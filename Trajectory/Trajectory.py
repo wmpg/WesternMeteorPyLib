@@ -69,7 +69,8 @@ class ObservedPoints(object):
 
         """
 
-        ########## INPUT DATA
+        ### INPUT DATA ###
+        ######################################################################################################
 
         self.meas1 = meas1
         self.meas2 = meas2
@@ -101,10 +102,11 @@ class ObservedPoints(object):
         self.ra_data = None
         self.dec_data = None
 
-        ##########
+        ######################################################################################################
 
 
-        ########## CALCULATED DATA
+        ### CALCULATED DATA ###
+        ######################################################################################################
 
         # Residuals from the fit
         self.h_residuals = None
@@ -172,7 +174,7 @@ class ObservedPoints(object):
         self.rend_lon = None
         self.rend_ele = None
 
-        ##########
+        ######################################################################################################
 
 
         # If inputs are RA and Dec
@@ -416,7 +418,8 @@ class PlaneIntersection(object):
         ###### that is, a vector pointing from each station to the radiant line, which magnitude
         ###### corresponds to the distance to the radiant line
 
-        ### Calculate the unit vector pointing from the 1st station to the radiant line
+        ### Calculate the unit vector pointing from the 1st station to the radiant line ###
+        ######################################################################################################
 
         w1 = np.cross(self.radiant_eci, self.obs1.plane_N)
 
@@ -426,10 +429,12 @@ class PlaneIntersection(object):
         # Invert vector orientation if pointing towards the station, not the radiant line
         if np.dot(w1, self.obs1.meas_eci[0]) < 0:
             w1 = -w1
-        ###
+        
+        ######################################################################################################
 
 
-        ### Calculate the unit vector pointing from the 2nd station to the radiant line
+        ### Calculate the unit vector pointing from the 2nd station to the radiant line ###
+        ######################################################################################################
 
         w2 = np.cross(self.radiant_eci, self.obs2.plane_N)
 
@@ -439,10 +444,10 @@ class PlaneIntersection(object):
         # Invert vector orientation if pointing towards the station, not the radiant line
         if np.dot(w2, self.obs2.meas_eci[0]) < 0:
             w2 = -w2
-        ###
+        ######################################################################################################
 
 
-        ### Calculate the range from stations to the radiant line
+        ### Calculate the range from stations to the radiant line ###
 
         # Calculate the difference in position of the two stations
         stat_diff = self.obs1.stat_eci - self.obs2.stat_eci
@@ -470,8 +475,7 @@ class PlaneIntersection(object):
         # Calculate the position of the CPA with respect to the first camera, in ECI coordinates
         self.cpa_eci = obs1.stat_eci + self.rcpa_stat1
 
-        ###
-        ######
+        ######################################################################################################
 
 
         # Calculate the statistical weight of the radiant solution
@@ -828,7 +832,7 @@ class Trajectory(object):
         # Save results to disk if true
         self.save_results = save_results
 
-        ########
+        ######################################################################################################
 
         # Counts from how may stations the observations are given (start from 1)
         self.station_count = 1
@@ -1102,7 +1106,8 @@ class Trajectory(object):
                 self.t_ref_station))
 
 
-        ### Perform the minimization of lag differences
+        ### Perform the minimization of lag differences ###
+        ######################################################################################################
 
         # Define the bounds for the initial velocity to be +/-5%
         bounds = [(0.95*v_init, 1.05*v_init)]
@@ -1124,7 +1129,7 @@ class Trajectory(object):
             if vel_timing_mini.success:
                 break
 
-        ###
+        ######################################################################################################
 
         
         # If the minimization was successful, apply the time corrections
@@ -1309,6 +1314,7 @@ class Trajectory(object):
 
 
             ### Assign model_fit1, model_fit2, so they are in the same format as the input meas1, meas2 data
+            ######################################################################################################
 
             # If input were RA and Dec
             if self.meastype == 1:
@@ -1334,7 +1340,7 @@ class Trajectory(object):
                 obs.model_fit1 = (np.pi/2.0 - obs.model_azim)%(2*np.pi)
                 obs.model_fit2 = np.pi/2.0 - obs.model_elev
 
-            ###
+            ######################################################################################################
 
 
     def calcAverages(self, observations):
@@ -1513,7 +1519,8 @@ class Trajectory(object):
         out_str += "End   {:>12.6f}, {:>12.6f}, {:>8.2f}\n".format(np.degrees(self.rend_lon), np.degrees(self.rend_lat), self.rend_ele)
         out_str += "\n"
 
-        #-> Write information about stations
+        ### Write information about stations ###
+        ######################################################################################################
         out_str += "Stations\n"
         out_str += "--------\n"
 
@@ -1535,10 +1542,12 @@ class Trajectory(object):
 
             out_str += ", ".join(station_info) + "\n"
         
-        #<-
+        ######################################################################################################
+
         out_str += "\n"
 
-        #-> Write information about individual points
+        ### Write information about individual points ###
+        ######################################################################################################
         out_str += "Points\n"
         out_str += "------\n"
 
@@ -1597,7 +1606,9 @@ class Trajectory(object):
                 out_str += ", ".join(point_info) + "\n"
 
 
-        #<-
+        ######################################################################################################
+
+
         out_str += "\n"
 
         out_str += "Notes\n"
@@ -1631,7 +1642,8 @@ class Trajectory(object):
         # Plot residuals per observing station
         for obs in self.observations:
 
-            ### PLOT RESIDUALS
+            ### PLOT RESIDUALS ###
+            ##################################################################################################
 
             # Calculate root mean square
             v_res_rms = round(np.sqrt(np.mean(obs.v_residuals**2)), 2)
@@ -1663,12 +1675,14 @@ class Trajectory(object):
 
             plt.show()
 
-            ###
+            ##################################################################################################
 
 
         # Plot lag per observing station
         for obs in self.observations:
-            ### PLOT LAG
+            
+            ### PLOT LAG ###
+            ##################################################################################################
 
             fig, ax1 = plt.subplots()
 
@@ -1702,7 +1716,7 @@ class Trajectory(object):
             plt.show()
 
 
-            ###
+            ##################################################################################################
 
 
 
@@ -1732,7 +1746,8 @@ class Trajectory(object):
 
 
 
-        ### PLOT VELOCITY
+        ### PLOT VELOCITY ###
+        ######################################################################################################
 
         # Possible markers for velocity
         markers = ['x', '+', '.', '2']
@@ -1798,10 +1813,10 @@ class Trajectory(object):
 
         plt.show()
 
-        ###
+        ######################################################################################################
 
 
-        ### Plot lat/lon of the meteor
+        ### Plot lat/lon of the meteor ###
             
         # Calculate mean latitude and longitude of all meteor points
         met_lon_mean = np.degrees(meanAngle([x for x in obs.meas_lon for obs in self.observations]))
@@ -1896,7 +1911,7 @@ class Trajectory(object):
 
         plt.show()
 
-        ###
+        ######################################################################################################
 
 
         # Compare original and modeled measurements (residuals in azimuthal coordinates)
@@ -2340,6 +2355,9 @@ class Trajectory(object):
 
 if __name__ == "__main__":
 
+    ### TEST CASE ###
+    ##########################################################################################################
+
     import time
 
     # Referent julian date
@@ -2355,15 +2373,6 @@ if __name__ == "__main__":
     time2 = np.array([0.0, 0.0091240406036376953, 0.018245935440063477, 0.027379035949707031, 0.036490917205810547, 0.045619010925292969, 0.05474090576171875, 0.063858985900878906, 0.072983026504516602, 0.082114934921264648, 0.091231107711791992, 0.10035109519958496, 0.10947489738464355, 0.11859893798828125, 0.12772512435913086, 0.13684391975402832, 0.14596700668334961, 0.15510010719299316, 0.16421103477478027, 0.17334103584289551, 0.18245911598205566, 0.19158196449279785, 0.20070290565490723, 0.20982694625854492, 0.2189481258392334, 0.22807097434997559, 0.23719310760498047, 0.24631595611572266, 0.25544309616088867, 0.26456212997436523, 0.27368307113647461, 0.28281092643737793, 0.29193806648254395, 0.30105209350585938, 0.31017804145812988, 0.31929898262023926, 0.32842206954956055, 0.33754897117614746, 0.34666705131530762, 0.3557898998260498, 0.36492395401000977, 0.37403392791748047, 0.38316202163696289, 0.39228296279907227, 0.40140891075134277, 0.41053390502929688, 0.41965007781982422, 0.42877292633056641, 0.43789410591125488, 0.44702005386352539, 0.45614290237426758, 0.46526408195495605, 0.47438502311706543, 0.48351693153381348, 0.49264097213745117, 0.50175309181213379, 0.51088404655456543, 0.52000308036804199, 0.52912497520446777, 0.53824996948242188, 0.54737210273742676, 0.55649089813232422, 0.56562089920043945, 0.5747380256652832, 0.58387494087219238, 0.592987060546875, 0.60210895538330078, 0.61122798919677734, 0.62035298347473145, 0.62947607040405273])
     phi2 = np.array([53.277395606543514, 53.378894622674743, 53.479956569118926, 53.581583564486643, 53.684034387407628, 53.785592745520816, 53.888221858788505, 53.989652095989705, 54.091286379162753, 54.193602941001174, 54.295489508972871, 54.39680492261197, 54.498476109777449, 54.600324950506916, 54.701540003200897, 54.803176858628973, 54.905770160432461, 55.007812728006726, 55.109255891578165, 55.210470634952003, 55.311514652098822, 55.413530094031998, 55.515323573286715, 55.616651349503798, 55.718365072619598, 55.81929890161981, 55.920171553847844, 56.021613048812512, 56.122821258097112, 56.224678899349627, 56.325865881424491, 56.426926299896216, 56.52861756575669, 56.629470224659684, 56.730172326265581, 56.831015465257991, 56.932197458064081, 57.033194520779368, 57.133991458819061, 57.234684773453658, 57.334955465097238, 57.435791110725937, 57.536108210586804, 57.63636328763743, 57.736907767451896, 57.837175586955425, 57.937203809457536, 58.036781893703278, 58.136978754564268, 58.236686044195643, 58.336377908906051, 58.43535465814314, 58.534625554011399, 58.6333660935654, 58.732691095623927, 58.831079484821906, 58.928886668384948, 59.026971367888081, 59.124250755486784, 59.221517041956538, 59.318507836373392, 59.414909920684529, 59.512434568208263, 59.608138099768297, 59.703628259049658, 59.799124823225796, 59.891752747734891, 59.983964699509606, 60.075068063440163, 60.161279720285414])
     theta2 = np.array([101.53457826463746, 101.51641844358608, 101.49838475808278, 101.48029817266169, 101.46211330853345, 101.44413445103872, 101.42601386963629, 101.40815190889943, 101.3903005255073, 101.37237603253595, 101.35457316211422, 101.3369156085497, 101.3192413904863, 101.30158154144411, 101.28407617303588, 101.26654229652355, 101.24888830028594, 101.23137351945253, 101.21400528102164, 101.19671926225118, 101.17950508630588, 101.16216841059016, 101.14491224554251, 101.12777721128521, 101.1106189746513, 101.09363369919245, 101.07669966495487, 101.05971116018192, 101.04280246671952, 101.02582610588094, 101.00900182871261, 100.99223844387629, 100.97541036501492, 100.95876039276899, 100.94217411607163, 100.92560326192354, 100.90901536078817, 100.89249613221422, 100.87604760647557, 100.85965363121295, 100.84336561880852, 100.82702299646236, 100.81080116796716, 100.79462576794111, 100.77843999684811, 100.76233476558444, 100.74630362442984, 100.73037973345876, 100.71439203286904, 100.69851722922239, 100.68267935704768, 100.66698899065921, 100.65128571495896, 100.63569963309027, 100.62005459779738, 100.60458982468012, 100.58924850257456, 100.57389559776691, 100.5587001573241, 100.5435378536578, 100.52844926863388, 100.51348253940968, 100.49837205688057, 100.48357341370303, 100.46883689073712, 100.45412830754735, 100.43988903856147, 100.42574044202429, 100.41178798399015, 100.39860839656382])
-
-    # 2nd end alt az:
-    # az = 
-    # alt = 30 
-
-
-    # NOTE: For some reason, you can't do this: theta1 = npct.as_ctypes(theta1). For some reason, the memory 
-    # is not well allocated in that case...
-    # The conversion must be done directly upon calling a function.
 
     # Convert measurement to radians
     theta1 = np.radians(theta1)
@@ -2388,7 +2397,7 @@ if __name__ == "__main__":
 
 
     # Init new trajectory solving
-    traj_solve = Trajectory(jdt_ref, meastype, show_plots)
+    traj_solve = Trajectory(jdt_ref, meastype)
 
     # Set input points for the first site
     traj_solve.infillTrajectory(theta1, phi1, time1, lat1, lon1, ele1)
@@ -2403,3 +2412,6 @@ if __name__ == "__main__":
     traj_solve.run()
 
     print('Run time:', time.clock() - t1)
+
+
+    ##########################################################################################################
