@@ -467,11 +467,6 @@ def refineSearchMetSim(met, consts, zg, obs_time, obs_height, obs_length, end_ht
     #     [ 0.5*c_p,        2*c_p]        # Specific heat
     # ]
 
-
-
-
-
-
     # Set fixed parameters
     met.q = q
     met.T_boil = T_boil
@@ -634,178 +629,6 @@ def showBestResult(results_file, met, consts, v_init, zg, obs_time, obs_height, 
     print('Vinit:', v_init/1000)
     print('zg', np.degrees(zg))
     showResult(met, consts, v_init, zg, obs_time, obs_height, obs_length, params=best_solution)
-
-
-
-
-
-
-def plotParams(results_list, full_cost_list, v_init_orig):
-    """ Plots graphs of the given parameters and their dependence. 
-
-    Arguments:
-        results_list: [list] a list of files with simulation results
-        full_cost: [list of float] list of mean absolute deviations calculated from the measurement error 
-            from trajectory estimation, for every station
-        v_init_orig: [float] initial velocity estimated during trajectory estimation
-
-    """
-
-
-    # Make a plot with N side-by-side plots, one for each station
-    #fig, axes = plt.subplots(2, len(results_list), sharey=True, sharex=True)
-
-    fig = plt.gcf()
-
-    ax1 = fig.add_subplot(221)
-    ax2 = fig.add_subplot(222, sharex=ax1, sharey=ax1)
-
-    #ax3 = fig.add_subplot(223, sharex=ax1, sharey=ax1)
-    #ax4 = fig.add_subplot(224, sharex=ax1, sharey=ax1)
-
-    ax3 = fig.add_subplot(223)
-    ax4 = fig.add_subplot(224, sharex=ax3, sharey=ax3)
-    
-    axes = np.array([[ax1, ax2], [ax3, ax4]])
-
-    # Go through all results file
-    for n, (full_cost, results_file) in enumerate(zip(full_cost_list, results_list)):
-
-        # Cost function plots
-        ax = axes[0, n]
-
-        # # Density historgams plots
-        # ax_dens = axes[1, n]
-
-        # Velocity plots
-        ax_vel = axes[1, n]
-
-        # Load the numpy array with the results from a file
-        solutions = np.load(results_file)
-
-        # Extract initial velocities
-        v_init_all = solutions[:, 1]
-
-        # Idenfity unique initial velocities
-        v_init_unique = np.unique(v_init_all)
-
-
-        # List for velocities which are possible under the measurement RMS
-        v_possible = []
-
-
-        # List of velocities vs. best cost pairs
-        vel_cost_pairs = []
-
-        # Go through initial velocities
-        for i, v_init in enumerate(v_init_unique):
-
-            # Select only those with the given initial velocity
-            select_ind = np.where(v_init_all == v_init)
-
-            # Select the solution by the v init
-            solutions_v_init = solutions[select_ind]
-
-            # Sort by cost
-            solutions_v_init[solutions_v_init[:, 0].argsort()]
-
-            # Select cost function values with the given indices
-            # costs = solutions[select_ind, 0][0]
-            # costs = np.sort(costs)
-
-            costs = solutions_v_init[:, 0]
-
-            vel_cost_pairs.append([v_init, costs[0]])
-
-            # Add the velocity to the list if the first cost is below the measurement RMS cost
-            if costs[0] < full_cost:
-                v_possible.append(v_init)
-
-            # Plot the cost of all solutions for the given speed
-            #ax.plot(range(len(costs)), costs, label=str(v_init))
-
-            # Scatter plot where the color represents the mass
-            points = ax.scatter(range(len(costs)), costs, c=solutions_v_init[:, 2], s=((i+1)**2)/2, norm=matplotlib.colors.LogNorm())
-
-            # # Scatter plot where the color represents the density
-            # dens_points = ax_dens.scatter(range(len(costs)), costs, c=solutions_v_init[:, 3], s=((i+1)**2)/2)
-
-            # Set text to mark the velocity
-            ax.text(0, costs[0], str(int(v_init)), ha='right')
-            # ax_dens.text(0, costs[0], str(int(v_init)), ha='right')
-
-            print('Best solution:', solutions_v_init[0])
-
-
-        if v_possible:
-            v_possible = sorted(v_possible)
-            print('Possible range of velocities:', min(v_possible), max(v_possible))
-        else:
-            print('No possible velocities!')
-
-        # Plot the cost function values of the RMS of lengths along the track
-        rms_cost_x = np.linspace(0, len(costs), 1000)
-        rms_cost_y = np.array([full_cost]*1000)
-        
-        ax.plot(rms_cost_x, rms_cost_y, label='RMS along track cost', linestyle='--', linewidth=2)
-
-
-        # Set the Y limit from 0 to 2x the threshold cost
-        ax.set_ylim(0, 2*full_cost)
-
-
-        ax.set_xlabel('Index')
-        ax.legend()
-
-        ax.set_title(str(n + 1))
-
-
-        ### Plot velocities vs. best cost
-
-        vel_cost_pairs = np.array(vel_cost_pairs)
-        vels, best_costs = vel_cost_pairs.T
-
-        ax_vel.plot(vels, best_costs, marker='x')
-
-        # Plot the threshold cost
-        vel_rms_cost_x = np.linspace(np.min(vels), np.max(vels), 1000)
-        vel_rms_cost_y = np.zeros_like(vel_rms_cost_x) + full_cost
-        ax_vel.plot(vel_rms_cost_x, vel_rms_cost_y, linestyle='--', linewidth=2)
-
-        # Plot the initial velocity from the trajectory solver
-        v_init_orig_x = np.zeros(10) + v_init_orig
-        v_init_orig_y = np.linspace(0, full_cost, 10)
-        ax_vel.plot(v_init_orig_x, v_init_orig_y, color='r')
-
-        ax_vel.set_xlabel('Velocity (m/s)')
-
-        # Set the Y limit from 0 to 2x the threshold cost
-        ax_vel.set_ylim(0, 2*full_cost)
-
-        ######
-
-        # # Find indices of solutions which are within the precision error
-        # pass_solutions = np.where(solutions[:, 0] < full_cost)
-
-        # # Find densities which are within the precision error
-        # dens_pass = [row[3] for row in solutions[pass_solutions]]
-
-        # # Plot the density histogram
-        # ax_dens.hist(dens_pass, 21)
-
-
-    # Set mass scatter plot labels and colorbar
-    axes[0, 0].set_ylabel('Average absolute deviations (m)')
-    fig.colorbar(points, label='Mass (kg)', ax=axes[0].tolist(), orientation='vertical')
-
-    # # Set density scatter plot labels and colorbar
-    # axes[1, 0].set_ylabel('Average absolute deviations (m)')
-    # fig.colorbar(dens_points, label='Density (kg/m^3)', ax=axes[1].tolist(), orientation='vertical')
-
-    #plt.subplots_adjust(wspace=0)
-    #plt.tight_layout()
-
-    plt.show()
 
 
 
@@ -1049,10 +872,6 @@ if __name__ == "__main__":
     plt.gca().invert_yaxis()
 
     plt.show()
-
-
-    # Plot cost values for different velocities
-    plotParams(results_list, full_cost_list, v_init)
 
 
     

@@ -298,7 +298,7 @@ class FitSimAnalyzer(object):
             # Print the range of possible velocities from the simulations and threshold deviations
             if v_possible:
                 v_possible = sorted(v_possible)
-                print('Possible range of velocities:', min(v_possible), max(v_possible))
+                print('Site', n+1,  'possible range of velocities:', min(v_possible), max(v_possible))
 
             else:
                 print('No possible velocities!')
@@ -326,19 +326,24 @@ class FitSimAnalyzer(object):
             vel_cost_pairs = np.array(vel_cost_pairs)
             vels, best_costs = vel_cost_pairs.T
 
-            plot_vel_dev = ax_vel.plot(vels, best_costs, marker='x')
+            plot_vel_dev = ax_vel.plot(vels, best_costs, marker='x', label='Model V')
 
             plot_velocity_handles.append(plot_vel_dev)
 
             # Plot the threshold cost
             vel_rms_cost_x = np.linspace(np.min(vels), np.max(vels), 1000)
             vel_rms_cost_y = np.zeros_like(vel_rms_cost_x) + full_cost
-            ax_vel.plot(vel_rms_cost_x, vel_rms_cost_y, linestyle='--', linewidth=2, zorder=3)
+            ax_vel.plot(vel_rms_cost_x, vel_rms_cost_y, linestyle='--', linewidth=2, zorder=3, label='RMS cost')
 
             # Plot the initial velocity from the trajectory solver
             v_init_orig_x = np.zeros(10) + self.traj.v_init
             v_init_orig_y = np.linspace(0, full_cost, 10)
-            ax_vel.plot(v_init_orig_x, v_init_orig_y, color='r', zorder=3)
+            ax_vel.plot(v_init_orig_x, v_init_orig_y, color='r', zorder=3, label='$V_{init}$')
+
+            # Plot the no-atmosphere velocity from the trajectory solver
+            v_init_orig_x = np.zeros(10) + self.traj.orbit.v_inf
+            v_init_orig_y = np.linspace(0, full_cost, 10)
+            ax_vel.plot(v_init_orig_x, v_init_orig_y, color='g', zorder=3, label='$V_{\infty}$')
 
             ax_vel.set_xlabel('Velocity (m/s)')
 
@@ -346,6 +351,8 @@ class FitSimAnalyzer(object):
             ax_vel.set_ylim(0, 2*full_cost)
 
             ax_vel.grid()
+
+            ax_vel.legend()
 
             ######
 
@@ -417,14 +424,14 @@ if __name__ == "__main__":
 
     
 
-    #dir_path = "../MirfitPrepare/20160929_062945_mir/"
-    dir_path_mir = "../MirfitPrepare/20161007_052749_mir/"
-    #dir_path = "../MirfitPrepare/20161007_052346_mir/"
+    # dir_path_mir = "../MirfitPrepare/20160929_062945_mir/"
+    # dir_path_mir = "../MirfitPrepare/20161007_052749_mir/"
+    dir_path_mir = "../MirfitPrepare/20161007_052346_mir/"
 
     # Trajectory pickle file
     #traj_pickle_file = "20160929_062945_trajectory.pickle"
-    traj_pickle_file = "20161007_052749_trajectory.pickle"
-    #traj_pickle_file = "20161007_052346_trajectory.pickle"
+    #traj_pickle_file = "20161007_052749_trajectory.pickle"
+    traj_pickle_file = "20161007_052346_trajectory.pickle"
 
 
     FitSimAnalyzer(dir_path_mir, traj_pickle_file)

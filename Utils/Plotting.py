@@ -27,6 +27,7 @@ def savePlot(plt_handle, file_path, output_dir='.', kwargs=None):
 	# Make the output directory, if it does not exist
 	mkdirP(output_dir)
 
-	# Save the plot
-	plt_handle.savefig(os.path.join(output_dir, file_path), dpi=config.plots_DPI, **kwargs)
+	# Save the plot (remove all surrounding white space)
+	plt_handle.savefig(os.path.join(output_dir, file_path), dpi=config.plots_DPI, bbox_inches='tight', 
+		**kwargs)
 

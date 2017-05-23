@@ -311,6 +311,7 @@ class ObservedPoints(object):
         self.meas_eci_los = np.array(raDec2ECI(self.ra_data_los, self.dec_data_los)).T
         #self.x_eci_los, self.y_eci_los, self.z_eci_los = self.meas_eci_los.T
         
+        ### USED IN GURAL SOLVER FOR ADDING THE NOISE TO ECI COORDINATES
         # for kmeas, eci_coord in enumerate(self.meas_eci):
             
         #     zhat = np.zeros(shape=3)
@@ -332,7 +333,7 @@ class ObservedPoints(object):
         #     vhat = vhat/np.linalg.norm(vhat)
 
         #     # Calculate the unit vector pointing from the station camera to the observed point
-        #     meas_eci = eci_coord + uhat + vhat
+        #     meas_eci = eci_coord + (GAUSS NOISE???)*uhat + (GAUSS NOISE??)*vhat
         #     meas_eci = meas_eci/np.linalg.norm(meas_eci)
 
         #     print('Meas ECI:', meas_eci)
@@ -428,7 +429,7 @@ class PlaneIntersection(object):
         ###
 
 
-        ### Calculate the unit vector pointing from the 1st station to the radiant line
+        ### Calculate the unit vector pointing from the 2nd station to the radiant line
 
         w2 = np.cross(self.radiant_eci, self.obs2.plane_N)
 
@@ -506,7 +507,7 @@ def angleSumMeasurements2Line(observations, state_vect, best_conv_radiant_eci):
             r = r - stat_eci
             r = vectNorm(r)
 
-            # Calculate the angle between the measurement line of light as seen from the station
+            # Calculate the angle between the measurement line of sight as seen from the station
             cosangle = np.dot(meas_eci, r)
 
             # Make sure the cosine is within limits and calculate the angle
@@ -765,7 +766,7 @@ class Trajectory(object):
 
 
     def __init__(self, jdt_ref, output_dir='.', max_toffset=1.0, meastype=4, verbose=True, 
-        estimate_timing_vel=True, calc_orbit=True, show_plots=True):
+        estimate_timing_vel=True, filter_picks=True, calc_orbit=True, show_plots=True, save_results=True):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -789,8 +790,11 @@ class Trajectory(object):
                         4 = Azimuth +north of due east for meas1, Zenith angle for meas2
             verbose: [bool] Print out the results and status messages, True by default
             estimate_timing_vel: [bool] Try to estimate the difference in timing and velocity. True by default
+            filter_picks: [bool] If True (default), picks which deviate more than 3 sigma in angular residuals
+                will be removed, and the trajectory will be recalculated.
             calc_orbit: [bool] If True, the orbit is calculates as well. True by default
             show_plots: [bool] Show plots of residuals, velocity, lag, meteor position. True by default.
+            save_results: [bool] Save results of trajectory estimation to disk. True by default.
 
         """
 
@@ -809,14 +813,20 @@ class Trajectory(object):
         # If verbose True, results and status messages will be printed out, otherwise they will be supressed
         self.verbose = verbose
 
-        # Flag to estimating the difference in timing between stations, and the initial velocity
+        # Estimating the difference in timing between stations, and the initial velocity if this flag is True
         self.estimate_timing_vel = estimate_timing_vel
+
+        # Filter bad picks (ones that deviate more than 3 sigma in angular residuals) if this flag is True
+        self.filter_picks = filter_picks
 
         # Calculate orbit if True
         self.calc_orbit = calc_orbit
 
         # If True, plots are shown
         self.show_plots = show_plots
+
+        # Save results to disk if true
+        self.save_results = save_results
 
         ########
 
@@ -1962,13 +1972,15 @@ class Trajectory(object):
 
 
 
-    def run(self, _rerun=False, _prev_toffsets=None):
+    def run(self, _rerun_timing=False, _rerun_bad_picks=False, _prev_toffsets=None):
         """ Estimate the trajectory from the given input points. 
         
         Arguments:
-            _rerun: [bool] Internal flag. Is it True when everything is recalculated upon estimating the 
-                difference in timings, so it breaks the second trajectory run after updating the values
+            _rerun_timing: [bool] Internal flag. Is it True when everything is recalculated upon estimating 
+                the difference in timings, so it breaks the second trajectory run after updating the values
                 of R.A., Dec, velocity, etc.
+            _rerun_bad_picks: [bool] Internal flag. Is is True when a second pass of trajectory estimation is
+                run with bad picks removed, thus improving the solution.
             _prev_toffsets: [ndarray] Internal variable. Used for keeping the initially estimated timing 
                 offsets from the first run of the solver. None by default.
 
@@ -1982,6 +1994,9 @@ class Trajectory(object):
                 self.t_ref_station = i
                 break
 
+
+        ### INTERSECTING PLANES SOLUTION ###
+        ######################################################################################################
 
         self.intersection_list = []
 
@@ -2010,6 +2025,7 @@ class Trajectory(object):
 
             weights_sum += plane_intersection.weight
 
+
         # Calculate the average radiant
         avg_radiant = radiant_sum/weights_sum
 
@@ -2023,22 +2039,35 @@ class Trajectory(object):
             print('Multi-Track Weighted IP radiant:', np.degrees(self.radiant_eq))
 
 
-        # Choose the intersection with the largest convergence angle
+        # Choose the intersection with the largest convergence angle as the best solution
+        # The reason why the average trajectory determined from plane intersections is not taken as the 'seed'
+        # for the LoS method is that the state vector cannot be calculated for the average radiant
         self.best_conv_inter = max(self.intersection_list, key=attrgetter('conv_angle'))
 
         if self.verbose:
             print('Best Convergence Angle IP radiant:', np.degrees(self.best_conv_inter.radiant_eq))
 
 
-        # Calculate the initial 3D position state vector in ECI coordinates
-        self.state_vect, _, _ = findClosestPoints(self.best_conv_inter.obs1.stat_eci, 
-            self.best_conv_inter.obs1.meas_eci[0], self.best_conv_inter.cpa_eci, 
-            self.best_conv_inter.radiant_eci)
+        # # Calculate the initial 3D position state vector in ECI coordinates
+        # self.state_vect, _, _ = findClosestPoints(self.best_conv_inter.obs1.stat_eci, 
+        #     self.best_conv_inter.obs1.meas_eci[0], self.best_conv_inter.cpa_eci, 
+        #     self.best_conv_inter.radiant_eci)
+
+        # Set the 3D position of the radiant line as the state vector
+        self.state_vect = self.best_conv_inter.cpa_eci
+
+
+        ######################################################################################################
+
 
         if self.verbose:
             print('Intersecting planes solution:', self.state_vect)
             
             print('Minimizing angle deviations...')
+
+
+        ### LEAST SQUARES SOLUTION ###
+        ######################################################################################################
 
         # Calculate the initial sum and angles deviating from the radiant line
         angle_sum = angleSumMeasurements2Line(self.observations, self.state_vect, 
@@ -2115,6 +2144,7 @@ class Trajectory(object):
             # Convert the minimized radiant solution to RA and Dec
             self.radiant_eq_mini = eci2RaDec(self.radiant_eci_mini)
 
+        ######################################################################################################
 
 
         # Calculate velocity at each point
@@ -2135,9 +2165,12 @@ class Trajectory(object):
 
         self.time_diffs_final = self.time_diffs
 
-        # Runs only in the first pass of trajectory estimation and estimates timing offsets between stations
-        if not _rerun:
 
+        ### RERUN THE TRAJECTORY ESTIMATION WITH UPDATED TIMINGS ###
+        ######################################################################################################
+
+        # Runs only in the first pass of trajectory estimation and estimates timing offsets between stations
+        if not _rerun_timing:
 
             # After the timing has been estimated, everything needs to be recalculated from scratch
             if self.estimate_timing_vel:
@@ -2160,7 +2193,7 @@ class Trajectory(object):
                 
                 # Re-run the trajectory estimation with updated timings. This will update all calculated
                 # values up to this point
-                self.run(_rerun=True, _prev_toffsets=self.time_diffs)
+                self.run(_rerun_timing=True, _prev_toffsets=self.time_diffs)
 
 
         else:
@@ -2173,6 +2206,8 @@ class Trajectory(object):
                 self.time_diffs_final = self.time_diffs
 
             return None
+
+        ######################################################################################################
 
 
 
@@ -2192,7 +2227,67 @@ class Trajectory(object):
         self.calcAllResiduals(self.state_vect_mini, self.radiant_eci_mini, self.observations)
 
 
-        # Calculate meteor orbit
+        ### REMOVE BAD PICKS AND RECALCULATE ###
+        ######################################################################################################
+
+        if self.filter_picks:
+            if (not _rerun_bad_picks):
+
+                picks_rejected = 0
+
+                # Remove all picks which deviate more than 3 sigma in angular residuals
+                for obs in self.observations:
+
+                    # Find the indicies of picks which are within 3 sigma
+                    good_picks = np.argwhere(obs.ang_res < (np.mean(obs.ang_res) + 3*np.std(obs.ang_res))).ravel()
+
+                    # Check if any picks were removed
+                    if len(good_picks) < len(obs.ang_res):
+                        picks_rejected += len(obs.ang_res) - len(good_picks)
+
+                        # Take only the good picks
+                        obs.time_data = obs.time_data[good_picks]
+                        obs.meas1 = obs.meas1[good_picks]
+                        obs.meas2 = obs.meas2[good_picks]
+
+
+                # Run only if some picks were rejected
+                if picks_rejected:
+
+                    # Make a copy of observations
+                    temp_observations = copy.deepcopy(self.observations)
+                    
+                    # Reset the observation points
+                    self.observations = []
+
+                    print("Updating the solution after rejecting", picks_rejected, "bad picks...")
+
+                    # Reinitialize the observations without the bad picks
+                    for obs in temp_observations:
+                
+                        self.infillTrajectory(obs.meas1, obs.meas2, obs.time_data, obs.lat, obs.lon, obs.ele, \
+                            obs.station_id)
+
+                    
+                    # Re-run the trajectory estimation with updated timings. This will update all calculated
+                    # values up to this point
+                    self.run(_rerun_bad_picks=True)
+
+                else:
+                    print("All picks are within 3 sigma...")
+
+
+            else:
+
+                # In the second pass, return None
+                return None
+
+        ######################################################################################################
+
+
+        ### CALCULATE ORBIT ###
+        ######################################################################################################
+
         if self.calc_orbit:
 
             # Calculate average velocity and average ECI position of the trajectory
@@ -2210,19 +2305,25 @@ class Trajectory(object):
             print(self.orbit)
 
 
+        ######################################################################################################
 
-        #-> SAVE REPORTS
 
-        # Construct a file name for this event
-        file_name = jd2Date(self.jdt_ref, dt_obj=True).strftime('%Y%m%d_%H%M%S')
 
-        # Save the picked trajectory structure
-        savePickle(self, self.output_dir, file_name + '_trajectory.pickle')
+        #### SAVE REPORTS ###
+        ######################################################################################################
 
-        # Save trajectory report
-        self.saveReport(self.output_dir, file_name + '_report.txt')
+        if self.save_results:
 
-        #<-
+            # Construct a file name for this event
+            file_name = jd2Date(self.jdt_ref, dt_obj=True).strftime('%Y%m%d_%H%M%S')
+
+            # Save the picked trajectory structure
+            savePickle(self, self.output_dir, file_name + '_trajectory.pickle')
+
+            # Save trajectory report
+            self.saveReport(self.output_dir, file_name + '_report.txt')
+
+        ######################################################################################################
 
 
         # Show plots if show_plots flag is true
