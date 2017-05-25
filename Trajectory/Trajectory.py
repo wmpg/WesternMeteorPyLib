@@ -14,9 +14,11 @@ from operator import attrgetter
 import numpy as np
 import scipy.optimize
 import scipy.interpolate
+import scipy.stats
 
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import cm
+from mpl_toolkits.basemap import Basemap
 
 
 from Trajectory.Orbit import calcOrbit
@@ -26,8 +28,9 @@ from Utils.OSTools import mkdirP
 from Utils.Pickling import savePickle
 from Utils.Plotting import savePlot
 from Utils.PlotOrbits import plotOrbits
+from Utils.PlotCelestial import CelestialPlot
 from Utils.TrajConversions import ecef2ENU, enu2ECEF, geo2Cartesian, geo2Cartesian_vect, cartesian2Geo, \
-    altAz2RADec_vect, raDec2AltAz, raDec2AltAz_vect, raDec2ECI, eci2RaDec, jd2Date
+    altAz2RADec_vect, raDec2AltAz, raDec2AltAz_vect, raDec2ECI, eci2RaDec, jd2Date, datetime2JD
 
 
 
@@ -152,13 +155,13 @@ class ObservedPoints(object):
         # ECI coordinates of radiant CPA to the observed line of sight
         self.model_eci = None
 
-        # Arrays for geo coordinates of closest points of approach of observed lines of sight to the radiant line
+        # Arrays for geo coords of closest points of approach of observed lines of sight to the radiant line
         self.meas_lat = None
         self.meas_lon = None
         self.meas_ht = None
         self.meas_range = None
 
-        # Arrays for geo coordinates of closest points of approach of the radiant line to the observed lines of sight
+        # Arrays for geo coords of closest points of approach of the radiant line to the observed lines of sight
         self.model_lat = None
         self.model_lon = None
         self.model_ht = None
@@ -757,6 +760,342 @@ def timingAndVelocityResiduals(params, observations, t_ref_station):
 
 
 
+class MCUncertanties(object):
+
+    def __init__(self):
+        """ Container for standard deviations of trajectory parameters calculated using Monte Carlo. """
+
+        # State vector position
+        self.state_vect_mini = None
+
+        # Radiant vector
+        self.radiant_eci_mini = None
+
+        # Beginning/ending points
+        self.rbeg_lon = None
+        self.rbeg_lat = None
+        self.rbeg_ele = None
+
+        self.rend_lon = None
+        self.rend_lat = None
+        self.rend_ele = None
+
+        # Apparent radiant position (radians)
+        self.ra = None
+        self.dec = None
+
+        # Estimated average velocity
+        self.v_avg = None
+
+        # Estimated initial velocity
+        self.v_init = None
+
+        # Longitude of the average point on the trajectory (rad)
+        self.lon_avg = None
+
+        # Latitude of the average point on the trajectory (rad)
+        self.lat_avg = None
+
+        # Velocity at infinity
+        self.v_inf = None
+
+        # Geocentric velocity (m/s)
+        self.v_g = None
+
+        # Geocentric radiant position (radians)
+        self.ra_g = None
+        self.dec_g = None
+
+        # Ecliptic coordinates of the radiant (radians)
+        self.L_g = None
+        self.B_g = None
+
+        # Sun-centered ecliptic rectangular coordinates of the average position on the meteor's trajectory 
+        # (in kilometers)
+        self.meteor_pos = None
+
+        # Apparent zenith angle (before the correction for Earth's gravity)
+        self.zc = None
+
+        # Zenith distance of the geocentric radiant (after the correction for Earth's gravity)
+        self.zg = None
+
+        # Helioventric velocity of the meteor (m/s)
+        self.v_h = None
+
+        # Solar longitude (radians)
+        self.la_sun = None
+
+        # Semi-major axis (AU)
+        self.a = None
+
+        # Eccentricty
+        self.e = None
+
+        # Inclination (radians)
+        self.i = None
+
+        # Argument of perihelion (radians)
+        self.peri = None
+
+        # Ascending node (radians)
+        self.node = None
+
+        # Longitude of perihelion (radians)
+        self.pi = None
+
+        # Perihelion distance (AU)
+        self.q = None
+
+        # Aphelion distance (AU)
+        self.Q = None
+
+        # True anomaly at the moment of contact with Earth (radians)
+        self.true_anomaly = None
+
+        # Exxentric anomaly (radians)
+        self.eccentric_anomaly = None
+
+        # Mean anomaly (radians)
+        self.mean_anomaly = None
+
+        # Calculate the date and time of the last perihelion passage (datetime object)
+        self.last_perihelion = None
+
+        # Mean motion in the orbit (rad/day)
+        self.n = None
+
+        # Tisserand's parameter with respect to Jupiter
+        self.Tj = None
+
+
+
+
+
+def calcMCUncertanties(traj_list):
+    """ Takes a list of trajectory objects and returns the standard deviation of every parameter. """
+
+
+    # Init a new container for uncertanties
+    un = MCUncertanties()
+
+    # State vector
+    x = np.std([traj.state_vect_mini[0] for traj in traj_list])
+    y = np.std([traj.state_vect_mini[1] for traj in traj_list])
+    z = np.std([traj.state_vect_mini[2] for traj in traj_list])
+
+    un.state_vect_mini = np.array([x, y, z])
+
+
+    rad_x = np.std([traj.radiant_eci_mini[0] for traj in traj_list])
+    rad_y = np.std([traj.radiant_eci_mini[1] for traj in traj_list])
+    rad_z = np.std([traj.radiant_eci_mini[2] for traj in traj_list])
+
+    un.radiant_eci_mini = np.array([rad_x, rad_y, rad_z])
+
+
+    # Beginning/ending points
+    un.rbeg_lon = scipy.stats.circstd([traj.rbeg_lon for traj in traj_list])
+    un.rbeg_lat = np.std([traj.rbeg_lat for traj in traj_list])
+    un.rbeg_ele = np.std([traj.rbeg_ele for traj in traj_list])
+
+    un.rend_lon = scipy.stats.circstd([traj.rend_lon for traj in traj_list])
+    un.rend_lat = np.std([traj.rend_lat for traj in traj_list])
+    un.rend_ele = np.std([traj.rend_ele for traj in traj_list])
+
+
+    # Apparent
+    un.ra = scipy.stats.circstd([traj.orbit.ra for traj in traj_list])
+    un.dec = np.std([traj.orbit.dec for traj in traj_list])
+    un.v_avg = np.std([traj.orbit.v_avg for traj in traj_list])
+    un.v_inf = np.std([traj.orbit.v_inf for traj in traj_list])
+
+    # Average meteor position
+    un.lon_avg = scipy.stats.circstd([traj.orbit.lon_avg for traj in traj_list])
+    un.lat_avg = np.std([traj.orbit.lat_avg for traj in traj_list])
+
+    # Geocentric
+    un.ra_g = scipy.stats.circstd([traj.orbit.ra_g for traj in traj_list])
+    un.dec_g = np.std([traj.orbit.dec_g for traj in traj_list])
+    un.v_g = np.std([traj.orbit.v_g for traj in traj_list])
+
+    # Meteor position in Suun-centred rectangular coordinates
+    meteor_pos_x = np.std([traj.orbit.meteor_pos[0] for traj in traj_list])
+    meteor_pos_y = np.std([traj.orbit.meteor_pos[1] for traj in traj_list])
+    meteor_pos_z = np.std([traj.orbit.meteor_pos[2] for traj in traj_list])
+
+    un.meteor_pos = np.array([meteor_pos_x, meteor_pos_y, meteor_pos_z])
+
+    # Zenith angles
+    un.zc = np.std([traj.orbit.zc for traj in traj_list])
+    un.zg = np.std([traj.orbit.zg for traj in traj_list])
+
+
+    # Ecliptic
+    un.L_g = scipy.stats.circstd([traj.orbit.L_g for traj in traj_list])
+    un.B_g = np.std([traj.orbit.B_g for traj in traj_list])
+    un.v_h = np.std([traj.orbit.v_h for traj in traj_list])
+
+    # Orbital elements
+    un.la_sun = scipy.stats.circstd([traj.orbit.la_sun for traj in traj_list])
+    un.a = np.std([traj.orbit.a for traj in traj_list])
+    un.e = np.std([traj.orbit.e for traj in traj_list])
+    un.i = np.std([traj.orbit.i for traj in traj_list])
+    un.peri = scipy.stats.circstd([traj.orbit.peri for traj in traj_list])
+    un.node = scipy.stats.circstd([traj.orbit.node for traj in traj_list])
+    un.pi = scipy.stats.circstd([traj.orbit.pi for traj in traj_list])
+    un.q = np.std([traj.orbit.q for traj in traj_list])
+    un.Q = np.std([traj.orbit.Q for traj in traj_list])
+    un.true_anomaly = scipy.stats.circstd([traj.orbit.true_anomaly for traj in traj_list])
+    un.eccentric_anomaly = scipy.stats.circstd([traj.orbit.eccentric_anomaly for traj in traj_list])
+    un.mean_anomaly = scipy.stats.circstd([traj.orbit.mean_anomaly for traj in traj_list])
+
+    # Last perihelion uncertanty (days)
+    un.last_perihelion = np.std([datetime2JD(traj.orbit.last_perihelion) for traj in traj_list])
+
+    # Mean motion in the orbit (rad/day)
+    un.n = np.std([traj.orbit.n for traj in traj_list])
+
+    # Tisserand's parameter
+    un.Tj = np.std([traj.orbit.Tj for traj in traj_list])
+
+
+    
+
+
+
+
+
+    print('GEO', np.degrees(un.ra_g), np.degrees(un.dec_g), un.v_g)
+    print('ECL', np.degrees(un.L_g), np.degrees(un.B_g))
+
+
+    return un
+
+
+
+
+
+def monteCarloTrajectory(traj, mc_num=None, mc_pick_multiplier=1):
+    """ Estimates uncertanty in the trajectory solution by doing Monte Carlo runs. 
+
+        The uncertanty is taken as the standard deviation of angular measurements. Each point is sampled 
+        mc_pick_multiplier times using a symetric 2D Gaussian kernel.
+
+    Arguments:
+        traj: [Trajectory object] initial trajectory on which Monte Carlo runs will be performed
+
+    Keyword arguments:
+        mc_num: [int] A fixed number of Monte Carlo simulations. None by default. If it is given, it will
+            override mc_pick_multiplier.
+        mc_pick_multiplier: [int] Number of MC samples that will be taken for every point. 2 by default.
+        
+
+    """
+
+    ### DO MONTE CARLO RUNS ###
+    ##########################################################################################################
+
+    # If a fixed number of Monte Carlo simulations is given, use it
+    if mc_num is not None:
+
+        mc_runs = mc_num
+
+    else:
+
+        # Calculate the total number of Monte Carlo runs, so every point is sampled mc_pick_multiplier times.
+        mc_runs = sum([len(obs.time_data) for obs in traj.observations])
+        mc_runs = mc_runs*mc_pick_multiplier
+
+
+    print('Doing', mc_runs, ' Monte Carlo runs...')
+
+    # List which will hold trajectory object after Monte Carlo runs
+    mc_results = []
+
+    # Do mc_runs Monte Carlo runs
+    for i in range(mc_runs):
+
+        print('Run No.', i + 1)
+
+        # Make a copy of the original trajectory object
+        traj_mc = copy.deepcopy(traj)
+        
+        # Reset the observation points
+        traj_mc.observations = []
+
+        # Reinitialize the observations with points sampled using a Gaussian kernel
+        for obs in traj.observations:
+
+            # Add noise to angular measurements
+            meas1_mc = (obs.meas1 + np.random.normal(0, obs.ang_res_std))%(2*np.pi)
+            meas2_mc = (obs.meas2 + np.random.normal(0, obs.ang_res_std))%(2*np.pi)
+        
+            # Fill in the new trajectory object - the time is assumed to be absolute
+            traj_mc.infillTrajectory(meas1_mc, meas2_mc, obs.time_data, obs.lat, obs.lon, obs.ele, \
+                obs.station_id)
+            
+        # Do not show plots or perform additional optimizations
+        traj_mc.verbose = False
+        traj_mc.estimate_timing_vel = True
+        traj_mc.filter_picks = False
+        traj_mc.show_plots = False
+        traj_mc.save_results = False
+
+        # Estimate the trajectory with the added noise
+        traj_mc.run(_mc_run=True)
+
+        # Save the trajectory to the final list
+        mc_results.append(traj_mc)
+
+    ##########################################################################################################
+
+
+    # Calculate the standard deviation of every trajectory parameter
+    uncertanties = calcMCUncertanties(mc_results)
+
+
+    ### PLOT RADIANT SPREAD ###
+    ##########################################################################################################
+
+    if traj.show_plots:
+
+        ra_g_list = np.array([traj_temp.orbit.ra_g for traj_temp in mc_results])
+        dec_g_list = np.array([traj_temp.orbit.dec_g for traj_temp in mc_results])
+        v_g_list = np.array([traj_temp.orbit.v_g for traj_temp in mc_results])/1000
+
+        # Init a celestial plot
+        m = CelestialPlot(ra_g_list, dec_g_list, projection='stere', bgcolor='w')
+        m.scatter(ra_g_list, dec_g_list, c=v_g_list, s=2)
+        m.colorbar(label='$V_g$ (km/s)')
+
+        plt.title('Monte Carlo - geocentric radiant')
+        # plt.xlabel('$\\alpha_g (\\degree)$')
+        # plt.ylabel('$\\delta_g (\\degree)$')
+
+        plt.tight_layout()
+
+        savePlot(plt, traj.file_name + '_monte_carlo_eq.png', output_dir=traj.output_dir)
+
+        plt.show()
+
+    ##########################################################################################################
+
+
+    # Choose the solution with the lowest lag residuals as the best solution
+    lag_res_trajs = [traj_tmp.lag_res for traj_tmp in mc_results]
+    best_traj_ind = lag_res_trajs.index(min(lag_res_trajs))
+
+    # Choose the best trajectory
+    traj_best = mc_results[best_traj_ind]
+
+
+    return traj_best, uncertanties
+
+
+
+
+
 
 class Trajectory(object):
     """ Meteor trajectory solver designed for the UWO CAMO system.
@@ -770,15 +1109,16 @@ class Trajectory(object):
 
 
     def __init__(self, jdt_ref, output_dir='.', max_toffset=1.0, meastype=4, verbose=True, 
-        estimate_timing_vel=True, filter_picks=True, calc_orbit=True, show_plots=True, save_results=True):
+        estimate_timing_vel=True, monte_carlo=True, filter_picks=True, calc_orbit=True, show_plots=True, 
+        save_results=True):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
             jdt_ref: [float] Reference Julian date/time that the measurements times are provided relative to. 
                     This is user selectable and can be the time of the first camera, or the first measurement, 
                     or some average time for the meteor, but should be close to the time of passage of the 
-                    meteor. This same reference date/time will be used on all camera measurements for the 
-                    purposes of computing local sidereal time and making  geocentric coordinate 
+                    meteor. This same reference date/time will be used on all camera measurements for the
+                     purposes of computing local sidereal time and making  geocentric coordinate 
                     transformations.
 
         Keyword arguments:
@@ -794,6 +1134,7 @@ class Trajectory(object):
                         4 = Azimuth +north of due east for meas1, Zenith angle for meas2
             verbose: [bool] Print out the results and status messages, True by default
             estimate_timing_vel: [bool] Try to estimate the difference in timing and velocity. True by default
+            monte_carlo: [bool] Runs Monte Carlo estimation of uncertanties. True by default.
             filter_picks: [bool] If True (default), picks which deviate more than 3 sigma in angular residuals
                 will be removed, and the trajectory will be recalculated.
             calc_orbit: [bool] If True, the orbit is calculates as well. True by default
@@ -820,6 +1161,9 @@ class Trajectory(object):
         # Estimating the difference in timing between stations, and the initial velocity if this flag is True
         self.estimate_timing_vel = estimate_timing_vel
 
+        # Running Monte Carlo simulations to estimate uncertanties
+        self.monte_carlo = monte_carlo
+
         # Filter bad picks (ones that deviate more than 3 sigma in angular residuals) if this flag is True
         self.filter_picks = filter_picks
 
@@ -833,6 +1177,9 @@ class Trajectory(object):
         self.save_results = save_results
 
         ######################################################################################################
+
+        # Construct a file name for this event
+        self.file_name = jd2Date(self.jdt_ref, dt_obj=True).strftime('%Y%m%d_%H%M%S')
 
         # Counts from how may stations the observations are given (start from 1)
         self.station_count = 1
@@ -948,6 +1295,9 @@ class Trajectory(object):
             # Calculate the angular residuals from the radiant line
             obs.ang_res = np.sqrt(elev_res**2 + azim_res**2)
 
+            # Calculate the standard deviaton of angular residuals in radians
+            obs.ang_res_std = np.std(obs.ang_res)
+
 
 
     def calcVelocity(self, state_vect, radiant_eci, observations):
@@ -999,10 +1349,16 @@ class Trajectory(object):
 
 
 
-    def calcLag(self, observations):
+    def calcLag(self, observations, calc_res=False):
         """ Calculate lag by fitting a line to the first 25% of the points and subtracting the line from the 
             length along the trail.
 
+        Arguments:
+            observations: [list] A list of ObservationPoints objects.
+
+        Keyword arguments:
+            calc_res: [bool] If True, the cost of lag residuals will be calculated. The timing offsets need to
+                be calculated for this to work.
         """
 
         # Go through observations from all stations
@@ -1027,6 +1383,13 @@ class Trajectory(object):
 
             # Calculate lag
             obs.lag = obs.length - lineFunc(obs.time_data, *obs.lag_line)
+
+
+        if calc_res and (self.time_diffs_final is not None):
+
+            # Calculate the final lag residuals
+            p0 = np.r_[self.v_init, self.time_diffs_final]
+            self.lag_res = timingAndVelocityResiduals(p0, self.observations, self.t_ref_station)
 
 
 
@@ -1425,7 +1788,7 @@ class Trajectory(object):
 
 
 
-    def saveReport(self, dir_path, file_name):
+    def saveReport(self, dir_path, file_name, uncertanties=None):
         """ Save the trajectory estimation report to file. """
         
         out_str = ''
@@ -1502,7 +1865,8 @@ class Trajectory(object):
 
         out_str += "Average point on the trajectory:\n"
         out_str += "  Time: " + str(jd2Date(self.orbit.jd_avg, dt_obj=True)) + " UTC\n"
-        out_str += "  Lon   = {:>10.6f}  Lat = {:>10.6f} deg\n".format(np.degrees(self.orbit.lon_avg), np.degrees(self.orbit.lat_avg))
+        out_str += "  Lon   = {:>10.6f}  Lat = {:>10.6f} deg\n".format(np.degrees(self.orbit.lon_avg), \
+            np.degrees(self.orbit.lat_avg))
         out_str += "\n"
 
         # Write out orbital parameters
@@ -1515,8 +1879,10 @@ class Trajectory(object):
         out_str += "\n"
 
         out_str += "      Lon +E (deg), Lat + N Deg),  Ele (m)\n"
-        out_str += "Begin {:>12.6f}, {:>12.6f}, {:>8.2f}\n".format(np.degrees(self.rbeg_lon), np.degrees(self.rbeg_lat), self.rbeg_ele)
-        out_str += "End   {:>12.6f}, {:>12.6f}, {:>8.2f}\n".format(np.degrees(self.rend_lon), np.degrees(self.rend_lat), self.rend_ele)
+        out_str += "Begin {:>12.6f}, {:>12.6f}, {:>8.2f}\n".format(np.degrees(self.rbeg_lon), \
+            np.degrees(self.rbeg_lat), self.rbeg_ele)
+        out_str += "End   {:>12.6f}, {:>12.6f}, {:>8.2f}\n".format(np.degrees(self.rend_lon), \
+            np.degrees(self.rend_lat), self.rend_ele)
         out_str += "\n"
 
         ### Write information about stations ###
@@ -1856,8 +2222,6 @@ class Trajectory(object):
         # Add some buffer to the maximum distance (50 km)
         max_dist += 50000
 
-
-        from mpl_toolkits.basemap import Basemap
         m = Basemap(projection='gnom', lat_0=lat_mean, lon_0=lon_mean, width=2*max_dist, height=2*max_dist, 
             resolution='i')
 
@@ -1890,15 +2254,6 @@ class Trajectory(object):
             x, y = m(np.degrees(obs.meas_lon), np.degrees(obs.meas_lat))
             m.plot(x, y, c='r')
 
-
-        # # Plot an arrow showing the direction of the flight path
-        # x1, y1 = m(np.degrees(self.rbeg_lon), np.degrees(self.rbeg_lat))
-        # x2, y2 = m(np.degrees(self.rend_lon), np.degrees(self.rend_lat))
-
-        # plt.annotate('', xy=(x1, y1),  xycoords='data',
-        #         xytext=(x2, y2), textcoords='data',
-        #         arrowprops=dict(arrowstyle="->, head_width=0.3, head_length=0.5", color='r'),
-        #         )
 
         # Plot a point marking the final point of the meteor
         x_end, y_end = m(np.degrees(self.rend_lon), np.degrees(self.rend_lat))
@@ -1987,7 +2342,7 @@ class Trajectory(object):
 
 
 
-    def run(self, _rerun_timing=False, _rerun_bad_picks=False, _prev_toffsets=None):
+    def run(self, _rerun_timing=False, _rerun_bad_picks=False, _mc_run=False, _prev_toffsets=None):
         """ Estimate the trajectory from the given input points. 
         
         Arguments:
@@ -1996,6 +2351,7 @@ class Trajectory(object):
                 of R.A., Dec, velocity, etc.
             _rerun_bad_picks: [bool] Internal flag. Is is True when a second pass of trajectory estimation is
                 run with bad picks removed, thus improving the solution.
+            _mc_run: [bool] Internal flag. True if the solver is calculating the Carlo Run.
             _prev_toffsets: [ndarray] Internal variable. Used for keeping the initially estimated timing 
                 offsets from the first run of the solver. None by default.
 
@@ -2166,8 +2522,7 @@ class Trajectory(object):
         self.calcVelocity(self.state_vect_mini, self.radiant_eci_mini, self.observations)
 
         # Calculate lag
-        self.calcLag(self.observations)
-
+        self.calcLag(self.observations, calc_res=_rerun_timing)
 
 
         if self.verbose and self.estimate_timing_vel:
@@ -2197,7 +2552,8 @@ class Trajectory(object):
                 # Reset the observation points
                 self.observations = []
 
-                print("Updating the solution after the timing estimation...")
+                if self.verbose:
+                    print("Updating the solution after the timing estimation...")
 
                 # Reinitialize the observations with proper timing
                 for obs in temp_observations:
@@ -2254,7 +2610,7 @@ class Trajectory(object):
                 for obs in self.observations:
 
                     # Find the indicies of picks which are within 3 sigma
-                    good_picks = np.argwhere(obs.ang_res < (np.mean(obs.ang_res) + 3*np.std(obs.ang_res))).ravel()
+                    good_picks = np.argwhere(obs.ang_res < (np.mean(obs.ang_res) + 3*obs.ang_res_std)).ravel()
 
                     # Check if any picks were removed
                     if len(good_picks) < len(obs.ang_res):
@@ -2280,8 +2636,8 @@ class Trajectory(object):
                     # Reinitialize the observations without the bad picks
                     for obs in temp_observations:
                 
-                        self.infillTrajectory(obs.meas1, obs.meas2, obs.time_data, obs.lat, obs.lon, obs.ele, \
-                            obs.station_id)
+                        self.infillTrajectory(obs.meas1, obs.meas2, obs.time_data, obs.lat, obs.lon, \
+                            obs.ele, obs.station_id)
 
                     
                     # Re-run the trajectory estimation with updated timings. This will update all calculated
@@ -2317,11 +2673,25 @@ class Trajectory(object):
             self.orbit.v_avg = v_avg
             self.orbit.v_init = self.v_init
 
-            print(self.orbit)
+            if self.verbose:
+                print(self.orbit)
 
 
         ######################################################################################################
 
+
+        # Break if doing a Monte Carlo run
+        if _mc_run:
+            return None
+
+
+        if self.monte_carlo:
+
+            # Do a Monte Carlo estimate of the uncertanties in all calculated parameters
+            traj_best, uncertanties = monteCarloTrajectory(self)
+
+        else:
+            uncertanties = None
 
 
         #### SAVE REPORTS ###
@@ -2329,14 +2699,18 @@ class Trajectory(object):
 
         if self.save_results:
 
-            # Construct a file name for this event
-            file_name = jd2Date(self.jdt_ref, dt_obj=True).strftime('%Y%m%d_%H%M%S')
-
             # Save the picked trajectory structure
-            savePickle(self, self.output_dir, file_name + '_trajectory.pickle')
+            savePickle(traj_best, self.output_dir, self.file_name + '_trajectory.pickle')
+
+            if self.monte_carlo:
+                
+                # Save the uncertanties
+                savePickle(uncertanties, self.output_dir, file.file_name + '_uncertanties.pickle')
+
 
             # Save trajectory report
-            self.saveReport(self.output_dir, file_name + '_report.txt')
+            traj_best.saveReport(traj_best.output_dir, self.file_name + '_report.txt', \
+                uncertanties=uncertanties)
 
         ######################################################################################################
 
@@ -2344,7 +2718,7 @@ class Trajectory(object):
         # Show plots if show_plots flag is true
         if self.show_plots:
 
-            self.showPlots(file_name)
+            traj_best.showPlots(self.file_name)
 
 
 

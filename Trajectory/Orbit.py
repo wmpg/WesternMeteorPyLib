@@ -118,16 +118,19 @@ class Orbit(object):
         out_str =  ""
         #out_str +=  "--------------------\n"
         out_str += "Radiant (apparent):\n"
-        out_str += "  R.A.   = {:>9.5f}  Dec = {:>+9.5f} deg\n".format(np.degrees(self.ra), np.degrees(self.dec))
+        out_str += "  R.A.   = {:>9.5f}  Dec = {:>+9.5f} deg\n".format(np.degrees(self.ra), \
+            np.degrees(self.dec))
         out_str += "  Vavg   = {:>9.5f} km/s\n".format(self.v_avg/1000)
         out_str += "  Vinit  = {:>9.5f} km/s\n".format(self.v_init/1000)
         out_str += "Radiant (geocentric):\n"
-        out_str += "  R.A.   = {:>9.5f}  Dec = {:>+9.5f} deg\n".format(np.degrees(self.ra_g), np.degrees(self.dec_g))
+        out_str += "  R.A.   = {:>9.5f}  Dec = {:>+9.5f} deg\n".format(np.degrees(self.ra_g), \
+            np.degrees(self.dec_g))
         out_str += "  Vg     = {:>9.5f} km/s\n".format(self.v_g/1000)
         out_str += "  Vinf   = {:>9.5f} km/s\n".format(self.v_inf/1000)
         out_str += "  Zg     = {:>9.5f} deg\n".format(np.degrees(self.zg))
         out_str += "Radiant (ecliptic):\n"
-        out_str += "  L      = {:>9.5f}  B   = {:>+9.5f} deg\n".format(np.degrees(self.L_g), np.degrees(self.B_g))
+        out_str += "  L      = {:>9.5f}  B   = {:>+9.5f} deg\n".format(np.degrees(self.L_g), \
+            np.degrees(self.B_g))
         out_str += "  Vh     = {:>9.5f} km/s\n".format(self.v_h/1000)
         out_str += "Orbit:\n"
         out_str += "  La Sun = {:>10.6f} deg\n".format(np.degrees(self.la_sun))
