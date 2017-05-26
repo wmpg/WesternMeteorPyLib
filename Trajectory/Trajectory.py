@@ -394,7 +394,8 @@ class PlaneIntersection(object):
         obsangle2 = np.arccos(np.dot(self.obs2.meas_eci[0], self.obs2.meas_eci[-1]))
 
 
-        ### Calculate the angle between the pair of planes (convergence angle)
+        ### Calculate the angle between the pair of planes (convergence angle) ###
+        ######################################################################################################
         
         # Calculate the cosine of the convergence angle
         ang_cos = np.dot(self.obs1.plane_N, self.obs2.plane_N)
@@ -402,7 +403,7 @@ class PlaneIntersection(object):
         # Make sure the cosine is in the proper range
         self.conv_angle = np.arccos(np.abs(np.clip(ang_cos, -1, 1)))
 
-        ###
+        ######################################################################################################
 
 
         # Calculate the ECI coordinates of the plane intersection
@@ -451,6 +452,7 @@ class PlaneIntersection(object):
 
 
         ### Calculate the range from stations to the radiant line ###
+        ######################################################################################################
 
         # Calculate the difference in position of the two stations
         stat_diff = self.obs1.stat_eci - self.obs2.stat_eci
@@ -680,7 +682,7 @@ def fitLagIntercept(time, length, v_init, initial_intercept=0.0):
 
 
 
-def timingAndVelocityResiduals(params, observations, t_ref_station):
+def timingAndVelocityResiduals(params, observations, t_ref_station, ret_stddev=False):
     """ Calculate the sum of absolute differences between the lag of the referent station and all other 
         stations, by using the given initial velocity and timing differences between stations. 
     
@@ -689,6 +691,9 @@ def timingAndVelocityResiduals(params, observations, t_ref_station):
             referent station (NOTE: referent station is NOT in this list)
         observations: [list] a list of ObservedPoints objects
         t_ref_station: [int] index of the referent station
+
+    Arguments:
+        ret_stddev: [bool] Returns the standard deviation of lag offsets instead of the cost function.
     
     Return:
         [float] sum of absolute differences between the referent and lags of all stations
@@ -734,6 +739,8 @@ def timingAndVelocityResiduals(params, observations, t_ref_station):
     ref_line_spline = scipy.interpolate.CubicSpline(ref_time, ref_lag, extrapolate=True)
 
     residual_sum = 0
+    stddev_sum = 0
+    stddev_count = 0
 
     # Go through all lags
     for i, obs in enumerate(observations):
@@ -754,19 +761,45 @@ def timingAndVelocityResiduals(params, observations, t_ref_station):
         z = (ref_line_spline(time) - lag)**2
         residual_sum += np.sum(2*(np.sqrt(1 + z) - 1))
 
+        # Standard deviation calculation
+        stddev_sum += np.sum(z)
+        stddev_count += len(z)
 
-    return residual_sum
+
+    lag_stddev = np.sqrt(stddev_sum/stddev_count)
+
+
+    if ret_stddev:
+
+        # Returned for reporting the goodness of fit
+        return lag_stddev
+
+    else:
+
+        # Returned for minimization
+        return residual_sum
 
 
 
 
 class MCUncertanties(object):
 
-    def __init__(self):
+    def __init__(self, mc_traj_list):
         """ Container for standard deviations of trajectory parameters calculated using Monte Carlo. """
+
+        # A list with all trajectory objects calculated via Monte Carlo
+        self.mc_traj_list = mc_traj_list
 
         # State vector position
         self.state_vect_mini = None
+        self.x = None
+        self.y = None
+        self.z = None
+
+        # Velocity state vector
+        self.vx = None
+        self.vy = None
+        self.z = None
 
         # Radiant vector
         self.radiant_eci_mini = None
@@ -872,19 +905,22 @@ class MCUncertanties(object):
 
 
 
-def calcMCUncertanties(traj_list):
+def calcMCUncertanties(traj_list, traj_best):
     """ Takes a list of trajectory objects and returns the standard deviation of every parameter. """
 
 
     # Init a new container for uncertanties
-    un = MCUncertanties()
+    un = MCUncertanties(traj_list)
+
+    # Initial velocity
+    un.v_init = np.std([traj.v_init for traj in traj_list])
 
     # State vector
-    x = np.std([traj.state_vect_mini[0] for traj in traj_list])
-    y = np.std([traj.state_vect_mini[1] for traj in traj_list])
-    z = np.std([traj.state_vect_mini[2] for traj in traj_list])
+    un.x = np.std([traj.state_vect_mini[0] for traj in traj_list])
+    un.y = np.std([traj.state_vect_mini[1] for traj in traj_list])
+    un.z = np.std([traj.state_vect_mini[2] for traj in traj_list])
 
-    un.state_vect_mini = np.array([x, y, z])
+    un.state_vect_mini = np.array([un.x, un.y, un.z])
 
 
     rad_x = np.std([traj.radiant_eci_mini[0] for traj in traj_list])
@@ -892,6 +928,14 @@ def calcMCUncertanties(traj_list):
     rad_z = np.std([traj.radiant_eci_mini[2] for traj in traj_list])
 
     un.radiant_eci_mini = np.array([rad_x, rad_y, rad_z])
+
+    # Velocity state vector
+    un.vx = abs(traj_best.v_init*traj_best.radiant_eci_mini[0]*(un.v_init/traj_best.v_init
+        + rad_x/traj_best.radiant_eci_mini[0]))
+    un.vy = abs(traj_best.v_init*traj_best.radiant_eci_mini[1]*(un.v_init/traj_best.v_init
+        + rad_y/traj_best.radiant_eci_mini[1]))
+    un.vz = abs(traj_best.v_init*traj_best.radiant_eci_mini[2]*(un.v_init/traj_best.v_init
+        + rad_z/traj_best.radiant_eci_mini[2]))
 
 
     # Beginning/ending points
@@ -958,12 +1002,6 @@ def calcMCUncertanties(traj_list):
 
     # Tisserand's parameter
     un.Tj = np.std([traj.orbit.Tj for traj in traj_list])
-
-
-    
-
-
-
 
 
     print('GEO', np.degrees(un.ra_g), np.degrees(un.dec_g), un.v_g)
@@ -1051,8 +1089,16 @@ def monteCarloTrajectory(traj, mc_num=None, mc_pick_multiplier=1):
     ##########################################################################################################
 
 
+    # Choose the solution with the lowest lag residuals as the best solution
+    lag_res_trajs = [traj_tmp.lag_res for traj_tmp in mc_results]
+    best_traj_ind = lag_res_trajs.index(min(lag_res_trajs))
+
+    # Choose the best trajectory
+    traj_best = mc_results[best_traj_ind]
+
+
     # Calculate the standard deviation of every trajectory parameter
-    uncertanties = calcMCUncertanties(mc_results)
+    uncertanties = calcMCUncertanties(mc_results, traj_best)
 
 
     ### PLOT RADIANT SPREAD ###
@@ -1082,14 +1128,6 @@ def monteCarloTrajectory(traj, mc_num=None, mc_pick_multiplier=1):
     ##########################################################################################################
 
 
-    # Choose the solution with the lowest lag residuals as the best solution
-    lag_res_trajs = [traj_tmp.lag_res for traj_tmp in mc_results]
-    best_traj_ind = lag_res_trajs.index(min(lag_res_trajs))
-
-    # Choose the best trajectory
-    traj_best = mc_results[best_traj_ind]
-
-
     return traj_best, uncertanties
 
 
@@ -1109,7 +1147,7 @@ class Trajectory(object):
 
 
     def __init__(self, jdt_ref, output_dir='.', max_toffset=1.0, meastype=4, verbose=True, 
-        estimate_timing_vel=True, monte_carlo=True, filter_picks=True, calc_orbit=True, show_plots=True, 
+        estimate_timing_vel=True, monte_carlo=True, mc_num=None, filter_picks=True, calc_orbit=True, show_plots=True, 
         save_results=True):
         """ Init the Ceplecha trajectory solver.
 
@@ -1135,6 +1173,7 @@ class Trajectory(object):
             verbose: [bool] Print out the results and status messages, True by default
             estimate_timing_vel: [bool] Try to estimate the difference in timing and velocity. True by default
             monte_carlo: [bool] Runs Monte Carlo estimation of uncertanties. True by default.
+            mc_num: [int] Number of Monte Carlo runs. The default value is the number of observed points.
             filter_picks: [bool] If True (default), picks which deviate more than 3 sigma in angular residuals
                 will be removed, and the trajectory will be recalculated.
             calc_orbit: [bool] If True, the orbit is calculates as well. True by default
@@ -1163,6 +1202,9 @@ class Trajectory(object):
 
         # Running Monte Carlo simulations to estimate uncertanties
         self.monte_carlo = monte_carlo
+
+        # Number of Monte Carlo runs
+        self.mc_num = mc_num
 
         # Filter bad picks (ones that deviate more than 3 sigma in angular residuals) if this flag is True
         self.filter_picks = filter_picks
@@ -1211,6 +1253,12 @@ class Trajectory(object):
 
         # Jacchia fit parameters for all observations combined
         self.jacchia_fit = None
+
+        # Cost function values of the lag fit
+        self.lag_res = None
+
+        # Standard deviation of all lags vs. the referent lag
+        self.lag_stddev = None
 
         # Orbit object which contains orbital parameters
         self.orbit = None
@@ -1287,6 +1335,9 @@ class Trajectory(object):
             obs.h_residuals = np.array(obs.h_residuals)
             obs.v_residuals = np.array(obs.v_residuals)
 
+            # Calculate RMS of both residuals
+            obs.h_res_rms = np.std(obs.h_residuals)
+            obs.v_res_rms = np.std(obs.v_residuals)
 
             # Calculate angular deviations in azimuth and elevation
             elev_res = obs.elev_data - obs.model_elev
@@ -1390,6 +1441,8 @@ class Trajectory(object):
             # Calculate the final lag residuals
             p0 = np.r_[self.v_init, self.time_diffs_final]
             self.lag_res = timingAndVelocityResiduals(p0, self.observations, self.t_ref_station)
+            self.lag_stddev = timingAndVelocityResiduals(p0, self.observations, self.t_ref_station, 
+                ret_stddev=True)
 
 
 
@@ -1790,6 +1843,32 @@ class Trajectory(object):
 
     def saveReport(self, dir_path, file_name, uncertanties=None):
         """ Save the trajectory estimation report to file. """
+
+
+        def _uncer(str_format, std_name, multi=1.0, deg=False):
+            """ Internal function. Returns the formatted uncertanty, if the uncertanty is given. If not,
+                it returns nothing. 
+
+            Arguments:
+                str_format: [str] String format for the unceertanty.
+                std_name: [str] Name of the uncertanty attribute, e.g. if it is 'x', then the uncertanty is 
+                    stored in uncertanties.x.
+        
+            Keyword arguments:
+                multi: [float] Uncertanty multiplier. 1.0 by default. This is used to scale the uncertanty to
+                    different units (e.g. from m/s to km/s).
+                deg: [bool] Converet radians to degrees if True. False by defualt.
+                """
+
+            if deg:
+                multi *= np.degrees(1.0)
+
+            if uncertanties is not None:
+                return " +/- " + str_format.format(getattr(uncertanties, std_name)*multi)
+
+            else:
+                return ''
+
         
         out_str = ''
 
@@ -1824,8 +1903,8 @@ class Trajectory(object):
 
             n = n + 1
 
-            out_str += 'Intersection ' + str(n) + ' - Stations: ' + str(plane_intersection.obs1.station_id) + ' and ' + \
-                str(plane_intersection.obs2.station_id) + '\n'
+            out_str += 'Intersection ' + str(n) + ' - Stations: ' + str(plane_intersection.obs1.station_id) +\
+                ' and ' + str(plane_intersection.obs2.station_id) + '\n'
 
             out_str += ' Convergence angle = {:.5f} deg\n'.format(np.degrees(plane_intersection.conv_angle))
             
@@ -1848,12 +1927,12 @@ class Trajectory(object):
 
         # Write out the state vector
         out_str += "State vector (ECI):\n"
-        out_str += " X =  {:10.2f} m\n".format(x)
-        out_str += " Y =  {:10.2f} m\n".format(y)
-        out_str += " Z =  {:10.2f} m\n".format(z)
-        out_str += " Vx = {:10.2f} m/s\n".format(vx)
-        out_str += " Vy = {:10.2f} m/s\n".format(vy)
-        out_str += " Vz = {:10.2f} m/s\n".format(vz)
+        out_str += " X =  {:11.2f}{:s} m\n".format(x, _uncer('{:.2f}', 'x'))
+        out_str += " Y =  {:11.2f}{:s} m\n".format(y, _uncer('{:.2f}', 'y'))
+        out_str += " Z =  {:11.2f}{:s} m\n".format(z, _uncer('{:.2f}', 'z'))
+        out_str += " Vx = {:11.2f}{:s} m/s\n".format(vx, _uncer('{:.2f}', 'vx'))
+        out_str += " Vy = {:11.2f}{:s} m/s\n".format(vy, _uncer('{:.2f}', 'vy'))
+        out_str += " Vz = {:11.2f}{:s} m/s\n".format(vz, _uncer('{:.2f}', 'vz'))
 
         out_str += "\n"
 
@@ -1865,12 +1944,14 @@ class Trajectory(object):
 
         out_str += "Average point on the trajectory:\n"
         out_str += "  Time: " + str(jd2Date(self.orbit.jd_avg, dt_obj=True)) + " UTC\n"
-        out_str += "  Lon   = {:>10.6f}  Lat = {:>10.6f} deg\n".format(np.degrees(self.orbit.lon_avg), \
-            np.degrees(self.orbit.lat_avg))
+        out_str += "  Lon   = {:>10.6f}{:s} deg\n".format(np.degrees(self.orbit.lon_avg), _uncer('{:.4f}', 
+            'lon_avg', deg=True))
+        out_str += "  Lat   = {:>10.6f}{:s} deg\n".format(np.degrees(self.orbit.lat_avg), _uncer('{:.4f}', 
+            'lat_avg', deg=True))
         out_str += "\n"
 
         # Write out orbital parameters
-        out_str += self.orbit.__repr__()
+        out_str += self.orbit.__repr__(uncertanties=uncertanties)
         out_str += "\n"
 
         out_str += "Jacchia fit on lag = -|a1|*exp(|a2|*t):\n"
@@ -1878,11 +1959,24 @@ class Trajectory(object):
         out_str += " a2 = {:.6f}\n".format(self.jacchia_fit[1])
         out_str += "\n"
 
-        out_str += "      Lon +E (deg), Lat + N Deg),  Ele (m)\n"
-        out_str += "Begin {:>12.6f}, {:>12.6f}, {:>8.2f}\n".format(np.degrees(self.rbeg_lon), \
-            np.degrees(self.rbeg_lat), self.rbeg_ele)
-        out_str += "End   {:>12.6f}, {:>12.6f}, {:>8.2f}\n".format(np.degrees(self.rend_lon), \
-            np.degrees(self.rend_lat), self.rend_ele)
+        out_str += "Standard deviation from the referent lag:\n"
+        out_str += "  Station with referent lag: {:s}\n".format(str(self.observations[self.t_ref_station].station_id))
+        out_str += "  Lag stddev = {:.2f} m\n".format(self.lag_stddev)
+        out_str += "\n"
+
+        out_str += "Begin:\n"
+        out_str += "  Lon = {:>12.6f}{:s} deg\n".format(np.degrees(self.rbeg_lon), _uncer('{:.4f}', 
+            'rbeg_lon', deg=True))
+        out_str += "  Lat = {:>12.6f}{:s} deg\n".format(np.degrees(self.rbeg_lat), _uncer('{:.4f}', 
+            'rbeg_lat', deg=True))
+        out_str += "  Ht  = {:>8.2f}{:s} m\n".format(self.rbeg_ele, _uncer('{:.2f}', 'rbeg_ele'))
+
+        out_str += "End:\n"
+        out_str += "  Lon = {:>12.6f}{:s} deg\n".format(np.degrees(self.rend_lon), _uncer('{:.4f}', 
+            'rend_lon', deg=True))
+        out_str += "  Lat = {:>12.6f}{:s} deg\n".format(np.degrees(self.rend_lat), _uncer('{:.4f}', 
+            'rend_lat', deg=True))
+        out_str += "  Ht  = {:>8.2f}{:s} m\n".format(self.rend_ele, _uncer('{:.2f}', 'rend_ele'))
         out_str += "\n"
 
         ### Write information about stations ###
@@ -1890,7 +1984,7 @@ class Trajectory(object):
         out_str += "Stations\n"
         out_str += "--------\n"
 
-        out_str += "        ID, Lon +E (deg), Lat +N (deg), Ele (m), Jacchia a1, Jacchia a2, Beg Ele (m), End Ele (m) \n"
+        out_str += "        ID, Lon +E (deg), Lat +N (deg), Ele (m), Jacchia a1, Jacchia a2, Beg Ele (m),  End Ht (m), +/- Obs ang (deg), +/- V (m), +/- H (m)\n"
         
         for obs in self.observations:
             station_info = [obs.station_id, obs.lat, obs.lon, obs.ele]
@@ -1904,6 +1998,9 @@ class Trajectory(object):
             station_info.append("{:>10.6f}".format(obs.jacchia_fit[1]))
             station_info.append("{:>11.2f}".format(obs.rbeg_ele))
             station_info.append("{:>11.2f}".format(obs.rend_ele))
+            station_info.append("{:>17.6f}".format(np.degrees(obs.ang_res_std)))
+            station_info.append("{:>9.2f}".format(obs.v_res_rms))
+            station_info.append("{:>9.2f}".format(obs.h_res_rms))
 
 
             out_str += ", ".join(station_info) + "\n"
@@ -1986,8 +2083,8 @@ class Trajectory(object):
         out_str += "- Right ascension and declination in the table are given for the epoch of date for the corresponding JD, per every point.\n"
         out_str += "- 'RA and Dec obs' are the right ascension and declination calculated from the observed values, while the 'RA and Dec line' are coordinates of the lines of sight projected on the fitted radiant line. 'Azim and alt line' are thus corresponding azimuthal coordinates.\n"
 
-
-        print(out_str)
+        if self.verbose:
+            print(out_str)
 
         mkdirP(dir_path)
 
@@ -1997,11 +2094,15 @@ class Trajectory(object):
 
 
 
-    def showPlots(self, file_name):
+    def savePlots(self, file_name, output_dir, show_plots=True):
         """ Show plots of the estimated trajectory. 
     
         Arguments:
-            file_name: [str] file name which will be used for saving plots
+            file_name: [str] File name which will be used for saving plots.
+            output_dir: [str] Path to the output directory.
+
+        Keyword_arguments:
+            show_plots: [bools] Show the plots on the screen. True by default.
 
         """
 
@@ -2037,9 +2138,14 @@ class Trajectory(object):
 
 
             savePlot(plt, file_name + '_' + str(obs.station_id) + '_spatial_residuals.png', \
-                self.output_dir)
+                output_dir)
 
-            plt.show()
+            if show_plots:
+                plt.show()
+
+            else:
+                plt.clf()
+                plt.close()
 
             ##################################################################################################
 
@@ -2077,9 +2183,14 @@ class Trajectory(object):
 
             plt.tight_layout()
 
-            savePlot(plt, file_name + '_' + str(obs.station_id) + '_lag.png', self.output_dir)
+            savePlot(plt, file_name + '_' + str(obs.station_id) + '_lag.png', output_dir)
 
-            plt.show()
+            if show_plots:
+                plt.show()
+
+            else:
+                plt.clf()
+                plt.close()
 
 
             ##################################################################################################
@@ -2097,7 +2208,7 @@ class Trajectory(object):
             zorder=3)
 
 
-        plt.title('Lags, all stations')
+        plt.title('Lags, all stations, RMS = ' + str(round(self.lag_stddev, 2)) + ' m')
 
         plt.xlabel('Lag (m)')
         plt.ylabel('Time (s)')
@@ -2106,9 +2217,14 @@ class Trajectory(object):
         plt.grid()
         plt.gca().invert_yaxis()
 
-        savePlot(plt, file_name + '_lags_all.png', self.output_dir)
+        savePlot(plt, file_name + '_lags_all.png', output_dir)
 
-        plt.show()
+        if show_plots:
+            plt.show()
+
+        else:
+            plt.clf()
+            plt.close()
 
 
 
@@ -2175,9 +2291,14 @@ class Trajectory(object):
 
         plt.tight_layout()
 
-        savePlot(plt, file_name + '_velocities.png', self.output_dir)
+        savePlot(plt, file_name + '_velocities.png', output_dir)
 
-        plt.show()
+        if show_plots:
+            plt.show()
+
+        else:
+            plt.clf()
+            plt.close()
 
         ######################################################################################################
 
@@ -2229,7 +2350,7 @@ class Trajectory(object):
         m.drawmapboundary(fill_color='0.2')
 
         # Fill continents, set lake color same as ocean color
-        m.fillcontinents(color='black', lake_color='0.2', zorder=0)
+        m.fillcontinents(color='black', lake_color='0.2', zorder=1)
 
         # Draw country borders
         m.drawcountries(color='0.2')
@@ -2248,7 +2369,7 @@ class Trajectory(object):
 
             # Plot stations
             x, y = m(np.degrees(obs.lon), np.degrees(obs.lat))
-            m.scatter(x, y, s=10, label=str(obs.station_id), marker='x')
+            m.scatter(x, y, s=10, label=str(obs.station_id), marker='x', zorder=3)
 
             # Plot measured points
             x, y = m(np.degrees(obs.meas_lon), np.degrees(obs.meas_lat))
@@ -2257,14 +2378,19 @@ class Trajectory(object):
 
         # Plot a point marking the final point of the meteor
         x_end, y_end = m(np.degrees(self.rend_lon), np.degrees(self.rend_lat))
-        m.scatter(x_end, y_end, c='y', marker='+', s=50, alpha=0.75, label='Endpoint')
+        m.scatter(x_end, y_end, c='y', marker='+', s=50, alpha=0.75, label='Endpoint', zorder=3)
 
 
         plt.legend()
 
-        savePlot(plt, file_name + '_ground_track.png', self.output_dir)
+        savePlot(plt, file_name + '_ground_track.png', output_dir)
 
-        plt.show()
+        if show_plots:
+            plt.show()
+
+        else:
+            plt.clf()
+            plt.close()
 
         ######################################################################################################
 
@@ -2292,9 +2418,14 @@ class Trajectory(object):
             plt.legend()
 
             savePlot(plt, file_name + '_' + str(obs.station_id) + '_angular_residuals.png', \
-                self.output_dir)
+                output_dir)
 
-            plt.show()
+            if show_plots:
+                plt.show()
+
+            else:
+                plt.clf()
+                plt.close()
 
 
         # Plot angular residuals from all stations
@@ -2321,9 +2452,14 @@ class Trajectory(object):
         plt.grid()
         plt.legend()
 
-        savePlot(plt, file_name + '_all_angular_residuals.png', self.output_dir)
+        savePlot(plt, file_name + '_all_angular_residuals.png', output_dir)
 
-        plt.show()
+        if show_plots:
+            plt.show()
+
+        else:
+            plt.clf()
+            plt.close()
 
 
 
@@ -2337,7 +2473,20 @@ class Trajectory(object):
                 ])
 
             # Run orbit plotting procedure
-            plotOrbits(orbit_params, jd2Date(self.jdt_ref, dt_obj=True))
+            plotOrbits(orbit_params, jd2Date(self.jdt_ref, dt_obj=True), save_plots=True, \
+                plot_path=os.path.join(output_dir, file_name))
+
+
+            plt.tight_layout()
+
+
+            if show_plots:
+                plt.show()
+
+            else:
+                plt.clf()
+                plt.close()
+
 
 
 
@@ -2356,6 +2505,14 @@ class Trajectory(object):
                 offsets from the first run of the solver. None by default.
 
         """
+
+        # Make sure there are at least 2 stations
+        if len(self.observations) < 2:
+            
+            print('At least 2 sets of measurements from 2 stations are needed to estimate the trajectory!')
+
+            return None
+
 
         # Determine which station has the referent time (the first time entry is 0 for that station)
         for i, obs in enumerate(self.observations):
@@ -2688,37 +2845,63 @@ class Trajectory(object):
         if self.monte_carlo:
 
             # Do a Monte Carlo estimate of the uncertanties in all calculated parameters
-            traj_best, uncertanties = monteCarloTrajectory(self)
+            traj_best, uncertanties = monteCarloTrajectory(self, mc_num=self.mc_num)
 
         else:
             uncertanties = None
 
 
-        #### SAVE REPORTS ###
+        #### SAVE RESULTS ###
         ######################################################################################################
 
         if self.save_results:
 
-            # Save the picked trajectory structure
-            savePickle(traj_best, self.output_dir, self.file_name + '_trajectory.pickle')
-
+            # Save Monte Carlo results
             if self.monte_carlo:
+
+                if self.verbose:
+                    print('Saving Monte Carlo results...')
+
+                # Monte Carlo output directory
+                mc_output_dir = os.path.join(self.output_dir, 'Monte Carlo')
+                mc_file_name = self.file_name + "_mc"
+
+                # Save the picked trajectory structure with Monte Carlo points
+                savePickle(traj_best, mc_output_dir, mc_file_name + '_trajectory.pickle')
                 
                 # Save the uncertanties
-                savePickle(uncertanties, self.output_dir, file.file_name + '_uncertanties.pickle')
+                savePickle(uncertanties, mc_output_dir, mc_file_name + '_uncertanties.pickle')
+
+                # Save trajectory report
+                traj_best.saveReport(mc_output_dir, mc_file_name + '_report.txt', \
+                    uncertanties=uncertanties)
+
+                # Save and show plots
+                traj_best.savePlots(mc_file_name, mc_output_dir, show_plots=self.show_plots)
 
 
-            # Save trajectory report
-            traj_best.saveReport(traj_best.output_dir, self.file_name + '_report.txt', \
-                uncertanties=uncertanties)
+            ## Save original picks results
+
+            if self.verbose:
+                print('Saving results with original picks...')
+
+            # Save the picked trajectory structure with original points
+            savePickle(self, self.output_dir, self.file_name + '_trajectory.pickle')
+
+            # Save trajectory report with original points
+            self.saveReport(self.output_dir, self.file_name + '_report.txt', \
+                    uncertanties=uncertanties)
+
+            # Save and show plots
+            self.savePlots(self.file_name, self.output_dir, \
+                show_plots=(self.show_plots and not self.monte_carlo))
+
+            
+            
 
         ######################################################################################################
 
-
-        # Show plots if show_plots flag is true
-        if self.show_plots:
-
-            traj_best.showPlots(self.file_name)
+        
 
 
 

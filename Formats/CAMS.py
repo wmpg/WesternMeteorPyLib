@@ -441,7 +441,7 @@ def solveTrajectory(meteor_list, output_dir, solver='original'):
         # Init the trajectory solver
         if solver == 'original':
             #traj = Trajectory(jdt_ref, output_dir=output_dir, meastype=1)
-            traj = Trajectory(jdt_ref, output_dir=output_dir, meastype=2, max_toffset=4.0, filter_picks=True)
+            traj = Trajectory(jdt_ref, output_dir=output_dir, meastype=2, max_toffset=4.0, filter_picks=True, monte_carlo=True)
 
         elif solver == 'gural':
             traj = GuralTrajectory(len(meteor_list), jdt_ref, velmodel=3, meastype=2, verbose=1)

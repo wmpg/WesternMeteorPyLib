@@ -112,41 +112,87 @@ class Orbit(object):
         self.Tj = None
 
 
-    def __repr__(self):
+    def __repr__(self, uncertanties=None):
         """ String to be printed out when the Orbit object is printed. """
+
+        def _uncer(str_format, std_name, multi=1.0, deg=False):
+            """ Internal function. Returns the formatted uncertanty, if the uncertanty is given. If not,
+                it returns nothing. 
+
+            Arguments:
+                str_format: [str] String format for the unceertanty.
+                std_name: [str] Name of the uncertanty attribute, e.g. if it is 'x', then the uncertanty is 
+                    stored in uncertanties.x.
+        
+            Keyword arguments:
+                multi: [float] Uncertanty multiplier. 1.0 by default. This is used to scale the uncertanty to
+                    different units (e.g. from m/s to km/s).
+                deg: [bool] Converet radians to degrees if True. False by defualt.
+                """
+
+            if deg:
+                multi *= np.degrees(1.0)
+
+            if uncertanties is not None:
+                return " +/- " + str_format.format(getattr(uncertanties, std_name)*multi)
+
+            else:
+                return ''
+
 
         out_str =  ""
         #out_str +=  "--------------------\n"
         out_str += "Radiant (apparent):\n"
-        out_str += "  R.A.   = {:>9.5f}  Dec = {:>+9.5f} deg\n".format(np.degrees(self.ra), \
-            np.degrees(self.dec))
-        out_str += "  Vavg   = {:>9.5f} km/s\n".format(self.v_avg/1000)
-        out_str += "  Vinit  = {:>9.5f} km/s\n".format(self.v_init/1000)
+        out_str += "  R.A.   = {:>9.5f}{:s} deg\n".format(np.degrees(self.ra), _uncer('{:.4f}', 'ra', 
+            deg=True))
+        out_str += "  Dec    = {:>+9.5f}{:s} deg\n".format(np.degrees(self.dec), _uncer('{:.4f}', 'dec', 
+            deg=True))
+        out_str += "  Vavg   = {:>9.5f}{:s} km/s\n".format(self.v_avg/1000, _uncer('{:.4f}', 'v_avg', 
+            multi=1.0/1000))
+        out_str += "  Vinit  = {:>9.5f}{:s} km/s\n".format(self.v_init/1000, _uncer('{:.4f}', 'v_init', 
+            multi=1.0/1000))
         out_str += "Radiant (geocentric):\n"
-        out_str += "  R.A.   = {:>9.5f}  Dec = {:>+9.5f} deg\n".format(np.degrees(self.ra_g), \
-            np.degrees(self.dec_g))
-        out_str += "  Vg     = {:>9.5f} km/s\n".format(self.v_g/1000)
-        out_str += "  Vinf   = {:>9.5f} km/s\n".format(self.v_inf/1000)
-        out_str += "  Zg     = {:>9.5f} deg\n".format(np.degrees(self.zg))
+        out_str += "  R.A.   = {:>9.5f}{:s} deg\n".format(np.degrees(self.ra_g), _uncer('{:.4f}', 'ra_g', 
+            deg=True))
+        out_str += "  Dec    = {:>+9.5f}{:s} deg\n".format(np.degrees(self.dec_g), _uncer('{:.4f}', 'dec_g', 
+            deg=True))
+        out_str += "  Vg     = {:>9.5f}{:s} km/s\n".format(self.v_g/1000, _uncer('{:.4f}', 'v_g', 
+            multi=1.0/1000))
+        out_str += "  Vinf   = {:>9.5f}{:s} km/s\n".format(self.v_inf/1000, _uncer('{:.4f}', 'v_inf', 
+            multi=1.0/1000))
+        out_str += "  Zg     = {:>9.5f}{:s} deg\n".format(np.degrees(self.zg), _uncer('{:.4f}', 'zg', 
+            deg=True))
         out_str += "Radiant (ecliptic):\n"
-        out_str += "  L      = {:>9.5f}  B   = {:>+9.5f} deg\n".format(np.degrees(self.L_g), \
-            np.degrees(self.B_g))
-        out_str += "  Vh     = {:>9.5f} km/s\n".format(self.v_h/1000)
+        out_str += "  L      = {:>9.5f}{:s} deg\n".format(np.degrees(self.L_g), _uncer('{:.4f}', 'L_g', 
+            deg=True))
+        out_str += "  B      = {:>+9.5f}{:s} deg\n".format(np.degrees(self.B_g), _uncer('{:.4f}', 'B_g', 
+            deg=True))
+        out_str += "  Vh     = {:>9.5f}{:s} km/s\n".format(self.v_h/1000, _uncer('{:.4f}', 'v_h', 
+            multi=1/1000.0))
         out_str += "Orbit:\n"
-        out_str += "  La Sun = {:>10.6f} deg\n".format(np.degrees(self.la_sun))
-        out_str += "  a      = {:>10.6f} AU\n".format(self.a)
-        out_str += "  e      = {:>10.6f}\n".format(self.e)
-        out_str += "  i      = {:>10.6f} deg\n".format(np.degrees(self.i))
-        out_str += "  peri   = {:>10.6f} deg\n".format(np.degrees(self.peri))
-        out_str += "  node   = {:>10.6f} deg\n".format(np.degrees(self.node))
-        out_str += "  Pi     = {:>10.6f} deg\n".format(np.degrees(self.pi))
-        out_str += "  q      = {:>10.6f} AU\n".format(self.q)
-        out_str += "  f      = {:>10.6f} deg\n".format(np.degrees(self.true_anomaly))
-        out_str += "  M      = {:>10.6f} deg\n".format(np.degrees(self.mean_anomaly))
-        out_str += "  Q      = {:>10.6f} AU\n".format(self.Q)
-        out_str += "  n      = {:>10.6f} deg/day\n".format(np.degrees(self.n))
-        out_str += "  Last perihelion: " + str(self.last_perihelion) + "\n"
-        out_str += "  Tj     = {:>10.6f}\n".format(self.Tj)
+        out_str += "  La Sun = {:>10.6f}{:s} deg\n".format(np.degrees(self.la_sun), _uncer('{:.4f}', 'la_sun', 
+            deg=True))
+        out_str += "  a      = {:>10.6f}{:s} AU\n".format(self.a, _uncer('{:.4f}', 'a'))
+        out_str += "  e      = {:>10.6f}{:s}\n".format(self.e, _uncer('{:.4f}', 'e'))
+        out_str += "  i      = {:>10.6f}{:s} deg\n".format(np.degrees(self.i), _uncer('{:.4f}', 'i', 
+            deg=True))
+        out_str += "  peri   = {:>10.6f}{:s} deg\n".format(np.degrees(self.peri), _uncer('{:.4f}', 'peri', 
+            deg=True))
+        out_str += "  node   = {:>10.6f}{:s} deg\n".format(np.degrees(self.node), _uncer('{:.4f}', 'node', 
+            deg=True))
+        out_str += "  Pi     = {:>10.6f}{:s} deg\n".format(np.degrees(self.pi), _uncer('{:.4f}', 'pi', 
+            deg=True))
+        out_str += "  q      = {:>10.6f}{:s} AU\n".format(self.q, _uncer('{:.4f}', 'q'))
+        out_str += "  f      = {:>10.6f}{:s} deg\n".format(np.degrees(self.true_anomaly), _uncer('{:.4f}', 
+            'true_anomaly', deg=True))
+        out_str += "  M      = {:>10.6f}{:s} deg\n".format(np.degrees(self.mean_anomaly), _uncer('{:.4f}', 
+            'mean_anomaly', deg=True))
+        out_str += "  Q      = {:>10.6f}{:s} AU\n".format(self.Q, _uncer('{:.4f}', 'Q'))
+        out_str += "  n      = {:>10.6f}{:s} deg/day\n".format(np.degrees(self.n), _uncer('{:.4f}', 'n', 
+            deg=True))
+        out_str += "  Last perihelion: " + str(self.last_perihelion) + _uncer('{:.4f}', 'last_perihelion') \
+            + " days \n"
+        out_str += "  Tj     = {:>10.6f}{:s}\n".format(self.Tj, _uncer('{:.4f}', 'Tj'))
 
 
         return out_str

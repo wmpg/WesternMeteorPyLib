@@ -27,11 +27,14 @@
 # The source of equations used:
 # http://farside.ph.utexas.edu/teaching/celestial/Celestialhtml/node34.html
 
+import os
 from datetime import datetime
 import matplotlib as mpl
 from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
 import matplotlib.pyplot as plt
+
+from Plotting import savePlot
 
 # Define Julian epoch
 J2000_EPOCH = datetime(2000, 1, 1, 12) # At the noon of 2000/01/01 UTC
@@ -220,8 +223,8 @@ def plotPlanets(ax, time):
 
 
 
-def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True):
-    """ Plot the given orbits in the solar system. 
+def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, save_plots=False, plot_path=None):
+    """ Plot the given orbits in the Solar System. 
 
     Arguments:
         orb_elements: [ndarray of floats]: 2D numpy array with orbits to plot, each entry contains:
@@ -230,8 +233,14 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True):
             I - Inclination (degrees)
             peri - Argument of perihelion (degrees)
             node - Ascending node (degrees)
-        ax: [matplotlib object] 3D plot axis handle
-        t: [datetime] a point in time of the planet's orbit
+        time: [float] datetime object of the moment of planet positions.
+
+    Keyword Arguments:
+        orbit_colors: [list] A list of size orb_elements.shape[0] containing color strings for every planet 
+            orbit.
+        plot_planets: [bool] If True, planets will be plotted. True by default.
+        save_plots: [bool] If True, plots will be saved to the given path under plot_path. False by default.
+        plot_path: [bool] File name and the full path where the plots will be saved if save_plots == True.
         
     """
 
@@ -291,8 +300,26 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True):
     ax.set_ylim3d(-5,5)
     ax.set_zlim3d(-5,5)
 
-    plt.tight_layout()
-    plt.show()
+    # Save plots to disk (top and side views)
+    if save_plots:
+
+        # Check if the file names is given
+        if plot_path is None:
+            plot_file_name = 'orbit'
+            plot_dir = '.'
+
+        else:
+            plot_dir, plot_file_name = os.path.split(plot_path)
+
+
+        # Save top view
+        ax.view_init(elev=90, azim=0)
+        savePlot(plt, plot_file_name + '_orbit_top.png', plot_dir)
+
+        # Save side view
+        ax.view_init(elev=0, azim=0)
+        savePlot(plt, plot_file_name + '_orbit_side.png', plot_dir)
+
 
 
 
@@ -313,3 +340,5 @@ if __name__ == '__main__':
 
     # Plot orbits
     plotOrbits(orb_elements, time)
+
+    plt.show()
