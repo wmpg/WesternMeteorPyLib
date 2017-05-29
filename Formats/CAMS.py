@@ -567,7 +567,7 @@ if __name__ == "__main__":
 
 
     # Run the trajectory solver
-    solveTrajectory(meteor5, os.path.join(dir_path, 'meteor5'), solver='original')
+    solveTrajectory(meteor6, os.path.join(dir_path, 'meteor6'), solver='original')
 
     # Write the MILIG input file
     #cams2MiligInput(meteor6, 'milig_meteor6.txt')

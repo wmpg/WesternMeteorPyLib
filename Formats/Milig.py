@@ -97,8 +97,7 @@ def loadMiligInput(file_path):
             if line.replace('\n', '') == '-1':
                 break
 
-            # # If the line has more than 32 characters, it marks the beginning of a new station
-            # if len(line) > 32:
+            # If the last line kad the control character 9, this marks the beginning of new station picks
             if new_station:
 
                 # Station ID
@@ -172,7 +171,7 @@ def loadMiligInput(file_path):
 
 
 
-def trajSolveMiligInput(dir_path, file_name, max_toffset=1.0):
+def trajSolveMiligInput(dir_path, file_name, **kwargs):
     """ Run the trajectory solver on data provided in the MILIG format input file. 
 
     Arguments:
@@ -180,7 +179,7 @@ def trajSolveMiligInput(dir_path, file_name, max_toffset=1.0):
         file_name: [str] Name of the MILIG input file.
 
     Keyword arguments:
-        max_toffset: [float] Maximum offset in seconds between observations. Default is 1 second.
+        **kwargs: [dict] Additional keyword arguments will be directly passed to the trajectory solver.
 
 
     Return:
@@ -194,7 +193,7 @@ def trajSolveMiligInput(dir_path, file_name, max_toffset=1.0):
     print('JD', jdt_ref)
 
     # Init the trajectory solver
-    traj = Trajectory(jdt_ref, output_dir=dir_path, max_toffset=max_toffset, meastype=3)
+    traj = Trajectory(jdt_ref, output_dir=dir_path, meastype=3, **kwargs)
 
     # Infill data from each station to the solver
     for station in stations:
@@ -289,23 +288,25 @@ if __name__ == '__main__':
     # dir_path = "../MirfitPrepare/20161007_052749_mir/"
     # file_name = "input_00.txt"
 
-    dir_path = "/home/dvida/Desktop/krizy"
-
+    #dir_path = "/home/dvida/Desktop/krizy"
     #dir_path = '/home/dvida/Desktop/PyLIG_in_2011100809VIB0142'
     #dir_path = "/home/dvida/Desktop/PyLIG_in_2011100809PUB0030"
     #dir_path = "/home/dvida/Desktop/PyLIG_in_2011100809VIB0141"
     #dir_path = "/home/dvida/Desktop/PyLIG_in_2011100809DUI0066"
     #dir_path = "/home/dvida/Desktop/PyLIG_in_2016112223APO0002"
+    dir_path = os.path.abspath("../MILIG files")
 
-
-    file_name = "input_krizy_01.txt"
+    #file_name = "input_krizy_01.txt"
     #file_name = 'PyLIG_in_2011100809PUB0030.txt'
     #file_name = 'PyLIG_in_2011100809DUI0066.txt'
     #file_name = 'PyLIG_in_2011100809VIB0142.txt'
     #file_name = "PyLIG_in_2011100809VIB0141.txt"
     #file_name = "PyLIG_in_2016112223APO0002.txt"
+    file_name = "PyLIG_IN_Pula_2010102829.txt"
 
-    trajSolveMiligInput(dir_path, file_name, max_toffset=4.0)
+
+
+    trajSolveMiligInput(dir_path, file_name, max_toffset=30.0, monte_carlo=False)
 
     
 

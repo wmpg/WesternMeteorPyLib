@@ -141,8 +141,6 @@ class CelestialPlot(object):
             # Have 20 ticks between the min and max of the current scale
             label_angle_freq /= 20
 
-            print('DEG SPAN', deg_span)
-            print('LABEL FREQ:', label_angle_freq)
 
             # Draw Dec lines
             dec_lines = np.arange(np.floor(dec_min/label_angle_freq)*label_angle_freq, np.ceil(dec_max/label_angle_freq)*label_angle_freq, label_angle_freq)
@@ -216,7 +214,9 @@ class CelestialPlot(object):
         self.m.scatter(x, y, c=c, zorder=3, **kwargs)
 
 
+
     def colorbar(self, **kwargs):
+        """ Plot a colorbar. """
 
         cbar = self.m.colorbar(pad="5%", **kwargs)
 

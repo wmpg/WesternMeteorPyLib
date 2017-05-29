@@ -23,7 +23,7 @@ from mpl_toolkits.basemap import Basemap
 
 from Trajectory.Orbit import calcOrbit
 
-from Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints
+from Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, rotateVector
 from Utils.OSTools import mkdirP
 from Utils.Pickling import savePickle
 from Utils.Plotting import savePlot
@@ -239,8 +239,13 @@ class ObservedPoints(object):
         # fig = plt.figure()
         # ax = fig.add_subplot(111, projection='3d')
 
+        # # Plot station position
         # ax.scatter(self.x_stat, self.y_stat, self.z_stat, s=50)
-        # ax.scatter(self.x_stat + self.x_eci, self.y_stat + self.y_eci, self.z_stat + self.z_eci, c='red')
+
+        # # Plot line of sight
+        # #ax.scatter(self.x_stat + self.x_eci, self.y_stat + self.y_eci, self.z_stat + self.z_eci, c='red')
+        # ax.quiver(self.x_stat, self.y_stat, self.z_stat, self.x_eci, self.y_eci, self.z_eci, length=1.0,
+        #         normalize=True, arrow_length_ratio=0.1)
 
         # # ax.scatter(0, 0, 0, s=50)
         # # ax.scatter(self.x_eci, self.y_eci, self.z_eci, c='red')
@@ -314,7 +319,7 @@ class ObservedPoints(object):
 
         # Calculate measurement ECI coordinates for the line of sight method
         self.meas_eci_los = np.array(raDec2ECI(self.ra_data_los, self.dec_data_los)).T
-        #self.x_eci_los, self.y_eci_los, self.z_eci_los = self.meas_eci_los.T
+        self.x_eci_los, self.y_eci_los, self.z_eci_los = self.meas_eci_los.T
         
         ### USED IN GURAL SOLVER FOR ADDING THE NOISE TO ECI COORDINATES
         # for kmeas, eci_coord in enumerate(self.meas_eci):
@@ -482,9 +487,91 @@ class PlaneIntersection(object):
 
         ######################################################################################################
 
-
         # Calculate the statistical weight of the radiant solution
         self.weight = obsangle1*obsangle2*np.sin(self.conv_angle)**2
+
+
+
+    def show(self):
+        """ Shows the intersection of the two planes in 3D. """
+
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+
+        observations = [self.obs1, self.obs2]
+
+        # Calculate one point on the meteor trajectory
+        traj_point, _, _ = findClosestPoints(self.obs1.stat_eci, self.obs1.meas_eci[0], self.cpa_eci, \
+            self.radiant_eci)
+
+        # Calculate the plot limits
+        x_min = min([self.obs1.x_stat, self.obs2.x_stat, traj_point[0]])
+        x_max = max([self.obs1.x_stat, self.obs2.x_stat, traj_point[0]])
+        y_min = min([self.obs1.y_stat, self.obs2.y_stat, traj_point[1]])
+        y_max = max([self.obs1.y_stat, self.obs2.y_stat, traj_point[1]])
+        z_min = min([self.obs1.z_stat, self.obs2.z_stat, traj_point[2]])
+        z_max = max([self.obs1.z_stat, self.obs2.z_stat, traj_point[2]])
+
+        # Normalize the plot limits so they are rectangular
+        delta_x = x_max - x_min
+        delta_y = y_max - y_min
+        delta_z = z_max - z_min
+        delta_max = max([delta_x, delta_y, delta_z])
+
+        x_diff = delta_max - delta_x
+        x_min -= x_diff/2
+        x_max += x_diff/2
+
+        y_diff = delta_max - delta_y
+        y_min -= y_diff/2
+        y_max += y_diff/2
+
+        z_diff = delta_max - delta_z
+        z_min -= z_diff/2
+        z_max += z_diff/2
+
+
+        # Calculate the quiver arrow length
+        arrow_len = 0.2*np.sqrt((x_min - x_max)**2 + (y_min - y_max)**2 + (z_min - z_max)**2)
+
+        # Plot stations and observations
+        for obs in observations:
+
+            # Station positions
+            ax.scatter(obs.x_stat, obs.y_stat, obs.z_stat, s=50)
+
+            # Lines of sight
+            ax.quiver(obs.x_stat, obs.y_stat, obs.z_stat, obs.x_eci, obs.y_eci, obs.z_eci, length=arrow_len,
+                normalize=True, arrow_length_ratio=0.1, color='blue')
+
+            d = -np.array([obs.x_stat, obs.y_stat, obs.z_stat]).dot(obs.plane_N)
+
+            # Create x,y
+            xx, yy = np.meshgrid(np.linspace(x_min, x_max, 10), np.linspace(y_min, y_max, 10))
+
+            # Calculate corresponding z
+            z = (-obs.plane_N[0]*xx - obs.plane_N[1]*yy - d)*1.0/obs.plane_N[2]
+
+            # Plot plane normal
+            ax.quiver(obs.x_stat, obs.y_stat, obs.z_stat, *obs.plane_N, length=arrow_len/2, 
+                normalize=True, arrow_length_ratio=0.1, color='green')
+
+            # Plot the plane
+            ax.plot_surface(xx, yy, z, color='green', alpha=0.25)
+
+
+        # Plot the radiant state vector
+        rad_x, rad_y, rad_z = -self.radiant_eci
+        rst_x, rst_y, rst_z = traj_point
+        ax.quiver(rst_x, rst_y, rst_z, rad_x, rad_y, rad_z, length=arrow_len, normalize=True, color='red', \
+            arrow_length_ratio=0.1)
+
+        ax.set_xlim([x_min, x_max])
+        ax.set_ylim([y_min, y_max])
+        ax.set_zlim([z_min, z_max])
+
+        plt.show()
+
 
 
 
@@ -1002,11 +1089,7 @@ def calcMCUncertanties(traj_list, traj_best):
 
     # Tisserand's parameter
     un.Tj = np.std([traj.orbit.Tj for traj in traj_list])
-
-
-    print('GEO', np.degrees(un.ra_g), np.degrees(un.dec_g), un.v_g)
-    print('ECL', np.degrees(un.L_g), np.degrees(un.B_g))
-
+    
 
     return un
 
@@ -1258,7 +1341,7 @@ class Trajectory(object):
         self.lag_res = None
 
         # Standard deviation of all lags vs. the referent lag
-        self.lag_stddev = None
+        self.lag_stddev = -1.0
 
         # Orbit object which contains orbital parameters
         self.orbit = None
@@ -1347,7 +1430,7 @@ class Trajectory(object):
             obs.ang_res = np.sqrt(elev_res**2 + azim_res**2)
 
             # Calculate the standard deviaton of angular residuals in radians
-            obs.ang_res_std = np.std(obs.ang_res)
+            obs.ang_res_std = scipy.stats.circstd(obs.ang_res)
 
 
 
@@ -1675,8 +1758,6 @@ class Trajectory(object):
         self.rend_lat = self.observations[last_end].rend_lat
         self.rend_lon = self.observations[last_end].rend_lon
         self.rend_ele = self.observations[last_end].rend_ele
-
-
 
 
 
@@ -2381,6 +2462,27 @@ class Trajectory(object):
         m.scatter(x_end, y_end, c='y', marker='+', s=50, alpha=0.75, label='Endpoint', zorder=3)
 
 
+        ## Plot the map scale
+        
+        # Get XY cordinate of the lower left corner
+        ll_x, _ = plt.gca().get_xlim()
+        ll_y, _ = plt.gca().get_ylim()
+
+        # Move the label to fit in the lower left corner
+        ll_x += 0.2*2*max_dist
+        ll_y += 0.1*2*max_dist
+
+        # Convert XY to latitude, longitude
+        ll_lon, ll_lat = m(ll_x, ll_y, inverse=True)
+
+        # Round to distance to the closest 10 km
+        scale_range = round(max_dist/2/1000/10, 0)*10
+
+        # Plot the scale
+        m.drawmapscale(ll_lon, ll_lat, lon_mean, lat_mean, scale_range, barstyle='fancy', units='km', 
+            fontcolor='0.5')
+
+
         plt.legend()
 
         savePlot(plt, file_name + '_ground_track.png', output_dir)
@@ -2401,11 +2503,11 @@ class Trajectory(object):
             # Calculate residuals in arcseconds
             res = np.degrees(obs.ang_res)*3600
 
-            # Calculate the RMS of the residuals
-            res_rms = round(np.sqrt(np.mean(res**2)), 2)
+            # Calculate the RMS of the residuals in arcsec
+            res_rms = np.degrees(obs.ang_res_std)*3600
 
             # Plot residuals
-            plt.scatter(obs.time_data, res, label='Angle, RMS = {:.2f}'.format(res_rms), s=2, zorder=3)
+            plt.scatter(obs.time_data, res, label='Angle, RMS = {:.2f}"'.format(res_rms), s=2, zorder=3)
 
             plt.title('Observed vs. Radiant LoS Residuals, station ' + str(obs.station_id))
             plt.ylabel('Angle (arcsec)')
@@ -2434,12 +2536,12 @@ class Trajectory(object):
             # Calculate residuals in arcseconds
             res = np.degrees(obs.ang_res)*3600
 
-            # Calculate the RMS of the residuals
-            res_rms = round(np.sqrt(np.mean(res**2)), 2)
+            # Calculate the RMS of the residuals in arcsec
+            res_rms = np.degrees(obs.ang_res_std)*3600
 
             # Plot residuals
             plt.scatter(obs.time_data, res, s=2, zorder=3, label='Station ' + str(obs.station_id) + \
-                ', RMS = {:.2f}'.format(res_rms))
+                ', RMS = {:.2f}"'.format(res_rms))
 
 
         plt.title('Observed vs. Radiant LoS Residuals, all stations')
@@ -2488,6 +2590,84 @@ class Trajectory(object):
                 plt.close()
 
 
+
+    def showLoS(self):
+        """ Show the stations and the lines of sight solution. """
+
+
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+
+        # Calculate the position of the state vector (aka. first point on the trajectory)
+        traj_point = self.observations[0].model_eci[0]
+
+        # Calculate the length to the last point on the trajectory
+        meteor_len = np.sqrt(np.sum((self.observations[0].model_eci[0] - self.observations[0].model_eci[-1])**2))
+
+        # Calculate the plot limits
+        x_list = [x_stat for obs in self.observations for x_stat in obs.stat_eci_los[:, 0]]
+        x_list.append(traj_point[0])
+        y_list = [y_stat for obs in self.observations for y_stat in obs.stat_eci_los[:, 1]]
+        y_list.append(traj_point[1])
+        z_list = [z_stat for obs in self.observations for z_stat in obs.stat_eci_los[:, 2]]
+        z_list.append(traj_point[2])
+
+        x_min, x_max = min(x_list), max(x_list)
+        y_min, y_max = min(y_list), max(y_list)
+        z_min, z_max = min(z_list), max(z_list)
+
+
+        # Normalize the plot limits so they are rectangular
+        delta_x = x_max - x_min
+        delta_y = y_max - y_min
+        delta_z = z_max - z_min
+        delta_max = max([delta_x, delta_y, delta_z])
+
+        x_diff = delta_max - delta_x
+        x_min -= x_diff/2
+        x_max += x_diff/2
+
+        y_diff = delta_max - delta_y
+        y_min -= y_diff/2
+        y_max += y_diff/2
+
+        z_diff = delta_max - delta_z
+        z_min -= z_diff/2
+        z_max += z_diff/2
+
+
+        # Plot stations and observations
+        for obs in self.observations:
+
+            # Station positions
+            ax.scatter(obs.stat_eci_los[:, 0], obs.stat_eci_los[:, 1], obs.stat_eci_los[:, 2], s=50)
+
+            # Plot lines of sight
+            for stat_eci_los, meas_eci_los in zip(obs.stat_eci_los, obs.meas_eci_los):
+
+                # Calculate the point on the trajectory
+                traj_pt, _, _ = findClosestPoints(stat_eci_los, meas_eci_los, self.state_vect_mini, 
+                    self.radiant_eci_mini)
+
+                vect_len = np.sqrt(np.sum((stat_eci_los - traj_pt)**2))
+
+                # Lines of sight
+                ax.quiver(stat_eci_los[0], stat_eci_los[1], stat_eci_los[2], meas_eci_los[0], meas_eci_los[1], 
+                    meas_eci_los[2], length=vect_len, normalize=True, arrow_length_ratio=0, color='blue')
+
+
+
+        # Plot the radiant state vector
+        rad_x, rad_y, rad_z = -self.radiant_eci_mini
+        rst_x, rst_y, rst_z = traj_point
+        ax.quiver(rst_x, rst_y, rst_z, rad_x, rad_y, rad_z, length=meteor_len, normalize=True, color='red', 
+            arrow_length_ratio=0.1)
+
+        ax.set_xlim([x_min, x_max])
+        ax.set_ylim([y_min, y_max])
+        ax.set_zlim([z_min, z_max])
+
+        plt.show()
 
 
 
@@ -2901,9 +3081,22 @@ class Trajectory(object):
 
         ######################################################################################################
 
-        
 
 
+        ### SHOW PLANE INTERSECTIONS AND LoS PLOTS ###
+        ######################################################################################################
+
+        # # Show the plane intersection
+        # if self.show_plots:
+        #     self.best_conv_inter.show()
+
+
+        # # Show lines of sight solution in 3D
+        # if self.show_plots:
+        #     self.showLoS()
+
+
+        ######################################################################################################
 
 
 
