@@ -2,15 +2,17 @@ from __future__ import print_function
 
 import multiprocessing
 
-def DomainParallelizer(domain, function, cores, kwarg_dict=None):
+
+def DomainParallelizer(domain, function, cores=None, kwarg_dict=None):
     """ Runs N (cores) functions as separate processes with parameters given in the domain list.
 
     Arguments:
         domain: [list] a list of separate data (arguments) to feed individual function calls
         function: [function object] function that will be called with one entry from the domain
-        cores: [int] number of CPU cores, or number of parallel processes to run simultaneously
     
     Keyword arguments:
+        cores: [int] Number of CPU cores, or number of parallel processes to run simultaneously. None by 
+            default, in which case all available cores will be used.
         kwarg_dict: [dictionary] a dictionary of keyword arguments to be passed to the function, None by default
 
     Return:
@@ -26,6 +28,11 @@ def DomainParallelizer(domain, function, cores, kwarg_dict=None):
 
     if kwarg_dict is None:
         kwarg_dict = {}
+
+
+    # If the number of cores was not given, use all available cores
+    if cores is None:
+        cores = multiprocessing.cpu_count()
 
 
     results = []    
@@ -96,7 +103,7 @@ if __name__ == '__main__':
     cpu_cores = multiprocessing.cpu_count()
 
     # Run the parallelized function
-    results = DomainParallelizer(data, mp_worker, cpu_cores)
+    results = DomainParallelizer(data, mp_worker, cores=(cpu_cores - 1))
 
     print('Results:', results)
 

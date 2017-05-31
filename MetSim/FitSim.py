@@ -382,7 +382,7 @@ def bruteForceSearchMetSim(results_file, met, consts, mass, v_init, zg, obs_time
     cpu_cores = multiprocessing.cpu_count()
 
     # Run the parallelized function
-    solutions = DomainParallelizer(input_params, runMetSimEvaluation, cpu_cores, 
+    solutions = DomainParallelizer(input_params, runMetSimEvaluation, cores=cpu_cores, 
         kwarg_dict={'met': met, 'consts': consts, 'obs_time':obs_time, 'obs_height': obs_height, 'obs_length': obs_length, 'end_ht': end_ht})
 
 

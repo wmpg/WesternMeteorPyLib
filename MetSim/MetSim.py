@@ -315,7 +315,12 @@ def loadInputs(file_name):
 
 
 def atmDensity(h, consts):
-    """ Calculates the atmospheric density. """
+    """ Calculates the atmospheric density. 
+    
+    Arguments:
+        h: [float] Height in meters.
+
+    """
 
     dens_co = consts.dens_co
 

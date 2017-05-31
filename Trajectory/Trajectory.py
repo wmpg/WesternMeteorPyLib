@@ -31,6 +31,7 @@ from Utils.PlotOrbits import plotOrbits
 from Utils.PlotCelestial import CelestialPlot
 from Utils.TrajConversions import ecef2ENU, enu2ECEF, geo2Cartesian, geo2Cartesian_vect, cartesian2Geo, \
     altAz2RADec_vect, raDec2AltAz, raDec2AltAz_vect, raDec2ECI, eci2RaDec, jd2Date, datetime2JD
+from Utils.PyDomainParallelizer import DomainParallelizer
 
 
 
@@ -1095,10 +1096,30 @@ def calcMCUncertanties(traj_list, traj_best):
 
 
 
+def _MCTrajSolve(i, traj):
+    """ Internal function. Does a Monte Carlo run of the given trajectory object. Used as a function for
+        parallelization. 
+
+    Arguments:
+        i: [int] Number of MC run to be printed out.
+        traj: [Trajectory object] Trajectory object on which the run will be performed.
+
+    Return:
+        traj: [Trajectory object] Trajectory object with the MC solution.
+
+    """
+
+    print('Run No.', i + 1)
+
+    traj.run(_mc_run=True)
+
+    return traj
+
 
 
 def monteCarloTrajectory(traj, mc_num=None, mc_pick_multiplier=1):
-    """ Estimates uncertanty in the trajectory solution by doing Monte Carlo runs. 
+    """ Estimates uncertanty in the trajectory solution by doing Monte Carlo runs. The MC runs are done 
+        in parallel on all available computer cores.
 
         The uncertanty is taken as the standard deviation of angular measurements. Each point is sampled 
         mc_pick_multiplier times using a symetric 2D Gaussian kernel.
@@ -1113,6 +1134,8 @@ def monteCarloTrajectory(traj, mc_num=None, mc_pick_multiplier=1):
         
 
     """
+
+
 
     ### DO MONTE CARLO RUNS ###
     ##########################################################################################################
@@ -1131,13 +1154,11 @@ def monteCarloTrajectory(traj, mc_num=None, mc_pick_multiplier=1):
 
     print('Doing', mc_runs, ' Monte Carlo runs...')
 
-    # List which will hold trajectory object after Monte Carlo runs
-    mc_results = []
+    # List which holds all trajectory objects with the added noise
+    mc_input_list = []
 
     # Do mc_runs Monte Carlo runs
     for i in range(mc_runs):
-
-        print('Run No.', i + 1)
 
         # Make a copy of the original trajectory object
         traj_mc = copy.deepcopy(traj)
@@ -1163,11 +1184,13 @@ def monteCarloTrajectory(traj, mc_num=None, mc_pick_multiplier=1):
         traj_mc.show_plots = False
         traj_mc.save_results = False
 
-        # Estimate the trajectory with the added noise
-        traj_mc.run(_mc_run=True)
 
-        # Save the trajectory to the final list
-        mc_results.append(traj_mc)
+        # Add the modified trajectory object to the input list for parallelization
+        mc_input_list.append(traj_mc)
+
+
+    # Run MC trajectory estimation on multiple cores
+    mc_results = DomainParallelizer(enumerate(mc_input_list), _MCTrajSolve)
 
     ##########################################################################################################
 
@@ -1444,6 +1467,8 @@ class Trajectory(object):
 
             radiant_distances = []
 
+            state_vect_distances = []
+
             # Go through all individual position measurement from each site
             for i, (stat, meas) in enumerate(zip(obs.stat_eci_los, obs.meas_eci_los)):
 
@@ -1459,9 +1484,18 @@ class Trajectory(object):
                 
                 radiant_distances.append(dist)
 
+                state_vect_distances.append(vectMag(state_vect - rad_cpa))
+
 
             # Convert the distances (length along the trail) into a numpy array
             obs.length = np.array(radiant_distances)
+
+
+            ### TEST
+
+            plt.plot(obs.time_data, state_vect_distances, marker='x', label=str(obs.station_id), zorder=3)
+
+            ##########
 
             # Shift the radiant distances one element down (for difference calculation)
             dists_shifted = np.r_[0, obs.length][:-1]
@@ -1481,6 +1515,9 @@ class Trajectory(object):
             # Calculate velocity for every point
             obs.velocities = dists_diffs/time_diffs
 
+        plt.legend()
+        plt.grid()
+        plt.show()
 
 
     def calcLag(self, observations, calc_res=False):
@@ -2439,11 +2476,11 @@ class Trajectory(object):
 
         # Draw parallels
         parallels = np.arange(-90, 90, 1.)
-        m.drawparallels(parallels, labels=[False, True, True, False], color='0.25')
+        m.drawparallels(parallels, labels=[False, True, False, False], color='0.25')
 
         # Draw meridians
         meridians = np.arange(0, 360, 1.)
-        m.drawmeridians(meridians, labels=[True, False, False, True], color='0.25')
+        m.drawmeridians(meridians, labels=[False, False, False, True], color='0.25')
 
         # Plot locations of all stations and measured positions of the meteor
         for obs in self.observations:
@@ -3086,14 +3123,14 @@ class Trajectory(object):
         ### SHOW PLANE INTERSECTIONS AND LoS PLOTS ###
         ######################################################################################################
 
-        # # Show the plane intersection
-        # if self.show_plots:
-        #     self.best_conv_inter.show()
+        # Show the plane intersection
+        if self.show_plots:
+            self.best_conv_inter.show()
 
 
-        # # Show lines of sight solution in 3D
-        # if self.show_plots:
-        #     self.showLoS()
+        # Show lines of sight solution in 3D
+        if self.show_plots:
+            self.showLoS()
 
 
         ######################################################################################################

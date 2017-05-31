@@ -901,13 +901,13 @@ if __name__ == "__main__":
     # dir_path = os.path.join(os.path.curdir, "..", "MirfitPrepare", "20161007_052346_mir")
 
     # Long meteor
-    # dir_path = os.path.join(os.path.curdir, "..", "MirfitPrepare", "20161007_052749_mir")
+    dir_path = os.path.join(os.path.curdir, "..", "MirfitPrepare", "20161007_052749_mir")
 
     # Leading fragment event
     # dir_path = os.path.join(os.path.curdir, "..", "MirfitPrepare", "20161009_064237_mir")
 
     # Short meteor
-    dir_path = os.path.join(os.path.curdir, "..", "MirfitPrepare", "20170303_055055_mir")
+    # dir_path = os.path.join(os.path.curdir, "..", "MirfitPrepare", "20170303_055055_mir")
 
     
 
