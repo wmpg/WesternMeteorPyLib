@@ -425,13 +425,15 @@ if __name__ == "__main__":
     
 
     # dir_path_mir = "../MirfitPrepare/20160929_062945_mir/"
-    # dir_path_mir = "../MirfitPrepare/20161007_052749_mir/"
     dir_path_mir = "../MirfitPrepare/20161007_052346_mir/"
+    # dir_path_mir = "../MirfitPrepare/20161007_052749_mir/"
+    
 
     # Trajectory pickle file
     #traj_pickle_file = "20160929_062945_trajectory.pickle"
-    #traj_pickle_file = "20161007_052749_trajectory.pickle"
     traj_pickle_file = "20161007_052346_trajectory.pickle"
+    # traj_pickle_file = "20161007_052749_trajectory.pickle"
+    
 
 
     FitSimAnalyzer(dir_path_mir, traj_pickle_file)

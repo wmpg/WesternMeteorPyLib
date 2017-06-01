@@ -698,6 +698,9 @@ def lineFunc(x, m, k):
 
 
 
+
+
+
 def jacchiaLagFunc(t, a1, a2):
     """ Jacchia (1955) model for modelling lengths along the trail of meteors, modified to fit the lag (length 
         along the trail minus the linear part, estimated by fitting a line to the first 25% of observations, 
@@ -717,6 +720,25 @@ def jacchiaLagFunc(t, a1, a2):
 
 
 
+def jacchiaLengthFunc(t, a1, a2, v_init):
+    """ Jacchia (1955) model for modelling lengths along the trail of meteors. 
+    
+    Arguments:
+        t: [float] time in seconds at which the Jacchia function will be evaluated
+        a1: [float] 1st acceleration term
+        a2: [float] 2nd acceleration term
+        v_init: [float] initial velocity in m/s
+
+    Return:
+        [float] Jacchia model defined by a1 and a2, estimated at point in time t
+
+    """
+
+
+    return v_init*t - np.abs(a1)*np.exp(np.abs(a2)*t)
+
+
+
 def jacchiaVelocityFunc(t, a1, a2, v_init):
     """ Derivation of the Jacchia (1955) model, used for calculating velocities from the fitted model. 
     
@@ -731,7 +753,7 @@ def jacchiaVelocityFunc(t, a1, a2, v_init):
 
     """
 
-    return v_init + -np.abs(a1*a2)*np.exp(np.abs(a2)*t)
+    return v_init - np.abs(a1*a2)*np.exp(np.abs(a2)*t)
 
 
 
@@ -866,6 +888,100 @@ def timingAndVelocityResiduals(params, observations, t_ref_station, ret_stddev=F
 
         # Returned for minimization
         return residual_sum
+
+
+
+def timingResiduals(params, observations, t_ref_station, ret_stddev=False):
+    """ Calculate the sum of absolute differences between state vector distances of the referent station and 
+        all other stations, by using the given timing differences between stations.
+    
+    Arguments:
+        params: [ndarray] Timing differences from the referent station (NOTE: referent station is NOT in this 
+            list).
+        observations: [list] A list of ObservedPoints objects.
+        t_ref_station: [int] Index of the referent station.
+
+    Arguments:
+        ret_stddev: [bool] Returns the standard deviation instead of the cost function.
+    
+    Return:
+        [float] Sum of absolute differences between the referent and lengths of all stations.
+
+    """
+
+    stat_count = 0
+
+    state_vect_distances = []
+
+    # Go through observations from all stations
+    for i, obs in enumerate(observations):
+
+        # Time difference is 0 for the referent statins
+        if i == t_ref_station:
+            t_diff = 0
+
+        else:
+            # Take the estimated time difference for all other stations
+            t_diff = params[stat_count]
+            stat_count += 1
+
+
+        # Calculate the shifted time
+        time_shifted = obs.time_data + t_diff
+
+        # Add lag to lag list
+        state_vect_distances.append([time_shifted,  obs.state_vect_dist])
+
+
+    # Choose the referent station time and distances
+    ref_time, ref_dist = state_vect_distances[t_ref_station]
+
+    # Do a spline fit on the referent state vector distance
+    ref_line_spline = scipy.interpolate.CubicSpline(ref_time, ref_dist, extrapolate=True)
+
+    residual_sum = 0
+    stddev_sum = 0
+    stddev_count = 0
+
+    # Go through all state vector distances
+    for i, obs in enumerate(observations):
+
+        # Skip the referent station
+        if i == t_ref_station:
+            continue
+
+        time, state_vect_dist = state_vect_distances[i]
+
+        # # WARNING: THIS MAY MESS UP RESULTS FOR SOME EVENTS, BECAUSE THERE WILL NOT BE OVERLAPPING POINTS
+        # # Take only those points that overlap with the referent station
+        # common_points = np.where((time > np.min(ref_time)) & (time < np.max(ref_time)))
+        # time = time[common_points]
+        # state_vect_dist = state_vect_dist[common_points]
+
+        # Calculate the residuals in dist from the current dist to the referent dist, using smooth
+        # approximation of L1 (absolute value) cost
+        z = (ref_line_spline(time) - state_vect_dist)**2
+        residual_sum += np.sum(2*(np.sqrt(1 + z) - 1))
+
+        # Standard deviation calculation
+        stddev_sum += np.sum(z)
+        stddev_count += len(z)
+
+
+    # Calculate the standard deviation of the fit
+    dist_stddev = np.sqrt(stddev_sum/stddev_count)
+
+
+    if ret_stddev:
+
+        # Returned for reporting the goodness of fit
+        return dist_stddev
+
+    else:
+
+        # Returned for minimization
+        return residual_sum/stddev_count
+
 
 
 
@@ -1036,73 +1152,76 @@ def calcMCUncertanties(traj_list, traj_best):
     un.rend_ele = np.std([traj.rend_ele for traj in traj_list])
 
 
-    # Apparent
-    un.ra = scipy.stats.circstd([traj.orbit.ra for traj in traj_list])
-    un.dec = np.std([traj.orbit.dec for traj in traj_list])
-    un.v_avg = np.std([traj.orbit.v_avg for traj in traj_list])
-    un.v_inf = np.std([traj.orbit.v_inf for traj in traj_list])
+    if traj.orbit is not None:
 
-    # Average meteor position
-    un.lon_avg = scipy.stats.circstd([traj.orbit.lon_avg for traj in traj_list])
-    un.lat_avg = np.std([traj.orbit.lat_avg for traj in traj_list])
+        # Apparent
+        un.ra = scipy.stats.circstd([traj.orbit.ra for traj in traj_list])
+        un.dec = np.std([traj.orbit.dec for traj in traj_list])
+        un.v_avg = np.std([traj.orbit.v_avg for traj in traj_list])
+        un.v_inf = np.std([traj.orbit.v_inf for traj in traj_list])
 
-    # Geocentric
-    un.ra_g = scipy.stats.circstd([traj.orbit.ra_g for traj in traj_list])
-    un.dec_g = np.std([traj.orbit.dec_g for traj in traj_list])
-    un.v_g = np.std([traj.orbit.v_g for traj in traj_list])
+        # Average meteor position
+        un.lon_avg = scipy.stats.circstd([traj.orbit.lon_avg for traj in traj_list])
+        un.lat_avg = np.std([traj.orbit.lat_avg for traj in traj_list])
 
-    # Meteor position in Suun-centred rectangular coordinates
-    meteor_pos_x = np.std([traj.orbit.meteor_pos[0] for traj in traj_list])
-    meteor_pos_y = np.std([traj.orbit.meteor_pos[1] for traj in traj_list])
-    meteor_pos_z = np.std([traj.orbit.meteor_pos[2] for traj in traj_list])
+        # Geocentric
+        un.ra_g = scipy.stats.circstd([traj.orbit.ra_g for traj in traj_list])
+        un.dec_g = np.std([traj.orbit.dec_g for traj in traj_list])
+        un.v_g = np.std([traj.orbit.v_g for traj in traj_list])
 
-    un.meteor_pos = np.array([meteor_pos_x, meteor_pos_y, meteor_pos_z])
+        # Meteor position in Sun-centred rectangular coordinates
+        meteor_pos_x = np.std([traj.orbit.meteor_pos[0] for traj in traj_list])
+        meteor_pos_y = np.std([traj.orbit.meteor_pos[1] for traj in traj_list])
+        meteor_pos_z = np.std([traj.orbit.meteor_pos[2] for traj in traj_list])
 
-    # Zenith angles
-    un.zc = np.std([traj.orbit.zc for traj in traj_list])
-    un.zg = np.std([traj.orbit.zg for traj in traj_list])
+        un.meteor_pos = np.array([meteor_pos_x, meteor_pos_y, meteor_pos_z])
+
+        # Zenith angles
+        un.zc = np.std([traj.orbit.zc for traj in traj_list])
+        un.zg = np.std([traj.orbit.zg for traj in traj_list])
 
 
-    # Ecliptic
-    un.L_g = scipy.stats.circstd([traj.orbit.L_g for traj in traj_list])
-    un.B_g = np.std([traj.orbit.B_g for traj in traj_list])
-    un.v_h = np.std([traj.orbit.v_h for traj in traj_list])
+        # Ecliptic
+        un.L_g = scipy.stats.circstd([traj.orbit.L_g for traj in traj_list])
+        un.B_g = np.std([traj.orbit.B_g for traj in traj_list])
+        un.v_h = np.std([traj.orbit.v_h for traj in traj_list])
 
-    # Orbital elements
-    un.la_sun = scipy.stats.circstd([traj.orbit.la_sun for traj in traj_list])
-    un.a = np.std([traj.orbit.a for traj in traj_list])
-    un.e = np.std([traj.orbit.e for traj in traj_list])
-    un.i = np.std([traj.orbit.i for traj in traj_list])
-    un.peri = scipy.stats.circstd([traj.orbit.peri for traj in traj_list])
-    un.node = scipy.stats.circstd([traj.orbit.node for traj in traj_list])
-    un.pi = scipy.stats.circstd([traj.orbit.pi for traj in traj_list])
-    un.q = np.std([traj.orbit.q for traj in traj_list])
-    un.Q = np.std([traj.orbit.Q for traj in traj_list])
-    un.true_anomaly = scipy.stats.circstd([traj.orbit.true_anomaly for traj in traj_list])
-    un.eccentric_anomaly = scipy.stats.circstd([traj.orbit.eccentric_anomaly for traj in traj_list])
-    un.mean_anomaly = scipy.stats.circstd([traj.orbit.mean_anomaly for traj in traj_list])
+        # Orbital elements
+        un.la_sun = scipy.stats.circstd([traj.orbit.la_sun for traj in traj_list])
+        un.a = np.std([traj.orbit.a for traj in traj_list])
+        un.e = np.std([traj.orbit.e for traj in traj_list])
+        un.i = np.std([traj.orbit.i for traj in traj_list])
+        un.peri = scipy.stats.circstd([traj.orbit.peri for traj in traj_list])
+        un.node = scipy.stats.circstd([traj.orbit.node for traj in traj_list])
+        un.pi = scipy.stats.circstd([traj.orbit.pi for traj in traj_list])
+        un.q = np.std([traj.orbit.q for traj in traj_list])
+        un.Q = np.std([traj.orbit.Q for traj in traj_list])
+        un.true_anomaly = scipy.stats.circstd([traj.orbit.true_anomaly for traj in traj_list])
+        un.eccentric_anomaly = scipy.stats.circstd([traj.orbit.eccentric_anomaly for traj in traj_list])
+        un.mean_anomaly = scipy.stats.circstd([traj.orbit.mean_anomaly for traj in traj_list])
 
-    # Last perihelion uncertanty (days)
-    un.last_perihelion = np.std([datetime2JD(traj.orbit.last_perihelion) for traj in traj_list])
+        # Last perihelion uncertanty (days)
+        un.last_perihelion = np.std([datetime2JD(traj.orbit.last_perihelion) for traj in traj_list])
 
-    # Mean motion in the orbit (rad/day)
-    un.n = np.std([traj.orbit.n for traj in traj_list])
+        # Mean motion in the orbit (rad/day)
+        un.n = np.std([traj.orbit.n for traj in traj_list])
 
-    # Tisserand's parameter
-    un.Tj = np.std([traj.orbit.Tj for traj in traj_list])
+        # Tisserand's parameter
+        un.Tj = np.std([traj.orbit.Tj for traj in traj_list])
     
 
     return un
 
 
 
-def _MCTrajSolve(i, traj):
+def _MCTrajSolve(i, traj, observations):
     """ Internal function. Does a Monte Carlo run of the given trajectory object. Used as a function for
         parallelization. 
 
     Arguments:
         i: [int] Number of MC run to be printed out.
         traj: [Trajectory object] Trajectory object on which the run will be performed.
+        observations: [list] A list of observations with no noise.
 
     Return:
         traj: [Trajectory object] Trajectory object with the MC solution.
@@ -1111,7 +1230,7 @@ def _MCTrajSolve(i, traj):
 
     print('Run No.', i + 1)
 
-    traj.run(_mc_run=True)
+    traj.run(_mc_run=True, _orig_obs=observations)
 
     return traj
 
@@ -1169,9 +1288,17 @@ def monteCarloTrajectory(traj, mc_num=None, mc_pick_multiplier=1):
         # Reinitialize the observations with points sampled using a Gaussian kernel
         for obs in traj.observations:
 
+            # Generate noise for measurements
+            meas1_noise = np.random.normal(0, obs.ang_res_std, size=len(obs.time_data))
+            meas2_noise = np.random.normal(0, obs.ang_res_std, size=len(obs.time_data))
+
+            # Make sure all noise points are within 3 sigma
+            meas1_noise[(meas1_noise > 3*obs.ang_res_std) | (meas1_noise < -3*obs.ang_res_std)] = 0
+            meas2_noise[(meas2_noise > 3*obs.ang_res_std) | (meas2_noise < -3*obs.ang_res_std)] = 0
+
             # Add noise to angular measurements
-            meas1_mc = (obs.meas1 + np.random.normal(0, obs.ang_res_std))%(2*np.pi)
-            meas2_mc = (obs.meas2 + np.random.normal(0, obs.ang_res_std))%(2*np.pi)
+            meas1_mc = (obs.meas1 + meas1_noise)%(2*np.pi)
+            meas2_mc = (obs.meas2 + meas2_noise)%(2*np.pi)
         
             # Fill in the new trajectory object - the time is assumed to be absolute
             traj_mc.infillTrajectory(meas1_mc, meas2_mc, obs.time_data, obs.lat, obs.lon, obs.ele, \
@@ -1185,19 +1312,22 @@ def monteCarloTrajectory(traj, mc_num=None, mc_pick_multiplier=1):
         traj_mc.save_results = False
 
 
-        # Add the modified trajectory object to the input list for parallelization
-        mc_input_list.append(traj_mc)
+        # Add the modified trajectory object to the input list for parallelization and the original observations
+        mc_input_list.append([i, traj_mc, traj.observations])
 
 
     # Run MC trajectory estimation on multiple cores
-    mc_results = DomainParallelizer(enumerate(mc_input_list), _MCTrajSolve)
+    mc_results = DomainParallelizer(mc_input_list, _MCTrajSolve)
+
+    # Add the original trajectory in the Monte Carlo results, if it is the one which has the best length match
+    mc_results.append(traj)
 
     ##########################################################################################################
 
 
-    # Choose the solution with the lowest lag residuals as the best solution
-    lag_res_trajs = [traj_tmp.lag_res for traj_tmp in mc_results]
-    best_traj_ind = lag_res_trajs.index(min(lag_res_trajs))
+    # Choose the solution with the lowest length residuals as the best solution
+    length_res_trajs = [traj_tmp.length_res for traj_tmp in mc_results]
+    best_traj_ind = length_res_trajs.index(min(length_res_trajs))
 
     # Choose the best trajectory
     traj_best = mc_results[best_traj_ind]
@@ -1210,7 +1340,7 @@ def monteCarloTrajectory(traj, mc_num=None, mc_pick_multiplier=1):
     ### PLOT RADIANT SPREAD ###
     ##########################################################################################################
 
-    if traj.show_plots:
+    if traj.show_plots and (traj.orbit is not None):
 
         ra_g_list = np.array([traj_temp.orbit.ra_g for traj_temp in mc_results])
         dec_g_list = np.array([traj_temp.orbit.dec_g for traj_temp in mc_results])
@@ -1357,14 +1487,17 @@ class Trajectory(object):
         # Calculated initial velocity
         self.v_init = None
 
+        # Fit to the first 25% of time vs. length
+        self.velocity_fit = None
+
         # Jacchia fit parameters for all observations combined
         self.jacchia_fit = None
 
-        # Cost function values of the lag fit
-        self.lag_res = None
+        # Cost function value of the time vs. state vector distance fit
+        self.length_res = None
 
-        # Standard deviation of all lags vs. the referent lag
-        self.lag_stddev = -1.0
+        # Standard deviation of all state vectors distances vs. the referent value
+        self.length_stddev = -1.0
 
         # Orbit object which contains orbital parameters
         self.orbit = None
@@ -1457,17 +1590,24 @@ class Trajectory(object):
 
 
 
-    def calcVelocity(self, state_vect, radiant_eci, observations):
+    def calcVelocity(self, state_vect, radiant_eci, observations, calc_res=False):
         """ Calculates velocity for the given solution.
+
+
+        Keyword arguments:
+            calc_res: [bool] If True, the cost of lag residuals will be calculated. The timing offsets need to
+                be calculated for this to work.
 
         """
 
         # Go through observations from all stations
         for obs in observations:
 
-            radiant_distances = []
+            # List of distances from the first trajectory point on the radiant line
+            first_pt_distances = []
 
-            state_vect_distances = []
+            # List of distances from the state vector
+            state_vect_dist = []
 
             # Go through all individual position measurement from each site
             for i, (stat, meas) in enumerate(zip(obs.stat_eci_los, obs.meas_eci_los)):
@@ -1482,18 +1622,20 @@ class Trajectory(object):
                 # Calculate the distance from the first observed point to the projected point on the radiant line
                 dist = vectMag(ref_point - rad_cpa)
                 
-                radiant_distances.append(dist)
+                first_pt_distances.append(dist)
 
-                state_vect_distances.append(vectMag(state_vect - rad_cpa))
+                # Distance from the state vector to the projected point on the radiant line
+                state_vect_dist.append(vectMag(state_vect - rad_cpa))
 
 
             # Convert the distances (length along the trail) into a numpy array
-            obs.length = np.array(radiant_distances)
+            obs.length = np.array(first_pt_distances)
+            obs.state_vect_dist = np.array(state_vect_dist)
 
 
             ### TEST
 
-            plt.plot(obs.time_data, state_vect_distances, marker='x', label=str(obs.station_id), zorder=3)
+            #plt.plot(obs.time_data, obs.state_vect_dist, marker='x', label=str(obs.station_id), zorder=3)
 
             ##########
 
@@ -1515,21 +1657,28 @@ class Trajectory(object):
             # Calculate velocity for every point
             obs.velocities = dists_diffs/time_diffs
 
-        plt.legend()
-        plt.grid()
-        plt.show()
+        # plt.legend()
+        # plt.grid()
+        # plt.show()
 
 
-    def calcLag(self, observations, calc_res=False):
+
+        if calc_res and (self.time_diffs_final is not None):
+
+            # Calculate the final length residuals
+            self.length_res = timingResiduals(self.time_diffs_final, self.observations, self.t_ref_station)
+            self.length_stddev = timingResiduals(self.time_diffs_final, self.observations, self.t_ref_station, 
+                ret_stddev=True)
+
+
+
+
+    def calcLag(self, observations):
         """ Calculate lag by fitting a line to the first 25% of the points and subtracting the line from the 
             length along the trail.
 
         Arguments:
             observations: [list] A list of ObservationPoints objects.
-
-        Keyword arguments:
-            calc_res: [bool] If True, the cost of lag residuals will be calculated. The timing offsets need to
-                be calculated for this to work.
         """
 
         # Go through observations from all stations
@@ -1554,15 +1703,6 @@ class Trajectory(object):
 
             # Calculate lag
             obs.lag = obs.length - lineFunc(obs.time_data, *obs.lag_line)
-
-
-        if calc_res and (self.time_diffs_final is not None):
-
-            # Calculate the final lag residuals
-            p0 = np.r_[self.v_init, self.time_diffs_final]
-            self.lag_res = timingAndVelocityResiduals(p0, self.observations, self.t_ref_station)
-            self.lag_stddev = timingAndVelocityResiduals(p0, self.observations, self.t_ref_station, 
-                ret_stddev=True)
 
 
 
@@ -1605,9 +1745,9 @@ class Trajectory(object):
 
 
     def estimateTimingAndVelocity(self, observations, estimate_timing_vel=True):
-        """ Estimate the timing difference between stations and the initial velocity by minimizing the 
-            residuals between the lag. 
-
+        """ Estimates time offsets between the stations by matching time vs. distance from state vector. 
+            The initial velocity is calculated by fitting a line to the first 25% of time-corrected
+            time vs. distance from state vector data.
         """
 
         # Take the initial velocity as the median velocity between all sites
@@ -1621,34 +1761,22 @@ class Trajectory(object):
         if not estimate_timing_vel:
             return v_init, time_diffs
 
-        if self.verbose:
-            print('Median Vinit from all stations:', v_init, 'm/s')
 
         # Initial timing difference between sites is 0 (there are N-1 timing differences, as the time 
         # difference for the referent site is always 0)
-        t_diffs = np.zeros(shape=(self.station_count - 1))
+        p0 = np.zeros(shape=(self.station_count - 1))
 
-        # Initial parameters are the estimated initial velocity and the time difference (except for the referent station)
-        p0 = np.r_[v_init, t_diffs]
-
-
-        # Set the time referent station to be the one with the most picks
+        # Set the time referent station to be the one with the most points
         obs_points = [obs.kmeas for obs in self.observations]
         self.t_ref_station = obs_points.index(max(obs_points))
 
 
         if self.verbose:
-            print('Initial function evaluation:', timingAndVelocityResiduals(p0, observations, 
-                self.t_ref_station))
+            print('Initial function evaluation:', timingResiduals(p0, observations, self.t_ref_station))
 
-
-        ### Perform the minimization of lag differences ###
-        ######################################################################################################
-
-        # Define the bounds for the initial velocity to be +/-5%
-        bounds = [(0.95*v_init, 1.05*v_init)]
 
         # Set bounds for timing to +/- given maximum time offset
+        bounds = []
         for i in range(self.station_count - 1):
             bounds.append([-self.max_toffset, self.max_toffset])
 
@@ -1656,26 +1784,22 @@ class Trajectory(object):
         # Try different methods of optimization until it is successful
         methods = ['SLSQP', 'TNC']
         for opt_method in methods:
-            
-            # Run the minimization of residuals betwpeen lags of all stations
-            vel_timing_mini = scipy.optimize.minimize(timingAndVelocityResiduals, p0, args=(observations, \
+
+            # Run the minimization of residuals between lags of all stations
+            timing_mini = scipy.optimize.minimize(timingResiduals, p0, args=(observations, \
                 self.t_ref_station), bounds=bounds, method=opt_method)
 
             # Stop trying methods if this one was successful
-            if vel_timing_mini.success:
+            if timing_mini.success:
                 break
 
-        ######################################################################################################
 
-        
         # If the minimization was successful, apply the time corrections
-        if vel_timing_mini.success:
-
-            v_init_mini, _ = vel_timing_mini.x[:2]
+        if timing_mini.success:
 
             if self.verbose:
-                print("Final function evaluation:", vel_timing_mini.fun)
-                print('ESTIMATED Vinit:', v_init_mini, 'm/s')
+                print("Final function evaluation:", timing_mini.fun)
+                
 
             stat_count = 0
             for i, obs in enumerate(observations):
@@ -1685,7 +1809,7 @@ class Trajectory(object):
                     t_diff = 0
 
                 else:
-                    t_diff = vel_timing_mini.x[1 + stat_count]
+                    t_diff = timing_mini.x[stat_count]
                     stat_count += 1
 
                 if self.verbose:
@@ -1697,20 +1821,86 @@ class Trajectory(object):
                 # Add the final time difference of the site to the list
                 time_diffs[i] = t_diff
 
-                # Calculate the new intercept for the length along the trail, with the given initial velocity
-                lag_line = fitLagIntercept(obs.time_data, obs.length, v_init_mini, 0)
 
-                # Recalculate the lag
-                obs.lag = obs.length - lineFunc(obs.time_data, *lag_line)
+
+            # Calculate the initial velocity as the slope of the first 25% of points from all time vs. 
+            # state vector distances data
+            times = []
+            state_vect_dist = []
+            for obs in observations:
+                times.append(obs.time_data)
+                state_vect_dist.append(obs.state_vect_dist)
+
+            times = np.concatenate(times).ravel()
+            state_vect_dist = np.concatenate(state_vect_dist).ravel()
+
+            # Sort points by time
+            time_sort_ind = times.argsort()
+            times = times[time_sort_ind]
+            state_vect_dist = state_vect_dist[time_sort_ind]
+
+
+            stddev_list = []
+
+            # Calculate the velocity on different initial portions of the trajectory
+            for part in np.arange(0.2, 0.8, 0.05):
+
+                # Get the index of the first portion of points
+                part_size = int(part*len(times))
+
+                # Make sure there are at least 4 points
+                if part_size < 4:
+                    part_size = 4
+
+                # Select only the first part of all points
+                times_part = times[:part_size]
+                state_vect_dist_part = state_vect_dist[:part_size]
+
+                # Fit a line to time vs. state_vect_dist
+                velocity_fit, _ = scipy.optimize.curve_fit(lineFunc, times_part, state_vect_dist_part)
+
+                # Calculate the standard deviation of the line fit
+                line_stddev = np.std(state_vect_dist_part - lineFunc(times_part, *velocity_fit))
+
+                stddev_list.append([line_stddev, velocity_fit])
+
+
+            # stddev_arr = np.array([std[0] for std in stddev_list])
+
+            # plt.plot(range(len(stddev_arr)), stddev_arr, label='line')
+
+            # plt.legend()
+            # plt.show()
+
+
+            # Take the velocity fit with the minimum line standard deviation
+            stddev_min_ind = np.argmin([std[0] for std in stddev_list])
+            velocity_fit = stddev_list[stddev_min_ind][1]
+
+            # Make sure the velocity is positive
+            v_init_mini = np.abs(velocity_fit[0])
+
+            # Calculate the lag
+            for obs in observations:
+                obs.lag = obs.state_vect_dist - lineFunc(obs.time_data, *velocity_fit)
+
+
+                ####
+
+            if self.verbose:
+                print('ESTIMATED Vinit:', v_init_mini, 'm/s')
+
+
 
         else:
 
             print('Timing difference and initial velocity minimization failed with the message:')
-            print(vel_timing_mini.message)
+            print(timing_mini.message)
             v_init_mini = v_init
 
-        # Return the best estimate of the initial velocity
-        return v_init_mini, time_diffs
+
+        return velocity_fit, v_init_mini, time_diffs, observations
+
 
 
 
@@ -1875,6 +2065,7 @@ class Trajectory(object):
                 obs.model_fit2 = np.pi/2.0 - obs.model_elev
 
             ######################################################################################################
+
 
 
     def calcAverages(self, observations):
@@ -2060,26 +2251,27 @@ class Trajectory(object):
 
         out_str += "\n"
 
-        out_str += "Average point on the trajectory:\n"
-        out_str += "  Time: " + str(jd2Date(self.orbit.jd_avg, dt_obj=True)) + " UTC\n"
-        out_str += "  Lon   = {:>10.6f}{:s} deg\n".format(np.degrees(self.orbit.lon_avg), _uncer('{:.4f}', 
-            'lon_avg', deg=True))
-        out_str += "  Lat   = {:>10.6f}{:s} deg\n".format(np.degrees(self.orbit.lat_avg), _uncer('{:.4f}', 
-            'lat_avg', deg=True))
-        out_str += "\n"
+        if self.orbit is not None:
+            out_str += "Average point on the trajectory:\n"
+            out_str += "  Time: " + str(jd2Date(self.orbit.jd_avg, dt_obj=True)) + " UTC\n"
+            out_str += "  Lon   = {:>10.6f}{:s} deg\n".format(np.degrees(self.orbit.lon_avg), _uncer('{:.4f}', 
+                'lon_avg', deg=True))
+            out_str += "  Lat   = {:>10.6f}{:s} deg\n".format(np.degrees(self.orbit.lat_avg), _uncer('{:.4f}', 
+                'lat_avg', deg=True))
+            out_str += "\n"
 
-        # Write out orbital parameters
-        out_str += self.orbit.__repr__(uncertanties=uncertanties)
-        out_str += "\n"
+            # Write out orbital parameters
+            out_str += self.orbit.__repr__(uncertanties=uncertanties)
+            out_str += "\n"
 
         out_str += "Jacchia fit on lag = -|a1|*exp(|a2|*t):\n"
         out_str += " a1 = {:.6f}\n".format(self.jacchia_fit[0])
         out_str += " a2 = {:.6f}\n".format(self.jacchia_fit[1])
         out_str += "\n"
 
-        out_str += "Standard deviation from the referent lag:\n"
-        out_str += "  Station with referent lag: {:s}\n".format(str(self.observations[self.t_ref_station].station_id))
-        out_str += "  Lag stddev = {:.2f} m\n".format(self.lag_stddev)
+        out_str += "Standard deviation from the referent state vector distance:\n"
+        out_str += "  Station with referent time: {:s}\n".format(str(self.observations[self.t_ref_station].station_id))
+        out_str += "  Stddev = {:.2f} m\n".format(self.length_stddev)
         out_str += "\n"
 
         out_str += "Begin:\n"
@@ -2313,7 +2505,8 @@ class Trajectory(object):
 
             ##################################################################################################
 
-
+        ### PLOT ALL LAGS ###
+        ######################################################################################################
 
         # Plot lags from each station on a single plot
         for obs in self.observations:
@@ -2326,7 +2519,7 @@ class Trajectory(object):
             zorder=3)
 
 
-        plt.title('Lags, all stations, RMS = ' + str(round(self.lag_stddev, 2)) + ' m')
+        plt.title('Lags, all stations')
 
         plt.xlabel('Lag (m)')
         plt.ylabel('Time (s)')
@@ -2343,6 +2536,50 @@ class Trajectory(object):
         else:
             plt.clf()
             plt.close()
+
+        ######################################################################################################
+
+
+
+        ### PLOT DISTANCE FROM RADIANT STATE VECTOR POSITION ###
+        ######################################################################################################
+        for obs in self.observations:
+            plt.plot(obs.state_vect_dist, obs.time_data, marker='x', label=str(obs.station_id), zorder=3)
+
+
+        # Add the fitted velocity line
+        if self.velocity_fit is not None:
+
+            # Get time data range
+            t_min = min([np.min(obs.time_data) for obs in self.observations])
+            t_max = max([np.max(obs.time_data) for obs in self.observations])
+
+            t_range = np.linspace(t_min, t_max, 100)
+
+            plt.plot(lineFunc(t_range, *self.velocity_fit), t_range, label='Velocity fit', linestyle='--', 
+                alpha=0.5, zorder=3)
+
+
+        plt.title('Distances from state vector, RMS = ' + str(round(self.length_stddev, 2)) + ' m')
+
+        plt.ylabel('Time (s)')
+        plt.xlabel('Distance from state vector (m)')
+        
+        plt.legend()
+        plt.grid()
+        plt.gca().invert_yaxis()
+
+        savePlot(plt, file_name + '_lengths.png', output_dir)
+
+
+        if show_plots:
+            plt.show()
+
+        else:
+            plt.clf()
+            plt.close()
+
+        ######################################################################################################
 
 
 
@@ -2708,7 +2945,38 @@ class Trajectory(object):
 
 
 
-    def run(self, _rerun_timing=False, _rerun_bad_picks=False, _mc_run=False, _prev_toffsets=None):
+
+    def moveStateVector(self, state_vect, radiant_eci, observations):
+        """ Moves the state vector position along the radiant line until it is before any points which are
+            projected on it. This is used to make sure that lengths and lags are properly calculated.
+
+        """
+
+        k_list = []
+
+        for obs in observations:
+
+            # Calculate closest points of approach (observed line of sight to radiant line) of the first point
+            _, rad_cpa, _ = findClosestPoints(obs.stat_eci_los[0], obs.meas_eci_los[0], state_vect, 
+                radiant_eci)
+
+            # k is the parameter which determines if the relative distance from the state vector to the given
+            # point. k is negative if the state vector is in front of the given point
+            k = (rad_cpa - state_vect)/radiant_eci
+            k = np.sign(k[0])*vectMag(k)
+
+            k_list.append([k, rad_cpa])
+
+
+        # Find location on the radiant which is behind every observed point
+        rad_cpa_min = k_list[np.argmax([x[0] for x in k_list])][1]
+
+        return rad_cpa_min
+
+
+
+    def run(self, _rerun_timing=False, _rerun_bad_picks=False, _mc_run=False, _orig_obs=None, 
+        _prev_toffsets=None):
         """ Estimate the trajectory from the given input points. 
         
         Arguments:
@@ -2718,6 +2986,8 @@ class Trajectory(object):
             _rerun_bad_picks: [bool] Internal flag. Is is True when a second pass of trajectory estimation is
                 run with bad picks removed, thus improving the solution.
             _mc_run: [bool] Internal flag. True if the solver is calculating the Carlo Run.
+            _orig_obs: [list] Used for Monte Carlo. A list of original observations, with no added noise.
+                Used for calculating all other parameters after the trajectory with noise has been estimated.
             _prev_toffsets: [ndarray] Internal variable. Used for keeping the initially estimated timing 
                 offsets from the first run of the solver. None by default.
 
@@ -2864,6 +3134,10 @@ class Trajectory(object):
             # Unpack the solution
             self.state_vect_mini, self.radiant_eci_mini = np.hsplit(minimize_solution.x, 2)
 
+            # Set the state vector the the position of the foremost point projected on the radiant line
+            self.state_vect_mini = self.moveStateVector(self.state_vect_mini, self.radiant_eci_mini, 
+                self.observations)
+
             # Normalize radiant direction
             self.radiant_eci_mini = vectNorm(self.radiant_eci_mini)
 
@@ -2892,11 +3166,37 @@ class Trajectory(object):
         ######################################################################################################
 
 
-        # Calculate velocity at each point
-        self.calcVelocity(self.state_vect_mini, self.radiant_eci_mini, self.observations)
+        # If running a Monte Carlo run, switch the observations to the original ones, so noise does not 
+        # infucence anything except the radiant position
+        if (_mc_run or _rerun_timing) and (_orig_obs is not None):
+                
+            # Store the noisy observations for later
+            self.obs_noisy = list(self.observations)
 
-        # Calculate lag
-        self.calcLag(self.observations, calc_res=_rerun_timing)
+            # Replace the noisy observations with original observations
+            self.observations = _orig_obs
+
+
+            # If this is the run of recalculating the parameters after updating the timing, preserve the
+            # timing as well
+            if _rerun_timing:
+
+                for obs, obs_noise in zip(self.observations, self.obs_noisy):
+                    obs.time_data = np.copy(obs_noise.time_data)
+
+
+
+
+        # Calculate velocity at each point
+        self.calcVelocity(self.state_vect_mini, self.radiant_eci_mini, self.observations, 
+            calc_res=_rerun_timing)
+
+
+        # Calculate the lag if it was not calculated during timing estimation
+        if self.observations[0].lag is None:
+
+            # Calculate lag
+            self.calcLag(self.observations)
 
 
         if self.verbose and self.estimate_timing_vel:
@@ -2904,8 +3204,8 @@ class Trajectory(object):
 
 
         # Estimate the timing difference between stations and the initial velocity
-        self.v_init, self.time_diffs = self.estimateTimingAndVelocity(self.observations, \
-            estimate_timing_vel=self.estimate_timing_vel)
+        self.velocity_fit, self.v_init, self.time_diffs, self.observations = \
+            self.estimateTimingAndVelocity(self.observations, estimate_timing_vel=self.estimate_timing_vel)
 
         self.time_diffs_final = self.time_diffs
 
@@ -2918,6 +3218,18 @@ class Trajectory(object):
 
             # After the timing has been estimated, everything needs to be recalculated from scratch
             if self.estimate_timing_vel:
+
+
+                # If doing a Monte Carlo run, switch back to noisy observations
+                if _mc_run and (_orig_obs is not None):
+
+                    # Keep the updated timings
+                    for obs, obs_noise in zip(self.observations, self.obs_noisy):
+                        obs_noise.time_data = np.copy(obs.time_data)
+
+                    # Switch back to noisy observations, but with updated timing
+                    self.observations = self.obs_noisy
+
 
                 # Make a copy of observations
                 temp_observations = copy.deepcopy(self.observations)
@@ -2938,7 +3250,7 @@ class Trajectory(object):
                 
                 # Re-run the trajectory estimation with updated timings. This will update all calculated
                 # values up to this point
-                self.run(_rerun_timing=True, _prev_toffsets=self.time_diffs)
+                self.run(_rerun_timing=True, _prev_toffsets=self.time_diffs, _orig_obs=_orig_obs)
 
 
         else:
@@ -2953,6 +3265,21 @@ class Trajectory(object):
             return None
 
         ######################################################################################################
+
+
+        # If running a Monte Carlo runs, switch the observations to the original ones, so noise does not 
+        # infuence anything except the radiant position
+        if _mc_run and (_orig_obs is not None):
+                
+            # Store the noisy observations for later
+            self.obs_noisy = list(self.observations)
+
+            # Replace the noisy observations with original observations
+            self.observations = _orig_obs
+
+            # Keep the updated timings
+            for obs, obs_noise in zip(self.observations, self.obs_noisy):
+                obs.time_data = np.copy(obs_noise.time_data)
 
 
 
@@ -3123,14 +3450,14 @@ class Trajectory(object):
         ### SHOW PLANE INTERSECTIONS AND LoS PLOTS ###
         ######################################################################################################
 
-        # Show the plane intersection
-        if self.show_plots:
-            self.best_conv_inter.show()
+        # # Show the plane intersection
+        # if self.show_plots:
+        #     self.best_conv_inter.show()
 
 
-        # Show lines of sight solution in 3D
-        if self.show_plots:
-            self.showLoS()
+        # # Show lines of sight solution in 3D
+        # if self.show_plots:
+        #     self.showLoS()
 
 
         ######################################################################################################
