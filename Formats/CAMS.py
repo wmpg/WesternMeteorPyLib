@@ -423,7 +423,7 @@ def prepareObservations(meteor_list):
 
 
 
-def solveTrajectory(meteor_list, output_dir, solver='original', **kwargs):
+def solveTrajectoryCAMS(meteor_list, output_dir, solver='original', **kwargs):
     """ Feed the list of meteors in the trajectory solver. """
 
 
@@ -444,7 +444,8 @@ def solveTrajectory(meteor_list, output_dir, solver='original', **kwargs):
             traj = Trajectory(jdt_ref, output_dir=output_dir, meastype=2, max_toffset=4.0, **kwargs)
 
         elif solver == 'gural':
-            traj = GuralTrajectory(len(meteor_list), jdt_ref, velmodel=3, meastype=2, verbose=1)
+            traj = GuralTrajectory(len(meteor_list), jdt_ref, velmodel=3, meastype=2, verbose=1, 
+                output_dir=output_dir)
 
         else:
             print('No such solver:', solver)
@@ -529,7 +530,9 @@ def cams2MiligInput(meteor_list, file_path):
 
 if __name__ == "__main__":
 
-    dir_path = "../DenisGEMcases"
+    #dir_path = "../DenisGEMcases"
+    dir_path = "../DenisGEMcases_5_sigma"
+
     dir_path = os.path.abspath(dir_path)
 
     camerasites_file_name = 'CameraSites.txt'
@@ -567,7 +570,8 @@ if __name__ == "__main__":
 
 
     # Run the trajectory solver
-    solveTrajectory(meteor5, os.path.join(dir_path, 'meteor5'), solver='original', monte_carlo=True, mc_num=1000)
+    solveTrajectoryCAMS(meteor2, os.path.join(dir_path, 'meteor2'), solver='gural', monte_carlo=True, 
+        mc_runs=1000)
 
     # Write the MILIG input file
     #cams2MiligInput(meteor6, 'milig_meteor6.txt')

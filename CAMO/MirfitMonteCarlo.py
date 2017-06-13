@@ -709,7 +709,7 @@ class MonteCarloPicks(object):
                 break
 
 
-    def solveTrajectory(self, pick_type='original', velmodel=3, solver='original'):
+    def solveTrajectory(self, pick_type='original', velmodel=3, solver='original', **kwargs):
         """ Runs the trajectory solver on points of the given type. 
 
         Keyword arguments:
@@ -760,7 +760,7 @@ class MonteCarloPicks(object):
         if solver == 'original':
 
             # Init the new trajectory solver object
-            traj_solve = Trajectory(ref_JD, show_plots=True, output_dir=self.met.dir_path)
+            traj_solve = Trajectory(ref_JD, show_plots=True, output_dir=self.met.dir_path, **kwargs)
 
         elif solver == 'gural':
 
@@ -894,8 +894,14 @@ if __name__ == "__main__":
 
     ### Directory where the met file is
 
-    # Long meteor
-    # dir_path = os.path.join(os.path.curdir, "..", "MirfitPrepare", "20160929_062945_mir")
+    # STA short
+    # dir_path = os.path.join(os.path.curdir, "..", "MirfitPrepare", "20160929_050928_mir")
+
+    # Long meteor STA
+    dir_path = os.path.join(os.path.curdir, "..", "MirfitPrepare", "20160929_062945_mir")
+
+    # Medium meteor - sporadic
+    # dir_path = os.path.join(os.path.curdir, "..", "MirfitPrepare", "20161007_032608_mir")
 
     # Short meteor
     # dir_path = os.path.join(os.path.curdir, "..", "MirfitPrepare", "20161007_052346_mir")
@@ -907,7 +913,10 @@ if __name__ == "__main__":
     # dir_path = os.path.join(os.path.curdir, "..", "MirfitPrepare", "20161009_064237_mir")
 
     # Short meteor
-    dir_path = os.path.join(os.path.curdir, "..", "MirfitPrepare", "20170303_055055_mir")
+    # dir_path = os.path.join(os.path.curdir, "..", "MirfitPrepare", "20170303_055055_mir")
+
+    # GigE event
+    # dir_path = os.path.join(os.path.curdir, "..", "MirfitPrepare", "20170519_030133_mir")
 
     
 

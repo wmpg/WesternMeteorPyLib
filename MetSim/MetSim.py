@@ -53,15 +53,35 @@ class MeteorProperties(object):
 
         zero = D_TYPE(0)
 
+        # Time
         self.t = zero
+
+        # Length along the train
         self.s = zero
+
+        # Height
         self.h = zero
+
+        # Velocity
         self.v = zero
+
+        # Luminosity
+        self.lum = zero
+
+        # Ionization
+        self.q_ed = zero
+
         self.p2 = zero
+
+        # Mass
         self.m = zero
+
         self.vh = zero
         self.vv = zero
+
+        # Temperature
         self.temp = zero
+
         self.m_kill = zero
         self.T_lim = zero
         self.T_int = zero
@@ -621,6 +641,9 @@ def ablate(met, consts):
     # Ionization produced in this step as well
     q_ed, lum = lumIntensity(met, consts, m_dot, v_dot)
 
+    met.q_ed = q_ed
+    met.lum = lum
+
     printd("q_ed", q_ed)
     printd("lum", lum)
     printd("met.m", met.m)
@@ -747,7 +770,7 @@ def runSimulation(met, consts):
         met, consts = ablate(met, consts)
 
         # Add the current state to results
-        results_list.append([met.t, met.h, met.s, met.v])
+        results_list.append([met.t, met.h, met.s, met.v, met.lum])
 
 
     printv('Minimum height was', consts.h_min/1000, 'km')
@@ -779,14 +802,14 @@ if __name__ == "__main__":
 
     # Get the results
     results_list = np.array(results_list)
-    time, height, trail, velocity = results_list.T
+    time, height, trail, velocity, luminosity = results_list.T
 
     # Convert distance/height to km
     height = height/1000
     trail = trail/1000
     velocity = velocity/1000
 
-    ### Claculate the lag
+    ### Calculate the lag
 
     # Fit a line to the first 10% of points
     part_len = int(0.1*len(time))
@@ -843,5 +866,31 @@ if __name__ == "__main__":
     ax2.set_ylabel('Height (km)')
 
     ax1.grid()
+
+    plt.show()
+
+
+
+    ### MAGNITUDES ###
+
+    # Calculate absolute magnitude (apparent @100km) from luminous intensity
+    P_0m = 840.0
+    magnitude = -2.5*np.log10(luminosity/P_0m)
+
+
+    # Plot time vs. luminosity
+    plt.plot(time, magnitude, zorder=3)
+
+    plt.gca().invert_yaxis()
+
+    # # Plot time vs. velocity
+    plt.plot(time, velocity, zorder=3, label='Velocity (km/s)')
+
+    plt.xlim([min(time), max(time)])
+
+    plt.xlabel('Time (s)')
+    plt.ylabel('Absolute magnitude')
+
+    plt.grid()
 
     plt.show()

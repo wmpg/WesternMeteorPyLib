@@ -12,9 +12,12 @@ import ctypes as ct
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import cm
 
+
 from Trajectory.Trajectory import fitLagIntercept, lineFunc
-from Utils.TrajConversions import geo2Cartesian, raDec2ECI, altAz2RADec_vect, raDec2AltAz_vect
+from Trajectory.Orbit import calcOrbit
+from Utils.TrajConversions import geo2Cartesian, raDec2ECI, altAz2RADec_vect, raDec2AltAz_vect, jd2Date
 from Utils.Math import vectMag, findClosestPoints, sphericalToCartesian
+from Utils.Pickling import savePickle
 
 # Path to the compiled trajectory library
 TRAJ_LIBRARY = os.path.join('lib', 'libtrajectorysolution')
@@ -258,7 +261,8 @@ class GuralTrajectory(object):
 
     """
 
-    def __init__(self, maxcameras, jdt_ref, velmodel, max_toffset=1.0, nummonte=1, meastype=4, verbose=0):
+    def __init__(self, maxcameras, jdt_ref, velmodel, max_toffset=1.0, nummonte=1, meastype=4, verbose=0, 
+        output_dir='.', show_plots=True):
         """ Initialize meteor trajectory solving.
 
         Arguments:
@@ -290,6 +294,9 @@ class GuralTrajectory(object):
                 1 = all step's intermediate values displayed on console
                 2 = only final step solution parameters displayed on console
                 3 = TBD measurements and model positions sent to console
+            output_dir: [str] Path to the output directory where the Trajectory report and 'pickled' object
+                will be stored.
+            show_plots: [bool] Show plots of residuals, velocity, lag, meteor position. True by default.
         """
 
         # Init input parameters
@@ -301,8 +308,18 @@ class GuralTrajectory(object):
         self.meastype = meastype
         self.verbose = verbose
 
+        # Directory where the trajectory estimation results will be saved
+        self.output_dir = output_dir
+
+        # If True, plots will be shown on screen when the trajectory estimation is done
+        self.show_plots = show_plots
+
+
         # Track the number of measurements per each camera
         self.nummeas_lst = []
+
+        # Construct a file name for this event
+        self.file_name = jd2Date(self.jdt_ref, dt_obj=True).strftime('%Y%m%d_%H%M%S')
 
         ###
         # Init trajectory results (WARNING, there are more results to be read in, these are just some chosen
@@ -409,6 +426,9 @@ class GuralTrajectory(object):
 
         # Calculated lag from length and the initial velocity
         self.lags = None
+
+        # Orbit solutions
+        self.orbit = None
 
         ######
 
@@ -596,6 +616,7 @@ class GuralTrajectory(object):
         self.velocities = []
         self.lengths = []
 
+
         ### Calculate lengths and instantaneous velocities for all stations
         for kmeas, (stat_eci_los, meas_eci_los) in enumerate(zip(self.stations_eci_cameras, \
             self.meas_eci_los_cameras)):
@@ -647,7 +668,6 @@ class GuralTrajectory(object):
 
             self.velocities.append(velocity)
 
-
         
 
     def calcLag(self):
@@ -655,7 +675,7 @@ class GuralTrajectory(object):
 
         self.lags = []
 
-        # Go throug every station
+        # Go through every station
         for time_data, length in zip(self.times, self.lengths):
 
             # Find the lag intercept from the given slope (i.e. initial velocity)
@@ -665,6 +685,57 @@ class GuralTrajectory(object):
             lag = length - lineFunc(time_data, *lag_line)
 
             self.lags.append(lag)
+
+
+
+    def calcAverages(self):
+        """ Calculate the average velocity, ECI position on the trajectory and the average JD. """
+
+        # List of average velocities per each station
+        v_avg_list = []
+
+        # List of meteor ECI coordinates per each camera
+        self.model_eci_cameras = []
+
+        # Go though every observation from each camera
+        for kmeas in range(self.maxcameras):
+
+            length = self.lengths[kmeas]
+            time_data = self.times[kmeas]
+
+            # Calculate the average velocity from the current station
+            v_avg_list.append((length[-1] - length[0])/(time_data[-1] - time_data[0]))
+
+
+            eci_list = []
+
+            # Calculate ECI coordinated for every point on the meteor's track
+            for j in range(self.nummeas_lst[kmeas]):
+
+                eci_list.append(geo2Cartesian(self.model_lat[kmeas][j], self.model_lon[kmeas][j], 
+                    1000*self.model_hkm[kmeas][j], self.JD_data_cameras[kmeas][j]))
+
+            eci_list = np.array(eci_list)
+
+            # Convert meteor geographical positions to ECI coordinates
+            self.model_eci_cameras.append(eci_list)
+
+
+        # Calculate the average velocity across all stations
+        v_avg = np.mean(v_avg_list)
+
+        # Calculate average ECI coordinate from all measurements
+        eci_x = [eci_meas[0] for eci_stat_list in self.model_eci_cameras for eci_meas in eci_stat_list]
+        eci_y = [eci_meas[1] for eci_stat_list in self.model_eci_cameras for eci_meas in eci_stat_list]
+        eci_z = [eci_meas[2] for eci_stat_list in self.model_eci_cameras for eci_meas in eci_stat_list]
+
+        eci_avg = np.array([np.mean(eci_x), np.mean(eci_y), np.mean(eci_z)])
+
+        # Calculate average JD date
+        jd_avg = np.mean([np.mean(jd_data) for jd_data in self.JD_data_cameras])
+
+        return v_avg, eci_avg, jd_avg
+
 
 
 
@@ -856,6 +927,7 @@ class GuralTrajectory(object):
         print('State vector:', self.state_vect)
         print('Deceleration:', self.decel)
 
+
         # Calculate the ECI positions of the trajectory on the radiant line, length and velocities
         self.calcVelocity()
 
@@ -863,7 +935,35 @@ class GuralTrajectory(object):
         self.calcLag()
 
 
-        self.showPlots()
+        # Calculate average velocity and average ECI position of the trajectory
+        v_avg, eci_avg, jd_avg = self.calcAverages()
+
+        # Get the first Julian date of all observations
+        jd_first = np.min([np.min(jd_data) for jd_data in self.JD_data_cameras])
+        
+
+        # Calculate the orbit
+        self.orbit = calcOrbit(self.radiant_eci, self.vbegin*1000, v_avg, self.state_vect, jd_first, 
+            stations_fixed=True, referent_init=True)
+        print(self.orbit)
+
+
+        if self.show_plots:
+            self.showPlots()
+
+
+        ### SAVE RESULTS ###
+        ######################################################################################################
+
+        # Delete all library bindings and ctypes variables, so the object can be pickled
+        del self.traj_lib
+        del self.traj
+
+        # Save the picked trajectory structure with original points
+        savePickle(self, self.output_dir, self.file_name + '_gural_trajectory.pickle')
+
+
+        ######################################################################################################
 
 
 

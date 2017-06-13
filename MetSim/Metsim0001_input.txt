@@ -19,7 +19,7 @@ ncmp = 1 //maximum 10; masses (kg) follow, separate lines 1e-6
 30
 //therm conductivity (J/ m s K) 80 1
 3
-//luminous efficiency (percent) 0.05 0.01
+//luminous efficiency (ratio, NOT percent! Thus, 0.007 is 0.7%)
 0.007
 //temperature at which porosity is reduced
 1900

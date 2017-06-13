@@ -18,6 +18,13 @@ def calcAngDataLimits(ra_data, dec_data, border_ratio=0.1):
 
     """
 
+    # If there's only one point, add 2 fake measurements to be able to calculate limits
+    if len(ra_data) == 1:
+
+        ra_data = np.r_[ra_data, np.array([ra_data[0] - 1, ra_data[0] + 1])]
+        dec_data = np.r_[dec_data, np.array([dec_data[0], dec_data[0]])]
+        
+
     # Check if there are any points crossing the 0/360 branch cut
     if max(ra_data) - min(ra_data) > 180:
         ra_data[ra_data < 180] += 360
@@ -114,7 +121,8 @@ class CelestialPlot(object):
             ### STEREOGRAPHIC PROJECTION ###
 
             # Calculate plot limits and the span of those limits in degrees
-            ra_min, ra_max, dec_min, dec_max, deg_span = calcAngDataLimits(np.degrees(ra_data), np.degrees(dec_data))
+            ra_min, ra_max, dec_min, dec_max, deg_span = calcAngDataLimits(np.degrees(ra_data), \
+                np.degrees(dec_data))
             
             # Calculate centre of the projection
             ra_mean = np.degrees(meanAngle([np.radians(ra_min), np.radians(ra_max)]))
@@ -127,6 +135,7 @@ class CelestialPlot(object):
 
             # Calculate the frequency of RA/Dec angle labels in degrees, so it labels every .5 division
             label_angle_freq = 10**(np.ceil(np.log10(deg_span)))
+
 
             # Change label frequency so the ticks are not too close
             if deg_span/label_angle_freq < 0.25:
@@ -145,8 +154,6 @@ class CelestialPlot(object):
             # Draw Dec lines
             dec_lines = np.arange(np.floor(dec_min/label_angle_freq)*label_angle_freq, np.ceil(dec_max/label_angle_freq)*label_angle_freq, label_angle_freq)
             self.m.drawparallels(dec_lines, labels=[True, False, False, False], color='0.25')
-
-            print(ra_min, ra_max)
 
             ra_min_round = np.floor(ra_min/label_angle_freq)*label_angle_freq
             ra_max_round = np.ceil(ra_max/label_angle_freq)*label_angle_freq

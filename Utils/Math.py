@@ -96,6 +96,25 @@ def sphericalToCartesian(r, theta, phi):
     return x, y, z
 
 
+def angleBetweenSphericalCoords(phi1, lambda1, phi2, lambda2):
+    """ Calculates the angle between two points on a sphere. 
+    
+    Arguments:
+        phi1: [float] Latitude 1 (radians).
+        lambda1: [float] Longitude 1 (radians).
+        phi2: [float] Latitude 2 (radians).
+        lambda2: [float] Longitude 2 (radians).
+
+    Return:
+        [float] Angle between two coordinates (radians).
+    """
+
+    return np.arccos(np.sin(phi1)*np.sin(phi2) + np.cos(phi1)*np.cos(phi2)*np.cos(lambda2 - lambda1))
+
+
+
+
+
 
 def rotateVector(vect, axis, theta):
     """ Rotate vector around the given axis for the given angle.

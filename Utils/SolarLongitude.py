@@ -2,12 +2,16 @@
 
 from __future__ import print_function, division, absolute_import
 
+import datetime
+
 import numpy as np
+import scipy.optimize
 
 from jplephem.spk import SPK
 
 from Config import config
 from Utils.Earth import calcEarthRectangularCoordJPL
+from Utils.TrajConversions import date2JD
 
 
 
@@ -1317,7 +1321,6 @@ def jd2SolLonSteyaert(jd):
 
 
 
-
 def jd2SolLonJPL(jd):
     """ Convert the given Julian date to solar longitude using JPL ephemerids, DE430, J2000.0 epoch.
 
@@ -1346,22 +1349,138 @@ def jd2SolLonJPL(jd):
 
 
 
+def _solLon2jd(solFunc, year, month, L):
+    """ Internal function. Numerically calculates the Julian date from the given solar longitude with the
+        given method. The inverse precision is around 0.5 milliseconds.
+
+        Because the solar longitudes around Dec 31 and Jan 1 can be ambigous, the month also has to be given.
+
+    Arguments:
+        solFunc: [function] Function which calculates solar longitudes from Julian dates.
+        year: [int] Year of the event.
+        month: [int] Month of the event.
+        L: [float] Solar longitude (radians), J2000 epoch.
+
+    Return:
+        JD: [float] Julian date.
+
+    """
+
+    def _nextMonth(year, month):
+        """ Internal function. Calculates the next month. """
+
+        dt = datetime.datetime(year, month, 1, 0, 0, 0)
+
+        # Get some day in the next month
+        next_month = dt.replace(day=28) + datetime.timedelta(days=4)
+
+        return next_month.year, next_month.month
+
+
+    # Calculate the upper and lower bounds for the Julian date using the given year
+    jd_min = date2JD(year, month, 1, 0, 0, 0)
+
+    next_year, next_month = _nextMonth(year, month)
+    jd_max = date2JD(next_year, next_month, 1, 0, 0, 0)
+
+    # Function which returns the difference between the given JD and solar longitude that is being matched
+    sol_res_func = lambda jd, sol_lon: (np.sin(sol_lon) - np.sin(solFunc(jd)))**2 + (np.cos(sol_lon) \
+        - np.cos(solFunc(jd)))**2
+
+    # Find the Julian date corresponding to the given solar longitude
+    res = scipy.optimize.minimize(sol_res_func, x0=[(jd_min + jd_max)/2], args=(L), \
+        bounds=[(jd_min, jd_max)], tol=1e-13)
+
+    return res.x[0]
+
+
+
+def solLon2jdVSOP(*args):
+    """ Convert the given solar longitude (J2000) to Julian date, J2000.0 epoch using VSOP84.
+    
+    Arguments:
+        year: [int] Year of the event.
+        month: [int] Month of the event.
+        L: [float] Solar longitude (radians), J2000 epoch.
+
+    Return:
+        JD: [float] Julian date.
+
+    """
+
+    return _solLon2jd(jd2SolLonVSOP, *args)
+
+
+
+def solLon2jdSteyaert(*args):
+    """ Convert the given solar longitude (J2000) to Julian date, J2000.0 epoch. Chris Steyaert method. 
+    
+    Arguments:
+        year: [int] Year of the event.
+        month: [int] Month of the event.
+        L: [float] Solar longitude (radians), J2000 epoch.
+
+    Return:
+        JD: [float] Julian date.
+
+    """
+
+    return _solLon2jd(jd2SolLonSteyaert, *args)
+
+
+
+def solLon2jdJPL(*args):
+    """ Convert the given solar longitude (J2000) to Julian date, J2000.0 epoch using DE430 JPL ephemerids.
+    
+    Arguments:
+        year: [int] Year of the event.
+        month: [int] Month of the event.
+        L: [float] Solar longitude (radians), J2000 epoch.
+
+    Return:
+        JD: [float] Julian date.
+
+    """
+
+    return _solLon2jd(jd2SolLonJPL, *args)
+
+
+
 
 if __name__ == "__main__":
 
 
-    from Utils.TrajConversions import date2JD
-
     ### Test all solar longitude functions and see the difference between the solar longitudes they return
 
-    jd = date2JD(2011, 2, 4, 23, 20, 42.16)
-    #jd = date2JD(2012, 12, 13, 8, 20, 33.07)
-    #jd = date2JD(2012, 12, 13, 8, 21, 34.51)
-    #jd = date2JD(2012, 12, 13, 8, 22, 20.10)
-    #jd = date2JD(2012, 12, 13, 8, 24, 01.63)
+    year = 2012
 
-    print('JD: {:.12f}'.format(jd))
+    for month in range(1, 13):
 
-    print('Steyaert:', np.degrees(jd2SolLonSteyaert(jd)))
-    print('VSOP:', np.degrees(jd2SolLonVSOP(jd)))
-    print('JPL:', np.degrees(jd2SolLonJPL(jd)))
+        for day in [1, 10, 20]:
+
+            jd = date2JD(year, month, day, np.random.uniform(0, 24), np.random.uniform(0, 60), np.random.uniform(0, 60))
+
+            #jd = date2JD(2011, 2, 4, 23, 20, 42.16)
+            #jd = date2JD(2012, 12, 13, 8, 20, 33.07)
+            #jd = date2JD(2012, 12, 13, 8, 21, 34.51)
+            #jd = date2JD(2012, 12, 13, 8, 22, 20.10)
+            #jd = date2JD(2012, 12, 13, 8, 24, 01.63)
+
+            print('------------------------------------')
+            print('JD: {:.12f}'.format(jd))
+
+            print('Steyaert:', np.degrees(jd2SolLonSteyaert(jd)))
+            print('VSOP:', np.degrees(jd2SolLonVSOP(jd)))
+            print('JPL:', np.degrees(jd2SolLonJPL(jd)))
+
+
+            # Solar longitude to Julian date
+
+            jd_steyaert = solLon2jdSteyaert(year, month, jd2SolLonSteyaert(jd))
+            print('JD inverse Steyaert: {:.12f} +/- {:.6f} s'.format(jd_steyaert, 24*60*60*abs(jd - jd_steyaert)))
+
+            jd_vsop = solLon2jdVSOP(year, month, jd2SolLonVSOP(jd))
+            print('JD inverse     VSOP: {:.12f} +/- {:.6f} s'.format(jd_vsop, 24*60*60*abs(jd - jd_vsop)))
+
+            jd_jpl = solLon2jdJPL(year, month, jd2SolLonJPL(jd))
+            print('JD inverse      JPL: {:.12f} +/- {:.6f} s'.format(jd_jpl, 24*60*60*abs(jd - jd_jpl)))

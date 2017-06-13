@@ -36,7 +36,7 @@ from __future__ import print_function, division, absolute_import
 
 import math
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, MINYEAR
 
 from Utils.Math import vectNorm, vectMag
 
@@ -193,9 +193,18 @@ def jd2Date(jd, UT_corr=0, dt_obj=False):
         (year, month, day, hour, minute, second, millisecond)
 
     """
+
     
     dt = timedelta(days=jd)
-    date = dt + JULIAN_EPOCH - J2000_JD + timedelta(hours=UT_corr) 
+
+    try:
+        date = dt + JULIAN_EPOCH - J2000_JD + timedelta(hours=UT_corr) 
+
+    # If the date is out of range (i.e. before year 1) use year 1. This is the limitation in the datetime
+    # library. Time handling should be switched to astropy.time
+    except OverflowError:
+        date = datetime(MINYEAR, 1, 1, 0, 0, 0)
+
 
     # Return a datetime object if dt_obj == True
     if dt_obj:

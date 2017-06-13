@@ -21,3 +21,18 @@ def mkdirP(path):
     # Raise all other errors
 	else: 
 		raise
+
+
+
+def listDirRecursive(dir_path):
+    """ Return a list of all files in the given directory tree.
+
+    Arguments:
+        dir_path: [str] Path to the directory.
+
+    Return:
+        [list] A list of full paths of all files.
+    """
+
+
+    return [os.path.join(os.path.abspath(dp), f) for dp, dn, fn in os.walk(dir_path) for f in fn]

@@ -171,7 +171,7 @@ def loadMiligInput(file_path):
 
 
 
-def trajSolveMiligInput(dir_path, file_name, **kwargs):
+def solveTrajectoryMILIG(dir_path, file_name, **kwargs):
     """ Run the trajectory solver on data provided in the MILIG format input file. 
 
     Arguments:
@@ -306,7 +306,7 @@ if __name__ == '__main__':
 
 
 
-    trajSolveMiligInput(dir_path, file_name, max_toffset=30.0, monte_carlo=True)
+    solveTrajectoryMILIG(dir_path, file_name, max_toffset=30.0, monte_carlo=True, mc_runs=500)
 
     
 

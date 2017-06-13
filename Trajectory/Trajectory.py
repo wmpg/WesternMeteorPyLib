@@ -9,6 +9,7 @@ from __future__ import print_function, division, absolute_import
 import copy
 import sys
 import os
+import datetime
 from operator import attrgetter
 
 import numpy as np
@@ -1027,11 +1028,11 @@ class MCUncertanties(object):
         # Estimated initial velocity
         self.v_init = None
 
-        # Longitude of the average point on the trajectory (rad)
-        self.lon_avg = None
+        # Longitude of the referent point on the trajectory (rad)
+        self.lon_ref = None
 
-        # Latitude of the average point on the trajectory (rad)
-        self.lat_avg = None
+        # Latitude of the referent point on the trajectory (rad)
+        self.lat_ref = None
 
         # Velocity at infinity
         self.v_inf = None
@@ -1160,9 +1161,9 @@ def calcMCUncertanties(traj_list, traj_best):
         un.v_avg = np.std([traj.orbit.v_avg for traj in traj_list])
         un.v_inf = np.std([traj.orbit.v_inf for traj in traj_list])
 
-        # Average meteor position
-        un.lon_avg = scipy.stats.circstd([traj.orbit.lon_avg for traj in traj_list])
-        un.lat_avg = np.std([traj.orbit.lat_avg for traj in traj_list])
+        # Referent point on the meteor trajectory
+        un.lon_ref = scipy.stats.circstd([traj.orbit.lon_ref for traj in traj_list])
+        un.lat_ref = np.std([traj.orbit.lat_ref for traj in traj_list])
 
         # Geocentric
         un.ra_g = scipy.stats.circstd([traj.orbit.ra_g for traj in traj_list])
@@ -1201,7 +1202,8 @@ def calcMCUncertanties(traj_list, traj_best):
         un.mean_anomaly = scipy.stats.circstd([traj.orbit.mean_anomaly for traj in traj_list])
 
         # Last perihelion uncertanty (days)
-        un.last_perihelion = np.std([datetime2JD(traj.orbit.last_perihelion) for traj in traj_list])
+        un.last_perihelion = np.std([datetime2JD(traj.orbit.last_perihelion) for traj in traj_list if \
+            isinstance(traj.orbit.last_perihelion, datetime.datetime)])
 
         # Mean motion in the orbit (rad/day)
         un.n = np.std([traj.orbit.n for traj in traj_list])
@@ -1236,7 +1238,7 @@ def _MCTrajSolve(i, traj, observations):
 
 
 
-def monteCarloTrajectory(traj, mc_num=None, mc_pick_multiplier=1):
+def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1):
     """ Estimates uncertanty in the trajectory solution by doing Monte Carlo runs. The MC runs are done 
         in parallel on all available computer cores.
 
@@ -1247,9 +1249,11 @@ def monteCarloTrajectory(traj, mc_num=None, mc_pick_multiplier=1):
         traj: [Trajectory object] initial trajectory on which Monte Carlo runs will be performed
 
     Keyword arguments:
-        mc_num: [int] A fixed number of Monte Carlo simulations. None by default. If it is given, it will
+        mc_runs: [int] A fixed number of Monte Carlo simulations. None by default. If it is given, it will
             override mc_pick_multiplier.
-        mc_pick_multiplier: [int] Number of MC samples that will be taken for every point. 2 by default.
+        mc_pick_multiplier: [int] Number of MC samples that will be taken for every point. 1 by default.
+        noise_sigma: [float] Number of standard deviations to use for adding Gaussian noise to original 
+            measurements.
         
 
     """
@@ -1260,9 +1264,9 @@ def monteCarloTrajectory(traj, mc_num=None, mc_pick_multiplier=1):
     ##########################################################################################################
 
     # If a fixed number of Monte Carlo simulations is given, use it
-    if mc_num is not None:
+    if mc_runs is not None:
 
-        mc_runs = mc_num
+        mc_runs = mc_runs
 
     else:
 
@@ -1289,12 +1293,12 @@ def monteCarloTrajectory(traj, mc_num=None, mc_pick_multiplier=1):
         for obs in traj.observations:
 
             # Generate noise for measurements
-            meas1_noise = np.random.normal(0, obs.ang_res_std, size=len(obs.time_data))
-            meas2_noise = np.random.normal(0, obs.ang_res_std, size=len(obs.time_data))
+            meas1_noise = np.random.normal(0, noise_sigma*np.abs(obs.ang_res_std), size=len(obs.time_data))
+            meas2_noise = np.random.normal(0, noise_sigma*np.abs(obs.ang_res_std), size=len(obs.time_data))
 
             # Make sure all noise points are within 3 sigma
-            meas1_noise[(meas1_noise > 3*obs.ang_res_std) | (meas1_noise < -3*obs.ang_res_std)] = 0
-            meas2_noise[(meas2_noise > 3*obs.ang_res_std) | (meas2_noise < -3*obs.ang_res_std)] = 0
+            # meas1_noise[(meas1_noise > 3*obs.ang_res_std) | (meas1_noise < -3*obs.ang_res_std)] = 0
+            # meas2_noise[(meas2_noise > 3*obs.ang_res_std) | (meas2_noise < -3*obs.ang_res_std)] = 0
 
             # Add noise to angular measurements
             meas1_mc = (obs.meas1 + meas1_noise)%(2*np.pi)
@@ -1324,6 +1328,22 @@ def monteCarloTrajectory(traj, mc_num=None, mc_pick_multiplier=1):
 
     ##########################################################################################################
 
+    # TESTING!!!!!!!!!!!
+    # Take only those solutions which have the length standard deviation <= than the initial solution
+    mc_results = [mc_traj for mc_traj in mc_results if mc_traj.length_stddev <= traj.length_stddev]
+
+    ##########
+
+
+    # Reject those solutions for which the orbit could not be calculated
+    mc_results = [mc_traj for mc_traj in mc_results if mc_traj.orbit.ra_g is not None]
+
+
+    # Break the function of there are no trajectories to process
+    if len(mc_results) == 0:
+        return traj, None
+
+
 
     # Choose the solution with the lowest length residuals as the best solution
     length_res_trajs = [traj_tmp.length_res for traj_tmp in mc_results]
@@ -1337,29 +1357,44 @@ def monteCarloTrajectory(traj, mc_num=None, mc_pick_multiplier=1):
     uncertanties = calcMCUncertanties(mc_results, traj_best)
 
 
-    ### PLOT RADIANT SPREAD ###
+    ### PLOT RADIANT SPREAD (Vg color and length stddev) ###
     ##########################################################################################################
 
-    if traj.show_plots and (traj.orbit is not None):
+    if traj.orbit is not None:
 
         ra_g_list = np.array([traj_temp.orbit.ra_g for traj_temp in mc_results])
         dec_g_list = np.array([traj_temp.orbit.dec_g for traj_temp in mc_results])
         v_g_list = np.array([traj_temp.orbit.v_g for traj_temp in mc_results])/1000
+        length_stddev_list = np.array([traj_temp.length_stddev for traj_temp in mc_results])
 
-        # Init a celestial plot
-        m = CelestialPlot(ra_g_list, dec_g_list, projection='stere', bgcolor='w')
-        m.scatter(ra_g_list, dec_g_list, c=v_g_list, s=2)
-        m.colorbar(label='$V_g$ (km/s)')
+        # Color code Vg and length standard deviation
+        for plt_flag in ['vg', 'len_std']:
 
-        plt.title('Monte Carlo - geocentric radiant')
-        # plt.xlabel('$\\alpha_g (\\degree)$')
-        # plt.ylabel('$\\delta_g (\\degree)$')
+            # Init a celestial plot
+            m = CelestialPlot(ra_g_list, dec_g_list, projection='stere', bgcolor='w')
 
-        plt.tight_layout()
+            if plt_flag == 'vg':
+                m.scatter(ra_g_list, dec_g_list, c=v_g_list, s=2)
+                m.colorbar(label='$V_g$ (km/s)')
 
-        savePlot(plt, traj.file_name + '_monte_carlo_eq.png', output_dir=traj.output_dir)
+            elif plt_flag == 'len_std':
+                m.scatter(ra_g_list, dec_g_list, c=length_stddev_list, s=2)
+                m.colorbar(label='$\sigma_L$ (m)')
 
-        plt.show()
+            plt.title('Monte Carlo - geocentric radiant')
+            # plt.xlabel('$\\alpha_g (\\degree)$')
+            # plt.ylabel('$\\delta_g (\\degree)$')
+
+            plt.tight_layout()
+
+            savePlot(plt, traj.file_name + '_monte_carlo_eq_' + plt_flag + '.png', output_dir=traj.output_dir)
+
+            if traj.show_plots:
+                plt.show()
+
+            else:
+                plt.clf()
+                plt.close()
 
     ##########################################################################################################
 
@@ -1383,8 +1418,8 @@ class Trajectory(object):
 
 
     def __init__(self, jdt_ref, output_dir='.', max_toffset=1.0, meastype=4, verbose=True, 
-        estimate_timing_vel=True, monte_carlo=True, mc_num=None, filter_picks=True, calc_orbit=True, show_plots=True, 
-        save_results=True):
+        estimate_timing_vel=True, monte_carlo=True, mc_runs=None, mc_pick_multiplier=1, filter_picks=True, 
+        calc_orbit=True, show_plots=True, save_results=True):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -1409,7 +1444,8 @@ class Trajectory(object):
             verbose: [bool] Print out the results and status messages, True by default
             estimate_timing_vel: [bool] Try to estimate the difference in timing and velocity. True by default
             monte_carlo: [bool] Runs Monte Carlo estimation of uncertanties. True by default.
-            mc_num: [int] Number of Monte Carlo runs. The default value is the number of observed points.
+            mc_runs: [int] Number of Monte Carlo runs. The default value is the number of observed points.
+            mc_pick_multiplier: [int] Number of MC samples that will be taken for every point. 1 by default.
             filter_picks: [bool] If True (default), picks which deviate more than 3 sigma in angular residuals
                 will be removed, and the trajectory will be recalculated.
             calc_orbit: [bool] If True, the orbit is calculates as well. True by default
@@ -1440,7 +1476,10 @@ class Trajectory(object):
         self.monte_carlo = monte_carlo
 
         # Number of Monte Carlo runs
-        self.mc_num = mc_num
+        self.mc_runs = mc_runs
+
+        # Number of MC samples that will be taken for every point
+        self.mc_pick_multiplier = mc_pick_multiplier
 
         # Filter bad picks (ones that deviate more than 3 sigma in angular residuals) if this flag is True
         self.filter_picks = filter_picks
@@ -1448,7 +1487,7 @@ class Trajectory(object):
         # Calculate orbit if True
         self.calc_orbit = calc_orbit
 
-        # If True, plots are shown
+        # If True, plots will be shown on screen when the trajectory estimation is done
         self.show_plots = show_plots
 
         # Save results to disk if true
@@ -1478,11 +1517,13 @@ class Trajectory(object):
         self.rbeg_lat = None
         self.rbeg_lon = None
         self.rbeg_ele = None
+        self.rbeg_jd = None
 
         # Coordinates of the end point
         self.rend_lat = None
         self.rend_lon = None
         self.rend_ele = None
+        self.rend_jd = None
 
         # Calculated initial velocity
         self.v_init = None
@@ -1633,9 +1674,9 @@ class Trajectory(object):
             obs.state_vect_dist = np.array(state_vect_dist)
 
 
-            ### TEST
+            ### Length vs. time
 
-            #plt.plot(obs.time_data, obs.state_vect_dist, marker='x', label=str(obs.station_id), zorder=3)
+            # plt.plot(obs.state_vect_dist, obs.time_data, marker='x', label=str(obs.station_id), zorder=3)
 
             ##########
 
@@ -1657,8 +1698,15 @@ class Trajectory(object):
             # Calculate velocity for every point
             obs.velocities = dists_diffs/time_diffs
 
+
+        # plt.ylabel('Time (s)')
+        # plt.xlabel('Distance from state vector (m)')
+
+        # plt.gca().invert_yaxis()
+
         # plt.legend()
         # plt.grid()
+        # plt.savefig('mc_time_offsets.png', dpi=300)
         # plt.show()
 
 
@@ -1715,7 +1763,12 @@ class Trajectory(object):
             # Initial parameters
             p0 = np.zeros(2)
 
-            obs.jacchia_fit, _ = scipy.optimize.curve_fit(jacchiaLagFunc, obs.time_data, obs.lag, p0=p0)
+            try:
+                obs.jacchia_fit, _ = scipy.optimize.curve_fit(jacchiaLagFunc, obs.time_data, obs.lag, p0=p0)
+
+            # If the maximum number of iterations have been reached, skip Jacchia fitting
+            except RuntimeError:
+                obs.jacchia_fit = p0
 
             # Force the parameters to be positive
             obs.jacchia_fit = np.abs(obs.jacchia_fit)
@@ -1737,7 +1790,13 @@ class Trajectory(object):
 
         # Do a Jacchia function fit on the collective lag
         p0 = np.zeros(2)
-        jacchia_fit, _ = scipy.optimize.curve_fit(jacchiaLagFunc, time_all, lag_all, p0=p0)
+
+        try:
+            jacchia_fit, _ = scipy.optimize.curve_fit(jacchiaLagFunc, time_all, lag_all, p0=p0)
+
+        # If the maximum number of iterations have been reached, skip Jacchia fitting
+        except RuntimeError:
+            jacchia_fit = p0
 
 
         return jacchia_fit
@@ -1967,7 +2026,7 @@ class Trajectory(object):
             obs.rend_ele = obs.meas_ht[-1]
 
 
-        # Find the heigest beginning height
+        # Find the highest beginning height
         beg_hts = [obs.rbeg_ele for obs in self.observations]
         first_begin = beg_hts.index(max(beg_hts))
 
@@ -1975,6 +2034,7 @@ class Trajectory(object):
         self.rbeg_lat = self.observations[first_begin].rbeg_lat
         self.rbeg_lon = self.observations[first_begin].rbeg_lon
         self.rbeg_ele = self.observations[first_begin].rbeg_ele
+        self.rbeg_jd = self.observations[first_begin].JD_data[0]
 
 
         # Find the lowest ending height
@@ -1985,6 +2045,7 @@ class Trajectory(object):
         self.rend_lat = self.observations[last_end].rend_lat
         self.rend_lon = self.observations[last_end].rend_lon
         self.rend_ele = self.observations[last_end].rend_ele
+        self.rend_jd = self.observations[last_end].JD_data[-1]
 
 
 
@@ -2106,7 +2167,6 @@ class Trajectory(object):
         eci_avg = eci_sum/meas_sum
 
         # Average Julian date
-        #jd_avg = jd_sum/meas_sum
         jd_avg = (jd_min + jd_max)/2
 
         
@@ -2252,12 +2312,12 @@ class Trajectory(object):
         out_str += "\n"
 
         if self.orbit is not None:
-            out_str += "Average point on the trajectory:\n"
-            out_str += "  Time: " + str(jd2Date(self.orbit.jd_avg, dt_obj=True)) + " UTC\n"
-            out_str += "  Lon   = {:>10.6f}{:s} deg\n".format(np.degrees(self.orbit.lon_avg), _uncer('{:.4f}', 
-                'lon_avg', deg=True))
-            out_str += "  Lat   = {:>10.6f}{:s} deg\n".format(np.degrees(self.orbit.lat_avg), _uncer('{:.4f}', 
-                'lat_avg', deg=True))
+            out_str += "Referent point on the trajectory:\n"
+            out_str += "  Time: " + str(jd2Date(self.orbit.jd_ref, dt_obj=True)) + " UTC\n"
+            out_str += "  Lon   = {:>10.6f}{:s} deg\n".format(np.degrees(self.orbit.lon_ref), _uncer('{:.4f}', 
+                'lon_ref', deg=True))
+            out_str += "  Lat   = {:>10.6f}{:s} deg\n".format(np.degrees(self.orbit.lat_ref), _uncer('{:.4f}', 
+                'lat_ref', deg=True))
             out_str += "\n"
 
             # Write out orbital parameters
@@ -2842,26 +2902,29 @@ class Trajectory(object):
         # Plot the orbit in 3D
         if self.calc_orbit:
 
-            # Construct a list of orbital elements of the meteor
-            orbit_params = np.array([
-                [self.orbit.a, self.orbit.e, np.degrees(self.orbit.i), np.degrees(self.orbit.peri), \
-                    np.degrees(self.orbit.node)]
-                ])
+            # Check if the orbit was properly calculated
+            if self.orbit.ra_g is not None:
 
-            # Run orbit plotting procedure
-            plotOrbits(orbit_params, jd2Date(self.jdt_ref, dt_obj=True), save_plots=True, \
-                plot_path=os.path.join(output_dir, file_name))
+                # Construct a list of orbital elements of the meteor
+                orbit_params = np.array([
+                    [self.orbit.a, self.orbit.e, np.degrees(self.orbit.i), np.degrees(self.orbit.peri), \
+                        np.degrees(self.orbit.node)]
+                    ])
+
+                # Run orbit plotting procedure
+                plotOrbits(orbit_params, jd2Date(self.jdt_ref, dt_obj=True), save_plots=True, \
+                    plot_path=os.path.join(output_dir, file_name))
 
 
-            plt.tight_layout()
+                plt.tight_layout()
 
 
-            if show_plots:
-                plt.show()
+                if show_plots:
+                    plt.show()
 
-            else:
-                plt.clf()
-                plt.close()
+                else:
+                    plt.clf()
+                    plt.close()
 
 
 
@@ -3113,7 +3176,7 @@ class Trajectory(object):
 
             # Bound the radiant vector to +/- 25% of original vales, per each ECI coordinate
             for val in self.best_conv_inter.radiant_eci:
-                bounds.append([0.75*val, 1.25*val])
+                bounds.append(sorted([0.75*val, 1.25*val]))
 
             print('BOUNDS:', bounds)
             print('p0:', p0)
@@ -3153,7 +3216,7 @@ class Trajectory(object):
 
             print('Angle minimization failed altogether!')
 
-            # If the solution did not succed, set the values to intersecting plates solution
+            # If the solution did not succeed, set the values to intersecting plates solution
             self.state_vect_mini = self.state_vect
             self.radiant_eci_mini = self.best_conv_inter.radiant_eci
 
@@ -3313,6 +3376,10 @@ class Trajectory(object):
                     # Find the indicies of picks which are within 3 sigma
                     good_picks = np.argwhere(obs.ang_res < (np.mean(obs.ang_res) + 3*obs.ang_res_std)).ravel()
 
+                    # If the number of good picks is below 4, do not remove any picks
+                    if len(good_picks) < 4:
+                        continue
+
                     # Check if any picks were removed
                     if len(good_picks) < len(obs.ang_res):
                         picks_rejected += len(obs.ang_res) - len(good_picks)
@@ -3367,12 +3434,11 @@ class Trajectory(object):
 
 
             # Calculate the orbit of the meteor
-            self.orbit = calcOrbit(self.radiant_eci_mini, self.v_init, v_avg, eci_avg, jd_avg)
-
-            # Set observed radiant parameters
-            self.orbit.ra, self.orbit.dec = self.radiant_eq_mini
-            self.orbit.v_avg = v_avg
-            self.orbit.v_init = self.v_init
+            # If the LoS estimation failed, then the plane intersection solution will be used for the orbit,
+            # which needs to have fixed stations and the average velocity should be the referent velocity
+            self.orbit = calcOrbit(self.radiant_eci_mini, self.v_init, v_avg, self.state_vect_mini, \
+                self.rbeg_jd, stations_fixed=(not minimize_solution.success), \
+                referent_init=minimize_solution.success)
 
             if self.verbose:
                 print(self.orbit)
@@ -3389,7 +3455,8 @@ class Trajectory(object):
         if self.monte_carlo:
 
             # Do a Monte Carlo estimate of the uncertanties in all calculated parameters
-            traj_best, uncertanties = monteCarloTrajectory(self, mc_num=self.mc_num)
+            traj_best, uncertanties = monteCarloTrajectory(self, mc_runs=self.mc_runs, 
+                mc_pick_multiplier=self.mc_pick_multiplier)
 
         else:
             uncertanties = None

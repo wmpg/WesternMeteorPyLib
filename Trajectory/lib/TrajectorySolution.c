@@ -324,13 +324,13 @@ double  max_convergence, vbegin;
 
 
 
-    // Special case for CAMO and Jacchia fit
+/*    // Special case for CAMO and Jacchia fit
     if( traj->velmodel == 3 ){
         
         traj->params[6] = 0.005;
         traj->params[7] = 10.0;    
 
-    }
+    }*/
 
 
     //======== Estimate deceleration terms only (all other parameters fixed) via the PSO

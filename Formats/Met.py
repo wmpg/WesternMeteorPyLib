@@ -9,6 +9,11 @@ import matplotlib.pyplot as plt
 
 from Formats.Plates import AffPlate, AstPlate
 
+from Trajectory.Trajectory import Trajectory
+from Trajectory.GuralTrajectory import GuralTrajectory
+
+from Utils.TrajConversions import unixTime2JD
+
 
 class Star(object):
     """ Container for info about stars in the vid. """
@@ -30,20 +35,61 @@ class Star(object):
 
 
 
+class PickInfo(object):
+    """ Container of information for individual picks. """
+
+    def __init__(self, theta, phi):
+
+        # Pick frame
+        self.frame = 0
+
+        # Pick time
+        self.unix_time = 0
+
+        # Mirror coordinates of the image centre
+        self.hx = 0
+        self.hy = 0
+
+        # Original picks centroids
+        self.cx = 0
+        self.cy = 0
+
+        # Original picks sky coordinates
+        self.theta = theta
+        self.phi = phi
+
+
 
 class MetStruct(object):
-    """ Container for Met file info. """
+    
 
-    def __init__(self, dir_path):
+    def __init__(self, dir_path, mirfit=False):
+        """ Container for Met file info. 
+        
+        Arguments:
+            dir_path: [str] Path to the directory which contains the .met file.
+
+        Keyword arguments:
+            mirfit: [bool] Flag which indicates if Mirfit .met file if being loaded (True). If False (by 
+            defualt), METAL-style .met file will be loaded. Note: Specifying the wrong format for the .met 
+            file may produce an error.
+        """
+
 
         # Met file location
         self.dir_path = dir_path
 
+        # Mirfit flag
+        self.mirfit = mirfit
+
         # Site geo coordinates
         self.sites_location = {}
 
-        # Init picks
+        # Init pick dict where picks will be stored as a list
         self.picks = {}
+
+        # Dictionary of lists of pick objects, with full pick info
+        self.picks_objs = {}
 
         # Init mirror positions in time
         self.mirror_pos = {}
@@ -51,6 +97,11 @@ class MetStruct(object):
         # Init plates
         self.scale_plates = {}
         self.exact_plates = {}
+
+        # Init geographical positions
+        self.lat = {}
+        self.lon = {}
+        self.elev = {}
 
         # Init star positions
         self.stars = {}
@@ -130,6 +181,160 @@ class MetStruct(object):
 
 
 
+def coordinatesSkyToImage(theta, phi, exact, scale, hx_centre, hy_centre):
+    """ Converts a point from (theta, phi) to image coordinates. """
+
+    # Calculate the pick location from (theta, phi) to mirror encoder coordinates
+    hx, hy = plateExactMap(exact, theta, phi, reverse_map=True)
+
+    # Calculate encoder offset from the centre
+    hu = hx - hx_centre
+    hv = hy - hy_centre
+
+    # Get image offsets from encoder offsets
+    nx, ny = plateScaleMap(scale, hu, hv, reverse_map=True)
+
+    # Get image coordinates of the centroid
+    mx = scale.wid/2.0 + nx
+    my = scale.ht/2.0 - ny
+
+    return mx, my
+
+
+def coordinatesImageToSky(mx, my, exact, scale, hx_centre, hy_centre):
+    """ Converts a point from image coordinates (mx, my) to (theta, phi). """
+
+    # Get image coordinates of the centroid
+    cx = mx - scale.wid/2.0
+    cy = scale.ht/2.0 - my
+
+    # Get image offsets from encoder offsets
+    hu, hv = plateScaleMap(scale, cx, cy)
+
+    # Calculate encoder offset from the centre
+    hx = hx_centre + hu
+    hy = hy_centre + hv
+
+    # Calculate the pick location from (theta, phi) to mirror encoder coordinates
+    theta, phi = plateExactMap(exact, hx, hy)
+
+    return theta, phi
+
+
+
+
+def extractPicks(met, mirfit=False):
+    """ Extracts picks from the list and convert them to pick objects. """
+
+    # Go though all sites
+    for site in met.sites:
+
+        # Extract mirfit picks into mirfit objects
+        if mirfit:
+
+            # Extract frames
+            frames = np.array(met.picks[site])[:,0]
+
+            # Extract original centroids
+            cx_data, cy_data = np.hsplit(np.array(met.picks[site])[:,2:4], 2)
+
+            # Extract UNIX time
+            ts_data, tu_data = np.hsplit(np.array(met.picks[site])[:,11:13], 2)
+            time_data = ts_data + tu_data/1000000
+
+
+            # Extract mirror positions on each frame
+            hx_data, hy_data = np.hsplit(np.array(met.picks[site])[:,22:24], 2)
+
+            # Init theta, phi arrays
+            theta = np.zeros_like(cx_data)
+            phi = np.zeros_like(cx_data)
+
+            # Calculate (theta, phi) from image coordinates
+            for i in range(len(cx_data)):
+                theta[i], phi[i] = coordinatesImageToSky(cx_data[i], cy_data[i], met.exact_plates[site], 
+                    met.scale_plates[site], hx_data[i], hy_data[i])
+
+            # Init a list of picks for this site
+            met.picks_objs[site] = []
+
+            # Generate a list of pick object
+            for fr, cx, cy, hx, hy, theta_pick, phi_pick, unix_time in zip(frames, cx_data, cy_data, hx_data, 
+                hy_data, theta, phi, time_data):
+                
+                # Init a new pick
+                pick = PickInfo(theta_pick, phi_pick)
+
+                # Set the pick frame
+                pick.frame = int(fr)
+
+                # Set pick UNIX time
+                pick.unix_time = unix_time
+
+                # Set original pick centroids
+                pick.cx = cx
+                pick.cy = cy
+
+                # Set mirror position of frame centre
+                pick.hx = hx
+                pick.hy = hy
+
+                # Add the pick to the list of all picks
+                met.picks_objs[site].append(pick)
+
+
+        # Extract METAL picks to pick objects
+        else:
+
+            # If there are no picks for this site, skip it and remove from the list of sites
+            if not met.picks[site]:
+                met.sites.remove(site)
+                continue
+
+            # Extract frames
+            frames = np.array(met.picks[site])[:, 2].astype(np.int)
+
+            # Extract original centroids
+            cx_data, cy_data = np.hsplit(np.array(met.picks[site])[:, 4:6].astype(np.float64), 2)
+
+            # Extract UNIX time
+            ts_data, tu_data = np.hsplit(np.array(met.picks[site])[:, 23:25].astype(np.float64), 2)
+            time_data = ts_data + tu_data/1000000
+
+            # Azimuthal coordinates
+            theta, phi = np.hsplit(np.radians(np.array(met.picks[site])[:, 12:14].astype(np.float64)), 2)
+
+
+            # Init a list of picks for this site
+            met.picks_objs[site] = []
+
+            # Generate a list of pick object
+            for fr, cx, cy, theta_pick, phi_pick, unix_time in zip(frames, cx_data, cy_data, theta, phi, 
+                time_data):
+                
+                # Init a new pick
+                pick = PickInfo(theta_pick, phi_pick)
+
+                # Set the pick frame
+                pick.frame = int(fr)
+
+                # Set pick UNIX time
+                pick.unix_time = unix_time
+
+                # Set original pick centroids
+                pick.cx = cx
+                pick.cy = cy
+
+                # Add the pick to the list of all picks
+                met.picks_objs[site].append(pick)
+
+
+    return met
+
+
+
+
+
 def loadMet(dir_path, file_name, mirfit=False):
     """ Loads a *.met file. 
     
@@ -148,7 +353,7 @@ def loadMet(dir_path, file_name, mirfit=False):
 
 
     # Init an empty Met structure
-    met = MetStruct(dir_path)
+    met = MetStruct(dir_path, mirfit=mirfit)
 
     with open(os.path.join(dir_path, file_name)) as f:
 
@@ -171,11 +376,25 @@ def loadMet(dir_path, file_name, mirfit=False):
             if site_prefix in line:
 
                 # Extract the site ID
-                line = line.strip(site_prefix)
-                line = line.split()
+                line = line.strip(site_prefix).split()
+                site_id = line[1]
+
+                # If there is no plate for this site, skip it
+                if 'NULL' in line[2]:
+                    continue
+
 
                 # Add the site ID to the list of sites
-                sites.append(line[1])
+                sites.append(site_id)
+
+
+                # Extract site geographical coordinates is METAL file was given
+                if not mirfit:
+
+                    met.lat[site_id] = float(line[11])
+                    met.lon[site_id] = float(line[13])
+                    met.elev[site_id] = float(line[15])
+
 
         met.sites = sites
 
@@ -280,6 +499,11 @@ def loadMet(dir_path, file_name, mirfit=False):
                     
                     met.exact_plates[site] = exact
 
+                    # Init geographical coordinates for the given site
+                    met.lon[exact.site] = exact.lon
+                    met.lat[exact.site] = exact.lat
+                    met.elev[exact.site] = exact.elev
+
 
                 # Check if star entry
                 if (star_prefix in line) and mirfit:
@@ -361,91 +585,215 @@ def loadMet(dir_path, file_name, mirfit=False):
         met.pairFrame2MirPos()
 
 
+
+    # Extract picks into pick objects
+    met = extractPicks(met, mirfit=mirfit)
+
     return met
 
-            
+          
+
+
+
+def solveTrajectoryMet(met, solver='original', velmodel=3, **kwargs):
+        """ Runs the trajectory solver on points of the given type. 
+
+        Keyword arguments:
+            solver: [str] Trajectory solver to use:
+                - 'original' (default) - "in-house" trajectory solver implemented in Python
+                - 'gural' - Pete Gural's PSO solver
+            velmodel: [int] Velocity propagation model for the Gural solver
+                0 = constant   v(t) = vinf
+                1 = linear     v(t) = vinf - |acc1| * t
+                2 = quadratic  v(t) = vinf - |acc1| * t + acc2 * t^2
+                3 = exponent   v(t) = vinf - |acc1| * |acc2| * exp( |acc2| * t ) (default)
+        """
+
+
+        # Check that there are at least two stations present
+        if len(met.sites) < 2:
+            print('ERROR! The .met file does not contain multistation data!')
+
+            return False
+
+
+
+        time_data = {}
+        theta_data = {}
+        phi_data = {}
+
+        # Go through all sites
+        for site in met.sites:
+
+            time_picks = []
+            theta_picks = []
+            phi_picks = []
+
+            # Go through all picks
+            for pick in met.picks_objs[site]:
+
+                # Add the pick to the picks list
+                theta_picks.append(pick.theta)
+                phi_picks.append(pick.phi)
+
+                # Add the time of the pick to a list
+                time_picks.append(pick.unix_time)
+
+
+            # Add the picks to the list of picks of both sites
+            time_data[site] = np.array(time_picks).ravel()
+            theta_data[site] = np.array(theta_picks).ravel()
+            phi_data[site] = np.array(phi_picks).ravel()
+
+
+        # Take the earliest time of all sites as the referent time
+        ref_unix_time = min([time_data[key][0] for key in time_data.keys()])
+
+        # Normalize all times with respect to the referent times
+        for site in met.sites:
+            time_data[site] = time_data[site] - ref_unix_time
+
+
+        # Convert the referent Unix time to Julian date
+        ts = int(ref_unix_time)
+        tu = (ref_unix_time - ts)*1e6
+        ref_JD = unixTime2JD(ts, tu)
+
+
+        if solver == 'original':
+
+            # Init the new trajectory solver object
+            traj_solve = Trajectory(ref_JD, output_dir=met.dir_path, **kwargs)
+
+        elif solver == 'gural':
+
+            # Select extra keyword arguments that are present only for the gural solver
+            gural_keys = ['max_toffset', 'nummonte', 'meastype', 'verbose', 'show_plots']
+            gural_kwargs = {key: kwargs[key] for key in gural_keys if key in kwargs}
+
+            # Init the new Gural trajectory solver object
+            traj_solve = GuralTrajectory(len(met.sites), ref_JD, velmodel, verbose=1, output_dir=met.dir_path, 
+                **gural_kwargs)
+
+
+        # Infill trajectories from each site
+        for site in met.sites:
+
+            theta_picks = theta_data[site]
+            phi_picks = phi_data[site]
+            time_picks = time_data[site]
+
+            lat = met.lat[site]
+            lon = met.lon[site]
+            elev = met.elev[site]
+
+            traj_solve.infillTrajectory(phi_picks, theta_picks, time_picks, lat, lon, elev)
+
+
+        print('Filling done!')
+
+
+        # # Dump measurements to a file
+        # traj_solve.dumpMeasurements(self.met.dir_path.split(os.sep)[-1] + '_dump.txt')
+
+
+        # Solve the trajectory
+        traj_solve.run()
+
+
+
+
+
 
 if __name__ == "__main__":
 
     # Directory where the met file is
-    dir_path = "/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20160927_030027_mir"
+    #dir_path = "../MirfitPrepare/20160929_062945_mir"
+    #dir_path = "../MetalPrepare/20161007_052749_met"
+    dir_path = "../MetalPrepare/20161007_052346_met"
 
     # Name of the met file
     file_name = 'state.met'
 
     # Load the met file
-    met = loadMet(dir_path, file_name)
+    met = loadMet(dir_path, file_name, mirfit=False)
 
-    print(met.scale_plates[1].M)
-    print(met.exact_plates[1].M)
 
-    ### TEST PLATES
-    from Plates import plateExactMap, plateScaleMap
+    # Run trajectory solver on the loaded .met file
+    solveTrajectoryMet(met, solver='gural')
+
+
+    # print(met.scale_plates.items())
+
+    # print(met.scale_plates['1'].M)
+    # print(met.exact_plates['1'].M)
+
+    # ### TEST PLATES
+    # from Formats.Plates import plateExactMap, plateScaleMap
     
-    # Test scale plate
-    hu, hv = plateScaleMap(met.scale_plates[1], 100, 100)
+    # # Test scale plate
+    # hu, hv = plateScaleMap(met.scale_plates['1'], 100, 100)
 
-    # Reverse map
-    print(plateScaleMap(met.scale_plates[1], hu, hv, reverse_map=True))
-    print(hu, hv)
+    # # Reverse map
+    # print(plateScaleMap(met.scale_plates['1'], hu, hv, reverse_map=True))
+    # print(hu, hv)
 
-    # Test exact plate
-    hx, hy = plateExactMap(met.exact_plates[2], 31997, 22290)
+    # # Test exact plate
+    # hx, hy = plateExactMap(met.exact_plates['2'], 31997, 22290)
 
-    print(plateExactMap(met.exact_plates[2], hx, hy, reverse_map=True))
+    # print(plateExactMap(met.exact_plates['2'], hx, hy, reverse_map=True))
 
-    ############ TEST IMAGE
+    # ############ TEST IMAGE
 
-    site = 2
+    # site = '2'
 
-    #hx_centre = 34852
-    hx_centre = 34847.8046875
-    #hy_centre = 34052
-    hy_centre = 34057.7265625
+    # #hx_centre = 34852
+    # hx_centre = 34847.8046875
+    # #hy_centre = 34052
+    # hy_centre = 34057.7265625
 
-    # mx = 10
-    # my = 10
+    # # mx = 10
+    # # my = 10
 
-    # # Get image coordinates of the centroid
-    # cx = mx - 320
-    # cy = 240 - my
+    # # # Get image coordinates of the centroid
+    # # cx = mx - 320
+    # # cy = 240 - my
 
-    # # Get image offsets from encoder offsets
-    # hu, hv = plateScaleMap(met.scale_plates[site], cx, cy)
+    # # # Get image offsets from encoder offsets
+    # # hu, hv = plateScaleMap(met.scale_plates[site], cx, cy)
 
-    # # Calculate encoder offset from the centre
-    # hx = hx_centre + hu
-    # hy = hy_centre + hv
+    # # # Calculate encoder offset from the centre
+    # # hx = hx_centre + hu
+    # # hy = hy_centre + hv
+
+    # # # Calculate the pick location from (theta, phi) to mirror encoder coordinates
+    # # theta, phi = plateExactMap(met.exact_plates[site], hx, hy)
+
+    # # print 'pick theta, phi:', map(np.degrees, (theta, phi))
+
+
+    # # # Image coord test
+    # # th_test, phi_test = plateExactMap(met.exact_plates[site], hx_centre, hy_centre)
+    # # print 'Centre theta, phi:', map(np.degrees, (th_test, phi_test))
+
+
+    # ############ TEST IMAGE 2
+
+    # theta = np.radians(43.948964)
+    # phi = np.radians(90.955409)
 
     # # Calculate the pick location from (theta, phi) to mirror encoder coordinates
-    # theta, phi = plateExactMap(met.exact_plates[site], hx, hy)
+    # hx, hy = plateExactMap(met.exact_plates[site], theta, phi, reverse_map=True)
 
-    # print 'pick theta, phi:', map(np.degrees, (theta, phi))
+    # # Calculate encoder offset from the centre
+    # hu = hx - hx_centre
+    # hv = hy - hy_centre
 
+    # # Get image offsets from encoder offsets
+    # nx, ny = plateScaleMap(met.scale_plates[site], hu, hv, reverse_map=True)
 
-    # # Image coord test
-    # th_test, phi_test = plateExactMap(met.exact_plates[site], hx_centre, hy_centre)
-    # print 'Centre theta, phi:', map(np.degrees, (th_test, phi_test))
+    # # Get image coordinates of the centroid
+    # mx = 320 + nx
+    # my = 240 - ny
 
-
-    ############ TEST IMAGE 2
-
-    theta = np.radians(43.948964)
-    phi = np.radians(90.955409)
-
-    # Calculate the pick location from (theta, phi) to mirror encoder coordinates
-    hx, hy = plateExactMap(met.exact_plates[site], theta, phi, reverse_map=True)
-
-    # Calculate encoder offset from the centre
-    hu = hx - hx_centre
-    hv = hy - hy_centre
-
-    # Get image offsets from encoder offsets
-    nx, ny = plateScaleMap(met.scale_plates[site], hu, hv, reverse_map=True)
-
-    # Get image coordinates of the centroid
-    mx = 320 + nx
-    my = 240 - ny
-
-    print('mx, my:', mx, my)
-
+    # print('mx, my:', mx, my)
