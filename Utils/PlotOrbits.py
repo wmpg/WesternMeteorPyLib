@@ -244,6 +244,8 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, save_pl
         
     """
 
+    orb_elements = np.array(orb_elements)
+
     # Check the shape of given orbital elements array
     if len(orb_elements.shape) < 2:
         orb_elements = np.array([orb_elements])

@@ -1,9 +1,12 @@
-""" General mathematical conversions. 
+""" General mathematical conversions, linear algebra functions, and geometrical functions. 
 
 """
 
+from __future__ import division, print_function, absolute_import
+
 import numpy as np
 import scipy.linalg
+import scipy.spatial
 from numpy.core.umath_tests import inner1d
 
 
@@ -41,12 +44,12 @@ def cartesianToPolar(x, y, z):
     """ Converts 3D cartesian coordinates to polar coordinates. 
 
     Arguments:
-        x: [float] point x coordinate
-        y: [float] point y coordinate
-        z: [float] point z coordinate
+        x: [float] Px coordinate.
+        y: [float] Py coordinate.
+        z: [float] Pz coordinate.
 
     Return:
-        (theta, phi): [float] polar angles in radians
+        (theta, phi): [float] Polar angles in radians (inclination, azimuth).
 
     """
 
@@ -280,7 +283,190 @@ def pointInsidePolygon(x, y, poly):
 
 
 
+def pointInsideConvexHull(hull_vertices, point):
+    """ Checks whether the given point is inside the 3D hull defined by given vertices. 
+    
+    Arguments:
+        hull_vertices: [2D ndarray] 2D numpy array containing 3D coordinates (x, y, z) of hull vertices.
+        point: [ndarray] (x, y, z) coordinates of the test point.
+
+    Return:
+        [bool]: True if point is inside the hull, False otherwise.
+
+    """
+
+    # Create a convex hull from the given hull vertices
+    hull = scipy.spatial.ConvexHull(hull_vertices)
+
+    # Create a new hull by adding the point we are checking
+    new_hull = scipy.spatial.ConvexHull(np.concatenate((hull.points, [point])))
+
+    # Check if the veretices have remained the same
+    if np.array_equal(new_hull.vertices, hull.vertices): 
+        return True
+    
+    return False
+
+
+
+def samplePointsFromHull(hull_vertices, n_points):
+    """ Randomly samples points inside the given convex hull. 
+    
+    Arguments:
+        hull_vertices: [2D ndarray] 2D numpy array containing 3D coordinates (x, y, z) of hull vertices.
+        n_points: [int] Number of points to sample from the hull.
+
+    Return:
+        samples_hull: [list] A list of points sampled from the hull.
+    """
+
+
+    # Find a rectangular cuboid which envelops the given hull
+    min_point = np.array([ np.inf,  np.inf,  np.inf])
+    max_point = np.array([-np.inf, -np.inf, -np.inf])
+
+    for vert in hull_vertices:
+        min_point = np.min([min_point, vert], axis=0)
+        max_point = np.max([max_point, vert], axis=0)
+
+
+    samples_hull = []
+
+
+    while True:
+
+        # Draw a sample from the rectangular cuboid
+        x = np.random.uniform(min_point[0], max_point[0])
+        y = np.random.uniform(min_point[1], max_point[1])
+        z = np.random.uniform(min_point[2], max_point[2])
+
+        point = np.array([x, y, z])
+
+        # Check if the point is inside the hull
+        if pointInsideConvexHull(hull_vertices, point):
+            samples_hull.append(point)
+
+        # Check if enough points were samples
+        if len(samples_hull) == n_points:
+            break
+
+
+    return np.array(samples_hull)
+
+
+
+def estimateHullOverlapRatio(hull1, hull2, niter=200, volume=False):
+    """ Given two convex hulls, estimate their overlap ratio by randomly generating points inside the first
+        and counting how many are inside the other. The ratio between the common and all points is the
+        estimate of the overlap ratio.
+
+    Arguments:
+        hull1: [list] A list of points in the first convex hull.
+        hull2: [list] A list of point in the second convex hull.
+
+    Keyword arguments:
+        niter: [int] Number of iterations for generating the points. 200 by default.
+        volume: [bool] If True, the common volume between the cameras will be returned instead of the ratio.
+
+    """
+
+    inside_count = 0
+
+    # Randomly generate a point inside the first convex hull
+    test_points = samplePointsFromHull(hull1, niter)
+
+
+
+    ## TEST
+    inside_points = []
+    ###
+
+    # Do niter iterations
+    for i in range(niter):
+
+        # Check if the point is inside the other hull
+        inside = pointInsideConvexHull(hull2, test_points[i])
+
+        if inside:
+            inside_count += 1
+
+            ## TEST
+            inside_points.append(test_points[i])
+
+
+    ratio = float(inside_count)/niter
+
+
+
+    # from mpl_toolkits.mplot3d import Axes3D
+    # import matplotlib.pyplot as plt
+
+    # fig = plt.figure()
+    # ax = fig.add_subplot(111, projection='3d')
+
+    # colors = ['g', 'y']
+    # for verts, color in zip([hull1, hull2], colors):
+
+    #     hull = scipy.spatial.ConvexHull(verts)
+
+    #     # Plot vertices
+    #     ax.plot(verts.T[0], verts.T[1], verts.T[2], c=color)
+
+    #     # Plot edges
+    #     for simp in hull.simplices:
+
+    #         # Cycle to the first coordinate
+    #         simp = np.append(simp, simp[0])
+
+    #         # Plot the edge
+    #         ax.plot(verts[simp, 0], verts[simp, 1], verts[simp, 2], c=color)
+
+
+    # # Plot convex hull1 vertices
+    # #ax.scatter(hull1[:, 0], hull1[:, 1], hull1[:, 2], c='g')
+
+    # # Plot convex hull2 vertices
+    # #ax.scatter(hull2[:, 0], hull2[:, 1], hull2[:, 2], c='y')
+
+
+    # # Plot all points
+    # for pt in test_points:
+
+    #     # Plot corner
+    #     ax.scatter(*pt, c='b')
+
+    # # Plot points inside both hulls
+    # for pt in inside_points:
+
+    #     # Plot corner
+    #     ax.scatter(*pt, c='r')
+
+
+    # # ax.set_xlim([-1, 1])
+    # # ax.set_ylim([-1, 1])
+    # # ax.set_zlim([-1, 1])
+    # plt.show()
+
+
+
+
+    # Return common volume if it was requested
+    if volume:
+        return ratio*scipy.spatial.ConvexHull(hull1).volume
+
+
+    # Return ratio otherwise
+    else:
+        return ratio
+
+        
+
+
+
+
 if __name__ == "__main__":
+
+    ### TESTS
 
     # Cx, Cy
     cx, cy = 229, 163
@@ -305,4 +491,47 @@ if __name__ == "__main__":
     y_diff = (img_rot0 - img0)/2
     x_diff = (img_rot1 - img1)/2
 
-    print cx_rot + x_diff, cy_rot + y_diff
+    print(cx_rot + x_diff, cy_rot + y_diff)
+
+
+
+    # Test hull functions
+    from mpl_toolkits.mplot3d import Axes3D
+    import matplotlib.pyplot as plt
+
+
+    # Define hull points
+    hull_vertices = np.array([
+        [100, 100, 120],
+        [ 98,  10, 120],
+        [  5,   8, 120],
+        [  3, 103, 120],
+
+        [80, 78,  70],
+        [81, 21,  70],
+        [22, 23,  70],
+        [19, 85, 70]])
+
+    # Point to check
+    point = np.array([10, 50, 80])
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection="3d")
+
+
+    print("Point", point, "inside the hull:", pointInsideConvexHull(hull_vertices, point))
+
+
+    # Take samples from the hull
+    samples_hull = samplePointsFromHull(hull_vertices, 100)
+
+    # Plot point
+    ax.scatter(*point, c='r')
+
+    # Plot hull
+    ax.scatter(hull_vertices[:, 0], hull_vertices[:, 1], hull_vertices[:, 2], c='b')
+
+    # Plot samples
+    ax.scatter(samples_hull[:, 0], samples_hull[:, 1], samples_hull[:, 2], c='g')
+
+    plt.show()

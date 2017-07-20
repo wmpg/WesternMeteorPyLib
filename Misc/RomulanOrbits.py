@@ -25,12 +25,12 @@ if __name__ == "__main__":
         if ('.met' in romulan_state_file) and os.path.isfile(romulan_state_path):
 
             # # Continue from the given .met file
-            # if (not '20121215_072101_A_RR.met' in romulan_state_file) and not started:
+            # if (not '20121215_015724_A_RR.met' in romulan_state_file) and not started:
             #     continue
 
-            # Do just the given .met file
-            if not "20121213_001806_A_RR" in romulan_state_file:
-                continue
+            # # Do just the given .met file
+            # if not "20121215_032737_A_RR" in romulan_state_file:
+            #     continue
 
 
             started = True
@@ -49,7 +49,19 @@ if __name__ == "__main__":
             # Load data from the .met file
             met = loadMet(romulan_solution_path, romulan_state_file, mirfit=False)
 
+            # Handle all solver errors
+            # while True:
+            #     try:
+
             # Run the trajectory solver
-            solveTrajectoryMet(met, solver='original', show_plots=False, mc_pick_multiplier=2)
+            solveTrajectoryMet(met, solver='gural', show_plots=False, mc_pick_multiplier=2)
+            #solveTrajectoryMet(met, solver='original', show_plots=True, monte_carlo=False)
+
+                #     break
+
+                # except:
+
+                #     continue
+
             
             

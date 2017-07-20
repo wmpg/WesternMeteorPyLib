@@ -846,8 +846,8 @@ def timingAndVelocityResiduals(params, observations, t_ref_station, ret_stddev=F
     # Choose the referent lag
     ref_time, ref_lag = lags[t_ref_station]
 
-    # Do a spline fit on the referent lag
-    ref_line_spline = scipy.interpolate.CubicSpline(ref_time, ref_lag, extrapolate=True)
+    # Do a monotonic cubic spline fit on the referent lag
+    ref_line_spline = scipy.interpolate.PchipInterpolator(ref_time, ref_lag, extrapolate=True)
 
     residual_sum = 0
     stddev_sum = 0
@@ -937,8 +937,8 @@ def timingResiduals(params, observations, t_ref_station, ret_stddev=False):
     # Choose the referent station time and distances
     ref_time, ref_dist = state_vect_distances[t_ref_station]
 
-    # Do a spline fit on the referent state vector distance
-    ref_line_spline = scipy.interpolate.CubicSpline(ref_time, ref_dist, extrapolate=True)
+    # Do a monotonic cubic spline fit on the referent state vector distance
+    ref_line_spline = scipy.interpolate.PchipInterpolator(ref_time, ref_dist, extrapolate=True)
 
     residual_sum = 0
     stddev_sum = 0
@@ -1034,6 +1034,12 @@ class MCUncertanties(object):
         # Latitude of the referent point on the trajectory (rad)
         self.lat_ref = None
 
+        # Apparent zenith angle (before the correction for Earth's gravity)
+        self.zc = None
+
+        # Zenith distance of the geocentric radiant (after the correction for Earth's gravity)
+        self.zg = None
+
         # Velocity at infinity
         self.v_inf = None
 
@@ -1052,14 +1058,17 @@ class MCUncertanties(object):
         # (in kilometers)
         self.meteor_pos = None
 
-        # Apparent zenith angle (before the correction for Earth's gravity)
-        self.zc = None
-
-        # Zenith distance of the geocentric radiant (after the correction for Earth's gravity)
-        self.zg = None
-
         # Helioventric velocity of the meteor (m/s)
         self.v_h = None
+
+        # Corrected heliocentric velocity vector of the meteoroid using the method of Sato & Watanabe (2014)
+        self.v_h_x = None
+        self.v_h_y = None
+        self.v_h_z = None
+
+        # Corrected ecliptci coordinates of the meteor using the method of Sato & Watanabe (2014)
+        self.L_h = None
+        self.B_h = None
 
         # Solar longitude (radians)
         self.la_sun = None
@@ -1182,10 +1191,17 @@ def calcMCUncertanties(traj_list, traj_best):
         un.zg = np.std([traj.orbit.zg for traj in traj_list])
 
 
-        # Ecliptic
+        # Ecliptic geocentric
         un.L_g = scipy.stats.circstd([traj.orbit.L_g for traj in traj_list])
         un.B_g = np.std([traj.orbit.B_g for traj in traj_list])
         un.v_h = np.std([traj.orbit.v_h for traj in traj_list])
+
+        # Ecliptic heliocentric
+        un.L_h = scipy.stats.circstd([traj.orbit.L_h for traj in traj_list])
+        un.B_h = np.std([traj.orbit.B_h for traj in traj_list])
+        un.v_h_x = np.std([traj.orbit.v_h_x for traj in traj_list])
+        un.v_h_y = np.std([traj.orbit.v_h_y for traj in traj_list])
+        un.v_h_z = np.std([traj.orbit.v_h_z for traj in traj_list])
 
         # Orbital elements
         un.la_sun = scipy.stats.circstd([traj.orbit.la_sun for traj in traj_list])
@@ -1329,11 +1345,16 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
     ##########################################################################################################
 
     # TESTING!!!!!!!!!!!
-    # Take only those solutions which have the length standard deviation <= than the initial solution
-    mc_results = [mc_traj for mc_traj in mc_results if mc_traj.length_stddev <= traj.length_stddev]
+    # # Take only those solutions which have the length standard deviation <= than the initial solution
+    # mc_results = [mc_traj for mc_traj in mc_results if mc_traj.length_stddev <= traj.length_stddev]
+
+    # Take only those solutions which have the length residuals <= than the initial solution
+    mc_results = [mc_traj for mc_traj in mc_results if mc_traj.length_res <= traj.length_res]
 
     ##########
 
+    # Reject those solutions for which LoS angle minimization failed
+    mc_results = [mc_traj for mc_traj in mc_results if mc_traj.los_mini_status == True]
 
     # Reject those solutions for which the orbit could not be calculated
     mc_results = [mc_traj for mc_traj in mc_results if mc_traj.orbit.ra_g is not None]
@@ -1345,9 +1366,14 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
 
 
 
-    # Choose the solution with the lowest length residuals as the best solution
+    # Choose the solution with the lowest length residuals as the best solution - THIS GIVES BETTER RESULTS
+    # THAN STDDEV!!!
     length_res_trajs = [traj_tmp.length_res for traj_tmp in mc_results]
     best_traj_ind = length_res_trajs.index(min(length_res_trajs))
+
+    # # Choose the solution with the lowest length standard deviation as the best solution
+    # length_res_trajs = [traj_tmp.length_stddev for traj_tmp in mc_results]
+    # best_traj_ind = length_res_trajs.index(min(length_res_trajs))
 
     # Choose the best trajectory
     traj_best = mc_results[best_traj_ind]
@@ -1365,10 +1391,10 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
         ra_g_list = np.array([traj_temp.orbit.ra_g for traj_temp in mc_results])
         dec_g_list = np.array([traj_temp.orbit.dec_g for traj_temp in mc_results])
         v_g_list = np.array([traj_temp.orbit.v_g for traj_temp in mc_results])/1000
-        length_stddev_list = np.array([traj_temp.length_stddev for traj_temp in mc_results])
+        length_res_list = np.array([traj_temp.length_res for traj_temp in mc_results])
 
         # Color code Vg and length standard deviation
-        for plt_flag in ['vg', 'len_std']:
+        for plt_flag in ['vg', 'len_res']:
 
             # Init a celestial plot
             m = CelestialPlot(ra_g_list, dec_g_list, projection='stere', bgcolor='w')
@@ -1377,9 +1403,9 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
                 m.scatter(ra_g_list, dec_g_list, c=v_g_list, s=2)
                 m.colorbar(label='$V_g$ (km/s)')
 
-            elif plt_flag == 'len_std':
-                m.scatter(ra_g_list, dec_g_list, c=length_stddev_list, s=2)
-                m.colorbar(label='$\sigma_L$ (m)')
+            elif plt_flag == 'len_res':
+                m.scatter(ra_g_list, dec_g_list, c=length_res_list, s=2)
+                m.colorbar(label='Length residuals (m)')
 
             plt.title('Monte Carlo - geocentric radiant')
             # plt.xlabel('$\\alpha_g (\\degree)$')
@@ -1504,6 +1530,9 @@ class Trajectory(object):
         # List of observations
         self.observations = []
 
+        # Minimization status - if True if LoS angle minimization is successfull, False otherwise
+        self.los_mini_status = False
+
         # Index of the station with the referent time
         self.t_ref_station = 0
 
@@ -1542,6 +1571,9 @@ class Trajectory(object):
 
         # Orbit object which contains orbital parameters
         self.orbit = None
+
+        # Uncertanties calculated using Monte Carlo
+        self.uncertanties = None
 
 
 
@@ -1726,7 +1758,8 @@ class Trajectory(object):
             length along the trail.
 
         Arguments:
-            observations: [list] A list of ObservationPoints objects.
+            observations: [list] A list of ObservationPoints objects which hold measurements from individual
+                stations.
         """
 
         # Go through observations from all stations
@@ -1807,6 +1840,19 @@ class Trajectory(object):
         """ Estimates time offsets between the stations by matching time vs. distance from state vector. 
             The initial velocity is calculated by fitting a line to the first 25% of time-corrected
             time vs. distance from state vector data.
+
+        Arguments:
+            observations: [list] A list of ObservationPoints objects which hold measurements from individual
+                stations.
+
+        Return:
+            (velocity_fit, v_init_mini, time_diffs, observations): [tuple]
+                velocity_fit: [tuple] (slope, intercept) tuple of a line fit on the time vs. length data.
+                v_init_mini: [float] Estimated initial velocity in m/s.
+                time_diffs: [ndarray] Estimated time offsets from individual stations.
+                observations: [list] A list of ObservationPoints objects which hold measurements from 
+                    individual stations. These objects are modified during timing estimations.
+
         """
 
         # Take the initial velocity as the median velocity between all sites
@@ -1841,7 +1887,7 @@ class Trajectory(object):
 
 
         # Try different methods of optimization until it is successful
-        methods = ['SLSQP', 'TNC']
+        methods = ['SLSQP', 'TNC', None]
         for opt_method in methods:
 
             # Run the minimization of residuals between lags of all stations
@@ -1902,14 +1948,14 @@ class Trajectory(object):
             stddev_list = []
 
             # Calculate the velocity on different initial portions of the trajectory
-            for part in np.arange(0.2, 0.8, 0.05):
+            for part in np.arange(0.25, 0.8, 0.05):
 
                 # Get the index of the first portion of points
                 part_size = int(part*len(times))
 
-                # Make sure there are at least 4 points
-                if part_size < 4:
-                    part_size = 4
+                # Make sure there are at least 4 points per every station
+                if part_size < 4*len(observations):
+                    part_size = 4*len(observations)
 
                 # Select only the first part of all points
                 times_part = times[:part_size]
@@ -1966,6 +2012,15 @@ class Trajectory(object):
     def calcLLA(self, state_vect, radiant_eci, observations):
         """ Calculate latitude, longitude and altitude of every point on the obesrver line of sight, 
             which is closest to the radiant line.
+
+        Arguments:
+            state_vect: [ndarray] (x, y, z) ECI coordinates of the initial state vector (meters).
+            radiant_eci: [ndarray] (x, y, z) components of the unit radiant direction vector.
+            observations: [list] A list of ObservationPoints objects which hold measurements from individual
+                stations.
+
+        Return:
+            None
 
         """
 
@@ -2053,6 +2108,15 @@ class Trajectory(object):
         """ Calculate ECI coordinates of both CPAs (observed and radiant), equatorial and alt-az coordinates 
             of CPA positions on the radiant line. 
 
+        Arguments:
+            state_vect: [ndarray] (x, y, z) ECI coordinates of the initial state vector (meters).
+            radiant_eci: [ndarray] (x, y, z) components of the unit radiant direction vector.
+            observations: [list] A list of ObservationPoints objects which hold measurements from individual
+                stations.
+
+        Return:
+            None
+
         """
 
 
@@ -2132,6 +2196,16 @@ class Trajectory(object):
     def calcAverages(self, observations):
         """ Calculate the average velocity, the average ECI position of the trajectory and the average 
             Julian date of the trajectory.
+
+        Arguments:
+            observations: [list] A list of ObservationPoints objects which hold measurements from individual
+                stations.
+
+        Return:
+            (v_avg, eci_avg, jd_avg): [tuple]
+                v_avg: [float] Average velocity of the meteor in m/s.
+                eci_avg: [ndarray] (x, y, z) ECI coordinates of the average point on the trajectory (meters).
+                jd_avg: [float] Julian date of the average time of the trajectory.
 
         """
 
@@ -2329,9 +2403,10 @@ class Trajectory(object):
         out_str += " a2 = {:.6f}\n".format(self.jacchia_fit[1])
         out_str += "\n"
 
-        out_str += "Standard deviation from the referent state vector distance:\n"
+        out_str += "Deviation from the referent state vector distance:\n"
         out_str += "  Station with referent time: {:s}\n".format(str(self.observations[self.t_ref_station].station_id))
-        out_str += "  Stddev = {:.2f} m\n".format(self.length_stddev)
+        out_str += "  Residuals = {:.2f} m\n".format(self.length_res)
+        out_str += "  Stddev    = {:.2f} m\n".format(self.length_stddev)
         out_str += "\n"
 
         out_str += "Begin:\n"
@@ -2357,7 +2432,6 @@ class Trajectory(object):
         out_str += "        ID, Lon +E (deg), Lat +N (deg), Ele (m), Jacchia a1, Jacchia a2, Beg Ele (m),  End Ht (m), +/- Obs ang (deg), +/- V (m), +/- H (m)\n"
         
         for obs in self.observations:
-            station_info = [obs.station_id, obs.lat, obs.lon, obs.ele]
 
             station_info = []
             station_info.append("{:>10s}".format(str(obs.station_id)))
@@ -2620,7 +2694,7 @@ class Trajectory(object):
                 alpha=0.5, zorder=3)
 
 
-        plt.title('Distances from state vector, RMS = ' + str(round(self.length_stddev, 2)) + ' m')
+        plt.title('Distances from state vector, Residuals = ' + str(round(self.length_res, 2)) + ' m')
 
         plt.ylabel('Time (s)')
         plt.xlabel('Distance from state vector (m)')
@@ -2814,7 +2888,7 @@ class Trajectory(object):
 
         # Plot the scale
         m.drawmapscale(ll_lon, ll_lat, lon_mean, lat_mean, scale_range, barstyle='fancy', units='km', 
-            fontcolor='0.5')
+            fontcolor='0.5', zorder=3)
 
 
         plt.legend()
@@ -3012,29 +3086,35 @@ class Trajectory(object):
     def moveStateVector(self, state_vect, radiant_eci, observations):
         """ Moves the state vector position along the radiant line until it is before any points which are
             projected on it. This is used to make sure that lengths and lags are properly calculated.
+        
+        Arguments:
+            state_vect: [ndarray] (x, y, z) ECI coordinates of the initial state vector (meters).
+            radiant_eci: [ndarray] (x, y, z) components of the unit radiant direction vector.
+            observations: [list] A list of ObservationPoints objects which hold measurements from individual
+                stations.
+
+        Return:
+            rad_cpa_beg: [ndarray] (x, y, z) ECI coordinates of the beginning point of the trajectory.
 
         """
 
-        k_list = []
+        rad_cpa_list = []
 
+        # Go through all observations from all stations
         for obs in observations:
 
             # Calculate closest points of approach (observed line of sight to radiant line) of the first point
+            # on the trajectory
             _, rad_cpa, _ = findClosestPoints(obs.stat_eci_los[0], obs.meas_eci_los[0], state_vect, 
                 radiant_eci)
 
-            # k is the parameter which determines if the relative distance from the state vector to the given
-            # point. k is negative if the state vector is in front of the given point
-            k = (rad_cpa - state_vect)/radiant_eci
-            k = np.sign(k[0])*vectMag(k)
-
-            k_list.append([k, rad_cpa])
+            rad_cpa_list.append(rad_cpa)
 
 
-        # Find location on the radiant which is behind every observed point
-        rad_cpa_min = k_list[np.argmax([x[0] for x in k_list])][1]
+        # Choose the state vector with the largest height
+        rad_cpa_beg = rad_cpa_list[np.argmax([vectMag(rad_cpa_temp) for rad_cpa_temp in rad_cpa_list])]
 
-        return rad_cpa_min
+        return rad_cpa_beg
 
 
 
@@ -3191,13 +3271,17 @@ class Trajectory(object):
             print(' Success:', minimize_solution.success)
             print(' Final function value:', minimize_solution.fun)
 
+
+        # Set the minimization status
+        self.los_mini_status = minimize_solution.success
+
         # If the minimization succeded
         if minimize_solution.success:
         
             # Unpack the solution
             self.state_vect_mini, self.radiant_eci_mini = np.hsplit(minimize_solution.x, 2)
 
-            # Set the state vector the the position of the foremost point projected on the radiant line
+            # Set the state vector to the position of the highest point projected on the radiant line
             self.state_vect_mini = self.moveStateVector(self.state_vect_mini, self.radiant_eci_mini, 
                 self.observations)
 
@@ -3217,7 +3301,6 @@ class Trajectory(object):
             print('Angle minimization failed altogether!')
 
             # If the solution did not succeed, set the values to intersecting plates solution
-            self.state_vect_mini = self.state_vect
             self.radiant_eci_mini = self.best_conv_inter.radiant_eci
 
             # Normalize radiant direction
@@ -3225,6 +3308,10 @@ class Trajectory(object):
 
             # Convert the minimized radiant solution to RA and Dec
             self.radiant_eq_mini = eci2RaDec(self.radiant_eci_mini)
+
+            # Calculate the state vector
+            self.state_vect_mini = self.moveStateVector(self.state_vect, self.radiant_eci_mini, 
+                self.observations)
 
         ######################################################################################################
 
@@ -3457,6 +3544,20 @@ class Trajectory(object):
             # Do a Monte Carlo estimate of the uncertanties in all calculated parameters
             traj_best, uncertanties = monteCarloTrajectory(self, mc_runs=self.mc_runs, 
                 mc_pick_multiplier=self.mc_pick_multiplier)
+
+
+            ### Save uncertainties to the trajectory object ###
+            if uncertanties is not None:
+                traj_uncer = copy.deepcopy(uncertanties)
+
+                # Remove the list of all MC trajectires (it is unecessarily big)
+                traj_uncer.mc_traj_list = []
+
+                # Set the uncertanties to the best trajectory
+                traj_best.uncertanties = traj_uncer
+
+            ######
+
 
         else:
             uncertanties = None

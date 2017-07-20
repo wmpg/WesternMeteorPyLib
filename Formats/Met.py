@@ -7,7 +7,7 @@ import numpy as np
 import scipy.stats
 import matplotlib.pyplot as plt
 
-from Formats.Plates import AffPlate, AstPlate
+from Formats.Plates import AffPlate, AstPlate, plateExactMap, plateScaleMap
 
 from Trajectory.Trajectory import Trajectory
 from Trajectory.GuralTrajectory import GuralTrajectory

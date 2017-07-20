@@ -152,7 +152,9 @@ class CelestialPlot(object):
 
 
             # Draw Dec lines
-            dec_lines = np.arange(np.floor(dec_min/label_angle_freq)*label_angle_freq, np.ceil(dec_max/label_angle_freq)*label_angle_freq, label_angle_freq)
+            dec_lines = np.arange(np.floor(dec_min/label_angle_freq)*label_angle_freq, \
+                np.ceil(dec_max/label_angle_freq)*label_angle_freq, label_angle_freq)
+
             self.m.drawparallels(dec_lines, labels=[True, False, False, False], color='0.25')
 
             ra_min_round = np.floor(ra_min/label_angle_freq)*label_angle_freq
@@ -164,10 +166,10 @@ class CelestialPlot(object):
 
             else:
                 ra_labels = np.arange(ra_min_round - 360, ra_max_round, label_angle_freq) + 360
-
-
             
-            self.m.drawmeridians(ra_labels, labels=[False, False, False, True], color='0.25')
+
+            self.m.drawmeridians(ra_labels, labels=[False, False, False, True], color='0.25', \
+                fmt=(lambda x: (u"%d\N{DEGREE SIGN}")%(x%360)))
 
             plt.gca().tick_params(axis='x', pad=15)
 
@@ -189,7 +191,7 @@ class CelestialPlot(object):
 
             # Draw RA lines
             ra_labels = np.arange(0, 360, label_angle_freq)
-            self.m.drawmeridians(ra_labels, labels=[True, False, False, True], color='0.25')
+            self.m.drawmeridians(ra_labels, color='0.25')
 
             ##################################################################################################
 

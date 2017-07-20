@@ -2,13 +2,13 @@ Meteoroid properties
 ncmp = 1 //maximum 10; masses (kg) follow, separate lines 1e-6 
 4.3e-5
 //density: (kg/m^3) 7500 1000
-2500
+3000
 //initial porosity
 0
 //heat of ablation: (J/kg) 5e5 1e6
 6e6
 //boiling point (K) 3130 1500
-2100
+1850
 //melting point (K) 1811 1490
 2000
 //specific heat (J/kg K) 450 1000
@@ -16,7 +16,7 @@ ncmp = 1 //maximum 10; masses (kg) follow, separate lines 1e-6
 //condensation coefficient psi 0.5 1.0
 0.5
 //molar mass (atomic units) 56 23
-30
+36
 //therm conductivity (J/ m s K) 80 1
 3
 //luminous efficiency (ratio, NOT percent! Thus, 0.007 is 0.7%)

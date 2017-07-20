@@ -10,7 +10,8 @@ from Config import config
 from Utils.Earth import calcEarthRectangularCoordJPL
 from Utils.SolarLongitude import jd2SolLonJPL
 from Utils.TrajConversions import J2000_JD, J2000_OBLIQUITY, AU, SUN_MU, SUN_MASS, G, jd2LST, jd2Date, \
-    eci2RaDec, altAz2RADec, raDec2AltAz, raDec2Ecliptic, cartesian2Geo, equatorialCoordPrecession, eci2RaDec
+    eci2RaDec, altAz2RADec, raDec2AltAz, raDec2Ecliptic, cartesian2Geo, equatorialCoordPrecession,\
+    eclipticToRectangularVelocityVect, correctedEclipticCoord
 from Utils.Math import vectNorm, vectMag, rotateVector
 
 
@@ -40,6 +41,12 @@ class Orbit(object):
         # Latitude of the referent point on the trajectory (rad)
         self.lat_ref = None
 
+        # Apparent zenith angle (before the correction for Earth's gravity)
+        self.zc = None
+
+        # Zenith distance of the geocentric radiant (after the correction for Earth's gravity)
+        self.zg = None
+
         # Velocity at infinity
         self.v_inf = None
 
@@ -58,14 +65,17 @@ class Orbit(object):
         # (in kilometers)
         self.meteor_pos = None
 
-        # Apparent zenith angle (before the correction for Earth's gravity)
-        self.zc = None
-
-        # Zenith distance of the geocentric radiant (after the correction for Earth's gravity)
-        self.zg = None
-
         # Helioventric velocity of the meteor (m/s)
         self.v_h = None
+
+        # Corrected heliocentric velocity vector of the meteoroid using the method of Sato & Watanabe (2014)
+        self.v_h_x = None
+        self.v_h_y = None
+        self.v_h_z = None
+
+        # Corrected ecliptci coordinates of the meteor using the method of Sato & Watanabe (2014)
+        self.L_h = None
+        self.B_h = None
 
         # Solar longitude (radians)
         self.la_sun = None
@@ -168,13 +178,21 @@ class Orbit(object):
                 multi=1.0/1000))
             out_str += "  Zg     = {:>9.5f}{:s} deg\n".format(np.degrees(self.zg), _uncer('{:.4f}', 'zg', 
                 deg=True))
-            out_str += "Radiant (ecliptic):\n"
-            out_str += "  L      = {:>9.5f}{:s} deg\n".format(np.degrees(self.L_g), _uncer('{:.4f}', 'L_g', 
+            out_str += "Radiant (ecliptic geocentric):\n"
+            out_str += "  Lg     = {:>9.5f}{:s} deg\n".format(np.degrees(self.L_g), _uncer('{:.4f}', 'L_g', 
                 deg=True))
-            out_str += "  B      = {:>+9.5f}{:s} deg\n".format(np.degrees(self.B_g), _uncer('{:.4f}', 'B_g', 
+            out_str += "  Bg     = {:>+9.5f}{:s} deg\n".format(np.degrees(self.B_g), _uncer('{:.4f}', 'B_g', 
                 deg=True))
             out_str += "  Vh     = {:>9.5f}{:s} km/s\n".format(self.v_h/1000, _uncer('{:.4f}', 'v_h', 
                 multi=1/1000.0))
+            out_str += "Radiant (ecliptic heliocentric):\n"
+            out_str += "  Lh     = {:>9.5f}{:s} deg\n".format(np.degrees(self.L_h), _uncer('{:.4f}', 'L_h', 
+                deg=True))
+            out_str += "  Bh     = {:>+9.5f}{:s} deg\n".format(np.degrees(self.B_h), _uncer('{:.4f}', 'B_h', 
+                deg=True))
+            out_str += "  Vh_x   = {:>9.5f}{:s} km/s\n".format(self.v_h_x, _uncer('{:.4f}', 'v_h_x'))
+            out_str += "  Vh_y   = {:>9.5f}{:s} km/s\n".format(self.v_h_y, _uncer('{:.4f}', 'v_h_y'))
+            out_str += "  Vh_z   = {:>9.5f}{:s} km/s\n".format(self.v_h_z, _uncer('{:.4f}', 'v_h_z'))
             out_str += "Orbit:\n"
             out_str += "  La Sun = {:>10.6f}{:s} deg\n".format(np.degrees(self.la_sun), _uncer('{:.4f}', 'la_sun', 
                 deg=True))
@@ -399,24 +417,25 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         meteor_pos = rotateVector(meteor_pos, np.array([1, 0, 0]), -J2000_OBLIQUITY)
 
 
-        # Convert the meteor's velocity to km/s
-        v_g = v_g/1000.0
-
         ##########################################################################################################
 
         # Calculate components of the heliocentric velocity of the meteor
-        v_h = np.zeros(3)
-        v_h[0] = earth_vel[0] - v_g*np.cos(L_g)*np.cos(B_g)
-        v_h[1] = earth_vel[1] - v_g*np.sin(L_g)*np.cos(B_g)
-        v_h[2] = earth_vel[2] - v_g*np.sin(B_g)
+        # v_h = np.zeros(3)
+        # v_h[0] = earth_vel[0] - v_g*np.cos(L_g)*np.cos(B_g)
+        # v_h[1] = earth_vel[1] - v_g*np.sin(L_g)*np.cos(B_g)
+        # v_h[2] = earth_vel[2] - v_g*np.sin(B_g)
+        v_h = np.array(earth_vel) + np.array(eclipticToRectangularVelocityVect(L_g, B_g, v_g/1000))
 
         # Calculate the heliocentric velocity in km/s
         v_h_mag = vectMag(v_h)
 
 
+        # Calculate the corrected ecliptic coordinates of the meteoroid using the method of 
+        # Sato and Watanabe (2014).
+        L_h, B_h, met_v_h = correctedEclipticCoord(L_g, B_g, v_g/1000, earth_vel)
+
+
         # Calculate the solar longitude
-        #la_sun = np.arctan2(earth_pos[1], earth_pos[0]) + np.pi
-        #la_sun = la_sun%(2*np.pi)
         la_sun = jd2SolLonJPL(jd_ref)
 
 
@@ -523,13 +542,17 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
 
 
         # Assign calculated parameters
-        orb.v_g = v_g*1000
+        orb.v_g = v_g
         orb.ra_g = ra_g
         orb.dec_g = dec_g
 
         orb.meteor_pos = meteor_pos
         orb.L_g = L_g
         orb.B_g = B_g
+
+        orb.v_h_x, orb.v_h_y, orb.v_h_z = met_v_h
+        orb.L_h = L_h
+        orb.B_h = B_h
 
         orb.zc = zc
         orb.zg = zg

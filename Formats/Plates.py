@@ -1,5 +1,6 @@
 """ Loading and handling scale and exact plates. """
 
+from __future__ import print_function, division, absolute_import
 
 import os
 import numpy as np
@@ -90,6 +91,8 @@ class AstPlate(object):
         self.th0 = 0.0
         self.phi0 = 0.0
 
+        self.rot = 0.0
+
         self.wid = 0
         self.ht = 0
 
@@ -132,10 +135,11 @@ class AstPlate(object):
         return "text " + str(self.text) + " starcat " + str(self.starcat) + " sitename " + \
             str(self.sitename) + " site " + str(self.site) + " lat " + str(self.lat) + " lon " + \
             str(self.lon) + " elev " + str(self.elev) + " ts " + str(self.ts) + " tu " + str(self.tu) + \
-            " th0 " + str(self.th0) + " phi0 " + str(self.phi0) + " wid " + str(self.wid) + " ht " + \
+            " th0 " + str(np.degrees(self.th0)) + " phi0 " + str(np.degrees(self.phi0)) + " wid " + str(self.wid) + " ht " + \
             str(self.ht) + " a " + str(self.a) + " da " + str(self.da) + " b " + str(self.b) + " db " + \
             str(self.db) + " c " + str(self.c) + " dc " + str(self.dc) + " d " + str(self.d) + " dd " + \
-            str(self.dd) + " flags " + str(self.flags)
+            str(self.dd) + " flags " + str(self.flags) + " rot {:.2f} deg".format(np.degrees(self.rot)) \
+            + " FOV: {:.2f} x {:.2f} deg".format(np.degrees(self.fov), np.degrees(self.fov/self.asp))
 
 
 
@@ -222,6 +226,48 @@ def loadExact(dir_path, file_name):
 
     # Calculate the conversion matrix
     exact.initM()
+
+
+    u = 0.5*exact.wid
+    v = 0.5*exact.ht
+
+    ### Calculate the FOV ###
+
+    a, b = plateExactMap(exact, 0.0, v)
+    c, d = plateExactMap(exact, 2.0*u, v)
+
+    dot  = np.sin(a)*np.cos(b)*np.sin(c)*np.cos(d)
+    dot += np.sin(a)*np.sin(b)*np.sin(c)*np.sin(d)
+    dot += np.cos(a)*np.cos(c)
+
+    # FOV width in radians
+    exact.fov = np.arccos(dot)
+
+    
+    a, b = plateExactMap(exact, u, 0.0)
+    c, d = plateExactMap(exact, u, 2.0*v)
+
+    dot  = np.sin(a)*np.cos(b)*np.sin(c)*np.cos(d)
+    dot += np.sin(a)*np.sin(b)*np.sin(c)*np.sin(d)
+    dot += np.cos(a)*np.cos(c)
+
+    # FOV ascept (width/height)
+    exact.asp = exact.fov/np.arccos(dot)
+
+    ######
+
+
+    ### Calculate the rotation ###
+    a, b = plateExactMap(exact, u, v)
+    x, y = plateExactMap(exact, a - np.radians(1.0), b, reverse_map=True)
+
+    rot = np.arctan2(v - y, x - u) - np.pi/2
+    if rot < -np.pi:
+        rot += 2*np.pi
+
+    exact.rot = rot
+
+    ######
 
 
     return exact
@@ -447,40 +493,40 @@ def plateScaleMap(scale, x, y, reverse_map=False):
 if __name__ == "__main__":
 
     # Scale plate file path
-    scale_dir_path = "/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20160927_030027_mir"
-    scale_file_name = "scale_01.aff"
+    scale_dir_path = "../MirfitPrepare/20160929_062945_mir"
+    scale_file_name = "scale_02.aff"
 
     # Load the scale plate
     scale = loadScale(scale_dir_path, scale_file_name)
 
-    print scale.M
+    print(scale)
 
     # Convert image (X, Y) to encoder (Hu, Hv)
     hu, hv = plateScaleMap(scale, 100, 100)
-    print hu, hv
+    print(hu, hv)
 
     # Reverse map (Hu, Hv) to (X, Y)
     x, y = plateScaleMap(scale, hu, hv, reverse_map=True)
-    print x, y
+    print(x, y)
 
 
     # Exact plate file path
-    exact_dir_path = "/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20160927_030027_mir"
-    exact_file_name = "exact_01.ast"
+    exact_dir_path = "../MirfitPrepare/20160929_062945_mir"
+    exact_file_name = "exact_02.ast"
 
     # Load the exact plate
     exact = loadExact(exact_dir_path, exact_file_name)
 
-    print exact.M
-    print 'Exact lat, lon {:>12.6f}, {:>12.6f}'.format(np.degrees(exact.lat), np.degrees(exact.lon)), exact.elev
+    print(exact)
+    print('Exact lat, lon {:>12.6f}, {:>12.6f}'.format(np.degrees(exact.lat), np.degrees(exact.lon)), exact.elev)
 
     # Convert (Hx, Hy) to (theta, phi)
     theta, phi = plateExactMap(exact, 31997, 22290)
 
-    print np.degrees(theta), np.degrees(phi)
+    print(np.degrees(theta), np.degrees(phi))
 
     # Convert (theta, phi) to (Hx, Hy)
-    print plateExactMap(exact, theta, phi, reverse_map=True)
+    print(plateExactMap(exact, theta, phi, reverse_map=True))
 
-    print 'exact test'
-    print plateExactMap(exact, np.radians(55.438), np.radians(128.128), reverse_map=True)
+    print('exact test')
+    print(plateExactMap(exact, np.radians(55.438), np.radians(128.128), reverse_map=True))

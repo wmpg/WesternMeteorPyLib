@@ -430,6 +430,9 @@ class GuralTrajectory(object):
         # Orbit solutions
         self.orbit = None
 
+        # Uncertainties (currently not used!)
+        self.uncertanties = None
+
         ######
 
 

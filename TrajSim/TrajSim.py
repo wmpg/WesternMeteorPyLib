@@ -18,7 +18,7 @@ from Utils.Math import angleBetweenSphericalCoords, vectMag
 
 
 
-def geocentric2apparentRadiant(ra_g, dec_g, v_g, state_vector, jd_ref):
+def geocentricRadiantToApparent(ra_g, dec_g, v_g, state_vector, jd_ref):
     """ Numerically converts the given geocentric radiant to the apparent radiant. 
 
     Arguments:
@@ -28,7 +28,11 @@ def geocentric2apparentRadiant(ra_g, dec_g, v_g, state_vector, jd_ref):
         state_vector: [ndarray of 3 elemens] (x, y, z) ECI coordinates of the initial state vector (meters).
         jd_ref: [float] Referent Julian date of the event.
 
-
+    Return:
+        (ra_a, dec_a, v_init): [list]
+            - ra_a: [float] Apparent R.A. (radians).
+            - dec_a: [float] Apparent declination (radians).
+            - v_init: [float] Initial velocity (m/s).
     """
 
     def _radiantDiff(radiant_eq, ra_g, dec_g, v_init, state_vector, jd_ref):
@@ -39,7 +43,11 @@ def geocentric2apparentRadiant(ra_g, dec_g, v_g, state_vector, jd_ref):
         radiant_eci = np.array(raDec2ECI(ra_a, dec_a))
 
         # Estimate the orbit with the given apparent radiant
-        orbit = calcOrbit(radiant_eci, v_init, v_init, state_vector, jd_ref, stations_fixed=False, referent_init=True)
+        orbit = calcOrbit(radiant_eci, v_init, v_init, state_vector, jd_ref, stations_fixed=False, \
+            referent_init=True)
+
+        if orbit.ra_g is None:
+            return None
 
         # Compare the difference between the calculated and the referent geocentric radiant
         return angleBetweenSphericalCoords(orbit.dec_g, orbit.ra_g, dec_g, ra_g)
@@ -52,7 +60,9 @@ def geocentric2apparentRadiant(ra_g, dec_g, v_g, state_vector, jd_ref):
     res = scipy.optimize.minimize(_radiantDiff, x0=[ra_g, dec_g], args=(ra_g, dec_g, v_init, state_vector, jd_ref), \
         bounds=[(0, 2*np.pi), (-np.pi, np.pi)], tol=1e-13, method='SLSQP')
 
-    return res.x
+    ra_a, dec_a = res.x
+
+    return ra_a, dec_a, v_init
 
 
 
@@ -105,7 +115,7 @@ if __name__ == "__main__":
 
 
 
-    ra_a, dec_a = geocentric2apparentRadiant(ra_g, dec_g, v_g, state_vector, jd_ref)
+    ra_a, dec_a, v_init = geocentricRadiantToApparent(ra_g, dec_g, v_g, state_vector, jd_ref)
 
     print('Apparent:')
     print('  R.A.:', np.degrees(ra_a))

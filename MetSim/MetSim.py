@@ -1,4 +1,4 @@
-from __future__ import print_function, division
+from __future__ import print_function, division, absolute_import
 
 
 import math
@@ -101,6 +101,12 @@ class MeteorProperties(object):
 
         # Heat of ablation  
         self.q = zero
+
+        # Drag coeficient
+        self.Gamma = 1.0
+
+        # Heat transfer coeficient
+        self.Lambda = 0.5
 
         # coefficient of condensation
         self.psi = zero
@@ -371,21 +377,21 @@ def massLoss(met, consts, rho_atm):
     if qb1/2 > met.m:
         qb1 = met.m*2
 
-    qb2 = consts.dt*consts.shape_fact*math.pow((met.m-qb1/2.0)*(1 + met.poros)/met.rho, 2.0/3)*met.psi \
+    qb2 = consts.dt*consts.shape_fact*math.pow((met.m - qb1/2.0)*(1 + met.poros)/met.rho, 2.0/3)*met.psi \
             *math.exp(met.q*met.m_mass/(K_BOLTZMAN*met.T_boil))*P_SUR \
             *math.exp(-met.q*met.m_mass/(K_BOLTZMAN*met.temp))/math.sqrt(2*math.pi*K_BOLTZMAN*met.temp/met.m_mass)
 
     if qb2/2 > met.m:
         qb2 = met.m*2
     
-    qb3 = consts.dt*consts.shape_fact*math.pow((met.m-qb2/2.0)*(1 + met.poros)/met.rho, 2.0/3)*met.psi \
+    qb3 = consts.dt*consts.shape_fact*math.pow((met.m - qb2/2.0)*(1 + met.poros)/met.rho, 2.0/3)*met.psi \
         *math.exp(met.q*met.m_mass/(K_BOLTZMAN*met.T_boil))*P_SUR \
         *math.exp(-met.q*met.m_mass/(K_BOLTZMAN*met.temp))/math.sqrt(2*math.pi*K_BOLTZMAN*met.temp/met.m_mass)
 
     if qb3 > met.m:
         qb3 = met.m
     
-    qb4 = consts.dt*consts.shape_fact*math.pow((met.m-qb3)*(1 + met.poros)/met.rho, 2.0/3)*met.psi \
+    qb4 = consts.dt*consts.shape_fact*math.pow((met.m - qb3)*(1 + met.poros)/met.rho, 2.0/3)*met.psi \
         *math.exp(met.q*met.m_mass/(K_BOLTZMAN*met.T_boil))*P_SUR \
         *math.exp(-met.q*met.m_mass/(K_BOLTZMAN*met.temp))/math.sqrt(2*math.pi*K_BOLTZMAN*met.temp/met.m_mass)
 
@@ -426,8 +432,6 @@ def tempChange(met, consts, rho_atm, scale_ht, lam, m_dot):
         - 4*SIGMA_B*consts.emiss*((met.temp + qc2/2.0)**4 - consts.T_a**4)*math.pow(met.Vtot, 2.0/3) \
         - sumqmdot)
 
-
-    ### QUESTION: second line, (met.temp + qc3)**4, should it be qc3/2.0 ?
     qc4 = consts.dt*(1/sumcpm)*(consts.shape_fact*math.pow(met.Vtot, 2.0/3)*lam*rho_atm*(met.v**3)/2.0 \
         - 4*SIGMA_B*consts.emiss*((met.temp + qc3)**4 - consts.T_a**4)*math.pow(met.Vtot, 2.0/3) - sumqmdot)
 
@@ -496,8 +500,11 @@ def ablate(met, consts):
     #   Lambda = 0.5
     # }
 
-    Gamma = 1.0
-    Lambda = 0.5
+    # Drag coeficient
+    #Gamma = 1.0
+
+    # Heat transfer coeficient
+    #Lambda = 0.5
 
     # Calculation of pressure acting on meteor: atmospheric pressure
     p1 = math.pow(10, (consts.press_co[0] + consts.press_co[1]*met.h/1000 
@@ -535,12 +542,12 @@ def ablate(met, consts):
         met.m_kill = consts.mkill
 
     # Calculate the change in temperature
-    T_dot = tempChange(met, consts, rho_atm, scale_ht, Lambda, m_dot)
+    T_dot = tempChange(met, consts, rho_atm, scale_ht, met.Lambda, m_dot)
 
     printd('T_dot', T_dot)
 
     # Three terms: fraction Lambda of kinetic energy of air, blackbody radiation, energy to ablate mass
-    dEair = (consts.shape_fact*(met.Vtot**(2.0/3))*Lambda*rho_atm*(met.v**3)/2.0)
+    dEair = (consts.shape_fact*(met.Vtot**(2.0/3))*met.Lambda*rho_atm*(met.v**3)/2.0)
     dErad = -4*SIGMA_B*consts.emiss*(met.temp**4 - consts.T_a**4)*met.Vtot**(2.0/3)
     dEdm = -met.q*m_dot
 
@@ -551,10 +558,10 @@ def ablate(met, consts):
     # Change in velocity
     # The change in velocity is calculated from the exchange of momentum with atmospheric molecules 
     # (McKinley 1961, Bronshten 1983)
-    qa1 = consts.dt*Gamma*consts.shape_fact*(met.Vtot**(2/3.0))*rho_atm*(met.v**2)/met.m
-    qa2 = consts.dt*Gamma*consts.shape_fact*(met.Vtot**(2/3.0))*rho_atm*((met.v + qa1/2.0)**2)/met.m
-    qa3 = consts.dt*Gamma*consts.shape_fact*(met.Vtot**(2/3.0))*rho_atm*((met.v + qa2/2.0)**2)/met.m
-    qa4 = consts.dt*Gamma*consts.shape_fact*(met.Vtot**(2/3.0))*rho_atm*((met.v + qa3)**2)/met.m
+    qa1 = consts.dt*met.Gamma*consts.shape_fact*(met.Vtot**(2/3.0))*rho_atm*(met.v**2)/met.m
+    qa2 = consts.dt*met.Gamma*consts.shape_fact*(met.Vtot**(2/3.0))*rho_atm*((met.v + qa1/2.0)**2)/met.m
+    qa3 = consts.dt*met.Gamma*consts.shape_fact*(met.Vtot**(2/3.0))*rho_atm*((met.v + qa2/2.0)**2)/met.m
+    qa4 = consts.dt*met.Gamma*consts.shape_fact*(met.Vtot**(2/3.0))*rho_atm*((met.v + qa3)**2)/met.m
 
     # Decelaration in m/s**2
     a_current = (qa1/6.0 + qa2/3.0 + qa3/3.0 + qa4/6.0)/consts.dt

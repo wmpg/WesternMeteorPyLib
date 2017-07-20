@@ -6,6 +6,7 @@ import os
 import numpy as np
 
 from Trajectory.Trajectory import Trajectory
+from Trajectory.GuralTrajectory import GuralTrajectory
 from Utils.TrajConversions import date2JD, jd2Date, jd2LST
 
 
@@ -171,7 +172,7 @@ def loadMiligInput(file_path):
 
 
 
-def solveTrajectoryMILIG(dir_path, file_name, **kwargs):
+def solveTrajectoryMILIG(dir_path, file_name, solver='original', **kwargs):
     """ Run the trajectory solver on data provided in the MILIG format input file. 
 
     Arguments:
@@ -193,17 +194,36 @@ def solveTrajectoryMILIG(dir_path, file_name, **kwargs):
     print('JD', jdt_ref)
 
     # Init the trajectory solver
-    traj = Trajectory(jdt_ref, output_dir=dir_path, meastype=3, **kwargs)
+    if solver == 'original':
+        traj = Trajectory(jdt_ref, output_dir=dir_path, meastype=3, **kwargs)
+
+    elif solver == 'gural':
+        traj = GuralTrajectory(len(stations), jdt_ref, velmodel=3, meastype=3, verbose=1, 
+            output_dir=dir_path)
+
+
 
     # Infill data from each station to the solver
     for station in stations:
+
         print(station)
-        traj.infillTrajectory(station.azim_data, station.zangle_data, station.time_data, station.lat, 
-            station.lon, station.height, station_id=station.station_id)
 
 
-    for obs in traj.observations:
-        print(np.degrees(obs.lat), np.degrees(obs.lon))
+
+
+        if solver == 'original':
+
+            traj.infillTrajectory(station.azim_data, station.zangle_data, station.time_data, station.lat, 
+                station.lon, station.height, station_id=station.station_id)
+
+        elif solver == 'gural':
+
+            traj.infillTrajectory(np.array(station.azim_data), np.array(station.zangle_data), 
+                np.array(station.time_data), station.lat, station.lon, station.height)
+
+
+    # for obs in traj.observations:
+    #     print(np.degrees(obs.lat), np.degrees(obs.lon))
 
     # Run the trajectory solver
     traj.run()
@@ -288,25 +308,29 @@ if __name__ == '__main__':
     # dir_path = "../MirfitPrepare/20161007_052749_mir/"
     # file_name = "input_00.txt"
 
-    dir_path = "/home/dvida/Desktop/krizy"
+    #dir_path = "/home/dvida/Desktop/krizy"
     #dir_path = '/home/dvida/Desktop/PyLIG_in_2011100809VIB0142'
     #dir_path = "/home/dvida/Desktop/PyLIG_in_2011100809PUB0030"
     #dir_path = "/home/dvida/Desktop/PyLIG_in_2011100809VIB0141"
     #dir_path = "/home/dvida/Desktop/PyLIG_in_2011100809DUI0066"
     #dir_path = "/home/dvida/Desktop/PyLIG_in_2016112223APO0002"
     #dir_path = os.path.abspath("../MILIG files")
+    #dir_path = os.path.abspath("../MILIG files/20170531_002824")
+    dir_path = os.path.abspath("../MILIG files/PyLIG_IN_Pula_2010102829")
 
-    file_name = "input_krizy_01.txt"
+    #file_name = "input_krizy_01.txt"
     #file_name = 'PyLIG_in_2011100809PUB0030.txt'
     #file_name = 'PyLIG_in_2011100809DUI0066.txt'
     #file_name = 'PyLIG_in_2011100809VIB0142.txt'
     #file_name = "PyLIG_in_2011100809VIB0141.txt"
     #file_name = "PyLIG_in_2016112223APO0002.txt"
     #file_name = "PyLIG_IN_Pula_2010102829.txt"
+    #file_name = "PyLIG_M_20170531_002824.txt"
+    file_name = "PyLIG_IN_Pula_2010102829.txt"
 
 
 
-    solveTrajectoryMILIG(dir_path, file_name, max_toffset=30.0, monte_carlo=True, mc_runs=500)
+    solveTrajectoryMILIG(dir_path, file_name, solver='original', max_toffset=30.0, monte_carlo=False, mc_runs=20)
 
     
 

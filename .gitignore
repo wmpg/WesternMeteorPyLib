@@ -15,3 +15,8 @@ VSOP87D.ear
 *.so
 *.so.0
 *.o
+
+# Build directories
+build/
+dist/
+WesternMeteorPyLib.egg-info/

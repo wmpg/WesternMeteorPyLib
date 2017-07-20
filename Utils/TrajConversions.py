@@ -38,7 +38,7 @@ import math
 import numpy as np
 from datetime import datetime, timedelta, MINYEAR
 
-from Utils.Math import vectNorm, vectMag
+from Utils.Math import vectNorm, vectMag, rotateVector
 
 
 ### CONSTANTS ###
@@ -458,7 +458,7 @@ def ecef2LatLonAlt(x, y, z):
     # Get distance from Earth centre to the position given by geographical coordinates, in WGS84
     N = EARTH.EQUATORIAL_RADIUS/math.sqrt(1.0 - (EARTH.E**2)*math.sin(lat)**2)
 
-    # Calculate the altitude in meters
+    # Calculate the height in meters
     alt = p/np.cos(lat) - N
 
     # Handle the case when in the Southern hemisphere
@@ -630,6 +630,40 @@ def eci2RaDec(eci):
 
     
 
+def rotatePolar(azim, dec, azim_rot, elev_rot):
+    """ Rotate the given polar coordinates on a sphere by the given azimuth and elevation.
+    
+    Arguments:
+        azim: [float] Azimuth of coordinates to be rotated.
+        dec: [float] Elevation of coordinates to be rotated.
+        azim_rot: [float] Azimuth for which the input coordinates will be rotated on a sphere.
+        elev_rot: [float] Elevation for which the input coordinates will be rotated on a sphere.
+
+    Return:
+        (azim, dec): [floats] Rotated coordinates.
+
+    """
+
+    # Convert the angles to cartesian unit vectors
+    cartesian_vect = np.array(raDec2ECI(azim, dec))
+
+
+    # Rotate elevation
+    cartesian_vect = rotateVector(cartesian_vect, np.array([0, 1, 0]), -elev_rot)
+
+    # Rotate azimuth
+    cartesian_vect = rotateVector(cartesian_vect, np.array([0, 0, 1]), azim_rot)
+
+
+    # Convert carterian unit vector to polar coordinates
+    azim, dec = np.array(eci2RaDec(cartesian_vect))
+
+
+    return azim, dec
+
+
+
+
 def raDec2Ecliptic(jd, ra, dec):
     """ Convert right ascension and declinatoin to ecliptic longitude and latitude.
 
@@ -705,10 +739,69 @@ def rectangular2EclipticCoord(x, y, z):
     # Convert the distance to AU
     r_au = r/AU
 
-    print(r)
-
 
     return L, B, r_au
+
+
+
+def eclipticToRectangularVelocityVect(L, B, v):
+    """ Calculate heliocentric velocity component given the ecliptic latitude, longitude and heliocentric 
+        velocity.
+
+    Arguments:
+        L: [float] Ecliptic longitude (radians).
+        B: [float] Ecliptic latitude (radians).
+        v: [float] Heliocentric velocity.
+
+    Return:
+        (x, y, z): [tuple of floats] Heliocentric velocity components.
+    """
+
+
+    x = -v*np.cos(L)*np.cos(B)
+    y = -v*np.sin(L)*np.cos(B)
+    z = -v*np.sin(B)
+
+    return x, y, z
+
+
+
+def correctedEclipticCoord(L_g, B_g, v_g, earth_vel):
+    """ Calculates the corrected ecliptic coordinates using the method of Sato and Watanabe (2014).
+    
+    Arguments:
+        L_g: [float] Geocentric ecliptic longitude (radians).
+        B_g: [float] Geocentric ecliptic latitude (radians).
+        v_g: [float] Geocentric velocity (km/s).
+        earth_vel: [3 element ndarray] Earh velocity vector (km/s)
+
+    Return:
+        L_h, B_h, met_v_h:
+            L_h: [float] Corrected ecliptic longitude (radians).
+            B_h: [float] Corrected ecliptic latitude (radians).
+            met_v_h: [3 element ndarray] Heliocentric velocity vector of the meteoroid (km/s).
+    """
+
+    # Calculate velocity components of the meteor
+    xm, ym, zm = eclipticToRectangularVelocityVect(L_g, B_g, v_g)
+
+    # Calculate the heliocentric velocity vector magnitude
+    v_h = vectMag(np.array(earth_vel) + np.array([xm, ym, zm]))
+
+    # Calculate the corrected meteoroid velocity vector
+    xm_c = (xm + earth_vel[0])/v_h
+    ym_c = (ym + earth_vel[1])/v_h
+    zm_c = (zm + earth_vel[2])/v_h
+
+    # Calculate corrected radiant in ecliptic coordinates
+    L_h = np.arctan2(ym_c, xm_c)
+    B_h = np.arcsin(zm_c)
+
+    # Calculate the heliocentric velocity vector of the meteoroid
+    xh, yh, zh = eclipticToRectangularVelocityVect(L_h, B_h, v_h)
+
+    return L_h, B_h, np.array([xh, yh, zh])
+
 
 
 
