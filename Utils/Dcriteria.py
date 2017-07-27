@@ -9,6 +9,118 @@ import math
 SPEED_EARTH = 29.7
 
 
+def calcDSH(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2):
+    """ Calculate the Southworth and Hawking meteoroid orbit dissimilarity criterion.
+
+    Arguments:
+        q1: [double] perihelion distance of the first orbit
+        e1: [double] num. eccentricity of the first orbit
+        i1: [double] inclination of the first orbit (rad)
+        O1: [double] longitude of ascending node of the first orbit (rad)
+        w1: [double] argument of perihelion of the first orbit (rad)
+        q2: [double] perihelion distance of the second orbit
+        e2: [double] num. eccentricity of the second orbit
+        i2: [double] inclination of the second orbit (rad)
+        O2: [double] longitude of ascending node of the second orbit (rad)
+        w2: [double] argument of perihelion of the second orbit (rad)
+
+    Return:
+        [double] D_SH value
+
+    """
+
+    rho = 1
+
+    if (abs(O2 - O1) > math.pi):
+        rho = -1
+
+
+    I21 = math.acos(math.cos(i1)*math.cos(i2) + math.sin(i1)*math.sin(i2)*math.cos(O2 - O1))
+
+    pi21 = w2 - w1 + 2*rho*math.asin(math.cos((i2 + i1)/2.0)*math.sin((O2 - O1)/2.0)*(1/math.cos(I21/2.0)))
+
+    DSH2 = pow((e2 - e1), 2) + pow((q2 - q1), 2) + pow((2 * math.sin(I21/2.0)), 2) + \
+        pow((e2 + e1)/2.0, 2)*pow((2 * math.sin(pi21 / 2.0)), 2)
+
+
+    return math.sqrt(DSH2)
+
+
+
+
+def calcDH(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2):
+    """ Calculate the Jopek meteoroid orbit dissimilarity criterion.
+
+    Arguments:
+        q1: [double] perihelion distance of the first orbit
+        e1: [double] num. eccentricity of the first orbit
+        i1: [double] inclination of the first orbit (rad)
+        O1: [double] longitude of ascending node of the first orbit (rad)
+        w1: [double] argument of perihelion of the first orbit (rad)
+        q2: [double] perihelion distance of the second orbit
+        e2: [double] num. eccentricity of the second orbit
+        i2: [double] inclination of the second orbit (rad)
+        O2: [double] longitude of ascending node of the second orbit (rad)
+        w2: [double] argument of perihelion of the second orbit (rad)
+
+    Return:
+        [double] D_H value
+
+    """
+
+    I21 = math.acos(math.cos(i1)*math.cos(i2) + math.sin(i1)*math.sin(i2)*math.cos(O2 - O1))
+
+    pi21 = w2 - w1 + 2*math.asin(math.cos((i2 + i1)/2.0)*math.sin((O2-O1)/2.0)*1/math.cos(I21/2.0))
+
+    DH2 = (e2 - e1)**2 + ((q2 - q1)/(q2 + q1))**2 + (2*math.sin(I21/2.0))**2 \
+        + ((e2 + e1)/2.0)**2*(2*math.sin(pi21/2.0))**2
+
+    return math.sqrt(DH2)
+
+
+
+
+def calcDD(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2):
+    """ Calculate the Drummond (1981) meteoroid orbit dissimilarity criterion.
+
+    Arguments:
+        q1: [double] perihelion distance of the first orbit
+        e1: [double] num. eccentricity of the first orbit
+        i1: [double] inclination of the first orbit (rad)
+        O1: [double] longitude of ascending node of the first orbit (rad)
+        w1: [double] argument of perihelion of the first orbit (rad)
+        q2: [double] perihelion distance of the second orbit
+        e2: [double] num. eccentricity of the second orbit
+        i2: [double] inclination of the second orbit (rad)
+        O2: [double] longitude of ascending node of the second orbit (rad)
+        w2: [double] argument of perihelion of the second orbit (rad)
+
+    Return:
+        [double] D_H value
+
+    """
+
+    I21 = math.acos(math.cos(i1)*math.cos(i2) + math.sin(i1)*math.sin(i2)*math.cos(O2 - O1))
+
+    lambda1 = O1 + math.atan2(math.cos(i1)*math.sin(w1), math.cos(w1))
+
+    beta1 = math.asin(math.sin(i1)*math.sin(w1))
+
+    lambda2 = O2 + math.atan2(math.cos(i2)*math.sin(w2), math.cos(w2))
+
+    beta2 = math.asin(math.sin(i2)*math.sin(w2))
+
+    theta21 = math.acos(math.sin(beta1)*math.sin(beta2) + math.cos(beta1)*math.cos(beta2)*math.cos(lambda2 \
+        - lambda1))
+
+    DD2 = ((e2 - e1)/(e2 + e1))**2 + ((q2 - q1)/(q2 + q1))**2 + (I21/math.pi)**2 \
+        + ((e2 + e1)/2.0)**2*(theta21/math.pi)**2
+
+    return math.sqrt(DD2)
+
+
+
+
 def calcVgComponents(ra, dec, sol, vg):
     """ Calculates geocentric velovity (Vg) components relative to Earth velocity. All components are in 
         J2000.0 and all angles are in radians. Used for calculating the Valsecchi D criteria, needed for 
@@ -57,26 +169,26 @@ def calcDN(ra1, dec1, sol1, vg1, ra2, dec2, sol2, vg2, d_max=999.0):
 
     Arguments:
         point1: [double pointer] container for:
-            ra1: [double] right ascension, 1st orbit (deg)
-            dec1: [double] declination, 1st orbit (deg)
-            sol1: [double] solar longitude, 1st orbit (deg)
+            ra1: [double] right ascension, 1st orbit (radians)
+            dec1: [double] declination, 1st orbit (radians)
+            sol1: [double] solar longitude, 1st orbit (radians)
             vg1: [double] geocentric velocity, 1st orbit (km/s)
             q1: [double] perihelion distance of the first orbit
             e1: [double] num. eccentricity of the first orbit
-            i1: [double] inclination of the first orbit (deg)
-            O1: [double] longitude of ascending node of the first orbit (deg)
-            w1: [double] argument of perihelion of the first orbit (deg)
+            i1: [double] inclination of the first orbit (radians)
+            O1: [double] longitude of ascending node of the first orbit (radians)
+            w1: [double] argument of perihelion of the first orbit (radians)
 
         point2: [double pointer] container for:
-            ra2: [double] right ascension, 2nd orbit (deg)
-            dec2: [double] declination, 2nd orbit (deg)
-            sol2: [double] solar longitude, 2nd orbit (deg)
+            ra2: [double] right ascension, 2nd orbit (radians)
+            dec2: [double] declination, 2nd orbit (radians)
+            sol2: [double] solar longitude, 2nd orbit (radians)
             vg2: [double] geocentric velocity, 2nd orbit (km/s)
             q2: [double] perihelion distance of the second orbit
             e2: [double] num. eccentricity of the second orbit
-            i2: [double] inclination of the second orbit (deg)
-            O2: [double] longitude of ascending node of the second orbit (deg)
-            w2: [double] argument of perihelion of the second orbit (deg)
+            i2: [double] inclination of the second orbit (radians)
+            O2: [double] longitude of ascending node of the second orbit (radians)
+            w2: [double] argument of perihelion of the second orbit (radians)
 
         d_max: [double] maximum value of the criterion, if larger than that number, 999.0 will be returned
             (used for speeding up the algorithm)
@@ -84,14 +196,6 @@ def calcDN(ra1, dec1, sol1, vg1, ra2, dec2, sol2, vg2, d_max=999.0):
     Return:
         [double] Valsecchi D criterion value
     """
-
-    # Unpack input values and convert to radians
-    ra1  = math.radians(ra1)
-    dec1 = math.radians(dec1)
-    sol1 = math.radians(sol1)
-    ra2  = math.radians(ra2)
-    dec2 = math.radians(dec2)
-    sol2 = math.radians(sol2)
 
     # Define weights
     w1 = 1.0
@@ -232,7 +336,7 @@ def calcDN(ra1, dec1, sol1, vg1, ra2, dec2, sol2, vg2, d_max=999.0):
 
 
 
-def calcDHuncert(Lh1, Lh1_std, Bh1, Bh1_std, sol1, Vh1, Vh1_std, Lh2, Lh2_std, Bh2, Bh2_std, sol2, Vh2, Vh2_std, 
+def calcDVuncert(Lh1, Lh1_std, Bh1, Bh1_std, sol1, Vh1, Vh1_std, Lh2, Lh2_std, Bh2, Bh2_std, sol2, Vh2, Vh2_std, 
     d_max=999.0):
     """ D criterion calculated using Vida et al. 2017 (TBP) which uses the corrected heliocentric velocity
         vector (correction by Sato & Watanabe 2017) and Valsecchi-type D criterion approach of calculating
@@ -326,7 +430,7 @@ def calcDHuncert(Lh1, Lh1_std, Bh1, Bh1_std, sol1, Vh1, Vh1_std, Lh2, Lh2_std, B
 
 
 
-def calcDH(Lh1, Bh1, sol1, Vh1, Lh2, Bh2, sol2, Vh2, d_max=999.0):
+def calcDV(Lh1, Bh1, sol1, Vh1, Lh2, Bh2, sol2, Vh2, d_max=999.0):
     """ D criterion calculated using Vida et al. 2017 (TBP) which uses the corrected heliocentric velocity
         vector (correction by Sato & Watanabe 2017) and Valsecchi-type D criterion approach of calculating
         the similarity between orbits.

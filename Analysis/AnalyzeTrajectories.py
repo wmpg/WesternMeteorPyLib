@@ -15,7 +15,7 @@ from Utils.Pickling import loadPickle
 from Utils.OSTools import listDirRecursive
 from Utils.Math import angleBetweenSphericalCoords
 
-from Utils.Dcriteria import calcDN, calcDH, calcDHuncert
+from Utils.Dcriteria import calcDN, calcDV, calcDVuncert
 
 
 def calculateDistanceProfile(inputs, metric):
@@ -154,8 +154,6 @@ def plotRadiants(pickle_trajs, plot_type='geocentric', ra_cent=None, dec_cent=No
                 traj.orbit.ra_g) > np.radians(radius):
                 continue
 
-        
-
 
         ra_list.append(traj.orbit.ra_g)
         dec_list.append(traj.orbit.dec_g)
@@ -197,7 +195,7 @@ def plotRadiants(pickle_trajs, plot_type='geocentric', ra_cent=None, dec_cent=No
         # Create inputs for calculating the distance profile
         distance_input = []
         for ra, dec, sol, vg in zip(ra_list, dec_list, sol_list, vg_list):
-            distance_input.append([np.degrees(ra), np.degrees(dec), np.degrees(sol), vg/1000])
+            distance_input.append([ra, dec, sol, vg/1000])
 
         # Calculate the distance profile
         dist_profile = calculateDistanceProfile(distance_input, calcDN)
@@ -218,7 +216,7 @@ def plotRadiants(pickle_trajs, plot_type='geocentric', ra_cent=None, dec_cent=No
                 distance_input.append([Lh, Lh_std, Bh, Bh_std, sol, vh/1000, vh_std/1000])
 
             # Calculate the distance profile
-            dist_profile = calculateDistanceProfile(distance_input, calcDHuncert)
+            dist_profile = calculateDistanceProfile(distance_input, calcDVuncert)
     
         else:
 
@@ -226,7 +224,7 @@ def plotRadiants(pickle_trajs, plot_type='geocentric', ra_cent=None, dec_cent=No
                 distance_input.append([Lh, Bh, sol, vh/1000])
 
             # Calculate the distance profile
-            dist_profile = calculateDistanceProfile(distance_input, calcDH)
+            dist_profile = calculateDistanceProfile(distance_input, calcDV)
 
 
 

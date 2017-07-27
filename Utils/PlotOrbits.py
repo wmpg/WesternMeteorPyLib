@@ -223,7 +223,8 @@ def plotPlanets(ax, time):
 
 
 
-def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, save_plots=False, plot_path=None):
+def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, save_plots=False, plot_path=None, 
+    plt_handle=None, **kwargs):
     """ Plot the given orbits in the Solar System. 
 
     Arguments:
@@ -241,6 +242,8 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, save_pl
         plot_planets: [bool] If True, planets will be plotted. True by default.
         save_plots: [bool] If True, plots will be saved to the given path under plot_path. False by default.
         plot_path: [bool] File name and the full path where the plots will be saved if save_plots == True.
+        plt_handle: [matplotlib plt handle] Pass the plot handle if some orbits need to be added to the plot.
+        **kwargs: [dict] Extra keyword arguments which will be passes to the orbit plotter.
         
     """
 
@@ -255,16 +258,22 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, save_pl
     julian = (time - J2000_EPOCH)
     years_diff = (julian.days + (julian.seconds + julian.microseconds/1000000.0) /86400.0)/365.2425
 
-    # Setup the plot
-    fig = plt.figure()
-    ax = fig.gca(projection='3d', axisbg='black')
+    if plt_handle is None:
 
-    # Set a constant aspect ratio
-    ax.set_aspect('equal', adjustable='box-forced')
+        # Setup the plot
+        fig = plt.figure()
+        ax = fig.gca(projection='3d', axisbg='black')
 
-    # Hide the axes
-    ax.set_axis_off()
-    ax.grid(b=False)
+        # Set a constant aspect ratio
+        ax.set_aspect('equal', adjustable='box-forced')
+
+        # Hide the axes
+        ax.set_axis_off()
+        ax.grid(b=False)
+
+    else:
+        fig = plt_handle.gcf()
+        ax = plt_handle.gca()
 
     # Plot the solar system planets
     if plot_planets:
@@ -293,7 +302,7 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, save_pl
             color = '#32CD32'
 
         # Plot orbits
-        ax.plot(x, y, z, c=color)
+        ax.plot(x, y, z, c=color, **kwargs)
 
     ax.legend()
 
@@ -321,6 +330,9 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, save_pl
         # Save side view
         ax.view_init(elev=0, azim=0)
         savePlot(plt, plot_file_name + '_orbit_side.png', plot_dir)
+
+
+    return plt
 
 
 

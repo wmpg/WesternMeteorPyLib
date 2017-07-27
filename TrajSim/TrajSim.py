@@ -62,7 +62,11 @@ def geocentricRadiantToApparent(ra_g, dec_g, v_g, state_vector, jd_ref):
 
     ra_a, dec_a = res.x
 
-    return ra_a, dec_a, v_init
+    # Calculate all orbital parameters with the best estimation of apparent RA and Dec
+    orb = calcOrbit(np.array(raDec2ECI(ra_a, dec_a)), v_init, v_init, state_vector, jd_ref, stations_fixed=False, \
+            referent_init=True)
+
+    return ra_a, dec_a, v_init, orb
 
 
 
@@ -115,11 +119,14 @@ if __name__ == "__main__":
 
 
 
-    ra_a, dec_a, v_init = geocentricRadiantToApparent(ra_g, dec_g, v_g, state_vector, jd_ref)
+    ra_a, dec_a, v_init, orb = geocentricRadiantToApparent(ra_g, dec_g, v_g, state_vector, jd_ref)
 
     print('Apparent:')
     print('  R.A.:', np.degrees(ra_a))
     print('  Dec: ', np.degrees(dec_a))
+
+    # Print the whole orbit
+    print(orb)
 
 
 

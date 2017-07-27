@@ -729,7 +729,6 @@ def rectangular2EclipticCoord(x, y, z):
     # Calculate the distance from the Sun to the Earth in km
     r = vectMag(np.array([x, y, z]))
 
-
     # Calculate the ecliptic latitude
     B = np.arcsin(z/r)
 

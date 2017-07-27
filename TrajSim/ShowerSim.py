@@ -11,6 +11,8 @@ import numpy as np
 import scipy.optimize
 import matplotlib.pyplot as plt
 
+from Config import config
+
 from TrajSim.TrajSim import geocentricRadiantToApparent
 
 from Trajectory.Trajectory import ObservedPoints, Trajectory
@@ -25,11 +27,18 @@ from Utils.OSTools import mkdirP
 from Utils.Pickling import savePickle
 
 
+# Try importing Campbell-Brown & Koschny (2004) ablation code 
+try:
+    from MetSim.MetSim import loadInputs, runSimulation
+    METSIM_IMPORT = True
+except:
+    METSIM_IMPORT = False
+
 
 
 class SimStation(object):
     def __init__(self, lat, lon, elev, station_id, fps, t_offset, obs_ang_std, azim_centre, elev_centre, \
-        fov_wid, fov_ht):
+        fov_wid, fov_ht, lim_mag=None, P_0m=None):
         """ Simulated station parameters. 
 
         Arguments:
@@ -44,6 +53,10 @@ class SimStation(object):
             elev_centre: [float] Elevation from horizon of the centre of FOV (radians).
             fov_wid: [float] FOV width in azimuth (radians).
             fov_ht: [float] FOV height in elevation (radians).
+
+        Keyword arguments:
+            lim_mag: [float] Limiting magnitude for meteors.
+            P_0m: [float] Bolometric power of zero magnitude meteor (Watts).
 
         """
 
@@ -73,6 +86,12 @@ class SimStation(object):
 
         # Field of view height/altitude (radians)
         self.fov_ht = fov_ht
+
+        # Limiting magnitude
+        self.lim_mag = lim_mag
+
+        # Bolometric power of zero magnitude meteor
+        self.P_0m = P_0m
 
 
 
@@ -238,9 +257,13 @@ class SimMeteor(object):
         # Calculate geographic coordinates of the state vector
         self.rbeg_lat, self.rbeg_lon, self.rbeg_ele = cartesian2Geo(jdt_ref, *state_vect)
 
-        # Calculate apparent radiant
-        self.ra, self.dec, self.v_init = geocentricRadiantToApparent(ra_g, dec_g, v_g, state_vect, jdt_ref)
+        # Calculate apparent radiant and the orbit
+        self.ra, self.dec, self.v_init, self.orb = geocentricRadiantToApparent(ra_g, dec_g, v_g, state_vect, \
+            jdt_ref)
 
+
+        # Velocity at the beginning heights
+        self.v_begin = None
 
         # Calculated apparent values
         self.radiant_eq = [self.ra, self.dec]
@@ -346,13 +369,14 @@ class SimMeteor(object):
 
 
 class ConstantVelocity(object):
-    
     def __init__(self, duration):
         """ Constant velocity model for generating meteor trajectories. 
         
         Arguments:
             duration: [float] Duration of the meteor in seconds. 
         """
+
+        self.name = 'constant'
 
         self.duration = duration
 
@@ -395,7 +419,6 @@ class ConstantVelocity(object):
 
 
 class JacchiaVelocity(object):
-    
     def __init__(self, duration, a1, a2):
         """ Exponential velocity model by Whipple & Jacchia for generating meteor trajectories. 
         
@@ -404,6 +427,8 @@ class JacchiaVelocity(object):
             a1: [float] First deceleration term.
             a2: [float] Second deceleration term.
         """
+
+        self.name = 'exponential'
 
         self.duration = duration
 
@@ -450,8 +475,164 @@ class JacchiaVelocity(object):
 
 
 
+class AblationModelVelocity(object):
+    def __init__(self, mass, density, ablation_coeff, Gamma, Lambda, lum_eff):
+        """ Velocity calculated from numerical meteor ablation simulation by method of Campbell-Brown & 
+            Koschny (2004).
+        
+        Arguments:
+            mass: [float] Meteoroid mass (kg).
+            density: [float] Meteoroid density (kg/m^3).
+            ablation_coeff: [float] Ablation coefficient (s^2/km^2)
+            Gamma: [float] Drag coefficient.
+            Lambda: [float] Heat transfer coefficient.
+            lum_eff: [float] Luminous efficiency (fraction).
+
+        """
+
+        self.name = 'ablation'
+
+        self.mass = mass
+        self.density = density
+        self.Gamma = Gamma
+        self.Lambda = Lambda
+        self.ablation_coeff = ablation_coeff
+        self.lum_eff = lum_eff
+
+        self.length_model = None
+        self.luminosity_model = None
+        self.velocity_model = None
+        self.time = None
+
+        self.met = None
+        self.consts = None
+
+
+        if METSIM_IMPORT:
+
+            # Load simulation parameters from a file
+            self.met, self.consts = loadInputs(config.met_sim_input_file)
+
+            # Set physical parameters of the meteor
+            self.met.m_init = self.mass
+            self.met.rho = self.density
+            self.met.Gamma = self.Gamma
+            self.met.Lambda = self.Lambda
+
+            # Apply the ablation coefficient to the heat of ablation
+            self.met.q = self.Lambda/(2*(self.ablation_coeff/10**6)*self.Gamma)
+
+            # Luminous efficiency
+            self.met.lum_eff = self.lum_eff
+
+            # Flag for checking if the simulation was run the first time or not
+            self.sim_executed = False
+
+        else:
+            raise NotImplementedError("""The numerical meteor ablation simulation code (Campbell-Brown and 
+                Koschny 2004) is not available in this version of the code. Please use a different velocity 
+                model, such as liinear or exponential.""")
+
+
+
+    def getTimeData(self, fps):
+        """ Returns an array of time data for the meteor. 
+        
+        Arguments:
+            fps: [float] Frames per second of the camera.
+
+        """
+
+        return np.arange(0, np.max(self.time), 1.0/fps)
+
+
+
+    def getSimulation(self, v_init, zangle, beg_height):
+        """ Runs the meteor ablation simulation. 
+        
+        Arguments:
+            v_init: [float] Velocity at t = -infinity. In m/s.
+            zangle: [float] Zenith angle (radians).
+            beg_height: [float] Beginning height (meters).
+    
+        """
+
+        # Set velocity @180km
+        self.met.v_init = v_init
+
+        # Set the zenith angle
+        self.consts.zr = zangle
+
+        # Run the simulation with the given parameters
+        sim_results = runSimulation(self.met, self.consts)
+
+        # Get the results
+        sim_results = np.array(sim_results)
+
+        # Unpack results
+        time, height, trail, velocity, luminosity = sim_results.T
+
+
+        # Set time 0 for the moment when the simulated height matches the given beginning height
+        heights_diffs = np.abs(height - beg_height)
+        closest_index = np.argwhere(heights_diffs == np.min(heights_diffs))[0][0]
+
+        self.time = time[closest_index:]
+        self.height = height[closest_index:]
+        self.trail = trail[closest_index:]
+        self.velocity = velocity[closest_index:]
+        self.luminosity = luminosity[closest_index:]
+
+        # Normalize time and length
+        self.time  -= np.min(self.time)
+        self.trail -= np.min(self.trail)
+        
+        # Fit a spline model to time vs. length
+        self.length_model = scipy.interpolate.PchipInterpolator(self.time, self.trail, extrapolate=True)
+
+        # Fit a spline model to time vs. luminosity
+        self.luminosity_model = scipy.interpolate.PchipInterpolator(self.time, self.luminosity, \
+            extrapolate=True)
+
+        # Fit a spline model to time vs. velocity
+        self.velocity_model = scipy.interpolate.PchipInterpolator(self.time, self.velocity, \
+            extrapolate=True)
+
+
+
+    def getLength(self, v_init, t):
+        """ Calculates the length along the track at the given time with the given velocity using the 
+            numerical ablation model.
+
+        Arguments:
+            v_init: [float] Velocity at t = -infinity. In m/s. (NOT USED IN THIS MODEL!)
+            t: [float] Time at which the length along the track will be evaluated.
+
+        """
+
+        return self.length_model(t)
+
+
+
+    def __repr__(self):
+        """ Returned upon printing the object. """
+
+        out_str = ''
+        out_str += "Ablation model\n"
+        out_str += "Mass      = {:.2E}\n".format(self.mass) + "\n"
+        out_str += "Density   = {:.2f}\n".format(self.density) + "\n"
+        out_str += "Gamma     = {:.2f}\n".format(self.Gamma) + "\n"
+        out_str += "Lambda    = {:.2f}\n".format(self.Lambda) + "\n"
+        out_str += "Abl coeff = {:.2f}\n".format(self.ablation_coeff) + "\n"
+        out_str += "Lum eff   = {:.2f}\%\n".format(100*self.lum_eff) + "\n"
+
+        return out_str
+
+            
+
+
 def initStationList(stations_geo, azim_fovs, elev_fovs, fov_widths, fov_heights, t_offsets=None, \
-    fps_list=None, obs_ang_uncertainties=None):
+    fps_list=None, obs_ang_uncertainties=None, lim_magnitudes=None, P_0m_list=None):
     """ Given the parameters of stations, initializes SimStation objects and returns a list of them. 
     
     Arguments:
@@ -469,6 +650,10 @@ def initStationList(stations_geo, azim_fovs, elev_fovs, fov_widths, fov_heights,
         t_offsets: [list] List of time offsets of stations from real time (seconds).
         fps_list: [list] List of frames per second of each camera.
         obs_ang_uncertanties: [list] Observation precision of every station in arcseconds.
+        lim_magnitudes: [list] List of limiting magnitudes for meteors per every station. Only needed for 
+        ablation simulations. Default is +3 if not given.
+        P_0m_list: [list] List of powers of zero-magnitude meteors in Watts. Only needed for ablation 
+            simulations. Default is 840 W if not given.
 
     Return:
         station_list: [list] A list of SimStation objects with initialized values.
@@ -484,13 +669,20 @@ def initStationList(stations_geo, azim_fovs, elev_fovs, fov_widths, fov_heights,
     if obs_ang_uncertainties is None:
         obs_ang_uncertainties = [0]*len(stations_geo)
 
+    if lim_magnitudes is None:
+        lim_magnitudes = [3]*len(stations_geo)
+
+    if P_0m_list is None:
+        P_0m_list = [840]*len(stations_geo)
+
 
 
     station_list = []
     
     # Generate SimStation objects
-    for t_offset, stat_geo, fps, obs_ang_std, azim_centre, elev_centre, fov_wid, fov_ht in zip(t_offsets, \
-        stations_geo, fps_list, obs_ang_uncertainties, azim_fovs, elev_fovs, fov_widths, fov_heights):
+    for t_offset, stat_geo, fps, obs_ang_std, azim_centre, elev_centre, fov_wid, fov_ht, lim_mag, P_0m in \
+        zip(t_offsets, stations_geo, fps_list, obs_ang_uncertainties, azim_fovs, elev_fovs, fov_widths, \
+            fov_heights, lim_magnitudes, P_0m_list):
 
         # Unpack geographical station coords
         lat, lon, elev, station_id = stat_geo
@@ -511,7 +703,7 @@ def initStationList(stations_geo, azim_fovs, elev_fovs, fov_widths, fov_heights,
 
         # Make a new station object
         stat = SimStation(lat, lon, elev, station_id, fps, t_offset, obs_ang_std, azim_centre, \
-            elev_centre, fov_wid, fov_ht)
+            elev_centre, fov_wid, fov_ht, lim_mag=lim_mag, P_0m=P_0m)
 
 
         station_list.append(stat)
@@ -896,6 +1088,90 @@ def activityGenerator(b, sol_max):
 
 
 
+def sampleMass(mass_min, mass_max, mass_index, n_samples):
+    """ Sample a meteor shower mass distribution using the given mass range and mass index. Used for ablation
+        model meteoroids.
+
+    Arguments:
+        mass_min: [float] Logarithm of minimum mass in kilograms (e.g. -3 for 1 gram).
+        mass_max: [float] Logarithm of maximum mass in kilograms (e.g. 0 for 1 kilogram).
+        mass_index: [float] Shower mass index.
+        n_samples: [int] Number of samples to take from the distribution.
+
+
+    Return:
+        masses: [list] A list of masses in kilograms.
+
+    """
+
+    def _massIndex(m, alpha):
+        return m**(-alpha)
+
+    alpha = mass_index - 1
+
+    # Construct the cumulative distribution function
+    mass_range = np.logspace(mass_min, mass_max, 100)
+    mass_frequency = _massIndex(mass_range, alpha)
+
+    # Normalize the distribution to (0, 1) range
+    mass_frequency -= np.min(mass_frequency)
+    mass_frequency = mass_frequency/np.max(mass_frequency)
+
+    # Generate random numbers in the (0, 1) range
+    rand_nums = np.random.uniform(0, 1, n_samples)
+
+    # Flip arrays for interpolation (X axis must be increasing)
+    mass_frequency = mass_frequency[::-1]
+    mass_range = mass_range[::-1]
+
+    # Sample the distribution
+    masses = np.interp(rand_nums, mass_frequency, mass_range)
+
+
+    # print(masses)
+
+    # # PLOT DISTRIBUTION AND DRAWN MASSES
+    # n, bins, _ = plt.hist(masses, bins=np.logspace(mass_min, mass_max, np.floor(np.sqrt(n_samples))))
+
+    # # Normalize the mass function to the number of samples drawn
+    # plt.semilogx(mass_range, np.max(n)*mass_frequency, label='s = {:.2f}'.format(mass_index))
+
+    # plt.gca().set_xscale("log")
+
+    # plt.xlabel('Mass (kg)')
+    # plt.ylabel('Count')
+
+    # plt.legend()
+
+    # plt.show()
+
+
+    return masses
+
+
+
+def sampleDensity(log_rho_mean, log_rho_sigma, n_samples):
+    """ Sample a meteor shower density distribution using the given mean density and stddev. Used for ablation
+        model meteoroids. The density distribution is samples from a Gaussian distribution on logarithmic 
+        values of densities.
+
+    Arguments:
+        log_rho_mean: [float] Mean of the logarithmic density distribution.
+        log_rho_sigma: [float] Standard deviation of the logarithmic density distribution.
+        n_samples: [int] Number of samples to take from the distribution.
+    
+    Return:
+        [ndarray of float] Densities in kg/m^3
+
+    """
+
+    # Draw samples from a normal distribution of densities
+    log_densitites = np.random.normal(log_rho_mean, log_rho_sigma, n_samples)
+
+    # Convert the densities to normal values
+    return 10**log_densitites
+
+
 
 def generateStateVector(station_list, jd, beg_height_min, beg_height_max):
     """ Generate the initial state vector in ECI coordinates for the given meteor. 
@@ -1270,9 +1546,13 @@ def generateTrajectoryData(station_list, sim_met, velocity_model):
     # Go through every station
     for stat in station_list:
 
+        # If the velocity model is given by the ablation model, run the model first
+        if sim_met.velocity_model.name == 'ablation':
+            sim_met.velocity_model.getSimulation(sim_met.v_init, sim_met.orb.zc, sim_met.rbeg_ele)
+
+
         # Generate time data
         time_data_model = velocity_model.getTimeData(stat.fps)
-
 
         azim_data = []
         elev_data = []
@@ -1281,6 +1561,8 @@ def generateTrajectoryData(station_list, sim_met, velocity_model):
         model_lat_data = []
         model_lon_data = []
         model_elev_data = []
+
+        first_point = True
 
         # Go through all trajectory points
         for t in time_data_model:
@@ -1296,6 +1578,32 @@ def generateTrajectoryData(station_list, sim_met, velocity_model):
 
             # Apply gravity drop to calculated ECI coordinates
             traj_eci = calcGravityDrop(traj_eci, t)
+
+
+            # If the model is given by the ablation code, check that the magnitude of the meteor was above the
+            # detection threshold
+            if sim_met.velocity_model.name == 'ablation':
+
+                # Calculate the absolute magnitude (magnitude @100km) at this point in time
+                abs_mag = -2.5*np.log10(sim_met.velocity_model.luminosity_model(t)/stat.P_0m)
+
+                # Calculate the range to the station
+                stat_range = vectMag(geo2Cartesian(stat.lat, stat.lon, stat.elev, jd) - traj_eci)
+
+                # Calculate the visual magnitude
+                magnitude = abs_mag - 5*np.log10(100000.0/stat_range)
+
+                # Skip this point if the meteor is fainter than the limiting magnitude at this point
+                if magnitude > stat.lim_mag:
+                    continue
+
+
+                # Set the current velocity at this point
+                current_velocity = sim_met.velocity_model.velocity_model(t)
+
+            else:
+
+                current_velocity = sim_met.v_init
 
 
             ### Take only those points inside the FOV of the observer ###
@@ -1345,6 +1653,11 @@ def generateTrajectoryData(station_list, sim_met, velocity_model):
             model_lon_data.append(model_lon)
             model_elev_data.append(model_elev)
 
+            # Set the velocity at the first detected point
+            if first_point:
+                sim_met.v_begin = current_velocity
+                first_point = False
+
         
 
         azim_data = np.array(azim_data)
@@ -1359,6 +1672,9 @@ def generateTrajectoryData(station_list, sim_met, velocity_model):
         # Apply a random offset to time data
         time_data += stat.t_offset
 
+        # Skip the observations if no points were inside the FOV
+        if len(time_data) == 0:
+            continue
 
         # Init a new ObservedPoints with simulated values
         obs = ObservedPoints(sim_met.jdt_ref, azim_data, elev_data, time_data, stat.lat, stat.lon, stat.elev,
@@ -1418,9 +1734,15 @@ if __name__ == "__main__":
     # Cameras FOV heights (degrees)
     fov_heights = [25.77, 25.77]
 
+    # Limiting magnitudes (needed only for ablation simulation)
+    lim_magnitudes = [+5.5, +5.5]
+
+    # Powers of zero-magnitude meteors (Watts) (needed only for ablation simulation)
+    P_0m_list = [840, 840]
+
     # Init stations data to SimStation objects
     station_list = initStationList(stations_geo, azim_fovs, elev_fovs, fov_widths, fov_heights, t_offsets, \
-    fps_list, obs_ang_uncertainties)    
+    fps_list, obs_ang_uncertainties, lim_magnitudes=lim_magnitudes, P_0m_list=P_0m_list)
 
 
     # Plot FOVs of stations at ceiling height of 120km
@@ -1432,7 +1754,7 @@ if __name__ == "__main__":
 
     ### METEOR SHOWER PARAMETERS ###
     ##########################################################################################################
-    n_meteors = 20
+    n_meteors = 5
 
     ra_g = 113.0
     #ra_g = 0
@@ -1465,22 +1787,80 @@ if __name__ == "__main__":
     ##########################################################################################################
 
 
-    ### METEOR VELOCITY MOEL ###
+    ### METEOR VELOCITY MODEL ###
     ##########################################################################################################
 
     # Set a range of meteor durations
     meteor_durations = np.clip(np.random.normal(0.5, 0.1, n_meteors), 0.2, 1.0)
     #meteor_durations = [1.0]*n_meteors
 
-    # # Constant velocity model
+    # #### Constant velocity model
     # meteor_velocity_models = [ConstantVelocity(duration) for duration in meteor_durations]
+    # ####
 
-    # Jacchia (exponential deceleration) velocity model
-    a1_list = np.random.uniform(0.08, 0.15, n_meteors)
-    a2_list = np.random.uniform(8, 15, n_meteors)
 
-    meteor_velocity_models = [JacchiaVelocity(duration, a1, a2) for duration, a1, a2 in zip(meteor_durations,\
-        a1_list, a2_list)]
+    # #### Jacchia (exponential deceleration) velocity model
+    # a1_list = np.random.uniform(0.08, 0.15, n_meteors)
+    # a2_list = np.random.uniform(8, 15, n_meteors)
+
+    # meteor_velocity_models = [JacchiaVelocity(duration, a1, a2) for duration, a1, a2 in zip(meteor_durations,\
+    #     a1_list, a2_list)]
+
+    # ####
+
+
+    #### Velocity model from Campbell-Brown & Koschny (2004) meteor ablation model
+
+    # Make the beginning heights heigher, as the trajectory points will be determined by simulated
+    # magnitudes
+    beg_height = 110
+    beg_height_sigma = 0
+
+    # Luminous efficiency (fraction)
+    lum_eff = 0.7/100
+
+    # Ablation coefficient (s^2/km^2)
+    ablation_coeff = 0.1
+
+    # Drag coeficient
+    Gamma = 1.0
+
+    # Heat transfer coeficient
+    Lambda = 0.5
+
+    # Define the mass range (log of mass in kg)
+    mass_min = -5
+    mass_max = -3
+
+    # Mass index
+    mass_index = 2.0
+
+
+    # Define density distribution (see: Moorhead et al. 2017 "A two-population sporadic meteoroid density 
+    #        distribution and its implications for environment models")
+
+    # HTC density distribution (Tj <= 2)
+    log_rho_mean = 2.93320
+    log_rho_sigma = 0.12714
+
+    # # JFC and asteroidal distribution (Tj > 2) 
+    # log_rho_mean = 3.57916
+    # log_rho_sigma = 0.09312
+
+
+    # Sample the masses
+    mass_samples = sampleMass(mass_min, mass_max, mass_index, n_meteors)
+
+    # Samples densities
+    density_samples = sampleDensity(log_rho_mean, log_rho_sigma, n_meteors)
+
+
+    # Init velocity models
+    meteor_velocity_models = [AblationModelVelocity(mass, density, ablation_coeff, Gamma, Lambda, lum_eff) \
+        for mass, density in zip(mass_samples, density_samples)]
+
+
+    ####
 
     ##########################################################################################################
 
@@ -1503,14 +1883,32 @@ if __name__ == "__main__":
     # Solve generated trajectories
     for sim_met in sim_meteor_list:
 
+        # Check that there are at least 2 sets of measurements
+        if len(sim_met.observations) < 2:
+            print('Skipped meteor at JD =', sim_met.jdt_ref, 'as it was not observable from at least 2 stations!')
+            continue
+
+        # Make sure there are at least 4 point from every station
+        meas_counts = [len(obs.time_data) for obs in sim_met.observations]
+        if meas_counts:
+            if np.min(meas_counts) < 4:
+
+                print('Skipped meteor at JD =', sim_met.jdt_ref, 'due to having less than 4 point from any of the stations!')
+                continue
+
+        else:
+            print('Skipped meteor at JD =', sim_met.jdt_ref, 'due to having less than 4 point from any of the stations!')
+            continue
+
+
         # Directory where trajectory results will be saved
         output_dir = '../SimulatedMeteors/GEM/'+str(sim_met.jdt_ref)
 
-        # Save info about the simulated meteor
-        sim_met.saveInfo(output_dir, t_offsets, obs_ang_uncertainties)
+        # # Save info about the simulated meteor
+        # sim_met.saveInfo(output_dir, t_offsets, obs_ang_uncertainties)
 
         # Init the trajectory
-        traj = Trajectory(sim_met.jdt_ref, output_dir=output_dir, max_toffset=t_max_offset, meastype=2, show_plots=False, mc_pick_multiplier=3)
+        traj = Trajectory(sim_met.jdt_ref, output_dir=output_dir, max_toffset=t_max_offset, meastype=2, show_plots=False, mc_pick_multiplier=1)
 
         # Fill in observations
         for obs in sim_met.observations:
@@ -1527,6 +1925,7 @@ if __name__ == "__main__":
         print('  R.A. = {:8.4f} deg'.format(np.degrees(np.abs(sim_met.ra_g - traj.orbit.ra_g)%(2*np.pi))))
         print('  Dec  = {:8.4f} deg'.format(np.degrees((sim_met.dec_g - traj.orbit.dec_g + np.pi)%(2*np.pi) - np.pi)))
         print('  Vg   = {:7.3f} km/s'.format((sim_met.v_g - traj.orbit.v_g)/1000))
+        print('  Vinit= {:7.3f} km/s'.format((sim_met.v_begin - traj.orbit.v_init)/1000))
 
         print('Velocity model:')
         print(sim_met.velocity_model)

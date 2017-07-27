@@ -98,9 +98,7 @@ def calcAngDataLimits(ra_data, dec_data, border_ratio=0.1):
 
 
 class CelestialPlot(object):
-
-    def __init__(self, ra_data, dec_data, projection='sinu', bgcolor='k'):
-        """ Plotting on a celestial sphere.
+    """ Plotting on a celestial sphere.
 
         Arguments:
             ra_data: [ndarray] R.A. data in radians.
@@ -114,6 +112,7 @@ class CelestialPlot(object):
 
         """
 
+    def __init__(self, ra_data, dec_data, projection='sinu', bgcolor='k'):
 
 
         if projection == 'stere':
