@@ -96,6 +96,9 @@ class AstPlate(object):
         self.wid = 0
         self.ht = 0
 
+        self.fov = 0
+        self.asp = 1.0
+
         self.a = 0
         self.da = 0
         self.b = 0

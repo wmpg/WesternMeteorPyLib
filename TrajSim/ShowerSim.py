@@ -360,6 +360,13 @@ class SimMeteor(object):
         with open(os.path.join(output_dir, file_name), 'w') as f:
             f.write(out_str)
 
+
+        # Erase spline fits in the ablation model, as they cannot be pickled
+        if self.velocity_model.name == 'ablation':
+            self.velocity_model.velocity_model = None
+            self.velocity_model.length_model = None
+            self.velocity_model.luminosity_model = None
+
         # Save the SimMeteor object as pickle
         file_name_pickle = str(self.jdt_ref) + "_sim_met.pickle"
         savePickle(self, output_dir, file_name_pickle)
@@ -459,7 +466,7 @@ class JacchiaVelocity(object):
 
         """
 
-        return v_init*t - self.a1*np.exp(self.a2*t)
+        return v_init*t - abs(self.a1*np.exp(self.a2*t))
 
 
 
@@ -1612,8 +1619,10 @@ def generateTrajectoryData(station_list, sim_met, velocity_model):
             # Get ECI coordinates of the station FOV polyhedron
             fov_corners = stat.fovCornersToECI(jd, 2*sim_met.rbeg_ele)
 
-            # Add the ECI position of the station to the vertices list
+            # Calculate the ECI position of the station at the particular point in time
             stat_eci = geo2Cartesian(stat.lat, stat.lon, stat.elev, jd)
+
+            # Add the ECI position of the station to the vertices list
             fov_corners.append(stat_eci)
 
             # If the point is not inside the FOV, skip it
@@ -1676,7 +1685,7 @@ def generateTrajectoryData(station_list, sim_met, velocity_model):
         if len(time_data) == 0:
             continue
 
-        # Init a new ObservedPoints with simulated values
+        # Init new ObservedPoints with simulated values
         obs = ObservedPoints(sim_met.jdt_ref, azim_data, elev_data, time_data, stat.lat, stat.lon, stat.elev,
             meastype=2, station_id=stat.station_id)
 
@@ -1717,7 +1726,7 @@ if __name__ == "__main__":
         [43.19279, -81.31565, 324.0, 'elgin']] # Elgin
 
     # Camera FPS per station
-    fps_list = [80, 110]
+    fps_list = [110, 110]
 
     # Observation uncertanties per station (arcsec)
     obs_ang_uncertainties = [1, 1]
@@ -1754,34 +1763,69 @@ if __name__ == "__main__":
 
     ### METEOR SHOWER PARAMETERS ###
     ##########################################################################################################
-    n_meteors = 5
+    n_meteors = 20
 
-    ra_g = 113.0
-    #ra_g = 0
+
+    # ### GEMINIDS
+
+    # # Radiant position and dispersion
+    # ra_g = 113.0
+    # ra_g_sigma = 0.02
+
+    # dec_g = 32.5
+    # dec_g_sigma = 0.02
+
+    # # Radiant drift in degrees per degree of solar longitude
+    # d_ra = 1.05
+    # d_dec = -0.17
+
+    # # Geocentric velocity in km/s
+    # v_g = 33.5
+    # v_g_sigma = 0.1
+
+    # year = 2012
+    # month = 12
+
+    # # Solar longitude of peak activity in degrees
+    # sol_max = 261
+    # sol_slope = 0.4
+
+    # # Beginning height in kilometers
+    # beg_height = 95
+    # beg_height_sigma = 3
+
+    # ###
+
+
+    ### PERSEIDS
+
+    # Radiant position and dispersion
+    ra_g = 48.2
     ra_g_sigma = 0.02
 
-    dec_g = 32.5
-    #dec_g = 90
+    dec_g = 58.1
     dec_g_sigma = 0.02
 
     # Radiant drift in degrees per degree of solar longitude
-    d_ra = 1.05
-    d_dec = -0.17
+    d_ra = 1.40
+    d_dec = 0.26
 
     # Geocentric velocity in km/s
-    v_g = 33.5
+    v_g = 59.1
     v_g_sigma = 0.1
 
     year = 2012
-    month = 12
+    month = 8
 
     # Solar longitude of peak activity in degrees
-    sol_max = 261
+    sol_max = 140
     sol_slope = 0.4
 
     # Beginning height in kilometers
-    beg_height = 100
+    beg_height = 105
     beg_height_sigma = 3
+
+    ###
 
 
     ##########################################################################################################
@@ -1792,7 +1836,7 @@ if __name__ == "__main__":
 
     # Set a range of meteor durations
     meteor_durations = np.clip(np.random.normal(0.5, 0.1, n_meteors), 0.2, 1.0)
-    #meteor_durations = [1.0]*n_meteors
+    #meteor_durations = [1.5]*n_meteors
 
     # #### Constant velocity model
     # meteor_velocity_models = [ConstantVelocity(duration) for duration in meteor_durations]
@@ -1813,7 +1857,7 @@ if __name__ == "__main__":
 
     # Make the beginning heights heigher, as the trajectory points will be determined by simulated
     # magnitudes
-    beg_height = 110
+    beg_height = 120
     beg_height_sigma = 0
 
     # Luminous efficiency (fraction)
@@ -1902,10 +1946,10 @@ if __name__ == "__main__":
 
 
         # Directory where trajectory results will be saved
-        output_dir = '../SimulatedMeteors/GEM/'+str(sim_met.jdt_ref)
+        output_dir = '../SimulatedMeteors/PER/'+str(sim_met.jdt_ref)
 
-        # # Save info about the simulated meteor
-        # sim_met.saveInfo(output_dir, t_offsets, obs_ang_uncertainties)
+        # Save info about the simulated meteor
+        sim_met.saveInfo(output_dir, t_offsets, obs_ang_uncertainties)
 
         # Init the trajectory
         traj = Trajectory(sim_met.jdt_ref, output_dir=output_dir, max_toffset=t_max_offset, meastype=2, show_plots=False, mc_pick_multiplier=1)
@@ -1926,6 +1970,8 @@ if __name__ == "__main__":
         print('  Dec  = {:8.4f} deg'.format(np.degrees((sim_met.dec_g - traj.orbit.dec_g + np.pi)%(2*np.pi) - np.pi)))
         print('  Vg   = {:7.3f} km/s'.format((sim_met.v_g - traj.orbit.v_g)/1000))
         print('  Vinit= {:7.3f} km/s'.format((sim_met.v_begin - traj.orbit.v_init)/1000))
+        print('Velocity at beginning height:')
+        print('  Vinit= {:7.3f} km/s'.format(sim_met.v_begin/1000))
 
         print('Velocity model:')
         print(sim_met.velocity_model)

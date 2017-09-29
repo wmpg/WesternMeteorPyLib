@@ -531,13 +531,16 @@ def cams2MiligInput(meteor_list, file_path):
 if __name__ == "__main__":
 
     #dir_path = "../DenisGEMcases"
-    dir_path = "../DenisGEMcases_5_sigma"
+    #dir_path = "../DenisGEMcases_5_sigma"
+    #dir_path = "/home/dvida/DATA/Dropbox/Apps/VSA2017 RMS data/first_rpi_orbit"
+    dir_path = "D:/Dropbox/Apps/VSA2017 RMS data/first_rpi_orbit"
 
     dir_path = os.path.abspath(dir_path)
 
     camerasites_file_name = 'CameraSites.txt'
     cameratimeoffsets_file_name = 'CameraTimeOffsets.txt'
-    ftpdetectinfo_file_name = 'FTPdetectinfo20121213S.txt'
+    # ftpdetectinfo_file_name = 'FTPdetectinfo20121213S.txt'
+    ftpdetectinfo_file_name = 'FTPdetectinfo_first_rpi.txt'
 
 
     camerasites_file_name = os.path.join(dir_path, camerasites_file_name)
@@ -554,14 +557,16 @@ if __name__ == "__main__":
     meteor_list = loadFTPDetectInfo(ftpdetectinfo_file_name, stations, time_offsets=time_offsets)
 
 
+    # Construct lists of observations of the same meteor (Rpi)
+    meteor1 = meteor_list[1:3]
 
-    # Construct lists of observations of the same meteor
-    meteor5 = meteor_list[:2]
-    meteor2 = meteor_list[2:5]
-    meteor6 = meteor_list[5:9]
-    meteor3 = meteor_list[9:13]
-    meteor1 = meteor_list[13:18]
-    meteor4 = meteor_list[18:24]
+    # # Construct lists of observations of the same meteor
+    # meteor5 = meteor_list[:2]
+    # meteor2 = meteor_list[2:5]
+    # meteor6 = meteor_list[5:9]
+    # meteor3 = meteor_list[9:13]
+    # meteor1 = meteor_list[13:18]
+    # meteor4 = meteor_list[18:24]
 
 
     # for met in meteor1:
@@ -570,7 +575,7 @@ if __name__ == "__main__":
 
 
     # Run the trajectory solver
-    solveTrajectoryCAMS(meteor6, os.path.join(dir_path, 'meteor6'), solver='original', monte_carlo=True)
+    solveTrajectoryCAMS(meteor1, os.path.join(dir_path, 'meteor1'), solver='original', monte_carlo=False, mc_runs=150)
 
     # Write the MILIG input file
     #cams2MiligInput(meteor6, 'milig_meteor6.txt')

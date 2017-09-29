@@ -461,6 +461,78 @@ def estimateHullOverlapRatio(hull1, hull2, niter=200, volume=False):
 
         
 
+def RMSD(x):
+    """ Root-mean-square deviation of measurements vs. model. """
+
+    return np.sqrt(np.sum(x**2)/len(x))
+    
+
+
+def averageClosePoints(x_array, y_array, delta, x_datetime=False):
+    """ Finds if points have close values of x and averages all close values in y.
+
+    Arguments:
+        x_array: [list] A list of x values (must be of the same length as y_array!).
+        y_array: [list] A list of y values (must be of the same length as x_array!).
+        delta: [float] Threshold distance between two points in x to merge them. Can be sampling of data (e.g. 
+            half the fps).
+
+    Keyword arguments: 
+        x_datatime: [bool] Should be True if X is an array of datetime objects. False by default.
+
+    Return:
+        x_final, y_final: [tuple of lists] Processed x and y arrays.
+
+    """
+
+    x_final = []
+    y_final = []
+    skip = 0
+
+    # Step through all x values
+    for i, x in enumerate(x_array):
+
+        if skip > 0:
+            skip -= 1
+            continue
+
+
+        # Calculate the difference between this point and all others
+        diff = np.abs(x_array - x)
+
+        # Convert the difference to seconds if X array elements are datetime
+        if x_datetime:
+            diff_iter = (time_diff.total_seconds() for time_diff in diff)
+            diff = np.fromiter(diff_iter, np.float64, count=len(diff))
+
+
+        # Count the number of close points to this element
+        count = np.count_nonzero(diff < delta)
+
+        # If there are more than one, average them and put them to the list
+        if count > 1:
+
+            skip += count - 1
+
+            y = np.mean(y_array[i : i + count])
+
+
+        # If there are no close points, add the current point to the list
+        else:
+
+            y = y_array[i]
+
+
+        x_final.append(x)
+        y_final.append(y)
+
+
+    return x_final, y_final
+
+
+
+
+
 
 
 

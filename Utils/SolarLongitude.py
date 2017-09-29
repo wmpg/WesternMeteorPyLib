@@ -1,4 +1,4 @@
-""" Functions for calculating solar longitude from Julian date. """
+""" Functions for calculating solar longitude from Julian date and vice versa. """
 
 from __future__ import print_function, division, absolute_import
 

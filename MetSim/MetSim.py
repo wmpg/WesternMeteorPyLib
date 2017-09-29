@@ -2,12 +2,15 @@ from __future__ import print_function, division, absolute_import
 
 
 import math
+import time
+
 import numpy as np
 import scipy.optimize
 import scipy.interpolate
 import matplotlib.pyplot as plt
 
-import time
+from Utils.AtmosphereDensity import getAtmDensity
+
 
 # Verbose printing flags
 DEBUG_ON = False
@@ -163,6 +166,9 @@ class MeteorConstants(object):
         
         # coefficients for atm. density
         self.dens_co = []
+
+        # Interpolated atmospheric density
+        self.atm_density_interp = None
         
         # Coefficients for atm. pressure
         self.press_co = []
@@ -341,19 +347,28 @@ def loadInputs(file_name):
 
 
 def atmDensity(h, consts):
-    """ Calculates the atmospheric density. 
+    """ Calculates the atmospheric density in kg/m^3. 
     
     Arguments:
         h: [float] Height in meters.
 
+    Return:
+        [float] Atmosphere density at height h (kg/m^3)
+
     """
 
-    dens_co = consts.dens_co
+    # If the atmosphere dentiy interpolation is present, use it as the source of atm. density
+    if consts.atm_density_interp is not None:
+        return consts.atm_density_interp(h)
 
-    rho_a = (10**(dens_co[0] + dens_co[1]*h/1000.0 + dens_co[2]*(h/1000)**2 + dens_co[3]*(h/1000)**3 + \
-        dens_co[4]*(h/1000)**4 + dens_co[5]*(h/1000)**5))*1000
+    # Otherwise, use the polynomial fit (WARNING: the fit is not as good as the interpolation!!!)
+    else:
+        dens_co = consts.dens_co
 
-    return rho_a
+        rho_a = (10**(dens_co[0] + dens_co[1]*h/1000.0 + dens_co[2]*(h/1000)**2 + dens_co[3]*(h/1000)**3 \
+            + dens_co[4]*(h/1000)**4 + dens_co[5]*(h/1000)**5))*1000
+
+        return rho_a
 
 
 
@@ -521,7 +536,7 @@ def ablate(met, consts):
     if Kn >= 1:
 
         # Sets pressure to 0 for transition and free molecular flow
-        Ma=0  
+        Ma = 0
 
     # calculation of pressure
     met.p2 = p1*((2*consts.kappa/(consts.kappa + 1))*Ma**2*((math.sin(consts.sigma))**2))
@@ -703,7 +718,44 @@ def ablate(met, consts):
 
 
 
-def runSimulation(met, consts):
+def runSimulation(met, consts, lat=None, lon=None, jd_ref=None):
+    """ Runs meteor ablation simulation with the given initial parameters. The location and time can be 
+        provided as well, which will be used for calculating the atmosphere density at the given average 
+        geodetic coordinates and Julian date. 
+
+    Arguments:
+        met: [MeteorProperties object] Structure containing physical characteristics of the simulated meteor.
+        consts: [MeteorConstants object] Structure containing simulation constants.
+
+    Keyword arguments:
+        lat: [float] Geodetic latitude of the mean meteor path (radians).
+        lon: [float] Geodetic longitude of the mean meteor path (radians).
+        jd_ref: [float] Mean Julian date of the meteor.
+    
+    Return:
+        [list] A list containing simulation results:
+            [time, heights, length, velocity, luminosity]
+
+    """
+
+
+    # If the location is given, do a 5 order fit on the atmosphere density
+    if (lat is not None) and (lon is not None) and (jd_ref is not None):
+
+        # Get a range of heights from 60 to 200 km, every 100 meters
+        heights_fit = np.arange(60, 200, 0.1)*1000
+
+        # Get atmosphere density at simulation heights
+        atm_dens_list = []
+        for ht in heights_fit:
+            atm_dens = getAtmDensity(lat, lon, ht, jd_ref)
+            atm_dens_list.append(atm_dens)
+
+        atm_dens_list = np.array(atm_dens_list)
+
+        # Interpolate the density
+        consts.atm_density_interp = scipy.interpolate.PchipInterpolator(heights_fit, atm_dens_list)
+
 
 
     ### Calculate physical/other params
@@ -793,19 +845,41 @@ def runSimulation(met, consts):
 
 if __name__ == "__main__":
 
+    import os
+    import datetime
+    
+    from Utils.TrajConversions import datetime2JD
+
 
     # Name of input file for meteor parameters
-    file_name = 'Metsim0001_input.txt'
+    file_name = os.path.join('MetSim', 'Metsim0001_input.txt')
+
+    # Set meteor average location and time
+    lat = np.radians(43.937484)
+    lon = np.radians(-81.645127)
+    #jd = datetime2JD(datetime.datetime.now())
+    jd = 2457955.794670294970
 
     # Load input meteor data
     met, consts = loadInputs(file_name)
 
 
+    # Set drag coeficient
+    met.Gamma = 1.0
+
+    # Set heat transfer corficient (cometary)
+    met.Lambda = 0.5
+
+
+
     t1 = time.clock()
     
-    results_list = runSimulation(met, consts)
+    # Run the simulation
+    results_list = runSimulation(met, consts, lat=lat, lon=lon, jd_ref=jd)
 
     print('Runtime:', time.clock() - t1)
+
+
 
     # Get the results
     results_list = np.array(results_list)
@@ -885,19 +959,47 @@ if __name__ == "__main__":
     magnitude = -2.5*np.log10(luminosity/P_0m)
 
 
-    # Plot time vs. luminosity
-    plt.plot(time, magnitude, zorder=3)
+    # Plot time vs. absolute magnitude
+    plt.plot(magnitude, height, zorder=3)
 
-    plt.gca().invert_yaxis()
+    plt.ylabel('Height (km)')
+    plt.xlabel('Absolute magnitude')
 
-    # # Plot time vs. velocity
-    plt.plot(time, velocity, zorder=3, label='Velocity (km/s)')
+    #plt.gca().invert_yaxis()
 
-    plt.xlim([min(time), max(time)])
-
-    plt.xlabel('Time (s)')
-    plt.ylabel('Absolute magnitude')
+    plt.legend()
 
     plt.grid()
+
+    plt.show()
+
+
+    ### VELOCITY ###
+
+    plt.plot(velocity, height, zorder=3)
+
+    plt.xlabel('Velocity (km/s)')
+    plt.ylabel('Height (km)')
+
+    # plt.gca().invert_yaxis()
+
+    plt.grid(color='0.9')
+
+    ## TEST
+    plt.xlim(15.0, 17.0)
+    plt.ylim(75, 185)
+
+    # Find the index of the closest height to ht_mark
+    ht_mark = 87.620
+    ht_indx = np.argmin(np.abs(height - ht_mark))
+
+    # Plot a point at the velocity at the given heights
+    ht_mark = height[ht_indx]
+    vel_mark = velocity[ht_indx]
+    plt.scatter(vel_mark, ht_mark, c='red', label='Height = {:.3f} km\nVelocity = {:.3f} km/s'.format(ht_mark, vel_mark), zorder=4)
+
+    plt.legend()
+
+    plt.savefig('vel_diff.png', dpi=300)
 
     plt.show()

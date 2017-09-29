@@ -24,7 +24,7 @@ from mpl_toolkits.basemap import Basemap
 
 from Trajectory.Orbit import calcOrbit
 
-from Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, rotateVector
+from Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, rotateVector, RMSD
 from Utils.OSTools import mkdirP
 from Utils.Pickling import savePickle
 from Utils.Plotting import savePlot
@@ -721,7 +721,7 @@ def jacchiaLagFunc(t, a1, a2):
 
 
 
-def jacchiaLengthFunc(t, a1, a2, v_init):
+def jacchiaLengthFunc(t, a1, a2, v_init, k):
     """ Jacchia (1955) model for modelling lengths along the trail of meteors. 
     
     Arguments:
@@ -729,6 +729,7 @@ def jacchiaLengthFunc(t, a1, a2, v_init):
         a1: [float] 1st acceleration term
         a2: [float] 2nd acceleration term
         v_init: [float] initial velocity in m/s
+        k: [float] Initial offset in length.
 
     Return:
         [float] Jacchia model defined by a1 and a2, estimated at point in time t
@@ -736,7 +737,7 @@ def jacchiaLengthFunc(t, a1, a2, v_init):
     """
 
 
-    return v_init*t - np.abs(a1)*np.exp(np.abs(a2)*t)
+    return k + v_init*t - np.abs(a1)*np.exp(np.abs(a2)*t)
 
 
 
@@ -1112,6 +1113,9 @@ class MCUncertanties(object):
         # Mean motion in the orbit (rad/day)
         self.n = None
 
+        # Orbital period
+        self.T = None
+
         # Tisserand's parameter with respect to Jupiter
         self.Tj = None
 
@@ -1223,6 +1227,9 @@ def calcMCUncertanties(traj_list, traj_best):
 
         # Mean motion in the orbit (rad/day)
         un.n = np.std([traj.orbit.n for traj in traj_list])
+
+        # Orbital period
+        un.T = np.std([traj.orbit.T for traj in traj_list])
 
         # Tisserand's parameter
         un.Tj = np.std([traj.orbit.Tj for traj in traj_list])
@@ -1647,9 +1654,9 @@ class Trajectory(object):
             obs.h_residuals = np.array(obs.h_residuals)
             obs.v_residuals = np.array(obs.v_residuals)
 
-            # Calculate RMS of both residuals
-            obs.h_res_rms = np.std(obs.h_residuals)
-            obs.v_res_rms = np.std(obs.v_residuals)
+            # Calculate RMSD of both residuals
+            obs.h_res_rms = RMSD(obs.h_residuals)
+            obs.v_res_rms = RMSD(obs.v_residuals)
 
             # Calculate angular deviations in azimuth and elevation
             elev_res = obs.elev_data - obs.model_elev
@@ -1659,7 +1666,7 @@ class Trajectory(object):
             obs.ang_res = np.sqrt(elev_res**2 + azim_res**2)
 
             # Calculate the standard deviaton of angular residuals in radians
-            obs.ang_res_std = scipy.stats.circstd(obs.ang_res)
+            obs.ang_res_std = RMSD(obs.ang_res)
 
 
 
@@ -1888,11 +1895,12 @@ class Trajectory(object):
 
         # Try different methods of optimization until it is successful
         methods = ['SLSQP', 'TNC', None]
-        for opt_method in methods:
+        maxiter_list = [1000, None, 15000]
+        for opt_method, maxiter in zip(methods, maxiter_list):
 
             # Run the minimization of residuals between lags of all stations
             timing_mini = scipy.optimize.minimize(timingResiduals, p0, args=(observations, \
-                self.t_ref_station), bounds=bounds, method=opt_method)
+                self.t_ref_station), bounds=bounds, method=opt_method, options={'maxiter': maxiter})
 
             # Stop trying methods if this one was successful
             if timing_mini.success:
@@ -1928,8 +1936,6 @@ class Trajectory(object):
 
 
 
-            # Calculate the initial velocity as the slope of the first 25% of points from all time vs. 
-            # state vector distances data
             times = []
             state_vect_dist = []
             for obs in observations:
@@ -1948,7 +1954,7 @@ class Trajectory(object):
             stddev_list = []
 
             # Calculate the velocity on different initial portions of the trajectory
-            for part in np.arange(0.25, 0.8, 0.05):
+            for part in np.arange(0.2, 0.8, 0.05):
 
                 # Get the index of the first portion of points
                 part_size = int(part*len(times))
@@ -2522,6 +2528,7 @@ class Trajectory(object):
         out_str += "-----\n"
         out_str += "- 'meas1' and 'meas2' are given input points.\n"
         out_str += "- X, Y, Z are ECI (Earth-Centered Inertial) positions of projected lines of sight on the radiant line.\n"
+        out_str += "- Zc is the observed zenith distance of the entry angle, while the Zg is the entry zenith distance corrected for Earth's graity.\n"
         out_str += "- Latitude (deg), Longitude (deg), Height (m) are WGS84 coordinates of each point on the radiant line.\n"
         out_str += "- Jacchia (1955) equation fit was done on the lag (length minus the line fitted on the first 25% of the length).\n"
         out_str += "- Right ascension and declination in the table are given for the epoch of date for the corresponding JD, per every point.\n"
@@ -2561,11 +2568,11 @@ class Trajectory(object):
             h_res_rms = round(np.sqrt(np.mean(obs.h_residuals**2)), 2)
 
             # Plot vertical residuals
-            plt.scatter(obs.time_data, obs.v_residuals, c='red', label='Vertical, RMS = '+str(v_res_rms), 
+            plt.scatter(obs.time_data, obs.v_residuals, c='red', label='Vertical, RMSD = '+str(v_res_rms), 
                 zorder=3, s=2)
 
             # Plot horizontal residuals
-            plt.scatter(obs.time_data, obs.h_residuals, c='b', label='Horizontal, RMS = '+str(h_res_rms), 
+            plt.scatter(obs.time_data, obs.h_residuals, c='b', label='Horizontal, RMSD = '+str(h_res_rms), 
                 zorder=3, s=2)
 
             plt.title('Residuals, station ' + str(obs.station_id))
@@ -2911,11 +2918,11 @@ class Trajectory(object):
             # Calculate residuals in arcseconds
             res = np.degrees(obs.ang_res)*3600
 
-            # Calculate the RMS of the residuals in arcsec
+            # Calculate the RMSD of the residuals in arcsec
             res_rms = np.degrees(obs.ang_res_std)*3600
 
             # Plot residuals
-            plt.scatter(obs.time_data, res, label='Angle, RMS = {:.2f}"'.format(res_rms), s=2, zorder=3)
+            plt.scatter(obs.time_data, res, label='Angle, RMSD = {:.2f}"'.format(res_rms), s=2, zorder=3)
 
             plt.title('Observed vs. Radiant LoS Residuals, station ' + str(obs.station_id))
             plt.ylabel('Angle (arcsec)')
@@ -2949,7 +2956,7 @@ class Trajectory(object):
 
             # Plot residuals
             plt.scatter(obs.time_data, res, s=2, zorder=3, label='Station ' + str(obs.station_id) + \
-                ', RMS = {:.2f}"'.format(res_rms))
+                ', RMSD = {:.2f}"'.format(res_rms))
 
 
         plt.title('Observed vs. Radiant LoS Residuals, all stations')
@@ -3242,6 +3249,14 @@ class Trajectory(object):
         minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=(self.observations), 
             method="Nelder-Mead")
 
+        # NOTE
+        # Other minimization methods were tried as well, but all produce higher fit residuals than Nelder-Mead.
+        # Tried:
+        # - Powell, CS, BFGS - larger residuals
+        # - Least Squares - large residuals
+        # - Basinhoppoing with NM seed solution - long time to execute with no improvement
+
+
 
         # If the minimization diverged, bound the solution to +/-10% of state vector
         if np.max(np.abs(minimize_solution.x[:3] - self.state_vect)/self.state_vect) > 0.1:
@@ -3335,8 +3350,6 @@ class Trajectory(object):
                     obs.time_data = np.copy(obs_noise.time_data)
 
 
-
-
         # Calculate velocity at each point
         self.calcVelocity(self.state_vect_mini, self.radiant_eci_mini, self.observations, 
             calc_res=_rerun_timing)
@@ -3358,6 +3371,10 @@ class Trajectory(object):
             self.estimateTimingAndVelocity(self.observations, estimate_timing_vel=self.estimate_timing_vel)
 
         self.time_diffs_final = self.time_diffs
+
+        # Calculate velocity at each point with updated timings
+        self.calcVelocity(self.state_vect_mini, self.radiant_eci_mini, self.observations, 
+            calc_res=_rerun_timing)
 
 
         ### RERUN THE TRAJECTORY ESTIMATION WITH UPDATED TIMINGS ###

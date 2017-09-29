@@ -710,7 +710,8 @@ if __name__ == "__main__":
     # Directory where the met file is
     #dir_path = "../MirfitPrepare/20160929_062945_mir"
     #dir_path = "../MetalPrepare/20161007_052749_met"
-    dir_path = "../MetalPrepare/20161007_052346_met"
+    #dir_path = "../MetalPrepare/20161007_052346_met"
+    dir_path = "/home/dvida/Dropbox/UWO Master's/Projects/MetalPrepare/20170721_070420_met"
 
     # Name of the met file
     file_name = 'state.met'
@@ -720,7 +721,7 @@ if __name__ == "__main__":
 
 
     # Run trajectory solver on the loaded .met file
-    solveTrajectoryMet(met, solver='gural')
+    solveTrajectoryMet(met, solver='original', max_toffset=0.0)
 
 
     # print(met.scale_plates.items())

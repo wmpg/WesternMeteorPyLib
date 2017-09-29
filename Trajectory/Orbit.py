@@ -9,8 +9,8 @@ from Config import config
 
 from Utils.Earth import calcEarthRectangularCoordJPL
 from Utils.SolarLongitude import jd2SolLonJPL
-from Utils.TrajConversions import J2000_JD, J2000_OBLIQUITY, AU, SUN_MU, SUN_MASS, G, jd2LST, jd2Date, \
-    eci2RaDec, altAz2RADec, raDec2AltAz, raDec2Ecliptic, cartesian2Geo, equatorialCoordPrecession,\
+from Utils.TrajConversions import J2000_JD, J2000_OBLIQUITY, AU, SUN_MU, SUN_MASS, G, SIDEREAL_YEAR, jd2LST, \
+    jd2Date, eci2RaDec, altAz2RADec, raDec2AltAz, raDec2Ecliptic, cartesian2Geo, equatorialCoordPrecession,\
     eclipticToRectangularVelocityVect, correctedEclipticCoord
 from Utils.Math import vectNorm, vectMag, rotateVector
 
@@ -122,6 +122,9 @@ class Orbit(object):
         # Tisserand's parameter with respect to Jupiter
         self.Tj = None
 
+        # Orbital period
+        self.T = None
+
 
     def __repr__(self, uncertanties=None):
         """ String to be printed out when the Orbit object is printed. """
@@ -176,6 +179,8 @@ class Orbit(object):
                 multi=1.0/1000))
             out_str += "  Vinf   = {:>9.5f}{:s} km/s\n".format(self.v_inf/1000, _uncer('{:.4f}', 'v_inf', 
                 multi=1.0/1000))
+            out_str += "  Zc     = {:>9.5f}{:s} deg\n".format(np.degrees(self.zc), _uncer('{:.4f}', 'zc', 
+                deg=True))
             out_str += "  Zg     = {:>9.5f}{:s} deg\n".format(np.degrees(self.zg), _uncer('{:.4f}', 'zg', 
                 deg=True))
             out_str += "Radiant (ecliptic geocentric):\n"
@@ -214,6 +219,7 @@ class Orbit(object):
             out_str += "  Q      = {:>10.6f}{:s} AU\n".format(self.Q, _uncer('{:.4f}', 'Q'))
             out_str += "  n      = {:>10.6f}{:s} deg/day\n".format(np.degrees(self.n), _uncer('{:.4f}', 'n', 
                 deg=True))
+            out_str += "  T      = {:>10.6f}{:s} years\n".format(self.T, _uncer('{:.4f}', 'T'))
             out_str += "  Last perihelion: " + str(self.last_perihelion) + _uncer('{:.4f}', 'last_perihelion') \
                 + " days \n"
             out_str += "  Tj     = {:>10.6f}{:s}\n".format(self.Tj, _uncer('{:.4f}', 'Tj'))
@@ -451,6 +457,10 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         n = np.sqrt(G*SUN_MASS/((np.abs(a)*AU*1000.0)**3))*86400.0
 
 
+        # Calculate the orbital period in years
+        T = 2*np.pi*np.sqrt(((a*AU)**3)/SUN_MU)/(86400*SIDEREAL_YEAR)
+
+
         # Calculate the orbit angular momentum
         h_vect = np.cross(meteor_pos, v_h)
         
@@ -574,6 +584,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         orb.mean_anomaly = mean_anomaly
         orb.last_perihelion = last_perihelion
         orb.n = n
+        orb.T = T
 
         orb.Tj = Tj
 
@@ -583,8 +594,21 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
 
 
 
+if __name__ == "__main__":
+
+    from Utils.TrajConversions import raDec2ECI
+
+    # Calculate an orbit as a test
+    radiant_eci = np.array(raDec2ECI(np.radians(265.16047), np.radians(-18.84373)))
+    v_init      = 16424.81 + 400
+    v_avg       = 15768.71
+    eci_ref     =  np.array([3757410.98, -2762153.20, 4463901.73])
+    jd_ref      = 2457955.794670294970
 
 
+    orb = calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref)
+
+    print(orb)
 
 
 

@@ -538,7 +538,7 @@ class MonteCarloPicks(object):
             
 
             # Extract the desired frame
-            img = self.vids[site].frames[pick.frame]
+            img = self.vids[site].frames[pick.frame].img_data
 
             # Show the image
             plt.imshow(img, cmap='inferno')#, vmin=0, vmax=255)
@@ -701,7 +701,7 @@ class MonteCarloPicks(object):
 
 
                 # Extract the desired frame
-                img = self.vids[site].frames[pick.frame]
+                img = self.vids[site].frames[pick.frame].img_data
 
 
 

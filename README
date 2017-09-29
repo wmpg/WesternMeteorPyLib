@@ -1,1 +1,18 @@
-Empty for now!
+# WesternMeteorPyLib
+
+A library of common functions used for meteor physics, developed by the [Western Meteor Physics Group](http://meteor.uwo.ca/).
+
+List of features:
+
+ * I/O functions for common formats of meteor data
+ * Trajectory estimation methods
+   * Gural at al. (2012) Multi-parameter fit method with PSO
+   * WMPG Monte Carlo metdhos
+ * Orbit estimation
+ * Meteor shower/trajectory simulaton
+ * Obtaining atmosphere densities using the NRLMSISE-00 model
+ * D criteria functions
+ * Parent body search
+ * Coordinate system transforms
+ * Solar longitude calculation (forward and inverse)
+ * Orbit visualizations

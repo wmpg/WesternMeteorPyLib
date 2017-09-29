@@ -293,7 +293,7 @@ def runMetSimEvaluation(v_init, init_mass, rho, q, T_boil, m_mass, c_p, met=None
 
 
 
-def bruteForceSearchMetSim(results_file, met, consts, mass, v_init, zg, obs_time, obs_height, obs_length, end_ht):
+def bruteForceSearchMetSim(results_file, met, consts, mass, v_init, zc, obs_time, obs_height, obs_length, end_ht):
     """ Do a brute force search through the meteor parameter space for the best fit to the observed data.
 
     """
@@ -306,7 +306,7 @@ def bruteForceSearchMetSim(results_file, met, consts, mass, v_init, zg, obs_time
     # met.m_init = mass
 
     # Set the zenith angle
-    consts.zr = zg
+    consts.zr = zc
 
 
     #-> Define ranges of physical parameters (min, max, step)
@@ -439,7 +439,7 @@ def refineMetSimEvaluation(params, met=None, consts=None, obs_time=None, obs_hei
 
 
 
-def refineSearchMetSim(met, consts, zg, obs_time, obs_height, obs_length, end_ht, best_guess):
+def refineSearchMetSim(met, consts, zc, obs_time, obs_height, obs_length, end_ht, best_guess):
     """ Refine the initial guess of the pohysical parameters of the meteor. """
 
     v_init, init_mass, rho, q, T_boil, m_mass, c_p = best_guess
@@ -448,7 +448,7 @@ def refineSearchMetSim(met, consts, zg, obs_time, obs_height, obs_length, end_ht
     met.v_init = v_init
 
     # Set the zenith angle
-    consts.zr = zg
+    consts.zr = zc
 
     print('Vinit:', v_init)
     print('Initial evaluation:', runMetSimEvaluation(init_mass, rho, q, T_boil, m_mass, c_p, met, consts, obs_time, obs_height, obs_length, end_ht))
@@ -548,13 +548,13 @@ def findBestSolution(solutions, top_N=20):
 
 
 
-def showResult(met, consts, v_init, zg, obs_time, obs_height, obs_length, params=None):
+def showResult(met, consts, v_init, zc, obs_time, obs_height, obs_length, params=None):
 
     # Set the initial velocity
     # met.v_init = v_init
 
     # Set the zenith angle
-    consts.zr = zg
+    consts.zr = zc
 
     # # Set meteor parameters
     # met.rho = 100
@@ -582,7 +582,7 @@ def showResult(met, consts, v_init, zg, obs_time, obs_height, obs_length, params
 
 
 
-def showAllResults(results_file, met, consts, v_init, zg, obs_height, obs_length):
+def showAllResults(results_file, met, consts, v_init, zc, obs_height, obs_length):
 
 
     # Load the numpy array with the results from a file
@@ -604,12 +604,12 @@ def showAllResults(results_file, met, consts, v_init, zg, obs_height, obs_length
         print('  Molar mass:', m_mass)
         print('  Specific heat:', c_p)
 
-        showResult(met, consts, v_init, zg, obs_height, obs_length, params=solution)
+        showResult(met, consts, v_init, zc, obs_height, obs_length, params=solution)
 
 
 
 # TEST FUNCTON
-def showBestResult(results_file, met, consts, v_init, zg, obs_time, obs_height, obs_length):
+def showBestResult(results_file, met, consts, v_init, zc, obs_time, obs_height, obs_length):
 
     # Load the numpy array with the results from a file
     solutions = np.load(results_file)
@@ -623,12 +623,12 @@ def showBestResult(results_file, met, consts, v_init, zg, obs_time, obs_height, 
 
     #for v_init in np.linspace(0.94*v_init, 0.96*v_init, 10):
     #for v_init in np.linspace(0.99*v_init, 1.01*v_init, 5):
-    #for zg in np.linspace(0.97*zg, 0.99*zg, 10):
-    #for zg in np.linspace(0.97*zg, 0.99*zg, 10):
+    #for zc in np.linspace(0.97*zc, 0.99*zc, 10):
+    #for zc in np.linspace(0.97*zc, 0.99*zc, 10):
     
     print('Vinit:', v_init/1000)
-    print('zg', np.degrees(zg))
-    showResult(met, consts, v_init, zg, obs_time, obs_height, obs_length, params=best_solution)
+    print('zc', np.degrees(zc))
+    showResult(met, consts, v_init, zc, obs_time, obs_height, obs_length, params=best_solution)
 
 
 
@@ -699,7 +699,7 @@ if __name__ == "__main__":
     # Load parameters from the trajectory object
     v_init = traj.v_init
     v_avg = traj.orbit.v_avg
-    zg = traj.orbit.zg
+    zc = traj.orbit.zc
 
 
 
@@ -807,18 +807,18 @@ if __name__ == "__main__":
         t1 = datetime.datetime.now()
 
         # # Do the brute force search
-        # bruteForceSearchMetSim(results_file, met, consts, mass, v_init, zg, obs_time, obs_height, obs_length, end_ht)
+        # bruteForceSearchMetSim(results_file, met, consts, mass, v_init, zc, obs_time, obs_height, obs_length, end_ht)
         # continue
 
 
         print('Simulation time:', datetime.datetime.now() - t1)
 
 
-        # showResult(met, consts, v_init, zg, obs_height, obs_length)
+        # showResult(met, consts, v_init, zc, obs_height, obs_length)
 
-        # showAllResults(results_file, met, consts, v_init, zg, obs_height, obs_length)
+        # showAllResults(results_file, met, consts, v_init, zc, obs_height, obs_length)
 
-        showBestResult(results_file, met, consts, v_init, zg, obs_time, obs_height, obs_length)
+        showBestResult(results_file, met, consts, v_init, zc, obs_time, obs_height, obs_length)
 
 
         # Calculate observed velocities
@@ -888,4 +888,4 @@ if __name__ == "__main__":
 
     # best_guess = np.append(np.array([v_init]), best_solution)
 
-    # refineSearchMetSim(met, consts, zg, obs_time, obs_height, obs_length, end_ht, best_guess)
+    # refineSearchMetSim(met, consts, zc, obs_time, obs_height, obs_length, end_ht, best_guess)

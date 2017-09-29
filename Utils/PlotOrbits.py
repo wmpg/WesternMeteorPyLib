@@ -34,7 +34,7 @@ from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
 import matplotlib.pyplot as plt
 
-from Plotting import savePlot
+from Plotting import savePlot, Arrow3D
 
 # Define Julian epoch
 J2000_EPOCH = datetime(2000, 1, 1, 12) # At the noon of 2000/01/01 UTC
@@ -223,8 +223,8 @@ def plotPlanets(ax, time):
 
 
 
-def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, save_plots=False, plot_path=None, 
-    plt_handle=None, **kwargs):
+def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_equinox=True, save_plots=False, 
+    plot_path=None, plt_handle=None, **kwargs):
     """ Plot the given orbits in the Solar System. 
 
     Arguments:
@@ -240,6 +240,7 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, save_pl
         orbit_colors: [list] A list of size orb_elements.shape[0] containing color strings for every planet 
             orbit.
         plot_planets: [bool] If True, planets will be plotted. True by default.
+        plot_equinox: [bool] Plots an arrow pointing to the vernal equinox if True. True by default.
         save_plots: [bool] If True, plots will be saved to the given path under plot_path. False by default.
         plot_path: [bool] File name and the full path where the plots will be saved if save_plots == True.
         plt_handle: [matplotlib plt handle] Pass the plot handle if some orbits need to be added to the plot.
@@ -279,6 +280,17 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, save_pl
     if plot_planets:
         plotPlanets(ax, years_diff)
 
+    # Plot the arrow pointing towards the vernal equinox
+    if plot_equinox:
+
+        # Plot the arrow
+        a = Arrow3D([0, -4], [0, 0], [0, 0], mutation_scale=10, lw=1, arrowstyle="-|>", color="w", alpha=0.5)
+        ax.add_artist(a)
+
+        # Plot the vernal equinox symbol
+        ax.text(-4, 0, 0, u'\u2648', fontsize=14, color='w', alpha=0.5, horizontalalignment='center', 
+            verticalalignment='center')
+
 
     # Eccentric anomaly (full range)
     E = np.linspace(-np.pi, np.pi, 100)
@@ -307,9 +319,9 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, save_pl
     ax.legend()
 
     # Add limits (in AU)
-    ax.set_xlim3d(-5,5)
-    ax.set_ylim3d(-5,5)
-    ax.set_zlim3d(-5,5)
+    ax.set_xlim3d(-6, 6)
+    ax.set_ylim3d(-6, 6)
+    ax.set_zlim3d(-6, 6)
 
     # Save plots to disk (top and side views)
     if save_plots:
@@ -340,7 +352,10 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, save_pl
 if __name__ == '__main__':
 
     # Time now
-    time = datetime.now()
+    #time = datetime.now()
+
+    # Vernal equinox 2017
+    time = datetime(2017, 03, 20, 06, 28)
 
 
     # Define orbits to plot

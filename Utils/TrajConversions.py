@@ -55,6 +55,9 @@ SUN_MASS = 1.98855e+30
 # Gravitational constant in m^3/kg/s^2
 G = 6.67384e-11
 
+# Earth's sidereal year in days
+SIDEREAL_YEAR = 365.256363004
+
 # Obliquity of the Earth at J2000.0 epoch
 J2000_OBLIQUITY = np.radians(23.4392911111)
 
@@ -280,16 +283,16 @@ def LST2LongitudeEast(julian_date, LST):
 
 
 
-def GST2JD(gst):
-    """ Convert Greenwich Sidereal Time to Julian date. 
+# def GST2JD(gst):
+#     """ Convert Greenwich Sidereal Time to Julian date. 
     
-    Arguments:
-        gst: [float] Greenwich Sidereal Time in degrees
+#     Arguments:
+#         gst: [float] Greenwich Sidereal Time in degrees
 
-    Return:
-        jd: [float] Julian date
+#     Return:
+#         jd: [float] Julian date
 
-    """
+#     """
 
 
 

@@ -1,12 +1,12 @@
 Meteoroid properties
 ncmp = 1 //maximum 10; masses (kg) follow, separate lines 1e-6 
-4.3e-5
+0.000169101311594
 //density: (kg/m^3) 7500 1000
-3000
+700
 //initial porosity
-0
+0.0
 //heat of ablation: (J/kg) 5e5 1e6
-6e6
+6.6e6
 //boiling point (K) 3130 1500
 1850
 //melting point (K) 1811 1490
@@ -20,7 +20,7 @@ ncmp = 1 //maximum 10; masses (kg) follow, separate lines 1e-6
 //therm conductivity (J/ m s K) 80 1
 3
 //luminous efficiency (ratio, NOT percent! Thus, 0.007 is 0.7%)
-0.007
+0.014
 //temperature at which porosity is reduced
 1900
 //shape factor
@@ -33,11 +33,11 @@ Initial conditions
 //begin trail length (m)
 0
 //begin speed (m/s)
-31400
+16824.81
 //zenith angle (deg)
-45
+75.0
 //Initial temperature (K)
-280 
+280
 Simulation parameters
 //absolute magnitude distance (m)
 100000
