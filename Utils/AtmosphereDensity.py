@@ -11,33 +11,6 @@ from PythonNRLMSISE00.nrlmsise_00 import *
 from Utils.TrajConversions import jd2Date, jd2LST
 
 
-# from Config import config
-# from MetSim.MetSim import loadInputs, atmDensity
-
-# # Vectorize the atmospheric density function
-# atmDensity_vect = np.vectorize(atmDensity, excluded=['consts'])
-
-
-# def getAtmDensity(height):
-#     """ For the given heights, returns the atmospheric density from NRLMSISE-00 model. 
-
-#     Arguments:
-#         height: [float] Height in meters.
-
-#     Return:
-#         [float] Atmosphere density in kg/m^3.
-
-#     """
-
-#     # Load input meteor data
-#     met, consts = loadInputs(config.met_sim_input_file)
-
-#     # Get the atmosphere density
-#     atm_density = atmDensity_vect(height, consts)
-
-#     return atm_density
-
-
 
 def getAtmDensity(lat, lon, height, jd):
     """ For the given heights, returns the atmospheric density from NRLMSISE-00 model. 

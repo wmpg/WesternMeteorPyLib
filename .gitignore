@@ -20,3 +20,6 @@ VSOP87D.ear
 build/
 dist/
 WesternMeteorPyLib.egg-info/
+
+# Original metsim code
+MetSim/native

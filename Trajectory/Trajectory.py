@@ -863,10 +863,13 @@ def timingAndVelocityResiduals(params, observations, t_ref_station, ret_stddev=F
 
         time, lag = lags[i]
 
-        # # Take only those points that overlap with the referent station
-        # common_points = np.where((time > np.min(ref_time)) & (time < np.max(ref_time)))
-        # time = time[common_points]
-        # lag = lag[common_points]
+        # Take only those points that overlap with the referent station
+        common_points = np.where((time > np.min(ref_time)) & (time < np.max(ref_time)))
+
+        # Do this is there are at least 4 overlapping points
+        if len(common_points[0]) > 4:
+            time = time[common_points]
+            lag = lag[common_points]
 
         # Calculate the residuals in lag from the current lag to the referent lag, using smooth approximation
         # of L1 (absolute value) cost
@@ -954,11 +957,13 @@ def timingResiduals(params, observations, t_ref_station, ret_stddev=False):
 
         time, state_vect_dist = state_vect_distances[i]
 
-        # # WARNING: THIS MAY MESS UP RESULTS FOR SOME EVENTS, BECAUSE THERE WILL NOT BE OVERLAPPING POINTS
-        # # Take only those points that overlap with the referent station
-        # common_points = np.where((time > np.min(ref_time)) & (time < np.max(ref_time)))
-        # time = time[common_points]
-        # state_vect_dist = state_vect_dist[common_points]
+        # Take only those points that overlap with the referent station
+        common_points = np.where((time > np.min(ref_time)) & (time < np.max(ref_time)))
+
+        # Do this is there are at least 4 overlapping points
+        if len(common_points[0]) > 4:
+            time = time[common_points]
+            state_vect_dist = state_vect_dist[common_points]
 
         # Calculate the residuals in dist from the current dist to the referent dist, using smooth
         # approximation of L1 (absolute value) cost
@@ -1428,6 +1433,75 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
             else:
                 plt.clf()
                 plt.close()
+
+    ##########################################################################################################
+
+
+
+    ### PLOT ORBITAL ELEMENTS SPREAD ###
+    ##########################################################################################################
+
+    if traj.orbit is not None:
+
+        a_list = np.array([traj_temp.orbit.a for traj_temp in mc_results])
+        incl_list = np.array([traj_temp.orbit.i for traj_temp in mc_results])
+        e_list = np.array([traj_temp.orbit.e for traj_temp in mc_results])
+        peri_list = np.array([traj_temp.orbit.peri for traj_temp in mc_results])
+        q_list = np.array([traj_temp.orbit.q for traj_temp in mc_results])
+
+        fig = plt.figure()
+
+        ax1 = fig.add_subplot(2, 2, 1)
+        ax2 = fig.add_subplot(2, 2, 2, sharey=ax1)
+        ax3 = fig.add_subplot(2, 2, 3)
+        ax4 = fig.add_subplot(2, 2, 4, sharey=ax3)
+
+        # Semimajor axis vs. inclination
+        ax1.hist2d(a_list, np.degrees(incl_list))
+        ax1.set_xlabel('a (AU)')
+        ax1.set_ylabel('Inclination (deg)')
+
+        # Plot argument of perihelion vs. inclination
+        ax2.hist2d(peri_list, np.degrees(incl_list))
+        ax2.set_xlabel('peri (deg)')
+
+        ax2.tick_params(
+            axis='y',          # changes apply to the y-axis
+            which='both',      # both major and minor ticks are affected
+            left='off',        # ticks along the left edge are off
+            labelleft='off')   # labels along the left edge are off
+
+
+        # Plot eccentricity vs. perihelion distance
+        ax3.hist2d(e_list, q_list)
+        ax3.set_xlabel('Eccentricity')
+        ax3.set_ylabel('q (AU)')
+
+        # Plot argument of perihelion vs. perihelion distance
+        ax4.hist2d(peri_list, q_list)
+        ax4.set_xlabel('peri (deg)')
+
+        ax4.tick_params(
+            axis='y',          # changes apply to the y-axis
+            which='both',      # both major and minor ticks are affected
+            left='off',        # ticks along the left edge are off
+            labelleft='off')   # labels along the left edge are off
+        
+
+
+
+
+        plt.tight_layout()
+        plt.subplots_adjust(wspace=0)
+
+        savePlot(plt, traj.file_name + '_monte_carlo_orbit_elems.png', output_dir=traj.output_dir)
+
+        if traj.show_plots:
+            plt.show()
+
+        else:
+            plt.clf()
+            plt.close()
 
     ##########################################################################################################
 
@@ -2994,7 +3068,7 @@ class Trajectory(object):
 
                 # Run orbit plotting procedure
                 plotOrbits(orbit_params, jd2Date(self.jdt_ref, dt_obj=True), save_plots=True, \
-                    plot_path=os.path.join(output_dir, file_name))
+                    plot_path=os.path.join(output_dir, file_name), linewidth=1)
 
 
                 plt.tight_layout()
@@ -3254,7 +3328,7 @@ class Trajectory(object):
         # Tried:
         # - Powell, CS, BFGS - larger residuals
         # - Least Squares - large residuals
-        # - Basinhoppoing with NM seed solution - long time to execute with no improvement
+        # - Basinhopping with NM seed solution - long time to execute with no improvement
 
 
 

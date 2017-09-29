@@ -176,7 +176,7 @@ if __name__ == "__main__":
     peri   =  32.557683
     node   = 298.851272
 
-    # Find parent bodies
+    # Find parent bodies for the given orbit
     parent_matches = findParentBodies(q, e, np.radians(incl), np.radians(peri), np.radians(node), \
         d_crit='dsh', top_n=5)
 

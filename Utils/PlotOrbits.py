@@ -288,7 +288,7 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_eq
         ax.add_artist(a)
 
         # Plot the vernal equinox symbol
-        ax.text(-4, 0, 0, u'\u2648', fontsize=14, color='w', alpha=0.5, horizontalalignment='center', 
+        ax.text(-4.1, 0, 0, u'\u2648', fontsize=8, color='w', alpha=0.5, horizontalalignment='center', 
             verticalalignment='center')
 
 

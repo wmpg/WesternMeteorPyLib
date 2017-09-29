@@ -1,12 +1,9 @@
 """ 
-A set of tools of working with meteor data. 
-
-Includes:
-    - Julian date conversion
-    - LST calculation
-    - Coordinate transformations
-    - RA and Dec precession correction
-    - ...
+- Julian date conversion
+- LST calculation
+- Coordinate system trensforms
+- RA and Dec precession correction
+- ...
     
 """
 
@@ -283,22 +280,11 @@ def LST2LongitudeEast(julian_date, LST):
 
 
 
-# def GST2JD(gst):
-#     """ Convert Greenwich Sidereal Time to Julian date. 
-    
-#     Arguments:
-#         gst: [float] Greenwich Sidereal Time in degrees
-
-#     Return:
-#         jd: [float] Julian date
-
-#     """
-
-
-
-
 ############################
 
+
+
+### Spatial coordinates transformations ###
 
 
 def ecef2ENU(phi, lam, x, y, z):
@@ -388,8 +374,6 @@ def latLonAlt2ECEF(lat, lon, h):
     return ecef_x, ecef_y, ecef_z
 
 
-
-### Spatial coordinates transformations ###
 
 @floatArguments
 def geo2Cartesian(lat_rad, lon_rad, h, julian_date):
@@ -591,7 +575,7 @@ raDec2AltAz_vect = np.vectorize(raDec2AltAz, excluded=['lat', 'lon'])
 
 
 def raDec2ECI(ra, dec):
-    """ Convert right ascension and declination to Earth-centered inertial coordinates. 
+    """ Convert right ascension and declination to Earth-centered inertial vector. 
 
     Arguments:
         ra: [float] right ascension in radians
@@ -611,7 +595,7 @@ def raDec2ECI(ra, dec):
 
 
 def eci2RaDec(eci):
-    """ Convert Earth-centered intertial coordinates to right ascension and declination. 
+    """ Convert Earth-centered intertial vector to right ascension and declination. 
 
     Arguments:
         eci: [3 element ndarray] Earth-centered inertial coordinats
