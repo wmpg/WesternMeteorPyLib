@@ -22,6 +22,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+from __future__ import print_function, division, absolute_import
+
 import numpy as np
 import scipy.linalg
 
@@ -126,7 +128,7 @@ if __name__ == "__main__":
     # Plot a line from center to plane normal
     ax.plot([0, N[0]], [0, N[1]], [0, N[2]])
 
-    print 'Normal:', N
+    print('Normal:', N)
 
     # Set the limits of the plot to unit size
     plt.xlim([-1, 1])

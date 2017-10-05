@@ -250,7 +250,7 @@ def plotRadiants(pickle_trajs, plot_type='geocentric', ra_cent=None, dec_cent=No
 
     plt_handle.scatter(x_list, y_list, c=z_list, label=label, **kwargs)
 
-
+ 
     return plt_handle, dist_profile
 
 

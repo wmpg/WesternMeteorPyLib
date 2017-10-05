@@ -12,12 +12,16 @@ import scipy.optimize
 import scipy.interpolate
 import matplotlib.pyplot as plt
 
-from Utils.TrajConversions import raDec2ECI, geo2Cartesian_vect, altAz2RADec_vect, unixTime2JD, cartesian2Geo, jd2Date
+
+from Formats.Met import loadMet
 from Trajectory.Trajectory import lineFunc
+from Utils.TrajConversions import raDec2ECI, geo2Cartesian_vect, altAz2RADec_vect, unixTime2JD, cartesian2Geo, jd2Date
 from Utils.Math import findClosestPoints, vectMag
 from Utils.AtmosphereDensity import getAtmDensity, getAtmDensity_vect
-from Formats.Met import loadMet
 from Utils.Pickling import loadPickle
+from Utils.Physics import dynamicPressure
+
+
 
 
 def timeHeightFunc(x, a, b, c, d):
@@ -45,7 +49,8 @@ def projectNarrowPicks(met, traj):
     ### MANUAL ENTRIES ###
     ##########################################################################################################
     # DISCTIONARY WHICH MAPS FRAGMENT IDs to FRAGMENTS TO PLOT
-    frag_dict = {0.0: 10, 1.0: 11, 2.0: 6, 3.0: 9, 4.0: 8, 5.0: 3, 6.0: 2, 7.0: 4, 8.0: 1, 9.0: 5, 10.0: 12, 11.0: 7}
+    frag_dict = {0.0: 10, 1.0: 11, 2.0: 6, 3.0: 9, 4.0: 8, 5.0: 3, 6.0: 2, 7.0: 4, 8.0: 1, 9.0: 5, 10.0: 12, \
+        11.0: 7}
     frag_dict_rev = dict((v,k) for k,v in frag_dict.iteritems())
 
 
@@ -205,7 +210,8 @@ def projectNarrowPicks(met, traj):
             # time_data -= time_data[0]
 
             # Fit an exponential to the data
-            decel_fit, _ = scipy.optimize.curve_fit(exponentialDeceleration, time_data, length_data, maxfev=10000)
+            decel_fit, _ = scipy.optimize.curve_fit(exponentialDeceleration, time_data, length_data, \
+                maxfev=10000)
             decel_list.append(decel_fit)
 
             print(decel_fit)
@@ -253,7 +259,9 @@ def projectNarrowPicks(met, traj):
             # Plot the positions of fragments from the first time to the end, using fitted parameters
             # The lag is calculated by subtracting an "average" velocity length from the observed length
             time_array = np.linspace(-1, last_time, 1000)
-            plt.plot(exponentialDeceleration(time_array, *decel_fit) - exponentialDeceleration(time_array, 0, offset_vel_max, vel_max, 0, 0), time_array, linestyle='--', color=colors_frags[frag], linewidth=0.75)
+            plt.plot(exponentialDeceleration(time_array, *decel_fit) - exponentialDeceleration(time_array, \
+                0, offset_vel_max, vel_max, 0, 0), time_array, linestyle='--', color=colors_frags[frag], \
+                linewidth=0.75)
 
 
             # Plot the observed data
@@ -262,7 +270,8 @@ def projectNarrowPicks(met, traj):
 
 
             # Plot the fragment number at the end of each lag
-            plt.text(fake_lag[-1] - 10, time_data[-1] + 0.02, str(frag_dict[frag]), color=colors_frags[frag], size=7, va='center', ha='right')
+            plt.text(fake_lag[-1] - 10, time_data[-1] + 0.02, str(frag_dict[frag]), color=colors_frags[frag], \
+                size=7, va='center', ha='right')
 
 
             # Check if the fragment has a fragmentation point and plot it
@@ -270,13 +279,15 @@ def projectNarrowPicks(met, traj):
 
                 # Get the lag of the fragmentation point
                 frag_point_time, fragments_list = fragmentation_points[frag_dict[frag]]
-                frag_point_lag = exponentialDeceleration(frag_point_time, *decel_fit) - exponentialDeceleration(frag_point_time, 0, offset_vel_max, vel_max, 0, 0)
+                frag_point_lag = exponentialDeceleration(frag_point_time, *decel_fit) \
+                    - exponentialDeceleration(frag_point_time, 0, offset_vel_max, vel_max, 0, 0)
 
 
                 fragments_list = map(str, fragments_list)
 
                 # Plot the fragmentation point
-                plt.scatter(frag_point_lag, frag_point_time, s=20, zorder=4, color=colors_frags[frag], edgecolor='k', linewidth=0.5, label='Fragmentation: ' + ",".join(fragments_list))
+                plt.scatter(frag_point_lag, frag_point_time, s=20, zorder=4, color=colors_frags[frag], \
+                    edgecolor='k', linewidth=0.5, label='Fragmentation: ' + ",".join(fragments_list))
             
 
 
@@ -326,14 +337,17 @@ def projectNarrowPicks(met, traj):
 
             ### CALCULATE OBSERVED DYN PRESSURE
 
-            # Get the atmospheric densities at every heights
-            atm_dens = getAtmDensity_vect(lat_data, lon_data, height_data, jd_ref)
+            # # Get the atmospheric densities at every heights
+            # atm_dens = getAtmDensity_vect(lat_data, lon_data, height_data, jd_ref)
 
             # Get the velocity at every point in time
             velocities = exponentialDecelerationVel(time_data, *decel_fit)
 
+            # # Calculate the dynamic pressure
+            # dyn_pressure = atm_dens*drag_coefficient*velocities**2
+
             # Calculate the dynamic pressure
-            dyn_pressure = atm_dens*drag_coefficient*velocities**2
+            dyn_pressure = dynamicPressure(lat_data, lon_data, height_data, jd_ref, velocities)
 
             ###
 
@@ -342,7 +356,8 @@ def projectNarrowPicks(met, traj):
             plt.plot(dyn_pressure/10**3, height_data/1000, color=colors_frags[frag], zorder=3, linewidth=0.75)
 
             # Plot the fragment number at the end of each lag
-            plt.text(dyn_pressure[-1]/10**3, height_data[-1]/1000 - 0.02, str(frag_dict[frag]), color=colors_frags[frag], size=7, va='top', zorder=3)
+            plt.text(dyn_pressure[-1]/10**3, height_data[-1]/1000 - 0.02, str(frag_dict[frag]), \
+                color=colors_frags[frag], size=7, va='top', zorder=3)
 
 
             ### CALCULATE MODELLED DYN PRESSURE
@@ -383,7 +398,8 @@ def projectNarrowPicks(met, traj):
                 frag_point_velocity = exponentialDecelerationVel(frag_point_time, *decel_fit)
 
                 # Calculate the atm. density at the fragmentation point
-                frag_point_atm_dens = getAtmDensity(np.mean(lat_data), np.mean(lon_data), frag_point_height, jd_ref)
+                frag_point_atm_dens = getAtmDensity(np.mean(lat_data), np.mean(lon_data), frag_point_height, \
+                    jd_ref)
 
                 # Calculate the dynamic pressure at fragmentation
                 frag_point_dyn_pressure = frag_point_atm_dens*drag_coefficient*frag_point_velocity**2

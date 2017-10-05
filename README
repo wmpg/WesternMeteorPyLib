@@ -16,3 +16,35 @@ List of features:
  * Coordinate system transforms
  * Solar longitude calculation (forward and inverse)
  * Orbit visualizations
+ * Python 2 and 3 compatible
+
+
+
+## Installation
+
+After cloning/downloading this library, navigate into it with a terminal and run:
+
+```
+python setup.py install
+```
+
+This should install most of the libraries you need. You may have issues with basemap, in that case run:
+
+```
+pip install https://github.com/matplotlib/basemap/archive/v1.1.0.tar.gz
+```
+
+
+## Data files
+
+JPL DE430 ephemerids are not a part of the library and have to be downloaded separately and put into the **`shared`** directory:
+
+ * [JPL DE430 ephemerids](https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de430.bsp)
+
+
+If you want to use the most recent lists of comets and asteroids, download these as well:
+
+ * [JPL comets elements](https://ssd.jpl.nasa.gov/dat/ELEMENTS.COMET)
+ * [MPC Amors](http://cgi.minorplanetcenter.net/cgi-bin/textversion.cgi?f=lists/Amors.html)
+ * [MPC Apollos](http://cgi.minorplanetcenter.net/cgi-bin/textversion.cgi?f=lists/Apollos.html)
+ * [MPC Athens](http://cgi.minorplanetcenter.net/cgi-bin/textversion.cgi?f=lists/Atens.html)

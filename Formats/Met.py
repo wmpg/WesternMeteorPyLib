@@ -712,7 +712,7 @@ if __name__ == "__main__":
     #dir_path = "../MetalPrepare/20161007_052749_met"
     #dir_path = "../MetalPrepare/20161007_052346_met"
     #dir_path = "/home/dvida/Dropbox/UWO Master's/Projects/MetalPrepare/20170721_070420_met"
-    dir_path = "/home/dvida/Dropbox/UWO Master's/Projects/MetalPrepare/20170721_070420_met_TEST"
+    dir_path = "../MetalPrepare/20170721_070420_met_TEST"
 
     # Name of the met file
     file_name = 'state.met'
@@ -722,7 +722,7 @@ if __name__ == "__main__":
 
 
     # Run trajectory solver on the loaded .met file
-    solveTrajectoryMet(met, solver='original', max_toffset=1.0, mc_runs=100)
+    solveTrajectoryMet(met, solver='original', max_toffset=1.0, mc_runs=100, monte_carlo=True)
 
 
     # print(met.scale_plates.items())

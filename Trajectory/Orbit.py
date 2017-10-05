@@ -600,7 +600,7 @@ if __name__ == "__main__":
 
     # Calculate an orbit as a test
     radiant_eci = np.array(raDec2ECI(np.radians(265.16047), np.radians(-18.84373)))
-    v_init      = 16424.81 + 400
+    v_init      = 16424.81
     v_avg       = 15768.71
     eci_ref     =  np.array([3757410.98, -2762153.20, 4463901.73])
     jd_ref      = 2457955.794670294970

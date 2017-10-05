@@ -237,6 +237,8 @@ if __name__ == "__main__":
     # Load the trajectory file
     traj = loadPickle(dir_path, traj_file)
 
+    # ID of the site used for loading proper picks from the met object
+    site_id = '1'
 
     # Generate images with marked fragments on them
-    markFragments(out_dir, vid, met, '1', traj=traj)
+    markFragments(out_dir, vid, met, site_id, traj=traj)

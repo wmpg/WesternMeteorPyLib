@@ -27,6 +27,8 @@
 # The source of equations used:
 # http://farside.ph.utexas.edu/teaching/celestial/Celestialhtml/node34.html
 
+from __future__ import print_function, division, absolute_import
+
 import os
 from datetime import datetime
 import matplotlib as mpl
@@ -34,7 +36,7 @@ from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
 import matplotlib.pyplot as plt
 
-from Plotting import savePlot, Arrow3D
+from Utils.Plotting import savePlot, Arrow3D
 
 # Define Julian epoch
 J2000_EPOCH = datetime(2000, 1, 1, 12) # At the noon of 2000/01/01 UTC
@@ -355,7 +357,7 @@ if __name__ == '__main__':
     #time = datetime.now()
 
     # Vernal equinox 2017
-    time = datetime(2017, 03, 20, 06, 28)
+    time = datetime(2017, 3, 20, 6, 28)
 
 
     # Define orbits to plot

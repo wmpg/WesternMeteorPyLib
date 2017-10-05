@@ -8,9 +8,6 @@
 # JPL DE430 ephemerids
 de430.bsp
 
-# VSOP87D ephemerids
-VSOP87D.ear
-
 # Compiled files
 *.so
 *.so.0

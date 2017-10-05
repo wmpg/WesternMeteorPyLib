@@ -95,7 +95,7 @@ def loadMiligInput(file_path):
         for line in f:
 
             # Stop reading if '-1' flag has been reached
-            if line.replace('\n', '') == '-1':
+            if line.replace('\n', '').replace('\r', '') == '-1':
                 break
 
             # If the last line kad the control character 9, this marks the beginning of new station picks
@@ -316,7 +316,8 @@ if __name__ == '__main__':
     #dir_path = "/home/dvida/Desktop/PyLIG_in_2016112223APO0002"
     #dir_path = os.path.abspath("../MILIG files")
     #dir_path = os.path.abspath("../MILIG files/20170531_002824")
-    dir_path = os.path.abspath("../MILIG files/PyLIG_IN_Pula_2010102829")
+    #dir_path = os.path.abspath("../MILIG files/PyLIG_IN_Pula_2010102829")
+    dir_path = os.path.abspath("../MILIG files/20170923_053525 meteorite dropping")
 
     #file_name = "input_krizy_01.txt"
     #file_name = 'PyLIG_in_2011100809PUB0030.txt'
@@ -326,11 +327,12 @@ if __name__ == '__main__':
     #file_name = "PyLIG_in_2016112223APO0002.txt"
     #file_name = "PyLIG_IN_Pula_2010102829.txt"
     #file_name = "PyLIG_M_20170531_002824.txt"
-    file_name = "PyLIG_IN_Pula_2010102829.txt"
+    #file_name = "PyLIG_IN_Pula_2010102829.txt"
+    file_name = "20170923_053525-obs.dat"
 
 
 
-    solveTrajectoryMILIG(dir_path, file_name, solver='original', max_toffset=30.0, monte_carlo=False, mc_runs=20)
+    solveTrajectoryMILIG(dir_path, file_name, solver='original', max_toffset=30.0, monte_carlo=True, mc_runs=200)
 
     
 

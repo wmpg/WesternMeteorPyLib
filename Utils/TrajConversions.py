@@ -917,7 +917,7 @@ if __name__ == "__main__":
     # SPE 9 meteor burster
     ra = np.radians(47.98)
     dec = np.radians(+39.35)
-    jd = date2JD(2016, 9, 9, 23, 06, 59)
+    jd = date2JD(2016, 9, 9, 23, 6, 59)
 
     L, B = np.degrees(raDec2Ecliptic(jd, ra, dec))
 

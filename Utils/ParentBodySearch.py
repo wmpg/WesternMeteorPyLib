@@ -162,6 +162,10 @@ def findParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10):
 
 if __name__ == "__main__":
 
+
+    ### PROVIDE ORBITAL ELEMENTS MANUALLY ###
+    ##########################################################################################################
+
     # Orbital elements of the July 21 meteoroid
     # q      =   0.948562
     # e      =   0.710995
@@ -169,17 +173,31 @@ if __name__ == "__main__":
     # peri   =  31.979790
     # node   = 298.845068
 
-    # With velocity correction of 400 m/s
-    q      =   0.944491
-    e      =   0.744092
-    incl   =   2.302671
-    peri   =  32.557683
-    node   = 298.851272
+    # # With velocity correction of 400 m/s
+    # q      =   0.944491
+    # e      =   0.744092
+    # incl   =   2.302671
+    # peri   =  32.557683
+    # node   = 298.851272
+
+
+    # 20170923 meteorite dropper
+    q      =   0.978776
+    e      =   0.576897
+    incl   =   2.823131
+    peri   = 202.247996
+    node   = 180.337617
+
+
+    ##########################################################################################################
+
+
+    d_crit_type = 'dsh'
 
     # Find parent bodies for the given orbit
     parent_matches = findParentBodies(q, e, np.radians(incl), np.radians(peri), np.radians(node), \
-        d_crit='dsh', top_n=5)
+        d_crit=d_crit_type, top_n=5)
 
-    print('Name, q, e, incl, peri, node, D crit')
+    print('Name                ,   q,     e,    incl,   peri,   node,   D crit', d_crit_type)
     for entry in parent_matches:
-        print(entry)
+        print("{:20s}, {:.3f}, {:.3f}, {:5.2f}, {:7.3f}, {:7.3f}, {:.3f}".format(*entry))

@@ -26,6 +26,11 @@ for dir_name in os.listdir(dir_path):
             packages.append(dir_name)
 
 
+# Read requirements file
+with open('requirements.txt') as f:
+    requirements = f.read().splitlines()
+
+
 # Get all data files in 'share'
 share_files = [os.path.join('share', file_name) for file_name in os.listdir(os.path.join(dir_path, 'share'))]
 
@@ -47,4 +52,6 @@ setup(
         "Topic :: Utilities",
         "License :: OSI Approved :: MIT License",
     ],
+    setup_requires=["numpy"],
+    install_requires=requirements
 )
