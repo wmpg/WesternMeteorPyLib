@@ -41,7 +41,7 @@ pip install https://github.com/matplotlib/basemap/archive/v1.1.0.tar.gz
 ```
 
 
-## Data files
+### Data files
 
 JPL DE430 ephemerids are not a part of the library and have to be downloaded separately and put into the **`shared`** directory:
 
@@ -54,3 +54,12 @@ If you want to use the most recent lists of comets and asteroids, download these
  * [MPC Amors](http://cgi.minorplanetcenter.net/cgi-bin/textversion.cgi?f=lists/Amors.html)
  * [MPC Apollos](http://cgi.minorplanetcenter.net/cgi-bin/textversion.cgi?f=lists/Apollos.html)
  * [MPC Athens](http://cgi.minorplanetcenter.net/cgi-bin/textversion.cgi?f=lists/Atens.html)
+
+
+## Usage
+
+Module interfaces are not 100% complete yet, but individual functions are well documented. To run individual modules, e.g. to demonstrate how the Monte Carlo trajectory solver works, navigate into the WesternMeteorPyLib directory and run
+
+```
+python -m Trajectory.Trajectory
+```
