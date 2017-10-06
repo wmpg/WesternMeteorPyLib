@@ -46,7 +46,7 @@ setup(
     packages=find_packages(),
     data_files=[('share', share_files)],
     include_package_data=True,
-    long_description=read('README'),
+    long_description=read('README.md'),
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Topic :: Utilities",
