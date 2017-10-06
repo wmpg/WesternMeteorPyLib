@@ -1,0 +1,3 @@
+[submodule "PythonNRLMSISE00"]
+	path = PythonNRLMSISE00
+	url = git@github.com:DeepHorizons/Python-NRLMSISE-00.git
