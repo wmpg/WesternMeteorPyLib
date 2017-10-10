@@ -58,7 +58,7 @@ If you want to use the most recent lists of comets and asteroids, download these
 
 ## Usage
 
-Module interfaces are not 100% complete yet, but individual functions are well documented. To run individual modules, e.g. to demonstrate how the Monte Carlo trajectory solver works, navigate into the WesternMeteorPyLib directory and run
+Module interfaces are not 100% complete yet, but individual functions are well documented. To run individual modules, e.g. to demonstrate how the Monte Carlo trajectory solver works, navigate into the WesternMeteorPyLib directory and run:
 
 ```
 python -m Trajectory.Trajectory
