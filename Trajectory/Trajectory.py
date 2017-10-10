@@ -1017,6 +1017,10 @@ def timingResiduals(params, observations, t_ref_station, ret_stddev=False, ret_l
                 cost_point_count += len(time2)
 
 
+        # If no points were compared, return infinite
+        if cost_point_count == 0:
+            return np.inf
+
         # Calculate the standard deviation of the fit
         dist_stddev = np.sqrt(cost_sum/cost_point_count)
 
@@ -1565,13 +1569,15 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
         ax1.set_xlabel('a (AU)')
         ax1.set_ylabel('Inclination (deg)')
         plt.setp(ax1.get_xticklabels(), rotation=30, horizontalalignment='right')
-        ax1.get_xaxis().get_major_formatter().set_useOffset(False)
+        #ax1.get_xaxis().get_major_formatter().set_useOffset(False)
+        ax1.ticklabel_format(useOffset=False)
 
         # Plot argument of perihelion vs. inclination
         ax2.hist2d(peri_list, np.degrees(incl_list))
         ax2.set_xlabel('peri (deg)')
         plt.setp(ax2.get_xticklabels(), rotation=30, horizontalalignment='right')
-        ax2.get_xaxis().get_major_formatter().set_useOffset(False)
+        #ax2.get_xaxis().get_major_formatter().set_useOffset(False)
+        ax2.ticklabel_format(useOffset=False)
 
         ax2.tick_params(
             axis='y',          # changes apply to the y-axis
@@ -1585,13 +1591,15 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
         ax3.set_xlabel('Eccentricity')
         ax3.set_ylabel('q (AU)')
         plt.setp(ax3.get_xticklabels(), rotation=30, horizontalalignment='right')
-        ax3.get_xaxis().get_major_formatter().set_useOffset(False)
+        #ax3.get_xaxis().get_major_formatter().set_useOffset(False)
+        ax3.ticklabel_format(useOffset=False)
 
         # Plot argument of perihelion vs. perihelion distance
         ax4.hist2d(peri_list, q_list)
         ax4.set_xlabel('peri (deg)')
         plt.setp(ax4.get_xticklabels(), rotation=30, horizontalalignment='right')
-        ax4.get_xaxis().get_major_formatter().set_useOffset(False)
+        #ax4.get_xaxis().get_major_formatter().set_useOffset(False)
+        ax4.ticklabel_format(useOffset=False)
 
         ax4.tick_params(
             axis='y',          # changes apply to the y-axis
