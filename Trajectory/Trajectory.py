@@ -1291,6 +1291,57 @@ def calcMCUncertanties(traj_list, traj_best):
 
 
 
+def calcCovMatrices(mc_traj_list):
+    """ Calculate the covariance matrix between orbital elements, and initial state vector using all Monte 
+        Carlo trajectories. The covariance matrix is weighted by the timing residuals.
+
+        The orbital covariance matrix is calculated for radians and the inital state vector matrix in meters
+        and meters per second.
+
+    Arguments:
+        mc_traj_list: [list] A list of Trajectory objects from Monte Carlo runs.
+
+
+    Return:
+        orbit_cov, state_vect_cov: [tuple of ndarrays] Orbital and initial state vector covariance matrices.
+    """
+
+    # Extract timing residuals
+    timing_res_list = np.array([traj.timing_res for traj in mc_traj_list])
+
+    # Make sure the timing residual is not 0
+    timing_res_list[timing_res_list == 0] = 1e-10
+
+    # Calculate the weights using timing residuals
+    weights = np.min(timing_res_list)/timing_res_list
+    weights = weights
+
+
+    # Extract orbit elements
+    q_list = np.array([traj.orbit.q for traj in mc_traj_list])
+    e_list = np.array([traj.orbit.e for traj in mc_traj_list])
+    i_list = np.array([traj.orbit.i for traj in mc_traj_list])
+    peri_list = np.array([traj.orbit.peri for traj in mc_traj_list])
+    node_list = np.array([traj.orbit.node for traj in mc_traj_list])
+
+    # Calculate the orbital covariance
+    orbit_input = np.c_[q_list, e_list, i_list, peri_list, node_list].T
+    orbit_cov = np.cov(orbit_input, aweights=weights)
+
+
+    # Extract inital state vectors
+    state_vect_list = np.array([traj.state_vect_mini for traj in mc_traj_list])
+    initial_vel_vect_list = np.array([traj.v_init*traj.radiant_eci_mini for traj in mc_traj_list])
+
+    # Calculate inital state vector covariance
+    state_vect_input = np.hstack([state_vect_list, initial_vel_vect_list]).T
+    state_vect_cov = np.cov(state_vect_input, aweights=weights)
+
+
+    return orbit_cov, state_vect_cov
+
+
+
 def _MCTrajSolve(i, traj, observations):
     """ Internal function. Does a Monte Carlo run of the given trajectory object. Used as a function for
         parallelization. 
@@ -1439,6 +1490,10 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
 
     # Calculate the standard deviation of every trajectory parameter
     uncertanties = calcMCUncertanties(mc_results, traj_best)
+
+
+    # Calculate orbital and inital state vector covariance matrices
+    traj_best.orbit_cov, traj_best.state_vect_cov = calcCovMatrices(mc_results)
 
 
     ### PLOT RADIANT SPREAD (Vg color and length stddev) ###
@@ -1693,6 +1748,9 @@ class Trajectory(object):
         self.rend_ele = None
         self.rend_jd = None
 
+        # Initial state vector (minimization)
+        self.state_vect_mini = None
+
         # Calculated initial velocity
         self.v_init = None
 
@@ -1713,6 +1771,12 @@ class Trajectory(object):
 
         # Uncertanties calculated using Monte Carlo
         self.uncertanties = None
+
+        # Orbital covariance matrix
+        self.orbit_cov = None
+
+        # Initial state vector covariance matrix
+        self.state_vect_cov = None
 
 
 
@@ -2434,7 +2498,7 @@ class Trajectory(object):
 
 
 
-    def saveReport(self, dir_path, file_name, uncertanties=None):
+    def saveReport(self, dir_path, file_name, uncertanties=None, verbose=True):
         """ Save the trajectory estimation report to file. 
     
         Arguments:
@@ -2443,6 +2507,7 @@ class Trajectory(object):
 
         Keyword arguments:
             uncertanties: [MCUncertainties object] Object contaning uncertainties of every parameter.
+            verbose: [bool] Print the report to the screen. True by default.
         """
 
 
@@ -2537,6 +2602,22 @@ class Trajectory(object):
 
         out_str += "\n"
 
+        # Write out the state vector covariance matrix
+        if self.state_vect_cov is not None:
+
+            out_str += "State vector covariance matrix (X, Y, Z, Vx, Vy, Vz):\n"
+
+            for line in self.state_vect_cov:
+                line_list = []
+
+                for entry in line:
+                    line_list.append("{:+.6e}".format(entry))
+                
+                out_str += ", ".join(line_list) + "\n"
+
+            out_str += "\n"
+
+
         out_str += "Timing offsets:\n"
         for stat_id, t_diff in zip([obs.station_id for obs in self.observations], self.time_diffs_final):
             out_str += "{:>10s}: {:.6f} s\n".format(str(stat_id), t_diff)
@@ -2546,15 +2627,33 @@ class Trajectory(object):
         if self.orbit is not None:
             out_str += "Referent point on the trajectory:\n"
             out_str += "  Time: " + str(jd2Date(self.orbit.jd_ref, dt_obj=True)) + " UTC\n"
-            out_str += "  Lon   = {:>10.6f}{:s} deg\n".format(np.degrees(self.orbit.lon_ref), _uncer('{:.4f}', 
+            out_str += "  Lon   = {:+>10.6f}{:s} deg\n".format(np.degrees(self.orbit.lon_ref), _uncer('{:.4f}', 
                 'lon_ref', deg=True))
-            out_str += "  Lat   = {:>10.6f}{:s} deg\n".format(np.degrees(self.orbit.lat_ref), _uncer('{:.4f}', 
+            out_str += "  Lat   = {:+>10.6f}{:s} deg\n".format(np.degrees(self.orbit.lat_ref), _uncer('{:.4f}', 
                 'lat_ref', deg=True))
             out_str += "\n"
 
             # Write out orbital parameters
             out_str += self.orbit.__repr__(uncertanties=uncertanties)
             out_str += "\n"
+
+
+            # Write out the orbital covariance matrix
+            if self.state_vect_cov is not None:
+
+                out_str += "Orbit covariance matrix (q, e, i, peri, node):\n"
+                out_str += "(angular parameters in radians):\n"
+
+                for line in self.orbit_cov:
+                    line_list = []
+
+                    for entry in line:
+                        line_list.append("{:+.6e}".format(entry))
+                    
+                    out_str += ", ".join(line_list) + "\n"
+
+                out_str += "\n"
+
 
         out_str += "Jacchia fit on lag = -|a1|*exp(|a2|*t):\n"
         out_str += " a1 = {:.6f}\n".format(self.jacchia_fit[0])
@@ -2686,7 +2785,7 @@ class Trajectory(object):
         out_str += "- Right ascension and declination in the table are given for the epoch of date for the corresponding JD, per every point.\n"
         out_str += "- 'RA and Dec obs' are the right ascension and declination calculated from the observed values, while the 'RA and Dec line' are coordinates of the lines of sight projected on the fitted radiant line. 'Azim and alt line' are thus corresponding azimuthal coordinates.\n"
 
-        if self.verbose:
+        if verbose:
             print(out_str)
 
         mkdirP(dir_path)
@@ -3757,7 +3856,7 @@ class Trajectory(object):
 
                 # Save trajectory report
                 traj_best.saveReport(mc_output_dir, mc_file_name + '_report.txt', \
-                    uncertanties=uncertanties)
+                    uncertanties=uncertanties, verbose=True)
 
                 # Save and show plots
                 traj_best.savePlots(mc_output_dir, mc_file_name, show_plots=self.show_plots)
@@ -3773,7 +3872,7 @@ class Trajectory(object):
 
             # Save trajectory report with original points
             self.saveReport(self.output_dir, self.file_name + '_report.txt', \
-                    uncertanties=uncertanties)
+                    uncertanties=uncertanties, verbose = not self.monte_carlo)
 
             # Save and show plots
             self.savePlots(self.output_dir, self.file_name, \
