@@ -19,9 +19,9 @@ def mkdirP(path):
         if exc.errno == errno.EEXIST:
             pass
 
-    # Raise all other errors
-    else: 
-        raise
+        # Raise all other errors
+        else: 
+            raise
 
 
 

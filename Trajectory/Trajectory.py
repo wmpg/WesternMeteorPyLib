@@ -3252,7 +3252,7 @@ class Trajectory(object):
                     ])
 
                 # Run orbit plotting procedure
-                plotOrbits(orbit_params, jd2Date(self.jdt_ref, dt_obj=True), save_plots=True, \
+                plotOrbits(orbit_params, jd2Date(self.jdt_ref, dt_obj=True), save_plots=self.save_results, \
                     plot_path=os.path.join(output_dir, file_name), linewidth=1)
 
 
@@ -3841,38 +3841,46 @@ class Trajectory(object):
             # Save Monte Carlo results
             if self.monte_carlo:
 
-                if self.verbose:
-                    print('Saving Monte Carlo results...')
+                traj_best.save_results = self.save_results
+                traj_best.show_plots = self.show_plots
 
                 # Monte Carlo output directory
                 mc_output_dir = os.path.join(self.output_dir, 'Monte Carlo')
                 mc_file_name = self.file_name + "_mc"
 
-                # Save the picked trajectory structure with Monte Carlo points
-                savePickle(traj_best, mc_output_dir, mc_file_name + '_trajectory.pickle')
-                
-                # Save the uncertanties
-                savePickle(uncertanties, mc_output_dir, mc_file_name + '_uncertanties.pickle')
 
-                # Save trajectory report
-                traj_best.saveReport(mc_output_dir, mc_file_name + '_report.txt', \
-                    uncertanties=uncertanties, verbose=True)
+                if self.save_results:
+
+                    if self.verbose:
+                        print('Saving Monte Carlo results...')
+
+                    # Save the picked trajectory structure with Monte Carlo points
+                    savePickle(traj_best, mc_output_dir, mc_file_name + '_trajectory.pickle')
+                    
+                    # Save the uncertanties
+                    savePickle(uncertanties, mc_output_dir, mc_file_name + '_uncertanties.pickle')
+
+                    # Save trajectory report
+                    traj_best.saveReport(mc_output_dir, mc_file_name + '_report.txt', \
+                        uncertanties=uncertanties, verbose=True)
 
                 # Save and show plots
                 traj_best.savePlots(mc_output_dir, mc_file_name, show_plots=self.show_plots)
 
 
             ## Save original picks results
+            if self.save_results:
 
-            if self.verbose:
-                print('Saving results with original picks...')
+                if self.verbose:
+                    print('Saving results with original picks...')
 
-            # Save the picked trajectory structure with original points
-            savePickle(self, self.output_dir, self.file_name + '_trajectory.pickle')
+                # Save the picked trajectory structure with original points
+                savePickle(self, self.output_dir, self.file_name + '_trajectory.pickle')
 
-            # Save trajectory report with original points
-            self.saveReport(self.output_dir, self.file_name + '_report.txt', \
-                    uncertanties=uncertanties, verbose = not self.monte_carlo)
+                # Save trajectory report with original points
+                self.saveReport(self.output_dir, self.file_name + '_report.txt', \
+                        uncertanties=uncertanties, verbose = not self.monte_carlo)
+
 
             # Save and show plots
             self.savePlots(self.output_dir, self.file_name, \
