@@ -310,6 +310,9 @@ class SimMeteor(object):
         out_str += "  Dec    = {:>+9.5f} deg\n".format(np.degrees(self.dec))
         out_str += "  Vinit  = {:>9.5f} km/s\n".format(self.v_init/1000)
 
+        if self.v_begin is not None:
+            out_str += "  Vbegin = {:>9.5f} km/s\n".format(self.v_begin/1000)
+
         out_str += "Radiant (geocentric):\n"
         out_str += "  R.A.   = {:>9.5f} deg\n".format(np.degrees(self.ra_g))
         out_str += "  Dec    = {:>+9.5f} deg\n".format(np.degrees(self.dec_g))
@@ -1962,16 +1965,16 @@ if __name__ == "__main__":
 
 
         # Solve trajectory
-        traj.run()
+        traj = traj.run()
 
         # Compare differences in radiant
         print('Differences in geocentric radiant:')
-        print('  R.A. = {:8.4f} deg'.format(np.degrees(np.abs(sim_met.ra_g - traj.orbit.ra_g)%(2*np.pi))))
-        print('  Dec  = {:8.4f} deg'.format(np.degrees((sim_met.dec_g - traj.orbit.dec_g + np.pi)%(2*np.pi) - np.pi)))
-        print('  Vg   = {:7.3f} km/s'.format((sim_met.v_g - traj.orbit.v_g)/1000))
-        print('  Vinit= {:7.3f} km/s'.format((sim_met.v_begin - traj.orbit.v_init)/1000))
+        print('  dR.A. = {:8.4f} deg'.format(np.degrees(np.abs(sim_met.ra_g - traj.orbit.ra_g)%(2*np.pi))))
+        print('  dDec  = {:8.4f} deg'.format(np.degrees((sim_met.dec_g - traj.orbit.dec_g + np.pi)%(2*np.pi) - np.pi)))
+        print('  dVg   = {:7.3f} km/s'.format((sim_met.v_g - traj.orbit.v_g)/1000))
+        print('  dVbeg = {:7.3f} km/s'.format((sim_met.v_begin - traj.orbit.v_init)/1000))
         print('Velocity at beginning height:')
-        print('  Vinit= {:7.3f} km/s'.format(sim_met.v_begin/1000))
+        print('  Vinit = {:7.3f} km/s'.format(sim_met.v_begin/1000))
 
         print('Velocity model:')
         print(sim_met.velocity_model)

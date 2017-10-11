@@ -2233,6 +2233,9 @@ class Trajectory(object):
             print(timing_mini.message)
             v_init_mini = v_init
 
+            velocity_fit = np.zeros(2)
+            v_init_mini = 0
+
 
         return velocity_fit, v_init_mini, time_diffs, observations
 
@@ -3408,6 +3411,11 @@ class Trajectory(object):
             _prev_toffsets: [ndarray] Internal variable. Used for keeping the initially estimated timing 
                 offsets from the first run of the solver. None by default.
 
+
+        Return:
+            traj_best: [Trajectory object] The best trajectory from all Monte Carlo runs. If no Monte Carlo
+                runs were preformed, the pure LoS trajectory will be returned.
+
         """
 
         # Make sure there are at least 2 stations
@@ -3915,6 +3923,14 @@ class Trajectory(object):
 
 
         ######################################################################################################
+
+
+        # Return the best trajectory
+        if self.monte_carlo:
+            return traj_best
+
+        else:
+            return self
 
 
 
