@@ -379,13 +379,16 @@ def latLonAlt2ECEF(lat, lon, h):
 def geo2Cartesian(lat_rad, lon_rad, h, julian_date):
     """ Convert geographical Earth coordinates to Cartesian ECI coordinate system (Earth center as origin).
         The Earth is considered as an elipsoid.
-
-    @param lat_rad: [float] latitude of the observer in radians
-    @param lon_rad: [float] longitde of the observer in radians
-    @param h: [int or float] elevation of the observer in meters
-    @param julian_date: [float] decimal julian date, epoch J2000.0
-
-    @return (x, y, z): [tuple of floats] a tuple of X, Y, Z Cartesian ECI coordinates
+    
+    Arguments:
+        lat_rad: [float] Latitude of the observer in radians (+N).
+        lon_rad: [float] Longitde of the observer in radians (+E).
+        h: [int or float] Elevation of the observer in meters.
+        julian_date: [float] Julian date, epoch J2000.0.
+    
+    Return:
+        (x, y, z): [tuple of floats] a tuple of X, Y, Z Cartesian ECI coordinates
+        
     """
 
     lon = np.degrees(lon_rad)
@@ -449,7 +452,7 @@ def ecef2LatLonAlt(x, y, z):
     alt = p/np.cos(lat) - N
 
     # Handle the case when in the Southern hemisphere
-    if( np.abs(x) < 1  and  np.abs(y) < 1):
+    if((np.abs(x) < 1) and (np.abs(y) < 1)):
         alt = np.abs(z) - EARTH.POLAR_RADIUS
 
     return lat, lon, alt
@@ -902,6 +905,7 @@ if __name__ == "__main__":
     print(jd2Date(jd, UT_corr=2))
 
     # Test ECEF funtions
+    print('Geo -> ECEF -> Geo test')
     lat, lon, h = np.radians(18.5), np.radians(45.3), 90
     print(lat, lon, h)
     x, y, z = latLonAlt2ECEF(lat, lon, h)
@@ -945,3 +949,4 @@ if __name__ == "__main__":
     print('Azim: ', np.degrees(azim), 'elev:', np.degrees(elev))
     ra_back, dec_back = altAz2RADec(azim, elev, jd, lat, lon)
     print(np.degrees(ra_back), np.degrees(dec_back))
+    

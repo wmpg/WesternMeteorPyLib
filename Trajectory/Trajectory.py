@@ -30,6 +30,7 @@ from Utils.Pickling import savePickle
 from Utils.Plotting import savePlot
 from Utils.PlotOrbits import plotOrbits
 from Utils.PlotCelestial import CelestialPlot
+from Utils.PlotMap import GroundMap
 from Utils.TrajConversions import ecef2ENU, enu2ECEF, geo2Cartesian, geo2Cartesian_vect, cartesian2Geo, \
     altAz2RADec_vect, raDec2AltAz, raDec2AltAz_vect, raDec2ECI, eci2RaDec, jd2Date, datetime2JD
 from Utils.PyDomainParallelizer import DomainParallelizer
@@ -1310,6 +1311,13 @@ def calcCovMatrices(mc_traj_list):
         orbit_cov, state_vect_cov: [tuple of ndarrays] Orbital and initial state vector covariance matrices.
     """
 
+    # Filter out those trajectories for which the last perihelion time could not be estimated
+    mc_traj_list = [traj for traj in mc_traj_list if traj.orbit.last_perihelion is not None]
+
+    # If there are no good orbits, do not estimate the covariance matrix
+    if not mc_traj_list:
+        return np.zeros((6, 6)) - 1, np.zeros((6, 6)) - 1
+
     # Extract timing residuals
     timing_res_list = np.array([traj.timing_res for traj in mc_traj_list])
 
@@ -1320,16 +1328,17 @@ def calcCovMatrices(mc_traj_list):
     weights = np.min(timing_res_list)/timing_res_list
     weights = weights
 
-
     # Extract orbit elements
-    q_list = np.array([traj.orbit.q for traj in mc_traj_list])
     e_list = np.array([traj.orbit.e for traj in mc_traj_list])
-    i_list = np.array([traj.orbit.i for traj in mc_traj_list])
-    peri_list = np.array([traj.orbit.peri for traj in mc_traj_list])
+    q_list = np.array([traj.orbit.q for traj in mc_traj_list])
+    tp_list = np.array([datetime2JD(traj.orbit.last_perihelion) for traj in mc_traj_list])
     node_list = np.array([traj.orbit.node for traj in mc_traj_list])
+    peri_list = np.array([traj.orbit.peri for traj in mc_traj_list])
+    i_list = np.array([traj.orbit.i for traj in mc_traj_list])
+    
 
     # Calculate the orbital covariance
-    orbit_input = np.c_[q_list, e_list, i_list, peri_list, node_list].T
+    orbit_input = np.c_[e_list, q_list, tp_list, node_list, peri_list, i_list].T
     orbit_cov = np.cov(orbit_input, aweights=weights)
 
 
@@ -2652,11 +2661,13 @@ class Trajectory(object):
             # Write out the orbital covariance matrix
             if self.state_vect_cov is not None:
 
-                out_str += "Orbit covariance matrix (q, e, i, peri, node):\n"
-                out_str += "(angular parameters in radians):\n"
+                out_str += "Orbit covariance matrix:\n"
+                out_str += "             e     ,     q (AU)   ,      Tp (JD) ,   node (rad) ,   peri (rad) ,    i (rad)\n"
 
-                for line in self.orbit_cov:
-                    line_list = []
+                elements_list = ["e   ", "q   ", "Tp  ", "node", "peri", "i   "]
+
+                for elem_name, line in zip(elements_list, self.orbit_cov):
+                    line_list = [elem_name]
 
                     for entry in line:
                         line_list.append("{:+.6e}".format(entry))
@@ -3069,103 +3080,37 @@ class Trajectory(object):
         ### Plot lat/lon of the meteor ###
             
         # Calculate mean latitude and longitude of all meteor points
-        met_lon_mean = np.degrees(meanAngle([x for x in obs.meas_lon for obs in self.observations]))
-        met_lat_mean = np.degrees(meanAngle([x for x in obs.meas_lat for obs in self.observations]))
-
-        # Calculate the mean latitude and longitude by including station positions
-        lon_mean = np.degrees(meanAngle([np.radians(met_lon_mean)] + [obs.lon for obs in self.observations]))
-        lat_mean = np.degrees(meanAngle([np.radians(met_lat_mean)] + [obs.lat for obs in self.observations]))
+        met_lon_mean = meanAngle([x for x in obs.meas_lon for obs in self.observations])
+        met_lat_mean = meanAngle([x for x in obs.meas_lat for obs in self.observations])
 
 
         # Put coordinate of all sites and the meteor in the one list
-        geo_coords = [[obs.lat, obs.lon] for obs in self.observations]
-        geo_coords.append([np.radians(met_lat_mean), np.radians(met_lon_mean)])
-
-        # Find the maximum distance from the center to all stations and meteor points, this is used for 
-        # scaling the finalground track plot
-        
-        max_dist = 0
-        
-        lat1 = np.radians(lat_mean)
-        lon1 = np.radians(lon_mean)
-
-        for lat2, lon2 in geo_coords:
-
-            # Calculate the angular distance between two coordinates
-            delta_lat = lat2 - lat1
-            delta_lon = lon2 - lon1
-            a = np.sin(delta_lat/2)**2 + np.cos(lat1)*np.cos(lat2)*np.sin(delta_lon/2)**2
-            c = 2*np.arctan2(np.sqrt(a), np.sqrt(1 - a))
-            d = 6371000*c
-
-            # Set the current distance as maximum if it is larger than the previously found max. value
-            if d > max_dist:
-                max_dist = d
+        lat_list = [obs.lat for obs in self.observations]
+        lat_list.append(met_lat_mean)
+        lon_list = [obs.lon for obs in self.observations]
+        lon_list.append(met_lon_mean)
 
 
-        # Add some buffer to the maximum distance (50 km)
-        max_dist += 50000
+        # Init the map
+        m = GroundMap(lat_list, lon_list, border_size=50)
 
-        m = Basemap(projection='gnom', lat_0=lat_mean, lon_0=lon_mean, width=2*max_dist, height=2*max_dist, 
-            resolution='i')
-
-        # Draw the coast boundary and fill the oceans with the given color
-        m.drawmapboundary(fill_color='0.2')
-
-        # Fill continents, set lake color same as ocean color
-        m.fillcontinents(color='black', lake_color='0.2', zorder=1)
-
-        # Draw country borders
-        m.drawcountries(color='0.2')
-        m.drawstates(color='0.15', linestyle='--')
-
-        # Draw parallels
-        parallels = np.arange(-90, 90, 1.)
-        m.drawparallels(parallels, labels=[False, True, False, False], color='0.25')
-
-        # Draw meridians
-        meridians = np.arange(0, 360, 1.)
-        m.drawmeridians(meridians, labels=[False, False, False, True], color='0.25')
 
         # Plot locations of all stations and measured positions of the meteor
         for obs in self.observations:
 
             # Plot stations
-            x, y = m(np.degrees(obs.lon), np.degrees(obs.lat))
-            m.scatter(x, y, s=10, label=str(obs.station_id), marker='x', zorder=3)
+            m.scatter(obs.lat, obs.lon, s=10, label=str(obs.station_id), marker='x')
 
             # Plot measured points
-            x, y = m(np.degrees(obs.meas_lon), np.degrees(obs.meas_lat))
-            m.plot(x, y, c='r')
+            m.plot(obs.meas_lat, obs.meas_lon, c='r')
 
 
         # Plot a point marking the final point of the meteor
-        x_end, y_end = m(np.degrees(self.rend_lon), np.degrees(self.rend_lat))
-        m.scatter(x_end, y_end, c='y', marker='+', s=50, alpha=0.75, label='Endpoint', zorder=3)
-
-
-        ## Plot the map scale
-        
-        # Get XY cordinate of the lower left corner
-        ll_x, _ = plt.gca().get_xlim()
-        ll_y, _ = plt.gca().get_ylim()
-
-        # Move the label to fit in the lower left corner
-        ll_x += 0.2*2*max_dist
-        ll_y += 0.1*2*max_dist
-
-        # Convert XY to latitude, longitude
-        ll_lon, ll_lat = m(ll_x, ll_y, inverse=True)
-
-        # Round to distance to the closest 10 km
-        scale_range = round(max_dist/2/1000/10, 0)*10
-
-        # Plot the scale
-        m.drawmapscale(ll_lon, ll_lat, lon_mean, lat_mean, scale_range, barstyle='fancy', units='km', 
-            fontcolor='0.5', zorder=3)
+        m.scatter(self.rend_lat, self.rend_lon, c='y', marker='+', s=50, alpha=0.75, label='Endpoint')
 
 
         plt.legend()
+
 
         if self.save_results:
             savePlot(plt, file_name + '_ground_track.png', output_dir)
@@ -3981,7 +3926,7 @@ if __name__ == "__main__":
 
 
     # Init new trajectory solving
-    traj_solve = Trajectory(jdt_ref, meastype=meastype, save_results=False)
+    traj_solve = Trajectory(jdt_ref, meastype=meastype, save_results=False, monte_carlo=True)
 
     # Set input points for the first site
     traj_solve.infillTrajectory(theta1, phi1, time1, lat1, lon1, ele1)

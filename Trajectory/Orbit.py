@@ -11,7 +11,7 @@ from Utils.Earth import calcEarthRectangularCoordJPL
 from Utils.SolarLongitude import jd2SolLonJPL
 from Utils.TrajConversions import J2000_JD, J2000_OBLIQUITY, AU, SUN_MU, SUN_MASS, G, SIDEREAL_YEAR, jd2LST, \
     jd2Date, eci2RaDec, altAz2RADec, raDec2AltAz, raDec2Ecliptic, cartesian2Geo, equatorialCoordPrecession,\
-    eclipticToRectangularVelocityVect, correctedEclipticCoord
+    eclipticToRectangularVelocityVect, correctedEclipticCoord, datetime2JD
 from Utils.Math import vectNorm, vectMag, rotateVector
 
 
@@ -220,8 +220,14 @@ class Orbit(object):
             out_str += "  n      = {:>10.6f}{:s} deg/day\n".format(np.degrees(self.n), _uncer('{:.4f}', 'n', 
                 deg=True))
             out_str += "  T      = {:>10.6f}{:s} years\n".format(self.T, _uncer('{:.4f}', 'T'))
-            out_str += "  Last perihelion: " + str(self.last_perihelion) + _uncer('{:.4f}', 'last_perihelion') \
-                + " days \n"
+            
+            if self.last_perihelion is not None:
+                out_str += "  Last perihelion JD = {:.6f} ".format(datetime2JD(self.last_perihelion)) \
+                    + "(" + str(self.last_perihelion) + ")" + _uncer('{:.4f}', 'last_perihelion') \
+                    + " days \n"
+            else:
+                out_str += "  Last perihelion JD = NaN \n"
+
             out_str += "  Tj     = {:>10.6f}{:s}\n".format(self.Tj, _uncer('{:.4f}', 'Tj'))
 
 
@@ -543,7 +549,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
             last_perihelion = jd2Date(jd_ref - dt_perihelion, dt_obj=True)
 
         else:
-            last_perihelion = np.nan
+            last_perihelion = None
 
 
         # Calculate Tisserand's parameter with respect to Jupiter

@@ -100,6 +100,10 @@ def readWfdisc(dir_path, file_name):
 
         for line in fid:
 
+            # Skip the line if it is empty
+            if not line.strip():
+                continue
+
             w = WfdiscStruct()
 
             f = LineReader(line)

@@ -712,7 +712,8 @@ if __name__ == "__main__":
     #dir_path = "../MetalPrepare/20161007_052749_met"
     #dir_path = "../MetalPrepare/20161007_052346_met"
     #dir_path = "/home/dvida/Dropbox/UWO Master's/Projects/MetalPrepare/20170721_070420_met"
-    dir_path = "../MetalPrepare/20170721_070420_met_TEST"
+    #dir_path = "../MetalPrepare/20170721_070420_met_TEST"
+    dir_path = "/home/dvida/Desktop/ev_20171026_081339A"
 
     # Name of the met file
     file_name = 'state.met'

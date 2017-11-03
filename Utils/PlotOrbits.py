@@ -36,7 +36,7 @@ from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
 import matplotlib.pyplot as plt
 
-from Utils.Plotting import savePlot, Arrow3D
+from Utils.Plotting import savePlot, Arrow3D, set3DEqualAxes
 
 # Define Julian epoch
 J2000_EPOCH = datetime(2000, 1, 1, 12) # At the noon of 2000/01/01 UTC
@@ -324,6 +324,9 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_eq
     ax.set_xlim3d(-6, 6)
     ax.set_ylim3d(-6, 6)
     ax.set_zlim3d(-6, 6)
+
+    # Set equal aspect ratio
+    set3DEqualAxes(ax)
 
     # Save plots to disk (top and side views)
     if save_plots:

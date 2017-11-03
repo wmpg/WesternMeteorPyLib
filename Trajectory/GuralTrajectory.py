@@ -493,7 +493,7 @@ class GuralTrajectory(object):
 
 
 
-    def infillTrajectory(self, theta_data, phi_data, time_data, lat, lon, ele, noise=None):
+    def infillTrajectory(self, theta_data, phi_data, time_data, lat, lon, ele, noise=None, station_id=None):
         """ Fills in the trajectory structure with given observations: azimuth in radians, zenith angle in 
             radians, time in seconds relative to jdt_ref. This function should be called for each observing
             site, not more than 'maxcameras' times.
@@ -508,6 +508,8 @@ class GuralTrajectory(object):
 
         Kwargs:
             noise: [ndarray] observation noise in radians (0 if not provided)
+            station_id: [str] Station ID. NOT USED - here only to match the function interface of the
+                Monte Carlo solver.
         """
 
         nummeas = time_data.shape[0]
@@ -967,6 +969,9 @@ class GuralTrajectory(object):
 
 
         ######################################################################################################
+
+
+        return self
 
 
 

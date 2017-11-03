@@ -898,7 +898,7 @@ if __name__ == "__main__":
     # dir_path = os.path.join(os.path.curdir, "..", "MirfitPrepare", "20160929_050928_mir")
 
     # Long meteor STA
-    dir_path = os.path.join(os.path.curdir, "..", "MirfitPrepare", "20160929_062945_mir")
+    # dir_path = os.path.join(os.path.curdir, "..", "MirfitPrepare", "20160929_062945_mir")
 
     # Medium meteor - sporadic
     # dir_path = os.path.join(os.path.curdir, "..", "MirfitPrepare", "20161007_032608_mir")
@@ -918,7 +918,11 @@ if __name__ == "__main__":
     # GigE event
     # dir_path = os.path.join(os.path.curdir, "..", "MirfitPrepare", "20170519_030133_mir")
 
-    
+    # Elgin full GigE
+    #dir_path = "/home/dvida/Desktop/ev_20171022_030936"
+
+    # Test
+    dir_path = "/home/dvida/Desktop/ev_20171022_030936"
 
     ###
 
@@ -946,16 +950,16 @@ if __name__ == "__main__":
     mc_picks.solveTrajectory(pick_type='original', solver='original')
 
 
+
     sys.exit()
 
 
-
     ###### Print out picks
-    start_time = min(mc_picks.picks_full[1][0].unix_time, mc_picks.picks_full[2][0].unix_time)
+    start_time = min(mc_picks.picks_full['1'][0].unix_time, mc_picks.picks_full['2'][0].unix_time)
     print(datetime.datetime.utcfromtimestamp(start_time))
     print("Reference time:", "{:20.10f}".format(start_time[0]))
 
-    for site_no in [1, 2]:
+    for site_no in ['1', '2']:
 
         times = []
         thetas = []
@@ -975,7 +979,7 @@ if __name__ == "__main__":
         print(list(map(np.degrees, phis)))
 
 
-    sys.exit()
+    # sys.exit()
     #####
 
 
@@ -985,7 +989,7 @@ if __name__ == "__main__":
     mc_picks.samplePicks(2)
 
     ###
-    mc_picks.showVidPicks(2)
+    mc_picks.showVidPicks('2')
     ###
 
     # Go through all drawn trajectories
