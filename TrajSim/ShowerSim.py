@@ -2064,8 +2064,8 @@ if __name__ == "__main__":
             elif traj_solver == 'gural':
                 
                 # Init the new Gural trajectory solver object
-                traj = GuralTrajectory(n_stations, sim_met.jdt_ref, meastype=2, velmodel=3, verbose=1, \
-                    show_plots=False)
+                traj = GuralTrajectory(len(sim_met.observations), sim_met.jdt_ref, meastype=2, velmodel=3, \
+                    verbose=1, show_plots=False)
 
             else:
                 print(traj_solver, '- unknown trajectory solver!')
