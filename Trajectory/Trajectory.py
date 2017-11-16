@@ -17,6 +17,7 @@ import scipy.optimize
 import scipy.interpolate
 import scipy.stats
 
+import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import cm
 from mpl_toolkits.basemap import Basemap
@@ -377,7 +378,7 @@ class PlaneIntersection(object):
         ######################################################################################################
 
 
-        # Calculate the ECI coordinates of the plane intersection
+        # Calculate the plane intersection radiant ECI vector
         self.radiant_eci = np.cross(self.obs1.plane_N, self.obs2.plane_N)
         self.radiant_eci = vectNorm(self.radiant_eci)
 
@@ -541,7 +542,7 @@ class PlaneIntersection(object):
 
 
 
-def angleSumMeasurements2Line(observations, state_vect, best_conv_radiant_eci):
+def angleSumMeasurements2Line(observations, state_vect, best_conv_radiant_eci, weights=None):
     """ Sum all angles between the radiant line and measurement lines of sight.
 
         This function is used as a cost function for the least squares radiant solution of Borovicka et 
@@ -553,15 +554,28 @@ def angleSumMeasurements2Line(observations, state_vect, best_conv_radiant_eci):
         state_vect: [3 element ndarray] Estimated position of the initial state vector in ECI coordinates.
         best_conv_radiant_eci: [3 element ndarray] Unit 3D vector of the radiant in ECI coordinates.
 
+    Keyword arguments:
+        weights: [list] A list of statistical weights for every station. None by default.
+
     Return:
         angle_sum: [float] Sum of angles between the estimated trajectory line and individual lines of sight.
 
     """
 
-    angle_sum = 0
+    # If the weights were not given, use 1 for every weight
+    if weights is None:
+        weights = np.ones(len(observations))
+
+    # Make sure there are weights larger than 0
+    if sum(weights) <= 0:
+        weights = np.ones(len(observations))        
+
+
+    angle_sum = 0.0
+    weights_sum = 1e-10
 
     # Go through all observations from all stations
-    for obs in observations:
+    for i, obs in enumerate(observations):
         
         # Go through all measured positions
         for meas_eci, stat_eci in zip(obs.meas_eci_los, obs.stat_eci_los):
@@ -576,19 +590,22 @@ def angleSumMeasurements2Line(observations, state_vect, best_conv_radiant_eci):
             cosangle = np.dot(meas_eci, r)
 
             # Make sure the cosine is within limits and calculate the angle
-            angle_sum += np.arccos(np.clip(cosangle, -1, 1))
+            angle_sum += weights[i]*np.arccos(np.clip(cosangle, -1, 1))
+
+            weights_sum += weights[i]
 
 
-    return angle_sum
+    return angle_sum/weights_sum
 
 
 
-def minimizeAngleCost(params, observations):
+
+def minimizeAngleCost(params, observations, weights=None):
     """ A helper function for minimization of angle deviations. """
 
     state_vect, best_conv_radiant_eci = np.hsplit(params, 2)
     
-    return angleSumMeasurements2Line(observations, state_vect, best_conv_radiant_eci)
+    return angleSumMeasurements2Line(observations, state_vect, best_conv_radiant_eci, weights=weights)
 
 
 
@@ -663,6 +680,24 @@ def lineFunc(x, m, k):
     """
 
     return m*x + k
+
+
+
+def lineFuncLS(params, x, y):
+    """ Line defined by slope and intercept. Version for least squares.
+    
+    Arguments:
+        params: [list] Line parameters
+        x: [float] Independant variable
+        y: [float] Estimated values
+
+    Return:
+        [float]: line given by (m, k) evaluated at x
+
+    """
+
+    return lineFunc(x, *params) - y
+
 
 
 def jacchiaLagFunc(t, a1, a2):
@@ -860,7 +895,8 @@ def fitLagIntercept(time, length, v_init, initial_intercept=0.0):
 
 
 
-def timingResiduals(params, observations, t_ref_station, ret_stddev=False, ret_len_residuals=False):
+def timingResiduals(params, observations, t_ref_station, weights=None, ret_stddev=False, \
+    ret_len_residuals=False):
     """ Calculate the sum of absolute differences between timings of given stations using the length from
         respective stations.
     
@@ -870,7 +906,8 @@ def timingResiduals(params, observations, t_ref_station, ret_stddev=False, ret_l
         observations: [list] A list of ObservedPoints objects.
         t_ref_station: [int] Index of the referent station.
 
-    Arguments:
+    Keyword arguments:
+        weights: [list] A list of statistical weights for every station.
         ret_stddev: [bool] Returns the standard deviation instead of the cost function.
         ret_len_residuals: [bool] Returns the length residuals instead of the timing residuals. Used for 
             evaluating the goodness of length matching during the Monte Carlo procedure. False by default.
@@ -880,6 +917,15 @@ def timingResiduals(params, observations, t_ref_station, ret_stddev=False, ret_l
             matching.
 
     """
+
+    # If the weights were not given, use 1 for every weight
+    if weights is None:
+        weights = np.ones(len(observations))
+
+    # Make sure there are weights larger than 0
+    if sum(weights) <= 0:
+        weights = np.ones(len(observations))   
+
 
     stat_count = 0
 
@@ -967,6 +1013,7 @@ def timingResiduals(params, observations, t_ref_station, ret_stddev=False, ret_l
 
         cost_sum = 0
         cost_point_count = 0
+        weights_sum = 1e-10
 
         # Go through all pairs of observations
         for i in range(len(observations)):
@@ -1011,8 +1058,12 @@ def timingResiduals(params, observations, t_ref_station, ret_stddev=False, ret_l
                     # Calculate the residuals using smooth approximation of L1 (absolute value) cost
                     z = (len1_interpol(len2) - time2)**2
 
+
                 # Calculate the cost function sum
-                cost_sum += np.sum(2*(np.sqrt(1 + z) - 1))
+                cost_sum += weights[i]*weights[j]*np.sum(2*(np.sqrt(1 + z) - 1))
+
+                # Add the weight sum
+                weights_sum += weights[i]*weights[j]
 
                 # Add the total number of points to the cost counter
                 cost_point_count += len(time2)
@@ -1023,7 +1074,7 @@ def timingResiduals(params, observations, t_ref_station, ret_stddev=False, ret_l
             return np.inf
 
         # Calculate the standard deviation of the fit
-        dist_stddev = np.sqrt(cost_sum/cost_point_count)
+        dist_stddev = np.sqrt(cost_sum/weights_sum/cost_point_count)
 
         if ret_stddev:
 
@@ -1033,7 +1084,7 @@ def timingResiduals(params, observations, t_ref_station, ret_stddev=False, ret_l
         else:
 
             # Returned for minimization
-            return cost_sum/cost_point_count
+            return cost_sum/weights_sum/cost_point_count
 
 
 
@@ -1526,18 +1577,53 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
             m = CelestialPlot(ra_g_list, dec_g_list, projection='stere', bgcolor='w')
 
             if plt_flag == 'vg':
+
+                # Plot all MC radiants (geocentric velocities)
                 m.scatter(ra_g_list, dec_g_list, c=v_g_list, s=2)
+
                 m.colorbar(label='$V_g$ (km/s)')
 
+
+                # Plot original radiant
+                m.scatter(traj.orbit.ra_g, traj.orbit.dec_g, s=20, facecolors='none', edgecolors='r')
+
+                # Plot MC best radiant
+                m.scatter(traj_best.orbit.ra_g, traj_best.orbit.dec_g, s=20, facecolors='none', edgecolors='g')
+
+
+
             elif plt_flag == 'time_res':
-                m.scatter(ra_g_list, dec_g_list, c=1000*timing_res_list, s=2)
+
+                timing_res_list_ms = 1000*timing_res_list
+
+                v_min = np.min(timing_res_list_ms)
+                v_max = np.max(timing_res_list_ms)
+
+                # Determine the limits of the colorbar if there are more points
+                if len(timing_res_list) > 4:
+
+                    v_max = np.mean(timing_res_list_ms) + 2*np.std(timing_res_list_ms)
+
+
+                # Plot all MC radiants (length fit offsets)
+                m.scatter(ra_g_list, dec_g_list, c=timing_res_list_ms, s=2, vmin=v_min, vmax=v_max)
+
                 m.colorbar(label='Time residuals (ms)')
+
+
+                # Plot original radiant
+                m.scatter(traj.orbit.ra_g, traj.orbit.dec_g, s=20, facecolors='none', edgecolors='r')
+
+                # Plot MC best radiant
+                m.scatter(traj_best.orbit.ra_g, traj_best.orbit.dec_g, s=20, facecolors='none', edgecolors='g')
+
+
 
             plt.title('Monte Carlo - geocentric radiant')
             # plt.xlabel('$\\alpha_g (\\degree)$')
             # plt.ylabel('$\\delta_g (\\degree)$')
 
-            plt.tight_layout()
+            # plt.tight_layout()
 
             if traj.save_results:
                 savePlot(plt, traj.file_name + '_monte_carlo_eq_' + plt_flag + '.png', \
@@ -1771,7 +1857,10 @@ class Trajectory(object):
         # Calculated initial velocity
         self.v_init = None
 
-        # Fit to the first 25% of time vs. length
+        # Calculated average velocity
+        self.v_avg = None
+
+        # Fit to the best portion of time vs. length
         self.velocity_fit = None
 
         # Jacchia fit parameters for all observations combined
@@ -1782,6 +1871,12 @@ class Trajectory(object):
 
         # Standard deviation of all time differences between individual stations
         self.timing_stddev = -1.0
+
+        # Average position of the meteor
+        self.state_vect_avg = None
+
+        # Average JD of the meteor
+        self.jd_avg = None
 
         # Orbit object which contains orbital parameters
         self.orbit = None
@@ -2188,26 +2283,51 @@ class Trajectory(object):
             stddev_list = []
 
             # Calculate the velocity on different initial portions of the trajectory
-            for part in np.arange(0.2, 0.8, 0.05):
+            #for init_point in np.arange(0, 0.3, 0.05):
 
-                # Get the index of the first portion of points
-                part_size = int(part*len(times))
+            # Find the best fit by starting from the first few beginning points
+            for part_beg in range(4):
 
-                # Make sure there are at least 4 points per every station
-                if part_size < 4*len(observations):
-                    part_size = 4*len(observations)
+                # Find the best fit on different portions of the trajectory
+                for part in np.arange(0.2, 0.8, 0.05):
 
-                # Select only the first part of all points
-                times_part = times[:part_size]
-                state_vect_dist_part = state_vect_dist[:part_size]
+                    # Get the index of the beginning of the first portion of points
+                    # part_beg = int(init_point*len(times))
 
-                # Fit a line to time vs. state_vect_dist
-                velocity_fit, _ = scipy.optimize.curve_fit(lineFunc, times_part, state_vect_dist_part)
+                    # Get the index of the end of the first portion of points
+                    part_end = int(part*len(times))
 
-                # Calculate the standard deviation of the line fit
-                line_stddev = np.std(state_vect_dist_part - lineFunc(times_part, *velocity_fit))
+                    # Make sure there are at least 4 points per every station
+                    if (part_end - part_beg) < 4*len(observations):
+                        part_end = part_beg + 4*len(observations)
 
-                stddev_list.append([line_stddev, velocity_fit])
+
+                    # Make sure the end index is not larger than the meteor
+                    if part_end >= len(times):
+                        part_end = len(times) - 1
+
+
+                    # Select only the first part of all points
+                    times_part = times[part_beg:part_end]
+                    state_vect_dist_part = state_vect_dist[part_beg:part_end]
+
+                    # Fit a line to time vs. state_vect_dist
+                    velocity_fit = scipy.optimize.least_squares(lineFuncLS, [v_init, 1], args=(times_part, \
+                        state_vect_dist_part), loss='soft_l1')
+                    velocity_fit = velocity_fit.x
+
+                    # Calculate the lag and fit a line to it
+                    lag_temp = state_vect_dist - lineFunc(times, *velocity_fit)
+                    lag_fit = scipy.optimize.least_squares(lineFuncLS, np.ones(2), args=(times, lag_temp), \
+                        loss='soft_l1')
+                    lag_fit = lag_fit.x
+
+                    # Add the point to the considered list only if the lag has a negative trend
+                    if lag_fit[0] <= 0:
+
+                        # Calculate the standard deviation of the line fit and add it to the list of solutions
+                        line_stddev = np.std(state_vect_dist_part - lineFunc(times_part, *velocity_fit))
+                        stddev_list.append([line_stddev, velocity_fit])
 
 
             # stddev_arr = np.array([std[0] for std in stddev_list])
@@ -2218,21 +2338,36 @@ class Trajectory(object):
             # plt.show()
 
 
-            # Take the velocity fit with the minimum line standard deviation
-            stddev_min_ind = np.argmin([std[0] for std in stddev_list])
-            velocity_fit = stddev_list[stddev_min_ind][1]
 
-            # Make sure the velocity is positive
-            v_init_mini = np.abs(velocity_fit[0])
+            # If no lags were negative (meaning all fits were bad), use the initially estimated initial 
+            # velocity
+            if not stddev_list:
 
-            # Calculate the lag
-            for obs in observations:
-                obs.lag = obs.state_vect_dist - lineFunc(obs.time_data, *velocity_fit)
+                v_init_mini = v_init
+
+                # Redo the lag fit, but with fixed velocity
+                vel_intercept, _ = scipy.optimize.curve_fit(lambda x, intercept: lineFunc(x, v_init_mini, \
+                    intercept), times, state_vect_dist, p0=[0])
+
+                velocity_fit = [v_init_mini, vel_intercept[0]]
 
 
+            else:
 
-            if self.verbose:
-                print('ESTIMATED Vinit:', v_init_mini, 'm/s')
+                # Take the velocity fit with the minimum line standard deviation
+                stddev_min_ind = np.argmin([std[0] for std in stddev_list])
+                velocity_fit = stddev_list[stddev_min_ind][1]
+
+                # Make sure the velocity is positive
+                v_init_mini = np.abs(velocity_fit[0])
+
+                # Calculate the lag for every site
+                for obs in observations:
+                    obs.lag = obs.state_vect_dist - lineFunc(obs.time_data, *velocity_fit)
+
+
+                if self.verbose:
+                    print('ESTIMATED Vinit:', v_init_mini, 'm/s')
 
 
 
@@ -2801,9 +2936,9 @@ class Trajectory(object):
         out_str += "-----\n"
         out_str += "- 'meas1' and 'meas2' are given input points.\n"
         out_str += "- X, Y, Z are ECI (Earth-Centered Inertial) positions of projected lines of sight on the radiant line.\n"
-        out_str += "- Zc is the observed zenith distance of the entry angle, while the Zg is the entry zenith distance corrected for Earth's graity.\n"
+        out_str += "- Zc is the observed zenith distance of the entry angle, while the Zg is the entry zenith distance corrected for Earth's gravity.\n"
         out_str += "- Latitude (deg), Longitude (deg), Height (m) are WGS84 coordinates of each point on the radiant line.\n"
-        out_str += "- Jacchia (1955) equation fit was done on the lag.\n"
+        out_str += "- Jacchia (1955) deceleration equation fit was done on the lag.\n"
         out_str += "- Right ascension and declination in the table are given for the epoch of date for the corresponding JD, per every point.\n"
         out_str += "- 'RA and Dec obs' are the right ascension and declination calculated from the observed values, while the 'RA and Dec line' are coordinates of the lines of sight projected on the fitted radiant line. 'Azim and alt line' are thus corresponding azimuthal coordinates.\n"
 
@@ -3340,6 +3475,42 @@ class Trajectory(object):
 
 
 
+    def calcLoSWeights(self, state_vect, radiant_eci, observations):
+        """ Calculate the weights for lines of sight minimization. The weights are calculated as squared
+            sines of angles between the radiant vector and the vector pointing from a station to the 
+            initial state vector. 
+
+        Arguments:
+            state_vect: [ndarray] (x, y, z) ECI coordinates of the initial state vector (meters).
+            radiant_eci: [ndarray] (x, y, z) components of the unit radiant direction vector.
+            observations: [list] A list of ObservationPoints objects which hold measurements from individual
+                stations.
+
+        Return:
+            return: [list] A list of weights for every station.
+        """
+
+        weights = []
+
+        for obs in observations:
+
+            # Calculate the vector pointing from the station to the state vector
+            w = vectNorm(state_vect - obs.stat_eci)
+
+            # Calculate the angle between the pointing vector and the radiant vector
+            q_r = np.arccos(np.dot(radiant_eci, w))
+
+            # Calculate the weight
+            weight = np.sin(q_r)**2
+
+            weights.append(weight)
+
+
+        return weights
+
+
+
+
     def run(self, _rerun_timing=False, _rerun_bad_picks=False, _mc_run=False, _orig_obs=None, 
         _prev_toffsets=None):
         """ Estimate the trajectory from the given input points. 
@@ -3400,7 +3571,7 @@ class Trajectory(object):
 
 
         radiant_sum = np.zeros(shape=3)
-        weights_sum = 0
+        weights_sum = 1e-10
 
         # Sum all radiants ECI positions and weights
         for plane_intersection in self.intersection_list:
@@ -3433,9 +3604,20 @@ class Trajectory(object):
             print('Best Convergence Angle IP radiant:', np.degrees(self.best_conv_inter.radiant_eq))
 
 
-        # Set the 3D position of the radiant line as the state vector
-        self.state_vect = self.best_conv_inter.cpa_eci
+        # Set the 3D position of the radiant line as the state vector, at the beginning point
+        self.state_vect = self.moveStateVector(self.best_conv_inter.cpa_eci, self.best_conv_inter.radiant_eci,
+            self.observations)
 
+        # Calculate statistical weights for LoS minimization
+        weights = self.calcLoSWeights(self.state_vect, self.best_conv_inter.radiant_eci, \
+            self.observations)
+
+
+        if self.verbose:
+            print('LoS statistical weights:')
+
+            for i, obs in enumerate(self.observations):
+                print(obs.station_id, weights[i])
 
         ######################################################################################################
 
@@ -3451,7 +3633,7 @@ class Trajectory(object):
 
         # Calculate the initial sum and angles deviating from the radiant line
         angle_sum = angleSumMeasurements2Line(self.observations, self.state_vect, 
-             self.best_conv_inter.radiant_eci)
+             self.best_conv_inter.radiant_eci, weights=weights)
 
         if self.verbose:
             print('Initial angle sum:', angle_sum)
@@ -3461,7 +3643,7 @@ class Trajectory(object):
         p0 = np.r_[self.state_vect, self.best_conv_inter.radiant_eci]
 
         # Perform the minimization of angle deviations
-        minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=(self.observations), 
+        minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=(self.observations, weights), 
             method="Nelder-Mead")
 
         # NOTE
@@ -3489,8 +3671,8 @@ class Trajectory(object):
 
             print('BOUNDS:', bounds)
             print('p0:', p0)
-            minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=(self.observations), 
-                bounds=bounds, method='SLSQP')
+            minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=(self.observations, \
+                weights), bounds=bounds, method='SLSQP')
 
 
         if self.verbose:
@@ -3585,6 +3767,8 @@ class Trajectory(object):
             self.estimateTimingAndVelocity(self.observations, estimate_timing_vel=self.estimate_timing_vel)
 
         self.time_diffs_final = self.time_diffs
+
+
 
         # Calculate velocity at each point with updated timings
         self.calcVelocity(self.state_vect_mini, self.radiant_eci_mini, self.observations, 
@@ -3748,13 +3932,13 @@ class Trajectory(object):
         if self.calc_orbit:
 
             # Calculate average velocity and average ECI position of the trajectory
-            v_avg, eci_avg, jd_avg = self.calcAverages(self.observations)
+            self.v_avg, self.state_vect_avg, self.jd_avg = self.calcAverages(self.observations)
 
 
             # Calculate the orbit of the meteor
             # If the LoS estimation failed, then the plane intersection solution will be used for the orbit,
             # which needs to have fixed stations and the average velocity should be the referent velocity
-            self.orbit = calcOrbit(self.radiant_eci_mini, self.v_init, v_avg, self.state_vect_mini, \
+            self.orbit = calcOrbit(self.radiant_eci_mini, self.v_init, self.v_avg, self.state_vect_mini, \
                 self.rbeg_jd, stations_fixed=(not minimize_solution.success), \
                 referent_init=minimize_solution.success)
 

@@ -4,10 +4,11 @@ from __future__ import print_function, division, absolute_import
 
 import os
 import numpy as np
+import math
 from jplephem.spk import SPK
 
 from Utils.TrajConversions import J2000_JD, J2000_OBLIQUITY, AU, eclipticRectangularPrecession, \
-    ecliptic2RectangularCoord, rectangular2EclipticCoord
+    ecliptic2RectangularCoord, rectangular2EclipticCoord, jd2DynamicalTimeJD, jd2LST
 
 from Utils.Math import rotateVector
 
@@ -157,6 +158,299 @@ def calcEarthRectangularCoordJPL(jd, jpl_data, sun_centre_origin=False):
 
     # Return the position and the velocity of the Earth with respect to the Sun
     return position, velocity
+
+
+
+
+def calcNutationComponents(jd_dyn):
+    """ Calculate Earth's nutation components from the given Julian date.
+
+    Source: Meeus (1998) Astronomical algorithms, 2nd edition, chapter 22.
+    
+    The precision is limited to 0.5" in nutation in longitude and 0.1" in nutation in obliquity. The errata
+    for the 2nd edition was used to correct the equation for delta_psi.
+    
+    Arguments:
+        jd_dyn: [float] Dynamical Julian date. See jd2DynamicalTimeJD function.
+
+    Return:
+        (delta_psi, delta_eps): [tuple of floats] Differences from mean nutation due to the influence of
+            the Moon and minor effects (radians).
+    """
+
+
+    T = (jd_dyn - J2000_JD.days)/365250.0
+
+    # # Mean Elongation of the Moon from the Sun
+    # D = 297.85036 + 445267.11148*T - 0.0019142*T**2 + (T**3)/189474
+
+    # # Mean anomaly of the Earth with respect to the Sun
+    # M = 357.52772 + 35999.05034*T - 0.0001603*T**2 - (T**3)/300000
+
+    # # Mean anomaly of the Moon
+    # Mm = 134.96298 + 477198.867398*T + 0.0086972*T**2 + (T**3)/56250
+
+    # # Argument of latitude of the Moon
+    # F = 93.27191  + 483202.017538*T - 0.0036825*T**2 + (T**3)/327270
+
+
+    # Longitude of the ascending node of the Moon's mean orbit on the ecliptic, measured from the mean equinox
+    # of the date
+    omega = 125.04452 - 1934.136261*T
+
+
+    # Mean longitude of the Sun (deg)
+    L = 280.4665 + 36000.7698*T
+
+    # Mean longitude of the Moon (deg)
+    Ll = 218.3165 + 481267.8813*T
+
+
+    # Nutation in longitude
+    delta_psi = -17.2*math.sin(math.radians(omega)) - 1.32*math.sin(np.radians(2*L)) \
+        - 0.23*math.sin(math.radians(2*Ll)) + 0.21*math.sin(math.radians(2*omega))
+
+    # Nutation in obliquity
+    delta_eps = 9.2*math.cos(math.radians(omega)) + 0.57*math.cos(math.radians(2*L)) \
+        + 0.1*math.cos(math.radians(2*Ll)) - 0.09*math.cos(math.radians(2*omega))
+
+
+    # Convert to radians
+    delta_psi = np.radians(delta_psi/3600)
+    delta_eps = np.radians(delta_eps/3600)
+
+    return delta_psi, delta_eps
+
+
+    ### For higher precision (more than 0.5" in delta psi and 0.1" in delta eps) use the code below:
+
+
+    # # Longitude of the ascending node of the Moon
+    # omega = 125.04452 - 1934.136261*T   + 0.0020708*T**2 + (T**3)/450000
+
+
+    # # Periodic terms
+    # #
+    # # Source: http://read.pudn.com/downloads137/sourcecode/others/585305/nutate.c__.htm
+    # #
+    # # Trigonometric arguments: 
+    # # i - Mm
+    # # j - M
+    # # k - F
+    # # l - D
+    # # m - omega
+    # # a - C cos
+    # # b - C cos T
+    # # c - C sin
+    # # d - C sin T
+    # #         i      j   k   l   m        a       b      c     d  
+    # pp = [  [ 0,     0,  0,  0,  1,   -171996, -1742,  92025, 89],
+    #         [ 0,     0,  0,  0,  2,      2062,    2,    -895,  5],
+    #         [-2,     0,  2,  0,  1,      46,      0,     -24,  0],
+    #         [ 2,     0, -2,  0,  0,      11,      0,       0,  0],
+    #         [-2,     0,  2,  0,  2,     -3,       0,       1,  0],
+    #         [ 1,    -1,  0, -1,  0,     -3,       0,       0,  0],
+    #         [ 0,    -2,  2, -2,  1,     -2,       0,       1,  0],
+    #         [ 2,     0, -2,  0,  1,      1,       0,       0,  0],
+    #         [ 0,     0,  2, -2,  2,     -13187, -16,    5736,-31],
+    #         [ 0,     1,  0,  0,  0,      1426,  -34,      54, -1],
+    #         [ 0,     1,  2, -2,  2,     -517,    12,     224, -6],
+    #         [ 0,    -1,  2, -2,  2,      217,    -5,     -95,  3],
+    #         [ 0,     0,  2, -2,  1,      129,     1,     -70,  0],
+    #         [ 2,     0,  0, -2,  0,      48,      0,       1,  0],
+    #         [ 0,     0,  2, -2,  0,     -22,      0,       0,  0],
+    #         [ 0,     2,  0,  0,  0,      17,     -1,       0,  0],
+    #         [ 0,     1,  0,  0,  1,     -15,      0,       9,  0],
+    #         [ 0,     2,  2, -2,  2,     -16,      1,       7,  0],
+    #         [ 0,    -1,  0,  0,  1,     -12,      0,       6,  0],
+    #         [-2,     0,  0,  2,  1,     -6,       0,       3,  0],
+    #         [ 0,    -1,  2, -2,  1,     -5,       0,       3,  0],
+    #         [ 2,     0,  0, -2,  1,      4,       0,-      2,  0],
+    #         [ 0,     1,  2, -2,  1,      4,       0,-      2,  0],
+    #         [ 1,     0,  0, -1,  0,     -4,       0,       0,  0],
+    #         [ 2,     1,  0, -2,  0,      1,       0,       0,  0],
+    #         [ 0,     0, -2,  2,  1,      1,       0,       0,  0],
+    #         [ 0,     1, -2,  2,  0,     -1,       0,       0,  0],
+    #         [ 0,     1,  0,  0,  2,      1,       0,       0,  0],
+    #         [-1,     0,  0,  1,  1,      1,       0,       0,  0],
+    #         [ 0,     1,  2, -2,  0,     -1,       0,       0,  0],
+    #         [ 0,     0,  2,  0,  2,     -2274,   -2,     977,- 5],
+    #         [ 1,     0,  0,  0,  0,      712,     1,      -7,  0],
+    #         [ 0,     0,  2,  0,  1,     -386,    -4,     200,  0],
+    #         [ 1,     0,  2,  0,  2,     -301,     0,     129,- 1],
+    #         [ 1,     0,  0, -2,  0,     -158,     0,      -1,  0],
+    #         [-1,     0,  2,  0,  2,      123,     0,     -53,  0],
+    #         [ 0,     0,  0,  2,  0,      63,      0,      -2,  0],
+    #         [ 1,     0,  0,  0,  1,      63,      1,     -33,  0],
+    #         [-1,     0,  0,  0,  1,     -58,     -1,      32,  0],
+    #         [-1,     0,  2,  2,  2,     -59,      0,      26,  0],
+    #         [ 1,     0,  2,  0,  1,     -51,      0,      27,  0],
+    #         [ 0,     0,  2,  2,  2,     -38,      0,      16,  0],
+    #         [ 2,     0,  0,  0,  0,      29,      0,      -1,  0],
+    #         [ 1,     0,  2, -2,  2,      29,      0,     -12,  0],
+    #         [ 2,     0,  2,  0,  2,     -31,      0,      13,  0],
+    #         [ 0,     0,  2,  0,  0,      26,      0,      -1,  0],
+    #         [-1,     0,  2,  0,  1,      21,      0,     -10,  0],
+    #         [-1,     0,  0,  2,  1,      16,      0,      -8,  0],
+    #         [ 1,     0,  0, -2,  1,     -13,      0,       7,  0],
+    #         [-1,     0,  2,  2,  1,     -10,      0,       5,  0],
+    #         [ 1,     1,  0, -2,  0,      -7,      0,       0,  0],
+    #         [ 0,     1,  2,  0,  2,       7,      0,      -3,  0],
+    #         [ 0,    -1,  2,  0,  2,      -7,      0,       3,  0],
+    #         [ 1,     0,  2,  2,  2,      -8,      0,       3,  0],
+    #         [ 1,     0,  0,  2,  0,       6,      0,       0,  0],
+    #         [ 2,     0,  2, -2,  2,       6,      0,      -3,  0],
+    #         [ 0,     0,  0,  2,  1,      -6,      0,       3,  0],
+    #         [ 0,     0,  2,  2,  1,      -7,      0,       3,  0],
+    #         [ 1,     0,  2, -2,  1,       6,      0,      -3,  0],
+    #         [ 0,     0,  0, -2,  1,      -5,      0,       3,  0],
+    #         [ 1,    -1,  0,  0,  0,       5,      0,       0,  0],
+    #         [ 2,     0,  2,  0,  1,      -5,      0,       3,  0],
+    #         [ 0,     1,  0, -2,  0,      -4,      0,       0,  0],
+    #         [ 1,     0, -2,  0,  0,       4,      0,       0,  0],
+    #         [ 0,     0,  0,  1,  0,      -4,      0,       0,  0],
+    #         [ 1,     1,  0,  0,  0,      -3,      0,       0,  0],
+    #         [ 1,     0,  2,  0,  0,       3,      0,       0,  0],
+    #         [ 1,    -1,  2,  0,  2,      -3,      0,       1,  0],
+    #         [-1,    -1,  2,  2,  2,      -3,      0,       1,  0],
+    #         [-2,     0,  0,  0,  1,      -2,      0,       1,  0],
+    #         [ 3,     0,  2,  0,  2,      -3,      0,       1,  0],
+    #         [ 0,    -1,  2,  2,  2,      -3,      0,       1,  0],
+    #         [ 1,     1,  2,  0,  2,       2,      0,      -1,  0],
+    #         [-1,     0,  2, -2,  1,      -2,      0,       1,  0],
+    #         [ 2,     0,  0,  0,  1,       2,      0,      -1,  0],
+    #         [ 1,     0,  0,  0,  2,      -2,      0,       1,  0],
+    #         [ 3,     0,  0,  0,  0,       2,      0,       0,  0],
+    #         [ 0,     0,  2,  1,  2,       2,      0,      -1,  0],
+    #         [-1,     0,  0,  0,  2,       1,      0,      -1,  0],
+    #         [ 1,     0,  0, -4,  0,      -1,      0,       0,  0],
+    #         [-2,     0,  2,  2,  2,       1,      0,      -1,  0],
+    #         [-1,     0,  2,  4,  2,      -2,      0,       1,  0],
+    #         [ 2,     0,  0, -4,  0,      -1,      0,       0,  0],
+    #         [ 1,     1,  2, -2,  2,       1,      0,      -1,  0],
+    #         [ 1,     0,  2,  2,  1,      -1,      0,       1,  0],
+    #         [-2,     0,  2,  4,  2,      -1,      0,       1,  0],
+    #         [-1,     0,  4,  0,  2,       1,      0,       0,  0],
+    #         [ 1,    -1,  0, -2,  0,       1,      0,       0,  0],
+    #         [ 2,     0,  2, -2,  1,       1,      0,      -1,  0],
+    #         [ 2,     0,  2,  2,  2,      -1,      0,       0,  0],
+    #         [ 1,     0,  0,  2,  1,      -1,      0,       0,  0],
+    #         [ 0,     0,  4, -2,  2,       1,      0,       0,  0],
+    #         [ 3,     0,  2, -2,  2,       1,      0,       0,  0],
+    #         [ 1,     0,  2, -2,  0,      -1,      0,       0,  0],
+    #         [ 0,     1,  2,  0,  1,       1,      0,       0,  0],
+    #         [-1,    -1,  0,  2,  1,       1,      0,       0,  0],
+    #         [ 0,     0, -2,  0,  1,      -1,      0,       0,  0],
+    #         [ 0,     0,  2, -1,  2,      -1,      0,       0,  0],
+    #         [ 0,     1,  0,  2,  0,      -1,      0,       0,  0],
+    #         [ 1,     0, -2, -2,  0,      -1,      0,       0,  0],
+    #         [ 0,    -1,  2,  0,  1,      -1,      0,       0,  0],
+    #         [ 1,     1,  0, -2,  1,      -1,      0,       0,  0],
+    #         [ 1,     0, -2,  2,  0,      -1,      0,       0,  0],
+    #         [ 2,     0,  0,  2,  0,       1,      0,       0,  0],
+    #         [ 0,     0,  2,  4,  2,      -1,      0,       0,  0],
+    #         [ 0,     1,  0,  1,  0,       1,      0,       0,  0]]
+
+
+    # delta_psi = 0
+    # delta_eps = 0
+
+
+    # # Add up the periodic terms
+    # for i, j, k, l, m, a, b, c, d in pp:
+
+    #     alpha = math.radians(D*l + M*j + Mm*i + F*k + omega*m)
+
+    #     # Nutation in longitude
+    #     delta_psi = (c + d*T/10.0)*math.sin(alpha)
+
+    #     # Nutation in obliquity
+    #     delta_eps = (a + b*T/10.0)*math.cos(alpha)
+
+
+    # # Convert delta psi and eps to radians
+    # delta_psi = np.radians(10000*3600*delta_psi)
+    # delta_eps = np.radians(10000*3600*delta_eps)
+
+
+    # return delta_psi, delta_eps
+
+
+
+
+def calcTrueObliquity(jd):
+    """ Calculate the true obliquity of the Earth at the given Julian date. 
+    
+    Arguments:
+        jd_dyn: [float] Julian date.
+
+    Return:
+        eps: [float] True obliquity eps0 + delta_eps.
+
+    """
+
+
+    # Calculate the dynamical time JD
+    jd_dyn = jd2DynamicalTimeJD(jd)
+
+
+    # Calculate Earth's nutation components
+    delta_psi, delta_eps = calcNutationComponents(jd_dyn)
+
+
+    # Calculate the mean obliquity (in arcsec)
+    u = (jd_dyn - 2451545.0)/3652500.0
+    eps0 = 84381.448 - 4680.93*u - 1.55*u**2 + 1999.25*u**3 - 51.38*u**4 - 249.67*u**5 - 39.05*u**6 \
+        + 7.12*u**7 + 27.87*u**8 + 5.79*u**9 + 2.45*u**10
+
+
+    # Convert to radians
+    eps0 /= 3600
+    eps0 = np.radians(eps0)
+
+    # Calculate true obliquity
+    eps = (eps0 + delta_eps)%(2*np.pi)
+
+
+    return eps
+
+
+
+
+def calcApparentSiderealEarthRotation(julian_date):
+    """ Calculate apparent sidereal rotation of the Earth.
+
+    """
+
+    t = (julian_date - J2000_JD.days)/36525.0
+
+    # Calculate the Mean sidereal rotation of the Earth in radians (Greenwich Sidereal Time)
+    GST = 280.46061837 + 360.98564736629*(julian_date - J2000_JD.days) + 0.000387933*t**2 - (t**3)/38710000
+    GST = (GST + 360)%360
+    GST = math.radians(GST)
+
+
+    # Calculate the dynamical time JD
+    jd_dyn = jd2DynamicalTimeJD(julian_date)
+
+
+    # Calculate Earth's nutation components
+    delta_psi, delta_eps = calcNutationComponents(jd_dyn)
+
+
+    # Calculate the mean obliquity (in arcsec)
+    u = (jd_dyn - 2451545.0)/3652500.0
+    eps0 = 84381.448 - 4680.93*u - 1.55*u**2 + 1999.25*u**3 - 51.38*u**4 - 249.67*u**5 - 39.05*u**6 \
+        + 7.12*u**7 + 27.87*u**8 + 5.79*u**9 + 2.45*u**10
+
+    # Convert to radians
+    eps0 /= 3600
+    eps0 = np.radians(eps0)
+
+    # Calculate apparent sidereal Earth's rotation
+    app_sid_rot = (GST + delta_psi*math.cos(eps0 + delta_eps))%(2*math.pi)
+
+    return app_sid_rot
 
 
 

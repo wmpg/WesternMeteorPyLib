@@ -261,7 +261,8 @@ if __name__ == "__main__":
 
     #dir_path = "../DenisGEMcases/"
     #dir_path = "../DenisGEMcases_5_sigma"
-    dir_path = "../Romulan2012Geminids"
+    #dir_path = "../Romulan2012Geminids"
+    dir_path = "../SimulatedMeteors/CAMO/PER"
 
 
 
@@ -275,27 +276,36 @@ if __name__ == "__main__":
     traj_pickles_gural = collectTrajPickles(dir_path, traj_type='gural')
 
 
-    # Coordinates of the centre
-    ra_cent = 113.0
-    dec_cent = 32.5
-    radius = 5.0
+    # # Coordinates of the centre (GEM)
+    # ra_cent = 113.0
+    # dec_cent = 32.5
+    # radius = 5.0
+
+
+    # Coordinates of the centre (PER)
+    ra_cent = 48.2
+    dec_cent = 58.1
+    radius = 15.0
 
     # ra_cent = None
     # dec_cent = None
     # radius = 1
 
 
-    #plot_type = 'geocentric'
-    plot_type = 'heliocentric ecliptic'
+    plot_type = 'geocentric'
+    #plot_type = 'heliocentric ecliptic'
 
     # Plot geocentric radiants of Line of Sight solutions
-    m, los_profile = plotRadiants(traj_pickles_los, plot_type=plot_type, ra_cent=ra_cent, dec_cent=dec_cent, radius=radius, label='LoS:', s=10, marker='s')
+    m, los_profile = plotRadiants(traj_pickles_los, plot_type=plot_type, ra_cent=ra_cent, dec_cent=dec_cent, \
+        radius=radius, label='LoS:', s=10, marker='s')
 
     # Plot geocentric radiants of Monte Carlo solutions
-    _, mc_profile = plotRadiants(traj_pickles_mc, plot_type=plot_type, ra_cent=ra_cent, dec_cent=dec_cent, radius=radius, label='MC:', plt_handle=m, marker='+')
+    _, mc_profile = plotRadiants(traj_pickles_mc, plot_type=plot_type, ra_cent=ra_cent, dec_cent=dec_cent, \
+        radius=radius, label='MC:', plt_handle=m, marker='+')
 
     # Plot gural geocentric radiants
-    _, gural_profile = plotRadiants(traj_pickles_gural, plot_type=plot_type, ra_cent=ra_cent, dec_cent=dec_cent, radius=radius, label='Gural:', plt_handle=m, marker='x', s=15)
+    _, gural_profile = plotRadiants(traj_pickles_gural, plot_type=plot_type, ra_cent=ra_cent, \
+        dec_cent=dec_cent, radius=radius, label='Gural:', plt_handle=m, marker='x', s=15)
     
     
     # # Gural solver results
@@ -324,7 +334,7 @@ if __name__ == "__main__":
     m.colorbar(label=colorbar_label)
     plt.legend(loc='upper right')
 
-    plt.tight_layout()
+    # plt.tight_layout()
     #plt.savefig('CAMS_GEM_solver_comparison_5_sigma.png', dpi=300)
 
     plt.show()

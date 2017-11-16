@@ -35,7 +35,11 @@ import math
 import numpy as np
 from datetime import datetime, timedelta, MINYEAR
 
-from Utils.Math import vectNorm, vectMag, rotateVector
+
+from Config import config
+
+import Utils.Earth
+from Utils.Math import vectNorm, vectMag, rotateVector, cartesianToSpherical, sphericalToCartesian
 
 
 ### CONSTANTS ###
@@ -84,16 +88,16 @@ EARTH = EARTH_CONSTANTS()
 ### DECORATORS ###
 
 def floatArguments(func):
-    """ A decorator that converts all function arguments to float. 
+    """ A decorator that converts all function arguments to float. Keyword arguments are left untouched.
     
     @param func: a function to be decorated
 
     @return :[funtion object] the decorated function
     """
 
-    def inner_func(*args):
+    def inner_func(*args, **kwargs):
         args = map(float, args)
-        return func(*args)
+        return func(*args, **kwargs)
 
     return inner_func
 
@@ -101,7 +105,7 @@ def floatArguments(func):
 ##################
 
 
-### Time transformations ###
+### Time conversions ###
 
 
 def unixTime2Date(ts, tu, dt_obj=False):
@@ -231,7 +235,8 @@ def unixTime2JD(ts, tu):
 
 
 def jd2LST(julian_date, lon):
-    """ Convert Julian date to Local Sidereal Time and Greenwich Sidereal Time. 
+    """ Convert Julian date to Local Sidereal Time and Greenwich Sidereal Time. The times used are apparent
+        times, not mean times.
 
     Source: J. Meeus: Astronomical Algorithms
 
@@ -243,16 +248,48 @@ def jd2LST(julian_date, lon):
         (LST, GST): [tuple of floats] a tuple of Local Sidereal Time and Greenwich Sidereal Time
     """
 
-    t = (julian_date - J2000_JD.days)/36525.0
+    # t = (julian_date - J2000_JD.days)/36525.0
 
     # Greenwich Sidereal Time
-    GST = 280.46061837 + 360.98564736629*(julian_date - J2000_JD.days) + 0.000387933*t**2 - (t**3)/38710000
-    GST = (GST + 360)%360
+    #GST = 280.46061837 + 360.98564736629*(julian_date - J2000_JD.days) + 0.000387933*t**2 - (t**3)/38710000
+    #GST = (GST + 360)%360
+
+    GST = np.degrees(Utils.Earth.calcApparentSiderealEarthRotation(julian_date))
 
     # Local Sidereal Time
     LST = (GST + lon + 360)%360
     
     return LST, GST
+
+
+
+def jd2DynamicalTimeJD(jd):
+    """ Converts the given Julian date to dynamical time (i.e. Terrestrial Time, TT) Julian date. The 
+        conversion takes care of leap seconds. 
+
+    Arguments:
+        jd: [float] Julian date.
+
+    Return:
+        [float] Dynamical time Julian date.
+    """
+
+    # Leap seconds as of 2017 (default)
+    leap_secs = 37.0
+
+    # Get the relevant number of leap seconds for the given JD
+    for jd_leap, ls in config.leap_seconds:
+        
+        if jd > jd_leap:
+            leap_secs = ls
+            break
+
+    # Calculate the dynamical JD
+    jd_dyn = jd + (leap_secs + 32.184)/86400
+
+
+    return jd_dyn
+
 
 
 
@@ -267,11 +304,12 @@ def LST2LongitudeEast(julian_date, LST):
         lon: [float] longitude of the observer in degrees
     """
 
-    t = (julian_date - J2000_JD.days)/36525.0
+    # t = (julian_date - J2000_JD.days)/36525.0
 
-    # Greenwich Sidereal Time
-    GST = 280.46061837 + 360.98564736629*(julian_date - J2000_JD.days) + 0.000387933*t**2 - (t**3)/38710000
-    GST = (GST + 360)%360
+    # Greenwich Sidereal Time (apparent)
+    _, GST = jd2LST(julian_date, 0)
+    # GST = 280.46061837 + 360.98564736629*(julian_date - J2000_JD.days) + 0.000387933*t**2 - (t**3)/38710000
+    # GST = (GST + 360)%360
 
     # Calculate longitude
     lon = (LST - GST + 180)%360 - 180
@@ -376,7 +414,7 @@ def latLonAlt2ECEF(lat, lon, h):
 
 
 @floatArguments
-def geo2Cartesian(lat_rad, lon_rad, h, julian_date):
+def geo2Cartesian(lat_rad, lon_rad, h, julian_date, precess_j2000=False):
     """ Convert geographical Earth coordinates to Cartesian ECI coordinate system (Earth center as origin).
         The Earth is considered as an elipsoid.
     
@@ -385,6 +423,9 @@ def geo2Cartesian(lat_rad, lon_rad, h, julian_date):
         lon_rad: [float] Longitde of the observer in radians (+E).
         h: [int or float] Elevation of the observer in meters.
         julian_date: [float] Julian date, epoch J2000.0.
+
+    Keyword arguments:
+        precess_j2000: [bool] Precess ECI coordinates to J2000. False by default.
     
     Return:
         (x, y, z): [tuple of floats] a tuple of X, Y, Z Cartesian ECI coordinates
@@ -393,10 +434,13 @@ def geo2Cartesian(lat_rad, lon_rad, h, julian_date):
 
     lon = np.degrees(lon_rad)
 
-    # Get Local Sidereal Time
+    # Calculate ECEF coordinates
+    ecef_x, ecef_y, ecef_z = latLonAlt2ECEF(lat_rad, lon_rad, h)
+
+
+    # Get Local Sidereal Time (apparent)
     LST_rad = np.radians(jd2LST(julian_date, lon)[0])
 
-    ecef_x, ecef_y, ecef_z = latLonAlt2ECEF(lat_rad, lon_rad, h)
 
     # Calculate the Earth radius at given latitude
     Rh = math.sqrt(ecef_x**2 + ecef_y**2 + ecef_z**2)
@@ -404,16 +448,92 @@ def geo2Cartesian(lat_rad, lon_rad, h, julian_date):
     # Calculate the geocentric latitude (latitude which considers the Earth as an elipsoid)
     lat_geocentric = math.atan2(ecef_z, math.sqrt(ecef_x**2 + ecef_y**2))
 
-    # Calculate Cartesian ECI coordinates (in meters)
+    # Calculate Cartesian ECI coordinates (in meters), at epoch of date
     x = Rh*np.cos(lat_geocentric)*np.cos(LST_rad)
     y = Rh*np.cos(lat_geocentric)*np.sin(LST_rad)
     z = Rh*np.sin(lat_geocentric)
 
-    return x, y, z
+
+    if precess_j2000:
+
+        ### Precess coordinates to J2000 ###
+
+        # Convert rectangular to spherical coordiantes
+        re, delta_e, alpha_e = cartesianToSpherical(x, y, z)
+
+        # Dynamical Julian date
+        jd_dyn = jd2DynamicalTimeJD(julian_date)
+
+        # Precess coordinates to J2000
+        alpha_ej, delta_ej = equatorialCoordPrecession(jd_dyn, J2000_JD.days, alpha_e, delta_e)
+
+        # Convert coordinates back to rectangular
+        x_ej, y_ej, z_ej = sphericalToCartesian(re, delta_ej, alpha_ej)
+
+        ###
+
+        return x_ej, y_ej, z_ej
+
+    else:
+
+        # Leave the coordinates in the epoch of date
+        return x, y, z
 
 
 # Vectorize the geo2Cartesian function, so julian_date can be given as a numpy array
 geo2Cartesian_vect = np.vectorize(geo2Cartesian, excluded=['lat_rad', 'lon_rad', 'h'])
+
+
+# # DAVE's CLARK EQs
+# def geo2Cartesian_NEW(lat_rad, lon_rad, h, julian_date):
+#     """ Convert geographical Earth coordinates to Cartesian ECI coordinate system (Earth center as origin).
+#         The Earth is considered as an elipsoid. Equations used are from Clark (2010), UWO MSc thesis.
+    
+#     Arguments:
+#         lat_rad: [float] Latitude of the observer in radians (+N).
+#         lon_rad: [float] Longitde of the observer in radians (+E).
+#         h: [int or float] Elevation of the observer in meters.
+#         julian_date: [float] Julian date, epoch J2000.0.
+    
+#     Return:
+#         (x, y, z): [tuple of floats] a tuple of X, Y, Z Cartesian ECI coordinates
+        
+#     """
+
+
+#     # Get distance from Earth centre to the position given by geographical coordinates, in WGS84
+#     N = EARTH.EQUATORIAL_RADIUS/math.sqrt(1.0 - (EARTH.E**2)*math.sin(lat)**2)
+
+#     # Calculate ECEF coordinates
+#     xg = (N + h)*math.cos(lat_rad)*math.cos(lon_rad)
+#     yg = (N + h)*math.cos(lat_rad)*math.sin(lon_rad)
+#     zg = ((1 - EARTH.E**2)*N + h)*math.sin(lat_rad)
+
+#     # Calculate the apparent sidereal rotation
+#     gst_apparent = Utils.Earth.calcApparentSiderealEarthRotation(julian_date)
+
+
+#     # Earth-centred inertial (ECI) coordinates with respect to the equinox of the date
+#     xe = xg*np.cos(gst_apparent) - yg*np.sin(gst_apparent)
+#     ye = xg*np.sin(gst_apparent) + yg*np.cos(gst_apparent)
+#     ze = zg
+
+#     # Convert rectangular to spherical coordiantes
+#     re, delta_e, alpha_e = cartesianToSpherical(xe, ye, ze)
+
+
+#     # Dynamical Julian date
+#     jd_dyn = jd2DynamicalTimeJD(julian_date)
+
+#     # Precess coordinates to J2000
+#     alpha_ej, delta_ej = equatorialCoordPrecession(jd_dyn, J2000_JD.days, alpha_e, delta_e)
+
+#     # Convert coordinates back to rectangular
+#     x_ej, y_ej, z_ej = sphericalToCartesian(re, delta_ej, alpha_ej)
+
+
+#     return x_ej, y_ej, z_ej
+
 
 
 
@@ -459,7 +579,7 @@ def ecef2LatLonAlt(x, y, z):
 
 
 
-def cartesian2Geo(julian_date, x, y, z):
+def cartesian2Geo(julian_date, x, y, z, precess_j2000=False):
     """ Convert Cartesian ECI coordinates of a point (origin in Earth's centre) to geographical coordinates.
     
     Arguments:
@@ -467,6 +587,10 @@ def cartesian2Geo(julian_date, x, y, z):
         X: [float] X coordinate of a point in space (meters)
         Y: [float] Y coordinate of a point in space (meters)
         Z: [float] Z coordinate of a point in space (meters)
+
+    Keyword arguments:
+        precess_j2000: [bool] The given coordinates are in J2000. False by default, which means that they
+            should be in the epoch of date.
     
     Return:
         (lon, lat, ele): [tuple of floats]
@@ -474,6 +598,26 @@ def cartesian2Geo(julian_date, x, y, z):
             lat: latitude of the point in radians
             ele: elevation in meters
     """
+
+    # Precess the coordinates to epoch of date, if they are not already in it
+    if precess_j2000:
+
+        ### Precess coordinates from J2000 to epoch of date ###
+
+        # Convert rectangular to spherical coordiantes
+        re, delta_e, alpha_e = cartesianToSpherical(x, y, z)
+
+
+        # Dynamical Julian date
+        jd_dyn = jd2DynamicalTimeJD(julian_date)
+
+        # Precess coordinates to J2000
+        alpha_ej, delta_ej = equatorialCoordPrecession(J2000_JD.days, jd_dyn, alpha_e, delta_e)
+
+        # Convert coordinates back to rectangular
+        x, y, z = sphericalToCartesian(re, delta_ej, alpha_ej)
+
+        ###
 
 
     # Calculate LLA
@@ -485,12 +629,6 @@ def cartesian2Geo(julian_date, x, y, z):
     # Convert longitude to radians
     lon = np.radians(lon)
 
-    # # Get LST and GST
-    # LST, GST = jd2LST(julian_date, lon)
-
-    # # Convert Cartesian coordinates to latitude and longitude
-    # lon_p = math.degrees(math.atan2(Yi, Xi) - math.radians(GST))
-    # lat_p = math.degrees(math.atan2(math.sqrt(Xi**2 + Yi**2), Zi))
 
     return lat, lon, ele
 
@@ -667,10 +805,8 @@ def raDec2Ecliptic(jd, ra, dec):
 
     """
 
-    T = (jd - J2000_JD.days)/36525.0
-
-    eps = (23.0 + 26.0/60.0 + 21.448/3600.0)*np.pi/180.0 - (46.8150*T - 0.00059*(T**2) 
-        + 0.001813*(T**3))*np.pi/180.0/3600.0
+    # Get the true obliquity
+    eps = Utils.Earth.calcTrueObliquity(jd)
 
     # Calculate ecliptic longitude
     L = np.arctan2(np.sin(eps)*np.sin(dec) + np.sin(ra)*np.cos(dec)*np.cos(eps), np.cos(ra)*np.cos(dec))
@@ -783,8 +919,9 @@ def correctedEclipticCoord(L_g, B_g, v_g, earth_vel):
     zm_c = (zm + earth_vel[2])/v_h
 
     # Calculate corrected radiant in ecliptic coordinates
-    L_h = np.arctan2(ym_c, xm_c)
-    B_h = np.arcsin(zm_c)
+    # NOTE: 180 deg had to be added to L and B had to be negative arcsin to get the right results
+    L_h = (np.arctan2(ym_c, xm_c) + np.pi)%(2*np.pi)
+    B_h = -np.arcsin(zm_c)
 
     # Calculate the heliocentric velocity vector of the meteoroid
     xh, yh, zh = eclipticToRectangularVelocityVect(L_h, B_h, v_h)
@@ -812,7 +949,7 @@ def equatorialCoordPrecession(start_epoch, final_epoch, ra, dec):
         dec: [float] non-corrected declination in radians
     
     Return:
-        (ra, dec): [tuple of floats] precessed equatorial coordinates in degrees
+        (ra, dec): [tuple of floats] precessed equatorial coordinates in radians
 
     """
 
@@ -907,15 +1044,19 @@ if __name__ == "__main__":
     # Test ECEF funtions
     print('Geo -> ECEF -> Geo test')
     lat, lon, h = np.radians(18.5), np.radians(45.3), 90
-    print(lat, lon, h)
+    print('LLA:', lat, lon, h)
     x, y, z = latLonAlt2ECEF(lat, lon, h)
-    print(x, y, z)
-    print(ecef2LatLonAlt(x, y, z))
+    print('ECEF:', x, y, z)
+    print('LLA:', ecef2LatLonAlt(x, y, z))
 
 
     x, y, z = geo2Cartesian(lat, lon, h, jd)
-    print(x, y, z)
-    print(cartesian2Geo(jd, x, y, z))
+    print('ECI:', x, y, z)
+
+    # x_ej, y_ej, z_ej = geo2Cartesian_NEW(lat, lon, h, jd)
+    # print('ECI clark:', x_ej, y_ej, z_ej)
+
+    print('LLA:', cartesian2Geo(jd, x, y, z))
 
 
     # SPE 9 meteor burster
@@ -950,3 +1091,50 @@ if __name__ == "__main__":
     ra_back, dec_back = altAz2RADec(azim, elev, jd, lat, lon)
     print(np.degrees(ra_back), np.degrees(dec_back))
     
+
+
+    ### Corrected heliocentric ecliptic coordinats test (Tsuchiya et al. 2017) example ###
+    from jplephem.spk import SPK
+
+    ## EXAMPLE 1
+    # jd = date2JD(2008, 11, 1, 13, 33, 38)
+    # v_g = 13.52
+    # L_g = np.radians(10.13)
+    # B_g = np.radians(-10.87)
+
+    # # Values from Tsuchiya paper:
+    # # Lh: 327.63
+    # # Bh: -3.79
+    # # vh: 38.53
+    #############
+
+
+    ## EXAMPLE 2
+    jd = date2JD(2008, 11, 14, 15, 8, 3)
+    v_g = 9.43
+    L_g = np.radians(350.43)
+    B_g = np.radians(3.38)
+
+    # Values from Tsuchiya paper:
+    # Lh: 329.61
+    # Bh: 0.82
+    # vh: 38.71
+    ###########
+    
+    # Load the JPL ephemerids data
+    jpl_ephem_data = SPK.open(config.jpl_ephem_file)
+    
+    # Get the position of the Earth (km) and its velocity (km/s) at the given Julian date (J2000 epoch)
+    # The position is given in the ecliptic coordinates, origin of the coordinate system is in the Solar 
+    # system barycentre
+    earth_pos, earth_vel = Utils.Earth.calcEarthRectangularCoordJPL(jd, jpl_ephem_data)
+
+    # Calculate corrected heliocentrc coordinates
+    L_h, B_h, met_v_h = correctedEclipticCoord(L_g, B_g, v_g, earth_vel)
+
+
+    print('Lh:', np.degrees(L_h))
+    print('Bh:', np.degrees(B_h))
+    print('Vh:', vectMag(met_v_h))
+
+    ###########

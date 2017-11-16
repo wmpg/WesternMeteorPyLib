@@ -99,6 +99,36 @@ def sphericalToCartesian(r, theta, phi):
     return x, y, z
 
 
+
+def cartesianToSpherical(x, y, z):
+    """ Convert cartesian coordinates to spherical coordinates. 
+    
+    Arguments:
+        x: [float] 
+        y: [float]
+        z: [float]
+    
+    Return:
+        r, theta, phi: [tuple of floats] Spherical coordinates (angles given in radians)    
+            r - Radius (radians).
+            theta - Elevation (radians).
+            phi - Azimuth (radians).
+    """
+
+    # Radius
+    r = np.sqrt(x**2 + y**2 + z**2)
+
+    # Azimuith
+    phi = np.arctan2(y, x)
+
+    # Elevation
+    theta = np.arccos(z/r)
+
+
+    return r, theta, phi
+
+
+
 def angleBetweenSphericalCoords(phi1, lambda1, phi2, lambda2):
     """ Calculates the angle between two points on a sphere. 
     
@@ -538,7 +568,10 @@ def averageClosePoints(x_array, y_array, delta, x_datetime=False):
 
 if __name__ == "__main__":
 
+    import sys
+
     ### TESTS
+
 
     # Cx, Cy
     cx, cy = 229, 163
@@ -566,6 +599,30 @@ if __name__ == "__main__":
     print(cx_rot + x_diff, cy_rot + y_diff)
 
 
+
+
+    # Test cartesian to spherical transform
+    x = -3125996.00181 
+    y = 5180605.28206 
+    z = 4272017.20178
+
+    print('X, Y, Z')
+    print(x, y, z)
+
+    # Convert to spherical
+    r, theta, phi = cartesianToSpherical(x, y, z)
+
+    print('r, phi, theta')
+    print(r, phi, theta)
+
+    # Convert back to cartesian
+    x2, y2, z2 = sphericalToCartesian(r, theta, phi)
+
+    print('Converted X, Y, Z')
+    print(x2, y2, z2)
+
+
+    sys.exit()
 
     # Test hull functions
     from mpl_toolkits.mplot3d import Axes3D

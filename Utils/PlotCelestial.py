@@ -167,10 +167,26 @@ class CelestialPlot(object):
                 ra_labels = np.arange(ra_min_round - 360, ra_max_round, label_angle_freq) + 360
             
 
-            self.m.drawmeridians(ra_labels, labels=[False, False, False, True], color='0.25', \
-                fmt=(lambda x: (u"%d\N{DEGREE SIGN}")%(x%360)))
+            # Calculate R.A. labeling precision
+            ra_label_rounding = np.ceil(-np.log10(label_angle_freq))
+            if ra_label_rounding < 1:
+                ra_label_rounding = 0
+            ra_label_rounding = int(ra_label_rounding)
+            
+            ra_label_format = u"%." + str(ra_label_rounding) + u"f\N{DEGREE SIGN}"
+
+            ra_labels_handle = self.m.drawmeridians(ra_labels, labels=[False, False, False, True], color='0.25', \
+                fmt=(lambda x: ra_label_format%(x%360)))
+
+            # Rotate R.A. labels
+            for m in ra_labels_handle:
+                try:
+                    ra_labels_handle[m][1][0].set_rotation(30)
+                except:
+                    pass
 
             plt.gca().tick_params(axis='x', pad=15)
+
 
             ##################################################################################################
 
@@ -223,13 +239,18 @@ class CelestialPlot(object):
 
 
 
-    def colorbar(self, **kwargs):
+    def colorbar(self, turn_off_offset=True, **kwargs):
         """ Plot a colorbar. """
 
         cbar = self.m.colorbar(pad="5%", **kwargs)
 
-        # Turn off using offsets
-        cbar.formatter.set_useOffset(False)
+
+        if turn_off_offset:
+            
+            # Turn off using offsets
+            cbar.formatter.set_useOffset(False)
+
+
         cbar.update_ticks()
 
 
@@ -242,7 +263,7 @@ class CelestialPlot(object):
 if __name__ == "__main__":
 
 
-    ra = np.random.normal(0, 0.1, 10)
+    ra = np.random.normal(10, 0.1, 10)
     dec = np.random.normal(6.6516, 0.05, size=ra.shape)
 
     ra = np.radians(ra)
@@ -258,7 +279,5 @@ if __name__ == "__main__":
     celes_plot.colorbar(label='test')
 
     plt.title('Test')
-
-    plt.tight_layout()
 
     plt.show()

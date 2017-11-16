@@ -341,11 +341,11 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_eq
 
 
         # Save top view
-        ax.view_init(elev=90, azim=0)
+        ax.view_init(elev=90, azim=90)
         savePlot(plt, plot_file_name + '_orbit_top.png', plot_dir)
 
         # Save side view
-        ax.view_init(elev=0, azim=0)
+        ax.view_init(elev=0, azim=90)
         savePlot(plt, plot_file_name + '_orbit_side.png', plot_dir)
 
 

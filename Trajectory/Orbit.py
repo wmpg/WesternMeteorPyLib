@@ -10,9 +10,9 @@ from Config import config
 from Utils.Earth import calcEarthRectangularCoordJPL
 from Utils.SolarLongitude import jd2SolLonJPL
 from Utils.TrajConversions import J2000_JD, J2000_OBLIQUITY, AU, SUN_MU, SUN_MASS, G, SIDEREAL_YEAR, jd2LST, \
-    jd2Date, eci2RaDec, altAz2RADec, raDec2AltAz, raDec2Ecliptic, cartesian2Geo, equatorialCoordPrecession,\
-    eclipticToRectangularVelocityVect, correctedEclipticCoord, datetime2JD
-from Utils.Math import vectNorm, vectMag, rotateVector
+    jd2Date, jd2DynamicalTimeJD, eci2RaDec, altAz2RADec, raDec2AltAz, raDec2Ecliptic, cartesian2Geo, \
+    equatorialCoordPrecession, eclipticToRectangularVelocityVect, correctedEclipticCoord, datetime2JD
+from Utils.Math import vectNorm, vectMag, rotateVector, cartesianToSpherical, sphericalToCartesian
 
 
 
@@ -235,7 +235,8 @@ class Orbit(object):
 
 
 
-def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False, referent_init=True):
+def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False, referent_init=True, \
+    rotation_correction=False):
     """ Calculate the meteor's orbit from the given meteor trajectory. The orbit of the meteoroid is defined 
         relative to the barycentre of the Solar system.
 
@@ -243,10 +244,10 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         radiant_eci: [3 element ndarray] Radiant vector in ECI coordinates (meters).
         v_init: [float] Initial velocity (m/s).
         v_avg: [float] Average velocity of a meteor (m/s).
-        eci_ref: [float] Referent ECI coordinates of the meteor trajectory. They can be calculated with the
-            geo2Cartesian function. Ceplecha (1987) assumes this to the the average point on the trajectory, 
-            while Jennsikens et al. (2011) assume this to be the first point on the trajectory as that point 
-            is not influenced by deceleration. ECI coordinates are in meters.
+        eci_ref: [float] Referent ECI coordinates (meters, in the epoch of date) of the meteor trajectory. 
+            They can be calculated with the geo2Cartesian function. Ceplecha (1987) assumes this to the the 
+            average point on the trajectory, while Jennsikens et al. (2011) assume this to be the first point 
+            on the trajectory as that point is not influenced by deceleration.
             NOTE: If the stations are not fixed, the referent ECI coordinates should be the ones
             of the initial point on the trajectory, NOT of the average point!
         jd_ref: [float] Referent Julian date of the meteor trajectory. Ceplecha (1987) takes this as the 
@@ -254,14 +255,23 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
             on the trajectory.
     
     Keyword arguments:
-        stations_fixed: [bool] If True, the correction for Earth's rotation will be performed on the radiant.
+        stations_fixed: [bool] If True, the correction for Earth's rotation will be performed on the radiant,
+            but not the velocity. This should be True ONLY in two occasions:
+                - if the ECEF coordinate system was used for trajectory estimiation
+                - if the ECI coordinate system was used for trajectory estimation, BUT the stations were not
+                    moved in time, but were kept fixed at one point, regardless of the trajectory estimation
+                    method.
             It is necessary to perform this correction for the intersecting planes method, but not for
-            the lines of sight method when the stations are not fixed. Of course, if one is using the 
-            lines of sight method with fixed stations, one should perform this correction.
+            the lines of sight method ONLY when the stations are not fixed. Of course, if one is using the 
+            lines of sight method with fixed stations, one should perform this correction!
         referent_init: [bool] If True (default), the initial point on the trajectory is given as the referent
             one, i.e. the referent ECI coordinates are the ECI coordinates of the initial point on the
             trajectory, where the meteor has the velocity v_init. If False, then the referent point is the
             average point on the trajectory, and the average velocity will be used to do the corrections.
+        rotation_correction: [bool] If True, the correction of the initial velocity for Earth's rotation will
+            be performed. False by default. This should ONLY be True if the coordiante system for trajectory
+            estimation was ECEF, i.e. did not rotate with the Earth. In all other cases it should be False, 
+            even if fixed station coordinates were used in the ECI coordinate system!
 
     Return:
         orb: [Orbit object] Object containing the calculated orbit.
@@ -278,6 +288,10 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
     # trajectory point
     lat_geocentric = np.arctan2(eci_z, np.sqrt(eci_x**2 + eci_y**2))
 
+
+    # Calculate the dynamical JD
+    jd_dyn = jd2DynamicalTimeJD(jd_ref)
+
     # Calculate the geographical coordinates of the referent trajectory ECI position
     lat_ref, lon_ref, _ = cartesian2Geo(jd_ref, *eci_ref)
 
@@ -293,13 +307,14 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         # Calculate the equatorial coordinates of east from the referent position on the trajectory
         azimuth_east = np.pi/2
         altitude_east = 0
-        ra_east, dec_east = altAz2RADec(azimuth_east, altitude_east, jd_ref, lat_ref, lon_ref)
+        ra_east, dec_east = altAz2RADec(azimuth_east, altitude_east, jd_dyn, lat_ref, lon_ref)
 
 
         if referent_init:
 
             # If the initial velocity was the referent velocity, use it for the correction
             v_ref_vect = v_init*radiant_eci
+
 
         else:
             # Calculate referent velocity vector using the average point on the trajectory and the average
@@ -320,7 +335,6 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
 
         # MOVING STATIONS
         # Velocity vector will remain unchanged if the stations were moving
-
         if referent_init:
             v_ref_corr = v_init*radiant_eci
 
@@ -333,16 +347,34 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
 
 
 
-    ### Correct for Earth's gravity ###
+    ### Correct velocity for Earth's gravity ###
     ##########################################################################################################
 
-    # If the referent velocity is the initial velocity, then no additional corrections have to be applied
+    # If the referent velocity is the initial velocity
     if referent_init:
-        v_init_corr = vectMag(v_ref_corr)
+
+        # Use the corrected velocity for Earth's rotation (when ECEF coordinates are used)
+        if rotation_correction:
+            v_init_corr = vectMag(v_ref_corr)
+
+        else:
+            # IMPORTANT NOTE: The correction in this case is only done on the radiant (even if the stations 
+            # were fixed, but NOT on the initial velocity!). Thus, correction from Ceplecha 1987, 
+            # equation (35) is not needed. If the initial velocity is determined from time vs. length and in 
+            # ECI coordinates, whose coordinates rotate with the Earth, the moving stations play no role in 
+            # biasing the velocity.
+            v_init_corr = v_init
 
     else:
-        # Calculate the corrected initial velocity if the referent veloicity is the average velocity
-        v_init_corr = vectMag(v_ref_corr) + v_init - v_avg
+
+        if rotation_correction:
+
+            # Calculate the corrected initial velocity if the referent velocity is the average velocity
+            v_init_corr = vectMag(v_ref_corr) + v_init - v_avg
+            
+
+        else:
+            v_init_corr = v_init
 
 
 
@@ -377,7 +409,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         ra_corr, dec_corr = eci2RaDec(vectNorm(v_ref_corr))
 
         # Calculate the Local Sidreal Time of the referent trajectory position
-        lst_ref = np.radians(jd2LST(jd_ref, np.degrees(lon_ref))[0])
+        lst_ref = np.radians(jd2LST(jd_dyn, np.degrees(lon_ref))[0])
 
         # Calculate the apparent zenith angle
         zc = np.arccos(np.sin(dec_corr)*np.sin(lat_geocentric) \
@@ -397,17 +429,32 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         ##########################################################################################################
 
         # Get the azimuth from the corrected RA and Dec
-        azimuth_corr, _ = raDec2AltAz(ra_corr, dec_corr, jd_ref, lat_ref, lon_ref)
+        azimuth_corr, _ = raDec2AltAz(ra_corr, dec_corr, jd_dyn, lat_ref, lon_ref)
 
         # Calculate the geocentric radiant
-        ra_g, dec_g = altAz2RADec(azimuth_corr, np.pi/2 - zg, jd_ref, lat_geocentric, lon_ref)
+        ra_g, dec_g = altAz2RADec(azimuth_corr, np.pi/2 - zg, jd_dyn, lat_geocentric, lon_ref)
+        
+
+        ### Precess ECI coordinates to J2000 ###
+
+        # Convert rectangular to spherical coordiantes
+        re, delta_e, alpha_e = cartesianToSpherical(*eci_ref)
+
+        # Precess coordinates to J2000
+        alpha_ej, delta_ej = equatorialCoordPrecession(jd_dyn, J2000_JD.days, alpha_e, delta_e)
+
+        # Convert coordinates back to rectangular
+        eci_ref = sphericalToCartesian(re, delta_ej, alpha_ej)
+        eci_ref = np.array(eci_ref)
+
+        ######
 
         # Precess the geocentric radiant to J2000
-        ra_g, dec_g = equatorialCoordPrecession(jd_ref, J2000_JD.days, ra_g, dec_g)
+        ra_g, dec_g = equatorialCoordPrecession(jd_dyn, J2000_JD.days, ra_g, dec_g)
 
 
         # Calculate the ecliptic latitude and longitude of the geocentric radiant (J2000 epoch)
-        L_g, B_g = raDec2Ecliptic(jd_ref, ra_g, dec_g)
+        L_g, B_g = raDec2Ecliptic(jd_dyn, ra_g, dec_g)
 
 
         # Load the JPL ephemerids data
@@ -416,22 +463,22 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         # Get the position of the Earth (km) and its velocity (km/s) at the given Julian date (J2000 epoch)
         # The position is given in the ecliptic coordinates, origin of the coordinate system is in the Solar 
         # system barycentre
-        earth_pos, earth_vel = calcEarthRectangularCoordJPL(jd_ref, jpl_ephem_data)
+        earth_pos, earth_vel = calcEarthRectangularCoordJPL(jd_dyn, jpl_ephem_data)
 
         # Convert the Earth's position to rectangular equatorial coordinates (FK5)
         earth_pos_eq = rotateVector(earth_pos, np.array([1, 0, 0]), J2000_OBLIQUITY)
 
-        # Add the average position of the meteor's trajectory to the position of the Earth to calculate the 
+        # Add the position of the meteor's trajectory to the position of the Earth to calculate the 
         # equatorial coordinates of the meteor (in kilometers)
         meteor_pos = earth_pos_eq + eci_ref/1000
 
-        # Convert the position of the average trajectory from FK5 to Sun-centered ecliptic coordinates
+        # Convert the position of the trajectory from FK5 to Sun-centered ecliptic coordinates
         meteor_pos = rotateVector(meteor_pos, np.array([1, 0, 0]), -J2000_OBLIQUITY)
 
 
         ##########################################################################################################
 
-        # Calculate components of the heliocentric velocity of the meteor
+        # Calculate components of the heliocentric velocity of the meteor (km/s)
         # v_h = np.zeros(3)
         # v_h[0] = earth_vel[0] - v_g*np.cos(L_g)*np.cos(B_g)
         # v_h[1] = earth_vel[1] - v_g*np.sin(L_g)*np.cos(B_g)
@@ -442,13 +489,13 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         v_h_mag = vectMag(v_h)
 
 
-        # Calculate the corrected ecliptic coordinates of the meteoroid using the method of 
+        # Calculate the corrected heliocentric ecliptic coordinates of the meteoroid using the method of 
         # Sato and Watanabe (2014).
         L_h, B_h, met_v_h = correctedEclipticCoord(L_g, B_g, v_g/1000, earth_vel)
 
 
         # Calculate the solar longitude
-        la_sun = jd2SolLonJPL(jd_ref)
+        la_sun = jd2SolLonJPL(jd_dyn)
 
 
         # Calculations below done using Dave Clark's Master thesis equations
@@ -517,11 +564,12 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         peri = peri%(2*np.pi)
 
 
+
         # Calculate the longitude of perihelion
         pi = (node + peri)%(2*np.pi)
 
 
-        # Calculate true anomaly
+        ### Calculate true anomaly
         true_anomaly = np.arccos(np.dot(e_vect, meteor_pos)/(vectMag(e_vect)*vectMag(meteor_pos)))
         if np.dot(meteor_pos, v_h) < 0:
             true_anomaly = 2*np.pi - true_anomaly
@@ -546,7 +594,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         if not np.isnan(dt_perihelion):
             
             # Calculate the date and time of the last perihelion passage
-            last_perihelion = jd2Date(jd_ref - dt_perihelion, dt_obj=True)
+            last_perihelion = jd2Date(jd_dyn - dt_perihelion, dt_obj=True)
 
         else:
             last_perihelion = None

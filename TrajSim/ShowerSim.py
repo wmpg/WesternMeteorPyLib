@@ -17,15 +17,18 @@ from TrajSim.TrajSim import geocentricRadiantToApparent
 
 from Trajectory.Trajectory import ObservedPoints, Trajectory
 from Trajectory.GuralTrajectory import GuralTrajectory
+from Trajectory.Orbit import calcOrbit
 
-from Utils.TrajConversions import EARTH, altAz2RADec, raDec2ECI, rotatePolar, jd2Date, datetime2JD, \
-    cartesian2Geo, geo2Cartesian, eci2RaDec, raDec2AltAz
+from Utils.TrajConversions import J2000_JD, EARTH, altAz2RADec, raDec2ECI, rotatePolar, jd2Date, datetime2JD, \
+    jd2DynamicalTimeJD, cartesian2Geo, geo2Cartesian, eci2RaDec, raDec2AltAz, equatorialCoordPrecession
 from Utils.Ephem import astronomicalNight
 from Utils.SolarLongitude import solLon2jdJPL
 from Utils.PlotCelestial import CelestialPlot
-from Utils.Math import meanAngle, pointInsideConvexHull, samplePointsFromHull, vectMag, vectNorm
+from Utils.Math import meanAngle, pointInsideConvexHull, samplePointsFromHull, vectMag, vectNorm, \
+    sphericalToCartesian, cartesianToSpherical
 from Utils.OSTools import mkdirP
 from Utils.Pickling import savePickle
+from Utils.Plotting import savePlot
 
 
 # Try importing Campbell-Brown & Koschny (2004) ablation code 
@@ -399,14 +402,21 @@ class SimMeteor(object):
 
             out_str += '\n'
 
-            # Compare differences in radiant
-            out_str += 'Differences in geocentric radiant: (original minus estimated)\n'
-            out_str += '  dR.A.  = {:8.4f} deg\n'.format(np.degrees(np.abs(self.ra_g - traj.orbit.ra_g)%(2*np.pi)))
-            out_str += '  dDec   = {:8.4f} deg\n'.format(np.degrees((self.dec_g - traj.orbit.dec_g + np.pi)%(2*np.pi) - np.pi))
-            out_str += '  dVg    = {:7.3f} km/s\n'.format((self.v_g - traj.orbit.v_g)/1000)
-            out_str += 'Velocity at beginning height (i.e. initial velocity):\n'
-            out_str += 'simVbeg  = {:7.3f} km/s\n'.format(self.v_begin/1000)
-            out_str += '  dVbeg  = {:7.3f} km/s\n'.format((self.v_begin - traj.orbit.v_init)/1000)
+            # Check if the trajectory was sucessfult estimated
+            if traj.orbit.ra_g is not None:
+
+                # Compare differences in radiant
+                out_str += 'Differences in geocentric radiant: (original minus estimated)\n'
+                out_str += '  dR.A.  = {:8.4f} deg\n'.format(np.degrees(np.abs(self.ra_g - traj.orbit.ra_g)%(2*np.pi)))
+                out_str += '  dDec   = {:8.4f} deg\n'.format(np.degrees((self.dec_g - traj.orbit.dec_g + np.pi)%(2*np.pi) - np.pi))
+                out_str += '  dVg    = {:7.3f} km/s\n'.format((self.v_g - traj.orbit.v_g)/1000)
+                out_str += 'Velocity at beginning height (i.e. initial velocity):\n'
+                out_str += 'simVbeg  = {:7.3f} km/s\n'.format(self.v_begin/1000)
+                out_str += '  dVbeg  = {:7.3f} km/s\n'.format((self.v_begin - traj.orbit.v_init)/1000)
+
+            else:
+                out_str += 'Trajectory estimation failed!'
+
 
             out_str += '\n'
 
@@ -849,13 +859,17 @@ def plotStationFovs(station_list, jd, min_height, max_height, extra_points=None)
 
 
 
-def plotMeteorTracks(station_list, sim_meteor_list):
+def plotMeteorTracks(station_list, sim_meteor_list, output_dir='.', save_plots=True):
     """ Plots tracks of simulated meteors on a map. 
     
     Arguments:
         station_list: [list] A list of SimStation objects containing station info.
         sim_meteor_list: [list] A list of SimMeteor objects which contain information about generated
             meteors.
+
+    Keyword arguments:
+        output_dir: [str] Directory where the plots will be saved.
+        save_plot: [str] Save plots if True.
     """
 
     from mpl_toolkits.basemap import Basemap
@@ -962,6 +976,11 @@ def plotMeteorTracks(station_list, sim_meteor_list):
 
 
     plt.legend()
+
+
+    if save_plots:
+        savePlot(plt, 'trajectories', output_dir=output_dir)
+
 
     plt.show()
 
@@ -1302,7 +1321,8 @@ def generateStateVector(station_list, jd, beg_height_min, beg_height_max):
 
 
 def simulateMeteorShower(station_list, meteor_velocity_models, n_meteors, ra_g, ra_g_sigma, dec_g, 
-    dec_g_sigma, d_ra, d_dec, v_g, v_g_sigma, year, month, sol_max, sol_slope, beg_height, beg_height_sigma):
+    dec_g_sigma, d_ra, d_dec, v_g, v_g_sigma, year, month, sol_max, sol_slope, beg_height, beg_height_sigma,
+    output_dir='.', save_plots=True):
     """ Given the parameters of a meteor shower, generate simulated meteors and their trajectories.
 
     Arguments:
@@ -1325,6 +1345,11 @@ def simulateMeteorShower(station_list, meteor_velocity_models, n_meteors, ra_g, 
         sol_slope: [float] Slope of the activity profile.
         beg_height: [float] Mean of Gaussian beginning height profile (km).
         beg_height_sigma: [float] Standard deviation of beginning height profile (km).
+
+
+    Keyword arguments:
+        output_dir: [str] Directory where the plots will be saved.
+        save_plot: [str] Save plots if True.
 
     Return:
         sim_meteor_list: [list] A list of SimMeteor objects which contain simulated meteors.
@@ -1403,6 +1428,10 @@ def simulateMeteorShower(station_list, meteor_velocity_models, n_meteors, ra_g, 
     plt.xlabel('Solar longitude (deg)')
     plt.ylabel('Counts')
     plt.title('Activity profile')
+
+    if save_plots:
+        savePlot(plt, 'activity.png', output_dir=output_dir)
+
     plt.show()
 
 
@@ -1415,8 +1444,8 @@ def simulateMeteorShower(station_list, meteor_velocity_models, n_meteors, ra_g, 
     # ra_g_data, dec_g_data, v_g_data = np.random.multivariate_normal(mean, cov, n_meteors).T
 
     # Sample radiant positions from a von Mises distribution centred at (0, 0)
-    ra_g_data = np.random.vonmises(0, 1.0/ra_g_sigma, n_meteors)
-    dec_g_data = np.random.vonmises(0, 1.0/dec_g_sigma, n_meteors)
+    ra_g_data = np.random.vonmises(0, 1.0/(ra_g_sigma**2), n_meteors)
+    dec_g_data = np.random.vonmises(0, 1.0/(dec_g_sigma**2), n_meteors)
 
 
     ra_rot_list = []
@@ -1455,6 +1484,10 @@ def simulateMeteorShower(station_list, meteor_velocity_models, n_meteors, ra_g, 
     plt.xlabel('Geocentric velocity (km/s)')
     plt.ylabel('Counts')
     plt.title('Geocentric velocities')
+
+    if save_plots:
+        savePlot(plt, 'vg.png', output_dir=output_dir)
+
     plt.show()
 
 
@@ -1465,6 +1498,10 @@ def simulateMeteorShower(station_list, meteor_velocity_models, n_meteors, ra_g, 
     plt.xlabel('Counts')
     plt.ylabel('Beginning height (km)')
     plt.title('Beginning heights')
+
+    if save_plots:
+        savePlot(plt, 'beginning_heights.png', output_dir=output_dir)
+
     plt.show()
 
 
@@ -1474,6 +1511,9 @@ def simulateMeteorShower(station_list, meteor_velocity_models, n_meteors, ra_g, 
     m.scatter(ra_g_data, dec_g_data, c=v_g_data/1000, s=2)
 
     m.colorbar(label='$V_g$ (km/s)')
+
+    if save_plots:
+        savePlot(plt, 'geo_radiants.png', output_dir=output_dir)
 
     plt.show()
 
@@ -1645,7 +1685,8 @@ def generateTrajectoryData(station_list, sim_met, velocity_model):
                 abs_mag = -2.5*np.log10(sim_met.velocity_model.luminosity_model(t)/stat.P_0m)
 
                 # Calculate the range to the station
-                stat_range = vectMag(geo2Cartesian(stat.lat, stat.lon, stat.elev, jd) - traj_eci)
+                stat_range = vectMag(geo2Cartesian(stat.lat, stat.lon, stat.elev, jd) \
+                    - traj_eci)
 
                 # Calculate the visual magnitude
                 magnitude = abs_mag - 5*np.log10(100000.0/stat_range)
@@ -1688,8 +1729,11 @@ def generateTrajectoryData(station_list, sim_met, velocity_model):
             # Calculate the unit direction vector pointing from the station to the trajectory point
             model_eci = vectNorm(traj_eci - stat_eci)
 
-            # Calculate azimuth and altitude of this direction vector
+            # Calculate RA, Dec for the given point
             ra, dec = eci2RaDec(model_eci)
+
+
+            # Calculate azimuth and altitude of this direction vector
             azim, elev = raDec2AltAz(ra, dec, jd, stat.lat, stat.lon)
 
             ##################################################################################################
@@ -1705,7 +1749,7 @@ def generateTrajectoryData(station_list, sim_met, velocity_model):
             elev_data.append(elev)
             time_data.append(t)
 
-            # Calculate geogrpahical coordinates of every trajectory point
+            # Calculate geographical coordinates of every trajectory point
             model_lat, model_lon, model_elev = cartesian2Geo(jd, *traj_eci)
 
             model_lat_data.append(model_lat)
@@ -1756,95 +1800,101 @@ def generateTrajectoryData(station_list, sim_met, velocity_model):
 
 if __name__ == "__main__":
 
+    # Directory where the files will be saved
+    dir_path = os.path.abspath('../SimulatedMeteors')
 
-    # ### CAMO STATION PARAMETERS ###
-    # ##########################################################################################################
-
-    # # Number of stations in total
-    # n_stations = 2
-
-    # # Maximum time offset (seconds)
-    # t_max_offset = 1
-
-    # # Geographical coordinates of stations (lat, lon, elev, station_id) in degrees and meters
-    # stations_geo = [
-    #     [43.26420, -80.77209, 329.0, 'tavis'], # Tavis
-    #     [43.19279, -81.31565, 324.0, 'elgin']] # Elgin
-
-    # # Camera FPS per station
-    # fps_list = [110, 110]
-
-    # # Observation uncertanties per station (arcsec)
-    # obs_ang_uncertainties = [1, 1]
-
-    # # Azimuths of centre of FOVs (degrees)
-    # azim_fovs = [326.823, 1.891]
-
-    # # Elevations of centre of FOVs (degrees)
-    # elev_fovs = [41.104, 46.344]
-
-    # # Cameras FOV widths (degrees)
-    # fov_widths = [19.22, 19.22]
-
-    # # Cameras FOV heights (degrees)
-    # fov_heights = [25.77, 25.77]
-
-    # # Limiting magnitudes (needed only for ablation simulation)
-    # lim_magnitudes = [+5.5, +5.5]
-
-    # # Powers of zero-magnitude meteors (Watts) (needed only for ablation simulation)
-    # P_0m_list = [840, 840]
-
-    # # Define the mass range (log of mass in kg)
-    # mass_min = -6
-    # mass_max = -4
-
-    # ##########################################################################################################
-
-    ### SIMULATED MODERATE STATION PARAMETERS ###
+    ### CAMO STATION PARAMETERS ###
     ##########################################################################################################
 
+    system_name = 'CAMO'
+
     # Number of stations in total
-    n_stations = 3
+    n_stations = 2
 
     # Maximum time offset (seconds)
     t_max_offset = 1
 
     # Geographical coordinates of stations (lat, lon, elev, station_id) in degrees and meters
     stations_geo = [
-        [43.19279, -81.31565, 324.0, 'M1'], # M1 elgin
-        [43.19055, -80.09913, 212.0, 'M2'],
-        [43.96324, -80.80952, 383.0, 'M3']]
+        [43.26420, -80.77209, 329.0, 'tavis'], # Tavis
+        [43.19279, -81.31565, 324.0, 'elgin']] # Elgin
 
     # Camera FPS per station
-    fps_list = [30, 30, 30]
+    fps_list = [110, 110]
 
     # Observation uncertanties per station (arcsec)
-    obs_ang_uncertainties = [60, 60, 60]
+    obs_ang_uncertainties = [1, 1]
 
     # Azimuths of centre of FOVs (degrees)
-    azim_fovs = [56.0, 300.0, 174.0]
+    azim_fovs = [326.823, 1.891]
 
     # Elevations of centre of FOVs (degrees)
-    elev_fovs = [65.0, 65.0, 65.0]
+    elev_fovs = [41.104, 46.344]
 
     # Cameras FOV widths (degrees)
-    fov_widths = [64.0, 64.0, 64.0]
+    fov_widths = [19.22, 19.22]
 
     # Cameras FOV heights (degrees)
-    fov_heights = [48.0, 48.0, 48.0]
+    fov_heights = [25.77, 25.77]
 
     # Limiting magnitudes (needed only for ablation simulation)
-    lim_magnitudes = [3.75, 3.75, 3.75]
+    lim_magnitudes = [+5.5, +5.5]
 
     # Powers of zero-magnitude meteors (Watts) (needed only for ablation simulation)
-    P_0m_list = [1210, 1210, 1210]
+    P_0m_list = [840, 840]
 
     # Define the mass range (log of mass in kg)
-    mass_min = -5
-    mass_max = -3
+    mass_min = -6
+    mass_max = -4
 
     ##########################################################################################################
+
+    # ### SIMULATED MODERATE STATION PARAMETERS ###
+    # ##########################################################################################################
+
+    # system_name = 'CAMS'
+
+    # # Number of stations in total
+    # n_stations = 3
+
+    # # Maximum time offset (seconds)
+    # t_max_offset = 1
+
+    # # Geographical coordinates of stations (lat, lon, elev, station_id) in degrees and meters
+    # stations_geo = [
+    #     [43.19279, -81.31565, 324.0, 'M1'], # M1 elgin
+    #     [43.19055, -80.09913, 212.0, 'M2'],
+    #     [43.96324, -80.80952, 383.0, 'M3']]
+
+    # # Camera FPS per station
+    # fps_list = [30, 30, 30]
+
+    # # Observation uncertanties per station (arcsec)
+    # obs_ang_uncertainties = [60, 60, 60]
+
+    # # Azimuths of centre of FOVs (degrees)
+    # azim_fovs = [56.0, 300.0, 174.0]
+
+    # # Elevations of centre of FOVs (degrees)
+    # elev_fovs = [65.0, 65.0, 65.0]
+
+    # # Cameras FOV widths (degrees)
+    # fov_widths = [64.0, 64.0, 64.0]
+
+    # # Cameras FOV heights (degrees)
+    # fov_heights = [48.0, 48.0, 48.0]
+
+    # # Limiting magnitudes (needed only for ablation simulation)
+    # lim_magnitudes = [3.75, 3.75, 3.75]
+
+    # # Powers of zero-magnitude meteors (Watts) (needed only for ablation simulation)
+    # P_0m_list = [1210, 1210, 1210]
+
+    # # Define the mass range (log of mass in kg)
+    # mass_min = -5
+    # mass_max = -3
+
+    # ##########################################################################################################
 
 
     # Randomly generate station timing offsets, the first station has zero time offset
@@ -1867,12 +1917,14 @@ if __name__ == "__main__":
 
     # ### GEMINIDS
 
+    # shower_name = 'Geminids'
+
     # # Radiant position and dispersion
     # ra_g = 113.0
-    # ra_g_sigma = 0.02
+    # ra_g_sigma = 0.15
 
     # dec_g = 32.5
-    # dec_g_sigma = 0.02
+    # dec_g_sigma = 0.15
 
     # # Radiant drift in degrees per degree of solar longitude
     # d_ra = 1.05
@@ -1898,12 +1950,15 @@ if __name__ == "__main__":
 
     ### PERSEIDS
 
+    # Shower name
+    shower_name = 'Perseids'
+
     # Radiant position and dispersion
     ra_g = 48.2
-    ra_g_sigma = 0.02
+    ra_g_sigma = 0.15
 
     dec_g = 58.1
-    dec_g_sigma = 0.02
+    dec_g_sigma = 0.15
 
     # Radiant drift in degrees per degree of solar longitude
     d_ra = 1.40
@@ -2004,20 +2059,30 @@ if __name__ == "__main__":
     ##########################################################################################################
 
 
+    # Make the system directory
+    system_dir = os.path.join(dir_path, system_name)
+    mkdirP(system_dir)
+
+    # Make the shower directory
+    shower_dir = os.path.join(system_dir, shower_name)
+    mkdirP(shower_dir)
+
+
+    
     # Trajectory solver (original or gural)
-    traj_solvers = ['original', 'gural']
+    traj_solvers = ['planes', 'los', 'monte_carlo', 'gural']
 
 
 
     # Run shower simulation
     sim_meteor_list = simulateMeteorShower(station_list, meteor_velocity_models, n_meteors, ra_g, ra_g_sigma, 
         dec_g, dec_g_sigma, d_ra, d_dec, v_g, v_g_sigma, year, month, sol_max, sol_slope, beg_height, 
-        beg_height_sigma)
+        beg_height_sigma, output_dir=shower_dir)
 
 
 
     # Plot meteor positions
-    plotMeteorTracks(station_list, sim_meteor_list)
+    plotMeteorTracks(station_list, sim_meteor_list, output_dir=shower_dir)
 
     # ## TEST
     # sys.exit()
@@ -2046,7 +2111,8 @@ if __name__ == "__main__":
 
 
         # Directory where trajectory results will be saved
-        output_dir = '../SimulatedMeteors/PER/' + str(sim_met.jdt_ref)
+        output_dir = os.path.join(shower_dir, str(sim_met.jdt_ref))
+
 
         # Save info about the simulated meteor
         sim_met.saveInfo(output_dir, t_offsets, obs_ang_uncertainties)
@@ -2055,17 +2121,25 @@ if __name__ == "__main__":
         # Solve the simulated meteor with multiple solvers
         for traj_solver in traj_solvers:
 
-            if traj_solver == 'original':
+
+            if (traj_solver == 'los') or (traj_solver == 'planes'):
+
+                # Init the trajectory (LoS or intersecing planes)
+                traj = Trajectory(sim_met.jdt_ref, output_dir=output_dir, max_toffset=t_max_offset, \
+                    meastype=2, show_plots=False, save_results=False, monte_carlo=False)
+
+
+            elif traj_solver == 'monte_carlo':
                 
                 # Init the trajectory
-                traj = Trajectory(sim_met.jdt_ref, output_dir=output_dir, max_toffset=t_max_offset, meastype=2, \
-                    show_plots=False, mc_runs=250)
+                traj = Trajectory(sim_met.jdt_ref, output_dir=output_dir, max_toffset=t_max_offset, \
+                    meastype=2, show_plots=False, mc_runs=250)
 
             elif traj_solver == 'gural':
                 
                 # Init the new Gural trajectory solver object
-                traj = GuralTrajectory(len(sim_met.observations), sim_met.jdt_ref, meastype=2, velmodel=3, \
-                    verbose=1, show_plots=False)
+                traj = GuralTrajectory(len(sim_met.observations), sim_met.jdt_ref, output_dir=output_dir, 
+                    max_toffset=t_max_offset, meastype=2, velmodel=3, verbose=1, show_plots=False)
 
             else:
                 print(traj_solver, '- unknown trajectory solver!')
@@ -2081,6 +2155,28 @@ if __name__ == "__main__":
 
             # Solve trajectory
             traj = traj.run()
+
+
+            # Calculate orbit of an intersecting planes solution
+            if traj_solver == 'planes':
+
+                # Use the average velocity of the first part of the trajectory for the initial velocity
+                time_vel = []
+                for obs in traj.observations:
+                    for t, v in zip(obs.time_data, obs.velocities):
+                        time_vel.append([t, v])
+
+                time_vel = np.array(time_vel)
+
+                # Sort by time
+                time_vel = time_vel[time_vel[:, 0].argsort()]
+
+                # Calculate the velocity of the first half of the trajectory
+                v_init_fh = np.mean(time_vel[int(len(time_vel)/2), 1])
+
+                # Calculate the orbit
+                traj.orbit = calcOrbit(traj.avg_radiant, v_init_fh, traj.v_avg, traj.state_vect_avg, \
+                traj.jd_avg, stations_fixed=True, referent_init=False)
 
 
             # Save info about the simulation comparison
