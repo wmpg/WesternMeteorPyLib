@@ -2619,10 +2619,10 @@ class Trajectory(object):
 
 
 
-    def dumpMeasurements(self, file_name):
+    def dumpMeasurements(self, dir_path, file_name):
         """ Writes the initialized measurements in a MATLAB format text file."""
 
-        with open(file_name, 'w') as f:
+        with open(os.path.join(dir_path, file_name), 'w') as f:
 
             for i, obs in enumerate(self.observations):
 
@@ -2649,7 +2649,7 @@ class Trajectory(object):
             date_formatted = ', '.join(map(str, [yyyy, MM, DD, hh, mm, ss]))
             f.write('m->jdt_ref = JulianDate( ' + date_formatted + ');\n')
         
-        print('Measurements dumped into ', file_name)
+        print('Measurements dumped into ', os.path.join(dir_path, file_name))
 
 
 

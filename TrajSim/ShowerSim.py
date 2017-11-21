@@ -2182,3 +2182,9 @@ if __name__ == "__main__":
             # Save info about the simulation comparison
             sim_met.saveTrajectoryComparison(traj, traj_solver)
 
+
+            # Dump measurements to a MATLAB-style file
+            if traj_solver == 'monte_carlo':
+                traj.dumpMeasurements(output_dir, str(sim_met.jdt_ref) + '_meas_dump.txt')
+
+

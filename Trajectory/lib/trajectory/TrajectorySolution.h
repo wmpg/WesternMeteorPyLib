@@ -13,6 +13,12 @@
 // of each measurement is obtainable, then that can be used instead and it does
 // not need to be uniformly spaced.
 //
+// IMPORTANT NOTE: ----------------------------------------------------------------
+// This version "B" allows for the site positions to move during the frame-to-frame
+// time steps accounting for Earth's rotation under the meteor. Thus one should NOT
+// remove the coriolis effect later in calculating orbits as it is accounted for in
+// the geocentric radiant information reported herein. ----------------------------
+//
 // The multi-parameter fit algorithm and implemented software can handle two or more
 // cameras and also deal with multiple cameras from the same site. It uses a
 // particle swarm optimzation (PSO) algorithm to fit the best propagating linear-path
@@ -38,8 +44,7 @@
 // IMPORTANT NOTES:
 //
 // Results are for geocentric radiants and velocities and have not been corrected
-// for zenith attraction. The trajectory estimator also does not correct for the
-// relative motion between the camera sites during passage of the meteor, nor for
+// for zenith attraction. The trajectory estimator also does not correct for
 // stellar aberration.
 //
 //###################################################################################
@@ -66,7 +71,9 @@
 //  struct trajectory_info  traj;
 //
 //
-//  InitTrajectoryStructure( maxcameras_expected, &traj );  //... Called at program startup
+//  InitTrajectoryStructure( maxcameras_expected, &traj );    //... Called at program startup
+//
+//  ReadTrajectoryPSOconfig( "PSO_Trajectory_Config.txt", &traj );  //... Get PSO parameters
 //
 //  ...
 //
@@ -149,6 +156,8 @@
 // Jan 18 2017  2.2   Pete Gural    Added ref time parameter to fit for acceleration
 //                                  models and added guess for time offsets
 // Jan 19 2017  2.3   Pete Gural    Fixed propagation function
+// Jan 26 2017  2.4   Pete Gural    Moved hardcoded PSO parameters to config file
+// Feb 08 2017  2.5   Pete Gural    Added closed form guess for deceleration
 //
 //###################################################################################
 
@@ -177,18 +186,41 @@
 #define   MEAS2LINE     0   // cost function selection
 #define   MEAS2MODEL    1
 
-#define   QUICK_FIT     0   // "pso_accuracy_config"  setting
+#define   QUICK_FIT     0   // "pso_accuracy_config"  settings
 #define   GOOD_FIT      1
 #define   ACCURATE_FIT  2
 #define   EXTREME_FIT   3
+#define   NFIT_TYPES    4   // = last "fit" mnemonic token value + 1
+#define   NPSO_CALLS    6   // # unique ParameterRefinementViaPSO calls in trajectory
 
 #define   LLA_BEG       0   // "LLA_position"  extreme begin or end point
 #define   LLA_END       1
 
 
+
+
+
 //###################################################################################
-//                      Trajectory Structure Definition
+//                      Trajectory Structure Definitions
 //###################################################################################
+
+struct PSO_info
+{
+	//======= Particle Swarm Optimizer
+	int       number_particles;           // Number of particles to be used
+    int       maximum_iterations;         // Maximum number of iterations criteria
+    int       boundary_flag;              // Periodic or reflective boundary behavior
+    int       limits_flag;                // Strict or loose boundary limits
+    int       particle_distribution_flag; // Uniformly random or Gaussian
+    double    epsilon_convergence;        // Relative residual error criteria
+    double    weight_inertia;             // Weight for inertia - (typically 0.8)
+    double    weight_stubborness;         // Weight for stubborness (typically 1.0)
+    double    weight_grouppressure;       // Weight for grouppressure (typically 2.0)
+};
+
+
+//.......................................................................................................
+
 
 struct trajectory_info
 {
@@ -227,6 +259,13 @@ struct trajectory_info
                                  //     time and making  geocentric coordinate transformations.
     double    max_toffset;       // Maximum allowed time offset between cameras in seconds
 
+	//----------------------------- Particle Swarm Optimizer (PSO) settings
+
+	struct PSO_info    PSOfit[NFIT_TYPES];  // Structure containing the various PSO settings per fit
+
+	int       PSO_fit_control[NPSO_CALLS];  // Fit option for each ParameterRefinementViaPSO call
+
+
 
     //======= SOLUTION STARTUP and DERIVED PRODUCTS ==========================================================
 
@@ -243,7 +282,7 @@ struct trajectory_info
     double   *camera_lon;        // Vector of longitudes (positive east) of the cameras in radians
     double   *camera_hkm;        // Vector of camera heights in km above a WGS84 ellipsoid (GPS height)
     double   *camera_LST;        // Vector of local sidereal times for each camera (based on jdt_ref)
-    double  **rcamera_ECI;       // Camera site ECI radius vector from Earth center (#cameras x XYZ)
+    double ***rcamera_ECI;       // Camera site ECI radius vector from Earth center (#cameras x #measurements x XYZ)
 
     //----------------------------- Measurement information
     int      *nummeas;           // Vector containing the number of measurements per camera
@@ -255,11 +294,11 @@ struct trajectory_info
     double  **noise;             // Array of measurement standard deviations in radians (per measurement)
 
     double ***meashat_ECI;       // Measurement ray unit vectors (#cameras x #measurements x XYZT)
-                                 //    XYZ in is Earth Centered Inertial (ECI) coordinates
-                                 //    T is dtime minus the reference time dtime_ref
+	                             //    XYZ in is Earth Centered Inertial (ECI) coordinates
+	                             //    T is dtime minus the reference time dtime_ref
     double    ttbeg;             // Begin position time relative to ref time dtime_ref
     double    ttend;             // End position time relative to ref time dtime_ref
-    double    ttzero;            // Tzero model start time relative to ref time dtime_ref
+	double    ttzero;            // Tzero model start time relative to ref time dtime_ref
 
 
     //----------------------------- Trajectory fitting parameters to feed to the particle swarm optimizer
@@ -314,10 +353,10 @@ struct trajectory_info
     double    dec_radiant_LMS;   // Radiant declination in radians
 
     //----------------------------- Timing output relative to jdt_ref in seconds
-    double    dtime_ref;         // The input dtime associated with the ref starting position Rx, Ry, Rz (!= beg)
-    double    dtime_tzero;       // The input dtime that represents t=0 in the velocity fit model
-    double    dtime_beg;         // The input dtime that represents the begin position reported
-    double    dtime_end;         // The input dtime that represents the end   position reported
+	double    dtime_ref;         // The input dtime associated with the ref starting position Rx, Ry, Rz (!= beg)
+	double    dtime_tzero;       // The input dtime that represents t=0 in the velocity fit model
+	double    dtime_beg;         // The input dtime that represents the begin position reported
+	double    dtime_end;         // The input dtime that represents the end   position reported
     double   *tref_offsets;      // Vector of timing offsets in seconds per camera
 
     //----------------------------- Measurement and model LLA, range and velocity arrays
@@ -379,6 +418,8 @@ void    ResetTrajectoryStructure( double jdt_ref, double max_toffset,
 void    InfillTrajectoryStructure( int nummeas, double *meas1, double *meas2, double *dtime, double *noise,
                                    double site_latitude, double site_longitude, double site_height,
                                    struct trajectory_info *traj );
+
+int     ReadTrajectoryPSOconfig( char* PSOconfig_pathname, struct trajectory_info *traj );
 
 
 

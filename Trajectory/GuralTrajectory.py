@@ -20,14 +20,45 @@ from Utils.Math import vectMag, findClosestPoints, sphericalToCartesian
 from Utils.Pickling import savePickle
 
 # Path to the compiled trajectory library
-TRAJ_LIBRARY = os.path.join('lib', 'libtrajectorysolution')
+#TRAJ_LIBRARY = os.path.join('lib', 'libtrajectorysolution')
+TRAJ_LIBRARY = os.path.join('lib', 'trajectory', 'libtrajectorysolution')
 
+# Path to the PSO configuration
+PSO_CONFIG_PATH = os.path.join('lib', 'trajectory', 'conf', 'trajectorysolution.conf')
+
+
+### VALUES FROM TrajectorySolution.h
+# last "fit" mnemonic token value + 1
+NFIT_TYPES = 4
+
+# Unique ParameterRefinementViaPSO calls in trajectory
+NPSO_CALLS = 6
+
+######
 
 # Init ctypes types
 DOUBLE = ct.c_double
 PDOUBLE = ct.POINTER(DOUBLE)
 PPDOUBLE = ct.POINTER(PDOUBLE)
 PPPDOUBLE = ct.POINTER(PPDOUBLE)
+
+
+class PSO_info(ct.Structure):
+    """ Mimichs PSO_info structure from the TrajectorySolution.h file, in Python-understandable 
+        ctypes format. 
+    """
+
+    _fields_ = [
+        ('number_particles', ct.c_int),
+        ('maximum_iterations', ct.c_int),
+        ('boundary_flag', ct.c_int),
+        ('limits_flag', ct.c_int),
+        ('particle_distribution_flag', ct.c_int),
+        ('epsilon_convergence', ct.c_double),
+        ('weight_inertia', ct.c_double),
+        ('weight_stubborness', ct.c_double),
+        ('weight_grouppressure', ct.c_double)
+    ]
 
 
 
@@ -44,8 +75,10 @@ class TrajectoryInfo(ct.Structure):
         ('meastype', ct.c_int),
         ('jdt_ref', ct.c_double),
         ('max_toffset', ct.c_double),
+        ('PSO_info', PSO_info*NFIT_TYPES),
+        ('PSO_fit_control', ct.c_int*NPSO_CALLS),
         ('malloced', ct.POINTER(ct.c_int)),
-        ('numcameras ', ct.POINTER(ct.c_int)),
+        ('numcameras ', ct.c_int),
         ('camera_lat', ct.POINTER(ct.c_double)),
         ('camera_lon', ct.POINTER(ct.c_double)),
         ('camera_hkm', ct.POINTER(ct.c_double)),
@@ -165,7 +198,6 @@ def double1pointerToArray(ptr, n):
 
     # Go through every camera
     for i in range(n):
-
         arr[i] = ptr[i]
 
     return arr
@@ -439,22 +471,36 @@ class GuralTrajectory(object):
         # Load the trajectory library
         self.traj_lib = npct.load_library(TRAJ_LIBRARY, os.path.dirname(__file__))
 
-        ### Define trajectory function types and argument types
+
+        ### Define trajectory function types and argument types ###
+        ######################################################################################################
+
+        
         self.traj_lib.MeteorTrajectory.restype = ct.c_int
         self.traj_lib.MeteorTrajectory.argtypes = [
             ct.POINTER(TrajectoryInfo)
         ]
 
+        
         self.traj_lib.InitTrajectoryStructure.restype = ct.c_void_p
         self.traj_lib.InitTrajectoryStructure.argtypes = [
             ct.c_int,
             ct.POINTER(TrajectoryInfo)
         ]
 
+
+        self.traj_lib.ReadTrajectoryPSOconfig.restype = ct.c_int
+        self.traj_lib.ReadTrajectoryPSOconfig.argtypes = [
+            ct.POINTER(ct.c_char),
+            ct.POINTER(TrajectoryInfo)
+        ]
+
+
         self.traj_lib.FreeTrajectoryStructure.restype = ct.c_void_p
         self.traj_lib.FreeTrajectoryStructure.argtypes = [
             ct.POINTER(TrajectoryInfo)
         ]
+
 
         self.traj_lib.ResetTrajectoryStructure.restype = ct.c_void_p
         self.traj_lib.ResetTrajectoryStructure.argtypes = [
@@ -466,6 +512,7 @@ class GuralTrajectory(object):
             ct.c_int,
             ct.POINTER(TrajectoryInfo)
         ]
+
 
         self.traj_lib.InfillTrajectoryStructure.restype = ct.c_void_p
         self.traj_lib.InfillTrajectoryStructure.argtypes = [
@@ -480,12 +527,16 @@ class GuralTrajectory(object):
             ct.POINTER(TrajectoryInfo)
         ]
 
-        ###
+        ######################################################################################################
 
 
         # Init the trajectory structure
         self.traj = TrajectoryInfo()
         self.traj_lib.InitTrajectoryStructure(maxcameras, self.traj)
+
+        # Read PSO parameters
+        self.traj_lib.ReadTrajectoryPSOconfig(os.path.join(os.path.dirname(__file__), PSO_CONFIG_PATH), \
+            self.traj)
 
         # Reset the trajectory structure
         self.traj_lib.ResetTrajectoryStructure(jdt_ref, max_toffset, velmodel, nummonte, meastype, verbose, 
@@ -853,12 +904,16 @@ class GuralTrajectory(object):
         # Run trajectory estimation
         self.traj_lib.MeteorTrajectory(self.traj)
 
+        print('Running done! Reading out results...')
+
         ### Read out the results
 
         # Camera coordinates (angles in radians, height in km)
         self.camera_lat = double1pointerToArray(self.traj.camera_lat, self.maxcameras)
         self.camera_lon = double1pointerToArray(self.traj.camera_lon, self.maxcameras)
         self.camera_hkm = double1pointerToArray(self.traj.camera_hkm, self.maxcameras)
+
+
 
         # ECI coordinates of measurements
         self.meashat_ECI = double3pointerToArray(self.traj.meashat_ECI, self.maxcameras, self.nummeas_lst, 3)
@@ -912,6 +967,7 @@ class GuralTrajectory(object):
 
         ###
 
+        print('Freeing trajectory structure...')
 
         # Free memory for trajectory
         self.traj_lib.FreeTrajectoryStructure(self.traj)
@@ -949,7 +1005,7 @@ class GuralTrajectory(object):
 
         # Calculate the orbit
         self.orbit = calcOrbit(self.radiant_eci, self.vbegin*1000, v_avg, self.state_vect, jd_first, 
-            stations_fixed=True, referent_init=True)
+            stations_fixed=False, referent_init=True)
         print(self.orbit)
 
 
