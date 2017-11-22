@@ -2747,7 +2747,7 @@ class Trajectory(object):
         vx, vy, vz = self.v_init*self.radiant_eci_mini
 
         # Write out the state vector
-        out_str += "State vector (ECI):\n"
+        out_str += "State vector (ECI, epoch of date):\n"
         out_str += " X =  {:11.2f}{:s} m\n".format(x, _uncer('{:.2f}', 'x'))
         out_str += " Y =  {:11.2f}{:s} m\n".format(y, _uncer('{:.2f}', 'y'))
         out_str += " Z =  {:11.2f}{:s} m\n".format(z, _uncer('{:.2f}', 'z'))

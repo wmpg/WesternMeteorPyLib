@@ -7,9 +7,7 @@ import numpy as np
 import math
 from jplephem.spk import SPK
 
-from Utils.TrajConversions import J2000_JD, J2000_OBLIQUITY, AU, eclipticRectangularPrecession, \
-    ecliptic2RectangularCoord, rectangular2EclipticCoord, jd2DynamicalTimeJD, jd2LST
-
+import Utils.TrajConversions
 from Utils.Math import rotateVector
 
 
@@ -72,7 +70,7 @@ def calcEarthEclipticCoordVSOP(jd, vsop_data):
             r_au - distante from the Earth to the Sun in AU
     """
 
-    T = (jd - J2000_JD.days)/365250.0
+    T = (jd - Utils.TrajConversions.J2000_JD.days)/365250.0
 
     pos = np.zeros(3)
     P = np.zeros(6)
@@ -151,10 +149,10 @@ def calcEarthRectangularCoordJPL(jd, jpl_data, sun_centre_origin=False):
 
 
     # Rotate the position to the ecliptic reference frame (from the Earth equator reference frame)
-    position = rotateVector(position, np.array([1, 0, 0]), -J2000_OBLIQUITY)
+    position = rotateVector(position, np.array([1, 0, 0]), -Utils.TrajConversions.J2000_OBLIQUITY)
 
     # Rotate the velocity vector to the ecliptic reference frame (from the Earth equator reference frame)
-    velocity = rotateVector(velocity, np.array([1, 0, 0]), -J2000_OBLIQUITY)
+    velocity = rotateVector(velocity, np.array([1, 0, 0]), -Utils.TrajConversions.J2000_OBLIQUITY)
 
     # Return the position and the velocity of the Earth with respect to the Sun
     return position, velocity
@@ -171,7 +169,7 @@ def calcNutationComponents(jd_dyn):
     for the 2nd edition was used to correct the equation for delta_psi.
     
     Arguments:
-        jd_dyn: [float] Dynamical Julian date. See jd2DynamicalTimeJD function.
+        jd_dyn: [float] Dynamical Julian date. See Utils.TrajConversions.jd2DynamicalTimeJD function.
 
     Return:
         (delta_psi, delta_eps): [tuple of floats] Differences from mean nutation due to the influence of
@@ -179,7 +177,7 @@ def calcNutationComponents(jd_dyn):
     """
 
 
-    T = (jd_dyn - J2000_JD.days)/365250.0
+    T = (jd_dyn - Utils.TrajConversions.J2000_JD.days)/365250.0
 
     # # Mean Elongation of the Moon from the Sun
     # D = 297.85036 + 445267.11148*T - 0.0019142*T**2 + (T**3)/189474
@@ -391,7 +389,7 @@ def calcTrueObliquity(jd):
 
 
     # Calculate the dynamical time JD
-    jd_dyn = jd2DynamicalTimeJD(jd)
+    jd_dyn = Utils.TrajConversions.jd2DynamicalTimeJD(jd)
 
 
     # Calculate Earth's nutation components
@@ -422,16 +420,16 @@ def calcApparentSiderealEarthRotation(julian_date):
 
     """
 
-    t = (julian_date - J2000_JD.days)/36525.0
+    t = (julian_date - Utils.TrajConversions.J2000_JD.days)/36525.0
 
     # Calculate the Mean sidereal rotation of the Earth in radians (Greenwich Sidereal Time)
-    GST = 280.46061837 + 360.98564736629*(julian_date - J2000_JD.days) + 0.000387933*t**2 - (t**3)/38710000
+    GST = 280.46061837 + 360.98564736629*(julian_date - Utils.TrajConversions.J2000_JD.days) + 0.000387933*t**2 - (t**3)/38710000
     GST = (GST + 360)%360
     GST = math.radians(GST)
 
 
     # Calculate the dynamical time JD
-    jd_dyn = jd2DynamicalTimeJD(julian_date)
+    jd_dyn = Utils.TrajConversions.jd2DynamicalTimeJD(julian_date)
 
 
     # Calculate Earth's nutation components
@@ -486,21 +484,21 @@ if __name__ == "__main__":
     print('Distance (AU):', r_au)
 
     # Convert ecliptic coordinates to Cartesian coordinates
-    x, y, z = ecliptic2RectangularCoord(L, B, r_au)
+    x, y, z = Utils.TrajConversions.ecliptic2RectangularCoord(L, B, r_au)
 
-    print('X:', x*AU)
-    print('Y:', y*AU)
-    print('Z:', z*AU)
+    print('X:', x*Utils.TrajConversions.AU)
+    print('Y:', y*Utils.TrajConversions.AU)
+    print('Z:', z*Utils.TrajConversions.AU)
 
     jpl_pos, jpl_vel = calcEarthRectangularCoordJPL(jd, jpl_data)
     print('JPL:', jpl_pos, jpl_vel)
 
     # Precess the coordinates to the epoch of date
-    x, y, z = eclipticRectangularPrecession(J2000_JD.days, jd, *jpl_pos)
+    x, y, z = Utils.TrajConversions.eclipticRectangularPrecession(Utils.TrajConversions.J2000_JD.days, jd, *jpl_pos)
 
 
     # Calculate ecliptic coordinates from the JPL rectangular coordinates
-    L, B, r_au = rectangular2EclipticCoord(x, y, z)
+    L, B, r_au = Utils.TrajConversions.rectangular2EclipticCoord(x, y, z)
 
     print('Ecliptic longitude:', np.degrees(L))
     print('Ecliptic latitude:', np.degrees(B))

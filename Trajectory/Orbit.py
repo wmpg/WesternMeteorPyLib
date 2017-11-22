@@ -156,7 +156,7 @@ class Orbit(object):
 
         out_str =  ""
         #out_str +=  "--------------------\n"
-        out_str += "Radiant (apparent):\n"
+        out_str += "Radiant (apparent, epoch of date):\n"
         out_str += "  R.A.   = {:>9.5f}{:s} deg\n".format(np.degrees(self.ra), _uncer('{:.4f}', 'ra', 
             deg=True))
         out_str += "  Dec    = {:>+9.5f}{:s} deg\n".format(np.degrees(self.dec), _uncer('{:.4f}', 'dec', 
@@ -170,7 +170,7 @@ class Orbit(object):
         # Check if the orbital elements could be calculated, and write them out
         if self.ra_g is not None:
 
-            out_str += "Radiant (geocentric):\n"
+            out_str += "Radiant (geocentric, J2000):\n"
             out_str += "  R.A.   = {:>9.5f}{:s} deg\n".format(np.degrees(self.ra_g), _uncer('{:.4f}', 'ra_g', 
                 deg=True))
             out_str += "  Dec    = {:>+9.5f}{:s} deg\n".format(np.degrees(self.dec_g), _uncer('{:.4f}', 'dec_g', 
@@ -183,14 +183,14 @@ class Orbit(object):
                 deg=True))
             out_str += "  Zg     = {:>9.5f}{:s} deg\n".format(np.degrees(self.zg), _uncer('{:.4f}', 'zg', 
                 deg=True))
-            out_str += "Radiant (ecliptic geocentric):\n"
+            out_str += "Radiant (ecliptic geocentric, J2000):\n"
             out_str += "  Lg     = {:>9.5f}{:s} deg\n".format(np.degrees(self.L_g), _uncer('{:.4f}', 'L_g', 
                 deg=True))
             out_str += "  Bg     = {:>+9.5f}{:s} deg\n".format(np.degrees(self.B_g), _uncer('{:.4f}', 'B_g', 
                 deg=True))
             out_str += "  Vh     = {:>9.5f}{:s} km/s\n".format(self.v_h/1000, _uncer('{:.4f}', 'v_h', 
                 multi=1/1000.0))
-            out_str += "Radiant (ecliptic heliocentric):\n"
+            out_str += "Radiant (ecliptic heliocentric, J2000):\n"
             out_str += "  Lh     = {:>9.5f}{:s} deg\n".format(np.degrees(self.L_h), _uncer('{:.4f}', 'L_h', 
                 deg=True))
             out_str += "  Bh     = {:>+9.5f}{:s} deg\n".format(np.degrees(self.B_h), _uncer('{:.4f}', 'B_h', 
