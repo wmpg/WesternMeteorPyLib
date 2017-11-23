@@ -5,9 +5,38 @@
 from __future__ import division, print_function, absolute_import
 
 import numpy as np
-import scipy.linalg
-import scipy.spatial
 from numpy.core.umath_tests import inner1d
+import scipy.linalg
+import scipy.stats
+import scipy.spatial
+import scipy.optimize
+
+
+
+### BASIC FUNCTIONS ###
+##############################################################################################################
+
+def lineFunc(x, m, k):
+    """ A line function.
+
+    Arguments:
+        x: [float] Independant variable.
+        m: [float] Slope.
+        k: [float] Intercept.
+
+    Return:
+        y: [float] Line evaluation.
+    """
+
+    return m*x + k
+
+
+##############################################################################################################
+
+
+
+### VECTORS ###
+##############################################################################################################
 
 
 def vectNorm(vect):
@@ -23,6 +52,90 @@ def vectMag(vect):
     return np.sqrt(inner1d(vect, vect))
 
 
+
+def rotateVector(vect, axis, theta):
+    """ Rotate vector around the given axis for the given angle.
+
+    Arguments:
+        vect: [3 element ndarray] vector to be rotated
+        axis: [3 element ndarray] axis of rotation
+        theta: [float] angle of rotation in radians
+
+    Return:
+        [3 element ndarray] rotated vector
+
+    """
+    
+    rot_M = scipy.linalg.expm3(np.cross(np.eye(3), axis/vectMag(axis)*theta))
+
+    return np.dot(rot_M, vect)
+
+
+
+def rotatePoint(origin, point, angle):
+    """
+    Rotate a point counterclockwise by a given angle around a given origin.
+
+    The angle should be given in radians.
+
+    Source: http://stackoverflow.com/questions/34372480/rotate-point-about-another-point-in-degrees-python
+
+    Arguments:
+        origin: [tuple of floats] (x, y) pair of Cartesian coordinates of the origin
+        point: [tuple of floats] (x, y) pair of Cartesian coordinates of the point
+        angle: [float] angle of rotation in radians
+
+    Return:
+        (qx, qy): [tuple of floats] Cartesian coordinates of the rotated point
+    """
+
+    ox, oy = origin
+    px, py = point
+
+    qx = ox + np.cos(angle)*(px - ox) - np.sin(angle)*(py - oy)
+    qy = oy + np.sin(angle)*(px - ox) + np.cos(angle)*(py - oy)
+
+    return qx, qy
+
+
+
+def getRotMatrix(v1, v2):
+    """ Generates a rotation matrix which is used to rotate from vector v1 to v2. 
+
+        Source: http://math.stackexchange.com/questions/180418/calculate-rotation-matrix-to-align-vector-a-to-vector-b-in-3d
+    
+    """
+
+    # Rotation vector
+    w = np.cross(v1, v2)
+
+    # Check if the vectors are 0, then return I matrix
+    if np.sum(np.abs(w)) == 0:
+        return np.eye(3)
+
+    w = vectNorm(w)
+
+    # Skew-symmetric cross-product matrix
+    w_hat = np.array([[    0, -w[2],  w[1]],
+                      [ w[2],     0, -w[0]],
+                      [-w[1], w[0],     0]])
+
+    # Rotation angle
+    theta = np.arccos(np.dot(vectNorm(v1), vectNorm(v2)))
+
+    # Construct the rotation matrix
+    R = np.eye(3) + w_hat*np.sin(theta) + np.dot(w_hat, w_hat)*(1 - np.cos(theta))
+
+    return R
+
+
+##############################################################################################################
+
+
+
+
+### POLAR/ANGULAR FUNCTIONS ###
+##############################################################################################################
 
 def meanAngle(angles):
     """ Calculate the mean angle from a list of angles. 
@@ -145,85 +258,13 @@ def angleBetweenSphericalCoords(phi1, lambda1, phi2, lambda2):
     return np.arccos(np.sin(phi1)*np.sin(phi2) + np.cos(phi1)*np.cos(phi2)*np.cos(lambda2 - lambda1))
 
 
+##############################################################################################################
 
 
 
 
-def rotateVector(vect, axis, theta):
-    """ Rotate vector around the given axis for the given angle.
-
-    Arguments:
-        vect: [3 element ndarray] vector to be rotated
-        axis: [3 element ndarray] axis of rotation
-        theta: [float] angle of rotation in radians
-
-    Return:
-        [3 element ndarray] rotated vector
-
-    """
-    
-    rot_M = scipy.linalg.expm3(np.cross(np.eye(3), axis/vectMag(axis)*theta))
-
-    return np.dot(rot_M, vect)
-
-
-
-def rotatePoint(origin, point, angle):
-    """
-    Rotate a point counterclockwise by a given angle around a given origin.
-
-    The angle should be given in radians.
-
-    Source: http://stackoverflow.com/questions/34372480/rotate-point-about-another-point-in-degrees-python
-
-    Arguments:
-        origin: [tuple of floats] (x, y) pair of Cartesian coordinates of the origin
-        point: [tuple of floats] (x, y) pair of Cartesian coordinates of the point
-        angle: [float] angle of rotation in radians
-
-    Return:
-        (qx, qy): [tuple of floats] Cartesian coordinates of the rotated point
-    """
-
-    ox, oy = origin
-    px, py = point
-
-    qx = ox + np.cos(angle)*(px - ox) - np.sin(angle)*(py - oy)
-    qy = oy + np.sin(angle)*(px - ox) + np.cos(angle)*(py - oy)
-
-    return qx, qy
-
-
-
-def getRotMatrix(v1, v2):
-    """ Generates a rotation matrix which is used to rotate from vector v1 to v2. 
-
-        Source: http://math.stackexchange.com/questions/180418/calculate-rotation-matrix-to-align-vector-a-to-vector-b-in-3d
-    
-    """
-
-    # Rotation vector
-    w = np.cross(v1, v2)
-
-    # Check if the vectors are 0, then return I matrix
-    if np.sum(np.abs(w)) == 0:
-        return np.eye(3)
-
-    w = vectNorm(w)
-
-    # Skew-symmetric cross-product matrix
-    w_hat = np.array([[    0, -w[2],  w[1]],
-                      [ w[2],     0, -w[0]],
-                      [-w[1], w[0],     0]])
-
-    # Rotation angle
-    theta = np.arccos(np.dot(vectNorm(v1), vectNorm(v2)))
-
-    # Construct the rotation matrix
-    R = np.eye(3) + w_hat*np.sin(theta) + np.dot(w_hat, w_hat)*(1 - np.cos(theta))
-
-    return R
-
+### 3D FUNCTIONS ###
+##############################################################################################################
 
 
 def findClosestPoints(P, u, Q, v):
@@ -489,7 +530,10 @@ def estimateHullOverlapRatio(hull1, hull2, niter=200, volume=False):
     else:
         return ratio
 
-        
+
+
+##############################################################################################################
+
 
 def RMSD(x):
     """ Root-mean-square deviation of measurements vs. model. """
@@ -499,7 +543,8 @@ def RMSD(x):
 
 
 def averageClosePoints(x_array, y_array, delta, x_datetime=False):
-    """ Finds if points have close values of x and averages all close values in y.
+    """ Finds if points have similar sample values on the independant axis x (if they are within delta) and 
+        averages all y values.
 
     Arguments:
         x_array: [list] A list of x values (must be of the same length as y_array!).
@@ -562,13 +607,81 @@ def averageClosePoints(x_array, y_array, delta, x_datetime=False):
 
 
 
+### OPTIMIZATION ###
+##############################################################################################################
 
+
+def fitConfidenceInterval(x_data, y_data, conf=0.95, x_array=None):
+    """ Fits a line to the data and calculates the confidence interval. 
+
+    Source: https://gist.github.com/rsnemmen/f2c03beb391db809c90f
+
+    Arguments:
+        x_data: [ndarray] Independent variable data.
+        y_data: [ndarray] Dependent vairable data.
+
+    Keyword arguments:
+        conf: [float] Confidence interval (fraction, 0.0 to 1.0).
+        x_array: [ndarray] Array for evaluating the confidence interval on. Usually used as an independant 
+            variable array for plotting.
+
+
+    Return:
+        line_params, lcb, ucb, x_array:
+            line_params: [list] Fitted line parameters.
+            sd: [float] Standard deviation of the fit in Y.
+            lcb: [ndarray] Lower bound values evaluated on x_array.
+            ucb: [ndarray] Upper bound values evaluated on x_array.
+            x_array: [ndarray] Independent variable array for lcb and ucb evaluation.
+    """
+
+    # Fit a line
+    line_params, _ = scipy.optimize.curve_fit(lineFunc, x_data, y_data)
+
+
+    alpha = 1.0 - conf
+    n = x_data.size
+
+    # Array for evaluation the fit and the confidence interval on
+    if x_array is None:
+        x_array = np.linspace(x_data.min(), x_data.max(), 100)
+
+    # Predicted values (best-fit model)
+    y_array = lineFunc(x_array, *line_params)
+
+    # Auxiliary definitions
+    sxd = np.sum((x_data - x_data.mean())**2)
+    sx = (x_array - x_data.mean())**2
+
+    # Quantile of Student's t distribution for p=1-alpha/2
+    q = scipy.stats.t.ppf(1.0 - alpha/2.0, n-2)
+
+    # Std. deviation of an individual measurement (Bevington, eq. 6.15)  
+    N = np.size(x_data)  
+    sd = 1.0/(N - 2.0)*np.sum((y_data - lineFunc(x_data, *line_params))**2)
+    sd = np.sqrt(sd)
+
+    # Confidence band
+    dy = q*sd*np.sqrt(1 + 1.0/n + sx/sxd)
+    
+    # Upper confidence band
+    ucb = y_array + dy    
+
+    # Lower confidence band
+    lcb = y_array - dy    
+
+
+    return line_params, sd, lcb, ucb, x_array
+
+
+##############################################################################################################
 
 
 
 if __name__ == "__main__":
 
     import sys
+    import matplotlib.pyplot as plt
 
     ### TESTS
 
@@ -620,6 +733,27 @@ if __name__ == "__main__":
 
     print('Converted X, Y, Z')
     print(x2, y2, z2)
+
+
+
+
+    # Generate fake data, fit a line and get confidence interval
+    x_data = np.linspace(1, 10, 100)
+    y_data = np.random.normal(0, 1, size=len(x_data))
+
+    # Fit a line with the given confidence interval
+    line_params, lcb, ucb, x_array = fitConfidenceInterval(x_data, y_data, conf=0.95)
+
+
+    plt.scatter(x_data, y_data)
+    plt.plot(x_array, lineFunc(x_array, *line_params))
+    plt.plot(x_array, lcb)
+    plt.plot(x_array, ucb)
+
+    plt.plot()
+
+    plt.show()
+
 
 
     sys.exit()
