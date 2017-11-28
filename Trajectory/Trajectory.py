@@ -40,7 +40,7 @@ from Utils.PyDomainParallelizer import DomainParallelizer
 
 
 class ObservedPoints(object):
-    def __init__(self, jdt_ref, meas1, meas2, time_data, lat, lon, ele, meastype, station_id=None):
+    def __init__(self, jdt_ref, meas1, meas2, time_data, lat, lon, ele, meastype, station_id=None, excluded_time=None):
         """ Structure for containing data of observations from invidiual stations.
         
         Arguments:
@@ -69,6 +69,9 @@ class ObservedPoints(object):
         Keyword arguments:
             station_id: [str] Identification of the station. None by default, in which case a number will be
                 assigned to the station by the program.
+            excluded_time: [list] [excluded_time_min, excluded_time, max] A range of minimum and maximum 
+                observation time which should be excluded from the optimization because the measurements are 
+                missing in that portion of the time.
 
         """
 
@@ -233,6 +236,47 @@ class ObservedPoints(object):
         # Fit a plane through the given points
         self.plane_N = self.planeFit()
 
+
+        ### EXCLUDED POINTS ###
+        ######################################################################################################
+
+        self.excluded_time = excluded_time
+
+        self.excluded_indx_range = []
+
+        # Get the indices of measurements between which there is an excluded part of the trajectory
+        if self.excluded_time is not None:
+
+            # Get minimum and maximum excluded times
+            excluded_time_min, excluded_time_max = min(self.excluded_time), max(self.excluded_time)
+
+
+            # Make sure the excluded time is within the observations
+            if (excluded_time_min >= np.min(self.time_data)) and (excluded_time_max <= np.max(time_data)):
+
+                excluded_indx_min = 0
+                excluded_indx_max = len(self.time_data) - 1
+
+                for i, t in enumerate(self.time_data):
+                    
+                    if t <= excluded_time_min:
+                        excluded_indx_min = i
+
+                    if t >= excluded_time_max:
+                        excluded_indx_max = i
+                        break
+
+
+                self.excluded_indx_range = [excluded_indx_min, excluded_indx_max]
+
+            else:
+
+                print('Excluded time range', self.excluded_time, 'is outside the observation times!')
+
+
+
+
+        ######################################################################################################
 
         # ### PLOT RESULTS
 
@@ -934,7 +978,7 @@ def timingResiduals(params, observations, t_ref_station, weights=None, ret_stdde
     # Go through observations from all stations
     for i, obs in enumerate(observations):
 
-        # Time difference is 0 for the referent statins
+        # Time difference is 0 for the referent stations
         if i == t_ref_station:
             t_diff = 0
 
@@ -952,7 +996,7 @@ def timingResiduals(params, observations, t_ref_station, weights=None, ret_stdde
 
 
 
-    # Returns the length residuals (used only for evaluating the goodness of length fit for Monte Carlo)
+    # Returns the length residuals (NOT USED)
     if ret_len_residuals:
 
         # Choose the referent station time and distances
@@ -1052,6 +1096,26 @@ def timingResiduals(params, observations, t_ref_station, weights=None, ret_stdde
                     time2 = time2[common_pts]
                     len2 = len2[common_pts]
 
+
+                    # If there are any excluded points in the referent observations, do not take their
+                    # pairs form the other site into consideration
+                    if observations[i].excluded_indx_range:
+
+                        # Extract excluded indices
+                        excluded_indx_min, excluded_indx_max = observations[i].excluded_indx_range
+
+                        # Get the range of lengths inside the exclusion zone
+                        len1_excluded_min = len1[excluded_indx_min]
+                        len1_excluded_max = len1[excluded_indx_max]
+
+                        # Select only those lengths in the other station which are outside the exclusion zone
+                        temp_arr = np.c_[time2, len2]
+                        temp_arr = temp_arr[~((temp_arr[:, 1] >= len1_excluded_min) \
+                            & (temp_arr[:, 1] <= len1_excluded_max))]
+
+                        time2, len2 = temp_arr.T
+
+
                     # Interpolate the first (i.e. referent length)
                     len1_interpol = scipy.interpolate.interp1d(len1, time1)
 
@@ -1066,7 +1130,7 @@ def timingResiduals(params, observations, t_ref_station, weights=None, ret_stdde
                 weights_sum += weights[i]*weights[j]
 
                 # Add the total number of points to the cost counter
-                cost_point_count += len(time2)
+                cost_point_count += len(z)
 
 
         # If no points were compared, return infinite
@@ -1495,7 +1559,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
         
             # Fill in the new trajectory object - the time is assumed to be absolute
             traj_mc.infillTrajectory(meas1_mc, meas2_mc, obs.time_data, obs.lat, obs.lon, obs.ele, \
-                obs.station_id)
+                station_id=obs.station_id, excluded_time=obs.excluded_time)
             
         # Do not show plots or perform additional optimizations
         traj_mc.verbose = False
@@ -1892,7 +1956,7 @@ class Trajectory(object):
 
 
 
-    def infillTrajectory(self, meas1, meas2, time_data, lat, lon, ele, station_id=None):
+    def infillTrajectory(self, meas1, meas2, time_data, lat, lon, ele, station_id=None, excluded_time=None):
         """ Initialize a set of measurements for a given station. 
     
         Arguments:
@@ -1907,6 +1971,8 @@ class Trajectory(object):
 
         Keyword arguments:
             station_id: [str] Identification of the station. None by default.
+            excluded_time: [list] A range of minimum and maximum observation time which should be excluded 
+                from the optimization because the measurements are missing in that portion of the time.
 
         Return:
             None
@@ -1924,7 +1990,7 @@ class Trajectory(object):
 
         # Init a new structure which will contain the observed data from the given site
         obs = ObservedPoints(self.jdt_ref, meas1, meas2, time_data, lat, lon, ele, station_id=station_id, 
-            meastype=self.meastype)
+            meastype=self.meastype, excluded_time=excluded_time)
             
         # Add observations to the total observations list
         self.observations.append(obs)
@@ -2259,6 +2325,10 @@ class Trajectory(object):
 
                 # Apply the time shift to original time data
                 obs.time_data = obs.time_data + t_diff
+
+                # Apply the time shift to the excluded time
+                if obs.excluded_time is not None:
+                    obs.excluded_time = [ex_time + t_diff for ex_time in obs.excluded_time]
 
                 # Add the final time difference of the site to the list
                 time_diffs[i] = t_diff
@@ -2631,8 +2701,8 @@ class Trajectory(object):
                 f.write('m->latitude[' + str(i) + '] = ' + str(obs.lat) + ';\n')
                 f.write('m->heightkm[' + str(i) + '] = ' + str(obs.ele/1000) + ';\n\n')
 
-                # Construct an measurement matrix (time, azimuth, zenith angle)
-                meas_matr = np.c_[obs.time_data, np.degrees(obs.meas2), np.degrees(obs.meas1)]
+                # Construct an measurement matrix (time, elevation, azimuth) - meastype 2
+                meas_matr = np.c_[obs.time_data, np.degrees(obs.elev_data), np.degrees(obs.azim_data)]
 
                 f.write('double ' + chr(97 + i) + '[' + str(len(meas_matr)) + '][3] = {\n')
                 for j, row in enumerate(meas_matr):
@@ -3542,8 +3612,13 @@ class Trajectory(object):
             return None
 
 
-        # Determine which station has the referent time (the first time entry is 0 for that station)
+        # Determine which station has the referent time (the first time entry is 0 for that station, but
+        # do not take the station which has excluded points)
         for i, obs in enumerate(self.observations):
+
+            # Do not take the station with excluded points as the referent one
+            if obs.excluded_indx_range:
+                continue
             
             if obs.time_data[0] == 0.0:
 
@@ -3810,7 +3885,7 @@ class Trajectory(object):
                 for obs in temp_observations:
             
                     self.infillTrajectory(obs.meas1, obs.meas2, obs.time_data, obs.lat, obs.lon, obs.ele, \
-                        obs.station_id)
+                        station_id=obs.station_id, excluded_time=obs.excluded_time)
 
                 
                 # Re-run the trajectory estimation with updated timings. This will update all calculated
@@ -3907,7 +3982,7 @@ class Trajectory(object):
                     for obs in temp_observations:
                 
                         self.infillTrajectory(obs.meas1, obs.meas2, obs.time_data, obs.lat, obs.lon, \
-                            obs.ele, obs.station_id)
+                            obs.ele, station_id=obs.station_id, excluded_time=obs.excluded_time)
 
                     
                     # Re-run the trajectory estimation with updated timings. This will update all calculated

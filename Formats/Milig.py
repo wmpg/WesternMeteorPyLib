@@ -102,7 +102,7 @@ def loadMiligInput(file_path):
             if new_station:
 
                 # Station ID
-                station_id = line[:3]
+                station_id = line[:3].strip()
 
                 # Station latitude in degrees, +N (converted to radians)                
                 lat = np.radians(float(line[3:13]))
@@ -209,12 +209,23 @@ def solveTrajectoryMILIG(dir_path, file_name, solver='original', **kwargs):
         print(station)
 
 
-
-
         if solver == 'original':
 
+            excluded_time = None
+
+
+            # ### ADD A TIME OF EXCLUSION ###
+            # # Add a time range for the given station for which there are not measurements (possibly due to
+            # # saturation). This way the calculation of length residuals will not be affected.
+
+            # if station.station_id == "1":
+            #     print('EXCLUDED POINTS')
+            #     excluded_time = [1.6036, 3.2072]
+
+            # ###############################
+
             traj.infillTrajectory(station.azim_data, station.zangle_data, station.time_data, station.lat, 
-                station.lon, station.height, station_id=station.station_id)
+                station.lon, station.height, station_id=station.station_id, excluded_time=excluded_time)
 
         elif solver == 'gural':
 
@@ -317,7 +328,8 @@ if __name__ == '__main__':
     #dir_path = os.path.abspath("../MILIG files")
     #dir_path = os.path.abspath("../MILIG files/20170531_002824")
     #dir_path = os.path.abspath("../MILIG files/PyLIG_IN_Pula_2010102829")
-    dir_path = os.path.abspath("../MILIG files/20170923_053525 meteorite dropping")
+    #dir_path = os.path.abspath("../MILIG files/20170923_053525 meteorite dropping")
+    dir_path = os.path.abspath("../MILIG files/20171127_meteorite_dropping")
 
     #file_name = "input_krizy_01.txt"
     #file_name = 'PyLIG_in_2011100809PUB0030.txt'
@@ -328,11 +340,13 @@ if __name__ == '__main__':
     #file_name = "PyLIG_IN_Pula_2010102829.txt"
     #file_name = "PyLIG_M_20170531_002824.txt"
     #file_name = "PyLIG_IN_Pula_2010102829.txt"
-    file_name = "20170923_053525-obs.dat"
+    #file_name = "20170923_053525-obs.dat"
+    file_name = "input.txt"
 
 
 
-    solveTrajectoryMILIG(dir_path, file_name, solver='original', max_toffset=30.0, monte_carlo=True, mc_runs=200)
+    solveTrajectoryMILIG(dir_path, file_name, solver='original', max_toffset=30.0, monte_carlo=True, 
+        mc_runs=200)
 
     
 

@@ -62,7 +62,27 @@ def expTwoFunc2ndDer(x, a, b, c, d, e, f):
 
 
 
-def residuals(params, x, y):
+
+def polyFunc(x, a, b, c, d):
+    """ 3rd order polynomial. """
+
+    return a + x*b + c*x**2 + d*x**3
+
+
+
+def polyFuncDer(x, a, b, c, d):
+
+    return b + 2*c*x + 3*d*x**2
+
+
+
+def polyFunc2ndDer(x, a, b, c, d):
+
+    return 2*c + 6*d*x
+
+
+
+def residuals(params, x, y, fitFunc=expTwoFunc):
     """ Returns the residuals between the predicted and input values of the 2 term exonential.
 
     Arguments:
@@ -74,20 +94,18 @@ def residuals(params, x, y):
         residuals: [ndarray]
     """
 
-    return expTwoFunc(x, *params) - y
+    return fitFunc(x, *params) - y
 
 
 
-def residuals_minimize(params, x, y):
+def residuals_minimize(params, x, y, fitFunc=expTwoFunc):
     """ Wrapper function for calculating fit residuals for minimization. """
 
     # Squared value of each residual
-    z = residuals(params, x, y)**2
+    z = residuals(params, x, y, fitFunc=fitFunc)**2
 
     # Smooth approximation of l1 (absolute value) loss
     return np.sum(2*((1 + z)**0.5 - 1))
-
-
 
 
 
@@ -96,10 +114,12 @@ if __name__ == "__main__":
     ### INPUT FILE ######
 
     # Trajectory path
-    dir_path = os.path.abspath("../MILIG files/20170923_053525 meteorite dropping/Monte Carlo")
+    #dir_path = os.path.abspath("../MILIG files/20170923_053525 meteorite dropping/Monte Carlo")
+    dir_path = os.path.abspath("../MILIG files/20171127_meteorite_dropping/Monte Carlo")
 
     # Trajectory pickle file
-    traj_file = '20170923_053524_mc_trajectory.pickle'
+    # traj_file = '20170923_053524_mc_trajectory.pickle'
+    traj_file = '20171127_010546_mc_trajectory.pickle'
 
     # No. of input station (if -1, the program will loop over all stations)
     station_id = -1
@@ -121,7 +141,47 @@ if __name__ == "__main__":
     gamma = 1.0
 
 
+    # Fit function
+    # - 'exp' - single term exponential
+    # - '2exp' - two term exponential
+    # - 'poly' - 3rd order polynomial
+    fit_func = '2exp'
+
+
     ##########################################################################################################
+
+
+
+    # Choose the fitting function, velocity, deceleration
+    if fit_func == 'exp':
+
+        # Fit function
+        fitFunc = expFunc
+        fitFuncDer = expFuncDer
+        fitFunc2ndDer = expFunc2ndDer
+
+        # Number of function arguments
+        fit_func_args = 4
+
+    elif fit_func == '2exp':
+
+        # Fit function
+        fitFunc = expTwoFunc
+        fitFuncDer = expTwoFuncDer
+        fitFunc2ndDer = expTwoFunc2ndDer
+
+        # Number of function arguments
+        fit_func_args = 6
+
+    else:
+
+        # Fit function
+        fitFunc = polyFunc
+        fitFuncDer = polyFuncDer
+        fitFunc2ndDer = polyFunc2ndDer
+
+        # Number of function arguments
+        fit_func_args = 4
 
 
     # Load the trajectory file
@@ -150,6 +210,7 @@ if __name__ == "__main__":
         elif station_id != stat_i:
             continue
 
+
         # Extract time vs. length from the best station
         print(traj.observations[stat_i].station_id)
         time_data = traj.observations[stat_i].time_data
@@ -157,11 +218,27 @@ if __name__ == "__main__":
         height_data = traj.observations[stat_i].meas_ht
 
 
-        x0 = np.ones(6)
+        ### DATA SELECTION ###
+
+        # # Take only the last quarter of observations
+        # last_quart_len = int(0.75*len(time_data))
+
+        # time_data = time_data[last_quart_len:]
+        # length_data = length_data[last_quart_len:]
+        # height_data = height_data[last_quart_len:]
+
+
+        ######################
+
+
+
+
+        x0 = np.ones(fit_func_args)
+
 
         # Treat the fit as a minimization problem, but use basinhopping for minimizing residuals
         fit_robust_mini = scipy.optimize.basinhopping(residuals_minimize, x0, \
-            minimizer_kwargs={'args':(time_data, length_data)}, niter=300)
+            minimizer_kwargs={'args':(time_data, length_data, fitFunc)}, niter=500)
 
         # Print the fit status message
         print('Fit result:')
@@ -177,7 +254,7 @@ if __name__ == "__main__":
 
         # Plot the fit
         t_plot = np.linspace(np.min(time_data), np.max(time_data), 1000)
-        plt.plot(t_plot, expTwoFunc(t_plot, *popt)/1000, label='Model')
+        plt.plot(t_plot, fitFunc(t_plot, *popt)/1000, label='Model')
 
         plt.xlabel('Time (s)')
         plt.ylabel('Length (km)')
@@ -200,8 +277,8 @@ if __name__ == "__main__":
             traj.observations[stat_i].JD_data):
 
             # Calculate the velocity and deceleration from the fit
-            vel = expTwoFuncDer(t, *popt)
-            decel = abs(expTwoFunc2ndDer(t, *popt))
+            vel = fitFuncDer(t, *popt)
+            decel = np.abs(fitFunc2ndDer(t, *popt))
 
             # Calculate the dynamic mass
             mass_dyn = dynamicMass(bulk_density, lat, lon, ele, jd, vel, decel, gamma=gamma, \
@@ -226,11 +303,13 @@ if __name__ == "__main__":
 
         fig = plt.figure()
 
-        ax1 = fig.add_subplot(1, 2, 1)
-        ax2 = fig.add_subplot(1, 2, 2, sharey=ax1)
+        ax1 = fig.add_subplot(1, 4, 1)
+        ax2 = fig.add_subplot(1, 4, 2, sharey=ax1)
+        ax3 = fig.add_subplot(1, 4, 3, sharey=ax1)
+        ax4 = fig.add_subplot(1, 4, 4, sharey=ax1)
             
         # Plot the fit residuals
-        ax1.plot(length_data - expTwoFunc(time_data, *popt), height_data/1000, zorder=3)
+        ax1.plot(length_data - fitFunc(time_data, *popt), height_data/1000, zorder=3)
 
         ax1.set_xlabel('Residuals (m)')
         ax1.set_ylabel('Height (km)')
@@ -242,10 +321,35 @@ if __name__ == "__main__":
         ax2.set_xlabel('Dynamic mass (g)')
 
 
+        # Plot Velocity
+        ax3.plot(fitFuncDer(time_data, *popt), height_data/1000, zorder=3)
+
+        ax3.set_xlabel('Velocity (m/s)')
+
+    
+        # Plot decelration
+        ax4.plot(fitFunc2ndDer(time_data, *popt), height_data/1000, zorder=3)
+
+        ax4.set_xlabel('Deceleration (m/s^2)')
+
+
+
         plt.subplots_adjust(wspace=0)
 
-        # Turn of Y ticks on the second plot
+        # Turn of Y ticks on the other plots
         ax2.tick_params(
+            axis='y',          # changes apply to the y-axis
+            which='both',      # both major and minor ticks are affected
+            left='off',        # ticks along the left edge are off
+            labelleft='off')  # labels along the left edge are off
+
+        ax3.tick_params(
+            axis='y',          # changes apply to the y-axis
+            which='both',      # both major and minor ticks are affected
+            left='off',        # ticks along the left edge are off
+            labelleft='off')  # labels along the left edge are off
+
+        ax4.tick_params(
             axis='y',          # changes apply to the y-axis
             which='both',      # both major and minor ticks are affected
             left='off',        # ticks along the left edge are off
@@ -255,6 +359,8 @@ if __name__ == "__main__":
 
         ax1.grid(color='0.9')
         ax2.grid(color='0.9')
+        ax3.grid(color='0.9')
+        ax4.grid(color='0.9')
 
         plt.suptitle('Station ' + str(obs.station_id))
 
@@ -278,7 +384,7 @@ if __name__ == "__main__":
         time_data_list, fit_list, length_data_list, height_data_list, dynamic_mass_list):
             
         # Plot the fit residuals
-        ax1.plot(length_data - expTwoFunc(time_data, *popt), height_data/1000, zorder=3)
+        ax1.plot(length_data - fitFunc(time_data, *popt), height_data/1000, zorder=3)
 
         # Plot the dynamic mass
         ax2.plot(mass_dyn_array*1000, height_data/1000, zorder=3, label=str(obs.station_id))
@@ -299,6 +405,8 @@ if __name__ == "__main__":
     ax1.set_ylabel('Height (km)')
 
     ax2.set_xlabel('Dynamic mass (g)')
+
+    
 
     ax1.grid(color='0.9')
     ax2.grid(color='0.9')
