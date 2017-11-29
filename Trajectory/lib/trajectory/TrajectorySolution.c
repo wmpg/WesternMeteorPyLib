@@ -2130,7 +2130,10 @@ int     kcamera, kmeas, k;
 double  sumw, sumwe, sumwex, sumwet, sumwext, sumesq, weight, expa2t, posvel;
 double  diff, diff_last, diff_best;
 double  decel2, decel2_start, decel2_step, decel2_stop, decel2_best, decel1_best;
-
+    
+    decel1_best = 0;
+    decel2_best = 0;
+    diff_last = 0;
 
     //======== Loop over decel2 values
 
