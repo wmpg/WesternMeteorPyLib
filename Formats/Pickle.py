@@ -4,12 +4,47 @@ from __future__ import print_function, division, absolute_import
 
 import os
 
+import numpy as np
+
+from Formats.EvUWO import writeEvFile
 from Utils.Pickling import loadPickle
+from Utils.TrajConversions import jd2Date
 from Trajectory.Trajectory import Trajectory
 from Trajectory.GuralTrajectory import GuralTrajectory
 
 
+def dumpAsEvFiles(dir_path, file_name):
+    """ Dump the given pickle file as UWO-style ev_* file. """
+
+        # Load the pickles trajectory
+    traj = loadPickle(dir_path, file_name)
+
+    
+    # Dump the results as a UWO-style ev file
+
+    year, month, day, hour, minute, second, _ = jd2Date(traj.jdt_ref)
+
+    for i, obs in enumerate(traj.observations):
+
+        # Construct file name
+        date_str = "{:4d}{:02d}{:02d}_{:02d}{:02d}{:02d}A_{:s}".format(year, month, day, hour, minute, second, \
+            obs.station_id)
+
+        ev_file_name = 'ev_' + date_str + '.txt'
+
+        # Convert azimuth and altitude to theta/tphi
+        theta_data = np.pi/2.0 - obs.elev_data
+        phi_data = (np.pi/2.0 - obs.azim_data)%(2*np.pi)
+
+        # Write the ev_* file
+        writeEvFile(dir_path, ev_file_name, traj.jdt_ref, str(i), obs.lat, obs.lon, obs.ele, 
+            obs.time_data, theta_data, phi_data)
+
+
+
+
 def solveTrajectory(dir_path, file_name, solver='original', **kwargs):
+    """ Rerun the trajectory solver on the given trajectory pickle file. """
 
 
     # Load the pickles trajectory
@@ -61,6 +96,8 @@ def solveTrajectory(dir_path, file_name, solver='original', **kwargs):
     # Run the trajectory solver
     traj.run()
 
+
+
     return traj
 
 
@@ -70,8 +107,15 @@ if __name__ == "__main__":
     # dir_path = os.path.abspath("../SimulatedMeteors/CAMO/Perseids/2456154.85547")
     # file_name = "20120815_083152_trajectory.pickle"
 
-    dir_path = os.path.abspath("../SimulatedMeteors/CAMO/Perseids/2456154.70174")
-    file_name = "20120815_045030_trajectory.pickle"
+    # dir_path = os.path.abspath("../SimulatedMeteors/CAMO_OLD/Perseids/2456154.70174")
+    # file_name = "20120815_045030_trajectory.pickle"
+
+    dir_path = os.path.abspath("../SimulatedMeteors/CAMO/Perseids/2456149.83746")
+    file_name = "20120810_080556_trajectory.pickle"
+
+
+    # # Dump the pickled trajectory as UWO-style ev_* file 
+    # dumpAsEvFiles(dir_path, file_name)
 
 
     # Solve the trajectory from the given pickle file

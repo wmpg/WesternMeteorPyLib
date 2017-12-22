@@ -632,6 +632,9 @@ class AblationModelVelocity(object):
         # Unpack results
         time, height, trail, velocity, luminosity = sim_results.T
 
+        # If the meteor is not ablating at all, skip the meteor
+        if len(time) == 0:
+            return False
 
         # Set time 0 for the moment when the simulated height matches the given beginning height
         heights_diffs = np.abs(height - beg_height)
@@ -1646,6 +1649,10 @@ def generateTrajectoryData(station_list, sim_met, velocity_model):
         # If the velocity model is given by the ablation model, run the model first
         if sim_met.velocity_model.name == 'ablation':
             sim_met.velocity_model.getSimulation(sim_met.v_init, sim_met.orb.zc, sim_met.rbeg_ele)
+
+            # If the simulation did not run, skip the station
+            if sim_met.velocity_model.time is None:
+                continue
 
 
         # Generate time data

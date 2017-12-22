@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 
 from Formats.CSSseismic import loadCSSseismicData
 from Utils.TrajConversions import date2JD, raDec2ECI, geo2Cartesian, cartesian2Geo, raDec2AltAz, eci2RaDec, latLonAlt2ECEF, ecef2ENU, enu2ECEF, ecef2LatLonAlt
-from Utils.Math import vectMag, rotateVector, meanAngle
+from Utils.Math import vectMag, vectNorm, rotateVector, meanAngle
 from Utils.Plotting import Arrow3D, set3DEqualAxes
 from Utils.PlotMap import GroundMap
 
@@ -93,152 +93,6 @@ def wrapRaDec(ra, dec):
 
 
 
-# def timeResiduals(params, stat_eci_list, arrival_times, v_sound):
-#     """ Cost function for seismic fireball trajectory optimization. The function uses ECI coordiantes of
-#         stations for minimization.
-
-#     Arguments:
-#         params: [list] Estimated parameters: x0, t0, z0, t0, v, ra, dec.
-#         stat_eci_list: [list of ndarrays] A list of station ECI coordinates (x, y, z).
-#         arrival_times: [list] A list of arrival times of the sound wave to the seismic station (in seconds 
-#             from some referent time).
-#         v_sound: [float] Average speed of sound (m/s).
-
-#     """
-
-#     # Unpack estimated parameters
-#     x0, y0, z0, t0, v, ra, dec = params
-
-#     # # Keep the fireball velocity fixed
-#     # v = 20000
-
-#     # Wrap RA and Dec into their nominal range
-#     ra, dec = wrapRaDec(ra, dec)
-
-#     cost_value = 0
-
-#     # Go through all arrival times
-#     for t_obs, stat_eci in zip(arrival_times, stat_eci_list):
-
-#         ### Calculate the difference between the observed and the prediced arrival times ###
-#         ######################################################################################################
-
-#         # Calculate the mach angle
-#         beta = np.arcsin(v_sound/v)
-
-#         # Radiant vector
-#         x, y, z = raDec2ECI(ra, dec)
-#         u = np.array([x, y, z])
-
-#         # Difference from the referent point on the trajectory and the station
-#         b = stat_eci - np.array([x0, y0, z0])
-
-
-#         # Calculate the distance along the trajectory
-#         dt = np.abs(np.dot(b, u))
-
-#         # Calculate the distance perpendicular to the trajectory
-#         dp = np.sqrt(vectMag(b)**2 - dt**2)
-
-#         # Calculate the time of arrival
-#         ti = t0 - dt/v + (dp*np.cos(beta))/v_sound
-
-#         # Calculate the squared difference in time
-#         cost_value += abs(t_obs - ti)
-
-#         ######################################################################################################
-
-
-#     return cost_value
-
-
-
-# def estimateSeismicTrajectoryECI(station_list, v_sound):
-#     """ Estimate the trajectory of a fireball from seismic/infrasound data by modelling the arrival times of
-#         the balistic shock at given stations. This function uses ECI coordinates for trajectory estimation.
-
-#     The method used is a modification of the usual methods.
-
-#     Arguments:
-#         station_list: [list] A list of stations and arrival times, each entry is a tuple of:
-#             (name, lat, lon, elev, arrival_time_jd), where latitude and longitude are in radians, the elevation is in
-#             meters and Julian date of the arrival time.
-#         v_sound: [float] The average speed of sound in the atmosphere (m/s).
-
-#     """
-
-#     stat_eci_list = []
-#     jd_list = []
-
-#     # Calculate the ECI coordinates of stations at the given time
-#     for i, entry in enumerate(station_list):
-
-#         name, lat, lon, elev, arrival_time_jd = entry
-
-#         jd_list.append(arrival_time_jd)
-
-#         # Convert the geo coordinates of the station into ECI coordinates at the given arrival time
-#         stat_eci = geo2Cartesian(lat, lon, elev, arrival_time_jd)
-
-#         stat_eci_list.append(stat_eci)
-
-
-#     # Calculate the arrival times as the time in seconds from the earliest JD
-#     jd_ref = min(jd_list)
-#     jd_list = np.array(jd_list)
-#     arrival_times = (jd_list - jd_ref)*86400.0
-
-    
-#     # Initial parameters:
-#     #   - The initial position of the fireball is at the station which recorded the shock the first
-#     #   - The initial velocity of the fireball is set to 20 km/s
-
-#     x0 = np.ones(7)
-
-#     first_arrival_entry = station_list[np.argwhere(jd_list == jd_ref)[0][0]]
-#     _, lat1, lon1, elev1, _ = first_arrival_entry
-
-#     # Set initial fireball position
-#     first_eci = geo2Cartesian(lat1, lon1, elev1, jd_ref)
-#     x0[:3] = first_eci
-
-#     # Set the time of the wave release to 1 minute (about 20km at 320 m/s)
-#     x0[3] = -60
-
-#     # Set fireball velocity (km/s)
-#     x0[4] = 20000
-
-#     # Set RA/Dec to 0, 0
-#     x0[5] = 0
-#     x0[6] = 0
-
-#     # Find the trajectory by minimization
-#     # The minimization will probably fail as t0 and the velocity of the fireball are dependant, but the
-#     # radiant should converge
-#     res = scipy.optimize.minimize(timeResiduals, x0, args=(stat_eci_list, arrival_times, v_sound), \
-#         options={'maxls': 50, 'maxcor': 20}) #, method='Nelder-Mead')
-
-#     # # Try basinhopping
-#     # res = scipy.optimize.basinhopping(timeResiduals, x0, minimizer_kwargs={'args': (stat_eci_list, arrival_times, v_sound)}, niter=100)
-
-#     print(res)
-
-#     ra, dec = res.x[5:]
-
-#     # Wrap RA, Dec into their nominal range
-#     ra, dec = wrapRaDec(ra, dec)
-
-#     print('RA: ', np.degrees(ra))
-#     print('Dec:', np.degrees(dec))
-
-#     lat_f, lon_f, _ = cartesian2Geo(jd_ref, *res.x[:3])
-#     azim, alt = raDec2AltAz(ra, dec, jd_ref, lat_f, lon_f)
-
-#     print('Azim:', np.degrees(azim))
-#     print('Elev: ', np.degrees(alt))
-
-
-
 
 def timeOfArrival(stat_coord, x0, y0, t0, v, azim, zangle, v_sound):
     """ Calculate the time of arrival at given coordinates in the local coordinate system for the given
@@ -281,6 +135,56 @@ def timeOfArrival(stat_coord, x0, y0, t0, v, azim, zangle, v_sound):
 
 
     return ti
+
+
+
+
+def waveReleasePoint(stat_coord, x0, y0, t0, v, azim, zangle, v_sound):
+    """ Calculate the point on the trajectory from which the balistic wave was released and heard by the given
+        station.
+
+    Arguments:
+        stat_coord: [3 element ndarray] Coordinates of the station in the local coordinate system.
+        x0: [float] Intersection with the X axis in the local coordinate system (meters).
+        y0: [float] Intersection with the Y axis in the local coordinate system (meters).
+        t0: [float] Time when the trajectory intersected the reference XY plane (seconds), offset from 
+            some referent time.
+        v: [float] Velocity of the fireball (m/s).
+        azim: [float] Fireball azimuth (+E of due S).
+        zangle: [float] Zenith angle.
+        v_sound: [float] Average speed of sound (m/s).
+
+    Return:
+        traj_point: [3 element ndarray] Location of the release point in the local coordinate system.
+
+    """
+
+    # Calculate the mach angle
+    beta = np.arcsin(v_sound/v)
+
+    # Trajectory vector
+    u = np.array([np.cos(azim)*np.sin(zangle), np.sin(azim)*np.cos(zangle), -np.cos(zangle)])
+
+    # Difference from the referent point on the trajectory and the station
+    b = stat_coord - np.array([x0, y0, 0])
+
+
+    # Calculate the distance along the trajectory
+    dt = np.abs(np.dot(b, u))
+
+    # Calculate the distance perpendicular to the trajectory
+    dp = np.sqrt(vectMag(b)**2 - dt**2)
+
+
+    # Vector from (x0, y0) to the point of wave release
+    r = -u*(dt + dp*np.tan(beta))
+
+    # Position of the wave release in the local coordinate system
+    traj_point = np.array([x0, y0, 0]) + r
+
+
+    return traj_point
+
 
 
 
@@ -332,30 +236,11 @@ def timeResidualsAzimuth(params, stat_coord_list, arrival_times, v_sound, azim_o
         ### Calculate the difference between the observed and the prediced arrival times ###
         ######################################################################################################
 
-        # # Calculate the mach angle
-        # beta = np.arcsin(v_sound/v)
-
-        # # Trajectory vector
-        # u = np.array([np.cos(azim)*np.sin(zangle), np.sin(azim)*np.cos(zangle), -np.cos(zangle)])
-
-        # # Difference from the referent point on the trajectory and the station
-        # b = stat_coord - np.array([x0, y0, 0])
-
-
-        # # Calculate the distance along the trajectory
-        # dt = np.abs(np.dot(b, u))
-
-        # # Calculate the distance perpendicular to the trajectory
-        # dp = np.sqrt(vectMag(b)**2 - dt**2)
-
-        # # Calculate the time of arrival
-        # ti = t0 - dt/v + (dp*np.cos(beta))/v_sound
-
         # Calculate the time of arrival
         ti = timeOfArrival(stat_coord, x0, y0, t0, v, azim, zangle, v_sound)
 
         # Smooth approximation of l1 (absolute value) loss
-        z = abs(t_obs - ti)
+        z = (t_obs - ti)**2
         cost = 2*((1 + z)**0.5 - 1)
 
         cost_value += cost
@@ -488,24 +373,6 @@ def convertStationCoordinates(station_list, ref_indx):
 
 
 
-# class Bounds(object):
-#     """ Special acceptance function for basinhopping bounds. 
-    
-#     Source: https://github.com/scipy/scipy/issues/4608
-#     """
-
-#     def __init__(self, bounds):
-#         self.min = np.array([-np.inf if bound[0] is None else bound[0] for bound in bounds])
-#         self.max = np.array([ np.inf if bound[1] is None else bound[1] for bound in bounds])
-
-
-#     def __call__(self, **kwargs):
-#         x = kwargs["x_new"]
-#         return (bool(np.all(x <= self.max)) and
-#                 bool(np.all(x >= self.min)))
-
-
-
 def estimateSeismicTrajectoryAzimuth(station_list, v_sound, p0=None, azim_range=None, elev_range=None, \
         v_fixed=False):
     """ Estimate the trajectory of a fireball from seismic/infrasound data by modelling the arrival times of
@@ -527,7 +394,7 @@ def estimateSeismicTrajectoryAzimuth(station_list, v_sound, p0=None, azim_range=
                 (seconds).
             p0[3]: [float] Velocity of the fireball (km/s).
             p0[4]: [float] Initial azimuth (+E of due south) of the fireball (radians).
-            p0[5]: [float] Initial elevation of the fireball (radians).
+            p0[5]: [float] Initial zenith angle of the fireball (radians).
         azim_range: [list of floats] (min, max) azimuths for the search, azimuths should be +E of due North
             in degrees. If the range of azmiuths traverses the 0/360 discontinuity, please use negative
             values for azimuths > 180 deg!
@@ -574,7 +441,7 @@ def estimateSeismicTrajectoryAzimuth(station_list, v_sound, p0=None, azim_range=
         # Set initial direction
         # Azim
         p0[4] = np.radians(0)
-        # Elev
+        # Zangle
         p0[5] = np.radians(45)
 
 
@@ -582,7 +449,6 @@ def estimateSeismicTrajectoryAzimuth(station_list, v_sound, p0=None, azim_range=
     # Find the trajectory by minimization
     # The minimization will probably fail as t0 and the velocity of the fireball are dependant, but the
     # radiant should converge
-    # res = scipy.optimize.minimize(timeResidualsAzimuth, p0, args=(stat_coord_list, arrival_times, v_sound), options={'maxls': 50, 'maxcor': 20}) #, method='Nelder-Mead')
 
 
     # Set azimuth bounds
@@ -625,22 +491,7 @@ def estimateSeismicTrajectoryAzimuth(station_list, v_sound, p0=None, azim_range=
     else:
         zangle_min, zangle_max = 0, np.pi/2
 
-    # # Set the bounds for every parameter
-    # bounds = [
-    #     (None, None), # X0
-    #     (None, None), # Y0
-    #     (None, None), # t0
-    #     (11, 30), # Velocity (km/s)
-    #     (azim_down, azim_up), # Azimuth
-    #     (zangle_min, zangle_max) # Zenith angle
-    #     ]
 
-    # print('Bounds:', bounds)
-
-    # # Try basinhopping
-    # res = scipy.optimize.basinhopping(timeResidualsAzimuth, p0, minimizer_kwargs={'args': (stat_coord_list, \
-    #     arrival_times, v_sound, azim_avg, v_fixed), 'method': 'SLSQP', 'bounds': bounds}, \
-    #     niter=2000, accept_test=Bounds(bounds))
 
     # Set the bounds for every parameters
     bounds = [
@@ -662,9 +513,29 @@ def estimateSeismicTrajectoryAzimuth(station_list, v_sound, p0=None, azim_range=
         def __init__(self):
             self.x = None
 
-    # Use PSO for minimization
-    x, fopt = pyswarm.pso(timeResidualsAzimuth, lower_bounds, upper_bounds, args=(stat_coord_list,
-        arrival_times, v_sound, azim_avg, v_fixed), maxiter=2000, swarmsize=2000, phip=1.1, phig=1.0, debug=True, omega=0.5)
+    # Run PSO several times and choose the best solution
+    solutions = []
+    
+    for i in range(10):
+
+        print('Running PSO, run', i)
+
+        # Use PSO for minimization
+        x, fopt = pyswarm.pso(timeResidualsAzimuth, lower_bounds, upper_bounds, args=(stat_coord_list, \
+            arrival_times, v_sound, azim_avg, v_fixed), maxiter=2000, swarmsize=2000, phip=1.1, phig=1.0, \
+            debug=False, omega=0.5)
+
+        print('Run', i, 'best estimation', fopt)
+
+        solutions.append([x, fopt])
+
+
+    # Choose the solution with the smallest residuals
+    fopt_array = np.array([fopt for x, fopt in solutions])
+    best_indx = np.argmin(fopt_array)
+
+    x, fopt = solutions[best_indx]
+
 
     res = MiniResults()
     res.x = x
@@ -686,6 +557,8 @@ def estimateSeismicTrajectoryAzimuth(station_list, v_sound, p0=None, azim_range=
     azim = azim%(2*np.pi)
     zangle = zangle%(np.pi/2)
 
+    print('--------------------')
+    print('RESULTS:')
     print('x0:', x0, 'km')
     print('y0:', y0, 'km')
     print('t0:', t0, 's')
@@ -702,13 +575,12 @@ def estimateSeismicTrajectoryAzimuth(station_list, v_sound, p0=None, azim_range=
 
 
     # Plot the stations and the estimated trajectory
-    plotStationsAndTrajectory(station_list, first_arrival_indx, [1000*x0, 1000*y0, t0, 1000*v_est, azim, \
-        zangle], v_sound)
+    plotStationsAndTrajectory(station_list, [1000*x0, 1000*y0, t0, 1000*v_est, azim, zangle], v_sound, 'fireball')
 
 
 
 
-def plotStationsAndTrajectory(station_list, ref_indx, params, v_sound):
+def plotStationsAndTrajectory(station_list, params, v_sound, file_name):
     """ Plots the stations in the local coordinate system and the fitted trajectory. """
 
 
@@ -717,17 +589,27 @@ def plotStationsAndTrajectory(station_list, ref_indx, params, v_sound):
     x0, y0, t0, v, azim, zangle = params
 
 
+    # Extract all Julian dates
+    jd_list = [entry[4] for entry in station_list]
+
+    # Calculate the arrival times as the time in seconds from the earliest JD
+    jd_ref = min(jd_list)
+    ref_indx = np.argmin(jd_list)
+    jd_list = np.array(jd_list)
+    stat_obs_times_of_arrival = (jd_list - jd_ref)*86400.0
+
+
     # Convert station coordiantes to local coordinates, with the station of the first arrival being the
     # origin of the coordinate system
     stat_coord_list = convertStationCoordinates(station_list, ref_indx)
 
     # Extract station coordinates
-    x, y, z = np.array(stat_coord_list).T
+    x_stat, y_stat, z_stat = np.array(stat_coord_list).T
 
     # Convert station coordinates to km
-    x /= 1000
-    y /= 1000
-    z /= 1000
+    x_stat /= 1000
+    y_stat /= 1000
+    z_stat /= 1000
 
     x0 /= 1000
     y0 /= 1000
@@ -737,33 +619,106 @@ def plotStationsAndTrajectory(station_list, ref_indx, params, v_sound):
     u = np.array([np.cos(azim)*np.sin(zangle), np.sin(azim)*np.cos(zangle), -np.cos(zangle)])
 
 
-    # Calculate times of arrival for every station
-    stat_times_of_arrival = []
+
+    # Calculate modelled times of arrival and points of wave releasefor every station
+    stat_model_times_of_arrival = []
+    wave_release_points = []
+
     for stat_coord in stat_coord_list:
+
+        # Calculate time of arrival
         ti = timeOfArrival(stat_coord, 1000*x0, 1000*y0, t0, v, azim, zangle, v_sound)
-        stat_times_of_arrival.append(ti)
+        stat_model_times_of_arrival.append(ti)
 
-    stat_times_of_arrival = np.array(stat_times_of_arrival)
+        # Calculate point of wave release
+        traj_point = waveReleasePoint(stat_coord, 1000*x0, 1000*y0, t0, v, azim, zangle, v_sound)/1000
+        wave_release_points.append(traj_point)
 
+    stat_model_times_of_arrival = np.array(stat_model_times_of_arrival)
+    wave_release_points = np.array(wave_release_points)
+
+
+    # Get the release points with the highest and the lowest release height
+    high_point = np.argmax(wave_release_points[:, 2])
+    low_point = np.argmin(wave_release_points[:, 2])
+
+    print('x0:', x0, 'km')
+    print('y0:', y0, 'km')
+    print('t0:', t0, 's')
+    print('v:', v, 'km/s')
+    print('Azim (+E of due N) : ', (180 - np.degrees(azim))%360)
+    print('Elev (from horizon):', 90 - np.degrees(zangle))
+    print('Wave release:')
+    print(wave_release_points[:, 2])
+    print(' - top:', wave_release_points[high_point, 2], 'km')
+    print(' - bottom:', wave_release_points[low_point, 2], 'km')
+    print()
+    print('Residuals:')
+    print('{:>10s}: {:6s}'.format('Station', 'res (s)'))
+    
+    sqr_res_acc = 0
+
+    # Print the residuals per station
+    for stat_entry, toa_obs, toa_model in zip(station_list, stat_obs_times_of_arrival, \
+        stat_model_times_of_arrival):
+
+        station_name = stat_entry[0]
+
+        print('{:>10s}: {:+06.2f}s'.format(station_name, toa_obs - toa_model))
+
+        sqr_res_acc += (toa_obs - toa_model)**2
+
+
+    print('RMS:', np.sqrt(sqr_res_acc/len(station_list)), 's')
+
+    
     # Determine the maximum absolute time of arrival (either positive of negative)
-    toa_abs_max = np.max([np.abs(np.min(stat_times_of_arrival)), np.max(stat_times_of_arrival)])
+    toa_abs_max = np.max([np.abs(np.min(stat_model_times_of_arrival)), np.max(stat_model_times_of_arrival)])
+
+
+    # Calcualte absolute observed - calculated residuals
+    toa_residuals = np.abs(stat_obs_times_of_arrival - stat_model_times_of_arrival)
+
+    # Determine the maximum absolute residual
+    toa_res_max = np.max(toa_residuals)
+
+
+
+    ### PLOT 3D ###
+    ##########################################################################################################
 
     # Setup 3D plot
     fig = plt.figure()
     ax = fig.gca(projection='3d')
 
 
-    # Plot the stations except the referent
-    station_mask = np.ones(len(x), dtype=bool)
-    station_mask[ref_indx] = 0
-    ax.scatter(x[station_mask], y[station_mask], z[station_mask], c=stat_times_of_arrival[station_mask], depthshade=0, cmap='viridis', vmin=0.00, vmax=toa_abs_max, edgecolor='k')
+    # # Plot the stations except the referent
+    # station_mask = np.ones(len(x), dtype=bool)
+    # station_mask[ref_indx] = 0
+    # ax.scatter(x[station_mask], y[station_mask], z[station_mask], c=stat_model_times_of_arrival[station_mask], \
+    #     depthshade=0, cmap='viridis', vmin=0.00, vmax=toa_abs_max, edgecolor='k')
 
-    # Plot the referent station
-    ax.scatter(x[ref_indx], y[ref_indx], z[ref_indx], c='k', zorder=5)
+    # # Plot the referent station
+    # ax.scatter(x[ref_indx], y[ref_indx], z[ref_indx], c='k', zorder=5)
+
+    # Plot the stations (the colors are observed - calculated residuasl)
+    stat_scat = ax.scatter(x_stat, y_stat, z_stat, c=toa_residuals, depthshade=0, cmap='inferno_r', \
+        edgecolor='0.5', linewidths=1, vmin=0, vmax=toa_res_max)
+
+    plt.colorbar(stat_scat, label='abs(O - C) (s)')
 
 
     # Plot the trajectory intersection with the ground
     ax.scatter(x0, y0, 0, c='g')
+
+
+    # Plot the lowest and highest release points
+    wrph_x, wrph_y, wrph_z = wave_release_points[high_point]
+    wrpl_x, wrpl_y, wrpl_z = wave_release_points[low_point]
+    ax.scatter(wrph_x, wrph_y, wrph_z)
+    ax.scatter(wrpl_x, wrpl_y, wrpl_z)
+
+
 
 
     print('Trajectory vector:', u)
@@ -789,6 +744,8 @@ def plotStationsAndTrajectory(station_list, ref_indx, params, v_sound):
     # Plot the trajectory
     ax.plot([x0, x_beg], [y0, y_beg], [0, z_beg], c='k')
 
+    # Plot wave release trajectory segment
+    ax.plot([wrph_x, wrpl_x], [wrph_y, wrpl_y], [wrph_z, wrpl_z], color='red', linewidth=2)
 
 
     ### Plot the boom corridor ###
@@ -818,7 +775,8 @@ def plotStationsAndTrajectory(station_list, ref_indx, params, v_sound):
     levels = np.linspace(0.00, toa_abs_max, 25)
 
     # Plot colorcoded times of arrival on the surface
-    toa_conture = ax.contourf(xx, yy, times_of_arrival, levels, zdir='z', offset=np.min(z), cmap='viridis', alpha=0.7)
+    toa_conture = ax.contourf(xx, yy, times_of_arrival, levels, zdir='z', offset=np.min(z_stat), \
+        cmap='viridis', alpha=1.0)
 
     # Add a color bar which maps values to colors
     fig.colorbar(toa_conture, label='Time of arrival (s)')
@@ -845,6 +803,9 @@ def plotStationsAndTrajectory(station_list, ref_indx, params, v_sound):
     ax.set_ylabel('Y (+ east)')
     ax.set_zlabel('Z (+ zenith)')
 
+
+    plt.savefig(file_name + '_3d.png', dpi=300)
+
     plt.show()
 
 
@@ -857,11 +818,47 @@ def plotStationsAndTrajectory(station_list, ref_indx, params, v_sound):
     lat0, lon0, elev0 = station_list[ref_indx][1:4]
 
     # Calculate the coordinates of the trajectory intersection with the ground
-    lat_i, lon_i, elev_i = local2LatLon(lat0, lon0, elev0, np.array([1000*x0, 1000*y0, 0]))
+    lat_i, lon_i, elev_i = local2LatLon(lat0, lon0, elev0, 1000*np.array([x0, y0, 0]))
 
     # Calculate the coordinate of the beginning of the trajectory
-    lat_beg, lon_beg, elev_beg = local2LatLon(lat0, lon0, elev0, np.array([1000*x_beg, 1000*y_beg, \
-        1000*z_beg]))
+    lat_beg, lon_beg, elev_beg = local2LatLon(lat0, lon0, elev0, 1000*np.array([x_beg, y_beg, z_beg]))
+
+
+    # Calculate coordinates of trajectory release points
+    wrph_lat, wrph_lon, wrph_elev = local2LatLon(lat0, lon0, elev0, 1000*np.array([wrph_x, wrph_y, wrph_z]))
+    wrpl_lat, wrpl_lon, wrpl_elev = local2LatLon(lat0, lon0, elev0, 1000*np.array([wrpl_x, wrpl_y, wrpl_z]))
+
+
+
+    ### Calculate pointing vectors from stations to release points
+
+    wr_points = []
+    for wr_point, stat_point in zip(wave_release_points, np.c_[x_stat, y_stat, z_stat]):
+
+        # Calculate vector pointing from station to release point
+        wr_point = wr_point - stat_point
+
+        wr_points.append(wr_point)
+
+    
+    # Normalize by the longest vector, which will be 1/10 of the trajectory length
+
+    wr_len_max = max([vectMag(wr_point) for wr_point in wr_points])
+
+    wr_vect_x = []
+    wr_vect_y = []
+    wr_vect_z = []
+
+    for wr_point in wr_points:
+
+        wr_x, wr_y, wr_z = (wr_point/wr_len_max)*traj_len/10
+
+        wr_vect_x.append(wr_x)
+        wr_vect_y.append(wr_y)
+        wr_vect_z.append(wr_z)
+
+    ###
+
 
 
     # Extract station coordinates
@@ -886,18 +883,6 @@ def plotStationsAndTrajectory(station_list, ref_indx, params, v_sound):
     m = GroundMap(np.append(stat_lat, lat_i), np.append(stat_lon, lon_i), border_size=20)
 
 
-    # Plot stations
-    m.scatter(stat_lat, stat_lon, c=stat_times_of_arrival, s=20, marker='o', edgecolor='k', cmap='viridis', vmin=0.00, vmax=toa_abs_max)
-
-
-    # Plot intersection with the ground
-    m.scatter(lat_i, lon_i, s=10, marker='x', c='g')
-
-
-    # Plot the trajectory
-    m.plot([lat_beg, lat_i], [lon_beg, lon_i], c='g')
-
-
 
     # Convert contour local coordinated to geo coordinates
     lat_cont = []
@@ -916,15 +901,44 @@ def plotStationsAndTrajectory(station_list, ref_indx, params, v_sound):
 
 
     # Plot the time of arrival contours
-    toa_conture = m.m.contourf(np.degrees(lon_cont), np.degrees(lat_cont), times_of_arrival, levels, zorder=2, \
+    toa_conture = m.m.contourf(np.degrees(lon_cont), np.degrees(lat_cont), times_of_arrival, levels, zorder=3, \
         latlon=True, cmap='viridis')
 
 
     # Add a color bar which maps values to colors
     m.m.colorbar(toa_conture, label='Time of arrival (s)')
 
+
+    # Plot stations
+    m.scatter(stat_lat, stat_lon, c=stat_model_times_of_arrival, s=20, marker='o', edgecolor='0.5', \
+        linewidths=1, cmap='viridis', vmin=0.00, vmax=toa_abs_max)
+
+
+    # Plot intersection with the ground
+    m.scatter(lat_i, lon_i, s=10, marker='x', c='g')
+
+
+    # Plot the trajectory
+    m.plot([lat_beg, lat_i], [lon_beg, lon_i], c='g')
+
+
+    # Plot the wave release segment
+    m.plot([wrph_lat, wrpl_lat], [wrph_lon, wrpl_lon], c='red', linewidth=2)
+
+
+    # Plot wave release directions
+    for i in range(len(x_stat)):
+        
+        wr_lat_i, wr_lon_i, wr_elev_i = local2LatLon(lat0, lon0, elev0, 1000*np.array([x_stat[i] + wr_vect_x[i], y_stat[i] + wr_vect_y[i], z_stat[i] + wr_vect_z[i]]))
+        #wr_lat_i, wr_lon_i, wr_elev_i = local2LatLon(lat0, lon0, elev0, 1000*np.array([wrp_x[i], wrp_y[i], wrp_z[i]]))
+
+        m.plot([stat_lat[i], wr_lat_i], [stat_lon[i], wr_lon_i], c='w', linewidth=1.0)
+
+
     plt.tight_layout()
 
+
+    plt.savefig(file_name + '_map.png', dpi=300)
 
     plt.show()
 
@@ -961,16 +975,16 @@ if __name__ == "__main__":
     ### TEST!!!! ###
     ##########################################################################################################
 
-    # # Wayne event
-    # station_list = [
-    #     ['G58A', np.radians(45.149200), np.radians(-74.054001), 173, date2JD(2013, 11, 27, 00, 50, 27, 150)],
-    #     ['F58A', np.radians(45.866300), np.radians(-73.814500), 239, date2JD(2013, 11, 27, 00, 52, 39, 900)],
-    #     ['E58A', np.radians(46.372100), np.radians(-73.277100), 764, date2JD(2013, 11, 27, 00, 55, 25, 880)],
-    #     ['H59A', np.radians(44.645500), np.radians(-73.690498), 355, date2JD(2013, 11, 27, 00, 52, 48, 800)],
-    #     ['H58A', np.radians(44.417599), np.radians(-74.179802), 537, date2JD(2013, 11, 27, 00, 53, 19, 320)]
-    # ]
-    # #plotStationsAndTrajectory(station_list, 0, -10.6247234922*1000,  0.979699666482*1000, np.radians(180 - 180.4874276),   np.radians(90 - 42.5891820891))
-    # estimateSeismicTrajectoryAzimuth(station_list, 320, azim_range=[100, 220], elev_range=[10, 70])
+    # Wayne event
+    station_list = [
+        ['G58A', np.radians(45.149200), np.radians(-74.054001), 173, date2JD(2013, 11, 27, 00, 50, 27, 150)],
+        ['F58A', np.radians(45.866300), np.radians(-73.814500), 239, date2JD(2013, 11, 27, 00, 52, 23, 900)],
+        ['E58A', np.radians(46.372100), np.radians(-73.277100), 764, date2JD(2013, 11, 27, 00, 55, 25, 880)],
+        ['H59A', np.radians(44.645500), np.radians(-73.690498), 355, date2JD(2013, 11, 27, 00, 52, 48, 800)],
+        ['H58A', np.radians(44.417599), np.radians(-74.179802), 537, date2JD(2013, 11, 27, 00, 53, 19, 320)]
+    ]
+    #plotStationsAndTrajectory(station_list, [-10.6255131247*1000,  0.97761117287*1000, -22.39726861, 29.72664835*1000, np.radians(180 - 180.485602168), np.radians(90 - 42.5945238073)], v_sound, 'wayne')
+    estimateSeismicTrajectoryAzimuth(station_list, 320, azim_range=[100, 220], elev_range=[5, 35])
 
 
     # # Bolivia 2007
@@ -1023,18 +1037,19 @@ if __name__ == "__main__":
     # p0[3] = 20
 
     # # Set initial direction
-    # # Azim
+    # # Azim (+E of due south)
     # p0[4] = np.radians(-106.5)
-    # # Elev
+    # # Zangle
     # p0[5] = np.radians(37.6)
 
     # # Arkansas
-    # plotStationsAndTrajectory(station_list, 0, [-9.05406157e+00*1000,  -8.22575287e+01*1000,  -1.66322331e+02,   1.84898542e+01*1000, np.radians(180 - 272.303002438),   7.13692280e-01], v_sound)
+    # plotStationsAndTrajectory(station_list, [-9.05406157e+00*1000,  -8.22575287e+01*1000,  -1.66322331e+02,   1.84898542e+01*1000, np.radians(180 - 272.303002438),   7.13692280e-01], v_sound, 'arkansas')
     # #estimateSeismicTrajectoryAzimuth(station_list, 320, p0=p0, azim_range=[230, 310], elev_range=[30, 55])
 
 
     # # Ishikara 2003 data
     # station_list = [
+    #     #["MYK  ", np.radians(39.590), np.radians(141.98), 120, date2JD(1998, 3, 30, 3, 23,  8, 270, UT_corr=9)],
     #     ["KGJ* ", np.radians(39.387), np.radians(141.57), 375, date2JD(1998, 3, 30, 3, 23, 42, 740, UT_corr=9)],
     #     ["JOM* ", np.radians(39.473), np.radians(141.29), 210, date2JD(1998, 3, 30, 3, 24,  7, 830, UT_corr=9)],
     #     ["MNS* ", np.radians(39.355), np.radians(141.20),  65, date2JD(1998, 3, 30, 3, 24, 13, 780, UT_corr=9)],
@@ -1073,13 +1088,13 @@ if __name__ == "__main__":
     # p0[3] = 20
 
     # # Set initial direction
-    # # Azim
-    # p0[4] = np.radians(270)
-    # # Elev
-    # p0[5] = np.radians(70)
+    # # Azim (+E of due south)
+    # p0[4] = np.radians(135)
+    # # Zangle
+    # p0[5] = np.radians(90 - 18.5)
 
     # # Japanese
-    # # plotStationsAndTrajectory(station_list, 0, -11466.2958037, 175318.786352, 5.00539821,    0.28304974)
+    # # plotStationsAndTrajectory(station_list, -11466.2958037, 175318.786352, 5.00539821,    0.28304974, 'miyako')
     # estimateSeismicTrajectoryAzimuth(station_list, 320, p0=p0, azim_range=[30, 90], elev_range=[10, 40])
 
 
@@ -1114,21 +1129,16 @@ if __name__ == "__main__":
     # p0[3] = 20
 
     # # Set initial direction
-    # # Azim
+    # # Azim (+E of due south)
     # p0[4] = np.radians(0)
-    # # Elev
+    # # Zangle
     # p0[5] = np.radians(90 - 20)
 
     # # Moravka
-    # plotStationsAndTrajectory(station_list, 0, [1000*7.10714884e+01,  -1000*2.26290796e+00,  -7.02326093e+01,   1000*1.40304477e+01, 6.64257699e-02,   1.24330021e+00], v_sound)
+    # plotStationsAndTrajectory(station_list, [1000*7.10714884e+01,  -1000*2.26290796e+00,  -7.02326093e+01,   1000*1.40304477e+01, 6.64257699e-02,   1.24330021e+00], v_sound, 'moravka')
     # # estimateSeismicTrajectoryAzimuth(station_list, 320, p0=p0, azim_range=[140, 220], elev_range=[15, 40], \
     # #     v_fixed=False)
 
-
-
-
-    # Run trajectory estimation ECI
-    #estimateSeismicTrajectoryECI(station_list, 320)
 
 
 
@@ -1146,7 +1156,7 @@ if __name__ == "__main__":
     # print(stat_coord_list)
 
 
-    #sys.exit()
+    sys.exit()
     ##########################################################################################################
 
 

@@ -173,6 +173,46 @@ int     kcamera, kcamera1, kcamera2, kcamera_ref, kmeas_ref, k, offsets_shifted;
 double  radiant_hat[3], radiant_bestconv[3], ttzero, ttzero_limit;
 double  Rbestconv[3], Rdummy[3], Rref[3], dist, magdummy;
 double  max_convergence, vbegin, vapprox, decel1, decel2;
+    
+
+/*    printf("Traj struct size: %d\n", sizeof(traj));
+    
+    // TEST
+    // Print out the parameters
+    printf("PSO params\n");
+    for(int i = 0; i < NFIT_TYPES; i++)
+    {   
+        printf("\n");
+        printf("number_particles %d \n", traj->PSOfit[i].number_particles);
+        printf("maximum_iterations %d \n", traj->PSOfit[i].maximum_iterations);
+        printf("boundary_flag %d \n,", traj->PSOfit[i].boundary_flag);
+        printf("limits_flag %d \n", traj->PSOfit[i].limits_flag);
+        printf("particle_distribution_flag %d \n", traj->PSOfit[i].particle_distribution_flag);
+        printf("epsilon_convergence %e \n", traj->PSOfit[i].epsilon_convergence);
+        printf("weight_inertia %f \n", traj->PSOfit[i].weight_inertia);
+        printf("weight_stubborness %f \n", traj->PSOfit[i].weight_stubborness);
+        printf("weight_grouppressure %f \n", traj->PSOfit[i].weight_grouppressure);
+    }
+
+    printf("PSO fit control:\n");
+    for (int i = 0; i < NPSO_CALLS; ++i)
+    {
+        printf("%i\n", traj->PSO_fit_control[i]);
+    }
+    
+    printf("\n");
+
+    // Print out all observations
+    for (int k = 0; k < traj->maxcameras; ++k)
+    {
+        for (int i = 0; i < traj->nummeas[k]; ++i)
+        {
+            printf("%d meas1: %f \n", k, traj->meas1[k][i]);
+            printf("%d meas2: %f \n\n", k, traj->meas2[k][i]);
+        }
+    }
+
+    printf("\n");*/
 
 
     //======== Since we now use an inverse of the noise variance per measurement to weight
@@ -336,12 +376,15 @@ double  max_convergence, vbegin, vapprox, decel1, decel2;
 
 		VelDecelFit_LMS( traj, vbegin, &vapprox, &decel1, &decel2 );
 
+/*        printf("Outside vbegin: %f\n", vbegin);
+        printf("Outside decels: %f, %f, %f\n", vapprox, decel1, decel2);*/
+
         traj->params[6] = fabs( decel1 );
 
 		if( traj->velmodel == EXPONENT )  traj->params[7] = fabs( decel2 );
 		else                              traj->params[7] = decel2;
 
-		////printf(" INITIAL DECEL GUESS  %12.3le  %8.3lf \n", traj->params[6], traj->params[7] );
+		printf(" INITIAL DECEL GUESS  %12.3le  %8.3lf \n", traj->params[6], traj->params[7] );
 
 	}
 
@@ -531,6 +574,22 @@ double  max_convergence, vbegin, vapprox, decel1, decel2;
         printf("     LLA beg sigma  %lf  %lf  %lf\n",   traj->rbeg_lon_sigma * 57.29577951, traj->rbeg_lat_sigma * 57.29577951, traj->rbeg_hkm_sigma );
         printf("     LLA end sigma  %lf  %lf  %lf\n\n", traj->rend_lon_sigma * 57.29577951, traj->rend_lat_sigma * 57.29577951, traj->rend_hkm_sigma );
     }
+
+
+/*        // Print out all observations
+    for (int k = 0; k < traj->maxcameras; ++k)
+    {
+        for (int i = 0; i < traj->nummeas[k]; ++i)
+        {
+            printf("%d meas1: %f \n", k, traj->meas1[k][i]);
+            printf("%d meas2: %f \n\n", k, traj->meas2[k][i]);
+        }
+    }
+
+    printf("\n");
+
+    printf("rbeg_hkm: %f\n", traj->rbeg_hkm);*/
+
 
     return(0);
 }
@@ -1507,7 +1566,6 @@ double   *pos, *tim, *noi, rmserror, *err;
 double    rbeg[3], rend[3], rdummy[3], distance;
 
 
-
     //======== Allocate memory for the positional measurements and time stamps actually used,
     //         plus the measurement count and starting position per camera
 
@@ -1586,6 +1644,8 @@ double    rbeg[3], rend[3], rdummy[3], distance;
 	}
 
 
+    // printf("Decel FIRST ESTIMATION: %f, %f\n", *decel1LMS, *decel2LMS);
+
     //======== Perform outlier removal, set at 2x the rmserror
 
     kmeas      = 0;
@@ -1627,6 +1687,7 @@ double    rbeg[3], rend[3], rdummy[3], distance;
 		printf("            Velocity model %d not implemented phase 2\n", traj->velmodel );
 	}
 
+    // printf("Decel SECOND ESTIMATION: %f, %f\n", *decel1LMS, *decel2LMS);
 
     //======== Free memory and return LMS velocity estimate
 
@@ -2028,7 +2089,7 @@ double  matinv[3][3], denom, alpha, beta, eta;
 
             for( k=0; k<nmeas_per_camera[kcamera]; k++ )  {
 
-                if( noi[kmeas] != 0.0 )  weight = 1.0 / ( noi[kmeas] * noi[kmeas] );
+                if( fabs(noi[kmeas]) > 1e-8 )  weight = 1.0 / ( noi[kmeas] * noi[kmeas] );
                 else                     weight = 1.0;
 
                 sumwt0  += weight;
@@ -2069,10 +2130,26 @@ double  matinv[3][3], denom, alpha, beta, eta;
 
     alpha = ( sumwxt0 * matinv[0][0] + sumwxt1 * matinv[0][1] + sumwxt2 * matinv[0][2] ) / denom;
 
+/*    printf("sumwxt0 %f\n", sumwxt0);
+
+    printf("matinv[0][0] %f \n", matinv[0][0]);
+    printf("sumwxt1 %f \n", sumwxt1);
+    printf("matinv[0][1] %f \n", matinv[0][1]);
+    printf("sumwxt2 %f \n", sumwxt2);
+    printf("matinv[0][2] %f \n", matinv[0][2]);
+    printf("denom %f \n", denom);*/
+
     eta   = ( sumwxt0 * matinv[1][0] + sumwxt1 * matinv[1][1] + sumwxt2 * matinv[1][2] ) / denom;
 
     beta  = ( sumwxt0 * matinv[2][0] + sumwxt1 * matinv[2][1] + sumwxt2 * matinv[2][2] ) / denom;
 
+    alpha = fabs(alpha);
+    beta = fabs(beta);
+    //eta = fabs(eta);
+
+/*    printf("Alpha: %f\n", alpha);
+    printf("Beta: %f\n", beta);
+    printf("Eta: %f\n", eta);*/
 
 	*decel1LMS = alpha;
 
@@ -2104,6 +2181,9 @@ double  matinv[3][3], denom, alpha, beta, eta;
     }
 
     *rmserror = sqrt( sumesq / (double)kmeas );
+
+
+    // printf("Exp est: %f, %f, %f\n", *velocityLMS, *decel1LMS, *decel2LMS);
 
 
 }

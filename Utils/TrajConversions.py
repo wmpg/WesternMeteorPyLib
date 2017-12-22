@@ -136,8 +136,39 @@ def unixTime2Date(ts, tu, dt_obj=False):
 
 
 
+
+def date2UnixTime(year, month, day, hour, minute, second, millisecond=0, UT_corr=0.0):
+    """ Convert date and time to Unix time. 
+    Arguments:
+        year: [int] year
+        month: [int] month
+        day: [int] day of the date
+        hour: [int] hours
+        minute: [int] minutes
+        second: [int] seconds
+
+    Kwargs:
+        millisecond: [int] milliseconds (optional)
+        UT_corr: [float] UT correction in hours (difference from local time to UT)
+    
+    Return:
+        [float] Unix time
+
+    """# Convert all input arguments to integer (except milliseconds)
+    year, month, day, hour, minute, second = map(int, (year, month, day, hour, minute, second))
+
+    # Create datetime object of current time
+    dt = datetime(year, month, day, hour, minute, second, int(millisecond*1000)) - timedelta(hours=UT_corr)
+
+    # UTC unix timestamp
+    unix_timestamp = (dt - datetime(1970, 1, 1)).total_seconds()
+
+    return unix_timestamp
+
+
+
 def date2JD(year, month, day, hour, minute, second, millisecond=0, UT_corr=0.0):
-    """ Convert date and time to Julian Date with epoch J2000.0. 
+    """ Convert date and time to Julian Date in J2000.0. 
     
     Arguments:
         year: [int] year
@@ -152,7 +183,7 @@ def date2JD(year, month, day, hour, minute, second, millisecond=0, UT_corr=0.0):
         UT_corr: [float] UT correction in hours (difference from local time to UT)
     
     Return:
-        [float] julian date, epoch 2000.0
+        [float] julian date, J2000.0 epoch
     """
 
     # Convert all input arguments to integer (except milliseconds)
@@ -231,6 +262,24 @@ def unixTime2JD(ts, tu):
     """
 
     return date2JD(*unixTime2Date(ts, tu))
+
+
+
+def jd2UnixTime(jd, UT_corr=0):
+    """ Converts the given Julian date to Unix timestamp. 
+
+    Arguments:
+        jd: [float] Julian date
+
+    Keyword arguments:
+        UT_corr: [float] UT correction in hours (difference from local time to UT)
+
+    Return:
+        [float] Unix timestamp.
+
+    """
+
+    return date2UnixTime(*jd2Date(jd, UT_corr=UT_corr))
 
 
 
@@ -341,7 +390,6 @@ def ecef2ENU(phi, lam, x, y, z):
 
 
 
-
 def enu2ECEF(phi, lam, x, y, z, t=0.0):
     """ Convert ENU local coordinates (East, North, Up) to Earth centered - Earth fixed (ECEF) Cartesian, 
         correcting for Earth rotation if needed.
@@ -385,6 +433,21 @@ def enu2ECEF(phi, lam, x, y, z, t=0.0):
 
     return x_ecef, y_ecef, z_ecef
 
+
+
+# def ecef2SEU(phi, lam, x, y, z):
+#     """ Convert Earth centered - Earth fixed (ECEF) Cartesian coordinates to SEU coordinates (South, East,
+#         Up).
+
+#         See 'seu2ECEF' function for more details.
+
+#     """
+
+#     x_seu =             -np.cos(lam)*x -             np.sin(lam)*y
+#     y_seu =  np.sin(phi)*np.sin(lam)*x - np.sin(phi)*np.cos(lam)*y + np.cos(phi)*z
+#     z_seu = -np.cos(phi)*np.sin(lam)*x + np.cos(phi)*np.cos(lam)*y + np.sin(phi)*z
+
+#     return x_seu, y_seu, z_seu
 
 
 
@@ -557,23 +620,28 @@ def ecef2LatLonAlt(x, y, z):
     # Calculate the longitude
     lon = np.arctan2(y, x)
 
-    p = np.sqrt(x**2  +  y**2);
+    p = np.sqrt(x**2  +  y**2)
 
     theta = np.arctan2( z*EARTH.EQUATORIAL_RADIUS, p*EARTH.POLAR_RADIUS)
 
     # Calculate the latitude
-    lat = np.arctan2(z + (ep**2)*EARTH.POLAR_RADIUS*np.sin(theta)**3, 
+    lat = np.arctan2(z + (ep**2)*EARTH.POLAR_RADIUS*np.sin(theta)**3, \
         p - (EARTH.E**2)*EARTH.EQUATORIAL_RADIUS*np.cos(theta)**3)
 
     # Get distance from Earth centre to the position given by geographical coordinates, in WGS84
     N = EARTH.EQUATORIAL_RADIUS/math.sqrt(1.0 - (EARTH.E**2)*math.sin(lat)**2)
 
+    
     # Calculate the height in meters
-    alt = p/np.cos(lat) - N
 
-    # Handle the case when in the Southern hemisphere
-    if((np.abs(x) < 1) and (np.abs(y) < 1)):
+    # Correct for numerical instability in altitude near exact poles (and make sure cos(lat) is not 0!)
+    if((np.abs(x) < 1000) and (np.abs(y) < 1000)):
         alt = np.abs(z) - EARTH.POLAR_RADIUS
+
+    else:
+        # Calculate altitude anywhere else
+        alt = p/np.cos(lat) - N
+
 
     return lat, lon, alt
 
@@ -1036,10 +1104,18 @@ if __name__ == "__main__":
 
     # TEST
 
+    print('Date -> JD -> Date')
     jd = date2JD(2016, 9, 29, 6, 29, 45, millisecond=452.127, UT_corr=2)
-    print(jd)
+    print('JD:', jd)
+    print('Date:', jd2Date(jd, UT_corr=2))
 
-    print(jd2Date(jd, UT_corr=2))
+
+    print('JD -> Unix timestamp -> JD')
+    unix_time = jd2UnixTime(jd)
+    print('Unix time:', unix_time)
+    print('JD:', unixTime2JD(int(unix_time), 1e6*(unix_time - int(unix_time))))
+    #
+
 
     # Test ECEF funtions
     print('Geo -> ECEF -> Geo test')

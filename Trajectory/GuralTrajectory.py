@@ -44,7 +44,7 @@ PPPDOUBLE = ct.POINTER(PPDOUBLE)
 
 
 class PSO_info(ct.Structure):
-    """ Mimichs PSO_info structure from the TrajectorySolution.h file, in Python-understandable 
+    """ Mimicks PSO_info structure from the TrajectorySolution.h file, in Python-understandable 
         ctypes format. 
     """
 
@@ -68,81 +68,132 @@ class TrajectoryInfo(ct.Structure):
     """
 
     _fields_ = [
+
+        ### PARAMETERS REFLECTING INPUT SETTINGS and CONTROL
+
+        # Max memory handling, intermediate reporting
         ('maxcameras', ct.c_int),
         ('verbose', ct.c_int),
+
+        # Modeling parameters
         ('nummonte', ct.c_int),
         ('velmodel', ct.c_int),
         ('meastype', ct.c_int),
-        ('jdt_ref', ct.c_double),
-        ('max_toffset', ct.c_double),
+
+        # Reference timing and offset constraint
+        ('jdt_ref', DOUBLE),
+        ('max_toffset', DOUBLE),
+
+
+        # PSO settings
         ('PSO_info', PSO_info*NFIT_TYPES),
         ('PSO_fit_control', ct.c_int*NPSO_CALLS),
+
+
+        ### SOLUTION STARTUP AND DERIVED PRODUCTS
+
+        # Memory allocation handling
         ('malloced', ct.POINTER(ct.c_int)),
+
+        # Camera/site information
         ('numcameras ', ct.c_int),
         ('camera_lat', PDOUBLE),
         ('camera_lon', PDOUBLE),
         ('camera_hkm', PDOUBLE),
         ('camera_LST', PDOUBLE),
         ('rcamera_ECI', PPPDOUBLE),
+
+        # Measurement information
         ('nummeas', ct.POINTER(ct.c_int)),
+
         ('meas1', PPDOUBLE),
         ('meas2', PPDOUBLE),
         ('dtime', PPDOUBLE),
         ('noise', PPDOUBLE),
+
         ('meashat_ECI', PPPDOUBLE),
-        ('ttbeg', ct.c_double),
-        ('ttend', ct.c_double),
-        ('ttzero', ct.c_double),
+        ('ttbeg', DOUBLE),
+        ('ttend', DOUBLE),
+        ('ttzero', DOUBLE),
+
+        # Trajectory fitting parameters to feed to the particle swarm optimizer
         ('numparams', ct.c_int),
         ('params', PDOUBLE),
         ('limits', PDOUBLE),
         ('xguess', PDOUBLE),
         ('xshift', PDOUBLE),
+
+
+        ### SOLUTION OUTPUT PRODUCTS
+
+        # Best solution vector of the parameter values of length numparams
         ('solution', PDOUBLE),
+
+        # Primary output products and their standard deviations (sigma)
         ('ra_radiant', PDOUBLE),
         ('dec_radiant', PDOUBLE),
+
         ('vbegin', PDOUBLE),
         ('decel1', PDOUBLE),
         ('decel2', PDOUBLE),
+
         ('ra_sigma', PDOUBLE),
         ('dec_sigma', PDOUBLE),
+
         ('vbegin_sigma', PDOUBLE),
         ('decel1_sigma', PDOUBLE),
         ('decel2_sigma', PDOUBLE),
+
+        # Intermediate bootstrapping solutions
         ('max_convergence', PDOUBLE),
         ('ra_radiant_IP', PDOUBLE),
         ('dec_radiant_IP', PDOUBLE),
+
         ('ra_radiant_IPW', PDOUBLE),
         ('dec_radiant_IPW', PDOUBLE),
+
         ('ra_radiant_LMS', PDOUBLE),
         ('dec_radiant_LMS', PDOUBLE),
+
+        # Timing output relative to jdt_ref in seconds
         ('dtime_ref', PDOUBLE),
         ('dtime_tzero', PDOUBLE),
         ('dtime_beg', PDOUBLE),
         ('dtime_end', PDOUBLE),
         ('tref_offsets', PDOUBLE),
+
+        # Measurement and model LLA, range and velocity arrays with dimension #cameras x #measurements(camera)
         ('meas_lat', PPDOUBLE),
         ('meas_lon', PPDOUBLE),
         ('meas_hkm', PPDOUBLE),
         ('meas_range', PPDOUBLE),
         ('meas_vel', PPDOUBLE),
+        
         ('model_lat', PPDOUBLE),
         ('model_lon', PPDOUBLE),
         ('model_hkm', PPDOUBLE),
         ('model_range', PPDOUBLE),
         ('model_vel', PPDOUBLE),
+
+        # Model fit vectors which follow the same "meastype" on output with dimension #cameras x #measurements(camera)
         ('model_fit1', PPDOUBLE),
         ('model_fit2', PPDOUBLE),
         ('model_time', PPDOUBLE),
+
+        # BEGIN position and standard deviation in LLA
         ('rbeg_lat', PDOUBLE),
         ('rbeg_lon', PDOUBLE),
         ('rbeg_hkm', PDOUBLE),
+
         ('rbeg_lat_sigma', PDOUBLE),
         ('rbeg_lon_sigma', PDOUBLE),
         ('rbeg_hkm_sigma', PDOUBLE),
+
+        # END position and standard deviation in LLA
         ('rend_lat', PDOUBLE),
         ('rend_lon', PDOUBLE),
         ('rend_hkm', PDOUBLE),
+
         ('rend_lat_sigma', PDOUBLE),
         ('rend_lon_sigma', PDOUBLE),
         ('rend_hkm_sigma', PDOUBLE)
@@ -570,7 +621,7 @@ class GuralTrajectory(object):
 
         # If the measurement noise is not given, set it to 0
         if noise is None:
-            noise = np.zeros_like(time_data)
+            noise = np.zeros_like(time_data)*0.0
 
         # Fill the trajectory structure for site 1
         self.traj_lib.InfillTrajectoryStructure(nummeas, npct.as_ctypes(theta_data), 
