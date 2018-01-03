@@ -2,7 +2,7 @@
 //                     Meteor Trajectory Iterative Solution
 //###################################################################################
 //
-// See TrajectorySolution.h for full documentation & usage info
+// See TrajectorySolutionB.h for full documentation & usage info
 //
 //###################################################################################
 //
@@ -14,22 +14,31 @@
 // Jan 11 2017  2.1   Pete Gural    Added PSO particles, tighter convergence, and
 //                                  adjusted the bootstrap processing
 // Jan 18 2017  2.2   Pete Gural    Added ref time parameter to fit for acceleration
-//                                  models and added guess for time offsets
+//                                  models and added guess for time offsets 
 // Jan 19 2017  2.3   Pete Gural    Fixed propagation function
 // Jan 26 2017  2.4   Pete Gural    Moved hardcoded PSO parameters to config file
 // Feb 08 2017  2.5   Pete Gural    Added closed form guess for deceleration
 // Mar 21 2017  2.6   Pete Gural    Adjusted site position at each frame time step
+// Dec 11 2017  2.7   Pete Gural    Put in 0.05" minimum noise floor per Denis Vida
+// Dec 22 2017  2.8   Pete Gural    Set negative deceleration coefs to 0 in the first
+//                                      guess estimate from function VelDecelFit_LMS
+//                                  Compute weights from std dev & normalized to unity
+//                                  Const V guess based on <= 10 meas per camera
+//                                  Added gravitational acceleration to propagation
+//                                  Added meastype of RA calculated for LST(time)
 //
 //###################################################################################
 
+#pragma warning(disable: 4996)  // disable warning on strcpy, fopen, ...
 
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>     // strcpy, strcat
 
-#include "TrajectorySolution.h"
 #include "../common/ParticleSwarmFunctions.h"
 #include "../common/System_FileFunctions.h"
+#include "TrajectorySolution.h"
 
 
 #ifdef _WIN32 /************* WINDOWS ******************************/
@@ -40,7 +49,7 @@
 
 #endif /***********************************************************/
 
-// Moved from TrajectorySolution.h - shouldn't be needed for the public interface
+// Moved from TrajectorySolutionB.h - shouldn't be needed for the public interface
 // and this causes problems when included in other source files that use X, Y, Z, etc.
 // as symbol names...
 #define   X   0
@@ -57,10 +66,12 @@ void    AllocateTrajectoryMemory4Infill( int kcamera, int nummeas, struct trajec
 void    InfillTrajectoryStructure( int nummeas, double *meas1, double *meas2, double *dtime, double *noise,
                                    double site_latitude, double site_longitude, double site_height,
                                    struct trajectory_info *traj );
-
+									   
 void    IntermediateConsoleOutput( char *ctitle, double *params, int ncams );
 
 void    EnsureNonZeroStdDev( struct trajectory_info *traj );
+
+void    MeasurementWeightsFromStdDev( struct trajectory_info *traj );
 
 void    Angles2SiteMeasurements( double   camera_lat,  double   camera_lon,  double  camera_hkm,  double camera_LST,
                                  int      nummeas,     int      meastype,
@@ -68,23 +79,23 @@ void    Angles2SiteMeasurements( double   camera_lat,  double   camera_lon,  dou
                                  double  *noise,       int      noiseflag,   double  dtime_ref,  double tshift,
                                  double **meashat_ECI, double **rcamera_ECI  );
 
-void   IntersectingPlanes( int     nmeas_camera1, double **meashat_camera1, double *rcamera1,
-                           int     nmeas_camera2, double **meashat_camera2, double *rcamera2,
-                           double *radiant_hat, double  *convergence_angle, double *rcpa_camera1, double *rcpa_camera2  );
+void    IntersectingPlanes( int     nmeas_camera1, double **meashat_camera1, double *rcamera1,
+                            int     nmeas_camera2, double **meashat_camera2, double *rcamera2,
+                            double *radiant_hat, double  *convergence_angle, double *rcpa_camera1, double *rcpa_camera2  );
 
 void    IntersectingPlanes_MultiTrack( struct trajectory_info *traj, double *radiant_hat );
 
 void    IntersectingPlanes_BestConvergence( struct trajectory_info *traj,
-                                            int    *kcamera1,
-                                            int    *kcamera2,
+                                            int    *kcamera1, 
+                                            int    *kcamera2, 
 											double *max_convergence,
-                                            double *radiant_bestconv,
+                                            double *radiant_bestconv, 
 											double *r_bestconv  );
 
 void    Normal2MeteorMeasurements( int nmeas, double **meashat_ECI, double *planenormal );
 
 void    TwoLineCPA( double *position1, double *vector1, double *r1,
-                    double *position2, double *vector2, double *r2,
+                    double *position2, double *vector2, double *r2, 
 					double *d21 );
 
 double  Propagation( int propmodel, int velmodel, double tt, double ttzero, double vinf, double acc1, double acc2 );
@@ -97,19 +108,19 @@ void    VelocityFit_LMS( struct trajectory_info *traj, double *velocityLMS, doub
 
 void    VelDecelFit_LMS( struct trajectory_info *traj, double velocity_input, double *velocityLMS, double *decel1LMS, double *decel2LMS );
 
-void    ConstantVelocity_MultiTrackFit( int ncameras, int *nmeas_per_camera, double *pos, double *tim, double *noi,
+void    ConstantVelocity_MultiTrackFit( int ncameras, int *nmeas_per_camera, double *pos, double *tim, double *wgt,
                                         double *velocityLMS, double *xo, double *rmserror, double *err );
 
-void    LinearVelocity_MultiTrackFit( int ncameras, int *nmeas_per_camera, double *pos, double *tim, double *noi,
+void    LinearVelocity_MultiTrackFit( int ncameras, int *nmeas_per_camera, double *pos, double *tim, double *wgt,
                                       double *velocityLMS, double *decel1LMS, double *decel2LMS, double *rmserror, double *err );
 
-void    QuadraticVelocity_MultiTrackFit( int ncameras, int *nmeas_per_camera, double *pos, double *tim, double *noi,
+void    QuadraticVelocity_MultiTrackFit( int ncameras, int *nmeas_per_camera, double *pos, double *tim, double *wgt,
                                          double *velocityLMS, double *decel1LMS, double *decel2LMS, double *rmserror, double *err );
 
-void    ExponentVelocity_MultiTrackApprox( int ncameras, int *nmeas_per_camera, double *pos, double *tim, double *noi,
+void    ExponentVelocity_MultiTrackApprox( int ncameras, int *nmeas_per_camera, double *pos, double *tim, double *wgt,
                                            double *velocityLMS, double *decel1LMS, double *decel2LMS, double *rmserror, double *err );
 
-void    ExponentVelocity_MultiTrackFit( int ncameras, int *nmeas_per_camera, double *pos, double *tim, double *noi, double velocity_input,
+void    ExponentVelocity_MultiTrackFit( int ncameras, int *nmeas_per_camera, double *pos, double *tim, double *wgt, double velocity_input,
                                         double *velocityLMS, double *decel1LMS, double *decel2LMS, double *rmserror, double *err );
 
 void    ParameterRefinementViaPSO( struct trajectory_info *traj, int cost_function, int velocity_model, int pso_fit_control );
@@ -173,61 +184,23 @@ int     kcamera, kcamera1, kcamera2, kcamera_ref, kmeas_ref, k, offsets_shifted;
 double  radiant_hat[3], radiant_bestconv[3], ttzero, ttzero_limit;
 double  Rbestconv[3], Rdummy[3], Rref[3], dist, magdummy;
 double  max_convergence, vbegin, vapprox, decel1, decel2;
-    
-
-/*    printf("Traj struct size: %d\n", sizeof(traj));
-    
-    // TEST
-    // Print out the parameters
-    printf("PSO params\n");
-    for(int i = 0; i < NFIT_TYPES; i++)
-    {   
-        printf("\n");
-        printf("number_particles %d \n", traj->PSOfit[i].number_particles);
-        printf("maximum_iterations %d \n", traj->PSOfit[i].maximum_iterations);
-        printf("boundary_flag %d \n,", traj->PSOfit[i].boundary_flag);
-        printf("limits_flag %d \n", traj->PSOfit[i].limits_flag);
-        printf("particle_distribution_flag %d \n", traj->PSOfit[i].particle_distribution_flag);
-        printf("epsilon_convergence %e \n", traj->PSOfit[i].epsilon_convergence);
-        printf("weight_inertia %f \n", traj->PSOfit[i].weight_inertia);
-        printf("weight_stubborness %f \n", traj->PSOfit[i].weight_stubborness);
-        printf("weight_grouppressure %f \n", traj->PSOfit[i].weight_grouppressure);
-    }
-
-    printf("PSO fit control:\n");
-    for (int i = 0; i < NPSO_CALLS; ++i)
-    {
-        printf("%i\n", traj->PSO_fit_control[i]);
-    }
-    
-    printf("\n");
-
-    // Print out all observations
-    for (int k = 0; k < traj->maxcameras; ++k)
-    {
-        for (int i = 0; i < traj->nummeas[k]; ++i)
-        {
-            printf("%d meas1: %f \n", k, traj->meas1[k][i]);
-            printf("%d meas2: %f \n\n", k, traj->meas2[k][i]);
-        }
-    }
-
-    printf("\n");*/
 
 
     //======== Since we now use an inverse of the noise variance per measurement to weight
-    //         the minimzation cost function, look for any zero valued standard deviations
-    //         input by the user and set them to the minimum sigma found.
+    //         the minimzation cost function, first look for any zero valued standard 
+    //         deviations input by the user (reseting them to the minimum sigma found), 
+    //         then compute the weights as the inverse variance with the weight sum
+    //         normalized to unity.
 
-    EnsureNonZeroStdDev( traj );
+	MeasurementWeightsFromStdDev( traj );
 
 
     //======== Site positions and measured coordinates are converted into measurement unit vectors
     //           that have a common coordinate system (Earth Centered Inertial or ECI) where the
-    //           conversion depends on the user's selection of input measurement type.
-	//         The times are adjusted to be relative to the first camera, first measurement and
-	//           will later be associated to the first 3 components of the parameter search (which
-	//           is NOT necessarily the earliest begin point in time).
+    //           conversion depends on the user's selection of input measurement type. 
+	//         The times are adjusted to be relative to the first camera, first measurement and 
+	//           will later be associated to the first 3 components of the parameter search (which 
+	//           is NOT necessarily the earliest begin point in time). 
     //         Zero measurement noise is added to the measurements at this stage of processing.
 
 	kcamera_ref = 0;  //... 1st camera
@@ -272,11 +245,11 @@ double  max_convergence, vbegin, vapprox, decel1, decel2;
 
     for( k=9; k<=8+traj->numcameras; k++ )  traj->limits[k]  = traj->max_toffset;  //... Timing offset search limit in seconds
 	                                        traj->limits[9]  = 0.0;                //... First timing offset always fixed at zero
+	
 
-
-    //======== Tzero is a relative time fitting parameter that indicates where the
+    //======== Tzero is a relative time fitting parameter that indicates where the 
 	//           propagation models take over from a purely constant velocity.
-	//         Get the starting tzero by setting it to the midpoint of all the
+	//         Get the starting tzero by setting it to the midpoint of all the 
     //           user provided times. Limit the tzero range from min to max
 	//           unless using the constant velocity model where tzero is fixed.
 
@@ -296,7 +269,7 @@ double  max_convergence, vbegin, vapprox, decel1, decel2;
 
 
     //======== Get an initial guess for the radiant by pairing all track combinations
-    //         and selecting the intersecting planes solution ONLY for the pair with the
+    //         and selecting the intersecting planes solution ONLY for the pair with the 
     //         largest convergence angle.
 
     IntersectingPlanes_BestConvergence( traj, &kcamera1, &kcamera2, &max_convergence, radiant_bestconv, Rbestconv  );
@@ -317,7 +290,7 @@ double  max_convergence, vbegin, vapprox, decel1, decel2;
     //         line with a point that lies along the measurement unit vector.
 
     TwoLineCPA( traj->rcamera_ECI[kcamera_ref][kmeas_ref], traj->meashat_ECI[kcamera_ref][kmeas_ref], Rref,
-                Rbestconv, radiant_bestconv, Rdummy,
+                Rbestconv, radiant_bestconv, Rdummy, 
 				&dist );
 
     traj->params[0] = Rref[X];   //... Initial 3D position state vector in ECI spatial coordinates
@@ -335,7 +308,7 @@ double  max_convergence, vbegin, vapprox, decel1, decel2;
     if( traj->verbose == 1 )  IntermediateConsoleOutput( "Intersecting Planes Solution", traj->params, traj->numcameras );
 
 
-    //======== Refine position and velocity (radiant drection) via Jiri Borivicka's LMS method using the PSO
+    //======== Refine position and velocity (radiant direction) via Jiri Borivicka's LMS method using the PSO
 
     for( k=0; k<traj->numparams; k++ )  traj->xguess[k] = traj->params[k];
     for( k=0; k<traj->numparams; k++ )  traj->xshift[k] = 0.0;
@@ -352,46 +325,45 @@ double  max_convergence, vbegin, vapprox, decel1, decel2;
     if( traj->verbose == 1 )  IntermediateConsoleOutput( "Position & Radiant LMS Solution", traj->params, traj->numcameras );
 
 
-    //======== Use the first half of the measurements (or all of them if less than 10 or
-	//           the fit model is constant velocity) of all the camera tracks to compute
-    //           the initial velocity estimate working from absolute positions (CPA) of
-    //           the rays to the current 3D radiant line. A least mean squares estimate is
-    //           made of the velocity with outlier removal.
-	//         As a by-product, the timing offsets are also estimated. Set them all
-	//           relative to first camera.
+    //======== Use the earliest 10 measurements of each camera track (or all of them if 
+	//           less than 10 or the fit model is constant velocity), to compute the
+    //           initial velocity estimate working from absolute positions (CPA) of the
+    //           rays to the current 3D radiant line. A least mean squares estimate is 
+    //           made of the velocity with outlier removal. 
+	//         As a by-product, the timing offsets are also estimated. Set them all 
+	//           relative to the first camera.
 
     VelocityFit_LMS( traj, &vbegin, traj->tref_offsets );
 
-	for( kcamera=0; kcamera<traj->maxcameras; kcamera++ )  traj->params[9+kcamera] = traj->tref_offsets[kcamera]
+	for( kcamera=0; kcamera<traj->maxcameras; kcamera++ )  traj->params[9+kcamera] = traj->tref_offsets[kcamera] 
 	                                                                               - traj->tref_offsets[0];
 
-	for( kcamera=0; kcamera<traj->maxcameras; kcamera++ )  traj->tref_offsets[kcamera] = traj->tref_offsets[kcamera]
+	for( kcamera=0; kcamera<traj->maxcameras; kcamera++ )  traj->tref_offsets[kcamera] = traj->tref_offsets[kcamera] 
 	                                                                                   - traj->tref_offsets[0];
 
 
 	//======== For the non-constant velocity models, estimate the velocity with deceleration terms given
-	//            the timing offsets just estimated.
+	//            the timing offsets just estimated. This will revert to the constant velocity solution
+	//            if deceleration terms that should be positive are evaluated as negative (set to zero).
 
 	if( traj->velmodel != CONSTANT )  {
 
 		VelDecelFit_LMS( traj, vbegin, &vapprox, &decel1, &decel2 );
-
-/*        printf("Outside vbegin: %f\n", vbegin);
-        printf("Outside decels: %f, %f, %f\n", vapprox, decel1, decel2);*/
 
         traj->params[6] = fabs( decel1 );
 
 		if( traj->velmodel == EXPONENT )  traj->params[7] = fabs( decel2 );
 		else                              traj->params[7] = decel2;
 
-		printf(" INITIAL DECEL GUESS  %12.3le  %8.3lf \n", traj->params[6], traj->params[7] );
+		////printf(" INITIAL DECEL GUESS  %12.3le  %8.3lf \n", traj->params[6], traj->params[7] );
 
 	}
 
 
 	//======== Velocity state vector is now scaled up from a radiant unit vector using the
 	//             velocity magnitude "vbegin" estimated from the early part of the
-	//             measurements. That is, assuming a constant velocity model.
+	//             measurements. That is, assuming a constant velocity model in the early part
+	//             of the meteor's recorded track.
 
     traj->params[3] *= vbegin;
     traj->params[4] *= vbegin;
@@ -401,7 +373,7 @@ double  max_convergence, vbegin, vapprox, decel1, decel2;
 	//======== Refine velocity & deceleration terms only (all other parameters fixed) via the PSO for
 	//            the non-constant velocity motion models.
 
-	if( traj->velmodel != CONSTANT )  {
+	if( traj->velmodel != CONSTANT )  { 
 
         for( k=0; k<traj->numparams; k++ )  traj->xguess[k] = traj->params[k];
         for( k=0; k<traj->numparams; k++ )  traj->xshift[k] = 0.0;
@@ -420,7 +392,7 @@ double  max_convergence, vbegin, vapprox, decel1, decel2;
 	}
 
 
-	//======== Refine ALL parameters EXCEPT deceleration terms to improve general solution via the PSO
+	//======== Refine ALL parameters EXCEPT deceleration terms to improve the general solution via the PSO
 
     for( k=0; k<traj->numparams; k++ )  traj->xguess[k] = traj->params[k];
     for( k=0; k<traj->numparams; k++ )  traj->xshift[k] = traj->limits[k];
@@ -466,7 +438,7 @@ double  max_convergence, vbegin, vapprox, decel1, decel2;
     if( traj->velmodel <= 1 )  traj->xshift[7] = 0.0;  //... Constrain decel2 due to velocity model
     if( traj->velmodel == 0 )  traj->xshift[8] = 0.0;  //... Constrain ttzero due to velocity model
     if( traj->velmodel == 3 )  traj->xshift[8] = 0.0;  //... Constrain ttzero due to velocity model
-
+	 
     ParameterRefinementViaPSO( traj, MEAS2MODEL, traj->velmodel, traj->PSO_fit_control[3] );  //... call index 3
 
     if( traj->verbose == 1 )  IntermediateConsoleOutput( "PSO: 1st Solution on ALL parameters", traj->params, traj->numcameras );
@@ -477,7 +449,7 @@ double  max_convergence, vbegin, vapprox, decel1, decel2;
 	offsets_shifted = TimeOffsetRefinement( traj );
 
 
-	//======== Update the measurements before final solution since there is a timing offset which shifts the LST slightly
+	//======== Update the measurements before the final solution since there is a timing offset which shifts the LST slightly
 
     for( kcamera=0; kcamera<traj->numcameras; kcamera++ )  {
 
@@ -510,7 +482,7 @@ double  max_convergence, vbegin, vapprox, decel1, decel2;
     if( traj->velmodel == 0 )  traj->xshift[8] = 0.0;  //... Constrain ttzero due to velocity model
     if( traj->velmodel == 3 )  traj->xshift[8] = 0.0;  //... Constrain ttzero due to velocity model
 
-
+	 
     ParameterRefinementViaPSO( traj, MEAS2MODEL, traj->velmodel, traj->PSO_fit_control[4] );  //... call index 4
 
     if( traj->verbose == 1 )  IntermediateConsoleOutput( "PSO: 2nd Solution on ALL parameters", traj->params, traj->numcameras );
@@ -569,26 +541,13 @@ double  max_convergence, vbegin, vapprox, decel1, decel2;
     //======== Diagnostic standard deviation output to console
 
     if( traj->verbose != 0 )  {
+		/*PETE
         printf("     Rah Dec sigma  %lf  %lf\n",        traj->ra_sigma * 57.29577951,     traj->dec_sigma * 57.29577951 );
         printf("     Vel Acc sigma  %lf  %lf  %lf\n",   traj->vbegin_sigma,               traj->decel1_sigma,               traj->decel2_sigma );
         printf("     LLA beg sigma  %lf  %lf  %lf\n",   traj->rbeg_lon_sigma * 57.29577951, traj->rbeg_lat_sigma * 57.29577951, traj->rbeg_hkm_sigma );
         printf("     LLA end sigma  %lf  %lf  %lf\n\n", traj->rend_lon_sigma * 57.29577951, traj->rend_lat_sigma * 57.29577951, traj->rend_hkm_sigma );
-    }
-
-
-/*        // Print out all observations
-    for (int k = 0; k < traj->maxcameras; ++k)
-    {
-        for (int i = 0; i < traj->nummeas[k]; ++i)
-        {
-            printf("%d meas1: %f \n", k, traj->meas1[k][i]);
-            printf("%d meas2: %f \n\n", k, traj->meas2[k][i]);
-        }
-    }
-
-    printf("\n");
-
-    printf("rbeg_hkm: %f\n", traj->rbeg_hkm);*/
+        */
+	}
 
 
     return(0);
@@ -603,22 +562,23 @@ double  max_convergence, vbegin, vapprox, decel1, decel2;
 
 void  IntermediateConsoleOutput( char *ctitle, double *params, int ncams )
 {
-int     kcam;
 double  rah, dec, radiant_hat[3], Vbegin;
 
     ECI2RahDec( &params[3], &rah, &dec );
 
     VectorNorm( &params[3], radiant_hat, &Vbegin );
 
+	
     printf(" %s\n", ctitle );
     printf(" ------------------------------------------------------\n" );
     printf("     Radiant at %lf %lf \n", rah * 57.29577951, dec * 57.29577951 );
     printf("     Ro         %lf %lfs %lf \n", params[0], params[1], params[2] );
     printf("     Vel Acc    %lf %le %le \n", Vbegin, fabs(params[6]), fabs(params[7]) );
     printf("     Tzero      %lf \n", params[8] );
+	int kcam;
     for( kcam=0; kcam<ncams; kcam++ ) printf("     Timing Offsets %lf \n", params[9+kcam] );
     printf("\n");
-
+	
 }
 
 
@@ -631,13 +591,12 @@ double  rah, dec, radiant_hat[3], Vbegin;
 void    EnsureNonZeroStdDev( struct trajectory_info *traj )
 {
 int     kmeas, kcamera;
-double  sigma, minsigma, maxsigma;
+double  sigma, minsigma;
 
 
     //======== Find the smallest (nonzero) and largest standard deviation
 
     minsigma = +1.0e+30;
-    maxsigma = -1.0e+30;
 
     for( kcamera=0; kcamera<traj->numcameras; kcamera++ )  {
 
@@ -647,24 +606,73 @@ double  sigma, minsigma, maxsigma;
 
             if( sigma < minsigma  &&  sigma > 0.0 )  minsigma = sigma;
 
-            if( sigma > maxsigma )  maxsigma = sigma;
+        }  //... end of measurement loop per camera
+
+    } //... end of camera loop
+
+
+	if( minsigma < 1.0e-8 )  minsigma = 1.0e-8;   //... Set to at least 0.05 arcseconds
+
+
+    //======== Set the smallest standard deviation for any values that are too small
+
+    for( kcamera=0; kcamera<traj->numcameras; kcamera++ )  {
+
+        for( kmeas=0; kmeas<traj->nummeas[kcamera]; kmeas++ )  {
+
+            if( traj->noise[kcamera][kmeas] < minsigma )  traj->noise[kcamera][kmeas] = minsigma;
 
         }  //... end of measurement loop per camera
 
     } //... end of camera loop
 
 
-    //======== Set the smallest standard deviation and infill any zeroes
+}
 
-    if( maxsigma == 0.0 )  sigma = 1.0e-8;    //... All input sigmas were zero
-    else                   sigma = minsigma;  //... Smallest sigma greater than zero
+//##################################################################################
+//
+//======== Function to set the measurement weights based on the inverse of the input
+//         noise variance of each measurement. This looks for any zero valued
+//         standard deviations and sets them to the minimum found. The std dev is
+//         never allowed to be less than 0.05 arc-seconds (1.0e-8 radians). All 
+//         weights are normalized to a unity sum.
+//==================================================================================
 
+void    MeasurementWeightsFromStdDev( struct trajectory_info *traj )
+{
+int     kmeas, kcamera;
+double  wnorm;
+
+
+    //======== Make sure no sigma < 0.05 arc-seconds, resets traj->noise as necessary
+
+    EnsureNonZeroStdDev( traj );
+
+
+    //======== Set the measurement weights to the inverse of the variance per measurement
+
+	wnorm = 0.0;
 
     for( kcamera=0; kcamera<traj->numcameras; kcamera++ )  {
 
         for( kmeas=0; kmeas<traj->nummeas[kcamera]; kmeas++ )  {
 
-            if( traj->noise[kcamera][kmeas] == 0.0 )  traj->noise[kcamera][kmeas] = sigma;
+            traj->weight[kcamera][kmeas] = 1.0 / ( traj->noise[kcamera][kmeas] * traj->noise[kcamera][kmeas] );
+
+			wnorm += traj->weight[kcamera][kmeas];
+
+        }  //... end of measurement loop per camera
+
+    } //... end of camera loop
+
+
+    //======== Normalize the measurement weights to unity sum
+
+    for( kcamera=0; kcamera<traj->numcameras; kcamera++ )  {
+
+        for( kmeas=0; kmeas<traj->nummeas[kcamera]; kmeas++ )  {
+
+            traj->weight[kcamera][kmeas] /= wnorm;
 
         }  //... end of measurement loop per camera
 
@@ -691,9 +699,11 @@ double  ecef[3], rhat[3], uhat[3], vhat[3], zhat[3], mvec[3], mag, LSTshift, RAp
 double  Rcenter, camera_lat_geocentric, sigma, azim, elev, ra, dec, pi;
 
 
-    //-------- Site position vectors in ECI coords relative to center of Earth
+    //======== Convert each measurement to ECI for a specific camera
 
     pi = 4.0 * atan(1.0);
+
+	RApersecond = 2.0 * pi * 1.00273785 / 86400.0;
 
     LatLonAlt2ECEF( camera_lat, camera_lon, camera_hkm, ecef );
 
@@ -703,7 +713,7 @@ double  Rcenter, camera_lat_geocentric, sigma, azim, elev, ra, dec, pi;
 
     for( kmeas=0; kmeas<nummeas; kmeas++ )  {
 
-		RApersecond = 2.0 * pi * 1.00273785 / 86400.0;
+        //-------- Site position vectors in ECI coords relative to center of Earth
 
 		LSTshift = RApersecond * ( dtime[kmeas] - dtime_ref + tshift );
 
@@ -711,18 +721,21 @@ double  Rcenter, camera_lat_geocentric, sigma, azim, elev, ra, dec, pi;
         rs_camera[kmeas][Y] = Rcenter * cos( camera_lat_geocentric ) * sin( camera_LST + LSTshift );
         rs_camera[kmeas][Z] = Rcenter * sin( camera_lat_geocentric );
 
-	}
 
+        //-------- Measurement unit vectors in ECI (ECEF) coords
+        //           NOTE: "azim" = +east of north,
+        //                 "elev" = +altitude angle above horizon
 
-    //-------- Measurement unit vectors in ECI (ECEF) coords
-    //           NOTE: "azim" = +east of north,
-    //                 "elev" = +altitude angle above horizon
-
-    for( kmeas=0; kmeas<nummeas; kmeas++ )  {
-
-        if( meastype == RADEC )  {  //... no conversion
+        if( meastype == RODEC )  {  //... each RA was calculated using the LST of the measurement time
 
             ra  = meas_angle1[kmeas];
+
+            dec = meas_angle2[kmeas];
+
+        }
+        else if( meastype == RADEC )  {  //... each RA was calculated at a fixed LST (assumed ref time)
+
+            ra  = meas_angle1[kmeas] + LSTshift;
 
             dec = meas_angle2[kmeas];
 
@@ -736,7 +749,7 @@ double  Rcenter, camera_lat_geocentric, sigma, azim, elev, ra, dec, pi;
 
             elev = meas_angle2[kmeas];
 
-            AzimuthElevation2RADec( azim, elev, camera_lat, camera_LST, &ra, &dec );
+            AzimuthElevation2RADec( azim, elev, camera_lat, camera_LST + LSTshift, &ra, &dec );
 
         }
         else if( meastype == SAZZA )  {  //... convert from azimuth +west of south and zenith angle
@@ -748,7 +761,7 @@ double  Rcenter, camera_lat_geocentric, sigma, azim, elev, ra, dec, pi;
 
             elev = pi / 2.0 - meas_angle2[kmeas];
 
-            AzimuthElevation2RADec( azim, elev, camera_lat, camera_LST, &ra, &dec );
+            AzimuthElevation2RADec( azim, elev, camera_lat, camera_LST + LSTshift, &ra, &dec );
 
         }
         else if( meastype == EAZZA )  {  //... convert from azimuth +north of east and zenith angle
@@ -760,7 +773,7 @@ double  Rcenter, camera_lat_geocentric, sigma, azim, elev, ra, dec, pi;
 
             elev = pi / 2.0 - meas_angle2[kmeas];
 
-            AzimuthElevation2RADec( azim, elev, camera_lat, camera_LST, &ra, &dec );
+            AzimuthElevation2RADec( azim, elev, camera_lat, camera_LST + LSTshift, &ra, &dec );
 
         }
         else  {
@@ -931,10 +944,10 @@ double  dotw1w2, range_cpa1, range_cpa2, mag, cosangle;
 //==================================================================================
 
 void   IntersectingPlanes_BestConvergence( struct trajectory_info *traj,
-                                           int    *kcamera1,
-										   int    *kcamera2,
+                                           int    *kcamera1, 
+										   int    *kcamera2, 
 										   double *max_convergence,
-                                           double *radiant_bestconv,
+                                           double *radiant_bestconv, 
 										   double *r_bestconv  )
 {
 int     kcam1, kcam2;
@@ -1169,8 +1182,8 @@ double  Propagation( int propagation_state, int velmodel, double tt, double ttze
 double  ttpoly, xconstV;
 
 
-	//====== Note: The polynomial propagation models are used only for tt > ttzero, in addition to the
-    //             constant velocity model the time period < ttzero.
+	//====== Note: The polynomial propagation models are used only for tt > ttzero, in addition to the 
+    //             constant velocity model for the time period < ttzero. 
 
 	if( tt < ttzero )  {
 		xconstV = fabs(vbegin) * tt;     //... Constant velocity model contribution up to time tt
@@ -1183,7 +1196,7 @@ double  ttpoly, xconstV;
 
 
     if( propagation_state == POSITION )  {
-
+		
         if(      velmodel == CONSTANT  ) return( xconstV + fabs(vbegin) * ttpoly );
         else if( velmodel == LINEAR    ) return( xconstV + fabs(vbegin) * ttpoly - fabs(decel1) * ttpoly * ttpoly / 2.0 );
         else if( velmodel == QUADRATIC ) return( xconstV + fabs(vbegin) * ttpoly - fabs(decel1) * ttpoly * ttpoly / 2.0 + decel2 * ttpoly * ttpoly * ttpoly / 3.0 );
@@ -1255,7 +1268,7 @@ double    ttmin, ttmax;
 	*ttzero_limit = 0.5 * ( ttmax - ttmin );
 
 }
-
+	
 
 //##################################################################################
 //
@@ -1319,11 +1332,11 @@ double    time_difference, rbeg[3], rend[3], rdummy[3], distance;
             //........ Get an absolute ECI position along the measurement ray that has a CPA to the radiant line
 
             TwoLineCPA( traj->rcamera_ECI[kcamera][k],   traj->meashat_ECI[kcamera][k],   rbeg,
-                        &traj->params[0], &traj->params[3], rdummy,
+                        &traj->params[0], &traj->params[3], rdummy, 
 						&distance );
 
             TwoLineCPA( traj->rcamera_ECI[kcamera][k+1], traj->meashat_ECI[kcamera][k+1], rend,
-                        &traj->params[0], &traj->params[3], rdummy,
+                        &traj->params[0], &traj->params[3], rdummy, 
 						&distance );
 
             distance = sqrt( ( rend[X] - rbeg[X] ) * ( rend[X] - rbeg[X] ) +
@@ -1390,7 +1403,7 @@ void   VelocityFit_LMS( struct trajectory_info *traj, double *velocityLMS, doubl
 {
 int       kcamera, kmeas, ntotalmeas, k, kbeg, kend, kmeas_kept, nmeas_kept;
 int      *nmeas_per_camera;
-double   *pos, *tim, *noi, *xo, rmserror, *err;
+double   *pos, *tim, *wgt, *xo, rmserror, *err;
 double    rbeg[3], rend[3], rdummy[3], distance;
 
 
@@ -1404,7 +1417,7 @@ double    rbeg[3], rend[3], rdummy[3], distance;
 
     pos           = (double*) malloc( ntotalmeas       * sizeof(double) );
     tim           = (double*) malloc( ntotalmeas       * sizeof(double) );
-    noi           = (double*) malloc( ntotalmeas       * sizeof(double) );
+    wgt           = (double*) malloc( ntotalmeas       * sizeof(double) );
     err           = (double*) malloc( ntotalmeas       * sizeof(double) );
     xo            = (double*) malloc( traj->numcameras * sizeof(double) );
     nmeas_per_camera = (int*) malloc( traj->numcameras * sizeof(int)    );
@@ -1418,26 +1431,21 @@ double    rbeg[3], rend[3], rdummy[3], distance;
     for( kcamera=0; kcamera<traj->numcameras; kcamera++ ) {
 
         //-------- Avoid first and last measurement, unless 3 or less measurements.
-		//         For under 10 measurements, use all available
-		//         For under 20 measurements, use the first 10
-		//         For more than 20 measurements, restrict to first half of measurements
+		//         For up to 12 measurements, use all available dropping 1st and last
+		//         For more than 12 measurements, use earliest 10 dropping the sfirst
 		//         Use nearly all measurements if constant velocity model
 
         if( traj->nummeas[kcamera] <= 3 )  {
             kbeg = 0;
             kend = traj->nummeas[kcamera] - 1;
         }
-		else if( traj->nummeas[kcamera] <= 10 )  {
+		else if( traj->nummeas[kcamera] < 12 )  {
             kbeg = 1;
             kend = traj->nummeas[kcamera] - 2;
         }
-		else if( traj->nummeas[kcamera] <= 20 )  {
-            kbeg = 1;
-            kend = 9;
-        }
 		else  {
             kbeg = 1;
-            kend = traj->nummeas[kcamera] / 2;
+            kend = 10;
         }
 
 
@@ -1464,7 +1472,7 @@ double    rbeg[3], rend[3], rdummy[3], distance;
             //........ Get an absolute ECI position along the measurement ray at its CPA to the radiant line
 
             TwoLineCPA( traj->rcamera_ECI[kcamera][k], traj->meashat_ECI[kcamera][k], rend,
-                        &traj->params[0], &traj->params[3], rdummy,
+                        &traj->params[0], &traj->params[3], rdummy, 
 						&distance );
 
             //........ Compute the distance from the reference point along the line to the measurement CPA
@@ -1473,9 +1481,9 @@ double    rbeg[3], rend[3], rdummy[3], distance;
                                ( rend[Y] - rbeg[Y] ) * ( rend[Y] - rbeg[Y] ) +
                                ( rend[Z] - rbeg[Z] ) * ( rend[Z] - rbeg[Z] )   );
 
-            noi[kmeas] = traj->noise[kcamera][k];
+            wgt[kmeas] = traj->weight[kcamera][k];
 
-            //........ Time of the measurement can be relative between cameras for this LMS fit,
+            //........ Time of the measurement can be relative between cameras for this LMS fit, 
 			//         therefore no need for tzero or time offset adjustments
 
             tim[kmeas] = traj->meashat_ECI[kcamera][k][T];
@@ -1491,7 +1499,7 @@ double    rbeg[3], rend[3], rdummy[3], distance;
 
     //======== LMS solution for velocity and starting positions per camera
 
-    ConstantVelocity_MultiTrackFit( traj->numcameras, nmeas_per_camera, pos, tim, noi, velocityLMS, xo, &rmserror, err );
+    ConstantVelocity_MultiTrackFit( traj->numcameras, nmeas_per_camera, pos, tim, wgt, velocityLMS, xo, &rmserror, err );
 
 
     //======== Perform outlier removal set at 2x the rmserror
@@ -1509,7 +1517,7 @@ double    rbeg[3], rend[3], rdummy[3], distance;
 
                 pos[kmeas_kept] = pos[kmeas];
                 tim[kmeas_kept] = tim[kmeas];
-                noi[kmeas_kept] = noi[kmeas];
+                wgt[kmeas_kept] = wgt[kmeas];
                 kmeas_kept++;
                 nmeas_kept++;
 
@@ -1526,21 +1534,21 @@ double    rbeg[3], rend[3], rdummy[3], distance;
 
     //======== LMS solution for velocity with outliers removed
 
-    ConstantVelocity_MultiTrackFit( traj->numcameras, nmeas_per_camera, pos, tim, noi, velocityLMS, xo, &rmserror, err );
+    ConstantVelocity_MultiTrackFit( traj->numcameras, nmeas_per_camera, pos, tim, wgt, velocityLMS, xo, &rmserror, err );
 
 
 	//======== Compute the time offsets from the fit starting positions
 
 	if( *velocityLMS <= 0.0 )  *velocityLMS = 42.0;  //... km/sec
 
-	for( kcamera=0; kcamera<traj->numcameras; kcamera++ )  tshift[kcamera] = xo[kcamera] / *velocityLMS;
+	for( kcamera=0; kcamera<traj->numcameras; kcamera++ )  tshift[kcamera] = xo[kcamera] / *velocityLMS; 
 
 
     //======== Free memory and return LMS velocity estimate
 
     free( pos );
     free( tim );
-    free( noi );
+    free( wgt );
     free( err );
     free( xo  );
     free( nmeas_per_camera );
@@ -1551,19 +1559,20 @@ double    rbeg[3], rend[3], rdummy[3], distance;
 
 //##################################################################################
 //
-//======== Function to estimate the velocity and deceleration terms from a set of
+//======== Function to estimate the velocity and deceleration terms from a set of 
 //         positions and times along the radiant line by using an LMS fit to multiple
-//         measurement sequences. The RMS error is used on a second pass to remove
-//         outliers in the final LMS fit. Requires an estimate of the timing offsets
-//         on entering this function.
+//         measurement sequences. The RMS error is used on a second pass to remove 
+//         outliers in the final LMS fit. Requires an estimate of the timing offsets 
+//         on entering this function. 
 //==================================================================================
 
 void   VelDecelFit_LMS( struct trajectory_info *traj, double velocity_input, double *velocityLMS, double *decel1LMS, double *decel2LMS )
 {
 int       kcamera, kmeas, ntotalmeas, k, kbeg, kend, kmeas_kept, nmeas_kept;
 int      *nmeas_per_camera;
-double   *pos, *tim, *noi, rmserror, *err;
+double   *pos, *tim, *wgt, rmserror, *err;
 double    rbeg[3], rend[3], rdummy[3], distance;
+
 
 
     //======== Allocate memory for the positional measurements and time stamps actually used,
@@ -1575,7 +1584,7 @@ double    rbeg[3], rend[3], rdummy[3], distance;
 
     pos           = (double*) malloc( ntotalmeas       * sizeof(double) );
     tim           = (double*) malloc( ntotalmeas       * sizeof(double) );
-    noi           = (double*) malloc( ntotalmeas       * sizeof(double) );
+    wgt           = (double*) malloc( ntotalmeas       * sizeof(double) );
     err           = (double*) malloc( ntotalmeas       * sizeof(double) );
     nmeas_per_camera = (int*) malloc( traj->numcameras * sizeof(int)    );
 
@@ -1609,7 +1618,7 @@ double    rbeg[3], rend[3], rdummy[3], distance;
             //........ Get an absolute ECI position along the measurement ray at its CPA to the radiant line
 
             TwoLineCPA( traj->rcamera_ECI[kcamera][k], traj->meashat_ECI[kcamera][k], rend,
-                        &traj->params[0], &traj->params[3], rdummy,
+                        &traj->params[0], &traj->params[3], rdummy, 
 						&distance );
 
             //........ Compute the distance from the reference point along the line to the measurement CPA
@@ -1618,9 +1627,9 @@ double    rbeg[3], rend[3], rdummy[3], distance;
                                ( rend[Y] - rbeg[Y] ) * ( rend[Y] - rbeg[Y] ) +
                                ( rend[Z] - rbeg[Z] ) * ( rend[Z] - rbeg[Z] )   );
 
-            noi[kmeas] = traj->noise[kcamera][k];
+            wgt[kmeas] = traj->weight[kcamera][k];
 
-            //........ Time of the measurement can be relative between cameras for this LMS fit,
+            //........ Time of the measurement can be relative between cameras for this LMS fit, 
 			//         so time offset adjustments relative to first
 
             tim[kmeas] = traj->meashat_ECI[kcamera][k][T] + traj->tref_offsets[kcamera];
@@ -1634,17 +1643,15 @@ double    rbeg[3], rend[3], rdummy[3], distance;
 
     //======== LMS solutions for non-constant velocity models
 
-    if(      traj->velmodel == LINEAR    )     LinearVelocity_MultiTrackFit( traj->numcameras, nmeas_per_camera, pos, tim, noi, velocityLMS,    decel1LMS, decel2LMS, &rmserror, err );
-	else if( traj->velmodel == QUADRATIC )  QuadraticVelocity_MultiTrackFit( traj->numcameras, nmeas_per_camera, pos, tim, noi, velocityLMS,    decel1LMS, decel2LMS, &rmserror, err );
-	//else if( traj->velmodel == EXPONENT  )   ExponentVelocity_MultiTrackFit( traj->numcameras, nmeas_per_camera, pos, tim, noi, velocity_input, velocityLMS, decel1LMS, decel2LMS, &rmserror, err );
-	else if( traj->velmodel == EXPONENT  )   ExponentVelocity_MultiTrackApprox( traj->numcameras, nmeas_per_camera, pos, tim, noi, velocityLMS, decel1LMS, decel2LMS, &rmserror, err );
+    if(      traj->velmodel == LINEAR    )     LinearVelocity_MultiTrackFit( traj->numcameras, nmeas_per_camera, pos, tim, wgt, velocityLMS,    decel1LMS, decel2LMS, &rmserror, err );
+	else if( traj->velmodel == QUADRATIC )  QuadraticVelocity_MultiTrackFit( traj->numcameras, nmeas_per_camera, pos, tim, wgt, velocityLMS,    decel1LMS, decel2LMS, &rmserror, err );
+	//else if( traj->velmodel == EXPONENT  )   ExponentVelocity_MultiTrackFit( traj->numcameras, nmeas_per_camera, pos, tim, wgt, velocity_input, velocityLMS, decel1LMS, decel2LMS, &rmserror, err );
+	else if( traj->velmodel == EXPONENT  )   ExponentVelocity_MultiTrackApprox( traj->numcameras, nmeas_per_camera, pos, tim, wgt, velocityLMS, decel1LMS, decel2LMS, &rmserror, err );
 	else  {
 		printf("====> ERROR in function VelDecelFit_LMS of trajectory\n");
 		printf("            Velocity model %d not implemented phase 1\n", traj->velmodel );
 	}
 
-
-    // printf("Decel FIRST ESTIMATION: %f, %f\n", *decel1LMS, *decel2LMS);
 
     //======== Perform outlier removal, set at 2x the rmserror
 
@@ -1661,7 +1668,7 @@ double    rbeg[3], rend[3], rdummy[3], distance;
 
                 pos[kmeas_kept] = pos[kmeas];
                 tim[kmeas_kept] = tim[kmeas];
-                noi[kmeas_kept] = noi[kmeas];
+                wgt[kmeas_kept] = wgt[kmeas];
                 kmeas_kept++;
                 nmeas_kept++;
 
@@ -1678,22 +1685,21 @@ double    rbeg[3], rend[3], rdummy[3], distance;
 
     //======== LMS solution for velocity with outliers removed
 
-    if(      traj->velmodel == LINEAR    )     LinearVelocity_MultiTrackFit( traj->numcameras, nmeas_per_camera, pos, tim, noi, velocityLMS,    decel1LMS, decel2LMS, &rmserror, err );
-	else if( traj->velmodel == QUADRATIC )  QuadraticVelocity_MultiTrackFit( traj->numcameras, nmeas_per_camera, pos, tim, noi, velocityLMS,    decel1LMS, decel2LMS, &rmserror, err );
-	//else if( traj->velmodel == EXPONENT  )   ExponentVelocity_MultiTrackFit( traj->numcameras, nmeas_per_camera, pos, tim, noi, velocity_input, velocityLMS, decel1LMS, decel2LMS, &rmserror, err );
-	else if( traj->velmodel == EXPONENT  )   ExponentVelocity_MultiTrackApprox( traj->numcameras, nmeas_per_camera, pos, tim, noi, velocityLMS, decel1LMS, decel2LMS, &rmserror, err );
+    if(      traj->velmodel == LINEAR    )     LinearVelocity_MultiTrackFit( traj->numcameras, nmeas_per_camera, pos, tim, wgt, velocityLMS,    decel1LMS, decel2LMS, &rmserror, err );
+	else if( traj->velmodel == QUADRATIC )  QuadraticVelocity_MultiTrackFit( traj->numcameras, nmeas_per_camera, pos, tim, wgt, velocityLMS,    decel1LMS, decel2LMS, &rmserror, err );
+	//else if( traj->velmodel == EXPONENT  )   ExponentVelocity_MultiTrackFit( traj->numcameras, nmeas_per_camera, pos, tim, wgt, velocity_input, velocityLMS, decel1LMS, decel2LMS, &rmserror, err );
+	else if( traj->velmodel == EXPONENT  )   ExponentVelocity_MultiTrackApprox( traj->numcameras, nmeas_per_camera, pos, tim, wgt, velocityLMS, decel1LMS, decel2LMS, &rmserror, err );
 	else  {
 		printf("====> ERROR in function VelDecelFit_LMS of trajectory\n");
 		printf("            Velocity model %d not implemented phase 2\n", traj->velmodel );
 	}
 
-    // printf("Decel SECOND ESTIMATION: %f, %f\n", *decel1LMS, *decel2LMS);
 
     //======== Free memory and return LMS velocity estimate
 
     free( pos );
     free( tim );
-    free( noi );
+    free( wgt );
     free( err );
     free( nmeas_per_camera );
 
@@ -1708,21 +1714,22 @@ double    rbeg[3], rend[3], rdummy[3], distance;
 //         tracks. Assumes all the tracks have the same constant motion velocity "velocityLMS"
 //         but that each track is not synchronized in any way to another track sequence in
 //         time or starting position "xo". The input data is comprised of a set of concatenated
-//         track measurements in vectors for position "pos", time "tim", and standard deviation
-//         "noi". The weight is the inverse of the variance per measurement.
+//         track measurements in vectors for position "pos", time "tim", and weight "wgt"
+//         which is the inverse of the variance per measurement.
 //
 //         Thus the user inputs the number of sequences or tracks "ncameras" and the number of
 //         measurements for each camera "nmeas_per_camera" which does NOT have to be the same
 //         measurement count per camera.
 //============================================================================================
 
-void  ConstantVelocity_MultiTrackFit( int ncameras, int *nmeas_per_camera, double *pos, double *tim, double *noi, double *velocityLMS, double *xo, double *rmserror, double *err )
+void  ConstantVelocity_MultiTrackFit( int ncameras, int *nmeas_per_camera, double *pos, double *tim, double *wgt, double *velocityLMS, double *xo, double *rmserror, double *err )
 {
 int     kcamera, kmeas, k;
-double  sumw, sumwx, sumwt, sumwxt, sumwtt, sumwtsumwtsumw, sumwxsumwtsumw, sumesq, weight;
+double  sumw, sumwx, sumwt, sumwxt, sumwtt, sumwtsumwtsumw, sumwxsumwtsumw, sumesq;
 
 
-    //======== Compute sums for the LMS solution
+
+	//======== Compute sums for the LMS solution
 
     sumwxt         = 0.0;
     sumwtt         = 0.0;
@@ -1737,28 +1744,21 @@ double  sumw, sumwx, sumwt, sumwxt, sumwtt, sumwtsumwtsumw, sumwxsumwtsumw, sume
         sumwx = 0.0;
         sumwt = 0.0;
 
-        if( nmeas_per_camera[kcamera] > 0 )  {
+        for( k=0; k<nmeas_per_camera[kcamera]; k++ )  {
 
-            for( k=0; k<nmeas_per_camera[kcamera]; k++ )  {
+            sumw   += wgt[kmeas];
+            sumwx  += wgt[kmeas] * pos[kmeas];
+            sumwt  += wgt[kmeas] * tim[kmeas];
 
-                if( noi[kmeas] != 0.0 )  weight = 1.0 / ( noi[kmeas] * noi[kmeas] );
-                else                     weight = 1.0;
+            sumwxt += wgt[kmeas] * pos[kmeas] * tim[kmeas];
+            sumwtt += wgt[kmeas] * tim[kmeas] * tim[kmeas];
 
-                sumw   += weight;
-                sumwx  += weight * pos[kmeas];
-                sumwt  += weight * tim[kmeas];
+            kmeas++;
 
-                sumwxt += weight * pos[kmeas] * tim[kmeas];
-                sumwtt += weight * tim[kmeas] * tim[kmeas];
+        }  // end of measurement loop per camera
 
-                kmeas++;
-
-            }  // end of measurement loop per camera
-
-            sumwtsumwtsumw += sumwt * sumwt / sumw;
-            sumwxsumwtsumw += sumwx * sumwt / sumw;
-
-        }
+        sumwtsumwtsumw += sumwt * sumwt / sumw;
+        sumwxsumwtsumw += sumwx * sumwt / sumw;
 
     }  //... end of camera loop
 
@@ -1782,12 +1782,9 @@ double  sumw, sumwx, sumwt, sumwxt, sumwtt, sumwtsumwtsumw, sumwxsumwtsumw, sume
 
             for( k=0; k<nmeas_per_camera[kcamera]; k++ )  {
 
-                if( noi[kmeas] != 0.0 )  weight = 1.0 / ( noi[kmeas] * noi[kmeas] );
-                else                     weight = 1.0;
-
-                sumw  += weight;
-                sumwx += weight * pos[kmeas];
-                sumwt += weight * tim[kmeas];
+                sumw  += wgt[kmeas];
+                sumwx += wgt[kmeas] * pos[kmeas];
+                sumwt += wgt[kmeas] * tim[kmeas];
 
                 kmeas++;
 
@@ -1833,19 +1830,29 @@ double  sumw, sumwx, sumwt, sumwxt, sumwtt, sumwtsumwtsumw, sumwxsumwtsumw, sume
 //         sequences of position and time measurements obtained from several independent
 //         tracks. Assumes all the tracks have the same velocity and deceleration and the
 //         model chosen is LINEAR. The input data is comprised of a set of concatenated
-//         track measurements in vectors for position "pos", time "tim", and standard deviation
-//         "noi". The weight is the inverse of the variance per measurement.
+//         track measurements in vectors for position "pos", time "tim", and weight "wgt"
+//         which is a normalized inverse of the variance per measurement.
+//
+//         The time MUST include timing offsets between cameras.
+//
+//         If a deceleration coefficient that should be greater than zero is found
+//         to be a negative value, it is set to zero rather than try to do a
+//         constrained LMS for positive coefficients (since this is a first guess
+//         function it should be OK to initialize the solution with zero deceleration).
 //
 //         Thus the user inputs the number of sequences or tracks "ncameras" and the number of
 //         measurements for each camera "nmeas_per_camera" which does NOT have to be the same
 //         measurement count per camera.
 //============================================================================================
 
-void  LinearVelocity_MultiTrackFit( int ncameras, int *nmeas_per_camera, double *pos, double *tim, double *noi, double *velocityLMS, double *decel1LMS, double *decel2LMS, double *rmserror, double *err )
+void  LinearVelocity_MultiTrackFit( int ncameras, int *nmeas_per_camera, double *pos, double *tim, double *wgt, double *velocityLMS, double *decel1LMS, double *decel2LMS, double *rmserror, double *err )
 {
 int     kcamera, kmeas, k;
-double  sumwt2, sumwt3, sumwt4, sumwxt1, sumwxt2, sumesq, weight;
+double  sumwt2, sumwt3, sumwt4, sumwxt1, sumwxt2, sumesq;
 double  matinv[2][2], denom, alpha;
+double  vel, vel_const, xo_const, rmserr_const;
+
+
 
 
     //======== Compute sums for the LMS solution
@@ -1860,25 +1867,18 @@ double  matinv[2][2], denom, alpha;
 
     for( kcamera=0; kcamera<ncameras; kcamera++ ) {
 
-        if( nmeas_per_camera[kcamera] > 0 )  {
+        for( k=0; k<nmeas_per_camera[kcamera]; k++ )  {
 
-            for( k=0; k<nmeas_per_camera[kcamera]; k++ )  {
+            sumwt2  += wgt[kmeas] * tim[kmeas] * tim[kmeas];
+            sumwt3  -= wgt[kmeas] * tim[kmeas] * tim[kmeas] * tim[kmeas];
+            sumwt4  += wgt[kmeas] * tim[kmeas] * tim[kmeas] * tim[kmeas] * tim[kmeas];
 
-                if( noi[kmeas] != 0.0 )  weight = 1.0 / ( noi[kmeas] * noi[kmeas] );
-                else                     weight = 1.0;
+            sumwxt1 += wgt[kmeas] * pos[kmeas] * tim[kmeas];
+            sumwxt2 -= wgt[kmeas] * pos[kmeas] * tim[kmeas] * tim[kmeas];
 
-                sumwt2  += weight * tim[kmeas] * tim[kmeas];
-                sumwt3  -= weight * tim[kmeas] * tim[kmeas] * tim[kmeas];
-                sumwt4  += weight * tim[kmeas] * tim[kmeas] * tim[kmeas] * tim[kmeas];
+            kmeas++;
 
-                sumwxt1 += weight * pos[kmeas] * tim[kmeas];
-                sumwxt2 -= weight * pos[kmeas] * tim[kmeas] * tim[kmeas];
-
-                kmeas++;
-
-            }  // end of measurement loop for the given camera
-
-        }  //... end if any measurements for the given camera
+        }  // end of measurement loop for the given camera
 
     }  //... end of camera loop
 
@@ -1893,14 +1893,31 @@ double  matinv[2][2], denom, alpha;
 
 	denom = sumwt2 * sumwt4 - sumwt3 * sumwt3;
 
+	vel   = ( sumwxt1 * matinv[0][0] + sumwxt2 * matinv[0][1] ) / denom;
 
-    *velocityLMS = ( sumwxt1 * matinv[0][0] + sumwxt2 * matinv[0][1] ) / denom;
+    alpha = ( sumwxt1 * matinv[1][0] + sumwxt2 * matinv[1][1] ) / denom;
 
-    alpha        = ( sumwxt1 * matinv[1][0] + sumwxt2 * matinv[1][1] ) / denom;
 
-	*decel1LMS = 2.0 * alpha;
+	if( alpha > 0.0 )  {
 
-	*decel2LMS = 0.0;
+        *velocityLMS = vel;
+
+	    *decel1LMS = 2.0 * alpha;
+
+	    *decel2LMS = 0.0;
+
+	}
+	else  {
+
+		ConstantVelocity_MultiTrackFit( ncameras, nmeas_per_camera, pos, tim, wgt, &vel_const, &xo_const, &rmserr_const, err );
+
+        *velocityLMS = vel_const;
+
+	    *decel1LMS = 0.0;
+
+	    *decel2LMS = 0.0;
+
+	}
 
 
     //======== Determine the root-mean-square error
@@ -1913,7 +1930,7 @@ double  matinv[2][2], denom, alpha;
 
         for( k=0; k<nmeas_per_camera[kcamera]; k++ )  {
 
-            err[kmeas] = pos[kmeas] - *velocityLMS * tim[kmeas]
+            err[kmeas] = pos[kmeas] - *velocityLMS * tim[kmeas] 
 			                        +   *decel1LMS * tim[kmeas] * tim[kmeas] / 2.0;
 
             sumesq += err[kmeas] * err[kmeas];
@@ -1935,22 +1952,31 @@ double  matinv[2][2], denom, alpha;
 //         sequences of position and time measurements obtained from several independent
 //         tracks. Assumes all the tracks have the same velocity and deceleration and the
 //         model chosen is QUADRATIC. The input data is comprised of a set of concatenated
-//         track measurements in vectors for position "pos", time "tim", and standard deviation
-//         "noi". The weight is the inverse of the variance per measurement.
+//         track measurements in vectors for position "pos", time "tim", and weight "wgt"
+//         which is a normalized inverse of the variance per measurement.
+//
+//         The time MUST include timing offsets between cameras.
+//
+//         If the t^2 deceleration coefficient that should be greater than zero is found
+//         to be a negative value, all deceleration is set to zero rather than try to do a
+//         constrained LMS for positive coefficients (since this is a first guess
+//         function it should be OK to initialize the solution with zero deceleration).
 //
 //         Thus the user inputs the number of sequences or tracks "ncameras" and the number of
 //         measurements for each camera "nmeas_per_camera" which does NOT have to be the same
 //         measurement count per camera.
 //============================================================================================
 
-void  QuadraticVelocity_MultiTrackFit( int ncameras, int *nmeas_per_camera, double *pos, double *tim, double *noi, double *velocityLMS, double *decel1LMS, double *decel2LMS, double *rmserror, double *err )
+void  QuadraticVelocity_MultiTrackFit( int ncameras, int *nmeas_per_camera, double *pos, double *tim, double *wgt, double *velocityLMS, double *decel1LMS, double *decel2LMS, double *rmserror, double *err )
 {
 int     kcamera, kmeas, k;
-double  sumwt2, sumwt3, sumwt4, sumwt5, sumwt6, sumwxt1, sumwxt2, sumwxt3, sumesq, weight;
+double  sumwt2, sumwt3, sumwt4, sumwt5, sumwt6, sumwxt1, sumwxt2, sumwxt3, sumesq;
 double  matinv[3][3], denom, alpha, beta;
+double  vel, vel_const, xo_const, rmserr_const;
 
 
-    //======== Compute sums for the LMS solution
+
+	//======== Compute sums for the LMS solution
 
     sumwt2         = 0.0;
     sumwt3         = 0.0;
@@ -1965,28 +1991,21 @@ double  matinv[3][3], denom, alpha, beta;
 
     for( kcamera=0; kcamera<ncameras; kcamera++ ) {
 
-        if( nmeas_per_camera[kcamera] > 0 )  {
+        for( k=0; k<nmeas_per_camera[kcamera]; k++ )  {
 
-            for( k=0; k<nmeas_per_camera[kcamera]; k++ )  {
+            sumwt2  += wgt[kmeas] * tim[kmeas] * tim[kmeas];
+            sumwt3  -= wgt[kmeas] * tim[kmeas] * tim[kmeas] * tim[kmeas];
+            sumwt4  += wgt[kmeas] * tim[kmeas] * tim[kmeas] * tim[kmeas] * tim[kmeas];
+            sumwt5  -= wgt[kmeas] * tim[kmeas] * tim[kmeas] * tim[kmeas] * tim[kmeas] * tim[kmeas];
+            sumwt6  += wgt[kmeas] * tim[kmeas] * tim[kmeas] * tim[kmeas] * tim[kmeas] * tim[kmeas] * tim[kmeas];
 
-                if( noi[kmeas] != 0.0 )  weight = 1.0 / ( noi[kmeas] * noi[kmeas] );
-                else                     weight = 1.0;
+            sumwxt1 += wgt[kmeas] * pos[kmeas] * tim[kmeas];
+            sumwxt2 -= wgt[kmeas] * pos[kmeas] * tim[kmeas] * tim[kmeas];
+            sumwxt3 += wgt[kmeas] * pos[kmeas] * tim[kmeas] * tim[kmeas] * tim[kmeas];
 
-                sumwt2  += weight * tim[kmeas] * tim[kmeas];
-                sumwt3  -= weight * tim[kmeas] * tim[kmeas] * tim[kmeas];
-                sumwt4  += weight * tim[kmeas] * tim[kmeas] * tim[kmeas] * tim[kmeas];
-                sumwt5  -= weight * tim[kmeas] * tim[kmeas] * tim[kmeas] * tim[kmeas] * tim[kmeas];
-                sumwt6  += weight * tim[kmeas] * tim[kmeas] * tim[kmeas] * tim[kmeas] * tim[kmeas] * tim[kmeas];
+            kmeas++;
 
-                sumwxt1 += weight * pos[kmeas] * tim[kmeas];
-                sumwxt2 -= weight * pos[kmeas] * tim[kmeas] * tim[kmeas];
-                sumwxt3 += weight * pos[kmeas] * tim[kmeas] * tim[kmeas] * tim[kmeas];
-
-                kmeas++;
-
-            }  // end of measurement loop for the given camera
-
-        }  //... end if any measurements for the given camera
+        }  // end of measurement loop for the given camera
 
     }  //... end of camera loop
 
@@ -2008,15 +2027,33 @@ double  matinv[3][3], denom, alpha, beta;
 	denom = sumwt2 * matinv[0][0] + sumwt3 * matinv[1][0] + sumwt4 * matinv[2][0];
 
 
-    *velocityLMS = ( sumwxt1 * matinv[0][0] + sumwxt2 * matinv[0][1] + sumwxt3 * matinv[0][2] ) / denom;
+    vel   = ( sumwxt1 * matinv[0][0] + sumwxt2 * matinv[0][1] + sumwxt3 * matinv[0][2] ) / denom;
 
-    alpha        = ( sumwxt1 * matinv[1][0] + sumwxt2 * matinv[1][1] + sumwxt3 * matinv[1][2] ) / denom;
+    alpha = ( sumwxt1 * matinv[1][0] + sumwxt2 * matinv[1][1] + sumwxt3 * matinv[1][2] ) / denom;
 
-    beta         = ( sumwxt1 * matinv[2][0] + sumwxt2 * matinv[2][1] + sumwxt3 * matinv[2][2] ) / denom;
+    beta  = ( sumwxt1 * matinv[2][0] + sumwxt2 * matinv[2][1] + sumwxt3 * matinv[2][2] ) / denom;
 
-	*decel1LMS = 2.0 * alpha;
+	
+	if( alpha > 0.0 )  {
 
-	*decel2LMS = 3.0 * beta;
+        *velocityLMS = vel;
+
+	    *decel1LMS = 2.0 * alpha;
+
+	    *decel2LMS = 3.0 * beta;
+
+	}
+	else  {
+
+		ConstantVelocity_MultiTrackFit( ncameras, nmeas_per_camera, pos, tim, wgt, &vel_const, &xo_const, &rmserr_const, err );
+
+        *velocityLMS = vel_const;
+
+	    *decel1LMS = 0.0;
+
+	    *decel2LMS = 0.0;
+
+	}
 
 
     //======== Determine the root-mean-square error
@@ -2029,7 +2066,7 @@ double  matinv[3][3], denom, alpha, beta;
 
         for( k=0; k<nmeas_per_camera[kcamera]; k++ )  {
 
-            err[kmeas] = pos[kmeas] - *velocityLMS * tim[kmeas]
+            err[kmeas] = pos[kmeas] - *velocityLMS * tim[kmeas] 
 			                        +   *decel1LMS * tim[kmeas] * tim[kmeas] / 2.0
 								    -   *decel2LMS * tim[kmeas] * tim[kmeas] * tim[kmeas] / 3.0;
 
@@ -2052,25 +2089,33 @@ double  matinv[3][3], denom, alpha, beta;
 //         sequences of position and time measurements obtained from several independent
 //         tracks. Assumes all the tracks have the same velocity and deceleration and the
 //         model chosen is EXPONENT. The input data is comprised of a set of concatenated
-//         track measurements in vectors for position "pos", time "tim", and standard deviation
-//         "noi". The weight is the inverse of the variance per measurement.
+//         track measurements in vectors for position "pos", time "tim", and weight "wgt"
+//         which is a normalized inverse of the variance per measurement.
+//
+//         The time MUST include timing offsets between cameras.
 //
 //         This is an approximation because the exponential has been expanded to just 3 terms
 //         such that exp(ax) ~ 1 + ax + (ax)^2/2
+//
+//         If a deceleration coefficient that should be greater than zero is found
+//         to be a negative value, it is set to zero rather than try to do a
+//         constrained LMS for positive coefficients (since this is a first guess
+//         function it should be OK to initialize the solution with zero deceleration).
 //
 //         Thus the user inputs the number of sequences or tracks "ncameras" and the number of
 //         measurements for each camera "nmeas_per_camera" which does NOT have to be the same
 //         measurement count per camera.
 //============================================================================================
 
-void  ExponentVelocity_MultiTrackApprox( int ncameras, int *nmeas_per_camera, double *pos, double *tim, double *noi, double *velocityLMS, double *decel1LMS, double *decel2LMS, double *rmserror, double *err )
+void  ExponentVelocity_MultiTrackApprox( int ncameras, int *nmeas_per_camera, double *pos, double *tim, double *wgt, double *velocityLMS, double *decel1LMS, double *decel2LMS, double *rmserror, double *err )
 {
 int     kcamera, kmeas, k;
-double  sumwt0, sumwt1, sumwt2, sumwt3, sumwt4, sumwxt0, sumwxt1, sumwxt2, sumesq, weight;
+double  sumwt0, sumwt1, sumwt2, sumwt3, sumwt4, sumwxt0, sumwxt1, sumwxt2, sumesq;
 double  matinv[3][3], denom, alpha, beta, eta;
+double  vel_const, xo_const, rmserr_const;
 
 
-    //======== Compute sums for the LMS solution
+//======== Compute sums for the LMS solution
 
     sumwt0         = 0.0;
     sumwt1         = 0.0;
@@ -2085,28 +2130,21 @@ double  matinv[3][3], denom, alpha, beta, eta;
 
     for( kcamera=0; kcamera<ncameras; kcamera++ ) {
 
-        if( nmeas_per_camera[kcamera] > 0 )  {
+        for( k=0; k<nmeas_per_camera[kcamera]; k++ )  {
 
-            for( k=0; k<nmeas_per_camera[kcamera]; k++ )  {
+            sumwt0  += wgt[kmeas];
+            sumwt1  -= wgt[kmeas] * tim[kmeas];
+            sumwt2  += wgt[kmeas] * tim[kmeas] * tim[kmeas];
+            sumwt3  -= wgt[kmeas] * tim[kmeas] * tim[kmeas] * tim[kmeas];
+            sumwt4  += wgt[kmeas] * tim[kmeas] * tim[kmeas] * tim[kmeas] * tim[kmeas];
 
-                if( fabs(noi[kmeas]) > 1e-8 )  weight = 1.0 / ( noi[kmeas] * noi[kmeas] );
-                else                     weight = 1.0;
+            sumwxt0 -= wgt[kmeas] * pos[kmeas];
+            sumwxt1 += wgt[kmeas] * pos[kmeas] * tim[kmeas];
+            sumwxt2 -= wgt[kmeas] * pos[kmeas] * tim[kmeas] * tim[kmeas];
 
-                sumwt0  += weight;
-                sumwt1  -= weight * tim[kmeas];
-                sumwt2  += weight * tim[kmeas] * tim[kmeas];
-                sumwt3  -= weight * tim[kmeas] * tim[kmeas] * tim[kmeas];
-                sumwt4  += weight * tim[kmeas] * tim[kmeas] * tim[kmeas] * tim[kmeas];
+            kmeas++;
 
-                sumwxt0 -= weight * pos[kmeas];
-                sumwxt1 += weight * pos[kmeas] * tim[kmeas];
-                sumwxt2 -= weight * pos[kmeas] * tim[kmeas] * tim[kmeas];
-
-                kmeas++;
-
-            }  // end of measurement loop for the given camera
-
-        }  //... end if any measurements for the given camera
+        }  // end of measurement loop for the given camera
 
     }  //... end of camera loop
 
@@ -2130,32 +2168,31 @@ double  matinv[3][3], denom, alpha, beta, eta;
 
     alpha = ( sumwxt0 * matinv[0][0] + sumwxt1 * matinv[0][1] + sumwxt2 * matinv[0][2] ) / denom;
 
-/*    printf("sumwxt0 %f\n", sumwxt0);
-
-    printf("matinv[0][0] %f \n", matinv[0][0]);
-    printf("sumwxt1 %f \n", sumwxt1);
-    printf("matinv[0][1] %f \n", matinv[0][1]);
-    printf("sumwxt2 %f \n", sumwxt2);
-    printf("matinv[0][2] %f \n", matinv[0][2]);
-    printf("denom %f \n", denom);*/
-
     eta   = ( sumwxt0 * matinv[1][0] + sumwxt1 * matinv[1][1] + sumwxt2 * matinv[1][2] ) / denom;
 
     beta  = ( sumwxt0 * matinv[2][0] + sumwxt1 * matinv[2][1] + sumwxt2 * matinv[2][2] ) / denom;
 
-    alpha = fabs(alpha);
-    beta = fabs(beta);
-    //eta = fabs(eta);
 
-/*    printf("Alpha: %f\n", alpha);
-    printf("Beta: %f\n", beta);
-    printf("Eta: %f\n", eta);*/
+	if( alpha > 0.0  &&  beta >= 0.0 )  {
 
-	*decel1LMS = alpha;
+	    *decel1LMS = alpha;
 
-	*decel2LMS = sqrt( 2.0 * beta / alpha );
+	    *decel2LMS = sqrt( 2.0 * beta / alpha );
 
-	*velocityLMS = eta - *decel1LMS * *decel2LMS;
+        *velocityLMS = eta - *decel1LMS * *decel2LMS;
+
+	}
+	else  {
+
+		ConstantVelocity_MultiTrackFit( ncameras, nmeas_per_camera, pos, tim, wgt, &vel_const, &xo_const, &rmserr_const, err );
+
+        *velocityLMS = vel_const;
+
+	    *decel1LMS = 0.0;
+
+	    *decel2LMS = 0.0;
+
+	}
 
 
     //======== Determine the root-mean-square error
@@ -2168,7 +2205,7 @@ double  matinv[3][3], denom, alpha, beta, eta;
 
         for( k=0; k<nmeas_per_camera[kcamera]; k++ )  {
 
-            err[kmeas] = pos[kmeas] - *velocityLMS * tim[kmeas]
+            err[kmeas] = pos[kmeas] - *velocityLMS * tim[kmeas]  
 			                        +   *decel1LMS * exp( *decel2LMS * tim[kmeas] );
 
 
@@ -2182,10 +2219,6 @@ double  matinv[3][3], denom, alpha, beta, eta;
 
     *rmserror = sqrt( sumesq / (double)kmeas );
 
-
-    // printf("Exp est: %f, %f, %f\n", *velocityLMS, *decel1LMS, *decel2LMS);
-
-
 }
 
 
@@ -2195,27 +2228,32 @@ double  matinv[3][3], denom, alpha, beta, eta;
 //         sequences of position and time measurements obtained from several independent
 //         tracks. Assumes all the tracks have the same velocity and deceleration and the
 //         model chosen is EXPONENT. The input data is comprised of a set of concatenated
-//         track measurements in vectors for position "pos", time "tim", and standard deviation
-//         "noi". The weight is the inverse of the variance per measurement. The velocity
-//         and timing offsets are presumed known a priori and "tim" includes the offsets.
+//         track measurements in vectors for position "pos", time "tim", and weight "wgt"
+//         which is a normalized inverse of the variance per measurement.
+//
+//         The time MUST include timing offsets between cameras.
+//
+//         The velocity is presumed known a priori.
+//
+//         If a deceleration coefficient that should be greater than zero is found
+//         to be a negative value, it is set to zero rather than try to do a
+//         constrained LMS for positive coefficients (since this is a first guess
+//         function it should be OK to initialize the solution with zero deceleration).
 //
 //         Thus the user inputs the number of sequences or tracks "ncameras" and the number of
 //         measurements for each camera "nmeas_per_camera" which does NOT have to be the same
 //         measurement count per camera.
 //============================================================================================
 
-void  ExponentVelocity_MultiTrackFit( int ncameras, int *nmeas_per_camera, double *pos, double *tim, double *noi, double velocity_input, double *velocityLMS, double *decel1LMS, double *decel2LMS, double *rmserror, double *err )
+void  ExponentVelocity_MultiTrackFit( int ncameras, int *nmeas_per_camera, double *pos, double *tim, double *wgt, double velocity_input, double *velocityLMS, double *decel1LMS, double *decel2LMS, double *rmserror, double *err )
 {
 int     kcamera, kmeas, k;
-double  sumw, sumwe, sumwex, sumwet, sumwext, sumesq, weight, expa2t, posvel;
+double  sumw, sumwe, sumwex, sumwet, sumwext, sumesq, expa2t, posvel; 
 double  diff, diff_last, diff_best;
 double  decel2, decel2_start, decel2_step, decel2_stop, decel2_best, decel1_best;
-    
-    decel1_best = 0;
-    decel2_best = 0;
-    diff_last = 0;
 
-    //======== Loop over decel2 values
+
+	//======== Loop over positive only decel2 values
 
     decel2_start =  0.000;
 	decel2_step  =  0.001;
@@ -2237,28 +2275,21 @@ double  decel2, decel2_start, decel2_step, decel2_stop, decel2_best, decel1_best
 
         for( kcamera=0; kcamera<ncameras; kcamera++ ) {
 
-            if( nmeas_per_camera[kcamera] > 0 )  {
+            for( k=0; k<nmeas_per_camera[kcamera]; k++ )  {
 
-                for( k=0; k<nmeas_per_camera[kcamera]; k++ )  {
+				expa2t = exp( decel2 * tim[kmeas] );
 
-                    if( noi[kmeas] != 0.0 )  weight = 1.0 / ( noi[kmeas] * noi[kmeas] );
-                    else                     weight = 1.0;
+				posvel = pos[kmeas] - velocity_input * tim[kmeas];
 
-					expa2t = exp( decel2 * tim[kmeas] );
+		        sumw    += wgt[kmeas];
+                sumwe   += wgt[kmeas] * expa2t * expa2t;
+                sumwet  += wgt[kmeas] * expa2t * expa2t * tim[kmeas];
+                sumwex  -= wgt[kmeas] * expa2t * posvel;
+                sumwext -= wgt[kmeas] * expa2t * posvel * tim[kmeas];
 
-					posvel = pos[kmeas] - velocity_input * tim[kmeas];
+                kmeas++;
 
-					sumw    += weight;
-                    sumwe   += weight * expa2t * expa2t;
-                    sumwet  += weight * expa2t * expa2t * tim[kmeas];
-                    sumwex  -= weight * expa2t * posvel;
-                    sumwext -= weight * expa2t * posvel * tim[kmeas];
-
-                    kmeas++;
-
-                }  // end of measurement loop for the given camera
-
-            }  //... end if any measurements for the given camera
+            }  // end of measurement loop for the given camera
 
         }  //... end of camera loop
 
@@ -2308,7 +2339,7 @@ double  decel2, decel2_start, decel2_step, decel2_stop, decel2_best, decel1_best
 
         for( k=0; k<nmeas_per_camera[kcamera]; k++ )  {
 
-            err[kmeas] = pos[kmeas] - velocity_input * tim[kmeas]
+            err[kmeas] = pos[kmeas] - velocity_input * tim[kmeas]  
 			                        + *decel1LMS * exp( *decel2LMS * tim[kmeas] );
 
 
@@ -2331,15 +2362,15 @@ double  decel2, decel2_start, decel2_step, decel2_stop, decel2_best, decel1_best
 //
 //======== Function used to refine the estimation parameters by calling the PSO
 //         minimization module. Four levels of accuracy are available based on need:
-//         1) a low quality "quick fit" for performing many Monte Carlo solutions
-//            given the no added noise best solution as starting guess each time.
+//         1) a low quality "quick fit" for performing many Monte Carlo solutions 
+//            given the no added noise best solution as starting guess each time. 
 //         2) a "good" quality solution for bootstrapping to the final best solution
 //            without a large runtime cost.
 //         3) a high quality "accurate" solution for best solution iteration using
 //            large number of particles and tighter convergence criteria
-//         4) an "extremely" heavy particle count in the PSO and even tighter
+//         4) an "extremely" heavy particle count in the PSO and even tighter 
 //            constraints on convergence
-//         Input is the starting guess of parameters passed in via traj->xguess
+//         Input is the starting guess of parameters passed in via traj->xguess 
 //         with range limits in traj->xshift, with the output solution saved off
 //         to traj->params.
 //=================================================================================
@@ -2362,15 +2393,15 @@ struct PSO_info          trajpsofit;
 
     //======== Pre-populate the PSO and initialize with guesses and shifts (zero shifts for fixed parameters)
 
-    ParticleSwarm_PrePopulate( trajpsofit.number_particles,
-		                       traj->numparams,
+    ParticleSwarm_PrePopulate( trajpsofit.number_particles, 
+		                       traj->numparams, 
 							   trajpsofit.maximum_iterations,
-                               trajpsofit.boundary_flag,
+                               trajpsofit.boundary_flag,  
 							   trajpsofit.limits_flag,
-							   trajpsofit.particle_distribution_flag,
+							   trajpsofit.particle_distribution_flag, 
 							   trajpsofit.epsilon_convergence,
-                               trajpsofit.weight_inertia,
-							   trajpsofit.weight_stubborness,
+                               trajpsofit.weight_inertia, 
+							   trajpsofit.weight_stubborness, 
 							   trajpsofit.weight_grouppressure,
                                &pso );
 
@@ -2395,7 +2426,7 @@ struct PSO_info          trajpsofit;
                                                                                                 traj );
 
         else  {
-            printf("ERROR--> cost_function %d not implemented in ParameterRefinementViaPSO\n");
+            printf("ERROR--> cost_function %d not implemented in ParameterRefinementViaPSO\n", cost_function );
 			Delay_msec(15000);
             exit(1);
         }
@@ -2483,7 +2514,7 @@ double  dt, tbase, tshift, cfv, cfvbest;
 
 		//-------- Did we find a better time offset for this camera ?
 
-		if( ktbest != 0 )  {
+		if( ktbest != 0 )  {  
 
 			tshift = (double)ktbest * dt / 100.0;
 
@@ -2500,7 +2531,7 @@ double  dt, tbase, tshift, cfv, cfvbest;
 
 }
 
-
+	
 //##################################################################################
 //
 //======== Function to sum the angles between the radiant line and the measurement
@@ -2535,7 +2566,7 @@ double  fsum, cosangle, r[3], rmeas[3], radiant_hat_ECI[3], rmagnitude, cpa_dist
 
             //-------- The weighting of 1/variance is based on the per measurment noise standard deviation
 
-            weight = 1.0 / ( traj->noise[kcamera][kmeas] * traj->noise[kcamera][kmeas] + 1.0e-10 );
+            weight = traj->weight[kcamera][kmeas];
 
             wsum += weight;
 
@@ -2577,7 +2608,9 @@ double  Anglesum_Measurements2Model( int velmodel,  double *ro_ECI, double *vo_E
                                      struct trajectory_info *traj )
 {
 int     kcamera, kmeas;
-double  fsum, tt, length_km, r[3], radiant_hat_ECI[3];
+double  fsum, tt, length_km, gravity_km;
+double  g, ro_lat, ro_LST, ro_hkm;
+double  r[3], radiant_hat_ECI[3], gravity_hat_ECI[3];
 double  vbegin, rmagnitude, cosangle, weight, wsum;
 
 
@@ -2585,7 +2618,15 @@ double  vbegin, rmagnitude, cosangle, weight, wsum;
     fsum = 0.0;
     wsum = 0.0;
 
-    VectorNorm( vo_ECI, radiant_hat_ECI, &vbegin );
+    VectorNorm( vo_ECI, radiant_hat_ECI, &vbegin );         //... radiant direction
+
+    VectorNorm( ro_ECI, gravity_hat_ECI, &rmagnitude );     //... anti-gravity direction
+
+	ECEF2LatLonAlt( ro_ECI, &ro_lat, &ro_LST, &ro_hkm );    //... height of meteor above surface
+
+	g = 9.80065e-3 * ( 6378.137 / ( 6378.137 + ro_hkm ) );  //... gravity km/sec^2 corrected for height
+
+
 
     for( kcamera=0; kcamera<traj->numcameras; kcamera++ )  {
 
@@ -2597,7 +2638,7 @@ double  vbegin, rmagnitude, cosangle, weight, wsum;
 
             //-------- The weighting of 1/variance is based on the per measurment noise standard deviation
 
-            weight = 1.0 / ( traj->noise[kcamera][kmeas] * traj->noise[kcamera][kmeas] + 1.0e-10 );
+            weight = traj->weight[kcamera][kmeas];
 
             wsum += weight;
 
@@ -2607,11 +2648,16 @@ double  vbegin, rmagnitude, cosangle, weight, wsum;
             length_km = Propagation( POSITION, velmodel, tt, ttzero, vbegin, decel1, decel2 );
 
 
+			//-------- Propagation towards earth center due to gravity acceleration
+
+			gravity_km = 0.5 * g * tt * tt;
+
+
             //-------- Model ray's unit vector from the camera position
 
-            r[X] = ro_ECI[X] - traj->rcamera_ECI[kcamera][kmeas][X] - radiant_hat_ECI[X] * length_km;
-            r[Y] = ro_ECI[Y] - traj->rcamera_ECI[kcamera][kmeas][Y] - radiant_hat_ECI[Y] * length_km;
-            r[Z] = ro_ECI[Z] - traj->rcamera_ECI[kcamera][kmeas][Z] - radiant_hat_ECI[Z] * length_km;
+            r[X] = ro_ECI[X] - traj->rcamera_ECI[kcamera][kmeas][X] - radiant_hat_ECI[X] * length_km - gravity_hat_ECI[X] * gravity_km;
+            r[Y] = ro_ECI[Y] - traj->rcamera_ECI[kcamera][kmeas][Y] - radiant_hat_ECI[Y] * length_km - gravity_hat_ECI[Y] * gravity_km;
+            r[Z] = ro_ECI[Z] - traj->rcamera_ECI[kcamera][kmeas][Z] - radiant_hat_ECI[Z] * length_km - gravity_hat_ECI[Z] * gravity_km;
 
             VectorNorm( r, r, &rmagnitude );
 
@@ -2630,7 +2676,9 @@ double  vbegin, rmagnitude, cosangle, weight, wsum;
 
     fsum /= wsum;
 
-    return( fsum );
+	////printf(" Height = %lf   Gravity g = %lf   Lgrav = %lf m\n", ro_hkm, g, gravity_km*1000.0 );
+
+	return( fsum );
 
 }
 
@@ -2652,11 +2700,21 @@ int     kcamera, kmeas;
 double  radiant_hat[3], rdummy[3], r[3], rfit[3], r_lat, r_lon, r_LST, r_hkm;
 double  dist, vbegin, tt, length_km, rafit, decfit;
 double  azim, elev, sazim, eazim, zenangle, pi;
+double  g, gravity_km, gravity_hat[3], ro_lat, ro_LST, ro_hkm, romag;
+double  RApersecond, LSTshift;
 
 
     pi = 4.0 * atan(1.0);
 
+	RApersecond = 2.0 * pi * 1.00273785 / 86400.0;
+
     VectorNorm( &traj->solution[3], radiant_hat, &vbegin );
+
+    VectorNorm( &traj->solution[0], gravity_hat, &romag );
+
+	ECEF2LatLonAlt( &traj->solution[0], &ro_lat, &ro_LST, &ro_hkm );  //... height of meteor begin above surface
+
+	g = 9.80065e-3 * ( 6378.137 / ( 6378.137 + ro_hkm ) );  //... gravity km/sec^2 corrected for height
 
 
     //======== Loop over all cameras and their associated measurements
@@ -2666,9 +2724,10 @@ double  azim, elev, sazim, eazim, zenangle, pi;
         for( kmeas=0; kmeas<traj->nummeas[kcamera]; kmeas++ ) {
 
              //-------- Get measurement ray positional info at the closest point of approach to the radiant line
+			 //            DOES NOT INCLUDE GRAVITATIONAL ACCELERATION CHANGE IN TRACK
 
              TwoLineCPA( traj->rcamera_ECI[kcamera][kmeas], traj->meashat_ECI[kcamera][kmeas], r,
-                         &traj->solution[0], radiant_hat, rdummy,
+                         &traj->solution[0], radiant_hat, rdummy, 
 						 &dist );
 
              ECEF2LatLonAlt( r, &r_lat, &r_LST, &r_hkm );
@@ -2695,9 +2754,14 @@ double  azim, elev, sazim, eazim, zenangle, pi;
 
              length_km = Propagation( POSITION, traj->velmodel, tt, traj->ttzero, traj->vbegin, traj->decel1, traj->decel2 );
 
-             r[X] = traj->solution[0] - radiant_hat[X] * length_km;
-             r[Y] = traj->solution[1] - radiant_hat[Y] * length_km;
-             r[Z] = traj->solution[2] - radiant_hat[Z] * length_km;
+				 
+			 //-------- Propagation towards earth center due to gravity acceleration
+
+	         gravity_km = 0.5 * g * tt * tt;
+
+             r[X] = traj->solution[0] - radiant_hat[X] * length_km - gravity_hat[X] * gravity_km;
+             r[Y] = traj->solution[1] - radiant_hat[Y] * length_km - gravity_hat[Y] * gravity_km;
+             r[Z] = traj->solution[2] - radiant_hat[Z] * length_km - gravity_hat[Z] * gravity_km;
 
              ECEF2LatLonAlt( r, &r_lat, &r_LST, &r_hkm );
 
@@ -2712,7 +2776,8 @@ double  azim, elev, sazim, eazim, zenangle, pi;
                                                      + (r[Z] - traj->rcamera_ECI[kcamera][kmeas][Z]) * (r[Z] - traj->rcamera_ECI[kcamera][kmeas][Z]) );
 
 
-             //-------- Compute the model velocity at eash time (duplicate this value for the measurement)
+             //-------- Compute the model velocity at each time (duplicate this value for the measurement)
+			 //               NO ADJUSTMENT MADE FOR GRAVITY INDUCED VELOCITY (~few m/sec)
 
              traj->model_vel[kcamera][kmeas] = Propagation( VELOCITY, traj->velmodel, tt, traj->ttzero, traj->vbegin, traj->decel1, traj->decel2 );
 
@@ -2727,19 +2792,26 @@ double  azim, elev, sazim, eazim, zenangle, pi;
 
              ECI2RahDec( rfit, &rafit, &decfit );
 
-             if( traj->meastype == RADEC )  {
+	         LSTshift = RApersecond * tt;
+
+             if( traj->meastype == RODEC )  {
                  traj->model_fit1[kcamera][kmeas] = rafit;
                  traj->model_fit2[kcamera][kmeas] = decfit;
              }
 
+             else if( traj->meastype == RADEC )  {
+                 traj->model_fit1[kcamera][kmeas] = rafit - LSTshift; //.. bring back to fixed LST of input data
+                 traj->model_fit2[kcamera][kmeas] = decfit;
+             }
+
              else if( traj->meastype == NAZEL )  {
-                 RADec2AzimuthElevation( rafit, decfit, traj->camera_lat[kcamera], traj->camera_LST[kcamera], &azim, &elev );
+                 RADec2AzimuthElevation( rafit, decfit, traj->camera_lat[kcamera], traj->camera_LST[kcamera] + LSTshift, &azim, &elev );
                  traj->model_fit1[kcamera][kmeas] = azim;
                  traj->model_fit2[kcamera][kmeas] = elev;
              }
 
              else if( traj->meastype == SAZZA )  {
-                 RADec2AzimuthElevation( rafit, decfit, traj->camera_lat[kcamera], traj->camera_LST[kcamera], &azim, &elev );
+                 RADec2AzimuthElevation( rafit, decfit, traj->camera_lat[kcamera], traj->camera_LST[kcamera] + LSTshift, &azim, &elev );
                  sazim = azim + pi;
                  if( sazim <  0.0      )  sazim += 2.0 * pi;
                  if( sazim >= 2.0 * pi )  sazim -= 2.0 * pi;
@@ -2749,7 +2821,7 @@ double  azim, elev, sazim, eazim, zenangle, pi;
              }
 
              else if( traj->meastype == EAZZA )  {
-                 RADec2AzimuthElevation( rafit, decfit, traj->camera_lat[kcamera], traj->camera_LST[kcamera], &azim, &elev );
+                 RADec2AzimuthElevation( rafit, decfit, traj->camera_lat[kcamera], traj->camera_LST[kcamera] + LSTshift, &azim, &elev );
                  eazim = pi / 2.0 - azim;
                  if( eazim <  0.0      )  eazim += 2.0 * pi;
                  if( eazim >= 2.0 * pi )  eazim -= 2.0 * pi;
@@ -2787,6 +2859,7 @@ void    ReportFill_LLA_Beg_End( int LLA_position, struct trajectory_info *traj )
 int     kcamera, kcamera1, kmeas;
 double  tt, length_km, vbegin;
 double  r_lat, r_lon, r_LST, r_hkm, r[3], radiant_hat[3];
+double  g, gravity_km, gravity_hat[3], ro_lat, ro_LST, ro_hkm, romag;
 
 
     //======== Get the earliest measurement time
@@ -2834,15 +2907,23 @@ double  r_lat, r_lon, r_LST, r_hkm, r[3], radiant_hat[3];
 
 
     //======== Given the time for the desired measurement point, compute its ECI coords, convert to LLA
-	//             NOTE: tt is either the begin or end point time
+	//             NOTE: tt is either the begin or end point time based on LLA_position input argument
 
     length_km = Propagation( POSITION, traj->velmodel, tt, traj->ttzero, traj->vbegin, traj->decel1, traj->decel2 );
 
     VectorNorm( &traj->solution[3], radiant_hat, &vbegin );
 
-    r[X] = traj->solution[0] - radiant_hat[X] * length_km;
-    r[Y] = traj->solution[1] - radiant_hat[Y] * length_km;
-    r[Z] = traj->solution[2] - radiant_hat[Z] * length_km;
+    VectorNorm( &traj->solution[0], gravity_hat, &romag );
+
+	ECEF2LatLonAlt( &traj->solution[0], &ro_lat, &ro_LST, &ro_hkm );  //... height of meteor begin above surface
+
+	g = 9.80065e-3 * ( 6378.137 / ( 6378.137 + ro_hkm ) );  //... gravity km/sec^2 corrected for height
+
+	gravity_km = 0.5 * g * tt * tt;
+
+	r[X] = traj->solution[0] - radiant_hat[X] * length_km - gravity_hat[X] * gravity_km;
+    r[Y] = traj->solution[1] - radiant_hat[Y] * length_km - gravity_hat[Y] * gravity_km;
+    r[Z] = traj->solution[2] - radiant_hat[Z] * length_km - gravity_hat[Z] * gravity_km;
 
     ECEF2LatLonAlt( r, &r_lat, &r_LST, &r_hkm );
 
@@ -2880,6 +2961,7 @@ void  MonteCarlo_ErrorEstimate( struct trajectory_info *traj )
 int     kmonte, kcamera, k;
 double  ra, dec, vbegin, length_km, kount;
 double  radiant_hat[3], r[3], r_lat, r_lon, r_hkm, r_LST;
+double  g, gravity_km, gravity_hat[3], ro_lat, ro_LST, ro_hkm, romag;
 
 
     //======== Initialize the standard deviation (squared accumulation) to zero
@@ -2935,12 +3017,12 @@ double  radiant_hat[3], r[3], r_lat, r_lon, r_hkm, r_LST;
         if( traj->velmodel <= 1 )  traj->xshift[7] = 0.0;  //... Constrain decel2 due to velocity model
         if( traj->velmodel <= 0 )  traj->xshift[8] = 0.0;  //... Constrain tzero  due to velocity model
 
-        ParameterRefinementViaPSO( traj, MEAS2MODEL, traj->velmodel, traj->PSO_fit_control[5] );   //... call index 5
-
+        ParameterRefinementViaPSO( traj, MEAS2MODEL, traj->velmodel, traj->PSO_fit_control[5] );   //... call index 5 
+		
 		                          // --> traj-params[*]
 
 
-		//-------- Set deceleration terms fot correct sign
+		//-------- Set deceleration terms to correct sign
 
 		traj->params[6] = fabs( traj->params[6] );
 
@@ -2963,14 +3045,24 @@ double  radiant_hat[3], r[3], r_lat, r_lon, r_hkm, r_LST;
         traj->decel1_sigma += (fabs(traj->params[6]) - traj->decel1) * (fabs(traj->params[6]) - traj->decel1);
         traj->decel2_sigma += (fabs(traj->params[7]) - traj->decel2) * (fabs(traj->params[7]) - traj->decel2);
 
+		//-------- Get the gravitation constant and direction of gravity
+
+		VectorNorm( &traj->params[0], gravity_hat, &romag );
+
+	    ECEF2LatLonAlt( &traj->params[0], &ro_lat, &ro_LST, &ro_hkm );  //... height of meteor begin above surface
+
+	    g = 9.80065e-3 * ( 6378.137 / ( 6378.137 + ro_hkm ) );  //... gravity km/sec^2 corrected for height
+
 
         //-------- Form statistics on begin LLA
 
         length_km = Propagation( POSITION, traj->velmodel, traj->ttbeg, traj->params[8], vbegin, fabs(traj->params[6]), fabs(traj->params[7]) );
 
-        r[X] = traj->params[0] - radiant_hat[X] * length_km;
-        r[Y] = traj->params[1] - radiant_hat[Y] * length_km;
-        r[Z] = traj->params[2] - radiant_hat[Z] * length_km;
+	    gravity_km = 0.5 * g * traj->ttbeg * traj->ttbeg;
+
+        r[X] = traj->params[0] - radiant_hat[X] * length_km - gravity_hat[X] * gravity_km;
+        r[Y] = traj->params[1] - radiant_hat[Y] * length_km - gravity_hat[Y] * gravity_km;
+        r[Z] = traj->params[2] - radiant_hat[Z] * length_km - gravity_hat[Z] * gravity_km;
 
         ECEF2LatLonAlt( r, &r_lat, &r_LST, &r_hkm );
 
@@ -2989,9 +3081,11 @@ double  radiant_hat[3], r[3], r_lat, r_lon, r_hkm, r_LST;
 
         length_km = Propagation( POSITION, traj->velmodel, traj->ttend, traj->params[8], vbegin, fabs(traj->params[6]), fabs(traj->params[7]) );
 
-        r[X] = traj->params[0] - radiant_hat[X] * length_km;
-        r[Y] = traj->params[1] - radiant_hat[Y] * length_km;
-        r[Z] = traj->params[2] - radiant_hat[Z] * length_km;
+	    gravity_km = 0.5 * g * traj->ttend * traj->ttend;
+
+        r[X] = traj->params[0] - radiant_hat[X] * length_km - gravity_hat[X] * gravity_km;
+        r[Y] = traj->params[1] - radiant_hat[Y] * length_km - gravity_hat[Y] * gravity_km;
+        r[Z] = traj->params[2] - radiant_hat[Z] * length_km - gravity_hat[Z] * gravity_km;
 
         ECEF2LatLonAlt( r, &r_lat, &r_LST, &r_hkm );
 
@@ -3357,6 +3451,7 @@ int  kcamera, maxparams;
     traj->meas2          =  (double**) malloc( maxcameras * sizeof( double* ) );
     traj->dtime          =  (double**) malloc( maxcameras * sizeof( double* ) );
     traj->noise          =  (double**) malloc( maxcameras * sizeof( double* ) );
+    traj->weight         =  (double**) malloc( maxcameras * sizeof( double* ) );
 
     traj->meas_lat       =  (double**) malloc( maxcameras * sizeof( double* ) );
     traj->meas_lon       =  (double**) malloc( maxcameras * sizeof( double* ) );
@@ -3395,6 +3490,7 @@ int  kcamera, maxparams;
         traj->meas2          == NULL  ||
         traj->dtime          == NULL  ||
         traj->noise          == NULL  ||
+        traj->weight         == NULL  ||
         traj->meas_lat       == NULL  ||
         traj->meas_lon       == NULL  ||
         traj->meas_hkm       == NULL  ||
@@ -3443,6 +3539,7 @@ void    FreeTrajectoryStructure( struct trajectory_info *traj )
     free( traj->meas2          );
     free( traj->dtime          );
     free( traj->noise          );
+    free( traj->weight         );
 
     free( traj->meas_lat       );
     free( traj->meas_lon       );
@@ -3520,6 +3617,7 @@ int  kcamera, kmeas;
             free( traj->meas2[kcamera]          );
             free( traj->dtime[kcamera]          );
             free( traj->noise[kcamera]          );
+            free( traj->weight[kcamera]         );
 
             free( traj->meas_lat[kcamera]       );
             free( traj->meas_lon[kcamera]       );
@@ -3537,7 +3635,7 @@ int  kcamera, kmeas;
             free( traj->model_fit2[kcamera]     );
             free( traj->model_time[kcamera]     );
 
-            //... free first the 3rd dimension (XYZ or XYZT) of rcamera_ECI and meashat_ECI
+            //... free first the 3rd dimension (XYZ or XYZT) of rcamera_ECI and meashat_ECI 
 			//       then free the 2nd measurement dimension
 
             for( kmeas=0; kmeas<traj->nummeas[kcamera]; kmeas++ )  free( traj->rcamera_ECI[kcamera][kmeas] );
@@ -3627,6 +3725,7 @@ int  kmeas;
     traj->meas2[kcamera]          = (double*) malloc( nummeas * sizeof(double) );
     traj->dtime[kcamera]          = (double*) malloc( nummeas * sizeof(double) );
     traj->noise[kcamera]          = (double*) malloc( nummeas * sizeof(double) );
+    traj->weight[kcamera]         = (double*) malloc( nummeas * sizeof(double) );
 
     traj->meas_lat[kcamera]       = (double*) malloc( nummeas * sizeof(double) );
     traj->meas_lon[kcamera]       = (double*) malloc( nummeas * sizeof(double) );
@@ -3654,6 +3753,7 @@ int  kmeas;
         traj->meas2[kcamera]          == NULL  ||
         traj->dtime[kcamera]          == NULL  ||
         traj->noise[kcamera]          == NULL  ||
+        traj->weight[kcamera]         == NULL  ||
         traj->meas_lat[kcamera]       == NULL  ||
         traj->meas_lon[kcamera]       == NULL  ||
         traj->meas_hkm[kcamera]       == NULL  ||
@@ -3705,7 +3805,7 @@ int  kmeas;
 //         specific to the trajectory solver
 //==================================================================================
 
-int     ReadTrajectoryPSOconfig( char* PSOconfig_pathname, struct trajectory_info *traj )
+void    ReadTrajectoryPSOconfig( char* PSOconfig_pathname, struct trajectory_info *traj )
 {
 int     kcall;
 char    text[128], desc[128];
@@ -3716,12 +3816,13 @@ FILE   *PSOfile;
 
    if( ( PSOfile = fopen( PSOconfig_pathname, "r" )) == NULL )  {
      	printf(" Cannot open PSO config file %s for reading \n", PSOconfig_pathname );
-        return -1;
+        Delay_msec(15000);
+        exit(1);
    }
-
+      
 
    //------------------ Skip past header lines
-
+      
    fscanf( PSOfile, "%[^\n]\n", text );
    fscanf( PSOfile, "%[^\n]\n", text );
    fscanf( PSOfile, "%[^\n]\n", text );
@@ -3734,82 +3835,86 @@ FILE   *PSOfile;
 
    if( strstr( text, "QUICK_FIT" ) == NULL )  {
 	   printf("PSO config file error, 1st column entry should be QUICK_FIT\n");
-	   return -1;
+	   Delay_msec(15000);
+	   exit(1);
    }
-
+      
    fscanf(PSOfile,"%s", text );
 
    if( strstr( text, "GOOD_FIT" ) == NULL )  {
 	   printf("PSO config file error, 2nd column entry should be GOOD_FIT\n");
-	   return -1;
+	   Delay_msec(15000);
+	   exit(1);
    }
-
+      
    fscanf(PSOfile,"%s", text );
 
    if( strstr( text, "ACCURATE_FIT" ) == NULL )  {
 	   printf("PSO config file error, 3rd column entry should be ACCURATE_FIT\n");
-	   return -1;
+	   Delay_msec(15000);
+	   exit(1);
    }
-
+      
    fscanf(PSOfile,"%[^\n]\n", text );
 
    if( strstr( text, "EXTREME_FIT" ) == NULL )  {
 	   printf("PSO config file error, 4th column entry should be EXTREME_FIT\n");
-	   return -1;
+	   Delay_msec(15000);
+	   exit(1);
    }
-
+      
 
    //------------------ Read each of the config parameters for all fit options
 
-   fscanf( PSOfile, "%[^=]= %d %d %d %d\n", desc,
+   fscanf( PSOfile, "%[^=]= %d %d %d %d\n", desc, 
 	                                        &traj->PSOfit[0].number_particles,
 	                                        &traj->PSOfit[1].number_particles,
 								            &traj->PSOfit[2].number_particles,
 									        &traj->PSOfit[3].number_particles );
 
-   fscanf( PSOfile, "%[^=]= %d %d %d %d\n", desc,
+   fscanf( PSOfile, "%[^=]= %d %d %d %d\n", desc, 
 	                                        &traj->PSOfit[0].maximum_iterations,
 	                                        &traj->PSOfit[1].maximum_iterations,
 									        &traj->PSOfit[2].maximum_iterations,
 									        &traj->PSOfit[3].maximum_iterations );
 
-   fscanf( PSOfile, "%[^=]= %d %d %d %d\n", desc,
+   fscanf( PSOfile, "%[^=]= %d %d %d %d\n", desc, 
 	                                        &traj->PSOfit[0].boundary_flag,
 	                                        &traj->PSOfit[1].boundary_flag,
 									        &traj->PSOfit[2].boundary_flag,
 									        &traj->PSOfit[3].boundary_flag );
 
-   fscanf( PSOfile, "%[^=]= %d %d %d %d\n", desc,
+   fscanf( PSOfile, "%[^=]= %d %d %d %d\n", desc, 
 	                                        &traj->PSOfit[0].limits_flag,
 	                                        &traj->PSOfit[1].limits_flag,
 									        &traj->PSOfit[2].limits_flag,
 									        &traj->PSOfit[3].limits_flag );
 
-   fscanf( PSOfile, "%[^=]= %d %d %d %d\n", desc,
+   fscanf( PSOfile, "%[^=]= %d %d %d %d\n", desc, 
 	                                        &traj->PSOfit[0].particle_distribution_flag,
 	                                        &traj->PSOfit[1].particle_distribution_flag,
 									        &traj->PSOfit[2].particle_distribution_flag,
 									        &traj->PSOfit[3].particle_distribution_flag );
 
-   fscanf( PSOfile, "%[^=]= %lf %lf %lf %lf\n", desc,
+   fscanf( PSOfile, "%[^=]= %lf %lf %lf %lf\n", desc, 
 	                                            &traj->PSOfit[0].epsilon_convergence,
 	                                            &traj->PSOfit[1].epsilon_convergence,
 									  	        &traj->PSOfit[2].epsilon_convergence,
 										        &traj->PSOfit[3].epsilon_convergence );
 
-   fscanf( PSOfile, "%[^=]= %lf %lf %lf %lf\n", desc,
+   fscanf( PSOfile, "%[^=]= %lf %lf %lf %lf\n", desc, 
 	                                            &traj->PSOfit[0].weight_inertia,
 	                                            &traj->PSOfit[1].weight_inertia,
 									  	        &traj->PSOfit[2].weight_inertia,
 										        &traj->PSOfit[3].weight_inertia );
 
-   fscanf( PSOfile, "%[^=]= %lf %lf %lf %lf\n", desc,
+   fscanf( PSOfile, "%[^=]= %lf %lf %lf %lf\n", desc, 
 	                                            &traj->PSOfit[0].weight_stubborness,
 	                                            &traj->PSOfit[1].weight_stubborness,
 									  	        &traj->PSOfit[2].weight_stubborness,
 										        &traj->PSOfit[3].weight_stubborness );
 
-   fscanf( PSOfile, "%[^=]= %lf %lf %lf %lf\n", desc,
+   fscanf( PSOfile, "%[^=]= %lf %lf %lf %lf\n", desc, 
 	                                            &traj->PSOfit[0].weight_grouppressure,
 	                                            &traj->PSOfit[1].weight_grouppressure,
 									  	        &traj->PSOfit[2].weight_grouppressure,
@@ -3817,7 +3922,7 @@ FILE   *PSOfile;
 
 
    //------------------ Skip past some more header lines
-
+      
    fscanf( PSOfile, "%[^\n]\n", text );
    fscanf( PSOfile, "%[^\n]\n", text );
    fscanf( PSOfile, "%[^\n]\n", text );
@@ -3835,14 +3940,15 @@ FILE   *PSOfile;
        else if( strstr( text, "EXTREME_FIT"  ) != NULL )  traj->PSO_fit_control[kcall] = EXTREME_FIT;
        else {
 		   printf("Incorrect fit name in PSO config file for line %d of the control settings\n", kcall+1 );
-		   return -1;
+		   Delay_msec(15000);
+		   exit(1);
 	   }
 
    } //... end of stage/call loop
-
+                     
    fclose( PSOfile );
+   
 
-   return 0;
 }
 
 //################################################################################

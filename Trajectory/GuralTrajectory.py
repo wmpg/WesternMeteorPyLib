@@ -110,6 +110,7 @@ class TrajectoryInfo(ct.Structure):
         ('meas2', PPDOUBLE),
         ('dtime', PPDOUBLE),
         ('noise', PPDOUBLE),
+        ('weight', PPDOUBLE),
 
         ('meashat_ECI', PPPDOUBLE),
         ('ttbeg', DOUBLE),
@@ -540,7 +541,7 @@ class GuralTrajectory(object):
         ]
 
 
-        self.traj_lib.ReadTrajectoryPSOconfig.restype = ct.c_int
+        self.traj_lib.ReadTrajectoryPSOconfig.restype = ct.c_void_p
         self.traj_lib.ReadTrajectoryPSOconfig.argtypes = [
             ct.POINTER(ct.c_char),
             ct.POINTER(TrajectoryInfo)

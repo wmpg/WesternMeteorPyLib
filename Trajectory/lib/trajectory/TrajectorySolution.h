@@ -14,7 +14,7 @@
 // not need to be uniformly spaced.
 //
 // IMPORTANT NOTE: ----------------------------------------------------------------
-// This version "B" allows for the site positions to move during the frame-to-frame
+// This version "B" allows for the site positions to move during the frame-to-frame 
 // time steps accounting for Earth's rotation under the meteor. Thus one should NOT
 // remove the coriolis effect later in calculating orbits as it is accounted for in
 // the geocentric radiant information reported herein. ----------------------------
@@ -129,11 +129,11 @@
 //                 offset estimates as a bonus.
 //          Step 4 uses the PSO to refine ALL parameters except deceleration by
 //                 assuming a constant velocity model.
-//          Step 5 uses the PSO to make estimates of the deceleration parameters
+//          Step 5 uses the PSO to make estimates of the deceleration parameters 
 //                 keeping all other parameters fixed.
 //          Step 6 uses the PSO to iteratively solve for ALL the variable parameters
 //                 simultaneously given that a good estimate is now available
-//                 for each of the unknowns.
+//                 for each of the unknowns. 
 //          Step 7 slides the timing offsets to minimize the cost function then
 //                 solve for ALL the variable parameters simultaneously again.
 //          Step 8 loops over Monte Carlo trials using PSO to quickly solve for
@@ -154,10 +154,18 @@
 // Jan 11 2017  2.1   Pete Gural    Added PSO particles, tighter convergence, and
 //                                  adjusted the bootstrap processing
 // Jan 18 2017  2.2   Pete Gural    Added ref time parameter to fit for acceleration
-//                                  models and added guess for time offsets
+//                                  models and added guess for time offsets 
 // Jan 19 2017  2.3   Pete Gural    Fixed propagation function
 // Jan 26 2017  2.4   Pete Gural    Moved hardcoded PSO parameters to config file
 // Feb 08 2017  2.5   Pete Gural    Added closed form guess for deceleration
+// Mar 21 2017  2.6   Pete Gural    Adjusted site position at each frame time step
+// Dec 11 2017  2.7   Pete Gural    Put in 0.05" minimum noise floor per Denis Vida
+// Dec 22 2017  2.8   Pete Gural    Set negative deceleration coefs to 0 in the first
+//                                      guess estimate from function VelDecelFit_LMS
+//                                  Compute weights from std dev & normalized to unity
+//                                  Const V guess based on <= 10 meas per camera
+//                                  Added gravitational acceleration to propagation
+//                                  Added meastype of RA calculated for LST(time)
 //
 //###################################################################################
 
@@ -167,7 +175,9 @@
 //                        Includes and Constants
 //###################################################################################
 
-#define   RADEC         1   // "meastype" is RA and Dec
+                            // "meastype"
+#define   RODEC         0   // RA and Dec where RA was calculated using LST(time)
+#define   RADEC         1   // RA and Dec where all RAs were calculated for a fixed LST 
 #define   NAZEL         2   // Azim +east of north, altitude angle
 #define   SAZZA         3   // Azim +west of south, zenith angle
 #define   EAZZA         4   // Azim +north of east, zenith angle
@@ -243,7 +253,10 @@ struct trajectory_info
                                  //     3 = exponent   v(t) = vinf - |acc1| * |acc2| * exp( |acc2| * t )
     int       meastype;          // Flag to indicate the type of angle measurements the user is providing
                                  //    for meas1 and meas2 below. The following are all in radians:
+                                 //        0 = Right Ascension for meas1, Declination for meas2.
+	                             //            where RA was calculated for LST = function of time
                                  //        1 = Right Ascension for meas1, Declination for meas2.
+	                             //            where RA was calculated for fixed LST for all time
                                  //        2 = Azimuth +east of due north for meas1, Elevation angle
                                  //            above the horizon for meas2
                                  //        3 = Azimuth +west of due south for meas1, Zenith angle for meas2
@@ -261,7 +274,7 @@ struct trajectory_info
 
 	//----------------------------- Particle Swarm Optimizer (PSO) settings
 
-	struct PSO_info    PSOfit[NFIT_TYPES];  // Structure containing the various PSO settings per fit
+	struct PSO_info    PSOfit[NFIT_TYPES];  // Structure containing the various PSO settings per fit 
 
 	int       PSO_fit_control[NPSO_CALLS];  // Fit option for each ParameterRefinementViaPSO call
 
@@ -292,11 +305,12 @@ struct trajectory_info
     double  **meas2;             // Array of 2nd measurement type (see meastype), typically Dec, typically in radians
     double  **dtime;             // Array of time measurements in seconds relative to jdt_ref
     double  **noise;             // Array of measurement standard deviations in radians (per measurement)
+	double  **weight;            // Array of normalized measurement weights based on the std devs (per measurement)
 
     double ***meashat_ECI;       // Measurement ray unit vectors (#cameras x #measurements x XYZT)
 	                             //    XYZ in is Earth Centered Inertial (ECI) coordinates
 	                             //    T is dtime minus the reference time dtime_ref
-    double    ttbeg;             // Begin position time relative to ref time dtime_ref
+    double    ttbeg;             // Begin position time relative to ref time dtime_ref 
     double    ttend;             // End position time relative to ref time dtime_ref
 	double    ttzero;            // Tzero model start time relative to ref time dtime_ref
 
@@ -419,7 +433,7 @@ void    InfillTrajectoryStructure( int nummeas, double *meas1, double *meas2, do
                                    double site_latitude, double site_longitude, double site_height,
                                    struct trajectory_info *traj );
 
-int     ReadTrajectoryPSOconfig( char* PSOconfig_pathname, struct trajectory_info *traj );
+void    ReadTrajectoryPSOconfig( char* PSOconfig_pathname, struct trajectory_info *traj );
 
 
 

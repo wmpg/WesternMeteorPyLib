@@ -1594,7 +1594,8 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
     mc_results = [mc_traj for mc_traj in mc_results if mc_traj.los_mini_status == True]
 
     # Reject those solutions for which the orbit could not be calculated
-    mc_results = [mc_traj for mc_traj in mc_results if mc_traj.orbit.ra_g is not None]
+    mc_results = [mc_traj for mc_traj in mc_results if (mc_traj.orbit.ra_g is not None) \
+        and (mc_traj.orbit.dec_g is not None)]
 
 
     # Break the function of there are no trajectories to process
@@ -1805,9 +1806,9 @@ class Trajectory(object):
     """
 
 
-    def __init__(self, jdt_ref, output_dir='.', max_toffset=1.0, meastype=4, verbose=True, 
-        estimate_timing_vel=True, monte_carlo=True, mc_runs=None, mc_pick_multiplier=1, filter_picks=True, 
-        calc_orbit=True, show_plots=True, save_results=True):
+    def __init__(self, jdt_ref, output_dir='.', max_toffset=1.0, meastype=4, verbose=True, \
+        estimate_timing_vel=True, monte_carlo=True, mc_runs=None, mc_pick_multiplier=1,  mc_noise_std=1.0, \
+        filter_picks=True, calc_orbit=True, show_plots=True, save_results=True):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -1833,6 +1834,8 @@ class Trajectory(object):
             monte_carlo: [bool] Runs Monte Carlo estimation of uncertanties. True by default.
             mc_runs: [int] Number of Monte Carlo runs. The default value is the number of observed points.
             mc_pick_multiplier: [int] Number of MC samples that will be taken for every point. 1 by default.
+            mc_noise_std: [float] Number of standard deviations of measurement noise to add during Monte
+                Carlo estimation.
             filter_picks: [bool] If True (default), picks which deviate more than 3 sigma in angular residuals
                 will be removed, and the trajectory will be recalculated.
             calc_orbit: [bool] If True, the orbit is calculates as well. True by default
@@ -1867,6 +1870,9 @@ class Trajectory(object):
 
         # Number of MC samples that will be taken for every point
         self.mc_pick_multiplier = mc_pick_multiplier
+
+        # Standard deviatons of measurement noise to add during Monte Carlo runs
+        self.mc_noise_std = mc_noise_std
 
         # Filter bad picks (ones that deviate more than 3 sigma in angular residuals) if this flag is True
         self.filter_picks = filter_picks
@@ -4033,7 +4039,7 @@ class Trajectory(object):
 
             # Do a Monte Carlo estimate of the uncertanties in all calculated parameters
             traj_best, uncertanties = monteCarloTrajectory(self, mc_runs=self.mc_runs, 
-                mc_pick_multiplier=self.mc_pick_multiplier)
+                mc_pick_multiplier=self.mc_pick_multiplier, noise_sigma=self.mc_noise_std)
 
 
             ### Save uncertainties to the trajectory object ###
