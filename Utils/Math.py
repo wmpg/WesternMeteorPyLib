@@ -54,7 +54,7 @@ def vectMag(vect):
 
 
 def rotateVector(vect, axis, theta):
-    """ Rotate vector around the given axis for the given angle.
+    """ Rotate vector around the given axis by a given angle.
 
     Arguments:
         vect: [3 element ndarray] vector to be rotated
@@ -66,7 +66,7 @@ def rotateVector(vect, axis, theta):
 
     """
     
-    rot_M = scipy.linalg.expm3(np.cross(np.eye(3), axis/vectMag(axis)*theta))
+    rot_M = scipy.linalg.expm(np.cross(np.eye(3), axis/vectMag(axis)*theta))
 
     return np.dot(rot_M, vect)
 
@@ -449,7 +449,7 @@ def estimateHullOverlapRatio(hull1, hull2, niter=200, volume=False):
 
 
     ## TEST
-    inside_points = []
+    # inside_points = []
     ###
 
     # Do niter iterations
@@ -462,7 +462,7 @@ def estimateHullOverlapRatio(hull1, hull2, niter=200, volume=False):
             inside_count += 1
 
             ## TEST
-            inside_points.append(test_points[i])
+            # inside_points.append(test_points[i])
 
 
     ratio = float(inside_count)/niter
@@ -618,7 +618,7 @@ def fitConfidenceInterval(x_data, y_data, conf=0.95, x_array=None):
 
     Arguments:
         x_data: [ndarray] Independent variable data.
-        y_data: [ndarray] Dependent vairable data.
+        y_data: [ndarray] Dependent variable data.
 
     Keyword arguments:
         conf: [float] Confidence interval (fraction, 0.0 to 1.0).
