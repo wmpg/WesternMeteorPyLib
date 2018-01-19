@@ -207,7 +207,9 @@
 #define   LLA_END       1
 
 
+#define   g_surface     0.00980065  // Accel due to gravity at the Earth's surface km/sec^2
 
+////#define   g_surface     0.0  // No accel due to gravity
 
 
 //###################################################################################

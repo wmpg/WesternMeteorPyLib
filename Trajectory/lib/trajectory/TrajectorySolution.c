@@ -541,12 +541,12 @@ double  max_convergence, vbegin, vapprox, decel1, decel2;
     //======== Diagnostic standard deviation output to console
 
     if( traj->verbose != 0 )  {
-		/*PETE
+		
         printf("     Rah Dec sigma  %lf  %lf\n",        traj->ra_sigma * 57.29577951,     traj->dec_sigma * 57.29577951 );
         printf("     Vel Acc sigma  %lf  %lf  %lf\n",   traj->vbegin_sigma,               traj->decel1_sigma,               traj->decel2_sigma );
         printf("     LLA beg sigma  %lf  %lf  %lf\n",   traj->rbeg_lon_sigma * 57.29577951, traj->rbeg_lat_sigma * 57.29577951, traj->rbeg_hkm_sigma );
         printf("     LLA end sigma  %lf  %lf  %lf\n\n", traj->rend_lon_sigma * 57.29577951, traj->rend_lat_sigma * 57.29577951, traj->rend_hkm_sigma );
-        */
+        
 	}
 
 
@@ -568,7 +568,7 @@ double  rah, dec, radiant_hat[3], Vbegin;
 
     VectorNorm( &params[3], radiant_hat, &Vbegin );
 
-	
+	/*PETE
     printf(" %s\n", ctitle );
     printf(" ------------------------------------------------------\n" );
     printf("     Radiant at %lf %lf \n", rah * 57.29577951, dec * 57.29577951 );
@@ -578,7 +578,7 @@ double  rah, dec, radiant_hat[3], Vbegin;
 	int kcam;
     for( kcam=0; kcam<ncams; kcam++ ) printf("     Timing Offsets %lf \n", params[9+kcam] );
     printf("\n");
-	
+	*/
 }
 
 
@@ -2624,7 +2624,7 @@ double  vbegin, rmagnitude, cosangle, weight, wsum;
 
 	ECEF2LatLonAlt( ro_ECI, &ro_lat, &ro_LST, &ro_hkm );    //... height of meteor above surface
 
-	g = 9.80065e-3 * ( 6378.137 / ( 6378.137 + ro_hkm ) );  //... gravity km/sec^2 corrected for height
+	g = g_surface * ( 6378.137 / ( 6378.137 + ro_hkm ) );  //... gravity km/sec^2 corrected for height
 
 
 
@@ -2714,7 +2714,7 @@ double  RApersecond, LSTshift;
 
 	ECEF2LatLonAlt( &traj->solution[0], &ro_lat, &ro_LST, &ro_hkm );  //... height of meteor begin above surface
 
-	g = 9.80065e-3 * ( 6378.137 / ( 6378.137 + ro_hkm ) );  //... gravity km/sec^2 corrected for height
+	g = g_surface * ( 6378.137 / ( 6378.137 + ro_hkm ) );  //... gravity km/sec^2 corrected for height
 
 
     //======== Loop over all cameras and their associated measurements
@@ -2917,7 +2917,7 @@ double  g, gravity_km, gravity_hat[3], ro_lat, ro_LST, ro_hkm, romag;
 
 	ECEF2LatLonAlt( &traj->solution[0], &ro_lat, &ro_LST, &ro_hkm );  //... height of meteor begin above surface
 
-	g = 9.80065e-3 * ( 6378.137 / ( 6378.137 + ro_hkm ) );  //... gravity km/sec^2 corrected for height
+	g = g_surface * ( 6378.137 / ( 6378.137 + ro_hkm ) );  //... gravity km/sec^2 corrected for height
 
 	gravity_km = 0.5 * g * tt * tt;
 
@@ -3051,7 +3051,7 @@ double  g, gravity_km, gravity_hat[3], ro_lat, ro_LST, ro_hkm, romag;
 
 	    ECEF2LatLonAlt( &traj->params[0], &ro_lat, &ro_LST, &ro_hkm );  //... height of meteor begin above surface
 
-	    g = 9.80065e-3 * ( 6378.137 / ( 6378.137 + ro_hkm ) );  //... gravity km/sec^2 corrected for height
+	    g = g_surface * ( 6378.137 / ( 6378.137 + ro_hkm ) );  //... gravity km/sec^2 corrected for height
 
 
         //-------- Form statistics on begin LLA

@@ -384,12 +384,13 @@ class SimMeteor(object):
         savePickle(self, output_dir, file_name_pickle)
 
 
-    def saveTrajectoryComparison(self, traj, traj_method):
+    def saveTrajectoryComparison(self, traj, traj_method, note=''):
         """ Saves the comparison of trajectory results, between the original values and the estimated values.
         
         Arguments:
             traj: [Trajectory]
             traj_method: [str] Method of trajectory estimation.
+            note: [str] Extra note to write in the file.
 
         """
 
@@ -398,7 +399,7 @@ class SimMeteor(object):
 
             out_str = '\n'
             out_str += '-----------------------------\n'
-            out_str += 'Trajectory estimation method: {:s}\n' .format(traj_method)
+            out_str += 'Trajectory estimation method: {:s} {:s}\n' .format(traj_method, note)
 
             out_str += '\n'
 
@@ -475,6 +476,63 @@ class ConstantVelocity(object):
 
         return out_str
 
+
+
+class LinearDeceleration(object):
+    def __init__(self, duration, t0, decel):
+        """ Linear deceleration model for generating meteor trajectories. 
+        
+        Arguments:
+            duration: [float] Duration of the meteor in seconds. 
+            t0: [float] Beginning time of linear deceleration (seconds).
+            decel: [float] Deceleration (m/s^2).
+        """
+
+        self.name = 'linear'
+
+        self.duration = duration
+        self.t0 = t0
+        self.decel = decel
+
+
+
+    def getTimeData(self, fps):
+        """ Returns an array of time data for the meteor. 
+        
+        Arguments:
+            fps: [float] Frames per second of the camera.
+
+        """
+
+        return np.arange(0, self.duration, 1.0/fps)
+
+
+
+    def getLength(self, v_init, t):
+        """ Calculates a length along the track at the given time with the given initial velocity and
+            constant deceleration. 
+
+        Arguments:
+            v_init: [float] Velocity at t = 0. In m/s.
+            t: [float] Time at which the length along the track will be evaluated.
+
+        """
+
+        if t < self.t0:
+            return v_init*t
+
+        else:
+            return v_init*t - ((t - self.t0)**2)*self.decel/2.0
+
+
+
+    def __repr__(self):
+        """ Returned upon printing the object. """
+
+        out_str = "Linear deceleration, duration: {:.4f}, t0: {:.4f}, decel: {:.2f}".format(self.duration, 
+            self.t0, self.decel) + "\n"
+
+        return out_str
 
 
 
@@ -1810,6 +1868,53 @@ if __name__ == "__main__":
     # Directory where the files will be saved
     dir_path = os.path.abspath('../SimulatedMeteors')
 
+    # ### PERFECT STATIONS (CAMO-based) PARAMETERS ###
+    # ##########################################################################################################
+
+    # system_name = 'Perfect_CAMO'
+
+    # # Number of stations in total
+    # n_stations = 2
+
+    # # Maximum time offset (seconds)
+    # t_max_offset = 1
+
+    # # Geographical coordinates of stations (lat, lon, elev, station_id) in degrees and meters
+    # stations_geo = [
+    #     [43.26420, -80.77209, 329.0, 'tavis'], # Tavis
+    #     [43.19279, -81.31565, 324.0, 'elgin']] # Elgin
+
+    # # Camera FPS per station
+    # fps_list = [100, 100]
+
+    # # Observation uncertanties per station (arcsec)
+    # obs_ang_uncertainties = [0.001, 0.001]
+
+    # # Azimuths of centre of FOVs (degrees)
+    # azim_fovs = [326.823, 1.891]
+
+    # # Elevations of centre of FOVs (degrees)
+    # elev_fovs = [41.104, 46.344]
+
+    # # Cameras FOV widths (degrees)
+    # fov_widths = [19.22, 19.22]
+
+    # # Cameras FOV heights (degrees)
+    # fov_heights = [25.77, 25.77]
+
+    # # Limiting magnitudes (needed only for ablation simulation)
+    # lim_magnitudes = [+5.5, +5.5]
+
+    # # Powers of zero-magnitude meteors (Watts) (needed only for ablation simulation)
+    # P_0m_list = [840, 840]
+
+    # # Define the mass range (log of mass in kg)
+    # mass_min = -6
+    # mass_max = -4
+
+    # ##########################################################################################################
+
+
     ### CAMO STATION PARAMETERS ###
     ##########################################################################################################
 
@@ -2004,6 +2109,20 @@ if __name__ == "__main__":
     # ####
 
 
+    # #### Linear deceleration model
+    
+    # # Randomly generate deceleration times t0
+    # t0_rand = np.random.uniform(0.1, 0.7, size=n_meteors)
+    # t0_list = meteor_durations*t0_rand
+
+    # # Randomly generate decelerations
+    # decel_list = np.random.uniform(100, 800, size=n_meteors)
+
+    # meteor_velocity_models = [LinearDeceleration(duration, t0, decel) for duration, t0, decel in \
+    #     zip(meteor_durations, t0_list, decel_list)]
+    # ####
+
+
     # #### Jacchia (exponential deceleration) velocity model
     # a1_list = np.random.uniform(0.08, 0.15, n_meteors)
     # a2_list = np.random.uniform(8, 15, n_meteors)
@@ -2144,9 +2263,12 @@ if __name__ == "__main__":
 
             elif traj_solver == 'gural':
                 
+                # Velocity model ID
+                velmodel = 3
+
                 # Init the new Gural trajectory solver object
                 traj = GuralTrajectory(len(sim_met.observations), sim_met.jdt_ref, output_dir=output_dir, 
-                    max_toffset=t_max_offset, meastype=2, velmodel=3, verbose=1, show_plots=False)
+                    max_toffset=t_max_offset, meastype=2, velmodel=velmodel, verbose=1, show_plots=False)
 
             else:
                 print(traj_solver, '- unknown trajectory solver!')
@@ -2186,8 +2308,14 @@ if __name__ == "__main__":
                 traj.jd_avg, stations_fixed=True, referent_init=False)
 
 
-            # Save info about the simulation comparison
-            sim_met.saveTrajectoryComparison(traj, traj_solver)
+            if traj_solver == 'gural':
+
+                # Save info about the simulation comparison
+                sim_met.saveTrajectoryComparison(traj, traj_solver, 'velmodel: ' + str(velmodel))
+
+            else:
+                # Save info about the simulation comparison
+                sim_met.saveTrajectoryComparison(traj, traj_solver)
 
 
             # Dump measurements to a MATLAB-style file
