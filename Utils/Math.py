@@ -606,6 +606,48 @@ def averageClosePoints(x_array, y_array, delta, x_datetime=False):
 
 
 
+def movingAverage(arr, n=3):
+    """ Perform a moving average on an array with the window size n.
+
+    Arguments:
+        arr: [ndarray] Numpy array of values.
+
+    Keyword arguments:
+        n: [int] Averaging window.
+
+    Return:
+        [ndarray] Averaged array. The size of the array is always by n-1 smaller than the input array.
+
+    """
+
+    ret = np.cumsum(arr, dtype=float)
+
+    ret[n:] = ret[n:] - ret[:-n]
+
+    return ret[n - 1:]/n
+
+
+def subsampleAverage(arr, n=3):
+    """ Average the given array and subsample it. 
+
+    Source: https://stackoverflow.com/a/10847914/6002120
+    
+    Arguments:
+        arr: [ndarray] Numpy array of values.
+
+    Keyword arguments:
+        n: [int] Averaging window.
+
+    Return:
+        [ndarray] Subsampled array.
+
+    """
+
+    end =  n*int(len(arr)/n)
+
+    return np.mean(arr[:end].reshape(-1, n), 1)
+
+
 
 ### OPTIMIZATION ###
 ##############################################################################################################

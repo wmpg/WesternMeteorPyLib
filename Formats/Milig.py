@@ -329,7 +329,8 @@ if __name__ == '__main__':
     #dir_path = os.path.abspath("../MILIG files/20170531_002824")
     #dir_path = os.path.abspath("../MILIG files/PyLIG_IN_Pula_2010102829")
     #dir_path = os.path.abspath("../MILIG files/20170923_053525 meteorite dropping")
-    dir_path = os.path.abspath("../MILIG files/20171127_meteorite_dropping")
+    #dir_path = os.path.abspath("../MILIG files/20171127_meteorite_dropping")
+    dir_path = os.path.abspath("../MILIG files/20171231_011853")
 
     #file_name = "input_krizy_01.txt"
     #file_name = 'PyLIG_in_2011100809PUB0030.txt'
@@ -341,7 +342,8 @@ if __name__ == '__main__':
     #file_name = "PyLIG_M_20170531_002824.txt"
     #file_name = "PyLIG_IN_Pula_2010102829.txt"
     #file_name = "20170923_053525-obs.dat"
-    file_name = "input.txt"
+    #file_name = "input.txt"
+    file_name = "20171231_011853-input.txt"
 
 
 

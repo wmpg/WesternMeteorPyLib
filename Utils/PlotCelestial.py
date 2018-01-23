@@ -235,7 +235,9 @@ class CelestialPlot(object):
         # Convert angular coordinates to image coordinates
         x, y = self.m(np.degrees(ra_data), np.degrees(dec_data))
 
-        self.m.scatter(x, y, c=c, zorder=3, **kwargs)
+        scat_handle = self.m.scatter(x, y, c=c, zorder=3, **kwargs)
+
+        return scat_handle
 
 
 

@@ -453,6 +453,33 @@ def calcApparentSiderealEarthRotation(julian_date):
 
 
 
+def greatCircleDistance(lat1, lon1, lat2, lon2):
+    """ Calculate the great circle distance in kilometers between two points on the Earth.
+        Source: https://gis.stackexchange.com/a/56589/15183
+
+    Arguments:
+        lat1: [float] Latitude 1 (radians).
+        lon1: [float] Longitude 1 (radians).
+        lat2: [float] Latitude 2 (radians).
+        lon2: [float] Longitude 2 (radians).
+
+    Return:
+        [float]: Distance in kilometers.
+    """
+    
+    # Haversine formula
+    dlon = lon2 - lon1 
+    dlat = lat2 - lat1 
+
+    a = np.sin(dlat/2)**2 + np.cos(lat1)*np.cos(lat2)*np.sin(dlon/2)**2
+    c = 2*np.arcsin(np.sqrt(a))
+
+    # Distance in kilometers.
+    dist = 6371*c
+
+    return dist
+
+
 
 
 if __name__ == "__main__":

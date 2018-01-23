@@ -12,8 +12,10 @@ import numpy as np
 import scipy.signal
 import obspy
 
+from Utils.Earth import greatCircleDistance
 from Utils.OSTools import mkdirP
 from Utils.PlotMap import GroundMap
+from Utils.Math import subsampleAverage
 
 DATA_FILE = 'data.txt'
 
@@ -254,69 +256,191 @@ def getAllWaveformFiles(lat_centre, lon_centre, deg_radius, start_datetime, end_
 
 
 
+def butterworthBandpassFilter(lowcut, highcut, fs, order=5):
+    """ Butterworth bandpass filter.
 
+    Argument:
+        lowcut: [float] Lower bandpass frequency (Hz).
+        highcut: [float] Upper bandpass frequency (Hz).
+        fs: [float] Sampling rate (Hz).
 
-
-
-
-def greatCircleDistance(lat1, lon1, lat2, lon2):
-    """ Calculate the great circle distance in kilometers between two points on the Earth.
-        Source: https://gis.stackexchange.com/a/56589/15183
-
-    Arguments:
-        lat1: [float] Latitude 1 (radians).
-        lon1: [float] Longitude 1 (radians).
-        lat2: [float] Latitude 2 (radians).
-        lon2: [float] Longitude 2 (radians).
+    Keyword arguments:
+        order: [int] Butterworth filter order.
 
     Return:
-        [float]: Distance in kilometers.
+        (b, a): [tuple] Butterworth filter.
+
     """
-    
-    # Haversine formula
-    dlon = lon2 - lon1 
-    dlat = lat2 - lat1 
 
-    a = np.sin(dlat/2)**2 + np.cos(lat1)*np.cos(lat2)*np.sin(dlon/2)**2
-    c = 2*np.arcsin(np.sqrt(a))
-
-    # Distance in kilometers.
-    dist = 6371*c
-
-    return dist
-
-
-
-def butterworthBandpassFilter(lowcut, highcut, fs, order=5):
+    # Calculate the Nyquist frequency
     nyq = 0.5*fs
+
     low = lowcut/nyq
     high = highcut/nyq
+
+    # Init the filter
     b, a = scipy.signal.butter(order, [low, high], btype='band')
+
     return b, a
 
 
 
-def filterWaveform(data, lowcut, highcut, fs, order=6):
+def plotStationMap(data_list, lat_centre, lon_centre, ax=None):
+    """ Plots the map of siesmic stations from loaded data file. """
+
+
+    if ax is None:
+        ax = plt.gca()
+
+    # Extract the list of station locations
+    lat_list = [np.radians(entry[2]) for entry in data_list]
+    lon_list = [np.radians(entry[3]) for entry in data_list]
+
+    # Plot stations
+    m = GroundMap(lat_list, lon_list, ax=ax)
+    m.scatter(lat_list, lon_list, c='w', s=1)
+
+    # Plot source location
+    m.scatter([np.radians(lat_centre)], [np.radians(lon_centre)], marker='*', c='yellow')
+
+
+    ax.set_title('Source location: {:.6f}, {:.6f}'.format(lat_centre, lon_centre))
+
+
+
+def plotAllWaveforms(dir_path, data_list, v_sound, t0, lat_centre, lon_centre, ax=None, waveform_window=None):
+    """ Bandpass filter and plot all waveforms from the given data list. 
+
+    Keyword arguments:
+        waveform_window: [int] If given, the waveforms will be cut around the modelled time of arrival line
+            with +/- waveform_window/2 seconds. None by default, which means the whole waveform will be 
+            plotted.
+    """
+
+    if ax is None:
+        ax = plt.gca()
+
+    max_wave_value = 0
+    min_wave_value = np.inf
+    max_time = 0
+
+    # Go though all stations and waveforms
+    for entry in data_list:
+
+        net, station_code, stat_lat, stat_lon, stat_elev, station_name, mseed_file = entry
+
+        print('Plotting:', net, station_code)
+
+        mseed_file_path = os.path.join(dir_path, mseed_file)
+
+        # Read the miniSEED file
+        mseed = obspy.read(mseed_file_path)
+        
+
+        # Unpack miniSEED data
+        delta = mseed[0].stats.delta
+        waveform_data = mseed[0].data
+
+        # Extract time
+        start_datetime = mseed[0].stats.starttime.datetime
+        end_datetime = mseed[0].stats.endtime.datetime
+
+
+        # Skip stations with no data
+        if len(waveform_data) == 0:
+            continue
+
+
+
+        ### BANDPASS FILTERING ###
+
+        # Init the butterworth bandpass filter
+        butter_b, butter_a = butterworthBandpassFilter(0.8, 5.0, 1.0/delta, order=6)
+
+        # Filter the data
+        waveform_data = scipy.signal.filtfilt(butter_b, butter_a, waveform_data)
+
+        # Average and subsample the array for quicker plotting (reduces 40Hz to 10Hz)
+        waveform_data = subsampleAverage(waveform_data, 4)
+        delta *= 4
+
+        ##########################
+
+
+        # Calculate the distance from the source point to this station (kilometers)
+        station_dist = greatCircleDistance(np.radians(lat_centre), np.radians(lon_centre), \
+            np.radians(stat_lat), np.radians(stat_lon))
+
+
+        # Construct time array, 0 is at start_datetime
+        time_data = np.arange(0, (end_datetime - start_datetime).total_seconds(), delta)
+
+        # Cut the waveform data length to match the time data
+        waveform_data = waveform_data[:len(time_data)]
+        time_data = time_data[:len(waveform_data)]
+
+        # # Skip the first 100 samples in the filtered waveform data
+        # waveform_data = waveform_data[100:]
+        # time_data = time_data[100:]
+
+        
+        # Detrend the waveform and normalize to fixed width
+        waveform_data = waveform_data - np.mean(waveform_data)
+
+        #waveform_data = waveform_data/np.percentile(waveform_data, 99)*2
+        waveform_data = waveform_data/np.max(waveform_data)*10
+
+        # Add the distance to the waveform
+        waveform_data += station_dist
+
+
+        # Cut the waveforms around the time of arrival, if the window for cutting was given.
+        if waveform_window is not None:
+
+            # Time of arrival
+            toa = station_dist/(v_sound/1000) + t0
+
+            # Cut the waveform around the time of arrival
+            crop_indices = (time_data >= toa - waveform_window/2) & (time_data <= toa + waveform_window/2)
+            time_data = time_data[crop_indices]
+            waveform_data = waveform_data[crop_indices]
+            
+
+            # Skip plotting if array empty
+            if len(time_data) == 0:
+                continue
+
+        
+        max_time = np.max([max_time, np.max(time_data)])
+
+
+        # Keep track of minimum and maximum waveform values (used for plotting)
+        max_wave_value = np.max([max_wave_value, np.max(waveform_data)])
+        min_wave_value = np.min([min_wave_value, np.min(waveform_data)])
+
+        # Plot the waveform on the the time vs. distance graph
+        ax.plot(waveform_data, time_data, color='k', alpha=0.4, linewidth=0.2, zorder=3)
+
+        # Print the name of the station
+        ax.text(np.mean(waveform_data), np.max(time_data), net + '-' + station_code, rotation=270, \
+            va='bottom', ha='center', size=4, zorder=3)
+
+
+
+    toa_line_time = np.linspace(0, max_time, 10)
+
+    # Plot the constant sound speed line (assumption is that the release happened at t = 0)
+    ax.plot((toa_line_time + t0)*v_sound/1000, (toa_line_time + t0), color='r', alpha=0.25, linewidth=1, \
+        zorder=3, label="$V_s = " + "{:d}".format(int(v_sound)) + r" \rm{ms^{-1}}$")
+
     
-    b, a = butterworthBandpassFilter(lowcut, highcut, fs, order=order)
+    ax.set_xlabel('Distance (km)')
+    ax.set_ylabel('Time (s)')
 
+    ax.set_ylim(0, max_time + 500)
+    ax.set_xlim(min_wave_value, max_wave_value)
 
-    # # Plot the frequency response
-    # w, h = scipy.signal.freqz(b, a, worN=2000)
-    # plt.plot((fs * 0.5 / np.pi) * w, np.abs(h))
-
-    # plt.plot([0, 0.5 * fs], [np.sqrt(0.5), np.sqrt(0.5)], '--', label='sqrt(0.5)')
-
-    # plt.xlabel('Frequency (Hz)')
-    # plt.ylabel('Gain')
-    # plt.grid(True)
-    # plt.show()
-
-
-    #y = scipy.signal.lfilter(b, a, data)
-    filtered_data = scipy.signal.filtfilt(b, a, data)
-
-    return filtered_data
+    ax.grid(color='#ADD8E6', linestyle='dashed', linewidth=0.5, alpha=0.5)
 
 
 
@@ -346,7 +470,10 @@ if __name__ == "__main__":
     channel = 'BDF'
 
     # Speed of sound (m/s)
-    sound_speed = 310
+    v_sound = 310
+
+    # Time offset of wave release from the reference time
+    t0 = 0
 
     # Time range of waveform retrieval (can't be more than 2 hours!)
     start_datetime = datetime.datetime(2018, 1, 17, 1, 8, 30)
@@ -384,19 +511,7 @@ if __name__ == "__main__":
     ### Plot station map ###
     ##########################################################################################################
 
-    # Extract the list of station locations
-    lat_list = [np.radians(entry[2]) for entry in data_list]
-    lon_list = [np.radians(entry[3]) for entry in data_list]
-
-    # Plot stations
-    m = GroundMap(lat_list, lon_list)
-    m.scatter(lat_list, lon_list, c='w', s=1)
-
-    # Plot source location
-    m.scatter([np.radians(lat_centre)], [np.radians(lon_centre)], marker='*', c='yellow')
-
-
-    plt.title('Source location: {:.6f}, {:.6f}'.format(lat_centre, lon_centre))
+    plotStationMap(data_list, lat_centre, lon_centre)
 
     plt.savefig(os.path.join(dir_path, "{:s}_{:s}_{:s}_stations.png".format(network_name, channel, \
         str(start_datetime).replace(':', '.'))), dpi=300)
@@ -409,93 +524,13 @@ if __name__ == "__main__":
 
     ### Filter and plot all downloaded waveforms ###
     ##########################################################################################################
-    max_wave_value = 0
-    min_wave_value = np.inf
+    
 
-    # Go though all stations and waveforms
-    for entry in data_list:
-
-        net, station_code, stat_lat, stat_lon, stat_elev, station_name, mseed_file = entry
-
-        print('Plotting:', net, station_code)
-
-        mseed_file_path = os.path.join(dir_path, mseed_file)
-
-        # Read the miniSEED file
-        mseed = obspy.read(mseed_file_path)
-
-        print(mseed[0].stats)
-        
-
-        # Unpact miniSEED data
-        delta = mseed[0].stats.delta
-        waveform_data = mseed[0].data
-
-        # Skip stations with no data
-        if len(waveform_data) == 0:
-            continue
-
-
-        # Filter the data with a bandpass filter
-        waveform_data = filterWaveform(waveform_data, 0.8, 5.0, 1.0/delta)
-        #waveform_data = filterWaveform(waveform_data, 2.0, 8.0, 1.0/delta)
-
-
-        # Calculate the distance from the source point to this station (kilometers)
-        station_dist = greatCircleDistance(np.radians(lat_centre), np.radians(lon_centre), \
-            np.radians(stat_lat), np.radians(stat_lon))
-
-
-        # Construct time array, 0 is at start_datetime
-        time_data = np.arange(0, (end_datetime - start_datetime).total_seconds(), delta)
-
-        # Cut the waveform data length to match the time data
-        waveform_data = waveform_data[:len(time_data)]
-        time_data = time_data[:len(waveform_data)]
-
-        # Skip the first 100 samples in the filtered waveform data
-        waveform_data = waveform_data[100:]
-        time_data = time_data[100:]
-
-        
-        # Detrend the waveform and normalize to fixed width
-        waveform_data = waveform_data - np.mean(waveform_data)
-        #waveform_data = waveform_data/np.percentile(waveform_data, 99)*2
-        waveform_data = waveform_data/np.max(waveform_data)*10
-
-        # Add the distance to the waveform
-        waveform_data += station_dist
-
-        # Keep track of minimum and maximum waveform values (used for plotting)
-        max_wave_value = np.max([max_wave_value, np.max(waveform_data)])
-        min_wave_value = np.min([min_wave_value, np.min(waveform_data)])
-
-        # Plot the waveform on the the time vs. distance graph
-        plt.plot(waveform_data, time_data, color='k', alpha=0.4, linewidth=0.2, zorder=3)
-
-        # Print the name of the station
-        plt.text(np.mean(waveform_data), np.max(time_data), net + '-' + station_code, rotation=270, \
-            va='bottom', ha='center', size=4, zorder=3)
-
-
-
-    # Plot the constant sound speed line (assumption is that the release happened at t = 0)
-    plt.plot(time_data*sound_speed/1000, time_data, color='r', alpha=0.25, linewidth=1, zorder=3, \
-        label="$V_s = " + "{:d}".format(int(sound_speed)) + r" \rm{ms^{-1}}$")
+    plotAllWaveforms(dir_path, data_list, v_sound, t0, lat_centre, lon_centre)
 
     plt.title('Source location: {:.6f}, {:.6f}, Reference time: {:s} UTC, channel: {:s}'.format(lat_centre, \
         lon_centre, str(start_datetime), channel), fontsize=7)
-    plt.xlabel('Distance (km)')
-    plt.ylabel('Time (s)')
-
-    plt.ylim(0, np.max(time_data) + 500)
-    plt.xlim(min_wave_value, max_wave_value)
-
-    plt.grid(color='#ADD8E6', linestyle='dashed', linewidth=0.5, alpha=0.5)
-
     plt.legend(loc='lower right')
-
-
 
     plt.savefig(os.path.join(dir_path, "{:s}_{:s}_{:s}_waveforms.png".format(network_name, channel, \
         str(start_datetime).replace(':', '.'))), dpi=300)

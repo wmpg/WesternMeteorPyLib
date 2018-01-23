@@ -14,7 +14,7 @@ from Config import config
 from Utils.Pickling import loadPickle
 from Utils.TrajConversions import jd2Date
 from MetSim.MetSim import loadInputs
-from MetSim.FitSim import calcVelocity
+from MetSim.FitSim import calcVelocity  
 
 
 # Minimum difference between slider

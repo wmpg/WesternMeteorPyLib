@@ -13,7 +13,7 @@ from Utils.Math import meanAngle
 
 class GroundMap(object):
     def __init__(self, lat_list, lon_list, border_size=50, bgcolor='0.2', parallel_step=1.0, \
-        meridian_step=1.0, plot_scale=True):
+        meridian_step=1.0, plot_scale=True, ax=None):
         """ Inits a gnomonic Basemap plot around given latitudes and longitudes.
 
         Arguments:
@@ -27,8 +27,12 @@ class GroundMap(object):
             parallel_step: [float] Steps of parallel lines in degrees. 1 deg by default.
             meridian_step: [float] Steps of meridian lines in degrees. 1 deg by default.
             plot_scale: [bool] Plot the map scale. True by default.
+            ax: [matplotlib axis handle] Axis to use for plotting. None by default.
+
         """
 
+        if ax is None:
+            ax = plt.gca()
 
         # Calculate the mean latitude and longitude by including station positions
         lat_mean = meanAngle([lat for lat in lat_list])
@@ -65,7 +69,7 @@ class GroundMap(object):
 
         # Init the map
         self.m = Basemap(projection='gnom', lat_0=np.degrees(lat_mean), lon_0=np.degrees(lon_mean), \
-            width=2*max_dist, height=2*max_dist, resolution='i')
+            width=2*max_dist, height=2*max_dist, resolution='i', ax=ax)
 
         # Draw the coast boundary and fill the oceans with the given color
         self.m.drawmapboundary(fill_color=bgcolor)
@@ -79,8 +83,8 @@ class GroundMap(object):
 
 
         # Calculate the range of meridians and parallels to plot
-        x_min, x_max = plt.gca().get_xlim()
-        y_min, y_max = plt.gca().get_ylim()
+        x_min, x_max = ax.get_xlim()
+        y_min, y_max = ax.get_ylim()
 
         lon_min, lat_min = self.m(x_min, y_min, inverse=True)
         lon_max, lat_max = self.m(x_max, y_max, inverse=True)
@@ -145,8 +149,8 @@ class GroundMap(object):
 
 
         # Turn off shortening numbers into offsets
-        plt.gca().get_xaxis().get_major_formatter().set_useOffset(False)
-        plt.gca().get_yaxis().get_major_formatter().set_useOffset(False)
+        ax.get_xaxis().get_major_formatter().set_useOffset(False)
+        ax.get_yaxis().get_major_formatter().set_useOffset(False)
 
 
 
@@ -154,8 +158,8 @@ class GroundMap(object):
             ## Plot the map scale
             
             # Get XY cordinate of the lower left corner
-            ll_x, _ = plt.gca().get_xlim()
-            ll_y, _ = plt.gca().get_ylim()
+            ll_x, _ = ax.get_xlim()
+            ll_y, _ = ax.get_ylim()
 
             # Move the label to fit in the lower left corner
             ll_x += 0.2*2*max_dist
@@ -178,7 +182,7 @@ class GroundMap(object):
 
 
             # Reset the colour cycle
-            plt.gca().set_prop_cycle(None)
+            ax.set_prop_cycle(None)
 
 
 
@@ -194,7 +198,9 @@ class GroundMap(object):
         # Convert coordinates to map coordinates
         x, y = self.m(np.degrees(lon_list), np.degrees(lat_list))
 
-        self.m.scatter(x, y, zorder=3, **kwargs)
+        scat_handle = self.m.scatter(x, y, zorder=3, **kwargs)
+
+        return scat_handle
 
 
 
@@ -210,7 +216,9 @@ class GroundMap(object):
         # Convert coordinates to map coordinates
         x, y = self.m(np.degrees(lon_list), np.degrees(lat_list))
 
-        self.m.plot(x, y, zorder=3, **kwargs)
+        plot_handle = self.m.plot(x, y, zorder=3, **kwargs)
+
+        return plot_handle
 
 
 
