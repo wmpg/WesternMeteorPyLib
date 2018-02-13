@@ -25,6 +25,10 @@ class Orbit(object):
         self.ra = None
         self.dec = None
 
+        # Apparent azimuth and altitude
+        self.azimuth_apparent = None
+        self.elevation_apparent = None
+
         # Estimated average velocity
         self.v_avg = None
 
@@ -35,11 +39,20 @@ class Orbit(object):
         # average time of the meteor
         self.jd_ref = None
 
+        # Dynamical Julian date
+        self.jd_dyn = None
+
+        # Referent Local Sidreal Time of the referent trajectory position
+        self.lst_ref = None
+
         # Longitude of the referent point on the trajectory (rad)
         self.lon_ref = None
 
         # Latitude of the referent point on the trajectory (rad)
         self.lat_ref = None
+
+        # Geocentric latitude of the referent point on the trajectory (rad)
+        self.lat_geocentric = None
 
         # Apparent zenith angle (before the correction for Earth's gravity)
         self.zc = None
@@ -156,14 +169,25 @@ class Orbit(object):
 
         out_str =  ""
         #out_str +=  "--------------------\n"
+
+        # Check if the orbit was calculated
+        if self.ra_g is not None:
+            out_str += "  JD dynamic   = {:20.12f} \n".format(self.jd_dyn)
+            out_str += "  LST apparent = {:.10f} deg\n".format(np.degrees(self.lst_ref))
+
+
         out_str += "Radiant (apparent, epoch of date):\n"
-        out_str += "  R.A.   = {:>9.5f}{:s} deg\n".format(np.degrees(self.ra), _uncer('{:.4f}', 'ra', 
+        out_str += "  R.A.      = {:>9.5f}{:s} deg\n".format(np.degrees(self.ra), _uncer('{:.4f}', 'ra', 
             deg=True))
-        out_str += "  Dec    = {:>+9.5f}{:s} deg\n".format(np.degrees(self.dec), _uncer('{:.4f}', 'dec', 
+        out_str += "  Dec       = {:>+9.5f}{:s} deg\n".format(np.degrees(self.dec), _uncer('{:.4f}', 'dec', 
             deg=True))
-        out_str += "  Vavg   = {:>9.5f}{:s} km/s\n".format(self.v_avg/1000, _uncer('{:.4f}', 'v_avg', 
+        out_str += "  Azimuth   = {:>+9.5f}{:s} deg\n".format(np.degrees(self.azimuth_apparent), \
+            _uncer('{:.4f}', 'azimuth_apparent', deg=True))
+        out_str += "  Elevation = {:>+9.5f}{:s} deg\n".format(np.degrees(self.elevation_apparent), \
+            _uncer('{:.4f}', 'elevation_apparent', deg=True))
+        out_str += "  Vavg      = {:>9.5f}{:s} km/s\n".format(self.v_avg/1000, _uncer('{:.4f}', 'v_avg', 
             multi=1.0/1000))
-        out_str += "  Vinit  = {:>9.5f}{:s} km/s\n".format(self.v_init/1000, _uncer('{:.4f}', 'v_init', 
+        out_str += "  Vinit     = {:>9.5f}{:s} km/s\n".format(self.v_init/1000, _uncer('{:.4f}', 'v_init', 
             multi=1.0/1000))
 
 
@@ -307,7 +331,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         # Calculate the equatorial coordinates of east from the referent position on the trajectory
         azimuth_east = np.pi/2
         altitude_east = 0
-        ra_east, dec_east = altAz2RADec(azimuth_east, altitude_east, jd_dyn, lat_ref, lon_ref)
+        ra_east, dec_east = altAz2RADec(azimuth_east, altitude_east, jd_ref, lat_ref, lon_ref)
 
 
         if referent_init:
@@ -386,9 +410,15 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
     orb.v_init = v_init
     orb.v_avg = v_avg
 
+    # Calculate the apparent azimuth and altitude (geodetic latitude, because ra/dec are calculated from ECI,
+    #   which is calculated from WGS84 coordinates)
+    orb.azimuth_apparent, orb.elevation_apparent = raDec2AltAz(orb.ra, orb.dec, jd_ref, lat_geocentric, \
+        lon_ref)
+
     orb.jd_ref = jd_ref
     orb.lon_ref = lon_ref
     orb.lat_ref = lat_ref
+    orb.lat_geocentric = lat_geocentric
 
     # Assume that the velocity in infinity is the same as the initial velocity (after rotation correction, if
     # it was needed)
@@ -405,11 +435,12 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         v_g = np.sqrt(v_init_corr**2 - (2*6.67408*5.9722)*1e13/vectMag(eci_ref))
 
 
-        # Calculate the radiant corrected for Earth's rotation
+        # Calculate the radiant corrected for Earth's rotation (ONLY if the stations were fixed, otherwise it
+        #   is the same as the apparent radiant)
         ra_corr, dec_corr = eci2RaDec(vectNorm(v_ref_corr))
 
         # Calculate the Local Sidreal Time of the referent trajectory position
-        lst_ref = np.radians(jd2LST(jd_dyn, np.degrees(lon_ref))[0])
+        lst_ref = np.radians(jd2LST(jd_ref, np.degrees(lon_ref))[0])
 
         # Calculate the apparent zenith angle
         zc = np.arccos(np.sin(dec_corr)*np.sin(lat_geocentric) \
@@ -429,10 +460,10 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         ##########################################################################################################
 
         # Get the azimuth from the corrected RA and Dec
-        azimuth_corr, _ = raDec2AltAz(ra_corr, dec_corr, jd_dyn, lat_ref, lon_ref)
+        azimuth_corr, _ = raDec2AltAz(ra_corr, dec_corr, jd_ref, lat_geocentric, lon_ref)
 
         # Calculate the geocentric radiant
-        ra_g, dec_g = altAz2RADec(azimuth_corr, np.pi/2 - zg, jd_dyn, lat_geocentric, lon_ref)
+        ra_g, dec_g = altAz2RADec(azimuth_corr, np.pi/2 - zg, jd_ref, lat_geocentric, lon_ref)
         
 
         ### Precess ECI coordinates to J2000 ###
@@ -441,7 +472,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         re, delta_e, alpha_e = cartesianToSpherical(*eci_ref)
 
         # Precess coordinates to J2000
-        alpha_ej, delta_ej = equatorialCoordPrecession(jd_dyn, J2000_JD.days, alpha_e, delta_e)
+        alpha_ej, delta_ej = equatorialCoordPrecession(jd_ref, J2000_JD.days, alpha_e, delta_e)
 
         # Convert coordinates back to rectangular
         eci_ref = sphericalToCartesian(re, delta_ej, alpha_ej)
@@ -450,11 +481,11 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         ######
 
         # Precess the geocentric radiant to J2000
-        ra_g, dec_g = equatorialCoordPrecession(jd_dyn, J2000_JD.days, ra_g, dec_g)
+        ra_g, dec_g = equatorialCoordPrecession(jd_ref, J2000_JD.days, ra_g, dec_g)
 
 
         # Calculate the ecliptic latitude and longitude of the geocentric radiant (J2000 epoch)
-        L_g, B_g = raDec2Ecliptic(jd_dyn, ra_g, dec_g)
+        L_g, B_g = raDec2Ecliptic(J2000_JD.days, ra_g, dec_g)
 
 
         # Load the JPL ephemerids data
@@ -465,15 +496,33 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         # system barycentre
         earth_pos, earth_vel = calcEarthRectangularCoordJPL(jd_dyn, jpl_ephem_data)
 
+        # print('Earth position:')
+        # print(earth_pos)
+        # print('Earth velocity:')
+        # print(earth_vel)
+
         # Convert the Earth's position to rectangular equatorial coordinates (FK5)
         earth_pos_eq = rotateVector(earth_pos, np.array([1, 0, 0]), J2000_OBLIQUITY)
+
+        # print('Earth position (FK5):')
+        # print(earth_pos_eq)
+
+        # print('Meteor ECI:')
+        # print(eci_ref)
 
         # Add the position of the meteor's trajectory to the position of the Earth to calculate the 
         # equatorial coordinates of the meteor (in kilometers)
         meteor_pos = earth_pos_eq + eci_ref/1000
 
-        # Convert the position of the trajectory from FK5 to Sun-centered ecliptic coordinates
+
+        # print('Meteor position (FK5):')
+        # print(meteor_pos)
+
+        # Convert the position of the trajectory from FK5 to barycentric ecliptic coordinates
         meteor_pos = rotateVector(meteor_pos, np.array([1, 0, 0]), -J2000_OBLIQUITY)
+
+        # print('Meteor position:')
+        # print(meteor_pos)
 
 
         ##########################################################################################################
@@ -606,6 +655,8 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
 
 
         # Assign calculated parameters
+        orb.lst_ref = lst_ref
+        orb.jd_dyn = jd_dyn
         orb.v_g = v_g
         orb.ra_g = ra_g
         orb.dec_g = dec_g

@@ -1073,7 +1073,8 @@ class GuralTrajectory(object):
         del self.traj
 
         # Save the picked trajectory structure with original points
-        savePickle(self, self.output_dir, self.file_name + '_gural_trajectory.pickle')
+        savePickle(self, self.output_dir, self.file_name \
+            + '_gural{:d}_trajectory.pickle'.format(self.velmodel))
 
 
         ######################################################################################################

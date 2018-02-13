@@ -262,7 +262,8 @@ if __name__ == "__main__":
     #dir_path = "../DenisGEMcases/"
     #dir_path = "../DenisGEMcases_5_sigma"
     #dir_path = "../Romulan2012Geminids"
-    dir_path = "../SimulatedMeteors/CAMO/PER"
+    #dir_path = "../SimulatedMeteors/CAMO/PER"
+    dir_path = "../SimulatedMeteors/CAMO/2011Draconids"
 
 
 
@@ -282,9 +283,14 @@ if __name__ == "__main__":
     # radius = 5.0
 
 
-    # Coordinates of the centre (PER)
-    ra_cent = 48.2
-    dec_cent = 58.1
+    # # Coordinates of the centre (PER)
+    # ra_cent = 48.2
+    # dec_cent = 58.1
+    # radius = 15.0
+
+    # Coordinates of the centre (DRA)
+    ra_cent = 263.387
+    dec_cent = 55.9181
     radius = 15.0
 
     # ra_cent = None

@@ -104,11 +104,14 @@ def solveTrajectory(dir_path, file_name, solver='original', **kwargs):
 
 if __name__ == "__main__":
 
-    dir_path = os.path.abspath("../SimulatedMeteors/CAMO_OLD/Perseids/2456149.60802")
-    file_name = "20120810_023532_trajectory.pickle"
+    # dir_path = os.path.abspath("../SimulatedMeteors/CAMO_OLD/Perseids/2456149.60802")
+    # file_name = "20120810_023532_trajectory.pickle"
 
     # dir_path = os.path.abspath("../SimulatedMeteors/CAMO_OLD/Perseids/2456150.7563")
     # file_name = "20120811_060904_trajectory.pickle"
+
+    dir_path = os.path.abspath("/home/dvida/Desktop/test/012 - 2455896.500000")
+    file_name = "20111201_000000_trajectory.pickle"
 
 
     # # Dump the pickled trajectory as UWO-style ev_* file 
@@ -116,4 +119,4 @@ if __name__ == "__main__":
 
 
     # Solve the trajectory from the given pickle file
-    traj = solveTrajectory(dir_path, file_name, solver='gural')
+    traj = solveTrajectory(dir_path, file_name, solver='original')

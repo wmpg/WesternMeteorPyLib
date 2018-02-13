@@ -265,7 +265,7 @@ class CelestialPlot(object):
 if __name__ == "__main__":
 
 
-    ra = np.random.normal(10, 0.1, 10)
+    ra = np.random.normal(10, 0.5, 10)
     dec = np.random.normal(6.6516, 0.05, size=ra.shape)
 
     ra = np.radians(ra)

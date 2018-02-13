@@ -115,11 +115,13 @@ if __name__ == "__main__":
 
     # Trajectory path
     #dir_path = os.path.abspath("../MILIG files/20170923_053525 meteorite dropping/Monte Carlo")
-    dir_path = os.path.abspath("../MILIG files/20171127_meteorite_dropping/Monte Carlo")
+    #dir_path = os.path.abspath("../MILIG files/20171127_meteorite_dropping/Monte Carlo")
+    dir_path = os.path.abspath("../MILIG files/20180125_meteorite_dropping/Monte Carlo")
 
     # Trajectory pickle file
     # traj_file = '20170923_053524_mc_trajectory.pickle'
-    traj_file = '20171127_010546_mc_trajectory.pickle'
+    # traj_file = '20171127_010546_mc_trajectory.pickle'
+    traj_file = '20180125_002305_mc_trajectory.pickle'
 
     # No. of input station (if -1, the program will loop over all stations)
     station_id = -1
@@ -145,7 +147,7 @@ if __name__ == "__main__":
     # - 'exp' - single term exponential
     # - '2exp' - two term exponential
     # - 'poly' - 3rd order polynomial
-    fit_func = '2exp'
+    fit_func = 'poly'
 
 
     ##########################################################################################################

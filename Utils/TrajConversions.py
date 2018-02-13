@@ -326,15 +326,16 @@ def jd2DynamicalTimeJD(jd):
     # Leap seconds as of 2017 (default)
     leap_secs = 37.0
 
+
     # Get the relevant number of leap seconds for the given JD
     for jd_leap, ls in config.leap_seconds:
         
         if jd > jd_leap:
             leap_secs = ls
-            break
+            
 
     # Calculate the dynamical JD
-    jd_dyn = jd + (leap_secs + 32.184)/86400
+    jd_dyn = jd + (leap_secs + 32.184)/86400.0
 
 
     return jd_dyn
@@ -1021,6 +1022,7 @@ def equatorialCoordPrecession(start_epoch, final_epoch, ra, dec):
 
     """
 
+
     T = (start_epoch - J2000_JD.days)/36525.0
     t = (final_epoch - start_epoch)/36525.0
 
@@ -1212,5 +1214,11 @@ if __name__ == "__main__":
     print('Lh:', np.degrees(L_h))
     print('Bh:', np.degrees(B_h))
     print('Vh:', vectMag(met_v_h))
+
+    print()
+
+    jd = 2455843.314521576278
+    print('JD: {:.10f}'.format(jd))
+    print('JDdyn: {:.10f}'.format(jd2DynamicalTimeJD(jd)))
 
     ###########

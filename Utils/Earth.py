@@ -57,7 +57,8 @@ class VSOP87:
 def calcEarthEclipticCoordVSOP(jd, vsop_data):
     """ Calculates the ecliptic coordinates of the Earth for the given Julian date.
 
-        The calculations are done using the VSOP87 model.
+        The calculations are done using the VSOP87 model, the returned coordinates are heliocentric in the
+        epoch of date.
 
     Arguments:
         jd: [float] Julian date
@@ -177,7 +178,7 @@ def calcNutationComponents(jd_dyn):
     """
 
 
-    T = (jd_dyn - Utils.TrajConversions.J2000_JD.days)/365250.0
+    T = (jd_dyn - Utils.TrajConversions.J2000_JD.days)/36525.0
 
     # # Mean Elongation of the Moon from the Sun
     # D = 297.85036 + 445267.11148*T - 0.0019142*T**2 + (T**3)/189474
@@ -416,7 +417,11 @@ def calcTrueObliquity(jd):
 
 
 def calcApparentSiderealEarthRotation(julian_date):
-    """ Calculate apparent sidereal rotation of the Earth.
+    """ Calculate apparent sidereal rotation GST of the Earth. 
+        
+        Calculated according to: 
+        Clark, D. L. (2010). Searching for fireball pre-detections in sky surveys. The School of Graduate and 
+        Postdoctoral Studies. University of Western Ontario, London, Ontario, Canada, MSc Thesis.
 
     """
 
@@ -427,6 +432,7 @@ def calcApparentSiderealEarthRotation(julian_date):
     GST = (GST + 360)%360
     GST = math.radians(GST)
 
+    # print('GST:', np.degrees(GST), 'deg')
 
     # Calculate the dynamical time JD
     jd_dyn = Utils.TrajConversions.jd2DynamicalTimeJD(julian_date)
@@ -434,6 +440,9 @@ def calcApparentSiderealEarthRotation(julian_date):
 
     # Calculate Earth's nutation components
     delta_psi, delta_eps = calcNutationComponents(jd_dyn)
+
+    # print('Delta Psi:', np.degrees(delta_psi), 'deg')
+    # print('Delta Epsilon:', np.degrees(delta_eps), 'deg')
 
 
     # Calculate the mean obliquity (in arcsec)
@@ -444,6 +453,8 @@ def calcApparentSiderealEarthRotation(julian_date):
     # Convert to radians
     eps0 /= 3600
     eps0 = np.radians(eps0)
+
+    # print('Mean obliquity:', np.degrees(eps0), 'deg')
 
     # Calculate apparent sidereal Earth's rotation
     app_sid_rot = (GST + delta_psi*math.cos(eps0 + delta_eps))%(2*math.pi)
@@ -486,7 +497,9 @@ if __name__ == "__main__":
 
     from Utils.TrajConversions import date2JD
 
-    jd = date2JD(2016, 9, 29, 6, 29, 45)
+    #jd = date2JD(2016, 9, 29, 6, 29, 45)
+    #jd = 2455843.318098123185
+    jd=2455843.318098123
 
     print("JD:", "{:10.10f}".format(jd))
 
@@ -506,22 +519,33 @@ if __name__ == "__main__":
     # Calculate ecliptic coordinates
     L, B, r_au = calcEarthEclipticCoordVSOP(jd, vsop_data)
 
-    print('Ecliptic longitude:', np.degrees(L))
-    print('Ecliptic latitude:', np.degrees(B))
-    print('Distance (AU):', r_au)
+    print()
+    print('VSOP87, J2000:')
 
     # Convert ecliptic coordinates to Cartesian coordinates
     x, y, z = Utils.TrajConversions.ecliptic2RectangularCoord(L, B, r_au)
+
+    # Precess VSOP coordinates to J2000
+    x, y, z = Utils.TrajConversions.eclipticRectangularPrecession(jd, Utils.TrajConversions.J2000_JD.days, \
+        x, y, z)
+
+    L, B, r_au = Utils.TrajConversions.rectangular2EclipticCoord(x, y, z)
+
+
+    print('Ecliptic longitude:', np.degrees(L))
+    print('Ecliptic latitude:', np.degrees(B))
+    print('Distance (AU):', r_au)
 
     print('X:', x*Utils.TrajConversions.AU)
     print('Y:', y*Utils.TrajConversions.AU)
     print('Z:', z*Utils.TrajConversions.AU)
 
-    jpl_pos, jpl_vel = calcEarthRectangularCoordJPL(jd, jpl_data)
-    print('JPL:', jpl_pos, jpl_vel)
+    print()
+    print('JPL DE430, J2000, heliocentric:')
+    jpl_pos, jpl_vel = calcEarthRectangularCoordJPL(jd, jpl_data, sun_centre_origin=True)
 
-    # Precess the coordinates to the epoch of date
-    x, y, z = Utils.TrajConversions.eclipticRectangularPrecession(Utils.TrajConversions.J2000_JD.days, jd, *jpl_pos)
+    # Precess the JPL coordinates to the epoch of date
+    #x, y, z = Utils.TrajConversions.eclipticRectangularPrecession(Utils.TrajConversions.J2000_JD.days, jd, *jpl_pos)
 
 
     # Calculate ecliptic coordinates from the JPL rectangular coordinates
@@ -530,3 +554,18 @@ if __name__ == "__main__":
     print('Ecliptic longitude:', np.degrees(L))
     print('Ecliptic latitude:', np.degrees(B))
     print('Distance (AU):', r_au)
+
+    print('X:', jpl_pos[0])
+    print('Y:', jpl_pos[1])
+    print('Z:', jpl_pos[2])
+
+    print('Vx', jpl_vel[0])
+    print('Vy', jpl_vel[1])
+    print('Vz', jpl_vel[2])
+
+
+    print()
+    print('------------')
+    # Test the apparent LST calculation
+    print('JD: {:.10f}'.format(jd))
+    print('Apparent GST: {:.10f} deg'.format(np.degrees(calcApparentSiderealEarthRotation(jd))))

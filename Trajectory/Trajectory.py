@@ -114,6 +114,9 @@ class ObservedPoints(object):
         ### CALCULATED DATA ###
         ######################################################################################################
 
+        # Angle between the station, the state vector, and the trajectory
+        self.incident_angle = None
+
         # Residuals from the fit
         self.h_residuals = None
         self.v_residuals = None
@@ -1187,6 +1190,10 @@ class MCUncertanties(object):
         self.ra = None
         self.dec = None
 
+        # Apparent azimuth and altitude
+        self.azimuth_apparent = None
+        self.elevation_apparent = None
+
         # Estimated average velocity
         self.v_avg = None
 
@@ -1198,6 +1205,9 @@ class MCUncertanties(object):
 
         # Latitude of the referent point on the trajectory (rad)
         self.lat_ref = None
+
+        # Geocentric latitude of the referent point (rad)
+        self.lat_geocentric = None
 
         # Apparent zenith angle (before the correction for Earth's gravity)
         self.zc = None
@@ -1346,9 +1356,13 @@ def calcMCUncertanties(traj_list, traj_best):
         un.v_avg = np.std([traj.orbit.v_avg for traj in traj_list])
         un.v_inf = np.std([traj.orbit.v_inf for traj in traj_list])
 
+        un.azimuth_apparent = scipy.stats.circstd([traj.orbit.azimuth_apparent for traj in traj_list])
+        un.elevation_apparent = np.std([traj.orbit.elevation_apparent for traj in traj_list])
+
         # Referent point on the meteor trajectory
         un.lon_ref = scipy.stats.circstd([traj.orbit.lon_ref for traj in traj_list])
         un.lat_ref = np.std([traj.orbit.lat_ref for traj in traj_list])
+        un.lat_geocentric = np.std([traj.orbit.lat_geocentric for traj in traj_list])
 
         # Geocentric
         un.ra_g = scipy.stats.circstd([traj.orbit.ra_g for traj in traj_list])
@@ -1921,6 +1935,14 @@ class Trajectory(object):
         self.rend_ele = None
         self.rend_jd = None
 
+
+        # Intersecting planes state vector
+        self.state_vect = None
+
+        # Angles (radians) between the trajectory and the station, looking from the state vector determined
+        #   by intersecting planes
+        self.incident_angles = []
+
         # Initial state vector (minimization)
         self.state_vect_mini = None
 
@@ -2144,14 +2166,7 @@ class Trajectory(object):
 
         if calc_res and (self.time_diffs_final is not None):
 
-            # Calculate the final length residuals
-            # self.timing_res = timingResiduals(self.time_diffs_final, self.observations, self.t_ref_station, \
-            #     ret_len_residuals=True)
-            # self.timing_stddev = timingResiduals(self.time_diffs_final, self.observations, self.t_ref_station, \
-            #     ret_stddev=True, ret_len_residuals=True)
-
-
-            ### TEST !!!! with timing as the indicator
+            # Calculate the timing offset between the meteor time vs. length
             self.timing_res = timingResiduals(self.time_diffs_final, self.observations, self.t_ref_station)
             self.timing_stddev = timingResiduals(self.time_diffs_final, self.observations, self.t_ref_station, \
                 ret_stddev=True)
@@ -2305,7 +2320,13 @@ class Trajectory(object):
 
             # Stop trying methods if this one was successful
             if timing_mini.success:
+                if self.verbose:
+                    print('Successful timing optimization with', opt_method)
+
                 break
+
+            else:
+                print('Unsuccessful timing optimization with', opt_method)
 
 
         # If the minimization was successful, apply the time corrections
@@ -2451,6 +2472,7 @@ class Trajectory(object):
 
             print('Timing difference and initial velocity minimization failed with the message:')
             print(timing_mini.message)
+            print('Try increasing the range of time offsets!')
             v_init_mini = v_init
 
             velocity_fit = np.zeros(2)
@@ -2858,10 +2880,12 @@ class Trajectory(object):
         if self.orbit is not None:
             out_str += "Referent point on the trajectory:\n"
             out_str += "  Time: " + str(jd2Date(self.orbit.jd_ref, dt_obj=True)) + " UTC\n"
-            out_str += "  Lon   = {:+>10.6f}{:s} deg\n".format(np.degrees(self.orbit.lon_ref), _uncer('{:.4f}', 
-                'lon_ref', deg=True))
-            out_str += "  Lat   = {:+>10.6f}{:s} deg\n".format(np.degrees(self.orbit.lat_ref), _uncer('{:.4f}', 
-                'lat_ref', deg=True))
+            out_str += "  Lon     = {:+>10.6f}{:s} deg\n".format(np.degrees(self.orbit.lon_ref), \
+                _uncer('{:.4f}', 'lon_ref', deg=True))
+            out_str += "  Lat     = {:+>10.6f}{:s} deg\n".format(np.degrees(self.orbit.lat_ref), \
+                _uncer('{:.4f}', 'lat_ref', deg=True))
+            out_str += "  Lat geo = {:+>10.6f}{:s} deg\n".format(np.degrees(self.orbit.lat_geocentric), \
+                _uncer('{:.4f}', 'lat_geocentric', deg=True))
             out_str += "\n"
 
             # Write out orbital parameters
@@ -2919,7 +2943,7 @@ class Trajectory(object):
         out_str += "Stations\n"
         out_str += "--------\n"
 
-        out_str += "        ID, Lon +E (deg), Lat +N (deg), Ele (m), Jacchia a1, Jacchia a2, Beg Ele (m),  End Ht (m), +/- Obs ang (deg), +/- V (m), +/- H (m)\n"
+        out_str += "        ID, Lon +E (deg), Lat +N (deg), Ele (m), Jacchia a1, Jacchia a2, Beg Ele (m),  End Ht (m), +/- Obs ang (deg), +/- V (m), +/- H (m), Incident angle (deg)\n"
         
         for obs in self.observations:
 
@@ -2935,6 +2959,7 @@ class Trajectory(object):
             station_info.append("{:>17.6f}".format(np.degrees(obs.ang_res_std)))
             station_info.append("{:>9.2f}".format(obs.v_res_rms))
             station_info.append("{:>9.2f}".format(obs.h_res_rms))
+            station_info.append("{:>20.2f}".format(np.degrees(obs.incident_angle)))
 
 
             out_str += ", ".join(station_info) + "\n"
@@ -3114,8 +3139,8 @@ class Trajectory(object):
 
             # Set the height axis
             ax2 = ax1.twinx()
-            ax2.set_ylim(min(obs.meas_ht), max(obs.meas_ht))
-            ax2.set_ylabel('Height (m)')
+            ax2.set_ylim(min(obs.meas_ht)/1000, max(obs.meas_ht)/1000)
+            ax2.set_ylabel('Height (km)')
 
             plt.tight_layout()
 
@@ -3270,8 +3295,8 @@ class Trajectory(object):
 
         # Set the height axis
         ax2 = ax1.twinx()
-        ax2.set_ylim(ht_min, ht_max)
-        ax2.set_ylabel('Height (m)')
+        ax2.set_ylim(ht_min/1000, ht_max/1000)
+        ax2.set_ylabel('Height (km)')
 
         plt.tight_layout()
 
@@ -3551,9 +3576,8 @@ class Trajectory(object):
 
 
 
-    def calcLoSWeights(self, state_vect, radiant_eci, observations):
-        """ Calculate the weights for lines of sight minimization. The weights are calculated as squared
-            sines of angles between the radiant vector and the vector pointing from a station to the 
+    def calcStationIncidentAngles(self, state_vect, radiant_eci, observations):
+        """ Calculate angles between the radiant vector and the vector pointing from a station to the 
             initial state vector. 
 
         Arguments:
@@ -3563,10 +3587,10 @@ class Trajectory(object):
                 stations.
 
         Return:
-            return: [list] A list of weights for every station.
+            return: [list] A list of angles (radians) for every station.
         """
 
-        weights = []
+        angles = []
 
         for obs in observations:
 
@@ -3576,13 +3600,10 @@ class Trajectory(object):
             # Calculate the angle between the pointing vector and the radiant vector
             q_r = np.arccos(np.dot(radiant_eci, w))
 
-            # Calculate the weight
-            weight = np.sin(q_r)**2
-
-            weights.append(weight)
+            angles.append(q_r)
 
 
-        return weights
+        return angles
 
 
 
@@ -3689,9 +3710,27 @@ class Trajectory(object):
         self.state_vect = self.moveStateVector(self.best_conv_inter.cpa_eci, self.best_conv_inter.radiant_eci,
             self.observations)
 
-        # Calculate statistical weights for LoS minimization
-        weights = self.calcLoSWeights(self.state_vect, self.best_conv_inter.radiant_eci, \
+        # Calculate incident angles between the trajectory and the station
+        self.incident_angles = self.calcStationIncidentAngles(self.state_vect, self.best_conv_inter.radiant_eci, \
             self.observations)
+
+        # Join each observation the calculated incident angle
+        for obs, inc_angl in zip(self.observations, self.incident_angles):
+            obs.incident_angle = inc_angl
+
+
+
+        # If there are more than 2 stations, use weights for fitting
+        if len(self.observations) > 2:
+
+            # Calculate minimization weights for LoS minimization as squared sines of incident angles
+            weights = [np.sin(w)**2 for w in self.incident_angles]
+
+        else:
+
+            # Use unity weights if there are only two stations
+            weights = [1.0]*len(self.observations)
+
 
 
         if self.verbose:
