@@ -262,7 +262,7 @@ class Orbit(object):
 def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False, referent_init=True, \
     rotation_correction=False):
     """ Calculate the meteor's orbit from the given meteor trajectory. The orbit of the meteoroid is defined 
-        relative to the barycentre of the Solar system.
+        relative to the centre of the Sun (heliocentric).
 
     Arguments:
         radiant_eci: [3 element ndarray] Radiant vector in ECI coordinates (meters).
@@ -492,9 +492,9 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         jpl_ephem_data = SPK.open(config.jpl_ephem_file)
         
         # Get the position of the Earth (km) and its velocity (km/s) at the given Julian date (J2000 epoch)
-        # The position is given in the ecliptic coordinates, origin of the coordinate system is in the Solar 
-        # system barycentre
-        earth_pos, earth_vel = calcEarthRectangularCoordJPL(jd_dyn, jpl_ephem_data)
+        # The position is given in the ecliptic coordinates, origin of the coordinate system is in the centre
+        # of the Sun
+        earth_pos, earth_vel = calcEarthRectangularCoordJPL(jd_dyn, jpl_ephem_data, sun_centre_origin=True)
 
         # print('Earth position:')
         # print(earth_pos)
@@ -518,7 +518,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         # print('Meteor position (FK5):')
         # print(meteor_pos)
 
-        # Convert the position of the trajectory from FK5 to barycentric ecliptic coordinates
+        # Convert the position of the trajectory from FK5 to heliocentric ecliptic coordinates
         meteor_pos = rotateVector(meteor_pos, np.array([1, 0, 0]), -J2000_OBLIQUITY)
 
         # print('Meteor position:')
@@ -528,10 +528,6 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         ##########################################################################################################
 
         # Calculate components of the heliocentric velocity of the meteor (km/s)
-        # v_h = np.zeros(3)
-        # v_h[0] = earth_vel[0] - v_g*np.cos(L_g)*np.cos(B_g)
-        # v_h[1] = earth_vel[1] - v_g*np.sin(L_g)*np.cos(B_g)
-        # v_h[2] = earth_vel[2] - v_g*np.sin(B_g)
         v_h = np.array(earth_vel) + np.array(eclipticToRectangularVelocityVect(L_g, B_g, v_g/1000))
 
         # Calculate the heliocentric velocity in km/s
