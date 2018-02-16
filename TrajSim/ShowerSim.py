@@ -19,7 +19,7 @@ from Trajectory.Trajectory import ObservedPoints, Trajectory
 from Trajectory.GuralTrajectory import GuralTrajectory
 from Trajectory.Orbit import calcOrbit
 
-from Utils.TrajConversions import J2000_JD, EARTH, altAz2RADec, raDec2ECI, rotatePolar, jd2Date, datetime2JD, \
+from Utils.TrajConversions import J2000_JD, G, EARTH, altAz2RADec, raDec2ECI, rotatePolar, jd2Date, datetime2JD, \
     jd2DynamicalTimeJD, jd2LST, cartesian2Geo, geo2Cartesian, eci2RaDec, raDec2AltAz, \
     equatorialCoordPrecession
 from Utils.Ephem import astronomicalNight
@@ -1460,16 +1460,13 @@ def calcGravityDrop(eci_coord, t):
     """
 
     # Calculate gravitational acceleration at given ECI coordinates
-    r_earth = (EARTH.EQUATORIAL_RADIUS + EARTH.POLAR_RADIUS)/2
-    g = 9.81*(r_earth/vectMag(eci_coord))**2
+    g = G*EARTH.MASS/vectMag(eci_coord)**2
 
     # Calculate the amount of gravity drop from a straight trajectory
     drop = (1.0/2)*g*t**2
 
     # Apply gravity drop to ECI coordinates
-    eci_coord -= drop*vectNorm(eci_coord)
-
-    return eci_coord
+    return eci_coord - drop*vectNorm(eci_coord)
     
 
 
@@ -1526,7 +1523,7 @@ def generateTrajectoryData(station_list, sim_met, velocity_model):
             # Calculate the length along the trail using the given velocity model
             length = velocity_model.getLength(sim_met.v_init, t)
 
-            # Calculate the state vector position at every point in time
+            # Calculate the meteor position at every point in time
             traj_eci = sim_met.state_vect + length*(-sim_met.radiant_eci)
 
             # Apply gravity drop to calculated ECI coordinates
@@ -1541,8 +1538,7 @@ def generateTrajectoryData(station_list, sim_met, velocity_model):
                 abs_mag = -2.5*np.log10(sim_met.velocity_model.luminosity_model(t)/stat.P_0m)
 
                 # Calculate the range to the station
-                stat_range = vectMag(geo2Cartesian(stat.lat, stat.lon, stat.elev, jd) \
-                    - traj_eci)
+                stat_range = vectMag(geo2Cartesian(stat.lat, stat.lon, stat.elev, jd) - traj_eci)
 
                 # Calculate the visual magnitude
                 magnitude = abs_mag - 5*np.log10(100000.0/stat_range)
@@ -2005,56 +2001,10 @@ if __name__ == "__main__":
     # Directory where the files will be saved
     dir_path = os.path.abspath('../SimulatedMeteors')
 
-    ### PERFECT STATIONS (CAMO-based) PARAMETERS ###
-    ##########################################################################################################
-
-    system_name = 'Perfect_CAMO'
-
-    # Number of stations in total
-    n_stations = 2
-
-    # Maximum time offset (seconds)
-    t_max_offset = 1
-
-    # Geographical coordinates of stations (lat, lon, elev, station_id) in degrees and meters
-    stations_geo = [
-        [43.26420, -80.77209, 329.0, 'tavis'], # Tavis
-        [43.19279, -81.31565, 324.0, 'elgin']] # Elgin
-
-    # Camera FPS per station
-    fps_list = [100, 100]
-
-    # Observation uncertanties per station (arcsec)
-    obs_ang_uncertainties = [0.001, 0.001]
-
-    # Azimuths of centre of FOVs (degrees)
-    azim_fovs = [326.823, 1.891]
-
-    # Elevations of centre of FOVs (degrees)
-    elev_fovs = [41.104, 46.344]
-
-    # Cameras FOV widths (degrees)
-    fov_widths = [19.22, 19.22]
-
-    # Cameras FOV heights (degrees)
-    fov_heights = [25.77, 25.77]
-
-    # Limiting magnitudes (needed only for ablation simulation)
-    lim_magnitudes = [+5.5, +5.5]
-
-    # Powers of zero-magnitude meteors (Watts) (needed only for ablation simulation)
-    P_0m_list = [840, 840]
-
-    # Minimum angular velocity for detection (deg/s)
-    min_ang_velocities = [3.0, 3.0]
-
-    ##########################################################################################################
-
-
-    # ### CAMO STATION PARAMETERS ###
+    # ### PERFECT STATIONS (CAMO-based) PARAMETERS ###
     # ##########################################################################################################
 
-    # system_name = 'CAMO'
+    # system_name = 'Perfect_CAMO'
 
     # # Number of stations in total
     # n_stations = 2
@@ -2068,10 +2018,10 @@ if __name__ == "__main__":
     #     [43.19279, -81.31565, 324.0, 'elgin']] # Elgin
 
     # # Camera FPS per station
-    # fps_list = [110, 110]
+    # fps_list = [100, 100]
 
     # # Observation uncertanties per station (arcsec)
-    # obs_ang_uncertainties = [1, 1]
+    # obs_ang_uncertainties = [0.001, 0.001]
 
     # # Azimuths of centre of FOVs (degrees)
     # azim_fovs = [326.823, 1.891]
@@ -2095,6 +2045,52 @@ if __name__ == "__main__":
     # min_ang_velocities = [3.0, 3.0]
 
     # ##########################################################################################################
+
+
+    ### CAMO STATION PARAMETERS ###
+    ##########################################################################################################
+
+    system_name = 'CAMO'
+
+    # Number of stations in total
+    n_stations = 2
+
+    # Maximum time offset (seconds)
+    t_max_offset = 1
+
+    # Geographical coordinates of stations (lat, lon, elev, station_id) in degrees and meters
+    stations_geo = [
+        [43.26420, -80.77209, 329.0, 'tavis'], # Tavis
+        [43.19279, -81.31565, 324.0, 'elgin']] # Elgin
+
+    # Camera FPS per station
+    fps_list = [110, 110]
+
+    # Observation uncertanties per station (arcsec)
+    obs_ang_uncertainties = [1, 1]
+
+    # Azimuths of centre of FOVs (degrees)
+    azim_fovs = [326.823, 1.891]
+
+    # Elevations of centre of FOVs (degrees)
+    elev_fovs = [41.104, 46.344]
+
+    # Cameras FOV widths (degrees)
+    fov_widths = [19.22, 19.22]
+
+    # Cameras FOV heights (degrees)
+    fov_heights = [25.77, 25.77]
+
+    # Limiting magnitudes (needed only for ablation simulation)
+    lim_magnitudes = [+5.5, +5.5]
+
+    # Powers of zero-magnitude meteors (Watts) (needed only for ablation simulation)
+    P_0m_list = [840, 840]
+
+    # Minimum angular velocity for detection (deg/s)
+    min_ang_velocities = [3.0, 3.0]
+
+    ##########################################################################################################
 
     # ### SIMULATED MODERATE STATION PARAMETERS ###
     # ##########################################################################################################
@@ -2206,7 +2202,7 @@ if __name__ == "__main__":
     ### METEOR SHOWER PARAMETERS ###
     ##########################################################################################################
     
-    n_meteors = 5
+    n_meteors = 20
 
 
     # ### GEMINIDS
@@ -2279,7 +2275,7 @@ if __name__ == "__main__":
     ### 2011 Draconids
 
     # Shower name
-    shower_name = '2011Draconids'
+    shower_name = '2011Draconids_TEST'
 
     # Radiant position and dispersion
     ra_g = 263.387
@@ -2304,7 +2300,7 @@ if __name__ == "__main__":
     sol_slope = 17.5 # Koten et al. 2014 observations
 
     # Beginning height in kilometers
-    beg_height = 90
+    beg_height = 95
     beg_height_sigma = 3
 
     ###
@@ -2317,12 +2313,12 @@ if __name__ == "__main__":
     ##########################################################################################################
 
     # Set a range of meteor durations
-    meteor_durations = np.clip(np.random.normal(0.5, 0.1, n_meteors), 0.2, 1.0)
-    #meteor_durations = [1.5]*n_meteors
+    #meteor_durations = np.clip(np.random.normal(0.5, 0.1, n_meteors), 0.2, 1.0)
+    meteor_durations = [2.0]*n_meteors
 
-    #### Constant velocity model
-    meteor_velocity_models = [ConstantVelocity(duration) for duration in meteor_durations]
-    ####
+    # #### Constant velocity model
+    # meteor_velocity_models = [ConstantVelocity(duration) for duration in meteor_durations]
+    # ####
 
 
     # #### Linear deceleration model
@@ -2350,11 +2346,54 @@ if __name__ == "__main__":
     # ####
 
 
-    # #### Velocity model from Campbell-Brown & Koschny (2004) meteor ablation model #####
+    #### Velocity model from Campbell-Brown & Koschny (2004) meteor ablation model #####
 
-    # ## 2011 Draconids ###
+    ## 2011 Draconids ###
+    # Make the beginning heights heigher, as the trajectory points will be determined by simulated
+    #   magnitudes
+    beg_height = 120
+    beg_height_sigma = 0
+
+    # Luminous efficiency (fraction)
+    lum_eff = 0.7/100
+
+    # Ablation coefficient (s^2/km^2)
+    ablation_coeff = 0.21 # Ceplecha et al. 1998, D type
+
+    # Drag coeficient
+    Gamma = 1.0
+
+    # Heat transfer coeficient
+    Lambda = 0.5
+
+
+    # Define the mass range (log of mass in kg) seen by the system (CAMO)
+    # mass_min = -6
+    # mass_max = -4
+    mass_min = -4
+    mass_max = -2
+
+    # Define the mass range (log of mass in kg) seen by the system (allsky)
+    # mass_min = -2.5
+    # mass_max = 0.5
+    # mass_min = -0.5
+    # mass_max = 1.5
+
+    # Mass index
+    mass_index = 1.95 # Koten et al. 2014
+
+    # Sample densities (Borovicka et al. 2013: Radiants, orbits, spectra, and deceleration of selected 2011 
+    #   Draconids)
+    density_samples = np.random.uniform(100, 400, n_meteors)
+
+
+    # \ 2011 Draconids
+
+
+    ### Perseids ###
+
     # # Make the beginning heights heigher, as the trajectory points will be determined by simulated
-    # #   magnitudes
+    # # magnitudes
     # beg_height = 120
     # beg_height_sigma = 0
 
@@ -2362,7 +2401,7 @@ if __name__ == "__main__":
     # lum_eff = 0.7/100
 
     # # Ablation coefficient (s^2/km^2)
-    # ablation_coeff = 0.21 # Ceplecha et al. 1998, D type
+    # ablation_coeff = 0.1
 
     # # Drag coeficient
     # Gamma = 1.0
@@ -2370,85 +2409,44 @@ if __name__ == "__main__":
     # # Heat transfer coeficient
     # Lambda = 0.5
 
+    # # Mass index
+    # mass_index = 2.0
 
-    # # Define the mass range (log of mass in kg) seen by the system (CAMO)
+    # # Define the mass range (log of mass in kg) seen by the system
     # mass_min = -6
     # mass_max = -4
 
-    # # Define the mass range (log of mass in kg) seen by the system (allsky)
-    # # mass_min = -2.5
-    # # mass_max = 0.5
-    # # mass_min = -0.5
-    # # mass_max = 1.5
 
-    # # Mass index
-    # mass_index = 1.95 # Koten et al. 2014
+    # # Define density distribution (see: Moorhead et al. 2017 "A two-population sporadic meteoroid density 
+    # #        distribution and its implications for environment models")
 
-    # # Sample densities (Borovicka et al. 2013: Radiants, orbits, spectra, and deceleration of selected 2011 
-    # #   Draconids)
-    # density_samples = np.random.uniform(100, 400, n_meteors)
+    # # HTC density distribution (Tj <= 2)
+    # log_rho_mean = 2.93320
+    # log_rho_sigma = 0.12714
 
+    # # # JFC and asteroidal distribution (Tj > 2) 
+    # # log_rho_mean = 3.57916
+    # # log_rho_sigma = 0.09312
 
-    # # \ 2011 Draconids
+    # # Samples densities
+    # density_samples = sampleDensityMoorhead(log_rho_mean, log_rho_sigma, n_meteors)
 
-
-    # ### Perseids ###
-
-    # # # Make the beginning heights heigher, as the trajectory points will be determined by simulated
-    # # # magnitudes
-    # # beg_height = 120
-    # # beg_height_sigma = 0
-
-    # # # Luminous efficiency (fraction)
-    # # lum_eff = 0.7/100
-
-    # # # Ablation coefficient (s^2/km^2)
-    # # ablation_coeff = 0.1
-
-    # # # Drag coeficient
-    # # Gamma = 1.0
-
-    # # # Heat transfer coeficient
-    # # Lambda = 0.5
-
-    # # # Mass index
-    # # mass_index = 2.0
-
-    # # # Define the mass range (log of mass in kg) seen by the system
-    # # mass_min = -6
-    # # mass_max = -4
-
-
-    # # # Define density distribution (see: Moorhead et al. 2017 "A two-population sporadic meteoroid density 
-    # # #        distribution and its implications for environment models")
-
-    # # # HTC density distribution (Tj <= 2)
-    # # log_rho_mean = 2.93320
-    # # log_rho_sigma = 0.12714
-
-    # # # # JFC and asteroidal distribution (Tj > 2) 
-    # # # log_rho_mean = 3.57916
-    # # # log_rho_sigma = 0.09312
-
-    # # # Samples densities
-    # # density_samples = sampleDensityMoorhead(log_rho_mean, log_rho_sigma, n_meteors)
-
-    # ### \Perseids
+    ### \Perseids
 
 
 
-    # # Sample the masses
-    # mass_samples = sampleMass(mass_min, mass_max, mass_index, n_meteors)
+    # Sample the masses
+    mass_samples = sampleMass(mass_min, mass_max, mass_index, n_meteors)
 
 
-    # # Init velocity models
-    # meteor_velocity_models = [AblationModelVelocity(mass, density, ablation_coeff, Gamma, Lambda, lum_eff) \
-    #     for mass, density in zip(mass_samples, density_samples)]
+    # Init velocity models
+    meteor_velocity_models = [AblationModelVelocity(mass, density, ablation_coeff, Gamma, Lambda, lum_eff) \
+        for mass, density in zip(mass_samples, density_samples)]
 
 
-    # # ####################################################################################
+    # ####################################################################################
 
-    # ##########################################################################################################
+    ##########################################################################################################
 
 
     # Make the system directory

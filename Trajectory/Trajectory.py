@@ -6,6 +6,7 @@ Estimates meteor trajectory from given observed points.
 
 from __future__ import print_function, division, absolute_import
 
+import time
 import copy
 import sys
 import os
@@ -25,22 +26,23 @@ from mpl_toolkits.basemap import Basemap
 
 from Trajectory.Orbit import calcOrbit
 
-from Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, rotateVector, RMSD
+from Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, RMSD, angleBetweenSphericalCoords
 from Utils.OSTools import mkdirP
 from Utils.Pickling import savePickle
 from Utils.Plotting import savePlot
 from Utils.PlotOrbits import plotOrbits
 from Utils.PlotCelestial import CelestialPlot
 from Utils.PlotMap import GroundMap
-from Utils.TrajConversions import ecef2ENU, enu2ECEF, geo2Cartesian, geo2Cartesian_vect, cartesian2Geo, \
-    altAz2RADec_vect, raDec2AltAz, raDec2AltAz_vect, raDec2ECI, eci2RaDec, jd2Date, datetime2JD
+from Utils.TrajConversions import EARTH, G, ecef2ENU, enu2ECEF, geo2Cartesian, geo2Cartesian_vect, \
+    cartesian2Geo, altAz2RADec_vect, raDec2AltAz, raDec2AltAz_vect, raDec2ECI, eci2RaDec, jd2Date, datetime2JD
 from Utils.PyDomainParallelizer import DomainParallelizer
 
 
 
 
 class ObservedPoints(object):
-    def __init__(self, jdt_ref, meas1, meas2, time_data, lat, lon, ele, meastype, station_id=None, excluded_time=None):
+    def __init__(self, jdt_ref, meas1, meas2, time_data, lat, lon, ele, meastype, station_id=None, \
+        excluded_time=None):
         """ Structure for containing data of observations from invidiual stations.
         
         Arguments:
@@ -155,7 +157,7 @@ class ObservedPoints(object):
         # ECI coordinates of observed CPA to the radiant line, with the station fixed in time at jdt_ref
         self.meas_eci = None
 
-        # ECI coordinates of observed CPA to the radiant line, with the station moving in time
+        # ECI vector of observed CPA to the radiant line, with the station moving in time
         self.meas_eci_los = None
 
         # ECI coordinates of radiant CPA to the observed line of sight
@@ -167,7 +169,8 @@ class ObservedPoints(object):
         self.meas_ht = None
         self.meas_range = None
 
-        # Arrays for geo coords of closest points of approach of the radiant line to the observed lines of sight
+        # Arrays for geo coords of closest points of approach of the radiant line to the observed lines of 
+        #   sight
         self.model_lat = None
         self.model_lon = None
         self.model_ht = None
@@ -555,7 +558,7 @@ class PlaneIntersection(object):
             ax.scatter(obs.x_stat, obs.y_stat, obs.z_stat, s=50)
 
             # Lines of sight
-            ax.quiver(obs.x_stat, obs.y_stat, obs.z_stat, obs.x_eci, obs.y_eci, obs.z_eci, length=arrow_len,
+            ax.quiver(obs.x_stat, obs.y_stat, obs.z_stat, obs.x_eci, obs.y_eci, obs.z_eci, length=arrow_len, \
                 normalize=True, arrow_length_ratio=0.1, color='blue')
 
             d = -np.array([obs.x_stat, obs.y_stat, obs.z_stat]).dot(obs.plane_N)
@@ -589,7 +592,7 @@ class PlaneIntersection(object):
 
 
 
-def angleSumMeasurements2Line(observations, state_vect, best_conv_radiant_eci, weights=None):
+def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=None, gravity=False):
     """ Sum all angles between the radiant line and measurement lines of sight.
 
         This function is used as a cost function for the least squares radiant solution of Borovicka et 
@@ -599,10 +602,11 @@ def angleSumMeasurements2Line(observations, state_vect, best_conv_radiant_eci, w
     Arguments:
         observations: [list] A list of ObservedPoints objects which are containing meteor observations.
         state_vect: [3 element ndarray] Estimated position of the initial state vector in ECI coordinates.
-        best_conv_radiant_eci: [3 element ndarray] Unit 3D vector of the radiant in ECI coordinates.
+        radiant_eci: [3 element ndarray] Unit 3D vector of the radiant in ECI coordinates.
 
     Keyword arguments:
         weights: [list] A list of statistical weights for every station. None by default.
+        gravity: [bool] If True, the gravity drop will be taken into account.
 
     Return:
         angle_sum: [float] Sum of angles between the estimated trajectory line and individual lines of sight.
@@ -615,8 +619,14 @@ def angleSumMeasurements2Line(observations, state_vect, best_conv_radiant_eci, w
 
     # Make sure there are weights larger than 0
     if sum(weights) <= 0:
-        weights = np.ones(len(observations))        
+        weights = np.ones(len(observations))
 
+
+    # Move the state vector to the beginning of the trajectory
+    state_vect = moveStateVector(state_vect, radiant_eci, observations)
+
+    # Find the earliest point in time
+    t0 = min([obs.time_data[0] for obs in observations])
 
     angle_sum = 0.0
     weights_sum = 1e-10
@@ -625,16 +635,47 @@ def angleSumMeasurements2Line(observations, state_vect, best_conv_radiant_eci, w
     for i, obs in enumerate(observations):
         
         # Go through all measured positions
-        for meas_eci, stat_eci in zip(obs.meas_eci_los, obs.stat_eci_los):
+        for t, meas_eci, stat_eci in zip(obs.time_data, obs.meas_eci_los, obs.stat_eci_los):
 
-            # Get the position of the projection of the measurement line of sight on the radiant line,
-            # measured from the state vector
-            _, r, _ = findClosestPoints(stat_eci, meas_eci, state_vect, best_conv_radiant_eci)
-            r = r - stat_eci
-            r = vectNorm(r)
+            # Get the ECI coordinates of the projection of the measurement line of sight on the radiant line
+            _, rad_cpa, _ = findClosestPoints(stat_eci, meas_eci, state_vect, radiant_eci)
 
-            # Calculate the angle between the measurement line of sight as seen from the station
-            cosangle = np.dot(meas_eci, r)
+
+            # Take the gravity drop into account
+            if gravity:
+
+
+                # Calculate the time in seconds from the beginning of the meteor
+                t_rel = t - t0
+
+                # Calculate the gravitational acceleration at the given height
+                g = G*EARTH.MASS/(vectMag(rad_cpa)**2)
+
+                # Determing the sign of the initial time
+                time_sign = np.sign(t_rel)
+
+                # Calculate the amount of gravity drop from a straight trajectory (handle the case when the time
+                #   can be negative)
+                drop = time_sign*(1.0/2)*g*t_rel**2
+
+                # Apply gravity drop to ECI coordinates
+                rad_cpa -= drop*vectNorm(rad_cpa)
+
+
+                # print('-----')
+                # print('Station:', obs.station_id)
+                # print('t:', t_rel)
+                # print('g:', g)
+
+                # print('Drop:', drop)
+
+
+            # Calculate the unit vector pointing from the station to the point on the trajectory
+            station_ray = rad_cpa - stat_eci
+            station_ray = vectNorm(station_ray)
+
+            # Calculate the angle between the observed LoS as seen from the station and the radiant line
+            cosangle = np.dot(meas_eci, station_ray)
 
             # Make sure the cosine is within limits and calculate the angle
             angle_sum += weights[i]*np.arccos(np.clip(cosangle, -1, 1))
@@ -647,21 +688,22 @@ def angleSumMeasurements2Line(observations, state_vect, best_conv_radiant_eci, w
 
 
 
-def minimizeAngleCost(params, observations, weights=None):
+def minimizeAngleCost(params, observations, weights=None, gravity=False):
     """ A helper function for minimization of angle deviations. """
 
-    state_vect, best_conv_radiant_eci = np.hsplit(params, 2)
+    state_vect, radiant_eci = np.hsplit(params, 2)
     
-    return angleSumMeasurements2Line(observations, state_vect, best_conv_radiant_eci, weights=weights)
+    return angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=weights, gravity=gravity)
 
 
 
 
-def calcResidual(jd, state_vect, radiant_eci, stat, meas):
+def calcSpatialResidual(jd, state_vect, radiant_eci, stat, meas):
     """ Calculate horizontal and vertical residuals from the radiant line, for the given observed point.
 
     Arguments:
         jd: [float] Julian date
+        t_rel: [float] Time from the beginning of the trajectory
         state_vect: [3 element ndarray] ECI position of the state vector
         radiant_eci: [3 element ndarray] radiant direction vector in ECI
         stat: [3 element ndarray] position of the station in ECI
@@ -672,18 +714,49 @@ def calcResidual(jd, state_vect, radiant_eci, stat, meas):
 
     """
 
+
+    # Note:
+    #   This function has been tested (without the gravity influence part) and it produces good results
+
+
     meas = vectNorm(meas)
 
-    # Calculate closest points of approach (observed line of sight to radiant line)
+    # Calculate closest points of approach (observed line of sight to radiant line) from the state vector
     obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, state_vect, radiant_eci)
+
+    # ### STILL IN TESTING !!!
+    # # Calculate the gravitational acceleration at the given height
+    # g = G*EARTH.MASS/(vectMag(rad_cpa)**2)
+
+    # # Determine the sign of the initial time
+    # time_sign = np.sign(t_rel)
+
+    # # Calculate the amount of gravity drop from a straight trajectory (handle the case when the
+    # #   time is negative)
+    # drop = time_sign*(1/2.0)*g*t_rel**2
+
+    # # Apply gravity drop to ECI coordinates
+    # rad_cpa -= drop*vectNorm(rad_cpa)
+
+    # ###########################
+
+    # # Calculate closest points of approach (observed line of sight to radiant line) from the gravity corrected
+    # #   point
+    # obs_cpa, _, d = findClosestPoints(stat, meas, rad_cpa, radiant_eci)
+
+    # ##!!!!!
+
 
     # Vector pointing from the point on the trajectory to the point on the line of sight
     p = obs_cpa - rad_cpa
 
-    # Calculate geographical coordinates of the state vector position
+    # # Calculate geographical coordinates of the point on the trajectory
+    # lat, lon, elev = cartesian2Geo(jd, *rad_cpa)
+
+    # Calculate geographical coordinates of the state vector
     lat, lon, elev = cartesian2Geo(jd, *state_vect)
 
-    # Calculate ENU (East, North, Up) vector in the position of the state vector, and direction of the radiant
+    # Calculate ENU (East, North, Up) vector at the position of the state vector, and direction of the radiant
     nn = np.array(ecef2ENU(lat, lon, *radiant_eci))
 
     # Convert the vector to polar coordinates
@@ -704,10 +777,10 @@ def calcResidual(jd, state_vect, radiant_eci, stat, meas):
     ehy = np.dot(p, ehorzy)
 
     # Calculate vertical residuals
-    vres = -np.sign(ehx)*np.hypot(ehx, ehy)
+    vres = np.sign(ehx)*np.hypot(ehx, ehy)
 
     # Calculate horizontal residuals
-    hres = -np.dot(p, evert)
+    hres = np.dot(p, evert)
 
     return hres, vres
 
@@ -1152,6 +1225,41 @@ def timingResiduals(params, observations, t_ref_station, weights=None, ret_stdde
 
             # Returned for minimization
             return cost_sum/weights_sum/cost_point_count
+
+
+
+def moveStateVector(state_vect, radiant_eci, observations):
+        """ Moves the state vector position along the radiant line until it is before any points which are
+            projected on it. This is used to make sure that lengths and lags are properly calculated.
+        
+        Arguments:
+            state_vect: [ndarray] (x, y, z) ECI coordinates of the initial state vector (meters).
+            radiant_eci: [ndarray] (x, y, z) components of the unit radiant direction vector.
+            observations: [list] A list of ObservationPoints objects which hold measurements from individual
+                stations.
+
+        Return:
+            rad_cpa_beg: [ndarray] (x, y, z) ECI coordinates of the beginning point of the trajectory.
+
+        """
+
+        rad_cpa_list = []
+
+        # Go through all observations from all stations
+        for obs in observations:
+
+            # Calculate closest points of approach (observed line of sight to radiant line) of the first point
+            # on the trajectory across all stations
+            _, rad_cpa, _ = findClosestPoints(obs.stat_eci_los[0], obs.meas_eci_los[0], state_vect, 
+                radiant_eci)
+
+            rad_cpa_list.append(rad_cpa)
+
+
+        # Choose the state vector with the largest height
+        rad_cpa_beg = rad_cpa_list[np.argmax([vectMag(rad_cpa_temp) for rad_cpa_temp in rad_cpa_list])]
+
+        return rad_cpa_beg
 
 
 
@@ -1822,7 +1930,7 @@ class Trajectory(object):
 
     def __init__(self, jdt_ref, output_dir='.', max_toffset=1.0, meastype=4, verbose=True, \
         estimate_timing_vel=True, monte_carlo=True, mc_runs=None, mc_pick_multiplier=1,  mc_noise_std=1.0, \
-        filter_picks=True, calc_orbit=True, show_plots=True, save_results=True):
+        filter_picks=True, calc_orbit=True, show_plots=True, save_results=True, gravity_correction=True):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -1855,6 +1963,7 @@ class Trajectory(object):
             calc_orbit: [bool] If True, the orbit is calculates as well. True by default
             show_plots: [bool] Show plots of residuals, velocity, lag, meteor position. True by default.
             save_results: [bool] Save results of trajectory estimation to disk. True by default.
+            gravity_correction: [bool] Apply the gravity drop when estimating trajectories. True by default.
 
         """
 
@@ -1899,6 +2008,9 @@ class Trajectory(object):
 
         # Save results to disk if true
         self.save_results = save_results
+
+        # Apply the correction for gravity when estimating the trajectory
+        self.gravity_correction = gravity_correction
 
         ######################################################################################################
 
@@ -2049,10 +2161,10 @@ class Trajectory(object):
             obs.v_residuals = []
 
             # Go through all individual position measurement from each site
-            for jd, stat, meas in zip(obs.JD_data, obs.stat_eci_los, obs.meas_eci_los):
+            for t, jd, stat, meas in zip(obs.time_data, obs.JD_data, obs.stat_eci_los, obs.meas_eci_los):
 
                 # Calculate horizontal and vertical residuals
-                hres, vres = calcResidual(jd, state_vect, radiant_eci, stat, meas)
+                hres, vres = calcSpatialResidual(jd, state_vect, radiant_eci, stat, meas)
 
                 # Add residuals to the residual list
                 obs.h_residuals.append(hres)
@@ -2066,12 +2178,11 @@ class Trajectory(object):
             obs.h_res_rms = RMSD(obs.h_residuals)
             obs.v_res_rms = RMSD(obs.v_residuals)
 
-            # Calculate angular deviations in azimuth and elevation
-            elev_res = obs.elev_data - obs.model_elev
-            azim_res = (np.abs(obs.azim_data - obs.model_azim)%(2*np.pi))*np.sin(obs.elev_data)
 
-            # Calculate the angular residuals from the radiant line
-            obs.ang_res = np.sqrt(elev_res**2 + azim_res**2)
+            # Calculate the angular residuals from the radiant line, with the gravity drop taken care of
+            obs.ang_res = angleBetweenSphericalCoords(obs.elev_data, obs.azim_data, obs.model_elev, \
+                obs.model_azim)
+
 
             # Calculate the standard deviaton of angular residuals in radians
             obs.ang_res_std = RMSD(obs.ang_res)
@@ -2485,7 +2596,7 @@ class Trajectory(object):
 
 
     def calcLLA(self, state_vect, radiant_eci, observations):
-        """ Calculate latitude, longitude and altitude of every point on the obesrver line of sight, 
+        """ Calculate latitude, longitude and altitude of every point on the observer's line of sight, 
             which is closest to the radiant line.
 
         Arguments:
@@ -2588,6 +2699,8 @@ class Trajectory(object):
 
         """
 
+        # Determine the first time of observation
+        t0 = min([obs.time_data[0] for obs in observations])
 
         # Go through observations from all stations
         for obs in observations:
@@ -2605,10 +2718,29 @@ class Trajectory(object):
 
 
             # Go through all individual position measurement from each site
-            for i, (stat, meas) in enumerate(zip(obs.stat_eci_los, obs.meas_eci_los)):
+            for i, (t, jd, stat, meas) in enumerate(zip(obs.time_data, obs.JD_data, obs.stat_eci_los, \
+                obs.meas_eci_los)):
 
                 # Calculate closest points of approach (observed line of sight to radiant line)
                 obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, state_vect, radiant_eci)
+
+
+                # # Calculate the time in seconds from the beginning of the meteor
+                # t_rel = t - t0
+
+                # # Calculate the gravitational acceleration at the given height
+                # g = G*EARTH.MASS/(vectMag(rad_cpa)**2)
+
+                # # Determine the sign of the initial time
+                # time_sign = np.sign(t_rel)
+
+                # # Calculate the amount of gravity drop from a straight trajectory (handle the case when the
+                # #   time is negative)
+                # drop = time_sign*(1/2.0)*g*t_rel**2
+
+                # # Apply gravity drop to ECI coordinates
+                # rad_cpa -= drop*vectNorm(rad_cpa)
+
 
                 # Set the ECI position of the CPA on the radiant line, as seen by this observer
                 obs.model_eci.append(rad_cpa)
@@ -3066,23 +3198,48 @@ class Trajectory(object):
 
         """
 
+        # Get the first referent time
+        t0 = min([obs.time_data[0] for obs in self.observations])
+
         # Plot residuals per observing station
         for obs in self.observations:
 
-            ### PLOT RESIDUALS ###
+            ### PLOT SPATIAL RESIDUALS ###
             ##################################################################################################
 
-            # Calculate root mean square
-            v_res_rms = round(np.sqrt(np.mean(obs.v_residuals**2)), 2)
-            h_res_rms = round(np.sqrt(np.mean(obs.h_residuals**2)), 2)
+
+            # NOTE: It is possible that the gravity drop is not easily visible due to the perspective of the
+            #   observer
+            # # Calculate the gravity acceleration at every point
+            # g = []
+            # for eci in obs.model_eci:
+            #     g.append(G*EARTH.MASS/(vectMag(eci)**2))
+
+            # g = np.array(g)
+
+            # # Generate gravity drop data
+            # grav_drop = -np.sign(obs.time_data - t0)*1/2.0*g*(obs.time_data - t0)**2
+
+            # # Plot the gravity drop
+            # plt.plot(obs.time_data, grav_drop, c='red', linestyle='--', linewidth=1.0, label='Gravity drop')
+
+            # Calculate root mean square of the residuals
+            v_res_rms = RMSD(obs.v_residuals)
+            #v_res_grav_rms = RMSD(obs.v_residuals - grav_drop)
+            h_res_rms = RMSD(obs.h_residuals)
+
+            # # Plot vertical residuals
+            # plt.scatter(obs.time_data, obs.v_residuals, c='red', \
+            #     label='Vertical, RMSD = {:.2f}\nw/ gravity, RMSD = {:.2f}'.format(v_res_rms, v_res_grav_rms), 
+            #     zorder=3, s=2)
 
             # Plot vertical residuals
-            plt.scatter(obs.time_data, obs.v_residuals, c='red', label='Vertical, RMSD = '+str(v_res_rms), 
-                zorder=3, s=2)
+            plt.scatter(obs.time_data, obs.v_residuals, c='red', \
+                label='Vertical, RMSD = {:.2f}'.format(v_res_rms), zorder=3, s=2)
 
             # Plot horizontal residuals
-            plt.scatter(obs.time_data, obs.h_residuals, c='b', label='Horizontal, RMSD = '+str(h_res_rms), 
-                zorder=3, s=2)
+            plt.scatter(obs.time_data, obs.h_residuals, c='b', \
+                label='Horizontal, RMSD = {:.2f}'.format(h_res_rms), zorder=3, s=2)
 
             plt.title('Residuals, station ' + str(obs.station_id))
             plt.xlabel('Time (s)')
@@ -3097,9 +3254,9 @@ class Trajectory(object):
                 plt.ylim([-10, 10])
 
 
-                if self.save_results:
-                    savePlot(plt, file_name + '_' + str(obs.station_id) + '_spatial_residuals.png', \
-                        output_dir)
+            if self.save_results:
+                savePlot(plt, file_name + '_' + str(obs.station_id) + '_spatial_residuals.png', \
+                    output_dir)
 
             if show_plots:
                 plt.show()
@@ -3540,42 +3697,6 @@ class Trajectory(object):
 
 
 
-
-    def moveStateVector(self, state_vect, radiant_eci, observations):
-        """ Moves the state vector position along the radiant line until it is before any points which are
-            projected on it. This is used to make sure that lengths and lags are properly calculated.
-        
-        Arguments:
-            state_vect: [ndarray] (x, y, z) ECI coordinates of the initial state vector (meters).
-            radiant_eci: [ndarray] (x, y, z) components of the unit radiant direction vector.
-            observations: [list] A list of ObservationPoints objects which hold measurements from individual
-                stations.
-
-        Return:
-            rad_cpa_beg: [ndarray] (x, y, z) ECI coordinates of the beginning point of the trajectory.
-
-        """
-
-        rad_cpa_list = []
-
-        # Go through all observations from all stations
-        for obs in observations:
-
-            # Calculate closest points of approach (observed line of sight to radiant line) of the first point
-            # on the trajectory
-            _, rad_cpa, _ = findClosestPoints(obs.stat_eci_los[0], obs.meas_eci_los[0], state_vect, 
-                radiant_eci)
-
-            rad_cpa_list.append(rad_cpa)
-
-
-        # Choose the state vector with the largest height
-        rad_cpa_beg = rad_cpa_list[np.argmax([vectMag(rad_cpa_temp) for rad_cpa_temp in rad_cpa_list])]
-
-        return rad_cpa_beg
-
-
-
     def calcStationIncidentAngles(self, state_vect, radiant_eci, observations):
         """ Calculate angles between the radiant vector and the vector pointing from a station to the 
             initial state vector. 
@@ -3707,7 +3828,7 @@ class Trajectory(object):
 
 
         # Set the 3D position of the radiant line as the state vector, at the beginning point
-        self.state_vect = self.moveStateVector(self.best_conv_inter.cpa_eci, self.best_conv_inter.radiant_eci,
+        self.state_vect = moveStateVector(self.best_conv_inter.cpa_eci, self.best_conv_inter.radiant_eci,
             self.observations)
 
         # Calculate incident angles between the trajectory and the station
@@ -3752,8 +3873,9 @@ class Trajectory(object):
         ######################################################################################################
 
         # Calculate the initial sum and angles deviating from the radiant line
-        angle_sum = angleSumMeasurements2Line(self.observations, self.state_vect, 
-             self.best_conv_inter.radiant_eci, weights=weights)
+        angle_sum = angleSumMeasurements2Line(self.observations, self.state_vect, \
+             self.best_conv_inter.radiant_eci, weights=weights, \
+             gravity=(_rerun_timing and self.gravity_correction))
 
         if self.verbose:
             print('Initial angle sum:', angle_sum)
@@ -3762,9 +3884,10 @@ class Trajectory(object):
         # Set the initial guess for the state vector and the radiant from the intersecting plane solution
         p0 = np.r_[self.state_vect, self.best_conv_inter.radiant_eci]
 
-        # Perform the minimization of angle deviations
-        minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=(self.observations, weights), 
-            method="Nelder-Mead")
+        # Perform the minimization of angle deviations. The gravity will only be compansated for after the
+        #   initial estimate of timing differences
+        minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=(self.observations, weights, 
+            (_rerun_timing and self.gravity_correction)), method="Nelder-Mead")
 
         # NOTE
         # Other minimization methods were tried as well, but all produce higher fit residuals than Nelder-Mead.
@@ -3792,7 +3915,7 @@ class Trajectory(object):
             print('BOUNDS:', bounds)
             print('p0:', p0)
             minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=(self.observations, \
-                weights), bounds=bounds, method='SLSQP')
+                weights, (_rerun_timing and self.gravity_correction)), bounds=bounds, method='SLSQP')
 
 
         if self.verbose:
@@ -3813,7 +3936,7 @@ class Trajectory(object):
             self.state_vect_mini, self.radiant_eci_mini = np.hsplit(minimize_solution.x, 2)
 
             # Set the state vector to the position of the highest point projected on the radiant line
-            self.state_vect_mini = self.moveStateVector(self.state_vect_mini, self.radiant_eci_mini, 
+            self.state_vect_mini = moveStateVector(self.state_vect_mini, self.radiant_eci_mini, 
                 self.observations)
 
             # Normalize radiant direction
@@ -3841,7 +3964,7 @@ class Trajectory(object):
             self.radiant_eq_mini = eci2RaDec(self.radiant_eci_mini)
 
             # Calculate the state vector
-            self.state_vect_mini = self.moveStateVector(self.state_vect, self.radiant_eci_mini, 
+            self.state_vect_mini = moveStateVector(self.state_vect, self.radiant_eci_mini, 
                 self.observations)
 
         ######################################################################################################

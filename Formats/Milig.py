@@ -329,12 +329,13 @@ if __name__ == '__main__':
     #dir_path = os.path.abspath("../MILIG files/20170531_002824")
     #dir_path = os.path.abspath("../MILIG files/PyLIG_IN_Pula_2010102829")
     #dir_path = os.path.abspath("../MILIG files/20170923_053525 meteorite dropping")
+    dir_path = os.path.abspath("../MILIG files/20170923_053525 meteorite dropping GRAVITY TEST")
     #dir_path = os.path.abspath("../MILIG files/20171127_meteorite_dropping")
     #dir_path = os.path.abspath("../MILIG files/20171231_011853")
     #dir_path = os.path.abspath("../MILIG files/20180125_meteorite_dropping")
     #dir_path = os.path.abspath("../MILIG files/PyLIG20180123_020244")
     #dir_path = os.path.abspath("../MILIG files/PyLIG20180206_011705")
-    dir_path = os.path.abspath("../MILIG files/PyLIG20180209_231854")
+    #dir_path = os.path.abspath("../MILIG files/PyLIG20180209_231854")
     
 
     #file_name = "input_krizy_01.txt"
@@ -346,16 +347,16 @@ if __name__ == '__main__':
     #file_name = "PyLIG_IN_Pula_2010102829.txt"
     #file_name = "PyLIG_M_20170531_002824.txt"
     #file_name = "PyLIG_IN_Pula_2010102829.txt"
-    #file_name = "20170923_053525-obs.dat"
+    file_name = "20170923_053525-obs.dat"
     #file_name = "input.txt"
     #file_name = "20171231_011853-input.txt"
     #file_name = "20180123_020244-input.txt"
     #file_name = "20180206_011705_input.txt"
-    file_name = "20180206_011705_input.txt"
+    #file_name = "20180206_011705_input.txt"
 
 
 
-    solveTrajectoryMILIG(dir_path, file_name, solver='original', max_toffset=5.0, monte_carlo=True, 
+    solveTrajectoryMILIG(dir_path, file_name, solver='original', max_toffset=5.0, monte_carlo=False, 
         mc_runs=200)
 
     

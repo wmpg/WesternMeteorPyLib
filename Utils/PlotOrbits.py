@@ -41,6 +41,8 @@ from Utils.Plotting import savePlot, Arrow3D, set3DEqualAxes
 # Define Julian epoch
 J2000_EPOCH = datetime(2000, 1, 1, 12) # At the noon of 2000/01/01 UTC
 
+
+
 class Planet(object):
     """ Defines a planet in the Solar System. """
 

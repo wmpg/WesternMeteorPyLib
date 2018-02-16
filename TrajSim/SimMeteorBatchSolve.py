@@ -26,7 +26,10 @@ if __name__ == "__main__":
 
     # Directory which contains SimMet .pickle files
     #shower_dir = os.path.abspath("../SimulatedMeteors/CAMO/2011Draconids")
-    shower_dir = os.path.abspath("../SimulatedMeteors/Perfect_CAMO/2011Draconids")
+    #shower_dir = os.path.abspath("../SimulatedMeteors/Perfect_CAMO/2011Draconids")
+    #shower_dir = os.path.abspath("../SimulatedMeteors/Perfect_CAMO/2011Draconids_TEST")
+    #shower_dir = os.path.abspath("../SimulatedMeteors/CAMO/2011Draconids_TEST")
+    shower_dir = os.path.abspath("../SimulatedMeteors/CAMO/2011Draconids_TEST_nograv")
     #shower_dir = os.path.abspath("../SimulatedMeteors/SOMNsim/2011Draconids")
 
     # Maximum time offset (seconds)
@@ -52,8 +55,9 @@ if __name__ == "__main__":
 
 
 
-    # Trajectory solver (original or gural)
-    traj_solvers = ['planes', 'los', 'monte_carlo', 'gural0', 'gural1', 'gural2', 'gural3']
+    # Trajectory solvers
+    #traj_solvers = ['planes', 'los', 'monte_carlo', 'gural0', 'gural1', 'gural2', 'gural3']
+    traj_solvers = ['planes', 'los', 'monte_carlo']
 
 
     # Solve generated trajectories
@@ -83,7 +87,7 @@ if __name__ == "__main__":
                 
                 # Init the trajectory
                 traj = Trajectory(sim_met.jdt_ref, output_dir=output_dir, max_toffset=t_max_offset, \
-                    meastype=2, show_plots=False, mc_runs=250)
+                    meastype=2, show_plots=False, mc_runs=250, gravity_correction=False)
 
             
             elif 'gural' in traj_solver:

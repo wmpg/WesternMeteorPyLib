@@ -67,7 +67,7 @@ JULIAN_EPOCH = datetime(2000, 1, 1, 12) # J2000.0 noon
 J2000_JD = timedelta(2451545) # J2000.0 epoch in julian days
 
 class EARTH_CONSTANTS(object):
-    """ Holds Earth's shape parameters. """
+    """ Holds Earth's shape and physical parameters. """
 
     def __init__(self):
 
@@ -77,6 +77,9 @@ class EARTH_CONSTANTS(object):
         self.E = math.sqrt(1.0 - self.POLAR_RADIUS**2/self.EQUATORIAL_RADIUS**2)
         self.RATIO = self.EQUATORIAL_RADIUS/self.POLAR_RADIUS
         self.SQR_DIFF = self.EQUATORIAL_RADIUS**2 - self.POLAR_RADIUS**2
+
+        # Earth mass (kg)
+        self.MASS = 5.9722e24
 
 # Initialize Earth shape constants object
 EARTH = EARTH_CONSTANTS()
