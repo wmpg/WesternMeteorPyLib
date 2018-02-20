@@ -1009,7 +1009,7 @@ def correctedEclipticCoord(L_g, B_g, v_g, earth_vel):
 ### Precession ###
 
 def equatorialCoordPrecession(start_epoch, final_epoch, ra, dec):
-    """ Corrects Right Ascension and Declination from one epoch to another, taking only precession into 
+    """ Precess right Ascension and declination from one epoch to another, taking only precession into 
         account.
 
         Implemented from: Jean Meeus - Astronomical Algorithms, 2nd edition, pages 134-135

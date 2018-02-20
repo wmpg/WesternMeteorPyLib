@@ -268,10 +268,10 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         radiant_eci: [3 element ndarray] Radiant vector in ECI coordinates (meters).
         v_init: [float] Initial velocity (m/s).
         v_avg: [float] Average velocity of a meteor (m/s).
-        eci_ref: [float] Referent ECI coordinates (meters, in the epoch of date) of the meteor trajectory. 
-            They can be calculated with the geo2Cartesian function. Ceplecha (1987) assumes this to the the 
-            average point on the trajectory, while Jennsikens et al. (2011) assume this to be the first point 
-            on the trajectory as that point is not influenced by deceleration.
+        eci_ref: [float] Referent ECI coordinates in the epoch of date (meters, in the epoch of date) of the 
+            meteor trajectory. They can be calculated with the geo2Cartesian function. Ceplecha (1987) assumes 
+            this to the the average point on the trajectory, while Jennsikens et al. (2011) assume this to be 
+            the first point on the trajectory as that point is not influenced by deceleration.
             NOTE: If the stations are not fixed, the referent ECI coordinates should be the ones
             of the initial point on the trajectory, NOT of the average point!
         jd_ref: [float] Referent Julian date of the meteor trajectory. Ceplecha (1987) takes this as the 

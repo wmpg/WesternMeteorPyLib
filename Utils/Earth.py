@@ -499,7 +499,7 @@ if __name__ == "__main__":
 
     #jd = date2JD(2016, 9, 29, 6, 29, 45)
     #jd = 2455843.318098123185
-    jd=2455843.318098123
+    jd = 2455843.318098123
 
     print("JD:", "{:10.10f}".format(jd))
 
@@ -569,3 +569,7 @@ if __name__ == "__main__":
     # Test the apparent LST calculation
     print('JD: {:.10f}'.format(jd))
     print('Apparent GST: {:.10f} deg'.format(np.degrees(calcApparentSiderealEarthRotation(jd))))
+
+
+    # Earth obliquty at J2000, for some reason this does not match the constant value
+    print('Calcualted obliquty@J2000:', np.degrees(calcTrueObliquity(Utils.TrajConversions.J2000_JD.days)))
