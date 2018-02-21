@@ -108,7 +108,7 @@ class CelestialPlot(object):
             projection: [str] Projection type:
                 - "sinu" (default) All-sky sinusoidal projection.
                 - "stere" - Stereographic projection centered at the centroid of the given data.
-            bgcolor: [str] Background color of the plot. Black by defualt.
+            bgcolor: [str] Background color of the plot. Black by default.
 
         """
 

@@ -72,8 +72,6 @@ if __name__ == "__main__":
 
     jd = date2JD(2018, 2, 14, 10, 30, 0)
 
-    t_rel = 0
-
     lat = np.radians(45.0)
     lon = np.radians(13.0)
     h = 100000
@@ -81,8 +79,8 @@ if __name__ == "__main__":
     state_vect = np.array(geo2Cartesian(lat, lon, h, jd))
     radiant_eci = np.array([0.0, 1.0, 0.0])
 
-    state_vect2 = np.array(geo2Cartesian(lat, lon, h + 10, jd))
-    radiant_eci2 = np.array([0.0, 0.0, 1.0])
+    stat = np.array(geo2Cartesian(lat, lon, h + 10, jd))
+    meas = np.array([0.0, 0.0, 1.0])
 
 
 
@@ -90,7 +88,7 @@ if __name__ == "__main__":
     ax = fig.add_subplot(111, projection='3d')
 
 
-    print(calcSpatialResidual(jd, t_rel, state_vect, radiant_eci, state_vect2, radiant_eci2))
+    print(calcSpatialResidual(jd, state_vect, radiant_eci, stat, meas))
 
 
     # Plot the origin
@@ -116,11 +114,11 @@ if __name__ == "__main__":
 
 
     # Plot the second point
-    ax.scatter(*state_vect2)
+    ax.scatter(*stat)
 
     # Plot the direction of the second vector
-    rad_x, rad_y, rad_z = -radiant_eci2
-    rst_x, rst_y, rst_z = state_vect2
+    rad_x, rad_y, rad_z = -meas
+    rst_x, rst_y, rst_z = stat
     meteor_len = 1000000
     ax.quiver(rst_x, rst_y, rst_z, rad_x, rad_y, rad_z, length=meteor_len, normalize=True, color='g', 
             arrow_length_ratio=0.1)
@@ -130,13 +128,11 @@ if __name__ == "__main__":
 
 
     # Calculate closest points of approach (observed line of sight to radiant line) from the state vector
-    obs_cpa, rad_cpa, d = findClosestPoints(state_vect2, radiant_eci2, state_vect, radiant_eci)
+    obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, state_vect, radiant_eci)
 
     # Plot the closest points
     ax.scatter(*obs_cpa)
     ax.scatter(*rad_cpa)
-
-
 
 
     # Set a constant aspect ratio

@@ -29,11 +29,20 @@ if __name__ == "__main__":
     #shower_dir = os.path.abspath("../SimulatedMeteors/Perfect_CAMO/2011Draconids")
     #shower_dir = os.path.abspath("../SimulatedMeteors/Perfect_CAMO/2011Draconids_TEST")
     #shower_dir = os.path.abspath("../SimulatedMeteors/CAMO/2011Draconids_TEST")
-    shower_dir = os.path.abspath("../SimulatedMeteors/CAMO/2011Draconids_TEST_nograv")
-    #shower_dir = os.path.abspath("../SimulatedMeteors/SOMNsim/2011Draconids")
+    #shower_dir = os.path.abspath("../SimulatedMeteors/CAMO/2011Draconids_TEST_nograv")
+    #shower_dir = os.path.abspath("../SimulatedMeteors/SOMNsim/2011Draconids_TEST_grav")
+    shower_dir = os.path.abspath("../SimulatedMeteors/SOMN_precise_sim/LongFireball_grav")
 
     # Maximum time offset (seconds)
     t_max_offset = 1
+
+    # Use gravity correction when calculating trajectories
+    gravity_correction = True
+
+
+    # Trajectory solvers
+    #traj_solvers = ['planes', 'los', 'monte_carlo', 'gural0', 'gural1', 'gural2', 'gural3']
+    traj_solvers = ['planes', 'los', 'monte_carlo']
 
 
     ##########################################################################################################
@@ -52,12 +61,6 @@ if __name__ == "__main__":
             sim_met = loadPickle(shower_dir, file_name)
 
             sim_meteor_list.append(sim_met)
-
-
-
-    # Trajectory solvers
-    #traj_solvers = ['planes', 'los', 'monte_carlo', 'gural0', 'gural1', 'gural2', 'gural3']
-    traj_solvers = ['planes', 'los', 'monte_carlo']
 
 
     # Solve generated trajectories
@@ -80,14 +83,15 @@ if __name__ == "__main__":
 
                 # Init the trajectory (LoS or intersecing planes)
                 traj = Trajectory(sim_met.jdt_ref, output_dir=output_dir, max_toffset=t_max_offset, \
-                    meastype=2, show_plots=False, save_results=False, monte_carlo=False)
+                    meastype=2, show_plots=False, save_results=False, monte_carlo=False, \
+                    gravity_correction=gravity_correction)
 
 
             elif traj_solver == 'monte_carlo':
                 
                 # Init the trajectory
                 traj = Trajectory(sim_met.jdt_ref, output_dir=output_dir, max_toffset=t_max_offset, \
-                    meastype=2, show_plots=False, mc_runs=250, gravity_correction=False)
+                    meastype=2, show_plots=False, mc_runs=50, gravity_correction=gravity_correction)  ## TESING, ONLY 50 RUNS!!!
 
             
             elif 'gural' in traj_solver:

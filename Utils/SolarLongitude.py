@@ -1366,6 +1366,17 @@ def _solLon2jd(solFunc, year, month, L):
 
     """
 
+    def _previousMonth(year, month):
+        """ Internal function. Calculates the previous month. """
+
+        dt = datetime.datetime(year, month, 1, 0, 0, 0)
+
+        # Get some day in the next month
+        next_month = dt.replace(day=1) - datetime.timedelta(days=4)
+
+        return next_month.year, next_month.month
+
+
     def _nextMonth(year, month):
         """ Internal function. Calculates the next month. """
 
@@ -1378,10 +1389,11 @@ def _solLon2jd(solFunc, year, month, L):
 
 
     # Calculate the upper and lower bounds for the Julian date using the given year
-    jd_min = date2JD(year, month, 1, 0, 0, 0)
+    prev_year, prev_month = _previousMonth(year, month)
+    jd_min = date2JD(prev_year, prev_month, 1, 0, 0, 0)
 
     next_year, next_month = _nextMonth(year, month)
-    jd_max = date2JD(next_year, next_month, 1, 0, 0, 0)
+    jd_max = date2JD(next_year, next_month, 28, 23, 59, 59)
 
     # Function which returns the difference between the given JD and solar longitude that is being matched
     sol_res_func = lambda jd, sol_lon: (np.sin(sol_lon) - np.sin(solFunc(jd)))**2 + (np.cos(sol_lon) \

@@ -59,7 +59,7 @@ def rotateVector(vect, axis, theta):
     Arguments:
         vect: [3 element ndarray] vector to be rotated
         axis: [3 element ndarray] axis of rotation
-        theta: [float] angle of rotation in radians
+        theta: [float] angle of rotation (radians)
 
     Return:
         [3 element ndarray] rotated vector

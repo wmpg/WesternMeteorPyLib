@@ -125,10 +125,10 @@ class WaveformPicker(object):
 
 
         # Init ground map
-        self.m = GroundMap(self.lat_list, self.lon_list, ax=self.ax_map)
+        self.m = GroundMap(self.lat_list, self.lon_list, ax=self.ax_map, color_scheme='light')
 
         # Plot stations
-        self.m.scatter(self.lat_list, self.lon_list, c='w', s=1)
+        self.m.scatter(self.lat_list, self.lon_list, c='k', s=1)
 
         # Plot source location
         self.m.scatter([np.radians(lat_centre)], [np.radians(lon_centre)], marker='*', c='yellow')

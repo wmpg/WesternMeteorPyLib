@@ -226,9 +226,32 @@ def plotPlanets(ax, time):
 
 
 
+class OrbitPlotColorScheme(object):
+    def __init__(self):
+        """ Color scheme of the orbit plot. """
+
+        self.dark()
+
+
+    def dark(self):
+        """ Dark orbit plot color scheme. """
+
+        self.background = 'black'
+        self.vernal_eq = 'w'
+        self.planet_default = '#32CD32'
+
+
+    def light(self):
+        """ Light orbit plot color scheme. """
+
+        self.background = '0.99'
+        self.vernal_eq = 'black'
+        self.planet_default = '#32CD32'
+
+
 
 def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_equinox=True, save_plots=False, 
-    plot_path=None, plt_handle=None, **kwargs):
+    plot_path=None, plt_handle=None, color_scheme='dark', **kwargs):
     """ Plot the given orbits in the Solar System. 
 
     Arguments:
@@ -248,9 +271,19 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_eq
         save_plots: [bool] If True, plots will be saved to the given path under plot_path. False by default.
         plot_path: [bool] File name and the full path where the plots will be saved if save_plots == True.
         plt_handle: [matplotlib plt handle] Pass the plot handle if some orbits need to be added to the plot.
+        color_scheme: [str] 'dark' or 'light'. Dark by default.
         **kwargs: [dict] Extra keyword arguments which will be passes to the orbit plotter.
         
     """
+
+    cs = OrbitPlotColorScheme()
+
+    if color_scheme == 'light':
+        cs.light()
+
+    else:
+        cs.dark()
+
 
     orb_elements = np.array(orb_elements)
 
@@ -261,13 +294,13 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_eq
 
     # Calculate the time difference from epoch to the given time (in years)
     julian = (time - J2000_EPOCH)
-    years_diff = (julian.days + (julian.seconds + julian.microseconds/1000000.0) /86400.0)/365.2425
+    years_diff = (julian.days + (julian.seconds + julian.microseconds/1000000.0)/86400.0)/365.2425
 
     if plt_handle is None:
 
         # Setup the plot
         fig = plt.figure()
-        ax = fig.gca(projection='3d', axisbg='black')
+        ax = fig.gca(projection='3d', axisbg=cs.background)
 
         # Set a constant aspect ratio
         ax.set_aspect('equal', adjustable='box-forced')
@@ -288,12 +321,13 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_eq
     if plot_equinox:
 
         # Plot the arrow
-        a = Arrow3D([0, -4], [0, 0], [0, 0], mutation_scale=10, lw=1, arrowstyle="-|>", color="w", alpha=0.5)
+        a = Arrow3D([0, -4], [0, 0], [0, 0], mutation_scale=10, lw=1, arrowstyle="-|>", \
+            color=cs.vernal_eq, alpha=0.5)
         ax.add_artist(a)
 
         # Plot the vernal equinox symbol
-        ax.text(-4.1, 0, 0, u'\u2648', fontsize=8, color='w', alpha=0.5, horizontalalignment='center', 
-            verticalalignment='center')
+        ax.text(-4.1, 0, 0, u'\u2648', fontsize=8, color=cs.vernal_eq, alpha=0.5, \
+            horizontalalignment='center', verticalalignment='center')
 
 
     # Eccentric anomaly (full range)
@@ -315,7 +349,7 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_eq
             color = orbit_colors[i]
         else:
             # Set to default
-            color = '#32CD32'
+            color = cs.planet_default
 
         # Plot orbits
         ax.plot(x, y, z, c=color, **kwargs)
@@ -375,6 +409,6 @@ if __name__ == '__main__':
         ])
 
     # Plot orbits
-    plotOrbits(orb_elements, time)
+    plotOrbits(orb_elements, time, color_scheme='light')
 
     plt.show()

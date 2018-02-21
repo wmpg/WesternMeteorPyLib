@@ -834,10 +834,10 @@ def rotatePolar(azim, dec, azim_rot, elev_rot):
     """ Rotate the given polar coordinates on a sphere by the given azimuth and elevation.
     
     Arguments:
-        azim: [float] Azimuth of coordinates to be rotated.
-        dec: [float] Elevation of coordinates to be rotated.
-        azim_rot: [float] Azimuth for which the input coordinates will be rotated on a sphere.
-        elev_rot: [float] Elevation for which the input coordinates will be rotated on a sphere.
+        azim: [float] Azimuth of coordinates to be rotated (radians).
+        dec: [float] Elevation of coordinates to be rotated (radians).
+        azim_rot: [float] Azimuth for which the input coordinates will be rotated on a sphere (radians).
+        elev_rot: [float] Elevation for which the input coordinates will be rotated on a sphere (radians).
 
     Return:
         (azim, dec): [floats] Rotated coordinates.

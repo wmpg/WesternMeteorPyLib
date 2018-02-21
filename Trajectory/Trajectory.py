@@ -3485,7 +3485,7 @@ class Trajectory(object):
 
 
         # Init the map
-        m = GroundMap(lat_list, lon_list, border_size=50)
+        m = GroundMap(lat_list, lon_list, border_size=50, color_scheme='light')
 
 
         # Plot locations of all stations and measured positions of the meteor
@@ -3502,7 +3502,7 @@ class Trajectory(object):
         m.scatter(self.rend_lat, self.rend_lon, c='y', marker='+', s=50, alpha=0.75, label='Endpoint')
 
 
-        plt.legend()
+        plt.legend(loc='upper right')
 
 
         if self.save_results:
@@ -3602,7 +3602,7 @@ class Trajectory(object):
 
                 # Run orbit plotting procedure
                 plotOrbits(orbit_params, jd2Date(self.jdt_ref, dt_obj=True), save_plots=self.save_results, \
-                    plot_path=os.path.join(output_dir, file_name), linewidth=1)
+                    plot_path=os.path.join(output_dir, file_name), linewidth=1, color_scheme='light')
 
 
                 plt.tight_layout()

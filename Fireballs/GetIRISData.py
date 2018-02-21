@@ -297,8 +297,8 @@ def plotStationMap(data_list, lat_centre, lon_centre, ax=None):
     lon_list = [np.radians(entry[3]) for entry in data_list]
 
     # Plot stations
-    m = GroundMap(lat_list, lon_list, ax=ax)
-    m.scatter(lat_list, lon_list, c='w', s=1)
+    m = GroundMap(lat_list, lon_list, ax=ax, color_scheme='light')
+    m.scatter(lat_list, lon_list, c='k', s=1)
 
     # Plot source location
     m.scatter([np.radians(lat_centre)], [np.radians(lon_centre)], marker='*', c='yellow')

@@ -880,7 +880,8 @@ def plotStationsAndTrajectory(station_list, params, v_sound, file_name):
     stat_elev = np.array(stat_elev)
 
     # Init the ground map
-    m = GroundMap(np.append(stat_lat, lat_i), np.append(stat_lon, lon_i), border_size=20)
+    m = GroundMap(np.append(stat_lat, lat_i), np.append(stat_lon, lon_i), border_size=20, \
+        color_scheme='light')
 
 
 
@@ -932,7 +933,7 @@ def plotStationsAndTrajectory(station_list, params, v_sound, file_name):
         wr_lat_i, wr_lon_i, wr_elev_i = local2LatLon(lat0, lon0, elev0, 1000*np.array([x_stat[i] + wr_vect_x[i], y_stat[i] + wr_vect_y[i], z_stat[i] + wr_vect_z[i]]))
         #wr_lat_i, wr_lon_i, wr_elev_i = local2LatLon(lat0, lon0, elev0, 1000*np.array([wrp_x[i], wrp_y[i], wrp_z[i]]))
 
-        m.plot([stat_lat[i], wr_lat_i], [stat_lon[i], wr_lon_i], c='w', linewidth=1.0)
+        m.plot([stat_lat[i], wr_lat_i], [stat_lon[i], wr_lon_i], c='k', linewidth=1.0)
 
 
     plt.tight_layout()
@@ -983,8 +984,8 @@ if __name__ == "__main__":
         ['H59A', np.radians(44.645500), np.radians(-73.690498), 355, date2JD(2013, 11, 27, 00, 52, 48, 800)],
         ['H58A', np.radians(44.417599), np.radians(-74.179802), 537, date2JD(2013, 11, 27, 00, 53, 19, 320)]
     ]
-    #plotStationsAndTrajectory(station_list, [-10.6255131247*1000,  0.97761117287*1000, -22.39726861, 29.72664835*1000, np.radians(180 - 180.485602168), np.radians(90 - 42.5945238073)], v_sound, 'wayne')
-    estimateSeismicTrajectoryAzimuth(station_list, 320, azim_range=[100, 220], elev_range=[5, 35])
+    plotStationsAndTrajectory(station_list, [-10.6255131247*1000,  0.97761117287*1000, -22.39726861, 29.72664835*1000, np.radians(180 - 180.485602168), np.radians(90 - 42.5945238073)], v_sound, 'wayne')
+    #estimateSeismicTrajectoryAzimuth(station_list, 320, azim_range=[100, 220], elev_range=[5, 35])
 
 
     # # Bolivia 2007

@@ -9,10 +9,42 @@ import matplotlib.pyplot as plt
 from Utils.Math import meanAngle
 
 
+class MapColorScheme(object):
+    def __init__(self):
+        """ Container for map color schemes. """
+
+        self.dark()
+
+
+    def dark(self):
+        """ Dark color theme. """
+
+        self.map_background = '0.2'
+        self.continents = 'black'
+        self.lakes = '0.2'
+        self.countries = '0.2'
+        self.states = '0.15'
+        self.parallels = '0.25'
+        self.meridians = '0.25'
+        self.scale_bar_text = '0.5'
+
+
+    def light(self):
+        """ Light color theme. """
+
+        self.map_background = '0.85'
+        self.continents = '0.99'
+        self.lakes = '0.8'
+        self.countries = '0.8'
+        self.states = '0.85'
+        self.parallels = '0.7'
+        self.meridians = '0.7'
+        self.scale_bar_text = '0.2'
+
 
 
 class GroundMap(object):
-    def __init__(self, lat_list, lon_list, border_size=50, bgcolor='0.2', parallel_step=1.0, \
+    def __init__(self, lat_list, lon_list, border_size=50, color_scheme='dark', parallel_step=1.0, \
         meridian_step=1.0, plot_scale=True, ax=None):
         """ Inits a gnomonic Basemap plot around given latitudes and longitudes.
 
@@ -23,7 +55,7 @@ class GroundMap(object):
         Keyword arguments:
             border_size: [float] Size (kilometers) of the empty space which will be added around the box which 
                 fits all given geo coordinates.
-            bgcolor: [str] Background color of the plot. Default is dark gray.
+            color_scheme: [str] 'dark' or 'light'. Dark by default.
             parallel_step: [float] Steps of parallel lines in degrees. 1 deg by default.
             meridian_step: [float] Steps of meridian lines in degrees. 1 deg by default.
             plot_scale: [bool] Plot the map scale. True by default.
@@ -33,6 +65,17 @@ class GroundMap(object):
 
         if ax is None:
             ax = plt.gca()
+
+
+        # Choose the color scheme
+        self.cs = MapColorScheme()
+        
+        if color_scheme == 'light':
+            self.cs.light()
+
+        else:
+            self.cs.dark()
+
 
         # Calculate the mean latitude and longitude by including station positions
         lat_mean = meanAngle([lat for lat in lat_list])
@@ -72,14 +115,14 @@ class GroundMap(object):
             width=2*max_dist, height=2*max_dist, resolution='i', ax=ax)
 
         # Draw the coast boundary and fill the oceans with the given color
-        self.m.drawmapboundary(fill_color=bgcolor)
+        self.m.drawmapboundary(fill_color=self.cs.map_background)
 
         # Fill continents, set lake color same as ocean color
-        self.m.fillcontinents(color='black', lake_color='0.2', zorder=1)
+        self.m.fillcontinents(color=self.cs.continents, lake_color=self.cs.lakes, zorder=1)
 
         # Draw country borders
-        self.m.drawcountries(color='0.2')
-        self.m.drawstates(color='0.15', linestyle='--')
+        self.m.drawcountries(color=self.cs.countries)
+        self.m.drawstates(color=self.cs.states, linestyle='--')
 
 
         # Calculate the range of meridians and parallels to plot
@@ -141,11 +184,11 @@ class GroundMap(object):
 
         # Draw parallels
         parallels = np.arange(lat_min, lat_max, parallel_step)
-        self.m.drawparallels(parallels, labels=[True, False, False, False], color='0.25')
+        self.m.drawparallels(parallels, labels=[True, False, False, False], color=self.cs.parallels)
 
         # Draw meridians
         meridians = np.arange(lon_min, lon_max, meridian_step)
-        self.m.drawmeridians(meridians, labels=[False, False, False, True], color='0.25')
+        self.m.drawmeridians(meridians, labels=[False, False, False, True], color=self.cs.meridians)
 
 
         # Turn off shortening numbers into offsets
@@ -176,9 +219,9 @@ class GroundMap(object):
             scale_range = round(max_dist/2/1000/(10**scale_size), 0)*(10**scale_size)
 
 
-            # Plot the scale
+            # Plot the scale bar
             self.m.drawmapscale(ll_lon, ll_lat, lon_mean, lat_mean, scale_range, barstyle='fancy', units='km', 
-                fontcolor='0.5', zorder=3)
+                fontcolor=self.cs.scale_bar_text, zorder=3)
 
 
             # Reset the colour cycle
@@ -231,7 +274,7 @@ if __name__ == "__main__":
     lon_list = np.linspace(np.radians(13), np.radians(30), 10)
 
     # Test the ground plot function
-    m = GroundMap(lat_list, lon_list)
+    m = GroundMap(lat_list, lon_list, color_scheme='light')
 
     m.scatter(lat_list, lon_list)
 
