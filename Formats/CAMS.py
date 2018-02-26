@@ -170,7 +170,7 @@ def loadCameraSites(camerasites_file_name):
 
                 station_id, lat, lon, height = line[:4]
 
-                station_id = int(station_id)
+                station_id = station_id
                 lat, lon, height = map(float, [lat, lon, height])
 
                 stations[station_id] = [np.radians(lat), np.radians(-lon), height*1000]
@@ -249,9 +249,15 @@ def loadFTPDetectInfo(ftpdetectinfo_file_name, stations, time_offsets=None):
                 # Extract the referent time from the FF bin file name
                 line = line.split('_')
 
-                ff_date = line[1]
-                ff_time = line[2]
-                milliseconds = line[3]
+                # Count the number of string segments, and determine if it the old or new CAMS format
+                if len(line) == 6:
+                    sc = 1
+                else:
+                    sc = 0
+
+                ff_date = line[1 + sc]
+                ff_time = line[2 + sc]
+                milliseconds = line[3 + sc]
 
                 year = ff_date[:4]
                 month = ff_date[4:6]
@@ -287,7 +293,7 @@ def loadFTPDetectInfo(ftpdetectinfo_file_name, stations, time_offsets=None):
                 line = line.split()
 
                 # Get the station ID and the FPS from the meteor header
-                station_id = int(line[0])
+                station_id = line[0].strip()
                 fps = float(line[3])
 
                 # If the time offsets were given, apply the correction to the JD

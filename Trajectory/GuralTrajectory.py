@@ -420,6 +420,9 @@ class GuralTrajectory(object):
         # Note that R and V are in ECI (ECEF), in kilometers
         self.solution = 0
 
+        # Convergence angle
+        self.max_convergence = 0
+
         # Radiant right ascension in radians (multi-parameter fit)
         self.ra_radiant = 0
         # Radiant declination in radians (multi-parameter fit)
@@ -976,6 +979,9 @@ class GuralTrajectory(object):
         # Read out the radiant position (radians)
         self.ra_radiant = np.frombuffer(self.traj.ra_radiant, float)[0]
         self.dec_radiant = np.frombuffer(self.traj.dec_radiant, float)[0]
+
+        # Read out the convergence angle (radians)
+        self.max_convergence = np.frombuffer(self.traj.max_convergence, float)[0]
 
 
         # Read out beginning velocity

@@ -284,8 +284,8 @@ class SimMeteor(object):
         self.state_vect_lat, self.state_vect_lon, self.state_vect_ele = cartesian2Geo(jdt_ref, *state_vect)
 
         # Calculate apparent radiant and the orbit
-        self.ra, self.dec, self.v_init, self.orb = geocentricRadiantToApparent(ra_g, dec_g, v_g, state_vect, \
-            jdt_ref)
+        self.ra, self.dec, self.v_init, self.orbit = geocentricRadiantToApparent(ra_g, dec_g, v_g, \
+            state_vect, jdt_ref)
 
 
         # Velocity at the beginning heights
@@ -379,7 +379,7 @@ class SimMeteor(object):
 
         out_str += "Orbit:\n"
         out_str += "----------------------------------\n"
-        out_str += self.orb.__repr__()
+        out_str += self.orbit.__repr__()
 
         out_str += "----------------------------------\n"
         out_str += "\n"
@@ -757,7 +757,13 @@ class AblationModelVelocity(object):
 
         # Set time 0 for the moment when the simulated height matches the given beginning height
         heights_diffs = np.abs(height - beg_height)
-        closest_index = np.argwhere(heights_diffs == np.min(heights_diffs))[0][0]
+        closest_index = np.argwhere(heights_diffs == np.min(heights_diffs))
+
+        # Check if any heights matched
+        if len(closest_index) == 0:
+            return False
+
+        closest_index = closest_index[0][0]
 
         self.time = time[closest_index:]
         self.height = height[closest_index:]
@@ -1423,7 +1429,7 @@ def generateTrajectoryData(station_list, sim_met, velocity_model):
 
         # If the velocity model is given by the ablation model, run the model first
         if sim_met.velocity_model.name == 'ablation':
-            sim_met.velocity_model.getSimulation(sim_met.v_init, sim_met.orb.zc, sim_met.state_vect_ele)
+            sim_met.velocity_model.getSimulation(sim_met.v_init, sim_met.orbit.zc, sim_met.state_vect_ele)
 
             # If the simulation did not run, skip the station
             if sim_met.velocity_model.time is None:
@@ -1606,9 +1612,10 @@ def generateTrajectoryData(station_list, sim_met, velocity_model):
 
 
 
+
 def simulateMeteorShower(station_list, meteor_velocity_models, n_meteors, ra_g, ra_g_sigma, dec_g, 
     dec_g_sigma, d_ra, d_dec, v_g, v_g_sigma, d_vg, year, month, sol_max, sol_slope, beg_height, 
-    beg_height_sigma, nighttime_meteors_only=True, output_dir='.', save_plots=True):
+    beg_height_sigma, nighttime_meteors_only=True, output_dir='.', save_plots=True, orbit_limits=None):
     """ Given the parameters of a meteor shower, generate simulated meteors and their trajectories.
 
     Arguments:
@@ -1639,6 +1646,13 @@ def simulateMeteorShower(station_list, meteor_velocity_models, n_meteors, ra_g, 
             default.
         output_dir: [str] Directory where the plots will be saved.
         save_plot: [str] Save plots if True.
+        orbit_limits: [list] A list of limits per orbital element. None by defualt. The syntax is the 
+            following: ['param_name', param_min, param_max], the fist element is the name of the orbital 
+            parameter (it has to be a variable name from the Orbit class), the second is the minimum value 
+            of the parameter, and the third element is the maxium value. If angles are being limited, they 
+            should be in radians.
+            Example: if we want to limit the semimajor axis and the inclination, then
+                orbit_limits = [['a', 2.2, 2.23], ['incl', np.radians(2), np.radians(10)]]
 
     Return:
         sim_meteor_list: [list] A list of SimMeteor objects which contain simulated meteors.
@@ -1660,12 +1674,47 @@ def simulateMeteorShower(station_list, meteor_velocity_models, n_meteors, ra_g, 
 
     
 
-    ### GENERATE SOLAR LONGITUDES ###
+    ### GENERATE METEORS ###
     ##########################################################################################################
 
     sol_data = []
     jd_data = []
 
+    ra_g_list = []
+    dec_g_list = []
+    v_g_list = []
+
+    beg_height_list = []
+    state_vector_list = []
+
+    sim_meteor_list = []
+
+    # Get a list of uncertanties per every station and the range of timing offsets
+    obs_ang_uncertanties = [stat.obs_ang_std for stat in station_list]
+    t_offsets = [stat.t_offset for stat in station_list]
+
+
+    # Make sure that the range of beginning heights is at least 10km (determine that as the -2 and +2 sigma 
+    #   difference)
+    if 4*beg_height_sigma < 10:
+
+        beg_height_min = 1000*(beg_height - 5)
+        beg_height_max = 1000*(beg_height + 5)
+
+    else:
+        beg_height_min = 1000*(beg_height - 2*beg_height_sigma)
+        beg_height_max = 1000*(beg_height + 2*beg_height_sigma)
+
+
+    # Check if the station FOVs are overlapping at all at given heights
+    if not stationFovOverlap(station_list, solLon2jdJPL(year, month, sol_max), beg_height_min, beg_height_max):
+        
+        print('ERROR! FOVs of stations are not overlapping!')
+        sys.exit()
+
+
+
+    meteor_no = 0
 
     # Draw solar longitudes for meteors only during the night for all stations
     for sol in activityGenerator(sol_slope, sol_max):
@@ -1694,31 +1743,149 @@ def simulateMeteorShower(station_list, meteor_velocity_models, n_meteors, ra_g, 
         # Check if the given solar longitude is during the common night from all stations
         if (not nighttime_meteors_only) or ((datetime2JD(night_start) < meteor_jd) \
             and (datetime2JD(night_end) > meteor_jd)):
-            
-            # Add the solar longitude to the final list
-            sol_data.append(sol)
-            jd_data.append(meteor_jd)
 
             print('{:d}/{:d} meteor at JD = {:.6f}, LaSun = {:.6f} deg'.format(len(sol_data), n_meteors, \
                 meteor_jd, sol))
 
         else:
-            print('The generated meteor occured during daytime!')
+            print('The generated meteor occured during daytime, skipping it!')
 
-            print('Night start     :', night_start)
-            print('Meteor candidate:', jd2Date(meteor_jd, dt_obj=True))
-            print('Night end       :', night_end)
+            # print('Night start     :', night_start)
+            # print('Meteor candidate:', jd2Date(meteor_jd, dt_obj=True))
+            # print('Night end       :', night_end)
 
-            print('-----------------')
+            # print('-----------------')
+
+            continue
 
 
-        # Check if there are enough solar longitudes generated
-        if len(sol_data) == n_meteors:
+        ### GENERATE GEOCENTRIC RADIANTS ###
+        ######################################################################################################
+
+        # Sample radiant positions from a von Mises distribution centred at (0, 0)
+        ra = np.random.vonmises(0, 1.0/(ra_g_sigma**2), 1)
+        dec = np.random.vonmises(0, 1.0/(dec_g_sigma**2), 1)
+
+        # Rotate R.A., Dec from (0, 0) to generated coordinates, to account for spherical nature of the angles
+        # After rotation, (RA, Dec) will still be scattered around (0, 0)
+        ra_rot, dec_rot = rotatePolar(0, 0, ra, dec)
+
+        # Rotate all angles scattered around (0, 0) to the given coordinates of the centre of the distribution
+        ra_rot, dec_rot = rotatePolar(ra_rot, dec_rot, ra_g, dec_g)
+
+
+        # Apply the radiant drift
+        ra_g_final = np.radians(np.degrees(ra_rot) + d_ra*np.degrees(sol - sol_max))
+        dec_g_final = np.radians(np.degrees(dec_rot) + d_dec*np.degrees(sol - sol_max))
+
+        # Generate geocentric velocities from a Gaussian distribution
+        v_g_final = np.random.normal(v_g, v_g_sigma, size=1)[0]
+
+        # Apply the velocity drift
+        v_g_final = v_g_final + 1000*d_vg*np.degrees(sol - sol_max)
+
+
+        # Draw beginning heights from a Gaussian distribution
+        beg_height_final = np.random.normal(beg_height, beg_height_sigma, size=1)[0]
+
+
+        # Generate initial state vectors for drawn shower meteors inside the FOVs of given stations
+        state_vect = generateStateVector(station_list, meteor_jd, beg_height_final, beg_height_min, \
+            beg_height_max)
+
+
+        # Init the SimMeter object
+        sim_meteor = SimMeteor(ra_g_final, dec_g_final, v_g_final, year, month, sol, meteor_jd, \
+            beg_height_final, state_vect, obs_ang_uncertanties, t_offsets)
+
+
+        # Check if the generated orbit is within the set limits
+        if orbit_limits is not None:
+
+            # Check if there is only one limit, of if there are more
+            if not all(isinstance(elem, list) for elem in orbit_limits):
+                orbit_limits = [orbit_limits]
+
+            skip_meteor = False
+
+            print('Orbital limits:')
+
+            # Check every limit
+            for entry in orbit_limits:
+                arg_name, arg_min, arg_max = entry
+
+                # Get the value of the given parameter
+                arg_value = sim_meteor.orbit.__getattribute__(arg_name)
+
+                # The parameter if it is not within the given range
+                if (not (arg_value >= arg_min)) or (not (arg_value <= arg_max)):
+
+                    print('Skipping meteor, the orbit parameter {:s} is outside bounds: {:.3f} <= {:.3f} <= {:.3f}'.format(arg_name, arg_min, arg_value, arg_max))
+
+                    skip_meteor = True
+                    break
+
+                else:
+                    print("{:s} = {:.3f} <= {:.3f} <= {:.3f}".format(arg_name, arg_min, arg_value, arg_max))
+
+
+            if skip_meteor:
+                continue
+
+
+
+        # Generate trajectory data for the given meteor
+        sim_meteor = generateTrajectoryData(station_list, sim_meteor, meteor_velocity_models[meteor_no])
+
+
+        # Check that there are at least 2 sets of measurements
+        if len(sim_meteor.observations) < 2:
+            print('Skipped meteor at JD =', sim_meteor.jdt_ref, 'as it was not observable from at least 2 stations!')
+            continue
+
+        # Make sure there are at least 4 point from every station
+        meas_counts = [len(obs.time_data) for obs in sim_meteor.observations]
+        if meas_counts:
+            if np.min(meas_counts) < 4:
+
+                print('Skipped meteor at JD =', sim_meteor.jdt_ref, 'due to having less than 4 point from any of the stations!')
+                continue
+
+        else:
+            print('Skipped meteor at JD =', sim_meteor.jdt_ref, 'due to having less than 4 point from any of the stations!')
+            continue
+
+
+        # Add the solar longitude to the final list
+        sol_data.append(sol)
+        jd_data.append(meteor_jd)
+
+        # Add the geocentric radiant to the list
+        ra_g_list.append(ra_g_final)
+        dec_g_list.append(dec_g_final)
+        v_g_list.append(v_g_final)
+
+        beg_height_list.append(beg_height_final)
+
+        # Put the found state vector in the list
+        state_vector_list.append(state_vect)
+
+        sim_meteor_list.append(sim_meteor)
+
+        meteor_no += 1
+
+        # Check if there are enough meteors
+        if meteor_no == n_meteors:
             break
 
 
     sol_data = np.array(sol_data)
     jd_data = np.array(jd_data)
+
+    ra_g_data = np.array(ra_g_list)
+    dec_g_data = np.array(dec_g_list)
+    v_g_data = np.array(v_g_list)
+    beg_height_data = np.array(beg_height_list)
 
     # Sort the results by Julian date
     sort_temp = np.c_[jd_data, sol_data]
@@ -1739,53 +1906,8 @@ def simulateMeteorShower(station_list, meteor_velocity_models, n_meteors, ra_g, 
     plt.show()
 
 
-    ### GENERATE GEOCENTRIC RADIANTS ###
     ##########################################################################################################
 
-    # # Draw R.A. and Dec from a bivariate Gaussian centred at (0, 0)
-    # mean = (0, 0, v_g)
-    # cov = [[ra_g_sigma, 0, 0], [0, dec_g_sigma, 0], [0, 0, v_g_sigma]]
-    # ra_g_data, dec_g_data, v_g_data = np.random.multivariate_normal(mean, cov, n_meteors).T
-
-    # Sample radiant positions from a von Mises distribution centred at (0, 0)
-    ra_g_data = np.random.vonmises(0, 1.0/(ra_g_sigma**2), n_meteors)
-    dec_g_data = np.random.vonmises(0, 1.0/(dec_g_sigma**2), n_meteors)
-
-
-    ra_rot_list = []
-    dec_rot_list = []
-
-    # Go through all generated RA, Dec and project them properly on a sphere
-    for ra, dec in zip(ra_g_data, dec_g_data):
-
-        # Rotate R.A., Dec from (0, 0) to generated coordinates, to account for spherical nature of the angles
-        # After rotation, (RA, Dec) will still be scattered around (0, 0)
-        ra_rot, dec_rot = rotatePolar(0, 0, ra, dec)
-
-        # Rotate all angles scattered around (0, 0) to the given coordinates of the centre of the distribution
-        ra_rot, dec_rot = rotatePolar(ra_rot, dec_rot, ra_g, dec_g)
-
-        ra_rot_list.append(ra_rot)
-        dec_rot_list.append(dec_rot)
-
-
-    ra_g_data = np.array(ra_rot_list)
-    dec_g_data = np.array(dec_rot_list)
-
-
-    # Apply the radiant drift
-    ra_g_data = np.radians(np.degrees(ra_g_data) + d_ra*np.degrees(sol_data - sol_max))
-    dec_g_data = np.radians(np.degrees(dec_g_data) + d_dec*np.degrees(sol_data - sol_max))
-
-
-    ##########################################################################################################
-
-
-    # Generate geocentric velocities from a Gaussian distribution
-    v_g_data = np.random.normal(v_g, v_g_sigma, size=n_meteors)
-
-    # Apply the velocity drift
-    v_g_data = v_g_data + d_vg*np.degrees(sol_data - sol_max)
 
     plt.hist(v_g_data/1000)
     plt.xlabel('Geocentric velocity (km/s)')
@@ -1796,10 +1918,6 @@ def simulateMeteorShower(station_list, meteor_velocity_models, n_meteors, ra_g, 
         savePlot(plt, 'vg.png', output_dir=output_dir)
 
     plt.show()
-
-
-    # Draw beginning heights from a Gaussian distribution
-    beg_height_data = np.random.normal(beg_height, beg_height_sigma, size=n_meteors)
 
     plt.hist(beg_height_data, orientation='horizontal')
     plt.xlabel('Counts')
@@ -1825,115 +1943,68 @@ def simulateMeteorShower(station_list, meteor_velocity_models, n_meteors, ra_g, 
     plt.show()
 
 
+    ##########################################################################################################
 
-    # Make sure that the range of beginning heights is at least 10km
-    if max(beg_height_data) - min(beg_height_data) < 10:
 
-        beg_height_max = 1000*(beg_height + 5)
-        beg_height_min = 1000*(beg_height - 5)
+    # Prepare the solar longitudes for plotting
+    sol_data_plt = np.degrees(sol_data)
+    
+    if (np.max(sol_data_plt) - np.min(sol_data_plt)) > 180:
+        sol_data_plt = sol_data_plt[sol_data_plt < 180] + 360
 
-    else:
-        beg_height_min = 1000*min(beg_height_data)
-        beg_height_max = 1000*max(beg_height_data)
+    sol_plt_arr = np.linspace(np.min(sol_data_plt), np.max(sol_data_plt), 100)
+
+
+    # Plot RA vs. solar longitude
+    plt.scatter(sol_data_plt, np.degrees(ra_g_data))
+
+    # Plot the radiant drift in RA
+    plt.plot(sol_plt_arr, np.degrees(ra_g) + d_ra*(sol_plt_arr - np.degrees(sol_max)))
+
+    plt.xlabel('Solar longitude (deg)')
+    plt.ylabel('Right ascension (deg)')
+
+    if save_plots:
+        savePlot(plt, 'ra_g_drift.png', output_dir=output_dir)
+
+    plt.show()
+
+
+
+    # Plot Dec vs. solar longitude
+    plt.scatter(sol_data_plt, np.degrees(dec_g_data))
+
+    # Plot the radiant drift in Dec
+    plt.plot(sol_plt_arr, np.degrees(dec_g) + d_dec*(sol_plt_arr - np.degrees(sol_max)))
+
+    plt.xlabel('Solar longitude (deg)')
+    plt.ylabel('Declination (deg)')
+
+    if save_plots:
+        savePlot(plt, 'dec_g_drift.png', output_dir=output_dir)
+
+    plt.show()
+
+
+    # Plot Vg vs. solar longitude
+    plt.scatter(sol_data_plt, v_g_data)
+
+    # Plot the drift in Vg
+    plt.plot(sol_plt_arr, v_g + 1000*d_vg*(sol_plt_arr - np.degrees(sol_max)))
+
+    plt.xlabel('Solar longitude (deg)')
+    plt.ylabel('Geocentric velocity (km/s)')
+
+    if save_plots:
+        savePlot(plt, 'v_g_drift.png', output_dir=output_dir)
+
+    plt.show()
     
     
     print('Beginning height range:', beg_height_min/1000, beg_height_max/1000)
 
-    ### Generate initial state vectors for drawn shower meteors inside the FOVs of given stations ###
-    ##########################################################################################################
 
-    # Check if the station FOVs are overlapping at all at given heights
-    if not stationFovOverlap(station_list, np.mean(jd_data), beg_height_min, beg_height_max):
-        
-        print('ERROR! FOVs of stations are not overlapping!')
-        sys.exit()
-
-
-
-    # If there is an overlap
-    else:
-
-        state_vector_data = []
-
-        # Go through all meteors
-        for jd, beg_height in zip(jd_data, beg_height_data):
-
-            # Generate state vector
-            state_vect = generateStateVector(station_list, jd, beg_height, beg_height_min, beg_height_max)
-
-            # Put the found state vector in the list
-            state_vector_data.append(state_vect)
-
-
-    state_vector_data = np.array(state_vector_data)
-
-
-    ##########################################################################################################
-
-
-
-    ### GENERATE SimMeteor OBJECTS ###
-    ##########################################################################################################
-
-    sim_meteor_list = []
-
-    # Get a list of uncertanties per every station and the range of timing offsets
-    obs_ang_uncertanties = [stat.obs_ang_std for stat in station_list]
-    t_offsets = [stat.t_offset for stat in station_list]
-
-    # Put all simulated meteors into SimMeteor objects
-    for ra_g, dec_g, v_g, sol, jd, beg_height, state_vect in zip(ra_g_data, dec_g_data, v_g_data, sol_data,\
-        jd_data, beg_height_data, state_vector_data):
-
-        sim_meteor_list.append(SimMeteor(ra_g, dec_g, v_g, year, month, sol, jd, beg_height, state_vect, \
-            obs_ang_uncertanties, t_offsets))
-
-    ##########################################################################################################
-
-
-
-    ### ADD TRAJECTORIES TO GENERATED METEORS USING THE GIVEN VELOCITY MODELS ###
-    ##########################################################################################################
-
-    for i, (sim_met, velocity_model) in enumerate(zip(sim_meteor_list, meteor_velocity_models)):
-
-        # Generate trajectory data for the given meteor
-        sim_meteor = generateTrajectoryData(station_list, sim_met, velocity_model)
-
-        sim_meteor_list[i] = sim_meteor
-
-
-    ##########################################################################################################
-
-    sim_meteor_list_filtered = []
-
-    # Remove meteors with less than 2 observations and with at least 4 observed points from each station
-    for sim_met in sim_meteor_list:
-        
-        # Check that there are at least 2 sets of measurements
-        if len(sim_met.observations) < 2:
-            print('Skipped meteor at JD =', sim_met.jdt_ref, 'as it was not observable from at least 2 stations!')
-            continue
-
-        # Make sure there are at least 4 point from every station
-        meas_counts = [len(obs.time_data) for obs in sim_met.observations]
-        if meas_counts:
-            if np.min(meas_counts) < 4:
-
-                print('Skipped meteor at JD =', sim_met.jdt_ref, 'due to having less than 4 point from any of the stations!')
-                continue
-
-        else:
-            print('Skipped meteor at JD =', sim_met.jdt_ref, 'due to having less than 4 point from any of the stations!')
-            continue
-
-        sim_meteor_list_filtered.append(sim_met)
-
-
-
-    return sim_meteor_list_filtered
-
-
+    return sim_meteor_list
 
 
 
@@ -2081,57 +2152,10 @@ if __name__ == "__main__":
 
     # ##########################################################################################################
 
-    # ### SIMULATED ALL-SKY STATION PARAMETERS ###
-    # ##########################################################################################################
-
-    # system_name = 'SOMN_sim'
-
-    # # Number of stations in total
-    # n_stations = 3
-
-    # # Maximum time offset (seconds)
-    # t_max_offset = 1.0
-
-    # # Geographical coordinates of stations (lat, lon, elev, station_id) in degrees and meters
-    # stations_geo = [
-    #     [43.19279, -81.31565, 324.0, 'A1'],
-    #     [43.19055, -80.09913, 212.0, 'A2'],
-    #     [43.96324, -80.80952, 383.0, 'A3']]
-
-    # # Camera FPS per station
-    # fps_list = [30, 30, 30]
-
-    # # Observation uncertanties per station (arcsec)
-    # obs_ang_uncertainties = [150, 150, 150]
-
-    # # Azimuths of centre of FOVs (degrees)
-    # azim_fovs = [56.0, 300.0, 174.0]
-
-    # # Elevations of centre of FOVs (degrees)
-    # elev_fovs = [90.0, 90.0, 90.0]
-
-    # # Cameras FOV widths (degrees)
-    # fov_widths = [120.0, 120.0, 120.0]
-
-    # # Cameras FOV heights (degrees)
-    # fov_heights = [120.0, 120.0, 120.0]
-
-    # # Limiting magnitudes (needed only for ablation simulation)
-    # lim_magnitudes = [-0.5, -0.5, -0.5]
-
-    # # Powers of zero-magnitude meteors (Watts) (needed only for ablation simulation)
-    # P_0m_list = [1210, 1210, 1210]
-
-    # # Minimum angular velocity for detection (deg/s)
-    # min_ang_velocities = [1.0, 1.0, 1.0]
-
-    # ##########################################################################################################
-
-
-    ### SIMULATED ALL-SKY PRECISE STATION PARAMETERS ###
+    ### SIMULATED ALL-SKY STATION PARAMETERS ###
     ##########################################################################################################
 
-    system_name = 'SOMN_precise_sim'
+    system_name = 'SOMN_sim'
 
     # Number of stations in total
     n_stations = 3
@@ -2149,7 +2173,7 @@ if __name__ == "__main__":
     fps_list = [30, 30, 30]
 
     # Observation uncertanties per station (arcsec)
-    obs_ang_uncertainties = [30, 30, 30]
+    obs_ang_uncertainties = [120, 120, 120]
 
     # Azimuths of centre of FOVs (degrees)
     azim_fovs = [56.0, 300.0, 174.0]
@@ -2175,6 +2199,53 @@ if __name__ == "__main__":
     ##########################################################################################################
 
 
+    # ### SIMULATED ALL-SKY PRECISE STATION PARAMETERS ###
+    # ##########################################################################################################
+
+    # system_name = 'SOMN_precise_sim'
+
+    # # Number of stations in total
+    # n_stations = 3
+
+    # # Maximum time offset (seconds)
+    # t_max_offset = 1.0
+
+    # # Geographical coordinates of stations (lat, lon, elev, station_id) in degrees and meters
+    # stations_geo = [
+    #     [43.19279, -81.31565, 324.0, 'A1'],
+    #     [43.19055, -80.09913, 212.0, 'A2'],
+    #     [43.96324, -80.80952, 383.0, 'A3']]
+
+    # # Camera FPS per station
+    # fps_list = [30, 30, 30]
+
+    # # Observation uncertanties per station (arcsec)
+    # obs_ang_uncertainties = [30, 30, 30]
+
+    # # Azimuths of centre of FOVs (degrees)
+    # azim_fovs = [56.0, 300.0, 174.0]
+
+    # # Elevations of centre of FOVs (degrees)
+    # elev_fovs = [90.0, 90.0, 90.0]
+
+    # # Cameras FOV widths (degrees)
+    # fov_widths = [120.0, 120.0, 120.0]
+
+    # # Cameras FOV heights (degrees)
+    # fov_heights = [120.0, 120.0, 120.0]
+
+    # # Limiting magnitudes (needed only for ablation simulation)
+    # lim_magnitudes = [-0.5, -0.5, -0.5]
+
+    # # Powers of zero-magnitude meteors (Watts) (needed only for ablation simulation)
+    # P_0m_list = [1210, 1210, 1210]
+
+    # # Minimum angular velocity for detection (deg/s)
+    # min_ang_velocities = [1.0, 1.0, 1.0]
+
+    # ##########################################################################################################
+
+
     # Randomly generate station timing offsets, the first station has zero time offset
     t_offsets = np.random.uniform(-t_max_offset, +t_max_offset, size=n_stations)
     t_offsets[0] = 0
@@ -2192,8 +2263,9 @@ if __name__ == "__main__":
     ### METEOR SHOWER PARAMETERS ###
     ##########################################################################################################
     
-    n_meteors = 2
+    n_meteors = 100
 
+    orbit_limits = None
 
     # ### GEMINIDS
 
@@ -2231,47 +2303,86 @@ if __name__ == "__main__":
     # ###
 
 
-    # ### PERSEIDS
+    # ### URSIDS
 
     # # Shower name
-    # shower_name = 'Perseids'
+    # shower_name = '2012Ursids'
+
+    # # NOTE: sigmas here are not observed values, but best guesses !!!
 
     # # Radiant position and dispersion
-    # ra_g = 48.2
-    # ra_g_sigma = 0.15
+    # ra_g = 219.9
+    # ra_g_sigma = 1.0
 
-    # dec_g = 58.1
-    # dec_g_sigma = 0.15
+    # dec_g = 56.6
+    # dec_g_sigma = 1.0
 
     # # Radiant drift in degrees per degree of solar longitude
-    # d_ra = 1.40
-    # d_dec = 0.26
+    # d_ra = 0.05
+    # d_dec = -0.31
 
     # # Geocentric velocity in km/s
-    # v_g = 59.1
-    # v_g_sigma = 0.1
+    # v_g = 32.9
+    # v_g_sigma = 0.5
 
     # # Velocity drift
     # d_vg = 0.0
 
     # year = 2012
-    # month = 8
+    # month = 12
 
     # # Solar longitude of peak activity in degrees
-    # sol_max = 140
-    # sol_slope = 0.4
+    # sol_max = 271.0
+    # sol_slope = 0.61
 
     # # Beginning height in kilometers
-    # beg_height = 105
+    # beg_height = 95
     # beg_height_sigma = 3
 
     # ###
 
 
+    ### PERSEIDS
+
+    # Shower name
+    shower_name = '2012Perseids'
+
+    # Radiant position and dispersion
+    ra_g = 48.2
+    ra_g_sigma = 0.15
+
+    dec_g = 58.1
+    dec_g_sigma = 0.15
+
+    # Radiant drift in degrees per degree of solar longitude
+    d_ra = 1.40
+    d_dec = 0.26
+
+    # Geocentric velocity in km/s
+    v_g = 59.1
+    v_g_sigma = 0.1
+
+    # Velocity drift
+    d_vg = 0.0
+
+    year = 2012
+    month = 8
+
+    # Solar longitude of peak activity in degrees
+    sol_max = 140
+    sol_slope = 0.4
+
+    # Beginning height in kilometers
+    beg_height = 105
+    beg_height_sigma = 3
+
+    ###
+
+
     # ### 2011 Draconids
 
     # # Shower name
-    # shower_name = '2011Draconids_TEST'
+    # shower_name = '2011Draconids'
 
     # # Radiant position and dispersion
     # ra_g = 263.387
@@ -2281,8 +2392,8 @@ if __name__ == "__main__":
     # dec_g_sigma = 0.15746
 
     # # Radiant drift in degrees per degree of solar longitude
-    # d_ra = 0
-    # d_dec = 0
+    # d_ra = 0.0
+    # d_dec = 0.0
 
     # # Geocentric velocity in km/s
     # v_g = 20.9245
@@ -2302,44 +2413,44 @@ if __name__ == "__main__":
     # beg_height = 95
     # beg_height_sigma = 3
 
-    # ###
-
-
-    ### Long sporadic fireball
-
-    # Shower name
-    shower_name = 'LongFireball_TEST'
-
-    # Radiant position and dispersion
-    ra_g = 304.67053
-    ra_g_sigma = 0.04
-
-    dec_g = -7.28225
-    dec_g_sigma = 0.07
-
-    # Radiant drift in degrees per degree of solar longitude
-    d_ra = 0
-    d_dec = 0
-
-    # Geocentric velocity in km/s
-    v_g = 11.3
-    v_g_sigma = 0.02
-
-    # Velocity drift
-    d_vg = 0.0
-
-    year = 2017
-    month = 9
-
-    # Solar longitude of peak activity in degrees
-    sol_max = 180.150305
-    sol_slope = 20
-
-    # Beginning height in kilometers
-    beg_height = 76.4 
-    beg_height_sigma = 3
-
     ###
+
+
+    # ### Long sporadic fireball
+
+    # # Shower name
+    # shower_name = 'LongFireball'
+
+    # # Radiant position and dispersion
+    # ra_g = 304.67053
+    # ra_g_sigma = 0.04
+
+    # dec_g = -7.28225
+    # dec_g_sigma = 0.07
+
+    # # Radiant drift in degrees per degree of solar longitude
+    # d_ra = 0
+    # d_dec = 0
+
+    # # Geocentric velocity in km/s
+    # v_g = 11.3
+    # v_g_sigma = 0.02
+
+    # # Velocity drift
+    # d_vg = 0.0
+
+    # year = 2017
+    # month = 9
+
+    # # Solar longitude of peak activity in degrees
+    # sol_max = 180.150305
+    # sol_slope = 20
+
+    # # Beginning height in kilometers
+    # beg_height = 76.4 
+    # beg_height_sigma = 3
+
+    # ###
 
 
     # ### 2015 Taurid outburst
@@ -2370,11 +2481,15 @@ if __name__ == "__main__":
 
     # # Solar longitude of peak activity in degrees
     # sol_max = 220.956
-    # sol_slope = 1.5
+    # sol_slope = 0.15
 
     # # Beginning height in kilometers
     # beg_height = 100
     # beg_height_sigma = 3
+
+
+    # # Set constraints to the orbit
+    # orbit_limits = ['a', 2.24, 2.28]
 
     # ###
 
@@ -2387,28 +2502,28 @@ if __name__ == "__main__":
 
     # Set a range of meteor durations
     #meteor_durations = np.clip(np.random.normal(0.5, 0.1, n_meteors), 0.2, 1.0)
-    meteor_durations = [7.0]*n_meteors
+    meteor_durations = [2.0]*n_meteors
 
     # #### Constant velocity model
     # meteor_velocity_models = [ConstantVelocity(duration) for duration in meteor_durations]
     # ####
 
 
-    #### Linear deceleration model
+    # #### Linear deceleration model
     
-    # Randomly generate deceleration times t0
-    #t0_rand = np.random.uniform(0.1, 0.7, size=n_meteors) # Ratios of deceleratoin start
-    t0_rand = np.random.uniform(0.3, 0.6, size=n_meteors) # Ratios of deceleratoin start
-    t0_list = meteor_durations*t0_rand
+    # # Randomly generate deceleration times t0
+    # #t0_rand = np.random.uniform(0.1, 0.7, size=n_meteors) # Ratios of deceleratoin start
+    # t0_rand = np.random.uniform(0.3, 0.6, size=n_meteors) # Ratios of deceleratoin start
+    # t0_list = meteor_durations*t0_rand
 
-    # Randomly generate decelerations
-    #decel_list = np.random.uniform(100, 800, size=n_meteors)
-    decel_list = np.random.uniform(4000, 6000, size=n_meteors)
+    # # Randomly generate decelerations
+    # #decel_list = np.random.uniform(100, 800, size=n_meteors)
+    # decel_list = np.random.uniform(4000, 6000, size=n_meteors)
 
-    meteor_velocity_models = [LinearDeceleration(duration, t0, decel) for duration, t0, decel in \
-        zip(meteor_durations, t0_list, decel_list)]
+    # meteor_velocity_models = [LinearDeceleration(duration, t0, decel) for duration, t0, decel in \
+    #     zip(meteor_durations, t0_list, decel_list)]
 
-    ####
+    # ####
 
 
     # #### Jacchia (exponential deceleration) velocity model
@@ -2421,7 +2536,7 @@ if __name__ == "__main__":
     # ####
 
 
-    # #### Velocity model from Campbell-Brown & Koschny (2004) meteor ablation model #####
+    ### Velocity model from Campbell-Brown & Koschny (2004) meteor ablation model #####
 
     # ## 2011 Draconids ###
     # # Make the beginning heights heigher, as the trajectory points will be determined by simulated
@@ -2442,17 +2557,15 @@ if __name__ == "__main__":
     # Lambda = 0.5
 
 
-    # # # Define the mass range (log of mass in kg) seen by the system (CAMO)
+    # # # Mass range (log of mass in kg) seen by the system (CAMO)
     # # # mass_min = -6
     # # # mass_max = -4
     # # mass_min = -4
     # # mass_max = -2
 
-    # # Define the mass range (log of mass in kg) seen by the system (allsky)
-    # # mass_min = -2.5
-    # # mass_max = 0.5
-    # mass_min = 0.5
-    # mass_max = 2.0
+    # # Mass range (log of mass in kg) seen by the system (allsky, 20 km/s, Draconids)
+    # mass_min = -2.5
+    # mass_max = 0.5
 
     # # Mass index
     # mass_index = 1.95 # Koten et al. 2014
@@ -2465,63 +2578,140 @@ if __name__ == "__main__":
     # # \ 2011 Draconids
 
 
-    # ### Perseids ###
+    ## Perseids ###
 
-    # # # Make the beginning heights heigher, as the trajectory points will be determined by simulated
-    # # # magnitudes
-    # # beg_height = 120
-    # # beg_height_sigma = 0
+    # Make the beginning heights heigher, as the trajectory points will be determined by simulated
+    # magnitudes
+    beg_height = 120
+    beg_height_sigma = 0
 
-    # # # Luminous efficiency (fraction)
-    # # lum_eff = 0.7/100
+    # Luminous efficiency (fraction)
+    lum_eff = 0.7/100
 
-    # # # Ablation coefficient (s^2/km^2)
-    # # ablation_coeff = 0.1
+    # Ablation coefficient (s^2/km^2) (cometary)
+    ablation_coeff = 0.1
 
-    # # # Drag coeficient
-    # # Gamma = 1.0
+    # Drag coeficient
+    Gamma = 1.0
 
-    # # # Heat transfer coeficient
-    # # Lambda = 0.5
+    # Heat transfer coeficient
+    Lambda = 0.5
 
-    # # # Mass index
-    # # mass_index = 2.0
+    # Mass index
+    mass_index = 2.0
 
-    # # # Define the mass range (log of mass in kg) seen by the system
-    # # mass_min = -6
-    # # mass_max = -4
-
-
-    # # # Define density distribution (see: Moorhead et al. 2017 "A two-population sporadic meteoroid density 
-    # # #        distribution and its implications for environment models")
-
-    # # # HTC density distribution (Tj <= 2)
-    # # log_rho_mean = 2.93320
-    # # log_rho_sigma = 0.12714
-
-    # # # # JFC and asteroidal distribution (Tj > 2) 
-    # # # log_rho_mean = 3.57916
-    # # # log_rho_sigma = 0.09312
-
-    # # # Samples densities
-    # # density_samples = sampleDensityMoorhead(log_rho_mean, log_rho_sigma, n_meteors)
-
-    # ### \Perseids
+    # Mass range (log of mass in kg) seen by the system (allsky, 60 km/s, Perseids)
+    mass_min = -4
+    mass_max = -2
 
 
+    # Define density distribution (see: Moorhead et al. 2017 "A two-population sporadic meteoroid density 
+    #        distribution and its implications for environment models")
 
-    # # Sample the masses
-    # mass_samples = sampleMass(mass_min, mass_max, mass_index, n_meteors)
+    # HTC density distribution (Tj <= 2)
+    log_rho_mean = 2.93320
+    log_rho_sigma = 0.12714
+
+    # # JFC and asteroidal distribution (Tj > 2) 
+    # log_rho_mean = 3.57916
+    # log_rho_sigma = 0.09312
+
+    # Samples densities
+    density_samples = sampleDensityMoorhead(log_rho_mean, log_rho_sigma, n_meteors)
+
+    ## \Perseids
 
 
-    # # Init velocity models
-    # meteor_velocity_models = [AblationModelVelocity(mass, density, ablation_coeff, Gamma, Lambda, lum_eff) \
-    #     for mass, density in zip(mass_samples, density_samples)]
+
+    # ## Ursids ###
+
+    # # Make the beginning heights heigher, as the trajectory points will be determined by simulated
+    # # magnitudes
+    # beg_height = 120
+    # beg_height_sigma = 0
+
+    # # Luminous efficiency (fraction)
+    # lum_eff = 0.7/100
+
+    # # Ablation coefficient (s^2/km^2) (cometary)
+    # ablation_coeff = 0.1
+
+    # # Drag coeficient
+    # Gamma = 1.0
+
+    # # Heat transfer coeficient
+    # Lambda = 0.5
+
+    # # Mass index
+    # mass_index = 1.8
+
+    # # Mass range (log of mass in kg) seen by the system (allsky, 30 km/s, Ursids)
+    # mass_min = -3.0
+    # mass_max = 0.0
 
 
-    # # ####################################################################################
+    # # Define density distribution (see: Moorhead et al. 2017 "A two-population sporadic meteoroid density 
+    # #        distribution and its implications for environment models")
 
-    # ##########################################################################################################
+    # # HTC density distribution (Tj <= 2)
+    # log_rho_mean = 2.93320
+    # log_rho_sigma = 0.12714
+
+    # # Samples densities
+    # density_samples = sampleDensityMoorhead(log_rho_mean, log_rho_sigma, n_meteors)
+
+    # ## \Ursids
+
+
+
+    # ## Taurids ###
+
+    # # Make the beginning heights heigher, as the trajectory points will be determined by simulated
+    # # magnitudes
+    # beg_height = 120
+    # beg_height_sigma = 0
+
+    # # Luminous efficiency (fraction)
+    # lum_eff = 0.7/100
+
+    # # Ablation coefficient (s^2/km^2) (cometary)
+    # ablation_coeff = 0.1
+
+    # # Drag coeficient
+    # Gamma = 1.0
+
+    # # Heat transfer coeficient
+    # Lambda = 0.5
+
+    # # Mass index
+    # mass_index = 1.8
+
+    # # Mass range (log of mass in kg) seen by the system (allsky, 30 km/s, Taurids)
+    # mass_min = -3.0
+    # mass_max = 0.0
+
+
+    # # Sample densities - around 1400 kg/m3
+    # # Reference: Brown, P., Marchenko, V., Moser, D. E., Weryk, R., & Cooke, W. (2013). Meteorites from 
+    # # meteor showers: A case study of the Taurids. Meteoritics & Planetary Science, 48(2), 270-288.
+    # density_samples = np.random.uniform(1200, 1600, n_meteors)
+
+    # ## \Taurids
+
+
+
+    # Sample the masses
+    mass_samples = sampleMass(mass_min, mass_max, mass_index, n_meteors)
+
+
+    # Init velocity models
+    meteor_velocity_models = [AblationModelVelocity(mass, density, ablation_coeff, Gamma, Lambda, lum_eff) \
+        for mass, density in zip(mass_samples, density_samples)]
+
+
+    # ####################################################################################
+
+    ##########################################################################################################
 
 
     # Make the system directory
@@ -2537,7 +2727,7 @@ if __name__ == "__main__":
     # Run shower simulation
     sim_meteor_list = simulateMeteorShower(station_list, meteor_velocity_models, n_meteors, ra_g, ra_g_sigma, 
         dec_g, dec_g_sigma, d_ra, d_dec, v_g, v_g_sigma, d_vg, year, month, sol_max, sol_slope, beg_height, 
-        beg_height_sigma, output_dir=shower_dir, nighttime_meteors_only=False)
+        beg_height_sigma, output_dir=shower_dir, orbit_limits=orbit_limits, nighttime_meteors_only=True)
 
 
 

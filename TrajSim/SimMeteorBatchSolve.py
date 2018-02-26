@@ -30,8 +30,8 @@ if __name__ == "__main__":
     #shower_dir = os.path.abspath("../SimulatedMeteors/Perfect_CAMO/2011Draconids_TEST")
     #shower_dir = os.path.abspath("../SimulatedMeteors/CAMO/2011Draconids_TEST")
     #shower_dir = os.path.abspath("../SimulatedMeteors/CAMO/2011Draconids_TEST_nograv")
-    #shower_dir = os.path.abspath("../SimulatedMeteors/SOMNsim/2011Draconids_TEST_grav")
-    shower_dir = os.path.abspath("../SimulatedMeteors/SOMN_precise_sim/LongFireball_grav")
+    shower_dir = os.path.abspath("../SimulatedMeteors/SOMN_sim/2012Ursids")
+    #shower_dir = os.path.abspath("../SimulatedMeteors/SOMN_precise_sim/LongFireball_grav")
 
     # Maximum time offset (seconds)
     t_max_offset = 1
@@ -41,8 +41,8 @@ if __name__ == "__main__":
 
 
     # Trajectory solvers
-    #traj_solvers = ['planes', 'los', 'monte_carlo', 'gural0', 'gural1', 'gural2', 'gural3']
-    traj_solvers = ['planes', 'los', 'monte_carlo']
+    traj_solvers = ['planes', 'los', 'monte_carlo', 'gural0', 'gural1', 'gural2', 'gural3']
+    #traj_solvers = ['planes', 'los', 'monte_carlo']
 
 
     ##########################################################################################################
@@ -91,7 +91,7 @@ if __name__ == "__main__":
                 
                 # Init the trajectory
                 traj = Trajectory(sim_met.jdt_ref, output_dir=output_dir, max_toffset=t_max_offset, \
-                    meastype=2, show_plots=False, mc_runs=50, gravity_correction=gravity_correction)  ## TESING, ONLY 50 RUNS!!!
+                    meastype=2, show_plots=False, mc_runs=100, gravity_correction=gravity_correction)  ## TESING, ONLY 100 RUNS!!!
 
             
             elif 'gural' in traj_solver:

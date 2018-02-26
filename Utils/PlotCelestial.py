@@ -232,6 +232,10 @@ class CelestialPlot(object):
             **kwargs: [dict] Any additional keyword arguments will be passes to matplotlib scatter.
         """
 
+        # Do not plot anything if the inputs are None
+        if (ra_data is None) or (dec_data is None):
+            return None
+
         # Convert angular coordinates to image coordinates
         x, y = self.m(np.degrees(ra_data), np.degrees(dec_data))
 

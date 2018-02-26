@@ -357,7 +357,7 @@ if __name__ == '__main__':
 
 
     solveTrajectoryMILIG(dir_path, file_name, solver='original', max_toffset=5.0, monte_carlo=False, 
-        mc_runs=200)
+        mc_runs=200, gravity_correction=True)
 
     
 

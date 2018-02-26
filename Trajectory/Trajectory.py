@@ -1789,7 +1789,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
                 # Determine the limits of the colorbar if there are more points
                 if len(timing_res_list) > 4:
 
-                    v_max = np.mean(timing_res_list_ms) + 2*np.std(timing_res_list_ms)
+                    v_max = np.median(timing_res_list_ms) + 2*np.std(timing_res_list_ms)
 
 
                 # Plot all MC radiants (length fit offsets)
@@ -1947,7 +1947,7 @@ class Trajectory(object):
             max_toffset: [float] Maximum allowed time offset between cameras in seconds (default 1 second).
             meastype: [float] Flag indicating the type of angle measurements the user is providing for meas1 
                 and meas2 below. The following are all in radians:
-                        1 = Right Ascension for meas1, declination for meas2.
+                        1 = Right Ascension for meas1, declination for meas2, epoch of date.
                         2 = Azimuth +east of due north for meas1, Elevation angle above the horizon for meas2
                         3 = Azimuth +west of due south for meas1, Zenith angle for meas2
                         4 = Azimuth +north of due east for meas1, Zenith angle for meas2
