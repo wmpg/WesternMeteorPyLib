@@ -25,7 +25,7 @@ List of features:
 To clone this repository locally, run:
 
 ```
-git clone --recursive git@github.com:dvida/WesternMeteorPyLib.git
+git clone --recursive https://github.com/dvida/WesternMeteorPyLib.git
 ```
 
 After cloning/downloading this library, navigate into it with a terminal and run:
