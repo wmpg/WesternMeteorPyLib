@@ -256,7 +256,7 @@ def calcDN(ra1, dec1, sol1, vg1, ra2, dec2, sol2, vg2, d_max=999.0):
 
 
 # def calcDV(Lh1, Bh1, sol1, Vh1, Lh2, Bh2, sol2, Vh2, d_max=999.0):
-#     """ D criterion calculated using Vida et al. 2017 (TBP) which uses the corrected heliocentric velocity
+#     """ D criterion calculated using Vida et al. 2018 (TBP) which uses the corrected heliocentric velocity
 #         vector (correction by Sato & Watanabe 2017) and Valsecchi-type D criterion approach of calculating
 #         the similarity between orbits.
 
@@ -338,7 +338,7 @@ def calcDN(ra1, dec1, sol1, vg1, ra2, dec2, sol2, vg2, d_max=999.0):
 
 def calcDVuncert(Lh1, Lh1_std, Bh1, Bh1_std, sol1, Vh1, Vh1_std, Lh2, Lh2_std, Bh2, Bh2_std, sol2, Vh2, Vh2_std, 
     d_max=999.0):
-    """ D criterion calculated using Vida et al. 2017 (TBP) which uses the corrected heliocentric velocity
+    """ D criterion calculated using Vida et al. 2018 (TBP) which uses the corrected heliocentric velocity
         vector (correction by Sato & Watanabe 2017) and Valsecchi-type D criterion approach of calculating
         the similarity between orbits. The uncertainties are included in calculation.
 
