@@ -2607,6 +2607,10 @@ class Trajectory(object):
 
         """
 
+        # Determine the first time
+        t0 = min([obs.time_data[0] for obs in observations])
+
+
         # Go through all observations from all stations
         for obs in observations:
 
@@ -2623,10 +2627,32 @@ class Trajectory(object):
 
 
             # Go through all individual position measurement from each site
-            for i, (stat, meas) in enumerate(zip(obs.stat_eci_los, obs.meas_eci_los)):
+            for i, (t, stat, meas) in enumerate(zip(obs.time_data, obs.stat_eci_los, obs.meas_eci_los)):
 
                 # Calculate closest points of approach (observed line of sight to radiant line)
                 obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, state_vect, radiant_eci)
+
+
+                ### Take the gravity drop into account ###
+
+                # Calculate the time in seconds from the beginning of the meteor
+                t_rel = t - t0
+
+                # Calculate the gravitational acceleration at the given height
+                g = G*EARTH.MASS/(vectMag(rad_cpa)**2)
+
+                # Determing the sign of the initial time
+                time_sign = np.sign(t_rel)
+
+                # Calculate the amount of gravity drop from a straight trajectory (handle the case when the time
+                #   can be negative)
+                drop = time_sign*(1.0/2)*g*t_rel**2
+
+                # Apply gravity drop to ECI coordinates
+                rad_cpa -= drop*vectNorm(rad_cpa)
+
+                ###
+                
 
                 # Calculate the range to the observed CPA
                 r_meas = vectMag(obs_cpa - stat)
