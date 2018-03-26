@@ -173,19 +173,31 @@ def orbitalElements2Cartesian(a, e, I, peri, node, E):
 
     """
 
-    # Check if the orbit is parabolic or hyperbolic, if it is, set it to a very high eccentricity
-    if e >=1:
-        e = 0.99999999
-
-
     # Convert degrees to radians
     I, peri, node = map(np.radians, [I, peri, node])
 
-    # True anomaly
-    theta = 2*np.arctan(np.sqrt((1.0 + e)/(1.0 - e))*np.tan(E/2.0))
+    
 
-    # Distance from the Sun to the point on orbit
-    r = a*(1.0 - e*np.cos(E))
+
+    # If the orbit is an elipse
+    if e < 1.0:
+
+        # Distance from the Sun to the point on orbit
+        r = a*(1.0 - e*np.cos(E))
+
+        # True anomaly
+        theta = 2*np.arctan(np.sqrt((1.0 + e)/(1.0 - e))*np.tan(E/2.0))
+
+
+    # If the orbit is parabolic or hyperbolic
+    else:
+
+        # True anomaly
+        theta = 2*np.arctan(np.sqrt((e + 1.0)/(e - 1.0))*np.tanh(E/2.0))
+
+        # Distance from the Sun to the point on orbit
+        r = a*(1.0 - e**2)/(1 + e*np.cos(theta))
+
 
     # Cartesian coordinates
     x = r*(np.cos(node)*np.cos(peri + theta) - np.sin(node)*np.sin(peri + theta)*np.cos(I))
