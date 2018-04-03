@@ -132,6 +132,10 @@ def collectTrajPickles(dir_path, traj_type='original', unique=False):
     elif traj_type == 'mc':
         pickle_files = [pickle_f for pickle_f in pickle_files if '_mc_trajectory.pickle' in pickle_f]
 
+    # Select MILIG trajectories
+    elif traj_type == 'milig':
+        pickle_files = [pickle_f for pickle_f in pickle_files if '_milig.pickle' in pickle_f]
+
     # Select gural trajectory
     elif 'gural' in traj_type:
         pickle_files = [pickle_f for pickle_f in pickle_files if '_{:s}_trajectory.pickle'.format(traj_type) \
@@ -482,19 +486,26 @@ if __name__ == "__main__":
     #dir_path = "../DenisGEMcases/"
     #dir_path = "../DenisGEMcases_5_sigma"
     #dir_path = "../Romulan2012Geminids"
-    #dir_path = "../SimulatedMeteors/CAMO/PER"
+
+    dir_path = "../SimulatedMeteors/EMCCD/2011Draconids"
+
     #dir_path = "../SimulatedMeteors/CAMO/2011Draconids"
+    #dir_path = "../SimulatedMeteors/CAMO/2012Perseids"
+
+    #dir_path = "../SimulatedMeteors/SOMN_sim/2011Draconids"
+    #dir_path = "../SimulatedMeteors/SOMN_sim/2012Ursids"
+    #dir_path = "../SimulatedMeteors/SOMN_sim/2012Perseids"
     #dir_path = "../SimulatedMeteors/SOMN_sim/2015Taurids"
-    dir_path = "../SimulatedMeteors/SOMN_sim/2012Ursids"
+    #dir_path = "../SimulatedMeteors/CAMSsim/2012Perseids"
 
 
     # Minimum convergence angle (deg)
-    min_conv_angle = 15.0
+    min_conv_angle = 5.0
 
 
 
-    solvers = ['original', 'mc', 'gural0', 'gural1', 'gural3']
-    plot_labels = ['LoS', 'Monte Carlo', 'Gural (constant)', 'Gural (linear)', 'Gural (exp)']
+    solvers = ['milig', 'mc', 'gural0', 'gural1', 'gural3']
+    plot_labels = ['MILIG', 'Monte Carlo', 'Gural (constant)', 'Gural (linear)', 'Gural (exp)']
     markers = ['o', 's', '+', 'x', 'D']
     sizes = [20, 20, 40, 40, 10]
 
@@ -598,8 +609,8 @@ if __name__ == "__main__":
             traj_list = [traj for traj in traj_list if np.degrees(traj.best_conv_inter.conv_angle) \
                 >= min_conv_angle]
 
-        # Plot the 2D histogram comparing the results, radiants within 2 degrees, Vg within 2 km/s
-        compareTrajToSim(dir_path, sim_meteors, traj_list, solver_name, 2, 2)
+        # Plot the 2D histogram comparing the results, radiants within X degrees, Vg within X km/s
+        compareTrajToSim(dir_path, sim_meteors, traj_list, solver_name, 0.5, 1.0, vmax=5)
 
 
 

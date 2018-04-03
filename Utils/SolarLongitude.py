@@ -1461,7 +1461,6 @@ def solLon2jdJPL(*args):
 
 if __name__ == "__main__":
 
-
     ### Test all solar longitude functions and see the difference between the solar longitudes they return
 
     year = 2012

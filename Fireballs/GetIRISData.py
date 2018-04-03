@@ -430,7 +430,7 @@ def plotAllWaveforms(dir_path, data_list, v_sound, t0, lat_centre, lon_centre, a
     toa_line_time = np.linspace(0, max_time, 10)
 
     # Plot the constant sound speed line (assumption is that the release happened at t = 0)
-    ax.plot((toa_line_time + t0)*v_sound/1000, (toa_line_time + t0), color='r', alpha=0.25, linewidth=1, \
+    ax.plot((toa_line_time)*v_sound/1000, (toa_line_time + t0), color='r', alpha=0.25, linewidth=1, \
         zorder=3, label="$V_s = " + "{:d}".format(int(v_sound)) + r" \rm{ms^{-1}}$")
 
     
@@ -453,12 +453,47 @@ if __name__ == "__main__":
     ### WAVEFORM RETRIEVAL PARAMETERS ###
     ##########################################################################################################
 
+
+
+    # ### 2018-01-16 Michigan fireball
+
+    # # Name of the folder where data files will be stored
+    # dir_path = '../Seismic data/2018-01-16 Michigan fireball'
+
+    # # Geo coordinates of the wave release centre
+    # lat_centre = 42.646767
+    # lon_centre = -83.925573
+
+    # # Station search radius (degrees)
+    # deg_radius = 10
+
+    # # Seismic network code. Use '*' for all networks
+    # network = '*'
+
+    # # Instrument channel ('BDF' default)
+    # channel = 'BDF'
+
+    # # Speed of sound (m/s)
+    # v_sound = 310
+
+    # # Time offset of wave release from the reference time
+    # t0 = 0
+
+    # # Time range of waveform retrieval (can't be more than 2 hours!)
+    # start_datetime = datetime.datetime(2018, 1, 17, 1, 8, 30)
+    # end_datetime = datetime.datetime(2018, 1, 17, 2, 8, 30)
+
+    # ###############
+
+
+    ### 2018-03-08 Seattle fireball
+
     # Name of the folder where data files will be stored
-    dir_path = '../Seismic data/2018-01-16 Michigan fireball'
+    dir_path = '../Seismic data/2018-03-08 Seattle fireball'
 
     # Geo coordinates of the wave release centre
-    lat_centre = 42.646767
-    lon_centre = -83.925573
+    lat_centre = 47.348652
+    lon_centre = -124.075456
 
     # Station search radius (degrees)
     deg_radius = 10
@@ -472,12 +507,16 @@ if __name__ == "__main__":
     # Speed of sound (m/s)
     v_sound = 310
 
-    # Time offset of wave release from the reference time
-    t0 = 0
+    # Time offset of wave release from the reference time (seconds)
+    t0 = 159.0
 
     # Time range of waveform retrieval (can't be more than 2 hours!)
-    start_datetime = datetime.datetime(2018, 1, 17, 1, 8, 30)
-    end_datetime = datetime.datetime(2018, 1, 17, 2, 8, 30)
+    start_datetime = datetime.datetime(2018, 3, 8, 3, 5, 20)
+    end_datetime = datetime.datetime(2018, 3, 8, 4, 30, 0)
+
+
+    #################
+
 
     ##########################################################################################################
 

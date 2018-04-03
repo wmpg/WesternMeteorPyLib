@@ -288,7 +288,7 @@ def loadCSSseismicData(dir_path, site_file, wfdisc_file):
     
     Return:
         [list] A list of (SiteStruct, WfdiscStruct, time_data, seismic_data) entries. The time is in seconds,
-            referent to the beginning time defined in the Wfdisc object (begin_time).
+            reference to the beginning time defined in the Wfdisc object (begin_time).
     """
 
     # Load the .site file
@@ -352,10 +352,10 @@ if __name__ == "__main__":
         site, w, time_data, waveform_data = entry
 
 
-        # Calculate the difference from the referent time
+        # Calculate the difference from the reference time
         t_diff = (w.begin_time - ref_time).total_seconds()
 
-        # Offset the time data to be in accordance with the referent time
+        # Offset the time data to be in accordance with the reference time
         time_data += t_diff
 
 

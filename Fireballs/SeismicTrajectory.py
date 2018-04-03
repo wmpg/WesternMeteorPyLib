@@ -72,7 +72,7 @@ def mergeChannels(seismic_data):
                 merged_indices.append(j)
 
 
-        # Add all merged data to the list, but keep the first site and wfdisc info as the referent one
+        # Add all merged data to the list, but keep the first site and wfdisc info as the reference one
         merged_data.append([merged_sites, merged_wfdisc, merged_time, merged_waveform])
 
 
@@ -103,7 +103,7 @@ def timeOfArrival(stat_coord, x0, y0, t0, v, azim, zangle, v_sound):
         x0: [float] Intersection with the X axis in the local coordinate system (meters).
         y0: [float] Intersection with the Y axis in the local coordinate system (meters).
         t0: [float] Time when the trajectory intersected the reference XY plane (seconds), offset from 
-            some referent time.
+            some reference time.
         v: [float] Velocity of the fireball (m/s).
         azim: [float] Fireball azimuth (+E of due S).
         zangle: [float] Zenith angle.
@@ -120,7 +120,7 @@ def timeOfArrival(stat_coord, x0, y0, t0, v, azim, zangle, v_sound):
     # Trajectory vector
     u = np.array([np.cos(azim)*np.sin(zangle), np.sin(azim)*np.cos(zangle), -np.cos(zangle)])
 
-    # Difference from the referent point on the trajectory and the station
+    # Difference from the reference point on the trajectory and the station
     b = stat_coord - np.array([x0, y0, 0])
 
 
@@ -148,7 +148,7 @@ def waveReleasePoint(stat_coord, x0, y0, t0, v, azim, zangle, v_sound):
         x0: [float] Intersection with the X axis in the local coordinate system (meters).
         y0: [float] Intersection with the Y axis in the local coordinate system (meters).
         t0: [float] Time when the trajectory intersected the reference XY plane (seconds), offset from 
-            some referent time.
+            some reference time.
         v: [float] Velocity of the fireball (m/s).
         azim: [float] Fireball azimuth (+E of due S).
         zangle: [float] Zenith angle.
@@ -165,7 +165,7 @@ def waveReleasePoint(stat_coord, x0, y0, t0, v, azim, zangle, v_sound):
     # Trajectory vector
     u = np.array([np.cos(azim)*np.sin(zangle), np.sin(azim)*np.cos(zangle), -np.cos(zangle)])
 
-    # Difference from the referent point on the trajectory and the station
+    # Difference from the reference point on the trajectory and the station
     b = stat_coord - np.array([x0, y0, 0])
 
 
@@ -194,9 +194,9 @@ def timeResidualsAzimuth(params, stat_coord_list, arrival_times, v_sound, azim_o
 
     Arguments:
         params: [list] Estimated parameters: x0, t0, t0, v, azim, elev.
-        stat_coord_list: [list of ndarrays] A list of station coordinates (x, y, z) in the referent coordinate system.
+        stat_coord_list: [list of ndarrays] A list of station coordinates (x, y, z) in the reference coordinate system.
         arrival_times: [list] A list of arrival times of the sound wave to the seismic station (in seconds 
-            from some referent time).
+            from some reference time).
         v_sound: [float] Average speed of sound (m/s).
 
     Keyword arguments:
@@ -257,15 +257,15 @@ def timeResidualsAzimuth(params, stat_coord_list, arrival_times, v_sound, azim_o
 
 
 def latLon2Local(lat0, lon0, elev0, lat, lon, elev):
-    """ Convert geographic coordinates into a local coordinate system where the referent coordinates will be
+    """ Convert geographic coordinates into a local coordinate system where the reference coordinates will be
         the origin. The positive direction of the X axis points towards the south, the positive direction of
         the Y axis points towards the east and the positive direction of the Z axis points to the zenith at
-        the referent coordinates.
+        the reference coordinates.
 
     Arguments:
-        lat0: [float] Referent latitude +N (radians).
-        lon0: [float] Referent longtidue +E (radians).
-        elev0: [float] Referent elevation above sea level (meters).
+        lat0: [float] reference latitude +N (radians).
+        lon0: [float] reference longtidue +E (radians).
+        elev0: [float] reference elevation above sea level (meters).
         lat: [float] Latitude +N (radians).
         lon: [float] Longtidue +E (radians).
         elev: [float] Elevation above sea level (meters).
@@ -275,7 +275,7 @@ def latLon2Local(lat0, lon0, elev0, lat, lon, elev):
         (x, y, z): [3 element ndarray] (x, y, z) local coordinates.
     """
 
-    # Calculate the ECEF coordinates of the referent position
+    # Calculate the ECEF coordinates of the reference position
     x0, y0, z0 = latLonAlt2ECEF(lat0, lon0, elev0)
     ref_ecef = np.array([x0, y0, z0])
 
@@ -305,9 +305,9 @@ def local2LatLon(lat0, lon0, elev0, local_coord):
     """ Convert local coordinates into geographic coordinates. See latLon2Local for more details.
 
     Arguments:
-        lat0: [float] Referent latitude +N (radians).
-        lon0: [float] Referent longtidue +E (radians).
-        elev0: [float] Referent elevation above sea level (meters).
+        lat0: [float] reference latitude +N (radians).
+        lon0: [float] reference longtidue +E (radians).
+        elev0: [float] reference elevation above sea level (meters).
         local_coord: [3 element ndarray] (x, y, z):
             - x: [float] Local X coordinate (meters).
             - y: [float] Local Y coordinate (meters).
@@ -318,7 +318,7 @@ def local2LatLon(lat0, lon0, elev0, local_coord):
     """
 
 
-    # Calculate the ECEF coordinates of the referent position
+    # Calculate the ECEF coordinates of the reference position
     x0, y0, z0 = latLonAlt2ECEF(lat0, lon0, elev0)
     ref_ecef = np.array([x0, y0, z0])
 
@@ -346,12 +346,12 @@ def convertStationCoordinates(station_list, ref_indx):
         station_list: [list] A list of stations and arrival times, each entry is a tuple of:
             (name, lat, lon, elev, arrival_time_jd), where latitude and longitude are in radians, the 
             elevation is in meters and Julian date of the arrival time.
-        ref_indx: [int] Index of the referent station which will be in the origin of the local coordinate
+        ref_indx: [int] Index of the reference station which will be in the origin of the local coordinate
             system.
     """
 
 
-    # Select the location of the referent station
+    # Select the location of the reference station
     _, lat0, lon0, elev0, _ = station_list[ref_indx]
 
     stat_coord_list = []
@@ -390,7 +390,7 @@ def estimateSeismicTrajectoryAzimuth(station_list, v_sound, p0=None, azim_range=
         p0: [6 element ndarray] Initial parameters for trajectory estimation:
             p0[0]: [float] p0, north-south offset of the trajectory intersection with the ground (in km, +S).
             p0[1]: [float] y0, east-west offset of the trajectory intersection with the ground (in km, +E).
-            p0[2]: [float] Time when the trajectory was at point (p0, y0), referent to the referent time 
+            p0[2]: [float] Time when the trajectory was at point (p0, y0), reference to the reference time 
                 (seconds).
             p0[3]: [float] Velocity of the fireball (km/s).
             p0[4]: [float] Initial azimuth (+E of due south) of the fireball (radians).
@@ -427,9 +427,9 @@ def estimateSeismicTrajectoryAzimuth(station_list, v_sound, p0=None, azim_range=
 
         # Initial parameter
         # Initial point (km)
-        # X direction (south positive) from the referent station
+        # X direction (south positive) from the reference station
         p0[0] = 0
-        # Y direction (east positive) from the referent station
+        # Y direction (east positive) from the reference station
         p0[1] = 0
 
         # Set the time of the wave release to 1 minute (about 20km at 320 m/s)
@@ -692,13 +692,13 @@ def plotStationsAndTrajectory(station_list, params, v_sound, file_name):
     ax = fig.gca(projection='3d')
 
 
-    # # Plot the stations except the referent
+    # # Plot the stations except the reference
     # station_mask = np.ones(len(x), dtype=bool)
     # station_mask[ref_indx] = 0
     # ax.scatter(x[station_mask], y[station_mask], z[station_mask], c=stat_model_times_of_arrival[station_mask], \
     #     depthshade=0, cmap='viridis', vmin=0.00, vmax=toa_abs_max, edgecolor='k')
 
-    # # Plot the referent station
+    # # Plot the reference station
     # ax.scatter(x[ref_indx], y[ref_indx], z[ref_indx], c='k', zorder=5)
 
     # Plot the stations (the colors are observed - calculated residuasl)
@@ -814,7 +814,7 @@ def plotStationsAndTrajectory(station_list, params, v_sound, file_name):
     ### PLOT THE MAP ###
     ##########################################################################################################
 
-    # Extract coordinates of the referent station
+    # Extract coordinates of the reference station
     lat0, lon0, elev0 = station_list[ref_indx][1:4]
 
     # Calculate the coordinates of the trajectory intersection with the ground
@@ -1026,9 +1026,9 @@ if __name__ == "__main__":
     # # Initial parameters (Arkasnas fireball)
     # p0 = np.zeros(6)
     # # Initial point (km)
-    # # X direction (south positive) from the referent station
+    # # X direction (south positive) from the reference station
     # p0[0] = -18.1
-    # # Y direction (east positive) from the referent station
+    # # Y direction (east positive) from the reference station
     # p0[1] = -85.7
 
     # # Set the time of the wave release to 1 minute (about 20km at 320 m/s)
@@ -1077,9 +1077,9 @@ if __name__ == "__main__":
     # # Initial parameter (Japanese fireball)
     # p0 = np.zeros(6)
     # # Initial point (km)
-    # # X direction (south positive) from the referent station
+    # # X direction (south positive) from the reference station
     # p0[0] = -93
-    # # Y direction (east positive) from the referent station
+    # # Y direction (east positive) from the reference station
     # p0[1] = 207
 
     # # Set the time of the wave release to 1 minute (about 20km at 320 m/s)
@@ -1118,9 +1118,9 @@ if __name__ == "__main__":
     # # Initial parameters (Moravka)
     # p0 = np.zeros(6)
     # # Initial point (km)
-    # # X direction (south positive) from the referent station
+    # # X direction (south positive) from the reference station
     # p0[0] = 100
-    # # Y direction (east positive) from the referent station
+    # # Y direction (east positive) from the reference station
     # p0[1] = 0
 
     # # Set the time of the wave release to 1 minute (about 20km at 320 m/s)
@@ -1231,10 +1231,10 @@ if __name__ == "__main__":
         for site, w, time_data, waveform_data in zip(merged_sites, merged_wfdisc, merged_time, merged_waveform):
 
 
-            # Calculate the difference from the referent time
+            # Calculate the difference from the reference time
             t_diff = (w.begin_time - ref_time).total_seconds()
 
-            # Offset the time data to be in accordance with the referent time
+            # Offset the time data to be in accordance with the reference time
             time_data += t_diff
 
             # Plot the seismic data

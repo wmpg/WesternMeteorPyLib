@@ -7,7 +7,7 @@ import sys
 
 import numpy as np
 
-from Utils.Pickling import loadPickle
+from Utils.Pickling import loadPickle, savePickle
 from Trajectory.Trajectory import Trajectory
 from Trajectory.GuralTrajectory import GuralTrajectory
 from Trajectory.Orbit import calcOrbit
@@ -25,13 +25,19 @@ if __name__ == "__main__":
 
 
     # Directory which contains SimMet .pickle files
-    #shower_dir = os.path.abspath("../SimulatedMeteors/CAMO/2011Draconids")
+    #shower_dir = os.path.abspath("../SimulatedMeteors/EMCCD/2011Draconids")
+
+    shower_dir = os.path.abspath("../SimulatedMeteors/CAMO/2011Draconids_TEST")
+    #shower_dir = os.path.abspath("../SimulatedMeteors/CAMO/2012Perseids")
+
     #shower_dir = os.path.abspath("../SimulatedMeteors/Perfect_CAMO/2011Draconids")
     #shower_dir = os.path.abspath("../SimulatedMeteors/Perfect_CAMO/2011Draconids_TEST")
-    #shower_dir = os.path.abspath("../SimulatedMeteors/CAMO/2011Draconids_TEST")
-    #shower_dir = os.path.abspath("../SimulatedMeteors/CAMO/2011Draconids_TEST_nograv")
-    shower_dir = os.path.abspath("../SimulatedMeteors/SOMN_sim/2012Ursids")
+
+    #shower_dir = os.path.abspath("../SimulatedMeteors/SOMN_sim/2011Draconids")
     #shower_dir = os.path.abspath("../SimulatedMeteors/SOMN_precise_sim/LongFireball_grav")
+
+    #shower_dir = os.path.abspath("../SimulatedMeteors/CAMSsim/2011Draconids")
+    #shower_dir = os.path.abspath("../SimulatedMeteors/CAMSsim/2012Perseids")
 
     # Maximum time offset (seconds)
     t_max_offset = 1
@@ -41,8 +47,9 @@ if __name__ == "__main__":
 
 
     # Trajectory solvers
-    traj_solvers = ['planes', 'los', 'monte_carlo', 'gural0', 'gural1', 'gural2', 'gural3']
+    traj_solvers = ['planes', 'los', 'milig', 'monte_carlo', 'gural0', 'gural1', 'gural2', 'gural3']
     #traj_solvers = ['planes', 'los', 'monte_carlo']
+    #traj_solvers = ['milig']
 
 
     ##########################################################################################################
@@ -66,20 +73,17 @@ if __name__ == "__main__":
     # Solve generated trajectories
     for met_no, sim_met in enumerate(sim_meteor_list):
 
-
         # Directory where trajectory results will be saved
         output_dir = os.path.join(shower_dir, "{:03d} - {:.6f}".format(met_no, sim_met.jdt_ref))
 
-
         # Save info about the simulated meteor
         sim_met.saveInfo(output_dir)
-
 
         # Solve the simulated meteor with multiple solvers
         for traj_solver in traj_solvers:
 
 
-            if (traj_solver == 'los') or (traj_solver == 'planes'):
+            if (traj_solver == 'los') or (traj_solver == 'planes') or (traj_solver == 'milig'):
 
                 # Init the trajectory (LoS or intersecing planes)
                 traj = Trajectory(sim_met.jdt_ref, output_dir=output_dir, max_toffset=t_max_offset, \
@@ -145,7 +149,22 @@ if __name__ == "__main__":
 
                 # Calculate the orbit
                 traj.orbit = calcOrbit(traj.avg_radiant, v_init_fh, traj.v_avg, traj.state_vect_avg, \
-                    traj.jd_avg, stations_fixed=True, referent_init=False)
+                    traj.jd_avg, stations_fixed=True, reference_init=False)
+
+
+                # Save the intersecting planes solution
+                savePickle(traj, output_dir, traj.file_name + '_planes.pickle')
+
+
+            # Calculate the orbit as MILIG does it, with the average velocity
+            elif traj_solver == 'milig':
+
+                # Calculate the orbit with the average velocity
+                traj.orbit = calcOrbit(traj.radiant_eci_mini, traj.v_avg, traj.v_avg, traj.state_vect_mini, \
+                    traj.rbeg_jd, stations_fixed=False, reference_init=False)
+
+                # Save the simulated milig solution
+                savePickle(traj, output_dir, traj.file_name + '_milig.pickle')
 
 
             if 'gural' in traj_solver:

@@ -203,12 +203,20 @@ if __name__ == "__main__":
     # node   = 298.851272
 
 
-    # 20170923 meteorite dropper
-    q      =   0.978776
-    e      =   0.576897
-    incl   =   2.823131
-    peri   = 202.247996
-    node   = 180.337617
+    # # 20170923 meteorite dropper
+    # q      =   0.978776
+    # e      =   0.576897
+    # incl   =   2.823131
+    # peri   = 202.247996
+    # node   = 180.337617
+
+
+    # 20180117 Michigan fireball
+    q      =   0.929614
+    e      =   0.645998
+    incl   =   0.862916
+    peri   = 210.803526
+    node   = 296.539520
 
 
     ##########################################################################################################
@@ -223,3 +231,187 @@ if __name__ == "__main__":
     print('Name                ,   q,     e,    incl,   peri,   node,   D crit', d_crit_type)
     for entry in parent_matches:
         print("{:20s}, {:.3f}, {:.3f}, {:5.2f}, {:7.3f}, {:7.3f}, {:.3f}".format(*entry))
+
+
+
+
+
+    # ##########################################################################################################
+
+    # ### Plot orbits of all JFCs
+    # from Utils.PlotOrbits import plotOrbits
+    # import datetime
+
+    # # Get orbital elements of comets
+    # orbit_list = []
+
+    # count = 0
+
+    # for entry in comets_elements:
+
+    #     comet_name, q, e, incl, peri, node = entry
+
+    #     if e >= 1.0:
+    #         continue
+
+    #     a = q/(1.0 - e)
+
+
+    #     # Take only short period comets
+    #     if a > 34:
+    #         continue
+
+    #     orbit_list.append([a, e, incl, peri, node])
+
+    #     count += 1
+
+    #     # Limit the number of plotted objects
+    #     if count > 4000:
+    #         break
+
+    # orbit_list = np.array(orbit_list)
+
+    # orb_time = datetime.datetime.now()
+
+    # plt = plotOrbits(orbit_list, orb_time, linewidth=0.2, color_scheme='dark')
+
+    # plt.show()
+
+
+    # ##########################################################################################################
+
+    # ### Plot orbits of all KBOs
+    # from Utils.PlotOrbits import plotOrbits
+    # import datetime
+
+    # # Load a list of KBOs
+    # #file_path = "C:\Users\delorayn1\Desktop\distant_extended.dat"
+    # file_path = "/home/dvida/Desktop/distant_extended.dat"
+    # with open(file_path) as f:
+    #     kbos_elements = []
+
+    #     for line in f:
+    #         line = line.split()
+
+    #         peri = float(line[5])
+    #         node = float(line[6])
+    #         incl = float(line[7])
+    #         e = float(line[8])
+
+    #         try:
+    #             a = float(line[10])
+
+    #         except:
+    #             continue
+
+    #         kbos_elements.append([a, e, incl, peri, node])
+    
+
+
+    # # Get orbital elements of KBOs
+    # orbit_list = []
+
+    # count = 0
+
+    # for entry in kbos_elements:
+
+    #     a, e, incl, peri, node = entry
+
+    #     if e >= 1.0:
+    #         continue
+
+
+    #     # Take only TNOs
+    #     if (a < 30) or (a > 55):
+    #         continue
+
+    #     orbit_list.append([a, e, incl, peri, node])
+
+    #     count += 1
+
+    #     # Limit the number of plotted objects
+    #     if count > 5000:
+    #         break
+
+    # orbit_list = np.array(orbit_list)
+
+    # orb_time = datetime.datetime.now()
+
+    # # Plot KBOs
+    # plt = plotOrbits(orbit_list, orb_time, linewidth=0.1, color_scheme='dark', figsize=(20, 20))
+
+
+
+
+    # # Get orbital elements of Centaurs
+    # orbit_list = []
+
+    # count = 0
+
+    # for entry in kbos_elements:
+
+    #     a, e, incl, peri, node = entry
+
+    #     if e >= 1.0:
+    #         continue
+
+
+    #     # Take only Centaurs
+    #     if (a > 30):
+    #         continue
+
+    #     orbit_list.append([a, e, incl, peri, node])
+
+    #     count += 1
+
+    #     # Limit the number of plotted objects
+    #     if count > 5000:
+    #         break
+
+
+    # orbit_list = np.array(orbit_list)
+
+    # orb_time = datetime.datetime.now()
+
+    # # Plot Centaurs
+    # plt = plotOrbits(orbit_list, orb_time, linewidth=0.4, color_scheme='dark', orbit_colors=['#2072e3']*len(orbit_list), plt_handle=plt)
+
+
+
+    # # Get orbital elements of comets
+    # orbit_list = []
+
+    # count = 0
+
+    # for entry in comets_elements:
+
+    #     comet_name, q, e, incl, peri, node = entry
+
+    #     if e >= 1.0:
+    #         continue
+
+    #     a = q/(1.0 - e)
+
+
+    #     # Take only short period comets
+    #     if a > 34:
+    #         continue
+
+    #     orbit_list.append([a, e, incl, peri, node])
+
+    #     count += 1
+
+    #     # Limit the number of plotted objects
+    #     if count > 4000:
+    #         break
+
+    # orbit_list = np.array(orbit_list)
+
+    # orb_time = datetime.datetime.now()
+
+    # plt = plotOrbits(orbit_list, orb_time, linewidth=0.05, color_scheme='dark', orbit_colors=['r']*len(orbit_list), plt_handle=plt)
+
+
+
+
+    # plt.show()

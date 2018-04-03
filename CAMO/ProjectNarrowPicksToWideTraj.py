@@ -150,7 +150,7 @@ def projectNarrowPicks(met, traj):
         length_list = []
         decel_list = []
 
-        # Go through all fragments and calculate the length from the referent point
+        # Go through all fragments and calculate the length from the reference point
         for frag in fragments:
 
             # Select only the data points of the current fragment
@@ -291,8 +291,8 @@ def projectNarrowPicks(met, traj):
             
 
 
-        # Plot referent time
-        plt.title('Referent time: ' + str(jd2Date(jd_ref, dt_obj=True)))
+        # Plot reference time
+        plt.title('reference time: ' + str(jd2Date(jd_ref, dt_obj=True)))
 
         plt.gca().invert_yaxis()
         plt.grid(color='0.9')
@@ -415,8 +415,8 @@ def projectNarrowPicks(met, traj):
 
 
 
-        # Plot referent time
-        plt.title('Referent time: ' + str(jd2Date(jd_ref, dt_obj=True)))
+        # Plot reference time
+        plt.title('reference time: ' + str(jd2Date(jd_ref, dt_obj=True)))
 
         plt.xlabel('Dynamic pressure (kPa)')
         plt.ylabel('Height (km)')

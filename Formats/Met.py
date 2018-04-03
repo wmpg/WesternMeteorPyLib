@@ -646,15 +646,15 @@ def solveTrajectoryMet(met, solver='original', velmodel=3, **kwargs):
             phi_data[site] = np.array(phi_picks).ravel()
 
 
-        # Take the earliest time of all sites as the referent time
+        # Take the earliest time of all sites as the reference time
         ref_unix_time = min([time_data[key][0] for key in time_data.keys()])
 
-        # Normalize all times with respect to the referent times
+        # Normalize all times with respect to the reference times
         for site in met.sites:
             time_data[site] = time_data[site] - ref_unix_time
 
 
-        # Convert the referent Unix time to Julian date
+        # Convert the reference Unix time to Julian date
         ts = int(ref_unix_time)
         tu = (ref_unix_time - ts)*1e6
         ref_JD = unixTime2JD(ts, tu)
@@ -712,8 +712,8 @@ if __name__ == "__main__":
     #dir_path = "../MetalPrepare/20161007_052749_met"
     #dir_path = "../MetalPrepare/20161007_052346_met"
     #dir_path = "/home/dvida/Dropbox/UWO Master's/Projects/MetalPrepare/20170721_070420_met"
-    #dir_path = "../MetalPrepare/20170721_070420_met_TEST"
-    dir_path = "/home/dvida/Desktop/ev_20171026_081339A"
+    dir_path = "../MetalPrepare/20170721_070420_met_TEST"
+    #dir_path = "/home/dvida/Desktop/ev_20171026_081339A"
 
     # Name of the met file
     file_name = 'state.met'

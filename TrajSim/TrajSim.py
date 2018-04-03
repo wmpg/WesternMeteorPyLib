@@ -26,7 +26,7 @@ def geocentricRadiantToApparent(ra_g, dec_g, v_g, state_vector, jd_ref):
         dec_g: [float] Geocentric declination (radians).
         v_g: [float] Geocentric velocity (m/s).
         state_vector: [ndarray of 3 elemens] (x, y, z) ECI coordinates of the initial state vector (meters).
-        jd_ref: [float] Referent Julian date of the event.
+        jd_ref: [float] reference Julian date of the event.
 
     Return:
         (ra_a, dec_a, v_init): [list]
@@ -44,12 +44,12 @@ def geocentricRadiantToApparent(ra_g, dec_g, v_g, state_vector, jd_ref):
 
         # Estimate the orbit with the given apparent radiant
         orbit = calcOrbit(radiant_eci, v_init, v_init, state_vector, jd_ref, stations_fixed=False, \
-            referent_init=True)
+            reference_init=True)
 
         if orbit.ra_g is None:
             return None
 
-        # Compare the difference between the calculated and the referent geocentric radiant
+        # Compare the difference between the calculated and the reference geocentric radiant
         return angleBetweenSphericalCoords(orbit.dec_g, orbit.ra_g, dec_g, ra_g)
 
 
@@ -64,7 +64,7 @@ def geocentricRadiantToApparent(ra_g, dec_g, v_g, state_vector, jd_ref):
 
     # Calculate all orbital parameters with the best estimation of apparent RA and Dec
     orb = calcOrbit(np.array(raDec2ECI(ra_a, dec_a)), v_init, v_init, state_vector, jd_ref, stations_fixed=False, \
-            referent_init=True)
+            reference_init=True)
 
     return ra_a, dec_a, v_init, orb
 
@@ -87,7 +87,7 @@ if __name__ == "__main__":
     #          1: -0.004239 s
     #          2: 0.000000 s
 
-    # Referent point on the trajectory:
+    # reference point on the trajectory:
     #   Time: 2012-12-13 00:18:05.413143 UTC
     #   Lon   = -81.494888 +/- 0.0441 deg
     #   Lat   =  43.782497 +/- 0.0905 deg
@@ -114,7 +114,7 @@ if __name__ == "__main__":
     # ECI coordinates of the inital state vector
     state_vector = np.array([4663824.46, 417867.46, 4458026.80])
 
-    # Referent Julian date
+    # reference Julian date
     jd_ref = date2JD(2012, 12, 13, 0, 18, 5)
 
 

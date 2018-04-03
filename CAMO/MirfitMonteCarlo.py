@@ -743,15 +743,15 @@ class MonteCarloPicks(object):
             phi_data[site] = np.array(phi_picks).ravel()
 
 
-        # Take the earliest time of all sites as the referent time
+        # Take the earliest time of all sites as the reference time
         ref_unix_time = min([time_data[key][0] for key in time_data.keys()])
 
-        # Normalize all times with respect to the referent times
+        # Normalize all times with respect to the reference times
         for site in self.met.sites:
             time_data[site] = time_data[site] - ref_unix_time
 
 
-        # Convert the referent Unix time to Julian date
+        # Convert the reference Unix time to Julian date
         ts = int(ref_unix_time)
         tu = (ref_unix_time - ts)*1e6
         ref_JD = unixTime2JD(ts, tu)

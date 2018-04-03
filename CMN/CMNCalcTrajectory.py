@@ -23,7 +23,7 @@ if __name__ == "__main__":
 		observations.append(loadINF(os.path.join(dir_path, file_name)))
 
 
-	# Get the referent JD from the first site
+	# Get the reference JD from the first site
 	jdt_ref = observations[0].jd_data[0]
 
 	max_first = 0

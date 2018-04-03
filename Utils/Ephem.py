@@ -26,12 +26,12 @@ def astronomicalNight(night_dt, lat, lon, elevation):
             - night_end: [datetime object] End of the astronomical night.
     """
 
-    # If the given date is before noon (meaning it is after midnight), use the referent date will be the 
+    # If the given date is before noon (meaning it is after midnight), use the reference date will be the 
     # previous day's noon
     if night_dt.hour < 12:
         night_dt = night_dt - datetime.timedelta(days=1)
         
-    # Use the current nooon as the referent time for calculating next sunrise/sunset
+    # Use the current nooon as the reference time for calculating next sunrise/sunset
     night_dt = datetime.datetime(night_dt.year, night_dt.month, night_dt.day, 12, 0, 0)
 
     # Convert geo coordinates to degrees

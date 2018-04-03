@@ -15,7 +15,7 @@ from Utils.Pickling import loadPickle
 from Utils.TrajConversions import unixTime2Date, unixTime2JD
 
 
-def markFragments(out_dir, vid, met, site_id, traj=None):
+def markFragments(out_dir, vid, met, site_id, traj=None, crop=None):
     """ Mark fragments on .vid file frames and save them as images. If the trajectory structure is given,
         the approximate height at every frame will be plotted on the image as well.
     
@@ -29,6 +29,7 @@ def markFragments(out_dir, vid, met, site_id, traj=None):
         traj: [Trajectory object] Optional trajectory object from which the height of the meteor at evey frame
             will be estimated and plotted on the image. None by default (no height will be plotted on the
             image).
+        crop: [list] A list of Xmin, Xmax, Ymin, Ymax crop window.
 
     Return:
         None
@@ -103,11 +104,45 @@ def markFragments(out_dir, vid, met, site_id, traj=None):
     # Go through all frames
     for i, fr_vid in enumerate(vid.frames):
 
+
+        # Determine crop
+        if crop is not None:
+            xmin, xmax, ymin, ymax = crop
+
+            if xmin == None:
+                xmin = 0
+
+            if xmax == None:
+                xmax = fr_vid.wid
+
+            if ymin == None:
+                ymin = 0
+
+            if ymax == None:
+                ymax == fr_vid.ht
+
+
+        else:
+            xmin, ymin = 0, 0
+            xmax, ymax = fr_vid.wid, fr_vid.ht
+
+
+
+        # LIMIT FRAMES
         if (i < 218) or (i > 512):
             continue
 
+
+        # CROP IMAGE
+        if crop is not None:
+            img = fr_vid.img_data[ymin:ymax, xmin:xmax]
+        
+        else:
+            img = fr_vid.img_data
+
+
         # Plot the frame
-        plt.imshow(fr_vid.img_data, cmap='gray', vmin=0, vmax=255, interpolation='bicubic')
+        plt.imshow(img, cmap='gray', vmin=0, vmax=255, interpolation='nearest')
 
 
         # Convert the frame time from UNIX timestamp to human readable format
@@ -119,7 +154,7 @@ def markFragments(out_dir, vid, met, site_id, traj=None):
 
 
         # Plot the timestamp
-        plt.text(10, fr_vid.ht - 10, timestamp, ha='left', va='bottom', color='0.7', size=10)
+        plt.text(10, ymax - 10, timestamp, ha='left', va='bottom', color='0.7', size=10)
 
 
         # If the trajectory was given, plot the meteor height at every frame
@@ -131,7 +166,7 @@ def markFragments(out_dir, vid, met, site_id, traj=None):
             height_str = 'Height = {:7.3f} km'.format(frame_height/1000)
 
             # Plot the height
-            plt.text(fr_vid.wid - 10, fr_vid.ht - 10, height_str, ha='right', va='bottom', color='0.7', size=10)
+            plt.text(img.shape[1] - 10, img.shape[0] - 10, height_str, ha='right', va='bottom', color='0.7', size=10)
 
 
         # Hide axes
@@ -152,9 +187,9 @@ def markFragments(out_dir, vid, met, site_id, traj=None):
                 # Choose the appropriate colour by fragment
                 frag_color = colors_frags[pick[1]]
 
-                # Extract pick coordinates
-                cx = pick[2]
-                cy = pick[3]
+                # Extract pick coordinates and apply crop
+                cx = pick[2] - xmin
+                cy = pick[3] - ymin
 
                 # Extract fragment number
                 frag = pick[1]
@@ -189,8 +224,8 @@ def markFragments(out_dir, vid, met, site_id, traj=None):
         
 
         # Set limits
-        plt.xlim([0, vid.wid])
-        plt.ylim([vid.ht, 0])
+        plt.xlim([0, img.shape[1]])
+        plt.ylim([img.shape[0], 0])
 
         # Save the plot
         extent = plt.gca().get_window_extent().transformed(plt.gcf().dpi_scale_trans.inverted())
@@ -211,7 +246,7 @@ if __name__ == "__main__":
 
 
     # Main directory
-    dir_path = "/home/dvida/Dropbox/UWO Master's/Projects/MetalPrepare/20170721_070420_met"
+    dir_path = "../MetalPrepare/20170721_070420_met"
 
     # Output directory
     out_dir = os.path.join(dir_path, 'marked_frames')
@@ -241,4 +276,4 @@ if __name__ == "__main__":
     site_id = '1'
 
     # Generate images with marked fragments on them
-    markFragments(out_dir, vid, met, site_id, traj=traj)
+    markFragments(out_dir, vid, met, site_id, traj=traj, crop=[175, None, None, 340])

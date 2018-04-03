@@ -743,7 +743,7 @@ class GuralTrajectory(object):
                 # Calculate closest points of approach (observed line of sight to radiant line)
                 obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, self.state_vect, self.radiant_eci)
 
-                # Take the position of the first point as the referent point
+                # Take the position of the first point as the reference point
                 if i == 0:
                     ref_point = np.copy(rad_cpa)
 
@@ -1063,7 +1063,7 @@ class GuralTrajectory(object):
 
         # Calculate the orbit
         self.orbit = calcOrbit(self.radiant_eci, self.vbegin*1000, v_avg, self.state_vect, jd_first, 
-            stations_fixed=False, referent_init=True)
+            stations_fixed=False, reference_init=True)
         print(self.orbit)
 
 
@@ -1097,7 +1097,7 @@ if __name__ == "__main__":
     ### TEST DATA
     maxcameras = 2
 
-    # Referent julian date
+    # reference julian date
     jdt_ref = 2457660.770667
 
     # Velocity model type

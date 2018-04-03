@@ -263,7 +263,7 @@ class OrbitPlotColorScheme(object):
 
 
 def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_equinox=True, save_plots=False, 
-    plot_path=None, plt_handle=None, color_scheme='dark', **kwargs):
+    plot_path=None, plt_handle=None, color_scheme='dark', figsize=None, dpi=None, **kwargs):
     """ Plot the given orbits in the Solar System. 
 
     Arguments:
@@ -276,15 +276,19 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_eq
         time: [float] datetime object of the moment of planet positions.
 
     Keyword Arguments:
-        orbit_colors: [list] A list of size orb_elements.shape[0] containing color strings for every planet 
-            orbit.
+        orbit_colors: [list] A list of size orb_elements.shape[0] containing color strings for every orbit.
         plot_planets: [bool] If True, planets will be plotted. True by default.
         plot_equinox: [bool] Plots an arrow pointing to the vernal equinox if True. True by default.
         save_plots: [bool] If True, plots will be saved to the given path under plot_path. False by default.
         plot_path: [bool] File name and the full path where the plots will be saved if save_plots == True.
         plt_handle: [matplotlib plt handle] Pass the plot handle if some orbits need to be added to the plot.
         color_scheme: [str] 'dark' or 'light'. Dark by default.
+        figsize: [tuple] Size in inches per every dimension (None by default).
+        dpi: [int] Dots per inch (None by default).
         **kwargs: [dict] Extra keyword arguments which will be passes to the orbit plotter.
+
+    Return:
+        plt: [matplotlib.pyplot object]
         
     """
 
@@ -311,7 +315,7 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_eq
     if plt_handle is None:
 
         # Setup the plot
-        fig = plt.figure()
+        fig = plt.figure(dpi=dpi)
         ax = fig.gca(projection='3d', axisbg=cs.background)
 
         # Set a constant aspect ratio

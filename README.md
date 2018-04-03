@@ -34,7 +34,13 @@ After cloning/downloading this library, navigate into it with a terminal and run
 python setup.py install
 ```
 
-This should install most of the libraries you need. You may have issues with basemap, in that case run:
+This should install most of the libraries you need. You may have issues with basemap, in that case you'll need to have the GEOS library installed:
+
+```
+sudo apt-get install libgeos-3* libgeos-c1v5 libgeos-dev
+```
+
+After which install basemap:
 
 ```
 pip install https://github.com/matplotlib/basemap/archive/v1.1.0.tar.gz

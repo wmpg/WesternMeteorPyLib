@@ -110,8 +110,11 @@ if __name__ == "__main__":
     # dir_path = os.path.abspath("../SimulatedMeteors/CAMO_OLD/Perseids/2456150.7563")
     # file_name = "20120811_060904_trajectory.pickle"
 
-    dir_path = os.path.abspath("/home/dvida/Desktop/test/012 - 2455896.500000")
-    file_name = "20111201_000000_trajectory.pickle"
+    dir_path = os.path.abspath("../SimulatedMeteors/CAMO/2011Draconids/023 - 2455843.361897")
+    file_name = "20111008_204107_trajectory.pickle"
+
+    #dir_path = os.path.abspath("/home/dvida/Desktop/test/012 - 2455896.500000")
+    #file_name = "20111201_000000_trajectory.pickle"
 
 
     # # Dump the pickled trajectory as UWO-style ev_* file 

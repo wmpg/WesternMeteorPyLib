@@ -42,7 +42,7 @@ class MeteorObservation(object):
         """ Adds the measurement point to the meteor.
 
         Arguments:
-            frame_n: [flaot] Frame number from the referent time.
+            frame_n: [flaot] Frame number from the reference time.
             azim: [float] Azimuth, J2000 in degrees.
             elev: [float] Elevation angle, J2000 in degrees.
             ra: [float] Right ascension, J2000 in degrees.
@@ -50,7 +50,7 @@ class MeteorObservation(object):
 
         """
 
-        # Calculate the time in seconds w.r.t. to the referent JD
+        # Calculate the time in seconds w.r.t. to the reference JD
         point_time = frame_n/self.fps
 
         self.time_data.append(point_time)
@@ -170,7 +170,14 @@ def loadCameraSites(camerasites_file_name):
 
                 station_id, lat, lon, height = line[:4]
 
-                station_id = station_id
+                station_id = station_id.strip()
+
+                # Try converting station ID to integer
+                try:
+                    station_id = int(station_id)
+                except:
+                    pass
+
                 lat, lon, height = map(float, [lat, lon, height])
 
                 stations[station_id] = [np.radians(lat), np.radians(-lon), height*1000]
@@ -246,7 +253,7 @@ def loadFTPDetectInfo(ftpdetectinfo_file_name, stations, time_offsets=None):
                 # Mark that the next line is the calibration file name
                 cal_name = True
 
-                # Extract the referent time from the FF bin file name
+                # Extract the reference time from the FF bin file name
                 line = line.split('_')
 
                 # Count the number of string segments, and determine if it the old or new CAMS format
@@ -270,7 +277,7 @@ def loadFTPDetectInfo(ftpdetectinfo_file_name, stations, time_offsets=None):
                 year, month, day, hour, minute, seconds, milliseconds = map(int, [year, month, day, hour, 
                     minute, seconds, milliseconds])
 
-                # Calculate the referent JD time
+                # Calculate the reference JD time
                 jdt_ref = date2JD(year, month, day, hour, minute, seconds, milliseconds)
 
                 continue
@@ -295,6 +302,12 @@ def loadFTPDetectInfo(ftpdetectinfo_file_name, stations, time_offsets=None):
                 # Get the station ID and the FPS from the meteor header
                 station_id = line[0].strip()
                 fps = float(line[3])
+
+                # Try converting station ID to integer
+                try:
+                    station_id = int(station_id)
+                except:
+                    pass
 
                 # If the time offsets were given, apply the correction to the JD
                 if time_offsets is not None:
@@ -349,7 +362,7 @@ def loadFTPDetectInfo(ftpdetectinfo_file_name, stations, time_offsets=None):
 
 
 def prepareObservations(meteor_list):
-    """ Takes a list of MeteorObservation objects, normalizes all data points to the same referent Julian 
+    """ Takes a list of MeteorObservation objects, normalizes all data points to the same reference Julian 
         date, precesses the observations from J2000 to the epoch of date. 
     
     Arguments:
@@ -357,7 +370,7 @@ def prepareObservations(meteor_list):
 
     Return:
         (jdt_ref, meteor_list):
-            - jdt_ref: [float] Referent Julian date for which t = 0
+            - jdt_ref: [float] reference Julian date for which t = 0
             - meteor_list: [list] A list a MeteorObservations whose time is normalized to jdt_ref, and are
                 precessed to the epoch of date
 
@@ -365,7 +378,7 @@ def prepareObservations(meteor_list):
 
     if meteor_list:
 
-        # The first meteor is the referent one, normalize the first point to have t = 0, and set the JD to 
+        # The first meteor is the reference one, normalize the first point to have t = 0, and set the JD to 
         # that point
         ref_ind = 0
         tsec_delta = meteor_list[ref_ind].time_data[0] 
@@ -374,7 +387,7 @@ def prepareObservations(meteor_list):
 
         ### Normalize all times to the beginning of the first meteor
 
-        # Apply the normalization to the referent meteor
+        # Apply the normalization to the reference meteor
         meteor_list[ref_ind].jdt_ref += jdt_delta
         meteor_list[ref_ind].time_data -= tsec_delta
 
@@ -383,14 +396,14 @@ def prepareObservations(meteor_list):
 
         for i, meteor in enumerate(meteor_list):
 
-            # Only correct non-referent meteors
+            # Only correct non-reference meteors
             if i != ref_ind:
 
-                # Calculate the difference between the referent and the current meteor
+                # Calculate the difference between the reference and the current meteor
                 jdt_diff = meteor.jdt_ref - meteor_list[ref_ind].jdt_ref
                 tsec_diff = jdt_diff*86400.0
 
-                # Normalize all meteor times to the same referent time
+                # Normalize all meteor times to the same reference time
                 meteor.jdt_ref -= jdt_diff
                 meteor.time_data += tsec_diff
 
@@ -398,7 +411,7 @@ def prepareObservations(meteor_list):
 
         ######
 
-        # The referent JD for all meteors is thus the referent JD of the first meteor
+        # The reference JD for all meteors is thus the reference JD of the first meteor
         jdt_ref = meteor_list_tcorr[ref_ind].jdt_ref
 
 
@@ -436,7 +449,7 @@ def solveTrajectoryCAMS(meteor_list, output_dir, solver='original', **kwargs):
     """ Feed the list of meteors in the trajectory solver. """
 
 
-    # Normalize the observations to the same referent Julian date and precess them from J2000 to the 
+    # Normalize the observations to the same reference Julian date and precess them from J2000 to the 
     # epoch of date
     jdt_ref, meteor_list = prepareObservations(meteor_list)
 
@@ -497,7 +510,7 @@ def cams2MiligInput(meteor_list, file_path):
         None
     """
 
-    # Normalize the observations to the same referent Julian date and precess them from J2000 to the 
+    # Normalize the observations to the same reference Julian date and precess them from J2000 to the 
     # epoch of date
     jdt_ref, meteor_list = prepareObservations(meteor_list)
 

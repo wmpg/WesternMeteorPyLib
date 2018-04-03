@@ -131,7 +131,7 @@ def stationsCommonVolume(station_list, fixed_cameras, jd, max_height, min_height
 
 #         return station_list
 
-#     # Use the current Julian date as the referent time (this is just used to convert the coordinated to ECI,
+#     # Use the current Julian date as the reference time (this is just used to convert the coordinated to ECI,
 #     # it has no operational importance whatsoever).
 #     jd = datetime2JD(datetime.datetime.now())
 
@@ -176,7 +176,7 @@ def explorePointings(station_list, fixed_cameras, min_height, max_height, moving
 
     k = 0
 
-    # Use the current Julian date as the referent time (this is just used to convert the coordinated to ECI,
+    # Use the current Julian date as the reference time (this is just used to convert the coordinated to ECI,
     # it has no operational importance whatsoever).
     jd = datetime2JD(datetime.datetime.now())
 

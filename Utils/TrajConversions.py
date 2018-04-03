@@ -666,8 +666,8 @@ def cartesian2Geo(julian_date, x, y, z, precess_j2000=False):
     
     Return:
         (lon, lat, ele): [tuple of floats]
-            lon: longitude of the point in radians
-            lat: latitude of the point in radians
+            lat: longitude of the point in radians
+            lon: latitude of the point in radians
             ele: elevation in meters
     """
 
