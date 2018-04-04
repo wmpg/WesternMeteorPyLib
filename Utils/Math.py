@@ -312,6 +312,100 @@ def findClosestPoints(P, u, Q, v):
 
 
 
+def lineAndSphereIntersections(centre, radius, origin, direction):
+    """ Finds intersections between a sphere of given radius and coordiantes of the centre and a line
+        defined by an origin and a direction vector.
+
+    Source: http://www.lighthouse3d.com/tutorials/maths/ray-sphere-intersection/
+    
+    Argument:
+        centre: [3 element ndarray] Coordinates of the centre of the sphere.
+        radius: [float] Radius of the sphere.
+        origin: [3 element ndarray] Coordinates of the origin of the line.
+        direction: [3 element ndarray] 3D direction vector of the line
+
+    Return:
+        [list] A list of intersections, every intersections is a 3 element ndarray.
+    """
+
+    intersection_list = []
+
+
+    # Make sure the direction is a unit vector
+    direction = vectNorm(direction)
+
+    # Vector pointing from the origin of the line to the centre of the sphere
+    v = centre - origin
+
+    # Projection of the centre on the line
+    pc = origin + np.dot(direction, v)/vectMag(direction)*direction
+
+    
+    # No solutions
+    if vectMag(centre - pc) > radius:
+
+        # No intersection
+        return intersection_list
+
+
+    # Check if the line is only skimming the sphere
+    elif vectMag(centre - pc) == radius:
+
+        intersection_list.append(pc)
+
+        return intersection_list
+
+
+    # There are 2 solutions
+    else:
+
+        # Check if the sphere is behind the origin
+        if np.dot(v, direction) < 0:
+
+            # Distance from the projection to the intersection
+            dist = np.sqrt(radius**2 - vectMag(pc - centre)**2)
+            
+            # Intersection at the front
+            dil = dist - vectMag(pc - origin)
+            intersection = origin + direction*dil
+
+            intersection_list.append(intersection)
+
+
+            # Intersection at the back
+            dil = dist + vectMag(pc - origin)
+            intersection = origin - direction*dil
+
+            intersection_list.append(intersection)
+
+            return intersection_list
+
+
+        # If the sphere is in front of the origin
+        else:
+
+
+            # Distance from the projection to the intersection
+            dist = np.sqrt(radius**2 - vectMag(pc - centre)**2)
+
+            
+            # Intersection at the front
+            dil = vectMag(pc - origin) - dist
+            intersection = origin + direction*dil
+
+            intersection_list.append(intersection)
+
+            # Intersection at the back
+            dil = vectMag(pc - origin) + dist
+            intersection = origin + direction*dil
+
+            intersection_list.append(intersection)
+
+
+            return intersection_list
+
+
+
 
 def pointInsidePolygon(x, y, poly):
     """ Checks if the given point (x, y) is inside a polygon. 
