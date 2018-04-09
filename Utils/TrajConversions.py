@@ -515,7 +515,7 @@ def geo2Cartesian(lat_rad, lon_rad, h, julian_date, precess_j2000=False):
     # Calculate the geocentric latitude (latitude which considers the Earth as an elipsoid)
     lat_geocentric = math.atan2(ecef_z, math.sqrt(ecef_x**2 + ecef_y**2))
 
-    # Calculate Cartesian ECI coordinates (in meters), at epoch of date
+    # Calculate Cartesian ECI coordinates (in meters), in the epoch of date
     x = Rh*np.cos(lat_geocentric)*np.cos(LST_rad)
     y = Rh*np.cos(lat_geocentric)*np.sin(LST_rad)
     z = Rh*np.sin(lat_geocentric)

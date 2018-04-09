@@ -3185,7 +3185,7 @@ class Trajectory(object):
             out_str += "\n"
 
 
-        out_str += "Timing offsets:\n"
+        out_str += "Timing offsets (from input data):\n"
         for stat_id, t_diff in zip([obs.station_id for obs in self.observations], self.time_diffs_final):
             out_str += "{:>10s}: {:.6f} s\n".format(str(stat_id), t_diff)
 
@@ -3350,6 +3350,7 @@ class Trajectory(object):
 
         out_str += "Notes\n"
         out_str += "-----\n"
+        out_str += "- The time already has time offsets applied to it.\n"
         out_str += "- 'meas1' and 'meas2' are given input points.\n"
         out_str += "- X, Y, Z are ECI (Earth-Centered Inertial) positions of projected lines of sight on the radiant line.\n"
         out_str += "- Zc is the observed zenith distance of the entry angle, while the Zg is the entry zenith distance corrected for Earth's gravity.\n"
@@ -4479,8 +4480,6 @@ class Trajectory(object):
             # Save and show plots
             self.savePlots(self.output_dir, self.file_name, \
                 show_plots=(self.show_plots and not self.monte_carlo))
-
-            
             
 
         ######################################################################################################

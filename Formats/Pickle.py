@@ -97,8 +97,8 @@ def solveTrajectory(dir_path, file_name, solver='original', **kwargs):
     traj.run()
 
 
-
     return traj
+
 
 
 
