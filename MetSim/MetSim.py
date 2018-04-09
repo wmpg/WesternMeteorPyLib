@@ -477,8 +477,14 @@ def lumIntensity(met, consts, m_dot, vdot):
 
 
 
-def ablate(met, consts):
-    """ Ablate the main mass. """
+def ablate(met, consts, no_atmosphere_end_ht=-1):
+    """ Ablate the main mass. 
+        
+    Keyword arguments:
+        no_atmosphere_end_ht: [float] If > 0, a no-atmosphere solution will be computed, meaning that the meteoroid
+            will not be ablated. The number that is given is the height in meters at which the simulation 
+            will stop.
+    """
 
     # Calculate atmospheric parameters
     rho_atm = atmDensity(met.h, consts)
@@ -545,6 +551,8 @@ def ablate(met, consts):
 
 
     # Integrations are a 4th order Runge-Kutta
+
+    # Compute the mass loss
     m_dot = massLoss(met, consts, rho_atm);
 
     printd('m_dot', m_dot)
@@ -580,6 +588,12 @@ def ablate(met, consts):
 
     # Decelaration in m/s**2
     a_current = (qa1/6.0 + qa2/3.0 + qa3/3.0 + qa4/6.0)/consts.dt
+
+
+    # If a no atmosphere solution is computed, the deceleration will not happen
+    if no_atmosphere_end_ht > 0:
+        a_current = 0.0
+        m_dot = 0.0
 
     printd('a_current', a_current)
 
@@ -686,10 +700,17 @@ def ablate(met, consts):
         met.m_kill = met.m
 
 
+    # Stop ablating if the mass is below the minimum mass of a particle
     if (met.m <= met.m_kill):
 
         # No longer ablates
         met.Fl_ablate = 0
+
+
+    # Stop ablating if the no-atmosphere solution is computed and the height drops below the given height
+    if no_atmosphere_end_ht > 0:
+        if met.h <= no_atmosphere_end_ht:
+            met.Fl_ablate = 0
 
 
     # # Write results
@@ -718,7 +739,7 @@ def ablate(met, consts):
 
 
 
-def runSimulation(met, consts, lat=None, lon=None, jd_ref=None):
+def runSimulation(met, consts, lat=None, lon=None, jd_ref=None, no_atmosphere_end_ht=-1):
     """ Runs meteor ablation simulation with the given initial parameters. The location and time can be 
         provided as well, which will be used for calculating the atmosphere density at the given average 
         geodetic coordinates and Julian date. 
@@ -731,6 +752,9 @@ def runSimulation(met, consts, lat=None, lon=None, jd_ref=None):
         lat: [float] Geodetic latitude of the mean meteor path (radians).
         lon: [float] Geodetic longitude of the mean meteor path (radians).
         jd_ref: [float] Mean Julian date of the meteor.
+        no_atmosphere_end_ht: [float] If > 0, a no-atmosphere solution will be computed, meaning that the meteoroid
+            will not be ablated. The number that is given is the height in meters at which the simulation 
+            will stop.
     
     Return:
         [list] A list containing simulation results:
@@ -826,7 +850,7 @@ def runSimulation(met, consts, lat=None, lon=None, jd_ref=None):
         printd("##########################")
         
         # Ablate the fragment
-        met, consts = ablate(met, consts)
+        met, consts = ablate(met, consts, no_atmosphere_end_ht=no_atmosphere_end_ht)
 
         # Add the current state to results
         results_list.append([met.t, met.h, met.s, met.v, met.lum])
@@ -871,11 +895,10 @@ if __name__ == "__main__":
     met.Lambda = 0.5
 
 
-
     t1 = time.clock()
     
     # Run the simulation
-    results_list = runSimulation(met, consts, lat=lat, lon=lon, jd_ref=jd)
+    results_list = runSimulation(met, consts, lat=lat, lon=lon, jd_ref=jd, no_atmosphere_end_ht=-1)
 
     print('Runtime:', time.clock() - t1)
 
@@ -883,7 +906,7 @@ if __name__ == "__main__":
 
     # Get the results
     results_list = np.array(results_list)
-    time, height, trail, velocity, luminosity = results_list.T
+    time_data, height, trail, velocity, luminosity = results_list.T
 
     # Convert distance/height to km
     height = height/1000
@@ -893,9 +916,9 @@ if __name__ == "__main__":
     ### Calculate the lag
 
     # Fit a line to the first 10% of points
-    part_len = int(0.1*len(time))
+    part_len = int(0.1*len(time_data))
     
-    fpart_t = time[:part_len]
+    fpart_t = time_data[:part_len]
     fpart_s = trail[:part_len]
 
 
@@ -905,7 +928,7 @@ if __name__ == "__main__":
 
     line_params, _ = scipy.optimize.curve_fit(line, fpart_t, fpart_s)
 
-    lag = trail - line(time, *line_params)
+    lag = trail - line(time_data, *line_params)
 
     ###
 
@@ -915,8 +938,8 @@ if __name__ == "__main__":
 
 
     ### Take the last 25% of the trail
-    lquart_len = int(0.75*len(time))
-    lquart_t = time[lquart_len:]
+    lquart_len = int(0.75*len(time_data))
+    lquart_t = time_data[lquart_len:]
     lquart_s = trail[lquart_len:]
     lquart_lag = lag[lquart_len:]
 
@@ -924,22 +947,22 @@ if __name__ == "__main__":
     #jacchia_fit, _ = scipy.optimize.curve_fit(jacchia, lquart_t, lquart_s, maxfev=20000, p0=p0)
     #print(jacchia_fit)
 
-    spline_fit = scipy.interpolate.CubicSpline(time, lag)
+    spline_fit = scipy.interpolate.CubicSpline(time_data, lag)
 
     fig, ax1 = plt.subplots()
 
     # Plot the original data
-    ax1.scatter(lag, time, s=2, zorder=2, c='red')
+    ax1.scatter(lag, time_data, s=2, zorder=2, c='red')
 
     # Plot the spline data
-    ax1.plot(spline_fit(time), time, zorder=1)
+    ax1.plot(spline_fit(time_data), time_data, zorder=1)
 
     #ax1.plot(jacchia(lquart_t, *jacchia_fit), lquart_t)
 
     ax1.set_xlabel('Length (km)')
 
     ax1.set_ylabel('Time')
-    ax1.set_ylim([min(time), max(time)])
+    ax1.set_ylim([min(time_data), max(time_data)])
     ax1.invert_yaxis()
 
     ax2 = ax1.twinx()
