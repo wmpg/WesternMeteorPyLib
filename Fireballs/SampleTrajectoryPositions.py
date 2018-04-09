@@ -10,6 +10,7 @@ from __future__ import print_function, division, absolute_import
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.interpolate
+import scipy.signal
 
 from Utils.TrajConversions import cartesian2Geo
 from Utils.Math import lineAndSphereIntersections
@@ -109,6 +110,54 @@ def sampleTrajectory(dir_path, file_name, beg_ht, end_ht, sample_step):
     print(height_array)
 
 
+    ### Fit time vs. height
+
+    time_data = []
+    height_data = []
+
+    for obs in traj.observations:
+
+        time_data += obs.time_data.tolist()
+        height_data += obs.model_ht.tolist()
+
+
+    height_data = np.array(height_data)
+    time_data = np.array(time_data)
+
+    # Sort the arrays by increasing height
+    arr_sort_indices = np.argsort(height_data)
+    height_data = height_data[arr_sort_indices]
+    time_data = time_data[arr_sort_indices]
+
+
+
+    # Plot the non-smoothed time vs. height
+    plt.scatter(time_data, height_data/1000, label='Data')
+
+
+    # Fit negative height as X axis must be rising
+    ht_vs_time_interp = scipy.interpolate.PchipInterpolator(height_data, time_data)
+
+    # Plot the interpolation
+    ht_arr = np.linspace(np.min(height_data), np.max(height_data), 1000)
+    time_arr = ht_vs_time_interp(ht_arr)
+
+    plt.plot(time_arr, ht_arr/1000, label='Interpolation')
+
+
+    plt.legend()
+    
+
+
+    plt.xlabel('Time (s)')
+    plt.ylabel('Height (km)')
+
+    plt.show()
+
+    ###
+
+
+
     # Take the ground above the state vector as the reference distance from the surface of the Earth
     ref_radius = vectMag(traj.state_vect_mini) - traj.rbeg_ele
 
@@ -116,9 +165,21 @@ def sampleTrajectory(dir_path, file_name, beg_ht, end_ht, sample_step):
     radius_array = ref_radius + height_array
 
 
-    print('Height (m),  Lat (deg),   Lon (deg), Elev (m)')
+    print(' Time(s), Height (m),  Lat (deg),   Lon (deg), Elev (m)')
     # Go through every distance from the Earth centre and compute the geo coordinates at the given distance
     for ht, radius in zip(height_array, radius_array):
+
+        # If the height is lower than the eng height, use a fixed velocity of 3 km/s
+
+        if ht < traj.rend_ele:
+            t_est = ht_vs_time_interp(traj.rend_ele) + abs(ht - traj.rend_ele)/3000
+            time_marker = "*"
+
+        else:
+            
+            # Estimate the fireball time at the given height using interpolated values
+            t_est = ht_vs_time_interp(ht)
+            time_marker = " "
 
         # Compute the intersection between the trajectory line and the sphere of radius at the given height
         intersections = lineAndSphereIntersections(np.array([0, 0, 0]), radius, traj.state_vect_mini, 
@@ -130,10 +191,16 @@ def sampleTrajectory(dir_path, file_name, beg_ht, end_ht, sample_step):
         height_eci = intersections[inter_min_dist_indx]
 
 
-        # Compute geographical coordinates
-        lat, lon, ele = cartesian2Geo(traj.jdt_ref, *height_eci)
+        # Compute the Julian date at the given height
+        jd = traj.jdt_ref + t_est/86400.0
 
-        print("{:10.1f}, {:10.6f}, {:11.6f}, {:8.1f}".format(ht, np.degrees(lat), np.degrees(lon), ele))
+        # Compute geographical coordinates
+        lat, lon, ele = cartesian2Geo(jd, *height_eci)
+
+        print("{:s}{:7.2f}, {:10.1f}, {:10.6f}, {:11.6f}, {:8.1f}".format(time_marker, t_est, ht, np.degrees(lat), np.degrees(lon), ele))
+
+
+    print('The star * denotes heights extrapolated after the end of the fireball, with the fixed velocity of 3 km/s.')
 
 
 
