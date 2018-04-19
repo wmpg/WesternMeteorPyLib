@@ -20,7 +20,7 @@ INPUT_DATA_FILE = 'data.txt'
 OUTPUT_CSV = 'data_picks.csv'
 
 from Fireballs.GetIRISData import readStationAndWaveformsListFile, butterworthBandpassFilter, \
-    plotAllWaveforms
+    plotAllWaveforms, convolutionDifferenceFilter
 from Utils.Earth import greatCircleDistance
 from Utils.PlotMap import GroundMap
 from Utils.TrajConversions import datetime2JD
@@ -28,7 +28,8 @@ from Utils.TrajConversions import datetime2JD
 
 
 class WaveformPicker(object):
-    def __init__(self, dir_path, v_sound, t0, data_list, lat_centre, lon_centre, waveform_window=600):
+    def __init__(self, dir_path, v_sound, t0, data_list, lat_centre, lon_centre, waveform_window=600, \
+        difference_filter_all=False):
         """
 
         Arguments:
@@ -36,6 +37,8 @@ class WaveformPicker(object):
 
         Keyword arguments:
             waveform_window: [int] Number of seconds for the wavefrom window.
+            difference_filter_all: [bool] If True, the Kalenda et al. (2014) difference filter will be applied
+                on the data plotted in the overview plot of all waveforms.
         """
 
         self.dir_path = dir_path
@@ -172,13 +175,16 @@ class WaveformPicker(object):
         self.ax_next_btn = plt.subplot(gs[3, 0])
 
         # Bandpass options
-        bandpass_gridspec = gridspec.GridSpecFromSubplotSpec(4, 1, subplot_spec=gs[2:4, 1])
+        bandpass_gridspec = gridspec.GridSpecFromSubplotSpec(5, 1, subplot_spec=gs[2:4, 1])
         self.ax_bandpass_low = plt.subplot(bandpass_gridspec[0])
         self.ax_bandpass_high = plt.subplot(bandpass_gridspec[1])
         self.ax_bandpass_button = plt.subplot(bandpass_gridspec[2])
 
         # Spectrogram button
         self.ax_specgram_btn = plt.subplot(bandpass_gridspec[3])
+
+        # Convolution filter button
+        self.ax_convolution_button = plt.subplot(bandpass_gridspec[4])
         
 
         # Pick list
@@ -218,6 +224,10 @@ class WaveformPicker(object):
         self.specgram_btn = Button(self.ax_specgram_btn, 'Spectrogram of raw data')
         self.specgram_btn.on_clicked(self.showSpectrogram)
 
+        # Convolution filter button
+        self.convolution_button = Button(self.ax_convolution_button, '$S_i - (S_{i-1} + S_{i+1})/2$ filter')
+        self.convolution_button.on_clicked(self.filterConvolution)
+
 
         # Export CSV button
         self.export_csv_btn = Button(self.ax_export_csv_btn, 'Export CSV: ' + OUTPUT_CSV)
@@ -225,7 +235,8 @@ class WaveformPicker(object):
 
         # Plot all waveforms
         plotAllWaveforms(self.dir_path, self.data_list, self.v_sound, self.t0, self.lat_centre, \
-            self.lon_centre, ax=self.ax_all_waves, waveform_window=self.waveform_window)
+            self.lon_centre, ax=self.ax_all_waves, waveform_window=self.waveform_window, 
+            difference_filter_all=difference_filter_all)
 
 
 
@@ -502,9 +513,21 @@ class WaveformPicker(object):
         # Get the miniSEED file path
         mseed_file_path = os.path.join(self.dir_path, mseed_file)
 
+        try:
+            
+            if os.path.isfile(mseed_file_path):
+                        
+                # Read the miniSEED file
+                mseed = obspy.read(mseed_file_path)
 
-        # Read the miniSEED file
-        mseed = obspy.read(mseed_file_path)
+            else:
+                print('File {:s} does not exist!'.format(mseed_file_path))
+                return None
+
+        except TypeError as e:
+
+            print('Opening file {:s} failed with error: {:s}'.format(mseed_file_path, e))
+            return None
 
 
         # Unpact miniSEED data
@@ -530,16 +553,16 @@ class WaveformPicker(object):
             delta)
 
 
-        ### BANDPASS FILTERING ###
+        # ### BANDPASS FILTERING ###
 
-        # Init the butterworth bandpass filter
-        butter_b, butter_a = butterworthBandpassFilter(self.bandpass_low_default, \
-            self.bandpass_high_default, 1.0/delta, order=6)
+        # # Init the butterworth bandpass filter
+        # butter_b, butter_a = butterworthBandpassFilter(self.bandpass_low_default, \
+        #     self.bandpass_high_default, 1.0/delta, order=6)
 
-        # Filter the data
-        waveform_data = scipy.signal.filtfilt(butter_b, butter_a, waveform_data)
+        # # Filter the data
+        # waveform_data = scipy.signal.filtfilt(butter_b, butter_a, waveform_data)
 
-        ##########################
+        # ##########################
 
 
         # Construct time array, 0 is at start_datetime
@@ -647,6 +670,12 @@ class WaveformPicker(object):
         self.drawWaveform(waveform_data)
 
 
+    def filterConvolution(self, event):
+        """ Apply the convolution filter on data as suggested in Kalenda et al. (2014). """
+
+        waveform_data = convolutionDifferenceFilter(self.current_wavefrom_raw)
+
+        self.drawWaveform(waveform_data)
 
 
     def updatePlot(self):
@@ -699,9 +728,21 @@ class WaveformPicker(object):
                 # Get the miniSEED file path
                 mseed_file_path = os.path.join(self.dir_path, mseed_file)
 
+                try:
+                    
+                    if os.path.isfile(mseed_file_path):
+                        
+                        # Read the miniSEED file
+                        mseed = obspy.read(mseed_file_path)
 
-                # Read the miniSEED file
-                mseed = obspy.read(mseed_file_path)
+                    else:
+                        print('File {:s} does not exist!'.format(mseed_file_path))
+                        continue
+
+                except TypeError as e:
+
+                    print('Opening file {:s} failed with error: {:s}'.format(mseed_file_path, e))
+                    continue
 
                 # Find datetime of the beginning of the file
                 start_datetime = mseed[0].stats.starttime.datetime
@@ -725,22 +766,49 @@ if __name__ == "__main__":
 
 
 
+    # ### WAVEFORM DATA PARAMETERS ###
+    # ##########################################################################################################
+
+
+    # # Name of the folder where data files will be stored
+    # dir_path = '../Seismic data/2018-01-16 Michigan fireball'
+
+    # # Geo coordinates of the wave release centre
+    # lat_centre = 42.646767
+    # lon_centre = -83.925573
+
+    # # Speed of sound (m/s)
+    # v_sound = 310
+
+    # # Time offset of wave release from the reference time
+    # t0 = 0
+
+    # # Apply the Kalenda et al. (2014) difference filter to the plot of all waveforms
+    # difference_filter_all = False
+
+
+    # ##########################################################################################################
+
+
     ### WAVEFORM DATA PARAMETERS ###
     ##########################################################################################################
 
 
     # Name of the folder where data files will be stored
-    dir_path = '../Seismic data/2018-01-16 Michigan fireball'
+    dir_path = '../Seismic data/2018-04-08 Varazdin fireball'
 
     # Geo coordinates of the wave release centre
-    lat_centre = 42.646767
-    lon_centre = -83.925573
+    lat_centre = 46.163195
+    lon_centre = 16.656935
 
     # Speed of sound (m/s)
     v_sound = 310
 
     # Time offset of wave release from the reference time
-    t0 = 0
+    t0 = 514.0
+
+    # Apply the Kalenda et al. (2014) difference filter to the plot of all waveforms
+    difference_filter_all = True
 
 
     ##########################################################################################################
@@ -759,7 +827,8 @@ if __name__ == "__main__":
 
 
     # Init the wavefrom picker
-    WaveformPicker(dir_path, v_sound, t0, data_list, lat_centre, lon_centre)
+    WaveformPicker(dir_path, v_sound, t0, data_list, lat_centre, lon_centre, \
+        difference_filter_all=difference_filter_all)
 
     plt.tight_layout()
 

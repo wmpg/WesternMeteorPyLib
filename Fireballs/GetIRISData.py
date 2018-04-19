@@ -20,7 +20,8 @@ from Utils.Math import subsampleAverage
 DATA_FILE = 'data.txt'
 
 
-def getIRISStations(lat_centre, lon_centre, deg_radius, start_date, end_date, network='*', channel='BDF'):
+def getIRISStations(lat_centre, lon_centre, deg_radius, start_date, end_date, network='*', channel='BDF', 
+    orfeus=False):
     """ Retrieves seismic stations from the IRIS web service in a radius around given geographical position 
         which were active during the specified range of dates.
 
@@ -35,16 +36,27 @@ def getIRISStations(lat_centre, lon_centre, deg_radius, start_date, end_date, ne
         network: [str] Filter retrieved stations by the given seismic network code. * by default, meaning
             stations for all networks will be retrieved.
         channel: [str] Seismograph channel. BDF by default.
+        orfeus: [bool] If True, the European ORFEUS website will be queried instead of IRIS.
 
     Return:
         [list] A list of stations and their parameters.
     """
 
-    # Construct IRIS URL
-    iris_url = ("http://service.iris.edu/fdsnws/station/1/query?net={:s}&latitude={:.3f}&longitude={:.3f}" \
-                "&maxradius={:.3f}&start={:s}&end={:s}&cha={:s}&nodata=404&format=text" \
-                "&matchtimeseries=true").format(network, lat_centre, lon_centre, deg_radius, start_date, \
-                end_date, channel)
+    # Use the European ORFEUS data access site
+    if orfeus:
+
+        # Construct ORFEUS URL
+        iris_url = ("http://www.orfeus-eu.org/fdsnws/station/1/query?network={:s}&latitude={:.3f}&longitude={:.3f}" \
+            "&maxradius={:.3f}&start={:s}&end={:s}&channel={:s}&format=text" \
+            "&includerestricted=false&nodata=404").format(network, lat_centre, lon_centre, deg_radius, \
+            start_date, end_date, channel)
+
+    else:
+        # Construct IRIS URL
+        iris_url = ("http://service.iris.edu/fdsnws/station/1/query?net={:s}&latitude={:.3f}&longitude={:.3f}" \
+            "&maxradius={:.3f}&start={:s}&end={:s}&cha={:s}&nodata=404&format=text" \
+            "&matchtimeseries=true").format(network, lat_centre, lon_centre, deg_radius, start_date, \
+            end_date, channel)
 
     # Retrieve station list
     stations_txt = urllib.urlopen(iris_url).read()
@@ -75,7 +87,8 @@ def getIRISStations(lat_centre, lon_centre, deg_radius, start_date, end_date, ne
 
 
 
-def getIRISWaveformFiles(network, station_code, start_datetime, end_datetime, dir_path='.', channel='BDF'):
+def getIRISWaveformFiles(network, station_code, start_datetime, end_datetime, dir_path='.', channel='BDF', \
+    orfeus=False):
     """ Download weaveform files from the IRIS site. 
     
     Arguments:
@@ -89,6 +102,7 @@ def getIRISWaveformFiles(network, station_code, start_datetime, end_datetime, di
     Keyword arguments:
         dir_path: [str] Full path to location where the miniSEED files will be saved.
         channel: [str] Seismograph channel. BDF by default.
+        orfeus: [bool] If True, the European ORFEUS website will be queried instead of IRIS.
 
     Return:
         mseed_file_path: [str] Path to the downloaded miniSEED data file.
@@ -111,14 +125,25 @@ def getIRISWaveformFiles(network, station_code, start_datetime, end_datetime, di
         print('No more than 2 hours of waveform data can be requested!')
         return None
 
-    # Construct IRIS URL
-    iris_url = ("http://service.iris.edu/fdsnws/dataselect/1/query?net={:s}&sta={:s}&cha={:s}" \
+
+    # Use the European ORFEUS data access site if specified
+    if orfeus:
+
+        # Construct ORFEUS URL
+        iris_url = ("http://www.orfeus-eu.org/fdsnws/dataselect/1/query?network={:s}&station={:s}" \
+                "&channel={:s}&start={:s}&end={:s}").format(network, station_code, channel, start_time, \
+                end_time)
+
+    else:
+        
+        # Construct IRIS URL
+        iris_url = ("http://service.iris.edu/fdsnws/dataselect/1/query?net={:s}&sta={:s}&cha={:s}" \
                 "&start={:s}&end={:s}").format(network, station_code, channel, start_time, end_time)
 
 
     # Construct a file name
-    mseed_file = network + '_' + station_code + '_BDF_' + start_time.replace(':', '.') + '_' \
-        + end_time.replace(':', '.') + '.mseed'
+    mseed_file = network + '_' + station_code + '_{:s}_'.format(channel) + start_time.replace(':', '.') \
+        + '_' + end_time.replace(':', '.') + '.mseed'
 
 
     mseed_file_path = os.path.join(dir_path, mseed_file)
@@ -191,7 +216,7 @@ def readStationAndWaveformsListFile(file_path):
 
 
 def getAllWaveformFiles(lat_centre, lon_centre, deg_radius, start_datetime, end_datetime, network='*', \
-    channel='BDF', dir_path='.'):
+    channel='BDF', dir_path='.', orfeus=False):
     """ Retrieves and saves waveforms as miniSEED files of all seismic stations from the IRIS web service in 
         a radius around given geographical position and for the given range of times.
 
@@ -208,6 +233,7 @@ def getAllWaveformFiles(lat_centre, lon_centre, deg_radius, start_datetime, end_
         network: [str] Filter retrieved stations by the given seismic network code. * by default, meaning
             stations for all networks will be retrieved.
         dir_path: [str] Full path to location where the miniSEED files will be saved.
+        orfeus: [bool] If True, the European ORFEUS website will be queried instead of IRIS.
 
     """
 
@@ -225,7 +251,11 @@ def getAllWaveformFiles(lat_centre, lon_centre, deg_radius, start_datetime, end_
 
     # Get a list of stations active on specified dates around the given location
     station_list = getIRISStations(lat_centre, lon_centre, deg_radius, start_date, end_date, \
-        network=network, channel=channel)
+        network=network, channel=channel, orfeus=orfeus)
+
+
+    print('STATIONS:')
+    print(station_list)
 
 
     # A list of station data and waveform files
@@ -241,7 +271,7 @@ def getAllWaveformFiles(lat_centre, lon_centre, deg_radius, start_datetime, end_
     
         # Retreive the waveform of the given station
         mseed_file = getIRISWaveformFiles(network, station_code, start_datetime, end_datetime, \
-            channel=channel, dir_path=dir_path)
+            channel=channel, dir_path=dir_path, orfeus=orfeus)
 
         # Add the mseed file to the data list
         if mseed_file is not None:
@@ -285,6 +315,13 @@ def butterworthBandpassFilter(lowcut, highcut, fs, order=5):
 
 
 
+def convolutionDifferenceFilter(waveform_data):
+    """ Apply the convolution filter on data as suggested in Kalenda et al. (2014). """
+
+    return np.convolve(waveform_data, [-0.5, 1.0, -0.5], mode='same')
+
+
+
 def plotStationMap(data_list, lat_centre, lon_centre, ax=None):
     """ Plots the map of siesmic stations from loaded data file. """
 
@@ -308,13 +345,16 @@ def plotStationMap(data_list, lat_centre, lon_centre, ax=None):
 
 
 
-def plotAllWaveforms(dir_path, data_list, v_sound, t0, lat_centre, lon_centre, ax=None, waveform_window=None):
+def plotAllWaveforms(dir_path, data_list, v_sound, t0, lat_centre, lon_centre, ax=None, waveform_window=None,\
+    difference_filter_all=False):
     """ Bandpass filter and plot all waveforms from the given data list. 
 
     Keyword arguments:
         waveform_window: [int] If given, the waveforms will be cut around the modelled time of arrival line
             with +/- waveform_window/2 seconds. None by default, which means the whole waveform will be 
             plotted.
+        difference_filter_all: [bool] If True, the Kalenda et al. (2014) difference filter will be applied
+                on the data plotted in the overview plot of all waveforms.
     """
 
     if ax is None:
@@ -333,8 +373,22 @@ def plotAllWaveforms(dir_path, data_list, v_sound, t0, lat_centre, lon_centre, a
 
         mseed_file_path = os.path.join(dir_path, mseed_file)
 
-        # Read the miniSEED file
-        mseed = obspy.read(mseed_file_path)
+        try:
+            
+            # Read the miniSEED file
+            if os.path.isfile(mseed_file_path):
+
+                mseed = obspy.read(mseed_file_path)
+
+            else:
+                print('File {:s} does not exist!'.format(mseed_file_path))
+                continue
+
+
+        except TypeError as e:
+
+            print('Opening file {:s} failed with error: {:s}'.format(mseed_file_path, e))
+            continue
         
 
         # Unpack miniSEED data
@@ -352,25 +406,31 @@ def plotAllWaveforms(dir_path, data_list, v_sound, t0, lat_centre, lon_centre, a
 
 
 
-        ### BANDPASS FILTERING ###
+        # Apply the Kalenda et al. (2014) difference filter instead of Butterworth
+        if difference_filter_all:
 
-        # Init the butterworth bandpass filter
-        butter_b, butter_a = butterworthBandpassFilter(0.8, 5.0, 1.0/delta, order=6)
+            waveform_data = convolutionDifferenceFilter(waveform_data)
 
-        # Filter the data
-        waveform_data = scipy.signal.filtfilt(butter_b, butter_a, waveform_data)
+        else:
 
-        # Average and subsample the array for quicker plotting (reduces 40Hz to 10Hz)
-        waveform_data = subsampleAverage(waveform_data, 4)
-        delta *= 4
+            ### BANDPASS FILTERING ###
 
-        ##########################
+            # Init the butterworth bandpass filter
+            butter_b, butter_a = butterworthBandpassFilter(0.8, 5.0, 1.0/delta, order=6)
+
+            # Filter the data
+            waveform_data = scipy.signal.filtfilt(butter_b, butter_a, waveform_data)
+
+            # Average and subsample the array for quicker plotting (reduces 40Hz to 10Hz)
+            waveform_data = subsampleAverage(waveform_data, 4)
+            delta *= 4
+
+            ##########################
 
 
         # Calculate the distance from the source point to this station (kilometers)
         station_dist = greatCircleDistance(np.radians(lat_centre), np.radians(lon_centre), \
             np.radians(stat_lat), np.radians(stat_lon))
-
 
         # Construct time array, 0 is at start_datetime
         time_data = np.arange(0, (end_datetime - start_datetime).total_seconds(), delta)
@@ -410,13 +470,16 @@ def plotAllWaveforms(dir_path, data_list, v_sound, t0, lat_centre, lon_centre, a
             if len(time_data) == 0:
                 continue
 
+
+        # Replace all NaNs with 0s
+        waveform_data = np.nan_to_num(waveform_data, 0)
         
         max_time = np.max([max_time, np.max(time_data)])
-
 
         # Keep track of minimum and maximum waveform values (used for plotting)
         max_wave_value = np.max([max_wave_value, np.max(waveform_data)])
         min_wave_value = np.min([min_wave_value, np.min(waveform_data)])
+
 
         # Plot the waveform on the the time vs. distance graph
         ax.plot(waveform_data, time_data, color='k', alpha=0.4, linewidth=0.2, zorder=3)
@@ -438,7 +501,7 @@ def plotAllWaveforms(dir_path, data_list, v_sound, t0, lat_centre, lon_centre, a
     ax.set_ylabel('Time (s)')
 
     ax.set_ylim(0, max_time + 500)
-    ax.set_xlim(min_wave_value, max_wave_value)
+    ax.set_xlim(0, max_wave_value)
 
     ax.grid(color='#ADD8E6', linestyle='dashed', linewidth=0.5, alpha=0.5)
 
@@ -454,11 +517,13 @@ if __name__ == "__main__":
     ##########################################################################################################
 
 
-
     # ### 2018-01-16 Michigan fireball
 
     # # Name of the folder where data files will be stored
     # dir_path = '../Seismic data/2018-01-16 Michigan fireball'
+
+    # # Use the European data access site
+    # orfeus = False
 
     # # Geo coordinates of the wave release centre
     # lat_centre = 42.646767
@@ -483,36 +548,83 @@ if __name__ == "__main__":
     # start_datetime = datetime.datetime(2018, 1, 17, 1, 8, 30)
     # end_datetime = datetime.datetime(2018, 1, 17, 2, 8, 30)
 
+    # # Apply the Kalenda et al. (2014) difference filter to the plot of all waveforms
+    # difference_filter_all = False
+
     # ###############
 
 
-    ### 2018-03-08 Seattle fireball
+    # ### 2018-03-08 Seattle fireball
+
+    # # Name of the folder where data files will be stored
+    # dir_path = '../Seismic data/2018-03-08 Seattle fireball'
+
+    # # Use the European data access site
+    # orfeus = False
+
+    # # Geo coordinates of the wave release centre
+    # lat_centre = 47.348652
+    # lon_centre = -124.075456
+
+    # # Station search radius (degrees)
+    # deg_radius = 10
+
+    # # Seismic network code. Use '*' for all networks
+    # network = '*'
+
+    # # Instrument channel ('BDF' default)
+    # channel = 'BDF'
+
+    # # Speed of sound (m/s)
+    # v_sound = 310
+
+    # # Time offset of wave release from the reference time (seconds)
+    # t0 = 159.0
+
+    # # Time range of waveform retrieval (can't be more than 2 hours!)
+    # start_datetime = datetime.datetime(2018, 3, 8, 3, 5, 20)
+    # end_datetime = datetime.datetime(2018, 3, 8, 4, 30, 0)
+
+    # # Apply the Kalenda et al. (2014) difference filter to the plot of all waveforms
+    # difference_filter_all = False
+
+
+    # #################
+
+
+    ### 2018-04-08 Varazdin fireball
 
     # Name of the folder where data files will be stored
-    dir_path = '../Seismic data/2018-03-08 Seattle fireball'
+    dir_path = '../Seismic data/2018-04-08 Varazdin fireball'
+
+    # Use the European data access site
+    orfeus = True
 
     # Geo coordinates of the wave release centre
-    lat_centre = 47.348652
-    lon_centre = -124.075456
+    lat_centre = 46.238112
+    lon_centre = 16.603644
 
     # Station search radius (degrees)
-    deg_radius = 10
+    deg_radius = 2
 
     # Seismic network code. Use '*' for all networks
     network = '*'
 
     # Instrument channel ('BDF' default)
-    channel = 'BDF'
+    channel = 'HHZ'
 
     # Speed of sound (m/s)
     v_sound = 310
 
     # Time offset of wave release from the reference time (seconds)
-    t0 = 159.0
+    t0 = 514.0
 
-    # Time range of waveform retrieval (can't be more than 2 hours!)
-    start_datetime = datetime.datetime(2018, 3, 8, 3, 5, 20)
-    end_datetime = datetime.datetime(2018, 3, 8, 4, 30, 0)
+    # Time range of waveform retrieval in UTC (can't be more than 2 hours!)
+    start_datetime = datetime.datetime(2018, 4, 8, 18, 40, 0)
+    end_datetime = datetime.datetime(2018, 4, 8, 19, 39, 0)
+
+    # Apply the Kalenda et al. (2014) difference filter to the plot of all waveforms
+    difference_filter_all = True
 
 
     #################
@@ -524,7 +636,7 @@ if __name__ == "__main__":
     # ### Download all waveform files which are within the given geographical and temporal range ###
     # ##########################################################################################################
     # getAllWaveformFiles(lat_centre, lon_centre, deg_radius, start_datetime, end_datetime, network=network, \
-    #     channel=channel, dir_path=dir_path)
+    #     channel=channel, dir_path=dir_path, orfeus=orfeus)
     # ##########################################################################################################
 
 
@@ -565,7 +677,8 @@ if __name__ == "__main__":
     ##########################################################################################################
     
 
-    plotAllWaveforms(dir_path, data_list, v_sound, t0, lat_centre, lon_centre)
+    plotAllWaveforms(dir_path, data_list, v_sound, t0, lat_centre, lon_centre, \
+        difference_filter_all=difference_filter_all)
 
     plt.title('Source location: {:.6f}, {:.6f}, Reference time: {:s} UTC, channel: {:s}'.format(lat_centre, \
         lon_centre, str(start_datetime), channel), fontsize=7)
