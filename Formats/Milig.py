@@ -3,6 +3,9 @@
 from __future__ import print_function, absolute_import
 
 import os
+import sys
+import argparse
+
 import numpy as np
 
 from Trajectory.Trajectory import Trajectory
@@ -23,6 +26,7 @@ class StationData(object):
         self.time_data = []
         self.azim_data = []
         self.zangle_data = []
+        self.ignore_picks = []
 
 
     def __repr__(self):
@@ -152,9 +156,6 @@ def loadMiligInput(file_path):
                 # Flag indicating that the pick is bad. If it is 1, the pick will be ignored
                 bad_pick = int(line[20:23])
 
-                if bad_pick:
-                    continue
-
                 # Time in seconds from the reference GST
                 time = float(line[23:31])
 
@@ -162,6 +163,7 @@ def loadMiligInput(file_path):
                 stations[stat_ind].time_data.append(time)
                 stations[stat_ind].azim_data.append(azim)
                 stations[stat_ind].zangle_data.append(zangle)
+                stations[stat_ind].ignore_picks.append(bad_pick)
 
 
             # There are 2 extra rows in the MILIG format which are not read by this parser, as they do not
@@ -198,7 +200,16 @@ def solveTrajectoryMILIG(dir_path, file_name, solver='original', **kwargs):
         traj = Trajectory(jdt_ref, output_dir=dir_path, meastype=3, **kwargs)
 
     elif solver == 'gural':
-        traj = GuralTrajectory(len(stations), jdt_ref, velmodel=3, meastype=3, verbose=1, 
+
+        # Extract velocity model is given
+        try:
+            velmodel = int(solver[-1])
+
+        except: 
+            # Default to the exponential model
+            velmodel = 3
+
+        traj = GuralTrajectory(len(stations), jdt_ref, velmodel=velmodel, meastype=3, verbose=1, 
             output_dir=dir_path)
 
 
@@ -220,17 +231,23 @@ def solveTrajectoryMILIG(dir_path, file_name, solver='original', **kwargs):
 
             # if station.station_id == "1":
             #     print('EXCLUDED POINTS')
-            #     excluded_time = [0.580001, 0.859983]
+            #     #excluded_time = [0.580001, 0.859983]
+            #     #excluded_time = [1.7, 3.2]
 
-            # ###############################
+            ###############################
 
             traj.infillTrajectory(station.azim_data, station.zangle_data, station.time_data, station.lat, 
-                station.lon, station.height, station_id=station.station_id, excluded_time=excluded_time)
+                station.lon, station.height, station_id=station.station_id, excluded_time=excluded_time, \
+                ignore_list=station.ignore_picks)
 
-        elif solver == 'gural':
+        elif 'gural' in solver:
 
             traj.infillTrajectory(np.array(station.azim_data), np.array(station.zangle_data), 
                 np.array(station.time_data), station.lat, station.lon, station.height)
+
+
+        else:
+            print('Solver: {:s} is not a valid solver!'.format(solver))
 
 
     # for obs in traj.observations:
@@ -316,51 +333,102 @@ def writeMiligInputFile(jdt_ref, meteor_list, file_path, convergation_fact=1.0):
 
 if __name__ == '__main__':
 
-    # dir_path = "../MirfitPrepare/20161007_052749_mir/"
-    # file_name = "input_00.txt"
+    ### COMMAND LINE ARGUMENTS
 
-    #dir_path = "/home/dvida/Desktop/krizy"
-    #dir_path = '/home/dvida/Desktop/PyLIG_in_2011100809VIB0142'
-    #dir_path = "/home/dvida/Desktop/PyLIG_in_2011100809PUB0030"
-    #dir_path = "/home/dvida/Desktop/PyLIG_in_2011100809VIB0141"
-    #dir_path = "/home/dvida/Desktop/PyLIG_in_2011100809DUI0066"
-    #dir_path = "/home/dvida/Desktop/PyLIG_in_2016112223APO0002"
-    #dir_path = os.path.abspath("../MILIG files")
-    #dir_path = os.path.abspath("../MILIG files/20170531_002824")
-    #dir_path = os.path.abspath("../MILIG files/PyLIG_IN_Pula_2010102829")
-    #dir_path = os.path.abspath("../MILIG files/20170923_053525 meteorite dropping")
-    #dir_path = os.path.abspath("../MILIG files/20170923_053525 meteorite dropping GRAVITY TEST")
-    #dir_path = os.path.abspath("../MILIG files/20171127_meteorite_dropping")
-    #dir_path = os.path.abspath("../MILIG files/20171231_011853")
-    #dir_path = os.path.abspath("../MILIG files/20180125_meteorite_dropping")
-    #dir_path = os.path.abspath("../MILIG files/PyLIG20180123_020244")
-    #dir_path = os.path.abspath("../MILIG files/PyLIG20180206_011705")
-    #dir_path = os.path.abspath("../MILIG files/PyLIG20180209_231854")
-    #dir_path = os.path.abspath("../MILIG files/20180117_010828 Michigan fireball")
-    #dir_path = os.path.abspath("../MILIG files/20180117_010828 Michigan fireball (2 stations)")
-    dir_path = os.path.abspath("../MILIG files/20180117_010828 Michigan fireball (2 stations) second")
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description=""" Run the Monte Carlo trajectory solver using MILIG files.""",
+        formatter_class=argparse.RawTextHelpFormatter)
+
+    arg_parser.add_argument('input_file', type=str, help='Path to the MILIG input file.')
+
+    arg_parser.add_argument('-s', '--solver', metavar='SOLVER', help="""Trajectory solver to use. \n
+        - 'original' - Monte Carlo solver
+        - 'gural0' - Gural constant velocity
+        - 'gural1' - Gural linear deceleration
+        - 'gural2' - Gural quadratic deceleration
+        - 'gural3' - Gural exponential deceleration
+         """, type=str, nargs='?', default='original')
+
+    arg_parser.add_argument('-t', '--maxtoffset', metavar='MAX_TOFFSET', nargs='?', \
+        help='Maximum time offset between the stations.', type=float, default=1.0)
+
+    arg_parser.add_argument('-d', '--disablemc', \
+        help='Do not use the Monte Carlo solver, but only run the geometric solution.', action="store_true")
+    
+    arg_parser.add_argument('-r', '--mcruns', metavar="MC_RUNS", nargs='?', help='Number of Monte Carlo runs.', \
+        type=int, default=100)
+    
+    arg_parser.add_argument('-g', '--disablegravity', \
+        help='Disable gravity compensation.', action="store_true")
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+        
+    # Split the input directory and the file
+    if os.path.isfile(cml_args.input_file):
+
+        dir_path, file_name = os.path.split(cml_args.input_file)
+
+    else:
+        print('Input file: {:s}'.format(cml_args.input_file))
+        print('The given input file does not exits!')
+        sys.exit()
+
+    # Run the solver
+    solveTrajectoryMILIG(dir_path, file_name, solver=cml_args.solver, max_toffset=cml_args.maxtoffset, \
+        monte_carlo=(not cml_args.disablemc), mc_runs=cml_args.mcruns, \
+        gravity_correction=(not cml_args.disablegravity))
+
+
+
+    # ######
+
+    # # dir_path = "../MirfitPrepare/20161007_052749_mir/"
+    # # file_name = "input_00.txt"
+
+    # #dir_path = "/home/dvida/Desktop/krizy"
+    # #dir_path = '/home/dvida/Desktop/PyLIG_in_2011100809VIB0142'
+    # #dir_path = "/home/dvida/Desktop/PyLIG_in_2011100809PUB0030"
+    # #dir_path = "/home/dvida/Desktop/PyLIG_in_2011100809VIB0141"
+    # #dir_path = "/home/dvida/Desktop/PyLIG_in_2011100809DUI0066"
+    # #dir_path = "/home/dvida/Desktop/PyLIG_in_2016112223APO0002"
+    # #dir_path = os.path.abspath("../MILIG files")
+    # #dir_path = os.path.abspath("../MILIG files/20170531_002824")
+    # #dir_path = os.path.abspath("../MILIG files/PyLIG_IN_Pula_2010102829")
+    # #dir_path = os.path.abspath("../MILIG files/20170923_053525 meteorite dropping")
+    # #dir_path = os.path.abspath("../MILIG files/20170923_053525 meteorite dropping GRAVITY TEST")
+    # #dir_path = os.path.abspath("../MILIG files/20171127_meteorite_dropping")
+    # #dir_path = os.path.abspath("../MILIG files/20171231_011853")
+    # #dir_path = os.path.abspath("../MILIG files/20180125_meteorite_dropping")
+    # #dir_path = os.path.abspath("../MILIG files/PyLIG20180123_020244")
+    # #dir_path = os.path.abspath("../MILIG files/PyLIG20180206_011705")
+    # #dir_path = os.path.abspath("../MILIG files/PyLIG20180209_231854")
+    # #dir_path = os.path.abspath("../MILIG files/20180117_010828 Michigan fireball")
+    # #dir_path = os.path.abspath("../MILIG files/20180117_010828 Michigan fireball (2 stations)")
+    # dir_path = os.path.abspath("../MILIG files/20180117_010828 Michigan fireball (4 stations)")
+    # #dir_path = os.path.abspath("../MILIG files/20180117_010828 Michigan fireball (2 stations) second")
     
 
-    #file_name = "input_krizy_01.txt"
-    #file_name = 'PyLIG_in_2011100809PUB0030.txt'
-    #file_name = 'PyLIG_in_2011100809DUI0066.txt'
-    #file_name = 'PyLIG_in_2011100809VIB0142.txt'
-    #file_name = "PyLIG_in_2011100809VIB0141.txt"
-    #file_name = "PyLIG_in_2016112223APO0002.txt"
-    #file_name = "PyLIG_IN_Pula_2010102829.txt"
-    #file_name = "PyLIG_M_20170531_002824.txt"
-    #file_name = "PyLIG_IN_Pula_2010102829.txt"
-    #file_name = "20170923_053525-obs.dat"
-    file_name = "input.txt"
-    #file_name = "20171231_011853-input.txt"
-    #file_name = "20180123_020244-input.txt"
-    #file_name = "20180206_011705_input.txt"
-    #file_name = "20180206_011705_input.txt"
+    # #file_name = "input_krizy_01.txt"
+    # #file_name = 'PyLIG_in_2011100809PUB0030.txt'
+    # #file_name = 'PyLIG_in_2011100809DUI0066.txt'
+    # #file_name = 'PyLIG_in_2011100809VIB0142.txt'
+    # #file_name = "PyLIG_in_2011100809VIB0141.txt"
+    # #file_name = "PyLIG_in_2016112223APO0002.txt"
+    # #file_name = "PyLIG_IN_Pula_2010102829.txt"
+    # #file_name = "PyLIG_M_20170531_002824.txt"
+    # #file_name = "PyLIG_IN_Pula_2010102829.txt"
+    # #file_name = "20170923_053525-obs.dat"
+    # file_name = "input.txt"
+    # #file_name = "20171231_011853-input.txt"
+    # #file_name = "20180123_020244-input.txt"
+    # #file_name = "20180206_011705_input.txt"
+    # #file_name = "20180206_011705_input.txt"
 
 
 
-    solveTrajectoryMILIG(dir_path, file_name, solver='original', max_toffset=1.0, monte_carlo=False, 
-        mc_runs=250, gravity_correction=True)
+    # solveTrajectoryMILIG(dir_path, file_name, solver='original', max_toffset=1.0, monte_carlo=False, 
+    #     mc_runs=250, gravity_correction=True)
 
     
 

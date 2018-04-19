@@ -26,7 +26,8 @@ from mpl_toolkits.basemap import Basemap
 
 from Trajectory.Orbit import calcOrbit
 
-from Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, RMSD, angleBetweenSphericalCoords
+from Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, RMSD, angleBetweenSphericalCoords, \
+    checkContinuity
 from Utils.OSTools import mkdirP
 from Utils.Pickling import savePickle
 from Utils.Plotting import savePlot
@@ -42,7 +43,7 @@ from Utils.PyDomainParallelizer import DomainParallelizer
 
 class ObservedPoints(object):
     def __init__(self, jdt_ref, meas1, meas2, time_data, lat, lon, ele, meastype, station_id=None, \
-        excluded_time=None):
+        excluded_time=None, ignore_list=None):
         """ Structure for containing data of observations from invidiual stations.
         
         Arguments:
@@ -71,9 +72,14 @@ class ObservedPoints(object):
         Keyword arguments:
             station_id: [str] Identification of the station. None by default, in which case a number will be
                 assigned to the station by the program.
-            excluded_time: [list] [excluded_time_min, excluded_time, max] A range of minimum and maximum 
+            excluded_time: [list] [excluded_time_min, excluded_time_max] A range of minimum and maximum 
                 observation time which should be excluded from the optimization because the measurements are 
                 missing in that portion of the time.
+            ignore_list: [list or ndarray] A list of 0s and 1s which should be of the equal length as 
+                the input data. If a particular data point is to be ignored, number 1 should be put,
+                otherwise (if the point should be used) 0 should be used. E.g. the this should could look
+                like this: [0, 0, 0, 1, 1, 0, 0], which would mean that the fourth and the fifth points
+                will be ignored in trajectory estimation.
 
         """
 
@@ -87,6 +93,23 @@ class ObservedPoints(object):
         self.jdt_ref = jdt_ref
 
         self.time_data = time_data
+
+        # Init the ignore list
+        if ignore_list is None:
+            self.ignore_list = np.zeros(len(time_data))
+        else:
+
+            self.ignore_list = np.array(ignore_list)
+
+            # # Check if there is one continous sequence of ignored indices and use excluded points method 
+            # #   instead
+            # if excluded_time is None:
+
+            #     continuity_status, first_ignored, last_ignored = checkContinuity(self.ignore_list)
+
+            #     if continuity_status and np.any(self.ignore_list):
+            #         excluded_time = [self.time_data[first_ignored], self.time_data[last_ignored]]
+
 
         # Store the number of measurement
         self.kmeas = len(self.time_data)
@@ -264,7 +287,8 @@ class ObservedPoints(object):
                 excluded_indx_min = 0
                 excluded_indx_max = len(self.time_data) - 1
 
-                for i, t in enumerate(self.time_data):
+                # Find indices of excluded times, taking the ignored points into account
+                for i, t in enumerate(self.time_data[self.ignore_list == 0]):
                     
                     if t <= excluded_time_min:
                         excluded_indx_min = i
@@ -279,8 +303,6 @@ class ObservedPoints(object):
             else:
 
                 print('Excluded time range', self.excluded_time, 'is outside the observation times!')
-
-
 
 
         ######################################################################################################
@@ -636,7 +658,12 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
     for i, obs in enumerate(observations):
         
         # Go through all measured positions
-        for t, meas_eci, stat_eci in zip(obs.time_data, obs.meas_eci_los, obs.stat_eci_los):
+        for t, meas_eci, stat_eci, ignore in zip(obs.time_data, obs.meas_eci_los, obs.stat_eci_los, \
+            obs.ignore_list):
+
+            # Skip the point if it is to be ignored
+            if ignore:
+                continue
 
             # Get the ECI coordinates of the projection of the measurement line of sight on the radiant line
             _, rad_cpa, _ = findClosestPoints(stat_eci, meas_eci, state_vect, radiant_eci)
@@ -1095,19 +1122,19 @@ def timingResiduals(params, observations, t_ref_station, weights=None, ret_stdde
             if i == t_ref_station:
                 continue
 
-            time, state_vect_dist = state_vect_distances[i]
+            time_data, state_vect_dist = state_vect_distances[i]
 
             # Take only those points that overlap with the reference station
-            common_points = np.where((time > np.min(ref_time)) & (time < np.max(ref_time)))
+            common_points = np.where((time_data > np.min(ref_time)) & (time_data < np.max(ref_time)))
 
             # Do this is there are at least 4 overlapping points
             if len(common_points[0]) > 4:
-                time = time[common_points]
+                time_data = time_data[common_points]
                 state_vect_dist = state_vect_dist[common_points]
 
             # Calculate the residuals in dist from the current dist to the reference dist, using smooth
             # approximation of L1 (absolute value) cost
-            z = (ref_line_spline(time) - state_vect_dist)**2
+            z = (ref_line_spline(time_data) - state_vect_dist)**2
             residual_sum += np.sum(2*(np.sqrt(1 + z) - 1))
 
             # Standard deviation calculation
@@ -1138,69 +1165,62 @@ def timingResiduals(params, observations, t_ref_station, weights=None, ret_stdde
         cost_point_count = 0
         weights_sum = 1e-10
 
-        # Go through all pairs of observations
+        # Go through all pairs of observations (i.e. stations)
         for i in range(len(observations)):
             for j in range(len(observations)):
 
-                # Skip pairing the same observations
+                # Skip pairing the same observations again
                 if j <= i:
                     continue
 
-                # Extract time and length from first point
+                # Extract times and lengths from both stations
                 time1, len1 = state_vect_distances[i]
                 time2, len2 = state_vect_distances[j]
 
-                # Find common points in length
+                # Exclude ignored points
+                time1 = time1[observations[i].ignore_list == 0]
+                len1 = len1[observations[i].ignore_list == 0]
+                time2 = time2[observations[j].ignore_list == 0]
+                len2 = len2[observations[j].ignore_list == 0]
+
+                # Find common points in length between both stations
                 common_pts = np.where((len2 >= np.min(len1)) & (len2 <= np.max(len1)))
 
-                # If the number of common points is smaller than 3, fit a line through length (thus assume no
-                # deceleration) and find the residuals from that
-                if len(common_pts[0]) < 4:
 
-                    ### TEST!!!
-                    # Continue without fitting the timing is there is not overlap!
+                # Continue without fitting the timing is there is no, or almost no overlap
+                if len(common_pts[0]) < 4:
                     continue
 
-                    # # Fit a line to the length
-                    # popt, _ = scipy.optimize.curve_fit(lineFunc, len1, time1)
 
-                    # # Calculate the residuals using smooth approximation of L1 (absolute value) cost
-                    # z = (lineFunc(len2, *popt) - time2)**2
-
-
-                # Take common points and find the residuals from interpolation
-                else:
-
-                    # Take only the common points
-                    time2 = time2[common_pts]
-                    len2 = len2[common_pts]
+                # Take only the common points
+                time2 = time2[common_pts]
+                len2 = len2[common_pts]
 
 
-                    # If there are any excluded points in the reference observations, do not take their
-                    # pairs form the other site into consideration
-                    if observations[i].excluded_indx_range:
+                # If there are any excluded points in the reference observations, do not take their
+                # pairs from the other site into consideration
+                if observations[i].excluded_indx_range:
 
-                        # Extract excluded indices
-                        excluded_indx_min, excluded_indx_max = observations[i].excluded_indx_range
+                    # Extract excluded indices
+                    excluded_indx_min, excluded_indx_max = observations[i].excluded_indx_range
 
-                        # Get the range of lengths inside the exclusion zone
-                        len1_excluded_min = len1[excluded_indx_min]
-                        len1_excluded_max = len1[excluded_indx_max]
+                    # Get the range of lengths inside the exclusion zone
+                    len1_excluded_min = len1[excluded_indx_min]
+                    len1_excluded_max = len1[excluded_indx_max]
 
-                        # Select only those lengths in the other station which are outside the exclusion zone
-                        temp_arr = np.c_[time2, len2]
-                        temp_arr = temp_arr[~((temp_arr[:, 1] >= len1_excluded_min) \
-                            & (temp_arr[:, 1] <= len1_excluded_max))]
+                    # Select only those lengths in the other station which are outside the exclusion zone
+                    temp_arr = np.c_[time2, len2]
+                    temp_arr = temp_arr[~((temp_arr[:, 1] >= len1_excluded_min) \
+                        & (temp_arr[:, 1] <= len1_excluded_max))]
 
-                        time2, len2 = temp_arr.T
+                    time2, len2 = temp_arr.T
 
 
-                    # Interpolate the first (i.e. reference length)
-                    len1_interpol = scipy.interpolate.interp1d(len1, time1)
+                # Interpolate the first (i.e. reference length)
+                len1_interpol = scipy.interpolate.interp1d(len1, time1)
 
-                    # Calculate the residuals using smooth approximation of L1 (absolute value) cost
-                    z = (len1_interpol(len2) - time2)**2
-
+                # Calculate the residuals using smooth approximation of L1 (absolute value) cost
+                z = (len1_interpol(len2) - time2)**2
 
                 # Calculate the cost function sum
                 cost_sum += weights[i]*weights[j]*np.sum(2*(np.sqrt(1 + z) - 1))
@@ -1737,7 +1757,8 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
         
             # Fill in the new trajectory object - the time is assumed to be absolute
             traj_mc.infillTrajectory(azim_noise_list, elev_noise_list, obs.time_data, obs.lat, obs.lon, \
-                obs.ele, station_id=obs.station_id, excluded_time=obs.excluded_time)
+                obs.ele, station_id=obs.station_id, excluded_time=obs.excluded_time, \
+                ignore_list=obs.ignore_list)
 
             
         # Do not show plots or perform additional optimizations
@@ -2208,7 +2229,8 @@ class Trajectory(object):
 
 
 
-    def infillTrajectory(self, meas1, meas2, time_data, lat, lon, ele, station_id=None, excluded_time=None):
+    def infillTrajectory(self, meas1, meas2, time_data, lat, lon, ele, station_id=None, excluded_time=None,
+        ignore_list=None):
         """ Initialize a set of measurements for a given station. 
     
         Arguments:
@@ -2225,6 +2247,11 @@ class Trajectory(object):
             station_id: [str] Identification of the station. None by default.
             excluded_time: [list] A range of minimum and maximum observation time which should be excluded 
                 from the optimization because the measurements are missing in that portion of the time.
+            ignore_list: [list or ndarray] A list of 0s and 1s which should be of the equal length as 
+                the input data. If a particular data point is to be ignored, number 1 should be put,
+                otherwise (if the point should be used) 0 should be used. E.g. the this should could look
+                like this: [0, 0, 0, 1, 1, 0, 0], which would mean that the fourth and the fifth points
+                will be ignored in trajectory estimation.
 
         Return:
             None
@@ -2240,9 +2267,15 @@ class Trajectory(object):
         meas2 = np.array(meas2)
         time_data = np.array(time_data)
 
+        # Skip the observation if all points were ignored
+        if ignore_list is not None:
+            if np.all(ignore_list):
+                print('All points from station {:s} are ignored, skipping this station!'.format(station_id))
+                return None
+
         # Init a new structure which will contain the observed data from the given site
         obs = ObservedPoints(self.jdt_ref, meas1, meas2, time_data, lat, lon, ele, station_id=station_id, 
-            meastype=self.meastype, excluded_time=excluded_time)
+            meastype=self.meastype, excluded_time=excluded_time, ignore_list=ignore_list)
             
         # Add observations to the total observations list
         self.observations.append(obs)
@@ -2296,8 +2329,9 @@ class Trajectory(object):
                 obs.model_azim)
 
 
-            # Calculate the standard deviaton of angular residuals in radians
-            obs.ang_res_std = RMSD(obs.ang_res)
+            # Calculate the standard deviaton of angular residuals in radians, taking the ignored points into
+            #   account
+            obs.ang_res_std = RMSD(obs.ang_res[obs.ignore_list == 0])
 
 
 
@@ -2516,7 +2550,7 @@ class Trajectory(object):
         # difference for the reference site is always 0)
         p0 = np.zeros(shape=(self.station_count - 1))
 
-        # Set the time reference station to be the one with the most points
+        # Set the time reference station to be the one with the most used points
         obs_points = [obs.kmeas for obs in self.observations]
         self.t_ref_station = obs_points.index(max(obs_points))
 
@@ -2585,11 +2619,12 @@ class Trajectory(object):
 
 
 
+            # Add in time and distance points, excluding the ignored points
             times = []
             state_vect_dist = []
             for obs in observations:
-                times.append(obs.time_data)
-                state_vect_dist.append(obs.state_vect_dist)
+                times.append(obs.time_data[obs.ignore_list == 0])
+                state_vect_dist.append(obs.state_vect_dist[obs.ignore_list == 0])
 
             times = np.concatenate(times).ravel()
             state_vect_dist = np.concatenate(state_vect_dist).ravel()
@@ -2603,7 +2638,6 @@ class Trajectory(object):
             stddev_list = []
 
             # Calculate the velocity on different initial portions of the trajectory
-            #for init_point in np.arange(0, 0.3, 0.05):
 
             # Find the best fit by starting from the first few beginning points
             for part_beg in range(4):
@@ -2835,15 +2869,15 @@ class Trajectory(object):
 
 
 
-            # Set the coordinates of the first point on the trajectory
-            obs.rbeg_lat = obs.model_lat[0]
-            obs.rbeg_lon = obs.model_lon[0]
-            obs.rbeg_ele = obs.model_ht[0]
+            # Set the coordinates of the first point on the trajectory, taking the ignored points into account
+            obs.rbeg_lat = obs.model_lat[obs.ignore_list == 0][0]
+            obs.rbeg_lon = obs.model_lon[obs.ignore_list == 0][0]
+            obs.rbeg_ele = obs.model_ht[obs.ignore_list == 0][0]
 
-            # Set the coordinates of the last point on the trajectory
-            obs.rend_lat = obs.model_lat[-1]
-            obs.rend_lon = obs.model_lon[-1]
-            obs.rend_ele = obs.model_ht[-1]
+            # Set the coordinates of the last point on the trajectory, taking the ignored points into account
+            obs.rend_lat = obs.model_lat[obs.ignore_list == 0][-1]
+            obs.rend_lon = obs.model_lon[obs.ignore_list == 0][-1]
+            obs.rend_ele = obs.model_ht[obs.ignore_list == 0][-1]
 
 
         # Find the highest beginning height
@@ -2854,7 +2888,8 @@ class Trajectory(object):
         self.rbeg_lat = self.observations[first_begin].rbeg_lat
         self.rbeg_lon = self.observations[first_begin].rbeg_lon
         self.rbeg_ele = self.observations[first_begin].rbeg_ele
-        self.rbeg_jd = self.observations[first_begin].JD_data[0]
+        self.rbeg_jd = self.observations[first_begin].JD_data[self.observations[first_begin].ignore_list \
+            == 0][0]
 
 
         # Find the lowest ending height
@@ -2865,7 +2900,7 @@ class Trajectory(object):
         self.rend_lat = self.observations[last_end].rend_lat
         self.rend_lon = self.observations[last_end].rend_lon
         self.rend_ele = self.observations[last_end].rend_ele
-        self.rend_jd = self.observations[last_end].JD_data[-1]
+        self.rend_jd = self.observations[last_end].JD_data[self.observations[last_end].ignore_list == 0][-1]
 
 
 
@@ -3001,20 +3036,22 @@ class Trajectory(object):
         # Go through all observations
         for obs in observations:
 
-            # Calculate the average velocity
-            meteor_duration = obs.time_data[-1] - obs.time_data[0]
-            meteor_length = vectMag(obs.model_eci[-1] - obs.model_eci[0])
+            # Calculate the average velocity, ignoring ignored points
+            meteor_duration = obs.time_data[obs.ignore_list == 0][-1] - obs.time_data[obs.ignore_list == 0][0]
+            meteor_length = vectMag(obs.model_eci[obs.ignore_list == 0][-1] \
+                - obs.model_eci[obs.ignore_list == 0][0])
 
             # Calculate the average velocity
             v_avg = meteor_length/meteor_duration
 
             v_sum += v_avg
-            eci_sum += np.sum(obs.model_eci, axis=0)
+            eci_sum += np.sum(obs.model_eci[obs.ignore_list == 0], axis=0)
             
-            jd_min = min(jd_min, np.min(obs.JD_data))
-            jd_max = max(jd_max, np.max(obs.JD_data))
+            jd_min = min(jd_min, np.min(obs.JD_data[obs.ignore_list == 0]))
+            jd_max = max(jd_max, np.max(obs.JD_data[obs.ignore_list == 0]))
 
-            meas_sum += obs.kmeas
+            # Add in the total number of used points
+            meas_sum += len(obs.time_data[obs.ignore_list == 0])
 
 
         # Average velocity across all stations
@@ -3288,7 +3325,7 @@ class Trajectory(object):
         out_str += "------\n"
 
 
-        out_str += " No, Station ID,  Time (s),                   JD,     meas1,     meas2, Azim +E of due N (deg), Alt (deg), Azim line (deg), Alt line (deg), RA obs (deg), Dec obs (deg), RA line (deg), Dec line (deg),       X (m),       Y (m),       Z (m), Latitude (deg), Longitude (deg), Height (m),  Range (m), Length (m),  Lag (m), Vel (m/s), H res (m), V res (m), Ang res (asec)\n"
+        out_str += " No, Station ID,  Ignore,  Time (s),                   JD,     meas1,     meas2, Azim +E of due N (deg), Alt (deg), Azim line (deg), Alt line (deg), RA obs (deg), Dec obs (deg), RA line (deg), Dec line (deg),       X (m),       Y (m),       Z (m), Latitude (deg), Longitude (deg), Height (m),  Range (m), Length (m),  Lag (m), Vel (m/s), H res (m), V res (m), Ang res (asec)\n"
 
         # Go through observation from all stations
         for obs in self.observations:
@@ -3301,6 +3338,8 @@ class Trajectory(object):
                 point_info.append("{:3d}".format(i))
 
                 point_info.append("{:>10s}".format(str(obs.station_id)))
+
+                point_info.append("{:>7d}".format(obs.ignore_list[i]))
                 
                 point_info.append("{:9.6f}".format(obs.time_data[i]))
                 point_info.append("{:20.12f}".format(obs.JD_data[i]))
@@ -3350,6 +3389,7 @@ class Trajectory(object):
 
         out_str += "Notes\n"
         out_str += "-----\n"
+        out_str += "- Points that have not been taken into consideratio when computing the trajectory have '1' in the 'Ignore' column.\n"
         out_str += "- The time already has time offsets applied to it.\n"
         out_str += "- 'meas1' and 'meas2' are given input points.\n"
         out_str += "- X, Y, Z are ECI (Earth-Centered Inertial) positions of projected lines of sight on the radiant line.\n"
@@ -3425,6 +3465,19 @@ class Trajectory(object):
             plt.scatter(obs.time_data, obs.h_residuals, c='b', \
                 label='Horizontal, RMSD = {:.2f}'.format(h_res_rms), zorder=3, s=2)
 
+            # Mark ignored points
+            if np.any(obs.ignore_list):
+
+                ignored_times = obs.time_data[obs.ignore_list > 0]
+                ignored_v_res = obs.v_residuals[obs.ignore_list > 0]
+                ignored_h_res = obs.h_residuals[obs.ignore_list > 0]
+
+                plt.scatter(ignored_times, ignored_v_res, facecolors='none', edgecolors='k', marker='o', \
+                    zorder=3, s=20, label='Ignored points')
+                plt.scatter(ignored_times, ignored_h_res, facecolors='none', edgecolors='k', marker='o', 
+                    zorder=3, s=20)
+
+
             plt.title('Residuals, station ' + str(obs.station_id))
             plt.xlabel('Time (s)')
             plt.ylabel('Residuals (m)')
@@ -3460,11 +3513,26 @@ class Trajectory(object):
 
             fig, ax1 = plt.subplots()
 
-            ax1.plot(obs.lag, obs.time_data, color='r', marker='x', label='Lag', zorder=3)
+            # Extract lag points that were not ignored
+            used_times = obs.time_data[obs.ignore_list == 0]
+            used_lag = obs.lag[obs.ignore_list == 0]
+
+            # Plot the lag
+            ax1.plot(used_lag, used_times, color='r', marker='x', label='Lag', zorder=3)
 
             # Plot the Jacchia fit
             ax1.plot(jacchiaLagFunc(obs.time_data, *obs.jacchia_fit), obs.time_data, color='b', 
                 label='Jacchia fit', zorder=3)
+
+
+            # Plot ignored lag points
+            if np.any(obs.ignore_list):
+
+                ignored_times = obs.time_data[obs.ignore_list > 0]
+                ignored_lag = obs.v_residuals[obs.ignore_list > 0]
+
+                ax1.scatter(ignored_lag, ignored_times, c='k', marker='+', zorder=4, label='Ignored points')
+
             
             ax1.legend()
 
@@ -3503,8 +3571,27 @@ class Trajectory(object):
 
         # Plot lags from each station on a single plot
         for obs in self.observations:
-            plt.plot(obs.lag, obs.time_data, marker='x', label='Station: ' + str(obs.station_id), 
+
+            # Extract lag points that were not ignored
+            used_times = obs.time_data[obs.ignore_list == 0]
+            used_lag = obs.lag[obs.ignore_list == 0]
+
+            # Plot the lag
+            plt_handle = plt.plot(used_lag, used_times, marker='x', label='Station: ' + str(obs.station_id), 
                 zorder=3)
+
+
+            # Plot ignored lag points
+            if np.any(obs.ignore_list):
+
+                ignored_times = obs.time_data[obs.ignore_list > 0]
+                ignored_lag = obs.v_residuals[obs.ignore_list > 0]
+
+                plt.scatter(ignored_lag, ignored_times, facecolors='k', edgecolors=plt_handle[0].get_color(), 
+                    marker='o', s=8, zorder=4, label='Station: {:s} ignored points'.format(str(obs.station_id)))
+
+
+
 
         # Plot the Jacchia fit on all observations
         time_all = np.sort(np.hstack([obs.time_data for obs in self.observations]))
@@ -3538,7 +3625,23 @@ class Trajectory(object):
         ### PLOT DISTANCE FROM RADIANT STATE VECTOR POSITION ###
         ######################################################################################################
         for obs in self.observations:
-            plt.plot(obs.state_vect_dist, obs.time_data, marker='x', label=str(obs.station_id), zorder=3)
+
+            # Extract points that were not ignored
+            used_times = obs.time_data[obs.ignore_list == 0]
+            used_dists = obs.state_vect_dist[obs.ignore_list == 0]
+
+            plt_handle = plt.plot(used_dists, used_times, marker='x', label=str(obs.station_id), zorder=3)
+
+
+            # Plot ignored points
+            if np.any(obs.ignore_list):
+
+                ignored_times = obs.time_data[obs.ignore_list > 0]
+                ignored_dists = obs.state_vect_dist[obs.ignore_list > 0]
+                    
+                plt.scatter(ignored_dists, ignored_times, facecolors='k', edgecolors=plt_handle[0].get_color(), 
+                    marker='o', s=8, zorder=4, label='{:s} ignored points'.format(str(obs.station_id)))
+
 
 
         # Add the fitted velocity line
@@ -3598,11 +3701,36 @@ class Trajectory(object):
         t_max = -np.inf
         t_min = np.inf
 
+        
+        first_ignored_plot = True
+
         # Plot velocities from each observed site
         for i, obs in enumerate(self.observations):
 
+            # Mark ignored velocities
+            if np.any(obs.ignore_list):
+
+                # Extract data that is not ignored
+                ignored_times = obs.time_data[1:][obs.ignore_list[1:] > 0]
+                ignored_velocities = obs.velocities[1:][obs.ignore_list[1:] > 0]
+
+                # Set the label only for the first occurence
+                if first_ignored_plot:
+
+                    ax1.scatter(ignored_velocities, ignored_times, facecolors='none', edgecolors='k', \
+                        zorder=4, s=30, label='Ignored points')
+
+                    first_ignored_plot = False
+
+                else:
+                    ax1.scatter(ignored_velocities, ignored_times, facecolors='none', edgecolors='k', \
+                        zorder=4, s=30)
+
+
+            # Plot all velocities
             ax1.scatter(obs.velocities[1:], obs.time_data[1:], marker=markers[i%len(markers)], 
                 c=colors[i], alpha=0.5, label='Station: ' + str(obs.station_id), zorder=3)
+
 
             # Determine the max/min velocity and height, as this is needed for plotting both height/time axes
             vel_max = max(np.max(obs.velocities[1:]), vel_max)
@@ -3708,11 +3836,22 @@ class Trajectory(object):
             # Calculate residuals in arcseconds
             res = np.degrees(obs.ang_res)*3600
 
+            # Mark ignored points
+            if np.any(obs.ignore_list):
+
+                ignored_times = obs.time_data[obs.ignore_list > 0]
+                ignored_residuals = res[obs.ignore_list > 0]
+
+                plt.scatter(ignored_times, ignored_residuals, facecolors='none', edgecolors='k', s=20, \
+                    zorder=4, label='Ignored points')
+
+
             # Calculate the RMSD of the residuals in arcsec
             res_rms = np.degrees(obs.ang_res_std)*3600
 
             # Plot residuals
             plt.scatter(obs.time_data, res, label='Angle, RMSD = {:.2f}"'.format(res_rms), s=2, zorder=3)
+
 
             plt.title('Observed vs. Radiant LoS Residuals, station ' + str(obs.station_id))
             plt.ylabel('Angle (arcsec)')
@@ -3737,10 +3876,31 @@ class Trajectory(object):
 
 
         # Plot angular residuals from all stations
+        first_ignored_plot = True
         for obs in self.observations:
 
             # Calculate residuals in arcseconds
             res = np.degrees(obs.ang_res)*3600
+
+
+            # Mark ignored points
+            if np.any(obs.ignore_list):
+
+                ignored_times = obs.time_data[obs.ignore_list > 0]
+                ignored_residuals = res[obs.ignore_list > 0]
+
+                # Plot the label only for the first occurence
+                if first_ignored_plot:
+                    
+                    plt.scatter(ignored_times, ignored_residuals, facecolors='none', edgecolors='k', s=20, \
+                        zorder=4, label='Ignored points')
+
+                    first_ignored_plot = False
+
+                else:
+                    plt.scatter(ignored_times, ignored_residuals, facecolors='none', edgecolors='k', s=20, \
+                        zorder=4)
+
 
             # Calculate the RMS of the residuals in arcsec
             res_rms = np.degrees(obs.ang_res_std)*3600
@@ -4260,7 +4420,8 @@ class Trajectory(object):
                 for obs in temp_observations:
             
                     self.infillTrajectory(obs.meas1, obs.meas2, obs.time_data, obs.lat, obs.lon, obs.ele, \
-                        station_id=obs.station_id, excluded_time=obs.excluded_time)
+                        station_id=obs.station_id, excluded_time=obs.excluded_time, \
+                        ignore_list=obs.ignore_list)
 
                 
                 # Re-run the trajectory estimation with updated timings. This will update all calculated
@@ -4340,6 +4501,7 @@ class Trajectory(object):
                         obs.time_data = obs.time_data[good_picks]
                         obs.meas1 = obs.meas1[good_picks]
                         obs.meas2 = obs.meas2[good_picks]
+                        obs.ignore_list = obs.ignore_list[good_picks]
 
 
                 # Run only if some picks were rejected
@@ -4357,7 +4519,8 @@ class Trajectory(object):
                     for obs in temp_observations:
                 
                         self.infillTrajectory(obs.meas1, obs.meas2, obs.time_data, obs.lat, obs.lon, \
-                            obs.ele, station_id=obs.station_id, excluded_time=obs.excluded_time)
+                            obs.ele, station_id=obs.station_id, excluded_time=obs.excluded_time,
+                            ignore_list=obs.ignore_list)
 
                     
                     # Re-run the trajectory estimation with updated timings. This will update all calculated

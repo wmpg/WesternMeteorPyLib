@@ -743,6 +743,68 @@ def subsampleAverage(arr, n=3):
 
 
 
+def checkContinuity(sequence):
+    """ Given a sequence of 1s and 0s, check if there is exactly one continuous sequence of 1s. 
+
+    Arguments:
+        sequence: [list] A list of 0s and 1s.
+
+    Return:
+        (status, first_index, last_index): [bool], [int], [int] True if the sequence contains exaclty one 
+            continous string of 1s, False otherwise. first_index and last_index are indices of the beginning
+            and the end of the sequence.
+
+    Examples:
+
+        Input: [1, 1, 1, 1, 1, 1]
+        Output: True, 0, 5
+
+        Input: [0, 1, 1, 1, 1, 1, 1, 1, 1, 0]
+        Output: True, 1, 8
+        
+        Input: [0, 0, 0, 0, 0]
+        Output: False, 0, 0
+
+        Input: [1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0]
+        Output: False, 0, 0
+    """
+
+    sequence = np.array(sequence)
+
+    # Compute element-wise differences
+    diffs = sequence[:-1] - sequence[1:]
+
+    # Check if the number of differences is 2 or less, indicating one continous sequence
+    if np.count_nonzero(diffs) == 0:
+
+        # Make sure there are more then one 1s in the sequence
+        if np.count_nonzero(sequence == 1) > 1:
+            return True, 0, len(sequence) - 1
+
+    elif np.count_nonzero(diffs) == 1:
+
+        # Find the index at which the change occurs
+        change_indx = np.argwhere(diffs != 0)[0][0]
+
+        # If the first part are zeros
+        if diffs[change_indx] < 0:
+            return True, change_indx + 1, len(sequence) - 1
+
+        else:
+            return True, 0, change_indx
+
+
+    elif np.count_nonzero(diffs) == 2:
+
+        # Check if that continous sequence is a sequence of ones, or a sequence of zeros
+        first, last = np.argwhere(diffs != 0)
+
+        if np.count_nonzero(sequence[first[0]+1:last[0]] == 1):
+            return True, first[0] + 1, last[0]
+
+    return False, 0, 0
+
+
 ### OPTIMIZATION ###
 ##############################################################################################################
 
