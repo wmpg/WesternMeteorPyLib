@@ -28,9 +28,11 @@ First, let's install all prerequisites:
 ```
 sudo apt-get update
 sudo apt-get -y upgrade
-sudo apt-get install -y libblas* liblapack-dev python-pip python-dev libgeos-3*
+sudo apt-get install -y libblas* liblapack-dev python-pip python-dev python-tk libgeos-3* libxml2-dev libxslt-dev python-dev lib32z1-dev
 sudo pip install setuptools --upgrade
 sudo pip install numpy --upgrade
+sudo pip install matplotlib --upgrade
+sudo pip install scipy
 sudo pip install https://github.com/matplotlib/basemap/archive/v1.1.0.tar.gz
 ```
 
