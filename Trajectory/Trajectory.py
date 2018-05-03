@@ -4745,12 +4745,14 @@ if __name__ == "__main__":
 
 
     # Init new trajectory solving
-    traj_solve = Trajectory(jdt_ref, meastype=meastype, save_results=False, monte_carlo=True)
+    traj_solve = Trajectory(jdt_ref, meastype=meastype, save_results=False, monte_carlo=False)
 
     # Set input points for the first site
     traj_solve.infillTrajectory(theta1, phi1, time1, lat1, lon1, ele1)
 
     # Set input points for the second site
     traj_solve.infillTrajectory(theta2, phi2, time2, lat2, lon2, ele2)
+
+    traj_solve.run()
 
     ###############
