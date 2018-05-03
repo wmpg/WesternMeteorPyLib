@@ -21,7 +21,7 @@ List of features:
 
 
 ## Installation
-These are installation instructions for Linux. On windows, you might not have to install library packages, but the installation might differ. I recommend installing [Anaconda Python 3.*](https://www.anaconda.com/download/#linux), which should install most of the packages you will need. Contact me for more details about Windows installation if you are stuck.
+These are installation instructions for Linux. On windows, you might not have to install library packages, but the installation might differ. I recommend installing [Anaconda Python 3.*](https://www.anaconda.com/download/#linux), which should install most of the packages you will need. Contact me for more details about Windows installation if you are stuck. Also, you might want to install this in a separate [virtual environment](https://www.dabapps.com/blog/introduction-to-pip-and-virtualenv-python/) in Python - in that case you should omit "sudo" in front of "pip" commands.
 
 
 First, let's install all prerequisites:
