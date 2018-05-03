@@ -3418,7 +3418,7 @@ class Trajectory(object):
         out_str += "- Latitude (deg), Longitude (deg), Height (m) are WGS84 coordinates of each point on the radiant line.\n"
         out_str += "- Jacchia (1955) deceleration equation fit was done on the lag.\n"
         out_str += "- Right ascension and declination in the table are given for the epoch of date for the corresponding JD, per every point.\n"
-        out_str += "- 'RA and Dec obs' are the right ascension and declination calculated from the observed values, while the 'RA and Dec line' are coordinates of the lines of sight projected on the fitted radiant line. 'Azim and alt line' are thus corresponding azimuthal coordinates.\n"
+        out_str += "- 'RA and Dec obs' are the right ascension and declination calculated from the observed values, while the 'RA and Dec line' are coordinates of the lines of sight projected on the fitted radiant line. The coordinates are in the epoch of date, and NOT J2000!. 'Azim and alt line' are thus corresponding azimuthal coordinates.\n"
 
         if verbose:
             print(out_str)
