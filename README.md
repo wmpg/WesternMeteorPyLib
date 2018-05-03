@@ -21,6 +21,19 @@ List of features:
 
 
 ## Installation
+These are installation instructions for Linux. On windows, you might not have to install library packages, but the installation might differ. I recommend installing [Anaconda Python 3.*](https://www.anaconda.com/download/#linux), which should install most of the packages you will need. Contact me for more details about Windows installation if you are stuck.
+
+
+First, let's install all prerequisites:
+```
+sudo apt-get update
+sudo apt-get -y upgrade
+sudo apt-get install -y libblas* liblapack-dev python-pip python-dev libgeos-3*
+sudo pip install setuptools --upgrade
+sudo pip install numpy --upgrade
+sudo pip install https://github.com/matplotlib/basemap/archive/v1.1.0.tar.gz
+```
+
 
 To clone this repository locally, run:
 
@@ -31,19 +44,7 @@ git clone --recursive https://github.com/dvida/WesternMeteorPyLib.git
 After cloning/downloading this library, navigate into it with a terminal and run:
 
 ```
-python setup.py install
-```
-
-This should install most of the libraries you need. You may have issues with basemap, in that case you'll need to have the GEOS library installed:
-
-```
-sudo apt-get install libgeos-3* libgeos-c1v5 libgeos-dev
-```
-
-After which install basemap:
-
-```
-pip install https://github.com/matplotlib/basemap/archive/v1.1.0.tar.gz
+sudo python setup.py install
 ```
 
 

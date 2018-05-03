@@ -96,10 +96,10 @@ class ObservedPoints(object):
 
         # Init the ignore list
         if ignore_list is None:
-            self.ignore_list = np.zeros(len(time_data))
+            self.ignore_list = np.zeros(len(time_data), dtype=np.uint8)
         else:
 
-            self.ignore_list = np.array(ignore_list)
+            self.ignore_list = np.array(ignore_list, dtype=np.uint8)
 
             # # Check if there is one continous sequence of ignored indices and use excluded points method 
             # #   instead
@@ -1849,11 +1849,16 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
                 m.colorbar(label='$V_g$ (km/s)')
 
 
-                # Plot original radiant
-                m.scatter(traj.orbit.ra_g, traj.orbit.dec_g, s=20, facecolors='none', edgecolors='r')
+                if traj.orbit.ra_g is not None:
+                    
+                    # Plot original radiant
+                    m.scatter(traj.orbit.ra_g, traj.orbit.dec_g, s=20, facecolors='none', edgecolors='r')
 
-                # Plot MC best radiant
-                m.scatter(traj_best.orbit.ra_g, traj_best.orbit.dec_g, s=20, facecolors='none', edgecolors='g')
+
+                if traj_best.orbit.ra_g is not None:
+                    
+                    # Plot MC best radiant
+                    m.scatter(traj_best.orbit.ra_g, traj_best.orbit.dec_g, s=20, facecolors='none', edgecolors='g')
 
 
 
@@ -1933,8 +1938,11 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
         ax1.ticklabel_format(useOffset=False)
 
         # Plot the first solution and the MC solution
-        ax1.scatter(traj.orbit.a, np.degrees(traj.orbit.i), c='r', linewidth=1, edgecolors='w')
-        ax1.scatter(traj_best.orbit.a, np.degrees(traj_best.orbit.i), c='g', linewidth=1, edgecolors='w')
+        if traj.orbit.a is not None:
+            ax1.scatter(traj.orbit.a, np.degrees(traj.orbit.i), c='r', linewidth=1, edgecolors='w')
+
+        if traj_best.orbit.a is not None:
+            ax1.scatter(traj_best.orbit.a, np.degrees(traj_best.orbit.i), c='g', linewidth=1, edgecolors='w')
 
 
 
@@ -1946,8 +1954,13 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
         ax2.ticklabel_format(useOffset=False)
 
         # Plot the first solution and the MC solution
-        ax2.scatter(np.degrees(traj.orbit.peri), np.degrees(traj.orbit.i), c='r', linewidth=1, edgecolors='w')
-        ax2.scatter(np.degrees(traj_best.orbit.peri), np.degrees(traj_best.orbit.i), c='g', linewidth=1, edgecolors='w')
+        if traj.orbit.peri is not None:
+            ax2.scatter(np.degrees(traj.orbit.peri), np.degrees(traj.orbit.i), c='r', linewidth=1, \
+                edgecolors='w')
+
+        if traj_best.orbit.peri is not None:
+            ax2.scatter(np.degrees(traj_best.orbit.peri), np.degrees(traj_best.orbit.i), c='g', linewidth=1, \
+                edgecolors='w')
 
         ax2.tick_params(
             axis='y',          # changes apply to the y-axis
@@ -1965,8 +1978,11 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
         ax3.ticklabel_format(useOffset=False)
 
         # Plot the first solution and the MC solution
-        ax3.scatter(traj.orbit.e, traj.orbit.q, c='r', linewidth=1, edgecolors='w')
-        ax3.scatter(traj_best.orbit.e, traj_best.orbit.q, c='g', linewidth=1, edgecolors='w')
+        if traj.orbit.e is not None:
+            ax3.scatter(traj.orbit.e, traj.orbit.q, c='r', linewidth=1, edgecolors='w')
+
+        if traj_best.orbit.e is not None:
+            ax3.scatter(traj_best.orbit.e, traj_best.orbit.q, c='g', linewidth=1, edgecolors='w')
 
         # Plot argument of perihelion vs. perihelion distance
         ax4.hist2d(np.degrees(peri_list), q_list)
@@ -1976,8 +1992,13 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
         ax4.ticklabel_format(useOffset=False)
 
         # Plot the first solution and the MC solution
-        ax4.scatter(np.degrees(traj.orbit.peri), traj.orbit.q, c='r', linewidth=1, edgecolors='w')
-        ax4.scatter(np.degrees(traj_best.orbit.peri), traj_best.orbit.q, c='g', linewidth=1, edgecolors='w')
+        if traj.orbit.peri is not None:
+            ax4.scatter(np.degrees(traj.orbit.peri), traj.orbit.q, c='r', linewidth=1, edgecolors='w')
+
+        if traj_best.orbit.peri is not None:
+            ax4.scatter(np.degrees(traj_best.orbit.peri), traj_best.orbit.q, c='g', linewidth=1, \
+                edgecolors='w')
+            
 
         ax4.tick_params(
             axis='y',          # changes apply to the y-axis
