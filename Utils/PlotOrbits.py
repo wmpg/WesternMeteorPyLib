@@ -316,10 +316,10 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_eq
 
         # Setup the plot
         fig = plt.figure(dpi=dpi)
-        ax = fig.gca(projection='3d', axisbg=cs.background)
+        ax = fig.gca(projection='3d', facecolor=cs.background)
 
         # Set a constant aspect ratio
-        ax.set_aspect('equal', adjustable='box-forced')
+        ax.set_aspect('equal', adjustable='box')
 
         # Hide the axes
         ax.set_axis_off()
