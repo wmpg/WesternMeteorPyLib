@@ -329,17 +329,30 @@ def plotStationMap(data_list, lat_centre, lon_centre, ax=None):
     if ax is None:
         ax = plt.gca()
 
+    # Find unique networks
+    networks = set([entry[0] for entry in data_list])
+
+
     # Extract the list of station locations
     lat_list = [np.radians(entry[2]) for entry in data_list]
     lon_list = [np.radians(entry[3]) for entry in data_list]
 
     # Plot stations
     m = GroundMap(lat_list, lon_list, ax=ax, color_scheme='light')
-    m.scatter(lat_list, lon_list, c='k', s=1)
+
+    # Plot different networks with different colours
+    for net in networks:
+
+        # Extract the list of station locations
+        lat_net_list = [np.radians(entry[2]) for entry in data_list if entry[0] == net]
+        lon_net_list = [np.radians(entry[3]) for entry in data_list if entry[0] == net]
+
+        m.scatter(lat_net_list, lon_net_list, s=2, label=net)
 
     # Plot source location
-    m.scatter([np.radians(lat_centre)], [np.radians(lon_centre)], marker='*', c='yellow')
+    m.scatter([np.radians(lat_centre)], [np.radians(lon_centre)], marker='*', c='yellow', edgecolor='k', linewidth=0.1, label='Source')
 
+    plt.legend(loc='upper left')
 
     ax.set_title('Source location: {:.6f}, {:.6f}'.format(lat_centre, lon_centre))
 
