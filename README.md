@@ -21,7 +21,12 @@ List of features:
 
 
 ## Installation
-These are installation instructions for Linux. On windows, you might not have to install library packages, but the installation might differ. I recommend installing [Anaconda Python 3.*](https://www.anaconda.com/download/#linux), which should install most of the packages you will need. Contact me for more details about Windows installation if you are stuck. Also, you might want to install this in a separate [virtual environment](https://www.dabapps.com/blog/introduction-to-pip-and-virtualenv-python/) in Python - in that case you should omit "sudo" in front of "pip" commands.
+
+The two sections below describe how to install the library on both Linux and Windows. Make sure to read the "Data files" section regardless of the 
+
+### Linux
+
+These are installation instructions for Linux. You might want to install this in a separate [virtual environment](https://www.dabapps.com/blog/introduction-to-pip-and-virtualenv-python/) in Python - in that case you should omit "sudo" in front of "pip" commands.
 
 
 First, let's install all prerequisites:
@@ -48,6 +53,46 @@ After cloning/downloading this library, navigate into it with a terminal and run
 ```
 sudo python setup.py install
 ```
+
+Finally, follow the section "Data files" below to complete the installation.
+
+
+### Windows
+
+On windows, you might not have to install library packages, but the installation might differ. I recommend installing Anaconda, which should install most of the packages you will need. Contact me for more details about Windows installation if you are stuck.
+
+
+1) Install [Anaconda Python 3.*](https://www.anaconda.com/download/), IMPORTANT: during the installation, make sure to select the following:
+
+	a) Check the checkbox which tells you to add anaconda path to system path: "Add Anaconda to my PATH envorinment variable."
+
+	b) Install only for "me" (single user)
+
+
+2) Open Anaconda prompt and run:
+	```
+	conda update anaconda
+	conda install numpy scipy matplotlib
+	conda install -c conda-forge basemap basemap-data-hires jplephem pyephem
+	conda install -c obspy obspy
+	```
+
+3) Download and install git: [https://git-scm.com/downloads](https://git-scm.com/downloads)
+
+
+4) Open git bash, navigate to where you want to pull the code and run:
+	```
+	git clone --recursive https://github.com/dvida/WesternMeteorPyLib.git
+	```
+	You will probably have to log in with your GitHub account to do that.
+
+
+5) From Anaconda prompt navigate to the the cloned WesternMeteorPyLib directory and inside run:
+	```
+	python setup.py install
+	```
+
+6) Finally, follow the section "Data files" below to complete the installation.
 
 
 ### Data files
