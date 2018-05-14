@@ -3446,10 +3446,10 @@ class Trajectory(object):
         # Get the first reference time
         t0 = min([obs.time_data[0] for obs in self.observations])
 
-        # Plot residuals per observing station
+        # Plot spatial residuals per observing station
         for obs in self.observations:
 
-            ### PLOT SPATIAL RESIDUALS ###
+            ### PLOT SPATIAL RESIDUALS PER STATION ###
             ##################################################################################################
 
 
@@ -3524,6 +3524,65 @@ class Trajectory(object):
                 plt.close()
 
             ##################################################################################################
+
+
+        # Plot all spatial residuals
+        for obs in self.observations:
+
+            ### PLOT ALL SPATIAL RESIDUALS ###
+            ##################################################################################################
+
+            # Calculate root mean square of the residuals
+            v_res_rms = RMSD(obs.v_residuals)
+            h_res_rms = RMSD(obs.h_residuals)
+
+            # Plot vertical residuals
+            vres_plot = plt.scatter(obs.time_data, obs.v_residuals, marker='o', s=4, \
+                label='{:s}, vertical, RMSD = {:.2f}'.format(str(obs.station_id), v_res_rms), zorder=3)
+
+            # Plot horizontal residuals
+            plt.scatter(obs.time_data, obs.h_residuals, c=vres_plot.get_facecolor(), marker='+', \
+                label='{:s}, horizontal, RMSD = {:.2f}'.format(str(obs.station_id), h_res_rms), zorder=3)
+
+            # Mark ignored points
+            if np.any(obs.ignore_list):
+
+                ignored_times = obs.time_data[obs.ignore_list > 0]
+                ignored_v_res = obs.v_residuals[obs.ignore_list > 0]
+                ignored_h_res = obs.h_residuals[obs.ignore_list > 0]
+
+                plt.scatter(ignored_times, ignored_v_res, facecolors='none', edgecolors='k', marker='o', \
+                    zorder=3, s=20)
+                plt.scatter(ignored_times, ignored_h_res, facecolors='none', edgecolors='k', marker='o', 
+                    zorder=3, s=20)
+
+
+        plt.title('All spatial residuals')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Residuals (m)')
+
+        plt.grid()
+
+        plt.legend()
+
+        # Set the residual limits to +/-10m if they are smaller than that
+        if np.max(np.abs(plt.gca().get_ylim())) < 10:
+            plt.ylim([-10, 10])
+
+
+        if self.save_results:
+            savePlot(plt, file_name + '_all_spatial_residuals.png', output_dir)
+
+        if show_plots:
+            plt.show()
+
+        else:
+            plt.clf()
+            plt.close()
+
+        ######################################################################################################
+
+
 
 
         # Plot lag per observing station
