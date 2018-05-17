@@ -39,4 +39,4 @@ def loadPickle(dir_path, file_name):
     """
 
     with open(os.path.join(dir_path, file_name), 'rb') as f:
-        return pickle.load(f)
+        return pickle.load(f, encoding='latin1')
