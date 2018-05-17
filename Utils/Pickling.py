@@ -25,7 +25,7 @@ def savePickle(obj, dir_path, file_name):
     mkdirP(dir_path)
 
     with open(os.path.join(dir_path, file_name), 'wb') as f:
-        pickle.dump(obj, f)
+        pickle.dump(obj, f, protocol=2)
 
 
 
