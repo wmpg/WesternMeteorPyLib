@@ -363,6 +363,9 @@ if __name__ == '__main__':
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
+
+    ############################
+    
         
     # Split the input directory and the file
     if os.path.isfile(cml_args.input_file):

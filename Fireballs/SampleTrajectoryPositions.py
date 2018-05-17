@@ -6,6 +6,8 @@
 
 from __future__ import print_function, division, absolute_import
 
+import os
+import argparse
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -207,23 +209,56 @@ def sampleTrajectory(dir_path, file_name, beg_ht, end_ht, sample_step):
 
 if __name__ == "__main__":
 
-    # Directory of the trajectory file
-    dir_path = "/home/dvida/Dropbox/UWO Master's/Projects/MILIG files/20180117_010828 Michigan fireball (2 stations) second"
-
-    # Trajectory pickle file
-    file_name = "20180117_010828_trajectory.pickle"
 
 
-    # Beginning height of sampling (km)
-    #   Use -1 for the beginning hieght of the fireball
-    beg_ht = 50.0
+    ### COMMAND LINE ARGUMENTS
 
-    # End height of sampling (km)
-    #   Use -1 for the final height
-    end_ht = 10.0
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description=""" Sample the positions on the given trajectory. 
+        The beginning and ending heights should be given, as well as the height step. The function
+        returns a list of sampled points on the trajectory and their geographical coordinates. """,
+        formatter_class=argparse.RawTextHelpFormatter)
 
-    # Sampling step (km)
-    sample_step = 0.1
+    arg_parser.add_argument('traj_pickle_file', type=str, help='Path to the trajectory .pickle file.')
+
+    arg_parser.add_argument('beg_height', type=float, help='Sampling begin height (km).')
+    arg_parser.add_argument('end_height', type=float, help='Sampling end height (km).')
+    arg_parser.add_argument('height_step', type=float, help='Sampling step (km).')
+
+
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+
+    # Unpack the file name and the directory path from the given arguments
+    dir_path, file_name = os.path.split(cml_args.traj_pickle_file)
+
+    beg_ht = cml_args.beg_height
+    end_ht = cml_args.end_height
+    sample_step = cml_args.height_step
+
+    ############################
+
+
+    # # Directory of the trajectory file
+    # dir_path = "/home/dvida/Dropbox/UWO Master's/Projects/MILIG files/20180117_010828 Michigan fireball (2 stations) second"
+
+    # # Trajectory pickle file
+    # file_name = "20180117_010828_trajectory.pickle"
+
+
+    # # Beginning height of sampling (km)
+    # #   Use -1 for the beginning hieght of the fireball
+    # beg_ht = 50.0
+
+    # # End height of sampling (km)
+    # #   Use -1 for the final height
+    # end_ht = 10.0
+
+    # # Sampling step (km)
+    # sample_step = 0.1
+
 
 
     samples = sampleTrajectory(dir_path, file_name, beg_ht, end_ht, sample_step)
