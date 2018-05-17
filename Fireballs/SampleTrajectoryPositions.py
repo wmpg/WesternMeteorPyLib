@@ -189,7 +189,7 @@ def sampleTrajectory(dir_path, file_name, beg_ht, end_ht, sample_step):
 
 
         # Choose the intersection that is closer to the state vector
-        inter_min_dist_indx = np.argmin([vectMag(inter) for inter in intersections])
+        inter_min_dist_indx = np.argmin([vectMag(inter - traj.state_vect_mini) for inter in intersections])
         height_eci = intersections[inter_min_dist_indx]
 
 
