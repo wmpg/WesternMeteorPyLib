@@ -188,3 +188,12 @@ class ConfigStruct(object):
 
 # Init the configuration structure
 config = ConfigStruct()
+
+
+### MATPLOTLIB OPTIONS ###
+import matplotlib
+
+# Override default DPI for saving from the interactive window
+matplotlib.rcParams['savefig.dpi'] = 300
+
+##########################
