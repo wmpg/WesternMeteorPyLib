@@ -3,6 +3,7 @@
 from __future__ import print_function, absolute_import
 
 import os
+import sys
 import pickle
 
 
@@ -39,4 +40,11 @@ def loadPickle(dir_path, file_name):
     """
 
     with open(os.path.join(dir_path, file_name), 'rb') as f:
-        return pickle.load(f, encoding='latin1')
+
+        # Python 2
+        if sys.version_info[0] < 3:
+            return pickle.load(f)
+
+        # Python 3
+        else:
+            return pickle.load(f, encoding='latin1')
