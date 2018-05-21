@@ -412,13 +412,22 @@ def compareTrajToSim(dir_path, sim_meteors, traj_list, solver_name, radiant_exte
 
     traj_sim_pairs = []
 
-    # Find the simulation that matches the trajectory solution
+    # Find the simulation that matches the trajectory solution (the JDs might be a bit off, but find the one
+    #   that matches the best)
     for traj in traj_list:
-        for sim in sim_meteors:
+        min_indx = 0
+        min_diff = np.inf
+        for i, sim in enumerate(sim_meteors):
 
-            if traj.jdt_ref == sim.jdt_ref:
-                traj_sim_pairs.append([traj, sim])
-                break
+            jd_diff = abs(traj.jdt_ref - sim.jdt_ref)
+
+            if jd_diff < min_diff:
+                min_diff = jd_diff
+                min_indx = i
+
+
+        # Add the pair to the list
+        traj_sim_pairs.append([traj, sim_meteors[min_indx]])
 
 
     vg_diffs = []
@@ -487,7 +496,8 @@ if __name__ == "__main__":
     #dir_path = "../DenisGEMcases_5_sigma"
     #dir_path = "../Romulan2012Geminids"
 
-    dir_path = "../SimulatedMeteors/EMCCD/2011Draconids"
+    #dir_path = "../SimulatedMeteors/EMCCD/2011Draconids"
+    dir_path = "../SimulatedMeteors/CABERNET/2011Draconids"
 
     #dir_path = "../SimulatedMeteors/CAMO/2011Draconids"
     #dir_path = "../SimulatedMeteors/CAMO/2012Perseids"
@@ -500,14 +510,14 @@ if __name__ == "__main__":
 
 
     # Minimum convergence angle (deg)
-    min_conv_angle = 5.0
+    min_conv_angle = 1.0
 
 
 
-    solvers = ['milig', 'mc', 'gural0', 'gural1', 'gural3']
-    plot_labels = ['MILIG', 'Monte Carlo', 'Gural (constant)', 'Gural (linear)', 'Gural (exp)']
-    markers = ['o', 's', '+', 'x', 'D']
-    sizes = [20, 20, 40, 40, 10]
+    solvers = ['los', 'milig', 'mc', 'gural0', 'gural1', 'gural3']
+    plot_labels = ['LoS', 'MILIG', 'Monte Carlo', 'Gural (constant)', 'Gural (linear)', 'Gural (exp)']
+    markers = ['o', 's', '+', 'x', 'D', 'd']
+    sizes = [20, 20, 40, 40, 10, 20]
 
 
 
@@ -609,8 +619,14 @@ if __name__ == "__main__":
             traj_list = [traj for traj in traj_list if np.degrees(traj.best_conv_inter.conv_angle) \
                 >= min_conv_angle]
 
+        # Skip the solver if there are no trajectories to plot
+        if not traj_list:
+            print('Skipping {:s} solver, no data...'.format(solver))
+            continue
+
+
         # Plot the 2D histogram comparing the results, radiants within X degrees, Vg within X km/s
-        compareTrajToSim(dir_path, sim_meteors, traj_list, solver_name, 0.5, 1.0, vmax=5)
+        compareTrajToSim(dir_path, sim_meteors, traj_list, solver_name, 0.5, 1.0, vmax=10)
 
 
 

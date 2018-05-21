@@ -1985,11 +1985,11 @@ def simulateMeteorShower(station_list, meteor_velocity_models, n_meteors, ra_g, 
 
         sim_meteor_list.append(sim_meteor)
 
-        meteor_no += 1
-
         # Check if there are enough meteors
         if meteor_no == n_meteors:
             break
+
+        meteor_no += 1
 
 
     sol_data = np.array(sol_data)
@@ -2222,48 +2222,94 @@ if __name__ == "__main__":
     # ##########################################################################################################
 
 
-    ### CAMO STATION PARAMETERS ###
+    # ### CAMO STATION PARAMETERS ###
+    # ##########################################################################################################
+
+    # system_name = 'CAMO'
+
+    # # Number of stations in total
+    # n_stations = 2
+
+    # # Maximum time offset (seconds)
+    # t_max_offset = 1
+
+    # # Geographical coordinates of stations (lat, lon, elev, station_id) in degrees and meters
+    # stations_geo = [
+    #     [43.26420, -80.77209, 329.0, 'tavis'], # Tavis
+    #     [43.19279, -81.31565, 324.0, 'elgin']] # Elgin
+
+    # # Camera FPS per station
+    # fps_list = [110, 110]
+
+    # # Observation uncertanties per station (arcsec)
+    # obs_ang_uncertainties = [1, 1]
+
+    # # Azimuths of centre of FOVs (degrees)
+    # azim_fovs = [326.823, 1.891]
+
+    # # Elevations of centre of FOVs (degrees)
+    # elev_fovs = [41.104, 46.344]
+
+    # # Cameras FOV widths (degrees)
+    # fov_widths = [19.22, 19.22]
+
+    # # Cameras FOV heights (degrees)
+    # fov_heights = [25.77, 25.77]
+
+    # # Limiting magnitudes (needed only for ablation simulation)
+    # lim_magnitudes = [+5.5, +5.5]
+
+    # # Powers of zero-magnitude meteors (Watts) (needed only for ablation simulation)
+    # P_0m_list = [840, 840]
+
+    # # Minimum angular velocity for detection (deg/s)
+    # min_ang_velocities = [1.0, 1.0]
+
+    # ##########################################################################################################
+
+    ### CABARNET STATION PARAMETERS ###
     ##########################################################################################################
 
-    system_name = 'CAMO'
+    system_name = 'CABERNET'
 
     # Number of stations in total
-    n_stations = 2
+    n_stations = 3
 
     # Maximum time offset (seconds)
-    t_max_offset = 1
+    t_max_offset = 1.0
 
     # Geographical coordinates of stations (lat, lon, elev, station_id) in degrees and meters
     stations_geo = [
-        [43.26420, -80.77209, 329.0, 'tavis'], # Tavis
-        [43.19279, -81.31565, 324.0, 'elgin']] # Elgin
+        [42.936389, 0.142778, 2877.0, 'PicDuMidi'], #PicDuMidi
+        [42.787761, 1.300037, 1600.0, 'Guzet'], #Guzet
+        [42.051639, 0.729586, 1569.0, 'Montsec']] #Montsec
 
     # Camera FPS per station
-    fps_list = [110, 110]
+    fps_list = [95, 95, 95]
 
-    # Observation uncertanties per station (arcsec)
-    obs_ang_uncertainties = [1, 1]
+    # Observation uncertainties per station (arcsec)
+    obs_ang_uncertainties = [3.24, 3.24, 3.24]
 
     # Azimuths of centre of FOVs (degrees)
-    azim_fovs = [326.823, 1.891]
+    azim_fovs = [126.51, 251.94, 357.67]
 
     # Elevations of centre of FOVs (degrees)
-    elev_fovs = [41.104, 46.344]
+    elev_fovs = [62.67, 62.81, 64.74]
 
     # Cameras FOV widths (degrees)
-    fov_widths = [19.22, 19.22]
+    fov_widths = [40.72, 40.72, 40.72]
 
     # Cameras FOV heights (degrees)
-    fov_heights = [25.77, 25.77]
+    fov_heights = [27.21, 27.21, 27.21]
 
     # Limiting magnitudes (needed only for ablation simulation)
-    lim_magnitudes = [+5.5, +5.5]
+    lim_magnitudes = [+5.0, +5.0, +5.0]
 
     # Powers of zero-magnitude meteors (Watts) (needed only for ablation simulation)
-    P_0m_list = [840, 840]
+    P_0m_list = [840, 840, 840]
 
     # Minimum angular velocity for detection (deg/s)
-    min_ang_velocities = [1.0, 1.0]
+    min_ang_velocities = [1.0, 1.0, 1.0]
 
     ##########################################################################################################
 
@@ -2424,7 +2470,7 @@ if __name__ == "__main__":
     ### METEOR SHOWER PARAMETERS ###
     ##########################################################################################################
     
-    n_meteors = 10
+    n_meteors = 100
 
     orbit_limits = None
 
@@ -2543,7 +2589,7 @@ if __name__ == "__main__":
     ### 2011 Draconids
 
     # Shower name
-    shower_name = '2011Draconids_TEST'
+    shower_name = '2011Draconids'
 
     # Radiant position and dispersion
     ra_g = 263.387

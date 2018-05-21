@@ -27,7 +27,9 @@ if __name__ == "__main__":
     # Directory which contains SimMet .pickle files
     #shower_dir = os.path.abspath("../SimulatedMeteors/EMCCD/2011Draconids")
 
-    shower_dir = os.path.abspath("../SimulatedMeteors/CAMO/2011Draconids_TEST")
+    shower_dir = os.path.abspath("../SimulatedMeteors/CABERNET/2011Draconids")
+
+    #shower_dir = os.path.abspath("../SimulatedMeteors/CAMO/2011Draconids_TEST")
     #shower_dir = os.path.abspath("../SimulatedMeteors/CAMO/2012Perseids")
 
     #shower_dir = os.path.abspath("../SimulatedMeteors/Perfect_CAMO/2011Draconids")

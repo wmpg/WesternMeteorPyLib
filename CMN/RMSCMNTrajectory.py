@@ -16,14 +16,14 @@ if __name__ == "__main__":
 
 	ftp_stations = {'HR0002': [np.radians(45.34813055555556), np.radians(14.050744444444444), 337]}
 
-	#ftpdetectinfo_file = "C:\Users\delorayn1\Desktop\HR0002_20180119_162419_928144_detected\FTPdetectinfo_HR0002_20180119_162419_928144_temporal.txt"
-	ftpdetectinfo_file = "C:\Users\delorayn1\Desktop\HR0002_20180119_162419_928144_detected\FTPdetectinfo_HR0002_20180121_162654_728788_temporal.txt"
+	#ftpdetectinfo_file = "C:\\Users\\delorayn1\\Desktop\\HR0002_20180119_162419_928144_detected\\FTPdetectinfo_HR0002_20180119_162419_928144_temporal.txt"
+	ftpdetectinfo_file = "C:\\Users\\delorayn1\\Desktop\\HR0002_20180119_162419_928144_detected\\FTPdetectinfo_HR0002_20180121_162654_728788_temporal.txt"
 
 
 	# Load meteor from FTPdetectinfo
 	ftp = loadFTPDetectInfo(ftpdetectinfo_file, ftp_stations)
 
-	inf_dir = "C:\Users\delorayn1\Desktop\ImplementCorrection\CMN inf files"
+	inf_dir = "C:\\Users\\delorayn1\\Desktop\\ImplementCorrection\\CMN inf files"
 		
 
 	## METEOR 1
@@ -33,7 +33,7 @@ if __name__ == "__main__":
 
 	ftp_meteor = ftp[2]
 
-	output_dir = "C:\Users\delorayn1\Desktop\ImplementCorrection\FF_HR0002_20180119_210212_876_0414720"
+	output_dir = "C:\\Users\\delorayn1\\Desktop\\ImplementCorrection\\FF_HR0002_20180119_210212_876_0414720"
 	############
 
 
@@ -42,7 +42,7 @@ if __name__ == "__main__":
 
 	ftp_meteor = ftp[8]
 
-	output_dir = "C:\Users\delorayn1\Desktop\ImplementCorrection\FF_HR0002_20180119_233859_048_0641536.fits"
+	output_dir = "C:\\Users\\delorayn1\\Desktop\\ImplementCorrection\\FF_HR0002_20180119_233859_048_0641536.fits"
 	############
 
 
@@ -51,7 +51,7 @@ if __name__ == "__main__":
 
 	ftp_meteor = ftp[17]
 
-	output_dir = "C:\Users\delorayn1\Desktop\ImplementCorrection\FF_HR0002_20180120_014014_887_0817664"
+	output_dir = "C:\\Users\\delorayn1\\Desktop\\ImplementCorrection\\FF_HR0002_20180120_014014_887_0817664"
 	############
 
 
@@ -60,7 +60,7 @@ if __name__ == "__main__":
 
 	ftp_meteor = ftp[29]
 
-	output_dir = "C:\Users\delorayn1\Desktop\ImplementCorrection\FF_HR0002_20180120_050021_373_1105920"
+	output_dir = "C:\\Users\\delorayn1\\Desktop\\ImplementCorrection\\FF_HR0002_20180120_050021_373_1105920"
 	############
 
 
@@ -71,7 +71,7 @@ if __name__ == "__main__":
 
 	ftp_meteor = ftp[7]
 
-	output_dir = "C:\Users\delorayn1\Desktop\ImplementCorrection\FF_HR0002_20180121_191911_939_0254720"
+	output_dir = "C:\\Users\\delorayn1\\Desktop\\ImplementCorrection\\FF_HR0002_20180121_191911_939_0254720"
 	############
 
 

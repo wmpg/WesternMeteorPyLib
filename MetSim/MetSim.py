@@ -777,6 +777,13 @@ def runSimulation(met, consts, lat=None, lon=None, jd_ref=None, no_atmosphere_en
 
         atm_dens_list = np.array(atm_dens_list)
 
+        # ### TEST ## !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+        # # Increase atmospheric density by 50%
+        # atm_dens_list *= 1.5
+
+        # ###
+
         # Interpolate the density
         consts.atm_density_interp = scipy.interpolate.PchipInterpolator(heights_fit, atm_dens_list)
 
@@ -884,24 +891,45 @@ if __name__ == "__main__":
     #jd = datetime2JD(datetime.datetime.now())
     jd = 2457955.794670294970
 
+    # System limiting magnitude
+    system_lm = +5.0
+
     # Load input meteor data
     met, consts = loadInputs(file_name)
 
 
+    ### METEOR PARAMETERS ###
+
     # Set drag coeficient
     met.Gamma = 1.0
 
-    # Set heat transfer corficient (cometary)
+    # Set heat transfer coefficient (cometary)
     met.Lambda = 0.5
+
+    # Set heat of ablation (J/kg) (cometary)
+    met.q = 2.5*10**6
+
+    # Initial mass (kg)
+    met.m_init = 0.1/1000
+
+    # Density (kg/m^3)
+    met.rho = 1510.0
+
+    # Initial velocity (m/s)
+    met.v_init = 20000
+
+    # Zenith angle (rad)
+    consts.zr = np.radians(45.0)
+
+    ##########################
 
 
     t1 = time.clock()
     
-    # Run the simulation
+    # Run the simulation (full atmosphere)
     results_list = runSimulation(met, consts, lat=lat, lon=lon, jd_ref=jd, no_atmosphere_end_ht=-1)
 
     print('Runtime:', time.clock() - t1)
-
 
 
     # Get the results
@@ -937,92 +965,158 @@ if __name__ == "__main__":
         return a + b*t + c*np.exp(k*t)
 
 
-    ### Take the last 25% of the trail
-    lquart_len = int(0.75*len(time_data))
-    lquart_t = time_data[lquart_len:]
-    lquart_s = trail[lquart_len:]
-    lquart_lag = lag[lquart_len:]
+    # ### Take the last 25% of the trail
+    # lquart_len = int(0.75*len(time_data))
+    # lquart_t = time_data[lquart_len:]
+    # lquart_s = trail[lquart_len:]
+    # lquart_lag = lag[lquart_len:]
 
-    #p0 = [line_params[1], line_params[0], 0, 0]
-    #jacchia_fit, _ = scipy.optimize.curve_fit(jacchia, lquart_t, lquart_s, maxfev=20000, p0=p0)
-    #print(jacchia_fit)
+    # #p0 = [line_params[1], line_params[0], 0, 0]
+    # #jacchia_fit, _ = scipy.optimize.curve_fit(jacchia, lquart_t, lquart_s, maxfev=20000, p0=p0)
+    # #print(jacchia_fit)
 
-    spline_fit = scipy.interpolate.CubicSpline(time_data, lag)
+    # spline_fit = scipy.interpolate.CubicSpline(time_data, lag)
 
-    fig, ax1 = plt.subplots()
+    # fig, ax1 = plt.subplots()
 
-    # Plot the original data
-    ax1.scatter(lag, time_data, s=2, zorder=2, c='red')
+    # # Plot the original data
+    # ax1.scatter(lag, time_data, s=2, zorder=2, c='red')
 
-    # Plot the spline data
-    ax1.plot(spline_fit(time_data), time_data, zorder=1)
+    # # Plot the spline data
+    # ax1.plot(spline_fit(time_data), time_data, zorder=1)
 
-    #ax1.plot(jacchia(lquart_t, *jacchia_fit), lquart_t)
+    # #ax1.plot(jacchia(lquart_t, *jacchia_fit), lquart_t)
 
-    ax1.set_xlabel('Length (km)')
+    # ax1.set_xlabel('Length (km)')
 
-    ax1.set_ylabel('Time')
-    ax1.set_ylim([min(time_data), max(time_data)])
-    ax1.invert_yaxis()
+    # ax1.set_ylabel('Time')
+    # ax1.set_ylim([min(time_data), max(time_data)])
+    # ax1.invert_yaxis()
 
-    ax2 = ax1.twinx()
-    ax2.set_ylim(min(height), max(height))
-    ax2.set_ylabel('Height (km)')
+    # ax2 = ax1.twinx()
+    # ax2.set_ylim(min(height), max(height))
+    # ax2.set_ylabel('Height (km)')
 
-    ax1.grid()
+    # ax1.grid()
 
-    plt.show()
+    # plt.show()
 
 
 
-    ### MAGNITUDES ###
 
     # Calculate absolute magnitude (apparent @100km) from luminous intensity
     P_0m = 840.0
-    magnitude = -2.5*np.log10(luminosity/P_0m)
+    abs_magnitude = -2.5*np.log10(luminosity/P_0m)
+
+    # Calculate visual (apparent) magnitude, assuming the meteor is at a 45 deg angle and
+    # 100km of ground distance away
+    dist = np.sqrt((1000*height)**2 + 100000**2)
+    magnitude = abs_magnitude - 5*np.log10(100000.0/dist)
+
+    # Get indices where the meteor is above the detection limit
+    mag_above_ind = np.where(magnitude < system_lm)[0]
+
+    # Get the times of the detected meteor
+    time_detect = time_data[mag_above_ind]
+
+    # Find an index when the magnitude reaches the limiting magnitude
+    arg_lim = np.argmax(magnitude < system_lm)
+
+    # Find the height at detection point
+    height_detect = height[arg_lim]
 
 
-    # Plot time vs. absolute magnitude
-    plt.plot(magnitude, height, zorder=3)
 
-    plt.ylabel('Height (km)')
-    plt.xlabel('Absolute magnitude')
+    # Run the simulation (no atmosphere)
+    results_list = runSimulation(met, consts, lat=lat, lon=lon, jd_ref=jd, no_atmosphere_end_ht=50000)
 
-    #plt.gca().invert_yaxis()
+    # Get the results
+    results_list = np.array(results_list)
+    _, _, _, velocity_noatm, _ = results_list.T
 
-    plt.legend()
+    velocity_noatm = velocity_noatm/1000
 
-    plt.grid()
 
-    plt.show()
+    # Apply gravity correction to the velocity
+    velocity = velocity + (met.v_init/1000 - velocity_noatm[:len(velocity)])
+
+    # Find the gravity-corrected velocity at the detection point
+    vel_detect = velocity[arg_lim]
+
+
+    # 2 subplots (mag and velocity)
+    fig, (ax_vel, ax_mag) = plt.subplots(nrows=2, sharex=True)
+
 
 
     ### VELOCITY ###
 
-    plt.plot(velocity, height, zorder=3)
+    ax_vel.plot(height, velocity, zorder=3)
 
-    plt.xlabel('Velocity (km/s)')
-    plt.ylabel('Height (km)')
+    ax_vel.set_ylabel('Velocity (km/s)')
+    
 
     # plt.gca().invert_yaxis()
 
-    plt.grid(color='0.9')
+    ax_vel.grid()
 
     ## TEST
-    plt.xlim(15.0, 17.0)
-    plt.ylim(75, 185)
+    #plt.xlim(15.0, 17.0)
+    #plt.ylim(75, 185)
 
-    # Find the index of the closest height to ht_mark
-    ht_mark = 87.620
-    ht_indx = np.argmin(np.abs(height - ht_mark))
 
     # Plot a point at the velocity at the given heights
-    ht_mark = height[ht_indx]
-    vel_mark = velocity[ht_indx]
-    plt.scatter(vel_mark, ht_mark, c='red', label='Height = {:.3f} km\nVelocity = {:.3f} km/s'.format(ht_mark, vel_mark), zorder=4)
+    ax_vel.scatter(height_detect, vel_detect, c='red', label='$ v(t_{init}) = ' \
+        + '{:.3f}$ km/s\n'.format(vel_detect) + '$ h(t_{init}) = ' \
+        + '{:.3f}$ km\n'.format(height_detect) + '$\Delta v = {:.3f}$ km/s'.format(vel_detect - met.v_init/1000), \
+        zorder=4)
 
-    plt.legend()
 
-    plt.savefig('vel_diff.png', dpi=300)
+    # Vertical line at detection height
+    ax_vel.plot(np.zeros(10) + height_detect, np.linspace(np.min(velocity), vel_detect, 10), c='k', \
+        linewidth=1, linestyle='--')
+
+    ax_vel.legend()
+
+    ax_vel.set_ylim([19.5, 20.6])
+
+
+    ### MAGNITUDES ###
+
+
+    # Plot time vs. absolute magnitude
+    ax_mag.plot(height, magnitude, zorder=3)
+
+
+    # Plot the limiting magnitude line
+    ax_mag.plot(height, np.zeros_like(height) + system_lm, label='LM = {:+.2f}'.format(system_lm))
+
+    # Vertical line at detection height
+    ax_mag.plot(np.zeros(10) + height_detect, np.linspace(-10, magnitude[arg_lim], 10), c='k', \
+        linewidth=1, linestyle='--')
+
+    ax_mag.set_ylabel('Visual magnitude')
+    ax_mag.set_xlabel('Height (km)')
+
+    ax_mag.set_ylim([0, 8])
+    ax_mag.set_xlim([np.max(height), np.min(height)])
+
+    ax_mag.invert_yaxis()
+
+    ax_mag.legend()
+
+    ax_mag.grid()
+
+    ###############
+
+    # Set top X axis for time
+    ax_time = ax_vel.twiny()
+    ax_time.set_xlim([np.min(time_data), np.max(time_data)])
+    ax_time.set_xlabel('Time (s)')
+
+
+    plt.subplots_adjust(hspace=0)
+
+    plt.savefig('simulation_vel_mag.png', dpi=300)
 
     plt.show()
