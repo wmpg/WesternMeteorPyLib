@@ -605,7 +605,7 @@ class PlaneIntersection(object):
                 normalize=True, arrow_length_ratio=0.1, color='green')
 
             # Plot the plane
-            ax.plot_surface(xx, yy, z, color='green', alpha=0.25)
+            ax.plot_surface(xx, yy, z, alpha=0.25)
 
 
         # Plot the radiant state vector
@@ -617,6 +617,14 @@ class PlaneIntersection(object):
         ax.set_xlim([x_min, x_max])
         ax.set_ylim([y_min, y_max])
         ax.set_zlim([z_min, z_max])
+
+        ax.set_xlabel('X (m)')
+        ax.set_ylabel('Y (m)')
+        ax.set_zlabel('Z (m)')
+
+        # Change the size of ticks (make them smaller)
+        ax.tick_params(axis='both', which='major', labelsize=8)
+
 
         plt.show()
 
@@ -4235,7 +4243,7 @@ class Trajectory(object):
         for obs in self.observations:
 
             # Station positions
-            ax.scatter(obs.stat_eci_los[:, 0], obs.stat_eci_los[:, 1], obs.stat_eci_los[:, 2], s=50)
+            ax.scatter(obs.stat_eci_los[:, 0], obs.stat_eci_los[:, 1], obs.stat_eci_los[:, 2], s=20)
 
             # Plot lines of sight
             for stat_eci_los, meas_eci_los in zip(obs.stat_eci_los, obs.meas_eci_los):
@@ -4248,7 +4256,8 @@ class Trajectory(object):
 
                 # Lines of sight
                 ax.quiver(stat_eci_los[0], stat_eci_los[1], stat_eci_los[2], meas_eci_los[0], meas_eci_los[1], 
-                    meas_eci_los[2], length=vect_len, normalize=True, arrow_length_ratio=0, color='blue')
+                    meas_eci_los[2], length=vect_len, normalize=True, arrow_length_ratio=0, color='blue', 
+                    alpha=0.5)
 
 
 
@@ -4261,6 +4270,14 @@ class Trajectory(object):
         ax.set_xlim([x_min, x_max])
         ax.set_ylim([y_min, y_max])
         ax.set_zlim([z_min, z_max])
+
+
+        ax.set_xlabel('X (m)')
+        ax.set_ylabel('Y (m)')
+        ax.set_zlabel('Z (m)')
+
+        # Change the size of ticks (make them smaller)
+        ax.tick_params(axis='both', which='major', labelsize=8)
 
         plt.show()
 
@@ -4878,8 +4895,8 @@ class Trajectory(object):
 
 
 
-        ### SHOW PLANE INTERSECTIONS AND LoS PLOTS ###
-        ######################################################################################################
+        ## SHOW PLANE INTERSECTIONS AND LoS PLOTS ###
+        #####################################################################################################
 
         # # Show the plane intersection
         # if self.show_plots:
@@ -4891,7 +4908,7 @@ class Trajectory(object):
         #     self.showLoS()
 
 
-        ######################################################################################################
+        #####################################################################################################
 
 
         # Return the best trajectory
