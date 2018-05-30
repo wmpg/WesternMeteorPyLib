@@ -212,16 +212,15 @@ class GroundMap(object):
             ll_lon, ll_lat = self.m(ll_x, ll_y, inverse=True)
 
 
-            # Determine the scale size
+            # Determine the map scale size    
             scale_size = int(np.log10(max_dist/2/1000))
 
             # Round to distance to the closest scale size
             scale_range = round(max_dist/2/1000/(10**scale_size), 0)*(10**scale_size)
 
-
             # Plot the scale bar
-            self.m.drawmapscale(ll_lon, ll_lat, lon_mean, lat_mean, scale_range, barstyle='fancy', units='km', 
-                fontcolor=self.cs.scale_bar_text, zorder=3)
+            self.m.drawmapscale(ll_lon, ll_lat, np.degrees(lon_mean), np.degrees(lat_mean), scale_range, \
+                barstyle='fancy', units='km', fontcolor=self.cs.scale_bar_text, zorder=3)
 
 
             # Reset the colour cycle
@@ -270,8 +269,8 @@ if __name__ == "__main__":
 
 
     # Generate some geo coords
-    lat_list = np.linspace(np.radians(45), np.radians(46), 10)
-    lon_list = np.linspace(np.radians(13), np.radians(30), 10)
+    lat_list = np.linspace(np.radians(37.4), np.radians(37.7), 10)
+    lon_list = np.linspace(np.radians(-122.5), np.radians(-122.9), 10)
 
     # Test the ground plot function
     m = GroundMap(lat_list, lon_list, color_scheme='light')
