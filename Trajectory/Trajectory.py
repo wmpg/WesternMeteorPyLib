@@ -1838,10 +1838,6 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
 
     ##########################################################################################################
 
-    # TESTING!!!!!!!!!!!
-    # # Take only those solutions which have the timing standard deviation <= than the initial solution
-    # mc_results = [mc_traj for mc_traj in mc_results if mc_traj.timing_stddev <= traj.timing_stddev]
-
     # Take only those solutions which have the timing residuals <= than the initial solution
     mc_results = [mc_traj for mc_traj in mc_results if mc_traj.timing_res <= traj.timing_res]
 
@@ -1860,15 +1856,9 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
         return traj, None
 
 
-
-    # Choose the solution with the lowest timing residuals as the best solution - THIS GIVES BETTER RESULTS
-    # THAN STDDEV!!!
+    # Choose the solution with the lowest timing residuals as the best solution
     timing_res_trajs = [traj_tmp.timing_res for traj_tmp in mc_results]
     best_traj_ind = timing_res_trajs.index(min(timing_res_trajs))
-
-    # # Choose the solution with the lowest length standard deviation as the best solution
-    # timing_res_trajs = [traj_tmp.timing_stddev for traj_tmp in mc_results]
-    # best_traj_ind = timing_res_trajs.index(min(timing_res_trajs))
 
     # Choose the best trajectory
     traj_best = mc_results[best_traj_ind]
@@ -2511,11 +2501,11 @@ class Trajectory(object):
 
 
 
-        if calc_res and (self.time_diffs_final is not None):
+        if calc_res and (self.time_diffs is not None):
 
             # Calculate the timing offset between the meteor time vs. length
-            self.timing_res = timingResiduals(self.time_diffs_final, self.observations, self.t_ref_station)
-            self.timing_stddev = timingResiduals(self.time_diffs_final, self.observations, self.t_ref_station, \
+            self.timing_res = timingResiduals(self.time_diffs, self.observations, self.t_ref_station)
+            self.timing_stddev = timingResiduals(self.time_diffs, self.observations, self.t_ref_station, \
                 ret_stddev=True)
 
 
@@ -4617,7 +4607,7 @@ class Trajectory(object):
 
 
         # Calculate velocity at each point
-        self.calcVelocity(self.state_vect_mini, self.radiant_eci_mini, self.observations, 
+        self.calcVelocity(self.state_vect_mini, self.radiant_eci_mini, self.observations, \
             calc_res=_rerun_timing)
 
 
@@ -4848,6 +4838,7 @@ class Trajectory(object):
                 return None
 
         ######################################################################################################
+
 
 
         ### CALCULATE ORBIT ###
