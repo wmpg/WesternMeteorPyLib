@@ -4629,7 +4629,7 @@ class Trajectory(object):
 
 
         if self.verbose and self.estimate_timing_vel:
-                print('Estimating initial velocity and timing differences...')
+            print('Estimating initial velocity and timing differences...')
 
 
 
@@ -4675,9 +4675,6 @@ class Trajectory(object):
         self.velocity_fit, self.v_init, self.time_diffs, self.observations = \
             self.estimateTimingAndVelocity(self.observations, estimate_timing_vel=self.estimate_timing_vel)
 
-        self.time_diffs_final = self.time_diffs
-
-
 
         # Calculate velocity at each point with updated timings
         self.calcVelocity(self.state_vect_mini, self.radiant_eci_mini, self.observations, 
@@ -4689,6 +4686,15 @@ class Trajectory(object):
 
         # Runs only in the first pass of trajectory estimation and estimates timing offsets between stations
         if not _rerun_timing:
+
+            # Assign the initial timing differences
+            if not _rerun_bad_picks:
+                self.time_diffs_final = self.time_diffs
+
+            else:
+                # Assign the timing differences after bad pick removal
+                self.time_diffs_final += self.time_diffs
+
 
             # After the timing has been estimated, everything needs to be recalculated from scratch
             if self.estimate_timing_vel:
@@ -4713,7 +4719,10 @@ class Trajectory(object):
                 self.observations = []
 
                 if self.verbose:
+                    print()
+                    print("---------------------------------------------------------------------------------")
                     print("Updating the solution after the timing estimation...")
+                    print("---------------------------------------------------------------------------------")
 
                 # Reinitialize the observations with proper timing
                 for obs in temp_observations:
@@ -4730,14 +4739,12 @@ class Trajectory(object):
 
         else:
 
-            # In the second pass, calculate the final timing offsets
-            if _prev_toffsets is not None:
-                self.time_diffs_final = _prev_toffsets + self.time_diffs
+            # In the second pass with updated timings, calculate the final timing offsets
+            self.time_diffs_final += self.time_diffs
 
-            else:
-                self.time_diffs_final = self.time_diffs
 
             return None
+
 
         ######################################################################################################
 
@@ -4812,7 +4819,11 @@ class Trajectory(object):
                     # Reset the observation points
                     self.observations = []
 
-                    print("Updating the solution after rejecting", picks_rejected, "bad picks...")
+                    if self.verbose:
+                        print()
+                        print("---------------------------------------------------------------------------------")
+                        print("Updating the solution after rejecting", picks_rejected, "bad picks...")
+                        print("---------------------------------------------------------------------------------")
 
                     # Reinitialize the observations without the bad picks
                     for obs in temp_observations:
@@ -4824,10 +4835,11 @@ class Trajectory(object):
                     
                     # Re-run the trajectory estimation with updated timings. This will update all calculated
                     # values up to this point
-                    self.run(_rerun_bad_picks=True)
+                    self.run(_rerun_bad_picks=True, _prev_toffsets=self.time_diffs_final)
 
                 else:
-                    print("All picks are within 3 sigma...")
+                    if self.verbose:
+                        print("All picks are within 3 sigma...")
 
 
             else:
