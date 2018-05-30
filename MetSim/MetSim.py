@@ -231,14 +231,59 @@ def parseFloat(f, skip_next=True):
 
 
 
-def loadInputs(file_name):
-    """ Loads input parameters of a meteor. """
+def loadInputs(file_name, lat=None, lon=None, jd_ref=None):
+    """ Loads input parameters of a meteor. If the location and the time are given, the atmospheric
+        density will be computed from the NRL-MSISE00 model.
+    
+    Arguments:
+        file_name: [str] Name of the input file.
+
+    Keyword arguments:
+        lat: [float] Geodetic latitude of the mean meteor path (radians).
+        lon: [float] Geodetic longitude of the mean meteor path (radians).
+        jd_ref: [float] Mean Julian date of the meteor.
+
+    Return:
+        None
+    """
 
     # Init new MeteorProperties struct
     met = MeteorProperties()
 
     # Init new constsants struct
     consts = MeteorConstants()
+
+
+    # If the location is given, create an interpolation for the atmosphere density
+    if (lat is not None) and (lon is not None) and (jd_ref is not None):
+
+        # Get a range of heights from 10 to 200 km, every 100 meters
+        heights_fit = np.arange(10, 200, 0.1)*1000
+
+        # Get atmosphere density at simulation heights
+        atm_dens_list = []
+        for ht in heights_fit:
+            atm_dens = getAtmDensity(lat, lon, ht, jd_ref)
+            atm_dens_list.append(atm_dens)
+
+        atm_dens_list = np.array(atm_dens_list)
+
+        # ### TEST ## !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+        # # Increase atmospheric density by 50%
+        # atm_dens_list *= 1.5
+
+        # ###
+
+        # Interpolate the density
+        consts.atm_density_interp = scipy.interpolate.PchipInterpolator(heights_fit, atm_dens_list)
+
+        # # Plot interpolated values
+        # plt.semilogx(consts.atm_density_interp(heights_fit), heights_fit)
+        # plt.grid(which='both')
+        # plt.show()
+
+
 
     with open(file_name) as f:
 
@@ -739,19 +784,14 @@ def ablate(met, consts, no_atmosphere_end_ht=-1):
 
 
 
-def runSimulation(met, consts, lat=None, lon=None, jd_ref=None, no_atmosphere_end_ht=-1):
-    """ Runs meteor ablation simulation with the given initial parameters. The location and time can be 
-        provided as well, which will be used for calculating the atmosphere density at the given average 
-        geodetic coordinates and Julian date. 
+def runSimulation(met, consts, no_atmosphere_end_ht=-1):
+    """ Runs meteor ablation simulation with the given initial parameters.
 
     Arguments:
         met: [MeteorProperties object] Structure containing physical characteristics of the simulated meteor.
         consts: [MeteorConstants object] Structure containing simulation constants.
 
     Keyword arguments:
-        lat: [float] Geodetic latitude of the mean meteor path (radians).
-        lon: [float] Geodetic longitude of the mean meteor path (radians).
-        jd_ref: [float] Mean Julian date of the meteor.
         no_atmosphere_end_ht: [float] If > 0, a no-atmosphere solution will be computed, meaning that the meteoroid
             will not be ablated. The number that is given is the height in meters at which the simulation 
             will stop.
@@ -761,31 +801,6 @@ def runSimulation(met, consts, lat=None, lon=None, jd_ref=None, no_atmosphere_en
             [time, heights, length, velocity, luminosity]
 
     """
-
-
-    # If the location is given, do a 5 order fit on the atmosphere density
-    if (lat is not None) and (lon is not None) and (jd_ref is not None):
-
-        # Get a range of heights from 60 to 200 km, every 100 meters
-        heights_fit = np.arange(60, 200, 0.1)*1000
-
-        # Get atmosphere density at simulation heights
-        atm_dens_list = []
-        for ht in heights_fit:
-            atm_dens = getAtmDensity(lat, lon, ht, jd_ref)
-            atm_dens_list.append(atm_dens)
-
-        atm_dens_list = np.array(atm_dens_list)
-
-        # ### TEST ## !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-        # # Increase atmospheric density by 50%
-        # atm_dens_list *= 1.5
-
-        # ###
-
-        # Interpolate the density
-        consts.atm_density_interp = scipy.interpolate.PchipInterpolator(heights_fit, atm_dens_list)
 
 
 
@@ -886,16 +901,21 @@ if __name__ == "__main__":
     file_name = os.path.join('MetSim', 'Metsim0001_input.txt')
 
     # Set meteor average location and time
-    lat = np.radians(43.937484)
-    lon = np.radians(-81.645127)
+    # lat = np.radians(43.937484)
+    # lon = np.radians(-81.645127)
+    # #jd = datetime2JD(datetime.datetime.now())
+    # jd = 2457955.794670294970
+
+    lat = np.radians(45.0)
+    lon = np.radians(0.0)
     #jd = datetime2JD(datetime.datetime.now())
-    jd = 2457955.794670294970
+    jd = 2451545.0 # J2000
 
     # System limiting magnitude
     system_lm = +5.0
 
     # Load input meteor data
-    met, consts = loadInputs(file_name)
+    met, consts = loadInputs(file_name, lat=lat, lon=lon, jd_ref=jd)
 
 
     ### METEOR PARAMETERS ###
@@ -927,7 +947,7 @@ if __name__ == "__main__":
     t1 = time.clock()
     
     # Run the simulation (full atmosphere)
-    results_list = runSimulation(met, consts, lat=lat, lon=lon, jd_ref=jd, no_atmosphere_end_ht=-1)
+    results_list = runSimulation(met, consts, no_atmosphere_end_ht=-1)
 
     print('Runtime:', time.clock() - t1)
 
@@ -1028,7 +1048,7 @@ if __name__ == "__main__":
 
 
     # Run the simulation (no atmosphere)
-    results_list = runSimulation(met, consts, lat=lat, lon=lon, jd_ref=jd, no_atmosphere_end_ht=50000)
+    results_list = runSimulation(met, consts, no_atmosphere_end_ht=50000)
 
     # Get the results
     results_list = np.array(results_list)

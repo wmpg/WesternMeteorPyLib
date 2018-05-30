@@ -1825,7 +1825,7 @@ def simulateMeteorShower(station_list, meteor_velocity_models, n_meteors, ra_g, 
         if (not nighttime_meteors_only) or ((datetime2JD(night_start) < meteor_jd) \
             and (datetime2JD(night_end) > meteor_jd)):
 
-            print('{:d}/{:d} meteor at JD = {:.6f}, LaSun = {:.6f} deg'.format(len(sol_data), n_meteors, \
+            print('{:d}/{:d} meteor at JD = {:.6f}, LaSun = {:.6f} deg'.format(meteor_no + 1, n_meteors, \
                 meteor_jd, np.degrees(sol)))
 
         else:
@@ -1986,7 +1986,7 @@ def simulateMeteorShower(station_list, meteor_velocity_models, n_meteors, ra_g, 
         sim_meteor_list.append(sim_meteor)
 
         # Check if there are enough meteors
-        if meteor_no == n_meteors:
+        if meteor_no == n_meteors - 1:
             break
 
         meteor_no += 1
@@ -2267,97 +2267,97 @@ if __name__ == "__main__":
 
     # ##########################################################################################################
 
-    ### CABARNET STATION PARAMETERS ###
-    ##########################################################################################################
-
-    system_name = 'CABERNET'
-
-    # Number of stations in total
-    n_stations = 3
-
-    # Maximum time offset (seconds)
-    t_max_offset = 1.0
-
-    # Geographical coordinates of stations (lat, lon, elev, station_id) in degrees and meters
-    stations_geo = [
-        [42.936389, 0.142778, 2877.0, 'PicDuMidi'], #PicDuMidi
-        [42.787761, 1.300037, 1600.0, 'Guzet'], #Guzet
-        [42.051639, 0.729586, 1569.0, 'Montsec']] #Montsec
-
-    # Camera FPS per station
-    fps_list = [95, 95, 95]
-
-    # Observation uncertainties per station (arcsec)
-    obs_ang_uncertainties = [3.24, 3.24, 3.24]
-
-    # Azimuths of centre of FOVs (degrees)
-    azim_fovs = [126.51, 251.94, 357.67]
-
-    # Elevations of centre of FOVs (degrees)
-    elev_fovs = [62.67, 62.81, 64.74]
-
-    # Cameras FOV widths (degrees)
-    fov_widths = [40.72, 40.72, 40.72]
-
-    # Cameras FOV heights (degrees)
-    fov_heights = [27.21, 27.21, 27.21]
-
-    # Limiting magnitudes (needed only for ablation simulation)
-    lim_magnitudes = [+5.0, +5.0, +5.0]
-
-    # Powers of zero-magnitude meteors (Watts) (needed only for ablation simulation)
-    P_0m_list = [840, 840, 840]
-
-    # Minimum angular velocity for detection (deg/s)
-    min_ang_velocities = [1.0, 1.0, 1.0]
-
-    ##########################################################################################################
-
-    # ### SIMULATED MODERATE STATION PARAMETERS ###
+    # ### CABARNET STATION PARAMETERS ###
     # ##########################################################################################################
 
-    # system_name = 'CAMSsim'
+    # system_name = 'CABERNET'
 
     # # Number of stations in total
     # n_stations = 3
 
     # # Maximum time offset (seconds)
-    # t_max_offset = 1
+    # t_max_offset = 1.0
 
     # # Geographical coordinates of stations (lat, lon, elev, station_id) in degrees and meters
     # stations_geo = [
-    #     [43.19279, -81.31565, 324.0, 'M1'], # M1 elgin
-    #     [43.19055, -80.09913, 212.0, 'M2'],
-    #     [43.96324, -80.80952, 383.0, 'M3']]
+    #     [42.936389, 0.142778, 2877.0, 'PicDuMidi'], #PicDuMidi
+    #     [42.787761, 1.300037, 1600.0, 'Guzet'], #Guzet
+    #     [42.051639, 0.729586, 1569.0, 'Montsec']] #Montsec
 
     # # Camera FPS per station
-    # fps_list = [30, 30, 30]
+    # fps_list = [95, 95, 95]
 
-    # # Observation uncertanties per station (arcsec)
-    # obs_ang_uncertainties = [30, 30, 30]
+    # # Observation uncertainties per station (arcsec)
+    # obs_ang_uncertainties = [3.24, 3.24, 3.24]
 
     # # Azimuths of centre of FOVs (degrees)
-    # azim_fovs = [56.0, 300.0, 174.0]
+    # azim_fovs = [126.51, 251.94, 357.67]
 
     # # Elevations of centre of FOVs (degrees)
-    # elev_fovs = [65.0, 65.0, 65.0]
+    # elev_fovs = [62.67, 62.81, 64.74]
 
     # # Cameras FOV widths (degrees)
-    # fov_widths = [64.0, 64.0, 64.0]
+    # fov_widths = [40.72, 40.72, 40.72]
 
     # # Cameras FOV heights (degrees)
-    # fov_heights = [48.0, 48.0, 48.0]
+    # fov_heights = [27.21, 27.21, 27.21]
 
     # # Limiting magnitudes (needed only for ablation simulation)
-    # lim_magnitudes = [5.0, 5.0, 5.0]
+    # lim_magnitudes = [+5.0, +5.0, +5.0]
 
     # # Powers of zero-magnitude meteors (Watts) (needed only for ablation simulation)
-    # P_0m_list = [1210, 1210, 1210]
+    # P_0m_list = [840, 840, 840]
 
     # # Minimum angular velocity for detection (deg/s)
-    # min_ang_velocities = [2.0, 2.0, 2.0]
+    # min_ang_velocities = [1.0, 1.0, 1.0]
 
     # ##########################################################################################################
+
+    ### SIMULATED MODERATE STATION PARAMETERS ###
+    ##########################################################################################################
+
+    system_name = 'CAMSsim'
+
+    # Number of stations in total
+    n_stations = 3
+
+    # Maximum time offset (seconds)
+    t_max_offset = 1
+
+    # Geographical coordinates of stations (lat, lon, elev, station_id) in degrees and meters
+    stations_geo = [
+        [43.19279, -81.31565, 324.0, 'M1'], # M1 elgin
+        [43.19055, -80.09913, 212.0, 'M2'],
+        [43.96324, -80.80952, 383.0, 'M3']]
+
+    # Camera FPS per station
+    fps_list = [30, 30, 30]
+
+    # Observation uncertanties per station (arcsec)
+    obs_ang_uncertainties = [30, 30, 30]
+
+    # Azimuths of centre of FOVs (degrees)
+    azim_fovs = [56.0, 300.0, 174.0]
+
+    # Elevations of centre of FOVs (degrees)
+    elev_fovs = [65.0, 65.0, 65.0]
+
+    # Cameras FOV widths (degrees)
+    fov_widths = [64.0, 64.0, 64.0]
+
+    # Cameras FOV heights (degrees)
+    fov_heights = [48.0, 48.0, 48.0]
+
+    # Limiting magnitudes (needed only for ablation simulation)
+    lim_magnitudes = [5.0, 5.0, 5.0]
+
+    # Powers of zero-magnitude meteors (Watts) (needed only for ablation simulation)
+    P_0m_list = [1210, 1210, 1210]
+
+    # Minimum angular velocity for detection (deg/s)
+    min_ang_velocities = [2.0, 2.0, 2.0]
+
+    ##########################################################################################################
 
     # ### SIMULATED ALL-SKY STATION PARAMETERS ###
     # ##########################################################################################################
@@ -2771,17 +2771,17 @@ if __name__ == "__main__":
     # mass_min = -6.5
     # mass_max = -4.5
 
-    # Mass range (log of mass in kg) seen by the system (CAMO, 20 km/s, Draconids)
-    mass_min = -5.5
-    mass_max = -3
+    # # Mass range (log of mass in kg) seen by the system (CAMO, 20 km/s, Draconids)
+    # mass_min = -5.5
+    # mass_max = -3
 
     # # Mass range (log of mass in kg) seen by the system (allsky, 20 km/s, Draconids)
     # mass_min = -2.5
     # mass_max = 0.5
 
-    # # Mass range (log of mass in kg) seen by the system (moderate, 20 km/s, Draconids)
-    # mass_min = -4.0
-    # mass_max = -2.0
+    # Mass range (log of mass in kg) seen by the system (moderate, 20 km/s, Draconids)
+    mass_min = -4.9
+    mass_max = -3.0
 
     # Mass index
     mass_index = 1.95 # Koten et al. 2014
