@@ -590,8 +590,8 @@ class GuralTrajectory(object):
         self.traj_lib.InitTrajectoryStructure(maxcameras, self.traj)
 
         # Read PSO parameters
-        self.traj_lib.ReadTrajectoryPSOconfig(os.path.join(os.path.dirname(__file__), PSO_CONFIG_PATH), \
-            self.traj)
+        self.traj_lib.ReadTrajectoryPSOconfig(os.path.join(os.path.dirname(__file__), \
+            PSO_CONFIG_PATH).encode('ascii'), self.traj)
 
         # Reset the trajectory structure
         self.traj_lib.ResetTrajectoryStructure(jdt_ref, max_toffset, velmodel, nummonte, meastype, verbose, 
