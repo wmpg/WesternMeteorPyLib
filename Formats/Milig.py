@@ -361,6 +361,9 @@ if __name__ == '__main__':
     arg_parser.add_argument('-g', '--disablegravity', \
         help='Disable gravity compensation.', action="store_true")
 
+    arg_parser.add_argument('-l', '--plotallspatial', \
+        help='Plot all spatial residuals on one plot (one vs. time and other vs length.', action="store_true")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -380,7 +383,7 @@ if __name__ == '__main__':
     # Run the solver
     solveTrajectoryMILIG(dir_path, file_name, solver=cml_args.solver, max_toffset=cml_args.maxtoffset, \
         monte_carlo=(not cml_args.disablemc), mc_runs=cml_args.mcruns, \
-        gravity_correction=(not cml_args.disablegravity))
+        gravity_correction=(not cml_args.disablegravity), plot_all_spatial_residuals=cml_args.plotallspatial)
 
 
 

@@ -584,12 +584,12 @@ if __name__ == "__main__":
     #meteor1 = meteor_list[1:3]
 
     # # Construct lists of observations of the same meteor
-    #meteor5 = meteor_list[:2]
-    # meteor2 = meteor_list[2:5]
-    # meteor6 = meteor_list[5:9]
-    # meteor3 = meteor_list[9:13]
+    meteor5 = meteor_list[:2]
+    meteor2 = meteor_list[2:5]
+    meteor6 = meteor_list[5:9]
+    meteor3 = meteor_list[9:13]
     meteor1 = meteor_list[13:18]
-    # meteor4 = meteor_list[18:24]
+    meteor4 = meteor_list[18:24]
 
 
     # for met in meteor1:
@@ -598,7 +598,7 @@ if __name__ == "__main__":
 
 
     # Run the trajectory solver
-    solveTrajectoryCAMS(meteor1, os.path.join(dir_path, 'meteor1'), solver='original', monte_carlo=True, \
+    solveTrajectoryCAMS(meteor3, os.path.join(dir_path, 'meteor3'), solver='original', monte_carlo=False, \
         show_plots=True, save_results=True, mc_noise_std=1.0)
 
     # Write the MILIG input file

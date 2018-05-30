@@ -2141,7 +2141,8 @@ class Trajectory(object):
 
     def __init__(self, jdt_ref, output_dir='.', max_toffset=1.0, meastype=4, verbose=True, \
         estimate_timing_vel=True, monte_carlo=True, mc_runs=None, mc_pick_multiplier=1,  mc_noise_std=1.0, \
-        filter_picks=True, calc_orbit=True, show_plots=True, save_results=True, gravity_correction=True):
+        filter_picks=True, calc_orbit=True, show_plots=True, save_results=True, gravity_correction=True,
+        plot_all_spatial_residuals=False):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -2175,6 +2176,8 @@ class Trajectory(object):
             show_plots: [bool] Show plots of residuals, velocity, lag, meteor position. True by default.
             save_results: [bool] Save results of trajectory estimation to disk. True by default.
             gravity_correction: [bool] Apply the gravity drop when estimating trajectories. True by default.
+            plot_all_spatial_residuals: [bool] Plot all spatial residuals on one plot (one vs. time, and
+                the other vs. length). False by default.
 
         """
 
@@ -2223,7 +2226,11 @@ class Trajectory(object):
         # Apply the correction for gravity when estimating the trajectory
         self.gravity_correction = gravity_correction
 
+        # Plot all spatial residuals on one plot
+        self.plot_all_spatial_residuals = plot_all_spatial_residuals
+
         ######################################################################################################
+
 
         # Construct a file name for this event
         self.file_name = jd2Date(self.jdt_ref, dt_obj=True).strftime('%Y%m%d_%H%M%S')
@@ -3620,117 +3627,122 @@ class Trajectory(object):
             ##################################################################################################
 
 
-        # Plot all spatial residuals (vs. time)
-        for obs in self.observations:
 
-            ### PLOT ALL SPATIAL RESIDUALS ###
+        if self.plot_all_spatial_residuals:
+
+
+            # Plot all spatial residuals (vs. time)
+            for obs in self.observations:
+
+                ### PLOT ALL SPATIAL RESIDUALS ###
+                ##################################################################################################
+
+                # Calculate root mean square of the residuals
+                v_res_rms = RMSD(obs.v_residuals)
+                h_res_rms = RMSD(obs.h_residuals)
+
+                # Plot vertical residuals
+                vres_plot = plt.scatter(obs.time_data, obs.v_residuals, marker='o', s=4, \
+                    label='{:s}, vertical, RMSD = {:.2f}'.format(str(obs.station_id), v_res_rms), zorder=3)
+
+                # Plot horizontal residuals
+                plt.scatter(obs.time_data, obs.h_residuals, c=vres_plot.get_facecolor(), marker='+', \
+                    label='{:s}, horizontal, RMSD = {:.2f}'.format(str(obs.station_id), h_res_rms), zorder=3)
+
+                # Mark ignored points
+                if np.any(obs.ignore_list):
+
+                    ignored_times = obs.time_data[obs.ignore_list > 0]
+                    ignored_v_res = obs.v_residuals[obs.ignore_list > 0]
+                    ignored_h_res = obs.h_residuals[obs.ignore_list > 0]
+
+                    plt.scatter(ignored_times, ignored_v_res, facecolors='none', edgecolors='k', marker='o', \
+                        zorder=3, s=20)
+                    plt.scatter(ignored_times, ignored_h_res, facecolors='none', edgecolors='k', marker='o', 
+                        zorder=3, s=20)
+
+
+            plt.title('All spatial residuals')
+            plt.xlabel('Time (s)')
+            plt.ylabel('Residuals (m)')
+
+            plt.grid()
+
+            plt.legend()
+
+            # Set the residual limits to +/-10m if they are smaller than that
+            if np.max(np.abs(plt.gca().get_ylim())) < 10:
+                plt.ylim([-10, 10])
+
+
+            if self.save_results:
+                savePlot(plt, file_name + '_all_spatial_residuals.png', output_dir)
+
+            if show_plots:
+                plt.show()
+
+            else:
+                plt.clf()
+                plt.close()
+
+
+            # Plot all spatial residuals (vs. length)
+            for obs in self.observations:
+
+                ### PLOT ALL SPATIAL RESIDUALS VS LENGTH ###
+                ##############################################################################################
+
+                # Calculate root mean square of the residuals
+                v_res_rms = RMSD(obs.v_residuals)
+                h_res_rms = RMSD(obs.h_residuals)
+
+                # Plot vertical residuals
+                vres_plot = plt.scatter(obs.state_vect_dist/1000, obs.v_residuals, marker='o', s=4, \
+                    label='{:s}, vertical, RMSD = {:.2f}'.format(str(obs.station_id), v_res_rms), zorder=3)
+
+                # Plot horizontal residuals
+                plt.scatter(obs.state_vect_dist/1000, obs.h_residuals, c=vres_plot.get_facecolor(), 
+                    marker='+', label='{:s}, horizontal, RMSD = {:.2f}'.format(str(obs.station_id), \
+                        h_res_rms), zorder=3)
+
+                # Mark ignored points
+                if np.any(obs.ignore_list):
+
+                    ignored_length = obs.state_vect_dist[obs.ignore_list > 0]
+                    ignored_v_res = obs.v_residuals[obs.ignore_list > 0]
+                    ignored_h_res = obs.h_residuals[obs.ignore_list > 0]
+
+                    plt.scatter(ignored_length/1000, ignored_v_res, facecolors='none', edgecolors='k', \
+                        marker='o', zorder=3, s=20)
+                    plt.scatter(ignored_length/1000, ignored_h_res, facecolors='none', edgecolors='k', \
+                        marker='o', zorder=3, s=20)
+
+
+            plt.title('All spatial residuals')
+            plt.xlabel('Length (km)')
+            plt.ylabel('Residuals (m)')
+
+            plt.grid()
+
+            plt.legend()
+
+            # Set the residual limits to +/-10m if they are smaller than that
+            if np.max(np.abs(plt.gca().get_ylim())) < 10:
+                plt.ylim([-10, 10])
+
+
+            if self.save_results:
+                savePlot(plt, file_name + '_all_spatial_residuals_length.png', output_dir)
+
+            if show_plots:
+                plt.show()
+
+            else:
+                plt.clf()
+                plt.close()
+
+
             ##################################################################################################
-
-            # Calculate root mean square of the residuals
-            v_res_rms = RMSD(obs.v_residuals)
-            h_res_rms = RMSD(obs.h_residuals)
-
-            # Plot vertical residuals
-            vres_plot = plt.scatter(obs.time_data, obs.v_residuals, marker='o', s=4, \
-                label='{:s}, vertical, RMSD = {:.2f}'.format(str(obs.station_id), v_res_rms), zorder=3)
-
-            # Plot horizontal residuals
-            plt.scatter(obs.time_data, obs.h_residuals, c=vres_plot.get_facecolor(), marker='+', \
-                label='{:s}, horizontal, RMSD = {:.2f}'.format(str(obs.station_id), h_res_rms), zorder=3)
-
-            # Mark ignored points
-            if np.any(obs.ignore_list):
-
-                ignored_times = obs.time_data[obs.ignore_list > 0]
-                ignored_v_res = obs.v_residuals[obs.ignore_list > 0]
-                ignored_h_res = obs.h_residuals[obs.ignore_list > 0]
-
-                plt.scatter(ignored_times, ignored_v_res, facecolors='none', edgecolors='k', marker='o', \
-                    zorder=3, s=20)
-                plt.scatter(ignored_times, ignored_h_res, facecolors='none', edgecolors='k', marker='o', 
-                    zorder=3, s=20)
-
-
-        plt.title('All spatial residuals')
-        plt.xlabel('Time (s)')
-        plt.ylabel('Residuals (m)')
-
-        plt.grid()
-
-        plt.legend()
-
-        # Set the residual limits to +/-10m if they are smaller than that
-        if np.max(np.abs(plt.gca().get_ylim())) < 10:
-            plt.ylim([-10, 10])
-
-
-        if self.save_results:
-            savePlot(plt, file_name + '_all_spatial_residuals.png', output_dir)
-
-        if show_plots:
-            plt.show()
-
-        else:
-            plt.clf()
-            plt.close()
-
-
-        # Plot all spatial residuals (vs. length)
-        for obs in self.observations:
-
-            ### PLOT ALL SPATIAL RESIDUALS VS LENGTH ###
-            ##################################################################################################
-
-            # Calculate root mean square of the residuals
-            v_res_rms = RMSD(obs.v_residuals)
-            h_res_rms = RMSD(obs.h_residuals)
-
-            # Plot vertical residuals
-            vres_plot = plt.scatter(obs.state_vect_dist/1000, obs.v_residuals, marker='o', s=4, \
-                label='{:s}, vertical, RMSD = {:.2f}'.format(str(obs.station_id), v_res_rms), zorder=3)
-
-            # Plot horizontal residuals
-            plt.scatter(obs.state_vect_dist/1000, obs.h_residuals, c=vres_plot.get_facecolor(), marker='+', \
-                label='{:s}, horizontal, RMSD = {:.2f}'.format(str(obs.station_id), h_res_rms), zorder=3)
-
-            # Mark ignored points
-            if np.any(obs.ignore_list):
-
-                ignored_length = obs.state_vect_dist[obs.ignore_list > 0]
-                ignored_v_res = obs.v_residuals[obs.ignore_list > 0]
-                ignored_h_res = obs.h_residuals[obs.ignore_list > 0]
-
-                plt.scatter(ignored_length/1000, ignored_v_res, facecolors='none', edgecolors='k', \
-                    marker='o', zorder=3, s=20)
-                plt.scatter(ignored_length/1000, ignored_h_res, facecolors='none', edgecolors='k', \
-                    marker='o', zorder=3, s=20)
-
-
-        plt.title('All spatial residuals')
-        plt.xlabel('Length (km)')
-        plt.ylabel('Residuals (m)')
-
-        plt.grid()
-
-        plt.legend()
-
-        # Set the residual limits to +/-10m if they are smaller than that
-        if np.max(np.abs(plt.gca().get_ylim())) < 10:
-            plt.ylim([-10, 10])
-
-
-        if self.save_results:
-            savePlot(plt, file_name + '_all_spatial_residuals_length.png', output_dir)
-
-        if show_plots:
-            plt.show()
-
-        else:
-            plt.clf()
-            plt.close()
-
-
-        ######################################################################################################
 
 
 
@@ -3863,7 +3875,8 @@ class Trajectory(object):
             used_times = obs.time_data[obs.ignore_list == 0]
             used_dists = obs.state_vect_dist[obs.ignore_list == 0]
 
-            plt_handle = plt.plot(used_dists, used_times, marker='x', label=str(obs.station_id), zorder=3)
+            plt_handle = plt.plot(used_dists/1000, used_times, marker='x', label=str(obs.station_id), \
+                zorder=3)
 
 
             # Plot ignored points
@@ -3872,8 +3885,9 @@ class Trajectory(object):
                 ignored_times = obs.time_data[obs.ignore_list > 0]
                 ignored_dists = obs.state_vect_dist[obs.ignore_list > 0]
                     
-                plt.scatter(ignored_dists, ignored_times, facecolors='k', edgecolors=plt_handle[0].get_color(), 
-                    marker='o', s=8, zorder=4, label='{:s} ignored points'.format(str(obs.station_id)))
+                plt.scatter(ignored_dists/1000, ignored_times, facecolors='k', 
+                    edgecolors=plt_handle[0].get_color(), marker='o', s=8, zorder=4, \
+                    label='{:s} ignored points'.format(str(obs.station_id)))
 
 
 
@@ -3886,14 +3900,14 @@ class Trajectory(object):
 
             t_range = np.linspace(t_min, t_max, 100)
 
-            plt.plot(lineFunc(t_range, *self.velocity_fit), t_range, label='Velocity fit', linestyle='--', 
-                alpha=0.5, zorder=3)
+            plt.plot(lineFunc(t_range, *self.velocity_fit)/1000, t_range, label='Velocity fit', \
+                linestyle='--', alpha=0.5, zorder=3)
 
 
         plt.title('Distances from state vector, Time residuals = {:.3e} s'.format(self.timing_res))
 
         plt.ylabel('Time (s)')
-        plt.xlabel('Distance from state vector (m)')
+        plt.xlabel('Distance from state vector (km)')
         
         plt.legend()
         plt.grid()
@@ -3950,24 +3964,24 @@ class Trajectory(object):
                 # Set the label only for the first occurence
                 if first_ignored_plot:
 
-                    ax1.scatter(ignored_velocities, ignored_times, facecolors='none', edgecolors='k', \
+                    ax1.scatter(ignored_velocities/1000, ignored_times, facecolors='none', edgecolors='k', \
                         zorder=4, s=30, label='Ignored points')
 
                     first_ignored_plot = False
 
                 else:
-                    ax1.scatter(ignored_velocities, ignored_times, facecolors='none', edgecolors='k', \
+                    ax1.scatter(ignored_velocities/1000, ignored_times, facecolors='none', edgecolors='k', \
                         zorder=4, s=30)
 
 
             # Plot all velocities
-            ax1.scatter(obs.velocities[1:], obs.time_data[1:], marker=markers[i%len(markers)], 
+            ax1.scatter(obs.velocities[1:]/1000, obs.time_data[1:], marker=markers[i%len(markers)], 
                 c=colors[i], alpha=0.5, label='Station: ' + str(obs.station_id), zorder=3)
 
 
             # Determine the max/min velocity and height, as this is needed for plotting both height/time axes
-            vel_max = max(np.max(obs.velocities[1:]), vel_max)
-            vel_min = min(np.min(obs.velocities[1:]), vel_min)
+            vel_max = max(np.max(obs.velocities[1:]/1000), vel_max)
+            vel_min = min(np.min(obs.velocities[1:]/1000), vel_min)
 
             ht_max = max(np.max(obs.meas_ht[1:]), ht_max)
             ht_min = min(np.min(obs.meas_ht[1:]), ht_min)
@@ -3978,18 +3992,18 @@ class Trajectory(object):
 
         # Plot the velocity calculated from the Jacchia model
         t_vel = np.linspace(t_min, t_max, 1000)
-        ax1.plot(jacchiaVelocityFunc(t_vel, self.jacchia_fit[0], self.jacchia_fit[1], self.v_init), t_vel,
-            label='Jacchia fit', alpha=0.5)
+        ax1.plot(jacchiaVelocityFunc(t_vel, self.jacchia_fit[0], self.jacchia_fit[1], self.v_init)/1000, \
+            t_vel, label='Jacchia fit', alpha=0.5)
 
         plt.title('Velocity')
-        ax1.set_xlabel('Velocity (m/s)')
+        ax1.set_xlabel('Velocity (km/s)')
         ax1.set_ylabel('Time (s)')
 
         ax1.legend()
         ax1.grid()
 
         # Set velocity limits to +/- 3 km/s
-        ax1.set_xlim([vel_min - 3000, vel_max + 3000])
+        ax1.set_xlim([vel_min - 3, vel_max + 3])
 
         # Set time axis limits
         ax1.set_ylim([t_min, t_max])
@@ -4616,6 +4630,45 @@ class Trajectory(object):
 
         if self.verbose and self.estimate_timing_vel:
                 print('Estimating initial velocity and timing differences...')
+
+
+
+        # # Show the pre-time corrected time vs. length
+        # if not _rerun_timing:
+
+        #     ### PLOT DISTANCE FROM RADIANT STATE VECTOR POSITION ###
+        #     ######################################################################################################
+        #     for obs in self.observations:
+
+        #         # Extract points that were not ignored
+        #         used_times = obs.time_data[obs.ignore_list == 0]
+        #         used_dists = obs.state_vect_dist[obs.ignore_list == 0]
+
+        #         plt_handle = plt.plot(used_dists, used_times, marker='x', label=str(obs.station_id), zorder=3)
+
+
+        #         # Plot ignored points
+        #         if np.any(obs.ignore_list):
+
+        #             ignored_times = obs.time_data[obs.ignore_list > 0]
+        #             ignored_dists = obs.state_vect_dist[obs.ignore_list > 0]
+                        
+        #             plt.scatter(ignored_dists, ignored_times, facecolors='k', edgecolors=plt_handle[0].get_color(), 
+        #                 marker='o', s=8, zorder=4, label='{:s} ignored points'.format(str(obs.station_id)))
+
+
+        #     plt.title("Distances from state vector, before time correction")
+
+        #     plt.ylabel('Time (s)')
+        #     plt.xlabel('Distance from state vector (m)')
+            
+        #     plt.legend()
+        #     plt.grid()
+        #     plt.gca().invert_yaxis()
+
+        #     plt.tight_layout()
+
+        #     plt.show()
 
 
         # Estimate the timing difference between stations and the initial velocity
