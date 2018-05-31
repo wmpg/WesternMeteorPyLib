@@ -4634,7 +4634,8 @@ class Trajectory(object):
         #         used_times = obs.time_data[obs.ignore_list == 0]
         #         used_dists = obs.state_vect_dist[obs.ignore_list == 0]
 
-        #         plt_handle = plt.plot(used_dists, used_times, marker='x', label=str(obs.station_id), zorder=3)
+        #         plt_handle = plt.plot(used_dists/1000, used_times, marker='x', label=str(obs.station_id), \
+        #             zorder=3)
 
 
         #         # Plot ignored points
@@ -4643,14 +4644,15 @@ class Trajectory(object):
         #             ignored_times = obs.time_data[obs.ignore_list > 0]
         #             ignored_dists = obs.state_vect_dist[obs.ignore_list > 0]
                         
-        #             plt.scatter(ignored_dists, ignored_times, facecolors='k', edgecolors=plt_handle[0].get_color(), 
-        #                 marker='o', s=8, zorder=4, label='{:s} ignored points'.format(str(obs.station_id)))
+        #             plt.scatter(ignored_dists/1000, ignored_times, facecolors='k', \
+        #                 edgecolors=plt_handle[0].get_color(), marker='o', s=8, zorder=4, \
+        #                 label='{:s} ignored points'.format(str(obs.station_id)))
 
 
         #     plt.title("Distances from state vector, before time correction")
 
         #     plt.ylabel('Time (s)')
-        #     plt.xlabel('Distance from state vector (m)')
+        #     plt.xlabel('Distance from state vector (km)')
             
         #     plt.legend()
         #     plt.grid()
