@@ -2513,16 +2513,14 @@ if __name__ == "__main__":
     # ### URSIDS
 
     # # Shower name
-    # shower_name = '2012Ursids'
-
-    # # NOTE: sigmas here are not observed values, but best guesses !!!
+    # shower_name = '2014Ursids'
 
     # # Radiant position and dispersion
     # ra_g = 219.9
-    # ra_g_sigma = 1.0
+    # ra_g_sigma = 3.2
 
-    # dec_g = 56.6
-    # dec_g_sigma = 1.0
+    # dec_g = 75.4
+    # dec_g_sigma = 1.1
 
     # # Radiant drift in degrees per degree of solar longitude
     # d_ra = 0.05
@@ -2530,12 +2528,12 @@ if __name__ == "__main__":
 
     # # Geocentric velocity in km/s
     # v_g = 32.9
-    # v_g_sigma = 0.5
+    # v_g_sigma = 0.8
 
     # # Velocity drift
     # d_vg = 0.0
 
-    # year = 2012
+    # year = 2014
     # month = 12
 
     # # Solar longitude of peak activity in degrees
@@ -2815,7 +2813,7 @@ if __name__ == "__main__":
     # Lambda = 0.5
 
     # # Mass index
-    # mass_index = 2.0
+    # mass_index = 2.0, Beech et al. 1999
 
     # # # Mass range (log of mass in kg) seen by the system (allsky, 60 km/s, Perseids)
     # # mass_min = -4
@@ -2868,7 +2866,7 @@ if __name__ == "__main__":
     # Lambda = 0.5
 
     # # Mass index
-    # mass_index = 1.8
+    # mass_index = 1.58 # compured from population index s = 1 + 2.5*log10(r) from Molau et al. 2015
 
     # # Mass range (log of mass in kg) seen by the system (allsky, 30 km/s, Ursids)
     # mass_min = -3.0
