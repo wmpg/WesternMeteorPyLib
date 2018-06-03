@@ -59,7 +59,7 @@ def solveTrajectory(dir_path, file_name, solver='original', **kwargs):
 
 
         # Fill the observations
-        for obs in traj_p.observations:
+        for i, obs in enumerate(traj_p.observations):
 
             # Check if the trajectory had any excluded points
             if hasattr(traj_p, 'excluded_time'):
@@ -70,7 +70,7 @@ def solveTrajectory(dir_path, file_name, solver='original', **kwargs):
 
 
             traj.infillTrajectory(obs.meas1, obs.meas2, obs.time_data, obs.lat, obs.lon, obs.ele, 
-                station_id=obs.station_id, excluded_time=excluded_time)
+                station_id=obs.station_id, excluded_time=excluded_time, ignore_list=obs.ignore_list)
 
 
     elif solver == 'gural':
@@ -110,8 +110,11 @@ if __name__ == "__main__":
     # dir_path = os.path.abspath("../SimulatedMeteors/CAMO_OLD/Perseids/2456150.7563")
     # file_name = "20120811_060904_trajectory.pickle"
 
-    dir_path = os.path.abspath("../SimulatedMeteors/CAMO/2011Draconids/023 - 2455843.361897")
-    file_name = "20111008_204107_trajectory.pickle"
+    # dir_path = os.path.abspath("../SimulatedMeteors/CAMO/2011Draconids/023 - 2455843.361897")
+    # file_name = "20111008_204107_trajectory.pickle"
+
+    dir_path = os.path.abspath("../SimulatedMeteors/CAMSsim/2014Ursids/000 - 2457011.277327")
+    file_name = "20141219_183921_trajectory.pickle"
 
     #dir_path = os.path.abspath("/home/dvida/Desktop/test/012 - 2455896.500000")
     #file_name = "20111201_000000_trajectory.pickle"
@@ -122,4 +125,4 @@ if __name__ == "__main__":
 
 
     # Solve the trajectory from the given pickle file
-    traj = solveTrajectory(dir_path, file_name, solver='original')
+    traj = solveTrajectory(dir_path, file_name, solver='original', monte_carlo=True)

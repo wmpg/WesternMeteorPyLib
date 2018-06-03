@@ -2239,7 +2239,7 @@ if __name__ == "__main__":
     #     [43.19279, -81.31565, 324.0, 'elgin']] # Elgin
 
     # # Camera FPS per station
-    # fps_list = [110, 110]
+    # fps_list = [100, 100]
 
     # # Observation uncertanties per station (arcsec)
     # obs_ang_uncertainties = [1, 1]
@@ -2251,10 +2251,10 @@ if __name__ == "__main__":
     # elev_fovs = [41.104, 46.344]
 
     # # Cameras FOV widths (degrees)
-    # fov_widths = [19.22, 19.22]
+    # fov_widths = [30.0, 30.0]
 
     # # Cameras FOV heights (degrees)
-    # fov_heights = [25.77, 25.77]
+    # fov_heights = [30.0, 30.0]
 
     # # Limiting magnitudes (needed only for ablation simulation)
     # lim_magnitudes = [+5.5, +5.5]
@@ -2510,41 +2510,41 @@ if __name__ == "__main__":
     # ###
 
 
-    # ### URSIDS
+    ### URSIDS
 
-    # # Shower name
-    # shower_name = '2014Ursids'
+    # Shower name
+    shower_name = '2014Ursids'
 
-    # # Radiant position and dispersion
-    # ra_g = 219.9
-    # ra_g_sigma = 3.2
+    # Radiant position and dispersion
+    ra_g = 219.9
+    ra_g_sigma = 3.2
 
-    # dec_g = 75.4
-    # dec_g_sigma = 1.1
+    dec_g = 75.4
+    dec_g_sigma = 1.1
 
-    # # Radiant drift in degrees per degree of solar longitude
-    # d_ra = 0.05
-    # d_dec = -0.31
+    # Radiant drift in degrees per degree of solar longitude
+    d_ra = 0.05
+    d_dec = -0.31
 
-    # # Geocentric velocity in km/s
-    # v_g = 32.9
-    # v_g_sigma = 0.8
+    # Geocentric velocity in km/s
+    v_g = 32.9
+    v_g_sigma = 0.8
 
-    # # Velocity drift
-    # d_vg = 0.0
+    # Velocity drift
+    d_vg = 0.0
 
-    # year = 2014
-    # month = 12
+    year = 2014
+    month = 12
 
-    # # Solar longitude of peak activity in degrees
-    # sol_max = 271.0
-    # sol_slope = 0.61
+    # Solar longitude of peak activity in degrees
+    sol_max = 271.0
+    sol_slope = 0.61
 
-    # # Beginning height in kilometers
-    # beg_height = 95
-    # beg_height_sigma = 3
+    # Beginning height in kilometers
+    beg_height = 95
+    beg_height_sigma = 3
 
-    # ###
+    ###
 
 
     # ### PERSEIDS
@@ -2584,41 +2584,41 @@ if __name__ == "__main__":
     # ###
 
 
-    ### 2011 Draconids
+    # ### 2011 Draconids
 
-    # Shower name
-    shower_name = '2011Draconids'
+    # # Shower name
+    # shower_name = '2011Draconids'
 
-    # Radiant position and dispersion
-    ra_g = 263.387
-    ra_g_sigma = 0.291019
+    # # Radiant position and dispersion
+    # ra_g = 263.387
+    # ra_g_sigma = 0.291019
 
-    dec_g = 55.9181
-    dec_g_sigma = 0.15746
+    # dec_g = 55.9181
+    # dec_g_sigma = 0.15746
 
-    # Radiant drift in degrees per degree of solar longitude
-    d_ra = 0.0
-    d_dec = 0.0
+    # # Radiant drift in degrees per degree of solar longitude
+    # d_ra = 0.0
+    # d_dec = 0.0
 
-    # Geocentric velocity in km/s
-    v_g = 20.9245
-    v_g_sigma = 0.04191
+    # # Geocentric velocity in km/s
+    # v_g = 20.9245
+    # v_g_sigma = 0.04191
 
-    # Velocity drift
-    d_vg = 0.0
+    # # Velocity drift
+    # d_vg = 0.0
 
-    year = 2011
-    month = 10
+    # year = 2011
+    # month = 10
 
-    # Solar longitude of peak activity in degrees
-    sol_max = 195.07 # Paul's sims
-    sol_slope = 17.5 # Koten et al. 2014 observations
+    # # Solar longitude of peak activity in degrees
+    # sol_max = 195.07 # Paul's sims
+    # sol_slope = 17.5 # Koten et al. 2014 observations
 
-    # Beginning height in kilometers
-    beg_height = 95
-    beg_height_sigma = 3
+    # # Beginning height in kilometers
+    # beg_height = 95
+    # beg_height_sigma = 3
 
-    ##
+    # ##
 
 
     # ### Long sporadic fireball
@@ -2744,52 +2744,52 @@ if __name__ == "__main__":
 
 
 
-    ## Velocity model from Campbell-Brown & Koschny (2004) meteor ablation model #####
+    # ## Velocity model from Campbell-Brown & Koschny (2004) meteor ablation model #####
 
-    ## 2011 Draconids ###
-    # Make the beginning heights heigher, as the trajectory points will be determined by simulated
-    #   magnitudes
-    beg_height = 110
-    beg_height_sigma = 0
+    # ## 2011 Draconids ###
+    # # Make the beginning heights heigher, as the trajectory points will be determined by simulated
+    # #   magnitudes
+    # beg_height = 110
+    # beg_height_sigma = 0
 
-    # Luminous efficiency (fraction)
-    lum_eff = 0.7/100
+    # # Luminous efficiency (fraction)
+    # lum_eff = 0.7/100
 
-    # Ablation coefficient (s^2/km^2)
-    ablation_coeff = 0.21 # Ceplecha et al. 1998, D type
+    # # Ablation coefficient (s^2/km^2)
+    # ablation_coeff = 0.21 # Ceplecha et al. 1998, D type
 
-    # Drag coeficient
-    Gamma = 1.0
+    # # Drag coeficient
+    # Gamma = 1.0
 
-    # Heat transfer coeficient
-    Lambda = 0.5
-
-
-    # # Mass range (log of mass in kg) seen by the system (EMCCD, 20 km/s, Draconids)
-    # mass_min = -6.5
-    # mass_max = -4.5
-
-    # # Mass range (log of mass in kg) seen by the system (CAMO, 20 km/s, Draconids)
-    # mass_min = -5.5
-    # mass_max = -3
-
-    # # Mass range (log of mass in kg) seen by the system (allsky, 20 km/s, Draconids)
-    # mass_min = -2.5
-    # mass_max = 0.5
-
-    # Mass range (log of mass in kg) seen by the system (moderate, 20 km/s, Draconids)
-    mass_min = -4.9
-    mass_max = -3.0
-
-    # Mass index
-    mass_index = 1.95 # Koten et al. 2014
-
-    # Sample densities (Borovicka et al. 2013: Radiants, orbits, spectra, and deceleration of selected 2011 
-    #   Draconids)
-    density_samples = np.random.uniform(100, 400, n_meteors)
+    # # Heat transfer coeficient
+    # Lambda = 0.5
 
 
-    # \ 2011 Draconids
+    # # # Mass range (log of mass in kg) seen by the system (EMCCD, 20 km/s, Draconids)
+    # # mass_min = -6.5
+    # # mass_max = -4.5
+
+    # # # Mass range (log of mass in kg) seen by the system (CAMO, 20 km/s, Draconids)
+    # # mass_min = -5.5
+    # # mass_max = -3
+
+    # # # Mass range (log of mass in kg) seen by the system (allsky, 20 km/s, Draconids)
+    # # mass_min = -2.5
+    # # mass_max = 0.5
+
+    # # Mass range (log of mass in kg) seen by the system (moderate, 20 km/s, Draconids)
+    # mass_min = -4.9
+    # mass_max = -3.0
+
+    # # Mass index
+    # mass_index = 1.95 # Koten et al. 2014
+
+    # # Sample densities (Borovicka et al. 2013: Radiants, orbits, spectra, and deceleration of selected 2011 
+    # #   Draconids)
+    # density_samples = np.random.uniform(100, 400, n_meteors)
+
+
+    # # \ 2011 Draconids
 
 
 
@@ -2846,44 +2846,48 @@ if __name__ == "__main__":
 
 
 
-    # ## Ursids ###
+    ## Ursids ###
 
-    # # Make the beginning heights heigher, as the trajectory points will be determined by simulated
-    # # magnitudes
-    # beg_height = 120
-    # beg_height_sigma = 0
+    # Make the beginning heights heigher, as the trajectory points will be determined by simulated
+    # magnitudes
+    beg_height = 120
+    beg_height_sigma = 0
 
-    # # Luminous efficiency (fraction)
-    # lum_eff = 0.7/100
+    # Luminous efficiency (fraction)
+    lum_eff = 0.7/100
 
-    # # Ablation coefficient (s^2/km^2) (cometary)
-    # ablation_coeff = 0.1
+    # Ablation coefficient (s^2/km^2) (cometary)
+    ablation_coeff = 0.1
 
-    # # Drag coeficient
-    # Gamma = 1.0
+    # Drag coeficient
+    Gamma = 1.0
 
-    # # Heat transfer coeficient
-    # Lambda = 0.5
+    # Heat transfer coeficient
+    Lambda = 0.5
 
-    # # Mass index
-    # mass_index = 1.58 # compured from population index s = 1 + 2.5*log10(r) from Molau et al. 2015
+    # Mass index
+    mass_index = 1.58 # compured from population index s = 1 + 2.5*log10(r) from Molau et al. 2015
 
     # # Mass range (log of mass in kg) seen by the system (allsky, 30 km/s, Ursids)
     # mass_min = -3.0
     # mass_max = 0.0
 
+    # Mass range (log of mass in kg) seen by the system (CAMS, 30 km/s, Ursids)
+    mass_min = -5.5
+    mass_max = -3.4
 
-    # # Define density distribution (see: Moorhead et al. 2017 "A two-population sporadic meteoroid density 
-    # #        distribution and its implications for environment models")
 
-    # # HTC density distribution (Tj <= 2)
-    # log_rho_mean = 2.93320
-    # log_rho_sigma = 0.12714
+    # Define density distribution (see: Moorhead et al. 2017 "A two-population sporadic meteoroid density 
+    #        distribution and its implications for environment models")
 
-    # # Samples densities
-    # density_samples = sampleDensityMoorhead(log_rho_mean, log_rho_sigma, n_meteors)
+    # HTC density distribution (Tj <= 2)
+    log_rho_mean = 2.93320
+    log_rho_sigma = 0.12714
 
-    # ## \Ursids
+    # Samples densities
+    density_samples = sampleDensityMoorhead(log_rho_mean, log_rho_sigma, n_meteors)
+
+    ## \Ursids
 
 
 

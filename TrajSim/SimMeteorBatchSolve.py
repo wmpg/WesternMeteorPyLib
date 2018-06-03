@@ -27,7 +27,7 @@ if __name__ == "__main__":
     # Directory which contains SimMet .pickle files
     #shower_dir = os.path.abspath("../SimulatedMeteors/EMCCD/2011Draconids")
 
-    shower_dir = os.path.abspath("../SimulatedMeteors/CABERNET/2011Draconids")
+    #shower_dir = os.path.abspath("../SimulatedMeteors/CABERNET/2011Draconids")
 
     #shower_dir = os.path.abspath("../SimulatedMeteors/CAMO/2011Draconids_TEST")
     #shower_dir = os.path.abspath("../SimulatedMeteors/CAMO/2012Perseids")
@@ -39,6 +39,7 @@ if __name__ == "__main__":
     #shower_dir = os.path.abspath("../SimulatedMeteors/SOMN_precise_sim/LongFireball_grav")
 
     #shower_dir = os.path.abspath("../SimulatedMeteors/CAMSsim/2011Draconids")
+    shower_dir = os.path.abspath("../SimulatedMeteors/CAMSsim/2014Ursids")
     #shower_dir = os.path.abspath("../SimulatedMeteors/CAMSsim/2012Perseids")
 
     # Maximum time offset (seconds)
@@ -97,7 +98,7 @@ if __name__ == "__main__":
                 
                 # Init the trajectory
                 traj = Trajectory(sim_met.jdt_ref, output_dir=output_dir, max_toffset=t_max_offset, \
-                    meastype=2, show_plots=False, mc_runs=100, gravity_correction=gravity_correction)  ## TESING, ONLY 100 RUNS!!!
+                    meastype=2, show_plots=False, mc_runs=250, gravity_correction=gravity_correction)  ## TESING, ONLY 100 RUNS!!!
 
             
             elif 'gural' in traj_solver:

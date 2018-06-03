@@ -1085,8 +1085,7 @@ def fitLagIntercept(time, length, v_init, initial_intercept=0.0):
 
 
 
-def timingResiduals(params, observations, t_ref_station, weights=None, ret_stddev=False, \
-    ret_len_residuals=False):
+def timingResiduals(params, observations, t_ref_station, weights=None, ret_stddev=False):
     """ Calculate the sum of absolute differences between timings of given stations using the length from
         respective stations.
     
@@ -1099,8 +1098,6 @@ def timingResiduals(params, observations, t_ref_station, weights=None, ret_stdde
     Keyword arguments:
         weights: [list] A list of statistical weights for every station.
         ret_stddev: [bool] Returns the standard deviation instead of the cost function.
-        ret_len_residuals: [bool] Returns the length residuals instead of the timing residuals. Used for 
-            evaluating the goodness of length matching during the Monte Carlo procedure. False by default.
     
     Return:
         [float] Average absolute difference between the timings from all stations using the length for
@@ -1150,161 +1147,102 @@ def timingResiduals(params, observations, t_ref_station, weights=None, ret_stdde
 
 
 
-    # Returns the length residuals (NOT USED)
-    if ret_len_residuals:
+    cost_sum = 0
+    cost_point_count = 0
+    weights_sum = 1e-10
 
-        # Choose the reference station time and distances
-        ref_time, ref_dist = state_vect_distances[t_ref_station]
+    # Go through all pairs of observations (i.e. stations)
+    for i in range(len(observations)):
 
-        # Do a monotonic cubic spline fit on the reference state vector distance
-        ref_line_spline = scipy.interpolate.PchipInterpolator(ref_time, ref_dist, extrapolate=True)
+        # Skip ignored stations
+        if observations[i].ignore_station:
+            continue
 
-        residual_sum = 0
-        stddev_sum = 0
-        stddev_count = 0
-
-        # Go through all state vector distances
-        for i, obs in enumerate(observations):
-
-            # Skip the reference station
-            if i == t_ref_station:
-                continue
-
-            time_data, state_vect_dist = state_vect_distances[i]
-
-            # Take only those points that overlap with the reference station
-            common_points = np.where((time_data > np.min(ref_time)) & (time_data < np.max(ref_time)))
-
-            # Do this is there are at least 4 overlapping points
-            if len(common_points[0]) > 4:
-                time_data = time_data[common_points]
-                state_vect_dist = state_vect_dist[common_points]
-
-            # Calculate the residuals in dist from the current dist to the reference dist, using smooth
-            # approximation of L1 (absolute value) cost
-            z = (ref_line_spline(time_data) - state_vect_dist)**2
-            residual_sum += np.sum(2*(np.sqrt(1 + z) - 1))
-
-            # Standard deviation calculation
-            stddev_sum += np.sum(z)
-            stddev_count += len(z)
-
-
-        # Calculate the standard deviation of the fit
-        dist_stddev = np.sqrt(stddev_sum/stddev_count)
-
-
-        if ret_stddev:
-
-            # Returned for reporting the goodness of fit
-            return dist_stddev
-
-        else:
-
-            # Returned for minimization
-            return residual_sum/stddev_count
-
-
-
-    # Return the timing residuals (used for determining the timing offset)
-    else:
-
-        cost_sum = 0
-        cost_point_count = 0
-        weights_sum = 1e-10
-
-        # Go through all pairs of observations (i.e. stations)
-        for i in range(len(observations)):
+        for j in range(len(observations)):
 
             # Skip ignored stations
-            if observations[i].ignore_station:
+            if observations[j].ignore_station:
                 continue
 
-            for j in range(len(observations)):
+            # Skip pairing the same observations again
+            if j <= i:
+                continue
 
-                # Skip ignored stations
-                if observations[j].ignore_station:
-                    continue
+            # Extract times and lengths from both stations
+            time1, len1 = state_vect_distances[i]
+            time2, len2 = state_vect_distances[j]
 
-                # Skip pairing the same observations again
-                if j <= i:
-                    continue
+            # Exclude ignored points
+            time1 = time1[observations[i].ignore_list == 0]
+            len1 = len1[observations[i].ignore_list == 0]
+            time2 = time2[observations[j].ignore_list == 0]
+            len2 = len2[observations[j].ignore_list == 0]
 
-                # Extract times and lengths from both stations
-                time1, len1 = state_vect_distances[i]
-                time2, len2 = state_vect_distances[j]
-
-                # Exclude ignored points
-                time1 = time1[observations[i].ignore_list == 0]
-                len1 = len1[observations[i].ignore_list == 0]
-                time2 = time2[observations[j].ignore_list == 0]
-                len2 = len2[observations[j].ignore_list == 0]
-
-                # Find common points in length between both stations
-                common_pts = np.where((len2 >= np.min(len1)) & (len2 <= np.max(len1)))
+            # Find common points in length between both stations
+            common_pts = np.where((len2 >= np.min(len1)) & (len2 <= np.max(len1)))
 
 
-                # Continue without fitting the timing is there is no, or almost no overlap
-                if len(common_pts[0]) < 4:
-                    continue
+            # Continue without fitting the timing is there is no, or almost no overlap
+            if len(common_pts[0]) < 4:
+                continue
 
 
-                # Take only the common points
-                time2 = time2[common_pts]
-                len2 = len2[common_pts]
+            # Take only the common points
+            time2 = time2[common_pts]
+            len2 = len2[common_pts]
 
 
-                # If there are any excluded points in the reference observations, do not take their
-                # pairs from the other site into consideration
-                if observations[i].excluded_indx_range:
+            # If there are any excluded points in the reference observations, do not take their
+            # pairs from the other site into consideration
+            if observations[i].excluded_indx_range:
 
-                    # Extract excluded indices
-                    excluded_indx_min, excluded_indx_max = observations[i].excluded_indx_range
+                # Extract excluded indices
+                excluded_indx_min, excluded_indx_max = observations[i].excluded_indx_range
 
-                    # Get the range of lengths inside the exclusion zone
-                    len1_excluded_min = len1[excluded_indx_min]
-                    len1_excluded_max = len1[excluded_indx_max]
+                # Get the range of lengths inside the exclusion zone
+                len1_excluded_min = len1[excluded_indx_min]
+                len1_excluded_max = len1[excluded_indx_max]
 
-                    # Select only those lengths in the other station which are outside the exclusion zone
-                    temp_arr = np.c_[time2, len2]
-                    temp_arr = temp_arr[~((temp_arr[:, 1] >= len1_excluded_min) \
-                        & (temp_arr[:, 1] <= len1_excluded_max))]
+                # Select only those lengths in the other station which are outside the exclusion zone
+                temp_arr = np.c_[time2, len2]
+                temp_arr = temp_arr[~((temp_arr[:, 1] >= len1_excluded_min) \
+                    & (temp_arr[:, 1] <= len1_excluded_max))]
 
-                    time2, len2 = temp_arr.T
-
-
-                # Interpolate the first (i.e. reference length)
-                len1_interpol = scipy.interpolate.interp1d(len1, time1)
-
-                # Calculate the residuals using smooth approximation of L1 (absolute value) cost
-                z = (len1_interpol(len2) - time2)**2
-
-                # Calculate the cost function sum
-                cost_sum += weights[i]*weights[j]*np.sum(2*(np.sqrt(1 + z) - 1))
-
-                # Add the weight sum
-                weights_sum += weights[i]*weights[j]
-
-                # Add the total number of points to the cost counter
-                cost_point_count += len(z)
+                time2, len2 = temp_arr.T
 
 
-        # If no points were compared, return infinite
-        if cost_point_count == 0:
-            return np.inf
+            # Interpolate the first (i.e. reference length)
+            len1_interpol = scipy.interpolate.interp1d(len1, time1)
 
-        # Calculate the standard deviation of the fit
-        dist_stddev = np.sqrt(cost_sum/weights_sum/cost_point_count)
+            # Calculate the residuals using smooth approximation of L1 (absolute value) cost
+            z = (len1_interpol(len2) - time2)**2
 
-        if ret_stddev:
+            # Calculate the cost function sum
+            cost_sum += weights[i]*weights[j]*np.sum(2*(np.sqrt(1 + z) - 1))
 
-            # Returned for reporting the goodness of fit
-            return dist_stddev
+            # Add the weight sum
+            weights_sum += weights[i]*weights[j]
 
-        else:
+            # Add the total number of points to the cost counter
+            cost_point_count += len(z)
 
-            # Returned for minimization
-            return cost_sum/weights_sum/cost_point_count
+
+    # If no points were compared, return infinite
+    if cost_point_count == 0:
+        return np.inf
+
+    # Calculate the standard deviation of the fit
+    dist_stddev = np.sqrt(cost_sum/weights_sum/cost_point_count)
+
+    if ret_stddev:
+
+        # Returned for reporting the goodness of fit
+        return dist_stddev
+
+    else:
+
+        # Returned for minimization
+        return cost_sum/weights_sum/cost_point_count
 
 
 
@@ -2501,11 +2439,17 @@ class Trajectory(object):
 
 
 
-        if calc_res and (self.time_diffs is not None):
+        if calc_res:
+
+            # Because the timing offsets have already been applied, the timing offsets are 0
+            zero_timing_res = np.zeros(len(self.observations))
 
             # Calculate the timing offset between the meteor time vs. length
-            self.timing_res = timingResiduals(self.time_diffs, self.observations, self.t_ref_station)
-            self.timing_stddev = timingResiduals(self.time_diffs, self.observations, self.t_ref_station, \
+            
+            if self.timing_res is None:
+                self.timing_res = timingResiduals(zero_timing_res, self.observations, self.t_ref_station)
+
+            self.timing_stddev = timingResiduals(zero_timing_res, self.observations, self.t_ref_station, \
                 ret_stddev=True)
 
 
@@ -2671,6 +2615,10 @@ class Trajectory(object):
 
             if self.verbose:
                 print("Final function evaluation:", timing_mini.fun)
+
+
+            # Set the final value of the timing residual
+            self.timing_res = timing_mini.fun
                 
 
             stat_count = 0
@@ -4587,7 +4535,7 @@ class Trajectory(object):
         ######################################################################################################
 
 
-        # If running a Monte Carlo run, switch the observations to the original ones, so noise does not 
+        # If running a Monte Carlo run, switch the observations to the original ones, so the noise does not 
         # influence anything except the radiant position
         if (_mc_run or _rerun_timing) and (_orig_obs is not None):
                 
@@ -4601,21 +4549,12 @@ class Trajectory(object):
             # If this is the run of recalculating the parameters after updating the timing, preserve the
             # timing as well
             if _rerun_timing:
-
                 for obs, obs_noise in zip(self.observations, self.obs_noisy):
                     obs.time_data = np.copy(obs_noise.time_data)
 
 
         # Calculate velocity at each point
-        self.calcVelocity(self.state_vect_mini, self.radiant_eci_mini, self.observations, \
-            calc_res=_rerun_timing)
-
-
-        # Calculate the lag if it was not calculated during timing estimation
-        if self.observations[0].lag is None:
-
-            # Calculate lag
-            self.calcLag(self.observations)
+        self.calcVelocity(self.state_vect_mini, self.radiant_eci_mini, self.observations)
 
 
         if self.verbose and self.estimate_timing_vel:
@@ -4663,7 +4602,14 @@ class Trajectory(object):
         #     plt.show()
 
 
-        # Estimate the timing difference between stations and the initial velocity
+        # Calculate the lag ONLY if it was not calculated during timing estimation
+        if self.observations[0].lag is None:
+
+            # Calculate lag
+            self.calcLag(self.observations)
+            
+
+        # Estimate the timing difference between stations and the initial velocity and update the time
         self.velocity_fit, self.v_init, self.time_diffs, self.observations = \
             self.estimateTimingAndVelocity(self.observations, estimate_timing_vel=self.estimate_timing_vel)
 

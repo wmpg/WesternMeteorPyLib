@@ -497,7 +497,7 @@ if __name__ == "__main__":
     #dir_path = "../Romulan2012Geminids"
 
     #dir_path = "../SimulatedMeteors/EMCCD/2011Draconids"
-    dir_path = "../SimulatedMeteors/CABERNET/2011Draconids"
+    #dir_path = "../SimulatedMeteors/CABERNET/2011Draconids"
 
     #dir_path = "../SimulatedMeteors/CAMO/2011Draconids"
     #dir_path = "../SimulatedMeteors/CAMO/2012Perseids"
@@ -507,6 +507,8 @@ if __name__ == "__main__":
     #dir_path = "../SimulatedMeteors/SOMN_sim/2012Perseids"
     #dir_path = "../SimulatedMeteors/SOMN_sim/2015Taurids"
     #dir_path = "../SimulatedMeteors/CAMSsim/2012Perseids"
+    #dir_path = "../SimulatedMeteors/CAMSsim/2011Draconids"
+    dir_path = "../SimulatedMeteors/CAMSsim/2014Ursids"
 
 
     # Minimum convergence angle (deg)
