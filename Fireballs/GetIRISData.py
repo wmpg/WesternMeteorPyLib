@@ -318,7 +318,13 @@ def butterworthBandpassFilter(lowcut, highcut, fs, order=5):
 def convolutionDifferenceFilter(waveform_data):
     """ Apply the convolution filter on data as suggested in Kalenda et al. (2014). """
 
-    return np.convolve(waveform_data, [-0.5, 1.0, -0.5], mode='same')
+    # Apply the filter 
+    filtered_data = np.convolve(waveform_data, [-0.5, 1.0, -0.5], mode='same')
+
+    # Detrend data
+    filtered_data = filtered_data - np.mean(filtered_data)
+
+    return filtered_data
 
 
 
@@ -493,7 +499,6 @@ def plotAllWaveforms(dir_path, data_list, v_sound, t0, lat_centre, lon_centre, a
         max_wave_value = np.max([max_wave_value, np.max(waveform_data)])
         min_wave_value = np.min([min_wave_value, np.min(waveform_data)])
 
-
         # Plot the waveform on the the time vs. distance graph
         ax.plot(waveform_data, time_data, color='k', alpha=0.4, linewidth=0.2, zorder=3)
 
@@ -605,17 +610,54 @@ if __name__ == "__main__":
     # #################
 
 
+    # ### 2018-04-08 Varazdin fireball
+
+    # # Name of the folder where data files will be stored
+    # dir_path = '../Seismic data/2018-04-08 Varazdin fireball'
+
+    # # Use the European data access site
+    # orfeus = True
+
+    # # Geo coordinates of the wave release centre
+    # lat_centre = 46.238112
+    # lon_centre = 16.603644
+
+    # # Station search radius (degrees)
+    # deg_radius = 2
+
+    # # Seismic network code. Use '*' for all networks
+    # network = '*'
+
+    # # Instrument channel ('BDF' default)
+    # channel = 'HHZ'
+
+    # # Speed of sound (m/s)
+    # v_sound = 310
+
+    # # Time offset of wave release from the reference time (seconds)
+    # t0 = 514.0
+
+    # # Time range of waveform retrieval in UTC (can't be more than 2 hours!)
+    # start_datetime = datetime.datetime(2018, 4, 8, 18, 40, 0)
+    # end_datetime = datetime.datetime(2018, 4, 8, 19, 39, 0)
+
+    # # Apply the Kalenda et al. (2014) difference filter to the plot of all waveforms
+    # difference_filter_all = True
+
+
+    # #################
+
     ### 2018-04-08 Varazdin fireball
 
     # Name of the folder where data files will be stored
-    dir_path = '../Seismic data/2018-04-08 Varazdin fireball'
+    dir_path = '../Seismic data/2018-06-13 Nevada fireball'
 
     # Use the European data access site
-    orfeus = True
+    orfeus = False
 
     # Geo coordinates of the wave release centre
-    lat_centre = 46.238112
-    lon_centre = 16.603644
+    lat_centre = 38.51115630406
+    lon_centre = -115.17391599243
 
     # Station search radius (degrees)
     deg_radius = 2
@@ -630,27 +672,29 @@ if __name__ == "__main__":
     v_sound = 310
 
     # Time offset of wave release from the reference time (seconds)
-    t0 = 514.0
+    t0 = 806.0
 
     # Time range of waveform retrieval in UTC (can't be more than 2 hours!)
-    start_datetime = datetime.datetime(2018, 4, 8, 18, 40, 0)
-    end_datetime = datetime.datetime(2018, 4, 8, 19, 39, 0)
+    start_datetime = datetime.datetime(2018, 6, 13, 03, 40, 0)
+    end_datetime = datetime.datetime(2018, 6, 13, 4, 40, 0)
 
     # Apply the Kalenda et al. (2014) difference filter to the plot of all waveforms
-    difference_filter_all = True
+    difference_filter_all = False
 
 
     #################
 
 
+
+
     ##########################################################################################################
 
 
-    # ### Download all waveform files which are within the given geographical and temporal range ###
-    # ##########################################################################################################
-    # getAllWaveformFiles(lat_centre, lon_centre, deg_radius, start_datetime, end_datetime, network=network, \
-    #     channel=channel, dir_path=dir_path, orfeus=orfeus)
-    # ##########################################################################################################
+    ### Download all waveform files which are within the given geographical and temporal range ###
+    ##########################################################################################################
+    getAllWaveformFiles(lat_centre, lon_centre, deg_radius, start_datetime, end_datetime, network=network, \
+        channel=channel, dir_path=dir_path, orfeus=orfeus)
+    ##########################################################################################################
 
 
 

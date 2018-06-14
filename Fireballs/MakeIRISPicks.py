@@ -573,6 +573,11 @@ class WaveformPicker(object):
         time_data = time_data[:len(waveform_data)]
 
 
+        # Trim the ends to avoid issues with differenced data
+        time_data = time_data[1:-1]
+        waveform_data = waveform_data[1:-1]
+
+
         # Calculate the time of arrival assuming constant propagation with the given speed of sound
         t_arrival = self.source_dists[self.current_station]/(self.v_sound/1000) + self.t0
 
@@ -640,7 +645,8 @@ class WaveformPicker(object):
         fig = plt.figure()
         ax_spec = fig.add_subplot(111)
 
-        ax_spec.specgram(wave_arr, Fs=1.0/self.current_wavefrom_delta, cmap=plt.cm.inferno)
+        ax_spec.specgram(wave_arr, Fs=1.0/self.current_wavefrom_delta, cmap=plt.cm.inferno, \
+            xextent=(x_min, x_max))
 
         ax_spec.set_xlabel('Time (s)')
         ax_spec.set_ylabel('Frequency (Hz)')
@@ -790,22 +796,46 @@ if __name__ == "__main__":
     # ##########################################################################################################
 
 
+    # ### WAVEFORM DATA PARAMETERS ###
+    # ##########################################################################################################
+
+
+    # # Name of the folder where data files will be stored
+    # dir_path = '../Seismic data/2018-04-08 Varazdin fireball'
+
+    # # Geo coordinates of the wave release centre
+    # lat_centre = 46.163195
+    # lon_centre = 16.656935
+
+    # # Speed of sound (m/s)
+    # v_sound = 310
+
+    # # Time offset of wave release from the reference time
+    # t0 = 514.0
+
+    # # Apply the Kalenda et al. (2014) difference filter to the plot of all waveforms
+    # difference_filter_all = True
+
+
+    # ##########################################################################################################
+
+
     ### WAVEFORM DATA PARAMETERS ###
     ##########################################################################################################
 
 
     # Name of the folder where data files will be stored
-    dir_path = '../Seismic data/2018-04-08 Varazdin fireball'
+    dir_path = '../Seismic data/2018-06-13 Nevada fireball'
 
     # Geo coordinates of the wave release centre
-    lat_centre = 46.163195
-    lon_centre = 16.656935
+    lat_centre = 38.51115630406
+    lon_centre = -115.17391599243
 
     # Speed of sound (m/s)
     v_sound = 310
 
     # Time offset of wave release from the reference time
-    t0 = 514.0
+    t0 = 806.0
 
     # Apply the Kalenda et al. (2014) difference filter to the plot of all waveforms
     difference_filter_all = True
