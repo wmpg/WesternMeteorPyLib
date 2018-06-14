@@ -656,12 +656,14 @@ class JacchiaVelocity(object):
 
 
 class AblationModelVelocity(object):
-    def __init__(self, mass, density, ablation_coeff, Gamma, Lambda, lum_eff):
+    def __init__(self, mass_min, mass_max, mass_index, density, ablation_coeff, Gamma, Lambda, lum_eff):
         """ Velocity calculated from numerical meteor ablation simulation by method of Campbell-Brown & 
             Koschny (2004).
         
         Arguments:
-            mass: [float] Meteoroid mass (kg).
+            mass_min: [float] Logarithm of minimum mass in kilograms (e.g. -3 for 1 gram).
+            mass_max: [float] Logarithm of maximum mass in kilograms (e.g. 0 for 1 kilogram).
+            mass_index: [float] Shower mass index.
             density: [float] Meteoroid density (kg/m^3).
             ablation_coeff: [float] Ablation coefficient (s^2/km^2)
             Gamma: [float] Drag coefficient.
@@ -672,13 +674,16 @@ class AblationModelVelocity(object):
 
         self.name = 'ablation'
 
-        self.mass = mass
+        self.mass_min = mass_min
+        self.mass_max = mass_max
+        self.mass_index = mass_index
         self.density = density
         self.Gamma = Gamma
         self.Lambda = Lambda
         self.ablation_coeff = ablation_coeff
         self.lum_eff = lum_eff
 
+        self.mass = None
         self.length_model = None
         self.luminosity_model = None
         self.velocity_model = None
@@ -694,7 +699,6 @@ class AblationModelVelocity(object):
             self.met, self.consts = loadInputs(config.met_sim_input_file)
 
             # Set physical parameters of the meteor
-            self.met.m_init = self.mass
             self.met.rho = self.density
             self.met.Gamma = self.Gamma
             self.met.Lambda = self.Lambda
@@ -736,6 +740,13 @@ class AblationModelVelocity(object):
             beg_height: [float] Beginning height (meters).
     
         """
+
+        # Generate a mass upon the first run
+        if self.mass is None:
+            self.mass = sampleMass(self.mass_min, self.mass_max, self.mass_index, 1)[0]
+
+
+        self.met.m_init = self.mass
 
         # Set velocity @180km
         self.met.v_init = v_init
@@ -1450,6 +1461,10 @@ def generateTrajectoryData(station_list, sim_met, velocity_model):
     # Assign the velocity model
     sim_met.velocity_model = velocity_model
 
+    # Reset the mass if using the ablation modelling (prevent for getting stuck on small masses that produce
+    #   too faint meteors)
+    if sim_met.velocity_model.name == 'ablation':
+        sim_met.velocity_model.mass = None
 
     # Go through every station
     for stat in station_list:
@@ -1556,6 +1571,11 @@ def generateTrajectoryData(station_list, sim_met, velocity_model):
 
             # Add the ECI position of the station to the vertices list
             fov_corners.append(stat_eci)
+
+            # Skip the estimation if the trajectory has NaNs
+            if np.any(np.isnan(traj_eci)):
+                print('Trajectory ECI coordinates is NaN, skipping...')
+                continue
 
             # If the point is not inside the FOV, skip it
             if not pointInsideConvexHull(fov_corners, traj_eci):
@@ -2313,97 +2333,97 @@ if __name__ == "__main__":
 
     # ##########################################################################################################
 
-    ### SIMULATED MODERATE STATION PARAMETERS ###
-    ##########################################################################################################
-
-    system_name = 'CAMSsim'
-
-    # Number of stations in total
-    n_stations = 3
-
-    # Maximum time offset (seconds)
-    t_max_offset = 1
-
-    # Geographical coordinates of stations (lat, lon, elev, station_id) in degrees and meters
-    stations_geo = [
-        [43.19279, -81.31565, 324.0, 'M1'], # M1 elgin
-        [43.19055, -80.09913, 212.0, 'M2'],
-        [43.96324, -80.80952, 383.0, 'M3']]
-
-    # Camera FPS per station
-    fps_list = [30, 30, 30]
-
-    # Observation uncertanties per station (arcsec)
-    obs_ang_uncertainties = [30, 30, 30]
-
-    # Azimuths of centre of FOVs (degrees)
-    azim_fovs = [56.0, 300.0, 174.0]
-
-    # Elevations of centre of FOVs (degrees)
-    elev_fovs = [65.0, 65.0, 65.0]
-
-    # Cameras FOV widths (degrees)
-    fov_widths = [64.0, 64.0, 64.0]
-
-    # Cameras FOV heights (degrees)
-    fov_heights = [48.0, 48.0, 48.0]
-
-    # Limiting magnitudes (needed only for ablation simulation)
-    lim_magnitudes = [5.0, 5.0, 5.0]
-
-    # Powers of zero-magnitude meteors (Watts) (needed only for ablation simulation)
-    P_0m_list = [1210, 1210, 1210]
-
-    # Minimum angular velocity for detection (deg/s)
-    min_ang_velocities = [2.0, 2.0, 2.0]
-
-    ##########################################################################################################
-
-    # ### SIMULATED ALL-SKY STATION PARAMETERS ###
+    # ### SIMULATED MODERATE STATION PARAMETERS ###
     # ##########################################################################################################
 
-    # system_name = 'SOMN_sim'
+    # system_name = 'CAMSsim'
 
     # # Number of stations in total
     # n_stations = 3
 
     # # Maximum time offset (seconds)
-    # t_max_offset = 1.0
+    # t_max_offset = 1
 
     # # Geographical coordinates of stations (lat, lon, elev, station_id) in degrees and meters
     # stations_geo = [
-    #     [43.19279, -81.31565, 324.0, 'A1'],
-    #     [43.19055, -80.09913, 212.0, 'A2'],
-    #     [43.96324, -80.80952, 383.0, 'A3']]
+    #     [43.19279, -81.31565, 324.0, 'M1'], # M1 elgin
+    #     [43.19055, -80.09913, 212.0, 'M2'],
+    #     [43.96324, -80.80952, 383.0, 'M3']]
 
     # # Camera FPS per station
     # fps_list = [30, 30, 30]
 
     # # Observation uncertanties per station (arcsec)
-    # obs_ang_uncertainties = [120, 120, 120]
+    # obs_ang_uncertainties = [30, 30, 30]
 
     # # Azimuths of centre of FOVs (degrees)
     # azim_fovs = [56.0, 300.0, 174.0]
 
     # # Elevations of centre of FOVs (degrees)
-    # elev_fovs = [90.0, 90.0, 90.0]
+    # elev_fovs = [65.0, 65.0, 65.0]
 
     # # Cameras FOV widths (degrees)
-    # fov_widths = [120.0, 120.0, 120.0]
+    # fov_widths = [64.0, 64.0, 64.0]
 
     # # Cameras FOV heights (degrees)
-    # fov_heights = [120.0, 120.0, 120.0]
+    # fov_heights = [48.0, 48.0, 48.0]
 
     # # Limiting magnitudes (needed only for ablation simulation)
-    # lim_magnitudes = [-0.5, -0.5, -0.5]
+    # lim_magnitudes = [5.0, 5.0, 5.0]
 
     # # Powers of zero-magnitude meteors (Watts) (needed only for ablation simulation)
     # P_0m_list = [1210, 1210, 1210]
 
     # # Minimum angular velocity for detection (deg/s)
-    # min_ang_velocities = [1.0, 1.0, 1.0]
+    # min_ang_velocities = [2.0, 2.0, 2.0]
 
     # ##########################################################################################################
+
+    ### SIMULATED ALL-SKY STATION PARAMETERS ###
+    ##########################################################################################################
+
+    system_name = 'SOMN_sim'
+
+    # Number of stations in total
+    n_stations = 3
+
+    # Maximum time offset (seconds)
+    t_max_offset = 1.0
+
+    # Geographical coordinates of stations (lat, lon, elev, station_id) in degrees and meters
+    stations_geo = [
+        [43.19279, -81.31565, 324.0, 'A1'],
+        [43.19055, -80.09913, 212.0, 'A2'],
+        [43.96324, -80.80952, 383.0, 'A3']]
+
+    # Camera FPS per station
+    fps_list = [30, 30, 30]
+
+    # Observation uncertanties per station (arcsec)
+    obs_ang_uncertainties = [120, 120, 120]
+
+    # Azimuths of centre of FOVs (degrees)
+    azim_fovs = [56.0, 300.0, 174.0]
+
+    # Elevations of centre of FOVs (degrees)
+    elev_fovs = [90.0, 90.0, 90.0]
+
+    # Cameras FOV widths (degrees)
+    fov_widths = [120.0, 120.0, 120.0]
+
+    # Cameras FOV heights (degrees)
+    fov_heights = [120.0, 120.0, 120.0]
+
+    # Limiting magnitudes (needed only for ablation simulation)
+    lim_magnitudes = [-0.5, -0.5, -0.5]
+
+    # Powers of zero-magnitude meteors (Watts) (needed only for ablation simulation)
+    P_0m_list = [1210, 1210, 1210]
+
+    # Minimum angular velocity for detection (deg/s)
+    min_ang_velocities = [1.0, 1.0, 1.0]
+
+    ##########################################################################################################
 
 
     # ### SIMULATED ALL-SKY PRECISE STATION PARAMETERS ###
@@ -2510,41 +2530,41 @@ if __name__ == "__main__":
     # ###
 
 
-    ### URSIDS
+    # ### URSIDS
 
-    # Shower name
-    shower_name = '2014Ursids'
+    # # Shower name
+    # shower_name = '2014Ursids'
 
-    # Radiant position and dispersion
-    ra_g = 219.9
-    ra_g_sigma = 3.2
+    # # Radiant position and dispersion
+    # ra_g = 219.9
+    # ra_g_sigma = 3.2
 
-    dec_g = 75.4
-    dec_g_sigma = 1.1
+    # dec_g = 75.4
+    # dec_g_sigma = 1.1
 
-    # Radiant drift in degrees per degree of solar longitude
-    d_ra = 0.05
-    d_dec = -0.31
+    # # Radiant drift in degrees per degree of solar longitude
+    # d_ra = 0.05
+    # d_dec = -0.31
 
-    # Geocentric velocity in km/s
-    v_g = 32.9
-    v_g_sigma = 0.8
+    # # Geocentric velocity in km/s
+    # v_g = 32.9
+    # v_g_sigma = 0.8
 
-    # Velocity drift
-    d_vg = 0.0
+    # # Velocity drift
+    # d_vg = 0.0
 
-    year = 2014
-    month = 12
+    # year = 2014
+    # month = 12
 
-    # Solar longitude of peak activity in degrees
-    sol_max = 271.0
-    sol_slope = 0.61
+    # # Solar longitude of peak activity in degrees
+    # sol_max = 271.0
+    # sol_slope = 0.61
 
-    # Beginning height in kilometers
-    beg_height = 95
-    beg_height_sigma = 3
+    # # Beginning height in kilometers
+    # beg_height = 95
+    # beg_height_sigma = 3
 
-    ###
+    # ###
 
 
     # ### PERSEIDS
@@ -2658,45 +2678,45 @@ if __name__ == "__main__":
     # ###
 
 
-    # ### 2015 Taurid outburst
+    ### 2015 Taurid outburst
 
-    # # Shower name
-    # shower_name = '2015Taurids'
+    # Shower name
+    shower_name = '2015Taurids'
 
-    # # Radiant position and dispersion
-    # ra_g = 53.059624
-    # ra_g_sigma = 0.334
+    # Radiant position and dispersion
+    ra_g = 53.059624
+    ra_g_sigma = 0.334
 
-    # dec_g = 14.65736
-    # dec_g_sigma = 0.267
+    dec_g = 14.65736
+    dec_g_sigma = 0.267
 
-    # # Radiant drift in degrees per degree of solar longitude
-    # d_ra = 0.554
-    # d_dec = 0.06
+    # Radiant drift in degrees per degree of solar longitude
+    d_ra = 0.554
+    d_dec = 0.06
 
-    # # Geocentric velocity in km/s
-    # v_g = 29.689892
-    # v_g_sigma = 0.223
+    # Geocentric velocity in km/s
+    v_g = 29.689892
+    v_g_sigma = 0.223
 
-    # # Velocity drift
-    # d_vg = -0.293
+    # Velocity drift
+    d_vg = -0.293
 
-    # year = 2015
-    # month = 10
+    year = 2015
+    month = 10
 
-    # # Solar longitude of peak activity in degrees
-    # sol_max = 220.956
-    # sol_slope = 0.15
+    # Solar longitude of peak activity in degrees
+    sol_max = 220.956
+    sol_slope = 0.15
 
-    # # Beginning height in kilometers
-    # beg_height = 100
-    # beg_height_sigma = 3
+    # Beginning height in kilometers
+    beg_height = 100
+    beg_height_sigma = 3
 
 
-    # # Set constraints to the orbit
-    # orbit_limits = ['a', 2.24, 2.28]
+    # Set constraints to the orbit
+    orbit_limits = ['a', 2.24, 2.28]
 
-    # ###
+    ###
 
 
     ##########################################################################################################
@@ -2744,7 +2764,7 @@ if __name__ == "__main__":
 
 
 
-    # ## Velocity model from Campbell-Brown & Koschny (2004) meteor ablation model #####
+    # # ## Velocity model from Campbell-Brown & Koschny (2004) meteor ablation model #####
 
     # ## 2011 Draconids ###
     # # Make the beginning heights heigher, as the trajectory points will be determined by simulated
@@ -2770,16 +2790,16 @@ if __name__ == "__main__":
     # # mass_max = -4.5
 
     # # # Mass range (log of mass in kg) seen by the system (CAMO, 20 km/s, Draconids)
-    # # mass_min = -5.5
-    # # mass_max = -3
+    # # mass_min = -6.0
+    # # mass_max = -4.0
 
-    # # # Mass range (log of mass in kg) seen by the system (allsky, 20 km/s, Draconids)
-    # # mass_min = -2.5
-    # # mass_max = 0.5
+    # # Mass range (log of mass in kg) seen by the system (allsky, 20 km/s, Draconids)
+    # mass_min = -2.5
+    # mass_max = 1.5
 
-    # # Mass range (log of mass in kg) seen by the system (moderate, 20 km/s, Draconids)
-    # mass_min = -4.9
-    # mass_max = -3.0
+    # # # Mass range (log of mass in kg) seen by the system (moderate, 20 km/s, Draconids)
+    # # mass_min = -4.9
+    # # mass_max = -3.0
 
     # # Mass index
     # mass_index = 1.95 # Koten et al. 2014
@@ -2813,19 +2833,19 @@ if __name__ == "__main__":
     # Lambda = 0.5
 
     # # Mass index
-    # mass_index = 2.0, Beech et al. 1999
+    # mass_index = 2.0 # Beech et al. 1999
 
-    # # # Mass range (log of mass in kg) seen by the system (allsky, 60 km/s, Perseids)
-    # # mass_min = -4
-    # # mass_max = -2
+    # # Mass range (log of mass in kg) seen by the system (allsky, 60 km/s, Perseids)
+    # mass_min = -3.5
+    # mass_max = -1
 
     # # # Mass range (log of mass in kg) seen by the system (moderate, 60 km/s, Perseids)
     # # mass_min = -6.0
-    # # mass_max = -3.0
+    # # mass_max = -4.0
 
-    # # Mass range (log of mass in kg) seen by the system (CAMO, 60 km/s, Perseids)
-    # mass_min = -5.5
-    # mass_max = -4.0
+    # # # Mass range (log of mass in kg) seen by the system (CAMO, 60 km/s, Perseids)
+    # # mass_min = -6.5
+    # # mass_max = -4.5
 
 
     # # Define density distribution (see: Moorhead et al. 2017 "A two-population sporadic meteoroid density 
@@ -2846,52 +2866,7 @@ if __name__ == "__main__":
 
 
 
-    ## Ursids ###
-
-    # Make the beginning heights heigher, as the trajectory points will be determined by simulated
-    # magnitudes
-    beg_height = 120
-    beg_height_sigma = 0
-
-    # Luminous efficiency (fraction)
-    lum_eff = 0.7/100
-
-    # Ablation coefficient (s^2/km^2) (cometary)
-    ablation_coeff = 0.1
-
-    # Drag coeficient
-    Gamma = 1.0
-
-    # Heat transfer coeficient
-    Lambda = 0.5
-
-    # Mass index
-    mass_index = 1.58 # compured from population index s = 1 + 2.5*log10(r) from Molau et al. 2015
-
-    # # Mass range (log of mass in kg) seen by the system (allsky, 30 km/s, Ursids)
-    # mass_min = -3.0
-    # mass_max = 0.0
-
-    # Mass range (log of mass in kg) seen by the system (CAMS, 30 km/s, Ursids)
-    mass_min = -5.5
-    mass_max = -3.4
-
-
-    # Define density distribution (see: Moorhead et al. 2017 "A two-population sporadic meteoroid density 
-    #        distribution and its implications for environment models")
-
-    # HTC density distribution (Tj <= 2)
-    log_rho_mean = 2.93320
-    log_rho_sigma = 0.12714
-
-    # Samples densities
-    density_samples = sampleDensityMoorhead(log_rho_mean, log_rho_sigma, n_meteors)
-
-    ## \Ursids
-
-
-
-    # ## Taurids ###
+    # ## Ursids ###
 
     # # Make the beginning heights heigher, as the trajectory points will be determined by simulated
     # # magnitudes
@@ -2911,31 +2886,73 @@ if __name__ == "__main__":
     # Lambda = 0.5
 
     # # Mass index
-    # mass_index = 1.8
+    # mass_index = 1.58 # compured from population index s = 1 + 2.5*log10(r) from Molau et al. 2015
 
-    # # Mass range (log of mass in kg) seen by the system (allsky, 30 km/s, Taurids)
+    # # Mass range (log of mass in kg) seen by the system (allsky, 30 km/s, Ursids)
     # mass_min = -3.0
     # mass_max = 0.0
 
+    # # # Mass range (log of mass in kg) seen by the system (CAMS, 30 km/s, Ursids)
+    # # mass_min = -5.5
+    # # mass_max = -3.4
 
-    # # Sample densities - around 1400 kg/m3
-    # # Reference: Brown, P., Marchenko, V., Moser, D. E., Weryk, R., & Cooke, W. (2013). Meteorites from 
-    # # meteor showers: A case study of the Taurids. Meteoritics & Planetary Science, 48(2), 270-288.
-    # density_samples = np.random.uniform(1200, 1600, n_meteors)
-
-    # ## \Taurids
+    # # # Mass range (log of mass in kg) seen by the system (CAMO, 30 km/s, Ursids)
+    # # mass_min = -6.3
+    # # mass_max = -4.5
 
 
+    # # Define density distribution (see: Moorhead et al. 2017 "A two-population sporadic meteoroid density 
+    # #        distribution and its implications for environment models")
 
-    # Sample the masses
-    mass_samples = sampleMass(mass_min, mass_max, mass_index, n_meteors)
+    # # HTC density distribution (Tj <= 2)
+    # log_rho_mean = 2.93320
+    # log_rho_sigma = 0.12714
 
-    print('MASSES:', mass_samples)
+    # # Samples densities
+    # density_samples = sampleDensityMoorhead(log_rho_mean, log_rho_sigma, n_meteors)
+
+    # ## \Ursids
+
+
+
+    ## Taurids ###
+
+    # Make the beginning heights heigher, as the trajectory points will be determined by simulated
+    # magnitudes
+    beg_height = 120
+    beg_height_sigma = 0
+
+    # Luminous efficiency (fraction)
+    lum_eff = 0.7/100
+
+    # Ablation coefficient (s^2/km^2) (cometary)
+    ablation_coeff = 0.1
+
+    # Drag coeficient
+    Gamma = 1.0
+
+    # Heat transfer coeficient
+    Lambda = 0.5
+
+    # Mass index
+    mass_index = 1.8
+
+    # Mass range (log of mass in kg) seen by the system (allsky, 30 km/s, Taurids)
+    mass_min = -3.0
+    mass_max = 0.0
+
+
+    # Sample densities - around 1400 kg/m3
+    # Reference: Brown, P., Marchenko, V., Moser, D. E., Weryk, R., & Cooke, W. (2013). Meteorites from 
+    # meteor showers: A case study of the Taurids. Meteoritics & Planetary Science, 48(2), 270-288.
+    density_samples = np.random.uniform(1200, 1600, n_meteors)
+
+    ## \Taurids
 
 
     # Init velocity models
-    meteor_velocity_models = [AblationModelVelocity(mass, density, ablation_coeff, Gamma, Lambda, lum_eff) \
-        for mass, density in zip(mass_samples, density_samples)]
+    meteor_velocity_models = [AblationModelVelocity(mass_min, mass_max, mass_index, density, ablation_coeff, \
+        Gamma, Lambda, lum_eff) for density in density_samples]
 
 
     # ####################################################################################
