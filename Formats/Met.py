@@ -116,10 +116,12 @@ class MetStruct(object):
         # Do this for both sites
         for site in self.sites:
 
+            print(self.mirror_pos[site])
+
             # Extract time data and encoder positions
-            time_data = np.array(self.mirror_pos[site])[:,0]
-            hx_data = np.array(self.mirror_pos[site])[:,1]
-            hy_data = np.array(self.mirror_pos[site])[:,2]
+            time_data = np.array(self.mirror_pos[site])[:, 0]
+            hx_data = np.array(self.mirror_pos[site])[:, 1]
+            hy_data = np.array(self.mirror_pos[site])[:, 2]
 
             # Linear regression: time vs. hx
             hx_slope, hx_intercept, _, _, _ = scipy.stats.linregress(time_data, hx_data)
@@ -157,7 +159,7 @@ class MetStruct(object):
 
         for site in self.sites:
             ret_str += 'Site '+str(site)+'\n'
-            ret_str += 'Location: '+','.join(map(str, self.sites_location[site]))+'\n'
+            ret_str += 'Location: '+','.join(list(map(str, self.sites_location[site]))) + '\n'
             ret_str += 'PICKS: \n'
             ret_str += str(self.picks[site])
             ret_str += '\n'
@@ -458,7 +460,7 @@ def loadMet(dir_path, file_name, mirfit=False):
 
                     # Extract scale plate data
                     scale_data = line.replace(scale_prefix, '').split()[1::2]
-                    scale_data = map(float, scale_data[:-1])
+                    scale_data = list(map(float, scale_data[:-1]))
 
                     # Init a new scale plate
                     scale = AffPlate()
@@ -480,10 +482,10 @@ def loadMet(dir_path, file_name, mirfit=False):
                     exact_data = line.replace(exact_prefix, '').split()[1::2]
 
                     # Extract the header
-                    exact_header = map(float, exact_data[3:12])
+                    exact_header = list(map(float, exact_data[3:12]))
 
                     # Unpack fit parameters
-                    exact_fit = map(lambda x: map(float, x.split(':')), exact_data[12:])
+                    exact_fit = list(map(lambda x: list(map(float, x.split(':'))), exact_data[12:]))
 
                     # Init a new exact plate
                     exact = AstPlate()
@@ -528,7 +530,7 @@ def loadMet(dir_path, file_name, mirfit=False):
 
                         # Extract pick data
                         pick_data = line.replace(pick_prefix, '').split()[1::2]
-                        pick_data = map(float, pick_data)
+                        pick_data = list(map(float, pick_data))
 
                         met.picks[site].append(pick_data)
 
@@ -541,7 +543,7 @@ def loadMet(dir_path, file_name, mirfit=False):
 
                         # Check that it is a meteor pick
                         if 'type meteor' in line:
-                            pick_data = map(float, pick_data[:29] + pick_data[31:])
+                            pick_data = list(map(float, pick_data[:29] + pick_data[31:]))
 
                             met.picks[site].append(pick_data)
 
@@ -556,7 +558,7 @@ def loadMet(dir_path, file_name, mirfit=False):
                     met.vids[site] = video_data[1].replace("'", "")
 
                     # Extract site location
-                    met.sites_location[site] = map(float, video_data[12:15])
+                    met.sites_location[site] = list(map(float, video_data[12:15]))
 
                     # Allow reading mirror positions
                     mirror_pos_read = True
@@ -567,7 +569,7 @@ def loadMet(dir_path, file_name, mirfit=False):
 
                     # Extract mirror position data
                     mpos_data = line.replace(mirror_pos_prefix, '').split()[1::2]
-                    mpos_data = map(float, mpos_data)
+                    mpos_data = list(map(float, mpos_data))
 
                     # Store mirror position
                     met.mirror_pos[site].append(mpos_data)
