@@ -1725,6 +1725,11 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
                 # sqrt(2)/2*noise in each orthogonal dimension
                 sigma = noise_sigma*np.abs(obs.ang_res_std)/np.sqrt(2.0)
 
+                # Make sure sigma is positive, if not set it to 1/sqrt(2) degrees
+                if (sigma < 0) or np.isnan(sigma):
+                    sigma = np.radians(1)/np.sqrt(2)
+
+
                 meas_eci_noise = np.zeros(3)
 
                 meas_eci_noise[0] = rhat[0] + np.random.normal(0, sigma)*uhat[0] \
@@ -3805,67 +3810,6 @@ class Trajectory(object):
 
 
 
-        ### PLOT DISTANCE FROM RADIANT STATE VECTOR POSITION ###
-        ######################################################################################################
-        for obs in self.observations:
-
-            # Extract points that were not ignored
-            used_times = obs.time_data[obs.ignore_list == 0]
-            used_dists = obs.state_vect_dist[obs.ignore_list == 0]
-
-            plt_handle = plt.plot(used_dists/1000, used_times, marker='x', label=str(obs.station_id), \
-                zorder=3)
-
-
-            # Plot ignored points
-            if np.any(obs.ignore_list):
-
-                ignored_times = obs.time_data[obs.ignore_list > 0]
-                ignored_dists = obs.state_vect_dist[obs.ignore_list > 0]
-                    
-                plt.scatter(ignored_dists/1000, ignored_times, facecolors='k', 
-                    edgecolors=plt_handle[0].get_color(), marker='o', s=8, zorder=4, \
-                    label='{:s} ignored points'.format(str(obs.station_id)))
-
-
-
-        # Add the fitted velocity line
-        if self.velocity_fit is not None:
-
-            # Get time data range
-            t_min = min([np.min(obs.time_data) for obs in self.observations])
-            t_max = max([np.max(obs.time_data) for obs in self.observations])
-
-            t_range = np.linspace(t_min, t_max, 100)
-
-            plt.plot(lineFunc(t_range, *self.velocity_fit)/1000, t_range, label='Velocity fit', \
-                linestyle='--', alpha=0.5, zorder=3)
-
-
-        plt.title('Distances from state vector, Time residuals = {:.3e} s'.format(self.timing_res))
-
-        plt.ylabel('Time (s)')
-        plt.xlabel('Distance from state vector (km)')
-        
-        plt.legend()
-        plt.grid()
-        plt.gca().invert_yaxis()
-
-        if self.save_results:
-            savePlot(plt, file_name + '_lengths.png', output_dir)
-
-
-        if show_plots:
-            plt.show()
-
-        else:
-            plt.clf()
-            plt.close()
-
-        ######################################################################################################
-
-
-
         ### PLOT VELOCITY ###
         ######################################################################################################
 
@@ -3921,11 +3865,11 @@ class Trajectory(object):
             vel_max = max(np.max(obs.velocities[1:]/1000), vel_max)
             vel_min = min(np.min(obs.velocities[1:]/1000), vel_min)
 
-            ht_max = max(np.max(obs.meas_ht[1:]), ht_max)
-            ht_min = min(np.min(obs.meas_ht[1:]), ht_min)
+            ht_max = max(np.max(obs.meas_ht), ht_max)
+            ht_min = min(np.min(obs.meas_ht), ht_min)
 
-            t_max = max(np.max(obs.time_data[1:]), t_max)
-            t_min = min(np.min(obs.time_data[1:]), t_min)
+            t_max = max(np.max(obs.time_data), t_max)
+            t_min = min(np.min(obs.time_data), t_min)
 
 
         # Plot the velocity calculated from the Jacchia model
@@ -3956,6 +3900,78 @@ class Trajectory(object):
 
         if self.save_results:
             savePlot(plt, file_name + '_velocities.png', output_dir)
+
+        if show_plots:
+            plt.show()
+
+        else:
+            plt.clf()
+            plt.close()
+
+        ######################################################################################################
+
+
+        ### PLOT DISTANCE FROM RADIANT STATE VECTOR POSITION ###
+        ######################################################################################################
+
+        fig, ax1 = plt.subplots()
+
+        for obs in self.observations:
+
+            # Extract points that were not ignored
+            used_times = obs.time_data[obs.ignore_list == 0]
+            used_dists = obs.state_vect_dist[obs.ignore_list == 0]
+
+            plt_handle = ax1.plot(used_dists/1000, used_times, marker='x', label=str(obs.station_id), \
+                zorder=3)
+
+
+            # Plot ignored points
+            if np.any(obs.ignore_list):
+
+                ignored_times = obs.time_data[obs.ignore_list > 0]
+                ignored_dists = obs.state_vect_dist[obs.ignore_list > 0]
+                    
+                ax1.scatter(ignored_dists/1000, ignored_times, facecolors='k', 
+                    edgecolors=plt_handle[0].get_color(), marker='o', s=8, zorder=4, \
+                    label='{:s} ignored points'.format(str(obs.station_id)))
+
+
+
+        # Add the fitted velocity line
+        if self.velocity_fit is not None:
+
+            # Get time data range
+            t_min = min([np.min(obs.time_data) for obs in self.observations])
+            t_max = max([np.max(obs.time_data) for obs in self.observations])
+
+            t_range = np.linspace(t_min, t_max, 100)
+
+            ax1.plot(lineFunc(t_range, *self.velocity_fit)/1000, t_range, label='Velocity fit', \
+                linestyle='--', alpha=0.5, zorder=3)
+
+
+        plt.title('Distances from state vector, Time residuals = {:.3e} s'.format(self.timing_res))
+
+        ax1.set_ylabel('Time (s)')
+        ax1.set_xlabel('Distance from state vector (km)')
+        
+        ax1.legend()
+        ax1.grid()
+        
+        # Set time axis limits
+        ax1.set_ylim([t_min, t_max])
+        ax1.invert_yaxis()
+
+        # Set the height axis
+        ax2 = ax1.twinx()
+        ax2.set_ylim(ht_min/1000, ht_max/1000)
+        ax2.set_ylabel('Height (km)')
+
+
+        if self.save_results:
+            savePlot(plt, file_name + '_lengths.png', output_dir)
+
 
         if show_plots:
             plt.show()
