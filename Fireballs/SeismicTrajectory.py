@@ -13,6 +13,7 @@ import scipy.signal
 import scipy.optimize
 import pyswarm
 import matplotlib.pyplot as plt
+import matplotlib.patheffects as PathEffects
 
 
 from Formats.CSSseismic import loadCSSseismicData
@@ -914,6 +915,21 @@ def plotStationsAndTrajectory(station_list, params, v_sound, file_name):
     m.scatter(stat_lat, stat_lon, c=stat_model_times_of_arrival, s=20, marker='o', edgecolor='0.5', \
         linewidths=1, cmap='viridis', vmin=0.00, vmax=toa_abs_max)
 
+    # Plot station names
+    for stat_entry in station_list:
+
+        name, s_lat, s_lon = stat_entry[:3]
+
+        # Convert coordinates to map coordinates
+        x, y = m.m(np.degrees(s_lon), np.degrees(s_lat))
+
+        # Plot the text 
+        txt = plt.text(x, y, name, horizontalalignment='left', verticalalignment='top', color='k')
+
+        # Add border to text
+        txt.set_path_effects([PathEffects.withStroke(linewidth=1, foreground='w')])
+
+
 
     # Plot intersection with the ground
     m.scatter(lat_i, lon_i, s=10, marker='x', c='g')
@@ -976,16 +992,16 @@ if __name__ == "__main__":
     ### TEST!!!! ###
     ##########################################################################################################
 
-    # Wayne event
-    station_list = [
-        ['G58A', np.radians(45.149200), np.radians(-74.054001), 173, date2JD(2013, 11, 27, 00, 50, 27, 150)],
-        ['F58A', np.radians(45.866300), np.radians(-73.814500), 239, date2JD(2013, 11, 27, 00, 52, 23, 900)],
-        ['E58A', np.radians(46.372100), np.radians(-73.277100), 764, date2JD(2013, 11, 27, 00, 55, 25, 880)],
-        ['H59A', np.radians(44.645500), np.radians(-73.690498), 355, date2JD(2013, 11, 27, 00, 52, 48, 800)],
-        ['H58A', np.radians(44.417599), np.radians(-74.179802), 537, date2JD(2013, 11, 27, 00, 53, 19, 320)]
-    ]
-    plotStationsAndTrajectory(station_list, [-10.6255131247*1000,  0.97761117287*1000, -22.39726861, 29.72664835*1000, np.radians(180 - 180.485602168), np.radians(90 - 42.5945238073)], v_sound, 'wayne')
-    #estimateSeismicTrajectoryAzimuth(station_list, 320, azim_range=[100, 220], elev_range=[5, 35])
+    # # Wayne event
+    # station_list = [
+    #     ['G58A', np.radians(45.149200), np.radians(-74.054001), 173, date2JD(2013, 11, 27, 00, 50, 27, 150)],
+    #     ['F58A', np.radians(45.866300), np.radians(-73.814500), 239, date2JD(2013, 11, 27, 00, 52, 23, 900)],
+    #     ['E58A', np.radians(46.372100), np.radians(-73.277100), 764, date2JD(2013, 11, 27, 00, 55, 25, 880)],
+    #     ['H59A', np.radians(44.645500), np.radians(-73.690498), 355, date2JD(2013, 11, 27, 00, 52, 48, 800)],
+    #     ['H58A', np.radians(44.417599), np.radians(-74.179802), 537, date2JD(2013, 11, 27, 00, 53, 19, 320)]
+    # ]
+    # plotStationsAndTrajectory(station_list, [-10.6255131247*1000,  0.97761117287*1000, -22.39726861, 29.72664835*1000, np.radians(180 - 180.485602168), np.radians(90 - 42.5945238073)], v_sound, 'wayne')
+    # #estimateSeismicTrajectoryAzimuth(station_list, 320, azim_range=[100, 220], elev_range=[5, 35])
 
 
     # # Bolivia 2007
@@ -1155,6 +1171,17 @@ if __name__ == "__main__":
     # stat_coord_list = convertStationCoordinates(station_list, 0)
 
     # print(stat_coord_list)
+
+
+    # 2018-06-13 Nevada event
+    station_list = [
+        ["S11A", np.radians(37.6444), np.radians(-115.7472), 1456, 2458282.65755817],
+        ["PIO", np.radians(37.9472), np.radians(-114.4914), 1887, 2458282.66093798],
+        ["PRN", np.radians(37.4065), np.radians(-115.0512), 1464, 2458282.66366093]
+    ]
+    # x0, y0, t0, v, azim, zangle
+    plotStationsAndTrajectory(station_list, [47.7*1000,  -42.0*1000, -140.0, 17*1000, np.radians(180 - 215), np.radians(90 - 25)], v_sound, '2018-06-13_nevada')
+    #estimateSeismicTrajectoryAzimuth(station_list, 320, azim_range=[100, 220], elev_range=[5, 35])
 
 
     sys.exit()
