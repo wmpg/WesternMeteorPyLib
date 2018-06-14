@@ -419,6 +419,14 @@ def plotAllWaveforms(dir_path, data_list, v_sound, t0, lat_centre, lon_centre, a
         end_datetime = mseed[0].stats.endtime.datetime
 
 
+        # ### TEST!!!
+        # print(station_code, start_datetime, end_datetime)
+        # print(len(waveform_data))
+        # print()
+
+        # ###
+        
+
         # Skip stations with no data
         if len(waveform_data) == 0:
             continue
@@ -457,10 +465,6 @@ def plotAllWaveforms(dir_path, data_list, v_sound, t0, lat_centre, lon_centre, a
         # Cut the waveform data length to match the time data
         waveform_data = waveform_data[:len(time_data)]
         time_data = time_data[:len(waveform_data)]
-
-        # # Skip the first 100 samples in the filtered waveform data
-        # waveform_data = waveform_data[100:]
-        # time_data = time_data[100:]
 
         
         # Detrend the waveform and normalize to fixed width
@@ -672,11 +676,11 @@ if __name__ == "__main__":
     v_sound = 310
 
     # Time offset of wave release from the reference time (seconds)
-    t0 = 806.0
+    t0 = 506.0
 
     # Time range of waveform retrieval in UTC (can't be more than 2 hours!)
-    start_datetime = datetime.datetime(2018, 6, 13, 03, 40, 0)
-    end_datetime = datetime.datetime(2018, 6, 13, 4, 40, 0)
+    start_datetime = datetime.datetime(2018, 6, 13, 03, 45, 0)
+    end_datetime = datetime.datetime(2018, 6, 13, 4, 45, 0)
 
     # Apply the Kalenda et al. (2014) difference filter to the plot of all waveforms
     difference_filter_all = False
