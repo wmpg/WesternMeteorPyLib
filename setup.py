@@ -36,7 +36,7 @@ share_files = [os.path.join('share', file_name) for file_name in os.listdir(os.p
 
 
 setup(
-    name = "WesternMeteorPyLib",
+    name = "westernmeteorpylib",
     version = "1.0",
     author = "Denis Vida",
     author_email = "denis.vida@gmail.com",
