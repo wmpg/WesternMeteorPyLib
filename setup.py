@@ -1,5 +1,7 @@
 import os
+import urllib
 from setuptools import setup, find_packages
+from wmpl.UpdateOrbitFiles import updateOrbitFiles
 
 # Utility function to read the README file.
 # Used for the long_description.  It's nice, because now 1) we have a top level
@@ -30,6 +32,22 @@ for dir_name in os.listdir(dir_path):
 with open('requirements.txt') as f:
     requirements = f.read().splitlines()
 
+
+
+# Download the DE430 ephemerids
+de430_file_path = os.path.join('wmpl', 'share', 'de430.bsp')
+
+if not os.path.isfile(de430_file_path):
+    
+    de430_url = "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de430.bsp"
+
+    print('Downloading DE430 ephemerids...')
+    urllib.urlretrieve(de430_url, de430_file_path)
+    print('... download done!')
+
+
+# Download the orbit files
+updateOrbitFiles()
 
 # Get all data files in 'share'
 share_files = [os.path.join('wmpl', 'share', file_name) for file_name in os.listdir(os.path.join(dir_path, 'wmpl', 'share'))]

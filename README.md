@@ -107,7 +107,7 @@ If you want to use the most recent lists of comets and asteroids, download these
  * [JPL comets elements](https://ssd.jpl.nasa.gov/dat/ELEMENTS.COMET)
  * [MPC Amors](http://cgi.minorplanetcenter.net/cgi-bin/textversion.cgi?f=lists/Amors.html)
  * [MPC Apollos](http://cgi.minorplanetcenter.net/cgi-bin/textversion.cgi?f=lists/Apollos.html)
- * [MPC Athens](http://cgi.minorplanetcenter.net/cgi-bin/textversion.cgi?f=lists/Atens.html)
+ * [MPC Atens](http://cgi.minorplanetcenter.net/cgi-bin/textversion.cgi?f=lists/Atens.html)
 
 
 ## Usage

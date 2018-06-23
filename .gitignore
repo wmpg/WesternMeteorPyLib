@@ -16,7 +16,7 @@ de430.bsp
 # Build directories
 build/
 dist/
-WesternMeteorPyLib.egg-info/
+*.egg-info/
 
 # Original metsim code
 wmpl/MetSim/native
