@@ -22,7 +22,7 @@ List of features:
 
 ## Installation
 
-The two sections below describe how to install the library on both Linux and Windows. Make sure to read the "Data files" section regardless of the 
+The two sections below describe how to install the library on both Linux and Windows.
 
 ### Linux
 
@@ -53,8 +53,6 @@ After cloning/downloading this library, navigate into it with a terminal and run
 ```
 sudo python setup.py install
 ```
-
-Finally, follow the section "Data files" below to complete the installation.
 
 
 ### Windows
@@ -92,17 +90,15 @@ On windows, you might not have to install library packages, but the installation
 	python setup.py install
 	```
 
-6) Finally, follow the section "Data files" below to complete the installation.
 
+### Manually downloading data files
 
-### Data files
-
-JPL DE430 ephemerids are not a part of the library and have to be downloaded separately and put into the **`shared`** directory:
+JPL DE430 ephemerids are not a part of the library, but they **will** be downloaded automatically on install. The file can be downloaded separately and put into the **`shared`** directory:
 
  * [JPL DE430 ephemerids](https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de430.bsp)
 
 
-If you want to use the most recent lists of comets and asteroids, download these as well:
+If you want to use the most recent lists of comets and asteroids, download these as well, or run the ```UpdateOrbitFiles.py``` script:
 
  * [JPL comets elements](https://ssd.jpl.nasa.gov/dat/ELEMENTS.COMET)
  * [MPC Amors](http://cgi.minorplanetcenter.net/cgi-bin/textversion.cgi?f=lists/Amors.html)
@@ -115,5 +111,24 @@ If you want to use the most recent lists of comets and asteroids, download these
 Module interfaces are not 100% complete yet, but individual functions are well documented. To run individual modules, e.g. to demonstrate how the Monte Carlo trajectory solver works, navigate into the WesternMeteorPyLib directory and run:
 
 ```
-python -m Trajectory.Trajectory
+python -m wmpl.Trajectory.Trajectory
+```
+
+or, you can use functions from the library anywhere. E.g. if you want to run a particular function from the library, you can do:
+
+```
+import datetime
+import math
+
+# Import modules from WMPL
+import wmpl.Utils.TrajConversions as trajconv
+import wmpl.Utils.SolarLongitude as sollon
+
+# Compute the Julian date of the current time
+jd_now = trajconv.datetime2JD(datetime.datetime.now())
+
+# Get the solar longitude of the current time (in radians)
+lasun = sollon.jd2SolLonJPL(jd_now)
+
+print(math.degrees(lasun), ' deg')
 ```
