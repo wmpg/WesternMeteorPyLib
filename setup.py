@@ -32,7 +32,7 @@ with open('requirements.txt') as f:
 
 
 # Get all data files in 'share'
-share_files = [os.path.join('share', file_name) for file_name in os.listdir(os.path.join(dir_path, 'share'))]
+share_files = [os.path.join('wmpl', 'share', file_name) for file_name in os.listdir(os.path.join(dir_path, 'wmpl', 'share'))]
 
 
 setup(
@@ -44,7 +44,7 @@ setup(
     license = "MIT",
     keywords = "meteors",
     packages=find_packages(),
-    data_files=[('share', share_files)],
+    data_files=[(os.path.join('wmpl', 'share'), share_files)],
     include_package_data=True,
     long_description=read('README.md'),
     classifiers=[

@@ -143,7 +143,7 @@ class ConfigStruct(object):
     def __init__(self):
 
         # Find the absolute path of the directory where this file is located
-        abs_path = os.path.split(os.path.abspath(__file__))[0]
+        abs_path = os.path.abspath(os.path.join(os.path.split(__file__)[0]))
 
         ### EPHEMERIDS
 

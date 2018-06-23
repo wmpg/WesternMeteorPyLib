@@ -1,1 +1,1 @@
-recursive-include share *
+recursive-include wmpl\share *

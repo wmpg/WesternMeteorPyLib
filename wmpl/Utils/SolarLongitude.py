@@ -9,7 +9,7 @@ import scipy.optimize
 
 from jplephem.spk import SPK
 
-from Config import config
+from wmpl.Config import config
 from wmpl.Utils.Earth import calcEarthRectangularCoordJPL
 from wmpl.Utils.TrajConversions import date2JD
 

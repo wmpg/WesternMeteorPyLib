@@ -27,7 +27,7 @@ from __future__ import print_function, division, absolute_import
 import numpy as np
 
 from wmpl.Utils.Dcriteria import calcDSH, calcDH, calcDD
-from Config import config
+from wmpl.Config import config
 
 
 def loadCometsElements(comets_file):

@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import scipy.interpolate
 import scipy.optimize
 
-from Config import config
+from wmpl.Config import config
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PyDomainParallelizer import DomainParallelizer
 from wmpl.Utils.TrajConversions import jd2Date

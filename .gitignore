@@ -19,4 +19,4 @@ dist/
 WesternMeteorPyLib.egg-info/
 
 # Original metsim code
-MetSim/native
+wmpl/MetSim/native

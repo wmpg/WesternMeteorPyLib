@@ -12,7 +12,7 @@ import numpy as np
 import scipy.optimize
 import matplotlib.pyplot as plt
 
-from Config import config
+from wmpl.Config import config
 from wmpl.TrajSim.TrajSim import geocentricRadiantToApparent
 from wmpl.Trajectory.Trajectory import ObservedPoints, Trajectory
 from wmpl.Trajectory.GuralTrajectory import GuralTrajectory

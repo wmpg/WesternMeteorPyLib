@@ -8,7 +8,7 @@ import numpy as np
 from matplotlib.patches import FancyArrowPatch
 from mpl_toolkits.mplot3d import proj3d
 
-from Config import config
+from wmpl.Config import config
 from wmpl.Utils.OSTools import mkdirP
 
 

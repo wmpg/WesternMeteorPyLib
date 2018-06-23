@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.widgets import Slider
 
-from Config import config
+from wmpl.Config import config
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.TrajConversions import jd2Date
 from wmpl.MetSim.MetSim import loadInputs

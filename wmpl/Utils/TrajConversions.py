@@ -36,7 +36,7 @@ import numpy as np
 from datetime import datetime, timedelta, MINYEAR
 
 
-from Config import config
+from wmpl.Config import config
 import wmpl.Utils.Earth
 from wmpl.Utils.Math import vectNorm, vectMag, rotateVector, cartesianToSpherical, sphericalToCartesian
 

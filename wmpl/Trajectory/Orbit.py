@@ -5,7 +5,7 @@ import numpy as np
 from jplephem.spk import SPK
 
 
-from Config import config
+from wmpl.Config import config
 
 from wmpl.Utils.Earth import calcEarthRectangularCoordJPL
 from wmpl.Utils.SolarLongitude import jd2SolLonJPL
