@@ -3,7 +3,13 @@
 from __future__ import print_function, division, absolute_import
 
 import os
-import urllib
+import sys
+
+if sys.version_info.major < 3:
+	import urllib as urllibrary
+
+else:
+	import urllib.request as urllibrary
 
 def updateOrbitFiles():
 	""" Updates asteroid and comet orbit files from MPC and JPL website. """
@@ -31,7 +37,7 @@ def updateOrbitFiles():
 	# Download all orbit files
 	for fname, url in zip(file_names, url_list):
 		print('Downloading {:s}...'.format(fname), end='')
-		urllib.urlretrieve(url, os.path.join(dir_path, fname))
+		urllibrary.urlretrieve(url, os.path.join(dir_path, fname))
 		print(' done!')
 
 
