@@ -412,8 +412,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
 
     # Calculate the apparent azimuth and altitude (geodetic latitude, because ra/dec are calculated from ECI,
     #   which is calculated from WGS84 coordinates)
-    orb.azimuth_apparent, orb.elevation_apparent = raDec2AltAz(orb.ra, orb.dec, jd_ref, lat_geocentric, \
-        lon_ref)
+    orb.azimuth_apparent, orb.elevation_apparent = raDec2AltAz(orb.ra, orb.dec, jd_ref, lat_ref, lon_ref)
 
     orb.jd_ref = jd_ref
     orb.lon_ref = lon_ref
