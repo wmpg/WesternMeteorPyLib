@@ -1,5 +1,12 @@
 import os
-import urllib
+import sys
+
+if sys.version_info.major < 3:
+    import urllib as urllibrary
+else:
+    import urllib.request as urllibrary
+
+
 from setuptools import setup, find_packages
 from wmpl.UpdateOrbitFiles import updateOrbitFiles
 
@@ -42,7 +49,7 @@ if not os.path.isfile(de430_file_path):
     de430_url = "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de430.bsp"
 
     print('Downloading DE430 ephemerids...')
-    urllib.urlretrieve(de430_url, de430_file_path)
+    urllibrary.urlretrieve(de430_url, de430_file_path)
     print('... download done!')
 
 
