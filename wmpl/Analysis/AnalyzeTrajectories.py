@@ -136,6 +136,11 @@ def collectTrajPickles(dir_path, traj_type='original', unique=False):
     elif traj_type == 'milig':
         pickle_files = [pickle_f for pickle_f in pickle_files if '_milig.pickle' in pickle_f]
 
+
+    # Select intersecting planes trajectories
+    elif traj_type == 'planes':
+        pickle_files = [pickle_f for pickle_f in pickle_files if '_planes.pickle' in pickle_f]
+
     # Select gural trajectory
     elif 'gural' in traj_type:
         pickle_files = [pickle_f for pickle_f in pickle_files if '_{:s}_trajectory.pickle'.format(traj_type) \
@@ -500,26 +505,32 @@ if __name__ == "__main__":
     #dir_path = "../SimulatedMeteors/CABERNET/2011Draconids"
 
     #dir_path = "../SimulatedMeteors/CAMO/2011Draconids"
+    #dir_path = "../SimulatedMeteors/CAMO/2014Ursids"
     #dir_path = "../SimulatedMeteors/CAMO/2012Perseids"
 
-    #dir_path = "../SimulatedMeteors/SOMN_sim/2011Draconids"
-    dir_path = "../SimulatedMeteors/SOMN_sim/2014Ursids"
-    #dir_path = "../SimulatedMeteors/SOMN_sim/2012Perseids"
-    #dir_path = "../SimulatedMeteors/SOMN_sim/2015Taurids"
-    #dir_path = "../SimulatedMeteors/CAMSsim/2012Perseids"
     #dir_path = "../SimulatedMeteors/CAMSsim/2011Draconids"
     #dir_path = "../SimulatedMeteors/CAMSsim/2014Ursids"
+    #dir_path = "../SimulatedMeteors/CAMSsim/2012Perseids"
+
+    #dir_path = "../SimulatedMeteors/SOMN_sim/2011Draconids"
+    #dir_path = "../SimulatedMeteors/SOMN_sim/2014Ursids"
+    #dir_path = "../SimulatedMeteors/SOMN_sim/2012Perseids"
+    dir_path = "../SimulatedMeteors/SOMN_sim/2015Taurids"
 
 
     # Minimum convergence angle (deg)
     min_conv_angle = 1.0
 
+    # Radiant precision plot limits
+    sigma_r_max = 5.0 #deg
+    sigma_v_max = 5.0 #km/s
 
 
-    solvers = ['los', 'milig', 'mc', 'gural0', 'gural1', 'gural3']
-    plot_labels = ['LoS', 'MILIG', 'Monte Carlo', 'Gural (constant)', 'Gural (linear)', 'Gural (exp)']
-    markers = ['o', 's', '+', 'x', 'D', 'd']
-    sizes = [20, 20, 40, 40, 10, 20]
+
+    solvers = ['planes', 'los', 'milig', 'mc', 'gural0', 'gural1', 'gural3']
+    plot_labels = ['IP', 'LoS', 'MILIG', 'Monte Carlo', 'Gural (constant)', 'Gural (linear)', 'Gural (exp)']
+    markers = ['v', 'o', 's', '+', 'x', 'D', 'd']
+    sizes = [20, 20, 20, 40, 40, 10, 20]
 
 
 
@@ -528,72 +539,74 @@ if __name__ == "__main__":
 
 
 
-    # ### PLOT ORBIT ELEMENTS ###
-    # ##########################################################################################################
+    ### PLOT ORBIT ELEMENTS ###
+    ##########################################################################################################
 
-    # # Plot simulated meteors
-    # plt_handle = plotOrbitElements(sim_meteors, plt_type='sol_a', label='Simulated', marker='o', s=5)
-
-
-    # # Make sure all lengths are the same
-    # if sum([len(solvers), len(plot_labels), len(markers), len(sizes)]) != 4*len(solvers):
-    #     print('The lenghts of solvers, plots, markers and sizes is not the same!')
-    #     sys.exit()
-
-    # # Make plots from data with different solvers
-
-    # for solver, plt_lbl, marker, size in zip(solvers, plot_labels, markers, sizes):
-
-    #     # Load trajectories
-    #     traj_list = collectTrajPickles(dir_path, traj_type=solver)
+    # Plot simulated meteors
+    plt_handle = plotOrbitElements(sim_meteors, plt_type='sol_a', label='Simulated', marker='o', s=5)
 
 
-    #     # Filter by convergence angle
-    #     if 'gural' in solver:
+    # Make sure all lengths are the same
+    if sum([len(solvers), len(plot_labels), len(markers), len(sizes)]) != 4*len(solvers):
+        print('The lenghts of solvers, plots, markers and sizes is not the same!')
+        sys.exit()
 
-    #         # Remove all trajectories with the convergence angle less then 15 deg
-    #         traj_list = [traj for traj in traj_list if np.degrees(traj.max_convergence) >= min_conv_angle]
+    # Make plots from data with different solvers
 
-    #         pass
+    for solver, plt_lbl, marker, size in zip(solvers, plot_labels, markers, sizes):
 
-    #     else:
-
-    #         # Remove all trajectories with the convergence angle less then 15 deg
-    #         traj_list = [traj for traj in traj_list if np.degrees(traj.best_conv_inter.conv_angle) \
-    #             >= min_conv_angle]
+        # Load trajectories
+        traj_list = collectTrajPickles(dir_path, traj_type=solver)
 
 
-    #     # Plot trajectories
-    #     plt_handle = plotOrbitElements(traj_list, plt_type='sol_a', plt_handle=plt_handle, label=plt_lbl, \
-    #         alpha=0.5, s=size, marker=marker)
+        # Filter by convergence angle
+        if 'gural' in solver:
+
+            # Remove all trajectories with the convergence angle less then 15 deg
+            traj_list = [traj for traj in traj_list if np.degrees(traj.max_convergence) >= min_conv_angle]
+
+            pass
+
+        else:
+
+            # Remove all trajectories with the convergence angle less then 15 deg
+            traj_list = [traj for traj in traj_list if np.degrees(traj.best_conv_inter.conv_angle) \
+                >= min_conv_angle]
+
+
+        # Plot trajectories
+        plt_handle = plotOrbitElements(traj_list, plt_type='sol_a', plt_handle=plt_handle, label=plt_lbl, \
+            alpha=0.5, s=size, marker=marker)
 
 
     
-    # # Get the limits of the plot
-    # x_min, x_max = plt_handle.get_xlim()
+    # Get the limits of the plot
+    x_min, x_max = plt_handle.get_xlim()
 
     
-    # # Plot the 7:2 resonance with Jupiter
-    # sol_arr = np.linspace(x_min, x_max, 10)
+    # Plot the 7:2 resonance with Jupiter
+    sol_arr = np.linspace(x_min, x_max, 10)
 
-    # plt.plot(sol_arr, np.zeros_like(sol_arr) + 2.24, linestyle='--', color='k')
-    # plt.plot(sol_arr, np.zeros_like(sol_arr) + 2.28, linestyle='--', color='k')
+    plt.plot(sol_arr, np.zeros_like(sol_arr) + 2.24, linestyle='--', color='k')
+    plt.plot(sol_arr, np.zeros_like(sol_arr) + 2.28, linestyle='--', color='k')
 
-    # # Set xlim
-    # plt.xlim([x_min, x_max])
+    # Set xlim
+    plt.xlim([x_min, x_max])
 
-    # # Limit a from 1.5 AU to 3.5 AU
-    # plt.ylim([1.5, 3.5])
+    # Limit a from 1.5 AU to 3.5 AU
+    plt.ylim([1.5, 3.5])
 
 
-    # plt.legend()
+    plt.legend()
 
-    # # Save the figure
-    # plt.savefig(os.path.join(dir_path, 'solver_comparison_sol_a.png'), dpi=300)
+    # Save the figure
+    plt.savefig(os.path.join(dir_path, 'solver_comparison_sol_a.png'), dpi=300)
 
-    # plt.show()
+    plt.show()
 
-    # ##########################################################################################################
+    sys.exit()
+
+    ##########################################################################################################
 
 
 
@@ -628,7 +641,7 @@ if __name__ == "__main__":
 
 
         # Plot the 2D histogram comparing the results, radiants within X degrees, Vg within X km/s
-        compareTrajToSim(dir_path, sim_meteors, traj_list, solver_name, 5.0, 5.0, vmax=10)
+        compareTrajToSim(dir_path, sim_meteors, traj_list, solver_name, sigma_r_max, sigma_v_max, vmax=10)
 
 
 

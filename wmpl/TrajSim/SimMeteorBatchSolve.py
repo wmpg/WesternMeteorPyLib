@@ -29,18 +29,19 @@ if __name__ == "__main__":
 
     #shower_dir = os.path.abspath("../SimulatedMeteors/CABERNET/2011Draconids")
 
-    #shower_dir = os.path.abspath("../SimulatedMeteors/CAMO/2011Draconids_TEST")
+    #shower_dir = os.path.abspath("../SimulatedMeteors/CAMO/2011Draconids")
+    #shower_dir = os.path.abspath("../SimulatedMeteors/CAMO/2014Ursids")
     #shower_dir = os.path.abspath("../SimulatedMeteors/CAMO/2012Perseids")
 
-    #shower_dir = os.path.abspath("../SimulatedMeteors/Perfect_CAMO/2011Draconids")
-    #shower_dir = os.path.abspath("../SimulatedMeteors/Perfect_CAMO/2011Draconids_TEST")
+    #shower_dir = os.path.abspath("../SimulatedMeteors/CAMSsim/2011Draconids")
+    #shower_dir = os.path.abspath("../SimulatedMeteors/CAMSsim/2014Ursids")
+    #shower_dir = os.path.abspath("../SimulatedMeteors/CAMSsim/2012Perseids")
 
     #shower_dir = os.path.abspath("../SimulatedMeteors/SOMN_sim/2011Draconids")
+    #shower_dir = os.path.abspath("../SimulatedMeteors/SOMN_sim/2014Ursids")
+    #shower_dir = os.path.abspath("../SimulatedMeteors/SOMN_sim/2012Perseids")
+    shower_dir = os.path.abspath("../SimulatedMeteors/SOMN_sim/2015Taurids")
     #shower_dir = os.path.abspath("../SimulatedMeteors/SOMN_precise_sim/LongFireball_grav")
-
-    #shower_dir = os.path.abspath("../SimulatedMeteors/CAMSsim/2011Draconids")
-    shower_dir = os.path.abspath("../SimulatedMeteors/CAMSsim/2014Ursids")
-    #shower_dir = os.path.abspath("../SimulatedMeteors/CAMSsim/2012Perseids")
 
     # Maximum time offset (seconds)
     t_max_offset = 1
@@ -50,9 +51,10 @@ if __name__ == "__main__":
 
 
     # Trajectory solvers
-    traj_solvers = ['planes', 'los', 'milig', 'monte_carlo', 'gural0', 'gural1', 'gural2', 'gural3']
+    #traj_solvers = ['planes', 'los', 'milig', 'monte_carlo', 'gural0', 'gural1', 'gural2', 'gural3']
     #traj_solvers = ['planes', 'los', 'monte_carlo']
     #traj_solvers = ['milig']
+    traj_solvers = ['planes', 'milig']
 
 
     ##########################################################################################################
@@ -79,8 +81,11 @@ if __name__ == "__main__":
         # Directory where trajectory results will be saved
         output_dir = os.path.join(shower_dir, "{:03d} - {:.6f}".format(met_no, sim_met.jdt_ref))
 
-        # Save info about the simulated meteor
-        sim_met.saveInfo(output_dir)
+        # Prepare everything for saving data to disk
+        sim_met.initOutput(output_dir)
+
+        # Save info about the simulated meteor !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        # sim_met.saveInfo(output_dir)
 
         # Solve the simulated meteor with multiple solvers
         for traj_solver in traj_solvers:
@@ -139,7 +144,8 @@ if __name__ == "__main__":
                 # Use the average velocity of the first part of the trajectory for the initial velocity
                 time_vel = []
                 for obs in traj.observations:
-                    for t, v in zip(obs.time_data, obs.velocities):
+                    for t, v in zip(obs.time_data[1:], obs.velocities[1:]):
+
                         time_vel.append([t, v])
 
                 time_vel = np.array(time_vel)
@@ -148,7 +154,7 @@ if __name__ == "__main__":
                 time_vel = time_vel[time_vel[:, 0].argsort()]
 
                 # Calculate the velocity of the first half of the trajectory
-                v_init_fh = np.mean(time_vel[int(len(time_vel)/2), 1])
+                v_init_fh = np.mean(time_vel[:int(len(time_vel)/2), 1])
 
                 # Calculate the orbit
                 traj.orbit = calcOrbit(traj.avg_radiant, v_init_fh, traj.v_avg, traj.state_vect_avg, \
@@ -162,9 +168,24 @@ if __name__ == "__main__":
             # Calculate the orbit as MILIG does it, with the average velocity
             elif traj_solver == 'milig':
 
+                # Use the average velocity of the first half of the trajectory for the initial velocity
+                time_vel = []
+                for obs in traj.observations:
+                    for t, v in zip(obs.time_data[1:], obs.velocities[1:]):
+
+                        time_vel.append([t, v])
+
+                time_vel = np.array(time_vel)
+
+                # Sort by time
+                time_vel = time_vel[time_vel[:, 0].argsort()]
+
+                # Calculate the velocity of the first half of the trajectory
+                v_init_fh = np.mean(time_vel[:int(len(time_vel)/2), 1])
+
                 # Calculate the orbit with the average velocity
-                traj.orbit = calcOrbit(traj.radiant_eci_mini, traj.v_avg, traj.v_avg, traj.state_vect_mini, \
-                    traj.rbeg_jd, stations_fixed=False, reference_init=False)
+                traj.orbit = calcOrbit(traj.radiant_eci_mini, v_init_fh, traj.v_avg, traj.state_vect_mini, \
+                    traj.rbeg_jd, stations_fixed=False, reference_init=True)
 
                 # Save the simulated milig solution
                 savePickle(traj, output_dir, traj.file_name + '_milig.pickle')

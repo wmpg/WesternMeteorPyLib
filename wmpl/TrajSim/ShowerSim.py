@@ -319,10 +319,23 @@ class SimMeteor(object):
         savePickle(self, output_dir, file_name_pickle)
 
 
+    def initOutput(self, output_dir):
+        """ Prepare everything for saving solver results. """
+
+        mkdirP(output_dir)
+
+        # File name of the report file
+        file_name = str(self.jdt_ref) + "_sim_met_info.txt"
+
+        self.file_path = os.path.join(output_dir, file_name)
+
 
 
     def saveInfo(self, output_dir):
         """ Save information about the simulated meteor. """
+
+
+        self.initOutput(self, output_dir)
 
         out_str =  ""
         out_str += "reference JD: {:20.12f}".format(self.jdt_ref) + "\n"
@@ -418,13 +431,6 @@ class SimMeteor(object):
 
         print(out_str)
 
-        mkdirP(output_dir)
-
-        # File name of the report file
-        file_name = str(self.jdt_ref) + "_sim_met_info.txt"
-
-        self.file_path = os.path.join(output_dir, file_name)
-
         # Save the report to a file
         with open(self.file_path, 'w') as f:
             f.write(out_str)
@@ -454,7 +460,7 @@ class SimMeteor(object):
         """
 
         # Add the info to the simulation file, if it exists
-        if self.file_path:
+        if os.path.isfile(self.file_path):
 
             out_str = '\n'
             out_str += '-----------------------------\n'
@@ -479,6 +485,8 @@ class SimMeteor(object):
 
 
             out_str += '\n'
+
+            print(out_str)
 
 
             with open(self.file_path, 'a') as f:
@@ -2984,110 +2992,4 @@ if __name__ == "__main__":
         sim_met.saveInfo(shower_dir)
 
         print('Saved meteor:', sim_met.jdt_ref)
-
-    
-
-
-    # Break here without running solvers!
-    sys.exit()
-
-
-
-
-
-    ##########################################################################################################
-    
-    # Trajectory solver (original or gural)
-    traj_solvers = ['planes', 'los', 'monte_carlo', 'gural']
-
-    # Solve generated trajectories
-    for met_no, sim_met in enumerate(sim_meteor_list):
-
-
-        # Directory where trajectory results will be saved
-        output_dir = os.path.join(shower_dir, "{:03d} - {:.6f}".format(met_no, sim_met.jdt_ref))
-
-
-        # Save info about the simulated meteor
-        sim_met.saveInfo(output_dir)
-
-
-        # Solve the simulated meteor with multiple solvers
-        for traj_solver in traj_solvers:
-
-
-            if (traj_solver == 'los') or (traj_solver == 'planes'):
-
-                # Init the trajectory (LoS or intersecing planes)
-                traj = Trajectory(sim_met.jdt_ref, output_dir=output_dir, max_toffset=t_max_offset, \
-                    meastype=2, show_plots=False, save_results=False, monte_carlo=False)
-
-
-            elif traj_solver == 'monte_carlo':
-                
-                # Init the trajectory
-                traj = Trajectory(sim_met.jdt_ref, output_dir=output_dir, max_toffset=t_max_offset, \
-                    meastype=2, show_plots=False, mc_runs=250)
-
-            elif traj_solver == 'gural':
-                
-                # Velocity model ID
-                velmodel = 3
-
-                # Init the new Gural trajectory solver object
-                traj = GuralTrajectory(len(sim_met.observations), sim_met.jdt_ref, output_dir=output_dir, 
-                    max_toffset=t_max_offset, meastype=2, velmodel=velmodel, verbose=1, show_plots=False)
-
-            else:
-                print(traj_solver, '- unknown trajectory solver!')
-                sys.exit()
-
-
-            # Fill in observations
-            for obs in sim_met.observations:
-
-                traj.infillTrajectory(obs.meas1, obs.meas2, obs.time_data, obs.lat, obs.lon, obs.ele, \
-                    station_id=obs.station_id)
-
-
-            # Solve trajectory
-            traj = traj.run()
-
-
-            # Calculate orbit of an intersecting planes solution
-            if traj_solver == 'planes':
-
-                # Use the average velocity of the first part of the trajectory for the initial velocity
-                time_vel = []
-                for obs in traj.observations:
-                    for t, v in zip(obs.time_data, obs.velocities):
-                        time_vel.append([t, v])
-
-                time_vel = np.array(time_vel)
-
-                # Sort by time
-                time_vel = time_vel[time_vel[:, 0].argsort()]
-
-                # Calculate the velocity of the first half of the trajectory
-                v_init_fh = np.mean(time_vel[int(len(time_vel)/2), 1])
-
-                # Calculate the orbit
-                traj.orbit = calcOrbit(traj.avg_radiant, v_init_fh, traj.v_avg, traj.state_vect_avg, \
-                traj.jd_avg, stations_fixed=True, reference_init=False)
-
-
-            if traj_solver == 'gural':
-
-                # Save info about the simulation comparison
-                sim_met.saveTrajectoryComparison(traj, traj_solver, 'velmodel: ' + str(velmodel))
-
-            else:
-                # Save info about the simulation comparison
-                sim_met.saveTrajectoryComparison(traj, traj_solver)
-
-
-            # Dump measurements to a MATLAB-style file
-            if traj_solver == 'monte_carlo':
-                traj.dumpMeasurements(output_dir, str(sim_met.jdt_ref) + '_meas_dump.txt')
-
 
