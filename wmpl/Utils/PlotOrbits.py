@@ -262,8 +262,9 @@ class OrbitPlotColorScheme(object):
 
 
 
-def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_equinox=True, save_plots=False, 
-    plot_path=None, plt_handle=None, color_scheme='dark', figsize=None, dpi=None, **kwargs):
+def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_equinox=True, save_plots=False, \
+    plot_path=None, plt_handle=None, color_scheme='dark', figsize=None, dpi=None, plot_file_type='.png', \
+    **kwargs):
     """ Plot the given orbits in the Solar System. 
 
     Arguments:
@@ -285,6 +286,7 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_eq
         color_scheme: [str] 'dark' or 'light'. Dark by default.
         figsize: [tuple] Size in inches per every dimension (None by default).
         dpi: [int] Dots per inch (None by default).
+        plot_file_type: [str] Image file type for the plot. 'png' by default.
         **kwargs: [dict] Extra keyword arguments which will be passes to the orbit plotter.
 
     Return:
@@ -394,11 +396,11 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_eq
 
         # Save top view
         ax.view_init(elev=90, azim=90)
-        savePlot(plt, plot_file_name + '_orbit_top.png', plot_dir)
+        savePlot(plt, plot_file_name + '_orbit_top.' + plot_file_type, plot_dir)
 
         # Save side view
         ax.view_init(elev=0, azim=90)
-        savePlot(plt, plot_file_name + '_orbit_side.png', plot_dir)
+        savePlot(plt, plot_file_name + '_orbit_side.' + plot_file_type, plot_dir)
 
 
     return plt

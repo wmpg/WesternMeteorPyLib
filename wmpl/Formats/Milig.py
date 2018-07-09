@@ -349,7 +349,7 @@ if __name__ == '__main__':
         - 'gural3' - Gural exponential deceleration
          """, type=str, nargs='?', default='original')
 
-    arg_parser.add_argument('-t', '--maxtoffset', metavar='MAX_TOFFSET', nargs='?', \
+    arg_parser.add_argument('-t', '--maxtoffset', metavar='MAX_TOFFSET', nargs='1', \
         help='Maximum time offset between the stations.', type=float, default=1.0)
 
     arg_parser.add_argument('-d', '--disablemc', \
@@ -363,6 +363,9 @@ if __name__ == '__main__':
 
     arg_parser.add_argument('-l', '--plotallspatial', \
         help='Plot all spatial residuals on one plot (one vs. time and other vs length.', action="store_true")
+
+    arg_parser.add_argument('-i', '--imgformat', metavar='IMG_FORMAT', nargs='1', \
+        help="Plot image format. 'png' by default, can be 'pdf', 'eps',... ", type=str, default='png')
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -383,7 +386,8 @@ if __name__ == '__main__':
     # Run the solver
     solveTrajectoryMILIG(dir_path, file_name, solver=cml_args.solver, max_toffset=cml_args.maxtoffset, \
         monte_carlo=(not cml_args.disablemc), mc_runs=cml_args.mcruns, \
-        gravity_correction=(not cml_args.disablegravity), plot_all_spatial_residuals=cml_args.plotallspatial)
+        gravity_correction=(not cml_args.disablegravity), plot_all_spatial_residuals=cml_args.plotallspatial,
+        plot_file_type=cml_args.imgformat)
 
 
 
