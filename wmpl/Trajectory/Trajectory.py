@@ -1331,6 +1331,9 @@ class MCUncertanties(object):
         # Latitude of the reference point on the trajectory (rad)
         self.lat_ref = None
 
+        # Height of the reference point on the trajectory (meters)
+        self.ht_ref = None
+
         # Geocentric latitude of the reference point (rad)
         self.lat_geocentric = None
 
@@ -1488,6 +1491,7 @@ def calcMCUncertanties(traj_list, traj_best):
         un.lon_ref = scipy.stats.circstd([traj.orbit.lon_ref for traj in traj_list])
         un.lat_ref = np.std([traj.orbit.lat_ref for traj in traj_list])
         un.lat_geocentric = np.std([traj.orbit.lat_geocentric for traj in traj_list])
+        un.ht_ref = np.std([traj.orbit.ht_ref for traj in traj_list])
 
         # Geocentric
         un.ra_g = scipy.stats.circstd([traj.orbit.ra_g for traj in traj_list])
@@ -1885,7 +1889,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
             # plt.tight_layout()
 
             if traj.save_results:
-                savePlot(plt, traj.file_name + '_monte_carlo_eq_' + plt_flag + '.png', \
+                savePlot(plt, traj.file_name + '_monte_carlo_eq_' + plt_flag + '.' + traj.plot_file_type, \
                     output_dir=traj.output_dir)
 
 
@@ -2001,7 +2005,8 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
 
 
         if traj.save_results:
-            savePlot(plt, traj.file_name + '_monte_carlo_orbit_elems.png', output_dir=traj.output_dir)
+            savePlot(plt, traj.file_name + '_monte_carlo_orbit_elems.' + traj.plot_file_type, 
+                output_dir=traj.output_dir)
 
 
         if traj.show_plots:
@@ -2074,7 +2079,7 @@ class Trajectory(object):
     def __init__(self, jdt_ref, output_dir='.', max_toffset=1.0, meastype=4, verbose=True, \
         estimate_timing_vel=True, monte_carlo=True, mc_runs=None, mc_pick_multiplier=1,  mc_noise_std=1.0, \
         filter_picks=True, calc_orbit=True, show_plots=True, save_results=True, gravity_correction=True,
-        plot_all_spatial_residuals=False):
+        plot_all_spatial_residuals=False, plot_file_type='png'):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -2110,6 +2115,7 @@ class Trajectory(object):
             gravity_correction: [bool] Apply the gravity drop when estimating trajectories. True by default.
             plot_all_spatial_residuals: [bool] Plot all spatial residuals on one plot (one vs. time, and
                 the other vs. length). False by default.
+            plot_file_type: [str] File extansion of the plot image. 'png' by default, can be 'pdf', 'eps', ...
 
         """
 
@@ -2160,6 +2166,9 @@ class Trajectory(object):
 
         # Plot all spatial residuals on one plot
         self.plot_all_spatial_residuals = plot_all_spatial_residuals
+
+        # Image file type for the plot
+        self.plot_file_type = plot_file_type
 
         ######################################################################################################
 
@@ -2438,7 +2447,7 @@ class Trajectory(object):
 
         # plt.legend()
         # plt.grid()
-        # plt.savefig('mc_time_offsets.png', dpi=300)
+        # plt.savefig('mc_time_offsets.' + self.plot_file_type, dpi=300)
         # plt.show()
 
 
@@ -3301,6 +3310,8 @@ class Trajectory(object):
                 _uncer('{:.4f}', 'lat_ref', deg=True))
             out_str += "  Lat geo = {:+>10.6f}{:s} deg\n".format(np.degrees(self.orbit.lat_geocentric), \
                 _uncer('{:.4f}', 'lat_geocentric', deg=True))
+            out_str += "  Ht      = {:+>10.2f}{:s} m\n".format(self.orbit.ht_ref, \
+                _uncer('{:.2f}', 'ht_ref', deg=False))
             out_str += "\n"
 
             # Write out orbital parameters
@@ -3556,8 +3567,8 @@ class Trajectory(object):
 
 
             if self.save_results:
-                savePlot(plt, file_name + '_' + str(obs.station_id) + '_spatial_residuals.png', \
-                    output_dir)
+                savePlot(plt, file_name + '_' + str(obs.station_id) + '_spatial_residuals.' \
+                    + self.plot_file_type, output_dir)
 
             if show_plots:
                 plt.show()
@@ -3618,7 +3629,7 @@ class Trajectory(object):
 
 
             if self.save_results:
-                savePlot(plt, file_name + '_all_spatial_residuals.png', output_dir)
+                savePlot(plt, file_name + '_all_spatial_residuals.' + self.plot_file_type, output_dir)
 
             if show_plots:
                 plt.show()
@@ -3674,7 +3685,7 @@ class Trajectory(object):
 
 
             if self.save_results:
-                savePlot(plt, file_name + '_all_spatial_residuals_length.png', output_dir)
+                savePlot(plt, file_name + '_all_spatial_residuals_length.' + self.plot_file_type, output_dir)
 
             if show_plots:
                 plt.show()
@@ -3741,7 +3752,7 @@ class Trajectory(object):
             plt.tight_layout()
 
             if self.save_results:
-                savePlot(plt, file_name + '_' + str(obs.station_id) + '_lag.png', output_dir)
+                savePlot(plt, file_name + '_' + str(obs.station_id) + '_lag.' + self.plot_file_type, output_dir)
 
             if show_plots:
                 plt.show()
@@ -3796,7 +3807,7 @@ class Trajectory(object):
         plt.gca().invert_yaxis()
 
         if self.save_results:
-            savePlot(plt, file_name + '_lags_all.png', output_dir)
+            savePlot(plt, file_name + '_lags_all.' + self.plot_file_type, output_dir)
 
         if show_plots:
             plt.show()
@@ -3898,7 +3909,7 @@ class Trajectory(object):
         plt.tight_layout()
 
         if self.save_results:
-            savePlot(plt, file_name + '_velocities.png', output_dir)
+            savePlot(plt, file_name + '_velocities.' + self.plot_file_type, output_dir)
 
         if show_plots:
             plt.show()
@@ -3969,7 +3980,7 @@ class Trajectory(object):
 
 
         if self.save_results:
-            savePlot(plt, file_name + '_lengths.png', output_dir)
+            savePlot(plt, file_name + '_lengths.' + self.plot_file_type, output_dir)
 
 
         if show_plots:
@@ -4011,14 +4022,14 @@ class Trajectory(object):
 
 
         # Plot a point marking the final point of the meteor
-        m.scatter(self.rend_lat, self.rend_lon, c='y', marker='+', s=50, alpha=0.75, label='Endpoint')
+        m.scatter(self.rend_lat, self.rend_lon, c='k', marker='+', s=50, alpha=0.75, label='Endpoint')
 
 
         plt.legend(loc='upper right')
 
 
         if self.save_results:
-            savePlot(plt, file_name + '_ground_track.png', output_dir)
+            savePlot(plt, file_name + '_ground_track.' + self.plot_file_type, output_dir)
 
         if show_plots:
             plt.show()
@@ -4064,8 +4075,8 @@ class Trajectory(object):
             plt.legend()
 
             if self.save_results:
-                savePlot(plt, file_name + '_' + str(obs.station_id) + '_angular_residuals.png', \
-                output_dir)
+                savePlot(plt, file_name + '_' + str(obs.station_id) + '_angular_residuals.' \
+                    + self.plot_file_type, output_dir)
 
             if show_plots:
                 plt.show()
@@ -4121,7 +4132,7 @@ class Trajectory(object):
         plt.legend()
 
         if self.save_results:
-            savePlot(plt, file_name + '_all_angular_residuals.png', output_dir)
+            savePlot(plt, file_name + '_all_angular_residuals.' + self.plot_file_type, output_dir)
 
         if show_plots:
             plt.show()
@@ -4146,7 +4157,8 @@ class Trajectory(object):
 
                 # Run orbit plotting procedure
                 plotOrbits(orbit_params, jd2Date(self.jdt_ref, dt_obj=True), save_plots=self.save_results, \
-                    plot_path=os.path.join(output_dir, file_name), linewidth=1, color_scheme='light')
+                    plot_path=os.path.join(output_dir, file_name), linewidth=1, color_scheme='light', \
+                    plot_file_type=self.plot_file_type)
 
 
                 plt.tight_layout()

@@ -1,5 +1,10 @@
 from __future__ import print_function, division, absolute_import
 
+import os
+import sys
+import datetime
+import argparse
+
 import numpy as np
 
 from jplephem.spk import SPK
@@ -11,8 +16,10 @@ from wmpl.Utils.Earth import calcEarthRectangularCoordJPL
 from wmpl.Utils.SolarLongitude import jd2SolLonJPL
 from wmpl.Utils.TrajConversions import J2000_JD, J2000_OBLIQUITY, AU, SUN_MU, SUN_MASS, G, SIDEREAL_YEAR, \
     jd2LST, jd2Date, jd2DynamicalTimeJD, eci2RaDec, altAz2RADec, raDec2AltAz, raDec2Ecliptic, cartesian2Geo,\
-    equatorialCoordPrecession, eclipticToRectangularVelocityVect, correctedEclipticCoord, datetime2JD
+    equatorialCoordPrecession, eclipticToRectangularVelocityVect, correctedEclipticCoord, datetime2JD, \
+    geo2Cartesian
 from wmpl.Utils.Math import vectNorm, vectMag, rotateVector, cartesianToSpherical, sphericalToCartesian
+from wmpl.Utils.Pickling import loadPickle
 
 
 
@@ -50,6 +57,9 @@ class Orbit(object):
 
         # Latitude of the reference point on the trajectory (rad)
         self.lat_ref = None
+
+        # Height of the reference point on the trajectory (meters)
+        self.ht_ref = None
 
         # Geocentric latitude of the reference point on the trajectory (rad)
         self.lat_geocentric = None
@@ -317,7 +327,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
     jd_dyn = jd2DynamicalTimeJD(jd_ref)
 
     # Calculate the geographical coordinates of the reference trajectory ECI position
-    lat_ref, lon_ref, _ = cartesian2Geo(jd_ref, *eci_ref)
+    lat_ref, lon_ref, ht_ref = cartesian2Geo(jd_ref, *eci_ref)
 
 
     # Apply the Earth rotation correction if the station ECI coordinates are fixed (a MUST for the 
@@ -417,6 +427,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
     orb.jd_ref = jd_ref
     orb.lon_ref = lon_ref
     orb.lat_ref = lat_ref
+    orb.ht_ref = ht_ref
     orb.lat_geocentric = lat_geocentric
 
     # Assume that the velocity in infinity is the same as the initial velocity (after rotation correction, if
@@ -698,22 +709,189 @@ if __name__ == "__main__":
 
     from Utils.TrajConversions import raDec2ECI
 
-    # Calculate an orbit as a test
-    radiant_eci = np.array(raDec2ECI(np.radians(265.16047), np.radians(-18.84373)))
-    v_init      = 16424.81
-    v_avg       = 15768.71
-    eci_ref     =  np.array([3757410.98, -2762153.20, 4463901.73])
-    jd_ref      = 2457955.794670294970
+    ### COMMAND LINE ARGUMENTS
+
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description=""" Compute the orbit from given trajectory parameters, or recompute the orbit using the given trajectory pickle file and a few modified trajectory values.
+        Usage:
+
+        a) Recomputing an orbit using an existing trajectory, but modifying one one of the trajectory parameters, e.g. with the initial velocity of 20.5 km/s:
+            python -m wmpl.Trajectory.Orbit trajectory.pickle -v 20.5
+
+        b) Compute the orbit from scratch:
+            python -m wmpl.Trajectory.Orbit -r 317.74 -d 31.72 -v 54.9 -t "20180614-072809.3" -a 44.43 -o -81.56 -e 105.8
+
+        c) If the radiant was given in J2000, use the --j2000 option.
+        """,
+        formatter_class=argparse.RawTextHelpFormatter)
+
+    arg_parser.add_argument('pickle_file', type=str, nargs='?', help='Path to the trajectory pickle file.')
+
+    arg_parser.add_argument('-r', '--ra', help='Custom right ascention of the apparent radiant (deg) in the epoch of date (use option --j2000 to use the J2000 epoch).', type=float, \
+        default=None)
+
+    arg_parser.add_argument('-d', '--dec', help='Custom declination of the apparent radiant (deg) in the epoch of date (use option --j2000 to use the J2000 epoch).', type=float, \
+        default=None)
+
+    arg_parser.add_argument('-v', '--vinit', help='Custom initial velocity in km/s.', type=float, \
+        default=None)
+
+    arg_parser.add_argument('-w', '--vavg', help='Custom average velocity in km/s.', type=float, \
+        default=None)
+
+    arg_parser.add_argument('-t', '--time', help='Reference UTC date and time for which the relative time of the meteor is t = 0. Format: YYYYMMDD-HHMMSS.uuu', \
+        type=str, default=None)
+
+    arg_parser.add_argument('-a', '--lat', help='Latitude +N of the reference position on the trajectory (deg).', \
+        type=float, default=None)
+
+    arg_parser.add_argument('-o', '--lon', help='Longitude +E of the reference position on the trajectory (deg).', \
+        type=float, default=None)
+
+    arg_parser.add_argument('-e', '--ele', help='Height of the reference position on the trajectory (km).', \
+        type=float, default=None)
+
+    arg_parser.add_argument('-j', '--j2000', \
+        help="Give the radiant in J2000.", \
+        action="store_true")
+
+    arg_parser.add_argument('-k', '--refavg', \
+        help="The average position on the trajectory is used as a reference position instead of the initial position. The correction for Earth's rotation will be applied.", \
+        action="store_true")
+
+    arg_parser.add_argument('-c', '--rotcorr', \
+        help="If the radiant was estimated in ECEF coordinates or fixed ECI coordinates, then the correction for Earth's rotation MUST be applied, thus this option must be used.", \
+        action="store_true")
 
 
-    orb = calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref)
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    ############################
+
+
+    # Load the pickle file, if given
+    if cml_args.pickle_file is not None:
+        traj = loadPickle(*os.path.split(cml_args.pickle_file))
+
+    else:
+        traj = None
+
+
+
+    parameter_missing_message = "To compute the orbit without the existing trajectory file, {:s} must also be provided!"
+
+    if cml_args.ra is not None:
+        ra = np.radians(cml_args.ra)
+    elif traj is not None:
+        ra = traj.orbit.ra
+    else:
+        print(parameter_missing_message.format('RA'))
+        sys.exit()
+
+    if cml_args.dec is not None:
+        dec = np.radians(cml_args.dec)
+    elif traj is not None:
+        dec = traj.orbit.dec
+    else:
+        print(parameter_missing_message.format('Dec'))
+        sys.exit()
+
+    if cml_args.vinit is not None:
+        v_init = 1000*cml_args.vinit
+    elif traj is not None:
+        v_init = traj.orbit.v_init
+    else:
+        print(parameter_missing_message.format('initial velocity'))
+        sys.exit()
+
+    if cml_args.vavg is not None:
+        v_avg = 1000*cml_args.vavg
+    elif traj is not None:
+        v_avg = traj.orbit.v_avg
+    elif v_init is not None:
+        v_avg = v_init
+    else:
+        print(parameter_missing_message.format('average velocity'))
+        sys.exit()
+
+    if cml_args.time is not None:
+        dt_ref = datetime.datetime.strptime(cml_args.time, "%Y%m%d-%H%M%S.%f")
+        jd_ref = datetime2JD(dt_ref)
+    elif traj is not None:
+        jd_ref = traj.orbit.jd_ref
+    else:
+        print(parameter_missing_message.format('reference time'))
+        sys.exit()
+
+
+    # Parse reference location
+    if (cml_args.lat is None) and (cml_args.lon is None) and (cml_args.ele is None):
+
+        # Reuse the ECI coordinates from the given trajectory file
+        if traj is not None:
+            eci_ref = traj.state_vect_mini
+
+        else:
+            print(parameter_missing_message.format('lat, lon, ht'))
+            sys.exit()
+
+
+    else:
+
+        # Parse individual location parameters
+        if cml_args.lat is not None:
+            lat_ref = np.radians(cml_args.lat)
+        elif traj is not None:
+            lat_ref = traj.orbit.lat_ref
+        else:
+            print(parameter_missing_message.format('latitude'))
+            sys.exit()
+
+        if cml_args.lon is not None:
+            lon_ref = np.radians(cml_args.lon)
+        elif traj is not None:
+            lon_ref = traj.orbit.lon_ref
+        else:
+            print(parameter_missing_message.format('longitude'))
+            sys.exit()
+
+        if cml_args.ele is not None:
+            ht_ref = 1000*cml_args.ele
+        elif traj is not None:
+            ht_ref = traj.orbit.ht_ref
+        else:
+            print(parameter_missing_message.format('height'))
+            sys.exit()
+
+
+        # Compute the ECI coordinates of the reference point on the trajectory
+        eci_ref = geo2Cartesian(lat_ref, lon_ref, ht_ref, jd_ref)
+
+
+
+    # Presess to epoch of date if given in J2000
+    if cml_args.j2000:
+        ra, dec = equatorialCoordPrecession(J2000_JD.days, jd_ref, ra, dec)
+
+    # Compute the radiant vector in ECI coordinates
+    radiant_eci = np.array(raDec2ECI(ra, dec))
+
+
+    # # Test values
+    # radiant_eci = np.array(raDec2ECI(np.radians(265.16047), np.radians(-18.84373)))
+    # v_init      = 16424.81
+    # v_avg       = 15768.71
+    # eci_ref     =  np.array([3757410.98, -2762153.20, 4463901.73])
+    # jd_ref      = 2457955.794670294970
+
+    # Compute the orbit
+    orb = calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, reference_init=(not cml_args.refavg), \
+        rotation_correction=cml_args.rotcorr)
+
+    # Print the results
+    print('Ref JD:', jd_ref)
+    print('ECI ref:', *eci_ref)
 
     print(orb)
 
-
-
-
-
-
-
-    
