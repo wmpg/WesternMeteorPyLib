@@ -474,7 +474,7 @@ def compareTrajToSim(dir_path, sim_meteors, traj_list, solver_name, radiant_exte
     # Reject all differences outside 3 standard deviations
     for i in range(10):
 
-        # Calculate standard deviations
+        # Calculate the standard deviation
         vg_std = RMSD(vg_diffs_std)
         radiant_std = RMSD(radiant_diffs_std)
 
@@ -483,44 +483,51 @@ def compareTrajToSim(dir_path, sim_meteors, traj_list, solver_name, radiant_exte
         radiant_diffs_std = radiant_diffs_std[np.abs(radiant_diffs_std) < 3*radiant_std]
 
 
+
     print("{:s}, {:d}, {:.2f}, {:.2f}".format(solver_name, failed_count, radiant_std, vg_std))
 
-    # Define limits of the plot
-    extent = [0, radiant_extent, -vg_extent, vg_extent]
 
-    # Plot a 2D histogram
-    plt.hexbin(radiant_diffs, vg_diffs, gridsize=20, extent=extent, vmin=0, vmax=vmax, cmap='viridis_r')
+    ################################################################################################# COMMENTED OUT !!!!!!!!!!!
 
-    # Plot a dVg = 0 line
-    rad_plt_arr = np.linspace(0, radiant_extent, 10)
-    plt.plot(rad_plt_arr, np.zeros_like(rad_plt_arr), linestyle='--', color='k', linewidth=1)
+    # # Define limits of the plot
+    # extent = [0, radiant_extent, -vg_extent, vg_extent]
+
+    # # Plot a 2D histogram
+    # plt.hexbin(radiant_diffs, vg_diffs, gridsize=20, extent=extent, vmin=0, vmax=vmax, cmap='viridis_r')
+
+    # # Plot a dVg = 0 line
+    # rad_plt_arr = np.linspace(0, radiant_extent, 10)
+    # plt.plot(rad_plt_arr, np.zeros_like(rad_plt_arr), linestyle='--', color='k', linewidth=1)
 
 
-    # Plot 3 sigma lines
-    sigma_value = 3
-    y_arr = np.linspace(-sigma_value*vg_std, sigma_value*vg_std, 10)
-    plt.plot(np.zeros_like(y_arr) + sigma_value*radiant_std, y_arr, linewidth=1, color='0.5')
+    # # Plot 3 sigma lines
+    # sigma_value = 3
+    # y_arr = np.linspace(-sigma_value*vg_std, sigma_value*vg_std, 10)
+    # plt.plot(np.zeros_like(y_arr) + sigma_value*radiant_std, y_arr, linewidth=1, color='0.5')
     
-    x_arr = np.linspace(0, sigma_value*radiant_std, 10)
-    plt.plot(x_arr, np.zeros_like(x_arr) + sigma_value*vg_std, linewidth=1, color='0.5')
-    plt.plot(x_arr, np.zeros_like(x_arr) - sigma_value*vg_std, linewidth=1, color='0.5')
+    # x_arr = np.linspace(0, sigma_value*radiant_std, 10)
+    # plt.plot(x_arr, np.zeros_like(x_arr) + sigma_value*vg_std, linewidth=1, color='0.5')
+    # plt.plot(x_arr, np.zeros_like(x_arr) - sigma_value*vg_std, linewidth=1, color='0.5')
 
 
-    plt.xlim(0, radiant_extent)
-    plt.ylim(-vg_extent, vg_extent)
+    # plt.xlim(0, radiant_extent)
+    # plt.ylim(-vg_extent, vg_extent)
 
-    plt.title('{:s}, failures: {:d}, $\sigma_R$ = {:.2f} deg, $\sigma_V$ = {:.2f} km/s'.format(solver_name, failed_count, radiant_std, vg_std))
+    # plt.title('{:s}, failures: {:d}, $\sigma_R$ = {:.2f} deg, $\sigma_V$ = {:.2f} km/s'.format(solver_name, failed_count, radiant_std, vg_std))
 
-    plt.xlabel('Radiant difference (deg)')
-    plt.ylabel('Vg difference (km/s)')
+    # plt.xlabel('Radiant difference (deg)')
+    # plt.ylabel('Vg difference (km/s)')
 
-    plt.savefig(os.path.join(dir_path, 'solution_comparison_{:s}.png'.format(solver_name)), dpi=300)
+    # plt.savefig(os.path.join(dir_path, 'solution_comparison_{:s}.png'.format(solver_name)), dpi=300)
 
-    if show_plot:
-        plt.show()
+    # if show_plot:
+    #     plt.show()
 
-    plt.clf()
-    plt.close()
+    # plt.clf()
+    # plt.close()
+
+
+    return failed_count, radiant_std, vg_std
 
 
 if __name__ == "__main__":
@@ -576,20 +583,45 @@ if __name__ == "__main__":
         ["../SimulatedMeteors/CAMSsim/2012Perseids",    10.0,       1.0,     1.0],
         ["../SimulatedMeteors/SOMN_sim/2011Draconids",  15.0,       5.0,     5.0],
         ["../SimulatedMeteors/SOMN_sim/2014Ursids",     15.0,       5.0,     5.0],
-        ["../SimulatedMeteors/SOMN_sim/2012Perseids",   15.0,       5.0,     5.0],
-        ["../SimulatedMeteors/SOMN_sim/2015Taurids",    15.0,       5.0,     5.0]]
+        ["../SimulatedMeteors/SOMN_sim/2012Perseids",   15.0,       5.0,     5.0]]
+        #["../SimulatedMeteors/SOMN_sim/2015Taurids",    15.0,       5.0,     5.0]]
 
 
     solvers = ['planes', 'los', 'milig', 'mc', 'gural0', 'gural0fha', 'gural1', 'gural3']
-    plot_labels = ['IP', 'LoS', 'LoS-FHAV', 'Monte Carlo', 'Gural (constant)', 'Gural (constant) - FHAV', 'Gural (linear)', 'Gural (exp)']
+    solvers_plot_labels = ['IP', 'LoS', 'LoS-FHAV', 'Monte Carlo', 'MPF const', 'MPF const-FHAV', 'MPF linear', 'MPF exp']
     markers = ['v', 'o', 's', '+', 'x', '.', 'D', 'd']
     sizes = [20, 20, 20, 40, 40, 20, 10, 20]
 
+
+    results_list = []
+    systems_list = []
+    showers_list = []
 
     # Go through all simulations
     for dir_path, min_conv_angle, sigma_r_max, sigma_v_max in data_list:
 
         print('Plotting:', dir_path)
+
+        # Split the path into components
+        path = os.path.normpath(dir_path)
+        path = path.split(os.sep)
+
+        # Extract the system and the shower name
+        system_name = path[-2].replace("_", "").replace('sim', '')
+        shower_name = path[-1]
+        shower_name = shower_name[:4] + ' ' + shower_name[4:]
+
+
+        # Save system path
+        system_path = os.path.join(*path[:-1])
+
+        if not system_name in systems_list:
+            systems_list.append(system_name)
+
+
+        if not shower_name in showers_list:
+            showers_list.append(shower_name)
+
 
         # Load simulated meteors
         sim_meteors = collectTrajPickles(dir_path, traj_type='sim_met')
@@ -600,7 +632,7 @@ if __name__ == "__main__":
 
 
         # Compare trajectories to simulations
-        for solver, solver_name in zip(solvers, plot_labels):
+        for solver, solver_name in zip(solvers, solvers_plot_labels):
 
             # Load trajectories
             traj_list = collectTrajPickles(dir_path, traj_type=solver)
@@ -626,12 +658,125 @@ if __name__ == "__main__":
 
 
             # Plot the 2D histogram comparing the results, radiants within X degrees, Vg within X km/s
-            compareTrajToSim(dir_path, sim_meteors, traj_list, solver_name, sigma_r_max, sigma_v_max, vmax=10, \
-                show_plot=show_plot)
+            failed_count, radiant_std, vg_std = compareTrajToSim(dir_path, sim_meteors, traj_list, \
+                solver_name, sigma_r_max, sigma_v_max, vmax=10, show_plot=show_plot)
 
+
+            results_list.append([system_name, shower_name, solver_name, failed_count, radiant_std, vg_std, system_path])
 
 
         ##########################################################################################################
+
+
+    # Plot the comparison between solvers of one system
+    for system_name in systems_list:
+
+        print(system_name)
+
+        # Only select the values for the given system
+        system_results = [entry for entry in results_list if system_name == entry[0]]
+
+
+        # Find the maximum Vg deviation
+        vg_std_max = max([entry[5] for entry in system_results])
+
+        plot_handle_list = []
+        xticks_values = []
+        xticks_labels = []
+
+        # Go through all solvers
+        for i, solver_name_iter in enumerate(solvers_plot_labels):
+
+            # Generate colors for different showers
+            color_list = plt.cm.inferno(np.linspace(0.95, 0.4, len(showers_list)))
+
+            # Compute the left_limit position of the boxes for the given solver
+            left_limit = 1.5*vg_std_max*i
+
+            # Round the left_limit point
+            left_limit = round(left_limit, 1)
+
+
+            # Find the maximum radiant deviation for the given solver
+            radiant_std_max = max([entry[4] for entry in system_results if solver_name_iter == entry[2]])
+
+            # Compute text padding
+            pad_x = 0.02*vg_std_max
+            pad_y = 0.01*radiant_std_max
+
+            # Plot the name of the solver
+            plt.text(left_limit + pad_x, pad_y, solver_name_iter, rotation=90, verticalalignment='bottom', horizontalalignment='left', fontsize=10)
+
+            
+            # Go through all showers
+            left_limit_list = []
+
+            for color_name, shower_name_iter in zip(color_list, showers_list):
+
+                # Only select results for the given shower
+                shower_results = [entry for entry in system_results if shower_name_iter == entry[1]]
+
+                # Skip plotting if there are no results for a given shower
+                if len(shower_results) == 0:
+                    continue
+
+
+                for result in shower_results:
+
+                    system_name, shower_name, solver_name, failed_count, radiant_std, vg_std, system_path = result
+
+                    # Take only the results for the given solver
+                    if solver_name_iter != solver_name:
+                        continue
+
+
+                    # Plot the standard deviation box
+                    right_limit = left_limit + vg_std
+                    x_arr = np.linspace(left_limit, right_limit, 10)
+                    y_arr = np.linspace(0, radiant_std, 10)
+
+                    left_limit_list.append(left_limit)
+
+                    upper = plt.plot(x_arr, np.zeros_like(x_arr) + radiant_std, color=color_name, label=shower_name_iter)
+                    plt.plot(np.zeros_like(x_arr) + left_limit, y_arr, color=color_name)
+                    plt.plot(np.zeros_like(x_arr) + right_limit, y_arr, color=color_name)
+
+                    # Add the legend only for the first solver
+                    if solver_name_iter == solvers_plot_labels[0]:
+                        plot_handle_list.append(upper[0])
+
+
+            # Add X ticks
+            vg_tick = round(vg_std_max/2, 1)
+
+            xticks_values.append(left_limit)
+            xticks_values.append(left_limit + vg_tick)
+
+            xticks_labels.append('0')
+            xticks_labels.append('{:.1f}'.format(vg_tick))
+
+
+        
+        plt.legend(handles=plot_handle_list)
+
+        # Replace X ticks
+        plt.xticks(xticks_values, xticks_labels, rotation=90)
+
+        plt.ylabel('Radiant error (deg)')
+        plt.xlabel('Velocity error (km/s)')
+
+        plt.gca().set_ylim(ymin=0)
+
+        plt.tight_layout()
+
+
+        # Save the figure
+        plt.savefig(os.path.join(system_path, system_name + '_solver_comparison.png'), dpi=300)
+
+        plt.show()
+
+
+
 
 
 
@@ -647,13 +792,13 @@ if __name__ == "__main__":
 
 
     # # Make sure all lengths are the same
-    # if sum([len(solvers), len(plot_labels), len(markers), len(sizes)]) != 4*len(solvers):
+    # if sum([len(solvers), len(solvers_plot_labels), len(markers), len(sizes)]) != 4*len(solvers):
     #     print('The lenghts of solvers, plots, markers and sizes is not the same!')
     #     sys.exit()
 
     # # Make plots from data with different solvers
 
-    # for solver, plt_lbl, marker, size in zip(solvers, plot_labels, markers, sizes):
+    # for solver, plt_lbl, marker, size in zip(solvers, solvers_plot_labels, markers, sizes):
 
     #     # Load trajectories
     #     traj_list = collectTrajPickles(dir_path, traj_type=solver)
