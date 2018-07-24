@@ -9,14 +9,15 @@ import numpy as np
 import numpy.ctypeslib as npct
 import ctypes as ct
 
+import scipy.optimize
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import cm
 
 
-from wmpl.Trajectory.Trajectory import fitLagIntercept, lineFunc
 from wmpl.Trajectory.Orbit import calcOrbit
-from wmpl.Utils.TrajConversions import geo2Cartesian, raDec2ECI, altAz2RADec_vect, raDec2AltAz_vect, jd2Date
-from wmpl.Utils.Math import vectMag, findClosestPoints, sphericalToCartesian
+from wmpl.Utils.TrajConversions import geo2Cartesian, raDec2ECI, altAz2RADec_vect, \
+    raDec2AltAz_vect, jd2Date
+from wmpl.Utils.Math import vectMag, findClosestPoints, sphericalToCartesian, lineFunc
 from wmpl.Utils.Pickling import savePickle
 
 # Path to the compiled trajectory library
@@ -326,6 +327,39 @@ def double3pointerToArray(ptr, n, m_sizes, p):
 
 
 
+def fitLagIntercept(time, length, v_init, initial_intercept=0.0):
+    """ Finds the intercept of the line with the given slope. Used for fitting time vs. length along the trail
+        data.
+
+    Arguments:
+        time: [ndarray] Array containing the time data (seconds).
+        length: [ndarray] Array containing the length along the trail data.
+        v_init: [float] Fixed slope of the line (i.e. initial velocity).
+
+    Keyword arguments:
+        initial_intercept: [float] Initial estimate of the intercept.
+
+    Return:
+        (slope, intercept): [tuple of floats] fitted line parameters
+    """
+
+    # Fit a line to the first 25% of the points
+    quart_size = int(0.25*len(time))
+
+    # If the size is smaller than 4 points, take all point
+    if quart_size < 4:
+        quart_size = len(time)
+
+    quart_length = length[:quart_size]
+    quart_time = time[:quart_size]
+
+    # Redo the lag fit, but with fixed velocity
+    lag_intercept, _ = scipy.optimize.curve_fit(lambda x, intercept: lineFunc(x, v_init, intercept), 
+        quart_time, quart_length, p0=[initial_intercept])
+
+    return v_init, lag_intercept[0]
+
+
 class GuralTrajectory(object):
     """ Meteor trajectory estimation, using the Gural solver. 
 
@@ -357,10 +391,11 @@ class GuralTrajectory(object):
                 This same reference date/time will be used on all camera measurements for the purposes of 
                 computing local sidereal time and making  geocentric coordinate transformations.
             velmodel: [int] Velocity propagation model
-                0 = constant   v(t) = vinf
-                1 = linear     v(t) = vinf - |acc1| * t
-                2 = quadratic  v(t) = vinf - |acc1| * t + acc2 * t^2
-                3 = exponent   v(t) = vinf - |acc1| * |acc2| * exp( |acc2| * t )
+                0    = constant   v(t) = vinf
+                0fha = constant, where the initial velocity is estimated as the average vel of the first half
+                1    = linear     v(t) = vinf - |acc1| * t
+                2    = quadratic  v(t) = vinf - |acc1| * t + acc2 * t^2
+                3    = exponent   v(t) = vinf - |acc1| * |acc2| * exp( |acc2| * t )
 
 
         Keyword arguments:
@@ -386,11 +421,26 @@ class GuralTrajectory(object):
         # Init input parameters
         self.maxcameras = maxcameras
         self.jdt_ref = jdt_ref
-        self.velmodel = velmodel
         self.max_toffset = max_toffset
         self.nummonte = nummonte
-        self.meastype = meastype
         self.verbose = verbose
+        self.meastype = meastype
+
+        # Check if the initial velocity should be computed as the average velocity of the first half
+        if 'fha' in velmodel:
+            
+            self.fha_velocity = True
+
+            velmodel = int(velmodel.replace('fha', ''))
+
+        else:
+            self.fha_velocity = False
+
+            velmodel = int(velmodel)
+
+
+        self.velmodel = velmodel
+        
 
         # Directory where the trajectory estimation results will be saved
         self.output_dir = output_dir
@@ -429,6 +479,8 @@ class GuralTrajectory(object):
         self.dec_radiant = 0
         # Meteor solution velocity at the begin point in km/sec
         self.vbegin = 0
+        # Average velocity
+        self.vavg = 0
         # Deceleration term 1 defined by the given velocity model
         self.decel1 = 0         
         # Deceleration term 2 defined by the given velocity model
@@ -510,6 +562,9 @@ class GuralTrajectory(object):
 
         # Calculated lengths from each station
         self.lengths = None
+
+        # Calculated distance from the beginning of the trajectory for every station
+        self.state_vector_distances = None
 
         # Calculated lag from length and the initial velocity
         self.lags = None
@@ -726,22 +781,47 @@ class GuralTrajectory(object):
 
         self.velocities = []
         self.lengths = []
+        self.state_vector_distances = []
+
+        rad_cpa_all_stations = []
+        max_ht = 0
+        beg_cpa = None
+        
+        # Calculate ECI coordinates of all LoS projections on the trajectory
+        for stat_eci_los, meas_eci_los in zip(self.stations_eci_cameras, self.meas_eci_los_cameras):
+
+            rad_cpa_list = []
+
+            # Go through all individual position measurement from each site
+            for stat, meas in zip(stat_eci_los, meas_eci_los):
+
+                # Calculate closest points of approach (observed line of sight to radiant line)
+                _, rad_cpa, _ = findClosestPoints(stat, meas, self.state_vect, self.radiant_eci)
+
+                # Save ECI coordinates of the projection on the trajectory
+                rad_cpa_list.append(rad_cpa)
+
+                # Compute the distance from the centre of the Earth
+                ht_center = vectMag(rad_cpa)
+
+                # Save the ECI coordinate as the beginning if it has the highest height
+                if ht_center > max_ht:
+                    max_ht = ht_center
+                    beg_cpa = np.copy(rad_cpa)
+
+            rad_cpa_all_stations.append(rad_cpa_list)
 
 
         ### Calculate lengths and instantaneous velocities for all stations
-        for kmeas, (stat_eci_los, meas_eci_los) in enumerate(zip(self.stations_eci_cameras, \
-            self.meas_eci_los_cameras)):
+        for kmeas, rad_cpa_list in enumerate(rad_cpa_all_stations):
 
             # Calculate the time data
             time_data = self.times[kmeas]
 
             radiant_distances = []
+            state_vector_distance = []
 
-            # Go through all individual position measurement from each site
-            for i, (stat, meas) in enumerate(zip(stat_eci_los, meas_eci_los)):
-
-                # Calculate closest points of approach (observed line of sight to radiant line)
-                obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, self.state_vect, self.radiant_eci)
+            for i, rad_cpa in enumerate(rad_cpa_list):
 
                 # Take the position of the first point as the reference point
                 if i == 0:
@@ -749,14 +829,20 @@ class GuralTrajectory(object):
 
                 # Calculate the distance from the first observed point to the projected point on the radiant line
                 dist = vectMag(ref_point - rad_cpa)
-                
                 radiant_distances.append(dist)
+
+                # Calculate the distance from the beginning of the trajectory to the projected point
+                beg_dist = vectMag(beg_cpa - rad_cpa)
+                state_vector_distance.append(beg_dist)
+
 
 
             # Convert the distances (length along the trail) into a numpy array
             length = np.array(radiant_distances)
+            state_vector_distance = np.array(state_vector_distance)
 
             self.lengths.append(length)
+            self.state_vector_distances.append(state_vector_distance)
 
 
             # Shift the radiant distances one element down (for difference calculation)
@@ -778,6 +864,83 @@ class GuralTrajectory(object):
             velocity = dists_diffs/time_diffs
 
             self.velocities.append(velocity)
+
+
+        # Compute the initial velocity as the average of the first half
+        if self.fha_velocity:
+
+            # Set the average velocity if the velocity model was the constant velocity model
+            if int(self.velmodel) == 0:
+                self.vavg = self.vbegin
+
+
+            best_stddev = np.inf
+            best_solution = None
+
+            # If there are more than 2 stations, try all rejecting one until the best velocity fit is found
+            for i in range(1, self.maxcameras + 1):
+
+                use_indices = list(range(self.maxcameras))
+
+                # If there are more than 2 stations, reject one station
+                if self.maxcameras > 2 and (i != 0):
+                    use_indices.pop(i - 1)
+
+
+                filtered_times = [time_dat for i, time_dat in enumerate(self.times) if i in use_indices]
+                filtered_svs = [sv_dat for i, sv_dat in enumerate(self.state_vector_distances) if i in use_indices]
+
+                # Get a list of times and lengths from all stations
+                times = np.array([t for time_dat in filtered_times for t in time_dat]).flatten()
+                sv_dists = np.array([sv for sv_dat in filtered_svs for sv in sv_dat]).flatten()
+
+                # Sort by time
+                temp_arr = np.c_[times, sv_dists]
+                temp_arr = temp_arr[np.argsort(temp_arr[:, 0])]
+                times, sv_dists = temp_arr.T
+
+                half_index = int(len(times)/2)
+                times_half = times[:half_index]
+                sv_dists_half = sv_dists[:half_index]
+
+                # Fit a line to the first 50% of the points
+                popt, pcov = scipy.optimize.curve_fit(lineFunc, times_half, sv_dists_half)
+
+                # Compute the standard deviation of the fit
+                intercept_stddev = np.sqrt(np.diag(pcov))[1]
+
+
+                if intercept_stddev < best_stddev:
+                    best_stddev = intercept_stddev
+                    best_solution = popt
+
+
+                # End if there are only 2 stations
+                if self.maxcameras == 2:
+                    break
+
+
+            # Compute the begin velocity
+            self.vbegin = best_solution[0]/1000
+
+
+            # print(self.vbegin)
+
+            # # Plot original points
+            # for t, sv, dt in zip(self.times, self.state_vector_distances, self.tref_offsets):
+            #     plt.scatter(t, sv, label='dt: {:.2f}'.format(dt))
+
+            # # Plot fitted line
+            # time_arr = np.linspace(np.min(times), np.max(times), 100)
+            # plt.plot(time_arr, lineFunc(time_arr, *best_solution))
+
+            # plt.xlabel('Time (s)')
+            # plt.ylabel('Length (m)')
+
+            # plt.legend()
+
+            # plt.show()
+
 
         
 
@@ -1045,6 +1208,7 @@ class GuralTrajectory(object):
         print('Vbeg:', self.vbegin)
         print('State vector:', self.state_vect)
         print('Deceleration:', self.decel)
+        print('Timing offsets:', self.tref_offsets)
 
 
         # Calculate the ECI positions of the trajectory on the radiant line, length and velocities
@@ -1078,9 +1242,14 @@ class GuralTrajectory(object):
         del self.traj_lib
         del self.traj
 
+        if self.fha_velocity:
+            fha_suffix = 'fha'
+        else:
+            fha_suffix = ''
+
         # Save the picked trajectory structure with original points
         savePickle(self, self.output_dir, self.file_name \
-            + '_gural{:d}_trajectory.pickle'.format(self.velmodel))
+            + '_gural{:d}{:s}_trajectory.pickle'.format(self.velmodel, fha_suffix))
 
 
         ######################################################################################################

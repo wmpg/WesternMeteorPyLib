@@ -335,7 +335,7 @@ class SimMeteor(object):
         """ Save information about the simulated meteor. """
 
 
-        self.initOutput(self, output_dir)
+        self.initOutput(output_dir)
 
         out_str =  ""
         out_str += "reference JD: {:20.12f}".format(self.jdt_ref) + "\n"
@@ -2646,82 +2646,82 @@ if __name__ == "__main__":
     # ##
 
 
-    # ### Long sporadic fireball
-
-    # # Shower name
-    # shower_name = 'LongFireball'
-
-    # # Radiant position and dispersion
-    # ra_g = 304.67053
-    # ra_g_sigma = 0.04
-
-    # dec_g = -7.28225
-    # dec_g_sigma = 0.07
-
-    # # Radiant drift in degrees per degree of solar longitude
-    # d_ra = 0
-    # d_dec = 0
-
-    # # Geocentric velocity in km/s
-    # v_g = 11.3
-    # v_g_sigma = 0.02
-
-    # # Velocity drift
-    # d_vg = 0.0
-
-    # year = 2017
-    # month = 9
-
-    # # Solar longitude of peak activity in degrees
-    # sol_max = 180.150305
-    # sol_slope = 20
-
-    # # Beginning height in kilometers
-    # beg_height = 76.4 
-    # beg_height_sigma = 3
-
-    # ###
-
-
-    ### 2015 Taurid outburst
+    ### Long sporadic fireball
 
     # Shower name
-    shower_name = '2015Taurids'
+    shower_name = 'LongFireball'
 
     # Radiant position and dispersion
-    ra_g = 53.059624
-    ra_g_sigma = 0.334
+    ra_g = 304.67053
+    ra_g_sigma = 0.04
 
-    dec_g = 14.65736
-    dec_g_sigma = 0.267
+    dec_g = -7.28225
+    dec_g_sigma = 0.07
 
     # Radiant drift in degrees per degree of solar longitude
-    d_ra = 0.554
-    d_dec = 0.06
+    d_ra = 0
+    d_dec = 0
 
     # Geocentric velocity in km/s
-    v_g = 29.689892
-    v_g_sigma = 0.223
+    v_g = 11.3
+    v_g_sigma = 0.02
 
     # Velocity drift
-    d_vg = -0.293
+    d_vg = 0.0
 
-    year = 2015
-    month = 10
+    year = 2017
+    month = 9
 
     # Solar longitude of peak activity in degrees
-    sol_max = 220.956
-    sol_slope = 0.15
+    sol_max = 180.150305
+    sol_slope = 20
 
     # Beginning height in kilometers
-    beg_height = 100
+    beg_height = 76.4 
     beg_height_sigma = 3
 
-
-    # Set constraints to the orbit
-    orbit_limits = ['a', 2.24, 2.28]
-
     ###
+
+
+    # ### 2015 Taurid outburst
+
+    # # Shower name
+    # shower_name = '2015Taurids'
+
+    # # Radiant position and dispersion
+    # ra_g = 53.059624
+    # ra_g_sigma = 0.334
+
+    # dec_g = 14.65736
+    # dec_g_sigma = 0.267
+
+    # # Radiant drift in degrees per degree of solar longitude
+    # d_ra = 0.554
+    # d_dec = 0.06
+
+    # # Geocentric velocity in km/s
+    # v_g = 29.689892
+    # v_g_sigma = 0.223
+
+    # # Velocity drift
+    # d_vg = -0.293
+
+    # year = 2015
+    # month = 10
+
+    # # Solar longitude of peak activity in degrees
+    # sol_max = 220.956
+    # sol_slope = 0.15
+
+    # # Beginning height in kilometers
+    # beg_height = 100
+    # beg_height_sigma = 3
+
+
+    # # Set constraints to the orbit
+    # orbit_limits = ['a', 2.24, 2.28]
+
+    # ###
 
 
     ##########################################################################################################
@@ -2732,28 +2732,28 @@ if __name__ == "__main__":
 
     # Set a range of meteor durations
     #meteor_durations = np.clip(np.random.normal(0.5, 0.1, n_meteors), 0.2, 1.0)
-    meteor_durations = [2.0]*n_meteors
+    meteor_durations = [6.5]*n_meteors
 
     # #### Constant velocity model
     # meteor_velocity_models = [ConstantVelocity(duration) for duration in meteor_durations]
     # ####
 
 
-    # #### Linear deceleration model
+    #### Linear deceleration model
     
-    # # Randomly generate deceleration times t0
-    # #t0_rand = np.random.uniform(0.1, 0.7, size=n_meteors) # Ratios of deceleratoin start
-    # t0_rand = np.random.uniform(0.3, 0.6, size=n_meteors) # Ratios of deceleratoin start
-    # t0_list = meteor_durations*t0_rand
+    # Randomly generate deceleration times t0
+    #t0_rand = np.random.uniform(0.1, 0.7, size=n_meteors) # Ratios of deceleratoin start
+    t0_rand = np.random.uniform(0.3, 0.6, size=n_meteors) # Ratios of deceleratoin start
+    t0_list = meteor_durations*t0_rand
 
-    # # Randomly generate decelerations
-    # #decel_list = np.random.uniform(100, 800, size=n_meteors)
-    # decel_list = np.random.uniform(4000, 6000, size=n_meteors)
+    # Randomly generate decelerations
+    #decel_list = np.random.uniform(100, 800, size=n_meteors)
+    decel_list = np.random.uniform(4000, 6000, size=n_meteors)
 
-    # meteor_velocity_models = [LinearDeceleration(duration, t0, decel) for duration, t0, decel in \
-    #     zip(meteor_durations, t0_list, decel_list)]
+    meteor_velocity_models = [LinearDeceleration(duration, t0, decel) for duration, t0, decel in \
+        zip(meteor_durations, t0_list, decel_list)]
 
-    # ####
+    ####
 
 
     # #### Jacchia (exponential deceleration) velocity model
@@ -2920,44 +2920,46 @@ if __name__ == "__main__":
 
 
 
-    ## Taurids ###
+    # ## Taurids ###
 
-    # Make the beginning heights heigher, as the trajectory points will be determined by simulated
-    # magnitudes
-    beg_height = 120
-    beg_height_sigma = 0
+    # # Make the beginning heights heigher, as the trajectory points will be determined by simulated
+    # # magnitudes
+    # beg_height = 120
+    # beg_height_sigma = 0
 
-    # Luminous efficiency (fraction)
-    lum_eff = 0.7/100
+    # # Luminous efficiency (fraction)
+    # lum_eff = 0.7/100
 
-    # Ablation coefficient (s^2/km^2) (cometary)
-    ablation_coeff = 0.1
+    # # Ablation coefficient (s^2/km^2) (cometary)
+    # ablation_coeff = 0.1
 
-    # Drag coeficient
-    Gamma = 1.0
+    # # Drag coeficient
+    # Gamma = 1.0
 
-    # Heat transfer coeficient
-    Lambda = 0.5
+    # # Heat transfer coeficient
+    # Lambda = 0.5
 
-    # Mass index
-    mass_index = 1.8
+    # # Mass index
+    # mass_index = 1.8
 
-    # Mass range (log of mass in kg) seen by the system (allsky, 30 km/s, Taurids)
-    mass_min = -3.0
-    mass_max = 0.0
+    # # Mass range (log of mass in kg) seen by the system (allsky, 30 km/s, Taurids)
+    # mass_min = -3.0
+    # mass_max = 0.0
 
 
-    # Sample densities - around 1400 kg/m3
-    # Reference: Brown, P., Marchenko, V., Moser, D. E., Weryk, R., & Cooke, W. (2013). Meteorites from 
-    # meteor showers: A case study of the Taurids. Meteoritics & Planetary Science, 48(2), 270-288.
-    density_samples = np.random.uniform(1200, 1600, n_meteors)
+    # # Sample densities - around 1400 kg/m3
+    # # Reference: Brown, P., Marchenko, V., Moser, D. E., Weryk, R., & Cooke, W. (2013). Meteorites from 
+    # # meteor showers: A case study of the Taurids. Meteoritics & Planetary Science, 48(2), 270-288.
+    # density_samples = np.random.uniform(1200, 1600, n_meteors)
 
     ## \Taurids
 
 
-    # Init velocity models
-    meteor_velocity_models = [AblationModelVelocity(mass_min, mass_max, mass_index, density, ablation_coeff, \
-        Gamma, Lambda, lum_eff) for density in density_samples]
+
+
+    # # Init velocity models
+    # meteor_velocity_models = [AblationModelVelocity(mass_min, mass_max, mass_index, density, ablation_coeff, \
+    #     Gamma, Lambda, lum_eff) for density in density_samples]
 
 
     # ####################################################################################
@@ -2978,7 +2980,7 @@ if __name__ == "__main__":
     # Run shower simulation
     sim_meteor_list = simulateMeteorShower(station_list, meteor_velocity_models, n_meteors, ra_g, ra_g_sigma, 
         dec_g, dec_g_sigma, d_ra, d_dec, v_g, v_g_sigma, d_vg, year, month, sol_max, sol_slope, beg_height, 
-        beg_height_sigma, output_dir=shower_dir, orbit_limits=orbit_limits, nighttime_meteors_only=False)
+        beg_height_sigma, output_dir=shower_dir, orbit_limits=orbit_limits, nighttime_meteors_only=True)
 
 
 
