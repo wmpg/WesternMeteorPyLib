@@ -31,7 +31,7 @@ from wmpl.Utils.Pickling import savePickle
 from wmpl.Utils.Plotting import savePlot
 
 
-# Try importing Campbell-Brown & Koschny (2004) ablation code 
+# Try importing Campbell-Brown & Koschny (2004) ablation code
 try:
     from MetSim.MetSim import loadInputs, runSimulation
     METSIM_IMPORT = True

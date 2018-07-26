@@ -71,9 +71,10 @@ On windows, you might not have to install library packages, but the installation
 2) Open Anaconda prompt and run:
 	```
 	conda update anaconda
-	conda install numpy scipy matplotlib
+	conda install numpy scipy matplotlib cython
 	conda install -c conda-forge basemap basemap-data-hires jplephem pyephem pyhdf obspy
 	conda install -c anaconda netcdf4
+	pip install pyqt5 pyswarm
 	```
 
 3) Download and install git: [https://git-scm.com/downloads](https://git-scm.com/downloads)
@@ -90,6 +91,11 @@ On windows, you might not have to install library packages, but the installation
 	```
 	python setup.py install
 	```
+
+
+#### Troubleshooting
+
+If you are getting the following error on Windows: ```Unable to find vcvarsall.bat```, that means you need to install [Visual C++ Build Tools 2015](http://go.microsoft.com/fwlink/?LinkId=691126).
 
 
 ### Manually downloading data files
