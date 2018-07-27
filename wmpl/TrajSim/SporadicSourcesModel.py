@@ -1,9 +1,11 @@
+""" Model of the sporadic background. """
+
 from __future__ import print_function, division, absolute_import
 
 import numpy as np
 import matplotlib.pyplot as plt
 
-from wmpl.Utils.TrajConversions import rotatePolar
+from wmpl.Utils.TrajConversions import rotatePolar, ecliptic2RaDec, date2JD
 from wmpl.Utils.PlotCelestial import CelestialPlot
 
 
@@ -67,11 +69,12 @@ class SporadicModel(object):
 
 
 
-    def sample(self, n=1):
+    def sample(self, jd_data):
         """ Sample the sporadic model.
 
-        Keyword argument:
-            n: [int] Number of samples to return. 1 by default.
+        Arguments:
+            jd_data: [array-like] A list or array of Julian dates for drawn samples. Needed for computing RA
+                and Dec.
 
         Return:
             samples: [list] A list of lambda, beta pairs (degrees).
@@ -85,7 +88,7 @@ class SporadicModel(object):
         samples = []
 
         # Draw n samples from the model
-        for i in range(n):
+        for jd in jd_data:
 
             # Choose a source by weighing it using its relative flux
             source = np.random.choice(self.sources, p=flux_norm)
@@ -114,7 +117,12 @@ class SporadicModel(object):
                 vg = 71
 
 
-            samples.append([np.degrees(lam_rot), np.degrees(bet_rot), vg])
+            # Compute geocentric RA and Dec
+            ra_g, dec_g = ecliptic2RaDec(jd, lam_rot, bet_rot)
+
+
+            samples.append([np.degrees(lam_rot), np.degrees(bet_rot), vg, np.degrees(ra_g), \
+                np.degrees(dec_g)])
 
 
         return samples
@@ -122,49 +130,82 @@ class SporadicModel(object):
 
 
 
+def initSporadicModel():
+    """ Initialize the sporadic source model using the values from: 
+        Jones, J., & Brown, P. (1993). Sporadic meteor radiant distributions: orbital survey results. 
+        MNRAS, 265(3), 524-532.
 
-if __name__ == '__main__':
+    """
 
     ### Init the sporadic model ###
 
     spor_model = SporadicModel()
 
-    # Values from: Jones, J., & Brown, P. (1993). Sporadic meteor radiant distributions: orbital survey 
-    #   results. Monthly Notices of the Royal Astronomical Society, 265(3), 524-532.
+    # Values from: 
     #                    lam lam_sig bet bet_sig  vg  vg_sig flux
     
-    spor_model.addSource(  71,     5,   0,    5,  25,  7.0,  0.35) # Helion source
-    spor_model.addSource( 290,     5,   0,    5,  25,  7.0,  0.58) # Antihelion source
+    spor_model.addSource(  71,     5,   0,    5,  35, 10.0,  0.35) # Helion source
+    spor_model.addSource( 290,     5,   0,    5,  35, 10.0,  0.58) # Antihelion source
     spor_model.addSource(   0,     5,  15,    5,  60,  5.0,  0.46) # North apex source
     spor_model.addSource(   0,     5, -15,    5,  60,  5.0,  0.46) # South apex source
-    spor_model.addSource(   0,    10,  60,    5,  30,  5.0,  1.0) # North toroidal source
-    spor_model.addSource( 180,    50,   0,   20,  20, 10.0,  0.5) # Antapex source (no reference)
+    spor_model.addSource(   0,    10,  60,    5,  35,  5.0,  1.0) # North toroidal source
+    spor_model.addSource(   0,    10, -60,    5,  35,  5.0,  1.0) # North toroidal source
+    spor_model.addSource( 180,    50,   0,   20,  15, 10.0,  0.5) # Antapex source (no reference)
 
     ###############
 
 
-    # Sample the model
-    samples = spor_model.sample(1000)
+    return spor_model
 
-    lam_list, bet_list, vg_list = np.array(samples).T
+
+
+
+if __name__ == '__main__':
+
+    n_samples = 1000
+
+    # Generate Julian data data
+    start_jd = date2JD(2018, 7, 27, 0, 0, 0)
+    end_jd = date2JD(2018, 7, 28, 0, 0, 0)
+
+    jd_data = np.random.uniform(start_jd, end_jd, n_samples)
+
+    
+    # Init the sporadic model
+    spor_model = initSporadicModel()
+
+    # Sample the model
+    samples = spor_model.sample(jd_data)
+
+    lam_list, bet_list, vg_list, rag_list, decg_list = np.array(samples).T
 
     lam_list = np.radians(lam_list)
     bet_list = np.radians(bet_list)
+
+    rag_list = np.radians(rag_list)
+    decg_list = np.radians(decg_list)
 
     # Rotate lambda to be Sun-centred
     lam_list = lam_list%(2*np.pi)
 
 
-    # Plot the radiants
-    cp = CelestialPlot(lam_list, bet_list)
+    # Plot the radiants in ecliptic coordinates
+    cp = CelestialPlot(lam_list, bet_list, bgcolor='w')
 
-    cp.scatter(lam_list, bet_list, s=1)
+    cp.scatter(lam_list, bet_list, s=1, c=vg_list)
+    cp.colorbar(label='Vg (km/s)')
 
-    #plt.scatter(lam_list, bet_list, s=1)
+    plt.title('Sun-centred ecliptic')
+    plt.show()
 
-    #plt.ylim([-90, 90])
-    #plt.xlim([0, 360])
 
+    # Plot the radiants in geocentric equatorial coordinates
+    cp = CelestialPlot(rag_list, decg_list, bgcolor='w')
+
+    cp.scatter(rag_list, decg_list, s=1, c=vg_list)
+    cp.colorbar(label='Vg (km/s)')
+
+    plt.title('Geocentric equatorial')
     plt.show()
 
 

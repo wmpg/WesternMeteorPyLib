@@ -192,7 +192,7 @@ class CelestialPlot(object):
 
         else:
 
-            ### ALL-SKY SINOSOIDAL PROJECTION ###
+            ### ALL-SKY SINOSOIDAL OR OTHER PROJECTION ###
 
             # Frequency of RA/Dec angle labels (deg)
             label_angle_freq = 15

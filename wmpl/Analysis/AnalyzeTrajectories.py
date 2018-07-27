@@ -483,48 +483,44 @@ def compareTrajToSim(dir_path, sim_meteors, traj_list, solver_name, radiant_exte
         radiant_diffs_std = radiant_diffs_std[np.abs(radiant_diffs_std) < 3*radiant_std]
 
 
-
-    print("{:s}, {:d}, {:.2f}, {:.2f}".format(solver_name, failed_count, radiant_std, vg_std))
-
-
     ################################################################################################# COMMENTED OUT !!!!!!!!!!!
 
-    # # Define limits of the plot
-    # extent = [0, radiant_extent, -vg_extent, vg_extent]
+    # Define limits of the plot
+    extent = [0, radiant_extent, -vg_extent, vg_extent]
 
-    # # Plot a 2D histogram
-    # plt.hexbin(radiant_diffs, vg_diffs, gridsize=20, extent=extent, vmin=0, vmax=vmax, cmap='viridis_r')
+    # Plot a 2D histogram
+    plt.hexbin(radiant_diffs, vg_diffs, gridsize=20, extent=extent, vmin=0, vmax=vmax, cmap='viridis_r')
 
-    # # Plot a dVg = 0 line
-    # rad_plt_arr = np.linspace(0, radiant_extent, 10)
-    # plt.plot(rad_plt_arr, np.zeros_like(rad_plt_arr), linestyle='--', color='k', linewidth=1)
+    # Plot a dVg = 0 line
+    rad_plt_arr = np.linspace(0, radiant_extent, 10)
+    plt.plot(rad_plt_arr, np.zeros_like(rad_plt_arr), linestyle='--', color='k', linewidth=1)
 
 
-    # # Plot 3 sigma lines
-    # sigma_value = 3
-    # y_arr = np.linspace(-sigma_value*vg_std, sigma_value*vg_std, 10)
-    # plt.plot(np.zeros_like(y_arr) + sigma_value*radiant_std, y_arr, linewidth=1, color='0.5')
+    # Plot 3 sigma lines
+    sigma_value = 3
+    y_arr = np.linspace(-sigma_value*vg_std, sigma_value*vg_std, 10)
+    plt.plot(np.zeros_like(y_arr) + sigma_value*radiant_std, y_arr, linewidth=1, color='0.5')
     
-    # x_arr = np.linspace(0, sigma_value*radiant_std, 10)
-    # plt.plot(x_arr, np.zeros_like(x_arr) + sigma_value*vg_std, linewidth=1, color='0.5')
-    # plt.plot(x_arr, np.zeros_like(x_arr) - sigma_value*vg_std, linewidth=1, color='0.5')
+    x_arr = np.linspace(0, sigma_value*radiant_std, 10)
+    plt.plot(x_arr, np.zeros_like(x_arr) + sigma_value*vg_std, linewidth=1, color='0.5')
+    plt.plot(x_arr, np.zeros_like(x_arr) - sigma_value*vg_std, linewidth=1, color='0.5')
 
 
-    # plt.xlim(0, radiant_extent)
-    # plt.ylim(-vg_extent, vg_extent)
+    plt.xlim(0, radiant_extent)
+    plt.ylim(-vg_extent, vg_extent)
 
-    # plt.title('{:s}, failures: {:d}, $\sigma_R$ = {:.2f} deg, $\sigma_V$ = {:.2f} km/s'.format(solver_name, failed_count, radiant_std, vg_std))
+    plt.title('{:s}, failures: {:d}, $\sigma_R$ = {:.2f} deg, $\sigma_V$ = {:.2f} km/s'.format(solver_name, failed_count, radiant_std, vg_std))
 
-    # plt.xlabel('Radiant difference (deg)')
-    # plt.ylabel('Vg difference (km/s)')
+    plt.xlabel('Radiant difference (deg)')
+    plt.ylabel('Vg difference (km/s)')
 
-    # plt.savefig(os.path.join(dir_path, 'solution_comparison_{:s}.png'.format(solver_name)), dpi=300)
+    plt.savefig(os.path.join(dir_path, 'solution_comparison_{:s}.png'.format(solver_name)), dpi=300)
 
-    # if show_plot:
-    #     plt.show()
+    if show_plot:
+        plt.show()
 
-    # plt.clf()
-    # plt.close()
+    plt.clf()
+    plt.close()
 
 
     return failed_count, radiant_std, vg_std
@@ -533,25 +529,9 @@ def compareTrajToSim(dir_path, sim_meteors, traj_list, solver_name, radiant_exte
 if __name__ == "__main__":
 
 
-    # #dir_path = "../DenisGEMcases/"
-    # #dir_path = "../DenisGEMcases_5_sigma"
-    # #dir_path = "../Romulan2012Geminids"
-
     # #dir_path = "../SimulatedMeteors/EMCCD/2011Draconids"
     # #dir_path = "../SimulatedMeteors/CABERNET/2011Draconids"
 
-    # #dir_path = "../SimulatedMeteors/CAMO/2011Draconids"
-    # #dir_path = "../SimulatedMeteors/CAMO/2014Ursids"
-    # #dir_path = "../SimulatedMeteors/CAMO/2012Perseids"
-
-    # #dir_path = "../SimulatedMeteors/CAMSsim/2011Draconids"
-    # #dir_path = "../SimulatedMeteors/CAMSsim/2014Ursids"
-    # dir_path = "../SimulatedMeteors/CAMSsim/2012Perseids"
-
-    # #dir_path = "../SimulatedMeteors/SOMN_sim/2011Draconids"
-    # # dir_path = "../SimulatedMeteors/SOMN_sim/2014Ursids"
-    # #dir_path = "../SimulatedMeteors/SOMN_sim/2012Perseids"
-    # #dir_path = "../SimulatedMeteors/SOMN_sim/2015Taurids"
     # #dir_path = "../SimulatedMeteors/SOMN_sim/LongFireball"
     # #dir_path = "../SimulatedMeteors/SOMN_sim/LongFireball_nograv"
 
@@ -707,6 +687,7 @@ if __name__ == "__main__":
             # Plot the name of the solver
             plt.text(left_limit + pad_x, pad_y, solver_name_iter, rotation=90, verticalalignment='bottom', horizontalalignment='left', fontsize=10)
 
+            print("{:<17s}".format(solver_name_iter), end='')
             
             # Go through all showers
             left_limit_list = []
@@ -744,6 +725,12 @@ if __name__ == "__main__":
                     # Add the legend only for the first solver
                     if solver_name_iter == solvers_plot_labels[0]:
                         plot_handle_list.append(upper[0])
+
+
+                    #print("{:s}, {:s}, {:d}, {:.2f}, {:.2f}".format(shower_name_iter, solver_name, failed_count, radiant_std, vg_std))
+                    print(" & {:2d} & \\ang{{{:.2f}}} & \\SI{{{:.2f}}}".format(failed_count, radiant_std, vg_std) + "{\\kilo \\metre \\per \\second}", end='')
+
+            print('\\\\')
 
 
             # Add X ticks
