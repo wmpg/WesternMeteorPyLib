@@ -36,14 +36,23 @@ class SporadicSource(object):
 
 
 
+
 class SporadicModel(object):
-    def __init__(self):
+    def __init__(self, start_jd, end_jd):
         """ Adjustable model of sporadic sources. The sources are modeled as 2D von Mises distributions in
-            ecliptic coordinates. The velocity is drawn from a Gaussian distribution.
+            ecliptic coordinates. The velocity is drawn from a Gaussian distribution, the Julian dates are 
+            drawn from a uniform distribution between start_jd and end_jd.
+
+        Arguments:
+            start_jd: [float] Julian date of the beginning of the sampling period.
+            end_jd: [float] Julian date of the end of the sampling period.
         """
 
         # Init the sporadic model variables
         self.reset()
+
+        self.start_jd = start_jd
+        self.end_jd = end_jd
 
 
     def addSource(self, lam, lam_sig, bet, bet_sig, vg, vg_sig, rel_flux):
@@ -69,12 +78,12 @@ class SporadicModel(object):
 
 
 
-    def sample(self, jd_data):
+    def sample(self, n_samples=1):
         """ Sample the sporadic model.
 
-        Arguments:
-            jd_data: [array-like] A list or array of Julian dates for drawn samples. Needed for computing RA
-                and Dec.
+        Keyword arguments:
+            n_samples: [int] Number of samples to draw from the model. 1 by default.
+            
 
         Return:
             samples: [list] A list of lambda, beta pairs (degrees).
@@ -88,7 +97,11 @@ class SporadicModel(object):
         samples = []
 
         # Draw n samples from the model
-        for jd in jd_data:
+        for i in range(n_samples):
+
+            # Generate a Julian date
+            jd = np.random.uniform(self.start_jd, self.end_jd)
+
 
             # Choose a source by weighing it using its relative flux
             source = np.random.choice(self.sources, p=flux_norm)
@@ -130,16 +143,21 @@ class SporadicModel(object):
 
 
 
-def initSporadicModel():
+def initSporadicModel(start_jd, end_jd):
     """ Initialize the sporadic source model using the values from: 
         Jones, J., & Brown, P. (1993). Sporadic meteor radiant distributions: orbital survey results. 
         MNRAS, 265(3), 524-532.
+
+
+    Arguments:
+        start_jd: [float] Julian date of the beginning of the sampling period.
+        end_jd: [float] Julian date of the end of the sampling period.
 
     """
 
     ### Init the sporadic model ###
 
-    spor_model = SporadicModel()
+    spor_model = SporadicModel(start_jd, end_jd)
 
     # Values from: 
     #                    lam lam_sig bet bet_sig  vg  vg_sig flux
@@ -164,18 +182,17 @@ if __name__ == '__main__':
 
     n_samples = 1000
 
+
     # Generate Julian data data
     start_jd = date2JD(2018, 7, 27, 0, 0, 0)
     end_jd = date2JD(2018, 7, 28, 0, 0, 0)
 
-    jd_data = np.random.uniform(start_jd, end_jd, n_samples)
-
     
     # Init the sporadic model
-    spor_model = initSporadicModel()
+    spor_model = initSporadicModel(start_jd, end_jd)
 
     # Sample the model
-    samples = spor_model.sample(jd_data)
+    samples = spor_model.sample(n_samples)
 
     lam_list, bet_list, vg_list, rag_list, decg_list = np.array(samples).T
 
