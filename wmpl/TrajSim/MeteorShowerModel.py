@@ -27,15 +27,6 @@ def showerActivityModel(sol, flux_max, b, sol_max):
     # Compute the flux at given solar longitude
     flux = flux_max*10**(-b*np.abs(sol - sol_max))
 
-
-    # # Set all fluxes that are less then 0 to 0
-    # if isinstance(flux, np.ndarray):
-    #     flux[flux < 0] = 0
-
-    # else:
-    #     if flux < 0:
-    #         flux = 0
-
     return flux
 
 
