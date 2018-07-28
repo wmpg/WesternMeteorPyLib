@@ -55,20 +55,6 @@ def sampleActivityModel(b, sol_max, n_samples=1):
 
 
 
-def activityGenerator(b, sol_max):
-    """ Generator which returns one value of solar longitude upon every call. 
-    
-    Arguments:
-        sol_max: [float] Solar longitude of the maximum shower activity (radians).
-        b: [float] Slope of the activity profile.
-
-    """
-
-    while True:
-        yield sampleActivityModel(b, sol_max)[0]
-
-
-
 class MeteorShower(object):
     def __init__(self, ra_g, ra_g_sigma, dec_g, dec_g_sigma, d_ra, d_dec, v_g, v_g_sigma, d_vg, year, month, \
         sol_max, sol_slope):
@@ -359,8 +345,7 @@ if __name__ == "__main__":
 
     # Solar longitude of peak activity in degrees
     sol_max = 140.0
-    #sol_slope = 0.4 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1
-    sol_slope = 20
+    sol_slope = 0.4
 
     ###
 
@@ -399,7 +384,7 @@ if __name__ == "__main__":
     source_list = [met_shower_model, sporadic_model]
 
     # Refine relative fluxes betweent the shower and the sporadic background
-    relative_fluxes = [10.0, 1.0]
+    relative_fluxes = [1.0, 1.0]
 
     combined_model = CombinedSources(source_list, relative_fluxes, start_jd, end_jd)
 
