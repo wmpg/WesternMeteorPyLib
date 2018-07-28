@@ -4,12 +4,40 @@ from __future__ import print_function, division, absolute_import
 
 import numpy as np
 import matplotlib.pyplot as plt
+import scipy.interpolate
 
 from wmpl.TrajSim.SporadicSourcesModel import RadiantSample, extractRadiantSampleParameters, \
-    initSporadicModel
+    initSporadicModel, SporadicModel
 from wmpl.Utils.TrajConversions import date2JD, jd2Date, rotatePolar, raDec2Ecliptic
-from wmpl.Utils.SolarLongitude import solLon2jdJPL
+from wmpl.Utils.SolarLongitude import solLon2jdJPL, jd2SolLonJPL, jd2SolLonJPL_vect
 from wmpl.Utils.PlotCelestial import CelestialPlot
+
+
+def showerActivityModel(sol, flux_max, b, sol_max):
+    """ Activity model taken from: Jenniskens, P. (1994).  Meteor stream activity I. The annual streams. 
+        Astronomy and Astrophysics, 287., equation 8.
+
+    Arguments: 
+        sol: [float] Solar longitude for which the activity is computed (radians).
+        flux_max: [float] Peak relative flux.
+        b: [float] Slope of the shower.
+        sol_max: [float] Solar longitude of the peak of the shower (radians).
+    """
+
+    # Compute the flux at given solar longitude
+    flux = flux_max*10**(-b*np.abs(sol - sol_max))
+
+
+    # # Set all fluxes that are less then 0 to 0
+    # if isinstance(flux, np.ndarray):
+    #     flux[flux < 0] = 0
+
+    # else:
+    #     if flux < 0:
+    #         flux = 0
+
+    return flux
+
 
 
 
@@ -65,8 +93,8 @@ class MeteorShower(object):
             v_g: [float] Mean geocentric velocity (km/s).
             v_g_sigma: [float] Standard deviation of the geocentric velocity (km/s).
             d_vg: [float] Vg drift in km/s per degree of solar longitude.
-            year: [int] Year of the meteor shower.
-            month: [int] Month of the meteor shower.
+            year: [int] Year of the meteor shower peak.
+            month: [int] Month of the meteor shower peak.
             sol_max: [float] Solar longitude of the maximum shower activity (degrees).
             sol_slope: [float] Slope of the activity profile.
 
@@ -92,12 +120,13 @@ class MeteorShower(object):
 
 
 
-    def sample(self, n_samples=1):
+    def sample(self, n_samples=1, jd_input=None):
         """ Sample the meteor shower.
 
         Keyword arguments:
             n_samples: [int] Number of samples to draw from the model. 1 by default.
-            
+            jd_input: [float] Julian date of the event. If not given, it will be drawn from the activity 
+                profile.
 
         Return:
             samples: [list] A list of RadiantSample objects.
@@ -110,13 +139,21 @@ class MeteorShower(object):
         # Generate radiant samples
         for i in range(n_samples):
 
-            # Sample the solar longitude
-            la_sun = sampleActivityModel(self.sol_slope, self.sol_max)[0]
+            if jd_input is None:
 
-            # Calculate the corresponding Julian date for the drawn solar longitude
-            jd = solLon2jdJPL(self.year, self.month, la_sun)
+                # Sample the solar longitude
+                la_sun = sampleActivityModel(self.sol_slope, self.sol_max)[0]
 
-            print(jd2Date(jd, dt_obj=True))
+                # Calculate the corresponding Julian date for the drawn solar longitude
+                jd = solLon2jdJPL(self.year, self.month, la_sun)
+
+            else:
+
+                jd = jd_input
+
+                # Compute the solar longitude from the given julian date
+                la_sun = jd2SolLonJPL(jd)
+
 
 
             # Sample radiant positions from a von Mises distribution centred at (0, 0)
@@ -164,13 +201,96 @@ class MeteorShower(object):
 
 
 class CombinedSources(object):
-    def __init__(self, source_models, rel_fluxes):
+    def __init__(self, source_models, rel_fluxes, start_jd, end_jd):
         """ Given a list which combines shower objects and/or the sporadic sources object, sample the
             combined model with the given relative fluxes.
+
+        Arguments:
+            source_models: [list] A list of MeteorShower or SporadicModel objects.
+            ref_fluxes: [list] A list of floats representing relative fluxes.
+            start_jd: [float] Julian date of the beginning of the sampling period.
+            end_jd: [float] Julian date of the end of the sampling period.
         """
 
         self.source_models = source_models
         self.rel_fluxes = rel_fluxes
+
+
+        ### Compute the activity profile of combined sources with the resolution of 30 minutes
+
+        # Construct an array of Julian dates with a 30 min time step
+        jd_arr = np.arange(start_jd, end_jd, 30.0/(24*60))
+
+        # Compute solar longitude for every Julian date
+        la_sun_arr = jd2SolLonJPL_vect(jd_arr)
+
+
+        # Compute the total activity for every solar longitude and every source
+        total_flux = np.zeros_like(la_sun_arr)
+        self.source_flux_interp = []
+
+        for i, (rel_flux, source) in enumerate(zip(rel_fluxes, source_models)):
+
+            # If the source is sporadic, assume a constant flux
+            if isinstance(source, SporadicModel):
+
+                src_flux = np.zeros_like(la_sun_arr) + rel_flux
+
+            # If the source is a shower, compute the flux from the activity profile
+            else:
+
+                src_flux = showerActivityModel(la_sun_arr, rel_flux, source.sol_slope, source.sol_max)
+
+            # Add the source flux to the total flux
+            total_flux += src_flux
+
+            # Interpolate the source flux and save the interpolation handle
+            src_flux_interp = scipy.interpolate.interp1d(jd_arr, src_flux)
+            self.source_flux_interp.append(src_flux_interp)
+
+
+        # Compute the cumulative sum of the total flux
+        total_flux_cumsum = np.cumsum(total_flux)
+
+        # Interpolate the cumulative as and use it as an inverse density function
+        self.flux_inverse_density_func = scipy.interpolate.interp1d(total_flux_cumsum, jd_arr)
+
+        # Save values of drawing random samples from the activity
+        self.flux_cumsum_min = total_flux_cumsum[0]
+        self.flux_cumsum_max = total_flux_cumsum[-1]
+
+
+
+        #### Plot the total flux
+
+        # Handle the case when the solar longitude wraps back to 0
+        if np.max(la_sun_arr) - np.min(la_sun_arr) > np.radians(180):
+            la_sun_arr[la_sun_arr < np.radians(180)] += 2*np.pi
+
+        plt.plot(np.degrees(la_sun_arr), total_flux)
+
+        plt.gcf().canvas.draw()
+        
+        # Wrap all xticks to 0-360 range
+        locs, labels = plt.xticks()
+        lbl_precision = len(labels[0].get_text().split('.')[-1])
+        modified_xticks = [[loc, str(round(float(lbl.get_text())%360, lbl_precision))] for loc, lbl in \
+            zip(locs, labels) if lbl.get_text()]
+        locs = [loc for loc, lbl in modified_xticks]
+        labels = [lbl for loc, lbl in modified_xticks]
+        plt.xticks(locs, labels)
+
+        plt.gca().set_ylim(ymin=0)
+
+        plt.xlabel('Solar longitude (deg)')
+        plt.ylabel('Total flux')
+
+        plt.show()
+
+        ######
+
+
+
 
 
     def sample(self, n_samples=1):
@@ -186,20 +306,25 @@ class CombinedSources(object):
 
         samples = []
 
-        # Normalize fluxes to 0 to 1 range
-        flux_norm = np.array(self.rel_fluxes)
-        flux_norm /= np.sum(flux_norm)
-
-        samples = []
-
         # Draw n samples from the model
         for i in range(n_samples):
 
+            # Draw a Julian date from the activity model
+            u = np.random.uniform(self.flux_cumsum_min, self.flux_cumsum_max)
+            jd = float(self.flux_inverse_density_func(u))
+
+            # Compute the probabilities of choosing a source for the given Julian date
+            source_probabilities = [src_flux_interp(jd) for src_flux_interp in self.source_flux_interp]
+
+            # Normalize the relative fluxes
+            source_probabilities = np.array(source_probabilities)
+            source_probabilities /= np.sum(source_probabilities)
+
             # Choose a source by weighing it using its relative flux
-            source = np.random.choice(self.source_models, p=flux_norm)
+            source = np.random.choice(self.source_models, p=source_probabilities)
 
             # Sample the source
-            sample = source.sample(1)[0]
+            sample = source.sample(n_samples=1, jd_input=jd)[0]
 
             samples.append(sample)
 
@@ -243,7 +368,8 @@ if __name__ == "__main__":
 
     # Solar longitude of peak activity in degrees
     sol_max = 140.0
-    sol_slope = 0.4
+    #sol_slope = 0.4 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1
+    sol_slope = 20
 
     ###
 
@@ -260,8 +386,8 @@ if __name__ == "__main__":
     ### SPORADIC BACKGROUND MODEL ###
 
     # Generate Julian data data
-    start_jd = date2JD(2012, 8,  8, 12, 35, 0)
-    end_jd   = date2JD(2012, 8, 16,  2, 23, 0)
+    start_jd = date2JD(2012, 8,  1, 0, 0, 0)
+    end_jd   = date2JD(2012, 8, 31,  0, 0, 0)
 
     # Init the sporadic background
     sporadic_model = initSporadicModel(start_jd, end_jd)
@@ -282,9 +408,9 @@ if __name__ == "__main__":
     source_list = [met_shower_model, sporadic_model]
 
     # Refine relative fluxes betweent the shower and the sporadic background
-    relative_fluxes = [1.0, 1.0]
+    relative_fluxes = [10.0, 1.0]
 
-    combined_model = CombinedSources(source_list, relative_fluxes)
+    combined_model = CombinedSources(source_list, relative_fluxes, start_jd, end_jd)
 
     ####################
 

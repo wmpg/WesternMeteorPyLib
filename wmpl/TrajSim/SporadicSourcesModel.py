@@ -115,11 +115,13 @@ class SporadicModel(object):
 
 
 
-    def sample(self, n_samples=1):
+    def sample(self, n_samples=1, jd_input=None):
         """ Sample the sporadic model.
 
         Keyword arguments:
             n_samples: [int] Number of samples to draw from the model. 1 by default.
+            jd_input: [float] Julian date of the event. If not given, it will be drawn from the activity 
+                profile.
             
 
         Return:
@@ -139,9 +141,15 @@ class SporadicModel(object):
             # Choose a source by weighing it using its relative flux
             source = np.random.choice(self.sources, p=flux_norm)
 
+            # Draw the Julian date from the activity range if it's not given
+            if jd_input is None:
+                
+                # Generate a Julian date
+                jd = np.random.uniform(self.start_jd, self.end_jd)
 
-            # Generate a Julian date
-            jd = np.random.uniform(self.start_jd, self.end_jd)
+            else:
+                jd = jd_input
+
 
             # Compute the solar longitude
             la_sun = jd2SolLonJPL(jd)
