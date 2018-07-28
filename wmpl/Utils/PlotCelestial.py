@@ -98,7 +98,8 @@ def calcAngDataLimits(ra_data, dec_data, border_ratio=0.1):
 
 
 class CelestialPlot(object):
-    """ Plotting on a celestial sphere.
+    def __init__(self, ra_data, dec_data, projection='sinu', bgcolor='k', lon_0=0):
+        """ Plotting on a celestial sphere.
 
         Arguments:
             ra_data: [ndarray] R.A. data in radians.
@@ -109,11 +110,9 @@ class CelestialPlot(object):
                 - "sinu" (default) All-sky sinusoidal projection.
                 - "stere" - Stereographic projection centered at the centroid of the given data.
             bgcolor: [str] Background color of the plot. Black by default.
+            lon_0: [float] Longitude or RA of the centre of the plot in degrees. Only for allsky plots.
 
         """
-
-    def __init__(self, ra_data, dec_data, projection='sinu', bgcolor='k'):
-
 
         if projection == 'stere':
 
@@ -197,7 +196,7 @@ class CelestialPlot(object):
             # Frequency of RA/Dec angle labels (deg)
             label_angle_freq = 15
 
-            self.m = Basemap(celestial=True, projection=projection, lon_0=0)
+            self.m = Basemap(celestial=True, projection=projection, lon_0=lon_0)
 
 
             # Draw Dec lines
@@ -207,6 +206,10 @@ class CelestialPlot(object):
             # Draw RA lines
             ra_labels = np.arange(0, 360, label_angle_freq)
             self.m.drawmeridians(ra_labels, color='0.25')
+
+            # Plot meridian labels
+            for ra in np.arange(0, 360, 2*label_angle_freq):
+                plt.annotate(np.str(ra), xy=self.m(ra, -5), xycoords='data', ha='center', color='0.25')
 
             ##################################################################################################
 

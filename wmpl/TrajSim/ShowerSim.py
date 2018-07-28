@@ -285,7 +285,6 @@ class SimMeteor(object):
         self.ra, self.dec, self.v_init, self.orbit = geocentricRadiantToApparent(ra_g, dec_g, v_g, \
             state_vect, jdt_ref)
 
-
         # Velocity at the beginning heights
         self.v_begin = None
 
@@ -307,6 +306,15 @@ class SimMeteor(object):
 
         # Name of the file where the info will be stored
         self.file_path = None
+
+
+
+    def calcRadiantAzimElev(self, lat, lon):
+        """ Compute the local azimuth and elevation of the radiant from a given station location. """
+
+        azim, elev = raDec2AltAz(self.ra, self.dec, self.jdt_ref, lat, lon)
+
+        return azim, elev
 
 
 
@@ -1903,6 +1911,24 @@ def simulateMeteorShower(station_list, meteor_velocity_models, n_meteors, ra_g, 
         # Init the SimMeter object
         sim_meteor = SimMeteor(ra_g_final, dec_g_final, v_g_final, year, month, sol, meteor_jd, \
             beg_height_final, state_vect, obs_ang_uncertanties, t_offsets)
+
+        
+
+        # Make sure the radiant is above the horizon for all stations
+        skip_meteor = False
+        for stat in station_list:
+
+            # Compute radiant elevation
+            _, elev = sim_meteor.calcRadiantAzimElev(stat.lat, stat.lon)
+
+            # Skip meteor if the radiant is below the local horizon
+            if elev < 0:
+                skip_meteor = True
+                break
+
+        if skip_meteor:
+            continue
+
 
 
         # Check if the generated orbit is within the set limits

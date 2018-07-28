@@ -6,7 +6,42 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from wmpl.Utils.TrajConversions import rotatePolar, ecliptic2RaDec, date2JD
+from wmpl.Utils.SolarLongitude import jd2SolLonJPL
 from wmpl.Utils.PlotCelestial import CelestialPlot
+
+
+class RadiantSample(object):
+    def __init__(self):
+        """ Container for sampled radiants. """
+
+        self.jd = None
+        self.la_sun = None
+
+        self.ra_g = None
+        self.dec_g = None
+        self.vg = None
+
+        self.lam = None
+        self.bet = None
+
+
+
+
+def extractRadiantSampleParameters(sample_list):
+    """ Given a list of samples, extract the parameters into a list. """
+
+    jd_list = [s.jd for s in sample_list]
+    la_sun_list = [s.la_sun for s in sample_list]
+    rag_list = [s.ra_g for s in sample_list]
+    decg_list = [s.dec_g for s in sample_list]
+    vg_list = [s.vg for s in sample_list]
+    lam_list = [s.lam for s in sample_list]
+    bet_list = [s.bet for s in sample_list]
+
+    return jd_list, la_sun_list, rag_list, decg_list, vg_list, lam_list, bet_list
+
+
+
 
 
 class SporadicSource(object):
@@ -29,10 +64,11 @@ class SporadicSource(object):
         self.bet = np.radians(bet)
         self.bet_sig = np.radians(bet_sig)
 
-        self.vg = vg
-        self.vg_sig = vg_sig
+        # Convert Vg to from km/s to m/s
+        self.vg = 1000*vg
+        self.vg_sig = 1000*vg_sig
 
-        self.rel_flux = np.radians(rel_flux)
+        self.rel_flux = rel_flux
 
 
 
@@ -56,7 +92,8 @@ class SporadicModel(object):
 
 
     def addSource(self, lam, lam_sig, bet, bet_sig, vg, vg_sig, rel_flux):
-        """ Add a souradic source to the model. 
+        """ Add a souradic source to the model. The coordinates are Sun-centred ecliptic (the solar longitude
+            is to be taken out).
     
         Arguments:
             lam: [float] Ecliptic longitude of the source (deg).
@@ -86,7 +123,7 @@ class SporadicModel(object):
             
 
         Return:
-            samples: [list] A list of lambda, beta pairs (degrees).
+            samples: [list] A list of RadiantSample objects.
 
         """
 
@@ -99,12 +136,15 @@ class SporadicModel(object):
         # Draw n samples from the model
         for i in range(n_samples):
 
+            # Choose a source by weighing it using its relative flux
+            source = np.random.choice(self.sources, p=flux_norm)
+
+
             # Generate a Julian date
             jd = np.random.uniform(self.start_jd, self.end_jd)
 
-
-            # Choose a source by weighing it using its relative flux
-            source = np.random.choice(self.sources, p=flux_norm)
+            # Compute the solar longitude
+            la_sun = jd2SolLonJPL(jd)
 
 
             # Sample radiant positions from a von Mises distribution centred at (0, 0)
@@ -118,24 +158,35 @@ class SporadicModel(object):
             # Rotate all angles scattered around (0, 0) to the given coordinates of the centre of the distribution
             lam_rot, bet_rot = rotatePolar(lam_rot, bet_rot, source.lam, source.bet)
 
+            # Add the Solar longitude to the source longitude
+            lam_rot += la_sun
+            lam_rot = lam_rot%(2*np.pi)
 
             # Draw the geocentric velocity
             vg = np.random.normal(source.vg, source.vg_sig)
 
             # Limit Vg from 11 to 71 km/s
-            if vg < 11:
-                vg = 11
+            if vg < 11000:
+                vg = 11000
 
-            if vg > 71:
-                vg = 71
+            if vg > 71000:
+                vg = 71000
 
 
             # Compute geocentric RA and Dec
             ra_g, dec_g = ecliptic2RaDec(jd, lam_rot, bet_rot)
 
+            # Init the sample object
+            sample = RadiantSample()
+            sample.jd = jd
+            sample.la_sun = la_sun
+            sample.ra_g = ra_g
+            sample.dec_g = dec_g
+            sample.vg = vg
+            sample.lam = lam_rot
+            sample.bet = bet_rot
 
-            samples.append([np.degrees(lam_rot), np.degrees(bet_rot), vg, np.degrees(ra_g), \
-                np.degrees(dec_g)])
+            samples.append(sample)
 
 
         return samples
@@ -159,16 +210,23 @@ def initSporadicModel(start_jd, end_jd):
 
     spor_model = SporadicModel(start_jd, end_jd)
 
-    # Values from: 
     #                    lam lam_sig bet bet_sig  vg  vg_sig flux
     
-    spor_model.addSource(  71,     5,   0,    5,  35, 10.0,  0.35) # Helion source
-    spor_model.addSource( 290,     5,   0,    5,  35, 10.0,  0.58) # Antihelion source
-    spor_model.addSource(   0,     5,  15,    5,  60,  5.0,  0.46) # North apex source
-    spor_model.addSource(   0,     5, -15,    5,  60,  5.0,  0.46) # South apex source
-    spor_model.addSource(   0,    10,  60,    5,  35,  5.0,  1.0) # North toroidal source
-    spor_model.addSource(   0,    10, -60,    5,  35,  5.0,  1.0) # North toroidal source
-    spor_model.addSource( 180,    50,   0,   20,  15, 10.0,  0.5) # Antapex source (no reference)
+    # spor_model.addSource(  71,     5,   0,    5,  35, 10.0,  0.35) # Helion source
+    # spor_model.addSource( 290,     5,   0,    5,  35, 10.0,  0.58) # Antihelion source
+    # spor_model.addSource(   0,     5,  15,    5,  60,  5.0,  0.46) # North apex source
+    # spor_model.addSource(   0,     5, -15,    5,  60,  5.0,  0.46) # South apex source
+    # spor_model.addSource(   0,    10,  60,    5,  35,  5.0,  1.0) # North toroidal source
+    # spor_model.addSource(   0,    10, -60,    5,  35,  5.0,  1.0) # North toroidal source
+    # spor_model.addSource( 180,    50,   0,   20,  15, 10.0,  0.5) # Antapex source (no reference)
+
+    spor_model.addSource( 340,     5,   0,    5,  35, 10.0,  0.35) # Helion source
+    spor_model.addSource( 160,     5,   0,    5,  35, 10.0,  0.58) # Antihelion source
+    spor_model.addSource( 270,     5,  15,    5,  60,  5.0,  0.46) # North apex source
+    spor_model.addSource( 270,     5, -15,    5,  60,  5.0,  0.46) # South apex source
+    spor_model.addSource( 270,    10,  60,    5,  35,  5.0,  1.0) # North toroidal source
+    spor_model.addSource( 270,    10, -60,    5,  35,  5.0,  1.0) # South toroidal source
+    spor_model.addSource(  90,    50,   0,   20,  15, 10.0,  0.5) # Antapex source (no reference)
 
     ###############
 
@@ -194,20 +252,20 @@ if __name__ == '__main__':
     # Sample the model
     samples = spor_model.sample(n_samples)
 
-    lam_list, bet_list, vg_list, rag_list, decg_list = np.array(samples).T
+    # Extract parameters from the model
+    samples_params = extractRadiantSampleParameters(samples)
+    jd_list, la_sun_list, rag_list, decg_list, vg_list, lam_list, bet_list = map(np.array, samples_params)
 
-    lam_list = np.radians(lam_list)
-    bet_list = np.radians(bet_list)
-
-    rag_list = np.radians(rag_list)
-    decg_list = np.radians(decg_list)
-
-    # Rotate lambda to be Sun-centred
+    # Take out the solar longitude from source ecliptic longitude
+    lam_list -= la_sun_list
     lam_list = lam_list%(2*np.pi)
 
+    # Convert Vg to km/s
+    vg_list /= 1000
 
-    # Plot the radiants in ecliptic coordinates
-    cp = CelestialPlot(lam_list, bet_list, bgcolor='w')
+
+    # Plot the radiants in Sun-centred ecliptic coordinates
+    cp = CelestialPlot(lam_list, bet_list, bgcolor='w', lon_0=270)
 
     cp.scatter(lam_list, bet_list, s=1, c=vg_list)
     cp.colorbar(label='Vg (km/s)')
