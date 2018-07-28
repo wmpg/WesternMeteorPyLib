@@ -25,7 +25,7 @@ def showerActivityModel(sol, flux_max, b, sol_max):
     """
 
     # Compute the flux at given solar longitude
-    flux = flux_max*10**(-b*np.abs(sol - sol_max))
+    flux = flux_max*10**(-b*np.degrees(np.abs(sol - sol_max)))
 
     return flux
 
@@ -384,7 +384,7 @@ if __name__ == "__main__":
     source_list = [met_shower_model, sporadic_model]
 
     # Refine relative fluxes betweent the shower and the sporadic background
-    relative_fluxes = [1.0, 1.0]
+    relative_fluxes = [100.0, 8.0]
 
     combined_model = CombinedSources(source_list, relative_fluxes, start_jd, end_jd)
 
