@@ -3407,11 +3407,11 @@ class Trajectory(object):
 
             # Plot vertical residuals
             plt.scatter(obs.time_data, obs.v_residuals, c='red', \
-                label='Vertical, RMSD = {:.2f}'.format(v_res_rms), zorder=3, s=2)
+                label='Vertical, RMSD = {:.2f} m'.format(v_res_rms), zorder=3, s=2)
 
             # Plot horizontal residuals
             plt.scatter(obs.time_data, obs.h_residuals, c='b', \
-                label='Horizontal, RMSD = {:.2f}'.format(h_res_rms), zorder=3, s=2)
+                label='Horizontal, RMSD = {:.2f} m'.format(h_res_rms), zorder=3, s=2)
 
             # Mark ignored points
             if np.any(obs.ignore_list):
@@ -3469,11 +3469,11 @@ class Trajectory(object):
 
                 # Plot vertical residuals
                 vres_plot = plt.scatter(obs.time_data, obs.v_residuals, marker='o', s=4, \
-                    label='{:s}, vertical, RMSD = {:.2f}'.format(str(obs.station_id), v_res_rms), zorder=3)
+                    label='{:s}, vertical, RMSD = {:.2f} m'.format(str(obs.station_id), v_res_rms), zorder=3)
 
                 # Plot horizontal residuals
                 plt.scatter(obs.time_data, obs.h_residuals, c=vres_plot.get_facecolor(), marker='+', \
-                    label='{:s}, horizontal, RMSD = {:.2f}'.format(str(obs.station_id), h_res_rms), zorder=3)
+                    label='{:s}, horizontal, RMSD = {:.2f} m'.format(str(obs.station_id), h_res_rms), zorder=3)
 
                 # Mark ignored points
                 if np.any(obs.ignore_list):
@@ -3524,11 +3524,11 @@ class Trajectory(object):
 
                 # Plot vertical residuals
                 vres_plot = plt.scatter(obs.state_vect_dist/1000, obs.v_residuals, marker='o', s=4, \
-                    label='{:s}, vertical, RMSD = {:.2f}'.format(str(obs.station_id), v_res_rms), zorder=3)
+                    label='{:s}, vertical, RMSD = {:.2f} m'.format(str(obs.station_id), v_res_rms), zorder=3)
 
                 # Plot horizontal residuals
                 plt.scatter(obs.state_vect_dist/1000, obs.h_residuals, c=vres_plot.get_facecolor(), 
-                    marker='+', label='{:s}, horizontal, RMSD = {:.2f}'.format(str(obs.station_id), \
+                    marker='+', label='{:s}, horizontal, RMSD = {:.2f} m'.format(str(obs.station_id), \
                         h_res_rms), zorder=3)
 
                 # Mark ignored points
