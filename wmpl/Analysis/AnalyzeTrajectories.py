@@ -483,7 +483,7 @@ def compareTrajToSim(dir_path, sim_meteors, traj_list, solver_name, radiant_exte
         radiant_diffs_std = radiant_diffs_std[np.abs(radiant_diffs_std) < 3*radiant_std]
 
 
-    ################################################################################################# COMMENTED OUT !!!!!!!!!!!
+    #################################################################################################
 
     # Define limits of the plot
     extent = [0, radiant_extent, -vg_extent, vg_extent]
@@ -688,10 +688,13 @@ if __name__ == "__main__":
             plt.text(left_limit + pad_x, pad_y, solver_name_iter, rotation=90, verticalalignment='bottom', horizontalalignment='left', fontsize=10)
 
             print("{:<17s}".format(solver_name_iter), end='')
-            
-            # Go through all showers
+                
             left_limit_list = []
+            failure_list = []
 
+            vg_shower_std_max = 0
+
+            # Go through all showers
             for color_name, shower_name_iter in zip(color_list, showers_list):
 
                 # Only select results for the given shower
@@ -710,6 +713,13 @@ if __name__ == "__main__":
                     if solver_name_iter != solver_name:
                         continue
 
+
+                    if vg_std > vg_shower_std_max:
+                        vg_shower_std_max = vg_std
+                    
+                    print(failed_count)
+
+                    failure_list.append(failed_count)
 
                     # Plot the standard deviation box
                     right_limit = left_limit + vg_std
@@ -732,6 +742,11 @@ if __name__ == "__main__":
 
             print('\\\\')
 
+            
+            # Write the number of failed solutions per solver
+            failed_count_str = "/".join(map(str, failure_list))
+            plt.text(left_limit + vg_shower_std_max/2, 1.01*radiant_std_max, failed_count_str, ha='center')
+
 
             # Add X ticks
             vg_tick = round(vg_std_max/2, 1)
@@ -741,7 +756,6 @@ if __name__ == "__main__":
 
             xticks_labels.append('0')
             xticks_labels.append('{:.1f}'.format(vg_tick))
-
 
         
         plt.legend(handles=plot_handle_list)
