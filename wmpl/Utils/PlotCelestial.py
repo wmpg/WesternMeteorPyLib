@@ -281,7 +281,7 @@ if __name__ == "__main__":
     v = np.linspace(0, 10, 10)
 
     # Initi a celestial plot (the points have to be given to estimate the data range)
-    celes_plot = CelestialPlot(ra, dec, projection='stere')
+    celes_plot = CelestialPlot(ra, dec, projection='sinu')
 
     celes_plot.scatter(ra, dec, c=v)
 
