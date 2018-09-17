@@ -21,6 +21,23 @@ from wmpl.Utils.AtmosphereDensity import getAtmDensity, getAtmDensity_vect
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.Physics import dynamicPressure
 
+# DRAG COEFFICIENT (assume unity)
+DRAG_COEFF = 1.0
+
+
+
+
+class FragmentationInfo(object):
+    def __init__(self, frag_dict, fragmentation_points):
+        """ Container for information about fragments and fragmentation points. """
+
+        self.frag_dict = frag_dict
+
+        #self.frag_dict_rev = dict((v,k) for k,v in frag_dict.iteritems())
+
+        self.fragmentation_points = fragmentation_points
+
+
 
 
 
@@ -42,30 +59,13 @@ def exponentialDecelerationVel(t, d_t, k, v, a1, a2):
 
 
 
-def projectNarrowPicks(met, traj):
+def projectNarrowPicks(met, traj, frag_info):
     """ Projects picks done in the narrow-field to the given trajectory. """
 
 
     ### MANUAL ENTRIES ###
     ##########################################################################################################
-    # DISCTIONARY WHICH MAPS FRAGMENT IDs to FRAGMENTS TO PLOT
-    frag_dict = {0.0: 10, 1.0: 11, 2.0: 6, 3.0: 9, 4.0: 8, 5.0: 3, 6.0: 2, 7.0: 4, 8.0: 1, 9.0: 5, 10.0: 12, \
-        11.0: 7}
-    frag_dict_rev = dict((v,k) for k,v in frag_dict.iteritems())
 
-
-    # DRAG COEFFICIENT (assume unity)
-    drag_coefficient = 1.0
-
-
-    # FRAGMENTATION POINTS (main fragments: time of fragmentation)
-    fragmentation_points = {
-        2 : [0.0854, [2, 3]], # Fragments 2 and 3
-        10: [0.066, [10, 11]],  # Fragments 10 and 11
-        7:  [0.246, [7, 9, 12]],  # Fragments 7, 9, 12
-        4:  [0.26, [4, 3]],   # 4 fragmented from 3
-        8:  [0.046, [8, 5]]    # Fragments 8 and 5
-    }
 
     ##########################################################################################################
 
@@ -270,15 +270,15 @@ def projectNarrowPicks(met, traj):
 
 
             # Plot the fragment number at the end of each lag
-            plt.text(fake_lag[-1] - 10, time_data[-1] + 0.02, str(frag_dict[frag]), color=colors_frags[frag], \
+            plt.text(fake_lag[-1] - 10, time_data[-1] + 0.02, str(frag_info.frag_dict[frag]), color=colors_frags[frag], \
                 size=7, va='center', ha='right')
 
 
             # Check if the fragment has a fragmentation point and plot it
-            if frag_dict[frag] in fragmentation_points:
+            if frag_info.frag_dict[frag] in frag_info.fragmentation_points:
 
                 # Get the lag of the fragmentation point
-                frag_point_time, fragments_list = fragmentation_points[frag_dict[frag]]
+                frag_point_time, fragments_list = frag_info.fragmentation_points[frag_info.frag_dict[frag]]
                 frag_point_lag = exponentialDeceleration(frag_point_time, *decel_fit) \
                     - exponentialDeceleration(frag_point_time, 0, offset_vel_max, vel_max, 0, 0)
 
@@ -344,7 +344,7 @@ def projectNarrowPicks(met, traj):
             velocities = exponentialDecelerationVel(time_data, *decel_fit)
 
             # # Calculate the dynamic pressure
-            # dyn_pressure = atm_dens*drag_coefficient*velocities**2
+            # dyn_pressure = atm_dens*DRAG_COEFF*velocities**2
 
             # Calculate the dynamic pressure
             dyn_pressure = dynamicPressure(lat_data, lon_data, height_data, jd_ref, velocities)
@@ -356,7 +356,7 @@ def projectNarrowPicks(met, traj):
             plt.plot(dyn_pressure/10**3, height_data/1000, color=colors_frags[frag], zorder=3, linewidth=0.75)
 
             # Plot the fragment number at the end of each lag
-            plt.text(dyn_pressure[-1]/10**3, height_data[-1]/1000 - 0.02, str(frag_dict[frag]), \
+            plt.text(dyn_pressure[-1]/10**3, height_data[-1]/1000 - 0.02, str(frag_info.frag_dict[frag]), \
                 color=colors_frags[frag], size=7, va='top', zorder=3)
 
 
@@ -375,7 +375,7 @@ def projectNarrowPicks(met, traj):
             velocities_model = exponentialDecelerationVel(time_array, *decel_fit)
 
             # Calculate the dynamic pressure
-            dyn_pressure_model = atm_dens_model*drag_coefficient*velocities_model**2
+            dyn_pressure_model = atm_dens_model*DRAG_COEFF*velocities_model**2
 
             ###
 
@@ -386,10 +386,10 @@ def projectNarrowPicks(met, traj):
 
 
             # Check if the fragment has a fragmentation point and plot it
-            if frag_dict[frag] in fragmentation_points:
+            if frag_info.frag_dict[frag] in frag_info.fragmentation_points:
 
                 # Get the lag of the fragmentation point
-                frag_point_time, fragments_list = fragmentation_points[frag_dict[frag]]
+                frag_point_time, fragments_list = frag_info.fragmentation_points[frag_info.frag_dict[frag]]
                 
                 # Get the fragmentation height
                 frag_point_height = timeHeightFunc(frag_point_time, *line_fit)
@@ -402,7 +402,7 @@ def projectNarrowPicks(met, traj):
                     jd_ref)
 
                 # Calculate the dynamic pressure at fragmentation
-                frag_point_dyn_pressure = frag_point_atm_dens*drag_coefficient*frag_point_velocity**2
+                frag_point_dyn_pressure = frag_point_atm_dens*DRAG_COEFF*frag_point_velocity**2
 
 
                 fragments_list = map(str, fragments_list)
@@ -446,6 +446,8 @@ def projectNarrowPicks(met, traj):
 if __name__ == "__main__":
 
 
+    ### July 21, 2017 event
+
     # Main directory
     dir_path = "../MetalPrepare/20170721_070420_met/"
 
@@ -457,7 +459,32 @@ if __name__ == "__main__":
     traj_file = 'Monte Carlo' + os.sep + "20170721_070419_mc_trajectory.pickle"
 
 
+    # DICTIONARY WHICH MAPS FRAGMENT IDs to FRAGMENTS TO PLOT
+    frag_dict = {0.0: 10, 1.0: 11, 2.0: 6, 3.0: 9, 4.0: 8, 5.0: 3, 6.0: 2, 7.0: 4, 8.0: 1, 9.0: 5, 10.0: 12, \
+        11.0: 7}
+
+
+    # FRAGMENTATION POINTS (main fragments: time of fragmentation)
+    fragmentation_points = {
+        2 : [0.0854, [2, 3]], # Fragments 2 and 3
+        10: [0.066, [10, 11]],  # Fragments 10 and 11
+        7:  [0.246, [7, 9, 12]],  # Fragments 7, 9, 12
+        4:  [0.26, [4, 3]],   # 4 fragmented from 3
+        8:  [0.046, [8, 5]]    # Fragments 8 and 5
+    }
+
+    frag_info = FragmentationInfo(frag_dict, fragmentation_points)
+
+
+    ######
+
+
+    
+
+
     ##########################################################################################################
+
+
 
     # Load the MET file
     met = loadMet(dir_path, met_file, mirfit=True)
@@ -468,4 +495,4 @@ if __name__ == "__main__":
     print(met)
     
     # Project narrow-field picks to wide-field trajectory
-    projectNarrowPicks(met, traj)
+    projectNarrowPicks(met, traj, frag_info)
