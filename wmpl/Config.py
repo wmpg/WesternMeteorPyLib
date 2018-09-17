@@ -5,7 +5,14 @@
 from __future__ import print_function, division, absolute_import
 
 import os
-import urllib
+import sys
+
+
+if sys.version_info.major < 3:
+    import urllib as urllibrary
+
+else:
+    import urllib.request as urllibrary
 
 import time
 import datetime
@@ -50,7 +57,7 @@ def loadLeapSeconds(leap_seconds_file):
 
         # Try reading the leap second file from URL
         try:
-            leap_string = urllib.urlopen(usno_leap_url).read()
+            leap_string = urllibrary.urlopen(usno_leap_url).read()
             print('Downloaded leap seconds from:', usno_leap_url)
 
             # Save the leap seconds file locally
