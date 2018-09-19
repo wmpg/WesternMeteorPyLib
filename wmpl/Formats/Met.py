@@ -229,8 +229,13 @@ def extractPicks(met, mirfit=False):
     # Go though all sites
     for site in met.sites:
 
+        # If there are no picks for this site, skip it and remove from the list of sites
+        if not met.picks[site]:
+            met.sites.remove(site)
+            continue
+
         # Extract mirfit picks into mirfit objects
-        if mirfit:
+        if mirfit: 
 
             # Extract frames
             frames = np.array(met.picks[site])[:,0]
@@ -285,11 +290,6 @@ def extractPicks(met, mirfit=False):
 
         # Extract METAL picks to pick objects
         else:
-
-            # If there are no picks for this site, skip it and remove from the list of sites
-            if not met.picks[site]:
-                met.sites.remove(site)
-                continue
 
             # Extract frames
             frames = np.array(met.picks[site])[:, 2].astype(np.int)
