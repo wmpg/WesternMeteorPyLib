@@ -5,7 +5,9 @@
 from __future__ import print_function, division, absolute_import
 
 import os
-import sys
+import argparse
+import json
+from collections import OrderedDict
 
 import numpy as np
 import scipy.optimize
@@ -27,8 +29,80 @@ DRAG_COEFF = 1.0
 
 
 
+class NarrowProjectionInputData(object):
+    def __init__(self, name, dir_path, met_file, traj_file, traj_uncert_file=None, frag_dict=None, \
+        fragmentation_points=None, fit_full_exp_model=False, v_init_adjust=0):
+        """ Structure storing input data. 
+    
+        Arguments:
+            name: [str] Name of the event.
+            dir_path: [str] Full path to the directory with data.
+            met_file: [str] Name of the mirfit .met file in the dir_path directory.
+            traj_file: [str] Name of the .pickle trajectory file in the dir_path directory.
+
+        Keyword arguments:
+            traj_uncert_file: [str] Path to the MC uncertainties file in the dir_path directory. None by
+                default, in which case the file will be tried to found in the same directory where
+                the traj_file is.
+            frag_dict: [dict] Dictionary that maps the mirfit fragment IDs to desired numbers or names.
+                None by default, in which case the fragments will be named from 1 to N.
+            fragmentation_points: [dict] Determines where the fragmentation points are and in which points
+                the dynamic pressure will be computed. Format:
+                    {site_ID: {main fragment: [time of fragmentation, [indices of daughter fragments]],
+                               main_fragment 2: ...},
+                    #   ...}
+            fit_full_exp_model: [bool] If True, the full exponential deceleration model will the fit, 
+                including the velocity. If False, the initial velocity will be taken from the given
+                trajectory and a simpler (more robust) model will be fitted to the lag.
+            v_init_adjust: [float] Sometimes to get a good exponential fit, the initial velocity has to be
+                adjusted on the order of +/- 100 m/s. The default value is 0 m/s.
+
+        """
+
+        self.name = name
+        self.dir_path = dir_path
+        self.met_file = met_file
+        self.traj_file = traj_file
+
+
+
+        if traj_uncert_file is None:
+
+            # Try finding the trajectory undertainty file
+            self.traj_uncert_file = self.traj_file.replace('_mc_trajectory', '_mc_uncertanties')
+
+        else:
+            self.traj_uncert_file = traj_uncert_file
+
+        # If the file cannot be found, don't use the uncertainties
+        if not os.path.isfile(os.path.join(self.dir_path, self.traj_uncert_file)):
+            print('The trajectry uncertainties file cannot be found:', traj_uncert_file)
+            self.traj_uncert_file = None
+
+
+        # Init the fragmentation info container
+        self.frag_info = FragmentationInfo(frag_dict, fragmentation_points, v_init_adjust=v_init_adjust, \
+        fit_full_exp_model=fit_full_exp_model)
+
+
+        # Load the Mirfit .met file
+        self.met = loadMet(self.dir_path, self.met_file, mirfit=True)
+
+        # Load the trajectory
+        self.traj = loadPickle(self.dir_path, self.traj_file)
+
+
+        # Load trajectory uncertainties
+        if self.traj_uncert_file is not None:
+            self.traj_uncert = loadPickle(dir_path, self.traj_uncert_file)
+        else:
+            self.traj_uncert = None
+
+
+
+
 class FragmentationInfo(object):
-    def __init__(self, frag_dict, fragmentation_points):
+    def __init__(self, frag_dict, fragmentation_points, v_init_adjust=0, fit_full_exp_model=False):
         """ Container for information about fragments and fragmentation points. """
 
         self.frag_dict = frag_dict
@@ -37,12 +111,83 @@ class FragmentationInfo(object):
 
         self.fragmentation_points = fragmentation_points
 
+        self.v_init_adjust = v_init_adjust
+
+        self.fit_full_exp_model = fit_full_exp_model
 
 
 
+def loadNarrowProjectionInputJSON(file_path):
+    """ Load the input data from a JSON file. """     
 
-def timeHeightFunc(x, a, b, c, d):
-    return a + b*x + c*x**2 + d*x**3
+    # Read the JSON file
+    with open(file_path) as f:
+
+        json_data = json.load(f)
+
+
+    # Parse the input data into the input structure
+    name = json_data['name']
+    dir_path = json_data['dir_path']
+    met_file = json_data['met_file']
+    traj_file = json_data['traj_file']
+
+
+    # Parse the fragmentation dictionary
+    if 'frag_dict' in json_data:
+        frag_dict = {float(key):json_data['frag_dict'][key] for key in json_data['frag_dict']}
+    else:
+        frag_dict = None
+
+
+
+    # Parse the points of fragmentation
+    if 'fragmentation_points' in json_data:
+
+        fragmentation_points = {}
+
+        # Convert frag IDs from string to int
+        frag_pts = json_data['fragmentation_points']
+        for site_id in frag_pts:
+
+            site_frags = {}
+
+            for frag_id in frag_pts[site_id]:
+                site_frags[int(frag_id)] = frag_pts[site_id][frag_id]
+
+            fragmentation_points[site_id] = site_frags
+
+    else:
+        fragmentation_points = None
+
+
+    if 'traj_uncert_file' in json_data:
+        traj_uncert_file = json_data['traj_uncert_file']
+    else:
+        traj_uncert_file = None
+
+
+    if 'v_init_adjust' in json_data:
+        v_init_adjust = json_data['v_init_adjust']
+    else:
+        v_init_adjust = 0
+
+
+    if 'fit_full_exp_model' in json_data:
+        fit_full_exp_model = json_data['fit_full_exp_model']
+    else:
+        fit_full_exp_model = False
+
+
+    # Init the input structure
+    input_data = NarrowProjectionInputData(name, dir_path, met_file, traj_file, \
+        traj_uncert_file=traj_uncert_file, frag_dict=frag_dict, fragmentation_points=fragmentation_points, \
+        fit_full_exp_model=fit_full_exp_model, v_init_adjust=v_init_adjust)
+
+
+    return input_data
+
+
 
 
 def exponentialDeceleration(t, v, d_t, k, a1, a2):
@@ -59,15 +204,19 @@ def exponentialDecelerationVel(t, v, d_t, k, a1, a2):
 
 
 
+
 def projectNarrowPicks(dir_path, met, traj, traj_uncert, frag_info):
     """ Projects picks done in the narrow-field to the given trajectory. """
 
 
-    ### MANUAL ENTRIES ###
-    ##########################################################################################################
+    # Adjust initial velocity
+    frag_v_init = traj.v_init + frag_info.v_init_adjust
 
+    # List for computed values to be stored in a file
+    computed_values = []
 
-    ##########################################################################################################
+    # Generate the file name prefix from the time (take from trajectory)
+    file_name_prefix = traj.file_name
 
 
     # Go through picks from all sites (there should only be one)
@@ -83,6 +232,11 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, frag_info):
         # Skip the site if there are no picks
         if not len(picks):
             continue
+
+
+        print()
+        print('Processing site:', site_no)
+
 
         # Find unique fragments
         fragments = np.unique(picks[:, 1])
@@ -154,7 +308,9 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, frag_info):
         rad_cpa_ref = cpa_list[first_jd_indx][3]
 
         print(jd_ref)
-        #print(cpa_list)
+
+        # Set the beginning time to the beginning of the widefield trajectory
+        ref_beg_time = (traj.jdt_ref - jd_ref)*86400
 
         length_list = []
         decel_list = []
@@ -185,25 +341,6 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, frag_info):
 
                 length_frag.append([time_sec, dist, rad_lat, rad_lon, height])
                 length_list.append([frag, time_sec, dist, rad_lat, rad_lon, height])
-        
-
-            # Fit a line to the first part of the fragment which starts the first
-            if length_frag[0][0] == 0:
-
-                length_frag = np.array(length_frag)
-
-                # Take only the first 1/10 of the first fragment's trajectory
-                part_size = int(0.1*len(length_frag))
-                if part_size < 4:
-                    part_size = 4
-
-                # Extract JDs and lengths into individual arrays
-                time_data, length_data, lat_data, lon_data, height_data = length_frag[:part_size].T
-
-                # print(time_data, length_data)
-
-                # Fit a line to the first part of the first fragment to get the estimate of the velocity
-                lag_line, _ = scipy.optimize.curve_fit(lineFunc, time_data, length_data)
 
 
             ### Fit the deceleration model to the length ###
@@ -214,19 +351,49 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, frag_info):
             # Extract JDs and lengths into individual arrays
             time_data, length_data, lat_data, lon_data, height_data = length_frag.T
 
-            # First guess of the lag parameters
-            p0 = [0, 0, traj.jacchia_fit[0], traj.jacchia_fit[1]]
 
-            # Length residuals function
-            def _lenRes(params, time_data, length_data, v_init):
-                return np.sum((length_data - exponentialDeceleration(time_data, v_init, *params))**2)
+            if frag_info.fit_full_exp_model:
+
+                # Fit the full exp deceleration model
+
+                # First guess of the lag parameters
+                p0 = [frag_v_init, 0, 0, traj.jacchia_fit[0], traj.jacchia_fit[1]]
+
+                # Length residuals function
+                def _lenRes(params, time_data, length_data):
+                    return np.sum((length_data - exponentialDeceleration(time_data, *params))**2)
 
 
-            # Fit an exponential to the data
-            res = scipy.optimize.basinhopping(_lenRes, p0, \
-                minimizer_kwargs={"method": "Nelder-Mead", 'args':(time_data, length_data, traj.v_init)}, \
-                niter=100)
-            decel_fit = res.x
+                # Fit an exponential to the data
+                res = scipy.optimize.basinhopping(_lenRes, p0, \
+                    minimizer_kwargs={"method": "BFGS", 'args':(time_data, length_data)}, \
+                    niter=1000)
+                decel_fit = res.x
+
+            else:
+
+                # Fit only the deceleration parameters
+
+                # First guess of the lag parameters
+                p0 = [0, 0, traj.jacchia_fit[0], traj.jacchia_fit[1]]
+
+                # Length residuals function
+                def _lenRes(params, time_data, length_data, v_init):
+                    return np.sum((length_data - exponentialDeceleration(time_data, v_init, *params))**2)
+
+
+                # Fit an exponential to the data
+                res = scipy.optimize.basinhopping(_lenRes, p0, \
+                    minimizer_kwargs={"method": "Nelder-Mead", 'args':(time_data, length_data, frag_v_init)}, \
+                    niter=100)
+                decel_fit = res.x
+
+
+                # Add the velocity to the deceleration fit
+                decel_fit = np.append(np.array([frag_v_init]), decel_fit)
+
+
+
 
             decel_list.append(decel_fit)
 
@@ -236,19 +403,19 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, frag_info):
 
 
             # plt.plot(time_data, length_data, label='Observed')
-            # plt.plot(time_data, exponentialDeceleration(time_data, traj.v_init, *decel_fit), label='fit')
+            # plt.plot(time_data, exponentialDeceleration(time_data, *decel_fit), label='fit')
             # plt.legend()
             # plt.xlabel('Time (s)')
             # plt.ylabel('Length (m)')
             # plt.title('Fragment {:d} fit'.format(frag_info.frag_dict[frag]))
             # plt.show()
 
-            # Plot the residuals
-            plt.plot(time_data, length_data - exponentialDeceleration(time_data, traj.v_init, *decel_fit))
-            plt.xlabel('Time (s)')
-            plt.ylabel('Length O - C (m)')
-            plt.title('Fragment {:d} fit residuals'.format(frag_info.frag_dict[frag]))
-            plt.show()
+            # # Plot the residuals
+            # plt.plot(time_data, length_data - exponentialDeceleration(time_data, *decel_fit))
+            # plt.xlabel('Time (s)')
+            # plt.ylabel('Length O - C (m)')
+            # plt.title('Fragment {:d} fit residuals'.format(frag_info.frag_dict[frag]))
+            # plt.show()
 
 
             ##################################################################################################
@@ -280,14 +447,14 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, frag_info):
 
             # Plot the positions of fragments from the first time to the end, using fitted parameters
             # The lag is calculated by subtracting an "average" velocity length from the observed length
-            time_array = np.linspace(-1, last_time, 1000)
-            plt.plot(exponentialDeceleration(time_array, traj.v_init, *decel_fit) - exponentialDeceleration(time_array, \
-                traj.v_init, 0, offset_vel_max, 0, 0), time_array, linestyle='--', color=colors_frags[frag], \
+            time_array = np.linspace(ref_beg_time, last_time, 1000)
+            plt.plot(exponentialDeceleration(time_array, *decel_fit) - exponentialDeceleration(time_array, \
+                frag_v_init, 0, offset_vel_max, 0, 0), time_array, linestyle='--', color=colors_frags[frag], \
                 linewidth=0.75)
 
 
             # Plot the observed data
-            fake_lag = length_data - exponentialDeceleration(time_data, traj.v_init, 0, offset_vel_max, 0, 0)
+            fake_lag = length_data - exponentialDeceleration(time_data, frag_v_init, 0, offset_vel_max, 0, 0)
             plt.plot(fake_lag, time_data, color=colors_frags[frag], linewidth=0.75)
 
 
@@ -297,19 +464,20 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, frag_info):
 
 
             # Check if the fragment has a fragmentation point and plot it
-            if frag_info.frag_dict[frag] in frag_info.fragmentation_points:
+            if site_no in frag_info.fragmentation_points:
+                if frag_info.frag_dict[frag] in frag_info.fragmentation_points[site_no]:
 
-                # Get the lag of the fragmentation point
-                frag_point_time, fragments_list = frag_info.fragmentation_points[frag_info.frag_dict[frag]]
-                frag_point_lag = exponentialDeceleration(frag_point_time, traj.v_init, *decel_fit) \
-                    - exponentialDeceleration(frag_point_time, traj.v_init, 0, offset_vel_max, 0, 0)
+                    # Get the lag of the fragmentation point
+                    frag_point_time, fragments_list = frag_info.fragmentation_points[site_no][frag_info.frag_dict[frag]]
+                    frag_point_lag = exponentialDeceleration(frag_point_time, *decel_fit) \
+                        - exponentialDeceleration(frag_point_time, frag_v_init, 0, offset_vel_max, 0, 0)
 
 
-                fragments_list = map(str, fragments_list)
+                    fragments_list = map(str, fragments_list)
 
-                # Plot the fragmentation point
-                plt.scatter(frag_point_lag, frag_point_time, s=20, zorder=4, color=colors_frags[frag], \
-                    edgecolor='k', linewidth=0.5, label='Fragmentation: ' + ",".join(fragments_list))
+                    # Plot the fragmentation point
+                    plt.scatter(frag_point_lag, frag_point_time, s=20, zorder=4, color=colors_frags[frag], \
+                        edgecolor='k', linewidth=0.5, label='Fragmentation: ' + ",".join(fragments_list))
             
 
 
@@ -322,13 +490,15 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, frag_info):
         plt.xlabel('Lag (m)')
         plt.ylabel('Time (s)')
 
-        plt.ylim(ymax=-1)
+        plt.ylim(ymax=ref_beg_time)
 
         plt.legend()
 
-        plt.savefig(os.path.join(dir_path, 'fragments_deceleration.png'), dpi=300)
+        plt.savefig(os.path.join(dir_path, file_name_prefix \
+            + '_fragments_deceleration_site_{:s}.png'.format(str(site_no))), dpi=300)
 
         plt.show()
+
 
 
         time_min =  np.inf
@@ -336,7 +506,7 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, frag_info):
         ht_min =  np.inf
         ht_max = -np.inf
 
-        # Calculate the dynamic pressure for the first fragment
+        # Plot dynamic pressures for all fragments
         for frag, decel_fit in zip(fragments, decel_list):
 
             # Select only the data points of the current fragment
@@ -347,7 +517,7 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, frag_info):
 
 
             # Fit a linear dependance of time vs. height
-            line_fit, _ = scipy.optimize.curve_fit(timeHeightFunc, time_data, height_data)
+            line_fit, _ = scipy.optimize.curve_fit(lineFunc, time_data, height_data)
 
 
             # Get the time and height limits
@@ -363,10 +533,7 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, frag_info):
             # atm_dens = getAtmDensity_vect(lat_data, lon_data, height_data, jd_ref)
 
             # Get the velocity at every point in time
-            velocities = exponentialDecelerationVel(time_data, traj.v_init, *decel_fit)
-
-            # # Calculate the dynamic pressure
-            # dyn_pressure = atm_dens*DRAG_COEFF*velocities**2
+            velocities = exponentialDecelerationVel(time_data, *decel_fit)
 
             # Calculate the dynamic pressure
             dyn_pressure = dynamicPressure(lat_data, lon_data, height_data, jd_ref, velocities)
@@ -384,10 +551,10 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, frag_info):
 
             ### CALCULATE MODELLED DYN PRESSURE
 
-            time_array = np.linspace(-1.0, max(time_data), 1000)
+            time_array = np.linspace(ref_beg_time, max(time_data), 1000)
 
             # Calculate the modelled height
-            height_array = timeHeightFunc(time_array, *line_fit)
+            height_array = lineFunc(time_array, *line_fit)
 
 
             # Get the time and height limits
@@ -402,7 +569,7 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, frag_info):
                 np.zeros_like(time_array) + np.mean(lon_data), height_array, jd_ref)
 
             # Get the velocity at every point in time
-            velocities_model = exponentialDecelerationVel(time_array, traj.v_init, *decel_fit)
+            velocities_model = exponentialDecelerationVel(time_array, *decel_fit)
 
             # Calculate the dynamic pressure
             dyn_pressure_model = atm_dens_model*DRAG_COEFF*velocities_model**2
@@ -416,75 +583,86 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, frag_info):
 
 
             # Check if the fragment has a fragmentation point and plot it
-            if frag_info.frag_dict[frag] in frag_info.fragmentation_points:
+            if site_no in frag_info.fragmentation_points:
+                if frag_info.frag_dict[frag] in frag_info.fragmentation_points[site_no]:
 
-                # Get the lag of the fragmentation point
-                frag_point_time, fragments_list = frag_info.fragmentation_points[frag_info.frag_dict[frag]]
-                
-                # Get the fragmentation height
-                frag_point_height = timeHeightFunc(frag_point_time, *line_fit)
+                    # Get the lag of the fragmentation point
+                    frag_point_time, fragments_list = frag_info.fragmentation_points[site_no][frag_info.frag_dict[frag]]
+                    
+                    # Get the fragmentation height
+                    frag_point_height = lineFunc(frag_point_time, *line_fit)
 
-                # Calculate the velocity at fragmentation
-                frag_point_velocity = exponentialDecelerationVel(frag_point_time, traj.v_init, *decel_fit)
+                    # Calculate the velocity at fragmentation
+                    frag_point_velocity = exponentialDecelerationVel(frag_point_time, *decel_fit)
 
-                # Calculate the atm. density at the fragmentation point
-                frag_point_atm_dens = getAtmDensity(np.mean(lat_data), np.mean(lon_data), frag_point_height, \
-                    jd_ref)
+                    # Calculate the atm. density at the fragmentation point
+                    frag_point_atm_dens = getAtmDensity(np.mean(lat_data), np.mean(lon_data), frag_point_height, \
+                        jd_ref)
 
-                # Calculate the dynamic pressure at fragmentation in kPa
-                frag_point_dyn_pressure = frag_point_atm_dens*DRAG_COEFF*frag_point_velocity**2
-                frag_point_dyn_pressure /= 10**3
+                    # Calculate the dynamic pressure at fragmentation in kPa
+                    frag_point_dyn_pressure = frag_point_atm_dens*DRAG_COEFF*frag_point_velocity**2
+                    frag_point_dyn_pressure /= 10**3
 
-                # Compute height in km
-                frag_point_height_km = frag_point_height/1000
-
-
-                fragments_list = map(str, fragments_list)
-
-                # Plot the fragmentation point
-                plt.scatter(frag_point_dyn_pressure, frag_point_height_km, s=20, zorder=5, \
-                    color=colors_frags[frag], edgecolor='k', linewidth=0.5, \
-                    label='Fragmentation: ' + ",".join(fragments_list))
+                    # Compute height in km
+                    frag_point_height_km = frag_point_height/1000
 
 
+                    fragments_list = map(str, fragments_list)
 
-                ### Plot the errorbar 
-
-                # Compute the lower veloicty estimate
-                stddev_multiplier = 2.0
-
-
-                # Check if the uncertainty exists
-                if traj_uncert.v_init is None:
-                    v_init_uncert = 0
-                else:
-                    v_init_uncert = traj_uncert.v_init
+                    # Plot the fragmentation point
+                    plt.scatter(frag_point_dyn_pressure, frag_point_height_km, s=20, zorder=5, \
+                        color=colors_frags[frag], edgecolor='k', linewidth=0.5, \
+                        label='Fragmentation: ' + ",".join(fragments_list))
 
 
-                # Compute the range of velocities
-                lower_vel = frag_point_velocity - stddev_multiplier*v_init_uncert
-                higher_vel = frag_point_velocity + stddev_multiplier*v_init_uncert
 
-                # Assume the atmosphere density can vary +/- 50%
-                lower_atm_dens = 0.5*frag_point_atm_dens
-                higher_atm_dens = 1.5*frag_point_atm_dens
+                    ### Plot the errorbar 
 
-                # Compute lower and higher range for dyn pressure in kPa
-                lower_frag_point_dyn_pressure = (lower_atm_dens*DRAG_COEFF*lower_vel**2)/10**3
-                higher_frag_point_dyn_pressure = (higher_atm_dens*DRAG_COEFF*higher_vel**2)/10**3
-
-                # Compute errors
-                lower_error = abs(frag_point_dyn_pressure - lower_frag_point_dyn_pressure)
-                higher_error = abs(frag_point_dyn_pressure - higher_frag_point_dyn_pressure)
+                    # Compute the lower veloicty estimate
+                    stddev_multiplier = 2.0
 
 
-                print(frag_point_dyn_pressure, frag_point_height_km, [lower_frag_point_dyn_pressure, higher_frag_point_dyn_pressure])
+                    # Check if the uncertainty exists
+                    if traj_uncert.v_init is None:
+                        v_init_uncert = 0
+                    else:
+                        v_init_uncert = traj_uncert.v_init
 
-                # Plot the errorbar
-                plt.errorbar(frag_point_dyn_pressure, frag_point_height_km, xerr=[[lower_error], [higher_error]], fmt='--', capsize=5, zorder=4, label='+/- 50% $\\rho_{atm}$, 2$\\sigma_v$ ')
+
+                    # Compute the range of velocities
+                    lower_vel = frag_point_velocity - stddev_multiplier*v_init_uncert
+                    higher_vel = frag_point_velocity + stddev_multiplier*v_init_uncert
+
+                    # Assume the atmosphere density can vary +/- 50%
+                    lower_atm_dens = 0.5*frag_point_atm_dens
+                    higher_atm_dens = 1.5*frag_point_atm_dens
+
+                    # Compute lower and higher range for dyn pressure in kPa
+                    lower_frag_point_dyn_pressure = (lower_atm_dens*DRAG_COEFF*lower_vel**2)/10**3
+                    higher_frag_point_dyn_pressure = (higher_atm_dens*DRAG_COEFF*higher_vel**2)/10**3
+
+                    # Compute errors
+                    lower_error = abs(frag_point_dyn_pressure - lower_frag_point_dyn_pressure)
+                    higher_error = abs(frag_point_dyn_pressure - higher_frag_point_dyn_pressure)
 
 
-                ######
+                    print(frag_point_dyn_pressure, frag_point_height_km, [lower_frag_point_dyn_pressure, higher_frag_point_dyn_pressure])
+
+                    # Plot the errorbar
+                    plt.errorbar(frag_point_dyn_pressure, frag_point_height_km, \
+                        xerr=[[lower_error], [higher_error]], fmt='--', capsize=5, zorder=4, \
+                        color=colors_frags[frag], label='+/- 50% $\\rho_{atm}$, 2$\\sigma_v$ ')
+
+
+                    # Save the computed fragmentation values to list
+                    # Site, Reference JD, Relative time, Fragment ID, Height, Dyn pressure, Dyn pressure lower \
+                    #   bound, Dyn pressure upper bound
+                    computed_values.append([site_no, jd_ref, frag_point_time, frag_info.frag_dict[frag], \
+                        frag_point_height_km, frag_point_dyn_pressure, lower_frag_point_dyn_pressure, \
+                        higher_frag_point_dyn_pressure])
+
+
+                    ######
 
 
 
@@ -498,7 +676,13 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, frag_info):
 
         plt.ylim([ht_min/1000, ht_max/1000])
 
-        plt.legend()
+
+        # Remove repeating labels and plot the legend
+        handles, labels = plt.gca().get_legend_handles_labels()
+        by_label = OrderedDict(zip(labels, handles))
+        plt.legend(by_label.values(), by_label.keys())
+
+        
         plt.grid(color='0.9')
 
         # Create the label for seconds
@@ -506,13 +690,27 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, frag_info):
         ax2.set_ylim([time_max, time_min])
         ax2.set_ylabel('Time (s)')
 
-        plt.savefig(os.path.join(dir_path, 'fragments_dyn_pressures.png'), dpi=300)
+        plt.savefig(os.path.join(dir_path, file_name_prefix \
+            + '_fragments_dyn_pressures_site_{:s}.png'.format(str(site_no))), dpi=300)
 
         plt.show()
+
+
+
+
+    # Save the computed values to file
+    with open(os.path.join(dir_path, file_name_prefix + "_fragments_dyn_pressure_info.txt"), 'w') as f:
+
+        # Site, Reference JD, Relative time, Fragment ID, Height, Dyn pressure, Dyn pressure lower \
+                #   bound, Dyn pressure upper bound
+
+        # Write the header
+        f.write("# Site,               Ref JD,  Rel time, Frag ID, Ht (km),  DP (kPa),   DP low,  DP high\n")
+
+        # Write computed values for every fragment
+        for entry in computed_values:
+            f.write(" {:>5s}, {:20.12f}, {:+8.6f}, {:7d}, {:7.3f}, {:9.2f}, {:8.2f}, {:8.2f}\n".format(*entry))
         
-
-
-    pass
 
 
 
@@ -521,87 +719,30 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, frag_info):
 if __name__ == "__main__":
 
 
-    # ### July 21, 2017 event
+    ### COMMAND LINE ARGUMENTS
 
-    # # Main directory
-    # dir_path = "../MetalPrepare/20170721_070420_met/"
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description=""" Choose which input data will be used.""",
+        formatter_class=argparse.RawTextHelpFormatter)
 
-    # # .met file containing narrow-field picks
-    # met_file = 'state_fragment_picks.met'
+    arg_parser.add_argument('input_file', type=str, help="""Path to JSON file with input data.""")
 
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
 
-    # # Trajectory file
-    # traj_file = 'Monte Carlo' + os.sep + "20170721_070419_mc_trajectory.pickle"
-
-
-    # # DICTIONARY WHICH MAPS FRAGMENT IDs to FRAGMENTS TO PLOT
-    # frag_dict = {0.0: 10, 1.0: 11, 2.0: 6, 3.0: 9, 4.0: 8, 5.0: 3, 6.0: 2, 7.0: 4, 8.0: 1, 9.0: 5, 10.0: 12, \
-    #     11.0: 7}
+    ############################
 
 
-    # # FRAGMENTATION POINTS (main fragments: time of fragmentation)
-    # fragmentation_points = {
-    #     2 : [0.0854, [2, 3]], # Fragments 2 and 3
-    #     10: [0.066, [10, 11]],  # Fragments 10 and 11
-    #     7:  [0.246, [7, 9, 12]],  # Fragments 7, 9, 12
-    #     4:  [0.26, [4, 3]],   # 4 fragmented from 3
-    #     8:  [0.046, [8, 5]]    # Fragments 8 and 5
-    # }
-
-    # frag_info = FragmentationInfo(frag_dict, fragmentation_points)
-
-
-    # ######
-
-    ### 20180703
-
-    # Main directory
-    dir_path = "/mnt/bulk/mirfitprepare/20180703_030839_met"
-
-    # .met file containing narrow-field picks
-    met_file = 'state_fragment_picks.met'
-
-
-    # Trajectory file
-    traj_file = 'Monte Carlo' + os.sep + "20180703_030839_mc_trajectory.pickle"
-
-    # Trajectory uncertainties file
-    traj_uncert_file = 'Monte Carlo' + os.sep + "20180703_030839_mc_uncertanties.pickle"
-
-
-
-    # DICTIONARY WHICH MAPS FRAGMENT IDs to FRAGMENTS TO PLOT
-    frag_dict = None
-
-
-    # FRAGMENTATION POINTS (main fragments: time of fragmentation)
-    fragmentation_points = {
-        4 : [-0.18, [1, 2, 3, 4]]
-    }
-
-    frag_info = FragmentationInfo(frag_dict, fragmentation_points)
-
-
-    ######
-
-    
+    # Load inputs from a JSON file
+    input_data = loadNarrowProjectionInputJSON(cml_args.input_file)
 
 
     ##########################################################################################################
 
 
 
-    # Load the MET file
-    met = loadMet(dir_path, met_file, mirfit=True)
-
-    # Load the trajectory
-    traj = loadPickle(dir_path, traj_file)
-
-    # Load trajectory uncertainties
-    traj_uncert = loadPickle(dir_path, traj_uncert_file)
-
-    print(met)
-
-    
     # Project narrow-field picks to wide-field trajectory
-    projectNarrowPicks(dir_path, met, traj, traj_uncert, frag_info)
+    projectNarrowPicks(input_data.dir_path, input_data.met, input_data.traj, input_data.traj_uncert, \
+        input_data.frag_info)
+
+

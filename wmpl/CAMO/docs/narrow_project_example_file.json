@@ -1,0 +1,18 @@
+{
+	"name" : "July 21, 2017 event",
+    "dir_path" : "/mnt/bulk/mirfitprepare/20170721_070420_met",
+    "met_file" : "state_fragment_picks.met",
+    "traj_file": "Monte Carlo/20170721_070419_mc_trajectory.pickle",
+    "frag_dict": {"0.0": 10, "1.0": 11, "2.0": 6, "3.0": 9, "4.0": 8, "5.0": 3, "6.0": 2, "7.0": 4, "8.0": 1, "9.0": 5, "10.0": 12, "11.0": 7},
+    "fragmentation_points": {
+        "1": {
+            "2" : [0.0854, [2, 3]], 
+            "10": [0.066, [10, 11]],
+            "7":  [0.246, [7, 9, 12]],
+            "4":  [0.26, [4, 3]],
+            "8":  [0.046, [8, 5]]
+        }
+    },
+    "fit_full_exp_model": true,
+    "v_init_adjust": 0
+}
