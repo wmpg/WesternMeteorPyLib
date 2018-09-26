@@ -17,11 +17,13 @@ import matplotlib.pyplot as plt
 
 from wmpl.Formats.Met import loadMet
 from wmpl.Trajectory.Trajectory import lineFunc
-from wmpl.Utils.TrajConversions import raDec2ECI, geo2Cartesian_vect, altAz2RADec_vect, unixTime2JD, cartesian2Geo, jd2Date
+from wmpl.MetSim.MetalMass import loadMetalMags
+from wmpl.Utils.TrajConversions import raDec2ECI, geo2Cartesian_vect, altAz2RADec_vect, unixTime2JD, \
+    cartesian2Geo, jd2Date
 from wmpl.Utils.Math import findClosestPoints, vectMag
 from wmpl.Utils.AtmosphereDensity import getAtmDensity, getAtmDensity_vect
 from wmpl.Utils.Pickling import loadPickle
-from wmpl.Utils.Physics import dynamicPressure
+from wmpl.Utils.Physics import dynamicPressure, dynamicMass
 
 # DRAG COEFFICIENT (assume unity)
 DRAG_COEFF = 1.0
@@ -30,8 +32,9 @@ DRAG_COEFF = 1.0
 
 
 class NarrowProjectionInputData(object):
-    def __init__(self, name, dir_path, met_file, traj_file, traj_uncert_file=None, frag_dict=None, \
-        fragmentation_points=None, fit_full_exp_model=False, v_init_adjust=0):
+    def __init__(self, name, dir_path, met_file, traj_file, traj_uncert_file=None, metal_met_file=None, \
+        frag_dict=None, fragmentation_points=None, fit_full_exp_model=False, v_init_adjust=0, 
+        bulk_density=3500):
         """ Structure storing input data. 
     
         Arguments:
@@ -44,6 +47,8 @@ class NarrowProjectionInputData(object):
             traj_uncert_file: [str] Path to the MC uncertainties file in the dir_path directory. None by
                 default, in which case the file will be tried to found in the same directory where
                 the traj_file is.
+            metal_met_file: [str] Name of the METAL .met file in the dir_path directory. 'state.met' is used 
+                by default.
             frag_dict: [dict] Dictionary that maps the mirfit fragment IDs to desired numbers or names.
                 None by default, in which case the fragments will be named from 1 to N.
             fragmentation_points: [dict] Determines where the fragmentation points are and in which points
@@ -56,6 +61,8 @@ class NarrowProjectionInputData(object):
                 trajectory and a simpler (more robust) model will be fitted to the lag.
             v_init_adjust: [float] Sometimes to get a good exponential fit, the initial velocity has to be
                 adjusted on the order of +/- 100 m/s. The default value is 0 m/s.
+            bulk_density: [float] Bulk density of the meteoroid in kg/m3 used for dynamic mass computation. 
+                3500 kg/m3 by default.
 
         """
 
@@ -63,7 +70,6 @@ class NarrowProjectionInputData(object):
         self.dir_path = dir_path
         self.met_file = met_file
         self.traj_file = traj_file
-
 
 
         if traj_uncert_file is None:
@@ -80,9 +86,21 @@ class NarrowProjectionInputData(object):
             self.traj_uncert_file = None
 
 
+        if metal_met_file is None:
+            self.metal_met_file = 'state.met'
+        else:
+            self.metal_met_file = metal_met_file
+
+
+        # If the file cannot be found, don't use anything
+        if not os.path.isfile(os.path.join(self.dir_path, self.metal_met_file)):
+            print('The METAL .met file cannot be found:', self.metal_met_file)
+            self.metal_met_file = None
+
+
         # Init the fragmentation info container
         self.frag_info = FragmentationInfo(frag_dict, fragmentation_points, v_init_adjust=v_init_adjust, \
-        fit_full_exp_model=fit_full_exp_model)
+        fit_full_exp_model=fit_full_exp_model, bulk_density=bulk_density)
 
 
         # Load the Mirfit .met file
@@ -99,10 +117,18 @@ class NarrowProjectionInputData(object):
             self.traj_uncert = None
 
 
+        # Load magnitudes from the METAL .met file
+        if self.metal_met_file is not None:
+            self.metal_mags = loadMetalMags(self.dir_path, self.metal_met_file)
+        else:
+            self.metal_mags = None
+
+
 
 
 class FragmentationInfo(object):
-    def __init__(self, frag_dict, fragmentation_points, v_init_adjust=0, fit_full_exp_model=False):
+    def __init__(self, frag_dict, fragmentation_points, v_init_adjust=0, fit_full_exp_model=False, 
+        bulk_density=3500):
         """ Container for information about fragments and fragmentation points. """
 
         self.frag_dict = frag_dict
@@ -114,6 +140,8 @@ class FragmentationInfo(object):
         self.v_init_adjust = v_init_adjust
 
         self.fit_full_exp_model = fit_full_exp_model
+
+        self.bulk_density = bulk_density
 
 
 
@@ -167,6 +195,12 @@ def loadNarrowProjectionInputJSON(file_path):
         traj_uncert_file = None
 
 
+    if 'metal_met_file' in json_data:
+        metal_met_file = json_data['metal_met_file']
+    else:
+        metal_met_file = None
+
+
     if 'v_init_adjust' in json_data:
         v_init_adjust = json_data['v_init_adjust']
     else:
@@ -179,10 +213,18 @@ def loadNarrowProjectionInputJSON(file_path):
         fit_full_exp_model = False
 
 
+
+    if 'bulk_density' in json_data:
+        bulk_density = json_data['bulk_density']
+    else:
+        bulk_density = 3500 # kg/m3
+
+
     # Init the input structure
     input_data = NarrowProjectionInputData(name, dir_path, met_file, traj_file, \
-        traj_uncert_file=traj_uncert_file, frag_dict=frag_dict, fragmentation_points=fragmentation_points, \
-        fit_full_exp_model=fit_full_exp_model, v_init_adjust=v_init_adjust)
+        traj_uncert_file=traj_uncert_file, metal_met_file=metal_met_file, frag_dict=frag_dict, \
+        fragmentation_points=fragmentation_points, fit_full_exp_model=fit_full_exp_model, \
+        v_init_adjust=v_init_adjust, bulk_density=bulk_density)
 
 
     return input_data
@@ -193,19 +235,25 @@ def loadNarrowProjectionInputJSON(file_path):
 def exponentialDeceleration(t, v, d_t, k, a1, a2):
     """ Model for exponential deceleration. Returns the length at every point. """
     td = t + d_t
-    return k + v*td + a1*np.exp(a2*td)
+    return k + v*td - abs(a1)*np.exp(a2*td)
 
 
 
 def exponentialDecelerationVel(t, v, d_t, k, a1, a2):
     """ Model for exponential deceleration. Returns the velocity at every point. """
     td = t + d_t
-    return v + a1*a2*np.exp(a2*td)
+    return v - abs(a1*a2)*np.exp(a2*td)
+
+
+def exponentialDecelerationDecel(t, v, d_t, k, a1, a2):
+    """ Model for exponential deceleration. Returns the deceleration at every point. """
+    td = t + d_t
+    return -abs(a1*a2*a2)*np.exp(a2*td)
 
 
 
 
-def projectNarrowPicks(dir_path, met, traj, traj_uncert, frag_info):
+def projectNarrowPicks(dir_path, met, traj, traj_uncert, metal_mags, frag_info):
     """ Projects picks done in the narrow-field to the given trajectory. """
 
 
@@ -219,7 +267,11 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, frag_info):
     file_name_prefix = traj.file_name
 
 
-    # Go through picks from all sites (there should only be one)
+    # List that holds datetimes of fragmentations, used for the light curve plot
+    fragmentations_datetime = []
+
+
+    # Go through picks from all sites
     for site_no in met.picks:
 
         # Extract site exact plate
@@ -473,7 +525,12 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, frag_info):
                         - exponentialDeceleration(frag_point_time, frag_v_init, 0, offset_vel_max, 0, 0)
 
 
-                    fragments_list = map(str, fragments_list)
+                    fragments_list = list(map(str, fragments_list))
+
+
+                    # Save the fragmentation time in the list for light curve plot
+                    fragmentations_datetime.append([jd2Date(jd_ref + frag_point_time/86400, dt_obj=True), \
+                        fragments_list])
 
                     # Plot the fragmentation point
                     plt.scatter(frag_point_lag, frag_point_time, s=20, zorder=4, color=colors_frags[frag], \
@@ -506,7 +563,7 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, frag_info):
         ht_min =  np.inf
         ht_max = -np.inf
 
-        # Plot dynamic pressures for all fragments
+        ### PLOT DYNAMIC PRESSURE FOR EVERY FRAGMENT
         for frag, decel_fit in zip(fragments, decel_list):
 
             # Select only the data points of the current fragment
@@ -528,9 +585,6 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, frag_info):
 
 
             ### CALCULATE OBSERVED DYN PRESSURE
-
-            # # Get the atmospheric densities at every heights
-            # atm_dens = getAtmDensity_vect(lat_data, lon_data, height_data, jd_ref)
 
             # Get the velocity at every point in time
             velocities = exponentialDecelerationVel(time_data, *decel_fit)
@@ -698,6 +752,187 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, frag_info):
 
 
 
+        ### PLOT DYNAMICS MASSES FOR ALL FRAGMENTS
+        for frag, decel_fit in zip(fragments, decel_list):
+
+            # Select only the data points of the current fragment
+            length_frag = [entry for entry in length_list if entry[0] == frag]
+
+            # Extract the observed data
+            _, time_data, length_data, lat_data, lon_data, height_data = np.array(length_frag).T
+
+
+            # Fit a linear dependance of time vs. height
+            line_fit, _ = scipy.optimize.curve_fit(lineFunc, time_data, height_data)
+
+
+            ### CALCULATE OBSERVED DYN MASS
+
+            # Get the velocity at every point in time
+            velocities = exponentialDecelerationVel(time_data, *decel_fit)
+
+            decelerations = np.abs(exponentialDecelerationDecel(time_data, *decel_fit))
+
+            # Calculate the dynamic mass
+            dyn_mass = dynamicMass(frag_info.bulk_density, lat_data, lon_data, height_data, jd_ref, \
+                velocities, decelerations)
+
+            ###
+
+
+            # Plot Observed height vs. dynamic pressure
+            plt.plot(dyn_mass*1000, height_data/1000, color=colors_frags[frag], zorder=3, linewidth=0.75)
+
+            # Plot the fragment number at the end of each lag
+            plt.text(dyn_mass[-1]*1000, height_data[-1]/1000 - 0.02, str(frag_info.frag_dict[frag]), \
+                color=colors_frags[frag], size=7, va='top', zorder=3)
+
+
+
+            ### CALCULATE MODELLED DYN MASS
+
+            time_array = np.linspace(ref_beg_time, max(time_data), 1000)
+
+            # Calculate the modelled height
+            height_array = lineFunc(time_array, *line_fit)
+
+
+            # Get the velocity at every point in time
+            velocities_model = exponentialDecelerationVel(time_array, *decel_fit)
+
+            # Get the deceleration
+            decelerations_model = np.abs(exponentialDecelerationDecel(time_array, *decel_fit))
+
+            # Calculate the modelled dynamic mass
+            dyn_mass_model = dynamicMass(frag_info.bulk_density, 
+                np.zeros_like(time_array) + np.mean(lat_data), 
+                np.zeros_like(time_array) + np.mean(lon_data), height_array, jd_ref, \
+                velocities_model, decelerations_model)
+
+            
+
+            ###
+
+            # Plot Modelled height vs. dynamic mass
+            plt.plot(dyn_mass_model*1000, height_array/1000, color=colors_frags[frag], zorder=3, \
+                linewidth=0.75, linestyle='--', \
+                label='Frag {:d} initial dyn mass = {:.1e} g'.format(frag_info.frag_dict[frag], \
+                    1000*dyn_mass_model[0]))
+
+
+
+        # Plot reference time
+        plt.title('Reference time: ' + str(jd2Date(jd_ref, dt_obj=True)) \
+            + ', $\\rho_m = ${:d} $kg/m^3$'.format(frag_info.bulk_density))
+
+        plt.xlabel('Dynamic mass (g)')
+        plt.ylabel('Height (km)')
+
+        plt.ylim([ht_min/1000, ht_max/1000])
+
+
+        # Remove repeating labels and plot the legend
+        handles, labels = plt.gca().get_legend_handles_labels()
+        by_label = OrderedDict(zip(labels, handles))
+        plt.legend(by_label.values(), by_label.keys())
+
+        
+        plt.grid(color='0.9')
+
+        # Create the label for seconds
+        ax2 = plt.gca().twinx()
+        ax2.set_ylim([time_max, time_min])
+        ax2.set_ylabel('Time (s)')
+
+        plt.savefig(os.path.join(dir_path, file_name_prefix \
+            + '_fragments_dyn_mass_site_{:s}.png'.format(str(site_no))), dpi=300)
+
+        plt.show()
+
+
+
+
+
+
+    # Plot the light curve if the METAL .met file was given
+    if (metal_mags is not None):
+
+        # Make sure there are lightcurves in the data
+        if len(metal_mags):
+
+            lc_min = np.inf
+            lc_max = -np.inf
+
+            # Plot the lightcurves
+            for site_entry in metal_mags:
+
+                site_id, time, mags = site_entry
+
+                # Track the minimum and maximum magnitude
+                lc_min = np.min([lc_min, np.min(mags)])
+                lc_max = np.max([lc_max, np.max(mags)])
+
+                plt.plot(time, mags, marker='+', label='Site: ' + str(site_id), zorder=4, linewidth=1)
+
+
+            # Plot times of fragmentation
+            for frag_dt, fragments_list in fragmentations_datetime:
+
+                # Plot the lines of fragmentation
+                y_arr = np.linspace(lc_min, lc_max, 10)
+                x_arr = [frag_dt]*len(y_arr)
+
+                plt.plot(x_arr, y_arr, linestyle='--', zorder=4, \
+                    label='Fragmentation: ' + ",".join(fragments_list))
+
+
+            plt.xlabel('Time (UTC)')
+            plt.ylabel('Absolute magnitude (@100km)')
+
+            plt.grid()
+
+            plt.gca().invert_yaxis()
+
+            plt.legend()
+
+            ### Format the X axis datetimes
+            import matplotlib
+
+            def formatDT(x, pos=None):
+
+                x = matplotlib.dates.num2date(x)
+
+                # Add date to the first tick
+                if pos == 0:
+                    fmt = '%D %H:%M:%S.%f'
+                else:
+                    fmt = '%H:%M:%S.%f'
+
+                label = x.strftime(fmt)[:-3]
+                label = label.rstrip("0")
+                label = label.rstrip(".")
+
+                return label
+
+            from matplotlib.ticker import FuncFormatter
+
+            plt.gca().xaxis.set_major_formatter(FuncFormatter(formatDT))
+            plt.gca().xaxis.set_minor_formatter(FuncFormatter(formatDT))
+
+            ###
+
+
+            plt.tight_layout()
+
+            # Save the figure
+            plt.savefig(os.path.join(dir_path, file_name_prefix + '_fragments_light_curve_comparison.png'), \
+                dpi=300)
+
+            plt.show()
+
+
+
+
     # Save the computed values to file
     with open(os.path.join(dir_path, file_name_prefix + "_fragments_dyn_pressure_info.txt"), 'w') as f:
 
@@ -743,6 +978,6 @@ if __name__ == "__main__":
 
     # Project narrow-field picks to wide-field trajectory
     projectNarrowPicks(input_data.dir_path, input_data.met, input_data.traj, input_data.traj_uncert, \
-        input_data.frag_info)
+        input_data.metal_mags, input_data.frag_info)
 
 
