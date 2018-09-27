@@ -3107,7 +3107,8 @@ class Trajectory(object):
         
         out_str += "\n"
 
-        out_str += "reference JD: {:20.12f}".format(self.jdt_ref)
+        out_str += "Reference JD: {:20.12f}".format(self.jdt_ref)
+        out_str += "Time: " + str(jd2Date(self.orbit.jd_ref, dt_obj=True)) + " UTC\n"
 
         out_str += "\n\n"
 
