@@ -687,7 +687,7 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, metal_mags, frag_info):
                     lower_vel = frag_point_velocity - stddev_multiplier*v_init_uncert
                     higher_vel = frag_point_velocity + stddev_multiplier*v_init_uncert
 
-                    # Assume the atmosphere density can vary +/- 50%
+                    # Assume the atmosphere density can vary +/- 50% (Gunther's analysis)
                     lower_atm_dens = 0.5*frag_point_atm_dens
                     higher_atm_dens = 1.5*frag_point_atm_dens
 
@@ -957,7 +957,7 @@ if __name__ == "__main__":
     ### COMMAND LINE ARGUMENTS
 
     # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(description=""" Choose which input data will be used.""",
+    arg_parser = argparse.ArgumentParser(description="""Choose which input data will be used.""",
         formatter_class=argparse.RawTextHelpFormatter)
 
     arg_parser.add_argument('input_file', type=str, help="""Path to JSON file with input data.""")

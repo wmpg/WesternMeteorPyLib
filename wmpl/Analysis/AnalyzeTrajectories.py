@@ -509,7 +509,8 @@ def compareTrajToSim(dir_path, sim_meteors, traj_list, solver_name, radiant_exte
     plt.xlim(0, radiant_extent)
     plt.ylim(-vg_extent, vg_extent)
 
-    plt.title('{:s}, failures: {:d}, $\sigma_R$ = {:.2f} deg, $\sigma_V$ = {:.2f} km/s'.format(solver_name, failed_count, radiant_std, vg_std))
+    plt.title('{:s}, failures: {:d}/{:d}, $\sigma_R$ = {:.2f} deg, $\sigma_V$ = {:.2f} km/s'.format(solver_name, \
+        failed_count, len(traj_list), radiant_std, vg_std))
 
     plt.xlabel('Radiant difference (deg)')
     plt.ylabel('Vg difference (km/s)')
@@ -555,16 +556,22 @@ if __name__ == "__main__":
 
 
     data_list = [ # Trajectory directory            Min Qc    dRadiant max  dVg max
-        ["../SimulatedMeteors/CAMO/2011Draconids",      1.0,        0.5,     0.5],
-        ["../SimulatedMeteors/CAMO/2014Ursids",         1.0,        0.5,     0.5],
-        ["../SimulatedMeteors/CAMO/2012Perseids",       1.0,        0.5,     0.5],
-        ["../SimulatedMeteors/CAMSsim/2011Draconids",   10.0,       1.0,     1.0],
-        ["../SimulatedMeteors/CAMSsim/2014Ursids",      10.0,       1.0,     1.0],
-        ["../SimulatedMeteors/CAMSsim/2012Perseids",    10.0,       1.0,     1.0],
-        ["../SimulatedMeteors/SOMN_sim/2011Draconids",  15.0,       5.0,     5.0],
-        ["../SimulatedMeteors/SOMN_sim/2014Ursids",     15.0,       5.0,     5.0],
-        ["../SimulatedMeteors/SOMN_sim/2012Perseids",   15.0,       5.0,     5.0]]
+        # ["../SimulatedMeteors/CAMO/2011Draconids",      1.0,        0.5,     0.5],
+        # ["../SimulatedMeteors/CAMO/2014Ursids",         1.0,        0.5,     0.5],
+        # ["../SimulatedMeteors/CAMO/2012Perseids",       1.0,        0.5,     0.5],
+        # ["../SimulatedMeteors/CAMSsim/2011Draconids",   10.0,       1.0,     1.0],
+        # ["../SimulatedMeteors/CAMSsim/2014Ursids",      10.0,       1.0,     1.0],
+        # ["../SimulatedMeteors/CAMSsim/2012Perseids",    10.0,       1.0,     1.0],
+        # ["../SimulatedMeteors/SOMN_sim/2011Draconids",  15.0,       5.0,     5.0],
+        # ["../SimulatedMeteors/SOMN_sim/2014Ursids",     15.0,       5.0,     5.0],
+        # ["../SimulatedMeteors/SOMN_sim/2012Perseids",   15.0,       5.0,     5.0]]
         #["../SimulatedMeteors/SOMN_sim/2015Taurids",    15.0,       5.0,     5.0]]
+        #["../SimulatedMeteors/SOMN_sim/LongFireball",     5.0,       0.5,     0.5]
+        ["../SimulatedMeteors/SOMN_sim/LongFireball_nograv",     5.0,       0.5,     0.5]]
+
+
+    # Minimum duration of meteor in seconds (-1 to turn this filter off)
+    min_duration = 4
 
 
     solvers = ['planes', 'los', 'milig', 'mc', 'gural0', 'gural0fha', 'gural1', 'gural3']
@@ -617,6 +624,7 @@ if __name__ == "__main__":
             # Load trajectories
             traj_list = collectTrajPickles(dir_path, traj_type=solver)
 
+
             # Filter by convergence angle
             if 'gural' in solver:
 
@@ -637,12 +645,50 @@ if __name__ == "__main__":
                 continue
 
 
+            # Filter by minimum duration
+            if min_duration > 0:
+                
+                print('Filtering by minimum duration of {:.2f} seconds!'.format(min_duration))
+                
+                filtered_traj_list = []
+
+                # Go through all trajectories
+                for traj in traj_list:
+
+                    if 'gural' in solver:
+
+                        # Go through all observations and find the total duration
+                        first_beginning = np.min([time_data[0] for time_data in traj.times])
+                        last_ending = np.max([time_data[-1] for time_data in traj.times])
+
+
+                    else:
+
+                        # Go through all observations and find the total duration
+                        first_beginning = np.min([obs.time_data[0] for obs in traj.observations])
+                        last_ending = np.max([obs.time_data[-1] for obs in traj.observations])
+
+                    total_duration = last_ending - first_beginning
+
+
+                    if total_duration >= min_duration:
+                        filtered_traj_list.append(traj)
+
+
+                print('Taking {:d}/{:d} trajectories after duration filtering'.format(len(filtered_traj_list),\
+                    len(traj_list)))
+
+                traj_list = filtered_traj_list
+
+
+
             # Plot the 2D histogram comparing the results, radiants within X degrees, Vg within X km/s
             failed_count, radiant_std, vg_std = compareTrajToSim(dir_path, sim_meteors, traj_list, \
                 solver_name, sigma_r_max, sigma_v_max, vmax=10, show_plot=show_plot)
 
 
-            results_list.append([system_name, shower_name, solver_name, failed_count, radiant_std, vg_std, system_path])
+            results_list.append([system_name, shower_name, solver_name, failed_count, len(traj_list), \
+                radiant_std, vg_std, system_path])
 
 
         ##########################################################################################################
@@ -658,7 +704,7 @@ if __name__ == "__main__":
 
 
         # Find the maximum Vg deviation
-        vg_std_max = max([entry[5] for entry in system_results])
+        vg_std_max = max([entry[6] for entry in system_results])
 
         plot_handle_list = []
         xticks_values = []
@@ -678,7 +724,7 @@ if __name__ == "__main__":
 
 
             # Find the maximum radiant deviation for the given solver
-            radiant_std_max = max([entry[4] for entry in system_results if solver_name_iter == entry[2]])
+            radiant_std_max = max([entry[5] for entry in system_results if solver_name_iter == entry[2]])
 
             # Compute text padding
             pad_x = 0.02*vg_std_max
@@ -707,7 +753,8 @@ if __name__ == "__main__":
 
                 for result in shower_results:
 
-                    system_name, shower_name, solver_name, failed_count, radiant_std, vg_std, system_path = result
+                    system_name, shower_name, solver_name, failed_count, total_count, radiant_std, vg_std, \
+                        system_path = result
 
                     # Take only the results for the given solver
                     if solver_name_iter != solver_name:
@@ -717,7 +764,7 @@ if __name__ == "__main__":
                     if vg_std > vg_shower_std_max:
                         vg_shower_std_max = vg_std
                     
-                    print(failed_count)
+                    print("Failed {:d}/{:d}".format(failed_count, total_count))
 
                     failure_list.append(failed_count)
 
@@ -738,7 +785,8 @@ if __name__ == "__main__":
 
 
                     #print("{:s}, {:s}, {:d}, {:.2f}, {:.2f}".format(shower_name_iter, solver_name, failed_count, radiant_std, vg_std))
-                    print(" & {:2d} & \\ang{{{:.2f}}} & \\SI{{{:.2f}}}".format(failed_count, radiant_std, vg_std) + "{\\kilo \\metre \\per \\second}", end='')
+                    print(" & {:2d}/{:d} & \\ang{{{:.2f}}} & \\SI{{{:.2f}}}".format(failed_count, \
+                        total_count, radiant_std, vg_std) + "{\\kilo \\metre \\per \\second}", end='')
 
             print('\\\\')
 
@@ -785,110 +833,116 @@ if __name__ == "__main__":
 
 
 
-    # ### PLOT ORBIT ELEMENTS ###
-    # ##########################################################################################################
-
-    # # Plot simulated meteors
-    # plt_handle = plotOrbitElements(sim_meteors, plt_type='sol_a', label='Simulated', marker='o', s=5)
+    ### PLOT ORBITAL ELEMENTS OF SELECT SHOWER ###
+    ##########################################################################################################
 
 
-    # # Make sure all lengths are the same
-    # if sum([len(solvers), len(solvers_plot_labels), len(markers), len(sizes)]) != 4*len(solvers):
-    #     print('The lenghts of solvers, plots, markers and sizes is not the same!')
-    #     sys.exit()
+    dir_path = "../SimulatedMeteors/SOMN_sim/2015Taurids"
 
-    # # Make plots from data with different solvers
+    # Load simulated meteors
+    sim_meteors = collectTrajPickles(dir_path, traj_type='sim_met')
 
-    # for solver, plt_lbl, marker, size in zip(solvers, solvers_plot_labels, markers, sizes):
-
-    #     # Load trajectories
-    #     traj_list = collectTrajPickles(dir_path, traj_type=solver)
+    # Plot simulated meteors
+    plt_handle = plotOrbitElements(sim_meteors, plt_type='sol_a', label='Simulated', marker='o', s=5)
 
 
-    #     # Filter by convergence angle
-    #     if 'gural' in solver:
+    # Make sure all lengths are the same
+    if sum([len(solvers), len(solvers_plot_labels), len(markers), len(sizes)]) != 4*len(solvers):
+        print('The lenghts of solvers, plots, markers and sizes is not the same!')
+        sys.exit()
 
-    #         # Remove all trajectories with the convergence angle less then 15 deg
-    #         traj_list = [traj for traj in traj_list if np.degrees(traj.max_convergence) >= min_conv_angle]
+    # Make plots from data with different solvers
 
-    #         pass
+    for solver, plt_lbl, marker, size in zip(solvers, solvers_plot_labels, markers, sizes):
 
-    #     else:
-
-    #         # Remove all trajectories with the convergence angle less then 15 deg
-    #         traj_list = [traj for traj in traj_list if np.degrees(traj.best_conv_inter.conv_angle) \
-    #             >= min_conv_angle]
+        # Load trajectories
+        traj_list = collectTrajPickles(dir_path, traj_type=solver)
 
 
-    #     # Plot trajectories
-    #     plt_handle = plotOrbitElements(traj_list, plt_type='sol_a', plt_handle=plt_handle, label=plt_lbl, \
-    #         alpha=0.5, s=size, marker=marker)
+        # Filter by convergence angle
+        if 'gural' in solver:
+
+            # Remove all trajectories with the convergence angle less then 15 deg
+            traj_list = [traj for traj in traj_list if np.degrees(traj.max_convergence) >= min_conv_angle]
+
+            pass
+
+        else:
+
+            # Remove all trajectories with the convergence angle less then 15 deg
+            traj_list = [traj for traj in traj_list if np.degrees(traj.best_conv_inter.conv_angle) \
+                >= min_conv_angle]
 
 
-    #     # Compute the stddev of differences in semi-major axis for every solver
-    #     traj_list_filtered = [traj for traj in traj_list if traj.orbit.a is not None]
-    #     a_diff = [traj.orbit.a - 2.26 for traj in traj_list if traj.orbit.a is not None]
+        # Plot trajectories
+        plt_handle = plotOrbitElements(traj_list, plt_type='sol_a', plt_handle=plt_handle, label=plt_lbl, \
+            alpha=0.5, s=size, marker=marker)
 
-    #     # Remove outliers
-    #     removed_count = 0
-    #     for i in range(100):
+
+        # Compute the stddev of differences in semi-major axis for every solver
+        traj_list_filtered = [traj for traj in traj_list if traj.orbit.a is not None]
+        a_diff = [traj.orbit.a - 2.26 for traj in traj_list if traj.orbit.a is not None]
+
+        # Remove outliers
+        removed_count = 0
+        for i in range(100):
             
-    #         a_diff_stddev = np.std(a_diff)
+            a_diff_stddev = np.std(a_diff)
 
-    #         for a_temp in a_diff:
-    #             if np.abs(a_temp) > 3*a_diff_stddev:
+            for a_temp in a_diff:
+                if np.abs(a_temp) > 3*a_diff_stddev:
 
-    #                 # Get the index of the a_diff to remove
-    #                 a_rm_indx = a_diff.index(a_temp)
+                    # Get the index of the a_diff to remove
+                    a_rm_indx = a_diff.index(a_temp)
 
-    #                 # Remove a from lists
-    #                 a_diff.remove(a_temp)
-    #                 traj_list_filtered.pop(a_rm_indx)
+                    # Remove a from lists
+                    a_diff.remove(a_temp)
+                    traj_list_filtered.pop(a_rm_indx)
 
-    #                 removed_count += 1
+                    removed_count += 1
         
-    #     #print(plt_lbl, a_diff)
-    #     print(plt_lbl, a_diff_stddev, 'AU', 'removed', removed_count)
+        #print(plt_lbl, a_diff)
+        print(plt_lbl, a_diff_stddev, 'AU', 'removed', removed_count)
 
-    #     # # Plot the estimated semi-major axes
-    #     # plt.clf()
-    #     # plt.scatter([np.degrees(traj.orbit.la_sun) for traj in traj_list_filtered], [traj.orbit.a for traj in traj_list_filtered], marker='x', color='r', label=plt_lbl)
+        # # Plot the estimated semi-major axes
+        # plt.clf()
+        # plt.scatter([np.degrees(traj.orbit.la_sun) for traj in traj_list_filtered], [traj.orbit.a for traj in traj_list_filtered], marker='x', color='r', label=plt_lbl)
 
-    #     # # Plot the original points
-    #     # plotOrbitElements(sim_meteors, plt_type='sol_a', label='Simulated', marker='o', s=5, plt_handle=plt)
+        # # Plot the original points
+        # plotOrbitElements(sim_meteors, plt_type='sol_a', label='Simulated', marker='o', s=5, plt_handle=plt)
 
-    #     # plt.legend()
-    #     # plt.show()
-
-    
-    # # Get the limits of the plot
-    # x_min, x_max = plt_handle.get_xlim()
+        # plt.legend()
+        # plt.show()
 
     
-    # # Plot the 7:2 resonance with Jupiter
-    # sol_arr = np.linspace(x_min, x_max, 10)
+    # Get the limits of the plot
+    x_min, x_max = plt_handle.get_xlim()
 
-    # plt.plot(sol_arr, np.zeros_like(sol_arr) + 2.24, linestyle='--', color='k')
-    # plt.plot(sol_arr, np.zeros_like(sol_arr) + 2.28, linestyle='--', color='k')
+    
+    # Plot the 7:2 resonance with Jupiter
+    sol_arr = np.linspace(x_min, x_max, 10)
 
-    # # Set xlim
-    # plt.xlim([x_min, x_max])
+    plt.plot(sol_arr, np.zeros_like(sol_arr) + 2.24, linestyle='--', color='k')
+    plt.plot(sol_arr, np.zeros_like(sol_arr) + 2.28, linestyle='--', color='k')
 
-    # # Limit a from 1.5 AU to 3.5 AU
-    # #plt.ylim([1.5, 3.5])
-    # plt.ylim([2.2, 2.35])
+    # Set xlim
+    plt.xlim([x_min, x_max])
+
+    # Limit a from 1.5 AU to 3.5 AU
+    #plt.ylim([1.5, 3.5])
+    plt.ylim([2.2, 2.35])
 
 
-    # plt.legend()
+    plt.legend()
 
-    # # Save the figure
-    # plt.savefig(os.path.join(dir_path, 'solver_comparison_sol_a_zoom.png'), dpi=300)
+    # Save the figure
+    plt.savefig(os.path.join(dir_path, 'solver_comparison_sol_a_zoom.png'), dpi=300)
 
-    # plt.show()
+    plt.show()
 
-    # sys.exit()
+    sys.exit()
 
-    # ##########################################################################################################
+    ##########################################################################################################
 
 
 

@@ -153,7 +153,7 @@ if __name__ == "__main__":
     jd = datetime2JD(datetime.datetime.now())
 
     # Density evaluation heights (m)
-    heights = np.linspace(70, 120)*1000
+    heights = np.linspace(70, 120, 100)*1000
 
     atm_densities = []
     for height in heights:

@@ -1908,7 +1908,7 @@ def simulateMeteorShower(station_list, meteor_velocity_models, n_meteors, ra_g, 
             beg_height_max)
 
 
-        # Init the SimMeter object
+        # Init the SimMeteor object
         sim_meteor = SimMeteor(ra_g_final, dec_g_final, v_g_final, year, month, sol, meteor_jd, \
             beg_height_final, state_vect, obs_ang_uncertanties, t_offsets)
 
@@ -2510,9 +2510,9 @@ if __name__ == "__main__":
 
 
     # Init stations data to SimStation objects
-    station_list = initStationList(stations_geo, azim_fovs, elev_fovs, fov_widths, fov_heights, t_offsets, \
-        fps_list, obs_ang_uncertainties, lim_magnitudes=lim_magnitudes, P_0m_list=P_0m_list, \
-        min_ang_velocities=min_ang_velocities)
+    station_list = initStationList(stations_geo, azim_fovs, elev_fovs, fov_widths, fov_heights, \
+        t_offsets=t_offsets, fps_list=fps_list, obs_ang_uncertainties=obs_ang_uncertainties, \
+        lim_magnitudes=lim_magnitudes, P_0m_list=P_0m_list, min_ang_velocities=min_ang_velocities)
 
     # Plot FOVs of stations at ceiling height of 120km
     plotStationFovs(station_list, datetime2JD(datetime.datetime.now()), 70*1000, 120*1000)
@@ -2774,7 +2774,7 @@ if __name__ == "__main__":
 
     # Randomly generate decelerations
     #decel_list = np.random.uniform(100, 800, size=n_meteors)
-    decel_list = np.random.uniform(4000, 6000, size=n_meteors)
+    decel_list = np.random.uniform(1500, 2750, size=n_meteors)
 
     meteor_velocity_models = [LinearDeceleration(duration, t0, decel) for duration, t0, decel in \
         zip(meteor_durations, t0_list, decel_list)]

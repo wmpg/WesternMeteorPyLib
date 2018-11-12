@@ -80,11 +80,12 @@ if __name__ == "__main__":
     # os.path.abspath("../SimulatedMeteors/CAMSsim/2012Perseids"),
 
     # os.path.abspath("../SimulatedMeteors/SOMN_sim/2011Draconids"),
-    os.path.abspath("../SimulatedMeteors/SOMN_sim/2014Ursids"),
+    #os.path.abspath("../SimulatedMeteors/SOMN_sim/2014Ursids"),
     # os.path.abspath("../SimulatedMeteors/SOMN_sim/2012Perseids"),
     # os.path.abspath("../SimulatedMeteors/SOMN_sim/2015Taurids")
 
-    #shower_dir = os.path.abspath("../SimulatedMeteors/SOMN_sim/LongFireball")
+    os.path.abspath("../SimulatedMeteors/SOMN_sim/LongFireball")
+    #os.path.abspath("../SimulatedMeteors/SOMN_sim/LongFireball_nograv")
     #shower_dir = os.path.abspath("../SimulatedMeteors/SOMN_sim/LongFireball_nograv")
     ]
 
@@ -96,10 +97,10 @@ if __name__ == "__main__":
 
 
     # Trajectory solvers
-    #traj_solvers = ['planes', 'los', 'milig', 'monte_carlo', 'gural0', 'gural1', 'gural2', 'gural3']
+    traj_solvers = ['planes', 'los', 'milig', 'monte_carlo', 'gural0', 'gural0fha', 'gural1', 'gural2', 'gural3']
     #traj_solvers = ['gural0fha']
     #traj_solvers = ['planes', 'los', 'monte_carlo']
-    traj_solvers = ['los']
+    #traj_solvers = ['los']
     #traj_solvers = ['planes', 'milig']
 
 
@@ -132,8 +133,8 @@ if __name__ == "__main__":
             # Prepare everything for saving data to disk
             sim_met.initOutput(output_dir)
 
-            # # Save info about the simulated meteor (THIS CAN BE DISABLED WITH UPDATING SOLUTIONS)
-            # sim_met.saveInfo(output_dir) # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+            # Save info about the simulated meteor (THIS CAN BE DISABLED WITH UPDATING SOLUTIONS)
+            sim_met.saveInfo(output_dir)
 
             # Solve the simulated meteor with multiple solvers
             for traj_solver in traj_solvers:
@@ -157,7 +158,7 @@ if __name__ == "__main__":
                     
                     # Init the trajectory
                     traj = Trajectory(sim_met.jdt_ref, output_dir=output_dir, max_toffset=t_max_offset, \
-                        meastype=2, show_plots=False, mc_runs=250, gravity_correction=gravity_correction)  ## TESING, ONLY 100 RUNS!!!
+                        meastype=2, show_plots=False, mc_runs=100, gravity_correction=gravity_correction)  ## TESING, ONLY 100 RUNS!!!
 
                 
                 elif 'gural' in traj_solver:

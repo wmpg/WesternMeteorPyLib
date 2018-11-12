@@ -41,6 +41,9 @@ class PickInfo(object):
         # Pick frame
         self.frame = 0
 
+        # Fragment ID
+        self.id = 0
+
         # Pick time
         self.unix_time = 0
 
@@ -55,6 +58,9 @@ class PickInfo(object):
         # Original picks sky coordinates
         self.theta = theta
         self.phi = phi
+
+        # Log sum pixel
+        self.lsp = 0
 
 
 
@@ -240,12 +246,18 @@ def extractPicks(met, mirfit=False):
             # Extract frames
             frames = np.array(met.picks[site])[:,0]
 
+            # Fragment ID
+            id_data = np.array(met.picks[site])[:,1]
+
             # Extract original centroids
             cx_data, cy_data = np.hsplit(np.array(met.picks[site])[:,2:4], 2)
 
             # Extract UNIX time
             ts_data, tu_data = np.hsplit(np.array(met.picks[site])[:,11:13], 2)
             time_data = ts_data + tu_data/1000000
+
+            # Extract log sum pixel
+            lsp_data = np.array(met.picks[site])[:,7]
 
 
             # Extract mirror positions on each frame
@@ -264,8 +276,8 @@ def extractPicks(met, mirfit=False):
             met.picks_objs[site] = []
 
             # Generate a list of pick object
-            for fr, cx, cy, hx, hy, theta_pick, phi_pick, unix_time in zip(frames, cx_data, cy_data, hx_data, 
-                hy_data, theta, phi, time_data):
+            for fr, frag_id, cx, cy, hx, hy, theta_pick, phi_pick, unix_time, lsp in zip(frames, id_data, \
+                cx_data, cy_data, hx_data, hy_data, theta, phi, time_data, lsp_data):
                 
                 # Init a new pick
                 pick = PickInfo(theta_pick, phi_pick)
@@ -276,6 +288,9 @@ def extractPicks(met, mirfit=False):
                 # Set pick UNIX time
                 pick.unix_time = unix_time
 
+                # Set fragment ID
+                pick.id = frag_id
+
                 # Set original pick centroids
                 pick.cx = cx
                 pick.cy = cy
@@ -283,6 +298,9 @@ def extractPicks(met, mirfit=False):
                 # Set mirror position of frame centre
                 pick.hx = hx
                 pick.hy = hy
+
+                # Log sum pixel
+                pick.lsp = lsp
 
                 # Add the pick to the list of all picks
                 met.picks_objs[site].append(pick)
@@ -711,10 +729,29 @@ if __name__ == "__main__":
     #dir_path = "../MirfitPrepare/20160929_062945_mir"
     #dir_path = "../MetalPrepare/20161007_052749_met"
     #dir_path = "../MetalPrepare/20161007_052346_met"
-    #dir_path = "/home/dvida/Dropbox/UWO Master's/Projects/MetalPrepare/20170721_070420_met"
+    #dir_path = "/home/dvida/Dropbox/UWO/Projects/MetalPrepare/20170721_070420_met"
     #dir_path = "../MetalPrepare/20170721_070420_met_TEST"
     #dir_path = "/home/dvida/Desktop/ev_20171026_081339A"
-    dir_path = "/mnt/bulk/mirfitprepare/20180703_030839_met"
+    #dir_path = "/mnt/bulk/mirfitprepare/20180703_030839_met"
+    #dir_path = "/mnt/bulk/mirfitprepare/20180707_035246_met"
+    #dir_path = "/mnt/bulk/mirfitprepare/20180707_044501_met"
+    #dir_path = "/mnt/bulk/mirfitprepare/20180707_050552_met"
+    #dir_path = "/mnt/bulk/mirfitprepare/20180707_081214_met"
+    #dir_path = "/mnt/bulk/mirfitprepare/20180712_033850_met"
+    #dir_path = "/mnt/bulk/mirfitprepare/20180716_062718_met"
+    #dir_path = "/mnt/bulk/mirfitprepare/20180720_043328_met"
+    #dir_path = "/mnt/bulk/mirfitprepare/20180707_061802_met"
+    #dir_path = "/mnt/bulk/mirfitprepare/20180710_074555_met"
+    #dir_path = "/mnt/bulk/mirfitprepare/20180521_062759_met"
+    #dir_path = "/mnt/bulk/mirfitprepare/20180707_063133_met"
+    #dir_path = "/mnt/bulk/mirfitprepare/20180720_073742_met"
+    #dir_path = "/mnt/bulk/mirfitprepare/20180806_053704_met"
+    #dir_path = "/mnt/bulk/mirfitprepare/20180811_030625_met"
+    #dir_path = "/mnt/bulk/mirfitprepare/20180815_024529_met"
+    #dir_path = "/mnt/bulk/mirfitprepare/20180815_061558_met"
+    #dir_path = "/mnt/bulk/mirfitprepare/20180917_041318_met"
+    dir_path = "/mnt/bulk/mirfitprepare/20180919_085506_met"
+    
 
     # Name of the met file
     file_name = 'state.met'
