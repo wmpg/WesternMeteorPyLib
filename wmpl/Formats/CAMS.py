@@ -625,16 +625,16 @@ if __name__ == "__main__":
     #dir_path = "/home/dvida/DATA/Dropbox/Apps/VSA2017 RMS data/first_rpi_orbit"
     #dir_path = "D:/Dropbox/Apps/VSA2017 RMS data/first_rpi_orbit"
     #dir_path = "/home/dvida/DATA/Dropbox/Apps/VSA2017 RMS data/first_rpi_orbit"
-    #dir_path = "D:/Dropbox/RPi Meteor Station/orbit_test"
+    dir_path = "D:/Dropbox/RPi Meteor Station/orbit_test"
     #dir_path = "/home/dvida/Dropbox/RPi Meteor Station/orbit_test"
-    dir_path = "/home/dvida/Dropbox/RPi Meteor Station/orbit_test/20180615_long_shallow_meteor"
+    #dir_path = "/home/dvida/Dropbox/RPi Meteor Station/orbit_test/20180615_long_shallow_meteor"
     #dir_path = "D:/Dropbox/RPi Meteor Station/orbit_test/20180615_long_shallow_meteor"
 
     # Find the absolute path of the given directory
     dir_path = os.path.abspath(dir_path)
 
     # Image file type of the plots
-    plot_file_type = 'pdf'
+    plot_file_type = 'png'
 
     camerasites_file_name = 'CameraSites.txt'
     cameratimeoffsets_file_name = 'CameraTimeOffsets.txt'
@@ -643,8 +643,9 @@ if __name__ == "__main__":
     #ftpdetectinfo_file_name = 'FTPdetectinfo_20180614.txt'
     #ftpdetectinfo_file_name = "FTPdetectinfo_20180614_temporal.txt"
     #ftpdetectinfo_file_name = "FTPdetectinfo_20180614_spatial.txt"
+    ftpdetectinfo_file_name = "FTPdetectinfo_20180614_spatial_new.txt"
     #ftpdetectinfo_file_name = 'FTPdetectinfo_20180615.txt'
-    ftpdetectinfo_file_name = 'FTPdetectinfo_20180615_long_shallow_meteor.txt'
+    #ftpdetectinfo_file_name = 'FTPdetectinfo_20180615_long_shallow_meteor.txt'
 
 
     camerasites_file_name = os.path.join(dir_path, camerasites_file_name)
@@ -682,62 +683,62 @@ if __name__ == "__main__":
     #   print('--------------------------')
     #   print(met)
 
-    meteor = meteor1
+    meteor = meteor6
 
     # Run the trajectory solver
-    traj = solveTrajectoryCAMS(meteor, os.path.join(dir_path, 'trajectory'), solver='original', monte_carlo=False, \
+    traj = solveTrajectoryCAMS(meteor, os.path.join(dir_path, 'meteor6_spatial'), solver='original', monte_carlo=False, \
         show_plots=False, save_results=True, mc_noise_std=1.0, mc_runs=250, max_toffset=60.0, 
         plot_file_type=plot_file_type)
 
 
-    ### PERFORM PHOTOMETRY
+    # ### PERFORM PHOTOMETRY
 
-    # Override default DPI for saving from the interactive window
-    matplotlib.rcParams['savefig.dpi'] = 300
+    # # Override default DPI for saving from the interactive window
+    # matplotlib.rcParams['savefig.dpi'] = 300
 
-    # Compute absolute mangitudes
-    computeAbsoluteMagnitudes(traj, meteor)
+    # # Compute absolute mangitudes
+    # computeAbsoluteMagnitudes(traj, meteor)
 
-    # List of photometric uncertainties per station
-    photometry_stddevs = [0.3]*len(meteor)
-    # photometry_stddevs = [0.2, 0.3]*len(meteor)
+    # # List of photometric uncertainties per station
+    # photometry_stddevs = [0.3]*len(meteor)
+    # # photometry_stddevs = [0.2, 0.3]*len(meteor)
 
-    time_data_all = []
-    abs_mag_data_all = []
+    # time_data_all = []
+    # abs_mag_data_all = []
 
-    # Plot absolute magnitudes for every station
-    for i, (meteor_obs, photometry_stddev) in enumerate(zip(meteor, photometry_stddevs)):
+    # # Plot absolute magnitudes for every station
+    # for i, (meteor_obs, photometry_stddev) in enumerate(zip(meteor, photometry_stddevs)):
 
-        # Take only magnitudes that are not None
-        good_mag_indices = [j for j, abs_mag in enumerate(meteor_obs.abs_mag_data) if abs_mag is not None]
-        time_data = traj.observations[i].time_data[good_mag_indices]
-        abs_mag_data = np.array(meteor_obs.abs_mag_data)[good_mag_indices]
+    #     # Take only magnitudes that are not None
+    #     good_mag_indices = [j for j, abs_mag in enumerate(meteor_obs.abs_mag_data) if abs_mag is not None]
+    #     time_data = traj.observations[i].time_data[good_mag_indices]
+    #     abs_mag_data = np.array(meteor_obs.abs_mag_data)[good_mag_indices]
 
-        time_data_all += time_data.tolist()
-        abs_mag_data_all += abs_mag_data.tolist()
+    #     time_data_all += time_data.tolist()
+    #     abs_mag_data_all += abs_mag_data.tolist()
 
-        # Sort by time
-        temp_arr = np.c_[time_data, abs_mag_data]
-        temp_arr = temp_arr[np.argsort(temp_arr[:, 0])]
-        time_data, abs_mag_data = temp_arr.T
+    #     # Sort by time
+    #     temp_arr = np.c_[time_data, abs_mag_data]
+    #     temp_arr = temp_arr[np.argsort(temp_arr[:, 0])]
+    #     time_data, abs_mag_data = temp_arr.T
 
-        # Plot the magnitude
-        plt_hande = plt.plot(time_data, abs_mag_data, label=meteor_obs.station_id, zorder=3)
+    #     # Plot the magnitude
+    #     plt_hande = plt.plot(time_data, abs_mag_data, label=meteor_obs.station_id, zorder=3)
 
-        # Plot magnitude errorbars
-        plt.errorbar(time_data, abs_mag_data, yerr=photometry_stddev, fmt='--o', color=plt_hande[0].get_color())
+    #     # Plot magnitude errorbars
+    #     plt.errorbar(time_data, abs_mag_data, yerr=photometry_stddev, fmt='--o', color=plt_hande[0].get_color())
 
     
-    plt.legend()
+    # plt.legend()
 
-    plt.xlabel('Time (s)')
-    plt.ylabel('Absolute magnitude')
+    # plt.xlabel('Time (s)')
+    # plt.ylabel('Absolute magnitude')
     
-    plt.gca().invert_yaxis()
+    # plt.gca().invert_yaxis()
 
-    plt.grid()
+    # plt.grid()
 
-    plt.show()
+    # plt.show()
 
 
     # ### Compute the mass

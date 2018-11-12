@@ -1,8 +1,10 @@
 from __future__ import print_function, division, absolute_import
 
 
+import sys
 import math
 import time
+import copy
 
 import numpy as np
 import scipy.optimize
@@ -50,22 +52,101 @@ M_PROTON = 1.6726231e-27
 
 ###
 
+
+class NoFragmentation(object):
+    def __init__(self):
+        """ Dummy object which defines no fragmentation whatsoever. """
+
+        pass
+
+    def fragment(self, met):
+        return False
+
+
+
+
+class HeightFragmentation(object):
+    def __init__(self, frag_ht, daughter_frag_mass_ratios):
+        """ Fragmentation behaviour which assumes that the main fragment will fragment at a specific height 
+            into the given number of daughter fragments. Daughter fragments will have predefined mass
+            ratios.
+
+        Arguments:
+            frag_ht: [float] Fragmentation height (km).
+            daughter_frag_mass_ratios: [list] A list of daughter fragment mass ratios, e.g. [1, 0.5, 0.25].
+        """
+
+        self.frag_ht = 1000*frag_ht
+        self.daughter_frag_mass_ratios = daughter_frag_mass_ratios
+
+
+    def fragment(self, met):
+        """ Given the status of the main fragment, decide if the fragmentation should occur. """
+
+        # Check if the given fragment has reached the specified height
+        # Fragment only the main fragment if it's active
+        if (met.h < self.frag_ht) and met.main_fragment and met.Fl_ablate:
+
+            # Fragment the main fragment into several daughter fragments
+            # Assume that the daughter fragments inherit all physical properties of the parent fragment
+
+            # Normalize mass ratios
+            new_frags_mass_ratio = np.array(self.daughter_frag_mass_ratios)
+            new_frags_mass_ratio /= np.max(new_frags_mass_ratio)
+
+            # Compute the new masses
+            new_frags_masses = met.m*new_frags_mass_ratio
+
+
+            print('Fragmentation at {:.2f} km, main mass: {:e} g, into: '.format(self.frag_ht/1000, \
+                1000*met.m), 1000*new_frags_masses, 'g')
+
+            new_frag_list = []
+
+            # Init new fragments
+            for frag_mass in new_frags_masses:
+
+                frag = copy.deepcopy(met)
+
+                # Reset the results of the daughter fragments
+                frag.results_list = []
+
+                # Set the new mass
+                frag.m = frag_mass
+
+                # Make sure the daughter fragments are ablating
+                frag.Fl_ablate = 1
+
+                frag.main_fragment = False
+
+                new_frag_list.append(frag)
+
+
+            return new_frag_list
+
+
+        # Return False if no fragmentation occurs
+        return False
+
+
+
+
 class MeteorProperties(object):
 
     def __init__(self):
 
         zero = D_TYPE(0)
 
-        # Time
+        # Time in seconds
         self.t = zero
 
-        # Length along the train
+        # Length along the train in meters
         self.s = zero
 
-        # Height
+        # Height in meters
         self.h = zero
 
-        # Velocity
+        # Velocity in m/s
         self.v = zero
 
         # Luminosity
@@ -129,6 +210,13 @@ class MeteorProperties(object):
 
         # 1 if the particle is still actively ablating
         self.Fl_ablate = zero
+
+
+        # List of fragment results
+        self.results_list = []
+
+        # Denotes the main fragment
+        self.main_fragment = False
 
 
 
@@ -784,7 +872,7 @@ def ablate(met, consts, no_atmosphere_end_ht=-1):
 
 
 
-def runSimulation(met, consts, no_atmosphere_end_ht=-1):
+def runSimulation(met, consts, fragmentation_model=None, no_atmosphere_end_ht=-1):
     """ Runs meteor ablation simulation with the given initial parameters.
 
     Arguments:
@@ -792,16 +880,23 @@ def runSimulation(met, consts, no_atmosphere_end_ht=-1):
         consts: [MeteorConstants object] Structure containing simulation constants.
 
     Keyword arguments:
+        fragmentation_model: [xFragmentation object] Object which has a function 'fragment' and decides if the
+            body should fragment. The function should return a list of daughter fragments. None by default,
+            if which case no fragmentation will occur.
         no_atmosphere_end_ht: [float] If > 0, a no-atmosphere solution will be computed, meaning that the meteoroid
             will not be ablated. The number that is given is the height in meters at which the simulation 
             will stop.
     
     Return:
-        [list] A list containing simulation results:
-            [time, heights, length, velocity, luminosity]
+        [list] A list of MeteorProperties objects for every fragment.
+        [list] A list of [time, total_luminosity] pairs.
 
     """
 
+
+    # If no fragmentation model was specified, don't fragment the meteor
+    if fragmentation_model is None:
+        fragmentation_model = NoFragmentation()
 
 
     ### Calculate physical/other params
@@ -841,9 +936,7 @@ def runSimulation(met, consts, no_atmosphere_end_ht=-1):
         consts.mkill = met.m_init
 
 
-    # Assume a single-body meteor
-    #frag = MeteorProperties()
-
+    # Assume a single-body meteor at the beginning
     met.t = 0
     met.s = 0
     met.h = met.h_init
@@ -864,18 +957,70 @@ def runSimulation(met, consts, no_atmosphere_end_ht=-1):
     # 1 if the particle is still actively ablating
     met.Fl_ablate = 1
 
-    results_list = []
+    # Denote that this is the first main fragment
+    met.main_fragment = True
+
+    
+    # Add the main body to the fragment list
+    fragment_list = []
+    fragment_list.append(met)
+    consts.active_fragments = 1
+
+    # Keep track of the total luminosity
+    time_luminosity_list = []
 
     # Run the ablation until the mass is too small
-    while(met.Fl_ablate and (met.m > consts.mkill) and (met.h/1000 < 200)):
+    while consts.active_fragments > 0:
 
-        printd("##########################")
-        
-        # Ablate the fragment
-        met, consts = ablate(met, consts, no_atmosphere_end_ht=no_atmosphere_end_ht)
+        # Keep track of the total number of fragments at the beginning
+        iter_frags = len(fragment_list)
 
-        # Add the current state to results
-        results_list.append([met.t, met.h, met.s, met.v, met.lum])
+
+        total_luminosity_per_step = 0
+
+        # Ablate all fragments
+        for i, frag in enumerate(fragment_list[:iter_frags]):
+
+            # Check if the ablation for this fragment is enabled
+            if frag.Fl_ablate:
+
+                # If the mass of the fragment is too small, stop ablating
+                if frag.m <= consts.mkill:
+                    
+                    frag.Fl_ablate = False
+                    consts.active_fragments -= 1
+                    continue
+                
+                # Ablate the fragment
+                frag, consts = ablate(frag, consts, no_atmosphere_end_ht=no_atmosphere_end_ht)
+
+                # Make sure to reduce the number of active fragments if this one ended ablating
+                if frag.Fl_ablate == False:
+                    consts.active_fragments -= 1
+
+                # Add the current state to results
+                frag.results_list.append([frag.t, frag.h, frag.s, frag.v, frag.lum])
+
+                # Add up the luminosity
+                total_luminosity_per_step += frag.lum
+
+
+                # Check if the body should fragment
+                new_fragments = fragmentation_model.fragment(frag)
+                if new_fragments:
+
+                    # If the body fragmented, stop the ablation of the parent fragment
+                    frag.Fl_ablate = False
+                    consts.active_fragments -= 1
+
+                    # Add daughter fragments to the ablation list
+                    fragment_list += new_fragments
+                    consts.active_fragments += len(new_fragments)
+
+
+        time_luminosity_list.append([frag.t, total_luminosity_per_step])
+
+
 
 
     printv('Minimum height was', consts.h_min/1000, 'km')
@@ -886,7 +1031,7 @@ def runSimulation(met, consts, no_atmosphere_end_ht=-1):
         print("Proceeding to evaluate")
 
 
-    return results_list
+    return fragment_list, time_luminosity_list
 
 
 if __name__ == "__main__":
@@ -898,7 +1043,7 @@ if __name__ == "__main__":
 
 
     # Name of input file for meteor parameters
-    file_name = os.path.join('MetSim', 'Metsim0001_input.txt')
+    file_name = os.path.join('wmpl', 'MetSim', 'Metsim0001_input.txt')
 
     # Set meteor average location and time
     # lat = np.radians(43.937484)
@@ -907,7 +1052,7 @@ if __name__ == "__main__":
     # jd = 2457955.794670294970
 
     lat = np.radians(45.0)
-    lon = np.radians(0.0)
+    lon = np.radians(-81.0)
     #jd = datetime2JD(datetime.datetime.now())
     jd = 2451545.0 # J2000
 
@@ -926,40 +1071,137 @@ if __name__ == "__main__":
     # Set heat transfer coefficient (cometary)
     met.Lambda = 0.5
 
-    # Set heat of ablation (J/kg) (cometary)
-    met.q = 2.5*10**6
+    # Set heat of ablation (J/kg) 
+    #met.q = 2.5*10**6 # (cometary)
+    met.q = 6*10**6 # (asteroidal)
 
     # Initial mass (kg)
-    met.m_init = 0.1/1000
+    met.m_init = 0.003/1000
 
     # Density (kg/m^3)
-    met.rho = 1510.0
+    met.rho = 3000
 
     # Initial velocity (m/s)
-    met.v_init = 20000
+    #met.v_init = 39660
+    met.v_init = 38408
 
     # Zenith angle (rad)
-    consts.zr = np.radians(45.0)
+    #consts.zr = np.radians(57.78)
+    consts.zr = np.radians(54.6)
 
     ##########################
+
+    ### FRAGMENTATION
+
+    # # No fragmentation
+    # fragmentation_model = NoFragmentation()
+
+
+    # Fragment into daughter fragments at the given height
+    #daughter_frag_mass_ratios = [1.0, 0.75, 0.5, 0.25]
+    #daughter_frag_mass_ratios = [1.0, 0.8, 0.6, 0.4]
+    #daughter_frag_mass_ratios = [1.0, 0.9, 0.8, 0.7]
+    #daughter_frag_mass_ratios = [1.0, 0.5]
+    daughter_frag_mass_ratios = [1.0, 0.75, 0.5]
+    #fragmentation_model = HeightFragmentation(93.5, daughter_frag_mass_ratios)
+    #fragmentation_model = HeightFragmentation(93.0, daughter_frag_mass_ratios)
+    fragmentation_model = HeightFragmentation(110.0, daughter_frag_mass_ratios)
+
+    ##########################    
 
 
     t1 = time.clock()
     
     # Run the simulation (full atmosphere)
-    results_list = runSimulation(met, consts, no_atmosphere_end_ht=-1)
+    fragment_list, time_luminosity_list = runSimulation(met, consts, fragmentation_model=fragmentation_model,\
+        no_atmosphere_end_ht=-1)
+
+
 
     print('Runtime:', time.clock() - t1)
 
 
-    # Get the results
-    results_list = np.array(results_list)
-    time_data, height, trail, velocity, luminosity = results_list.T
+    def line(x, m, l):
+        return m*x + l
 
-    # Convert distance/height to km
-    height = height/1000
-    trail = trail/1000
-    velocity = velocity/1000
+
+    # Plot time vs. lag on the top graph
+    fig, (ax1, ax2) = plt.subplots(nrows=2)
+
+    # Get the results for every fragment
+    for i, frag in enumerate(fragment_list):
+
+        # Get the result list of every fragment
+        results_list = np.array(frag.results_list)
+
+        time_data, height, trail, velocity, luminosity = results_list.T
+
+        # Compute the lag on the main fragment, just before the fragmentation
+        if i == 0:
+
+            # Take the last 10% of the fragment path
+            fpart_t = time_data[int(0.9*len(time_data)):]
+            fpart_s = trail[int(0.9*len(trail)):]
+
+            line_params, _ = scipy.optimize.curve_fit(line, fpart_t, fpart_s)
+
+
+        # Compute the lag
+        lag = trail - line(time_data, *line_params)
+
+
+        # Convert distance/height to km
+        height = height/1000
+        trail = trail/1000
+        velocity = velocity/1000
+
+        # Plot time vs. length for every fragment
+        #plt.plot(trail, time_data)
+
+        # Plot the lag
+        ax1.plot(lag, time_data)
+
+        # Plot time vs. height
+        ax2.plot(time_data, height)
+
+
+
+    
+    ax1.set_xlabel('Lag (m)')
+    ax1.set_ylabel('Time (s)')
+    ax1.invert_yaxis()
+    
+    
+    ax2.set_xlabel('Time (s)')
+    ax2.set_ylabel('Height (km)')
+    
+    
+    plt.show()
+
+
+    # Extract time vs. luminosty data
+    time_lum_data, luminosity = np.array(time_luminosity_list).T
+
+    # Calculate absolute magnitude (apparent @100km) from given luminous intensity
+    P_0m = 840.0
+    abs_magnitude = -2.5*np.log10(luminosity/P_0m)
+
+
+    # Plot the lightcurve
+    plt.plot(time_lum_data, abs_magnitude)
+
+    plt.xlabel('Time (s)')
+    plt.ylabel('Abs mag')
+
+    plt.title('$P_{0m}$ = ' + '{:.1f}'.format(P_0m))
+
+    plt.gca().invert_yaxis()
+
+    plt.show()
+
+
+
+    sys.exit()
 
     ### Calculate the lag
 

@@ -629,10 +629,13 @@ def estimateHullOverlapRatio(hull1, hull2, niter=200, volume=False):
 ##############################################################################################################
 
 
-def RMSD(x):
+def RMSD(x, weights=None):
     """ Root-mean-square deviation of measurements vs. model. """
 
-    return np.sqrt(np.sum(x**2)/len(x))
+    if weights is None:
+        weights = np.ones_like(x)
+
+    return np.sqrt(np.sum(weights*x**2)/np.sum(weights))
     
 
 

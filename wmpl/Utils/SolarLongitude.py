@@ -1347,6 +1347,7 @@ def jd2SolLonJPL(jd):
 
     return la_sun
 
+jd2SolLonJPL_vect = np.vectorize(jd2SolLonJPL)
 
 
 def _solLon2jd(solFunc, year, month, L):

@@ -46,6 +46,10 @@ def loadMetalMags(dir_path, file_name):
         # Split into time, range and apparent magnitude
         time, r, mag_app = data.T
 
+        # If the range are all zeros, skip this step
+        if not np.all(r):
+            continue
+
         # Calculate absolute magnitude (apparent magnitude @100km range)
         mag_abs = mag_app + 5.0*np.log10(100.0/r.astype(np.float64))
 

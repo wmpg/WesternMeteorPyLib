@@ -26,7 +26,7 @@ from mpl_toolkits.basemap import Basemap
 
 from wmpl.Trajectory.Orbit import calcOrbit
 from wmpl.Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, RMSD, angleBetweenSphericalCoords, \
-    checkContinuity
+    lineFunc
 from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import savePickle
 from wmpl.Utils.Plotting import savePlot
@@ -855,37 +855,25 @@ def calcSpatialResidual(jd, state_vect, radiant_eci, stat, meas):
 
 
 
-def lineFunc(x, m, k):
-    """ Line defined by slope and intercept. 
-    
-    Arguments:
-        x: [float] independant variable
-        m: [float] slope
-        k: [float] intercept
-
-    Return:
-        [float]: line given by (m, k) evaluated at x
-
-    """
-
-    return m*x + k
-
-
-
-def lineFuncLS(params, x, y):
+def lineFuncLS(params, x, y, weights):
     """ Line defined by slope and intercept. Version for least squares.
     
     Arguments:
-        params: [list] Line parameters
+        params: [list] Line parameters 
         x: [float] Independant variable
         y: [float] Estimated values
+
+    Keyword arguments:
+        weight: [float] Weight of the residual.
 
     Return:
         [float]: line given by (m, k) evaluated at x
 
     """
 
-    return lineFunc(x, *params) - y
+    # Compute the residuals and apply weights (sqrt of weights is takes because the value will be squared in
+    #   the LS function)
+    return (lineFunc(x, *params) - y)*np.sqrt(weights)
 
 
 
@@ -946,141 +934,6 @@ def jacchiaVelocityFunc(t, a1, a2, v_init):
     return v_init - np.abs(a1*a2)*np.exp(np.abs(a2)*t)
 
 
-
-def fitLagIntercept(time, length, v_init, initial_intercept=0.0):
-    """ Finds the intercept of the line with the given slope. Used for fitting time vs. length along the trail
-        data.
-
-    Arguments:
-        time: [ndarray] Array containing the time data (seconds).
-        length: [ndarray] Array containing the length along the trail data.
-        v_init: [float] Fixed slope of the line (i.e. initial velocity).
-
-    Keyword arguments:
-        initial_intercept: [float] Initial estimate of the intercept.
-
-    Return:
-        (slope, intercept): [tuple of floats] fitted line parameters
-    """
-
-    # Fit a line to the first 25% of the points
-    quart_size = int(0.25*len(time))
-
-    # If the size is smaller than 4 points, take all point
-    if quart_size < 4:
-        quart_size = len(time)
-
-    quart_length = length[:quart_size]
-    quart_time = time[:quart_size]
-
-    # Redo the lag fit, but with fixed velocity
-    lag_intercept, _ = scipy.optimize.curve_fit(lambda x, intercept: lineFunc(x, v_init, intercept), 
-        quart_time, quart_length, p0=[initial_intercept])
-
-    return v_init, lag_intercept[0]
-
-
-
-
-# def timingAndVelocityResiduals(params, observations, t_ref_station, ret_stddev=False):
-#     """ Calculate the sum of absolute differences between the lag of the reference station and all other 
-#         stations, by using the given initial velocity and timing differences between stations. 
-    
-#     Arguments:
-#         params: [ndarray] first element is the initial velocity, all others are timing differences from the 
-#             reference station (NOTE: reference station is NOT in this list)
-#         observations: [list] a list of ObservedPoints objects
-#         t_ref_station: [int] index of the reference station
-
-#     Arguments:
-#         ret_stddev: [bool] Returns the standard deviation of lag offsets instead of the cost function.
-    
-#     Return:
-#         [float] sum of absolute differences between the reference and lags of all stations
-#     """
-
-#     stat_count = 0
-
-#     # The first parameters is the initial velocity
-#     v_init = params[0]
-
-#     lags = []
-
-#     # Go through observations from all stations
-#     for i, obs in enumerate(observations):
-
-#         # Time difference is 0 for the reference statins
-#         if i == t_ref_station:
-#             t_diff = 0
-
-#         else:
-#             # Take the estimated time difference for all other stations
-#             t_diff = params[stat_count + 1]
-#             stat_count += 1
-
-
-#         # Calculate the shifted time
-#         time_shifted = obs.time_data + t_diff
-
-#         # Estimate the intercept of the lag line, with the fixed slope (i.e. initial velocity)
-#         lag_line = fitLagIntercept(time_shifted, obs.length, v_init, obs.lag_line[1])
-
-#         # Calculate lag
-#         lag = obs.length - lineFunc(time_shifted, *lag_line)
-
-#         # Add lag to lag list
-#         lags.append([time_shifted,  np.array(lag)])
-
-
-#     # Choose the reference lag
-#     ref_time, ref_lag = lags[t_ref_station]
-
-#     # Do a monotonic cubic spline fit on the reference lag
-#     ref_line_spline = scipy.interpolate.PchipInterpolator(ref_time, ref_lag, extrapolate=True)
-
-#     residual_sum = 0
-#     stddev_sum = 0
-#     stddev_count = 0
-
-#     # Go through all lags
-#     for i, obs in enumerate(observations):
-
-#         # Skip the lag from the reference station
-#         if i == t_ref_station:
-#             continue
-
-#         time, lag = lags[i]
-
-#         # Take only those points that overlap with the reference station
-#         common_points = np.where((time > np.min(ref_time)) & (time < np.max(ref_time)))
-
-#         # Do this is there are at least 4 overlapping points
-#         if len(common_points[0]) > 4:
-#             time = time[common_points]
-#             lag = lag[common_points]
-
-#         # Calculate the residuals in lag from the current lag to the reference lag, using smooth approximation
-#         # of L1 (absolute value) cost
-#         z = (ref_line_spline(time) - lag)**2
-#         residual_sum += np.sum(2*(np.sqrt(1 + z) - 1))
-
-#         # Standard deviation calculation
-#         stddev_sum += np.sum(z)
-#         stddev_count += len(z)
-
-
-#     lag_stddev = np.sqrt(stddev_sum/stddev_count)
-
-
-#     if ret_stddev:
-
-#         # Returned for reporting the goodness of fit
-#         return lag_stddev
-
-#     else:
-
-#         # Returned for minimization
-#         return residual_sum
 
 
 
@@ -2366,7 +2219,7 @@ class Trajectory(object):
 
 
 
-    def calcVelocity(self, state_vect, radiant_eci, observations, calc_res=False):
+    def calcVelocity(self, state_vect, radiant_eci, observations, weights, calc_res=False):
         """ Calculates velocity for the given solution.
 
 
@@ -2375,12 +2228,14 @@ class Trajectory(object):
             radiant_eci: [ndarray] (x, y, z) components of the unit radiant direction vector.
             observations: [list] A list of ObservationPoints objects which hold measurements from individual
                 stations.
+            weights: [list] A list of statistical weights for every station.
 
         Keyword arguments:
             calc_res: [bool] If True, the cost of lag residuals will be calculated. The timing offsets first 
                 need to be calculated for this to work.
 
         """
+
 
         # Go through observations from all stations
         for obs in observations:
@@ -2460,10 +2315,11 @@ class Trajectory(object):
             # Calculate the timing offset between the meteor time vs. length
             
             if self.timing_res is None:
-                self.timing_res = timingResiduals(zero_timing_res, self.observations, self.t_ref_station)
+                self.timing_res = timingResiduals(zero_timing_res, self.observations, self.t_ref_station, \
+                    weights)
 
             self.timing_stddev = timingResiduals(zero_timing_res, self.observations, self.t_ref_station, \
-                ret_stddev=True)
+                weights, ret_stddev=True)
 
 
 
@@ -2551,7 +2407,7 @@ class Trajectory(object):
 
 
 
-    def estimateTimingAndVelocity(self, observations, estimate_timing_vel=True):
+    def estimateTimingAndVelocity(self, observations, weights, estimate_timing_vel=True):
         """ Estimates time offsets between the stations by matching time vs. distance from state vector. 
             The initial velocity is calculated by ineratively fitting a line from the beginning to 20% of the 
             total trajectory, and up to the 80% of the total trajectory. The fit with the lowest standard
@@ -2560,6 +2416,11 @@ class Trajectory(object):
         Arguments:
             observations: [list] A list of ObservationPoints objects which hold measurements from individual
                 stations.
+            weights: [list] A list of statistical weights for every station.
+
+        Keyword arguments:
+            estimate_timing_vel: [bool] If True (default), the time differences and the velocity will be 
+                estimated, otherwise the velocity will be estimated as the medial velocity.
 
         Return:
             (velocity_fit, v_init_mini, time_diffs, observations): [tuple]
@@ -2578,7 +2439,8 @@ class Trajectory(object):
         # Timing differences which will be calculated
         time_diffs = np.zeros(len(observations))
 
-        # If the timing difference and velocity difference is not desired to be performed, skip the procedure
+        # If the timing difference and velocity difference estimation is not desired to be performed, skip 
+        # the procedure
         if not estimate_timing_vel:
             return v_init, time_diffs
 
@@ -2593,7 +2455,8 @@ class Trajectory(object):
 
 
         if self.verbose:
-            print('Initial function evaluation:', timingResiduals(p0, observations, self.t_ref_station))
+            print('Initial function evaluation:', timingResiduals(p0, observations, self.t_ref_station, 
+                weights=weights))
 
 
         # Set bounds for timing to +/- given maximum time offset
@@ -2609,7 +2472,7 @@ class Trajectory(object):
 
             # Run the minimization of residuals between all stations (set tolerance to 1 ns)
             timing_mini = scipy.optimize.minimize(timingResiduals, p0, args=(observations, \
-                self.t_ref_station), bounds=bounds, method=opt_method, options={'maxiter': maxiter}, \
+                self.t_ref_station, weights), bounds=bounds, method=opt_method, options={'maxiter': maxiter}, \
                 tol=1e-9)
 
             # Stop trying methods if this one was successful
@@ -2663,7 +2526,8 @@ class Trajectory(object):
             # Add in time and distance points, excluding the ignored points
             times = []
             state_vect_dist = []
-            for obs in observations:
+            weight_list = []
+            for obs, wt in zip(observations, weights):
 
                 # Skip ignored stations
                 if obs.ignore_station:
@@ -2671,14 +2535,17 @@ class Trajectory(object):
 
                 times.append(obs.time_data[obs.ignore_list == 0])
                 state_vect_dist.append(obs.state_vect_dist[obs.ignore_list == 0])
+                weight_list.append(np.zeros_like(obs.time_data[obs.ignore_list == 0]) + wt)
 
             times = np.concatenate(times).ravel()
             state_vect_dist = np.concatenate(state_vect_dist).ravel()
+            weight_list = np.concatenate(weight_list).ravel()
 
             # Sort points by time
             time_sort_ind = times.argsort()
             times = times[time_sort_ind]
             state_vect_dist = state_vect_dist[time_sort_ind]
+            weight_list = weight_list[time_sort_ind]
 
 
             stddev_list = []
@@ -2710,23 +2577,29 @@ class Trajectory(object):
                     # Select only the first part of all points
                     times_part = times[part_beg:part_end]
                     state_vect_dist_part = state_vect_dist[part_beg:part_end]
+                    weights_list_path = weight_list[part_beg:part_end]
 
                     # Fit a line to time vs. state_vect_dist
                     velocity_fit = scipy.optimize.least_squares(lineFuncLS, [v_init, 1], args=(times_part, \
-                        state_vect_dist_part), loss='soft_l1')
+                        state_vect_dist_part, weights_list_path), loss='soft_l1')
+                    # velocity_fit = scipy.optimize.minimize(lineFuncMinimize, [v_init, 1], args=(times_part, \
+                    #     state_vect_dist_part, weights_list_path))
                     velocity_fit = velocity_fit.x
 
                     # Calculate the lag and fit a line to it
                     lag_temp = state_vect_dist - lineFunc(times, *velocity_fit)
-                    lag_fit = scipy.optimize.least_squares(lineFuncLS, np.ones(2), args=(times, lag_temp), \
+                    lag_fit = scipy.optimize.least_squares(lineFuncLS, np.ones(2), args=(times, lag_temp, weight_list), \
                         loss='soft_l1')
+                    # lag_fit = scipy.optimize.minimize(lineFuncMinimize, np.ones(2), args=(times, \
+                    #     lag_temp, weight_list))
                     lag_fit = lag_fit.x
 
                     # Add the point to the considered list only if the lag has a negative trend
                     if lag_fit[0] <= 0:
 
                         # Calculate the standard deviation of the line fit and add it to the list of solutions
-                        line_stddev = RMSD(state_vect_dist_part - lineFunc(times_part, *velocity_fit))
+                        line_stddev = RMSD(state_vect_dist_part - lineFunc(times_part, *velocity_fit), \
+                            weights=weights_list_path)
                         stddev_list.append([line_stddev, velocity_fit])
 
 
@@ -3234,7 +3107,8 @@ class Trajectory(object):
         
         out_str += "\n"
 
-        out_str += "reference JD: {:20.12f}".format(self.jdt_ref)
+        out_str += "Reference JD: {:20.12f}".format(self.jdt_ref)
+        out_str += "Time: " + str(jd2Date(self.orbit.jd_ref, dt_obj=True)) + " UTC\n"
 
         out_str += "\n\n"
 
@@ -3534,11 +3408,11 @@ class Trajectory(object):
 
             # Plot vertical residuals
             plt.scatter(obs.time_data, obs.v_residuals, c='red', \
-                label='Vertical, RMSD = {:.2f}'.format(v_res_rms), zorder=3, s=2)
+                label='Vertical, RMSD = {:.2f} m'.format(v_res_rms), zorder=3, s=2)
 
             # Plot horizontal residuals
             plt.scatter(obs.time_data, obs.h_residuals, c='b', \
-                label='Horizontal, RMSD = {:.2f}'.format(h_res_rms), zorder=3, s=2)
+                label='Horizontal, RMSD = {:.2f} m'.format(h_res_rms), zorder=3, s=2)
 
             # Mark ignored points
             if np.any(obs.ignore_list):
@@ -3596,11 +3470,11 @@ class Trajectory(object):
 
                 # Plot vertical residuals
                 vres_plot = plt.scatter(obs.time_data, obs.v_residuals, marker='o', s=4, \
-                    label='{:s}, vertical, RMSD = {:.2f}'.format(str(obs.station_id), v_res_rms), zorder=3)
+                    label='{:s}, vertical, RMSD = {:.2f} m'.format(str(obs.station_id), v_res_rms), zorder=3)
 
                 # Plot horizontal residuals
                 plt.scatter(obs.time_data, obs.h_residuals, c=vres_plot.get_facecolor(), marker='+', \
-                    label='{:s}, horizontal, RMSD = {:.2f}'.format(str(obs.station_id), h_res_rms), zorder=3)
+                    label='{:s}, horizontal, RMSD = {:.2f} m'.format(str(obs.station_id), h_res_rms), zorder=3)
 
                 # Mark ignored points
                 if np.any(obs.ignore_list):
@@ -3651,11 +3525,11 @@ class Trajectory(object):
 
                 # Plot vertical residuals
                 vres_plot = plt.scatter(obs.state_vect_dist/1000, obs.v_residuals, marker='o', s=4, \
-                    label='{:s}, vertical, RMSD = {:.2f}'.format(str(obs.station_id), v_res_rms), zorder=3)
+                    label='{:s}, vertical, RMSD = {:.2f} m'.format(str(obs.station_id), v_res_rms), zorder=3)
 
                 # Plot horizontal residuals
                 plt.scatter(obs.state_vect_dist/1000, obs.h_residuals, c=vres_plot.get_facecolor(), 
-                    marker='+', label='{:s}, horizontal, RMSD = {:.2f}'.format(str(obs.station_id), \
+                    marker='+', label='{:s}, horizontal, RMSD = {:.2f} m'.format(str(obs.station_id), \
                         h_res_rms), zorder=3)
 
                 # Mark ignored points
@@ -4581,7 +4455,7 @@ class Trajectory(object):
 
 
         # Calculate velocity at each point
-        self.calcVelocity(self.state_vect_mini, self.radiant_eci_mini, self.observations)
+        self.calcVelocity(self.state_vect_mini, self.radiant_eci_mini, self.observations, weights)
 
 
         if self.verbose and self.estimate_timing_vel:
@@ -4638,11 +4512,12 @@ class Trajectory(object):
 
         # Estimate the timing difference between stations and the initial velocity and update the time
         self.velocity_fit, self.v_init, self.time_diffs, self.observations = \
-            self.estimateTimingAndVelocity(self.observations, estimate_timing_vel=self.estimate_timing_vel)
+            self.estimateTimingAndVelocity(self.observations, weights, \
+                estimate_timing_vel=self.estimate_timing_vel)
 
 
         # Calculate velocity at each point with updated timings
-        self.calcVelocity(self.state_vect_mini, self.radiant_eci_mini, self.observations, 
+        self.calcVelocity(self.state_vect_mini, self.radiant_eci_mini, self.observations, weights,
             calc_res=_rerun_timing)
 
 

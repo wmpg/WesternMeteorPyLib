@@ -864,7 +864,7 @@ def rotatePolar(azim, dec, azim_rot, elev_rot):
 
 
 def raDec2Ecliptic(jd, ra, dec):
-    """ Convert right ascension and declinatoin to ecliptic longitude and latitude.
+    """ Convert right ascension and declination to ecliptic longitude and latitude.
 
     Arguments:
         jd: [float] Julian date of the desired epoch
@@ -892,6 +892,37 @@ def raDec2Ecliptic(jd, ra, dec):
     B = (B + np.pi/2)%np.pi - np.pi/2
 
     return L, B
+
+
+
+def ecliptic2RaDec(jd, L, B):
+    """ Convert right ascension and declination to ecliptic longitude and latitude.
+
+    Arguments:
+        jd: [float] Julian date of the desired epoch
+        L: [float] Ecliptic longitude in radians.
+        B: [float] Ecliptic latitude in radians.
+
+    Return:
+        ra, dec: [tuple of floats] ecliptic longitude and latitude in radians
+
+    """
+
+    # Get the true obliquity
+    eps = wmpl.Utils.Earth.calcTrueObliquity(jd)
+
+
+    ra = np.arctan2(np.cos(eps)*np.sin(L)*np.cos(B) - np.sin(eps)*np.sin(B), np.cos(L)*np.cos(B))
+
+    dec = np.arcsin(np.sin(eps)*np.sin(L)*np.cos(B) + np.cos(eps)*np.sin(B))
+
+    # Wrap the right ascension to [0, 2pi] range
+    ra = ra%(2*np.pi)
+
+    # Wrap the declination to [-pi/2, pi/2] range
+    dec = (dec + np.pi/2)%np.pi - np.pi/2
+
+    return ra, dec
 
 
 
@@ -1144,10 +1175,19 @@ if __name__ == "__main__":
     dec = np.radians(+39.35)
     jd = date2JD(2016, 9, 9, 23, 6, 59)
 
-    L, B = np.degrees(raDec2Ecliptic(jd, ra, dec))
+    print()
+    print('Ecliptic test:')
+    # Test RA/Dec to/from ecliptic conversions
+    print("RA:", np.degrees(ra))
+    print("Dec:", np.degrees(dec))
+    L, B = raDec2Ecliptic(jd, ra, dec)
+    print('L:', np.degrees(L))
+    print('B:', np.degrees(B))
 
-    print('L:', L)
-    print('B:', B)
+    ra, dec = ecliptic2RaDec(jd, L, B)
+    print('RA back:', np.degrees(ra))
+    print('Dec back:', np.degrees(dec))
+    print()
 
 
     jd = date2JD(2011, 2, 4, 23, 20, 42)

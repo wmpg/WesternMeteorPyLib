@@ -8,6 +8,7 @@ else:
 
 
 from setuptools import setup, find_packages
+
 from wmpl.UpdateOrbitFiles import updateOrbitFiles
 
 # Utility function to read the README file.
@@ -58,6 +59,8 @@ updateOrbitFiles()
 
 # Get all data files in 'share'
 share_files = [os.path.join('wmpl', 'share', file_name) for file_name in os.listdir(os.path.join(dir_path, 'wmpl', 'share'))]
+
+
 
 
 setup(
