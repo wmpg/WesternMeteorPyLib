@@ -16,7 +16,10 @@ def readnCDF(file_name):
     # print(dataset.variables)
 
     lon = np.array(dataset.variables['longitude'][:])
+    #0 - 359.5 in steps of 0.5
     lat = np.array(dataset.variables['latitude'][:])
+    #90 - -90 in steps of 0.5
+
 
     level = np.array(dataset.variables['level'][:])
     #pressure 1 - 1000 hPa , non-linear
@@ -25,21 +28,35 @@ def readnCDF(file_name):
     #not known
 
     # time, (number), level, lat, lon
-    T = np.array(dataset.variables['t'][0, 0, 0, 0])
-    u = np.array(dataset.variables['u'][0, 0, 0, 0])
-    v = np.array(dataset.variables['v'][0, 0, 0, 0])
+    T = np.array(dataset.variables['t'][0, 0, 0:10, 0:10])
+    u = np.array(dataset.variables['u'][0, 0, 0:10, 0:10])
+    v = np.array(dataset.variables['v'][0, 0, 0:10, 0:10])
 
     if ensemble_no == True:
-        x = np.arange(0,10,1)
-        y = np.arange(0,10,1)
+
 
         number = np.array(dataset.variables['number'])
-        T = np.array(dataset.variables['t'][0, 0, 0, 0:10, 0:10])
-        u = np.array(dataset.variables['u'][0, 0, 0, 0, 0])
-        v = np.array(dataset.variables['v'][0, 0, 0, 0, 0])
+        T = np.array(dataset.variables['t'][0, 0:10, 0, 0:10, 0:10])
+        u = np.array(dataset.variables['u'][0, 0:10, 0, 0:10, 0:10])
+        v = np.array(dataset.variables['v'][0, 0:10, 0, 0:10, 0:10])
+
+    print(T.shape)
+    #keep this as a function later
+    dim = 10
+    x = np.arange(0,dim,1)
+    x = np.repeat(x, dim**2)
+    y = np.arange(0,dim,1)
+    y = np.repeat(y, dim)
+    y = np.tile(y, dim)
+    z = np.arange(0,dim,1)
+    z = np.tile(z, dim**2)
+    t = T.reshape(-1)
 
     fig = plt.figure(figsize=plt.figaspect(0.5))
-    plt.contourf(x, y, T, 100, cmap='inferno', alpha=1.0)
+    ax1 = fig.add_subplot(1, 1, 1, projection='3d')
+    sc = ax1.scatter(x, y, z, c=t, cmap='inferno', alpha=1.0)
+    #a = plt.colorbar(sc, ax=ax1)
+    #plt.contourf(x, y, u, 100, cmap='inferno', alpha=1.0)
     plt.show()
     # # Conversions
     # temps = (consts.GAMMA*consts.R/consts.M_0*temperature[:])**0.5
