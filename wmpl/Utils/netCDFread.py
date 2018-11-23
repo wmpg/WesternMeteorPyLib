@@ -27,37 +27,40 @@ def readnCDF(file_name):
     time = np.array(dataset.variables['time'][:])
     #not known
 
-    # time, (number), level, lat, lon
-    T = np.array(dataset.variables['t'][0, 0, 0:10, 0:10])
-    u = np.array(dataset.variables['u'][0, 0, 0:10, 0:10])
-    v = np.array(dataset.variables['v'][0, 0, 0:10, 0:10])
 
     if ensemble_no == True:
 
 
         number = np.array(dataset.variables['number'])
-        T = np.array(dataset.variables['t'][0, 0:10, 0, 0:10, 0:10])
-        u = np.array(dataset.variables['u'][0, 0:10, 0, 0:10, 0:10])
-        v = np.array(dataset.variables['v'][0, 0:10, 0, 0:10, 0:10])
+        T = np.array(dataset.variables['t'][0, :, :, 90, 90])
+        u = np.array(dataset.variables['u'][0, :, :, 90, 90])
+        v = np.array(dataset.variables['v'][0, :, :, 90, 90])
 
-    print(T.shape)
+    else:
+        # time, (number), level, lat, lon
+        T = np.array(dataset.variables['t'][0, :, 90, 90])
+        u = np.array(dataset.variables['u'][0, :, 90, 90])
+        v = np.array(dataset.variables['v'][0, :, 90, 90])
+
+    mag = np.sqrt(u**2 + v**2)
+    print(np.flip(mag, axis=0))
     #keep this as a function later
-    dim = 10
-    x = np.arange(0,dim,1)
-    x = np.repeat(x, dim**2)
-    y = np.arange(0,dim,1)
-    y = np.repeat(y, dim)
-    y = np.tile(y, dim)
-    z = np.arange(0,dim,1)
-    z = np.tile(z, dim**2)
-    t = T.reshape(-1)
+    # dim = 10
+    # x = np.arange(0,dim,1)
+    # x = np.repeat(x, dim**2)
+    # y = np.arange(0,dim,1)
+    # y = np.repeat(y, dim)
+    # y = np.tile(y, dim)
+    # z = np.arange(0,dim,1)
+    # z = np.tile(z, dim**2)
+    # t = T.reshape(-1)
 
-    fig = plt.figure(figsize=plt.figaspect(0.5))
-    ax1 = fig.add_subplot(1, 1, 1, projection='3d')
-    sc = ax1.scatter(x, y, z, c=t, cmap='inferno', alpha=1.0)
-    #a = plt.colorbar(sc, ax=ax1)
-    #plt.contourf(x, y, u, 100, cmap='inferno', alpha=1.0)
-    plt.show()
+    # fig = plt.figure(figsize=plt.figaspect(0.5))
+    # ax1 = fig.add_subplot(1, 1, 1, projection='3d')
+    # sc = ax1.scatter(x, y, z, c=t, cmap='inferno', alpha=1.0)
+    # #a = plt.colorbar(sc, ax=ax1)
+    # #plt.contourf(x, y, u, 100, cmap='inferno', alpha=1.0)
+    # plt.show()
     # # Conversions
     # temps = (consts.GAMMA*consts.R/consts.M_0*temperature[:])**0.5
 
