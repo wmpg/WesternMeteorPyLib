@@ -122,6 +122,11 @@ def loadCameraTimeOffsets(cameratimeoffsets_file_name):
 
     time_offsets = {}
 
+    # If the file was not found, skip it
+    if not os.path.isfile(cameratimeoffsets_file_name):
+        print('The time offsets file could not be found! ', cameratimeoffsets_file_name)
+        return time_offsets
+
     with open(cameratimeoffsets_file_name) as f:
 
         # Skip the header
@@ -371,7 +376,7 @@ def loadFTPDetectInfo(ftpdetectinfo_file_name, stations, time_offsets=None):
                 elev = float(line[6])
 
                 # Read the visual magnitude, if present
-                if len(line) > 7:
+                if len(line) > 8:
                     
                     mag = line[8]
 
@@ -625,10 +630,12 @@ if __name__ == "__main__":
     #dir_path = "/home/dvida/DATA/Dropbox/Apps/VSA2017 RMS data/first_rpi_orbit"
     #dir_path = "D:/Dropbox/Apps/VSA2017 RMS data/first_rpi_orbit"
     #dir_path = "/home/dvida/DATA/Dropbox/Apps/VSA2017 RMS data/first_rpi_orbit"
-    dir_path = "D:/Dropbox/RPi Meteor Station/orbit_test"
+    #dir_path = "D:/Dropbox/RPi Meteor Station/orbit_test"
     #dir_path = "/home/dvida/Dropbox/RPi Meteor Station/orbit_test"
     #dir_path = "/home/dvida/Dropbox/RPi Meteor Station/orbit_test/20180615_long_shallow_meteor"
     #dir_path = "D:/Dropbox/RPi Meteor Station/orbit_test/20180615_long_shallow_meteor"
+    #dir_path = "/home/dvida/Dropbox/UWO/Projects/OpticalData/PetesMeteors4Denis"
+    dir_path = "/home/dvida/Dropbox/UWO/Projects/OpticalData/RMS_Leonids"
 
     # Find the absolute path of the given directory
     dir_path = os.path.abspath(dir_path)
@@ -643,9 +650,11 @@ if __name__ == "__main__":
     #ftpdetectinfo_file_name = 'FTPdetectinfo_20180614.txt'
     #ftpdetectinfo_file_name = "FTPdetectinfo_20180614_temporal.txt"
     #ftpdetectinfo_file_name = "FTPdetectinfo_20180614_spatial.txt"
-    ftpdetectinfo_file_name = "FTPdetectinfo_20180614_spatial_new.txt"
+    #ftpdetectinfo_file_name = "FTPdetectinfo_20180614_spatial_new.txt"
     #ftpdetectinfo_file_name = 'FTPdetectinfo_20180615.txt'
     #ftpdetectinfo_file_name = 'FTPdetectinfo_20180615_long_shallow_meteor.txt'
+    #ftpdetectinfo_file_name = os.path.join('PER', 'FTPdetectinfo_000000_2017_08_14_02_47_54M.txt')
+    ftpdetectinfo_file_name = "FTPdetectinfo_RMS2018Leonids.txt"
 
 
     camerasites_file_name = os.path.join(dir_path, camerasites_file_name)
@@ -662,13 +671,13 @@ if __name__ == "__main__":
     meteor_list = loadFTPDetectInfo(ftpdetectinfo_file_name, stations, time_offsets=time_offsets)
 
 
-    # Construct lists of observations of the same meteor (Rpi)
-    meteor1 = meteor_list[:2]
-    meteor2 = meteor_list[2:4]
-    meteor3 = meteor_list[4:6]
-    meteor4 = meteor_list[6:8]
-    meteor5 = meteor_list[8:10]
-    meteor6 = meteor_list[10:12]
+    # # Construct lists of observations of the same meteor (Rpi)
+    # meteor1 = meteor_list[:2]
+    # meteor2 = meteor_list[2:4]
+    # meteor3 = meteor_list[4:6]
+    # meteor4 = meteor_list[6:8]
+    # meteor5 = meteor_list[8:10]
+    # meteor6 = meteor_list[10:12]
 
     # # # Construct lists of observations of the same meteor
     # meteor5 = meteor_list[:2]
@@ -678,17 +687,26 @@ if __name__ == "__main__":
     # meteor1 = meteor_list[13:18]
     # meteor4 = meteor_list[18:24]
 
+    # # Pete's meteors
+    # meteor1 = meteor_list[:4]
+    # meteor2 = meteor_list[4:7]
+    # meteor3 = meteor_list[7:10]
+
+    # RMS leonids
+    meteor1 = meteor_list[:2]
+    meteor2 = meteor_list[2:4]
+
 
     # for met in meteor1:
     #   print('--------------------------')
     #   print(met)
 
-    meteor = meteor6
+    meteor = meteor2
 
     # Run the trajectory solver
-    traj = solveTrajectoryCAMS(meteor, os.path.join(dir_path, 'meteor6_spatial'), solver='original', monte_carlo=False, \
-        show_plots=False, save_results=True, mc_noise_std=1.0, mc_runs=250, max_toffset=60.0, 
-        plot_file_type=plot_file_type)
+    traj = solveTrajectoryCAMS(meteor, os.path.join(dir_path, 'meteor2_rms'), solver='original', monte_carlo=True, \
+        show_plots=False, save_results=True, mc_noise_std=1.0, mc_runs=100, max_toffset=10.0, 
+        plot_file_type=plot_file_type, v_init_part=0.5)
 
 
     # ### PERFORM PHOTOMETRY

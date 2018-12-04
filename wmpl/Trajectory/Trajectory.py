@@ -879,7 +879,7 @@ def lineFuncLS(params, x, y, weights):
 
 def jacchiaLagFunc(t, a1, a2):
     """ Jacchia (1955) model for modeling lengths along the trail of meteors, modified to fit the lag (length 
-        along the trail minus the linear part, estimated by fitting a line to the first 25% of observations, 
+        along the trail minus the linear part, estimated by fitting a line to the first part of observations, 
         where the length is still linear) instead of the length along the trail. 
     
     Arguments:
@@ -1929,7 +1929,7 @@ class Trajectory(object):
     """
 
 
-    def __init__(self, jdt_ref, output_dir='.', max_toffset=1.0, meastype=4, verbose=True, \
+    def __init__(self, jdt_ref, output_dir='.', max_toffset=None, meastype=4, verbose=True, v_init_part=None,\
         estimate_timing_vel=True, monte_carlo=True, mc_runs=None, mc_pick_multiplier=1,  mc_noise_std=1.0, \
         filter_picks=True, calc_orbit=True, show_plots=True, save_results=True, gravity_correction=True,
         plot_all_spatial_residuals=False, plot_file_type='png'):
@@ -1954,6 +1954,9 @@ class Trajectory(object):
                         3 = Azimuth +west of due south for meas1, Zenith angle for meas2
                         4 = Azimuth +north of due east for meas1, Zenith angle for meas2
             verbose: [bool] Print out the results and status messages, True by default.
+            v_init_path: [float] Fixed part from the beginning of the meteor on which the initial velocity
+                estimation using the sliding fit will start. Default is 0.25 (25%), but for noisier data
+                this might be bumped up to 0.5.
             estimate_timing_vel: [bool] Try to estimate the difference in timing and velocity. True by default.
             monte_carlo: [bool] Runs Monte Carlo estimation of uncertanties. True by default.
             mc_runs: [int] Number of Monte Carlo runs. The default value is the number of observed points.
@@ -1982,10 +1985,18 @@ class Trajectory(object):
         self.output_dir = output_dir
 
         # Maximum time offset between cameras
+        if max_toffset is None:
+            max_toffset = 1.0
         self.max_toffset = max_toffset
 
         # If verbose True, results and status messages will be printed out, otherwise they will be supressed
         self.verbose = verbose
+
+        # Fixed part from the beginning of the meteor on which the initial velocity estimation using the 
+        #   sliding fit will start
+        if v_init_part is None:
+            v_init_part = 0.25
+        self.v_init_part = v_init_part
 
         # Estimating the difference in timing between stations, and the initial velocity if this flag is True
         self.estimate_timing_vel = estimate_timing_vel
@@ -2325,7 +2336,7 @@ class Trajectory(object):
 
 
     def calcLag(self, observations):
-        """ Calculate lag by fitting a line to the first 25% of the points and subtracting the line from the 
+        """ Calculate lag by fitting a line to the first part of the points and subtracting the line from the 
             length along the trail.
 
         Arguments:
@@ -2336,16 +2347,16 @@ class Trajectory(object):
         # Go through observations from all stations
         for obs in observations:
 
-            # Fit a line to the first 25% of the points
-            quart_size = int(0.25*len(obs.time_data))
+            # Fit a line to the first part of the points
+            init_part_size = int(self.v_init_part*len(obs.time_data))
 
             # If the size is smaller than 4 points, take all point
-            if quart_size < 4:
-                quart_size = len(obs.time_data)
+            if init_part_size < 4:
+                init_part_size = len(obs.time_data)
 
             # Cut the length and time to the first quarter
-            quart_length = obs.length[:quart_size]
-            quart_time = obs.time_data[:quart_size]
+            quart_length = obs.length[:init_part_size]
+            quart_time = obs.time_data[:init_part_size]
 
             # Fit a line to the data
             obs.lag_line, _ = scipy.optimize.curve_fit(lineFunc, quart_time, quart_length)
@@ -2556,10 +2567,7 @@ class Trajectory(object):
             for part_beg in range(4):
 
                 # Find the best fit on different portions of the trajectory
-                for part in np.arange(0.25, 0.8, 0.05):
-
-                    # Get the index of the beginning of the first portion of points
-                    # part_beg = int(init_point*len(times))
+                for part in np.arange(self.v_init_part, 0.8, 0.05):
 
                     # Get the index of the end of the first portion of points
                     part_end = int(part*len(times))

@@ -26,6 +26,43 @@ from __future__ import print_function, division, absolute_import
 
 import numpy as np
 import scipy.linalg
+import scipy.optimize
+
+from Utils.Math import polarToCartesian
+
+
+
+def greatCirclePhase(theta, phi, theta0, phi0):
+    """ Find the phase angle of the point closest to the given point on the great circle. 
+    
+    Arguments:
+        theta: [float] Inclination of the point under consideration (radians).
+        phi: [float] Nodal angle of the point (radians).
+        theta0: [float] Inclination of the great circle (radians).
+        phi0: [float] Nodal angle of the great circle (radians).
+
+    Return:
+        [float] Phase angle on the great circle of the point under consideration (radians).
+    """
+
+    def _pointDist(x):
+        """ Calculates the Cartesian distance from a point defined in polar coordinates, and a point on
+            a great circle. """
+        
+        # Convert the pick to Cartesian coordinates
+        point = polarToCartesian(phi, theta)
+
+        # Get the point on the great circle
+        circle = greatCircle(x, theta0, phi0)
+
+        # Return the distance from the pick to the great circle
+        return np.sqrt((point[0] - circle[0])**2 + (point[1] - circle[1])**2 + (point[2] - circle[2])**2)
+
+    # Find the phase angle on the great circle which corresponds to the pick
+    res = scipy.optimize.minimize(_pointDist, 0)
+
+    return res.x
+
 
 
 def greatCircle(t, theta0, phi0):
@@ -37,8 +74,8 @@ def greatCircle(t, theta0, phi0):
 
     Arguments:
         t: [float or 1D ndarray] phase angle of the point in the great circle
-        theta0: [float] inclination of the great circle
-        phi0: [float] nodal angle of the great circle
+        theta0: [float] Inclination of the great circle (radians).
+        phi0: [float] Nodal angle of the great circle (radians).
     Return:
         [tuple or 2D ndarray] a tuple of (X, Y, Z) coordinates in 3D space (becomes a 2D ndarray if the input
             parameter t is also a ndarray)

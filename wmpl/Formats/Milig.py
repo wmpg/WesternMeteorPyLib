@@ -350,7 +350,10 @@ if __name__ == '__main__':
          """, type=str, nargs='?', default='original')
 
     arg_parser.add_argument('-t', '--maxtoffset', metavar='MAX_TOFFSET', nargs=1, \
-        help='Maximum time offset between the stations.', type=float, default=1.0)
+        help='Maximum time offset between the stations.', type=float)
+
+    arg_parser.add_argument('-v', '--velpart', metavar='VELOCITY_PART', nargs=1, \
+        help='Fixed part from the beginning of the meteor on which the initial velocity estimation using the sliding fit will start. Default is 0.25 (25%), but for noisier data this might be bumped up to 0.5.', type=float, default=1.0)
 
     arg_parser.add_argument('-d', '--disablemc', \
         help='Do not use the Monte Carlo solver, but only run the geometric solution.', action="store_true")
@@ -375,6 +378,20 @@ if __name__ == '__main__':
 
     ############################
     
+
+    ### Parse command line arguments ###
+
+    max_toffset = None
+    print(cml_args.maxtoffset)
+    if cml_args.maxtoffset:
+        max_toffset = cml_args.maxtoffset[0]
+
+    velpart = None
+    if cml_args.velpart:
+        velpart = cml_args.velpart[0]
+
+    ### ###
+
         
     # Split the input directory and the file
     if os.path.isfile(cml_args.input_file):
@@ -387,10 +404,10 @@ if __name__ == '__main__':
         sys.exit()
 
     # Run the solver
-    solveTrajectoryMILIG(dir_path, file_name, solver=cml_args.solver, max_toffset=cml_args.maxtoffset, \
+    solveTrajectoryMILIG(dir_path, file_name, solver=cml_args.solver, max_toffset=max_toffset, \
         monte_carlo=(not cml_args.disablemc), mc_runs=cml_args.mcruns, \
         gravity_correction=(not cml_args.disablegravity), plot_all_spatial_residuals=cml_args.plotallspatial,
-        plot_file_type=cml_args.imgformat, show_plots=(not cml_args.hideplots))
+        plot_file_type=cml_args.imgformat, show_plots=(not cml_args.hideplots), v_init_part=velpart)
 
 
 
