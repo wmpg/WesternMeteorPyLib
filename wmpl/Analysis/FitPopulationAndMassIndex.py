@@ -23,7 +23,7 @@ def estimateIndex(input_data, mass=False, show_plots=False):
         MLE and estimating the slope in the completeness region.
 
     Arguments:
-        input_data: [array like] List of peak magnitudes or logarithms of mass
+        input_data: [array like] List of peak magnitudes or logarithms of mass (in kg).
 
     Keyword arguments:
         mass: [bool] If true, the mass index will be computed. False by default, in which case the population
