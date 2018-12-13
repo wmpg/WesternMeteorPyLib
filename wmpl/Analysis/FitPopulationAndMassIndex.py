@@ -18,7 +18,7 @@ def logline(x, m, k):
     return 10**line(x, m, k)
 
 
-def estimateIndex(input_data, mass=False, show_plots=False):
+def estimateIndex(input_data, mass=False, show_plots=False, nbins=None):
     """ Estimate the mass or population index from the meteor data by fitting a gamma function to it using
         MLE and estimating the slope in the completeness region.
 
@@ -29,6 +29,8 @@ def estimateIndex(input_data, mass=False, show_plots=False):
         mass: [bool] If true, the mass index will be computed. False by default, in which case the population
             index is computed.
         show_plots: [bool] Set to True to show the plots. False by default.
+        nbins: [int] Number of bins for the histogram. None by default, in which case it will be estimated
+            as the square root of the total number of data points.
     """
 
 
@@ -95,7 +97,8 @@ def estimateIndex(input_data, mass=False, show_plots=False):
         ### PLOTTING ###
 
         # Compute the number of bins for the histogram
-        nbins = int(np.ceil(np.sqrt(len(input_data))))
+        if nbins is None:
+            nbins = int(np.ceil(np.sqrt(len(input_data))))
 
         # Find the slope at the reference point for PDF plotting
         slope_pdf = scipy.stats.gamma.pdf(ref_point, *params)
