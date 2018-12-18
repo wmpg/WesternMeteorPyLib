@@ -66,7 +66,7 @@ def fitSlope(input_data, mass):
 
 
 
-def estimateIndex(input_data, mass=False, show_plots=False):
+def estimateIndex(input_data, mass=False, show_plots=False, nsamples=100):
     """ Estimate the mass or population index from the meteor data by fitting a gamma function to it using
         MLE and estimating the slope in the completeness region.
 
@@ -77,6 +77,7 @@ def estimateIndex(input_data, mass=False, show_plots=False):
         mass: [bool] If true, the mass index will be computed. False by default, in which case the population
             index is computed.
         show_plots: [bool] Set to True to show the plots. False by default.
+        nsamples: [int] Number of samples for uncertainty estimation. 100 by default.
     """
 
 
@@ -94,7 +95,7 @@ def estimateIndex(input_data, mass=False, show_plots=False):
     # Estimate the uncertainty of the slope by sampling the fitted distribution 100 times and refitting it
     #   to the same number amples as the number of input data points
     unc_results_list = []
-    for i in range(100):
+    for i in range(nsamples):
 
         # Sample the distribution
         sampled_data = scipy.stats.gamma.rvs(*params, size=len(input_data))
