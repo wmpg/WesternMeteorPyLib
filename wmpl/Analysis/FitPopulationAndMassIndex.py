@@ -124,7 +124,7 @@ def estimateIndex(input_data, mass=False, show_plots=False):
 
         plt.hist(sign*input_data, bins=nbins, density=True, color='k', histtype='step')
         
-        plt.plot(sign*x_arr, scipy.stats.gamma.pdf(x_arr, *params))
+        plt.plot(sign*x_arr, scipy.stats.gamma.pdf(x_arr, *params), zorder=4)
 
 
 
@@ -138,21 +138,23 @@ def estimateIndex(input_data, mass=False, show_plots=False):
             # Find the slope at the reference point for PDF plotting
             slope_pdf_unc = scipy.stats.gamma.pdf(ref_point_unc, *params_unc)
 
-            plt.scatter(sign*ref_point_unc, slope_pdf_unc, color='k', zorder=3, alpha=0.05)
+            plt.plot(sign*x_arr, scipy.stats.gamma.pdf(x_arr, *params_unc), color='k', alpha=0.05)
+
+            plt.scatter(sign*ref_point_unc, slope_pdf_unc, color='g', zorder=3, alpha=0.05)
 
             plt.scatter(sign*turnover_point_unc, scipy.stats.gamma.pdf(turnover_point_unc, *params_unc), \
-                color='k', zorder=3, alpha=0.1)
+                color='g', zorder=3, alpha=0.1)
 
 
         # Compute standard deviation of reference point
         # The sddev is not computed for turnover point as it has the same value
         ref_point_std = np.std(ref_point_unc_list)
         
-        plt.scatter(sign*ref_point, slope_pdf, color='r', zorder=4, \
+        plt.scatter(sign*ref_point, slope_pdf, color='r', zorder=5, \
             label='Reference point = {:.2f} $\pm$ {:.2f}'.format(sign*ref_point, ref_point_std))
 
         plt.scatter(sign*turnover_point, scipy.stats.gamma.pdf(turnover_point, *params), color='r', \
-            marker='x', zorder=4, label='Turnover point = {:.2f}'.format(sign*turnover_point))
+            marker='x', zorder=5, label='Turnover point = {:.2f}'.format(sign*turnover_point))
 
 
         plt.ylabel('Normalized count')
@@ -169,9 +171,12 @@ def estimateIndex(input_data, mass=False, show_plots=False):
         y_temp = np.log10(scipy.stats.gamma.sf(ref_point, *params))
         intercept = y_temp + slope*ref_point
 
+        # Plot data histogram
         plt.hist(sign*input_data, bins=nbins, cumulative=-sign, density=True, log=True, histtype='step', 
             color='k', zorder=4)
-        plt.plot(sign*x_arr, scipy.stats.gamma.sf(x_arr, *params))
+        
+        # # Plot fitted survival function
+        # plt.plot(sign*x_arr, scipy.stats.gamma.sf(x_arr, *params))
 
 
         # Plot slopes of all lines found during uncertainty estimation
@@ -195,11 +200,11 @@ def estimateIndex(input_data, mass=False, show_plots=False):
 
         # Plot the turnover point
         plt.scatter(sign*ref_point, 10**y_temp, c='r', \
-            label='Reference point = {:.2f} $\pm$ {:.2f}'.format(sign*ref_point, ref_point_std), zorder=4)
+            label='Reference point = {:.2f} $\pm$ {:.2f}'.format(sign*ref_point, ref_point_std), zorder=5)
 
         # Plot the tangential line with the slope
         plt.plot(sign*x_arr, logline(-x_arr, slope, intercept), color='r', \
-            label='Slope = {:.2f} $\pm$ {:.2f}'.format(slope_report, slope_report_std), zorder=4)
+            label='Slope = {:.2f} $\pm$ {:.2f}'.format(slope_report, slope_report_std), zorder=5)
 
 
         plt.xlabel(xlabel)
