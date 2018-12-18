@@ -140,10 +140,10 @@ def estimateIndex(input_data, mass=False, show_plots=False):
 
             plt.plot(sign*x_arr, scipy.stats.gamma.pdf(x_arr, *params_unc), color='k', alpha=0.05)
 
-            plt.scatter(sign*ref_point_unc, slope_pdf_unc, color='g', zorder=3, alpha=0.05)
+            plt.scatter(sign*ref_point_unc, slope_pdf_unc, color='g', zorder=3, alpha=0.1)
 
             plt.scatter(sign*turnover_point_unc, scipy.stats.gamma.pdf(turnover_point_unc, *params_unc), \
-                color='g', zorder=3, alpha=0.1)
+                color='y', zorder=3, alpha=0.1)
 
 
         # Compute standard deviation of reference point
