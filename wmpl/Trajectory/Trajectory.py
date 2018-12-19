@@ -151,8 +151,12 @@ class ObservedPoints(object):
         self.h_residuals = None
         self.v_residuals = None
 
-        # Calculated velocities (in m/s)
+        # Calculated point to point velocities (in m/s)
         self.velocities = None
+
+        # Average velocities including all previous points up to the current point (for first 4 points the
+        #   velocity corresponds to the average velocity through those 4 points)
+        self.velocities_prev_point = None
 
         # Calculated length along the path (meters)
         self.length = None
@@ -2231,7 +2235,8 @@ class Trajectory(object):
 
 
     def calcVelocity(self, state_vect, radiant_eci, observations, weights, calc_res=False):
-        """ Calculates velocity for the given solution.
+        """ Calculates point to point velocity for the given solution, as well as the average velocity 
+            including all previous points up to the given point.
 
 
         Arguments:
@@ -2280,6 +2285,29 @@ class Trajectory(object):
             obs.length = np.array(first_pt_distances)
             obs.state_vect_dist = np.array(state_vect_dist)
 
+
+            # Calculate average velocity including all points up to the given point
+            velocities_prev_point = []
+            for i, (t, l) in enumerate(zip(obs.time_data, obs.length)):
+
+                # For the first 4 points compute the velocity using the first 4 points
+                if i < 4:
+                    time_part = obs.time_data[:4]
+                    len_part = obs.length[:4]
+
+                # Otherwise include all points up to the current point
+                else:
+                    time_part = obs.time_data[: i+1]
+                    len_part = obs.length[: i+1]
+
+
+                # Fit a line through time vs. length data
+                popt, _ = scipy.optimize.curve_fit(lineFunc, time_part, len_part)
+
+                velocities_prev_point.append(popt[0])
+
+
+            obs.velocities_prev_point = np.array(velocities_prev_point)
 
             ### Length vs. time
 
@@ -3282,7 +3310,7 @@ class Trajectory(object):
         out_str += "------\n"
 
 
-        out_str += " No, Station ID,  Ignore,  Time (s),                   JD,     meas1,     meas2, Azim +E of due N (deg), Alt (deg), Azim line (deg), Alt line (deg), RA obs (deg), Dec obs (deg), RA line (deg), Dec line (deg),       X (m),       Y (m),       Z (m), Latitude (deg), Longitude (deg), Height (m),  Range (m), Length (m),  Lag (m), Vel (m/s), H res (m), V res (m), Ang res (asec)\n"
+        out_str += " No, Station ID,  Ignore,  Time (s),                   JD,     meas1,     meas2, Azim +E of due N (deg), Alt (deg), Azim line (deg), Alt line (deg), RA obs (deg), Dec obs (deg), RA line (deg), Dec line (deg),       X (m),       Y (m),       Z (m), Latitude (deg), Longitude (deg), Height (m),  Range (m), Length (m),  Lag (m), Vel (m/s), Vel prev avg (m/s), H res (m), V res (m), Ang res (asec)\n"
 
         # Go through observation from all stations
         for obs in self.observations:
@@ -3329,6 +3357,7 @@ class Trajectory(object):
                 point_info.append("{:8.2f}".format(obs.lag[i]))
 
                 point_info.append("{:9.2f}".format(obs.velocities[i]))
+                point_info.append("{:18.2f}".format(obs.velocities_prev_point[i]))
 
                 point_info.append("{:9.2f}".format(obs.h_residuals[i]))
                 point_info.append("{:9.2f}".format(obs.v_residuals[i]))
@@ -3355,6 +3384,7 @@ class Trajectory(object):
         out_str += "- Jacchia (1955) deceleration equation fit was done on the lag.\n"
         out_str += "- Right ascension and declination in the table are given for the epoch of date for the corresponding JD, per every point.\n"
         out_str += "- 'RA and Dec obs' are the right ascension and declination calculated from the observed values, while the 'RA and Dec line' are coordinates of the lines of sight projected on the fitted radiant line. The coordinates are in the epoch of date, and NOT J2000!. 'Azim and alt line' are thus corresponding azimuthal coordinates.\n"
+        out_str += "- 'Vel prev avg' is the average velocity including all previous points up to the given point. For the first 4 points this velocity is computed as the average velocity of those 4 points. \n"
 
         if verbose:
             print(out_str)
