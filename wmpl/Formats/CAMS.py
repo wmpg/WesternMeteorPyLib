@@ -93,13 +93,13 @@ class MeteorObservation(object):
         out_str += 'FPS = {:f}'.format(self.fps) + '\n'
 
         out_str += 'Points:\n'
-        out_str += 'Time, azimuth, elevation, RA, Dec:\n'
+        out_str += 'Time, azimuth, elevation, RA, Dec, Mag:\n'
 
-        for point_time, azim, elev, ra, dec in zip(self.time_data, self.azim_data, self.elev_data, \
-                self.ra_data, self.dec_data):
+        for point_time, azim, elev, ra, dec, mag in zip(self.time_data, self.azim_data, self.elev_data, \
+                self.ra_data, self.dec_data, self.mag_data):
 
-            out_str += '{:.4f}, {:.2f}, {:.2f}, {:.2f}, {:+.2f}\n'.format(point_time, np.degrees(azim), \
-                np.degrees(elev), np.degrees(ra), np.degrees(dec))
+            out_str += '{:.4f}, {:.2f}, {:.2f}, {:.2f}, {:+.2f}, {:.2f}\n'.format(point_time, np.degrees(azim), \
+                np.degrees(elev), np.degrees(ra), np.degrees(dec), mag)
 
 
         return out_str
@@ -527,7 +527,8 @@ def solveTrajectoryCAMS(meteor_list, output_dir, solver='original', **kwargs):
                 #     meteor.longitude, meteor.height, station_id = meteor.station_id)
 
                 traj.infillTrajectory(meteor.azim_data, meteor.elev_data, meteor.time_data, meteor.latitude, 
-                     meteor.longitude, meteor.height, station_id = meteor.station_id)
+                     meteor.longitude, meteor.height, station_id=meteor.station_id, \
+                     magnitudes=meteor.mag_data)
 
             elif solver == 'gural':
 
@@ -697,15 +698,17 @@ if __name__ == "__main__":
     meteor2 = meteor_list[2:4]
 
 
-    # for met in meteor1:
-    #   print('--------------------------')
-    #   print(met)
-
     meteor = meteor2
 
+
+    for met in meteor:
+      print('--------------------------')
+      print(met)
+
+
     # Run the trajectory solver
-    traj = solveTrajectoryCAMS(meteor, os.path.join(dir_path, 'meteor2_rms'), solver='original', monte_carlo=True, \
-        show_plots=False, save_results=True, mc_noise_std=1.0, mc_runs=100, max_toffset=10.0, 
+    traj = solveTrajectoryCAMS(meteor, os.path.join(dir_path, 'meteor2_rms'), solver='original', monte_carlo=False, \
+        show_plots=True, save_results=True, mc_noise_std=1.0, mc_runs=100, max_toffset=10.0, 
         plot_file_type=plot_file_type, v_init_part=0.5)
 
 

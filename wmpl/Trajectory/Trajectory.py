@@ -42,7 +42,7 @@ from wmpl.Utils.PyDomainParallelizer import DomainParallelizer
 
 class ObservedPoints(object):
     def __init__(self, jdt_ref, meas1, meas2, time_data, lat, lon, ele, meastype, station_id=None, \
-        excluded_time=None, ignore_list=None, ignore_station=False):
+        excluded_time=None, ignore_list=None, ignore_station=False, magnitudes=None):
         """ Structure for containing data of observations from invidiual stations.
         
         Arguments:
@@ -81,6 +81,7 @@ class ObservedPoints(object):
                 will be ignored in trajectory estimation.
             ignore_station: [bool] If True, all data from the given station will not be taken into 
                 consideration upon trajectory fitting, but they will still be shown on the graphs.
+            magnitudes: [list] A list of apparent magnitudes of the meteor. None by default.
         """
 
         ### INPUT DATA ###
@@ -137,6 +138,9 @@ class ObservedPoints(object):
         # Equatorial coordinates
         self.ra_data = None
         self.dec_data = None
+
+        # Apparent magnitude
+        self.magnitudes = magnitudes
 
         ######################################################################################################
 
@@ -220,6 +224,9 @@ class ObservedPoints(object):
         self.rend_lon = None
         self.rend_ele = None
         self.rend_jd = None
+
+        # Absolute magntiudes
+        self.absolute_magnitudes = None
 
         ######################################################################################################
 
@@ -1618,7 +1625,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
             # Fill in the new trajectory object - the time is assumed to be absolute
             traj_mc.infillTrajectory(azim_noise_list, elev_noise_list, obs.time_data, obs.lat, obs.lon, \
                 obs.ele, station_id=obs.station_id, excluded_time=obs.excluded_time, \
-                ignore_list=obs.ignore_list)
+                ignore_list=obs.ignore_list, magnitudes=obg.magnitudes)
 
             
         # Do not show plots or perform additional optimizations
@@ -2124,7 +2131,7 @@ class Trajectory(object):
 
 
     def infillTrajectory(self, meas1, meas2, time_data, lat, lon, ele, station_id=None, excluded_time=None,
-        ignore_list=None):
+        ignore_list=None, magnitudes=None):
         """ Initialize a set of measurements for a given station. 
     
         Arguments:
@@ -2146,6 +2153,7 @@ class Trajectory(object):
                 otherwise (if the point should be used) 0 should be used. E.g. the this should could look
                 like this: [0, 0, 0, 1, 1, 0, 0], which would mean that the fourth and the fifth points
                 will be ignored in trajectory estimation.
+            magnitudes: [list] A list of apparent magnitudes of the meteor. None by default.
 
         Return:
             None
@@ -2168,8 +2176,9 @@ class Trajectory(object):
 
 
         # Init a new structure which will contain the observed data from the given site
-        obs = ObservedPoints(self.jdt_ref, meas1, meas2, time_data, lat, lon, ele, station_id=station_id, 
-            meastype=self.meastype, excluded_time=excluded_time, ignore_list=ignore_list)
+        obs = ObservedPoints(self.jdt_ref, meas1, meas2, time_data, lat, lon, ele, station_id=station_id, \
+            meastype=self.meastype, excluded_time=excluded_time, ignore_list=ignore_list, \
+            magnitudes=magnitudes)
             
         # Add observations to the total observations list
         self.observations.append(obs)
@@ -3050,6 +3059,37 @@ class Trajectory(object):
 
 
 
+    def calcAbsMagnitudes(self):
+        """ Compute absolute magnitudes (apparent magnitude at 100 km) after trajectory estimation. """
+
+        # Go through observations from all stations
+        for obs in self.observations:
+
+            # Check if the apparent magnitudes were given
+            if obs.magnitudes is not None:
+
+                abs_magnitudes = []
+                for i, app_mag in enumerate(obs.magnitudes):
+
+                    if app_mag is not None:
+                        
+                        # Compute absolute magntiude (apparent magnitude at 100 km)
+                        abs_mag = app_mag + 5*np.log10(100000/obs.model_range[i])
+
+                    else:
+                        abs_mag = None
+
+                    abs_magnitudes.append(abs_mag)
+
+
+                obs.absolute_magnitudes = np.array(abs_magnitudes)
+
+
+            else:
+                obs.absolute_magnitudes = None
+
+
+
     def dumpMeasurements(self, dir_path, file_name):
         """ Writes the initialized measurements in a MATLAB format text file."""
 
@@ -3310,7 +3350,7 @@ class Trajectory(object):
         out_str += "------\n"
 
 
-        out_str += " No, Station ID,  Ignore,  Time (s),                   JD,     meas1,     meas2, Azim +E of due N (deg), Alt (deg), Azim line (deg), Alt line (deg), RA obs (deg), Dec obs (deg), RA line (deg), Dec line (deg),       X (m),       Y (m),       Z (m), Latitude (deg), Longitude (deg), Height (m),  Range (m), Length (m),  Lag (m), Vel (m/s), Vel prev avg (m/s), H res (m), V res (m), Ang res (asec)\n"
+        out_str += " No, Station ID,  Ignore,  Time (s),                   JD,     meas1,     meas2, Azim +E of due N (deg), Alt (deg), Azim line (deg), Alt line (deg), RA obs (deg), Dec obs (deg), RA line (deg), Dec line (deg),       X (m),       Y (m),       Z (m), Latitude (deg), Longitude (deg), Height (m),  Range (m), Length (m),  Lag (m), Vel (m/s), Vel prev avg (m/s), H res (m), V res (m), Ang res (asec), AppMag, AbsMag\n"
 
         # Go through observation from all stations
         for obs in self.observations:
@@ -3365,6 +3405,8 @@ class Trajectory(object):
 
 
 
+
+
                 out_str += ", ".join(point_info) + "\n"
 
 
@@ -3375,7 +3417,7 @@ class Trajectory(object):
 
         out_str += "Notes\n"
         out_str += "-----\n"
-        out_str += "- Points that have not been taken into consideratio when computing the trajectory have '1' in the 'Ignore' column.\n"
+        out_str += "- Points that have not been taken into consideration when computing the trajectory have '1' in the 'Ignore' column.\n"
         out_str += "- The time already has time offsets applied to it.\n"
         out_str += "- 'meas1' and 'meas2' are given input points.\n"
         out_str += "- X, Y, Z are ECI (Earth-Centered Inertial) positions of projected lines of sight on the radiant line.\n"
@@ -3953,7 +3995,7 @@ class Trajectory(object):
         ######################################################################################################
 
 
-        # Compare original and modeled measurements (residuals in azimuthal coordinates)
+        # Compare original and modelled measurements (residuals in azimuthal coordinates)
         for obs in self.observations:
 
             # Calculate residuals in arcseconds
@@ -4053,6 +4095,47 @@ class Trajectory(object):
             plt.clf()
             plt.close()
 
+
+
+        ######################################################################################################
+
+        ### PLOT ABSOLUTE MAGNITUDES, IF ANY ###
+
+        if np.any([obs.absolute_magnitudes is not None for obs in self.observations]):
+
+            # Go through all observations
+            for obs in self.observations:
+
+                # Check if the absolute magnitude was given
+                if obs.absolute_magnitudes is not None:
+
+                    # Filter out None absolute magnitudes
+                    filter_mask = np.where([abs_mag is not None for abs_mag in obs.absolute_magnitudes])[0]
+
+                    plt.plot(obs.time_data[filter_mask], obs.absolute_magnitudes[filter_mask], \
+                        marker='x', label=str(obs.station_id), zorder=3)
+
+
+            plt.xlabel('Time (s)')
+            plt.ylabel('Absolute magnitude')
+
+            plt.gca().invert_yaxis()
+
+            plt.legend()
+
+
+            if self.save_results:
+                savePlot(plt, file_name + '_abs_mag.' + self.plot_file_type, output_dir)
+
+            if show_plots:
+                plt.show()
+
+            else:
+                plt.clf()
+                plt.close()
+
+
+        ######################################################################################################
 
 
         # Plot the orbit in 3D
@@ -4607,7 +4690,7 @@ class Trajectory(object):
             
                     self.infillTrajectory(obs.meas1, obs.meas2, obs.time_data, obs.lat, obs.lon, obs.ele, \
                         station_id=obs.station_id, excluded_time=obs.excluded_time, \
-                        ignore_list=obs.ignore_list)
+                        ignore_list=obs.ignore_list, magnitudes=obs.magnitudes)
 
                 
                 # Re-run the trajectory estimation with updated timings. This will update all calculated
@@ -4658,6 +4741,9 @@ class Trajectory(object):
         # Calculate horizontal, vertical and angular residuals from the lines of sight to the radiant line
         self.calcAllResiduals(self.state_vect_mini, self.radiant_eci_mini, self.observations)
 
+        # Calculate absolute magnitudes
+        self.calcAbsMagnitudes()
+
 
         ### REMOVE BAD PICKS AND RECALCULATE ###
         ######################################################################################################
@@ -4705,7 +4791,7 @@ class Trajectory(object):
                 
                         self.infillTrajectory(obs.meas1, obs.meas2, obs.time_data, obs.lat, obs.lon, \
                             obs.ele, station_id=obs.station_id, excluded_time=obs.excluded_time,
-                            ignore_list=obs.ignore_list)
+                            ignore_list=obs.ignore_list, magnitudes=obs.magnitudes)
 
                     
                     # Re-run the trajectory estimation with updated timings. This will update all calculated
