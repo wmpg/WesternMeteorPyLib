@@ -3403,6 +3403,18 @@ class Trajectory(object):
                 point_info.append("{:9.2f}".format(obs.v_residuals[i]))
                 point_info.append("{:14.2f}".format(3600*np.degrees(obs.ang_res[i])))
 
+                # Write the magnitude
+                if obs.magnitudes[i] is not None:
+                    point_info.append("{:+6.2f}".format(obs.magnitudes[i]))
+                else:
+                    point_info.append("{:6}".format('None'))
+
+                # Write the magnitude
+                if obs.absolute_magnitudes[i] is not None:
+                    point_info.append("{:+6.2f}".format(obs.absolute_magnitudes[i]))
+                else:
+                    point_info.append("{:6}".format('None'))
+
 
 
 
