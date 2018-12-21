@@ -1625,7 +1625,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
             # Fill in the new trajectory object - the time is assumed to be absolute
             traj_mc.infillTrajectory(azim_noise_list, elev_noise_list, obs.time_data, obs.lat, obs.lon, \
                 obs.ele, station_id=obs.station_id, excluded_time=obs.excluded_time, \
-                ignore_list=obs.ignore_list, magnitudes=obg.magnitudes)
+                ignore_list=obs.ignore_list, magnitudes=obs.magnitudes)
 
             
         # Do not show plots or perform additional optimizations
@@ -4974,7 +4974,7 @@ if __name__ == "__main__":
     ##########################################################################################################
 
     import time
-    from Utils.TrajConversions import equatorialCoordPrecession_vect, J2000_JD
+    from wmpl.Utils.TrajConversions import equatorialCoordPrecession_vect, J2000_JD
 
     ## TEST EVENT 1
     ###############

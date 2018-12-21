@@ -2,8 +2,8 @@
 
 import numpy as np
 
-from Utils.Math import findClosestPoints, vectNorm, vectMag
-from Utils.TrajConversions import date2JD, ecef2ENU, enu2ECEF, cartesian2Geo, geo2Cartesian
+from wmpl.Utils.Math import findClosestPoints, vectNorm, vectMag
+from wmpl.Utils.TrajConversions import date2JD, ecef2ENU, enu2ECEF, cartesian2Geo, geo2Cartesian
 
 
 

@@ -1039,7 +1039,7 @@ if __name__ == "__main__":
     import os
     import datetime
     
-    from Utils.TrajConversions import datetime2JD
+    from wmpl.Utils.TrajConversions import datetime2JD
 
 
     # Name of input file for meteor parameters

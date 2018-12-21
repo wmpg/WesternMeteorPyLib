@@ -246,7 +246,7 @@ if __name__ == "__main__":
     # ##########################################################################################################
 
     # ### Plot orbits of all JFCs
-    # from Utils.PlotOrbits import plotOrbits
+    # from wmpl.Utils.PlotOrbits import plotOrbits
     # import datetime
 
     # # Get orbital elements of comets
@@ -288,7 +288,7 @@ if __name__ == "__main__":
     # ##########################################################################################################
 
     # ### Plot orbits of all KBOs
-    # from Utils.PlotOrbits import plotOrbits
+    # from wmpl.Utils.PlotOrbits import plotOrbits
     # import datetime
 
     # # Load a list of KBOs

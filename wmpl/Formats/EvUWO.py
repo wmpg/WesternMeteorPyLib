@@ -102,7 +102,7 @@ if __name__ == '__main__':
 
     import numpy as np
 
-    from Utils.TrajConversions import datetime2JD
+    from wmpl.Utils.TrajConversions import datetime2JD
 
     dir_path = '/home/dvida/Desktop'
     file_name = 'ev_test.txt'

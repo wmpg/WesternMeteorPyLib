@@ -146,7 +146,7 @@ getAtmDensity_vect = np.vectorize(getAtmDensity, excluded=['jd'])
 if __name__ == "__main__":
 
     import datetime
-    from Utils.TrajConversions import datetime2JD
+    from wmpl.Utils.TrajConversions import datetime2JD
     
     lat = 44.327234
     lon = -81.372350

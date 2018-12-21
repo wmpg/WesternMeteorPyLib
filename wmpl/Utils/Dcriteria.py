@@ -502,7 +502,7 @@ def calcDV(Lh1, Bh1, sol1, Vh1, Lh2, Bh2, sol2, Vh2, d_max=999.0):
 
 if __name__ == "__main__":
 
-    from Utils.PlotCelestial import CelestialPlot
+    from wmpl.Utils.PlotCelestial import CelestialPlot
 
 
     import numpy as np

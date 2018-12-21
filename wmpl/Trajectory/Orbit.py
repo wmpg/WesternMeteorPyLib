@@ -707,7 +707,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
 
 if __name__ == "__main__":
 
-    from Utils.TrajConversions import raDec2ECI
+    from wmpl.Utils.TrajConversions import raDec2ECI
 
     ### COMMAND LINE ARGUMENTS
 

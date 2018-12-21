@@ -170,7 +170,7 @@ def calcNutationComponents(jd_dyn):
     for the 2nd edition was used to correct the equation for delta_psi.
     
     Arguments:
-        jd_dyn: [float] Dynamical Julian date. See Utils.TrajConversions.jd2DynamicalTimeJD function.
+        jd_dyn: [float] Dynamical Julian date. See wmpl.Utils.TrajConversions.jd2DynamicalTimeJD function.
 
     Return:
         (delta_psi, delta_eps): [tuple of floats] Differences from mean nutation due to the influence of
