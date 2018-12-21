@@ -1965,7 +1965,7 @@ class Trajectory(object):
                         3 = Azimuth +west of due south for meas1, Zenith angle for meas2
                         4 = Azimuth +north of due east for meas1, Zenith angle for meas2
             verbose: [bool] Print out the results and status messages, True by default.
-            v_init_path: [float] Fixed part from the beginning of the meteor on which the initial velocity
+            v_init_part: [float] Fixed part from the beginning of the meteor on which the initial velocity
                 estimation using the sliding fit will start. Default is 0.25 (25%), but for noisier data
                 this might be bumped up to 0.5.
             estimate_timing_vel: [bool] Try to estimate the difference in timing and velocity. True by default.
@@ -3403,16 +3403,22 @@ class Trajectory(object):
                 point_info.append("{:9.2f}".format(obs.v_residuals[i]))
                 point_info.append("{:14.2f}".format(3600*np.degrees(obs.ang_res[i])))
 
-                # Write the magnitude
-                if obs.magnitudes[i] is not None:
-                    point_info.append("{:+6.2f}".format(obs.magnitudes[i]))
+                if obs.magnitudes is not None:
+
+                    # Write the magnitude
+                    if obs.magnitudes[i] is not None:
+                        point_info.append("{:+6.2f}".format(obs.magnitudes[i]))
+                    else:
+                        point_info.append("{:6}".format('None'))
+
+                    # Write the magnitude
+                    if obs.absolute_magnitudes[i] is not None:
+                        point_info.append("{:+6.2f}".format(obs.absolute_magnitudes[i]))
+                    else:
+                        point_info.append("{:6}".format('None'))
+
                 else:
                     point_info.append("{:6}".format('None'))
-
-                # Write the magnitude
-                if obs.absolute_magnitudes[i] is not None:
-                    point_info.append("{:+6.2f}".format(obs.absolute_magnitudes[i]))
-                else:
                     point_info.append("{:6}".format('None'))
 
 

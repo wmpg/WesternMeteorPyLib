@@ -353,7 +353,8 @@ if __name__ == '__main__':
         help='Maximum time offset between the stations.', type=float)
 
     arg_parser.add_argument('-v', '--velpart', metavar='VELOCITY_PART', nargs=1, \
-        help='Fixed part from the beginning of the meteor on which the initial velocity estimation using the sliding fit will start. Default is 0.25 (25%), but for noisier data this might be bumped up to 0.5.', type=float, default=1.0)
+        help='Fixed part from the beginning of the meteor on which the initial velocity estimation using the sliding fit will start. Default is 0.25 (25%), but for noisier data this might be bumped up to 0.5.', \
+        type=float, default=1.0)
 
     arg_parser.add_argument('-d', '--disablemc', \
         help='Do not use the Monte Carlo solver, but only run the geometric solution.', action="store_true")
@@ -388,7 +389,7 @@ if __name__ == '__main__':
 
     velpart = None
     if cml_args.velpart:
-        velpart = cml_args.velpart[0]
+        velpart = cml_args.velpart
 
     ### ###
 
