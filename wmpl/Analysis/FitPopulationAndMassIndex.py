@@ -4,6 +4,7 @@
 
 from __future__ import print_function, division, absolute_import
 
+import os
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -66,7 +67,7 @@ def fitSlope(input_data, mass):
 
 
 
-def estimateIndex(input_data, mass=False, show_plots=False, nsamples=100):
+def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None, nsamples=100):
     """ Estimate the mass or population index from the meteor data by fitting a gamma function to it using
         MLE and estimating the slope in the completeness region.
 
@@ -77,6 +78,8 @@ def estimateIndex(input_data, mass=False, show_plots=False, nsamples=100):
         mass: [bool] If true, the mass index will be computed. False by default, in which case the population
             index is computed.
         show_plots: [bool] Set to True to show the plots. False by default.
+        plot_save_path: [str] Path where to save the plots. None by default, in which case the plots will not
+            be saved.
         nsamples: [int] Number of samples for uncertainty estimation. 100 by default.
     """
 
@@ -107,13 +110,15 @@ def estimateIndex(input_data, mass=False, show_plots=False, nsamples=100):
 
 
 
-    if show_plots:
+    if show_plots or (plot_save_path is not None):
 
         if mass:
             xlabel = 'Log of mass (kg)'
+            plot_save_name = 'mass'
 
         else:
             xlabel = 'Magnitude'
+            plot_save_name = 'magnitude'
 
         ### PLOTTING ###
 
@@ -163,7 +168,17 @@ def estimateIndex(input_data, mass=False, show_plots=False, nsamples=100):
 
         plt.xlabel(xlabel)
 
-        plt.show()
+        # Save the plot
+        if plot_save_path is not None:
+            plt.savefig(os.path.join(plot_save_path, plot_save_name + "_distribution.png"), dpi=300)
+
+        # Show the plot
+        if show_plots:
+            plt.show()
+
+        else:
+            plt.clf()
+            plt.close()
 
 
         ####
@@ -212,7 +227,17 @@ def estimateIndex(input_data, mass=False, show_plots=False, nsamples=100):
         plt.ylabel('Cumulative count')
         plt.legend()
 
-        plt.show()
+        # Save the plot
+        if plot_save_path is not None:
+            plt.savefig(os.path.join(plot_save_path, plot_save_name + "_cumulative.png"), dpi=300)
+
+        # Show the plot
+        if show_plots:
+            plt.show()
+
+        else:
+            plt.clf()
+            plt.close()
 
 
 
