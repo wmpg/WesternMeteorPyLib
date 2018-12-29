@@ -115,10 +115,12 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
         if mass:
             xlabel = 'Log of mass (kg)'
             plot_save_name = 'mass'
+            slope_name = 's'
 
         else:
             xlabel = 'Magnitude'
             plot_save_name = 'magnitude'
+            slope_name = 'r'
 
         ### PLOTTING ###
 
@@ -220,7 +222,7 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
 
         # Plot the tangential line with the slope
         plt.plot(sign*x_arr, logline(-x_arr, slope, intercept), color='r', \
-            label='Slope = {:.2f} $\pm$ {:.2f}'.format(slope_report, slope_report_std), zorder=5)
+            label='{:s} = {:.2f} $\pm$ {:.2f}'.format(slope_name, slope_report, slope_report_std), zorder=5)
 
 
         plt.xlabel(xlabel)
