@@ -3556,11 +3556,10 @@ class Trajectory(object):
         if self.plot_all_spatial_residuals:
 
 
-            # Plot all spatial residuals (vs. time)
-            for obs in self.observations:
+            ### PLOT ALL SPATIAL RESIDUALS VS. TIME ###
+            ##################################################################################################
 
-                ### PLOT ALL SPATIAL RESIDUALS ###
-                ##################################################################################################
+            for obs in self.observations:
 
                 # Calculate root mean square of the residuals
                 v_res_rms = RMSD(obs.v_residuals)
@@ -3610,12 +3609,13 @@ class Trajectory(object):
                 plt.clf()
                 plt.close()
 
+            ##################################################################################################
 
-            # Plot all spatial residuals (vs. length)
+
+            ### PLOT ALL SPATIAL RESIDUALS VS LENGTH ###
+            ##################################################################################################
+
             for obs in self.observations:
-
-                ### PLOT ALL SPATIAL RESIDUALS VS LENGTH ###
-                ##############################################################################################
 
                 # Calculate root mean square of the residuals
                 v_res_rms = RMSD(obs.v_residuals)
@@ -3658,6 +3658,61 @@ class Trajectory(object):
 
             if self.save_results:
                 savePlot(plt, file_name + '_all_spatial_residuals_length.' + self.plot_file_type, output_dir)
+
+            if show_plots:
+                plt.show()
+
+            else:
+                plt.clf()
+                plt.close()
+
+
+            ##################################################################################################
+
+
+            ### PLOT ALL TOTAL SPATIAL RESIDUALS VS HEIGHT ###
+            ##################################################################################################
+
+            for obs in self.observations:
+
+                # Calculate root mean square of the total residuals
+                v_res_rms = RMSD(obs.v_residuals)
+                h_res_rms = RMSD(obs.h_residuals)
+                total_res_rms = np.sqrt(v_res_rms**2 + h_res_rms**2)
+
+                # Compute total residuals
+                total_residuals = np.sqrt(obs.v_residuals**2 + obs.h_residuals**2)
+
+                # Plot total residuals
+                plt.scatter(total_residuals, obs.meas_ht/1000, marker='o', s=4, \
+                    label='{:s}, RMSD = {:.2f} m'.format(str(obs.station_id), total_res_rms), zorder=3)
+
+                # Mark ignored points
+                if np.any(obs.ignore_list):
+
+                    ignored_ht = obs.model_ht[obs.ignore_list > 0]
+                    ignored_tot_res = total_residuals[obs.ignore_list > 0]
+
+                    plt.scatter(ignored_tot_res, ignored_ht/1000, facecolors='none', edgecolors='k', \
+                        marker='o', zorder=3, s=20)
+
+
+            plt.title('All spatial residuals')
+            plt.xlabel('Total deviation (m)')
+            plt.ylabel('Height (km)')
+
+            plt.grid()
+
+            plt.legend()
+
+            # Set the residual limits to +/-10m if they are smaller than that
+            if np.max(np.abs(plt.gca().get_xlim())) < 10:
+                plt.xlim([-10, 10])
+
+
+            if self.save_results:
+                savePlot(plt, file_name + '_all_spatial_total_residuals_height.' + self.plot_file_type, \
+                    output_dir)
 
             if show_plots:
                 plt.show()

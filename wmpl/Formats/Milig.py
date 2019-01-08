@@ -359,14 +359,15 @@ if __name__ == '__main__':
     arg_parser.add_argument('-d', '--disablemc', \
         help='Do not use the Monte Carlo solver, but only run the geometric solution.', action="store_true")
     
-    arg_parser.add_argument('-r', '--mcruns', metavar="MC_RUNS", nargs='?', help='Number of Monte Carlo runs.', \
-        type=int, default=100)
+    arg_parser.add_argument('-r', '--mcruns', metavar="MC_RUNS", nargs='?', \
+        help='Number of Monte Carlo runs.', type=int, default=100)
     
     arg_parser.add_argument('-g', '--disablegravity', \
         help='Disable gravity compensation.', action="store_true")
 
     arg_parser.add_argument('-l', '--plotallspatial', \
-        help='Plot all spatial residuals on one plot (one vs. time and other vs length.', action="store_true")
+        help='Plot a collection of plots showing the residuals vs. time, lenght and height.', \
+        action="store_true")
 
     arg_parser.add_argument('-i', '--imgformat', metavar='IMG_FORMAT', nargs=1, \
         help="Plot image format. 'png' by default, can be 'pdf', 'eps',... ", type=str, default='png')
