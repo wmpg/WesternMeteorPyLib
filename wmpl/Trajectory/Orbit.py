@@ -329,6 +329,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
     # Calculate the geographical coordinates of the reference trajectory ECI position
     lat_ref, lon_ref, ht_ref = cartesian2Geo(jd_ref, *eci_ref)
 
+
     # Apply the Earth rotation correction if the station ECI coordinates are fixed (a MUST for the 
     # intersecting planes method!)
     if stations_fixed:
@@ -720,7 +721,7 @@ if __name__ == "__main__":
         b) Compute the orbit from scratch:
             python -m wmpl.Trajectory.Orbit -r 317.74 -d 31.72 -v 54.9 -t "20180614-072809.3" -a 44.43 -o -81.56 -e 105.8
 
-        c) If the radiant was given in J2000, use the --j2000 option.
+        c) If the apparent radiant was given in J2000, use the --j2000 option.
         """,
         formatter_class=argparse.RawTextHelpFormatter)
 
