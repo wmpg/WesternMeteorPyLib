@@ -291,7 +291,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
     Keyword arguments:
         stations_fixed: [bool] If True, the correction for Earth's rotation will be performed on the radiant,
             but not the velocity. This should be True ONLY in two occasions:
-                - if the ECEF coordinate system was used for trajectory estimiation
+                - if the ECEF coordinate system was used for trajectory estimation
                 - if the ECI coordinate system was used for trajectory estimation, BUT the stations were not
                     moved in time, but were kept fixed at one point, regardless of the trajectory estimation
                     method.
@@ -328,7 +328,6 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
 
     # Calculate the geographical coordinates of the reference trajectory ECI position
     lat_ref, lon_ref, ht_ref = cartesian2Geo(jd_ref, *eci_ref)
-
 
     # Apply the Earth rotation correction if the station ECI coordinates are fixed (a MUST for the 
     # intersecting planes method!)
@@ -756,11 +755,15 @@ if __name__ == "__main__":
         action="store_true")
 
     arg_parser.add_argument('-k', '--refavg', \
-        help="The average position on the trajectory is used as a reference position instead of the initial position. The correction for Earth's rotation will be applied.", \
+        help="The average position on the trajectory is used as a reference position instead of the initial position (e.g. with MILIG). The correction for Earth's rotation will be applied.", \
         action="store_true")
 
-    arg_parser.add_argument('-c', '--rotcorr', \
-        help="If the radiant was estimated in ECEF coordinates or fixed ECI coordinates, then the correction for Earth's rotation MUST be applied, thus this option must be used.", \
+    arg_parser.add_argument('-s', '--statfixed', \
+        help="Shoud be used if the stations were fixed during trajectory estimation (e.g. with MILIG).", \
+        action="store_true")
+
+    arg_parser.add_argument('-m', '--milig', \
+        help="MILIG input mode, i.e. the trajectory was estimated with fixed stations and reference average position on the trajectory. This replaces calling both options --refavg and --statfixed.", \
         action="store_true")
 
 
@@ -878,6 +881,12 @@ if __name__ == "__main__":
     radiant_eci = np.array(raDec2ECI(ra, dec))
 
 
+    # Set the right flags
+    reference_init = (not cml_args.refavg) and (not cml_args.milig)
+    rotation_correction = cml_args.milig or cml_args.statfixed
+    stations_fixed = cml_args.statfixed or cml_args.milig
+
+
     # # Test values
     # radiant_eci = np.array(raDec2ECI(np.radians(265.16047), np.radians(-18.84373)))
     # v_init      = 16424.81
@@ -886,8 +895,8 @@ if __name__ == "__main__":
     # jd_ref      = 2457955.794670294970
 
     # Compute the orbit
-    orb = calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, reference_init=(not cml_args.refavg), \
-        rotation_correction=cml_args.rotcorr)
+    orb = calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, reference_init=reference_init, \
+        rotation_correction=rotation_correction, stations_fixed=stations_fixed)
 
     # Print the results
     print('Ref JD:', jd_ref)
