@@ -759,6 +759,10 @@ if __name__ == "__main__":
         help="The average position on the trajectory is used as a reference position instead of the initial position (e.g. with MILIG). The correction for Earth's rotation will be applied.", \
         action="store_true")
 
+    arg_parser.add_argument('-c', '--vrotcorr', \
+        help="Correct the magnitude of the velocity due to the Earth's rotation.", \
+        action="store_true")
+
     arg_parser.add_argument('-s', '--statfixed', \
         help="Shoud be used if the stations were fixed during trajectory estimation (e.g. with MILIG).", \
         action="store_true")
@@ -884,7 +888,7 @@ if __name__ == "__main__":
 
     # Set the right flags
     reference_init = (not cml_args.refavg) and (not cml_args.milig)
-    rotation_correction = cml_args.milig or cml_args.statfixed
+    rotation_correction = cml_args.vrotcorr or cml_args.milig #or cml_args.statfixed
     stations_fixed = cml_args.statfixed or cml_args.milig
 
 
