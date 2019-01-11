@@ -34,15 +34,15 @@ def fitSlope(input_data, mass):
     pdf_derivative = scipy.misc.derivative(scipy.stats.gamma.pdf, x_arr, dx=0.01, args=params)
 
     # Find the minimum of the PDF derivative
-    turnover_point = x_arr[pdf_derivative.argmin()]
+    inflection_point = x_arr[pdf_derivative.argmin()]
 
     if not mass:
-        # Take one magnitude brighter than the turnover point (the addition here is because the turnover point 
-        #   is reverse)
-        ref_point = turnover_point + 1
+        # Take one magnitude brighter than the inflection point (the addition here is because the inflection
+        #   point is reverse)
+        ref_point = inflection_point + 1
 
     else:
-        ref_point = turnover_point + 0.4
+        ref_point = inflection_point + 0.4
 
 
     # Find the slope of the log survival function
@@ -62,7 +62,7 @@ def fitSlope(input_data, mass):
         sign = -1
 
 
-    return params, x_arr, turnover_point, ref_point, slope, slope_report, sign, kstest
+    return params, x_arr, inflection_point, ref_point, slope, slope_report, sign, kstest
 
 
 
@@ -92,7 +92,7 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
     
 
     # Fit the slope to the data
-    params, x_arr, turnover_point, ref_point, slope, slope_report, sign, kstest = fitSlope(input_data, mass)
+    params, x_arr, inflection_point, ref_point, slope, slope_report, sign, kstest = fitSlope(input_data, mass)
 
 
     # Estimate the uncertainty of the slope by sampling the fitted distribution 100 times and refitting it
@@ -140,7 +140,7 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
         ref_point_unc_list = []
         for unc_results in unc_results_list:
             
-            params_unc, _, turnover_point_unc, ref_point_unc, _, _, _, _ = unc_results
+            params_unc, _, inflection_point_unc, ref_point_unc, _, _, _, _ = unc_results
             ref_point_unc_list.append(ref_point_unc)
 
             # Find the slope at the reference point for PDF plotting
@@ -150,19 +150,19 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
 
             plt.scatter(sign*ref_point_unc, slope_pdf_unc, color='g', zorder=3, alpha=0.1)
 
-            plt.scatter(sign*turnover_point_unc, scipy.stats.gamma.pdf(turnover_point_unc, *params_unc), \
+            plt.scatter(sign*inflection_point_unc, scipy.stats.gamma.pdf(inflection_point_unc, *params_unc), \
                 color='y', zorder=3, alpha=0.1)
 
 
         # Compute standard deviation of reference point
-        # The sddev is not computed for turnover point as it has the same value
+        # The sddev is not computed for inflection point as it has the same value
         ref_point_std = np.std(ref_point_unc_list)
         
         plt.scatter(sign*ref_point, slope_pdf, color='r', zorder=5, \
             label='Reference point = {:.2f} $\pm$ {:.2f}'.format(sign*ref_point, ref_point_std))
 
-        plt.scatter(sign*turnover_point, scipy.stats.gamma.pdf(turnover_point, *params), color='r', \
-            marker='x', zorder=5, label='Turnover point = {:.2f}'.format(sign*turnover_point))
+        plt.scatter(sign*inflection_point, scipy.stats.gamma.pdf(inflection_point, *params), color='r', \
+            marker='x', zorder=5, label='Inflection point = {:.2f}'.format(sign*inflection_point))
 
 
         plt.ylabel('Normalized count')
@@ -216,13 +216,14 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
         slope_report_std = np.std(slope_report_unc_list)
 
 
-        # Plot the turnover point
+        # Plot the inflection point
         plt.scatter(sign*ref_point, 10**y_temp, c='r', \
             label='Reference point = {:.2f} $\pm$ {:.2f}'.format(sign*ref_point, ref_point_std), zorder=5)
 
         # Plot the tangential line with the slope
         plt.plot(sign*x_arr, logline(-x_arr, slope, intercept), color='r', \
-            label='{:s} = {:.2f} $\pm$ {:.2f}'.format(slope_name, slope_report, slope_report_std), zorder=5)
+            label='{:s} = {:.2f} $\pm$ {:.2f} \nKS test p-value: {:.3f}'.format(slope_name, slope_report, \
+                slope_report_std, kstest.pvalue), zorder=5)
 
 
         plt.xlabel(xlabel)
@@ -244,4 +245,4 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
 
 
 
-    return params, sign*ref_point, sign*turnover_point, slope_report, kstest
+    return params, sign*ref_point, sign*inflection_point, slope_report, kstest
