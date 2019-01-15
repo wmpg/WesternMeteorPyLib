@@ -808,6 +808,25 @@ def checkContinuity(sequence):
     return False, 0, 0
 
 
+
+
+def histogramEdgesEqualDataNumber(x, nbins):
+    """ Given the data, divide the histogram edges in such a way that every bin has the same number of
+        data points. 
+
+        Source: https://stackoverflow.com/questions/37649342/matplotlib-how-to-make-a-histogram-with-bins-of-equal-area/37667480
+
+    Arguments:
+        x: [list] Input data.
+        nbins: [int] Number of bins.
+
+    """
+
+    npt = len(x)
+    return np.interp(np.linspace(0, npt, nbins + 1), np.arange(npt), np.sort(x))
+
+
+
 ### OPTIMIZATION ###
 ##############################################################################################################
 

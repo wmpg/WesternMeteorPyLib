@@ -125,6 +125,16 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
     unc_results_list = unc_results_list_filtered
 
 
+    # Compute the standard deviation of the slope
+    slope_report_unc_list = []
+    for unc_results in unc_results_list:
+        _, _, _, ref_point_unc, slope_unc, slope_report_unc, _, _ = unc_results
+        slope_report_unc_list.append(slope_report_unc)
+
+    # Compute the slope standard deviation
+    slope_report_std = np.std(slope_report_unc_list)
+
+
     # Make plots
     if show_plots or (plot_save_path is not None):
 
@@ -226,11 +236,9 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
 
 
         # Plot slopes of all lines found during uncertainty estimation
-        slope_report_unc_list = []
         for unc_results in unc_results_list:
             
             _, _, _, ref_point_unc, slope_unc, slope_report_unc, _, _ = unc_results
-            slope_report_unc_list.append(slope_report_unc)
 
             # Compute intercept of the line on the reverse cumulative plot (survival function)
             y_temp_unc = np.log10(scipy.stats.gamma.sf(ref_point_unc, *params))
@@ -239,9 +247,6 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
             # Plot the tangential line with the slope
             plt.plot(sign*x_arr, logline(-x_arr, slope_unc, intercept_unc), color='k',\
                 alpha=0.05*alpha_factor, zorder=3)
-
-        # Compute the slope standard deviation
-        slope_report_std = np.std(slope_report_unc_list)
 
 
         # Plot the inflection point
@@ -273,4 +278,4 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
 
 
 
-    return params, sign*ref_point, sign*inflection_point, slope_report, kstest
+    return params, sign*ref_point, sign*inflection_point, slope_report, slope_report_std, kstest
