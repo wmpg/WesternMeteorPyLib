@@ -95,21 +95,37 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
     params, x_arr, inflection_point, ref_point, slope, slope_report, sign, kstest = fitSlope(input_data, mass)
 
 
-    # Estimate the uncertainty of the slope by sampling the fitted distribution 100 times and refitting it
-    #   to the same number amples as the number of input data points
+    # Estimate the uncertainty of the slope using the bootstrap method
     unc_results_list = []
     for i in range(nsamples):
 
-        # Sample the distribution
-        sampled_data = scipy.stats.gamma.rvs(*params, size=len(input_data))
+        # Sample the distribution with replacement
+        sampled_data = np.random.choice(input_data, len(input_data))
 
         # Fit the slope again
         unc_results = fitSlope(sampled_data, mass)
 
         unc_results_list.append(unc_results)
 
+    
+    # Reject all 3 sigma slope outliers
+    slopes = [scipy.stats.gamma.pdf(entry[3], *entry[0]) for entry in unc_results_list]
+    mean_slope = np.mean(slopes)
+    slope_std = np.std(slopes)
+
+    unc_results_list_filtered = []
+    for i, unc_slope in enumerate(slopes):
+
+        # Reject all 3 sigma outliers
+        if abs(unc_slope - mean_slope) > 3*slope_std:
+            continue
+
+        unc_results_list_filtered.append(unc_results_list[i])
+
+    unc_results_list = unc_results_list_filtered
 
 
+    # Make plots
     if show_plots or (plot_save_path is not None):
 
         if mass:
@@ -121,6 +137,12 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
             xlabel = 'Magnitude'
             plot_save_name = 'magnitude'
             slope_name = 'r'
+
+
+        # Compute the transparency correction
+        alpha_factor = 1.0
+        if nsamples > 100:
+            alpha_factor = np.sqrt(100/nsamples)
 
         ### PLOTTING ###
 
@@ -134,6 +156,8 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
         
         plt.plot(sign*x_arr, scipy.stats.gamma.pdf(x_arr, *params), zorder=4)
 
+        # Get Y axis range
+        y_min, y_max = plt.gca().get_ylim()
 
 
         # Plot positions of all points found during uncertainty estimation
@@ -146,12 +170,14 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
             # Find the slope at the reference point for PDF plotting
             slope_pdf_unc = scipy.stats.gamma.pdf(ref_point_unc, *params_unc)
 
-            plt.plot(sign*x_arr, scipy.stats.gamma.pdf(x_arr, *params_unc), color='k', alpha=0.05)
+            # Alpha (transparency) is normazlied for 100 sampling runs
+            plt.plot(sign*x_arr, scipy.stats.gamma.pdf(x_arr, *params_unc), color='k', \
+                alpha=0.05*alpha_factor)
 
-            plt.scatter(sign*ref_point_unc, slope_pdf_unc, color='g', zorder=3, alpha=0.1)
+            plt.scatter(sign*ref_point_unc, slope_pdf_unc, color='g', zorder=3, alpha=0.1*alpha_factor)
 
             plt.scatter(sign*inflection_point_unc, scipy.stats.gamma.pdf(inflection_point_unc, *params_unc), \
-                color='y', zorder=3, alpha=0.1)
+                color='y', zorder=3, alpha=0.1*alpha_factor)
 
 
         # Compute standard deviation of reference point
@@ -169,6 +195,8 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
         plt.legend()
 
         plt.xlabel(xlabel)
+
+        plt.ylim([y_min, y_max])
 
         # Save the plot
         if plot_save_path is not None:
@@ -210,7 +238,7 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
 
             # Plot the tangential line with the slope
             plt.plot(sign*x_arr, logline(-x_arr, slope_unc, intercept_unc), color='k',\
-                alpha=0.05, zorder=3)
+                alpha=0.05*alpha_factor, zorder=3)
 
         # Compute the slope standard deviation
         slope_report_std = np.std(slope_report_unc_list)
@@ -222,8 +250,8 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
 
         # Plot the tangential line with the slope
         plt.plot(sign*x_arr, logline(-x_arr, slope, intercept), color='r', \
-            label='{:s} = {:.2f} $\pm$ {:.2f} \nKS test p-value: {:.3f}'.format(slope_name, slope_report, \
-                slope_report_std, kstest.pvalue), zorder=5)
+            label='{:s} = {:.2f} $\pm$ {:.2f} \nKS test D = {:.3f} \nKS test p-value = {:.3f}'.format(\
+                slope_name, slope_report, slope_report_std, kstest.statistic, kstest.pvalue), zorder=5)
 
 
         plt.xlabel(xlabel)
