@@ -228,7 +228,7 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
         intercept = y_temp + slope*ref_point
 
         # Plot data histogram
-        plt.hist(sign*input_data, bins=nbins, cumulative=-sign, density=True, log=True, histtype='step', 
+        plt.hist(sign*input_data, bins=len(input_data), cumulative=-sign, density=True, log=True, histtype='step', 
             color='k', zorder=4)
         
         # # Plot fitted survival function
