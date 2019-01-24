@@ -259,6 +259,12 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
                 slope_name, slope_report, slope_report_std, kstest.statistic, kstest.pvalue), zorder=5)
 
 
+        # Limit Y axis range to the maximum of the fitted line
+        y_max = np.max(logline(-x_arr, slope, intercept))
+        plt.ylim(ymax=y_max)
+        plt.xlim([np.min(sign*x_arr), np.max(sign*x_arr)])
+
+
         plt.xlabel(xlabel)
         plt.ylabel('Cumulative count')
         plt.legend()
