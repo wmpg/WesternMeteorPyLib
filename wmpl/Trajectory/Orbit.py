@@ -257,8 +257,8 @@ class Orbit(object):
             
             if self.last_perihelion is not None:
                 out_str += "  Last perihelion JD = {:.6f} ".format(datetime2JD(self.last_perihelion)) \
-                    + "(" + str(self.last_perihelion) + ")" + _uncer('{:.4f}', 'last_perihelion') \
-                    + " days \n"
+                    + "(" + str(self.last_perihelion) + ")" + _uncer('{:.4f} days', 'last_perihelion') \
+                    + "\n"
             else:
                 out_str += "  Last perihelion JD = NaN \n"
 

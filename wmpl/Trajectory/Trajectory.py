@@ -1663,6 +1663,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
 
     # Break the function of there are no trajectories to process
     if len(mc_results) == 0:
+        print('!!! Not enough good Monte Carlo runus for uncertaintly estimation!')
         return traj, None
 
 
@@ -3183,7 +3184,7 @@ class Trajectory(object):
         
         out_str += "\n"
 
-        out_str += "Reference JD: {:20.12f}".format(self.jdt_ref)
+        out_str += "Reference JD: {:20.12f}\n".format(self.jdt_ref)
         out_str += "Time: " + str(jd2Date(self.orbit.jd_ref, dt_obj=True)) + " UTC\n"
 
         out_str += "\n\n"
@@ -3260,7 +3261,7 @@ class Trajectory(object):
                 _uncer('{:.4f}', 'lat_ref', deg=True))
             out_str += "  Lat geo = {:+>10.6f}{:s} deg\n".format(np.degrees(self.orbit.lat_geocentric), \
                 _uncer('{:.4f}', 'lat_geocentric', deg=True))
-            out_str += "  Ht      = {:+>10.2f}{:s} m\n".format(self.orbit.ht_ref, \
+            out_str += "  Ht      = {:>10.2f}{:s} m\n".format(self.orbit.ht_ref, \
                 _uncer('{:.2f}', 'ht_ref', deg=False))
             out_str += "\n"
 
@@ -3409,17 +3410,17 @@ class Trajectory(object):
                     if obs.magnitudes[i] is not None:
                         point_info.append("{:+6.2f}".format(obs.magnitudes[i]))
                     else:
-                        point_info.append("{:6}".format('None'))
+                        point_info.append("{:>6s}".format('None'))
 
                     # Write the magnitude
                     if obs.absolute_magnitudes[i] is not None:
                         point_info.append("{:+6.2f}".format(obs.absolute_magnitudes[i]))
                     else:
-                        point_info.append("{:6}".format('None'))
+                        point_info.append("{:>6s}".format('None'))
 
                 else:
-                    point_info.append("{:6}".format('None'))
-                    point_info.append("{:6}".format('None'))
+                    point_info.append("{:>6s}".format('None'))
+                    point_info.append("{:>6s}".format('None'))
 
 
 
@@ -4918,6 +4919,11 @@ class Trajectory(object):
             # Do a Monte Carlo estimate of the uncertanties in all calculated parameters
             traj_best, uncertanties = monteCarloTrajectory(self, mc_runs=self.mc_runs, 
                 mc_pick_multiplier=self.mc_pick_multiplier, noise_sigma=self.mc_noise_std)
+
+
+            # Set the covariance matrix to the initial trajectory, so it will be reported in the report
+            self.orbit_cov = traj_best.orbit_cov
+            self.state_vect_cov = traj_best.state_vect_cov
 
 
             ### Save uncertainties to the trajectory object ###

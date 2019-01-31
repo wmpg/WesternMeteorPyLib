@@ -199,7 +199,7 @@ def solveTrajectoryMILIG(dir_path, file_name, solver='original', **kwargs):
     if solver == 'original':
         traj = Trajectory(jdt_ref, output_dir=dir_path, meastype=3, **kwargs)
 
-    elif solver == 'gural':
+    elif solver.startswith('gural'):
 
         # Extract velocity model is given
         try:

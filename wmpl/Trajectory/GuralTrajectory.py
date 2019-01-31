@@ -426,6 +426,8 @@ class GuralTrajectory(object):
         self.verbose = verbose
         self.meastype = meastype
 
+        velmodel = str(velmodel)
+
         # Check if the initial velocity should be computed as the average velocity of the first half
         if 'fha' in velmodel:
             
