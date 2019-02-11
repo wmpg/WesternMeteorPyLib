@@ -1499,7 +1499,7 @@ def _MCTrajSolve(i, traj, observations):
 
 
 
-def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1):
+def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1, geometric_uncert=False):
     """ Estimates uncertanty in the trajectory solution by doing Monte Carlo runs. The MC runs are done 
         in parallel on all available computer cores.
 
@@ -1515,7 +1515,9 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
         mc_pick_multiplier: [int] Number of MC samples that will be taken for every point. 1 by default.
         noise_sigma: [float] Number of standard deviations to use for adding Gaussian noise to original 
             measurements.
-
+        geometric_uncert: [bool] If True, all MC runs will be taken to estimate the uncertainty, not just
+            the ones with the better cost function value than the pure geometric solution. Use this when
+            the lag is not reliable.
     """
 
 
@@ -1646,10 +1648,13 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
     # Add the original trajectory in the Monte Carlo results, if it is the one which has the best length match
     mc_results.append(traj)
 
+    
     ##########################################################################################################
 
-    # Take only those solutions which have the timing residuals <= than the initial solution
-    mc_results = [mc_traj for mc_traj in mc_results if mc_traj.timing_res <= traj.timing_res]
+    if not geometric_uncert:
+
+        # Take only those solutions which have the timing residuals <= than the initial solution
+        mc_results = [mc_traj for mc_traj in mc_results if mc_traj.timing_res <= traj.timing_res]
 
     ##########
 
@@ -1943,8 +1948,8 @@ class Trajectory(object):
 
     def __init__(self, jdt_ref, output_dir='.', max_toffset=None, meastype=4, verbose=True, v_init_part=None,\
         estimate_timing_vel=True, monte_carlo=True, mc_runs=None, mc_pick_multiplier=1,  mc_noise_std=1.0, \
-        filter_picks=True, calc_orbit=True, show_plots=True, save_results=True, gravity_correction=True,
-        plot_all_spatial_residuals=False, plot_file_type='png'):
+        geometric_uncert=False, filter_picks=True, calc_orbit=True, show_plots=True, save_results=True, \
+        gravity_correction=True, plot_all_spatial_residuals=False, plot_file_type='png'):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -1975,6 +1980,9 @@ class Trajectory(object):
             mc_pick_multiplier: [int] Number of MC samples that will be taken for every point. 1 by default.
             mc_noise_std: [float] Number of standard deviations of measurement noise to add during Monte
                 Carlo estimation.
+            geometric_uncert: [bool] If True, all MC runs will be taken to estimate the uncertainty, not just
+                the ones with the better cost function value than the pure geometric solution. Use this when
+                the lag is not reliable. False by default.
             filter_picks: [bool] If True (default), picks which deviate more than 3 sigma in angular residuals
                 will be removed, and the trajectory will be recalculated.
             calc_orbit: [bool] If True, the orbit is calculates as well. True by default
@@ -2024,6 +2032,10 @@ class Trajectory(object):
 
         # Standard deviatons of measurement noise to add during Monte Carlo runs
         self.mc_noise_std = mc_noise_std
+
+        # If True, pure geometric uncertainties will be computed and culling of solutions based on cost
+        #   function value will not be done
+        self.geometric_uncert = geometric_uncert
 
         # Filter bad picks (ones that deviate more than 3 sigma in angular residuals) if this flag is True
         self.filter_picks = filter_picks
@@ -3165,24 +3177,38 @@ class Trajectory(object):
         
         out_str = ''
 
-        # out_str += 'reference JD: {:.12f}\n'.format(self.jdt_ref)
         out_str += 'Input measurement type: '
 
         # Write out measurement type
         if self.meastype == 1:
-            out_str += 'Right Ascension for meas1, Declination for meas2, epoch of date'
+            out_str += 'Right Ascension for meas1, Declination for meas2, epoch of date\n'
 
         elif self.meastype == 2:
-            out_str += 'Azimuth +east of due north for meas1, Elevation angle above the horizon for meas2'
+            out_str += 'Azimuth +east of due north for meas1, Elevation angle above the horizon for meas2\n'
 
         elif self.meastype == 3:
-            out_str += 'Azimuth +west of due south for meas1, Zenith angle for meas2'
+            out_str += 'Azimuth +west of due south for meas1, Zenith angle for meas2\n'
 
         elif self.meastype == 4:
-            out_str += 'Azimuth +north of due east for meas1, Zenith angle for meas2'
-
+            out_str += 'Azimuth +north of due east for meas1, Zenith angle for meas2\n'
         
         out_str += "\n"
+
+
+
+        # Write the uncertainty type
+        if self.geometric_uncert:
+            uncert_label = "Purely geometric uncertainties"
+
+        else:
+            uncert_label = "Uncertainties computed using MC runs with lower cost function value than the purely geometric solution"
+
+        if self.state_vect_cov is not None:
+            out_str += 'Uncertainties type:\n'
+            out_str += ' {:s}'.format(uncert_label)
+            out_str += '\n\n'
+
+
 
         out_str += "Reference JD: {:20.12f}\n".format(self.jdt_ref)
         out_str += "Time: " + str(jd2Date(self.orbit.jd_ref, dt_obj=True)) + " UTC\n"
@@ -3192,7 +3218,7 @@ class Trajectory(object):
         out_str += 'Plane intersections\n'
         out_str += '-------------------\n'
 
-        # Print out all intersecting planes pairs
+        # Write out all intersecting planes pairs
         for n, plane_intersection in enumerate(self.intersection_list):
 
             n = n + 1
@@ -3229,6 +3255,7 @@ class Trajectory(object):
         out_str += " Vz = {:11.2f}{:s} m/s\n".format(vz, _uncer('{:.2f}', 'vz'))
 
         out_str += "\n"
+
 
         # Write out the state vector covariance matrix
         if self.state_vect_cov is not None:
@@ -4917,8 +4944,9 @@ class Trajectory(object):
         if self.monte_carlo:
 
             # Do a Monte Carlo estimate of the uncertanties in all calculated parameters
-            traj_best, uncertanties = monteCarloTrajectory(self, mc_runs=self.mc_runs, 
-                mc_pick_multiplier=self.mc_pick_multiplier, noise_sigma=self.mc_noise_std)
+            traj_best, uncertanties = monteCarloTrajectory(self, mc_runs=self.mc_runs, \
+                mc_pick_multiplier=self.mc_pick_multiplier, noise_sigma=self.mc_noise_std, \
+                geometric_uncert=self.geometric_uncert)
 
 
             # Set the covariance matrix to the initial trajectory, so it will be reported in the report

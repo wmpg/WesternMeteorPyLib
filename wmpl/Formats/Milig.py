@@ -353,7 +353,7 @@ if __name__ == '__main__':
         help='Maximum time offset between the stations.', type=float)
 
     arg_parser.add_argument('-v', '--velpart', metavar='VELOCITY_PART', nargs=1, \
-        help='Fixed part from the beginning of the meteor on which the initial velocity estimation using the sliding fit will start. Default is 0.25 (25%), but for noisier data this might be bumped up to 0.5.', \
+        help='Fixed part from the beginning of the meteor on which the initial velocity estimation using the sliding fit will start. Default is 0.25 (25 percent), but for noisier data this might be bumped up to 0.5.', \
         type=float, default=1.0)
 
     arg_parser.add_argument('-d', '--disablemc', \
@@ -361,6 +361,9 @@ if __name__ == '__main__':
     
     arg_parser.add_argument('-r', '--mcruns', metavar="MC_RUNS", nargs='?', \
         help='Number of Monte Carlo runs.', type=int, default=100)
+
+    arg_parser.add_argument('-u', '--uncertgeom', \
+        help='Compute purely geometric uncertainties.', action="store_true")
     
     arg_parser.add_argument('-g', '--disablegravity', \
         help='Disable gravity compensation.', action="store_true")
@@ -407,7 +410,7 @@ if __name__ == '__main__':
 
     # Run the solver
     solveTrajectoryMILIG(dir_path, file_name, solver=cml_args.solver, max_toffset=max_toffset, \
-        monte_carlo=(not cml_args.disablemc), mc_runs=cml_args.mcruns, \
+        monte_carlo=(not cml_args.disablemc), mc_runs=cml_args.mcruns, geometric_uncert=cml_args.uncertgeom, \
         gravity_correction=(not cml_args.disablegravity), plot_all_spatial_residuals=cml_args.plotallspatial,
         plot_file_type=cml_args.imgformat, show_plots=(not cml_args.hideplots), v_init_part=velpart)
 
