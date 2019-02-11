@@ -165,6 +165,9 @@ class ObservedPoints(object):
         # Calculated length along the path (meters)
         self.length = None
 
+        # Distance from state vector (meters)
+        self.state_vect_dist = None
+
         # Calculated lag (meters)
         self.lag = None
 
@@ -1947,9 +1950,9 @@ class Trajectory(object):
 
 
     def __init__(self, jdt_ref, output_dir='.', max_toffset=None, meastype=4, verbose=True, v_init_part=None,\
-        estimate_timing_vel=True, monte_carlo=True, mc_runs=None, mc_pick_multiplier=1,  mc_noise_std=1.0, \
-        geometric_uncert=False, filter_picks=True, calc_orbit=True, show_plots=True, save_results=True, \
-        gravity_correction=True, plot_all_spatial_residuals=False, plot_file_type='png'):
+        v_init_ht=None, estimate_timing_vel=True, monte_carlo=True, mc_runs=None, mc_pick_multiplier=1, \
+        mc_noise_std=1.0, geometric_uncert=False, filter_picks=True, calc_orbit=True, show_plots=True, \
+        save_results=True, gravity_correction=True, plot_all_spatial_residuals=False, plot_file_type='png'):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -1971,9 +1974,12 @@ class Trajectory(object):
                         3 = Azimuth +west of due south for meas1, Zenith angle for meas2
                         4 = Azimuth +north of due east for meas1, Zenith angle for meas2
             verbose: [bool] Print out the results and status messages, True by default.
-            v_init_part: [float] Fixed part from the beginning of the meteor on which the initial velocity
-                estimation using the sliding fit will start. Default is 0.25 (25%), but for noisier data
-                this might be bumped up to 0.5.
+            v_init_part: [float] Fixed part from the beginning of the meteor on which the automated initial
+                velocity estimation using the sliding fit will start. Default is 0.25 (25%), but for noisier 
+                data this might be bumped up to 0.5.
+            v_init_ht: [float] If given, the initial velocity will be estimated as the average velocity
+                above the given height in kilometers using data from all stations. None by default, in which
+                case the initial velocity will be estimated using the automated siliding fit.
             estimate_timing_vel: [bool] Try to estimate the difference in timing and velocity. True by default.
             monte_carlo: [bool] Runs Monte Carlo estimation of uncertanties. True by default.
             mc_runs: [int] Number of Monte Carlo runs. The default value is the number of observed points.
@@ -2017,6 +2023,10 @@ class Trajectory(object):
         if v_init_part is None:
             v_init_part = 0.25
         self.v_init_part = v_init_part
+
+        # (Optional) Height in kilometers above which points will be taken for estimating the initial
+        #   velocity (linear fit)
+        self.v_init_ht = v_init_ht
 
         # Estimating the difference in timing between stations, and the initial velocity if this flag is True
         self.estimate_timing_vel = estimate_timing_vel
@@ -2383,39 +2393,94 @@ class Trajectory(object):
                 weights, ret_stddev=True)
 
 
+    def calcAvgVelocityAboveHt(self, observations, bottom_ht):
+        """ Calculate the average velocity of all points above a given height.
+
+        Arguments:
+            observations: [list] A list of ObservationPoints objects which hold measurements from individual
+                stations.
+            bottom_ht: [float] Height above which points will be used to compute the average velocity (m).
+    
+        Return:
+            (v_ht_avg, intercept): 
+                v_ht_avg: [float] Average velocity above the given height (m/s).
+                intercept: [float] Fit intercept (m).
+        """
+
+        # Construct arrays of times vs. distance from state vector
+
+        all_times = []
+        all_state_vect_dists = []
+
+        for obs in observations:
+            for t, sv_dist, ht in zip(obs.time_data, obs.state_vect_dist, obs.model_ht):
+
+                # Skip heights below the given height
+                if ht < bottom_ht:
+                    continue
+
+                all_times.append(t)
+                all_state_vect_dists.append(sv_dist)
+
+        # If there are less than 4 points, don't estimate the initial velocity this way!
+        if len(all_times) < 4:
+            print('!!! Error, there are less than 4 points for velocity estimation above the given height of {:.2f} km!'.format(bottom_ht/1000))
+            print('Using automated velocity estimation with the sliding fit...')
+            return None, None
+
+        # Fit a line through the time vs. state vector distance data
+        line_params, _ = scipy.optimize.curve_fit(lineFunc, all_times, all_state_vect_dists)
+
+        return line_params
 
 
-    def calcLag(self, observations):
+
+    def calcLag(self, observations, velocity_fit=None):
         """ Calculate lag by fitting a line to the first part of the points and subtracting the line from the 
             length along the trail.
 
         Arguments:
             observations: [list] A list of ObservationPoints objects which hold measurements from individual
                 stations.
+
+        Keyword arguments:
+            velocity_fit: [tuple of float] Initial velocity and fit intercept (m/s and m). None by defualt.
+
         """
 
         # Go through observations from all stations
         for obs in observations:
 
-            # Fit a line to the first part of the points
-            init_part_size = int(self.v_init_part*len(obs.time_data))
 
-            # If the size is smaller than 4 points, take all point
-            if init_part_size < 4:
-                init_part_size = len(obs.time_data)
+            if velocity_fit is None:
 
-            # Cut the length and time to the first quarter
-            quart_length = obs.length[:init_part_size]
-            quart_time = obs.time_data[:init_part_size]
+                # Fit a line to the first part of the points
+                init_part_size = int(self.v_init_part*len(obs.time_data))
 
-            # Fit a line to the data
-            obs.lag_line, _ = scipy.optimize.curve_fit(lineFunc, quart_time, quart_length)
+                # If the size is smaller than 4 points, take all point
+                if init_part_size < 4:
+                    init_part_size = len(obs.time_data)
+
+                # Cut the length and time to the first quarter
+                quart_length = obs.length[:init_part_size]
+                quart_time = obs.time_data[:init_part_size]
+
+                # Fit a line to the data, estimate the velocity
+                obs.lag_line, _ = scipy.optimize.curve_fit(lineFunc, quart_time, quart_length)
+
+                # Calculate lag
+                obs.lag = obs.length - lineFunc(obs.time_data, *obs.lag_line)
+
+            else:
+                
+                obs.lag_line = list(velocity_fit)
+
+                # Calculate lag
+                obs.lag = obs.state_vect_dist - lineFunc(obs.time_data, *obs.lag_line)
+
 
             # Initial velocity is the slope of the fitted line
-            obs.v_init = obs.lag_line[0]
-
-            # Calculate lag
-            obs.lag = obs.length - lineFunc(obs.time_data, *obs.lag_line)
+            obs.v_init = obs.lag_line[0]            
 
 
 
@@ -2640,16 +2705,12 @@ class Trajectory(object):
                     # Fit a line to time vs. state_vect_dist
                     velocity_fit = scipy.optimize.least_squares(lineFuncLS, [v_init, 1], args=(times_part, \
                         state_vect_dist_part, weights_list_path), loss='soft_l1')
-                    # velocity_fit = scipy.optimize.minimize(lineFuncMinimize, [v_init, 1], args=(times_part, \
-                    #     state_vect_dist_part, weights_list_path))
                     velocity_fit = velocity_fit.x
 
                     # Calculate the lag and fit a line to it
                     lag_temp = state_vect_dist - lineFunc(times, *velocity_fit)
-                    lag_fit = scipy.optimize.least_squares(lineFuncLS, np.ones(2), args=(times, lag_temp, weight_list), \
-                        loss='soft_l1')
-                    # lag_fit = scipy.optimize.minimize(lineFuncMinimize, np.ones(2), args=(times, \
-                    #     lag_temp, weight_list))
+                    lag_fit = scipy.optimize.least_squares(lineFuncLS, np.ones(2), args=(times, lag_temp, \
+                        weight_list), loss='soft_l1')
                     lag_fit = lag_fit.x
 
                     # Add the point to the considered list only if the lag has a negative trend
@@ -3293,7 +3354,7 @@ class Trajectory(object):
             out_str += "\n"
 
             # Write out orbital parameters
-            out_str += self.orbit.__repr__(uncertanties=uncertanties)
+            out_str += self.orbit.__repr__(uncertanties=uncertanties, v_init_ht=self.v_init_ht)
             out_str += "\n"
 
 
@@ -4833,6 +4894,25 @@ class Trajectory(object):
         # Calculate latitude, longitude and altitude of each point closest to the radiant line, in WGS84
         self.calcLLA(self.state_vect_mini, self.radiant_eci_mini, self.observations)
 
+
+        # Compute the initial velocity as the average velocity of all points above the given height
+        #   (optional)
+        if self.v_init_ht is not None:
+            v_ht_avg, intercept_ht_avg = self.calcAvgVelocityAboveHt(self.observations, 1000*self.v_init_ht)
+
+            # Assign this average velocity as the initial velocity if the fit was successful
+            if v_ht_avg is not None:
+                
+                self.v_init = v_ht_avg
+                self.velocity_fit = [self.v_init, intercept_ht_avg]
+
+                # Recalculate the lag
+                self.calcLag(self.observations, velocity_fit=self.velocity_fit)
+
+                # Refit jacchia lag fit
+                self.jacchia_fit = self.fitJacchiaLag(self.observations)
+
+
         # Calculate ECI positions of the CPA on the radiant line, RA and Dec of the points on the radiant
         # line as seen by the observers, the corresponding azimuth and elevation, and set arrays model_fit1 
         # and model_fit2 to be of the same type as the input parameters meas1 and meas2
@@ -4930,7 +5010,7 @@ class Trajectory(object):
                 reference_init=minimize_solution.success)
 
             if self.verbose:
-                print(self.orbit)
+                print(self.orbit.__repr__(v_init_ht=self.v_init_ht))
 
 
         ######################################################################################################

@@ -149,7 +149,7 @@ class Orbit(object):
         self.T = None
 
 
-    def __repr__(self, uncertanties=None):
+    def __repr__(self, uncertanties=None, v_init_ht=None):
         """ String to be printed out when the Orbit object is printed. """
 
         def _uncer(str_format, std_name, multi=1.0, deg=False):
@@ -197,8 +197,15 @@ class Orbit(object):
             _uncer('{:.4f}', 'elevation_apparent', deg=True))
         out_str += "  Vavg      = {:>9.5f}{:s} km/s\n".format(self.v_avg/1000, _uncer('{:.4f}', 'v_avg', 
             multi=1.0/1000))
-        out_str += "  Vinit     = {:>9.5f}{:s} km/s\n".format(self.v_init/1000, _uncer('{:.4f}', 'v_init', 
-            multi=1.0/1000))
+
+
+        if v_init_ht is not None:
+            v_init_ht_str = ' (average above {:.2f} km)'.format(v_init_ht)
+        else:
+            v_init_ht_str = ''
+
+        out_str += "  Vinit     = {:>9.5f}{:s} km/s{:s}\n".format(self.v_init/1000, _uncer('{:.4f}', 'v_init', 
+            multi=1.0/1000), v_init_ht_str)
 
 
         # Check if the orbital elements could be calculated, and write them out
