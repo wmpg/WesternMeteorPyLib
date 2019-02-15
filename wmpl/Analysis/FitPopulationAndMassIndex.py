@@ -86,6 +86,11 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
 
     input_data = np.array(input_data).astype(np.float64)
 
+    
+    # Skip NaN values
+    input_data = input_data[~np.isnan(input_data)]
+
+
     # Reverse the signs of magnitudes to conform with the gamma distribution definition
     if not mass:
         input_data = -input_data
