@@ -3759,6 +3759,66 @@ class Trajectory(object):
             ##################################################################################################
 
 
+
+            ### PLOT TOTAL SPATIAL RESIDUALS VS LENGTH ###
+            ##################################################################################################
+            # marker type, size multiplier
+            markers = [
+             ['x', 2 ],
+             ['+', 8 ],
+             ['o', 1 ],
+             ['s', 1 ],
+             ['d', 1 ],
+             ]
+
+            for i, obs in enumerate(self.observations):
+
+                marker, size_multiplier = markers[i%len(markers)]
+
+                # Compute total residuals, take the signs from vertical residuals
+                tot_res = np.sign(obs.v_residuals)*np.hypot(obs.v_residuals, obs.h_residuals)
+
+                # Plot total residuals
+                plt.scatter(obs.state_vect_dist/1000, tot_res, marker=marker, s=10*size_multiplier, \
+                    label='{:s}'.format(str(obs.station_id)), zorder=3)
+
+                # Mark ignored points
+                if np.any(obs.ignore_list):
+
+                    ignored_length = obs.state_vect_dist[obs.ignore_list > 0]
+                    ignored_tot_res = tot_res[obs.ignore_list > 0]
+
+                    plt.scatter(ignored_length/1000, ignored_tot_res, facecolors='none', edgecolors='k', \
+                        marker='o', zorder=3, s=20)
+
+
+            plt.title('Total spatial residuals')
+            plt.xlabel('Length (km)')
+            plt.ylabel('Residuals (m)')
+
+            plt.grid()
+
+            plt.legend()
+
+            # Set the residual limits to +/-10m if they are smaller than that
+            if np.max(np.abs(plt.gca().get_ylim())) < 10:
+                plt.ylim([-10, 10])
+
+
+            if self.save_results:
+                savePlot(plt, file_name + '_total_spatial_residuals_length.' + self.plot_file_type, output_dir)
+
+            if show_plots:
+                plt.show()
+
+            else:
+                plt.clf()
+                plt.close()
+
+
+            ##################################################################################################
+
+
             ### PLOT ALL TOTAL SPATIAL RESIDUALS VS HEIGHT ###
             ##################################################################################################
 
