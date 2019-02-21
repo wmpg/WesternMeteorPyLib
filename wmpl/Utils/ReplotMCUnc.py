@@ -5,6 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from wmpl.Utils.Pickling import loadPickle
+from wmpl.Utils.Plotting import savePlot
 
 
 if __name__ == "__main__":
@@ -167,5 +168,7 @@ if __name__ == "__main__":
 
     plt.tight_layout()
     plt.subplots_adjust(wspace=0)
+
+    savePlot(plt, traj_file_name_core + '_monte_carlo_orbit_elems.png', output_dir=dir_path_mc)
 
     plt.show()
