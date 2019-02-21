@@ -137,6 +137,7 @@ def getRotMatrix(v1, v2):
 ### POLAR/ANGULAR FUNCTIONS ###
 ##############################################################################################################
 
+
 def meanAngle(angles):
     """ Calculate the mean angle from a list of angles. 
 
@@ -150,6 +151,37 @@ def meanAngle(angles):
     angles = np.array(angles)
 
     return np.arctan2(np.sum(np.sin(angles)), np.sum(np.cos(angles)))
+
+
+
+
+def normalizeAngleWrap(arr):
+    """ Given an array with angles which possibly have values close to 0 and 360, normalize all angles
+        to 0 (i.e. values > 180 will be negative).
+
+    Arguments:
+        arr: [ndarray] Array of angles (radians).
+
+
+    Return:
+        arr: [ndarray] Normalized array of angles (radians).
+
+    """
+
+
+    min_ang = np.min(arr)
+    max_ang = np.max(arr)
+
+    # Check if the data was wrapped
+    if abs(max_ang - min_ang) >= np.pi:
+
+        arr = np.array(arr)
+
+        # Subtract 360 from large angles
+        arr[arr >= np.pi] -= 2*np.pi
+
+
+    return arr
 
 
 

@@ -26,7 +26,7 @@ from mpl_toolkits.basemap import Basemap
 
 from wmpl.Trajectory.Orbit import calcOrbit
 from wmpl.Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, RMSD, angleBetweenSphericalCoords, \
-    lineFunc
+    lineFunc, normalizeAngleWrap
 from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import savePickle
 from wmpl.Utils.Plotting import savePlot
@@ -1472,9 +1472,9 @@ def calcCovMatrices(mc_traj_list):
     e_list = np.array([traj.orbit.e for traj in mc_traj_list])
     q_list = np.array([traj.orbit.q for traj in mc_traj_list])
     tp_list = np.array([datetime2JD(traj.orbit.last_perihelion) for traj in mc_traj_list])
-    node_list = np.array([traj.orbit.node for traj in mc_traj_list])
-    peri_list = np.array([traj.orbit.peri for traj in mc_traj_list])
-    i_list = np.array([traj.orbit.i for traj in mc_traj_list])
+    node_list = normalizeAngleWrap(np.array([traj.orbit.node for traj in mc_traj_list]))
+    peri_list = normalizeAngleWrap(np.array([traj.orbit.peri for traj in mc_traj_list]))
+    i_list = normalizeAngleWrap(np.array([traj.orbit.i for traj in mc_traj_list]))
     
 
     # Calculate the orbital covariance
