@@ -167,8 +167,10 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
         # Find the slope at the reference point for PDF plotting
         slope_pdf = scipy.stats.gamma.pdf(ref_point, *params)
 
+        # Plot the histogram
         plt.hist(sign*input_data, bins=nbins, density=True, color='k', histtype='step')
         
+        # Plot the estimated slope
         plt.plot(sign*x_arr, scipy.stats.gamma.pdf(x_arr, *params), zorder=4)
 
         # Get Y axis range
@@ -235,6 +237,9 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
         # Plot data histogram
         plt.hist(sign*input_data, bins=len(input_data), cumulative=-sign, density=True, log=True, histtype='step', 
             color='k', zorder=4)
+
+        # Get Y axis range
+        y_min, y_max = plt.gca().get_ylim()
         
         # # Plot fitted survival function
         # plt.plot(sign*x_arr, scipy.stats.gamma.sf(x_arr, *params))
@@ -243,10 +248,10 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
         # Plot slopes of all lines found during uncertainty estimation
         for unc_results in unc_results_list:
             
-            _, _, _, ref_point_unc, slope_unc, slope_report_unc, _, _ = unc_results
+            params_unc, _, _, ref_point_unc, slope_unc, slope_report_unc, _, _ = unc_results
 
             # Compute intercept of the line on the reverse cumulative plot (survival function)
-            y_temp_unc = np.log10(scipy.stats.gamma.sf(ref_point_unc, *params))
+            y_temp_unc = np.log10(scipy.stats.gamma.sf(ref_point_unc, *params_unc))
             intercept_unc = y_temp_unc + slope_unc*ref_point_unc
 
             # Plot the tangential line with the slope
@@ -264,10 +269,14 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
                 slope_name, slope_report, slope_report_std, kstest.statistic, kstest.pvalue), zorder=5)
 
 
-        # Limit Y axis range to the maximum of the fitted line
-        y_max = np.max(logline(-x_arr, slope, intercept))
-        plt.ylim(ymax=y_max)
+        # # Limit Y axis range to the maximum of the fitted line
+        # y_max = np.max(logline(-x_arr, slope, intercept))
+        # plt.ylim(ymax=y_max)
+
+        plt.ylim([y_min, y_max])
+
         plt.xlim([np.min(sign*x_arr), np.max(sign*x_arr)])
+        
 
 
         plt.xlabel(xlabel)
