@@ -1334,10 +1334,12 @@ def calcMCUncertanties(traj_list, traj_best):
 
 
     # Beginning/ending points
+    print([traj.rbeg_lon for traj in traj_list])
     un.rbeg_lon = scipy.stats.circstd([traj.rbeg_lon for traj in traj_list])
     un.rbeg_lat = np.std([traj.rbeg_lat for traj in traj_list])
     un.rbeg_ele = np.std([traj.rbeg_ele for traj in traj_list])
 
+    print([traj.rend_lon for traj in traj_list])
     un.rend_lon = scipy.stats.circstd([traj.rend_lon for traj in traj_list])
     un.rend_lat = np.std([traj.rend_lat for traj in traj_list])
     un.rend_ele = np.std([traj.rend_ele for traj in traj_list])
@@ -1346,21 +1348,25 @@ def calcMCUncertanties(traj_list, traj_best):
     if traj_best.orbit is not None:
 
         # Apparent
+        print([traj.orbit.ra for traj in traj_list])
         un.ra = scipy.stats.circstd([traj.orbit.ra for traj in traj_list])
         un.dec = np.std([traj.orbit.dec for traj in traj_list])
         un.v_avg = np.std([traj.orbit.v_avg for traj in traj_list])
         un.v_inf = np.std([traj.orbit.v_inf for traj in traj_list])
 
+        print([traj.orbit.azimuth_apparent for traj in traj_list])
         un.azimuth_apparent = scipy.stats.circstd([traj.orbit.azimuth_apparent for traj in traj_list])
         un.elevation_apparent = np.std([traj.orbit.elevation_apparent for traj in traj_list])
 
         # reference point on the meteor trajectory
+        print([traj.orbit.lon_ref for traj in traj_list])
         un.lon_ref = scipy.stats.circstd([traj.orbit.lon_ref for traj in traj_list])
         un.lat_ref = np.std([traj.orbit.lat_ref for traj in traj_list])
         un.lat_geocentric = np.std([traj.orbit.lat_geocentric for traj in traj_list])
         un.ht_ref = np.std([traj.orbit.ht_ref for traj in traj_list])
 
         # Geocentric
+        print([traj.orbit.ra_g for traj in traj_list])
         un.ra_g = scipy.stats.circstd([traj.orbit.ra_g for traj in traj_list])
         un.dec_g = np.std([traj.orbit.dec_g for traj in traj_list])
         un.v_g = np.std([traj.orbit.v_g for traj in traj_list])
@@ -1378,11 +1384,13 @@ def calcMCUncertanties(traj_list, traj_best):
 
 
         # Ecliptic geocentric
+        print([traj.orbit.L_g for traj in traj_list])
         un.L_g = scipy.stats.circstd([traj.orbit.L_g for traj in traj_list])
         un.B_g = np.std([traj.orbit.B_g for traj in traj_list])
         un.v_h = np.std([traj.orbit.v_h for traj in traj_list])
 
         # Ecliptic heliocentric
+        print([traj.orbit.L_h for traj in traj_list])
         un.L_h = scipy.stats.circstd([traj.orbit.L_h for traj in traj_list])
         un.B_h = np.std([traj.orbit.B_h for traj in traj_list])
         un.v_h_x = np.std([traj.orbit.v_h_x for traj in traj_list])
@@ -1390,17 +1398,24 @@ def calcMCUncertanties(traj_list, traj_best):
         un.v_h_z = np.std([traj.orbit.v_h_z for traj in traj_list])
 
         # Orbital elements
+        print([traj.orbit.la_sun for traj in traj_list])
         un.la_sun = scipy.stats.circstd([traj.orbit.la_sun for traj in traj_list])
         un.a = np.std([traj.orbit.a for traj in traj_list])
         un.e = np.std([traj.orbit.e for traj in traj_list])
         un.i = np.std([traj.orbit.i for traj in traj_list])
+        print([traj.orbit.peri for traj in traj_list])
         un.peri = scipy.stats.circstd([traj.orbit.peri for traj in traj_list])
+        print([traj.orbit.node for traj in traj_list])
         un.node = scipy.stats.circstd([traj.orbit.node for traj in traj_list])
+        print([traj.orbit.pi for traj in traj_list])
         un.pi = scipy.stats.circstd([traj.orbit.pi for traj in traj_list])
         un.q = np.std([traj.orbit.q for traj in traj_list])
         un.Q = np.std([traj.orbit.Q for traj in traj_list])
+        print([traj.orbit.true_anomaly for traj in traj_list])
         un.true_anomaly = scipy.stats.circstd([traj.orbit.true_anomaly for traj in traj_list])
+        print([traj.orbit.eccentric_anomaly for traj in traj_list])
         un.eccentric_anomaly = scipy.stats.circstd([traj.orbit.eccentric_anomaly for traj in traj_list])
+        print([traj.orbit.mean_anomaly for traj in traj_list])
         un.mean_anomaly = scipy.stats.circstd([traj.orbit.mean_anomaly for traj in traj_list])
 
         # Last perihelion uncertanty (days)
@@ -1682,10 +1697,12 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
     # Choose the best trajectory
     traj_best = mc_results[best_traj_ind]
 
+    print('Computing uncertainties...')
 
     # Calculate the standard deviation of every trajectory parameter
     uncertanties = calcMCUncertanties(mc_results, traj_best)
 
+    print('Computing covariance matices...')
 
     # Calculate orbital and inital state vector covariance matrices
     traj_best.orbit_cov, traj_best.state_vect_cov = calcCovMatrices(mc_results)
@@ -1795,8 +1812,13 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
         ax3 = fig.add_subplot(2, 2, 3)
         ax4 = fig.add_subplot(2, 2, 4, sharey=ax3)
 
+        # Compute the number of bins
+        nbins = np.ceil(np.sqrt(len(a_list)))
+        if nbins < 10:
+            nbins = 10
+
         # Semimajor axis vs. inclination
-        ax1.hist2d(a_list, np.degrees(incl_list))
+        ax1.hist2d(a_list, np.degrees(incl_list), bins=nbins)
         ax1.set_xlabel('a (AU)')
         ax1.set_ylabel('Inclination (deg)')
         plt.setp(ax1.get_xticklabels(), rotation=30, horizontalalignment='right')
@@ -1813,7 +1835,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
 
 
         # Plot argument of perihelion vs. inclination
-        ax2.hist2d(np.degrees(peri_list), np.degrees(incl_list))
+        ax2.hist2d(np.degrees(peri_list), np.degrees(incl_list), bins=nbins)
         ax2.set_xlabel('peri (deg)')
         plt.setp(ax2.get_xticklabels(), rotation=30, horizontalalignment='right')
         #ax2.get_xaxis().get_major_formatter().set_useOffset(False)
@@ -1836,7 +1858,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
 
 
         # Plot eccentricity vs. perihelion distance
-        ax3.hist2d(e_list, q_list)
+        ax3.hist2d(e_list, q_list, bins=nbins)
         ax3.set_xlabel('Eccentricity')
         ax3.set_ylabel('q (AU)')
         plt.setp(ax3.get_xticklabels(), rotation=30, horizontalalignment='right')
@@ -1851,7 +1873,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
             ax3.scatter(traj_best.orbit.e, traj_best.orbit.q, c='g', linewidth=1, edgecolors='w')
 
         # Plot argument of perihelion vs. perihelion distance
-        ax4.hist2d(np.degrees(peri_list), q_list)
+        ax4.hist2d(np.degrees(peri_list), q_list, bins=nbins)
         ax4.set_xlabel('peri (deg)')
         plt.setp(ax4.get_xticklabels(), rotation=30, horizontalalignment='right')
         #ax4.get_xaxis().get_major_formatter().set_useOffset(False)
