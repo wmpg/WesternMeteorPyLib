@@ -840,6 +840,18 @@ def ablate(met, consts, no_atmosphere_end_ht=-1):
         met.Fl_ablate = 0
 
 
+    # Skip ablating if the meteor starts propagating outside the atmosphere (> 200 km)
+    if met.h > 200000:
+        met.Fl_ablate = 0
+
+
+    # If any of the values are NaN, stop ablating
+    if np.isnan(met.m):
+        print('NaN encountered, stopping ablation!')
+        met.Fl_ablate = 0        
+
+
+
     # Stop ablating if the no-atmosphere solution is computed and the height drops below the given height
     if no_atmosphere_end_ht > 0:
         if met.h <= no_atmosphere_end_ht:
@@ -892,6 +904,11 @@ def runSimulation(met, consts, fragmentation_model=None, no_atmosphere_end_ht=-1
         [list] A list of [time, total_luminosity] pairs.
 
     """
+
+
+    # Make sure the input parameters are not modified
+    met = copy.deepcopy(met)
+    consts = copy.deepcopy(consts)
 
 
     # If no fragmentation model was specified, don't fragment the meteor

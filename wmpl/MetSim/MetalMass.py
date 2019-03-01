@@ -68,11 +68,11 @@ if __name__ == '__main__':
     ### INPUT PARAMETERS ###
     ##########################################################################################################
 
-    #dir_path = "/home/dvida/Dropbox/UWO Master's/Projects/MirfitPrepare/20161007_052749_met"
-    #dir_path = "/home/dvida/Dropbox/UWO Master's/Projects/MetalPrepare/20161007_052346_met"
+    #dir_path = "/home/dvida/Dropbox/UWO/Projects/MirfitPrepare/20161007_052749_met"
+    dir_path = "/home/dvida/Dropbox/UWO/Projects/MetalPrepare/20161007_052749_met"
 
     # Path to the directory containing the met file
-    dir_path = "../MetalPrepare/20170721_070420_met"
+    #dir_path = "../MetalPrepare/20170721_070420_met"
 
     # Name of the met file
     file_name = 'state.met'
@@ -81,9 +81,9 @@ if __name__ == '__main__':
     fps = 80.0
 
     # Average velocity (m/s)
-    #v_avg = 23541.10
+    v_avg = 23541.10
     #v_avg = 26972.28
-    v_avg = 15821.78
+    #v_avg = 15821.78
 
     # Approx. bulk density of the meteoroid (used for size calculation)
     bulk_density = 1000 # kg/m^3
