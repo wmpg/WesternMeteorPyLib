@@ -151,6 +151,9 @@ class ObservedPoints(object):
         # Angle between the station, the state vector, and the trajectory
         self.incident_angle = None
 
+        # Weight for the station
+        self.weight = None
+
         # Residuals from the fit
         self.h_residuals = None
         self.v_residuals = None
@@ -949,6 +952,28 @@ def jacchiaVelocityFunc(t, a1, a2, v_init):
 
 
 
+def checkWeights(observations, weights):
+    """ Check weight values and make sure they can be used. """
+
+    # If the weights were not given, use 1 for every weight
+    if weights is None:
+        weights = np.ones(len(observations))
+
+        # Set weights for stations that are not used to 0
+        weights = np.array([w if (observations[i].ignore_station == False) else 0 \
+            for i, w in enumerate(weights)])
+
+    # Make sure there are weights larger than 0
+    if sum(weights) <= 0:
+        weights = np.ones(len(observations))
+
+        # Set weights for stations that are not used to 0
+        weights = np.array([w if (observations[i].ignore_station == False) else 0 \
+            for i, w in enumerate(weights)])
+
+
+    return weights
+
 
 
 def timingResiduals(params, observations, t_ref_station, weights=None, ret_stddev=False):
@@ -971,22 +996,8 @@ def timingResiduals(params, observations, t_ref_station, weights=None, ret_stdde
 
     """
 
-    # If the weights were not given, use 1 for every weight
-    if weights is None:
-        weights = np.ones(len(observations))
-
-        # Set weights for stations that are not used to 0
-        weights = np.array([w if (observations[i].ignore_station == False) else 0 \
-            for i, w in enumerate(weights)])
-
-    # Make sure there are weights larger than 0
-    if sum(weights) <= 0:
-        weights = np.ones(len(observations))
-
-        # Set weights for stations that are not used to 0
-        weights = np.array([w if (observations[i].ignore_station == False) else 0 \
-            for i, w in enumerate(weights)])
-
+    # Make sure weight values are OK
+    weights = checkWeights(observations, weights)
 
     stat_count = 0
 
@@ -2415,13 +2426,14 @@ class Trajectory(object):
                 weights, ret_stddev=True)
 
 
-    def calcAvgVelocityAboveHt(self, observations, bottom_ht):
+    def calcAvgVelocityAboveHt(self, observations, bottom_ht, weights):
         """ Calculate the average velocity of all points above a given height.
 
         Arguments:
             observations: [list] A list of ObservationPoints objects which hold measurements from individual
                 stations.
             bottom_ht: [float] Height above which points will be used to compute the average velocity (m).
+            weights: [list] A list of statistical weights for every station.
     
         Return:
             (v_ht_avg, intercept): 
@@ -2429,13 +2441,33 @@ class Trajectory(object):
                 intercept: [float] Fit intercept (m).
         """
 
+        # Maker sure weight values are OK
+        weights = checkWeights(observations, weights)
+
         # Construct arrays of times vs. distance from state vector
 
         all_times = []
         all_state_vect_dists = []
+        all_inv_weights = []
 
-        for obs in observations:
-            for t, sv_dist, ht in zip(obs.time_data, obs.state_vect_dist, obs.model_ht):
+        for obs, w in zip(observations, weights):
+
+            # Skip ignored stations
+            if obs.ignore_station:
+                continue
+
+
+            # Skip stations with weight 0
+            if w <= 0:
+                continue
+
+
+            for t, sv_dist, ht, ignore in zip(obs.time_data, obs.state_vect_dist, obs.model_ht, \
+                obs.ignore_list):
+
+                # Skip ignored points
+                if ignore:
+                    continue
 
                 # Skip heights below the given height
                 if ht < bottom_ht:
@@ -2443,6 +2475,8 @@ class Trajectory(object):
 
                 all_times.append(t)
                 all_state_vect_dists.append(sv_dist)
+                all_inv_weights.append(1.0/w)
+
 
         # If there are less than 4 points, don't estimate the initial velocity this way!
         if len(all_times) < 4:
@@ -2451,7 +2485,8 @@ class Trajectory(object):
             return None, None
 
         # Fit a line through the time vs. state vector distance data
-        line_params, _ = scipy.optimize.curve_fit(lineFunc, all_times, all_state_vect_dists)
+        line_params, _ = scipy.optimize.curve_fit(lineFunc, all_times, all_state_vect_dists, \
+            sigma=all_inv_weights)
 
         return line_params
 
@@ -3430,7 +3465,7 @@ class Trajectory(object):
         out_str += "Stations\n"
         out_str += "--------\n"
 
-        out_str += "        ID, Lon +E (deg), Lat +N (deg), Ele (m), Jacchia a1, Jacchia a2, Beg Ele (m),  End Ht (m), +/- Obs ang (deg), +/- V (m), +/- H (m), Incident angle (deg)\n"
+        out_str += "        ID, Lon +E (deg), Lat +N (deg), Ele (m), Jacchia a1, Jacchia a2, Beg Ele (m),  End Ht (m), +/- Obs ang (deg), +/- V (m), +/- H (m), Perspective angle (deg), Weight\n"
         
         for obs in self.observations:
 
@@ -3447,6 +3482,12 @@ class Trajectory(object):
             station_info.append("{:>9.2f}".format(obs.v_res_rms))
             station_info.append("{:>9.2f}".format(obs.h_res_rms))
             station_info.append("{:>20.2f}".format(np.degrees(obs.incident_angle)))
+
+            if obs.weight is not None:
+                station_info.append("{:>6.4f}".format(obs.weight))
+            else:
+                station_info.append("{:>6s}".format('None'))
+
 
 
             out_str += ", ".join(station_info) + "\n"
@@ -4680,7 +4721,7 @@ class Trajectory(object):
             weights = [1.0]*len(self.observations)
 
 
-        # Set weights for stations that are not used to 0
+        # Set weights to 0 for stations that are not used
         weights = [w if (self.observations[i].ignore_station == False) else 0 for i, w in enumerate(weights)]
 
 
@@ -4688,8 +4729,10 @@ class Trajectory(object):
         if self.verbose:
             print('LoS statistical weights:')
 
+            # Set weights to stations
             for i, obs in enumerate(self.observations):
                 print(obs.station_id, weights[i])
+                obs.weight = weights[i]
 
         ######################################################################################################
 
@@ -4980,7 +5023,8 @@ class Trajectory(object):
         # Compute the initial velocity as the average velocity of all points above the given height
         #   (optional)
         if self.v_init_ht is not None:
-            v_ht_avg, intercept_ht_avg = self.calcAvgVelocityAboveHt(self.observations, 1000*self.v_init_ht)
+            v_ht_avg, intercept_ht_avg = self.calcAvgVelocityAboveHt(self.observations, 1000*self.v_init_ht, \
+                weights)
 
             # Assign this average velocity as the initial velocity if the fit was successful
             if v_ht_avg is not None:
