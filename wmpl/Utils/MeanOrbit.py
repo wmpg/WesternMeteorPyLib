@@ -354,3 +354,98 @@ def meanOrbitVectorLSQ(orb_elem):
     out_elem = vectorial2kepler(hs, evs, Es)
 
     return out_elem
+
+
+
+if __name__ == "__main__":
+
+    import os
+    import argparse
+
+
+    ### COMMAND LINE ARGUMENTS
+
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="""Compute mean orbital elements of orbits in the given file (orbits.csv by default) and output them to a file.""",
+        formatter_class=argparse.RawTextHelpFormatter)
+
+    arg_parser.add_argument('input_file', type=str, nargs='?', default='orbits.csv', help='Path to the input CSV file with orbits. The values should be comma or semicolon separated, and the columns should be: q, e, i, o, w. The angular values are expected in degrees. If no file is given, orbits.csv will be used.')
+
+    arg_parser.add_argument('-o', '--out', metavar='OUT_FILE', help="Output file path. out.txt by default.", type=str, nargs='?')
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    ############################
+
+    file_path = cml_args.input_file
+
+    print('File path:', file_path)
+
+
+    if os.path.isfile(file_path):
+
+        # Read the CSV file
+        with open(file_path) as f:
+
+            orb_elem_list = []
+
+            for line in f:
+
+                # Skip line beginnign with #
+                if line.startswith('#'):
+                    continue
+
+                line = line.replace('\n', '').replace('\r', '')
+
+                # Determine which delimiter to use
+                if line.count(',') > line.count(';'):
+                    line = line.split(',')
+
+                else:
+                    line = line.split(';')
+
+
+                # Extract orbital elements
+                if len(line) < 5:
+                    continue
+
+                q, e, i, o, w = list(map(float, line[:5]))
+
+
+                orb_elem_list.append([q, e, np.radians(i), np.radians(o), np.radians(w)])
+
+
+
+            # Compute mean orbital elements
+            mean_orb = meanOrbitVectorLSQ(np.array(orb_elem_list))
+
+            q, e, i, o, w = mean_orb
+
+
+
+            if cml_args.out is None:
+                out_path = os.path.join(os.path.dirname(os.path.abspath(file_path)), 'out.txt')
+
+            else:
+                out_path = cml_args.out
+
+
+
+            # Write orbital elements to file
+            with open(out_path, 'w') as f:
+
+                f.write('Mean orbit\n\r')
+                f.write('----------\n\r')
+                f.write('q = {:.6f} AU\n\r'.format(q))
+                f.write('e = {:.6f}\n\r'.format(e))
+                f.write('i = {:.6f} deg\n\r'.format(np.degrees(i)))
+                f.write('node = {:.6f} deg\n\r'.format(np.degrees(o)))
+                f.write('peri = {:.6f} deg\n\r'.format(np.degrees(w)))
+
+
+
+
+
+
+
