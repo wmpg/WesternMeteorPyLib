@@ -231,10 +231,10 @@ def jd2Date(jd, UT_corr=0, dt_obj=False):
 
     """
 
-    
-    dt = timedelta(days=jd)
-
     try:
+
+        dt = timedelta(days=jd)
+        
         date = dt + JULIAN_EPOCH - J2000_JD + timedelta(hours=UT_corr) 
 
     # If the date is out of range (i.e. before year 1) use year 1. This is the limitation in the datetime
