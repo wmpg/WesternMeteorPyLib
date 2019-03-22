@@ -130,13 +130,13 @@ If you want to use the most recent lists of comets and asteroids, download these
 
 ## Usage
 
-Module interfaces are not 100% complete yet, but individual functions are well documented. To run individual modules, e.g. to demonstrate how the Monte Carlo trajectory solver works, navigate into the WesternMeteorPyLib directory and run:
+Module interfaces are not 100% complete yet, but individual functions are well documented. To run individual modules, e.g. to demonstrate how the trajectory solver works, run:
 
 ```
 python -m wmpl.Trajectory.Trajectory
 ```
 
-or, you can use functions from the library anywhere. E.g. if you want to run a particular function from the library, you can do:
+or, you can use functions from the library in other scripts. E.g. if you want to run a particular function from the library, you can create a new .py file and do:
 
 ```
 import datetime
