@@ -74,17 +74,25 @@ if __name__ == "__main__":
     # os.path.abspath("../SimulatedMeteors/CAMO/2011Draconids"),
     # os.path.abspath("../SimulatedMeteors/CAMO/2014Ursids"),
     # os.path.abspath("../SimulatedMeteors/CAMO/2012Perseids"),
+    #os.path.abspath("../SimulatedMeteors/CAMO/2012Geminids")
+    #os.path.abspath("../SimulatedMeteors/CAMO/2012Geminids_1000")
 
     # os.path.abspath("../SimulatedMeteors/CAMSsim/2011Draconids"),
     # os.path.abspath("../SimulatedMeteors/CAMSsim/2014Ursids"),
     # os.path.abspath("../SimulatedMeteors/CAMSsim/2012Perseids"),
+    # os.path.abspath("../SimulatedMeteors/CAMSsim/2012SDA")
+    # os.path.abspath("../SimulatedMeteors/CAMSsim/2012Geminids")
+    #os.path.abspath("../SimulatedMeteors/CAMSsim_2station/2012Geminids_1000")
 
     # os.path.abspath("../SimulatedMeteors/SOMN_sim/2011Draconids"),
     #os.path.abspath("../SimulatedMeteors/SOMN_sim/2014Ursids"),
     # os.path.abspath("../SimulatedMeteors/SOMN_sim/2012Perseids"),
     # os.path.abspath("../SimulatedMeteors/SOMN_sim/2015Taurids")
+    #os.path.abspath("../SimulatedMeteors/SOMN_sim/2012Geminids")
+    #os.path.abspath("../SimulatedMeteors/SOMN_sim/2012Geminids_1000")
+    os.path.abspath("../SimulatedMeteors/SOMN_sim_2station/2012Geminids_1000")
 
-    os.path.abspath("../SimulatedMeteors/SOMN_sim/LongFireball")
+    #os.path.abspath("../SimulatedMeteors/SOMN_sim/LongFireball")
     #os.path.abspath("../SimulatedMeteors/SOMN_sim/LongFireball_nograv")
     #shower_dir = os.path.abspath("../SimulatedMeteors/SOMN_sim/LongFireball_nograv")
     ]

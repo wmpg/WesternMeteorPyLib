@@ -20,16 +20,39 @@ from wmpl.TrajSim.ShowerSim import SimMeteor, AblationModelVelocity, LinearDecel
 if __name__ == "__main__":
 
 
-    dir_path = "../SimulatedMeteors/CAMO/2012Geminids_1000"
 
+    # ## CAMO ###
+
+    # dir_path = "../SimulatedMeteors/CAMO/2012Geminids_1000"
+
+    # solvers = ['planes', 'los', 'milig', 'mc', 'gural1', 'gural3']
+    # solvers_plot_labels = ['IP', 'LoS', 'LoS-FHAV', 'Monte Carlo', 'MPF linear', 'MPF exp']
+
+    # ## ###
+
+
+
+    # ### CAMS ###
+    # dir_path = "../SimulatedMeteors/CAMSsim_2station/2012Geminids_1000"
 
     # solvers = ['planes', 'los', 'milig', 'mc', 'gural0', 'gural0fha', 'gural1', 'gural3']
     # solvers_plot_labels = ['IP', 'LoS', 'LoS-FHAV', 'Monte Carlo', 'MPF const', 'MPF const-FHAV', 'MPF linear', 'MPF exp']
 
-    solvers = ['planes', 'los', 'milig', 'mc', 'gural1', 'gural3']
-    solvers_plot_labels = ['IP', 'LoS', 'LoS-FHAV', 'Monte Carlo', 'MPF linear', 'MPF exp']
+    # ### ###
 
 
+
+    ### SOMN ###
+    dir_path = "../SimulatedMeteors/SOMN_sim_2station/2012Geminids_1000"
+
+    solvers = ['planes', 'los', 'milig', 'mc', 'gural0', 'gural0fha', 'gural1', 'gural3']
+    solvers_plot_labels = ['IP', 'LoS', 'LoS-FHAV', 'Monte Carlo', 'MPF const', 'MPF const-FHAV', 'MPF linear', 'MPF exp']
+
+    ### ###
+
+
+
+    # Number of historgram bins
     conv_hist_bins = 30
 
 
@@ -80,27 +103,45 @@ if __name__ == "__main__":
             binned_radiant_diffs.append(radiant_diff_med)
             binned_vg_diffs.append(vg_diff_med)
 
+
+        # Plot MPF results dotted
+        if solver_name.startswith('MPF'):
+            linestyle = (0, (1, 1))
+            linewidth = 1
+            marker = 'x'
+            markersize = 4
+
+        else:
+            linestyle = 'solid'
+            linewidth = 1.5
+            marker = None
+            markersize = 0
+
         # Plot convergence angle vs radiant error
-        ax1.plot(edges[:-1], binned_radiant_diffs, label=solver_name, zorder=3)
+        ax1.plot(edges[:-1], binned_radiant_diffs, label=solver_name, linestyle=linestyle, \
+            linewidth=linewidth, marker=marker, markersize=markersize, zorder=3)
 
         # Plot convergence angle vs Vg error
-        ax2.plot(edges[:-1], binned_vg_diffs, label=solver_name, zorder=3)
+        ax2.plot(edges[:-1], binned_vg_diffs, label=solver_name, linestyle=linestyle, linewidth=linewidth, \
+            marker=marker, markersize=markersize, zorder=3)
 
-        # Add a zero velocity error line
-        ax2.plot(edges[:-1], np.zeros_like(edges[:-1]), color='k', linestyle='--')
+    # Add a zero velocity error line
+    ax2.plot(edges[:-1], np.zeros_like(edges[:-1]), color='k', linestyle='--')
 
 
     ax1.legend()
     ax1.grid()
     ax1.set_ylabel('Radiant error (deg)')
     ax1.set_ylim(bottom=0)
-    ax1.set_xlim(left=0, right=np.max(edges[-1]))
+    ax1.set_xlim(left=0, right=np.max(edges[:-1]))
 
     ax2.grid()
     ax2.set_ylabel('$V_g$ error (km/s)')
     ax2.set_xlabel('Convergence angle (deg)')
 
     plt.tight_layout()
+
+    plt.subplots_adjust(hspace=0.1)
 
     # Save the figure
     plt.savefig(os.path.join(dir_path, system_name + '_' + shower_name.replace(' ', '_') \
