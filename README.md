@@ -1,4 +1,18 @@
-# WesternMeteorPyLib
+
+
+## Cloning
+
+Because this repository contains submodules, you will have to clone it by running:
+
+```
+git clone --recursive https://github.com/dvida/WesternMeteorPyLib.git
+```
+
+Running a normal git clone **will not work.**
+
+
+
+## Features
 
 A library of common functions used for meteor physics, developed by the [Western Meteor Physics Group](http://meteor.uwo.ca/).
 
@@ -7,8 +21,8 @@ List of features:
  * I/O functions for common formats of meteor data
  * Trajectory estimation methods
    * Gural at al. (2012) Multi-parameter fit method with PSO
-   * WMPG Monte Carlo metdhos
- * Orbit estimation
+   * Monte Carlo method
+ * Orbit computation
  * Meteor shower/trajectory simulaton
  * Obtaining atmosphere densities using the NRLMSISE-00 model
  * D criteria functions
