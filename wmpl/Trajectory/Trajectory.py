@@ -595,6 +595,14 @@ class PlaneIntersection(object):
         z_max += z_diff/2
 
 
+        # Convert meters to km
+        x_min /= 1000
+        x_max /= 1000
+        y_min /= 1000
+        y_max /= 1000
+        z_min /= 1000
+        z_max /= 1000
+
         # Calculate the quiver arrow length
         arrow_len = 0.2*np.sqrt((x_min - x_max)**2 + (y_min - y_max)**2 + (z_min - z_max)**2)
 
@@ -602,13 +610,13 @@ class PlaneIntersection(object):
         for obs in observations:
 
             # Station positions
-            ax.scatter(obs.x_stat, obs.y_stat, obs.z_stat, s=50)
+            ax.scatter(obs.x_stat/1000, obs.y_stat/1000, obs.z_stat/1000, s=50)
 
             # Lines of sight
-            ax.quiver(obs.x_stat, obs.y_stat, obs.z_stat, obs.x_eci, obs.y_eci, obs.z_eci, length=arrow_len, \
-                normalize=True, arrow_length_ratio=0.1, color='blue')
+            ax.quiver(obs.x_stat/1000, obs.y_stat/1000, obs.z_stat/1000, obs.x_eci/1000, obs.y_eci/1000, \
+                obs.z_eci/1000, length=arrow_len, normalize=True, arrow_length_ratio=0.1, color='blue')
 
-            d = -np.array([obs.x_stat, obs.y_stat, obs.z_stat]).dot(obs.plane_N)
+            d = -np.array([obs.x_stat/1000, obs.y_stat/1000, obs.z_stat/1000]).dot(obs.plane_N)
 
             # Create x,y
             xx, yy = np.meshgrid(np.linspace(x_min, x_max, 10), np.linspace(y_min, y_max, 10))
@@ -617,7 +625,7 @@ class PlaneIntersection(object):
             z = (-obs.plane_N[0]*xx - obs.plane_N[1]*yy - d)*1.0/obs.plane_N[2]
 
             # Plot plane normal
-            ax.quiver(obs.x_stat, obs.y_stat, obs.z_stat, *obs.plane_N, length=arrow_len/2, 
+            ax.quiver(obs.x_stat/1000, obs.y_stat/1000, obs.z_stat/1000, *obs.plane_N, length=arrow_len/2, 
                 normalize=True, arrow_length_ratio=0.1, color='green')
 
             # Plot the plane
@@ -625,8 +633,8 @@ class PlaneIntersection(object):
 
 
         # Plot the radiant state vector
-        rad_x, rad_y, rad_z = -self.radiant_eci
-        rst_x, rst_y, rst_z = traj_point
+        rad_x, rad_y, rad_z = -self.radiant_eci/1000
+        rst_x, rst_y, rst_z = traj_point/1000
         ax.quiver(rst_x, rst_y, rst_z, rad_x, rad_y, rad_z, length=arrow_len, normalize=True, color='red', \
             arrow_length_ratio=0.1)
 
@@ -634,9 +642,9 @@ class PlaneIntersection(object):
         ax.set_ylim([y_min, y_max])
         ax.set_zlim([z_min, z_max])
 
-        ax.set_xlabel('X (m)')
-        ax.set_ylabel('Y (m)')
-        ax.set_zlabel('Z (m)')
+        ax.set_xlabel('X (km)')
+        ax.set_ylabel('Y (km)')
+        ax.set_zlabel('Z (km)')
 
         # Change the size of ticks (make them smaller)
         ax.tick_params(axis='both', which='major', labelsize=8)
@@ -4461,17 +4469,18 @@ class Trajectory(object):
         ax = fig.add_subplot(111, projection='3d')
 
         # Calculate the position of the state vector (aka. first point on the trajectory)
-        traj_point = self.observations[0].model_eci[0]
+        traj_point = self.observations[0].model_eci[0]/1000
 
         # Calculate the length to the last point on the trajectory
-        meteor_len = np.sqrt(np.sum((self.observations[0].model_eci[0] - self.observations[0].model_eci[-1])**2))
+        meteor_len = np.sqrt(np.sum((self.observations[0].model_eci[0]/1000 \
+            - self.observations[0].model_eci[-1]/1000)**2))
 
         # Calculate the plot limits
-        x_list = [x_stat for obs in self.observations for x_stat in obs.stat_eci_los[:, 0]]
+        x_list = [x_stat for obs in self.observations for x_stat in obs.stat_eci_los[:, 0]/1000]
         x_list.append(traj_point[0])
-        y_list = [y_stat for obs in self.observations for y_stat in obs.stat_eci_los[:, 1]]
+        y_list = [y_stat for obs in self.observations for y_stat in obs.stat_eci_los[:, 1]/1000]
         y_list.append(traj_point[1])
-        z_list = [z_stat for obs in self.observations for z_stat in obs.stat_eci_los[:, 2]]
+        z_list = [z_stat for obs in self.observations for z_stat in obs.stat_eci_los[:, 2]/1000]
         z_list.append(traj_point[2])
 
         x_min, x_max = min(x_list), max(x_list)
@@ -4502,26 +4511,31 @@ class Trajectory(object):
         for obs in self.observations:
 
             # Station positions
-            ax.scatter(obs.stat_eci_los[:, 0], obs.stat_eci_los[:, 1], obs.stat_eci_los[:, 2], s=20)
+            ax.scatter(obs.stat_eci_los[:, 0]/1000, obs.stat_eci_los[:, 1]/1000, obs.stat_eci_los[:, 2]/1000,\
+                s=20)
 
             # Plot lines of sight
-            for stat_eci_los, meas_eci_los in zip(obs.stat_eci_los, obs.meas_eci_los):
+            for i, (stat_eci_los, meas_eci_los) in enumerate(zip(obs.stat_eci_los, obs.meas_eci_los)):
+
+                # Take every other
+                if i%2 == 1:
+                    continue
 
                 # Calculate the point on the trajectory
                 traj_pt, _, _ = findClosestPoints(stat_eci_los, meas_eci_los, self.state_vect_mini, 
                     self.radiant_eci_mini)
 
-                vect_len = np.sqrt(np.sum((stat_eci_los - traj_pt)**2))
+                vect_len = np.sqrt(np.sum((stat_eci_los - traj_pt)**2))/1000
 
                 # Lines of sight
-                ax.quiver(stat_eci_los[0], stat_eci_los[1], stat_eci_los[2], meas_eci_los[0], meas_eci_los[1], 
-                    meas_eci_los[2], length=vect_len, normalize=True, arrow_length_ratio=0, color='blue', 
-                    alpha=0.5)
+                ax.quiver(stat_eci_los[0]/1000, stat_eci_los[1]/1000, stat_eci_los[2]/1000, 
+                    meas_eci_los[0]/1000, meas_eci_los[1]/1000, meas_eci_los[2]/1000, 
+                    length=vect_len, normalize=True, arrow_length_ratio=0, color='blue', alpha=0.5)
 
 
 
         # Plot the radiant state vector
-        rad_x, rad_y, rad_z = -self.radiant_eci_mini
+        rad_x, rad_y, rad_z = -self.radiant_eci_mini/1000
         rst_x, rst_y, rst_z = traj_point
         ax.quiver(rst_x, rst_y, rst_z, rad_x, rad_y, rad_z, length=meteor_len, normalize=True, color='red', 
             arrow_length_ratio=0.1)
@@ -4531,9 +4545,9 @@ class Trajectory(object):
         ax.set_zlim([z_min, z_max])
 
 
-        ax.set_xlabel('X (m)')
-        ax.set_ylabel('Y (m)')
-        ax.set_zlabel('Z (m)')
+        ax.set_xlabel('X (km)')
+        ax.set_ylabel('Y (km)')
+        ax.set_zlabel('Z (km)')
 
         # Change the size of ticks (make them smaller)
         ax.tick_params(axis='both', which='major', labelsize=8)
@@ -5240,12 +5254,12 @@ class Trajectory(object):
 
         # # Show the plane intersection
         # if self.show_plots:
-        #     self.best_conv_inter.show()
+        #   self.best_conv_inter.show()
 
 
         # # Show lines of sight solution in 3D
         # if self.show_plots:
-        #     self.showLoS()
+        #   self.showLoS()
 
 
         #####################################################################################################
