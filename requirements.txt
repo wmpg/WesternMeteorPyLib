@@ -3,7 +3,6 @@ scipy
 matplotlib
 jplephem
 pyephem
-obspy
 # you'll have to install this with:
 # > pip install basemap --allow-external basemap --allow-unverified basemap
 # or for Python 3:

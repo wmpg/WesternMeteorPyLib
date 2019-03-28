@@ -52,9 +52,7 @@ sudo pip install setuptools --upgrade
 sudo pip install numpy --upgrade
 sudo pip install matplotlib --upgrade
 sudo pip install scipy
-sudo pip install netcdf
-sudo pip install simplekml
-sudo pip install https://github.com/matplotlib/basemap/archive/v1.1.0.tar.gz
+sudo pip install https://github.com/matplotlib/basemap/archive/v1.0.7.tar.gz
 ```
 
 
@@ -87,9 +85,7 @@ On windows, you might not have to install library packages, but the installation
 	```
 	conda update anaconda
 	conda install numpy scipy matplotlib cython
-	conda install -c conda-forge basemap basemap-data-hires jplephem pyephem pyhdf obspy simplekml
-	conda install -c anaconda netcdf4
-	pip install pyqt5 pyswarm
+	conda install -c conda-forge basemap basemap-data-hires jplephem pyephem
 	```
 
 3) Download and install git: [https://git-scm.com/downloads](https://git-scm.com/downloads)
