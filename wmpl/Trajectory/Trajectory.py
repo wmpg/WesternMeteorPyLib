@@ -2287,8 +2287,8 @@ class Trajectory(object):
             obs.v_residuals = np.array(obs.v_residuals)
 
             # Calculate RMSD of both residuals
-            obs.h_res_rms = RMSD(obs.h_residuals)
-            obs.v_res_rms = RMSD(obs.v_residuals)
+            obs.h_res_rms = RMSD(obs.h_residuals[obs.ignore_list == 0])
+            obs.v_res_rms = RMSD(obs.v_residuals[obs.ignore_list == 0])
 
 
             # Calculate the angular residuals from the radiant line, with the gravity drop taken care of
@@ -4416,6 +4416,7 @@ class Trajectory(object):
 
             plt.legend()
 
+            plt.grid()
 
             if self.save_results:
                 savePlot(plt, file_name + '_abs_mag.' + self.plot_file_type, output_dir)
