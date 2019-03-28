@@ -98,6 +98,9 @@ class MeteorObservation(object):
         for point_time, azim, elev, ra, dec, mag in zip(self.time_data, self.azim_data, self.elev_data, \
                 self.ra_data, self.dec_data, self.mag_data):
 
+            if mag is None:
+                mag = 0
+
             out_str += '{:.4f}, {:.2f}, {:.2f}, {:.2f}, {:+.2f}, {:.2f}\n'.format(point_time, np.degrees(azim), \
                 np.degrees(elev), np.degrees(ra), np.degrees(dec), mag)
 
@@ -337,7 +340,7 @@ def loadFTPDetectInfo(ftpdetectinfo_file_name, stations, time_offsets=None):
                 if time_offsets is not None:
 
                     if station_id in time_offsets:
-                        print('Applying time offset for station {:s} of {:.2f} s'.format(station_id, \
+                        print('Applying time offset for station {:s} of {:.2f} s'.format(str(station_id), \
                             time_offsets[station_id]))
 
                         jdt_ref += time_offsets[station_id]/86400.0
@@ -626,7 +629,7 @@ if __name__ == "__main__":
     import matplotlib
     import matplotlib.pyplot as plt
 
-    #dir_path = "../DenisGEMcases"
+    #dir_path = "/home/dvida/Dropbox/UWO/Projects/OpticalData/DenisGEMcases"
     #dir_path = "../DenisGEMcases_5_sigma"
     #dir_path = "/home/dvida/DATA/Dropbox/Apps/VSA2017 RMS data/first_rpi_orbit"
     #dir_path = "D:/Dropbox/Apps/VSA2017 RMS data/first_rpi_orbit"
@@ -636,7 +639,9 @@ if __name__ == "__main__":
     #dir_path = "/home/dvida/Dropbox/RPi Meteor Station/orbit_test/20180615_long_shallow_meteor"
     #dir_path = "D:/Dropbox/RPi Meteor Station/orbit_test/20180615_long_shallow_meteor"
     #dir_path = "/home/dvida/Dropbox/UWO/Projects/OpticalData/PetesMeteors4Denis"
-    dir_path = "/home/dvida/Dropbox/UWO/Projects/OpticalData/RMS_Leonids"
+    #dir_path = "/home/dvida/Dropbox/UWO/Projects/OpticalData/RMS_Leonids"
+    #dir_path = "/home/dvida/Dropbox/RPi_Meteor_Station/data/20190131_fireball_krasnodar"
+    dir_path = "D:\\Dropbox\\UWO\\Projects\\OpticalData\\16mm_RMS"
 
     # Find the absolute path of the given directory
     dir_path = os.path.abspath(dir_path)
@@ -655,7 +660,9 @@ if __name__ == "__main__":
     #ftpdetectinfo_file_name = 'FTPdetectinfo_20180615.txt'
     #ftpdetectinfo_file_name = 'FTPdetectinfo_20180615_long_shallow_meteor.txt'
     #ftpdetectinfo_file_name = os.path.join('PER', 'FTPdetectinfo_000000_2017_08_14_02_47_54M.txt')
-    ftpdetectinfo_file_name = "FTPdetectinfo_RMS2018Leonids.txt"
+    #ftpdetectinfo_file_name = "FTPdetectinfo_RMS2018Leonids.txt"
+    #ftpdetectinfo_file_name = "FTPdetectinfo_20190130_krasnodar_fireball.txt"
+    ftpdetectinfo_file_name = "FTP_detectinfo_RMSCRO2019032324.txt"
 
 
     camerasites_file_name = os.path.join(dir_path, camerasites_file_name)
@@ -681,35 +688,40 @@ if __name__ == "__main__":
     # meteor6 = meteor_list[10:12]
 
     # # # Construct lists of observations of the same meteor
-    # meteor5 = meteor_list[:2]
-    # meteor2 = meteor_list[2:5]
-    # meteor6 = meteor_list[5:9]
-    # meteor3 = meteor_list[9:13]
     # meteor1 = meteor_list[13:18]
+    # meteor2 = meteor_list[2:5]
+    # meteor3 = meteor_list[9:13]
     # meteor4 = meteor_list[18:24]
+    # meteor5 = meteor_list[:2]
+    # meteor6 = meteor_list[5:9]
+
 
     # # Pete's meteors
     # meteor1 = meteor_list[:4]
     # meteor2 = meteor_list[4:7]
     # meteor3 = meteor_list[7:10]
 
-    # RMS leonids
-    meteor1 = meteor_list[:2]
-    meteor2 = meteor_list[2:4]
+    # # RMS leonids
+    # meteor1 = meteor_list[:2]
+    # meteor2 = meteor_list[2:4]
+
+    # RMS 16mm tests
+    meteor1 = meteor_list[:3]
+    meteor2 = meteor_list[3:]
 
 
     meteor = meteor2
 
 
     for met in meteor:
-      print('--------------------------')
-      print(met)
+        print('--------------------------')
+        print(met)
 
 
     # Run the trajectory solver
-    traj = solveTrajectoryCAMS(meteor, os.path.join(dir_path, 'meteor2_rms'), solver='original', monte_carlo=False, \
+    traj = solveTrajectoryCAMS(meteor, os.path.join(dir_path, 'meteor2'), solver='original', monte_carlo=True, \
         show_plots=True, save_results=True, mc_noise_std=1.0, mc_runs=100, max_toffset=10.0, 
-        plot_file_type=plot_file_type, v_init_part=0.5)
+        plot_file_type=plot_file_type, v_init_part=0.4)
 
 
     # ### PERFORM PHOTOMETRY
