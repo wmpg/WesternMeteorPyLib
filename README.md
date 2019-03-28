@@ -108,6 +108,7 @@ On windows, you might not have to install library packages, but the installation
 
 If you are getting the following error on Windows: ```Unable to find vcvarsall.bat```, that means you need to install [Visual C++ Build Tools 2015](http://go.microsoft.com/fwlink/?LinkId=691126).
 
+If you are getting this error when running the setup: ```ModuleNotFoundError: No module named 'wmpl.PythonNRLMSISE00.nrlmsise_00_header'```, it means that you haven't cloned the repository as per instructions. Please read this README file more carefully (hint: the answer is at the top of the file).
 
 ### Manually downloading data files
 
