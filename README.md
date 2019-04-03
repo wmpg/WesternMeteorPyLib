@@ -52,7 +52,7 @@ sudo pip install setuptools --upgrade
 sudo pip install numpy --upgrade
 sudo pip install matplotlib --upgrade
 sudo pip install scipy
-sudo pip install https://github.com/matplotlib/basemap/archive/v1.0.7.tar.gz
+sudo pip install https://github.com/matplotlib/basemap/archive/v1.1.0.tar.gz
 ```
 
 
