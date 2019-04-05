@@ -151,3 +151,9 @@ lasun = sollon.jd2SolLonJPL(jd_now)
 
 print(math.degrees(lasun), ' deg')
 ```
+
+
+## Citations
+
+For academic use, please cite the paper:
+>Vida, D., Gural, P., Brown, P., Campbell-Brown, M., Wiegert, P. (2019). *Estimating trajectories of meteors: an observational Monte Carlo approach*. **MNRAS**, submitted
