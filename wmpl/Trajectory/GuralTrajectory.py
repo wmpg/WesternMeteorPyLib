@@ -380,7 +380,7 @@ class GuralTrajectory(object):
     """
 
     def __init__(self, maxcameras, jdt_ref, velmodel, max_toffset=1.0, nummonte=1, meastype=4, verbose=0, 
-        output_dir='.', show_plots=True):
+        output_dir='.', show_plots=True, traj_id=None):
         """ Initialize meteor trajectory solving.
 
         Arguments:
@@ -416,6 +416,7 @@ class GuralTrajectory(object):
             output_dir: [str] Path to the output directory where the Trajectory report and 'pickled' object
                 will be stored.
             show_plots: [bool] Show plots of residuals, velocity, lag, meteor position. True by default.
+            traj_id: [str] Trajectory solution identifier.
         """
 
         # Init input parameters
@@ -449,6 +450,13 @@ class GuralTrajectory(object):
 
         # If True, plots will be shown on screen when the trajectory estimation is done
         self.show_plots = show_plots
+
+        # Trajectory solution identifier
+        self.traj_id = str(traj_id)
+
+
+
+        ######################################################################################################
 
 
         # Track the number of measurements per each camera

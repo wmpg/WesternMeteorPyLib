@@ -220,7 +220,7 @@ class SimStation(object):
 
 class SimMeteor(object):
     def __init__(self, ra_g, dec_g, v_g, year, month, sol, jdt_ref, beg_height, state_vect, \
-        obs_ang_uncertanties, t_offsets):
+        obs_ang_uncertanties, t_offsets, unique_id=None):
         """ Container for a simulated meteor. 
     
         Arguments:
@@ -276,6 +276,9 @@ class SimMeteor(object):
 
         # Coordinates of the beginning point on the trajectory
         self.rbeg_lat, self.rbeg_lon, self.rbeg_ele = None, None, None
+
+        # Unique ID of the simulation
+        self.unique_id = str(unique_id)
 
         ######################################################################################################
 
@@ -1902,7 +1905,7 @@ def simulateMeteorShower(station_list, meteor_velocity_models, n_meteors, met_sh
         # Init the SimMeteor object
         sim_meteor = SimMeteor(sample.ra_g, sample.dec_g, sample.vg, met_shower_model.year, \
             met_shower_model.month, sample.la_sun, meteor_jd, beg_height_final, state_vect, \
-            obs_ang_uncertanties, t_offsets)
+            obs_ang_uncertanties, t_offsets, unique_id=meteor_no)
 
         
 
@@ -2200,10 +2203,11 @@ if __name__ == "__main__":
         [41.860200, -87.641200, 180.00, " 2"]]
 
     # Camera FPS per station
-    fps_list = [25.0, 25.0, 25.0, 25.0]
+    fps_list = [15.0, 1.0, 7.7, 30.0]
 
     # Observation uncertanties per station (arcsec)
     obs_ang_uncertainties = [150.0, 50.0, 100.0, 50.0]
+    obs_ang_uncertainties = np.sqrt(2)*np.array(obs_ang_uncertainties)
 
     # Azimuths of centre of FOVs (degrees)
     azim_fovs = [0.0, 270.0, 90.0, 90.0]
@@ -2666,7 +2670,7 @@ if __name__ == "__main__":
     ### METEOR SHOWER PARAMETERS ###
     ##########################################################################################################
     
-    n_meteors = 1
+    n_meteors = 100
 
     orbit_limits = None
 
@@ -3018,13 +3022,13 @@ if __name__ == "__main__":
     # t0_rand = np.random.uniform(0.3, 0.6, size=n_meteors) # Ratios of deceleratoin start
     # t0_rand = np.random.uniform(0.3, 0.6, size=n_meteors) # Ratios of deceleratoin start
     # t0_list = meteor_durations*t0_rand
-    t0_list = [4.0]*n_meteors # Hamburg fall, deceleration start at 4 seconds
+    t0_list = [3.75]*n_meteors # Hamburg fall
 
 
     # Randomly generate decelerations
     #decel_list = np.random.uniform(100, 800, size=n_meteors)
     #decel_list = np.random.uniform(1500, 2750, size=n_meteors)
-    decel_list = np.random.uniform(8000, 10000, size=n_meteors) # m/s^2, Hamburg fall
+    decel_list = np.random.uniform(8500, 9500, size=n_meteors) # m/s^2, Hamburg fall
 
 
     meteor_velocity_models = [LinearDeceleration(duration, t0, decel) for duration, t0, decel in \
