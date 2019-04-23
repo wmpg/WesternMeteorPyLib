@@ -175,6 +175,21 @@ class MeteorShower(object):
         return samples
 
 
+    def generate(self, jd_input=None):
+        """ Draw a sample from meteor shower object. 
+    
+        Keyword arguments:
+            jd_input: [float] Julian date of the event. If not given, it will be drawn from the activity 
+                profile.
+
+        Return:
+            sample: [RadiantSample objects]
+
+        """
+        while True:
+            yield self.sample()[0]
+
+
 
 
 class CombinedSources(object):
