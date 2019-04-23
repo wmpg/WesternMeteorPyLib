@@ -6,11 +6,13 @@
 from __future__ import print_function, division, absolute_import
 
 import os
-
+import sys
+import argparse
 import numpy as np
 
 from wmpl.Formats.Milig import StationData, writeMiligInputFile
-from wmpl.Utils.TrajConversions import J2000_JD, date2JD, equatorialCoordPrecession_vect, raDec2AltAz_vect
+from wmpl.Utils.TrajConversions import J2000_JD, date2JD, equatorialCoordPrecession_vect, raDec2AltAz_vect, \
+    jd2Date
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.Trajectory.GuralTrajectory import GuralTrajectory
 from wmpl.Utils.Math import averageClosePoints
@@ -509,11 +511,10 @@ def solveTrajectoryCAMS(meteor_list, output_dir, solver='original', **kwargs):
 
         # Init the trajectory solver
         if solver == 'original':
-            #traj = Trajectory(jdt_ref, output_dir=output_dir, meastype=1)
-            traj = Trajectory(jdt_ref, output_dir=output_dir, meastype=2, **kwargs)
+            traj = Trajectory(jdt_ref, output_dir=output_dir, meastype=1, **kwargs)
 
         elif solver == 'gural':
-            traj = GuralTrajectory(len(meteor_list), jdt_ref, velmodel=3, meastype=2, verbose=1, 
+            traj = GuralTrajectory(len(meteor_list), jdt_ref, velmodel=3, meastype=1, verbose=1, 
                 output_dir=output_dir)
 
         else:
@@ -526,20 +527,21 @@ def solveTrajectoryCAMS(meteor_list, output_dir, solver='original', **kwargs):
 
             if solver == 'original':
 
-                # traj.infillTrajectory(meteor.ra_data, meteor.dec_data, meteor.time_data, meteor.latitude, 
-                #     meteor.longitude, meteor.height, station_id = meteor.station_id)
+                traj.infillTrajectory(meteor.ra_data, meteor.dec_data, meteor.time_data, meteor.latitude, 
+                    meteor.longitude, meteor.height, station_id=meteor.station_id, \
+                    magnitudes=meteor.mag_data)
 
-                traj.infillTrajectory(meteor.azim_data, meteor.elev_data, meteor.time_data, meteor.latitude, 
-                     meteor.longitude, meteor.height, station_id=meteor.station_id, \
-                     magnitudes=meteor.mag_data)
+                # traj.infillTrajectory(meteor.azim_data, meteor.elev_data, meteor.time_data, meteor.latitude, 
+                #      meteor.longitude, meteor.height, station_id=meteor.station_id, \
+                #      magnitudes=meteor.mag_data)
 
             elif solver == 'gural':
 
-                # traj.infillTrajectory(meteor.ra_data, meteor.dec_data, meteor.time_data, meteor.latitude, 
-                #     meteor.longitude, meteor.height)
-
-                traj.infillTrajectory(meteor.azim_data, meteor.elev_data, meteor.time_data, meteor.latitude, 
+                traj.infillTrajectory(meteor.ra_data, meteor.dec_data, meteor.time_data, meteor.latitude, 
                     meteor.longitude, meteor.height)
+
+                # traj.infillTrajectory(meteor.azim_data, meteor.elev_data, meteor.time_data, meteor.latitude, 
+                #     meteor.longitude, meteor.height)
 
 
         # Solve the trajectory
@@ -626,48 +628,99 @@ def computeAbsoluteMagnitudes(traj, meteor_list):
 
 if __name__ == "__main__":
 
-    import matplotlib
-    import matplotlib.pyplot as plt
 
-    #dir_path = "/home/dvida/Dropbox/UWO/Projects/OpticalData/DenisGEMcases"
-    #dir_path = "../DenisGEMcases_5_sigma"
-    #dir_path = "/home/dvida/DATA/Dropbox/Apps/VSA2017 RMS data/first_rpi_orbit"
-    #dir_path = "D:/Dropbox/Apps/VSA2017 RMS data/first_rpi_orbit"
-    #dir_path = "/home/dvida/DATA/Dropbox/Apps/VSA2017 RMS data/first_rpi_orbit"
-    #dir_path = "D:/Dropbox/RPi Meteor Station/orbit_test"
-    #dir_path = "/home/dvida/Dropbox/RPi Meteor Station/orbit_test"
-    #dir_path = "/home/dvida/Dropbox/RPi Meteor Station/orbit_test/20180615_long_shallow_meteor"
-    #dir_path = "D:/Dropbox/RPi Meteor Station/orbit_test/20180615_long_shallow_meteor"
-    #dir_path = "/home/dvida/Dropbox/UWO/Projects/OpticalData/PetesMeteors4Denis"
-    #dir_path = "/home/dvida/Dropbox/UWO/Projects/OpticalData/RMS_Leonids"
-    #dir_path = "/home/dvida/Dropbox/RPi_Meteor_Station/data/20190131_fireball_krasnodar"
-    dir_path = "D:\\Dropbox\\UWO\\Projects\\OpticalData\\16mm_RMS"
+    ### COMMAND LINE ARGUMENTS
 
-    # Find the absolute path of the given directory
-    dir_path = os.path.abspath(dir_path)
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Run the trajectory solver on the given FTPdetectinfo file. It is assumed that only one meteor per file is given.")
+
+    arg_parser.add_argument('ftpdetectinfo_path', nargs=1, metavar='FTP_PATH', type=str, \
+        help='Path to the FTPdetectinfo file. It is assumed that the CameraSites.txt and CameraTimeOffsets.txt are in the same folder.')
+
+    arg_parser.add_argument('-s', '--solver', metavar='SOLVER', help="""Trajectory solver to use. \n
+        - 'original' - Monte Carlo solver
+        - 'gural0' - Gural constant velocity
+        - 'gural1' - Gural linear deceleration
+        - 'gural2' - Gural quadratic deceleration
+        - 'gural3' - Gural exponential deceleration
+         """, type=str, nargs='?', default='original')
+
+    arg_parser.add_argument('-t', '--maxtoffset', metavar='MAX_TOFFSET', nargs=1, \
+        help='Maximum time offset between the stations.', type=float)
+
+    arg_parser.add_argument('-v', '--vinitht', metavar='V_INIT_HT', nargs=1, \
+        help='The initial veloicty will be estimated as the average velocity above this height (in km). If not given, the initial velocity will be estimated using the sliding fit which can be controlled with the --velpart option.', \
+        type=float)
+
+    arg_parser.add_argument('-p', '--velpart', metavar='VELOCITY_PART', nargs=1, \
+        help='Fixed part from the beginning of the meteor on which the initial velocity estimation using the sliding fit will start. Default is 0.25 (25 percent), but for noisier data this might be bumped up to 0.5.', \
+        type=float, default=0.4)
+
+    arg_parser.add_argument('-d', '--disablemc', \
+        help='Do not use the Monte Carlo solver, but only run the geometric solution.', action="store_true")
+    
+    arg_parser.add_argument('-r', '--mcruns', metavar="MC_RUNS", nargs='?', \
+        help='Number of Monte Carlo runs.', type=int, default=100)
+
+    arg_parser.add_argument('-u', '--uncertgeom', \
+        help='Compute purely geometric uncertainties.', action="store_true")
+    
+    arg_parser.add_argument('-g', '--disablegravity', \
+        help='Disable gravity compensation.', action="store_true")
+
+    arg_parser.add_argument('-l', '--plotallspatial', \
+        help='Plot a collection of plots showing the residuals vs. time, lenght and height.', \
+        action="store_true")
+
+    arg_parser.add_argument('-i', '--imgformat', metavar='IMG_FORMAT', nargs=1, \
+        help="Plot image format. 'png' by default, can be 'pdf', 'eps',... ", type=str, default='png')
+
+    arg_parser.add_argument('-x', '--hideplots', \
+        help="Don't show generated plots on the screen, just save them to disk.", action="store_true")
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    #########################
+
+    ### Parse command line arguments ###
+
+    ftpdetectinfo_path = os.path.abspath(cml_args.ftpdetectinfo_path[0])
+
+    dir_path = os.path.dirname(ftpdetectinfo_path)
+
+    # Check if the given directory is OK
+    if not os.path.isfile(ftpdetectinfo_path):
+        print('No such file:', ftpdetectinfo_path)
+        sys.exit()
+
+
+
+    max_toffset = None
+    print(cml_args.maxtoffset)
+    if cml_args.maxtoffset:
+        max_toffset = cml_args.maxtoffset[0]
+
+    velpart = None
+    if cml_args.velpart:
+        velpart = cml_args.velpart
+
+    vinitht = None
+    if cml_args.vinitht:
+        vinitht = cml_args.vinitht[0]
+
+    ### ###
+
 
     # Image file type of the plots
     plot_file_type = 'png'
 
     camerasites_file_name = 'CameraSites.txt'
     cameratimeoffsets_file_name = 'CameraTimeOffsets.txt'
-    #ftpdetectinfo_file_name = 'FTPdetectinfo20121213S.txt'
-    #ftpdetectinfo_file_name = 'FTPdetectinfo_first_rpi.txt'
-    #ftpdetectinfo_file_name = 'FTPdetectinfo_20180614.txt'
-    #ftpdetectinfo_file_name = "FTPdetectinfo_20180614_temporal.txt"
-    #ftpdetectinfo_file_name = "FTPdetectinfo_20180614_spatial.txt"
-    #ftpdetectinfo_file_name = "FTPdetectinfo_20180614_spatial_new.txt"
-    #ftpdetectinfo_file_name = 'FTPdetectinfo_20180615.txt'
-    #ftpdetectinfo_file_name = 'FTPdetectinfo_20180615_long_shallow_meteor.txt'
-    #ftpdetectinfo_file_name = os.path.join('PER', 'FTPdetectinfo_000000_2017_08_14_02_47_54M.txt')
-    #ftpdetectinfo_file_name = "FTPdetectinfo_RMS2018Leonids.txt"
-    #ftpdetectinfo_file_name = "FTPdetectinfo_20190130_krasnodar_fireball.txt"
-    ftpdetectinfo_file_name = "FTP_detectinfo_RMSCRO2019032324.txt"
 
 
     camerasites_file_name = os.path.join(dir_path, camerasites_file_name)
     cameratimeoffsets_file_name = os.path.join(dir_path, cameratimeoffsets_file_name)
-    ftpdetectinfo_file_name = os.path.join(dir_path, ftpdetectinfo_file_name)
 
     # Get locations of stations
     stations = loadCameraSites(camerasites_file_name)
@@ -676,7 +729,7 @@ if __name__ == "__main__":
     time_offsets = loadCameraTimeOffsets(cameratimeoffsets_file_name)
 
     # Get the meteor data
-    meteor_list = loadFTPDetectInfo(ftpdetectinfo_file_name, stations, time_offsets=time_offsets)
+    meteor_list = loadFTPDetectInfo(ftpdetectinfo_path, stations, time_offsets=time_offsets)
 
 
     # # Construct lists of observations of the same meteor (Rpi)
@@ -705,26 +758,31 @@ if __name__ == "__main__":
     # meteor1 = meteor_list[:2]
     # meteor2 = meteor_list[2:4]
 
-    # RMS 16mm tests
-    meteor1 = meteor_list[:3]
-    meteor2 = meteor_list[3:]
+    
+    # Assume all entires in the FTPdetectinfo path should be used for one meteor
+    meteor_proc_list = [meteor_list]
 
 
-    meteor = meteor2
+    for meteor in meteor_proc_list:
+
+        for met in meteor:
+            print('--------------------------')
+            print(met)
 
 
-    for met in meteor:
-        print('--------------------------')
-        print(met)
-
-
-    # Run the trajectory solver
-    traj = solveTrajectoryCAMS(meteor, os.path.join(dir_path, 'meteor2'), solver='original', monte_carlo=True, \
-        show_plots=True, save_results=True, mc_noise_std=1.0, mc_runs=100, max_toffset=10.0, 
-        plot_file_type=plot_file_type, v_init_part=0.4)
+        # Run the trajectory solver
+        traj = solveTrajectoryCAMS(meteor, os.path.join(dir_path, jd2Date(meteor[0].jdt_ref, \
+            dt_obj=True).strftime("%Y%m%d-%H%M%S.%f")), solver=cml_args.solver, max_toffset=max_toffset, \
+            monte_carlo=(not cml_args.disablemc), mc_runs=cml_args.mcruns, \
+            geometric_uncert=cml_args.uncertgeom, gravity_correction=(not cml_args.disablegravity), 
+            plot_all_spatial_residuals=cml_args.plotallspatial, plot_file_type=cml_args.imgformat, \
+            show_plots=(not cml_args.hideplots), v_init_part=velpart, v_init_ht=vinitht)
 
 
     # ### PERFORM PHOTOMETRY
+
+    # import matplotlib
+    # import matplotlib.pyplot as plt
 
     # # Override default DPI for saving from the interactive window
     # matplotlib.rcParams['savefig.dpi'] = 300
