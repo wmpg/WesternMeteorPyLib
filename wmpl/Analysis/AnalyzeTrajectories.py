@@ -424,10 +424,26 @@ def pairTrajAndSim(traj_list, sim_meteors, radiant_extent, vg_extent):
     # Find the simulation that matches the trajectory solution (the JDs might be a bit off, but find the one
     #   that matches the best)
     for traj in traj_list:
+        
         min_indx = 0
         min_diff = np.inf
+
         for i, sim in enumerate(sim_meteors):
 
+            # Try to check simulation and trajectory unique identifiers, if they exist
+            if hasattr(traj, 'traj_id') and hasattr(sim, 'unique_id'):
+
+                if traj.traj_id == sim.unique_id:
+                    min_indx = i
+                    min_diff = -1
+
+                    print('Found pair using unique ID:', traj.traj_id)
+
+                    # Break the loop because the pair was found
+                    break
+
+
+            # Find the best matching JD
             jd_diff = abs(traj.jdt_ref - sim.jdt_ref)
 
             if jd_diff < min_diff:
@@ -439,20 +455,23 @@ def pairTrajAndSim(traj_list, sim_meteors, radiant_extent, vg_extent):
         traj_sim_pairs.append([traj, sim_meteors[min_indx]])
 
 
+
     vg_diffs = []
     radiant_diffs = []
     conv_angles = []
     failed_count = 0
+
     # Go through all the pairs and calculate the difference in the geocentric velocity and distance between
     #   the true and the estimated radiant
     for entry in traj_sim_pairs:
         
         traj, sim = entry
 
-        # Skip the orbit if it was not estimated properby
+        # Skip the orbit if it was not estimated properly
         if traj.orbit.v_g is None:
             failed_count += 1
             continue
+
 
         # Difference in the geocentric velocity (km/s)
         vg_diff = (traj.orbit.v_g - sim.v_g)/1000
@@ -590,9 +609,9 @@ if __name__ == "__main__":
 
     # min duration = Minimum duration of meteor in seconds (-1 to turn this filter off)
     data_list = [ # Trajectory directory                     Min Qc  dRadiant max   dVg max   min duration  skip solver plot
-        ["../SimulatedMeteors/CAMO/2011Draconids",            1.0,        0.5,         0.5,       -1, []],
-        ["../SimulatedMeteors/CAMO/2012Geminids",             1.0,        0.5,         0.5,       -1, ['MPF const', 'MPF const-FHAV']],
-        ["../SimulatedMeteors/CAMO/2012Perseids",             1.0,        0.5,         0.5,       -1, []] ]
+        # ["../SimulatedMeteors/CAMO/2011Draconids",            1.0,        0.5,         0.5,       -1, []],
+        # ["../SimulatedMeteors/CAMO/2012Geminids",             1.0,        0.5,         0.5,       -1, ['MPF const', 'MPF const-FHAV']],
+        # ["../SimulatedMeteors/CAMO/2012Perseids",             1.0,        0.5,         0.5,       -1, []] ]
         #
         # ["../SimulatedMeteors/CAMSsim/2011Draconids",         10.0,       1.0,         1.0,       -1, []],
         # ["../SimulatedMeteors/CAMSsim/2012Geminids",          10.0,       1.0,         1.0,       -1, []],
@@ -609,6 +628,8 @@ if __name__ == "__main__":
         # ["../SimulatedMeteors/CAMO/2014Ursids",               1.0,        0.5,         0.5,       -1, []],
         # ["../SimulatedMeteors/CAMSsim/2014Ursids",            10.0,       1.0,         1.0,       -1, []],
         # ["../SimulatedMeteors/SOMN_sim/2014Ursids",           15.0,       5.0,         5.0,       -1, []],
+
+        ["../SimulatedMeteors/Hamburg_stations/Hamburg_fall",   1.0,       0.2,         0.2,        -1, ['planes', 'milig', 'mc', 'gural0', 'gural0fha', 'gural1', 'gural3']]]
 
 
 
@@ -676,8 +697,6 @@ if __name__ == "__main__":
 
                 # Remove all trajectories with the convergence angle less then min_conv_angle deg
                 traj_list = [traj for traj in traj_list if np.degrees(traj.max_convergence) >= min_conv_angle]
-
-                pass
 
             else:
 

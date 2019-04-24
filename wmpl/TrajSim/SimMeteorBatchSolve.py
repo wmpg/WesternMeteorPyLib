@@ -67,9 +67,6 @@ if __name__ == "__main__":
 
     shower_dir_list = [
     # Directory which contains SimMet .pickle files
-    #shower_dir = os.path.abspath("../SimulatedMeteors/EMCCD/2011Draconids")
-
-    #shower_dir = os.path.abspath("../SimulatedMeteors/CABERNET/2011Draconids")
 
     # os.path.abspath("../SimulatedMeteors/CAMO/2011Draconids"),
     # os.path.abspath("../SimulatedMeteors/CAMO/2014Ursids"),
@@ -90,11 +87,11 @@ if __name__ == "__main__":
     # os.path.abspath("../SimulatedMeteors/SOMN_sim/2015Taurids")
     #os.path.abspath("../SimulatedMeteors/SOMN_sim/2012Geminids")
     #os.path.abspath("../SimulatedMeteors/SOMN_sim/2012Geminids_1000")
-    os.path.abspath("../SimulatedMeteors/SOMN_sim_2station/2012Geminids_1000")
+    #os.path.abspath("../SimulatedMeteors/SOMN_sim_2station/2012Geminids_1000")
 
     #os.path.abspath("../SimulatedMeteors/SOMN_sim/LongFireball")
     #os.path.abspath("../SimulatedMeteors/SOMN_sim/LongFireball_nograv")
-    #shower_dir = os.path.abspath("../SimulatedMeteors/SOMN_sim/LongFireball_nograv")
+    os.path.abspath("../SimulatedMeteors/Hamburg_stations/Hamburg_fall")
     ]
 
     # Maximum time offset (seconds)
@@ -105,7 +102,8 @@ if __name__ == "__main__":
 
 
     # Trajectory solvers
-    traj_solvers = ['planes', 'los', 'milig', 'monte_carlo', 'gural0', 'gural0fha', 'gural1', 'gural2', 'gural3']
+    #traj_solvers = ['planes', 'los', 'milig', 'monte_carlo', 'gural0', 'gural0fha', 'gural1', 'gural2', 'gural3']
+    traj_solvers = ['los']
     #traj_solvers = ['gural0fha']
     #traj_solvers = ['planes', 'los', 'monte_carlo']
     #traj_solvers = ['los']
@@ -144,6 +142,15 @@ if __name__ == "__main__":
             # Save info about the simulated meteor (THIS CAN BE DISABLED WITH UPDATING SOLUTIONS)
             sim_met.saveInfo(output_dir)
 
+
+            # Extract the unique solution ID
+            if hasattr(sim_met, 'unique_id'):
+                unique_id = sim_met.unique_id
+
+            else:
+                unique_id = None
+
+
             # Solve the simulated meteor with multiple solvers
             for traj_solver in traj_solvers:
 
@@ -159,14 +166,15 @@ if __name__ == "__main__":
                     # Init the trajectory (LoS or intersecing planes)
                     traj = Trajectory(sim_met.jdt_ref, output_dir=output_dir, max_toffset=t_max_offset, \
                         meastype=2, show_plots=False, save_results=save_results, monte_carlo=False, \
-                        gravity_correction=gravity_correction)
+                        gravity_correction=gravity_correction, traj_id=unique_id)
 
 
                 elif traj_solver == 'monte_carlo':
-                    
+
                     # Init the trajectory
                     traj = Trajectory(sim_met.jdt_ref, output_dir=output_dir, max_toffset=t_max_offset, \
-                        meastype=2, show_plots=False, mc_runs=100, gravity_correction=gravity_correction)  ## TESING, ONLY 100 RUNS!!!
+                        meastype=2, show_plots=False, mc_runs=100, gravity_correction=gravity_correction,\
+                        traj_id=unique_id)
 
                 
                 elif 'gural' in traj_solver:
@@ -184,7 +192,7 @@ if __name__ == "__main__":
                     # Init the new Gural trajectory solver object
                     traj = GuralTrajectory(len(sim_met.observations), sim_met.jdt_ref, output_dir=output_dir, \
                         max_toffset=t_max_offset, meastype=2, velmodel=velmodel, verbose=1, \
-                        show_plots=False)
+                        show_plots=False, traj_id=unique_id)
 
                 else:
                     print(traj_solver, '- unknown trajectory solver!')

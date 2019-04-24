@@ -1628,12 +1628,21 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
                     vhat = vectNorm(np.cross(uhat, rhat))
                 
 
-                # sqrt(2)/2*noise in each orthogonal dimension
-                sigma = noise_sigma*np.abs(obs.ang_res_std)/np.sqrt(2.0)
+                # # sqrt(2)/2*noise in each orthogonal dimension
+                # NOTE: This is a bad way to do it because the estimated fit residuals are already estimated
+                #   in the prependicular direction to the trajectory line
+                # sigma = noise_sigma*np.abs(obs.ang_res_std)/np.sqrt(2.0)
 
-                # Make sure sigma is positive, if not set it to 1/sqrt(2) degrees
+                # # Make sure sigma is positive, if not set it to 1/sqrt(2) degrees
+                # if (sigma < 0) or np.isnan(sigma):
+                #     sigma = np.radians(1)/np.sqrt(2)
+
+                # Compute noise level to add to observations
+                sigma = noise_sigma*np.abs(obs.ang_res_std)
+
+                # Make sure sigma is positive, if not set it to 1 degree
                 if (sigma < 0) or np.isnan(sigma):
-                    sigma = np.radians(1)/np.sqrt(2)
+                    sigma = np.radians(1)
 
 
                 meas_eci_noise = np.zeros(3)
@@ -1993,7 +2002,8 @@ class Trajectory(object):
     def __init__(self, jdt_ref, output_dir='.', max_toffset=None, meastype=4, verbose=True, v_init_part=None,\
         v_init_ht=None, estimate_timing_vel=True, monte_carlo=True, mc_runs=None, mc_pick_multiplier=1, \
         mc_noise_std=1.0, geometric_uncert=False, filter_picks=True, calc_orbit=True, show_plots=True, \
-        save_results=True, gravity_correction=True, plot_all_spatial_residuals=False, plot_file_type='png'):
+        save_results=True, gravity_correction=True, plot_all_spatial_residuals=False, plot_file_type='png', \
+        traj_id=None):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -2039,6 +2049,7 @@ class Trajectory(object):
             plot_all_spatial_residuals: [bool] Plot all spatial residuals on one plot (one vs. time, and
                 the other vs. length). False by default.
             plot_file_type: [str] File extansion of the plot image. 'png' by default, can be 'pdf', 'eps', ...
+            traj_id: [str] Trajectory solution identifier.
 
         """
 
@@ -2108,6 +2119,9 @@ class Trajectory(object):
 
         # Image file type for the plot
         self.plot_file_type = plot_file_type
+
+        # Trajectory solution identifier
+        self.traj_id = str(traj_id)
 
         ######################################################################################################
 
