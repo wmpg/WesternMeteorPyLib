@@ -5,7 +5,7 @@
 Because this repository contains submodules, you will have to clone it by running:
 
 ```
-git clone --recursive https://github.com/dvida/WesternMeteorPyLib.git
+git clone --recursive https://github.com/wmpg/WesternMeteorPyLib.git
 ```
 
 Running a normal git clone **will not work.**
@@ -59,7 +59,7 @@ sudo pip install https://github.com/matplotlib/basemap/archive/v1.1.0.tar.gz
 To clone this repository locally, run:
 
 ```
-git clone --recursive https://github.com/dvida/WesternMeteorPyLib.git
+git clone --recursive https://github.com/wmpg/WesternMeteorPyLib.git
 ```
 
 After cloning/downloading this library, navigate into it with a terminal and run:
@@ -93,7 +93,7 @@ On windows, you might not have to install library packages, but the installation
 
 4) Open git bash, navigate to where you want to pull the code and run:
 	```
-	git clone --recursive https://github.com/dvida/WesternMeteorPyLib.git
+	git clone --recursive https://github.com/wmpg/WesternMeteorPyLib.git
 	```
 	You will probably have to log in with your GitHub account to do that.
 
