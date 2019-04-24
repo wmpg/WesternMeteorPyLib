@@ -1670,8 +1670,13 @@ def generateTrajectoryData(station_list, sim_met, velocity_model):
                 vhat = vectNorm(np.cross(uhat, rhat))
             
 
-            # sqrt(2)/2*noise in each orthogonal dimension
-            sigma = stat.obs_ang_std/np.sqrt(2.0)
+            # # sqrt(2)/2*noise in each orthogonal dimension
+            # # NOTE: This is a bad way to do it because the estimated fit residuals are already estimated
+            #     #   in the prependicular direction to the trajectory line
+            # sigma = stat.obs_ang_std/np.sqrt(2.0)
+
+            # Take the observation uncertainty as the sigma for the normal distribution
+            sigma = stat.obs_ang_std
 
             model_eci = np.zeros(3)
 
@@ -2207,7 +2212,6 @@ if __name__ == "__main__":
 
     # Observation uncertanties per station (arcsec)
     obs_ang_uncertainties = [150.0, 50.0, 100.0, 50.0]
-    obs_ang_uncertainties = np.sqrt(2)*np.array(obs_ang_uncertainties)
 
     # Azimuths of centre of FOVs (degrees)
     azim_fovs = [0.0, 270.0, 90.0, 90.0]
