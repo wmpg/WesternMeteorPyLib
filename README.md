@@ -40,23 +40,34 @@ The two sections below describe how to install the library on both Linux and Win
 
 ### Linux
 
-These are installation instructions for Linux. You might want to install this in a separate [virtual environment](https://www.dabapps.com/blog/introduction-to-pip-and-virtualenv-python/) in Python - in that case you should omit "sudo" in front of "pip" commands.
+These are installation instructions for Linux, assuming you have [Anaconda](https://www.anaconda.com/distribution/) installed. You might want to install this in a separate [virtual environment](https://conda.io/docs/user-guide/tasks/manage-environments.html) in Anaconda. I recommend creating a separate environment called ```wmpl``` for this code:
 
-
-First, let's install all prerequisites:
 ```
-sudo apt-get update
-sudo apt-get -y upgrade
-sudo apt-get install -y libblas* liblapack-dev python-pip python-dev python-tk libgeos-3* libxml2-dev libxslt-dev python-dev lib32z1-dev
-sudo pip install setuptools --upgrade
-sudo pip install numpy --upgrade
-sudo pip install matplotlib --upgrade
-sudo pip install scipy
-sudo pip install https://github.com/matplotlib/basemap/archive/v1.1.0.tar.gz
+conda create --name wmpl python=3.7
 ```
 
+Answer yes to all questions.
 
-To clone this repository locally, run:
+Every time you run the code, you **will have to activate the environment by typing:**
+
+```
+conda activate wmpl
+```
+
+on some systems this may not work, so you will have to write ```source activate wmpl``` instead.
+
+We will now install all needed libraries. With the environment activated as described above, run this in the terminal:
+
+```
+conda install -y numpy scipy matplotlib cython
+conda install -y -c conda-forge basemap basemap-data-hires jplephem pyephem
+```
+
+
+Next, navigate to a folder where you will be keeping the code, e.g. ```~/source/```. Create this folder if it doesn't exist.
+
+
+Then clone this repository:
 
 ```
 git clone --recursive https://github.com/wmpg/WesternMeteorPyLib.git
@@ -68,10 +79,13 @@ After cloning/downloading this library, navigate into it with a terminal and run
 sudo python setup.py install
 ```
 
+this step might take a while because it will download the DE430 ephemerids.
+
+
 
 ### Windows
 
-On windows, you might not have to install library packages, but the installation might differ. I recommend installing Anaconda, which should install most of the packages you will need. Contact me for more details about Windows installation if you are stuck.
+The installation might differ on Windows. I recommend installing Anaconda, which should install most of the packages you will need. Contact me for more details about Windows installation if you are stuck.
 
 
 1) Install [Anaconda Python 3.*](https://www.anaconda.com/download/), IMPORTANT: during the installation, make sure to select the following:
@@ -84,8 +98,8 @@ On windows, you might not have to install library packages, but the installation
 2) Open Anaconda prompt and run:
 	```
 	conda update anaconda
-	conda install numpy scipy matplotlib cython
-	conda install -c conda-forge basemap basemap-data-hires jplephem pyephem
+	conda install -y numpy scipy matplotlib cython
+	conda install -y -c conda-forge basemap basemap-data-hires jplephem pyephem
 	```
 
 3) Download and install git: [https://git-scm.com/downloads](https://git-scm.com/downloads)
