@@ -437,7 +437,7 @@ def pairTrajAndSim(traj_list, sim_meteors, radiant_extent, vg_extent):
                     min_indx = i
                     min_diff = -1
 
-                    print('Found pair using unique ID!')
+                    print('Found pair using unique ID:', traj.traj_id)
 
                     # Break the loop because the pair was found
                     break
@@ -472,8 +472,6 @@ def pairTrajAndSim(traj_list, sim_meteors, radiant_extent, vg_extent):
             failed_count += 1
             continue
 
-
-        print('vgs:', traj.orbit.v_g, sim.v_g)
 
         # Difference in the geocentric velocity (km/s)
         vg_diff = (traj.orbit.v_g - sim.v_g)/1000
@@ -631,7 +629,7 @@ if __name__ == "__main__":
         # ["../SimulatedMeteors/CAMSsim/2014Ursids",            10.0,       1.0,         1.0,       -1, []],
         # ["../SimulatedMeteors/SOMN_sim/2014Ursids",           15.0,       5.0,         5.0,       -1, []],
 
-        ["../SimulatedMeteors/Hamburg_stations/Hamburg_fall",   1.0,       0.5,         0.5,        -1, ['planes', 'milig', 'mc', 'gural0', 'gural0fha', 'gural1', 'gural3']]]
+        ["../SimulatedMeteors/Hamburg_stations/Hamburg_fall",   1.0,       0.2,         0.2,        -1, ['planes', 'milig', 'mc', 'gural0', 'gural0fha', 'gural1', 'gural3']]]
 
 
 
