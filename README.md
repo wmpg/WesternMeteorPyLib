@@ -76,7 +76,7 @@ git clone --recursive https://github.com/wmpg/WesternMeteorPyLib.git
 After cloning/downloading this library, navigate into it with a terminal and run:
 
 ```
-sudo python setup.py install
+python setup.py install
 ```
 
 this step might take a while because it will download the DE430 ephemerids.
