@@ -66,8 +66,8 @@ def mslToWGS84Height(lat, lon, msl_height):
         ellipsoid.
     
     Arguments:
-        lat: [float] Latitude +N (deg).
-        lon: [float] Longitude +E (deg).
+        lat: [float] Latitude +N (rad).
+        lon: [float] Longitude +E (rad).
         msl_height: [float] Height above sea level (meters).
 
     Return:
@@ -77,8 +77,8 @@ def mslToWGS84Height(lat, lon, msl_height):
 
 
     # Get the difference between WGS84 and MSL height
-    lat_mod = np.radians(90 - lat)
-    lon_mod = np.radians(lon%360)
+    lat_mod = np.pi/2 - lat
+    lon_mod = lon%(2*np.pi)
     msl_ht_diff = GEOID_MODEL(lat_mod, lon_mod)[0][0]
 
     # Compute the WGS84 height
@@ -87,6 +87,32 @@ def mslToWGS84Height(lat, lon, msl_height):
 
     return wgs84_height
 
+
+
+def wgs84toMSLHeight(lat, lon, wgs84_height):
+    """ Given the height above the WGS84 ellipsoid compute the height above sea level (using the EGM96 model).
+    
+    Arguments:
+        lat: [float] Latitude +N (rad).
+        lon: [float] Longitude +E (rad).
+        wgs84_height: [float] Height above the WGS84 ellipsoid.
+
+    Return:
+        msl_height: [float] Height above sea level (meters).
+
+    """
+
+
+    # Get the difference between WGS84 and MSL height
+    lat_mod = np.pi/2 - lat
+    lon_mod = lon%(2*np.pi)
+    msl_ht_diff = GEOID_MODEL(lat_mod, lon_mod)[0][0]
+
+    # Compute the sea level
+    msl_height = wgs84_height - msl_ht_diff
+
+
+    return msl_height
 
 
 
@@ -107,7 +133,7 @@ if __name__ == "__main__":
 
 
     # Compute the WGS84 height
-    wgs84_height = mslToWGS84Height(lat, lon, msl_height)
+    wgs84_height = mslToWGS84Height(np.radians(lat), np.radians(lon), msl_height)
 
 
 
@@ -115,6 +141,17 @@ if __name__ == "__main__":
     print('Longitude', lon)
     print('MSL height (m):', msl_height)
     print('WGS84 height (m):', wgs84_height)
+    print('MSL height reverse (m):', wgs84toMSLHeight(np.radians(lat), np.radians(lon), wgs84_height))
 
-    # plt.imshow(geoid_heights)
-    # plt.show()
+
+    # Plot the height differences
+
+    vabs = np.max(np.abs([np.min(GEOID_HEIGHTS), np.max(GEOID_HEIGHTS)]))
+    plt.imshow(GEOID_HEIGHTS, extent=(0, 360, 90, -90), aspect='auto', vmin=-vabs, vmax=vabs,
+        cmap='PiYG')
+
+    plt.xlabel('Longitude')
+    plt.ylabel('Latitude')
+
+    plt.colorbar(label='WGS84 - MSL difference (m)')
+    plt.show()

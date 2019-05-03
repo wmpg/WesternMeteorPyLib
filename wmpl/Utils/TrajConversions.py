@@ -38,6 +38,7 @@ from datetime import datetime, timedelta, MINYEAR
 
 from wmpl.Config import config
 import wmpl.Utils.Earth
+import wmpl.Utils.GeoidHeightEGM96
 from wmpl.Utils.Math import vectNorm, vectMag, rotateVector, cartesianToSpherical, sphericalToCartesian
 
 
@@ -460,7 +461,7 @@ def latLonAlt2ECEF(lat, lon, h):
     Arguments:
         lat: [float] latitude in radians (+north)
         lon: [float] longitude in radians (+east)
-        h: [float] elevation in meters
+        h: [float] elevation in meters (WGS84)
 
     Return:
         (x, y, z): [tuple of floats] ECEF coordinates
@@ -485,9 +486,9 @@ def geo2Cartesian(lat_rad, lon_rad, h, julian_date, precess_j2000=False):
         The Earth is considered as an elipsoid.
     
     Arguments:
-        lat_rad: [float] Latitude of the observer in radians (+N).
-        lon_rad: [float] Longitde of the observer in radians (+E).
-        h: [int or float] Elevation of the observer in meters.
+        lat_rad: [float] Latitude of the observer in radians (+N), WGS84.
+        lon_rad: [float] Longitde of the observer in radians (+E), WGS84.
+        h: [int or float] Elevation of the observer in meters (EGS96 convention).
         julian_date: [float] Julian date, epoch J2000.0.
 
     Keyword arguments:
@@ -499,6 +500,11 @@ def geo2Cartesian(lat_rad, lon_rad, h, julian_date, precess_j2000=False):
     """
 
     lon = np.degrees(lon_rad)
+
+
+    # Convert MSL height (i.e. height above sea level) to WGS84 height
+    h = wmpl.Utils.GeoidHeightEGM96.mslToWGS84Height(lat_rad, lon_rad, h)
+
 
     # Calculate ECEF coordinates
     ecef_x, ecef_y, ecef_z = latLonAlt2ECEF(lat_rad, lon_rad, h)
@@ -613,7 +619,7 @@ def ecef2LatLonAlt(x, y, z):
         z: [float] ECEF z coordinate
 
     Return:
-        (lat, lon, alt): [tuple of floats] latitude and longitude in radians, elevation in meters
+        (lat, lon, alt): [tuple of floats] latitude and longitude in radians, WGS84 elevation in meters
 
     """
 
@@ -699,6 +705,9 @@ def cartesian2Geo(julian_date, x, y, z, precess_j2000=False):
 
     # Convert longitude to radians
     lon = np.radians(lon)
+
+    # Convert the height from WGS84 to MSL
+    ele = wmpl.Utils.GeoidHeightEGM96.wgs84toMSLHeight(lat, lon, ele)
 
 
     return lat, lon, ele
