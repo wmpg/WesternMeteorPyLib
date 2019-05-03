@@ -163,6 +163,13 @@ class ConfigStruct(object):
         ###
 
 
+        ### EGM96 vs WGS84 heights file ###
+
+        self.egm96_file = os.path.join(abs_path, 'share', 'WW15MGH.DAC')
+
+        ###
+
+
         ### PARENT BODY ORBITAL ELEMENTS
 
         # JPL comets elements
