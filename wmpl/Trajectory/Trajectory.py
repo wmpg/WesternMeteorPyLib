@@ -2218,9 +2218,10 @@ class Trajectory(object):
             meas2: [list or ndarray] Second measurement array (altitude, zenith angle or declination, 
                 depending on meastype, see meastype documentation for more information), in radians.
             time_data: [list or ndarray] Time in seconds from the reference Julian date.
-            lat: [float] Latitude +N of station in radians.
-            lon: [float] Longitude +E of station in radians.
-            ele: [float] Elevation of station in meters.
+            lat: [float] WGS84 latitude +N of station in radians.
+            lon: [float] WGS84 longitude +E of station in radians.
+            ele: [float] EGS96 geoidal elevation of station in meters (not the height above the WGS84 
+                ellipsoid!).
 
         Keyword arguments:
             station_id: [str] Identification of the station. None by default.
