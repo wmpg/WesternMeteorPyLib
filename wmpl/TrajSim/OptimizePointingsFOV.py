@@ -199,6 +199,7 @@ def explorePointings(station_list, fixed_cameras, min_height, max_height, moving
             d_range = np.linspace(-mv_range/2.0, +mv_range/2, steps)
 
             # Make a grid of movements
+            total_runs = 0
             for elev_ind, d_elev in enumerate(d_range):
                 for azim_ind, d_azim in enumerate(d_range):
 
@@ -233,9 +234,11 @@ def explorePointings(station_list, fixed_cameras, min_height, max_height, moving
                     # Print status messages
                     print()
                     print('Azim: {:d}/{:d}, elev: {:d}/{:d}, total runs: {:d}/{:d}'.format(azim_ind + 1, \
-                    	len(d_range), elev_ind + 1, len(d_range), (azim_ind + 1)*(elev_ind + 1), \
+                    	len(d_range), elev_ind + 1, len(d_range), total_runs, \
                     	len(d_range)**2))
                     print('Azim {:.2f} elev {:.2f} vol {:e}'.format(np.degrees(azim), np.degrees(elev), vol))
+
+                    total_runs += 1
 
 
 
@@ -296,10 +299,10 @@ if __name__ == "__main__":
     #################
 
     # Azimuths of centre of FOVs (degrees)
-    azim_fovs = [346.45, 356.0]
+    azim_fovs = [326.75, 359.5]
 
     # Elevations of centre of FOVs (degrees)
-    elev_fovs = [43.16, 44.0]
+    elev_fovs = [45.62, 44.85]
 
     # # Azimuths of centre of FOVs (degrees)
     # azim_fovs = [338.823, 1.891]
@@ -317,7 +320,7 @@ if __name__ == "__main__":
 
     # If the camera FOV is fixed, it should have True at its index, and False if it can be moved to optimize
     # the overlap
-    fixed_cameras = [False, True]
+    fixed_cameras = [True, False]
 
     # Height range to optimize for (kilometers)
     min_height = 70
@@ -378,6 +381,32 @@ if __name__ == "__main__":
     # # Height range to optimize for (kilometers)
     # min_height = 80
     # max_height = 100
+
+    # #################
+
+    # ### ROMULAN ###
+    # #################
+
+    # # Azimuths of centre of FOVs (degrees)
+    # azim_fovs = [327.0, 20.0]
+
+    # # Elevations of centre of FOVs (degrees)
+    # elev_fovs = [56.5, 65.16]
+
+    # # Cameras FOV widths (degrees)
+    # fov_widths = [29.5, 29.5]
+
+    # # Cameras FOV heights (degrees)
+    # fov_heights = [23.77, 23.77]
+
+
+    # # If the camera FOV is fixed, it should have True at its index, and False if it can be moved to optimize
+    # # the overlap
+    # fixed_cameras = [True, False]
+
+    # # Height range to optimize for (kilometers)
+    # min_height = 70
+    # max_height = 120
 
     # #################
 
