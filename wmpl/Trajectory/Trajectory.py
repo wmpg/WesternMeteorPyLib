@@ -1353,12 +1353,10 @@ def calcMCUncertanties(traj_list, traj_best):
 
 
     # Beginning/ending points
-    print([traj.rbeg_lon for traj in traj_list])
     un.rbeg_lon = scipy.stats.circstd([traj.rbeg_lon for traj in traj_list])
     un.rbeg_lat = np.std([traj.rbeg_lat for traj in traj_list])
     un.rbeg_ele = np.std([traj.rbeg_ele for traj in traj_list])
 
-    print([traj.rend_lon for traj in traj_list])
     un.rend_lon = scipy.stats.circstd([traj.rend_lon for traj in traj_list])
     un.rend_lat = np.std([traj.rend_lat for traj in traj_list])
     un.rend_ele = np.std([traj.rend_ele for traj in traj_list])
@@ -1366,26 +1364,30 @@ def calcMCUncertanties(traj_list, traj_best):
 
     if traj_best.orbit is not None:
 
-        # Apparent
-        print([traj.orbit.ra for traj in traj_list])
+        # Apparent ECI
         un.ra = scipy.stats.circstd([traj.orbit.ra for traj in traj_list])
         un.dec = np.std([traj.orbit.dec for traj in traj_list])
         un.v_avg = np.std([traj.orbit.v_avg for traj in traj_list])
         un.v_inf = np.std([traj.orbit.v_inf for traj in traj_list])
-
-        print([traj.orbit.azimuth_apparent for traj in traj_list])
         un.azimuth_apparent = scipy.stats.circstd([traj.orbit.azimuth_apparent for traj in traj_list])
         un.elevation_apparent = np.std([traj.orbit.elevation_apparent for traj in traj_list])
 
-        # reference point on the meteor trajectory
-        print([traj.orbit.lon_ref for traj in traj_list])
+        # Apparent ground-fixed
+        un.ra_norot = scipy.stats.circstd([traj.orbit.ra_norot for traj in traj_list])
+        un.dec_norot = np.std([traj.orbit.dec_norot for traj in traj_list])
+        un.v_avg_norot = np.std([traj.orbit.v_avg_norot for traj in traj_list])
+        un.v_init_norot = np.std([traj.orbit.v_init_norot for traj in traj_list])
+        un.azimuth_apparent_norot = scipy.stats.circstd([traj.orbit.azimuth_apparent_norot for traj \
+            in traj_list])
+        un.elevation_apparent_norot = np.std([traj.orbit.elevation_apparent_norot for traj in traj_list])
+
+        # Reference point on the meteor trajectory
         un.lon_ref = scipy.stats.circstd([traj.orbit.lon_ref for traj in traj_list])
         un.lat_ref = np.std([traj.orbit.lat_ref for traj in traj_list])
         un.lat_geocentric = np.std([traj.orbit.lat_geocentric for traj in traj_list])
         un.ht_ref = np.std([traj.orbit.ht_ref for traj in traj_list])
 
         # Geocentric
-        print([traj.orbit.ra_g for traj in traj_list])
         un.ra_g = scipy.stats.circstd([traj.orbit.ra_g for traj in traj_list])
         un.dec_g = np.std([traj.orbit.dec_g for traj in traj_list])
         un.v_g = np.std([traj.orbit.v_g for traj in traj_list])
@@ -1403,13 +1405,11 @@ def calcMCUncertanties(traj_list, traj_best):
 
 
         # Ecliptic geocentric
-        print([traj.orbit.L_g for traj in traj_list])
         un.L_g = scipy.stats.circstd([traj.orbit.L_g for traj in traj_list])
         un.B_g = np.std([traj.orbit.B_g for traj in traj_list])
         un.v_h = np.std([traj.orbit.v_h for traj in traj_list])
 
         # Ecliptic heliocentric
-        print([traj.orbit.L_h for traj in traj_list])
         un.L_h = scipy.stats.circstd([traj.orbit.L_h for traj in traj_list])
         un.B_h = np.std([traj.orbit.B_h for traj in traj_list])
         un.v_h_x = np.std([traj.orbit.v_h_x for traj in traj_list])
@@ -1417,24 +1417,17 @@ def calcMCUncertanties(traj_list, traj_best):
         un.v_h_z = np.std([traj.orbit.v_h_z for traj in traj_list])
 
         # Orbital elements
-        print([traj.orbit.la_sun for traj in traj_list])
         un.la_sun = scipy.stats.circstd([traj.orbit.la_sun for traj in traj_list])
         un.a = np.std([traj.orbit.a for traj in traj_list])
         un.e = np.std([traj.orbit.e for traj in traj_list])
         un.i = np.std([traj.orbit.i for traj in traj_list])
-        print([traj.orbit.peri for traj in traj_list])
         un.peri = scipy.stats.circstd([traj.orbit.peri for traj in traj_list])
-        print([traj.orbit.node for traj in traj_list])
         un.node = scipy.stats.circstd([traj.orbit.node for traj in traj_list])
-        print([traj.orbit.pi for traj in traj_list])
         un.pi = scipy.stats.circstd([traj.orbit.pi for traj in traj_list])
         un.q = np.std([traj.orbit.q for traj in traj_list])
         un.Q = np.std([traj.orbit.Q for traj in traj_list])
-        print([traj.orbit.true_anomaly for traj in traj_list])
         un.true_anomaly = scipy.stats.circstd([traj.orbit.true_anomaly for traj in traj_list])
-        print([traj.orbit.eccentric_anomaly for traj in traj_list])
         un.eccentric_anomaly = scipy.stats.circstd([traj.orbit.eccentric_anomaly for traj in traj_list])
-        print([traj.orbit.mean_anomaly for traj in traj_list])
         un.mean_anomaly = scipy.stats.circstd([traj.orbit.mean_anomaly for traj in traj_list])
 
         # Last perihelion uncertanty (days)

@@ -28,21 +28,48 @@ class Orbit(object):
 
     def __init__(self):
 
-        # Apparent radiant position (radians)
+
+        ### Apparent radiant in ECI (Earth's rotation is included) ###
+
+        # Apparent radiant position (ECI, radians)
         self.ra = None
         self.dec = None
 
-        # Apparent azimuth and altitude
+        # Apparent azimuth and altitude (ECI)
         self.azimuth_apparent = None
         self.elevation_apparent = None
 
-        # Estimated average velocity
+        # Estimated average velocity (ECI)
         self.v_avg = None
 
-        # Estimated initial velocity
+        # Estimated initial velocity (ECI)
         self.v_init = None
 
-        # reference Julian date for the trajectory. Can be the time of the first point on the trajectory or the
+        ### ###
+
+
+
+        ### Apparent radiant which includes no Earth's rotation (reference to the ground) ###
+
+        # Apparent radiant position (no Earth's rotation, radians)
+        self.ra_norot = None
+        self.dec_norot = None
+
+        # Apparent azimuth and altitude (no Earth's rotation)
+        self.azimuth_apparent_norot = None
+        self.elevation_apparent_norot = None
+
+        # Estimated average velocity (no Earth's rotation)
+        self.v_avg_norot = None
+
+        # Estimated initial velocity (no Earth's rotation)
+        self.v_init_norot = None
+
+        ### ###
+
+
+
+        # Reference Julian date for the trajectory. Can be the time of the first point on the trajectory or the
         # average time of the meteor
         self.jd_ref = None
 
@@ -171,10 +198,11 @@ class Orbit(object):
                 multi *= np.degrees(1.0)
 
             if uncertanties is not None:
-                return " +/- " + str_format.format(getattr(uncertanties, std_name)*multi)
+                if hasattr(uncertanties, std_name):
+                    return " +/- " + str_format.format(getattr(uncertanties, std_name)*multi)
 
-            else:
-                return ''
+            
+            return ''
 
 
         out_str =  ""
@@ -186,7 +214,9 @@ class Orbit(object):
             out_str += "  LST apparent = {:.10f} deg\n".format(np.degrees(self.lst_ref))
 
 
-        out_str += "Radiant (apparent, epoch of date):\n"
+        ### Apparent radiant in ECI ###
+
+        out_str += "Radiant (apparent in ECI which includes Earth's rotation, epoch of date):\n"
         out_str += "  R.A.      = {:>9.5f}{:s} deg\n".format(np.degrees(self.ra), _uncer('{:.4f}', 'ra', 
             deg=True))
         out_str += "  Dec       = {:>+9.5f}{:s} deg\n".format(np.degrees(self.dec), _uncer('{:.4f}', 'dec', 
@@ -206,6 +236,30 @@ class Orbit(object):
 
         out_str += "  Vinit     = {:>9.5f}{:s} km/s{:s}\n".format(self.v_init/1000, _uncer('{:.4f}', 'v_init', 
             multi=1.0/1000), v_init_ht_str)
+
+
+        ### ###
+
+
+        ### Apparent radiant in ECEF (no rotation included) ###
+
+        out_str += "Radiant (apparent ground-fixed, epoch of date):\n"
+        out_str += "  R.A.      = {:>9.5f}{:s} deg\n".format(np.degrees(self.ra_norot), _uncer('{:.4f}', \
+            'ra', deg=True))
+        out_str += "  Dec       = {:>+9.5f}{:s} deg\n".format(np.degrees(self.dec_norot), _uncer('{:.4f}', \
+            'dec', deg=True))
+        out_str += "  Azimuth   = {:>+9.5f}{:s} deg\n".format(np.degrees(self.azimuth_apparent_norot), \
+            _uncer('{:.4f}', 'azimuth_apparent', deg=True))
+        out_str += "  Elevation = {:>+9.5f}{:s} deg\n".format(np.degrees(self.elevation_apparent_norot), \
+            _uncer('{:.4f}', 'elevation_apparent', deg=True))
+        out_str += "  Vavg      = {:>9.5f}{:s} km/s\n".format(self.v_avg_norot/1000, _uncer('{:.4f}', \
+            'v_avg', multi=1.0/1000))
+        out_str += "  Vinit     = {:>9.5f}{:s} km/s{:s}\n".format(self.v_init_norot/1000, _uncer('{:.4f}', \
+            'v_init', multi=1.0/1000), v_init_ht_str)
+
+
+
+        ### ###
 
 
         # Check if the orbital elements could be calculated, and write them out
@@ -337,35 +391,60 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
     lat_ref, lon_ref, ht_ref = cartesian2Geo(jd_ref, *eci_ref)
 
 
-    # Apply the Earth rotation correction if the station ECI coordinates are fixed (a MUST for the 
+    # Initialize a new orbit structure and assign calculated parameters
+    orb = Orbit()
+
+
+
+    # Calculate the velocity of the Earth rotation at the position of the reference trajectory point (m/s)
+    v_e = 2*np.pi*vectMag(eci_ref)*np.cos(lat_geocentric)/86164.09053
+
+    
+    # Calculate the equatorial coordinates of east from the reference position on the trajectory
+    azimuth_east = np.pi/2
+    altitude_east = 0
+    ra_east, dec_east = altAz2RADec(azimuth_east, altitude_east, jd_ref, lat_ref, lon_ref)
+
+
+    # Compute velocity components of the state vector
+    if reference_init:
+
+        # If the initial velocity was the reference velocity, use it for the correction
+        v_ref_vect = v_init*radiant_eci
+
+
+    else:
+        # Calculate reference velocity vector using the average point on the trajectory and the average
+        # velocity
+        v_ref_vect = v_avg*radiant_eci
+
+
+
+    # Apply the Earth rotation correction if the station coordinates are fixed (a MUST for the 
     # intersecting planes method!)
     if stations_fixed:
 
-        # Calculate the velocity of the Earth rotation at the position of the reference trajectory point (m/s)
-        v_e = 2*np.pi*vectMag(eci_ref)*np.cos(lat_geocentric)/86164.09053
+        ### Set fixed stations radiant info ###
 
-        
-        # Calculate the equatorial coordinates of east from the reference position on the trajectory
-        azimuth_east = np.pi/2
-        altitude_east = 0
-        ra_east, dec_east = altAz2RADec(azimuth_east, altitude_east, jd_ref, lat_ref, lon_ref)
+        # If the stations are fixed, then the input state vector is already fixed to the ground
+        orb.ra_norot, orb.dec_norot = eci2RaDec(radiant_eci)
 
+        # Apparent azimuth and altitude (no rotation)
+        orb.azimuth_apparent_norot, orb.elevation_apparent_norot = raDec2AltAz(orb.ra_norot, orb.dec_norot, \
+            jd_ref, lat_ref, lon_ref)
 
-        if reference_init:
+        # Estimated average velocity (no rotation)
+        orb.v_avg_norot = v_avg
 
-            # If the initial velocity was the reference velocity, use it for the correction
-            v_ref_vect = v_init*radiant_eci
+        # Estimated initial velocity (no rotation)
+        orb.v_init_norot = v_init
 
-
-        else:
-            # Calculate reference velocity vector using the average point on the trajectory and the average
-            # velocity
-            v_ref_vect = v_avg*radiant_eci
+        ### ###
 
 
         v_ref_corr = np.zeros(3)
 
-        # Calculate the corrected reference velocity
+        # Calculate the corrected reference velocity vector/radiant
         v_ref_corr[0] = v_ref_vect[0] - v_e*np.cos(ra_east)
         v_ref_corr[1] = v_ref_vect[1] - v_e*np.sin(ra_east)
         v_ref_corr[2] = v_ref_vect[2]
@@ -381,6 +460,30 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
 
         else:
             v_ref_corr = v_avg*radiant_eci
+
+
+
+        ### ###
+        # If the rotation correction does not have to be applied, meaning that the rotation is already
+        # included, compute a version of the radiant and the velocity without Earth's rotation
+        # (REPORTING PURPOSES ONLY, THESE VALUES ARE NOT USED IN THE CALCULATION)
+
+        v_ref_nocorr = np.zeros(3)
+
+        # Calculate the derotated reference velocity vector/radiant
+        v_ref_nocorr[0] = v_ref_vect[0] + v_e*np.cos(ra_east)
+        v_ref_nocorr[1] = v_ref_vect[1] + v_e*np.sin(ra_east)
+        v_ref_nocorr[2] = v_ref_vect[2]
+
+        # Compute the radiant without Earth's rotation included
+        orb.ra_norot, orb.dec_norot = eci2RaDec(vectNorm(v_ref_nocorr))
+        orb.azimuth_apparent_norot, orb.elevation_apparent_norot = raDec2AltAz(orb.ra_norot, orb.dec_norot, \
+            jd_ref, lat_ref, lon_ref)
+        orb.v_init_norot = vectMag(v_ref_nocorr)
+        orb.v_avg_norot = orb.v_init_norot - v_init + v_avg
+
+        ### ###
+
 
             
 
@@ -418,9 +521,6 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
             v_init_corr = v_init
 
 
-
-    # Initialize a new orbit structure and assign calculated parameters
-    orb = Orbit()
 
     # Calculate apparent RA and Dec from radiant state vector
     orb.ra, orb.dec = eci2RaDec(radiant_eci)
