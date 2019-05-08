@@ -147,11 +147,11 @@ if __name__ == "__main__":
     # Plot the height differences
 
     vabs = np.max(np.abs([np.min(GEOID_HEIGHTS), np.max(GEOID_HEIGHTS)]))
-    plt.imshow(GEOID_HEIGHTS, extent=(0, 360, 90, -90), aspect='auto', vmin=-vabs, vmax=vabs,
+    plt.imshow(GEOID_HEIGHTS, extent=(0, 360, -90, 90), aspect='auto', vmin=-vabs, vmax=vabs,
         cmap='PiYG')
 
-    plt.xlabel('Longitude')
-    plt.ylabel('Latitude')
+    plt.xlabel('Longitude (+E)')
+    plt.ylabel('Latitude (+N)')
 
     plt.colorbar(label='WGS84 - MSL difference (m)')
     plt.show()
