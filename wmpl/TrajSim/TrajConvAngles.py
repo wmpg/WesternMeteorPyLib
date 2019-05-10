@@ -6,7 +6,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-from wmpl.Analysis.AnalyzeTrajectories import collectTrajPickles, pairTrajAndSim
+from wmpl.TrajSim.AnalyzeTrajectories import collectTrajPickles, pairTrajAndSim
 from wmpl.Utils.Math import histogramEdgesEqualDataNumber
 
 ### This import is needed to be able to load SimMeteor pickle files

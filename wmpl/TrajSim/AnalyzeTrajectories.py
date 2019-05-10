@@ -414,9 +414,8 @@ def plotOrbitElements(pickle_trajs, plt_type='sol_a', plt_handle=None, **kwargs)
 
 
 
-def pairTrajAndSim(traj_list, sim_meteors, radiant_extent, vg_extent):
-    """ Given a list of trajectories, simulated meteor object and max deviations in radiant and Vg, 
-        return the list of radiant and Vg deviations and convergence angles. 
+def pairTrajAndSim(traj_list, sim_meteors):
+    """ Given a list of pairs of trajectories and simulated meteor objects.
     """
 
     traj_sim_pairs = []
@@ -454,6 +453,19 @@ def pairTrajAndSim(traj_list, sim_meteors, radiant_extent, vg_extent):
         # Add the pair to the list
         traj_sim_pairs.append([traj, sim_meteors[min_indx]])
 
+
+    return traj_sim_pairs
+
+
+
+
+def compareTrajToSim(dir_path, sim_meteors, traj_list, solver_name, radiant_extent, vg_extent, vmax=5, 
+    show_plot=True, ret_conv_angles=False):
+    """ Compares results of a simulation to results of trajectory solving. """
+
+
+    # Pair trajectories and simulations
+    traj_sim_pairs = pairTrajAndSim(traj_list, sim_meteors)
 
 
     vg_diffs = []
@@ -503,20 +515,6 @@ def pairTrajAndSim(traj_list, sim_meteors, radiant_extent, vg_extent):
         conv_angles.append(conv_ang)
 
 
-
-    return failed_count, radiant_diffs, vg_diffs, conv_angles
-
-
-
-
-def compareTrajToSim(dir_path, sim_meteors, traj_list, solver_name, radiant_extent, vg_extent, vmax=5, 
-    show_plot=True, ret_conv_angles=False):
-    """ Compares results of a simulation to results of trajectory solving. """
-
-
-    # Pair trajectories and simulations
-    failed_count, radiant_diffs, vg_diffs, _ = pairTrajAndSim(traj_list, sim_meteors, radiant_extent, \
-        vg_extent)
 
 
     vg_diffs_std = np.array(vg_diffs)
