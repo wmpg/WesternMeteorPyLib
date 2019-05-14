@@ -67,7 +67,8 @@ def fitSlope(input_data, mass):
 
 
 
-def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None, nsamples=100):
+def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None, nsamples=100, \
+    mass_as_intensity=False):
     """ Estimate the mass or population index from the meteor data by fitting a gamma function to it using
         MLE and estimating the slope in the completeness region.
 
@@ -81,6 +82,8 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
         plot_save_path: [str] Path where to save the plots. None by default, in which case the plots will not
             be saved.
         nsamples: [int] Number of samples for uncertainty estimation. 100 by default.
+        mass_as_intensity: [bool] If True, it indicates that the integrated intensity in zero-magnitude units
+            is given instead of the mass. This will just change the axis labels. False by default.
     """
 
 
@@ -144,7 +147,12 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
     if show_plots or (plot_save_path is not None):
 
         if mass:
-            xlabel = 'Log of mass (kg)'
+
+            if mass_as_intensity:
+                xlabel = 'Integ. intensity (zero mag. units)'
+            else:
+                xlabel = 'Log of mass (kg)'
+
             plot_save_name = 'mass'
             slope_name = 's'
 
