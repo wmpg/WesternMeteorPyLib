@@ -34,6 +34,7 @@ class MeteorObservation(object):
         self.height = height
         self.fps = fps
 
+        self.frames = []
         self.time_data = []
         self.azim_data = []
         self.elev_data = []
@@ -57,10 +58,10 @@ class MeteorObservation(object):
 
         """
 
-        # Calculate the time in seconds w.r.t. to the reference JD
-        point_time = frame_n/self.fps
+        self.frames.append(frame_n)
 
-        print('Point time:', point_time)
+        # Calculate the time in seconds w.r.t. to the reference JD
+        point_time = float(frame_n)/self.fps
 
         self.time_data.append(point_time)
 
@@ -76,11 +77,21 @@ class MeteorObservation(object):
     def finish(self):
         """ When the initialization is done, convert data lists to numpy arrays. """
 
+        self.frames = np.array(self.frames)
         self.time_data = np.array(self.time_data)
         self.azim_data = np.array(self.azim_data)
         self.elev_data = np.array(self.elev_data)
         self.ra_data = np.array(self.ra_data)
         self.dec_data = np.array(self.dec_data)
+        self.mag_data = np.array(self.mag_data)
+
+        # Sort by frame
+        temp_arr = np.c_[self.frames, self.time_data, self.azim_data, self.elev_data, self.ra_data, \
+            self.dec_data, self.mag_data]
+        temp_arr = temp_arr[np.argsort(temp_arr[:, 0])]
+        self.frames, self.time_data, self.azim_data, self.elev_data, self.ra_data, self.dec_data, \
+            self.mag_data = temp_arr.T
+
 
 
 
@@ -403,6 +414,68 @@ def loadFTPDetectInfo(ftpdetectinfo_file_name, stations, time_offsets=None):
         if current_meteor is not None:
             current_meteor.finish()
             meteor_list.append(current_meteor)
+
+
+    ### Concatenate observations across different FF files ###
+
+    new_meteor_list = []
+
+    # Find unique station codes
+    station_codes = [met.station_id for met in meteor_list]
+    station_codes_unique = np.unique(station_codes)
+
+    # If there are duplicates, concatenate those observations
+    if len(station_codes) > len(station_codes_unique):
+
+        for station_id in station_codes_unique:
+
+            # Get all observations from this station
+            metobs_list = [met for met in meteor_list if met.station_id == station_id]
+
+            # Check if there are more than 1 observation from this station and concatenate
+            if len(metobs_list) > 1:
+
+                # Find the first observation in time
+                met_first = metobs_list[np.argmin([met.jdt_ref for met in metobs_list])]
+
+                # Append the second observation to the first one (assumption here is that the meteor
+                #   can only span 2 FF files)
+                met2 = metobs_list[1]
+
+                # Recompute the frames
+                frames = 256.0 + met2.frames
+
+                # Recompute the time data
+                time_data = frames/met_first.fps
+
+                # Add the observations to first meteor object
+                met_first.frames = np.append(met_first.frames, frames)
+                met_first.time_data = np.append(met_first.time_data, time_data)
+                met_first.azim_data = np.append(met_first.azim_data, met2.azim_data)
+                met_first.elev_data = np.append(met_first.elev_data, met2.elev_data)
+                met_first.ra_data = np.append(met_first.ra_data, met2.ra_data)
+                met_first.dec_data = np.append(met_first.dec_data, met2.dec_data)
+                met_first.mag_data = np.append(met_first.mag_data, met2.mag_data)
+
+
+                # Sort all observations by time
+                met_first.finish()
+
+
+            else:
+                met_first = metobs_list[0]
+
+
+            # Add the modified meteor observations object to updated list
+            new_meteor_list.append(met_first)
+
+
+        # Set the updated meteor list as the one that will be retured by the function
+        meteor_list = new_meteor_list
+
+    ### ###
+
+
 
 
     return meteor_list
