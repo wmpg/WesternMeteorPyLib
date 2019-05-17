@@ -863,7 +863,7 @@ def histogramEdgesEqualDataNumber(x, nbins):
 ##############################################################################################################
 
 
-def fitConfidenceInterval(x_data, y_data, conf=0.95, x_array=None):
+def fitConfidenceInterval(x_data, y_data, conf=0.95, x_array=None, func=None):
     """ Fits a line to the data and calculates the confidence interval. 
 
     Source: https://gist.github.com/rsnemmen/f2c03beb391db809c90f
@@ -876,6 +876,7 @@ def fitConfidenceInterval(x_data, y_data, conf=0.95, x_array=None):
         conf: [float] Confidence interval (fraction, 0.0 to 1.0).
         x_array: [ndarray] Array for evaluating the confidence interval on. Usually used as an independant 
             variable array for plotting.
+        func: [function] Function to fit. None by default, which means a line will be fit.
 
 
     Return:
@@ -887,8 +888,11 @@ def fitConfidenceInterval(x_data, y_data, conf=0.95, x_array=None):
             x_array: [ndarray] Independent variable array for lcb and ucb evaluation.
     """
 
+    if func is None:
+        func = lineFunc
+
     # Fit a line
-    line_params, _ = scipy.optimize.curve_fit(lineFunc, x_data, y_data)
+    fit_params, _ = scipy.optimize.curve_fit(func, x_data, y_data)
 
 
     alpha = 1.0 - conf
@@ -899,7 +903,7 @@ def fitConfidenceInterval(x_data, y_data, conf=0.95, x_array=None):
         x_array = np.linspace(x_data.min(), x_data.max(), 100)
 
     # Predicted values (best-fit model)
-    y_array = lineFunc(x_array, *line_params)
+    y_array = func(x_array, *fit_params)
 
     # Auxiliary definitions
     sxd = np.sum((x_data - x_data.mean())**2)
@@ -910,7 +914,7 @@ def fitConfidenceInterval(x_data, y_data, conf=0.95, x_array=None):
 
     # Std. deviation of an individual measurement (Bevington, eq. 6.15)  
     N = np.size(x_data)  
-    sd = 1.0/(N - 2.0)*np.sum((y_data - lineFunc(x_data, *line_params))**2)
+    sd = 1.0/(N - 2.0)*np.sum((y_data - func(x_data, *fit_params))**2)
     sd = np.sqrt(sd)
 
     # Confidence band
@@ -923,7 +927,7 @@ def fitConfidenceInterval(x_data, y_data, conf=0.95, x_array=None):
     lcb = y_array - dy    
 
 
-    return line_params, sd, lcb, ucb, x_array
+    return fit_params, sd, lcb, ucb, x_array
 
 
 ##############################################################################################################
