@@ -3,6 +3,7 @@
 from __future__ import print_function, absolute_import, division
 
 import os
+import sys
 import numpy as np
 import scipy.stats
 import matplotlib.pyplot as plt
@@ -119,8 +120,6 @@ class MetStruct(object):
 
         # Do this for both sites
         for site in self.sites:
-
-            print(self.mirror_pos[site])
 
             # Extract time data and encoder positions
             time_data = np.array(self.mirror_pos[site])[:, 0]
@@ -725,43 +724,102 @@ def solveTrajectoryMet(met, solver='original', velmodel=3, **kwargs):
 
 if __name__ == "__main__":
 
-    # Directory where the met file is
-    #dir_path = "../MirfitPrepare/20160929_062945_mir"
-    #dir_path = "../MetalPrepare/20161007_052749_met"
-    #dir_path = "../MetalPrepare/20161007_052346_met"
-    #dir_path = "/home/dvida/Dropbox/UWO/Projects/MetalPrepare/20170721_070420_met"
-    #dir_path = "../MetalPrepare/20170721_070420_met_TEST"
-    #dir_path = "/home/dvida/Desktop/ev_20171026_081339A"
-    #dir_path = "/mnt/bulk/mirfitprepare/20180703_030839_met"
-    #dir_path = "/mnt/bulk/mirfitprepare/20180707_035246_met"
-    #dir_path = "/mnt/bulk/mirfitprepare/20180707_044501_met"
-    #dir_path = "/mnt/bulk/mirfitprepare/20180707_050552_met"
-    #dir_path = "/mnt/bulk/mirfitprepare/20180707_081214_met"
-    #dir_path = "/mnt/bulk/mirfitprepare/20180712_033850_met"
-    #dir_path = "/mnt/bulk/mirfitprepare/20180716_062718_met"
-    #dir_path = "/mnt/bulk/mirfitprepare/20180720_043328_met"
-    #dir_path = "/mnt/bulk/mirfitprepare/20180707_061802_met"
-    #dir_path = "/mnt/bulk/mirfitprepare/20180710_074555_met"
-    #dir_path = "/mnt/bulk/mirfitprepare/20180521_062759_met"
-    #dir_path = "/mnt/bulk/mirfitprepare/20180707_063133_met"
-    #dir_path = "/mnt/bulk/mirfitprepare/20180720_073742_met"
-    #dir_path = "/mnt/bulk/mirfitprepare/20180806_053704_met"
-    #dir_path = "/mnt/bulk/mirfitprepare/20180811_030625_met"
-    #dir_path = "/mnt/bulk/mirfitprepare/20180815_024529_met"
-    #dir_path = "/mnt/bulk/mirfitprepare/20180815_061558_met"
-    #dir_path = "/mnt/bulk/mirfitprepare/20180917_041318_met"
-    dir_path = "/mnt/bulk/mirfitprepare/20180919_085506_met"
-    
 
-    # Name of the met file
-    file_name = 'state.met'
+    import argparse
+
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Run the trajectory solver on the given METAL or mirfit .met file. If mirfit is used, make sure to use the --mirfit option.")
+
+    arg_parser.add_argument('met_path', nargs=1, metavar='MET_PATH', type=str, \
+        help='Full path to the .met file.')
+
+    arg_parser.add_argument('-m', '--mirfit', \
+        help='Mirfit format instead of metal format.', action="store_true")
+
+    arg_parser.add_argument('-s', '--solver', metavar='SOLVER', help="""Trajectory solver to use. \n
+        - 'original' - Monte Carlo solver
+        - 'gural0' - Gural constant velocity
+        - 'gural1' - Gural linear deceleration
+        - 'gural2' - Gural quadratic deceleration
+        - 'gural3' - Gural exponential deceleration
+         """, type=str, nargs='?', default='original')
+
+    arg_parser.add_argument('-t', '--maxtoffset', metavar='MAX_TOFFSET', nargs=1, \
+        help='Maximum time offset between the stations.', type=float)
+
+    arg_parser.add_argument('-v', '--vinitht', metavar='V_INIT_HT', nargs=1, \
+        help='The initial veloicty will be estimated as the average velocity above this height (in km). If not given, the initial velocity will be estimated using the sliding fit which can be controlled with the --velpart option.', \
+        type=float)
+
+    arg_parser.add_argument('-p', '--velpart', metavar='VELOCITY_PART', \
+        help='Fixed part from the beginning of the meteor on which the initial velocity estimation using the sliding fit will start. Default is 0.25 (25 percent), but for noisier data this might be bumped up to 0.5.', \
+        type=float, default=0.25)
+
+    arg_parser.add_argument('-d', '--disablemc', \
+        help='Do not use the Monte Carlo solver, but only run the geometric solution.', action="store_true")
+    
+    arg_parser.add_argument('-r', '--mcruns', metavar="MC_RUNS", nargs='?', \
+        help='Number of Monte Carlo runs.', type=int, default=100)
+
+    arg_parser.add_argument('-u', '--uncertgeom', \
+        help='Compute purely geometric uncertainties.', action="store_true")
+    
+    arg_parser.add_argument('-g', '--disablegravity', \
+        help='Disable gravity compensation.', action="store_true")
+
+    arg_parser.add_argument('-l', '--plotallspatial', \
+        help='Plot a collection of plots showing the residuals vs. time, lenght and height.', \
+        action="store_true")
+
+    arg_parser.add_argument('-i', '--imgformat', metavar='IMG_FORMAT', nargs=1, \
+        help="Plot image format. 'png' by default, can be 'pdf', 'eps',... ", type=str, default='png')
+
+    arg_parser.add_argument('-x', '--hideplots', \
+        help="Don't show generated plots on the screen, just save them to disk.", action="store_true")
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    #########################
+
+    ### Parse command line arguments ###
+
+    met_path = os.path.abspath(cml_args.met_path[0])
+
+    dir_path = os.path.dirname(met_path)
+
+    # Check if the given directory is OK
+    if not os.path.isfile(met_path):
+        print('No such file:', met_path)
+        sys.exit()
+
+
+
+    max_toffset = None
+    if cml_args.maxtoffset:
+        max_toffset = cml_args.maxtoffset[0]
+
+    velpart = None
+    if cml_args.velpart:
+        velpart = cml_args.velpart
+
+    vinitht = None
+    if cml_args.vinitht:
+        vinitht = cml_args.vinitht[0]
+
+    ### ###
+
 
     # Load the met file
-    met = loadMet(dir_path, file_name, mirfit=False)
+    met = loadMet(*os.path.split(met_path), mirfit=cml_args.mirfit)
 
 
     # Run trajectory solver on the loaded .met file
-    solveTrajectoryMet(met, solver='original', max_toffset=1.0, mc_runs=100, monte_carlo=True)
+    solveTrajectoryMet(met, solver=cml_args.solver, max_toffset=max_toffset, \
+            monte_carlo=(not cml_args.disablemc), mc_runs=cml_args.mcruns, \
+            geometric_uncert=cml_args.uncertgeom, gravity_correction=(not cml_args.disablegravity), 
+            plot_all_spatial_residuals=cml_args.plotallspatial, plot_file_type=cml_args.imgformat, \
+            show_plots=(not cml_args.hideplots), v_init_part=velpart, v_init_ht=vinitht)
 
 
     # print(met.scale_plates.items())

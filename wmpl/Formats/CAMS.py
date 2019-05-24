@@ -725,8 +725,8 @@ if __name__ == "__main__":
         help='The initial veloicty will be estimated as the average velocity above this height (in km). If not given, the initial velocity will be estimated using the sliding fit which can be controlled with the --velpart option.', \
         type=float)
 
-    arg_parser.add_argument('-p', '--velpart', metavar='VELOCITY_PART', nargs=1, \
-        help='Fixed part from the beginning of the meteor on which the initial velocity estimation using the sliding fit will start. Default is 0.25 (25 percent), but for noisier data this might be bumped up to 0.5.', \
+    arg_parser.add_argument('-p', '--velpart', metavar='VELOCITY_PART', \
+        help='Fixed part from the beginning of the meteor on which the initial velocity estimation using the sliding fit will start. Default is 0.4 (40 percent), but for noisier data this might be bumped up to 0.5.', \
         type=float, default=0.4)
 
     arg_parser.add_argument('-d', '--disablemc', \
@@ -770,7 +770,6 @@ if __name__ == "__main__":
 
 
     max_toffset = None
-    print(cml_args.maxtoffset)
     if cml_args.maxtoffset:
         max_toffset = cml_args.maxtoffset[0]
 
