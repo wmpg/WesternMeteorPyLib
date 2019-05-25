@@ -586,8 +586,14 @@ def solveTrajectoryCAMS(meteor_list, output_dir, solver='original', **kwargs):
         if solver == 'original':
             traj = Trajectory(jdt_ref, output_dir=output_dir, meastype=1, **kwargs)
 
-        elif solver == 'gural':
-            traj = GuralTrajectory(len(meteor_list), jdt_ref, velmodel=3, meastype=1, verbose=1, 
+        elif solver.lower().startswith('gural'):
+            velmodel = solver.lower().strip('gural')
+            if len(velmodel) == 1:
+                velmodel = int(velmodel)
+            else:
+                velmodel = 0
+
+            traj = GuralTrajectory(len(meteor_list), jdt_ref, velmodel=velmodel, meastype=1, verbose=1, 
                 output_dir=output_dir)
 
         else:
@@ -716,7 +722,7 @@ if __name__ == "__main__":
         - 'gural1' - Gural linear deceleration
         - 'gural2' - Gural quadratic deceleration
         - 'gural3' - Gural exponential deceleration
-         """, type=str, nargs='?', default='original')
+         """, type=str, default='original')
 
     arg_parser.add_argument('-t', '--maxtoffset', metavar='MAX_TOFFSET', nargs=1, \
         help='Maximum time offset between the stations.', type=float)
