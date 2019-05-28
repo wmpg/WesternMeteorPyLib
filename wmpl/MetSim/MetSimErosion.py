@@ -1,10 +1,13 @@
 
 from __future__ import print_function, division, absolute_import
 
+
 import sys
 import math
 import copy
 
+import numpy as np
+import scipy.stats
 
 
 ### DEFINE CONSTANTS
@@ -29,7 +32,7 @@ class Constants(object):
         ### Simulation parameters ###
 
         # Time step
-        self.dt = 0.02
+        self.dt = 0.01
 
         # Time elapsed since the beginning
         self.total_time = 0
@@ -61,6 +64,18 @@ class Constants(object):
         ### ###
 
 
+        ### Wake parameters ###
+
+        # PSF stddev (m)
+        self.wake_psf = 50
+
+        # Wake extension from the leading fragment (m)
+        self.wake_extension = 1000
+
+        ### ###
+
+
+
         ### Main meteoroid properties ###
 
         # Meteoroid bulk density (kg/m^3)
@@ -79,7 +94,7 @@ class Constants(object):
         self.shape_factor = 1.21
 
         # Main fragment ablation coefficient
-        self.sigma = 0.02/1e6
+        self.sigma = 0.023/1e6
 
         # Zenith angle (radians)
         self.zenith_angle = math.radians(45)
@@ -96,17 +111,17 @@ class Constants(object):
         ### Erosion properties ###
 
         # Height at which the erosion starts (meters)
-        self.erosion_height = 105000
+        self.erosion_height = 102000
 
         # Grain ablation coefficient (s^2/m^2)
-        self.erosion_coeff = 0.3/1e6
+        self.erosion_coeff = 0.33/1e6
 
         # Grain mass distribution index
         self.erosion_mass_index = 2.5
 
         # Mass range for grains (kg)
-        self.erosion_mass_min = 2.0e-11
-        self.erosion_mass_max = 2.0e-10
+        self.erosion_mass_min = 1.2e-11
+        self.erosion_mass_max = 6.0e-10
 
         ###
 
@@ -114,18 +129,18 @@ class Constants(object):
         ### Disruption properties ###
 
         # Meteoroid compressive strength (Pa)
-        self.compressive_strength = 2200
+        self.compressive_strength = 1500
 
         # Disruption mass distribution index
         self.disruption_mass_index = 1.8
 
 
         # Mass ratio for disrupted fragments as the ratio of the disrupted mass
-        self.disruption_mass_min_ratio = 1.0/100
-        self.disruption_mass_max_ratio = 10.0/100
+        self.disruption_mass_min_ratio = 0.1/100
+        self.disruption_mass_max_ratio = 1.0/100
 
-        # Ratio of leftover mass that will disrupt into grains
-        self.disruption_mass_grain_ratio = 0.9
+        # Ratio of mass that will disrupt into grains
+        self.disruption_mass_grain_ratio = 0.25
 
         ### ###
 
@@ -155,6 +170,9 @@ class Fragment(object):
 
         # Length along the trajectory
         self.length = 0
+
+        # Luminous intensity (Watts)
+        self.lum = 0
 
         # Erosion coefficient value
         self.erosion_coeff = 0
@@ -188,6 +206,17 @@ class Fragment(object):
 
         self.active = True
         self.n_grains = 1
+
+
+
+class Wake(object):
+    def __init__(self, length_array, wake_luminosity_profile, length_points, luminosity_points):
+        """ Container for the evaluated wake. """
+
+        self.length_array = length_array
+        self.wake_luminosity_profile = wake_luminosity_profile
+        self.length_points = np.array(length_points)
+        self.luminosity_points = np.array(luminosity_points)
 
 
 
@@ -334,7 +363,7 @@ def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mas
 
 
 
-def ablate(fragments, const):
+def ablate(fragments, const, compute_wake=False):
     """ Perform single body ablation of the given grain using the 4th order Runge-Kutta method. """
 
 
@@ -421,9 +450,13 @@ def ablate(fragments, const):
         frag.m = m_new
         frag.h = frag.h + frag.vv*const.dt
 
-        # Compute ablated luminosity (including the deceleration term)
+        # Compute ablated luminosity (including the deceleration term) for one fragment/grain
         lum = -luminousEfficiency(frag.v)*((mass_loss_ablation/const.dt*frag.v**2)/2 - frag.m*frag.v*deceleration_total)
         #lum = -luminousEfficiency(frag.v)*((mass_loss_ablation/const.dt*frag.v**2)/2)
+
+        # Compute the total luminosity
+        frag.lum = lum*frag.n_grains
+
 
         # Keep track of the brightest fragment
         if lum > brightest_lum:
@@ -432,7 +465,7 @@ def ablate(fragments, const):
 
 
         # Keep track of the total luminosity across all fragments
-        luminosity_total += lum*frag.n_grains
+        luminosity_total += frag.lum
 
         # Update length along the track
         frag.length += frag.v*const.dt
@@ -456,7 +489,7 @@ def ablate(fragments, const):
 
 
         # If the fragment is done, stop ablating
-        if (frag.m <= const.m_kill) or (frag.v < const.v_kill) or (frag.h < const.h_kill):
+        if (frag.m <= const.m_kill) or (frag.v < const.v_kill) or (frag.h < const.h_kill) or (frag.lum < 0):
             frag.active = False
             const.n_active -= 1
             #print('Killing', frag.id)
@@ -472,7 +505,7 @@ def ablate(fragments, const):
             # Generate new fragments if there is some mass to distribute
             if abs(mass_loss_erosion) > 0:
 
-                grain_children, const = generateFragments(const, frag, abs(mass_loss_erosion), 
+                grain_children, const = generateFragments(const, frag, abs(mass_loss_erosion), \
                     const.erosion_mass_index, const.erosion_mass_min, const.erosion_mass_max, \
                     keep_eroding=False)
 
@@ -505,8 +538,9 @@ def ablate(fragments, const):
                     disruption_mass_max = const.disruption_mass_max_ratio*mass_frag_disruption
                     # disruption_mass_min = const.erosion_mass_min
                     # disruption_mass_max = const.erosion_mass_max
-                    frag_children, const = generateFragments(const, frag, mass_frag_disruption,
-                        const.disruption_mass_index, disruption_mass_min, disruption_mass_max, keep_eroding=True)
+                    frag_children, const = generateFragments(const, frag, mass_frag_disruption, \
+                        const.disruption_mass_index, disruption_mass_min, disruption_mass_max, \
+                        keep_eroding=True)
 
 
                     frag_children_all += frag_children
@@ -544,21 +578,71 @@ def ablate(fragments, const):
 
 
 
-            
+    # Track the leading fragment length
+    active_fragments_length = [frag.length for frag in fragments if frag.active]
+    if len(active_fragments_length):
+        leading_frag_length = max(active_fragments_length)
+    else:
+        leading_frag_length = None
+
+    print('Leading fragment:', leading_frag_length)
+
+
+    ### Compute the wake profile ###
+
+    if compute_wake and (leading_frag_length is not None):
+
+        # Evaluate the Gaussian from +3 sigma in front of the leading fragment to behind
+        front_len = leading_frag_length + 3*const.wake_psf
+        back_len = leading_frag_length - const.wake_extension
+
+        ### Compute the wake as convoluted luminosities with the PSF ###
+
+        length_array = np.linspace(back_len, front_len, 100)
+        wake_luminosity_profile = np.zeros_like(length_array)
+
+        luminosity_points = []
+        length_points = []
+
+        # Evalue the Gaussian of every fragment
+        for frag in fragments:
+
+            # Take only those lengths inside the wake window
+            if (frag.length > back_len) and (frag.length < front_len):
+
+                luminosity_points.append(frag.lum)
+                length_points.append(frag.length)
+
+                # Evalute the Gaussian
+                wake_luminosity_profile += frag.lum*scipy.stats.norm.pdf(length_array, loc=frag.length, \
+                    scale=const.wake_psf)
+
+
+        # Store evaluated wake
+        wake = Wake(length_array, wake_luminosity_profile, length_points, luminosity_points)
+
+        ### ###
+
+    else:
+        wake = None
+
+
+    ### ###
+
+
     # Add generated fragment children to the list of fragments
     fragments += frag_children_all
 
-    
     # Increment the running time
     const.total_time += const.dt
 
 
-    return fragments, const, luminosity_total, brightest_height, mass_total
+    return fragments, const, luminosity_total, brightest_height, leading_frag_length, mass_total, wake
 
 
 
 
-def runSimulation(const):
+def runSimulation(const, compute_wake=False):
 
     ###
 
@@ -591,28 +675,54 @@ def runSimulation(const):
 
     # Run the simulation until all fragments stop ablating
     results_list = []
+    wake_results = []
     while const.n_active > 0:
-    #for i in range(5000):
-        fragments, const, luminosity_total, brightest_height, mass_total = ablate(fragments, const)
+
+        # Ablate the fragments
+        fragments, const, luminosity_total, brightest_height, leading_frag_length, mass_total, \
+            wake = ablate(fragments, const, compute_wake=compute_wake)
+
+        # Store wake estimation results
+        wake_results.append(wake)
 
         # Stack results list
         results_list.append([const.total_time, luminosity_total, brightest_height, mass_total])
 
 
-    return results_list
+
+    return results_list, wake_results
 
 
 
 if __name__ == "__main__":
 
     import matplotlib.pyplot as plt
-    import numpy as np
+
+
+
+    # Show wake
+    show_wake = True
+
 
     # Init the constants
     const = Constants()
 
 
-    results_list = runSimulation(const)
+    # Run the ablation simulation
+    results_list, wake_results = runSimulation(const, compute_wake=show_wake)
+
+
+
+
+
+    ### ANALYZE RESULTS ###
+
+
+    # System limiting magnitude
+    lim_mag = 6.0
+
+    # Power of a 0 mag meteor (watts)
+    P_0m = 1500
 
 
     results_list = np.array(results_list)
@@ -621,7 +731,6 @@ if __name__ == "__main__":
 
 
     # Calculate absolute magnitude (apparent @100km) from given luminous intensity
-    P_0m = 1500
     abs_magnitude = -2.5*np.log10(luminosity_arr/P_0m)
 
     # plt.plot(abs_magnitude, brightest_height_arr/1000)
@@ -637,3 +746,42 @@ if __name__ == "__main__":
 
     plt.plot(time_arr, mass_total_arr)
     plt.show()
+
+
+    # Plot the wake animation
+    if show_wake and wake_results:
+        
+        plt.ion()
+        fig, ax = plt.subplots(1,1)
+
+        # Determine the plot upper limit
+        max_lum_wake = max([max(wake.wake_luminosity_profile) for wake in wake_results if wake is not None])
+
+        
+
+        for wake, abs_mag in zip(wake_results, abs_magnitude):
+
+            if wake is None:
+                continue
+
+            # Skip points below the limiting magnitude
+            if (abs_mag > lim_mag) or np.isnan(abs_mag):
+                continue
+
+            plt.cla()
+                
+            # Plot the wake profile
+            ax.plot(wake.length_array, wake.wake_luminosity_profile)
+
+            # Plot the location of grains
+            ax.scatter(wake.length_points, wake.luminosity_points/10, c='k', s=10*wake.luminosity_points/np.max(wake.luminosity_points))
+
+            plt.ylim([0, max_lum_wake])
+
+            plt.pause(2*const.dt)
+
+            fig.canvas.draw()
+
+        plt.ioff()
+        plt.clf()
+        plt.close()
