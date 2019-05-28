@@ -63,11 +63,11 @@ class Constants(object):
 
         ### Main meteoroid properties ###
 
-        # Meteoroid density (kg/m^3)
-        self.rho = 120
+        # Meteoroid bulk density (kg/m^3)
+        self.rho = 200
 
         # Initial meteoroid mass (kg)
-        self.m_init = 5.9e-5
+        self.m_init = 1e-3
 
         # Initial meteoroid veocity (m/s)
         self.v_init = 23570
@@ -79,7 +79,7 @@ class Constants(object):
         self.shape_factor = 1.21
 
         # Main fragment ablation coefficient
-        self.sigma = 0.023/1e6
+        self.sigma = 0.02/1e6
 
         # Zenith angle (radians)
         self.zenith_angle = math.radians(45)
@@ -87,28 +87,47 @@ class Constants(object):
         # Drag coefficient
         self.gamma = 1.0
 
+        # Grain bulk density (kg/m^3)
+        self.rho_grain = 3000
+
         ### ###
 
 
         ### Erosion properties ###
 
         # Height at which the erosion starts (meters)
-        self.erosion_height = 100000
+        self.erosion_height = 105000
 
         # Grain ablation coefficient (s^2/m^2)
-        self.erosion_coeff = 0.33/1e6
+        self.erosion_coeff = 0.3/1e6
 
         # Grain mass distribution index
-        self.mass_index = 2.5
+        self.erosion_mass_index = 2.5
 
-        # Grain density (kg/m^3)
-        self.rho_grain = 3000
-
-        # Define mass range for grains (kg)
-        self.mass_min = 1.2e-10
-        self.mass_max = 6e-10
+        # Mass range for grains (kg)
+        self.erosion_mass_min = 2.0e-11
+        self.erosion_mass_max = 2.0e-10
 
         ###
+
+
+        ### Disruption properties ###
+
+        # Meteoroid compressive strength (Pa)
+        self.compressive_strength = 2200
+
+        # Disruption mass distribution index
+        self.disruption_mass_index = 1.8
+
+
+        # Mass ratio for disrupted fragments as the ratio of the disrupted mass
+        self.disruption_mass_min_ratio = 1.0/100
+        self.disruption_mass_max_ratio = 10.0/100
+
+        # Ratio of leftover mass that will disrupt into grains
+        self.disruption_mass_grain_ratio = 0.9
+
+        ### ###
 
 
 
@@ -141,6 +160,8 @@ class Fragment(object):
         self.erosion_coeff = 0
 
         self.erosion_enabled = False
+
+        self.disruption_enabled = False
 
         self.active = False
         self.n_grains = 1
@@ -243,7 +264,7 @@ def atmDensity(h, const):
 
 
 
-def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mass_max):
+def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mass_max, keep_eroding=False):
 
     # Compute the number of mass bins
     k = math.ceil(abs(math.log10(mass_max/mass_min)/math.log10(MASS_BIN_COEFF)))
@@ -254,42 +275,52 @@ def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mas
     else:
         n0 = abs((eroded_mass/mass_max)*(1 - MASS_BIN_COEFF**(2 - mass_index))/(1 - MASS_BIN_COEFF**((2 - mass_index)*(k + 1))))
 
-    print('Largest grains:', n0, mass_max)
 
     # Go though every mass bin
     frag_children = []
+    leftover_mass = 0
     for i in range(0, k + 1):
 
         # Compute the mass of all grains in the bin (per grain)
         m_grain = mass_max*MASS_BIN_COEFF**i
 
         # Compute the number of grains in the bin
-        n_grains_bin = int(n0*(mass_max/m_grain)**(mass_index - 1))
+        n_grains_bin = n0*(mass_max/m_grain)**(mass_index - 1) + leftover_mass/m_grain
+        n_grains_bin_round = int(math.floor(n_grains_bin))
 
+        # Compute the leftover mass
+        leftover_mass = (n_grains_bin - n_grains_bin_round)*m_grain
 
         # If there are any grains to erode, erode them
-        if n_grains_bin > 0:
-
+        if n_grains_bin_round > 0:
 
             # Init the new fragment with params of the parent
             frag_child = copy.deepcopy(frag_parent)
 
-            # Assign the number of grains this fragment stands for
-            frag_child.n_grains = n_grains_bin
+            # Assign the number of grains this fragment stands for (make sure to preserve the previous value
+            #   if erosion is done for more fragments)
+            frag_child.n_grains *= n_grains_bin_round
 
             # Assign the grain mass
             frag_child.m = m_grain
 
-            # Compute the grain density and shape-density coeff
-            frag_child.rho = const.rho_grain
-            frag_child.K = const.gamma*const.shape_factor*frag_child.rho**(-2/3.0)
-
-            frag_child.erosion_enabled = False
             frag_child.active = True
             frag_child.main = False
+            frag_child.disruption_enabled = False
 
-            # Set the erosion coefficient value (disable in child fragments, only the parent erodes!)
-            frag_child.erosion_coeff = 0
+            # Set the erosion coefficient value (disable in child fragments, only the parent erodes)
+            if keep_eroding:
+                frag_child.erosion_enabled = True
+                frag_child.erosion_coeff = const.erosion_coeff
+
+            else:
+                # Compute the grain density and shape-density coeff
+                frag_child.rho = const.rho_grain
+                frag_child.K = const.gamma*const.shape_factor*frag_child.rho**(-2/3.0)
+
+                frag_child.erosion_enabled = False
+                frag_child.erosion_coeff = 0
+
 
             # Give every fragment a unique ID
             frag_child.id = const.total_fragments
@@ -317,6 +348,8 @@ def ablate(fragments, const):
 
     # Track total mass
     mass_total = sum([frag.m for frag in fragments])
+
+    frag_children_all = []
 
     # Go through all active fragments
     for frag in fragments:
@@ -397,6 +430,7 @@ def ablate(fragments, const):
             brightest_lum = lum
             brightest_height = frag.h
 
+
         # Keep track of the total luminosity across all fragments
         luminosity_total += lum*frag.n_grains
 
@@ -413,14 +447,20 @@ def ablate(fragments, const):
 
         if frag.id == 0:
             print('----- id:', frag.id)
+            print('t:', const.total_time)
             print('V:', frag.v/1000)
             print('H:', frag.h/1000)
             print('m:', frag.m)
             print('DynPress:', dyn_press/1000, 'kPa')
 
 
-        # ## TEST !!!!!!!!!!!!!!
-        # sys.exit()
+
+        # If the fragment is done, stop ablating
+        if (frag.m <= const.m_kill) or (frag.v < const.v_kill) or (frag.h < const.h_kill):
+            frag.active = False
+            const.n_active -= 1
+            #print('Killing', frag.id)
+            continue
 
 
         # Check if the erosion should start, given the height and create grains
@@ -432,12 +472,12 @@ def ablate(fragments, const):
             # Generate new fragments if there is some mass to distribute
             if abs(mass_loss_erosion) > 0:
 
-                frag_children, const = generateFragments(const, frag, abs(mass_loss_erosion), 
-                    const.mass_index, const.mass_min, const.mass_max)
+                grain_children, const = generateFragments(const, frag, abs(mass_loss_erosion), 
+                    const.erosion_mass_index, const.erosion_mass_min, const.erosion_mass_max, \
+                    keep_eroding=False)
 
-                const.n_active += len(frag_children)
-
-                fragments += frag_children
+                const.n_active += len(grain_children)
+                frag_children_all += grain_children
 
                 # print('Eroding id', frag.id)
                 # print('Eroded mass: {:e}'.format(abs(mass_loss_erosion)))
@@ -450,15 +490,63 @@ def ablate(fragments, const):
 
 
 
-        # If the fragment is done, stop ablating
-        if (frag.m <= const.m_kill) or (frag.v < const.v_kill) or (frag.h < const.h_kill):
-            frag.active = False
-            const.n_active -= 1
-            #print('Killing', frag.id)
+        # Disrupt the fragment if the dynamic pressure exceeds its strength
+        if frag.disruption_enabled:
+            if dyn_press > const.compressive_strength:
+
+
+                # Compute the mass that should be disrupted into fragments
+                mass_frag_disruption = frag.m*(1 - const.disruption_mass_grain_ratio)
+                fragments_total_mass = 0
+                if mass_frag_disruption > 0:
+
+                    # Disrupt the meteoroid into fragments
+                    disruption_mass_min = const.disruption_mass_min_ratio*mass_frag_disruption
+                    disruption_mass_max = const.disruption_mass_max_ratio*mass_frag_disruption
+                    # disruption_mass_min = const.erosion_mass_min
+                    # disruption_mass_max = const.erosion_mass_max
+                    frag_children, const = generateFragments(const, frag, mass_frag_disruption,
+                        const.disruption_mass_index, disruption_mass_min, disruption_mass_max, keep_eroding=True)
+
+
+                    frag_children_all += frag_children
+                    const.n_active += len(frag_children)
+
+
+                    # Compute the mass that went into fragments
+                    fragments_total_mass = sum([f.n_grains*f.m for f in frag_children])
+
+
+                    print('Disrupting id', frag.id)
+                    print('Disrupted mass: {:e}'.format(mass_frag_disruption))
+                    print('Mass distribution:')
+                    for f in frag_children:
+                        print('{:4d}: {:e} kg'.format(f.n_grains, f.m))
+                    print('Disrupted total mass: {:e}'.format(fragments_total_mass))
+
+
+
+                # Disrupt a portion of the leftover mass into grains
+                mass_grain_disruption = frag.m - fragments_total_mass
+                if mass_grain_disruption > 0:
+                    grain_children, const = generateFragments(const, frag, mass_grain_disruption, 
+                        const.erosion_mass_index, const.erosion_mass_min, const.erosion_mass_max, \
+                        keep_eroding=False)
+
+                    frag_children_all += grain_children
+                    const.n_active += len(grain_children)
+
+
+                # Deactive the disrupted fragment
+                frag.active = False
+                frag.m = 0
+                const.n_active -= 1
+
 
 
             
-
+    # Add generated fragment children to the list of fragments
+    fragments += frag_children_all
 
     
     # Increment the running time
@@ -483,6 +571,9 @@ def runSimulation(const):
     
     # Erode the main fragment
     frag.erosion_enabled = True
+
+    # Disrupt the main fragment
+    frag.disruption_enabled = True
 
     fragments.append(frag)
 
