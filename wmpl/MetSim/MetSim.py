@@ -739,7 +739,7 @@ def ablate(met, consts, no_atmosphere_end_ht=-1):
     # Horizontal component of a
     ah = -a_current*met.vh/met.v - met.vv*met.v/(R_EARTH + met.h)
 
-    # Velocity magnitude
+    # Deceleration
     v_dot = math.sqrt(av**2 + ah**2)
 
     printd('v_dot', v_dot)
@@ -925,7 +925,7 @@ def runSimulation(met, consts, fragmentation_model=None, no_atmosphere_end_ht=-1
     # Initial radius (assume sphere)
     met.r_init = ((3.0/4)*met.vol/math.pi)**(1.0/3)
 
-    # ?
+    # Init velocity components
     met.vv_init = -met.v_init*math.cos(consts.zr)
     met.vh_init = met.v_init*math.sin(consts.zr)
 
@@ -1111,18 +1111,18 @@ if __name__ == "__main__":
     ### FRAGMENTATION
 
     # # No fragmentation
-    # fragmentation_model = NoFragmentation()
+    fragmentation_model = NoFragmentation()
 
 
-    # Fragment into daughter fragments at the given height
-    #daughter_frag_mass_ratios = [1.0, 0.75, 0.5, 0.25]
-    #daughter_frag_mass_ratios = [1.0, 0.8, 0.6, 0.4]
-    #daughter_frag_mass_ratios = [1.0, 0.9, 0.8, 0.7]
-    #daughter_frag_mass_ratios = [1.0, 0.5]
-    daughter_frag_mass_ratios = [1.0, 0.75, 0.5]
-    #fragmentation_model = HeightFragmentation(93.5, daughter_frag_mass_ratios)
-    #fragmentation_model = HeightFragmentation(93.0, daughter_frag_mass_ratios)
-    fragmentation_model = HeightFragmentation(110.0, daughter_frag_mass_ratios)
+    # # Fragment into daughter fragments at the given height
+    # #daughter_frag_mass_ratios = [1.0, 0.75, 0.5, 0.25]
+    # #daughter_frag_mass_ratios = [1.0, 0.8, 0.6, 0.4]
+    # #daughter_frag_mass_ratios = [1.0, 0.9, 0.8, 0.7]
+    # #daughter_frag_mass_ratios = [1.0, 0.5]
+    # daughter_frag_mass_ratios = [1.0, 0.75, 0.5]
+    # #fragmentation_model = HeightFragmentation(93.5, daughter_frag_mass_ratios)
+    # #fragmentation_model = HeightFragmentation(93.0, daughter_frag_mass_ratios)
+    # fragmentation_model = HeightFragmentation(110.0, daughter_frag_mass_ratios)
 
     ##########################    
 
