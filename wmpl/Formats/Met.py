@@ -63,6 +63,8 @@ class PickInfo(object):
         # Log sum pixel
         self.lsp = 0
 
+        # Magnitude
+
 
 
 class MetStruct(object):
@@ -301,6 +303,9 @@ def extractPicks(met, mirfit=False):
                 # Log sum pixel
                 pick.lsp = lsp
 
+                # Magnitude
+                pick.mag = 0
+
                 # Add the pick to the list of all picks
                 met.picks_objs[site].append(pick)
 
@@ -321,13 +326,16 @@ def extractPicks(met, mirfit=False):
             # Azimuthal coordinates
             theta, phi = np.hsplit(np.radians(np.array(met.picks[site])[:, 12:14].astype(np.float64)), 2)
 
+            # Apparent magnitudes
+            mag_data = np.array(met.picks[site])[:, 17].astype(np.float)
+
 
             # Init a list of picks for this site
             met.picks_objs[site] = []
 
             # Generate a list of pick object
-            for fr, cx, cy, theta_pick, phi_pick, unix_time in zip(frames, cx_data, cy_data, theta, phi, 
-                time_data):
+            for fr, cx, cy, theta_pick, phi_pick, mag, unix_time in zip(frames, cx_data, cy_data, theta, phi, 
+                mag_data, time_data):
                 
                 # Init a new pick
                 pick = PickInfo(theta_pick, phi_pick)
@@ -341,6 +349,9 @@ def extractPicks(met, mirfit=False):
                 # Set original pick centroids
                 pick.cx = cx
                 pick.cy = cy
+
+                # Magnitude
+                pick.mag = mag
 
                 # Add the pick to the list of all picks
                 met.picks_objs[site].append(pick)
@@ -638,6 +649,7 @@ def solveTrajectoryMet(met, solver='original', velmodel=3, **kwargs):
         time_data = {}
         theta_data = {}
         phi_data = {}
+        mag_data = {}
 
         # Go through all sites
         for site in met.sites:
@@ -645,6 +657,7 @@ def solveTrajectoryMet(met, solver='original', velmodel=3, **kwargs):
             time_picks = []
             theta_picks = []
             phi_picks = []
+            mag_picks = []
 
             # Go through all picks
             for pick in met.picks_objs[site]:
@@ -656,11 +669,15 @@ def solveTrajectoryMet(met, solver='original', velmodel=3, **kwargs):
                 # Add the time of the pick to a list
                 time_picks.append(pick.unix_time)
 
+                # Add magnitude
+                mag_picks.append(pick.mag)
+
 
             # Add the picks to the list of picks of both sites
             time_data[site] = np.array(time_picks).ravel()
             theta_data[site] = np.array(theta_picks).ravel()
             phi_data[site] = np.array(phi_picks).ravel()
+            mag_data[site] = np.array(mag_picks).ravel()
 
 
         # Take the earliest time of all sites as the reference time
@@ -680,7 +697,7 @@ def solveTrajectoryMet(met, solver='original', velmodel=3, **kwargs):
         if solver == 'original':
 
             # Init the new trajectory solver object
-            traj_solve = Trajectory(ref_JD, output_dir=met.dir_path, **kwargs)
+            traj = Trajectory(ref_JD, output_dir=met.dir_path, **kwargs)
 
         elif solver == 'gural':
 
@@ -689,7 +706,7 @@ def solveTrajectoryMet(met, solver='original', velmodel=3, **kwargs):
             gural_kwargs = {key: kwargs[key] for key in gural_keys if key in kwargs}
 
             # Init the new Gural trajectory solver object
-            traj_solve = GuralTrajectory(len(met.sites), ref_JD, velmodel, verbose=1, output_dir=met.dir_path, 
+            traj = GuralTrajectory(len(met.sites), ref_JD, velmodel, verbose=1, output_dir=met.dir_path, 
                 **gural_kwargs)
 
 
@@ -699,23 +716,33 @@ def solveTrajectoryMet(met, solver='original', velmodel=3, **kwargs):
             theta_picks = theta_data[site]
             phi_picks = phi_data[site]
             time_picks = time_data[site]
+            mag_picks = mag_data[site]
 
             lat = met.lat[site]
             lon = met.lon[site]
             elev = met.elev[site]
 
-            traj_solve.infillTrajectory(phi_picks, theta_picks, time_picks, lat, lon, elev)
+
+            # MC solver
+            if solver == 'original':
+
+                traj.infillTrajectory(phi_picks, theta_picks, time_picks, lat, lon, elev, \
+                    station_id=str(site), magnitudes=mag_picks)
+            
+            # Gural solver
+            else:
+                traj.infillTrajectory(phi_picks, theta_picks, time_picks, lat, lon, elev)
 
 
         print('Filling done!')
 
 
         # # Dump measurements to a file
-        # traj_solve.dumpMeasurements(self.met.dir_path.split(os.sep)[-1] + '_dump.txt')
+        # traj.dumpMeasurements(self.met.dir_path.split(os.sep)[-1] + '_dump.txt')
 
 
         # Solve the trajectory
-        traj_solve.run()
+        traj.run()
 
 
 
