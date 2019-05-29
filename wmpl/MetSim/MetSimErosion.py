@@ -1,4 +1,15 @@
 
+""" Implementation of the Borovicka (2007) meteor erosion model with added disruption.
+
+References:
+    Borovička, J., Spurný, P., & Koten, P. (2007). Atmospheric deceleration and light curves of Draconid 
+    meteors and implications for the structure of cometary dust. Astronomy & Astrophysics, 473(2), 661-672.
+
+    Campbell-Brown, M. D., Borovička, J., Brown, P. G., & Stokan, E. (2013). High-resolution modelling of 
+    meteoroid ablation. Astronomy & Astrophysics, 557, A41.
+
+"""
+
 from __future__ import print_function, division, absolute_import
 
 
@@ -12,7 +23,7 @@ import scipy.stats
 
 ### DEFINE CONSTANTS
 
-# earth acceleration in m/s^2
+# Earth acceleration in m/s^2 on the surface
 G0 = 9.81
 
 # Earth radius (m) at 43.930723 deg latitude
@@ -32,7 +43,7 @@ class Constants(object):
         ### Simulation parameters ###
 
         # Time step
-        self.dt = 0.01
+        self.dt = 0.02
 
         # Time elapsed since the beginning
         self.total_time = 0
@@ -136,8 +147,8 @@ class Constants(object):
 
 
         # Mass ratio for disrupted fragments as the ratio of the disrupted mass
-        self.disruption_mass_min_ratio = 0.1/100
-        self.disruption_mass_max_ratio = 1.0/100
+        self.disruption_mass_min_ratio = 1.0/100
+        self.disruption_mass_max_ratio = 10.0/100
 
         # Ratio of mass that will disrupt into grains
         self.disruption_mass_grain_ratio = 0.25
@@ -221,11 +232,36 @@ class Wake(object):
 
 
 
-def massLoss(K, sigma, m, rho, v):
-    return -K*sigma*m**(2/3.0)*rho*v**3
+def massLoss(K, sigma, m, rho_atm, v):
+    """ Mass loss differential equation, the result is giving dm/dt.
+
+    Arguments:
+        K: [float] Shape-density coefficient (m^2/kg^(2/3)).
+        sigma: [float] Ablation coefficient (s^2/m^2).
+        m: [float] Mass (kg).
+        rho_atm: [float] Atmosphere density (kg/m^3).
+        v: [float] Velocity (m/S).
+
+    Return:
+        dm/dt: [float] Mass loss in kg/s.
+    """
+
+    return -K*sigma*m**(2/3.0)*rho_atm*v**3
+
 
 
 def massLossRK4(frag, const, rho_atm, sigma):
+    """ Computes the mass loss using the 4th order Runge-Kutta method. 
+    
+    Arguments:
+        frag: [object] Fragment instance.
+        cont: [object] Constants instance.
+        rho_atm: [float] Atmosphere density (kg/m^3).
+        sigma: [float] Ablation coefficient (s^2/m^2).
+
+    Return:
+        dm/dt: [float] Mass loss in kg/s.
+    """
 
     # Compute the mass loss (RK4)
     # Check instances when there is no more mass to ablate
@@ -253,13 +289,36 @@ def massLossRK4(frag, const, rho_atm, sigma):
     return mass_loss_total
 
 
-def deceleration(K, m, rho, v):
-    return -K*m**(-1/3.0)*rho*v**2
+
+
+def deceleration(K, m, rho_atm, v):
+    """ Computes the deceleration derivative.     
+
+    Arguments:
+        K: [float] Shape-density coefficient (m^2/kg^(2/3)).
+        m: [float] Mass (kg).
+        rho_atm: [float] Atmosphere density (kg/m^3).
+        v: [float] Velocity (m/S).
+
+    Return:
+        dv/dt: [float] Deceleration.
+    """
+
+    return -K*m**(-1/3.0)*rho_atm*v**2
+
 
 
 
 def luminousEfficiency(vel):
-    """ Compute the luminous efficienty in percent for the given velocity (m/s). """
+    """ Compute the luminous efficienty in percent for the given velocity. 
+    
+    Arguments:
+        vel: [float] Velocity (m/s).
+
+    Return:
+        tau: [float] Luminous efficiency (ratio).
+
+    """
 
     return 0.7/100
 
@@ -294,6 +353,26 @@ def atmDensity(h, const):
 
 
 def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mass_max, keep_eroding=False):
+    """ Given the parent fragment, fragment it into daughter fragments using a power law mass distribution.
+
+    Masses are binned and one daughter fragment may represent several fragments/grains, which is specified 
+    with the n_grains atribute.
+
+    Arguments:
+        const: [object] Constants instance.
+        frag_parent: [object] Fragment instance, the tparent fragment.
+        eroded_mass: [float] Mass to be distributed into daughter fragments. 
+        mass_index: [float] Mass index to use to distribute the mass.
+        mass_min: [float] Minimum mass bin (kg).
+        mass_max: [float] Maximum mass bin (kg).
+
+    Keyword arguments:
+        keep_eroding: [bool] Whether the daughter fragments should keep eroding.
+
+    Return:
+        frag_children: [list] A list of Fragment instances - these are the generated daughter fragments.
+
+    """
 
     # Compute the number of mass bins
     k = math.ceil(abs(math.log10(mass_max/mass_min)/math.log10(MASS_BIN_COEFF)))
@@ -364,7 +443,18 @@ def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mas
 
 
 def ablate(fragments, const, compute_wake=False):
-    """ Perform single body ablation of the given grain using the 4th order Runge-Kutta method. """
+    """ Perform single body ablation of the given grain using the 4th order Runge-Kutta method. 
+
+    Arguments:
+        fragments: [list] A list of Fragment instances.
+        const: [object] Constants instance.
+
+    Keyword arguments:
+        compute_wake: [bool] If True, the wake profile will be computed. False by default.
+
+    Return:
+        ...
+    """
 
 
 
@@ -643,6 +733,7 @@ def ablate(fragments, const, compute_wake=False):
 
 
 def runSimulation(const, compute_wake=False):
+    """ Run the ablation simulation. """
 
     ###
 
@@ -710,8 +801,6 @@ if __name__ == "__main__":
 
     # Run the ablation simulation
     results_list, wake_results = runSimulation(const, compute_wake=show_wake)
-
-
 
 
 
