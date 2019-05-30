@@ -425,9 +425,14 @@ class MetSimGUI(QMainWindow):
                 & (sr.brightest_height_arr > plot_end_ht)]
             ht_arr, brightest_len_arr = temp_arr.T
 
-            # Find the 
 
-            # Compute the simulated lag using observed initial velocity
+            # Compute the simulated lag using the observed velocity
+            lag_sim = brightest_len_arr - brightest_len_arr[0] - traj.v_init*np.arange(0, \
+                self.const.dt*len(brightest_len_arr), self.const.dt)
+
+            print(lag_sim)
+
+            self.lagPlot.canvas.axes.plot(lag_sim, ht_arr/1000)
 
 
 
