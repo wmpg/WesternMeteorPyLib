@@ -61,6 +61,7 @@ We will now install all needed libraries. With the environment activated as desc
 ```
 conda install -y numpy scipy matplotlib cython
 conda install -y -c conda-forge basemap basemap-data-hires jplephem pyephem
+pip install PyQt5
 ```
 
 

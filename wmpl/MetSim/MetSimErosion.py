@@ -43,7 +43,7 @@ class Constants(object):
         ### Simulation parameters ###
 
         # Time step
-        self.dt = 0.02
+        self.dt = 0.01
 
         # Time elapsed since the beginning
         self.total_time = 0
@@ -60,6 +60,11 @@ class Constants(object):
         # Minimum height (m)
         self.h_kill = 40000
 
+        # Initial meteoroid height (m)
+        self.h_init = 180000
+
+        # Power of a 0 magnitude meteor
+        self.P_0m = 840
 
         # Atmosphere density coefficients
         self.dens_co = [-9.02726494,
@@ -98,9 +103,6 @@ class Constants(object):
         # Initial meteoroid veocity (m/s)
         self.v_init = 23570
 
-        # Initial meteoroid height (m)
-        self.h_init = 180000
-
         # Shape factor (1.21 is sphere)
         self.shape_factor = 1.21
 
@@ -121,6 +123,9 @@ class Constants(object):
 
         ### Erosion properties ###
 
+        # Toggle erosion on/off
+        self.erosion_on = True
+
         # Height at which the erosion starts (meters)
         self.erosion_height = 102000
 
@@ -138,6 +143,9 @@ class Constants(object):
 
 
         ### Disruption properties ###
+
+        # Toggle disruption on/off
+        self.disruption_on = True
 
         # Meteoroid compressive strength (Pa)
         self.compressive_strength = 1500
@@ -463,7 +471,9 @@ def ablate(fragments, const, compute_wake=False):
 
     # Keep track of height of the brightest fragment
     brightest_height = 0.0
+    brightest_length = 0.0
     brightest_lum = 0.0
+    brightest_vel = 0.0
 
     # Track total mass
     mass_total = sum([frag.m for frag in fragments])
@@ -548,12 +558,6 @@ def ablate(fragments, const, compute_wake=False):
         frag.lum = lum*frag.n_grains
 
 
-        # Keep track of the brightest fragment
-        if lum > brightest_lum:
-            brightest_lum = lum
-            brightest_height = frag.h
-
-
         # Keep track of the total luminosity across all fragments
         luminosity_total += frag.lum
 
@@ -565,16 +569,24 @@ def ablate(fragments, const, compute_wake=False):
         mass_total += mass_loss_total
 
 
+        # Keep track of the brightest fragment
+        if lum > brightest_lum:
+            brightest_lum = lum
+            brightest_height = frag.h
+            brightest_length = frag.length
+            brightest_vel = frag.v
+
+
         # Compute aerodynamic loading on the grain
         dyn_press = const.gamma*rho_atm*frag.v**2
 
-        if frag.id == 0:
-            print('----- id:', frag.id)
-            print('t:', const.total_time)
-            print('V:', frag.v/1000)
-            print('H:', frag.h/1000)
-            print('m:', frag.m)
-            print('DynPress:', dyn_press/1000, 'kPa')
+        # if frag.id == 0:
+        #     print('----- id:', frag.id)
+        #     print('t:', const.total_time)
+        #     print('V:', frag.v/1000)
+        #     print('H:', frag.h/1000)
+        #     print('m:', frag.m)
+        #     print('DynPress:', dyn_press/1000, 'kPa')
 
 
 
@@ -587,7 +599,7 @@ def ablate(fragments, const, compute_wake=False):
 
 
         # Check if the erosion should start, given the height and create grains
-        if (frag.h < const.erosion_height) and frag.erosion_enabled:
+        if (frag.h < const.erosion_height) and frag.erosion_enabled and const.erosion_on:
 
             # Turn on the erosion of the fragment
             frag.erosion_coeff = const.erosion_coeff
@@ -614,23 +626,24 @@ def ablate(fragments, const, compute_wake=False):
 
 
         # Disrupt the fragment if the dynamic pressure exceeds its strength
-        if frag.disruption_enabled:
+        if frag.disruption_enabled and const.disruption_on:
             if dyn_press > const.compressive_strength:
-
 
                 # Compute the mass that should be disrupted into fragments
                 mass_frag_disruption = frag.m*(1 - const.disruption_mass_grain_ratio)
+
+
                 fragments_total_mass = 0
                 if mass_frag_disruption > 0:
 
                     # Disrupt the meteoroid into fragments
                     disruption_mass_min = const.disruption_mass_min_ratio*mass_frag_disruption
                     disruption_mass_max = const.disruption_mass_max_ratio*mass_frag_disruption
-                    # disruption_mass_min = const.erosion_mass_min
-                    # disruption_mass_max = const.erosion_mass_max
+    
+                    # Generate larger fragments
                     frag_children, const = generateFragments(const, frag, mass_frag_disruption, \
                         const.disruption_mass_index, disruption_mass_min, disruption_mass_max, \
-                        keep_eroding=True)
+                        keep_eroding=const.erosion_on)
 
 
                     frag_children_all += frag_children
@@ -647,7 +660,6 @@ def ablate(fragments, const, compute_wake=False):
                     for f in frag_children:
                         print('{:4d}: {:e} kg'.format(f.n_grains, f.m))
                     print('Disrupted total mass: {:e}'.format(fragments_total_mass))
-
 
 
                 # Disrupt a portion of the leftover mass into grains
@@ -674,8 +686,6 @@ def ablate(fragments, const, compute_wake=False):
         leading_frag_length = max(active_fragments_length)
     else:
         leading_frag_length = None
-
-    print('Leading fragment:', leading_frag_length)
 
 
     ### Compute the wake profile ###
@@ -727,7 +737,8 @@ def ablate(fragments, const, compute_wake=False):
     const.total_time += const.dt
 
 
-    return fragments, const, luminosity_total, brightest_height, leading_frag_length, mass_total, wake
+    return fragments, const, luminosity_total, brightest_height, brightest_length, brightest_vel, \
+        leading_frag_length, mass_total, wake
 
 
 
@@ -770,14 +781,15 @@ def runSimulation(const, compute_wake=False):
     while const.n_active > 0:
 
         # Ablate the fragments
-        fragments, const, luminosity_total, brightest_height, leading_frag_length, mass_total, \
-            wake = ablate(fragments, const, compute_wake=compute_wake)
+        fragments, const, luminosity_total, brightest_height, brightest_length, brightest_vel, \
+            leading_frag_length, mass_total, wake = ablate(fragments, const, compute_wake=compute_wake)
 
         # Store wake estimation results
         wake_results.append(wake)
 
         # Stack results list
-        results_list.append([const.total_time, luminosity_total, brightest_height, mass_total])
+        results_list.append([const.total_time, luminosity_total, brightest_height, brightest_length, \
+            brightest_vel, leading_frag_length, mass_total])
 
 
 
@@ -810,17 +822,14 @@ if __name__ == "__main__":
     # System limiting magnitude
     lim_mag = 6.0
 
-    # Power of a 0 mag meteor (watts)
-    P_0m = 1500
-
-
-    results_list = np.array(results_list)
-
-    time_arr, luminosity_arr, brightest_height_arr, mass_total_arr = results_list.T
+    # Unpack the results
+    results_list = np.array(results_list).astype(np.float64)
+    time_arr, luminosity_arr, brightest_height_arr, brightest_length_arr, brightest_vel_arr, \
+        leading_frag_length_arr, mass_total_arr = results_list.T
 
 
     # Calculate absolute magnitude (apparent @100km) from given luminous intensity
-    abs_magnitude = -2.5*np.log10(luminosity_arr/P_0m)
+    abs_magnitude = -2.5*np.log10(luminosity_arr/const.P_0m)
 
     # plt.plot(abs_magnitude, brightest_height_arr/1000)
     # plt.gca().invert_xaxis()
