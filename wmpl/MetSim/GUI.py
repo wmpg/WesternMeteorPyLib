@@ -110,8 +110,9 @@ class MetSimGUI(QMainWindow):
         # Set kill height to the observed end height
         self.const.h_kill = traj.rend_ele - 3000
 
-        # Set erosion height to the beginning height
-        self.const.erosion_height = traj.rbeg_ele
+        # Set erosion heights to the beginning/end height
+        self.const.erosion_height_start = traj.rbeg_ele
+        self.const.erosion_height_end = traj.rend_ele
 
 
         # Calculate the photometric mass
@@ -164,7 +165,7 @@ class MetSimGUI(QMainWindow):
             avg_t_diff_max = max(avg_t_diff_max, np.median(obs.time_data[1:] - obs.time_data[:-1]))
 
             for t, mag in zip(obs.time_data, obs.absolute_magnitudes):
-                if mag is not None:
+                if (mag is not None) and (not np.isnan(mag)):
                     time_mag_arr.append([t, mag])
 
         # Sort array by time
@@ -231,7 +232,8 @@ class MetSimGUI(QMainWindow):
 
         self.checkBoxErosion.setChecked(const.erosion_on)
 
-        self.inputErosionHt.setText("{:.3f}".format(const.erosion_height/1000))
+        self.inputErosionHtStart.setText("{:.3f}".format(const.erosion_height_start/1000))
+        self.inputErosionHtEnd.setText("{:.3f}".format(const.erosion_height_end/1000))
         self.inputErosionCoeff.setText("{:.3f}".format(const.erosion_coeff*1e6))
         self.inputErosionMassIndex.setText("{:.2f}".format(const.erosion_mass_index))
         self.inputErosionMassMin.setText("{:.2e}".format(const.erosion_mass_min))
@@ -277,7 +279,8 @@ class MetSimGUI(QMainWindow):
         self.const.erosion_on = self.checkBoxErosion.isChecked()
 
         # Disable/enable inputs if the checkbox is checked/unchecked
-        self.inputErosionHt.setDisabled(not self.const.erosion_on)
+        self.inputErosionHtStart.setDisabled(not self.const.erosion_on)
+        self.inputErosionHtEnd.setDisabled(not self.const.erosion_on)
         self.inputErosionCoeff.setDisabled(not self.const.erosion_on)
         self.inputErosionMassIndex.setDisabled(not self.const.erosion_on)
         self.inputErosionMassMin.setDisabled(not self.const.erosion_on)
@@ -364,7 +367,10 @@ class MetSimGUI(QMainWindow):
 
         ### Erosion parameters ###
 
-        self.const.erosion_height = 1000*_tryReadFloat(self.inputErosionHt, self.const.erosion_height/1000)
+        self.const.erosion_height_start = 1000*_tryReadFloat(self.inputErosionHtStart, \
+            self.const.erosion_height_start/1000)
+        self.const.erosion_height_end = 1000*_tryReadFloat(self.inputErosionHtEnd, \
+            self.const.erosion_height_end/1000)
         self.const.erosion_coeff = _tryReadFloat(self.inputErosionCoeff, self.const.erosion_coeff*1e6)/1e6
         self.const.erosion_mass_index = _tryReadFloat(self.inputErosionMassIndex, \
             self.const.erosion_mass_index)
@@ -424,8 +430,8 @@ class MetSimGUI(QMainWindow):
                 linestyle='dashed', label=obs.station_id)
 
             # Keep track of the faintest and the brightest magnitude
-            mag_brightest = min(mag_brightest, np.min(obs.absolute_magnitudes))
-            mag_faintest = max(mag_faintest, np.max(obs.absolute_magnitudes))
+            mag_brightest = min(mag_brightest, np.min(obs.absolute_magnitudes[~np.isinf(obs.absolute_magnitudes)]))
+            mag_faintest = max(mag_faintest, np.max(obs.absolute_magnitudes[~np.isinf(obs.absolute_magnitudes)]))
 
 
         # Plot simulated magnitudes
@@ -505,7 +511,7 @@ class MetSimGUI(QMainWindow):
             lag_sim = brightest_len_arr - brightest_len_arr[0] - traj.orbit.v_init_norot*np.arange(0, \
                 self.const.dt*len(brightest_len_arr), self.const.dt)
 
-            self.lagPlot.canvas.axes.plot(lag_sim, ht_arr/1000, label='Simulated')
+            self.lagPlot.canvas.axes.plot(lag_sim[:len(ht_arr)], (ht_arr/1000)[:len(lag_sim)], label='Simulated')
 
 
         self.lagPlot.canvas.axes.set_ylim([plot_end_ht/1000, plot_beg_ht/1000])
@@ -542,7 +548,8 @@ class MetSimGUI(QMainWindow):
     def updateWakePlot(self, show_previous=False):
         """ Plot the wake. """
 
-        self.readInputBoxes()
+        if not show_previous:
+            self.readInputBoxes()
 
 
         # Choose to show current of previous results

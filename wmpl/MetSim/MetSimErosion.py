@@ -126,8 +126,9 @@ class Constants(object):
         # Toggle erosion on/off
         self.erosion_on = True
 
-        # Height at which the erosion starts (meters)
-        self.erosion_height = 102000
+        # Height at which the erosion starts and ends (meters)
+        self.erosion_height_start = 102000
+        self.erosion_height_end = 90000
 
         # Grain ablation coefficient (s^2/m^2)
         self.erosion_coeff = 0.33/1e6
@@ -609,7 +610,8 @@ def ablate(fragments, const, compute_wake=False):
 
 
         # Check if the erosion should start, given the height and create grains
-        if (frag.h < const.erosion_height) and frag.erosion_enabled and const.erosion_on:
+        if (frag.h < const.erosion_height_start) and (frag.h > const.erosion_height_end) \
+            and frag.erosion_enabled and const.erosion_on:
 
             # Turn on the erosion of the fragment
             frag.erosion_coeff = const.erosion_coeff
