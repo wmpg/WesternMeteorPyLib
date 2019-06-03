@@ -14,6 +14,7 @@ from PyQt5.uic import loadUi
 
 
 from wmpl.MetSim.MetSimErosion import runSimulation, Constants
+from wmpl.Trajectory.Orbit import calcOrbit
 from wmpl.Utils.Math import averageClosePoints
 from wmpl.Utils.Physics import calcMass
 from wmpl.Utils.Pickling import loadPickle
@@ -55,11 +56,14 @@ class SimulationResults(object):
 
 class MetSimGUI(QMainWindow):
     
-    def __init__(self, traj):
+    def __init__(self, traj_path):
         """ GUI tool for MetSim. """
-            
+        
 
-        self.traj = traj
+        self.traj_path = traj_path
+
+        # Load the trajectory pickle file
+        self.traj = loadPickle(*os.path.split(traj_path))
 
 
         ### Init GUI ###
@@ -79,8 +83,12 @@ class MetSimGUI(QMainWindow):
         ### Add key bindings ###
 
         self.runSimButton.clicked.connect(self.runSimulationGUI)
+        
         self.showPreviousButton.pressed.connect(self.showPreviousResults)
         self.showPreviousButton.released.connect(self.showCurrentResults)
+
+        self.saveUpdatedOrbitButton.clicked.connect(self.saveUpdatedOrbit)
+
 
         self.wakePlotUpdateButton.clicked.connect(self.updateWakePlot)
         self.wakeIncrementPlotHeightButton.clicked.connect(self.incrementWakePlotHeight)
@@ -92,6 +100,7 @@ class MetSimGUI(QMainWindow):
         self.checkBoxWake.stateChanged.connect(self.checkBoxWakeSignal)
         self.checkBoxErosion.stateChanged.connect(self.checkBoxErosionSignal)
         self.checkBoxDisruption.stateChanged.connect(self.checkBoxDisruptionSignal)
+        self.checkBoxDisruptionErosionCoeff.stateChanged.connect(self.checkBoxDisruptionErosionCoeffSignal)
 
         ### ###
 
@@ -104,15 +113,15 @@ class MetSimGUI(QMainWindow):
 
 
         # Set the constants value from the trajectory
-        self.const.zenith_angle = traj.orbit.zc
-        self.const.v_init = traj.orbit.v_init_norot
+        self.const.zenith_angle = self.traj.orbit.zc
+        self.const.v_init = self.traj.orbit.v_init_norot
 
         # Set kill height to the observed end height
-        self.const.h_kill = traj.rend_ele - 3000
+        self.const.h_kill = self.traj.rend_ele - 3000
 
         # Set erosion heights to the beginning/end height
-        self.const.erosion_height_start = traj.rbeg_ele
-        self.const.erosion_height_end = traj.rend_ele
+        self.const.erosion_height_start = self.traj.rbeg_ele
+        self.const.erosion_height_end = self.traj.rend_ele
 
 
         # Calculate the photometric mass
@@ -130,6 +139,9 @@ class MetSimGUI(QMainWindow):
         self.const.erosion_on = False
         self.const.disruption_on = False
 
+        # Disable different erosion coeff after disruption at the beginning
+        self.disruption_different_erosion_coeff = False
+
 
         self.simulation_results = None
 
@@ -146,6 +158,7 @@ class MetSimGUI(QMainWindow):
         self.checkBoxWakeSignal(None)
         self.checkBoxErosionSignal(None)
         self.checkBoxDisruptionSignal(None)
+        self.checkBoxDisruptionErosionCoeffSignal(None)
 
         # Update plots
         self.updateMagnitudePlot()
@@ -179,6 +192,7 @@ class MetSimGUI(QMainWindow):
 
         # Compute the photometry mass
         return calcMass(np.array(time_arr), np.array(mag_arr), self.traj.orbit.v_avg_norot, P_0m=self.const.P_0m)
+
 
 
     def updateInputBoxes(self, show_previous=False):
@@ -231,6 +245,7 @@ class MetSimGUI(QMainWindow):
         ### Erosion parameters ###
 
         self.checkBoxErosion.setChecked(const.erosion_on)
+        self.checkBoxDisruptionErosionCoeff.setChecked(self.disruption_different_erosion_coeff)
 
         self.inputErosionHtStart.setText("{:.3f}".format(const.erosion_height_start/1000))
         self.inputErosionHtEnd.setText("{:.3f}".format(const.erosion_height_end/1000))
@@ -245,7 +260,7 @@ class MetSimGUI(QMainWindow):
         ### Disruption parameters ###
 
         self.checkBoxDisruption.setChecked(const.disruption_on)
-
+        self.inputDisruptionErosionCoeff.setText("{:.3f}".format(const.disruption_erosion_coeff*1e6))
         self.inputCompressiveStrength.setText("{:.1f}".format(const.compressive_strength/1000))
         self.inputDisruptionMassGrainRatio.setText("{:.2f}".format(const.disruption_mass_grain_ratio*100))
         self.inputDisruptionMassIndex.setText("{:.2f}".format(const.disruption_mass_index))
@@ -298,11 +313,26 @@ class MetSimGUI(QMainWindow):
         self.const.disruption_on = self.checkBoxDisruption.isChecked()
 
         # Disable/enable inputs if the checkbox is checked/unchecked
+        self.checkBoxDisruptionErosionCoeff.setDisabled(not self.const.disruption_on)
+        self.inputDisruptionErosionCoeff.setDisabled(not self.const.disruption_on)
         self.inputCompressiveStrength.setDisabled(not self.const.disruption_on)
         self.inputDisruptionMassGrainRatio.setDisabled(not self.const.disruption_on)
         self.inputDisruptionMassIndex.setDisabled(not self.const.disruption_on)
         self.inputDisruptionMassMinRatio.setDisabled(not self.const.disruption_on)
         self.inputDisruptionMassMaxRatio.setDisabled(not self.const.disruption_on)
+
+        # Read inputs
+        self.readInputBoxes()
+
+
+    def checkBoxDisruptionErosionCoeffSignal(self, event):
+        """ Use a different erosion coefficient after disruption. """
+
+        self.disruption_different_erosion_coeff = self.checkBoxDisruptionErosionCoeff.isChecked()
+
+        # Disable/enable different erosion coefficient checkbox
+        self.inputDisruptionErosionCoeff.setDisabled((not self.disruption_different_erosion_coeff) \
+            or (not self.const.disruption_on))
 
         # Read inputs
         self.readInputBoxes()
@@ -385,6 +415,16 @@ class MetSimGUI(QMainWindow):
 
         self.const.compressive_strength = 1000*_tryReadFloat(self.inputCompressiveStrength, \
             self.const.compressive_strength/1000)
+
+        # If a different value for erosion coefficient after disruption should be used, read it
+        if self.disruption_different_erosion_coeff:
+            self.const.disruption_erosion_coeff = _tryReadFloat(self.inputDisruptionErosionCoeff, \
+                self.const.disruption_erosion_coeff*1e6)/1e6
+        else:
+            # Otherwise, use the same value
+            self.const.disruption_erosion_coeff = self.const.erosion_coeff
+
+
         self.const.disruption_mass_grain_ratio = _tryReadFloat(self.inputDisruptionMassGrainRatio, \
             self.const.disruption_mass_grain_ratio*100)/100
         self.const.disruption_mass_index = _tryReadFloat(self.inputDisruptionMassIndex, \
@@ -424,7 +464,7 @@ class MetSimGUI(QMainWindow):
         mag_faintest = -np.inf
 
         # Plot observed magnitudes from different stations
-        for obs in traj.observations:
+        for obs in self.traj.observations:
 
             self.magnitudePlot.canvas.axes.plot(obs.absolute_magnitudes, obs.model_ht/1000, marker='x',
                 linestyle='dashed', label=obs.station_id)
@@ -480,14 +520,18 @@ class MetSimGUI(QMainWindow):
 
 
         # Update the observed initial velocity label
-        self.vInitObsLabel.setText("Vinit obs = {:.3f} km/s".format(traj.orbit.v_init_norot/1000))
+        self.vInitObsLabel.setText("Vinit obs = {:.3f} km/s".format(self.traj.orbit.v_init_norot/1000))
 
 
         # Plot observed magnitudes from different stations
-        for obs in traj.observations:
+        for obs in self.traj.observations:
 
             self.lagPlot.canvas.axes.plot(obs.lag, obs.model_ht/1000, marker='x',
                 linestyle='dashed', label=obs.station_id)
+
+
+        # Get X plot limits
+        x_min, x_max = self.lagPlot.canvas.axes.get_xlim()
 
 
         # Plot simulated lag of the brightest point on the trajectory
@@ -508,14 +552,14 @@ class MetSimGUI(QMainWindow):
             ht_arr, brightest_len_arr = temp_arr.T
 
             # Compute the simulated lag using the observed velocity
-            lag_sim = brightest_len_arr - brightest_len_arr[0] - traj.orbit.v_init_norot*np.arange(0, \
-                self.const.dt*len(brightest_len_arr), self.const.dt)
+            lag_sim = brightest_len_arr - brightest_len_arr[0] - self.traj.orbit.v_init_norot*np.arange(0, \
+                self.const.dt*len(brightest_len_arr), self.const.dt)[:len(brightest_len_arr)]
 
             self.lagPlot.canvas.axes.plot(lag_sim[:len(ht_arr)], (ht_arr/1000)[:len(lag_sim)], label='Simulated')
 
 
         self.lagPlot.canvas.axes.set_ylim([plot_end_ht/1000, plot_beg_ht/1000])
-
+        self.lagPlot.canvas.axes.set_xlim([x_min, x_max])
 
         self.lagPlot.canvas.axes.set_xlabel('Lag (m)')
         self.lagPlot.canvas.axes.set_ylabel('Height (km)')
@@ -648,6 +692,33 @@ class MetSimGUI(QMainWindow):
 
 
 
+    def saveUpdatedOrbit(self):
+        """ Save updated orbit and trajectory to file. """
+
+        # Compute the difference between the model and the measured initial velocity
+        v_init_diff = self.const.v_init - self.traj.orbit.v_init_norot
+
+        # Recompute the orbit with an increased initial velocity
+        orb = calcOrbit(self.traj.radiant_eci_mini, self.traj.v_init + v_init_diff, self.traj.v_avg \
+            + v_init_diff, self.traj.state_vect_mini, self.traj.rbeg_jd)
+
+
+        print(orb)
+
+        
+        # Make a file name for the report
+        traj_updated = copy.deepcopy(self.traj)
+        traj_updated.orbit = orb
+        dir_path, file_name = os.path.split(self.traj_path)
+        file_name = file_name.replace('trajectory.pickle', '') + 'report_sim.txt'
+
+        # Save the report with updated orbit
+        traj_updated.saveReport(dir_path, file_name, uncertanties=self.traj.uncertanties, verbose=False)
+
+
+
+
+
 
 if __name__ == "__main__":
 
@@ -665,14 +736,9 @@ if __name__ == "__main__":
     #########################
 
 
-
-    # Load the trajectory pickle file
-    traj = loadPickle(*os.path.split(os.path.abspath(cml_args.traj_pickle)))
-
-
     app = QApplication([])
 
-    main_window = MetSimGUI(traj)
+    main_window = MetSimGUI(os.path.abspath(cml_args.traj_pickle))
 
     main_window.show()
 

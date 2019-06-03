@@ -151,6 +151,9 @@ class Constants(object):
         # Meteoroid compressive strength (Pa)
         self.compressive_strength = 1500
 
+        # Erosion coefficient to use after disruption
+        self.disruption_erosion_coeff = self.erosion_coeff
+
         # Disruption mass distribution index
         self.disruption_mass_index = 1.8
 
@@ -361,7 +364,8 @@ def atmDensity(h, const):
 
 
 
-def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mass_max, keep_eroding=False):
+def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mass_max, keep_eroding=False,
+    disruption=False):
     """ Given the parent fragment, fragment it into daughter fragments using a power law mass distribution.
 
     Masses are binned and one daughter fragment may represent several fragments/grains, which is specified 
@@ -377,6 +381,8 @@ def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mas
 
     Keyword arguments:
         keep_eroding: [bool] Whether the daughter fragments should keep eroding.
+        disruption: [bool] Indicates that the disruption occured, uses a separate erosion parameter for
+            disrupted daughter fragments.
 
     Return:
         frag_children: [list] A list of Fragment instances - these are the generated daughter fragments.
@@ -425,10 +431,15 @@ def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mas
             frag_child.main = False
             frag_child.disruption_enabled = False
 
-            # Set the erosion coefficient value (disable in child fragments, only the parent erodes)
+            # Set the erosion coefficient value (disable in grans, only larger fragments)
             if keep_eroding:
                 frag_child.erosion_enabled = True
-                frag_child.erosion_coeff = const.erosion_coeff
+
+                # If the disruption occured, use a different erosion coefficient for daguhter fragments
+                if disruption:
+                    frag_child.erosion_coeff = const.disruption_erosion_coeff
+                else:
+                    frag_child.erosion_coeff = const.erosion_coeff
 
             else:
                 # Compute the grain density and shape-density coeff
@@ -652,10 +663,10 @@ def ablate(fragments, const, compute_wake=False):
                     disruption_mass_min = const.disruption_mass_min_ratio*mass_frag_disruption
                     disruption_mass_max = const.disruption_mass_max_ratio*mass_frag_disruption
     
-                    # Generate larger fragments
+                    # Generate larger fragments, possibly assign them a separate erosion coefficient
                     frag_children, const = generateFragments(const, frag, mass_frag_disruption, \
                         const.disruption_mass_index, disruption_mass_min, disruption_mass_max, \
-                        keep_eroding=const.erosion_on)
+                        keep_eroding=const.erosion_on, disruption=True)
 
 
                     frag_children_all += frag_children
