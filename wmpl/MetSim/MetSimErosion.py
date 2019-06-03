@@ -43,7 +43,7 @@ class Constants(object):
         ### Simulation parameters ###
 
         # Time step
-        self.dt = 0.01
+        self.dt = 0.005
 
         # Time elapsed since the beginning
         self.total_time = 0
@@ -58,7 +58,7 @@ class Constants(object):
         self.v_kill = 3000
 
         # Minimum height (m)
-        self.h_kill = 40000
+        self.h_kill = 60000
 
         # Initial meteoroid height (m)
         self.h_init = 180000
@@ -98,7 +98,7 @@ class Constants(object):
         self.rho = 200
 
         # Initial meteoroid mass (kg)
-        self.m_init = 1e-3
+        self.m_init = 1e-4
 
         # Initial meteoroid veocity (m/s)
         self.v_init = 23570
@@ -524,26 +524,36 @@ def ablate(fragments, const, compute_wake=False):
         deceleration_total = (vk1/6.0 + vk2/3.0 + vk3/3.0 + vk4/6.0)/const.dt
 
 
-        ### Add velocity change due to Earth's gravity ###
+        # ### Add velocity change due to Earth's gravity ###
 
-        # Compute g at given height
-        gv = G0/((1 + frag.h/R_EARTH)**2)
+        # # Compute g at given height
+        # gv = G0/((1 + frag.h/R_EARTH)**2)
+
+        # # Vertical component of a
+        # av = -gv - deceleration_total*frag.vv/frag.v + frag.vh*frag.v/(R_EARTH + frag.h)
+
+        # # Horizontal component of a
+        # ah = -deceleration_total*frag.vh/frag.v - frag.vv*frag.v/(R_EARTH + frag.h)
+
+        # ### ###
+
+
+        ### Compute deceleration wihout effect of gravity (to reconstruct the initial velocity without the 
+        #   gravity component)
 
         # Vertical component of a
-        av = -gv - deceleration_total*frag.vv/frag.v + frag.vh*frag.v/(R_EARTH + frag.h)
+        av = -deceleration_total*frag.vv/frag.v + frag.vh*frag.v/(R_EARTH + frag.h)
 
         # Horizontal component of a
         ah = -deceleration_total*frag.vh/frag.v - frag.vv*frag.v/(R_EARTH + frag.h)
 
-        # # Deceleration magnitude
-        # decel_mag = math.sqrt(av**2 + ah**2)
+        ###
+
 
         # Update the velocity
         frag.vv -= av*const.dt
         frag.vh -= ah*const.dt
         frag.v = math.sqrt(frag.vh**2 + frag.vv**2)
-
-        ### ###
 
 
         # Update fragment parameters

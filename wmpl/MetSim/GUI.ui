@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>1678</width>
-    <height>946</height>
+    <height>963</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -35,6 +35,43 @@
       <width>171</width>
       <height>51</height>
      </rect>
+    </property>
+    <property name="palette">
+     <palette>
+      <active>
+       <colorrole role="Button">
+        <brush brushstyle="SolidPattern">
+         <color alpha="255">
+          <red>177</red>
+          <green>238</green>
+          <blue>166</blue>
+         </color>
+        </brush>
+       </colorrole>
+      </active>
+      <inactive>
+       <colorrole role="Button">
+        <brush brushstyle="SolidPattern">
+         <color alpha="255">
+          <red>177</red>
+          <green>238</green>
+          <blue>166</blue>
+         </color>
+        </brush>
+       </colorrole>
+      </inactive>
+      <disabled>
+       <colorrole role="Button">
+        <brush brushstyle="SolidPattern">
+         <color alpha="255">
+          <red>177</red>
+          <green>238</green>
+          <blue>166</blue>
+         </color>
+        </brush>
+       </colorrole>
+      </disabled>
+     </palette>
     </property>
     <property name="text">
      <string>Run simulation</string>
@@ -360,7 +397,7 @@
     <widget class="QLineEdit" name="inputDisruptionMassMinRatio">
      <property name="geometry">
       <rect>
-       <x>304</x>
+       <x>294</x>
        <y>60</y>
        <width>71</width>
        <height>23</height>
@@ -370,7 +407,7 @@
     <widget class="QLineEdit" name="inputDisruptionMassMaxRatio">
      <property name="geometry">
       <rect>
-       <x>304</x>
+       <x>294</x>
        <y>90</y>
        <width>71</width>
        <height>23</height>
@@ -380,7 +417,7 @@
     <widget class="QLineEdit" name="inputDisruptionMassIndex">
      <property name="geometry">
       <rect>
-       <x>304</x>
+       <x>294</x>
        <y>30</y>
        <width>71</width>
        <height>23</height>
@@ -390,14 +427,14 @@
     <widget class="QLabel" name="label_51">
      <property name="geometry">
       <rect>
-       <x>210</x>
+       <x>190</x>
        <y>60</y>
-       <width>81</width>
+       <width>91</width>
        <height>20</height>
       </rect>
      </property>
      <property name="text">
-      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;m&lt;span style=&quot; vertical-align:sub;&quot;&gt;min&lt;/span&gt;/m&lt;span style=&quot; vertical-align:sub;&quot;&gt;disrupt&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;m&lt;span style=&quot; vertical-align:sub;&quot;&gt;min&lt;/span&gt;/m&lt;span style=&quot; vertical-align:sub;&quot;&gt;disr&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
      </property>
      <property name="alignment">
       <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
@@ -406,7 +443,7 @@
     <widget class="QLabel" name="label_52">
      <property name="geometry">
       <rect>
-       <x>234</x>
+       <x>224</x>
        <y>30</y>
        <width>57</width>
        <height>15</height>
@@ -422,14 +459,14 @@
     <widget class="QLabel" name="label_53">
      <property name="geometry">
       <rect>
-       <x>210</x>
+       <x>190</x>
        <y>90</y>
-       <width>81</width>
+       <width>91</width>
        <height>20</height>
       </rect>
      </property>
      <property name="text">
-      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;m&lt;span style=&quot; vertical-align:sub;&quot;&gt;max&lt;/span&gt;/m&lt;span style=&quot; vertical-align:sub;&quot;&gt;disrupt&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;m&lt;span style=&quot; vertical-align:sub;&quot;&gt;max&lt;/span&gt;/m&lt;span style=&quot; vertical-align:sub;&quot;&gt;disr&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
      </property>
      <property name="alignment">
       <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
@@ -455,10 +492,49 @@
       </rect>
      </property>
      <property name="text">
-      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;m&lt;span style=&quot; vertical-align:sub;&quot;&gt;grain&lt;/span&gt;/m&lt;span style=&quot; vertical-align:sub;&quot;&gt;disrupt&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;m&lt;span style=&quot; vertical-align:sub;&quot;&gt;grain&lt;/span&gt;/m&lt;span style=&quot; vertical-align:sub;&quot;&gt;disr&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
      </property>
      <property name="alignment">
       <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_55">
+     <property name="geometry">
+      <rect>
+       <x>370</x>
+       <y>60</y>
+       <width>71</width>
+       <height>20</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;%&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_56">
+     <property name="geometry">
+      <rect>
+       <x>370</x>
+       <y>90</y>
+       <width>71</width>
+       <height>20</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;%&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_57">
+     <property name="geometry">
+      <rect>
+       <x>180</x>
+       <y>90</y>
+       <width>71</width>
+       <height>20</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;%&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
      </property>
     </widget>
    </widget>
@@ -493,7 +569,7 @@
     <widget class="QLabel" name="label_39">
      <property name="geometry">
       <rect>
-       <x>160</x>
+       <x>180</x>
        <y>60</y>
        <width>21</width>
        <height>16</height>
@@ -506,7 +582,7 @@
     <widget class="QLineEdit" name="inputErosionHt">
      <property name="geometry">
       <rect>
-       <x>80</x>
+       <x>100</x>
        <y>60</y>
        <width>71</width>
        <height>23</height>
@@ -516,7 +592,7 @@
     <widget class="QLabel" name="label_38">
      <property name="geometry">
       <rect>
-       <x>10</x>
+       <x>30</x>
        <y>60</y>
        <width>57</width>
        <height>15</height>
@@ -532,7 +608,7 @@
     <widget class="QLabel" name="label_41">
      <property name="geometry">
       <rect>
-       <x>160</x>
+       <x>180</x>
        <y>90</y>
        <width>71</width>
        <height>16</height>
@@ -545,7 +621,7 @@
     <widget class="QLineEdit" name="inputErosionCoeff">
      <property name="geometry">
       <rect>
-       <x>80</x>
+       <x>100</x>
        <y>90</y>
        <width>71</width>
        <height>23</height>
@@ -555,7 +631,7 @@
     <widget class="QLabel" name="label_40">
      <property name="geometry">
       <rect>
-       <x>10</x>
+       <x>30</x>
        <y>90</y>
        <width>57</width>
        <height>15</height>
@@ -1027,7 +1103,7 @@
       <x>0</x>
       <y>560</y>
       <width>1271</width>
-      <height>341</height>
+      <height>361</height>
      </rect>
     </property>
    </widget>
@@ -1062,7 +1138,7 @@
     <widget class="QLabel" name="label_22">
      <property name="geometry">
       <rect>
-       <x>160</x>
+       <x>180</x>
        <y>60</y>
        <width>21</width>
        <height>20</height>
@@ -1075,7 +1151,7 @@
     <widget class="QLabel" name="label_23">
      <property name="geometry">
       <rect>
-       <x>-14</x>
+       <x>6</x>
        <y>60</y>
        <width>81</width>
        <height>20</height>
@@ -1091,7 +1167,7 @@
     <widget class="QLineEdit" name="inputWakePlotHt">
      <property name="geometry">
       <rect>
-       <x>80</x>
+       <x>100</x>
        <y>60</y>
        <width>71</width>
        <height>23</height>
@@ -1176,6 +1252,58 @@
       </rect>
      </property>
     </widget>
+    <widget class="QPushButton" name="wakePlotUpdateButton">
+     <property name="geometry">
+      <rect>
+       <x>90</x>
+       <y>30</y>
+       <width>91</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Update plot</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="wakeIncrementPlotHeightButton">
+     <property name="geometry">
+      <rect>
+       <x>70</x>
+       <y>30</y>
+       <width>21</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>+</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="wakeDecrementPlotHeightButton">
+     <property name="geometry">
+      <rect>
+       <x>180</x>
+       <y>30</y>
+       <width>21</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>-</string>
+     </property>
+    </widget>
+   </widget>
+   <widget class="QPushButton" name="showPreviousButton">
+    <property name="geometry">
+     <rect>
+      <x>1280</x>
+      <y>780</y>
+      <width>171</width>
+      <height>51</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Show previous</string>
+    </property>
    </widget>
   </widget>
   <widget class="QMenuBar" name="menubar">
