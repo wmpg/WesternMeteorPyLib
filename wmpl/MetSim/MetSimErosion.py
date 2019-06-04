@@ -126,12 +126,20 @@ class Constants(object):
         # Toggle erosion on/off
         self.erosion_on = True
 
-        # Height at which the erosion starts and ends (meters)
+        
+        # Height at which the erosion starts (meters)
         self.erosion_height_start = 102000
-        self.erosion_height_end = 90000
 
-        # Grain ablation coefficient (s^2/m^2)
+        # Erosion coefficient (s^2/m^2)
         self.erosion_coeff = 0.33/1e6
+
+        
+        # Height at which the erosion coefficient changes (meters)
+        self.erosion_height_change = 90000
+
+        # Erosion coefficient after the change (s^2/m^2)
+        self.erosion_coeff_change = 0.33/1e6
+
 
         # Grain mass distribution index
         self.erosion_mass_index = 2.5
@@ -439,7 +447,7 @@ def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mas
                 if disruption:
                     frag_child.erosion_coeff = const.disruption_erosion_coeff
                 else:
-                    frag_child.erosion_coeff = const.erosion_coeff
+                    frag_child.erosion_coeff = getErosionCoeff(const, frag_parent.h)
 
             else:
                 # Compute the grain density and shape-density coeff
@@ -461,6 +469,23 @@ def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mas
 
 
 
+def getErosionCoeff(const, h):
+    """ Return the erosion coeff for the given height. """
+
+    # Return the changed erosion coefficient
+    if const.erosion_height_change >= h:
+        return const.erosion_coeff_change
+
+    # Return the starting erosion coeff
+    elif const.erosion_height_start >= h:
+        return const.erosion_coeff
+
+    # If the height is above the erosion start height, return 0
+    else:
+        return 0
+
+
+
 
 def ablate(fragments, const, compute_wake=False):
     """ Perform single body ablation of the given grain using the 4th order Runge-Kutta method. 
@@ -475,7 +500,6 @@ def ablate(fragments, const, compute_wake=False):
     Return:
         ...
     """
-
 
 
     # Keep track of the total luminosity
@@ -619,13 +643,18 @@ def ablate(fragments, const, compute_wake=False):
             #print('Killing', frag.id)
             continue
 
+        
+        # # Change the erosion coefficient of the fragment below the given height
+        # if (frag.erosion_coeff > 0):
+        #     frag.erosion_coeff = getErosionCoeff(const, frag.h)
 
-        # Check if the erosion should start, given the height and create grains
-        if (frag.h < const.erosion_height_start) and (frag.h > const.erosion_height_end) \
-            and frag.erosion_enabled and const.erosion_on:
+
+
+        # Check if the erosion should start, given the height, and create grains
+        if (frag.h < const.erosion_height_start) and frag.erosion_enabled and const.erosion_on:
 
             # Turn on the erosion of the fragment
-            frag.erosion_coeff = const.erosion_coeff
+            frag.erosion_coeff = getErosionCoeff(const, frag.h)
 
             # Generate new fragments if there is some mass to distribute
             if abs(mass_loss_erosion) > 0:

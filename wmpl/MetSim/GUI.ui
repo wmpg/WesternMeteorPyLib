@@ -331,7 +331,7 @@
     <property name="geometry">
      <rect>
       <x>1280</x>
-      <y>530</y>
+      <y>570</y>
       <width>391</width>
       <height>121</height>
      </rect>
@@ -596,7 +596,7 @@
       <x>1280</x>
       <y>400</y>
       <width>391</width>
-      <height>121</height>
+      <height>161</height>
      </rect>
     </property>
     <property name="title">
@@ -661,7 +661,7 @@
      <property name="geometry">
       <rect>
        <x>180</x>
-       <y>90</y>
+       <y>60</y>
        <width>71</width>
        <height>16</height>
       </rect>
@@ -674,7 +674,7 @@
      <property name="geometry">
       <rect>
        <x>100</x>
-       <y>90</y>
+       <y>60</y>
        <width>71</width>
        <height>23</height>
       </rect>
@@ -684,7 +684,7 @@
      <property name="geometry">
       <rect>
        <x>30</x>
-       <y>90</y>
+       <y>60</y>
        <width>57</width>
        <height>15</height>
       </rect>
@@ -700,7 +700,7 @@
      <property name="geometry">
       <rect>
        <x>280</x>
-       <y>60</y>
+       <y>80</y>
        <width>71</width>
        <height>23</height>
       </rect>
@@ -710,7 +710,7 @@
      <property name="geometry">
       <rect>
        <x>360</x>
-       <y>60</y>
+       <y>80</y>
        <width>57</width>
        <height>15</height>
       </rect>
@@ -723,7 +723,7 @@
      <property name="geometry">
       <rect>
        <x>210</x>
-       <y>60</y>
+       <y>80</y>
        <width>57</width>
        <height>15</height>
       </rect>
@@ -739,7 +739,7 @@
      <property name="geometry">
       <rect>
        <x>280</x>
-       <y>90</y>
+       <y>110</y>
        <width>71</width>
        <height>23</height>
       </rect>
@@ -749,7 +749,7 @@
      <property name="geometry">
       <rect>
        <x>360</x>
-       <y>90</y>
+       <y>110</y>
        <width>57</width>
        <height>15</height>
       </rect>
@@ -762,7 +762,7 @@
      <property name="geometry">
       <rect>
        <x>210</x>
-       <y>90</y>
+       <y>110</y>
        <width>57</width>
        <height>15</height>
       </rect>
@@ -778,7 +778,7 @@
      <property name="geometry">
       <rect>
        <x>280</x>
-       <y>30</y>
+       <y>50</y>
        <width>71</width>
        <height>23</height>
       </rect>
@@ -788,7 +788,7 @@
      <property name="geometry">
       <rect>
        <x>210</x>
-       <y>30</y>
+       <y>50</y>
        <width>57</width>
        <height>15</height>
       </rect>
@@ -804,7 +804,7 @@
      <property name="geometry">
       <rect>
        <x>180</x>
-       <y>60</y>
+       <y>100</y>
        <width>21</width>
        <height>16</height>
       </rect>
@@ -813,11 +813,11 @@
       <string>km</string>
      </property>
     </widget>
-    <widget class="QLineEdit" name="inputErosionHtEnd">
+    <widget class="QLineEdit" name="inputErosionHtChange">
      <property name="geometry">
       <rect>
        <x>100</x>
-       <y>60</y>
+       <y>100</y>
        <width>71</width>
        <height>23</height>
       </rect>
@@ -827,16 +827,68 @@
      <property name="geometry">
       <rect>
        <x>30</x>
-       <y>60</y>
+       <y>100</y>
        <width>57</width>
        <height>15</height>
       </rect>
      </property>
      <property name="text">
-      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;H&lt;span style=&quot; vertical-align:sub;&quot;&gt;end&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;H&lt;span style=&quot; vertical-align:sub;&quot;&gt;change&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
      </property>
      <property name="alignment">
       <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="inputErosionCoeffChange">
+     <property name="geometry">
+      <rect>
+       <x>100</x>
+       <y>130</y>
+       <width>71</width>
+       <height>23</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_62">
+     <property name="geometry">
+      <rect>
+       <x>180</x>
+       <y>130</y>
+       <width>71</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;s&lt;span style=&quot; vertical-align:super;&quot;&gt;2&lt;/span&gt;/km&lt;span style=&quot; vertical-align:super;&quot;&gt;2&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_63">
+     <property name="geometry">
+      <rect>
+       <x>30</x>
+       <y>130</y>
+       <width>57</width>
+       <height>15</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;σ&lt;span style=&quot; vertical-align:sub;&quot;&gt;erosion&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+     </property>
+    </widget>
+    <widget class="Line" name="line">
+     <property name="geometry">
+      <rect>
+       <x>50</x>
+       <y>80</y>
+       <width>171</width>
+       <height>20</height>
+      </rect>
+     </property>
+     <property name="orientation">
+      <enum>Qt::Horizontal</enum>
      </property>
     </widget>
    </widget>
@@ -1402,11 +1454,24 @@
       <x>1490</x>
       <y>780</y>
       <width>171</width>
-      <height>51</height>
+      <height>21</height>
      </rect>
     </property>
     <property name="text">
      <string>Save updated orbit</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="saveFitParametersButton">
+    <property name="geometry">
+     <rect>
+      <x>1490</x>
+      <y>810</y>
+      <width>171</width>
+      <height>21</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Save fit parameters</string>
     </property>
    </widget>
   </widget>

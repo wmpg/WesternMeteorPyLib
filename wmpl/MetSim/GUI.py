@@ -6,6 +6,7 @@ import sys
 import copy
 import argparse
 import time
+import json
 
 import numpy as np
 from matplotlib.backends.backend_qt5agg import (NavigationToolbar2QT as NavigationToolbar)
@@ -56,7 +57,7 @@ class SimulationResults(object):
 
 class MetSimGUI(QMainWindow):
     
-    def __init__(self, traj_path):
+    def __init__(self, traj_path, const_json_file):
         """ GUI tool for MetSim. """
         
 
@@ -79,6 +80,66 @@ class MetSimGUI(QMainWindow):
 
 
 
+        ### Init simulation parameters ###
+
+        # Init the constants
+        self.const = Constants()
+
+        # If a JSON file with constant was given, load them instead of initing from scratch
+        if const_json_file is not None:
+
+            with open(const_json_file) as f:
+                const_json = json.load(f)
+
+            # Fill in the constants
+            for key in const_json:
+                setattr(self.const, key, const_json[key])
+
+        else:
+
+            # Set the constants value from the trajectory
+            self.const.zenith_angle = self.traj.orbit.zc
+            self.const.v_init = self.traj.orbit.v_init_norot
+
+            # Set kill height to the observed end height
+            self.const.h_kill = self.traj.rend_ele - 3000
+
+            # Set erosion heights to the beginning/end height
+            self.const.erosion_height_start = self.traj.rbeg_ele
+            self.const.erosion_height_change = self.traj.rend_ele
+
+            # Disable erosion and disruption at the beginning
+            self.const.erosion_on = False
+            self.const.disruption_on = False
+
+
+            # Calculate the photometric mass
+            self.const.m_init = self.calcPhotometricMass()
+
+        ### ###
+
+
+        ### Define GUI and simulation attributes ###
+
+        self.wake_on = False
+        self.wake_plot_ht = self.traj.rbeg_ele # m
+
+        # Disable different erosion coeff after disruption at the beginning
+        self.disruption_different_erosion_coeff = False
+
+        self.simulation_results = None
+
+        self.const_prev = None
+        self.simulation_results_prev = None
+
+        ### ###
+
+
+
+        # Update the values in the input boxes
+        self.updateInputBoxes()
+
+
 
         ### Add key bindings ###
 
@@ -88,6 +149,8 @@ class MetSimGUI(QMainWindow):
         self.showPreviousButton.released.connect(self.showCurrentResults)
 
         self.saveUpdatedOrbitButton.clicked.connect(self.saveUpdatedOrbit)
+
+        self.saveFitParametersButton.clicked.connect(self.saveFitParameters)
 
 
         self.wakePlotUpdateButton.clicked.connect(self.updateWakePlot)
@@ -103,56 +166,6 @@ class MetSimGUI(QMainWindow):
         self.checkBoxDisruptionErosionCoeff.stateChanged.connect(self.checkBoxDisruptionErosionCoeffSignal)
 
         ### ###
-
-
-
-        ### Init simulation parameters ###
-
-        # Init the constants
-        self.const = Constants()
-
-
-        # Set the constants value from the trajectory
-        self.const.zenith_angle = self.traj.orbit.zc
-        self.const.v_init = self.traj.orbit.v_init_norot
-
-        # Set kill height to the observed end height
-        self.const.h_kill = self.traj.rend_ele - 3000
-
-        # Set erosion heights to the beginning/end height
-        self.const.erosion_height_start = self.traj.rbeg_ele
-        self.const.erosion_height_end = self.traj.rend_ele
-
-
-        # Calculate the photometric mass
-        self.const.m_init = self.calcPhotometricMass()
-
-        ### ###
-
-
-        ### Define GUI and simulation attributes ###
-
-        self.wake_on = False
-        self.wake_plot_ht = self.traj.rbeg_ele # m
-
-        # Disable erosion and disruption at the beginning
-        self.const.erosion_on = False
-        self.const.disruption_on = False
-
-        # Disable different erosion coeff after disruption at the beginning
-        self.disruption_different_erosion_coeff = False
-
-
-        self.simulation_results = None
-
-        self.const_prev = None
-        self.simulation_results_prev = None
-
-        ### ###
-
-
-        # Update the values in the input boxes
-        self.updateInputBoxes()
 
         # Update checkboxes
         self.checkBoxWakeSignal(None)
@@ -248,8 +261,9 @@ class MetSimGUI(QMainWindow):
         self.checkBoxDisruptionErosionCoeff.setChecked(self.disruption_different_erosion_coeff)
 
         self.inputErosionHtStart.setText("{:.3f}".format(const.erosion_height_start/1000))
-        self.inputErosionHtEnd.setText("{:.3f}".format(const.erosion_height_end/1000))
         self.inputErosionCoeff.setText("{:.3f}".format(const.erosion_coeff*1e6))
+        self.inputErosionHtChange.setText("{:.3f}".format(const.erosion_height_change/1000))
+        self.inputErosionCoeffChange.setText("{:.3f}".format(const.erosion_coeff_change*1e6))
         self.inputErosionMassIndex.setText("{:.2f}".format(const.erosion_mass_index))
         self.inputErosionMassMin.setText("{:.2e}".format(const.erosion_mass_min))
         self.inputErosionMassMax.setText("{:.2e}".format(const.erosion_mass_max))
@@ -295,8 +309,9 @@ class MetSimGUI(QMainWindow):
 
         # Disable/enable inputs if the checkbox is checked/unchecked
         self.inputErosionHtStart.setDisabled(not self.const.erosion_on)
-        self.inputErosionHtEnd.setDisabled(not self.const.erosion_on)
         self.inputErosionCoeff.setDisabled(not self.const.erosion_on)
+        self.inputErosionHtChange.setDisabled(not self.const.erosion_on)
+        self.inputErosionCoeffChange.setDisabled(not self.const.erosion_on)
         self.inputErosionMassIndex.setDisabled(not self.const.erosion_on)
         self.inputErosionMassMin.setDisabled(not self.const.erosion_on)
         self.inputErosionMassMax.setDisabled(not self.const.erosion_on)
@@ -320,6 +335,8 @@ class MetSimGUI(QMainWindow):
         self.inputDisruptionMassIndex.setDisabled(not self.const.disruption_on)
         self.inputDisruptionMassMinRatio.setDisabled(not self.const.disruption_on)
         self.inputDisruptionMassMaxRatio.setDisabled(not self.const.disruption_on)
+
+        self.checkBoxDisruptionErosionCoeffSignal(None)
 
         # Read inputs
         self.readInputBoxes()
@@ -399,9 +416,11 @@ class MetSimGUI(QMainWindow):
 
         self.const.erosion_height_start = 1000*_tryReadFloat(self.inputErosionHtStart, \
             self.const.erosion_height_start/1000)
-        self.const.erosion_height_end = 1000*_tryReadFloat(self.inputErosionHtEnd, \
-            self.const.erosion_height_end/1000)
         self.const.erosion_coeff = _tryReadFloat(self.inputErosionCoeff, self.const.erosion_coeff*1e6)/1e6
+        self.const.erosion_height_change = 1000*_tryReadFloat(self.inputErosionHtChange, \
+            self.const.erosion_height_change/1000)
+        self.const.erosion_coeff_change = _tryReadFloat(self.inputErosionCoeffChange, \
+            self.const.erosion_coeff_change*1e6)/1e6
         self.const.erosion_mass_index = _tryReadFloat(self.inputErosionMassIndex, \
             self.const.erosion_mass_index)
         self.const.erosion_mass_min = _tryReadFloat(self.inputErosionMassMin, self.const.erosion_mass_min)
@@ -690,6 +709,9 @@ class MetSimGUI(QMainWindow):
         self.updateLagPlot()
         self.updateWakePlot()
 
+        # Save the latest run parameters
+        self.saveFitParameters(False, suffix="_latest")
+
 
 
     def saveUpdatedOrbit(self):
@@ -717,6 +739,25 @@ class MetSimGUI(QMainWindow):
 
 
 
+    def saveFitParameters(self, event, suffix=None):
+        """ Save fit parameters to a JSON file. """
+
+        if suffix is None:
+            suffix = str("")
+            print(suffix)
+
+        print(suffix)
+
+
+        dir_path, file_name = os.path.split(self.traj_path)
+        file_name = file_name.replace('trajectory.pickle', '') + "sim_fit{:s}.json".format(suffix)
+
+        file_path = os.path.join(dir_path, file_name)
+        with open(file_path, 'w') as f:
+            json.dump(self.const, f, default=lambda o: o.__dict__, indent=4)
+
+        print("Saved fit parameters to:", file_path)
+
 
 
 
@@ -730,15 +771,21 @@ if __name__ == "__main__":
     arg_parser.add_argument('traj_pickle', metavar='TRAJ_PICKLE', type=str, \
         help=".pickle file with the trajectory solution and the magnitudes.")
 
+    arg_parser.add_argument('-l', '--load', metavar='LOAD_JSON', \
+        help='Load JSON file with fit parameters.', type=str)
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
     #########################
 
-
+    # Init PyQt5 window
     app = QApplication([])
 
-    main_window = MetSimGUI(os.path.abspath(cml_args.traj_pickle))
+
+    # Init the MetSimGUI application
+    main_window = MetSimGUI(os.path.abspath(cml_args.traj_pickle), cml_args.load)
+
 
     main_window.show()
 
