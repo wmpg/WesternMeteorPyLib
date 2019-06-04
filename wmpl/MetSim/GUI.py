@@ -79,6 +79,21 @@ class MetSimGUI(QMainWindow):
         ### ###
 
 
+        ### Define GUI and simulation attributes ###
+
+        self.wake_on = False
+        self.wake_plot_ht = self.traj.rbeg_ele # m
+
+        # Disable different erosion coeff after disruption at the beginning
+        self.disruption_different_erosion_coeff = False
+
+        self.simulation_results = None
+
+        self.const_prev = None
+        self.simulation_results_prev = None
+
+        ### ###
+
 
         ### Init simulation parameters ###
 
@@ -94,6 +109,11 @@ class MetSimGUI(QMainWindow):
             # Fill in the constants
             for key in const_json:
                 setattr(self.const, key, const_json[key])
+
+
+            # Check if the disruption erosion coefficient is different than the main erosion coeff
+            if const_json['disruption_erosion_coeff'] != const_json['erosion_coeff']:
+                self.disruption_different_erosion_coeff = True
 
         else:
 
@@ -115,22 +135,6 @@ class MetSimGUI(QMainWindow):
 
             # Calculate the photometric mass
             self.const.m_init = self.calcPhotometricMass()
-
-        ### ###
-
-
-        ### Define GUI and simulation attributes ###
-
-        self.wake_on = False
-        self.wake_plot_ht = self.traj.rbeg_ele # m
-
-        # Disable different erosion coeff after disruption at the beginning
-        self.disruption_different_erosion_coeff = False
-
-        self.simulation_results = None
-
-        self.const_prev = None
-        self.simulation_results_prev = None
 
         ### ###
 
