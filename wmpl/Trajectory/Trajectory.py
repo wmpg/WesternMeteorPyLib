@@ -2426,7 +2426,7 @@ class Trajectory(object):
             ### ###
 
 
-            ### Caculate velocities using the moving average of sqrt(all measurements) window ###
+            ### Calculate velocities using LOWESS method ###
 
             # Compute window length as 2xsqrt(total points per station)
             window = 2*np.sqrt(len(obs.time_data))
