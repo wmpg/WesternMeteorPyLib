@@ -519,6 +519,8 @@ class MetSimGUI(QMainWindow):
 
         self.magnitudePlot.canvas.axes.legend()
 
+        self.magnitudePlot.canvas.axes.grid(color="k", linestyle='dotted', alpha=0.3)
+
         self.magnitudePlot.canvas.axes.set_title('Magnitude')
 
         self.magnitudePlot.canvas.draw()
@@ -589,6 +591,8 @@ class MetSimGUI(QMainWindow):
         
 
         self.lagPlot.canvas.axes.legend()
+
+        self.lagPlot.canvas.axes.grid(color="k", linestyle='dotted', alpha=0.3)
 
         self.lagPlot.canvas.axes.set_title('Lag')
 
