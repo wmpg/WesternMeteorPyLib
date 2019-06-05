@@ -3983,69 +3983,69 @@ class Trajectory(object):
 
 
 
-        # Plot lag per observing station
-        for obs in self.observations:
+        # # Plot lag per observing station
+        # for obs in self.observations:
             
-            ### PLOT LAG ###
-            ##################################################################################################
+        #     ### PLOT LAG ###
+        #     ##################################################################################################
 
-            fig, ax1 = plt.subplots()
+        #     fig, ax1 = plt.subplots()
 
-            # Extract lag points that were not ignored
-            used_times = obs.time_data[obs.ignore_list == 0]
-            used_lag = obs.lag[obs.ignore_list == 0]
+        #     # Extract lag points that were not ignored
+        #     used_times = obs.time_data[obs.ignore_list == 0]
+        #     used_lag = obs.lag[obs.ignore_list == 0]
 
-            if not obs.ignore_station:
+        #     if not obs.ignore_station:
 
-                # Plot the lag
-                ax1.plot(used_lag, used_times, color='r', marker='x', label='Lag', zorder=3)
+        #         # Plot the lag
+        #         ax1.plot(used_lag, used_times, color='r', marker='x', label='Lag', zorder=3)
 
-                # Plot the Jacchia fit
-                ax1.plot(jacchiaLagFunc(obs.time_data, *obs.jacchia_fit), obs.time_data, color='b', 
-                    label='Jacchia fit', zorder=3)
+        #         # Plot the Jacchia fit
+        #         ax1.plot(jacchiaLagFunc(obs.time_data, *obs.jacchia_fit), obs.time_data, color='b', 
+        #             label='Jacchia fit', zorder=3)
 
 
-            # Plot ignored lag points
-            if np.any(obs.ignore_list):
+        #     # Plot ignored lag points
+        #     if np.any(obs.ignore_list):
 
-                ignored_times = obs.time_data[obs.ignore_list > 0]
-                ignored_lag = obs.lag[obs.ignore_list > 0]
+        #         ignored_times = obs.time_data[obs.ignore_list > 0]
+        #         ignored_lag = obs.lag[obs.ignore_list > 0]
 
-                ax1.scatter(ignored_lag, ignored_times, c='k', marker='+', zorder=4, \
-                    label='Lag, ignored points')
+        #         ax1.scatter(ignored_lag, ignored_times, c='k', marker='+', zorder=4, \
+        #             label='Lag, ignored points')
 
             
-            ax1.legend()
+        #     ax1.legend()
 
-            plt.title('Lag, station ' + str(obs.station_id))
-            ax1.set_xlabel('Lag (m)')
-            ax1.set_ylabel('Time (s)')
+        #     plt.title('Lag, station ' + str(obs.station_id))
+        #     ax1.set_xlabel('Lag (m)')
+        #     ax1.set_ylabel('Time (s)')
 
-            ax1.set_ylim(min(obs.time_data), max(obs.time_data))
+        #     ax1.set_ylim(min(obs.time_data), max(obs.time_data))
 
-            ax1.grid()
+        #     ax1.grid()
 
-            ax1.invert_yaxis()
+        #     ax1.invert_yaxis()
 
-            # Set the height axis
-            ax2 = ax1.twinx()
-            ax2.set_ylim(min(obs.meas_ht)/1000, max(obs.meas_ht)/1000)
-            ax2.set_ylabel('Height (km)')
+        #     # Set the height axis
+        #     ax2 = ax1.twinx()
+        #     ax2.set_ylim(min(obs.meas_ht)/1000, max(obs.meas_ht)/1000)
+        #     ax2.set_ylabel('Height (km)')
 
-            plt.tight_layout()
+        #     plt.tight_layout()
 
-            if self.save_results:
-                savePlot(plt, file_name + '_' + str(obs.station_id) + '_lag.' + self.plot_file_type, output_dir)
+        #     if self.save_results:
+        #         savePlot(plt, file_name + '_' + str(obs.station_id) + '_lag.' + self.plot_file_type, output_dir)
 
-            if show_plots:
-                plt.show()
+        #     if show_plots:
+        #         plt.show()
 
-            else:
-                plt.clf()
-                plt.close()
+        #     else:
+        #         plt.clf()
+        #         plt.close()
 
 
-            ##################################################################################################
+        #     ##################################################################################################
 
         ### PLOT ALL LAGS ###
         ######################################################################################################
@@ -4329,49 +4329,49 @@ class Trajectory(object):
         ######################################################################################################
 
 
-        # Compare original and modelled measurements (residuals in azimuthal coordinates)
-        for obs in self.observations:
+        # # Plot angular residuals for every station separately
+        # for obs in self.observations:
 
-            # Calculate residuals in arcseconds
-            res = np.degrees(obs.ang_res)*3600
+        #     # Calculate residuals in arcseconds
+        #     res = np.degrees(obs.ang_res)*3600
 
-            # Mark ignored points
-            if np.any(obs.ignore_list):
+        #     # Mark ignored points
+        #     if np.any(obs.ignore_list):
 
-                ignored_times = obs.time_data[obs.ignore_list > 0]
-                ignored_residuals = res[obs.ignore_list > 0]
+        #         ignored_times = obs.time_data[obs.ignore_list > 0]
+        #         ignored_residuals = res[obs.ignore_list > 0]
 
-                plt.scatter(ignored_times, ignored_residuals, facecolors='none', edgecolors='k', s=20, \
-                    zorder=4, label='Ignored points')
-
-
-            # Calculate the RMSD of the residuals in arcsec
-            res_rms = np.degrees(obs.ang_res_std)*3600
-
-            # Plot residuals
-            plt.scatter(obs.time_data, res, label='Angle, RMSD = {:.2f}"'.format(res_rms), s=2, zorder=3)
+        #         plt.scatter(ignored_times, ignored_residuals, facecolors='none', edgecolors='k', s=20, \
+        #             zorder=4, label='Ignored points')
 
 
-            plt.title('Observed vs. Radiant LoS Residuals, station ' + str(obs.station_id))
-            plt.ylabel('Angle (arcsec)')
-            plt.xlabel('Time (s)')
+        #     # Calculate the RMSD of the residuals in arcsec
+        #     res_rms = np.degrees(obs.ang_res_std)*3600
 
-            # The lower limit is always at 0
-            plt.ylim(ymin=0)
+        #     # Plot residuals
+        #     plt.scatter(obs.time_data, res, label='Angle, RMSD = {:.2f}"'.format(res_rms), s=2, zorder=3)
 
-            plt.grid()
-            plt.legend()
 
-            if self.save_results:
-                savePlot(plt, file_name + '_' + str(obs.station_id) + '_angular_residuals.' \
-                    + self.plot_file_type, output_dir)
+        #     plt.title('Observed vs. Radiant LoS Residuals, station ' + str(obs.station_id))
+        #     plt.ylabel('Angle (arcsec)')
+        #     plt.xlabel('Time (s)')
 
-            if show_plots:
-                plt.show()
+        #     # The lower limit is always at 0
+        #     plt.ylim(ymin=0)
 
-            else:
-                plt.clf()
-                plt.close()
+        #     plt.grid()
+        #     plt.legend()
+
+        #     if self.save_results:
+        #         savePlot(plt, file_name + '_' + str(obs.station_id) + '_angular_residuals.' \
+        #             + self.plot_file_type, output_dir)
+
+        #     if show_plots:
+        #         plt.show()
+
+        #     else:
+        #         plt.clf()
+        #         plt.close()
 
 
         # Plot angular residuals from all stations
