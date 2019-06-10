@@ -3,7 +3,7 @@ from __future__ import print_function
 import multiprocessing
 
 
-def DomainParallelizer(domain, function, cores=None, kwarg_dict=None):
+def domainParallelizer(domain, function, cores=None, kwarg_dict=None):
     """ Runs N (cores) functions as separate processes with parameters given in the domain list.
 
     Arguments:
@@ -72,7 +72,7 @@ def DomainParallelizer(domain, function, cores=None, kwarg_dict=None):
 import time
 import sys
 
-def mp_worker(inputs, wait_time):
+def mpWorker(inputs, wait_time):
     """ Example worker function. This function will print out the name of the worker and wait 'wait_time
         seconds. 
 
@@ -103,7 +103,7 @@ if __name__ == '__main__':
     cpu_cores = multiprocessing.cpu_count()
 
     # Run the parallelized function
-    results = DomainParallelizer(data, mp_worker, cores=(cpu_cores - 1))
+    results = domainParallelizer(data, mpWorker, cores=(cpu_cores - 1))
 
     print('Results:', results)
 

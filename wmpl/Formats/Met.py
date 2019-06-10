@@ -70,16 +70,11 @@ class PickInfo(object):
 class MetStruct(object):
     
 
-    def __init__(self, dir_path, mirfit=False):
+    def __init__(self, dir_path):
         """ Container for Met file info. 
         
         Arguments:
             dir_path: [str] Path to the directory which contains the .met file.
-
-        Keyword arguments:
-            mirfit: [bool] Flag which indicates if Mirfit .met file if being loaded (True). If False (by 
-            defualt), METAL-style .met file will be loaded. Note: Specifying the wrong format for the .met 
-            file may produce an error.
         """
 
 
@@ -87,7 +82,7 @@ class MetStruct(object):
         self.dir_path = dir_path
 
         # Mirfit flag
-        self.mirfit = mirfit
+        self.mirfit = False
 
         # Site geo coordinates
         self.sites_location = {}
@@ -304,7 +299,7 @@ def extractPicks(met, mirfit=False):
                 pick.lsp = lsp
 
                 # Magnitude
-                pick.mag = 0
+                pick.mag = None
 
                 # Add the pick to the list of all picks
                 met.picks_objs[site].append(pick)
@@ -363,7 +358,7 @@ def extractPicks(met, mirfit=False):
 
 
 
-def loadMet(dir_path, file_name, mirfit=False):
+def loadMet(dir_path, file_name):
     """ Loads a *.met file. 
     
     Arguments:
@@ -381,7 +376,7 @@ def loadMet(dir_path, file_name, mirfit=False):
 
 
     # Init an empty Met structure
-    met = MetStruct(dir_path, mirfit=mirfit)
+    met = MetStruct(dir_path)
 
     with open(os.path.join(dir_path, file_name)) as f:
 
@@ -389,16 +384,24 @@ def loadMet(dir_path, file_name, mirfit=False):
 
         
         f.seek(0)
-
-        # Mirfit and METAL store site numbers differently
-        if mirfit:
-            site_prefix = "video ;"
-        else:
-            site_prefix = "plate ;"
             
 
         # Find all participating sites that are in the .met file
-        for line in f:
+        mirfit = False
+        for i, line in enumerate(f):
+
+            # The first line determines if it's a METAL or mirfit .met file
+            if i == 0:
+                if line.startswith('mirfit'):
+                    mirfit = True
+                    met.mirfit = True
+
+                # Mirfit and METAL store site numbers differently
+                if mirfit:
+                    site_prefix = "video ;"
+                else:
+                    site_prefix = "plate ;"
+
 
             # Find the lines which will contain the site ID
             if site_prefix in line:
@@ -718,6 +721,9 @@ def solveTrajectoryMet(met, solver='original', velmodel=3, **kwargs):
             time_picks = time_data[site]
             mag_picks = mag_data[site]
 
+            if not np.any(mag_picks):
+                mag_picks = None
+
             lat = met.lat[site]
             lon = met.lon[site]
             elev = met.elev[site]
@@ -759,9 +765,6 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('met_path', nargs=1, metavar='MET_PATH', type=str, \
         help='Full path to the .met file.')
-
-    arg_parser.add_argument('-m', '--mirfit', \
-        help='Mirfit format instead of metal format.', action="store_true")
 
     arg_parser.add_argument('-s', '--solver', metavar='SOLVER', help="""Trajectory solver to use. \n
         - 'original' - Monte Carlo solver
@@ -838,7 +841,7 @@ if __name__ == "__main__":
 
 
     # Load the met file
-    met = loadMet(*os.path.split(met_path), mirfit=cml_args.mirfit)
+    met = loadMet(*os.path.split(met_path))
 
 
     # Run trajectory solver on the loaded .met file

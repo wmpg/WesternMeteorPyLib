@@ -47,7 +47,7 @@ if __name__ == "__main__":
             shutil.copy2(romulan_state_path, os.path.join(romulan_solution_path, romulan_state_file))
 
             # Load data from the .met file
-            met = loadMet(romulan_solution_path, romulan_state_file, mirfit=False)
+            met = loadMet(romulan_solution_path, romulan_state_file)
 
             # Handle all solver errors
             # while True:

@@ -104,7 +104,7 @@ class NarrowProjectionInputData(object):
 
 
         # Load the Mirfit .met file
-        self.met = loadMet(self.dir_path, self.met_file, mirfit=True)
+        self.met = loadMet(self.dir_path, self.met_file)
 
         # Load the trajectory
         self.traj = loadPickle(self.dir_path, self.traj_file)

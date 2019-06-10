@@ -264,7 +264,7 @@ if __name__ == "__main__":
     ##########################################################################################################
 
     # Load the MET file
-    met = loadMet(dir_path, met_file, mirfit=True)
+    met = loadMet(dir_path, met_file)
 
     # Load the vid file
     vid = readVid(dir_path, vid_file)

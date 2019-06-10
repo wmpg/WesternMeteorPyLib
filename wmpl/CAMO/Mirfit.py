@@ -929,7 +929,7 @@ if __name__ == "__main__":
     file_name = "state_1529591794.met"
 
     # Load the met file
-    met = loadMet(dir_path, file_name, mirfit=True)
+    met = loadMet(dir_path, file_name)
 
     # # Load the plates
     # met.scale_plates[1] = loadScale(dir_path, 'scale_01.aff')

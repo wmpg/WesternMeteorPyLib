@@ -14,11 +14,13 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
 from PyQt5.uic import loadUi
 
 
+from wmpl.Formats.Met import loadMet
 from wmpl.MetSim.MetSimErosion import runSimulation, Constants
 from wmpl.Trajectory.Orbit import calcOrbit
-from wmpl.Utils.Math import averageClosePoints
+from wmpl.Utils.Math import averageClosePoints, findClosestPoints, vectMag, lineFunc
 from wmpl.Utils.Physics import calcMass
 from wmpl.Utils.Pickling import loadPickle
+from wmpl.Utils.TrajConversions import unixTime2JD, geo2Cartesian, cartesian2Geo, altAz2RADec_vect, raDec2ECI
 
 
 
@@ -54,10 +56,125 @@ class SimulationResults(object):
 
 
 
+class MetObservations(object):
+    def __init__(self, met, traj):
+        """ Container for additional observations from a .met file. Computes the lag and apparent magnitude
+            given the base trajectory solution. 
+        """
+
+        self.met = met
+        self.traj = traj
+
+        self.sites = [site for site in met.sites]
+
+
+        self.height_data = {}
+        self.lag_data = {}
+        self.abs_mag_data = {}
+
+
+        # Compute the lag and the magnitude using the given observations
+        if self.met is not None:
+
+            # Project additional observations from the .met file to the trajectory and compute the lag
+            # Go through all sites
+            for site in met.sites:
+
+                jd_picks = []
+                time_rel_picks = []
+                theta_picks = []
+                phi_picks = []
+                mag_picks = []
+
+                # Go through all picks
+                for pick in met.picks_objs[site]:
+
+                    # Add the pick to the picks list
+                    theta_picks.append(pick.theta)
+                    phi_picks.append(pick.phi)
+
+                    # Convert the reference Unix time to Julian date
+                    ts = int(pick.unix_time)
+                    tu = (pick.unix_time - ts)*1e6
+                    jd = unixTime2JD(ts, tu)
+
+                    # Add the time of the pick to a list
+                    jd_picks.append(jd)
+
+                    # Compute relative time in seconds since the beginning of the meteor
+                    time_rel_picks.append((jd - self.traj.jdt_ref)*86400)
+
+                    # Add magnitude
+                    mag_picks.append(pick.mag)
+
+
+                jd_picks = np.array(jd_picks).ravel()
+                time_rel_picks = np.array(time_rel_picks).ravel()
+                theta_picks = np.array(theta_picks).ravel()
+                phi_picks = np.array(phi_picks).ravel()
+                mag_picks = np.array(mag_picks).ravel()
+
+
+                # Compute RA/Dec of observations
+                ra_picks, dec_picks = altAz2RADec_vect(np.pi/2 - phi_picks, np.pi/2 - theta_picks, \
+                    jd_picks, met.lat[site], met.lon[site])
+
+                
+                # List of distances from the state vector (m)
+                state_vect_dist = []
+
+                # List of heights (m)
+                height_data = []
+
+                # List of absolute magnitudes
+                abs_mag_data = []
+
+                # Project rays to the trajectory line
+                for i, (jd, ra, dec, mag) in enumerate(np.c_[jd_picks, ra_picks, dec_picks, mag_picks]):
+
+                    # Compute the station coordinates at the given time
+                    stat = geo2Cartesian(met.lat[site], met.lon[site], met.elev[site], jd)
+
+                    # Compute measurement rays in cartesian coordinates
+                    meas = np.array(raDec2ECI(ra, dec))
+
+
+                    # Calculate closest points of approach (observed line of sight to radiant line)
+                    obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, self.traj.state_vect_mini, \
+                        self.traj.radiant_eci_mini)
+
+                    # Distance from the state vector to the projected point on the radiant line
+                    state_vect_dist.append(vectMag(self.traj.state_vect_mini - rad_cpa))
+
+                    # Compute the height (meters)
+                    _, _, ht = cartesian2Geo(jd, *rad_cpa)
+                    height_data.append(ht)
+
+                    # Compute the range to the station and the absolute magnitude
+                    if mag is not None:
+                        r = vectMag(rad_cpa - stat)
+                        abs_mag = mag + 5*np.log10(100000/r)
+                    else:
+                        abs_mag = np.nan
+
+                    abs_mag_data.append(abs_mag)
+
+
+                state_vect_dist = np.array(state_vect_dist)
+
+                # Compute the lag
+                self.lag_data[site] = state_vect_dist - lineFunc(time_rel_picks, *self.traj.velocity_fit)
+
+                # Store the heights and magnitudes
+                self.height_data[site] = np.array(height_data)
+                self.abs_mag_data[site] = np.array(abs_mag_data)
+
+
+
 
 class MetSimGUI(QMainWindow):
     
-    def __init__(self, traj_path, const_json_file):
+    def __init__(self, traj_path, const_json_file, met=None):
         """ GUI tool for MetSim. """
         
 
@@ -66,6 +183,14 @@ class MetSimGUI(QMainWindow):
         # Load the trajectory pickle file
         self.traj = loadPickle(*os.path.split(traj_path))
 
+
+        self.met = met
+
+        # Init a container for .met results, compute lag and magnitude
+        if self.met is not None:
+            self.met_obs = MetObservations(self.met, self.traj)
+        else:
+            self.met_obs = None
 
         ### Init GUI ###
 
@@ -191,12 +316,22 @@ class MetSimGUI(QMainWindow):
         avg_t_diff_max = 0
         for obs in self.traj.observations:
 
+            # If there are not magnitudes for this site, skip it
+            if obs.absolute_magnitudes is None:
+                continue
+
             # Compute average time difference
             avg_t_diff_max = max(avg_t_diff_max, np.median(obs.time_data[1:] - obs.time_data[:-1]))
 
             for t, mag in zip(obs.time_data, obs.absolute_magnitudes):
                 if (mag is not None) and (not np.isnan(mag)):
                     time_mag_arr.append([t, mag])
+
+        
+        # If there are no magnitudes, assume that the initial mass is 0.1 grams
+        if not time_mag_arr:
+            return 0.1/1000
+
 
         # Sort array by time
         time_mag_arr = np.array(sorted(time_mag_arr, key=lambda x: x[0]))
@@ -478,10 +613,9 @@ class MetSimGUI(QMainWindow):
         self.magnitudePlot.canvas.axes.clear()
 
         
-        # Set height plot limits
-        plot_beg_ht = self.traj.rbeg_ele + 5000
-        plot_end_ht = self.traj.rend_ele - 2000
-
+        # Track plot limits
+        plot_beg_ht = -np.inf
+        plot_end_ht = np.inf
 
         mag_brightest = np.inf
         mag_faintest = -np.inf
@@ -489,12 +623,52 @@ class MetSimGUI(QMainWindow):
         # Plot observed magnitudes from different stations
         for obs in self.traj.observations:
 
-            self.magnitudePlot.canvas.axes.plot(obs.absolute_magnitudes, obs.model_ht/1000, marker='x',
+            # Extract data
+            abs_mag_data = obs.absolute_magnitudes
+            height_data = obs.model_ht/1000
+
+            # Skip instances when no magnitudes are present
+            if abs_mag_data is None:
+                continue
+
+            self.magnitudePlot.canvas.axes.plot(abs_mag_data, height_data, marker='x',
                 linestyle='dashed', label=obs.station_id)
 
             # Keep track of the faintest and the brightest magnitude
-            mag_brightest = min(mag_brightest, np.min(obs.absolute_magnitudes[~np.isinf(obs.absolute_magnitudes)]))
-            mag_faintest = max(mag_faintest, np.max(obs.absolute_magnitudes[~np.isinf(obs.absolute_magnitudes)]))
+            mag_brightest = min(mag_brightest, np.min(abs_mag_data[~np.isinf(abs_mag_data)]))
+            mag_faintest = max(mag_faintest, np.max(abs_mag_data[~np.isinf(abs_mag_data)]))
+
+            # Keep track of the height limits
+            plot_beg_ht = max(plot_beg_ht, np.max(height_data))
+            plot_end_ht = min(plot_end_ht, np.min(height_data))
+            
+
+
+        # Plot additional observations from the .met file (if available)
+        if self.met_obs is not None:
+
+            # Plot additional magnitudes for all sites
+            for site in self.met_obs.sites:
+
+                # Extract data
+                abs_mag_data = self.met_obs.abs_mag_data[site]
+                height_data = self.met_obs.height_data[site]/1000
+
+                self.magnitudePlot.canvas.axes.plot(abs_mag_data, \
+                    height_data, marker='x', linestyle='dashed', label=str(site))
+
+                # Keep track of the faintest and the brightest magnitude
+                mag_brightest = min(mag_brightest, np.min(abs_mag_data[~np.isinf(abs_mag_data)]))
+                mag_faintest = max(mag_faintest, np.max(abs_mag_data[~np.isinf(abs_mag_data)]))
+
+                # Keep track of the height limits
+                plot_beg_ht = max(plot_beg_ht, np.max(height_data))
+                plot_end_ht = min(plot_end_ht, np.min(height_data))
+
+
+        # Add buffering to height plot
+        plot_beg_ht += 5
+        plot_end_ht -= 2
 
 
         # Plot simulated magnitudes
@@ -502,8 +676,8 @@ class MetSimGUI(QMainWindow):
 
             # Cut the part with same beginning heights as observations
             temp_arr = np.c_[sr.brightest_height_arr, sr.abs_magnitude]
-            temp_arr = temp_arr[(sr.brightest_height_arr < plot_beg_ht) \
-                & (sr.brightest_height_arr > plot_end_ht)]
+            temp_arr = temp_arr[(sr.brightest_height_arr < plot_beg_ht*1000) \
+                & (sr.brightest_height_arr > plot_end_ht*1000)]
             ht_arr, abs_mag_arr = temp_arr.T
 
             # Plot the simulated magnitudes
@@ -514,7 +688,7 @@ class MetSimGUI(QMainWindow):
         self.magnitudePlot.canvas.axes.set_ylabel('Height (km)')
         self.magnitudePlot.canvas.axes.set_xlabel('Abs magnitude')
 
-        self.magnitudePlot.canvas.axes.set_ylim([plot_end_ht/1000, plot_beg_ht/1000])
+        self.magnitudePlot.canvas.axes.set_ylim([plot_end_ht, plot_beg_ht])
         self.magnitudePlot.canvas.axes.set_xlim([mag_faintest + 1, mag_brightest - 1])
 
         self.magnitudePlot.canvas.axes.legend()
@@ -539,20 +713,50 @@ class MetSimGUI(QMainWindow):
 
         self.lagPlot.canvas.axes.clear()
 
-        # Set height plot limits
-        plot_beg_ht = self.traj.rbeg_ele + 5000
-        plot_end_ht = self.traj.rend_ele - 2000
-
 
         # Update the observed initial velocity label
         self.vInitObsLabel.setText("Vinit obs = {:.3f} km/s".format(self.traj.orbit.v_init_norot/1000))
 
 
+        # Track plot limits
+        plot_beg_ht = -np.inf
+        plot_end_ht = np.inf
+
+
         # Plot observed magnitudes from different stations
         for obs in self.traj.observations:
 
-            self.lagPlot.canvas.axes.plot(obs.lag, obs.model_ht/1000, marker='x',
+            height_data = obs.model_ht/1000
+
+            self.lagPlot.canvas.axes.plot(obs.lag, height_data, marker='x',
                 linestyle='dashed', label=obs.station_id)
+
+            # Keep track of the height limits
+            plot_beg_ht = max(plot_beg_ht, np.max(height_data))
+            plot_end_ht = min(plot_end_ht, np.min(height_data))
+
+
+        # Plot additional observations from the .met file (if available)
+        if self.met_obs is not None:
+
+            # Plot additional lags for all sites (plot only mirfit lags)
+            for site in self.met_obs.sites:
+
+                height_data = self.met_obs.height_data[site]/1000
+
+                # Only plot mirfit lags
+                if self.met.mirfit:
+                    self.lagPlot.canvas.axes.plot(self.met_obs.lag_data[site], height_data, marker='x',
+                        linestyle='dashed', label=str(site))
+
+                # Keep track of the height limits
+                plot_beg_ht = max(plot_beg_ht, np.max(height_data))
+                plot_end_ht = min(plot_end_ht, np.min(height_data))
+
+
+        # Add buffering to height plot
+        plot_beg_ht += 5
+        plot_end_ht -= 2
 
 
         # Get X plot limits
@@ -583,7 +787,8 @@ class MetSimGUI(QMainWindow):
             self.lagPlot.canvas.axes.plot(lag_sim[:len(ht_arr)], (ht_arr/1000)[:len(lag_sim)], label='Simulated')
 
 
-        self.lagPlot.canvas.axes.set_ylim([plot_end_ht/1000, plot_beg_ht/1000])
+
+        self.lagPlot.canvas.axes.set_ylim([plot_end_ht, plot_beg_ht])
         self.lagPlot.canvas.axes.set_xlim([x_min, x_max])
 
         self.lagPlot.canvas.axes.set_xlabel('Lag (m)')
@@ -599,12 +804,14 @@ class MetSimGUI(QMainWindow):
         self.lagPlot.canvas.draw()
 
 
+
     def incrementWakePlotHeight(self):
         """ Increment wake plot height by 100 m. """
 
         self.wake_plot_ht += 100
         self.updateInputBoxes()
         self.updateWakePlot()
+
 
 
     def decrementWakePlotHeight(self):
@@ -659,9 +866,15 @@ class MetSimGUI(QMainWindow):
         self.wakePlot.canvas.axes.set_xlabel('Length behind leading fragment')
         self.wakePlot.canvas.axes.set_ylabel('Intensity')
 
+        self.wakePlot.canvas.axes.invert_xaxis()
+
+        self.wakePlot.canvas.axes.set_ylim(bottom=0)
+
         # self.wakePlot.canvas.axes.legend()
 
         self.wakePlot.canvas.axes.set_title('Wake')
+
+        self.wakePlot.canvas.figure.tight_layout()
 
         self.wakePlot.canvas.draw()
 
@@ -752,10 +965,6 @@ class MetSimGUI(QMainWindow):
 
         if suffix is None:
             suffix = str("")
-            print(suffix)
-
-        print(suffix)
-
 
         dir_path, file_name = os.path.split(self.traj_path)
         file_name = file_name.replace('trajectory.pickle', '') + "sim_fit{:s}.json".format(suffix)
@@ -782,6 +991,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('-l', '--load', metavar='LOAD_JSON', \
         help='Load JSON file with fit parameters.', type=str)
 
+    arg_parser.add_argument('-m', '--met', metavar='MET_FILE', \
+        help='Load additional observations from a METAL or mirfit .met file.', type=str)
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -791,8 +1003,19 @@ if __name__ == "__main__":
     app = QApplication([])
 
 
+    # Load a METAL .met file if given
+    met = None
+    if cml_args.met is not None:
+        if os.path.isfile(cml_args.met):
+            met = loadMet(*os.path.split(os.path.abspath(cml_args.met)))
+        else:
+            print('The .met file does not exist:', cml_args.met)
+            sys.exit()
+
+
+
     # Init the MetSimGUI application
-    main_window = MetSimGUI(os.path.abspath(cml_args.traj_pickle), cml_args.load)
+    main_window = MetSimGUI(os.path.abspath(cml_args.traj_pickle), cml_args.load, met=met)
 
 
     main_window.show()

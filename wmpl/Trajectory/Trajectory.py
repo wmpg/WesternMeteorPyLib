@@ -36,7 +36,7 @@ from wmpl.Utils.PlotCelestial import CelestialPlot
 from wmpl.Utils.PlotMap import GroundMap
 from wmpl.Utils.TrajConversions import EARTH, G, ecef2ENU, enu2ECEF, geo2Cartesian, geo2Cartesian_vect, \
     cartesian2Geo, altAz2RADec_vect, raDec2AltAz, raDec2AltAz_vect, raDec2ECI, eci2RaDec, jd2Date, datetime2JD
-from wmpl.Utils.PyDomainParallelizer import DomainParallelizer
+from wmpl.Utils.PyDomainParallelizer import domainParallelizer
 
 
 
@@ -1686,7 +1686,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
 
 
     # Run MC trajectory estimation on multiple cores
-    mc_results = DomainParallelizer(mc_input_list, _MCTrajSolve)
+    mc_results = domainParallelizer(mc_input_list, _MCTrajSolve)
 
     # Add the original trajectory in the Monte Carlo results, if it is the one which has the best length match
     mc_results.append(traj)

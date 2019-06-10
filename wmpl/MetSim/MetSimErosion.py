@@ -13,7 +13,6 @@ References:
 from __future__ import print_function, division, absolute_import
 
 
-import sys
 import math
 import copy
 
@@ -83,10 +82,10 @@ class Constants(object):
         ### Wake parameters ###
 
         # PSF stddev (m)
-        self.wake_psf = 50
+        self.wake_psf = 2
 
         # Wake extension from the leading fragment (m)
-        self.wake_extension = 1000
+        self.wake_extension = 200
 
         ### ###
 
@@ -486,9 +485,8 @@ def getErosionCoeff(const, h):
 
 
 
-
-def ablate(fragments, const, compute_wake=False):
-    """ Perform single body ablation of the given grain using the 4th order Runge-Kutta method. 
+def ablateAll(fragments, const, compute_wake=False):
+    """ Perform single body ablation of all fragments using the 4th order Runge-Kutta method. 
 
     Arguments:
         fragments: [list] A list of Fragment instances.
@@ -750,7 +748,7 @@ def ablate(fragments, const, compute_wake=False):
 
         ### Compute the wake as convoluted luminosities with the PSF ###
 
-        length_array = np.linspace(back_len, front_len, 100)
+        length_array = np.linspace(back_len, front_len, 500) - leading_frag_length
         wake_luminosity_profile = np.zeros_like(length_array)
 
         luminosity_points = []
@@ -763,11 +761,11 @@ def ablate(fragments, const, compute_wake=False):
             if (frag.length > back_len) and (frag.length < front_len):
 
                 luminosity_points.append(frag.lum)
-                length_points.append(frag.length)
+                length_points.append(frag.length - leading_frag_length)
 
                 # Evalute the Gaussian
-                wake_luminosity_profile += frag.lum*scipy.stats.norm.pdf(length_array, loc=frag.length, \
-                    scale=const.wake_psf)
+                wake_luminosity_profile += frag.lum*scipy.stats.norm.pdf(length_array, \
+                    loc=frag.length - leading_frag_length, scale=const.wake_psf)
 
 
         # Store evaluated wake
@@ -834,7 +832,7 @@ def runSimulation(const, compute_wake=False):
 
         # Ablate the fragments
         fragments, const, luminosity_total, brightest_height, brightest_length, brightest_vel, \
-            leading_frag_length, mass_total, wake = ablate(fragments, const, compute_wake=compute_wake)
+            leading_frag_length, mass_total, wake = ablateAll(fragments, const, compute_wake=compute_wake)
 
         # Store wake estimation results
         wake_results.append(wake)

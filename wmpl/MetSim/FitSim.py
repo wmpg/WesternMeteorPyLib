@@ -14,7 +14,7 @@ import scipy.optimize
 
 from wmpl.Config import config
 from wmpl.Utils.Pickling import loadPickle
-from wmpl.Utils.PyDomainParallelizer import DomainParallelizer
+from wmpl.Utils.PyDomainParallelizer import domainParallelizer
 from wmpl.Utils.TrajConversions import jd2Date
 from wmpl.MetSim.MetSim import M_PROTON, loadInputs, runSimulation
 from wmpl.MetSim.MetalMass import loadMetalMags, calcMass
@@ -380,7 +380,7 @@ def bruteForceSearchMetSim(results_file, met, consts, mass, v_init, zc, obs_time
     cpu_cores = multiprocessing.cpu_count()
 
     # Run the parallelized function
-    solutions = DomainParallelizer(input_params, runMetSimEvaluation, cores=cpu_cores, 
+    solutions = domainParallelizer(input_params, runMetSimEvaluation, cores=cpu_cores, 
         kwarg_dict={'met': met, 'consts': consts, 'obs_time':obs_time, 'obs_height': obs_height, 'obs_length': obs_length, 'end_ht': end_ht})
 
 
