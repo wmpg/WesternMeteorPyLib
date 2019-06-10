@@ -7,6 +7,7 @@ import copy
 import argparse
 import time
 import json
+import glob
 
 import numpy as np
 from matplotlib.backends.backend_qt5agg import (NavigationToolbar2QT as NavigationToolbar)
@@ -20,7 +21,8 @@ from wmpl.Trajectory.Orbit import calcOrbit
 from wmpl.Utils.Math import averageClosePoints, findClosestPoints, vectMag, lineFunc
 from wmpl.Utils.Physics import calcMass
 from wmpl.Utils.Pickling import loadPickle
-from wmpl.Utils.TrajConversions import unixTime2JD, geo2Cartesian, cartesian2Geo, altAz2RADec_vect, raDec2ECI
+from wmpl.Utils.TrajConversions import unixTime2JD, geo2Cartesian, cartesian2Geo, altAz2RADec, \
+    altAz2RADec_vect, raDec2ECI
 
 
 
@@ -172,10 +174,79 @@ class MetObservations(object):
 
 
 
+
+class WakePoint(object):
+    def __init__(self, n, th, phi, intens_sum, amp, r, b, c, state_vect_dist, ht):
+        """ Container for wake points. """
+
+        # Distance along the trail (pixels)
+        self.n = n
+
+        # Zenith angle (deg)
+        self.th = th
+
+        # Azimuth +N of due E (deeg)
+        self.phi = phi
+
+        # Intensity sum
+        self.intens_sum = intens_sum
+
+        # Peak pixel intensity
+        self.amp = amp
+
+        # Raw trail width (pixels above the background)
+        self.r = r
+
+        # Standard deviation of the Gaussian fit (meters)
+        self.b = b
+
+        # Corrected trail width (raw - stellar width) (meters)
+        self.c = c
+
+        # Distance from the trajectory state vector (m)
+        self.state_vect_dist = state_vect_dist
+
+        # Height (m)
+        self.ht = ht
+
+        # Distance from the leading fragment (m)
+        self.leading_frag_length = 0
+
+
+
+class WakeContainter(object):
+    def __init__(self, site_id, frame_n):
+        """ Containter for wake profile data extracted from mirfit wid files. 
+        
+        Arguments:
+            site_id: [str] Name of the site.
+            frame_n: [str] Frame number of the measurement.
+        """
+
+        self.site_id = int(site_id)
+        self.frame_n = frame_n
+
+        self.points = []
+
+
+    def addPoint(self, n, th, phi, intens_sum, amp, r, b, c, state_vect_dist, ht):
+        self.points.append(WakePoint(n, th, phi, intens_sum, amp, r, b, c, state_vect_dist, ht))
+
+
+
 class MetSimGUI(QMainWindow):
     
-    def __init__(self, traj_path, const_json_file, met=None):
-        """ GUI tool for MetSim. """
+    def __init__(self, traj_path, const_json_file=None, met_path=None, wid_files=None):
+        """ GUI tool for MetSim. 
+    
+        Arguments:
+            traj_path: [str] Path to the trajectory pickle file.
+
+        Keyword arguments:
+            const_json_file: [str] Path to the JSON file with simulation parameters.
+            met: [str] Path to the METAL or mirfit .met file with additional magnitude or lag information.
+            wid_files: [str] Mirfit wid files containing the meteor wake information.
+        """
         
 
         self.traj_path = traj_path
@@ -184,13 +255,58 @@ class MetSimGUI(QMainWindow):
         self.traj = loadPickle(*os.path.split(traj_path))
 
 
-        self.met = met
+        ### LOAD .met FILE ###
+
+        # Load a METAL .met file if given
+        self.met = None
+        if met_path is not None:
+            if os.path.isfile(met_path):
+                self.met = loadMet(*os.path.split(os.path.abspath(met_path)))
+            else:
+                print('The .met file does not exist:', met_path)
+                sys.exit()
 
         # Init a container for .met results, compute lag and magnitude
         if self.met is not None:
             self.met_obs = MetObservations(self.met, self.traj)
         else:
             self.met_obs = None
+
+        ### ###
+
+
+
+        ### LOAD WAKE FILES ###
+
+        # Load mirfit wake "wid" file
+        self.wake_meas = []
+        if wid_files is not None:
+            for wid_path in wid_files:
+                for wid_file in glob.glob(wid_path):
+
+                    # Load wake information from wid files
+                    wake_container = self.loadWakeFile(wid_file)
+
+                    if wake_container is not None:
+                        self.wake_meas.append(wake_container)
+
+        
+        # Get a list of heights where lag measurements were taken
+        self.wake_heights = None
+        if self.wake_meas:
+            self.wake_heights = []
+            for wake_container in self.wake_meas:
+                for wake_pt in wake_container.points:
+                    if int(wake_pt.n ) == 0:
+                        self.wake_heights.append([wake_pt.ht, wake_container])
+                        break
+
+            # Sort wake height list by height
+            self.wake_heights = sorted(self.wake_heights, key=lambda x: x[0])
+
+        ### ###
+
+
 
         ### Init GUI ###
 
@@ -207,7 +323,14 @@ class MetSimGUI(QMainWindow):
         ### Define GUI and simulation attributes ###
 
         self.wake_on = False
-        self.wake_plot_ht = self.traj.rbeg_ele # m
+        self.wake_ht_current_index = 0
+        self.current_wake_container = None
+
+        if self.wake_heights is not None:
+            self.wake_plot_ht, self.current_wake_container = self.wake_heights[self.wake_ht_current_index]
+        else:
+            self.wake_plot_ht = self.traj.rbeg_ele # m
+
 
         # Disable different erosion coeff after disruption at the beginning
         self.disruption_different_erosion_coeff = False
@@ -309,6 +432,87 @@ class MetSimGUI(QMainWindow):
 
 
 
+
+    def loadWakeFile(self, file_path):
+        """ Load a mirfit wake "wid" file. """
+
+
+        # Extract the site ID and the frame number from the file name
+        site_id, frame_n = os.path.basename(file_path).replace('.txt', '').split('_')[1:]
+        site_id = str(int(site_id))
+        frame_n = int(frame_n)
+
+        print('wid file: ', site_id, frame_n)
+
+
+        # Extract geo coordinates of sites
+        lat_dict = {obs.station_id:obs.lat for obs in self.traj.observations}
+        lon_dict = {obs.station_id:obs.lon for obs in self.traj.observations}
+        ele_dict = {obs.station_id:obs.ele for obs in self.traj.observations}
+
+        wake_container = None
+        leading_state_vect_dist = 0
+        with open(file_path) as f:
+            for line in f:
+
+                if line.startswith('#'):
+                    continue
+
+                line = line.replace('\n', '').replace('\r', '').split()
+
+                if not line:
+                    continue
+
+
+                # Init the wake container
+                if wake_container is None:
+                    wake_container = WakeContainter(site_id, frame_n)
+
+                # Read the wake point
+                n, th, phi, _, _, _, _, intens_sum, amp, r, b, c = list(map(float, line))
+
+
+                ### Compute the projection of the wake line of sight to the trajectory ###
+
+                # Calculate RA/Dec
+                ra, dec = altAz2RADec(np.pi/2 - np.radians(phi), np.pi/2 - np.radians(th), \
+                    self.traj.jdt_ref, lat_dict[site_id], lon_dict[site_id])
+
+                # Compute the station coordinates at the given time
+                stat = geo2Cartesian(lat_dict[site_id], lon_dict[site_id], ele_dict[site_id], \
+                    self.traj.jdt_ref)
+
+                # Compute measurement rays in cartesian coordinates
+                meas = np.array(raDec2ECI(ra, dec))
+
+                # Calculate closest points of approach (observed line of sight to radiant line)
+                obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, self.traj.state_vect_mini, \
+                    self.traj.radiant_eci_mini)
+
+                # Compute Distance from the state vector to the projected point on the radiant line
+                state_vect_dist = vectMag(self.traj.state_vect_mini - rad_cpa)
+
+                # Compute the height (meters)
+                _, _, ht = cartesian2Geo(self.traj.jdt_ref, *rad_cpa)
+
+                ### ###
+
+                # Record the state vector distance of the leading fragment
+                if int(n) == 0:
+                    leading_state_vect_dist = state_vect_dist
+
+                wake_container.addPoint(n, th, phi, intens_sum, amp, r, b, c, state_vect_dist, ht)
+
+            # Compute lengths of the leading fragment
+            if wake_container is not None:
+                for wake_pt in wake_container.points:
+                    wake_pt.leading_frag_length = wake_pt.state_vect_dist - leading_state_vect_dist
+
+
+        return wake_container
+
+
+
     def calcPhotometricMass(self):
         """ Calculate photometric mass from given magnitude data. """
 
@@ -387,7 +591,7 @@ class MetSimGUI(QMainWindow):
 
         self.checkBoxWake.setChecked(self.wake_on)
 
-        self.inputWakePSF.setText("{:d}".format(int(const.wake_psf)))
+        self.inputWakePSF.setText("{:.1f}".format(const.wake_psf))
         self.inputWakeExt.setText("{:d}".format(int(const.wake_extension)))
         self.inputWakePlotHt.setText("{:.3f}".format(self.wake_plot_ht/1000))
 
@@ -808,7 +1012,19 @@ class MetSimGUI(QMainWindow):
     def incrementWakePlotHeight(self):
         """ Increment wake plot height by 100 m. """
 
-        self.wake_plot_ht += 100
+        # If the wake files are loaded, use the wake heights
+        if self.wake_heights is not None:
+            
+            self.wake_ht_current_index = (self.wake_ht_current_index + 1)%len(self.wake_heights)
+
+            # Extract the wake height and observations
+            self.wake_plot_ht, self.current_wake_container = self.wake_heights[self.wake_ht_current_index]
+
+
+        # Otherwise, increment the wake height by 100 m
+        else:
+            self.wake_plot_ht += 100
+
         self.updateInputBoxes()
         self.updateWakePlot()
 
@@ -817,7 +1033,19 @@ class MetSimGUI(QMainWindow):
     def decrementWakePlotHeight(self):
         """ Decrement wake plot height by 100 m. """
 
-        self.wake_plot_ht -= 100
+        # If the wake files are loaded, use the wake heights
+        if self.wake_heights is not None:
+            
+            self.wake_ht_current_index = (self.wake_ht_current_index - 1)%len(self.wake_heights)
+
+            # Extract the wake height and observations
+            self.wake_plot_ht, self.current_wake_container = self.wake_heights[self.wake_ht_current_index]
+
+
+        # Otherwise, decrement the wake height by 100 m
+        else:
+            self.wake_plot_ht -= 100
+
         self.updateInputBoxes()
         self.updateWakePlot()
 
@@ -837,14 +1065,22 @@ class MetSimGUI(QMainWindow):
             sr = self.simulation_results
 
 
+        # Find the appropriate observed wake to plot for the given height
+        if self.wake_heights is not None:
+
+            # Find the index of the observed wake that's closest to the given plot height
+            self.wake_ht_current_index = np.argmin(np.abs(np.array([w[0] for w in self.wake_heights]) \
+                - self.wake_plot_ht))
+
+            # Extract the wake height and observations
+            self.wake_plot_ht, self.current_wake_container = self.wake_heights[self.wake_ht_current_index]
+
+
+
         self.wakePlot.canvas.axes.clear()
 
 
-        # Plot observed wake
-        # ...
-
-
-        # Plot simulated wake
+        ### PLOT SIMULATED WAKE ###
         if sr is not None:
 
             # Find the wake index closest to the given wake height
@@ -855,12 +1091,40 @@ class MetSimGUI(QMainWindow):
 
             if wake is not None:
 
+                # Plot the simulated wake
                 self.wakePlot.canvas.axes.plot(wake.length_array, wake.wake_luminosity_profile, label='Simulated')
 
                 self.lagPlot.canvas.axes.set_ylim([0, sr.wake_max_lum])
 
 
-        
+                ### ###
+
+
+                ### PLOT OBSERVED WAKE ###
+
+                if self.current_wake_container is not None:
+                    
+                    # Extract array of length and intensity 
+                    len_array = []
+                    wake_intensity_array = []
+                    for wake_pt in self.current_wake_container.points:
+                        len_array.append(wake_pt.leading_frag_length)
+                        wake_intensity_array.append(wake_pt.intens_sum)
+
+                    len_array = np.array(len_array)
+                    wake_intensity_array = np.array(wake_intensity_array)
+
+                    # Normalize the wake intensity to the maximum of simulated intensity
+                    wake_intensity_array *= np.max(wake.wake_luminosity_profile)/np.max(wake_intensity_array)
+
+                    # Plot the observed wake
+                    self.wakePlot.canvas.axes.plot(-len_array, wake_intensity_array,
+                        label='Observed, site: {:s}'.format(str(self.current_wake_container.site_id)))
+
+                ### ###
+
+                self.wakePlot.canvas.axes.legend()
+
 
 
         self.wakePlot.canvas.axes.set_xlabel('Length behind leading fragment')
@@ -869,8 +1133,6 @@ class MetSimGUI(QMainWindow):
         self.wakePlot.canvas.axes.invert_xaxis()
 
         self.wakePlot.canvas.axes.set_ylim(bottom=0)
-
-        # self.wakePlot.canvas.axes.legend()
 
         self.wakePlot.canvas.axes.set_title('Wake')
 
@@ -920,7 +1182,14 @@ class MetSimGUI(QMainWindow):
         # Run the simulation
         results_list, wake_results = runSimulation(self.const, compute_wake=self.wake_on)
 
-        print('Simulation runtime: {:d} ms'.format(int(1000*(time.time() - t1))))
+        sim_runtime = time.time() - t1
+
+        if sim_runtime < 0.5:
+            print('Simulation runtime: {:d} ms'.format(int(1000*sim_runtime)))
+        elif sim_runtime < 100:
+            print('Simulation runtime: {:.2f} s'.format(sim_runtime))
+        else:
+            print('Simulation runtime: {:.2f} min'.format(sim_runtime/60))
 
         # Store simulation results
         self.simulation_results = SimulationResults(self.const, results_list, wake_results)
@@ -994,6 +1263,10 @@ if __name__ == "__main__":
     arg_parser.add_argument('-m', '--met', metavar='MET_FILE', \
         help='Load additional observations from a METAL or mirfit .met file.', type=str)
 
+    arg_parser.add_argument('-w', '--wid', metavar='WID_FILES', \
+        help='Load mirfit wid files which will be used for wake plotting. Wildchars can be used, e.g. /path/wid*.txt.', 
+        type=str, nargs='+')
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -1003,19 +1276,9 @@ if __name__ == "__main__":
     app = QApplication([])
 
 
-    # Load a METAL .met file if given
-    met = None
-    if cml_args.met is not None:
-        if os.path.isfile(cml_args.met):
-            met = loadMet(*os.path.split(os.path.abspath(cml_args.met)))
-        else:
-            print('The .met file does not exist:', cml_args.met)
-            sys.exit()
-
-
-
     # Init the MetSimGUI application
-    main_window = MetSimGUI(os.path.abspath(cml_args.traj_pickle), cml_args.load, met=met)
+    main_window = MetSimGUI(os.path.abspath(cml_args.traj_pickle), const_json_file=cml_args.load, \
+        met_path=cml_args.met, wid_files=cml_args.wid)
 
 
     main_window.show()

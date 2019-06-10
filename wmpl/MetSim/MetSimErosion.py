@@ -82,7 +82,7 @@ class Constants(object):
         ### Wake parameters ###
 
         # PSF stddev (m)
-        self.wake_psf = 2
+        self.wake_psf = 1.5
 
         # Wake extension from the leading fragment (m)
         self.wake_extension = 200
