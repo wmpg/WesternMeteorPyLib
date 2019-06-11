@@ -471,6 +471,9 @@ class MetSimGUI(QMainWindow):
                 # Read the wake point
                 n, th, phi, _, _, _, _, intens_sum, amp, r, b, c = list(map(float, line))
 
+                # Skip bad measurements
+                if np.any(np.isnan([th, phi])):
+                    continue
 
                 ### Compute the projection of the wake line of sight to the trajectory ###
 
@@ -502,6 +505,12 @@ class MetSimGUI(QMainWindow):
                     leading_state_vect_dist = state_vect_dist
 
                 wake_container.addPoint(n, th, phi, intens_sum, amp, r, b, c, state_vect_dist, ht)
+
+
+            # If there are no points in the wake container, don't use it
+            if wake_container is not None:
+                if len(wake_container.points) == 0:
+                    wake_container = None
 
             # Compute lengths of the leading fragment
             if wake_container is not None:
@@ -1085,6 +1094,7 @@ class MetSimGUI(QMainWindow):
 
 
         ### PLOT SIMULATED WAKE ###
+        max_luminosity = 1.0
         if sr is not None:
 
             # Find the wake index closest to the given wake height
@@ -1100,34 +1110,36 @@ class MetSimGUI(QMainWindow):
 
                 self.lagPlot.canvas.axes.set_ylim([0, sr.wake_max_lum])
 
+                max_luminosity = np.max(wake.wake_luminosity_profile)
+
 
                 ### ###
 
 
-                ### PLOT OBSERVED WAKE ###
+        ### PLOT OBSERVED WAKE ###
 
-                if self.current_wake_container is not None:
-                    
-                    # Extract array of length and intensity 
-                    len_array = []
-                    wake_intensity_array = []
-                    for wake_pt in self.current_wake_container.points:
-                        len_array.append(wake_pt.leading_frag_length)
-                        wake_intensity_array.append(wake_pt.intens_sum)
+        if self.current_wake_container is not None:
+            
+            # Extract array of length and intensity 
+            len_array = []
+            wake_intensity_array = []
+            for wake_pt in self.current_wake_container.points:
+                len_array.append(wake_pt.leading_frag_length)
+                wake_intensity_array.append(wake_pt.intens_sum)
 
-                    len_array = np.array(len_array)
-                    wake_intensity_array = np.array(wake_intensity_array)
+            len_array = np.array(len_array)
+            wake_intensity_array = np.array(wake_intensity_array)
 
-                    # Normalize the wake intensity to the maximum of simulated intensity
-                    wake_intensity_array *= np.max(wake.wake_luminosity_profile)/np.max(wake_intensity_array)
+            # Normalize the wake intensity to the maximum of simulated intensity
+            wake_intensity_array *= max_luminosity/np.max(wake_intensity_array)
 
-                    # Plot the observed wake
-                    self.wakePlot.canvas.axes.plot(-len_array, wake_intensity_array,
-                        label='Observed, site: {:s}'.format(str(self.current_wake_container.site_id)))
+            # Plot the observed wake
+            self.wakePlot.canvas.axes.plot(-len_array, wake_intensity_array,
+                label='Observed, site: {:s}'.format(str(self.current_wake_container.site_id)))
 
-                ### ###
+        ### ###
 
-                self.wakePlot.canvas.axes.legend()
+        self.wakePlot.canvas.axes.legend()
 
 
 
