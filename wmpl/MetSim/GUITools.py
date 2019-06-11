@@ -14,7 +14,7 @@ class MagnitudeMplWidget(QWidget):
 
         QWidget.__init__(self, parent)
         
-        self.canvas = FigureCanvas(Figure())
+        self.canvas = FigureCanvas(Figure(facecolor='#efefef'))
         
         vertical_layout = QVBoxLayout()
         vertical_layout.addWidget(self.canvas)
@@ -30,7 +30,7 @@ class LagMplWidget(QWidget):
 
         QWidget.__init__(self, parent)
         
-        self.canvas = FigureCanvas(Figure())
+        self.canvas = FigureCanvas(Figure(facecolor='#efefef'))
         
         vertical_layout = QVBoxLayout()
         vertical_layout.addWidget(self.canvas)
@@ -47,7 +47,7 @@ class WakeMplWidget(QWidget):
 
         QWidget.__init__(self, parent)
         
-        self.canvas = FigureCanvas(Figure())
+        self.canvas = FigureCanvas(Figure(facecolor='#efefef'))
         
         vertical_layout = QVBoxLayout()
         vertical_layout.addWidget(self.canvas)
