@@ -543,7 +543,7 @@ class MetSimGUI(QMainWindow):
         
         # If there are no magnitudes, assume that the initial mass is 0.1 grams
         if not time_mag_arr:
-            return 0.1/1000
+            return self.const.m_init
 
 
         # Sort array by time

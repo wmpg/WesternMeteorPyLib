@@ -94,10 +94,10 @@ class Constants(object):
         ### Main meteoroid properties ###
 
         # Meteoroid bulk density (kg/m^3)
-        self.rho = 200
+        self.rho = 1000
 
         # Initial meteoroid mass (kg)
-        self.m_init = 1e-4
+        self.m_init = 2e-5
 
         # Initial meteoroid veocity (m/s)
         self.v_init = 23570
@@ -144,8 +144,8 @@ class Constants(object):
         self.erosion_mass_index = 2.5
 
         # Mass range for grains (kg)
-        self.erosion_mass_min = 1.2e-11
-        self.erosion_mass_max = 6.0e-10
+        self.erosion_mass_min = 1.0e-11
+        self.erosion_mass_max = 5.0e-10
 
         ###
 
@@ -156,13 +156,13 @@ class Constants(object):
         self.disruption_on = True
 
         # Meteoroid compressive strength (Pa)
-        self.compressive_strength = 1500
+        self.compressive_strength = 2000
 
         # Erosion coefficient to use after disruption
         self.disruption_erosion_coeff = self.erosion_coeff
 
         # Disruption mass distribution index
-        self.disruption_mass_index = 1.8
+        self.disruption_mass_index = 2.0
 
 
         # Mass ratio for disrupted fragments as the ratio of the disrupted mass
