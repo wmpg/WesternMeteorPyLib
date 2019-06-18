@@ -1094,7 +1094,8 @@ class MetSimGUI(QMainWindow):
 
 
         ### PLOT SIMULATED WAKE ###
-        max_luminosity = 1.0
+        simulated_integrated_luminosity = 1.0
+        sim_wake_exists = False
         if sr is not None:
 
             # Find the wake index closest to the given wake height
@@ -1105,13 +1106,18 @@ class MetSimGUI(QMainWindow):
 
             if wake is not None:
 
+                sim_wake_exists = True
+
                 # Plot the simulated wake
                 self.wakePlot.canvas.axes.plot(wake.length_array, wake.wake_luminosity_profile, label='Simulated')
 
                 self.lagPlot.canvas.axes.set_ylim([0, sr.wake_max_lum])
 
-                max_luminosity = np.max(wake.wake_luminosity_profile)
-
+                # Compute the area under the simulated wake curve (take only the part after the leading fragment)
+                selected_indices = (wake.length_array > 0) | (wake.length_array < self.const.wake_extension)
+                wake_intensity_array_trunc = wake.wake_luminosity_profile[selected_indices]
+                len_array_trunc = wake.length_array[selected_indices]
+                simulated_integrated_luminosity = np.trapz(wake_intensity_array_trunc, len_array_trunc)
 
                 ### ###
 
@@ -1130,8 +1136,21 @@ class MetSimGUI(QMainWindow):
             len_array = np.array(len_array)
             wake_intensity_array = np.array(wake_intensity_array)
 
-            # Normalize the wake intensity to the maximum of simulated intensity
-            wake_intensity_array *= max_luminosity/np.max(wake_intensity_array)
+            # Compute the area under the observed wake curve that is within the simulated range
+            #   (take only the part after the leading fragment)
+            if sim_wake_exists:
+                selected_indices = (len_array > 0) | (len_array < self.const.wake_extension)
+                wake_intensity_array_trunc = wake_intensity_array[selected_indices]
+                len_array_trunc = len_array[selected_indices]
+            else:
+                wake_intensity_array_trunc = wake_intensity_array
+                len_array_trunc = len_array
+
+            observed_integrated_luminosity = np.trapz(wake_intensity_array_trunc, len_array_trunc)
+
+
+            # Normalize the wake intensity by the area under the intensity curve
+            wake_intensity_array *= simulated_integrated_luminosity/observed_integrated_luminosity
 
             # Plot the observed wake
             self.wakePlot.canvas.axes.plot(-len_array, wake_intensity_array,
