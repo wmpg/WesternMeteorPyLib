@@ -73,7 +73,6 @@ def loadAsteroidsElements(asteroids_file):
             try:
                 q = float(line[39:45])
             except ValueError:
-                print("Cannot read asteroid: {:s}".format(asteroid_name))
                 continue
 
             e = float(line[107:112])
