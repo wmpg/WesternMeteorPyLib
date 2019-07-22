@@ -2000,7 +2000,7 @@ class Trajectory(object):
         v_init_ht=None, estimate_timing_vel=True, monte_carlo=True, mc_runs=None, mc_pick_multiplier=1, \
         mc_noise_std=1.0, geometric_uncert=False, filter_picks=True, calc_orbit=True, show_plots=True, \
         save_results=True, gravity_correction=True, plot_all_spatial_residuals=False, plot_file_type='png', \
-        traj_id=None):
+        traj_id=None, reject_n_sigma_outliers=3):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -2046,7 +2046,9 @@ class Trajectory(object):
             plot_all_spatial_residuals: [bool] Plot all spatial residuals on one plot (one vs. time, and
                 the other vs. length). False by default.
             plot_file_type: [str] File extansion of the plot image. 'png' by default, can be 'pdf', 'eps', ...
-            traj_id: [str] Trajectory solution identifier.
+            traj_id: [str] Trajectory solution identifier. None by default.
+            reject_n_sigma_outliers: [float] Reject angular outliers that are n sigma outside the fit.
+                This value is 3 (sigma) by default.
 
         """
 
@@ -2119,6 +2121,9 @@ class Trajectory(object):
 
         # Trajectory solution identifier
         self.traj_id = str(traj_id)
+
+        # n sigma outlier rejection
+        self.reject_n_sigma_outliers = reject_n_sigma_outliers
 
         ######################################################################################################
 
@@ -3674,39 +3679,13 @@ class Trajectory(object):
             ### PLOT SPATIAL RESIDUALS PER STATION ###
             ##################################################################################################
 
-
-            # NOTE: It is possible that the gravity drop is not easily visible due to the perspective of the
-            #   observer
-            # # Calculate the gravity acceleration at every point
-            # g = []
-            # for eci in obs.model_eci:
-            #     g.append(G*EARTH.MASS/(vectMag(eci)**2))
-
-            # g = np.array(g)
-
-            # # Generate gravity drop data
-            # grav_drop = -np.sign(obs.time_data - t0)*1/2.0*g*(obs.time_data - t0)**2
-
-            # # Plot the gravity drop
-            # plt.plot(obs.time_data, grav_drop, c='red', linestyle='--', linewidth=1.0, label='Gravity drop')
-
-            # Calculate root mean square of the residuals
-            v_res_rms = RMSD(obs.v_residuals)
-            #v_res_grav_rms = RMSD(obs.v_residuals - grav_drop)
-            h_res_rms = RMSD(obs.h_residuals)
-
-            # # Plot vertical residuals
-            # plt.scatter(obs.time_data, obs.v_residuals, c='red', \
-            #     label='Vertical, RMSD = {:.2f}\nw/ gravity, RMSD = {:.2f}'.format(v_res_rms, v_res_grav_rms), 
-            #     zorder=3, s=2)
-
             # Plot vertical residuals
             plt.scatter(obs.time_data, obs.v_residuals, c='red', \
-                label='Vertical, RMSD = {:.2f} m'.format(v_res_rms), zorder=3, s=2)
+                label='Vertical, RMSD = {:.2f} m'.format(obs.v_res_rms), zorder=3, s=2)
 
             # Plot horizontal residuals
             plt.scatter(obs.time_data, obs.h_residuals, c='b', \
-                label='Horizontal, RMSD = {:.2f} m'.format(h_res_rms), zorder=3, s=2)
+                label='Horizontal, RMSD = {:.2f} m'.format(obs.h_res_rms), zorder=3, s=2)
 
             # Mark ignored points
             if np.any(obs.ignore_list):
@@ -3757,17 +3736,15 @@ class Trajectory(object):
 
             for obs in self.observations:
 
-                # Calculate root mean square of the residuals
-                v_res_rms = RMSD(obs.v_residuals)
-                h_res_rms = RMSD(obs.h_residuals)
-
                 # Plot vertical residuals
                 vres_plot = plt.scatter(obs.time_data, obs.v_residuals, marker='o', s=4, \
-                    label='{:s}, vertical, RMSD = {:.2f} m'.format(str(obs.station_id), v_res_rms), zorder=3)
+                    label='{:s}, vertical, RMSD = {:.2f} m'.format(str(obs.station_id), obs.v_res_rms), \
+                    zorder=3)
 
                 # Plot horizontal residuals
                 plt.scatter(obs.time_data, obs.h_residuals, c=vres_plot.get_facecolor(), marker='+', \
-                    label='{:s}, horizontal, RMSD = {:.2f} m'.format(str(obs.station_id), h_res_rms), zorder=3)
+                    label='{:s}, horizontal, RMSD = {:.2f} m'.format(str(obs.station_id), obs.h_res_rms), \
+                    zorder=3)
 
                 # Mark ignored points
                 if np.any(obs.ignore_list):
@@ -3813,18 +3790,15 @@ class Trajectory(object):
 
             for obs in self.observations:
 
-                # Calculate root mean square of the residuals
-                v_res_rms = RMSD(obs.v_residuals)
-                h_res_rms = RMSD(obs.h_residuals)
-
                 # Plot vertical residuals
                 vres_plot = plt.scatter(obs.state_vect_dist/1000, obs.v_residuals, marker='o', s=4, \
-                    label='{:s}, vertical, RMSD = {:.2f} m'.format(str(obs.station_id), v_res_rms), zorder=3)
+                    label='{:s}, vertical, RMSD = {:.2f} m'.format(str(obs.station_id), obs.v_res_rms), \
+                    zorder=3)
 
                 # Plot horizontal residuals
                 plt.scatter(obs.state_vect_dist/1000, obs.h_residuals, c=vres_plot.get_facecolor(), 
                     marker='+', label='{:s}, horizontal, RMSD = {:.2f} m'.format(str(obs.station_id), \
-                        h_res_rms), zorder=3)
+                        obs.h_res_rms), zorder=3)
 
                 # Mark ignored points
                 if np.any(obs.ignore_list):
@@ -3932,12 +3906,11 @@ class Trajectory(object):
             for obs in self.observations:
 
                 # Calculate root mean square of the total residuals
-                v_res_rms = RMSD(obs.v_residuals)
-                h_res_rms = RMSD(obs.h_residuals)
-                total_res_rms = np.sqrt(v_res_rms**2 + h_res_rms**2)
+                total_res_rms = np.sqrt(obs.v_res_rms**2 + obs.h_res_rms**2)
 
                 # Compute total residuals
-                total_residuals = np.sqrt(obs.v_residuals**2 + obs.h_residuals**2)
+                total_residuals = np.sqrt(obs.v_residuals[obs.ignore_list == 0]**2 \
+                    + obs.h_residuals[obs.ignore_list == 0]**2)
 
                 # Plot total residuals
                 plt.scatter(total_residuals, obs.meas_ht/1000, marker='o', s=4, \
@@ -4070,7 +4043,6 @@ class Trajectory(object):
 
                 plt.scatter(ignored_lag, ignored_times, facecolors='k', edgecolors=plt_handle[0].get_color(), 
                     marker='o', s=8, zorder=4, label='Station: {:s} ignored points'.format(str(obs.station_id)))
-
 
 
 
@@ -4435,6 +4407,7 @@ class Trajectory(object):
 
         ### PLOT ABSOLUTE MAGNITUDES, IF ANY ###
 
+        first_ignored_plot = True
         if np.any([obs.absolute_magnitudes is not None for obs in self.observations]):
 
             # Go through all observations
@@ -4444,10 +4417,24 @@ class Trajectory(object):
                 if obs.absolute_magnitudes is not None:
 
                     # Filter out None absolute magnitudes
-                    filter_mask = np.where([abs_mag is not None for abs_mag in obs.absolute_magnitudes])[0]
+                    filter_mask = np.array([abs_mag is not None for abs_mag in obs.absolute_magnitudes])
 
-                    plt.plot(obs.time_data[filter_mask], obs.absolute_magnitudes[filter_mask], \
-                        marker='x', label=str(obs.station_id), zorder=3)
+                    # Extract data that is not ignored
+                    used_times = obs.time_data[filter_mask & (obs.ignore_list == 0)]
+                    used_magnitudes = obs.absolute_magnitudes[filter_mask & (obs.ignore_list == 0)]
+
+                    plt_handle = plt.plot(used_times, used_magnitudes, marker='x', \
+                        label=str(obs.station_id), zorder=3)
+
+                    # Mark ignored absolute magnitudes
+                    if np.any(obs.ignore_list):
+
+                        # Extract data that is ignored
+                        ignored_times = obs.time_data[filter_mask & (obs.ignore_list > 0)]
+                        ignored_magnitudes = obs.absolute_magnitudes[filter_mask & (obs.ignore_list > 0)]
+
+                        plt.scatter(ignored_times, ignored_magnitudes, facecolors='k', \
+                            edgecolors=plt_handle[0].get_color(), marker='o', s=8, zorder=4)
 
 
             plt.xlabel('Time (s)')
@@ -5116,11 +5103,12 @@ class Trajectory(object):
 
                 picks_rejected = 0
 
-                # Remove all picks which deviate more than 3 sigma in angular residuals
+                # Remove all picks which deviate more than N sigma in angular residuals
                 for obs in self.observations:
 
-                    # Find the indicies of picks which are within 3 sigma
-                    good_picks = obs.ang_res < (np.mean(obs.ang_res) + 3*obs.ang_res_std)
+                    # Find the indicies of picks which are within N sigma
+                    good_picks = obs.ang_res < (np.mean(obs.ang_res) \
+                        + self.reject_n_sigma_outliers*obs.ang_res_std)
 
                     # If the number of good picks is below 4, do not remove any picks
                     if np.count_nonzero(good_picks) < 4:
@@ -5262,7 +5250,7 @@ class Trajectory(object):
 
                     # Save trajectory report
                     traj_best.saveReport(mc_output_dir, mc_file_name + '_report.txt', \
-                        uncertanties=uncertanties, verbose=True)
+                        uncertanties=uncertanties, verbose=self.verbose)
 
                 # Save and show plots
                 traj_best.savePlots(mc_output_dir, mc_file_name, show_plots=self.show_plots)

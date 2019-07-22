@@ -129,6 +129,45 @@ def getRotMatrix(v1, v2):
     return R
 
 
+def angleBetweenVectors(a, b):
+    """ Compute the angle between two vectors. 
+    
+    Arguments:
+        a: [ndarray] First vector.
+        b: [ndarray] Second vector.
+
+    Return:
+        [float] Angle between a and b (radians).
+    """
+
+    return np.arccos(np.dot(a, b)/(vectMag(a)*vectMag(b)))
+
+
+def vectorFromPointDirectionAndAngle(pos, dir_hat, angle):
+    """ Compute a new vector given an initial position, direction and and angle between the initial and the
+    final position.
+
+    See link for a detailed explanation: 
+    https://math.stackexchange.com/questions/3297191/finding-the-direction-vector-magnitude-from-position-and-angle
+
+    Arguments:
+        pos: [ndarray] Initial position vector.
+        dir_path: [ndarray] Direction unit vector.
+        angle: [float] Angle between the inital and the final position vectors (radians).
+
+    Return:
+        [ndarray] Final position vector.
+    """
+
+    dir_hat = vectNorm(dir_hat)
+
+    # Compute the scalar which will scale the unit direction vector
+    beta = np.arccos(np.dot(dir_hat, pos)/vectMag(pos)) - angle
+    k = vectMag(pos)*np.sin(angle)/np.sin(beta)
+
+    return pos + k*dir_hat
+    
+
 ##############################################################################################################
 
 
