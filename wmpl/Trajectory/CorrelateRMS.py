@@ -200,13 +200,19 @@ class RMSDataHandle(object):
         """ Init meteor observations from the FTPdetectinfo file and recalibrated platepars. """
 
         # Load station coordinates
-        pp_dict = platepars_recalibrated_dict[list(platepars_recalibrated_dict.keys())[0]]
-        pp = PlateparDummy(**pp_dict)
-        stations_dict = {station_code: [np.radians(pp.lat), np.radians(pp.lon), pp.elev]}
+        if len(list(platepars_recalibrated_dict.keys())):
+            
+            pp_dict = platepars_recalibrated_dict[list(platepars_recalibrated_dict.keys())[0]]
+            pp = PlateparDummy(**pp_dict)
+            stations_dict = {station_code: [np.radians(pp.lat), np.radians(pp.lon), pp.elev]}
 
-        # Load the FTPdetectinfo file
-        meteor_list = loadFTPDetectInfo(ftpdetectinfo_path, stations_dict, \
-            join_same_station_observations=False)
+            # Load the FTPdetectinfo file
+            meteor_list = loadFTPDetectInfo(ftpdetectinfo_path, stations_dict, \
+                join_same_station_observations=False)
+
+        else:
+            meteor_list = []
+
 
         return meteor_list
 
