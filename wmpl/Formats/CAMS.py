@@ -15,7 +15,7 @@ from wmpl.Utils.TrajConversions import J2000_JD, date2JD, equatorialCoordPrecess
     jd2Date
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.Trajectory.GuralTrajectory import GuralTrajectory
-from wmpl.Utils.Math import averageClosePoints
+from wmpl.Utils.Math import averageClosePoints, angleBetweenSphericalCoords
 from wmpl.Utils.Physics import calcMass
 
 
@@ -231,7 +231,7 @@ def loadCameraSites(camerasites_file_name):
 
 
 def loadFTPDetectInfo(ftpdetectinfo_file_name, stations, time_offsets=None, \
-        join_same_station_observations=True):
+        join_broken_meteors=True):
     """
 
     Arguments:
@@ -245,8 +245,7 @@ def loadFTPDetectInfo(ftpdetectinfo_file_name, stations, time_offsets=None, \
     Keyword arguments:
         time_offsets: [dict] (key, value) pairs of (stations_id, time_offset) for every station. None by 
             default.
-        join_same_station_observations: [bool] Concatenate all observations from the same station. True by \
-            default.
+        join_broken_meteors: [bool] Join meteors broken across 2 FF files.
 
 
     Return:
@@ -426,64 +425,95 @@ def loadFTPDetectInfo(ftpdetectinfo_file_name, stations, time_offsets=None, \
 
 
     ### Concatenate observations across different FF files ###
-    if join_same_station_observations:
+    if join_broken_meteors:
 
-        new_meteor_list = []
+        # Go through all meteors and compare the next observation
+        merged_indices = []
+        for i in range(len(meteor_list)):
 
-        # Find unique station codes
-        station_codes = [met.station_id for met in meteor_list]
-        station_codes_unique = np.unique(station_codes)
-
-        # If there are duplicates, concatenate those observations
-        if len(station_codes) > len(station_codes_unique):
-
-            for station_id in station_codes_unique:
-
-                # Get all observations from this station
-                metobs_list = [met for met in meteor_list if met.station_id == station_id]
-
-                # Check if there are more than 1 observation from this station and concatenate
-                if len(metobs_list) > 1:
-
-                    # Find the first observation in time
-                    met_first = metobs_list[np.argmin([met.jdt_ref for met in metobs_list])]
-
-                    # Append the second observation to the first one (assumption here is that the meteor
-                    #   can only span 2 FF files)
-                    met2 = metobs_list[1]
-
-                    # Recompute the frames
-                    frames = 256.0 + met2.frames
-
-                    # Recompute the time data
-                    time_data = frames/met_first.fps
-
-                    # Add the observations to first meteor object
-                    met_first.frames = np.append(met_first.frames, frames)
-                    met_first.time_data = np.append(met_first.time_data, time_data)
-                    met_first.azim_data = np.append(met_first.azim_data, met2.azim_data)
-                    met_first.elev_data = np.append(met_first.elev_data, met2.elev_data)
-                    met_first.ra_data = np.append(met_first.ra_data, met2.ra_data)
-                    met_first.dec_data = np.append(met_first.dec_data, met2.dec_data)
-                    met_first.mag_data = np.append(met_first.mag_data, met2.mag_data)
+            # If the next observation was merged, skip it
+            if (i + 1) in merged_indices:
+                continue
 
 
-                    # Sort all observations by time
-                    met_first.finish()
+            # Get the current meteor observation
+            met1 = meteor_list[i]
 
 
-                else:
-                    met_first = metobs_list[0]
+            if i >= (len(meteor_list) - 1):
+                break
 
 
-                # Add the modified meteor observations object to updated list
-                new_meteor_list.append(met_first)
+            # Get the next meteor observation
+            met2 = meteor_list[i + 1]
+            
+            # Compare only same station observations
+            if met1.station_id != met2.station_id:
+                continue
 
 
-            # Set the updated meteor list as the one that will be retured by the function
-            meteor_list = new_meteor_list
+            # Extract frame number
+            met1_frame_no = int(met1.ff_name.split("_")[-1].split('.')[0])
+            met2_frame_no = int(met2.ff_name.split("_")[-1].split('.')[0])
 
-        ### ###
+            # Skip if the next FF is not exactly 256 frames later
+            if met2_frame_no != (met1_frame_no + 256):
+                continue
+
+
+            # Check for frame continouty
+            if (met1.frames[-1] < 254) or (met2.frames[0] > 2):
+                continue
+
+
+            ### Check if the next frame is close to the predicted position ###
+
+            # Compute angular distance between the last 2 points on the first FF
+            ang_dist = angleBetweenSphericalCoords(met1.dec_data[-2], met1.ra_data[-2], met1.dec_data[-1], \
+                met1.ra_data[-1])
+
+            # Compute frame difference between the last frame on the 1st FF and the first frame on the 2nd FF
+            df = met2.frames[0] + (256 - met1.frames[-1])
+
+            # Skip the pair if the angular distance between the last and first frames is 2x larger than the 
+            #   frame difference times the expected separation
+            ang_dist_between = angleBetweenSphericalCoords(met1.dec_data[-1], met1.ra_data[-1], \
+                met2.dec_data[0], met2.ra_data[0])
+
+            if ang_dist_between > 2*df*ang_dist:
+                continue
+
+            ### ###
+
+
+            ### If all checks have passed, merge observations ###
+
+            # Recompute the frames
+            frames = 256.0 + met2.frames
+
+            # Recompute the time data
+            time_data = frames/met1.fps
+
+            # Add the observations to first meteor object
+            met1.frames = np.append(met1.frames, frames)
+            met1.time_data = np.append(met1.time_data, time_data)
+            met1.azim_data = np.append(met1.azim_data, met2.azim_data)
+            met1.elev_data = np.append(met1.elev_data, met2.elev_data)
+            met1.ra_data = np.append(met1.ra_data, met2.ra_data)
+            met1.dec_data = np.append(met1.dec_data, met2.dec_data)
+            met1.mag_data = np.append(met1.mag_data, met2.mag_data)
+
+            # Sort all observations by time
+            met1.finish()
+
+            # Indicate that the next observation is to be skipped
+            merged_indices.append(i + 1)
+
+            ### ###
+
+
+        # Removed merged meteors from the list
+        meteor_list = [element for i, element in enumerate(meteor_list) if i not in merged_indices]
 
 
 

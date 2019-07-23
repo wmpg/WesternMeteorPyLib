@@ -207,14 +207,14 @@ class RMSDataHandle(object):
             stations_dict = {station_code: [np.radians(pp.lat), np.radians(pp.lon), pp.elev]}
 
             # Load the FTPdetectinfo file
-            meteor_list = loadFTPDetectInfo(ftpdetectinfo_path, stations_dict, \
-                join_same_station_observations=False)
+            meteor_list = loadFTPDetectInfo(ftpdetectinfo_path, stations_dict)
 
         else:
             meteor_list = []
 
 
         return meteor_list
+
 
 
     def loadUnprocessedObservations(self, processing_list):
@@ -305,6 +305,7 @@ class RMSDataHandle(object):
         return self.unprocessed_observations
 
 
+
     def findTimePairs(self, met_obs, max_toffset):
         """ Finds pairs in time between the given meteor observations and all other observations from 
             different stations. 
@@ -355,6 +356,11 @@ class RMSDataHandle(object):
         traj.save_results = False
 
 
+
+    def markObservationAsProcessed(self, met_obs):
+        """ Mark the given meteor observation as processed. """
+
+        self.db.addProcessedDir(met_obs.station_code, met_obs.rel_proc_path)
 
 
 

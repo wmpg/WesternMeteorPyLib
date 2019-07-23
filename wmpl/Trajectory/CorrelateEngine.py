@@ -34,7 +34,7 @@ class TrajectoryConstraints(object):
 
 
         # Minimum convergence angle (deg)
-        self.min_qc = 2.0
+        self.min_qc = 3.0
 
 
         ### Velocity filters ###
@@ -81,13 +81,13 @@ class TrajectoryConstraints(object):
         ### MC solver settings ###
 
         # MC runs to run for error estimation
-        self.error_mc_runs = 10
+        self.error_mc_runs = 5
 
         # Convergence angle below which more MC runs will be used (deg)
         self.low_qc_threshold = 10.0
 
         # Number of MC runs to run for low Qc trajectories
-        self.low_qc_mc_runs = 50
+        self.low_qc_mc_runs = 20
 
         ### ###
 
@@ -244,7 +244,7 @@ class TrajectoryCorrelator(object):
         # If the two begin and end points are fainter by N magnitudes from the median, ignore them
         ignore_list = np.zeros_like(mag_data)
         if len(mag_data) > 5:
-            
+
             median_mag = np.median(mag_data)
             indices = [0, 1, -1, -2]
 
@@ -288,15 +288,6 @@ class TrajectoryCorrelator(object):
         ra_cand, dec_cand = plane_intersection.radiant_eq
         print("Candidate radiant: RA = {:.3f}, Dec = {:+.3f}".format(np.degrees(ra_cand), \
             np.degrees(dec_cand)))
-
-
-        # Check if convergence angle
-        qc = np.degrees(plane_intersection.conv_angle)
-        if qc < self.traj_constraints.min_qc:
-            print("Too small convergence angle: {:.1f} < {:.1f} deg".format(qc, \
-                self.traj_constraints.min_qc))
-
-            return None
         
 
         ### Compute meteor begin and end points
@@ -359,7 +350,7 @@ class TrajectoryCorrelator(object):
         v_avg = (vel1 + vel2)/2
         if (v_avg < self.traj_constraints.v_avg_min) or (v_avg > self.traj_constraints.v_avg_max):
             
-            print("Average veocity outside velocity bounds: {:.1f} < {:.1f} < {:.1f}".format(self.traj_constraints.v_avg, \
+            print("Average veocity outside velocity bounds: {:.1f} < {:.1f} < {:.1f}".format(self.traj_constraints.v_avg_min, \
                 v_avg, self.traj_constraints.v_avg_max))
             return None
 
@@ -374,8 +365,12 @@ class TrajectoryCorrelator(object):
     def run(self):
         """ Run meteor corellation using available data. """
 
+        # Get unprocessed observations and sort them by time
+        unprocessed_observations = self.dh.getUnprocessedObservations()
+        unprocessed_observations = sorted(unprocessed_observations, key=lambda x: x.reference_dt)
+
         # Go through all unpaired and unprocessed meteor observations
-        for met_obs in self.dh.getUnprocessedObservations():
+        for met_obs in unprocessed_observations:
 
             # Skip observations that were paired and processed in the meantime
             if met_obs.processed:
@@ -439,6 +434,15 @@ class TrajectoryCorrelator(object):
                 continue
 
 
+            # Check if the maximum convergence angle is large enough
+            qc_max = np.degrees(max([entry[2].conv_angle for entry in matched_observations]))
+            if qc_max < self.traj_constraints.min_qc:
+                print("Max convergence angle too small: {:.1f} < {:.1f} deg".format(qc_max, \
+                    self.traj_constraints.min_qc))
+
+                continue
+
+
             ### Solve the trajectory ###
 
             print()
@@ -460,7 +464,7 @@ class TrajectoryCorrelator(object):
             # Init the solver
             traj = Trajectory(datetime2JD(met_obs.reference_dt), \
                 max_toffset=self.traj_constraints.max_toffset, meastype=1, \
-                v_init_part=self.v_init_part, monte_carlo=False, mc_runs=mc_runs, show_plots=False, \
+                v_init_part=self.v_init_part, monte_carlo=True, mc_runs=mc_runs, show_plots=False, \
                 verbose=False, save_results=False, reject_n_sigma_outliers=2)
 
             # Feed the observations into the trajectory solver
@@ -469,13 +473,21 @@ class TrajectoryCorrelator(object):
                 traj.station_count += 1
 
             # Run the solver
-            traj.run()
-
+            traj_status = traj.run()
             
             # Mark observations as processed
             for _, met_obs_temp, _ in matched_observations:
                 met_obs_temp.processed = True
+                self.dh.markObservationAsProcessed(met_obs_temp)
 
+            
+            # If the trajectory estimation failed, skip this trajectory
+            if traj_status is None:
+                print("Trajectory estimation failed!")
+                continue
+
+            # use the best trajectory solution
+            traj = traj_status
 
             # If the orbits couldn't be computed, skip saving the data files
             if traj.orbit.ra_g is not None:

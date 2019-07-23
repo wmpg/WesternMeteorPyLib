@@ -149,6 +149,10 @@ class ObservedPoints(object):
         ### CALCULATED DATA ###
         ######################################################################################################
 
+        # Flag to indicate that the station should be ignored for timing and velocity estimation becaue
+        #   it doesn't overlap in time with other stations
+        self.no_time_overlap = False
+
         # Angle between the station, the state vector, and the trajectory
         self.incident_angle = None
 
@@ -1040,6 +1044,9 @@ def timingResiduals(params, observations, t_ref_station, weights=None, ret_stdde
     cost_point_count = 0
     weights_sum = 1e-10
 
+    # Keep track of stations with confirmed overlaps
+    confirmed_overlaps = []
+
     # Go through all pairs of observations (i.e. stations)
     for i in range(len(observations)):
 
@@ -1047,11 +1054,21 @@ def timingResiduals(params, observations, t_ref_station, weights=None, ret_stdde
         if observations[i].ignore_station:
             continue
 
+        # Skip stations with no time overlap
+        if observations[i].no_time_overlap:
+            continue
+
         for j in range(len(observations)):
 
+            
             # Skip ignored stations
             if observations[j].ignore_station:
                 continue
+
+            # Skip stations with no time overlap
+            if observations[j].no_time_overlap:
+                continue
+
 
             # Skip pairing the same observations again
             if j <= i:
@@ -1075,6 +1092,11 @@ def timingResiduals(params, observations, t_ref_station, weights=None, ret_stdde
             if len(common_pts[0]) < 4:
                 continue
 
+
+            # Keep track of stations with confirmed overlaps
+            confirmed_overlaps.append(observations[i].station_id)
+            confirmed_overlaps.append(observations[j].station_id)
+            
 
             # Take only the common points
             time2 = time2[common_pts]
@@ -1114,6 +1136,14 @@ def timingResiduals(params, observations, t_ref_station, weights=None, ret_stdde
 
             # Add the total number of points to the cost counter
             cost_point_count += len(z)
+
+
+        # Exclude stations with no time overlap with other stations
+        if (len(observations) > 2):
+            confirmed_overlaps = list(set(confirmed_overlaps))
+            for obs in observations:
+                if obs.station_id not in confirmed_overlaps:
+                    obs.no_time_overlap = True
 
 
     # If no points were compared, return infinite
@@ -1533,7 +1563,8 @@ def _MCTrajSolve(i, traj, observations):
 
 
 
-def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1, geometric_uncert=False):
+def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1, geometric_uncert=False, \
+    plot_results=True):
     """ Estimates uncertanty in the trajectory solution by doing Monte Carlo runs. The MC runs are done 
         in parallel on all available computer cores.
 
@@ -1552,6 +1583,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
         geometric_uncert: [bool] If True, all MC runs will be taken to estimate the uncertainty, not just
             the ones with the better cost function value than the pure geometric solution. Use this when
             the lag is not reliable.
+        plot_results: [bool] Plot the trajectory and orbit spread. True by default.
     """
 
 
@@ -1727,7 +1759,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
     # Calculate the standard deviation of every trajectory parameter
     uncertanties = calcMCUncertanties(mc_results, traj_best)
 
-    print('Computing covariance matices...')
+    print('Computing covariance matrices...')
 
     # Calculate orbital and inital state vector covariance matrices
     traj_best.orbit_cov, traj_best.state_vect_cov = calcCovMatrices(mc_results)
@@ -2505,6 +2537,10 @@ class Trajectory(object):
             if obs.ignore_station:
                 continue
 
+            # Skip stations with no time overlap
+            if obs.no_time_overlap:
+                continue
+
 
             # Skip stations with weight 0
             if w <= 0:
@@ -2763,6 +2799,9 @@ class Trajectory(object):
 
                 # Skip ignored stations
                 if obs.ignore_station:
+                    continue
+
+                if obs.no_time_overlap:
                     continue
 
                 times.append(obs.time_data[obs.ignore_list == 0])
@@ -3045,7 +3084,8 @@ class Trajectory(object):
 
 
         # Find the highest beginning height
-        beg_hts = [obs.rbeg_ele for obs in self.observations if obs.ignore_station == False]
+        beg_hts = [obs.rbeg_ele for obs in self.observations if (obs.ignore_station == False) \
+            and (obs.no_time_overlap == False)]
         first_begin = beg_hts.index(max(beg_hts))
 
         # Set the coordinates of the height point as the first point
@@ -3056,7 +3096,8 @@ class Trajectory(object):
 
 
         # Find the lowest ending height
-        end_hts = [obs.rend_ele for obs in self.observations if obs.ignore_station == False]
+        end_hts = [obs.rend_ele for obs in self.observations if (obs.ignore_station == False) \
+            and (obs.no_time_overlap == False)]
         last_end = end_hts.index(min(end_hts))
 
         # Set coordinates of the lowest point as the last point
@@ -3203,6 +3244,9 @@ class Trajectory(object):
 
             # Skip ignored stations
             if obs.ignore_station:
+                continue
+
+            if obs.no_time_overlap:
                 continue
 
             # Calculate the average velocity, ignoring ignored points
@@ -3514,12 +3558,14 @@ class Trajectory(object):
         out_str += "Stations\n"
         out_str += "--------\n"
 
-        out_str += "        ID, Lon +E (deg), Lat +N (deg),  Ht (m), Jacchia a1, Jacchia a2,  Beg Ht (m),  End Ht (m), +/- Obs ang (deg), +/- V (m), +/- H (m), Persp. angle (deg), Weight\n"
+        out_str += "        ID, Ignored, Time overlap, Lon +E (deg), Lat +N (deg),  Ht (m), Jacchia a1, Jacchia a2,  Beg Ht (m),  End Ht (m), +/- Obs ang (deg), +/- V (m), +/- H (m), Persp. angle (deg), Weight\n"
         
         for obs in self.observations:
 
             station_info = []
             station_info.append("{:>10s}".format(str(obs.station_id)))
+            station_info.append("{:>7s}".format(str(obs.ignore_station)))
+            station_info.append("{:>12s}".format(str(not obs.no_time_overlap)))
             station_info.append("{:>12.6f}".format(np.degrees(obs.lon)))
             station_info.append("{:>12.6f}".format(np.degrees(obs.lat)))
             station_info.append("{:>7.2f}".format(obs.ele))
@@ -5056,6 +5102,11 @@ class Trajectory(object):
 
 
 
+        # If the stations have no time overlap at all, skip further computations
+        if len([obs for obs in self.observations if not obs.no_time_overlap]) == 0:
+            return None
+
+
         # Do a Jacchia exponential fit to the lag, per every station
         self.jacchia_fit = self.fitJacchiaLag(self.observations)
 
@@ -5196,7 +5247,7 @@ class Trajectory(object):
             # Do a Monte Carlo estimate of the uncertanties in all calculated parameters
             traj_best, uncertanties = monteCarloTrajectory(self, mc_runs=self.mc_runs, \
                 mc_pick_multiplier=self.mc_pick_multiplier, noise_sigma=self.mc_noise_std, \
-                geometric_uncert=self.geometric_uncert)
+                geometric_uncert=self.geometric_uncert, plot_results=self.save_results)
 
 
             # Set the covariance matrix to the initial trajectory, so it will be reported in the report
