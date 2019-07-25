@@ -13,6 +13,7 @@ import copy
 import datetime
 
 import numpy as np
+import matplotlib
 
 from wmpl.Formats.CAMS import loadFTPDetectInfo
 from wmpl.Trajectory.CorrelateEngine import TrajectoryCorrelator, TrajectoryConstraints
@@ -417,6 +418,10 @@ contain data folders. Data folders should have FTPdetectinfo files together with
 
     # Init the data handler
     data_handle = RMSDataHandle(cml_args.dir_path)
+
+
+    # Set matplotlib for headless running
+    matplotlib.use('Agg')
 
 
     # Init trajectory constraints
