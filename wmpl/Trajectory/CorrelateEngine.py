@@ -6,6 +6,7 @@ import os
 import datetime
 
 import numpy as np
+import matplotlib
 
 from wmpl.Trajectory.Trajectory import ObservedPoints, PlaneIntersection, Trajectory
 from wmpl.Utils.Earth import greatCircleDistance
@@ -14,6 +15,9 @@ from wmpl.Utils.Math import vectNorm, vectMag, angleBetweenVectors, vectorFromPo
 from wmpl.Utils.TrajConversions import J2000_JD, geo2Cartesian, cartesian2Geo, raDec2AltAz, altAz2RADec, \
     raDec2ECI, datetime2JD, equatorialCoordPrecession_vect
 
+
+# Set matplotlib for headless running
+matplotlib.use('Agg')
 
 
 
