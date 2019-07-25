@@ -1768,7 +1768,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
     ### PLOT RADIANT SPREAD (Vg color and length stddev) ###
     ##########################################################################################################
 
-    if traj.orbit is not None:
+    if (traj.orbit is not None) and plot_results:
 
         ra_g_list = np.array([traj_temp.orbit.ra_g for traj_temp in mc_results])
         dec_g_list = np.array([traj_temp.orbit.dec_g for traj_temp in mc_results])
@@ -1854,7 +1854,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
     ### PLOT ORBITAL ELEMENTS SPREAD ###
     ##########################################################################################################
 
-    if traj.orbit is not None:
+    if (traj.orbit is not None) and plot_results:
 
         a_list = np.array([traj_temp.orbit.a for traj_temp in mc_results])
         incl_list = np.array([traj_temp.orbit.i for traj_temp in mc_results])
