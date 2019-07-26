@@ -12,8 +12,8 @@ import json
 import copy
 import datetime
 
-import numpy as np
 import matplotlib
+import numpy as np
 
 from wmpl.Formats.CAMS import loadFTPDetectInfo
 from wmpl.Trajectory.CorrelateEngine import TrajectoryCorrelator, TrajectoryConstraints
@@ -173,6 +173,8 @@ class RMSDataHandle(object):
 
         processing_list = []
 
+        skipped_dirs = 0
+
         # Go through all station directories
         for station_name in station_list:
 
@@ -186,12 +188,18 @@ class RMSDataHandle(object):
             for night_name in os.listdir(station_path):
 
                 night_path = os.path.join(station_path, night_name)
+                night_path_rel = os.path.join(station_name, night_name)
 
                 # If the night path is not in the processed list, add it to the processing list
-                if night_path not in self.db.processed_dirs[station_name]:
-                    night_path_rel = os.path.join(station_name, night_name)
+                if night_path_rel not in self.db.processed_dirs[station_name]:
                     processing_list.append([station_name, night_path_rel, night_path])
 
+                else:
+                    skipped_dirs += 1
+
+
+        if skipped_dirs:
+            print("Skipped {:d} processed directories".format(skipped_dirs))
 
         return processing_list
 
@@ -249,6 +257,8 @@ class RMSDataHandle(object):
                 self.db.addProcessedDir(station_code, rel_proc_path)
 
                 continue
+
+            self.db.save()
 
 
             # Load platepars
@@ -329,6 +339,7 @@ class RMSDataHandle(object):
             met_obs2_mean_dt = met_obs2.reference_dt + datetime.timedelta(seconds=np.mean([entry.time_rel \
                 for entry in met_obs2.data]))
 
+
             # Take observations which are within the given time window
             if abs((met_obs_mean_dt - met_obs2_mean_dt).total_seconds()) <= max_toffset:
                 found_pairs.append(met_obs2)
@@ -366,7 +377,14 @@ class RMSDataHandle(object):
 
 
     def finish(self):
-        pass
+        """ Finish the processing run. """
+
+        # Save the processed directories to the DB file
+        self.db.save()
+
+        # Save the list of processed meteor observations
+
+        
 
 
 
@@ -397,7 +415,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     arg_parser.add_argument('dir_path', type=str, help='Path to the data directory. Trajectory helper files will be stored here as well.')
 
     arg_parser.add_argument('-t', '--maxtoffset', metavar='MAX_TOFFSET', \
-        help='Maximum time offset between the stations. Default is 5 seconds.', type=float, default=5.0)
+        help='Maximum time offset between the stations. Default is 5 seconds.', type=float, default=10.0)
 
     arg_parser.add_argument('-s', '--maxstationdist', metavar='MAX_STATION_DIST', \
         help='Maximum distance (km) between stations of paired meteors. Default is 300 km.', type=float, \

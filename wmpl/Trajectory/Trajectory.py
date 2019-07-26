@@ -1564,7 +1564,7 @@ def _MCTrajSolve(i, traj, observations):
 
 
 def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1, geometric_uncert=False, \
-    plot_results=True):
+    plot_results=True, mc_cores=None):
     """ Estimates uncertanty in the trajectory solution by doing Monte Carlo runs. The MC runs are done 
         in parallel on all available computer cores.
 
@@ -1584,6 +1584,8 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
             the ones with the better cost function value than the pure geometric solution. Use this when
             the lag is not reliable.
         plot_results: [bool] Plot the trajectory and orbit spread. True by default.
+        mc_cores: [int] Number of CPU cores to use for Monte Carlo parallel procesing. None by default,
+            which means that all available cores will be used.
     """
 
 
@@ -1718,7 +1720,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
 
 
     # Run MC trajectory estimation on multiple cores
-    mc_results = domainParallelizer(mc_input_list, _MCTrajSolve)
+    mc_results = domainParallelizer(mc_input_list, _MCTrajSolve, cores=mc_cores)
 
     # Add the original trajectory in the Monte Carlo results, if it is the one which has the best length match
     mc_results.append(traj)
@@ -1768,7 +1770,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
     ### PLOT RADIANT SPREAD (Vg color and length stddev) ###
     ##########################################################################################################
 
-    if (traj.orbit is not None) and plot_results:
+    if traj.orbit is not None:
 
         ra_g_list = np.array([traj_temp.orbit.ra_g for traj_temp in mc_results])
         dec_g_list = np.array([traj_temp.orbit.dec_g for traj_temp in mc_results])
@@ -1854,7 +1856,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
     ### PLOT ORBITAL ELEMENTS SPREAD ###
     ##########################################################################################################
 
-    if (traj.orbit is not None) and plot_results:
+    if traj.orbit is not None:
 
         a_list = np.array([traj_temp.orbit.a for traj_temp in mc_results])
         incl_list = np.array([traj_temp.orbit.i for traj_temp in mc_results])
@@ -2032,7 +2034,7 @@ class Trajectory(object):
         v_init_ht=None, estimate_timing_vel=True, monte_carlo=True, mc_runs=None, mc_pick_multiplier=1, \
         mc_noise_std=1.0, geometric_uncert=False, filter_picks=True, calc_orbit=True, show_plots=True, \
         save_results=True, gravity_correction=True, plot_all_spatial_residuals=False, plot_file_type='png', \
-        traj_id=None, reject_n_sigma_outliers=3):
+        traj_id=None, reject_n_sigma_outliers=3, mc_cores=None):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -2081,6 +2083,8 @@ class Trajectory(object):
             traj_id: [str] Trajectory solution identifier. None by default.
             reject_n_sigma_outliers: [float] Reject angular outliers that are n sigma outside the fit.
                 This value is 3 (sigma) by default.
+            mc_cores: [int] Number of CPU cores to use for Monte Carlo parallell processing. None by default,
+                which means that all cores will be used.
 
         """
 
@@ -2156,6 +2160,9 @@ class Trajectory(object):
 
         # n sigma outlier rejection
         self.reject_n_sigma_outliers = reject_n_sigma_outliers
+
+        # Number of CPU cores to be used for MC
+        self.mc_cores = mc_cores
 
         ######################################################################################################
 
@@ -5247,7 +5254,8 @@ class Trajectory(object):
             # Do a Monte Carlo estimate of the uncertanties in all calculated parameters
             traj_best, uncertanties = monteCarloTrajectory(self, mc_runs=self.mc_runs, \
                 mc_pick_multiplier=self.mc_pick_multiplier, noise_sigma=self.mc_noise_std, \
-                geometric_uncert=self.geometric_uncert, plot_results=self.save_results)
+                geometric_uncert=self.geometric_uncert, plot_results=self.save_results, \
+                mc_cores=self.mc_cores)
 
 
             # Set the covariance matrix to the initial trajectory, so it will be reported in the report

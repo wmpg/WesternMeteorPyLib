@@ -80,6 +80,12 @@ class TrajectoryConstraints(object):
 
         ### MC solver settings ###
 
+        # Run Monte Carlo or not
+        self.run_mc = False
+
+        # Number of CPU cores to use for parallel processing
+        self.mc_cores = 2
+
         # MC runs to run for error estimation
         self.error_mc_runs = 5
 
@@ -464,8 +470,9 @@ class TrajectoryCorrelator(object):
             # Init the solver
             traj = Trajectory(datetime2JD(met_obs.reference_dt), \
                 max_toffset=self.traj_constraints.max_toffset, meastype=1, \
-                v_init_part=self.v_init_part, monte_carlo=True, mc_runs=mc_runs, show_plots=False, \
-                verbose=False, save_results=False, reject_n_sigma_outliers=2)
+                v_init_part=self.v_init_part, monte_carlo=self.traj_constraints.run_mc, \
+                mc_runs=mc_runs, show_plots=False, verbose=False, save_results=False, \
+                reject_n_sigma_outliers=2, mc_cores=self.traj_constraints.mc_cores)
 
             # Feed the observations into the trajectory solver
             for obs_temp, _, _ in matched_observations:
