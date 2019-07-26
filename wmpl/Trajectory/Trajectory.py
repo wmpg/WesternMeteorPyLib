@@ -149,10 +149,6 @@ class ObservedPoints(object):
         ### CALCULATED DATA ###
         ######################################################################################################
 
-        # Flag to indicate that the station should be ignored for timing and velocity estimation becaue
-        #   it doesn't overlap in time with other stations
-        self.no_time_overlap = False
-
         # Angle between the station, the state vector, and the trajectory
         self.incident_angle = None
 
@@ -1054,19 +1050,10 @@ def timingResiduals(params, observations, t_ref_station, weights=None, ret_stdde
         if observations[i].ignore_station:
             continue
 
-        # Skip stations with no time overlap
-        if observations[i].no_time_overlap:
-            continue
-
         for j in range(len(observations)):
-
             
             # Skip ignored stations
             if observations[j].ignore_station:
-                continue
-
-            # Skip stations with no time overlap
-            if observations[j].no_time_overlap:
                 continue
 
 
@@ -1143,7 +1130,7 @@ def timingResiduals(params, observations, t_ref_station, weights=None, ret_stdde
             confirmed_overlaps = list(set(confirmed_overlaps))
             for obs in observations:
                 if obs.station_id not in confirmed_overlaps:
-                    obs.no_time_overlap = True
+                    obs.ignore_station = True
 
 
     # If no points were compared, return infinite
@@ -2544,10 +2531,6 @@ class Trajectory(object):
             if obs.ignore_station:
                 continue
 
-            # Skip stations with no time overlap
-            if obs.no_time_overlap:
-                continue
-
 
             # Skip stations with weight 0
             if w <= 0:
@@ -2806,9 +2789,6 @@ class Trajectory(object):
 
                 # Skip ignored stations
                 if obs.ignore_station:
-                    continue
-
-                if obs.no_time_overlap:
                     continue
 
                 times.append(obs.time_data[obs.ignore_list == 0])
@@ -3091,8 +3071,7 @@ class Trajectory(object):
 
 
         # Find the highest beginning height
-        beg_hts = [obs.rbeg_ele for obs in self.observations if (obs.ignore_station == False) \
-            and (obs.no_time_overlap == False)]
+        beg_hts = [obs.rbeg_ele for obs in self.observations if (obs.ignore_station == False)]
         first_begin = beg_hts.index(max(beg_hts))
 
         # Set the coordinates of the height point as the first point
@@ -3103,8 +3082,7 @@ class Trajectory(object):
 
 
         # Find the lowest ending height
-        end_hts = [obs.rend_ele for obs in self.observations if (obs.ignore_station == False) \
-            and (obs.no_time_overlap == False)]
+        end_hts = [obs.rend_ele for obs in self.observations if (obs.ignore_station == False)]
         last_end = end_hts.index(min(end_hts))
 
         # Set coordinates of the lowest point as the last point
@@ -3251,9 +3229,6 @@ class Trajectory(object):
 
             # Skip ignored stations
             if obs.ignore_station:
-                continue
-
-            if obs.no_time_overlap:
                 continue
 
             # Calculate the average velocity, ignoring ignored points
@@ -3565,14 +3540,13 @@ class Trajectory(object):
         out_str += "Stations\n"
         out_str += "--------\n"
 
-        out_str += "        ID, Ignored, Time overlap, Lon +E (deg), Lat +N (deg),  Ht (m), Jacchia a1, Jacchia a2,  Beg Ht (m),  End Ht (m), +/- Obs ang (deg), +/- V (m), +/- H (m), Persp. angle (deg), Weight\n"
+        out_str += "        ID, Ignored, Lon +E (deg), Lat +N (deg),  Ht (m), Jacchia a1, Jacchia a2,  Beg Ht (m),  End Ht (m), +/- Obs ang (deg), +/- V (m), +/- H (m), Persp. angle (deg), Weight\n"
         
         for obs in self.observations:
 
             station_info = []
             station_info.append("{:>10s}".format(str(obs.station_id)))
             station_info.append("{:>7s}".format(str(obs.ignore_station)))
-            station_info.append("{:>12s}".format(str(not obs.no_time_overlap)))
             station_info.append("{:>12.6f}".format(np.degrees(obs.lon)))
             station_info.append("{:>12.6f}".format(np.degrees(obs.lat)))
             station_info.append("{:>7.2f}".format(obs.ele))
@@ -5110,7 +5084,7 @@ class Trajectory(object):
 
 
         # If the stations have no time overlap at all, skip further computations
-        if len([obs for obs in self.observations if not obs.no_time_overlap]) == 0:
+        if len([obs for obs in self.observations if not obs.ignore_station]) < 2:
             return None
 
 
