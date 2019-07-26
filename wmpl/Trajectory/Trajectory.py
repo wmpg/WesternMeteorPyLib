@@ -4797,7 +4797,12 @@ class Trajectory(object):
 
         # Set weights to stations
         for i, obs in enumerate(self.observations):
-            obs.weight = weights[i]
+            
+            if obs.ignore_station:
+                obs.weight = 0
+                
+            else:
+                obs.weight = weights[i]
 
 
         # Print weights
