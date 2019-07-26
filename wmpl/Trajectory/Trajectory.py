@@ -4795,14 +4795,17 @@ class Trajectory(object):
         weights = [w if (self.observations[i].ignore_station == False) else 0 for i, w in enumerate(weights)]
 
 
+        # Set weights to stations
+        for i, obs in enumerate(self.observations):
+            obs.weight = weights[i]
 
+
+        # Print weights
         if self.verbose:
             print('LoS statistical weights:')
 
-            # Set weights to stations
-            for i, obs in enumerate(self.observations):
-                print(obs.station_id, weights[i])
-                obs.weight = weights[i]
+            for obs in self.observations:
+                print(obs.station_id, obs.weight)
 
         ######################################################################################################
 
