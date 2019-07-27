@@ -317,6 +317,13 @@ class RMSDataHandle(object):
 
 
 
+    def getMeanDt(self, met_obs):
+        """ Returns the mean meteor datetime. """
+
+        return met_obs.reference_dt + datetime.timedelta(seconds=np.mean([entry.time_rel \
+            for entry in met_obs.data]))
+
+
     def findTimePairs(self, met_obs, max_toffset):
         """ Finds pairs in time between the given meteor observations and all other observations from 
             different stations. 
@@ -325,8 +332,7 @@ class RMSDataHandle(object):
         found_pairs = []
 
         # Compute datetime of the mean time of the meteor
-        met_obs_mean_dt = met_obs.reference_dt + datetime.timedelta(seconds=np.mean([entry.time_rel \
-            for entry in met_obs.data]))
+        met_obs_mean_dt = self.getMeanDt(met_obs)
 
         # Go through all meteors from other stations
         for met_obs2 in self.unprocessed_observations:
@@ -336,8 +342,7 @@ class RMSDataHandle(object):
                 continue
 
             # Compute datetime of the mean time of the meteor
-            met_obs2_mean_dt = met_obs2.reference_dt + datetime.timedelta(seconds=np.mean([entry.time_rel \
-                for entry in met_obs2.data]))
+            met_obs2_mean_dt = self.getMeanDt(met_obs2)
 
 
             # Take observations which are within the given time window
