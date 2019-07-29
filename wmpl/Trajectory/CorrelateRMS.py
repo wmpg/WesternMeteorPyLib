@@ -28,7 +28,7 @@ from wmpl.Utils.TrajConversions import jd2Date
 OUTPUT_TRAJ_DIR = "trajectories"
 
 # Name of json file with the list of processed directories
-JSON_DB_NAME = "processed.json"
+JSON_DB_NAME = "processed_trajectories.json"
 
 ### ###
 
