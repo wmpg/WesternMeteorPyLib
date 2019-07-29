@@ -474,7 +474,7 @@ class TrajectoryCorrelator(object):
 
 
         ### Merge all candidate trajectories which share the same observations ###
-
+        print("Merging broken observations...")
         merged_candidate_trajectories = []
         merged_indices = []
         for i, traj_cand_ref in enumerate(candidate_trajectories):
@@ -490,7 +490,7 @@ class TrajectoryCorrelator(object):
 
 
             # Get the mean time of the reference observation
-            ref_mean_dt = self.dh.getMeanDt(traj_cand_ref[0][1])
+            ref_mean_dt = traj_cand_ref[0][1].mean_dt
 
             obs_list_ref = [entry[1] for entry in traj_cand_ref]
             merged_candidate = []
@@ -505,7 +505,7 @@ class TrajectoryCorrelator(object):
 
 
                 # Get the mean time of the test observation
-                test_mean_dt = self.dh.getMeanDt(traj_cand_test[0][1])
+                test_mean_dt = traj_cand_test[0][1].mean_dt
 
                 # Make sure the observations that are being compared are within the time window
                 time_diff = (test_mean_dt - ref_mean_dt).total_seconds()
@@ -535,6 +535,7 @@ class TrajectoryCorrelator(object):
                     # Add observations that weren't present in the reference candidate
                     for entry in traj_cand_test:
                         if entry[1] not in obs_list_ref:
+                            print("Merging:", entry[1].mean_dt, entry[1].station_code)
                             traj_cand_ref.append(entry)
 
                     # Mark that the current index has been processed
@@ -567,12 +568,55 @@ class TrajectoryCorrelator(object):
         for matched_observations in candidate_trajectories:
 
 
+            ### If there are duplicate observations from the same station, take the longer one ###
+
+            # Find unique station counts
+            station_counts = np.unique([entry[1].station_code for entry in matched_observations], \
+                return_counts=True)
+
+            # If there are duplicates, choose the longest one
+            station_duplicates = np.where(station_counts[1] > 1)[0]
+            if len(station_duplicates):
+
+                # Go through all duplicates
+                for duplicate_station_id in station_counts[0][station_duplicates]:
+
+                    # Find the longest observation of all from the given duplicate station
+                    longest_entry = None
+                    longest_count = 0
+                    for entry in matched_observations:
+                        _, met_obs, _ = entry
+
+                        # Skip non-duplicate stations
+                        if met_obs.station_code != duplicate_station_id:
+                            continue
+
+                        if len(met_obs.data) > longest_count:
+                            longest_count = len(met_obs.data)
+                            longest_entry = entry
+
+                    # Reject all other shorter entries
+                    for entry in matched_observations:
+                        _, met_obs, _ = entry
+
+                        # Skip non-duplicate stations
+                        if met_obs.station_code != duplicate_station_id:
+                            continue
+
+                        # Remove shorter duplicate entries
+                        if entry != longest_entry:
+                            print("Rejecting:", met_obs.station_code)
+                            matched_observations.remove(entry)
+
+            ###
+
+
             # Print info about observations which are being solved
             print()
             print("Observations:")
             for entry in matched_observations:
-                _, obs, _ = entry
-                print(obs.station_code, self.dh.getMeanDt(obs))
+                _, met_obs, _ = entry
+                print(met_obs.station_code, met_obs.mean_dt)
 
 
 
@@ -640,3 +684,8 @@ class TrajectoryCorrelator(object):
 
         # Finish the correlation run (update the database with new values)
         self.dh.finish()
+
+        print()
+        print("-----------------")
+        print("SOLVING RUN DONE!")
+        print("-----------------")

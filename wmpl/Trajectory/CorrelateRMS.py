@@ -17,6 +17,7 @@ import numpy as np
 
 from wmpl.Formats.CAMS import loadFTPDetectInfo
 from wmpl.Trajectory.CorrelateEngine import TrajectoryCorrelator, TrajectoryConstraints
+from wmpl.Utils.Pickling import savePickle
 from wmpl.Utils.TrajConversions import jd2Date
 
 
@@ -37,8 +38,11 @@ class DatabaseJSON(object):
 
         self.db_file_path = db_file_path
 
-        # List of processed directories
+        # List of processed directories (keys are station codes)
         self.processed_dirs = {}
+
+        # List of trajectories (keys are trajectory reference julian dates)
+        self.trajectories = {}
 
         # Load the database from a JSON file
         self.load()
@@ -66,6 +70,16 @@ class DatabaseJSON(object):
         if station_name in self.processed_dirs:
             if not rel_proc_path in self.processed_dirs[station_name]:
                 self.processed_dirs[station_name].append(rel_proc_path)
+
+
+    def addTrajectory(self, traj, met_obs_list):
+        """ Add a computed trajectory to the list. """
+
+        pass        
+
+        # if traj.jdt_ref not in self.trajectories:
+        #     self.trajectories[traj.jdt_ref] = traj.toJSON()
+
 
 
 
@@ -113,6 +127,10 @@ class MeteorObsRMS(object):
 
         self.processed = False 
         self.paired = False
+
+        # Mean datetime of the observation
+        self.mean_dt = self.reference_dt + datetime.timedelta(seconds=np.mean([entry.time_rel \
+            for entry in self.data]))
 
 
 
@@ -316,23 +334,12 @@ class RMSDataHandle(object):
         return self.unprocessed_observations
 
 
-
-    def getMeanDt(self, met_obs):
-        """ Returns the mean meteor datetime. """
-
-        return met_obs.reference_dt + datetime.timedelta(seconds=np.mean([entry.time_rel \
-            for entry in met_obs.data]))
-
-
     def findTimePairs(self, met_obs, max_toffset):
         """ Finds pairs in time between the given meteor observations and all other observations from 
             different stations. 
         """
 
         found_pairs = []
-
-        # Compute datetime of the mean time of the meteor
-        met_obs_mean_dt = self.getMeanDt(met_obs)
 
         # Go through all meteors from other stations
         for met_obs2 in self.unprocessed_observations:
@@ -341,12 +348,8 @@ class RMSDataHandle(object):
             if met_obs.station_code == met_obs2.station_code:
                 continue
 
-            # Compute datetime of the mean time of the meteor
-            met_obs2_mean_dt = self.getMeanDt(met_obs2)
-
-
             # Take observations which are within the given time window
-            if abs((met_obs_mean_dt - met_obs2_mean_dt).total_seconds()) <= max_toffset:
+            if abs((met_obs.mean_dt - met_obs2.mean_dt).total_seconds()) <= max_toffset:
                 found_pairs.append(met_obs2)
 
 
@@ -367,6 +370,9 @@ class RMSDataHandle(object):
         traj.saveReport(output_dir, traj.file_name + '_report.txt', uncertanties=traj.uncertanties, 
             verbose=False)
 
+        # Save the picked trajectory structure
+        savePickle(traj, output_dir, traj.file_name + '_trajectory.pickle')
+
         # Save the plots
         traj.save_results = True
         traj.savePlots(output_dir, traj.file_name, show_plots=False)
@@ -378,6 +384,13 @@ class RMSDataHandle(object):
         """ Mark the given meteor observation as processed. """
 
         self.db.addProcessedDir(met_obs.station_code, met_obs.rel_proc_path)
+
+
+
+    def addTrajectory(self, traj, met_obs_list):
+        """ Add the resulting trajectory to the database. """
+
+        self.db.addTrajectory(traj, met_obs_list)
 
 
 

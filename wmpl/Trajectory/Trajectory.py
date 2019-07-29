@@ -1125,12 +1125,12 @@ def timingResiduals(params, observations, t_ref_station, weights=None, ret_stdde
             cost_point_count += len(z)
 
 
-        # Exclude stations with no time overlap with other stations
-        if (len(observations) > 2):
-            confirmed_overlaps = list(set(confirmed_overlaps))
-            for obs in observations:
-                if obs.station_id not in confirmed_overlaps:
-                    obs.ignore_station = True
+    # Exclude stations with no time overlap with other stations
+    if (len(observations) > 2):
+        confirmed_overlaps = list(set(confirmed_overlaps))
+        for obs in observations:
+            if obs.station_id not in confirmed_overlaps:
+                obs.ignore_station = True
 
 
     # If no points were compared, return infinite
