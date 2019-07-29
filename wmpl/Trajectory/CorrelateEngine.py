@@ -81,7 +81,7 @@ class TrajectoryConstraints(object):
         ### MC solver settings ###
 
         # Run Monte Carlo or not
-        self.run_mc = False
+        self.run_mc = True
 
         # Number of CPU cores to use for parallel processing
         self.mc_cores = 2

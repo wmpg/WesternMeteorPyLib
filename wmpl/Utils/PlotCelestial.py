@@ -214,13 +214,14 @@ class CelestialPlot(object):
                 if dec == 0:
                     continue
 
-                plt.annotate(np.str(dec), xy=self.m(lon_0, dec), xycoords='data', ha='center', va='center', \
-                    color='0.25')
+                plt.annotate(u"{:+d}\u00b0".format(int(dec)), xy=self.m(lon_0, dec), xycoords='data', ha='center', 
+                    va='center', color='w', alpha=0.25)
 
 
             # Plot meridian labels
             for ra in np.arange(0, 360, 2*label_angle_freq):
-                plt.annotate(np.str(ra), xy=self.m(ra, -5), xycoords='data', ha='center', color='0.25')
+                plt.annotate(u"{:d}\u00b0".format(int(ra)), xy=self.m(ra, -5), xycoords='data', ha='center', \
+                    color='w', alpha=0.25)
 
             ##################################################################################################
 

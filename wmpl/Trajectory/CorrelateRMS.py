@@ -466,6 +466,12 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     trajectory_constraints.max_station_dist = cml_args.maxstationdist
     trajectory_constraints.max_vel_percent_diff = cml_args.maxveldiff
 
+
+    t1 = datetime.datetime.utcnow()
+
     # Run the trajectory correlator
     tc = TrajectoryCorrelator(data_handle, trajectory_constraints, cml_args.velpart, data_in_j2000=True)
     tc.run()
+
+
+    print("Total run time: {:s}".format(datetime.datetime.utcnow() - t1))
