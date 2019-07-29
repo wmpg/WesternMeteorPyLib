@@ -98,7 +98,7 @@ def calcAngDataLimits(ra_data, dec_data, border_ratio=0.1):
 
 
 class CelestialPlot(object):
-    def __init__(self, ra_data, dec_data, projection='sinu', bgcolor='k', lon_0=0):
+    def __init__(self, ra_data, dec_data, projection='sinu', bgcolor='k', lon_0=0, ax=None):
         """ Plotting on a celestial sphere.
 
         Arguments:
@@ -111,6 +111,7 @@ class CelestialPlot(object):
                 - "stere" - Stereographic projection centered at the centroid of the given data.
             bgcolor: [str] Background color of the plot. Black by default.
             lon_0: [float] Longitude or RA of the centre of the plot in degrees. Only for allsky plots.
+            ax: [plt] Matplotlib handle to use. If None, a new figure will be initiated.
 
         """
 
@@ -129,7 +130,7 @@ class CelestialPlot(object):
 
             # Init a new basemap plot
             self.m = Basemap(celestial=True, projection=projection, lat_0=dec_mean, lon_0=-ra_mean, 
-                llcrnrlat=dec_min, urcrnrlat=dec_max, llcrnrlon=-ra_min, urcrnrlon=-ra_max)
+                llcrnrlat=dec_min, urcrnrlat=dec_max, llcrnrlon=-ra_min, urcrnrlon=-ra_max, ax=ax)
 
             # Calculate the frequency of RA/Dec angle labels in degrees, so it labels every .5 division
             label_angle_freq = 10**(np.ceil(np.log10(deg_span)))
@@ -196,7 +197,7 @@ class CelestialPlot(object):
             # Frequency of RA/Dec angle labels (deg)
             label_angle_freq = 15
 
-            self.m = Basemap(celestial=True, projection=projection, lon_0=lon_0)
+            self.m = Basemap(celestial=True, projection=projection, lon_0=lon_0, ax=ax)
 
 
             # Draw Dec lines
@@ -206,6 +207,16 @@ class CelestialPlot(object):
             # Draw RA lines
             ra_labels = np.arange(0, 360, label_angle_freq)
             self.m.drawmeridians(ra_labels, color='0.25')
+
+            # Plot parallels labels
+            for dec in np.arange(-90, 90 + 2*label_angle_freq, 2*label_angle_freq):
+                
+                if dec == 0:
+                    continue
+
+                plt.annotate(np.str(dec), xy=self.m(lon_0, dec), xycoords='data', ha='center', va='center', \
+                    color='0.25')
+
 
             # Plot meridian labels
             for ra in np.arange(0, 360, 2*label_angle_freq):
