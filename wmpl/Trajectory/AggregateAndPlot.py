@@ -246,7 +246,7 @@ if __name__ == "__main__":
                 max_points = max(points_count)
 
                 if max_points < min_traj_points:
-                    print("Skipping {:.2} due to the small number of points...".format(traj.jdt_ref))
+                    print("Skipping {:.2f} due to the small number of points...".format(traj.jdt_ref))
                     continue
 
                 ###
