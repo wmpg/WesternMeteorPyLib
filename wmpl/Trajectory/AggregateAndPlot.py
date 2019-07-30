@@ -9,8 +9,8 @@ import datetime
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
-from mpl_toolkits.basemap import shiftgrid
 import scipy.stats
+import scipy.ndimage
 
 
 from wmpl.Utils.Pickling import loadPickle
@@ -36,7 +36,7 @@ def plotSCE(x_data, y_data, color_data, sol_range, plot_title, colorbar_title, d
 
 
     # Init the allsky plot
-    celes_plot = CelestialPlot(x_data, y_data, projection='sinu', lon_0=270, ax=fig.gca())
+    celes_plot = CelestialPlot(x_data, y_data, projection='sinu', lon_0=-90, ax=fig.gca())
 
     # ### Mark the sources ###
     # sources_lg = np.radians([0, 270, 180])
@@ -71,33 +71,60 @@ def plotSCE(x_data, y_data, color_data, sol_range, plot_title, colorbar_title, d
     ### Do a KDE density plot
     if density_plot:
 
-        # Init the KDE
-        data = np.vstack([np.degrees(np.array(x_data)), np.degrees(np.array(y_data))])
-        kde = scipy.stats.gaussian_kde(data, bw_method=0.008)
+        # # Init the KDE
+        # data = np.vstack([np.degrees(np.array(x_data)), np.degrees(np.array(y_data))])
+        # kde = scipy.stats.gaussian_kde(data, bw_method=0.008)
 
-        # Get lat/lons of ny by nx evenly space grid.
-        delta = 0.5
-        #lons = np.arange(0, 360, delta)
-        lons = np.append(np.arange(0, 90, delta)[::-1], np.arange(90, 360, delta)[::-1])
-        lats = np.arange(-90, 90 + delta, delta)
+        # # # Get lat/lons of ny by nx evenly space grid.
+        # # delta = 1
+        # # #lons = np.arange(0, 360, delta)
+        # # lons = np.append(np.arange(0, 90, delta)[::-1], np.arange(-180, 90, delta))
+        # # #lons = np.append(np.arange(0, 90, delta)[::-1], np.arange(90, 360, delta)[::-1])
+        # # lats = np.arange(-90, 90 + delta, delta)
+
+        # LONS, LATS = celes_plot.m.makegrid(360, 180) # get lat/lons of ny by nx evenly space grid.
+
+        # # Get KDE values
+        # kde_values = kde(np.vstack([LONS.ravel(), LATS.ravel()]))
+
+        # # Convert geo coordinates into image coordinates
+        # x, y = celes_plot.m(LONS, LATS)
+        # kde_values = np.reshape(kde_values.T, x.shape)
+
+        # # Scale KDE values to counts
+        # kde_values *= len(x_data)
+
+        # # Plot the countures
+        # plt_handle = celes_plot.m.contourf(x, y, kde_values, levels=100, cmap=cmap, \
+        #     norm=matplotlib.colors.PowerNorm(gamma=1./2.))
 
 
-        # Compute map proj coordinates.
-        LONS, LATS = np.meshgrid(lons, lats)
+        lon_min = 0
+        lon_max = 360
+        lat_min = -90
+        lat_max = 90
+        delta_deg = 0.5
 
-        # Get KDE values
-        kde_values = kde(np.vstack([LONS.ravel(), LATS.ravel()]))
+        lon_bins = np.linspace(lon_min, lon_max, int(360/delta_deg))
+        lat_bins = np.linspace(lat_min, lat_max, int(180/delta_deg))
 
-        # Convert geo coordinates into image coordinates
-        x, y = celes_plot.m(LONS, LATS)
-        kde_values = np.reshape(kde_values.T, x.shape)
+        # Compute corrected longitude (centered at 270)
+        lon_corr = (90 - np.degrees(np.array(x_data)))%360
 
-        # Scale KDE values to counts
-        kde_values *= len(x_data)
+        # # Do a sinus projection
+        # lon_corr = ((np.cos(np.array(y_data))*(np.degrees(np.array(x_data))) - 180))%360
 
-        # Plot the countures
-        plt_handle = celes_plot.m.contourf(x, y, kde_values, levels=100, cmap=cmap, \
-            norm=matplotlib.colors.PowerNorm(gamma=1./2.))
+        data, _, _ = np.histogram2d(lon_corr, 
+            np.degrees(np.array(y_data)), bins=(lon_bins, lat_bins))
+
+        data = scipy.ndimage.filters.gaussian_filter(data, 1.0)
+
+        plt_handle = celes_plot.m.imshow(data.T, origin='lower', extent=[lon_min, lon_max, lat_min, lat_max], 
+            interpolation='gaussian', norm=matplotlib.colors.PowerNorm(gamma=1./2.), cmap=cmap)
+
+        # _, _, X, Y = celes_plot.m.makegrid(int(360/delta_deg) - 1, int(180/delta_deg) - 1, returnxy=True)
+        # plt_handle = celes_plot.m.contourf(X, Y, data.T, levels=100, cmap=cmap, \
+        #     norm=matplotlib.colors.PowerNorm(gamma=1./2.))
 
 
     else:
