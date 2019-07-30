@@ -202,11 +202,11 @@ class CelestialPlot(object):
 
             # Draw Dec lines
             dec_lines = np.arange(-90, 90, label_angle_freq)
-            self.m.drawparallels(dec_lines, labels=[False, True, True, False], color='0.25')
+            self.m.drawparallels(dec_lines, labels=[False, True, True, False], color='0.2')
 
             # Draw RA lines
             ra_labels = np.arange(0, 360, label_angle_freq)
-            self.m.drawmeridians(ra_labels, color='0.25')
+            self.m.drawmeridians(ra_labels, color='0.2')
 
             # Plot parallels labels
             for dec in np.arange(-90, 90 + 2*label_angle_freq, 2*label_angle_freq):
@@ -215,13 +215,13 @@ class CelestialPlot(object):
                     continue
 
                 plt.annotate(u"{:+d}\u00b0".format(int(dec)), xy=self.m(lon_0, dec), xycoords='data', ha='center', 
-                    va='center', color='w', alpha=0.25)
+                    va='center', color='0.8', alpha=0.5, fontsize=8)
 
 
             # Plot meridian labels
             for ra in np.arange(0, 360, 2*label_angle_freq):
-                plt.annotate(u"{:d}\u00b0".format(int(ra)), xy=self.m(ra, -5), xycoords='data', ha='center', \
-                    color='w', alpha=0.25)
+                plt.annotate(u"{:d}\u00b0".format(int(ra)), xy=self.m(ra, 0), xycoords='data', ha='center', \
+                    va='center', color='0.8', alpha=0.5, fontsize=8)
 
             ##################################################################################################
 

@@ -7,6 +7,7 @@ import os
 import datetime
 
 import numpy as np
+import matplotlib
 import matplotlib.pyplot as plt
 from mpl_toolkits.basemap import shiftgrid
 import scipy.stats
@@ -26,8 +27,8 @@ def writeOrbitSummaryFile(dir_path, traj_list):
 
 
 
-def plotSCE(x_data, y_data, color_data, sol_range, plot_title, colorbar_title, dir_path, file_name, \
-    density_plot=False):
+def plotSCE(x_data, y_data, color_data, sol_range, plot_title, colorbar_title, dir_path, \
+    file_name, density_plot=False):
 
     ### PLOT SUN-CENTERED GEOCENTRIC ECLIPTIC RADIANTS ###
 
@@ -52,18 +53,32 @@ def plotSCE(x_data, y_data, color_data, sol_range, plot_title, colorbar_title, d
 
     fg_color = 'white'
 
+    # Choose the colormap
+    if density_plot:
+        cmap_name = 'inferno'
+        cmap_bottom_cut = 0.0
+    else:
+        cmap_name = 'viridis'
+        cmap_bottom_cut = 0.2
+
+
+    # Cut the dark portion of the colormap
+    cmap = plt.get_cmap(cmap_name)
+    colors = cmap(np.linspace(cmap_bottom_cut, 1.0, cmap.N))
+    cmap = matplotlib.colors.LinearSegmentedColormap.from_list('cut_cmap', colors)
+
 
     ### Do a KDE density plot
     if density_plot:
 
         # Init the KDE
         data = np.vstack([np.degrees(np.array(x_data)), np.degrees(np.array(y_data))])
-        kde = scipy.stats.gaussian_kde(data, bw_method=0.01)
+        kde = scipy.stats.gaussian_kde(data, bw_method=0.008)
 
         # Get lat/lons of ny by nx evenly space grid.
-        #lons, lats = celes_plot.m.makegrid(n_lon, n_lat) 
-        delta = 0.2
-        lons = np.arange(0, 360, delta)
+        delta = 0.5
+        #lons = np.arange(0, 360, delta)
+        lons = np.append(np.arange(0, 90, delta)[::-1], np.arange(90, 360, delta)[::-1])
         lats = np.arange(-90, 90 + delta, delta)
 
 
@@ -73,9 +88,7 @@ def plotSCE(x_data, y_data, color_data, sol_range, plot_title, colorbar_title, d
         # Get KDE values
         kde_values = kde(np.vstack([LONS.ravel(), LATS.ravel()]))
 
-        # Shift values so they can be plotted
-        kde_values, LONS_ravelled = shiftgrid(90., kde_values, LONS.ravel(), start=True)
-        LONS = np.reshape(LONS_ravelled, LONS.shape)
+        # Convert geo coordinates into image coordinates
         x, y = celes_plot.m(LONS, LATS)
         kde_values = np.reshape(kde_values.T, x.shape)
 
@@ -83,11 +96,8 @@ def plotSCE(x_data, y_data, color_data, sol_range, plot_title, colorbar_title, d
         kde_values *= len(x_data)
 
         # Plot the countures
-        plt_handle = celes_plot.m.contourf(x, y, kde_values, levels=30, cmap='inferno')
-        
-        # # add colorbar.
-        # cbar = celes_plot.m.colorbar(cs, location='bottom', pad="5%")
-        # cbar.set_label('Count')
+        plt_handle = celes_plot.m.contourf(x, y, kde_values, levels=100, cmap=cmap, \
+            norm=matplotlib.colors.PowerNorm(gamma=1./2.))
 
 
     else:
@@ -98,7 +108,8 @@ def plotSCE(x_data, y_data, color_data, sol_range, plot_title, colorbar_title, d
         dot_size = 40*(1.0/np.sqrt(len(x_data)))
 
         # Plot the data
-        plt_handle = celes_plot.scatter(x_data, y_data, color_data, s=dot_size)
+        plt_handle = celes_plot.scatter(x_data, y_data, color_data, s=dot_size, cmap=cmap)
+
         
     # Plot the colorbar
     cb = fig.colorbar(plt_handle)
@@ -216,6 +227,9 @@ if __name__ == "__main__":
     # Minimum number of points on the trajectory for the station with the most points
     min_traj_points = 6
 
+    # Minimum convergence angle (deg)
+    min_qc = 5.0
+
 
     ### ###
 
@@ -236,6 +250,7 @@ if __name__ == "__main__":
                 traj = loadPickle(dir_path, file_name)
 
 
+                ### MINIMUM POINTS
                 ### Reject all trajectories with small number of used points ###
                 points_count = [len(obs.time_data[obs.ignore_list == 0]) for obs in traj.observations \
                     if obs.ignore_station == False]
@@ -251,6 +266,15 @@ if __name__ == "__main__":
 
                 ###
 
+
+                ### CONVERGENCE ANGLE                
+                ### Reject all trajectories with a too small convergence angle ###
+
+                if np.degrees(traj.best_conv_inter.conv_angle) < min_qc:
+                    print("Skipping {:.2f} due to the small convergence angle...".format(traj.jdt_ref))
+                    continue
+
+                ###
 
 
                 traj_list.append(traj)

@@ -2204,6 +2204,9 @@ class Trajectory(object):
         # Calculated average velocity
         self.v_avg = None
 
+        # Status of timing minimization
+        self.timing_minimization_successful = False
+
         # Fit to the best portion of time vs. length
         self.velocity_fit = None
 
@@ -2681,7 +2684,8 @@ class Trajectory(object):
                 estimated, otherwise the velocity will be estimated as the medial velocity.
 
         Return:
-            (velocity_fit, v_init_mini, time_diffs, observations): [tuple]
+            (fit_success, velocity_fit, v_init_mini, time_diffs, observations): [tuple]
+                fit_success: [bool] True if timing minimization was successful, False otherwise.
                 velocity_fit: [tuple] (slope, intercept) tuple of a line fit on the time vs. length data.
                 v_init_mini: [float] Estimated initial velocity in m/s.
                 time_diffs: [ndarray] Estimated time offsets from individual stations.
@@ -2906,7 +2910,7 @@ class Trajectory(object):
             v_init_mini = 0
 
 
-        return velocity_fit, v_init_mini, time_diffs, observations
+        return timing_mini.success, velocity_fit, v_init_mini, time_diffs, observations
 
 
 
@@ -4997,9 +5001,14 @@ class Trajectory(object):
             
 
         # Estimate the timing difference between stations and the initial velocity and update the time
-        self.velocity_fit, self.v_init, self.time_diffs, self.observations = \
-            self.estimateTimingAndVelocity(self.observations, weights, \
+        self.timing_minimization_successful, self.velocity_fit, self.v_init, self.time_diffs, \
+            self.observations = self.estimateTimingAndVelocity(self.observations, weights, \
                 estimate_timing_vel=self.estimate_timing_vel)
+
+
+        # If estimating the timing failed, skip any further steps
+        if not self.timing_minimization_successful:
+            return None
 
 
         # Calculate velocity at each point with updated timings

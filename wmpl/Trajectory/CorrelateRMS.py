@@ -474,4 +474,4 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     tc.run()
 
 
-    print("Total run time: {:s}".format(datetime.datetime.utcnow() - t1))
+    print("Total run time: {:s}".format(str(datetime.datetime.utcnow() - t1)))
