@@ -237,9 +237,13 @@ if __name__ == "__main__":
 
 
                 ### Reject all trajectories with small number of used points ###
-                
-                max_points = max([len(obs.time_data[obs.ignore_list == 0]) for obs in traj.observations \
-                    if obs.ignore_station == False])
+                points_count = [len(obs.time_data[obs.ignore_list == 0]) for obs in traj.observations \
+                    if obs.ignore_station == False]
+
+                if not points_count:
+                    continue
+
+                max_points = max(points_count)
 
                 if max_points < min_traj_points:
                     print("Skipping {:.2} due to the small number of points...".format(traj.jdt_ref))
