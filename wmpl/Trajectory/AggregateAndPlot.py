@@ -210,6 +210,16 @@ if __name__ == "__main__":
     ############################
 
 
+
+    ### FILTERS ###
+
+    # Minimum number of points on the trajectory for the station with the most points
+    min_traj_points = 6
+
+
+    ### ###
+
+
     # Get a list of paths of all trajectory pickle files
     traj_list = []
     for entry in os.walk(cml_args.dir_path):
@@ -224,6 +234,20 @@ if __name__ == "__main__":
 
                 # Load the pickle file
                 traj = loadPickle(dir_path, file_name)
+
+
+                ### Reject all trajectories with small number of used points ###
+                
+                max_points = max([len(obs.time_data[obs.ignore_list == 0]) for obs in traj.observations \
+                    if obs.ignore_station == False])
+
+                if max_points < min_traj_points:
+                    print("Skipping {:.2} due to the small number of points...".format(traj.jdt_ref))
+                    continue
+
+                ###
+
+
 
                 traj_list.append(traj)
 
