@@ -71,36 +71,9 @@ def plotSCE(x_data, y_data, color_data, sol_range, plot_title, colorbar_title, d
     ### Do a KDE density plot
     if density_plot:
 
-        # # Init the KDE
-        # data = np.vstack([np.degrees(np.array(x_data)), np.degrees(np.array(y_data))])
-        # kde = scipy.stats.gaussian_kde(data, bw_method=0.008)
-
-        # # # Get lat/lons of ny by nx evenly space grid.
-        # # delta = 1
-        # # #lons = np.arange(0, 360, delta)
-        # # lons = np.append(np.arange(0, 90, delta)[::-1], np.arange(-180, 90, delta))
-        # # #lons = np.append(np.arange(0, 90, delta)[::-1], np.arange(90, 360, delta)[::-1])
-        # # lats = np.arange(-90, 90 + delta, delta)
-
-        # LONS, LATS = celes_plot.m.makegrid(360, 180) # get lat/lons of ny by nx evenly space grid.
-
-        # # Get KDE values
-        # kde_values = kde(np.vstack([LONS.ravel(), LATS.ravel()]))
-
-        # # Convert geo coordinates into image coordinates
-        # x, y = celes_plot.m(LONS, LATS)
-        # kde_values = np.reshape(kde_values.T, x.shape)
-
-        # # Scale KDE values to counts
-        # kde_values *= len(x_data)
-
-        # # Plot the countures
-        # plt_handle = celes_plot.m.contourf(x, y, kde_values, levels=100, cmap=cmap, \
-        #     norm=matplotlib.colors.PowerNorm(gamma=1./2.))
-
-
-        lon_min = 0
-        lon_max = 360
+        # Define extent and density
+        lon_min = -180
+        lon_max = 180
         lat_min = -90
         lat_max = 90
         delta_deg = 0.5
@@ -108,23 +81,26 @@ def plotSCE(x_data, y_data, color_data, sol_range, plot_title, colorbar_title, d
         lon_bins = np.linspace(lon_min, lon_max, int(360/delta_deg))
         lat_bins = np.linspace(lat_min, lat_max, int(180/delta_deg))
 
-        # Compute corrected longitude (centered at 270)
-        lon_corr = (90 - np.degrees(np.array(x_data)))%360
+        # Rotate all coordinates by 90 deg to make them Sun-centered
+        x_data = np.array(x_data)
+        y_data = np.array(y_data)
+        lon_corr = (np.degrees(x_data) + 90)%360
 
-        # # Do a sinus projection
-        # lon_corr = ((np.cos(np.array(y_data))*(np.degrees(np.array(x_data))) - 180))%360
+        # Do a sinus projection
+        lon_corr_temp = np.zeros_like(lon_corr)
+        lon_corr_temp[lon_corr > 180] = ((180 - lon_corr[lon_corr > 180] + 180)*np.cos(y_data[lon_corr > 180]))
+        lon_corr_temp[lon_corr <= 180] = ((180 - lon_corr[lon_corr <= 180] - 180)*np.cos(y_data[lon_corr <= 180]))
+        lon_corr = lon_corr_temp
 
+        # Compute the histogram
         data, _, _ = np.histogram2d(lon_corr, 
             np.degrees(np.array(y_data)), bins=(lon_bins, lat_bins))
 
-        data = scipy.ndimage.filters.gaussian_filter(data, 1.0)
+        # Apply Gaussian filter to it
+        data = scipy.ndimage.filters.gaussian_filter(data, 1.0)*2*np.pi
 
         plt_handle = celes_plot.m.imshow(data.T, origin='lower', extent=[lon_min, lon_max, lat_min, lat_max], 
             interpolation='gaussian', norm=matplotlib.colors.PowerNorm(gamma=1./2.), cmap=cmap)
-
-        # _, _, X, Y = celes_plot.m.makegrid(int(360/delta_deg) - 1, int(180/delta_deg) - 1, returnxy=True)
-        # plt_handle = celes_plot.m.contourf(X, Y, data.T, levels=100, cmap=cmap, \
-        #     norm=matplotlib.colors.PowerNorm(gamma=1./2.))
 
 
     else:
