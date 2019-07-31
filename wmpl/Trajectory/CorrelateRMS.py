@@ -357,7 +357,7 @@ class RMSDataHandle(object):
 
 
 
-    def saveTrajectoryResults(self, traj):
+    def saveTrajectoryResults(self, traj, save_plots):
         """ Save trajectory results to the disk. """
 
 
@@ -374,9 +374,10 @@ class RMSDataHandle(object):
         savePickle(traj, output_dir, traj.file_name + '_trajectory.pickle')
 
         # Save the plots
-        traj.save_results = True
-        traj.savePlots(output_dir, traj.file_name, show_plots=False)
-        traj.save_results = False
+        if save_plots:
+            traj.save_results = True
+            traj.savePlots(output_dir, traj.file_name, show_plots=False)
+            traj.save_results = False
 
 
 

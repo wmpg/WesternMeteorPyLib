@@ -87,13 +87,16 @@ class TrajectoryConstraints(object):
         self.mc_cores = 2
 
         # MC runs to run for error estimation
-        self.error_mc_runs = 5
+        self.error_mc_runs = 10
 
         # Convergence angle below which more MC runs will be used (deg)
         self.low_qc_threshold = 10.0
 
         # Number of MC runs to run for low Qc trajectories
         self.low_qc_mc_runs = 20
+
+        # Save plots to disk
+        self.save_plots = False
 
         ### ###
 
@@ -674,7 +677,7 @@ class TrajectoryCorrelator(object):
             # If the orbits couldn't be computed, skip saving the data files
             if traj.orbit.ra_g is not None:
 
-                self.dh.saveTrajectoryResults(traj)
+                self.dh.saveTrajectoryResults(traj, self.traj_constraints.save_plots)
 
             else:
                 print("Orbit could not the computed...")
