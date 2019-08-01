@@ -5210,6 +5210,9 @@ class Trajectory(object):
 
         ######################################################################################################
 
+        # If the time fit failed, stop further computations
+        if not self.timing_minimization_successful:
+            return None
 
 
         ### CALCULATE ORBIT ###
