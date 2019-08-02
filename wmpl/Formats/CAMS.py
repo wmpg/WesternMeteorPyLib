@@ -38,6 +38,8 @@ class MeteorObservation(object):
 
         self.frames = []
         self.time_data = []
+        self.x_data = []
+        self.y_data = []
         self.azim_data = []
         self.elev_data = []
         self.ra_data = []
@@ -47,11 +49,13 @@ class MeteorObservation(object):
 
 
 
-    def addPoint(self, frame_n, azim, elev, ra, dec, mag):
+    def addPoint(self, frame_n, x, y, azim, elev, ra, dec, mag):
         """ Adds the measurement point to the meteor.
 
         Arguments:
             frame_n: [flaot] Frame number from the reference time.
+            x: [float] X image coordinate.
+            y: [float] X image coordinate.
             azim: [float] Azimuth, J2000 in degrees.
             elev: [float] Elevation angle, J2000 in degrees.
             ra: [float] Right ascension, J2000 in degrees.
@@ -67,6 +71,9 @@ class MeteorObservation(object):
 
         self.time_data.append(point_time)
 
+        self.x_data.append(x)
+        self.y_data.append(y)
+
         # Angular coordinates converted to radians
         self.azim_data.append(np.radians(azim))
         self.elev_data.append(np.radians(elev))
@@ -81,6 +88,8 @@ class MeteorObservation(object):
 
         self.frames = np.array(self.frames)
         self.time_data = np.array(self.time_data)
+        self.x_data = np.array(self.x_data)
+        self.y_data = np.array(self.y_data)
         self.azim_data = np.array(self.azim_data)
         self.elev_data = np.array(self.elev_data)
         self.ra_data = np.array(self.ra_data)
@@ -88,11 +97,11 @@ class MeteorObservation(object):
         self.mag_data = np.array(self.mag_data)
 
         # Sort by frame
-        temp_arr = np.c_[self.frames, self.time_data, self.azim_data, self.elev_data, self.ra_data, \
-            self.dec_data, self.mag_data]
+        temp_arr = np.c_[self.frames, self.time_data, self.x_data, self.y_data, self.azim_data, \
+        self.elev_data, self.ra_data, self.dec_data, self.mag_data]
         temp_arr = temp_arr[np.argsort(temp_arr[:, 0])]
-        self.frames, self.time_data, self.azim_data, self.elev_data, self.ra_data, self.dec_data, \
-            self.mag_data = temp_arr.T
+        self.frames, self.time_data, self.x_data, self.y_data, self.azim_data, self.elev_data, self.ra_data, \
+            self.dec_data, self.mag_data = temp_arr.T
 
 
 
@@ -108,16 +117,16 @@ class MeteorObservation(object):
         out_str += 'FPS = {:f}'.format(self.fps) + '\n'
 
         out_str += 'Points:\n'
-        out_str += 'Time, azimuth, elevation, RA, Dec, Mag:\n'
+        out_str += 'Time, X, Y, azimuth, elevation, RA, Dec, Mag:\n'
 
-        for point_time, azim, elev, ra, dec, mag in zip(self.time_data, self.azim_data, self.elev_data, \
-                self.ra_data, self.dec_data, self.mag_data):
+        for point_time, x, y, azim, elev, ra, dec, mag in zip(self.time_data, self.x_data, self.y_data, \
+            self.azim_data, self.elev_data, self.ra_data, self.dec_data, self.mag_data):
 
             if mag is None:
                 mag = 0
 
-            out_str += '{:.4f}, {:.2f}, {:.2f}, {:.2f}, {:+.2f}, {:.2f}\n'.format(point_time, np.degrees(azim), \
-                np.degrees(elev), np.degrees(ra), np.degrees(dec), mag)
+            out_str += '{:.4f}, {:.2f}, {:.2f}, {:.2f}, {:.2f}, {:.2f}, {:+.2f}, {:.2f}\n'.format(point_time,\
+                x, y, np.degrees(azim), np.degrees(elev), np.degrees(ra), np.degrees(dec), mag)
 
 
         return out_str
@@ -230,7 +239,7 @@ def loadCameraSites(camerasites_file_name):
 
 
 
-def loadFTPDetectInfo(ftpdetectinfo_file_name, stations, time_offsets=None, \
+def loadFTPDetectInfo(ftpdetectinfo_file_name, stations, time_offsets=None,
         join_broken_meteors=True):
     """
 
@@ -394,6 +403,8 @@ def loadFTPDetectInfo(ftpdetectinfo_file_name, stations, time_offsets=None, \
 
                 # Read in the meteor frame, RA and Dec
                 frame_n = float(line[0])
+                x = float(line[1])
+                y = float(line[2])
                 ra = float(line[3])
                 dec = float(line[4])
                 azim = float(line[5])
@@ -415,7 +426,7 @@ def loadFTPDetectInfo(ftpdetectinfo_file_name, stations, time_offsets=None, \
 
 
                 # Add the measurement point to the current meteor 
-                current_meteor.addPoint(frame_n, azim, elev, ra, dec, mag)
+                current_meteor.addPoint(frame_n, x, y, azim, elev, ra, dec, mag)
 
 
         # Add the last meteor the the meteor list
@@ -497,6 +508,8 @@ def loadFTPDetectInfo(ftpdetectinfo_file_name, stations, time_offsets=None, \
             # Add the observations to first meteor object
             met1.frames = np.append(met1.frames, frames)
             met1.time_data = np.append(met1.time_data, time_data)
+            met1.x_data = np.append(met1.x_data, met2.x_data)
+            met1.y_data = np.append(met1.y_data, met2.y_data)
             met1.azim_data = np.append(met1.azim_data, met2.azim_data)
             met1.elev_data = np.append(met1.elev_data, met2.elev_data)
             met1.ra_data = np.append(met1.ra_data, met2.ra_data)

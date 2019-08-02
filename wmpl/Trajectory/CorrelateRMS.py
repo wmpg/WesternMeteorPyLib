@@ -84,7 +84,7 @@ class DatabaseJSON(object):
 
 
 class MeteorPointRMS(object):
-    def __init__(self, frame, time_rel, ra, dec, azim, alt, mag):
+    def __init__(self, frame, time_rel, x, y, ra, dec, azim, alt, mag):
         """ Container for individual meteor picks. """
 
         # Frame number since the beginning of the FF file
@@ -94,8 +94,8 @@ class MeteorPointRMS(object):
         self.time_rel = time_rel
 
         # Image coordinats
-        self.x = None
-        self.y = None
+        self.x = x
+        self.y = x
         
         # Equatorial coordinates (J2000, deg)
         self.ra = ra
@@ -131,6 +131,50 @@ class MeteorObsRMS(object):
         # Mean datetime of the observation
         self.mean_dt = self.reference_dt + datetime.timedelta(seconds=np.mean([entry.time_rel \
             for entry in self.data]))
+
+        
+        ### Estimate if the meteor begins and ends inside the FOV ###
+
+        self.fov_beg = False
+        self.fov_end = False
+
+        half_index = len(data)//2
+
+
+        # Find angular velocity at the beginning per every axis
+        dxdf_beg = (self.data[half_index].x - self.data[0].x)/(self.data[half_index].frame \
+            - self.data[0].frame)
+        dydf_beg = (self.data[half_index].y - self.data[0].y)/(self.data[half_index].frame \
+            - self.data[0].frame)
+
+        # Compute locations of centroids 2 frames before the beginning
+        x_pre_begin = self.data[0].x - 2*dxdf_beg
+        y_pre_begin = self.data[0].y - 2*dydf_beg
+
+        # If the predicted point is inside the FOV, mark it as such
+        if (x_pre_begin > 0) and (x_pre_begin <= self.platepar.X_res) and (y_pre_begin > 0) \
+            and (y_pre_begin < self.platepar.Y_res):
+
+            self.fov_beg = True
+
+
+        # Find angular velocity at the ending per every axis
+        dxdf_end = (self.data[-1].x - self.data[half_index].x)/(self.data[-1].frame \
+            - self.data[half_index].frame)
+        dydf_end = (self.data[-1].y - self.data[half_index].y)/(self.data[-1].frame \
+            - self.data[half_index].frame)
+
+        # Compute locations of centroids 2 frames after the end
+        x_post_end = self.data[-1].x + 2*dxdf_end
+        y_post_end = self.data[-1].y + 2*dydf_end
+
+        # If the predicted point is inside the FOV, mark it as such
+        if (x_post_end > 0) and (x_post_end <= self.platepar.X_res) and (y_post_end > 0) \
+            and (y_post_end <= self.platepar.Y_res):
+            
+            self.fov_end = True
+
+        ### ###
 
 
 
@@ -296,13 +340,13 @@ class RMSDataHandle(object):
 
                 # Init meteor data
                 meteor_data = []
-                for entry in zip(cams_met_obs.frames, cams_met_obs.time_data, cams_met_obs.azim_data, \
-                    cams_met_obs.elev_data, cams_met_obs.ra_data, cams_met_obs.dec_data, \
-                    cams_met_obs.mag_data):
+                for entry in zip(cams_met_obs.frames, cams_met_obs.time_data, cams_met_obs.x_data,\
+                    cams_met_obs.y_data, cams_met_obs.azim_data, cams_met_obs.elev_data, \
+                    cams_met_obs.ra_data, cams_met_obs.dec_data, cams_met_obs.mag_data):
 
-                    frame, time_rel, azim, alt, ra, dec, mag = entry
+                    frame, time_rel, x, y, azim, alt, ra, dec, mag = entry
 
-                    met_point = MeteorPointRMS(frame, time_rel, np.degrees(ra), np.degrees(dec), \
+                    met_point = MeteorPointRMS(frame, time_rel, x, y, np.degrees(ra), np.degrees(dec), \
                         np.degrees(azim), np.degrees(alt), mag)
 
                     meteor_data.append(met_point)
@@ -415,8 +459,6 @@ if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser(description="""Automatically compute trajectories from RMS data in the given directory. 
 The directory structure needs to be the following, for example:
     ./ # root directory
-        ./CameraSites.txt
-        ./CameraTimeOffsets.txt
         /HR0001/
             /HR0001_20190707_192835_241084_detected
                 ./FTPdetectinfo_HR0001_20190707_192835_241084.txt
@@ -431,7 +473,7 @@ Next, is should contain directories of stations (station codes need to be exact)
 contain data folders. Data folders should have FTPdetectinfo files together with platepar files.""",
         formatter_class=argparse.RawTextHelpFormatter)
 
-    arg_parser.add_argument('dir_path', type=str, help='Path to the data directory. Trajectory helper files will be stored here as well.')
+    arg_parser.add_argument('dir_path', type=str, help='Path to the root data directory. Trajectory helper files will be stored here as well.')
 
     arg_parser.add_argument('-t', '--maxtoffset', metavar='MAX_TOFFSET', \
         help='Maximum time offset between the stations. Default is 5 seconds.', type=float, default=10.0)

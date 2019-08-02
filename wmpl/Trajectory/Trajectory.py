@@ -43,7 +43,8 @@ from wmpl.Utils.PyDomainParallelizer import domainParallelizer
 
 class ObservedPoints(object):
     def __init__(self, jdt_ref, meas1, meas2, time_data, lat, lon, ele, meastype, station_id=None, \
-        excluded_time=None, ignore_list=None, ignore_station=False, magnitudes=None):
+        excluded_time=None, ignore_list=None, ignore_station=False, magnitudes=None, fov_beg=None, \
+        fov_end=None):
         """ Structure for containing data of observations from invidiual stations.
         
         Arguments:
@@ -83,6 +84,8 @@ class ObservedPoints(object):
             ignore_station: [bool] If True, all data from the given station will not be taken into 
                 consideration upon trajectory fitting, but they will still be shown on the graphs.
             magnitudes: [list] A list of apparent magnitudes of the meteor. None by default.
+            fov_beg: [bool] True if the meteor began inside the FOV, False otherwise. None by default.
+            fov_end: [bool] True if the meteor ended inside the FOV, False otherwise. None by default.
         """
 
         ### INPUT DATA ###
@@ -142,6 +145,10 @@ class ObservedPoints(object):
 
         # Apparent magnitude
         self.magnitudes = magnitudes
+
+        # Meteor began/ended inside the FOV flags
+        self.fov_beg = fov_beg
+        self.fov_end = fov_end
 
         ######################################################################################################
 
@@ -1624,27 +1631,9 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
 
                 ### Add noise to simulated coordinates (taken over from Gural solver source)
 
-                zhat = np.zeros(3)
-
-                # Southern Hemisphere
-                if(rhat[2] < 0.0):
-
-                    zhat[0] =  0.0
-                    zhat[1] =  0.0
-                    zhat[2] = +1.0
-
-                    uhat = vectNorm(np.cross(rhat, zhat))
-                    vhat = vectNorm(np.cross(uhat, rhat))
-                
-                # Northern Hemisphere
-                else:
-                    zhat[0] =  0.0
-                    zhat[1] =  0.0
-                    zhat[2] = -1.0
-
-                    uhat = vectNorm(np.cross(zhat, rhat))
-                    vhat = vectNorm(np.cross(uhat, rhat))
-                
+                zhat = np.array([0.0, 0.0, 1.0])
+                uhat = vectNorm(np.cross(rhat, zhat))
+                vhat = vectNorm(np.cross(uhat, rhat))
 
                 # # sqrt(2)/2*noise in each orthogonal dimension
                 # NOTE: This is a bad way to do it because the estimated fit residuals are already estimated
@@ -1691,7 +1680,8 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
             # Fill in the new trajectory object - the time is assumed to be absolute
             traj_mc.infillTrajectory(azim_noise_list, elev_noise_list, obs.time_data, obs.lat, obs.lon, \
                 obs.ele, station_id=obs.station_id, excluded_time=obs.excluded_time, \
-                ignore_list=obs.ignore_list, magnitudes=obs.magnitudes)
+                ignore_list=obs.ignore_list, magnitudes=obs.magnitudes, fov_beg=obs.fov_beg, \
+                fov_end=obs.fov_end)
 
             
         # Do not show plots or perform additional optimizations
@@ -2240,7 +2230,7 @@ class Trajectory(object):
 
 
     def infillTrajectory(self, meas1, meas2, time_data, lat, lon, ele, station_id=None, excluded_time=None,
-        ignore_list=None, magnitudes=None):
+        ignore_list=None, magnitudes=None, fov_beg=None, fov_end=None):
         """ Initialize a set of measurements for a given station. 
     
         Arguments:
@@ -2264,6 +2254,8 @@ class Trajectory(object):
                 like this: [0, 0, 0, 1, 1, 0, 0], which would mean that the fourth and the fifth points
                 will be ignored in trajectory estimation.
             magnitudes: [list] A list of apparent magnitudes of the meteor. None by default.
+            fov_beg: [bool] True if the meteor began inside the FOV, False otherwise. None by default.
+            fov_end: [bool] True if the meteor ended inside the FOV, False otherwise. None by default.
 
         Return:
             None
@@ -2288,7 +2280,7 @@ class Trajectory(object):
         # Init a new structure which will contain the observed data from the given site
         obs = ObservedPoints(self.jdt_ref, meas1, meas2, time_data, lat, lon, ele, station_id=station_id, \
             meastype=self.meastype, excluded_time=excluded_time, ignore_list=ignore_list, \
-            magnitudes=magnitudes)
+            magnitudes=magnitudes, fov_beg=fov_beg, fov_end=fov_end)
             
         # Add observations to the total observations list
         self.observations.append(obs)
@@ -5064,7 +5056,8 @@ class Trajectory(object):
             
                     self.infillTrajectory(obs.meas1, obs.meas2, obs.time_data, obs.lat, obs.lon, obs.ele, \
                         station_id=obs.station_id, excluded_time=obs.excluded_time, \
-                        ignore_list=obs.ignore_list, magnitudes=obs.magnitudes)
+                        ignore_list=obs.ignore_list, magnitudes=obs.magnitudes, fov_beg=obs.fov_beg, \
+                        fov_end=obs.fov_end)
 
                 
                 # Re-run the trajectory estimation with updated timings. This will update all calculated
@@ -5191,7 +5184,8 @@ class Trajectory(object):
                 
                         self.infillTrajectory(obs.meas1, obs.meas2, obs.time_data, obs.lat, obs.lon, \
                             obs.ele, station_id=obs.station_id, excluded_time=obs.excluded_time,
-                            ignore_list=obs.ignore_list, magnitudes=obs.magnitudes)
+                            ignore_list=obs.ignore_list, magnitudes=obs.magnitudes, fov_beg=obs.fov_beg,
+                            fov_end=obs.fov_end)
 
                     
                     # Re-run the trajectory estimation with updated timings. This will update all calculated

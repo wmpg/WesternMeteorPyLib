@@ -13,15 +13,271 @@ import scipy.stats
 import scipy.ndimage
 
 
+from wmpl.Utils.Math import averageClosePoints
+from wmpl.Utils.Physics import calcMass
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PlotCelestial import CelestialPlot
 from wmpl.Utils.SolarLongitude import jd2SolLonSteyaert
+from wmpl.Utils.TrajConversions import jd2Date
 
 
-def writeOrbitSummaryFile(dir_path, traj_list):
+
+
+### CONSTANTS ###
+    
+# Trajectory summary file name
+TRAJ_SUMMARY_FILE = "trajectory_summary.txt"
+
+
+### ###
+
+
+
+def writeOrbitSummaryFile(dir_path, traj_list, P_0m=1210):
     """ Given a list of trajectory files, generate CSV file with the orbit summary. """
 
-    pass
+    def _uncer(traj, str_format, std_name, multi=1.0, deg=False, max_val=None, max_val_format="{:7.1e}"):
+        """ Internal function. Returns the formatted uncertanty, if the uncertanty is given. If not,
+            it returns nothing. 
+
+        Arguments:
+            traj: [Trajectory instance]
+            str_format: [str] String format for the unceertanty.
+            std_name: [str] Name of the uncertanty attribute, e.g. if it is 'x', then the uncertanty is 
+                stored in uncertanties.x.
+    
+        Keyword arguments:
+            multi: [float] Uncertanty multiplier. 1.0 by default. This is used to scale the uncertanty to
+                different units (e.g. from m/s to km/s).
+            deg: [bool] Converet radians to degrees if True. False by defualt.
+            max_val: [float] Larger number to use the given format. If the value is larger than that, the
+                max_val_format is used.
+            max_val_format: [str]
+            """
+
+        if deg:
+            multi *= np.degrees(1.0)
+
+        if traj.uncertanties is not None:
+            if hasattr(traj.uncertanties, std_name):
+
+                # Get the value
+                val = getattr(traj.uncertanties, std_name)*multi
+
+                # If the value is too big, use scientific notation
+                if max_val is not None:
+                    if val > max_val:
+                        str_format = max_val_format
+
+                return str_format.format(val)
+
+        
+        return "None"
+
+    # Sort trajectories by Julian date
+    traj_list = sorted(traj_list, key=lambda x: x.jdt_ref)
+
+
+    delimiter = "; "
+
+    out_str =  ""
+    out_str += "# Summary generated on {:s} UTC\n\r".format(str(datetime.datetime.utcnow()))
+
+    header = ["   Beginning      ", "       Beginning          ", "  Sol lon ", "  App LST ", "  RAgeo  ", "  +/-  ", "  DECgeo ", "  +/-  ", " LAMgeo  ", "  +/-  ", "  BETgeo ", "  +/-  ", "   Vgeo  ", "   +/- ", " LAMhel  ", "  +/-  ", "  BEThel ", "  +/-  ", "   Vhel  ", "   +/- ", "      a    ", "  +/-  ", "     e    ", "  +/-  ", "     i    ", "  +/-  ", "   peri   ", "   +/-  ", "   node   ", "   +/-  ", "    Pi    ", "  +/-  ", "     q    ", "  +/-  ", "     f    ", "  +/-  ", "     M    ", "  +/-  ", "      Q    ", "  +/-  ", "     n    ", "  +/-  ", "     T    ", "  +/-  ", "TisserandJ", "  +/-  ", "  RAapp  ", "  +/-  ", "  DECapp ", "  +/-  ", " Azim +E ", "  +/-  ", "   Elev  ", "  +/-  ", "  Vinit  ", "   +/- ", "   Vavg  ", "   +/- ", "   LatBeg   ", "  +/-  ", "   LonBeg   ", "  +/-  ", "  HtBeg ", "  +/-  ", "   LatEnd   ", "  +/-  ", "   LonEnd   ", "  +/-  ", "  HtEnd ", "  +/-  ", "Duration", " Peak ", " Peak Ht", " Mass kg", "  Qc ", "Beg in", "End in", "     Participating    "]
+    head_2 = ["  Julian date     ", "        UTC Time          ", "    deg   ", "    deg   ", "   deg   ", " sigma ", "   deg   ", " sigma ", "   deg   ", " sigma ", "    deg  ", " sigma ", "   km/s  ", "  sigma", "   deg   ", " sigma ", "    deg  ", " sigma ", "   km/s  ", "  sigma", "     AU    ", " sigma ", "          ", " sigma ", "   deg    ", " sigma ", "    deg   ", "  sigma ", "    deg   ", "  sigma ", "   deg    ", " sigma ", "    AU    ", " sigma ", "   deg    ", " sigma ", "    deg   ", " sigma ", "     AU    ", " sigma ", "  deg/day ", " sigma ", "   years  ", " sigma ", "          ", " sigma ", "   deg   ", " sigma ", "   deg   ", " sigma ", "of N  deg", " sigma ", "    deg  ", " sigma ", "   km/s  ", "  sigma", "   km/s  ", "  sigma", "   +N deg   ", " sigma ", "   +E deg   ", " sigma ", "    km  ", " sigma ", "   +N deg   ", " sigma ", "   +E deg   ", " sigma ", "    km  ", " sigma ", "  sec   ", "AbsMag", "    km  ", "tau=0.7%", " deg ", "  FOV ", "  FOV ", "        stations      "]
+    out_str += "# {:s}\n\r".format(delimiter.join(header))
+    out_str += "# {:s}\n\r".format(delimiter.join(head_2))
+
+    # Add a horizontal line
+    out_str += "# {:s}\n\r".format("; ".join(["-"*len(entry) for entry in header]))
+
+    # Write lines of data
+    for traj in traj_list:
+
+        line_info = []
+
+        line_info.append("{:20.12f}".format(traj.jdt_ref))
+        line_info.append("{:26s}".format(str(jd2Date(traj.jdt_ref, dt_obj=True))))
+
+        # Geocentric radiant (equatorial and ecliptic)
+        line_info.append("{:>10.6f}".format(np.degrees(traj.orbit.la_sun)))
+        line_info.append("{:>10.6f}".format(np.degrees(traj.orbit.lst_ref)))
+        line_info.append("{:>9.5f}".format(np.degrees(traj.orbit.ra_g)))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:7.4f}', 'ra_g', deg=True, max_val=100.0)))
+        line_info.append("{:>+9.5f}".format(np.degrees(traj.orbit.dec_g)))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:7.4f}', 'dec_g', deg=True, max_val=100.0)))
+        line_info.append("{:>9.5f}".format(np.degrees(traj.orbit.L_g)))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:7.4f}', 'L_g', deg=True, max_val=100.0)))
+        line_info.append("{:>+9.5f}".format(np.degrees(traj.orbit.B_g)))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:7.4f}', 'B_g', deg=True, max_val=100.0)))
+        line_info.append("{:>9.5f}".format(traj.orbit.v_g/1000))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:7.4f}', 'v_g', multi=1.0/1000)))
+
+        # Ecliptic heliocentric radiant
+        line_info.append("{:>9.5f}".format(np.degrees(traj.orbit.L_h)))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:7.4f}', 'L_h', deg=True, max_val=100.0)))
+        line_info.append("{:>+9.5f}".format(np.degrees(traj.orbit.B_h)))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:7.4f}', 'B_h', deg=True, max_val=100.0)))
+        line_info.append("{:>9.5f}".format(traj.orbit.v_h/1000))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:7.4f}', 'v_h', multi=1.0/1000)))
+
+        # Orbital elements
+        if abs(traj.orbit.a) < 1000:
+            line_info.append("{:>11.6f}".format(traj.orbit.a))
+        else:
+            line_info.append("{:>11.2e}".format(traj.orbit.a))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:.4f}', 'a', max_val=100.0)))
+        line_info.append("{:>10.6f}".format(traj.orbit.e))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:.4f}', 'e')))
+        line_info.append("{:>10.6f}".format(np.degrees(traj.orbit.i)))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:.4f}', 'i', deg=True)))
+        line_info.append("{:>10.6f}".format(np.degrees(traj.orbit.peri)))
+        line_info.append("{:>8s}".format(_uncer(traj, '{:.4f}', 'peri', deg=True)))
+        line_info.append("{:>10.6f}".format(np.degrees(traj.orbit.node)))
+        line_info.append("{:>8s}".format(_uncer(traj, '{:.4f}', 'node', deg=True)))
+        line_info.append("{:>10.6f}".format(np.degrees(traj.orbit.pi)))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:.4f}', 'pi', deg=True)))
+        line_info.append("{:>10.6f}".format(traj.orbit.q))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:.4f}', 'q')))
+        line_info.append("{:>10.6f}".format(np.degrees(traj.orbit.true_anomaly)))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:.4f}', 'true_anomaly', deg=True)))
+        line_info.append("{:>10.6f}".format(np.degrees(traj.orbit.mean_anomaly)))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:.4f}', 'mean_anomaly', deg=True)))
+        if abs(traj.orbit.Q) < 1000:
+            line_info.append("{:>11.6f}".format(traj.orbit.Q))
+        else:
+            line_info.append("{:>11.4e}".format(traj.orbit.Q))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:.4f}', 'Q', max_val=100.0)))
+        line_info.append("{:>10.6f}".format(np.degrees(traj.orbit.n)))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:.4f}', 'n', deg=True, max_val=100.0)))
+        if traj.orbit.T < 1000:
+            line_info.append("{:>10.6f}".format(traj.orbit.T))
+        else:
+            line_info.append("{:>10.4e}".format(traj.orbit.T))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:.4f}', 'T', max_val=100.0)))
+        line_info.append("{:>10.6f}".format(traj.orbit.Tj))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:.4f}', 'Tj', max_val=100.0)))
+        
+        # Apparent radiant
+        line_info.append("{:>9.5f}".format(np.degrees(traj.orbit.ra_norot)))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:7.4f}', 'ra_norot', deg=True, max_val=100.0)))
+        line_info.append("{:>+9.5f}".format(np.degrees(traj.orbit.dec_norot)))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:7.4f}', 'dec_norot', deg=True, max_val=100.0)))
+        line_info.append("{:>9.5f}".format(np.degrees(traj.orbit.azimuth_apparent_norot)))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:7.4f}', 'azimuth_apparent', deg=True, max_val=100.0)))
+        line_info.append("{:>9.5f}".format(np.degrees(traj.orbit.elevation_apparent_norot)))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:7.4f}', 'elevation_apparent', deg=True, max_val=100.0)))
+        line_info.append("{:>9.5f}".format(traj.orbit.v_init_norot/1000))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:7.4f}', 'v_init', multi=1.0/1000)))
+        line_info.append("{:>9.5f}".format(traj.orbit.v_avg_norot/1000))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:7.4f}', 'v_avg', multi=1.0/1000)))
+
+        # Begin/end point
+        line_info.append("{:>12.6f}".format(np.degrees(traj.rbeg_lat)))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:.4f}', 'rbeg_lat', deg=True)))
+        line_info.append("{:>12.6f}".format(np.degrees(traj.rbeg_lon)))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:.4f}', 'rbeg_lon', deg=True)))
+        line_info.append("{:>8.4f}".format(traj.rbeg_ele/1000))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:.2f}', 'rbeg_ele', multi=1.0/1000)))
+        line_info.append("{:>12.6f}".format(np.degrees(traj.rend_lat)))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:.4f}', 'rend_lat', deg=True)))
+        line_info.append("{:>12.6f}".format(np.degrees(traj.rend_lon)))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:.4f}', 'rend_lon', deg=True)))
+        line_info.append("{:>8.4f}".format(traj.rend_ele/1000))
+        line_info.append("{:>7s}".format(_uncer(traj, '{:.2f}', 'rend_ele', multi=1.0/1000)))
+
+        
+        
+        # Compute the duration
+        duration = max([np.max(obs.time_data[obs.ignore_list == 0]) for obs in traj.observations \
+            if obs.ignore_station == False])
+
+        # Compute the peak magnitude and the peak height
+        peak_mags = [np.min(obs.absolute_magnitudes[obs.ignore_list == 0]) for obs in traj.observations \
+            if obs.ignore_station == False]
+        peak_mag = np.min(peak_mags)
+        peak_ht = [obs.model_ht[np.argmin(obs.absolute_magnitudes[obs.ignore_list == 0])] for obs in traj.observations \
+            if obs.ignore_station == False][np.argmin(peak_mags)]
+
+
+        ### Compute the mass
+
+        time_mag_arr = []
+        avg_t_diff_max = 0
+        for obs in traj.observations:
+
+            # Skip ignored stations
+            if obs.ignore_station:
+                continue
+
+            # If there are not magnitudes for this site, skip it
+            if obs.absolute_magnitudes is None:
+                continue
+
+            # Compute average time difference
+            avg_t_diff_max = max(avg_t_diff_max, np.median(obs.time_data[1:] - obs.time_data[:-1]))
+
+            for t, mag in zip(obs.time_data, obs.absolute_magnitudes):
+                if (mag is not None) and (not np.isnan(mag)):
+                    time_mag_arr.append([t, mag])
+
+
+        # Compute the mass
+        time_mag_arr = np.array(sorted(time_mag_arr, key=lambda x: x[0]))
+        time_arr, mag_arr = time_mag_arr.T
+        
+        # Average out the magnitudes
+        time_arr, mag_arr = averageClosePoints(time_arr, mag_arr, avg_t_diff_max)
+
+        # Compute the photometry mass
+        mass = calcMass(np.array(time_arr), np.array(mag_arr), traj.orbit.v_avg_norot, P_0m=P_0m)
+
+        ###
+
+
+        # Meteor parameters (duration, peak magnitude, integrated intensity, Q angle)
+        line_info.append("{:8.2f}".format(duration))
+        line_info.append("{:+6.2f}".format(peak_mag))
+        line_info.append("{:>8.4f}".format(peak_ht/1000))
+        line_info.append("{:8.2e}".format(mass))
+
+        # Convergence angle
+        line_info.append("{:5.2f}".format(np.degrees(traj.best_conv_inter.conv_angle)))
+
+
+        # Meteor begins inside the FOV
+        fov_beg = None
+        fov_beg_list = [obs.fov_beg for obs in traj.observations if (obs.ignore_station == False) \
+            and hasattr(obs, "fov_beg")]
+        if len(fov_beg_list) > 0:
+            fov_beg = np.any(fov_beg_list)
+
+        line_info.append("{:>6s}".format(str(fov_beg)))
+
+        # Meteor ends inside the FOV
+        fov_end = None
+        fov_end_list = [obs.fov_end for obs in traj.observations if (obs.ignore_station == False) \
+            and hasattr(obs, "fov_end")]
+        if len(fov_end_list) > 0:
+            fov_end = np.any(fov_end_list)
+
+        line_info.append("{:>6s}".format(str(fov_end)))
+
+
+        # Participating stations
+        line_info.append("{:s}".format(",".join(sorted([obs.station_id for obs in traj.observations \
+            if obs.ignore_station == False]))))
+
+
+        out_str += delimiter.join(line_info) + "\n\r"
+
+
+    # Save the file to a trajectory summary
+    traj_summary_path = os.path.join(dir_path, TRAJ_SUMMARY_FILE)
+    with open(traj_summary_path, 'w') as f:
+        f.write(out_str)
+
+    print("Trajectory summary saved to:", traj_summary_path)
 
 
 
@@ -233,6 +489,8 @@ if __name__ == "__main__":
     # Minimum convergence angle (deg)
     min_qc = 5.0
 
+    # Maximum eccentricity
+    max_e = 2.5
 
     ### ###
 
@@ -264,7 +522,7 @@ if __name__ == "__main__":
                 max_points = max(points_count)
 
                 if max_points < min_traj_points:
-                    print("Skipping {:.2f} due to the small number of points...".format(traj.jdt_ref))
+                    # print("Skipping {:.2f} due to the small number of points...".format(traj.jdt_ref))
                     continue
 
                 ###
@@ -274,7 +532,15 @@ if __name__ == "__main__":
                 ### Reject all trajectories with a too small convergence angle ###
 
                 if np.degrees(traj.best_conv_inter.conv_angle) < min_qc:
-                    print("Skipping {:.2f} due to the small convergence angle...".format(traj.jdt_ref))
+                    # print("Skipping {:.2f} due to the small convergence angle...".format(traj.jdt_ref))
+                    continue
+
+                ###
+
+
+                ### MAXIMUM ECCENTRICITY ###
+
+                if traj.orbit.e > max_e:
                     continue
 
                 ###

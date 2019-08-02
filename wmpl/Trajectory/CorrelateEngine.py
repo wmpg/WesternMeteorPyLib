@@ -265,7 +265,7 @@ class TrajectoryCorrelator(object):
         # Init the observation object
         obs = ObservedPoints(datetime2JD(ref_dt), ra_data, dec_data, time_data, np.radians(pp.lat), \
             np.radians(pp.lon), pp.elev, meastype=1, station_id=pp.station_code, magnitudes=mag_data, \
-            ignore_list=ignore_list)
+            ignore_list=ignore_list, fov_beg=met.fov_beg, fov_end=met.fov_end)
 
         return obs
 
@@ -535,11 +535,20 @@ class TrajectoryCorrelator(object):
                 # Add the candidate trajectory to the common list if a match has been found
                 if found_match:
 
+                    ref_stations = [obs.station_code for obs in obs_list_ref]
+
                     # Add observations that weren't present in the reference candidate
                     for entry in traj_cand_test:
+
+                        # Make sure the added observation is not from a station that's already added
+                        if entry[1].station_code in ref_stations:
+                            continue
+
                         if entry[1] not in obs_list_ref:
+
                             print("Merging:", entry[1].mean_dt, entry[1].station_code)
                             traj_cand_ref.append(entry)
+
 
                     # Mark that the current index has been processed
                     merged_indices.append(i + j + 1)
