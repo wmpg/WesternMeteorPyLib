@@ -353,10 +353,15 @@ def plotSCE(x_data, y_data, color_data, sol_range, plot_title, colorbar_title, d
             np.degrees(np.array(y_data)), bins=(lon_bins, lat_bins))
 
         # Apply Gaussian filter to it
-        data = scipy.ndimage.filters.gaussian_filter(data, 1.0)*2*np.pi
+        data = scipy.ndimage.filters.gaussian_filter(data, 1.0)*4*np.pi
 
-        plt_handle = celes_plot.m.imshow(data.T, origin='lower', extent=[lon_min, lon_max, lat_min, lat_max], 
-            interpolation='gaussian', norm=matplotlib.colors.PowerNorm(gamma=1./2.), cmap=cmap)
+        plt_handle = celes_plot.m.imshow(data.T, origin='lower', extent=[lon_min, lon_max, lat_min, lat_max],\
+            #interpolation='gaussian', norm=matplotlib.colors.PowerNorm(gamma=1./2.), cmap=cmap)
+            interpolation='gaussian', norm=matplotlib.colors.LogNorm(vmin=1.0, vmax=100), cmap=cmap)
+
+        # Plot the colorbar
+        ticks = [1, 5, 10, 20, 50, 100]
+        cb = fig.colorbar(plt_handle, ticks=ticks, format="%.0f")
 
 
     else:
@@ -368,10 +373,12 @@ def plotSCE(x_data, y_data, color_data, sol_range, plot_title, colorbar_title, d
 
         # Plot the data
         plt_handle = celes_plot.scatter(x_data, y_data, color_data, s=dot_size, cmap=cmap)
+    
+        # Plot the colorbar
+        cb = fig.colorbar(plt_handle)
 
-        
-    # Plot the colorbar
-    cb = fig.colorbar(plt_handle)
+    
+    # Tweak the colorbar
     cb.set_label(colorbar_title, color=fg_color)
     cb.ax.yaxis.set_tick_params(color=fg_color)
     cb.outline.set_edgecolor(fg_color)
