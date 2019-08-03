@@ -490,6 +490,13 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         help='Fixed part from the beginning of the meteor on which the initial velocity estimation using the sliding fit will start. Default is 0.25 (25 percent), but for noisier data this might be bumped up to 0.5.', \
         type=float, default=0.25)
 
+    arg_parser.add_argument('-d', '--disablemc', \
+        help='Disable Monte Carlo.', action="store_true")
+
+    arg_parser.add_argument('-l', '--saveplots', \
+        help='Save plots to disk.', action="store_true")
+
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -508,6 +515,8 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     trajectory_constraints.max_toffset = cml_args.maxtoffset
     trajectory_constraints.max_station_dist = cml_args.maxstationdist
     trajectory_constraints.max_vel_percent_diff = cml_args.maxveldiff
+    trajectory_constraints.run_mc = not cml_args.disablemc
+    trajectory_constraints.save_plots = cml_args.saveplots
 
 
     t1 = datetime.datetime.utcnow()
