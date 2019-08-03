@@ -321,7 +321,11 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_eq
         ax = fig.gca(projection='3d', facecolor=cs.background)
 
         # Set a constant aspect ratio
-        ax.set_aspect('equal', adjustable='box')
+        try:
+            ax.set_aspect('equal', adjustable='box')
+
+        except NotImplementedError:
+            print("Couldn't set 3D plot aspect ratio!")
 
         # Hide the axes
         ax.set_axis_off()
