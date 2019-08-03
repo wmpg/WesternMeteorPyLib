@@ -483,7 +483,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         default=300.0)
 
     arg_parser.add_argument('-v', '--maxveldiff', metavar='MAX_VEL_DIFF', \
-        help='Maximum difference in percent between velocities between two stations. Default is 25%.', \
+        help='Maximum difference in percent between velocities between two stations. Default is 25 percent.', \
         type=float, default=25.0)
 
     arg_parser.add_argument('-p', '--velpart', metavar='VELOCITY_PART', \
