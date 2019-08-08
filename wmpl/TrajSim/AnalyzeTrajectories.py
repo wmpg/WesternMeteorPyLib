@@ -577,6 +577,27 @@ def compareTrajToSim(dir_path, sim_meteors, traj_list, solver_name, radiant_exte
     return failed_count, radiant_std, vg_std
 
 
+
+def skipPlottingSystemShower(system_shower_solver_skip_list, system_name, shower_name, solver_name):
+    """ Given the system and the shower name, determine if it should be plotted or not. """
+
+    # Skip plotting if this combination of shower, solver and system is in the no-plot list
+    skip_plot = False
+    for no_plot_entry in system_shower_solver_skip_list:
+        system_name_tmp, shower_name_tmp, skip_plotting_solver_results = no_plot_entry
+
+        if (system_name == system_name_tmp) and (shower_name == shower_name_tmp) \
+            and (solver_name in skip_plotting_solver_results):
+
+            skip_plot = True
+            break
+
+
+    return skip_plot
+
+
+
+
 if __name__ == "__main__":
 
 
@@ -607,17 +628,17 @@ if __name__ == "__main__":
 
     # min duration = Minimum duration of meteor in seconds (-1 to turn this filter off)
     data_list = [ # Trajectory directory                     Min Qc  dRadiant max   dVg max   min duration  skip solver plot
-        # ["../SimulatedMeteors/CAMO/2011Draconids",            1.0,        0.5,         0.5,       -1, []],
-        # ["../SimulatedMeteors/CAMO/2012Geminids",             1.0,        0.5,         0.5,       -1, ['MPF const', 'MPF const-FHAV']],
-        # ["../SimulatedMeteors/CAMO/2012Perseids",             1.0,        0.5,         0.5,       -1, []] ]
+        ["../SimulatedMeteors/CAMO/2011Draconids",            1.0,        0.5,         0.5,       -1, []],
+        ["../SimulatedMeteors/CAMO/2012Geminids",             1.0,        0.5,         0.5,       -1, ['MPF const', 'MPF const-FHAV']],
+        ["../SimulatedMeteors/CAMO/2012Perseids",             1.0,        0.5,         0.5,       -1, []],
         #
-        # ["../SimulatedMeteors/CAMSsim/2011Draconids",         10.0,       1.0,         1.0,       -1, []],
-        # ["../SimulatedMeteors/CAMSsim/2012Geminids",          10.0,       1.0,         1.0,       -1, []],
-        # ["../SimulatedMeteors/CAMSsim/2012Perseids",          10.0,       1.0,         1.0,       -1, []] ]
+        ["../SimulatedMeteors/CAMSsim/2011Draconids",         10.0,       1.0,         1.0,       -1, []],
+        ["../SimulatedMeteors/CAMSsim/2012Geminids",          10.0,       1.0,         1.0,       -1, []],
+        ["../SimulatedMeteors/CAMSsim/2012Perseids",          10.0,       1.0,         1.0,       -1, []],
         #
-        # ["../SimulatedMeteors/SOMN_sim/2011Draconids",        15.0,       5.0,         5.0,       -1, []],
-        # ["../SimulatedMeteors/SOMN_sim/2012Geminids",           15.0,       5.0,         5.0,       -1, []],
-        # ["../SimulatedMeteors/SOMN_sim/2012Perseids",         15.0,       5.0,         5.0,       -1, []] ]
+        ["../SimulatedMeteors/SOMN_sim/2011Draconids",        15.0,       5.0,         5.0,       -1, []],
+        ["../SimulatedMeteors/SOMN_sim/2012Geminids",         15.0,       5.0,         5.0,       -1, []],
+        ["../SimulatedMeteors/SOMN_sim/2012Perseids",         15.0,       5.0,         5.0,       -1, []] ]
         
         # ["../SimulatedMeteors/SOMN_sim/2015Taurids",          15.0,       5.0,         5.0,       -1, []]]
         # ["../SimulatedMeteors/SOMN_sim/LongFireball",          5.0,       0.5,         0.5,        4, []]
@@ -627,7 +648,7 @@ if __name__ == "__main__":
         # ["../SimulatedMeteors/CAMSsim/2014Ursids",            10.0,       1.0,         1.0,       -1, []],
         # ["../SimulatedMeteors/SOMN_sim/2014Ursids",           15.0,       5.0,         5.0,       -1, []],
 
-        ["../SimulatedMeteors/Hamburg_stations/Hamburg_fall",   1.0,       0.2,         0.2,        -1, ['planes', 'milig', 'mc', 'gural0', 'gural0fha', 'gural1', 'gural3']]]
+        #["../SimulatedMeteors/Hamburg_stations/Hamburg_fall",   1.0,       0.2,         0.2,        -1, ['planes', 'milig', 'mc', 'gural0', 'gural0fha', 'gural1', 'gural3']]]
 
 
 
@@ -786,8 +807,8 @@ if __name__ == "__main__":
         radiant_std_mean = np.median([entry[5] for entry in system_results for solver_name_iter in solvers_plot_labels if solver_name_iter == entry[2]])
 
         # Compute text padding
-        pad_x = 0.02*vg_std_max
-        pad_y = 0.01*radiant_std_mean
+        pad_x = 0.10*vg_std_max
+        pad_y = 0.05*radiant_std_mean
 
 
         # Go through all solvers
@@ -799,9 +820,16 @@ if __name__ == "__main__":
             # Round the left_limit point
             left_limit = round(left_limit, 1)
 
+            # Find the rightmost limit for the solver
+            vg_std_solver_max = max([entry[6] for entry in system_results if (solver_name_iter == entry[2]) \
+                and (not skipPlottingSystemShower(system_shower_solver_skip_list, system_name, \
+                        entry[1], solver_name_iter))])
+            right_limit_solver = left_limit + vg_std_solver_max
+
             # Plot the name of the solver
-            plt.text(left_limit + pad_x, pad_y, solver_name_iter, rotation=90, verticalalignment='bottom', 
-                horizontalalignment='left', fontsize=10, color='r', zorder=5, weight='bold')
+            plt.text(right_limit_solver + pad_x, pad_y, solver_name_iter, rotation=90, \
+                verticalalignment='bottom', horizontalalignment='left', fontsize=10, color='r', zorder=5, \
+                weight='bold')
 
             print("{:<17s}".format(solver_name_iter), end='')
                 
@@ -833,15 +861,8 @@ if __name__ == "__main__":
 
 
                     # Skip plotting if this combination of shower, solver and system is in the no-plot list
-                    skip_plot = False
-                    for no_plot_entry in system_shower_solver_skip_list:
-                        system_name_tmp, shower_name_tmp, skip_plotting_solver_results = no_plot_entry
-
-                        if (system_name == system_name_tmp) and (shower_name == shower_name_tmp) \
-                            and (solver_name in skip_plotting_solver_results):
-
-                            skip_plot = True
-                            break
+                    skip_plot = skipPlottingSystemShower(system_shower_solver_skip_list, system_name, \
+                        shower_name, solver_name)
 
 
                     if (vg_std > vg_shower_std_max) and (not skip_plot):
@@ -868,9 +889,12 @@ if __name__ == "__main__":
                     linestyle = linestyle_list[j%len(linestyle_list)]
 
                     if not skip_plot:
-                        upper = plt.plot(x_arr, np.zeros_like(x_arr) + radiant_std, color=color_name, label=shower_name_iter, linestyle=linestyle)
-                        plt.plot(np.zeros_like(x_arr) + left_limit, y_arr, color=color_name, linestyle=linestyle)
-                        plt.plot(np.zeros_like(x_arr) + right_limit, y_arr, color=color_name, linestyle=linestyle)
+                        upper = plt.plot(x_arr, np.zeros_like(x_arr) + radiant_std, color=color_name, \
+                            label=shower_name_iter, linestyle=linestyle)
+                        plt.plot(np.zeros_like(x_arr) + left_limit, y_arr, color=color_name, \
+                            linestyle=linestyle)
+                        plt.plot(np.zeros_like(x_arr) + right_limit, y_arr, color=color_name, \
+                            linestyle=linestyle)
 
                         # Add the legend only for the first solver
                         if solver_name_iter == solvers_plot_labels[0]:

@@ -69,29 +69,35 @@ if __name__ == "__main__":
     # Directory which contains SimMet .pickle files
 
     # os.path.abspath("../SimulatedMeteors/CAMO/2011Draconids"),
-    # os.path.abspath("../SimulatedMeteors/CAMO/2014Ursids"),
     # os.path.abspath("../SimulatedMeteors/CAMO/2012Perseids"),
-    #os.path.abspath("../SimulatedMeteors/CAMO/2012Geminids")
     #os.path.abspath("../SimulatedMeteors/CAMO/2012Geminids_1000")
 
     # os.path.abspath("../SimulatedMeteors/CAMSsim/2011Draconids"),
-    # os.path.abspath("../SimulatedMeteors/CAMSsim/2014Ursids"),
     # os.path.abspath("../SimulatedMeteors/CAMSsim/2012Perseids"),
-    # os.path.abspath("../SimulatedMeteors/CAMSsim/2012SDA")
-    # os.path.abspath("../SimulatedMeteors/CAMSsim/2012Geminids")
     #os.path.abspath("../SimulatedMeteors/CAMSsim_2station/2012Geminids_1000")
 
     # os.path.abspath("../SimulatedMeteors/SOMN_sim/2011Draconids"),
-    #os.path.abspath("../SimulatedMeteors/SOMN_sim/2014Ursids"),
     # os.path.abspath("../SimulatedMeteors/SOMN_sim/2012Perseids"),
     # os.path.abspath("../SimulatedMeteors/SOMN_sim/2015Taurids")
     #os.path.abspath("../SimulatedMeteors/SOMN_sim/2012Geminids")
-    #os.path.abspath("../SimulatedMeteors/SOMN_sim/2012Geminids_1000")
     #os.path.abspath("../SimulatedMeteors/SOMN_sim_2station/2012Geminids_1000")
 
     #os.path.abspath("../SimulatedMeteors/SOMN_sim/LongFireball")
     #os.path.abspath("../SimulatedMeteors/SOMN_sim/LongFireball_nograv")
-    os.path.abspath("../SimulatedMeteors/Hamburg_stations/Hamburg_fall")
+    #os.path.abspath("../SimulatedMeteors/Hamburg_stations/Hamburg_fall")
+
+    os.path.abspath("/mnt/bulk/SimulatedMeteors/CAMO/2011Draconids"),
+    os.path.abspath("/mnt/bulk/SimulatedMeteors/CAMO/2012Perseids"),
+    os.path.abspath("/mnt/bulk/SimulatedMeteors/CAMO/2012Geminids_1000"),
+
+    os.path.abspath("/mnt/bulk/SimulatedMeteors/CAMSsim/2011Draconids"),
+    os.path.abspath("/mnt/bulk/SimulatedMeteors/CAMSsim/2012Perseids"),
+    os.path.abspath("/mnt/bulk/SimulatedMeteors/CAMSsim_2station/2012Geminids_1000"),
+
+    os.path.abspath("/mnt/bulk/SimulatedMeteors/SOMN_sim/2011Draconids"),
+    os.path.abspath("/mnt/bulk/SimulatedMeteors/SOMN_sim/2012Perseids"),
+    os.path.abspath("/mnt/bulk/SimulatedMeteors/SOMN_sim_2station/2012Geminids_1000")
+
     ]
 
     # Maximum time offset (seconds)
@@ -100,10 +106,13 @@ if __name__ == "__main__":
     # Use gravity correction when calculating trajectories
     gravity_correction = True
 
+    # Only update solution files, don't overwrite the old solutions
+    update_only = True
+
 
     # Trajectory solvers
     #traj_solvers = ['planes', 'los', 'milig', 'monte_carlo', 'gural0', 'gural0fha', 'gural1', 'gural2', 'gural3']
-    traj_solvers = ['los']
+    traj_solvers = ['monte_carlo']
     #traj_solvers = ['gural0fha']
     #traj_solvers = ['planes', 'los', 'monte_carlo']
     #traj_solvers = ['los']
@@ -139,8 +148,9 @@ if __name__ == "__main__":
             # Prepare everything for saving data to disk
             sim_met.initOutput(output_dir)
 
-            # Save info about the simulated meteor (THIS CAN BE DISABLED WITH UPDATING SOLUTIONS)
-            sim_met.saveInfo(output_dir)
+            # Save info about the simulated meteor (THIS CAN BE DISABLED WHEN YOU ONLY WANT TO UPDATE SOLUTIONS)
+            if not update_only:
+                sim_met.saveInfo(output_dir)
 
 
             # Extract the unique solution ID

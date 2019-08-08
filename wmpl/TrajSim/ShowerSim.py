@@ -1648,26 +1648,9 @@ def generateTrajectoryData(station_list, sim_met, velocity_model):
 
             ### Add noise to simulated coordinates (taken over from Gural solver source)
 
-            zhat = np.zeros(3)
-
-            # Southern Hemisphere
-            if(rhat[2] < 0.0):
-
-                zhat[0] =  0.0
-                zhat[1] =  0.0
-                zhat[2] = +1.0
-
-                uhat = vectNorm(np.cross(rhat, zhat))
-                vhat = vectNorm(np.cross(uhat, rhat))
-            
-            # Northern Hemisphere
-            else:
-                zhat[0] =  0.0
-                zhat[1] =  0.0
-                zhat[2] = -1.0
-
-                uhat = vectNorm(np.cross(zhat, rhat))
-                vhat = vectNorm(np.cross(uhat, rhat))
+            zhat = np.array([0.0, 0.0, 1.0])
+            uhat = vectNorm(np.cross(rhat, zhat))
+            vhat = vectNorm(np.cross(uhat, rhat))
             
 
             # # sqrt(2)/2*noise in each orthogonal dimension

@@ -199,7 +199,7 @@ def explorePointings(station_list, fixed_cameras, min_height, max_height, moving
             d_range = np.linspace(-mv_range/2.0, +mv_range/2, steps)
 
             # Make a grid of movements
-            total_runs = 0
+            total_runs = 1
             for elev_ind, d_elev in enumerate(d_range):
                 for azim_ind, d_azim in enumerate(d_range):
 
@@ -299,10 +299,10 @@ if __name__ == "__main__":
     #################
 
     # Azimuths of centre of FOVs (degrees)
-    azim_fovs = [326.75, 359.5]
+    azim_fovs = [326.75, 344.34]
 
     # Elevations of centre of FOVs (degrees)
-    elev_fovs = [45.62, 44.85]
+    elev_fovs = [45.62, 44.6]
 
     # # Azimuths of centre of FOVs (degrees)
     # azim_fovs = [338.823, 1.891]
@@ -388,10 +388,10 @@ if __name__ == "__main__":
     # #################
 
     # # Azimuths of centre of FOVs (degrees)
-    # azim_fovs = [327.0, 20.0]
+    # azim_fovs = [327.0,  4.0]
 
     # # Elevations of centre of FOVs (degrees)
-    # elev_fovs = [56.5, 65.16]
+    # elev_fovs = [56.5, 60.75]
 
     # # Cameras FOV widths (degrees)
     # fov_widths = [29.5, 29.5]
@@ -402,7 +402,7 @@ if __name__ == "__main__":
 
     # # If the camera FOV is fixed, it should have True at its index, and False if it can be moved to optimize
     # # the overlap
-    # fixed_cameras = [True, False]
+    # fixed_cameras = [False, True]
 
     # # Height range to optimize for (kilometers)
     # min_height = 70
