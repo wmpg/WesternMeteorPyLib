@@ -90,7 +90,7 @@ class TrajectoryConstraints(object):
         self.error_mc_runs = 10
 
         # Convergence angle below which more MC runs will be used (deg)
-        self.low_qc_threshold = 10.0
+        self.low_qc_threshold = 15.0
 
         # Number of MC runs to run for low Qc trajectories
         self.low_qc_mc_runs = 20
