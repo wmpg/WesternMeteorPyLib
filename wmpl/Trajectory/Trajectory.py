@@ -4071,8 +4071,9 @@ class Trajectory(object):
 
         # Plot the Jacchia fit on all observations
         time_all = np.sort(np.hstack([obs.time_data for obs in self.observations]))
-        plt.plot(jacchiaLagFunc(time_all, *self.jacchia_fit), time_all, label='Jacchia fit', 
-            zorder=3)
+        time_jacchia = np.linspace(np.min(time_all), np.max(time_all), 1000)
+        plt.plot(jacchiaLagFunc(time_jacchia, *self.jacchia_fit), time_jacchia, label='Jacchia fit', 
+            zorder=3, color='k', alpha=0.5)
 
 
         plt.title('Lags, all stations')
@@ -4168,7 +4169,7 @@ class Trajectory(object):
         # Plot the velocity calculated from the Jacchia model
         t_vel = np.linspace(t_min, t_max, 1000)
         ax1.plot(jacchiaVelocityFunc(t_vel, self.jacchia_fit[0], self.jacchia_fit[1], self.v_init)/1000, \
-            t_vel, label='Jacchia fit', alpha=0.5)
+            t_vel, label='Jacchia fit', alpha=0.5, color='k')
 
         plt.title('Velocity')
         ax1.set_xlabel('Velocity (km/s)')
