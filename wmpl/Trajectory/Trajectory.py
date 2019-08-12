@@ -1651,15 +1651,8 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
                 if (sigma < 0) or np.isnan(sigma):
                     sigma = np.radians(1)
 
-
-                meas_eci_noise = np.zeros(3)
-
-                meas_eci_noise[0] = rhat[0] + np.random.normal(0, sigma)*uhat[0] \
-                    + np.random.normal(0, sigma)*vhat[0]
-                meas_eci_noise[1] = rhat[1] + np.random.normal(0, sigma)*uhat[1] \
-                    + np.random.normal(0, sigma)*vhat[1]
-                meas_eci_noise[2] = rhat[2] + np.random.normal(0, sigma)*uhat[2] \
-                    + np.random.normal(0, sigma)*vhat[2]
+                # Add noise to observations
+                meas_eci_noise = rhat + np.random.normal(0, sigma)*uhat + np.random.normal(0, sigma)*vhat
 
                 # Normalize to a unit vector
                 meas_eci_noise = vectNorm(meas_eci_noise)
@@ -4073,7 +4066,7 @@ class Trajectory(object):
         time_all = np.sort(np.hstack([obs.time_data for obs in self.observations]))
         time_jacchia = np.linspace(np.min(time_all), np.max(time_all), 1000)
         plt.plot(jacchiaLagFunc(time_jacchia, *self.jacchia_fit), time_jacchia, label='Jacchia fit', 
-            zorder=3, color='k', alpha=0.5)
+            zorder=3, color='k', alpha=0.5, linestyle="dashed")
 
 
         plt.title('Lags, all stations')

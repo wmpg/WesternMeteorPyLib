@@ -1661,11 +1661,8 @@ def generateTrajectoryData(station_list, sim_met, velocity_model):
             # Take the observation uncertainty as the sigma for the normal distribution
             sigma = stat.obs_ang_std
 
-            model_eci = np.zeros(3)
-
-            model_eci[0] = rhat[0] + np.random.normal(0, sigma)*uhat[0] + np.random.normal(0, sigma)*vhat[0]
-            model_eci[1] = rhat[1] + np.random.normal(0, sigma)*uhat[1] + np.random.normal(0, sigma)*vhat[1]
-            model_eci[2] = rhat[2] + np.random.normal(0, sigma)*uhat[2] + np.random.normal(0, sigma)*vhat[2]
+            # Add the noise
+            model_eci = rhat + np.random.normal(0, sigma)*uhat + np.random.normal(0, sigma)*vhat
 
             # Normalize to a unit vector
             model_eci = vectNorm(model_eci)
