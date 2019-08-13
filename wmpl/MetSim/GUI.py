@@ -331,6 +331,10 @@ class MetSimGUI(QMainWindow):
         else:
             self.wake_plot_ht = self.traj.rbeg_ele # m
 
+        self.wake_normalization_method = 'area'
+        self.wake_align_peaks = True
+
+
 
         # Disable different erosion coeff after disruption at the beginning
         self.disruption_different_erosion_coeff = False
@@ -409,6 +413,13 @@ class MetSimGUI(QMainWindow):
         self.wakeIncrementPlotHeightButton.clicked.connect(self.incrementWakePlotHeight)
         self.wakeDecrementPlotHeightButton.clicked.connect(self.decrementWakePlotHeight)
 
+        self.radioButtonWakeNormalizationPeak.toggled.connect(self.toggleWakeNormalizationMethod)
+        self.radioButtonWakeNormalizationArea.toggled.connect(self.toggleWakeNormalizationMethod)
+        self.radioButtonWakeNormalizationArea.setChecked(self.wake_normalization_method == 'area')
+        self.radioButtonWakeNormalizationPeak.setChecked(self.wake_normalization_method == 'peak')
+        self.checkBoxWakeAlignPeaks.stateChanged.connect(self.checkBoxWakeAlignPeaksSignal)
+        self.checkBoxWakeAlignPeaks.setChecked(self.wake_align_peaks)
+
         #self.addToolBar(NavigationToolbar(self.magnitudePlot.canvas, self))
 
 
@@ -424,6 +435,7 @@ class MetSimGUI(QMainWindow):
         self.checkBoxErosionSignal(None)
         self.checkBoxDisruptionSignal(None)
         self.checkBoxDisruptionErosionCoeffSignal(None)
+        self.toggleWakeNormalizationMethod(None)
 
         # Update plots
         self.updateMagnitudePlot()
@@ -653,6 +665,15 @@ class MetSimGUI(QMainWindow):
 
 
 
+    def checkBoxWakeAlignPeaksSignal(self, event):
+        """ Control what happens when the wake peak alignment checkbox is pressed. """
+
+        self.wake_align_peaks = self.checkBoxWakeAlignPeaks.isChecked()
+
+        self.updateWakePlot()
+
+
+
     def checkBoxErosionSignal(self, event):
         """ Control what happens when the erosion checkbox is pressed. """
 
@@ -706,6 +727,26 @@ class MetSimGUI(QMainWindow):
         # Read inputs
         self.readInputBoxes()
 
+
+
+    def toggleWakeNormalizationMethod(self, event):
+        """ Toggle methods of wake plot normalization. """
+
+        if self.radioButtonWakeNormalizationPeak.isChecked():
+            
+            # Set the normalization method
+            self.wake_normalization_method = 'peak'
+
+
+
+        if self.radioButtonWakeNormalizationArea.isChecked():
+            
+            # Set the normalization method
+            self.wake_normalization_method = 'area'
+
+
+
+        self.updateWakePlot()
 
 
 
@@ -1095,6 +1136,8 @@ class MetSimGUI(QMainWindow):
 
         ### PLOT SIMULATED WAKE ###
         simulated_integrated_luminosity = 1.0
+        simulated_peak_luminosity = 1.0
+        simulated_peak_length = 0.0
         sim_wake_exists = False
         if sr is not None:
 
@@ -1109,7 +1152,8 @@ class MetSimGUI(QMainWindow):
                 sim_wake_exists = True
 
                 # Plot the simulated wake
-                self.wakePlot.canvas.axes.plot(wake.length_array, wake.wake_luminosity_profile, label='Simulated')
+                self.wakePlot.canvas.axes.plot(wake.length_array, wake.wake_luminosity_profile, \
+                    label='Simulated')
 
                 self.lagPlot.canvas.axes.set_ylim([0, sr.wake_max_lum])
 
@@ -1118,6 +1162,10 @@ class MetSimGUI(QMainWindow):
                 wake_intensity_array_trunc = wake.wake_luminosity_profile[selected_indices]
                 len_array_trunc = wake.length_array[selected_indices]
                 simulated_integrated_luminosity = np.trapz(wake_intensity_array_trunc, len_array_trunc)
+
+                # Store the max values
+                simulated_peak_luminosity = np.max(wake_intensity_array_trunc)
+                simulated_peak_length = len_array_trunc[np.argmax(wake_intensity_array_trunc)]
 
                 ### ###
 
@@ -1136,21 +1184,42 @@ class MetSimGUI(QMainWindow):
             len_array = np.array(len_array)
             wake_intensity_array = np.array(wake_intensity_array)
 
-            # Compute the area under the observed wake curve that is within the simulated range
-            #   (take only the part after the leading fragment)
-            if sim_wake_exists:
-                selected_indices = (len_array > 0) | (len_array < self.const.wake_extension)
-                wake_intensity_array_trunc = wake_intensity_array[selected_indices]
-                len_array_trunc = len_array[selected_indices]
+
+            # Normalize the wake by areas under both curves
+            if self.wake_normalization_method == "area":
+
+                # Compute the area under the observed wake curve that is within the simulated range
+                #   (take only the part after the leading fragment)
+                if sim_wake_exists:
+                    selected_indices = (len_array > 0) | (len_array < self.const.wake_extension)
+                    wake_intensity_array_trunc = wake_intensity_array[selected_indices]
+                    len_array_trunc = len_array[selected_indices]
+                else:
+                    wake_intensity_array_trunc = wake_intensity_array
+                    len_array_trunc = len_array
+
+                observed_integrated_luminosity = np.trapz(wake_intensity_array_trunc, len_array_trunc)
+
+
+                # Normalize the wake intensity by the area under the intensity curve
+                wake_intensity_array *= simulated_integrated_luminosity/observed_integrated_luminosity
+
+
+            # Normalize the wake by the peak intensity
             else:
-                wake_intensity_array_trunc = wake_intensity_array
-                len_array_trunc = len_array
-
-            observed_integrated_luminosity = np.trapz(wake_intensity_array_trunc, len_array_trunc)
+                wake_intensity_array *= simulated_peak_luminosity/np.max(wake_intensity_array)
 
 
-            # Normalize the wake intensity by the area under the intensity curve
-            wake_intensity_array *= simulated_integrated_luminosity/observed_integrated_luminosity
+            # Align peaks
+            if self.wake_align_peaks:
+
+                # Find the length of the peak intensity
+                peak_len = len_array[np.argmax(wake_intensity_array)]
+
+                # Offset lengths
+                len_array -= peak_len + simulated_peak_length
+
+
 
             # Plot the observed wake
             self.wakePlot.canvas.axes.plot(-len_array, wake_intensity_array,
