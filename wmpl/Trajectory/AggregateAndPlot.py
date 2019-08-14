@@ -535,8 +535,10 @@ def generateStationPlot(dir_path, traj_list, color_scheme='light'):
         # Convert lat/lon to x/y
         x, y = m(lon, lat)
 
-        plt.scatter(x, y, s=0.5, zorder=5)
+        plt.scatter(x, y, s=0.75, zorder=5, label="{:s}: {:d}".format(country_code, len(lat)))
 
+
+    plt.legend(loc='lower left')
 
     plt.tight_layout()
 
