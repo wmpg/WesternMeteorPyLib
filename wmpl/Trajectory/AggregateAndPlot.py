@@ -9,6 +9,7 @@ import datetime
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
+from mpl_toolkits.basemap import Basemap
 import scipy.stats
 import scipy.ndimage
 
@@ -17,6 +18,7 @@ from wmpl.Utils.Math import averageClosePoints
 from wmpl.Utils.Physics import calcMass
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PlotCelestial import CelestialPlot
+from wmpl.Utils.PlotMap import MapColorScheme
 from wmpl.Utils.SolarLongitude import jd2SolLonSteyaert
 from wmpl.Utils.TrajConversions import jd2Date
 
@@ -469,6 +471,88 @@ def generateTrajectoryPlots(dir_path, traj_list):
 
 
 
+def generateStationPlot(dir_path, traj_list, color_scheme='light'):
+    """ Generate a plot of all stations participating in the trajectory estimation. """
+
+
+    # Choose the color scheme
+    cs = MapColorScheme()
+    
+    if color_scheme == 'light':
+        cs.light()
+
+    else:
+        cs.dark()
+
+
+    plt.figure(figsize=(19.2, 10.8))
+
+    # Init the map
+    m = Basemap(projection='cyl', resolution='i')
+
+    # Draw the coast boundary and fill the oceans with the given color
+    m.drawmapboundary(fill_color=cs.map_background)
+
+    # Fill continents, set lake color same as ocean color
+    m.fillcontinents(color=cs.continents, lake_color=cs.lakes, zorder=1)
+
+    # Draw country borders
+    m.drawcountries(color=cs.countries)
+    m.drawstates(color=cs.states, linestyle='--')
+
+
+
+    ### PLOT STATIONS ###
+
+    # Group stations into countries
+    country_dict = {}
+    for traj in traj_list:
+
+        for obs in traj.observations:
+
+            # Extract country code
+            country_code = obs.station_id[:2]
+
+            if country_code not in country_dict:
+                country_dict[country_code] = {}
+            
+
+            if obs.station_id not in country_dict[country_code]:
+                country_dict[country_code][obs.station_id] = [obs.lat, obs.lon]
+
+
+
+    # Plot stations in all countries
+    for country_code in country_dict:
+
+        station_dict = country_dict[country_code]
+
+        # Extract lat/lon
+        lat = np.degrees([station_dict[station_id][0] for station_id in station_dict])
+        lon = np.degrees([station_dict[station_id][1] for station_id in station_dict])
+
+        # Convert lat/lon to x/y
+        x, y = m(lon, lat)
+
+        plt.scatter(x, y, s=0.5, zorder=5)
+
+
+    ### ###
+
+
+    plt.tight_layout()
+
+    plt.savefig(os.path.join(dir_path, "world_map.png"), dpi=100)
+
+
+    plt.show()
+
+    plt.close()
+
+
+
+
+
 if __name__ == "__main__":
 
     import argparse
@@ -564,6 +648,5 @@ if __name__ == "__main__":
     # Generate plots
     generateTrajectoryPlots(cml_args.dir_path, traj_list)
 
-
-
-
+    # Generate station plot
+    generateStationPlot(cml_args.dir_path, traj_list)
