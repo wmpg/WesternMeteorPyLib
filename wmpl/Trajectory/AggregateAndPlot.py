@@ -502,7 +502,7 @@ def generateStationPlot(dir_path, traj_list, color_scheme='light'):
 
 
 
-    ### PLOT STATIONS ###
+    ### PLOT WORLD MAP ###
 
     # Group stations into countries
     country_dict = {}
@@ -537,17 +537,13 @@ def generateStationPlot(dir_path, traj_list, color_scheme='light'):
         plt.scatter(x, y, s=0.5, zorder=5)
 
 
-    ### ###
-
-
     plt.tight_layout()
 
     plt.savefig(os.path.join(dir_path, "world_map.png"), dpi=100)
 
-
-    plt.show()
-
     plt.close()
+
+    ### ###
 
 
 
