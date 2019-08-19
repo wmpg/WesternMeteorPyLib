@@ -648,7 +648,7 @@ if __name__ == "__main__":
                 ### MAXIMUM GEOCENTRIC VELOCITY ERROR ###
 
                 if traj.uncertanties is not None:
-                    if traj.orbit.v_g*max_vgerr/100 > traj.uncertanties.v_g:
+                    if traj.uncertanties.v_g > traj.orbit.v_g*max_vgerr/100:
                         continue
 
                 ###
