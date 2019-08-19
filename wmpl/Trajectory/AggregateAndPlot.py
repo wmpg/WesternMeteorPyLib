@@ -373,6 +373,8 @@ def plotSCE(x_data, y_data, color_data, sol_range, plot_title, colorbar_title, d
 
         # Compute the dot size which varies by the number of data points
         dot_size = 40*(1.0/np.sqrt(len(x_data)))
+        if dot_size > 1:
+            dot_size = 1
 
         # Plot the data
         plt_handle = celes_plot.scatter(x_data, y_data, color_data, s=dot_size, cmap=cmap)
@@ -411,7 +413,8 @@ def plotSCE(x_data, y_data, color_data, sol_range, plot_title, colorbar_title, d
 
 
 
-def generateTrajectoryPlots(dir_path, traj_list):
+def generateTrajectoryPlots(dir_path, traj_list, plot_name='scecliptic', plot_vg=True, plot_sol=True, \
+    plot_density=True):
     """ Given a path with trajectory .pickle files, generate orbits plots. """
 
 
@@ -453,21 +456,24 @@ def generateTrajectoryPlots(dir_path, traj_list):
 
 
     # Plot SCE vs Vg
-    plotSCE(lambda_list, beta_list, vg_list, (sol_min, sol_max), 
-        "Sun-centered geocentric ecliptic coordinates", "$V_g$ (km/s)", dir_path, "scecliptic_vg.png")
+    if plot_vg:
+        plotSCE(lambda_list, beta_list, vg_list, (sol_min, sol_max), 
+            "Sun-centered geocentric ecliptic coordinates", "$V_g$ (km/s)", dir_path, plot_name + "_vg.png")
 
 
     # Plot SCE vs Sol
-    plotSCE(lambda_list, beta_list, sol_list, (sol_min, sol_max), \
-        "Sun-centered geocentric ecliptic coordinates", "Solar longitude (deg)", dir_path, \
-        "scecliptic_sol.png")
+    if plot_sol:
+        plotSCE(lambda_list, beta_list, sol_list, (sol_min, sol_max), \
+            "Sun-centered geocentric ecliptic coordinates", "Solar longitude (deg)", dir_path, \
+            plot_name + "_sol.png")
     
 
     
     # Plot SCE orbit density
-    plotSCE(lambda_list, beta_list, None, (sol_min, sol_max), 
-        "Sun-centered geocentric ecliptic coordinates", "Count", dir_path, "scecliptic_density.png", \
-        density_plot=True)
+    if plot_density:
+        plotSCE(lambda_list, beta_list, None, (sol_min, sol_max), 
+            "Sun-centered geocentric ecliptic coordinates", "Count", dir_path, plot_name + "_density.png", \
+            density_plot=True)
 
 
 
@@ -660,10 +666,37 @@ if __name__ == "__main__":
 
 
     # Generate the orbit summary file
+    print("Writing summary file...")
     writeOrbitSummaryFile(cml_args.dir_path, traj_list)
 
     # Generate plots
+    print("Plotting all trajectories...")
     generateTrajectoryPlots(cml_args.dir_path, traj_list)
 
     # Generate station plot
+    print("Plotting station plot...")
     generateStationPlot(cml_args.dir_path, traj_list)
+
+
+
+    # Generate radiant plots per solar longitude (degrees)
+    step = 1.0
+    for sol_min in np.arange(0, 360 + step, step):
+        sol_max = sol_min + step
+
+        # Extract only those trajectories with solar longitudes in the given range
+        traj_list_sol = [traj_temp for traj_temp in traj_list if \
+            (np.degrees(traj_temp.orbit.la_sun) >= sol_min) \
+            and (np.degrees(traj_temp.orbit.la_sun) < sol_max)]
+
+
+        # Skip solar longitudes with no data
+        if len(traj_list_sol) == 0:
+            continue
+
+        print("Plotting solar longitude range: {:.1f} - {:.1f}".format(sol_min, sol_max))
+
+
+        # Plot graphs per solar longitude
+        generateTrajectoryPlots(cml_args.dir_path, traj_list_sol, \
+            plot_name="scecliptic_solrange_{:.1f}-{:.1f}".format(sol_min, sol_max), plot_sol=False)
