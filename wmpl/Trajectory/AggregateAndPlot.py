@@ -699,4 +699,4 @@ if __name__ == "__main__":
 
         # Plot graphs per solar longitude
         generateTrajectoryPlots(cml_args.dir_path, traj_list_sol, \
-            plot_name="scecliptic_solrange_{:.1f}-{:.1f}".format(sol_min, sol_max), plot_sol=False)
+            plot_name="scecliptic_solrange_{:05.1f}-{:05.1f}".format(sol_min, sol_max), plot_sol=False)
