@@ -580,7 +580,10 @@ if __name__ == "__main__":
     min_qc = 5.0
 
     # Maximum eccentricity
-    max_e = 2.5
+    max_e = 1.5
+
+    # Maximum geocentric velocity error (percent)
+    max_vgerr = 10.0
 
     ### ###
 
@@ -599,6 +602,11 @@ if __name__ == "__main__":
 
                 # Load the pickle file
                 traj = loadPickle(dir_path, file_name)
+
+                
+                # Skip those with no orbit solution
+                if traj.orbit.ra_g is None:
+                    continue
 
 
                 ### MINIMUM POINTS
@@ -632,6 +640,16 @@ if __name__ == "__main__":
 
                 if traj.orbit.e > max_e:
                     continue
+
+                ###
+
+
+
+                ### MAXIMUM GEOCENTRIC VELOCITY ERROR ###
+
+                if traj.uncertanties is not None:
+                    if traj.orbit.v_g*max_vgerr/100 > traj.uncertanties.v_g:
+                        continue
 
                 ###
 
