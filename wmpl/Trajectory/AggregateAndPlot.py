@@ -570,6 +570,9 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('dir_path', type=str, help='Path to the data directory. Trajectory pickle files are found in all subdirectories.')
 
+    arg_parser.add_argument('-s', '--solstep', metavar='SOL_STEP', \
+        help='Step in solar longitude for plotting (degrees). 2 deg by default.', type=float, default=2.0)
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -680,7 +683,7 @@ if __name__ == "__main__":
 
 
     # Generate radiant plots per solar longitude (degrees)
-    step = 1.0
+    step = cml_args.solstep
     for sol_min in np.arange(0, 360 + step, step):
         sol_max = sol_min + step
 
