@@ -4143,9 +4143,9 @@ class Trajectory(object):
                 c=colors[i], alpha=0.5, label='Station: {:s}'.format(str(obs.station_id)), zorder=3)
 
 
-            # Plot all LOWESS smoothed velocities
-            ax1.plot(obs.velocities_moving_avg/1000, obs.time_data[1:], c=colors[i], zorder=3, alpha=0.5, \
-                linestyle='dashed')
+            # # Plot all LOWESS smoothed velocities
+            # ax1.plot(obs.velocities_moving_avg/1000, obs.time_data[1:], c=colors[i], zorder=3, alpha=0.5, \
+            #     linestyle='dashed')
 
 
             # Determine the max/min velocity and height, as this is needed for plotting both height/time axes
