@@ -7,10 +7,6 @@ import os
 import datetime
 
 import numpy as np
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-from mpl_toolkits.basemap import Basemap
 import scipy.stats
 import scipy.ndimage
 
@@ -561,6 +557,11 @@ def generateStationPlot(dir_path, traj_list, color_scheme='light'):
 
 
 if __name__ == "__main__":
+
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.basemap import Basemap
 
     import argparse
 

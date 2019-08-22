@@ -12,7 +12,6 @@ import json
 import copy
 import datetime
 
-import matplotlib
 import numpy as np
 
 from wmpl.Formats.CAMS import loadFTPDetectInfo
@@ -507,6 +506,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
 
 
     # Set matplotlib for headless running
+    import matplotlib
     matplotlib.use('Agg')
 
 
