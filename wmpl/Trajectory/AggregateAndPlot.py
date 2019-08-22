@@ -593,8 +593,11 @@ if __name__ == "__main__":
     # Maximum eccentricity
     max_e = 1.5
 
+    # Maximum radiant error (deg)
+    max_radiant_err = 2.0
+
     # Maximum geocentric velocity error (percent)
-    max_vgerr = 10.0
+    max_vg_err = 10.0
 
     ### ###
 
@@ -655,11 +658,20 @@ if __name__ == "__main__":
                 ###
 
 
+                ### MAXIMUM RADIANT ERROR ###
+
+                if traj.uncertanties is not None:
+                    if np.degrees(np.hypot(traj.uncertanties.ra_g, \
+                        traj.uncertanties.dec_g)) > max_radiant_err:
+
+                        continue
+
+
 
                 ### MAXIMUM GEOCENTRIC VELOCITY ERROR ###
 
                 if traj.uncertanties is not None:
-                    if traj.uncertanties.v_g > traj.orbit.v_g*max_vgerr/100:
+                    if traj.uncertanties.v_g > traj.orbit.v_g*max_vg_err/100:
                         continue
 
                 ###
