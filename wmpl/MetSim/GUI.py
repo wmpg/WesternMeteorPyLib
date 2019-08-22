@@ -881,6 +881,10 @@ class MetSimGUI(QMainWindow):
             abs_mag_data = obs.absolute_magnitudes
             height_data = obs.model_ht/1000
 
+            # Keep track of the height limits
+            plot_beg_ht = max(plot_beg_ht, np.max(height_data))
+            plot_end_ht = min(plot_end_ht, np.min(height_data))
+
             # Skip instances when no magnitudes are present
             if abs_mag_data is None:
                 continue
@@ -891,10 +895,6 @@ class MetSimGUI(QMainWindow):
             # Keep track of the faintest and the brightest magnitude
             mag_brightest = min(mag_brightest, np.min(abs_mag_data[~np.isinf(abs_mag_data)]))
             mag_faintest = max(mag_faintest, np.max(abs_mag_data[~np.isinf(abs_mag_data)]))
-
-            # Keep track of the height limits
-            plot_beg_ht = max(plot_beg_ht, np.max(height_data))
-            plot_end_ht = min(plot_end_ht, np.min(height_data))
             
 
 
