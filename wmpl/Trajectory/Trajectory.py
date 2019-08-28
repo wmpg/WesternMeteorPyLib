@@ -3319,7 +3319,7 @@ class Trajectory(object):
 
 
 
-    def saveReport(self, dir_path, file_name, uncertanties=None, verbose=True):
+    def saveReport(self, dir_path, file_name, uncertanties=None, verbose=True, save_results=True):
         """ Save the trajectory estimation report to file. 
     
         Arguments:
@@ -3329,6 +3329,7 @@ class Trajectory(object):
         Keyword arguments:
             uncertanties: [MCUncertainties object] Object contaning uncertainties of every parameter.
             verbose: [bool] Print the report to the screen. True by default.
+            save_results: [bool] If True, the results will be saved to a file.
         """
 
 
@@ -3666,11 +3667,16 @@ class Trajectory(object):
         if verbose:
             print(out_str)
 
-        mkdirP(dir_path)
-
         # Save the report to a file
-        with open(os.path.join(dir_path, file_name), 'w') as f:
-            f.write(out_str)
+        if save_results:
+            
+            mkdirP(dir_path)
+
+            with open(os.path.join(dir_path, file_name), 'w') as f:
+                f.write(out_str)
+
+
+        return out_str
 
 
 
