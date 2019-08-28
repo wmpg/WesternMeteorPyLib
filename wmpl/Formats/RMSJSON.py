@@ -30,7 +30,7 @@ def initMeteorObjects(json_list):
         for entry in j['centroids']:
             t_rel, x_centroid, y_centroid, ra, dec, intensity_sum, mag = entry
 
-            meteor.addPoint(t_rel*j['fps'], x_centroid, y_centroid, ra, dec, mag)
+            meteor.addPoint(t_rel*j['fps'], x_centroid, y_centroid, 0.0, 0.0, ra, dec, mag)
 
         meteor.finish()
 
