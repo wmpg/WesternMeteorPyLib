@@ -6,7 +6,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-from wmpl.TrajSim.AnalyzeTrajectories import collectTrajPickles, pairTrajAndSim
+from wmpl.TrajSim.AnalyzeTrajectories import collectTrajPickles, pairTrajAndSim, calcTrajSimDiffs
 from wmpl.Utils.Math import histogramEdgesEqualDataNumber
 
 ### This import is needed to be able to load SimMeteor pickle files
@@ -21,14 +21,14 @@ if __name__ == "__main__":
 
 
 
-    # ## CAMO ###
+    ## CAMO ###
 
-    # dir_path = "../SimulatedMeteors/CAMO/2012Geminids_1000"
+    dir_path = "../SimulatedMeteors/CAMO/2012Geminids_1000"
 
-    # solvers = ['planes', 'los', 'milig', 'mc', 'gural1', 'gural3']
-    # solvers_plot_labels = ['IP', 'LoS', 'LoS-FHAV', 'Monte Carlo', 'MPF linear', 'MPF exp']
+    solvers = ['planes', 'los', 'milig', 'mc', 'gural1', 'gural3']
+    solvers_plot_labels = ['IP', 'LoS', 'LoS-FHAV', 'Monte Carlo', 'MPF linear', 'MPF exp']
 
-    # ## ###
+    ## ###
 
 
 
@@ -42,13 +42,13 @@ if __name__ == "__main__":
 
 
 
-    ### SOMN ###
-    dir_path = "../SimulatedMeteors/SOMN_sim_2station/2012Geminids_1000"
+    # ### SOMN ###
+    # dir_path = "../SimulatedMeteors/SOMN_sim_2station/2012Geminids_1000"
 
-    solvers = ['planes', 'los', 'milig', 'mc', 'gural0', 'gural0fha', 'gural1', 'gural3']
-    solvers_plot_labels = ['IP', 'LoS', 'LoS-FHAV', 'Monte Carlo', 'MPF const', 'MPF const-FHAV', 'MPF linear', 'MPF exp']
+    # solvers = ['planes', 'los', 'milig', 'mc', 'gural0', 'gural0fha', 'gural1', 'gural3']
+    # solvers_plot_labels = ['IP', 'LoS', 'LoS-FHAV', 'Monte Carlo', 'MPF const', 'MPF const-FHAV', 'MPF linear', 'MPF exp']
 
-    ### ###
+    # ### ###
 
 
 
@@ -83,8 +83,11 @@ if __name__ == "__main__":
         # Load trajectories
         traj_list = collectTrajPickles(dir_path, traj_type=solver)
 
-        _, radiant_diffs, vg_diffs, conv_angles = pairTrajAndSim(traj_list, sim_meteors, np.inf, np.inf)
-        conv_angles = np.degrees(conv_angles)
+        # Pair simulations and trajectories
+        traj_sim_pairs = pairTrajAndSim(traj_list, sim_meteors)
+
+        # Compute radiant and velocity errors
+        radiant_diffs, vg_diffs, conv_angles, _ = calcTrajSimDiffs(traj_sim_pairs, np.inf, np.inf)
 
         # Get edges of histogram and compute medians of errors in every bin
         edges = histogramEdgesEqualDataNumber(conv_angles, conv_hist_bins)
@@ -108,14 +111,43 @@ if __name__ == "__main__":
         if solver_name.startswith('MPF'):
             linestyle = (0, (1, 1))
             linewidth = 1
-            marker = 'x'
-            markersize = 4
+
+            if 'exp' in solver_name:
+                marker = '*'
+
+            elif 'const-FHAV' in solver_name:
+                marker = '+'
+
+            elif 'const' in solver_name:
+                marker = 'x'
+
+            else:
+                marker = None
+
+            markersize = 6
+
+
+        elif solver_name == "Monte Carlo":
+            linestyle = 'solid'
+            linewidth = 2
+            marker = '*'
+            markersize = 8
 
         else:
             linestyle = 'solid'
-            linewidth = 1.5
-            marker = None
-            markersize = 0
+            linewidth = 1
+
+            if solver_name == "LoS":
+                marker = 'x'
+
+            elif solver_name == "LoS-FHAV":
+                marker = '+'
+
+            else:
+                marker = None
+
+            markersize = 6
+
 
         # Plot convergence angle vs radiant error
         ax1.plot(edges[:-1], binned_radiant_diffs, label=solver_name, linestyle=linestyle, \
