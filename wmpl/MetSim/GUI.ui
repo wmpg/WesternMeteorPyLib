@@ -895,9 +895,9 @@
    <widget class="LagMplWidget" name="lagPlot" native="true">
     <property name="geometry">
      <rect>
-      <x>640</x>
+      <x>860</x>
       <y>0</y>
-      <width>631</width>
+      <width>411</width>
       <height>551</height>
      </rect>
     </property>
@@ -917,7 +917,7 @@
     <widget class="QLabel" name="vInitSimLabel">
      <property name="geometry">
       <rect>
-       <x>410</x>
+       <x>250</x>
        <y>530</y>
        <width>151</width>
        <height>16</height>
@@ -1235,7 +1235,7 @@
      <rect>
       <x>0</x>
       <y>0</y>
-      <width>631</width>
+      <width>411</width>
       <height>551</height>
      </rect>
     </property>
@@ -1539,6 +1539,16 @@
      <string>Save fit parameters</string>
     </property>
    </widget>
+   <widget class="VelocityMplWidget" name="velocityPlot" native="true">
+    <property name="geometry">
+     <rect>
+      <x>430</x>
+      <y>0</y>
+      <width>411</width>
+      <height>551</height>
+     </rect>
+    </property>
+   </widget>
   </widget>
   <widget class="QMenuBar" name="menubar">
    <property name="geometry">
@@ -1567,6 +1577,12 @@
   </customwidget>
   <customwidget>
    <class>WakeMplWidget</class>
+   <extends>QWidget</extends>
+   <header>wmpl/MetSim/GUITools.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>VelocityMplWidget</class>
    <extends>QWidget</extends>
    <header>wmpl/MetSim/GUITools.h</header>
    <container>1</container>

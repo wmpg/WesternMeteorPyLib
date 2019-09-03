@@ -7,6 +7,10 @@ from matplotlib.backends.backend_qt5agg import FigureCanvas
 
 from matplotlib.figure import Figure
 
+
+# Top figure sizes
+TOP_FIGSIZES = (3, 5)
+
     
 class MagnitudeMplWidget(QWidget):
     
@@ -14,7 +18,7 @@ class MagnitudeMplWidget(QWidget):
 
         QWidget.__init__(self, parent)
         
-        self.canvas = FigureCanvas(Figure(facecolor='#efefef'))
+        self.canvas = FigureCanvas(Figure(facecolor='#efefef', figsize=TOP_FIGSIZES))
         
         vertical_layout = QVBoxLayout()
         vertical_layout.addWidget(self.canvas)
@@ -30,7 +34,7 @@ class LagMplWidget(QWidget):
 
         QWidget.__init__(self, parent)
         
-        self.canvas = FigureCanvas(Figure(facecolor='#efefef'))
+        self.canvas = FigureCanvas(Figure(facecolor='#efefef', figsize=TOP_FIGSIZES))
         
         vertical_layout = QVBoxLayout()
         vertical_layout.addWidget(self.canvas)
@@ -38,6 +42,20 @@ class LagMplWidget(QWidget):
         self.canvas.axes = self.canvas.figure.add_subplot(111)
         self.setLayout(vertical_layout)
 
+
+class VelocityMplWidget(QWidget):
+    
+    def __init__(self, parent=None):
+
+        QWidget.__init__(self, parent)
+        
+        self.canvas = FigureCanvas(Figure(facecolor='#efefef', figsize=TOP_FIGSIZES))
+        
+        vertical_layout = QVBoxLayout()
+        vertical_layout.addWidget(self.canvas)
+        
+        self.canvas.axes = self.canvas.figure.add_subplot(111)
+        self.setLayout(vertical_layout)
 
 
 

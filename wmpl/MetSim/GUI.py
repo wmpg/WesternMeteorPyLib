@@ -438,9 +438,7 @@ class MetSimGUI(QMainWindow):
         self.toggleWakeNormalizationMethod(None)
 
         # Update plots
-        self.updateMagnitudePlot()
-        self.updateLagPlot()
-        self.updateWakePlot()
+        self.showCurrentResults()
 
 
 
@@ -935,7 +933,8 @@ class MetSimGUI(QMainWindow):
             ht_arr, abs_mag_arr = temp_arr.T
 
             # Plot the simulated magnitudes
-            self.magnitudePlot.canvas.axes.plot(abs_mag_arr, ht_arr/1000, label='Simulated')
+            self.magnitudePlot.canvas.axes.plot(abs_mag_arr, ht_arr/1000, label='Simulated', color='k', \
+                alpha=0.5)
 
 
 
@@ -954,6 +953,77 @@ class MetSimGUI(QMainWindow):
         self.magnitudePlot.canvas.figure.tight_layout()
 
         self.magnitudePlot.canvas.draw()
+
+
+
+    def updateVelocityPlot(self, show_previous=False):
+        """ Update the velocity plot. """
+
+        # Choose to show current or previous results
+        if show_previous:
+            sr = self.simulation_results_prev
+        else:
+            sr = self.simulation_results
+
+
+        self.velocityPlot.canvas.axes.clear()
+
+        
+        # Track plot limits
+        plot_beg_ht = -np.inf
+        plot_end_ht = np.inf
+
+        vel_min = np.inf
+        vel_max = -np.inf
+
+        # Plot observed velocities from different stations
+        for obs in self.traj.observations:
+
+            # Extract data
+            vel_data = obs.velocities[1:]/1000
+            height_data = obs.model_ht[1:]/1000
+
+            # Keep track of the height limits
+            plot_beg_ht = max(plot_beg_ht, np.max(height_data))
+            plot_end_ht = min(plot_end_ht, np.min(height_data))
+
+            self.velocityPlot.canvas.axes.plot(vel_data, height_data, marker='o', label=obs.station_id, \
+                markersize=1, linestyle='none')
+
+            # Keep track of the faintest and the brightest magnitude
+            vel_min = min(vel_min, np.min(vel_data))
+            vel_max = max(vel_max, np.max(vel_data))
+
+
+        # Add buffering to height plot
+        plot_beg_ht += 5
+        plot_end_ht -= 2
+
+
+        # Plot simulated velocity
+        if sr is not None:
+
+            # Plot the simulated magnitudes
+            self.velocityPlot.canvas.axes.plot(sr.brightest_vel_arr/1000, sr.brightest_height_arr/1000, \
+                label='Simulated', color='k', alpha=0.5)
+
+
+
+        self.velocityPlot.canvas.axes.set_ylabel('Height (km)')
+        self.velocityPlot.canvas.axes.set_xlabel('Velocity (km/s)')
+
+        self.velocityPlot.canvas.axes.set_ylim([plot_end_ht, plot_beg_ht])
+        self.velocityPlot.canvas.axes.set_xlim([vel_min - 1, vel_max + 1])
+
+        self.velocityPlot.canvas.axes.legend()
+
+        self.velocityPlot.canvas.axes.grid(color="k", linestyle='dotted', alpha=0.3)
+
+        self.velocityPlot.canvas.axes.set_title('Velocity')
+
+        self.velocityPlot.canvas.figure.tight_layout()
+
+        self.velocityPlot.canvas.draw()
 
 
 
@@ -1040,7 +1110,8 @@ class MetSimGUI(QMainWindow):
             lag_sim = brightest_len_arr - brightest_len_arr[0] - self.traj.orbit.v_init_norot*np.arange(0, \
                 self.const.dt*len(brightest_len_arr), self.const.dt)[:len(brightest_len_arr)]
 
-            self.lagPlot.canvas.axes.plot(lag_sim[:len(ht_arr)], (ht_arr/1000)[:len(lag_sim)], label='Simulated')
+            self.lagPlot.canvas.axes.plot(lag_sim[:len(ht_arr)], (ht_arr/1000)[:len(lag_sim)], 
+                label='Simulated', color='k', alpha=0.5)
 
 
 
@@ -1253,6 +1324,7 @@ class MetSimGUI(QMainWindow):
 
             self.updateInputBoxes(show_previous=True)
             self.updateMagnitudePlot(show_previous=True)
+            self.updateVelocityPlot(show_previous=True)
             self.updateLagPlot(show_previous=True)
             self.updateWakePlot(show_previous=True)
 
@@ -1263,6 +1335,7 @@ class MetSimGUI(QMainWindow):
 
         self.updateInputBoxes(show_previous=False)
         self.updateMagnitudePlot(show_previous=False)
+        self.updateVelocityPlot(show_previous=False)
         self.updateLagPlot(show_previous=False)
         self.updateWakePlot(show_previous=False)
 
@@ -1298,10 +1371,8 @@ class MetSimGUI(QMainWindow):
         # Store simulation results
         self.simulation_results = SimulationResults(self.const, results_list, wake_results)
 
-
-        self.updateMagnitudePlot()
-        self.updateLagPlot()
-        self.updateWakePlot()
+        # Update the plots
+        self.showCurrentResults()
 
         # Save the latest run parameters
         self.saveFitParameters(False, suffix="_latest")
