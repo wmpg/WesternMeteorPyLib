@@ -1041,6 +1041,18 @@ class MetSimGUI(QMainWindow):
 
 
 
+        # Plot the initial velocity
+        self.velocityPlot.canvas.axes.plot(self.traj.orbit.v_init_norot/1000, self.traj.rbeg_ele/1000, \
+            marker='x', label="Vinit obs", markersize=5, linestyle='none', color='k')
+
+        # Plot the average velocity
+        avg_vel_ht_plot_arr = np.linspace(self.traj.rbeg_ele/1000, self.traj.rend_ele/1000, 10)
+        self.velocityPlot.canvas.axes.plot(np.zeros_like(avg_vel_ht_plot_arr) \
+            + self.traj.orbit.v_avg_norot/1000, avg_vel_ht_plot_arr, label="Vavg obs", linestyle='dashed', \
+            color='k', alpha=0.5)
+
+
+
         # Plot simulated velocity
         if sr is not None:
 
