@@ -14,6 +14,20 @@ from wmpl.Utils.OSTools import mkdirP
 
 
 
+def saveImage(file_path, img, vmin=None, vmax=None, cmap=None, format=None, origin=None):
+    """ Save numpy array to disk as image. """
+
+    from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+    from matplotlib.figure import Figure
+
+    fig = Figure(figsize=img.shape[::-1], dpi=1, frameon=False)
+    FigureCanvas(fig)
+    fig.figimage(img, cmap=cmap, vmin=vmin, vmax=vmax, origin=origin)
+    fig.savefig(file_path, dpi=1, format=format)
+
+
+
+
 def savePlot(plt_handle, file_path, output_dir='.', kwargs=None):
     """ Saves the plot to the given file path, with the DPI defined in configuration. 
 

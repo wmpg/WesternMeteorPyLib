@@ -10,6 +10,8 @@ import json
 import glob
 
 import numpy as np
+from scipy.stats import multivariate_normal
+import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import (NavigationToolbar2QT as NavigationToolbar)
 from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
 from PyQt5.uic import loadUi
@@ -21,8 +23,22 @@ from wmpl.Trajectory.Orbit import calcOrbit
 from wmpl.Utils.Math import averageClosePoints, findClosestPoints, vectMag, lineFunc
 from wmpl.Utils.Physics import calcMass
 from wmpl.Utils.Pickling import loadPickle
+from wmpl.Utils.Plotting import saveImage
 from wmpl.Utils.TrajConversions import unixTime2JD, geo2Cartesian, cartesian2Geo, altAz2RADec, \
     altAz2RADec_vect, raDec2ECI
+
+
+
+
+### CONSTANTS ###
+
+# Height padding for top plots
+BEG_HT_PAD = +5
+END_HT_PAD = -2
+
+
+### ###
+
 
 
 
@@ -332,7 +348,7 @@ class MetSimGUI(QMainWindow):
             self.wake_plot_ht = self.traj.rbeg_ele # m
 
         self.wake_normalization_method = 'area'
-        self.wake_align_peaks = True
+        self.wake_align_peaks = False
 
 
 
@@ -412,6 +428,7 @@ class MetSimGUI(QMainWindow):
         self.wakePlotUpdateButton.clicked.connect(self.updateWakePlot)
         self.wakeIncrementPlotHeightButton.clicked.connect(self.incrementWakePlotHeight)
         self.wakeDecrementPlotHeightButton.clicked.connect(self.decrementWakePlotHeight)
+        self.wakeSaveVideoButton.clicked.connect(self.saveVideo)
 
         self.radioButtonWakeNormalizationPeak.toggled.connect(self.toggleWakeNormalizationMethod)
         self.radioButtonWakeNormalizationArea.toggled.connect(self.toggleWakeNormalizationMethod)
@@ -657,6 +674,10 @@ class MetSimGUI(QMainWindow):
         self.inputWakePlotHt.setDisabled(not self.wake_on)
         self.inputWakePSF.setDisabled(not self.wake_on)
         self.inputWakeExt.setDisabled(not self.wake_on)
+        self.checkBoxWakeAlignPeaks.setDisabled(not self.wake_on)
+        self.radioButtonWakeNormalizationPeak.setDisabled(not self.wake_on)
+        self.radioButtonWakeNormalizationArea.setDisabled(not self.wake_on)
+        self.wakeSaveVideoButton.setDisabled(not self.wake_on)
 
         # Read inputs
         self.readInputBoxes()
@@ -853,7 +874,18 @@ class MetSimGUI(QMainWindow):
 
 
     def updateMagnitudePlot(self, show_previous=False):
-        """ Update the magnitude plot. """
+        """ Update the magnitude plot. 
+
+        Arguments:
+            None
+
+        Keyword arguments:
+            show_previous: [bool] Show the previous simulation. False by default.
+
+
+        Return: 
+            (plot_beg_ht, plot_end_ht): [tuple] A range of heights used for plotting the magnitude plot.
+        """
 
         # Choose to show current or previous results
         if show_previous:
@@ -918,30 +950,26 @@ class MetSimGUI(QMainWindow):
                 plot_end_ht = min(plot_end_ht, np.min(height_data))
 
 
-        # Add buffering to height plot
-        plot_beg_ht += 5
-        plot_end_ht -= 2
-
 
         # Plot simulated magnitudes
         if sr is not None:
 
-            # Cut the part with same beginning heights as observations
-            temp_arr = np.c_[sr.brightest_height_arr, sr.abs_magnitude]
-            temp_arr = temp_arr[(sr.brightest_height_arr < plot_beg_ht*1000) \
-                & (sr.brightest_height_arr > plot_end_ht*1000)]
-            ht_arr, abs_mag_arr = temp_arr.T
+            # # Cut the part with same beginning heights as observations
+            # temp_arr = np.c_[sr.brightest_height_arr, sr.abs_magnitude]
+            # temp_arr = temp_arr[(sr.brightest_height_arr < plot_beg_ht*1000) \
+            #     & (sr.brightest_height_arr > plot_end_ht*1000)]
+            # ht_arr, abs_mag_arr = temp_arr.T
 
             # Plot the simulated magnitudes
-            self.magnitudePlot.canvas.axes.plot(abs_mag_arr, ht_arr/1000, label='Simulated', color='k', \
-                alpha=0.5)
+            self.magnitudePlot.canvas.axes.plot(sr.abs_magnitude, sr.brightest_height_arr/1000, \
+                label='Simulated', color='k', alpha=0.5)
 
 
 
         self.magnitudePlot.canvas.axes.set_ylabel('Height (km)')
         self.magnitudePlot.canvas.axes.set_xlabel('Abs magnitude')
 
-        self.magnitudePlot.canvas.axes.set_ylim([plot_end_ht, plot_beg_ht])
+        self.magnitudePlot.canvas.axes.set_ylim([plot_end_ht + END_HT_PAD, plot_beg_ht + BEG_HT_PAD])
         self.magnitudePlot.canvas.axes.set_xlim([mag_faintest + 1, mag_brightest - 1])
 
         self.magnitudePlot.canvas.axes.legend()
@@ -955,9 +983,22 @@ class MetSimGUI(QMainWindow):
         self.magnitudePlot.canvas.draw()
 
 
+        return plot_beg_ht, plot_end_ht
 
-    def updateVelocityPlot(self, show_previous=False):
-        """ Update the velocity plot. """
+
+
+    def updateVelocityPlot(self, show_previous=False, plot_beg_ht=None, plot_end_ht=None):
+        """ Update the velocity plot. 
+        
+        Arguments:
+            None
+
+        Keyword arguments:
+            show_previous: [bool] Show the previous simulation. False by default.
+            plot_beg_ht: [float] Beginning height for the plot before adding the padding.
+            plot_end_ht: [float] End height for the plot before adding the padding.
+
+        """
 
         # Choose to show current or previous results
         if show_previous:
@@ -970,8 +1011,12 @@ class MetSimGUI(QMainWindow):
 
         
         # Track plot limits
-        plot_beg_ht = -np.inf
-        plot_end_ht = np.inf
+        if plot_beg_ht is None:
+            plot_beg_ht = -np.inf
+
+        if plot_end_ht is None:
+            plot_end_ht = np.inf
+
 
         vel_min = np.inf
         vel_max = -np.inf
@@ -995,10 +1040,6 @@ class MetSimGUI(QMainWindow):
             vel_max = max(vel_max, np.max(vel_data))
 
 
-        # Add buffering to height plot
-        plot_beg_ht += 5
-        plot_end_ht -= 2
-
 
         # Plot simulated velocity
         if sr is not None:
@@ -1012,7 +1053,7 @@ class MetSimGUI(QMainWindow):
         self.velocityPlot.canvas.axes.set_ylabel('Height (km)')
         self.velocityPlot.canvas.axes.set_xlabel('Velocity (km/s)')
 
-        self.velocityPlot.canvas.axes.set_ylim([plot_end_ht, plot_beg_ht])
+        self.velocityPlot.canvas.axes.set_ylim([plot_end_ht + END_HT_PAD, plot_beg_ht + BEG_HT_PAD])
         self.velocityPlot.canvas.axes.set_xlim([vel_min - 1, vel_max + 1])
 
         self.velocityPlot.canvas.axes.legend()
@@ -1027,8 +1068,18 @@ class MetSimGUI(QMainWindow):
 
 
 
-    def updateLagPlot(self, show_previous=False):
-        """ Update the lag plot. """
+    def updateLagPlot(self, show_previous=False, plot_beg_ht=None, plot_end_ht=None):
+        """ Update the lag plot. 
+        
+        Arguments:
+            None
+
+        Keyword arguments:
+            show_previous: [bool] Show the previous simulation. False by default.
+            plot_beg_ht: [float] Beginning height for the plot before adding the padding.
+            plot_end_ht: [float] End height for the plot before adding the padding.
+
+        """
 
         # Choose to show current of previous results
         if show_previous:
@@ -1045,11 +1096,14 @@ class MetSimGUI(QMainWindow):
 
 
         # Track plot limits
-        plot_beg_ht = -np.inf
-        plot_end_ht = np.inf
+        if plot_beg_ht is None:
+            plot_beg_ht = -np.inf
+
+        if plot_end_ht is None:
+            plot_end_ht = np.inf
 
 
-        # Plot observed magnitudes from different stations
+        # Keep track of the height range
         for obs in self.traj.observations:
 
             height_data = obs.model_ht/1000
@@ -1078,11 +1132,6 @@ class MetSimGUI(QMainWindow):
                 # Keep track of the height limits
                 plot_beg_ht = max(plot_beg_ht, np.max(height_data))
                 plot_end_ht = min(plot_end_ht, np.min(height_data))
-
-
-        # Add buffering to height plot
-        plot_beg_ht += 5
-        plot_end_ht -= 2
 
 
         # Get X plot limits
@@ -1115,7 +1164,7 @@ class MetSimGUI(QMainWindow):
 
 
 
-        self.lagPlot.canvas.axes.set_ylim([plot_end_ht, plot_beg_ht])
+        self.lagPlot.canvas.axes.set_ylim([plot_end_ht + END_HT_PAD, plot_beg_ht + BEG_HT_PAD])
         self.lagPlot.canvas.axes.set_xlim([x_min, x_max])
 
         self.lagPlot.canvas.axes.set_xlabel('Lag (m)')
@@ -1323,9 +1372,9 @@ class MetSimGUI(QMainWindow):
         if self.simulation_results_prev is not None:
 
             self.updateInputBoxes(show_previous=True)
-            self.updateMagnitudePlot(show_previous=True)
-            self.updateVelocityPlot(show_previous=True)
-            self.updateLagPlot(show_previous=True)
+            plot_beg_ht, plot_end_ht = self.updateMagnitudePlot(show_previous=True)
+            self.updateVelocityPlot(show_previous=True, plot_beg_ht=plot_beg_ht, plot_end_ht=plot_end_ht)
+            self.updateLagPlot(show_previous=True, plot_beg_ht=plot_beg_ht, plot_end_ht=plot_end_ht)
             self.updateWakePlot(show_previous=True)
 
 
@@ -1334,9 +1383,9 @@ class MetSimGUI(QMainWindow):
         """ Show current simulation results and parameters. """
 
         self.updateInputBoxes(show_previous=False)
-        self.updateMagnitudePlot(show_previous=False)
-        self.updateVelocityPlot(show_previous=False)
-        self.updateLagPlot(show_previous=False)
+        plot_beg_ht, plot_end_ht = self.updateMagnitudePlot(show_previous=False)
+        self.updateVelocityPlot(show_previous=False, plot_beg_ht=plot_beg_ht, plot_end_ht=plot_end_ht)
+        self.updateLagPlot(show_previous=False, plot_beg_ht=plot_beg_ht, plot_end_ht=plot_end_ht)
         self.updateWakePlot(show_previous=False)
 
 
@@ -1418,6 +1467,148 @@ class MetSimGUI(QMainWindow):
             json.dump(self.const, f, default=lambda o: o.__dict__, indent=4)
 
         print("Saved fit parameters to:", file_path)
+
+
+
+
+    def saveVideo(self, event):
+        """ Generate video frames using the simulated wake and PSF. """
+
+
+        # Skip saving video if there is no wake results
+        if self.simulation_results.wake_results is None:
+            return False
+
+
+        # The plate scale is fixed at 0.5 meters per pixel at 100 km, so the animation is better visible
+        plate_scale = 0.5
+
+        # Frame nackground intensity
+        background_intensity = 30
+
+
+        # Create meshgrid for Gaussian evaluation
+        grid_size = 20
+        x = np.linspace(-grid_size//2, grid_size//2, grid_size)
+        y = np.linspace(-grid_size//2, grid_size//2, grid_size)
+        X, Y = np.meshgrid(x, y)
+        mesh_list = np.c_[X.flatten(), Y.flatten()]
+
+
+        # Compute the video size from the pixel scale and wake extent and make sure it's an even number
+        frame_ht = frame_wid = int(np.ceil(self.const.wake_extension/plate_scale) + grid_size)
+        if frame_ht%2 == 1:
+            frame_ht = frame_wid = frame_ht + 1
+
+
+        # Init the Gaussian
+        gauss = multivariate_normal([0.0, 0.0], [[self.const.wake_psf/np.sqrt(2)/plate_scale,      0       ], 
+                                                 [        0,     self.const.wake_psf/np.sqrt(2)/plate_scale]])
+
+
+        # Get the directory path
+        dir_path, _ = os.path.split(self.traj_path)
+
+
+
+        # Find the wake index starting at 5 km above the beginning height
+        video_beg_ht = self.traj.rbeg_ele + 5000
+        wake_beg_indx =  np.argmin(np.abs(video_beg_ht - self.simulation_results.brightest_height_arr))
+
+        # Find the wake index ending at the end height
+        video_end_ht = self.traj.rend_ele
+        wake_end_indx =  np.argmin(np.abs(video_end_ht - self.simulation_results.brightest_height_arr))
+
+        # Go through all wake points
+        for i, (wake, ht) in enumerate(zip(self.simulation_results.wake_results[wake_beg_indx:wake_end_indx],\
+            self.simulation_results.brightest_height_arr[wake_beg_indx:wake_end_indx])):
+
+            if wake is None:
+                continue
+
+            print('Height: {:.3f} km'.format(ht/1000))
+
+
+            # Init a new video frame
+            frame = np.zeros((frame_ht, frame_wid), dtype=np.float64)
+
+
+            # Compute pixel scale from length
+            pixel_length = wake.length_points/plate_scale
+
+
+            # Normalize the luminosity by the maximum luminosity (oversaturate the peak so the fainter parts
+            #   are better visible)
+            luminosities = 2*255*wake.luminosity_points/self.simulation_results.wake_max_lum
+
+            
+            # Evaluate the gaussian of every fragment
+            for px, lum in zip(pixel_length, luminosities):
+
+                # Compute the gaussian centre
+                center = int(px) + frame_wid//2
+
+                # Skip those fragments exiting the FOV
+                if center < -grid_size//2:
+                    continue
+
+                # Evaluate the gaussian, normalize so that the brightest peak of the meteor is saturating
+                gauss_eval = self.const.wake_psf/plate_scale*lum*gauss.pdf(mesh_list).reshape(grid_size, grid_size)
+
+
+                ### Add the evaluated gaussian to the frame ###
+
+                # Compute range of pixel coordinates where to add the evaluated window
+                x_min = center - grid_size//2
+                x_min_eval = 0
+                if x_min < 0: 
+                    x_min_eval = -x_min
+                    x_min = 0
+
+                x_max = center + grid_size//2
+                x_max_eval = grid_size
+                if x_max >= frame_wid: 
+                    x_max_eval = grid_size + frame_wid - x_max
+                    x_max = frame_wid - 1
+
+                y_min = center - grid_size//2
+                y_min_eval = 0
+                if y_min < 0: 
+                    y_min_eval = -y_min
+                    y_min = 0
+
+
+                y_max = center + grid_size//2
+                y_max_eval = grid_size
+                if y_max >= frame_wid: 
+                    y_max_eval = grid_size + frame_ht - y_max
+                    y_max = frame_ht - 1
+
+                ### ###
+
+                # print()
+                # print(center)
+                # print(y_min,y_max, x_min,x_max)
+                # print(y_min_eval,y_max_eval, x_min_eval,x_max_eval)
+
+
+                # Add the evaluated gaussian to the frame
+                frame[y_min:y_max, x_min:x_max] += gauss_eval[y_min_eval:y_max_eval, x_min_eval:x_max_eval]
+
+            # Add frame background intensity
+            frame += background_intensity
+
+            # Save the image to disk
+            saveImage(os.path.join(dir_path, "{:04d}_{:7.3f}km.png".format(i, ht/1000)), frame, cmap='gray',
+                vmin=0, vmax=255)
+
+
+        print("Video frame saving done!")
+            
+
+            
+            
+            
 
 
 

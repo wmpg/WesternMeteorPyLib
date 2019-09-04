@@ -18,9 +18,9 @@
     <property name="geometry">
      <rect>
       <x>1490</x>
-      <y>840</y>
+      <y>890</y>
       <width>171</width>
-      <height>51</height>
+      <height>31</height>
      </rect>
     </property>
     <property name="text">
@@ -31,9 +31,9 @@
     <property name="geometry">
      <rect>
       <x>1280</x>
-      <y>840</y>
+      <y>880</y>
       <width>171</width>
-      <height>51</height>
+      <height>41</height>
      </rect>
     </property>
     <property name="palette">
@@ -331,7 +331,7 @@
     <property name="geometry">
      <rect>
       <x>1280</x>
-      <y>610</y>
+      <y>460</y>
       <width>391</width>
       <height>121</height>
      </rect>
@@ -594,7 +594,7 @@
     <property name="geometry">
      <rect>
       <x>1280</x>
-      <y>440</y>
+      <y>290</y>
       <width>391</width>
       <height>161</height>
      </rect>
@@ -1254,9 +1254,9 @@
     <property name="geometry">
      <rect>
       <x>1280</x>
-      <y>290</y>
+      <y>590</y>
       <width>391</width>
-      <height>141</height>
+      <height>161</height>
      </rect>
     </property>
     <property name="title">
@@ -1465,7 +1465,7 @@
       <rect>
        <x>10</x>
        <y>90</y>
-       <width>371</width>
+       <width>211</width>
        <height>20</height>
       </rect>
      </property>
@@ -1477,7 +1477,7 @@
      <property name="geometry">
       <rect>
        <x>10</x>
-       <y>110</y>
+       <y>120</y>
        <width>91</width>
        <height>20</height>
       </rect>
@@ -1489,14 +1489,27 @@
     <widget class="QCheckBox" name="checkBoxWakeAlignPeaks">
      <property name="geometry">
       <rect>
-       <x>270</x>
-       <y>110</y>
+       <x>110</x>
+       <y>130</y>
        <width>101</width>
-       <height>21</height>
+       <height>31</height>
       </rect>
      </property>
      <property name="text">
       <string>Align peaks</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="wakeSaveVideoButton">
+     <property name="geometry">
+      <rect>
+       <x>270</x>
+       <y>120</y>
+       <width>91</width>
+       <height>31</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Save video</string>
      </property>
     </widget>
    </widget>
@@ -1504,9 +1517,9 @@
     <property name="geometry">
      <rect>
       <x>1280</x>
-      <y>780</y>
+      <y>830</y>
       <width>171</width>
-      <height>51</height>
+      <height>41</height>
      </rect>
     </property>
     <property name="text">
@@ -1517,7 +1530,7 @@
     <property name="geometry">
      <rect>
       <x>1490</x>
-      <y>780</y>
+      <y>830</y>
       <width>171</width>
       <height>21</height>
      </rect>
@@ -1530,7 +1543,7 @@
     <property name="geometry">
      <rect>
       <x>1490</x>
-      <y>810</y>
+      <y>860</y>
       <width>171</width>
       <height>21</height>
      </rect>
