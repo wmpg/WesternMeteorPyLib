@@ -459,14 +459,24 @@ def pairTrajAndSim(traj_list, sim_meteors):
 
 
 
-def compareTrajToSim(dir_path, sim_meteors, traj_list, solver_name, radiant_extent, vg_extent, vmax=5, 
-    show_plot=True, ret_conv_angles=False):
-    """ Compares results of a simulation to results of trajectory solving. """
 
+def calcTrajSimDiffs(traj_sim_pairs, radiant_extent, vg_extent):
+    """ Given the pairs of trajectories and simulations, compute radiant and velocity differences. 
 
-    # Pair trajectories and simulations
-    traj_sim_pairs = pairTrajAndSim(traj_list, sim_meteors)
+    Arguments:
+        traj_sim_pairs: [list] A list of (Trajectory, SimMeteor) pairs.
+        radiant_extent: [float] Maximum radiant error (deg). If the error is larger, the trajectory will be
+            counted as a failure.
+        vg_extent: [float] Maxium velocity error (km/s). If the error is larger, the trajectory will be
+            counted as a failure.
 
+    Return:
+        radiant_diffs, vg_diffs, conv_angles, failed_count: [list of lists]
+            - radiant_diffs - radiant errors (deg)
+            - vg_diffs - velocity errors (km/s)
+            - conv_angles - convergence angles (deg)
+            - failed_count - number of trajectories outside the radiant and velocity error bounds
+    """
 
     vg_diffs = []
     radiant_diffs = []
@@ -512,9 +522,24 @@ def compareTrajToSim(dir_path, sim_meteors, traj_list, solver_name, radiant_exte
             # Gural type trajectory object
             conv_ang = traj.max_convergence
 
-        conv_angles.append(conv_ang)
+        conv_angles.append(np.degrees(conv_ang))
+
+    return radiant_diffs, vg_diffs, conv_angles, failed_count
 
 
+
+def compareTrajToSim(dir_path, sim_meteors, traj_list, solver_name, radiant_extent, vg_extent, vmax=5, 
+    show_plot=True, ret_conv_angles=False):
+    """ Compares results of a simulation to results of trajectory solving. """
+
+
+    # Pair trajectories and simulations
+    traj_sim_pairs = pairTrajAndSim(traj_list, sim_meteors)
+
+
+    # Calculate radiant and velocity errors between estimated and simulated values
+    radiant_diffs, vg_diffs, conv_angles, failed_count = calcTrajSimDiffs(traj_sim_pairs, radiant_extent, 
+        vg_extent)
 
 
     vg_diffs_std = np.array(vg_diffs)
@@ -563,6 +588,8 @@ def compareTrajToSim(dir_path, sim_meteors, traj_list, solver_name, radiant_exte
 
     plt.xlabel('Radiant difference (deg)')
     plt.ylabel('Vg difference (km/s)')
+
+    plt.tight_layout()
 
     plt.savefig(os.path.join(dir_path, 'solution_comparison_{:s}.png'.format(solver_name.replace(' ', '_'))),\
         dpi=300)
@@ -630,15 +657,15 @@ if __name__ == "__main__":
     data_list = [ # Trajectory directory                     Min Qc  dRadiant max   dVg max   min duration  skip solver plot
         ["../SimulatedMeteors/CAMO/2011Draconids",            1.0,        0.5,         0.5,       -1, []],
         ["../SimulatedMeteors/CAMO/2012Geminids",             1.0,        0.5,         0.5,       -1, ['MPF const', 'MPF const-FHAV']],
-        ["../SimulatedMeteors/CAMO/2012Perseids",             1.0,        0.5,         0.5,       -1, []],
+        ["../SimulatedMeteors/CAMO/2012Perseids",             1.0,        0.5,         0.5,       -1, []]]
         #
-        ["../SimulatedMeteors/CAMSsim/2011Draconids",         10.0,       1.0,         1.0,       -1, []],
-        ["../SimulatedMeteors/CAMSsim/2012Geminids",          10.0,       1.0,         1.0,       -1, []],
-        ["../SimulatedMeteors/CAMSsim/2012Perseids",          10.0,       1.0,         1.0,       -1, []],
-        #
-        ["../SimulatedMeteors/SOMN_sim/2011Draconids",        15.0,       5.0,         5.0,       -1, []],
-        ["../SimulatedMeteors/SOMN_sim/2012Geminids",         15.0,       5.0,         5.0,       -1, []],
-        ["../SimulatedMeteors/SOMN_sim/2012Perseids",         15.0,       5.0,         5.0,       -1, []] ]
+        # ["../SimulatedMeteors/CAMSsim/2011Draconids",         10.0,       1.0,         1.0,       -1, []],
+        # ["../SimulatedMeteors/CAMSsim/2012Geminids",          10.0,       1.0,         1.0,       -1, []],
+        # ["../SimulatedMeteors/CAMSsim/2012Perseids",          10.0,       1.0,         1.0,       -1, []],
+        # #
+        # ["../SimulatedMeteors/SOMN_sim/2011Draconids",        15.0,       5.0,         5.0,       -1, []],
+        # ["../SimulatedMeteors/SOMN_sim/2012Geminids",         15.0,       5.0,         5.0,       -1, []],
+        # ["../SimulatedMeteors/SOMN_sim/2012Perseids",         15.0,       5.0,         5.0,       -1, []] ]
         
         # ["../SimulatedMeteors/SOMN_sim/2015Taurids",          15.0,       5.0,         5.0,       -1, []]]
         # ["../SimulatedMeteors/SOMN_sim/LongFireball",          5.0,       0.5,         0.5,        4, []]
