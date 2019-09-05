@@ -387,7 +387,7 @@ class MetSimGUI(QMainWindow):
 
             # Set the constants value from the trajectory
             self.const.zenith_angle = self.traj.orbit.zc
-            self.const.v_init = self.traj.orbit.v_init_norot
+            self.const.v_init = self.traj.orbit.v_init
 
             # Set kill height to the observed end height
             self.const.h_kill = self.traj.rend_ele - 3000
@@ -583,7 +583,7 @@ class MetSimGUI(QMainWindow):
         time_arr, mag_arr = averageClosePoints(time_arr, mag_arr, avg_t_diff_max)
 
         # Compute the photometry mass
-        return calcMass(np.array(time_arr), np.array(mag_arr), self.traj.orbit.v_avg_norot, P_0m=self.const.P_0m)
+        return calcMass(np.array(time_arr), np.array(mag_arr), self.traj.orbit.v_avg, P_0m=self.const.P_0m)
 
 
 
@@ -891,7 +891,8 @@ class MetSimGUI(QMainWindow):
         x_arr = np.linspace(x_min, x_max, 10)
 
 
-
+        # Height padding
+        ht_pad = 0.1
 
         # Plot a line marking erosion beginning
         plot_handle.canvas.axes.plot(x_arr, np.zeros_like(x_arr) + self.const.erosion_height_start/1000, \
@@ -899,8 +900,8 @@ class MetSimGUI(QMainWindow):
 
         # Add the text about erosion begin
         if plot_text:
-            plot_handle.canvas.axes.text(x_min, self.const.erosion_height_start/1000, "Erosion beg", size=7, \
-                alpha=0.5)
+            plot_handle.canvas.axes.text(x_min, ht_pad + self.const.erosion_height_start/1000, "Erosion beg",\
+                size=7, alpha=0.5)
 
 
 
@@ -913,8 +914,8 @@ class MetSimGUI(QMainWindow):
 
             # Add the text about erosion change
             if plot_text:
-                plot_handle.canvas.axes.text(x_min, self.const.erosion_height_change/1000, "Erosion change", \
-                    size=7, alpha=0.5)
+                plot_handle.canvas.axes.text(x_min, ht_pad + self.const.erosion_height_change/1000, \
+                    "Erosion change", size=7, alpha=0.5)
 
 
 
@@ -926,7 +927,7 @@ class MetSimGUI(QMainWindow):
 
             # Add the text about disruption
             if plot_text:
-                plot_handle.canvas.axes.text(x_min, self.const.disruption_height/1000, "Disruption", \
+                plot_handle.canvas.axes.text(x_min, ht_pad + self.const.disruption_height/1000, "Disruption",\
                     size=7, alpha=0.5)
 
 
@@ -1110,13 +1111,13 @@ class MetSimGUI(QMainWindow):
 
 
         # Plot the initial velocity
-        self.velocityPlot.canvas.axes.plot(self.traj.orbit.v_init_norot/1000, self.traj.rbeg_ele/1000, \
+        self.velocityPlot.canvas.axes.plot(self.traj.orbit.v_init/1000, self.traj.rbeg_ele/1000, \
             marker='x', label="Vinit obs", markersize=5, linestyle='none', color='k')
 
         # Plot the average velocity
         avg_vel_ht_plot_arr = np.linspace(self.traj.rbeg_ele/1000, self.traj.rend_ele/1000, 10)
         self.velocityPlot.canvas.axes.plot(np.zeros_like(avg_vel_ht_plot_arr) \
-            + self.traj.orbit.v_avg_norot/1000, avg_vel_ht_plot_arr, label="Vavg obs", linestyle='dashed', \
+            + self.traj.orbit.v_avg/1000, avg_vel_ht_plot_arr, label="Vavg obs", linestyle='dashed', \
             color='k', alpha=0.5)
 
 
@@ -1175,7 +1176,7 @@ class MetSimGUI(QMainWindow):
 
 
         # Update the observed initial velocity label
-        self.vInitObsLabel.setText("Vinit obs = {:.3f} km/s".format(self.traj.orbit.v_init_norot/1000))
+        self.vInitObsLabel.setText("Vinit obs = {:.3f} km/s".format(self.traj.orbit.v_init/1000))
 
 
         # Track plot limits
@@ -1239,7 +1240,7 @@ class MetSimGUI(QMainWindow):
             ht_arr, brightest_len_arr = temp_arr.T
 
             # Compute the simulated lag using the observed velocity
-            lag_sim = brightest_len_arr - brightest_len_arr[0] - self.traj.orbit.v_init_norot*np.arange(0, \
+            lag_sim = brightest_len_arr - brightest_len_arr[0] - self.traj.orbit.v_init*np.arange(0, \
                 self.const.dt*len(brightest_len_arr), self.const.dt)[:len(brightest_len_arr)]
 
             self.lagPlot.canvas.axes.plot(lag_sim[:len(ht_arr)], (ht_arr/1000)[:len(lag_sim)], 
@@ -1517,7 +1518,7 @@ class MetSimGUI(QMainWindow):
         """ Save updated orbit and trajectory to file. """
 
         # Compute the difference between the model and the measured initial velocity
-        v_init_diff = self.const.v_init - self.traj.orbit.v_init_norot
+        v_init_diff = self.const.v_init - self.traj.orbit.v_init
 
         # Recompute the orbit with an increased initial velocity
         orb = calcOrbit(self.traj.radiant_eci_mini, self.traj.v_init + v_init_diff, self.traj.v_avg \
