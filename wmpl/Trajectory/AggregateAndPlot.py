@@ -600,6 +600,10 @@ if __name__ == "__main__":
     # Maximum geocentric velocity error (percent)
     max_vg_err = 10.0
 
+    # Begin/end height filters (km)
+    max_begin_ht = 160
+    min_end_ht = 20
+
     ### ###
 
 
@@ -674,6 +678,17 @@ if __name__ == "__main__":
                 if traj.uncertanties is not None:
                     if traj.uncertanties.v_g > traj.orbit.v_g*max_vg_err/100:
                         continue
+
+                ###
+
+
+                ### HEIGHT FILTER ###
+
+                if traj.rbeg_ele/1000 > max_begin_ht:
+                    continue
+
+                if traj.rend_ele/1000 < min_end_ht:
+                    continue
 
                 ###
 
