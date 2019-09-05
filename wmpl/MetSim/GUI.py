@@ -873,6 +873,70 @@ class MetSimGUI(QMainWindow):
 
 
 
+
+    def updateCommonPlotFeatures(self, plot_handle, sr, plot_text=False):
+        """ Update common features on all plots such as the erosion start. 
+
+        Arguments:
+            plot_handle: [PyQt5 plot handle]
+            sr: [object] Simulation results.
+        """
+
+
+        # Get the plot X limits
+        x_min, x_max = plot_handle.canvas.axes.get_xlim()
+
+
+        # Generate array for horizontal line plotting
+        x_arr = np.linspace(x_min, x_max, 10)
+
+
+
+
+        # Plot a line marking erosion beginning
+        plot_handle.canvas.axes.plot(x_arr, np.zeros_like(x_arr) + self.const.erosion_height_start/1000, \
+            linestyle='dashed', color='k', alpha=0.25)
+
+        # Add the text about erosion begin
+        if plot_text:
+            plot_handle.canvas.axes.text(x_min, self.const.erosion_height_start/1000, "Erosion beg", size=7, \
+                alpha=0.5)
+
+
+
+        # Only plot the erosion change if it's above the meteor end
+        if self.const.erosion_height_change > self.traj.rend_ele:
+
+            # Plot a line marking erosion change
+            plot_handle.canvas.axes.plot(x_arr, np.zeros_like(x_arr) + self.const.erosion_height_change/1000,\
+                linestyle='dashed', color='k', alpha=0.25)
+
+            # Add the text about erosion change
+            if plot_text:
+                plot_handle.canvas.axes.text(x_min, self.const.erosion_height_change/1000, "Erosion change", \
+                    size=7, alpha=0.5)
+
+
+
+        # Plot the disruption height
+        if self.const.disruption_on and (self.const.disruption_height is not None):
+
+            plot_handle.canvas.axes.plot(x_arr, np.zeros_like(x_arr) + self.const.disruption_height/1000, \
+                linestyle='dotted', color='k', alpha=0.25)
+
+            # Add the text about disruption
+            if plot_text:
+                plot_handle.canvas.axes.text(x_min, self.const.disruption_height/1000, "Disruption", \
+                    size=7, alpha=0.5)
+
+
+
+        # Force the plot X limits back
+        plot_handle.canvas.axes.set_xlim([x_min, x_max])
+
+
+
+
     def updateMagnitudePlot(self, show_previous=False):
         """ Update the magnitude plot. 
 
@@ -970,7 +1034,11 @@ class MetSimGUI(QMainWindow):
         self.magnitudePlot.canvas.axes.set_xlabel('Abs magnitude')
 
         self.magnitudePlot.canvas.axes.set_ylim([plot_end_ht + END_HT_PAD, plot_beg_ht + BEG_HT_PAD])
-        self.magnitudePlot.canvas.axes.set_xlim([mag_faintest + 1, mag_brightest - 1])
+        self.magnitudePlot.canvas.axes.set_xlim([mag_brightest - 1, mag_faintest + 1])
+        self.magnitudePlot.canvas.axes.invert_xaxis()
+
+        # Plot common features across all plots
+        self.updateCommonPlotFeatures(self.magnitudePlot, sr, plot_text=True)
 
         self.magnitudePlot.canvas.axes.legend()
 
@@ -1067,6 +1135,9 @@ class MetSimGUI(QMainWindow):
 
         self.velocityPlot.canvas.axes.set_ylim([plot_end_ht + END_HT_PAD, plot_beg_ht + BEG_HT_PAD])
         self.velocityPlot.canvas.axes.set_xlim([vel_min - 1, vel_max + 1])
+
+        # Plot common features across all plots
+        self.updateCommonPlotFeatures(self.velocityPlot, sr)
 
         self.velocityPlot.canvas.axes.legend()
 
@@ -1182,6 +1253,8 @@ class MetSimGUI(QMainWindow):
         self.lagPlot.canvas.axes.set_xlabel('Lag (m)')
         self.lagPlot.canvas.axes.set_ylabel('Height (km)')
         
+        # Plot common features across all plots
+        self.updateCommonPlotFeatures(self.lagPlot, sr)
 
         self.lagPlot.canvas.axes.legend()
 

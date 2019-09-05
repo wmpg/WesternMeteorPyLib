@@ -158,6 +158,9 @@ class Constants(object):
         # Meteoroid compressive strength (Pa)
         self.compressive_strength = 2000
 
+        # Height of disruption (will be assigned when the disruption occures)
+        self.disruption_height = None
+
         # Erosion coefficient to use after disruption
         self.disruption_erosion_coeff = self.erosion_coeff
 
@@ -703,8 +706,12 @@ def ablateAll(fragments, const, compute_wake=False):
                     # Compute the mass that went into fragments
                     fragments_total_mass = sum([f.n_grains*f.m for f in frag_children])
 
+                    # Assign the height of disruption
+                    const.disruption_height = frag.h
+
 
                     print('Disrupting id', frag.id)
+                    print('Height: {:.3f} km'.format(const.disruption_height/1000))
                     print('Disrupted mass: {:e}'.format(mass_frag_disruption))
                     print('Mass distribution:')
                     for f in frag_children:
