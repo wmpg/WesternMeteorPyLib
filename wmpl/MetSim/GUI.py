@@ -10,7 +10,8 @@ import json
 import glob
 
 import numpy as np
-from scipy.stats import multivariate_normal
+import scipy.stats
+import scipy.interpolate
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import (NavigationToolbar2QT as NavigationToolbar)
 from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
@@ -348,7 +349,7 @@ class MetSimGUI(QMainWindow):
             self.wake_plot_ht = self.traj.rbeg_ele # m
 
         self.wake_normalization_method = 'area'
-        self.wake_align_peaks = False
+        self.wake_align_method = 'none'
 
 
 
@@ -434,8 +435,13 @@ class MetSimGUI(QMainWindow):
         self.radioButtonWakeNormalizationArea.toggled.connect(self.toggleWakeNormalizationMethod)
         self.radioButtonWakeNormalizationArea.setChecked(self.wake_normalization_method == 'area')
         self.radioButtonWakeNormalizationPeak.setChecked(self.wake_normalization_method == 'peak')
-        self.checkBoxWakeAlignPeaks.stateChanged.connect(self.checkBoxWakeAlignPeaksSignal)
-        self.checkBoxWakeAlignPeaks.setChecked(self.wake_align_peaks)
+        
+        self.radioButtonWakeAlignNone.toggled.connect(self.toggleWakeAlignMethod)
+        self.radioButtonWakeAlignPeak.toggled.connect(self.toggleWakeAlignMethod)
+        self.radioButtonWakeAlignCorrelate.toggled.connect(self.toggleWakeAlignMethod)
+        self.radioButtonWakeAlignNone.setChecked(self.wake_align_method == 'none')
+        self.radioButtonWakeAlignPeak.setChecked(self.wake_align_method == 'peak')
+        self.radioButtonWakeAlignCorrelate.setChecked(self.wake_align_method == 'correlate')
 
         #self.addToolBar(NavigationToolbar(self.magnitudePlot.canvas, self))
 
@@ -453,6 +459,7 @@ class MetSimGUI(QMainWindow):
         self.checkBoxDisruptionSignal(None)
         self.checkBoxDisruptionErosionCoeffSignal(None)
         self.toggleWakeNormalizationMethod(None)
+        self.toggleWakeAlignMethod(None)
 
         # Update plots
         self.showCurrentResults()
@@ -674,22 +681,15 @@ class MetSimGUI(QMainWindow):
         self.inputWakePlotHt.setDisabled(not self.wake_on)
         self.inputWakePSF.setDisabled(not self.wake_on)
         self.inputWakeExt.setDisabled(not self.wake_on)
-        self.checkBoxWakeAlignPeaks.setDisabled(not self.wake_on)
         self.radioButtonWakeNormalizationPeak.setDisabled(not self.wake_on)
         self.radioButtonWakeNormalizationArea.setDisabled(not self.wake_on)
         self.wakeSaveVideoButton.setDisabled(not self.wake_on)
+        self.radioButtonWakeAlignNone.setDisabled(not self.wake_on)
+        self.radioButtonWakeAlignPeak.setDisabled(not self.wake_on)
+        self.radioButtonWakeAlignCorrelate.setDisabled(not self.wake_on)
 
         # Read inputs
         self.readInputBoxes()
-
-
-
-    def checkBoxWakeAlignPeaksSignal(self, event):
-        """ Control what happens when the wake peak alignment checkbox is pressed. """
-
-        self.wake_align_peaks = self.checkBoxWakeAlignPeaks.isChecked()
-
-        self.updateWakePlot()
 
 
 
@@ -763,6 +763,31 @@ class MetSimGUI(QMainWindow):
             # Set the normalization method
             self.wake_normalization_method = 'area'
 
+
+
+        self.updateWakePlot()
+
+
+
+    def toggleWakeAlignMethod(self, event):
+        """ Toggle method of wake horizontal alignment. """
+
+        if self.radioButtonWakeAlignNone.isChecked():
+
+            # Set the align methods
+            self.wake_align_method = 'none'
+
+
+        if self.radioButtonWakeAlignPeak.isChecked():
+
+            # Set the align methods
+            self.wake_align_method = 'peak'
+
+
+        if self.radioButtonWakeAlignCorrelate.isChecked():
+
+            # Set the align methods
+            self.wake_align_method = 'correlate'
 
 
         self.updateWakePlot()
@@ -1176,6 +1201,8 @@ class MetSimGUI(QMainWindow):
 
 
         # Update the observed initial velocity label
+        # NOTE: The ECI, not the ground-fixed velocity needs to be used, as the meteor model does not
+        #   include Earth's rotation!
         self.vInitObsLabel.setText("Vinit obs = {:.3f} km/s".format(self.traj.orbit.v_init/1000))
 
 
@@ -1416,14 +1443,34 @@ class MetSimGUI(QMainWindow):
                 wake_intensity_array *= simulated_peak_luminosity/np.max(wake_intensity_array)
 
 
-            # Align peaks
-            if self.wake_align_peaks:
+            # Align wake by peaks
+            if self.wake_align_method == 'peak':
 
                 # Find the length of the peak intensity
                 peak_len = len_array[np.argmax(wake_intensity_array)]
 
                 # Offset lengths
                 len_array -= peak_len + simulated_peak_length
+
+
+            # Align the wake by cross correlation
+            elif self.wake_align_method == 'correlate':
+
+
+                # Interpolate the model values and sample them at observed points
+                sim_wake_interp = scipy.interpolate.interp1d(wake.length_array, \
+                    wake.wake_luminosity_profile, bounds_error=False, fill_value=0)
+                model_wake_obs_len_sample = sim_wake_interp(-len_array)
+
+                # Correlate the wakes and find the shift
+                wake_shift = (np.argmax(np.correlate(model_wake_obs_len_sample, wake_intensity_array, \
+                    "full")) + 1)%len(model_wake_obs_len_sample)
+
+                # Find the index of the zero observed length
+                obs_len_zero_indx = np.argmin(np.abs(len_array))
+
+                # Add the offset to the observed length
+                len_array += len_array[obs_len_zero_indx + wake_shift]
 
 
 
@@ -1518,6 +1565,8 @@ class MetSimGUI(QMainWindow):
         """ Save updated orbit and trajectory to file. """
 
         # Compute the difference between the model and the measured initial velocity
+        # NOTE: The ECI, not the ground-fixed velocity needs to be used, as the meteor model does not
+        #   include Earth's rotation!
         v_init_diff = self.const.v_init - self.traj.orbit.v_init
 
         # Recompute the orbit with an increased initial velocity
@@ -1588,7 +1637,7 @@ class MetSimGUI(QMainWindow):
 
 
         # Init the Gaussian
-        gauss = multivariate_normal([0.0, 0.0], [[self.const.wake_psf/np.sqrt(2)/plate_scale,      0       ], 
+        gauss = scipy.stats.multivariate_normal([0.0, 0.0], [[self.const.wake_psf/np.sqrt(2)/plate_scale, 0 ], 
                                                  [        0,     self.const.wake_psf/np.sqrt(2)/plate_scale]])
 
 
@@ -1639,7 +1688,8 @@ class MetSimGUI(QMainWindow):
                     continue
 
                 # Evaluate the gaussian, normalize so that the brightest peak of the meteor is saturating
-                gauss_eval = self.const.wake_psf/plate_scale*lum*gauss.pdf(mesh_list).reshape(grid_size, grid_size)
+                gauss_eval = self.const.wake_psf/plate_scale*lum*gauss.pdf(mesh_list).reshape(grid_size, \
+                    grid_size)
 
 
                 ### Add the evaluated gaussian to the frame ###
