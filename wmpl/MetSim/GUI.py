@@ -1019,7 +1019,7 @@ class MetSimGUI(QMainWindow):
                 continue
 
             self.magnitudePlot.canvas.axes.plot(abs_mag_data, height_data, marker='x',
-                linestyle='dashed', label=obs.station_id)
+                linestyle='dashed', label=obs.station_id, markersize=5, linewidth=1)
 
             # Keep track of the faintest and the brightest magnitude
             mag_brightest = min(mag_brightest, np.min(abs_mag_data[~np.isinf(abs_mag_data)]))
@@ -1038,7 +1038,7 @@ class MetSimGUI(QMainWindow):
                 height_data = self.met_obs.height_data[site]/1000
 
                 self.magnitudePlot.canvas.axes.plot(abs_mag_data, \
-                    height_data, marker='x', linestyle='dashed', label=str(site))
+                    height_data, marker='x', linestyle='dashed', label=str(site), markersize=5, linewidth=1)
 
                 # Keep track of the faintest and the brightest magnitude
                 mag_brightest = min(mag_brightest, np.min(abs_mag_data[~np.isinf(abs_mag_data)]))
@@ -1229,7 +1229,7 @@ class MetSimGUI(QMainWindow):
             height_data = obs.model_ht/1000
 
             self.lagPlot.canvas.axes.plot(obs.lag, height_data, marker='x',
-                linestyle='dashed', label=obs.station_id)
+                linestyle='dashed', label=obs.station_id, markersize=5, linewidth=1)
 
             # Keep track of the height limits
             plot_beg_ht = max(plot_beg_ht, np.max(height_data))
@@ -1247,7 +1247,7 @@ class MetSimGUI(QMainWindow):
                 # Only plot mirfit lags
                 if self.met.mirfit:
                     self.lagPlot.canvas.axes.plot(self.met_obs.lag_data[site], height_data, marker='x',
-                        linestyle='dashed', label=str(site))
+                        linestyle='dashed', label=str(site),  markersize=5, linewidth=1)
 
                 # Keep track of the height limits
                 plot_beg_ht = max(plot_beg_ht, np.max(height_data))
@@ -1410,6 +1410,7 @@ class MetSimGUI(QMainWindow):
             sr = self.simulation_results
 
 
+        wake = None
 
 
         # Plot lines on mag, vel, lag plots indicating where the wake is shown
@@ -1509,34 +1510,37 @@ class MetSimGUI(QMainWindow):
                 wake_intensity_array *= simulated_peak_luminosity/np.max(wake_intensity_array)
 
 
-            # Align wake by peaks
-            if self.wake_align_method == 'peak':
+            # Perform alignments when simulations are available
+            if wake is not None:
 
-                # Find the length of the peak intensity
-                peak_len = len_array[np.argmax(wake_intensity_array)]
+                # Align wake by peaks
+                if self.wake_align_method == 'peak':
 
-                # Offset lengths
-                len_array -= peak_len + simulated_peak_length
+                    # Find the length of the peak intensity
+                    peak_len = len_array[np.argmax(wake_intensity_array)]
+
+                    # Offset lengths
+                    len_array -= peak_len + simulated_peak_length
 
 
-            # Align the wake by cross correlation
-            elif self.wake_align_method == 'correlate':
+                # Align the wake by cross correlation
+                elif self.wake_align_method == 'correlate':
 
 
-                # Interpolate the model values and sample them at observed points
-                sim_wake_interp = scipy.interpolate.interp1d(wake.length_array, \
-                    wake.wake_luminosity_profile, bounds_error=False, fill_value=0)
-                model_wake_obs_len_sample = sim_wake_interp(-len_array)
+                    # Interpolate the model values and sample them at observed points
+                    sim_wake_interp = scipy.interpolate.interp1d(wake.length_array, \
+                        wake.wake_luminosity_profile, bounds_error=False, fill_value=0)
+                    model_wake_obs_len_sample = sim_wake_interp(-len_array)
 
-                # Correlate the wakes and find the shift
-                wake_shift = np.argmax(np.correlate(model_wake_obs_len_sample, wake_intensity_array, \
-                    "full")) + 1
+                    # Correlate the wakes and find the shift
+                    wake_shift = np.argmax(np.correlate(model_wake_obs_len_sample, wake_intensity_array, \
+                        "full")) + 1
 
-                # Find the index of the zero observed length
-                obs_len_zero_indx = np.argmin(np.abs(len_array))
+                    # Find the index of the zero observed length
+                    obs_len_zero_indx = np.argmin(np.abs(len_array))
 
-                # Add the offset to the observed length
-                len_array += len_array[(obs_len_zero_indx + wake_shift)%len(model_wake_obs_len_sample)]
+                    # Add the offset to the observed length
+                    len_array += len_array[(obs_len_zero_indx + wake_shift)%len(model_wake_obs_len_sample)]
 
 
 
@@ -1562,6 +1566,11 @@ class MetSimGUI(QMainWindow):
         self.wakePlot.canvas.figure.tight_layout()
 
         self.wakePlot.canvas.draw()
+
+
+        # Enable/disable wake normalization and alignment dpending on availability of simulated data
+        self.wakeNormalizeGroup.setDisabled(wake is None)
+        self.wakeAlignGroup.setDisabled(wake is None)
 
 
 
@@ -1691,6 +1700,12 @@ class MetSimGUI(QMainWindow):
             return False
 
 
+        # Disable the video button
+        self.wakeSaveVideoButton.setStyleSheet("background-color: red")
+        self.wakeSaveVideoButton.setDisabled(True)
+        self.repaint()
+
+
         # The plate scale is fixed at 0.5 meters per pixel at 100 km, so the animation is better visible
         plate_scale = 0.5
 
@@ -1818,6 +1833,9 @@ class MetSimGUI(QMainWindow):
         print("Video frame saving done!")
             
 
+        # Enable the video button
+        self.wakeSaveVideoButton.setDisabled(False)
+        self.wakeSaveVideoButton.setStyleSheet("background-color: #efebe7")
             
             
             
