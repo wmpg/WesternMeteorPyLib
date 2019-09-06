@@ -37,6 +37,8 @@ from wmpl.Utils.TrajConversions import unixTime2JD, geo2Cartesian, cartesian2Geo
 BEG_HT_PAD = +5
 END_HT_PAD = -2
 
+# Text label height padding
+TEXT_LABEL_HT_PAD = 0.1
 
 ### ###
 
@@ -337,8 +339,10 @@ class MetSimGUI(QMainWindow):
         ### ###
 
 
-        ### Define GUI and simulation attributes ###
+        ### ### Define GUI and simulation attributes ### ###
 
+
+        ### Wake parameters
         self.wake_on = False
         self.wake_ht_current_index = 0
         self.current_wake_container = None
@@ -352,6 +356,13 @@ class MetSimGUI(QMainWindow):
         self.wake_align_method = 'none'
 
 
+        self.magnitudePlotWakeLine = None
+        self.magnitudePlotWakeLineLabel = None
+        self.velocityPlotWakeLine = None
+        self.lagPlotWakeLine = None
+
+        ### ###
+
 
         # Disable different erosion coeff after disruption at the beginning
         self.disruption_different_erosion_coeff = False
@@ -361,7 +372,8 @@ class MetSimGUI(QMainWindow):
         self.const_prev = None
         self.simulation_results_prev = None
 
-        ### ###
+
+        ### ### ### ###
 
 
         ### Init simulation parameters ###
@@ -916,17 +928,14 @@ class MetSimGUI(QMainWindow):
         x_arr = np.linspace(x_min, x_max, 10)
 
 
-        # Height padding
-        ht_pad = 0.1
-
         # Plot a line marking erosion beginning
         plot_handle.canvas.axes.plot(x_arr, np.zeros_like(x_arr) + self.const.erosion_height_start/1000, \
             linestyle='dashed', color='k', alpha=0.25)
 
         # Add the text about erosion begin
         if plot_text:
-            plot_handle.canvas.axes.text(x_min, ht_pad + self.const.erosion_height_start/1000, "Erosion beg",\
-                size=7, alpha=0.5)
+            plot_handle.canvas.axes.text(x_min, TEXT_LABEL_HT_PAD + self.const.erosion_height_start/1000, \
+                "Erosion beg", size=7, alpha=0.5)
 
 
 
@@ -939,8 +948,8 @@ class MetSimGUI(QMainWindow):
 
             # Add the text about erosion change
             if plot_text:
-                plot_handle.canvas.axes.text(x_min, ht_pad + self.const.erosion_height_change/1000, \
-                    "Erosion change", size=7, alpha=0.5)
+                plot_handle.canvas.axes.text(x_min, TEXT_LABEL_HT_PAD \
+                    + self.const.erosion_height_change/1000, "Erosion change", size=7, alpha=0.5)
 
 
 
@@ -952,8 +961,8 @@ class MetSimGUI(QMainWindow):
 
             # Add the text about disruption
             if plot_text:
-                plot_handle.canvas.axes.text(x_min, ht_pad + self.const.disruption_height/1000, "Disruption",\
-                    size=7, alpha=0.5)
+                plot_handle.canvas.axes.text(x_min, TEXT_LABEL_HT_PAD + self.const.disruption_height/1000, \
+                    "Disruption", size=7, alpha=0.5)
 
 
 
@@ -1338,6 +1347,55 @@ class MetSimGUI(QMainWindow):
 
 
 
+
+    def redrawWakeHeightLine(self, plot_handle, line_handle, label_handle=None, draw_label=False):
+        """ Plot lines on mag, vel, lag plots indicating where the wake is shown. The line will be just 
+            refreshed to prevent redrawing all plots from scratch.
+        """
+
+        # Remove the line from the plot
+        if line_handle is not None:
+            line_handle.remove()
+
+
+        # Get the plot limits
+        x_min, x_max = plot_handle.canvas.axes.get_xlim()
+        y_min, y_max = plot_handle.canvas.axes.get_ylim()
+
+        # Construct X array
+        x_arr = np.linspace(x_min, x_max)
+
+        # Plot the wake line
+        line_handle = plot_handle.canvas.axes.plot(x_arr, np.zeros_like(x_arr) + self.wake_plot_ht/1000, \
+            linestyle='dashed', color='green', alpha=0.5)[0]
+
+
+
+        # Plot the label if given
+        if draw_label:
+
+            # Remove the old label handle
+            if label_handle is not None:
+                label_handle.remove()
+
+            # Draw the wake line label
+            label_handle = plot_handle.canvas.axes.text(x_min, TEXT_LABEL_HT_PAD + self.wake_plot_ht/1000, \
+                "Wake plot", size=7, color='green', alpha=0.5)
+
+
+        # Keep the plot limits
+        plot_handle.canvas.axes.set_xlim([x_min, x_max])
+        plot_handle.canvas.axes.set_ylim([y_min, y_max])
+
+        # Redraw the plot
+        plot_handle.canvas.draw_idle()
+
+
+        return line_handle, label_handle
+
+
+
+
     def updateWakePlot(self, show_previous=False):
         """ Plot the wake. """
 
@@ -1350,6 +1408,16 @@ class MetSimGUI(QMainWindow):
             sr = self.simulation_results_prev
         else:
             sr = self.simulation_results
+
+
+
+
+        # Plot lines on mag, vel, lag plots indicating where the wake is shown
+        self.magnitudePlotWakeLine, self.magnitudePlotWakeLineLabel = self.redrawWakeHeightLine(self.magnitudePlot, \
+            self.magnitudePlotWakeLine, label_handle=self.magnitudePlotWakeLineLabel, draw_label=True)
+        self.velocityPlotWakeLine, _ = self.redrawWakeHeightLine(self.velocityPlot, self.velocityPlotWakeLine)
+        self.lagPlotWakeLine, _ = self.redrawWakeHeightLine(self.lagPlot, self.lagPlotWakeLine)
+
 
 
         # Find the appropriate observed wake to plot for the given height
@@ -1386,9 +1454,7 @@ class MetSimGUI(QMainWindow):
 
                 # Plot the simulated wake
                 self.wakePlot.canvas.axes.plot(wake.length_array, wake.wake_luminosity_profile, \
-                    label='Simulated')
-
-                self.lagPlot.canvas.axes.set_ylim([0, sr.wake_max_lum])
+                    label='Simulated', color='k', alpha=0.5)
 
                 # Compute the area under the simulated wake curve (take only the part after the leading fragment)
                 selected_indices = (wake.length_array > 0) | (wake.length_array < self.const.wake_extension)
@@ -1476,12 +1542,12 @@ class MetSimGUI(QMainWindow):
 
             # Plot the observed wake
             self.wakePlot.canvas.axes.plot(-len_array, wake_intensity_array,
-                label='Observed, site: {:s}'.format(str(self.current_wake_container.site_id)))
+                label='Observed, site: {:s}'.format(str(self.current_wake_container.site_id)), color='k', \
+                linestyle='dotted')
 
         ### ###
 
         self.wakePlot.canvas.axes.legend()
-
 
 
         self.wakePlot.canvas.axes.set_xlabel('Length behind leading fragment')
