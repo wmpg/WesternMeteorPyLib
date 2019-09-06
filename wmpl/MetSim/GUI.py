@@ -957,7 +957,7 @@ class MetSimGUI(QMainWindow):
         if self.const.disruption_on and (self.const.disruption_height is not None):
 
             plot_handle.canvas.axes.plot(x_arr, np.zeros_like(x_arr) + self.const.disruption_height/1000, \
-                linestyle='dotted', color='k', alpha=0.25)
+                linestyle='dotted', color='k', alpha=0.5)
 
             # Add the text about disruption
             if plot_text:
@@ -1529,14 +1529,14 @@ class MetSimGUI(QMainWindow):
                 model_wake_obs_len_sample = sim_wake_interp(-len_array)
 
                 # Correlate the wakes and find the shift
-                wake_shift = (np.argmax(np.correlate(model_wake_obs_len_sample, wake_intensity_array, \
-                    "full")) + 1)%len(model_wake_obs_len_sample)
+                wake_shift = np.argmax(np.correlate(model_wake_obs_len_sample, wake_intensity_array, \
+                    "full")) + 1
 
                 # Find the index of the zero observed length
                 obs_len_zero_indx = np.argmin(np.abs(len_array))
 
                 # Add the offset to the observed length
-                len_array += len_array[obs_len_zero_indx + wake_shift]
+                len_array += len_array[(obs_len_zero_indx + wake_shift)%len(model_wake_obs_len_sample)]
 
 
 
@@ -1601,6 +1601,12 @@ class MetSimGUI(QMainWindow):
         self.readInputBoxes()
 
 
+        # Disable the simulation button (have to force update by calling "repaint")
+        self.runSimButton.setStyleSheet("background-color: red")
+        self.runSimButton.setDisabled(True)
+        self.repaint()
+
+
         print('Running simulation...')
         t1 = time.time()
 
@@ -1624,6 +1630,10 @@ class MetSimGUI(QMainWindow):
 
         # Save the latest run parameters
         self.saveFitParameters(False, suffix="_latest")
+
+        # Enable the simulation button
+        self.runSimButton.setDisabled(False)
+        self.runSimButton.setStyleSheet("background-color: #b1eea6")
 
 
 
