@@ -1150,11 +1150,11 @@ class MetSimGUI(QMainWindow):
 
 
 
-        # Plot the initial velocity
+        # Plot the observed initial velocity
         self.velocityPlot.canvas.axes.plot(self.traj.orbit.v_init/1000, self.traj.rbeg_ele/1000, \
             marker='x', label="Vinit obs", markersize=5, linestyle='none', color='k')
 
-        # Plot the average velocity
+        # Plot the observed average velocity
         avg_vel_ht_plot_arr = np.linspace(self.traj.rbeg_ele/1000, self.traj.rend_ele/1000, 10)
         self.velocityPlot.canvas.axes.plot(np.zeros_like(avg_vel_ht_plot_arr) \
             + self.traj.orbit.v_avg/1000, avg_vel_ht_plot_arr, label="Vavg obs", linestyle='dashed', \
@@ -1165,9 +1165,28 @@ class MetSimGUI(QMainWindow):
         # Plot simulated velocity
         if sr is not None:
 
-            # Plot the simulated magnitudes
+            # Plot the simulated velocity
             self.velocityPlot.canvas.axes.plot(sr.brightest_vel_arr/1000, sr.brightest_height_arr/1000, \
                 label='Simulated', color='k', alpha=0.5)
+
+
+
+            ### Compute the simulated average velocity ###
+
+            # Select only the height range from observations
+            sim_vel_obs_range = sr.brightest_vel_arr[(sr.brightest_height_arr <= self.traj.rbeg_ele) \
+                & (sr.brightest_height_arr >= self.traj.rend_ele)]
+
+            # Compute the simulated average velocity
+            v_avg_sim = np.mean(sim_vel_obs_range)
+
+            ### ###
+
+
+            # Plot the simulated average velocity
+            self.velocityPlot.canvas.axes.plot(np.zeros_like(avg_vel_ht_plot_arr) \
+                + v_avg_sim/1000, avg_vel_ht_plot_arr, label="Vavg sim", linestyle='dotted', \
+                color='k', alpha=0.5)
 
 
 
