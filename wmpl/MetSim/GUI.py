@@ -538,8 +538,14 @@ class MetSimGUI(QMainWindow):
                 obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, self.traj.state_vect_mini, \
                     self.traj.radiant_eci_mini)
 
+                # If the projected point is above the state vector, use negative lengths
+                state_vect_dist_sign = 1.0
+                if vectMag(rad_cpa) > vectMag(self.traj.state_vect_mini):
+                    state_vect_dist_sign = -1.0
+
+
                 # Compute Distance from the state vector to the projected point on the radiant line
-                state_vect_dist = vectMag(self.traj.state_vect_mini - rad_cpa)
+                state_vect_dist = state_vect_dist_sign*vectMag(self.traj.state_vect_mini - rad_cpa)
 
                 # Compute the height (meters)
                 _, _, ht = cartesian2Geo(self.traj.jdt_ref, *rad_cpa)
@@ -1491,7 +1497,7 @@ class MetSimGUI(QMainWindow):
                 # Compute the area under the observed wake curve that is within the simulated range
                 #   (take only the part after the leading fragment)
                 if sim_wake_exists:
-                    selected_indices = (len_array > 0) | (len_array < self.const.wake_extension)
+                    selected_indices = (len_array > -50) | (len_array < self.const.wake_extension)
                     wake_intensity_array_trunc = wake_intensity_array[selected_indices]
                     len_array_trunc = len_array[selected_indices]
                 else:
