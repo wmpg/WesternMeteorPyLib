@@ -257,6 +257,9 @@ def solveTrajectoryMILIG(dir_path, file_name, solver='original', **kwargs):
     traj.run()
 
 
+    return traj
+
+
 
 def writeMiligInputFile(jdt_ref, meteor_list, file_path, convergation_fact=1.0):
     """ Write the MILIG input file. 

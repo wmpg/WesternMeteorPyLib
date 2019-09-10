@@ -792,7 +792,7 @@ class MonteCarloPicks(object):
         # Solve the trajectory
         traj_solve.run()
             
-
+        return traj_solve
 
 
             

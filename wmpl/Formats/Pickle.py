@@ -113,8 +113,8 @@ if __name__ == "__main__":
     # dir_path = os.path.abspath("../SimulatedMeteors/CAMO/2011Draconids/023 - 2455843.361897")
     # file_name = "20111008_204107_trajectory.pickle"
 
-    dir_path = os.path.abspath("../SimulatedMeteors/CAMSsim/2014Ursids/000 - 2457011.277327")
-    file_name = "20141219_183921_trajectory.pickle"
+    dir_path = os.path.abspath("/mnt/bulk/trajectories/20190606_002926.876_HR")
+    file_name = "20190606_002926_trajectory.pickle"
 
     #dir_path = os.path.abspath("/home/dvida/Desktop/test/012 - 2455896.500000")
     #file_name = "20111201_000000_trajectory.pickle"
@@ -125,4 +125,4 @@ if __name__ == "__main__":
 
 
     # Solve the trajectory from the given pickle file
-    traj = solveTrajectory(dir_path, file_name, solver='original', monte_carlo=True)
+    traj = solveTrajectory(dir_path, file_name, solver='original', monte_carlo=False)

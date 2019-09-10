@@ -750,7 +750,7 @@ def solveTrajectoryMet(met, solver='original', velmodel=3, **kwargs):
         # Solve the trajectory
         traj.run()
 
-
+        return traj
 
 
 
