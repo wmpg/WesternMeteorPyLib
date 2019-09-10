@@ -1725,9 +1725,12 @@ class MetSimGUI(QMainWindow):
         lag_point_count = len(~np.isnan(fit_input_data[:, 2]))
 
         # Interpolate simulated magnitude and length
-        len_sim_interpol = scipy.interpolate.interp1d(sr.brightest_height_arr, sr.brightest_length_arr)
-        mag_sim_interpol = scipy.interpolate.interp1d(sr.brightest_height_arr, sr.abs_magnitude)
-        time_sim_interpol = scipy.interpolate.interp1d(sr.brightest_height_arr, sr.time_arr)
+        len_sim_interpol = scipy.interpolate.interp1d(sr.brightest_height_arr, sr.brightest_length_arr, \
+            bounds_error=False, fill_value=0)
+        mag_sim_interpol = scipy.interpolate.interp1d(sr.brightest_height_arr, sr.abs_magnitude, \
+            bounds_error=False, fill_value=10)
+        time_sim_interpol = scipy.interpolate.interp1d(sr.brightest_height_arr, sr.time_arr, \
+            bounds_error=False, fill_value=0)
 
         
         # Find the length and time at the meteor begin point
@@ -1761,10 +1764,17 @@ class MetSimGUI(QMainWindow):
             if not np.isnan(mag):
                 mag_res = (((mag - mag_sim)/mag_inv_weight)**2)/mag_point_count
 
+            if np.isnan(mag_res):
+                mag_res = 10.0
+
+
             # Compute the length residual
             lag_res = 0
             if not np.isnan(lag):
                 lag_res = (((lag - lag_sim)/len_inv_weight)**2)/lag_point_count
+
+            if np.isnan(lag_res):
+                lag_res = 10000
 
 
             total_residual += mag_res + lag_res
@@ -1918,7 +1928,7 @@ class MetSimGUI(QMainWindow):
 
         # Run the fit
         res = scipy.optimize.minimize(self.fitResiduals, p0, args=(fit_input_data, param_string, const), \
-            bounds=bounds, method='TNC')
+            bounds=bounds)
 
 
         print(res)
