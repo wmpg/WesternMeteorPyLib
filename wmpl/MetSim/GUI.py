@@ -12,6 +12,7 @@ import glob
 import numpy as np
 import scipy.stats
 import scipy.interpolate
+import scipy.optimize
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import (NavigationToolbar2QT as NavigationToolbar)
 from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
@@ -429,6 +430,7 @@ class MetSimGUI(QMainWindow):
         ### Add key bindings ###
 
         self.runSimButton.clicked.connect(self.runSimulationGUI)
+        self.autoFitButton.clicked.connect(self.autoFit)
         
         self.showPreviousButton.pressed.connect(self.showPreviousResults)
         self.showPreviousButton.released.connect(self.showCurrentResults)
@@ -588,7 +590,9 @@ class MetSimGUI(QMainWindow):
             # Compute average time difference
             avg_t_diff_max = max(avg_t_diff_max, np.median(obs.time_data[1:] - obs.time_data[:-1]))
 
-            for t, mag in zip(obs.time_data, obs.absolute_magnitudes):
+            for t, mag in zip(obs.time_data[obs.ignore_list == 0], \
+                obs.absolute_magnitudes[obs.ignore_list == 0]):
+
                 if (mag is not None) and (not np.isnan(mag)):
                     time_mag_arr.append([t, mag])
 
@@ -1012,17 +1016,17 @@ class MetSimGUI(QMainWindow):
         # Plot observed magnitudes from different stations
         for obs in self.traj.observations:
 
+            # Skip instances when no magnitudes are present
+            if obs.absolute_magnitudes is None:
+                continue
+
             # Extract data
-            abs_mag_data = obs.absolute_magnitudes
-            height_data = obs.model_ht/1000
+            abs_mag_data = obs.absolute_magnitudes[obs.ignore_list == 0]
+            height_data = obs.model_ht[obs.ignore_list == 0]/1000
 
             # Keep track of the height limits
             plot_beg_ht = max(plot_beg_ht, np.max(height_data))
             plot_end_ht = min(plot_end_ht, np.min(height_data))
-
-            # Skip instances when no magnitudes are present
-            if abs_mag_data is None:
-                continue
 
             self.magnitudePlot.canvas.axes.plot(abs_mag_data, height_data, marker='x',
                 linestyle='dashed', label=obs.station_id, markersize=5, linewidth=1)
@@ -1134,8 +1138,8 @@ class MetSimGUI(QMainWindow):
         for obs in self.traj.observations:
 
             # Extract data
-            vel_data = obs.velocities[1:]/1000
-            height_data = obs.model_ht[1:]/1000
+            vel_data = obs.velocities[obs.ignore_list == 0][1:]/1000
+            height_data = obs.model_ht[obs.ignore_list == 0][1:]/1000
 
             # Keep track of the height limits
             plot_beg_ht = max(plot_beg_ht, np.max(height_data))
@@ -1251,9 +1255,9 @@ class MetSimGUI(QMainWindow):
         # Keep track of the height range
         for obs in self.traj.observations:
 
-            height_data = obs.model_ht/1000
+            height_data = obs.model_ht[obs.ignore_list == 0]/1000
 
-            self.lagPlot.canvas.axes.plot(obs.lag, height_data, marker='x',
+            self.lagPlot.canvas.axes.plot(obs.lag[obs.ignore_list == 0], height_data, marker='x', \
                 linestyle='dashed', label=obs.station_id, markersize=5, linewidth=1)
 
             # Keep track of the height limits
@@ -1271,7 +1275,7 @@ class MetSimGUI(QMainWindow):
 
                 # Only plot mirfit lags
                 if self.met.mirfit:
-                    self.lagPlot.canvas.axes.plot(self.met_obs.lag_data[site], height_data, marker='x',
+                    self.lagPlot.canvas.axes.plot(self.met_obs.lag_data[site], height_data, marker='x', \
                         linestyle='dashed', label=str(site),  markersize=5, linewidth=1)
 
                 # Keep track of the height limits
@@ -1671,6 +1675,263 @@ class MetSimGUI(QMainWindow):
 
 
 
+    def fitResiduals(self, params, fit_input_data, param_string, const_original, mag_inv_weight=0.1, \
+        len_inv_weight=5.0):
+        """ Compute the fit residual. """
+
+
+        # Create a copy of fit parameters
+        const = copy.deepcopy(const_original)
+
+
+        ### Extract fit parameters ###
+
+
+        # Read meteoroid properties
+        param_index = 4
+        const.m_init, const.v_init, const.rho, const.sigma = params[:param_index]
+
+        # Read erosion parameters if the erosion is on
+        if 'e' in param_string:
+            const.erosion_height_start, const.erosion_coeff, const.erosion_height_change, \
+                const.erosion_coeff_change, const.erosion_mass_index, const.erosion_mass_min, \
+                const.erosion_mass_max = params[param_index:param_index + 7]
+
+            param_index += 7
+
+
+        # Read distuption parameters if the disruption is on
+        if 'd' in param_string:
+            const.compressive_strength, const.disruption_erosion_coeff, const.disruption_mass_index, \
+            const.disruption_mass_min_ratio, const.disruption_mass_max_ratio, \
+            const.disruption_mass_grain_ratio = params[param_index: + 6]
+
+            param_index += 6
+
+        ### ###
+
+
+        # Run the simulation
+        results_list, wake_results = runSimulation(const, compute_wake=False)
+
+        # Store simulation results
+        sr = SimulationResults(const, results_list, wake_results)
+
+
+        ### Compute the residuals ###
+
+        # Count the total number of length and magnitude points
+        mag_point_count = len(~np.isnan(fit_input_data[:, 1]))
+        lag_point_count = len(~np.isnan(fit_input_data[:, 2]))
+
+        # Interpolate simulated magnitude and length
+        len_sim_interpol = scipy.interpolate.interp1d(sr.brightest_height_arr, sr.brightest_length_arr)
+        mag_sim_interpol = scipy.interpolate.interp1d(sr.brightest_height_arr, sr.abs_magnitude)
+        time_sim_interpol = scipy.interpolate.interp1d(sr.brightest_height_arr, sr.time_arr)
+
+        
+        # Find the length and time at the meteor begin point
+        # beg_ht_sim_indx = np.argmin(np.abs(sr.brightest_height_arr - self.traj.rbeg_ele))
+        # begin_length_sim = sr.brightest_length_arr[beg_ht_sim_indx]
+        begin_length_sim = len_sim_interpol(self.traj.rbeg_ele)
+        begin_time_sim = time_sim_interpol(self.traj.rbeg_ele)
+
+
+        # Go through every height point and compute the residual contribution
+        total_residual = 0
+        for entry in fit_input_data:
+
+            height, mag, lag = entry
+
+
+            # Find the corresponding magnitude and length from the simulation to the observation
+            # ht_sim_indx = np.argmin(np.abs(sr.brightest_height_arr - height))
+            # mag_sim = sr.abs_magnitude[ht_sim_indx]
+            # length_sim = sr.brightest_length_arr[ht_sim_indx] - begin_length_sim
+            mag_sim = mag_sim_interpol(height)
+            lag_sim = len_sim_interpol(height) - begin_length_sim \
+                - self.traj.orbit.v_init*(time_sim_interpol(height) - begin_time_sim)
+
+
+            # print("{:.2f}, {:.2f}, {:.2f}, {:.0f}, {:.0f}".format(height, mag, mag_sim, lag, lag_sim))
+
+
+            # Compute the magnitude residual
+            mag_res = 0
+            if not np.isnan(mag):
+                mag_res = (((mag - mag_sim)/mag_inv_weight)**2)/mag_point_count
+
+            # Compute the length residual
+            lag_res = 0
+            if not np.isnan(lag):
+                lag_res = (((lag - lag_sim)/len_inv_weight)**2)/lag_point_count
+
+
+            total_residual += mag_res + lag_res
+
+
+        print('Total residual:', total_residual)
+
+        # Plot the results of the current fit
+        self.simulation_results = sr
+        self.const = const
+        self.showCurrentResults()
+        self.repaint()
+
+
+        return total_residual
+
+
+
+
+    def autoFit(self):
+        """ Run the auto fit procedure. """
+
+        # Store original constants
+        const_original = copy.deepcopy(self.const)
+
+        ### Construct input data matrix ###
+
+        # Construct 2D array of height vs. absolute magnitude vs. lag
+        temp_list = []
+        for obs in self.traj.observations:
+
+
+            # Extract data
+            height_data = obs.model_ht[obs.ignore_list == 0]
+            lag_data = obs.lag[obs.ignore_list == 0]
+
+
+            # If the magnitudes are None, only fit the lag
+            if obs.absolute_magnitudes is None:
+                abs_mag_data = np.zeros_like(height_data) + np.nan
+
+            else:
+                abs_mag_data = obs.absolute_magnitudes[obs.ignore_list == 0]    
+
+
+            temp_arr = np.c_[height_data, abs_mag_data, lag_data]
+
+            # Skip infinite magnitude
+            temp_arr = temp_arr[~np.isinf(abs_mag_data)]
+
+            temp_list.append(temp_arr)
+
+
+        # Add data from the met file (if available)
+        if self.met_obs is not None:
+
+            # Plot additional magnitudes for all sites
+            for site in self.met_obs.sites:
+
+                # Extract data
+                height_data = self.met_obs.height_data[site]
+                abs_mag_data = self.met_obs.abs_mag_data[site]                
+
+
+                # Add dummy lag data
+                lag_data = np.zeros_like(height_data) + np.nan
+
+                temp_arr = np.c_[height_data, abs_mag_data, lag_data]
+
+                # Skip infinite magnitude
+                temp_arr = temp_arr[~np.isinf(abs_mag_data)]
+
+                temp_list.append(temp_arr)
+
+
+        # Construct single data matrix and sort by reverse height
+        fit_input_data = np.vstack(temp_list)
+        fit_input_data = fit_input_data[np.argsort(fit_input_data[:, 0])[::-1]]
+
+
+        ### ###
+
+
+
+        ### Only fit parameters of fragmentation processes which are used ###
+
+        p0 = []
+        bounds = []
+        param_string = 'm'
+        const = copy.deepcopy(self.const)
+
+
+        # Select meteoroid parameters
+        meteoroid_params = [const.m_init, const.v_init, const.rho, const.sigma]
+        meteoroid_bounds = [[0.5*const.m_init, 2*const.m_init],
+                            [0.9*const.v_init, 1.1*const.v_init],
+                            [100, 6000],
+                            [0.25*const.sigma, 4*const.sigma]]
+
+        p0 += meteoroid_params
+        bounds += meteoroid_bounds
+
+
+        # Add erosion parameters if the erosion is on
+        if const.erosion_on:
+
+            erosion_params = [const.erosion_height_start, const.erosion_coeff, \
+                const.erosion_height_change, const.erosion_coeff_change, \
+                const.erosion_mass_index, const.erosion_mass_min, const.erosion_mass_max]
+
+            erosion_bounds = [[70000, 130000],
+                              [0.0, 1.0/1e6],
+                              [70000, 130000],
+                              [0.0, 1.0/1e6],
+                              [1.0, 4.0],
+                              [1e-12, 1e-7],
+                              [1e-12, 1e-7]]
+
+            p0 += erosion_params
+            bounds += erosion_bounds
+
+            param_string += 'e'
+
+
+        # Add distuption parameters if the disruption is on
+        if const.disruption_on:
+
+            disruption_params = [const.compressive_strength, const.disruption_erosion_coeff, \
+            const.disruption_mass_index, const.disruption_mass_min_ratio, const.disruption_mass_max_ratio, \
+            const.disruption_mass_grain_ratio]
+
+            disruption_bounds = [[0.1*const.compressive_strength, 10*const.compressive_strength],
+                                 [0.0, 1.0/1e6],
+                                 [1.0, 4.0],
+                                 [0.01, 50.0],
+                                 [0.1, 80.0],
+                                 [0.0, 100.0]]
+
+            p0 += disruption_params
+            bounds += disruption_bounds
+
+            param_string += 'd'
+
+
+        ### ###
+
+
+        # Print residual value
+        # print(self.fitResiduals(p0, fit_input_data, param_string, const))
+
+
+        # Run the fit
+        res = scipy.optimize.minimize(self.fitResiduals, p0, args=(fit_input_data, param_string, const), \
+            bounds=bounds, method='TNC')
+
+
+        print(res)
+
+
+
+        ### TEST !!!
+        # Return the original constants
+        self.const = const_original
+        self.updateInputBoxes()
+
+
+
     def saveUpdatedOrbit(self):
         """ Save updated orbit and trajectory to file. """
 
@@ -1861,9 +2122,9 @@ class MetSimGUI(QMainWindow):
         # Enable the video button
         self.wakeSaveVideoButton.setDisabled(False)
         self.wakeSaveVideoButton.setStyleSheet("background-color: #efebe7")
-            
-            
-            
+
+
+
 
 
 
