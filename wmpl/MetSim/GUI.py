@@ -1703,8 +1703,8 @@ class MetSimGUI(QMainWindow):
         # Read distuption parameters if the disruption is on
         if 'd' in param_string:
             const.compressive_strength, const.disruption_erosion_coeff, const.disruption_mass_index, \
-            const.disruption_mass_min_ratio, const.disruption_mass_max_ratio, \
-            const.disruption_mass_grain_ratio = params[param_index: + 6]
+                const.disruption_mass_min_ratio, const.disruption_mass_max_ratio, \
+                const.disruption_mass_grain_ratio = params[param_index:param_index + 6]
 
             param_index += 6
 
@@ -1903,8 +1903,8 @@ class MetSimGUI(QMainWindow):
         if const.disruption_on:
 
             disruption_params = [const.compressive_strength, const.disruption_erosion_coeff, \
-            const.disruption_mass_index, const.disruption_mass_min_ratio, const.disruption_mass_max_ratio, \
-            const.disruption_mass_grain_ratio]
+                const.disruption_mass_index, const.disruption_mass_min_ratio, \
+                const.disruption_mass_max_ratio, const.disruption_mass_grain_ratio]
 
             disruption_bounds = [[0.1*const.compressive_strength, 10*const.compressive_strength],
                                  [0.0, 1.0/1e6],
