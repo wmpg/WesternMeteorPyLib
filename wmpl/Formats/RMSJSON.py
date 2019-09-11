@@ -43,7 +43,7 @@ def initMeteorObjects(json_list):
 
 
 
-def solveTrajectoryRMS(json_list, solver='original', **kwargs):
+def solveTrajectoryRMS(json_list, dir_path, solver='original', **kwargs):
     """ Feed the list of meteors in the trajectory solver. """
 
 
@@ -205,7 +205,7 @@ if __name__ == "__main__":
 
 
     # Init the trajectory structure
-    traj = solveTrajectoryRMS(json_list, solver=cml_args.solver, max_toffset=max_toffset, \
+    traj = solveTrajectoryRMS(json_list, dir_path, solver=cml_args.solver, max_toffset=max_toffset, \
             monte_carlo=(not cml_args.disablemc), mc_runs=cml_args.mcruns, \
             geometric_uncert=cml_args.uncertgeom, gravity_correction=(not cml_args.disablegravity), 
             plot_all_spatial_residuals=cml_args.plotallspatial, plot_file_type=cml_args.imgformat, \

@@ -254,6 +254,158 @@ class WakeContainter(object):
 
 
 
+class MinimizationParameterNormalization(object):
+    def __init__(self, params):
+        """ Normalize the fit parameters so that they are approx in the 0 to 1 range.
+
+            The normalization can be done by giving the fit bounds, in which case all parameters will be
+            normalized to the 0 to 1 range. Or, a fixed value can be given for every parameter which should
+            bring it approx to the 0 to 1 range.
+
+        Arguments:
+            params: [list] A list of fit parameters.
+
+
+        """
+
+        self.params = params
+
+        self.normalization_method = None
+        self.bounds = None
+        self.scaling_list = None
+
+
+
+    def normalizeBounds(self, bounds):
+        """ Normalize the parameters given the fit bounds. 
+        
+        Arguments:
+            bounds: [list] A list of bounds for every parameter.
+
+        Return:
+            params_normed: [list] A list of normalized parameters.
+            bounds_normed: [list] A list of normalized boundaries to the [0, 1] range.
+        """
+
+        self.normalization_method = 'bounds'
+        self.bounds = bounds
+
+        # Normalize every parameter
+        params_normed = []
+        bounds_normed = []
+        for p, bound in zip(self.params, self.bounds):
+
+            bound_min, bound_max = bound
+
+            # Normalize the parameter to [0, 1] range
+            p_normed = (p - bound_min)/(bound_max - bound_min)
+
+            params_normed.append(p_normed)
+
+            bounds_normed.append([0, 1])
+
+
+        return params_normed, bounds_normed
+
+
+
+    def normalizeScaling(self, scaling_list, bounds=None):
+        """ Normalize the parameters by specifying a scale for every paramter. 
+    
+        Arguments:
+            scaling_list: [list] A list of values used for scaling each parameter to approx the 0 to 1 range
+                using multiplication.
+
+        Keyword arguments:
+            bounds: [list] A list of bounds which will be scaled. None by default.
+
+
+        Return;
+            if bounds is None:
+                params_normed: [list] A list of scaled paramters.
+            else:
+                params_normed: [list] A list of scaled paramters.
+                bounds_normed: [list] A list of scaled boundaries.
+        """
+
+        self.normalization_method = 'scaling'
+        self.scaling_list = scaling_list
+        self.bounds = bounds
+
+        params_normed = []
+        bounds_normed = []
+
+        for i, (p, scale) in enumerate(zip(self.params, self.scaling_list)):
+
+            # Scale the parameter
+            p_normed = p*scale
+
+            params_normed.append(p_normed)
+
+            # Scale the bounds, if given
+            if bounds is not None:
+                bound = bounds[i]
+                bound_normed = [b*scale for b in bound]
+                bounds_normed.append(bound_normed)
+
+        
+        if bounds is None:
+            return params_normed
+
+        else:
+            return params_normed, bounds_normed
+
+
+
+    def denormalize(self, params_normed):
+        """ Denormalize the given normalized parameters. 
+        
+        Arguments:
+            params_normed: [list] A list of normalized parameters.
+
+        Return:
+            params: [list] A list of denormalized parameters.
+        """
+
+        # Denormalize using bounds
+        if self.normalization_method == 'bounds':
+
+            if self.bounds is None:
+                raise ValueError("Boundaries for parameter denormalization not specified!")
+
+
+            params = []
+
+            for p_normed, bound in zip(params_normed, self.bounds):
+
+                bound_min, bound_max = bound
+
+                # Denormalize the paramer to original bounds
+                p = p_normed*(bound_max - bound_min) + bound_min
+
+                params.append(p)
+
+
+        # Denormalize using scaling
+        elif self.normalization_method == 'scaling':
+
+            if self.scaling_list is None:
+                raise ValueError("Scaling list for parameter denormalization not specified!")
+
+            params = []
+
+            for p_normed, scale in zip(params_normed, self.scaling_list):
+
+                p = p_normed/scale
+
+                params.append(p)
+
+
+        return params
+
+
+
+
 class MetSimGUI(QMainWindow):
     
     def __init__(self, traj_path, const_json_file=None, met_path=None, wid_files=None):
@@ -1675,8 +1827,8 @@ class MetSimGUI(QMainWindow):
 
 
 
-    def fitResiduals(self, params, fit_input_data, param_string, const_original, mag_inv_weight=0.1, \
-        len_inv_weight=5.0):
+    def fitResiduals(self, params, fit_input_data, param_string, const_original, mini_norm_handle, 
+        mag_inv_weight=0.1, len_inv_weight=5.0):
         """ Compute the fit residual. """
 
 
@@ -1686,6 +1838,9 @@ class MetSimGUI(QMainWindow):
 
         ### Extract fit parameters ###
 
+
+        # Denormalize the fit parameters from the [0, 1] range
+        params = mini_norm_handle.denormalize(params)
 
         # Read meteoroid properties
         param_index = 4
@@ -1734,8 +1889,6 @@ class MetSimGUI(QMainWindow):
 
         
         # Find the length and time at the meteor begin point
-        # beg_ht_sim_indx = np.argmin(np.abs(sr.brightest_height_arr - self.traj.rbeg_ele))
-        # begin_length_sim = sr.brightest_length_arr[beg_ht_sim_indx]
         begin_length_sim = len_sim_interpol(self.traj.rbeg_ele)
         begin_time_sim = time_sim_interpol(self.traj.rbeg_ele)
 
@@ -1748,9 +1901,6 @@ class MetSimGUI(QMainWindow):
 
 
             # Find the corresponding magnitude and length from the simulation to the observation
-            # ht_sim_indx = np.argmin(np.abs(sr.brightest_height_arr - height))
-            # mag_sim = sr.abs_magnitude[ht_sim_indx]
-            # length_sim = sr.brightest_length_arr[ht_sim_indx] - begin_length_sim
             mag_sim = mag_sim_interpol(height)
             lag_sim = len_sim_interpol(height) - begin_length_sim \
                 - self.traj.orbit.v_init*(time_sim_interpol(height) - begin_time_sim)
@@ -1922,13 +2072,20 @@ class MetSimGUI(QMainWindow):
         ### ###
 
 
+
+
+        # Normalize the fit parameters to the [0, 1] range
+        mini_norm_handle = MinimizationParameterNormalization(p0)
+        p0_normed, bounds_normed = mini_norm_handle.normalizeBounds(bounds)
+
+
         # Print residual value
         # print(self.fitResiduals(p0, fit_input_data, param_string, const))
 
 
         # Run the fit
-        res = scipy.optimize.minimize(self.fitResiduals, p0, args=(fit_input_data, param_string, const), \
-            bounds=bounds)
+        res = scipy.optimize.minimize(self.fitResiduals, p0_normed, args=(fit_input_data, param_string, \
+            const, mini_norm_handle), bounds=bounds_normed)
 
 
         print(res)
