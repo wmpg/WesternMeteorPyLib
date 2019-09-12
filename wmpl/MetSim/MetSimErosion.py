@@ -20,6 +20,13 @@ import numpy as np
 import scipy.stats
 
 
+# Cython init
+import pyximport
+pyximport.install(setup_args={'include_dirs':[np.get_include()]})
+
+from wmpl.MetSim.MetSimErosionCyTools import massLossRK4, decelerationRK4, luminousEfficiency, atmDensity
+
+
 ### DEFINE CONSTANTS
 
 # Earth acceleration in m/s^2 on the surface
@@ -66,12 +73,12 @@ class Constants(object):
         self.P_0m = 840
 
         # Atmosphere density coefficients
-        self.dens_co = [-9.02726494,
+        self.dens_co = np.array([-9.02726494,
                         0.108986696,
                         -0.0005189,
                         -2.0646e-5,
                         1.93881e-7,
-                        -4.7231e-10]
+                        -4.7231e-10])
 
 
         self.total_fragments = 0
@@ -254,122 +261,128 @@ class Wake(object):
 
 
 
-def massLoss(K, sigma, m, rho_atm, v):
-    """ Mass loss differential equation, the result is giving dm/dt.
+# def massLoss(K, sigma, m, rho_atm, v):
+#     """ Mass loss differential equation, the result is giving dm/dt.
 
-    Arguments:
-        K: [float] Shape-density coefficient (m^2/kg^(2/3)).
-        sigma: [float] Ablation coefficient (s^2/m^2).
-        m: [float] Mass (kg).
-        rho_atm: [float] Atmosphere density (kg/m^3).
-        v: [float] Velocity (m/S).
+#     Arguments:
+#         K: [float] Shape-density coefficient (m^2/kg^(2/3)).
+#         sigma: [float] Ablation coefficient (s^2/m^2).
+#         m: [float] Mass (kg).
+#         rho_atm: [float] Atmosphere density (kg/m^3).
+#         v: [float] Velocity (m/S).
 
-    Return:
-        dm/dt: [float] Mass loss in kg/s.
-    """
+#     Return:
+#         dm/dt: [float] Mass loss in kg/s.
+#     """
 
-    return -K*sigma*m**(2/3.0)*rho_atm*v**3
+#     mass_loss = -K*sigma*m**(2/3.0)*rho_atm*v**3
+
+#     # if np.isnan(mass_loss):
+#     #     print(K, sigma, m, rho_atm, v)
+#     #     raise ValueError("Nan encounterted")
+
+#     return mass_loss
 
 
 
-def massLossRK4(frag, const, rho_atm, sigma):
-    """ Computes the mass loss using the 4th order Runge-Kutta method. 
+# def massLossRK4(frag, const, rho_atm, sigma):
+#     """ Computes the mass loss using the 4th order Runge-Kutta method. 
     
-    Arguments:
-        frag: [object] Fragment instance.
-        cont: [object] Constants instance.
-        rho_atm: [float] Atmosphere density (kg/m^3).
-        sigma: [float] Ablation coefficient (s^2/m^2).
+#     Arguments:
+#         frag: [object] Fragment instance.
+#         cont: [object] Constants instance.
+#         rho_atm: [float] Atmosphere density (kg/m^3).
+#         sigma: [float] Ablation coefficient (s^2/m^2).
 
-    Return:
-        dm/dt: [float] Mass loss in kg/s.
-    """
+#     Return:
+#         dm/dt: [float] Mass loss in kg/s.
+#     """
 
-    # Compute the mass loss (RK4)
-    # Check instances when there is no more mass to ablate
+#     # Compute the mass loss (RK4)
+#     # Check instances when there is no more mass to ablate
 
-    mk1 = const.dt*massLoss(frag.K, sigma, frag.m,            rho_atm, frag.v)
+#     mk1 = const.dt*massLoss(frag.K, sigma, frag.m,            rho_atm, frag.v)
 
-    if -mk1/2 > frag.m:
-        mk1 = -frag.m*2
+#     if -mk1/2 > frag.m:
+#         mk1 = -frag.m*2
 
-    mk2 = const.dt*massLoss(frag.K, sigma, frag.m + mk1/2.0,  rho_atm, frag.v)
+#     mk2 = const.dt*massLoss(frag.K, sigma, frag.m + mk1/2.0,  rho_atm, frag.v)
 
-    if -mk2/2 > frag.m:
-        mk2 = -frag.m*2
+#     if -mk2/2 > frag.m:
+#         mk2 = -frag.m*2
 
-    mk3 = const.dt*massLoss(frag.K, sigma, frag.m + mk2/2.0,  rho_atm, frag.v)
+#     mk3 = const.dt*massLoss(frag.K, sigma, frag.m + mk2/2.0,  rho_atm, frag.v)
 
-    if -mk3 > frag.m:
-        mk3 = -frag.m
+#     if -mk3 > frag.m:
+#         mk3 = -frag.m
 
-    mk4 = const.dt*massLoss(frag.K, sigma, frag.m + mk3,      rho_atm, frag.v)
-
-
-    mass_loss_total = mk1/6.0 + mk2/3.0 + mk3/3.0 + mk4/6.0
-
-    return mass_loss_total
+#     mk4 = const.dt*massLoss(frag.K, sigma, frag.m + mk3,      rho_atm, frag.v)
 
 
+#     mass_loss_total = mk1/6.0 + mk2/3.0 + mk3/3.0 + mk4/6.0
 
-
-def deceleration(K, m, rho_atm, v):
-    """ Computes the deceleration derivative.     
-
-    Arguments:
-        K: [float] Shape-density coefficient (m^2/kg^(2/3)).
-        m: [float] Mass (kg).
-        rho_atm: [float] Atmosphere density (kg/m^3).
-        v: [float] Velocity (m/S).
-
-    Return:
-        dv/dt: [float] Deceleration.
-    """
-
-    return -K*m**(-1/3.0)*rho_atm*v**2
+#     return mass_loss_total
 
 
 
 
-def luminousEfficiency(vel):
-    """ Compute the luminous efficienty in percent for the given velocity. 
+# def deceleration(K, m, rho_atm, v):
+#     """ Computes the deceleration derivative.     
+
+#     Arguments:
+#         K: [float] Shape-density coefficient (m^2/kg^(2/3)).
+#         m: [float] Mass (kg).
+#         rho_atm: [float] Atmosphere density (kg/m^3).
+#         v: [float] Velocity (m/S).
+
+#     Return:
+#         dv/dt: [float] Deceleration.
+#     """
+
+#     return -K*m**(-1/3.0)*rho_atm*v**2
+
+
+
+
+# def luminousEfficiency(vel):
+#     """ Compute the luminous efficienty in percent for the given velocity. 
     
-    Arguments:
-        vel: [float] Velocity (m/s).
+#     Arguments:
+#         vel: [float] Velocity (m/s).
 
-    Return:
-        tau: [float] Luminous efficiency (ratio).
+#     Return:
+#         tau: [float] Luminous efficiency (ratio).
 
-    """
+#     """
 
-    return 0.7/100
+#     return 0.7/100
 
 
 
-def atmDensity(h, const):
-    """ Calculates the atmospheric density in kg/m^3. 
+# def atmDensity(h, const):
+#     """ Calculates the atmospheric density in kg/m^3. 
     
-    Arguments:
-        h: [float] Height in meters.
+#     Arguments:
+#         h: [float] Height in meters.
 
-    Return:
-        [float] Atmosphere density at height h (kg/m^3)
+#     Return:
+#         [float] Atmosphere density at height h (kg/m^3)
 
-    """
+#     """
 
-    # # If the atmosphere dentiy interpolation is present, use it as the source of atm. density
-    # if const.atm_density_interp is not None:
-    #     return const.atm_density_interp(h)
+#     # # If the atmosphere dentiy interpolation is present, use it as the source of atm. density
+#     # if const.atm_density_interp is not None:
+#     #     return const.atm_density_interp(h)
 
-    # # Otherwise, use the polynomial fit (WARNING: the fit is not as good as the interpolation!!!)
-    # else:
+#     # # Otherwise, use the polynomial fit (WARNING: the fit is not as good as the interpolation!!!)
+#     # else:
 
-    dens_co = const.dens_co
+#     dens_co = const.dens_co
 
-    rho_a = (10**(dens_co[0] + dens_co[1]*h/1000.0 + dens_co[2]*(h/1000)**2 + dens_co[3]*(h/1000)**3 \
-        + dens_co[4]*(h/1000)**4 + dens_co[5]*(h/1000)**5))*1000
+#     rho_a = (10**(dens_co[0] + dens_co[1]*h/1000.0 + dens_co[2]*(h/1000)**2 + dens_co[3]*(h/1000)**3 \
+#         + dens_co[4]*(h/1000)**4 + dens_co[5]*(h/1000)**5))*1000
 
-    return rho_a
+#     return rho_a
 
 
 
@@ -526,16 +539,16 @@ def ablateAll(fragments, const, compute_wake=False):
 
 
         # Get atmosphere density for the given height
-        rho_atm = atmDensity(frag.h, const)
+        rho_atm = atmDensity(frag.h, const.dens_co)
 
 
         # Compute the mass loss of the main fragment due to ablation
-        mass_loss_ablation = massLossRK4(frag, const, rho_atm, const.sigma)
+        mass_loss_ablation = massLossRK4(const.dt, frag.K, const.sigma, frag.m, rho_atm, frag.v)
 
 
         # Compute the mass loss due to erosion
         if frag.erosion_enabled and (frag.erosion_coeff > 0):
-            mass_loss_erosion = massLossRK4(frag, const, rho_atm, frag.erosion_coeff)
+            mass_loss_erosion = massLossRK4(const.dt, frag.K, frag.erosion_coeff, frag.m, rho_atm, frag.v)
         else:
             mass_loss_erosion = 0
 
@@ -554,11 +567,7 @@ def ablateAll(fragments, const, compute_wake=False):
 
 
         # Compute change in velocity
-        vk1 = const.dt*deceleration(frag.K, frag.m, rho_atm, frag.v)
-        vk2 = const.dt*deceleration(frag.K, frag.m, rho_atm, frag.v + vk1/2.0)
-        vk3 = const.dt*deceleration(frag.K, frag.m, rho_atm, frag.v + vk2/2.0)
-        vk4 = const.dt*deceleration(frag.K, frag.m, rho_atm, frag.v + vk3)
-        deceleration_total = (vk1/6.0 + vk2/3.0 + vk3/3.0 + vk4/6.0)/const.dt
+        deceleration_total = decelerationRK4(const.dt, frag.K, frag.m, rho_atm, frag.v)
 
 
         # ### Add velocity change due to Earth's gravity ###
@@ -734,6 +743,14 @@ def ablateAll(fragments, const, compute_wake=False):
                 frag.active = False
                 frag.m = 0
                 const.n_active -= 1
+
+
+        # If the fragment is done, stop ablating
+        if (frag.m <= const.m_kill):
+            frag.active = False
+            const.n_active -= 1
+            #print('Killing', frag.id)
+            continue
 
 
 

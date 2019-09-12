@@ -1,4 +1,5 @@
 numpy
+cython
 scipy
 matplotlib
 jplephem
@@ -10,3 +11,4 @@ pyephem
 basemap
 statsmodels
 PyQt5
+pyswarms

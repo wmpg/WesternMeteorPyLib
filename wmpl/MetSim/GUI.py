@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import (NavigationToolbar2QT as NavigationToolbar)
 from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
 from PyQt5.uic import loadUi
-
+import pyswarms as ps
 
 from wmpl.Formats.Met import loadMet
 from wmpl.MetSim.MetSimErosion import runSimulation, Constants
@@ -548,6 +548,11 @@ class MetSimGUI(QMainWindow):
             # Check if the disruption erosion coefficient is different than the main erosion coeff
             if const_json['disruption_erosion_coeff'] != const_json['erosion_coeff']:
                 self.disruption_different_erosion_coeff = True
+
+
+            # Convert the density coefficients into a numpy array
+            self.const.dens_co = np.array(self.const.dens_co)
+
 
         else:
 
@@ -1827,10 +1832,9 @@ class MetSimGUI(QMainWindow):
 
 
 
-    def fitResiduals(self, params, fit_input_data, param_string, const_original, mini_norm_handle, 
-        mag_inv_weight=0.1, len_inv_weight=5.0):
-        """ Compute the fit residual. """
 
+    def extractConstantParams(self, const_original, params, param_string, mini_norm_handle):
+        """ Assign parameters to a Constants object given an array of parameters. """
 
         # Create a copy of fit parameters
         const = copy.deepcopy(const_original)
@@ -1864,6 +1868,24 @@ class MetSimGUI(QMainWindow):
             param_index += 6
 
         ### ###
+        
+        return const
+
+
+
+    def fitResiduals(self, params, fit_input_data, param_string, const_original, mini_norm_handle, 
+        mag_inv_weight=0.1, len_inv_weight=1.0, verbose=True):
+        """ Compute the fit residual. """
+
+        if verbose:
+            print()
+            print('Params:')
+            # print(params)
+            print(mini_norm_handle.denormalize(params))
+
+
+        # Assign fit parameters to a constants object
+        const = self.extractConstantParams(const_original, params, param_string, mini_norm_handle)
 
 
         # Run the simulation
@@ -1930,13 +1952,14 @@ class MetSimGUI(QMainWindow):
             total_residual += mag_res + lag_res
 
 
-        print('Total residual:', total_residual)
+        if verbose:
+            print('Total residual:', total_residual)
 
-        # Plot the results of the current fit
-        self.simulation_results = sr
-        self.const = const
-        self.showCurrentResults()
-        self.repaint()
+            # Plot the results of the current fit
+            self.simulation_results = sr
+            self.const = const
+            self.showCurrentResults()
+            self.repaint()
 
 
         return total_residual
@@ -2006,7 +2029,6 @@ class MetSimGUI(QMainWindow):
 
 
         ### ###
-
 
 
         ### Only fit parameters of fragmentation processes which are used ###
@@ -2085,17 +2107,56 @@ class MetSimGUI(QMainWindow):
 
         # Run the fit
         res = scipy.optimize.minimize(self.fitResiduals, p0_normed, args=(fit_input_data, param_string, \
-            const, mini_norm_handle), bounds=bounds_normed)
-
+            const, mini_norm_handle), bounds=bounds_normed, method='SLSQP')
 
         print(res)
 
+        fit_params = res.x
 
 
-        ### TEST !!!
-        # Return the original constants
-        self.const = const_original
+
+        # ### pyswarms ###
+
+
+        # # Set up hyperparameters
+        # options = {'c1': 0.5, 'c2': 0.3, 'w':0.9}
+
+
+        # # Set up bounds (min, max) are (0, 1)
+        # pso_bounds = (np.zeros(len(p0_normed)), np.ones(len(p0_normed)))
+
+
+        # # Call instance of PSO with bounds argument
+        # optimizer = ps.single.GlobalBestPSO(n_particles=500, dimensions=len(p0_normed), options=options, \
+        #     bounds=pso_bounds, bh_strategy='reflective', vh_strategy='invert')
+
+
+
+        # # Modify the residuals function so that it takes a list of arguments
+        # def fitResidualsListArguments(params, *args, **kwargs):
+        #     return [self.fitResiduals(param_line, *args, **kwargs) for param_line in params]
+
+
+        # # Run PSO
+        # cost, pos = optimizer.optimize(fitResidualsListArguments, iters=10, fit_input_data=fit_input_data, \
+        #     param_string=param_string, const_original=const, mini_norm_handle=mini_norm_handle, verbose=False)
+
+        # print(cost, pos)
+
+        # fit_params = pos
+
+        # ### ###
+
+
+
+
+        # Init a Constants instance with fitted parameters
+        const_fit = self.extractConstantParams(const_original, fit_params, param_string, mini_norm_handle)
+
+        # Assign fitted parameters and run the Simulation
+        self.const = const_fit
         self.updateInputBoxes()
+        self.runSimulationGUI()
 
 
 
@@ -2135,9 +2196,19 @@ class MetSimGUI(QMainWindow):
         dir_path, file_name = os.path.split(self.traj_path)
         file_name = file_name.replace('trajectory.pickle', '') + "sim_fit{:s}.json".format(suffix)
 
+
+        # Create a copy of the fit parameters
+        const = copy.deepcopy(self.const)
+
+
+        # Convert the density parameters to a list
+        if isinstance(const.dens_co, np.ndarray):
+            const.dens_co = const.dens_co.tolist()
+
+
         file_path = os.path.join(dir_path, file_name)
         with open(file_path, 'w') as f:
-            json.dump(self.const, f, default=lambda o: o.__dict__, indent=4)
+            json.dump(const, f, default=lambda o: o.__dict__, indent=4)
 
         print("Saved fit parameters to:", file_path)
 
