@@ -29,7 +29,7 @@ def updateOrbitFiles():
 
 
 	dir_path = os.path.split(os.path.abspath(__file__))[0]
-	dir_path = os.path.join(dir_path, 'share')
+	dir_path = os.path.join(dir_path, 'wmpl', 'share')
 
 	file_names = ['ELEMENTS.COMET', 'Amors.txt', 'Apollos.txt', 'Atens.txt']
 	url_list = [comets_url, amors_url, apollos_url, atens_url]
