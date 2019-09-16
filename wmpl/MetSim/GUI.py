@@ -17,7 +17,6 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import (NavigationToolbar2QT as NavigationToolbar)
 from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
 from PyQt5.uic import loadUi
-import pyswarms as ps
 
 from wmpl.Formats.Met import loadMet
 from wmpl.MetSim.MetSimErosion import runSimulation, Constants
@@ -495,7 +494,7 @@ class MetSimGUI(QMainWindow):
         ### ### Define GUI and simulation attributes ### ###
 
 
-        ### Wake parameters
+        ### Wake parameters ###
         self.wake_on = False
         self.wake_ht_current_index = 0
         self.current_wake_container = None
@@ -513,6 +512,14 @@ class MetSimGUI(QMainWindow):
         self.magnitudePlotWakeLineLabel = None
         self.velocityPlotWakeLine = None
         self.lagPlotWakeLine = None
+
+        ### ###
+
+
+        ### Autofit parameters ###
+
+        self.autofit_mag_weight = 10.0
+        self.autofit_lag_weight = 0.1
 
         ### ###
 
@@ -853,7 +860,17 @@ class MetSimGUI(QMainWindow):
         ### ###
 
 
+        ### Autofit parameters ###
+
+        self.inputAutoFitMagWeight.setText("{:.1f}".format(self.autofit_mag_weight))
+        self.inputAutoFitLagWeight.setText("{:.1f}".format(self.autofit_lag_weight))
+
+        ### ###
+
+
         self.updateGrainDiameters()
+
+
 
 
     def updateGrainDiameters(self):
@@ -1105,6 +1122,14 @@ class MetSimGUI(QMainWindow):
             self.const.disruption_mass_max_ratio*100)/100
 
         ### ###
+
+
+        ### Autofit parameters ###
+
+        self.autofit_mag_weight = self._tryReadFloat(self.inputAutoFitMagWeight, self.autofit_mag_weight)
+        self.autofit_lag_weight = self._tryReadFloat(self.inputAutoFitLagWeight, self.autofit_lag_weight)
+
+        ###
 
 
         # Update the boxes with read values
@@ -1909,7 +1934,7 @@ class MetSimGUI(QMainWindow):
 
 
     def fitResiduals(self, params, fit_input_data, param_string, const_original, mini_norm_handle, 
-        mag_inv_weight=0.1, len_inv_weight=10.0, verbose=True):
+        mag_inv_weight=0.1, lag_inv_weight=10.0, verbose=True):
         """ Compute the fit residual. """
 
         if verbose:
@@ -1978,7 +2003,7 @@ class MetSimGUI(QMainWindow):
             # Compute the length residual
             lag_res = 0
             if not np.isnan(lag):
-                lag_res = (((lag - lag_sim)/len_inv_weight)**2)/lag_point_count
+                lag_res = (((lag - lag_sim)/lag_inv_weight)**2)/lag_point_count
 
             if np.isnan(lag_res):
                 lag_res = 10000
@@ -2004,6 +2029,19 @@ class MetSimGUI(QMainWindow):
 
     def autoFit(self):
         """ Run the auto fit procedure. """
+
+        # Disable the fit button (have to force update by calling "repaint")
+        self.autoFitButton.setStyleSheet("background-color: red")
+        self.autoFitButton.setDisabled(True)
+        self.repaint()
+
+
+        print()
+        print("===================")
+        print("AUTO FIT REFINEMENT")
+        print("===================")
+        print()
+
 
         # Store original constants
         const_original = copy.deepcopy(self.const)
@@ -2137,20 +2175,32 @@ class MetSimGUI(QMainWindow):
 
 
         # Print residual value
-        # print(self.fitResiduals(p0, fit_input_data, param_string, const))
+        print("Starting residual value: {:.5f}".format(self.fitResiduals(p0_normed, fit_input_data, \
+            param_string, const, mini_norm_handle, mag_inv_weight=1/self.autofit_mag_weight, \
+            lag_inv_weight=1/self.autofit_lag_weight, verbose=False)))
+        print()
 
+
+
+        ### scipy minimize ###
 
         # Run the fit
         res = scipy.optimize.minimize(self.fitResiduals, p0_normed, args=(fit_input_data, param_string, \
-            const, mini_norm_handle), bounds=bounds_normed)
+            const, mini_norm_handle, 1/self.autofit_mag_weight, 1/self.autofit_lag_weight), \
+            bounds=bounds_normed, tol=0.001)
 
         print(res)
 
         fit_params = res.x
 
 
+        ### ###
+
+
 
         # ### pyswarms ###
+
+        # import pyswarms as ps
 
 
         # # Set up hyperparameters
@@ -2161,9 +2211,24 @@ class MetSimGUI(QMainWindow):
         # pso_bounds = (np.zeros(len(p0_normed)), np.ones(len(p0_normed)))
 
 
+        # init_pos = None
+
+        # n_particles = 50
+
+        # # Create particles in a tight Gaussian around the initial parameters
+        # init_pos = np.random.normal(loc=p0_normed, scale=0.1+np.zeros_like(p0_normed), \
+        #     size=(n_particles - 1, len(p0_normed)))
+        # init_pos[init_pos < 0] = 0
+        # init_pos[init_pos > 1] = 1
+
+        # # Add manual fit to initial positions
+        # init_pos = np.append(init_pos, np.array([p0_normed]), axis=0)
+
+
         # # Call instance of PSO with bounds argument
-        # optimizer = ps.single.GlobalBestPSO(n_particles=500, dimensions=len(p0_normed), options=options, \
-        #     bounds=pso_bounds, bh_strategy='reflective', vh_strategy='invert')
+        # optimizer = ps.single.GlobalBestPSO(n_particles=n_particles, dimensions=len(p0_normed), \
+        #     options=options, bounds=pso_bounds, bh_strategy='reflective', vh_strategy='invert', \
+        #     init_pos=init_pos)
 
 
 
@@ -2174,7 +2239,8 @@ class MetSimGUI(QMainWindow):
 
         # # Run PSO
         # cost, pos = optimizer.optimize(fitResidualsListArguments, iters=10, fit_input_data=fit_input_data, \
-        #     param_string=param_string, const_original=const, mini_norm_handle=mini_norm_handle, verbose=False)
+        #     param_string=param_string, const_original=const, mini_norm_handle=mini_norm_handle, \
+        #     mag_inv_weight=1/self.autofit_mag_weight, lag_inv_weight=1/self.autofit_lag_weight, verbose=False)
 
         # print(cost, pos)
 
@@ -2183,6 +2249,10 @@ class MetSimGUI(QMainWindow):
         # ### ###
 
 
+
+        # Enable the fit button
+        self.autoFitButton.setDisabled(False)
+        self.autoFitButton.setStyleSheet("background-color: #efebe7")
 
 
         # Init a Constants instance with fitted parameters

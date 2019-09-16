@@ -18,7 +18,7 @@ class MagnitudeMplWidget(QWidget):
 
         QWidget.__init__(self, parent)
         
-        self.canvas = FigureCanvas(Figure(facecolor='#efefef', figsize=TOP_FIGSIZES))
+        self.canvas = FigureCanvas(Figure(facecolor='#efebe7', figsize=TOP_FIGSIZES))
         
         vertical_layout = QVBoxLayout()
         vertical_layout.addWidget(self.canvas)
@@ -34,7 +34,7 @@ class LagMplWidget(QWidget):
 
         QWidget.__init__(self, parent)
         
-        self.canvas = FigureCanvas(Figure(facecolor='#efefef', figsize=TOP_FIGSIZES))
+        self.canvas = FigureCanvas(Figure(facecolor='#efebe7', figsize=TOP_FIGSIZES))
         
         vertical_layout = QVBoxLayout()
         vertical_layout.addWidget(self.canvas)
@@ -49,7 +49,7 @@ class VelocityMplWidget(QWidget):
 
         QWidget.__init__(self, parent)
         
-        self.canvas = FigureCanvas(Figure(facecolor='#efefef', figsize=TOP_FIGSIZES))
+        self.canvas = FigureCanvas(Figure(facecolor='#efebe7', figsize=TOP_FIGSIZES))
         
         vertical_layout = QVBoxLayout()
         vertical_layout.addWidget(self.canvas)
@@ -65,7 +65,7 @@ class WakeMplWidget(QWidget):
 
         QWidget.__init__(self, parent)
         
-        self.canvas = FigureCanvas(Figure(facecolor='#efefef'))
+        self.canvas = FigureCanvas(Figure(facecolor='#efebe7'))
         
         vertical_layout = QVBoxLayout()
         vertical_layout.addWidget(self.canvas)

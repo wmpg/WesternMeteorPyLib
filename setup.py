@@ -9,7 +9,7 @@ else:
 
 from setuptools import setup, find_packages
 
-from wmpl.UpdateOrbitFiles import updateOrbitFiles
+from UpdateOrbitFiles import updateOrbitFiles
 
 # Utility function to read the README file.
 # Used for the long_description.  It's nice, because now 1) we have a top level

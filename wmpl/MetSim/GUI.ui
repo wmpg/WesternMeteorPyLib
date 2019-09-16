@@ -14,19 +14,6 @@
    <string>MainWindow</string>
   </property>
   <widget class="QWidget" name="centralwidget">
-   <widget class="QPushButton" name="autoFitButton">
-    <property name="geometry">
-     <rect>
-      <x>1490</x>
-      <y>890</y>
-      <width>171</width>
-      <height>31</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>Auto fit refinement</string>
-    </property>
-   </widget>
    <widget class="QPushButton" name="runSimButton">
     <property name="geometry">
      <rect>
@@ -331,7 +318,7 @@
     <property name="geometry">
      <rect>
       <x>1280</x>
-      <y>460</y>
+      <y>430</y>
       <width>391</width>
       <height>121</height>
      </rect>
@@ -594,7 +581,7 @@
     <property name="geometry">
      <rect>
       <x>1280</x>
-      <y>290</y>
+      <y>270</y>
       <width>391</width>
       <height>161</height>
      </rect>
@@ -933,7 +920,7 @@
       </rect>
      </property>
      <property name="text">
-      <string>um</string>
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;μm&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
      </property>
     </widget>
     <widget class="QLabel" name="label_9">
@@ -946,7 +933,7 @@
       </rect>
      </property>
      <property name="text">
-      <string>um</string>
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;μm&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
      </property>
     </widget>
    </widget>
@@ -990,7 +977,7 @@
     <property name="geometry">
      <rect>
       <x>1280</x>
-      <y>130</y>
+      <y>120</y>
       <width>391</width>
       <height>151</height>
      </rect>
@@ -1312,9 +1299,9 @@
     <property name="geometry">
      <rect>
       <x>1280</x>
-      <y>590</y>
+      <y>550</y>
       <width>391</width>
-      <height>181</height>
+      <height>171</height>
      </rect>
     </property>
     <property name="title">
@@ -1616,7 +1603,7 @@
       <x>1490</x>
       <y>830</y>
       <width>171</width>
-      <height>21</height>
+      <height>41</height>
      </rect>
     </property>
     <property name="text">
@@ -1627,9 +1614,9 @@
     <property name="geometry">
      <rect>
       <x>1490</x>
-      <y>860</y>
+      <y>880</y>
       <width>171</width>
-      <height>21</height>
+      <height>41</height>
      </rect>
     </property>
     <property name="text">
@@ -1645,6 +1632,90 @@
       <height>551</height>
      </rect>
     </property>
+   </widget>
+   <widget class="QGroupBox" name="groupBox">
+    <property name="geometry">
+     <rect>
+      <x>1280</x>
+      <y>720</y>
+      <width>391</width>
+      <height>91</height>
+     </rect>
+    </property>
+    <property name="title">
+     <string>Auto fit refinement</string>
+    </property>
+    <property name="alignment">
+     <set>Qt::AlignCenter</set>
+    </property>
+    <widget class="QLineEdit" name="inputAutoFitMagWeight">
+     <property name="geometry">
+      <rect>
+       <x>100</x>
+       <y>30</y>
+       <width>71</width>
+       <height>23</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="inputAutoFitLagWeight">
+     <property name="geometry">
+      <rect>
+       <x>100</x>
+       <y>60</y>
+       <width>71</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string/>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_10">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>30</y>
+       <width>81</width>
+       <height>20</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Mag weight</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_11">
+     <property name="geometry">
+      <rect>
+       <x>20</x>
+       <y>60</y>
+       <width>71</width>
+       <height>21</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Lag weight</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="autoFitButton">
+     <property name="geometry">
+      <rect>
+       <x>210</x>
+       <y>40</y>
+       <width>171</width>
+       <height>31</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Auto fit refinement</string>
+     </property>
+    </widget>
    </widget>
   </widget>
   <widget class="QMenuBar" name="menubar">

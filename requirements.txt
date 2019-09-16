@@ -11,4 +11,5 @@ pyephem
 basemap
 statsmodels
 PyQt5
+pyyaml
 pyswarms
