@@ -622,6 +622,10 @@ class MetSimGUI(QMainWindow):
         self.checkBoxDisruption.stateChanged.connect(self.checkBoxDisruptionSignal)
         self.checkBoxDisruptionErosionCoeff.stateChanged.connect(self.checkBoxDisruptionErosionCoeffSignal)
 
+
+        self.inputErosionMassMin.editingFinished.connect(self.updateGrainDiameters)
+        self.inputErosionMassMax.editingFinished.connect(self.updateGrainDiameters)
+
         ### ###
 
         # Update checkboxes
@@ -849,6 +853,36 @@ class MetSimGUI(QMainWindow):
         ### ###
 
 
+        self.updateGrainDiameters()
+
+
+    def updateGrainDiameters(self):
+        """ Update the grain diameter labels. """
+
+        # Read minimum and maximum grain masses
+        self.const.erosion_mass_min = self._tryReadFloat(self.inputErosionMassMin, \
+            self.const.erosion_mass_min)
+        self.const.erosion_mass_max = self._tryReadFloat(self.inputErosionMassMax, \
+            self.const.erosion_mass_max)
+
+
+        # Compute minimum grain diameter (m)
+        grain_diam_min = 2*(3/(4.0*np.pi)*self.const.erosion_mass_min/self.const.rho_grain)**(1/3.0)
+
+        # Update diameter label
+        self.erosionMinMassDiameter.setText("""d<span style="vertical-align:sub;">min</span> = """ \
+            + "{:.0f}".format(1e6*grain_diam_min))
+
+
+        # Compute maximum grain diameter (m)
+        grain_diam_max = 2*(3/(4.0*np.pi)*self.const.erosion_mass_max/self.const.rho_grain)**(1/3.0)
+
+        # Update diameter label
+        self.erosionMaxMassDiameter.setText("""d<span style="vertical-align:sub;">max</span> = """ \
+            + "{:.0f}".format(1e6*grain_diam_max))
+
+
+
 
     def checkBoxWakeSignal(self, event):
         """ Control what happens when the wake checkbox is pressed. """
@@ -973,47 +1007,48 @@ class MetSimGUI(QMainWindow):
 
 
 
+    def _tryReadFloat(self, input_box, value):
+        try:
+            value = float(input_box.text())
+        except:
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Critical)
+            msg.setWindowTitle("Input parsing error")
+            msg.setText("Error reading input box " + input_box.objectName())
+            msg.setInformativeText("Setting it back to: " + str(value))
+            msg.exec_()
+
+        return value
+
+
+
     def readInputBoxes(self):
         """ Read input boxes and set values to the Constants object. """
-
-
-        def _tryReadFloat(input_box, value):
-            try:
-                value = float(input_box.text())
-            except:
-                msg = QMessageBox()
-                msg.setIcon(QMessageBox.Critical)
-                msg.setWindowTitle("Input parsing error")
-                msg.setText("Error reading input box " + input_box.objectName())
-                msg.setInformativeText("Setting it back to: " + str(value))
-                msg.exec_()
-
-            return value
 
         
         ### Simulation params ###
 
-        self.const.dt = _tryReadFloat(self.inputTimeStep, self.const.dt)
-        self.const.P_0m = _tryReadFloat(self.inputP0M, self.const.P_0m)
+        self.const.dt = self._tryReadFloat(self.inputTimeStep, self.const.dt)
+        self.const.P_0m = self._tryReadFloat(self.inputP0M, self.const.P_0m)
 
-        self.const.h_init = 1000*_tryReadFloat(self.inputHtInit, self.const.h_init/1000)
-        self.const.m_kill = _tryReadFloat(self.inputMassKill, self.const.m_kill)
-        self.const.v_kill = 1000*_tryReadFloat(self.inputVelKill, self.const.v_kill/1000)
-        self.const.h_kill = 1000*_tryReadFloat(self.inputHtKill, self.const.h_kill/1000)
+        self.const.h_init = 1000*self._tryReadFloat(self.inputHtInit, self.const.h_init/1000)
+        self.const.m_kill = self._tryReadFloat(self.inputMassKill, self.const.m_kill)
+        self.const.v_kill = 1000*self._tryReadFloat(self.inputVelKill, self.const.v_kill/1000)
+        self.const.h_kill = 1000*self._tryReadFloat(self.inputHtKill, self.const.h_kill/1000)
 
         ### ###
 
 
         ### Meteoroid physical properties ###
 
-        self.const.rho = _tryReadFloat(self.inputRho, self.const.rho)
-        self.const.rho_grain = _tryReadFloat(self.inputRhoGrain, self.const.rho_grain)
-        self.const.m_init = _tryReadFloat(self.inputMassInit, self.const.m_init)
-        self.const.sigma = _tryReadFloat(self.inputAblationCoeff, self.const.sigma*1e6)/1e6
-        self.const.v_init = 1000*_tryReadFloat(self.inputVelInit, self.const.v_init/1000)
-        self.const.shape_factor = _tryReadFloat(self.inputShapeFact, self.const.shape_factor)
-        self.const.gamma = _tryReadFloat(self.inputGamma, self.const.gamma)
-        self.const.zenith_angle = np.radians(_tryReadFloat(self.inputZenithAngle, \
+        self.const.rho = self._tryReadFloat(self.inputRho, self.const.rho)
+        self.const.rho_grain = self._tryReadFloat(self.inputRhoGrain, self.const.rho_grain)
+        self.const.m_init = self._tryReadFloat(self.inputMassInit, self.const.m_init)
+        self.const.sigma = self._tryReadFloat(self.inputAblationCoeff, self.const.sigma*1e6)/1e6
+        self.const.v_init = 1000*self._tryReadFloat(self.inputVelInit, self.const.v_init/1000)
+        self.const.shape_factor = self._tryReadFloat(self.inputShapeFact, self.const.shape_factor)
+        self.const.gamma = self._tryReadFloat(self.inputGamma, self.const.gamma)
+        self.const.zenith_angle = np.radians(self._tryReadFloat(self.inputZenithAngle, \
             np.degrees(self.const.zenith_angle)))
 
         ### ###
@@ -1021,26 +1056,26 @@ class MetSimGUI(QMainWindow):
 
         ### Wake parameters ###
 
-        self.const.wake_psf = _tryReadFloat(self.inputWakePSF, self.const.wake_psf)
-        self.const.wake_extension = _tryReadFloat(self.inputWakeExt, self.const.wake_extension)
-        self.wake_plot_ht = 1000*_tryReadFloat(self.inputWakePlotHt, self.wake_plot_ht/1000)
+        self.const.wake_psf = self._tryReadFloat(self.inputWakePSF, self.const.wake_psf)
+        self.const.wake_extension = self._tryReadFloat(self.inputWakeExt, self.const.wake_extension)
+        self.wake_plot_ht = 1000*self._tryReadFloat(self.inputWakePlotHt, self.wake_plot_ht/1000)
 
         ### ###
 
 
         ### Erosion parameters ###
 
-        self.const.erosion_height_start = 1000*_tryReadFloat(self.inputErosionHtStart, \
+        self.const.erosion_height_start = 1000*self._tryReadFloat(self.inputErosionHtStart, \
             self.const.erosion_height_start/1000)
-        self.const.erosion_coeff = _tryReadFloat(self.inputErosionCoeff, self.const.erosion_coeff*1e6)/1e6
-        self.const.erosion_height_change = 1000*_tryReadFloat(self.inputErosionHtChange, \
+        self.const.erosion_coeff = self._tryReadFloat(self.inputErosionCoeff, self.const.erosion_coeff*1e6)/1e6
+        self.const.erosion_height_change = 1000*self._tryReadFloat(self.inputErosionHtChange, \
             self.const.erosion_height_change/1000)
-        self.const.erosion_coeff_change = _tryReadFloat(self.inputErosionCoeffChange, \
+        self.const.erosion_coeff_change = self._tryReadFloat(self.inputErosionCoeffChange, \
             self.const.erosion_coeff_change*1e6)/1e6
-        self.const.erosion_mass_index = _tryReadFloat(self.inputErosionMassIndex, \
+        self.const.erosion_mass_index = self._tryReadFloat(self.inputErosionMassIndex, \
             self.const.erosion_mass_index)
-        self.const.erosion_mass_min = _tryReadFloat(self.inputErosionMassMin, self.const.erosion_mass_min)
-        self.const.erosion_mass_max = _tryReadFloat(self.inputErosionMassMax, self.const.erosion_mass_max)
+        self.const.erosion_mass_min = self._tryReadFloat(self.inputErosionMassMin, self.const.erosion_mass_min)
+        self.const.erosion_mass_max = self._tryReadFloat(self.inputErosionMassMax, self.const.erosion_mass_max)
 
         ### ###
 
@@ -1048,25 +1083,25 @@ class MetSimGUI(QMainWindow):
 
         ### Disruption parameters ###
 
-        self.const.compressive_strength = 1000*_tryReadFloat(self.inputCompressiveStrength, \
+        self.const.compressive_strength = 1000*self._tryReadFloat(self.inputCompressiveStrength, \
             self.const.compressive_strength/1000)
 
         # If a different value for erosion coefficient after disruption should be used, read it
         if self.disruption_different_erosion_coeff:
-            self.const.disruption_erosion_coeff = _tryReadFloat(self.inputDisruptionErosionCoeff, \
+            self.const.disruption_erosion_coeff = self._tryReadFloat(self.inputDisruptionErosionCoeff, \
                 self.const.disruption_erosion_coeff*1e6)/1e6
         else:
             # Otherwise, use the same value
             self.const.disruption_erosion_coeff = self.const.erosion_coeff
 
 
-        self.const.disruption_mass_grain_ratio = _tryReadFloat(self.inputDisruptionMassGrainRatio, \
+        self.const.disruption_mass_grain_ratio = self._tryReadFloat(self.inputDisruptionMassGrainRatio, \
             self.const.disruption_mass_grain_ratio*100)/100
-        self.const.disruption_mass_index = _tryReadFloat(self.inputDisruptionMassIndex, \
+        self.const.disruption_mass_index = self._tryReadFloat(self.inputDisruptionMassIndex, \
             self.const.disruption_mass_index)
-        self.const.disruption_mass_min_ratio = _tryReadFloat(self.inputDisruptionMassMinRatio, \
+        self.const.disruption_mass_min_ratio = self._tryReadFloat(self.inputDisruptionMassMinRatio, \
             self.const.disruption_mass_min_ratio*100)/100
-        self.const.disruption_mass_max_ratio = _tryReadFloat(self.inputDisruptionMassMaxRatio, \
+        self.const.disruption_mass_max_ratio = self._tryReadFloat(self.inputDisruptionMassMaxRatio, \
             self.const.disruption_mass_max_ratio*100)/100
 
         ### ###
@@ -1874,7 +1909,7 @@ class MetSimGUI(QMainWindow):
 
 
     def fitResiduals(self, params, fit_input_data, param_string, const_original, mini_norm_handle, 
-        mag_inv_weight=0.1, len_inv_weight=1.0, verbose=True):
+        mag_inv_weight=0.1, len_inv_weight=10.0, verbose=True):
         """ Compute the fit residual. """
 
         if verbose:
@@ -2058,9 +2093,9 @@ class MetSimGUI(QMainWindow):
                 const.erosion_mass_index, const.erosion_mass_min, const.erosion_mass_max]
 
             erosion_bounds = [[70000, 130000],
-                              [0.0, 1.0/1e6],
+                              [0.0, 5.0/1e6],
                               [70000, 130000],
-                              [0.0, 1.0/1e6],
+                              [0.0, 5.0/1e6],
                               [1.0, 4.0],
                               [1e-12, 1e-7],
                               [1e-12, 1e-7]]
@@ -2107,7 +2142,7 @@ class MetSimGUI(QMainWindow):
 
         # Run the fit
         res = scipy.optimize.minimize(self.fitResiduals, p0_normed, args=(fit_input_data, param_string, \
-            const, mini_norm_handle), bounds=bounds_normed, method='SLSQP')
+            const, mini_norm_handle), bounds=bounds_normed)
 
         print(res)
 
