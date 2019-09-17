@@ -490,7 +490,9 @@ def fitResiduals(params, fit_input_data, param_string, const_original, traj, min
 
 
     # Go through every height point and compute the residual contribution
-    total_residual = 0
+    total_mag_residual = 0
+    total_mag_weight = 0
+    total_lag_residual = 0
     for entry in fit_input_data:
 
         height, mag, lag = entry
@@ -505,13 +507,15 @@ def fitResiduals(params, fit_input_data, param_string, const_original, traj, min
         # print("{:.2f}, {:.2f}, {:.2f}, {:.0f}, {:.0f}".format(height, mag, mag_sim, lag, lag_sim))
 
 
-        # Compute the magnitude residual
+        # Compute the magnitude residual weighted by the magnitude to lessen the influence of fain magnitudes
         mag_res = 0
         if not np.isnan(mag):
             mag_res = (((mag - mag_sim)/mag_inv_weight)**2)/mag_point_count
+            mag_weight = 1/2.512**mag
 
         if np.isnan(mag_res):
             mag_res = 10.0
+            mag_weight = 1.0
 
 
         # Compute the length residual
@@ -523,7 +527,11 @@ def fitResiduals(params, fit_input_data, param_string, const_original, traj, min
             lag_res = 10000
 
 
-        total_residual += mag_res + lag_res
+        total_mag_residual += mag_weight*mag_res
+        total_mag_weight += mag_weight
+        total_lag_residual += lag_res
+
+    total_residual = total_mag_residual/total_mag_weight + total_lag_residual
 
 
     if verbose:
