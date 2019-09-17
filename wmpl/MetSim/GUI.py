@@ -1994,22 +1994,26 @@ class MetSimGUI(QMainWindow):
 
         wake_overview_plot = self.wakePlot.canvas.figure.add_subplot(1, 2, 2, label='wake overview')
 
-        # Plot wakes
+        # Number of wakes shown on the plot
+        n_plots = 10
 
-        n_plots = 6
 
         # Generate a range of heights used for plotting
         if self.wake_heights is not None:
 
+            # Choose heights from observed list of heights
             step = len(self.wake_heights)//n_plots
             wake_plotting_heights = np.array(self.wake_heights[::-step])[:, 0]
 
         else:
+            # Generate a list of heights between the begin and end of the trajectory
             wake_plotting_heights = np.linspace(self.traj.rbeg_ele, self.traj.rend_ele, n_plots)
         
 
         # Go through different heights
         for i, plot_ht in enumerate(sorted(wake_plotting_heights)):
+
+            plot_shift = 0.75*i
 
             wake = None
             if sr is not None:
@@ -2019,6 +2023,7 @@ class MetSimGUI(QMainWindow):
 
                 # Get the approprate wake results
                 wake = sr.wake_results[wake_res_indx]
+
 
             # Plot the simulated wake
             simulated_integrated_luminosity = 1.0
@@ -2030,7 +2035,7 @@ class MetSimGUI(QMainWindow):
                 sim_wake_exists = True
 
                 # Scale the luminosity profile to 1 and shift
-                luminosity_profile_scaled = i \
+                luminosity_profile_scaled = plot_shift \
                     + wake.wake_luminosity_profile/np.max(wake.wake_luminosity_profile)
 
                 # Plot the simulated wake and scale it to the maximum lumino
@@ -2089,7 +2094,7 @@ class MetSimGUI(QMainWindow):
                 else:
                     obs_wake_scale = np.max(wake_intensity_array)
 
-                wake_intensity_array_scaled = i + wake_intensity_array/obs_wake_scale
+                wake_intensity_array_scaled = plot_shift + wake_intensity_array/obs_wake_scale
 
                 # Plot the observed wake
                 wake_overview_plot.plot(-len_array, wake_intensity_array_scaled, color='k', \
@@ -2117,11 +2122,9 @@ class MetSimGUI(QMainWindow):
 
 
 
-
-
         self.wakePlot.canvas.figure.tight_layout()
-
         self.wakePlot.canvas.draw()
+
 
 
         # Enable/disable wake normalization and alignment dpending on availability of simulated data
