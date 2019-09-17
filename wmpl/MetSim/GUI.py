@@ -1802,6 +1802,71 @@ class MetSimGUI(QMainWindow):
 
 
 
+    def normalizeObservedWake(self, len_array, wake_intensity_array, wake_sim, simulated_peak_luminosity, 
+        simulated_integrated_luminosity, simulated_peak_length, sim_wake_exists=False):
+        """ Normalize the observed wake and match it to the simulated wake. """
+
+        # Normalize the wake by areas under both curves
+        if self.wake_normalization_method == "area":
+
+            # Compute the area under the observed wake curve that is within the simulated range
+            #   (take only the part after the leading fragment)
+            if sim_wake_exists:
+                selected_indices = (len_array > -50) | (len_array < self.const.wake_extension)
+                wake_intensity_array_trunc = wake_intensity_array[selected_indices]
+                len_array_trunc = len_array[selected_indices]
+            else:
+                wake_intensity_array_trunc = wake_intensity_array
+                len_array_trunc = len_array
+
+            observed_integrated_luminosity = np.trapz(wake_intensity_array_trunc, len_array_trunc)
+
+
+            # Normalize the wake intensity by the area under the intensity curve
+            wake_intensity_array *= simulated_integrated_luminosity/observed_integrated_luminosity
+
+
+        # Normalize the wake by the peak intensity
+        else:
+            wake_intensity_array *= simulated_peak_luminosity/np.max(wake_intensity_array)
+
+
+        # Perform alignments when simulations are available
+        if wake_sim is not None:
+
+            # Align wake by peaks
+            if self.wake_align_method == 'peak':
+
+                # Find the length of the peak intensity
+                peak_len = len_array[np.argmax(wake_intensity_array)]
+
+                # Offset lengths
+                len_array -= peak_len + simulated_peak_length
+
+
+            # Align the wake by cross correlation
+            elif self.wake_align_method == 'correlate':
+
+
+                # Interpolate the model values and sample them at observed points
+                sim_wake_interp = scipy.interpolate.interp1d(wake_sim.length_array, \
+                    wake_sim.wake_luminosity_profile, bounds_error=False, fill_value=0)
+                model_wake_obs_len_sample = sim_wake_interp(-len_array)
+
+                # Correlate the wakes and find the shift
+                wake_shift = np.argmax(np.correlate(model_wake_obs_len_sample, wake_intensity_array, \
+                    "full")) + 1
+
+                # Find the index of the zero observed length
+                obs_len_zero_indx = np.argmin(np.abs(len_array))
+
+                # Add the offset to the observed length
+                len_array += len_array[(obs_len_zero_indx + wake_shift)%len(model_wake_obs_len_sample)]
+
+
+        return len_array, wake_intensity_array
+
+
 
     def updateWakePlot(self, show_previous=False):
         """ Plot the wake. """
@@ -1840,7 +1905,11 @@ class MetSimGUI(QMainWindow):
 
 
 
-        self.wakePlot.canvas.axes.clear()
+        self.wakePlot.canvas.figure.clf()
+
+
+        # Create one large wake plot with movable height
+        wake_ht_plot = self.wakePlot.canvas.figure.add_subplot(1, 2, 1, label='wake ht')
 
 
         ### PLOT SIMULATED WAKE ###
@@ -1861,7 +1930,7 @@ class MetSimGUI(QMainWindow):
                 sim_wake_exists = True
 
                 # Plot the simulated wake
-                self.wakePlot.canvas.axes.plot(wake.length_array, wake.wake_luminosity_profile, \
+                wake_ht_plot.plot(wake.length_array, wake.wake_luminosity_profile, \
                     label='Simulated', color='k', alpha=0.5)
 
                 # Compute the area under the simulated wake curve (take only the part after the leading fragment)
@@ -1892,83 +1961,163 @@ class MetSimGUI(QMainWindow):
             wake_intensity_array = np.array(wake_intensity_array)
 
 
-            # Normalize the wake by areas under both curves
-            if self.wake_normalization_method == "area":
-
-                # Compute the area under the observed wake curve that is within the simulated range
-                #   (take only the part after the leading fragment)
-                if sim_wake_exists:
-                    selected_indices = (len_array > -50) | (len_array < self.const.wake_extension)
-                    wake_intensity_array_trunc = wake_intensity_array[selected_indices]
-                    len_array_trunc = len_array[selected_indices]
-                else:
-                    wake_intensity_array_trunc = wake_intensity_array
-                    len_array_trunc = len_array
-
-                observed_integrated_luminosity = np.trapz(wake_intensity_array_trunc, len_array_trunc)
-
-
-                # Normalize the wake intensity by the area under the intensity curve
-                wake_intensity_array *= simulated_integrated_luminosity/observed_integrated_luminosity
-
-
-            # Normalize the wake by the peak intensity
-            else:
-                wake_intensity_array *= simulated_peak_luminosity/np.max(wake_intensity_array)
-
-
-            # Perform alignments when simulations are available
-            if wake is not None:
-
-                # Align wake by peaks
-                if self.wake_align_method == 'peak':
-
-                    # Find the length of the peak intensity
-                    peak_len = len_array[np.argmax(wake_intensity_array)]
-
-                    # Offset lengths
-                    len_array -= peak_len + simulated_peak_length
-
-
-                # Align the wake by cross correlation
-                elif self.wake_align_method == 'correlate':
-
-
-                    # Interpolate the model values and sample them at observed points
-                    sim_wake_interp = scipy.interpolate.interp1d(wake.length_array, \
-                        wake.wake_luminosity_profile, bounds_error=False, fill_value=0)
-                    model_wake_obs_len_sample = sim_wake_interp(-len_array)
-
-                    # Correlate the wakes and find the shift
-                    wake_shift = np.argmax(np.correlate(model_wake_obs_len_sample, wake_intensity_array, \
-                        "full")) + 1
-
-                    # Find the index of the zero observed length
-                    obs_len_zero_indx = np.argmin(np.abs(len_array))
-
-                    # Add the offset to the observed length
-                    len_array += len_array[(obs_len_zero_indx + wake_shift)%len(model_wake_obs_len_sample)]
+            # Normalize and align the observed wake with simulations
+            len_array, wake_intensity_array = self.normalizeObservedWake(len_array, wake_intensity_array, \
+                wake, simulated_peak_luminosity, simulated_integrated_luminosity, simulated_peak_length, \
+                sim_wake_exists=sim_wake_exists)
 
 
 
             # Plot the observed wake
-            self.wakePlot.canvas.axes.plot(-len_array, wake_intensity_array,
+            wake_ht_plot.plot(-len_array, wake_intensity_array,
                 label='Observed, site: {:s}'.format(str(self.current_wake_container.site_id)), color='k', \
                 linestyle='dotted')
 
         ### ###
 
-        self.wakePlot.canvas.axes.legend()
+        wake_ht_plot.legend()
 
 
-        self.wakePlot.canvas.axes.set_xlabel('Length behind leading fragment')
-        self.wakePlot.canvas.axes.set_ylabel('Intensity')
+        wake_ht_plot.set_xlabel('Length behind leading fragment (m)')
+        wake_ht_plot.set_ylabel('Intensity')
 
-        self.wakePlot.canvas.axes.invert_xaxis()
+        wake_ht_plot.invert_xaxis()
 
-        self.wakePlot.canvas.axes.set_ylim(bottom=0)
+        wake_ht_plot.set_ylim(bottom=0)
 
-        self.wakePlot.canvas.axes.set_title('Wake')
+        wake_ht_plot.set_title('Wake at {:.2f} km'.format(self.wake_plot_ht/1000))
+
+
+
+
+        ### PLOT WAKE OVERVIEW SUBPLOT ###
+
+        wake_overview_plot = self.wakePlot.canvas.figure.add_subplot(1, 2, 2, label='wake overview')
+
+        # Plot wakes
+
+        n_plots = 6
+
+        # Generate a range of heights used for plotting
+        if self.wake_heights is not None:
+
+            step = len(self.wake_heights)//n_plots
+            wake_plotting_heights = np.array(self.wake_heights[::-step])[:, 0]
+
+        else:
+            wake_plotting_heights = np.linspace(self.traj.rbeg_ele, self.traj.rend_ele, n_plots)
+        
+
+        # Go through different heights
+        for i, plot_ht in enumerate(sorted(wake_plotting_heights)):
+
+            wake = None
+            if sr is not None:
+
+                # Find the wake index closest to the given wake height
+                wake_res_indx =  np.argmin(np.abs(plot_ht - sr.brightest_height_arr))
+
+                # Get the approprate wake results
+                wake = sr.wake_results[wake_res_indx]
+
+            # Plot the simulated wake
+            simulated_integrated_luminosity = 1.0
+            simulated_peak_luminosity = None
+            simulated_peak_length = 0.0
+            sim_wake_exists = False
+            if wake is not None:
+
+                sim_wake_exists = True
+
+                # Scale the luminosity profile to 1 and shift
+                luminosity_profile_scaled = i \
+                    + wake.wake_luminosity_profile/np.max(wake.wake_luminosity_profile)
+
+                # Plot the simulated wake and scale it to the maximum lumino
+                wake_overview_plot.plot(wake.length_array, luminosity_profile_scaled, \
+                    label='Simulated', color='k', alpha=0.5, linewidth=1)
+
+
+                # Add text indicating the height of the wake
+                wake_overview_plot.text(wake.length_array[0], luminosity_profile_scaled[0] - 0.1/n_plots,\
+                    "{:.2f} km".format(plot_ht/1000), ha='center', va='top', size=6)
+
+                # Compute the area under the simulated wake curve (take only the part after the leading fragment)
+                selected_indices = (wake.length_array > 0) | (wake.length_array < self.const.wake_extension)
+                wake_intensity_array_trunc = wake.wake_luminosity_profile[selected_indices]
+                len_array_trunc = wake.length_array[selected_indices]
+                simulated_integrated_luminosity = np.trapz(wake_intensity_array_trunc, len_array_trunc)
+
+                # Store the max values
+                simulated_peak_luminosity = np.max(wake_intensity_array_trunc)
+                simulated_peak_length = len_array_trunc[np.argmax(wake_intensity_array_trunc)]
+
+                ### ###
+
+
+
+            # Plot observed wake
+            if self.wake_heights is not None:
+
+                # Find the index of the observed wake that's closest to the given plot height
+                wake_ht_index = np.argmin(np.abs(np.array([w[0] for w in self.wake_heights]) \
+                    - plot_ht))
+
+                # Extract the wake observations
+                _, wake_container = self.wake_heights[wake_ht_index]
+
+                len_array = []
+                wake_intensity_array = []
+                for wake_pt in wake_container.points:
+                    len_array.append(wake_pt.leading_frag_length)
+                    wake_intensity_array.append(wake_pt.intens_sum)
+
+                len_array = np.array(len_array)
+                wake_intensity_array = np.array(wake_intensity_array)
+
+
+                # Normalize and align the observed wake with simulations
+                len_array, wake_intensity_array = self.normalizeObservedWake(len_array, \
+                    wake_intensity_array, wake, simulated_peak_luminosity, \
+                    simulated_integrated_luminosity, simulated_peak_length, \
+                    sim_wake_exists=sim_wake_exists)
+
+
+                # Normalize the observed wake to 1
+                if simulated_peak_luminosity is not None:
+                    obs_wake_scale = simulated_peak_luminosity
+                else:
+                    obs_wake_scale = np.max(wake_intensity_array)
+
+                wake_intensity_array_scaled = i + wake_intensity_array/obs_wake_scale
+
+                # Plot the observed wake
+                wake_overview_plot.plot(-len_array, wake_intensity_array_scaled, color='k', \
+                    linestyle='dotted', linewidth=1)
+
+
+                # If the simulations are not shown, plot the wake heights
+                if wake is None:
+                    wake_overview_plot.text(-self.const.wake_extension, wake_intensity_array_scaled[-1] \
+                        - 0.1/n_plots, "{:.2f} km".format(plot_ht/1000), ha='center', va='top', size=6)
+
+
+
+        wake_overview_plot.set_xlabel('Length behind leading fragment (m)')
+        wake_overview_plot.get_yaxis().set_visible(False)
+
+        wake_overview_plot.set_ylim(bottom=0)
+        wake_overview_plot.set_xlim(-self.const.wake_extension - 50, 50)
+
+        wake_overview_plot.invert_xaxis()
+
+        wake_overview_plot.set_title('Wake overview')
+
+        ###
+
+
+
+
 
         self.wakePlot.canvas.figure.tight_layout()
 
