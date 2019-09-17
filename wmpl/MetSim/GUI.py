@@ -8,6 +8,7 @@ import argparse
 import time
 import json
 import glob
+import multiprocessing as mp
 
 import numpy as np
 import scipy.stats
@@ -405,6 +406,149 @@ class MinimizationParameterNormalization(object):
 
 
 
+def extractConstantParams(const_original, params, param_string, mini_norm_handle):
+    """ Assign parameters to a Constants object given an array of parameters. """
+
+    # Create a copy of fit parameters
+    const = copy.deepcopy(const_original)
+
+
+    ### Extract fit parameters ###
+
+
+    # Denormalize the fit parameters from the [0, 1] range
+    params = mini_norm_handle.denormalize(params)
+
+    # Read meteoroid properties
+    param_index = 4
+    const.m_init, const.v_init, const.rho, const.sigma = params[:param_index]
+
+    # Read erosion parameters if the erosion is on
+    if 'e' in param_string:
+        const.erosion_height_start, const.erosion_coeff, const.erosion_height_change, \
+            const.erosion_coeff_change, const.erosion_mass_index, const.erosion_mass_min, \
+            const.erosion_mass_max = params[param_index:param_index + 7]
+
+        param_index += 7
+
+
+    # Read distuption parameters if the disruption is on
+    if 'd' in param_string:
+        const.compressive_strength, const.disruption_erosion_coeff, const.disruption_mass_index, \
+            const.disruption_mass_min_ratio, const.disruption_mass_max_ratio, \
+            const.disruption_mass_grain_ratio = params[param_index:param_index + 6]
+
+        param_index += 6
+
+    ### ###
+    
+    return const
+
+
+
+
+def fitResiduals(params, fit_input_data, param_string, const_original, traj, mini_norm_handle, 
+    mag_inv_weight=0.1, lag_inv_weight=10.0, verbose=True, gui_handle=None):
+    """ Compute the fit residual. """
+
+    if verbose:
+        print()
+        print('Params:')
+        # print(params)
+        print(mini_norm_handle.denormalize(params))
+
+
+    # Assign fit parameters to a constants object
+    const = extractConstantParams(const_original, params, param_string, mini_norm_handle)
+
+
+    # Run the simulation
+    results_list, wake_results = runSimulation(const, compute_wake=False)
+
+    # Store simulation results
+    sr = SimulationResults(const, results_list, wake_results)
+
+
+    ### Compute the residuals ###
+
+    # Count the total number of length and magnitude points
+    mag_point_count = len(~np.isnan(fit_input_data[:, 1]))
+    lag_point_count = len(~np.isnan(fit_input_data[:, 2]))
+
+    # Interpolate simulated magnitude and length
+    len_sim_interpol = scipy.interpolate.interp1d(sr.brightest_height_arr, sr.brightest_length_arr, \
+        bounds_error=False, fill_value=0)
+    mag_sim_interpol = scipy.interpolate.interp1d(sr.brightest_height_arr, sr.abs_magnitude, \
+        bounds_error=False, fill_value=10)
+    time_sim_interpol = scipy.interpolate.interp1d(sr.brightest_height_arr, sr.time_arr, \
+        bounds_error=False, fill_value=0)
+
+    
+    # Find the length and time at the meteor begin point
+    begin_length_sim = len_sim_interpol(traj.rbeg_ele)
+    begin_time_sim = time_sim_interpol(traj.rbeg_ele)
+
+
+    # Go through every height point and compute the residual contribution
+    total_residual = 0
+    for entry in fit_input_data:
+
+        height, mag, lag = entry
+
+
+        # Find the corresponding magnitude and length from the simulation to the observation
+        mag_sim = mag_sim_interpol(height)
+        lag_sim = len_sim_interpol(height) - begin_length_sim \
+            - traj.orbit.v_init*(time_sim_interpol(height) - begin_time_sim)
+
+
+        # print("{:.2f}, {:.2f}, {:.2f}, {:.0f}, {:.0f}".format(height, mag, mag_sim, lag, lag_sim))
+
+
+        # Compute the magnitude residual
+        mag_res = 0
+        if not np.isnan(mag):
+            mag_res = (((mag - mag_sim)/mag_inv_weight)**2)/mag_point_count
+
+        if np.isnan(mag_res):
+            mag_res = 10.0
+
+
+        # Compute the length residual
+        lag_res = 0
+        if not np.isnan(lag):
+            lag_res = (((lag - lag_sim)/lag_inv_weight)**2)/lag_point_count
+
+        if np.isnan(lag_res):
+            lag_res = 10000
+
+
+        total_residual += mag_res + lag_res
+
+
+    if verbose:
+        print('Total residual:', total_residual)
+
+        if gui_handle is not None:
+
+            # Plot the results of the current fit
+            gui_handle.simulation_results = sr
+            gui_handle.const = const
+            gui_handle.showCurrentResults()
+            gui_handle.repaint()
+
+
+    return total_residual
+
+
+
+# Modify the residuals function so that it takes a list of arguments
+def fitResidualsListArguments(params, *args, **kwargs):
+    return [fitResiduals(param_line, *args, **kwargs) for param_line in params]
+
+
+
+
 class MetSimGUI(QMainWindow):
     
     def __init__(self, traj_path, const_json_file=None, met_path=None, wid_files=None):
@@ -518,6 +662,13 @@ class MetSimGUI(QMainWindow):
 
         ### Autofit parameters ###
 
+
+        self.autofit_method = "Local"
+        self.autoFitMethodToggle(self.autofit_method)
+
+        self.pso_iterations = 10
+        self.pso_particles = 100
+
         self.autofit_mag_weight = 10.0
         self.autofit_lag_weight = 0.1
 
@@ -593,15 +744,8 @@ class MetSimGUI(QMainWindow):
 
         ### Add key bindings ###
 
-        self.runSimButton.clicked.connect(self.runSimulationGUI)
-        self.autoFitButton.clicked.connect(self.autoFit)
-        
-        self.showPreviousButton.pressed.connect(self.showPreviousResults)
-        self.showPreviousButton.released.connect(self.showCurrentResults)
-
-        self.saveUpdatedOrbitButton.clicked.connect(self.saveUpdatedOrbit)
-
-        self.saveFitParametersButton.clicked.connect(self.saveFitParameters)
+        self.inputErosionMassMin.editingFinished.connect(self.updateGrainDiameters)
+        self.inputErosionMassMax.editingFinished.connect(self.updateGrainDiameters)
 
 
         self.wakePlotUpdateButton.clicked.connect(self.updateWakePlot)
@@ -624,14 +768,23 @@ class MetSimGUI(QMainWindow):
         #self.addToolBar(NavigationToolbar(self.magnitudePlot.canvas, self))
 
 
+        self.autoFitMethodComboBox.activated[str].connect(self.autoFitMethodToggle)
+
+
         self.checkBoxWake.stateChanged.connect(self.checkBoxWakeSignal)
         self.checkBoxErosion.stateChanged.connect(self.checkBoxErosionSignal)
         self.checkBoxDisruption.stateChanged.connect(self.checkBoxDisruptionSignal)
         self.checkBoxDisruptionErosionCoeff.stateChanged.connect(self.checkBoxDisruptionErosionCoeffSignal)
 
 
-        self.inputErosionMassMin.editingFinished.connect(self.updateGrainDiameters)
-        self.inputErosionMassMax.editingFinished.connect(self.updateGrainDiameters)
+        self.runSimButton.clicked.connect(self.runSimulationGUI)
+        self.autoFitButton.clicked.connect(self.autoFit)
+        
+        self.showPreviousButton.pressed.connect(self.showPreviousResults)
+        self.showPreviousButton.released.connect(self.showCurrentResults)
+
+        self.saveUpdatedOrbitButton.clicked.connect(self.saveUpdatedOrbit)
+        self.saveFitParametersButton.clicked.connect(self.saveFitParameters)
 
         ### ###
 
@@ -862,6 +1015,9 @@ class MetSimGUI(QMainWindow):
 
         ### Autofit parameters ###
 
+        self.inputAutoFitPSOIterations.setText("{:d}".format(self.pso_iterations))
+        self.inputAutoFitPSOParticles.setText("{:d}".format(self.pso_particles))
+
         self.inputAutoFitMagWeight.setText("{:.1f}".format(self.autofit_mag_weight))
         self.inputAutoFitLagWeight.setText("{:.1f}".format(self.autofit_lag_weight))
 
@@ -877,9 +1033,9 @@ class MetSimGUI(QMainWindow):
         """ Update the grain diameter labels. """
 
         # Read minimum and maximum grain masses
-        self.const.erosion_mass_min = self._tryReadFloat(self.inputErosionMassMin, \
+        self.const.erosion_mass_min = self._tryReadBox(self.inputErosionMassMin, \
             self.const.erosion_mass_min)
-        self.const.erosion_mass_max = self._tryReadFloat(self.inputErosionMassMax, \
+        self.const.erosion_mass_max = self._tryReadBox(self.inputErosionMassMax, \
             self.const.erosion_mass_max)
 
 
@@ -1024,9 +1180,9 @@ class MetSimGUI(QMainWindow):
 
 
 
-    def _tryReadFloat(self, input_box, value):
+    def _tryReadBox(self, input_box, value, value_type=float):
         try:
-            value = float(input_box.text())
+            value = value_type(input_box.text())
         except:
             msg = QMessageBox()
             msg.setIcon(QMessageBox.Critical)
@@ -1045,27 +1201,27 @@ class MetSimGUI(QMainWindow):
         
         ### Simulation params ###
 
-        self.const.dt = self._tryReadFloat(self.inputTimeStep, self.const.dt)
-        self.const.P_0m = self._tryReadFloat(self.inputP0M, self.const.P_0m)
+        self.const.dt = self._tryReadBox(self.inputTimeStep, self.const.dt)
+        self.const.P_0m = self._tryReadBox(self.inputP0M, self.const.P_0m)
 
-        self.const.h_init = 1000*self._tryReadFloat(self.inputHtInit, self.const.h_init/1000)
-        self.const.m_kill = self._tryReadFloat(self.inputMassKill, self.const.m_kill)
-        self.const.v_kill = 1000*self._tryReadFloat(self.inputVelKill, self.const.v_kill/1000)
-        self.const.h_kill = 1000*self._tryReadFloat(self.inputHtKill, self.const.h_kill/1000)
+        self.const.h_init = 1000*self._tryReadBox(self.inputHtInit, self.const.h_init/1000)
+        self.const.m_kill = self._tryReadBox(self.inputMassKill, self.const.m_kill)
+        self.const.v_kill = 1000*self._tryReadBox(self.inputVelKill, self.const.v_kill/1000)
+        self.const.h_kill = 1000*self._tryReadBox(self.inputHtKill, self.const.h_kill/1000)
 
         ### ###
 
 
         ### Meteoroid physical properties ###
 
-        self.const.rho = self._tryReadFloat(self.inputRho, self.const.rho)
-        self.const.rho_grain = self._tryReadFloat(self.inputRhoGrain, self.const.rho_grain)
-        self.const.m_init = self._tryReadFloat(self.inputMassInit, self.const.m_init)
-        self.const.sigma = self._tryReadFloat(self.inputAblationCoeff, self.const.sigma*1e6)/1e6
-        self.const.v_init = 1000*self._tryReadFloat(self.inputVelInit, self.const.v_init/1000)
-        self.const.shape_factor = self._tryReadFloat(self.inputShapeFact, self.const.shape_factor)
-        self.const.gamma = self._tryReadFloat(self.inputGamma, self.const.gamma)
-        self.const.zenith_angle = np.radians(self._tryReadFloat(self.inputZenithAngle, \
+        self.const.rho = self._tryReadBox(self.inputRho, self.const.rho)
+        self.const.rho_grain = self._tryReadBox(self.inputRhoGrain, self.const.rho_grain)
+        self.const.m_init = self._tryReadBox(self.inputMassInit, self.const.m_init)
+        self.const.sigma = self._tryReadBox(self.inputAblationCoeff, self.const.sigma*1e6)/1e6
+        self.const.v_init = 1000*self._tryReadBox(self.inputVelInit, self.const.v_init/1000)
+        self.const.shape_factor = self._tryReadBox(self.inputShapeFact, self.const.shape_factor)
+        self.const.gamma = self._tryReadBox(self.inputGamma, self.const.gamma)
+        self.const.zenith_angle = np.radians(self._tryReadBox(self.inputZenithAngle, \
             np.degrees(self.const.zenith_angle)))
 
         ### ###
@@ -1073,26 +1229,26 @@ class MetSimGUI(QMainWindow):
 
         ### Wake parameters ###
 
-        self.const.wake_psf = self._tryReadFloat(self.inputWakePSF, self.const.wake_psf)
-        self.const.wake_extension = self._tryReadFloat(self.inputWakeExt, self.const.wake_extension)
-        self.wake_plot_ht = 1000*self._tryReadFloat(self.inputWakePlotHt, self.wake_plot_ht/1000)
+        self.const.wake_psf = self._tryReadBox(self.inputWakePSF, self.const.wake_psf)
+        self.const.wake_extension = self._tryReadBox(self.inputWakeExt, self.const.wake_extension)
+        self.wake_plot_ht = 1000*self._tryReadBox(self.inputWakePlotHt, self.wake_plot_ht/1000)
 
         ### ###
 
 
         ### Erosion parameters ###
 
-        self.const.erosion_height_start = 1000*self._tryReadFloat(self.inputErosionHtStart, \
+        self.const.erosion_height_start = 1000*self._tryReadBox(self.inputErosionHtStart, \
             self.const.erosion_height_start/1000)
-        self.const.erosion_coeff = self._tryReadFloat(self.inputErosionCoeff, self.const.erosion_coeff*1e6)/1e6
-        self.const.erosion_height_change = 1000*self._tryReadFloat(self.inputErosionHtChange, \
+        self.const.erosion_coeff = self._tryReadBox(self.inputErosionCoeff, self.const.erosion_coeff*1e6)/1e6
+        self.const.erosion_height_change = 1000*self._tryReadBox(self.inputErosionHtChange, \
             self.const.erosion_height_change/1000)
-        self.const.erosion_coeff_change = self._tryReadFloat(self.inputErosionCoeffChange, \
+        self.const.erosion_coeff_change = self._tryReadBox(self.inputErosionCoeffChange, \
             self.const.erosion_coeff_change*1e6)/1e6
-        self.const.erosion_mass_index = self._tryReadFloat(self.inputErosionMassIndex, \
+        self.const.erosion_mass_index = self._tryReadBox(self.inputErosionMassIndex, \
             self.const.erosion_mass_index)
-        self.const.erosion_mass_min = self._tryReadFloat(self.inputErosionMassMin, self.const.erosion_mass_min)
-        self.const.erosion_mass_max = self._tryReadFloat(self.inputErosionMassMax, self.const.erosion_mass_max)
+        self.const.erosion_mass_min = self._tryReadBox(self.inputErosionMassMin, self.const.erosion_mass_min)
+        self.const.erosion_mass_max = self._tryReadBox(self.inputErosionMassMax, self.const.erosion_mass_max)
 
         ### ###
 
@@ -1100,25 +1256,25 @@ class MetSimGUI(QMainWindow):
 
         ### Disruption parameters ###
 
-        self.const.compressive_strength = 1000*self._tryReadFloat(self.inputCompressiveStrength, \
+        self.const.compressive_strength = 1000*self._tryReadBox(self.inputCompressiveStrength, \
             self.const.compressive_strength/1000)
 
         # If a different value for erosion coefficient after disruption should be used, read it
         if self.disruption_different_erosion_coeff:
-            self.const.disruption_erosion_coeff = self._tryReadFloat(self.inputDisruptionErosionCoeff, \
+            self.const.disruption_erosion_coeff = self._tryReadBox(self.inputDisruptionErosionCoeff, \
                 self.const.disruption_erosion_coeff*1e6)/1e6
         else:
             # Otherwise, use the same value
             self.const.disruption_erosion_coeff = self.const.erosion_coeff
 
 
-        self.const.disruption_mass_grain_ratio = self._tryReadFloat(self.inputDisruptionMassGrainRatio, \
+        self.const.disruption_mass_grain_ratio = self._tryReadBox(self.inputDisruptionMassGrainRatio, \
             self.const.disruption_mass_grain_ratio*100)/100
-        self.const.disruption_mass_index = self._tryReadFloat(self.inputDisruptionMassIndex, \
+        self.const.disruption_mass_index = self._tryReadBox(self.inputDisruptionMassIndex, \
             self.const.disruption_mass_index)
-        self.const.disruption_mass_min_ratio = self._tryReadFloat(self.inputDisruptionMassMinRatio, \
+        self.const.disruption_mass_min_ratio = self._tryReadBox(self.inputDisruptionMassMinRatio, \
             self.const.disruption_mass_min_ratio*100)/100
-        self.const.disruption_mass_max_ratio = self._tryReadFloat(self.inputDisruptionMassMaxRatio, \
+        self.const.disruption_mass_max_ratio = self._tryReadBox(self.inputDisruptionMassMaxRatio, \
             self.const.disruption_mass_max_ratio*100)/100
 
         ### ###
@@ -1126,8 +1282,13 @@ class MetSimGUI(QMainWindow):
 
         ### Autofit parameters ###
 
-        self.autofit_mag_weight = self._tryReadFloat(self.inputAutoFitMagWeight, self.autofit_mag_weight)
-        self.autofit_lag_weight = self._tryReadFloat(self.inputAutoFitLagWeight, self.autofit_lag_weight)
+        self.pso_iterations = self._tryReadBox(self.inputAutoFitPSOIterations, self.pso_iterations, \
+            value_type=int)
+        self.pso_particles = self._tryReadBox(self.inputAutoFitPSOParticles, self.pso_particles, \
+            value_type=int)
+
+        self.autofit_mag_weight = self._tryReadBox(self.inputAutoFitMagWeight, self.autofit_mag_weight)
+        self.autofit_lag_weight = self._tryReadBox(self.inputAutoFitLagWeight, self.autofit_lag_weight)
 
         ###
 
@@ -1892,137 +2053,14 @@ class MetSimGUI(QMainWindow):
 
 
 
+    def autoFitMethodToggle(self, text):
+        """ Select method of auto fit. """
 
-    def extractConstantParams(self, const_original, params, param_string, mini_norm_handle):
-        """ Assign parameters to a Constants object given an array of parameters. """
+        self.autofit_method = text        
 
-        # Create a copy of fit parameters
-        const = copy.deepcopy(const_original)
-
-
-        ### Extract fit parameters ###
-
-
-        # Denormalize the fit parameters from the [0, 1] range
-        params = mini_norm_handle.denormalize(params)
-
-        # Read meteoroid properties
-        param_index = 4
-        const.m_init, const.v_init, const.rho, const.sigma = params[:param_index]
-
-        # Read erosion parameters if the erosion is on
-        if 'e' in param_string:
-            const.erosion_height_start, const.erosion_coeff, const.erosion_height_change, \
-                const.erosion_coeff_change, const.erosion_mass_index, const.erosion_mass_min, \
-                const.erosion_mass_max = params[param_index:param_index + 7]
-
-            param_index += 7
-
-
-        # Read distuption parameters if the disruption is on
-        if 'd' in param_string:
-            const.compressive_strength, const.disruption_erosion_coeff, const.disruption_mass_index, \
-                const.disruption_mass_min_ratio, const.disruption_mass_max_ratio, \
-                const.disruption_mass_grain_ratio = params[param_index:param_index + 6]
-
-            param_index += 6
-
-        ### ###
-        
-        return const
-
-
-
-    def fitResiduals(self, params, fit_input_data, param_string, const_original, mini_norm_handle, 
-        mag_inv_weight=0.1, lag_inv_weight=10.0, verbose=True):
-        """ Compute the fit residual. """
-
-        if verbose:
-            print()
-            print('Params:')
-            # print(params)
-            print(mini_norm_handle.denormalize(params))
-
-
-        # Assign fit parameters to a constants object
-        const = self.extractConstantParams(const_original, params, param_string, mini_norm_handle)
-
-
-        # Run the simulation
-        results_list, wake_results = runSimulation(const, compute_wake=False)
-
-        # Store simulation results
-        sr = SimulationResults(const, results_list, wake_results)
-
-
-        ### Compute the residuals ###
-
-        # Count the total number of length and magnitude points
-        mag_point_count = len(~np.isnan(fit_input_data[:, 1]))
-        lag_point_count = len(~np.isnan(fit_input_data[:, 2]))
-
-        # Interpolate simulated magnitude and length
-        len_sim_interpol = scipy.interpolate.interp1d(sr.brightest_height_arr, sr.brightest_length_arr, \
-            bounds_error=False, fill_value=0)
-        mag_sim_interpol = scipy.interpolate.interp1d(sr.brightest_height_arr, sr.abs_magnitude, \
-            bounds_error=False, fill_value=10)
-        time_sim_interpol = scipy.interpolate.interp1d(sr.brightest_height_arr, sr.time_arr, \
-            bounds_error=False, fill_value=0)
-
-        
-        # Find the length and time at the meteor begin point
-        begin_length_sim = len_sim_interpol(self.traj.rbeg_ele)
-        begin_time_sim = time_sim_interpol(self.traj.rbeg_ele)
-
-
-        # Go through every height point and compute the residual contribution
-        total_residual = 0
-        for entry in fit_input_data:
-
-            height, mag, lag = entry
-
-
-            # Find the corresponding magnitude and length from the simulation to the observation
-            mag_sim = mag_sim_interpol(height)
-            lag_sim = len_sim_interpol(height) - begin_length_sim \
-                - self.traj.orbit.v_init*(time_sim_interpol(height) - begin_time_sim)
-
-
-            # print("{:.2f}, {:.2f}, {:.2f}, {:.0f}, {:.0f}".format(height, mag, mag_sim, lag, lag_sim))
-
-
-            # Compute the magnitude residual
-            mag_res = 0
-            if not np.isnan(mag):
-                mag_res = (((mag - mag_sim)/mag_inv_weight)**2)/mag_point_count
-
-            if np.isnan(mag_res):
-                mag_res = 10.0
-
-
-            # Compute the length residual
-            lag_res = 0
-            if not np.isnan(lag):
-                lag_res = (((lag - lag_sim)/lag_inv_weight)**2)/lag_point_count
-
-            if np.isnan(lag_res):
-                lag_res = 10000
-
-
-            total_residual += mag_res + lag_res
-
-
-        if verbose:
-            print('Total residual:', total_residual)
-
-            # Plot the results of the current fit
-            self.simulation_results = sr
-            self.const = const
-            self.showCurrentResults()
-            self.repaint()
-
-
-        return total_residual
+        # Enable/disable PSO options
+        self.inputAutoFitPSOIterations.setDisabled("PSO" not in text)
+        self.inputAutoFitPSOParticles.setDisabled("PSO" not in text)
 
 
 
@@ -2168,85 +2206,88 @@ class MetSimGUI(QMainWindow):
 
 
 
-
         # Normalize the fit parameters to the [0, 1] range
         mini_norm_handle = MinimizationParameterNormalization(p0)
         p0_normed, bounds_normed = mini_norm_handle.normalizeBounds(bounds)
 
 
         # Print residual value
-        print("Starting residual value: {:.5f}".format(self.fitResiduals(p0_normed, fit_input_data, \
-            param_string, const, mini_norm_handle, mag_inv_weight=1/self.autofit_mag_weight, \
+        print("Starting residual value: {:.5f}".format(fitResiduals(p0_normed, fit_input_data, \
+            param_string, const, self.traj, mini_norm_handle, mag_inv_weight=1/self.autofit_mag_weight, \
             lag_inv_weight=1/self.autofit_lag_weight, verbose=False)))
         print()
 
 
 
-        ### scipy minimize ###
 
-        # Run the fit
-        res = scipy.optimize.minimize(self.fitResiduals, p0_normed, args=(fit_input_data, param_string, \
-            const, mini_norm_handle, 1/self.autofit_mag_weight, 1/self.autofit_lag_weight), \
-            bounds=bounds_normed, tol=0.001)
+        if self.autofit_method == "Local":
 
-        print(res)
+            ### scipy minimize ###
 
-        fit_params = res.x
+            # Run the fit
+            res = scipy.optimize.minimize(fitResiduals, p0_normed, args=(fit_input_data, param_string, \
+                const, self.traj, mini_norm_handle, 1/self.autofit_mag_weight, 1/self.autofit_lag_weight, \
+                True, self), bounds=bounds_normed, tol=0.001)
 
+            print(res)
 
-        ### ###
-
-
-
-        # ### pyswarms ###
-
-        # import pyswarms as ps
+            fit_params = res.x
 
 
-        # # Set up hyperparameters
-        # options = {'c1': 0.5, 'c2': 0.3, 'w':0.9}
+            ### ###
 
 
-        # # Set up bounds (min, max) are (0, 1)
-        # pso_bounds = (np.zeros(len(p0_normed)), np.ones(len(p0_normed)))
+        # PSO optimization
+        else:
+
+            ### pyswarms ###
+
+            import pyswarms as ps
 
 
-        # init_pos = None
-
-        # n_particles = 50
-
-        # # Create particles in a tight Gaussian around the initial parameters
-        # init_pos = np.random.normal(loc=p0_normed, scale=0.1+np.zeros_like(p0_normed), \
-        #     size=(n_particles - 1, len(p0_normed)))
-        # init_pos[init_pos < 0] = 0
-        # init_pos[init_pos > 1] = 1
-
-        # # Add manual fit to initial positions
-        # init_pos = np.append(init_pos, np.array([p0_normed]), axis=0)
+            # Set up hyperparameters
+            options = {'c1': 0.5, 'c2': 0.3, 'w':0.9}
 
 
-        # # Call instance of PSO with bounds argument
-        # optimizer = ps.single.GlobalBestPSO(n_particles=n_particles, dimensions=len(p0_normed), \
-        #     options=options, bounds=pso_bounds, bh_strategy='reflective', vh_strategy='invert', \
-        #     init_pos=init_pos)
+            # Set up bounds (min, max) are (0, 1)
+            pso_bounds = (np.zeros(len(p0_normed)), np.ones(len(p0_normed)))
 
 
-
-        # # Modify the residuals function so that it takes a list of arguments
-        # def fitResidualsListArguments(params, *args, **kwargs):
-        #     return [self.fitResiduals(param_line, *args, **kwargs) for param_line in params]
+            init_pos = None
 
 
-        # # Run PSO
-        # cost, pos = optimizer.optimize(fitResidualsListArguments, iters=10, fit_input_data=fit_input_data, \
-        #     param_string=param_string, const_original=const, mini_norm_handle=mini_norm_handle, \
-        #     mag_inv_weight=1/self.autofit_mag_weight, lag_inv_weight=1/self.autofit_lag_weight, verbose=False)
+            # If PSO local optimization is desired, create a tight cluster of particles around the initial
+            #   parameters
+            if self.autofit_method == "PSO local":
 
-        # print(cost, pos)
+                # Create particles in a tight Gaussian around the initial parameters
+                init_pos = np.random.normal(loc=p0_normed, scale=0.1+np.zeros_like(p0_normed), \
+                    size=(self.pso_particles - 1, len(p0_normed)))
+                init_pos[init_pos < 0] = 0
+                init_pos[init_pos > 1] = 1
 
-        # fit_params = pos
+                # Add manual fit to initial positions
+                init_pos = np.append(init_pos, np.array([p0_normed]), axis=0)
 
-        # ### ###
+
+            # Call instance of PSO with bounds argument
+            optimizer = ps.single.GlobalBestPSO(n_particles=self.pso_particles, dimensions=len(p0_normed), \
+                options=options, bounds=pso_bounds, bh_strategy='reflective', vh_strategy='invert', \
+                init_pos=init_pos)
+
+
+            # Run PSO
+            cost, pos = optimizer.optimize(fitResidualsListArguments, iters=self.pso_iterations, \
+                n_processes=mp.cpu_count() - 1, fit_input_data=fit_input_data, param_string=param_string, \
+                const_original=const, traj=self.traj, mini_norm_handle=mini_norm_handle, \
+                mag_inv_weight=1/self.autofit_mag_weight, lag_inv_weight=1/self.autofit_lag_weight, \
+                verbose=False)
+
+            print(cost, pos)
+
+            fit_params = pos
+
+            ### ###
 
 
 
@@ -2256,7 +2297,7 @@ class MetSimGUI(QMainWindow):
 
 
         # Init a Constants instance with fitted parameters
-        const_fit = self.extractConstantParams(const_original, fit_params, param_string, mini_norm_handle)
+        const_fit = extractConstantParams(const_original, fit_params, param_string, mini_norm_handle)
 
         # Assign fitted parameters and run the Simulation
         self.const = const_fit
