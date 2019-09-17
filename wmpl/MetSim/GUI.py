@@ -2068,6 +2068,10 @@ class MetSimGUI(QMainWindow):
     def autoFit(self):
         """ Run the auto fit procedure. """
 
+        # Read inputs
+        self.readInputBoxes()
+
+
         # Disable the fit button (have to force update by calling "repaint")
         self.autoFitButton.setStyleSheet("background-color: red")
         self.autoFitButton.setDisabled(True)
@@ -2219,6 +2223,8 @@ class MetSimGUI(QMainWindow):
 
 
 
+        print("Method:", self.autofit_method)
+
 
         if self.autofit_method == "Local":
 
@@ -2240,13 +2246,17 @@ class MetSimGUI(QMainWindow):
         # PSO optimization
         else:
 
+            print()
+            print("N particles:", self.pso_particles)
+            print("Iterations:", self.pso_iterations)
+
             ### pyswarms ###
 
             import pyswarms as ps
 
 
             # Set up hyperparameters
-            options = {'c1': 0.5, 'c2': 0.3, 'w':0.9}
+            options = {'c1': 0.5, 'c2': 0.7, 'w':0.9}
 
 
             # Set up bounds (min, max) are (0, 1)
