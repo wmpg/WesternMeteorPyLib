@@ -144,7 +144,7 @@ if __name__ == "__main__":
     arg_parser.add_argument('input_file', type=str, help='Path to the .pickle file.')
 
     arg_parser.add_argument('-a', '--onlyplot', \
-        help='Do not recompute the trajectory, just show the plots.', action="store_true")
+        help='Do not recompute the trajectory, just show and save the plots.', action="store_true")
 
     arg_parser.add_argument('-s', '--solver', metavar='SOLVER', help="""Trajectory solver to use. \n
         - 'original' - Monte Carlo solver
