@@ -164,7 +164,9 @@ class ObservedPoints(object):
 
         # Residuals from the fit
         self.h_residuals = None
+        self.h_res_rms = None
         self.v_residuals = None
+        self.v_res_rms = None
 
         # Calculated point to point velocities (in m/s)
         self.velocities = None
@@ -2181,6 +2183,10 @@ class Trajectory(object):
         # Initial state vector (minimization)
         self.state_vect_mini = None
 
+        # Radiant in ECi and equatorial coordinatrs (minimiziation)
+        self.radiant_eci_mini = None
+        self.radiant_eq_mini = None
+
         # Calculated initial velocity
         self.v_init = None
 
@@ -3691,6 +3697,13 @@ class Trajectory(object):
             show_plots: [bools] Show the plots on the screen. True by default.
 
         """
+
+        if output_dir is None:
+            output_dir = '.'
+
+        if file_name is None:
+            file_name = 'blank'
+            
 
         # Get the first reference time
         t0 = min([obs.time_data[0] for obs in self.observations])

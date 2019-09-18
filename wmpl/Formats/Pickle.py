@@ -44,7 +44,7 @@ def dumpAsEvFiles(dir_path, file_name):
 
 
 
-def solveTrajectoryPickle(dir_path, file_name, solver='original', **kwargs):
+def solveTrajectoryPickle(dir_path, file_name, only_plot=False, solver='original', **kwargs):
     """ Rerun the trajectory solver on the given trajectory pickle file. """
 
 
@@ -106,8 +106,21 @@ def solveTrajectoryPickle(dir_path, file_name, solver='original', **kwargs):
         print('Unrecognized solver:', solver)
 
 
-    # Run the trajectory solver
-    traj.run()
+
+    if only_plot:
+
+        # Disable saving plots
+        traj_p.save_results = False
+
+        # Show the plots
+        traj_p.savePlots(None, None, show_plots=True)
+
+
+    # Recompute the trajectory
+    else:
+        
+        # Run the trajectory solver
+        traj.run()
 
 
     return traj
@@ -128,6 +141,9 @@ if __name__ == "__main__":
         formatter_class=argparse.RawTextHelpFormatter)
 
     arg_parser.add_argument('input_file', type=str, help='Path to the .pickle file.')
+
+    arg_parser.add_argument('-a', '--onlyplot', \
+        help='Do not recompute the trajectory, just show the plots.', action="store_true")
 
     arg_parser.add_argument('-s', '--solver', metavar='SOLVER', help="""Trajectory solver to use. \n
         - 'original' - Monte Carlo solver
@@ -205,8 +221,8 @@ if __name__ == "__main__":
         sys.exit()
 
     # Run the solver
-    solveTrajectoryPickle(dir_path, file_name, solver=cml_args.solver, max_toffset=max_toffset, \
-        monte_carlo=(not cml_args.disablemc), mc_runs=cml_args.mcruns, geometric_uncert=cml_args.uncertgeom, \
-        gravity_correction=(not cml_args.disablegravity), plot_all_spatial_residuals=cml_args.plotallspatial,
-        plot_file_type=cml_args.imgformat, show_plots=(not cml_args.hideplots), v_init_part=velpart, \
-        v_init_ht=vinitht)
+    solveTrajectoryPickle(dir_path, file_name, only_plot=cml_args.onlyplot, solver=cml_args.solver, \
+        max_toffset=max_toffset, monte_carlo=(not cml_args.disablemc), mc_runs=cml_args.mcruns, \
+        geometric_uncert=cml_args.uncertgeom, gravity_correction=(not cml_args.disablegravity), \
+        plot_all_spatial_residuals=cml_args.plotallspatial, plot_file_type=cml_args.imgformat, \
+        show_plots=(not cml_args.hideplots), v_init_part=velpart, v_init_ht=vinitht)
