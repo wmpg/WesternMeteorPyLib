@@ -262,7 +262,7 @@ class OrbitPlotColorScheme(object):
 
 
 
-def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_equinox=True, save_plots=False, \
+def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_equinox=True, save_plots=False,\
     plot_path=None, plt_handle=None, color_scheme='dark', figsize=None, dpi=None, plot_file_type='.png', \
     **kwargs):
     """ Plot the given orbits in the Solar System. 
@@ -317,15 +317,8 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_eq
     if plt_handle is None:
 
         # Setup the plot
-        fig = plt.figure(dpi=dpi)
+        fig = plt.figure(figsize=(8, 8), dpi=dpi)
         ax = fig.gca(projection='3d', facecolor=cs.background)
-
-        # Set a constant aspect ratio
-        try:
-            ax.set_aspect('equal', adjustable='box')
-
-        except NotImplementedError:
-            print("Couldn't set 3D plot aspect ratio!")
 
         # Hide the axes
         ax.set_axis_off()
