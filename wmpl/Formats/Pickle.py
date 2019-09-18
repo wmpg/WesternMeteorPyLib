@@ -109,8 +109,9 @@ def solveTrajectoryPickle(dir_path, file_name, only_plot=False, solver='original
 
     if only_plot:
 
-        # Disable saving plots
-        traj_p.save_results = False
+        # Override plotting options with given options
+        traj_p.plot_all_spatial_residuals = kwargs["plot_all_spatial_residuals"]
+        traj_p.plot_file_type = kwargs["plot_file_type"]
 
         # Show the plots
         traj_p.savePlots(None, None, show_plots=True)

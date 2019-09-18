@@ -3948,14 +3948,15 @@ class Trajectory(object):
                     + obs.h_residuals[obs.ignore_list == 0]**2)
 
                 # Plot total residuals
-                plt.scatter(total_residuals, obs.meas_ht/1000, marker='o', s=4, \
+                plt.scatter(total_residuals, obs.meas_ht[obs.ignore_list == 0]/1000, marker='o', s=4, \
                     label='{:s}, RMSD = {:.2f} m'.format(str(obs.station_id), total_res_rms), zorder=3)
 
                 # Mark ignored points
                 if np.any(obs.ignore_list):
 
                     ignored_ht = obs.model_ht[obs.ignore_list > 0]
-                    ignored_tot_res = total_residuals[obs.ignore_list > 0]
+                    ignored_tot_res = np.sqrt(obs.v_residuals[obs.ignore_list > 0]**2 \
+                    + obs.h_residuals[obs.ignore_list > 0]**2)
 
                     plt.scatter(ignored_tot_res, ignored_ht/1000, facecolors='none', edgecolors='k', \
                         marker='o', zorder=3, s=20)
