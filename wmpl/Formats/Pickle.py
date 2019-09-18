@@ -114,7 +114,7 @@ def solveTrajectoryPickle(dir_path, file_name, only_plot=False, solver='original
         traj_p.plot_file_type = kwargs["plot_file_type"]
 
         # Show the plots
-        traj_p.savePlots(None, None, show_plots=True)
+        traj_p.savePlots(dir_path, traj_p.file_name, show_plots=kwargs["show_plots"])
 
 
     # Recompute the trajectory

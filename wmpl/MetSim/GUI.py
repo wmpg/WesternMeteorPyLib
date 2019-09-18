@@ -1319,24 +1319,32 @@ class MetSimGUI(QMainWindow):
         # Get the plot X limits
         x_min, x_max = plot_handle.canvas.axes.get_xlim()
 
+        # Get the plot Y limits
+        y_min, y_max = plot_handle.canvas.axes.get_ylim()
+
 
         # Generate array for horizontal line plotting
         x_arr = np.linspace(x_min, x_max, 10)
 
 
-        # Plot a line marking erosion beginning
-        plot_handle.canvas.axes.plot(x_arr, np.zeros_like(x_arr) + self.const.erosion_height_start/1000, \
-            linestyle='dashed', color='k', alpha=0.25)
+        # Plot the beginning only if it's inside the plot
+        if (self.const.erosion_height_start/1000 >= y_min) and (self.const.erosion_height_start/1000 \
+            <= y_max):
+            
+            # Plot a line marking erosion beginning
+            plot_handle.canvas.axes.plot(x_arr, np.zeros_like(x_arr) + self.const.erosion_height_start/1000, \
+                linestyle='dashed', color='k', alpha=0.25)
 
-        # Add the text about erosion begin
-        if plot_text:
-            plot_handle.canvas.axes.text(x_min, TEXT_LABEL_HT_PAD + self.const.erosion_height_start/1000, \
-                "Erosion beg", size=7, alpha=0.5)
+            # Add the text about erosion begin
+            if plot_text:
+                plot_handle.canvas.axes.text(x_min, TEXT_LABEL_HT_PAD + self.const.erosion_height_start/1000,\
+                    "Erosion beg", size=7, alpha=0.5)
 
 
 
-        # Only plot the erosion change if it's above the meteor end
-        if self.const.erosion_height_change > self.traj.rend_ele:
+        # Only plot the erosion change if it's above the meteor end and inside the plot
+        if (self.const.erosion_height_change > self.traj.rend_ele) and (self.const.erosion_height_change/1000\
+            >= y_min) and (self.const.erosion_height_change/1000 <= y_max):
 
             # Plot a line marking erosion change
             plot_handle.canvas.axes.plot(x_arr, np.zeros_like(x_arr) + self.const.erosion_height_change/1000,\
@@ -1352,13 +1360,16 @@ class MetSimGUI(QMainWindow):
         # Plot the disruption height
         if self.const.disruption_on and (self.const.disruption_height is not None):
 
-            plot_handle.canvas.axes.plot(x_arr, np.zeros_like(x_arr) + self.const.disruption_height/1000, \
-                linestyle='dotted', color='k', alpha=0.5)
+            # Check that the disruption height is inside the plot
+            if (self.const.disruption_height/1000 >= y_min) and (self.const.disruption_height/1000 <=y_max):
 
-            # Add the text about disruption
-            if plot_text:
-                plot_handle.canvas.axes.text(x_min, TEXT_LABEL_HT_PAD + self.const.disruption_height/1000, \
-                    "Disruption", size=7, alpha=0.5)
+                plot_handle.canvas.axes.plot(x_arr, np.zeros_like(x_arr) + self.const.disruption_height/1000,\
+                    linestyle='dotted', color='k', alpha=0.5)
+
+                # Add the text about disruption
+                if plot_text:
+                    plot_handle.canvas.axes.text(x_min, TEXT_LABEL_HT_PAD \
+                        + self.const.disruption_height/1000, "Disruption", size=7, alpha=0.5)
 
 
 
