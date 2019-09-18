@@ -21,14 +21,14 @@ if __name__ == "__main__":
 
 
 
-    ## CAMO ###
+    # ## CAMO ###
 
-    dir_path = "../SimulatedMeteors/CAMO/2012Geminids_1000"
+    # dir_path = "../SimulatedMeteors/CAMO/2012Geminids_1000"
 
-    solvers = ['planes', 'los', 'milig', 'mc', 'gural1', 'gural3']
-    solvers_plot_labels = ['IP', 'LoS', 'LoS-FHAV', 'Monte Carlo', 'MPF linear', 'MPF exp']
+    # solvers = ['planes', 'los', 'milig', 'mc', 'gural1', 'gural3']
+    # solvers_plot_labels = ['IP', 'LoS', 'LoS-FHAV', 'Monte Carlo', 'MPF linear', 'MPF exp']
 
-    ## ###
+    # ## ###
 
 
 
@@ -42,13 +42,13 @@ if __name__ == "__main__":
 
 
 
-    # ### SOMN ###
-    # dir_path = "../SimulatedMeteors/SOMN_sim_2station/2012Geminids_1000"
+    ### SOMN ###
+    dir_path = "../SimulatedMeteors/SOMN_sim_2station/2012Geminids_1000"
 
-    # solvers = ['planes', 'los', 'milig', 'mc', 'gural0', 'gural0fha', 'gural1', 'gural3']
-    # solvers_plot_labels = ['IP', 'LoS', 'LoS-FHAV', 'Monte Carlo', 'MPF const', 'MPF const-FHAV', 'MPF linear', 'MPF exp']
+    solvers = ['planes', 'los', 'milig', 'mc', 'gural0', 'gural0fha', 'gural1', 'gural3']
+    solvers_plot_labels = ['IP', 'LoS', 'LoS-FHAV', 'Monte Carlo', 'MPF const', 'MPF const-FHAV', 'MPF linear', 'MPF exp']
 
-    # ### ###
+    ### ###
 
 
 

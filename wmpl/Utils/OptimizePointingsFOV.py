@@ -257,6 +257,7 @@ def explorePointings(station_list, fixed_cameras, min_height, max_height, moving
             print('MAX OVERLAP:')
             print('Azim {:.2f} elev {:.2f} vol {:e}'.format(np.degrees(azims[vol_max]), np.degrees(elevs[vol_max]), vols[vol_max]))
 
+            plt.figure()
 
             plt.imshow(vols/1e9, extent=np.degrees([azim_centre_orig + np.min(d_range), azim_centre_orig + np.max(d_range), elev_centre_orig + np.max(d_range), \
                 elev_centre_orig + np.min(d_range)]))
