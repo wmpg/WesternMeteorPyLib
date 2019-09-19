@@ -506,26 +506,23 @@ def fitResiduals(params, fit_input_data, param_string, const_original, traj, min
         # print("{:.2f}, {:.2f}, {:.2f}, {:.0f}, {:.0f}".format(height, mag, mag_sim, lag, lag_sim))
 
 
-        # # Compute the magnitude residual weighted by the magnitude to lessen the influence of faint magnitudes
-        # #   We are choosing it to do this way so the fixed magnitude weight is a number one can grasp
-        # mag_res = 0
-        # if not np.isnan(mag):
-        #     mag_res = abs((mag - mag_sim)/mag_inv_weight)
-        #     mag_weight = 1/(2.512**mag)
-
-        # if np.isnan(mag_res):
-        #     mag_res = 10.0
-        #     mag_weight = 1.0
-
-        # Compute the magnitude residual in linear luminosity units
+        # Compute the magnitude residual 
+        mag_res = 0
         if not np.isnan(mag):
-            lum_obs = const.P_0m*10**(-0.4*mag)
-            lum_sim = const.P_0m*10**(-0.4*mag_sim)
-
-            mag_res = abs(lum_obs - lum_sim)*mag_weight
+            mag_res = abs((mag - mag_sim)*mag_weight)
 
         if np.isnan(mag_res):
-            mag_res = 1e6
+            mag_res = 10.0
+
+        # # Compute the magnitude residual in linear luminosity units
+        # if not np.isnan(mag):
+        #     lum_obs = const.P_0m*10**(-0.4*mag)
+        #     lum_sim = const.P_0m*10**(-0.4*mag_sim)
+
+        #     mag_res = abs(lum_obs - lum_sim)*mag_weight
+
+        # if np.isnan(mag_res):
+        #     mag_res = 1e6
 
 
         # Compute the length residual
@@ -686,7 +683,7 @@ class MetSimGUI(QMainWindow):
         self.pso_iterations = 10
         self.pso_particles = 100
 
-        self.autofit_mag_weight = 0.1
+        self.autofit_mag_weight = 10.0
         self.autofit_lag_weight = 1.0
 
         ### ###
