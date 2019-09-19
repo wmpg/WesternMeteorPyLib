@@ -3716,11 +3716,11 @@ class Trajectory(object):
 
             # Plot vertical residuals
             plt.scatter(obs.time_data, obs.v_residuals, c='red', \
-                label='Vertical, RMSD = {:.2f} m'.format(obs.v_res_rms), zorder=3, s=2)
+                label='Vertical, RMSD = {:.2f} m'.format(obs.v_res_rms), zorder=3, s=4, marker='o')
 
             # Plot horizontal residuals
             plt.scatter(obs.time_data, obs.h_residuals, c='b', \
-                label='Horizontal, RMSD = {:.2f} m'.format(obs.h_res_rms), zorder=3, s=2)
+                label='Horizontal, RMSD = {:.2f} m'.format(obs.h_res_rms), zorder=3, marker='+')
 
             # Mark ignored points
             if np.any(obs.ignore_list):
@@ -3922,7 +3922,8 @@ class Trajectory(object):
 
 
             if self.save_results:
-                savePlot(plt, file_name + '_total_spatial_residuals_length.' + self.plot_file_type, output_dir)
+                savePlot(plt, file_name + '_total_spatial_residuals_length.' + self.plot_file_type, \
+                    output_dir)
 
             if show_plots:
                 plt.show()
@@ -3938,25 +3939,28 @@ class Trajectory(object):
             ### PLOT ALL TOTAL SPATIAL RESIDUALS VS HEIGHT ###
             ##################################################################################################
 
-            for obs in self.observations:
+            for i, obs in enumerate(self.observations):
+
+                marker, size_multiplier = markers[i%len(markers)]
 
                 # Calculate root mean square of the total residuals
                 total_res_rms = np.sqrt(obs.v_res_rms**2 + obs.h_res_rms**2)
 
-                # Compute total residuals
-                total_residuals = np.sqrt(obs.v_residuals[obs.ignore_list == 0]**2 \
-                    + obs.h_residuals[obs.ignore_list == 0]**2)
+                # Compute total residuals, take the signs from vertical residuals
+                tot_res = np.sign(obs.v_residuals)*np.hypot(obs.v_residuals, obs.h_residuals)
 
                 # Plot total residuals
-                plt.scatter(total_residuals, obs.meas_ht[obs.ignore_list == 0]/1000, marker='o', s=4, \
-                    label='{:s}, RMSD = {:.2f} m'.format(str(obs.station_id), total_res_rms), zorder=3)
+                plt.scatter(tot_res, obs.meas_ht/1000, marker=marker, \
+                    s=10*size_multiplier, label='{:s}, RMSD = {:.2f} m'.format(str(obs.station_id), \
+                    total_res_rms), zorder=3)
 
                 # Mark ignored points
                 if np.any(obs.ignore_list):
 
                     ignored_ht = obs.model_ht[obs.ignore_list > 0]
-                    ignored_tot_res = np.sqrt(obs.v_residuals[obs.ignore_list > 0]**2 \
-                    + obs.h_residuals[obs.ignore_list > 0]**2)
+                    ignored_tot_res = np.sign(obs.v_residuals[obs.ignore_list > 0])\
+                        *np.hypot(obs.v_residuals[obs.ignore_list > 0], obs.h_residuals[obs.ignore_list > 0])
+    
 
                     plt.scatter(ignored_tot_res, ignored_ht/1000, facecolors='none', edgecolors='k', \
                         marker='o', zorder=3, s=20)
@@ -3972,8 +3976,7 @@ class Trajectory(object):
 
             # Set the residual limits to +/-10m if they are smaller than that
             if np.max(np.abs(plt.gca().get_xlim())) < 10:
-                plt.xlim([-10, 10])
-
+                plt.gca().set_xlim([-10, 10])
 
             if self.save_results:
                 savePlot(plt, file_name + '_all_spatial_total_residuals_height.' + self.plot_file_type, \
