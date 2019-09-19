@@ -448,7 +448,7 @@ def extractConstantParams(const_original, params, param_string, mini_norm_handle
 
 
 def fitResiduals(params, fit_input_data, param_string, const_original, traj, mini_norm_handle, 
-    mag_inv_weight=0.1, lag_inv_weight=10.0, verbose=True, gui_handle=None):
+    mag_weight=10.0, lag_weight=1.0, verbose=True, gui_handle=None):
     """ Compute the fit residual. """
 
     if verbose:
@@ -491,7 +491,6 @@ def fitResiduals(params, fit_input_data, param_string, const_original, traj, min
 
     # Go through every height point and compute the residual contribution
     total_mag_residual = 0
-    total_mag_weight = 0
     total_lag_residual = 0
     for entry in fit_input_data:
 
@@ -507,32 +506,41 @@ def fitResiduals(params, fit_input_data, param_string, const_original, traj, min
         # print("{:.2f}, {:.2f}, {:.2f}, {:.0f}, {:.0f}".format(height, mag, mag_sim, lag, lag_sim))
 
 
-        # Compute the magnitude residual weighted by the magnitude to lessen the influence of faint magnitudes
-        #   We are choosing it to do this way so the fixed magnitude weight is a number one can grasp
-        mag_res = 0
+        # # Compute the magnitude residual weighted by the magnitude to lessen the influence of faint magnitudes
+        # #   We are choosing it to do this way so the fixed magnitude weight is a number one can grasp
+        # mag_res = 0
+        # if not np.isnan(mag):
+        #     mag_res = abs((mag - mag_sim)/mag_inv_weight)
+        #     mag_weight = 1/(2.512**mag)
+
+        # if np.isnan(mag_res):
+        #     mag_res = 10.0
+        #     mag_weight = 1.0
+
+        # Compute the magnitude residual in linear luminosity units
         if not np.isnan(mag):
-            mag_res = abs((mag - mag_sim)/mag_inv_weight)
-            mag_weight = 1/(2.512**mag)
+            lum_obs = const.P_0m*10**(-0.4*mag)
+            lum_sim = const.P_0m*10**(-0.4*mag_sim)
+
+            mag_res = abs(lum_obs - lum_sim)*mag_weight
 
         if np.isnan(mag_res):
-            mag_res = 10.0
-            mag_weight = 1.0
+            mag_res = 1e6
 
 
         # Compute the length residual
         lag_res = 0
         if not np.isnan(lag):
-            lag_res = (abs((lag - lag_sim)/lag_inv_weight))
+            lag_res = abs((lag - lag_sim)*lag_weight)
 
         if np.isnan(lag_res):
             lag_res = 10000
 
 
-        total_mag_residual += mag_weight*mag_res
-        total_mag_weight += mag_weight
+        total_mag_residual += mag_res
         total_lag_residual += lag_res
 
-    total_residual = total_mag_residual/total_mag_weight/mag_point_count + total_lag_residual/lag_point_count
+    total_residual = total_mag_residual/mag_point_count + total_lag_residual/lag_point_count
 
 
     if verbose:
@@ -678,8 +686,8 @@ class MetSimGUI(QMainWindow):
         self.pso_iterations = 10
         self.pso_particles = 100
 
-        self.autofit_mag_weight = 10.0
-        self.autofit_lag_weight = 0.1
+        self.autofit_mag_weight = 0.1
+        self.autofit_lag_weight = 1.0
 
         ### ###
 
@@ -2392,8 +2400,8 @@ class MetSimGUI(QMainWindow):
 
         # Print residual value
         print("Starting residual value: {:.5f}".format(fitResiduals(p0_normed, fit_input_data, \
-            param_string, const, self.traj, mini_norm_handle, mag_inv_weight=1/self.autofit_mag_weight, \
-            lag_inv_weight=1/self.autofit_lag_weight, verbose=False)))
+            param_string, const, self.traj, mini_norm_handle, mag_weight=self.autofit_mag_weight, \
+            lag_weight=self.autofit_lag_weight, verbose=False)))
         print()
 
 
@@ -2407,7 +2415,7 @@ class MetSimGUI(QMainWindow):
 
             # Run the fit
             res = scipy.optimize.minimize(fitResiduals, p0_normed, args=(fit_input_data, param_string, \
-                const, self.traj, mini_norm_handle, 1/self.autofit_mag_weight, 1/self.autofit_lag_weight, \
+                const, self.traj, mini_norm_handle, self.autofit_mag_weight, self.autofit_lag_weight, \
                 True, self), bounds=bounds_normed, tol=0.001)
 
             print(res)
@@ -2465,7 +2473,7 @@ class MetSimGUI(QMainWindow):
             cost, pos = optimizer.optimize(fitResidualsListArguments, iters=self.pso_iterations, \
                 n_processes=mp.cpu_count() - 1, fit_input_data=fit_input_data, param_string=param_string, \
                 const_original=const, traj=self.traj, mini_norm_handle=mini_norm_handle, \
-                mag_inv_weight=1/self.autofit_mag_weight, lag_inv_weight=1/self.autofit_lag_weight, \
+                mag_weight=self.autofit_mag_weight, lag_weight=self.autofit_lag_weight, \
                 verbose=False)
 
             print(cost, pos)
