@@ -507,11 +507,12 @@ def fitResiduals(params, fit_input_data, param_string, const_original, traj, min
         # print("{:.2f}, {:.2f}, {:.2f}, {:.0f}, {:.0f}".format(height, mag, mag_sim, lag, lag_sim))
 
 
-        # Compute the magnitude residual weighted by the magnitude to lessen the influence of fain magnitudes
+        # Compute the magnitude residual weighted by the magnitude to lessen the influence of faint magnitudes
+        #   We are choosing it to do this way so the fixed magnitude weight is a number one can grasp
         mag_res = 0
         if not np.isnan(mag):
-            mag_res = (((mag - mag_sim)/mag_inv_weight)**2)/mag_point_count
-            mag_weight = 1/2.512**mag
+            mag_res = abs((mag - mag_sim)/mag_inv_weight)
+            mag_weight = 1/(2.512**mag)
 
         if np.isnan(mag_res):
             mag_res = 10.0
@@ -521,7 +522,7 @@ def fitResiduals(params, fit_input_data, param_string, const_original, traj, min
         # Compute the length residual
         lag_res = 0
         if not np.isnan(lag):
-            lag_res = (((lag - lag_sim)/lag_inv_weight)**2)/lag_point_count
+            lag_res = (abs((lag - lag_sim)/lag_inv_weight))
 
         if np.isnan(lag_res):
             lag_res = 10000
@@ -531,7 +532,7 @@ def fitResiduals(params, fit_input_data, param_string, const_original, traj, min
         total_mag_weight += mag_weight
         total_lag_residual += lag_res
 
-    total_residual = total_mag_residual/total_mag_weight + total_lag_residual
+    total_residual = total_mag_residual/total_mag_weight/mag_point_count + total_lag_residual/lag_point_count
 
 
     if verbose:
@@ -2259,6 +2260,9 @@ class MetSimGUI(QMainWindow):
         # Store original constants
         const_original = copy.deepcopy(self.const)
 
+        # Save current simulation results
+        simulation_results_prefit = copy.deepcopy(self.simulation_results)
+
         ### Construct input data matrix ###
 
         # Construct 2D array of height vs. absolute magnitude vs. lag
@@ -2327,7 +2331,7 @@ class MetSimGUI(QMainWindow):
 
         # Select meteoroid parameters
         meteoroid_params = [const.m_init, const.v_init, const.rho, const.sigma]
-        meteoroid_bounds = [[0.5*const.m_init, 2*const.m_init],
+        meteoroid_bounds = [[0.1*const.m_init, 2*const.m_init],
                             [0.9*const.v_init, 1.1*const.v_init],
                             [100, 6000],
                             [0.25*const.sigma, 4*const.sigma]]
@@ -2484,6 +2488,10 @@ class MetSimGUI(QMainWindow):
         self.const = const_fit
         self.updateInputBoxes()
         self.runSimulationGUI()
+
+        # Store the simulation results prior to auto fit as the previous simulation results
+        self.const_prev = const_original
+        self.simulation_results_prev = simulation_results_prefit
 
 
 
