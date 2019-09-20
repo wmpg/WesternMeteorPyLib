@@ -683,7 +683,7 @@ class MetSimGUI(QMainWindow):
         self.pso_iterations = 10
         self.pso_particles = 100
 
-        self.autofit_mag_weight = 10.0
+        self.autofit_mag_weight = 0.1
         self.autofit_lag_weight = 1.0
 
         ### ###

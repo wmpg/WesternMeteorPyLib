@@ -249,6 +249,7 @@ class Fragment(object):
 
 
 
+
 class Wake(object):
     def __init__(self, length_array, wake_luminosity_profile, length_points, luminosity_points):
         """ Container for the evaluated wake. """
@@ -257,132 +258,6 @@ class Wake(object):
         self.wake_luminosity_profile = wake_luminosity_profile
         self.length_points = np.array(length_points)
         self.luminosity_points = np.array(luminosity_points)
-
-
-
-
-# def massLoss(K, sigma, m, rho_atm, v):
-#     """ Mass loss differential equation, the result is giving dm/dt.
-
-#     Arguments:
-#         K: [float] Shape-density coefficient (m^2/kg^(2/3)).
-#         sigma: [float] Ablation coefficient (s^2/m^2).
-#         m: [float] Mass (kg).
-#         rho_atm: [float] Atmosphere density (kg/m^3).
-#         v: [float] Velocity (m/S).
-
-#     Return:
-#         dm/dt: [float] Mass loss in kg/s.
-#     """
-
-#     mass_loss = -K*sigma*m**(2/3.0)*rho_atm*v**3
-
-#     # if np.isnan(mass_loss):
-#     #     print(K, sigma, m, rho_atm, v)
-#     #     raise ValueError("Nan encounterted")
-
-#     return mass_loss
-
-
-
-# def massLossRK4(frag, const, rho_atm, sigma):
-#     """ Computes the mass loss using the 4th order Runge-Kutta method. 
-    
-#     Arguments:
-#         frag: [object] Fragment instance.
-#         cont: [object] Constants instance.
-#         rho_atm: [float] Atmosphere density (kg/m^3).
-#         sigma: [float] Ablation coefficient (s^2/m^2).
-
-#     Return:
-#         dm/dt: [float] Mass loss in kg/s.
-#     """
-
-#     # Compute the mass loss (RK4)
-#     # Check instances when there is no more mass to ablate
-
-#     mk1 = const.dt*massLoss(frag.K, sigma, frag.m,            rho_atm, frag.v)
-
-#     if -mk1/2 > frag.m:
-#         mk1 = -frag.m*2
-
-#     mk2 = const.dt*massLoss(frag.K, sigma, frag.m + mk1/2.0,  rho_atm, frag.v)
-
-#     if -mk2/2 > frag.m:
-#         mk2 = -frag.m*2
-
-#     mk3 = const.dt*massLoss(frag.K, sigma, frag.m + mk2/2.0,  rho_atm, frag.v)
-
-#     if -mk3 > frag.m:
-#         mk3 = -frag.m
-
-#     mk4 = const.dt*massLoss(frag.K, sigma, frag.m + mk3,      rho_atm, frag.v)
-
-
-#     mass_loss_total = mk1/6.0 + mk2/3.0 + mk3/3.0 + mk4/6.0
-
-#     return mass_loss_total
-
-
-
-
-# def deceleration(K, m, rho_atm, v):
-#     """ Computes the deceleration derivative.     
-
-#     Arguments:
-#         K: [float] Shape-density coefficient (m^2/kg^(2/3)).
-#         m: [float] Mass (kg).
-#         rho_atm: [float] Atmosphere density (kg/m^3).
-#         v: [float] Velocity (m/S).
-
-#     Return:
-#         dv/dt: [float] Deceleration.
-#     """
-
-#     return -K*m**(-1/3.0)*rho_atm*v**2
-
-
-
-
-# def luminousEfficiency(vel):
-#     """ Compute the luminous efficienty in percent for the given velocity. 
-    
-#     Arguments:
-#         vel: [float] Velocity (m/s).
-
-#     Return:
-#         tau: [float] Luminous efficiency (ratio).
-
-#     """
-
-#     return 0.7/100
-
-
-
-# def atmDensity(h, const):
-#     """ Calculates the atmospheric density in kg/m^3. 
-    
-#     Arguments:
-#         h: [float] Height in meters.
-
-#     Return:
-#         [float] Atmosphere density at height h (kg/m^3)
-
-#     """
-
-#     # # If the atmosphere dentiy interpolation is present, use it as the source of atm. density
-#     # if const.atm_density_interp is not None:
-#     #     return const.atm_density_interp(h)
-
-#     # # Otherwise, use the polynomial fit (WARNING: the fit is not as good as the interpolation!!!)
-#     # else:
-
-#     dens_co = const.dens_co
-
-#     rho_a = (10**(dens_co[0] + dens_co[1]*h/1000.0 + dens_co[2]*(h/1000)**2 + dens_co[3]*(h/1000)**3 \
-#         + dens_co[4]*(h/1000)**4 + dens_co[5]*(h/1000)**5))*1000
-
-#     return rho_a
 
 
 
@@ -607,7 +482,8 @@ def ablateAll(fragments, const, compute_wake=False):
         frag.h = frag.h + frag.vv*const.dt
 
         # Compute ablated luminosity (including the deceleration term) for one fragment/grain
-        lum = -luminousEfficiency(frag.v)*((mass_loss_ablation/const.dt*frag.v**2)/2 - frag.m*frag.v*deceleration_total)
+        lum = -luminousEfficiency(frag.v)*((mass_loss_ablation/const.dt*frag.v**2)/2 \
+            - frag.m*frag.v*deceleration_total)
         #lum = -luminousEfficiency(frag.v)*((mass_loss_ablation/const.dt*frag.v**2)/2)
 
         # Compute the total luminosity
