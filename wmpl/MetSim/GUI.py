@@ -506,23 +506,23 @@ def fitResiduals(params, fit_input_data, param_string, const_original, traj, min
         # print("{:.2f}, {:.2f}, {:.2f}, {:.0f}, {:.0f}".format(height, mag, mag_sim, lag, lag_sim))
 
 
-        # Compute the magnitude residual 
-        mag_res = 0
-        if not np.isnan(mag):
-            mag_res = abs((mag - mag_sim)*mag_weight)
-
-        if np.isnan(mag_res):
-            mag_res = 10.0
-
-        # # Compute the magnitude residual in linear luminosity units
+        # # Compute the magnitude residual 
+        # mag_res = 0
         # if not np.isnan(mag):
-        #     lum_obs = const.P_0m*10**(-0.4*mag)
-        #     lum_sim = const.P_0m*10**(-0.4*mag_sim)
-
-        #     mag_res = abs(lum_obs - lum_sim)*mag_weight
+        #     mag_res = abs((mag - mag_sim)*mag_weight)
 
         # if np.isnan(mag_res):
-        #     mag_res = 1e6
+        #     mag_res = 10.0
+
+        # Compute the magnitude residual in linear luminosity units
+        if not np.isnan(mag):
+            lum_obs = const.P_0m*10**(-0.4*mag)
+            lum_sim = const.P_0m*10**(-0.4*mag_sim)
+
+            mag_res = abs(lum_obs - lum_sim)*mag_weight
+
+        if np.isnan(mag_res):
+            mag_res = 1e6
 
 
         # Compute the length residual
