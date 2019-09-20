@@ -522,7 +522,7 @@ def fitResiduals(params, fit_input_data, param_string, const_original, traj, min
             mag_res = mag_weight*(lum_obs - lum_sim)**2
 
         if np.isnan(mag_res):
-            mag_res = 1e6
+            mag_res = 1e6**2
 
 
         # Compute the length residual
@@ -531,7 +531,7 @@ def fitResiduals(params, fit_input_data, param_string, const_original, traj, min
             lag_res = lag_weight*(lag - lag_sim)**2
 
         if np.isnan(lag_res):
-            lag_res = 10000
+            lag_res = 10000**2
 
 
         total_mag_residual += mag_res
