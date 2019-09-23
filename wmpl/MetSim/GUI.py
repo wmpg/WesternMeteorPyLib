@@ -2356,9 +2356,9 @@ class MetSimGUI(QMainWindow):
                               [0.0, 5.0/1e6],
                               [70000, 130000],
                               [0.0, 5.0/1e6],
-                              [1.0, 4.0],
-                              [1e-12, 1e-7],
-                              [1e-12, 1e-7]]
+                              [1.0, 3.0],
+                              [1e-12, 1e-9],
+                              [1e-11, 1e-7]]
 
             p0 += erosion_params
             bounds += erosion_bounds
@@ -2375,7 +2375,7 @@ class MetSimGUI(QMainWindow):
 
             disruption_bounds = [[0.1*const.compressive_strength, 10*const.compressive_strength],
                                  [0.0, 1.0/1e6],
-                                 [1.0, 4.0],
+                                 [1.0, 3.0],
                                  [0.01, 50.0],
                                  [0.1, 80.0],
                                  [0.0, 100.0]]
