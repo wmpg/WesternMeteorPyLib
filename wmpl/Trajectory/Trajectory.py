@@ -101,6 +101,7 @@ class ObservedPoints(object):
         self.time_data = time_data
 
 
+
         self.ignore_station = ignore_station
 
         # Set all points to be ignored if the station is ignored
@@ -1141,6 +1142,7 @@ def timingResiduals(params, observations, t_ref_station, weights=None, ret_stdde
         for obs in observations:
             if obs.station_id not in confirmed_overlaps:
                 obs.ignore_station = True
+                obs.ignore_list = np.ones(len(obs.time_data), dtype=np.uint8)
 
 
     # If no points were compared, return infinite
@@ -2635,8 +2637,10 @@ class Trajectory(object):
 
 
         # Get the time and lag points from all sites
-        time_all = np.hstack([obs.time_data for obs in self.observations])
-        lag_all = np.hstack([obs.lag for obs in self.observations])
+        time_all = np.hstack([obs.time_data[obs.ignore_list == 0] for obs in self.observations \
+            if not obs.ignore_station])
+        lag_all = np.hstack([obs.lag[obs.ignore_list == 0] for obs in self.observations \
+            if not obs.ignore_station])
         time_lag = np.c_[time_all, lag_all]
 
         # Sort by time
@@ -2703,9 +2707,9 @@ class Trajectory(object):
         # difference for the reference site is always 0)
         p0 = np.zeros(shape=(self.station_count - 1))
 
-        # Set the time reference station to be the one with the most used points
-        obs_points = [obs.kmeas for obs in self.observations]
-        self.t_ref_station = obs_points.index(max(obs_points))
+        # # Set the time reference station to be the one with the most used points
+        # obs_points = [obs.kmeas for obs in self.observations]
+        # self.t_ref_station = obs_points.index(max(obs_points))
 
 
         if self.verbose:
@@ -3575,7 +3579,39 @@ class Trajectory(object):
         out_str += "------\n"
 
 
-        out_str += " No, Station ID,  Ignore,  Time (s),                   JD,     meas1,     meas2, Azim +E of due N (deg), Alt (deg), Azim line (deg), Alt line (deg), RA obs (deg), Dec obs (deg), RA line (deg), Dec line (deg),       X (m),       Y (m),       Z (m), Latitude (deg), Longitude (deg), Height (m),  Range (m), Length (m),  Lag (m), Vel (m/s), Vel prev avg (m/s), H res (m), V res (m), Ang res (asec), AppMag, AbsMag\n"
+        out_str += " No, "
+        out_str += "Station ID, "
+        out_str += " Ignore, "
+        out_str += " Time (s), "
+        out_str += "                  JD, "
+        out_str += "    meas1, "
+        out_str += "    meas2, "
+        out_str += "Azim +E of due N (deg), "
+        out_str += "Alt (deg), "
+        out_str += "Azim line (deg), "
+        out_str += "Alt line (deg), "
+        out_str += "RA obs (deg), "
+        out_str += "Dec obs (deg), "
+        out_str += "RA line (deg), "
+        out_str += "Dec line (deg), "
+        out_str += "      X (m), "
+        out_str += "      Y (m), "
+        out_str += "      Z (m), "
+        out_str += "Latitude (deg), "
+        out_str += "Longitude (deg), "
+        out_str += "Height (m), "
+        out_str += " Range (m), "
+        out_str += "Length (m), "
+        out_str += "State vect dist (m), "
+        out_str += " Lag (m), "
+        out_str += "Vel (m/s), "
+        out_str += "Vel prev avg (m/s), "
+        out_str += "H res (m), "
+        out_str += "V res (m), "
+        out_str += "Ang res (asec), "
+        out_str += "AppMag, "
+        out_str += "AbsMag"
+        out_str += "\n"
 
         # Go through observation from all stations
         for obs in self.observations:
@@ -3619,6 +3655,7 @@ class Trajectory(object):
                 point_info.append("{:10.2f}".format(obs.model_range[i]))
 
                 point_info.append("{:10.2f}".format(obs.length[i]))
+                point_info.append("{:19.2f}".format(obs.state_vect_dist[i]))
                 point_info.append("{:8.2f}".format(obs.lag[i]))
 
                 point_info.append("{:9.2f}".format(obs.velocities[i]))
@@ -4805,7 +4842,6 @@ class Trajectory(object):
                 continue
             
             if obs.time_data[0] == 0.0:
-
                 self.t_ref_station = i
                 break
 

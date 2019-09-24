@@ -68,7 +68,7 @@ def solveTrajectoryPickle(dir_path, file_name, only_plot=False, solver='original
 
         # Reinitialize the trajectory solver
         traj = Trajectory(traj_p.jdt_ref, output_dir=dir_path, max_toffset=max_toffset, \
-            meastype=traj_p.meastype, **kwargs)
+            meastype=2, **kwargs)
 
 
         # Fill the observations
@@ -82,8 +82,9 @@ def solveTrajectoryPickle(dir_path, file_name, only_plot=False, solver='original
                 excluded_time = None
 
 
-            traj.infillTrajectory(obs.meas1, obs.meas2, obs.time_data, obs.lat, obs.lon, obs.ele, 
-                station_id=obs.station_id, excluded_time=excluded_time, ignore_list=obs.ignore_list)
+            traj.infillTrajectory(obs.azim_data, obs.elev_data, obs.time_data, obs.lat, obs.lon, obs.ele, \
+                station_id=obs.station_id, excluded_time=excluded_time, ignore_list=obs.ignore_list, \
+                magnitudes=obs.magnitudes)
 
 
     elif solver == 'gural':
@@ -93,13 +94,13 @@ def solveTrajectoryPickle(dir_path, file_name, only_plot=False, solver='original
         #     meastype=traj_p.meastype, output_dir=dir_path)
 
         traj = GuralTrajectory(len(traj_p.observations), traj_p.jdt_ref, velmodel=3, \
-            max_toffset=traj_p.max_toffset, meastype=traj_p.meastype, output_dir=dir_path, verbose=True)
+            max_toffset=traj_p.max_toffset, meastype=2, output_dir=dir_path, verbose=True)
 
 
         # Fill the observations
         for obs in traj_p.observations:
 
-            traj.infillTrajectory(obs.meas1, obs.meas2, obs.time_data, obs.lat, obs.lon, obs.ele)
+            traj.infillTrajectory(obs.azim_data, obs.elev_data, obs.time_data, obs.lat, obs.lon, obs.ele)
 
 
     else:
@@ -199,7 +200,6 @@ if __name__ == "__main__":
     ### Parse command line arguments ###
 
     max_toffset = None
-    print(cml_args.maxtoffset)
     if cml_args.maxtoffset:
         max_toffset = cml_args.maxtoffset[0]
 
