@@ -101,6 +101,21 @@ class TrajectoryConstraints(object):
         ### ###
 
 
+        ### Trajectory filters ###
+        ### These filter will be applied after the trajectory has been computed
+
+        # It will remove all stations with residuals larger than this fixed amount in arc seconds
+        self.max_arcsec_err = 180.0
+
+
+        # Bad station filter. If there are 3 or more stations, it will remove those that have angular 
+        #   residuals <bad_station_obs_ang_limit> times larger than the mean of all other stations
+        self.bad_station_obs_ang_limit = 2.0
+
+
+        ### ###
+
+
 
 class TrajectoryCorrelator(object):
     def __init__(self, data_handle, traj_constraints, v_init_part, data_in_j2000=True):
@@ -680,7 +695,59 @@ class TrajectoryCorrelator(object):
                 print("Trajectory estimation failed!")
                 continue
 
-            # use the best trajectory solution
+
+
+            ### Check for bad observations and rerun the solution if necessary ###
+
+            # Perform three passes of rejections to weed out all bad stations
+            for _ in range(3):
+
+                # a) Reject all observations which have angular residuals <bad_station_obs_ang_limit> times
+                #   larger than the median of all other observations
+                # b) Reject all observations with higher residuals than the fixed limit
+                any_ignored_stations = False
+                for i, obs in enumerate(traj.observations):
+
+                    if obs.ignore_station:
+                        continue
+
+                    # Compute the median angular uncertainty of all other stations
+                    ang_res_list = [obs.ang_res_std for j, obs in \
+                        enumerate(traj.observations) if (i != j) and not obs.ignore_station]
+
+                    if len(ang_res_list) == 0:
+                        break
+
+                    ang_res_median = np.median(ang_res_list)
+
+                    # Check if the current observations is outside the limits
+                    if (obs.ang_res_std > ang_res_median*self.traj_constraints.bad_station_obs_ang_limit) \
+                        or (obs.ang_res_std > np.radians(self.traj_constraints.max_arcsec_err/3600)):
+
+                        # Ignore the station
+                        traj.observations[i].ignore_station = True
+                        traj.observations[i].ignore_list = np.ones(len(obs.time_data), dtype=np.uint8)
+                        any_ignored_stations = True
+
+                        print("Ignoring station:", obs.station_id)
+
+
+            # If there are less than 2 stations that are not ignored, skip this solution
+            if len([obs for obs in traj.observations if not obs.ignore_station]) < 2:
+                print("Skipping trajectory, not enough good observations...")
+                continue
+
+            # If there are any ignored stations, rerun the solution
+            if any_ignored_stations:
+
+                print("Rerunning the trajectory solution...")
+
+                traj.run()
+
+
+            ### ###
+
+            # Use the best trajectory solution
             traj = traj_status
 
             # If the orbits couldn't be computed, skip saving the data files
