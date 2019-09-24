@@ -11,6 +11,7 @@ import copy
 import sys
 import os
 import datetime
+import pickle
 from operator import attrgetter
 
 import numpy as np
@@ -3686,7 +3687,7 @@ class Trajectory(object):
 
 
 
-    def savePlots(self, output_dir, file_name, show_plots=True):
+    def savePlots(self, output_dir, file_name, show_plots=True, ret_figs=False):
         """ Show plots of the estimated trajectory. 
     
         Arguments:
@@ -3695,6 +3696,14 @@ class Trajectory(object):
 
         Keyword_arguments:
             show_plots: [bools] Show the plots on the screen. True by default.
+            ret_figs: [bool] If True, it will return a dictionary of figure handles for every plot. It will
+                override the show_plots and set them to False, and it will not save any plots.
+
+        Return:
+            fig_pickle_dict: [dict] Dictionary of pickled figure handles for every plot. To unpickle the
+                figure objects, run:
+                    fig = pickle.loads(fig_pickle_dict[key])
+                where key is the dictionary key, e.g. "lags_all".
 
         """
 
@@ -3703,6 +3712,17 @@ class Trajectory(object):
 
         if file_name is None:
             file_name = 'blank'
+
+
+        # Dictionary which will hold figure handles for every plot
+        fig_pickle_dict = {}
+
+        # Override the status of saving commands if the figures should be returned
+        save_results_prev_status = self.save_results
+        if ret_figs:
+            self.save_results = False
+            show_plots = False
+
             
 
         # Get the first reference time
@@ -3746,6 +3766,12 @@ class Trajectory(object):
             # Set the residual limits to +/-10m if they are smaller than that
             if (np.max(np.abs(obs.v_residuals)) < 10) and (np.max(np.abs(obs.h_residuals)) < 10):
                 plt.ylim([-10, 10])
+
+
+            # Pickle the figure
+            if ret_figs:
+                fig_pickle_dict["spatial_residuals_{:s}".format(str(obs.station_id))] \
+                    = pickle.dumps(plt.gcf(), protocol=2)
 
 
             if self.save_results:
@@ -3806,6 +3832,9 @@ class Trajectory(object):
             if np.max(np.abs(plt.gca().get_ylim())) < 10:
                 plt.ylim([-10, 10])
 
+            # Pickle the figure
+            if ret_figs:
+                fig_pickle_dict["all_spatial_residuals"] = pickle.dumps(plt.gcf(), protocol=2)
 
             if self.save_results:
                 savePlot(plt, file_name + '_all_spatial_residuals.' + self.plot_file_type, output_dir)
@@ -3860,6 +3889,9 @@ class Trajectory(object):
             if np.max(np.abs(plt.gca().get_ylim())) < 10:
                 plt.ylim([-10, 10])
 
+            # Pickle the figure
+            if ret_figs:
+                fig_pickle_dict["all_spatial_residuals_length"] = pickle.dumps(plt.gcf(), protocol=2)
 
             if self.save_results:
                 savePlot(plt, file_name + '_all_spatial_residuals_length.' + self.plot_file_type, output_dir)
@@ -3920,6 +3952,9 @@ class Trajectory(object):
             if np.max(np.abs(plt.gca().get_ylim())) < 10:
                 plt.ylim([-10, 10])
 
+            # Pickle the figure
+            if ret_figs:
+                fig_pickle_dict["total_spatial_residuals_length"] = pickle.dumps(plt.gcf(), protocol=2)
 
             if self.save_results:
                 savePlot(plt, file_name + '_total_spatial_residuals_length.' + self.plot_file_type, \
@@ -3977,6 +4012,10 @@ class Trajectory(object):
             # Set the residual limits to +/-10m if they are smaller than that
             if np.max(np.abs(plt.gca().get_xlim())) < 10:
                 plt.gca().set_xlim([-10, 10])
+
+            # Pickle the figure
+            if ret_figs:
+                fig_pickle_dict["all_spatial_total_residuals_height"] = pickle.dumps(plt.gcf(), protocol=2)
 
             if self.save_results:
                 savePlot(plt, file_name + '_all_spatial_total_residuals_height.' + self.plot_file_type, \
@@ -4101,6 +4140,10 @@ class Trajectory(object):
         plt.grid()
         plt.gca().invert_yaxis()
 
+        # Pickle the figure
+        if ret_figs:
+            fig_pickle_dict["lags_all"] = pickle.dumps(plt.gcf(), protocol=2)
+
         if self.save_results:
             savePlot(plt, file_name + '_lags_all.' + self.plot_file_type, output_dir)
 
@@ -4208,6 +4251,11 @@ class Trajectory(object):
 
         plt.tight_layout()
 
+
+        # Pickle the figure
+        if ret_figs:
+            fig_pickle_dict["velocities"] = pickle.dumps(plt.gcf(), protocol=2)
+
         if self.save_results:
             savePlot(plt, file_name + '_velocities.' + self.plot_file_type, output_dir)
 
@@ -4279,6 +4327,10 @@ class Trajectory(object):
         ax2.set_ylabel('Height (km)')
 
 
+        # Pickle the figure
+        if ret_figs:
+            fig_pickle_dict["lengths"] = pickle.dumps(plt.gcf(), protocol=2)
+
         if self.save_results:
             savePlot(plt, file_name + '_lengths.' + self.plot_file_type, output_dir)
 
@@ -4327,6 +4379,10 @@ class Trajectory(object):
 
         plt.legend(loc='upper right')
 
+
+        # Pickle the figure
+        if ret_figs:
+            fig_pickle_dict["ground_track"] = pickle.dumps(plt.gcf(), protocol=2)
 
         if self.save_results:
             savePlot(plt, file_name + '_ground_track.' + self.plot_file_type, output_dir)
@@ -4431,6 +4487,10 @@ class Trajectory(object):
         plt.grid()
         plt.legend()
 
+        # Pickle the figure
+        if ret_figs:
+            fig_pickle_dict["all_angular_residuals"] = pickle.dumps(plt.gcf(), protocol=2)
+
         if self.save_results:
             savePlot(plt, file_name + '_all_angular_residuals.' + self.plot_file_type, output_dir)
 
@@ -4486,6 +4546,10 @@ class Trajectory(object):
 
             plt.grid()
 
+            # Pickle the figure
+            if ret_figs:
+                fig_pickle_dict["abs_mag"] = pickle.dumps(plt.gcf(), protocol=2)
+
             if self.save_results:
                 savePlot(plt, file_name + '_abs_mag.' + self.plot_file_type, output_dir)
 
@@ -4512,13 +4576,26 @@ class Trajectory(object):
                         np.degrees(self.orbit.node)]
                     ])
 
+                if (output_dir is None) or (file_name is None):
+                    plot_path = None
+                    save_results = False
+
+                else:
+                    plot_path = os.path.join(output_dir, file_name)
+                    save_results = self.save_results
+
+
                 # Run orbit plotting procedure
-                plotOrbits(orbit_params, jd2Date(self.jdt_ref, dt_obj=True), save_plots=self.save_results, \
-                    plot_path=os.path.join(output_dir, file_name), linewidth=1, color_scheme='light', \
+                plotOrbits(orbit_params, jd2Date(self.jdt_ref, dt_obj=True), save_plots=save_results, \
+                    plot_path=plot_path, linewidth=1, color_scheme='light', \
                     plot_file_type=self.plot_file_type)
 
 
                 plt.tight_layout()
+
+                # Pickle the figure
+                if ret_figs:
+                    fig_pickle_dict["orbit"] = pickle.dumps(plt.gcf(), protocol=2)
 
 
                 if show_plots:
@@ -4527,6 +4604,14 @@ class Trajectory(object):
                 else:
                     plt.clf()
                     plt.close()
+
+
+
+        # Restore the status of save results scripts and return a dictionary of pickled figure objects
+        if ret_figs:
+            self.save_results = save_results_prev_status
+
+            return fig_pickle_dict
 
 
 
