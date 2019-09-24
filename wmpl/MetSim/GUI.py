@@ -448,7 +448,7 @@ def extractConstantParams(const_original, params, param_string, mini_norm_handle
 
 
 def fitResiduals(params, fit_input_data, param_string, const_original, traj, mini_norm_handle, 
-    mag_weight=10.0, lag_weight=1.0, verbose=True, gui_handle=None):
+    mag_weight=10.0, lag_weights=None, lag_weight_ht_change=0.0, verbose=True, gui_handle=None):
     """ Compute the fit residual. """
 
     if verbose:
@@ -456,6 +456,10 @@ def fitResiduals(params, fit_input_data, param_string, const_original, traj, min
         print('Params:')
         # print(params)
         print(mini_norm_handle.denormalize(params))
+
+
+    if lag_weights is None:
+        lag_weights = [1.0, 1.0]
 
 
     # Assign fit parameters to a constants object
@@ -523,6 +527,13 @@ def fitResiduals(params, fit_input_data, param_string, const_original, traj, min
 
         if np.isnan(mag_res):
             mag_res = 1e6**2
+
+
+        # Choose the lag weight
+        if height > lag_weight_ht_change:
+            lag_weight = lag_weights[0]
+        else:
+            lag_weight = lag_weights[1]
 
 
         # Compute the length residual
@@ -684,7 +695,8 @@ class MetSimGUI(QMainWindow):
         self.pso_particles = 100
 
         self.autofit_mag_weight = 0.1
-        self.autofit_lag_weight = 1.0
+        self.autofit_lag_weight_ht_change = self.traj.rend_ele - 10000
+        self.autofit_lag_weights = [1.0, 1.0]
 
         ### ###
 
@@ -1033,7 +1045,8 @@ class MetSimGUI(QMainWindow):
         self.inputAutoFitPSOParticles.setText("{:d}".format(self.pso_particles))
 
         self.inputAutoFitMagWeight.setText("{:.1f}".format(self.autofit_mag_weight))
-        self.inputAutoFitLagWeight.setText("{:.1f}".format(self.autofit_lag_weight))
+        self.inputAutoFitLagWeightHtChange.setText("{:.2f}".format(self.autofit_lag_weight_ht_change/1000))
+        self.inputAutoFitLagWeights.setText("{:.1f}, {:.2f}".format(*self.autofit_lag_weights))
 
         ### ###
 
@@ -1302,7 +1315,10 @@ class MetSimGUI(QMainWindow):
             value_type=int)
 
         self.autofit_mag_weight = self._tryReadBox(self.inputAutoFitMagWeight, self.autofit_mag_weight)
-        self.autofit_lag_weight = self._tryReadBox(self.inputAutoFitLagWeight, self.autofit_lag_weight)
+        self.autofit_lag_weight_ht_change = 1000*self._tryReadBox(self.inputAutoFitLagWeightHtChange, \
+            self.autofit_lag_weight_ht_change/1000)
+        self.autofit_lag_weights = self._tryReadBox(self.inputAutoFitLagWeights, self.autofit_lag_weights, \
+            value_type=lambda x: list(map(float, x.split(","))))
 
         ###
 
@@ -2398,7 +2414,8 @@ class MetSimGUI(QMainWindow):
         # Print residual value
         print("Starting residual value: {:.5f}".format(fitResiduals(p0_normed, fit_input_data, \
             param_string, const, self.traj, mini_norm_handle, mag_weight=self.autofit_mag_weight, \
-            lag_weight=self.autofit_lag_weight, verbose=False)))
+            lag_weights=self.autofit_lag_weights, lag_weight_ht_change=self.autofit_lag_weight_ht_change, \
+            verbose=False)))
         print()
 
 
@@ -2412,8 +2429,8 @@ class MetSimGUI(QMainWindow):
 
             # Run the fit
             res = scipy.optimize.minimize(fitResiduals, p0_normed, args=(fit_input_data, param_string, \
-                const, self.traj, mini_norm_handle, self.autofit_mag_weight, self.autofit_lag_weight, \
-                True, self), bounds=bounds_normed, tol=0.001)
+                const, self.traj, mini_norm_handle, self.autofit_mag_weight, self.autofit_lag_weights, \
+                self.autofit_lag_weight_ht_change, True, self), bounds=bounds_normed, tol=0.001)
 
             print(res)
 
@@ -2470,12 +2487,16 @@ class MetSimGUI(QMainWindow):
             cost, pos = optimizer.optimize(fitResidualsListArguments, iters=self.pso_iterations, \
                 n_processes=mp.cpu_count() - 1, fit_input_data=fit_input_data, param_string=param_string, \
                 const_original=const, traj=self.traj, mini_norm_handle=mini_norm_handle, \
-                mag_weight=self.autofit_mag_weight, lag_weight=self.autofit_lag_weight, \
-                verbose=False)
+                mag_weight=self.autofit_mag_weight, lag_weights=self.autofit_lag_weights, \
+                lag_weight_ht_change=self.autofit_lag_weight_ht_change, verbose=False)
 
             print(cost, pos)
 
             fit_params = pos
+
+            # Get the position history
+            print(optimizer.cost_history)
+            print(optimizer.pos_history)
 
             ### ###
 
