@@ -118,14 +118,14 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
     
     # Reject all 3 sigma slope outliers
     slopes = [scipy.stats.gamma.pdf(entry[3], *entry[0]) for entry in unc_results_list]
-    mean_slope = np.mean(slopes)
+    median_slope = np.median(slopes)
     slope_std = np.std(slopes)
 
     unc_results_list_filtered = []
     for i, unc_slope in enumerate(slopes):
 
         # Reject all 3 sigma outliers
-        if abs(unc_slope - mean_slope) > 3*slope_std:
+        if abs(unc_slope - median_slope) > 3*slope_std:
             continue
 
         unc_results_list_filtered.append(unc_results_list[i])
@@ -140,6 +140,17 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
         slope_report_unc_list.append(slope_report_unc)
 
     # Compute the slope standard deviation
+    slope_report_std = np.std(slope_report_unc_list)
+
+    # If the standard deviation is larger than 10 or is nan, set it to 10
+    if (slope_report_std > 10) or np.isnan(slope_report_std):
+        slope_report_std = 10
+
+    # Reject all 3 sigma outliers and recompute the std
+    slope_report_unc_list = [slp for slp in slope_report_unc_list if (slp < slope_report \
+        + 3*slope_report_std) and (slp > slope_report - 3*slope_report_std)]
+
+    # Recompute the standard deviation
     slope_report_std = np.std(slope_report_unc_list)
 
 
