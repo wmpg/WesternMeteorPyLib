@@ -7,9 +7,14 @@ else:
     import urllib.request as urllibrary
 
 
-from setuptools import setup, find_packages
+from setuptools import setup, find_packages, Extension
+from Cython.Build import cythonize
+import numpy
+
 
 from UpdateOrbitFiles import updateOrbitFiles
+
+
 
 # Utility function to read the README file.
 # Used for the long_description.  It's nice, because now 1) we have a top level
@@ -17,6 +22,8 @@ from UpdateOrbitFiles import updateOrbitFiles
 # string in below ...
 def read(fname):
     return open(os.path.join(os.path.dirname(__file__), fname)).read()
+
+
 
 
 packages = []
@@ -63,6 +70,14 @@ share_files = [os.path.join('wmpl', 'share', file_name) for file_name in os.list
 
 
 
+# Cython modules which will be compiled on setup
+cython_modules = [
+    Extension('wmpl.MetSim.MetSimErosionCyTools', sources=['wmpl/MetSim/MetSimErosionCyTools.pyx'], \
+        include_dirs=[numpy.get_include()])
+    ]
+
+
+
 setup(
     name = "westernmeteorpylib",
     version = "1.0",
@@ -72,6 +87,7 @@ setup(
     license = "MIT",
     keywords = "meteors",
     packages=find_packages(),
+    ext_modules = cythonize(cython_modules),
     data_files=[(os.path.join('wmpl', 'share'), share_files)],
     include_package_data=True,
     long_description=read('README.md'),
@@ -81,5 +97,6 @@ setup(
         "License :: OSI Approved :: MIT License",
     ],
     setup_requires=["numpy"],
-    install_requires=requirements
+    install_requires=requirements,
+    include_dirs=[numpy.get_include()]
 )
