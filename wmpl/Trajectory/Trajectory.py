@@ -2845,8 +2845,9 @@ class Trajectory(object):
                         weight_list), loss='soft_l1')
                     lag_fit = lag_fit.x
 
-                    # Add the point to the considered list only if the lag has a negative trend
-                    if lag_fit[0] <= 0:
+                    # Add the point to the considered list only if the lag has a negative trend, or a trend
+                    #   that is not *too* positive, about 500 m per second is the limit
+                    if lag_fit[0] <= 500:
 
                         # Calculate the standard deviation of the line fit and add it to the list of solutions
                         line_stddev = RMSD(state_vect_dist_part - lineFunc(times_part, *velocity_fit), \
