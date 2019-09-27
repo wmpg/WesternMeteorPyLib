@@ -43,7 +43,7 @@ def writeOrbitSummaryFile(dir_path, traj_list, P_0m=1210):
             traj: [Trajectory instance]
             str_format: [str] String format for the unceertanty.
             std_name: [str] Name of the uncertanty attribute, e.g. if it is 'x', then the uncertanty is 
-                stored in uncertanties.x.
+                stored in uncertainties.x.
     
         Keyword arguments:
             multi: [float] Uncertanty multiplier. 1.0 by default. This is used to scale the uncertanty to
@@ -57,11 +57,11 @@ def writeOrbitSummaryFile(dir_path, traj_list, P_0m=1210):
         if deg:
             multi *= np.degrees(1.0)
 
-        if traj.uncertanties is not None:
-            if hasattr(traj.uncertanties, std_name):
+        if traj.uncertainties is not None:
+            if hasattr(traj.uncertainties, std_name):
 
                 # Get the value
-                val = getattr(traj.uncertanties, std_name)*multi
+                val = getattr(traj.uncertainties, std_name)*multi
 
                 # If the value is too big, use scientific notation
                 if max_val is not None:
@@ -665,9 +665,9 @@ if __name__ == "__main__":
 
                 ### MAXIMUM RADIANT ERROR ###
 
-                if traj.uncertanties is not None:
-                    if np.degrees(np.hypot(traj.uncertanties.ra_g, \
-                        traj.uncertanties.dec_g)) > max_radiant_err:
+                if traj.uncertainties is not None:
+                    if np.degrees(np.hypot(traj.uncertainties.ra_g, \
+                        traj.uncertainties.dec_g)) > max_radiant_err:
 
                         continue
 
@@ -675,8 +675,8 @@ if __name__ == "__main__":
 
                 ### MAXIMUM GEOCENTRIC VELOCITY ERROR ###
 
-                if traj.uncertanties is not None:
-                    if traj.uncertanties.v_g > traj.orbit.v_g*max_vg_err/100:
+                if traj.uncertainties is not None:
+                    if traj.uncertainties.v_g > traj.orbit.v_g*max_vg_err/100:
                         continue
 
                 ###

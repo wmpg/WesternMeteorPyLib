@@ -75,7 +75,7 @@ class NarrowProjectionInputData(object):
         if traj_uncert_file is None:
 
             # Try finding the trajectory undertainty file
-            self.traj_uncert_file = self.traj_file.replace('_mc_trajectory', '_mc_uncertanties')
+            self.traj_uncert_file = self.traj_file.replace('_mc_trajectory', '_mc_uncertainties')
 
         else:
             self.traj_uncert_file = traj_uncert_file

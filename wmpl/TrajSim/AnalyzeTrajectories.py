@@ -259,10 +259,10 @@ def plotRadiants(pickle_trajs, plot_type='geocentric', ra_cent=None, dec_cent=No
         vh_list.append(traj.orbit.v_h)
         
 
-        if traj.uncertanties is not None:
-            lh_std_list.append(traj.uncertanties.L_h)
-            bh_std_list.append(traj.uncertanties.B_h)
-            vh_std_list.append(traj.uncertanties.v_h)
+        if traj.uncertainties is not None:
+            lh_std_list.append(traj.uncertainties.L_h)
+            bh_std_list.append(traj.uncertainties.B_h)
+            vh_std_list.append(traj.uncertainties.v_h)
 
 
     ra_list = np.array(ra_list)
@@ -302,7 +302,7 @@ def plotRadiants(pickle_trajs, plot_type='geocentric', ra_cent=None, dec_cent=No
         # Create inputs for calculating the distance profile
         distance_input = []
 
-        if traj.uncertanties is not None:
+        if traj.uncertainties is not None:
             
 
             for Lh, Lh_std, Bh, Bh_std, sol, vh, vh_std in zip(lh_list, lh_std_list, bh_list, bh_std_list, sol_list, vh_list, vh_std_list):

@@ -2450,6 +2450,7 @@ class MetSimGUI(QMainWindow):
             ### pyswarms ###
 
             import pyswarms as ps
+            from pyswarms.utils.plotters import plot_cost_history
 
 
             # Set up hyperparameters
@@ -2494,9 +2495,10 @@ class MetSimGUI(QMainWindow):
 
             fit_params = pos
 
-            # Get the position history
-            print(optimizer.cost_history)
-            print(optimizer.pos_history)
+
+            # Plot the cost history
+            plot_cost_history(optimizer.cost_history)
+            plt.show()
 
             ### ###
 
@@ -2544,7 +2546,7 @@ class MetSimGUI(QMainWindow):
         file_name = file_name.replace('trajectory.pickle', '') + 'report_sim.txt'
 
         # Save the report with updated orbit
-        traj_updated.saveReport(dir_path, file_name, uncertanties=self.traj.uncertanties, verbose=False)
+        traj_updated.saveReport(dir_path, file_name, uncertainties=self.traj.uncertainties, verbose=False)
 
 
 

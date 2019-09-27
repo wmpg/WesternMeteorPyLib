@@ -410,7 +410,7 @@ class RMSDataHandle(object):
             + "_".join(list(set([obs.station_id[:2] for obs in traj.observations]))))
 
         # Save the report
-        traj.saveReport(output_dir, traj.file_name + '_report.txt', uncertanties=traj.uncertanties, 
+        traj.saveReport(output_dir, traj.file_name + '_report.txt', uncertainties=traj.uncertainties, 
             verbose=False)
 
         # Save the picked trajectory structure

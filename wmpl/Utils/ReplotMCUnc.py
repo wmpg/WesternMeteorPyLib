@@ -19,7 +19,7 @@ if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser(description=""" Replot the trajectory uncertainties.""",
         formatter_class=argparse.RawTextHelpFormatter)
 
-    arg_parser.add_argument('mc_uncertanties_path', type=str, help='Path to the MC uncertainties file.')
+    arg_parser.add_argument('mc_uncertainties_path', type=str, help='Path to the MC uncertainties file.')
 
     arg_parser.add_argument('-n', '--nbins', metavar="NUM_BINS", nargs=1, \
         help='Number of bins for the histogram.', type=int)
@@ -30,7 +30,7 @@ if __name__ == "__main__":
     ############################
 
 
-    dir_path_mc, mc_unc_file = os.path.split(cml_args.mc_uncertanties_path)
+    dir_path_mc, mc_unc_file = os.path.split(cml_args.mc_uncertainties_path)
 
 
     ### Load trajectory pickles
@@ -40,7 +40,7 @@ if __name__ == "__main__":
 
 
     # Extract file name core
-    traj_file_name_core = mc_unc_file.replace('_mc_uncertanties.pickle', '')
+    traj_file_name_core = mc_unc_file.replace('_mc_uncertainties.pickle', '')
 
     # Load geometrical trajectory
     dir_path_parent = os.path.abspath(os.path.join(dir_path_mc, os.pardir))

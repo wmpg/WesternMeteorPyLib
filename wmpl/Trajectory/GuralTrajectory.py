@@ -583,7 +583,7 @@ class GuralTrajectory(object):
         self.orbit = None
 
         # Uncertainties (currently not used!)
-        self.uncertanties = None
+        self.uncertainties = None
 
         ######
 

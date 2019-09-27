@@ -1200,7 +1200,7 @@ def moveStateVector(state_vect, radiant_eci, observations):
 
 
 
-class MCUncertanties(object):
+class MCuncertainties(object):
     def __init__(self, mc_traj_list):
         """ Container for standard deviations of trajectory parameters calculated using Monte Carlo. """
 
@@ -1344,7 +1344,7 @@ class MCUncertanties(object):
 
 
 
-def calcMCUncertanties(traj_list, traj_best):
+def calcMCuncertainties(traj_list, traj_best):
     """ Takes a list of trajectory objects and returns the standard deviation of every parameter. 
 
     Arguments:
@@ -1356,8 +1356,8 @@ def calcMCUncertanties(traj_list, traj_best):
     """
 
 
-    # Init a new container for uncertanties
-    un = MCUncertanties(traj_list)
+    # Init a new container for uncertainties
+    un = MCuncertainties(traj_list)
 
     # Initial velocity
     un.v_init = np.std([traj.v_init for traj in traj_list])
@@ -1734,7 +1734,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
     print('Computing uncertainties...')
 
     # Calculate the standard deviation of every trajectory parameter
-    uncertanties = calcMCUncertanties(mc_results, traj_best)
+    uncertainties = calcMCuncertainties(mc_results, traj_best)
 
     print('Computing covariance matrices...')
 
@@ -1948,7 +1948,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
     ##########################################################################################################
 
 
-    return traj_best, uncertanties
+    return traj_best, uncertainties
 
 
 
@@ -2038,7 +2038,7 @@ class Trajectory(object):
                 above the given height in kilometers using data from all stations. None by default, in which
                 case the initial velocity will be estimated using the automated siliding fit.
             estimate_timing_vel: [bool] Try to estimate the difference in timing and velocity. True by default.
-            monte_carlo: [bool] Runs Monte Carlo estimation of uncertanties. True by default.
+            monte_carlo: [bool] Runs Monte Carlo estimation of uncertainties. True by default.
             mc_runs: [int] Number of Monte Carlo runs. The default value is the number of observed points.
             mc_pick_multiplier: [int] Number of MC samples that will be taken for every point. 1 by default.
             mc_noise_std: [float] Number of standard deviations of measurement noise to add during Monte
@@ -2093,7 +2093,7 @@ class Trajectory(object):
         # Estimating the difference in timing between stations, and the initial velocity if this flag is True
         self.estimate_timing_vel = estimate_timing_vel
 
-        # Running Monte Carlo simulations to estimate uncertanties
+        # Running Monte Carlo simulations to estimate uncertainties
         self.monte_carlo = monte_carlo
 
         # Number of Monte Carlo runs
@@ -2220,8 +2220,8 @@ class Trajectory(object):
         # Orbit object which contains orbital parameters
         self.orbit = None
 
-        # Uncertanties calculated using Monte Carlo
-        self.uncertanties = None
+        # uncertainties calculated using Monte Carlo
+        self.uncertainties = None
 
         # Orbital covariance matrix
         self.orbit_cov = None
@@ -3331,7 +3331,7 @@ class Trajectory(object):
 
 
 
-    def saveReport(self, dir_path, file_name, uncertanties=None, verbose=True, save_results=True):
+    def saveReport(self, dir_path, file_name, uncertainties=None, verbose=True, save_results=True):
         """ Save the trajectory estimation report to file. 
     
         Arguments:
@@ -3339,7 +3339,7 @@ class Trajectory(object):
             file_name: [str] Name of the report time.
 
         Keyword arguments:
-            uncertanties: [MCUncertainties object] Object contaning uncertainties of every parameter.
+            uncertainties: [MCUncertainties object] Object contaning uncertainties of every parameter.
             verbose: [bool] Print the report to the screen. True by default.
             save_results: [bool] If True, the results will be saved to a file.
         """
@@ -3352,7 +3352,7 @@ class Trajectory(object):
             Arguments:
                 str_format: [str] String format for the unceertanty.
                 std_name: [str] Name of the uncertanty attribute, e.g. if it is 'x', then the uncertanty is 
-                    stored in uncertanties.x.
+                    stored in uncertainties.x.
         
             Keyword arguments:
                 multi: [float] Uncertanty multiplier. 1.0 by default. This is used to scale the uncertanty to
@@ -3363,8 +3363,8 @@ class Trajectory(object):
             if deg:
                 multi *= np.degrees(1.0)
 
-            if uncertanties is not None:
-                return " +/- " + str_format.format(getattr(uncertanties, std_name)*multi)
+            if uncertainties is not None:
+                return " +/- " + str_format.format(getattr(uncertainties, std_name)*multi)
 
             else:
                 return ''
@@ -3488,7 +3488,7 @@ class Trajectory(object):
             out_str += "\n"
 
             # Write out orbital parameters
-            out_str += self.orbit.__repr__(uncertanties=uncertanties, v_init_ht=self.v_init_ht)
+            out_str += self.orbit.__repr__(uncertainties=uncertainties, v_init_ht=self.v_init_ht)
             out_str += "\n"
 
 
@@ -5378,8 +5378,8 @@ class Trajectory(object):
 
         if self.monte_carlo:
 
-            # Do a Monte Carlo estimate of the uncertanties in all calculated parameters
-            traj_best, uncertanties = monteCarloTrajectory(self, mc_runs=self.mc_runs, \
+            # Do a Monte Carlo estimate of the uncertainties in all calculated parameters
+            traj_best, uncertainties = monteCarloTrajectory(self, mc_runs=self.mc_runs, \
                 mc_pick_multiplier=self.mc_pick_multiplier, noise_sigma=self.mc_noise_std, \
                 geometric_uncert=self.geometric_uncert, plot_results=self.save_results, \
                 mc_cores=self.mc_cores)
@@ -5391,20 +5391,20 @@ class Trajectory(object):
 
 
             ### Save uncertainties to the trajectory object ###
-            if uncertanties is not None:
-                traj_uncer = copy.deepcopy(uncertanties)
+            if uncertainties is not None:
+                traj_uncer = copy.deepcopy(uncertainties)
 
                 # Remove the list of all MC trajectires (it is unecessarily big)
                 traj_uncer.mc_traj_list = []
 
-                # Set the uncertanties to the best trajectory
-                traj_best.uncertanties = traj_uncer
+                # Set the uncertainties to the best trajectory
+                traj_best.uncertainties = traj_uncer
 
             ######
 
 
         else:
-            uncertanties = None
+            uncertainties = None
 
 
         #### SAVE RESULTS ###
@@ -5431,12 +5431,12 @@ class Trajectory(object):
                     # Save the picked trajectory structure with Monte Carlo points
                     savePickle(traj_best, mc_output_dir, mc_file_name + '_trajectory.pickle')
                     
-                    # Save the uncertanties
-                    savePickle(uncertanties, mc_output_dir, mc_file_name + '_uncertanties.pickle')
+                    # Save the uncertainties
+                    savePickle(uncertainties, mc_output_dir, mc_file_name + '_uncertainties.pickle')
 
                     # Save trajectory report
                     traj_best.saveReport(mc_output_dir, mc_file_name + '_report.txt', \
-                        uncertanties=uncertanties, verbose=self.verbose)
+                        uncertainties=uncertainties, verbose=self.verbose)
 
                 # Save and show plots
                 traj_best.savePlots(mc_output_dir, mc_file_name, show_plots=self.show_plots)
@@ -5453,7 +5453,7 @@ class Trajectory(object):
 
                 # Save trajectory report with original points
                 self.saveReport(self.output_dir, self.file_name + '_report.txt', \
-                        uncertanties=uncertanties, verbose = not self.monte_carlo)
+                        uncertainties=uncertainties, verbose = not self.monte_carlo)
 
 
             # Save and show plots

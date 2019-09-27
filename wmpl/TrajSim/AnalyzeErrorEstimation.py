@@ -94,19 +94,19 @@ if __name__ == "__main__":
                 continue
 
 
-            # # Skip zero velocity uncertanties
-            # if traj.uncertanties.v_init == 0:
+            # # Skip zero velocity uncertainties
+            # if traj.uncertainties.v_init == 0:
             #     continue
 
             # # Compute the number of standard deviations of the real error in the velocity
-            # vinit_diff_std = vinit_diff/traj.uncertanties.v_init
+            # vinit_diff_std = vinit_diff/traj.uncertainties.v_init
 
             # # # Skip all cases where the difference is larger than 0.5 km/s
             # # if np.abs(vinit_diff_std) > 500:
             # #     continue
 
             
-            # print(vinit_diff, traj.uncertanties.v_init, vinit_diff_std)
+            # print(vinit_diff, traj.uncertainties.v_init, vinit_diff_std)
 
 
 
@@ -114,7 +114,8 @@ if __name__ == "__main__":
             ### Compute the number of standard deviations of the real error in the radiant ###
 
             # Compute unified standard deviation for RA and Dec
-            radiant_std = np.degrees(np.hypot(traj.uncertanties.ra_g, traj.uncertanties.dec_g))
+            radiant_std = np.degrees(np.hypot(np.cos(traj.orbit.dec_g)*traj.uncertainties.ra_g, \
+                traj.uncertainties.dec_g))
 
             if radiant_std == 0:
                 continue
@@ -194,6 +195,8 @@ if __name__ == "__main__":
 
         plt.grid(color='0.8')
 
-        plt.savefig(os.path.join(dir_path, "true_vs_estimated_error.png"), dpi=300)
+        plot_path = os.path.join(dir_path, "true_vs_estimated_error.png")
+        print("Saving plot to:", plot_path)
+        plt.savefig(plot_path, dpi=300)
 
         plt.show()

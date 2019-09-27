@@ -43,7 +43,7 @@ def calcAngDataLimits(ra_data, dec_data, border_ratio=0.1):
 
     ### Make the limits rectangular ###
     ##########################################################################################################
-    delta_ra = abs(ra_max - ra_min)
+    delta_ra = np.cos(np.radians(np.median(dec_data)))*abs(ra_max - ra_min)
     delta_dec = abs(dec_max - dec_min)
 
     if delta_ra > delta_dec:

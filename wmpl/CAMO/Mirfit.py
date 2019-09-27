@@ -94,7 +94,7 @@ class PickInfo(object):
         self.y_gc = 0
         self.z_gc = 0
 
-        # Position after Monte Carlo uncertanties have been applied
+        # Position after Monte Carlo uncertainties have been applied
         self.x_draw = 0
         self.y_draw = 0
         self.z_draw = 0
@@ -177,7 +177,7 @@ class MonteCarloPicks(object):
         # Great circle normal (both sites)
         self.N = {}
 
-        # Pick uncertanties in transverse and longitudinal directions (both sites)
+        # Pick uncertainties in transverse and longitudinal directions (both sites)
         self.transverse_std = {} # Uncertanty in GC inclination (theta0)
         self.longitudinal_std = {} # Uncertanty in GC phase
 
@@ -424,7 +424,7 @@ class MonteCarloPicks(object):
 
 
     def samplePicks(self, n):
-        """ Sample picks from distributions defined by the transverse and longitudinal uncertanties. """
+        """ Sample picks from distributions defined by the transverse and longitudinal uncertainties. """
 
         # Determine the directon of phase progression of the meteor through time
         self.determinePhaseProgression()

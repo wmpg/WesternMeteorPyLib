@@ -53,7 +53,7 @@ class SimStation(object):
             station_id: [str] Station name or ID.
             fps: [float] Camera framerate in frames per second.
             t_offset: [float] Time offset from real time (seconds).
-            obs_ang_std: [float] Measurement uncertanties (radians).
+            obs_ang_std: [float] Measurement uncertainties (radians).
             azim_centre: [float] Azimuth eastward of due N of the centre of FOV (radians).
             elev_centre: [float] Elevation from horizon of the centre of FOV (radians).
             fov_wid: [float] FOV width in azimuth (radians).
@@ -80,7 +80,7 @@ class SimStation(object):
         # Time offset from the real time in seconds
         self.t_offset = t_offset
 
-        # Uncertanties in observations (radians)
+        # uncertainties in observations (radians)
         self.obs_ang_std = obs_ang_std
 
         # Field of view centre (radians)
@@ -220,7 +220,7 @@ class SimStation(object):
 
 class SimMeteor(object):
     def __init__(self, ra_g, dec_g, v_g, year, month, sol, jdt_ref, beg_height, state_vect, \
-        obs_ang_uncertanties, t_offsets, unique_id=None):
+        obs_ang_uncertainties, t_offsets, unique_id=None):
         """ Container for a simulated meteor. 
     
         Arguments:
@@ -233,7 +233,7 @@ class SimMeteor(object):
             jdt_ref: [float] Julian date.
             beg_height: [float] Beginning height (meters).
             state_vect: [ndarray] (x, y, z) ECI coordinates of the initial state vector (meters).
-            obs_ang_uncertanties: [list of floats] A list of observational unceretanties from every station 
+            obs_ang_uncertainties: [list of floats] A list of observational unceretanties from every station 
                 (in radians).
             t_offsets: [list] List of maximum time offsets of stations from real time (seconds).
         """
@@ -266,7 +266,7 @@ class SimMeteor(object):
         self.velocity_model = None
 
         # Station observational uncertainties
-        self.obs_ang_uncertanties = obs_ang_uncertanties
+        self.obs_ang_uncertainties = obs_ang_uncertainties
 
         # Max. time offsets per every station
         self.t_offsets = t_offsets
@@ -428,7 +428,7 @@ class SimMeteor(object):
         out_str += "--------\n"
 
         out_str += "        ID, Lon +E (deg), Lat +N (deg), Ele (m), Time offset (s), Obs. uncertanty (arcsec)\n"
-        for obs, t_off, obs_ang_std in zip(self.observations, self.t_offsets, self.obs_ang_uncertanties):
+        for obs, t_off, obs_ang_std in zip(self.observations, self.t_offsets, self.obs_ang_uncertainties):
 
             station_info = []
             station_info.append("{:>10s}".format(str(obs.station_id)))
@@ -1020,7 +1020,7 @@ def initStationList(stations_geo, azim_fovs, elev_fovs, fov_widths, fov_heights,
     Keyword arguments:
         t_offsets: [list] List of time offsets of stations from real time (seconds).
         fps_list: [list] List of frames per second of each camera.
-        obs_ang_uncertanties: [list] Observation precision of every station in arcseconds.
+        obs_ang_uncertainties: [list] Observation precision of every station in arcseconds.
         lim_magnitudes: [list] List of limiting magnitudes for meteors per every station. Only needed for 
         ablation simulations. Default is +3 if not given.
         P_0m_list: [list] List of powers of zero-magnitude meteors in Watts. Only needed for ablation 
@@ -1074,7 +1074,7 @@ def initStationList(stations_geo, azim_fovs, elev_fovs, fov_widths, fov_heights,
         lat = np.radians(lat)
         lon = np.radians(lon)
 
-        # Convert angular uncertanties to radians
+        # Convert angular uncertainties to radians
         obs_ang_std = np.radians(obs_ang_std/3600)
 
         # Convert FOV to radians
@@ -1807,8 +1807,8 @@ def simulateMeteorShower(station_list, meteor_velocity_models, n_meteors, met_sh
 
     sim_meteor_list = []
 
-    # Get a list of uncertanties per every station and the range of timing offsets (radians)
-    obs_ang_uncertanties = [stat.obs_ang_std for stat in station_list]
+    # Get a list of uncertainties per every station and the range of timing offsets (radians)
+    obs_ang_uncertainties = [stat.obs_ang_std for stat in station_list]
     t_offsets = [stat.t_offset for stat in station_list]
 
 
@@ -1890,7 +1890,7 @@ def simulateMeteorShower(station_list, meteor_velocity_models, n_meteors, met_sh
         # Init the SimMeteor object
         sim_meteor = SimMeteor(sample.ra_g, sample.dec_g, sample.vg, met_shower_model.year, \
             met_shower_model.month, sample.la_sun, meteor_jd, beg_height_final, state_vect, \
-            obs_ang_uncertanties, t_offsets, unique_id=meteor_no)
+            obs_ang_uncertainties, t_offsets, unique_id=meteor_no)
 
         
 
@@ -2190,7 +2190,7 @@ if __name__ == "__main__":
     # Camera FPS per station
     fps_list = [15.0, 1.0, 7.7, 30.0]
 
-    # Observation uncertanties per station (arcsec)
+    # Observation uncertainties per station (arcsec)
     obs_ang_uncertainties = [150.0, 50.0, 100.0, 50.0]
 
     # Azimuths of centre of FOVs (degrees)
@@ -2243,7 +2243,7 @@ if __name__ == "__main__":
     # # Camera FPS per station
     # fps_list = [16.67, 16.67, 16.67, 16.67]
 
-    # # Observation uncertanties per station (arcsec)
+    # # Observation uncertainties per station (arcsec)
     # obs_ang_uncertainties = [10, 10, 10, 10]
 
     # # Azimuths of centre of FOVs (degrees)
@@ -2288,7 +2288,7 @@ if __name__ == "__main__":
     # # Camera FPS per station
     # fps_list = [100, 100]
 
-    # # Observation uncertanties per station (arcsec)
+    # # Observation uncertainties per station (arcsec)
     # obs_ang_uncertainties = [0.001, 0.001]
 
     # # Azimuths of centre of FOVs (degrees)
@@ -2334,7 +2334,7 @@ if __name__ == "__main__":
     # # Camera FPS per station
     # fps_list = [100, 100]
 
-    # # Observation uncertanties per station (arcsec)
+    # # Observation uncertainties per station (arcsec)
     # obs_ang_uncertainties = [1, 1]
 
     # # Azimuths of centre of FOVs (degrees)
@@ -2426,7 +2426,7 @@ if __name__ == "__main__":
     # # Camera FPS per station
     # fps_list = [30, 30, 30]
 
-    # # Observation uncertanties per station (arcsec)
+    # # Observation uncertainties per station (arcsec)
     # obs_ang_uncertainties = [30, 30, 30]
 
     # # Azimuths of centre of FOVs (degrees)
@@ -2471,7 +2471,7 @@ if __name__ == "__main__":
     # # Camera FPS per station
     # fps_list = [30, 30]
 
-    # # Observation uncertanties per station (arcsec)
+    # # Observation uncertainties per station (arcsec)
     # obs_ang_uncertainties = [30, 30]
 
     # # Azimuths of centre of FOVs (degrees)
@@ -2517,7 +2517,7 @@ if __name__ == "__main__":
     # # Camera FPS per station
     # fps_list = [30, 30, 30]
 
-    # # Observation uncertanties per station (arcsec)
+    # # Observation uncertainties per station (arcsec)
     # obs_ang_uncertainties = [120, 120, 120]
 
     # # Azimuths of centre of FOVs (degrees)
@@ -2563,7 +2563,7 @@ if __name__ == "__main__":
     # # Camera FPS per station
     # fps_list = [30, 30]
 
-    # # Observation uncertanties per station (arcsec)
+    # # Observation uncertainties per station (arcsec)
     # obs_ang_uncertainties = [120, 120]
 
     # # Azimuths of centre of FOVs (degrees)
@@ -2610,7 +2610,7 @@ if __name__ == "__main__":
     # # Camera FPS per station
     # fps_list = [30, 30, 30]
 
-    # # Observation uncertanties per station (arcsec)
+    # # Observation uncertainties per station (arcsec)
     # obs_ang_uncertainties = [30, 30, 30]
 
     # # Azimuths of centre of FOVs (degrees)

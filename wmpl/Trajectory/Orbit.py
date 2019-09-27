@@ -176,7 +176,7 @@ class Orbit(object):
         self.T = None
 
 
-    def __repr__(self, uncertanties=None, v_init_ht=None):
+    def __repr__(self, uncertainties=None, v_init_ht=None):
         """ String to be printed out when the Orbit object is printed. """
 
         def _uncer(str_format, std_name, multi=1.0, deg=False):
@@ -186,7 +186,7 @@ class Orbit(object):
             Arguments:
                 str_format: [str] String format for the unceertanty.
                 std_name: [str] Name of the uncertanty attribute, e.g. if it is 'x', then the uncertanty is 
-                    stored in uncertanties.x.
+                    stored in uncertainties.x.
         
             Keyword arguments:
                 multi: [float] Uncertanty multiplier. 1.0 by default. This is used to scale the uncertanty to
@@ -197,9 +197,9 @@ class Orbit(object):
             if deg:
                 multi *= np.degrees(1.0)
 
-            if uncertanties is not None:
-                if hasattr(uncertanties, std_name):
-                    return " +/- " + str_format.format(getattr(uncertanties, std_name)*multi)
+            if uncertainties is not None:
+                if hasattr(uncertainties, std_name):
+                    return " +/- " + str_format.format(getattr(uncertainties, std_name)*multi)
 
             
             return ''

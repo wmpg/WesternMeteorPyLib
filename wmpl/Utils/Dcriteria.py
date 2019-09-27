@@ -369,7 +369,7 @@ def calcDVuncert(Lh1, Lh1_std, Bh1, Bh1_std, sol1, Vh1, Vh1_std, Lh2, Lh2_std, B
 
 
 
-    # Calculate total angular uncertanties
+    # Calculate total angular uncertainties
     Lh_std = math.sqrt(Lh1_std**2 + Lh2_std**2)
     Bh_std = math.sqrt(Bh1_std**2 + Bh2_std**2)
     ang_std = math.sqrt((math.sin((Bh1 + Bh2)/2)*Lh_std)**2 + Bh_std**2)
@@ -550,7 +550,7 @@ if __name__ == "__main__":
 
 
 
-    # Uncertanties test
+    # uncertainties test
 
     def hypo(x, c):
         return ((np.sqrt(2) - 1)/(2 - np.sqrt(2))**2)*(np.sqrt(x**2 + c**2) - c)
