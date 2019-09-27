@@ -4,6 +4,12 @@ from __future__ import print_function, division, absolute_import
 
 import os
 import sys
+import ssl
+
+
+# Fix certificates error
+ssl._create_default_https_context = ssl._create_unverified_context
+
 
 if sys.version_info.major < 3:
 	import urllib as urllibrary
