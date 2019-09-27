@@ -1200,7 +1200,7 @@ def moveStateVector(state_vect, radiant_eci, observations):
 
 
 
-class MCuncertainties(object):
+class MCUncertainties(object):
     def __init__(self, mc_traj_list):
         """ Container for standard deviations of trajectory parameters calculated using Monte Carlo. """
 
@@ -1344,7 +1344,7 @@ class MCuncertainties(object):
 
 
 
-def calcMCuncertainties(traj_list, traj_best):
+def calcMCUncertainties(traj_list, traj_best):
     """ Takes a list of trajectory objects and returns the standard deviation of every parameter. 
 
     Arguments:
@@ -1357,7 +1357,7 @@ def calcMCuncertainties(traj_list, traj_best):
 
 
     # Init a new container for uncertainties
-    un = MCuncertainties(traj_list)
+    un = MCUncertainties(traj_list)
 
     # Initial velocity
     un.v_init = np.std([traj.v_init for traj in traj_list])
@@ -1734,7 +1734,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
     print('Computing uncertainties...')
 
     # Calculate the standard deviation of every trajectory parameter
-    uncertainties = calcMCuncertainties(mc_results, traj_best)
+    uncertainties = calcMCUncertainties(mc_results, traj_best)
 
     print('Computing covariance matrices...')
 
