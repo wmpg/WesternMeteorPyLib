@@ -1340,7 +1340,8 @@ class MCUncertainties(object):
         # Tisserand's parameter with respect to Jupiter
         self.Tj = None
 
-
+# Preserve compatibility with pickle files genrated before the typo fix
+MCUncertanties = MCUncertainties
 
 
 
