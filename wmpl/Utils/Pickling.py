@@ -43,8 +43,20 @@ def loadPickle(dir_path, file_name):
 
         # Python 2
         if sys.version_info[0] < 3:
-            return pickle.load(f)
+            p = pickle.load(f)
 
         # Python 3
         else:
-            return pickle.load(f, encoding='latin1')
+            p = pickle.load(f, encoding='latin1')
+
+
+        # Fix attribute compatibility in trajectory objects with older versions which had a 
+        #   typo "uncertanties"
+        if hasattr(p, "uncertainties"):
+            p.uncertanties = p.uncertainties
+
+        if hasattr(p, "uncertanties"):
+            p.uncertainties = p.uncertanties
+
+
+        return p

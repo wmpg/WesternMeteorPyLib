@@ -2221,8 +2221,9 @@ class Trajectory(object):
         # Orbit object which contains orbital parameters
         self.orbit = None
 
-        # uncertainties calculated using Monte Carlo
+        # Uncertainties calculated using Monte Carlo
         self.uncertainties = None
+        self.uncertanties = self.uncertainties
 
         # Orbital covariance matrix
         self.orbit_cov = None
@@ -5398,8 +5399,10 @@ class Trajectory(object):
                 # Remove the list of all MC trajectires (it is unecessarily big)
                 traj_uncer.mc_traj_list = []
 
-                # Set the uncertainties to the best trajectory
+                # Set the uncertainties to the best trajectory (maintain compatibility with older version 
+                #   before the typo fix)
                 traj_best.uncertainties = traj_uncer
+                traj_best.uncertanties = traj_uncer
 
             ######
 
