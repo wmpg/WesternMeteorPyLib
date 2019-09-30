@@ -393,6 +393,10 @@ class TrajectoryCorrelator(object):
         unprocessed_observations_all = self.dh.getUnprocessedObservations()
         unprocessed_observations_all = sorted(unprocessed_observations_all, key=lambda x: x.reference_dt)
 
+        # Remove all observations done prior to 2000, to weed out those with bad time
+        unprocessed_observations_all = [met_obs for met_obs in unprocessed_observations_all \
+            if met_obs.reference_dt > datetime.datetime(2000, 1, 1, 0, 0, 0)]
+
 
         # Generate bins of datetimes for faster processing
         # Data will be divided into time bins, so the pairing function doesn't have to go pair many

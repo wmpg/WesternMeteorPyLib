@@ -981,7 +981,7 @@ def fitConfidenceInterval(x_data, y_data, conf=0.95, x_array=None, func=None):
 ##############################################################################################################
 
 
-def generateDatetimeBins(dt_beg, dt_end, bin_days=7, utc_hour_break=12):
+def generateDatetimeBins(dt_beg, dt_end, bin_days=7, utc_hour_break=12, tzinfo=None):
     """ Given a beginning and end datetime, bin this time range into bins bin_days long. The bin edges will
         be at utc_hour_break UTC. 12:00 UTC is chosen because at that time it is midnight at the International
         Date Line, and it is very unlikely that there are any meteor cameras there.
@@ -994,14 +994,15 @@ def generateDatetimeBins(dt_beg, dt_end, bin_days=7, utc_hour_break=12):
         bin_days: [float] Length of bin in days.
         utc_hour_break: [float] UTC hour when the break in time will occur, i.e. this will be the edges of the
             time bins.
+        tzinfo: [tz] pytz timezone object used for times. None by default.
 
     Return:
         [list] A list of (bin_beg, bin_end) datetime pairs.
     """
 
     # Convert input times to UTC
-    dt_beg = dt_beg.replace(tzinfo=pytz.utc)
-    dt_end = dt_end.replace(tzinfo=pytz.utc)
+    dt_beg = dt_beg.replace(tzinfo=tzinfo)
+    dt_end = dt_end.replace(tzinfo=tzinfo)
 
 
     # Compute the total number of bins
