@@ -553,7 +553,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
 
     # Find the range of datetimes of all folders (take only those after the year 2000)
     proc_dir_dts = [entry[3] for entry in dh.processing_list if entry[3] is not None]
-    proc_dir_dts = [dt for dt in dh.processing_list if dt > datetime.datetime(2000, 1, 1, 0, 0, 0)]
+    proc_dir_dts = [dt for dt in proc_dir_dts if dt > datetime.datetime(2000, 1, 1, 0, 0, 0)]
 
     # Determine the limits of data
     proc_dir_dt_beg = min(proc_dir_dts)
