@@ -725,6 +725,11 @@ def runSimulation(const, compute_wake=False):
 
 
 
+    # Check that the grain density is larger than the bulk density, and if not, set the grain density
+    #   to be the same as the bulk density
+    if const.rho > const.rho_grain:
+        const.rho_grain = const.rho
+
     # Run the simulation until all fragments stop ablating
     results_list = []
     wake_results = []

@@ -1251,6 +1251,10 @@ class MetSimGUI(QMainWindow):
         self.const.zenith_angle = np.radians(self._tryReadBox(self.inputZenithAngle, \
             np.degrees(self.const.zenith_angle)))
 
+        # If the bulk density is higher than the grain density, set the grain density to the bulk denisty
+        if self.const.rho > self.const.rho_grain:
+            self.const.rho_grain = self.const.rho
+
         ### ###
 
 
