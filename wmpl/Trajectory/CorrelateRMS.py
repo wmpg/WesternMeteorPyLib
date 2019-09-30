@@ -377,15 +377,25 @@ class RMSDataHandle(object):
         return self.unprocessed_observations
 
 
-    def findTimePairs(self, met_obs, max_toffset):
+    def findTimePairs(self, met_obs, unprocessed_observations, max_toffset):
         """ Finds pairs in time between the given meteor observations and all other observations from 
             different stations. 
+
+        Arguments:
+            met_obs: [MeteorObsRMS] Object containing a meteor observation.
+            unprocessed_observations: [list] A list of MeteorObsRMS objects which will be paired in time with
+                the given object.
+            max_toffset: [float] Maximum offset in time (seconds) for pairing.
+
+        Return:
+            [list] A list of MeteorObsRMS instances with are offten in time less than max_toffset from 
+                met_obs.
         """
 
         found_pairs = []
 
         # Go through all meteors from other stations
-        for met_obs2 in self.unprocessed_observations:
+        for met_obs2 in unprocessed_observations:
 
             # Take only observations from different stations
             if met_obs.station_code == met_obs2.station_code:

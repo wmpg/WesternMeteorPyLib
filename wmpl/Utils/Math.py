@@ -4,6 +4,9 @@
 
 from __future__ import division, print_function, absolute_import
 
+import datetime
+import pytz
+
 import numpy as np
 from numpy.core.umath_tests import inner1d
 import scipy.linalg
@@ -971,6 +974,76 @@ def fitConfidenceInterval(x_data, y_data, conf=0.95, x_array=None, func=None):
 
 ##############################################################################################################
 
+
+
+
+### TIME FUNCTIONS ###
+##############################################################################################################
+
+
+def generateDatetimeBins(dt_beg, dt_end, bin_days=7, utc_hour_break=12):
+    """ Given a beginning and end datetime, bin this time range into bins bin_days long. The bin edges will
+        be at utc_hour_break UTC. 12:00 UTC is chosen because at that time it is midnight at the International
+        Date Line, and it is very unlikely that there are any meteor cameras there.
+
+    Arguments:
+        dt_beg: [datetime] Begin datetime.
+        dt_end: [datetime] End datetime.
+
+    Keyword arguments:
+        bin_days: [float] Length of bin in days.
+        utc_hour_break: [float] UTC hour when the break in time will occur, i.e. this will be the edges of the
+            time bins.
+
+    Return:
+        [list] A list of (bin_beg, bin_end) datetime pairs.
+    """
+
+    # Convert input times to UTC
+    dt_beg = dt_beg.replace(tzinfo=pytz.utc)
+    dt_end = dt_end.replace(tzinfo=pytz.utc)
+
+
+    # Compute the total number of bins
+    n_bins = np.ceil((dt_end - dt_beg).total_seconds()/(bin_days*86400))
+
+    # Generate time bins
+    time_bins = []
+    for i in range(int(n_bins)):
+
+        # Generate the bin beginning edge
+        if i == 0:
+            # For the first bin beginning, use the initial time
+            bin_beg = dt_beg
+
+        else:
+            bin_beg = dt_beg + datetime.timedelta(days=i*bin_days)
+            bin_beg = bin_beg.replace(hour=int(utc_hour_break), minute=0, second=0, microsecond=0)
+
+        # Generate the bin ending edge
+        bin_end = bin_beg + datetime.timedelta(days=bin_days)
+        bin_end = bin_end.replace(hour=int(utc_hour_break), minute=0, second=0, microsecond=0)
+
+        # Check that the ending bin is not beyond the end dt
+        end_reached = False
+        if bin_end > dt_end:
+            bin_end = dt_end
+            end_reached = True
+
+
+        time_bins.append([bin_beg, bin_end])
+
+        # Stop iterating if the end was reached
+        if end_reached:
+            break
+
+
+    return time_bins
+
+
+
+
+##############################################################################################################
 
 
 if __name__ == "__main__":
