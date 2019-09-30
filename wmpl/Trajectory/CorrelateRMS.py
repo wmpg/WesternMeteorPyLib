@@ -16,6 +16,7 @@ import numpy as np
 
 from wmpl.Formats.CAMS import loadFTPDetectInfo
 from wmpl.Trajectory.CorrelateEngine import TrajectoryCorrelator, TrajectoryConstraints
+from wmpl.Utils.Math import generateDatetimeBins
 from wmpl.Utils.Pickling import savePickle
 from wmpl.Utils.TrajConversions import jd2Date
 
@@ -203,10 +204,7 @@ class RMSDataHandle(object):
         self.db = DatabaseJSON(os.path.join(self.dir_path, JSON_DB_NAME))
 
         # Find unprocessed meteor files
-        processing_list = self.findUnprocessedFolders(station_list)
-
-        # Load data of unprocessed observations
-        self.unprocessed_observations = self.loadUnprocessedObservations(processing_list)
+        self.processing_list = self.findUnprocessedFolders(station_list)
 
 
     def loadStations(self):
@@ -251,9 +249,17 @@ class RMSDataHandle(object):
                 night_path = os.path.join(station_path, night_name)
                 night_path_rel = os.path.join(station_name, night_name)
 
+                # Extract the date and time of directory, if possible
+                try:
+                    night_dt = datetime.datetime.strptime("_".join(night_name.split("_")[1:3]), \
+                        "%Y%m%d_%H%M%S")
+                except:
+                    print("Could not parse the date of the night dir: {:s}".format(night_path))
+                    night_dt = None
+
                 # If the night path is not in the processed list, add it to the processing list
                 if night_path_rel not in self.db.processed_dirs[station_name]:
-                    processing_list.append([station_name, night_path_rel, night_path])
+                    processing_list.append([station_name, night_path_rel, night_path, night_dt])
 
                 else:
                     skipped_dirs += 1
@@ -287,12 +293,22 @@ class RMSDataHandle(object):
 
 
 
-    def loadUnprocessedObservations(self, processing_list):
+    def loadUnprocessedObservations(self, processing_list, dt_range=None):
         """ Load unprocessed meteor observations. """
 
         # Go through folders for processing
         met_obs_list = []
-        for station_code, rel_proc_path, proc_path in processing_list:
+        for station_code, rel_proc_path, proc_path, night_dt in processing_list:
+
+            # Check that the night datetime is within the given range of times, if the range is given
+            if (dt_range is not None) and (night_dt is not None):
+                dt_beg, dt_end = dt_range
+
+                # Skip all folders which are outside the limits
+                if (night_dt < dt_beg) or (night_dt > dt_end):
+                    continue
+
+
 
             ftpdetectinfo_name = None
             platepar_recalibrated_name = None
@@ -319,6 +335,7 @@ class RMSDataHandle(object):
 
                 continue
 
+            # Save database to mark those with missing data files
             self.db.save()
 
 
@@ -462,6 +479,11 @@ class RMSDataHandle(object):
 
 if __name__ == "__main__":
 
+    # Set matplotlib for headless running
+    import matplotlib
+    matplotlib.use('Agg')
+
+
     ### COMMAND LINE ARGUMENTS
 
     # Init the command line arguments parser
@@ -511,14 +533,6 @@ contain data folders. Data folders should have FTPdetectinfo files together with
 
     ############################
 
-    # Init the data handler
-    data_handle = RMSDataHandle(cml_args.dir_path)
-
-
-    # Set matplotlib for headless running
-    import matplotlib
-    matplotlib.use('Agg')
-
 
     # Init trajectory constraints
     trajectory_constraints = TrajectoryConstraints()
@@ -529,11 +543,36 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     trajectory_constraints.save_plots = cml_args.saveplots
 
 
+    # Clock for measuring script time
     t1 = datetime.datetime.utcnow()
 
-    # Run the trajectory correlator
-    tc = TrajectoryCorrelator(data_handle, trajectory_constraints, cml_args.velpart, data_in_j2000=True)
-    tc.run()
+
+    # Init the data handle
+    dh = RMSDataHandle(cml_args.dir_path)
 
 
+    # Find the range of datetimes of all folders (take only those after the year 2000)
+    proc_dir_dts = [entry[3] for entry in dh.processing_list if entry[3] is not None]
+    proc_dir_dts = [dt for dt in dh.processing_list if dt > datetime.datetime(2000, 1, 1, 0, 0, 0)]
+
+    # Determine the limits of data
+    proc_dir_dt_beg = min(proc_dir_dts)
+    proc_dir_dt_end = max(proc_dir_dts)
+
+    # Split the processing into monthly chunks
+    dt_bins = generateDatetimeBins(proc_dir_dt_beg, proc_dir_dt_end, bin_days=30)
+
+    # Go through all monthly chunks in time
+    for bin_beg, bin_end in dt_bins:
+
+        # Load data of unprocessed observations
+        dh.unprocessed_observations = dh.loadUnprocessedObservations(dh.processing_list, \
+            dt_range=(bin_beg, bin_end))
+
+        # Run the trajectory correlator
+        tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True)
+        tc.run()
+
+
+    
     print("Total run time: {:s}".format(str(datetime.datetime.utcnow() - t1)))
