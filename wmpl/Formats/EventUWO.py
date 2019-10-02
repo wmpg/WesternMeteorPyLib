@@ -83,7 +83,7 @@ def loadEventData(event_file_path):
         # Get the reference Julian date
         jd_ref = float(data_dict["jd"])
 
-        dir_path = os.path.dirname(event_path)
+        dir_path = os.path.dirname(event_file_path)
 
 
         # Init the dictionary containing the observations
