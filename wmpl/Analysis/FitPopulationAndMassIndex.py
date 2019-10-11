@@ -21,6 +21,29 @@ def logline(x, m, k):
 
 
 def fitSlope(input_data, mass):
+    """ Fit a gamma distribution on the input data and compute the slope at the reference point. 
+
+    Arguments:
+        input_data: [list] A list of magnitudes or masses (see mass keyword argument).
+
+    Keyword arguments: 
+        mass: [bool] If True, the mass index is computed, if false the population index is computed. 
+
+    
+    Return:
+        params, x_arr, inflection_point, ref_point, slope, slope_report, sign, kstest:
+            - params: [list] A list of fit parameters.
+            - x_arr: [ndarray] An array of independent variable data used to compute the PDF derivative.
+            - inflection_point: [float] Magnitude or mass at which the PDF has the inflection point.
+            - ref_point: [float] The reference point at which the slope is taken. +1 mag brighter if the 
+                magnitudes are given, and +0.4 higher in log mass if masses are used.
+            - slope: [float] The derivative of the PDF at the reference point.
+            - slope_report: [float] Population or mass index.
+            - sign: [float] Sign of the slope. It's negative for the population index because the magnitude
+                scale is inverted.
+            - kstest: [list]: A list of [D, p-value] pair.
+    """
+
 
     # Fit a gamma distribution to the data
     df = 10
@@ -318,3 +341,38 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
 
 
     return params, sign*ref_point, sign*inflection_point, slope_report, slope_report_std, kstest
+
+
+
+
+if __name__ == "__main__":
+
+
+    ### Example of fitting a population index ###
+
+    magnitude_data = [4.19, 4.05, 4.73, 3.32, 3.84, 0.94, 5.04, 5.41, 5.56, 2.77, 3.24, 5.98, 5.12, 1.99, \
+        5.21, 3.58, 1.56, 5.49, 5.64, 3.59, 5.50, 5.54, 3.09, 3.32, 5.53, 2.31, 2.50, 4.51, 4.33, 4.93]
+
+
+    estimateIndex(magnitude_data, mass=False, show_plots=True, plot_save_path=None, nsamples=100, \
+        mass_as_intensity=False)
+
+
+    ### ###
+
+
+
+    ### Example of fitting a mass index ###
+    
+    # Log10 of integrated luminosity (the real mass can also be used)
+    log10_mass_data = [-2.20, -2.15, -2.31, -1.86, -1.96, -0.82, -2.36, -2.51, -2.72, -1.62, -1.86, -2.83, \
+        -2.36, -1.23, -2.47, -1.95, -1.05, -2.76, -2.57, -1.91, -2.72, -2.55, -1.68, -1.83, -2.67, -1.37, \
+        -1.26, -2.34, -2.33, -2.47]
+
+
+    # Compute the mass index
+    # NOTE: If using the true mass, set: mass_as_intensity=False
+    estimateIndex(log10_mass_data, mass=True, show_plots=True, plot_save_path=None, nsamples=100, \
+        mass_as_intensity=True)
+
+    ### ###
