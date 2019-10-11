@@ -9,11 +9,14 @@ import numpy as np
 from wmpl.Formats.GenericArgumentParser import addSolverOptions
 from wmpl.Trajectory.GuralTrajectory import GuralTrajectory
 from wmpl.Trajectory.Trajectory import Trajectory
+from wmpl.Utils.TrajConversions import jd2Date
 
 
 class StationData(object):
-    def __init__(self, lat, lon, height, station_id):
+    def __init__(self, jd_ref, lat, lon, height, station_id):
         """ Container for station data. """
+
+        self.jd_ref = jd_ref
 
         self.station_id = station_id
         self.lon = lon
@@ -24,6 +27,28 @@ class StationData(object):
         self.theta_data = []
         self.phi_data = []
         self.mag_data = []
+
+
+    def __repr__(self):
+
+        out_str  = ""
+        out_str += "StationData object:\n"
+        out_str += "    JD ref: {:s}\n".format(str(self.jd_ref))
+        out_str += "    Time ref: {:s}\n".format(jd2Date(self.jd_ref, \
+            dt_obj=True).strftime("%Y-%m-%d %H:%M:%S.%f"))
+        out_str += "    Lat: {:.6f} deg\n".format(np.degrees(self.lat))
+        out_str += "    Lon: {:.6f} deg\n".format(np.degrees(self.lon))
+        out_str += "    Ele: {:.2f} m\n".format(self.height)
+        out_str += "\n"
+        out_str +="   Time,     Theta,        Phi,    Mag\n"
+        for t, th, phi, mag in zip(self.time_data, np.degrees(self.theta_data), np.degrees(self.phi_data), \
+            self.mag_data):
+
+            out_str += "{:7.3f}, {:9.6f}, {:10.6f}, {:+6.2f}\n".format(t, th, phi, mag)
+
+
+        return out_str
+
 
 
 
@@ -116,7 +141,7 @@ def loadEventData(event_file_path):
             lat = np.radians(float(observers[obs_tag]["lat"]))
             lon = np.radians(float(observers[obs_tag]["lon"]))
             elev = 1000*float(observers[obs_tag]["elv"])
-            stat_data = StationData(lat, lon, elev, observers[obs_tag]["num"])
+            stat_data = StationData(jd_ref, lat, lon, elev, observers[obs_tag]["num"])
 
             # Add the position picks
             stat_data.time_data = data[:, 0]
@@ -162,7 +187,15 @@ def solveTrajectoryUWOEvent(station_data_dict, solver='original', velmodel=3, **
             traj = Trajectory(station_data_dict["jd_ref"], output_dir=station_data_dict["dir_path"], \
                 meastype=4, **kwargs)
 
-        elif solver == 'gural':
+        elif solver.startswith('gural'):
+
+            # Extract velocity model is given
+            try:
+                velmodel = int(solver[-1])
+
+            except: 
+                # Default to the exponential model
+                velmodel = 3
 
             # Select extra keyword arguments that are present only for the gural solver
             gural_keys = ['max_toffset', 'nummonte', 'meastype', 'verbose', 'show_plots']

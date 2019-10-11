@@ -84,7 +84,15 @@ def solveTrajectoryRMS(json_list, dir_path, solver='original', **kwargs):
                 meteor.longitude, meteor.height, station_id=meteor.station_id, \
                 magnitudes=meteor.mag_data)
 
-        elif solver == 'gural':
+        elif solver.lower().startswith('gural'):
+
+            # Extract velocity model is given
+            try:
+                velmodel = int(solver[-1])
+
+            except: 
+                # Default to the exponential model
+                velmodel = 3
 
             traj.infillTrajectory(meteor.ra_data, meteor.dec_data, meteor.time_data, meteor.latitude, 
                 meteor.longitude, meteor.height)
