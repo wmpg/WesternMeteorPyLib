@@ -4545,7 +4545,7 @@ class Trajectory(object):
 
         ######################################################################################################
 
-        ### PLOT ABSOLUTE MAGNITUDES, IF ANY ###
+        ### PLOT ABSOLUTE MAGNITUDES VS TIME, IF ANY ###
 
         first_ignored_plot = True
         if np.any([obs.absolute_magnitudes is not None for obs in self.observations]):
@@ -4592,6 +4592,65 @@ class Trajectory(object):
 
             if self.save_results:
                 savePlot(plt, file_name + '_abs_mag.' + self.plot_file_type, output_dir)
+
+            if show_plots:
+                plt.show()
+
+            else:
+                plt.clf()
+                plt.close()
+
+
+        ######################################################################################################
+
+
+        ### PLOT ABSOLUTE MAGNITUDES VS HEIGHT, IF ANY ###
+
+        first_ignored_plot = True
+        if np.any([obs.absolute_magnitudes is not None for obs in self.observations]):
+
+            # Go through all observations
+            for obs in self.observations:
+
+                # Check if the absolute magnitude was given
+                if obs.absolute_magnitudes is not None:
+
+                    # Filter out None absolute magnitudes
+                    filter_mask = np.array([abs_mag is not None for abs_mag in obs.absolute_magnitudes])
+
+                    # Extract data that is not ignored
+                    used_heights = obs.model_ht[filter_mask & (obs.ignore_list == 0)]
+                    used_magnitudes = obs.absolute_magnitudes[filter_mask & (obs.ignore_list == 0)]
+
+                    plt_handle = plt.plot(used_magnitudes, used_heights/1000, marker='x', \
+                        label=str(obs.station_id), zorder=3)
+
+                    # Mark ignored absolute magnitudes
+                    if np.any(obs.ignore_list):
+
+                        # Extract data that is ignored
+                        ignored_heights = obs.model_ht[filter_mask & (obs.ignore_list > 0)]
+                        ignored_magnitudes = obs.absolute_magnitudes[filter_mask & (obs.ignore_list > 0)]
+
+                        plt.scatter(ignored_magnitudes, ignored_heights/1000, facecolors='k', \
+                            edgecolors=plt_handle[0].get_color(), marker='o', s=8, zorder=4)
+
+
+            plt.xlabel('Absolute magnitude')
+            plt.ylabel('Height (km)')
+
+            plt.gca().invert_xaxis()
+
+            plt.legend()
+
+            plt.grid()
+
+            # Pickle the figure
+            if ret_figs:
+                fig_pickle_dict["abs_mag_ht"] = pickle.dumps(plt.gcf(), protocol=2)
+
+            if self.save_results:
+                savePlot(plt, file_name + '_abs_mag_ht.' + self.plot_file_type, output_dir)
 
             if show_plots:
                 plt.show()
