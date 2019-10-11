@@ -551,6 +551,11 @@ def fitResiduals(params, fit_input_data, param_string, const_original, traj, min
     total_residual = total_mag_residual/mag_point_count + total_lag_residual/lag_point_count
 
 
+    # If the total residual is zero, make it very high
+    if total_residual == 0:
+        total_residual = 1e8
+
+
     if verbose:
         print('Total residual:', total_residual)
 
