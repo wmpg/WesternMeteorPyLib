@@ -528,6 +528,11 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         help='Save plots to disk.', action="store_true")
 
 
+    arg_parser.add_argument('-r', '--timerange', metavar='TIME_RANGE', \
+        help="""Only compute the trajectories in the given range of time. The time range should be given in the format: "(YYYYMMDD-HHMMSS,YYYYMMDD-HHMMSS)".""", \
+            type=str)
+
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -551,6 +556,34 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     dh = RMSDataHandle(cml_args.dir_path)
 
 
+    # If there is nothing to process, stop
+    if not dh.processing_list:
+        print()
+        print("Nothing to process!")
+        print("Probably everything is already processed.")
+        print("Exiting...")
+        sys.exit()
+
+
+
+    # If the time range to use is given, use it
+    event_time_range = None
+    if cml_args.timerange is not None:
+
+        # Extract time range
+        time_beg, time_end = cml_args.timerange.strip("(").strip(")").split(",")
+        dt_beg = datetime.datetime.strptime(time_beg, "%Y%m%d-%H%M%S")
+        dt_end = datetime.datetime.strptime(time_end, "%Y%m%d-%H%M%S")
+
+        print("Custom time range:")
+        print("    BEG: {:s}".format(str(dt_beg)))
+        print("    END: {:s}".format(str(dt_end)))
+
+        event_time_range = [dt_beg, dt_end]
+
+
+    ### GENERATE MONTHLY TIME BINS ###
+    
     # Find the range of datetimes of all folders (take only those after the year 2000)
     proc_dir_dts = [entry[3] for entry in dh.processing_list if entry[3] is not None]
     proc_dir_dts = [dt for dt in proc_dir_dts if dt > datetime.datetime(2000, 1, 1, 0, 0, 0)]
@@ -562,8 +595,24 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     # Split the processing into monthly chunks
     dt_bins = generateDatetimeBins(proc_dir_dt_beg, proc_dir_dt_end, bin_days=30)
 
-    # Go through all monthly chunks in time
+    print()
+    print("ALL TIME BINS:")
+    print("----------")
     for bin_beg, bin_end in dt_bins:
+        print("{:s}, {:s}".format(str(bin_beg), str(bin_end)))
+
+
+    ### ###
+
+
+    # Go through all chunks in time
+    for bin_beg, bin_end in dt_bins:
+
+        print()
+        print("PROCESSING TIME BIN:")
+        print(bin_beg, bin_end)
+        print("-----------------------------")
+        print()
 
         # Load data of unprocessed observations
         dh.unprocessed_observations = dh.loadUnprocessedObservations(dh.processing_list, \
@@ -571,7 +620,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
 
         # Run the trajectory correlator
         tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True)
-        tc.run()
+        tc.run(event_time_range=event_time_range)
 
 
     

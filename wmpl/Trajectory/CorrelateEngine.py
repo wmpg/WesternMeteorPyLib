@@ -386,8 +386,13 @@ class TrajectoryCorrelator(object):
 
 
 
-    def run(self):
-        """ Run meteor corellation using available data. """
+    def run(self, event_time_range=None):
+        """ Run meteor corellation using available data. 
+
+        Keyword arguments:
+            event_time_range: [list] A list of two datetime objects. These are times between which
+                events should be used. None by default, which uses all available events.
+        """
 
         # Get unprocessed observations and sort them by time
         unprocessed_observations_all = self.dh.getUnprocessedObservations()
@@ -398,12 +403,20 @@ class TrajectoryCorrelator(object):
             if met_obs.reference_dt > datetime.datetime(2000, 1, 1, 0, 0, 0)]
 
 
-        # Generate bins of datetimes for faster processing
+        
+        # If the event range was given, only use the events in that time range
+        if event_time_range:
+            dt_beg, dt_end = event_time_range
+            dt_bin_list = [event_time_range]
+
+        # Otherwise, generate bins of datetimes for faster processing
         # Data will be divided into time bins, so the pairing function doesn't have to go pair many
-        #   observations at once and keep all pairs in memory
-        dt_beg = unprocessed_observations_all[0].reference_dt
-        dt_end = unprocessed_observations_all[-1].reference_dt
-        dt_bin_list = generateDatetimeBins(dt_beg, dt_end, bin_days=7, utc_hour_break=12)
+            #   observations at once and keep all pairs in memory
+        else:
+            dt_beg = unprocessed_observations_all[0].reference_dt
+            dt_end = unprocessed_observations_all[-1].reference_dt
+            dt_bin_list = generateDatetimeBins(dt_beg, dt_end, bin_days=7, utc_hour_break=12)
+
 
         print()
         print("---------------------------------")
@@ -536,15 +549,16 @@ class TrajectoryCorrelator(object):
             merged_candidate_trajectories = []
             merged_indices = []
             for i, traj_cand_ref in enumerate(candidate_trajectories):
+
+                # Skip candidate trajectories that have already been merged
+                if i in merged_indices:
+                    continue
+
                 
                 # Stop the search if the end has been reached
                 if (i + 1) == len(candidate_trajectories):
                     merged_candidate_trajectories.append(traj_cand_ref)
                     break
-
-                # Skip candidate trajectories that have already been merged
-                if i in merged_indices:
-                    continue
 
 
                 # Get the mean time of the reference observation
@@ -626,13 +640,16 @@ class TrajectoryCorrelator(object):
 
 
             print()
-            print("--------------------")
-            print("SOLVING TRAJECTORIES")
-            print("--------------------")
+            print("-----------------------")
+            print("SOLVING {:d} TRAJECTORIES".format(len(candidate_trajectories)))
+            print("-----------------------")
             print()
 
             # Go through all candidate trajectories and compute the complete trajectory solution
             for matched_observations in candidate_trajectories:
+
+                print()
+                print("-----------------------")
 
 
                 ### If there are duplicate observations from the same station, take the longer one ###
@@ -676,6 +693,10 @@ class TrajectoryCorrelator(object):
                                 matched_observations.remove(entry)
 
                 ###
+
+
+                # Sort observations by station code
+                matched_observations = sorted(matched_observations, key=lambda x: str(x[1].station_code))
 
 
                 # Print info about observations which are being solved
@@ -736,16 +757,18 @@ class TrajectoryCorrelator(object):
                     continue
 
 
+                print()
+
 
                 ### Check for bad observations and rerun the solution if necessary ###
 
                 # Perform three passes of rejections to weed out all bad stations
+                any_ignored_stations = False
                 for _ in range(3):
 
                     # a) Reject all observations which have angular residuals <bad_station_obs_ang_limit> times
                     #   larger than the median of all other observations
                     # b) Reject all observations with higher residuals than the fixed limit
-                    any_ignored_stations = False
                     for i, obs in enumerate(traj.observations):
 
                         if obs.ignore_station:
@@ -769,7 +792,12 @@ class TrajectoryCorrelator(object):
                             traj.observations[i].ignore_list = np.ones(len(obs.time_data), dtype=np.uint8)
                             any_ignored_stations = True
 
-                            print("Ignoring station:", obs.station_id)
+                            print("Ignoring station {:s}".format(obs.station_id))
+                            print("   obs std: {:.2f} arcsec".format(3600*np.degrees(obs.ang_res_std)))
+                            print("   bad lim: {:.2f} arcsec".format(3600*np.degrees(ang_res_median\
+                                *self.traj_constraints.bad_station_obs_ang_limit)))
+                            print("   max err: {:.2f} arcsec".format(self.traj_constraints.max_arcsec_err))
+
 
 
                 # If there are less than 2 stations that are not ignored, skip this solution
@@ -780,9 +808,10 @@ class TrajectoryCorrelator(object):
                 # If there are any ignored stations, rerun the solution
                 if any_ignored_stations:
 
+                    print()
                     print("Rerunning the trajectory solution...")
 
-                    traj.run()
+                    traj_status = traj.run()
 
 
                 ### ###

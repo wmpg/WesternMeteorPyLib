@@ -91,9 +91,6 @@ def solveTrajectoryPickle(dir_path, file_name, only_plot=False, solver='original
     elif solver == 'gural':
 
         # Init the Gural solver
-        # traj = GuralTrajectory(len(traj_p.observations), traj_p.jdt_ref, max_toffset=traj_p.max_toffset, \
-        #     meastype=traj_p.meastype, output_dir=dir_path)
-
         traj = GuralTrajectory(len(traj_p.observations), traj_p.jdt_ref, velmodel=3, \
             max_toffset=traj_p.max_toffset, meastype=2, output_dir=dir_path, verbose=True)
 

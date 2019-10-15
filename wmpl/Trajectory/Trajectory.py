@@ -2693,8 +2693,8 @@ class Trajectory(object):
         """
 
         # Take the initial velocity as the median velocity between all sites
-        v_init = np.array([obs.v_init for obs in observations])
-        v_init = np.median(v_init)
+        v_init_list = np.array([obs.v_init for obs in observations if obs.v_init is not None])
+        v_init = np.median(v_init_list)
 
         # Timing differences which will be calculated
         time_diffs = np.zeros(len(observations))
@@ -3073,26 +3073,29 @@ class Trajectory(object):
 
 
 
+        # Make a list of observations without any ignored stations in them
+        nonignored_observations = [obs for obs in self.observations if not obs.ignore_station]
+
         # Find the highest beginning height
-        beg_hts = [obs.rbeg_ele for obs in self.observations if (obs.ignore_station == False)]
+        beg_hts = [obs.rbeg_ele for obs in nonignored_observations]
         first_begin = beg_hts.index(max(beg_hts))
 
         # Set the coordinates of the height point as the first point
-        self.rbeg_lat = self.observations[first_begin].rbeg_lat
-        self.rbeg_lon = self.observations[first_begin].rbeg_lon
-        self.rbeg_ele = self.observations[first_begin].rbeg_ele
-        self.rbeg_jd = self.observations[first_begin].rbeg_jd
+        self.rbeg_lat = nonignored_observations[first_begin].rbeg_lat
+        self.rbeg_lon = nonignored_observations[first_begin].rbeg_lon
+        self.rbeg_ele = nonignored_observations[first_begin].rbeg_ele
+        self.rbeg_jd = nonignored_observations[first_begin].rbeg_jd
 
 
         # Find the lowest ending height
-        end_hts = [obs.rend_ele for obs in self.observations if (obs.ignore_station == False)]
+        end_hts = [obs.rend_ele for obs in nonignored_observations]
         last_end = end_hts.index(min(end_hts))
 
         # Set coordinates of the lowest point as the last point
-        self.rend_lat = self.observations[last_end].rend_lat
-        self.rend_lon = self.observations[last_end].rend_lon
-        self.rend_ele = self.observations[last_end].rend_ele
-        self.rend_jd = self.observations[last_end].rend_jd
+        self.rend_lat = nonignored_observations[last_end].rend_lat
+        self.rend_lon = nonignored_observations[last_end].rend_lon
+        self.rend_ele = nonignored_observations[last_end].rend_ele
+        self.rend_jd = nonignored_observations[last_end].rend_jd
 
 
 
@@ -4410,7 +4413,13 @@ class Trajectory(object):
             m.scatter(obs.lat, obs.lon, s=10, label=str(obs.station_id), marker='x')
 
             # Plot measured points
-            m.plot(obs.meas_lat, obs.meas_lon, c='r')
+            m.plot(obs.meas_lat[obs.ignore_list == 0], obs.meas_lon[obs.ignore_list == 0], c='r')
+
+            # Plot ignored points
+            if np.any(obs.ignore_list != 0):
+                m.scatter(obs.meas_lat[obs.ignore_list != 0], obs.meas_lon[obs.ignore_list != 0], c='k', \
+                    marker='x', s=5, alpha=0.5)
+
 
 
         # Plot a point marking the final point of the meteor
