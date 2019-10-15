@@ -4875,7 +4875,8 @@ class Trajectory(object):
         ### Recompute the reference JD and all times so that the first time starts at 0 ###
 
         # Determine the first relative time from reference JD
-        t0 = min([obs.time_data[0] for obs in self.observations])
+        t0 = min([obs.time_data[0] for obs in self.observations if (not obs.ignore_station) \
+            or (not np.all(obs.ignore_list))])
 
         # If the first time is not 0, normalize times so that the earliest time is 0
         if t0 != 0.0:
