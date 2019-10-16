@@ -2463,7 +2463,8 @@ class MetSimGUI(QMainWindow):
 
 
             # Set up hyperparameters
-            options = {'c1': 0.5, 'c2': 0.7, 'w':0.9}
+            #options = {'c1': 0.5, 'c2': 0.7, 'w':0.9}
+            options = {'c1': 0.5, 'c2': 0.3, 'w': 0.9, 'k': 3, 'p': 2}
 
 
             # Set up bounds (min, max) are (0, 1)
@@ -2488,7 +2489,7 @@ class MetSimGUI(QMainWindow):
 
 
             # Call instance of PSO with bounds argument
-            optimizer = ps.single.GlobalBestPSO(n_particles=self.pso_particles, dimensions=len(p0_normed), \
+            optimizer = ps.single.LocalBestPSO(n_particles=self.pso_particles, dimensions=len(p0_normed), \
                 options=options, bounds=pso_bounds, bh_strategy='reflective', vh_strategy='invert', \
                 init_pos=init_pos)
 
