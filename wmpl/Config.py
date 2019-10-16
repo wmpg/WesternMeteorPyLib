@@ -182,6 +182,18 @@ class ConfigStruct(object):
 
         ###
 
+
+        ### SHOWER ASSOCIATION
+
+        # Jenniskens et al. (2018) shower table
+        self.jenniskens_shower_table_file = os.path.join(abs_path, 'share', 'ShowerLookUpTable.txt')
+
+        # IAU shower table
+        self.iau_shower_table_file = os.path.join(abs_path, 'share', 'streamfulldata.csv')
+
+        ###
+
+
         # Leap seconds file
         self.leap_seconds_file = os.path.join(abs_path, 'share', 'tai-utc.dat')
 
