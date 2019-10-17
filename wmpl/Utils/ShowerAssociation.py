@@ -5,6 +5,7 @@ from __future__ import print_function, division, absolute_import
 
 
 import os
+import sys
 import copy
 
 # Preserve Python 2 compatibility for the encoding option in the "open" function
@@ -15,6 +16,7 @@ import numpy as np
 
 from wmpl.Config import config
 from wmpl.Utils.Math import angleBetweenSphericalCoords
+from wmpl.Utils.Pickling import loadPickle
 
 
 class MeteorShower(object):
@@ -99,9 +101,9 @@ jenniskens_shower_list = loadJenniskensShowers(*os.path.split(config.jenniskens_
 iau_shower_list = np.loadtxt(config.iau_shower_table_file, delimiter="|", usecols=range(20), dtype=str)
 
 
-def associateShowersJenniskens(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=3.0, \
+def associateShower(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=3.0, \
     max_veldif_percent=10.0):
-    """ Given the shower radiant in Sun-centered ecliptic coordinates, associate it to a meteor shower
+    """ Given a shower radiant in Sun-centered ecliptic coordinates, associate it to a meteor shower
         using the showers listed in the Jenniskens et al. (2018) paper. 
 
     Arguments:
@@ -170,7 +172,6 @@ def associateShowersJenniskens(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius
 
     ### ###
 
-    print(best_shower)
 
     # Init a shower object
     l0, L_l0, B_g, v_g, IAU_no = best_shower
@@ -182,12 +183,94 @@ def associateShowersJenniskens(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius
 
 
 
+def associateShowerTraj(traj, sol_window=1.0, max_radius=3.0, \
+    max_veldif_percent=10.0):
+    """ Given a Trajectory object, associate it to a meteor shower using the showers listed in the 
+        Jenniskens et al. (2018) paper. 
+
+    Arguments:
+        traj: [Trajectory object] A trajectory object.
+
+    Keyword arguments:
+        sol_window: [float] Solar longitude window of association (deg).
+        max_radius: [float] Maximum angular separation from reference radiant (deg).
+        max_veldif_percent: [float] Maximum velocity difference in percent.
+
+    Return:
+        [MeteorShower instance] MeteorShower instance for the closest match, or None for sporadics.
+    """
+
+    if traj.orbit.ra_g is not None:
+        return associateShower(traj.orbit.la_sun, traj.orbit.L_g, traj.orbit.B_g, traj.orbit.v_g, \
+            sol_window=sol_window, max_radius=max_radius, max_veldif_percent=max_veldif_percent)
+
+    else:
+        return None
+
+
+
+
 if __name__ == "__main__":
 
+    import argparse
 
-    import time
+
+    ### COMMAND LINE ARGUMENTS
+
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="""Associate the given trajectory object to a meteor shower.""",
+        formatter_class=argparse.RawTextHelpFormatter)
+
+    arg_parser.add_argument('traj_path', type=str, help="Path to a trajectory pickle file.")
+
+    arg_parser.add_argument('-s', '--solwindow', metavar='SOL_WINDOW', \
+        help="Solar longitude window (deg) for association. Note that the shower table has an entry for the same shower across several solar longitudes, which covers the activity period.", \
+        type=float, default=1.0)
+
+    arg_parser.add_argument('-r', '--radius', metavar='RADIUS', \
+        help="Maximum distance from reference radiant for association (deg).", \
+        type=float, default=3.0)
+
+    arg_parser.add_argument('-v', '--velperc', metavar='VEL_PERC', \
+        help="Maximum difference in geocentric velocity (in percent) from the reference radiant.", \
+        type=float, default=10.0)
+
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    ##################################
+
+
+    # Load the given trajectory object
+    if os.path.isfile(cml_args.traj_path):
+
+        # Load the trajectory object
+        traj = loadPickle(*os.path.split(cml_args.traj_path))
+
+        # Perform shower association
+        shower_obj = associateShowerTraj(traj, sol_window=cml_args.solwindow, max_radius=cml_args.radius, \
+            max_veldif_percent=cml_args.velperc)
+
+
+        if shower_obj is None:
+            print("Sporadic")
+        
+        else:
+            print(shower_obj)
+
+
+    else:
+        print("The file {:s} does not exist!".format(cml_args.traj_path))
+
+
+
+    ##########################################################################################################
+    sys.exit()
 
     ### Test shower association ###
+
+    import time
 
 
     # Draconid meteor
@@ -198,5 +281,5 @@ if __name__ == "__main__":
 
 
     t1 = time.time()
-    print(associateShowersJenniskens(la_sun, L_g, B_g, v_g))
+    print(associateShower(la_sun, L_g, B_g, v_g))
     print("Time for association:", time.time() - t1)
