@@ -13,6 +13,7 @@ from jplephem.spk import SPK
 from wmpl.Config import config
 
 from wmpl.Utils.Earth import calcEarthRectangularCoordJPL
+from wmpl.Utils.ShowerAssociation import associateShower
 from wmpl.Utils.SolarLongitude import jd2SolLonJPL
 from wmpl.Utils.TrajConversions import J2000_JD, J2000_OBLIQUITY, AU, SUN_MU, SUN_MASS, G, SIDEREAL_YEAR, \
     jd2LST, jd2Date, jd2DynamicalTimeJD, eci2RaDec, altAz2RADec, raDec2AltAz, raDec2Ecliptic, cartesian2Geo,\
@@ -324,6 +325,21 @@ class Orbit(object):
                 out_str += "  Last perihelion JD = NaN \n"
 
             out_str += "  Tj     = {:>10.6f}{:s}\n".format(self.Tj, _uncer('{:.4f}', 'Tj'))
+
+
+            out_str += "Shower association:\n"
+
+            # Perform shower association
+            shower_obj = associateShower(self.la_sun, self.L_g, self.B_g, self.v_g)
+            if shower_obj is None:
+                shower_no = -1
+                shower_code = '...'
+            else:
+                shower_no = shower_obj.IAU_no
+                shower_code = shower_obj.IAU_code
+
+            out_str += "  IAU No.  = {:>4d}\n".format(shower_no)
+            out_str += "  IAU code = {:>4s}\n".format(shower_code)
 
 
         return out_str
