@@ -332,6 +332,36 @@ def angleBetweenSphericalCoords(phi1, lambda1, phi2, lambda2):
     return np.arccos(np.sin(phi1)*np.sin(phi2) + np.cos(phi1)*np.cos(phi2)*np.cos(lambda2 - lambda1))
 
 
+
+@np.vectorize
+def sphericalPointFromHeadingAndDistance(phi, lam, heading, distance):
+    """ Given RA and Dec, a heading and angular distance, compute coordinates of the point.
+
+    Arguments:
+        phi: [float] Latitude (radians).
+        lam: [float] Longitude (radians).
+        heading: [float] Heading +E of due N in degrees (radians).
+        distance: [float] Distance (radians).
+
+    Return:
+        phi_new, lam_new: [float] Coordinates of the new point (radians)
+
+    """
+
+    # Compute the new declination
+    phi_new = np.arcsin(np.sin(phi)*np.cos(distance) + np.cos(phi)*np.sin(distance)*np.cos(heading))
+
+    # Handle poles and compute right ascension
+    if np.cos(phi_new) == 0:
+       lam_new = lam
+
+    else:
+       lam_new = (lam - np.arcsin(np.sin(heading)*np.sin(distance)/np.cos(phi_new)) + np.pi)%(2*np.pi) - np.pi
+
+
+    return phi_new, lam_new%(2*np.pi)
+
+
 ##############################################################################################################
 
 

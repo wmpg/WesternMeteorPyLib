@@ -115,6 +115,9 @@ class CelestialPlot(object):
 
         """
 
+        # Store the plot handle
+        self.plt = plt
+
         if projection == 'stere':
 
             ### STEREOGRAPHIC PROJECTION ###
@@ -185,7 +188,7 @@ class CelestialPlot(object):
                 except:
                     pass
 
-            plt.gca().tick_params(axis='x', pad=15)
+            self.plt.gca().tick_params(axis='x', pad=15)
 
 
             ##################################################################################################
@@ -214,13 +217,13 @@ class CelestialPlot(object):
                 if dec == 0:
                     continue
 
-                plt.annotate(u"{:+d}\u00b0".format(int(dec)), xy=self.m(lon_0, dec), xycoords='data', ha='center', 
+                self.plt.annotate(u"{:+d}\u00b0".format(int(dec)), xy=self.m(lon_0, dec), xycoords='data', ha='center', 
                     va='center', color='0.8', alpha=0.5, fontsize=8)
 
 
             # Plot meridian labels
             for ra in np.arange(0, 360, 2*label_angle_freq):
-                plt.annotate(u"{:d}\u00b0".format(int(ra)), xy=self.m(ra, 0), xycoords='data', ha='center', \
+                self.plt.annotate(u"{:d}\u00b0".format(int(ra)), xy=self.m(ra, 0), xycoords='data', ha='center', \
                     va='center', color='0.8', alpha=0.5, fontsize=8)
 
             ##################################################################################################
@@ -231,8 +234,57 @@ class CelestialPlot(object):
         self.m.drawmapboundary(fill_color=bgcolor)
 
         # Turn off shortening numbers into offsets
-        plt.gca().get_xaxis().get_major_formatter().set_useOffset(False)
-        plt.gca().get_yaxis().get_major_formatter().set_useOffset(False)
+        self.plt.gca().get_xaxis().get_major_formatter().set_useOffset(False)
+        self.plt.gca().get_yaxis().get_major_formatter().set_useOffset(False)
+
+
+
+    def plot(self, ra_data, dec_data, **kwargs):
+        """ Plot on the celestial sphere. 
+    
+        Arguments:
+            ra_data: [ndarray] R.A. data in radians.
+            dec_data: [ndarray] Declination data in radians.
+
+        Keyword arguments:
+            **kwargs: [dict] Any additional keyword arguments will be passes to matplotlib plot function.
+        """
+
+
+        # Do not plot anything if the inputs are None
+        if (ra_data is None) or (dec_data is None):
+            return None
+
+        # Convert angular coordinates to image coordinates
+        x, y = self.m(np.degrees(ra_data), np.degrees(dec_data))
+
+        plot_handle = self.m.plot(x, y, zorder=3, **kwargs)
+
+        return plot_handle
+
+
+    def text(self, txt, ra_data, dec_data, **kwargs):
+        """ Plot text on the celestial sphere. 
+    
+        Arguments:
+            ra_data: [ndarray] R.A. data in radians.
+            dec_data: [ndarray] Declination data in radians.
+
+        Keyword arguments:
+            **kwargs: [dict] Any additional keyword arguments will be passes to matplotlib text function.
+        """
+
+
+        # Do not plot anything if the inputs are None
+        if (ra_data is None) or (dec_data is None):
+            return None
+
+        # Convert angular coordinates to image coordinates
+        x, y = self.m(np.degrees(ra_data), np.degrees(dec_data))
+
+        text_handle = self.plt.text(x, y, txt, zorder=3, **kwargs)
+
+        return text_handle
 
 
 

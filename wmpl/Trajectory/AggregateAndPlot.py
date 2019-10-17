@@ -11,12 +11,12 @@ import scipy.stats
 import scipy.ndimage
 
 
-from wmpl.Utils.Math import averageClosePoints
+from wmpl.Utils.Math import averageClosePoints, meanAngle, sphericalPointFromHeadingAndDistance
 from wmpl.Utils.Physics import calcMass
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PlotCelestial import CelestialPlot
 from wmpl.Utils.PlotMap import MapColorScheme
-from wmpl.Utils.ShowerAssociation import associateShowerTraj
+from wmpl.Utils.ShowerAssociation import associateShowerTraj, MeteorShower
 from wmpl.Utils.SolarLongitude import jd2SolLonSteyaert
 from wmpl.Utils.TrajConversions import jd2Date
 
@@ -28,6 +28,12 @@ from wmpl.Utils.TrajConversions import jd2Date
 # Trajectory summary file name
 TRAJ_SUMMARY_FILE = "trajectory_summary.txt"
 
+
+# Minimum number of shower members to mark the shower
+MIN_SHOWER_MEMBERS = 3
+
+# Plot shower radius (deg)
+PLOT_SHOWER_RADIUS = 3.0
 
 ### ###
 
@@ -299,7 +305,7 @@ def writeOrbitSummaryFile(dir_path, traj_list, P_0m=1210):
 
 
 def plotSCE(x_data, y_data, color_data, sol_range, plot_title, colorbar_title, dir_path, \
-    file_name, density_plot=False):
+    file_name, density_plot=False, plot_showers=False, shower_obj_list=None):
 
     ### PLOT SUN-CENTERED GEOCENTRIC ECLIPTIC RADIANTS ###
 
@@ -394,6 +400,71 @@ def plotSCE(x_data, y_data, color_data, sol_range, plot_title, colorbar_title, d
         # Plot the colorbar
         cb = fig.colorbar(plt_handle)
 
+
+
+
+    # Plot showers, if given
+    if plot_showers and (shower_obj_list is not None):
+        for shower_obj in shower_obj_list:
+
+            # Compute the plotting coordinates
+            lam = shower_obj.L_g - shower_obj.la_sun
+            bet = shower_obj.B_g
+
+
+            ### Plot a <PLOT_SHOWER_RADIUS> deg radius circle around the shower centre ###
+            
+            # Generate circle data points
+            heading_arr = np.linspace(0, 2*np.pi, 50)
+            bet_arr, lam_arr = sphericalPointFromHeadingAndDistance(bet, lam, heading_arr, \
+                np.radians(PLOT_SHOWER_RADIUS))
+
+            # Plot the circle
+            celes_plot.plot(lam_arr, bet_arr, color='w', alpha=0.5)
+
+            ### ###
+
+
+            #### Plot the name of the shower ###
+
+            # The name orientation is determined by the quadrant, so all names "radiate" from the 
+            #   centre of the plot
+            heading = 0
+            lam_check = (lam - np.radians(270))%(2*np.pi)
+            va = 'top'
+            if lam_check < np.pi:
+                ha = 'right'
+                if bet > 0:
+                    heading = -np.pi/4
+                    va = 'bottom'
+                else:
+                    heading = -3*np.pi/4
+            else:
+                ha = 'left'
+                if bet > 0:
+                    heading = np.pi/4
+                    va = 'bottom'
+                else:
+                    heading = 3*np.pi/4
+
+            # Get the shower name location
+            bet_txt, lam_txt = sphericalPointFromHeadingAndDistance(bet, lam, heading, \
+                np.radians(PLOT_SHOWER_RADIUS))
+
+            # Plot the shower name
+            celes_plot.text(shower_obj.IAU_code, lam_txt, bet_txt, ha=ha, va=va, color='w', alpha=0.5)
+
+
+
+
+
+
+            ### ###
+
+
+
+
+
     
     # Tweak the colorbar
     cb.set_label(colorbar_title, color=fg_color)
@@ -426,16 +497,20 @@ def plotSCE(x_data, y_data, color_data, sol_range, plot_title, colorbar_title, d
 
 
 def generateTrajectoryPlots(dir_path, traj_list, plot_name='scecliptic', plot_vg=True, plot_sol=True, \
-    plot_density=True):
+    plot_density=True, plot_showers=False):
     """ Given a path with trajectory .pickle files, generate orbits plots. """
 
 
 
     ### Plot Sun-centered geocentric ecliptic plots ###
+
     lambda_list = []
     beta_list = []
     vg_list = []
     sol_list = []
+
+    shower_no_list = []
+    shower_obj_dict = {}
 
     hypo_count = 0
     jd_min = np.inf
@@ -459,6 +534,43 @@ def generateTrajectoryPlots(dir_path, traj_list, plot_name='scecliptic', plot_vg
         jd_max = max(jd_max, traj.jdt_ref)
 
 
+
+        if plot_showers:
+
+            # Perform shower association and track the list of all showers
+            shower_obj = associateShowerTraj(traj)
+
+            # If the trajectory was associated, sort it to the appropriate shower
+            if shower_obj is not None:
+                if shower_obj.IAU_no not in shower_no_list:
+                    shower_no_list.append(shower_obj.IAU_no)
+                    shower_obj_dict[shower_obj.IAU_no] = [shower_obj]
+                else:
+                    shower_obj_dict[shower_obj.IAU_no].append(shower_obj)
+
+
+
+    # Compute mean shower radiant for all associated showers
+    shower_obj_list = []
+    if plot_showers and shower_obj_dict:
+        for shower_no in shower_obj_dict:
+
+            # Check if there are enough shower members for plotting
+            if len(shower_obj_dict[shower_no]) < MIN_SHOWER_MEMBERS:
+                continue
+
+            la_sun_mean = meanAngle([sh.la_sun for sh in shower_obj_dict[shower_no]])
+            L_g_mean = meanAngle([sh.L_g for sh in shower_obj_dict[shower_no]])
+            B_g_mean = np.mean([sh.B_g for sh in shower_obj_dict[shower_no]])
+            v_g_mean = np.mean([sh.v_g for sh in shower_obj_dict[shower_no]])
+
+            # Init a new shower object
+            shower_obj_mean = MeteorShower(la_sun_mean, L_g_mean, B_g_mean, v_g_mean, shower_no)
+
+            shower_obj_list.append(shower_obj_mean)
+
+
+
     print("Hyperbolic percentage: {:.2f}%".format(100*hypo_count/len(traj_list)))
 
     # Compute the range of solar longitudes
@@ -470,14 +582,15 @@ def generateTrajectoryPlots(dir_path, traj_list, plot_name='scecliptic', plot_vg
     # Plot SCE vs Vg
     if plot_vg:
         plotSCE(lambda_list, beta_list, vg_list, (sol_min, sol_max), 
-            "Sun-centered geocentric ecliptic coordinates", "$V_g$ (km/s)", dir_path, plot_name + "_vg.png")
+            "Sun-centered geocentric ecliptic coordinates", "$V_g$ (km/s)", dir_path, plot_name + "_vg.png", \
+            shower_obj_list=shower_obj_list, plot_showers=plot_showers)
 
 
     # Plot SCE vs Sol
     if plot_sol:
         plotSCE(lambda_list, beta_list, sol_list, (sol_min, sol_max), \
             "Sun-centered geocentric ecliptic coordinates", "Solar longitude (deg)", dir_path, \
-            plot_name + "_sol.png")
+            plot_name + "_sol.png", shower_obj_list=shower_obj_list, plot_showers=plot_showers)
     
 
     
@@ -485,7 +598,7 @@ def generateTrajectoryPlots(dir_path, traj_list, plot_name='scecliptic', plot_vg
     if plot_density:
         plotSCE(lambda_list, beta_list, None, (sol_min, sol_max), 
             "Sun-centered geocentric ecliptic coordinates", "Count", dir_path, plot_name + "_density.png", \
-            density_plot=True)
+            density_plot=True, shower_obj_list=shower_obj_list, plot_showers=plot_showers)
 
 
 
@@ -716,9 +829,9 @@ if __name__ == "__main__":
     print("Writing summary file...")
     writeOrbitSummaryFile(cml_args.dir_path, traj_list)
 
-    # Generate plots
+    # Generate summary plots
     print("Plotting all trajectories...")
-    generateTrajectoryPlots(cml_args.dir_path, traj_list)
+    generateTrajectoryPlots(cml_args.dir_path, traj_list, plot_showers=False)
 
     # Generate station plot
     print("Plotting station plot...")
@@ -746,4 +859,5 @@ if __name__ == "__main__":
 
         # Plot graphs per solar longitude
         generateTrajectoryPlots(cml_args.dir_path, traj_list_sol, \
-            plot_name="scecliptic_solrange_{:05.1f}-{:05.1f}".format(sol_min, sol_max), plot_sol=False)
+            plot_name="scecliptic_solrange_{:05.1f}-{:05.1f}".format(sol_min, sol_max), plot_sol=False, \
+            plot_showers=True)
