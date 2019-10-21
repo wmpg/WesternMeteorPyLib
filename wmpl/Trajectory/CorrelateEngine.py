@@ -813,6 +813,11 @@ class TrajectoryCorrelator(object):
 
                     traj_status = traj.run()
 
+                    # If the trajectory estimation failed, skip this trajectory
+                    if traj_status is None:
+                        print("Trajectory estimation failed!")
+                        continue
+
 
                 ### ###
 
