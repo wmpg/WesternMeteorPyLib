@@ -518,8 +518,8 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         type=float, default=25.0)
 
     arg_parser.add_argument('-p', '--velpart', metavar='VELOCITY_PART', \
-        help='Fixed part from the beginning of the meteor on which the initial velocity estimation using the sliding fit will start. Default is 0.25 (25 percent), but for noisier data this might be bumped up to 0.5.', \
-        type=float, default=0.25)
+        help='Fixed part from the beginning of the meteor on which the initial velocity estimation using the sliding fit will start. Default is 0.4 (40 percent), but for noisier data this should be bumped up to 0.5.', \
+        type=float, default=0.40)
 
     arg_parser.add_argument('-d', '--disablemc', \
         help='Disable Monte Carlo.', action="store_true")
