@@ -11,6 +11,7 @@ from wmpl.Trajectory.Trajectory import ObservedPoints, PlaneIntersection, Trajec
 from wmpl.Utils.Earth import greatCircleDistance
 from wmpl.Utils.Math import vectNorm, vectMag, angleBetweenVectors, vectorFromPointDirectionAndAngle, \
     findClosestPoints, generateDatetimeBins
+from wmpl.Utils.ShowerAssociation import associateShowerTraj
 from wmpl.Utils.TrajConversions import J2000_JD, geo2Cartesian, cartesian2Geo, raDec2AltAz, altAz2RADec, \
     raDec2ECI, datetime2JD, equatorialCoordPrecession_vect
 
@@ -828,6 +829,17 @@ class TrajectoryCorrelator(object):
                 if traj.orbit.ra_g is not None:
 
                     self.dh.saveTrajectoryResults(traj, self.traj_constraints.save_plots)
+
+                    print()
+                    print("RA_g  = {:7.3f} deg".format(np.degrees(traj.orbit.ra_g)))
+                    print("Deg_g = {:+7.3f} deg".format(np.degrees(traj.orbit.dec_g)))
+                    print("V_g   = {:6.2f} km/s".format(traj.orbit.v_g/1000))
+                    shower_obj = associateShowerTraj(traj)
+                    if shower_obj is None:
+                        shower_code = '...'
+                    else:
+                        shower_code = shower_obj.IAU_code
+                    print("Shower: {:s}".format(shower_code))
 
                 else:
                     print("Orbit could not the computed...")
