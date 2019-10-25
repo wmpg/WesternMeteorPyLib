@@ -77,13 +77,29 @@ class NarrowProjectionInputData(object):
             # Try finding the trajectory undertainty file
             self.traj_uncert_file = self.traj_file.replace('_mc_trajectory', '_mc_uncertainties')
 
+            # If the file cannot be found, don't use the uncertainties
+            if not os.path.isfile(os.path.join(self.dir_path, self.traj_uncert_file)):
+                self.traj_uncert_file = None
+
+
+            # Try with the typo in name
+            if self.traj_uncert_file is None:
+
+                # Try finding the trajectory undertainty file
+                self.traj_uncert_file = self.traj_file.replace('_mc_trajectory', '_mc_uncertanties')
+
+                # If the file cannot be found, don't use the uncertainties
+                if not os.path.isfile(os.path.join(self.dir_path, self.traj_uncert_file)):
+                    self.traj_uncert_file = None
+                    
+
+            if self.traj_uncert_file is None:
+                print('The trajectry uncertainties file cannot be found:', traj_uncert_file)
+
         else:
             self.traj_uncert_file = traj_uncert_file
 
-        # If the file cannot be found, don't use the uncertainties
-        if not os.path.isfile(os.path.join(self.dir_path, self.traj_uncert_file)):
-            print('The trajectry uncertainties file cannot be found:', traj_uncert_file)
-            self.traj_uncert_file = None
+
 
 
         if metal_met_file is None:
@@ -687,9 +703,9 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, metal_mags, frag_info):
                     lower_vel = frag_point_velocity - stddev_multiplier*v_init_uncert
                     higher_vel = frag_point_velocity + stddev_multiplier*v_init_uncert
 
-                    # Assume the atmosphere density can vary +/- 50% (Gunther's analysis)
-                    lower_atm_dens = 0.5*frag_point_atm_dens
-                    higher_atm_dens = 1.5*frag_point_atm_dens
+                    # Assume the atmosphere density can vary +/- 25% (Gunther's analysis)
+                    lower_atm_dens = 0.75*frag_point_atm_dens
+                    higher_atm_dens = 1.25*frag_point_atm_dens
 
                     # Compute lower and higher range for dyn pressure in kPa
                     lower_frag_point_dyn_pressure = (lower_atm_dens*DRAG_COEFF*lower_vel**2)/10**3
@@ -705,7 +721,7 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, metal_mags, frag_info):
                     # Plot the errorbar
                     plt.errorbar(frag_point_dyn_pressure, frag_point_height_km, \
                         xerr=[[lower_error], [higher_error]], fmt='--', capsize=5, zorder=4, \
-                        color=colors_frags[frag], label='+/- 50% $\\rho_{atm}$, 2$\\sigma_v$ ')
+                        color=colors_frags[frag], label='+/- 25% $\\rho_{atm}$, 2$\\sigma_v$ ')
 
 
                     # Save the computed fragmentation values to list
