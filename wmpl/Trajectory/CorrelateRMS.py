@@ -157,6 +157,10 @@ class MeteorObsRMS(object):
 
             self.fov_beg = True
 
+        # If the starting point is not inside the FOV, exlude the first point
+        else:
+            self.data = self.data[1:]
+
 
         # Find angular velocity at the ending per every axis
         dxdf_end = (self.data[-1].x - self.data[half_index].x)/(self.data[-1].frame \
@@ -173,6 +177,10 @@ class MeteorObsRMS(object):
             and (y_post_end <= self.platepar.Y_res):
             
             self.fov_end = True
+
+        # If the ending point is not inside fully inside the FOV, exclude it
+        else:
+            self.data = self.data[:-1]
 
         ### ###
 
