@@ -3547,7 +3547,7 @@ class Trajectory(object):
         out_str += "Stations\n"
         out_str += "--------\n"
 
-        out_str += "        ID, Ignored, Lon +E (deg), Lat +N (deg),  Ht (m), Jacchia a1, Jacchia a2,  Beg Ht (m),  End Ht (m), +/- Obs ang (deg), +/- V (m), +/- H (m), Persp. angle (deg), Weight\n"
+        out_str += "        ID, Ignored, Lon +E (deg), Lat +N (deg),  Ht (m), Jacchia a1, Jacchia a2,  Beg Ht (m),  End Ht (m), +/- Obs ang (deg), +/- V (m), +/- H (m), Persp. angle (deg), Weight, FOV Beg, FOV End\n"
         
         for obs in self.observations:
 
@@ -3570,6 +3570,9 @@ class Trajectory(object):
                 station_info.append("{:>6.4f}".format(obs.weight))
             else:
                 station_info.append("{:>6s}".format('None'))
+
+            station_info.append("{:>7s}".format(str(obs.fov_beg)))
+            station_info.append("{:>7s}".format(str(obs.fov_end)))
 
 
 
