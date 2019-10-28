@@ -19,6 +19,10 @@ def logline(x, m, k):
     return 10**line(x, m, k)
 
 
+def inverseLogline(y, m, k):
+    return (np.log10(y) - k)/m
+
+
 
 def fitSlope(input_data, mass):
     """ Fit a gamma distribution on the input data and compute the slope at the reference point. 
@@ -277,8 +281,9 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
         intercept = y_temp + slope*ref_point
 
         # Plot data histogram
-        plt.hist(sign*input_data, bins=len(input_data), cumulative=-sign, density=True, log=True, histtype='step', 
-            color='k', zorder=4)
+        hist_values, hist_edges, _ = plt.hist(sign*input_data, bins=len(input_data), cumulative=-sign, \
+            density=True, log=True, histtype='step', color='k', zorder=4)
+
 
         # Get Y axis range
         y_min, y_max = plt.gca().get_ylim()
@@ -309,6 +314,23 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
         plt.plot(sign*x_arr, logline(-x_arr, slope, intercept), color='r', \
             label='{:s} = {:.2f} $\pm$ {:.2f} \nKS test D = {:.3f} \nKS test p-value = {:.3f}'.format(\
                 slope_name, slope_report, slope_report_std, kstest.statistic, kstest.pvalue), zorder=5)
+
+
+        # Plot a horizontal line indicating maximum cumulative value
+        max_cum_value = np.max(hist_values)
+        plt.plot(sign*x_arr, np.zeros_like(x_arr) + max_cum_value, linestyle='dotted', alpha=0.5, color='k')
+
+        # Compute the value of the slope line at the maximum cumulative value, indicating the effective 
+        #   limiting magnitude or mass
+        lim_point = -sign*inverseLogline(max_cum_value, slope, intercept)
+
+        # Plot the limiting point
+        if mass:
+            lim_label = "Eff. lim. mass"
+        else:
+            lim_label = "Eff. lim. mag"
+        plt.scatter(lim_point, max_cum_value, c='b', marker='s', \
+            label="{:s} = {:+.2f}".format(lim_label, lim_point), zorder=6)
 
 
         # # Limit Y axis range to the maximum of the fitted line
