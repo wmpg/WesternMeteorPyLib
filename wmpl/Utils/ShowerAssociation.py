@@ -95,10 +95,28 @@ def loadJenniskensShowers(dir_path, file_name):
 
 
 # Load the Jenniskens table on startup
-jenniskens_shower_list = loadJenniskensShowers(*os.path.split(config.jenniskens_shower_table_file))
+if os.path.isfile(config.jenniskens_shower_table_npy):
+
+    # Load the npy file (faster) if available
+    jenniskens_shower_list = np.load(config.jenniskens_shower_table_npy)
+else:
+
+    # If not, load the text file and store the npy for faster loading later
+    jenniskens_shower_list = loadJenniskensShowers(*os.path.split(config.jenniskens_shower_table_file))
+    np.save(config.jenniskens_shower_table_npy, jenniskens_shower_list)
+
 
 # Load the IAU table
-iau_shower_list = np.loadtxt(config.iau_shower_table_file, delimiter="|", usecols=range(20), dtype=str)
+if os.path.isfile(config.iau_shower_table_npy):
+
+    # Load the npy file (faster) if available
+    iau_shower_list = np.load(config.iau_shower_table_npy)
+else:
+
+    # If not, load the text file and store the npy file for faster loading later
+    iau_shower_list = np.loadtxt(config.iau_shower_table_file, delimiter="|", usecols=range(20), dtype=str)
+    np.save(config.iau_shower_table_npy, iau_shower_list)
+
 
 
 def associateShower(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=3.0, \

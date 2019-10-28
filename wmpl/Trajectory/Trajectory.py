@@ -4494,13 +4494,24 @@ class Trajectory(object):
         #         plt.close()
 
 
+        # marker type, size multiplier
+        markers = [
+         ['x', 2 ],
+         ['+', 8 ],
+         ['o', 1 ],
+         ['s', 1 ],
+         ['d', 1 ],
+         ]
+
         # Plot angular residuals from all stations
         first_ignored_plot = True
-        for obs in self.observations:
+        for i, obs in enumerate(self.observations):
+
+            # Extract marker type and size multiplier
+            marker, sm = markers[i%len(self.observations)]
 
             # Calculate residuals in arcseconds
             res = np.degrees(obs.ang_res)*3600
-
 
             # Mark ignored points
             if np.any(obs.ignore_list):
@@ -4525,8 +4536,8 @@ class Trajectory(object):
             res_rms = np.degrees(obs.ang_res_std)*3600
 
             # Plot residuals
-            plt.scatter(obs.time_data, res, s=2, zorder=3, label='Station ' + str(obs.station_id) + \
-                ', RMSD = {:.2f}"'.format(res_rms))
+            plt.scatter(obs.time_data, res, s=10*sm, zorder=3, label='Station ' + str(obs.station_id) + \
+                ', RMSD = {:.2f}"'.format(res_rms), marker=marker)
 
 
         plt.title('Observed vs. Radiant LoS Residuals, all stations')

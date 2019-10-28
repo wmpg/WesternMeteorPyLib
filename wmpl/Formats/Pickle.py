@@ -83,6 +83,13 @@ def solveTrajectoryPickle(dir_path, file_name, only_plot=False, solver='original
                 excluded_time = None
 
 
+            # Check if the observation object has FOV beg/end flags
+            if not hasattr(obs, 'fov_beg'):
+                obs.fov_beg = None
+            if not hasattr(obs, 'fov_end'):
+                obs.fov_end = None
+
+
             traj.infillTrajectory(obs.azim_data, obs.elev_data, obs.time_data, obs.lat, obs.lon, obs.ele, \
                 station_id=obs.station_id, excluded_time=excluded_time, ignore_list=obs.ignore_list, \
                 magnitudes=obs.magnitudes, fov_beg=obs.fov_beg, fov_end=obs.fov_end)

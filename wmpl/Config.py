@@ -188,8 +188,14 @@ class ConfigStruct(object):
         # Jenniskens et al. (2018) shower table
         self.jenniskens_shower_table_file = os.path.join(abs_path, 'share', 'ShowerLookUpTable.txt')
 
+        # Jenniskens shower table in numpy format, for faster loading
+        self.jenniskens_shower_table_npy = os.path.join(abs_path, 'share', 'ShowerLookUpTable.npy')
+
         # IAU shower table
         self.iau_shower_table_file = os.path.join(abs_path, 'share', 'streamfulldata.csv')
+
+        # IAU shower table in numpy format, for faster loading
+        self.iau_shower_table_npy = os.path.join(abs_path, 'share', 'streamfulldata.npy')
 
         ###
 
