@@ -187,7 +187,7 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
         if mass:
 
             if mass_as_intensity:
-                xlabel = 'Integ. intensity (zero mag. units)'
+                xlabel = 'Log integ. intensity (zero mag. units)'
             else:
                 xlabel = 'Log of mass (kg)'
 
