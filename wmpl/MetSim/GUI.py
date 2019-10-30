@@ -2464,7 +2464,7 @@ class MetSimGUI(QMainWindow):
 
             # Set up hyperparameters
             #options = {'c1': 0.5, 'c2': 0.7, 'w':0.9}
-            options = {'c1': 0.5, 'c2': 0.3, 'w': 0.9, 'k': 3, 'p': 2}
+            options = {'c1': 0.6, 'c2': 0.3, 'w': 0.9, 'k': 10, 'p': 1}
 
 
             # Set up bounds (min, max) are (0, 1)
