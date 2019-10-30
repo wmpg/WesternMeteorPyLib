@@ -7,7 +7,7 @@ import multiprocessing
 
 
 def parallelComputeGenerator(generator, workerFunc, resultsCheckFunc, req_num, n_proc=None, 
-    results_check_kwagrs=None):
+    results_check_kwagrs=None, max_runs=None):
     """ Given a generator which generates inputs for the workerFunc function, generate and process results 
         until req_num number of results satisfies the resultsCheckFunc function.
 
@@ -24,6 +24,7 @@ def parallelComputeGenerator(generator, workerFunc, resultsCheckFunc, req_num, n
         n_proc: [int] Number of processes to use. None by default, in which case all available processors
             will be used.
         results_check_kwargs: [dict] Keyword arguments for resultsCheckFunc. None by default.
+        max_runs: [int] Maximum number of runs. None by default, which will limit the runs to 10x req_num.
 
     Return:
         [list] A list of results.
@@ -38,11 +39,17 @@ def parallelComputeGenerator(generator, workerFunc, resultsCheckFunc, req_num, n
     if results_check_kwagrs is None:
         results_check_kwagrs = {}
 
+    # Limit the maxlimum number or runs
+    if max_runs is None:
+        max_runs = 10*req_num
+
 
     # Init the pool
     with multiprocessing.Pool(processes=n_proc) as pool:
 
         results = []
+
+        total_runs = 0
 
         # Generate an initial input list
         input_list = [next(generator) for i in range(req_num)]
@@ -50,7 +57,8 @@ def parallelComputeGenerator(generator, workerFunc, resultsCheckFunc, req_num, n
         # Run the initial list
         results = pool.map(workerFunc, input_list)
 
-        
+        total_runs += len(input_list)
+            
         # Only take good results
         results = resultsCheckFunc(results, **results_check_kwagrs)
 
@@ -70,8 +78,16 @@ def parallelComputeGenerator(generator, workerFunc, resultsCheckFunc, req_num, n
             # Map the inputs
             results_temp = pool.map(workerFunc, input_list)
 
+            total_runs += len(input_list)
+
             # Only take good results
             results += resultsCheckFunc(results_temp, **results_check_kwagrs)
+
+            # Check if the number of runs exceeded the maximum
+            if total_runs >= max_runs:
+                print("Total runs exceeded! Stopping...")
+                break
+
 
         return results
 
