@@ -3,6 +3,80 @@ from __future__ import print_function
 import multiprocessing
 
 
+
+
+
+def parallelComputeGenerator(generator, workerFunc, resultsCheckFunc, req_num, n_proc=None, 
+    results_check_kwagrs=None):
+    """ Given a generator which generates inputs for the workerFunc function, generate and process results 
+        until req_num number of results satisfies the resultsCheckFunc function.
+
+    Arguments:
+        generator: [generator] Generator function which creates inputs for the workerFunc. It should
+            return a list of arguments that will be fed into the workerFunc.
+        workerFunc: [function] Worker function.
+        resultsCheckFunc: [function] A function which takes a lists of results and returns only those which
+            satisfy some criteria.
+        req_num: [int] Number of good results required. A good results is the one that passes the 
+            resultsCheckFunc check.
+
+    Keyword arguments:
+        n_proc: [int] Number of processes to use. None by default, in which case all available processors
+            will be used.
+        results_check_kwargs: [dict] Keyword arguments for resultsCheckFunc. None by default.
+
+    Return:
+        [list] A list of results.
+    """
+
+
+    # If the number of processes was not given, use all available CPUs
+    if n_proc is None:
+        n_proc = multiprocessing.cpu_count()
+
+
+    if results_check_kwagrs is None:
+        results_check_kwagrs = {}
+
+
+    # Init the pool
+    with multiprocessing.Pool(processes=n_proc) as pool:
+
+        results = []
+
+        # Generate an initial input list
+        input_list = [next(generator) for i in range(req_num)]
+
+        # Run the initial list
+        results = pool.map(workerFunc, input_list)
+
+        
+        # Only take good results
+        results = resultsCheckFunc(results, **results_check_kwagrs)
+
+
+        # If there are None, do not continue, as there is obviously a problem
+        if len(results) == 0:
+            print("No successful results after the initial run!")
+            return results
+
+
+        # Run the processing until a required number of good values is returned
+        while len(results) < req_num:
+
+            # Generate an input for processing
+            input_list = [next(generator) for i in range(n_proc)]
+
+            # Map the inputs
+            results_temp = pool.map(workerFunc, input_list)
+
+            # Only take good results
+            results += resultsCheckFunc(results_temp, **results_check_kwagrs)
+
+        return results
+
+
+
 def domainParallelizer(domain, function, cores=None, kwarg_dict=None):
     """ Runs N (cores) functions as separate processes with parameters given in the domain list.
 

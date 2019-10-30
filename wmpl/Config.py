@@ -15,7 +15,6 @@ else:
     import urllib.request as urllibrary
 
 import time
-import datetime
 
 
 
@@ -57,7 +56,7 @@ def loadLeapSeconds(leap_seconds_file):
 
         # Try reading the leap second file from URL
         try:
-            leap_string = urllibrary.urlopen(usno_leap_url).read()
+            leap_string = urllibrary.urlopen(usno_leap_url, timeout=1).read()
             print('Downloaded leap seconds from:', usno_leap_url)
 
             # Save the leap seconds file locally

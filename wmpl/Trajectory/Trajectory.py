@@ -37,8 +37,7 @@ from wmpl.Utils.PlotCelestial import CelestialPlot
 from wmpl.Utils.PlotMap import GroundMap
 from wmpl.Utils.TrajConversions import EARTH, G, ecef2ENU, enu2ECEF, geo2Cartesian, geo2Cartesian_vect, \
     cartesian2Geo, altAz2RADec_vect, raDec2AltAz, raDec2AltAz_vect, raDec2ECI, eci2RaDec, jd2Date, datetime2JD
-from wmpl.Utils.PyDomainParallelizer import domainParallelizer
-
+from wmpl.Utils.PyDomainParallelizer import parallelComputeGenerator
 
 
 
@@ -1541,77 +1540,27 @@ def calcCovMatrices(mc_traj_list):
 
 
 
-def _MCTrajSolve(i, traj, observations):
-    """ Internal function. Does a Monte Carlo run of the given trajectory object. Used as a function for
-        parallelization. 
 
+def trajNoiseGenerator(traj, noise_sigma):
+    """ Given a base trajectory object and the observation uncertainly, this generator will generate
+        new trajectory objects with noise-added obsevations. 
+    
     Arguments:
-        i: [int] Number of MC run to be printed out.
-        traj: [Trajectory object] Trajectory object on which the run will be performed.
-        observations: [list] A list of observations with no noise.
+        traj: [Trajectory] Trajectory instance.
+        noise_sigma: [float] Standard deviations of noise to add to the data.
 
-    Return:
-        traj: [Trajectory object] Trajectory object with the MC solution.
-
-    """
-
-    print('Run No.', i + 1)
-
-    traj.run(_mc_run=True, _orig_obs=observations)
-
-    return traj
-
-
-
-def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1, geometric_uncert=False, \
-    plot_results=True, mc_cores=None):
-    """ Estimates uncertanty in the trajectory solution by doing Monte Carlo runs. The MC runs are done 
-        in parallel on all available computer cores.
-
-        The uncertanty is taken as the standard deviation of angular measurements. Each point is sampled 
-        mc_pick_multiplier times using a symetric 2D Gaussian kernel.
-
-    Arguments:
-        traj: [Trajectory object] initial trajectory on which Monte Carlo runs will be performed
-
-    Keyword arguments:
-        mc_runs: [int] A fixed number of Monte Carlo simulations. None by default. If it is given, it will
-            override mc_pick_multiplier.
-        mc_pick_multiplier: [int] Number of MC samples that will be taken for every point. 1 by default.
-        noise_sigma: [float] Number of standard deviations to use for adding Gaussian noise to original 
-            measurements.
-        geometric_uncert: [bool] If True, all MC runs will be taken to estimate the uncertainty, not just
-            the ones with the better cost function value than the pure geometric solution. Use this when
-            the lag is not reliable.
-        plot_results: [bool] Plot the trajectory and orbit spread. True by default.
-        mc_cores: [int] Number of CPU cores to use for Monte Carlo parallel procesing. None by default,
-            which means that all available cores will be used.
+    Yields:
+        [counter, traj_mc, traj.observations]:
+            - counter: [int] Number of trajectories generated since the generator init.
+            - traj_mc: [Trajectory] Trajectory object with added noise
+            - traj.observations: [list] A list of original noise-free ObservedPoints.
     """
 
 
-
-    ### DO MONTE CARLO RUNS ###
-    ##########################################################################################################
-
-    # If a fixed number of Monte Carlo simulations is given, use it
-    if mc_runs is not None:
-
-        mc_runs = mc_runs
-
-    else:
-
-        # Calculate the total number of Monte Carlo runs, so every point is sampled mc_pick_multiplier times.
-        mc_runs = sum([len(obs.time_data) for obs in traj.observations])
-        mc_runs = mc_runs*mc_pick_multiplier
-
-
-    print('Doing', mc_runs, ' Monte Carlo runs...')
-
-    # List which holds all trajectory objects with the added noise
-    mc_input_list = []
+    counter = 0
 
     # Do mc_runs Monte Carlo runs
-    for i in range(mc_runs):
+    while True:
 
         # Make a copy of the original trajectory object
         traj_mc = copy.deepcopy(traj)
@@ -1690,24 +1639,35 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
         traj_mc.show_plots = False
         traj_mc.save_results = False
 
+        # Return the modified trajectory object
+        yield [counter, traj_mc, traj.observations]
 
-        # Add the modified trajectory object to the input list for parallelization and the original observations
-        mc_input_list.append([i, traj_mc, traj.observations])
+        counter += 1
 
 
-    # Run MC trajectory estimation on multiple cores
-    mc_results = domainParallelizer(mc_input_list, _MCTrajSolve, cores=mc_cores)
 
-    # Add the original trajectory in the Monte Carlo results, if it is the one which has the best length match
-    mc_results.append(traj)
-
+def checkMCTrajectories(mc_results, timing_res=np.inf, geometric_uncert=False):
+    """ Filter out MC computed trajectories and only return successful ones. 
     
-    ##########################################################################################################
+    Arguments:
+        mc_results: [list] A list of Trajectory objects computed with added noise.
+
+    Keyword arguments:
+        timing_res: [float] Timing residual from the original LoS trajectory fit.
+        geometric_uncert: [bool] If True, all MC runs will be taken to estimate the uncertainty, not just
+            the ones with the better cost function value than the pure geometric solution. Use this when
+            the lag is not reliable.
+
+    Returns:
+        [list] A filtered list of trajectories.
+
+    """
+
 
     if not geometric_uncert:
 
         # Take only those solutions which have the timing residuals <= than the initial solution
-        mc_results = [mc_traj for mc_traj in mc_results if mc_traj.timing_res <= traj.timing_res]
+        mc_results = [mc_traj for mc_traj in mc_results if mc_traj.timing_res <= timing_res]
 
     ##########
 
@@ -1719,8 +1679,99 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
         and (mc_traj.orbit.dec_g is not None)]
 
 
+    return mc_results
+
+
+
+def _MCTrajSolve(params):
+    """ Internal function. Does a Monte Carlo run of the given trajectory object. Used as a function for
+        parallelization. 
+
+    Arguments:
+        params: [list]
+            - i: [int] Number of MC run to be printed out.
+            - traj: [Trajectory object] Trajectory object on which the run will be performed.
+            - observations: [list] A list of observations with no noise.
+
+    Return:
+        traj: [Trajectory object] Trajectory object with the MC solution.
+
+    """
+
+    i, traj, observations = params
+
+    print('Run No.', i + 1)
+
+    traj.run(_mc_run=True, _orig_obs=observations)
+
+    return traj
+
+
+
+def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1, geometric_uncert=False, \
+    plot_results=True, mc_cores=None):
+    """ Estimates uncertanty in the trajectory solution by doing Monte Carlo runs. The MC runs are done 
+        in parallel on all available computer cores.
+
+        The uncertanty is taken as the standard deviation of angular measurements. Each point is sampled 
+        mc_pick_multiplier times using a symetric 2D Gaussian kernel.
+
+    Arguments:
+        traj: [Trajectory object] initial trajectory on which Monte Carlo runs will be performed
+
+    Keyword arguments:
+        mc_runs: [int] A fixed number of Monte Carlo simulations. None by default. If it is given, it will
+            override mc_pick_multiplier.
+        mc_pick_multiplier: [int] Number of MC samples that will be taken for every point. 1 by default.
+        noise_sigma: [float] Number of standard deviations to use for adding Gaussian noise to original 
+            measurements.
+        geometric_uncert: [bool] If True, all MC runs will be taken to estimate the uncertainty, not just
+            the ones with the better cost function value than the pure geometric solution. Use this when
+            the lag is not reliable.
+        plot_results: [bool] Plot the trajectory and orbit spread. True by default.
+        mc_cores: [int] Number of CPU cores to use for Monte Carlo parallel procesing. None by default,
+            which means that all available cores will be used.
+    """
+
+
+
+    ### DO MONTE CARLO RUNS ###
+    ##########################################################################################################
+
+    # If a fixed number of Monte Carlo simulations is given, use it
+    if mc_runs is not None:
+
+        mc_runs = mc_runs
+
+    else:
+
+        # Calculate the total number of Monte Carlo runs, so every point is sampled mc_pick_multiplier times.
+        mc_runs = sum([len(obs.time_data) for obs in traj.observations])
+        mc_runs = mc_runs*mc_pick_multiplier
+
+
+    print('Doing', mc_runs, ' Monte Carlo runs...')
+
+
+    # Init the trajectory noise generator
+    traj_generator = trajNoiseGenerator(traj, noise_sigma)
+
+    
+    # Run the MC solutions
+    results_check_kwagrs = {"timing_res": traj.timing_res, "geometric_uncert": geometric_uncert}
+    mc_results = parallelComputeGenerator(traj_generator, _MCTrajSolve, checkMCTrajectories, mc_runs, \
+        results_check_kwagrs=results_check_kwagrs)
+
+
+    # Add the original trajectory in the Monte Carlo results, if it is the one which has the best length match
+    mc_results.append(traj)
+
+    
+    ##########################################################################################################
+
+
     # Break the function of there are no trajectories to process
-    if len(mc_results) == 0:
+    if len(mc_results) < 2:
         print('!!! Not enough good Monte Carlo runus for uncertaintly estimation!')
         return traj, None
 
