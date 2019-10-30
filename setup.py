@@ -13,7 +13,6 @@ import numpy
 
 
 from UpdateOrbitFiles import updateOrbitFiles
-from wmpl.Config import config
 
 
 # Utility function to read the README file.
@@ -66,11 +65,13 @@ updateOrbitFiles()
 
 
 # Delete npy shower files
-if os.path.isfile(config.jenniskens_shower_table_npy):
-    os.remove(config.jenniskens_shower_table_npy)
+jenniskens_shower_table_npy = os.path.join('wmpl', 'share', 'ShowerLookUpTable.npy')
+if os.path.isfile(jenniskens_shower_table_npy):
+    os.remove(jenniskens_shower_table_npy)
 
-if os.path.isfile(config.iau_shower_table_npy):
-    os.remove(config.iau_shower_table_npy)
+iau_shower_table_npy = os.path.join('wmpl', 'share', 'streamfulldata.npy')
+if os.path.isfile(iau_shower_table_npy):
+    os.remove(iau_shower_table_npy)
 
 
 # Get all data files in 'share'
