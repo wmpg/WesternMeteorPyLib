@@ -2479,10 +2479,10 @@ class MetSimGUI(QMainWindow):
             if self.autofit_method == "PSO local":
 
                 # Create particles in a tight Gaussian around the initial parameters
-                init_pos = np.random.normal(loc=p0_normed, scale=0.1+np.zeros_like(p0_normed), \
+                init_pos = np.random.normal(loc=p0_normed, scale=0.2 + np.zeros_like(p0_normed), \
                     size=(self.pso_particles - 1, len(p0_normed)))
-                init_pos[init_pos < 0] = 0
-                init_pos[init_pos > 1] = 1
+                init_pos[init_pos < 0] = abs(init_pos[init_pos < 0])
+                init_pos[init_pos > 1] = 1 - init_pos[init_pos > 1] + 1
 
                 # Add manual fit to initial positions
                 init_pos = np.append(init_pos, np.array([p0_normed]), axis=0)
