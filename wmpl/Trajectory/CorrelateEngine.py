@@ -108,6 +108,9 @@ class TrajectoryConstraints(object):
         # It will remove all stations with residuals larger than this fixed amount in arc seconds
         self.max_arcsec_err = 180.0
 
+        # It will keep all stations with residuals below this error, regardless of other filters
+        self.min_arcsec_err = 30.0
+
 
         # Bad station filter. If there are 3 or more stations, it will remove those that have angular 
         #   residuals <bad_station_obs_ang_limit> times larger than the mean of all other stations
@@ -783,6 +786,10 @@ class TrajectoryCorrelator(object):
                             break
 
                         ang_res_median = np.median(ang_res_list)
+
+                        # Keep the observation if it's within the minimum error
+                        if obs.ang_res_std <= np.radians(self.traj_constraints.min_arcsec_err/3600):
+                            continue
 
                         # Check if the current observations is outside the limits
                         if (obs.ang_res_std > ang_res_median*self.traj_constraints.bad_station_obs_ang_limit) \
