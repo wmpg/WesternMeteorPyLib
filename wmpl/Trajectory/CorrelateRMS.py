@@ -521,6 +521,14 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         help='Maximum distance (km) between stations of paired meteors. Default is 300 km.', type=float, \
         default=300.0)
 
+    arg_parser.add_argument('-m', '--minerr', metavar='MIN_ARCSEC_ERR', \
+        help="Minimum error in arc seconds below which the station won't be rejected. 30 arcsec by default.", \
+        type=float)
+
+    arg_parser.add_argument('-M', '--maxerr', metavar='MAX_ARCSEC_ERR', \
+        help="Maximum error in arc seconds, above which the station will be rejected. 180 arcsec by default.", \
+        type=float)
+
     arg_parser.add_argument('-v', '--maxveldiff', metavar='MAX_VEL_DIFF', \
         help='Maximum difference in percent between velocities between two stations. Default is 25 percent.', \
         type=float, default=25.0)
@@ -555,10 +563,16 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     trajectory_constraints.run_mc = not cml_args.disablemc
     trajectory_constraints.save_plots = cml_args.saveplots
 
+    if cml_args.minerr is not None:
+        trajectory_constraints.min_arcsec_err = cml_args.minerr
+
+    if cml_args.maxerr is not None:
+        trajectory_constraints.max_arcsec_err = cml_args.maxerr
+
+
 
     # Clock for measuring script time
     t1 = datetime.datetime.utcnow()
-
 
     # Init the data handle
     dh = RMSDataHandle(cml_args.dir_path)
