@@ -18,7 +18,6 @@ import numpy as np
 import scipy.optimize
 import scipy.interpolate
 import scipy.stats
-from statsmodels.nonparametric.smoothers_lowess import lowess
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -175,9 +174,6 @@ class ObservedPoints(object):
         # Average velocities including all previous points up to the current point (for first 4 points the
         #   velocity corresponds to the average velocity through those 4 points)
         self.velocities_prev_point = None
-
-        # Moving average velocities using 4 points
-        self.velocities_moving_avg = None
 
         # Calculated length along the path (meters)
         self.length = None
@@ -2507,30 +2503,6 @@ class Trajectory(object):
             ### ###
 
 
-            ### Calculate velocities using LOWESS method ###
-
-            # Compute window length as 2xsqrt(total points per station)
-            window = 2*np.sqrt(len(obs.time_data))
-            if window < 4:
-                window = 4.0
-
-            frac = window/len(obs.time_data)
-            if frac > 1:
-                frac = 1
-
-            elif frac < 0:
-                frac = 0
-
-            # Compute the moving average using the Locally Weighted Scatterplot Smoothing method
-            velocities_moving_avg = lowess(obs.velocities[1:], obs.time_data[1:], is_sorted=True, \
-                frac=frac, it=5)[:,1]
-
-
-            obs.velocities_moving_avg = np.array(velocities_moving_avg)
-
-            ### ###
-
-
         # plt.ylabel('Time (s)')
         # plt.xlabel('Distance from state vector (m)')
 
@@ -4311,11 +4283,6 @@ class Trajectory(object):
             # Plot all point to point velocities
             ax1.scatter(obs.velocities[1:]/1000, obs.time_data[1:], marker=markers[i%len(markers)], 
                 c=colors[i], alpha=0.5, label='Station: {:s}'.format(str(obs.station_id)), zorder=3)
-
-
-            # # Plot all LOWESS smoothed velocities
-            # ax1.plot(obs.velocities_moving_avg/1000, obs.time_data[1:], c=colors[i], zorder=3, alpha=0.5, \
-            #     linestyle='dashed')
 
 
             # Determine the max/min velocity and height, as this is needed for plotting both height/time axes

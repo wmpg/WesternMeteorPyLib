@@ -9,7 +9,6 @@ pyephem
 # or for Python 3:
 # > pip3 install --user https://github.com/matplotlib/basemap/archive/master.zip
 basemap
-statsmodels
 PyQt5
 pyyaml
 pyswarms
