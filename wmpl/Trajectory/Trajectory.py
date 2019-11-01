@@ -2514,9 +2514,16 @@ class Trajectory(object):
             if window < 4:
                 window = 4.0
 
+            frac = window/len(obs.time_data)
+            if frac > 1:
+                frac = 1
+
+            elif frac < 0:
+                frac = 0
+
             # Compute the moving average using the Locally Weighted Scatterplot Smoothing method
             velocities_moving_avg = lowess(obs.velocities[1:], obs.time_data[1:], is_sorted=True, \
-                frac=window/len(obs.time_data), it=5)[:,1]
+                frac=frac, it=5)[:,1]
 
 
             obs.velocities_moving_avg = np.array(velocities_moving_avg)
