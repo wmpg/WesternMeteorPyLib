@@ -1761,7 +1761,8 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
 
 
     # Add the original trajectory in the Monte Carlo results, if it is the one which has the best length match
-    mc_results.append(traj)
+    if traj.orbit.ra_g is not None:
+        mc_results.append(traj)
 
     
     ##########################################################################################################

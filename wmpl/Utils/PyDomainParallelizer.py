@@ -88,6 +88,9 @@ def parallelComputeGenerator(generator, workerFunc, resultsCheckFunc, req_num, n
                 print("Total runs exceeded! Stopping...")
                 break
 
+        # Make sure that there are no more results than needed
+        if len(results) > req_num:
+            results = results[:req_num]
 
         return results
 
