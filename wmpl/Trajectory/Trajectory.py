@@ -1674,6 +1674,7 @@ def checkMCTrajectories(mc_results, timing_res=np.inf, geometric_uncert=False):
     mc_results = [mc_traj for mc_traj in mc_results if (mc_traj.orbit.ra_g is not None) \
         and (mc_traj.orbit.dec_g is not None)]
 
+    print("{:d} successful MC runs done...".format(len(mc_results)))
 
     return mc_results
 
@@ -1746,7 +1747,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
         mc_runs = mc_runs*mc_pick_multiplier
 
 
-    print('Doing', mc_runs, ' Monte Carlo runs...')
+    print("Doing", mc_runs, "successful Monte Carlo runs...")
 
 
     # Init the trajectory noise generator

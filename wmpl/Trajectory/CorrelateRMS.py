@@ -95,7 +95,7 @@ class MeteorPointRMS(object):
 
         # Image coordinats
         self.x = x
-        self.y = x
+        self.y = y
         
         # Equatorial coordinates (J2000, deg)
         self.ra = ra
