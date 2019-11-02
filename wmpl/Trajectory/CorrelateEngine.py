@@ -4,6 +4,7 @@ from __future__ import print_function, division, absolute_import
 
 import os
 import datetime
+import multiprocessing
 
 import numpy as np
 
@@ -85,7 +86,9 @@ class TrajectoryConstraints(object):
         self.run_mc = True
 
         # Number of CPU cores to use for parallel processing
-        self.mc_cores = 2
+        self.mc_cores = multiprocessing.cpu_count() - 2
+        if self.mc_cores < 2:
+            self.mc_cores = 2
 
         # MC runs to run for error estimation
         self.error_mc_runs = 10
