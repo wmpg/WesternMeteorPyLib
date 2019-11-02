@@ -4533,7 +4533,7 @@ class Trajectory(object):
         for i, obs in enumerate(self.observations):
 
             # Extract marker type and size multiplier
-            marker, sm = markers[i%len(self.observations)]
+            marker, sm = markers[i%len(markers)]
 
             # Calculate residuals in arcseconds
             res = np.degrees(obs.ang_res)*3600
