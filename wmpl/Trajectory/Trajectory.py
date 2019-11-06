@@ -1760,6 +1760,17 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
         results_check_kwagrs=results_check_kwagrs)
 
 
+    # If there are no MC runs which were successful, recompute using geometric uncertainties
+    if len(mc_results) < 2:
+        print("No successful MC runs, computing geometric uncertanties...")
+
+        # Run the MC solutions
+        geometric_uncert = True
+        results_check_kwagrs["geometric_uncert"] = geometric_uncert
+        mc_results = parallelComputeGenerator(traj_generator, _MCTrajSolve, checkMCTrajectories, mc_runs, \
+            results_check_kwagrs=results_check_kwagrs)
+
+
     # Add the original trajectory in the Monte Carlo results, if it is the one which has the best length match
     if traj.orbit.ra_g is not None:
         mc_results.append(traj)
@@ -1780,6 +1791,9 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
 
     # Choose the best trajectory
     traj_best = mc_results[best_traj_ind]
+
+    # Assign geometric uncertainty flag, if it was changed
+    traj_best.geometric_uncert = geometric_uncert
 
     print('Computing uncertainties...')
 
