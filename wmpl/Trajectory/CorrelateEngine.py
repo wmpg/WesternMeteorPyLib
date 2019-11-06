@@ -757,86 +757,142 @@ class TrajectoryCorrelator(object):
                 # Run the solver
                 traj_status = traj.run()
 
+
+
+                # Reject bad observations until a stable set is found
+                skip_trajectory = False
+                ignored_station_dict = {}
+                for _ in range(len(traj.observations)):
                 
-                # If the trajectory estimation failed, skip this trajectory
-                if traj_status is None:
-                    print("Trajectory estimation failed!")
-                    continue
-
-
-                print()
-
-
-                ### Check for bad observations and rerun the solution if necessary ###
-
-                # Perform three passes of rejections to weed out all bad stations
-                any_ignored_stations = False
-                for _ in range(3):
-
-                    # a) Reject all observations which have angular residuals <bad_station_obs_ang_limit> times
-                    #   larger than the median of all other observations
-                    # b) Reject all observations with higher residuals than the fixed limit
-                    for i, obs in enumerate(traj.observations):
-
-                        if obs.ignore_station:
-                            continue
-
-                        # Compute the median angular uncertainty of all other stations
-                        ang_res_list = [obs.ang_res_std for j, obs in \
-                            enumerate(traj.observations) if (i != j) and not obs.ignore_station]
-
-                        if len(ang_res_list) == 0:
-                            break
-
-                        ang_res_median = np.median(ang_res_list)
-
-                        # Keep the observation if it's within the minimum error
-                        if obs.ang_res_std <= np.radians(self.traj_constraints.min_arcsec_err/3600):
-                            continue
-
-                        # Check if the current observations is outside the limits
-                        if (obs.ang_res_std > ang_res_median*self.traj_constraints.bad_station_obs_ang_limit) \
-                            or (obs.ang_res_std > np.radians(self.traj_constraints.max_arcsec_err/3600)):
-
-                            # Ignore the station
-                            traj.observations[i].ignore_station = True
-                            traj.observations[i].ignore_list = np.ones(len(obs.time_data), dtype=np.uint8)
-                            any_ignored_stations = True
-
-                            print("Ignoring station {:s}".format(obs.station_id))
-                            print("   obs std: {:.2f} arcsec".format(3600*np.degrees(obs.ang_res_std)))
-                            print("   bad lim: {:.2f} arcsec".format(3600*np.degrees(ang_res_median\
-                                *self.traj_constraints.bad_station_obs_ang_limit)))
-                            print("   max err: {:.2f} arcsec".format(self.traj_constraints.max_arcsec_err))
-
-
-
-                # If there are less than 2 stations that are not ignored, skip this solution
-                if len([obs for obs in traj.observations if not obs.ignore_station]) < 2:
-                    print("Skipping trajectory, not enough good observations...")
-                    continue
-
-                # If there are any ignored stations, rerun the solution
-                if any_ignored_stations:
-
-                    print()
-                    print("Rerunning the trajectory solution...")
-
-                    traj_status = traj.run()
-
                     # If the trajectory estimation failed, skip this trajectory
                     if traj_status is None:
                         print("Trajectory estimation failed!")
-                        continue
+                        skip_trajectory = True
+                        break
 
 
-                ### ###
+                    print()
+
+
+                    ### Check for bad observations and rerun the solution if necessary ###
+
+                    # Perform three passes of rejections to weed out all bad stations
+                    any_ignored_toggle = False
+                    for _ in range(3):
+
+                        # a) Reject all observations which have angular residuals <bad_station_obs_ang_limit> times
+                        #   larger than the median of all other observations
+                        # b) Reject all observations with higher residuals than the fixed limit
+                        for i, obs in enumerate(traj_status.observations):
+
+                            # Skip ignored stations
+                            if obs.ignore_station:
+                                continue
+
+                            # Compute the median angular uncertainty of all other stations
+                            ang_res_list = [obstmp.ang_res_std for j, obstmp in \
+                                enumerate(traj_status.observations) if (i != j) and not obstmp.ignore_station]
+
+                            # If all other stations are ignored, skip this procedure
+                            if len(ang_res_list) == 0:
+                                break
+
+                            ang_res_median = np.median(ang_res_list)
+
+                            # ### TEST!!!
+                            # print(obs.station_id, 'ang res:', np.degrees(obs.ang_res_std)*3600, \
+                            #     np.degrees(ang_res_median)*3600)
+                            
+                            # Check if the current observations is larger than the minimum limit, and
+                            # outside the median limit or larger than the maximum limit
+                            if (obs.ang_res_std > np.radians(self.traj_constraints.min_arcsec_err/3600)) \
+                                and ((obs.ang_res_std \
+                                    > ang_res_median*self.traj_constraints.bad_station_obs_ang_limit) \
+                                or (obs.ang_res_std > np.radians(self.traj_constraints.max_arcsec_err/3600))):
+
+                                # Add the station to the ignored dictionary and store the ignore list
+                                ignored_station_dict[obs.station_id] = np.array(obs.ignore_list)
+
+                                # Ignore the station
+                                traj_status.observations[i].ignore_station = True
+                                traj_status.observations[i].ignore_list = np.ones(len(obs.time_data), \
+                                    dtype=np.uint8)
+                                any_ignored_toggle = True
+
+                                print("Ignoring station {:s}".format(obs.station_id))
+                                print("   obs std: {:.2f} arcsec".format(3600*np.degrees(obs.ang_res_std)))
+                                print("   bad lim: {:.2f} arcsec".format(3600*np.degrees(ang_res_median\
+                                    *self.traj_constraints.bad_station_obs_ang_limit)))
+                                print("   max err: {:.2f} arcsec".format(self.traj_constraints.max_arcsec_err))
+
+                            # If the station is inside the limit
+                            else:
+
+                                # If the station was ignored, and now it is inside the limit, re-enable it
+                                if obs.station_id in ignored_station_dict:
+
+                                    print("Re-enabling the station: {:s}".format(obs.station_id))
+
+                                    # Re-enable station and restore the original ignore list
+                                    traj_status.observations[i].ignore_station = False
+                                    traj_status.observations[i].ignore_list \
+                                        = np.array(ignored_station_dict[obs.station_id])
+
+                                    any_ignored_toggle = True
+
+                                    # Remove the station from the ignored dictionary
+                                    del ignored_station_dict[obs.station_id]
+
+
+                        # If no stations where ignored, skip further iterations
+                        if not any_ignored_toggle:
+                            break
+
+
+
+                    # If there are less than 2 stations that are not ignored, skip this solution
+                    if len([obstmp for obstmp in traj_status.observations if not obstmp.ignore_station]) < 2:
+                        print("Skipping trajectory, not enough good observations...")
+                        skip_trajectory = True
+                        break
+
+                    # If there are any ignored stations, rerun the solution
+                    if any_ignored_toggle:
+
+                        print()
+                        print("Rerunning the trajectory solution...")
+
+                        traj_status = traj_status.run()
+
+                        # If the trajectory estimation failed, skip this trajectory
+                        if traj_status is None:
+                            print("Trajectory estimation failed!")
+                            skip_trajectory = True
+                            break
+
+
+                    # If there are no ignored observations, stop trying to improve the trajectory
+                    else:
+                        break
+
+                    ### ###
+
+
+
+                # Skip the trajectory if no good solution was found
+                if skip_trajectory:
+                    continue
+
 
                 # Use the best trajectory solution
                 traj = traj_status
 
+
                 # If the orbits couldn't be computed, skip saving the data files
                 if traj.orbit.ra_g is not None:
+
+                    # Update trajectory file name
+                    traj.generateFileName()
 
                     self.dh.saveTrajectoryResults(traj, self.traj_constraints.save_plots)
 

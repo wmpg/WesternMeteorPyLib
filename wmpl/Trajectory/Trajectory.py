@@ -2193,7 +2193,7 @@ class Trajectory(object):
 
 
         # Construct a file name for this event
-        self.file_name = jd2Date(self.jdt_ref, dt_obj=True).strftime('%Y%m%d_%H%M%S')
+        self.generateFileName()
 
         # Counts from how may stations the observations are given (start from 1)
         self.station_count = 1
@@ -2280,6 +2280,12 @@ class Trajectory(object):
         # Initial state vector covariance matrix
         self.state_vect_cov = None
 
+
+
+    def generateFileName(self):
+        """ Generate a file name for saving results using the reference julian date. """
+
+        self.file_name = jd2Date(self.jdt_ref, dt_obj=True).strftime('%Y%m%d_%H%M%S')
 
 
     def infillTrajectory(self, meas1, meas2, time_data, lat, lon, ele, station_id=None, excluded_time=None,
