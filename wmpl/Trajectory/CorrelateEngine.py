@@ -2,7 +2,7 @@
 
 from __future__ import print_function, division, absolute_import
 
-import os
+import copy
 import datetime
 import multiprocessing
 
@@ -761,6 +761,7 @@ class TrajectoryCorrelator(object):
 
                 # Reject bad observations until a stable set is found
                 skip_trajectory = False
+                traj_best = None
                 ignored_station_dict = {}
                 for _ in range(len(traj.observations)):
                 
@@ -769,6 +770,21 @@ class TrajectoryCorrelator(object):
                         print("Trajectory estimation failed!")
                         skip_trajectory = True
                         break
+
+                    # Store the "best" trajectory if it is good
+                    else:
+
+                        # If there's no best trajectory, store the current one as best
+                        if traj_best is None:
+                            traj_best = copy.deepcopy(traj_status)
+
+                        # Check if the current trajectory has smaller median residuals than the best
+                        #    trajectory and store it as the best trajectory
+                        elif np.median([obstmp.ang_res_std for obstmp in traj_status.observations 
+                            if not obstmp.ignore_station]) < np.median([obstmp.ang_res_std for obstmp \
+                            in traj_best.observations if not obstmp.ignore_station]):
+
+                            traj_best = copy.deepcopy(traj_status)
 
 
                     print()
@@ -852,7 +868,7 @@ class TrajectoryCorrelator(object):
 
                     # If there are less than 2 stations that are not ignored, skip this solution
                     if len([obstmp for obstmp in traj_status.observations if not obstmp.ignore_station]) < 2:
-                        print("Skipping trajectory, not enough good observations...")
+                        print("Skipping trajectory solution, not enough good observations...")
                         skip_trajectory = True
                         break
 
@@ -881,7 +897,15 @@ class TrajectoryCorrelator(object):
 
                 # Skip the trajectory if no good solution was found
                 if skip_trajectory:
-                    continue
+
+                    # If the trajectory solutions was not done at any point, skip the trajectory completely
+                    if traj_best is None:
+                        continue
+
+                    # Otherwise, use the best trajectory solution until the solving failed
+                    else:
+                        print("Using previously estimated best trajectory...")
+                        traj_status = traj_best
 
 
                 # Use the best trajectory solution
