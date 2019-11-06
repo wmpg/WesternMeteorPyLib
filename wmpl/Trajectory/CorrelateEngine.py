@@ -759,7 +759,8 @@ class TrajectoryCorrelator(object):
 
 
 
-                # Reject bad observations until a stable set is found
+                # Reject bad observations until a stable set is found, but only if there are more than 2    
+                #   stations
                 skip_trajectory = False
                 traj_best = None
                 ignored_station_dict = {}
@@ -785,6 +786,11 @@ class TrajectoryCorrelator(object):
                             in traj_best.observations if not obstmp.ignore_station]):
 
                             traj_best = copy.deepcopy(traj_status)
+
+
+                    # Skip this part if there are less than 3 stations
+                    if len(traj.observations) < 3:
+                        break
 
 
                     print()
@@ -894,7 +900,6 @@ class TrajectoryCorrelator(object):
                     ### ###
 
 
-
                 # Skip the trajectory if no good solution was found
                 if skip_trajectory:
 
@@ -906,6 +911,17 @@ class TrajectoryCorrelator(object):
                     else:
                         print("Using previously estimated best trajectory...")
                         traj_status = traj_best
+
+
+                # If there are only two stations, make sure to reject solutions which have stations with 
+                #   residuals higher than the maximum limit
+                if len(traj_status.observations) == 2:
+                    if np.any([(obstmp.ang_res_std > np.radians(self.traj_constraints.max_arcsec_err/3600)) \
+                        for obstmp in traj_status.observations]):
+
+                        print("2 station only solution, one station has an error above the maximum limit, skipping!")
+
+                        continue
 
 
                 # Use the best trajectory solution
