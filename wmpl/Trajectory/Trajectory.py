@@ -2413,12 +2413,27 @@ class Trajectory(object):
             meas2 = np.pi/2.0 - obs.elev_data
 
 
+        ### PRESERVE COMPATBILITY WITH OLD obs OBJECTS ###
 
         # Check if the observation had any excluded points
         if hasattr(obs, 'excluded_time'):
             excluded_time = obs.excluded_time
         else:
             excluded_time = None
+
+        # Check if it has the ignore list argument
+        if hasattr(obs, 'ignore_list'):
+            ignore_list = obs.ignore_list
+
+        else:
+            ignore_list = np.zeros(len(obs.time_data), dtype=np.uint8)
+
+        # Check for apparent magnitudes
+        if hasattr(obs, 'magnitudes'):
+            magnitudes = obs.magnitudes
+
+        else:
+            magnitudes = None
 
         # Check if the observation object has FOV beg/end flags
         if not hasattr(obs, 'fov_beg'):
@@ -2431,9 +2446,12 @@ class Trajectory(object):
             obs.obs_id = None
 
 
+        ### ###
+
+
         self.infillTrajectory(meas1, meas2, obs.time_data, obs.lat, obs.lon, obs.ele, \
-            station_id=obs.station_id, excluded_time=excluded_time, ignore_list=obs.ignore_list, \
-            magnitudes=obs.magnitudes, fov_beg=obs.fov_beg, fov_end=obs.fov_end, obs_id=obs.obs_id)
+            station_id=obs.station_id, excluded_time=excluded_time, ignore_list=ignore_list, \
+            magnitudes=magnitudes, fov_beg=obs.fov_beg, fov_end=obs.fov_end, obs_id=obs.obs_id)
 
 
 
