@@ -43,7 +43,7 @@ from wmpl.Utils.PyDomainParallelizer import parallelComputeGenerator
 class ObservedPoints(object):
     def __init__(self, jdt_ref, meas1, meas2, time_data, lat, lon, ele, meastype, station_id=None, \
         excluded_time=None, ignore_list=None, ignore_station=False, magnitudes=None, fov_beg=None, \
-        fov_end=None):
+        fov_end=None, obs_id=None):
         """ Structure for containing data of observations from invidiual stations.
         
         Arguments:
@@ -85,6 +85,8 @@ class ObservedPoints(object):
             magnitudes: [list] A list of apparent magnitudes of the meteor. None by default.
             fov_beg: [bool] True if the meteor began inside the FOV, False otherwise. None by default.
             fov_end: [bool] True if the meteor ended inside the FOV, False otherwise. None by default.
+            obs_id: [int] Unique ID of the observation. This is to differentiate different observations from
+                the same station.
         """
 
         ### INPUT DATA ###
@@ -149,6 +151,9 @@ class ObservedPoints(object):
         # Meteor began/ended inside the FOV flags
         self.fov_beg = fov_beg
         self.fov_end = fov_end
+
+        # Unique observation ID
+        self.obs_id = obs_id
 
         ######################################################################################################
 
@@ -433,10 +438,11 @@ class ObservedPoints(object):
     def planeFit(self):
         """ Fits a plane through station position and observed points. """
 
-        # Add meteor line of sight positions and station positions to single arays
-        x_data = np.append(self.x_eci, 0)
-        y_data = np.append(self.y_eci, 0)
-        z_data = np.append(self.z_eci, 0)
+        # Add meteor line of sight positions and station positions to single arays.
+        #   Only use non-ignored points
+        x_data = np.append(self.x_eci[self.ignore_list == 0], 0)
+        y_data = np.append(self.y_eci[self.ignore_list == 0], 0)
+        z_data = np.append(self.z_eci[self.ignore_list == 0], 0)
 
         A = np.c_[x_data, y_data, np.ones(x_data.shape[0])]
 
@@ -1176,8 +1182,9 @@ def moveStateVector(state_vect, radiant_eci, observations):
 
         rad_cpa_list = []
 
-        # Go through all observations from all stations
-        for obs in observations:
+        # Go through all non-ignored observations from all stations
+        nonignored_observations = [obstmp for obstmp in observations if not obstmp.ignore_station]
+        for obs in nonignored_observations:
 
             # Calculate closest points of approach (observed line of sight to radiant line) of the first point
             # on the trajectory across all stations
@@ -1625,7 +1632,7 @@ def trajNoiseGenerator(traj, noise_sigma):
             traj_mc.infillTrajectory(azim_noise_list, elev_noise_list, obs.time_data, obs.lat, obs.lon, \
                 obs.ele, station_id=obs.station_id, excluded_time=obs.excluded_time, \
                 ignore_list=obs.ignore_list, magnitudes=obs.magnitudes, fov_beg=obs.fov_beg, \
-                fov_end=obs.fov_end)
+                fov_end=obs.fov_end, obs_id=obs.obs_id)
 
             
         # Do not show plots or perform additional optimizations
@@ -2209,8 +2216,9 @@ class Trajectory(object):
         # Construct a file name for this event
         self.generateFileName()
 
-        # Counts from how may stations the observations are given (start from 1)
-        self.station_count = 1
+        # Counts from how many observations are given from the beginning (start from 1)
+        # NOTE: This should not the used as the number of observations, use len(traj.observations) instead!
+        self.meas_count = 1
 
         # List of observations
         self.observations = []
@@ -2303,7 +2311,7 @@ class Trajectory(object):
 
 
     def infillTrajectory(self, meas1, meas2, time_data, lat, lon, ele, station_id=None, excluded_time=None,
-        ignore_list=None, magnitudes=None, fov_beg=None, fov_end=None):
+        ignore_list=None, magnitudes=None, fov_beg=None, fov_end=None, obs_id=None):
         """ Initialize a set of measurements for a given station. 
     
         Arguments:
@@ -2329,14 +2337,19 @@ class Trajectory(object):
             magnitudes: [list] A list of apparent magnitudes of the meteor. None by default.
             fov_beg: [bool] True if the meteor began inside the FOV, False otherwise. None by default.
             fov_end: [bool] True if the meteor ended inside the FOV, False otherwise. None by default.
-
+            obs_id: [int] Unique ID of the observation. This is to differentiate different observations from
+                the same station.
         Return:
             None
         """
 
         # If station ID was not given, assign it a name
         if station_id is None:
-            station_id = self.station_count
+            station_id = self.meas_count
+
+        # If obs_id was not given, assign it
+        if obs_id is None:
+            obs_id = self.meas_count
 
 
         # Convert measuremet lists to numpy arrays
@@ -2353,12 +2366,74 @@ class Trajectory(object):
         # Init a new structure which will contain the observed data from the given site
         obs = ObservedPoints(self.jdt_ref, meas1, meas2, time_data, lat, lon, ele, station_id=station_id, \
             meastype=self.meastype, excluded_time=excluded_time, ignore_list=ignore_list, \
-            magnitudes=magnitudes, fov_beg=fov_beg, fov_end=fov_end)
+            magnitudes=magnitudes, fov_beg=fov_beg, fov_end=fov_end, obs_id=obs_id)
             
         # Add observations to the total observations list
         self.observations.append(obs)
 
-        self.station_count += 1
+        self.meas_count += 1
+
+
+    def infillWithObs(self, obs, meastype=None):
+        """ Infill the trajectory with already initialized ObservedPoints object. 
+    
+        Arguments:
+            obs: [ObservedPoints] Instance of ObservedPoints.
+
+        Keyword arguments:
+            meastype: [int] Measurement type. If not given, it will be read from the trajectory object.
+        """
+
+        if meastype is None:
+            meas1 = obs.meas1
+            meas2 = obs.meas2
+
+
+        # If inputs were RA and Dec
+        elif meastype == 1:
+            meas1 = obs.ra_data
+            meas2 = obs.dec_data
+
+        # If inputs were azimuth +east of due north, and elevation angle
+        elif meastype == 2:
+            meas1 = obs.azim_data
+            meas2 = obs.elev_data
+
+
+        # If inputs were azimuth +west of due south, and zenith angle
+        elif meastype == 3:
+
+            meas1 = (obs.azim_data + np.pi)%(2*np.pi)
+            meas2 = np.pi/2.0 - obs.elev_data
+
+        # If input were azimuth +north of due east, and zenith angle
+        elif meastype == 4:
+
+            meas1 = (np.pi/2.0 - obs.azim_data)%(2*np.pi)
+            meas2 = np.pi/2.0 - obs.elev_data
+
+
+
+        # Check if the observation had any excluded points
+        if hasattr(obs, 'excluded_time'):
+            excluded_time = obs.excluded_time
+        else:
+            excluded_time = None
+
+        # Check if the observation object has FOV beg/end flags
+        if not hasattr(obs, 'fov_beg'):
+            obs.fov_beg = None
+        if not hasattr(obs, 'fov_end'):
+            obs.fov_end = None
+
+        # Check if the observation object has obs_id argument
+        if not hasattr(obs, 'obs_id'):
+            obs.obs_id = None
+
+
+        self.infillTrajectory(meas1, meas2, obs.time_data, obs.lat, obs.lon, obs.ele, \
+            station_id=obs.station_id, excluded_time=excluded_time, ignore_list=obs.ignore_list, \
+            magnitudes=obs.magnitudes, fov_beg=obs.fov_beg, fov_end=obs.fov_end, obs_id=obs.obs_id)
 
 
 
@@ -2759,7 +2834,7 @@ class Trajectory(object):
 
         # Initial timing difference between sites is 0 (there are N-1 timing differences, as the time 
         # difference for the reference site is always 0)
-        p0 = np.zeros(shape=(self.station_count - 1))
+        p0 = np.zeros(shape=(len(self.observations) - 1))
 
         # # Set the time reference station to be the one with the most used points
         # obs_points = [obs.kmeas for obs in self.observations]
@@ -2773,7 +2848,7 @@ class Trajectory(object):
 
         # Set bounds for timing to +/- given maximum time offset
         bounds = []
-        for i in range(self.station_count - 1):
+        for i in range(len(self.observations) - 1):
             bounds.append([-self.max_toffset, self.max_toffset])
 
 
@@ -3230,7 +3305,7 @@ class Trajectory(object):
             ### Assign model_fit1, model_fit2, so they are in the same format as the input meas1, meas2 data
             ######################################################################################################
 
-            # If input were RA and Dec
+            # If inputs were RA and Dec
             if self.meastype == 1:
 
                 obs.model_fit1 = obs.model_ra
@@ -4963,9 +5038,6 @@ class Trajectory(object):
         ###################################################################################
 
 
-
-
-
         # Determine which station has the reference time (the first time entry is 0 for that station, but
         # do not take the station which has excluded points)
         for i, obs in enumerate(self.observations):
@@ -4984,9 +5056,10 @@ class Trajectory(object):
 
         self.intersection_list = []
 
-        # Calculate all plane intersections in between all station pairs
-        for i, obs1 in enumerate(self.observations):
-            for j, obs2 in enumerate(self.observations[i + 1:]):
+        # Calculate all plane intersections in between all station pairs, only use non-ignored stations
+        nonignored_observations = [obs for obs in self.observations if not obs.ignore_station]
+        for i, obs1 in enumerate(nonignored_observations):
+            for j, obs2 in enumerate(nonignored_observations[i + 1:]):
 
                 # Perform plane intersection
                 plane_intersection = PlaneIntersection(obs1, obs2)
@@ -5037,8 +5110,8 @@ class Trajectory(object):
             self.observations)
 
         # Calculate incident angles between the trajectory and the station
-        self.incident_angles = self.calcStationIncidentAngles(self.state_vect, self.best_conv_inter.radiant_eci, \
-            self.observations)
+        self.incident_angles = self.calcStationIncidentAngles(self.state_vect, \
+            self.best_conv_inter.radiant_eci, self.observations)
 
         # Join each observation the calculated incident angle
         for obs, inc_angl in zip(self.observations, self.incident_angles):
@@ -5061,15 +5134,9 @@ class Trajectory(object):
         # Set weights to 0 for stations that are not used
         weights = [w if (self.observations[i].ignore_station == False) else 0 for i, w in enumerate(weights)]
 
-
         # Set weights to stations
-        for i, obs in enumerate(self.observations):
-            
-            if obs.ignore_station:
-                obs.weight = 0
-                
-            else:
-                obs.weight = weights[i]
+        for w, obs in zip(weights, self.observations):
+                obs.weight = w
 
 
         # Print weights
@@ -5324,11 +5391,7 @@ class Trajectory(object):
 
                 # Reinitialize the observations with proper timing
                 for obs in temp_observations:
-            
-                    self.infillTrajectory(obs.meas1, obs.meas2, obs.time_data, obs.lat, obs.lon, obs.ele, \
-                        station_id=obs.station_id, excluded_time=obs.excluded_time, \
-                        ignore_list=obs.ignore_list, magnitudes=obs.magnitudes, fov_beg=obs.fov_beg, \
-                        fov_end=obs.fov_end)
+                    self.infillWithObs(obs)
 
                 
                 # Re-run the trajectory estimation with updated timings. This will update all calculated
@@ -5452,11 +5515,7 @@ class Trajectory(object):
 
                     # Reinitialize the observations without the bad picks
                     for obs in temp_observations:
-                
-                        self.infillTrajectory(obs.meas1, obs.meas2, obs.time_data, obs.lat, obs.lon, \
-                            obs.ele, station_id=obs.station_id, excluded_time=obs.excluded_time,
-                            ignore_list=obs.ignore_list, magnitudes=obs.magnitudes, fov_beg=obs.fov_beg,
-                            fov_end=obs.fov_end)
+                        self.infillWithObs(obs)
 
                     
                     # Re-run the trajectory estimation with updated timings. This will update all calculated

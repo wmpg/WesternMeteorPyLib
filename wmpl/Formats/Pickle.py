@@ -68,31 +68,14 @@ def solveTrajectoryPickle(dir_path, file_name, only_plot=False, solver='original
 
 
         # Reinitialize the trajectory solver
+        meastype = 2
         traj = Trajectory(traj_p.jdt_ref, output_dir=dir_path, max_toffset=max_toffset, \
-            meastype=2, **kwargs)
+            meastype=meastype, **kwargs)
 
 
         # Fill the observations
-        for i, obs in enumerate(traj_p.observations):
-
-            # Check if the trajectory had any excluded points
-            if hasattr(traj_p, 'excluded_time'):
-                excluded_time = obs.excluded_time
-
-            else:
-                excluded_time = None
-
-
-            # Check if the observation object has FOV beg/end flags
-            if not hasattr(obs, 'fov_beg'):
-                obs.fov_beg = None
-            if not hasattr(obs, 'fov_end'):
-                obs.fov_end = None
-
-
-            traj.infillTrajectory(obs.azim_data, obs.elev_data, obs.time_data, obs.lat, obs.lon, obs.ele, \
-                station_id=obs.station_id, excluded_time=excluded_time, ignore_list=obs.ignore_list, \
-                magnitudes=obs.magnitudes, fov_beg=obs.fov_beg, fov_end=obs.fov_end)
+        for obs in traj_p.observations:
+            traj.infillWithObs(obs, meastype=meastype)
 
 
     elif solver == 'gural':
