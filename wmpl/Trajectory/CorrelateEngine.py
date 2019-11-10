@@ -721,7 +721,7 @@ class TrajectoryCorrelator(object):
 
                                 # Remove shorter duplicate entries
                                 if entry != longest_entry:
-                                    print("Rejecting:", met_obs.station_code)
+                                    print("Rejecting duplicate observation from:", met_obs.station_code)
                                     matched_observations.remove(entry)
 
                 ###
@@ -833,9 +833,9 @@ class TrajectoryCorrelator(object):
                     # c) Keep all observations with error inside the minimum error limit
                     for i, obs in enumerate(traj_status.observations):
 
-                        # Skip ignored stations
-                        if obs.ignore_station:
-                            continue
+                        # # Skip ignored stations
+                        # if obs.ignore_station:
+                        #     continue
 
                         # Compute the median angular uncertainty of all other non-ignored stations
                         ang_res_list = [obstmp.ang_res_std for j, obstmp in \
@@ -859,8 +859,9 @@ class TrajectoryCorrelator(object):
                             or (obs.ang_res_std > np.radians(self.traj_constraints.max_arcsec_err/3600))):
 
                             # Add an ignore candidate and store its angular error
-                            ignore_candidates[i] = obs.ang_res_std
-                            any_ignored_toggle = True
+                            if obs.obs_id not in ignored_station_dict:
+                                ignore_candidates[i] = [obs.ang_res_std, ang_res_median]
+                                any_ignored_toggle = True
 
                         # If the station is inside the limit
                         else:
@@ -890,7 +891,8 @@ class TrajectoryCorrelator(object):
                         if len(ignore_candidates):
 
                             # Choose the observation with the largest error
-                            obs_ignore_indx = max(ignore_candidates, key=ignore_candidates.get)
+                            obs_ignore_indx = max(ignore_candidates, \
+                                key=lambda x: ignore_candidates.get(x)[0])
                             obs = traj_status.observations[obs_ignore_indx]
 
                             ### Ignore the observation with the largest error ###
@@ -905,6 +907,7 @@ class TrajectoryCorrelator(object):
 
                             ###
 
+                            ang_res_median = ignore_candidates[obs_ignore_indx][1]
                             print("Ignoring station {:s}".format(obs.station_id))
                             print("   obs std: {:.2f} arcsec".format(3600*np.degrees(obs.ang_res_std)))
                             print("   bad lim: {:.2f} arcsec".format(3600*np.degrees(ang_res_median\
@@ -942,15 +945,16 @@ class TrajectoryCorrelator(object):
 
                 # Skip the trajectory if no good solution was found
                 if skip_trajectory:
+                    continue
 
-                    # If the trajectory solutions was not done at any point, skip the trajectory completely
-                    if traj_best is None:
-                        continue
+                    # # If the trajectory solutions was not done at any point, skip the trajectory completely
+                    # if traj_best is None:
+                    #     continue
 
-                    # Otherwise, use the best trajectory solution until the solving failed
-                    else:
-                        print("Using previously estimated best trajectory...")
-                        traj_status = traj_best
+                    # # Otherwise, use the best trajectory solution until the solving failed
+                    # else:
+                    #     print("Using previously estimated best trajectory...")
+                    #     traj_status = traj_best
 
 
                 # If there are only two stations, make sure to reject solutions which have stations with 
@@ -970,6 +974,17 @@ class TrajectoryCorrelator(object):
 
                 # If the orbits couldn't be computed, skip saving the data files
                 if traj.orbit.ra_g is not None:
+
+
+                    # Check that the average velocity is within the accepted range
+                    if (traj.orbit.v_avg/1000 < self.traj_constraints.v_avg_min) \
+                        or (traj.orbit.v_avg/1000 > self.traj_constraints.v_avg_max):
+
+                        print("Average velocity outside range: {:.1f} < {:.1f} < {:.1f} km/s, skipping...".format(self.traj_constraints.v_avg_min, \
+                            traj.orbit.v_avg/1000, self.traj_constraints.v_avg_max))
+
+                        continue
+
 
                     # Update trajectory file name
                     traj.generateFileName()
