@@ -654,18 +654,19 @@ if __name__ == "__main__":
 
 
     # min duration = Minimum duration of meteor in seconds (-1 to turn this filter off)
+    comparison_plot_title = "All-sky"
     data_list = [ # Trajectory directory                     Min Qc  dRadiant max   dVg max   min duration  skip solver plot
-        ["../SimulatedMeteors/CAMO/2011Draconids",            1.0,        0.5,         0.5,       -1, []],
-        ["../SimulatedMeteors/CAMO/2012Geminids",             1.0,        0.5,         0.5,       -1, ['MPF const', 'MPF const-FHAV']],
-        ["../SimulatedMeteors/CAMO/2012Perseids",             1.0,        0.5,         0.5,       -1, []]]
+        # ["../SimulatedMeteors/CAMO/2011Draconids",            1.0,        0.5,         0.5,       -1, []],
+        # ["../SimulatedMeteors/CAMO/2012Geminids",             1.0,        0.5,         0.5,       -1, ['MPF const', 'MPF const-FHAV']],
+        # ["../SimulatedMeteors/CAMO/2012Perseids",             1.0,        0.5,         0.5,       -1, []]]
         #
         # ["../SimulatedMeteors/CAMSsim/2011Draconids",         10.0,       1.0,         1.0,       -1, []],
         # ["../SimulatedMeteors/CAMSsim/2012Geminids",          10.0,       1.0,         1.0,       -1, []],
-        # ["../SimulatedMeteors/CAMSsim/2012Perseids",          10.0,       1.0,         1.0,       -1, []],
+        # ["../SimulatedMeteors/CAMSsim/2012Perseids",          10.0,       1.0,         1.0,       -1, []]]
         # #
-        # ["../SimulatedMeteors/SOMN_sim/2011Draconids",        15.0,       5.0,         5.0,       -1, []],
-        # ["../SimulatedMeteors/SOMN_sim/2012Geminids",         15.0,       5.0,         5.0,       -1, []],
-        # ["../SimulatedMeteors/SOMN_sim/2012Perseids",         15.0,       5.0,         5.0,       -1, []] ]
+        ["../SimulatedMeteors/SOMN_sim/2011Draconids",        15.0,       5.0,         5.0,       -1, []],
+        ["../SimulatedMeteors/SOMN_sim/2012Geminids",         15.0,       5.0,         5.0,       -1, []],
+        ["../SimulatedMeteors/SOMN_sim/2012Perseids",         15.0,       5.0,         5.0,       -1, []] ]
         
         # ["../SimulatedMeteors/SOMN_sim/2015Taurids",          15.0,       5.0,         5.0,       -1, []]]
         # ["../SimulatedMeteors/SOMN_sim/LongFireball",          5.0,       0.5,         0.5,        4, []]
@@ -957,6 +958,8 @@ if __name__ == "__main__":
 
         plt.ylabel('Radiant error (deg)')
         plt.xlabel('Velocity error (km/s)')
+
+        plt.title(comparison_plot_title)
 
 
         # Increase the top limit a bit

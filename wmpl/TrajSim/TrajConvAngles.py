@@ -22,7 +22,7 @@ if __name__ == "__main__":
 
 
     # ## CAMO ###
-
+    # plot_title = "CAMO"
     # dir_path = "../SimulatedMeteors/CAMO/2012Geminids_1000"
 
     # solvers = ['planes', 'los', 'milig', 'mc', 'gural1', 'gural3']
@@ -33,20 +33,24 @@ if __name__ == "__main__":
 
 
     # ### CAMS ###
+    # plot_title = "Moderate FOV (CAMS-like)"
     # dir_path = "../SimulatedMeteors/CAMSsim_2station/2012Geminids_1000"
 
     # solvers = ['planes', 'los', 'milig', 'mc', 'gural0', 'gural0fha', 'gural1', 'gural3']
-    # solvers_plot_labels = ['IP', 'LoS', 'LoS-FHAV', 'Monte Carlo', 'MPF const', 'MPF const-FHAV', 'MPF linear', 'MPF exp']
+    # solvers_plot_labels = ['IP', 'LoS', 'LoS-FHAV', 'Monte Carlo', 'MPF const', 'MPF const-FHAV', \
+    #     'MPF linear', 'MPF exp']
 
     # ### ###
 
 
 
     ### SOMN ###
-    dir_path = "../SimulatedMeteors/SOMN_sim_2station/2012Geminids_1000"
+    plot_title = "All-sky"
+    dir_path = "./mnt/bulk/SimulatedMeteors/SOMN_sim_2station/2012Geminids_1000"
 
     solvers = ['planes', 'los', 'milig', 'mc', 'gural0', 'gural0fha', 'gural1', 'gural3']
-    solvers_plot_labels = ['IP', 'LoS', 'LoS-FHAV', 'Monte Carlo', 'MPF const', 'MPF const-FHAV', 'MPF linear', 'MPF exp']
+    solvers_plot_labels = ['IP', 'LoS', 'LoS-FHAV', 'Monte Carlo', 'MPF const', 'MPF const-FHAV', \
+        'MPF linear', 'MPF exp']
 
     ### ###
 
@@ -170,6 +174,8 @@ if __name__ == "__main__":
     ax2.grid()
     ax2.set_ylabel('$V_g$ error (km/s)')
     ax2.set_xlabel('Convergence angle (deg)')
+
+    plt.title(plot_title)
 
     plt.tight_layout()
 
