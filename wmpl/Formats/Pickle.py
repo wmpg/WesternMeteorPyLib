@@ -67,10 +67,17 @@ def solveTrajectoryPickle(dir_path, file_name, only_plot=False, solver='original
             kwargs.pop("max_toffset", None)
 
 
+        # Preserve the trajectory ID
+        if hasattr(traj_p, "traj_id"):
+            traj_id = traj_p.traj_id
+        else:
+            traj_id = None
+
+
         # Reinitialize the trajectory solver
         meastype = 2
         traj = Trajectory(traj_p.jdt_ref, output_dir=dir_path, max_toffset=max_toffset, \
-            meastype=meastype, **kwargs)
+            meastype=meastype, traj_id=traj_id, **kwargs)
 
 
         # Fill the observations
