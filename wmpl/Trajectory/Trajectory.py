@@ -2993,8 +2993,8 @@ class Trajectory(object):
                     lag_fit = lag_fit.x
 
                     # Add the point to the considered list only if the lag has a negative trend, or a trend
-                    #   that is not *too* positive, about 500 m per second is the limit
-                    if lag_fit[0] <= 500:
+                    #   that is not *too* positive, about 100 m per second is the limit
+                    if lag_fit[0] <= 100:
 
                         # Calculate the standard deviation of the line fit and add it to the list of solutions
                         line_stddev = RMSD(state_vect_dist_part - lineFunc(times_part, *velocity_fit), \
@@ -3979,7 +3979,15 @@ class Trajectory(object):
             ##################################################################################################
 
 
-
+        # marker type, size multiplier
+        markers = [
+         ['x', 2 ],
+         ['+', 8 ],
+         ['o', 1 ],
+         ['s', 1 ],
+         ['d', 1 ],
+         ]
+         
         if self.plot_all_spatial_residuals:
 
 
@@ -4101,14 +4109,6 @@ class Trajectory(object):
 
             ### PLOT TOTAL SPATIAL RESIDUALS VS LENGTH ###
             ##################################################################################################
-            # marker type, size multiplier
-            markers = [
-             ['x', 2 ],
-             ['+', 8 ],
-             ['o', 1 ],
-             ['s', 1 ],
-             ['d', 1 ],
-             ]
 
             for i, obs in enumerate(self.observations):
 
@@ -4162,65 +4162,65 @@ class Trajectory(object):
             ##################################################################################################
 
 
-            ### PLOT ALL TOTAL SPATIAL RESIDUALS VS HEIGHT ###
-            ##################################################################################################
+        ### PLOT ALL TOTAL SPATIAL RESIDUALS VS HEIGHT ###
+        ##################################################################################################
 
-            for i, obs in enumerate(self.observations):
+        for i, obs in enumerate(self.observations):
 
-                marker, size_multiplier = markers[i%len(markers)]
+            marker, size_multiplier = markers[i%len(markers)]
 
-                # Calculate root mean square of the total residuals
-                total_res_rms = np.sqrt(obs.v_res_rms**2 + obs.h_res_rms**2)
+            # Calculate root mean square of the total residuals
+            total_res_rms = np.sqrt(obs.v_res_rms**2 + obs.h_res_rms**2)
 
-                # Compute total residuals, take the signs from vertical residuals
-                tot_res = np.sign(obs.v_residuals)*np.hypot(obs.v_residuals, obs.h_residuals)
+            # Compute total residuals, take the signs from vertical residuals
+            tot_res = np.sign(obs.v_residuals)*np.hypot(obs.v_residuals, obs.h_residuals)
 
-                # Plot total residuals
-                plt.scatter(tot_res, obs.meas_ht/1000, marker=marker, \
-                    s=10*size_multiplier, label='{:s}, RMSD = {:.2f} m'.format(str(obs.station_id), \
-                    total_res_rms), zorder=3)
+            # Plot total residuals
+            plt.scatter(tot_res, obs.meas_ht/1000, marker=marker, \
+                s=10*size_multiplier, label='{:s}, RMSD = {:.2f} m'.format(str(obs.station_id), \
+                total_res_rms), zorder=3)
 
-                # Mark ignored points
-                if np.any(obs.ignore_list):
+            # Mark ignored points
+            if np.any(obs.ignore_list):
 
-                    ignored_ht = obs.model_ht[obs.ignore_list > 0]
-                    ignored_tot_res = np.sign(obs.v_residuals[obs.ignore_list > 0])\
-                        *np.hypot(obs.v_residuals[obs.ignore_list > 0], obs.h_residuals[obs.ignore_list > 0])
-    
-
-                    plt.scatter(ignored_tot_res, ignored_ht/1000, facecolors='none', edgecolors='k', \
-                        marker='o', zorder=3, s=20)
+                ignored_ht = obs.model_ht[obs.ignore_list > 0]
+                ignored_tot_res = np.sign(obs.v_residuals[obs.ignore_list > 0])\
+                    *np.hypot(obs.v_residuals[obs.ignore_list > 0], obs.h_residuals[obs.ignore_list > 0])
 
 
-            plt.title('All spatial residuals')
-            plt.xlabel('Total deviation (m)')
-            plt.ylabel('Height (km)')
-
-            plt.grid()
-
-            plt.legend()
-
-            # Set the residual limits to +/-10m if they are smaller than that
-            if np.max(np.abs(plt.gca().get_xlim())) < 10:
-                plt.gca().set_xlim([-10, 10])
-
-            # Pickle the figure
-            if ret_figs:
-                fig_pickle_dict["all_spatial_total_residuals_height"] = pickle.dumps(plt.gcf(), protocol=2)
-
-            if self.save_results:
-                savePlot(plt, file_name + '_all_spatial_total_residuals_height.' + self.plot_file_type, \
-                    output_dir)
-
-            if show_plots:
-                plt.show()
-
-            else:
-                plt.clf()
-                plt.close()
+                plt.scatter(ignored_tot_res, ignored_ht/1000, facecolors='none', edgecolors='k', \
+                    marker='o', zorder=3, s=20)
 
 
-            ##################################################################################################
+        plt.title('All spatial residuals')
+        plt.xlabel('Total deviation (m)')
+        plt.ylabel('Height (km)')
+
+        plt.grid()
+
+        plt.legend()
+
+        # Set the residual limits to +/-10m if they are smaller than that
+        if np.max(np.abs(plt.gca().get_xlim())) < 10:
+            plt.gca().set_xlim([-10, 10])
+
+        # Pickle the figure
+        if ret_figs:
+            fig_pickle_dict["all_spatial_total_residuals_height"] = pickle.dumps(plt.gcf(), protocol=2)
+
+        if self.save_results:
+            savePlot(plt, file_name + '_all_spatial_total_residuals_height.' + self.plot_file_type, \
+                output_dir)
+
+        if show_plots:
+            plt.show()
+
+        else:
+            plt.clf()
+            plt.close()
+
+
+        ##################################################################################################
 
 
 
