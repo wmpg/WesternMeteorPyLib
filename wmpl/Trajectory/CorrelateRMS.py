@@ -507,8 +507,7 @@ The directory structure needs to be the following, for example:
             ./platepars_all_recalibrated.json
         /...
 
-The root directory has to contain the CAMS-type CameraSites.txt file with the optional CameraTimeOffsets file.
-Next, is should contain directories of stations (station codes need to be exact), and these directories should
+In essence, the root directory should contain directories of stations (station codes need to be exact), and these directories should
 contain data folders. Data folders should have FTPdetectinfo files together with platepar files.""",
         formatter_class=argparse.RawTextHelpFormatter)
 
