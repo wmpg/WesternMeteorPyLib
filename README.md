@@ -59,7 +59,7 @@ on some systems this may not work, so you will have to write ```source activate 
 We will now install all needed libraries. With the environment activated as described above, run this in the terminal:
 
 ```
-conda install -y numpy scipy matplotlib cython basemap basemap-data-hires
+conda install -y numpy scipy matplotlib cython basemap basemap-data-hires pytz
 conda install -y -c conda-forge jplephem pyephem
 pip install PyQt5
 ```
