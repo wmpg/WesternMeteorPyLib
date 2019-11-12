@@ -24,15 +24,16 @@ def inverseLogline(y, m, k):
 
 
 
-def fitSlope(input_data, mass):
+def fitSlope(input_data, mass, ref_point=None):
     """ Fit a gamma distribution on the input data and compute the slope at the reference point. 
 
     Arguments:
         input_data: [list] A list of magnitudes or masses (see mass keyword argument).
-
-    Keyword arguments: 
         mass: [bool] If True, the mass index is computed, if false the population index is computed. 
 
+    Keyword arguments: 
+        ref_point: [float] Override automatic reference point estimation by giving a fixed value. None by 
+            default, in which case it will be automatically estimated.
     
     Return:
         params, x_arr, inflection_point, ref_point, slope, slope_report, sign, kstest:
@@ -63,13 +64,16 @@ def fitSlope(input_data, mass):
     # Find the minimum of the PDF derivative
     inflection_point = x_arr[pdf_derivative.argmin()]
 
-    if not mass:
-        # Take one magnitude brighter than the inflection point (the addition here is because the inflection
-        #   point is reverse)
-        ref_point = inflection_point + 1
+    # If the reference point is not given, estimate it
+    if ref_point is None:
 
-    else:
-        ref_point = inflection_point + 0.4
+        if not mass:
+            # Take one magnitude brighter than the inflection point (the addition here is because the inflection
+            #   point is reverse)
+            ref_point = inflection_point + 1
+
+        else:
+            ref_point = inflection_point + 0.4
 
 
     # Find the slope of the log survival function
@@ -89,13 +93,23 @@ def fitSlope(input_data, mass):
         sign = -1
 
 
-    return params, x_arr, inflection_point, ref_point, slope, slope_report, sign, kstest
+    # Compute intercept of the line on the reverse cumulative plot (survival function)
+    y_temp = np.log10(scipy.stats.gamma.sf(ref_point, *params))
+    intercept = y_temp + slope*ref_point
+
+
+    # Compute the value of the slope line at the maximum cumulative value, indicating the effective 
+    #   limiting magnitude or mass
+    lim_point = sign*intercept/slope
+
+
+    return params, x_arr, inflection_point, ref_point, slope, slope_report, intercept, lim_point, sign, kstest
 
 
 
 
-def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None, nsamples=100, \
-    mass_as_intensity=False):
+def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot_save_path=None, \
+    nsamples=100, mass_as_intensity=False):
     """ Estimate the mass or population index from the meteor data by fitting a gamma function to it using
         MLE and estimating the slope in the completeness region.
 
@@ -103,6 +117,8 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
         input_data: [array like] List of peak magnitudes or logarithms of mass
 
     Keyword arguments:
+        ref_point: [float] Override automatic reference point estimation by giving a fixed value. None by 
+            default, in which case it will be automatically estimated.
         mass: [bool] If true, the mass index will be computed. False by default, in which case the population
             index is computed.
         show_plots: [bool] Set to True to show the plots. False by default.
@@ -112,6 +128,12 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
         mass_as_intensity: [bool] If True, it indicates that the integrated intensity in zero-magnitude units
             is given instead of the mass. This will just change the axis labels. False by default.
     """
+
+
+    # If the reference point is given, set the appropriate sign
+    if ref_point is not None:
+        if not mass:
+            ref_point = -ref_point
 
 
     input_data = np.array(input_data).astype(np.float64)
@@ -127,7 +149,8 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
     
 
     # Fit the slope to the data
-    params, x_arr, inflection_point, ref_point, slope, slope_report, sign, kstest = fitSlope(input_data, mass)
+    params, x_arr, inflection_point, ref_point, slope, slope_report, intercept, lim_point, sign, \
+        kstest = fitSlope(input_data, mass, ref_point=ref_point)
 
 
     # Estimate the uncertainty of the slope using the bootstrap method
@@ -143,42 +166,43 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
         unc_results_list.append(unc_results)
 
     
-    # Reject all 3 sigma slope outliers
-    slopes = [scipy.stats.gamma.pdf(entry[3], *entry[0]) for entry in unc_results_list]
-    median_slope = np.median(slopes)
-    slope_std = np.std(slopes)
+    # Iteratively reject all 3 sigma slope outliers
+    for _ in range(3):
+        slopes = [scipy.stats.gamma.pdf(entry[3], *entry[0]) for entry in unc_results_list]
+        median_slope = np.median(slopes)
+        slope_std = np.std(slopes)
 
-    unc_results_list_filtered = []
-    for i, unc_slope in enumerate(slopes):
+        unc_results_list_filtered = []
+        for i, unc_slope in enumerate(slopes):
 
-        # Reject all 3 sigma outliers
-        if abs(unc_slope - median_slope) > 3*slope_std:
-            continue
+            # Reject all 3 sigma outliers
+            if abs(unc_slope - median_slope) > 3*slope_std:
+                continue
 
-        unc_results_list_filtered.append(unc_results_list[i])
+            unc_results_list_filtered.append(unc_results_list[i])
 
-    unc_results_list = unc_results_list_filtered
+        unc_results_list = unc_results_list_filtered
 
 
     # Compute the standard deviation of the slope
-    slope_report_unc_list = []
-    for unc_results in unc_results_list:
-        _, _, _, ref_point_unc, slope_unc, slope_report_unc, _, _ = unc_results
-        slope_report_unc_list.append(slope_report_unc)
-
-    # Compute the slope standard deviation
+    slope_report_unc_list = [entry[5] for entry in unc_results_list]
     slope_report_std = np.std(slope_report_unc_list)
 
     # If the standard deviation is larger than 10 or is nan, set it to 10
     if (slope_report_std > 10) or np.isnan(slope_report_std):
         slope_report_std = 10
 
-    # Reject all 3 sigma outliers and recompute the std
-    slope_report_unc_list = [slp for slp in slope_report_unc_list if (slp < slope_report \
-        + 3*slope_report_std) and (slp > slope_report - 3*slope_report_std)]
 
-    # Recompute the standard deviation
-    slope_report_std = np.std(slope_report_unc_list)
+    # Compute the standard deviation of the effective limiting magnitude
+    lim_point_unc_list = [entry[7] for entry in unc_results_list]
+    lim_point_std = np.std(lim_point_unc_list)
+
+    # # Reject all 3 sigma outliers and recompute the std
+    # slope_report_unc_list = [slp for slp in slope_report_unc_list if (slp < slope_report \
+    #     + 3*slope_report_std) and (slp > slope_report - 3*slope_report_std)]
+
+    # # Recompute the standard deviation
+    # slope_report_std = np.std(slope_report_unc_list)
 
 
     # Make plots
@@ -227,7 +251,7 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
         ref_point_unc_list = []
         for unc_results in unc_results_list:
             
-            params_unc, _, inflection_point_unc, ref_point_unc, _, _, _, _ = unc_results
+            params_unc, _, inflection_point_unc, ref_point_unc, _, _, _, _, _, _ = unc_results
             ref_point_unc_list.append(ref_point_unc)
 
             # Find the slope at the reference point for PDF plotting
@@ -276,10 +300,6 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
 
         ####
 
-        # Compute intercept of the line on the reverse cumulative plot (survival function)
-        y_temp = np.log10(scipy.stats.gamma.sf(ref_point, *params))
-        intercept = y_temp + slope*ref_point
-
         # Plot data histogram
         hist_values, hist_edges, _ = plt.hist(sign*input_data, bins=len(input_data), cumulative=-sign, \
             density=True, log=True, histtype='step', color='k', zorder=4)
@@ -295,7 +315,7 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
         # Plot slopes of all lines found during uncertainty estimation
         for unc_results in unc_results_list:
             
-            params_unc, _, _, ref_point_unc, slope_unc, slope_report_unc, _, _ = unc_results
+            params_unc, _, _, ref_point_unc, slope_unc, slope_report_unc, _, _, _, _ = unc_results
 
             # Compute intercept of the line on the reverse cumulative plot (survival function)
             y_temp_unc = np.log10(scipy.stats.gamma.sf(ref_point_unc, *params_unc))
@@ -307,6 +327,7 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
 
 
         # Plot the inflection point
+        y_temp = np.log10(scipy.stats.gamma.sf(ref_point, *params))
         plt.scatter(sign*ref_point, 10**y_temp, c='r', \
             label='Reference point = {:.2f} $\pm$ {:.2f}'.format(sign*ref_point, ref_point_std), zorder=5)
 
@@ -316,32 +337,23 @@ def estimateIndex(input_data, mass=False, show_plots=False, plot_save_path=None,
                 slope_name, slope_report, slope_report_std, kstest.statistic, kstest.pvalue), zorder=5)
 
 
-        # Plot a horizontal line indicating maximum cumulative value
-        max_cum_value = np.max(hist_values)
-        plt.plot(sign*x_arr, np.zeros_like(x_arr) + max_cum_value, linestyle='dotted', alpha=0.5, color='k')
 
-        # Compute the value of the slope line at the maximum cumulative value, indicating the effective 
-        #   limiting magnitude or mass
-        lim_point = -sign*inverseLogline(max_cum_value, slope, intercept)
+
+        # Plot a horizontal line at 1.0
+        plt.plot(sign*x_arr, np.ones_like(x_arr), linestyle='dotted', alpha=0.5, color='k')
+
 
         # Plot the limiting point
         if mass:
             lim_label = "Eff. lim. mass"
         else:
             lim_label = "Eff. lim. mag"
-        plt.scatter(lim_point, max_cum_value, c='b', marker='s', \
-            label="{:s} = {:+.2f}".format(lim_label, lim_point), zorder=6)
+        plt.scatter(lim_point, 1.0, c='b', marker='s', \
+            label="{:s} = {:+.2f} $\pm$ {:.2f}".format(lim_label, lim_point, lim_point_std), zorder=6)
 
-
-        # # Limit Y axis range to the maximum of the fitted line
-        # y_max = np.max(logline(-x_arr, slope, intercept))
-        # plt.ylim(ymax=y_max)
 
         plt.ylim([y_min, y_max])
-
         plt.xlim([np.min(sign*x_arr), np.max(sign*x_arr)])
-        
-
 
         plt.xlabel(xlabel)
         plt.ylabel('Cumulative count')
@@ -375,9 +387,11 @@ if __name__ == "__main__":
     magnitude_data = [4.19, 4.05, 4.73, 3.32, 3.84, 0.94, 5.04, 5.41, 5.56, 2.77, 3.24, 5.98, 5.12, 1.99, \
         5.21, 3.58, 1.56, 5.49, 5.64, 3.59, 5.50, 5.54, 3.09, 3.32, 5.53, 2.31, 2.50, 4.51, 4.33, 4.93]
 
+    # Give a fixed reference magnitude at which the slope will be estimated (None is auto estimation)
+    ref_point = None
 
-    estimateIndex(magnitude_data, mass=False, show_plots=True, plot_save_path=None, nsamples=100, \
-        mass_as_intensity=False)
+    estimateIndex(magnitude_data, ref_point=ref_point, mass=False, show_plots=True, plot_save_path=None, \
+        nsamples=100, mass_as_intensity=False)
 
 
     ### ###
@@ -391,10 +405,13 @@ if __name__ == "__main__":
         -2.36, -1.23, -2.47, -1.95, -1.05, -2.76, -2.57, -1.91, -2.72, -2.55, -1.68, -1.83, -2.67, -1.37, \
         -1.26, -2.34, -2.33, -2.47]
 
+    # Give a fixed reference mass at which the slope will be estimated (None is auto estimation)
+    ref_point = None
+
 
     # Compute the mass index
     # NOTE: If using the true mass, set: mass_as_intensity=False
-    estimateIndex(log10_mass_data, mass=True, show_plots=True, plot_save_path=None, nsamples=100, \
-        mass_as_intensity=True)
+    estimateIndex(log10_mass_data, ref_point=ref_point, mass=True, show_plots=True, plot_save_path=None, \
+        nsamples=100, mass_as_intensity=True)
 
     ### ###
