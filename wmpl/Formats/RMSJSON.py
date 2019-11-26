@@ -121,8 +121,12 @@ if __name__ == "__main__":
     arg_parser = addSolverOptions(arg_parser, skip_velpart=True)
 
     arg_parser.add_argument('-p', '--velpart', metavar='VELOCITY_PART', \
-        help='Fixed part from the beginning of the meteor on which the initial velocity estimation using the sliding fit will start. Default is 0.4 (40 percent), but for noisier data this might be bumped up to 0.5.', \
+        help="Fixed part from the beginning of the meteor on which the initial velocity estimation using the sliding fit will start. Default is 0.4 (40 percent), but for noisier data this might be bumped up to 0.5.", \
         type=float, default=0.4)
+
+    arg_parser.add_argument('-w', '--walk', \
+        help="Recursively find all manual reduction JSON files in the given folder and use them for trajectory estimation.", \
+        action="store_true")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -133,25 +137,51 @@ if __name__ == "__main__":
 
     json_paths = []
     print('Using JSON files:')
-    for json_p in cml_args.json_files:
-        for json_full_p in glob.glob(json_p):
-            json_full_path = os.path.abspath(json_full_p)
 
-            # Check that the path exists
-            if os.path.exists(json_full_path):
-                json_paths.append(json_full_path)
-                print(json_full_path)
-            else:
-                print('File not found:', json_full_path)
+
+    # If the recursive walk option is given, find all JSON files recursively in the given folder
+    if cml_args.walk:
+
+        # Take the dir path as the given path
+        dir_path = cml_args.json_files[0]
+
+        # Find all manual reduction JSON files in the given folder
+        json_names = []
+        for entry in sorted(os.walk(dir_path), key=lambda x: x[0]):
+
+            dir_name, _, file_names = entry
+
+            # Add all JSON files with picks to the processing list
+            for fn in file_names:
+                if fn.lower().endswith("_picks.json"):
+
+                    # Add JSON file, but skip duplicates
+                    if fn not in json_names:
+                        json_paths.append(os.path.join(dir_name, fn))
+                        json_names.append(fn)
+
+
+    else:
+        for json_p in cml_args.json_files:
+            for json_full_p in glob.glob(json_p):
+                json_full_path = os.path.abspath(json_full_p)
+
+                # Check that the path exists
+                if os.path.exists(json_full_path):
+                    json_paths.append(json_full_path)
+                    print(json_full_path)
+                else:
+                    print('File not found:', json_full_path)
+
+
+        # Extract dir path
+        dir_path = os.path.dirname(json_paths[0])
 
 
     # Check that there are more than 2 JSON files given
     if len(json_paths) < 2:
         print("At least 2 JSON files are needed for trajectory estimation!")
         sys.exit()
-
-    # Extract dir path
-    dir_path = os.path.dirname(json_paths[0])
 
 
     max_toffset = None
@@ -176,6 +206,29 @@ if __name__ == "__main__":
         with open(json_file) as f:
             data = json.load(f)
             json_list.append(data)
+
+
+    ### If there are stations with the same names, append "_1, _2,..." at the end of their names ###
+    station_names = [j['station']['station_id'] for j in json_list]
+    unique, counts = np.unique(station_names, return_counts=True)
+
+    for station_id, count in zip(unique, counts):
+
+        id_add_counter = 1
+
+        # If there are more than 1 stations with the same name, add suffixes
+        if count > 1:
+
+            # Find the stations with the duplicate ID
+            for j in json_list:
+                if j['station']['station_id'] == station_id:
+                    j['station']['station_id'] += "_{:d}".format(id_add_counter)
+                    id_add_counter += 1
+
+    ### ###
+
+
+
 
 
 
