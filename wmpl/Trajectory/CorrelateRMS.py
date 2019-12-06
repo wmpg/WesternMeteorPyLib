@@ -539,6 +539,10 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     arg_parser.add_argument('-d', '--disablemc', \
         help='Disable Monte Carlo.', action="store_true")
 
+    arg_parser.add_argument('-u', '--uncerttime', \
+        help="Compute uncertainties by culling solutions with worse value of the time fit than the LoS solution. This may increase the computation time considerably.", \
+        action="store_true")
+
     arg_parser.add_argument('-l', '--saveplots', \
         help='Save plots to disk.', action="store_true")
 
@@ -561,6 +565,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     trajectory_constraints.max_vel_percent_diff = cml_args.maxveldiff
     trajectory_constraints.run_mc = not cml_args.disablemc
     trajectory_constraints.save_plots = cml_args.saveplots
+    trajectory_constraints.geometric_uncert = not cml_args.uncerttime
 
     if cml_args.minerr is not None:
         trajectory_constraints.min_arcsec_err = cml_args.minerr

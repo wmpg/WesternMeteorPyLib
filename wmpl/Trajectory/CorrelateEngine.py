@@ -88,6 +88,10 @@ class TrajectoryConstraints(object):
         # Run Monte Carlo or not
         self.run_mc = True
 
+        # Only compute geometric uncertainties. If False, the solver will cull all MC runs with time residuals
+        #   worse than the initial LoS fit
+        self.geometric_uncert = True
+
         # Number of CPU cores to use for parallel processing
         self.mc_cores = multiprocessing.cpu_count() - 2
         if self.mc_cores < 2:
@@ -396,7 +400,7 @@ class TrajectoryCorrelator(object):
 
 
     def initTrajectory(self, ref_dt, mc_runs):
-        """ Initialize the Trajectory solver. 
+        """ Initialize the Trajectory solver.
         
         Arguments:
             ref_dt: [datetime] Reference datetime.
@@ -410,7 +414,8 @@ class TrajectoryCorrelator(object):
             max_toffset=self.traj_constraints.max_toffset, meastype=1, \
             v_init_part=self.v_init_part, monte_carlo=self.traj_constraints.run_mc, \
             mc_runs=mc_runs, show_plots=False, verbose=False, save_results=False, \
-            reject_n_sigma_outliers=2, mc_cores=self.traj_constraints.mc_cores)
+            reject_n_sigma_outliers=2, mc_cores=self.traj_constraints.mc_cores, \
+            geometric_uncert=self.traj_constraints.geometric_uncert)
 
         return traj
 
@@ -762,6 +767,18 @@ class TrajectoryCorrelator(object):
                 else:
                     mc_runs = self.traj_constraints.error_mc_runs
 
+
+                ### ADJUST THE NUMBER OF MC RUNS FOR OPTIMAL USE OF CPU CORES ###
+
+                # Make sure that the number of MC runs is larger or equal to the number of processor cores
+                if mc_runs < self.traj_constraints.mc_cores:
+                    mc_runs = int(self.traj_constraints.mc_cores)
+
+                # If the number of MC runs is not a multiple of CPU cores, increase it until it is
+                #   This will increase the number of MC runs while keeping the processing time the same
+                mc_runs = int(np.ceil(mc_runs/self.traj_constraints.mc_cores)*self.traj_constraints.mc_cores)
+
+                ### ###
 
 
                 # Init the solver
