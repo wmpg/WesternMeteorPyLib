@@ -142,6 +142,12 @@ Just make sure to replace <ANACONDA_DIR> with the full path. Also, make sure to 
 
 Save the file. Enjoy.
 
+If after this you get this error:
+
+```FileNotFoundError: [Errno 2] No such file or directory: 'C:/Users/delorayn1/Anaconda3/envs/wmpl/Library/share\\epsg'```
+
+then you have to manually download the ```epsg``` file ([LINK](https://raw.githubusercontent.com/matplotlib/basemap/master/lib/mpl_toolkits/basemap/data/epsg), choose "Save as...") into the ```<ANACONDA_DIR>/envs/wmpl/Library/share``` directory.
+
 
 ### Manually downloading data files
 
