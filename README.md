@@ -97,7 +97,7 @@ The installation might differ on Windows. I recommend installing Anaconda, which
 	b) Install only for "me" (single user)
 
 
-2) Open Anaconda prompt and run:
+2) Open the Anaconda powershell and run:
 	```
 	conda update anaconda
 	conda create -y --name wmpl python=3.7
