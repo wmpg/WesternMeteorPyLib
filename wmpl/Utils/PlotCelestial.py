@@ -5,7 +5,8 @@ from __future__ import print_function, absolute_import, division
 import numpy as np
 
 import matplotlib.pyplot as plt
-from mpl_toolkits.basemap import Basemap
+from wmpl.Utils.OSTools import importBasemap
+importBasemap()
 
 
 from wmpl.Utils.Math import meanAngle

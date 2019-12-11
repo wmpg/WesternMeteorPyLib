@@ -3,8 +3,9 @@
 from __future__ import print_function, division, absolute_import
 
 import numpy as np
-from mpl_toolkits.basemap import Basemap
 import matplotlib.pyplot as plt
+from wmpl.Utils.OSTools import importBasemap
+importBasemap()
 
 from wmpl.Utils.Math import meanAngle
 

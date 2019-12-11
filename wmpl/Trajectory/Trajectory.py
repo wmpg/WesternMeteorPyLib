@@ -22,7 +22,8 @@ import scipy.stats
 import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import cm
-from mpl_toolkits.basemap import Basemap
+from wmpl.Utils.OSTools import importBasemap
+importBasemap()
 
 
 from wmpl.Trajectory.Orbit import calcOrbit

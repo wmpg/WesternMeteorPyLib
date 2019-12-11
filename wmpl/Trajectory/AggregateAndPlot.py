@@ -689,10 +689,12 @@ def generateStationPlot(dir_path, traj_list, color_scheme='light'):
 
 if __name__ == "__main__":
 
+    from wmpl.Utils.OSTools import importBasemap
+
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-    from mpl_toolkits.basemap import Basemap
+    importBasemap()
 
     import argparse
 
