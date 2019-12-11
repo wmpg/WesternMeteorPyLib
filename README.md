@@ -145,7 +145,7 @@ If you are getting the following error on Windows: ```Unable to find vcvarsall.b
 If you are getting this error when running the setup: ```ModuleNotFoundError: No module named 'wmpl.PythonNRLMSISE00.nrlmsise_00_header'```, it means that you haven't cloned the repository as per instructions. Please read this README file more carefully (hint: the answer is at the top of the file).
 
 ##### ```KeyError: 'PROJ_LIB'``` on Windows
-The basemap conda package is terribly broken and no one seems to care to fix it, so we have to do a little bit of "hacking". First, find where your anaconda is installed. Under Windows, it is probably in ```C:\Users\<YOUR_USERNAME>\AppData\Local\Continuum\anaconda3\```, where you should replace <YOUR_USERNAME> with your username (duh!). From now on I will refer to this path as ```<ANACONDA_DIR>```.
+The basemap conda package is terribly broken and no one seems to care to fix it, so we have to do a little bit of "hacking". First, find where your anaconda is installed. Under Windows, it is probably in ```C:\Users\<YOUR_USERNAME>\AppData\Local\Continuum\anaconda3\``` or ```C:\Users\<YOUR_USERNAME>\Anaconda3\```, where you should replace <YOUR_USERNAME> with your username (duh!). From now on I will refer to this path as ```<ANACONDA_DIR>```.
 Open the following file in a text editor: ```<ANACONDA_DIR>\envs\wmpl\Lib\site-packages\mpl_toolkits\basemap\__init__.py```. 
 
 Find the line ```pyproj_datadir = os.environ['PROJ_LIB']```, and comment it out by putting a # in front of it. Right below that command, add the following line:
