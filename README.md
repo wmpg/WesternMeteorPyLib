@@ -146,7 +146,7 @@ If after this you get this error:
 
 ```FileNotFoundError: [Errno 2] No such file or directory: 'C:/Users/delorayn1/Anaconda3/envs/wmpl/Library/share\\epsg'```
 
-then you have to manually download the ```epsg``` file ([LINK](https://raw.githubusercontent.com/matplotlib/basemap/master/lib/mpl_toolkits/basemap/data/epsg), choose "Save as...") into the ```<ANACONDA_DIR>/envs/wmpl/Library/share``` directory.
+then you have to manually download the ```epsg``` file ([LINK](https://raw.githubusercontent.com/matplotlib/basemap/master/lib/mpl_toolkits/basemap/data/epsg), choose "Save as...", remove the ".txt" extension if necessary) into the ```<ANACONDA_DIR>/envs/wmpl/Library/share``` directory.
 
 
 ### Manually downloading data files
