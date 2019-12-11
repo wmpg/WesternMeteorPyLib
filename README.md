@@ -83,6 +83,13 @@ python setup.py install
 
 this step might take a while because it will download the DE430 ephemerids.
 
+Note that every time after closing the terminal or Anaconda prompt window, you will have to activate the ```wmpl``` enviroment by:
+```
+conda activate wmpl
+```
+
+If you experience any issues, please see the "Troubleshooting" section below.
+
 
 
 ### Windows
@@ -118,10 +125,17 @@ The installation might differ on Windows. I recommend installing Anaconda, which
 	You will probably have to log in with your GitHub account to do that.
 
 
-5) From Anaconda prompt navigate to the the cloned WesternMeteorPyLib directory and inside run:
+5) From the Anaconda powershell prompt navigate to the the cloned WesternMeteorPyLib directory and inside run:
 	```
 	python setup.py install
 	```
+
+Note that every time after closing the terminal or Anaconda prompt window, you will have to activate the ```wmpl``` enviroment by:
+```
+conda activate wmpl
+```
+
+If you experience any issues, please see the "Troubleshooting" section below.
 
 
 #### Troubleshooting
@@ -144,9 +158,9 @@ Save the file. Enjoy.
 
 If after this you get this error:
 
-```FileNotFoundError: [Errno 2] No such file or directory: 'C:/Users/delorayn1/Anaconda3/envs/wmpl/Library/share\\epsg'```
+```FileNotFoundError: [Errno 2] No such file or directory: '<ANACONDA_DIR>/envs/wmpl/Library/share\\epsg'```
 
-then you have to manually download the ```epsg``` file ([LINK](https://raw.githubusercontent.com/matplotlib/basemap/master/lib/mpl_toolkits/basemap/data/epsg), choose "Save as...", remove the ".txt" extension if necessary) into the ```<ANACONDA_DIR>/envs/wmpl/Library/share``` directory.
+then you have to manually download the ```epsg``` file ([LINK](https://raw.githubusercontent.com/matplotlib/basemap/master/lib/mpl_toolkits/basemap/data/epsg), choose "Save as...", remove the ".txt" extension if necessary) into the ```<ANACONDA_DIR>/envs/wmpl/Library/share``` directory. Please don't hesitate to contact us if you have trouble getting this to work, as we share the same frustrations with the ```basemap``` library and the lack of any real alternative.
 
 
 ### Manually downloading data files
