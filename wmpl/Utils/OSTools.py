@@ -86,3 +86,7 @@ def importBasemap():
             # The epsg file is probably missing
             print("The epsg file is probably missing, download it from the following link and put it in the path given above: https://raw.githubusercontent.com/matplotlib/basemap/master/lib/mpl_toolkits/basemap/data/epsg")
             sys.exit()
+
+
+
+    return Basemap

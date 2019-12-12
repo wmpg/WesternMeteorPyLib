@@ -6,7 +6,7 @@ import numpy as np
 
 import matplotlib.pyplot as plt
 from wmpl.Utils.OSTools import importBasemap
-importBasemap()
+Basemap = importBasemap()
 
 
 from wmpl.Utils.Math import meanAngle

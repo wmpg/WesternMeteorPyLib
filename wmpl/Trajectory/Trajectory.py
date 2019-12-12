@@ -23,7 +23,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import cm
 from wmpl.Utils.OSTools import importBasemap
-importBasemap()
+Basemap = importBasemap()
 
 
 from wmpl.Trajectory.Orbit import calcOrbit
