@@ -59,7 +59,7 @@ on some systems this may not work, so you will have to write ```source activate 
 We will now install all needed libraries. With the environment activated as described above, run this in the terminal:
 
 ```
-conda install -y -c conda-forge numpy scipy matplotlib cython pytz
+conda install -y -c conda-forge numpy scipy matplotlib cython pytz proj4=5.2.0
 conda install -y -c conda-forge jplephem pyephem
 conda install -y -c conda-forge basemap basemap-data-hires
 pip install PyQt5
@@ -109,7 +109,7 @@ The installation might differ on Windows. I recommend installing Anaconda, which
 	conda update anaconda
 	conda create -y --name wmpl python=3.7
 	conda activate wmpl
-	conda install -y -c conda-forge numpy scipy matplotlib cython pytz
+	conda install -y -c conda-forge numpy scipy matplotlib cython pytz proj4=5.2.0
 	conda install -y -c conda-forge jplephem pyephem statsmodels
 	conda install -y -c conda-forge basemap basemap-data-hires
 	pip install PyQt5
