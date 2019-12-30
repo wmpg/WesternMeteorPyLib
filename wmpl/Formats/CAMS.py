@@ -16,7 +16,7 @@ from wmpl.Utils.TrajConversions import J2000_JD, date2JD, equatorialCoordPrecess
     jd2Date
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.Trajectory.GuralTrajectory import GuralTrajectory
-from wmpl.Utils.Math import averageClosePoints, angleBetweenSphericalCoords
+from wmpl.Utils.Math import mergeClosePoints, angleBetweenSphericalCoords
 from wmpl.Utils.Physics import calcMass
 
 
@@ -938,7 +938,7 @@ if __name__ == "__main__":
     # time_data_all, abs_mag_data_all = temp_arr.T
 
     # # Average the close points
-    # time_data_all, abs_mag_data_all = averageClosePoints(time_data_all, abs_mag_data_all, 1/(2*25))
+    # time_data_all, abs_mag_data_all = mergeClosePoints(time_data_all, abs_mag_data_all, 1/(2*25))
 
     # time_data_all = np.array(time_data_all)
     # abs_mag_data_all = np.array(abs_mag_data_all)

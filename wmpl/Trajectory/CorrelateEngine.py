@@ -399,18 +399,18 @@ class TrajectoryCorrelator(object):
         return plane_intersection
 
 
-    def initTrajectory(self, ref_dt, mc_runs):
+    def initTrajectory(self, jdt_ref, mc_runs):
         """ Initialize the Trajectory solver.
         
         Arguments:
-            ref_dt: [datetime] Reference datetime.
+            jdt_ref: [datetime] Reference Julian date.
             mc_runs: [int] Number of Monte Carlo runs.
 
         Return:
             traj: [Trajectory]
         """
 
-        traj = Trajectory(datetime2JD(ref_dt), \
+        traj = Trajectory(jdt_ref, \
             max_toffset=self.traj_constraints.max_toffset, meastype=1, \
             v_init_part=self.v_init_part, monte_carlo=self.traj_constraints.run_mc, \
             mc_runs=mc_runs, show_plots=False, verbose=False, save_results=False, \
@@ -437,6 +437,18 @@ class TrajectoryCorrelator(object):
         # Remove all observations done prior to 2000, to weed out those with bad time
         unprocessed_observations_all = [met_obs for met_obs in unprocessed_observations_all \
             if met_obs.reference_dt > datetime.datetime(2000, 1, 1, 0, 0, 0)]
+
+
+        # Normalize all reference times and time data so that the refernce time is at t = 0 s
+        for met_obs in unprocessed_observations_all:
+
+            # Correct the reference time
+            t_zero = met_obs.data[0].time_rel
+            met_obs.reference_dt = met_obs.reference_dt + datetime.timedelta(seconds=t_zero)
+
+            # Normalize all observation times so that the first time is t = 0 s
+            for i in range(len(met_obs.data)):
+                met_obs.data[i].time_rel -= t_zero
 
 
         
@@ -781,13 +793,22 @@ class TrajectoryCorrelator(object):
                 ### ###
 
 
-                # Init the solver
-                ref_dt = matched_observations[0][1].reference_dt
-                traj = self.initTrajectory(ref_dt, mc_runs)
+                # Init the solver (use the earliest date as the reference)
+                ref_dt = min([met_obs.reference_dt for _, met_obs, _ in matched_observations])
+                jdt_ref = datetime2JD(ref_dt)
+                traj = self.initTrajectory(jdt_ref, mc_runs)
+
 
                 # Feed the observations into the trajectory solver
-                for obs_temp, _, _ in matched_observations:
+                for obs_temp, met_obs, _ in matched_observations:
+
+                    # Normalize the observations to the reference Julian date
+                    jdt_ref_curr = datetime2JD(met_obs.reference_dt)
+                    obs_temp.time_data += (jdt_ref_curr - jdt_ref)*86400
+
                     traj.infillWithObs(obs_temp)
+
+                    
 
                 # Run the solver
                 traj_status = traj.run()
@@ -936,8 +957,8 @@ class TrajectoryCorrelator(object):
                         print()
                         print("Rerunning the trajectory solution...")
 
-                        # Init a new trajectory object
-                        traj = self.initTrajectory(ref_dt, mc_runs)
+                        # Init a new trajectory object (make sure to use the new reference Julian date)
+                        traj = self.initTrajectory(traj_status.jdt_ref, mc_runs)
 
                         # Reinitialize the observations with ignored stations
                         for obs in traj_status.observations:

@@ -22,7 +22,7 @@ from PyQt5.uic import loadUi
 from wmpl.Formats.Met import loadMet
 from wmpl.MetSim.MetSimErosion import runSimulation, Constants
 from wmpl.Trajectory.Orbit import calcOrbit
-from wmpl.Utils.Math import averageClosePoints, findClosestPoints, vectMag, lineFunc
+from wmpl.Utils.Math import mergeClosePoints, findClosestPoints, vectMag, lineFunc
 from wmpl.Utils.Physics import calcMass
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.Plotting import saveImage
@@ -961,7 +961,7 @@ class MetSimGUI(QMainWindow):
 
         
         # Average out the magnitudes
-        time_arr, mag_arr = averageClosePoints(time_arr, mag_arr, avg_t_diff_max)
+        time_arr, mag_arr = mergeClosePoints(time_arr, mag_arr, avg_t_diff_max, method='avg')
 
         # Compute the photometry mass
         return calcMass(np.array(time_arr), np.array(mag_arr), self.traj.orbit.v_avg, P_0m=self.const.P_0m)

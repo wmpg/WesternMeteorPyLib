@@ -743,7 +743,7 @@ def RMSD(x, weights=None):
     
 
 
-def averageClosePoints(x_array, y_array, delta, x_datetime=False):
+def mergeClosePoints(x_array, y_array, delta, x_datetime=False, method='avg'):
     """ Finds if points have similar sample values on the independant axis x (if they are within delta) and 
         averages all y values.
 
@@ -755,6 +755,7 @@ def averageClosePoints(x_array, y_array, delta, x_datetime=False):
 
     Keyword arguments: 
         x_datatime: [bool] Should be True if X is an array of datetime objects. False by default.
+        method: [str] Method of merging, either "avg" or "max". "avg" is set by default.
 
     Return:
         x_final, y_final: [tuple of lists] Processed x and y arrays.
@@ -790,7 +791,12 @@ def averageClosePoints(x_array, y_array, delta, x_datetime=False):
 
             skip += count - 1
 
-            y = np.mean(y_array[i : i + count])
+            # Choose either to take the mean or the max of the points in the window
+            if method.lower() == "max":
+                y = np.max(y_array[i : i + count])
+                
+            else:
+                y = np.mean(y_array[i : i + count])
 
 
         # If there are no close points, add the current point to the list

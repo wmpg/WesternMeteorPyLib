@@ -11,7 +11,7 @@ import scipy.stats
 import scipy.ndimage
 
 
-from wmpl.Utils.Math import averageClosePoints, meanAngle, sphericalPointFromHeadingAndDistance
+from wmpl.Utils.Math import mergeClosePoints, meanAngle, sphericalPointFromHeadingAndDistance
 from wmpl.Utils.Physics import calcMass
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PlotCelestial import CelestialPlot
@@ -245,8 +245,9 @@ def writeOrbitSummaryFile(dir_path, traj_list, P_0m=1210):
         time_mag_arr = np.array(sorted(time_mag_arr, key=lambda x: x[0]))
         time_arr, mag_arr = time_mag_arr.T
         
-        # Average out the magnitudes
-        time_arr, mag_arr = averageClosePoints(time_arr, mag_arr, avg_t_diff_max)
+        # Take the maximum magnitudes, which mitigates saturation effects. Note that this assumes that the
+        #   photometric calibration was done well
+        time_arr, mag_arr = mergeClosePoints(time_arr, mag_arr, avg_t_diff_max)
 
         # Compute the photometry mass
         mass = calcMass(np.array(time_arr), np.array(mag_arr), traj.orbit.v_avg_norot, P_0m=P_0m)
