@@ -10,7 +10,7 @@ import matplotlib.dates as mdates
 
 from wmpl.Formats.Met import loadMet
 from wmpl.Utils.TrajConversions import unixTime2Date
-from wmpl.Utils.Math import averageClosePoints
+from wmpl.Utils.Math import mergeClosePoints
 from wmpl.Utils.Physics import calcMass
 
     
@@ -141,7 +141,7 @@ if __name__ == '__main__':
 
 
     # Average absolute magnitude values which are closer than half a frame
-    time_data, mag_abs_data = averageClosePoints(time_data, mag_abs_data, delta=1.0/(2*fps))
+    time_data, mag_abs_data = mergeClosePoints(time_data, mag_abs_data, delta=1.0/(2*fps))
 
 
     time_data = np.array(time_data)
