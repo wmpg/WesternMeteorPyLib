@@ -145,9 +145,7 @@ class DatabaseJSON(object):
                     for traj_json in traj_dict:
                         traj_reduced_tmp = TrajectoryReduced(None, traj_dict[traj_json])
 
-                        traj_key = self.generateTrajDictKey(traj_reduced_tmp)
-
-                        trajectories_obj_dict[traj_key] = traj_reduced_tmp
+                        trajectories_obj_dict[traj_reduced_tmp.jdt_ref] = traj_reduced_tmp
 
                     # Set the trajectory dictionary
                     setattr(self, traj_dict_str, trajectories_obj_dict)
@@ -195,28 +193,17 @@ class DatabaseJSON(object):
             return False
 
 
-    def generateTrajDictKey(self, traj):
-        """ Generate the key for trajectory dictionaries. """
-
-        # Round the reference Julian date to 7 decimal places for JSON compatibility and consistency
-        return str(round(traj.jdt_ref, 7))
-
-
     def checkTrajIfFailed(self, traj):
         """ Check if the given trajectory has been computed with the same observations and has failed to be
             computed before.
 
         """
 
-        # Get the dictionary key
-        traj_key = self.generateTrajDictKey(traj)
-
-
         # Check if the reference time is in the list of failed trajectories
-        if traj_key in self.failed_trajectories:
+        if traj.jdt_ref in self.failed_trajectories:
 
             # Get the failed trajectory object
-            failed_traj = self.failed_trajectories[traj_key]
+            failed_traj = self.failed_trajectories[traj.jdt_ref]
 
             # Check if the same observations participate in the failed trajectory as in the trajectory that
             #   is being tested
@@ -268,12 +255,9 @@ class DatabaseJSON(object):
             traj_dict = self.trajectories
 
 
-        # Generate a trajectory key
-        traj_key = self.generateTrajDictKey(traj_reduced)
-
         # Add the trajectory to the list (key is the reference JD)
-        if traj_key not in traj_dict:
-            traj_dict[traj_key] = traj_reduced
+        if traj_reduced.jdt_ref not in traj_dict:
+            traj_dict[traj_reduced.jdt_ref] = traj_reduced
 
 
         # Only try to add the new observation if the angular residuals are lower than the upper angular 
