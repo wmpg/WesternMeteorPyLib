@@ -707,14 +707,6 @@ class TrajectoryCorrelator(object):
             # Go through all candidate trajectories and compute the complete trajectory solution
             for matched_observations in candidate_trajectories:
 
-
-                # Mark observations as paired in a trajectory, even though the trajectory might be bad
-                for _, met_obs_temp, _ in matched_observations:
-                    met_obs_temp.paired = True
-                    self.dh.markObservationAsPaired(met_obs_temp)
-
-
-
                 print()
                 print("-----------------------")
 
@@ -828,6 +820,10 @@ class TrajectoryCorrelator(object):
                     traj.infillWithObs(obs_temp)
 
 
+                # If this trajectory already failed to be computed, don't try to recompute it again
+                if self.dh.checkTrajIfFailed(traj):
+                    print("The same trajectory already failed to be computed in previous runs!")
+                    continue
 
                 # Run the solver
                 traj_status = traj.run()
@@ -999,6 +995,10 @@ class TrajectoryCorrelator(object):
 
                 # Skip the trajectory if no good solution was found
                 if skip_trajectory:
+
+                    # Add the trajectory to the list of failed trajectories
+                    self.dh.addTrajectory(traj, failed_jdt_ref=jdt_ref)
+
                     continue
 
                     # # If the trajectory solutions was not done at any point, skip the trajectory completely
@@ -1019,6 +1019,9 @@ class TrajectoryCorrelator(object):
 
                         print("2 station only solution, one station has an error above the maximum limit, skipping!")
 
+                        # Add the trajectory to the list of failed trajectories
+                        self.dh.addTrajectory(traj_status, failed_jdt_ref=jdt_ref)
+
                         continue
 
 
@@ -1038,6 +1041,12 @@ class TrajectoryCorrelator(object):
                             traj.orbit.v_avg/1000, self.traj_constraints.v_avg_max))
 
                         continue
+
+
+                    # Mark observations as paired in a trajectory
+                    for _, met_obs_temp, _ in matched_observations:
+                        met_obs_temp.paired = True
+                        self.dh.markObservationAsPaired(met_obs_temp)
 
 
                     # Update trajectory file name

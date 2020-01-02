@@ -123,6 +123,10 @@ class DatabaseJSON(object):
         #   TrajectoryReduced objects)
         self.trajectories = {}
 
+        # List of failed trajectories (keys are trajectory reference julian dates, values are \
+        #   TrajectoryReduced objects)
+        self.failed_trajectories = {}
+
         # Load the database from a JSON file
         self.load()
 
@@ -135,13 +139,18 @@ class DatabaseJSON(object):
                 self.__dict__ = json.load(f)
 
                 # Convert trajectories from JSON to TrajectoryReduced objects
-                trajectories_obj_dict = {}
-                for traj_json in self.trajectories:
-                    traj_reduced_tmp = TrajectoryReduced(None, self.trajectories[traj_json])
+                for traj_dict_str in ["trajectories", "failed_trajectories"]:
+                    traj_dict = getattr(self, traj_dict_str)
+                    trajectories_obj_dict = {}
+                    for traj_json in traj_dict:
+                        traj_reduced_tmp = TrajectoryReduced(None, traj_dict[traj_json])
 
-                    trajectories_obj_dict[traj_reduced_tmp.jdt_ref] = traj_reduced_tmp
+                        traj_key = self.generateTrajDictKey(traj_reduced_tmp)
 
-                self.trajectories = trajectories_obj_dict
+                        trajectories_obj_dict[traj_key] = traj_reduced_tmp
+
+                    # Set the trajectory dictionary
+                    setattr(self, traj_dict_str, trajectories_obj_dict)
 
 
     def save(self):
@@ -152,6 +161,8 @@ class DatabaseJSON(object):
 
             # Convert reduced trajectory objects to JSON objects
             self2.trajectories = {key: self.trajectories[key].__dict__ for key in self.trajectories}
+            self2.failed_trajectories = {key: self.failed_trajectories[key].__dict__ \
+                for key in self.failed_trajectories}
 
             f.write(json.dumps(self2, default=lambda o: o.__dict__, indent=4, sort_keys=True))
 
@@ -184,7 +195,49 @@ class DatabaseJSON(object):
             return False
 
 
-    def addTrajectory(self, traj_file_path, traj_obj=None):
+    def generateTrajDictKey(self, traj):
+        """ Generate the key for trajectory dictionaries. """
+
+        # Round the reference Julian date to 7 decimal places for JSON compatibility and consistency
+        return str(round(traj.jdt_ref, 7))
+
+
+    def checkTrajIfFailed(self, traj):
+        """ Check if the given trajectory has been computed with the same observations and has failed to be
+            computed before.
+
+        """
+
+        # Get the dictionary key
+        traj_key = self.generateTrajDictKey(traj)
+
+
+        # Check if the reference time is in the list of failed trajectories
+        if traj_key in self.failed_trajectories:
+
+            # Get the failed trajectory object
+            failed_traj = self.failed_trajectories[traj_key]
+
+            # Check if the same observations participate in the failed trajectory as in the trajectory that
+            #   is being tested
+            all_match = True
+            for obs in traj.observations:
+                
+                if not ((obs.station_id in failed_traj.participating_stations) \
+                    or (obs.station_id in failed_traj.ignored_stations)):
+
+                    all_match = False
+                    break
+
+            # If the same stations were used, the trajectory estimation failed before
+            if all_match:
+                return True
+
+
+        return False
+
+
+    def addTrajectory(self, traj_file_path, traj_obj=None, failed=False):
         """ Add a computed trajectory to the list. 
     
         Arguments:
@@ -192,6 +245,7 @@ class DatabaseJSON(object):
 
         Keyword arguments:
             traj_obj: [bool] Instead of loading a traj object from disk, use the given object.
+            failed: [bool] Add as a failed trajectory. False by default.
         """
 
         # Load the trajectory from disk
@@ -206,9 +260,20 @@ class DatabaseJSON(object):
             traj_reduced = traj_obj
 
 
+        # Choose to which dictionary the trajectory will be added
+        if failed:
+            traj_dict = self.failed_trajectories
+
+        else:
+            traj_dict = self.trajectories
+
+
+        # Generate a trajectory key
+        traj_key = self.generateTrajDictKey(traj_reduced)
+
         # Add the trajectory to the list (key is the reference JD)
-        if traj_reduced.jdt_ref not in self.trajectories:
-            self.trajectories[traj_reduced.jdt_ref] = traj_reduced
+        if traj_key not in traj_dict:
+            traj_dict[traj_key] = traj_reduced
 
 
         # Only try to add the new observation if the angular residuals are lower than the upper angular 
@@ -642,13 +707,32 @@ class RMSDataHandle(object):
         self.db.addPairedObservation(met_obs)
 
 
-    def addTrajectory(self, traj):
-        """ Add the resulting trajectory to the database. """
+    def addTrajectory(self, traj, failed_jdt_ref=None):
+        """ Add the resulting trajectory to the database. 
+
+        Arguments:
+            traj: [Trajectory object]
+            failed_jdt_ref: [float] Reference Julian date of the failed trajectory. None by default.
+        """
 
         # Convert the full trajectory object into the reduced trajectory object
         traj_reduced = TrajectoryReduced(None, traj_obj=traj)
 
-        self.db.addTrajectory(None, traj_obj=traj_reduced)
+        # If the trajectory failed, keep track of the original reference Julian date, as it might have been
+        #   changed during trajectory estimation
+        if failed_jdt_ref is not None:
+            traj_reduced.jdt_ref = failed_jdt_ref
+
+        self.db.addTrajectory(None, traj_obj=traj_reduced, failed=(failed_jdt_ref is not None))
+
+
+    def checkTrajIfFailed(self, traj):
+        """ Check if the given trajectory has been computed with the same observations and has failed to be
+            computed before.
+
+        """
+
+        return self.db.checkTrajIfFailed(traj)
 
 
 
