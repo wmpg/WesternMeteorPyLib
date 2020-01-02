@@ -399,6 +399,7 @@ class TrajectoryCorrelator(object):
         return plane_intersection
 
 
+
     def initTrajectory(self, jdt_ref, mc_runs):
         """ Initialize the Trajectory solver.
         
@@ -428,19 +429,19 @@ class TrajectoryCorrelator(object):
                 events should be used. None by default, which uses all available events.
         """
 
-        # Get unprocessed observations, filter out observations with too little points and sort them by time
-        unprocessed_observations_all = self.dh.getUnprocessedObservations()
-        unprocessed_observations_all = [mettmp for mettmp in unprocessed_observations_all \
+        # Get unpaired observations, filter out observations with too little points and sort them by time
+        unpaired_observations_all = self.dh.getUnpairedObservations()
+        unpaired_observations_all = [mettmp for mettmp in unpaired_observations_all \
             if len(mettmp.data) >= self.traj_constraints.min_meas_pts]
-        unprocessed_observations_all = sorted(unprocessed_observations_all, key=lambda x: x.reference_dt)
+        unpaired_observations_all = sorted(unpaired_observations_all, key=lambda x: x.reference_dt)
 
         # Remove all observations done prior to 2000, to weed out those with bad time
-        unprocessed_observations_all = [met_obs for met_obs in unprocessed_observations_all \
+        unpaired_observations_all = [met_obs for met_obs in unpaired_observations_all \
             if met_obs.reference_dt > datetime.datetime(2000, 1, 1, 0, 0, 0)]
 
 
-        # Normalize all reference times and time data so that the refernce time is at t = 0 s
-        for met_obs in unprocessed_observations_all:
+        # Normalize all reference times and time data so that the reference time is at t = 0 s
+        for met_obs in unpaired_observations_all:
 
             # Correct the reference time
             t_zero = met_obs.data[0].time_rel
@@ -461,8 +462,8 @@ class TrajectoryCorrelator(object):
         # Data will be divided into time bins, so the pairing function doesn't have to go pair many
             #   observations at once and keep all pairs in memory
         else:
-            dt_beg = unprocessed_observations_all[0].reference_dt
-            dt_end = unprocessed_observations_all[-1].reference_dt
+            dt_beg = unpaired_observations_all[0].reference_dt
+            dt_end = unpaired_observations_all[-1].reference_dt
             dt_bin_list = generateDatetimeBins(dt_beg, dt_end, bin_days=7, utc_hour_break=12)
 
 
@@ -489,7 +490,7 @@ class TrajectoryCorrelator(object):
 
 
             # Select observations in the given time bin
-            unprocessed_observations = [met_obs for met_obs in unprocessed_observations_all \
+            unpaired_observations = [met_obs for met_obs in unpaired_observations_all \
                 if (met_obs.reference_dt >= bin_beg) and (met_obs.reference_dt <= bin_end)]
 
 
@@ -497,7 +498,7 @@ class TrajectoryCorrelator(object):
             candidate_trajectories = []
 
             # Go through all unpaired and unprocessed meteor observations
-            for met_obs in unprocessed_observations:
+            for met_obs in unpaired_observations:
 
                 # Skip observations that were paired and processed in the meantime
                 if met_obs.processed:
@@ -508,19 +509,29 @@ class TrajectoryCorrelator(object):
                 obs1 = self.initObservationsObject(met_obs, reference_platepar)
 
 
+                # ### CHECK FOR PAIRING WITH PREVIOUSLY ESTIMATED TRAJECTORY ###
+
+                # # Find all already estimated trajectories with times close to the meteor observation
+                # traj_time_pairs = self.dh.findTrajectoryTimePairs(met_obs, self.traj_constraints.max_toffset)
+
+
+                # ###
+
+
                 # Keep a list of observations which matched the reference observation
                 matched_observations = []
 
                 # Find all meteors from other stations that are close in time to this meteor
                 plane_intersection_good = None
-                time_pairs = self.dh.findTimePairs(met_obs, unprocessed_observations, \
+                time_pairs = self.dh.findTimePairs(met_obs, unpaired_observations, \
                     self.traj_constraints.max_toffset)
                 for met_pair_candidate in time_pairs:
 
                     print()
                     print("Processing pair:")
                     print("{:s} and {:s}".format(met_obs.station_code, met_pair_candidate.station_code))
-                    print("{:s} and {:s}".format(str(met_obs.reference_dt), str(met_pair_candidate.reference_dt)))
+                    print("{:s} and {:s}".format(str(met_obs.reference_dt), \
+                        str(met_pair_candidate.reference_dt)))
                     print("-----------------------")
 
                     ### Check if the stations are close enough and have roughly overlapping fields of view ###
@@ -696,6 +707,14 @@ class TrajectoryCorrelator(object):
             # Go through all candidate trajectories and compute the complete trajectory solution
             for matched_observations in candidate_trajectories:
 
+
+                # Mark observations as paired in a trajectory, even though the trajectory might be bad
+                for _, met_obs_temp, _ in matched_observations:
+                    met_obs_temp.paired = True
+                    self.dh.markObservationAsPaired(met_obs_temp)
+
+
+
                 print()
                 print("-----------------------")
 
@@ -808,7 +827,7 @@ class TrajectoryCorrelator(object):
 
                     traj.infillWithObs(obs_temp)
 
-                    
+
 
                 # Run the solver
                 traj_status = traj.run()
@@ -868,12 +887,9 @@ class TrajectoryCorrelator(object):
                     # a) Reject all observations which have angular residuals <bad_station_obs_ang_limit>
                     #   times larger than the median of all other observations
                     # b) Reject all observations with higher residuals than the fixed limit
-                    # c) Keep all observations with error inside the minimum error limit
+                    # c) Keep all observations with error inside the minimum error limit, even though they
+                    #   might have been rejected in a previous iteration
                     for i, obs in enumerate(traj_status.observations):
-
-                        # # Skip ignored stations
-                        # if obs.ignore_station:
-                        #     continue
 
                         # Compute the median angular uncertainty of all other non-ignored stations
                         ang_res_list = [obstmp.ang_res_std for j, obstmp in \
@@ -1028,6 +1044,7 @@ class TrajectoryCorrelator(object):
                     traj.generateFileName()
 
                     self.dh.saveTrajectoryResults(traj, self.traj_constraints.save_plots)
+                    self.dh.addTrajectory(traj)
 
                     print()
                     print("RA_g  = {:7.3f} deg".format(np.degrees(traj.orbit.ra_g)))

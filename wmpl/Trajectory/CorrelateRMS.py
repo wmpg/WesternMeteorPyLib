@@ -17,7 +17,7 @@ import numpy as np
 from wmpl.Formats.CAMS import loadFTPDetectInfo
 from wmpl.Trajectory.CorrelateEngine import TrajectoryCorrelator, TrajectoryConstraints
 from wmpl.Utils.Math import generateDatetimeBins
-from wmpl.Utils.Pickling import savePickle
+from wmpl.Utils.Pickling import loadPickle, savePickle
 from wmpl.Utils.TrajConversions import jd2Date
 
 
@@ -33,15 +33,94 @@ JSON_DB_NAME = "processed_trajectories.json"
 ### ###
 
 
+
+class TrajectoryReduced(object):
+    def __init__(self, traj_file_path, json_dict=None, traj_obj=None):
+        """ Reduced representation of the Trajectory object which helps to save memory. 
+
+        Arguments:
+            traj_file_path: [str] Full path to the trajectory object.
+
+        Keyword arguments:
+            json_dict: [dict] Load values from a dictionary instead of a traj pickle file. None by default,
+                in which case a traj pickle file will be loaded.
+            traj_obj: [Trajectory instance] Load values from a full Trajectory object, instead from the disk.
+                None by default.
+        """
+
+        # Load values from a JSON pickle file
+        if json_dict is None:
+
+            if traj_obj is None:
+
+                # Full path to the trajectory object (saved to it can be loaded later if needed)
+                self.traj_file_path = traj_file_path
+
+                # Load the trajectory object
+                traj = loadPickle(*os.path.split(traj_file_path))
+
+            else:
+
+                # Load values from a given trajectory file
+                traj = traj_obj
+                self.traj_file_path = os.path.join(traj.output_dir, traj.file_name + "_trajectory.pickle")
+
+
+            # Reference Julian date (beginning of the meteor)
+            self.jdt_ref = traj.jdt_ref
+
+            # ECI coordinates of the state vector computed through minimization
+            self.state_vect_mini = traj.state_vect_mini.tolist()
+
+            # Apparent radiant vector computed through minimization
+            self.radiant_eci_mini = traj.radiant_eci_mini.tolist()
+
+            # Initial and average velocity
+            self.v_init = traj.v_init
+            self.v_avg = traj.v_avg
+
+            # Coordinates of the first point (observed)
+            self.rbeg_lat = traj.rbeg_lat
+            self.rbeg_lon = traj.rbeg_lon
+            self.rbeg_ele = traj.rbeg_ele
+            self.rbeg_jd = traj.rbeg_jd
+
+            # Coordinates of the last point (observed)
+            self.rend_lat = traj.rend_lat
+            self.rend_lon = traj.rend_lon
+            self.rend_ele = traj.rend_ele
+            self.rend_jd = traj.rend_jd
+
+            # Stations participating in the solution
+            self.participating_stations = sorted([obs.station_id for obs in traj.observations \
+                if obs.ignore_station == False])
+
+            # Ignored stations
+            self.ignored_stations = sorted([obs.station_id for obs in traj.observations \
+                if obs.ignore_station == True])
+
+
+        # Load values from a dictionary
+        else:
+            self.__dict__ = json_dict
+
+
+
 class DatabaseJSON(object):
     def __init__(self, db_file_path):
 
         self.db_file_path = db_file_path
 
-        # List of processed directories (keys are station codes)
+        # List of processed directories (keys are station codes, values are relative paths to night 
+        #   directories)
         self.processed_dirs = {}
 
-        # List of trajectories (keys are trajectory reference julian dates)
+        # List of paired observations as a part of a trajectory (keys are station codes, values are unique 
+        #   observation IDs)
+        self.paired_obs = {}
+
+        # List of processed trajectories (keys are trajectory reference julian dates, values are \
+        #   TrajectoryReduced objects)
         self.trajectories = {}
 
         # Load the database from a JSON file
@@ -55,12 +134,25 @@ class DatabaseJSON(object):
             with open(self.db_file_path) as f:
                 self.__dict__ = json.load(f)
 
+                # Convert trajectories from JSON to TrajectoryReduced objects
+                trajectories_obj_dict = {}
+                for traj_json in self.trajectories:
+                    traj_reduced_tmp = TrajectoryReduced(None, self.trajectories[traj_json])
+
+                    trajectories_obj_dict[traj_reduced_tmp.jdt_ref] = traj_reduced_tmp
+
+                self.trajectories = trajectories_obj_dict
+
 
     def save(self):
         """ Save the database of processed meteors to disk. """
 
         with open(self.db_file_path, 'w') as f:
             self2 = copy.deepcopy(self)
+
+            # Convert reduced trajectory objects to JSON objects
+            self2.trajectories = {key: self.trajectories[key].__dict__ for key in self.trajectories}
+
             f.write(json.dumps(self2, default=lambda o: o.__dict__, indent=4, sort_keys=True))
 
 
@@ -72,13 +164,55 @@ class DatabaseJSON(object):
                 self.processed_dirs[station_name].append(rel_proc_path)
 
 
-    def addTrajectory(self, traj, met_obs_list):
-        """ Add a computed trajectory to the list. """
+    def addPairedObservation(self, met_obs):
+        """ Mark the given meteor observation as paired in a trajectory. """
 
-        pass        
+        if met_obs.station_code not in self.paired_obs:
+            self.paired_obs[met_obs.station_code] = []
 
-        # if traj.jdt_ref not in self.trajectories:
-        #     self.trajectories[traj.jdt_ref] = traj.toJSON()
+        if met_obs.id not in self.paired_obs[met_obs.station_code]:
+            self.paired_obs[met_obs.station_code].append(met_obs.id)
+
+
+    def checkObsIfPaired(self, met_obs):
+        """ Check if the given observation has been paired to a trajectory or not. """
+
+        if met_obs.station_code in self.paired_obs:
+            return (met_obs.id in self.paired_obs[met_obs.station_code])
+
+        else:
+            return False
+
+
+    def addTrajectory(self, traj_file_path, traj_obj=None):
+        """ Add a computed trajectory to the list. 
+    
+        Arguments:
+            traj_file_path: [str] Full path the trajectory object.
+
+        Keyword arguments:
+            traj_obj: [bool] Instead of loading a traj object from disk, use the given object.
+        """
+
+        # Load the trajectory from disk
+        if traj_obj is None:
+
+            # Init the reducted trajectory object
+            traj_reduced = TrajectoryReduced(traj_file_path)
+
+        else:
+
+            # Use the provided trajectory object
+            traj_reduced = traj_obj
+
+
+        # Add the trajectory to the list (key is the reference JD)
+        if traj_reduced.jdt_ref not in self.trajectories:
+            self.trajectories[traj_reduced.jdt_ref] = traj_reduced
+
+
+        # Only try to add the new observation if the angular residuals are lower than the upper angular 
+        #   error limit
 
 
 
@@ -110,6 +244,7 @@ class MeteorPointRMS(object):
         self.mag = mag
 
 
+
 class MeteorObsRMS(object):
     def __init__(self, station_code, reference_dt, platepar, data, rel_proc_path):
         """ Container for meteor observations with the interface compatible with the trajectory correlator
@@ -125,6 +260,7 @@ class MeteorObsRMS(object):
         # Path to the directory with data
         self.rel_proc_path = rel_proc_path
 
+        # Internal flags to control the processing flow
         self.processed = False 
         self.paired = False
 
@@ -185,10 +321,18 @@ class MeteorObsRMS(object):
         ### ###
 
 
+        # Generate a unique observation ID, the format is: STATIONID_YYYYMMDD-HHMMSS.us_CHECKSUM
+        #  where CHECKSUM is the last four digits of the sum of all observation image X cordinates
+        checksum = int(np.sum([entry.x for entry in self.data])%10000)
+        self.id = "{:s}_{:s}_{:04d}".format(self.station_code, self.mean_dt.strftime("%Y%m%d-%H%M%S.%f"), \
+            checksum)
+
+
 
 class PlateparDummy:
     def __init__(self, **entries):
         """ This class takes a platepar dictionary and converts it into an object. """
+
         self.__dict__.update(entries)
 
 
@@ -213,6 +357,9 @@ class RMSDataHandle(object):
 
         # Find unprocessed meteor files
         self.processing_list = self.findUnprocessedFolders(station_list)
+
+        # Load already computed trajectories
+        self.loadComputedTrajectories(os.path.join(self.dir_path, OUTPUT_TRAJ_DIR))
 
 
     def loadStations(self):
@@ -240,7 +387,7 @@ class RMSDataHandle(object):
 
         processing_list = []
 
-        skipped_dirs = 0
+        # skipped_dirs = 0
 
         # Go through all station directories
         for station_name in station_list:
@@ -265,16 +412,18 @@ class RMSDataHandle(object):
                     print("Could not parse the date of the night dir: {:s}".format(night_path))
                     night_dt = None
 
-                # If the night path is not in the processed list, add it to the processing list
-                if night_path_rel not in self.db.processed_dirs[station_name]:
-                    processing_list.append([station_name, night_path_rel, night_path, night_dt])
+                # # If the night path is not in the processed list, add it to the processing list
+                # if night_path_rel not in self.db.processed_dirs[station_name]:
+                #     processing_list.append([station_name, night_path_rel, night_path, night_dt])
 
-                else:
-                    skipped_dirs += 1
+                processing_list.append([station_name, night_path_rel, night_path, night_dt])
+
+                # else:
+                #     skipped_dirs += 1
 
 
-        if skipped_dirs:
-            print("Skipped {:d} processed directories".format(skipped_dirs))
+        # if skipped_dirs:
+        #     print("Skipped {:d} processed directories".format(skipped_dirs))
 
         return processing_list
 
@@ -301,11 +450,11 @@ class RMSDataHandle(object):
 
 
 
-    def loadUnprocessedObservations(self, processing_list, dt_range=None):
-        """ Load unprocessed meteor observations. """
+    def loadUnpairedObservations(self, processing_list, dt_range=None):
+        """ Load unpaired meteor observations, i.e. observations that are not a part of any trajectory. """
 
         # Go through folders for processing
-        met_obs_list = []
+        unpaired_met_obs_list = []
         for station_code, rel_proc_path, proc_path, night_dt in processing_list:
 
             # Check that the night datetime is within the given range of times, if the range is given
@@ -380,13 +529,35 @@ class RMSDataHandle(object):
                 met_obs = MeteorObsRMS(station_code, jd2Date(cams_met_obs.jdt_ref, dt_obj=True), pp, \
                     meteor_data, rel_proc_path)
 
-                print(station_code, met_obs.reference_dt, rel_proc_path)
+                # Add only unpaired observations
+                if not self.db.checkObsIfPaired(met_obs):
 
-                met_obs_list.append(met_obs)
+                    print(station_code, met_obs.reference_dt, rel_proc_path)
+
+                    unpaired_met_obs_list.append(met_obs)
 
 
-        return met_obs_list
+        return unpaired_met_obs_list
 
+
+
+    def loadComputedTrajectories(self, traj_dir_path):
+        """ Load all already estimated trajectories. 
+
+        Arguments:
+            traj_dir_path: [str] Full path to a directory with trajectory pickles.
+        """
+
+        # Find and load all trajectory objects
+        for entry in sorted(os.walk(traj_dir_path), key=lambda x: x[0]):
+
+            dir_path, _, file_names = entry
+
+            # Find and load all trajectory pickle files
+            for file_name in file_names:
+                if file_name.endswith("_trajectory.pickle"):
+                    self.db.addTrajectory(os.path.join(dir_path, file_name))
+                
 
 
     def getPlatepar(self, met_obs):
@@ -396,19 +567,19 @@ class RMSDataHandle(object):
 
 
 
-    def getUnprocessedObservations(self):
-        """ Returns a list of unprocessed meteor observations. """
+    def getUnpairedObservations(self):
+        """ Returns a list of unpaired meteor observations. """
 
-        return self.unprocessed_observations
+        return self.unpaired_observations
 
 
-    def findTimePairs(self, met_obs, unprocessed_observations, max_toffset):
+    def findTimePairs(self, met_obs, unpaired_observations, max_toffset):
         """ Finds pairs in time between the given meteor observations and all other observations from 
             different stations. 
 
         Arguments:
             met_obs: [MeteorObsRMS] Object containing a meteor observation.
-            unprocessed_observations: [list] A list of MeteorObsRMS objects which will be paired in time with
+            unpaired_observations: [list] A list of MeteorObsRMS objects which will be paired in time with
                 the given object.
             max_toffset: [float] Maximum offset in time (seconds) for pairing.
 
@@ -420,7 +591,7 @@ class RMSDataHandle(object):
         found_pairs = []
 
         # Go through all meteors from other stations
-        for met_obs2 in unprocessed_observations:
+        for met_obs2 in unpaired_observations:
 
             # Take only observations from different stations
             if met_obs.station_code == met_obs2.station_code:
@@ -465,11 +636,19 @@ class RMSDataHandle(object):
         self.db.addProcessedDir(met_obs.station_code, met_obs.rel_proc_path)
 
 
+    def markObservationAsPaired(self, met_obs):
+        """ Mark the given meteor observation as paired in a trajectory. """
 
-    def addTrajectory(self, traj, met_obs_list):
+        self.db.addPairedObservation(met_obs)
+
+
+    def addTrajectory(self, traj):
         """ Add the resulting trajectory to the database. """
 
-        self.db.addTrajectory(traj, met_obs_list)
+        # Convert the full trajectory object into the reduced trajectory object
+        traj_reduced = TrajectoryReduced(None, traj_obj=traj)
+
+        self.db.addTrajectory(None, traj_obj=traj_reduced)
 
 
 
@@ -641,7 +820,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         print()
 
         # Load data of unprocessed observations
-        dh.unprocessed_observations = dh.loadUnprocessedObservations(dh.processing_list, \
+        dh.unpaired_observations = dh.loadUnpairedObservations(dh.processing_list, \
             dt_range=(bin_beg, bin_end))
 
         # Run the trajectory correlator
