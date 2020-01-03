@@ -11,6 +11,7 @@ import argparse
 import json
 import copy
 import datetime
+import shutil
 
 import numpy as np
 
@@ -143,7 +144,7 @@ class DatabaseJSON(object):
                     traj_dict = getattr(self, traj_dict_str)
                     trajectories_obj_dict = {}
                     for traj_json in traj_dict:
-                        traj_reduced_tmp = TrajectoryReduced(None, traj_dict[traj_json])
+                        traj_reduced_tmp = TrajectoryReduced(None, json_dict=traj_dict[traj_json])
 
                         trajectories_obj_dict[traj_reduced_tmp.jdt_ref] = traj_reduced_tmp
 
@@ -238,7 +239,7 @@ class DatabaseJSON(object):
         # Load the trajectory from disk
         if traj_obj is None:
 
-            # Init the reducted trajectory object
+            # Init the reduced trajectory object
             traj_reduced = TrajectoryReduced(traj_file_path)
 
         else:
@@ -260,8 +261,21 @@ class DatabaseJSON(object):
             traj_dict[traj_reduced.jdt_ref] = traj_reduced
 
 
-        # Only try to add the new observation if the angular residuals are lower than the upper angular 
-        #   error limit
+
+    def removeTrajectory(self, traj_reduced):
+        """ Remove the trajectory from the data base and disk. """
+
+        # Remove the trajectory data base entry
+        if traj_reduced.jdt_ref in self.trajectories:
+            del self.trajectories[traj_reduced.jdt_ref]
+
+        # Remove the trajectory folder on the disk
+        if os.path.isfile(traj_reduced.traj_file_path):
+
+            traj_dir = os.path.dirname(traj_reduced.traj_file_path)
+            shutil.rmtree(traj_dir)
+
+
 
 
 
@@ -310,8 +324,8 @@ class MeteorObsRMS(object):
         self.rel_proc_path = rel_proc_path
 
         # Internal flags to control the processing flow
+        # NOTE: The processed flag should always be set to False for every observation when the program starts
         self.processed = False 
-        self.paired = False
 
         # Mean datetime of the observation
         self.mean_dt = self.reference_dt + datetime.timedelta(seconds=np.mean([entry.time_rel \
@@ -606,6 +620,15 @@ class RMSDataHandle(object):
             for file_name in file_names:
                 if file_name.endswith("_trajectory.pickle"):
                     self.db.addTrajectory(os.path.join(dir_path, file_name))
+
+
+    def getComputedTrajectories(self, jd_beg, jd_end):
+        """ Returns a list of computed trajectories between the Julian dates.
+        """
+
+        return [self.db.trajectories[key] for key in self.db.trajectories \
+            if (self.db.trajectories[key].jdt_ref >= jd_beg) \
+                and (self.db.trajectories[key].jdt_ref <= jd_end)]
                 
 
 
@@ -654,15 +677,55 @@ class RMSDataHandle(object):
         return found_pairs
 
 
+    def getTrajTimePairs(self, traj_reduced, unpaired_observations, max_toffset):
+        """ Find unpaired observations which are close in time to the given trajectory. """
+
+        found_traj_obs_pairs = []
+
+        # Compute the middle time of the trajectory as reference time
+        traj_mid_dt = jd2Date((traj_reduced.rbeg_jd + traj_reduced.rend_jd)/2, dt_obj=True)
+
+        # Go through all unpaired observations
+        for met_obs in unpaired_observations:
+
+            # Skip all stations that are already participating in the trajectory solution
+            if (met_obs.station_code in traj_reduced.participating_stations) or \
+                (met_obs.station_code in traj_reduced.ignored_stations):
+
+                continue
+
+
+            # Take observations which are within the given time window from the trajectory
+            if abs((met_obs.mean_dt - traj_mid_dt).total_seconds()) <= max_toffset:
+                found_traj_obs_pairs.append(met_obs)
+
+
+        return found_traj_obs_pairs
+
+
+    def generateTrajOutputDirectoryPath(self, traj):
+        """ Generate a path to the trajectory output directory. """
+
+        # Generate a list of station codes
+        if isinstance(traj, TrajectoryReduced):
+            # If the reducted trajectory object is given
+            station_list = traj.participating_stations
+
+        else:
+            # If the full trajectory object is given
+            station_list = [obs.station_id for obs in traj.observations if obs.ignore_station is False]
+
+        return os.path.join(self.dir_path, OUTPUT_TRAJ_DIR, \
+            jd2Date(traj.jdt_ref, dt_obj=True).strftime("%Y%m%d_%H%M%S.%f")[:-3] + "_" \
+            + "_".join(list(set([stat_id[:2] for stat_id in station_list]))))
+
 
     def saveTrajectoryResults(self, traj, save_plots):
         """ Save trajectory results to the disk. """
 
 
         # Generate the name for the output directory (add list of country codes at the end)
-        output_dir = os.path.join(self.dir_path, OUTPUT_TRAJ_DIR, \
-            jd2Date(traj.jdt_ref, dt_obj=True).strftime("%Y%m%d_%H%M%S.%f")[:-3] + "_" \
-            + "_".join(list(set([obs.station_id[:2] for obs in traj.observations]))))
+        output_dir = self.generateTrajOutputDirectoryPath(traj)
 
         # Save the report
         traj.saveReport(output_dir, traj.file_name + '_report.txt', uncertainties=traj.uncertainties, 
@@ -685,10 +748,12 @@ class RMSDataHandle(object):
         self.db.addProcessedDir(met_obs.station_code, met_obs.rel_proc_path)
 
 
+
     def markObservationAsPaired(self, met_obs):
         """ Mark the given meteor observation as paired in a trajectory. """
 
         self.db.addPairedObservation(met_obs)
+
 
 
     def addTrajectory(self, traj, failed_jdt_ref=None):
@@ -698,6 +763,9 @@ class RMSDataHandle(object):
             traj: [Trajectory object]
             failed_jdt_ref: [float] Reference Julian date of the failed trajectory. None by default.
         """
+
+        # Set the correct output path
+        traj.output_dir = self.generateTrajOutputDirectoryPath(traj)
 
         # Convert the full trajectory object into the reduced trajectory object
         traj_reduced = TrajectoryReduced(None, traj_obj=traj)
@@ -710,6 +778,14 @@ class RMSDataHandle(object):
         self.db.addTrajectory(None, traj_obj=traj_reduced, failed=(failed_jdt_ref is not None))
 
 
+
+    def removeTrajectory(self, traj_reduced):
+        """ Remove the trajectory from the data base and disk. """
+
+        self.db.removeTrajectory(traj_reduced)
+
+
+
     def checkTrajIfFailed(self, traj):
         """ Check if the given trajectory has been computed with the same observations and has failed to be
             computed before.
@@ -717,6 +793,26 @@ class RMSDataHandle(object):
         """
 
         return self.db.checkTrajIfFailed(traj)
+
+
+
+    def loadFullTraj(self, traj_reduced):
+        """ Load the full trajectory object. 
+    
+        Arguments:
+            traj_reduced: [TrajectoryReduced object]
+
+        Return:
+            traj: [Trajectory object]
+        """
+
+        # Generate the path to the output directory
+        output_dir = self.generateTrajOutputDirectoryPath(traj_reduced)
+
+        # Get the file name
+        file_name = os.path.basename(traj_reduced.traj_file_path)
+
+        return loadPickle(output_dir, file_name)
 
 
 
