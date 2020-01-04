@@ -854,11 +854,10 @@ class TrajectoryCorrelator(object):
                 traj_time_pairs = self.dh.getTrajTimePairs(traj_reduced, unpaired_observations, \
                     self.traj_constraints.max_toffset)
 
-                print(traj_time_pairs)
-
                 # Skip trajectory if there are no new obervations
                 if not traj_time_pairs:
                     continue
+
 
                 print()
                 print("Checking trajectory at {:s} in countries: {:s}".format( \
@@ -867,6 +866,7 @@ class TrajectoryCorrelator(object):
                     ) \
                 )
                 print("--------")
+
 
                 # Filter out bad matches and only keep the good ones
                 candidate_observations = []
