@@ -577,7 +577,11 @@ class RMSDataHandle(object):
             for cams_met_obs in cams_met_obs_list:
 
                 # Get the platepar
-                pp_dict = platepars_recalibrated_dict[cams_met_obs.ff_name]
+                if cams_met_obs.ff_name in platepars_recalibrated_dict:
+                    pp_dict = platepars_recalibrated_dict[cams_met_obs.ff_name]
+                else:
+                    continue
+
                 pp = PlateparDummy(**pp_dict)
 
                 # Init meteor data
