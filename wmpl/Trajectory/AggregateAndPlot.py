@@ -310,7 +310,7 @@ def writeOrbitSummaryFile(dir_path, traj_list, P_0m=1210):
 
 
 def plotSCE(x_data, y_data, color_data, sol_range, plot_title, colorbar_title, dir_path, \
-    file_name, density_plot=False, plot_showers=False, shower_obj_list=None):
+    file_name, density_plot=False, plot_showers=False, shower_obj_list=None, show_sol_range=True):
 
     ### PLOT SUN-CENTERED GEOCENTRIC ECLIPTIC RADIANTS ###
 
@@ -466,10 +466,6 @@ def plotSCE(x_data, y_data, color_data, sol_range, plot_title, colorbar_title, d
 
             ### ###
 
-
-
-
-
     
     # Tweak the colorbar
     cb.set_label(colorbar_title, color=fg_color)
@@ -480,15 +476,19 @@ def plotSCE(x_data, y_data, color_data, sol_range, plot_title, colorbar_title, d
 
     plt.title(plot_title, color=fg_color)
 
-    # Plot solar longitude range and count
-    sol_min, sol_max = sol_range
-    # plt.annotate(u"$\lambda_{\u2609 min} =$" + u"{:>5.2f}\u00b0".format(sol_min) \
-    #     + u"\n$\lambda_{\u2609 max} =$" + u"{:>5.2f}\u00b0".format(sol_max), \
-    #     xy=(0, 1), xycoords='axes fraction', color='w', size=12, family='monospace')
-    plt.annotate(u"Sol min = {:>6.2f}\u00b0".format(sol_min) \
-        + u"\nSol max = {:>6.2f}\u00b0".format(sol_max)
-        + "\nCount = {:d}".format(len(x_data)), \
-        xy=(0, 1), xycoords='axes fraction', color='w', size=10, family='monospace')
+
+    if show_sol_range:
+
+        # Plot solar longitude range and count
+        sol_min, sol_max = sol_range
+        # plt.annotate(u"$\lambda_{\u2609 min} =$" + u"{:>5.2f}\u00b0".format(sol_min) \
+        #     + u"\n$\lambda_{\u2609 max} =$" + u"{:>5.2f}\u00b0".format(sol_max), \
+        #     xy=(0, 1), xycoords='axes fraction', color='w', size=12, family='monospace')
+        plt.annotate(u"Sol min = {:>6.2f}\u00b0".format(sol_min) \
+            + u"\nSol max = {:>6.2f}\u00b0".format(sol_max)
+            + "\nCount = {:d}".format(len(x_data)), \
+            xy=(0, 1), xycoords='axes fraction', color='w', size=10, family='monospace')
+
 
     plt.tight_layout()
 
@@ -502,7 +502,7 @@ def plotSCE(x_data, y_data, color_data, sol_range, plot_title, colorbar_title, d
 
 
 def generateTrajectoryPlots(dir_path, traj_list, plot_name='scecliptic', plot_vg=True, plot_sol=True, \
-    plot_density=True, plot_showers=False):
+    plot_density=True, plot_showers=False, time_limited_plot=False):
     """ Given a path with trajectory .pickle files, generate orbits plots. """
 
 
@@ -588,14 +588,15 @@ def generateTrajectoryPlots(dir_path, traj_list, plot_name='scecliptic', plot_vg
     if plot_vg:
         plotSCE(lambda_list, beta_list, vg_list, (sol_min, sol_max), 
             "Sun-centered geocentric ecliptic coordinates", "$V_g$ (km/s)", dir_path, plot_name + "_vg.png", \
-            shower_obj_list=shower_obj_list, plot_showers=plot_showers)
+            shower_obj_list=shower_obj_list, plot_showers=plot_showers, show_sol_range=time_limited_plot)
 
 
     # Plot SCE vs Sol
     if plot_sol:
         plotSCE(lambda_list, beta_list, sol_list, (sol_min, sol_max), \
             "Sun-centered geocentric ecliptic coordinates", "Solar longitude (deg)", dir_path, \
-            plot_name + "_sol.png", shower_obj_list=shower_obj_list, plot_showers=plot_showers)
+            plot_name + "_sol.png", shower_obj_list=shower_obj_list, plot_showers=plot_showers, \
+            show_sol_range=time_limited_plot)
     
 
     
@@ -603,7 +604,8 @@ def generateTrajectoryPlots(dir_path, traj_list, plot_name='scecliptic', plot_vg
     if plot_density:
         plotSCE(lambda_list, beta_list, None, (sol_min, sol_max), 
             "Sun-centered geocentric ecliptic coordinates", "Count", dir_path, plot_name + "_density.png", \
-            density_plot=True, shower_obj_list=shower_obj_list, plot_showers=plot_showers)
+            density_plot=True, shower_obj_list=shower_obj_list, plot_showers=plot_showers, \
+            show_sol_range=time_limited_plot)
 
 
 
@@ -838,7 +840,7 @@ if __name__ == "__main__":
 
     # Generate summary plots
     print("Plotting all trajectories...")
-    generateTrajectoryPlots(cml_args.dir_path, traj_list, plot_showers=False)
+    generateTrajectoryPlots(cml_args.dir_path, traj_list, plot_showers=False, time_limited_plot=False)
 
     # Generate station plot
     print("Plotting station plot...")
@@ -867,4 +869,4 @@ if __name__ == "__main__":
         # Plot graphs per solar longitude
         generateTrajectoryPlots(cml_args.dir_path, traj_list_sol, \
             plot_name="scecliptic_solrange_{:05.1f}-{:05.1f}".format(sol_min, sol_max), plot_sol=False, \
-            plot_showers=True)
+            plot_showers=True, time_limited_plot=True)
