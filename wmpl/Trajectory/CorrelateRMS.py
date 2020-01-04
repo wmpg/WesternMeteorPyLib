@@ -71,10 +71,16 @@ class TrajectoryReduced(object):
             self.jdt_ref = traj.jdt_ref
 
             # ECI coordinates of the state vector computed through minimization
-            self.state_vect_mini = traj.state_vect_mini.tolist()
+            if traj.state_vect_mini is None:
+                self.state_vect_mini = None
+            else:
+                self.state_vect_mini = traj.state_vect_mini.tolist()
 
             # Apparent radiant vector computed through minimization
-            self.radiant_eci_mini = traj.radiant_eci_mini.tolist()
+            if traj.radiant_eci_mini is None:
+                self.radiant_eci_mini = None
+            else:
+                self.radiant_eci_mini = traj.radiant_eci_mini.tolist()
 
             # Initial and average velocity
             self.v_init = traj.v_init
