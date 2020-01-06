@@ -11,7 +11,9 @@ import scipy.stats
 import scipy.ndimage
 
 
-from wmpl.Utils.Math import mergeClosePoints, meanAngle, sphericalPointFromHeadingAndDistance
+from wmpl.Analysis.FitPopulationAndMassIndex import fitSlope, logline
+from wmpl.Utils.Math import mergeClosePoints, meanAngle, sphericalPointFromHeadingAndDistance, \
+    angleBetweenSphericalCoords
 from wmpl.Utils.Physics import calcMass
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PlotCelestial import CelestialPlot
@@ -35,7 +37,73 @@ MIN_SHOWER_MEMBERS = 3
 # Plot shower radius (deg)
 PLOT_SHOWER_RADIUS = 3.0
 
+# Power of a zero magnitude meteor
+P_0M=1210
+
 ### ###
+
+
+
+def computeMass(traj, P_0m):
+    """ Compute the mass given the trajectory and a power of a zero magnitude meteor. """
+
+
+    time_mag_arr = []
+    avg_t_diff_max = 0
+    for obs in traj.observations:
+
+        # Skip ignored stations
+        if obs.ignore_station:
+            continue
+
+        # If there are not magnitudes for this site, skip it
+        if obs.absolute_magnitudes is None:
+            continue
+
+        # Compute average time difference
+        avg_t_diff_max = max(avg_t_diff_max, np.median(obs.time_data[1:] - obs.time_data[:-1]))
+
+        for t, mag in zip(obs.time_data, obs.absolute_magnitudes):
+            if (mag is not None) and (not np.isnan(mag)):
+                time_mag_arr.append([t, mag])
+
+
+    # Compute the mass
+    time_mag_arr = np.array(sorted(time_mag_arr, key=lambda x: x[0]))
+    time_arr, mag_arr = time_mag_arr.T
+    
+    # Take the maximum magnitudes, which mitigates saturation effects. Note that this assumes that the
+    #   photometric calibration was done well
+    time_arr, mag_arr = mergeClosePoints(time_arr, mag_arr, avg_t_diff_max, method='max')
+
+    # Compute the photometric mass
+    mass = calcMass(np.array(time_arr), np.array(mag_arr), traj.orbit.v_avg_norot, P_0m=P_0m)
+
+
+    return mass
+
+
+
+def checkMeteorFOVBegEnd(traj):
+    """ Check if the meteor begins or ends inside the FOV of at least one camera. """
+
+    # Check if the meteor begins in the FOV of at least one camera
+    fov_beg = None
+    fov_beg_list = [obs.fov_beg for obs in traj.observations if (obs.ignore_station == False) \
+        and hasattr(obs, "fov_beg")]
+    if len(fov_beg_list) > 0:
+        fov_beg = np.any(fov_beg_list)
+
+
+    # Meteor ends inside the FOV
+    fov_end = None
+    fov_end_list = [obs.fov_end for obs in traj.observations if (obs.ignore_station == False) \
+        and hasattr(obs, "fov_end")]
+    if len(fov_end_list) > 0:
+        fov_end = np.any(fov_end_list)
+
+
+    return fov_beg, fov_end
 
 
 
@@ -220,37 +288,8 @@ def writeOrbitSummaryFile(dir_path, traj_list, P_0m=1210):
 
 
         ### Compute the mass
-
-        time_mag_arr = []
-        avg_t_diff_max = 0
-        for obs in traj.observations:
-
-            # Skip ignored stations
-            if obs.ignore_station:
-                continue
-
-            # If there are not magnitudes for this site, skip it
-            if obs.absolute_magnitudes is None:
-                continue
-
-            # Compute average time difference
-            avg_t_diff_max = max(avg_t_diff_max, np.median(obs.time_data[1:] - obs.time_data[:-1]))
-
-            for t, mag in zip(obs.time_data, obs.absolute_magnitudes):
-                if (mag is not None) and (not np.isnan(mag)):
-                    time_mag_arr.append([t, mag])
-
-
-        # Compute the mass
-        time_mag_arr = np.array(sorted(time_mag_arr, key=lambda x: x[0]))
-        time_arr, mag_arr = time_mag_arr.T
         
-        # Take the maximum magnitudes, which mitigates saturation effects. Note that this assumes that the
-        #   photometric calibration was done well
-        time_arr, mag_arr = mergeClosePoints(time_arr, mag_arr, avg_t_diff_max)
-
-        # Compute the photometry mass
-        mass = calcMass(np.array(time_arr), np.array(mag_arr), traj.orbit.v_avg_norot, P_0m=P_0m)
+        mass = computeMass(traj, P_0m=P_0m)
 
         ###
 
@@ -269,22 +308,10 @@ def writeOrbitSummaryFile(dir_path, traj_list, P_0m=1210):
             in traj.observations if not obs.ignore_station]))))
 
 
-        # Meteor begins inside the FOV
-        fov_beg = None
-        fov_beg_list = [obs.fov_beg for obs in traj.observations if (obs.ignore_station == False) \
-            and hasattr(obs, "fov_beg")]
-        if len(fov_beg_list) > 0:
-            fov_beg = np.any(fov_beg_list)
+        # Check if the meteor begins/ends inside the FOV
+        fov_beg, fov_end = checkMeteorFOVBegEnd(traj)
 
         line_info.append("{:>6s}".format(str(fov_beg)))
-
-        # Meteor ends inside the FOV
-        fov_end = None
-        fov_end_list = [obs.fov_end for obs in traj.observations if (obs.ignore_station == False) \
-            and hasattr(obs, "fov_end")]
-        if len(fov_end_list) > 0:
-            fov_end = np.any(fov_end_list)
-
         line_info.append("{:>6s}".format(str(fov_end)))
 
 
@@ -690,6 +717,343 @@ def generateStationPlot(dir_path, traj_list, color_scheme='light'):
 
 
 
+def generateShowerPlots(dir_path, traj_list, min_members=30, P_0m=1210):
+    """ Generate shower plots of showers with a minimum of min_members members. """
+
+
+    # Plot parameters
+    label_text_size = 6
+
+
+    # Generate a dictionary of showers and trajectories
+    shower_no_list = []
+    shower_traj_dict = {}
+    for traj in traj_list:
+
+        # Perform shower association and track the list of all showers
+        shower_obj = associateShowerTraj(traj)
+
+        # If the trajectory was associated, sort it to the appropriate shower
+        if shower_obj is not None:
+            if shower_obj.IAU_no not in shower_no_list:
+                shower_no_list.append(shower_obj.IAU_no)
+                shower_traj_dict[shower_obj.IAU_no] = [traj]
+            else:
+                shower_traj_dict[shower_obj.IAU_no].append(traj)
+
+
+
+    # Begin/end heights and initial velocities
+    ht_beg_all = np.array([traj.rbeg_ele for traj in traj_list])
+    ht_end_all = np.array([traj.rend_ele for traj in traj_list])
+    v_init_all = np.array([traj.v_init for traj in traj_list])
+
+
+    # Generate shower plots
+    for shower_no in sorted(shower_no_list):
+
+        # Extract shower trajectories
+        shower_trajs = shower_traj_dict[shower_no]
+
+        # Only take those showers with the minimum number of members
+        if len(shower_trajs) < min_members:
+            continue
+
+
+        # Get shower letter code
+        shower_code = associateShowerTraj(shower_trajs[0]).IAU_code
+
+        print("Processing shower:", shower_no, shower_code)
+
+
+        # Init the plot
+        fig, ((ax_rad, ax_radnodrift), (ax_mass, ax_ht)) = plt.subplots(nrows=2, ncols=2)
+
+
+
+
+        ### Plot the non-drift corrected radiants in Sun-centered ecliptic coordinates ###
+
+        # Compute SCE coordinates
+        sol_data = np.array([traj.orbit.la_sun for traj in shower_trajs])
+        lam_data = np.array([traj.orbit.L_g for traj in shower_trajs])
+        bet_data = np.array([traj.orbit.B_g for traj in shower_trajs])
+        lam_sol_data = (lam_data - sol_data)%(2*np.pi)
+
+        # Get the errors
+        lam_err = np.array([traj.uncertainties.L_g for traj in shower_trajs])
+        bet_err = np.array([traj.uncertainties.B_g for traj in shower_trajs])
+
+        # Compute masses (only take trajectories which are completely inside the FOV, otherwise set the 
+        #   mass to None)
+        mass_data = np.array([computeMass(traj, P_0m) if all(checkMeteorFOVBegEnd(traj)) else None \
+            for traj in shower_trajs])
+
+        # Begin/end heights and initial velocities
+        ht_beg_shower = np.array([traj.rbeg_ele for traj in shower_trajs])
+        ht_end_shower = np.array([traj.rend_ele for traj in shower_trajs])
+        v_init_shower = np.array([traj.v_init for traj in shower_trajs])
+
+
+
+        ### Radiant drift functions ###
+
+
+        def circleXYLineFunc(x, m, k):
+            """ Fit a line through circular data, both X and Y. """
+            return (m*x%(2*np.pi) + k)%(2*np.pi)
+
+
+        def circleXLineFunc(x, m, k):
+            """ Fit a line through circular data, only X. """
+            return m*x%(2*np.pi) + k
+
+
+        ###
+
+
+
+        ## Estimate radiant drift and reject 3 sigma outliers from the mean ##
+
+        n_iter = 3
+        for i in range(n_iter):
+
+            # Compute the radiant drift in SCE longitude
+            lam_sol_drift_params, _ = scipy.optimize.curve_fit(circleXYLineFunc, sol_data, lam_sol_data)
+
+            # Compute the radiant drift in SCE latitude
+            bet_drift_params, _ = scipy.optimize.curve_fit(circleXLineFunc, sol_data, bet_data)
+
+
+            # Compute SCE coordinates without the radiant drift
+            lam_sol_data_nodrift = lam_sol_data - circleXYLineFunc(sol_data, *lam_sol_drift_params)
+            bet_data_nodrift = bet_data - circleXLineFunc(sol_data, *bet_drift_params)
+
+
+            ###
+
+            # Skip rejecting radiants in the last iteration
+            if i == n_iter - 1:
+                break
+            
+
+            # Compute distances from the mean radiant
+            rad_dists = np.array([angleBetweenSphericalCoords(0.0, 0.0, bet_nodrift, lam_sol_nodrift) \
+                for lam_sol_nodrift, bet_nodrift in zip(lam_sol_data_nodrift, bet_data_nodrift)])
+
+            # Fit a Rayleigh distribution to radiant distances and get the standard deviation
+            ray_params = scipy.stats.rayleigh.fit(rad_dists)
+            ray_std = scipy.stats.rayleigh.std(*ray_params)
+
+            # Reject all showers outside 3 standard deviations
+            filter_indices = rad_dists < 3*ray_std
+            sol_data = sol_data[filter_indices]
+            lam_data = lam_data[filter_indices]
+            bet_data = bet_data[filter_indices]
+            lam_sol_data = lam_sol_data[filter_indices]
+            lam_sol_data_nodrift = lam_sol_data_nodrift[filter_indices]
+            bet_data_nodrift = bet_data_nodrift[filter_indices]
+            lam_err = lam_err[filter_indices]
+            bet_err = bet_err[filter_indices]
+            mass_data = mass_data[filter_indices]
+            ht_beg_shower = ht_beg_shower[filter_indices]
+            ht_end_shower = ht_end_shower[filter_indices]
+            v_init_shower = v_init_shower[filter_indices]
+
+            ##
+
+
+        # Compute mean radiant values
+        lam_sol_avg = meanAngle(lam_sol_data)%(2*np.pi)
+        bet_avg = np.mean(bet_data)
+
+
+        # Remove None masses
+        mass_data = np.array([mass for mass in mass_data if mass is not None])
+
+
+        ### Plot the radiants (no drift correction) ###
+
+        cp = CelestialPlot(lam_sol_data, bet_data, projection="stere", ax=ax_rad, bgcolor='w', \
+            tick_text_size=label_text_size)
+        cp.scatter(lam_sol_data, bet_data, c='k', s=1, \
+            label="Mean $\\lambda_{g} - \\lambda_{\\odot} = $" \
+                + "{:.2f}$^\\circ$".format(np.degrees(lam_sol_avg)) \
+                + "\nMean $B_g = $" + "{:.2f}$^\\circ$".format(np.degrees(bet_avg)))
+        
+        ax_rad.legend(prop={'size': 6}, loc='upper left')
+
+        ax_rad.set_xlabel("$\\lambda_g - \\lambda_{\\odot}$", labelpad=15, fontsize=label_text_size)
+        ax_rad.set_ylabel("$\\beta_g$", labelpad=15, fontsize=label_text_size)
+
+
+        ### ###
+
+
+        ### Plot the radiants (drift corrected) ###
+
+
+        # Plot the errors (scale the X error by the cos of the latitude)
+        ax_radnodrift.errorbar(np.degrees(lam_sol_data_nodrift), np.degrees(bet_data_nodrift), \
+            xerr=np.degrees(lam_err)*np.cos(bet_data), yerr=np.degrees(bet_err), color='k', ms=1, fmt="o", \
+            zorder=3, elinewidth=0.5, \
+            label="Drift $\\lambda_{g} - \\lambda_{\\odot} = $" \
+                + "{:.3f}".format(lam_sol_drift_params[0]) \
+                + "\nDrift $B_g = $" + "{:.3f}".format(bet_drift_params[0]))
+            
+        ax_radnodrift.legend(prop={'size': 6}, loc='upper left')
+
+        ax_radnodrift.set_xlabel("$(\\lambda_g - \\lambda_{\\odot}) - (\\lambda_g - \\lambda_{\\odot})'$", \
+            fontsize=label_text_size)
+        ax_radnodrift.set_ylabel("$\\beta_g - \\beta'_g$", fontsize=label_text_size)
+
+
+        ax_radnodrift.grid(linestyle='dashed')
+
+        ## Make the limits rectangular ##
+        x_min, x_max = ax_radnodrift.get_xlim()
+        y_min, y_max = ax_radnodrift.get_ylim()
+        delta_x = abs(x_max - x_min)
+        delta_y = abs(y_max - y_min)
+
+        if delta_x > delta_y:
+
+            delta_largest = delta_x
+            
+            delta_diff = (delta_x - delta_y)/2
+            
+            y_min -= delta_diff
+            y_max += delta_diff
+
+        else:
+
+            delta_largest = delta_y
+
+            delta_diff = (delta_y - delta_x)/2
+
+            x_min -= delta_diff
+            x_max += delta_diff
+
+
+        # Add a buffer around the points
+        border_ratio = 0.1
+        x_min -= delta_largest*border_ratio
+        x_max += delta_largest*border_ratio
+        y_min -= delta_largest*border_ratio
+        y_max += delta_largest*border_ratio
+
+
+        # Set the plot limits
+        ax_radnodrift.set_xlim([x_min, x_max])
+        ax_radnodrift.set_ylim([y_min, y_max])
+
+        # Set equal aspect ratio
+        ax_radnodrift.set_aspect("equal")
+
+        ## ##
+
+
+        # Set smaller tick size
+        ax_radnodrift.xaxis.set_tick_params(labelsize=label_text_size)
+        ax_radnodrift.yaxis.set_tick_params(labelsize=label_text_size)
+
+
+        ### ###
+
+
+
+        ### Plot the Rayleigh distribution ###
+
+
+        # ...
+
+
+        ### ###
+
+
+
+        ### Plot the mass distribution ###
+
+        # Plot the cumulative distribution
+        ax_mass.hist(np.log10(mass_data), bins=len(mass_data), cumulative=-1, \
+            density=True, log=True, histtype='step', color='k', zorder=4)
+
+
+        # Fit the slope to the data
+        params, x_arr, inflection_point, ref_point, slope, slope_report, intercept, lim_point, sign, \
+            kstest = fitSlope(np.log10(mass_data), True)
+
+
+        # Plot the tangential line with the slope
+        ax_mass.plot(sign*x_arr, logline(-x_arr, slope, intercept), color='r', \
+            label="s = {:.2f} \nKS test D = {:.3f} \nKS test p-value = {:.3f}".format(\
+                slope_report, kstest.statistic, kstest.pvalue), zorder=5)
+
+        ax_mass.legend(prop={'size': label_text_size}, loc='lower left')
+
+
+        ax_mass.set_xlabel("Mass (kg)", fontsize=label_text_size)
+        ax_mass.set_ylabel("Cumulative count", fontsize=label_text_size)
+
+        ax_mass.set_ylim(ymax=1.0)
+        ax_mass.set_xlim([-8.0, -3.0])
+
+
+        # Set smaller tick size
+        ax_mass.xaxis.set_tick_params(labelsize=label_text_size)
+        ax_mass.yaxis.set_tick_params(labelsize=label_text_size)
+
+        ###
+
+
+
+        ### Plot beginning and end heights vs initial speed
+
+        ax_ht.grid(alpha=0.2)
+
+        # Plot begin and end heights of all showers
+        ax_ht.scatter(v_init_all/1000, ht_beg_all/1000, s=0.1, c='k', alpha=0.2, zorder=3)
+        ax_ht.scatter(v_init_all/1000, ht_end_all/1000, s=0.1, c='k', alpha=0.2, zorder=3)
+
+        # Plot begin and end heights of shower meteors
+        ax_ht.scatter(v_init_shower/1000, ht_beg_shower/1000, s=0.5, c='r', alpha=0.25, label='Begin', \
+            zorder=4)
+        ax_ht.scatter(v_init_shower/1000, ht_end_shower/1000, s=0.5, c='b', alpha=0.25, label='End', zorder=4)
+
+        ax_ht.legend(prop={'size': label_text_size}, loc='lower right')
+
+
+        ax_ht.set_xlabel("$v_{init}$ (km/s)", fontsize=label_text_size)
+        ax_ht.set_ylabel("Height (km)", fontsize=label_text_size)
+
+        ax_ht.set_xlim([10, 72])
+
+        # Set smaller tick size
+        ax_ht.xaxis.set_tick_params(labelsize=label_text_size)
+        ax_ht.yaxis.set_tick_params(labelsize=label_text_size)
+
+
+        ###
+
+
+
+        # Set the shower code as the title
+        fig.suptitle("#{:d} - {:s}".format(shower_no, shower_code))
+
+
+        fig.tight_layout()
+
+
+        # Save the plot
+        fig.savefig(os.path.join(dir_path, "{:04d}{:s}.png".format(shower_no, shower_code)), dpi=200)
+        fig.clf()
+
+
+
+
+
+
+
 if __name__ == "__main__":
 
     from wmpl.Utils.OSTools import importBasemap
@@ -833,10 +1197,13 @@ if __name__ == "__main__":
 
 
 
+    # Generate shower plots
+    print("Plotting showers...")
+    generateShowerPlots(cml_args.dir_path, traj_list, min_members=30, P_0m=P_0M)
 
     # Generate the orbit summary file
     print("Writing summary file...")
-    writeOrbitSummaryFile(cml_args.dir_path, traj_list)
+    writeOrbitSummaryFile(cml_args.dir_path, traj_list, P_0m=P_0M)
 
     # Generate summary plots
     print("Plotting all trajectories...")
@@ -845,6 +1212,7 @@ if __name__ == "__main__":
     # Generate station plot
     print("Plotting station plot...")
     generateStationPlot(cml_args.dir_path, traj_list)
+
 
 
 

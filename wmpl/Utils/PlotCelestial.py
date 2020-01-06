@@ -99,7 +99,8 @@ def calcAngDataLimits(ra_data, dec_data, border_ratio=0.1):
 
 
 class CelestialPlot(object):
-    def __init__(self, ra_data, dec_data, projection='sinu', bgcolor='k', lon_0=0, ax=None):
+    def __init__(self, ra_data, dec_data, projection='sinu', bgcolor='k', lon_0=0, ax=None, \
+        tick_text_size='small'):
         """ Plotting on a celestial sphere.
 
         Arguments:
@@ -113,11 +114,17 @@ class CelestialPlot(object):
             bgcolor: [str] Background color of the plot. Black by default.
             lon_0: [float] Longitude or RA of the centre of the plot in degrees. Only for allsky plots.
             ax: [plt] Matplotlib handle to use. If None, a new figure will be initiated.
+            tick_text_size: [str or int] Tick text size. "small" by default.
 
         """
 
-        # Store the plot handle
-        self.plt = plt
+
+        if ax is None:
+            self.ax = plt.gca()
+
+        else:
+            self.ax = ax
+
 
         if projection == 'stere':
 
@@ -158,7 +165,8 @@ class CelestialPlot(object):
             dec_lines = np.arange(np.floor(dec_min/label_angle_freq)*label_angle_freq, \
                 np.ceil(dec_max/label_angle_freq)*label_angle_freq, label_angle_freq)
 
-            self.m.drawparallels(dec_lines, labels=[True, False, False, False], color='0.25')
+            self.m.drawparallels(dec_lines, labels=[True, False, False, False], color='0.25', \
+                fontsize=tick_text_size)
 
             ra_min_round = np.floor(ra_min/label_angle_freq)*label_angle_freq
             ra_max_round = np.ceil(ra_max/label_angle_freq)*label_angle_freq
@@ -179,8 +187,8 @@ class CelestialPlot(object):
             
             ra_label_format = u"%." + str(ra_label_rounding) + u"f\N{DEGREE SIGN}"
 
-            ra_labels_handle = self.m.drawmeridians(ra_labels, labels=[False, False, False, True], color='0.25', \
-                fmt=(lambda x: ra_label_format%(x%360)))
+            ra_labels_handle = self.m.drawmeridians(ra_labels, labels=[False, False, False, True], \
+                color='0.25', fmt=(lambda x: ra_label_format%(x%360)), fontsize=tick_text_size)
 
             # Rotate R.A. labels
             for m in ra_labels_handle:
@@ -189,7 +197,7 @@ class CelestialPlot(object):
                 except:
                     pass
 
-            self.plt.gca().tick_params(axis='x', pad=15)
+            self.ax.tick_params(axis='x', pad=15)
 
 
             ##################################################################################################
@@ -218,14 +226,14 @@ class CelestialPlot(object):
                 if dec == 0:
                     continue
 
-                self.plt.annotate(u"{:+d}\u00b0".format(int(dec)), xy=self.m(lon_0, dec), xycoords='data', ha='center', 
-                    va='center', color='0.8', alpha=0.5, fontsize=8)
+                self.ax.annotate(u"{:+d}\u00b0".format(int(dec)), xy=self.m(lon_0, dec), xycoords='data', \
+                    ha='center', va='center', color='0.8', alpha=0.5, fontsize=8)
 
 
             # Plot meridian labels
             for ra in np.arange(0, 360, 2*label_angle_freq):
-                self.plt.annotate(u"{:d}\u00b0".format(int(ra)), xy=self.m(ra, 0), xycoords='data', ha='center', \
-                    va='center', color='0.8', alpha=0.5, fontsize=8)
+                self.ax.annotate(u"{:d}\u00b0".format(int(ra)), xy=self.m(ra, 0), xycoords='data', \
+                    ha='center', va='center', color='0.8', alpha=0.5, fontsize=8)
 
             ##################################################################################################
 
@@ -235,8 +243,8 @@ class CelestialPlot(object):
         self.m.drawmapboundary(fill_color=bgcolor)
 
         # Turn off shortening numbers into offsets
-        self.plt.gca().get_xaxis().get_major_formatter().set_useOffset(False)
-        self.plt.gca().get_yaxis().get_major_formatter().set_useOffset(False)
+        self.ax.get_xaxis().get_major_formatter().set_useOffset(False)
+        self.ax.get_yaxis().get_major_formatter().set_useOffset(False)
 
 
 
@@ -283,7 +291,7 @@ class CelestialPlot(object):
         # Convert angular coordinates to image coordinates
         x, y = self.m(np.degrees(ra_data), np.degrees(dec_data))
 
-        text_handle = self.plt.text(x, y, txt, zorder=3, **kwargs)
+        text_handle = self.ax.text(x, y, txt, zorder=3, **kwargs)
 
         return text_handle
 
@@ -346,7 +354,7 @@ if __name__ == "__main__":
     v = np.linspace(0, 10, 10)
 
     # Initi a celestial plot (the points have to be given to estimate the data range)
-    celes_plot = CelestialPlot(ra, dec, projection='sinu', lon_0=-90)
+    celes_plot = CelestialPlot(ra, dec, projection='stere', lon_0=-90)
 
     celes_plot.scatter(ra, dec, c=v)
 
