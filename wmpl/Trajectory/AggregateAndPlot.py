@@ -7,8 +7,9 @@ import os
 import datetime
 
 import numpy as np
-import scipy.stats
+import scipy.integrate
 import scipy.ndimage
+import scipy.stats
 
 
 from wmpl.Analysis.FitPopulationAndMassIndex import fitSlope, logline
@@ -81,6 +82,24 @@ def computeMass(traj, P_0m):
 
 
     return mass
+
+
+
+def computePeakMagHt(traj):
+    """ Compute the peak magnitude and peak height. """
+
+    # Compute peak magnitude from all stations
+    peak_mags = [np.min(obs.absolute_magnitudes[obs.ignore_list == 0]) for obs in traj.observations \
+        if obs.ignore_station == False]
+    peak_mag = np.min(peak_mags)
+
+    # Compute the peak height
+    peak_ht = [obs.model_ht[np.argmin(obs.absolute_magnitudes[obs.ignore_list == 0])] \
+        for obs in traj.observations if obs.ignore_station == False][np.argmin(peak_mags)]
+
+
+    return peak_mag, peak_ht
+
 
 
 
@@ -278,20 +297,14 @@ def writeOrbitSummaryFile(dir_path, traj_list, P_0m=1210):
         # Compute the duration
         duration = max([np.max(obs.time_data[obs.ignore_list == 0]) for obs in traj.observations \
             if obs.ignore_station == False])
-
-        # Compute the peak magnitude and the peak height
-        peak_mags = [np.min(obs.absolute_magnitudes[obs.ignore_list == 0]) for obs in traj.observations \
-            if obs.ignore_station == False]
-        peak_mag = np.min(peak_mags)
-        peak_ht = [obs.model_ht[np.argmin(obs.absolute_magnitudes[obs.ignore_list == 0])] for obs in traj.observations \
-            if obs.ignore_station == False][np.argmin(peak_mags)]
-
-
-        ### Compute the mass
         
-        mass = computeMass(traj, P_0m=P_0m)
 
-        ###
+        # Compute the peak magnitude and height
+        peak_mag, peak_ht = computePeakMagHt(traj)
+
+
+        # Compute the mass
+        mass = computeMass(traj, P_0m=P_0m)
 
 
         # Meteor parameters (duration, peak magnitude, integrated intensity, Q angle)
@@ -743,10 +756,12 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, P_0m=1210):
 
 
 
-    # Begin/end heights and initial velocities
-    ht_beg_all = np.array([traj.rbeg_ele for traj in traj_list])
-    ht_end_all = np.array([traj.rend_ele for traj in traj_list])
-    v_init_all = np.array([traj.v_init for traj in traj_list])
+    # Extract all data
+    ht_beg_all  = np.array([traj.rbeg_ele for traj in traj_list])
+    ht_end_all  = np.array([traj.rend_ele for traj in traj_list])
+    v_g_all     = np.array([traj.orbit.v_g for traj in traj_list])
+    tj_all      = np.array([traj.orbit.Tj for traj in traj_list])
+    ht_max_all  = np.array([computePeakMagHt(traj)[1] for traj in traj_list])
 
 
     # Generate shower plots
@@ -767,7 +782,8 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, P_0m=1210):
 
 
         # Init the plot
-        fig, ((ax_rad, ax_radnodrift), (ax_mass, ax_ht)) = plt.subplots(nrows=2, ncols=2)
+        fig, ((ax_rad, ax_radnodrift, ax_rayleigh), (ax_mass, ax_ht, ax_tj)) = plt.subplots(nrows=2, ncols=3,\
+            figsize=(10, 6))
 
 
 
@@ -789,10 +805,15 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, P_0m=1210):
         mass_data = np.array([computeMass(traj, P_0m) if all(checkMeteorFOVBegEnd(traj)) else None \
             for traj in shower_trajs])
 
-        # Begin/end heights and initial velocities
+        # Begin/end/peak heights and initial velocities
         ht_beg_shower = np.array([traj.rbeg_ele for traj in shower_trajs])
         ht_end_shower = np.array([traj.rend_ele for traj in shower_trajs])
-        v_init_shower = np.array([traj.v_init for traj in shower_trajs])
+        ht_max_shower = np.array([computePeakMagHt(traj)[1] if all(checkMeteorFOVBegEnd(traj)) else None \
+            for traj in shower_trajs])
+        v_g_shower = np.array([traj.orbit.v_g for traj in shower_trajs])
+
+        # Get Tj
+        tj_shower = np.array([traj.orbit.Tj for traj in shower_trajs])
 
 
 
@@ -831,13 +852,9 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, P_0m=1210):
 
 
             ###
-
-            # Skip rejecting radiants in the last iteration
-            if i == n_iter - 1:
-                break
             
 
-            # Compute distances from the mean radiant
+            # Compute distances from the drift-corrected mean radiant
             rad_dists = np.array([angleBetweenSphericalCoords(0.0, 0.0, bet_nodrift, lam_sol_nodrift) \
                 for lam_sol_nodrift, bet_nodrift in zip(lam_sol_data_nodrift, bet_data_nodrift)])
 
@@ -845,20 +862,27 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, P_0m=1210):
             ray_params = scipy.stats.rayleigh.fit(rad_dists)
             ray_std = scipy.stats.rayleigh.std(*ray_params)
 
+
+            # Skip rejecting radiants in the last iteration
+            if i == n_iter - 1:
+                break
+
             # Reject all showers outside 3 standard deviations
-            filter_indices = rad_dists < 3*ray_std
-            sol_data = sol_data[filter_indices]
-            lam_data = lam_data[filter_indices]
-            bet_data = bet_data[filter_indices]
-            lam_sol_data = lam_sol_data[filter_indices]
+            filter_indices      = rad_dists < 3*ray_std
+            sol_data            = sol_data[filter_indices]
+            lam_data            = lam_data[filter_indices]
+            bet_data            = bet_data[filter_indices]
+            lam_sol_data        = lam_sol_data[filter_indices]
             lam_sol_data_nodrift = lam_sol_data_nodrift[filter_indices]
-            bet_data_nodrift = bet_data_nodrift[filter_indices]
-            lam_err = lam_err[filter_indices]
-            bet_err = bet_err[filter_indices]
-            mass_data = mass_data[filter_indices]
-            ht_beg_shower = ht_beg_shower[filter_indices]
-            ht_end_shower = ht_end_shower[filter_indices]
-            v_init_shower = v_init_shower[filter_indices]
+            bet_data_nodrift    = bet_data_nodrift[filter_indices]
+            lam_err             = lam_err[filter_indices]
+            bet_err             = bet_err[filter_indices]
+            mass_data           = mass_data[filter_indices]
+            ht_beg_shower       = ht_beg_shower[filter_indices]
+            ht_end_shower       = ht_end_shower[filter_indices]
+            ht_max_shower       = ht_max_shower[filter_indices]
+            v_g_shower          = v_g_shower[filter_indices]
+            tj_shower           = tj_shower[filter_indices]
 
             ##
 
@@ -869,19 +893,23 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, P_0m=1210):
 
 
         # Remove None masses
-        mass_data = np.array([mass for mass in mass_data if mass is not None])
+        mass_data_filt = np.array([mass for mass in mass_data if mass is not None])
 
 
         ### Plot the radiants (no drift correction) ###
 
         cp = CelestialPlot(lam_sol_data, bet_data, projection="stere", ax=ax_rad, bgcolor='w', \
             tick_text_size=label_text_size)
-        cp.scatter(lam_sol_data, bet_data, c='k', s=1, \
+        cp.scatter(lam_sol_data, bet_data, c='k', s=1)
+
+
+        # Plot the mean radiant
+        cp.scatter([lam_sol_avg], [bet_avg], c='red', marker='x', alpha=0.5, s=20, \
             label="Mean $\\lambda_{g} - \\lambda_{\\odot} = $" \
                 + "{:.2f}$^\\circ$".format(np.degrees(lam_sol_avg)) \
                 + "\nMean $B_g = $" + "{:.2f}$^\\circ$".format(np.degrees(bet_avg)))
         
-        ax_rad.legend(prop={'size': 6}, loc='upper left')
+        ax_rad.legend(prop={'size': label_text_size}, loc='upper left')
 
         ax_rad.set_xlabel("$\\lambda_g - \\lambda_{\\odot}$", labelpad=15, fontsize=label_text_size)
         ax_rad.set_ylabel("$\\beta_g$", labelpad=15, fontsize=label_text_size)
@@ -895,13 +923,13 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, P_0m=1210):
 
         # Plot the errors (scale the X error by the cos of the latitude)
         ax_radnodrift.errorbar(np.degrees(lam_sol_data_nodrift), np.degrees(bet_data_nodrift), \
-            xerr=np.degrees(lam_err)*np.cos(bet_data), yerr=np.degrees(bet_err), color='k', ms=1, fmt="o", \
+            xerr=np.degrees(lam_err)*np.cos(bet_data), yerr=np.degrees(bet_err), color='k', ms=0.5, fmt="o", \
             zorder=3, elinewidth=0.5, \
             label="Drift $\\lambda_{g} - \\lambda_{\\odot} = $" \
                 + "{:.3f}".format(lam_sol_drift_params[0]) \
                 + "\nDrift $B_g = $" + "{:.3f}".format(bet_drift_params[0]))
             
-        ax_radnodrift.legend(prop={'size': 6}, loc='upper left')
+        ax_radnodrift.legend(prop={'size': label_text_size}, loc='upper left')
 
         ax_radnodrift.set_xlabel("$(\\lambda_g - \\lambda_{\\odot}) - (\\lambda_g - \\lambda_{\\odot})'$", \
             fontsize=label_text_size)
@@ -964,8 +992,51 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, P_0m=1210):
 
         ### Plot the Rayleigh distribution ###
 
+        # Plot the histogram of radiant distances
+        nbins = int(np.sqrt(len(rad_dists))) if len(rad_dists) > 100 else 10
+        _, bins, _ = ax_rayleigh.hist(np.degrees(rad_dists), density=True, bins=nbins, histtype='step', \
+            color='0.5', label="Data")
 
-        # ...
+        # # Get angular residuals that are above and below the median mass
+        # mass_median = np.median(mass_data_filt)
+        # rad_dists_small = [rdist for rdist, m in zip(rad_dists, mass_data) \
+        #     if ((m is not None) and (m <  mass_median))]
+        # rad_dists_large = [rdist for rdist, m in zip(rad_dists, mass_data) \
+        #     if (m is not None) and (m >= mass_median)]
+
+        # # Plot angular deviations below and above the median mass, to see the dispersion dependence on size    
+        # ax_rayleigh.hist(np.degrees(rad_dists_small), density=True, bins=bins, histtype='step', \
+        #     color='r', label="m < median mass")
+        # ax_rayleigh.hist(np.degrees(rad_dists_large), density=True, bins=bins, histtype='step', \
+        #     color='b', label="m >= median mass")
+
+
+        # Plot the fitted Rayleigh distribution (normalize the integral to 1)
+        x_arr = np.linspace(np.min(rad_dists), np.max(rad_dists), 100)
+        ray_pdf_values = scipy.stats.rayleigh.pdf(x_arr, *ray_params)
+        ray_integ = scipy.integrate.simps(ray_pdf_values, x=np.degrees(x_arr))
+        ax_rayleigh.plot(np.degrees(x_arr), ray_pdf_values/ray_integ, color='k', \
+            label="Rayleigh, $\\sigma = $" + "{:.2f}".format(np.degrees(ray_std)) + "$^{\\circ}$")
+
+        # Plot the median deviation
+        rad_dists_median = np.median(rad_dists)
+        y_min, y_max = ax_rayleigh.get_ylim()
+        y_arr = np.linspace(y_min, y_max, 10)
+        ax_rayleigh.plot(np.degrees(rad_dists_median) + np.zeros_like(y_arr), y_arr, linestyle='dashed', 
+            linewidth=0.5, color='k', zorder=3, \
+            label="Median deviation = {:.2}".format(np.degrees(rad_dists_median)) + "$^{\\circ}$")
+
+
+        ax_rayleigh.legend(prop={'size': label_text_size}, loc='upper right')
+
+        ax_rayleigh.set_ylim(y_min, y_max)
+
+        ax_rayleigh.set_xlabel("Angular offset ($^{\\circ}$)", fontsize=label_text_size)
+        ax_rayleigh.set_ylabel("Fraction", fontsize=label_text_size)
+
+        # Set smaller tick size
+        ax_rayleigh.xaxis.set_tick_params(labelsize=label_text_size)
+        ax_rayleigh.yaxis.set_tick_params(labelsize=label_text_size)
 
 
         ### ###
@@ -975,13 +1046,13 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, P_0m=1210):
         ### Plot the mass distribution ###
 
         # Plot the cumulative distribution
-        ax_mass.hist(np.log10(mass_data), bins=len(mass_data), cumulative=-1, \
+        ax_mass.hist(np.log10(mass_data_filt), bins=len(mass_data_filt), cumulative=-1, \
             density=True, log=True, histtype='step', color='k', zorder=4)
 
 
         # Fit the slope to the data
         params, x_arr, inflection_point, ref_point, slope, slope_report, intercept, lim_point, sign, \
-            kstest = fitSlope(np.log10(mass_data), True)
+            kstest = fitSlope(np.log10(mass_data_filt), True)
 
 
         # Plot the tangential line with the slope
@@ -992,7 +1063,7 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, P_0m=1210):
         ax_mass.legend(prop={'size': label_text_size}, loc='lower left')
 
 
-        ax_mass.set_xlabel("Mass (kg)", fontsize=label_text_size)
+        ax_mass.set_xlabel("Log10 mass (kg)", fontsize=label_text_size)
         ax_mass.set_ylabel("Cumulative count", fontsize=label_text_size)
 
         ax_mass.set_ylim(ymax=1.0)
@@ -1011,14 +1082,14 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, P_0m=1210):
 
         ax_ht.grid(alpha=0.2)
 
-        # Plot begin and end heights of all showers
-        ax_ht.scatter(v_init_all/1000, ht_beg_all/1000, s=0.1, c='k', alpha=0.2, zorder=3)
-        ax_ht.scatter(v_init_all/1000, ht_end_all/1000, s=0.1, c='k', alpha=0.2, zorder=3)
+        # Plot begin and end heights of all meteors
+        ax_ht.scatter(v_g_all/1000, ht_beg_all/1000, s=0.1, c='k', alpha=0.2, zorder=3)
+        ax_ht.scatter(v_g_all/1000, ht_end_all/1000, s=0.1, c='k', alpha=0.2, zorder=3)
 
         # Plot begin and end heights of shower meteors
-        ax_ht.scatter(v_init_shower/1000, ht_beg_shower/1000, s=0.5, c='r', alpha=0.25, label='Begin', \
+        ax_ht.scatter(v_g_shower/1000, ht_beg_shower/1000, s=0.5, c='r', alpha=0.25, label='Begin', \
             zorder=4)
-        ax_ht.scatter(v_init_shower/1000, ht_end_shower/1000, s=0.5, c='b', alpha=0.25, label='End', zorder=4)
+        ax_ht.scatter(v_g_shower/1000, ht_end_shower/1000, s=0.5, c='b', alpha=0.25, label='End', zorder=4)
 
         ax_ht.legend(prop={'size': label_text_size}, loc='lower right')
 
@@ -1026,7 +1097,7 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, P_0m=1210):
         ax_ht.set_xlabel("$v_{init}$ (km/s)", fontsize=label_text_size)
         ax_ht.set_ylabel("Height (km)", fontsize=label_text_size)
 
-        ax_ht.set_xlim([10, 72])
+        ax_ht.set_xlim([9, 71])
 
         # Set smaller tick size
         ax_ht.xaxis.set_tick_params(labelsize=label_text_size)
@@ -1036,16 +1107,57 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, P_0m=1210):
         ###
 
 
+        ### Plot Tj vs peak height ###
 
-        # Set the shower code as the title
-        fig.suptitle("#{:d} - {:s}".format(shower_no, shower_code))
+        ax_tj.grid(alpha=0.2)
+
+        # Plot Tj vs peak height of all meteors
+        ax_tj.scatter(tj_all, ht_max_all/1000, s=0.1, c='k', alpha=0.2, zorder=3)
+
+
+        # Remove entries where the peak height is None (i.e. the meteor was not fully observed)
+        ht_max_none_arr = np.array([ht_tmp is not None for ht_tmp in ht_max_shower])
+        ht_max_shower_filter = ht_max_shower[ht_max_none_arr]
+        tj_shower_filter = tj_shower[ht_max_none_arr]
+
+
+        # Plot the shower data
+        ax_tj.scatter(tj_shower_filter, ht_max_shower_filter/1000, s=0.5, c='r', alpha=0.5, \
+            zorder=4)
+
+
+        ax_tj.set_xlabel("$T_J$", fontsize=label_text_size)
+        ax_tj.set_ylabel("Peak height (km)", fontsize=label_text_size)
+
+        ax_tj.set_xlim([-1, 6])
+
+
+        # Plot the divisions by Tisserand
+        y_min, y_max = ax_tj.get_ylim()
+        y_arr = np.linspace(y_min, y_max, 10)
+        ax_tj.plot(np.zeros_like(y_arr) + 2, y_arr, linestyle='dashed', color='k', zorder=3, linewidth=0.5)
+        ax_tj.plot(np.zeros_like(y_arr) + 3, y_arr, linestyle='dashed', color='k', zorder=3, linewidth=0.5)
+        ax_tj.set_ylim([y_min, y_max])
+
+
+        # Set smaller tick size
+        ax_tj.xaxis.set_tick_params(labelsize=label_text_size)
+        ax_tj.yaxis.set_tick_params(labelsize=label_text_size)
+    
+
+        ### ###
+
+
+
+        # # Set the shower code as the title
+        # fig.suptitle("#{:d} - {:s}".format(shower_no, shower_code))
 
 
         fig.tight_layout()
 
 
         # Save the plot
-        fig.savefig(os.path.join(dir_path, "{:04d}{:s}.png".format(shower_no, shower_code)), dpi=200)
+        fig.savefig(os.path.join(dir_path, "{:04d}{:s}.png".format(shower_no, shower_code)), dpi=300)
         fig.clf()
 
 
