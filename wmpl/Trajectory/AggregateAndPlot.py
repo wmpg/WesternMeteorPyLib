@@ -1247,11 +1247,10 @@ if __name__ == "__main__":
 
     ### ###
 
-    ### TEST
-    import pickle
 
     # Get a list of paths of all trajectory pickle files
     traj_list = []
+    loaded_trajs_count = 0
     for entry in os.walk(cml_args.dir_path):
 
         dir_path, _, file_names = entry
@@ -1265,11 +1264,14 @@ if __name__ == "__main__":
                 # Load the pickle file
                 traj = loadPickle(dir_path, file_name)
 
+                loaded_trajs_count += 1
+
+                # Print loading progress
+                if loaded_trajs_count%1000 == 0:
+                    print("Loaded {:d} trajectories...")
+
 
                 ### DELETE UNECESSARY OBJECTS AND ARGUMENTS TO CONSERVE MEMORY ###
-                
-                # # Check size before delete
-                # print('B:', len(pickle.dumps(traj, protocol=2)))
 
                 # Delete all stored MC runs to conserve memory
                 if traj.uncertainties is not None:
@@ -1314,9 +1316,6 @@ if __name__ == "__main__":
                     del obs.meas_eci
                     del obs.meas_eci_los
                     del obs.model_eci
-
-                # print('A:', len(pickle.dumps(traj, protocol=2)))
-                # print()
 
 
                 ### ###
