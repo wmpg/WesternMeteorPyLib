@@ -44,7 +44,7 @@ def loadCometsElements(comets_file):
                 continue
 
 
-            comet_name = ' '.join(line[:44].strip().split())
+            comet_name = line[:44].strip()
             q = float(line[52:63])
             e = float(line[64:74])
             incl = float(line[75:84])
@@ -69,7 +69,7 @@ def loadAsteroidsElements(asteroids_file):
             if i < 2:
                 continue
 
-            asteroid_name = ' '.join(line[:38].strip().split())
+            asteroid_name = line[:38].strip()
             try:
                 q = float(line[39:45])
             except ValueError:
@@ -222,20 +222,12 @@ if __name__ == "__main__":
     # peri   = 210.803526
     # node   = 296.539520
 
-    # # 20180615 RMS low shallow meteor
-    # q      =   0.052157
-    # e      =   0.973413
-    # incl   =   25.531061
-    # peri   = 22.588003
-    # node   = 83.919153
-
-
-    # Jan 6 mystery outburst
-    q      =    0.612
-    e      =    0.871
-    incl   =   74.0
-    peri   = 259.1
-    node   = 286.4
+    # 20180615 RMS low shallow meteor
+    q      =   0.052157
+    e      =   0.973413
+    incl   =   25.531061
+    peri   = 22.588003
+    node   = 83.919153
 
 
     ##########################################################################################################
@@ -245,7 +237,7 @@ if __name__ == "__main__":
 
     # Find parent bodies for the given orbit
     parent_matches = findParentBodies(q, e, np.radians(incl), np.radians(peri), np.radians(node), \
-        d_crit=d_crit_type, top_n=10)
+        d_crit=d_crit_type, top_n=5)
 
     print('Name                ,   q,     e,    incl,   peri,   node,   D crit', d_crit_type)
     for entry in parent_matches:

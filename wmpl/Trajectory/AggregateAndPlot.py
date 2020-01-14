@@ -730,18 +730,46 @@ def generateStationPlot(dir_path, traj_list, color_scheme='light'):
 
 
 
-def generateShowerPlots(dir_path, traj_list, min_members=30, P_0m=1210):
-    """ Generate shower plots of showers with a minimum of min_members members. """
+def generateShowerPlots(dir_path, traj_list, min_members=30, max_radiant_err=0.5, P_0m=1210):
+    """ Generate shower plots of showers with a minimum of min_members members. 
+    
+    Arguments:
+        dir_path: [str] Path where to save the plots.
+        traj_list: [list] A list of Trajectory objects.
+
+    Keyword arguments:
+        min_members: [int] Minimum number of shower members to plot the shower. 30 by default
+        max_radiant_err: [float] Maximum radiant error in degrees. 0.5 deg by default
+        P_0m: [float] Power of a zero magnitue meteors (watts) in the given camera bandpass. 1210 W by 
+            defualt.
+
+    """
 
 
     # Plot parameters
     label_text_size = 6
 
 
+    # Create a mask to filter out trajectories not satisfying the filter conditions
+    reject_indices = []
+    for i, traj in enumerate(traj_list):
+
+        if traj.uncertainties is not None:
+            if np.degrees(np.hypot(np.cos(traj.orbit.dec_g)*traj.uncertainties.ra_g, \
+                traj.uncertainties.dec_g)) > max_radiant_err:
+
+                reject_indices.append(i)
+
+
+
     # Generate a dictionary of showers and trajectories
     shower_no_list = []
     shower_traj_dict = {}
-    for traj in traj_list:
+    for i, traj in enumerate(traj_list):
+
+        # Skip low quality orbits
+        if i in reject_indices:
+            continue
 
         # Perform shower association and track the list of all showers
         shower_obj = associateShowerTraj(traj)
@@ -757,11 +785,12 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, P_0m=1210):
 
 
     # Extract all data
-    ht_beg_all  = np.array([traj.rbeg_ele for traj in traj_list])
-    ht_end_all  = np.array([traj.rend_ele for traj in traj_list])
-    v_g_all     = np.array([traj.orbit.v_g for traj in traj_list])
-    tj_all      = np.array([traj.orbit.Tj for traj in traj_list])
-    ht_max_all  = np.array([computePeakMagHt(traj)[1] for traj in traj_list])
+    ht_beg_all  = np.array([traj.rbeg_ele for i, traj in enumerate(traj_list) if i not in reject_indices])
+    ht_end_all  = np.array([traj.rend_ele for i, traj in enumerate(traj_list) if i not in reject_indices])
+    v_g_all     = np.array([traj.orbit.v_g for i, traj in enumerate(traj_list) if i not in reject_indices])
+    tj_all      = np.array([traj.orbit.Tj for i, traj in enumerate(traj_list) if i not in reject_indices])
+    ht_max_all  = np.array([computePeakMagHt(traj)[1] for i, traj in enumerate(traj_list) \
+        if i not in reject_indices])
 
 
     # Generate shower plots
@@ -1186,7 +1215,7 @@ if __name__ == "__main__":
     arg_parser.add_argument('dir_path', type=str, help='Path to the data directory. Trajectory pickle files are found in all subdirectories.')
 
     arg_parser.add_argument('-s', '--solstep', metavar='SOL_STEP', \
-        help='Step in solar longitude for plotting (degrees). 2 deg by default.', type=float, default=2.0)
+        help='Step in solar longitude for plotting (degrees). 5 deg by default.', type=float, default=5.0)
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -1218,6 +1247,8 @@ if __name__ == "__main__":
 
     ### ###
 
+    ### TEST
+    import pickle
 
     # Get a list of paths of all trajectory pickle files
     traj_list = []
@@ -1233,6 +1264,62 @@ if __name__ == "__main__":
 
                 # Load the pickle file
                 traj = loadPickle(dir_path, file_name)
+
+
+                ### DELETE UNECESSARY OBJECTS AND ARGUMENTS TO CONSERVE MEMORY ###
+                
+                # # Check size before delete
+                # print('B:', len(pickle.dumps(traj, protocol=2)))
+
+                # Delete all stored MC runs to conserve memory
+                if traj.uncertainties is not None:
+                    del traj.uncertainties.mc_traj_list
+                    
+
+                # Delete plane intersections
+                if traj.intersection_list:
+                    del traj.intersection_list
+
+                # Delete observations with added noise used during MC runs
+                if hasattr(traj, "obs_noisy"):
+                    del traj.obs_noisy
+
+
+                # Delete stuff in observations
+                for obs in traj.observations:
+                    del obs.meas1
+                    del obs.meas2
+                    del obs.magnitudes
+                    del obs.azim_data
+                    del obs.elev_data
+                    del obs.ra_data
+                    del obs.dec_data
+                    del obs.velocities
+                    del obs.velocities_prev_point
+                    del obs.model_ra
+                    del obs.model_dec
+                    del obs.model_azim
+                    del obs.model_elev
+                    del obs.model_fit1
+                    del obs.model_fit2
+                    del obs.length
+                    del obs.lag
+                    del obs.state_vect_dist
+                    del obs.meas_lat
+                    del obs.meas_lon
+                    del obs.meas_range
+                    del obs.model_lat
+                    del obs.model_lon
+                    del obs.model_range
+                    del obs.meas_eci
+                    del obs.meas_eci_los
+                    del obs.model_eci
+
+                # print('A:', len(pickle.dumps(traj, protocol=2)))
+                # print()
+
+
+                ### ###
 
                 
                 # Skip those with no orbit solution
@@ -1278,7 +1365,7 @@ if __name__ == "__main__":
                 ### MAXIMUM RADIANT ERROR ###
 
                 if traj.uncertainties is not None:
-                    if np.degrees(np.hypot(traj.uncertainties.ra_g, \
+                    if np.degrees(np.hypot(np.cos(traj.orbit.dec_g)*traj.uncertainties.ra_g, \
                         traj.uncertainties.dec_g)) > max_radiant_err:
 
                         continue
@@ -1311,7 +1398,7 @@ if __name__ == "__main__":
 
     # Generate shower plots
     print("Plotting showers...")
-    generateShowerPlots(cml_args.dir_path, traj_list, min_members=30, P_0m=P_0M)
+    generateShowerPlots(cml_args.dir_path, traj_list, min_members=30, P_0m=P_0M, max_radiant_err=0.5)
 
     # Generate the orbit summary file
     print("Writing summary file...")
