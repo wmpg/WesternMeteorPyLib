@@ -1268,7 +1268,7 @@ if __name__ == "__main__":
 
                 # Print loading progress
                 if loaded_trajs_count%1000 == 0:
-                    print("Loaded {:d} trajectories...")
+                    print("Loaded {:d} trajectories...".format(loaded_trajs_count))
 
 
                 ### DELETE UNECESSARY OBJECTS AND ARGUMENTS TO CONSERVE MEMORY ###
