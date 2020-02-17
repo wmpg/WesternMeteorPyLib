@@ -871,6 +871,7 @@ class TrajectoryCorrelator(object):
                 # Filter out bad matches and only keep the good ones
                 candidate_observations = []
                 traj_full = None
+                skip_traj_check = False
                 for met_obs in traj_time_pairs:
 
                     print("Candidate observation: {:s}".format(met_obs.station_code))
@@ -890,6 +891,12 @@ class TrajectoryCorrelator(object):
                     # Load the full trajectory object
                     if traj_full is None:
                         traj_full = self.dh.loadFullTraj(traj_reduced)
+
+                        # If the full trajectory couldn't be loaded, skip checking this trajectory
+                        if traj_full is None:
+                            
+                            skip_traj_check = True
+                            break
 
 
                     ### Do a rough trajectory solution and perform a quick quality control ###
@@ -922,6 +929,11 @@ class TrajectoryCorrelator(object):
                     ### ###
 
                     candidate_observations.append([met_obs, obs_new])
+
+
+                # Skip the candidate trajectory if it couldn't be loaded from disk
+                if skip_traj_check:
+                    continue
 
 
                 # If there are any good new observations, add them to the trajectory and re-run the solution

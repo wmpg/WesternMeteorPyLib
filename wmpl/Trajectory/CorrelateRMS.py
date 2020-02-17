@@ -813,7 +813,7 @@ class RMSDataHandle(object):
             traj_reduced: [TrajectoryReduced object]
 
         Return:
-            traj: [Trajectory object]
+            traj: [Trajectory object] or [None] if file not found
         """
 
         # Generate the path to the output directory
@@ -822,7 +822,16 @@ class RMSDataHandle(object):
         # Get the file name
         file_name = os.path.basename(traj_reduced.traj_file_path)
 
-        return loadPickle(output_dir, file_name)
+        # Try loading a full trajectory
+        try:
+            traj = loadPickle(output_dir, file_name)
+
+            return traj
+
+        except FileNotFoundError:
+            print("File {:s} not found!".format(traj_reduced.traj_file_path))
+            
+            return None
 
 
 
