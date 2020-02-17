@@ -1187,7 +1187,10 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, max_radiant_err=0.5
 
         # Save the plot
         fig.savefig(os.path.join(dir_path, "{:04d}{:s}.png".format(shower_no, shower_code)), dpi=300)
+
+        # Close the figure
         fig.clf()
+        fig.close()
 
 
 
