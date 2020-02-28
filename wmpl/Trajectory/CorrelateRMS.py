@@ -12,6 +12,7 @@ import json
 import copy
 import datetime
 import shutil
+import time
 
 import numpy as np
 
@@ -30,6 +31,9 @@ OUTPUT_TRAJ_DIR = "trajectories"
 
 # Name of json file with the list of processed directories
 JSON_DB_NAME = "processed_trajectories.json"
+
+# Auto run frequency (hours)
+AUTO_RUN_FREQUENCY = 12
 
 ### ###
 
@@ -908,16 +912,24 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     arg_parser.add_argument('-l', '--saveplots', \
         help='Save plots to disk.', action="store_true")
 
-
     arg_parser.add_argument('-r', '--timerange', metavar='TIME_RANGE', \
         help="""Only compute the trajectories in the given range of time. The time range should be given in the format: "(YYYYMMDD-HHMMSS,YYYYMMDD-HHMMSS)".""", \
             type=str)
+
+    arg_parser.add_argument('-a', '--auto', metavar='PREV_DAYS', type='float', default=14.0, nargs='?',
+        help="""Run continously taking the data in the last PREV_DAYS to compute the new trajectories and update the old ones."""
+        )
 
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
     ############################
+
+    if cml_args.auto is None:
+        print("Running trajectory estimation once!")
+    else:
+        print("Auto running trajectory estimation every {:.1f} hours using the last {:.1f} days of data...".format(AUTO_RUN_FREQUENCY, cml_args.auto))
 
 
     # Init trajectory constraints
@@ -936,80 +948,143 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         trajectory_constraints.max_arcsec_err = cml_args.maxerr
 
 
+    # Run processing. If the auto run more is not on, the loop will break after one run
+    previous_start_time = None
+    while True: 
 
-    # Clock for measuring script time
-    t1 = datetime.datetime.utcnow()
+        # Clock for measuring script time
+        t1 = datetime.datetime.utcnow()
 
-    # Init the data handle
-    dh = RMSDataHandle(cml_args.dir_path)
+        # Init the data handle
+        dh = RMSDataHandle(cml_args.dir_path)
 
 
-    # If there is nothing to process, stop
-    if not dh.processing_list:
+        # If there is nothing to process, stop
+        if not dh.processing_list:
+            print()
+            print("Nothing to process!")
+            print("Probably everything is already processed.")
+            print("Exiting...")
+            sys.exit()
+
+
+
+        # If auto run is enabled, compute the time range to use
+        event_time_range = None
+        if cml_args.auto is not None:
+
+            # Compute first date and time to use for auto run
+            dt_beg = datetime.datetime.now() - datetime.timedelta(days=cml_args.auto)
+
+            # If the beginning time is later than the beginning of the previous run, use the beginning of the
+            # previous run minus two days as the beginning time
+            if previous_start_time is not None:
+                if dt_beg > previous_start_time:
+                    dt_beg = previous_start_time - datetime.timedelta(days=2)
+
+
+            # Use now as the upper time limit
+            dt_end = datetime.datetime.now()
+
+            event_time_range = [dt_beg, dt_end]
+
+
+        # Otherwise check if the time range is given
+        else:
+
+            # If the time range to use is given, use it
+            if cml_args.timerange is not None:
+
+                # Extract time range
+                time_beg, time_end = cml_args.timerange.strip("(").strip(")").split(",")
+                dt_beg = datetime.datetime.strptime(time_beg, "%Y%m%d-%H%M%S")
+                dt_end = datetime.datetime.strptime(time_end, "%Y%m%d-%H%M%S")
+
+                print("Custom time range:")
+                print("    BEG: {:s}".format(str(dt_beg)))
+                print("    END: {:s}".format(str(dt_end)))
+
+                event_time_range = [dt_beg, dt_end]
+
+
+        ### GENERATE MONTHLY TIME BINS ###
+        
+        # Find the range of datetimes of all folders (take only those after the year 2000)
+        proc_dir_dts = [entry[3] for entry in dh.processing_list if entry[3] is not None]
+        proc_dir_dts = [dt for dt in proc_dir_dts if dt > datetime.datetime(2000, 1, 1, 0, 0, 0)]
+
+        # Reject all folders not within the time range of interest +/- 1 day
+        if event_time_range is not None:
+
+            dt_beg, dt_end = event_time_range
+            
+            proc_dir_dts = [dt for dt in proc_dir_dts \
+                if (dt >= dt_beg - datetime.timedelta(days=1)) and \
+                    (dt <= dt_end + datetime.timedelta(days=1))]
+
+
+        # Determine the limits of data
+        proc_dir_dt_beg = min(proc_dir_dts)
+        proc_dir_dt_end = max(proc_dir_dts)
+
+        # Split the processing into monthly chunks
+        dt_bins = generateDatetimeBins(proc_dir_dt_beg, proc_dir_dt_end, bin_days=30)
+
         print()
-        print("Nothing to process!")
-        print("Probably everything is already processed.")
-        print("Exiting...")
-        sys.exit()
+        print("ALL TIME BINS:")
+        print("----------")
+        for bin_beg, bin_end in dt_bins:
+            print("{:s}, {:s}".format(str(bin_beg), str(bin_end)))
 
 
-
-    # If the time range to use is given, use it
-    event_time_range = None
-    if cml_args.timerange is not None:
-
-        # Extract time range
-        time_beg, time_end = cml_args.timerange.strip("(").strip(")").split(",")
-        dt_beg = datetime.datetime.strptime(time_beg, "%Y%m%d-%H%M%S")
-        dt_end = datetime.datetime.strptime(time_end, "%Y%m%d-%H%M%S")
-
-        print("Custom time range:")
-        print("    BEG: {:s}".format(str(dt_beg)))
-        print("    END: {:s}".format(str(dt_end)))
-
-        event_time_range = [dt_beg, dt_end]
+        ### ###
 
 
-    ### GENERATE MONTHLY TIME BINS ###
-    
-    # Find the range of datetimes of all folders (take only those after the year 2000)
-    proc_dir_dts = [entry[3] for entry in dh.processing_list if entry[3] is not None]
-    proc_dir_dts = [dt for dt in proc_dir_dts if dt > datetime.datetime(2000, 1, 1, 0, 0, 0)]
+        # Go through all chunks in time
+        for bin_beg, bin_end in dt_bins:
 
-    # Determine the limits of data
-    proc_dir_dt_beg = min(proc_dir_dts)
-    proc_dir_dt_end = max(proc_dir_dts)
+            print()
+            print("PROCESSING TIME BIN:")
+            print(bin_beg, bin_end)
+            print("-----------------------------")
+            print()
 
-    # Split the processing into monthly chunks
-    dt_bins = generateDatetimeBins(proc_dir_dt_beg, proc_dir_dt_end, bin_days=30)
+            # Load data of unprocessed observations
+            dh.unpaired_observations = dh.loadUnpairedObservations(dh.processing_list, \
+                dt_range=(bin_beg, bin_end))
 
-    print()
-    print("ALL TIME BINS:")
-    print("----------")
-    for bin_beg, bin_end in dt_bins:
-        print("{:s}, {:s}".format(str(bin_beg), str(bin_end)))
+            # Run the trajectory correlator
+            tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True)
+            tc.run(event_time_range=event_time_range)
 
 
-    ### ###
+        
+        print("Total run time: {:s}".format(str(datetime.datetime.utcnow() - t1)))
 
+        # Store the previous start time
+        previous_start_time = copy.deepcopy(t1)
 
-    # Go through all chunks in time
-    for bin_beg, bin_end in dt_bins:
+        # Break after one loop if auto mode is not on
+        if cml_args.auto is None:
+            break
 
-        print()
-        print("PROCESSING TIME BIN:")
-        print(bin_beg, bin_end)
-        print("-----------------------------")
-        print()
+        else:
 
-        # Load data of unprocessed observations
-        dh.unpaired_observations = dh.loadUnpairedObservations(dh.processing_list, \
-            dt_range=(bin_beg, bin_end))
+            # Otherwise wait to run AUTO_RUN_FREQUENCY hours after the beginning
+            wait_time = (datetime.timedelta(hours=AUTO_RUN_FREQUENCY) \
+                - (datetime.datetime.utcnow() - t1)).total_seconds()
 
-        # Run the trajectory correlator
-        tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True)
-        tc.run(event_time_range=event_time_range)
+            # Run immediately if the wait time has elapsed
+            if wait_time < 0:
+                continue
 
+            # Otherwise wait to run
+            else:
 
-    
-    print("Total run time: {:s}".format(str(datetime.datetime.utcnow() - t1)))
+                # Compute next run time
+                next_run_time = datetime.datetime.now() + wait_time
+
+                # Wait to run
+                while next_run_time > datetime.datetime.now():
+                    print("Waiting {:s} to run the trajectory solver...          ".format(str(next_run_time - datetime.datetime.now())))
+                    time.sleep(2)
