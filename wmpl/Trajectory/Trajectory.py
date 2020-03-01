@@ -2917,6 +2917,10 @@ class Trajectory(object):
                 if self.verbose:
                     print('STATION ' + str(obs.station_id) + ' TIME OFFSET = ' + str(t_diff) + ' s')
 
+                # Skip NaN and inf time offsets
+                if np.isnan(t_diff) or np.isinf(t_diff):
+                    continue
+
                 # Apply the time shift to original time data
                 obs.time_data = obs.time_data + t_diff
 
@@ -5789,7 +5793,7 @@ if __name__ == "__main__":
 
 
     # Init new trajectory solving
-    traj_solve = Trajectory(jdt_ref, meastype=meastype, save_results=False, monte_carlo=False)
+    traj_solve = Trajectory(jdt_ref, meastype=meastype, save_results=False, monte_carlo=False, show_plots=False)
 
     # Set input points for the first site
     traj_solve.infillTrajectory(ra1, dec1, time1, lat1, lon1, ele1, station_id=station_id1)
@@ -5800,3 +5804,11 @@ if __name__ == "__main__":
     traj_solve.run()
 
     ###############
+
+
+    # TEST
+    fig_pickle_dict = traj_solve.savePlots(None, None, show_plots=False, ret_figs=True)
+
+    for key in fig_pickle_dict:
+        print(key)
+        fig = pickle.loads(fig_pickle_dict[key])
