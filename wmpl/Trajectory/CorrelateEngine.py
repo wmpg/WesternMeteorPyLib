@@ -11,7 +11,7 @@ import numpy as np
 from wmpl.Trajectory.Trajectory import ObservedPoints, PlaneIntersection, Trajectory
 from wmpl.Utils.Earth import greatCircleDistance
 from wmpl.Utils.Math import vectNorm, vectMag, angleBetweenVectors, vectorFromPointDirectionAndAngle, \
-    findClosestPoints, generateDatetimeBins
+    findClosestPoints, generateDatetimeBins, meanAngle, angleBetweenSphericalCoords
 from wmpl.Utils.ShowerAssociation import associateShowerTraj
 from wmpl.Utils.TrajConversions import J2000_JD, geo2Cartesian, cartesian2Geo, raDec2AltAz, altAz2RADec, \
     raDec2ECI, datetime2JD, jd2Date, equatorialCoordPrecession_vect
@@ -22,6 +22,7 @@ from wmpl.Utils.TrajConversions import J2000_JD, geo2Cartesian, cartesian2Geo, r
 class TrajectoryConstraints(object):
     def __init__(self):
         """ Container for trajectory constraints. """
+
 
         # Minimum number of measurement points per observation
         self.min_meas_pts = 4
@@ -81,6 +82,15 @@ class TrajectoryConstraints(object):
 
         ### ###
 
+
+        ### Trajectory candidate merging ###
+
+        # Maximum angle between radiants of candidate trajectories estimated using intersecting planes method
+        #   for them to be merged into one trajectory (deg)
+        self.max_merge_radiant_angle = 15
+
+
+        ### ###
 
 
         ### MC solver settings ###
@@ -1081,7 +1091,10 @@ class TrajectoryCorrelator(object):
 
 
             ### Merge all candidate trajectories which share the same observations ###
-            print("Merging broken observations...")
+            print()
+            print("---------------------------")
+            print("MERGING BROKEN OBSERVATIONS")
+            print("---------------------------")
             merged_candidate_trajectories = []
             merged_indices = []
             for i, traj_cand_ref in enumerate(candidate_trajectories):
@@ -1103,8 +1116,14 @@ class TrajectoryCorrelator(object):
                 obs_list_ref = [entry[1] for entry in traj_cand_ref]
                 merged_candidate = []
 
+                # Compute the mean radiant of the reference solution
+                plane_radiants_ref = [entry[2].radiant_eq for entry in traj_cand_ref]
+                ra_mean_ref = meanAngle([ra for ra, _ in plane_radiants_ref])
+                dec_mean_ref = np.mean([dec for _, dec in plane_radiants_ref])
+
 
                 # Check for pairs
+                found_first_pair = False
                 for j, traj_cand_test in enumerate(candidate_trajectories[(i + 1):]):
 
                     # Skip same observations
@@ -1120,14 +1139,16 @@ class TrajectoryCorrelator(object):
                     if abs(time_diff) > self.traj_constraints.max_toffset:
                         continue
 
+
                     # Break the search if the time went beyond the search. This can be done as observations 
                     #   are ordered in time
                     if time_diff > self.traj_constraints.max_toffset:
                         break
 
+
+
                     # Create a list of observations
                     obs_list_test = [entry[1] for entry in traj_cand_test]
-
 
                     # Check if there any any common observations between candidate trajectories and merge them
                     #   if that is the case
@@ -1136,6 +1157,19 @@ class TrajectoryCorrelator(object):
                         if obs1 in obs_list_test:
                             found_match = True
                             break
+
+
+                    # Compute the mean radiant of the reference solution
+                    plane_radiants_test = [entry[2].radiant_eq for entry in traj_cand_test]
+                    ra_mean_test = meanAngle([ra for ra, _ in plane_radiants_test])
+                    dec_mean_test = np.mean([dec for _, dec in plane_radiants_test])
+
+                    # Skip the mergning attempt if the estimated radiants are too far off
+                    if np.degrees(angleBetweenSphericalCoords(dec_mean_ref, ra_mean_ref, dec_mean_test, \
+                        ra_mean_test)) > self.traj_constraints.max_merge_radiant_angle:
+
+                        continue
+
 
                     # Add the candidate trajectory to the common list if a match has been found
                     if found_match:
@@ -1151,8 +1185,22 @@ class TrajectoryCorrelator(object):
 
                             if entry[1] not in obs_list_ref:
 
+                                # Print the reference and the merged radiants
+                                if not found_first_pair:
+                                    print("")
+                                    print("------")
+                                    print("Reference time:", ref_mean_dt)
+                                    print("Reference stations: {:s}".format(", ".join(sorted(ref_stations))))
+                                    print("Reference radiant: RA = {:.2f}, Dec = {:.2f}".format(np.degrees(ra_mean_ref), np.degrees(dec_mean_ref)))
+                                    print("")
+                                    found_first_pair = True
+
                                 print("Merging:", entry[1].mean_dt, entry[1].station_code)
                                 traj_cand_ref.append(entry)
+
+                                print("Merged radiant:    RA = {:.2f}, Dec = {:.2f}".format(np.degrees(ra_mean_test), np.degrees(dec_mean_test)))
+
+                                
 
 
                         # Mark that the current index has been processed
