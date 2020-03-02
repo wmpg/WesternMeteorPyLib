@@ -2579,7 +2579,7 @@ class Trajectory(object):
                     len_part = obs.length[: i+1]
 
                 # If there are NaNs or infs, drop them
-                filter_mask = not (np.isnan(time_part) | np.isinf(time_part) | np.isnan(len_part) \
+                filter_mask = np.logical_not(np.isnan(time_part) | np.isinf(time_part) | np.isnan(len_part) \
                     | np.isinf(len_part))
 
                 time_part = time_part[filter_mask]
