@@ -2578,6 +2578,12 @@ class Trajectory(object):
                     time_part = obs.time_data[: i+1]
                     len_part = obs.length[: i+1]
 
+                # If there are NaNs or infs, drop them
+                filter_mask = not (np.isnan(time_part) | np.isinf(time_part) | np.isnan(len_part) \
+                    | np.isinf(len_part))
+
+                time_part = time_part[filter_mask]
+                len_part = len_part[filter_mask]
 
                 # Fit a line through time vs. length data
                 popt, _ = scipy.optimize.curve_fit(lineFunc, time_part, len_part)
