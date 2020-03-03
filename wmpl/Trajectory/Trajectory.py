@@ -2585,10 +2585,18 @@ class Trajectory(object):
                 time_part = time_part[filter_mask]
                 len_part = len_part[filter_mask]
 
-                # Fit a line through time vs. length data
-                popt, _ = scipy.optimize.curve_fit(lineFunc, time_part, len_part)
+                if len(time_part):
 
-                velocities_prev_point.append(popt[0])
+                    # Fit a line through time vs. length data
+                    popt, _ = scipy.optimize.curve_fit(lineFunc, time_part, len_part)
+
+                    velocities_prev_point.append(popt[0])
+
+                else:
+
+                    # If there are no good points to estimate the velocity on, use NaN
+                    velocities_prev_point.append(np.nan)
+
 
 
             obs.velocities_prev_point = np.array(velocities_prev_point)
