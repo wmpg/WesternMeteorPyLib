@@ -681,8 +681,15 @@ class TrajectoryCorrelator(object):
                 for obs in traj_status.observations:
                     traj.infillWithObs(obs)
 
+                
                 # Re-run the trajectory solution
-                traj_status = traj.run()
+                try:
+                    traj_status = traj.run()
+
+                # If solving has failed, stop solving the trajectory
+                except ValueError:
+                    return False, None
+
 
                 # If the trajectory estimation failed, skip this trajectory
                 if traj_status is None:
