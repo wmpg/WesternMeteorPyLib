@@ -526,7 +526,12 @@ class TrajectoryCorrelator(object):
         jdt_ref = traj.jdt_ref
 
         # Run the solver
-        traj_status = traj.run()
+        try:
+            traj_status = traj.run()
+
+        # If solving has failed, stop solving the trajectory
+        except ValueError:
+            return False, None
 
 
         # Reject bad observations until a stable set is found, but only if there are more than 2    
