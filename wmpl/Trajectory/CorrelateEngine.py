@@ -531,6 +531,7 @@ class TrajectoryCorrelator(object):
 
         # If solving has failed, stop solving the trajectory
         except ValueError:
+            print("Error during trajectory estimation!")
             return False, None
 
 
@@ -688,6 +689,7 @@ class TrajectoryCorrelator(object):
 
                 # If solving has failed, stop solving the trajectory
                 except ValueError:
+                    print("Error during trajectory estimation!")
                     return False, None
 
 
