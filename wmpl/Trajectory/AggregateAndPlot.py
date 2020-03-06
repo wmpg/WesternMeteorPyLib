@@ -1698,13 +1698,13 @@ def generateAutoPlots(dir_path, traj_quality_params, prev_sols=10, sol_window=1)
     ### Link to latest files ###
 
     plot_copy_list = [
-        [most_recent_plot_file, "scecliptic_latest_daily"], 
-        [yesterday_plot_file, "scecliptic_yesterday"], 
-        [latest_monthly_plot_file, "scecliptic_latest_monthly"], \
-        [last_month_plot_file, "scecliptic_last_month"]]
+        [plots_daily_dir,   most_recent_plot_file,    "scecliptic_latest_daily"], \
+        [plots_daily_dir,   yesterday_plot_file,      "scecliptic_yesterday"], \
+        [plots_monthly_dir, latest_monthly_plot_file, "scecliptic_latest_monthly"], \
+        [plots_monthly_dir, last_month_plot_file,     "scecliptic_last_month"]]
 
     # Link latest plots per day and month
-    for plot_copy_name, plot_name in plot_copy_list:
+    for plots_dir, plot_copy_name, plot_name in plot_copy_list:
 
         # Set the most recent daily plots
         if plot_copy_name is not None:
@@ -1714,15 +1714,17 @@ def generateAutoPlots(dir_path, traj_quality_params, prev_sols=10, sol_window=1)
             # Set latest plots
             suffix_list = ["_vg.png", "_density.png"]
             for suffix in suffix_list:
-                shutil.copy2(os.path.join(plots_daily_dir, plot_copy_name + suffix), \
-                    os.path.join(plots_daily_dir, plot_name + suffix))
+                shutil.copy2(os.path.join(plots_dir, plot_copy_name + suffix), \
+                    os.path.join(plots_dir, plot_name + suffix))
 
-        
+    
+    # Link to latest summary files
     summary_copy_list = [
-        [most_recent_summary_file, "traj_summary_latest_daily.txt"],
-        [yesterday_summary_file, "traj_summary_yesterday.txt"]]
+        [summary_daily_dir, most_recent_summary_file, "traj_summary_latest_daily.txt"], \
+        [summary_daily_dir, yesterday_summary_file,   "traj_summary_yesterday.txt"]
+        ]
 
-    for summary_copy_name, summary_name in summary_copy_list:
+    for summary_dir, summary_copy_name, summary_name in summary_copy_list:
         
         # Set the most recent daily summary file
         if summary_copy_name is not None:
@@ -1730,8 +1732,8 @@ def generateAutoPlots(dir_path, traj_quality_params, prev_sols=10, sol_window=1)
             print("Copying latest report...")
 
             # Set latest summary file
-            shutil.copy2(os.path.join(summary_daily_dir, summary_copy_name), \
-                os.path.join(summary_daily_dir, summary_name))
+            shutil.copy2(os.path.join(summary_dir, summary_copy_name), \
+                os.path.join(summary_dir, summary_name))
 
 
     ### ###
