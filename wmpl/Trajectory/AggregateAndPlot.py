@@ -4,7 +4,9 @@ from __future__ import print_function, division, absolute_import
 
 
 import os
+import time
 import datetime
+import shutil
 
 import numpy as np
 import scipy.integrate
@@ -15,13 +17,14 @@ import scipy.stats
 from wmpl.Analysis.FitPopulationAndMassIndex import fitSlope, logline
 from wmpl.Utils.Math import mergeClosePoints, meanAngle, sphericalPointFromHeadingAndDistance, \
     angleBetweenSphericalCoords
+from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Physics import calcMass
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PlotCelestial import CelestialPlot
 from wmpl.Utils.PlotMap import MapColorScheme
 from wmpl.Utils.ShowerAssociation import associateShowerTraj, MeteorShower
-from wmpl.Utils.SolarLongitude import jd2SolLonSteyaert
-from wmpl.Utils.TrajConversions import jd2Date
+from wmpl.Utils.SolarLongitude import jd2SolLonSteyaert, solLon2jdSteyaert
+from wmpl.Utils.TrajConversions import jd2Date, datetime2JD
 
 
 
@@ -32,6 +35,13 @@ from wmpl.Utils.TrajConversions import jd2Date
 TRAJ_SUMMARY_FILE = "trajectory_summary.txt"
 
 
+# Output directory for auto-generated data
+AUTO_OUTPUT_DATA_DIR = "auto_output"
+
+# Auto run frequency (hours)
+AUTO_RUN_FREQUENCY = 12
+
+
 # Minimum number of shower members to mark the shower
 MIN_SHOWER_MEMBERS = 3
 
@@ -39,7 +49,7 @@ MIN_SHOWER_MEMBERS = 3
 PLOT_SHOWER_RADIUS = 3.0
 
 # Power of a zero magnitude meteor
-P_0M=1210
+P_0M = 1210
 
 ### ###
 
@@ -126,7 +136,7 @@ def checkMeteorFOVBegEnd(traj):
 
 
 
-def writeOrbitSummaryFile(dir_path, traj_list, P_0m=1210):
+def writeOrbitSummaryFile(dir_path, traj_list, traj_summary_file_name=TRAJ_SUMMARY_FILE, P_0m=1210):
     """ Given a list of trajectory files, generate CSV file with the orbit summary. """
 
     def _uncer(traj, str_format, std_name, multi=1.0, deg=False, max_val=None, max_val_format="{:7.1e}"):
@@ -339,7 +349,7 @@ def writeOrbitSummaryFile(dir_path, traj_list, P_0m=1210):
 
 
     # Save the file to a trajectory summary
-    traj_summary_path = os.path.join(dir_path, TRAJ_SUMMARY_FILE)
+    traj_summary_path = os.path.join(dir_path, traj_summary_file_name)
     with open(traj_summary_path, 'w') as f:
         f.write(out_str)
 
@@ -1195,68 +1205,80 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, max_radiant_err=0.5
 
 
 
+def inTimeRange(traj_dt, time_beg, time_end):
+
+    # Test the time range
+    if time_beg is not None:
+        if time_beg >= traj_dt:
+            return False
+
+    if time_end is not None:
+        if time_end < traj_dt:
+            return False
+
+
+    return True
 
 
 
-if __name__ == "__main__":
+def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end=None, verbose=False):
+    """ Load trajectory pickle files with the given quality constraints and in the given time range. 
+    
+    Arguments:
+        dir_path: [str] Path to the directory with trajectory directories.
+        traj_quality_params: [TrajQualityParams instance]
 
-    from wmpl.Utils.OSTools import importBasemap
-
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-    Basemap = importBasemap()
-
-    import argparse
-
-    ### COMMAND LINE ARGUMENTS
-
-    # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(description="""Given a folder with trajectory .pickle files, generate an orbit summary CSV file and orbital graphs.""",
-        formatter_class=argparse.RawTextHelpFormatter)
-
-    arg_parser.add_argument('dir_path', type=str, help='Path to the data directory. Trajectory pickle files are found in all subdirectories.')
-
-    arg_parser.add_argument('-s', '--solstep', metavar='SOL_STEP', \
-        help='Step in solar longitude for plotting (degrees). 5 deg by default.', type=float, default=5.0)
-
-    # Parse the command line arguments
-    cml_args = arg_parser.parse_args()
-
-    ############################
+    Keyword arguments:
+        time_beg: [datetime] First time to load. Note that it is assumed that the trajectory is in a folder 
+            named in the following format: YYYYMMDD_hhmmss.us_STATION
+        time_end: [datetime] Last time to load.
+        verbose: [bool] Print how many trajectoories were loaded. False by default.
 
 
+    Return:
+        traj_list: [list] A list of Trajectory objects.
 
-    ### FILTERS ###
-
-    # Minimum number of points on the trajectory for the station with the most points
-    min_traj_points = 6
-
-    # Minimum convergence angle (deg)
-    min_qc = 5.0
-
-    # Maximum eccentricity
-    max_e = 1.5
-
-    # Maximum radiant error (deg)
-    max_radiant_err = 2.0
-
-    # Maximum geocentric velocity error (percent)
-    max_vg_err = 10.0
-
-    # Begin/end height filters (km)
-    max_begin_ht = 160
-    min_end_ht = 20
-
-    ### ###
+    """
 
 
-    # Get a list of paths of all trajectory pickle files
     traj_list = []
     loaded_trajs_count = 0
-    for entry in os.walk(cml_args.dir_path):
+    for entry in os.walk(dir_path):
 
-        dir_path, _, file_names = entry
+        traj_dir_path, _, file_names = entry
+
+        # Try loading a time if the time limit was given
+        time_read_failed_dir = False
+        if (time_beg is not None) or (time_end is not None):
+
+            try:
+
+                # Extract the name of the trajectory folder
+                traj_dir_name =  os.path.basename(os.path.normpath(traj_dir_path))
+
+                traj_dir_split = traj_dir_name.split("_")
+
+                if len(traj_dir_split) < 2:
+                    time_read_failed_dir = True
+
+                else:
+
+                    traj_date = traj_dir_split[0]
+                    traj_time = traj_dir_split[1]
+
+                    traj_dt = datetime.datetime.strptime("{:s}-{:s}".format(traj_date, traj_time), \
+                        "%Y%m%d-%H%M%S.%f")
+
+                    # Test the time range
+                    if not inTimeRange(traj_dt, time_beg, time_end):
+                        continue
+
+            except:
+                time_read_failed_dir = True
+
+                if verbose:
+                    print("Failed to read the time for dir name: {:s}".format(traj_dir_name))
+
 
         # Go through all files
         for file_name in file_names:
@@ -1264,14 +1286,54 @@ if __name__ == "__main__":
             # Check if the file is a pickel file
             if file_name.endswith("_trajectory.pickle"):
 
+                # If reading the time from directory failed, try reading it from the file name
+                time_read_failed_file = False
+                if time_read_failed_dir:
+
+                    file_name_split = file_name.split("_")
+                    traj_date = file_name_split[0]
+                    traj_time = file_name_split[1]
+
+                    try:
+                        traj_dt = datetime.datetime.strptime("{:s}-{:s}".format(traj_date, traj_time), \
+                            "%Y%m%d-%H%M%S")
+
+                        # Test the time range
+                        if not inTimeRange(traj_dt, time_beg, time_end):
+                            continue
+
+                    except:
+                        time_read_failed_file = True
+
+                        if verbose:
+                            print("Failed to read the time for file name: {:s}".format(file_name))
+
+
                 # Load the pickle file
-                traj = loadPickle(dir_path, file_name)
+                try:
+                    traj = loadPickle(traj_dir_path, file_name)
+
+                except:
+                    print("Error opening trajectory file: {:s}".format(traj_dir_path, file_name))
+                    continue
+
+                # If reading the time from the file name has failed, read it from the pickle
+                if time_read_failed_file:
+
+                    # Compute the trajectory datetime
+                    traj_dt = jd2Date(traj.jdt_ref) 
+
+                    # Test the time range
+                    if not inTimeRange(traj_dt, time_beg, time_end):
+                        continue
+
 
                 loaded_trajs_count += 1
 
                 # Print loading progress
-                if loaded_trajs_count%1000 == 0:
-                    print("Loaded {:d} trajectories...".format(loaded_trajs_count))
+                if verbose:
+                    if loaded_trajs_count%1000 == 0:
+                        print("Loaded {:d} trajectories...".format(loaded_trajs_count))
 
 
                 ### DELETE UNECESSARY OBJECTS AND ARGUMENTS TO CONSERVE MEMORY ###
@@ -1339,7 +1401,7 @@ if __name__ == "__main__":
 
                 max_points = max(points_count)
 
-                if max_points < min_traj_points:
+                if max_points < traj_quality_params.min_traj_points:
                     # print("Skipping {:.2f} due to the small number of points...".format(traj.jdt_ref))
                     continue
 
@@ -1349,7 +1411,7 @@ if __name__ == "__main__":
                 ### CONVERGENCE ANGLE                
                 ### Reject all trajectories with a too small convergence angle ###
 
-                if np.degrees(traj.best_conv_inter.conv_angle) < min_qc:
+                if np.degrees(traj.best_conv_inter.conv_angle) < traj_quality_params.min_qc:
                     # print("Skipping {:.2f} due to the small convergence angle...".format(traj.jdt_ref))
                     continue
 
@@ -1358,7 +1420,7 @@ if __name__ == "__main__":
 
                 ### MAXIMUM ECCENTRICITY ###
 
-                if traj.orbit.e > max_e:
+                if traj.orbit.e > traj_quality_params.max_e:
                     continue
 
                 ###
@@ -1368,7 +1430,7 @@ if __name__ == "__main__":
 
                 if traj.uncertainties is not None:
                     if np.degrees(np.hypot(np.cos(traj.orbit.dec_g)*traj.uncertainties.ra_g, \
-                        traj.uncertainties.dec_g)) > max_radiant_err:
+                        traj.uncertainties.dec_g)) > traj_quality_params.max_radiant_err:
 
                         continue
 
@@ -1377,7 +1439,7 @@ if __name__ == "__main__":
                 ### MAXIMUM GEOCENTRIC VELOCITY ERROR ###
 
                 if traj.uncertainties is not None:
-                    if traj.uncertainties.v_g > traj.orbit.v_g*max_vg_err/100:
+                    if traj.uncertainties.v_g > traj.orbit.v_g*traj_quality_params.max_vg_err/100:
                         continue
 
                 ###
@@ -1385,10 +1447,10 @@ if __name__ == "__main__":
 
                 ### HEIGHT FILTER ###
 
-                if traj.rbeg_ele/1000 > max_begin_ht:
+                if traj.rbeg_ele/1000 > traj_quality_params.max_begin_ht:
                     continue
 
-                if traj.rend_ele/1000 < min_end_ht:
+                if traj.rend_ele/1000 < traj_quality_params.min_end_ht:
                     continue
 
                 ###
@@ -1398,44 +1460,252 @@ if __name__ == "__main__":
 
 
 
-    # Generate shower plots
-    print("Plotting showers...")
-    generateShowerPlots(cml_args.dir_path, traj_list, min_members=30, P_0m=P_0M, max_radiant_err=0.5)
-
-    # Generate the orbit summary file
-    print("Writing summary file...")
-    writeOrbitSummaryFile(cml_args.dir_path, traj_list, P_0m=P_0M)
-
-    # Generate summary plots
-    print("Plotting all trajectories...")
-    generateTrajectoryPlots(cml_args.dir_path, traj_list, plot_showers=False, time_limited_plot=False)
-
-    # Generate station plot
-    print("Plotting station plot...")
-    generateStationPlot(cml_args.dir_path, traj_list)
+    return traj_list
 
 
 
+def generateAutoPlots(dir_path, traj_quality_params, prev_sols=10, sol_window=1):
+    """ Auto generate plots per degree of solar longitude and put them in the AUTO_OUTPUT_DATA_DIR that is in the parent directory of dir_path. 
+    
+    Arguments:
+        dir_path: [str] Path to folders with trajectories.
+        traj_quality_params: [TrajQualityParams instance]
 
-    # Generate radiant plots per solar longitude (degrees)
-    step = cml_args.solstep
-    for sol_min in np.arange(0, 360 + step, step):
-        sol_max = sol_min + step
+    Keyword arguments:
+        prev_sols: [int] Number of previous degrees of solar longitdes to go back for and re-generate plots and reports.
+        sol_window: [float] Window of solar longitudes for plots and graphs in degrees.
 
-        # Extract only those trajectories with solar longitudes in the given range
-        traj_list_sol = [traj_temp for traj_temp in traj_list if \
-            (np.degrees(traj_temp.orbit.la_sun) >= sol_min) \
-            and (np.degrees(traj_temp.orbit.la_sun) < sol_max)]
+    """
 
 
-        # Skip solar longitudes with no data
-        if len(traj_list_sol) == 0:
+    # Make path to the output directory
+    parent_dir = os.path.abspath(os.path.join(dir_path, os.pardir))
+    output_dir = os.path.join(parent_dir, dir_path)
+
+    # Make the output directory for plots
+    mkdirP(output_dir)
+
+
+
+    ### Generate daily plots for the last N days ###
+
+    # Compute the time of the next closest integer solar longitude in degrees
+    time_now = datetime.datetime.utcnow()
+    sol_lon_now = np.degrees(jd2SolLonSteyaert(datetime2JD(time_now)))
+    sol_lon_next = np.floor(sol_lon_now)
+    
+
+    # Generate plots for every day
+    most_recent_plot_file = None
+    most_recent_summary_file = None
+    for sol_decrement in range(prev_sols):
+
+        sol_lon_end = sol_lon_next - sol_decrement
+        sol_lon_beg = sol_lon_end - sol_window
+
+        # Compute beg/end dates from solar longitudes
+        time_end_est = time_now - datetime.timedelta(days=sol_decrement)
+        time_end = jd2Date(solLon2jdSteyaert(time_end_est.year, time_end_est.month, \
+            np.radians(sol_lon_end)), dt_obj=True)
+        time_beg_est = time_end_est - datetime.timedelta(days=sol_window)
+        time_beg = jd2Date(solLon2jdSteyaert(time_beg_est.year, time_beg_est.month, \
+            np.radians(sol_lon_beg)), dt_obj=True)
+
+
+        # Load all trajectories within the given time range
+        traj_list = loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=time_beg, \
+            time_end=time_end, verbose=True)
+
+
+        # Skip if no trajectories are loaded
+        if not traj_list:
+            print("No trajectories in sol range: {:.1f} - {:.1f}".format(sol_lon_beg, sol_lon_end))
             continue
-
-        print("Plotting solar longitude range: {:.1f} - {:.1f}".format(sol_min, sol_max))
 
 
         # Plot graphs per solar longitude
-        generateTrajectoryPlots(cml_args.dir_path, traj_list_sol, \
-            plot_name="scecliptic_solrange_{:05.1f}-{:05.1f}".format(sol_min, sol_max), plot_sol=False, \
+        plot_name = "scecliptic_{:4d}{:02d}_solrange_{:05.1f}-{:05.1f}".format(time_beg.year, time_beg.month,\
+            sol_lon_beg, sol_lon_end)
+        generateTrajectoryPlots(output_dir, traj_list, plot_name=plot_name, plot_sol=False, \
             plot_showers=True, time_limited_plot=True)
+
+        # Store the most recent plot
+        if most_recent_plot_file is None:
+            most_recent_plot_file = plot_name
+
+
+        # Write the trajectory summary
+        summary_name = "traj_summary_{:4d}{:02d}_solrange_{:05.1f}-{:05.1f}.txt".format(time_beg.year, \
+            time_beg.month, sol_lon_beg, sol_lon_end)
+        writeOrbitSummaryFile(output_dir, traj_list, summary_name)
+
+        # Store the most recent summary file name
+        if most_recent_summary_file is None:
+            most_recent_summary_file = summary_name
+
+    ### ###
+
+
+    # Set the most recent plots
+    if most_recent_plot_file is not None:
+
+        # Set latest plots
+        suffix_list = ["_vg.png", "_density.png"]
+        for suffix in suffix_list:
+            shutil.copy2(os.path.join(output_dir, most_recent_plot_file + suffix), \
+                os.path.join(output_dir, "scecliptic_latest" + suffix))
+
+    
+    # Set the most recent summary file
+    if most_recent_summary_file is not None:
+
+        # Set latest summary file
+        shutil.copy2(os.path.join(output_dir, most_recent_summary_file), os.path.join(output_dir, \
+            "traj_summary_latest.txt"))
+
+
+
+
+
+
+
+if __name__ == "__main__":
+
+    from wmpl.Utils.OSTools import importBasemap
+
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    Basemap = importBasemap()
+
+    import argparse
+
+    ### COMMAND LINE ARGUMENTS
+
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="""Given a folder with trajectory .pickle files, generate an orbit summary CSV file and orbital graphs.""",
+        formatter_class=argparse.RawTextHelpFormatter)
+
+    arg_parser.add_argument('dir_path', type=str, help='Path to the data directory. Trajectory pickle files are found in all subdirectories.')
+
+    arg_parser.add_argument('-s', '--solstep', metavar='SOL_STEP', \
+        help='Step in solar longitude for plotting (degrees). 5 deg by default.', type=float, default=5.0)
+
+    arg_parser.add_argument('-a', '--auto', metavar='PREV_SOLS', type=int, default=None, const=10, \
+        nargs='?', \
+        help="""Run continously taking the data in the last PREV_SOLS degrees of solar longitudes to generate new plots and reports, and update old ones."""
+        )
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    ############################
+
+
+
+    ### FILTERS ###
+
+    class TrajQualityParams(object):
+        def __init__(self):
+
+            # Minimum number of points on the trajectory for the station with the most points
+            self. min_traj_points = 6
+
+            # Minimum convergence angle (deg)
+            self. min_qc = 5.0
+
+            # Maximum eccentricity
+            self. max_e = 1.5
+
+            # Maximum radiant error (deg)
+            self. max_radiant_err = 2.0
+
+            # Maximum geocentric velocity error (percent)
+            self. max_vg_err = 10.0
+
+            # Begin/end height filters (km)
+            self. max_begin_ht = 160
+            self. min_end_ht = 20
+
+
+    traj_quality_params = TrajQualityParams()
+
+    ### ###
+
+
+    # If auto trajectories should run, run in an infinite loop
+    if cml_args.auto is not None:
+
+        while True:
+
+            # Clock for measuring script time
+            t1 = datetime.datetime.utcnow()
+
+            # Generate the latest plots
+            generateAutoPlots(cml_args.dir_path, traj_quality_params, prev_sols=cml_args.auto)
+
+            # Wait to run AUTO_RUN_FREQUENCY hours after the beginning
+            wait_time = (datetime.timedelta(hours=AUTO_RUN_FREQUENCY) \
+                - (datetime.datetime.utcnow() - t1)).total_seconds()
+
+
+            # Compute next run time
+            next_run_time = datetime.datetime.utcnow() + datetime.timedelta(seconds=wait_time)
+
+            # Wait to run
+            while next_run_time > datetime.datetime.utcnow():
+                print("Waiting {:s} to generate plots and summary again...          ".format(str(next_run_time \
+                    - datetime.datetime.utcnow())), end='\r')
+                time.sleep(2)
+
+
+    else:
+
+        # Run once
+
+        # Get a list of paths of all trajectory pickle files
+        traj_list = loadTrajectoryPickles(cml_args.dir_path, traj_quality_params, verbose=True)
+
+
+
+        # Generate shower plots
+        print("Plotting showers...")
+        generateShowerPlots(cml_args.dir_path, traj_list, min_members=30, P_0m=P_0M, max_radiant_err=0.5)
+
+        # Generate the orbit summary file
+        print("Writing summary file...")
+        writeOrbitSummaryFile(cml_args.dir_path, traj_list, P_0m=P_0M)
+
+        # Generate summary plots
+        print("Plotting all trajectories...")
+        generateTrajectoryPlots(cml_args.dir_path, traj_list, plot_showers=False, time_limited_plot=False)
+
+        # Generate station plot
+        print("Plotting station plot...")
+        generateStationPlot(cml_args.dir_path, traj_list)
+
+
+
+
+        # Generate radiant plots per solar longitude (degrees)
+        step = cml_args.solstep
+        for sol_min in np.arange(0, 360 + step, step):
+            sol_max = sol_min + step
+
+            # Extract only those trajectories with solar longitudes in the given range
+            traj_list_sol = [traj_temp for traj_temp in traj_list if \
+                (np.degrees(traj_temp.orbit.la_sun) >= sol_min) \
+                and (np.degrees(traj_temp.orbit.la_sun) < sol_max)]
+
+
+            # Skip solar longitudes with no data
+            if len(traj_list_sol) == 0:
+                continue
+
+            print("Plotting solar longitude range: {:.1f} - {:.1f}".format(sol_min, sol_max))
+
+
+            # Plot graphs per solar longitude
+            generateTrajectoryPlots(cml_args.dir_path, traj_list_sol, \
+                plot_name="scecliptic_solrange_{:05.1f}-{:05.1f}".format(sol_min, sol_max), plot_sol=False, \
+                plot_showers=True, time_limited_plot=True)
