@@ -38,6 +38,20 @@ TRAJ_SUMMARY_FILE = "trajectory_summary.txt"
 # Output directory for auto-generated data
 AUTO_OUTPUT_DATA_DIR = "auto_output"
 
+# Output directory inside AUTO_OUTPUT_DATA_DIR for summary files
+AUTO_OUTPUT_SUMMARY_DIR = "traj_summary_data"
+
+# Output directory for plots
+AUTO_OUTPUT_PLOT_DIR = "plots"
+
+# Output directory for daily plots
+AUTO_OUTPUT_DAILY_DIR = "daily"
+
+# Output directory for monthly plots
+AUTO_OUTPUT_MONTHLY_DIR = "monthly"
+
+
+
 # Auto run frequency (hours)
 AUTO_RUN_FREQUENCY = 12
 
@@ -1536,9 +1550,23 @@ def generateAutoPlots(dir_path, traj_quality_params, prev_sols=10, sol_window=1)
     # Make path to the output directory
     parent_dir = os.path.abspath(os.path.join(dir_path, os.pardir))
     output_dir = os.path.join(parent_dir, AUTO_OUTPUT_DATA_DIR)
-
-    # Make the output directory for plots
     mkdirP(output_dir)
+
+    # Make the plots directory
+    plots_dir         = os.path.join(output_dir, AUTO_OUTPUT_PLOT_DIR)
+    plots_daily_dir   = os.path.join(plots_dir,  AUTO_OUTPUT_DAILY_DIR)
+    plots_monthly_dir = os.path.join(plots_dir,  AUTO_OUTPUT_MONTHLY_DIR)
+    mkdirP(plots_dir)
+    mkdirP(plots_daily_dir)
+    mkdirP(plots_monthly_dir)
+
+    # Make the trajectory summary directory
+    summary_dir         = os.path.join(output_dir,  AUTO_OUTPUT_SUMMARY_DIR)
+    summary_daily_dir   = os.path.join(summary_dir, AUTO_OUTPUT_DAILY_DIR)
+    summary_monthly_dir = os.path.join(summary_dir, AUTO_OUTPUT_MONTHLY_DIR)
+    mkdirP(summary_dir)
+    mkdirP(summary_daily_dir)
+    mkdirP(summary_monthly_dir)
 
 
 
@@ -1582,7 +1610,7 @@ def generateAutoPlots(dir_path, traj_quality_params, prev_sols=10, sol_window=1)
         plot_name = "scecliptic_{:4d}{:02d}{:02d}_solrange_{:05.1f}-{:05.1f}".format(time_beg.year, \
             time_beg.month, time_beg.day, sol_lon_beg, sol_lon_end)
         print("Plotting sol range {:05.1f}-{:05.1f}...".format(sol_lon_beg, sol_lon_end))
-        generateTrajectoryPlots(output_dir, traj_list, plot_name=plot_name, plot_sol=False, \
+        generateTrajectoryPlots(plots_daily_dir, traj_list, plot_name=plot_name, plot_sol=False, \
             plot_showers=True, time_limited_plot=True, low_density=True)
 
         # Store the most recent plot
@@ -1593,7 +1621,7 @@ def generateAutoPlots(dir_path, traj_quality_params, prev_sols=10, sol_window=1)
         # Write the trajectory summary
         summary_name = "traj_summary_{:4d}{:02d}{:02d}_solrange_{:05.1f}-{:05.1f}.txt".format(time_beg.year, \
             time_beg.month, time_beg.day, sol_lon_beg, sol_lon_end)
-        writeOrbitSummaryFile(output_dir, traj_list, summary_name)
+        writeOrbitSummaryFile(summary_daily_dir, traj_list, summary_name)
 
         # Store the most recent summary file name
         if most_recent_summary_file is None:
@@ -1601,6 +1629,29 @@ def generateAutoPlots(dir_path, traj_quality_params, prev_sols=10, sol_window=1)
 
 
     ### ###
+
+
+    # Set the most recent daily plots
+    if most_recent_plot_file is not None:
+
+        print("Copying latest plots...")
+
+        # Set latest plots
+        suffix_list = ["_vg.png", "_density.png"]
+        for suffix in suffix_list:
+            shutil.copy2(os.path.join(plots_daily_dir, most_recent_plot_file + suffix), \
+                os.path.join(output_dir, "scecliptic_latest_daily" + suffix))
+
+    
+    # Set the most recent daily summary file
+    if most_recent_summary_file is not None:
+
+        print("Copying latest report...")
+
+        # Set latest summary file
+        shutil.copy2(os.path.join(summary_daily_dir, most_recent_summary_file), os.path.join(output_dir, \
+            "traj_summary_latest_daily.txt"))
+
 
 
 
@@ -1632,39 +1683,16 @@ def generateAutoPlots(dir_path, traj_quality_params, prev_sols=10, sol_window=1)
         # Plot graphs per month
         plot_name = "scecliptic_monthly_{:4d}{:02d}".format(dt_beg.year, dt_beg.month)
         print("Plotting month: {:s}".format(dt_beg.strftime("%B %Y")))
-        generateTrajectoryPlots(output_dir, traj_list, plot_name=plot_name, plot_sol=False, \
+        generateTrajectoryPlots(plots_monthly_dir, traj_list, plot_name=plot_name, plot_sol=False, \
             plot_showers=True, time_limited_plot=True, low_density=False)
 
 
         # Write the trajectory summary
         summary_name = "traj_summary_monthly_{:4d}{:02d}.txt".format(dt_beg.year, dt_beg.month)
-        writeOrbitSummaryFile(output_dir, traj_list, summary_name)
+        writeOrbitSummaryFile(summary_monthly_dir, traj_list, summary_name)
 
 
     ### ###
-
-
-    # Set the most recent plots
-    if most_recent_plot_file is not None:
-
-        print("Copying latest plots...")
-
-        # Set latest plots
-        suffix_list = ["_vg.png", "_density.png"]
-        for suffix in suffix_list:
-            shutil.copy2(os.path.join(output_dir, most_recent_plot_file + suffix), \
-                os.path.join(output_dir, "scecliptic_latest" + suffix))
-
-    
-    # Set the most recent summary file
-    if most_recent_summary_file is not None:
-
-        print("Copying latest report...")
-
-        # Set latest summary file
-        shutil.copy2(os.path.join(output_dir, most_recent_summary_file), os.path.join(output_dir, \
-            "traj_summary_latest.txt"))
-
 
 
 
@@ -1696,6 +1724,10 @@ if __name__ == "__main__":
     arg_parser.add_argument('-a', '--auto', metavar='PREV_SOLS', type=int, default=None, const=10, \
         nargs='?', \
         help="""Run continously taking the data in the last PREV_SOLS degrees of solar longitudes to generate new plots and reports, and update old ones."""
+        )
+
+    arg_parser.add_argument('-f', '--autofirst', metavar='FIRST_PREV_SOLS', type=int, \
+        help="""During the first continous run, go back FIRST_PREV_SOLS to generate the plots and report. After that, use PREV_SOLS to run."""
         )
 
     # Parse the command line arguments
@@ -1738,18 +1770,35 @@ if __name__ == "__main__":
     # If auto trajectories should run, run in an infinite loop
     if cml_args.auto is not None:
 
+        print("Auto genrating plots and reports every {:.1f} hours using the last {:d} deg solar longitudes of data...".format(AUTO_RUN_FREQUENCY, cml_args.auto))
+
+        if cml_args.autofirst is not None:
+            print("The first run will use {:d} deg solar longitdes of data!".format(cml_args.autofirst))
+
+        first_run = True
         while True:
 
             # Clock for measuring script time
             t1 = datetime.datetime.utcnow()
 
+
+            # Set the number of solar longitudes to use for the auto run
+            prev_sols = cml_args.auto
+
+            # If the solar longitude range is different for the first run
+            if cml_args.autofirst is not None:
+                if first_run:
+                    prev_sols = cml_args.autofirst
+
+
             # Generate the latest plots
-            generateAutoPlots(cml_args.dir_path, traj_quality_params, prev_sols=cml_args.auto)
+            generateAutoPlots(cml_args.dir_path, traj_quality_params, prev_sols=prev_sols)
+
+
 
             # Wait to run AUTO_RUN_FREQUENCY hours after the beginning
             wait_time = (datetime.timedelta(hours=AUTO_RUN_FREQUENCY) \
                 - (datetime.datetime.utcnow() - t1)).total_seconds()
-
 
             # Compute next run time
             next_run_time = datetime.datetime.utcnow() + datetime.timedelta(seconds=wait_time)
@@ -1759,6 +1808,9 @@ if __name__ == "__main__":
                 print("Waiting {:s} to generate plots and summary again...          ".format(str(next_run_time \
                     - datetime.datetime.utcnow())), end='\r')
                 time.sleep(2)
+
+
+            first_run = False
 
 
     else:
