@@ -1480,7 +1480,7 @@ def generateAutoPlots(dir_path, traj_quality_params, prev_sols=10, sol_window=1)
 
     # Make path to the output directory
     parent_dir = os.path.abspath(os.path.join(dir_path, os.pardir))
-    output_dir = os.path.join(parent_dir, dir_path)
+    output_dir = os.path.join(parent_dir, AUTO_OUTPUT_DATA_DIR)
 
     # Make the output directory for plots
     mkdirP(output_dir)
