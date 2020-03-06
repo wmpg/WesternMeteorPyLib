@@ -1550,6 +1550,8 @@ def generateAutoPlots(dir_path, traj_quality_params, prev_sols=10, sol_window=1)
     # Set the most recent plots
     if most_recent_plot_file is not None:
 
+        print("Copying latest plots...")
+
         # Set latest plots
         suffix_list = ["_vg.png", "_density.png"]
         for suffix in suffix_list:
@@ -1559,6 +1561,8 @@ def generateAutoPlots(dir_path, traj_quality_params, prev_sols=10, sol_window=1)
     
     # Set the most recent summary file
     if most_recent_summary_file is not None:
+
+        print("Copying latest report...")
 
         # Set latest summary file
         shutil.copy2(os.path.join(output_dir, most_recent_summary_file), os.path.join(output_dir, \
