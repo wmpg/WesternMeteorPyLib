@@ -16,7 +16,7 @@ import scipy.stats
 
 from wmpl.Analysis.FitPopulationAndMassIndex import fitSlope, logline
 from wmpl.Utils.Math import mergeClosePoints, meanAngle, sphericalPointFromHeadingAndDistance, \
-    angleBetweenSphericalCoords
+    angleBetweenSphericalCoords, generateMonthyTimeBins
 from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Physics import calcMass
 from wmpl.Utils.Pickling import loadPickle
@@ -359,8 +359,32 @@ def writeOrbitSummaryFile(dir_path, traj_list, traj_summary_file_name=TRAJ_SUMMA
 
 
 
-def plotSCE(x_data, y_data, color_data, sol_range, plot_title, colorbar_title, dir_path, \
-    file_name, density_plot=False, plot_showers=False, shower_obj_list=None, show_sol_range=True):
+def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir, \
+    file_name, density_plot=False, low_density=False, plot_showers=False, shower_obj_list=None, \
+    show_sol_range=True, sol_range=None, dt_range=None):
+    """ Plot the given data in Sun-centered ecliptic coordinates.
+
+    Arguments:
+        x_data: [ndarray] SCE longitude data.
+        y_data: [ndarray] SCE latitude data.
+        color_data: [ndarray] Data for colour coding.
+        plot_title: [str] Title of the plot.
+        colorbar_title: [str] Colour bar title.
+        output_dir: [str] Path to the output directory.
+        file_name: [str] Name of the image file that will be saved.
+
+    Kewyword arguments:
+        density_plot: [bool] Save the SCE density plot. False by default.
+        low_density: [bool] When the number of trajectories is low, change the density scale. False by 
+            default.
+        plot_showers: [bool] Mark showers on the plot. False by default.
+        shower_obj_list: [list] A list of MeteorShower objects that will be plotted. Needs to be given in 
+            plot_showers is True. 
+        show_sol_range: [bool] Show the solar longitude range on the plot. True by default.
+        sol_range: [tuple] Range of solar longitudes to plot. None by default.
+        dt_range: [tuple] Datetimes of the first and last trajectory in the plot.
+
+    """
 
     ### PLOT SUN-CENTERED GEOCENTRIC ECLIPTIC RADIANTS ###
 
@@ -413,6 +437,18 @@ def plotSCE(x_data, y_data, color_data, sol_range, plot_title, colorbar_title, d
         lon_bins = np.linspace(lon_min, lon_max, int(360/delta_deg))
         lat_bins = np.linspace(lat_min, lat_max, int(180/delta_deg))
 
+
+        # Determine colorbar range based on whether it's a high or low density plot
+        if low_density:
+
+            vmin, vmax = 0.4, 50.0
+            colorbar_ticks = [1, 2, 5, 10, 20, 50]
+
+        else:
+            vmin, vmax = 1.0, 100
+            colorbar_ticks = [1, 5, 10, 20, 50, 100]
+
+
         # Rotate all coordinates by 90 deg to make them Sun-centered
         x_data = np.array(x_data)
         y_data = np.array(y_data)
@@ -433,11 +469,10 @@ def plotSCE(x_data, y_data, color_data, sol_range, plot_title, colorbar_title, d
 
         plt_handle = celes_plot.m.imshow(data.T, origin='lower', extent=[lon_min, lon_max, lat_min, lat_max],\
             #interpolation='gaussian', norm=matplotlib.colors.PowerNorm(gamma=1./2.), cmap=cmap)
-            interpolation='gaussian', norm=matplotlib.colors.LogNorm(vmin=1.0, vmax=100), cmap=cmap)
+            interpolation='gaussian', norm=matplotlib.colors.LogNorm(vmin=vmin, vmax=vmax), cmap=cmap)
 
         # Plot the colorbar
-        ticks = [1, 5, 10, 20, 50, 100]
-        cb = fig.colorbar(plt_handle, ticks=ticks, format="%.0f")
+        cb = fig.colorbar(plt_handle, ticks=colorbar_ticks, format="%.0f")
 
 
     else:
@@ -510,10 +545,6 @@ def plotSCE(x_data, y_data, color_data, sol_range, plot_title, colorbar_title, d
             celes_plot.text(shower_obj.IAU_code, lam_txt, bet_txt, ha=ha, va=va, color='w', alpha=0.5)
 
 
-
-
-
-
             ### ###
 
     
@@ -527,22 +558,25 @@ def plotSCE(x_data, y_data, color_data, sol_range, plot_title, colorbar_title, d
     plt.title(plot_title, color=fg_color)
 
 
-    if show_sol_range:
+    if show_sol_range and (sol_range is not None) and (dt_range is not None):
 
         # Plot solar longitude range and count
         sol_min, sol_max = sol_range
+        dt_min, dt_max = dt_range
+
         # plt.annotate(u"$\lambda_{\u2609 min} =$" + u"{:>5.2f}\u00b0".format(sol_min) \
         #     + u"\n$\lambda_{\u2609 max} =$" + u"{:>5.2f}\u00b0".format(sol_max), \
         #     xy=(0, 1), xycoords='axes fraction', color='w', size=12, family='monospace')
-        plt.annotate(u"Sol min = {:>6.2f}\u00b0".format(sol_min) \
-            + u"\nSol max = {:>6.2f}\u00b0".format(sol_max)
-            + "\nCount = {:d}".format(len(x_data)), \
+        plt.annotate(
+              u"Sol min = {:>6.2f}\u00b0 ({:s})\n".format(sol_min, dt_min.strftime("%Y/%m/%d %H:%M")) \
+            + u"Sol max = {:>6.2f}\u00b0 ({:s})\n".format(sol_max, dt_max.strftime("%Y/%m/%d %H:%M"))
+            +  "Count = {:d}".format(len(x_data)), \
             xy=(0, 1), xycoords='axes fraction', color='w', size=10, family='monospace')
 
 
     plt.tight_layout()
 
-    plt.savefig(os.path.join(dir_path, file_name), dpi=100, facecolor=fig.get_facecolor(), \
+    plt.savefig(os.path.join(output_dir, file_name), dpi=100, facecolor=fig.get_facecolor(), \
         edgecolor='none')
 
     plt.close()
@@ -551,9 +585,25 @@ def plotSCE(x_data, y_data, color_data, sol_range, plot_title, colorbar_title, d
 
 
 
-def generateTrajectoryPlots(dir_path, traj_list, plot_name='scecliptic', plot_vg=True, plot_sol=True, \
-    plot_density=True, plot_showers=False, time_limited_plot=False):
-    """ Given a path with trajectory .pickle files, generate orbits plots. """
+def generateTrajectoryPlots(output_dir, traj_list, plot_name='scecliptic', plot_vg=True, plot_sol=True, \
+    plot_density=True, low_density=False, plot_showers=False, time_limited_plot=False):
+    """ Given a path with trajectory .pickle files, generate orbits plots. 
+    
+    Arguments:
+        output_dir: [str] Output directory path.
+        traj_list: [str] List of trajectory objects to plots.
+
+    Keyword arguments:
+        plot_name: [str] Name of the plot to save.
+        plot_vg: [bool] Save the SCE Vg plot. True by default.
+        plot_sol: [bool] Save the SCE solar longitude plot. True by default
+        plot_density: [bool] Save the SCE density plot. True by default.
+        low_density: [bool] When the number of trajectories is low, change the density scale. False by 
+            default.
+        plot_showers: [bool] Mark showers on the plot. False by default.
+        time_limited_plot: [bool] Plotted trajectories are within a limited time. False by default.
+            If True, this will disable the sol and time text on the image.
+    """
 
 
 
@@ -632,30 +682,35 @@ def generateTrajectoryPlots(dir_path, traj_list, plot_name='scecliptic', plot_vg
     sol_min = np.degrees(jd2SolLonSteyaert(jd_min))
     sol_max = np.degrees(jd2SolLonSteyaert(jd_max))
 
-
+    # Compute the time range as datetime objects
+    dt_min = jd2Date(jd_min, dt_obj=True)
+    dt_max = jd2Date(jd_max, dt_obj=True)
 
     # Plot SCE vs Vg
     if plot_vg:
-        plotSCE(lambda_list, beta_list, vg_list, (sol_min, sol_max), 
-            "Sun-centered geocentric ecliptic coordinates", "$V_g$ (km/s)", dir_path, plot_name + "_vg.png", \
-            shower_obj_list=shower_obj_list, plot_showers=plot_showers, show_sol_range=time_limited_plot)
+        plotSCE(lambda_list, beta_list, vg_list, 
+            "Sun-centered geocentric ecliptic coordinates", "$V_g$ (km/s)", output_dir, plot_name + "_vg.png", \
+            shower_obj_list=shower_obj_list, plot_showers=plot_showers, show_sol_range=time_limited_plot, \
+            sol_range=(sol_min, sol_max), dt_range=(dt_min, dt_max))
 
 
     # Plot SCE vs Sol
     if plot_sol:
-        plotSCE(lambda_list, beta_list, sol_list, (sol_min, sol_max), \
-            "Sun-centered geocentric ecliptic coordinates", "Solar longitude (deg)", dir_path, \
+        plotSCE(lambda_list, beta_list, sol_list, \
+            "Sun-centered geocentric ecliptic coordinates", "Solar longitude (deg)", output_dir, \
             plot_name + "_sol.png", shower_obj_list=shower_obj_list, plot_showers=plot_showers, \
-            show_sol_range=time_limited_plot)
+            show_sol_range=time_limited_plot, sol_range=(sol_min, sol_max), \
+            dt_range=(dt_min, dt_max))
     
 
     
     # Plot SCE orbit density
     if plot_density:
-        plotSCE(lambda_list, beta_list, None, (sol_min, sol_max), 
-            "Sun-centered geocentric ecliptic coordinates", "Count", dir_path, plot_name + "_density.png", \
-            density_plot=True, shower_obj_list=shower_obj_list, plot_showers=plot_showers, \
-            show_sol_range=time_limited_plot)
+        plotSCE(lambda_list, beta_list, None, 
+            "Sun-centered geocentric ecliptic coordinates", "Count", output_dir, plot_name + "_density.png", \
+            density_plot=True, low_density=low_density, shower_obj_list=shower_obj_list, 
+            plot_showers=plot_showers, show_sol_range=time_limited_plot, sol_range=(sol_min, sol_max), \
+            dt_range=(dt_min, dt_max))
 
 
 
@@ -1504,7 +1559,7 @@ def generateAutoPlots(dir_path, traj_quality_params, prev_sols=10, sol_window=1)
         sol_lon_beg = sol_lon_end - sol_window
 
         # Compute beg/end dates from solar longitudes
-        time_end_est = time_now - datetime.timedelta(days=sol_decrement)
+        time_end_est = time_now - datetime.timedelta(days=sol_decrement*365.25/360.0)
         time_end = jd2Date(solLon2jdSteyaert(time_end_est.year, time_end_est.month, \
             np.radians(sol_lon_end)), dt_obj=True)
         time_beg_est = time_end_est - datetime.timedelta(days=sol_window)
@@ -1528,7 +1583,7 @@ def generateAutoPlots(dir_path, traj_quality_params, prev_sols=10, sol_window=1)
             time_beg.month, time_beg.day, sol_lon_beg, sol_lon_end)
         print("Plotting sol range {:05.1f}-{:05.1f}...".format(sol_lon_beg, sol_lon_end))
         generateTrajectoryPlots(output_dir, traj_list, plot_name=plot_name, plot_sol=False, \
-            plot_showers=True, time_limited_plot=True)
+            plot_showers=True, time_limited_plot=True, low_density=True)
 
         # Store the most recent plot
         if most_recent_plot_file is None:
@@ -1543,6 +1598,48 @@ def generateAutoPlots(dir_path, traj_quality_params, prev_sols=10, sol_window=1)
         # Store the most recent summary file name
         if most_recent_summary_file is None:
             most_recent_summary_file = summary_name
+
+
+    ### ###
+
+
+
+    ### Generate monthly plots ###
+
+    month_dt_beg_est = time_now - datetime.timedelta(days=prev_sols*365.25/360.0)
+    month_dt_beg = jd2Date(solLon2jdSteyaert(month_dt_beg_est.year, month_dt_beg_est.month, \
+            np.radians(sol_lon_end)), dt_obj=True)
+    month_dt_end = time_now
+
+    # Generate pairs of datetimes with edges as the beginning/end of each month which fully encompasses
+    #   the given range of times
+    monthly_bins =  generateMonthyTimeBins(month_dt_beg, month_dt_end)
+
+    # Plot data and create trajectory summaries for monthly bins
+    for dt_beg, dt_end in monthly_bins:
+
+        # Load all trajectories within the given time range
+        traj_list = loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=dt_beg, \
+            time_end=dt_end, verbose=True)
+
+
+        # Skip if no trajectories are loaded
+        if not traj_list:
+            print("No trajectories in month: {:s}".format(dt_beg.strftime("%B %Y")))
+            continue
+
+
+        # Plot graphs per month
+        plot_name = "scecliptic_monthly_{:4d}{:02d}".format(dt_beg.year, dt_beg.month)
+        print("Plotting month: {:s}".format(dt_beg.strftime("%B %Y")))
+        generateTrajectoryPlots(output_dir, traj_list, plot_name=plot_name, plot_sol=False, \
+            plot_showers=True, time_limited_plot=True, low_density=False)
+
+
+        # Write the trajectory summary
+        summary_name = "traj_summary_monthly_{:4d}{:02d}.txt".format(dt_beg.year, dt_beg.month)
+        writeOrbitSummaryFile(output_dir, traj_list, summary_name)
+
 
     ### ###
 

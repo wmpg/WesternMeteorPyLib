@@ -1079,6 +1079,43 @@ def generateDatetimeBins(dt_beg, dt_end, bin_days=7, utc_hour_break=12, tzinfo=N
 
 
 
+def generateMonthyTimeBins(dt_beg, dt_end):
+    """ Given a range of datetimes, generate pairs of datetimes ranging exactly a month so that all pairs
+        fully encompass the given input time range.
+
+    Arguments:
+        dt_beg: [datetime] First time.
+        dt_end: [datetime] Last time.
+
+    Return:
+        [list] A list of datetime tuples (month_beg, month_end).
+
+    """
+
+
+    monthly_bins = []
+
+    # Compute the next beginning of the month after dt_end
+    month_end_prev = (datetime.datetime(dt_end.year, dt_end.month, 1, 0, 0, 0) \
+        + datetime.timedelta(days=32)).replace(day=1)
+    month_end_next = datetime.datetime(dt_end.year, dt_end.month, 1, 0, 0, 0)
+
+    # Go backwards one month until the beginning dt is reached
+    while dt_beg < month_end_next:
+
+        monthly_bins.append([month_end_next, month_end_prev])
+
+        month_end_temp = month_end_next
+        month_end_next = (month_end_prev - datetime.timedelta(days=32)).replace(day=1)
+        month_end_prev = month_end_temp
+
+
+    monthly_bins.append([month_end_next, month_end_prev])
+    
+    
+    return monthly_bins
+
+
 
 ##############################################################################################################
 
