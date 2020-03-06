@@ -1583,8 +1583,8 @@ def generateAutoPlots(dir_path, traj_quality_params, prev_sols=10, sol_window=1)
     most_recent_summary_file = None
     for sol_decrement in range(prev_sols):
 
-        sol_lon_end = sol_lon_next - sol_decrement
-        sol_lon_beg = sol_lon_end - sol_window
+        sol_lon_end = (sol_lon_next - sol_decrement)%360
+        sol_lon_beg = (sol_lon_end - sol_window)%360
 
         # Compute beg/end dates from solar longitudes
         time_end_est = time_now - datetime.timedelta(days=sol_decrement*365.25/360.0)
