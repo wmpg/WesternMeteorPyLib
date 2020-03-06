@@ -1526,6 +1526,7 @@ def generateAutoPlots(dir_path, traj_quality_params, prev_sols=10, sol_window=1)
         # Plot graphs per solar longitude
         plot_name = "scecliptic_{:4d}{:02d}{:02d}_solrange_{:05.1f}-{:05.1f}".format(time_beg.year, \
             time_beg.month, time_beg.day, sol_lon_beg, sol_lon_end)
+        print("Plotting sol range {:05.1f}-{:05.1f}...".format(sol_lon_beg, sol_lon_end))
         generateTrajectoryPlots(output_dir, traj_list, plot_name=plot_name, plot_sol=False, \
             plot_showers=True, time_limited_plot=True)
 
