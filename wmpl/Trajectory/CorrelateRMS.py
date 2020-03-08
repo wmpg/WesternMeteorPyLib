@@ -33,7 +33,7 @@ OUTPUT_TRAJ_DIR = "trajectories"
 JSON_DB_NAME = "processed_trajectories.json"
 
 # Auto run frequency (hours)
-AUTO_RUN_FREQUENCY = 12
+AUTO_RUN_FREQUENCY = 6
 
 ### ###
 
