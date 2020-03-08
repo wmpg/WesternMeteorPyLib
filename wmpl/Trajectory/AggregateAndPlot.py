@@ -53,7 +53,7 @@ AUTO_OUTPUT_MONTHLY_DIR = "monthly"
 
 
 # Auto run frequency (hours)
-AUTO_RUN_FREQUENCY = 6
+AUTO_RUN_FREQUENCY = 2
 
 
 # Minimum number of shower members to mark the shower
