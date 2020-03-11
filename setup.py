@@ -77,6 +77,9 @@ if os.path.isfile(iau_shower_table_npy):
 # Get all data files in 'share'
 share_files = [os.path.join('wmpl', 'share', file_name) for file_name in os.listdir(os.path.join(dir_path, 'wmpl', 'share'))]
 
+# Add MetSim input file
+share_files += [os.path.join("wmpl", "MetSim", "Metsim0001_input.txt")]
+
 
 
 
