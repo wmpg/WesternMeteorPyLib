@@ -1919,7 +1919,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
         ax4 = fig.add_subplot(2, 2, 4, sharey=ax3)
 
         # Compute the number of bins
-        nbins = np.ceil(np.sqrt(len(a_list)))
+        nbins = int(np.ceil(np.sqrt(len(a_list))))
         if nbins < 10:
             nbins = 10
 
