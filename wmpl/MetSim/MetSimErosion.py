@@ -23,8 +23,7 @@ import scipy.stats
 # Cython init
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
-
-from wmpl.MetSim.MetSimErosionCyTools import massLossRK4, decelerationRK4, luminousEfficiency, atmDensity
+from wmpl.MetSim.MetSimErosionCyTools import massLossRK4, decelerationRK4, luminousEfficiency, atmDensityPoly
 
 
 ### DEFINE CONSTANTS
@@ -73,12 +72,8 @@ class Constants(object):
         self.P_0m = 840
 
         # Atmosphere density coefficients
-        self.dens_co = np.array([-9.02726494,
-                        0.108986696,
-                        -0.0005189,
-                        -2.0646e-5,
-                        1.93881e-7,
-                        -4.7231e-10])
+        self.dens_co = np.array([6.96795507e+01, -4.14779163e+03, 9.64506379e+04, -1.16695944e+06, \
+            7.62346229e+06, -2.55529460e+07, 3.45163318e+07])
 
 
         self.total_fragments = 0
@@ -414,7 +409,7 @@ def ablateAll(fragments, const, compute_wake=False):
 
 
         # Get atmosphere density for the given height
-        rho_atm = atmDensity(frag.h, const.dens_co)
+        rho_atm = atmDensityPoly(frag.h, const.dens_co)
 
 
         # Compute the mass loss of the main fragment due to ablation

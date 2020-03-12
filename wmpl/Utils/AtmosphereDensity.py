@@ -4,11 +4,106 @@ from __future__ import print_function, division, absolute_import
 
 import numpy as np
 import matplotlib.pyplot as plt
+import scipy.optimize
 
 from wmpl.PythonNRLMSISE00.nrlmsise_00_header import *
 from wmpl.PythonNRLMSISE00.nrlmsise_00 import *
 from wmpl.Utils.TrajConversions import jd2Date, jd2LST
 
+
+
+def atmDensPoly6th(ht, dens_co):
+    """ Compute the atmosphere density using a 6th order polynomial. This is used in the ablation simulation
+        for faster execution. 
+
+    Arguments:
+        ht: [float] Height above sea level (m).
+        dens_co: [list] Coeffs of the 6th order polynomial.
+
+    Return: 
+        atm_dens: [float] Atmosphere neutral mass density in kg/m^3.
+    """
+
+    # Compute the density
+    rho_a = 1000*(10**(dens_co[0] 
+                     + dens_co[1]*(ht/1000)
+                     + dens_co[2]*(ht/1000)**2 
+                     + dens_co[3]*(ht/1000)**3 
+                     + dens_co[4]*(ht/1000)**4 
+                     + dens_co[5]*(ht/1000)**5))
+
+    return rho_a
+
+
+
+def atmDensPoly(ht, dens_co):
+    """ Compute the atmosphere density using a 7th order polynomial. This is used in the ablation simulation
+        for faster execution. 
+
+    Arguments:
+        ht: [float] Height above sea level (m).
+        dens_co: [list] Coeffs of the 7th order polynomial.
+
+    Return: 
+        atm_dens: [float] Atmosphere neutral mass density in kg/m^3. Note that the minimum set density is
+            10^-14 kg/m^3.
+    """
+
+    # Compute the density (height is scaled to megameters to avoid overflows when raising it to the 6th power)
+    rho_a = 10**(dens_co[0] 
+               + dens_co[1]*(ht/1e6) 
+               + dens_co[2]*(ht/1e6)**2 
+               + dens_co[3]*(ht/1e6)**3 
+               + dens_co[4]*(ht/1e6)**4 
+               + dens_co[5]*(ht/1e6)**5
+               + dens_co[6]*(ht/1e6)**6
+               )
+
+    # Set a minimum density
+    if isinstance(rho_a, np.ndarray):
+        rho_a[rho_a == 0] = 1e-14
+    else:
+        if rho_a == 0:
+            rho_a = 1e-14
+
+    return rho_a
+
+
+
+def fitAtmPoly(lat, lon, height_min, height_max, jd):
+    """ Fits a 7th order polynomial on the atmosphere mass density profile at the given location, time, and 
+        for the given height range.
+
+    Arguments:
+        lat: [float] Latitude in radians.
+        lon: [float] Longitude in radians.
+        height_min: [float] Minimum height in meters. E.g. 30000 or 60000 are good values.
+        height_max: [float] Maximum height in meters. E.g. 120000 or 180000 are good values.
+        jd: [float] Julian date.
+
+    Return:
+        dens_co: [list] Coeffs for the 7th order polynomial.
+    """
+
+    # Generate a height array
+    height_arr = np.linspace(height_min, height_max, 200)
+
+    # Get atmosphere densities from NRLMSISE-00 (use log values for the fit)
+    atm_densities = np.array([getAtmDensity(lat, lon, ht, jd) for ht in height_arr])
+    atm_densities_log = np.log10(atm_densities)
+
+
+    def atmDensPolyLog(height_arr, *dens_co):
+        return np.log10(atmDensPoly(height_arr, dens_co))
+
+    # Fit the 7th order polynomial
+    dens_co, _ = scipy.optimize.curve_fit(atmDensPolyLog, height_arr, atm_densities_log, \
+        p0=np.zeros(7), maxfev=10000)
+
+    return dens_co
+
+
+    
 
 
 def getAtmDensity(lat, lon, height, jd):
@@ -153,7 +248,7 @@ if __name__ == "__main__":
     jd = datetime2JD(datetime.datetime.now())
 
     # Density evaluation heights (m)
-    heights = np.linspace(70, 120, 100)*1000
+    heights = np.linspace(60, 180, 100)*1000
 
     atm_densities = []
     for height in heights:
@@ -161,12 +256,21 @@ if __name__ == "__main__":
         atm_densities.append(atm_density)
 
 
-    plt.semilogx(atm_densities, heights/1000, zorder=3)
+    plt.semilogx(atm_densities, heights/1000, zorder=3, label="NRLMSISE-00")
+
+
+    # Fit the 6th order poly model
+    dens_co = fitAtmPoly(np.radians(lat), np.radians(lon), 60000, 180000, jd)
+
+    print(dens_co)
+
+    # Plot the fitted poly model
+    plt.semilogx(atmDensPoly(heights, dens_co), heights/1000, label="Poly fit")
+
+    plt.legend()
 
     plt.xlabel('Density (kg/m^3)')
     plt.ylabel('Height (km)')
-
-    plt.xlim(xmin=0)
 
     plt.grid()
 

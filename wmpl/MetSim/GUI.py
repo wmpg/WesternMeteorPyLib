@@ -22,7 +22,8 @@ from PyQt5.uic import loadUi
 from wmpl.Formats.Met import loadMet
 from wmpl.MetSim.MetSimErosion import runSimulation, Constants
 from wmpl.Trajectory.Orbit import calcOrbit
-from wmpl.Utils.Math import mergeClosePoints, findClosestPoints, vectMag, lineFunc
+from wmpl.Utils.AtmosphereDensity import fitAtmPoly
+from wmpl.Utils.Math import mergeClosePoints, findClosestPoints, vectMag, lineFunc, meanAngle
 from wmpl.Utils.Physics import calcMass
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.Plotting import saveImage
@@ -723,6 +724,10 @@ class MetSimGUI(QMainWindow):
         # Init the constants
         self.const = Constants()
 
+        # Calculate atmosphere density coeffs
+        dens_co = self.fitAtmosphereDensity()
+        self.const.dens_co = dens_co
+
         # If a JSON file with constant was given, load them instead of initing from scratch
         if const_json_file is not None:
 
@@ -739,8 +744,11 @@ class MetSimGUI(QMainWindow):
                 self.disruption_different_erosion_coeff = True
 
 
-            # Convert the density coefficients into a numpy array
-            self.const.dens_co = np.array(self.const.dens_co)
+            # # Convert the density coefficients into a numpy array
+            # self.const.dens_co = np.array(self.const.dens_co)
+
+            # Set the newly computed atmosphere density parameters
+            self.const.dens_co = dens_co
 
 
         else:
@@ -831,6 +839,15 @@ class MetSimGUI(QMainWindow):
         self.showCurrentResults()
 
 
+
+    def fitAtmosphereDensity(self):
+        """ Fit the atmosphere density coefficients for the given day and location. """
+
+        # Take mean meteor lat/lon as reference for the atmosphere model
+        lat_mean = np.mean([self.traj.rbeg_lat, self.traj.rend_lat])
+        lon_mean = meanAngle([self.traj.rbeg_lon, self.traj.rend_lon])
+
+        return fitAtmPoly(lat_mean, lon_mean, 60000, 180000, self.traj.jdt_ref)
 
 
     def loadWakeFile(self, file_path):

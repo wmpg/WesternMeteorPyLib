@@ -392,24 +392,23 @@ cpdef double luminousEfficiency(double vel):
 
 
 @cython.cdivision(True) 
-cpdef atmDensity(double h, np.ndarray[FLOAT_TYPE_t, ndim=1] dens_co):
+cpdef atmDensityPoly(double ht, np.ndarray[FLOAT_TYPE_t, ndim=1] dens_co):
     """ Calculates the atmospheric density in kg/m^3. 
     
     Arguments:
-        h: [double] Height in meters.
-        dens_co: [ndarray] Array of 6th order poly coeffs.
+        ht: [double] Height in meters.
+        dens_co: [ndarray] Array of 7th order poly coeffs.
 
     Return:
         [double] Atmosphere density at height h (kg/m^3)
 
     """
 
-    # # If the atmosphere dentiy interpolation is present, use it as the source of atm. density
-    # if const.atm_density_interp is not None:
-    #     return const.atm_density_interp(h)
-
-    # # Otherwise, use the polynomial fit (WARNING: the fit is not as good as the interpolation!!!)
-    # else:
-
-    return (10**(dens_co[0] + dens_co[1]*h/1000.0 + dens_co[2]*(h/1000)**2 + dens_co[3]*(h/1000)**3 \
-        + dens_co[4]*(h/1000)**4 + dens_co[5]*(h/1000)**5))*1000
+    return 10**(dens_co[0] 
+               + dens_co[1]*(ht/1e6) 
+               + dens_co[2]*(ht/1e6)**2 
+               + dens_co[3]*(ht/1e6)**3 
+               + dens_co[4]*(ht/1e6)**4 
+               + dens_co[5]*(ht/1e6)**5
+               + dens_co[6]*(ht/1e6)**6
+               )

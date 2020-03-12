@@ -11,7 +11,7 @@ import scipy.optimize
 import scipy.interpolate
 import matplotlib.pyplot as plt
 
-from wmpl.Utils.AtmosphereDensity import getAtmDensity
+from wmpl.Utils.AtmosphereDensity import getAtmDensity, atmDensPoly6th
 
 
 # Verbose printing flags
@@ -496,12 +496,7 @@ def atmDensity(h, consts):
 
     # Otherwise, use the polynomial fit (WARNING: the fit is not as good as the interpolation!!!)
     else:
-        dens_co = consts.dens_co
-
-        rho_a = (10**(dens_co[0] + dens_co[1]*h/1000.0 + dens_co[2]*(h/1000)**2 + dens_co[3]*(h/1000)**3 \
-            + dens_co[4]*(h/1000)**4 + dens_co[5]*(h/1000)**5))*1000
-
-        return rho_a
+        return atmDensPoly6th(h, consts.dens_co)
 
 
 
