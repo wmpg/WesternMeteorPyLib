@@ -392,8 +392,9 @@ def ablateAll(fragments, const, compute_wake=False):
     # Keep track of height of the brightest fragment
     brightest_height = 0.0
     brightest_length = 0.0
-    brightest_lum = 0.0
-    brightest_vel = 0.0
+    brightest_lum    = 0.0
+    brightest_vel    = 0.0
+
 
     # Track total mass
     mass_total = sum([frag.m for frag in fragments])
@@ -497,7 +498,7 @@ def ablateAll(fragments, const, compute_wake=False):
 
 
         # Keep track of the brightest fragment
-        if lum > brightest_lum:
+        if frag.lum > brightest_lum:
             brightest_lum = lum
             brightest_height = frag.h
             brightest_length = frag.length
@@ -626,11 +627,14 @@ def ablateAll(fragments, const, compute_wake=False):
 
 
     # Track the leading fragment length
-    active_fragments_length = [frag.length for frag in fragments if frag.active]
-    if len(active_fragments_length):
-        leading_frag_length = max(active_fragments_length)
+    active_fragments = [frag for frag in fragments if frag.active]
+    if len(active_fragments):
+        leading_frag = max(active_fragments, key=lambda x: x.length)
+        leading_frag_length = leading_frag.length
+        leading_frag_height = leading_frag.h
     else:
         leading_frag_length = None
+        leading_frag_height = None
 
 
     ### Compute the wake profile ###
@@ -683,7 +687,7 @@ def ablateAll(fragments, const, compute_wake=False):
 
 
     return fragments, const, luminosity_total, brightest_height, brightest_length, brightest_vel, \
-        leading_frag_length, mass_total, wake
+        leading_frag_height, leading_frag_length, mass_total, wake
 
 
 
@@ -732,14 +736,15 @@ def runSimulation(const, compute_wake=False):
 
         # Ablate the fragments
         fragments, const, luminosity_total, brightest_height, brightest_length, brightest_vel, \
-            leading_frag_length, mass_total, wake = ablateAll(fragments, const, compute_wake=compute_wake)
+            leading_frag_height, leading_frag_length, mass_total, wake = ablateAll(fragments, const, \
+                compute_wake=compute_wake)
 
         # Store wake estimation results
         wake_results.append(wake)
 
         # Stack results list
         results_list.append([const.total_time, luminosity_total, brightest_height, brightest_length, \
-            brightest_vel, leading_frag_length, mass_total])
+            brightest_vel, leading_frag_height, leading_frag_length, mass_total])
 
 
 
@@ -754,7 +759,7 @@ if __name__ == "__main__":
 
 
     # Show wake
-    show_wake = True
+    show_wake = False
 
 
     # Init the constants
@@ -775,7 +780,7 @@ if __name__ == "__main__":
     # Unpack the results
     results_list = np.array(results_list).astype(np.float64)
     time_arr, luminosity_arr, brightest_height_arr, brightest_length_arr, brightest_vel_arr, \
-        leading_frag_length_arr, mass_total_arr = results_list.T
+        leading_frag_height_arr, leading_frag_length_arr, mass_total_arr = results_list.T
 
 
     # Calculate absolute magnitude (apparent @100km) from given luminous intensity
@@ -787,12 +792,32 @@ if __name__ == "__main__":
 
     plt.plot(time_arr, abs_magnitude)
     plt.gca().invert_yaxis()
+
+    plt.xlabel("Time (s)")
+    plt.ylabel("Absolulte magnitude")
+
     plt.show()
 
 
-    # Plot mass loss
 
-    plt.plot(time_arr, mass_total_arr)
+    # Plot mass loss
+    plt.plot(time_arr, 1000*mass_total_arr)
+    plt.xlabel("Time (s)")
+    plt.ylabel("Mass (g)")
+    plt.show()
+
+
+
+    # Plot length vs time
+    plt.plot(brightest_length_arr[:-1]/1000, brightest_height_arr[:-1]/1000, label='Brightest bin')
+    plt.plot(leading_frag_length_arr[:-1]/1000, leading_frag_height_arr[:-1]/1000, label='Leading fragment')
+
+    plt.ylabel("Height (km)")
+    plt.xlabel("Length (km)")
+
+    plt.legend()
+
+
     plt.show()
 
 

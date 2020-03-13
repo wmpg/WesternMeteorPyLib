@@ -55,7 +55,8 @@ class SimulationResults(object):
         # Unpack the results
         results_list = np.array(results_list).astype(np.float64)
         self.time_arr, self.luminosity_arr, self.brightest_height_arr, self.brightest_length_arr, \
-            self.brightest_vel_arr, self.leading_frag_length_arr, self.mass_total_arr = results_list.T
+            self.brightest_vel_arr, self.leading_frag_height_arr, self.leading_frag_length_arr, \
+            self.mass_total_arr = results_list.T
 
 
         # Calculate absolute magnitude (apparent @100km)
@@ -1614,9 +1615,9 @@ class MetSimGUI(QMainWindow):
         # Plot simulated velocity
         if sr is not None:
 
-            # Plot the simulated velocity
+            # Plot the simulated velocity at the brightest point
             self.velocityPlot.canvas.axes.plot(sr.brightest_vel_arr/1000, sr.brightest_height_arr/1000, \
-                label='Simulated', color='k', alpha=0.5)
+                label='Simulated - brightest', color='k', alpha=0.5)
 
 
 
@@ -1743,6 +1744,8 @@ class MetSimGUI(QMainWindow):
             self.vInitSimLabel.setText("Vinit sim = {:.3f} km/s".format(v_init_sim/1000))
 
 
+            ### Plot lag of the brightest point on the traejctory ###
+
             # Cut the part with same beginning heights as observations
             temp_arr = np.c_[sr.brightest_height_arr, sr.brightest_length_arr]
             temp_arr = temp_arr[(sr.brightest_height_arr <= self.traj.rbeg_ele) \
@@ -1754,7 +1757,27 @@ class MetSimGUI(QMainWindow):
                 self.const.dt*len(brightest_len_arr), self.const.dt)[:len(brightest_len_arr)]
 
             self.lagPlot.canvas.axes.plot(lag_sim[:len(ht_arr)], (ht_arr/1000)[:len(lag_sim)], 
-                label='Simulated', color='k', alpha=0.5)
+                label='Simulated - brightest', color='k', alpha=0.5)
+
+            ### ###
+
+
+            ### Plot lag of the leading fragment ###
+
+            # Cut the part with same beginning heights as observations
+            temp_arr = np.c_[sr.leading_frag_height_arr, sr.leading_frag_length_arr]
+            temp_arr = temp_arr[(sr.leading_frag_height_arr <= self.traj.rbeg_ele) \
+                & (sr.leading_frag_height_arr >= plot_end_ht)]
+            ht_arr, leading_frag_len_arr = temp_arr.T
+
+            # Compute the simulated lag using the observed velocity
+            lag_sim = leading_frag_len_arr - leading_frag_len_arr[0] - self.traj.orbit.v_init*np.arange(0, \
+                self.const.dt*len(leading_frag_len_arr), self.const.dt)[:len(leading_frag_len_arr)]
+
+            self.lagPlot.canvas.axes.plot(lag_sim[:len(ht_arr)], (ht_arr/1000)[:len(lag_sim)], 
+                label='Simulated - leading', color='k', alpha=0.5, linestyle='dashed')
+
+            ### ###
 
 
 
