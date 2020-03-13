@@ -326,5 +326,5 @@ if __name__ == "__main__":
 
 
     # Generate simulations using multiprocessing
-    input_list = [[cml_args.output_dir, i] for i in range(cml_args.nsims)]
+    input_list = [[cml_args.output_dir, np.random.randint(0, 2**32 - 1)] for _ in range(cml_args.nsims)]
     domainParallelizer(input_list, generateErosionSim)
