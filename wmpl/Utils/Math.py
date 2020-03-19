@@ -937,6 +937,26 @@ def histogramEdgesEqualDataNumber(x, nbins):
 
 
 
+
+def padOrTruncate(array, size):
+    """ Given the array, either pad ti with zeros or cut it to the given size. 
+    
+    Argumetns:
+        array: [ndarray] Inpout numpy array.
+        size: [int] Output array size.
+
+    Return:
+        [ndarray] Array with the fixed size.
+    """
+
+    if array.shape[0] > size:
+        return array[0: size]
+
+    else:
+        return np.hstack((array, np.zeros(size - array.shape[0])))
+
+
+
 ### OPTIMIZATION ###
 ##############################################################################################################
 
