@@ -144,6 +144,16 @@ class ErosionSimParametersCAMO(object):
         #   This is a minimum for both magnitude and length!
         self.visibility_time_min = 10.0/self.fps
 
+        ### ###
+
+
+        ### Added noise ###
+
+        # Standard deviation of the magnitude Gaussian noise
+        self.mag_noise = 0.1
+
+        # SD of noise in length (m)
+        self.len_noise = 1.0
 
         ### ###
 
@@ -215,8 +225,21 @@ class ErosionSimContainer(object):
             if param_name == "erosion_mass_max":
                 p.min = self.params.erosion_mass_min.val
 
-            # Randomly generate the parameter value using an uniform distribution (and the given seed)
-            p.val = local_state.uniform(p.min, p.max)
+
+            # Draw parameters from a distribution:
+            # a) Generate all masses distributed logarithmically
+            if (param_name == "m_init") or (param_name == "erosion_mass_min") \
+                or (param_name == "erosion_mass_max"):
+
+                p.val = 10**(local_state.uniform(np.log10(p.min), np.log10(p.max)))
+
+
+            # b) Distribute all other values uniformely
+            else:
+
+                # Randomly generate the parameter value using an uniform distribution (and the given seed)
+                p.val = local_state.uniform(p.min, p.max)
+
 
             # Assign value to simulation contants
             setattr(self.const, param_name, p.val)
@@ -411,7 +434,6 @@ def extractSimData(sim, min_frames_visible=10):
     time_sampled -= time_sampled[0]
 
 
-
     ### SIMULATE CAMO tracking delay for length measurements ###
 
     # Zero out all length measurements before the length delay (to simulate the delay of CAMO
@@ -429,25 +451,39 @@ def extractSimData(sim, min_frames_visible=10):
     len_sampled[first_length_index:] -= len_sampled[first_length_index]
 
 
-    # ### Plot simulated data
-    # fig, (ax1, ax2, ax3) = plt.subplots(nrows=3)
+
+    ### ADD NOISE ###
+
+    # Add noise to magnitude data
+    mag_sampled[mag_sampled <= lim_mag] += np.random.normal(loc=0.0, scale=params.mag_noise, \
+        size=len(mag_sampled[mag_sampled <= lim_mag]))
+
+    # Add noise to length data
+    len_sampled[first_length_index:] += np.random.normal(loc=0.0, scale=params.len_noise, \
+        size=len(len_sampled[first_length_index:]))
+
+    ### ###
+
+
+    ### Plot simulated data
+    fig, (ax1, ax2, ax3) = plt.subplots(nrows=3)
     
-    # ax1.plot(time_sampled, mag_sampled)
-    # ax1.invert_yaxis()
-    # ax1.set_ylabel("Magnitude")
+    ax1.plot(time_sampled, mag_sampled)
+    ax1.invert_yaxis()
+    ax1.set_ylabel("Magnitude")
 
-    # ax2.plot(time_sampled, len_sampled/1000)
-    # ax2.set_ylabel("Length (km)")
+    ax2.plot(time_sampled, len_sampled/1000)
+    ax2.set_ylabel("Length (km)")
 
-    # ax3.plot(time_sampled, ht_sampled/1000)
-    # ax3.set_xlabel("Time (s)")
-    # ax3.set_ylabel("Height (km)")
+    ax3.plot(time_sampled, ht_sampled/1000)
+    ax3.set_xlabel("Time (s)")
+    ax3.set_ylabel("Height (km)")
 
-    # plt.subplots_adjust(hspace=0)
+    plt.subplots_adjust(hspace=0)
 
-    # plt.show()
+    plt.show()
 
-    # ### ###
+    ### ###
 
     ###
 
