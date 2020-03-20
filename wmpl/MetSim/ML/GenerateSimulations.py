@@ -465,27 +465,27 @@ def extractSimData(sim, min_frames_visible=10):
     ### ###
 
 
-    ### Plot simulated data
-    fig, (ax1, ax2, ax3) = plt.subplots(nrows=3)
+    # ### Plot simulated data
+    # fig, (ax1, ax2, ax3) = plt.subplots(nrows=3)
     
-    ax1.plot(time_sampled, mag_sampled)
-    ax1.invert_yaxis()
-    ax1.set_ylabel("Magnitude")
+    # ax1.plot(time_sampled, mag_sampled)
+    # ax1.invert_yaxis()
+    # ax1.set_ylabel("Magnitude")
 
-    ax2.plot(time_sampled, len_sampled/1000)
-    ax2.set_ylabel("Length (km)")
+    # ax2.plot(time_sampled, len_sampled/1000)
+    # ax2.set_ylabel("Length (km)")
 
-    ax3.plot(time_sampled, ht_sampled/1000)
-    ax3.set_xlabel("Time (s)")
-    ax3.set_ylabel("Height (km)")
+    # ax3.plot(time_sampled, ht_sampled/1000)
+    # ax3.set_xlabel("Time (s)")
+    # ax3.set_ylabel("Height (km)")
 
-    plt.subplots_adjust(hspace=0)
+    # plt.subplots_adjust(hspace=0)
 
-    plt.show()
+    # plt.show()
 
-    ### ###
+    # ### ###
 
-    ###
+    
 
     # Check that there are any length measurements
     if not np.any(len_sampled > 0):
