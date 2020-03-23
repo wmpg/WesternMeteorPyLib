@@ -96,6 +96,13 @@ def parallelComputeGenerator(generator, workerFunc, resultsCheckFunc, req_num, n
 
 
 
+def unpackDecorator(func):
+    def dec(args):
+        return func(*args)
+
+    return dec
+
+
 def domainParallelizer(domain, function, cores=None, kwarg_dict=None):
     """ Runs N (cores) functions as separate processes with parameters given in the domain list.
 
@@ -112,6 +119,9 @@ def domainParallelizer(domain, function, cores=None, kwarg_dict=None):
         results: [list] a list of function results
 
     """
+
+    from contextlib import closing
+
 
     def _logResult(result):
         """ Save the result from the async multiprocessing to a results list. """
@@ -142,13 +152,26 @@ def domainParallelizer(domain, function, cores=None, kwarg_dict=None):
         # Generate a pool of workers
         pool = multiprocessing.Pool(cores)
 
+        # Maximum number of jobs in waiting
+        max_jobs = 2*cores
+
         # Give workers things to do
+        count = 0
         for args in domain:
-            pool.apply_async(function, args, kwarg_dict, callback=_logResult)
+
+            # Give job to worker
+            last_job = pool.apply_async(function, args, kwarg_dict, callback=_logResult)
+
+            # Limit the amount of jobs in wawiting
+            count += 1
+            if count%10 == 0:
+                if len(pool._cache) > max_jobs:
+                    last_job.wait()
 
         # Clean up
         pool.close()
         pool.join()
+
 
     else:
         print('The number of CPU cores defined is not in an expected range (1 or more.)')
