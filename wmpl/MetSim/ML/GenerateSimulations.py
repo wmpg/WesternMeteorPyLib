@@ -522,18 +522,12 @@ def generateErosionSim(output_dir, erosion_sim_params, random_seed, min_frames_v
     # Run the simulation and save results
     erosion_cont.runSimulation()
 
-    ### TEST !!!
+    # Check if the simulation satisfies the visibility criteria
+    if extractSimData(erosion_cont, min_frames_visible=min_frames_visible) is not None:
+        return erosion_cont.file_name
 
-    # # Check if the simulation satisfies the visibility criteria
-    # if extractSimData(erosion_cont, min_frames_visible=min_frames_visible) is not None:
-    #     return erosion_cont.file_name
-
-    # else:
-    #     return None
-
-    ###
-
-    return None
+    else:
+        return None
 
 
 
