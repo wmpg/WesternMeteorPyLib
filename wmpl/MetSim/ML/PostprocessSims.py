@@ -11,6 +11,25 @@ import numpy as np
 from wmpl.MetSim.ML.GenerateSimulations import MetParam, ErosionSimContainer, ErosionSimParametersCAMO, \
     extractSimData
 from wmpl.Utils.Pickling import loadPickle
+from wmpl.Utils.PyDomainParallelizer import domainParallelizer
+
+
+def validateSimulation(data_path, file_name, min_frames_visible):
+
+    # Load the pickle file
+    sim = loadPickle(data_path, file_name)
+
+    # Extract simulation data
+    res = extractSimData(sim, min_frames_visible=min_frames_visible, check_only=True)
+
+    # If the simulation didn't satisfy the filters, skip it
+    if res is None:
+        return None
+
+
+    print("Good:", file_name)
+
+    return file_name, res
 
 
 def postprocessSims(data_path, min_frames_visible=10):
@@ -25,10 +44,8 @@ def postprocessSims(data_path, min_frames_visible=10):
 
     """
 
-    # A list of trajectories that satisfy the visibility criteria
-    good_list = []
-
-    # Go through all simulations
+    # Go through all simulations and create a list for processing
+    processing_list = []
     for file_name in os.listdir(data_path):
 
         file_path = os.path.join(data_path, file_name)
@@ -36,25 +53,22 @@ def postprocessSims(data_path, min_frames_visible=10):
         # Check if the given file is a pickle file
         if os.path.isfile(file_path) and file_name.endswith(".pickle"):
 
-            # Load the pickle file
-            sim = loadPickle(data_path, file_name)
+            processing_list.append([data_path, file_name, min_frames_visible])
 
-            # Extract simulation data
-            res = extractSimData(sim, min_frames_visible=min_frames_visible, check_only=True)
 
-            # If the simulation didn't satisfy the filters, skip it
-            if res is None:
-                continue
 
-            # If all conditions are satisfied, add the trajectory and random parameters to the processing list
-            good_list.append([file_name, res])
+    # Validate simulation (parallelized)
+    print("Starting postprocessing in parallel...")
+    results_list = domainParallelizer(processing_list, validateSimulation)
 
-            print("Good:", file_name)
-
+    # Reject all None's from the results
+    good_list = [entry for entry in results_list if entry is not None]
 
     # Randomize the list
     random.shuffle(good_list)
 
+    # Load one simulation to get simulation parameters
+    sim = loadPickle(data_path, good_list[0][0])
 
     # Compute the average minimum time the meteor needs to be visible
     min_time_visible = min_frames_visible/sim.params.fps \
