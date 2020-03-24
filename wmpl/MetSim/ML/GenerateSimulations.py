@@ -250,7 +250,7 @@ class ErosionSimContainer(object):
 
 
         # Generate a file name from simulation_parameters
-        self.file_name = "erosion_sim_v{:.2f}_m{:.2e}g_rho{:04d}_z{:04.1f}_abl{:.3f}_eh{:.1f}_er{:.3f}_s{:.2f}".format(self.params.v_init.val/1000, 
+        self.file_name = "erosion_sim_v{:.2f}_m{:.2e}g_rho{:04d}_z{:04.1f}_abl{:.3f}_eh{:05.1f}_er{:.3f}_s{:.2f}".format(self.params.v_init.val/1000, 
             self.params.m_init.val*1000, int(self.params.rho.val), np.degrees(self.params.zenith_angle.val), \
             self.params.sigma.val*1e6, self.params.erosion_height_start.val/1000, \
             self.params.erosion_coeff.val*1e6, self.params.erosion_mass_index.val)
