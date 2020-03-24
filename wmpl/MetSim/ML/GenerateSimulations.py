@@ -22,6 +22,9 @@ from wmpl.Utils.Pickling import savePickle
 from wmpl.Utils.PyDomainParallelizer import domainParallelizer
 
 
+# Length of data that will be used as an input during training
+DATA_LENGTH = 256
+
 
 class MetParam(object):
     def __init__(self, param_min, param_max):
@@ -161,7 +164,7 @@ class ErosionSimParametersCAMO(object):
         ### Fit parameters ###
 
         # Length of input data arrays that will be given to the neural network
-        self.data_length = 256
+        self.data_length = DATA_LENGTH
 
         ### ###
 
@@ -355,8 +358,26 @@ class ErosionSimContainer(object):
 
 
 
-def extractSimData(sim, min_frames_visible=10):
-    """ Extract input parameters and model outputs from the simulation container and normalize them. """
+def extractSimData(sim, min_frames_visible=10, check_only=False, postprocess_params=None):
+    """ Extract input parameters and model outputs from the simulation container and normalize them. 
+
+    Arguments:
+        sim: [ErosionSimContainer object] Container with the simulation.
+
+    Keyword arguments:
+        min_frames_visible: [int] Minimum number of frames above the limiting magnitude
+        check_only: [bool] Only check if the simulation satisfies filters, don' compute eveything.
+            Speed up the evaluation. False by default
+        postprocess_params: [list] A list of limiting magnitude for wide and narrow fields, and the delay in
+            length measurements. None by default, in which case they will be generated herein.
+
+    Return: 
+        - None if the simulation does not satisfy filter conditions.
+        - postprocess_params if check_only=True and the simulation satisfies the conditions.
+        - params, input_data_normed, simulated_data_normed if check_only=False and the simulation satisfies 
+            the conditions.
+
+    """
 
     # Create a frash instance of the system parameters
     #params_obj = getattr(GenerateSimulations, sim.params.__class__.__name__)
@@ -365,14 +386,24 @@ def extractSimData(sim, min_frames_visible=10):
 
     ### DRAW LIMITING MAGNITUDE AND LENGTH DELAY ###
 
-    # Draw limiting magnitude and length end magnitude
-    lim_mag     = np.random.uniform(params.lim_mag_brightest, params.lim_mag_faintest)
-    lim_mag_len = np.random.uniform(params.lim_mag_len_end_brightest, params.lim_mag_len_end_faintest)
+    # If the drawn values have already been given, use them
+    if postprocess_params is not None:
+        lim_mag, lim_mag_len, len_delay = postprocess_params
+
+    else:
+
+        # Draw limiting magnitude and length end magnitude
+        lim_mag     = np.random.uniform(params.lim_mag_brightest, params.lim_mag_faintest)
+        lim_mag_len = np.random.uniform(params.lim_mag_len_end_brightest, params.lim_mag_len_end_faintest)
+
+        # Draw the length delay
+        len_delay = np.random.uniform(params.len_delay_min, params.len_delay_max)
+
+        postprocess_params = [lim_mag, lim_mag_len, len_delay]
+
+
     lim_mag_faintest  = np.max([lim_mag, lim_mag_len])
     lim_mag_brightest = np.min([lim_mag, lim_mag_len])
-
-    # Draw the length delay
-    len_delay = np.random.uniform(params.len_delay_min, params.len_delay_max)
 
     ### ###
 
@@ -389,6 +420,10 @@ def extractSimData(sim, min_frames_visible=10):
 
     # Get indices of magnitudes above the brighter limiting magnitude
     indices_visible_brighter = sim.simulation_results.abs_magnitude <= lim_mag_brightest
+
+    # If no points were visible, skip this solution
+    if not np.any(indices_visible_brighter):
+        return None
 
     # Compute the minimum time the meteor needs to be visible
     min_time_visible = min_frames_visible/params.fps + len_delay
@@ -451,20 +486,6 @@ def extractSimData(sim, min_frames_visible=10):
     len_sampled[first_length_index:] -= len_sampled[first_length_index]
 
 
-
-    ### ADD NOISE ###
-
-    # Add noise to magnitude data
-    mag_sampled[mag_sampled <= lim_mag] += np.random.normal(loc=0.0, scale=params.mag_noise, \
-        size=len(mag_sampled[mag_sampled <= lim_mag]))
-
-    # Add noise to length data
-    len_sampled[first_length_index:] += np.random.normal(loc=0.0, scale=params.len_noise, \
-        size=len(len_sampled[first_length_index:]))
-
-    ### ###
-
-
     # ### Plot simulated data
     # fig, (ax1, ax2, ax3) = plt.subplots(nrows=3)
     
@@ -491,6 +512,25 @@ def extractSimData(sim, min_frames_visible=10):
     if not np.any(len_sampled > 0):
         return None
 
+
+    # If the simulation should only be checked that it's good, return the postprocess parameters used to 
+    #   generate the data
+    if check_only:
+        return postprocess_params
+
+
+    ### ADD NOISE ###
+
+    # Add noise to magnitude data
+    mag_sampled[mag_sampled <= lim_mag] += np.random.normal(loc=0.0, scale=params.mag_noise, \
+        size=len(mag_sampled[mag_sampled <= lim_mag]))
+
+    # Add noise to length data
+    len_sampled[first_length_index:] += np.random.normal(loc=0.0, scale=params.len_noise, \
+        size=len(len_sampled[first_length_index:]))
+
+    ### ###
+
     # Construct input data vector with normalized values
     input_data_normed = sim.getNormalizedInputs()
 
@@ -500,13 +540,13 @@ def extractSimData(sim, min_frames_visible=10):
 
 
     # Generate vector with simulated data
-    simulated_data = np.vstack([padOrTruncate(ht_normed, params.data_length), \
+    simulated_data_normed = np.vstack([padOrTruncate(ht_normed, params.data_length), \
         padOrTruncate(len_normed, params.data_length), \
         padOrTruncate(mag_normed, params.data_length)])
 
 
     # Return input data and results
-    return input_data_normed, simulated_data
+    return params, input_data_normed, simulated_data_normed
 
 
 
@@ -523,8 +563,9 @@ def generateErosionSim(output_dir, erosion_sim_params, random_seed, min_frames_v
     erosion_cont.runSimulation()
 
     # Check if the simulation satisfies the visibility criteria
-    if extractSimData(erosion_cont, min_frames_visible=min_frames_visible) is not None:
-        return erosion_cont.file_name
+    res = extractSimData(erosion_cont, min_frames_visible=min_frames_visible)
+    if res is not None:
+        return [erosion_cont.file_name, res]
 
     else:
         return None

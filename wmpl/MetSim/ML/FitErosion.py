@@ -3,41 +3,43 @@
 from __future__ import print_function, division, absolute_import, unicode_literals
 
 import os
-import importlib
-
+import copy
 
 import numpy as np
 import keras
 
 from wmpl.Utils.Pickling import loadPickle
+from wmpl.MetSim.ML.GenerateSimulations import DATA_LENGTH, MetParam, ErosionSimContainer, \
+    ErosionSimParametersCAMO, extractSimData
 
 
 
 class DataGenerator(object):
-    def __init__(self, data_path, batch_size, steps_per_epoch, validation_portion=0.2):
-        """ Generate meteor data. """
+    def __init__(self, data_path, data_list, batch_size, steps_per_epoch, validation=False, \
+            validation_portion=0.2):
+        """ Generate meteor data for the ML fit function. 
+    
+        Arguments:
+            data_path: [str] Path to the data files.
+            data_list: [list] A list of files that will be used as inputs.
+            batch_size: [int] Number of inputs in every step.
+            steps_per_epoch: [int] Number of steps in every epoch (iteration) with batch_size inputs each.
+
+        Keyword arguments:
+            validation: [bool] Generate validation data. False by default.
+            validation_portion: [float] Portion of input files to be used for validation.
+        """
 
 
         self.data_path = data_path
         self.batch_size = batch_size
         self.steps_per_epoch = steps_per_epoch
+        self.data_list = data_list
+
+        self.validation = validation
 
         # Compute the number of files in each epoch
         self.data_per_epoch = self.batch_size*self.steps_per_epoch
-
-
-        # Load the list of files from disk
-        self.data_list = []
-        for file_name in os.listdir(data_path):
-
-            file_path = os.path.join(data_path, file_name)
-
-            # Check if the given file is a pickle file
-            if os.path.isfile(file_path) and file_name.endswith(".pickle"):
-
-                # Add the pickle file to the processing list
-                self.data_list.append(file_name)
-
 
         # Cut the processing list to the steps multiplier
         self.data_list = self.data_list[:-int(len(self.data_list)%self.data_per_epoch)]
@@ -51,101 +53,301 @@ class DataGenerator(object):
         # Number of validation epochs
         self.validation_epochs = total_epochs - self.fit_epochs
 
+        # Make sure that there is a minimum of one validation epoch
+        if self.validation_epochs < 1:
+            self.validation_epochs = 1
+            self.fit_epochs -= 1
+
 
         # Current data index
-        self.curr_index = 0
+        self.data_index_start = 0
 
         # Current validation index
-        self.curr_validation_index = self.fit_epochs*self.data_per_epoch - 1
+        self.validation_index_start = self.fit_epochs*self.data_per_epoch - 1
 
 
 
-    def generate(self):
+    def __iter__(self):
+
+        # Select valirable depending on if the validation data is used or not
+        if self.validation:
+            curr_index = self.validation_index_start
+            epochs = self.validation_epochs
+
+        else:
+            curr_index = self.data_index_start
+            epochs = self.fit_epochs
+
+
 
         # Generate data for every epoch
-        for epoch in self.epochs:
-
+        for step in range(epochs*self.steps_per_epoch):
 
             param_list = []
             result_list = []
 
-            pickle_counter = 0
-
             # Get a portion of files to load
-            file_list = self.data_list[self.curr_index:(self.curr_index + batch_size)]
+            beg_index = curr_index
+            file_list = self.data_list[beg_index:(beg_index + self.batch_size)]
 
             # Load all pickle files in the data path directory
-            for file_path in os.listdir(data_path):
+            skipped_files = 0
+            for entry in file_list:
 
-                file_path = os.path.join(data_path, file_name)
+                file_name, postprocess_params = entry
 
-                # Check if the given file is a pickle file
-                if os.path.isfile(file_path) and file_name.endswith(".pickle"):
+                # Load the pickle file
+                sim = loadPickle(self.data_path, file_name)
 
-                    # Load the pickle file
-                    sim = loadPickle(data_path, file_name)
+                # Extract model inputs and outputs
+                res = extractSimData(sim, postprocess_params=postprocess_params)
 
+                # Skip simulation which did not satisfy filters
+                if res is None:
+                    print("Skipped:", file_name)
+                    file_list.append(self.data_list[beg_index + self.batch_size + skipped_files + 1])
+                    skipped_files += 1
+                    continue
 
-                    pickle_counter += 1
+                # Extract results
+                model_params, input_data_normed, simulated_data_normed = res
 
+                # Add data to model input and output lists
+                param_list.append(input_data_normed)
+                result_list.append(simulated_data_normed)
 
+                curr_index += 1
 
-                    # Add data to list
-
-
-                    # Stop loading 
-
-
-
-
-            for i in range(batch_size):
-
-                # Load the simulation from disk
-
-                # Generate a random duration
-                duration = np.random.uniform(DURATION_MIN, DURATION_MAX)
-
-                # Generate a random peak magnitude (allow 3 magnitude of room at top which will be variable by
-                #   velocity and deceleration)
-                peak_mag = np.random.uniform(MAG_BRIGHTEST + 3, MAG_FAINTEST)
-
-                # Generate a random F number
-                f_num = np.random.uniform(0.0, 1.0)
-
-                # Generate a random deceleration
-                decel = np.random.uniform(DECEL_MIN, DECEL_MAX)
-
-                # Generate a random velocity
-                velocity = np.random.uniform(V_MIN, V_MAX)
-
-                # Generate a random zenith angle
-                zangle = np.random.uniform(ZANGLE_MIN, ZANGLE_MAX)
-
-
-                # Run the model to create outputs
-                model_output = meteorModel(duration, peak_mag, f_num, decel, velocity, zangle)
-                result_list.append(model_output)
-
-                # Map inputs to to 0-1 range
-                model_inputs = inputNormalize(duration, peak_mag, f_num, decel, velocity, zangle)
-                param_list.append(model_inputs)
-
+            curr_index += skipped_files
 
             param_list = np.array(param_list)
             result_list = np.array(result_list)
 
-            if split_results:
 
-                height_data_normed_list, mag_data_normed_list, \
-                    length_data_normed_list = np.split(result_list, 3, axis=1)
+            height_data_normed_list, mag_data_normed_list, \
+                length_data_normed_list = np.split(result_list, 3, axis=1)
 
-                yield [height_data_normed_list.reshape(-1, DATA_LENGTH, 1), \
-                        length_data_normed_list.reshape(-1, DATA_LENGTH, 1), \
-                        mag_data_normed_list.reshape(-1, DATA_LENGTH, 1)], param_list
+            yield [height_data_normed_list.reshape(-1, model_params.data_length, 1), \
+                    length_data_normed_list.reshape(-1, model_params.data_length, 1), \
+                    mag_data_normed_list.reshape(-1, model_params.data_length, 1)], param_list
 
-            else:
-            
-                result_list = result_list.reshape(batch_size, 3, DATA_LENGTH, 1)
 
-                # Return a model run
-                yield (result_list, param_list)
+
+
+
+class ReportFitGoodness(keras.callbacks.Callback):
+  """ Report the fit goodness at the every epoch end.
+  """
+
+  def __init__(self, validation_gen):
+    self.validation_gen = validation_gen
+
+  def on_epoch_end(self, epoch, logs=None):
+
+    # Evaluate model accuracy using validation data
+    percent_errors = evaluteFit(self.model, self.validation_gen, ret_perc=True)
+
+    print()
+    print("Epoch {:d} errors".format(epoch + 1))
+    param_name_list = ["M0", "V0", "ZC", "DENS", "ABL", "ERHT", "ERCO", "ER_S", "ERMm", "ERMM"]
+    print(" ".join(["{:>6s}".format(param_name) for param_name in param_name_list]))
+    print(str(len(percent_errors)*"{:5.2f}% ").format(*percent_errors))
+
+    pass
+
+
+
+
+def loadModel(model_file, weights_file):
+
+    
+    with open('model.json', 'r') as json_file:
+
+        # load json and create model    
+        loaded_model_json = json_file.read()
+        loaded_model = keras.models.model_from_json(loaded_model_json)
+        
+        # load weights into new model
+        loaded_model.load_weights("model.h5")
+        print("Loaded model from disk")
+
+        return loaded_model
+
+
+
+
+def evaluteFit(model, validation_gen, ret_perc=False):
+
+    # Create a copy of the generator
+    validation_gen = copy.deepcopy(validation_gen)
+
+    # Generate test data
+    test_data = next(iter(validation_gen))
+    test_outputs, test_inputs = test_data
+
+    # Predict data
+    probabilities = model.predict(test_outputs)
+
+    # Compute mean absolute percentage error for every model parameter
+    percent_errors = 100*np.mean(np.abs(probabilities - test_inputs), axis=0)
+
+    if ret_perc:
+        return percent_errors
+
+    else:
+
+        print("Mean absolute percentage error per parameter:")
+        param_name_list = ["M0", "V0", "ZC", "DENS", "ABL", "ERHT", "ERCO", "ER_S", "ERMm", "ERMM"]
+        print(" ".join(["{:>6s}".format(param_name) for param_name in param_name_list]))
+        print(str(len(percent_errors)*"{:5.2f}% ").format(*percent_errors))
+
+
+
+def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_file):
+
+
+    # Height input model
+    visible1 = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 1))
+    cnn1 = keras.layers.Conv1D(filters=32, kernel_size=4, activation='relu')(visible1)
+    cnn1 = keras.layers.MaxPooling1D(pool_size=2)(cnn1)
+    cnn1 = keras.layers.Flatten()(cnn1)
+    cnn1 = keras.layers.Dense(128, kernel_initializer='normal', activation='relu')(cnn1)
+
+    # Length input model
+    visible2 = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 1))
+    cnn2 = keras.layers.Conv1D(filters=32, kernel_size=4, activation='relu')(visible2)
+    cnn2 = keras.layers.MaxPooling1D(pool_size=2)(cnn2)
+    cnn2 = keras.layers.Flatten()(cnn2)
+    cnn2 = keras.layers.Dense(128, kernel_initializer='normal', activation='relu')(cnn2)
+
+    # Magnitude input model
+    visible3 = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 1))
+    cnn3 = keras.layers.Conv1D(filters=32, kernel_size=4, activation='relu')(visible3)
+    cnn3 = keras.layers.MaxPooling1D(pool_size=2)(cnn3)
+    cnn3 = keras.layers.Flatten()(cnn3)
+    cnn3 = keras.layers.Dense(128, kernel_initializer='normal', activation='relu')(cnn3)
+
+
+    # merge input models
+    merge = keras.layers.merge.concatenate([cnn1, cnn2, cnn3])
+    dense1 = keras.layers.Dense(128, kernel_initializer='normal', activation='relu')(merge)
+    dense2 = keras.layers.Dense(128, kernel_initializer='normal', activation='relu')(dense1) # changed from 64
+    output = keras.layers.Dense(10, kernel_initializer='normal', activation="linear", \
+        batch_size=batch_size)(dense2)
+
+    # Tie inputs together
+    model = keras.models.Model(inputs=[visible1, visible2, visible3], outputs=output)
+
+    # Compile the model
+    model.compile(optimizer='adam', loss='mse')
+
+
+    # fit model
+    model.fit_generator(generator=iter(data_gen), 
+                        steps_per_epoch=data_gen.steps_per_epoch, 
+                        epochs=data_gen.fit_epochs,
+                        callbacks=[ReportFitGoodness(validation_gen)]
+                        )
+
+
+    # Save the model to disk
+    model_json = model.to_json()
+    with open(model_file, "w") as json_file:
+        json_file.write(model_json)
+        
+    # serialize weights to HDF5
+    model.save_weights(weights_file)
+    print("Saved model to disk")
+
+
+    # Evaluate fit quality
+    evaluteFit(model, validation_gen)
+
+
+
+
+
+if __name__ == "__main__":
+
+
+    import argparse
+
+
+    ### COMMAND LINE ARGUMENTS
+
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Fit the ML model using the files listed in the given text file (file names only, one file per row).")
+
+    arg_parser.add_argument('input_list_path', metavar='INPUT_LIST_PATH', type=str, \
+        help="Path to file which holds the list of input files which should be in the same directory.")
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    #########################
+
+
+    ### INPUTS ###
+
+    batch_size = 50
+
+    steps_per_epoch = 20
+
+    # Model file names
+    model_file = "model.json"
+    weights_file = "model.h5"
+
+    ### ###
+
+
+    # Extract directory path and the input file name
+    dir_path, input_file = os.path.split(cml_args.input_list_path)
+
+    # Load the list of files from the given input file and randomly drawn limiting magnitude and length 
+    #   measurement delay used to generate the data
+    data_list = []
+    with open(cml_args.input_list_path) as f:
+        for entry in f:
+
+            # Skip comment lines
+            if entry.startswith("#"):
+                continue
+
+            entry = entry.replace('\n', '').replace('\r', '')
+
+            if not entry:
+                continue
+
+            # Split the data into the file name and postprocessing parameters
+            file_name, lim_mag, lim_mag_length, len_delay = entry.split(",")
+            lim_mag = float(lim_mag)
+            lim_mag_length = float(lim_mag_length)
+            len_delay = float(len_delay)
+
+            file_path = os.path.join(dir_path, file_name)
+
+            # Check if the given file exists
+            if os.path.isfile(file_path):
+
+                # Add the file to the processing list
+                data_list.append([file_name, [lim_mag, lim_mag_length, len_delay]])
+
+
+
+    print("{:d} inputs used for training...".format(len(data_list)))
+
+    # Init the data generator
+    data_gen = DataGenerator(dir_path, data_list, batch_size, steps_per_epoch, validation=False)
+
+    # Init the validation generator
+    validation_gen = DataGenerator(dir_path, data_list, batch_size, steps_per_epoch, validation=True)
+
+
+    # ## TEST DATA GEN ###
+    # for epoch in range(data_gen.fit_epochs):
+    #     for step in range(data_gen.steps_per_epoch):
+    #         print(epoch, "/", step)
+    #         print(next(iter(data_gen)))
+
+    # Fit the model
+    fitCNNMultiHeaded(data_gen, validation_gen, dir_path, model_file, weights_file)
