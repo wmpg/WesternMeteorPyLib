@@ -335,7 +335,7 @@ if __name__ == "__main__":
 
     ### INPUTS ###
 
-    batch_size = 64
+    batch_size = 256
 
     steps_per_epoch = 20
 
