@@ -59,8 +59,10 @@ class SimulationResults(object):
             self.mass_total_arr = results_list.T
 
 
-        # Calculate absolute magnitude (apparent @100km)
+        # Calculate absolute magnitude (apparent @100km), and fix possible NaN values (replace them with the
+        #   faintest magnitude)
         self.abs_magnitude = -2.5*np.log10(self.luminosity_arr/const.P_0m)
+        self.abs_magnitude[np.isnan(self.abs_magnitude)] = np.nanmax(self.abs_magnitude)
 
 
 

@@ -77,7 +77,6 @@ class DataGenerator(object):
         self.validation_index_start = self.fit_epochs*self.data_per_epoch - 1
 
 
-
     def __iter__(self):
 
         # Select valirable depending on if the validation data is used or not
@@ -88,7 +87,6 @@ class DataGenerator(object):
         else:
             curr_index = self.data_index_start
             epochs = self.fit_epochs
-
 
 
         # Generate data for every epoch
@@ -292,7 +290,9 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
     model.fit_generator(generator=iter(data_gen), 
                         steps_per_epoch=data_gen.steps_per_epoch, 
                         epochs=data_gen.fit_epochs,
-                        callbacks=[ReportFitGoodness(validation_gen)]
+                        callbacks=[ReportFitGoodness(validation_gen)],
+                        workers=0,
+                        max_queue_size=1
                         )
 
 
@@ -337,7 +337,7 @@ if __name__ == "__main__":
 
     batch_size = 256
 
-    steps_per_epoch = 20
+    steps_per_epoch = 50
 
     # Model file names
     model_file = "model.json"

@@ -407,6 +407,10 @@ def extractSimData(sim, min_frames_visible=10, check_only=False, postprocess_par
 
     ### ###
 
+    # Fix NaN values in the simulated magnitude
+    sim.simulation_results.abs_magnitude[np.isnan(sim.simulation_results.abs_magnitude)] \
+        = np.nanmax(sim.simulation_results.abs_magnitude)
+
 
     # Get indices that are above the faintest limiting magnitude
     indices_visible = sim.simulation_results.abs_magnitude <= lim_mag_faintest
