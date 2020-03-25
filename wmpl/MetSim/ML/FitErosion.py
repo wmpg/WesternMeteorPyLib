@@ -8,10 +8,21 @@ import copy
 import numpy as np
 import keras
 
+
 from wmpl.Utils.Pickling import loadPickle
+from wmpl.Utils.PyDomainParallelizer import domainParallelizer
 from wmpl.MetSim.ML.GenerateSimulations import DATA_LENGTH, MetParam, ErosionSimContainer, \
     ErosionSimParametersCAMO, extractSimData
 
+
+
+def dataFunction(data_path, file_name, postprocess_params):
+
+    # Load the pickle file
+    sim = loadPickle(data_path, file_name)
+
+    # Extract model inputs and outputs
+    return extractSimData(sim, postprocess_params=postprocess_params)
 
 
 class DataGenerator(object):
@@ -90,24 +101,54 @@ class DataGenerator(object):
             beg_index = curr_index
             file_list = self.data_list[beg_index:(beg_index + self.batch_size)]
 
-            # Load all pickle files in the data path directory
-            skipped_files = 0
+            # Load pickle files and postprocess in parallel
+            domain = []
             for entry in file_list:
 
                 file_name, postprocess_params = entry
 
-                # Load the pickle file
-                sim = loadPickle(self.data_path, file_name)
+                domain.append([self.data_path, file_name, postprocess_params])
 
-                # Extract model inputs and outputs
-                res = extractSimData(sim, postprocess_params=postprocess_params)
+
+            # Postprocess the data in parallel
+            res_list = domainParallelizer(domain, dataFunction)
+
+            # Postprocess results
+            filtered_res = []
+            for res in res_list:
+
+                curr_index += 1
 
                 # Skip simulation which did not satisfy filters
                 if res is None:
                     print("Skipped:", file_name)
-                    file_list.append(self.data_list[beg_index + self.batch_size + skipped_files + 1])
-                    skipped_files += 1
                     continue
+
+                filtered_res.append(res)
+
+            res_list = filtered_res
+
+
+            # Load more results using one core until the proper length is achieved
+            while len(res_list) < self.batch_size:
+
+                file_name, postprocess_params = self.data_list[curr_index]
+
+                # Extract model inputs and outputs from the pickle file
+                res = dataFunction(self.data_path, file_name, postprocess_params)
+
+                curr_index += 1
+
+                # Skip simulation which did not satisfy filters
+                if res is None:
+                    print("Skipped:", file_name)
+                    continue
+
+                res_list.append(res)
+
+
+            # Split results to input/output list
+            for res in res_list:
 
                 # Extract results
                 model_params, input_data_normed, simulated_data_normed = res
@@ -116,9 +157,14 @@ class DataGenerator(object):
                 param_list.append(input_data_normed)
                 result_list.append(simulated_data_normed)
 
-                curr_index += 1
 
-            curr_index += skipped_files
+            # # Skip simulation which did not satisfy filters
+            #     if res is None:
+            #         print("Skipped:", file_name)
+            #         file_list.append(self.data_list[beg_index + self.batch_size + skipped_files + 1])
+            #         skipped_files += 1
+            #         continue
+
 
             param_list = np.array(param_list)
             result_list = np.array(result_list)
@@ -231,7 +277,7 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
     # merge input models
     merge = keras.layers.merge.concatenate([cnn1, cnn2, cnn3])
     dense1 = keras.layers.Dense(128, kernel_initializer='normal', activation='relu')(merge)
-    dense2 = keras.layers.Dense(128, kernel_initializer='normal', activation='relu')(dense1) # changed from 64
+    dense2 = keras.layers.Dense(64, kernel_initializer='normal', activation='relu')(dense1)
     output = keras.layers.Dense(10, kernel_initializer='normal', activation="linear", \
         batch_size=batch_size)(dense2)
 
@@ -289,7 +335,7 @@ if __name__ == "__main__":
 
     ### INPUTS ###
 
-    batch_size = 50
+    batch_size = 64
 
     steps_per_epoch = 20
 
@@ -347,7 +393,9 @@ if __name__ == "__main__":
     # for epoch in range(data_gen.fit_epochs):
     #     for step in range(data_gen.steps_per_epoch):
     #         print(epoch, "/", step)
-    #         print(next(iter(data_gen)))
+    #         result_list, param_list = next(iter(data_gen))
+
+    #         print(len(param_list))
 
     # Fit the model
     fitCNNMultiHeaded(data_gen, validation_gen, dir_path, model_file, weights_file)
