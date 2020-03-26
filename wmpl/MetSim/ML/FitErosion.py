@@ -281,7 +281,7 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
     dense = keras.layers.Dense(128, kernel_initializer='normal', activation='relu')(dense)
     dense = keras.layers.Dense(128, kernel_initializer='normal', activation='relu')(dense)
     output = keras.layers.Dense(10, kernel_initializer='normal', activation="linear", \
-        batch_size=batch_size)(dense2)
+        batch_size=batch_size)(dense)
 
     # Tie inputs together
     model = keras.models.Model(inputs=[visible1, visible2, visible3], outputs=output)
