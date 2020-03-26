@@ -252,30 +252,34 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
 
     # Height input model
     visible1 = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 1))
-    cnn1 = keras.layers.Conv1D(filters=32, kernel_size=4, activation='relu')(visible1)
+    cnn1 = keras.layers.Conv1D(filters=32, kernel_size=5, activation='relu')(visible1)
     cnn1 = keras.layers.MaxPooling1D(pool_size=2)(cnn1)
     cnn1 = keras.layers.Flatten()(cnn1)
+    cnn1 = keras.layers.Dense(128, kernel_initializer='normal', activation='relu')(cnn1)
     cnn1 = keras.layers.Dense(128, kernel_initializer='normal', activation='relu')(cnn1)
 
     # Length input model
     visible2 = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 1))
-    cnn2 = keras.layers.Conv1D(filters=32, kernel_size=4, activation='relu')(visible2)
+    cnn2 = keras.layers.Conv1D(filters=32, kernel_size=5, activation='relu')(visible2)
     cnn2 = keras.layers.MaxPooling1D(pool_size=2)(cnn2)
     cnn2 = keras.layers.Flatten()(cnn2)
+    cnn2 = keras.layers.Dense(128, kernel_initializer='normal', activation='relu')(cnn2)
     cnn2 = keras.layers.Dense(128, kernel_initializer='normal', activation='relu')(cnn2)
 
     # Magnitude input model
     visible3 = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 1))
-    cnn3 = keras.layers.Conv1D(filters=32, kernel_size=4, activation='relu')(visible3)
+    cnn3 = keras.layers.Conv1D(filters=32, kernel_size=5, activation='relu')(visible3)
     cnn3 = keras.layers.MaxPooling1D(pool_size=2)(cnn3)
     cnn3 = keras.layers.Flatten()(cnn3)
+    cnn3 = keras.layers.Dense(128, kernel_initializer='normal', activation='relu')(cnn3)
     cnn3 = keras.layers.Dense(128, kernel_initializer='normal', activation='relu')(cnn3)
 
 
     # merge input models
     merge = keras.layers.merge.concatenate([cnn1, cnn2, cnn3])
-    dense1 = keras.layers.Dense(128, kernel_initializer='normal', activation='relu')(merge)
-    dense2 = keras.layers.Dense(64, kernel_initializer='normal', activation='relu')(dense1)
+    dense = keras.layers.Dense(128, kernel_initializer='normal', activation='relu')(merge)
+    dense = keras.layers.Dense(128, kernel_initializer='normal', activation='relu')(dense)
+    dense = keras.layers.Dense(128, kernel_initializer='normal', activation='relu')(dense)
     output = keras.layers.Dense(10, kernel_initializer='normal', activation="linear", \
         batch_size=batch_size)(dense2)
 
