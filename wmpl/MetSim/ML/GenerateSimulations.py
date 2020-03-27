@@ -567,7 +567,7 @@ def generateErosionSim(output_dir, erosion_sim_params, random_seed, min_frames_v
     erosion_cont.runSimulation()
 
     # Check if the simulation satisfies the visibility criteria
-    res = extractSimData(erosion_cont, min_frames_visible=min_frames_visible)
+    res = extractSimData(erosion_cont, min_frames_visible=min_frames_visible, check_only=True)
     if res is not None:
         return [erosion_cont.file_name, res]
 
