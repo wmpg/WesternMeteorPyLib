@@ -3945,12 +3945,12 @@ class Trajectory(object):
             ##################################################################################################
 
             # Plot vertical residuals
-            plt.scatter(obs.time_data, obs.v_residuals, c='red', \
+            plt.scatter(obs.time_data, obs.v_residuals, c='r', \
                 label='Vertical, RMSD = {:.2f} m'.format(obs.v_res_rms), zorder=3, s=4, marker='o')
 
             # Plot horizontal residuals
             plt.scatter(obs.time_data, obs.h_residuals, c='b', \
-                label='Horizontal, RMSD = {:.2f} m'.format(obs.h_res_rms), zorder=3, marker='+')
+                label='Horizontal, RMSD = {:.2f} m'.format(obs.h_res_rms), zorder=3, s=4, marker='+')
 
             # Mark ignored points
             if np.any(obs.ignore_list):
