@@ -12,3 +12,4 @@ basemap
 PyQt5
 pyyaml
 pyswarms
+keras
