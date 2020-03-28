@@ -560,7 +560,7 @@ def generateErosionSim(output_dir, erosion_sim_params, random_seed, min_frames_v
 
     # Init simulation container
     erosion_cont = ErosionSimContainer(output_dir, copy.deepcopy(erosion_sim_params), random_seed=random_seed)
-
+    file_name = erosion_cont.file_name
     print("Running:", erosion_cont.file_name)
 
     # Run the simulation and save results
@@ -568,8 +568,12 @@ def generateErosionSim(output_dir, erosion_sim_params, random_seed, min_frames_v
 
     # Check if the simulation satisfies the visibility criteria
     res = extractSimData(erosion_cont, min_frames_visible=min_frames_visible, check_only=True)
+        
+    # Free up memory
+    del erosion_cont
+
     if res is not None:
-        return [erosion_cont.file_name, res]
+        return [file_name, res]
 
     else:
         return None
