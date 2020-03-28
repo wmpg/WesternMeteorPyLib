@@ -120,8 +120,6 @@ def domainParallelizer(domain, function, cores=None, kwarg_dict=None):
 
     """
 
-    from contextlib import closing
-
 
     def _logResult(result):
         """ Save the result from the async multiprocessing to a results list. """
@@ -153,7 +151,7 @@ def domainParallelizer(domain, function, cores=None, kwarg_dict=None):
         pool = multiprocessing.Pool(cores)
 
         # Maximum number of jobs in waiting
-        max_jobs = 2*cores
+        max_jobs = 10*cores
 
         # Give workers things to do
         count = 0
@@ -164,7 +162,7 @@ def domainParallelizer(domain, function, cores=None, kwarg_dict=None):
 
             # Limit the amount of jobs in wawiting
             count += 1
-            if count%10 == 0:
+            if count%cores == 0:
                 if len(pool._cache) > max_jobs:
                     last_job.wait()
 
