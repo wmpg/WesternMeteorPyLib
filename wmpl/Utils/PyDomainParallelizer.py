@@ -2,7 +2,7 @@ from __future__ import print_function
 
 import multiprocessing
 
-
+from contextlib import closing
 
 
 
@@ -147,28 +147,24 @@ def domainParallelizer(domain, function, cores=None, kwarg_dict=None):
     # Run real multiprocessing if more than one core
     elif cores > 1:
 
-        # Generate a pool of workers
-        pool = multiprocessing.Pool(cores)
-
         # Maximum number of jobs in waiting
         max_jobs = 10*cores
 
-        # Give workers things to do
-        count = 0
-        for args in domain:
+        # Generate a pool of workers
+        with closing(multiprocessing.Pool(cores)) as pool:
 
-            # Give job to worker
-            last_job = pool.apply_async(function, args, kwarg_dict, callback=_logResult)
+            # Give workers things to do
+            count = 0
+            for args in domain:
 
-            # Limit the amount of jobs in wawiting
-            count += 1
-            if count%cores == 0:
-                if len(pool._cache) > max_jobs:
-                    last_job.wait()
+                # Give job to worker
+                last_job = pool.apply_async(function, args, kwarg_dict, callback=_logResult)
 
-        # Clean up
-        pool.close()
-        pool.join()
+                # Limit the amount of jobs in waiting
+                count += 1
+                if count%cores == 0:
+                    if len(pool._cache) > max_jobs:
+                        last_job.wait()
 
 
     else:
