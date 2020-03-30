@@ -3950,7 +3950,7 @@ class Trajectory(object):
 
             # Plot horizontal residuals
             plt.scatter(obs.time_data, obs.h_residuals, c='b', \
-                label='Horizontal, RMSD = {:.2f} m'.format(obs.h_res_rms), zorder=3, s=4, marker='+')
+                label='Horizontal, RMSD = {:.2f} m'.format(obs.h_res_rms), zorder=3, s=20, marker='+')
 
             # Mark ignored points
             if np.any(obs.ignore_list):
