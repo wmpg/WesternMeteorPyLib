@@ -624,8 +624,9 @@ if __name__ == "__main__":
         file_mode = 'w'
 
     with open(simulation_results_file, file_mode) as f:
-        for file_name in results:
-            if file_name is not None:
+        for entry in results:
+            if entry is not None:
+                file_name = entry[0]
                 f.write("{:s}\n".format(file_name))
 
     ### ###
