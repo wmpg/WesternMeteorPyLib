@@ -354,7 +354,7 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_eq
 
         # Take extra steps in E if the orbit is very large
         if a > 50:
-            E = np.linspace(-np.pi, np.pi, (a/20.0)*100)
+            E = np.linspace(-np.pi, np.pi, int((a/20.0)*100))
 
         # Get the orbit in cartesian space
         x, y, z = orbitalElements2Cartesian(a, e, I, peri, node, E)
@@ -369,7 +369,10 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_eq
         # Plot orbits
         ax.plot(x, y, z, c=color, **kwargs)
 
-    ax.legend()
+
+    # Plot the legend if there are any labels
+    if ax.get_legend_handles_labels()[0]:
+        ax.legend()
 
     # Add limits (in AU)
     ax.set_xlim3d(-6, 6)
