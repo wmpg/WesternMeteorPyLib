@@ -12,22 +12,22 @@ import keras
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PyDomainParallelizer import domainParallelizer
 from wmpl.MetSim.ML.GenerateSimulations import DATA_LENGTH, MetParam, ErosionSimContainer, \
-    ErosionSimParametersCAMO, extractSimData
+    ErosionSimParametersCAMO, ErosionSimParametersCAMOWide, extractSimData
 
 
 
-def dataFunction(data_path, file_name, postprocess_params):
+def dataFunction(file_path, param_class_name, postprocess_params):
 
     # Load the pickle file
-    sim = loadPickle(data_path, file_name)
+    sim = loadPickle(*os.path.split(file_path))
 
     # Extract model inputs and outputs
-    return extractSimData(sim, postprocess_params=postprocess_params)
+    return extractSimData(sim, param_class_name=param_class_name, postprocess_params=postprocess_params)
 
 
 class DataGenerator(object):
-    def __init__(self, data_path, data_list, batch_size, steps_per_epoch, validation=False, \
-            validation_portion=0.2):
+    def __init__(self, data_path, data_list, batch_size, steps_per_epoch, param_class_name=None, \
+            validation=False, validation_portion=0.2):
         """ Generate meteor data for the ML fit function. 
     
         Arguments:
@@ -37,6 +37,8 @@ class DataGenerator(object):
             steps_per_epoch: [int] Number of steps in every epoch (iteration) with batch_size inputs each.
 
         Keyword arguments:
+            param_class_name: [str] Override the simulation parameters object with an instance of the given
+                class. An exact name of the class needs to be given.
             validation: [bool] Generate validation data. False by default.
             validation_portion: [float] Portion of input files to be used for validation.
         """
@@ -46,6 +48,8 @@ class DataGenerator(object):
         self.batch_size = batch_size
         self.steps_per_epoch = steps_per_epoch
         self.data_list = data_list
+
+        self.param_class_name = param_class_name
 
         self.validation = validation
 
@@ -103,9 +107,9 @@ class DataGenerator(object):
             domain = []
             for entry in file_list:
 
-                file_name, postprocess_params = entry
+                file_path, postprocess_params = entry
 
-                domain.append([self.data_path, file_name, postprocess_params])
+                domain.append([file_path, self.param_class_name, postprocess_params])
 
 
             # Postprocess the data in parallel
@@ -119,7 +123,7 @@ class DataGenerator(object):
 
                 # Skip simulation which did not satisfy filters
                 if res is None:
-                    print("Skipped:", file_name)
+                    print("Skipped:", file_path)
                     continue
 
                 filtered_res.append(res)
@@ -130,16 +134,16 @@ class DataGenerator(object):
             # Load more results using one core until the proper length is achieved
             while len(res_list) < self.batch_size:
 
-                file_name, postprocess_params = self.data_list[curr_index]
+                file_path, postprocess_params = self.data_list[curr_index]
 
                 # Extract model inputs and outputs from the pickle file
-                res = dataFunction(self.data_path, file_name, postprocess_params)
+                res = dataFunction(file_path, self.param_class_name, postprocess_params)
 
                 curr_index += 1
 
                 # Skip simulation which did not satisfy filters
                 if res is None:
-                    print("Skipped:", file_name)
+                    print("Skipped:", file_path)
                     continue
 
                 res_list.append(res)
@@ -154,14 +158,6 @@ class DataGenerator(object):
                 # Add data to model input and output lists
                 param_list.append(input_data_normed)
                 result_list.append(simulated_data_normed)
-
-
-            # # Skip simulation which did not satisfy filters
-            #     if res is None:
-            #         print("Skipped:", file_name)
-            #         file_list.append(self.data_list[beg_index + self.batch_size + skipped_files + 1])
-            #         skipped_files += 1
-            #         continue
 
 
             param_list = np.array(param_list)
@@ -340,7 +336,7 @@ if __name__ == "__main__":
 
     ### INPUTS ###
 
-    batch_size = 1024
+    batch_size = 256
 
     steps_per_epoch = 80
 
@@ -357,41 +353,46 @@ if __name__ == "__main__":
     # Load the list of files from the given input file and randomly drawn limiting magnitude and length 
     #   measurement delay used to generate the data
     data_list = []
+    param_class_name = None
     with open(cml_args.input_list_path) as f:
         for entry in f:
 
-            # Skip comment lines
-            if entry.startswith("#"):
-                continue
-
             entry = entry.replace('\n', '').replace('\r', '')
+
+            # Process comment lines
+            if entry.startswith("#"):
+
+                # Extract the name of the parameter class
+                if "param_class_name" in entry:
+                    param_class_name = entry.split('=')[1].strip()
+
+                continue
 
             if not entry:
                 continue
 
             # Split the data into the file name and postprocessing parameters
-            file_name, lim_mag, lim_mag_length, len_delay = entry.split(",")
+            file_path, lim_mag, lim_mag_length, len_delay = entry.split(",")
             lim_mag = float(lim_mag)
             lim_mag_length = float(lim_mag_length)
             len_delay = float(len_delay)
-
-            file_path = os.path.join(dir_path, file_name)
 
             # Check if the given file exists
             if os.path.isfile(file_path):
 
                 # Add the file to the processing list
-                data_list.append([file_name, [lim_mag, lim_mag_length, len_delay]])
-
+                data_list.append([file_path, [lim_mag, lim_mag_length, len_delay]])
 
 
     print("{:d} inputs used for training...".format(len(data_list)))
 
     # Init the data generator
-    data_gen = DataGenerator(dir_path, data_list, batch_size, steps_per_epoch, validation=False)
+    data_gen = DataGenerator(dir_path, data_list, batch_size, steps_per_epoch, \
+        param_class_name=param_class_name, validation=False)
 
     # Init the validation generator
-    validation_gen = DataGenerator(dir_path, data_list, batch_size, steps_per_epoch, validation=True)
+    validation_gen = DataGenerator(dir_path, data_list, batch_size, steps_per_epoch, \
+        param_class_name=param_class_name, validation=True)
 
 
     # ## TEST DATA GEN ###

@@ -17,13 +17,21 @@ from wmpl.MetSim.MetSimErosion import Constants
 from wmpl.MetSim.MetSimErosion import runSimulation as runSimulationErosion
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly
 from wmpl.Utils.Math import padOrTruncate
+from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.TrajConversions import J2000_JD
-from wmpl.Utils.Pickling import savePickle
+from wmpl.Utils.Pickling import savePickle, loadPickle
 from wmpl.Utils.PyDomainParallelizer import domainParallelizer
 
 
+### CONSTANTS ###
+
 # Length of data that will be used as an input during training
 DATA_LENGTH = 256
+
+# Default number of minimum frames for simulation
+MIN_FRAMES_VISIBLE = 10
+
+### ###
 
 
 class MetParam(object):
@@ -38,6 +46,11 @@ class MetParam(object):
 
 
 
+
+
+##############################################################################################################
+### SIMULATION PARAMETER CLASSES ###
+### MAKE SURE TO ADD ANY NEW CLASSES TO THE "SIM_CLASSES" VARIABLE!
 
 class ErosionSimParametersCAMO(object):
     def __init__(self):
@@ -187,6 +200,161 @@ class ErosionSimParametersCAMO(object):
 
         ### ###
 
+
+class ErosionSimParametersCAMOWide(object):
+    def __init__(self):
+        """ Range of physical parameters for the erosion model, CAMO system. """
+
+
+        # Define the reference time for the atmosphere density model as J2000
+        self.jdt_ref = J2000_JD.days
+
+
+        ## Atmosphere density ##
+        #   Use the atmosphere density for the time at J2000 and coordinates of Elginfield
+        self.dens_co = fitAtmPoly(np.radians(43.19301), np.radians(-81.315555), 60000, 180000, self.jdt_ref)
+
+        ##
+
+
+        # List of simulation parameters
+        self.param_list = []
+
+
+
+        ## System parameters ##
+
+        # System limiting magnitude (given as a range)
+        self.lim_mag_faintest = +5.8
+        self.lim_mag_brightest = +5.0
+
+        # Limiting magnitude for length measurements end (given by a range)
+        #   This should be the same as the two value above for all other systems except for CAMO
+        self.lim_mag_len_end_faintest = self.lim_mag_faintest
+        self.lim_mag_len_end_brightest = self.lim_mag_brightest
+
+
+        # Power of a zero-magnitude meteor (Watts)
+        self.P_0M = 840
+
+        # System FPS
+        self.fps = 80
+
+        # Time lag of length measurements (range in seconds) - accomodate CAMO tracking delay of 8 frames
+        #   This should be 0 for all other systems except for the CAMO mirror tracking system
+        self.len_delay_min = 0
+        self.len_delay_max = 0
+
+        # Simulation height range (m) that will be used to map the output to a grid
+        self.sim_height = MetParam(70000, 130000)
+
+
+        ##
+
+
+        ## Physical parameters
+
+        # Mass range (kg)
+        self.m_init = MetParam(5e-7, 1e-3)
+        self.param_list.append("m_init")
+
+        # Initial velocity range (m/s)
+        self.v_init = MetParam(11000, 72000)
+        self.param_list.append("v_init")
+
+        # Zenith angle range
+        self.zenith_angle = MetParam(np.radians(0.0), np.radians(80.0))
+        self.param_list.append("zenith_angle")
+
+        # Density range (kg/m^3)
+        self.rho = MetParam(100, 6000)
+        self.param_list.append("rho")
+
+        # Intrinsic ablation coeff range (s^2/m^2)
+        self.sigma = MetParam(0.001/1e6, 0.5/1e6)
+        self.param_list.append("sigma")
+
+        ##
+
+
+        ## Erosion parameters ##
+        ## Assumes no change in erosion once it starts!
+
+        # Erosion height range
+        self.erosion_height_start = MetParam(70000, 130000)
+        self.param_list.append("erosion_height_start")
+
+        # Erosion coefficient (s^2/m^2)
+        self.erosion_coeff = MetParam(0.0, 0.5/1e6)
+        self.param_list.append("erosion_coeff")
+
+        # Mass index
+        self.erosion_mass_index = MetParam(1.0, 3.0)
+        self.param_list.append("erosion_mass_index")
+
+        # Minimum mass for erosion
+        self.erosion_mass_min = MetParam(1e-12, 1e-9)
+        self.param_list.append("erosion_mass_min")
+
+        # Maximum mass for erosion
+        self.erosion_mass_max = MetParam(1e-11, 1e-7)
+        self.param_list.append("erosion_mass_max")
+
+        ## 
+
+
+        ### Simulation quality checks ###
+
+        # Minimum time above the limiting magnitude (10 frames)
+        #   This is a minimum for both magnitude and length!
+        self.visibility_time_min = 10.0/self.fps
+
+        ### ###
+
+
+        ### Added noise ###
+
+        # Standard deviation of the magnitude Gaussian noise
+        self.mag_noise = 0.1
+
+        # SD of noise in length (m)
+        self.len_noise = 20.0
+
+        ### ###
+
+
+        ### Fit parameters ###
+
+        # Length of input data arrays that will be given to the neural network
+        self.data_length = DATA_LENGTH
+
+        ### ###
+
+
+        ### Output normalization range ###
+
+        # Height range (m)
+        self.ht_min = 70000
+        self.ht_max = 130000
+
+        # Magnitude range
+        self.mag_faintest = self.lim_mag_faintest
+        self.mag_brightest = -2
+
+
+        # Compute length range
+        self.len_min = 0
+        self.len_max = self.v_init.max*self.data_length/self.fps
+
+
+        ### ###
+
+
+# List of classed that can be used for data generation and postprocessing
+SIM_CLASSES = [ErosionSimParametersCAMO, ErosionSimParametersCAMOWide]
+SIM_CLASSES_NAMES = [c.__name__ for c in SIM_CLASSES]
+
+##############################################################################################################
 
 
 class ErosionSimContainer(object):
@@ -349,16 +517,47 @@ class ErosionSimContainer(object):
         self.simulation_results = SimulationResults(self.const, results_list, wake_results)
 
 
+        ### Sort saved files into a directory structure split by velocity and density ###
+
+        # Extract the velocity part
+        split_file = self.file_name.split("_")
+        vel = float(split_file[2].strip("v"))
+
+        # Make velocity folder name
+        vel_folder = "v{:02d}".format(int(vel))
+        vel_folder_path = os.path.join(self.output_dir, vel_folder)
+
+        # Create the velocity folder if it doesn't already exist
+        if not os.path.isdir(vel_folder_path):
+            os.makedirs(vel_folder_path)
+
+
+        # Extract the density part
+        dens = 100*int(float(split_file[4].strip("rho"))/100)
+
+        # Make density folder name
+        dens_folder = "rho{:04d}".format(dens)
+        dens_folder_path = os.path.join(vel_folder_path, dens_folder)
+
+        # Make the density folder
+        if not os.path.isdir(dens_folder_path):
+            os.makedirs(dens_folder_path)
+
+
+        ###
+
+
         # # Save results as a JSON file
         # self.saveJSON()
 
         # Save results as a pickle file
-        savePickle(self, self.output_dir, self.file_name + ".pickle")
+        savePickle(self, dens_folder_path, self.file_name + ".pickle")
 
 
 
 
-def extractSimData(sim, min_frames_visible=10, check_only=False, postprocess_params=None):
+def extractSimData(sim, min_frames_visible=MIN_FRAMES_VISIBLE, check_only=False, param_class_name=None, \
+    postprocess_params=None):
     """ Extract input parameters and model outputs from the simulation container and normalize them. 
 
     Arguments:
@@ -367,7 +566,9 @@ def extractSimData(sim, min_frames_visible=10, check_only=False, postprocess_par
     Keyword arguments:
         min_frames_visible: [int] Minimum number of frames above the limiting magnitude
         check_only: [bool] Only check if the simulation satisfies filters, don' compute eveything.
-            Speed up the evaluation. False by default
+            Speed up the evaluation. False by default.
+        param_class_name: [str] Override the simulation parameters object with an instance of the given
+            class. An exact name of the class needs to be given.
         postprocess_params: [list] A list of limiting magnitude for wide and narrow fields, and the delay in
             length measurements. None by default, in which case they will be generated herein.
 
@@ -379,9 +580,15 @@ def extractSimData(sim, min_frames_visible=10, check_only=False, postprocess_par
 
     """
 
-    # Create a frash instance of the system parameters
-    #params_obj = getattr(GenerateSimulations, sim.params.__class__.__name__)
-    params = globals()[sim.params.__class__.__name__]()
+    # Create a frash instance of the system parameters if the same parameters are used as in the simulation
+    if param_class_name is None:
+        #params_obj = getattr(GenerateSimulations, sim.params.__class__.__name__)
+        params = globals()[sim.params.__class__.__name__]()
+
+    # Override the system parameters using the given class
+    else:
+        params = globals()[param_class_name]()
+
 
 
     ### DRAW LIMITING MAGNITUDE AND LENGTH DELAY ###
@@ -555,7 +762,7 @@ def extractSimData(sim, min_frames_visible=10, check_only=False, postprocess_par
 
 
 
-def generateErosionSim(output_dir, erosion_sim_params, random_seed, min_frames_visible=10):
+def generateErosionSim(output_dir, erosion_sim_params, random_seed, min_frames_visible=MIN_FRAMES_VISIBLE):
     """ Randomly generate parameters for the erosion simulation, run it, and store results. """
 
     # Init simulation container
@@ -580,6 +787,64 @@ def generateErosionSim(output_dir, erosion_sim_params, random_seed, min_frames_v
 
 
 
+def saveProcessedList(data_path, results_list, param_class_name, min_frames_visible):
+    """ Save a list of pickle files which passes postprocessing criteria to disk.
+
+    Arguments:
+        data_path: [str] Path to directory with simulation pickle files.
+        results_list: [list] A list of pickle files which passes the filers, plus randomly drawn parameters 
+            such as the limiting magnitude. If the pickle file didn't pass the filter, None is the entry.
+        param_class_name: [str] Name of the parameter class used for postprocessing.
+        min_frame_visible: [int] Minimum number of frames above the limting magnitude.
+
+    """
+
+    # Reject all None's from the results
+    good_list = [entry for entry in results_list if entry is not None]
+
+    # Load one simulation to get simulation parameters
+    sim = loadPickle(data_path, good_list[0][0])
+
+    # Compute the average minimum time the meteor needs to be visible
+    min_time_visible = min_frames_visible/sim.params.fps \
+        + (sim.params.len_delay_min + sim.params.len_delay_max)/2
+
+    # Save the list of good files to disk
+    simulation_resuts_file = "{:s}_lm{:+04.1f}_mintime{:.3f}s_good_files.txt".format(param_class_name, \
+        (sim.params.lim_mag_faintest + sim.params.lim_mag_brightest)/2, min_time_visible)
+
+    # If the file exists, append to it
+    append = False
+    if os.path.isfile(simulation_resuts_file):
+        file_mode = 'a'
+        append = True
+    else:
+        file_mode = 'w'
+
+    with open(os.path.join(data_path, simulation_resuts_file), file_mode) as f:
+
+        # Write the header when the file is created
+        if not append:
+
+            ### Write header ###
+
+            # Write name of class used for postprocessing
+            if param_class_name is None:
+                param_class_name = sim.params.__class__.__name__
+            f.write("# param_class_name = {:s}\n".format(param_class_name))
+
+            # Write column labels
+            f.write("# File name, lim mag, lim mag length, length delay (s)\n")
+
+            ### ###
+
+        # Write entries
+        for file_name, random_params in good_list:
+            f.write("{:s}, {:.8f}, {:.8f}, {:.8f}\n".format(file_name, *random_params))
+
+    print("{:d} entries saved to {:s}".format(len(good_list), simulation_resuts_file))
+
+
 
 if __name__ == "__main__":
 
@@ -594,6 +859,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('output_dir', metavar='OUTPUT_PATH', type=str, \
         help="Path to the output directory.")
 
+    arg_parser.add_argument('simclass', metavar='SIM_CLASS', type=str, \
+        help="Use simulation parameters from the given class. Options: {:s}".format(", ".join(SIM_CLASSES_NAMES)))
+
     arg_parser.add_argument('nsims', metavar='SIM_NUM', type=int, \
         help="Number of simulations to do.")
 
@@ -603,30 +871,19 @@ if __name__ == "__main__":
     #########################
 
 
+    # Make the output directory
+    mkdirP(cml_args.output_dir)
+
+
     # Init simulation parameters for CAMO
     erosion_sim_params = ErosionSimParametersCAMO()
 
     # Generate simulations using multiprocessing
     input_list = [[cml_args.output_dir, copy.deepcopy(erosion_sim_params), \
         np.random.randint(0, 2**31 - 1)] for _ in range(cml_args.nsims)]
-    results = domainParallelizer(input_list, generateErosionSim)
+    results_list = domainParallelizer(input_list, generateErosionSim)
 
 
-    ### Save the list of simulations that passed the criteria to disk ###
-
-    # Results file
-    simulation_results_file = os.path.join(cml_args.output_dir, "simulations_to_fit.txt")
-
-    # If the file exists, append to it
-    if os.path.isfile(simulation_results_file):
-        file_mode = 'a'
-    else:
-        file_mode = 'w'
-
-    with open(simulation_results_file, file_mode) as f:
-        for entry in results:
-            if entry is not None:
-                file_name = entry[0]
-                f.write("{:s}\n".format(file_name))
-
-    ### ###
+    # Save the list of simulations that passed the criteria to disk
+    saveProcessedList(cml_args.output_dir, results_list, erosion_sim_params.__class__.__name__, \
+        MIN_FRAMES_VISIBLE)
