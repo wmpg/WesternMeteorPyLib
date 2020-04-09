@@ -113,7 +113,9 @@ class MeteorObservation(object):
 
         out_str += 'Station ID = ' + str(self.station_id) + '\n'
         out_str += 'JD ref = {:f}'.format(self.jdt_ref) + '\n'
-        out_str += 'lat = {:f}, lon = {:f}, ht = {:f} m'.format(np.degrees(self.latitude), 
+        out_str += 'DT ref = {:s}'.format(jd2Date(self.jdt_ref, \
+            dt_obj=True).strftime("%Y/%m/%d-%H%M%S.%f")) + '\n'
+        out_str += 'Lat = {:f}, Lon = {:f}, Ht = {:f} m'.format(np.degrees(self.latitude), 
             np.degrees(self.longitude), self.height) + '\n'
         out_str += 'FPS = {:f}'.format(self.fps) + '\n'
 
@@ -554,9 +556,8 @@ def prepareObservations(meteor_list):
 
     if meteor_list:
 
-        # The first meteor is the reference one, normalize the first point to have t = 0, and set the JD to 
-        # that point
-        ref_ind = 0
+        # The reference meteor is the one with the first time of the first frame
+        ref_ind = np.argmin([met.jdt_ref + met.time_data[0]/86400.0 for met in meteor_list])
         tsec_delta = meteor_list[ref_ind].time_data[0] 
         jdt_delta = tsec_delta/86400.0
 
