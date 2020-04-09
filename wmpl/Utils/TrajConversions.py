@@ -102,6 +102,10 @@ def floatArguments(func):
         args = map(float, args)
         return func(*args, **kwargs)
 
+    # Set the docstring of the original function
+    inner_func.__name__ = func.__name__
+    inner_func.__doc__ = func.__doc__
+
     return inner_func
 
 
