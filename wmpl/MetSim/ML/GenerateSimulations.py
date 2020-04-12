@@ -803,7 +803,7 @@ def saveProcessedList(data_path, results_list, param_class_name, min_frames_visi
     good_list = [entry for entry in results_list if entry is not None]
 
     # Load one simulation to get simulation parameters
-    sim = loadPickle(data_path, good_list[0][0])
+    sim = loadPickle(data_path, good_list[0][0] + ".pickle")
 
     # Compute the average minimum time the meteor needs to be visible
     min_time_visible = min_frames_visible/sim.params.fps \
