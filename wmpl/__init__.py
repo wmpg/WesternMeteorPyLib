@@ -1,7 +1,10 @@
+""" Import all submodules. """
+
 
 import pkgutil
 
-# Import all submodules
+# Excluded packages
+exclude = ["MetSim.ML"]
 
 __all__ = []
 for loader, module_name, is_pkg in pkgutil.walk_packages(__path__):
@@ -12,7 +15,21 @@ for loader, module_name, is_pkg in pkgutil.walk_packages(__path__):
 
     # Skip Supracenter
     if 'Supracenter' in module_name:
-    	continue
+        continue
+
+
+    ### Skip exluded packages ###
+    skip_package = False
+    for exclude_test in exclude:
+        if exclude_test in module_name:
+            skip_package = True
+            break
+
+    if skip_package:
+        continue
+
+    ### ###
+
 
     __all__.append(module_name)
     module = loader.find_module(module_name).load_module(module_name)
