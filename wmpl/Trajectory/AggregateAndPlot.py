@@ -1702,7 +1702,7 @@ def generateAutoPlotsAndReports(dir_path, traj_quality_params, prev_sols=10, sol
 
     # Open the full file for writing (first write to a temp file, then move it to a completed file)
     traj_summary_all_temp = TRAJ_SUMMARY_ALL + ".tmp"
-    with open(os.path.join(summary_monthly_dir, traj_summary_all_temp), 'w') as f_all:
+    with open(os.path.join(summary_dir, traj_summary_all_temp), 'w') as f_all:
 
         f_all.write("# Summary generated on {:s} UTC\n\r".format(str(datetime.datetime.utcnow())))
 
@@ -1733,11 +1733,11 @@ def generateAutoPlotsAndReports(dir_path, traj_quality_params, prev_sols=10, sol
                 header_written = True
 
     # Change the name of the temp file to the summary file
-    shutil.copy2(os.path.join(summary_monthly_dir, traj_summary_all_temp), 
-        os.path.join(summary_monthly_dir, TRAJ_SUMMARY_ALL))
+    shutil.copy2(os.path.join(summary_dir, traj_summary_all_temp), 
+        os.path.join(summary_dir, TRAJ_SUMMARY_ALL))
 
     # Remove the temp file
-    os.remove(os.path.join(summary_monthly_dir, traj_summary_all_temp))
+    os.remove(os.path.join(summary_dir, traj_summary_all_temp))
 
     print("Saved summary file with all orbits: {:s}".format(TRAJ_SUMMARY_ALL))
 
