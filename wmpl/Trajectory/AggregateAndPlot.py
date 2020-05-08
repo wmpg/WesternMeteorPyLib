@@ -1714,7 +1714,7 @@ def generateAutoPlotsAndReports(dir_path, traj_quality_params, prev_sols=10, sol
                     for line in f_monthly:
 
                         # Skip the header if it was already written
-                        if not header_written:
+                        if header_written:
                             if line.startswith("#"):
                                 continue
 
