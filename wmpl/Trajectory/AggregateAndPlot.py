@@ -1704,8 +1704,11 @@ def generateAutoPlotsAndReports(dir_path, traj_quality_params, prev_sols=10, sol
     traj_summary_all_temp = TRAJ_SUMMARY_ALL + ".tmp"
     with open(os.path.join(summary_monthly_dir, traj_summary_all_temp), 'w') as f_all:
 
+        f_all.write("# Summary generated on {:s} UTC\n\r".format(str(datetime.datetime.utcnow())))
+
         # Find all monthly trajectory reports
         header_written = False
+        skipped_summary_date = False
         for summary_name in sorted(os.listdir(summary_monthly_dir)):
             if summary_name.startswith("traj_summary_monthly_"):
 
@@ -1716,6 +1719,12 @@ def generateAutoPlotsAndReports(dir_path, traj_quality_params, prev_sols=10, sol
                         # Skip the header if it was already written
                         if header_written:
                             if line.startswith("#"):
+                                continue
+
+                        else:
+                            # If the header was not written, copy it, but skip the summary date at the top
+                            if not skipped_summary_date:
+                                skipped_summary_date = True
                                 continue
 
                         f_all.write(line)
