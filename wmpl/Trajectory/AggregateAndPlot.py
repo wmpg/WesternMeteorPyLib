@@ -1727,6 +1727,11 @@ def generateAutoPlotsAndReports(dir_path, traj_quality_params, prev_sols=10, sol
     shutil.copy2(os.path.join(summary_monthly_dir, traj_summary_all_temp), 
         os.path.join(summary_monthly_dir, TRAJ_SUMMARY_ALL))
 
+    # Remove the temp file
+    os.remove(os.path.join(summary_monthly_dir, traj_summary_all_temp))
+
+    print("Saved summary file with all orbits: {:s}".format(TRAJ_SUMMARY_ALL))
+
 
     ###
 
