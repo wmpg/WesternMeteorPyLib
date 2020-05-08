@@ -1865,7 +1865,7 @@ if __name__ == "__main__":
     # If auto trajectories should run, run in an infinite loop
     if cml_args.auto is not None:
 
-        print("Auto genrating plots and reports every {:.1f} hours using the last {:d} deg solar longitudes of data...".format(AUTO_RUN_FREQUENCY, cml_args.auto))
+        print("Auto generating plots and reports every {:.1f} hours using the last {:d} deg solar longitudes of data...".format(AUTO_RUN_FREQUENCY, cml_args.auto))
 
         if cml_args.autofirst is not None:
             print("The first run will use {:d} deg solar longitdes of data!".format(cml_args.autofirst))
