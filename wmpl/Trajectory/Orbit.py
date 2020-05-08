@@ -222,7 +222,7 @@ class Orbit(object):
             deg=True))
         out_str += "  Dec       = {:>+9.5f}{:s} deg\n".format(np.degrees(self.dec), _uncer('{:.4f}', 'dec', 
             deg=True))
-        out_str += "  Azimuth   = {:>+9.5f}{:s} deg\n".format(np.degrees(self.azimuth_apparent), \
+        out_str += "  Azimuth   = {:>9.5f}{:s} deg\n".format(np.degrees(self.azimuth_apparent), \
             _uncer('{:.4f}', 'azimuth_apparent', deg=True))
         out_str += "  Elevation = {:>+9.5f}{:s} deg\n".format(np.degrees(self.elevation_apparent), \
             _uncer('{:.4f}', 'elevation_apparent', deg=True))
@@ -249,7 +249,7 @@ class Orbit(object):
             'ra', deg=True))
         out_str += "  Dec       = {:>+9.5f}{:s} deg\n".format(np.degrees(self.dec_norot), _uncer('{:.4f}', \
             'dec', deg=True))
-        out_str += "  Azimuth   = {:>+9.5f}{:s} deg\n".format(np.degrees(self.azimuth_apparent_norot), \
+        out_str += "  Azimuth   = {:>9.5f}{:s} deg\n".format(np.degrees(self.azimuth_apparent_norot), \
             _uncer('{:.4f}', 'azimuth_apparent', deg=True))
         out_str += "  Elevation = {:>+9.5f}{:s} deg\n".format(np.degrees(self.elevation_apparent_norot), \
             _uncer('{:.4f}', 'elevation_apparent', deg=True))

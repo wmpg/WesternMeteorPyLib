@@ -50,7 +50,8 @@ AUTO_OUTPUT_DAILY_DIR = "daily"
 # Output directory for monthly plots
 AUTO_OUTPUT_MONTHLY_DIR = "monthly"
 
-
+# Summary file with all orbits
+TRAJ_SUMMARY_ALL = "traj_summary_all.txt"
 
 # Auto run frequency (hours)
 AUTO_RUN_FREQUENCY = 2
@@ -1533,8 +1534,9 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
 
 
 
-def generateAutoPlots(dir_path, traj_quality_params, prev_sols=10, sol_window=1):
-    """ Auto generate plots per degree of solar longitude and put them in the AUTO_OUTPUT_DATA_DIR that is in the parent directory of dir_path. 
+def generateAutoPlotsAndReports(dir_path, traj_quality_params, prev_sols=10, sol_window=1):
+    """ Auto generate plots per degree of solar longitude and put them in the AUTO_OUTPUT_DATA_DIR that is 
+        in the parent directory of dir_path. 
     
     Arguments:
         dir_path: [str] Path to folders with trajectories.
@@ -1695,6 +1697,41 @@ def generateAutoPlots(dir_path, traj_quality_params, prev_sols=10, sol_window=1)
     ### 
 
 
+
+    ### Create one summary file with all data
+
+    # Open the full file for writing (first write to a temp file, then move it to a completed file)
+    traj_summary_all_temp = TRAJ_SUMMARY_ALL + ".tmp"
+    with open(os.path.join(summary_monthly_dir, traj_summary_all_temp), 'w') as f_all:
+
+        # Find all monthly trajectory reports
+        header_written = False
+        for summary_name in sorted(os.listdir(summary_monthly_dir)):
+            if summary_name.startswith("traj_summary_monthly_"):
+
+                # Load the monthly summary file and write entries to the collective file
+                with open(os.path.join(summary_monthly_dir, summary_name)) f_monthly:
+                    for line in f_monthly:
+
+                        # Skip the header if it was already written
+                        if not header_written:
+                            if line.startswith("#"):
+                                continue
+
+                        f_all.write(line)
+
+                # Write the header only once
+                header_written = True
+
+    # Change the name of the temp file to the summary file
+    shutil.copy2(os.path.join(summary_monthly_dir, traj_summary_all_temp), 
+        os.path.join(summary_monthly_dir, TRAJ_SUMMARY_ALL))
+
+
+    ###
+
+
+
     ### Link to latest files ###
 
     plot_copy_list = [
@@ -1836,7 +1873,7 @@ if __name__ == "__main__":
 
 
             # Generate the latest plots
-            generateAutoPlots(cml_args.dir_path, traj_quality_params, prev_sols=prev_sols)
+            generateAutoPlotsAndReports(cml_args.dir_path, traj_quality_params, prev_sols=prev_sols)
 
 
 
