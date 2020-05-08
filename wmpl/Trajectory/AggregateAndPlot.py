@@ -1710,7 +1710,7 @@ def generateAutoPlotsAndReports(dir_path, traj_quality_params, prev_sols=10, sol
             if summary_name.startswith("traj_summary_monthly_"):
 
                 # Load the monthly summary file and write entries to the collective file
-                with open(os.path.join(summary_monthly_dir, summary_name)) f_monthly:
+                with open(os.path.join(summary_monthly_dir, summary_name)) as f_monthly:
                     for line in f_monthly:
 
                         # Skip the header if it was already written
