@@ -94,6 +94,7 @@ class MetObservations(object):
         self.sites = [site for site in met.sites]
 
 
+        self.time_data = {}
         self.height_data = {}
         self.lag_data = {}
         self.abs_mag_data = {}
@@ -188,10 +189,12 @@ class MetObservations(object):
 
                 state_vect_dist = np.array(state_vect_dist)
 
+
                 # Compute the lag
                 self.lag_data[site] = state_vect_dist - lineFunc(time_rel_picks, *self.traj.velocity_fit)
 
-                # Store the heights and magnitudes
+                # Store the time, heights, magnitudes
+                self.time_data[site] = np.array(time_rel_picks)
                 self.height_data[site] = np.array(height_data)
                 self.abs_mag_data[site] = np.array(abs_mag_data)
 
@@ -774,6 +777,7 @@ class MetSimGUI(QMainWindow):
 
             # Calculate the photometric mass
             self.const.m_init = self.calcPhotometricMass()
+            print("Using initial mass: {:.2e} kg".format(self.const.m_init))
 
         ### ###
 
@@ -951,26 +955,48 @@ class MetSimGUI(QMainWindow):
     def calcPhotometricMass(self):
         """ Calculate photometric mass from given magnitude data. """
 
+
+        # If the magnitudes are given from the met file, use them instead of the trajectory file
         time_mag_arr = []
         avg_t_diff_max = 0
-        for obs in self.traj.observations:
+        if self.met_obs is not None:
 
-            # If there are not magnitudes for this site, skip it
-            if obs.absolute_magnitudes is None:
-                continue
+            # Extract time vs. magnitudes from the met file
+            for site in self.met_obs.sites:
 
-            # Compute average time difference
-            avg_t_diff_max = max(avg_t_diff_max, np.median(obs.time_data[1:] - obs.time_data[:-1]))
+                # Extract data
+                abs_mag_data = self.met_obs.abs_mag_data[site]
+                time_data = self.met_obs.time_data[site]
 
-            for t, mag in zip(obs.time_data[obs.ignore_list == 0], \
-                obs.absolute_magnitudes[obs.ignore_list == 0]):
+                # Compute the average time difference
+                avg_t_diff_max = max(avg_t_diff_max, np.median(time_data[1:] - time_data[:-1]))
 
-                if (mag is not None) and (not np.isnan(mag)):
-                    time_mag_arr.append([t, mag])
+                for t, mag in zip(time_data, abs_mag_data):
+                    if (mag is not None) and (not np.isnan(mag)):
+                        time_mag_arr.append([t, mag])
+
+        else:
+
+            # Extract time vs. magnitudes from the trajectory pickle file
+            for obs in self.traj.observations:
+
+                # If there are not magnitudes for this site, skip it
+                if obs.absolute_magnitudes is None:
+                    continue
+
+                # Compute average time difference
+                avg_t_diff_max = max(avg_t_diff_max, np.median(obs.time_data[1:] - obs.time_data[:-1]))
+
+                for t, mag in zip(obs.time_data[obs.ignore_list == 0], \
+                    obs.absolute_magnitudes[obs.ignore_list == 0]):
+
+                    if (mag is not None) and (not np.isnan(mag)):
+                        time_mag_arr.append([t, mag])
 
         
-        # If there are no magnitudes, assume that the initial mass is 0.1 grams
+        # If there are no magnitudes, assume that the initial mass is 0.2 grams
         if not time_mag_arr:
+            print("No photometry, assuming default mass:", self.const.m_init)
             return self.const.m_init
 
 
