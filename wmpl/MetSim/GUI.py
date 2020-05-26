@@ -2790,10 +2790,10 @@ if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser(description="Run meteor ablation modelling using the given trajectory file.")
 
     arg_parser.add_argument('traj_pickle', metavar='TRAJ_PICKLE', type=str, \
-        help=".pickle file with the trajectory solution and the magnitudes.")
+        help="Either the .pickle file with the trajectory solution and the magnitudes, or the path to the folder when the --all option is given.")
 
     arg_parser.add_argument('-l', '--load', metavar='LOAD_JSON', \
-        help='Load JSON file with fit parameters.', type=str)
+        help="Load JSON file with fit parameters. Instead of giving the full path to the file, you can call it as '--load .' and it will automatically find the file if it exists.", type=str)
 
     arg_parser.add_argument('-m', '--met', metavar='MET_FILE', \
         help='Load additional observations from a METAL or mirfit .met file.', type=str)
@@ -2801,6 +2801,15 @@ if __name__ == "__main__":
     arg_parser.add_argument('-w', '--wid', metavar='WID_FILES', \
         help='Load mirfit wid files which will be used for wake plotting. Wildchars can be used, e.g. /path/wid*.txt.', 
         type=str, nargs='+')
+
+    arg_parser.add_argument('-a', '--all', \
+        help="""Automatically find and load the trajectory pickle file, the metal met file, and the wid \
+        files. Instead of the path to the trajectory pickle file, a path to folders with data files should \
+        be given. For example, if the data is in /home/user/data/20200526_012345_mir and \
+        /home/user/data/20200526_012345_met, you should call this module as as: \
+        python -m wmpl.MetSim.GUI /home/user/data/20200526_012345 --all --load . \
+        """, \
+        action="store_true")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -2811,9 +2820,125 @@ if __name__ == "__main__":
     app = QApplication([])
 
 
+    # Automatically find all input files if the --all option is given
+    traj_pickle_file = None
+    met_file = None
+    wid_files = None
+    if cml_args.all:
+
+        # Find all folders that match the given regex
+        for dir_path in glob.glob(os.path.abspath(cml_args.traj_pickle.rstrip(os.sep) + "*")):
+
+            # Only take directories
+            if not os.path.isdir(dir_path):
+                continue
+
+            # Try finding the needed files
+            for file_name in sorted(os.listdir(dir_path)):
+
+                file_path = os.path.join(dir_path, file_name)
+
+                # If the folder is the metal folder, don't load the trajectory pickle nor wake files
+                if not os.path.basename(dir_path).endswith("_met"):
+
+                    # If it's a trajectory pickle file, assign it
+                    if traj_pickle_file is None:
+                        if file_name.endswith("_trajectory.pickle"):
+                            traj_pickle_file = file_path
+                            continue
+
+                    # Look for wid files
+                    if wid_files is None:
+                        if file_name.startswith("wid_") and file_name.endswith(".txt"):
+                            wid_files = sorted(glob.glob(os.path.join(dir_path, "wid_*.txt")))
+                            continue
+
+
+                # Look for state files with magnitude measurements
+                # Note that there is no check if the met_file has already been found, which means that it
+                #   will keep loading state files and take the last one in the end (i.e. the latest one)
+                if file_name.startswith("state") and file_name.endswith(".met"):
+
+                    # Try loading the state file and check if it's the METAL state file
+                    met = loadMet(dir_path, file_name)
+
+                    # Take the file if it's a METAL state file
+                    if not met.mirfit:
+                        met_file = file_path
+
+
+        # Print notices if certain files were not found
+        if traj_pickle_file is None:
+            print("No trajectory .pickle files found in the given path: {:s}".format(cml_args.traj_pickle))
+            sys.exit()
+
+        if met_file is None:
+            print("No .met files found in {:s}".format(cml_args.traj_pickle))
+
+        if wid_files is None:
+            print("No wid files found in {:s}".format(cml_args.traj_pickle))
+
+
+    else:
+
+        # Assign individual files
+        traj_pickle_file = os.path.abspath(cml_args.traj_pickle)
+        met_file = cml_args.met
+        wid_files = cml_args.wid
+
+
+
+    # Handle auto loading fit parameters
+    load_file = None
+    if cml_args.load == '.':
+
+        # Extract the directory (or more) where the JSON file with fit parametrs could be
+        if os.path.isfile(cml_args.traj_pickle):
+            dir_path = os.path.abspath(os.path.dirname(cml_args.traj_pickle))
+
+        else:
+            dir_path = os.path.abspath(cml_args.traj_pickle.rstrip(os.sep) + "*")
+
+
+        # Find the JSON file with the fit parameters
+        for dir_path in glob.glob(dir_path):
+
+            # Skip files
+            if not os.path.isdir(dir_path):
+                continue
+
+            # Find the file with fit parametres (but not the latest file, just the saved parameters)
+            for file_name in sorted(os.listdir(dir_path)):
+
+                if file_name.endswith("sim_fit.json"):
+                    load_file = os.path.join(dir_path, file_name)
+                    break
+
+    else:
+        load_file = cml_args.load
+
+
+    print("Loading trajectory pickle file:")
+    print(traj_pickle_file)
+
+    if met_file is not None:
+        print("Loading additional magnitudes from .met file:")
+        print(met_file)
+
+    if wid_files is not None:
+        print("Loading wake data from:")
+        for wfile in wid_files:
+            print(wfile)
+
+
+    if load_file is not None:
+        print("Loading fit parameters from:")
+        print(load_file)
+
+
     # Init the MetSimGUI application
-    main_window = MetSimGUI(os.path.abspath(cml_args.traj_pickle), const_json_file=cml_args.load, \
-        met_path=cml_args.met, wid_files=cml_args.wid)
+    main_window = MetSimGUI(traj_pickle_file, const_json_file=load_file, \
+        met_path=met_file, wid_files=wid_files)
 
 
     main_window.show()
