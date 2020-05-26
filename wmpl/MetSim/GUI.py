@@ -587,7 +587,6 @@ def fitResidualsListArguments(params, *args, **kwargs):
 
 
 class MetSimGUI(QMainWindow):
-    
     def __init__(self, traj_path, const_json_file=None, met_path=None, wid_files=None):
         """ GUI tool for MetSim. 
     
@@ -841,6 +840,10 @@ class MetSimGUI(QMainWindow):
         self.checkBoxDisruptionErosionCoeffSignal(None)
         self.toggleWakeNormalizationMethod(None)
         self.toggleWakeAlignMethod(None)
+
+
+        # Compute plot height limits
+        self.plot_beg_ht, self.plot_end_ht = self.calcHeightLimits()
 
         # Update plots
         self.showCurrentResults()
@@ -1383,6 +1386,43 @@ class MetSimGUI(QMainWindow):
 
 
 
+    def calcHeightLimits(self):
+        """ Find the upper and lower height limit for all plots. """
+
+
+        # Track plot limits
+        plot_beg_ht = -np.inf
+        plot_end_ht = np.inf
+
+
+        # Keep track of the height range from the original observations
+        for obs in self.traj.observations:
+
+            height_data = obs.model_ht[obs.ignore_list == 0]/1000
+
+            # Keep track of the height limits
+            plot_beg_ht = max(plot_beg_ht, np.max(height_data))
+            plot_end_ht = min(plot_end_ht, np.min(height_data))
+
+
+        # Track heihgts of additional observations from the .met file (if available)
+        if self.met_obs is not None:
+
+            # Plot additional lags for all sites (plot only mirfit lags)
+            for site in self.met_obs.sites:
+
+                height_data = self.met_obs.height_data[site]/1000
+
+                # Keep track of the height limits
+                plot_beg_ht = max(plot_beg_ht, np.max(height_data))
+                plot_end_ht = min(plot_end_ht, np.min(height_data))
+
+
+        return plot_beg_ht, plot_end_ht
+
+
+
+
 
     def updateCommonPlotFeatures(self, plot_handle, sr, plot_text=False):
         """ Update common features on all plots such as the erosion start. 
@@ -1465,9 +1505,6 @@ class MetSimGUI(QMainWindow):
         Keyword arguments:
             show_previous: [bool] Show the previous simulation. False by default.
 
-
-        Return: 
-            (plot_beg_ht, plot_end_ht): [tuple] A range of heights used for plotting the magnitude plot.
         """
 
         # Choose to show current or previous results
@@ -1481,9 +1518,6 @@ class MetSimGUI(QMainWindow):
 
         
         # Track plot limits
-        plot_beg_ht = -np.inf
-        plot_end_ht = np.inf
-
         mag_brightest = np.inf
         mag_faintest = -np.inf
 
@@ -1497,10 +1531,6 @@ class MetSimGUI(QMainWindow):
             # Extract data
             abs_mag_data = obs.absolute_magnitudes[obs.ignore_list == 0]
             height_data = obs.model_ht[obs.ignore_list == 0]/1000
-
-            # Keep track of the height limits
-            plot_beg_ht = max(plot_beg_ht, np.max(height_data))
-            plot_end_ht = min(plot_end_ht, np.min(height_data))
 
             self.magnitudePlot.canvas.axes.plot(abs_mag_data, height_data, marker='x',
                 linestyle='dashed', label=obs.station_id, markersize=5, linewidth=1)
@@ -1528,11 +1558,6 @@ class MetSimGUI(QMainWindow):
                 mag_brightest = min(mag_brightest, np.min(abs_mag_data[~np.isinf(abs_mag_data)]))
                 mag_faintest = max(mag_faintest, np.max(abs_mag_data[~np.isinf(abs_mag_data)]))
 
-                # Keep track of the height limits
-                plot_beg_ht = max(plot_beg_ht, np.max(height_data))
-                plot_end_ht = min(plot_end_ht, np.min(height_data))
-
-
 
         # Plot simulated magnitudes
         if sr is not None:
@@ -1552,7 +1577,8 @@ class MetSimGUI(QMainWindow):
         self.magnitudePlot.canvas.axes.set_ylabel('Height (km)')
         self.magnitudePlot.canvas.axes.set_xlabel('Abs magnitude')
 
-        self.magnitudePlot.canvas.axes.set_ylim([plot_end_ht + END_HT_PAD, plot_beg_ht + BEG_HT_PAD])
+        self.magnitudePlot.canvas.axes.set_ylim([self.plot_end_ht + END_HT_PAD, \
+            self.plot_beg_ht + BEG_HT_PAD])
         self.magnitudePlot.canvas.axes.set_xlim([mag_brightest - 1, mag_faintest + 1])
         self.magnitudePlot.canvas.axes.invert_xaxis()
 
@@ -1570,11 +1596,8 @@ class MetSimGUI(QMainWindow):
         self.magnitudePlot.canvas.draw()
 
 
-        return plot_beg_ht, plot_end_ht
 
-
-
-    def updateVelocityPlot(self, show_previous=False, plot_beg_ht=None, plot_end_ht=None):
+    def updateVelocityPlot(self, show_previous=False):
         """ Update the velocity plot. 
         
         Arguments:
@@ -1582,8 +1605,6 @@ class MetSimGUI(QMainWindow):
 
         Keyword arguments:
             show_previous: [bool] Show the previous simulation. False by default.
-            plot_beg_ht: [float] Beginning height for the plot before adding the padding.
-            plot_end_ht: [float] End height for the plot before adding the padding.
 
         """
 
@@ -1596,14 +1617,6 @@ class MetSimGUI(QMainWindow):
 
         self.velocityPlot.canvas.axes.clear()
 
-        
-        # Track plot limits
-        if plot_beg_ht is None:
-            plot_beg_ht = -np.inf
-
-        if plot_end_ht is None:
-            plot_end_ht = np.inf
-
 
         vel_min = np.inf
         vel_max = -np.inf
@@ -1614,10 +1627,6 @@ class MetSimGUI(QMainWindow):
             # Extract data
             vel_data = obs.velocities[obs.ignore_list == 0][1:]/1000
             height_data = obs.model_ht[obs.ignore_list == 0][1:]/1000
-
-            # Keep track of the height limits
-            plot_beg_ht = max(plot_beg_ht, np.max(height_data))
-            plot_end_ht = min(plot_end_ht, np.min(height_data))
 
             self.velocityPlot.canvas.axes.plot(vel_data, height_data, marker='o', label=obs.station_id, \
                 markersize=1, linestyle='none')
@@ -1671,7 +1680,7 @@ class MetSimGUI(QMainWindow):
         self.velocityPlot.canvas.axes.set_ylabel('Height (km)')
         self.velocityPlot.canvas.axes.set_xlabel('Velocity (km/s)')
 
-        self.velocityPlot.canvas.axes.set_ylim([plot_end_ht + END_HT_PAD, plot_beg_ht + BEG_HT_PAD])
+        self.velocityPlot.canvas.axes.set_ylim([self.plot_end_ht + END_HT_PAD, self.plot_beg_ht + BEG_HT_PAD])
         self.velocityPlot.canvas.axes.set_xlim([vel_min - 1, vel_max + 1])
 
         # Plot common features across all plots
@@ -1689,7 +1698,7 @@ class MetSimGUI(QMainWindow):
 
 
 
-    def updateLagPlot(self, show_previous=False, plot_beg_ht=None, plot_end_ht=None):
+    def updateLagPlot(self, show_previous=False):
         """ Update the lag plot. 
         
         Arguments:
@@ -1697,8 +1706,6 @@ class MetSimGUI(QMainWindow):
 
         Keyword arguments:
             show_previous: [bool] Show the previous simulation. False by default.
-            plot_beg_ht: [float] Beginning height for the plot before adding the padding.
-            plot_end_ht: [float] End height for the plot before adding the padding.
 
         """
 
@@ -1718,25 +1725,13 @@ class MetSimGUI(QMainWindow):
         self.vInitObsLabel.setText("Vinit obs = {:.3f} km/s".format(self.traj.orbit.v_init/1000))
 
 
-        # Track plot limits
-        if plot_beg_ht is None:
-            plot_beg_ht = -np.inf
-
-        if plot_end_ht is None:
-            plot_end_ht = np.inf
-
-
-        # Keep track of the height range
+        # Plot the lag from observations
         for obs in self.traj.observations:
 
             height_data = obs.model_ht[obs.ignore_list == 0]/1000
 
             self.lagPlot.canvas.axes.plot(obs.lag[obs.ignore_list == 0], height_data, marker='x', \
                 linestyle='dashed', label=obs.station_id, markersize=5, linewidth=1)
-
-            # Keep track of the height limits
-            plot_beg_ht = max(plot_beg_ht, np.max(height_data))
-            plot_end_ht = min(plot_end_ht, np.min(height_data))
 
 
         # Plot additional observations from the .met file (if available)
@@ -1751,10 +1746,6 @@ class MetSimGUI(QMainWindow):
                 if self.met.mirfit:
                     self.lagPlot.canvas.axes.plot(self.met_obs.lag_data[site], height_data, marker='x', \
                         linestyle='dashed', label=str(site),  markersize=5, linewidth=1)
-
-                # Keep track of the height limits
-                plot_beg_ht = max(plot_beg_ht, np.max(height_data))
-                plot_end_ht = min(plot_end_ht, np.min(height_data))
 
 
         # Get X plot limits
@@ -1777,7 +1768,7 @@ class MetSimGUI(QMainWindow):
             # Cut the part with same beginning heights as observations
             temp_arr = np.c_[sr.brightest_height_arr, sr.brightest_length_arr]
             temp_arr = temp_arr[(sr.brightest_height_arr <= self.traj.rbeg_ele) \
-                & (sr.brightest_height_arr >= plot_end_ht)]
+                & (sr.brightest_height_arr >= self.plot_end_ht)]
             ht_arr, brightest_len_arr = temp_arr.T
 
             # Compute the simulated lag using the observed velocity
@@ -1795,7 +1786,7 @@ class MetSimGUI(QMainWindow):
             # Cut the part with same beginning heights as observations
             temp_arr = np.c_[sr.leading_frag_height_arr, sr.leading_frag_length_arr]
             temp_arr = temp_arr[(sr.leading_frag_height_arr <= self.traj.rbeg_ele) \
-                & (sr.leading_frag_height_arr >= plot_end_ht)]
+                & (sr.leading_frag_height_arr >= self.plot_end_ht)]
             ht_arr, leading_frag_len_arr = temp_arr.T
 
             # Compute the simulated lag using the observed velocity
@@ -1809,7 +1800,7 @@ class MetSimGUI(QMainWindow):
 
 
 
-        self.lagPlot.canvas.axes.set_ylim([plot_end_ht + END_HT_PAD, plot_beg_ht + BEG_HT_PAD])
+        self.lagPlot.canvas.axes.set_ylim([self.plot_end_ht + END_HT_PAD, self.plot_beg_ht + BEG_HT_PAD])
         self.lagPlot.canvas.axes.set_xlim([x_min, x_max])
 
         self.lagPlot.canvas.axes.set_xlabel('Lag (m)')
@@ -2257,9 +2248,9 @@ class MetSimGUI(QMainWindow):
         if self.simulation_results_prev is not None:
 
             self.updateInputBoxes(show_previous=True)
-            plot_beg_ht, plot_end_ht = self.updateMagnitudePlot(show_previous=True)
-            self.updateVelocityPlot(show_previous=True, plot_beg_ht=plot_beg_ht, plot_end_ht=plot_end_ht)
-            self.updateLagPlot(show_previous=True, plot_beg_ht=plot_beg_ht, plot_end_ht=plot_end_ht)
+            self.updateMagnitudePlot(show_previous=True)
+            self.updateVelocityPlot(show_previous=True)
+            self.updateLagPlot(show_previous=True)
             self.updateWakePlot(show_previous=True)
 
 
@@ -2268,9 +2259,9 @@ class MetSimGUI(QMainWindow):
         """ Show current simulation results and parameters. """
 
         self.updateInputBoxes(show_previous=False)
-        plot_beg_ht, plot_end_ht = self.updateMagnitudePlot(show_previous=False)
-        self.updateVelocityPlot(show_previous=False, plot_beg_ht=plot_beg_ht, plot_end_ht=plot_end_ht)
-        self.updateLagPlot(show_previous=False, plot_beg_ht=plot_beg_ht, plot_end_ht=plot_end_ht)
+        self.updateMagnitudePlot(show_previous=False)
+        self.updateVelocityPlot(show_previous=False)
+        self.updateLagPlot(show_previous=False)
         self.updateWakePlot(show_previous=False)
 
 
