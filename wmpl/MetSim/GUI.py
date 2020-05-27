@@ -170,12 +170,19 @@ class MetObservations(object):
                     obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, self.traj.state_vect_mini, \
                         self.traj.radiant_eci_mini)
 
-                    # Distance from the state vector to the projected point on the radiant line
-                    state_vect_dist.append(vectMag(self.traj.state_vect_mini - rad_cpa))
-
                     # Compute the height (meters)
                     _, _, ht = cartesian2Geo(jd, *rad_cpa)
                     height_data.append(ht)
+
+
+                    # If the height is higher than the beginning height, make the state vector distance 
+                    #   negative
+                    state_vect_dist_sign = 1
+                    if ht > self.traj.rbeg_ele:
+                        state_vect_dist_sign = -1
+
+                    # Distance from the state vector to the projected point on the radiant line
+                    state_vect_dist.append(state_vect_dist_sign*vectMag(self.traj.state_vect_mini - rad_cpa))
 
                     # Compute the range to the station and the absolute magnitude
                     if mag is not None:
@@ -197,8 +204,7 @@ class MetObservations(object):
                 self.time_data[site] = np.array(time_rel_picks)
                 self.height_data[site] = np.array(height_data)
                 self.abs_mag_data[site] = np.array(abs_mag_data)
-
-
+                
 
 
 
@@ -1937,6 +1943,11 @@ class MetSimGUI(QMainWindow):
 
         # Normalize the wake by the peak intensity
         else:
+
+            # Handle cases when the simulation doesn't exist
+            if simulated_peak_luminosity is None:
+                simulated_peak_luminosity = 0
+
             wake_intensity_array *= simulated_peak_luminosity/np.max(wake_intensity_array)
 
 
