@@ -755,7 +755,7 @@ def mergeClosePoints(x_array, y_array, delta, x_datetime=False, method='avg'):
 
     Keyword arguments: 
         x_datatime: [bool] Should be True if X is an array of datetime objects. False by default.
-        method: [str] Method of merging, either "avg" or "max". "avg" is set by default.
+        method: [str] Method of merging: "avg", "max", or "min". "avg" is set by default.
 
     Return:
         x_final, y_final: [tuple of lists] Processed x and y arrays.
@@ -791,9 +791,12 @@ def mergeClosePoints(x_array, y_array, delta, x_datetime=False, method='avg'):
 
             skip += count - 1
 
-            # Choose either to take the mean or the max of the points in the window
+            # Choose either to take the mean, max, or min of the points in the window
             if method.lower() == "max":
                 y = np.max(y_array[i : i + count])
+
+            elif method.lower() == "min":
+                y = np.min(y_array[i : i + count])
                 
             else:
                 y = np.mean(y_array[i : i + count])

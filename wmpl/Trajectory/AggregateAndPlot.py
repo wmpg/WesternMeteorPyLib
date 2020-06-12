@@ -98,9 +98,9 @@ def computeMass(traj, P_0m):
     time_mag_arr = np.array(sorted(time_mag_arr, key=lambda x: x[0]))
     time_arr, mag_arr = time_mag_arr.T
     
-    # Take the maximum magnitudes, which mitigates saturation effects. Note that this assumes that the
+    # Take the brightest magnitudes, which mitigates saturation effects. Note that this assumes that the
     #   photometric calibration was done well
-    time_arr, mag_arr = mergeClosePoints(time_arr, mag_arr, avg_t_diff_max, method='max')
+    time_arr, mag_arr = mergeClosePoints(time_arr, mag_arr, avg_t_diff_max, method='min')
 
     # Compute the photometric mass
     mass = calcMass(np.array(time_arr), np.array(mag_arr), traj.orbit.v_avg_norot, P_0m=P_0m)
