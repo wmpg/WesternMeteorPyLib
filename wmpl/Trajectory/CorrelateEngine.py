@@ -36,7 +36,7 @@ class TrajectoryConstraints(object):
         self.min_station_dist = 5.0
 
         # Maximum distance between stations (km)
-        self.max_station_dist = 350.0
+        self.max_station_dist = 600.0
 
 
         # Minimum convergence angle (deg)
