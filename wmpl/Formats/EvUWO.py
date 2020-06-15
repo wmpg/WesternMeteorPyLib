@@ -166,12 +166,49 @@ def readEvFile(dir_path, file_name):
             # Read data
             else:
 
-                line = list(map(float, line.split()))
+                line = line.split()
 
-                time_data.append(line[1])
-                theta_data.append(line[6])
-                phi_data.append(line[7])
-                mag_data.append(line[9])
+                time_data.append(float(line[1]))
+                theta_data.append(float(line[6]))
+                phi_data.append(float(line[7]))
+
+                # Check if the magnitude is NaN and set None instead
+                mag = line[9]
+                if 'nan' in mag:
+                    mag = None
+                else:
+                    mag = float(mag)
+
+                mag_data.append(mag)
+
+
+        # If there is a NaN in the magnitude data, interpolate it
+        if None in mag_data:
+            none_index = mag_data.index(None)
+
+            # If the first magnitude is NaN, take the magnitude of the second point
+            if none_index == 0:
+                mag_data[none_index] = mag_data[none_index + 1]
+
+            # If the last magnitude is NaN, use the magnitude of the previous point
+            elif none_index == (len(mag_data) - 1):
+                mag_data[none_index] = mag_data[none_index - 1]
+
+            # If the magnitude is in between, interpolate it
+            else:
+
+                mag_prev = float(mag_data[none_index - 1])
+                mag_next = float(mag_data[none_index + 1])
+
+                # Interpolate in linear units
+                intens_prev = 10**(mag_prev/(-2.5))
+                intens_next = 10**(mag_next/(-2.5))
+                intens_interpol = (intens_prev + intens_next)/2
+                mag_interpol = -2.5*np.log10(intens_interpol)
+
+                mag_data[none_index] = mag_interpol
+
+
         
 
         # Change the relative time to 0 and update the reference Julian date
@@ -313,13 +350,14 @@ def solveTrajectoryEv(ev_file_list, solver='original', velmodel=3, **kwargs):
 if __name__ == '__main__':
 
     import sys
+    import glob
     import argparse
 
 
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Run the trajectory solver on the list of UWO ev files.")
 
-    arg_parser.add_argument('ev_files', nargs="+", metavar='EV_FILES', type=str, \
+    arg_parser.add_argument('ev_files', metavar='EV_FILES', type=str, \
         help='Full path to ev_*.txt files.')
 
     # Add other solver options
@@ -330,14 +368,23 @@ if __name__ == '__main__':
 
     #########################
 
-
+    # Unpack wildcards
+    ev_files = glob.glob(cml_args.ev_files)
     
-    event_path = os.path.abspath(cml_args.ev_files[0])
+
+    event_path = os.path.abspath(ev_files[0])
 
     # Check if the file path exists
     if not os.path.isfile(event_path):
         print('No such file:', event_path)
         sys.exit()
+
+    ev_files = [fn for fn in ev_files if os.path.isfile(fn)]
+
+    print("Using file:")
+    for fn in ev_files:
+        print(fn)
+
 
 
     max_toffset = None
@@ -355,7 +402,7 @@ if __name__ == '__main__':
 
 
     # Run trajectory solver on the loaded .met file
-    solveTrajectoryEv(cml_args.ev_files, solver=cml_args.solver, max_toffset=max_toffset, \
+    solveTrajectoryEv(ev_files, solver=cml_args.solver, max_toffset=max_toffset, \
             monte_carlo=(not cml_args.disablemc), mc_runs=cml_args.mcruns, \
             geometric_uncert=cml_args.uncertgeom, gravity_correction=(not cml_args.disablegravity), 
             plot_all_spatial_residuals=cml_args.plotallspatial, plot_file_type=cml_args.imgformat, \
