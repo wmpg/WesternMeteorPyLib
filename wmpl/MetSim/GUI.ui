@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1678</width>
+    <width>1909</width>
     <height>963</height>
    </rect>
   </property>
@@ -17,7 +17,7 @@
    <widget class="QPushButton" name="runSimButton">
     <property name="geometry">
      <rect>
-      <x>1280</x>
+      <x>1510</x>
       <y>880</y>
       <width>171</width>
       <height>41</height>
@@ -67,7 +67,7 @@
    <widget class="QGroupBox" name="simulationGroup">
     <property name="geometry">
      <rect>
-      <x>1280</x>
+      <x>1510</x>
       <y>0</y>
       <width>391</width>
       <height>121</height>
@@ -317,7 +317,7 @@
    <widget class="QGroupBox" name="disruptionGroup">
     <property name="geometry">
      <rect>
-      <x>1280</x>
+      <x>1510</x>
       <y>430</y>
       <width>391</width>
       <height>121</height>
@@ -580,7 +580,7 @@
    <widget class="QGroupBox" name="erosionGroup">
     <property name="geometry">
      <rect>
-      <x>1280</x>
+      <x>1510</x>
       <y>270</y>
       <width>391</width>
       <height>161</height>
@@ -942,7 +942,7 @@
      <rect>
       <x>860</x>
       <y>0</y>
-      <width>411</width>
+      <width>641</width>
       <height>551</height>
      </rect>
     </property>
@@ -976,7 +976,7 @@
    <widget class="QGroupBox" name="meteoroidGroup">
     <property name="geometry">
      <rect>
-      <x>1280</x>
+      <x>1510</x>
       <y>120</y>
       <width>391</width>
       <height>151</height>
@@ -1290,7 +1290,7 @@
      <rect>
       <x>0</x>
       <y>560</y>
-      <width>1271</width>
+      <width>1501</width>
       <height>361</height>
      </rect>
     </property>
@@ -1298,7 +1298,7 @@
    <widget class="QGroupBox" name="wakeGroup">
     <property name="geometry">
      <rect>
-      <x>1280</x>
+      <x>1510</x>
       <y>550</y>
       <width>391</width>
       <height>161</height>
@@ -1587,7 +1587,7 @@
    <widget class="QPushButton" name="showPreviousButton">
     <property name="geometry">
      <rect>
-      <x>1280</x>
+      <x>1510</x>
       <y>840</y>
       <width>171</width>
       <height>31</height>
@@ -1600,7 +1600,7 @@
    <widget class="QPushButton" name="saveUpdatedOrbitButton">
     <property name="geometry">
      <rect>
-      <x>1490</x>
+      <x>1720</x>
       <y>870</y>
       <width>171</width>
       <height>21</height>
@@ -1613,7 +1613,7 @@
    <widget class="QPushButton" name="saveFitParametersButton">
     <property name="geometry">
      <rect>
-      <x>1490</x>
+      <x>1720</x>
       <y>900</y>
       <width>171</width>
       <height>21</height>
@@ -1636,7 +1636,7 @@
    <widget class="QGroupBox" name="groupBox">
     <property name="geometry">
      <rect>
-      <x>1280</x>
+      <x>1510</x>
       <y>710</y>
       <width>391</width>
       <height>121</height>
@@ -1834,7 +1834,7 @@ p, li { white-space: pre-wrap; }
    <widget class="QPushButton" name="autoFitButton">
     <property name="geometry">
      <rect>
-      <x>1490</x>
+      <x>1720</x>
       <y>840</y>
       <width>171</width>
       <height>21</height>
@@ -1850,8 +1850,8 @@ p, li { white-space: pre-wrap; }
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>1678</width>
-     <height>20</height>
+     <width>1909</width>
+     <height>21</height>
     </rect>
    </property>
   </widget>

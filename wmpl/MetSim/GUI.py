@@ -694,10 +694,10 @@ class MetSimGUI(QMainWindow):
         self.wake_align_method = 'none'
 
 
-        self.magnitudePlotWakeLine = None
-        self.magnitudePlotWakeLineLabel = None
-        self.velocityPlotWakeLine = None
-        self.lagPlotWakeLine = None
+        self.magnitudePlotWakeLines = None
+        self.magnitudePlotWakeLineLabels = None
+        self.velocityPlotWakeLines = None
+        self.lagPlotWakeLines = None
 
         ### ###
 
@@ -1430,20 +1430,20 @@ class MetSimGUI(QMainWindow):
 
 
 
-    def updateCommonPlotFeatures(self, plot_handle, sr, plot_text=False):
+    def updateCommonPlotFeatures(self, plt_handle, sr, plot_text=False):
         """ Update common features on all plots such as the erosion start. 
 
         Arguments:
-            plot_handle: [PyQt5 plot handle]
+            plt_handle: [axis handle]
             sr: [object] Simulation results.
         """
 
 
         # Get the plot X limits
-        x_min, x_max = plot_handle.canvas.axes.get_xlim()
+        x_min, x_max = plt_handle.get_xlim()
 
         # Get the plot Y limits
-        y_min, y_max = plot_handle.canvas.axes.get_ylim()
+        y_min, y_max = plt_handle.get_ylim()
 
 
         # Generate array for horizontal line plotting
@@ -1455,12 +1455,12 @@ class MetSimGUI(QMainWindow):
             <= y_max):
             
             # Plot a line marking erosion beginning
-            plot_handle.canvas.axes.plot(x_arr, np.zeros_like(x_arr) + self.const.erosion_height_start/1000, \
+            plt_handle.plot(x_arr, np.zeros_like(x_arr) + self.const.erosion_height_start/1000, \
                 linestyle='dashed', color='k', alpha=0.25)
 
             # Add the text about erosion begin
             if plot_text:
-                plot_handle.canvas.axes.text(x_min, TEXT_LABEL_HT_PAD + self.const.erosion_height_start/1000,\
+                plt_handle.text(x_min, TEXT_LABEL_HT_PAD + self.const.erosion_height_start/1000,\
                     "Erosion beg", size=7, alpha=0.5)
 
 
@@ -1470,12 +1470,12 @@ class MetSimGUI(QMainWindow):
             >= y_min) and (self.const.erosion_height_change/1000 <= y_max):
 
             # Plot a line marking erosion change
-            plot_handle.canvas.axes.plot(x_arr, np.zeros_like(x_arr) + self.const.erosion_height_change/1000,\
+            plt_handle.plot(x_arr, np.zeros_like(x_arr) + self.const.erosion_height_change/1000,\
                 linestyle='dashed', color='k', alpha=0.25)
 
             # Add the text about erosion change
             if plot_text:
-                plot_handle.canvas.axes.text(x_min, TEXT_LABEL_HT_PAD \
+                plt_handle.text(x_min, TEXT_LABEL_HT_PAD \
                     + self.const.erosion_height_change/1000, "Erosion change", size=7, alpha=0.5)
 
 
@@ -1486,18 +1486,18 @@ class MetSimGUI(QMainWindow):
             # Check that the disruption height is inside the plot
             if (self.const.disruption_height/1000 >= y_min) and (self.const.disruption_height/1000 <=y_max):
 
-                plot_handle.canvas.axes.plot(x_arr, np.zeros_like(x_arr) + self.const.disruption_height/1000,\
+                plt_handle.plot(x_arr, np.zeros_like(x_arr) + self.const.disruption_height/1000,\
                     linestyle='dotted', color='k', alpha=0.5)
 
                 # Add the text about disruption
                 if plot_text:
-                    plot_handle.canvas.axes.text(x_min, TEXT_LABEL_HT_PAD \
+                    plt_handle.text(x_min, TEXT_LABEL_HT_PAD \
                         + self.const.disruption_height/1000, "Disruption", size=7, alpha=0.5)
 
 
 
         # Force the plot X limits back
-        plot_handle.canvas.axes.set_xlim([x_min, x_max])
+        plt_handle.set_xlim([x_min, x_max])
 
 
 
@@ -1589,7 +1589,7 @@ class MetSimGUI(QMainWindow):
         self.magnitudePlot.canvas.axes.invert_xaxis()
 
         # Plot common features across all plots
-        self.updateCommonPlotFeatures(self.magnitudePlot, sr, plot_text=True)
+        self.updateCommonPlotFeatures(self.magnitudePlot.canvas.axes, sr, plot_text=True)
 
         self.magnitudePlot.canvas.axes.legend()
 
@@ -1690,7 +1690,7 @@ class MetSimGUI(QMainWindow):
         self.velocityPlot.canvas.axes.set_xlim([vel_min - 1, vel_max + 1])
 
         # Plot common features across all plots
-        self.updateCommonPlotFeatures(self.velocityPlot, sr)
+        self.updateCommonPlotFeatures(self.velocityPlot.canvas.axes, sr)
 
         self.velocityPlot.canvas.axes.legend()
 
@@ -1722,7 +1722,7 @@ class MetSimGUI(QMainWindow):
             sr = self.simulation_results
 
 
-        self.lagPlot.canvas.axes.clear()
+        self.lagPlot.canvas.figure.clear()
 
 
         # Update the observed initial velocity label
@@ -1731,13 +1731,104 @@ class MetSimGUI(QMainWindow):
         self.vInitObsLabel.setText("Vinit obs = {:.3f} km/s".format(self.traj.orbit.v_init/1000))
 
 
+        # Compute things needed for the simulated lag
+        if sr is not None:
+
+            # Get the model velocity at the observed beginning height
+            sim_beg_ht_indx = np.argmin(np.abs(self.traj.rbeg_ele - sr.brightest_height_arr))
+            v_init_sim = sr.brightest_vel_arr[sim_beg_ht_indx]
+
+            # Update the simulated initial velocity label
+            self.vInitSimLabel.setText("Vinit sim = {:.3f} km/s".format(v_init_sim/1000))
+
+
+            ### Compute parameters for the brightest point on the trajectory ###
+
+            # Cut the part with same beginning heights as observations
+            temp_arr = np.c_[sr.brightest_height_arr, sr.brightest_length_arr]
+            temp_arr = temp_arr[(sr.brightest_height_arr <= self.traj.rbeg_ele) \
+                & (sr.brightest_height_arr >= self.plot_end_ht)]
+            brightest_ht_arr, brightest_len_arr = temp_arr.T
+
+            # Compute the simulated lag using the observed velocity
+            brightest_lag_sim = brightest_len_arr - brightest_len_arr[0] \
+                - self.traj.orbit.v_init*np.arange(0, self.const.dt*len(brightest_len_arr), \
+                                                   self.const.dt)[:len(brightest_len_arr)]
+
+            ###
+
+
+            ### Compute parameters for the leading point on the trajectory ###
+
+            # Cut the part with same beginning heights as observations
+            temp_arr = np.c_[sr.leading_frag_height_arr, sr.leading_frag_length_arr]
+            temp_arr = temp_arr[(sr.leading_frag_height_arr <= self.traj.rbeg_ele) \
+                & (sr.leading_frag_height_arr >= self.plot_end_ht)]
+            leading_ht_arr, leading_frag_len_arr = temp_arr.T
+
+            # Compute the simulated lag using the observed velocity
+            leading_lag_sim = leading_frag_len_arr - leading_frag_len_arr[0] \
+                              - self.traj.orbit.v_init*np.arange(0, self.const.dt*len(leading_frag_len_arr), \
+                                                                 self.const.dt)[:len(leading_frag_len_arr)]
+
+            ###
+
+
+
+        ### Lag plot ###
+
+        # Init the lag plot
+        lag_plot = self.lagPlot.canvas.figure.add_subplot(1, 2, 1, label='lag')
+
+
+        # Init the lag residuals plot
+        lag_residuals_plot = self.lagPlot.canvas.figure.add_subplot(1, 2, 2, label='lag residuals', \
+            sharey=lag_plot)
+
+
         # Plot the lag from observations
         for obs in self.traj.observations:
 
-            height_data = obs.model_ht[obs.ignore_list == 0]/1000
+            # Get observed heights
+            height_data = obs.model_ht[obs.ignore_list == 0]
 
-            self.lagPlot.canvas.axes.plot(obs.lag[obs.ignore_list == 0], height_data, marker='x', \
+            # Plot observed lag
+            lag_handle = lag_plot.plot(obs.lag[obs.ignore_list == 0], height_data/1000, marker='x', \
                 linestyle='dashed', label=obs.station_id, markersize=5, linewidth=1)
+
+
+            # Plot the lag residuals from simulated
+            if sr is not None:
+
+                ### Compute the residuals from simulated, brightest point on the trajectory ###
+
+                # Get simulated lags at the same height as observed
+                brightest_interp =  scipy.interpolate.interp1d(-brightest_ht_arr, brightest_lag_sim, \
+                    bounds_error=False, fill_value=0)
+                obs_hts = height_data[height_data > np.min(brightest_ht_arr)]
+                brightest_residuals = obs.lag[obs.ignore_list == 0] - brightest_interp(-obs_hts)
+
+                # Plot the lag residuals
+                lag_residuals_plot.scatter(brightest_residuals, obs_hts/1000, marker='+', \
+                    c=lag_handle[0].get_color(), label="Brightest, {:s}".format(obs.station_id))
+
+                ### ###
+
+
+                ### Compute the residuals from simulated, leading point on the trajectory ###
+
+                # Get simulated lags at the same height as observed
+                leading_interp =  scipy.interpolate.interp1d(-leading_ht_arr, leading_lag_sim, \
+                    bounds_error=False, fill_value=0)
+                obs_hts = height_data[height_data > np.min(leading_ht_arr)]
+                leading_residuals = obs.lag[obs.ignore_list == 0] - leading_interp(-obs_hts)
+
+                # Plot the lag residuals
+                lag_residuals_plot.scatter(leading_residuals, obs_hts/1000, marker='x', \
+                    c=lag_handle[0].get_color(), label="Leading, {:s}".format(obs.station_id))
+
+                ### ###
+
 
 
         # Plot additional observations from the .met file (if available)
@@ -1750,79 +1841,56 @@ class MetSimGUI(QMainWindow):
 
                 # Only plot mirfit lags
                 if self.met.mirfit:
-                    self.lagPlot.canvas.axes.plot(self.met_obs.lag_data[site], height_data, marker='x', \
+                    lag_plot.plot(self.met_obs.lag_data[site], height_data, marker='x', \
                         linestyle='dashed', label=str(site),  markersize=5, linewidth=1)
 
 
-        # Get X plot limits
-        x_min, x_max = self.lagPlot.canvas.axes.get_xlim()
+        # Get X plot limits before the simulated lag is plotted
+        x_min, x_max = lag_plot.get_xlim()
 
 
-        # Plot simulated lag of the brightest point on the trajectory
+
+        # Plot simulated lag
         if sr is not None:
 
-            # Get the model velocity at the observed beginning height
-            sim_beg_ht_indx = np.argmin(np.abs(self.traj.rbeg_ele - sr.brightest_height_arr))
-            v_init_sim = sr.brightest_vel_arr[sim_beg_ht_indx]
 
-            # Update the simulated initial velocity label
-            self.vInitSimLabel.setText("Vinit sim = {:.3f} km/s".format(v_init_sim/1000))
-
-
-            ### Plot lag of the brightest point on the traejctory ###
-
-            # Cut the part with same beginning heights as observations
-            temp_arr = np.c_[sr.brightest_height_arr, sr.brightest_length_arr]
-            temp_arr = temp_arr[(sr.brightest_height_arr <= self.traj.rbeg_ele) \
-                & (sr.brightest_height_arr >= self.plot_end_ht)]
-            ht_arr, brightest_len_arr = temp_arr.T
-
-            # Compute the simulated lag using the observed velocity
-            lag_sim = brightest_len_arr - brightest_len_arr[0] - self.traj.orbit.v_init*np.arange(0, \
-                self.const.dt*len(brightest_len_arr), self.const.dt)[:len(brightest_len_arr)]
-
-            self.lagPlot.canvas.axes.plot(lag_sim[:len(ht_arr)], (ht_arr/1000)[:len(lag_sim)], 
-                label='Simulated - brightest', color='k', alpha=0.5)
-
-            ### ###
+            # Plot lag of the brightest point on the trajectory
+            lag_plot.plot(brightest_lag_sim[:len(brightest_ht_arr)], \
+                         (brightest_ht_arr/1000)[:len(brightest_lag_sim)], \
+                         label='Simulated - brightest', color='k', alpha=0.5)
 
 
-            ### Plot lag of the leading fragment ###
-
-            # Cut the part with same beginning heights as observations
-            temp_arr = np.c_[sr.leading_frag_height_arr, sr.leading_frag_length_arr]
-            temp_arr = temp_arr[(sr.leading_frag_height_arr <= self.traj.rbeg_ele) \
-                & (sr.leading_frag_height_arr >= self.plot_end_ht)]
-            ht_arr, leading_frag_len_arr = temp_arr.T
-
-            # Compute the simulated lag using the observed velocity
-            lag_sim = leading_frag_len_arr - leading_frag_len_arr[0] - self.traj.orbit.v_init*np.arange(0, \
-                self.const.dt*len(leading_frag_len_arr), self.const.dt)[:len(leading_frag_len_arr)]
-
-            self.lagPlot.canvas.axes.plot(lag_sim[:len(ht_arr)], (ht_arr/1000)[:len(lag_sim)], 
+            # Plot lag of the leading fragment
+            lag_plot.plot(leading_lag_sim[:len(leading_ht_arr)], (leading_ht_arr/1000)[:len(leading_lag_sim)], 
                 label='Simulated - leading', color='k', alpha=0.5, linestyle='dashed')
 
-            ### ###
 
 
+        # Set parameters for the lag plot
+        lag_plot.set_ylim([self.plot_end_ht + END_HT_PAD, self.plot_beg_ht + BEG_HT_PAD])
+        lag_plot.set_xlim([x_min, x_max])
 
-        self.lagPlot.canvas.axes.set_ylim([self.plot_end_ht + END_HT_PAD, self.plot_beg_ht + BEG_HT_PAD])
-        self.lagPlot.canvas.axes.set_xlim([x_min, x_max])
-
-        self.lagPlot.canvas.axes.set_xlabel('Lag (m)')
-        self.lagPlot.canvas.axes.set_ylabel('Height (km)')
+        lag_plot.set_xlabel('Lag (m)')
+        lag_plot.set_ylabel('Height (km)')
         
         # Plot common features across all plots
-        self.updateCommonPlotFeatures(self.lagPlot, sr)
+        self.updateCommonPlotFeatures(lag_plot, sr)
+        self.updateCommonPlotFeatures(lag_residuals_plot, sr)
 
-        self.lagPlot.canvas.axes.legend()
+        lag_plot.legend()
+        lag_plot.grid(color="k", linestyle='dotted', alpha=0.3)
+        lag_plot.set_title('Lag')
 
-        self.lagPlot.canvas.axes.grid(color="k", linestyle='dotted', alpha=0.3)
 
-        self.lagPlot.canvas.axes.set_title('Lag')
+        lag_residuals_plot.set_xlabel('Residuals (m)')
+        lag_residuals_plot.get_yaxis().set_visible(False)
+        lag_residuals_plot.legend()
+        lag_residuals_plot.grid(color="k", linestyle='dotted', alpha=0.3)
+        lag_residuals_plot.set_title('Lag residuals')
+
 
         self.lagPlot.canvas.figure.tight_layout()
-
+        self.lagPlot.canvas.figure.subplots_adjust(wspace=0)
         self.lagPlot.canvas.draw()
 
 
@@ -1870,50 +1938,73 @@ class MetSimGUI(QMainWindow):
 
 
 
-    def redrawWakeHeightLine(self, plot_handle, line_handle, label_handle=None, draw_label=False):
+    def redrawWakeHeightLine(self, plt_handle, line_handles, label_handles=None, draw_label=False):
         """ Plot lines on mag, vel, lag plots indicating where the wake is shown. The line will be just 
             refreshed to prevent redrawing all plots from scratch.
         """
 
-        # Remove the line from the plot
-        if line_handle is not None:
-            line_handle.remove()
+        new_line_handles = []
+        new_label_handles = []
+
+        # Go through all axes on the image
+        for i, ax in enumerate(plt_handle.canvas.figure.get_axes()):
+
+            # Extract line and label handles
+            line_handle = None
+            if line_handles is not None:
+                if i <= (len(line_handles) - 1):
+                    line_handle = line_handles[i]
+
+            label_handle = None
+            if label_handles is not None:
+                if i <= (len(label_handles) - 1):
+                    label_handle = label_handles[i]
 
 
-        # Get the plot limits
-        x_min, x_max = plot_handle.canvas.axes.get_xlim()
-        y_min, y_max = plot_handle.canvas.axes.get_ylim()
-
-        # Construct X array
-        x_arr = np.linspace(x_min, x_max)
-
-        # Plot the wake line
-        line_handle = plot_handle.canvas.axes.plot(x_arr, np.zeros_like(x_arr) + self.wake_plot_ht/1000, \
-            linestyle='dashed', color='green', alpha=0.5)[0]
+            # Remove the line from the plot
+            if line_handle is not None:
+                line_handle.remove()
 
 
+            # Get the plot limits
+            x_min, x_max = ax.get_xlim()
+            y_min, y_max = ax.get_ylim()
 
-        # Plot the label if given
-        if draw_label:
+            # Construct X array
+            x_arr = np.linspace(x_min, x_max)
 
-            # Remove the old label handle
-            if label_handle is not None:
-                label_handle.remove()
+            # Plot the wake line
+            line_handle = ax.plot(x_arr, np.zeros_like(x_arr) + self.wake_plot_ht/1000, \
+                linestyle='dashed', color='green', alpha=0.5)[0]
 
-            # Draw the wake line label
-            label_handle = plot_handle.canvas.axes.text(x_min, TEXT_LABEL_HT_PAD + self.wake_plot_ht/1000, \
-                "Wake plot", size=7, color='green', alpha=0.5)
+            new_line_handles.append(line_handle)
 
 
-        # Keep the plot limits
-        plot_handle.canvas.axes.set_xlim([x_min, x_max])
-        plot_handle.canvas.axes.set_ylim([y_min, y_max])
+
+            # Plot the label if given
+            if draw_label:
+
+                # Remove the old label handle
+                if label_handle is not None:
+                    label_handle.remove()
+
+                # Draw the wake line label
+                label_handle = ax.text(x_min, TEXT_LABEL_HT_PAD + self.wake_plot_ht/1000, \
+                    "Wake plot", size=7, color='green', alpha=0.5)
+
+                new_label_handles.append(label_handle)
+
+
+            # Keep the plot limits
+            ax.set_xlim([x_min, x_max])
+            ax.set_ylim([y_min, y_max])
+
 
         # Redraw the plot
-        plot_handle.canvas.draw_idle()
+        plt_handle.canvas.draw_idle()
 
 
-        return line_handle, label_handle
+        return new_line_handles, new_label_handles
 
 
 
@@ -2006,10 +2097,12 @@ class MetSimGUI(QMainWindow):
 
 
         # Plot lines on mag, vel, lag plots indicating where the wake is shown
-        self.magnitudePlotWakeLine, self.magnitudePlotWakeLineLabel = self.redrawWakeHeightLine(self.magnitudePlot, \
-            self.magnitudePlotWakeLine, label_handle=self.magnitudePlotWakeLineLabel, draw_label=True)
-        self.velocityPlotWakeLine, _ = self.redrawWakeHeightLine(self.velocityPlot, self.velocityPlotWakeLine)
-        self.lagPlotWakeLine, _ = self.redrawWakeHeightLine(self.lagPlot, self.lagPlotWakeLine)
+        self.magnitudePlotWakeLines, self.magnitudePlotWakeLineLabels \
+            = self.redrawWakeHeightLine(self.magnitudePlot, self.magnitudePlotWakeLines, \
+                label_handles=self.magnitudePlotWakeLineLabels, draw_label=True)
+        self.velocityPlotWakeLines, _ = self.redrawWakeHeightLine(self.velocityPlot, \
+            self.velocityPlotWakeLines)
+        self.lagPlotWakeLines, _ = self.redrawWakeHeightLine(self.lagPlot, self.lagPlotWakeLines)
 
 
 
@@ -2028,7 +2121,7 @@ class MetSimGUI(QMainWindow):
         self.wakePlot.canvas.figure.clf()
 
 
-        # Create one large wake plot with movable height
+        # Create one large wake plot with movable height (first column)
         wake_ht_plot = self.wakePlot.canvas.figure.add_subplot(1, 2, 1, label='wake ht')
 
 
@@ -2112,6 +2205,7 @@ class MetSimGUI(QMainWindow):
 
         ### PLOT WAKE OVERVIEW SUBPLOT ###
 
+        # Init second subplot
         wake_overview_plot = self.wakePlot.canvas.figure.add_subplot(1, 2, 2, label='wake overview')
 
         # Number of wakes shown on the plot
