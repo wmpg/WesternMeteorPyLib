@@ -1805,8 +1805,11 @@ class MetSimGUI(QMainWindow):
                 # Get simulated lags at the same height as observed
                 brightest_interp =  scipy.interpolate.interp1d(-brightest_ht_arr, brightest_lag_sim, \
                     bounds_error=False, fill_value=0)
-                obs_hts = height_data[height_data > np.min(brightest_ht_arr)]
-                brightest_residuals = obs.lag[obs.ignore_list == 0] - brightest_interp(-obs_hts)
+
+                obs_height_indices = height_data > np.min(brightest_ht_arr)
+                obs_hts = height_data[obs_height_indices]
+                brightest_residuals = obs.lag[obs.ignore_list == 0][obs_height_indices] \
+                    - brightest_interp(-obs_hts)
 
                 # Plot the lag residuals
                 lag_residuals_plot.scatter(brightest_residuals, obs_hts/1000, marker='+', \
@@ -1820,8 +1823,10 @@ class MetSimGUI(QMainWindow):
                 # Get simulated lags at the same height as observed
                 leading_interp =  scipy.interpolate.interp1d(-leading_ht_arr, leading_lag_sim, \
                     bounds_error=False, fill_value=0)
-                obs_hts = height_data[height_data > np.min(leading_ht_arr)]
-                leading_residuals = obs.lag[obs.ignore_list == 0] - leading_interp(-obs_hts)
+                obs_height_indices = height_data > np.min(leading_ht_arr)
+                obs_hts = height_data[obs_height_indices]
+                leading_residuals = obs.lag[obs.ignore_list == 0][obs_height_indices] \
+                    - leading_interp(-obs_hts)
 
                 # Plot the lag residuals
                 lag_residuals_plot.scatter(leading_residuals, obs_hts/1000, marker='x', \
