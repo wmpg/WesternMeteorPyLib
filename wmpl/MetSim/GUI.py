@@ -682,6 +682,7 @@ class MetSimGUI(QMainWindow):
 
         ### Wake parameters ###
         self.wake_on = False
+        self.wake_show_mass_bins = False
         self.wake_ht_current_index = 0
         self.current_wake_container = None
 
@@ -823,6 +824,7 @@ class MetSimGUI(QMainWindow):
 
 
         self.checkBoxWake.stateChanged.connect(self.checkBoxWakeSignal)
+        self.checkBoxWakeMassBins.stateChanged.connect(self.checkBoxWakeMassBinsSignal)
         self.checkBoxErosion.stateChanged.connect(self.checkBoxErosionSignal)
         self.checkBoxDisruption.stateChanged.connect(self.checkBoxDisruptionSignal)
         self.checkBoxDisruptionErosionCoeff.stateChanged.connect(self.checkBoxDisruptionErosionCoeffSignal)
@@ -1062,6 +1064,7 @@ class MetSimGUI(QMainWindow):
         ### Wake parameters ###
 
         self.checkBoxWake.setChecked(self.wake_on)
+        self.checkBoxWakeMassBins.setChecked(self.wake_show_mass_bins)
 
         self.inputWakePSF.setText("{:.1f}".format(const.wake_psf))
         self.inputWakeExt.setText("{:d}".format(int(const.wake_extension)))
@@ -1145,12 +1148,16 @@ class MetSimGUI(QMainWindow):
 
 
     def checkBoxWakeSignal(self, event):
-        """ Control what happens when the wake checkbox is pressed. """
+        """ Control what happens when the wake checkbox is toggled. """
 
         # Read the wake checkbox
         self.wake_on = self.checkBoxWake.isChecked()
 
+        # Read the mass bins show checkbox
+        self.wake_show_mass_bins = self.checkBoxWakeMassBins.isChecked()
+
         # Disable/enable inputs if the checkbox is checked/unchecked
+        self.checkBoxWakeMassBins.setDisabled(not self.wake_on)
         self.inputWakePlotHt.setDisabled(not self.wake_on)
         self.inputWakePSF.setDisabled(not self.wake_on)
         self.inputWakeExt.setDisabled(not self.wake_on)
@@ -1163,6 +1170,16 @@ class MetSimGUI(QMainWindow):
 
         # Read inputs
         self.readInputBoxes()
+
+
+    def checkBoxWakeMassBinsSignal(self, event):
+        """ Control what happens when the wake checkbox for showing mass bins is toggled. """
+
+        # Read the mass bins show checkbox
+        self.wake_show_mass_bins = self.checkBoxWakeMassBins.isChecked()
+
+        # Update the wake plot
+        self.updateWakePlot()
 
 
 
@@ -2147,7 +2164,7 @@ class MetSimGUI(QMainWindow):
 
                 sim_wake_exists = True
 
-                # Plot the simulated wake
+                ### Plot the simulated wake ###
                 wake_ht_plot.plot(wake.length_array, wake.wake_luminosity_profile, \
                     label='Simulated', color='k', alpha=0.5)
 
@@ -2162,6 +2179,60 @@ class MetSimGUI(QMainWindow):
                 simulated_peak_length = len_array_trunc[np.argmax(wake_intensity_array_trunc)]
 
                 ### ###
+
+
+                ### Plot fragment masses ###
+                if self.wake_show_mass_bins:
+
+                    # Add second scale for masses (log)
+                    mass_ax = wake_ht_plot.twinx()
+                    mass_ax.set_yscale("log")
+
+                    frag_main = None
+                    frag_len_list = []
+                    #m_init_list = []
+                    m_list = []
+                    for frag in wake.frag_list:
+
+                        if frag.main:
+                            frag_main = frag
+
+                        if frag.m > 1.0e-11:
+
+                            # Compute the fragment length on the wake plot
+                            frag_wake_len = frag.length - wake.leading_frag_length
+
+                            frag_len_list.append(frag_wake_len)
+                            #m_init_list.append(frag.m_init)
+                            m_list.append(frag.m)
+
+
+                    # Plot the mass of the main fragment
+                    if frag_main is not None:
+                        # mass_ax.scatter(frag_main.length - wake.leading_frag_length, frag_main.m_init, c='k', \
+                        #     s=10, alpha=0.5)
+                        mass_ax.scatter(frag_main.length - wake.leading_frag_length, frag_main.m, c='r', \
+                            s=20, alpha=0.5)
+
+
+                    # # Plot the fragment initial mass at the position of the fragment length
+                    # mass_ax.scatter(frag_len_list, m_init_list, c='k', s=0.5, label="$m_0$")
+
+                    # Plot the instantaneous fragment mass
+                    mass_ax.scatter(frag_len_list, m_list, c='r', s=0.5, label="$m$")
+
+
+                    # Set the mass range (from ablation limit to initial mass)
+                    mass_ax.set_ylim([1.0e-11, self.const.m_init])
+
+                    mass_ax.set_ylabel("Fragment mass (kg)")
+
+
+
+                ### ###
+
+
+        ### ###
 
 
         ### PLOT OBSERVED WAKE ###

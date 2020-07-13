@@ -190,7 +190,10 @@ class Fragment(object):
         # Shape-density coeff
         self.K = 0
 
-        # Mass (kg)
+        # Initial fragment mass
+        self.m_init = 0
+
+        # Instantaneous fragment mass Mass (kg)
         self.m = 0
 
         # Density (kg/m^3)
@@ -227,6 +230,7 @@ class Fragment(object):
 
 
         self.m = m
+        self.m_init = m
         self.h = const.h_init
         self.rho = rho
         self.v = v_init
@@ -246,13 +250,35 @@ class Fragment(object):
 
 
 class Wake(object):
-    def __init__(self, length_array, wake_luminosity_profile, length_points, luminosity_points):
+    def __init__(self, const, frag_list, leading_frag_length, length_array):
         """ Container for the evaluated wake. """
 
+        # Constants
+        self.const = const
+
+        # List of active fragments within the window
+        self.frag_list = frag_list
+
+        # Length of the leading fragment
+        self.leading_frag_length = leading_frag_length
+
+        # Array of lengths for plotting (independent variable)
         self.length_array = length_array
-        self.wake_luminosity_profile = wake_luminosity_profile
-        self.length_points = np.array(length_points)
-        self.luminosity_points = np.array(luminosity_points)
+
+        # Length of visible fragments
+        self.length_points = np.array([frag.length - self.leading_frag_length for frag in self.frag_list])
+
+        # Luminosity of visible fragments
+        self.luminosity_points = np.array([frag.lum for frag in self.frag_list])
+
+
+        # Evalute the Gaussian at every fragment an add to the estimated wake
+        self.wake_luminosity_profile = np.zeros_like(length_array)
+        
+        for frag_lum, frag_len in zip(self.luminosity_points, self.length_points):
+
+            self.wake_luminosity_profile += frag_lum*scipy.stats.norm.pdf(self.length_array, loc=frag_len, \
+                scale=const.wake_psf)
 
 
 
@@ -319,6 +345,7 @@ def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mas
 
             # Assign the grain mass
             frag_child.m = m_grain
+            frag_child.m_init = m_grain
 
             frag_child.active = True
             frag_child.main = False
@@ -648,27 +675,19 @@ def ablateAll(fragments, const, compute_wake=False):
         ### Compute the wake as convoluted luminosities with the PSF ###
 
         length_array = np.linspace(back_len, front_len, 500) - leading_frag_length
-        wake_luminosity_profile = np.zeros_like(length_array)
 
-        luminosity_points = []
-        length_points = []
-
-        # Evalue the Gaussian of every fragment
+        frag_list = []
+        
         for frag in fragments:
 
             # Take only those lengths inside the wake window
-            if (frag.length > back_len) and (frag.length < front_len):
-
-                luminosity_points.append(frag.lum)
-                length_points.append(frag.length - leading_frag_length)
-
-                # Evalute the Gaussian
-                wake_luminosity_profile += frag.lum*scipy.stats.norm.pdf(length_array, \
-                    loc=frag.length - leading_frag_length, scale=const.wake_psf)
+            if frag.active:
+                if (frag.length > back_len) and (frag.length < front_len):
+                    frag_list.append(copy.deepcopy(frag))
 
 
         # Store evaluated wake
-        wake = Wake(length_array, wake_luminosity_profile, length_points, luminosity_points)
+        wake = Wake(const, frag_list, leading_frag_length, length_array)
 
         ### ###
 

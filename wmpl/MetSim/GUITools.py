@@ -49,7 +49,7 @@ class VelocityMplWidget(QWidget):
 
         QWidget.__init__(self, parent)
         
-        self.canvas = FigureCanvas(Figure(facecolor='#efebe7', figsize=TOP_FIGSIZES))
+        self.canvas = FigureCanvas(Figure(facecolor='#efebe7', figsize=(7, 5)))
         
         vertical_layout = QVBoxLayout()
         vertical_layout.addWidget(self.canvas)
@@ -65,7 +65,7 @@ class WakeMplWidget(QWidget):
 
         QWidget.__init__(self, parent)
         
-        self.canvas = FigureCanvas(Figure(facecolor='#efebe7'))
+        self.canvas = FigureCanvas(Figure(facecolor='#efebe7', figsize=(8, 5)))
         
         vertical_layout = QVBoxLayout()
         vertical_layout.addWidget(self.canvas)
