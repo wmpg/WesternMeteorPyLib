@@ -251,7 +251,15 @@ class Fragment(object):
 
 class Wake(object):
     def __init__(self, const, frag_list, leading_frag_length, length_array):
-        """ Container for the evaluated wake. """
+        """ Container for the evaluated wake. 
+        
+        Arguments:
+            const: [Constants]
+            frag_list: [list of Fragment object] A list of active fragments visible in the wake.
+            leading_frag_length: [float] Length from the beginning of the simulation of the leading fragment.
+            length_array: [ndarray] An array of lengths (zero centered to the leading fragment) over which 
+                the lag will be evaluated.
+        """
 
         # Constants
         self.const = const
