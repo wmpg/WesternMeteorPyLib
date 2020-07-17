@@ -271,7 +271,7 @@ if __name__ == "__main__":
     print("  i = {:.5f} deg".format(incl))
     print("  w = {:.5f} deg".format(peri))
     print("  O = {:.5f} deg".format(node))
-
+    print()
 
 
     ##########################################################################################################
@@ -280,6 +280,7 @@ if __name__ == "__main__":
     parent_matches = findParentBodies(q, e, np.radians(incl), np.radians(peri), np.radians(node), \
         d_crit=d_crit_type, top_n=10)
 
+    print("Top 10 matches:")
     print('Name                               ,     q,     e,   incl,    peri,    node, D crit', d_crit_type)
     for entry in parent_matches:
         print("{:35s}, {:.3f}, {:.3f}, {:6.2f}, {:7.3f}, {:7.3f}, {:.3f}".format(*entry))
