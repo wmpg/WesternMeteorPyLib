@@ -274,55 +274,6 @@ if __name__ == "__main__":
 
 
 
-    ### PROVIDE ORBITAL ELEMENTS MANUALLY ###
-    ##########################################################################################################
-
-    # Orbital elements of the July 21 meteoroid
-    # q      =   0.948562
-    # e      =   0.710995
-    # incl   =   2.461790
-    # peri   =  31.979790
-    # node   = 298.845068
-
-    # # With velocity correction of 400 m/s
-    # q      =   0.944491
-    # e      =   0.744092
-    # incl   =   2.302671
-    # peri   =  32.557683
-    # node   = 298.851272
-
-
-    # # 20170923 meteorite dropper
-    # q      =   0.978776
-    # e      =   0.576897
-    # incl   =   2.823131
-    # peri   = 202.247996
-    # node   = 180.337617
-
-
-    # # 20180117 Michigan fireball
-    # q      =   0.929614
-    # e      =   0.645998
-    # incl   =   0.862916
-    # peri   = 210.803526
-    # node   = 296.539520
-
-    # # 20180615 RMS low shallow meteor
-    # q      =   0.052157
-    # e      =   0.973413
-    # incl   =   25.531061
-    # peri   = 22.588003
-    # node   = 83.919153
-
-
-    # # Jan 6 mystery outburst
-    # q      =    0.612
-    # e      =    0.871
-    # incl   =   74.0
-    # peri   = 259.1
-    # node   = 286.4
-
-
     ##########################################################################################################
 
     # Find parent bodies for the given orbit
