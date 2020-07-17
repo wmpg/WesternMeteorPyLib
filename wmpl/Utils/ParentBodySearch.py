@@ -22,12 +22,15 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from __future__ import print_function, division, absolute_import
+from __future__ import print_function, division, absolute_import, unicode_literals
 
+import os
+import sys
 import numpy as np
 
-from wmpl.Utils.Dcriteria import calcDSH, calcDH, calcDD
 from wmpl.Config import config
+from wmpl.Utils.Dcriteria import calcDSH, calcDH, calcDD
+from wmpl.Utils.Pickling import loadPickle
 
 
 def loadCometsElements(comets_file):
@@ -189,6 +192,88 @@ def findParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10):
 if __name__ == "__main__":
 
 
+    import argparse
+
+    ### COMMAND LINE ARGUMENTS
+
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Run parent body search on given trajectory pickle file or orbital elements.")
+
+    arg_parser.add_argument('traj_path', nargs="?", metavar='TRAJ_PATH', type=str, \
+        help="Path to the trajectory pickle file.")
+
+    arg_parser.add_argument('-q', '--q', metavar='PERIHELION_DIST', help="Perihelion distance in AU.", \
+        type=float)
+
+    arg_parser.add_argument('-e', '--e', metavar='ECCENTRICITY', help="Eccentricity.", \
+        type=float)
+
+    arg_parser.add_argument('-i', '--i', metavar='INCLINATION', help="Inclination (deg).", \
+        type=float)
+
+    arg_parser.add_argument('-p', '--peri', metavar='ARG_OF_PERI', help="Argument of perihelion (deg).", \
+        type=float)
+
+    arg_parser.add_argument('-n', '--node', metavar='ASCENDING_NODE', help="Ascending node (deg).", \
+        type=float)
+
+    arg_parser.add_argument('-d', '--dcrit', metavar='D_CRIT', help="D criterion type. 'dsh' by default, options are: 'dsh' for Southworth and Hawkins, 'dd' for Drummond, and 'dh' for Jopek.", \
+        type=str, default='dsh')
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    #########################
+
+
+    # If the trajectory pickle was given, load the orbital elements from it
+    if cml_args.traj_path is not None:
+
+        # Load the trajectory pickle
+        traj = loadPickle(*os.path.split(cml_args.traj_path))
+
+        # Load orbital elements
+        q = traj.orbit.q
+        e = traj.orbit.e
+        incl = np.degrees(traj.orbit.i)
+        peri = np.degrees(traj.orbit.peri)
+        node = np.degrees(traj.orbit.node)
+
+
+    # Otherwise, load orbital elements from the manual entry
+    else:
+
+        # Check that all elements are given
+        if (cml_args.q is not None) and (cml_args.e is not None) and (cml_args.i is not None) \
+            and (cml_args.peri is not None) and (cml_args.node is not None):
+
+            q = cml_args.q
+            e = cml_args.e
+            incl = cml_args.i
+            peri = cml_args.peri
+            node = cml_args.node
+
+        else:
+            print("All orbital elements need to be specified: q, e, i, peri, node!")
+            sys.exit()
+
+
+
+    # Extract D criterion type
+    d_crit_type = cml_args.dcrit
+
+
+
+    # Print orbital elements
+    print("Orbital elements:")
+    print("  q = {:.5f} AU".format(q))
+    print("  e = {:.5f}".format(e))
+    print("  i = {:.5f} deg".format(incl))
+    print("  w = {:.5f} deg".format(peri))
+    print("  O = {:.5f} deg".format(node))
+
+
+
     ### PROVIDE ORBITAL ELEMENTS MANUALLY ###
     ##########################################################################################################
 
@@ -230,26 +315,23 @@ if __name__ == "__main__":
     # node   = 83.919153
 
 
-    # Jan 6 mystery outburst
-    q      =    0.612
-    e      =    0.871
-    incl   =   74.0
-    peri   = 259.1
-    node   = 286.4
+    # # Jan 6 mystery outburst
+    # q      =    0.612
+    # e      =    0.871
+    # incl   =   74.0
+    # peri   = 259.1
+    # node   = 286.4
 
 
     ##########################################################################################################
-
-
-    d_crit_type = 'dsh'
 
     # Find parent bodies for the given orbit
     parent_matches = findParentBodies(q, e, np.radians(incl), np.radians(peri), np.radians(node), \
         d_crit=d_crit_type, top_n=10)
 
-    print('Name                ,   q,     e,    incl,   peri,   node,   D crit', d_crit_type)
+    print('Name                               ,     q,     e,   incl,    peri,    node, D crit', d_crit_type)
     for entry in parent_matches:
-        print("{:20s}, {:.3f}, {:.3f}, {:5.2f}, {:7.3f}, {:7.3f}, {:.3f}".format(*entry))
+        print("{:35s}, {:.3f}, {:.3f}, {:6.2f}, {:7.3f}, {:7.3f}, {:.3f}".format(*entry))
 
 
 
