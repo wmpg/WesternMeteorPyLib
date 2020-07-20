@@ -361,12 +361,8 @@ def LST2LongitudeEast(julian_date, LST):
         lon: [float] longitude of the observer in degrees
     """
 
-    # t = (julian_date - J2000_JD.days)/36525.0
-
     # Greenwich Sidereal Time (apparent)
     _, GST = jd2LST(julian_date, 0)
-    # GST = 280.46061837 + 360.98564736629*(julian_date - J2000_JD.days) + 0.000387933*t**2 - (t**3)/38710000
-    # GST = (GST + 360)%360
 
     # Calculate longitude
     lon = (LST - GST + 180)%360 - 180
@@ -633,9 +629,9 @@ def ecef2LatLonAlt(x, y, z):
     # Calculate the longitude
     lon = np.arctan2(y, x)
 
-    p = np.sqrt(x**2  +  y**2)
+    p = np.sqrt(x**2 + y**2)
 
-    theta = np.arctan2( z*EARTH.EQUATORIAL_RADIUS, p*EARTH.POLAR_RADIUS)
+    theta = np.arctan2(z*EARTH.EQUATORIAL_RADIUS, p*EARTH.POLAR_RADIUS)
 
     # Calculate the latitude
     lat = np.arctan2(z + (ep**2)*EARTH.POLAR_RADIUS*np.sin(theta)**3, \
@@ -1090,7 +1086,7 @@ def equatorialCoordPrecession(start_epoch, final_epoch, ra, dec):
 
     # Calculate declination (apply a different equation if close to the pole, closer then 0.5 degrees)
     if (np.pi/2 - np.abs(dec)) < np.radians(0.5):
-        dec_corr = np.arccos(np.sqrt(A**2 + B**2))
+        dec_corr = np.sign(C)*np.arccos(np.sqrt(A**2 + B**2))
     else:
         dec_corr = np.arcsin(C)
 
