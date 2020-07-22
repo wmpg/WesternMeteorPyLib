@@ -404,6 +404,7 @@ def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir, 
         sol_range: [tuple] Range of solar longitudes to plot. None by default.
         dt_range: [tuple] Datetimes of the first and last trajectory in the plot.
         import_matplotlib: [bool] Import matplotlib, as it is not imported globally. False by default.
+            This needs to be used if the function is used from another script.
 
     """
 
