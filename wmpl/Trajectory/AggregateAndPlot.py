@@ -381,7 +381,7 @@ def writeOrbitSummaryFile(dir_path, traj_list, traj_summary_file_name=TRAJ_SUMMA
 
 def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir, \
     file_name, density_plot=False, low_density=False, plot_showers=False, shower_obj_list=None, \
-    show_sol_range=True, sol_range=None, dt_range=None):
+    show_sol_range=True, sol_range=None, dt_range=None, import_matplotlib=False):
     """ Plot the given data in Sun-centered ecliptic coordinates.
 
     Arguments:
@@ -403,8 +403,14 @@ def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir, 
         show_sol_range: [bool] Show the solar longitude range on the plot. True by default.
         sol_range: [tuple] Range of solar longitudes to plot. None by default.
         dt_range: [tuple] Datetimes of the first and last trajectory in the plot.
+        import_matplotlib: [bool] Import matplotlib, as it is not imported globally. False by default.
 
     """
+
+    if import_matplotlib:
+        import matplotlib
+        import matplotlib.pyplot as plt
+
 
     ### PLOT SUN-CENTERED GEOCENTRIC ECLIPTIC RADIANTS ###
 
