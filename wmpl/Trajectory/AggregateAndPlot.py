@@ -409,8 +409,14 @@ def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir, 
     """
 
     if import_matplotlib:
+
         import matplotlib
         import matplotlib.pyplot as plt
+
+    # Otherwise, use global variables
+    else:
+        global matplotlib
+        global plt
 
 
     ### PLOT SUN-CENTERED GEOCENTRIC ECLIPTIC RADIANTS ###
