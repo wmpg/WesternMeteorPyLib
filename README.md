@@ -121,7 +121,7 @@ The installation might differ on Windows. I recommend installing Anaconda, which
 	```
 	git clone --recursive https://github.com/wmpg/WesternMeteorPyLib.git
 	```
-	You will probably have to log in with your GitHub account to do that.
+	
 
 
 5) From the Anaconda powershell prompt navigate to the the cloned WesternMeteorPyLib directory and inside run:
