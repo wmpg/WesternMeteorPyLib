@@ -162,6 +162,15 @@ If after this you get this error:
 then you have to manually download the ```epsg``` file ([LINK](https://raw.githubusercontent.com/matplotlib/basemap/master/lib/mpl_toolkits/basemap/data/epsg), choose "Save as...", remove the ".txt" extension if necessary) into the ```<ANACONDA_DIR>/envs/wmpl/Library/share``` directory. Please don't hesitate to contact us if you have trouble getting this to work, as we share the same frustrations with the ```basemap``` library and the lack of any real alternative.
 
 
+#### ```ImportError: cannot import name 'dedent' from 'matplotlib.cbook'``` error
+
+In the recent matplotlib versions, the maintainters really droped the ball and started shipping buggy versions. Fortunately, we can revert to an old matplotlib version to fix this:
+
+```
+conda install -c conda-forge matplotlib=3.1.2
+conda upgrade matplotlib
+```
+
 ### Manually downloading data files
 
 JPL DE430 ephemerids are not a part of the library, but they **will** be downloaded automatically on install. The file can be downloaded separately and put into the **`shared`** directory:
