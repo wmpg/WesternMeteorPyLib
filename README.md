@@ -171,6 +171,11 @@ conda install -c conda-forge matplotlib=3.1.2
 conda upgrade matplotlib
 ```
 
+If it's still not working, try this:
+```
+conda install -c conda-forge matplotlib=2.2.4
+```
+
 ### Manually downloading data files
 
 JPL DE430 ephemerids are not a part of the library, but they **will** be downloaded automatically on install. The file can be downloaded separately and put into the **`shared`** directory:
