@@ -883,8 +883,8 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         help='Maximum time offset between the stations. Default is 5 seconds.', type=float, default=10.0)
 
     arg_parser.add_argument('-s', '--maxstationdist', metavar='MAX_STATION_DIST', \
-        help='Maximum distance (km) between stations of paired meteors. Default is 300 km.', type=float, \
-        default=300.0)
+        help='Maximum distance (km) between stations of paired meteors. Default is 600 km.', type=float, \
+        default=600.0)
 
     arg_parser.add_argument('-m', '--minerr', metavar='MIN_ARCSEC_ERR', \
         help="Minimum error in arc seconds below which the station won't be rejected. 30 arcsec by default.", \
