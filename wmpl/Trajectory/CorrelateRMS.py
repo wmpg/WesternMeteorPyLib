@@ -918,7 +918,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
 
     arg_parser.add_argument('-a', '--auto', metavar='PREV_DAYS', type=float, default=None, const=14.0, \
         nargs='?', \
-        help="""Run continously taking the data in the last PREV_DAYS to compute the new trajectories and update the old ones."""
+        help="""Run continously taking the data in the last PREV_DAYS to compute the new trajectories and update the old ones. The default time range is 14 days."""
         )
 
 
