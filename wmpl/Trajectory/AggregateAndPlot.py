@@ -542,8 +542,28 @@ def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir, 
             bet_arr, lam_arr = sphericalPointFromHeadingAndDistance(bet, lam, heading_arr, \
                 np.radians(PLOT_SHOWER_RADIUS))
 
-            # Plot the circle
-            celes_plot.plot(lam_arr, bet_arr, color='w', alpha=0.5)
+            # If the circle is on the 90 deg boundary, split the arrays into two parts
+            lam_arr_check = (lam_arr - np.radians(270))%(2*np.pi)
+            if np.any(lam_arr_check < np.pi) and np.any(lam_arr_check >= np.pi):
+
+                temp_arr = np.c_[lam_arr, bet_arr]
+                arr_left = temp_arr[lam_arr_check < np.pi]
+                arr_right = temp_arr[lam_arr_check > np.pi]
+
+                lam_left_arr, bet_left_arr = arr_left.T
+                lam_right_arr, bet_right_arr = arr_right.T
+
+                lam_arr_segments = [lam_left_arr, lam_right_arr]
+                bet_arr_segments = [bet_left_arr, bet_right_arr]
+
+            else:
+                lam_arr_segments = [lam_arr]
+                bet_arr_segments = [bet_arr]
+
+
+            # Plot the circle segments
+            for lam_arr, bet_arr in zip(lam_arr_segments, bet_arr_segments):
+                celes_plot.plot(lam_arr, bet_arr, color='w', alpha=0.5)
 
             ### ###
 
