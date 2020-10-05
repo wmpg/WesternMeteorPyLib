@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1909</width>
-    <height>963</height>
+    <width>1908</width>
+    <height>1001</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -18,7 +18,7 @@
     <property name="geometry">
      <rect>
       <x>1510</x>
-      <y>880</y>
+      <y>910</y>
       <width>171</width>
       <height>41</height>
      </rect>
@@ -318,7 +318,7 @@
     <property name="geometry">
      <rect>
       <x>1510</x>
-      <y>430</y>
+      <y>460</y>
       <width>391</width>
       <height>121</height>
      </rect>
@@ -581,7 +581,7 @@
     <property name="geometry">
      <rect>
       <x>1510</x>
-      <y>270</y>
+      <y>300</y>
       <width>391</width>
       <height>161</height>
      </rect>
@@ -979,7 +979,7 @@
       <x>1510</x>
       <y>120</y>
       <width>391</width>
-      <height>151</height>
+      <height>181</height>
      </rect>
     </property>
     <property name="title">
@@ -1274,6 +1274,45 @@
       <string>km/s</string>
      </property>
     </widget>
+    <widget class="QLabel" name="label_66">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>150</y>
+       <width>57</width>
+       <height>15</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&lt;p&gt;&amp;tau;&lt;/p&gt;</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_67">
+     <property name="geometry">
+      <rect>
+       <x>160</x>
+       <y>150</y>
+       <width>71</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;%&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="inputLumEff">
+     <property name="geometry">
+      <rect>
+       <x>80</x>
+       <y>150</y>
+       <width>71</width>
+       <height>23</height>
+      </rect>
+     </property>
+    </widget>
    </widget>
    <widget class="MagnitudeMplWidget" name="magnitudePlot" native="true">
     <property name="geometry">
@@ -1299,7 +1338,7 @@
     <property name="geometry">
      <rect>
       <x>1510</x>
-      <y>550</y>
+      <y>580</y>
       <width>391</width>
       <height>161</height>
      </rect>
@@ -1601,7 +1640,7 @@
     <property name="geometry">
      <rect>
       <x>1510</x>
-      <y>840</y>
+      <y>870</y>
       <width>171</width>
       <height>31</height>
      </rect>
@@ -1614,7 +1653,7 @@
     <property name="geometry">
      <rect>
       <x>1720</x>
-      <y>870</y>
+      <y>900</y>
       <width>171</width>
       <height>21</height>
      </rect>
@@ -1627,7 +1666,7 @@
     <property name="geometry">
      <rect>
       <x>1720</x>
-      <y>900</y>
+      <y>930</y>
       <width>171</width>
       <height>21</height>
      </rect>
@@ -1650,7 +1689,7 @@
     <property name="geometry">
      <rect>
       <x>1510</x>
-      <y>710</y>
+      <y>740</y>
       <width>391</width>
       <height>121</height>
      </rect>
@@ -1848,7 +1887,7 @@ p, li { white-space: pre-wrap; }
     <property name="geometry">
      <rect>
       <x>1720</x>
-      <y>840</y>
+      <y>870</y>
       <width>171</width>
       <height>21</height>
      </rect>
@@ -1863,7 +1902,7 @@ p, li { white-space: pre-wrap; }
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>1909</width>
+     <width>1908</width>
      <height>21</height>
     </rect>
    </property>

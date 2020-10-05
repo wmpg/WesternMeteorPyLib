@@ -376,10 +376,12 @@ cpdef double decelerationRK4(double dt, double K, double m, double rho_atm, doub
 
 
 @cython.cdivision(True) 
-cpdef double luminousEfficiency(double vel):
+cpdef double luminousEfficiency(int lum_eff_type, double lum_eff, double vel):
     """ Compute the luminous efficienty in percent for the given velocity. 
     
     Arguments:
+        lum_eff_type: [int] Lum. eff. model: 0 - constant, 1 - TDB, ...
+        lum_eff: [double] Value of the constant luminous efficiency (percent).
         vel: [double] Velocity (m/s).
 
     Return:
@@ -387,7 +389,7 @@ cpdef double luminousEfficiency(double vel):
 
     """
 
-    return 0.7/100
+    return lum_eff/100.0
 
 
 

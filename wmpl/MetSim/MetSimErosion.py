@@ -119,6 +119,16 @@ class Constants(object):
         # Grain bulk density (kg/m^3)
         self.rho_grain = 3000
 
+
+        # Luminous efficiency type
+        #   0 - Constant
+        #   1 - TDB
+        #   2 - TDB ...
+        self.lum_eff_type = 0
+
+        # Constant luminous efficiency (percent)
+        self.lum_eff = 0.7
+
         ### ###
 
 
@@ -513,8 +523,8 @@ def ablateAll(fragments, const, compute_wake=False):
         frag.h = frag.h + frag.vv*const.dt
 
         # Compute ablated luminosity (including the deceleration term) for one fragment/grain
-        lum = -luminousEfficiency(frag.v)*((mass_loss_ablation/const.dt*frag.v**2)/2 \
-            - frag.m*frag.v*deceleration_total)
+        lum = -luminousEfficiency(const.lum_eff_type, const.lum_eff, frag.v) \
+            *((mass_loss_ablation/const.dt*frag.v**2)/2 - frag.m*frag.v*deceleration_total)
         #lum = -luminousEfficiency(frag.v)*((mass_loss_ablation/const.dt*frag.v**2)/2)
 
         # Compute the total luminosity

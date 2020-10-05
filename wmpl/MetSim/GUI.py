@@ -796,8 +796,12 @@ class MetSimGUI(QMainWindow):
 
         ### Add key bindings ###
 
+        # Update shown grain diameters when the grain mass is updated
         self.inputErosionMassMin.editingFinished.connect(self.updateGrainDiameters)
         self.inputErosionMassMax.editingFinished.connect(self.updateGrainDiameters)
+
+        # Update the photometric mass when the luminous efficiency is changed
+        self.inputLumEff.editingFinished.connect(self.updateInitialMass)
 
 
         self.wakePlotUpdateButton.clicked.connect(self.updateWakePlot)
@@ -1021,7 +1025,8 @@ class MetSimGUI(QMainWindow):
         time_arr, mag_arr = mergeClosePoints(time_arr, mag_arr, avg_t_diff_max, method='avg')
 
         # Compute the photometry mass
-        return calcMass(np.array(time_arr), np.array(mag_arr), self.traj.orbit.v_avg, P_0m=self.const.P_0m)
+        return calcMass(np.array(time_arr), np.array(mag_arr), self.traj.orbit.v_avg, \
+            tau=self.const.lum_eff/100, P_0m=self.const.P_0m)
 
 
 
@@ -1053,6 +1058,7 @@ class MetSimGUI(QMainWindow):
         self.inputRhoGrain.setText("{:d}".format(int(const.rho_grain)))
         self.inputMassInit.setText("{:.1e}".format(const.m_init))
         self.inputAblationCoeff.setText("{:.3f}".format(const.sigma*1e6))
+        self.inputLumEff.setText("{:.2f}".format(const.lum_eff))
         self.inputVelInit.setText("{:.3f}".format(const.v_init/1000))
         self.inputShapeFact.setText("{:.2f}".format(const.shape_factor))
         self.inputGamma.setText("{:.1f}".format(const.gamma))
@@ -1116,6 +1122,22 @@ class MetSimGUI(QMainWindow):
 
         self.updateGrainDiameters()
 
+
+    def updateInitialMass(self):
+        """ Update the value of the photometric mass. """
+
+        # Keep the old luminous efficiency
+        lum_eff_old = self.const.lum_eff
+
+        # Read the new value
+        self.const.lum_eff = self._tryReadBox(self.inputLumEff, self.const.lum_eff)
+
+            
+        # Rescale the initial mass using the new tau value
+        self.const.m_init *= lum_eff_old/self.const.lum_eff
+
+
+        self.updateInputBoxes()
 
 
 
@@ -1322,6 +1344,7 @@ class MetSimGUI(QMainWindow):
         self.const.rho_grain = self._tryReadBox(self.inputRhoGrain, self.const.rho_grain)
         self.const.m_init = self._tryReadBox(self.inputMassInit, self.const.m_init)
         self.const.sigma = self._tryReadBox(self.inputAblationCoeff, self.const.sigma*1e6)/1e6
+        self.const.lum_eff = self._tryReadBox(self.inputLumEff, self.const.lum_eff)
         self.const.v_init = 1000*self._tryReadBox(self.inputVelInit, self.const.v_init/1000)
         self.const.shape_factor = self._tryReadBox(self.inputShapeFact, self.const.shape_factor)
         self.const.gamma = self._tryReadBox(self.inputGamma, self.const.gamma)
