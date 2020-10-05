@@ -27,8 +27,8 @@ Basemap = importBasemap()
 
 
 from wmpl.Trajectory.Orbit import calcOrbit
-from wmpl.Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, RMSD, angleBetweenSphericalCoords, \
-    lineFunc, normalizeAngleWrap
+from wmpl.Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, RMSD, \
+    angleBetweenSphericalCoords, angleBetweenVectors, lineFunc, normalizeAngleWrap
 from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import savePickle
 from wmpl.Utils.Plotting import savePlot
@@ -496,7 +496,7 @@ class PlaneIntersection(object):
         self.radiant_eci = np.cross(self.obs1.plane_N, self.obs2.plane_N)
         self.radiant_eci = vectNorm(self.radiant_eci)
 
-        # If the radiant is closer to the antiradiant, reverse signs
+        # If the last measurement is closer to the radiant than the first point, reverse signs
         if np.dot(self.obs1.meas_eci[0], self.radiant_eci) < np.dot(self.obs1.meas_eci[-1], self.radiant_eci):
             self.radiant_eci = -self.radiant_eci
 
@@ -759,18 +759,21 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
                 # Calculate the time in seconds from the beginning of the meteor
                 t_rel = t - t0
 
-                # Calculate the gravitational acceleration at the given height
-                g = G*EARTH.MASS/(vectMag(rad_cpa)**2)
+                # Compute the model point modified due to gravity, assuming zero vertical velocity
+                rad_cpa = applyGravityDrop(rad_cpa, t_rel, vectMag(rad_cpa), 0.0)
 
-                # Determing the sign of the initial time
-                time_sign = np.sign(t_rel)
+                # # Calculate the gravitational acceleration at the given height
+                # g = G*EARTH.MASS/(vectMag(rad_cpa)**2)
 
-                # Calculate the amount of gravity drop from a straight trajectory (handle the case when the time
-                #   can be negative)
-                drop = time_sign*(1.0/2)*g*t_rel**2
+                # # Determing the sign of the initial time
+                # time_sign = np.sign(t_rel)
 
-                # Apply gravity drop to ECI coordinates
-                rad_cpa -= drop*vectNorm(rad_cpa)
+                # # Calculate the amount of gravity drop from a straight trajectory (handle the case when the time
+                # #   can be negative)
+                # drop = time_sign*(1.0/2)*g*t_rel**2
+
+                # # Apply gravity drop to ECI coordinates
+                # rad_cpa -= drop*vectNorm(rad_cpa)
 
 
                 # print('-----')
@@ -814,7 +817,6 @@ def calcSpatialResidual(jd, state_vect, radiant_eci, stat, meas):
 
     Arguments:
         jd: [float] Julian date
-        t_rel: [float] Time from the beginning of the trajectory
         state_vect: [3 element ndarray] ECI position of the state vector
         radiant_eci: [3 element ndarray] radiant direction vector in ECI
         stat: [3 element ndarray] position of the station in ECI
@@ -1182,6 +1184,7 @@ def moveStateVector(state_vect, radiant_eci, observations):
         """
 
         rad_cpa_list = []
+        radiant_ang_dist_list = []
 
         # Go through all non-ignored observations from all stations
         nonignored_observations = [obstmp for obstmp in observations if not obstmp.ignore_station]
@@ -1195,8 +1198,18 @@ def moveStateVector(state_vect, radiant_eci, observations):
             rad_cpa_list.append(rad_cpa)
 
 
-        # Choose the state vector with the largest height
-        rad_cpa_beg = rad_cpa_list[np.argmax([vectMag(rad_cpa_temp) for rad_cpa_temp in rad_cpa_list])]
+            # Compute angular distance from the first point to the radiant
+            rad_ang_dist = angleBetweenVectors(radiant_eci, vectNorm(rad_cpa))
+            radiant_ang_dist_list.append(rad_ang_dist)
+
+            
+
+        # # Choose the state vector with the largest height
+        # rad_cpa_beg = rad_cpa_list[np.argmax([vectMag(rad_cpa_temp) for rad_cpa_temp in rad_cpa_list])]
+
+        # Choose the state vector as the point of initial observation closest to the radiant
+        rad_cpa_beg = rad_cpa_list[np.argmin([rad_ang_dist for rad_ang_dist in radiant_ang_dist_list])]
+
 
         return rad_cpa_beg
 
@@ -2885,15 +2898,24 @@ class Trajectory(object):
             bounds.append([-self.max_toffset, self.max_toffset])
 
 
-        # Try different methods of optimization until it is successful
-        methods = ['SLSQP', 'TNC', None]
-        maxiter_list = [1000, None, 15000]
+        ### Try different methods of optimization until it is successful ##
+
+        #   If there are more than 5 stations, use the advanced L-BFGS-B method by default
+        if len(self.observations) >= 5:
+            methods = [None]
+            maxiter_list = [15000]
+        else:
+            # If there are less than 5, try faster methods first
+            methods = ['SLSQP', 'TNC', None]
+            maxiter_list = [1000, None, 15000]
+
+        # Try different methods to minimize timing residuals
         for opt_method, maxiter in zip(methods, maxiter_list):
 
-            # Run the minimization of residuals between all stations (set tolerance to 1 ns)
+            # Run the minimization of residuals between all stations
             timing_mini = scipy.optimize.minimize(timingResiduals, p0, args=(observations, \
-                self.t_ref_station, weights), bounds=bounds, method=opt_method, options={'maxiter': maxiter}, \
-                tol=1e-9)
+                self.t_ref_station, weights), bounds=bounds, method=opt_method, options={'maxiter': maxiter},\
+                tol=1e-12)
 
             # Stop trying methods if this one was successful
             if timing_mini.success:
@@ -2905,6 +2927,7 @@ class Trajectory(object):
             else:
                 print('Unsuccessful timing optimization with', opt_method)
 
+        ### ###
 
         # If the minimization was successful, apply the time corrections
         if timing_mini.success:
@@ -3163,22 +3186,6 @@ class Trajectory(object):
 
                 # Apply the gravity drop
                 rad_cpa = applyGravityDrop(rad_cpa, t_rel, r0, v0z)
-
-
-                # # Calculate the gravitational acceleration at the given height
-                # g = G*EARTH.MASS/(vectMag(rad_cpa)**2)
-
-                # # Determing the sign of the initial time
-                # time_sign = np.sign(t_rel)
-
-                # # Calculate the amount of gravity drop from a straight trajectory (handle the case when the time
-                # #   can be negative)
-                # drop = time_sign*(1.0/2)*g*t_rel**2
-
-                # # Apply gravity drop to ECI coordinates
-                # rad_cpa -= drop*vectNorm(rad_cpa)
-
-                ###
                 
 
                 # Calculate the range to the observed CPA
@@ -3971,7 +3978,7 @@ class Trajectory(object):
 
             plt.grid()
 
-            plt.legend()
+            plt.legend(prop={'size': 6})
 
             # Set the residual limits to +/-10m if they are smaller than that
             if (np.max(np.abs(obs.v_residuals)) < 10) and (np.max(np.abs(obs.h_residuals)) < 10):
@@ -4005,6 +4012,8 @@ class Trajectory(object):
          ['o', 1 ],
          ['s', 1 ],
          ['d', 1 ],
+         ['o', 1 ],
+         ['s', 1 ],
          ]
          
         if self.plot_all_spatial_residuals:
@@ -4044,7 +4053,7 @@ class Trajectory(object):
 
             plt.grid()
 
-            plt.legend()
+            plt.legend(prop={'size': 6})
 
             # Set the residual limits to +/-10m if they are smaller than that
             if np.max(np.abs(plt.gca().get_ylim())) < 10:
@@ -4101,7 +4110,7 @@ class Trajectory(object):
 
             plt.grid()
 
-            plt.legend()
+            plt.legend(prop={'size': 6})
 
             # Set the residual limits to +/-10m if they are smaller than that
             if np.max(np.abs(plt.gca().get_ylim())) < 10:
@@ -4152,11 +4161,11 @@ class Trajectory(object):
 
             plt.title('Total spatial residuals')
             plt.xlabel('Length (km)')
-            plt.ylabel('Residuals (m)')
+            plt.ylabel('Residuals (m), vertical sign')
 
             plt.grid()
 
-            plt.legend()
+            plt.legend(prop={'size': 6})
 
             # Set the residual limits to +/-10m if they are smaller than that
             if np.max(np.abs(plt.gca().get_ylim())) < 10:
@@ -4176,6 +4185,95 @@ class Trajectory(object):
             else:
                 plt.clf()
                 plt.close()
+
+
+            ##################################################################################################
+
+
+            ### PLOT TOTAL SPATIAL RESIDUALS VS LENGTH (with influence of gravity) ###
+            ##################################################################################################
+
+            # Plot only with gravity compensation is used
+            if self.gravity_correction:
+
+                for i, obs in enumerate(self.observations):
+
+                    marker, size_multiplier = markers[i%len(markers)]
+
+
+                    ## Compute residual from gravity corrected point ##
+
+                    res_total_grav_list = []
+
+                    # Go through all individual position measurements from each site
+                    #for t, jd, stat, meas in zip(obs.time_data, obs.JD_data, obs.stat_eci_los, obs.meas_eci_los):
+                    for jd, tlat, tlon, tht, mlat, mlon, mht in zip(obs.JD_data, obs.model_lat, \
+                        obs.model_lon, obs.model_ht, obs.meas_lat, obs.meas_lon, obs.meas_ht):
+
+
+                        # Compute cartiesian coordinates of trajectory points
+                        traj_eci = np.array(geo2Cartesian(tlat, tlon, tht, jd))
+
+                        # Compute cartiesian coordinates of measurement points
+                        meas_eci = np.array(geo2Cartesian(mlat, mlon, mht, jd))
+
+                        # Compute the total distance between the points
+                        res_total_grav = vectMag(traj_eci - meas_eci)
+
+                        # The sign of the residual is the vertical component (meas higher than trajectory is
+                        #   positive)
+                        if vectMag(meas_eci) > vectMag(traj_eci):
+                            res_total_grav = -res_total_grav
+
+
+                        res_total_grav_list.append(res_total_grav)
+                        
+
+                    res_total_grav_list = np.array(res_total_grav_list)
+
+                    ## ##
+
+                    # Plot total residuals
+                    plt.scatter(obs.state_vect_dist/1000, res_total_grav_list, marker=marker, 
+                        s=10*size_multiplier, label='{:s}'.format(str(obs.station_id)), zorder=3)
+
+                    # Mark ignored points
+                    if np.any(obs.ignore_list):
+
+                        ignored_length = obs.state_vect_dist[obs.ignore_list > 0]
+                        ignored_tot_res = res_total_grav_list[obs.ignore_list > 0]
+
+                        plt.scatter(ignored_length/1000, ignored_tot_res, facecolors='none', edgecolors='k', \
+                            marker='o', zorder=3, s=20)
+
+
+                plt.title('Total spatial residuals (gravity corrected)')
+                plt.xlabel('Length (km)')
+                plt.ylabel('Residuals (m), vertical sign')
+
+                plt.grid()
+
+                plt.legend(prop={'size': 6})
+
+                # Set the residual limits to +/-10m if they are smaller than that
+                if np.max(np.abs(plt.gca().get_ylim())) < 10:
+                    plt.ylim([-10, 10])
+
+                # Pickle the figure
+                if ret_figs:
+                    fig_pickle_dict["total_spatial_residuals_length_grav"] = pickle.dumps(plt.gcf(), \
+                        protocol=2)
+
+                if self.save_results:
+                    savePlot(plt, file_name + '_total_spatial_residuals_length_grav.' + self.plot_file_type, \
+                        output_dir)
+
+                if show_plots:
+                    plt.show()
+
+                else:
+                    plt.clf()
+                    plt.close()
 
 
             ##################################################################################################
@@ -4217,7 +4315,7 @@ class Trajectory(object):
 
         plt.grid()
 
-        plt.legend()
+        plt.legend(prop={'size': 6})
 
         # Set the residual limits to +/-10m if they are smaller than that
         if np.max(np.abs(plt.gca().get_xlim())) < 10:
@@ -4276,7 +4374,7 @@ class Trajectory(object):
         #             label='Lag, ignored points')
 
             
-        #     ax1.legend()
+        #     ax1.legend(prop={'size': 6})
 
         #     plt.title('Lag, station ' + str(obs.station_id))
         #     ax1.set_xlabel('Lag (m)')
@@ -4320,7 +4418,7 @@ class Trajectory(object):
 
             # Plot the lag
             plt_handle = plt.plot(used_lag, used_times, marker='x', label='Station: ' + str(obs.station_id), 
-                zorder=3)
+                zorder=3, markersize=3)
 
 
             # Plot ignored lag points
@@ -4346,7 +4444,7 @@ class Trajectory(object):
         plt.xlabel('Lag (m)')
         plt.ylabel('Time (s)')
 
-        plt.legend()
+        plt.legend(prop={'size': 6})
         plt.grid()
         plt.gca().invert_yaxis()
 
@@ -4439,7 +4537,7 @@ class Trajectory(object):
         ax1.set_xlabel('Velocity (km/s)')
         ax1.set_ylabel('Time (s)')
 
-        ax1.legend()
+        ax1.legend(prop={'size': 6})
         ax1.grid()
 
         # Set velocity limits to +/- 3 km/s
@@ -4485,8 +4583,8 @@ class Trajectory(object):
             used_times = obs.time_data[obs.ignore_list == 0]
             used_dists = obs.state_vect_dist[obs.ignore_list == 0]
 
-            plt_handle = ax1.plot(used_dists/1000, used_times, marker='x', label=str(obs.station_id), \
-                zorder=3)
+            plt_handle = ax1.plot(used_dists/1000, used_times, marker='o', label=str(obs.station_id), \
+                zorder=3, markersize=3)
 
 
             # Plot ignored points
@@ -4496,7 +4594,7 @@ class Trajectory(object):
                 ignored_dists = obs.state_vect_dist[obs.ignore_list > 0]
                     
                 ax1.scatter(ignored_dists/1000, ignored_times, facecolors='k', 
-                    edgecolors=plt_handle[0].get_color(), marker='o', s=8, zorder=4, \
+                    edgecolors=plt_handle[0].get_color(), marker='o', s=8, zorder=5, \
                     label='{:s} ignored points'.format(str(obs.station_id)))
 
 
@@ -4519,7 +4617,7 @@ class Trajectory(object):
         ax1.set_ylabel('Time (s)')
         ax1.set_xlabel('Distance from state vector (km)')
         
-        ax1.legend()
+        ax1.legend(prop={'size': 6})
         ax1.grid()
         
         # Set time axis limits
@@ -4557,11 +4655,19 @@ class Trajectory(object):
         met_lat_mean = meanAngle([x for x in obs.meas_lat for obs in self.observations])
 
 
-        # Put coordinate of all sites and the meteor in the one list
+        # Put coordinates of all sites and the meteor in the one list
         lat_list = [obs.lat for obs in self.observations]
         lat_list.append(met_lat_mean)
         lon_list = [obs.lon for obs in self.observations]
         lon_list.append(met_lon_mean)
+
+        # Put edge points of the meteor in the list
+        lat_list.append(self.rbeg_lat)
+        lon_list.append(self.rbeg_lon)
+        lat_list.append(self.rend_lat)
+        lon_list.append(self.rend_lon)
+        lat_list.append(self.orbit.lat_ref)
+        lon_list.append(self.orbit.lon_ref)
 
 
         # Init the map
@@ -4585,10 +4691,16 @@ class Trajectory(object):
 
 
         # Plot a point marking the final point of the meteor
-        m.scatter(self.rend_lat, self.rend_lon, c='k', marker='+', s=50, alpha=0.75, label='Endpoint')
+        m.scatter(self.rend_lat, self.rend_lon, c='k', marker='+', s=50, alpha=0.75, label='Lowest height')
 
 
-        plt.legend(loc='upper right')
+        # If there are more than 10 observations, make the legend font smaller
+        legend_font_size = 6
+        if len(self.observations) >= 10:
+            legend_font_size = 5
+
+        plt.legend(loc='upper left', prop={'size': legend_font_size})
+
 
 
         # Pickle the figure
@@ -4639,7 +4751,7 @@ class Trajectory(object):
         #     plt.ylim(ymin=0)
 
         #     plt.grid()
-        #     plt.legend()
+        #     plt.legend(prop={'size': 6})
 
         #     if self.save_results:
         #         savePlot(plt, file_name + '_' + str(obs.station_id) + '_angular_residuals.' \
@@ -4660,6 +4772,8 @@ class Trajectory(object):
          ['o', 1 ],
          ['s', 1 ],
          ['d', 1 ],
+         ['o', 1 ],
+         ['s', 1 ],
          ]
 
         # Plot angular residuals from all stations
@@ -4707,7 +4821,7 @@ class Trajectory(object):
         plt.ylim(ymin=0)
 
         plt.grid()
-        plt.legend()
+        plt.legend(prop={'size': 6})
 
         # Pickle the figure
         if ret_figs:
@@ -4764,7 +4878,7 @@ class Trajectory(object):
 
             plt.gca().invert_yaxis()
 
-            plt.legend()
+            plt.legend(prop={'size': 6})
 
             plt.grid()
 
@@ -4823,7 +4937,7 @@ class Trajectory(object):
 
             plt.gca().invert_xaxis()
 
-            plt.legend()
+            plt.legend(prop={'size': 6})
 
             plt.grid()
 
@@ -5181,7 +5295,7 @@ class Trajectory(object):
             print('LoS statistical weights:')
 
             for obs in self.observations:
-                print(obs.station_id, obs.weight)
+                print("{:>12s}, {:.3f}".format(obs.station_id, obs.weight))
 
         ######################################################################################################
 
