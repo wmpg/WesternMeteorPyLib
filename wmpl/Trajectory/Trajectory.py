@@ -4406,19 +4406,51 @@ class Trajectory(object):
 
         #     ##################################################################################################
 
+
+        # Generate a list of colors to use for markers
+        colors = cm.viridis(np.linspace(0, 1, len(self.observations)))
+
+        # Only use one type of markers if there are not a lot of stations
+        plot_markers = ['x']
+
+        # Keep colors non-transparent if there are not a lot of stations
+        alpha = 1.0
+
+
+        # If there are more than 5 stations, interleave the colors with another colormap and change up
+        #   markers
+        if len(self.observations) > 5:
+            colors_alt = cm.inferno(np.linspace(0, 1, len(self.observations)))
+            for i in range(len(self.observations)):
+                if i%2 == 1:
+                    colors[i] = colors_alt[i]
+
+            plot_markers.append("+")
+
+            # Add transparency for more stations
+            alpha = 0.75
+
+
+        # Sort observations by first height to preserve color linearity
+        obs_ht_sorted = sorted(self.observations, key=lambda x: x.model_ht[0])
+
+
         ### PLOT ALL LAGS ###
         ######################################################################################################
 
         # Plot lags from each station on a single plot
-        for obs in self.observations:
+        for i, obs in enumerate(obs_ht_sorted):
 
             # Extract lag points that were not ignored
             used_times = obs.time_data[obs.ignore_list == 0]
             used_lag = obs.lag[obs.ignore_list == 0]
 
+            # Choose the marker
+            marker = plot_markers[i%len(plot_markers)]
+
             # Plot the lag
-            plt_handle = plt.plot(used_lag, used_times, marker='x', label='Station: ' + str(obs.station_id), 
-                zorder=3, markersize=3)
+            plt_handle = plt.plot(used_lag, used_times, marker=marker, label='Station: ' + str(obs.station_id), 
+                zorder=3, markersize=3, color=colors[i], alpha=alpha)
 
 
             # Plot ignored lag points
@@ -4470,10 +4502,7 @@ class Trajectory(object):
         ######################################################################################################
 
         # Possible markers for velocity
-        markers = ['x', '+', '.', '2']
-
-        # Generate a list of colors to use for markers
-        colors = cm.rainbow(np.linspace(0, 1 , len(self.observations)))
+        vel_markers = ['x', '+', '.', '2']
 
         fig, ax1 = plt.subplots()
 
@@ -4489,8 +4518,9 @@ class Trajectory(object):
         
         first_ignored_plot = True
 
+
         # Plot velocities from each observed site
-        for i, obs in enumerate(self.observations):
+        for i, obs in enumerate(obs_ht_sorted):
 
             # Mark ignored velocities
             if np.any(obs.ignore_list):
@@ -4513,8 +4543,8 @@ class Trajectory(object):
 
 
             # Plot all point to point velocities
-            ax1.scatter(obs.velocities[1:]/1000, obs.time_data[1:], marker=markers[i%len(markers)], 
-                c=colors[i], alpha=0.5, label='Station: {:s}'.format(str(obs.station_id)), zorder=3)
+            ax1.scatter(obs.velocities[1:]/1000, obs.time_data[1:], marker=vel_markers[i%len(vel_markers)], 
+                c=colors[i], alpha=alpha, label='Station: {:s}'.format(str(obs.station_id)), zorder=3)
 
 
             # Determine the max/min velocity and height, as this is needed for plotting both height/time axes
@@ -4577,14 +4607,17 @@ class Trajectory(object):
 
         fig, ax1 = plt.subplots()
 
-        for obs in self.observations:
+        for i, obs in enumerate(obs_ht_sorted):
 
             # Extract points that were not ignored
             used_times = obs.time_data[obs.ignore_list == 0]
             used_dists = obs.state_vect_dist[obs.ignore_list == 0]
 
-            plt_handle = ax1.plot(used_dists/1000, used_times, marker='o', label=str(obs.station_id), \
-                zorder=3, markersize=3)
+            # Choose the marker
+            marker = plot_markers[i%len(plot_markers)]
+
+            plt_handle = ax1.plot(used_dists/1000, used_times, marker=marker, label=str(obs.station_id), \
+                zorder=3, markersize=3, color=colors[i], alpha=alpha)
 
 
             # Plot ignored points
