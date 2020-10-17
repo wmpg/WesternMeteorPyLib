@@ -5047,6 +5047,11 @@ class Trajectory(object):
         """ Show the stations and the lines of sight solution. """
 
 
+        # Compute ECI values if they have not been computed
+        if self.observations[0].model_eci is None:
+            self.calcECIEqAltAz(self.state_vect_mini, self.radiant_eci_mini, self.observations)
+
+
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
 
