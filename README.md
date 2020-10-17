@@ -176,6 +176,13 @@ If it's still not working, try this:
 conda install -c conda-forge matplotlib=2.2.4
 ```
 
+#### ```ImportError: No module named PyQt5.QtWidgets``` error
+
+Run:
+```
+pip install PyQt5
+```
+
 ### Manually downloading data files
 
 JPL DE430 ephemerids are not a part of the library, but they **will** be downloaded automatically on install. The file can be downloaded separately and put into the **`shared`** directory:
