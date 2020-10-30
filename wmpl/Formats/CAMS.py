@@ -679,7 +679,7 @@ def solveTrajectoryCAMS(meteor_list, output_dir, solver='original', **kwargs):
 
 
         # Solve the trajectory
-        traj.run()
+        traj = traj.run()
 
         return traj
 

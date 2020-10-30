@@ -255,7 +255,7 @@ def solveTrajectoryMILIG(dir_path, file_name, solver='original', **kwargs):
     #     print(np.degrees(obs.lat), np.degrees(obs.lon))
 
     # Run the trajectory solver
-    traj.run()
+    traj = traj.run()
 
 
     return traj

@@ -333,7 +333,7 @@ def solveTrajectoryEv(ev_file_list, solver='original', velmodel=3, **kwargs):
 
 
         # Solve the trajectory
-        traj.run()
+        traj = traj.run()
 
 
         # Copy the ev files into the output directory

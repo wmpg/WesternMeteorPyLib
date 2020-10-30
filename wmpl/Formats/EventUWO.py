@@ -227,7 +227,7 @@ def solveTrajectoryUWOEvent(station_data_dict, solver='original', velmodel=3, **
 
 
         # Solve the trajectory
-        traj.run()
+        traj = traj.run()
 
         return traj
 

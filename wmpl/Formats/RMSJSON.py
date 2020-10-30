@@ -99,7 +99,7 @@ def solveTrajectoryRMS(json_list, dir_path, solver='original', **kwargs):
 
 
     # Solve the trajectory
-    traj.run()
+    traj = traj.run()
 
     return traj
 

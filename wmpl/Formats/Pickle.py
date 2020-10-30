@@ -120,7 +120,7 @@ def solveTrajectoryPickle(dir_path, file_name, only_plot=False, solver='original
     else:
         
         # Run the trajectory solver
-        traj.run()
+        traj = traj.run()
 
 
     return traj
