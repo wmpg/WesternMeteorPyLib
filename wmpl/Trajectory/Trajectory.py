@@ -2875,7 +2875,7 @@ class Trajectory(object):
         # If the timing difference and velocity difference estimation is not desired to be performed, skip 
         # the procedure
         if not estimate_timing_vel:
-            return v_init, time_diffs
+            return True, np.zeros(2), v_init, time_diffs, observations
 
 
         # Initial timing difference between sites is 0 (there are N-1 timing differences, as the time 
@@ -3694,8 +3694,9 @@ class Trajectory(object):
 
         out_str += "Mean time residuals from time vs. length:\n"
         out_str += "  Station with reference time: {:s}\n".format(str(self.observations[self.t_ref_station].station_id))
-        out_str += "  Avg. res. = {:.3e} s\n".format(self.timing_res)
-        out_str += "  Stddev    = {:.2e} s\n".format(self.timing_stddev)
+        if self.estimate_timing_vel is True:
+            out_str += "  Avg. res. = {:.3e} s\n".format(self.timing_res)
+            out_str += "  Stddev    = {:.2e} s\n".format(self.timing_stddev)
         out_str += "\n"
 
         out_str += "Begin point on the trajectory:\n"
@@ -4625,7 +4626,7 @@ class Trajectory(object):
 
                 ignored_times = obs.time_data[obs.ignore_list > 0]
                 ignored_dists = obs.state_vect_dist[obs.ignore_list > 0]
-                    
+
                 ax1.scatter(ignored_dists/1000, ignored_times, facecolors='k', 
                     edgecolors=plt_handle[0].get_color(), marker='o', s=8, zorder=5, \
                     label='{:s} ignored points'.format(str(obs.station_id)))
@@ -4644,8 +4645,10 @@ class Trajectory(object):
             ax1.plot(lineFunc(t_range, *self.velocity_fit)/1000, t_range, label='Velocity fit', \
                 linestyle='--', alpha=0.5, zorder=3)
 
-
-        plt.title('Distances from state vector, Time residuals = {:.3e} s'.format(self.timing_res))
+        stres=self.timing_res
+        if stres is None:
+            stres=0
+        plt.title('Distances from state vector, Time residuals = {:.3e} s'.format(stres))
 
         ax1.set_ylabel('Time (s)')
         ax1.set_xlabel('Distance from state vector (km)')
@@ -5527,6 +5530,7 @@ class Trajectory(object):
 
         # If estimating the timing failed, skip any further steps
         if not self.timing_minimization_successful:
+            print('unable to minimise timing')
             return None
 
 
