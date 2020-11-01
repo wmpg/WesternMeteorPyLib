@@ -4544,7 +4544,7 @@ class Trajectory(object):
 
             # Plot all point to point velocities
             ax1.scatter(obs.velocities[1:]/1000, obs.time_data[1:], marker=vel_markers[i%len(vel_markers)], 
-                c=colors[i], alpha=alpha, label='Station: {:s}'.format(str(obs.station_id)), zorder=3)
+                c=colors[i].reshape(1,-1), alpha=alpha, label='Station: {:s}'.format(str(obs.station_id)), zorder=3)
 
 
             # Determine the max/min velocity and height, as this is needed for plotting both height/time axes
