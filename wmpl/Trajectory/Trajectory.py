@@ -2093,8 +2093,8 @@ class Trajectory(object):
     def __init__(self, jdt_ref, output_dir='.', max_toffset=None, meastype=4, verbose=True, v_init_part=None,\
         v_init_ht=None, estimate_timing_vel=True, monte_carlo=True, mc_runs=None, mc_pick_multiplier=1, \
         mc_noise_std=1.0, geometric_uncert=False, filter_picks=True, calc_orbit=True, show_plots=True, \
-        save_results=True, gravity_correction=True, plot_all_spatial_residuals=False, plot_file_type='png', \
-        traj_id=None, reject_n_sigma_outliers=3, mc_cores=None):
+        show_jacchia=False, save_results=True, gravity_correction=True, plot_all_spatial_residuals=False, \
+        plot_file_type='png', traj_id=None, reject_n_sigma_outliers=3, mc_cores=None):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -2135,6 +2135,7 @@ class Trajectory(object):
                 will be removed, and the trajectory will be recalculated.
             calc_orbit: [bool] If True, the orbit is calculates as well. True by default
             show_plots: [bool] Show plots of residuals, velocity, lag, meteor position. True by default.
+            show_jacchia: [bool] Show the Jacchia fit on the plot with meteor dynamics. False by default.
             save_results: [bool] Save results of trajectory estimation to disk. True by default.
             gravity_correction: [bool] Apply the gravity drop when estimating trajectories. True by default.
             plot_all_spatial_residuals: [bool] Plot all spatial residuals on one plot (one vs. time, and
@@ -2202,6 +2203,9 @@ class Trajectory(object):
 
         # If True, plots will be shown on screen when the trajectory estimation is done
         self.show_plots = show_plots
+
+        # Show Jacchia fit on dynamics plots
+        self.show_jacchia = show_jacchia
 
         # Save results to disk if true
         self.save_results = save_results
@@ -2875,7 +2879,7 @@ class Trajectory(object):
         # If the timing difference and velocity difference estimation is not desired to be performed, skip 
         # the procedure
         if not estimate_timing_vel:
-            return v_init, time_diffs
+            return True, np.zeros(2), v_init, time_diffs, observations
 
 
         # Initial timing difference between sites is 0 (there are N-1 timing differences, as the time 
@@ -3692,11 +3696,13 @@ class Trajectory(object):
         out_str += " a2 = {:.6f}\n".format(self.jacchia_fit[1])
         out_str += "\n"
 
-        out_str += "Mean time residuals from time vs. length:\n"
-        out_str += "  Station with reference time: {:s}\n".format(str(self.observations[self.t_ref_station].station_id))
-        out_str += "  Avg. res. = {:.3e} s\n".format(self.timing_res)
-        out_str += "  Stddev    = {:.2e} s\n".format(self.timing_stddev)
-        out_str += "\n"
+        if self.estimate_timing_vel is True:
+            out_str += "Mean time residuals from time vs. length:\n"
+            out_str += "  Station with reference time: {:s}\n".format(
+                str(self.observations[self.t_ref_station].station_id))
+            out_str += "  Avg. res. = {:.3e} s\n".format(self.timing_res)
+            out_str += "  Stddev    = {:.2e} s\n".format(self.timing_stddev)
+            out_str += "\n"
 
         out_str += "Begin point on the trajectory:\n"
         out_str += "  Lon = {:>12.6f}{:s} deg\n".format(np.degrees(self.rbeg_lon), _uncer('{:.4f}', 
@@ -4465,10 +4471,12 @@ class Trajectory(object):
 
 
         # Plot the Jacchia fit on all observations
-        time_all = np.sort(np.hstack([obs.time_data for obs in self.observations]))
-        time_jacchia = np.linspace(np.min(time_all), np.max(time_all), 1000)
-        plt.plot(jacchiaLagFunc(time_jacchia, *self.jacchia_fit), time_jacchia, label='Jacchia fit', 
-            zorder=3, color='k', alpha=0.5, linestyle="dashed")
+        if self.show_jacchia:
+            
+            time_all = np.sort(np.hstack([obs.time_data for obs in self.observations]))
+            time_jacchia = np.linspace(np.min(time_all), np.max(time_all), 1000)
+            plt.plot(jacchiaLagFunc(time_jacchia, *self.jacchia_fit), time_jacchia, label='Jacchia fit', 
+                zorder=3, color='k', alpha=0.5, linestyle="dashed")
 
 
         plt.title('Lags, all stations')
@@ -4559,9 +4567,10 @@ class Trajectory(object):
 
 
         # Plot the velocity calculated from the Jacchia model
-        t_vel = np.linspace(t_min, t_max, 1000)
-        ax1.plot(jacchiaVelocityFunc(t_vel, self.jacchia_fit[0], self.jacchia_fit[1], self.v_init)/1000, \
-            t_vel, label='Jacchia fit', alpha=0.5, color='k')
+        if self.show_jacchia:
+            t_vel = np.linspace(t_min, t_max, 1000)
+            ax1.plot(jacchiaVelocityFunc(t_vel, self.jacchia_fit[0], self.jacchia_fit[1], self.v_init)/1000, \
+                t_vel, label='Jacchia fit', alpha=0.5, color='k')
 
         plt.title('Velocity')
         ax1.set_xlabel('Velocity (km/s)')
