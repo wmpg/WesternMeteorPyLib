@@ -380,13 +380,14 @@ def writeOrbitSummaryFile(dir_path, traj_list, traj_summary_file_name=TRAJ_SUMMA
 
 
 def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir, \
-    file_name, density_plot=False, low_density=False, plot_showers=False, shower_obj_list=None, \
-    show_sol_range=True, sol_range=None, dt_range=None, import_matplotlib=False):
+    file_name, density_plot=False, low_density=False, high_density=False, cmap=None, \
+    cmap_reverse=False, plot_showers=False, shower_obj_list=None, show_sol_range=True, sol_range=None, \
+    dt_range=None, import_matplotlib=False):
     """ Plot the given data in Sun-centered ecliptic coordinates.
 
     Arguments:
-        x_data: [ndarray] SCE longitude data.
-        y_data: [ndarray] SCE latitude data.
+        x_data: [ndarray] SCE longitude data (radians).
+        y_data: [ndarray] SCE latitude data (radians).
         color_data: [ndarray] Data for colour coding.
         plot_title: [str] Title of the plot.
         colorbar_title: [str] Colour bar title.
@@ -396,7 +397,11 @@ def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir, 
     Kewyword arguments:
         density_plot: [bool] Save the SCE density plot. False by default.
         low_density: [bool] When the number of trajectories is low, change the density scale. False by 
-            default.
+            default. high_density cannot be True at the same time.
+        high_density: [bool] When the number of trajectories is high, change the density scale. False by 
+            default. low_density cannot be true at the same time.
+        cmap: [bool] Use a specific colour map. None by default.
+        cmap_reverse: [bool] Reverse the colour map. False by default.
         plot_showers: [bool] Mark showers on the plot. False by default.
         shower_obj_list: [list] A list of MeteorShower objects that will be plotted. Needs to be given in 
             plot_showers is True. 
@@ -448,12 +453,23 @@ def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir, 
         cmap_bottom_cut = 0.0
     else:
         cmap_name = 'viridis'
-        cmap_bottom_cut = 0.2
+        cmap_bottom_cut = 0.3
+
+
+    # Set a specific colour map
+    if cmap is not None:
+        cmap_name = cmap
+
+    if cmap_reverse:
+        cmap_name += "_r"
 
 
     # Cut the dark portion of the colormap
     cmap = plt.get_cmap(cmap_name)
-    colors = cmap(np.linspace(cmap_bottom_cut, 1.0, cmap.N))
+    if cmap_reverse:
+        colors = cmap(np.linspace(0.0, 1.0 - cmap_bottom_cut, cmap.N))
+    else:
+        colors = cmap(np.linspace(cmap_bottom_cut, 1.0, cmap.N))
     cmap = matplotlib.colors.LinearSegmentedColormap.from_list('cut_cmap', colors)
 
 
@@ -477,6 +493,12 @@ def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir, 
             vmin, vmax = 0.4, 50.0
             colorbar_ticks = [1, 2, 5, 10, 20, 50]
 
+        # High density plot
+        elif high_density:
+            vmin, vmax = 1.0, 500
+            colorbar_ticks = [1, 5, 10, 20, 50, 100, 200, 500]
+
+        # Normal plot
         else:
             vmin, vmax = 1.0, 100
             colorbar_ticks = [1, 5, 10, 20, 50, 100]
@@ -516,6 +538,12 @@ def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir, 
         dot_size = 40*(1.0/np.sqrt(len(x_data)))
         if dot_size > 1:
             dot_size = 1
+
+        # Compute the dot size differently if a high density plot is done
+        if high_density:
+            dot_size = 2.0*(1.0/np.sqrt(len(x_data)))
+            if dot_size > 1:
+                dot_size = 1
 
         # Plot the data
         plt_handle = celes_plot.scatter(x_data, y_data, color_data, s=dot_size, cmap=cmap)

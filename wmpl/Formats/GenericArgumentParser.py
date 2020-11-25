@@ -40,6 +40,10 @@ def addSolverOptions(arg_parser, skip_velpart=False):
         help='Plot a collection of plots showing the residuals vs. time, lenght and height.', \
         action="store_true")
 
+    arg_parser.add_argument('-j', '--jacchia', \
+        help='Show the Jacchia exponential deceleration fit on plots with the dynamics.', \
+        action="store_true")
+
     arg_parser.add_argument('-i', '--imgformat', metavar='IMG_FORMAT', nargs=1, \
         help="Plot image format. 'png' by default, can be 'pdf', 'eps',... ", type=str, default='png')
 
