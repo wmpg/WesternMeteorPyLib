@@ -13,7 +13,8 @@ from wmpl.Formats.CAMS import MeteorObservation, prepareObservations
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.Trajectory.GuralTrajectory import GuralTrajectory
 from wmpl.Formats.GenericArgumentParser import addSolverOptions
-from wmpl.Utils.TrajConversions import jd2Date, datetime2JD, altAz2RADec_vect
+from wmpl.Utils.TrajConversions import J2000_JD, jd2Date, datetime2JD, altAz2RADec_vect, \
+    equatorialCoordPrecession_vect
 
 
 
@@ -97,6 +98,10 @@ def loadECSVs(ecsv_paths):
             # Compute RA/Dec
             ra_data, dec_data = altAz2RADec_vect(np.radians(azim_data), np.radians(alt_data), jd_data, \
                 np.radians(station_lat), np.radians(station_lon))
+
+            # Precess to J2000
+            ra_data, dec_data = equatorialCoordPrecession_vect(jdt_ref, J2000_JD.days, ra_data, dec_data)
+
 
 
             # Init the meteor object
