@@ -9,11 +9,8 @@ import argparse
 
 import numpy as np
 
-from wmpl.Formats.CAMS import MeteorObservation, prepareObservations
-from wmpl.Formats.GenericArgumentParser import addSolverOptions
-from wmpl.Trajectory.Trajectory import Trajectory
-from wmpl.Trajectory.GuralTrajectory import GuralTrajectory
-from wmpl.Utils.TrajConversions import jd2Date
+from wmpl.Formats.GenericFunctions import addSolverOptions, solveTrajectoryGeneric, MeteorObservation, \
+    prepareObservations
 
 
 
@@ -40,68 +37,6 @@ def initMeteorObjects(json_list):
 
     # Normalize all observations to the same JD and precess from J2000 to the epoch of date
     return prepareObservations(meteor_list)
-
-
-
-
-def solveTrajectoryRMS(json_list, dir_path, solver='original', **kwargs):
-    """ Feed the list of meteors in the trajectory solver. """
-
-
-    # Normalize the observations to the same reference Julian date and precess them from J2000 to the 
-    # epoch of date
-    jdt_ref, meteor_list = initMeteorObjects(json_list)
-
-    # Create name of output directory
-    output_dir = os.path.join(dir_path, jd2Date(jdt_ref, dt_obj=True).strftime("%Y%m%d-%H%M%S.%f"))
-
-
-    # Init the trajectory solver
-    if solver == 'original':
-        traj = Trajectory(jdt_ref, output_dir=output_dir, meastype=1, **kwargs)
-
-    elif solver.lower().startswith('gural'):
-        velmodel = solver.lower().strip('gural')
-        if len(velmodel) == 1:
-            velmodel = int(velmodel)
-        else:
-            velmodel = 0
-
-        traj = GuralTrajectory(len(meteor_list), jdt_ref, velmodel=velmodel, meastype=1, verbose=1, 
-            output_dir=output_dir)
-
-    else:
-        print('No such solver:', solver)
-        return 
-
-
-    # Add meteor observations to the solver
-    for meteor in meteor_list:
-
-        if solver == 'original':
-
-            traj.infillTrajectory(meteor.ra_data, meteor.dec_data, meteor.time_data, meteor.latitude, 
-                meteor.longitude, meteor.height, station_id=meteor.station_id, \
-                magnitudes=meteor.mag_data)
-
-        elif solver.lower().startswith('gural'):
-
-            # Extract velocity model is given
-            try:
-                velmodel = int(solver[-1])
-
-            except: 
-                # Default to the exponential model
-                velmodel = 3
-
-            traj.infillTrajectory(meteor.ra_data, meteor.dec_data, meteor.time_data, meteor.latitude, 
-                meteor.longitude, meteor.height)
-
-
-    # Solve the trajectory
-    traj = traj.run()
-
-    return traj
 
 
 
@@ -230,13 +165,16 @@ if __name__ == "__main__":
 
 
 
+    # Normalize the observations to the same reference Julian date and precess them from J2000 to the 
+    # epoch of date
+    jdt_ref, meteor_list = initMeteorObjects(json_list)
 
 
-    # Init the trajectory structure
-    traj = solveTrajectoryRMS(json_list, dir_path, solver=cml_args.solver, max_toffset=max_toffset, \
-            monte_carlo=(not cml_args.disablemc), mc_runs=cml_args.mcruns, \
-            geometric_uncert=cml_args.uncertgeom, gravity_correction=(not cml_args.disablegravity), 
-            plot_all_spatial_residuals=cml_args.plotallspatial, plot_file_type=cml_args.imgformat, \
-            show_plots=(not cml_args.hideplots), v_init_part=velpart, v_init_ht=vinitht, \
-            show_jacchia=cml_args.jacchia)
+    # Solve the trajectory
+    traj = solveTrajectoryGeneric(jdt_ref, meteor_list, dir_path, solver=cml_args.solver, \
+        max_toffset=max_toffset, monte_carlo=(not cml_args.disablemc), mc_runs=cml_args.mcruns, \
+        geometric_uncert=cml_args.uncertgeom, gravity_correction=(not cml_args.disablegravity), 
+        plot_all_spatial_residuals=cml_args.plotallspatial, plot_file_type=cml_args.imgformat, \
+        show_plots=(not cml_args.hideplots), v_init_part=velpart, v_init_ht=vinitht, \
+        show_jacchia=cml_args.jacchia)
     

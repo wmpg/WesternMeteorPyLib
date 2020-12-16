@@ -8,7 +8,7 @@ import numpy as np
 import scipy.stats
 import matplotlib.pyplot as plt
 
-from wmpl.Formats.GenericArgumentParser import addSolverOptions
+from wmpl.Formats.GenericFunctions import addSolverOptions
 from wmpl.Formats.Plates import AffPlate, AstPlate, plateExactMap, plateScaleMap
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.Trajectory.GuralTrajectory import GuralTrajectory
