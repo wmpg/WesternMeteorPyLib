@@ -1,5 +1,6 @@
 """ Solve the trajectory from observations in ECSV files. """
 
+from __future__ import print_function, division, absolute_import
 
 import os
 import sys
@@ -142,7 +143,7 @@ if __name__ == "__main__":
         type=float, default=0.4)
 
     arg_parser.add_argument('-w', '--walk', \
-        help="Recursively find all manual reduction JSON files in the given folder and use them for trajectory estimation.", \
+        help="Recursively find all ECSV files in the given folder and use them for trajectory estimation.", \
         action="store_true")
 
     # Parse the command line arguments
@@ -197,7 +198,7 @@ if __name__ == "__main__":
 
     # Check that there are more than 2 ECSV files given
     if len(ecsv_paths) < 2:
-        print("At least 2 JSON files are needed for trajectory estimation!")
+        print("At least 2 files are needed for trajectory estimation!")
         sys.exit()
 
 
