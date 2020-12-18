@@ -133,7 +133,7 @@ if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser(description="Run the trajectory solver on DFN ECSV files.")
 
     arg_parser.add_argument('ecsv_files', nargs="+", metavar='ECSV_PATH', type=str, \
-        help='Path to 2 of more ECSV files.')
+        help="Path to 2 of more ECSV files. Wildcards are supported, so e.g. /path/to/*.ecsv also works.")
 
         # Add other solver options
     arg_parser = addSolverOptions(arg_parser, skip_velpart=True)

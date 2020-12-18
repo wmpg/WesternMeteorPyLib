@@ -178,7 +178,7 @@ if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser(description="Run the trajectory solver on FRIPON .met files.")
 
     arg_parser.add_argument('fripon_files', nargs="+", metavar='FRIPON_PATH', type=str, \
-        help='Path to 2 of more FRIPON .met files.')
+        help="Path to 2 of more FRIPON .met files. Wildcards are supported, so e.g. /path/to/*.met also works.")
 
         # Add other solver options
     arg_parser = addSolverOptions(arg_parser, skip_velpart=True)
