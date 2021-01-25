@@ -4018,8 +4018,8 @@ class Trajectory(object):
          ['o', 1 ],
          ['s', 1 ],
          ['d', 1 ],
-         ['o', 1 ],
-         ['s', 1 ],
+         ['v', 1 ],
+         ['*', 1.5 ],
          ]
          
         if self.plot_all_spatial_residuals:
@@ -4455,7 +4455,7 @@ class Trajectory(object):
             marker = plot_markers[i%len(plot_markers)]
 
             # Plot the lag
-            plt_handle = plt.plot(used_lag, used_times, marker=marker, label='Station: ' + str(obs.station_id), 
+            plt_handle = plt.plot(used_lag, used_times, marker=marker, label=str(obs.station_id), 
                 zorder=3, markersize=3, color=colors[i], alpha=alpha)
 
 
@@ -4466,7 +4466,7 @@ class Trajectory(object):
                 ignored_lag = obs.lag[obs.ignore_list > 0]
 
                 plt.scatter(ignored_lag, ignored_times, facecolors='k', edgecolors=plt_handle[0].get_color(), 
-                    marker='o', s=8, zorder=4, label='Station: {:s} ignored points'.format(str(obs.station_id)))
+                    marker='o', s=8, zorder=4, label='{:s} ignored points'.format(str(obs.station_id)))
 
 
 
@@ -4552,7 +4552,7 @@ class Trajectory(object):
 
             # Plot all point to point velocities
             ax1.scatter(obs.velocities[1:]/1000, obs.time_data[1:], marker=vel_markers[i%len(vel_markers)], 
-                c=colors[i].reshape(1,-1), alpha=alpha, label='Station: {:s}'.format(str(obs.station_id)), zorder=3)
+                c=colors[i].reshape(1,-1), alpha=alpha, label='{:s}'.format(str(obs.station_id)), zorder=3)
 
 
             # Determine the max/min velocity and height, as this is needed for plotting both height/time axes
@@ -4717,10 +4717,13 @@ class Trajectory(object):
 
 
         # Plot locations of all stations and measured positions of the meteor
-        for obs in self.observations:
+        for i, obs in enumerate(self.observations):
+
+            # Extract marker type and size multiplier
+            marker, sm = markers[i%len(markers)]
 
             # Plot stations
-            m.scatter(obs.lat, obs.lon, s=10, label=str(obs.station_id), marker='x')
+            m.scatter(obs.lat, obs.lon, s=sm*10, label=str(obs.station_id), marker=marker)
 
             # Plot measured points
             m.plot(obs.meas_lat[obs.ignore_list == 0], obs.meas_lon[obs.ignore_list == 0], c='r')
@@ -4807,17 +4810,6 @@ class Trajectory(object):
         #         plt.close()
 
 
-        # marker type, size multiplier
-        markers = [
-         ['x', 2 ],
-         ['+', 8 ],
-         ['o', 1 ],
-         ['s', 1 ],
-         ['d', 1 ],
-         ['o', 1 ],
-         ['s', 1 ],
-         ]
-
         # Plot angular residuals from all stations
         first_ignored_plot = True
         for i, obs in enumerate(self.observations):
@@ -4851,7 +4843,7 @@ class Trajectory(object):
             res_rms = np.degrees(obs.ang_res_std)*3600
 
             # Plot residuals
-            plt.scatter(obs.time_data, res, s=10*sm, zorder=3, label='Station ' + str(obs.station_id) + \
+            plt.scatter(obs.time_data, res, s=10*sm, zorder=3, label=str(obs.station_id) + \
                 ', RMSD = {:.2f}"'.format(res_rms), marker=marker)
 
 

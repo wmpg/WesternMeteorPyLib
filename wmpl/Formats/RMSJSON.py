@@ -5,12 +5,73 @@ import os
 import sys
 import glob
 import json
+import datetime
 import argparse
 
 import numpy as np
 
 from wmpl.Formats.GenericFunctions import addSolverOptions, solveTrajectoryGeneric, MeteorObservation, \
     prepareObservations
+from wmpl.Utils.TrajConversions import jd2Date
+
+
+def saveJSON(dir_path, meteor_list):
+    """ Save observations in the RMS JSON format. 
+    
+    Arguments:
+        dir_path: [str] Path to where the JSON files will be saved.
+        meteor_list: [list of MeteorObservation objects]
+
+    """
+
+
+    for meteor in meteor_list:
+
+        # Construct the file name
+        dt = jd2Date(meteor.jdt_ref, dt_obj=True)
+
+        json_name = "{:s}_{:s}_picks.json".format(dt.strftime("%Y%m%d_%H%M%S.%f"), meteor.station_id)
+
+        # Init JSON dict
+        json_dict = {}
+
+        json_dict["fps"] = meteor.fps
+        json_dict["jdt_ref"] = meteor.jdt_ref
+        json_dict["meastype"] = 1 # ra/dec
+
+        json_dict["centroids_labels"] = ["Time (s)",
+                                         "X (px)",
+                                         "Y (px)",
+                                         "RA (deg)",
+                                         "Dec (deg)",
+                                         "Summed intensity",
+                                         "Magnitude"
+                                         ]
+
+        # Construct station info
+        station = {}
+        station["lat"] = np.degrees(meteor.latitude)
+        station["lon"] = np.degrees(meteor.longitude)
+        station["elev"] = meteor.height
+        station["station_id"] = meteor.station_id
+        json_dict["station"] = station
+
+
+        # Construct the JSON data
+        centroids = np.c_[meteor.time_data, meteor.x_data, meteor.y_data, np.degrees(meteor.ra_data), \
+            np.degrees(meteor.dec_data), np.ones_like(meteor.time_data), meteor.mag_data]
+        centroids = centroids.tolist()
+
+        # Sort centroids by relative time
+        centroids = sorted(centroids, key=lambda x: x[0])
+
+        json_dict["centroids"] = centroids
+
+
+        # Save the JSON file
+        with open(os.path.join(dir_path, json_name), 'w') as f:
+            json.dump(json_dict, f, indent=4, sort_keys=True)
+
 
 
 

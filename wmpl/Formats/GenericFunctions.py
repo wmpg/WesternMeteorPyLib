@@ -14,9 +14,20 @@ from wmpl.Utils.TrajConversions import J2000_JD, jd2Date, equatorialCoordPrecess
 class MeteorObservation(object):
     """ Container for meteor observations. 
         
-        The loaded points are RA and Dec in J2000 epoch, in radians.
-    """
+        The points in arrays are RA and Dec in J2000 epoch, in radians.
 
+        Arguments:
+            jdt_ref: [float] Reference Julian date when the relative time is t = 0s.
+            station_id: [str] Station ID.
+            latitude: [float] Latitude +N in radians.
+            longitude: [float] Longitude +E in radians.
+            height: [float] Elevation above sea level (MSL) in meters.
+            fps: [float] Frames per second.
+
+        Keyword arguments:
+            ff_name: [str] Name of the originating FF file.
+
+    """
     def __init__(self, jdt_ref, station_id, latitude, longitude, height, fps, ff_name=None):
 
         self.jdt_ref = jdt_ref

@@ -18,8 +18,8 @@ import numpy as np
 
 from wmpl.Formats.GenericFunctions import addSolverOptions, solveTrajectoryGeneric, MeteorObservation, \
     prepareObservations
-from wmpl.Utils.TrajConversions import J2000_JD, datetime2JD, raDec2AltAz_vect, equatorialCoordPrecession_vect
-from wmpl.Utils.Pickling import loadPickle
+from wmpl.Formats.RMSJSON import saveJSON
+from wmpl.Utils.TrajConversions import datetime2JD, raDec2AltAz_vect
 
 
 ### CONSTANTS ###
@@ -265,6 +265,10 @@ if __name__ == "__main__":
 
     # Load the observations into container objects
     jdt_ref, meteor_list = loadFripon(dir_path, fripon_paths)
+
+
+    # Save the data as RMS JSON files
+    saveJSON(dir_path, meteor_list)
 
 
     # Solve the trajectory
