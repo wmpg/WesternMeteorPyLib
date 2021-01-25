@@ -61,13 +61,24 @@ def loadECSVs(ecsv_paths):
 
 
             # Load meteor measurements
-            data = np.loadtxt(ecsv_file, comments='#', delimiter=',', usecols=(0, 1, 2, 3, 4), dtype=str)
+            delimiter = ','
+            data = np.loadtxt(ecsv_file, comments='#', delimiter=delimiter, dtype=str)
+
+            # Determine the column indices from the header
+            header = data[0].tolist()
+            dt_indx = header.index('datetime')
+            azim_indx = header.index('azimuth')
+            alt_indx = header.index('altitude')
+            x_indx = header.index('x_image')
+            y_indx = header.index('y_image')
+
 
             # Skip the header
             data = data[1:]
 
             # Unpack data
-            dt_data, azim_data, alt_data, x_data, y_data = data.T
+            dt_data, azim_data, alt_data, x_data, y_data = data[:, dt_indx], data[:, azim_indx], \
+                data[:, alt_indx], data[:, x_indx], data[:, y_indx]
 
             azim_data = azim_data.astype(np.float64)
             alt_data = alt_data.astype(np.float64)
