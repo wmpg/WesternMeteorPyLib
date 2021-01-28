@@ -553,8 +553,17 @@ class RMSDataHandle(object):
                     continue
 
                 if name == "platepars_all_recalibrated.json":
-                    platepar_recalibrated_name = name
-                    continue
+
+                    try:
+                        # Try loading the recalibrated platepars
+                        with open(os.path.join(proc_path, name)) as f:
+                            platepars_recalibrated_dict = json.load(f)                            
+                            platepar_recalibrated_name = name
+                            continue
+
+                    except:
+                        pass
+    
 
             # Skip these observations if no data files were found inside
             if (ftpdetectinfo_name is None) or (platepar_recalibrated_name is None):
