@@ -315,6 +315,10 @@ def addSolverOptions(arg_parser, skip_velpart=False):
 
     arg_parser.add_argument('-d', '--disablemc', \
         help='Do not use the Monte Carlo solver, but only run the geometric solution.', action="store_true")
+
+    arg_parser.add_argument('-e', '--notimefit', \
+        help='Do not estimate timing and velocity togetehr.', \
+        action="store_true")
     
     arg_parser.add_argument('-r', '--mcruns', metavar="MC_RUNS", nargs='?', \
         help='Number of Monte Carlo runs.', type=int, default=100)

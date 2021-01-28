@@ -2008,7 +2008,11 @@ class MetSimGUI(QMainWindow):
 
             # Remove the line from the plot
             if line_handle is not None:
-                line_handle.remove()
+                try:
+                    line_handle.remove()
+                except ValueError:
+                    pass
+
 
 
             # Get the plot limits
@@ -2031,7 +2035,10 @@ class MetSimGUI(QMainWindow):
 
                 # Remove the old label handle
                 if label_handle is not None:
-                    label_handle.remove()
+                    try:
+                        label_handle.remove()
+                    except ValueError:
+                        pass
 
                 # Draw the wake line label
                 label_handle = ax.text(x_min, TEXT_LABEL_HT_PAD + self.wake_plot_ht/1000, \

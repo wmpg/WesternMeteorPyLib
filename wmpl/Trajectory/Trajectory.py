@@ -4653,8 +4653,12 @@ class Trajectory(object):
             ax1.plot(lineFunc(t_range, *self.velocity_fit)/1000, t_range, label='Velocity fit', \
                 linestyle='--', alpha=0.5, zorder=3)
 
+        
+        title = "Distances from state vector"
+        if self.estimate_timing_vel:
+            title += ", Time residuals = {:.3e} s".format(self.timing_res)
 
-        plt.title('Distances from state vector, Time residuals = {:.3e} s'.format(self.timing_res))
+        plt.title(title)
 
         ax1.set_ylabel('Time (s)')
         ax1.set_xlabel('Distance from state vector (km)')
@@ -5473,44 +5477,44 @@ class Trajectory(object):
 
 
 
-        # # Show the pre-time corrected time vs. length
-        # if not _rerun_timing:
+        # Show the pre-time corrected time vs. length
+        if not _rerun_timing:
 
-        #     ### PLOT DISTANCE FROM RADIANT STATE VECTOR POSITION ###
-        #     ######################################################################################################
-        #     for obs in self.observations:
+            ### PLOT DISTANCE FROM RADIANT STATE VECTOR POSITION ###
+            ######################################################################################################
+            for obs in self.observations:
 
-        #         # Extract points that were not ignored
-        #         used_times = obs.time_data[obs.ignore_list == 0]
-        #         used_dists = obs.state_vect_dist[obs.ignore_list == 0]
+                # Extract points that were not ignored
+                used_times = obs.time_data[obs.ignore_list == 0]
+                used_dists = obs.state_vect_dist[obs.ignore_list == 0]
 
-        #         plt_handle = plt.plot(used_dists/1000, used_times, marker='x', label=str(obs.station_id), \
-        #             zorder=3)
+                plt_handle = plt.plot(used_dists/1000, used_times, marker='x', label=str(obs.station_id), \
+                    zorder=3)
 
 
-        #         # Plot ignored points
-        #         if np.any(obs.ignore_list):
+                # Plot ignored points
+                if np.any(obs.ignore_list):
 
-        #             ignored_times = obs.time_data[obs.ignore_list > 0]
-        #             ignored_dists = obs.state_vect_dist[obs.ignore_list > 0]
+                    ignored_times = obs.time_data[obs.ignore_list > 0]
+                    ignored_dists = obs.state_vect_dist[obs.ignore_list > 0]
                         
-        #             plt.scatter(ignored_dists/1000, ignored_times, facecolors='k', \
-        #                 edgecolors=plt_handle[0].get_color(), marker='o', s=8, zorder=4, \
-        #                 label='{:s} ignored points'.format(str(obs.station_id)))
+                    plt.scatter(ignored_dists/1000, ignored_times, facecolors='k', \
+                        edgecolors=plt_handle[0].get_color(), marker='o', s=8, zorder=4, \
+                        label='{:s} ignored points'.format(str(obs.station_id)))
 
 
-        #     plt.title("Distances from state vector, before time correction")
+            plt.title("Distances from state vector, before time correction")
 
-        #     plt.ylabel('Time (s)')
-        #     plt.xlabel('Distance from state vector (km)')
+            plt.ylabel('Time (s)')
+            plt.xlabel('Distance from state vector (km)')
             
-        #     plt.legend()
-        #     plt.grid()
-        #     plt.gca().invert_yaxis()
+            plt.legend()
+            plt.grid()
+            plt.gca().invert_yaxis()
 
-        #     plt.tight_layout()
+            plt.tight_layout()
 
-        #     plt.show()
+            plt.show()
 
 
         # Calculate the lag ONLY if it was not calculated during timing estimation
