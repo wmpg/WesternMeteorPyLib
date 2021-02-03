@@ -400,6 +400,10 @@ def loadFTPDetectInfo(ftpdetectinfo_file_name, stations, time_offsets=None,
             met1.dec_data = np.append(met1.dec_data, met2.dec_data)
             met1.mag_data = np.append(met1.mag_data, met2.mag_data)
 
+            # Merge the FF file name and create a list
+            if (met1.ff_name is not None) and (met2.ff_name is not None):
+                met1.ff_name = met1.ff_name + ',' + met2.ff_name
+
             # Sort all observations by time
             met1.finish()
 

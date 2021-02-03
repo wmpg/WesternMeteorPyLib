@@ -378,10 +378,16 @@ class TrajectoryCorrelator(object):
                     ignore_list[ind] = 1
 
 
+        # Set the FF file name as the comment
+        comment = ''
+        if met.ff_name is not None:
+            comment = met.ff_name
+
+
         # Init the observation object
         obs = ObservedPoints(datetime2JD(ref_dt), ra_data, dec_data, time_data, np.radians(pp.lat), \
             np.radians(pp.lon), pp.elev, meastype=1, station_id=pp.station_code, magnitudes=mag_data, \
-            ignore_list=ignore_list, fov_beg=met.fov_beg, fov_end=met.fov_end)
+            ignore_list=ignore_list, fov_beg=met.fov_beg, fov_end=met.fov_end, comment=comment)
 
         return obs
 

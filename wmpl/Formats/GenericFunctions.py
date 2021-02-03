@@ -265,9 +265,13 @@ def solveTrajectoryGeneric(jdt_ref, meteor_list, dir_path, solver='original', **
 
         if solver == 'original':
 
+            comment = ''
+            if hasattr(meteor, "ff_name"):
+                comment = meteor.ff_name
+
             traj.infillTrajectory(meteor.ra_data, meteor.dec_data, meteor.time_data, meteor.latitude, 
                 meteor.longitude, meteor.height, station_id=meteor.station_id, \
-                magnitudes=meteor.mag_data)
+                magnitudes=meteor.mag_data, comment=comment)
 
         elif solver.lower().startswith('gural'):
 

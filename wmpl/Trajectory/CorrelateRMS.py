@@ -319,9 +319,19 @@ class MeteorPointRMS(object):
 
 
 class MeteorObsRMS(object):
-    def __init__(self, station_code, reference_dt, platepar, data, rel_proc_path):
+    def __init__(self, station_code, reference_dt, platepar, data, rel_proc_path, ff_name=None):
         """ Container for meteor observations with the interface compatible with the trajectory correlator
             interface. 
+
+            Arguments:
+                station_code: [str] RMS station code.
+                reference_dt: [datetime] Datetime when the relative time is t = 0.
+                platepar: [Platepar object] RMS calibration plate for the given observations.
+                data: [list] A list of MeteorPointRMS objects.
+                rel_proc_path: [str] Path to the folder with the nighly observations for this meteor.
+
+            Keyword arguments:
+                ff_name: [str] Name of the FF file(s) which contains the meteor.
         """
 
         self.station_code = station_code
@@ -332,6 +342,8 @@ class MeteorObsRMS(object):
 
         # Path to the directory with data
         self.rel_proc_path = rel_proc_path
+
+        self.ff_name = ff_name
 
         # Internal flags to control the processing flow
         # NOTE: The processed flag should always be set to False for every observation when the program starts
@@ -613,7 +625,7 @@ class RMSDataHandle(object):
 
                 # Init the new meteor observation object
                 met_obs = MeteorObsRMS(station_code, jd2Date(cams_met_obs.jdt_ref, dt_obj=True), pp, \
-                    meteor_data, rel_proc_path)
+                    meteor_data, rel_proc_path, ff_name=cams_met_obs.ff_name)
 
                 # Add only unpaired observations
                 if not self.db.checkObsIfPaired(met_obs):

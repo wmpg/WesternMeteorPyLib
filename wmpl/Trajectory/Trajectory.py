@@ -44,7 +44,7 @@ from wmpl.Utils.PyDomainParallelizer import parallelComputeGenerator
 class ObservedPoints(object):
     def __init__(self, jdt_ref, meas1, meas2, time_data, lat, lon, ele, meastype, station_id=None, \
         excluded_time=None, ignore_list=None, ignore_station=False, magnitudes=None, fov_beg=None, \
-        fov_end=None, obs_id=None):
+        fov_end=None, obs_id=None, comment=""):
         """ Structure for containing data of observations from invidiual stations.
         
         Arguments:
@@ -88,6 +88,8 @@ class ObservedPoints(object):
             fov_end: [bool] True if the meteor ended inside the FOV, False otherwise. None by default.
             obs_id: [int] Unique ID of the observation. This is to differentiate different observations from
                 the same station.
+            comment: [str] A comment about the observations. May be used to store RMS FF file number on which
+                the meteor was observed.
         """
 
         ### INPUT DATA ###
@@ -155,6 +157,9 @@ class ObservedPoints(object):
 
         # Unique observation ID
         self.obs_id = obs_id
+
+        # Observations comment (may be the FF file name)
+        self.comment = comment
 
         ######################################################################################################
 
@@ -1646,7 +1651,7 @@ def trajNoiseGenerator(traj, noise_sigma):
             traj_mc.infillTrajectory(azim_noise_list, elev_noise_list, obs.time_data, obs.lat, obs.lon, \
                 obs.ele, station_id=obs.station_id, excluded_time=obs.excluded_time, \
                 ignore_list=obs.ignore_list, magnitudes=obs.magnitudes, fov_beg=obs.fov_beg, \
-                fov_end=obs.fov_end, obs_id=obs.obs_id)
+                fov_end=obs.fov_end, obs_id=obs.obs_id, comment=obs.comment)
 
             
         # Do not show plots or perform additional optimizations
@@ -2329,7 +2334,7 @@ class Trajectory(object):
 
 
     def infillTrajectory(self, meas1, meas2, time_data, lat, lon, ele, station_id=None, excluded_time=None,
-        ignore_list=None, magnitudes=None, fov_beg=None, fov_end=None, obs_id=None):
+        ignore_list=None, magnitudes=None, fov_beg=None, fov_end=None, obs_id=None, comment=''):
         """ Initialize a set of measurements for a given station. 
     
         Arguments:
@@ -2357,6 +2362,8 @@ class Trajectory(object):
             fov_end: [bool] True if the meteor ended inside the FOV, False otherwise. None by default.
             obs_id: [int] Unique ID of the observation. This is to differentiate different observations from
                 the same station.
+            comment: [str] A comment about the observations. May be used to store RMS FF file number on which
+                the meteor was observed.
         Return:
             None
         """
@@ -2384,7 +2391,7 @@ class Trajectory(object):
         # Init a new structure which will contain the observed data from the given site
         obs = ObservedPoints(self.jdt_ref, meas1, meas2, time_data, lat, lon, ele, station_id=station_id, \
             meastype=self.meastype, excluded_time=excluded_time, ignore_list=ignore_list, \
-            magnitudes=magnitudes, fov_beg=fov_beg, fov_end=fov_end, obs_id=obs_id)
+            magnitudes=magnitudes, fov_beg=fov_beg, fov_end=fov_end, obs_id=obs_id, comment=comment)
             
         # Add observations to the total observations list
         self.observations.append(obs)
@@ -2463,13 +2470,18 @@ class Trajectory(object):
         if not hasattr(obs, 'obs_id'):
             obs.obs_id = None
 
+        # Check if the observation object as the comment entry
+        if not hasattr(obs, 'comment'):
+            obs.comment = ''
+
 
         ### ###
 
 
         self.infillTrajectory(meas1, meas2, obs.time_data, obs.lat, obs.lon, obs.ele, \
             station_id=obs.station_id, excluded_time=excluded_time, ignore_list=ignore_list, \
-            magnitudes=magnitudes, fov_beg=obs.fov_beg, fov_end=obs.fov_end, obs_id=obs.obs_id)
+            magnitudes=magnitudes, fov_beg=obs.fov_beg, fov_end=obs.fov_end, obs_id=obs.obs_id, \
+            comment=obs.comment)
 
 
 
@@ -3724,7 +3736,7 @@ class Trajectory(object):
         out_str += "Stations\n"
         out_str += "--------\n"
 
-        out_str += "        ID, Ignored, Lon +E (deg), Lat +N (deg),  Ht (m), Jacchia a1, Jacchia a2,  Beg Ht (m),  End Ht (m), +/- Obs ang (deg), +/- V (m), +/- H (m), Persp. angle (deg), Weight, FOV Beg, FOV End\n"
+        out_str += "        ID, Ignored, Lon +E (deg), Lat +N (deg),  Ht (m), Jacchia a1, Jacchia a2,  Beg Ht (m),  End Ht (m), +/- Obs ang (deg), +/- V (m), +/- H (m), Persp. angle (deg), Weight, FOV Beg, FOV End, Comment\n"
         
         for obs in self.observations:
 
@@ -3750,6 +3762,7 @@ class Trajectory(object):
 
             station_info.append("{:>7s}".format(str(obs.fov_beg)))
             station_info.append("{:>7s}".format(str(obs.fov_end)))
+            station_info.append("{:s}".format(str(obs.comment)))
 
 
 
