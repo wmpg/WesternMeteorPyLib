@@ -680,6 +680,34 @@ class RMSDataHandle(object):
         return self.unpaired_observations
 
 
+    def countryFilter(self, met_obs1, met_obs2):
+        """ Only pair observations if they are in proximity to a given country. """
+
+
+        north_america_group = ["CA", "US", "MX"]
+
+        europe_group = ["AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", \
+            "IT", "LV", "LT", "LU", "MT", "NL", "PO", "PT", "RO", "SK", "SI", "ES", "SE", "AL", "AD", "AM", \
+            "BY", "BA", "FO", "GE", "GI", "IM", "XK", "LI", "MK", "MD", "MC", "ME", "NO", "RU", "SM", "RS", \
+            "CH", "TR", "UA", "UK", "VA"]
+
+
+        country_groups = [north_america_group, europe_group]
+
+
+        # Check that both stations are in the same country group
+        for group in country_groups:
+            if met_obs1.station_code[:2] in group:
+                if met_obs2.station_code[:2] in group:
+                    return True
+                else:
+                    return False
+
+
+        # If a given country is not in any of the groups, allow it to be paired
+        return True
+
+
     def findTimePairs(self, met_obs, unpaired_observations, max_toffset):
         """ Finds pairs in time between the given meteor observations and all other observations from 
             different stations. 
@@ -702,6 +730,10 @@ class RMSDataHandle(object):
 
             # Take only observations from different stations
             if met_obs.station_code == met_obs2.station_code:
+                continue
+
+            # Check that the stations are in the same region / group of countres
+            if not self.countryFilter(met_obs, met_obs2):
                 continue
 
             # Take observations which are within the given time window
