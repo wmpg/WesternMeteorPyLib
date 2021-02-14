@@ -717,7 +717,13 @@ class MetSimGUI(QMainWindow):
         self.autofit_lag_weights = [1.0, 1.0]
 
         ### ###
+    
 
+        # Disable different density after erosion change
+        self.erosion_different_rho = False
+
+        # Disable different ablation coeff after erosion change
+        self.erosion_different_sigma = False
 
         # Disable different erosion coeff after disruption at the beginning
         self.disruption_different_erosion_coeff = False
@@ -754,6 +760,17 @@ class MetSimGUI(QMainWindow):
             # Check if the disruption erosion coefficient is different than the main erosion coeff
             if const_json['disruption_erosion_coeff'] != const_json['erosion_coeff']:
                 self.disruption_different_erosion_coeff = True
+
+
+            # Check if the density is changed after Hchange
+            if 'erosion_rho_change' in const_json:
+                if const_json['erosion_rho_change'] != const_json['rho']:
+                    self.erosion_different_rho = True
+
+            # Check if the ablation coeff is changed after Hchange
+            if 'erosion_sigma_change' in const_json:
+                if const_json['erosion_sigma_change'] != const_json['sigma']:
+                    self.erosion_different_sigma = True
 
 
             # # Convert the density coefficients into a numpy array
@@ -803,7 +820,6 @@ class MetSimGUI(QMainWindow):
         # Update the photometric mass when the luminous efficiency is changed
         self.inputLumEff.editingFinished.connect(self.updateInitialMass)
 
-
         self.wakePlotUpdateButton.clicked.connect(self.updateWakePlot)
         self.wakeIncrementPlotHeightButton.clicked.connect(self.incrementWakePlotHeight)
         self.wakeDecrementPlotHeightButton.clicked.connect(self.decrementWakePlotHeight)
@@ -830,6 +846,8 @@ class MetSimGUI(QMainWindow):
         self.checkBoxWake.stateChanged.connect(self.checkBoxWakeSignal)
         self.checkBoxWakeMassBins.stateChanged.connect(self.checkBoxWakeMassBinsSignal)
         self.checkBoxErosion.stateChanged.connect(self.checkBoxErosionSignal)
+        self.checkBoxErosionRhoChange.stateChanged.connect(self.checkBoxErosionRhoSignal)
+        self.checkBoxErosionAblationCoeffChange.stateChanged.connect(self.checkBoxErosionAblationCoeffSignal)
         self.checkBoxDisruption.stateChanged.connect(self.checkBoxDisruptionSignal)
         self.checkBoxDisruptionErosionCoeff.stateChanged.connect(self.checkBoxDisruptionErosionCoeffSignal)
 
@@ -848,6 +866,8 @@ class MetSimGUI(QMainWindow):
         # Update checkboxes
         self.checkBoxWakeSignal(None)
         self.checkBoxErosionSignal(None)
+        self.checkBoxErosionRhoSignal(None)
+        self.checkBoxErosionAblationCoeffSignal(None)
         self.checkBoxDisruptionSignal(None)
         self.checkBoxDisruptionErosionCoeffSignal(None)
         self.toggleWakeNormalizationMethod(None)
@@ -1082,8 +1102,8 @@ class MetSimGUI(QMainWindow):
         ### Erosion parameters ###
 
         self.checkBoxErosion.setChecked(const.erosion_on)
-        self.checkBoxDisruptionErosionCoeff.setChecked(self.disruption_different_erosion_coeff)
-
+        self.checkBoxErosionRhoChange.setChecked(self.erosion_different_rho)
+        self.checkBoxErosionAblationCoeffChange.setChecked(self.erosion_different_sigma)
         self.inputErosionHtStart.setText("{:.3f}".format(const.erosion_height_start/1000))
         self.inputErosionCoeff.setText("{:.3f}".format(const.erosion_coeff*1e6))
         self.inputErosionHtChange.setText("{:.3f}".format(const.erosion_height_change/1000))
@@ -1091,6 +1111,8 @@ class MetSimGUI(QMainWindow):
         self.inputErosionMassIndex.setText("{:.2f}".format(const.erosion_mass_index))
         self.inputErosionMassMin.setText("{:.2e}".format(const.erosion_mass_min))
         self.inputErosionMassMax.setText("{:.2e}".format(const.erosion_mass_max))
+        self.inputErosionRhoChange.setText("{:d}".format(int(const.erosion_rho_change)))
+        self.inputErosionAblationCoeffChange.setText("{:.3f}".format(const.erosion_sigma_change*1e6))
 
         ### ###
 
@@ -1098,6 +1120,7 @@ class MetSimGUI(QMainWindow):
         ### Disruption parameters ###
 
         self.checkBoxDisruption.setChecked(const.disruption_on)
+        self.checkBoxDisruptionErosionCoeff.setChecked(self.disruption_different_erosion_coeff)
         self.inputDisruptionErosionCoeff.setText("{:.3f}".format(const.disruption_erosion_coeff*1e6))
         self.inputCompressiveStrength.setText("{:.1f}".format(const.compressive_strength/1000))
         self.inputDisruptionMassGrainRatio.setText("{:.2f}".format(const.disruption_mass_grain_ratio*100))
@@ -1216,9 +1239,41 @@ class MetSimGUI(QMainWindow):
         self.inputErosionCoeff.setDisabled(not self.const.erosion_on)
         self.inputErosionHtChange.setDisabled(not self.const.erosion_on)
         self.inputErosionCoeffChange.setDisabled(not self.const.erosion_on)
+        self.inputErosionRhoChange.setDisabled(not self.const.erosion_on)
+        self.inputErosionAblationCoeffChange.setDisabled(not self.const.erosion_on)
         self.inputErosionMassIndex.setDisabled(not self.const.erosion_on)
         self.inputErosionMassMin.setDisabled(not self.const.erosion_on)
         self.inputErosionMassMax.setDisabled(not self.const.erosion_on)
+
+        self.checkBoxErosionRhoSignal(None)
+        self.checkBoxErosionAblationCoeffSignal(None)
+
+        # Read inputs
+        self.readInputBoxes()
+
+
+
+    def checkBoxErosionRhoSignal(self, event):
+        """ Use a different erosion coefficient after disruption. """
+
+        self.erosion_different_rho = self.checkBoxErosionRhoChange.isChecked()
+
+        # Disable/enable different density coefficient checkbox
+        self.inputErosionRhoChange.setDisabled((not self.erosion_different_rho) \
+            or (not self.const.erosion_on))
+
+        # Read inputs
+        self.readInputBoxes()
+
+
+    def checkBoxErosionAblationCoeffSignal(self, event):
+        """ Use a different erosion coefficient after disruption. """
+
+        self.erosion_different_sigma = self.checkBoxErosionAblationCoeffChange.isChecked()
+
+        # Disable/enable different ablation coeff checkbox
+        self.inputErosionAblationCoeffChange.setDisabled((not self.erosion_different_sigma) \
+            or (not self.const.erosion_on))
 
         # Read inputs
         self.readInputBoxes()
@@ -1380,6 +1435,24 @@ class MetSimGUI(QMainWindow):
             self.const.erosion_mass_index)
         self.const.erosion_mass_min = self._tryReadBox(self.inputErosionMassMin, self.const.erosion_mass_min)
         self.const.erosion_mass_max = self._tryReadBox(self.inputErosionMassMax, self.const.erosion_mass_max)
+
+
+        # If a different density value after the change of erosion is used, read it
+        if self.erosion_different_rho:
+            self.const.erosion_rho_change = self._tryReadBox(self.inputErosionRhoChange, \
+                self.const.erosion_rho_change)
+        else:
+            # Otherwise, use the same bulk density value
+            self.const.erosion_rho_change = self.const.rho
+
+
+        # If a different ablation coeff value after the change of erosion is used, read it
+        if self.erosion_different_sigma:
+            self.const.erosion_sigma_change = self._tryReadBox(self.inputErosionAblationCoeffChange, \
+                self.const.erosion_sigma_change*1e6)/1e6
+        else:
+            # Otherwise, use the same bulk density value
+            self.const.erosion_sigma_change = self.const.sigma
 
         ### ###
 

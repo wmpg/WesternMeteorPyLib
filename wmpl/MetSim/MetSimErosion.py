@@ -107,7 +107,7 @@ class Constants(object):
         # Shape factor (1.21 is sphere)
         self.shape_factor = 1.21
 
-        # Main fragment ablation coefficient
+        # Main fragment ablation coefficient (s^2/km^2)
         self.sigma = 0.023/1e6
 
         # Zenith angle (radians)
@@ -150,6 +150,12 @@ class Constants(object):
 
         # Erosion coefficient after the change (s^2/m^2)
         self.erosion_coeff_change = 0.33/1e6
+
+        # Density after erosion change (density of small chondrules by default)
+        self.erosion_rho_change = 3700
+
+        # Abaltion coeff after erosion change
+        self.erosion_sigma_change = self.sigma
 
 
         # Grain mass distribution index
@@ -209,6 +215,9 @@ class Fragment(object):
         # Density (kg/m^3)
         self.rho = 0
 
+        # Ablation coefficient (s^2/m^2)
+        self.sigma = 0
+
         # Velocity (m/s)
         self.v = 0
 
@@ -236,7 +245,7 @@ class Fragment(object):
         self.main = False
 
 
-    def init(self, const, m, rho, v_init, zenith_angle):
+    def init(self, const, m, rho, v_init, sigma, zenith_angle):
 
 
         self.m = m
@@ -244,6 +253,7 @@ class Fragment(object):
         self.h = const.h_init
         self.rho = rho
         self.v = v_init
+        self.sigma = sigma
         self.zenith_angle = zenith_angle
 
         # Compute shape-density coeff
@@ -459,7 +469,7 @@ def ablateAll(fragments, const, compute_wake=False):
 
 
         # Compute the mass loss of the main fragment due to ablation
-        mass_loss_ablation = massLossRK4(const.dt, frag.K, const.sigma, frag.m, rho_atm, frag.v)
+        mass_loss_ablation = massLossRK4(const.dt, frag.K, frag.sigma, frag.m, rho_atm, frag.v)
 
 
         # Compute the mass loss due to erosion
@@ -582,6 +592,18 @@ def ablateAll(fragments, const, compute_wake=False):
 
             # Turn on the erosion of the fragment
             frag.erosion_coeff = getErosionCoeff(const, frag.h)
+
+
+            # Update the main fragment physical parameters if it is changed after erosion coefficient change
+            if frag.main and (const.erosion_height_change >= frag.h):
+
+                # Update the density
+                frag.rho = const.erosion_rho_change
+                frag.K = const.gamma*const.shape_factor*frag.rho**(-2/3.0)
+
+                # Update the ablation coeff
+                frag.sigma = const.erosion_sigma_change
+
 
             # Generate new fragments if there is some mass to distribute
             if abs(mass_loss_erosion) > 0:
@@ -738,7 +760,7 @@ def runSimulation(const, compute_wake=False):
 
     # Init the main fragment
     frag = Fragment()
-    frag.init(const, const.m_init, const.rho, const.v_init, const.zenith_angle)
+    frag.init(const, const.m_init, const.rho, const.v_init, const.sigma, const.zenith_angle)
     frag.main = True
     
     # Erode the main fragment
