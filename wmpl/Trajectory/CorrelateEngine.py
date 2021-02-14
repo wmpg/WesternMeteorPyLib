@@ -4,6 +4,7 @@ from __future__ import print_function, division, absolute_import
 
 import copy
 import datetime
+import json
 import multiprocessing
 
 import numpy as np
@@ -379,9 +380,13 @@ class TrajectoryCorrelator(object):
 
 
         # Set the FF file name as the comment
-        comment = ''
+        comment_dict = {}
         if met.ff_name is not None:
-            comment = met.ff_name
+            comment_dict['ff_name'] = met.ff_name
+
+
+        # Convert the comment dictionary to a JSON string
+        comment = json.dumps(comment_dict, sort_keys=True).replace('\n', '').replace('\r', '')
 
 
         # Init the observation object
