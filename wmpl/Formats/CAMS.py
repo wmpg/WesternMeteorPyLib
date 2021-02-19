@@ -163,6 +163,10 @@ def loadFTPDetectInfo(ftpdetectinfo_file_name, stations, time_offsets=None,
 
         for line in f:
 
+            # Skip comments
+            if line.startswith("#"):
+                continue
+
             line = line.replace('\n', '').replace('\r', '')
 
             # Skip the line if it is empty
