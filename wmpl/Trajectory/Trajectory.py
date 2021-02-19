@@ -1237,7 +1237,7 @@ class MCUncertainties(object):
         # Velocity state vector
         self.vx = None
         self.vy = None
-        self.z = None
+        self.vz = None
 
         # Radiant vector
         self.radiant_eci_mini = None
@@ -2888,79 +2888,98 @@ class Trajectory(object):
         # Timing differences which will be calculated
         time_diffs = np.zeros(len(observations))
 
-        # If the timing difference and velocity difference estimation is not desired to be performed, skip 
-        # the procedure
-        if not estimate_timing_vel:
-            return True, np.zeros(2), v_init, time_diffs, observations
 
+        # Run timing offset estimation if it needs to be done
+        if estimate_timing_vel:
 
-        # Initial timing difference between sites is 0 (there are N-1 timing differences, as the time 
-        # difference for the reference site is always 0)
-        p0 = np.zeros(shape=(len(self.observations) - 1))
+            # Initial timing difference between sites is 0 (there are N-1 timing differences, as the time 
+            # difference for the reference site is always 0)
+            p0 = np.zeros(shape=(len(self.observations) - 1))
 
-        # # Set the time reference station to be the one with the most used points
-        # obs_points = [obs.kmeas for obs in self.observations]
-        # self.t_ref_station = obs_points.index(max(obs_points))
+            # # Set the time reference station to be the one with the most used points
+            # obs_points = [obs.kmeas for obs in self.observations]
+            # self.t_ref_station = obs_points.index(max(obs_points))
 
-
-        if self.verbose:
-            print('Initial function evaluation:', timingResiduals(p0, observations, self.t_ref_station, 
-                weights=weights))
-
-
-        # Set bounds for timing to +/- given maximum time offset
-        bounds = []
-        for i in range(len(self.observations) - 1):
-            bounds.append([-self.max_toffset, self.max_toffset])
-
-
-        ### Try different methods of optimization until it is successful ##
-
-        #   If there are more than 5 stations, use the advanced L-BFGS-B method by default
-        if len(self.observations) >= 5:
-            methods = [None]
-            maxiter_list = [15000]
-        else:
-            # If there are less than 5, try faster methods first
-            methods = ['SLSQP', 'TNC', None]
-            maxiter_list = [1000, None, 15000]
-
-        # Try different methods to minimize timing residuals
-        for opt_method, maxiter in zip(methods, maxiter_list):
-
-            # Run the minimization of residuals between all stations
-            timing_mini = scipy.optimize.minimize(timingResiduals, p0, args=(observations, \
-                self.t_ref_station, weights), bounds=bounds, method=opt_method, options={'maxiter': maxiter},\
-                tol=1e-12)
-
-            # Stop trying methods if this one was successful
-            if timing_mini.success:
-                if self.verbose:
-                    print('Successful timing optimization with', opt_method)
-
-                break
-
-            else:
-                print('Unsuccessful timing optimization with', opt_method)
-
-        ### ###
-
-        # If the minimization was successful, apply the time corrections
-        if timing_mini.success:
 
             if self.verbose:
-                print("Final function evaluation:", timing_mini.fun)
+                print('Initial function evaluation:', timingResiduals(p0, observations, self.t_ref_station, 
+                    weights=weights))
 
 
-            # Set the final value of the timing residual
-            self.timing_res = timing_mini.fun
-                
+            # Set bounds for timing to +/- given maximum time offset
+            bounds = []
+            for i in range(len(self.observations) - 1):
+                bounds.append([-self.max_toffset, self.max_toffset])
+
+
+            ### Try different methods of optimization until it is successful ##
+
+            #   If there are more than 5 stations, use the advanced L-BFGS-B method by default
+            if len(self.observations) >= 5:
+                methods = [None]
+                maxiter_list = [15000]
+            else:
+                # If there are less than 5, try faster methods first
+                methods = ['SLSQP', 'TNC', None]
+                maxiter_list = [1000, None, 15000]
+
+            # Try different methods to minimize timing residuals
+            for opt_method, maxiter in zip(methods, maxiter_list):
+
+                # Run the minimization of residuals between all stations
+                timing_mini = scipy.optimize.minimize(timingResiduals, p0, args=(observations, \
+                    self.t_ref_station, weights), bounds=bounds, method=opt_method, options={'maxiter': maxiter},\
+                    tol=1e-12)
+
+                # Stop trying methods if this one was successful
+                if timing_mini.success:
+
+                    # Set the final value of the timing residual
+                    self.timing_res = timing_mini.fun
+
+                    if self.verbose:
+                        print('Successful timing optimization with', opt_method)
+                        print("Final function evaluation:", timing_mini.fun)
+
+
+                    break
+
+                else:
+                    print('Unsuccessful timing optimization with', opt_method)
+
+            ### ###
+
+
+            if not timing_mini.success:
+
+                print('Timing difference and initial velocity minimization failed with the message:')
+                print(timing_mini.message)
+                print('Try increasing the range of time offsets!')
+                v_init_mini = v_init
+
+                velocity_fit = np.zeros(2)
+                v_init_mini = 0
+
+
+        # Check if the velocity should be estimated
+        estimate_velocity = False
+        timing_minimization_successful = False
+        if not estimate_timing_vel:
+            estimate_velocity = True
+            timing_minimization_successful = True
+        else:
+            if timing_mini.success:
+                estimate_velocity = True
+                timing_minimization_successful = True
+
+        # If the minimization was successful, apply the time corrections
+        if estimate_velocity:
 
             stat_count = 0
             for i, obs in enumerate(observations):
 
                 # The timing difference for the reference station is always 0
-                if i == self.t_ref_station:
+                if (i == self.t_ref_station) or (not estimate_timing_vel):
                     t_diff = 0
 
                 else:
@@ -3099,20 +3118,10 @@ class Trajectory(object):
                 if self.verbose:
                     print('ESTIMATED Vinit:', v_init_mini, 'm/s')
 
+            
 
 
-        else:
-
-            print('Timing difference and initial velocity minimization failed with the message:')
-            print(timing_mini.message)
-            print('Try increasing the range of time offsets!')
-            v_init_mini = v_init
-
-            velocity_fit = np.zeros(2)
-            v_init_mini = 0
-
-
-        return timing_mini.success, velocity_fit, v_init_mini, time_diffs, observations
+        return timing_minimization_successful, velocity_fit, v_init_mini, time_diffs, observations
 
 
 
