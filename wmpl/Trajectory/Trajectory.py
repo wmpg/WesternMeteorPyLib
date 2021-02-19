@@ -12,6 +12,7 @@ import sys
 import os
 import datetime
 import pickle
+import json
 from operator import attrgetter
 
 import numpy as np
@@ -3530,6 +3531,133 @@ class Trajectory(object):
         
         print('Measurements dumped into ', os.path.join(dir_path, file_name))
 
+
+
+    def toJson(self):
+        """ Convert the Trajectory object to a JSON string. """
+
+        # Get a list of builtin types
+        try :
+            import __builtin__
+            builtin_types = [t for t in __builtin__.__dict__.itervalues() if isinstance(t, type)]
+        except: 
+            # Python 3.x
+            import builtins
+            builtin_types = [getattr(builtins, d) for d in dir(builtins) if isinstance(getattr(builtins, d), type)]
+            
+
+
+        def _convertDict(d):
+            """ Convert the given object dictionary to JSON-compatible format. """
+
+            d = copy.deepcopy(d)
+
+            d_new = {}
+
+            for key in d:
+
+                # Set the old value to the new dictionary
+                d_new[key] = d[key]
+
+                # Recursively convert all dictionaries
+                if isinstance(d[key], dict):
+                    d_new[key] = _convertDict(d[key])
+
+                # Recursively convert items in lists
+                if isinstance(d[key], list):
+
+                    # Skip empty lists
+                    if len(d[key]) == 0:
+                        continue
+
+                    # Remove the old list
+                    del d_new[key]
+
+                    # Convert the list to a dictionary
+                    d_tmp = {i: item for (i, item) in enumerate(d[key])}
+
+                    # Run the convert procedure
+                    d_tmp = _convertDict(d_tmp)
+
+                    # Unpack the dictionary to a list
+                    index_list = []
+                    value_list = []
+                    for k in d_tmp:
+                        index_list.append(k)
+                        value_list.append(d_tmp[k])
+
+                    # Sort value list by index
+                    value_list = [x for _, x in sorted(zip(index_list, value_list))]
+
+                    d_new[key] = value_list
+
+
+                # Skip None types
+                elif d[key] is None:
+                    continue
+
+                # Convert datetime objects to strings
+                elif isinstance(d[key], datetime.datetime):
+                    d_new[key] = str(d[key])
+
+                # Convert numpy arrays to lists
+                elif isinstance(d[key], np.ndarray):
+                    d_new[key] = d[key].tolist()
+
+                # Convert numpy types to float
+                elif type(d[key]).__module__ == np.__name__:
+                    d_new[key] = float(d[key])
+
+
+                # Recursively convert all non-builtin types
+                elif type(d[key]) not in builtin_types:
+
+                    # Get the name of the class
+                    class_name = type(d[key]).__name__
+                    key_name = class_name
+
+                    # Handle class-specific things
+                    if class_name == "ObservedPoints":
+                        key_name += "." + d[key].station_id
+
+                    elif class_name == "PlaneIntersection":
+                        key_name += "." + d[key].obs1.station_id + "_" + d[key].obs2.station_id
+                        del d[key].obs1
+                        del d[key].obs2
+
+                    # Remove a list of trajectoryes in the uncertainties object
+                    elif class_name == "MCUncertainties":
+                        d[key].mc_traj_list = None
+
+
+                    # Assign the converted dictionary to the given attribute name
+                    del d_new[key]
+                    d_new[key] = {key_name: _convertDict(d[key].__dict__)}
+                    
+
+
+            return d_new
+
+
+
+        traj = copy.deepcopy(self)
+
+        # Remove noise-added observations
+        if hasattr(traj, "obs_noisy"):
+            del traj.obs_noisy
+
+        # Delete duplicate misspelt attribute
+        if hasattr(traj, "uncertanties"):
+            del traj.uncertanties
+
+        # Convert the trajectory object's attributes to JSON-compatible format
+        traj_dict = _convertDict(traj.__dict__)
+
+        # Convert the trajectory object to JSON
+        out_str = json.dumps(traj_dict, indent=4, sort_keys=False)
+
+
+        return out_str
 
 
     def saveReport(self, dir_path, file_name, uncertainties=None, verbose=True, save_results=True):
