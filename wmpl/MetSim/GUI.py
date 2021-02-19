@@ -1651,6 +1651,11 @@ class MetSimGUI(QMainWindow):
             abs_mag_data = obs.absolute_magnitudes[obs.ignore_list == 0]
             height_data = obs.model_ht[obs.ignore_list == 0]/1000
 
+            # Don't plot magnitudes fainter than -10
+            mag_filter = abs_mag_data < 10
+            height_data = height_data[mag_filter]
+            abs_mag_data = abs_mag_data[mag_filter]
+
             self.magnitudePlot.canvas.axes.plot(abs_mag_data, height_data, marker='x',
                 linestyle='dashed', label=obs.station_id, markersize=5, linewidth=1)
 
