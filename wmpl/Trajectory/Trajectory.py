@@ -5040,12 +5040,18 @@ class Trajectory(object):
                 # Check if the absolute magnitude was given
                 if obs.absolute_magnitudes is not None:
 
-                    # Filter out None absolute magnitudes
+                    # Filter out None absolute magnitudes and magnitudes fainter than mag 10
                     filter_mask = np.array([abs_mag is not None for abs_mag in obs.absolute_magnitudes])
 
                     # Extract data that is not ignored
                     used_times = obs.time_data[filter_mask & (obs.ignore_list == 0)]
                     used_magnitudes = obs.absolute_magnitudes[filter_mask & (obs.ignore_list == 0)]
+
+                    # Filter out magnitudes fainter than mag 10
+                    mag_mask = np.array([abs_mag < 10 for abs_mag in used_magnitudes])
+                    used_times = used_times[mag_mask]
+                    used_magnitudes = used_magnitudes[mag_mask]
+                    
 
                     plt_handle = plt.plot(used_times, used_magnitudes, marker='x', \
                         label=str(obs.station_id), zorder=3)

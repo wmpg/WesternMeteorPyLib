@@ -53,6 +53,10 @@ def loadECSVs(ecsv_paths):
                         if "camera_id" in line[0]:
                             station_id = line[1].strip()
 
+                        if (station_id is None) and ("dfn_camera_codename" in line[0]):
+                            station_id = line[1].strip()
+                            
+
             if (station_lat is None) or (station_lon is None) or (station_ele is None) \
                 or (station_id is None):
 
