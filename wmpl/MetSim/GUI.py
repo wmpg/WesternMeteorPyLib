@@ -207,6 +207,73 @@ class MetObservations(object):
                 
 
 
+class LightCurveContainer(object):
+    def __init__(self, dir_path, file_name):
+        """ Loads the light curve data form an CSV file. 
+        Arguments:
+            dir_path: [str] Path to the directory with the LC file.
+            file_name: [str] Name of the LC CSV file.
+        """
+
+        self.sites = []
+
+        self.time_data = {}
+        self.height_data = {}
+        self.abs_mag_data = {}
+
+        with open(os.path.join(dir_path, file_name)) as f:
+            
+            time_data = []
+            height_data = []
+            abs_mag_data = []
+            current_station = None
+
+            station_label = "# Station:"
+
+            for line in f:
+
+                line = line.replace('\n', '').replace('\r', '')
+
+                if not len(line):
+                    continue
+
+                # Start a new station
+                if line.startswith(station_label):
+
+                    # Add the previous data to the dictionary
+                    if current_station is not None:
+                        self.sites.append(current_station)
+                        self.time_data[current_station] = np.array(time_data)
+                        self.height_data[current_station] = np.array(height_data)
+                        self.abs_mag_data[current_station] = np.array(abs_mag_data)
+
+                    time_data = []
+                    height_data = []
+                    abs_mag_data = []
+                    current_station = line.strip(station_label).strip()
+
+                    continue
+
+
+                # Skip comments
+                if line.startswith('#'):
+                    continue
+
+                # Read the data line (convert height to meters)
+                t, ht, mag = line.split(',')
+                time_data.append(float(t))
+                height_data.append(1000*float(ht))
+                abs_mag_data.append(float(mag))
+
+
+            # Add the final station to the list
+            if current_station is not None:
+                self.sites.append(current_station)
+                self.time_data[current_station] = np.array(time_data)
+                self.height_data[current_station] = np.array(height_data)
+                self.abs_mag_data[current_station] = np.array(abs_mag_data)
+
+
 
 class WakePoint(object):
     def __init__(self, n, th, phi, intens_sum, amp, r, b, c, state_vect_dist, ht):
@@ -593,7 +660,7 @@ def fitResidualsListArguments(params, *args, **kwargs):
 
 
 class MetSimGUI(QMainWindow):
-    def __init__(self, traj_path, const_json_file=None, met_path=None, wid_files=None):
+    def __init__(self, traj_path, const_json_file=None, met_path=None, lc_path=None, wid_files=None):
         """ GUI tool for MetSim. 
     
         Arguments:
@@ -601,7 +668,8 @@ class MetSimGUI(QMainWindow):
 
         Keyword arguments:
             const_json_file: [str] Path to the JSON file with simulation parameters.
-            met: [str] Path to the METAL or mirfit .met file with additional magnitude or lag information.
+            met_path: [str] Path to the METAL or mirfit .met file with additional magnitude or lag information.
+            lc_path: [str] Path to the light curve CSV file.
             wid_files: [str] Mirfit wid files containing the meteor wake information.
         """
         
@@ -628,6 +696,32 @@ class MetSimGUI(QMainWindow):
             self.met_obs = MetObservations(self.met, self.traj)
         else:
             self.met_obs = None
+
+        ### ###
+
+
+
+        ### LOAD the light curve file ###
+        self.lc_data = None
+        if lc_path is not None:
+            if os.path.isfile(lc_path):
+
+                # Read the light curve data
+                self.lc_data = LightCurveContainer(*os.path.split(os.path.abspath(lc_path)))
+
+
+                ## TEST !!!
+                for site in self.lc_data.sites:
+                    print(site)
+                    print(self.lc_data.height_data[site])
+                    print(self.lc_data.abs_mag_data[site])
+
+                ##
+
+            else:
+                print("The light curve file does not exist:", lc_path)
+                sys.exit()
+
 
         ### ###
 
@@ -901,7 +995,7 @@ class MetSimGUI(QMainWindow):
         site_id = str(int(site_id))
         frame_n = int(frame_n)
 
-        print('wid file: ', site_id, frame_n)
+        print('wid file: ', site_id, frame_n, end='')
 
 
         # Extract geo coordinates of sites
@@ -982,6 +1076,10 @@ class MetSimGUI(QMainWindow):
                 for wake_pt in wake_container.points:
                     wake_pt.leading_frag_length = wake_pt.state_vect_dist - leading_state_vect_dist
 
+        if wake_container is None:
+            print("... rejected")
+        else:
+            print("... loaded!")
 
         return wake_container
 
@@ -995,6 +1093,8 @@ class MetSimGUI(QMainWindow):
         time_mag_arr = []
         avg_t_diff_max = 0
         if self.met_obs is not None:
+
+            print("Photometric mass computed from the .met file!")
 
             # Extract time vs. magnitudes from the met file
             for site in self.met_obs.sites:
@@ -1010,7 +1110,32 @@ class MetSimGUI(QMainWindow):
                     if (mag is not None) and (not np.isnan(mag)):
                         time_mag_arr.append([t, mag])
 
+        # If the magnitudes are given
+        elif self.lc_data is not None:
+
+            print("Photometric mass computed from the light curve file!")
+
+            # Plot additional magnitudes for all sites
+            for site in self.lc_data.sites:
+
+                # Extract data
+                abs_mag_data = self.lc_data.abs_mag_data[site]
+                time_data = self.lc_data.time_data[site]
+
+                # Compute the average time difference
+                avg_t_diff_max_tmp = max(avg_t_diff_max, np.median(time_data[1:] - time_data[:-1]))
+                if avg_t_diff_max == 0:
+                    avg_t_diff_max = avg_t_diff_max_tmp
+                else:
+                    avg_t_diff_max = max([avg_t_diff_max, avg_t_diff_max_tmp])
+
+                for t, mag in zip(time_data, abs_mag_data):
+                    if (mag is not None) and (not np.isnan(mag)):
+                        time_mag_arr.append([t, mag])
+
         else:
+
+            print("Photometric mass computed from the trajectory pickle file!")
 
             # Extract time vs. magnitudes from the trajectory pickle file
             for obs in self.traj.observations:
@@ -1563,9 +1688,9 @@ class MetSimGUI(QMainWindow):
         x_arr = np.linspace(x_min, x_max, 10)
 
 
-        # Plot the beginning only if it's inside the plot
-        if (self.const.erosion_height_start/1000 >= y_min) and (self.const.erosion_height_start/1000 \
-            <= y_max):
+        # Plot the beginning only if it's inside the plot and the erosion is on
+        if self.const.erosion_on and (self.const.erosion_height_start/1000 >= y_min) \
+            and (self.const.erosion_height_start/1000 <= y_max):
             
             # Plot a line marking erosion beginning
             plt_handle.plot(x_arr, np.zeros_like(x_arr) + self.const.erosion_height_start/1000, \
@@ -1656,12 +1781,22 @@ class MetSimGUI(QMainWindow):
             height_data = height_data[mag_filter]
             abs_mag_data = abs_mag_data[mag_filter]
 
+            if len(height_data) == 0:
+                continue
+
             self.magnitudePlot.canvas.axes.plot(abs_mag_data, height_data, marker='x',
                 linestyle='dashed', label=obs.station_id, markersize=5, linewidth=1)
 
             # Keep track of the faintest and the brightest magnitude
-            mag_brightest = min(mag_brightest, np.min(abs_mag_data[~np.isinf(abs_mag_data)]))
-            mag_faintest = max(mag_faintest, np.max(abs_mag_data[~np.isinf(abs_mag_data)]))
+            if len(abs_mag_data):
+                mag_brightest = min(mag_brightest, np.min(abs_mag_data[~np.isinf(abs_mag_data)]))
+                mag_faintest = max(mag_faintest, np.max(abs_mag_data[~np.isinf(abs_mag_data)]))
+            else:
+                mag_faintest = 6.0
+                if sr is not None:
+                    mag_brightest = np.min(sr.abs_magnitude)
+                else:
+                    mag_brightest = -2.0
             
 
 
@@ -1674,6 +1809,24 @@ class MetSimGUI(QMainWindow):
                 # Extract data
                 abs_mag_data = self.met_obs.abs_mag_data[site]
                 height_data = self.met_obs.height_data[site]/1000
+
+                self.magnitudePlot.canvas.axes.plot(abs_mag_data, \
+                    height_data, marker='x', linestyle='dashed', label=str(site), markersize=5, linewidth=1)
+
+                # Keep track of the faintest and the brightest magnitude
+                mag_brightest = min(mag_brightest, np.min(abs_mag_data[~np.isinf(abs_mag_data)]))
+                mag_faintest = max(mag_faintest, np.max(abs_mag_data[~np.isinf(abs_mag_data)]))
+
+
+        # Plot additional observations from the light curve CSV file (if available)
+        if self.lc_data is not None:
+
+            # Plot additional magnitudes for all sites
+            for site in self.lc_data.sites:
+
+                # Extract data
+                abs_mag_data = self.lc_data.abs_mag_data[site]
+                height_data = self.lc_data.height_data[site]/1000
 
                 self.magnitudePlot.canvas.axes.plot(abs_mag_data, \
                     height_data, marker='x', linestyle='dashed', label=str(site), markersize=5, linewidth=1)
@@ -3104,6 +3257,29 @@ if __name__ == "__main__":
     arg_parser.add_argument('-m', '--met', metavar='MET_FILE', \
         help='Load additional observations from a METAL or mirfit .met file.', type=str)
 
+    arg_parser.add_argument('-c', '--lc', metavar='LIGHT_CURVE', \
+        help="""Additional light curve given in a comma-separated CSV file. The beginning of every station \
+        entry should start with 'Station: Name', followed by the height in km and the absolute magnitude. E.g.
+        # Station: XX0001
+        # Height (km), Abs Magnitude
+          102.3996248,  -8.021
+          101.2172498,  -8.036
+          100.0348748,  -8.142
+           98.8524998,  -8.607
+           97.6701248,  -8.703
+           96.4877498,  -8.788
+           95.3053748,  -9.084
+           94.1229998,  -9.399
+           92.9406248   -9.475
+           91.7582498,  -9.671
+           90.5758747,  -9.956
+           89.3934997, -10.061
+           88.2111247, -10.227
+           87.0287497, -10.412
+           85.8463747, -10.588
+           84.6639997, -10.763
+        """, type=str)
+
     arg_parser.add_argument('-w', '--wid', metavar='WID_FILES', \
         help='Load mirfit wid files which will be used for wake plotting. Wildchars can be used, e.g. /path/wid*.txt.', 
         type=str, nargs='+')
@@ -3231,6 +3407,10 @@ if __name__ == "__main__":
         print("Loading additional magnitudes from .met file:")
         print(met_file)
 
+    if cml_args.lc is not None:
+        print("Loading additional light curve from a light curve CSV file:")
+        print(cml_args.lc)
+
     if wid_files is not None:
         print("Loading wake data from:")
         for wfile in wid_files:
@@ -3244,7 +3424,7 @@ if __name__ == "__main__":
 
     # Init the MetSimGUI application
     main_window = MetSimGUI(traj_pickle_file, const_json_file=load_file, \
-        met_path=met_file, wid_files=wid_files)
+        met_path=met_file, lc_path=cml_args.lc, wid_files=wid_files)
 
 
     main_window.show()
