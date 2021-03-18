@@ -196,6 +196,20 @@ class Constants(object):
         ### ###
 
 
+        ### Complex fragmentation behaviour ###
+
+        # Indicate if the complex fragmentation is used
+        self.fragmentation_on = False
+
+        # A list of fragmentation entries
+        self.fragmentation_entries = []
+
+        # Name of the fragmentation file
+        self.fragmentation_file_name = "metsim_fragmentation.txt"
+
+        ### ###
+
+
 
 
 class Fragment(object):

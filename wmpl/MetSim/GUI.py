@@ -16,7 +16,7 @@ import scipy.interpolate
 import scipy.optimize
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import (NavigationToolbar2QT as NavigationToolbar)
-from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
+from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox, QFileDialog
 from PyQt5.uic import loadUi
 
 from wmpl.Formats.Met import loadMet
@@ -331,6 +331,363 @@ class WakeContainter(object):
 
     def addPoint(self, n, th, phi, intens_sum, amp, r, b, c, state_vect_dist, ht):
         self.points.append(WakePoint(n, th, phi, intens_sum, amp, r, b, c, state_vect_dist, ht))
+
+
+
+
+class FragmentationEntry(object):
+    def __init__(self, frag_type, height, number, mass_percent, sigma, gamma, erosion_coeff, grain_mass_min, \
+        grain_mass_max, mass_index):
+        """ A container for every fragmentation entry. """
+
+        self.frag_type = frag_type.strip()
+
+        self.height = 1000*float(height)
+
+        try:
+            self.number = int(number)
+        except:
+            self.number = None
+
+        try:
+            self.mass_percent = float(mass_percent)
+        except:
+            self.mass_percent = None
+            pass
+
+        try:
+            self.sigma = float(sigma)/1e6
+        except:
+            self.sigma = None
+            pass
+
+        try:
+            self.gamma = float(gamma)
+        except:
+            self.gamma = None
+            pass
+
+        try:
+            self.erosion_coeff = float(erosion_coeff)/1e6
+        except:
+            self.erosion_coeff = None
+            pass
+
+        try:
+            self.grain_mass_min = float(grain_mass_min)
+        except:
+            self.grain_mass_min = None
+            pass
+
+        try:
+            self.grain_mass_max = float(grain_mass_max)
+        except:
+            self.grain_mass_max = None
+            pass
+
+        try:
+            self.mass_index = float(mass_index)
+        except:
+            self.mass_index = None
+            pass
+
+
+    def toString(self):
+        """ Convert the entry to a string that can be written to a text file. """
+
+        line_entries = []
+
+        line_entries.append("{:>6s}".format(self.frag_type))
+
+        line_entries.append("{:11.3f}".format(self.height/1000))
+
+        if self.number is not None:
+            line_entries.append("{:6d}".format(self.number))
+        else:
+            line_entries.append(6*" ")
+
+        if self.mass_percent is not None:
+            line_entries.append("{:8.3f}".format(self.mass_percent))
+        else:
+            line_entries.append(8*" ")
+
+        if self.sigma is not None:
+            line_entries.append("{:14.4f}".format(1e6*self.sigma))
+        else:
+            line_entries.append(14*" ")
+
+        if self.gamma is not None:
+            line_entries.append("{:5.2f}".format(self.gamma))
+        else:
+            line_entries.append(5*" ")
+
+        if self.erosion_coeff is not None:
+            line_entries.append("{:13.4f}".format(1e6*self.erosion_coeff))
+        else:
+            line_entries.append(13*" ")
+
+        if self.grain_mass_min is not None:
+            line_entries.append("{:9.2e}".format(self.grain_mass_min))
+        else:
+            line_entries.append(9*" ")
+
+        if self.grain_mass_max is not None:
+            line_entries.append("{:9.2e}".format(self.grain_mass_max))
+        else:
+            line_entries.append(9*" ")
+
+        if self.mass_index is not None:
+            line_entries.append("{:5.2f}".format(self.mass_index))
+        else:
+            line_entries.append(5*" ")
+
+
+        # Join the entries to one string
+        out_str = ", ".join(line_entries)
+
+        # Add separator from inputs and outputs
+        out_str += " # "
+
+
+        return out_str
+
+
+
+            
+
+
+
+class FragmentationContainer(object):
+    def __init__(self, gui, fragmentation_file_path):
+        """ Class which handles fragmentation file I/O. 
+    
+        Arguments:
+            gui: [MetSimGUI object] A handle to the parent GUI object.
+            fragmentation_file_path: [str] Path to the main fragmentation file.
+
+        """
+
+        self.gui = gui
+
+        self.fragmentation_file_path = fragmentation_file_path
+
+        self.fragmentation_entries = []
+
+
+    def loadFromString(self, string):
+        """ Load parameters from a string. """
+
+        # Reset fragmentation entries and reload
+        self.fragmentation_entries = []
+
+        for line in string.split('\n'):
+
+            # Skip comment lines
+            if line.startswith("#"):
+                continue
+
+            line = line.replace('\n', '').replace('\r', '')
+
+            if not len(line):
+                continue
+
+            # Strip the output part
+            line = line.split("#")[0]
+
+            entries = line.split(',')
+
+            # There need to be exactly 10 entries for every fragmentation
+            if len(entries) != 10:
+                print("ERROR! Cannot read fragmentation line:")
+                print(line)
+                continue
+
+            # Create a new fragmentation entry
+            frag_entry = FragmentationEntry(*entries)
+
+            self.fragmentation_entries.append(frag_entry)
+
+
+        # Set the fragmentation entries to constants
+        self.gui.const.fragmentation_entries = self.fragmentation_entries
+
+
+    def loadFragmentationFile(self):
+        """ Load fragmentation paramters from the fragmentation file. """
+
+        string = ""
+        with open(self.fragmentation_file_path) as f:
+            for line in f:
+                string += line
+
+
+        self.loadFromString(string)
+
+
+    def toString(self):
+        """ Convert the container to a string. """
+
+        # Write the header
+        out_str  = ""
+        out_str += """# MetSim fragmentation file.
+#
+# Types of entries:
+#   - *INIT - Initial parameters taken from the GUI. Ready only, cannot be set in this file.
+#   - M    - Main fragment - parameter change.
+#           - REQUIRED: Height.
+#           - Possible: Ablation coeff, Erosion coeff, Gamma, Erosion coeff, Grain masses, Mass index.
+#   - A    - All fragments - parameter change.
+#           - REQUIRED: Height.
+#           - Possible: Ablation coeff, Gamma.
+#   - F    - New single-body fragment.
+#           - REQUIRED: Height, Number, Mass (%).
+#           - Possible: Ablation coeff, Gamma.
+#   - EF   - New eroding fragment. A mass index of 2.0 will be assumed if not given.
+#           - REQUIRED: Height, Number, Mass (%), Erosion coeff, Grain MIN mass, Grain MAX mass.
+#           - Possible: Ablation coeff, Gamma, Mass index.
+#   - D    - New dust. Onlt the grain mass range needs to be specified. A mass index of 2.0 will be assumed if not given.
+#           - REQUIRED: Height, Mass (%), Grain MIN mass, Grain MAX mass.
+#           - Possible: Mass index.
+#
+#                             INPUTS (leave unchanged fields empty)                                      #        OUTPUTS  (do not fill in!)         #
+# ------------------------------------------------------------------------------------------------------ # ----------------------------------------- #
+# Type, Height (km), Number, Mass (%), Ablation coeff, Gamma, Erosion coeff, Grain MIN, Grain MAX, Mass  # Time (s), Dyn pres, Velocity, Parent mass #
+#     ,            ,       ,         , (s^2 km^-2)   ,      , (s^2 km^-2)  , mass (kg), mass (kg), index #         , (kPa)   , (km/s)  , (kg)        #
+#                                                                                                        #                                           #
+"""
+
+        # Write the initial parameters
+        initial_entry = FragmentationEntry(frag_type="# INIT",
+                                            height=self.gui.const.h_init/1000,
+                                            number=1,
+                                            mass_percent=100,
+                                            sigma=self.gui.const.sigma,
+                                            gamma=self.gui.const.gamma,
+                                            erosion_coeff=0.0,
+                                            grain_mass_min=None,
+                                            grain_mass_max=None,
+                                            mass_index=None
+                                            )
+
+
+        # Write fragmentation entries
+        for frag_entry in [initial_entry] + self.fragmentation_entries:
+            out_str += frag_entry.toString() + "\n"
+
+
+        return out_str
+
+
+
+    def writeFragmentationFile(self):
+
+        with open(self.fragmentation_file_path, 'w') as f:
+            f.write(self.toString())
+
+        print("Fragmentation file saved:", self.fragmentation_file_path)
+
+
+    def newFragmentationFile(self):
+        """ Open a new fragmentation file. """
+
+        # Reset fragmentation entries
+        self.fragmentation_entries = []
+
+        # Write an empty fragmentation file to disk
+        self.writeFragmentationFile()
+
+        self.gui.const.fragmentation_file_name = os.path.basename(self.fragmentation_file_path)
+
+
+    def addFragmentation(self, frag_type):
+        """ Add a new fragmentation entry. """
+
+        # Load the fragmentation file
+        self.loadFragmentationFile()
+
+
+        # Change paramters of the main fragment
+        if frag_type == "M":
+            frag_entry = FragmentationEntry(frag_type=frag_type,
+                                            height=100.0,
+                                            number=None,
+                                            mass_percent=None,
+                                            sigma=self.gui.const.sigma,
+                                            gamma=self.gui.const.gamma,
+                                            erosion_coeff=1e6*self.gui.const.erosion_coeff,
+                                            grain_mass_min=None,
+                                            grain_mass_max=None,
+                                            mass_index=None
+                                            )
+
+        # Change paramters of all fragments
+        elif frag_type == "A":
+            frag_entry = FragmentationEntry(frag_type=frag_type,
+                                            height=100.0,
+                                            number=None,
+                                            mass_percent=None,
+                                            sigma=self.gui.const.sigma,
+                                            gamma=self.gui.const.gamma,
+                                            erosion_coeff=None,
+                                            grain_mass_min=None,
+                                            grain_mass_max=None,
+                                            mass_index=None
+                                            )
+
+        # New single-body fragment
+        elif frag_type == "F":
+            frag_entry = FragmentationEntry(frag_type=frag_type,
+                                            height=100.0,
+                                            number=1,
+                                            mass_percent=10,
+                                            sigma=self.gui.const.sigma,
+                                            gamma=None,
+                                            erosion_coeff=None,
+                                            grain_mass_min=None,
+                                            grain_mass_max=None,
+                                            mass_index=None
+                                            )
+
+        elif frag_type == "EF":
+            frag_entry = FragmentationEntry(frag_type=frag_type,
+                                            height=100.0,
+                                            number=1,
+                                            mass_percent=10,
+                                            sigma=self.gui.const.sigma,
+                                            gamma=None,
+                                            erosion_coeff=1e6*self.gui.const.erosion_coeff,
+                                            grain_mass_min=self.gui.const.erosion_mass_min,
+                                            grain_mass_max=self.gui.const.erosion_mass_max,
+                                            mass_index=self.gui.const.erosion_mass_index
+                                            )
+
+        elif frag_type == "D":
+            frag_entry = FragmentationEntry(frag_type=frag_type,
+                                            height=100.0,
+                                            number=None,
+                                            mass_percent=10,
+                                            sigma=None,
+                                            gamma=None,
+                                            erosion_coeff=None,
+                                            grain_mass_min=self.gui.const.erosion_mass_min,
+                                            grain_mass_max=self.gui.const.erosion_mass_max,
+                                            mass_index=self.gui.const.erosion_mass_index
+                                            )
+
+        else:
+            print("ERROR! Unknown fragmentation type:", frag_type)
+
+
+        # Add the fragment entry
+        self.fragmentation_entries.append(frag_entry)
+        self.gui.const.fragmentation_entries = self.fragmentation_entries
+
+
+        # Save the fragmentation file
+        self.writeFragmentationFile()
+
+
+
 
 
 
@@ -679,6 +1036,9 @@ class MetSimGUI(QMainWindow):
         # Load the trajectory pickle file
         self.traj = loadPickle(*os.path.split(traj_path))
 
+        # Extract the directory path
+        self.dir_path = os.path.dirname(traj_path)
+
 
         ### LOAD .met FILE ###
 
@@ -708,15 +1068,6 @@ class MetSimGUI(QMainWindow):
 
                 # Read the light curve data
                 self.lc_data = LightCurveContainer(*os.path.split(os.path.abspath(lc_path)))
-
-
-                ## TEST !!!
-                for site in self.lc_data.sites:
-                    print(site)
-                    print(self.lc_data.height_data[site])
-                    print(self.lc_data.abs_mag_data[site])
-
-                ##
 
             else:
                 print("The light curve file does not exist:", lc_path)
@@ -822,6 +1173,11 @@ class MetSimGUI(QMainWindow):
         # Disable different erosion coeff after disruption at the beginning
         self.disruption_different_erosion_coeff = False
 
+
+        # Fragmentation object
+        self.fragmentation = None
+
+
         self.simulation_results = None
 
         self.const_prev = None
@@ -851,6 +1207,30 @@ class MetSimGUI(QMainWindow):
                 setattr(self.const, key, const_json[key])
 
 
+            # Convert fragmentation entries from dictionaties to objects
+            frag_entries = []
+            if len(const_json['fragmentation_entries']) > 0:
+                for frag_entry_dict in const_json['fragmentation_entries']:
+
+                    # Correct units
+                    frag_entry_dict['height'] /= 1000
+                    if frag_entry_dict['erosion_coeff'] is not None:
+                        frag_entry_dict['erosion_coeff'] *= 1e6
+
+                    frag_entry = FragmentationEntry(**frag_entry_dict)
+                    frag_entries.append(frag_entry)
+
+            self.const.fragmentation_entries = frag_entries
+            self.fragmentation = FragmentationContainer(self, \
+                os.path.join(self.dir_path, self.const.fragmentation_file_name))
+            self.fragmentation.fragmentation_entries = self.const.fragmentation_entries
+
+            # Overwrite the existing fragmentatinon file
+            self.fragmentation.writeFragmentationFile()
+
+
+
+
             # Check if the disruption erosion coefficient is different than the main erosion coeff
             if const_json['disruption_erosion_coeff'] != const_json['erosion_coeff']:
                 self.disruption_different_erosion_coeff = True
@@ -865,6 +1245,13 @@ class MetSimGUI(QMainWindow):
             if 'erosion_sigma_change' in const_json:
                 if const_json['erosion_sigma_change'] != const_json['sigma']:
                     self.erosion_different_sigma = True
+
+            # if 'fragmentation_string' in const_json:
+            #     if const_json['fragmentation_string'] is not None:
+            #         self.fragmentation = FragmentationContainer(self, os.path.join(self.dir_path, \
+            #             "metsim_fragmentation.txt"))
+            #         self.fragmentation.loadFromString(const_json['fragmentation_string'])
+            #         self.fragmentation.writeFragmentationFile()
 
 
             # # Convert the density coefficients into a numpy array
@@ -895,6 +1282,7 @@ class MetSimGUI(QMainWindow):
             # Calculate the photometric mass
             self.const.m_init = self.calcPhotometricMass()
             print("Using initial mass: {:.2e} kg".format(self.const.m_init))
+
 
         ### ###
 
@@ -948,6 +1336,20 @@ class MetSimGUI(QMainWindow):
 
         self.runSimButton.clicked.connect(self.runSimulationGUI)
         self.autoFitButton.clicked.connect(self.autoFit)
+
+
+        self.fragmentationGroup.toggled.connect(self.toggleFragmentation)
+        self.newFragmentationFileButton.clicked.connect(self.newFragmentationFile)
+        self.loadFragmentationFileButton.clicked.connect(self.loadFragmentationFile)
+        self.mainFragmentStatusChangeButton.clicked.connect(lambda x: self.addFragmentation("M"))
+        self.allFragmentsStatusChangeButton.clicked.connect(lambda x: self.addFragmentation("A"))
+        self.newSingleBodyFragmentButton.clicked.connect(lambda x: self.addFragmentation("F"))
+        self.newErodingFragmentButton.clicked.connect(lambda x: self.addFragmentation("EF"))
+        self.newDustReleaseButton.clicked.connect(lambda x: self.addFragmentation("D"))
+
+        
+
+
         
         self.showPreviousButton.pressed.connect(self.showPreviousResults)
         self.showPreviousButton.released.connect(self.showCurrentResults)
@@ -966,6 +1368,7 @@ class MetSimGUI(QMainWindow):
         self.checkBoxDisruptionErosionCoeffSignal(None)
         self.toggleWakeNormalizationMethod(None)
         self.toggleWakeAlignMethod(None)
+        self.toggleFragmentation(None)
 
 
         # Compute plot height limits
@@ -1266,6 +1669,12 @@ class MetSimGUI(QMainWindow):
         self.inputAutoFitLagWeights.setText("{:.1f}, {:.2f}".format(*self.autofit_lag_weights))
 
         ### ###
+
+
+        ### Fragmentation parameters ###
+        self.fragmentationGroup.setChecked(const.fragmentation_on)
+
+        ###
 
 
         self.updateGrainDiameters()
@@ -2525,7 +2934,8 @@ class MetSimGUI(QMainWindow):
 
         ### ###
 
-        wake_ht_plot.legend()
+        if wake_ht_plot.lines or wake_ht_plot.collections:
+            wake_ht_plot.legend()
 
 
         wake_ht_plot.set_xlabel('Length behind leading fragment (m)')
@@ -2710,6 +3120,21 @@ class MetSimGUI(QMainWindow):
 
 
     def runSimulationGUI(self):
+
+
+        # If the fragmentation is turned on and no fragmentation data is given, notify the user
+        if self.const.fragmentation_on and (self.fragmentation is None):
+            frag_error_message = QMessageBox(QMessageBox.Critical, "Fragmentation file error", \
+                "Fragmentation is enabled but no fragmentation file is set.")
+            frag_error_message.setInformativeText("Either load an existing fragmentation file or create a new one.")
+            frag_error_message.exec_()
+            return None
+
+
+        # Load fragmentation entries if fragmentation is enabled
+        if self.const.fragmentation_on:
+            self.fragmentation.loadFragmentationFile()
+
 
         # Store previous run results
         self.const_prev = copy.deepcopy(self.const)
@@ -3031,6 +3456,68 @@ class MetSimGUI(QMainWindow):
         # Store the simulation results prior to auto fit as the previous simulation results
         self.const_prev = const_original
         self.simulation_results_prev = simulation_results_prefit
+
+
+    def toggleFragmentation(self, event):
+
+        if self.fragmentationGroup.isChecked():
+
+            print("Fragmentation ENABLED!")
+
+            self.const.fragmentation_on = True
+
+        else:
+
+            print("Fragmentation DISABLED!")
+
+            self.const.fragmentation_on = False
+
+
+    def newFragmentationFile(self):
+        """ Choose the location of a new fragmentation file. """
+
+        # Choose the location of the new file
+        fragmentation_file_path = QFileDialog.getSaveFileName(self, "Choose the fragmentation file", \
+            os.path.join(self.dir_path, "metsim_fragmentation.txt"), "Fragmentation file (*.txt)")[0]
+
+        # If it was cancelled, end function
+        if not fragmentation_file_path:
+            self.fragmentationGroup.setChecked(False)
+            return None
+
+        # Add a file extension if it was not given
+        if len(os.path.basename(fragmentation_file_path).split(".")) == 1:
+            fragmentation_file_path += ".txt"
+
+        print("New fragmentation file:", fragmentation_file_path)
+
+        self.fragmentation = FragmentationContainer(self, fragmentation_file_path)
+        self.fragmentation.newFragmentationFile()
+        
+
+    def loadFragmentationFile(self):
+        """ Load the fragmentation file for disk. """
+
+        fragmentation_file_path = QFileDialog.getOpenFileName(self, "Choose the fragmentation file", \
+            self.dir_path, "Fragmentation file (*.txt)")[0]
+
+
+        print("Loading fragmentation file:", fragmentation_file_path)
+
+
+        # Load the fragmentation data
+        self.fragmentation = FragmentationContainer(self, fragmentation_file_path)
+        self.fragmentation.loadFragmentationFile()
+
+        print("Loaded fragments:")
+        for frag_entry in self.fragmentation.fragmentation_entries:
+            print(frag_entry.toString())
+
+
+    def addFragmentation(self, frag_type):
+        """ Add a fragmentation line."""
+
+        self.fragmentation.addFragmentation(frag_type)
 
 
 
