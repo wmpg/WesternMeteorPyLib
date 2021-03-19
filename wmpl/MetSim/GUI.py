@@ -392,6 +392,14 @@ class FragmentationEntry(object):
             pass
 
 
+
+        # Output parameters
+        self.time = None
+        self.dyn_pressure = None
+        self.velocity = None
+        self.parent_mass = None
+
+
     def toString(self):
         """ Convert the entry to a string that can be written to a text file. """
 
@@ -447,6 +455,34 @@ class FragmentationEntry(object):
 
         # Add separator from inputs and outputs
         out_str += " # "
+
+
+        line_entries = []
+
+        if self.time is not None:
+            line_entries.append("{:9.6}".format(self.time))
+        else:
+            line_entries.append(9*" ")
+
+        if self.dyn_pressure is not None:
+            line_entries.append("{:9.3f}".format(self.dyn_pressure))
+        else:
+            line_entries.append(9*" ")
+
+        if self.velocity is not None:
+            line_entries.append("{:8.3f}".format(self.velocity))
+        else:
+            line_entries.append(8*" ")
+
+        if self.parent_mass is not None:
+            line_entries.append("{:11.3e}".format(self.parent_mass))
+        else:
+            line_entries.append(11*" ")
+
+        out_str += ", ".join(line_entries)
+
+        # Add final separator
+        out_str += " #"
 
 
         return out_str
@@ -549,11 +585,11 @@ class FragmentationContainer(object):
 #           - REQUIRED: Height, Mass (%), Grain MIN mass, Grain MAX mass.
 #           - Possible: Mass index.
 #
-#                             INPUTS (leave unchanged fields empty)                                      #        OUTPUTS  (do not fill in!)         #
-# ------------------------------------------------------------------------------------------------------ # ----------------------------------------- #
-# Type, Height (km), Number, Mass (%), Ablation coeff, Gamma, Erosion coeff, Grain MIN, Grain MAX, Mass  # Time (s), Dyn pres, Velocity, Parent mass #
-#     ,            ,       ,         , (s^2 km^-2)   ,      , (s^2 km^-2)  , mass (kg), mass (kg), index #         , (kPa)   , (km/s)  , (kg)        #
-#                                                                                                        #                                           #
+#                             INPUTS (leave unchanged fields empty)                                      #        OUTPUTS  (do not fill in!)           #
+# ------------------------------------------------------------------------------------------------------ # ------------------------------------------- #
+# Type, Height (km), Number, Mass (%), Ablation coeff, Gamma, Erosion coeff, Grain MIN, Grain MAX, Mass  #  Time (s),  Dyn pres, Velocity, Parent mass #
+#     ,            ,       ,         , (s^2 km^-2)   ,      , (s^2 km^-2)  , mass (kg), mass (kg), index #          ,  (kPa)   , (km/s)  , (kg)        #
+#-----,------------,-------,---------,---------------,------,--------------,----------,----------,-------#----------,----------,---------,-------------#
 """
 
         # Write the initial parameters
