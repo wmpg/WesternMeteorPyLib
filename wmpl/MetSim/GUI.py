@@ -337,67 +337,91 @@ class WakeContainter(object):
 
 class FragmentationEntry(object):
     def __init__(self, frag_type, height, number, mass_percent, sigma, gamma, erosion_coeff, grain_mass_min, \
-        grain_mass_max, mass_index):
-        """ A container for every fragmentation entry. """
+        grain_mass_max, mass_index, normalize_units=False):
+        """ A container for every fragmentation entry. 
+
+        normalize_units: [bool] Convert the units of sigma and erosion coeff from s^2 km^-2 to s^2 m^-2,
+            and convert the height to meters from km.
+        """
+
+        norm = 0.0
+        if normalize_units:
+            norm = 1.0
+
+
+        ### STATUS FLAGS ###
+
+        # Indicates that the fragmentation was not performed yet
+        self.done = False
+
+
+        ### ###
+
+        ### INPUT parameters ###
+
 
         self.frag_type = frag_type.strip()
 
-        self.height = 1000*float(height)
+        self.height = (1000**norm)*float(height)
 
         try:
             self.number = int(number)
         except:
-            self.number = None
+            if (self.frag_type == "F") or (self.frag_type == "EF"):
+                self.number = 1
+            else:
+                self.number = None
 
         try:
             self.mass_percent = float(mass_percent)
+
+            # Limit mass loss to 100%
+            if self.mass_percent > 100:
+                mass_percent = 100.0
+
         except:
             self.mass_percent = None
-            pass
 
         try:
-            self.sigma = float(sigma)/1e6
+            self.sigma = float(sigma)/(1e6**norm)
         except:
             self.sigma = None
-            pass
 
         try:
             self.gamma = float(gamma)
         except:
             self.gamma = None
-            pass
 
         try:
-            self.erosion_coeff = float(erosion_coeff)/1e6
+            self.erosion_coeff = float(erosion_coeff)/(1e6**norm)
         except:
             self.erosion_coeff = None
-            pass
 
         try:
             self.grain_mass_min = float(grain_mass_min)
         except:
             self.grain_mass_min = None
-            pass
 
         try:
             self.grain_mass_max = float(grain_mass_max)
         except:
             self.grain_mass_max = None
-            pass
 
         try:
             self.mass_index = float(mass_index)
         except:
             self.mass_index = None
-            pass
+
+        ### ###
 
 
-
-        # Output parameters
+        ### Output parameters ###
         self.time = None
         self.dyn_pressure = None
         self.velocity = None
         self.parent_mass = None
+
+        ### ###
 
 
     def toString(self):
@@ -460,17 +484,17 @@ class FragmentationEntry(object):
         line_entries = []
 
         if self.time is not None:
-            line_entries.append("{:9.6}".format(self.time))
+            line_entries.append("{:9.6f}".format(self.time))
         else:
             line_entries.append(9*" ")
 
         if self.dyn_pressure is not None:
-            line_entries.append("{:9.3f}".format(self.dyn_pressure))
+            line_entries.append("{:9.3f}".format(self.dyn_pressure/1000))
         else:
             line_entries.append(9*" ")
 
         if self.velocity is not None:
-            line_entries.append("{:8.3f}".format(self.velocity))
+            line_entries.append("{:8.3f}".format(self.velocity/1000))
         else:
             line_entries.append(8*" ")
 
@@ -510,6 +534,20 @@ class FragmentationContainer(object):
         self.fragmentation_entries = []
 
 
+    def sortByHeight(self):
+        """ Sort the fragmentation entries by height, from highest to lowest. """
+
+        self.fragmentation_entries = sorted(self.fragmentation_entries, key=lambda x: x.height, reverse=True)
+
+
+    def resetAll(self):
+        """ Reset the 'done' flag of all fragments to False, which means that the fragmentation should run.
+        """
+
+        for frag_entry in self.fragmentation_entries:
+            frag_entry.done = False
+
+
     def loadFromString(self, string):
         """ Load parameters from a string. """
 
@@ -539,7 +577,7 @@ class FragmentationContainer(object):
                 continue
 
             # Create a new fragmentation entry
-            frag_entry = FragmentationEntry(*entries)
+            frag_entry = FragmentationEntry(*entries, normalize_units=True)
 
             self.fragmentation_entries.append(frag_entry)
 
@@ -571,17 +609,17 @@ class FragmentationContainer(object):
 #   - *INIT - Initial parameters taken from the GUI. Ready only, cannot be set in this file.
 #   - M    - Main fragment - parameter change.
 #           - REQUIRED: Height.
-#           - Possible: Ablation coeff, Erosion coeff, Gamma, Erosion coeff, Grain masses, Mass index.
+#           - Possible: Ablation coeff, Erosion coeff, Grain masses, Mass index.
 #   - A    - All fragments - parameter change.
 #           - REQUIRED: Height.
 #           - Possible: Ablation coeff, Gamma.
 #   - F    - New single-body fragment.
 #           - REQUIRED: Height, Number, Mass (%).
-#           - Possible: Ablation coeff, Gamma.
+#           - Possible: Ablation coeff.
 #   - EF   - New eroding fragment. A mass index of 2.0 will be assumed if not given.
-#           - REQUIRED: Height, Number, Mass (%), Erosion coeff, Grain MIN mass, Grain MAX mass.
-#           - Possible: Ablation coeff, Gamma, Mass index.
-#   - D    - New dust. Onlt the grain mass range needs to be specified. A mass index of 2.0 will be assumed if not given.
+#           - REQUIRED: Height, Number, Mass (%), Erosion coeff, Grain masses.
+#           - Possible: Ablation coeff, Mass index.
+#   - D    - Dust release. Only the grain mass range needs to be specified. A mass index of 2.0 will be assumed if not given.
 #           - REQUIRED: Height, Mass (%), Grain MIN mass, Grain MAX mass.
 #           - Possible: Mass index.
 #
@@ -594,7 +632,7 @@ class FragmentationContainer(object):
 
         # Write the initial parameters
         initial_entry = FragmentationEntry(frag_type="# INIT",
-                                            height=self.gui.const.h_init/1000,
+                                            height=self.gui.const.h_init,
                                             number=1,
                                             mass_percent=100,
                                             sigma=self.gui.const.sigma,
@@ -645,12 +683,12 @@ class FragmentationContainer(object):
         # Change paramters of the main fragment
         if frag_type == "M":
             frag_entry = FragmentationEntry(frag_type=frag_type,
-                                            height=100.0,
+                                            height=100000.0000,
                                             number=None,
                                             mass_percent=None,
                                             sigma=self.gui.const.sigma,
-                                            gamma=self.gui.const.gamma,
-                                            erosion_coeff=1e6*self.gui.const.erosion_coeff,
+                                            gamma=None,
+                                            erosion_coeff=self.gui.const.erosion_coeff,
                                             grain_mass_min=None,
                                             grain_mass_max=None,
                                             mass_index=None
@@ -659,7 +697,7 @@ class FragmentationContainer(object):
         # Change paramters of all fragments
         elif frag_type == "A":
             frag_entry = FragmentationEntry(frag_type=frag_type,
-                                            height=100.0,
+                                            height=100000.0,
                                             number=None,
                                             mass_percent=None,
                                             sigma=self.gui.const.sigma,
@@ -673,7 +711,7 @@ class FragmentationContainer(object):
         # New single-body fragment
         elif frag_type == "F":
             frag_entry = FragmentationEntry(frag_type=frag_type,
-                                            height=100.0,
+                                            height=100000.0,
                                             number=1,
                                             mass_percent=10,
                                             sigma=self.gui.const.sigma,
@@ -686,12 +724,12 @@ class FragmentationContainer(object):
 
         elif frag_type == "EF":
             frag_entry = FragmentationEntry(frag_type=frag_type,
-                                            height=100.0,
+                                            height=100000.0,
                                             number=1,
                                             mass_percent=10,
                                             sigma=self.gui.const.sigma,
                                             gamma=None,
-                                            erosion_coeff=1e6*self.gui.const.erosion_coeff,
+                                            erosion_coeff=self.gui.const.erosion_coeff,
                                             grain_mass_min=self.gui.const.erosion_mass_min,
                                             grain_mass_max=self.gui.const.erosion_mass_max,
                                             mass_index=self.gui.const.erosion_mass_index
@@ -699,7 +737,7 @@ class FragmentationContainer(object):
 
         elif frag_type == "D":
             frag_entry = FragmentationEntry(frag_type=frag_type,
-                                            height=100.0,
+                                            height=100000.0,
                                             number=None,
                                             mass_percent=10,
                                             sigma=None,
@@ -1248,10 +1286,9 @@ class MetSimGUI(QMainWindow):
             if len(const_json['fragmentation_entries']) > 0:
                 for frag_entry_dict in const_json['fragmentation_entries']:
 
-                    # Correct units
-                    frag_entry_dict['height'] /= 1000
-                    if frag_entry_dict['erosion_coeff'] is not None:
-                        frag_entry_dict['erosion_coeff'] *= 1e6
+                    # Only take entries which are variable names for the FragmentationEntry class
+                    frag_entry_dict = {key:frag_entry_dict[key] for key in frag_entry_dict \
+                        if key in FragmentationEntry.__init__.__code__.co_varnames}
 
                     frag_entry = FragmentationEntry(**frag_entry_dict)
                     frag_entries.append(frag_entry)
@@ -3169,7 +3206,18 @@ class MetSimGUI(QMainWindow):
 
         # Load fragmentation entries if fragmentation is enabled
         if self.const.fragmentation_on:
+
+            # Load the file
             self.fragmentation.loadFragmentationFile()
+
+            # Sort entries by height
+            self.fragmentation.sortByHeight()
+
+            # Reset the status of all fragmentations
+            self.fragmentation.resetAll()
+
+            # Write the fragmentation file
+            self.fragmentation.writeFragmentationFile()
 
 
         # Store previous run results
@@ -3204,6 +3252,10 @@ class MetSimGUI(QMainWindow):
 
         # Store simulation results
         self.simulation_results = SimulationResults(self.const, results_list, wake_results)
+
+        # Write results in the fragmentation file
+        if self.const.fragmentation_on:
+            self.fragmentation.writeFragmentationFile()
 
         # Update the plots
         self.showCurrentResults()

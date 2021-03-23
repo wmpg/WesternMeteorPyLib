@@ -2125,7 +2125,7 @@ p, li { white-space: pre-wrap; }
       </rect>
      </property>
      <property name="text">
-      <string>Frag</string>
+      <string>SB frag</string>
      </property>
     </widget>
     <widget class="QPushButton" name="newErodingFragmentButton">

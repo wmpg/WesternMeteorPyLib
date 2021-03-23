@@ -217,6 +217,8 @@ class Fragment(object):
 
         self.id = 0
 
+        self.const = None
+
         # Shape-density coeff
         self.K = 0
 
@@ -248,6 +250,14 @@ class Fragment(object):
         # Erosion coefficient value
         self.erosion_coeff = 0
 
+        # Grain mass distribution index
+        self.erosion_mass_index = 2.5
+
+        # Mass range for grains (kg)
+        self.erosion_mass_min = 1.0e-11
+        self.erosion_mass_max = 5.0e-10
+
+
         self.erosion_enabled = False
 
         self.disruption_enabled = False
@@ -258,9 +268,14 @@ class Fragment(object):
         # Indicate that this is the main fragment
         self.main = False
 
+        # Indicate that this is born out of complex fragmentation
+        self.complex = False
 
-    def init(self, const, m, rho, v_init, sigma, zenith_angle):
 
+    def init(self, const, m, rho, v_init, sigma, gamma, zenith_angle, erosion_mass_index, erosion_mass_min, \
+        erosion_mass_max):
+
+        self.const = const
 
         self.m = m
         self.m_init = m
@@ -268,10 +283,15 @@ class Fragment(object):
         self.rho = rho
         self.v = v_init
         self.sigma = sigma
+        self.gamma = gamma
         self.zenith_angle = zenith_angle
 
         # Compute shape-density coeff
-        self.K = const.gamma*const.shape_factor*self.rho**(-2/3.0)
+        self.updateShapeDensityCoeff()
+
+        self.erosion_mass_index = erosion_mass_index
+        self.erosion_mass_min = erosion_mass_min
+        self.erosion_mass_max = erosion_mass_max
 
         # Compute velocity components
         self.vv = -v_init*math.cos(zenith_angle)
@@ -279,6 +299,11 @@ class Fragment(object):
 
         self.active = True
         self.n_grains = 1
+
+    def updateShapeDensityCoeff(self):
+        """ Update the value of the shape-density coefficient. """
+
+        self.K = self.gamma*self.const.shape_factor*self.rho**(-2/3.0)
 
 
 
@@ -334,7 +359,7 @@ def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mas
 
     Arguments:
         const: [object] Constants instance.
-        frag_parent: [object] Fragment instance, the tparent fragment.
+        frag_parent: [object] Fragment instance, the parent fragment.
         eroded_mass: [float] Mass to be distributed into daughter fragments. 
         mass_index: [float] Mass index to use to distribute the mass.
         mass_min: [float] Minimum mass bin (kg).
@@ -406,7 +431,7 @@ def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mas
             else:
                 # Compute the grain density and shape-density coeff
                 frag_child.rho = const.rho_grain
-                frag_child.K = const.gamma*const.shape_factor*frag_child.rho**(-2/3.0)
+                frag_child.updateShapeDensityCoeff()
 
                 frag_child.erosion_enabled = False
                 frag_child.erosion_coeff = 0
@@ -482,7 +507,7 @@ def ablateAll(fragments, const, compute_wake=False):
         rho_atm = atmDensityPoly(frag.h, const.dens_co)
 
 
-        # Compute the mass loss of the main fragment due to ablation
+        # Compute the mass loss of the fragment due to ablation
         mass_loss_ablation = massLossRK4(const.dt, frag.K, frag.sigma, frag.m, rho_atm, frag.v)
 
 
@@ -575,7 +600,7 @@ def ablateAll(fragments, const, compute_wake=False):
 
 
         # Compute aerodynamic loading on the grain
-        dyn_press = const.gamma*rho_atm*frag.v**2
+        dyn_press = frag.gamma*rho_atm*frag.v**2
 
         # if frag.id == 0:
         #     print('----- id:', frag.id)
@@ -601,8 +626,10 @@ def ablateAll(fragments, const, compute_wake=False):
 
 
 
-        # Check if the erosion should start, given the height, and create grains
-        if (frag.h < const.erosion_height_start) and frag.erosion_enabled and const.erosion_on:
+        # For non-complex fragmentation only: Check if the erosion should start, given the height, 
+        #   and create grains
+        if (not frag.complex) and (frag.h < const.erosion_height_start) and frag.erosion_enabled \
+            and const.erosion_on:
 
             # Turn on the erosion of the fragment
             frag.erosion_coeff = getErosionCoeff(const, frag.h)
@@ -613,17 +640,20 @@ def ablateAll(fragments, const, compute_wake=False):
 
                 # Update the density
                 frag.rho = const.erosion_rho_change
-                frag.K = const.gamma*const.shape_factor*frag.rho**(-2/3.0)
+                frag.updateShapeDensityCoeff()
 
                 # Update the ablation coeff
                 frag.sigma = const.erosion_sigma_change
 
 
-            # Generate new fragments if there is some mass to distribute
+        # Create grains for erosion-enabled fragments
+        if frag.erosion_enabled:
+
+            # Generate new grains if there is some mass to distribute
             if abs(mass_loss_erosion) > 0:
 
                 grain_children, const = generateFragments(const, frag, abs(mass_loss_erosion), \
-                    const.erosion_mass_index, const.erosion_mass_min, const.erosion_mass_max, \
+                    frag.erosion_mass_index, frag.erosion_mass_min, frag.erosion_mass_max, \
                     keep_eroding=False)
 
                 const.n_active += len(grain_children)
@@ -685,7 +715,7 @@ def ablateAll(fragments, const, compute_wake=False):
                 mass_grain_disruption = frag.m - fragments_total_mass
                 if mass_grain_disruption > 0:
                     grain_children, const = generateFragments(const, frag, mass_grain_disruption, 
-                        const.erosion_mass_index, const.erosion_mass_min, const.erosion_mass_max, \
+                        frag.erosion_mass_index, frag.erosion_mass_min, frag.erosion_mass_max, \
                         keep_eroding=False)
 
                     frag_children_all += grain_children
@@ -704,6 +734,144 @@ def ablateAll(fragments, const, compute_wake=False):
             const.n_active -= 1
             #print('Killing', frag.id)
             continue
+
+
+
+        # Handle complex fragmentation and status changes of the main fragment
+        if frag.main:
+
+            # Get a list of complex fragmentations that are still to do
+            frags_to_do = [frag_entry for frag_entry in const.fragmentation_entries if not frag_entry.done]
+
+            if len(frags_to_do):
+
+                # Go through all fragmentations that needs to be performed
+                for frag_entry in frags_to_do:
+
+                    # Check if the height of the main fragment is right to perform the operation
+                    if frag.h < frag_entry.height:
+
+
+                        # Change parameters of all fragments
+                        if frag_entry.frag_type == "A":
+
+                            for frag_tmp in (fragments + frag_children_all + [frag]):
+
+                                # Update the ablation coefficient
+                                if frag_entry.sigma is not None:
+                                    frag_tmp.sigma = frag_entry.sigma
+
+                                # Update the drag coefficient
+                                if frag_entry.gamma is not None:
+                                    frag_tmp.gamma = frag_entry.gamma
+                                    frag_tmp.updateShapeDensityCoeff()
+
+
+
+                        # Change the parameters of the main fragment
+                        if frag_entry.frag_type == "M":
+
+                            if frag_entry.sigma is not None:
+                                frag.sigma = frag_entry.sigma
+
+                            if frag_entry.erosion_coeff is not None:
+                                frag.erosion_coeff = frag_entry.erosion_coeff
+
+                            if frag_entry.mass_index is not None:
+                                frag.erosion_mass_index = frag_entry.mass_index
+
+                            if frag_entry.grain_mass_min is not None:
+                                frag.erosion_mass_min = frag_entry.grain_mass_min
+
+                            if frag_entry.grain_mass_max is not None:
+                                frag.erosion_mass_max = frag_entry.grain_mass_max
+
+
+                        # Create a new single-body or eroding fragment
+                        if (frag_entry.frag_type == "F") or (frag_entry.frag_type == "EF"):
+
+                            parent_initial_mass = frag.m
+
+                            # Go through all new fragments
+                            for frag_num in range(frag_entry.number):
+
+                                # Mass of the new fragment
+                                new_frag_mass = parent_initial_mass*(frag_entry.mass_percent/100.0)/frag_entry.number
+
+                                # Decrease the parent mass
+                                frag.m -= new_frag_mass
+
+                                # Create the new fragment
+                                frag_new = copy.deepcopy(frag)
+
+                                # Indicate that the fragments are born out of complex fragmentation
+                                frag_new.complex = True
+
+                                # Assing the mass to the new fragment
+                                frag_new.m = new_frag_mass
+
+                                # Assign possible new ablation coeff to this fragment
+                                if frag_entry.sigma is not None:
+                                    frag_new.sigma = frag_entry.sigma
+
+
+                                # If the fragment is eroding, set erosion parameters
+                                if frag_entry.frag_type == "EF":
+                                    frag_new.erosion_enabled = True
+
+                                    frag_new.erosion_coeff = frag_entry.erosion_coeff
+
+                                    frag_new.erosion_mass_index = frag_entry.mass_index
+                                    frag_new.erosion_mass_min = frag_entry.grain_mass_min
+                                    frag_new.erosion_mass_max = frag_entry.grain_mass_max
+
+                                    
+                                else:
+                                    # Disable erosion for single-body fragments
+                                    frag_new.erosion_enabled = False
+
+
+                                # Add the new fragment to the list of childern
+                                frag_children_all.append(frag_new)
+                                const.n_active += 1
+
+
+                        # Release dust
+                        if frag_entry.frag_type == "D":
+
+                            # Compute the mass of the dust
+                            dust_mass = frag.m*(frag_entry.mass_percent/100.0)
+
+                            # Subtract from the parent mass
+                            frag.m -= dust_mass
+
+                            # Create the new fragment
+                            frag_new = copy.deepcopy(frag)
+
+                            # Indicate that the fragments are born out of complex fragmentation
+                            frag_new.complex = True
+
+                            # Generate dust grains
+                            grain_children, const = generateFragments(const, frag_new, dust_mass, \
+                                frag_entry.mass_index, frag_entry.grain_mass_min, frag_entry.grain_mass_max, \
+                                keep_eroding=False)
+
+                            # Add fragments to the list
+                            frag_children_all += grain_children
+                            const.n_active += len(grain_children)
+
+
+                        # Set the fragmentation as finished
+                        frag_entry.done = True
+
+                        # Set physical conditions at the moment of fragmentation
+                        frag_entry.time = const.total_time
+                        frag_entry.dyn_pressure = dyn_press
+                        frag_entry.velocity = frag.v
+                        frag_entry.parent_mass = frag.m
+
+
+
 
 
 
@@ -774,7 +942,8 @@ def runSimulation(const, compute_wake=False):
 
     # Init the main fragment
     frag = Fragment()
-    frag.init(const, const.m_init, const.rho, const.v_init, const.sigma, const.zenith_angle)
+    frag.init(const, const.m_init, const.rho, const.v_init, const.sigma, const.gamma, const.zenith_angle, \
+        const.erosion_mass_index, const.erosion_mass_min, const.erosion_mass_max)
     frag.main = True
     
     # Erode the main fragment
