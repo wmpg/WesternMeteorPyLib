@@ -420,7 +420,7 @@ class FragmentationEntry(object):
         self.dyn_pressure = None
         self.velocity = None
         self.parent_mass = None
-
+        self.mass = None
         ### ###
 
 
@@ -499,9 +499,14 @@ class FragmentationEntry(object):
             line_entries.append(8*" ")
 
         if self.parent_mass is not None:
-            line_entries.append("{:11.3e}".format(self.parent_mass))
+            line_entries.append("{:11.2e}".format(self.parent_mass))
         else:
             line_entries.append(11*" ")
+
+        if self.mass is not None:
+            line_entries.append("{:9.2e}".format(self.mass))
+        else:
+            line_entries.append(9*" ")
 
         out_str += ", ".join(line_entries)
 
@@ -623,11 +628,11 @@ class FragmentationContainer(object):
 #           - REQUIRED: Height, Mass (%), Grain MIN mass, Grain MAX mass.
 #           - Possible: Mass index.
 #
-#                             INPUTS (leave unchanged fields empty)                                      #        OUTPUTS  (do not fill in!)           #
-# ------------------------------------------------------------------------------------------------------ # ------------------------------------------- #
-# Type, Height (km), Number, Mass (%), Ablation coeff, Gamma, Erosion coeff, Grain MIN, Grain MAX, Mass  #  Time (s),  Dyn pres, Velocity, Parent mass #
-#     ,            ,       ,         , (s^2 km^-2)   ,      , (s^2 km^-2)  , mass (kg), mass (kg), index #          ,  (kPa)   , (km/s)  , (kg)        #
-#-----,------------,-------,---------,---------------,------,--------------,----------,----------,-------#----------,----------,---------,-------------#
+#                             INPUTS (leave unchanged fields empty)                                      #        OUTPUTS  (do not fill in!)                      #
+# ------------------------------------------------------------------------------------------------------ # ------------------------------------------------------ #
+# Type, Height (km), Number, Mass (%), Ablation coeff, Gamma, Erosion coeff, Grain MIN, Grain MAX, Mass  #  Time (s),  Dyn pres, Velocity, Parent mass, Mass (kg) #
+#     ,            ,       ,         , (s^2 km^-2)   ,      , (s^2 km^-2)  , mass (kg), mass (kg), index #          ,  (kPa)   , (km/s)  , (kg)       ,           #
+#-----,------------,-------,---------,---------------,------,--------------,----------,----------,-------#----------,----------,---------,----------------------- #
 """
 
         # Write the initial parameters
@@ -1266,9 +1271,22 @@ class MetSimGUI(QMainWindow):
         # Init the constants
         self.const = Constants()
 
-        # Calculate atmosphere density coeffs
-        dens_co = self.fitAtmosphereDensity()
+        ### Calculate atmosphere density coeffs (down to the bottom observed height, limit to 15 km) ###
+
+        # Determine the height range for fitting the density
+        dens_fit_ht_beg = self.const.h_init
+        dens_fit_ht_end = self.traj.rend_ele - 5000
+        if dens_fit_ht_end < 15000:
+            dens_fit_ht_end = 15000
+
+        # Fit the polynomail describing the density
+        dens_co = self.fitAtmosphereDensity(dens_fit_ht_beg, dens_fit_ht_end)
         self.const.dens_co = dens_co
+
+        print("Atmospheric mass density fit for the range of heights: {:.2f} - {:.2f} km".format(\
+            dens_fit_ht_end/1000, dens_fit_ht_beg/1000))
+
+        ### ###
 
         # If a JSON file with constant was given, load them instead of initing from scratch
         if const_json_file is not None:
@@ -1452,14 +1470,20 @@ class MetSimGUI(QMainWindow):
 
 
 
-    def fitAtmosphereDensity(self):
-        """ Fit the atmosphere density coefficients for the given day and location. """
+    def fitAtmosphereDensity(self, dens_fit_ht_beg, dens_fit_ht_end):
+        """ Fit the atmosphere density coefficients for the given day and location. 
+        
+        Arguments:
+            dens_fit_ht_beg: [float] Begin height (top) for which the fit is valid (meters).
+            dens_fit_ht_end: [float] End height - bottom (meters).
+
+        """
 
         # Take mean meteor lat/lon as reference for the atmosphere model
         lat_mean = np.mean([self.traj.rbeg_lat, self.traj.rend_lat])
         lon_mean = meanAngle([self.traj.rbeg_lon, self.traj.rend_lon])
 
-        return fitAtmPoly(lat_mean, lon_mean, 60000, 180000, self.traj.jdt_ref)
+        return fitAtmPoly(lat_mean, lon_mean, dens_fit_ht_end, dens_fit_ht_beg, self.traj.jdt_ref)
 
 
     def loadWakeFile(self, file_path):
@@ -2503,28 +2527,33 @@ class MetSimGUI(QMainWindow):
                 & (sr.brightest_height_arr >= self.plot_end_ht)]
             brightest_ht_arr, brightest_len_arr = temp_arr.T
 
-            # Compute the simulated lag using the observed velocity
-            brightest_lag_sim = brightest_len_arr - brightest_len_arr[0] \
-                - self.traj.orbit.v_init*np.arange(0, self.const.dt*len(brightest_len_arr), \
-                                                   self.const.dt)[:len(brightest_len_arr)]
+            if len(brightest_len_arr):
 
-            ###
+                # Compute the simulated lag using the observed velocity
+                brightest_lag_sim = brightest_len_arr - brightest_len_arr[0] \
+                    - self.traj.orbit.v_init*np.arange(0, self.const.dt*len(brightest_len_arr), \
+                                                       self.const.dt)[:len(brightest_len_arr)]
+
+                ###
 
 
-            ### Compute parameters for the leading point on the trajectory ###
+                ### Compute parameters for the leading point on the trajectory ###
 
-            # Cut the part with same beginning heights as observations
-            temp_arr = np.c_[sr.leading_frag_height_arr, sr.leading_frag_length_arr]
-            temp_arr = temp_arr[(sr.leading_frag_height_arr <= self.traj.rbeg_ele) \
-                & (sr.leading_frag_height_arr >= self.plot_end_ht)]
-            leading_ht_arr, leading_frag_len_arr = temp_arr.T
+                # Cut the part with same beginning heights as observations
+                temp_arr = np.c_[sr.leading_frag_height_arr, sr.leading_frag_length_arr]
+                temp_arr = temp_arr[(sr.leading_frag_height_arr <= self.traj.rbeg_ele) \
+                    & (sr.leading_frag_height_arr >= self.plot_end_ht)]
+                leading_ht_arr, leading_frag_len_arr = temp_arr.T
 
-            # Compute the simulated lag using the observed velocity
-            leading_lag_sim = leading_frag_len_arr - leading_frag_len_arr[0] \
-                              - self.traj.orbit.v_init*np.arange(0, self.const.dt*len(leading_frag_len_arr), \
-                                                                 self.const.dt)[:len(leading_frag_len_arr)]
+                # Compute the simulated lag using the observed velocity
+                leading_lag_sim = leading_frag_len_arr - leading_frag_len_arr[0] \
+                                  - self.traj.orbit.v_init*np.arange(0, self.const.dt*len(leading_frag_len_arr), \
+                                                                     self.const.dt)[:len(leading_frag_len_arr)]
 
-            ###
+                ###
+
+            else:
+                sr = None
 
 
 

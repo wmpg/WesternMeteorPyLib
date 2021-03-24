@@ -797,6 +797,7 @@ def ablateAll(fragments, const, compute_wake=False):
 
                                 # Mass of the new fragment
                                 new_frag_mass = parent_initial_mass*(frag_entry.mass_percent/100.0)/frag_entry.number
+                                frag_entry.mass = new_frag_mass*frag_entry.number
 
                                 # Decrease the parent mass
                                 frag.m -= new_frag_mass
@@ -841,6 +842,7 @@ def ablateAll(fragments, const, compute_wake=False):
 
                             # Compute the mass of the dust
                             dust_mass = frag.m*(frag_entry.mass_percent/100.0)
+                            frag_entry.mass = dust_mass
 
                             # Subtract from the parent mass
                             frag.m -= dust_mass
