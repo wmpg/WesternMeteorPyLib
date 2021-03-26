@@ -289,7 +289,7 @@ cdef double massLoss(double K, double sigma, double m, double rho_atm, double v)
         sigma: [double] Ablation coefficient (s^2/m^2).
         m: [double] Mass (kg).
         rho_atm: [double] Atmosphere density (kg/m^3).
-        v: [double] Velocity (m/S).
+        v: [double] Velocity (m/s).
 
     Return:
         dm/dt: [double] Mass loss in kg/s.
