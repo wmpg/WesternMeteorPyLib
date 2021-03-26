@@ -1710,7 +1710,11 @@ class MetSimGUI(QMainWindow):
         self.inputGamma.setText("{:.1f}".format(const.gamma))
         self.inputZenithAngle.setText("{:.3f}".format(np.degrees(const.zenith_angle)))
         self.inputLumEff.setText("{:.2f}".format(const.lum_eff))
+        
         self.lumEffComboBox.setCurrentIndex(const.lum_eff_type)
+
+        # Enable/disable the constant tau box (index 0 = constant tau)
+        self.inputLumEff.setDisabled(self.const.lum_eff_type != 0)
 
         ### ###
 
