@@ -517,14 +517,14 @@ class PlaneIntersection(object):
         ### Calculate the unit vector pointing from the 1st station to the radiant line ###
         ######################################################################################################
 
-        w1 = np.cross(self.radiant_eci, self.obs1.plane_N)
+        self.w1 = np.cross(self.radiant_eci, self.obs1.plane_N)
 
         # Normalize the vector
-        w1 = vectNorm(w1)
+        self.w1 = vectNorm(self.w1)
 
         # Invert vector orientation if pointing towards the station, not the radiant line
-        if np.dot(w1, self.obs1.meas_eci[0]) < 0:
-            w1 = -w1
+        if np.dot(self.w1, self.obs1.meas_eci[0]) < 0:
+            self.w1 = -self.w1
         
         ######################################################################################################
 
@@ -532,14 +532,14 @@ class PlaneIntersection(object):
         ### Calculate the unit vector pointing from the 2nd station to the radiant line ###
         ######################################################################################################
 
-        w2 = np.cross(self.radiant_eci, self.obs2.plane_N)
+        self.w2 = np.cross(self.radiant_eci, self.obs2.plane_N)
 
         # Normalize the vector
-        w2 = vectNorm(w2)
+        self.w2 = vectNorm(self.w2)
 
         # Invert vector orientation if pointing towards the station, not the radiant line
-        if np.dot(w2, self.obs2.meas_eci[0]) < 0:
-            w2 = -w2
+        if np.dot(self.w2, self.obs2.meas_eci[0]) < 0:
+            self.w2 = -self.w2
         ######################################################################################################
 
 
@@ -550,23 +550,23 @@ class PlaneIntersection(object):
         stat_diff = self.obs1.stat_eci - self.obs2.stat_eci
 
         # Calculate the angle between the pointings to the radiant line
-        stat_cosangle = np.dot(w1, w2)
+        stat_cosangle = np.dot(self.w1, self.w2)
 
 
         # Calculate the range from the 1st station to the radiant line
-        stat_range1 = (stat_cosangle*np.dot(stat_diff, w2) - np.dot(stat_diff, w1))/(1.0 \
+        stat_range1 = (stat_cosangle*np.dot(stat_diff, self.w2) - np.dot(stat_diff, self.w1))/(1.0 \
             - stat_cosangle**2)
 
         # Calculate the CPA vector for the 1st station
-        self.rcpa_stat1 = stat_range1*w1
+        self.rcpa_stat1 = stat_range1*self.w1
 
 
         # Calculate the range from the 2nd station to the radiant line
-        stat_range2 = (np.dot(stat_diff, w2) - stat_cosangle*np.dot(stat_diff, w1))/(1.0 \
+        stat_range2 = (np.dot(stat_diff, self.w2) - stat_cosangle*np.dot(stat_diff, self.w1))/(1.0 \
             - stat_cosangle**2)
 
         # Calculate the CPA vector for the 2nd station
-        self.rcpa_stat2 = stat_range2*w2
+        self.rcpa_stat2 = stat_range2*self.w2
 
 
         # Calculate the position of the CPA with respect to the first camera, in ECI coordinates
@@ -5051,7 +5051,7 @@ class Trajectory(object):
                     mag_mask = np.array([abs_mag < 10 for abs_mag in used_magnitudes])
                     used_times = used_times[mag_mask]
                     used_magnitudes = used_magnitudes[mag_mask]
-                    
+
 
                     plt_handle = plt.plot(used_times, used_magnitudes, marker='x', \
                         label=str(obs.station_id), zorder=3)
