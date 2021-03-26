@@ -1393,6 +1393,9 @@ class MetSimGUI(QMainWindow):
         # Update the photometric mass when the luminous efficiency is changed
         self.inputLumEff.editingFinished.connect(self.updateInitialMass)
 
+        # Update boxes when the luminous efficiency type is changes
+        self.lumEffComboBox.currentIndexChanged.connect(self.updateLumEffType)
+
         self.wakePlotUpdateButton.clicked.connect(self.updateWakePlot)
         self.wakeIncrementPlotHeightButton.clicked.connect(self.incrementWakePlotHeight)
         self.wakeDecrementPlotHeightButton.clicked.connect(self.decrementWakePlotHeight)
@@ -1437,9 +1440,6 @@ class MetSimGUI(QMainWindow):
         self.newSingleBodyFragmentButton.clicked.connect(lambda x: self.addFragmentation("F"))
         self.newErodingFragmentButton.clicked.connect(lambda x: self.addFragmentation("EF"))
         self.newDustReleaseButton.clicked.connect(lambda x: self.addFragmentation("D"))
-
-        
-
 
         
         self.showPreviousButton.pressed.connect(self.showPreviousResults)
@@ -1588,6 +1588,7 @@ class MetSimGUI(QMainWindow):
     def calcPhotometricMass(self):
         """ Calculate photometric mass from given magnitude data. """
 
+        print()
 
         # If the magnitudes are given from the met file, use them instead of the trajectory file
         time_mag_arr = []
@@ -1659,6 +1660,7 @@ class MetSimGUI(QMainWindow):
             print("No photometry, assuming default mass:", self.const.m_init)
             return self.const.m_init
 
+        print("NOTE: The mass was computing using a constant luminous efficiency defined in the GUI!")
 
         # Sort array by time
         time_mag_arr = np.array(sorted(time_mag_arr, key=lambda x: x[0]))
@@ -1703,11 +1705,12 @@ class MetSimGUI(QMainWindow):
         self.inputRhoGrain.setText("{:d}".format(int(const.rho_grain)))
         self.inputMassInit.setText("{:.1e}".format(const.m_init))
         self.inputAblationCoeff.setText("{:.3f}".format(const.sigma*1e6))
-        self.inputLumEff.setText("{:.2f}".format(const.lum_eff))
         self.inputVelInit.setText("{:.3f}".format(const.v_init/1000))
         self.inputShapeFact.setText("{:.2f}".format(const.shape_factor))
         self.inputGamma.setText("{:.1f}".format(const.gamma))
         self.inputZenithAngle.setText("{:.3f}".format(np.degrees(const.zenith_angle)))
+        self.inputLumEff.setText("{:.2f}".format(const.lum_eff))
+        self.lumEffComboBox.setCurrentIndex(const.lum_eff_type)
 
         ### ###
 
@@ -1793,6 +1796,14 @@ class MetSimGUI(QMainWindow):
 
         self.updateInputBoxes()
 
+
+    def updateLumEffType(self):
+        """ Update the luminous efficiency type. """
+
+        self.const.lum_eff_type = self.lumEffComboBox.currentIndex()
+
+        # Enable/disable the constant tau box (index 0 = constant tau)
+        self.inputLumEff.setDisabled(self.const.lum_eff_type != 0)
 
 
     def updateGrainDiameters(self):
@@ -2030,7 +2041,6 @@ class MetSimGUI(QMainWindow):
         self.const.rho_grain = self._tryReadBox(self.inputRhoGrain, self.const.rho_grain)
         self.const.m_init = self._tryReadBox(self.inputMassInit, self.const.m_init)
         self.const.sigma = self._tryReadBox(self.inputAblationCoeff, self.const.sigma*1e6)/1e6
-        self.const.lum_eff = self._tryReadBox(self.inputLumEff, self.const.lum_eff)
         self.const.v_init = 1000*self._tryReadBox(self.inputVelInit, self.const.v_init/1000)
         self.const.shape_factor = self._tryReadBox(self.inputShapeFact, self.const.shape_factor)
         self.const.gamma = self._tryReadBox(self.inputGamma, self.const.gamma)
@@ -2040,6 +2050,10 @@ class MetSimGUI(QMainWindow):
         # If the bulk density is higher than the grain density, set the grain density to the bulk denisty
         if self.const.rho > self.const.rho_grain:
             self.const.rho_grain = self.const.rho
+
+
+        self.const.lum_eff = self._tryReadBox(self.inputLumEff, self.const.lum_eff)
+        self.const.lum_eff_type = self.lumEffComboBox.currentIndex()
 
         ### ###
 
