@@ -571,14 +571,13 @@ def ablateAll(fragments, const, compute_wake=False):
         frag.m = m_new
         frag.h = frag.h + frag.vv*const.dt
 
-        # Compute ablated luminosity (including the deceleration term) for one fragment/grain
-        lum = -luminousEfficiency(const.lum_eff_type, const.lum_eff, frag.v, frag.m) \
-            *((mass_loss_ablation/const.dt*frag.v**2)/2 - frag.m*frag.v*deceleration_total)
+        # # Compute ablated luminosity (including the deceleration term) for one fragment/grain
+        # lum = -luminousEfficiency(const.lum_eff_type, const.lum_eff, frag.v, frag.m) \
+        #     *((mass_loss_ablation/const.dt*frag.v**2)/2 - frag.m*frag.v*deceleration_total)
 
-        # If the luminosity is negative, compute it without the deceleration term
-        if lum < 0:
-            lum = -luminousEfficiency(const.lum_eff_type, const.lum_eff, frag.v, frag.m) \
-                *((mass_loss_ablation/const.dt*frag.v**2)/2)
+        # Compute luminosity without the deceleration term
+        lum = -luminousEfficiency(const.lum_eff_type, const.lum_eff, frag.v, frag.m) \
+            *((mass_loss_ablation/const.dt*frag.v**2)/2)
 
         # Compute the total luminosity
         frag.lum = lum*frag.n_grains
