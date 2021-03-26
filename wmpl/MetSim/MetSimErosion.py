@@ -572,6 +572,7 @@ def ablateAll(fragments, const, compute_wake=False):
         frag.h = frag.h + frag.vv*const.dt
 
         # # Compute ablated luminosity (including the deceleration term) for one fragment/grain
+        # # NOTE: Not numerically stable!
         # lum = -luminousEfficiency(const.lum_eff_type, const.lum_eff, frag.v, frag.m) \
         #     *((mass_loss_ablation/const.dt*frag.v**2)/2 - frag.m*frag.v*deceleration_total)
 
