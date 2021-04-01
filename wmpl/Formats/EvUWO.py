@@ -9,7 +9,7 @@ import shutil
 import numpy as np
 
 from wmpl.Formats.EventUWO import StationData
-from wmpl.Formats.GenericArgumentParser import addSolverOptions
+from wmpl.Formats.GenericFunctions import addSolverOptions
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.Trajectory.GuralTrajectory import GuralTrajectory
 from wmpl.Utils.OSTools import mkdirP

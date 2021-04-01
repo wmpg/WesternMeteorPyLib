@@ -25,6 +25,18 @@ def read(fname):
 
 
 
+# Remove all pyc files from the project
+for entry in sorted(os.walk("."), key=lambda x: x[0]):
+
+    dir_path, _, file_names = entry
+
+    for fn in file_names:
+        if fn.lower().endswith(".pyc"):
+            os.remove(os.path.join(dir_path, fn))
+
+
+
+
 packages = []
 
 dir_path = os.path.split(os.path.abspath(__file__))[0]

@@ -119,12 +119,12 @@ class Orbit(object):
         # Helioventric velocity of the meteor (m/s)
         self.v_h = None
 
-        # Corrected heliocentric velocity vector of the meteoroid using the method of Sato & Watanabe (2014)
+        # Components of the heliocentric velocity vector of the meteoroid
         self.v_h_x = None
         self.v_h_y = None
         self.v_h_z = None
 
-        # Corrected ecliptci coordinates of the meteor using the method of Sato & Watanabe (2014)
+        # Heliocentric ecliptic coordinates of the meteor
         self.L_h = None
         self.B_h = None
 
@@ -667,7 +667,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         v_h_mag = vectMag(v_h)
 
 
-        # Calculate the corrected heliocentric ecliptic coordinates of the meteoroid using the method of 
+        # Calculate the heliocentric ecliptic coordinates of the meteoroid using the method of 
         # Sato and Watanabe (2014).
         L_h, B_h, met_v_h = correctedEclipticCoord(L_g, B_g, v_g/1000, earth_vel)
 

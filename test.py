@@ -67,6 +67,65 @@ def calcSpatialResidual(jd, state_vect, radiant_eci, stat, meas):
 
 if __name__ == "__main__":
 
+
+    import sys
+
+    import matplotlib.pyplot as plt
+
+    import pyximport
+    pyximport.install(setup_args={'include_dirs':[np.get_include()]})
+    from wmpl.MetSim.MetSimErosionCyTools import luminousEfficiency
+
+
+
+    ### Plot different lum effs ###
+
+    # Range of velocities
+    vel_range = np.linspace(11000, 72000, 100)
+
+    # Range of masses
+    masses = [0.001, 0.01, 0.1, 1, 10, 100, 1000]
+
+
+    lum_eff_types = [1, 2, 3, 4]
+    lum_eff_labels = ["Revelle & Ceplecha (2001) - Type I", 
+                      "Revelle & Ceplecha (2001) - Type II",
+                      "Revelle & Ceplecha (2001) - Type III",
+                      "Borovicka et al. (2013) - Kosice"]
+
+    for i, lum_type in enumerate(lum_eff_types):
+
+        for mass in masses:
+
+            lum_list = []
+            for vel in vel_range:
+                lum = luminousEfficiency(lum_type, 0.0, vel, mass)
+
+                lum_list.append(lum)
+
+            plt.plot(vel_range/1000, 100*np.array(lum_list), label="{:s} kg".format(str(mass)), zorder=4)
+
+
+        plt.title(lum_eff_labels[i])
+
+        plt.xlabel("Velocity (km/s)")
+        plt.ylabel("Tau (%)")
+
+        plt.legend()
+
+        plt.grid(color='0.9')
+
+        plt.show()
+
+
+
+    sys.exit()
+
+    ### ###
+
+
+
+
     from mpl_toolkits.mplot3d import Axes3D
     import matplotlib.pyplot as plt
 

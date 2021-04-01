@@ -6,7 +6,7 @@ import sys
 
 import numpy as np
 
-from wmpl.Formats.GenericArgumentParser import addSolverOptions
+from wmpl.Formats.GenericFunctions import addSolverOptions
 from wmpl.Trajectory.GuralTrajectory import GuralTrajectory
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.Utils.TrajConversions import jd2Date

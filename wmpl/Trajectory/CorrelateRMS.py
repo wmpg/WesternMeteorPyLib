@@ -319,9 +319,19 @@ class MeteorPointRMS(object):
 
 
 class MeteorObsRMS(object):
-    def __init__(self, station_code, reference_dt, platepar, data, rel_proc_path):
+    def __init__(self, station_code, reference_dt, platepar, data, rel_proc_path, ff_name=None):
         """ Container for meteor observations with the interface compatible with the trajectory correlator
             interface. 
+
+            Arguments:
+                station_code: [str] RMS station code.
+                reference_dt: [datetime] Datetime when the relative time is t = 0.
+                platepar: [Platepar object] RMS calibration plate for the given observations.
+                data: [list] A list of MeteorPointRMS objects.
+                rel_proc_path: [str] Path to the folder with the nighly observations for this meteor.
+
+            Keyword arguments:
+                ff_name: [str] Name of the FF file(s) which contains the meteor.
         """
 
         self.station_code = station_code
@@ -332,6 +342,8 @@ class MeteorObsRMS(object):
 
         # Path to the directory with data
         self.rel_proc_path = rel_proc_path
+
+        self.ff_name = ff_name
 
         # Internal flags to control the processing flow
         # NOTE: The processed flag should always be set to False for every observation when the program starts
@@ -553,8 +565,17 @@ class RMSDataHandle(object):
                     continue
 
                 if name == "platepars_all_recalibrated.json":
-                    platepar_recalibrated_name = name
-                    continue
+
+                    try:
+                        # Try loading the recalibrated platepars
+                        with open(os.path.join(proc_path, name)) as f:
+                            platepars_recalibrated_dict = json.load(f)                            
+                            platepar_recalibrated_name = name
+                            continue
+
+                    except:
+                        pass
+    
 
             # Skip these observations if no data files were found inside
             if (ftpdetectinfo_name is None) or (platepar_recalibrated_name is None):
@@ -604,7 +625,7 @@ class RMSDataHandle(object):
 
                 # Init the new meteor observation object
                 met_obs = MeteorObsRMS(station_code, jd2Date(cams_met_obs.jdt_ref, dt_obj=True), pp, \
-                    meteor_data, rel_proc_path)
+                    meteor_data, rel_proc_path, ff_name=cams_met_obs.ff_name)
 
                 # Add only unpaired observations
                 if not self.db.checkObsIfPaired(met_obs):
@@ -659,6 +680,34 @@ class RMSDataHandle(object):
         return self.unpaired_observations
 
 
+    def countryFilter(self, met_obs1, met_obs2):
+        """ Only pair observations if they are in proximity to a given country. """
+
+
+        north_america_group = ["CA", "US", "MX"]
+
+        europe_group = ["AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", \
+            "IT", "LV", "LT", "LU", "MT", "NL", "PO", "PT", "RO", "SK", "SI", "ES", "SE", "AL", "AD", "AM", \
+            "BY", "BA", "FO", "GE", "GI", "IM", "XK", "LI", "MK", "MD", "MC", "ME", "NO", "RU", "SM", "RS", \
+            "CH", "TR", "UA", "UK", "VA"]
+
+
+        country_groups = [north_america_group, europe_group]
+
+
+        # Check that both stations are in the same country group
+        for group in country_groups:
+            if met_obs1.station_code[:2] in group:
+                if met_obs2.station_code[:2] in group:
+                    return True
+                else:
+                    return False
+
+
+        # If a given country is not in any of the groups, allow it to be paired
+        return True
+
+
     def findTimePairs(self, met_obs, unpaired_observations, max_toffset):
         """ Finds pairs in time between the given meteor observations and all other observations from 
             different stations. 
@@ -681,6 +730,10 @@ class RMSDataHandle(object):
 
             # Take only observations from different stations
             if met_obs.station_code == met_obs2.station_code:
+                continue
+
+            # Check that the stations are in the same region / group of countres
+            if not self.countryFilter(met_obs, met_obs2):
                 continue
 
             # Take observations which are within the given time window

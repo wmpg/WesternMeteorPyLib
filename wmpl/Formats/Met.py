@@ -8,7 +8,7 @@ import numpy as np
 import scipy.stats
 import matplotlib.pyplot as plt
 
-from wmpl.Formats.GenericArgumentParser import addSolverOptions
+from wmpl.Formats.GenericFunctions import addSolverOptions
 from wmpl.Formats.Plates import AffPlate, AstPlate, plateExactMap, plateScaleMap
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.Trajectory.GuralTrajectory import GuralTrajectory
@@ -226,7 +226,7 @@ def coordinatesImageToSky(mx, my, exact, scale, hx_centre, hy_centre):
 
 
 
-def extractPicks(met, mirfit=False):
+def extractPicks(met, mirfit=False, photom_dict=None):
     """ Extracts picks from the list and convert them to pick objects. """
 
     # Go though all sites
@@ -299,8 +299,11 @@ def extractPicks(met, mirfit=False):
                 # Log sum pixel
                 pick.lsp = lsp
 
-                # Magnitude
+                # Check if the photometric offset is given so the magnitude can be computed
                 pick.mag = None
+                if photom_dict is not None:
+                    if site in photom_dict:
+                        pick.mag = pick.lsp + photom_dict[site]
 
                 # Add the pick to the list of all picks
                 met.picks_objs[site].append(pick)
@@ -359,7 +362,7 @@ def extractPicks(met, mirfit=False):
 
 
 
-def loadMet(dir_path, file_name):
+def loadMet(dir_path, file_name, photom_dict=None):
     """ Loads a *.met file. 
     
     Arguments:
@@ -367,9 +370,8 @@ def loadMet(dir_path, file_name):
         file_name: [str] Name of the *.met file
 
     Keyword arguments:
-        mirfit: [bool] Flag which indicates if Mirfit .met file if being loaded (True). If False (by defualt),
-            METAL-style .met file will be loaded. Note: Specifying the wrong format for the .met file may 
-            produce an error.
+        photom_dict: [dict] Dictionary where keys are site codes and values are photometric offsets. Used for
+            computing narrow-field photometry.
 
     Return:
         met: [MetStruct object]
@@ -446,13 +448,13 @@ def loadMet(dir_path, file_name):
 
 
             # Exact plate prefix
-            exact_prefix = "exact ; site "+str(site)+" type 'AST'"
+            exact_prefix = "exact ; site " + str(site) + " type 'AST'"
 
             # Scale plate prefix
-            scale_prefix = "scale ; site "+str(site)+" type 'AFF'"
+            scale_prefix = "scale ; site " + str(site) + " type 'AFF'"
 
             # Video file prefix
-            vid_prefix = "video ; site "+str(site)
+            vid_prefix = "video ; site " + str(site)
             vid_prefix_nosite = "video ; site "
 
             # Mirror positions prefix
@@ -461,7 +463,7 @@ def loadMet(dir_path, file_name):
 
 
             # Star entry prefix
-            star_prefix = "mark ; site "+str(site)+" type starpick"
+            star_prefix = "mark ; site " + str(site) + " type starpick"
 
             # Prefixes for meteor picks and star picks (METAL and Mirfit have different styles of .met files)
             if mirfit:
@@ -469,7 +471,7 @@ def loadMet(dir_path, file_name):
                 # Mirfit-style .met file
 
                 # Line must start with this prefix to be taken as a meteor pick
-                pick_prefix = "mark ; site "+str(site)+" type meteor "
+                pick_prefix = "mark ; site " + str(site) + " type meteor "
 
             else:
 
@@ -582,13 +584,21 @@ def loadMet(dir_path, file_name):
                 if vid_prefix in line:
 
                     # Extract vid file data
-                    video_data = line.replace(vid_prefix, '').split()[1::2]
+                    video_data = line.split(';')[1].split()
+                    
+                    video_dict = {}
+                    for i in range(len(video_data)//2):
+                        key = video_data[2*i]
+                        value = video_data[2*i + 1]
+
+                        video_dict[key] = value
 
                     # Extract vid file name
-                    met.vids[site] = video_data[1].replace("'", "")
+                    met.vids[site] = video_dict["site"].replace("'", "")
 
                     # Extract site location
-                    met.sites_location[site] = list(map(float, video_data[12:15]))
+                    met.sites_location[site] = [float(video_dict["lat"]), float(video_dict["lon"]), \
+                        float(video_dict["elv"])]
 
                     # Allow reading mirror positions
                     mirror_pos_read = True
@@ -619,7 +629,7 @@ def loadMet(dir_path, file_name):
 
 
     # Extract picks into pick objects
-    met = extractPicks(met, mirfit=mirfit)
+    met = extractPicks(met, mirfit=mirfit, photom_dict=photom_dict)
 
     return met
 
@@ -767,6 +777,10 @@ if __name__ == "__main__":
     arg_parser.add_argument('met_path', nargs=1, metavar='MET_PATH', type=str, \
         help='Full path to the .met file.')
 
+    # Add option to compute CAMO narrowfield photometry
+    arg_parser.add_argument('-n', '--photom', metavar='PHOTOM_OFFSERS', \
+        help="Photometric offsets used to compute narrowfield photometry from LSP values in the met file. Format should be e.g. 1=16.8,2=15.9, where the 1 is Tavis and 16.8 is the photometric zero point.", type=str)
+
     # Add other solver options
     arg_parser = addSolverOptions(arg_parser)
 
@@ -800,11 +814,19 @@ if __name__ == "__main__":
     if cml_args.vinitht:
         vinitht = cml_args.vinitht[0]
 
+    # Parse photometric offsets
+    photom_dict = {}
+    if cml_args.photom:
+        for entry in cml_args.photom.split(","):
+            site, photom_offset = entry.split('=')
+            photom_dict[site] = float(photom_offset)
+
+
     ### ###
 
 
     # Load the met file
-    met = loadMet(*os.path.split(met_path))
+    met = loadMet(*os.path.split(met_path), photom_dict=photom_dict)
 
 
     # Run trajectory solver on the loaded .met file
@@ -813,7 +835,7 @@ if __name__ == "__main__":
             geometric_uncert=cml_args.uncertgeom, gravity_correction=(not cml_args.disablegravity), 
             plot_all_spatial_residuals=cml_args.plotallspatial, plot_file_type=cml_args.imgformat, \
             show_plots=(not cml_args.hideplots), v_init_part=velpart, v_init_ht=vinitht, \
-            show_jacchia=cml_args.jacchia)
+            show_jacchia=cml_args.jacchia, estimate_timing_vel=(not cml_args.notimefit))
 
 
     # print(met.scale_plates.items())

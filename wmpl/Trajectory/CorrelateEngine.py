@@ -4,6 +4,7 @@ from __future__ import print_function, division, absolute_import
 
 import copy
 import datetime
+import json
 import multiprocessing
 
 import numpy as np
@@ -378,10 +379,20 @@ class TrajectoryCorrelator(object):
                     ignore_list[ind] = 1
 
 
+        # Set the FF file name as the comment
+        comment_dict = {}
+        if met.ff_name is not None:
+            comment_dict['ff_name'] = met.ff_name
+
+
+        # Convert the comment dictionary to a JSON string
+        comment = json.dumps(comment_dict, sort_keys=True).replace('\n', '').replace('\r', '')
+
+
         # Init the observation object
         obs = ObservedPoints(datetime2JD(ref_dt), ra_data, dec_data, time_data, np.radians(pp.lat), \
             np.radians(pp.lon), pp.elev, meastype=1, station_id=pp.station_code, magnitudes=mag_data, \
-            ignore_list=ignore_list, fov_beg=met.fov_beg, fov_end=met.fov_end)
+            ignore_list=ignore_list, fov_beg=met.fov_beg, fov_end=met.fov_end, comment=comment)
 
         return obs
 

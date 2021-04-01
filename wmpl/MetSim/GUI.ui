@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1908</width>
-    <height>1001</height>
+    <width>1909</width>
+    <height>1058</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -18,7 +18,7 @@
     <property name="geometry">
      <rect>
       <x>1510</x>
-      <y>910</y>
+      <y>970</y>
       <width>171</width>
       <height>41</height>
      </rect>
@@ -318,7 +318,7 @@
     <property name="geometry">
      <rect>
       <x>1510</x>
-      <y>460</y>
+      <y>520</y>
       <width>391</width>
       <height>121</height>
      </rect>
@@ -365,7 +365,7 @@
       </rect>
      </property>
      <property name="text">
-      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;σ&lt;span style=&quot; vertical-align:sub;&quot;&gt;compress&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;P&lt;span style=&quot; vertical-align:sub;&quot;&gt;compress&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
      </property>
      <property name="alignment">
       <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
@@ -573,7 +573,7 @@
       </rect>
      </property>
      <property name="text">
-      <string>Different</string>
+      <string>Change</string>
      </property>
     </widget>
    </widget>
@@ -583,7 +583,7 @@
       <x>1510</x>
       <y>300</y>
       <width>391</width>
-      <height>161</height>
+      <height>221</height>
      </rect>
     </property>
     <property name="title">
@@ -934,6 +934,110 @@
      </property>
      <property name="text">
       <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;μm&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+     </property>
+    </widget>
+    <widget class="QCheckBox" name="checkBoxErosionRhoChange">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>160</y>
+       <width>85</width>
+       <height>21</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Change</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_69">
+     <property name="geometry">
+      <rect>
+       <x>30</x>
+       <y>160</y>
+       <width>61</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;ρ&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="inputErosionRhoChange">
+     <property name="geometry">
+      <rect>
+       <x>100</x>
+       <y>160</y>
+       <width>71</width>
+       <height>23</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_68">
+     <property name="geometry">
+      <rect>
+       <x>180</x>
+       <y>160</y>
+       <width>51</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;kg/m&lt;span style=&quot; vertical-align:super;&quot;&gt;3&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+     </property>
+    </widget>
+    <widget class="QCheckBox" name="checkBoxErosionAblationCoeffChange">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>190</y>
+       <width>85</width>
+       <height>21</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Change</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_71">
+     <property name="geometry">
+      <rect>
+       <x>30</x>
+       <y>190</y>
+       <width>57</width>
+       <height>15</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&lt;p&gt;&amp;sigma;&lt;/p&gt;</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="inputErosionAblationCoeffChange">
+     <property name="geometry">
+      <rect>
+       <x>100</x>
+       <y>190</y>
+       <width>71</width>
+       <height>23</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_70">
+     <property name="geometry">
+      <rect>
+       <x>180</x>
+       <y>190</y>
+       <width>71</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;s&lt;span style=&quot; vertical-align:super;&quot;&gt;2&lt;/span&gt;/km&lt;span style=&quot; vertical-align:super;&quot;&gt;2&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
      </property>
     </widget>
    </widget>
@@ -1313,6 +1417,41 @@
       </rect>
      </property>
     </widget>
+    <widget class="QComboBox" name="lumEffComboBox">
+     <property name="geometry">
+      <rect>
+       <x>190</x>
+       <y>150</y>
+       <width>171</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <item>
+      <property name="text">
+       <string>Constant</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>R&amp;C (2001) - Type I</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>R&amp;C (2001) - Type II</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>R&amp;C (2001) - Type III</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>Borovicka et al. (2013)</string>
+      </property>
+     </item>
+    </widget>
    </widget>
    <widget class="MagnitudeMplWidget" name="magnitudePlot" native="true">
     <property name="geometry">
@@ -1338,7 +1477,7 @@
     <property name="geometry">
      <rect>
       <x>1510</x>
-      <y>580</y>
+      <y>640</y>
       <width>391</width>
       <height>161</height>
      </rect>
@@ -1640,7 +1779,7 @@
     <property name="geometry">
      <rect>
       <x>1510</x>
-      <y>870</y>
+      <y>930</y>
       <width>171</width>
       <height>31</height>
      </rect>
@@ -1653,7 +1792,7 @@
     <property name="geometry">
      <rect>
       <x>1720</x>
-      <y>900</y>
+      <y>960</y>
       <width>171</width>
       <height>21</height>
      </rect>
@@ -1666,7 +1805,7 @@
     <property name="geometry">
      <rect>
       <x>1720</x>
-      <y>930</y>
+      <y>990</y>
       <width>171</width>
       <height>21</height>
      </rect>
@@ -1689,7 +1828,7 @@
     <property name="geometry">
      <rect>
       <x>1510</x>
-      <y>740</y>
+      <y>800</y>
       <width>391</width>
       <height>121</height>
      </rect>
@@ -1887,7 +2026,7 @@ p, li { white-space: pre-wrap; }
     <property name="geometry">
      <rect>
       <x>1720</x>
-      <y>870</y>
+      <y>930</y>
       <width>171</width>
       <height>21</height>
      </rect>
@@ -1896,14 +2035,182 @@ p, li { white-space: pre-wrap; }
      <string>Auto fit refinement</string>
     </property>
    </widget>
+   <widget class="QGroupBox" name="fragmentationGroup">
+    <property name="geometry">
+     <rect>
+      <x>20</x>
+      <y>930</y>
+      <width>911</width>
+      <height>71</height>
+     </rect>
+    </property>
+    <property name="title">
+     <string comment="0">Fragmentation</string>
+    </property>
+    <property name="alignment">
+     <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
+    </property>
+    <property name="flat">
+     <bool>false</bool>
+    </property>
+    <property name="checkable">
+     <bool>true</bool>
+    </property>
+    <property name="checked">
+     <bool>false</bool>
+    </property>
+    <widget class="QPushButton" name="loadFragmentationFileButton">
+     <property name="geometry">
+      <rect>
+       <x>500</x>
+       <y>30</y>
+       <width>80</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Load file</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_72">
+     <property name="geometry">
+      <rect>
+       <x>590</x>
+       <y>30</y>
+       <width>301</width>
+       <height>20</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>fragmentation file path</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="newFragmentationFileButton">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>30</y>
+       <width>80</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>New file</string>
+     </property>
+    </widget>
+    <widget class="Line" name="line_2">
+     <property name="geometry">
+      <rect>
+       <x>100</x>
+       <y>30</y>
+       <width>16</width>
+       <height>31</height>
+      </rect>
+     </property>
+     <property name="orientation">
+      <enum>Qt::Vertical</enum>
+     </property>
+    </widget>
+    <widget class="Line" name="line_3">
+     <property name="geometry">
+      <rect>
+       <x>480</x>
+       <y>30</y>
+       <width>16</width>
+       <height>31</height>
+      </rect>
+     </property>
+     <property name="orientation">
+      <enum>Qt::Vertical</enum>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="mainFragmentStatusChangeButton">
+     <property name="geometry">
+      <rect>
+       <x>190</x>
+       <y>30</y>
+       <width>51</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Main</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="allFragmentsStatusChangeButton">
+     <property name="geometry">
+      <rect>
+       <x>250</x>
+       <y>30</y>
+       <width>51</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>All</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="newSingleBodyFragmentButton">
+     <property name="geometry">
+      <rect>
+       <x>310</x>
+       <y>30</y>
+       <width>51</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>SB frag</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="newErodingFragmentButton">
+     <property name="geometry">
+      <rect>
+       <x>370</x>
+       <y>30</y>
+       <width>51</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Er frag</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="newDustReleaseButton">
+     <property name="geometry">
+      <rect>
+       <x>430</x>
+       <y>30</y>
+       <width>51</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Dust</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_73">
+     <property name="geometry">
+      <rect>
+       <x>118</x>
+       <y>30</y>
+       <width>81</width>
+       <height>20</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>New entry:</string>
+     </property>
+    </widget>
+   </widget>
   </widget>
   <widget class="QMenuBar" name="menubar">
    <property name="geometry">
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>1908</width>
-     <height>21</height>
+     <width>1909</width>
+     <height>20</height>
     </rect>
    </property>
   </widget>

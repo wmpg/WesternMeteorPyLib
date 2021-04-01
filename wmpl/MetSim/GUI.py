@@ -16,7 +16,7 @@ import scipy.interpolate
 import scipy.optimize
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import (NavigationToolbar2QT as NavigationToolbar)
-from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
+from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox, QFileDialog
 from PyQt5.uic import loadUi
 
 from wmpl.Formats.Met import loadMet
@@ -207,6 +207,73 @@ class MetObservations(object):
                 
 
 
+class LightCurveContainer(object):
+    def __init__(self, dir_path, file_name):
+        """ Loads the light curve data form an CSV file. 
+        Arguments:
+            dir_path: [str] Path to the directory with the LC file.
+            file_name: [str] Name of the LC CSV file.
+        """
+
+        self.sites = []
+
+        self.time_data = {}
+        self.height_data = {}
+        self.abs_mag_data = {}
+
+        with open(os.path.join(dir_path, file_name)) as f:
+            
+            time_data = []
+            height_data = []
+            abs_mag_data = []
+            current_station = None
+
+            station_label = "# Station:"
+
+            for line in f:
+
+                line = line.replace('\n', '').replace('\r', '')
+
+                if not len(line):
+                    continue
+
+                # Start a new station
+                if line.startswith(station_label):
+
+                    # Add the previous data to the dictionary
+                    if current_station is not None:
+                        self.sites.append(current_station)
+                        self.time_data[current_station] = np.array(time_data)
+                        self.height_data[current_station] = np.array(height_data)
+                        self.abs_mag_data[current_station] = np.array(abs_mag_data)
+
+                    time_data = []
+                    height_data = []
+                    abs_mag_data = []
+                    current_station = line.strip(station_label).strip()
+
+                    continue
+
+
+                # Skip comments
+                if line.startswith('#'):
+                    continue
+
+                # Read the data line (convert height to meters)
+                t, ht, mag = line.split(',')
+                time_data.append(float(t))
+                height_data.append(1000*float(ht))
+                abs_mag_data.append(float(mag))
+
+
+            # Add the final station to the list
+            if current_station is not None:
+                self.sites.append(current_station)
+                self.time_data[current_station] = np.array(time_data)
+                self.height_data[current_station] = np.array(height_data)
+                self.abs_mag_data[current_station] = np.array(abs_mag_data)
+
+
 
 class WakePoint(object):
     def __init__(self, n, th, phi, intens_sum, amp, r, b, c, state_vect_dist, ht):
@@ -264,6 +331,442 @@ class WakeContainter(object):
 
     def addPoint(self, n, th, phi, intens_sum, amp, r, b, c, state_vect_dist, ht):
         self.points.append(WakePoint(n, th, phi, intens_sum, amp, r, b, c, state_vect_dist, ht))
+
+
+
+
+class FragmentationEntry(object):
+    def __init__(self, frag_type, height, number, mass_percent, sigma, gamma, erosion_coeff, grain_mass_min, \
+        grain_mass_max, mass_index, normalize_units=False):
+        """ A container for every fragmentation entry. 
+
+        normalize_units: [bool] Convert the units of sigma and erosion coeff from s^2 km^-2 to s^2 m^-2,
+            and convert the height to meters from km.
+        """
+
+        norm = 0.0
+        if normalize_units:
+            norm = 1.0
+
+
+        ### STATUS FLAGS ###
+
+        # Indicates that the fragmentation was not performed yet
+        self.done = False
+
+
+        ### ###
+
+        ### INPUT parameters ###
+
+
+        self.frag_type = frag_type.strip()
+
+        self.height = (1000**norm)*float(height)
+
+        try:
+            self.number = int(number)
+        except:
+            if (self.frag_type == "F") or (self.frag_type == "EF"):
+                self.number = 1
+            else:
+                self.number = None
+
+        try:
+            self.mass_percent = float(mass_percent)
+
+            # Limit mass loss to 100%
+            if self.mass_percent > 100:
+                mass_percent = 100.0
+
+        except:
+            self.mass_percent = None
+
+        try:
+            self.sigma = float(sigma)/(1e6**norm)
+        except:
+            self.sigma = None
+
+        try:
+            self.gamma = float(gamma)
+        except:
+            self.gamma = None
+
+        try:
+            self.erosion_coeff = float(erosion_coeff)/(1e6**norm)
+        except:
+            self.erosion_coeff = None
+
+        try:
+            self.grain_mass_min = float(grain_mass_min)
+        except:
+            self.grain_mass_min = None
+
+        try:
+            self.grain_mass_max = float(grain_mass_max)
+        except:
+            self.grain_mass_max = None
+
+        try:
+            self.mass_index = float(mass_index)
+        except:
+            self.mass_index = None
+
+        ### ###
+
+
+        ### Output parameters ###
+        self.time = None
+        self.dyn_pressure = None
+        self.velocity = None
+        self.parent_mass = None
+        self.mass = None
+        ### ###
+
+
+    def toString(self):
+        """ Convert the entry to a string that can be written to a text file. """
+
+        line_entries = []
+
+        line_entries.append("{:>6s}".format(self.frag_type))
+
+        line_entries.append("{:11.3f}".format(self.height/1000))
+
+        if self.number is not None:
+            line_entries.append("{:6d}".format(self.number))
+        else:
+            line_entries.append(6*" ")
+
+        if self.mass_percent is not None:
+            line_entries.append("{:8.3f}".format(self.mass_percent))
+        else:
+            line_entries.append(8*" ")
+
+        if self.sigma is not None:
+            line_entries.append("{:14.4f}".format(1e6*self.sigma))
+        else:
+            line_entries.append(14*" ")
+
+        if self.gamma is not None:
+            line_entries.append("{:5.2f}".format(self.gamma))
+        else:
+            line_entries.append(5*" ")
+
+        if self.erosion_coeff is not None:
+            line_entries.append("{:13.4f}".format(1e6*self.erosion_coeff))
+        else:
+            line_entries.append(13*" ")
+
+        if self.grain_mass_min is not None:
+            line_entries.append("{:9.2e}".format(self.grain_mass_min))
+        else:
+            line_entries.append(9*" ")
+
+        if self.grain_mass_max is not None:
+            line_entries.append("{:9.2e}".format(self.grain_mass_max))
+        else:
+            line_entries.append(9*" ")
+
+        if self.mass_index is not None:
+            line_entries.append("{:5.2f}".format(self.mass_index))
+        else:
+            line_entries.append(5*" ")
+
+
+        # Join the entries to one string
+        out_str = ", ".join(line_entries)
+
+        # Add separator from inputs and outputs
+        out_str += " # "
+
+
+        line_entries = []
+
+        if self.time is not None:
+            line_entries.append("{:9.6f}".format(self.time))
+        else:
+            line_entries.append(9*" ")
+
+        if self.dyn_pressure is not None:
+            line_entries.append("{:9.3f}".format(self.dyn_pressure/1000))
+        else:
+            line_entries.append(9*" ")
+
+        if self.velocity is not None:
+            line_entries.append("{:8.3f}".format(self.velocity/1000))
+        else:
+            line_entries.append(8*" ")
+
+        if self.parent_mass is not None:
+            line_entries.append("{:11.2e}".format(self.parent_mass))
+        else:
+            line_entries.append(11*" ")
+
+        if self.mass is not None:
+            line_entries.append("{:9.2e}".format(self.mass))
+        else:
+            line_entries.append(9*" ")
+
+        out_str += ", ".join(line_entries)
+
+        # Add final separator
+        out_str += " #"
+
+
+        return out_str
+
+
+
+            
+
+
+
+class FragmentationContainer(object):
+    def __init__(self, gui, fragmentation_file_path):
+        """ Class which handles fragmentation file I/O. 
+    
+        Arguments:
+            gui: [MetSimGUI object] A handle to the parent GUI object.
+            fragmentation_file_path: [str] Path to the main fragmentation file.
+
+        """
+
+        self.gui = gui
+
+        self.fragmentation_file_path = fragmentation_file_path
+
+        self.fragmentation_entries = []
+
+
+    def sortByHeight(self):
+        """ Sort the fragmentation entries by height, from highest to lowest. """
+
+        self.fragmentation_entries = sorted(self.fragmentation_entries, key=lambda x: x.height, reverse=True)
+
+
+    def resetAll(self):
+        """ Reset the 'done' flag of all fragments to False, which means that the fragmentation should run.
+        """
+
+        for frag_entry in self.fragmentation_entries:
+            frag_entry.done = False
+
+
+    def loadFromString(self, string):
+        """ Load parameters from a string. """
+
+        # Reset fragmentation entries and reload
+        self.fragmentation_entries = []
+
+        for line in string.split('\n'):
+
+            # Skip comment lines
+            if line.startswith("#"):
+                continue
+
+            line = line.replace('\n', '').replace('\r', '')
+
+            if not len(line):
+                continue
+
+            # Strip the output part
+            line = line.split("#")[0]
+
+            entries = line.split(',')
+
+            # There need to be exactly 10 entries for every fragmentation
+            if len(entries) != 10:
+                print("ERROR! Cannot read fragmentation line:")
+                print(line)
+                continue
+
+            # Create a new fragmentation entry
+            frag_entry = FragmentationEntry(*entries, normalize_units=True)
+
+            self.fragmentation_entries.append(frag_entry)
+
+
+        # Set the fragmentation entries to constants
+        self.gui.const.fragmentation_entries = self.fragmentation_entries
+
+
+    def loadFragmentationFile(self):
+        """ Load fragmentation paramters from the fragmentation file. """
+
+        string = ""
+        with open(self.fragmentation_file_path) as f:
+            for line in f:
+                string += line
+
+
+        self.loadFromString(string)
+
+
+    def toString(self):
+        """ Convert the container to a string. """
+
+        # Write the header
+        out_str  = ""
+        out_str += """# MetSim fragmentation file.
+#
+# Types of entries:
+#   - *INIT - Initial parameters taken from the GUI. Ready only, cannot be set in this file.
+#   - M    - Main fragment - parameter change.
+#           - REQUIRED: Height.
+#           - Possible: Ablation coeff, Erosion coeff, Grain masses, Mass index.
+#   - A    - All fragments - parameter change.
+#           - REQUIRED: Height.
+#           - Possible: Ablation coeff, Gamma.
+#   - F    - New single-body fragment.
+#           - REQUIRED: Height, Number, Mass (%).
+#           - Possible: Ablation coeff.
+#   - EF   - New eroding fragment. A mass index of 2.0 will be assumed if not given.
+#           - REQUIRED: Height, Number, Mass (%), Erosion coeff, Grain masses.
+#           - Possible: Ablation coeff, Mass index.
+#   - D    - Dust release. Only the grain mass range needs to be specified. A mass index of 2.0 will be assumed if not given.
+#           - REQUIRED: Height, Mass (%), Grain MIN mass, Grain MAX mass.
+#           - Possible: Mass index.
+#
+#                             INPUTS (leave unchanged fields empty)                                      #        OUTPUTS  (do not fill in!)                      #
+# ------------------------------------------------------------------------------------------------------ # ------------------------------------------------------ #
+# Type, Height (km), Number, Mass (%), Ablation coeff, Gamma, Erosion coeff, Grain MIN, Grain MAX, Mass  #  Time (s),  Dyn pres, Velocity, Parent mass, Mass (kg) #
+#     ,            ,       ,         , (s^2 km^-2)   ,      , (s^2 km^-2)  , mass (kg), mass (kg), index #          ,  (kPa)   , (km/s)  , (kg)       ,           #
+#-----,------------,-------,---------,---------------,------,--------------,----------,----------,-------#----------,----------,---------,----------------------- #
+"""
+
+        # Write the initial parameters
+        initial_entry = FragmentationEntry(frag_type="# INIT",
+                                            height=self.gui.const.h_init,
+                                            number=1,
+                                            mass_percent=100,
+                                            sigma=self.gui.const.sigma,
+                                            gamma=self.gui.const.gamma,
+                                            erosion_coeff=0.0,
+                                            grain_mass_min=None,
+                                            grain_mass_max=None,
+                                            mass_index=None
+                                            )
+
+
+        # Write fragmentation entries
+        for frag_entry in [initial_entry] + self.fragmentation_entries:
+            out_str += frag_entry.toString() + "\n"
+
+
+        return out_str
+
+
+
+    def writeFragmentationFile(self):
+
+        with open(self.fragmentation_file_path, 'w') as f:
+            f.write(self.toString())
+
+        print("Fragmentation file saved:", self.fragmentation_file_path)
+
+
+    def newFragmentationFile(self):
+        """ Open a new fragmentation file. """
+
+        # Reset fragmentation entries
+        self.fragmentation_entries = []
+
+        # Write an empty fragmentation file to disk
+        self.writeFragmentationFile()
+
+        self.gui.const.fragmentation_file_name = os.path.basename(self.fragmentation_file_path)
+
+
+    def addFragmentation(self, frag_type):
+        """ Add a new fragmentation entry. """
+
+        # Load the fragmentation file
+        self.loadFragmentationFile()
+
+
+        # Change paramters of the main fragment
+        if frag_type == "M":
+            frag_entry = FragmentationEntry(frag_type=frag_type,
+                                            height=100000.0000,
+                                            number=None,
+                                            mass_percent=None,
+                                            sigma=self.gui.const.sigma,
+                                            gamma=None,
+                                            erosion_coeff=self.gui.const.erosion_coeff,
+                                            grain_mass_min=None,
+                                            grain_mass_max=None,
+                                            mass_index=None
+                                            )
+
+        # Change paramters of all fragments
+        elif frag_type == "A":
+            frag_entry = FragmentationEntry(frag_type=frag_type,
+                                            height=100000.0,
+                                            number=None,
+                                            mass_percent=None,
+                                            sigma=self.gui.const.sigma,
+                                            gamma=self.gui.const.gamma,
+                                            erosion_coeff=None,
+                                            grain_mass_min=None,
+                                            grain_mass_max=None,
+                                            mass_index=None
+                                            )
+
+        # New single-body fragment
+        elif frag_type == "F":
+            frag_entry = FragmentationEntry(frag_type=frag_type,
+                                            height=100000.0,
+                                            number=1,
+                                            mass_percent=10,
+                                            sigma=self.gui.const.sigma,
+                                            gamma=None,
+                                            erosion_coeff=None,
+                                            grain_mass_min=None,
+                                            grain_mass_max=None,
+                                            mass_index=None
+                                            )
+
+        elif frag_type == "EF":
+            frag_entry = FragmentationEntry(frag_type=frag_type,
+                                            height=100000.0,
+                                            number=1,
+                                            mass_percent=10,
+                                            sigma=self.gui.const.sigma,
+                                            gamma=None,
+                                            erosion_coeff=self.gui.const.erosion_coeff,
+                                            grain_mass_min=self.gui.const.erosion_mass_min,
+                                            grain_mass_max=self.gui.const.erosion_mass_max,
+                                            mass_index=self.gui.const.erosion_mass_index
+                                            )
+
+        elif frag_type == "D":
+            frag_entry = FragmentationEntry(frag_type=frag_type,
+                                            height=100000.0,
+                                            number=None,
+                                            mass_percent=10,
+                                            sigma=None,
+                                            gamma=None,
+                                            erosion_coeff=None,
+                                            grain_mass_min=self.gui.const.erosion_mass_min,
+                                            grain_mass_max=self.gui.const.erosion_mass_max,
+                                            mass_index=self.gui.const.erosion_mass_index
+                                            )
+
+        else:
+            print("ERROR! Unknown fragmentation type:", frag_type)
+
+
+        # Add the fragment entry
+        self.fragmentation_entries.append(frag_entry)
+        self.gui.const.fragmentation_entries = self.fragmentation_entries
+
+
+        # Save the fragmentation file
+        self.writeFragmentationFile()
+
+
+
 
 
 
@@ -593,7 +1096,7 @@ def fitResidualsListArguments(params, *args, **kwargs):
 
 
 class MetSimGUI(QMainWindow):
-    def __init__(self, traj_path, const_json_file=None, met_path=None, wid_files=None):
+    def __init__(self, traj_path, const_json_file=None, met_path=None, lc_path=None, wid_files=None):
         """ GUI tool for MetSim. 
     
         Arguments:
@@ -601,7 +1104,8 @@ class MetSimGUI(QMainWindow):
 
         Keyword arguments:
             const_json_file: [str] Path to the JSON file with simulation parameters.
-            met: [str] Path to the METAL or mirfit .met file with additional magnitude or lag information.
+            met_path: [str] Path to the METAL or mirfit .met file with additional magnitude or lag information.
+            lc_path: [str] Path to the light curve CSV file.
             wid_files: [str] Mirfit wid files containing the meteor wake information.
         """
         
@@ -610,6 +1114,9 @@ class MetSimGUI(QMainWindow):
 
         # Load the trajectory pickle file
         self.traj = loadPickle(*os.path.split(traj_path))
+
+        # Extract the directory path
+        self.dir_path = os.path.dirname(traj_path)
 
 
         ### LOAD .met FILE ###
@@ -628,6 +1135,23 @@ class MetSimGUI(QMainWindow):
             self.met_obs = MetObservations(self.met, self.traj)
         else:
             self.met_obs = None
+
+        ### ###
+
+
+
+        ### LOAD the light curve file ###
+        self.lc_data = None
+        if lc_path is not None:
+            if os.path.isfile(lc_path):
+
+                # Read the light curve data
+                self.lc_data = LightCurveContainer(*os.path.split(os.path.abspath(lc_path)))
+
+            else:
+                print("The light curve file does not exist:", lc_path)
+                sys.exit()
+
 
         ### ###
 
@@ -717,10 +1241,21 @@ class MetSimGUI(QMainWindow):
         self.autofit_lag_weights = [1.0, 1.0]
 
         ### ###
+    
 
+        # Disable different density after erosion change
+        self.erosion_different_rho = False
+
+        # Disable different ablation coeff after erosion change
+        self.erosion_different_sigma = False
 
         # Disable different erosion coeff after disruption at the beginning
         self.disruption_different_erosion_coeff = False
+
+
+        # Fragmentation object
+        self.fragmentation = None
+
 
         self.simulation_results = None
 
@@ -736,9 +1271,22 @@ class MetSimGUI(QMainWindow):
         # Init the constants
         self.const = Constants()
 
-        # Calculate atmosphere density coeffs
-        dens_co = self.fitAtmosphereDensity()
+        ### Calculate atmosphere density coeffs (down to the bottom observed height, limit to 15 km) ###
+
+        # Determine the height range for fitting the density
+        dens_fit_ht_beg = self.const.h_init
+        dens_fit_ht_end = self.traj.rend_ele - 5000
+        if dens_fit_ht_end < 15000:
+            dens_fit_ht_end = 15000
+
+        # Fit the polynomail describing the density
+        dens_co = self.fitAtmosphereDensity(dens_fit_ht_beg, dens_fit_ht_end)
         self.const.dens_co = dens_co
+
+        print("Atmospheric mass density fit for the range of heights: {:.2f} - {:.2f} km".format(\
+            dens_fit_ht_end/1000, dens_fit_ht_beg/1000))
+
+        ### ###
 
         # If a JSON file with constant was given, load them instead of initing from scratch
         if const_json_file is not None:
@@ -751,9 +1299,50 @@ class MetSimGUI(QMainWindow):
                 setattr(self.const, key, const_json[key])
 
 
+            # Convert fragmentation entries from dictionaties to objects
+            frag_entries = []
+            if len(const_json['fragmentation_entries']) > 0:
+                for frag_entry_dict in const_json['fragmentation_entries']:
+
+                    # Only take entries which are variable names for the FragmentationEntry class
+                    frag_entry_dict = {key:frag_entry_dict[key] for key in frag_entry_dict \
+                        if key in FragmentationEntry.__init__.__code__.co_varnames}
+
+                    frag_entry = FragmentationEntry(**frag_entry_dict)
+                    frag_entries.append(frag_entry)
+
+            self.const.fragmentation_entries = frag_entries
+            self.fragmentation = FragmentationContainer(self, \
+                os.path.join(self.dir_path, self.const.fragmentation_file_name))
+            self.fragmentation.fragmentation_entries = self.const.fragmentation_entries
+
+            # Overwrite the existing fragmentatinon file
+            self.fragmentation.writeFragmentationFile()
+
+
+
+
             # Check if the disruption erosion coefficient is different than the main erosion coeff
             if const_json['disruption_erosion_coeff'] != const_json['erosion_coeff']:
                 self.disruption_different_erosion_coeff = True
+
+
+            # Check if the density is changed after Hchange
+            if 'erosion_rho_change' in const_json:
+                if const_json['erosion_rho_change'] != const_json['rho']:
+                    self.erosion_different_rho = True
+
+            # Check if the ablation coeff is changed after Hchange
+            if 'erosion_sigma_change' in const_json:
+                if const_json['erosion_sigma_change'] != const_json['sigma']:
+                    self.erosion_different_sigma = True
+
+            # if 'fragmentation_string' in const_json:
+            #     if const_json['fragmentation_string'] is not None:
+            #         self.fragmentation = FragmentationContainer(self, os.path.join(self.dir_path, \
+            #             "metsim_fragmentation.txt"))
+            #         self.fragmentation.loadFromString(const_json['fragmentation_string'])
+            #         self.fragmentation.writeFragmentationFile()
 
 
             # # Convert the density coefficients into a numpy array
@@ -785,6 +1374,7 @@ class MetSimGUI(QMainWindow):
             self.const.m_init = self.calcPhotometricMass()
             print("Using initial mass: {:.2e} kg".format(self.const.m_init))
 
+
         ### ###
 
 
@@ -803,6 +1393,8 @@ class MetSimGUI(QMainWindow):
         # Update the photometric mass when the luminous efficiency is changed
         self.inputLumEff.editingFinished.connect(self.updateInitialMass)
 
+        # Update boxes when the luminous efficiency type is changes
+        self.lumEffComboBox.currentIndexChanged.connect(self.updateLumEffType)
 
         self.wakePlotUpdateButton.clicked.connect(self.updateWakePlot)
         self.wakeIncrementPlotHeightButton.clicked.connect(self.incrementWakePlotHeight)
@@ -830,12 +1422,25 @@ class MetSimGUI(QMainWindow):
         self.checkBoxWake.stateChanged.connect(self.checkBoxWakeSignal)
         self.checkBoxWakeMassBins.stateChanged.connect(self.checkBoxWakeMassBinsSignal)
         self.checkBoxErosion.stateChanged.connect(self.checkBoxErosionSignal)
+        self.checkBoxErosionRhoChange.stateChanged.connect(self.checkBoxErosionRhoSignal)
+        self.checkBoxErosionAblationCoeffChange.stateChanged.connect(self.checkBoxErosionAblationCoeffSignal)
         self.checkBoxDisruption.stateChanged.connect(self.checkBoxDisruptionSignal)
         self.checkBoxDisruptionErosionCoeff.stateChanged.connect(self.checkBoxDisruptionErosionCoeffSignal)
 
 
         self.runSimButton.clicked.connect(self.runSimulationGUI)
         self.autoFitButton.clicked.connect(self.autoFit)
+
+
+        self.fragmentationGroup.toggled.connect(self.toggleFragmentation)
+        self.newFragmentationFileButton.clicked.connect(self.newFragmentationFile)
+        self.loadFragmentationFileButton.clicked.connect(self.loadFragmentationFile)
+        self.mainFragmentStatusChangeButton.clicked.connect(lambda x: self.addFragmentation("M"))
+        self.allFragmentsStatusChangeButton.clicked.connect(lambda x: self.addFragmentation("A"))
+        self.newSingleBodyFragmentButton.clicked.connect(lambda x: self.addFragmentation("F"))
+        self.newErodingFragmentButton.clicked.connect(lambda x: self.addFragmentation("EF"))
+        self.newDustReleaseButton.clicked.connect(lambda x: self.addFragmentation("D"))
+
         
         self.showPreviousButton.pressed.connect(self.showPreviousResults)
         self.showPreviousButton.released.connect(self.showCurrentResults)
@@ -848,10 +1453,13 @@ class MetSimGUI(QMainWindow):
         # Update checkboxes
         self.checkBoxWakeSignal(None)
         self.checkBoxErosionSignal(None)
+        self.checkBoxErosionRhoSignal(None)
+        self.checkBoxErosionAblationCoeffSignal(None)
         self.checkBoxDisruptionSignal(None)
         self.checkBoxDisruptionErosionCoeffSignal(None)
         self.toggleWakeNormalizationMethod(None)
         self.toggleWakeAlignMethod(None)
+        self.toggleFragmentation(None)
 
 
         # Compute plot height limits
@@ -862,14 +1470,20 @@ class MetSimGUI(QMainWindow):
 
 
 
-    def fitAtmosphereDensity(self):
-        """ Fit the atmosphere density coefficients for the given day and location. """
+    def fitAtmosphereDensity(self, dens_fit_ht_beg, dens_fit_ht_end):
+        """ Fit the atmosphere density coefficients for the given day and location. 
+        
+        Arguments:
+            dens_fit_ht_beg: [float] Begin height (top) for which the fit is valid (meters).
+            dens_fit_ht_end: [float] End height - bottom (meters).
+
+        """
 
         # Take mean meteor lat/lon as reference for the atmosphere model
         lat_mean = np.mean([self.traj.rbeg_lat, self.traj.rend_lat])
         lon_mean = meanAngle([self.traj.rbeg_lon, self.traj.rend_lon])
 
-        return fitAtmPoly(lat_mean, lon_mean, 60000, 180000, self.traj.jdt_ref)
+        return fitAtmPoly(lat_mean, lon_mean, dens_fit_ht_end, dens_fit_ht_beg, self.traj.jdt_ref)
 
 
     def loadWakeFile(self, file_path):
@@ -881,7 +1495,7 @@ class MetSimGUI(QMainWindow):
         site_id = str(int(site_id))
         frame_n = int(frame_n)
 
-        print('wid file: ', site_id, frame_n)
+        print('wid file: ', site_id, frame_n, end='')
 
 
         # Extract geo coordinates of sites
@@ -962,6 +1576,10 @@ class MetSimGUI(QMainWindow):
                 for wake_pt in wake_container.points:
                     wake_pt.leading_frag_length = wake_pt.state_vect_dist - leading_state_vect_dist
 
+        if wake_container is None:
+            print("... rejected")
+        else:
+            print("... loaded!")
 
         return wake_container
 
@@ -970,11 +1588,14 @@ class MetSimGUI(QMainWindow):
     def calcPhotometricMass(self):
         """ Calculate photometric mass from given magnitude data. """
 
+        print()
 
         # If the magnitudes are given from the met file, use them instead of the trajectory file
         time_mag_arr = []
         avg_t_diff_max = 0
         if self.met_obs is not None:
+
+            print("Photometric mass computed from the .met file!")
 
             # Extract time vs. magnitudes from the met file
             for site in self.met_obs.sites:
@@ -990,7 +1611,32 @@ class MetSimGUI(QMainWindow):
                     if (mag is not None) and (not np.isnan(mag)):
                         time_mag_arr.append([t, mag])
 
+        # If the magnitudes are given
+        elif self.lc_data is not None:
+
+            print("Photometric mass computed from the light curve file!")
+
+            # Plot additional magnitudes for all sites
+            for site in self.lc_data.sites:
+
+                # Extract data
+                abs_mag_data = self.lc_data.abs_mag_data[site]
+                time_data = self.lc_data.time_data[site]
+
+                # Compute the average time difference
+                avg_t_diff_max_tmp = max(avg_t_diff_max, np.median(time_data[1:] - time_data[:-1]))
+                if avg_t_diff_max == 0:
+                    avg_t_diff_max = avg_t_diff_max_tmp
+                else:
+                    avg_t_diff_max = max([avg_t_diff_max, avg_t_diff_max_tmp])
+
+                for t, mag in zip(time_data, abs_mag_data):
+                    if (mag is not None) and (not np.isnan(mag)):
+                        time_mag_arr.append([t, mag])
+
         else:
+
+            print("Photometric mass computed from the trajectory pickle file!")
 
             # Extract time vs. magnitudes from the trajectory pickle file
             for obs in self.traj.observations:
@@ -1014,6 +1660,7 @@ class MetSimGUI(QMainWindow):
             print("No photometry, assuming default mass:", self.const.m_init)
             return self.const.m_init
 
+        print("NOTE: The mass was computing using a constant luminous efficiency defined in the GUI!")
 
         # Sort array by time
         time_mag_arr = np.array(sorted(time_mag_arr, key=lambda x: x[0]))
@@ -1058,11 +1705,16 @@ class MetSimGUI(QMainWindow):
         self.inputRhoGrain.setText("{:d}".format(int(const.rho_grain)))
         self.inputMassInit.setText("{:.1e}".format(const.m_init))
         self.inputAblationCoeff.setText("{:.3f}".format(const.sigma*1e6))
-        self.inputLumEff.setText("{:.2f}".format(const.lum_eff))
         self.inputVelInit.setText("{:.3f}".format(const.v_init/1000))
         self.inputShapeFact.setText("{:.2f}".format(const.shape_factor))
         self.inputGamma.setText("{:.1f}".format(const.gamma))
         self.inputZenithAngle.setText("{:.3f}".format(np.degrees(const.zenith_angle)))
+        self.inputLumEff.setText("{:.2f}".format(const.lum_eff))
+        
+        self.lumEffComboBox.setCurrentIndex(const.lum_eff_type)
+
+        # Enable/disable the constant tau box (index 0 = constant tau)
+        self.inputLumEff.setDisabled(self.const.lum_eff_type != 0)
 
         ### ###
 
@@ -1082,8 +1734,8 @@ class MetSimGUI(QMainWindow):
         ### Erosion parameters ###
 
         self.checkBoxErosion.setChecked(const.erosion_on)
-        self.checkBoxDisruptionErosionCoeff.setChecked(self.disruption_different_erosion_coeff)
-
+        self.checkBoxErosionRhoChange.setChecked(self.erosion_different_rho)
+        self.checkBoxErosionAblationCoeffChange.setChecked(self.erosion_different_sigma)
         self.inputErosionHtStart.setText("{:.3f}".format(const.erosion_height_start/1000))
         self.inputErosionCoeff.setText("{:.3f}".format(const.erosion_coeff*1e6))
         self.inputErosionHtChange.setText("{:.3f}".format(const.erosion_height_change/1000))
@@ -1091,6 +1743,8 @@ class MetSimGUI(QMainWindow):
         self.inputErosionMassIndex.setText("{:.2f}".format(const.erosion_mass_index))
         self.inputErosionMassMin.setText("{:.2e}".format(const.erosion_mass_min))
         self.inputErosionMassMax.setText("{:.2e}".format(const.erosion_mass_max))
+        self.inputErosionRhoChange.setText("{:d}".format(int(const.erosion_rho_change)))
+        self.inputErosionAblationCoeffChange.setText("{:.3f}".format(const.erosion_sigma_change*1e6))
 
         ### ###
 
@@ -1098,6 +1752,7 @@ class MetSimGUI(QMainWindow):
         ### Disruption parameters ###
 
         self.checkBoxDisruption.setChecked(const.disruption_on)
+        self.checkBoxDisruptionErosionCoeff.setChecked(self.disruption_different_erosion_coeff)
         self.inputDisruptionErosionCoeff.setText("{:.3f}".format(const.disruption_erosion_coeff*1e6))
         self.inputCompressiveStrength.setText("{:.1f}".format(const.compressive_strength/1000))
         self.inputDisruptionMassGrainRatio.setText("{:.2f}".format(const.disruption_mass_grain_ratio*100))
@@ -1120,6 +1775,12 @@ class MetSimGUI(QMainWindow):
         ### ###
 
 
+        ### Fragmentation parameters ###
+        self.fragmentationGroup.setChecked(const.fragmentation_on)
+
+        ###
+
+
         self.updateGrainDiameters()
 
 
@@ -1139,6 +1800,14 @@ class MetSimGUI(QMainWindow):
 
         self.updateInputBoxes()
 
+
+    def updateLumEffType(self):
+        """ Update the luminous efficiency type. """
+
+        self.const.lum_eff_type = self.lumEffComboBox.currentIndex()
+
+        # Enable/disable the constant tau box (index 0 = constant tau)
+        self.inputLumEff.setDisabled(self.const.lum_eff_type != 0)
 
 
     def updateGrainDiameters(self):
@@ -1216,9 +1885,41 @@ class MetSimGUI(QMainWindow):
         self.inputErosionCoeff.setDisabled(not self.const.erosion_on)
         self.inputErosionHtChange.setDisabled(not self.const.erosion_on)
         self.inputErosionCoeffChange.setDisabled(not self.const.erosion_on)
+        self.inputErosionRhoChange.setDisabled(not self.const.erosion_on)
+        self.inputErosionAblationCoeffChange.setDisabled(not self.const.erosion_on)
         self.inputErosionMassIndex.setDisabled(not self.const.erosion_on)
         self.inputErosionMassMin.setDisabled(not self.const.erosion_on)
         self.inputErosionMassMax.setDisabled(not self.const.erosion_on)
+
+        self.checkBoxErosionRhoSignal(None)
+        self.checkBoxErosionAblationCoeffSignal(None)
+
+        # Read inputs
+        self.readInputBoxes()
+
+
+
+    def checkBoxErosionRhoSignal(self, event):
+        """ Use a different erosion coefficient after disruption. """
+
+        self.erosion_different_rho = self.checkBoxErosionRhoChange.isChecked()
+
+        # Disable/enable different density coefficient checkbox
+        self.inputErosionRhoChange.setDisabled((not self.erosion_different_rho) \
+            or (not self.const.erosion_on))
+
+        # Read inputs
+        self.readInputBoxes()
+
+
+    def checkBoxErosionAblationCoeffSignal(self, event):
+        """ Use a different erosion coefficient after disruption. """
+
+        self.erosion_different_sigma = self.checkBoxErosionAblationCoeffChange.isChecked()
+
+        # Disable/enable different ablation coeff checkbox
+        self.inputErosionAblationCoeffChange.setDisabled((not self.erosion_different_sigma) \
+            or (not self.const.erosion_on))
 
         # Read inputs
         self.readInputBoxes()
@@ -1344,7 +2045,6 @@ class MetSimGUI(QMainWindow):
         self.const.rho_grain = self._tryReadBox(self.inputRhoGrain, self.const.rho_grain)
         self.const.m_init = self._tryReadBox(self.inputMassInit, self.const.m_init)
         self.const.sigma = self._tryReadBox(self.inputAblationCoeff, self.const.sigma*1e6)/1e6
-        self.const.lum_eff = self._tryReadBox(self.inputLumEff, self.const.lum_eff)
         self.const.v_init = 1000*self._tryReadBox(self.inputVelInit, self.const.v_init/1000)
         self.const.shape_factor = self._tryReadBox(self.inputShapeFact, self.const.shape_factor)
         self.const.gamma = self._tryReadBox(self.inputGamma, self.const.gamma)
@@ -1354,6 +2054,10 @@ class MetSimGUI(QMainWindow):
         # If the bulk density is higher than the grain density, set the grain density to the bulk denisty
         if self.const.rho > self.const.rho_grain:
             self.const.rho_grain = self.const.rho
+
+
+        self.const.lum_eff = self._tryReadBox(self.inputLumEff, self.const.lum_eff)
+        self.const.lum_eff_type = self.lumEffComboBox.currentIndex()
 
         ### ###
 
@@ -1380,6 +2084,24 @@ class MetSimGUI(QMainWindow):
             self.const.erosion_mass_index)
         self.const.erosion_mass_min = self._tryReadBox(self.inputErosionMassMin, self.const.erosion_mass_min)
         self.const.erosion_mass_max = self._tryReadBox(self.inputErosionMassMax, self.const.erosion_mass_max)
+
+
+        # If a different density value after the change of erosion is used, read it
+        if self.erosion_different_rho:
+            self.const.erosion_rho_change = self._tryReadBox(self.inputErosionRhoChange, \
+                self.const.erosion_rho_change)
+        else:
+            # Otherwise, use the same bulk density value
+            self.const.erosion_rho_change = self.const.rho
+
+
+        # If a different ablation coeff value after the change of erosion is used, read it
+        if self.erosion_different_sigma:
+            self.const.erosion_sigma_change = self._tryReadBox(self.inputErosionAblationCoeffChange, \
+                self.const.erosion_sigma_change*1e6)/1e6
+        else:
+            # Otherwise, use the same bulk density value
+            self.const.erosion_sigma_change = self.const.sigma
 
         ### ###
 
@@ -1490,9 +2212,9 @@ class MetSimGUI(QMainWindow):
         x_arr = np.linspace(x_min, x_max, 10)
 
 
-        # Plot the beginning only if it's inside the plot
-        if (self.const.erosion_height_start/1000 >= y_min) and (self.const.erosion_height_start/1000 \
-            <= y_max):
+        # Plot the beginning only if it's inside the plot and the erosion is on
+        if self.const.erosion_on and (self.const.erosion_height_start/1000 >= y_min) \
+            and (self.const.erosion_height_start/1000 <= y_max):
             
             # Plot a line marking erosion beginning
             plt_handle.plot(x_arr, np.zeros_like(x_arr) + self.const.erosion_height_start/1000, \
@@ -1578,12 +2300,27 @@ class MetSimGUI(QMainWindow):
             abs_mag_data = obs.absolute_magnitudes[obs.ignore_list == 0]
             height_data = obs.model_ht[obs.ignore_list == 0]/1000
 
+            # Don't plot magnitudes fainter than -10
+            mag_filter = abs_mag_data < 10
+            height_data = height_data[mag_filter]
+            abs_mag_data = abs_mag_data[mag_filter]
+
+            if len(height_data) == 0:
+                continue
+
             self.magnitudePlot.canvas.axes.plot(abs_mag_data, height_data, marker='x',
                 linestyle='dashed', label=obs.station_id, markersize=5, linewidth=1)
 
             # Keep track of the faintest and the brightest magnitude
-            mag_brightest = min(mag_brightest, np.min(abs_mag_data[~np.isinf(abs_mag_data)]))
-            mag_faintest = max(mag_faintest, np.max(abs_mag_data[~np.isinf(abs_mag_data)]))
+            if len(abs_mag_data):
+                mag_brightest = min(mag_brightest, np.min(abs_mag_data[~np.isinf(abs_mag_data)]))
+                mag_faintest = max(mag_faintest, np.max(abs_mag_data[~np.isinf(abs_mag_data)]))
+            else:
+                mag_faintest = 6.0
+                if sr is not None:
+                    mag_brightest = np.min(sr.abs_magnitude)
+                else:
+                    mag_brightest = -2.0
             
 
 
@@ -1596,6 +2333,24 @@ class MetSimGUI(QMainWindow):
                 # Extract data
                 abs_mag_data = self.met_obs.abs_mag_data[site]
                 height_data = self.met_obs.height_data[site]/1000
+
+                self.magnitudePlot.canvas.axes.plot(abs_mag_data, \
+                    height_data, marker='x', linestyle='dashed', label=str(site), markersize=5, linewidth=1)
+
+                # Keep track of the faintest and the brightest magnitude
+                mag_brightest = min(mag_brightest, np.min(abs_mag_data[~np.isinf(abs_mag_data)]))
+                mag_faintest = max(mag_faintest, np.max(abs_mag_data[~np.isinf(abs_mag_data)]))
+
+
+        # Plot additional observations from the light curve CSV file (if available)
+        if self.lc_data is not None:
+
+            # Plot additional magnitudes for all sites
+            for site in self.lc_data.sites:
+
+                # Extract data
+                abs_mag_data = self.lc_data.abs_mag_data[site]
+                height_data = self.lc_data.height_data[site]/1000
 
                 self.magnitudePlot.canvas.axes.plot(abs_mag_data, \
                     height_data, marker='x', linestyle='dashed', label=str(site), markersize=5, linewidth=1)
@@ -1790,28 +2545,33 @@ class MetSimGUI(QMainWindow):
                 & (sr.brightest_height_arr >= self.plot_end_ht)]
             brightest_ht_arr, brightest_len_arr = temp_arr.T
 
-            # Compute the simulated lag using the observed velocity
-            brightest_lag_sim = brightest_len_arr - brightest_len_arr[0] \
-                - self.traj.orbit.v_init*np.arange(0, self.const.dt*len(brightest_len_arr), \
-                                                   self.const.dt)[:len(brightest_len_arr)]
+            if len(brightest_len_arr):
 
-            ###
+                # Compute the simulated lag using the observed velocity
+                brightest_lag_sim = brightest_len_arr - brightest_len_arr[0] \
+                    - self.traj.orbit.v_init*np.arange(0, self.const.dt*len(brightest_len_arr), \
+                                                       self.const.dt)[:len(brightest_len_arr)]
+
+                ###
 
 
-            ### Compute parameters for the leading point on the trajectory ###
+                ### Compute parameters for the leading point on the trajectory ###
 
-            # Cut the part with same beginning heights as observations
-            temp_arr = np.c_[sr.leading_frag_height_arr, sr.leading_frag_length_arr]
-            temp_arr = temp_arr[(sr.leading_frag_height_arr <= self.traj.rbeg_ele) \
-                & (sr.leading_frag_height_arr >= self.plot_end_ht)]
-            leading_ht_arr, leading_frag_len_arr = temp_arr.T
+                # Cut the part with same beginning heights as observations
+                temp_arr = np.c_[sr.leading_frag_height_arr, sr.leading_frag_length_arr]
+                temp_arr = temp_arr[(sr.leading_frag_height_arr <= self.traj.rbeg_ele) \
+                    & (sr.leading_frag_height_arr >= self.plot_end_ht)]
+                leading_ht_arr, leading_frag_len_arr = temp_arr.T
 
-            # Compute the simulated lag using the observed velocity
-            leading_lag_sim = leading_frag_len_arr - leading_frag_len_arr[0] \
-                              - self.traj.orbit.v_init*np.arange(0, self.const.dt*len(leading_frag_len_arr), \
-                                                                 self.const.dt)[:len(leading_frag_len_arr)]
+                # Compute the simulated lag using the observed velocity
+                leading_lag_sim = leading_frag_len_arr - leading_frag_len_arr[0] \
+                                  - self.traj.orbit.v_init*np.arange(0, self.const.dt*len(leading_frag_len_arr), \
+                                                                     self.const.dt)[:len(leading_frag_len_arr)]
 
-            ###
+                ###
+
+            else:
+                sr = None
 
 
 
@@ -2008,7 +2768,11 @@ class MetSimGUI(QMainWindow):
 
             # Remove the line from the plot
             if line_handle is not None:
-                line_handle.remove()
+                try:
+                    line_handle.remove()
+                except ValueError:
+                    pass
+
 
 
             # Get the plot limits
@@ -2031,7 +2795,10 @@ class MetSimGUI(QMainWindow):
 
                 # Remove the old label handle
                 if label_handle is not None:
-                    label_handle.remove()
+                    try:
+                        label_handle.remove()
+                    except ValueError:
+                        pass
 
                 # Draw the wake line label
                 label_handle = ax.text(x_min, TEXT_LABEL_HT_PAD + self.wake_plot_ht/1000, \
@@ -2287,7 +3054,8 @@ class MetSimGUI(QMainWindow):
 
         ### ###
 
-        wake_ht_plot.legend()
+        if wake_ht_plot.lines or wake_ht_plot.collections:
+            wake_ht_plot.legend()
 
 
         wake_ht_plot.set_xlabel('Length behind leading fragment (m)')
@@ -2473,6 +3241,32 @@ class MetSimGUI(QMainWindow):
 
     def runSimulationGUI(self):
 
+
+        # If the fragmentation is turned on and no fragmentation data is given, notify the user
+        if self.const.fragmentation_on and (self.fragmentation is None):
+            frag_error_message = QMessageBox(QMessageBox.Critical, "Fragmentation file error", \
+                "Fragmentation is enabled but no fragmentation file is set.")
+            frag_error_message.setInformativeText("Either load an existing fragmentation file or create a new one.")
+            frag_error_message.exec_()
+            return None
+
+
+        # Load fragmentation entries if fragmentation is enabled
+        if self.const.fragmentation_on:
+
+            # Load the file
+            self.fragmentation.loadFragmentationFile()
+
+            # Sort entries by height
+            self.fragmentation.sortByHeight()
+
+            # Reset the status of all fragmentations
+            self.fragmentation.resetAll()
+
+            # Write the fragmentation file
+            self.fragmentation.writeFragmentationFile()
+
+
         # Store previous run results
         self.const_prev = copy.deepcopy(self.const)
         self.simulation_results_prev = copy.deepcopy(self.simulation_results)
@@ -2505,6 +3299,10 @@ class MetSimGUI(QMainWindow):
 
         # Store simulation results
         self.simulation_results = SimulationResults(self.const, results_list, wake_results)
+
+        # Write results in the fragmentation file
+        if self.const.fragmentation_on:
+            self.fragmentation.writeFragmentationFile()
 
         # Update the plots
         self.showCurrentResults()
@@ -2795,6 +3593,68 @@ class MetSimGUI(QMainWindow):
         self.simulation_results_prev = simulation_results_prefit
 
 
+    def toggleFragmentation(self, event):
+
+        if self.fragmentationGroup.isChecked():
+
+            print("Fragmentation ENABLED!")
+
+            self.const.fragmentation_on = True
+
+        else:
+
+            print("Fragmentation DISABLED!")
+
+            self.const.fragmentation_on = False
+
+
+    def newFragmentationFile(self):
+        """ Choose the location of a new fragmentation file. """
+
+        # Choose the location of the new file
+        fragmentation_file_path = QFileDialog.getSaveFileName(self, "Choose the fragmentation file", \
+            os.path.join(self.dir_path, "metsim_fragmentation.txt"), "Fragmentation file (*.txt)")[0]
+
+        # If it was cancelled, end function
+        if not fragmentation_file_path:
+            self.fragmentationGroup.setChecked(False)
+            return None
+
+        # Add a file extension if it was not given
+        if len(os.path.basename(fragmentation_file_path).split(".")) == 1:
+            fragmentation_file_path += ".txt"
+
+        print("New fragmentation file:", fragmentation_file_path)
+
+        self.fragmentation = FragmentationContainer(self, fragmentation_file_path)
+        self.fragmentation.newFragmentationFile()
+        
+
+    def loadFragmentationFile(self):
+        """ Load the fragmentation file for disk. """
+
+        fragmentation_file_path = QFileDialog.getOpenFileName(self, "Choose the fragmentation file", \
+            self.dir_path, "Fragmentation file (*.txt)")[0]
+
+
+        print("Loading fragmentation file:", fragmentation_file_path)
+
+
+        # Load the fragmentation data
+        self.fragmentation = FragmentationContainer(self, fragmentation_file_path)
+        self.fragmentation.loadFragmentationFile()
+
+        print("Loaded fragments:")
+        for frag_entry in self.fragmentation.fragmentation_entries:
+            print(frag_entry.toString())
+
+
+    def addFragmentation(self, frag_type):
+        """ Add a fragmentation line."""
+
+        self.fragmentation.addFragmentation(frag_type)
+
+
 
     def saveUpdatedOrbit(self):
         """ Save updated orbit and trajectory to file. """
@@ -3019,6 +3879,29 @@ if __name__ == "__main__":
     arg_parser.add_argument('-m', '--met', metavar='MET_FILE', \
         help='Load additional observations from a METAL or mirfit .met file.', type=str)
 
+    arg_parser.add_argument('-c', '--lc', metavar='LIGHT_CURVE', \
+        help="""Additional light curve given in a comma-separated CSV file. The beginning of every station \
+        entry should start with 'Station: Name', followed by the height in km and the absolute magnitude. E.g.
+        # Station: XX0001
+        # Height (km), Abs Magnitude
+          102.3996248,  -8.021
+          101.2172498,  -8.036
+          100.0348748,  -8.142
+           98.8524998,  -8.607
+           97.6701248,  -8.703
+           96.4877498,  -8.788
+           95.3053748,  -9.084
+           94.1229998,  -9.399
+           92.9406248   -9.475
+           91.7582498,  -9.671
+           90.5758747,  -9.956
+           89.3934997, -10.061
+           88.2111247, -10.227
+           87.0287497, -10.412
+           85.8463747, -10.588
+           84.6639997, -10.763
+        """, type=str)
+
     arg_parser.add_argument('-w', '--wid', metavar='WID_FILES', \
         help='Load mirfit wid files which will be used for wake plotting. Wildchars can be used, e.g. /path/wid*.txt.', 
         type=str, nargs='+')
@@ -3146,6 +4029,10 @@ if __name__ == "__main__":
         print("Loading additional magnitudes from .met file:")
         print(met_file)
 
+    if cml_args.lc is not None:
+        print("Loading additional light curve from a light curve CSV file:")
+        print(cml_args.lc)
+
     if wid_files is not None:
         print("Loading wake data from:")
         for wfile in wid_files:
@@ -3159,7 +4046,7 @@ if __name__ == "__main__":
 
     # Init the MetSimGUI application
     main_window = MetSimGUI(traj_pickle_file, const_json_file=load_file, \
-        met_path=met_file, wid_files=wid_files)
+        met_path=met_file, lc_path=cml_args.lc, wid_files=wid_files)
 
 
     main_window.show()
