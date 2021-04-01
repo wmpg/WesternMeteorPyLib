@@ -1417,6 +1417,41 @@
       </rect>
      </property>
     </widget>
+    <widget class="QComboBox" name="lumEffComboBox">
+     <property name="geometry">
+      <rect>
+       <x>190</x>
+       <y>150</y>
+       <width>171</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <item>
+      <property name="text">
+       <string>Constant</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>R&amp;C (2001) - Type I</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>R&amp;C (2001) - Type II</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>R&amp;C (2001) - Type III</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>Borovicka et al. (2013)</string>
+      </property>
+     </item>
+    </widget>
    </widget>
    <widget class="MagnitudeMplWidget" name="magnitudePlot" native="true">
     <property name="geometry">
@@ -2125,7 +2160,7 @@ p, li { white-space: pre-wrap; }
       </rect>
      </property>
      <property name="text">
-      <string>Frag</string>
+      <string>SB frag</string>
      </property>
     </widget>
     <widget class="QPushButton" name="newErodingFragmentButton">

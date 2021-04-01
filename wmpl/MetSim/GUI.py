@@ -337,67 +337,91 @@ class WakeContainter(object):
 
 class FragmentationEntry(object):
     def __init__(self, frag_type, height, number, mass_percent, sigma, gamma, erosion_coeff, grain_mass_min, \
-        grain_mass_max, mass_index):
-        """ A container for every fragmentation entry. """
+        grain_mass_max, mass_index, normalize_units=False):
+        """ A container for every fragmentation entry. 
+
+        normalize_units: [bool] Convert the units of sigma and erosion coeff from s^2 km^-2 to s^2 m^-2,
+            and convert the height to meters from km.
+        """
+
+        norm = 0.0
+        if normalize_units:
+            norm = 1.0
+
+
+        ### STATUS FLAGS ###
+
+        # Indicates that the fragmentation was not performed yet
+        self.done = False
+
+
+        ### ###
+
+        ### INPUT parameters ###
+
 
         self.frag_type = frag_type.strip()
 
-        self.height = 1000*float(height)
+        self.height = (1000**norm)*float(height)
 
         try:
             self.number = int(number)
         except:
-            self.number = None
+            if (self.frag_type == "F") or (self.frag_type == "EF"):
+                self.number = 1
+            else:
+                self.number = None
 
         try:
             self.mass_percent = float(mass_percent)
+
+            # Limit mass loss to 100%
+            if self.mass_percent > 100:
+                mass_percent = 100.0
+
         except:
             self.mass_percent = None
-            pass
 
         try:
-            self.sigma = float(sigma)/1e6
+            self.sigma = float(sigma)/(1e6**norm)
         except:
             self.sigma = None
-            pass
 
         try:
             self.gamma = float(gamma)
         except:
             self.gamma = None
-            pass
 
         try:
-            self.erosion_coeff = float(erosion_coeff)/1e6
+            self.erosion_coeff = float(erosion_coeff)/(1e6**norm)
         except:
             self.erosion_coeff = None
-            pass
 
         try:
             self.grain_mass_min = float(grain_mass_min)
         except:
             self.grain_mass_min = None
-            pass
 
         try:
             self.grain_mass_max = float(grain_mass_max)
         except:
             self.grain_mass_max = None
-            pass
 
         try:
             self.mass_index = float(mass_index)
         except:
             self.mass_index = None
-            pass
+
+        ### ###
 
 
-
-        # Output parameters
+        ### Output parameters ###
         self.time = None
         self.dyn_pressure = None
         self.velocity = None
         self.parent_mass = None
+        self.mass = None
+        ### ###
 
 
     def toString(self):
@@ -460,24 +484,29 @@ class FragmentationEntry(object):
         line_entries = []
 
         if self.time is not None:
-            line_entries.append("{:9.6}".format(self.time))
+            line_entries.append("{:9.6f}".format(self.time))
         else:
             line_entries.append(9*" ")
 
         if self.dyn_pressure is not None:
-            line_entries.append("{:9.3f}".format(self.dyn_pressure))
+            line_entries.append("{:9.3f}".format(self.dyn_pressure/1000))
         else:
             line_entries.append(9*" ")
 
         if self.velocity is not None:
-            line_entries.append("{:8.3f}".format(self.velocity))
+            line_entries.append("{:8.3f}".format(self.velocity/1000))
         else:
             line_entries.append(8*" ")
 
         if self.parent_mass is not None:
-            line_entries.append("{:11.3e}".format(self.parent_mass))
+            line_entries.append("{:11.2e}".format(self.parent_mass))
         else:
             line_entries.append(11*" ")
+
+        if self.mass is not None:
+            line_entries.append("{:9.2e}".format(self.mass))
+        else:
+            line_entries.append(9*" ")
 
         out_str += ", ".join(line_entries)
 
@@ -510,6 +539,20 @@ class FragmentationContainer(object):
         self.fragmentation_entries = []
 
 
+    def sortByHeight(self):
+        """ Sort the fragmentation entries by height, from highest to lowest. """
+
+        self.fragmentation_entries = sorted(self.fragmentation_entries, key=lambda x: x.height, reverse=True)
+
+
+    def resetAll(self):
+        """ Reset the 'done' flag of all fragments to False, which means that the fragmentation should run.
+        """
+
+        for frag_entry in self.fragmentation_entries:
+            frag_entry.done = False
+
+
     def loadFromString(self, string):
         """ Load parameters from a string. """
 
@@ -539,7 +582,7 @@ class FragmentationContainer(object):
                 continue
 
             # Create a new fragmentation entry
-            frag_entry = FragmentationEntry(*entries)
+            frag_entry = FragmentationEntry(*entries, normalize_units=True)
 
             self.fragmentation_entries.append(frag_entry)
 
@@ -571,30 +614,30 @@ class FragmentationContainer(object):
 #   - *INIT - Initial parameters taken from the GUI. Ready only, cannot be set in this file.
 #   - M    - Main fragment - parameter change.
 #           - REQUIRED: Height.
-#           - Possible: Ablation coeff, Erosion coeff, Gamma, Erosion coeff, Grain masses, Mass index.
+#           - Possible: Ablation coeff, Erosion coeff, Grain masses, Mass index.
 #   - A    - All fragments - parameter change.
 #           - REQUIRED: Height.
 #           - Possible: Ablation coeff, Gamma.
 #   - F    - New single-body fragment.
 #           - REQUIRED: Height, Number, Mass (%).
-#           - Possible: Ablation coeff, Gamma.
+#           - Possible: Ablation coeff.
 #   - EF   - New eroding fragment. A mass index of 2.0 will be assumed if not given.
-#           - REQUIRED: Height, Number, Mass (%), Erosion coeff, Grain MIN mass, Grain MAX mass.
-#           - Possible: Ablation coeff, Gamma, Mass index.
-#   - D    - New dust. Onlt the grain mass range needs to be specified. A mass index of 2.0 will be assumed if not given.
+#           - REQUIRED: Height, Number, Mass (%), Erosion coeff, Grain masses.
+#           - Possible: Ablation coeff, Mass index.
+#   - D    - Dust release. Only the grain mass range needs to be specified. A mass index of 2.0 will be assumed if not given.
 #           - REQUIRED: Height, Mass (%), Grain MIN mass, Grain MAX mass.
 #           - Possible: Mass index.
 #
-#                             INPUTS (leave unchanged fields empty)                                      #        OUTPUTS  (do not fill in!)           #
-# ------------------------------------------------------------------------------------------------------ # ------------------------------------------- #
-# Type, Height (km), Number, Mass (%), Ablation coeff, Gamma, Erosion coeff, Grain MIN, Grain MAX, Mass  #  Time (s),  Dyn pres, Velocity, Parent mass #
-#     ,            ,       ,         , (s^2 km^-2)   ,      , (s^2 km^-2)  , mass (kg), mass (kg), index #          ,  (kPa)   , (km/s)  , (kg)        #
-#-----,------------,-------,---------,---------------,------,--------------,----------,----------,-------#----------,----------,---------,-------------#
+#                             INPUTS (leave unchanged fields empty)                                      #        OUTPUTS  (do not fill in!)                      #
+# ------------------------------------------------------------------------------------------------------ # ------------------------------------------------------ #
+# Type, Height (km), Number, Mass (%), Ablation coeff, Gamma, Erosion coeff, Grain MIN, Grain MAX, Mass  #  Time (s),  Dyn pres, Velocity, Parent mass, Mass (kg) #
+#     ,            ,       ,         , (s^2 km^-2)   ,      , (s^2 km^-2)  , mass (kg), mass (kg), index #          ,  (kPa)   , (km/s)  , (kg)       ,           #
+#-----,------------,-------,---------,---------------,------,--------------,----------,----------,-------#----------,----------,---------,----------------------- #
 """
 
         # Write the initial parameters
         initial_entry = FragmentationEntry(frag_type="# INIT",
-                                            height=self.gui.const.h_init/1000,
+                                            height=self.gui.const.h_init,
                                             number=1,
                                             mass_percent=100,
                                             sigma=self.gui.const.sigma,
@@ -645,12 +688,12 @@ class FragmentationContainer(object):
         # Change paramters of the main fragment
         if frag_type == "M":
             frag_entry = FragmentationEntry(frag_type=frag_type,
-                                            height=100.0,
+                                            height=100000.0000,
                                             number=None,
                                             mass_percent=None,
                                             sigma=self.gui.const.sigma,
-                                            gamma=self.gui.const.gamma,
-                                            erosion_coeff=1e6*self.gui.const.erosion_coeff,
+                                            gamma=None,
+                                            erosion_coeff=self.gui.const.erosion_coeff,
                                             grain_mass_min=None,
                                             grain_mass_max=None,
                                             mass_index=None
@@ -659,7 +702,7 @@ class FragmentationContainer(object):
         # Change paramters of all fragments
         elif frag_type == "A":
             frag_entry = FragmentationEntry(frag_type=frag_type,
-                                            height=100.0,
+                                            height=100000.0,
                                             number=None,
                                             mass_percent=None,
                                             sigma=self.gui.const.sigma,
@@ -673,7 +716,7 @@ class FragmentationContainer(object):
         # New single-body fragment
         elif frag_type == "F":
             frag_entry = FragmentationEntry(frag_type=frag_type,
-                                            height=100.0,
+                                            height=100000.0,
                                             number=1,
                                             mass_percent=10,
                                             sigma=self.gui.const.sigma,
@@ -686,12 +729,12 @@ class FragmentationContainer(object):
 
         elif frag_type == "EF":
             frag_entry = FragmentationEntry(frag_type=frag_type,
-                                            height=100.0,
+                                            height=100000.0,
                                             number=1,
                                             mass_percent=10,
                                             sigma=self.gui.const.sigma,
                                             gamma=None,
-                                            erosion_coeff=1e6*self.gui.const.erosion_coeff,
+                                            erosion_coeff=self.gui.const.erosion_coeff,
                                             grain_mass_min=self.gui.const.erosion_mass_min,
                                             grain_mass_max=self.gui.const.erosion_mass_max,
                                             mass_index=self.gui.const.erosion_mass_index
@@ -699,7 +742,7 @@ class FragmentationContainer(object):
 
         elif frag_type == "D":
             frag_entry = FragmentationEntry(frag_type=frag_type,
-                                            height=100.0,
+                                            height=100000.0,
                                             number=None,
                                             mass_percent=10,
                                             sigma=None,
@@ -1228,9 +1271,22 @@ class MetSimGUI(QMainWindow):
         # Init the constants
         self.const = Constants()
 
-        # Calculate atmosphere density coeffs
-        dens_co = self.fitAtmosphereDensity()
+        ### Calculate atmosphere density coeffs (down to the bottom observed height, limit to 15 km) ###
+
+        # Determine the height range for fitting the density
+        dens_fit_ht_beg = self.const.h_init
+        dens_fit_ht_end = self.traj.rend_ele - 5000
+        if dens_fit_ht_end < 15000:
+            dens_fit_ht_end = 15000
+
+        # Fit the polynomail describing the density
+        dens_co = self.fitAtmosphereDensity(dens_fit_ht_beg, dens_fit_ht_end)
         self.const.dens_co = dens_co
+
+        print("Atmospheric mass density fit for the range of heights: {:.2f} - {:.2f} km".format(\
+            dens_fit_ht_end/1000, dens_fit_ht_beg/1000))
+
+        ### ###
 
         # If a JSON file with constant was given, load them instead of initing from scratch
         if const_json_file is not None:
@@ -1248,10 +1304,9 @@ class MetSimGUI(QMainWindow):
             if len(const_json['fragmentation_entries']) > 0:
                 for frag_entry_dict in const_json['fragmentation_entries']:
 
-                    # Correct units
-                    frag_entry_dict['height'] /= 1000
-                    if frag_entry_dict['erosion_coeff'] is not None:
-                        frag_entry_dict['erosion_coeff'] *= 1e6
+                    # Only take entries which are variable names for the FragmentationEntry class
+                    frag_entry_dict = {key:frag_entry_dict[key] for key in frag_entry_dict \
+                        if key in FragmentationEntry.__init__.__code__.co_varnames}
 
                     frag_entry = FragmentationEntry(**frag_entry_dict)
                     frag_entries.append(frag_entry)
@@ -1338,6 +1393,9 @@ class MetSimGUI(QMainWindow):
         # Update the photometric mass when the luminous efficiency is changed
         self.inputLumEff.editingFinished.connect(self.updateInitialMass)
 
+        # Update boxes when the luminous efficiency type is changes
+        self.lumEffComboBox.currentIndexChanged.connect(self.updateLumEffType)
+
         self.wakePlotUpdateButton.clicked.connect(self.updateWakePlot)
         self.wakeIncrementPlotHeightButton.clicked.connect(self.incrementWakePlotHeight)
         self.wakeDecrementPlotHeightButton.clicked.connect(self.decrementWakePlotHeight)
@@ -1384,9 +1442,6 @@ class MetSimGUI(QMainWindow):
         self.newDustReleaseButton.clicked.connect(lambda x: self.addFragmentation("D"))
 
         
-
-
-        
         self.showPreviousButton.pressed.connect(self.showPreviousResults)
         self.showPreviousButton.released.connect(self.showCurrentResults)
 
@@ -1415,14 +1470,20 @@ class MetSimGUI(QMainWindow):
 
 
 
-    def fitAtmosphereDensity(self):
-        """ Fit the atmosphere density coefficients for the given day and location. """
+    def fitAtmosphereDensity(self, dens_fit_ht_beg, dens_fit_ht_end):
+        """ Fit the atmosphere density coefficients for the given day and location. 
+        
+        Arguments:
+            dens_fit_ht_beg: [float] Begin height (top) for which the fit is valid (meters).
+            dens_fit_ht_end: [float] End height - bottom (meters).
+
+        """
 
         # Take mean meteor lat/lon as reference for the atmosphere model
         lat_mean = np.mean([self.traj.rbeg_lat, self.traj.rend_lat])
         lon_mean = meanAngle([self.traj.rbeg_lon, self.traj.rend_lon])
 
-        return fitAtmPoly(lat_mean, lon_mean, 60000, 180000, self.traj.jdt_ref)
+        return fitAtmPoly(lat_mean, lon_mean, dens_fit_ht_end, dens_fit_ht_beg, self.traj.jdt_ref)
 
 
     def loadWakeFile(self, file_path):
@@ -1527,6 +1588,7 @@ class MetSimGUI(QMainWindow):
     def calcPhotometricMass(self):
         """ Calculate photometric mass from given magnitude data. """
 
+        print()
 
         # If the magnitudes are given from the met file, use them instead of the trajectory file
         time_mag_arr = []
@@ -1598,6 +1660,7 @@ class MetSimGUI(QMainWindow):
             print("No photometry, assuming default mass:", self.const.m_init)
             return self.const.m_init
 
+        print("NOTE: The mass was computing using a constant luminous efficiency defined in the GUI!")
 
         # Sort array by time
         time_mag_arr = np.array(sorted(time_mag_arr, key=lambda x: x[0]))
@@ -1642,11 +1705,16 @@ class MetSimGUI(QMainWindow):
         self.inputRhoGrain.setText("{:d}".format(int(const.rho_grain)))
         self.inputMassInit.setText("{:.1e}".format(const.m_init))
         self.inputAblationCoeff.setText("{:.3f}".format(const.sigma*1e6))
-        self.inputLumEff.setText("{:.2f}".format(const.lum_eff))
         self.inputVelInit.setText("{:.3f}".format(const.v_init/1000))
         self.inputShapeFact.setText("{:.2f}".format(const.shape_factor))
         self.inputGamma.setText("{:.1f}".format(const.gamma))
         self.inputZenithAngle.setText("{:.3f}".format(np.degrees(const.zenith_angle)))
+        self.inputLumEff.setText("{:.2f}".format(const.lum_eff))
+        
+        self.lumEffComboBox.setCurrentIndex(const.lum_eff_type)
+
+        # Enable/disable the constant tau box (index 0 = constant tau)
+        self.inputLumEff.setDisabled(self.const.lum_eff_type != 0)
 
         ### ###
 
@@ -1732,6 +1800,14 @@ class MetSimGUI(QMainWindow):
 
         self.updateInputBoxes()
 
+
+    def updateLumEffType(self):
+        """ Update the luminous efficiency type. """
+
+        self.const.lum_eff_type = self.lumEffComboBox.currentIndex()
+
+        # Enable/disable the constant tau box (index 0 = constant tau)
+        self.inputLumEff.setDisabled(self.const.lum_eff_type != 0)
 
 
     def updateGrainDiameters(self):
@@ -1969,7 +2045,6 @@ class MetSimGUI(QMainWindow):
         self.const.rho_grain = self._tryReadBox(self.inputRhoGrain, self.const.rho_grain)
         self.const.m_init = self._tryReadBox(self.inputMassInit, self.const.m_init)
         self.const.sigma = self._tryReadBox(self.inputAblationCoeff, self.const.sigma*1e6)/1e6
-        self.const.lum_eff = self._tryReadBox(self.inputLumEff, self.const.lum_eff)
         self.const.v_init = 1000*self._tryReadBox(self.inputVelInit, self.const.v_init/1000)
         self.const.shape_factor = self._tryReadBox(self.inputShapeFact, self.const.shape_factor)
         self.const.gamma = self._tryReadBox(self.inputGamma, self.const.gamma)
@@ -1979,6 +2054,10 @@ class MetSimGUI(QMainWindow):
         # If the bulk density is higher than the grain density, set the grain density to the bulk denisty
         if self.const.rho > self.const.rho_grain:
             self.const.rho_grain = self.const.rho
+
+
+        self.const.lum_eff = self._tryReadBox(self.inputLumEff, self.const.lum_eff)
+        self.const.lum_eff_type = self.lumEffComboBox.currentIndex()
 
         ### ###
 
@@ -2466,28 +2545,33 @@ class MetSimGUI(QMainWindow):
                 & (sr.brightest_height_arr >= self.plot_end_ht)]
             brightest_ht_arr, brightest_len_arr = temp_arr.T
 
-            # Compute the simulated lag using the observed velocity
-            brightest_lag_sim = brightest_len_arr - brightest_len_arr[0] \
-                - self.traj.orbit.v_init*np.arange(0, self.const.dt*len(brightest_len_arr), \
-                                                   self.const.dt)[:len(brightest_len_arr)]
+            if len(brightest_len_arr):
 
-            ###
+                # Compute the simulated lag using the observed velocity
+                brightest_lag_sim = brightest_len_arr - brightest_len_arr[0] \
+                    - self.traj.orbit.v_init*np.arange(0, self.const.dt*len(brightest_len_arr), \
+                                                       self.const.dt)[:len(brightest_len_arr)]
+
+                ###
 
 
-            ### Compute parameters for the leading point on the trajectory ###
+                ### Compute parameters for the leading point on the trajectory ###
 
-            # Cut the part with same beginning heights as observations
-            temp_arr = np.c_[sr.leading_frag_height_arr, sr.leading_frag_length_arr]
-            temp_arr = temp_arr[(sr.leading_frag_height_arr <= self.traj.rbeg_ele) \
-                & (sr.leading_frag_height_arr >= self.plot_end_ht)]
-            leading_ht_arr, leading_frag_len_arr = temp_arr.T
+                # Cut the part with same beginning heights as observations
+                temp_arr = np.c_[sr.leading_frag_height_arr, sr.leading_frag_length_arr]
+                temp_arr = temp_arr[(sr.leading_frag_height_arr <= self.traj.rbeg_ele) \
+                    & (sr.leading_frag_height_arr >= self.plot_end_ht)]
+                leading_ht_arr, leading_frag_len_arr = temp_arr.T
 
-            # Compute the simulated lag using the observed velocity
-            leading_lag_sim = leading_frag_len_arr - leading_frag_len_arr[0] \
-                              - self.traj.orbit.v_init*np.arange(0, self.const.dt*len(leading_frag_len_arr), \
-                                                                 self.const.dt)[:len(leading_frag_len_arr)]
+                # Compute the simulated lag using the observed velocity
+                leading_lag_sim = leading_frag_len_arr - leading_frag_len_arr[0] \
+                                  - self.traj.orbit.v_init*np.arange(0, self.const.dt*len(leading_frag_len_arr), \
+                                                                     self.const.dt)[:len(leading_frag_len_arr)]
 
-            ###
+                ###
+
+            else:
+                sr = None
 
 
 
@@ -3169,7 +3253,18 @@ class MetSimGUI(QMainWindow):
 
         # Load fragmentation entries if fragmentation is enabled
         if self.const.fragmentation_on:
+
+            # Load the file
             self.fragmentation.loadFragmentationFile()
+
+            # Sort entries by height
+            self.fragmentation.sortByHeight()
+
+            # Reset the status of all fragmentations
+            self.fragmentation.resetAll()
+
+            # Write the fragmentation file
+            self.fragmentation.writeFragmentationFile()
 
 
         # Store previous run results
@@ -3204,6 +3299,10 @@ class MetSimGUI(QMainWindow):
 
         # Store simulation results
         self.simulation_results = SimulationResults(self.const, results_list, wake_results)
+
+        # Write results in the fragmentation file
+        if self.const.fragmentation_on:
+            self.fragmentation.writeFragmentationFile()
 
         # Update the plots
         self.showCurrentResults()
