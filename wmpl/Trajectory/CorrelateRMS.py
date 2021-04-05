@@ -382,6 +382,9 @@ class MeteorObsRMS(object):
         else:
             self.data = self.data[1:]
 
+            # Recompute the halfway point
+            half_index = len(self.data)//2
+
 
         # Find angular velocity at the ending per every axis
         dxdf_end = (self.data[-1].x - self.data[half_index].x)/(self.data[-1].frame \
