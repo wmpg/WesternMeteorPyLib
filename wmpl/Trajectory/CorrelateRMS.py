@@ -386,6 +386,15 @@ class MeteorObsRMS(object):
             half_index = len(self.data)//2
 
 
+        # If there is no data or the length is too short, skip the observation
+        if (len(self.data) == 0) or (len(self.data) < half_index):
+            self.bad_data = True
+            return None
+            
+        else:
+            self.bad_data = False
+
+
         # Find angular velocity at the ending per every axis
         dxdf_end = (self.data[-1].x - self.data[half_index].x)/(self.data[-1].frame \
             - self.data[half_index].frame)
@@ -629,6 +638,10 @@ class RMSDataHandle(object):
                 # Init the new meteor observation object
                 met_obs = MeteorObsRMS(station_code, jd2Date(cams_met_obs.jdt_ref, dt_obj=True), pp, \
                     meteor_data, rel_proc_path, ff_name=cams_met_obs.ff_name)
+
+                # Skip bad observations
+                if met_obs.bad_data:
+                    continue
 
                 # Add only unpaired observations
                 if not self.db.checkObsIfPaired(met_obs):
