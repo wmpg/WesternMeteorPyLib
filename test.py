@@ -84,14 +84,15 @@ if __name__ == "__main__":
     vel_range = np.linspace(11000, 72000, 100)
 
     # Range of masses
-    masses = [0.001, 0.01, 0.1, 1, 10, 100, 1000]
+    masses = [1e-11, 1e-9, 1e-7, 1e-5, 0.001, 0.01, 0.1, 1, 10, 100, 1000]
 
 
-    lum_eff_types = [1, 2, 3, 4]
+    lum_eff_types = [1, 2, 3, 4, 5]
     lum_eff_labels = ["Revelle & Ceplecha (2001) - Type I", 
                       "Revelle & Ceplecha (2001) - Type II",
                       "Revelle & Ceplecha (2001) - Type III",
-                      "Borovicka et al. (2013) - Kosice"]
+                      "Borovicka et al. (2013) - Kosice",
+                      "CAMO faint meteors"]
 
     for i, lum_type in enumerate(lum_eff_types):
 

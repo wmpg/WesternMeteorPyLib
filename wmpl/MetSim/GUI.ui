@@ -1451,6 +1451,11 @@
        <string>Borovicka et al. (2013)</string>
       </property>
      </item>
+     <item>
+      <property name="text">
+       <string>CAMO faint meteors</string>
+      </property>
+     </item>
     </widget>
    </widget>
    <widget class="MagnitudeMplWidget" name="magnitudePlot" native="true">

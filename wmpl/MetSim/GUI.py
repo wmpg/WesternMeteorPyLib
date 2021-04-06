@@ -250,7 +250,7 @@ class LightCurveContainer(object):
                     time_data = []
                     height_data = []
                     abs_mag_data = []
-                    current_station = line.strip(station_label).strip()
+                    current_station = line.strip(station_label).strip().replace(',', '')
 
                     continue
 
@@ -1299,25 +1299,27 @@ class MetSimGUI(QMainWindow):
                 setattr(self.const, key, const_json[key])
 
 
-            # Convert fragmentation entries from dictionaties to objects
-            frag_entries = []
-            if len(const_json['fragmentation_entries']) > 0:
-                for frag_entry_dict in const_json['fragmentation_entries']:
+            if 'fragmentation_entries' in const_json:
+                
+                # Convert fragmentation entries from dictionaties to objects
+                frag_entries = []
+                if len(const_json['fragmentation_entries']) > 0:
+                    for frag_entry_dict in const_json['fragmentation_entries']:
 
-                    # Only take entries which are variable names for the FragmentationEntry class
-                    frag_entry_dict = {key:frag_entry_dict[key] for key in frag_entry_dict \
-                        if key in FragmentationEntry.__init__.__code__.co_varnames}
+                        # Only take entries which are variable names for the FragmentationEntry class
+                        frag_entry_dict = {key:frag_entry_dict[key] for key in frag_entry_dict \
+                            if key in FragmentationEntry.__init__.__code__.co_varnames}
 
-                    frag_entry = FragmentationEntry(**frag_entry_dict)
-                    frag_entries.append(frag_entry)
+                        frag_entry = FragmentationEntry(**frag_entry_dict)
+                        frag_entries.append(frag_entry)
 
-            self.const.fragmentation_entries = frag_entries
-            self.fragmentation = FragmentationContainer(self, \
-                os.path.join(self.dir_path, self.const.fragmentation_file_name))
-            self.fragmentation.fragmentation_entries = self.const.fragmentation_entries
+                self.const.fragmentation_entries = frag_entries
+                self.fragmentation = FragmentationContainer(self, \
+                    os.path.join(self.dir_path, self.const.fragmentation_file_name))
+                self.fragmentation.fragmentation_entries = self.const.fragmentation_entries
 
-            # Overwrite the existing fragmentatinon file
-            self.fragmentation.writeFragmentationFile()
+                # Overwrite the existing fragmentatinon file
+                self.fragmentation.writeFragmentationFile()
 
 
 
@@ -2353,7 +2355,7 @@ class MetSimGUI(QMainWindow):
                 height_data = self.lc_data.height_data[site]/1000
 
                 self.magnitudePlot.canvas.axes.plot(abs_mag_data, \
-                    height_data, marker='x', linestyle='dashed', label=str(site), markersize=5, linewidth=1)
+                    height_data, marker='x', linestyle='dashed', label=str(site), markersize=1, linewidth=1)
 
                 # Keep track of the faintest and the brightest magnitude
                 mag_brightest = min(mag_brightest, np.min(abs_mag_data[~np.isinf(abs_mag_data)]))
