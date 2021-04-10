@@ -766,9 +766,11 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
             eccentric_anomaly = np.arctan2(np.sqrt(1 - eccentricity**2)*np.sin(true_anomaly), eccentricity \
                 + np.cos(true_anomaly))
 
-                # Calculate mean anomaly
-                mean_anomaly = eccentric_anomaly - eccentricity*np.sin(eccentric_anomaly)
-                mean_anomaly = mean_anomaly%(2*np.pi)
+            # Calculate mean anomaly
+            mean_anomaly = eccentric_anomaly - eccentricity * np.sin(eccentric_anomaly)
+            mean_anomaly = mean_anomaly % (2 * np.pi)
+        else:
+            mean_anomaly = np.nan
 
         # Calculate the time in days since the last perihelion passage of the meteoroid
         # not meaningful for non-closed orbits
