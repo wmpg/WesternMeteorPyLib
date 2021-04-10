@@ -689,8 +689,11 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
 
 
         # Calculate the orbital period in years
-        T = 2*np.pi*np.sqrt(((a*AU)**3)/SUN_MU)/(86400*SIDEREAL_YEAR)
-
+        # avoid floating point error if orbit is hyperbolic
+        if a > 0: 
+            T = 2*np.pi*np.sqrt(((a*AU)**3)/SUN_MU)/(86400*SIDEREAL_YEAR)
+        else:
+            T = 1e9
 
         # Calculate the orbit angular momentum
         h_vect = np.cross(meteor_pos, v_h)
@@ -758,16 +761,21 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
 
 
         # Calculate eccentric anomaly
-        eccentric_anomaly = np.arctan2(np.sqrt(1 - eccentricity**2)*np.sin(true_anomaly), eccentricity \
-            + np.cos(true_anomaly))
+        # not meaningful for eccentricity > 1
+        if eccentricity < 1: 
+            eccentric_anomaly = np.arctan2(np.sqrt(1 - eccentricity**2)*np.sin(true_anomaly), eccentricity \
+                + np.cos(true_anomaly))
 
-        # Calculate mean anomaly
-        mean_anomaly = eccentric_anomaly - eccentricity*np.sin(eccentric_anomaly)
-        mean_anomaly = mean_anomaly%(2*np.pi)
+                # Calculate mean anomaly
+                mean_anomaly = eccentric_anomaly - eccentricity*np.sin(eccentric_anomaly)
+                mean_anomaly = mean_anomaly%(2*np.pi)
 
         # Calculate the time in days since the last perihelion passage of the meteoroid
-        dt_perihelion = (mean_anomaly*a**(3.0/2))/0.01720209895
-
+        # not meaningful for non-closed orbits
+        if a > 0:
+            dt_perihelion = (mean_anomaly*a**(3.0/2))/0.01720209895
+        else:
+            dt_perihelion = np.nan
 
         if not np.isnan(dt_perihelion):
             

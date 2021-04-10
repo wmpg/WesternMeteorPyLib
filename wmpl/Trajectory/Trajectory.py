@@ -5049,8 +5049,11 @@ class Trajectory(object):
 
                     # Filter out magnitudes fainter than mag 10
                     mag_mask = np.array([abs_mag < 10 for abs_mag in used_magnitudes])
-                    used_times = used_times[mag_mask]
-                    used_magnitudes = used_magnitudes[mag_mask]
+                    
+                    # avoid crash if no magnitudes exceed the threshold
+                    if isinstance(mag_mask, int):
+                        used_times = used_times[mag_mask]
+                        used_magnitudes = used_magnitudes[mag_mask]
 
 
                     plt_handle = plt.plot(used_times, used_magnitudes, marker='x', \
