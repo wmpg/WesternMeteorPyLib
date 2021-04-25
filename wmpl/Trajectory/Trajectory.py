@@ -4564,7 +4564,7 @@ class Trajectory(object):
 
 
         # Generate a list of colors to use for markers
-        colors = cm.viridis(np.linspace(0, 1, len(self.observations)))
+        colors = cm.viridis(np.linspace(0, 0.9, len(self.observations)))
 
         # Only use one type of markers if there are not a lot of stations
         plot_markers = ['x']

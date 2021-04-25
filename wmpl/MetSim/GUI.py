@@ -14,6 +14,7 @@ import numpy as np
 import scipy.stats
 import scipy.interpolate
 import scipy.optimize
+import scipy.signal
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import (NavigationToolbar2QT as NavigationToolbar)
 from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox, QFileDialog
@@ -41,6 +42,9 @@ END_HT_PAD = -2
 
 # Text label height padding
 TEXT_LABEL_HT_PAD = 0.1
+
+# Legend text size
+LEGEND_TEXT_SIZE  = 8
 
 ### ###
 
@@ -243,6 +247,7 @@ class LightCurveContainer(object):
                     # Add the previous data to the dictionary
                     if current_station is not None:
                         self.sites.append(current_station)
+                        print("Loaded {:d} mag points from station: {:s}".format(len(time_data), current_station))
                         self.time_data[current_station] = np.array(time_data)
                         self.height_data[current_station] = np.array(height_data)
                         self.abs_mag_data[current_station] = np.array(abs_mag_data)
@@ -268,6 +273,7 @@ class LightCurveContainer(object):
 
             # Add the final station to the list
             if current_station is not None:
+                print("Loaded {:d} mag points from station: {:s}".format(len(time_data), current_station))
                 self.sites.append(current_station)
                 self.time_data[current_station] = np.array(time_data)
                 self.height_data[current_station] = np.array(height_data)
@@ -691,7 +697,7 @@ class FragmentationContainer(object):
                                             height=100000.0000,
                                             number=None,
                                             mass_percent=None,
-                                            sigma=self.gui.const.sigma,
+                                            sigma=None,
                                             gamma=None,
                                             erosion_coeff=self.gui.const.erosion_coeff,
                                             grain_mass_min=None,
@@ -732,7 +738,7 @@ class FragmentationContainer(object):
                                             height=100000.0,
                                             number=1,
                                             mass_percent=10,
-                                            sigma=self.gui.const.sigma,
+                                            sigma=None,
                                             gamma=None,
                                             erosion_coeff=self.gui.const.erosion_coeff,
                                             grain_mass_min=self.gui.const.erosion_mass_min,
@@ -1300,7 +1306,7 @@ class MetSimGUI(QMainWindow):
 
 
             if 'fragmentation_entries' in const_json:
-                
+
                 # Convert fragmentation entries from dictionaties to objects
                 frag_entries = []
                 if len(const_json['fragmentation_entries']) > 0:
@@ -1709,7 +1715,7 @@ class MetSimGUI(QMainWindow):
         self.inputAblationCoeff.setText("{:.3f}".format(const.sigma*1e6))
         self.inputVelInit.setText("{:.3f}".format(const.v_init/1000))
         self.inputShapeFact.setText("{:.2f}".format(const.shape_factor))
-        self.inputGamma.setText("{:.1f}".format(const.gamma))
+        self.inputGamma.setText("{:.2f}".format(const.gamma))
         self.inputZenithAngle.setText("{:.3f}".format(np.degrees(const.zenith_angle)))
         self.inputLumEff.setText("{:.2f}".format(const.lum_eff))
         
@@ -1739,6 +1745,7 @@ class MetSimGUI(QMainWindow):
         self.checkBoxErosionRhoChange.setChecked(self.erosion_different_rho)
         self.checkBoxErosionAblationCoeffChange.setChecked(self.erosion_different_sigma)
         self.inputErosionHtStart.setText("{:.3f}".format(const.erosion_height_start/1000))
+        self.inputBinsPer10m.setText("{:d}".format(const.erosion_bins_per_10mass))
         self.inputErosionCoeff.setText("{:.3f}".format(const.erosion_coeff*1e6))
         self.inputErosionHtChange.setText("{:.3f}".format(const.erosion_height_change/1000))
         self.inputErosionCoeffChange.setText("{:.3f}".format(const.erosion_coeff_change*1e6))
@@ -2077,6 +2084,8 @@ class MetSimGUI(QMainWindow):
 
         self.const.erosion_height_start = 1000*self._tryReadBox(self.inputErosionHtStart, \
             self.const.erosion_height_start/1000)
+        self.const.erosion_bins_per_10mass = int(self._tryReadBox(self.inputBinsPer10m, \
+            self.const.erosion_bins_per_10mass))
         self.const.erosion_coeff = self._tryReadBox(self.inputErosionCoeff, self.const.erosion_coeff*1e6)/1e6
         self.const.erosion_height_change = 1000*self._tryReadBox(self.inputErosionHtChange, \
             self.const.erosion_height_change/1000)
@@ -2291,38 +2300,39 @@ class MetSimGUI(QMainWindow):
         mag_brightest = np.inf
         mag_faintest = -np.inf
 
-        # Plot observed magnitudes from different stations
-        for obs in self.traj.observations:
+        # Plot observed magnitudes from different stations (only if additional LC data is not given)
+        if self.lc_data is None:
+            for obs in self.traj.observations:
 
-            # Skip instances when no magnitudes are present
-            if obs.absolute_magnitudes is None:
-                continue
+                # Skip instances when no magnitudes are present
+                if obs.absolute_magnitudes is None:
+                    continue
 
-            # Extract data
-            abs_mag_data = obs.absolute_magnitudes[obs.ignore_list == 0]
-            height_data = obs.model_ht[obs.ignore_list == 0]/1000
+                # Extract data
+                abs_mag_data = obs.absolute_magnitudes[obs.ignore_list == 0]
+                height_data = obs.model_ht[obs.ignore_list == 0]/1000
 
-            # Don't plot magnitudes fainter than -10
-            mag_filter = abs_mag_data < 10
-            height_data = height_data[mag_filter]
-            abs_mag_data = abs_mag_data[mag_filter]
+                # Don't plot magnitudes fainter than -10
+                mag_filter = abs_mag_data < 10
+                height_data = height_data[mag_filter]
+                abs_mag_data = abs_mag_data[mag_filter]
 
-            if len(height_data) == 0:
-                continue
+                if len(height_data) == 0:
+                    continue
 
-            self.magnitudePlot.canvas.axes.plot(abs_mag_data, height_data, marker='x',
-                linestyle='dashed', label=obs.station_id, markersize=5, linewidth=1)
+                self.magnitudePlot.canvas.axes.plot(abs_mag_data, height_data, marker='x',
+                    linestyle='dashed', label=obs.station_id, markersize=5, linewidth=1)
 
-            # Keep track of the faintest and the brightest magnitude
-            if len(abs_mag_data):
-                mag_brightest = min(mag_brightest, np.min(abs_mag_data[~np.isinf(abs_mag_data)]))
-                mag_faintest = max(mag_faintest, np.max(abs_mag_data[~np.isinf(abs_mag_data)]))
-            else:
-                mag_faintest = 6.0
-                if sr is not None:
-                    mag_brightest = np.min(sr.abs_magnitude)
+                # Keep track of the faintest and the brightest magnitude
+                if len(abs_mag_data):
+                    mag_brightest = min(mag_brightest, np.min(abs_mag_data[~np.isinf(abs_mag_data)]))
+                    mag_faintest = max(mag_faintest, np.max(abs_mag_data[~np.isinf(abs_mag_data)]))
                 else:
-                    mag_brightest = -2.0
+                    mag_faintest = 6.0
+                    if sr is not None:
+                        mag_brightest = np.min(sr.abs_magnitude)
+                    else:
+                        mag_brightest = -2.0
             
 
 
@@ -2354,8 +2364,11 @@ class MetSimGUI(QMainWindow):
                 abs_mag_data = self.lc_data.abs_mag_data[site]
                 height_data = self.lc_data.height_data[site]/1000
 
+                # self.magnitudePlot.canvas.axes.plot(abs_mag_data, \
+                #     height_data, marker='x', linestyle='dashed', label=str(site), markersize=1, linewidth=1)
+
                 self.magnitudePlot.canvas.axes.plot(abs_mag_data, \
-                    height_data, marker='x', linestyle='dashed', label=str(site), markersize=1, linewidth=1)
+                    height_data, marker='x', linestyle='none', label=str(site), markersize=2, linewidth=1)
 
                 # Keep track of the faintest and the brightest magnitude
                 mag_brightest = min(mag_brightest, np.min(abs_mag_data[~np.isinf(abs_mag_data)]))
@@ -2388,7 +2401,7 @@ class MetSimGUI(QMainWindow):
         # Plot common features across all plots
         self.updateCommonPlotFeatures(self.magnitudePlot.canvas.axes, sr, plot_text=True)
 
-        self.magnitudePlot.canvas.axes.legend()
+        self.magnitudePlot.canvas.axes.legend(prop={'size': LEGEND_TEXT_SIZE})
 
         self.magnitudePlot.canvas.axes.grid(color="k", linestyle='dotted', alpha=0.3)
 
@@ -2489,7 +2502,7 @@ class MetSimGUI(QMainWindow):
         # Plot common features across all plots
         self.updateCommonPlotFeatures(self.velocityPlot.canvas.axes, sr)
 
-        self.velocityPlot.canvas.axes.legend()
+        self.velocityPlot.canvas.axes.legend(prop={'size': LEGEND_TEXT_SIZE})
 
         self.velocityPlot.canvas.axes.grid(color="k", linestyle='dotted', alpha=0.3)
 
@@ -2596,7 +2609,7 @@ class MetSimGUI(QMainWindow):
 
             # Plot observed lag
             lag_handle = lag_plot.plot(obs.lag[obs.ignore_list == 0], height_data/1000, marker='x', \
-                linestyle='dashed', label=obs.station_id, markersize=5, linewidth=1)
+                linestyle='dashed', label=obs.station_id, markersize=3, linewidth=0.5)
 
 
             # Plot the lag residuals from simulated
@@ -2615,7 +2628,7 @@ class MetSimGUI(QMainWindow):
 
                 # Plot the lag residuals
                 lag_residuals_plot.scatter(brightest_residuals, obs_hts/1000, marker='+', \
-                    c=lag_handle[0].get_color(), label="Brightest, {:s}".format(obs.station_id))
+                    c=lag_handle[0].get_color(), label="Brightest, {:s}".format(obs.station_id), s=6)
 
                 ### ###
 
@@ -2631,8 +2644,8 @@ class MetSimGUI(QMainWindow):
                     - leading_interp(-obs_hts)
 
                 # Plot the lag residuals
-                lag_residuals_plot.scatter(leading_residuals, obs_hts/1000, marker='x', \
-                    c=lag_handle[0].get_color(), label="Leading, {:s}".format(obs.station_id))
+                lag_residuals_plot.scatter(leading_residuals, obs_hts/1000, marker='s', \
+                    c=lag_handle[0].get_color(), label="Leading, {:s}".format(obs.station_id), s=6)
 
                 ### ###
 
@@ -2684,14 +2697,14 @@ class MetSimGUI(QMainWindow):
         self.updateCommonPlotFeatures(lag_plot, sr)
         self.updateCommonPlotFeatures(lag_residuals_plot, sr)
 
-        lag_plot.legend()
+        lag_plot.legend(prop={'size': LEGEND_TEXT_SIZE})
         lag_plot.grid(color="k", linestyle='dotted', alpha=0.3)
         lag_plot.set_title('Lag')
 
 
         lag_residuals_plot.set_xlabel('Residuals (m)')
         lag_residuals_plot.get_yaxis().set_visible(False)
-        lag_residuals_plot.legend()
+        lag_residuals_plot.legend(prop={'size': LEGEND_TEXT_SIZE})
         lag_residuals_plot.grid(color="k", linestyle='dotted', alpha=0.3)
         lag_residuals_plot.set_title('Lag residuals')
 
@@ -3042,6 +3055,10 @@ class MetSimGUI(QMainWindow):
             wake_intensity_array = np.array(wake_intensity_array)
 
 
+            # # Smooth the wake intensity to reduce noise
+            # wake_intensity_array = scipy.signal.savgol_filter(wake_intensity_array, 5, 3)
+
+
             # Normalize and align the observed wake with simulations
             len_array, wake_intensity_array = self.normalizeObservedWake(len_array, wake_intensity_array, \
                 wake, simulated_peak_luminosity, simulated_integrated_luminosity, simulated_peak_length, \
@@ -3057,7 +3074,7 @@ class MetSimGUI(QMainWindow):
         ### ###
 
         if wake_ht_plot.lines or wake_ht_plot.collections:
-            wake_ht_plot.legend()
+            wake_ht_plot.legend(prop={'size': LEGEND_TEXT_SIZE})
 
 
         wake_ht_plot.set_xlabel('Length behind leading fragment (m)')
