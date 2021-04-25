@@ -34,9 +34,6 @@ G0 = 9.81
 # Earth radius (m) at 43.930723 deg latitude
 R_EARTH = 6367888.0
 
-# The mass bin coefficient makes sure that there are 10 mass bins per order of magnitude
-MASS_BIN_COEFF = 10**(-0.1)
-
 ###
 
 
@@ -137,6 +134,9 @@ class Constants(object):
         # Toggle erosion on/off
         self.erosion_on = True
 
+
+        # Bins per order of magnitude mass
+        self.erosion_bins_per_10mass = 10
         
         # Height at which the erosion starts (meters)
         self.erosion_height_start = 102000
@@ -375,14 +375,17 @@ def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mas
 
     """
 
+    # Compute the mass bin coefficient
+    mass_bin_coeff = 10**(-1.0/const.erosion_bins_per_10mass)
+
     # Compute the number of mass bins
-    k = math.ceil(abs(math.log10(mass_max/mass_min)/math.log10(MASS_BIN_COEFF)))
+    k = math.ceil(abs(math.log10(mass_max/mass_min)/math.log10(mass_bin_coeff)))
 
     # Compute the number of the largest grains
     if mass_index == 2:
         n0 = eroded_mass/(mass_max*(k + 1))
     else:
-        n0 = abs((eroded_mass/mass_max)*(1 - MASS_BIN_COEFF**(2 - mass_index))/(1 - MASS_BIN_COEFF**((2 - mass_index)*(k + 1))))
+        n0 = abs((eroded_mass/mass_max)*(1 - mass_bin_coeff**(2 - mass_index))/(1 - mass_bin_coeff**((2 - mass_index)*(k + 1))))
 
 
     # Go though every mass bin
@@ -391,7 +394,7 @@ def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mas
     for i in range(0, k + 1):
 
         # Compute the mass of all grains in the bin (per grain)
-        m_grain = mass_max*MASS_BIN_COEFF**i
+        m_grain = mass_max*mass_bin_coeff**i
 
         # Compute the number of grains in the bin
         n_grains_bin = n0*(mass_max/m_grain)**(mass_index - 1) + leftover_mass/m_grain
@@ -522,9 +525,9 @@ def ablateAll(fragments, const, compute_wake=False):
         mass_loss_total = mass_loss_ablation + mass_loss_erosion
 
 
-        # If the total mass in below zero, ablate what's left
+        # If the total mass after ablation in this step is below zero, ablate what's left of the whole mass
         if (frag.m + mass_loss_total ) < 0:
-            mass_loss_total = mass_loss_total + frag.m
+            mass_loss_total = frag.m
 
 
         # Compute new mass
@@ -534,37 +537,43 @@ def ablateAll(fragments, const, compute_wake=False):
         # Compute change in velocity
         deceleration_total = decelerationRK4(const.dt, frag.K, frag.m, rho_atm, frag.v)
 
+        # If the deceleration is negative (i.e. the fragment is accelerating), then stop the fragment
+        if deceleration_total > 0:
+            frag.vv = frag.vh = frag.v = 0
 
-        # ### Add velocity change due to Earth's gravity ###
-
-        # # Compute g at given height
-        # gv = G0/((1 + frag.h/R_EARTH)**2)
-
-        # # Vertical component of a
-        # av = -gv - deceleration_total*frag.vv/frag.v + frag.vh*frag.v/(R_EARTH + frag.h)
-
-        # # Horizontal component of a
-        # ah = -deceleration_total*frag.vh/frag.v - frag.vv*frag.v/(R_EARTH + frag.h)
-
-        # ### ###
+        # Otherwise update the velocity
+        else:
 
 
-        ### Compute deceleration wihout effect of gravity (to reconstruct the initial velocity without the 
-        #   gravity component)
+            # ### Add velocity change due to Earth's gravity ###
 
-        # Vertical component of a
-        av = -deceleration_total*frag.vv/frag.v + frag.vh*frag.v/(R_EARTH + frag.h)
+            # # Compute g at given height
+            # gv = G0/((1 + frag.h/R_EARTH)**2)
 
-        # Horizontal component of a
-        ah = -deceleration_total*frag.vh/frag.v - frag.vv*frag.v/(R_EARTH + frag.h)
+            # # Vertical component of a
+            # av = -gv - deceleration_total*frag.vv/frag.v + frag.vh*frag.v/(R_EARTH + frag.h)
 
-        ###
+            # # Horizontal component of a
+            # ah = -deceleration_total*frag.vh/frag.v - frag.vv*frag.v/(R_EARTH + frag.h)
+
+            # ### ###
 
 
-        # Update the velocity
-        frag.vv -= av*const.dt
-        frag.vh -= ah*const.dt
-        frag.v = math.sqrt(frag.vh**2 + frag.vv**2)
+            ### Compute deceleration wihout effect of gravity (to reconstruct the initial velocity without the 
+            #   gravity component)
+
+            # Vertical component of a
+            av = -deceleration_total*frag.vv/frag.v + frag.vh*frag.v/(R_EARTH + frag.h)
+
+            # Horizontal component of a
+            ah = -deceleration_total*frag.vh/frag.v - frag.vv*frag.v/(R_EARTH + frag.h)
+
+            ###
+
+            # Update the velocity
+            frag.vv -= av*const.dt
+            frag.vh -= ah*const.dt
+            frag.v = math.sqrt(frag.vh**2 + frag.vv**2)
 
 
         # Update fragment parameters
@@ -732,14 +741,6 @@ def ablateAll(fragments, const, compute_wake=False):
                 const.n_active -= 1
 
 
-        # If the fragment is done, stop ablating
-        if (frag.m <= const.m_kill):
-            frag.active = False
-            const.n_active -= 1
-            #print('Killing', frag.id)
-            continue
-
-
 
         # Handle complex fragmentation and status changes of the main fragment
         if frag.main:
@@ -755,6 +756,7 @@ def ablateAll(fragments, const, compute_wake=False):
                     # Check if the height of the main fragment is right to perform the operation
                     if frag.h < frag_entry.height:
 
+                        parent_initial_mass = None
 
                         # Change parameters of all fragments
                         if frag_entry.frag_type == "A":
@@ -808,6 +810,9 @@ def ablateAll(fragments, const, compute_wake=False):
 
                                 # Create the new fragment
                                 frag_new = copy.deepcopy(frag)
+                                frag_new.active = True
+                                frag_new.main = False
+                                frag_new.disruption_enabled = False
 
                                 # Indicate that the fragments are born out of complex fragmentation
                                 frag_new.complex = True
@@ -844,6 +849,8 @@ def ablateAll(fragments, const, compute_wake=False):
                         # Release dust
                         if frag_entry.frag_type == "D":
 
+                            parent_initial_mass = frag.m
+
                             # Compute the mass of the dust
                             dust_mass = frag.m*(frag_entry.mass_percent/100.0)
                             frag_entry.mass = dust_mass
@@ -853,6 +860,9 @@ def ablateAll(fragments, const, compute_wake=False):
 
                             # Create the new fragment
                             frag_new = copy.deepcopy(frag)
+                            frag_new.active = True
+                            frag_new.main = False
+                            frag_new.disruption_enabled = False
 
                             # Indicate that the fragments are born out of complex fragmentation
                             frag_new.complex = True
@@ -874,7 +884,16 @@ def ablateAll(fragments, const, compute_wake=False):
                         frag_entry.time = const.total_time
                         frag_entry.dyn_pressure = dyn_press
                         frag_entry.velocity = frag.v
-                        frag_entry.parent_mass = frag.m
+                        frag_entry.parent_mass = parent_initial_mass
+
+
+
+        # If the fragment is done, stop ablating
+        if (frag.m <= const.m_kill):
+            frag.active = False
+            const.n_active -= 1
+            #print('Killing', frag.id)
+            continue
 
 
 
