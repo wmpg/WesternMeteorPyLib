@@ -589,6 +589,17 @@ def ablateAll(fragments, const, compute_wake=False):
         lum = -luminousEfficiency(const.lum_eff_type, const.lum_eff, frag.v, frag.m) \
             *((mass_loss_ablation/const.dt*frag.v**2)/2)
 
+
+
+
+        # If the fragment is done, stop ablating
+        if (frag.m <= const.m_kill) or (frag.v < const.v_kill) or (frag.h < const.h_kill) or (frag.lum < 0):
+            frag.active = False
+            const.n_active -= 1
+            #print('Killing', frag.id)
+            continue
+
+
         # Compute the total luminosity
         frag.lum = lum*frag.n_grains
 
@@ -624,13 +635,6 @@ def ablateAll(fragments, const, compute_wake=False):
         #     print('DynPress:', dyn_press/1000, 'kPa')
 
 
-
-        # If the fragment is done, stop ablating
-        if (frag.m <= const.m_kill) or (frag.v < const.v_kill) or (frag.h < const.h_kill) or (frag.lum < 0):
-            frag.active = False
-            const.n_active -= 1
-            #print('Killing', frag.id)
-            continue
 
         
         # # Change the erosion coefficient of the fragment below the given height

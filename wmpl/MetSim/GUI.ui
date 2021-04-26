@@ -1513,6 +1513,11 @@
        <string>Ceplecha&amp;McCrosky (1976)</string>
       </property>
      </item>
+     <item>
+      <property name="text">
+       <string>Borovicka et al. (2020)</string>
+      </property>
+     </item>
     </widget>
    </widget>
    <widget class="MagnitudeMplWidget" name="magnitudePlot" native="true">

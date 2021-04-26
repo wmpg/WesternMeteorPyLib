@@ -81,19 +81,20 @@ if __name__ == "__main__":
     ### Plot different lum effs ###
 
     # Range of velocities
-    vel_range = np.linspace(11000, 72000, 100)
+    vel_range = np.linspace(2000, 72000, 100)
 
     # Range of masses
     masses = [1e-11, 1e-9, 1e-7, 1e-5, 0.001, 0.01, 0.1, 1, 10, 100, 1000]
 
 
-    lum_eff_types = [1, 2, 3, 4, 5, 6]
+    lum_eff_types = [1, 2, 3, 4, 5, 6, 7]
     lum_eff_labels = ["Revelle & Ceplecha (2001) - Type I", 
                       "Revelle & Ceplecha (2001) - Type II",
                       "Revelle & Ceplecha (2001) - Type III",
                       "Borovicka et al. (2013) - Kosice",
                       "CAMO faint meteors",
-                      "Ceplecha & McCrosky (1976)"]
+                      "Ceplecha & McCrosky (1976)",
+                      "Borovicka et al. (2020) - Two strengths"]
 
     for i, lum_type in enumerate(lum_eff_types):
 
