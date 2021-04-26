@@ -60,7 +60,7 @@ class SimulationResults(object):
         results_list = np.array(results_list).astype(np.float64)
         self.time_arr, self.luminosity_arr, self.brightest_height_arr, self.brightest_length_arr, \
             self.brightest_vel_arr, self.leading_frag_height_arr, self.leading_frag_length_arr, \
-            self.mass_total_arr = results_list.T
+            self.leading_frag_vel_arr, self.mass_total_arr = results_list.T
 
 
         # Calculate absolute magnitude (apparent @100km), and fix possible NaN values (replace them with the
@@ -2385,7 +2385,7 @@ class MetSimGUI(QMainWindow):
             # ht_arr, abs_mag_arr = temp_arr.T
 
             # Plot the simulated magnitudes
-            self.magnitudePlot.canvas.axes.plot(sr.abs_magnitude, sr.brightest_height_arr/1000, \
+            self.magnitudePlot.canvas.axes.plot(sr.abs_magnitude, sr.leading_frag_height_arr/1000, \
                 label='Simulated', color='k', alpha=0.5)
 
 
@@ -2471,6 +2471,10 @@ class MetSimGUI(QMainWindow):
             # Plot the simulated velocity at the brightest point
             self.velocityPlot.canvas.axes.plot(sr.brightest_vel_arr/1000, sr.brightest_height_arr/1000, \
                 label='Simulated - brightest', color='k', alpha=0.5)
+
+            # Plot the simulated velocity at the brightest point
+            self.velocityPlot.canvas.axes.plot(sr.leading_frag_vel_arr/1000, sr.leading_frag_height_arr/1000,\
+                label='Simulated - leading', color='k', alpha=0.5, linestyle="dashed")
 
 
 

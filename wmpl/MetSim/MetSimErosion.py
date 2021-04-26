@@ -910,9 +910,11 @@ def ablateAll(fragments, const, compute_wake=False):
         leading_frag = max(active_fragments, key=lambda x: x.length)
         leading_frag_length = leading_frag.length
         leading_frag_height = leading_frag.h
+        leading_frag_vel    = leading_frag.v
     else:
         leading_frag_length = None
         leading_frag_height = None
+        leading_frag_vel    = None
 
 
     ### Compute the wake profile ###
@@ -957,7 +959,7 @@ def ablateAll(fragments, const, compute_wake=False):
 
 
     return fragments, const, luminosity_total, brightest_height, brightest_length, brightest_vel, \
-        leading_frag_height, leading_frag_length, mass_total, wake
+        leading_frag_height, leading_frag_length, leading_frag_vel, mass_total, wake
 
 
 
@@ -1007,7 +1009,8 @@ def runSimulation(const, compute_wake=False):
 
         # Ablate the fragments
         fragments, const, luminosity_total, brightest_height, brightest_length, brightest_vel, \
-            leading_frag_height, leading_frag_length, mass_total, wake = ablateAll(fragments, const, \
+            leading_frag_height, leading_frag_length, leading_frag_vel, mass_total, \
+            wake = ablateAll(fragments, const, \
                 compute_wake=compute_wake)
 
         # Store wake estimation results
@@ -1015,7 +1018,7 @@ def runSimulation(const, compute_wake=False):
 
         # Stack results list
         results_list.append([const.total_time, luminosity_total, brightest_height, brightest_length, \
-            brightest_vel, leading_frag_height, leading_frag_length, mass_total])
+            brightest_vel, leading_frag_height, leading_frag_length, leading_frag_vel, mass_total])
 
 
 
@@ -1051,7 +1054,8 @@ if __name__ == "__main__":
     # Unpack the results
     results_list = np.array(results_list).astype(np.float64)
     time_arr, luminosity_arr, brightest_height_arr, brightest_length_arr, brightest_vel_arr, \
-        leading_frag_height_arr, leading_frag_length_arr, mass_total_arr = results_list.T
+        leading_frag_height_arr, leading_frag_length_arr, leading_frag_vel_arr, \
+        mass_total_arr = results_list.T
 
 
     # Calculate absolute magnitude (apparent @100km) from given luminous intensity
