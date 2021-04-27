@@ -499,7 +499,10 @@ def ablateAll(fragments, const, compute_wake=False):
     # Keep track of the total luminosity
     luminosity_total = 0.0
 
-    # Keep track of height of the brightest fragment
+    # Keep track of the luminosity of the main fragment
+    luminosity_main = 0.0
+
+    # Keep track of parameters of the brightest fragment
     brightest_height = 0.0
     brightest_length = 0.0
     brightest_lum    = 0.0
@@ -619,6 +622,12 @@ def ablateAll(fragments, const, compute_wake=False):
 
         # Keep track of the total luminosity across all fragments
         luminosity_total += frag.lum
+
+
+        # Keep track of the luminosity of the main fragment
+        if frag.main:
+            luminosity_main = frag.lum
+
 
         # Update length along the track
         frag.length += frag.v*const.dt
@@ -802,7 +811,7 @@ def ablateAll(fragments, const, compute_wake=False):
 
 
         # Handle complex fragmentation and status changes of the main fragment
-        if frag.main:
+        if frag.main and const.fragmentation_on:
 
             # Get a list of complex fragmentations that are still to do
             frags_to_do = [frag_entry for frag_entry in const.fragmentation_entries if not frag_entry.done]
@@ -1019,8 +1028,8 @@ def ablateAll(fragments, const, compute_wake=False):
     const.total_time += const.dt
 
 
-    return fragments, const, luminosity_total, brightest_height, brightest_length, brightest_vel, \
-        leading_frag_height, leading_frag_length, leading_frag_vel, mass_total, wake
+    return fragments, const, luminosity_total, luminosity_main, brightest_height, brightest_length, \
+        brightest_vel, leading_frag_height, leading_frag_length, leading_frag_vel, mass_total, wake
 
 
 
@@ -1031,12 +1040,14 @@ def runSimulation(const, compute_wake=False):
     ###
 
 
-    # Assign unique IDs to complex fragmentation entries
-    for i, frag_entry in enumerate(const.fragmentation_entries):
-        frag_entry.id = i
+    if const.fragmentation_on:
 
-        # Reset output parameters for every fragmentation entry
-        frag_entry.resetOutputParameters()
+        # Assign unique IDs to complex fragmentation entries
+        for i, frag_entry in enumerate(const.fragmentation_entries):
+            frag_entry.id = i
+
+            # Reset output parameters for every fragmentation entry
+            frag_entry.resetOutputParameters()
 
 
     fragments = []
@@ -1078,8 +1089,8 @@ def runSimulation(const, compute_wake=False):
     while const.n_active > 0:
 
         # Ablate the fragments
-        fragments, const, luminosity_total, brightest_height, brightest_length, brightest_vel, \
-            leading_frag_height, leading_frag_length, leading_frag_vel, mass_total, \
+        fragments, const, luminosity_total, luminosity_main, brightest_height, brightest_length, \
+            brightest_vel, leading_frag_height, leading_frag_length, leading_frag_vel, mass_total, \
             wake = ablateAll(fragments, const, \
                 compute_wake=compute_wake)
 
@@ -1087,8 +1098,9 @@ def runSimulation(const, compute_wake=False):
         wake_results.append(wake)
 
         # Stack results list
-        results_list.append([const.total_time, luminosity_total, brightest_height, brightest_length, \
-            brightest_vel, leading_frag_height, leading_frag_length, leading_frag_vel, mass_total])
+        results_list.append([const.total_time, luminosity_total, luminosity_main, brightest_height, \
+            brightest_length, brightest_vel, leading_frag_height, leading_frag_length, leading_frag_vel, \
+            mass_total])
 
 
 
@@ -1161,8 +1173,8 @@ if __name__ == "__main__":
 
     # Unpack the results
     results_list = np.array(results_list).astype(np.float64)
-    time_arr, luminosity_arr, brightest_height_arr, brightest_length_arr, brightest_vel_arr, \
-        leading_frag_height_arr, leading_frag_length_arr, leading_frag_vel_arr, \
+    time_arr, luminosity_arr, luminosity_main_arr, brightest_height_arr, brightest_length_arr, \
+        brightest_vel_arr, leading_frag_height_arr, leading_frag_length_arr, leading_frag_vel_arr, \
         mass_total_arr = results_list.T
 
 

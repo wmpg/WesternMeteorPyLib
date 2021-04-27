@@ -60,15 +60,19 @@ class SimulationResults(object):
 
         # Unpack the results
         results_list = np.array(results_list).astype(np.float64)
-        self.time_arr, self.luminosity_arr, self.brightest_height_arr, self.brightest_length_arr, \
-            self.brightest_vel_arr, self.leading_frag_height_arr, self.leading_frag_length_arr, \
-            self.leading_frag_vel_arr, self.mass_total_arr = results_list.T
+        self.time_arr, self.luminosity_arr, self.luminosity_main_arr, self.brightest_height_arr, \
+            self.brightest_length_arr, self.brightest_vel_arr, self.leading_frag_height_arr, \
+            self.leading_frag_length_arr, self.leading_frag_vel_arr, self.mass_total_arr = results_list.T
 
 
-        # Calculate absolute magnitude (apparent @100km), and fix possible NaN values (replace them with the
-        #   faintest magnitude)
+        # Calculate the total absolute magnitude (apparent @100km), and fix possible NaN values (replace them 
+        #   with the faintest magnitude)
         self.abs_magnitude = -2.5*np.log10(self.luminosity_arr/const.P_0m)
         self.abs_magnitude[np.isnan(self.abs_magnitude)] = np.nanmax(self.abs_magnitude)
+
+        # Compute the absolute magnitude of the main fragment
+        self.abs_magnitude_main = -2.5*np.log10(self.luminosity_main_arr/const.P_0m)
+        self.abs_magnitude_main[np.isnan(self.abs_magnitude_main)] = np.nanmax(self.abs_magnitude_main)
 
 
         # Interpolate time vs leading fragment height
@@ -2518,10 +2522,16 @@ class MetSimGUI(QMainWindow):
             # Plot magnitudes of individual fragments
             if self.const.fragmentation_show_individual_lcs:
 
+                # Plot the magnitude of the initial/main fragment
+                self.magnitudePlot.canvas.axes.plot(sr.abs_magnitude_main, \
+                    sr.leading_frag_height_arr/1000, color='blue', linestyle='solid', linewidth=1, \
+                    alpha=0.5)
+
+
                 # Plot magnitudes for every fragmentation entry
                 for frag_entry in self.const.fragmentation_entries:
 
-                    # Plot magnitude of the main fragment
+                    # Plot magnitude of the main fragment in the fragmentation (not the grains)
                     if len(frag_entry.main_height_data):
 
                         # Choose the color of the main fragment depending on the fragmentation type
