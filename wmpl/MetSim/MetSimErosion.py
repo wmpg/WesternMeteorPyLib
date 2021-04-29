@@ -543,7 +543,7 @@ def ablateAll(fragments, const, compute_wake=False):
 
         # If the total mass after ablation in this step is below zero, ablate what's left of the whole mass
         if (frag.m + mass_loss_total ) < 0:
-            mass_loss_total = frag.m
+            mass_loss_total = mass_loss_total + frag.m
 
 
         # Compute new mass
