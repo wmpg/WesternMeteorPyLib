@@ -26,7 +26,7 @@ from wmpl.Trajectory.Orbit import calcOrbit
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly
 from wmpl.Utils.Math import mergeClosePoints, findClosestPoints, vectMag, lineFunc, meanAngle
 from wmpl.Utils.Physics import calcMass
-from wmpl.Utils.Pickling import loadPickle
+from wmpl.Utils.Pickling import loadPickle, savePickle
 from wmpl.Utils.Plotting import saveImage
 from wmpl.Utils.TrajConversions import unixTime2JD, geo2Cartesian, cartesian2Geo, altAz2RADec, \
     altAz2RADec_vect, raDec2ECI
@@ -1909,6 +1909,7 @@ class MetSimGUI(QMainWindow):
 
         ### Fragmentation parameters ###
         self.fragmentationGroup.setChecked(const.fragmentation_on)
+        self.checkBoxFragmentationShowIndividualLCs.setChecked(const.fragmentation_show_individual_lcs)
         self.checkBoxDisruptionErosionCoeff.setChecked(const.fragmentation_show_individual_lcs)
 
         ###
@@ -3871,10 +3872,14 @@ class MetSimGUI(QMainWindow):
         traj_updated = copy.deepcopy(self.traj)
         traj_updated.orbit = orb
         dir_path, file_name = os.path.split(self.traj_path)
-        file_name = file_name.replace('trajectory.pickle', '') + 'report_sim.txt'
+        report_file_name = file_name.replace('trajectory.pickle', '') + 'report_sim.txt'
 
         # Save the report with updated orbit
-        traj_updated.saveReport(dir_path, file_name, uncertainties=self.traj.uncertainties, verbose=False)
+        traj_updated.saveReport(dir_path, report_file_name, uncertainties=self.traj.uncertainties, verbose=False)
+
+        # Save the updated pickle file
+        updated_pickle_file_name = file_name.replace('trajectory.pickle', 'trajectory_sim.pickle')
+        savePickle(traj_updated, dir_path, updated_pickle_file_name)
 
 
 

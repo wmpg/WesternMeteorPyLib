@@ -542,9 +542,8 @@ def ablateAll(fragments, const, compute_wake=False):
 
 
         # If the total mass after ablation in this step is below zero, ablate what's left of the whole mass
-        if (frag.m + mass_loss_total ) < 0:
+        if (frag.m + mass_loss_total) < 0:
             mass_loss_total = mass_loss_total + frag.m
-
 
         # Compute new mass
         m_new = frag.m + mass_loss_total
@@ -591,6 +590,14 @@ def ablateAll(fragments, const, compute_wake=False):
             frag.vh -= ah*const.dt
             frag.v = math.sqrt(frag.vh**2 + frag.vv**2)
 
+            # Only allow the meteoroid to go down, and stop the ablation if it stars going up
+            if frag.vv > 0:
+
+                frag.vv = 0
+
+                # Setting the height to zero will stop the ablation during the if catch below
+                frag.h = 0
+
 
         # Update fragment parameters
         frag.m = m_new
@@ -604,16 +611,6 @@ def ablateAll(fragments, const, compute_wake=False):
         # Compute luminosity without the deceleration term
         lum = -luminousEfficiency(const.lum_eff_type, const.lum_eff, frag.v, frag.m) \
             *((mass_loss_ablation/const.dt*frag.v**2)/2)
-
-
-
-
-        # If the fragment is done, stop ablating
-        if (frag.m <= const.m_kill) or (frag.v < const.v_kill) or (frag.h < const.h_kill) or (frag.lum < 0):
-            frag.active = False
-            const.n_active -= 1
-            #print('Killing', frag.id)
-            continue
 
 
         # Compute the total luminosity
@@ -635,6 +632,14 @@ def ablateAll(fragments, const, compute_wake=False):
 
         # Track total mass loss
         mass_total += mass_loss_total
+
+
+        # If the fragment is done, stop ablating
+        if (frag.m <= const.m_kill) or (frag.v < const.v_kill) or (frag.h < const.h_kill) or (frag.lum < 0):
+            frag.active = False
+            const.n_active -= 1
+            #print('Killing', frag.id)
+            continue
 
 
         # Keep track of the brightest fragment
