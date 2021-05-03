@@ -1,4 +1,4 @@
-""" Method for fitting the population and mass index based on fitting the gamma distribution on observed
+""" Method for fitting the population and mass index based on fitting the Gumbel distribution on observed
     data by MLE method and extracting the slope in the magnitude completeness region. 
 """
 
@@ -25,7 +25,7 @@ def inverseLogline(y, m, k):
 
 
 def fitSlope(input_data, mass, ref_point=None):
-    """ Fit a gamma distribution on the input data and compute the slope at the reference point. 
+    """ Fit a Gumbel distribution on the input data and compute the slope at the reference point. 
 
     Arguments:
         input_data: [list] A list of magnitudes or masses (see mass keyword argument).
@@ -50,16 +50,15 @@ def fitSlope(input_data, mass, ref_point=None):
     """
 
 
-    # Fit a gamma distribution to the data
-    df = 10
-    params = scipy.stats.gamma.fit(input_data, df, loc=np.min(input_data))
+    # Fit a Gumbel distribution to the data
+    params = scipy.stats.gumbel_r.fit(input_data, loc=np.min(input_data))
 
     # Kolmogorov-Smirnov test
-    kstest = scipy.stats.kstest(input_data, scipy.stats.gamma.cdf, params)
+    kstest = scipy.stats.kstest(input_data, scipy.stats.gumbel_r.cdf, params)
 
     # Compute the derivative of the PDF
     x_arr = np.linspace(np.min(input_data), np.max(input_data), 100)
-    pdf_derivative = scipy.misc.derivative(scipy.stats.gamma.pdf, x_arr, dx=0.01, args=params)
+    pdf_derivative = scipy.misc.derivative(scipy.stats.gumbel_r.pdf, x_arr, dx=0.01, args=params)
 
     # Find the minimum of the PDF derivative
     inflection_point = x_arr[pdf_derivative.argmin()]
@@ -78,7 +77,7 @@ def fitSlope(input_data, mass, ref_point=None):
 
     # Find the slope of the log survival function
     def logsf(*args, **kwargs):
-        return np.log10(scipy.stats.gamma.sf(*args, **kwargs))
+        return np.log10(scipy.stats.gumbel_r.sf(*args, **kwargs))
 
     slope = 1.0/(10**scipy.misc.derivative(logsf, ref_point, dx=0.01, args=params))
     slope = np.log10(slope)
@@ -94,7 +93,7 @@ def fitSlope(input_data, mass, ref_point=None):
 
 
     # Compute intercept of the line on the reverse cumulative plot (survival function)
-    y_temp = np.log10(scipy.stats.gamma.sf(ref_point, *params))
+    y_temp = np.log10(scipy.stats.gumbel_r.sf(ref_point, *params))
     intercept = y_temp + slope*ref_point
 
 
@@ -110,7 +109,7 @@ def fitSlope(input_data, mass, ref_point=None):
 
 def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot_save_path=None, \
     nsamples=100, mass_as_intensity=False):
-    """ Estimate the mass or population index from the meteor data by fitting a gamma function to it using
+    """ Estimate the mass or population index from the meteor data by fitting a Gumbel function to it using
         MLE and estimating the slope in the completeness region.
 
     Arguments:
@@ -143,7 +142,7 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
     input_data = input_data[~np.isnan(input_data)]
 
 
-    # Reverse the signs of magnitudes to conform with the gamma distribution definition
+    # Reverse the signs of magnitudes to conform with the Gumbel distribution definition
     if not mass:
         input_data = -input_data
     
@@ -168,7 +167,7 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
     
     # Iteratively reject all 3 sigma slope outliers
     for _ in range(3):
-        slopes = [scipy.stats.gamma.pdf(entry[3], *entry[0]) for entry in unc_results_list]
+        slopes = [scipy.stats.gumbel_r.pdf(entry[3], *entry[0]) for entry in unc_results_list]
         median_slope = np.median(slopes)
         slope_std = np.std(slopes)
 
@@ -235,13 +234,13 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
         nbins = int(np.ceil(np.sqrt(len(input_data))))
 
         # Find the slope at the reference point for PDF plotting
-        slope_pdf = scipy.stats.gamma.pdf(ref_point, *params)
+        slope_pdf = scipy.stats.gumbel_r.pdf(ref_point, *params)
 
         # Plot the histogram
         plt.hist(sign*input_data, bins=nbins, density=True, color='k', histtype='step')
         
         # Plot the estimated slope
-        plt.plot(sign*x_arr, scipy.stats.gamma.pdf(x_arr, *params), zorder=4)
+        plt.plot(sign*x_arr, scipy.stats.gumbel_r.pdf(x_arr, *params), zorder=4)
 
         # Get Y axis range
         y_min, y_max = plt.gca().get_ylim()
@@ -255,15 +254,15 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
             ref_point_unc_list.append(ref_point_unc)
 
             # Find the slope at the reference point for PDF plotting
-            slope_pdf_unc = scipy.stats.gamma.pdf(ref_point_unc, *params_unc)
+            slope_pdf_unc = scipy.stats.gumbel_r.pdf(ref_point_unc, *params_unc)
 
             # Alpha (transparency) is normazlied for 100 sampling runs
-            plt.plot(sign*x_arr, scipy.stats.gamma.pdf(x_arr, *params_unc), color='k', \
+            plt.plot(sign*x_arr, scipy.stats.gumbel_r.pdf(x_arr, *params_unc), color='k', \
                 alpha=0.05*alpha_factor)
 
             plt.scatter(sign*ref_point_unc, slope_pdf_unc, color='g', zorder=3, alpha=0.1*alpha_factor)
 
-            plt.scatter(sign*inflection_point_unc, scipy.stats.gamma.pdf(inflection_point_unc, *params_unc), \
+            plt.scatter(sign*inflection_point_unc, scipy.stats.gumbel_r.pdf(inflection_point_unc, *params_unc), \
                 color='y', zorder=3, alpha=0.1*alpha_factor)
 
 
@@ -274,7 +273,7 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
         plt.scatter(sign*ref_point, slope_pdf, color='r', zorder=5, \
             label='Reference point = {:.2f} $\pm$ {:.2f}'.format(sign*ref_point, ref_point_std))
 
-        plt.scatter(sign*inflection_point, scipy.stats.gamma.pdf(inflection_point, *params), color='r', \
+        plt.scatter(sign*inflection_point, scipy.stats.gumbel_r.pdf(inflection_point, *params), color='r', \
             marker='x', zorder=5, label='Inflection point = {:.2f}'.format(sign*inflection_point))
 
 
@@ -308,8 +307,8 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
         # Get Y axis range
         y_min, y_max = plt.gca().get_ylim()
         
-        # # Plot fitted survival function
-        # plt.plot(sign*x_arr, scipy.stats.gamma.sf(x_arr, *params))
+        # Plot fitted survival function
+        plt.plot(sign*x_arr, scipy.stats.gumbel_r.sf(x_arr, *params), label="Gumbel fit")
 
 
         # Plot slopes of all lines found during uncertainty estimation
@@ -318,7 +317,7 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
             params_unc, _, _, ref_point_unc, slope_unc, slope_report_unc, _, _, _, _ = unc_results
 
             # Compute intercept of the line on the reverse cumulative plot (survival function)
-            y_temp_unc = np.log10(scipy.stats.gamma.sf(ref_point_unc, *params_unc))
+            y_temp_unc = np.log10(scipy.stats.gumbel_r.sf(ref_point_unc, *params_unc))
             intercept_unc = y_temp_unc + slope_unc*ref_point_unc
 
             # Plot the tangential line with the slope
@@ -327,7 +326,7 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
 
 
         # Plot the inflection point
-        y_temp = np.log10(scipy.stats.gamma.sf(ref_point, *params))
+        y_temp = np.log10(scipy.stats.gumbel_r.sf(ref_point, *params))
         plt.scatter(sign*ref_point, 10**y_temp, c='r', \
             label='Reference point = {:.2f} $\pm$ {:.2f}'.format(sign*ref_point, ref_point_std), zorder=5)
 
