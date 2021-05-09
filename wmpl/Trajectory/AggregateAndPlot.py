@@ -1891,7 +1891,8 @@ if __name__ == "__main__":
         help="""During the first continous run, go back FIRST_PREV_SOLS to generate the plots and report. After that, use PREV_SOLS to run."""
         )
 
-    arg_parser.add_argument('-p', '--plot_all_showers', metavar='PLOTALLSHOWERS', type=int, \
+    arg_parser.add_argument('-p', '--plot_all_showers', metavar='PLOTALLSHOWERS', type=int, default=None, \
+        nargs='?', \
         help="""Plot showers on the maps showing the whole date ramge."""
         )
     # Parse the command line arguments
