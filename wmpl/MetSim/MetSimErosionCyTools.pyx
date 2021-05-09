@@ -6,7 +6,7 @@ cimport cython
 
 import numpy as np
 cimport numpy as np
-from libc.math cimport sqrt, M_PI, M_PI_2, atan2, tanh, log, exp
+from libc.math cimport sqrt, M_PI, M_PI_2, atan2, tanh, log, exp, log10
 
 
 # Define cython types for numpy arrays
@@ -386,6 +386,8 @@ cpdef double luminousEfficiency(int lum_eff_type, double lum_eff, double vel, do
             2 - b) Type II, 
             3 - c) Type III, 
             4 - Borovicka et al. (2013) Kosice
+            5 - CAMO faint meteors
+            6 - Celpecha & McCrosky (1976)
         lum_eff: [double] Value of the constant luminous efficiency (percent).
         vel: [double] Velocity (m/s).
         mass: [double] Mass (kg).
@@ -432,6 +434,31 @@ cpdef double luminousEfficiency(int lum_eff_type, double lum_eff, double vel, do
     # Borovicka et al. (2013) - Kosice
     elif lum_eff_type == 4:
         return (exp(-1.45 + log(vel/1000.0) + 0.35*tanh(0.38*log(mass))))/100.0
+
+    # CAMO fast meteors - Subasinghe 2018 & Brown 2020
+    elif lum_eff_type == 5:
+        return exp(-12.59 + 5.58*log(vel/1000.0) - 0.17*log(vel/1000.0)**3 - 1.21*tanh(0.2*log(1e6*mass)))/100.0
+
+    # Ceplecha & McCrosky (1976)
+    elif lum_eff_type == 6:
+
+        # Correction factor to convert from panchromatic magnitude to fraction definition
+        correction_factor = 1500*10000000
+
+        if vel <= 9300:
+            return correction_factor*10**(-12.75)
+
+        elif vel <= 12500:
+            return correction_factor*10**(-15.60 + 2.92*log10(vel/1000.0))
+
+        elif vel <= 17000:
+            return correction_factor*10**(-13.24 + 0.77*log10(vel/1000.0))
+
+        elif vel <= 27000:
+            return correction_factor*10**(-12.50 + 0.17*log10(vel/1000.0))
+
+        else:
+            return correction_factor*10**(-13.69 + 1.00*log10(vel/1000.0))
 
 
 

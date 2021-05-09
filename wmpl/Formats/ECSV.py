@@ -76,6 +76,11 @@ def loadECSVs(ecsv_paths):
             x_indx = header.index('x_image')
             y_indx = header.index('y_image')
 
+            if 'mag_data' in header:
+                mag_indx = header.index('mag_data')
+            else:
+                mag_indx = None
+
 
             # Skip the header
             data = data[1:]
@@ -88,6 +93,12 @@ def loadECSVs(ecsv_paths):
             alt_data = alt_data.astype(np.float64)
             x_data = x_data.astype(np.float64)
             y_data = y_data.astype(np.float64)
+
+            # Get magnitude data, if any
+            if mag_indx is not None:
+                mag_data = data[:, mag_indx].astype(np.float64)
+            else:
+                mag_data = np.zeros_like(azim_data) + 10.0
 
 
             # Convert time to JD
@@ -121,10 +132,10 @@ def loadECSVs(ecsv_paths):
                 np.radians(station_lon), station_ele, FPS)
 
             # Add data to meteor object
-            for t_rel, x_centroid, y_centroid, ra, dec, azim, alt in zip(time_data, x_data, y_data, \
-                np.degrees(ra_data), np.degrees(dec_data), azim_data, alt_data):
+            for t_rel, x_centroid, y_centroid, ra, dec, azim, alt, mag in zip(time_data, x_data, y_data, \
+                np.degrees(ra_data), np.degrees(dec_data), azim_data, alt_data, mag_data):
 
-                meteor.addPoint(t_rel*FPS, x_centroid, y_centroid, azim, alt, ra, dec, 0)
+                meteor.addPoint(t_rel*FPS, x_centroid, y_centroid, azim, alt, ra, dec, mag)
 
             meteor.finish()
 
