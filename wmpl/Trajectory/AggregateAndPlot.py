@@ -1998,8 +1998,8 @@ if __name__ == "__main__":
         print("Plotting all trajectories...")
         pas = False
         if cml_args.plot_all_showers is not None:
-            if cml_args.plot_all_showers == 1:
-                pas = True
+            pas = True
+            print('adding shower loci to all maps')
         generateTrajectoryPlots(cml_args.dir_path, traj_list, plot_showers=pas, time_limited_plot=False)
 
         # Generate station plot
