@@ -1545,7 +1545,7 @@ def calcCovMatrices(mc_traj_list):
     i_list = np.degrees(normalizeAngleWrap(np.array([traj.orbit.i for traj in mc_traj_list])))
     
 
-    # Calculate the orbital covariance
+    # Calculate the orbital covariance (angles in degrees)
     orbit_input = np.c_[e_list, q_list, tp_list, node_list, peri_list, i_list].T
     orbit_cov = np.cov(orbit_input, aweights=weights)
 
@@ -1829,7 +1829,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
 
     print('Computing covariance matrices...')
 
-    # Calculate orbital and inital state vector covariance matrices
+    # Calculate orbital and inital state vector covariance matrices (angles in degrees)
     traj_best.orbit_cov, traj_best.state_vect_cov = calcCovMatrices(mc_results)
 
 
@@ -2320,7 +2320,7 @@ class Trajectory(object):
         self.uncertainties = None
         self.uncertanties = self.uncertainties
 
-        # Orbital covariance matrix
+        # Orbital covariance matrix (angles in degrees)
         self.orbit_cov = None
 
         # Initial state vector covariance matrix
