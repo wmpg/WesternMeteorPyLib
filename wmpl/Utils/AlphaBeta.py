@@ -27,12 +27,10 @@ def minimizeAlphaBeta(v_normed, ht_normed):
 
         alpha, beta = x
 
-        res = 0.0
-
-        # Compute the sum of squared residuals of fit
-        res = np.sum(pow(2*alpha*np.exp(-ht_normed) \
+        # Compute the sum of absolute residuals (more robust than squared residuals)
+        res = np.sum(np.abs(2*alpha*np.exp(-ht_normed) \
                          - (scipy.special.expi(beta) \
-                            - scipy.special.expi(beta*v_normed**2))*np.exp(-beta), 2))
+                            - scipy.special.expi(beta*v_normed**2))*np.exp(-beta)))
 
         return res
 
@@ -163,7 +161,7 @@ def alphaBetaVelocity(ht_data, alpha, beta, v_init):
 
         # Minimize the forward function to find the velocity at the given height
         res = scipy.optimize.minimize(_diff, v_first_guess, args=(alpha, beta, ht_n), bounds=bounds)
-        vel_normed.append(res.x)
+        vel_normed.append(res.x[0])
 
     vel_normed = np.array(vel_normed)
 
