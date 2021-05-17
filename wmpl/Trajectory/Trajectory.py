@@ -1540,12 +1540,12 @@ def calcCovMatrices(mc_traj_list):
     e_list = np.array([traj.orbit.e for traj in mc_traj_list])
     q_list = np.array([traj.orbit.q for traj in mc_traj_list])
     tp_list = np.array([datetime2JD(traj.orbit.last_perihelion) for traj in mc_traj_list])
-    node_list = normalizeAngleWrap(np.array([traj.orbit.node for traj in mc_traj_list]))
-    peri_list = normalizeAngleWrap(np.array([traj.orbit.peri for traj in mc_traj_list]))
-    i_list = normalizeAngleWrap(np.array([traj.orbit.i for traj in mc_traj_list]))
+    node_list = np.degrees(normalizeAngleWrap(np.array([traj.orbit.node for traj in mc_traj_list])))
+    peri_list = np.degrees(normalizeAngleWrap(np.array([traj.orbit.peri for traj in mc_traj_list])))
+    i_list = np.degrees(normalizeAngleWrap(np.array([traj.orbit.i for traj in mc_traj_list])))
     
 
-    # Calculate the orbital covariance
+    # Calculate the orbital covariance (angles in degrees)
     orbit_input = np.c_[e_list, q_list, tp_list, node_list, peri_list, i_list].T
     orbit_cov = np.cov(orbit_input, aweights=weights)
 
@@ -1829,7 +1829,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
 
     print('Computing covariance matrices...')
 
-    # Calculate orbital and inital state vector covariance matrices
+    # Calculate orbital and inital state vector covariance matrices (angles in degrees)
     traj_best.orbit_cov, traj_best.state_vect_cov = calcCovMatrices(mc_results)
 
 
@@ -2320,7 +2320,7 @@ class Trajectory(object):
         self.uncertainties = None
         self.uncertanties = self.uncertainties
 
-        # Orbital covariance matrix
+        # Orbital covariance matrix (angles in degrees)
         self.orbit_cov = None
 
         # Initial state vector covariance matrix
@@ -3825,7 +3825,7 @@ class Trajectory(object):
             if self.state_vect_cov is not None:
 
                 out_str += "Orbit covariance matrix:\n"
-                out_str += "             e     ,     q (AU)   ,      Tp (JD) ,   node (rad) ,   peri (rad) ,    i (rad)\n"
+                out_str += "             e     ,     q (AU)   ,      Tp (JD) ,   node (deg) ,   peri (deg) ,    i (deg)\n"
 
                 elements_list = ["e   ", "q   ", "Tp  ", "node", "peri", "i   "]
 

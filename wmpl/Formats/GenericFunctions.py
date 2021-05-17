@@ -329,6 +329,10 @@ def addSolverOptions(arg_parser, skip_velpart=False):
 
     arg_parser.add_argument('-u', '--uncertgeom', \
         help='Compute purely geometric uncertainties.', action="store_true")
+
+    arg_parser.add_argument('-m', '--mcstd', metavar='MC_STDDEVS', \
+        help='Standard deviations of noise to add to measurements during the Monte Carlo procedure. 1.0 by default.', \
+        type=float, default=1.0)
     
     arg_parser.add_argument('-g', '--disablegravity', \
         help='Disable gravity compensation.', action="store_true")

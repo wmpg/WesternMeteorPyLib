@@ -388,6 +388,7 @@ cpdef double luminousEfficiency(int lum_eff_type, double lum_eff, double vel, do
             4 - Borovicka et al. (2013) Kosice
             5 - CAMO faint meteors
             6 - Celpecha & McCrosky (1976)
+            7 - Borovicka et al. (2020) - Two strengths
         lum_eff: [double] Value of the constant luminous efficiency (percent).
         vel: [double] Velocity (m/s).
         mass: [double] Mass (kg).
@@ -459,6 +460,19 @@ cpdef double luminousEfficiency(int lum_eff_type, double lum_eff, double vel, do
 
         else:
             return correction_factor*10**(-13.69 + 1.00*log10(vel/1000.0))
+
+    # Borovicka et al. (2020) - Two strengths
+    elif lum_eff_type == 7:
+
+        if vel < 25372:
+            return exp(0.567 - 10.307*log(vel/1000.0) 
+                             +  9.781*log(vel/1000.0)**2 
+                             - 3.0414*log(vel/1000.0)**3 
+                             + 0.3213*log(vel/1000.0)**4 
+                             + 0.3470*tanh(0.38*log(mass))
+                        )/100.0
+        else:
+            return exp(-1.4286 + log(vel/1000.0) + 0.347*tanh(0.38*log(mass)))/100.0
 
 
 
