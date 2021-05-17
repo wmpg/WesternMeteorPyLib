@@ -18,6 +18,7 @@ import copy
 
 import numpy as np
 import scipy.stats
+import scipy.integrate
 
 
 # Cython init
@@ -201,11 +202,42 @@ class Constants(object):
         # Indicate if the complex fragmentation is used
         self.fragmentation_on = False
 
+        # Track light curves of individual fragments
+        self.fragmentation_show_individual_lcs = False
+
         # A list of fragmentation entries
         self.fragmentation_entries = []
 
         # Name of the fragmentation file
         self.fragmentation_file_name = "metsim_fragmentation.txt"
+
+        ### ###
+
+
+        
+        ### OUTPUT PARAMETERS ###
+
+        # Velocity at the beginning of erosion
+        self.erosion_beg_vel = None
+
+        # Mass at the beginning of erosion
+        self.erosion_beg_mass = None
+
+        # Dynamic pressure at the beginning of erosion
+        self.erosion_beg_dyn_press = None
+
+        # Mass of main fragment at erosion change
+        self.mass_at_erosion_change = None
+
+        # Energy received per unit cross section prior to to erosion begin
+        self.energy_per_cs_before_erosion = None
+
+        # Energy received per unit mass prior to to erosion begin
+        self.energy_per_mass_before_erosion = None
+
+        # Height at which the main mass was depleeted
+        self.main_mass_exhaustion_ht = None
+
 
         ### ###
 
@@ -268,8 +300,14 @@ class Fragment(object):
         # Indicate that this is the main fragment
         self.main = False
 
+        # Indicate that the fragment is a grain
+        self.grain = False
+
         # Indicate that this is born out of complex fragmentation
         self.complex = False
+
+        # Identifier of the compex fragmentation entry
+        self.complex_id = None
 
 
     def init(self, const, m, rho, v_init, sigma, gamma, zenith_angle, erosion_mass_index, erosion_mass_min, \
@@ -421,7 +459,11 @@ def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mas
             frag_child.main = False
             frag_child.disruption_enabled = False
 
-            # Set the erosion coefficient value (disable in grans, only larger fragments)
+            # Indicate that the fragment is a grain
+            if (not keep_eroding) and (not disruption):
+                frag_child.grain = True
+
+            # Set the erosion coefficient value (disable in grain, only larger fragments)
             if keep_eroding:
                 frag_child.erosion_enabled = True
 
@@ -467,6 +509,17 @@ def getErosionCoeff(const, h):
         return 0
 
 
+def killFragment(const, frag):
+    """ Deactivate the given fragment and keep track of the stats. """
+
+    frag.active = False
+    const.n_active -= 1
+
+    # Set the height when the main fragment was exhausted
+    if frag.main:
+        const.main_mass_exhaustion_ht = frag.h
+
+
 
 def ablateAll(fragments, const, compute_wake=False):
     """ Perform single body ablation of all fragments using the 4th order Runge-Kutta method. 
@@ -486,7 +539,10 @@ def ablateAll(fragments, const, compute_wake=False):
     # Keep track of the total luminosity
     luminosity_total = 0.0
 
-    # Keep track of height of the brightest fragment
+    # Keep track of the luminosity of the main fragment
+    luminosity_main = 0.0
+
+    # Keep track of parameters of the brightest fragment
     brightest_height = 0.0
     brightest_length = 0.0
     brightest_lum    = 0.0
@@ -526,9 +582,8 @@ def ablateAll(fragments, const, compute_wake=False):
 
 
         # If the total mass after ablation in this step is below zero, ablate what's left of the whole mass
-        if (frag.m + mass_loss_total ) < 0:
-            mass_loss_total = frag.m
-
+        if (frag.m + mass_loss_total) < 0:
+            mass_loss_total = mass_loss_total + frag.m
 
         # Compute new mass
         m_new = frag.m + mass_loss_total
@@ -575,6 +630,14 @@ def ablateAll(fragments, const, compute_wake=False):
             frag.vh -= ah*const.dt
             frag.v = math.sqrt(frag.vh**2 + frag.vv**2)
 
+            # Only allow the meteoroid to go down, and stop the ablation if it stars going up
+            if frag.vv > 0:
+
+                frag.vv = 0
+
+                # Setting the height to zero will stop the ablation during the if catch below
+                frag.h = 0
+
 
         # Update fragment parameters
         frag.m = m_new
@@ -589,6 +652,7 @@ def ablateAll(fragments, const, compute_wake=False):
         lum = -luminousEfficiency(const.lum_eff_type, const.lum_eff, frag.v, frag.m) \
             *((mass_loss_ablation/const.dt*frag.v**2)/2)
 
+
         # Compute the total luminosity
         frag.lum = lum*frag.n_grains
 
@@ -596,12 +660,27 @@ def ablateAll(fragments, const, compute_wake=False):
         # Keep track of the total luminosity across all fragments
         luminosity_total += frag.lum
 
+
+        # Keep track of the luminosity of the main fragment
+        if frag.main:
+            luminosity_main = frag.lum
+
+
         # Update length along the track
         frag.length += frag.v*const.dt
 
 
         # Track total mass loss
         mass_total += mass_loss_total
+
+
+        # If the fragment is done, stop ablating
+        if (frag.m <= const.m_kill) or (frag.v < const.v_kill) or (frag.h < const.h_kill) or (frag.lum < 0):
+            
+            killFragment(const, frag)
+
+            #print('Killing', frag.id)
+            continue
 
 
         # Keep track of the brightest fragment
@@ -624,19 +703,54 @@ def ablateAll(fragments, const, compute_wake=False):
         #     print('DynPress:', dyn_press/1000, 'kPa')
 
 
+        # For fragments born out of complex fragmentation, keep track of their luminosity and height
+        if const.fragmentation_show_individual_lcs and frag.complex:
 
-        # If the fragment is done, stop ablating
-        if (frag.m <= const.m_kill) or (frag.v < const.v_kill) or (frag.h < const.h_kill) or (frag.lum < 0):
-            frag.active = False
-            const.n_active -= 1
-            #print('Killing', frag.id)
-            continue
+            # Find the corresponding fragmentation entry
+            frag_entry = next((x for x in const.fragmentation_entries if x.id == frag.complex_id), None)
 
-        
-        # # Change the erosion coefficient of the fragment below the given height
-        # if (frag.erosion_coeff > 0):
-        #     frag.erosion_coeff = getErosionCoeff(const, frag.h)
+            if frag_entry is not None:
 
+                # Store luminosity of grains
+                if frag.grain:
+
+                    add_new_entry = False
+
+                    # Check if the last time entry corresponds to the current time, and add to it
+                    if not len(frag_entry.grains_time_data):
+                        add_new_entry = True
+                    elif const.total_time != frag_entry.grains_time_data[-1]:
+                        add_new_entry = True
+
+                    # Add the current integration time
+                    if add_new_entry:
+                        frag_entry.grains_time_data.append(const.total_time)
+                        frag_entry.grains_luminosity.append(frag.lum)
+
+                    # Add to the total luminosity at the current time step that's already been added
+                    else:
+                        frag_entry.grains_luminosity[-1] += frag.lum
+                        
+
+                # Store parameters of the main fragment
+                else:
+
+                    add_new_entry = False
+
+                    # Check if the last time entry corresponds to the current time, and add to it
+                    if not len(frag_entry.main_time_data):
+                        add_new_entry = True
+                    elif const.total_time != frag_entry.main_time_data[-1]:
+                        add_new_entry = True
+
+                    # Add the current integration time
+                    if add_new_entry:
+                        frag_entry.main_time_data.append(const.total_time)
+                        frag_entry.main_luminosity.append(frag.lum)
+
+                    # Add to the total luminosity at the current time step that's already been added
+                    else:
+                        frag_entry.main_luminosity[-1] += frag.lum
 
 
         # For non-complex fragmentation only: Check if the erosion should start, given the height, 
@@ -680,6 +794,19 @@ def ablateAll(fragments, const, compute_wake=False):
                 #     print('    {:d}: {:e} kg'.format(f.n_grains, f.m))
                 #     grain_mass_sum += f.n_grains*f.m
                 # print('Grain total mass: {:e}'.format(grain_mass_sum))
+
+
+                # Record physical parameters at the beginning of erosion for the main fragment
+                if frag.main:
+                    if const.erosion_beg_vel is None:
+
+                        const.erosion_beg_vel = frag.v
+                        const.erosion_beg_mass = frag.m
+                        const.erosion_beg_dyn_press = dyn_press
+
+                    # Record the mass when erosion is changed
+                    elif (const.erosion_height_change >= frag.h) and (const.mass_at_erosion_change is None):
+                        const.mass_at_erosion_change = frag.m
 
 
 
@@ -736,14 +863,13 @@ def ablateAll(fragments, const, compute_wake=False):
 
 
                 # Deactive the disrupted fragment
-                frag.active = False
                 frag.m = 0
-                const.n_active -= 1
+                killFragment(const, frag)
 
 
 
         # Handle complex fragmentation and status changes of the main fragment
-        if frag.main:
+        if frag.main and const.fragmentation_on:
 
             # Get a list of complex fragmentations that are still to do
             frags_to_do = [frag_entry for frag_entry in const.fragmentation_entries if not frag_entry.done]
@@ -817,6 +943,9 @@ def ablateAll(fragments, const, compute_wake=False):
                                 # Indicate that the fragments are born out of complex fragmentation
                                 frag_new.complex = True
 
+                                # Assign the complex fragmentation ID
+                                frag_new.complex_id = frag_entry.id
+
                                 # Assing the mass to the new fragment
                                 frag_new.m = new_frag_mass
 
@@ -867,6 +996,9 @@ def ablateAll(fragments, const, compute_wake=False):
                             # Indicate that the fragments are born out of complex fragmentation
                             frag_new.complex = True
 
+                            # Assign the complex fragmentation ID
+                            frag_new.complex_id = frag_entry.id
+
                             # Generate dust grains
                             grain_children, const = generateFragments(const, frag_new, dust_mass, \
                                 frag_entry.mass_index, frag_entry.grain_mass_min, frag_entry.grain_mass_max, \
@@ -890,9 +1022,10 @@ def ablateAll(fragments, const, compute_wake=False):
 
         # If the fragment is done, stop ablating
         if (frag.m <= const.m_kill):
-            frag.active = False
-            const.n_active -= 1
+            
+            killFragment(const, frag)
             #print('Killing', frag.id)
+
             continue
 
 
@@ -906,9 +1039,11 @@ def ablateAll(fragments, const, compute_wake=False):
         leading_frag = max(active_fragments, key=lambda x: x.length)
         leading_frag_length = leading_frag.length
         leading_frag_height = leading_frag.h
+        leading_frag_vel    = leading_frag.v
     else:
         leading_frag_length = None
         leading_frag_height = None
+        leading_frag_vel    = None
 
 
     ### Compute the wake profile ###
@@ -952,8 +1087,8 @@ def ablateAll(fragments, const, compute_wake=False):
     const.total_time += const.dt
 
 
-    return fragments, const, luminosity_total, brightest_height, brightest_length, brightest_vel, \
-        leading_frag_height, leading_frag_length, mass_total, wake
+    return fragments, const, luminosity_total, luminosity_main, brightest_height, brightest_length, \
+        brightest_vel, leading_frag_height, leading_frag_length, leading_frag_vel, mass_total, wake
 
 
 
@@ -962,6 +1097,17 @@ def runSimulation(const, compute_wake=False):
     """ Run the ablation simulation. """
 
     ###
+
+
+    if const.fragmentation_on:
+
+        # Assign unique IDs to complex fragmentation entries
+        for i, frag_entry in enumerate(const.fragmentation_entries):
+            frag_entry.id = i
+
+            # Reset output parameters for every fragmentation entry
+            frag_entry.resetOutputParameters()
+
 
     fragments = []
 
@@ -1002,20 +1148,92 @@ def runSimulation(const, compute_wake=False):
     while const.n_active > 0:
 
         # Ablate the fragments
-        fragments, const, luminosity_total, brightest_height, brightest_length, brightest_vel, \
-            leading_frag_height, leading_frag_length, mass_total, wake = ablateAll(fragments, const, \
+        fragments, const, luminosity_total, luminosity_main, brightest_height, brightest_length, \
+            brightest_vel, leading_frag_height, leading_frag_length, leading_frag_vel, mass_total, \
+            wake = ablateAll(fragments, const, \
                 compute_wake=compute_wake)
 
         # Store wake estimation results
         wake_results.append(wake)
 
         # Stack results list
-        results_list.append([const.total_time, luminosity_total, brightest_height, brightest_length, \
-            brightest_vel, leading_frag_height, leading_frag_length, mass_total])
+        results_list.append([const.total_time, luminosity_total, luminosity_main, brightest_height, \
+            brightest_length, brightest_vel, leading_frag_height, leading_frag_length, leading_frag_vel, \
+            mass_total])
 
 
 
-    return results_list, wake_results
+    # Find the main fragment and return it with results
+    frag_main = None
+    for frag in fragments:
+        if frag.main:
+            frag_main = frag
+            break
+
+
+    ### Find the fragments born out of complex fragmentations and assign them to the fragmentation entries ###
+
+    # Reset all fragment lists for entries
+    for frag_entry in const.fragmentation_entries:
+        frag_entry.fragments = []
+
+    # Find fragments for every fragmentation
+    for frag_entry in const.fragmentation_entries:
+        for frag in fragments:
+            if not frag.grain:
+                if frag.complex_id is not None:
+                    if frag_entry.id == frag.complex_id:
+
+                        # Add fragment
+                        frag_entry.fragments.append(frag)
+
+                        # Compute the final mass of all fragments in this fragmentation after ablation stopped
+                        final_mass = frag_entry.number*frag.m
+
+                        # If the final mass is below a gram, assume it's zero
+                        if final_mass < 1e-3:
+                            final_mass = None
+
+                        # Assign the final mass to the fragmentation entry
+                        frag_entry.final_mass = final_mass
+
+
+    ### ###
+
+
+    return frag_main, results_list, wake_results
+
+
+
+def energyReceivedBeforeErosion(const, lam=1.0):
+    """ Compute the energy the meteoroid receive prior to erosion, assuming no major mass loss occured. 
+    
+    Arguments:
+        const: [Constants]
+
+    Keyword arguments:
+        lam: [float] Heat transfter coeff. 1.0 by default.
+
+    Return:
+        (es, ev):
+            - es: [float] Energy received per unit cross-section (J/m^2)
+            - ev: [float] Energy received per unit mass (J/kg).
+
+    """
+
+    # Integrate atmosphere density from the beginning of simulation to beginning of erosion.
+    dens_integ = scipy.integrate.quad(atmDensityPoly, const.erosion_height_start, const.h_init, args=(const.dens_co))[0]
+
+    # Compute the energy per unit cross-section
+    es = 1/2*lam*(const.v_init**2)*dens_integ/np.cos(const.zenith_angle)
+
+    # Compute initial shape-density coefficient
+    k = const.gamma*const.shape_factor*const.rho**(-2/3.0)
+
+    # Compute the energy per unit mass
+    ev = es*k/(const.gamma*const.m_init**(1/3.0))
+
+    return es, ev
 
 
 
@@ -1034,7 +1252,7 @@ if __name__ == "__main__":
 
 
     # Run the ablation simulation
-    results_list, wake_results = runSimulation(const, compute_wake=show_wake)
+    frag_main, results_list, wake_results = runSimulation(const, compute_wake=show_wake)
 
 
 
@@ -1046,8 +1264,9 @@ if __name__ == "__main__":
 
     # Unpack the results
     results_list = np.array(results_list).astype(np.float64)
-    time_arr, luminosity_arr, brightest_height_arr, brightest_length_arr, brightest_vel_arr, \
-        leading_frag_height_arr, leading_frag_length_arr, mass_total_arr = results_list.T
+    time_arr, luminosity_arr, luminosity_main_arr, brightest_height_arr, brightest_length_arr, \
+        brightest_vel_arr, leading_frag_height_arr, leading_frag_length_arr, leading_frag_vel_arr, \
+        mass_total_arr = results_list.T
 
 
     # Calculate absolute magnitude (apparent @100km) from given luminous intensity

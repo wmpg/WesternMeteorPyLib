@@ -336,12 +336,12 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_eq
     if plot_equinox:
 
         # Plot the arrow
-        a = Arrow3D([0, -4], [0, 0], [0, 0], mutation_scale=10, lw=1, arrowstyle="-|>", \
+        a = Arrow3D([0, 4], [0, 0], [0, 0], mutation_scale=10, lw=1, arrowstyle="-|>", \
             color=cs.vernal_eq, alpha=0.5)
         ax.add_artist(a)
 
         # Plot the vernal equinox symbol
-        ax.text(-4.1, 0, 0, u'\u2648', fontsize=8, color=cs.vernal_eq, alpha=0.5, \
+        ax.text(4.1, 0, 0, u'\u2648', fontsize=8, color=cs.vernal_eq, alpha=0.5, \
             horizontalalignment='center', verticalalignment='center')
 
 
@@ -389,11 +389,11 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_eq
 
 
         # Save side view
-        ax.view_init(elev=0, azim=90)
+        ax.view_init(elev=0, azim=-90)
         savePlot(plt, plot_file_name + '_orbit_side.' + plot_file_type, plot_dir)
         
         # Save top view
-        ax.view_init(elev=90, azim=90)
+        ax.view_init(elev=90, azim=-90)
         savePlot(plt, plot_file_name + '_orbit_top.' + plot_file_type, plot_dir)
 
 
