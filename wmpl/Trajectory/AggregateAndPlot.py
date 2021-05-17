@@ -1891,9 +1891,6 @@ if __name__ == "__main__":
         help="""During the first continous run, go back FIRST_PREV_SOLS to generate the plots and report. After that, use PREV_SOLS to run."""
         )
 
-    arg_parser.add_argument('-p', '--plot_all_showers', action="store_true", \
-        help="""Plot showers on the maps showing the whole date ramge."""
-        )
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -1996,11 +1993,7 @@ if __name__ == "__main__":
 
         # Generate summary plots
         print("Plotting all trajectories...")
-        pas = False
-        if cml_args.plot_all_showers is not None:
-            pas = True
-            print('adding shower loci to all maps')
-        generateTrajectoryPlots(cml_args.dir_path, traj_list, plot_showers=pas, time_limited_plot=False)
+        generateTrajectoryPlots(cml_args.dir_path, traj_list, plot_showers=False, time_limited_plot=False)
 
         # Generate station plot
         print("Plotting station plot...")
