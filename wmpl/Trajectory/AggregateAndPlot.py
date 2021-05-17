@@ -1895,7 +1895,7 @@ if __name__ == "__main__":
     cml_args = arg_parser.parse_args()
 
     ############################
-    print('plot_all_showers is', cml_args.plot_all_showers)
+    
 
 
     ### FILTERS ###

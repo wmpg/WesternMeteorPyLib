@@ -693,7 +693,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         if a > 0: 
             T = 2*np.pi*np.sqrt(((a*AU)**3)/SUN_MU)/(86400*SIDEREAL_YEAR)
         else:
-            T = 1e9
+            T = np.nan
 
         # Calculate the orbit angular momentum
         h_vect = np.cross(meteor_pos, v_h)
