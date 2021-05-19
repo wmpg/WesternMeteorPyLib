@@ -442,134 +442,134 @@ if __name__ == "__main__":
     from wmpl.Utils.Pickling import loadPickle
 
 
-    ### COMMAND LINE ARGUMENTS
+    # ### COMMAND LINE ARGUMENTS
 
-    # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(description="""Fit the Pecina & Ceplecha (1984) model to a trajectory in the pickle file.""",
-        formatter_class=argparse.RawTextHelpFormatter)
+    # # Init the command line arguments parser
+    # arg_parser = argparse.ArgumentParser(description="""Fit the Pecina & Ceplecha (1984) model to a trajectory in the pickle file.""",
+    #     formatter_class=argparse.RawTextHelpFormatter)
 
-    arg_parser.add_argument('input_file', type=str, help='Path to the .pickle file.')
+    # arg_parser.add_argument('input_file', type=str, help='Path to the .pickle file.')
 
-    # Parse the command line arguments
-    cml_args = arg_parser.parse_args()
+    # # Parse the command line arguments
+    # cml_args = arg_parser.parse_args()
 
-    ############################
-
-
-    # Load the pickle file
-    if not os.path.isfile(cml_args.input_file):
-
-        print("Could not find file:", cml_args.input_file)
-        print("Exiting...")
-
-        sys.exit()
+    # ############################
 
 
+    # # Load the pickle file
+    # if not os.path.isfile(cml_args.input_file):
 
-    # Load the trajectory pickle file
-    traj = loadPickle(*os.path.split(cml_args.input_file))
+    #     print("Could not find file:", cml_args.input_file)
+    #     print("Exiting...")
 
-    # Extract the time, height, and length data
-    time_data = []
-    len_data = []
-    ht_data = []
-    vel_data = []
-    for obs in traj.observations:
-
-        # Relative time in seconds
-        time_obs = obs.time_data[obs.ignore_list == 0]
-        time_data += time_obs.tolist()
-
-        # Height in km
-        ht_obs = obs.model_ht[obs.ignore_list == 0]/1000
-        ht_data += ht_obs.tolist()
-
-        # Length in km
-        len_obs = obs.state_vect_dist[obs.ignore_list == 0]/1000
-        len_data += len_obs.tolist()
-
-        # Velocity in km/s
-        vel_obs = obs.velocities[obs.ignore_list == 0]/1000
-        vel_data += vel_obs.tolist()
+    #     sys.exit()
 
 
-    # Sort observations by length
-    tmp_arr = np.c_[time_data, ht_data, len_data, vel_data]
-    tmp_arr = tmp_arr[np.argsort(len_data)]
-    time_data, ht_data, len_data, vel_data = tmp_arr.T
 
-    # # Check data 
+    # # Load the trajectory pickle file
+    # traj = loadPickle(*os.path.split(cml_args.input_file))
+
+    # # Extract the time, height, and length data
+    # time_data = []
+    # len_data = []
+    # ht_data = []
+    # vel_data = []
+    # for obs in traj.observations:
+
+    #     # Relative time in seconds
+    #     time_obs = obs.time_data[obs.ignore_list == 0]
+    #     time_data += time_obs.tolist()
+
+    #     # Height in km
+    #     ht_obs = obs.model_ht[obs.ignore_list == 0]/1000
+    #     ht_data += ht_obs.tolist()
+
+    #     # Length in km
+    #     len_obs = obs.state_vect_dist[obs.ignore_list == 0]/1000
+    #     len_data += len_obs.tolist()
+
+    #     # Velocity in km/s
+    #     vel_obs = obs.velocities[obs.ignore_list == 0]/1000
+    #     vel_data += vel_obs.tolist()
+
+
+    # # Sort observations by length
+    # tmp_arr = np.c_[time_data, ht_data, len_data, vel_data]
+    # tmp_arr = tmp_arr[np.argsort(len_data)]
+    # time_data, ht_data, len_data, vel_data = tmp_arr.T
+
+    # # # Check data 
+    # # plt.scatter(time_data, len_data)
+    # # plt.show()
+
+    # # plt.scatter(ht_data, vel_data)
+    # # plt.show()
+
+
+    # # Fit the Pecina & Ceplecha (1984) model to observations
+    # t0, l0, v0, v_inf, sigma, c, zr, dens_interp = fitPecinaCeplecha84Model(traj.rend_lat, traj.rend_lon, \
+    #     traj.jdt_ref, time_data, ht_data, len_data)
+
+
+    # print("Solution:")
+    # print("    t0    = {:.3f} s".format(t0))
+    # print("    l0    = {:.3f} km".format(l0))
+    # print("    v0    = {:.3f} km/s".format(v0))
+    # print("    v_inf = {:.3f} km/s".format(v_inf))
+    # print("    sigma = {:.6f} km^2/s^2".format(sigma))
+
+
+
+    # # Compute the h0 limit
+    # h0 = htFromLen(l0, c, zr)
+
+    # # Compute the velocity from height and model parameters
+    # ht_arr = ht_dens_arr = np.linspace(1000*np.min(ht_data), 1000*np.max(ht_data), 100)
+    # vel_arr = 1000*velFromHt(ht_arr/1000, h0, v0, v_inf, sigma, c, zr, dens_interp)
+
+    # # Plot velocity observations vs fit
+    # plt.scatter(vel_data[vel_data > 0], ht_data[vel_data > 0])
+    # plt.plot(vel_arr/1000, ht_arr/1000)
+
+    # plt.xlabel("Velocity (km/s)")
+    # plt.ylabel("Height (km)")
+
+    # plt.show()
+
+
+
+    # # Compute the time from height and model parameters
+    # len_arr = np.linspace(np.min(len_data), np.max(len_data), 100)
+    # time_arr = timeFromLen(len_arr, t0, l0, v0, v_inf, sigma, c, zr, dens_interp)
+
+    # # Plot time vs length observations vs fit
     # plt.scatter(time_data, len_data)
+    # plt.plot(time_arr, len_arr)
+
+    # plt.xlabel("Time (s)")
+    # plt.ylabel("Length (km)")
+
     # plt.show()
 
-    # plt.scatter(ht_data, vel_data)
+
+    # # Plot fit residuals
+    # time_residuals = time_data - timeFromLen(len_data, t0, l0, v0, v_inf, sigma, c, zr, dens_interp)
+    # plt.scatter(len_data, time_residuals)
+
+    # # Plot the zero line
+    # plt.plot(len_arr, np.zeros_like(len_arr), c='k', linestyle='dashed')
+
+    # plt.xlabel("Length (km)")
+    # plt.ylabel("Time residuals (s)")
+
+    # max_res = 1.2*np.max(np.abs(time_residuals))
+    # plt.ylim(-max_res, max_res)
     # plt.show()
 
 
-    # Fit the Pecina & Ceplecha (1984) model to observations
-    t0, l0, v0, v_inf, sigma, c, zr, dens_interp = fitPecinaCeplecha84Model(traj.rend_lat, traj.rend_lon, \
-        traj.jdt_ref, time_data, ht_data, len_data)
 
 
-    print("Solution:")
-    print("    t0    = {:.3f} s".format(t0))
-    print("    l0    = {:.3f} km".format(l0))
-    print("    v0    = {:.3f} km/s".format(v0))
-    print("    v_inf = {:.3f} km/s".format(v_inf))
-    print("    sigma = {:.6f} km^2/s^2".format(sigma))
-
-
-
-    # Compute the h0 limit
-    h0 = htFromLen(l0, c, zr)
-
-    # Compute the velocity from height and model parameters
-    ht_arr = ht_dens_arr = np.linspace(1000*np.min(ht_data), 1000*np.max(ht_data), 100)
-    vel_arr = 1000*velFromHt(ht_arr/1000, h0, v0, v_inf, sigma, c, zr, dens_interp)
-
-    # Plot velocity observations vs fit
-    plt.scatter(vel_data[vel_data > 0], ht_data[vel_data > 0])
-    plt.plot(vel_arr/1000, ht_arr/1000)
-
-    plt.xlabel("Velocity (km/s)")
-    plt.ylabel("Height (km)")
-
-    plt.show()
-
-
-
-    # Compute the time from height and model parameters
-    len_arr = np.linspace(np.min(len_data), np.max(len_data), 100)
-    time_arr = timeFromLen(len_arr, t0, l0, v0, v_inf, sigma, c, zr, dens_interp)
-
-    # Plot time vs length observations vs fit
-    plt.scatter(time_data, len_data)
-    plt.plot(time_arr, len_arr)
-
-    plt.xlabel("Time (s)")
-    plt.ylabel("Length (km)")
-
-    plt.show()
-
-
-    # Plot fit residuals
-    time_residuals = time_data - timeFromLen(len_data, t0, l0, v0, v_inf, sigma, c, zr, dens_interp)
-    plt.scatter(len_data, time_residuals)
-
-    # Plot the zero line
-    plt.plot(len_arr, np.zeros_like(len_arr), c='k', linestyle='dashed')
-
-    plt.xlabel("Length (km)")
-    plt.ylabel("Time residuals (s)")
-
-    max_res = 1.2*np.max(np.abs(time_residuals))
-    plt.ylim(-max_res, max_res)
-    plt.show()
-
-
-
-
-    sys.exit()
+    # sys.exit()
 
     ### BELOW IS THE EXAMPLE FOR THE ORIGINAL PAPER ###
 
