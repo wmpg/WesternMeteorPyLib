@@ -621,6 +621,14 @@ class RMSDataHandle(object):
 
                 pp = PlateparDummy(**pp_dict)
 
+
+                # Skip observations which weren't recalibrated
+                if hasattr(pp, "auto_recalibrated"):
+                    if not pp.auto_recalibrated:
+                        print("    Skipping {:s}, not recalibrated!".format(cams_met_obs.ff_name))
+                        continue
+
+
                 # Init meteor data
                 meteor_data = []
                 for entry in zip(cams_met_obs.frames, cams_met_obs.time_data, cams_met_obs.x_data,\
