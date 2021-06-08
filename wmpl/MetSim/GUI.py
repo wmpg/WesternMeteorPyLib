@@ -60,9 +60,10 @@ class SimulationResults(object):
 
         # Unpack the results
         results_list = np.array(results_list).astype(np.float64)
-        self.time_arr, self.luminosity_arr, self.luminosity_main_arr, self.brightest_height_arr, \
-            self.brightest_length_arr, self.brightest_vel_arr, self.leading_frag_height_arr, \
-            self.leading_frag_length_arr, self.leading_frag_vel_arr, self.mass_total_arr = results_list.T
+        self.time_arr, self.luminosity_arr, self.luminosity_main_arr, self.electron_density_total_arr, \
+            self.brightest_height_arr, self.brightest_length_arr, self.brightest_vel_arr, \
+            self.leading_frag_height_arr, self.leading_frag_length_arr, self.leading_frag_vel_arr, \
+            self.mass_total_arr = results_list.T
 
 
         # Calculate the total absolute magnitude (apparent @100km), and fix possible NaN values (replace them 
@@ -1331,6 +1332,11 @@ class MetSimGUI(QMainWindow):
         ### ### Define GUI and simulation attributes ### ###
 
 
+        # Init an axis for the electron line density
+        self.electronDensityPlot = self.magnitudePlot.canvas.axes.twiny()
+        self.electron_density_plot_show = False
+
+
         ### Wake parameters ###
         self.wake_on = False
         self.wake_show_mass_bins = False
@@ -1577,6 +1583,12 @@ class MetSimGUI(QMainWindow):
 
         self.saveUpdatedOrbitButton.clicked.connect(self.saveUpdatedOrbit)
         self.saveFitParametersButton.clicked.connect(self.saveFitParameters)
+
+        # Electron line density
+        self.checkBoxPlotElectronLineDensity.toggled.connect(self.checkBoxPlotElectronLineDensitySignal)
+        self.inputElectronDensityHt.editingFinished.connect(self.electronDensityMeasChanged)
+        self.inputElectronDensity.editingFinished.connect(self.electronDensityMeasChanged)
+
 
         ### ###
 
@@ -1915,6 +1927,17 @@ class MetSimGUI(QMainWindow):
         ###
 
 
+        ### Radar measurements ###
+
+        # Height of electron line density measurement
+        self.inputElectronDensityHt.setText("{:.3f}".format(self.const.electron_density_meas_ht/1000))
+
+        # Electron line density measurement
+        self.inputElectronDensity.setText("{:.2e}".format(self.const.electron_density_meas_q))
+
+        ###
+
+
         self.updateGrainDiameters()
 
 
@@ -2098,6 +2121,12 @@ class MetSimGUI(QMainWindow):
         """ Toggle computing light curves of individual fragments during complex fragmentation. """
 
         self.const.fragmentation_show_individual_lcs = self.checkBoxFragmentationShowIndividualLCs.isChecked()
+
+
+    def checkBoxPlotElectronLineDensitySignal(self, event):
+        """ Toggle plotting the electron line density on the magnitude plot. """
+
+        self.electron_density_plot_show = self.checkBoxPlotElectronLineDensity.isChecked()
 
 
 
@@ -2291,6 +2320,19 @@ class MetSimGUI(QMainWindow):
         ###
 
 
+        ### Radar measurements ###
+
+        # Height of electron line density measurement
+        self.const.electron_density_meas_ht = 1000*self._tryReadBox(self.inputElectronDensityHt, \
+            self.const.electron_density_meas_ht/1000)
+
+        # Electron line density measurement
+        self.const.electron_density_meas_q = self._tryReadBox(self.inputElectronDensity, \
+            self.const.electron_density_meas_q)
+
+        ### ###
+
+
         # Update the boxes with read values
         self.updateInputBoxes()
 
@@ -2409,9 +2451,6 @@ class MetSimGUI(QMainWindow):
     def updateMagnitudePlot(self, show_previous=False):
         """ Update the magnitude plot. 
 
-        Arguments:
-            None
-
         Keyword arguments:
             show_previous: [bool] Show the previous simulation. False by default.
 
@@ -2425,6 +2464,7 @@ class MetSimGUI(QMainWindow):
 
 
         self.magnitudePlot.canvas.axes.clear()
+        self.electronDensityPlot.clear()
 
         
         # Track plot limits
@@ -2507,6 +2547,8 @@ class MetSimGUI(QMainWindow):
 
 
         # Plot simulated magnitudes
+        q_sim_plot = None
+        q_meas_plot = None
         if sr is not None:
 
             # # Cut the part with same beginning heights as observations
@@ -2518,6 +2560,21 @@ class MetSimGUI(QMainWindow):
             # Plot the simulated magnitudes
             self.magnitudePlot.canvas.axes.plot(sr.abs_magnitude, sr.leading_frag_height_arr/1000, \
                 label='Simulated', color='k', alpha=0.5)
+
+
+            if self.electron_density_plot_show:
+
+                # Plot the simulated electron line density
+                q_sim_plot = self.electronDensityPlot.plot(np.log10(sr.electron_density_total_arr), \
+                    sr.leading_frag_height_arr/1000, color='b', alpha=0.5, linestyle='dashed')
+
+                # Plot the measured electron line density
+                if self.const.electron_density_meas_ht > 0:
+
+                    q_meas_plot = self.electronDensityPlot.scatter( \
+                        np.log10(self.const.electron_density_meas_q), \
+                        self.const.electron_density_meas_ht/1000, c='b', s=10, marker='o')
+
 
 
             # Plot magnitudes of individual fragments
@@ -2562,9 +2619,37 @@ class MetSimGUI(QMainWindow):
 
 
 
-
+        # Label for magnitude plot
         self.magnitudePlot.canvas.axes.set_ylabel('Height (km)')
         self.magnitudePlot.canvas.axes.set_xlabel('Abs magnitude')
+
+        # Get legend entries
+        handles, labels = self.magnitudePlot.canvas.axes.get_legend_handles_labels()
+
+        # Label for electron line density
+        if self.electron_density_plot_show:
+            
+            self.electronDensityPlot.set_xlabel("log$_{10}$ q (e$^{-}$/m)")
+
+            # Scale the electron line density so it's not in the way of magnitude
+            q_min, q_max = self.electronDensityPlot.get_xlim()
+            self.electronDensityPlot.set_xlim(q_min, q_max)
+            self.electronDensityPlot.set_visible(True)
+
+            # Add to the legend entry
+            if q_sim_plot is not None:
+                handles += [q_sim_plot[0]]
+                labels += ["Sim q"]
+
+            if q_meas_plot is not None:
+                handles += [q_meas_plot]
+                labels += ["Meas q"]
+
+
+        else:
+            self.electronDensityPlot.set_visible(False)
+            self.magnitudePlot.canvas.axes.set_title('Magnitude')
+
 
         self.magnitudePlot.canvas.axes.set_ylim([self.plot_end_ht + END_HT_PAD, \
             self.plot_beg_ht + BEG_HT_PAD])
@@ -2574,11 +2659,10 @@ class MetSimGUI(QMainWindow):
         # Plot common features across all plots
         self.updateCommonPlotFeatures(self.magnitudePlot.canvas.axes, sr, plot_text=True)
 
-        self.magnitudePlot.canvas.axes.legend(prop={'size': LEGEND_TEXT_SIZE}, loc='upper right')
+        #self.magnitudePlot.canvas.axes.legend(prop={'size': LEGEND_TEXT_SIZE}, loc='upper right')
+        self.magnitudePlot.canvas.axes.legend(handles, labels, prop={'size': LEGEND_TEXT_SIZE}, loc='upper right')
 
         self.magnitudePlot.canvas.axes.grid(color="k", linestyle='dotted', alpha=0.3)
-
-        self.magnitudePlot.canvas.axes.set_title('Magnitude')
 
         self.magnitudePlot.canvas.figure.tight_layout()
 
@@ -3850,6 +3934,12 @@ class MetSimGUI(QMainWindow):
 
         self.fragmentation.addFragmentation(frag_type)
 
+
+    def electronDensityMeasChanged(self):
+        """ Handle what happens when the electron density measurements are changed. """
+
+        self.readInputBoxes()
+        self.showCurrentResults()
 
 
     def saveUpdatedOrbit(self):

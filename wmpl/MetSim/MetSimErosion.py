@@ -18,12 +18,14 @@ import copy
 
 import numpy as np
 import scipy.stats
+import scipy.integrate
 
 
 # Cython init
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
-from wmpl.MetSim.MetSimErosionCyTools import massLossRK4, decelerationRK4, luminousEfficiency, atmDensityPoly
+from wmpl.MetSim.MetSimErosionCyTools import massLossRK4, decelerationRK4, luminousEfficiency, \
+    ionizationEfficiency, atmDensityPoly
 
 
 ### DEFINE CONSTANTS
@@ -126,6 +128,9 @@ class Constants(object):
         # Constant luminous efficiency (percent)
         self.lum_eff = 0.7
 
+        # Mean atomic mass of a meteor atom, kg (Jones 1997)
+        self.mu = 23*1.66*1e-27
+
         ### ###
 
 
@@ -213,6 +218,45 @@ class Constants(object):
         ### ###
 
 
+        ### Radar measurements ###
+
+        # Height at which the electron line density is measured (m)
+        self.electron_density_meas_ht = -1000
+
+        # Measured electron line density (e-/m)
+        self.electron_density_meas_q = -1
+
+        ### ###
+
+
+        
+        ### OUTPUT PARAMETERS ###
+
+        # Velocity at the beginning of erosion
+        self.erosion_beg_vel = None
+
+        # Mass at the beginning of erosion
+        self.erosion_beg_mass = None
+
+        # Dynamic pressure at the beginning of erosion
+        self.erosion_beg_dyn_press = None
+
+        # Mass of main fragment at erosion change
+        self.mass_at_erosion_change = None
+
+        # Energy received per unit cross section prior to to erosion begin
+        self.energy_per_cs_before_erosion = None
+
+        # Energy received per unit mass prior to to erosion begin
+        self.energy_per_mass_before_erosion = None
+
+        # Height at which the main mass was depleeted
+        self.main_mass_exhaustion_ht = None
+
+
+        ### ###
+
+
 
 
 class Fragment(object):
@@ -249,6 +293,9 @@ class Fragment(object):
 
         # Luminous intensity (Watts)
         self.lum = 0
+
+        # Electron line density
+        self.q = 0
 
         # Erosion coefficient value
         self.erosion_coeff = 0
@@ -480,6 +527,17 @@ def getErosionCoeff(const, h):
         return 0
 
 
+def killFragment(const, frag):
+    """ Deactivate the given fragment and keep track of the stats. """
+
+    frag.active = False
+    const.n_active -= 1
+
+    # Set the height when the main fragment was exhausted
+    if frag.main:
+        const.main_mass_exhaustion_ht = frag.h
+
+
 
 def ablateAll(fragments, const, compute_wake=False):
     """ Perform single body ablation of all fragments using the 4th order Runge-Kutta method. 
@@ -501,6 +559,9 @@ def ablateAll(fragments, const, compute_wake=False):
 
     # Keep track of the luminosity of the main fragment
     luminosity_main = 0.0
+
+    # Keep track of the total electron density
+    electron_density_total = 0.0
 
     # Keep track of parameters of the brightest fragment
     brightest_height = 0.0
@@ -612,13 +673,22 @@ def ablateAll(fragments, const, compute_wake=False):
         lum = -luminousEfficiency(const.lum_eff_type, const.lum_eff, frag.v, frag.m) \
             *((mass_loss_ablation/const.dt*frag.v**2)/2)
 
+        # Compute the electron line density
+        q = -ionizationEfficiency(frag.v)*(mass_loss_ablation/const.dt)/(const.mu*frag.v)
+
 
         # Compute the total luminosity
         frag.lum = lum*frag.n_grains
 
+        # Compute the total electron line density
+        frag.q = q*frag.n_grains
+
 
         # Keep track of the total luminosity across all fragments
         luminosity_total += frag.lum
+
+        # Keep track of the total number of produced electrons
+        electron_density_total += frag.q
 
 
         # Keep track of the luminosity of the main fragment
@@ -636,8 +706,9 @@ def ablateAll(fragments, const, compute_wake=False):
 
         # If the fragment is done, stop ablating
         if (frag.m <= const.m_kill) or (frag.v < const.v_kill) or (frag.h < const.h_kill) or (frag.lum < 0):
-            frag.active = False
-            const.n_active -= 1
+            
+            killFragment(const, frag)
+
             #print('Killing', frag.id)
             continue
 
@@ -755,6 +826,19 @@ def ablateAll(fragments, const, compute_wake=False):
                 # print('Grain total mass: {:e}'.format(grain_mass_sum))
 
 
+                # Record physical parameters at the beginning of erosion for the main fragment
+                if frag.main:
+                    if const.erosion_beg_vel is None:
+
+                        const.erosion_beg_vel = frag.v
+                        const.erosion_beg_mass = frag.m
+                        const.erosion_beg_dyn_press = dyn_press
+
+                    # Record the mass when erosion is changed
+                    elif (const.erosion_height_change >= frag.h) and (const.mass_at_erosion_change is None):
+                        const.mass_at_erosion_change = frag.m
+
+
 
         # Disrupt the fragment if the dynamic pressure exceeds its strength
         if frag.disruption_enabled and const.disruption_on:
@@ -809,9 +893,8 @@ def ablateAll(fragments, const, compute_wake=False):
 
 
                 # Deactive the disrupted fragment
-                frag.active = False
                 frag.m = 0
-                const.n_active -= 1
+                killFragment(const, frag)
 
 
 
@@ -969,9 +1052,10 @@ def ablateAll(fragments, const, compute_wake=False):
 
         # If the fragment is done, stop ablating
         if (frag.m <= const.m_kill):
-            frag.active = False
-            const.n_active -= 1
+            
+            killFragment(const, frag)
             #print('Killing', frag.id)
+
             continue
 
 
@@ -1033,8 +1117,9 @@ def ablateAll(fragments, const, compute_wake=False):
     const.total_time += const.dt
 
 
-    return fragments, const, luminosity_total, luminosity_main, brightest_height, brightest_length, \
-        brightest_vel, leading_frag_height, leading_frag_length, leading_frag_vel, mass_total, wake
+    return fragments, const, luminosity_total, luminosity_main, electron_density_total, brightest_height, \
+        brightest_length, brightest_vel, leading_frag_height, leading_frag_length, leading_frag_vel, \
+        mass_total, wake
 
 
 
@@ -1094,18 +1179,17 @@ def runSimulation(const, compute_wake=False):
     while const.n_active > 0:
 
         # Ablate the fragments
-        fragments, const, luminosity_total, luminosity_main, brightest_height, brightest_length, \
-            brightest_vel, leading_frag_height, leading_frag_length, leading_frag_vel, mass_total, \
-            wake = ablateAll(fragments, const, \
-                compute_wake=compute_wake)
+        fragments, const, luminosity_total, luminosity_main, electron_density_total, brightest_height, \
+            brightest_length, brightest_vel, leading_frag_height, leading_frag_length, leading_frag_vel, \
+            mass_total, wake = ablateAll(fragments, const, compute_wake=compute_wake)
 
         # Store wake estimation results
         wake_results.append(wake)
 
         # Stack results list
-        results_list.append([const.total_time, luminosity_total, luminosity_main, brightest_height, \
-            brightest_length, brightest_vel, leading_frag_height, leading_frag_length, leading_frag_vel, \
-            mass_total])
+        results_list.append([const.total_time, luminosity_total, luminosity_main, electron_density_total, \
+            brightest_height, brightest_length, brightest_vel, leading_frag_height, leading_frag_length, \
+            leading_frag_vel, mass_total])
 
 
 
@@ -1151,6 +1235,38 @@ def runSimulation(const, compute_wake=False):
 
 
 
+def energyReceivedBeforeErosion(const, lam=1.0):
+    """ Compute the energy the meteoroid receive prior to erosion, assuming no major mass loss occured. 
+    
+    Arguments:
+        const: [Constants]
+
+    Keyword arguments:
+        lam: [float] Heat transfter coeff. 1.0 by default.
+
+    Return:
+        (es, ev):
+            - es: [float] Energy received per unit cross-section (J/m^2)
+            - ev: [float] Energy received per unit mass (J/kg).
+
+    """
+
+    # Integrate atmosphere density from the beginning of simulation to beginning of erosion.
+    dens_integ = scipy.integrate.quad(atmDensityPoly, const.erosion_height_start, const.h_init, args=(const.dens_co))[0]
+
+    # Compute the energy per unit cross-section
+    es = 1/2*lam*(const.v_init**2)*dens_integ/np.cos(const.zenith_angle)
+
+    # Compute initial shape-density coefficient
+    k = const.gamma*const.shape_factor*const.rho**(-2/3.0)
+
+    # Compute the energy per unit mass
+    ev = es*k/(const.gamma*const.m_init**(1/3.0))
+
+    return es, ev
+
+
+
 if __name__ == "__main__":
 
     import matplotlib.pyplot as plt
@@ -1178,9 +1294,9 @@ if __name__ == "__main__":
 
     # Unpack the results
     results_list = np.array(results_list).astype(np.float64)
-    time_arr, luminosity_arr, luminosity_main_arr, brightest_height_arr, brightest_length_arr, \
-        brightest_vel_arr, leading_frag_height_arr, leading_frag_length_arr, leading_frag_vel_arr, \
-        mass_total_arr = results_list.T
+    time_arr, luminosity_arr, luminosity_main_arr, electron_density_total_arr, brightest_height_arr, \
+        brightest_length_arr, brightest_vel_arr, leading_frag_height_arr, leading_frag_length_arr, \
+        leading_frag_vel_arr, mass_total_arr = results_list.T
 
 
     # Calculate absolute magnitude (apparent @100km) from given luminous intensity

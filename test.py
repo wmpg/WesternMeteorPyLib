@@ -74,7 +74,7 @@ if __name__ == "__main__":
 
     import pyximport
     pyximport.install(setup_args={'include_dirs':[np.get_include()]})
-    from wmpl.MetSim.MetSimErosionCyTools import luminousEfficiency
+    from wmpl.MetSim.MetSimErosionCyTools import luminousEfficiency, ionizationEfficiency
 
 
 
@@ -120,6 +120,14 @@ if __name__ == "__main__":
 
         plt.show()
 
+
+
+    # Plot the ionization efficiency
+    beta_arr = np.array([ionizationEfficiency(vel) for vel in vel_range])
+    plt.semilogy(vel_range/1000, 100*beta_arr, label="Jones (1997)")
+    plt.xlabel("Velocity (km/s)")
+    plt.ylabel("Beta (%)")
+    plt.show()
 
 
     sys.exit()

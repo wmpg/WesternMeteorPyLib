@@ -17,7 +17,7 @@ def dynamicPressure(lat, lon, height, jd, velocity, gamma=1.0):
         
     Arguments:
         lat: [float] Latitude of the meteor (radians).
-        lon: [flaot] Longitude of the meteor (radians).
+        lon: [float] Longitude of the meteor (radians).
         height: [float] Height of the meteor (meters).
         jd: [float] Julian date of the meteor.
         velocity: [float] Velocity of the meteor (m/s).
@@ -91,7 +91,7 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0):
             in m/s.
 
     Keyword arguments:
-        tau: [float] Luminous efficiency. 0.7% by default (Ceplecha & McCrosky, 1976)
+        tau: [float] Luminous efficiency (ratio, not percent!). 0.007 (i.e. 0.7%) by default (Ceplecha & McCrosky, 1976)
         P_0m: [float] Power output of a zero absolute magnitude meteor. 840W by default, as that is the R
             bandpass for a T = 4500K black body meteor. See: Weryk & Brown, 2013 - "Simultaneous radar and 
             video meteors - II. Photometry and ionisation" for more details.
@@ -108,7 +108,7 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0):
     # Calculate the intensities from absolute magnitudes
     intens = P_0m*10**(-0.4*mag_abs)
 
-    # Interpolate I/v^2
+    # Interpolate I
     intens_interpol = scipy.interpolate.PchipInterpolator(time, intens)
 
     # x_data = np.linspace(np.min(time), np.max(time), 1000)
@@ -116,7 +116,7 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0):
     # plt.scatter(time, intens/(velocity**2))
     # plt.show()
 
-    # Integrate the interpolated I/v^2
+    # Integrate the interpolated I
     intens_int = intens_interpol.integrate(np.min(time), np.max(time))
 
     # Calculate the mass
