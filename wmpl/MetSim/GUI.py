@@ -25,7 +25,7 @@ from wmpl.MetSim.MetSimErosion import runSimulation, Constants
 from wmpl.Trajectory.Orbit import calcOrbit
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly
 from wmpl.Utils.Math import mergeClosePoints, findClosestPoints, vectMag, lineFunc, meanAngle
-from wmpl.Utils.Physics import calcMass
+from wmpl.Utils.Physics import calcMass, dynamicPressure
 from wmpl.Utils.Pickling import loadPickle, savePickle
 from wmpl.Utils.Plotting import saveImage
 from wmpl.Utils.TrajConversions import unixTime2JD, geo2Cartesian, cartesian2Geo, altAz2RADec, \
@@ -1588,6 +1588,9 @@ class MetSimGUI(QMainWindow):
         self.checkBoxPlotElectronLineDensity.toggled.connect(self.checkBoxPlotElectronLineDensitySignal)
         self.inputElectronDensityHt.editingFinished.connect(self.electronDensityMeasChanged)
         self.inputElectronDensity.editingFinished.connect(self.electronDensityMeasChanged)
+
+        # Plots
+        self.plotDynamicPressureButton.clicked.connect(self.plotDynamicPressure)
 
 
         ### ###
@@ -3516,6 +3519,57 @@ class MetSimGUI(QMainWindow):
         self.updateLagPlot(show_previous=False)
         self.updateWakePlot(show_previous=False)
 
+
+
+    def plotDynamicPressure(self):
+        """ Open a separate plot with the simulated dynamic pressure. """
+
+
+        if self.simulation_results is not None:
+
+            sr = self.simulation_results
+
+            # Take mean meteor lat/lon as reference for the atmosphere model
+            lat_mean = np.mean([self.traj.rbeg_lat, self.traj.rend_lat])
+            lon_mean = meanAngle([self.traj.rbeg_lon, self.traj.rend_lon])
+
+
+            print(sr.brightest_height_arr, sr.brightest_vel_arr)
+
+            # Compute the dynamic pressure
+            brightest_dyn_pressure = dynamicPressure(lat_mean, lon_mean, sr.brightest_height_arr, \
+                self.traj.jdt_ref, sr.brightest_vel_arr)
+            # leading_frag_dyn_pressure = dynamicPressure(lat_mean, lon_mean, sr.leading_frag_height_arr, \
+            #     self.traj.jdt_ref, sr.leading_frag_vel_arr)
+
+            print(brightest_dyn_pressure)
+
+
+            # Init plot for photometry
+            fig, ax = plt.subplots(nrows=1, facecolor=None)
+
+            # Set photometry window title
+            fig.canvas.set_window_title("Dynamic pressure")
+
+            # Plot catalog magnitude vs. raw logsum of pixel intensities
+            ax.plot(brightest_dyn_pressure/1e6, sr.brightest_height_arr/1000, label="Brightest", color='k', \
+                alpha=0.5)
+            # ax.plot(leading_frag_dyn_pressure/1e6, sr.leading_frag_height_arr/1000, label="Leading", \
+            #     color='k', alpha=0.5, linestyle="dashed")
+
+            ax.legend()
+
+            ax.set_ylabel("Height (km)")
+            ax.set_xlabel("Dynamic pressure (MPa)")
+
+            ax.grid()
+
+            fig.tight_layout()
+            fig.show()
+
+
+        else:
+            print("No simulation results to show!")
 
 
 
