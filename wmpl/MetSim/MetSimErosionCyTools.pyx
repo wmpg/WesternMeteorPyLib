@@ -377,7 +377,7 @@ cpdef double decelerationRK4(double dt, double K, double m, double rho_atm, doub
 
 @cython.cdivision(True) 
 cpdef double luminousEfficiency(int lum_eff_type, double lum_eff, double vel, double mass):
-    """ Compute the luminous efficienty in percent for the given velocity. 
+    """ Compute the luminous efficiency of the given type, velocity, and mass.
     
     Arguments:
         lum_eff_type: [int] Lum. eff. model: 
@@ -474,6 +474,24 @@ cpdef double luminousEfficiency(int lum_eff_type, double lum_eff, double vel, do
         else:
             return exp(-1.4286 + log(vel/1000.0) + 0.347*tanh(0.38*log(mass)))/100.0
 
+
+
+@cython.cdivision(True) 
+cpdef double ionizationEfficiency(double vel):
+    """ Compute the ionization efficienty in percent for the given velocity. Jones (1997) function.
+    
+    Arguments:
+        vel: [double] Velocity (m/s).
+
+    Return:
+        tau: [double] Dimensionless ionization efficiency (ratio, from 0 to 1).
+
+    """
+
+    # Scale velocity to km/s
+    vel = vel/1000
+
+    return 10**(5.84 - 0.09*vel**0.5 - 9.56/(log10(vel)))
 
 
 

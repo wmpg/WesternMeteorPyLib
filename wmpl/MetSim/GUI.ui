@@ -2106,9 +2106,9 @@ p, li { white-space: pre-wrap; }
     <property name="geometry">
      <rect>
       <x>20</x>
-      <y>930</y>
-      <width>1231</width>
-      <height>71</height>
+      <y>920</y>
+      <width>941</width>
+      <height>81</height>
      </rect>
     </property>
     <property name="title">
@@ -2129,7 +2129,7 @@ p, li { white-space: pre-wrap; }
     <widget class="QPushButton" name="loadFragmentationFileButton">
      <property name="geometry">
       <rect>
-       <x>800</x>
+       <x>640</x>
        <y>30</y>
        <width>80</width>
        <height>23</height>
@@ -2142,11 +2142,14 @@ p, li { white-space: pre-wrap; }
     <widget class="QLabel" name="label_72">
      <property name="geometry">
       <rect>
-       <x>890</x>
-       <y>30</y>
-       <width>301</width>
-       <height>20</height>
+       <x>730</x>
+       <y>19</y>
+       <width>201</width>
+       <height>41</height>
       </rect>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">font: 6pt &quot;Arial&quot;;</string>
      </property>
      <property name="text">
       <string>fragmentation file path</string>
@@ -2181,7 +2184,7 @@ p, li { white-space: pre-wrap; }
     <widget class="Line" name="line_3">
      <property name="geometry">
       <rect>
-       <x>780</x>
+       <x>620</x>
        <y>30</y>
        <width>16</width>
        <height>31</height>
@@ -2194,7 +2197,7 @@ p, li { white-space: pre-wrap; }
     <widget class="QPushButton" name="mainFragmentStatusChangeButton">
      <property name="geometry">
       <rect>
-       <x>490</x>
+       <x>330</x>
        <y>30</y>
        <width>51</width>
        <height>23</height>
@@ -2207,7 +2210,7 @@ p, li { white-space: pre-wrap; }
     <widget class="QPushButton" name="allFragmentsStatusChangeButton">
      <property name="geometry">
       <rect>
-       <x>550</x>
+       <x>390</x>
        <y>30</y>
        <width>51</width>
        <height>23</height>
@@ -2220,7 +2223,7 @@ p, li { white-space: pre-wrap; }
     <widget class="QPushButton" name="newSingleBodyFragmentButton">
      <property name="geometry">
       <rect>
-       <x>610</x>
+       <x>450</x>
        <y>30</y>
        <width>51</width>
        <height>23</height>
@@ -2233,7 +2236,7 @@ p, li { white-space: pre-wrap; }
     <widget class="QPushButton" name="newErodingFragmentButton">
      <property name="geometry">
       <rect>
-       <x>670</x>
+       <x>510</x>
        <y>30</y>
        <width>51</width>
        <height>23</height>
@@ -2246,7 +2249,7 @@ p, li { white-space: pre-wrap; }
     <widget class="QPushButton" name="newDustReleaseButton">
      <property name="geometry">
       <rect>
-       <x>730</x>
+       <x>570</x>
        <y>30</y>
        <width>51</width>
        <height>23</height>
@@ -2259,7 +2262,7 @@ p, li { white-space: pre-wrap; }
     <widget class="QLabel" name="label_73">
      <property name="geometry">
       <rect>
-       <x>418</x>
+       <x>258</x>
        <y>30</y>
        <width>81</width>
        <height>20</height>
@@ -2272,7 +2275,7 @@ p, li { white-space: pre-wrap; }
     <widget class="Line" name="line_5">
      <property name="geometry">
       <rect>
-       <x>400</x>
+       <x>240</x>
        <y>30</y>
        <width>16</width>
        <height>31</height>
@@ -2296,6 +2299,136 @@ p, li { white-space: pre-wrap; }
      </property>
     </widget>
    </widget>
+   <widget class="QGroupBox" name="groupBox_2">
+    <property name="geometry">
+     <rect>
+      <x>1259</x>
+      <y>919</y>
+      <width>241</width>
+      <height>81</height>
+     </rect>
+    </property>
+    <property name="title">
+     <string>Electron line density</string>
+    </property>
+    <widget class="QCheckBox" name="checkBoxPlotElectronLineDensity">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>20</y>
+       <width>51</width>
+       <height>21</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Plot</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_74">
+     <property name="geometry">
+      <rect>
+       <x>50</x>
+       <y>20</y>
+       <width>57</width>
+       <height>15</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;H&lt;span style=&quot; vertical-align:sub;&quot;&gt;meas&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="inputElectronDensityHt">
+     <property name="geometry">
+      <rect>
+       <x>120</x>
+       <y>20</y>
+       <width>71</width>
+       <height>23</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_75">
+     <property name="geometry">
+      <rect>
+       <x>200</x>
+       <y>20</y>
+       <width>31</width>
+       <height>21</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>km</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_76">
+     <property name="geometry">
+      <rect>
+       <x>50</x>
+       <y>50</y>
+       <width>57</width>
+       <height>15</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;q&lt;span style=&quot; vertical-align:sub;&quot;&gt;meas&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="inputElectronDensity">
+     <property name="geometry">
+      <rect>
+       <x>120</x>
+       <y>50</y>
+       <width>71</width>
+       <height>23</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_77">
+     <property name="geometry">
+      <rect>
+       <x>200</x>
+       <y>50</y>
+       <width>31</width>
+       <height>21</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;e&lt;span style=&quot; vertical-align:super;&quot;&gt;-&lt;/span&gt;/m&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+     </property>
+    </widget>
+   </widget>
+   <widget class="QGroupBox" name="groupBox_3">
+    <property name="geometry">
+     <rect>
+      <x>969</x>
+      <y>919</y>
+      <width>281</width>
+      <height>81</height>
+     </rect>
+    </property>
+    <property name="title">
+     <string>Plots</string>
+    </property>
+    <widget class="QPushButton" name="plotDynamicPressureButton">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>20</y>
+       <width>75</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Dyn pressure</string>
+     </property>
+    </widget>
+   </widget>
   </widget>
   <widget class="QMenuBar" name="menubar">
    <property name="geometry">
@@ -2303,7 +2436,7 @@ p, li { white-space: pre-wrap; }
      <x>0</x>
      <y>0</y>
      <width>1910</width>
-     <height>20</height>
+     <height>21</height>
     </rect>
    </property>
   </widget>

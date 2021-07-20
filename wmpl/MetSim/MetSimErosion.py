@@ -24,7 +24,8 @@ import scipy.integrate
 # Cython init
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
-from wmpl.MetSim.MetSimErosionCyTools import massLossRK4, decelerationRK4, luminousEfficiency, atmDensityPoly
+from wmpl.MetSim.MetSimErosionCyTools import massLossRK4, decelerationRK4, luminousEfficiency, \
+    ionizationEfficiency, atmDensityPoly
 
 
 ### DEFINE CONSTANTS
@@ -127,6 +128,9 @@ class Constants(object):
         # Constant luminous efficiency (percent)
         self.lum_eff = 0.7
 
+        # Mean atomic mass of a meteor atom, kg (Jones 1997)
+        self.mu = 23*1.66*1e-27
+
         ### ###
 
 
@@ -214,6 +218,17 @@ class Constants(object):
         ### ###
 
 
+        ### Radar measurements ###
+
+        # Height at which the electron line density is measured (m)
+        self.electron_density_meas_ht = -1000
+
+        # Measured electron line density (e-/m)
+        self.electron_density_meas_q = -1
+
+        ### ###
+
+
         
         ### OUTPUT PARAMETERS ###
 
@@ -278,6 +293,9 @@ class Fragment(object):
 
         # Luminous intensity (Watts)
         self.lum = 0
+
+        # Electron line density
+        self.q = 0
 
         # Erosion coefficient value
         self.erosion_coeff = 0
@@ -542,6 +560,9 @@ def ablateAll(fragments, const, compute_wake=False):
     # Keep track of the luminosity of the main fragment
     luminosity_main = 0.0
 
+    # Keep track of the total electron density
+    electron_density_total = 0.0
+
     # Keep track of parameters of the brightest fragment
     brightest_height = 0.0
     brightest_length = 0.0
@@ -652,13 +673,22 @@ def ablateAll(fragments, const, compute_wake=False):
         lum = -luminousEfficiency(const.lum_eff_type, const.lum_eff, frag.v, frag.m) \
             *((mass_loss_ablation/const.dt*frag.v**2)/2)
 
+        # Compute the electron line density
+        q = -ionizationEfficiency(frag.v)*(mass_loss_ablation/const.dt)/(const.mu*frag.v)
+
 
         # Compute the total luminosity
         frag.lum = lum*frag.n_grains
 
+        # Compute the total electron line density
+        frag.q = q*frag.n_grains
+
 
         # Keep track of the total luminosity across all fragments
         luminosity_total += frag.lum
+
+        # Keep track of the total number of produced electrons
+        electron_density_total += frag.q
 
 
         # Keep track of the luminosity of the main fragment
@@ -1087,8 +1117,9 @@ def ablateAll(fragments, const, compute_wake=False):
     const.total_time += const.dt
 
 
-    return fragments, const, luminosity_total, luminosity_main, brightest_height, brightest_length, \
-        brightest_vel, leading_frag_height, leading_frag_length, leading_frag_vel, mass_total, wake
+    return fragments, const, luminosity_total, luminosity_main, electron_density_total, brightest_height, \
+        brightest_length, brightest_vel, leading_frag_height, leading_frag_length, leading_frag_vel, \
+        mass_total, wake
 
 
 
@@ -1148,18 +1179,17 @@ def runSimulation(const, compute_wake=False):
     while const.n_active > 0:
 
         # Ablate the fragments
-        fragments, const, luminosity_total, luminosity_main, brightest_height, brightest_length, \
-            brightest_vel, leading_frag_height, leading_frag_length, leading_frag_vel, mass_total, \
-            wake = ablateAll(fragments, const, \
-                compute_wake=compute_wake)
+        fragments, const, luminosity_total, luminosity_main, electron_density_total, brightest_height, \
+            brightest_length, brightest_vel, leading_frag_height, leading_frag_length, leading_frag_vel, \
+            mass_total, wake = ablateAll(fragments, const, compute_wake=compute_wake)
 
         # Store wake estimation results
         wake_results.append(wake)
 
         # Stack results list
-        results_list.append([const.total_time, luminosity_total, luminosity_main, brightest_height, \
-            brightest_length, brightest_vel, leading_frag_height, leading_frag_length, leading_frag_vel, \
-            mass_total])
+        results_list.append([const.total_time, luminosity_total, luminosity_main, electron_density_total, \
+            brightest_height, brightest_length, brightest_vel, leading_frag_height, leading_frag_length, \
+            leading_frag_vel, mass_total])
 
 
 
@@ -1264,9 +1294,9 @@ if __name__ == "__main__":
 
     # Unpack the results
     results_list = np.array(results_list).astype(np.float64)
-    time_arr, luminosity_arr, luminosity_main_arr, brightest_height_arr, brightest_length_arr, \
-        brightest_vel_arr, leading_frag_height_arr, leading_frag_length_arr, leading_frag_vel_arr, \
-        mass_total_arr = results_list.T
+    time_arr, luminosity_arr, luminosity_main_arr, electron_density_total_arr, brightest_height_arr, \
+        brightest_length_arr, brightest_vel_arr, leading_frag_height_arr, leading_frag_length_arr, \
+        leading_frag_vel_arr, mass_total_arr = results_list.T
 
 
     # Calculate absolute magnitude (apparent @100km) from given luminous intensity
