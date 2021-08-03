@@ -818,7 +818,7 @@ def minimizeAngleCost(params, observations, weights=None, gravity=False):
 
 
 
-def calcSpatialResidual(jd, state_vect, radiant_eci, stat, meas):
+def calcSpatialResidual(jdt_ref, jd, state_vect, radiant_eci, stat, meas, gravity=False):
     """ Calculate horizontal and vertical residuals from the radiant line, for the given observed point.
 
     Arguments:
@@ -827,6 +827,9 @@ def calcSpatialResidual(jd, state_vect, radiant_eci, stat, meas):
         radiant_eci: [3 element ndarray] radiant direction vector in ECI
         stat: [3 element ndarray] position of the station in ECI
         meas: [3 element ndarray] line of sight from the station, in ECI
+
+    Keyword arguments:
+        gravity: [bool] Apply the correction for Earth's gravity.
 
     Return:
         (hres, vres): [tuple of floats] residuals in horitontal and vertical direction from the radiant line
@@ -843,27 +846,22 @@ def calcSpatialResidual(jd, state_vect, radiant_eci, stat, meas):
     # Calculate closest points of approach (observed line of sight to radiant line) from the state vector
     obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, state_vect, radiant_eci)
 
-    # ### STILL IN TESTING !!!
-    # # Calculate the gravitational acceleration at the given height
-    # g = G*EARTH.MASS/(vectMag(rad_cpa)**2)
+    # # Apply the gravity drop
+    # if gravity:
 
-    # # Determine the sign of the initial time
-    # time_sign = np.sign(t_rel)
+    #     # Compute the relative time
+    #     t_rel = 86400*(jd - jdt_ref)
 
-    # # Calculate the amount of gravity drop from a straight trajectory (handle the case when the
-    # #   time is negative)
-    # drop = time_sign*(1/2.0)*g*t_rel**2
+    #     # Correct the point on the trajectory for gravity
+    #     rad_cpa = applyGravityDrop(rad_cpa, t_rel, vectMag(rad_cpa), 0.0)
 
-    # # Apply gravity drop to ECI coordinates
-    # rad_cpa -= drop*vectNorm(rad_cpa)
+    #     # ###########################
 
-    # ###########################
+    #     # # Calculate closest points of approach (observed line of sight to radiant line) from the gravity corrected
+    #     # #   point
+    #     # obs_cpa, _, d = findClosestPoints(stat, meas, rad_cpa, radiant_eci)
 
-    # # Calculate closest points of approach (observed line of sight to radiant line) from the gravity corrected
-    # #   point
-    # obs_cpa, _, d = findClosestPoints(stat, meas, rad_cpa, radiant_eci)
-
-    # ##!!!!!
+    #     # ##!!!!!
 
 
     # Vector pointing from the point on the trajectory to the point on the line of sight
@@ -2511,7 +2509,8 @@ class Trajectory(object):
             for t, jd, stat, meas in zip(obs.time_data, obs.JD_data, obs.stat_eci_los, obs.meas_eci_los):
 
                 # Calculate horizontal and vertical residuals
-                hres, vres = calcSpatialResidual(jd, state_vect, radiant_eci, stat, meas)
+                hres, vres = calcSpatialResidual(self.jdt_ref, jd, state_vect, radiant_eci, stat, meas, \
+                    gravity=self.gravity_correction)
 
                 # Add residuals to the residual list
                 obs.h_residuals.append(hres)
@@ -3205,13 +3204,14 @@ class Trajectory(object):
                 obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, state_vect, radiant_eci)
 
 
-                ### Take the gravity drop into account ###
+                ### Take the gravity drop into account ### 
+                if self.gravity_correction:
 
-                # Calculate the time in seconds from the beginning of the meteor
-                t_rel = t - t0
+                    # Calculate the time in seconds from the beginning of the meteor
+                    t_rel = t - t0
 
-                # Apply the gravity drop
-                rad_cpa = applyGravityDrop(rad_cpa, t_rel, r0, v0z)
+                    # Apply the gravity drop
+                    rad_cpa = applyGravityDrop(rad_cpa, t_rel, r0, v0z)
                 
 
                 # Calculate the range to the observed CPA
