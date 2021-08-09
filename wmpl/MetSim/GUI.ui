@@ -2290,12 +2290,13 @@ p, li { white-space: pre-wrap; }
       <rect>
        <x>120</x>
        <y>30</y>
-       <width>141</width>
-       <height>21</height>
+       <width>121</width>
+       <height>31</height>
       </rect>
      </property>
      <property name="text">
-      <string>Show individual LCs</string>
+      <string>Show individual 
+LCs</string>
      </property>
     </widget>
    </widget>
@@ -2418,14 +2419,27 @@ p, li { white-space: pre-wrap; }
     <widget class="QPushButton" name="plotDynamicPressureButton">
      <property name="geometry">
       <rect>
-       <x>10</x>
+       <x>90</x>
        <y>20</y>
-       <width>75</width>
+       <width>91</width>
        <height>23</height>
       </rect>
      </property>
      <property name="text">
       <string>Dyn pressure</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="plotAirDensityButton">
+     <property name="geometry">
+      <rect>
+       <x>0</x>
+       <y>20</y>
+       <width>80</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Air dens</string>
      </property>
     </widget>
    </widget>
@@ -2436,7 +2450,7 @@ p, li { white-space: pre-wrap; }
      <x>0</x>
      <y>0</y>
      <width>1910</width>
-     <height>21</height>
+     <height>20</height>
     </rect>
    </property>
   </widget>

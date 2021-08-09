@@ -24,7 +24,7 @@ from wmpl.Formats.Met import loadMet
 from wmpl.MetSim.GUITools import MatplotlibPopupWindow
 from wmpl.MetSim.MetSimErosion import runSimulation, Constants
 from wmpl.Trajectory.Orbit import calcOrbit
-from wmpl.Utils.AtmosphereDensity import fitAtmPoly
+from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensity, atmDensPoly
 from wmpl.Utils.Math import mergeClosePoints, findClosestPoints, vectMag, lineFunc, meanAngle
 from wmpl.Utils.Physics import calcMass, dynamicPressure
 from wmpl.Utils.Pickling import loadPickle, savePickle
@@ -60,10 +60,10 @@ class SimulationResults(object):
 
         # Unpack the results
         results_list = np.array(results_list).astype(np.float64)
-        self.time_arr, self.luminosity_arr, self.luminosity_main_arr, self.electron_density_total_arr, \
-            self.brightest_height_arr, self.brightest_length_arr, self.brightest_vel_arr, \
-            self.leading_frag_height_arr, self.leading_frag_length_arr, self.leading_frag_vel_arr, \
-            self.mass_total_arr = results_list.T
+        self.time_arr, self.luminosity_arr, self.luminosity_main_arr, self.luminosity_eroded_arr, \
+            self.electron_density_total_arr, self.brightest_height_arr, self.brightest_length_arr, \
+            self.brightest_vel_arr, self.leading_frag_height_arr, self.leading_frag_length_arr, \
+            self.leading_frag_vel_arr, self.mass_total_arr = results_list.T
 
 
         # Calculate the total absolute magnitude (apparent @100km), and fix possible NaN values (replace them 
@@ -74,6 +74,10 @@ class SimulationResults(object):
         # Compute the absolute magnitude of the main fragment
         self.abs_magnitude_main = -2.5*np.log10(self.luminosity_main_arr/const.P_0m)
         self.abs_magnitude_main[np.isnan(self.abs_magnitude_main)] = np.nanmax(self.abs_magnitude_main)
+
+        # Compute the absolute magnitude of the eroded and disruped grains
+        self.abs_magnitude_eroded = -2.5*np.log10(self.luminosity_eroded_arr/const.P_0m)
+        self.abs_magnitude_eroded[np.isnan(self.abs_magnitude_eroded)] = np.nanmax(self.abs_magnitude_eroded)   
 
 
         # Interpolate time vs leading fragment height
@@ -1222,6 +1226,53 @@ def fitResidualsListArguments(params, *args, **kwargs):
 
 
 
+def loadConstants(sim_fit_json):
+    """ Load the simulation constants from a JSON file. 
+        
+    Arguments:
+        sim_fit_json: [str] Path to the sim_fit JSON file.
+
+    Return:
+        (const, const_json): 
+            - const: [Constants object]
+            - const_json: [dict]
+
+    """
+
+    # Init the constants
+    const = Constants()
+
+
+    # Load the nominal simulation
+    with open(sim_fit_json) as f:
+        const_json = json.load(f)
+
+
+        # Fill in the constants
+        for key in const_json:
+            setattr(const, key, const_json[key])
+
+
+    if 'fragmentation_entries' in const_json:
+
+        # Convert fragmentation entries from dictionaties to objects
+        frag_entries = []
+        if len(const_json['fragmentation_entries']) > 0:
+            for frag_entry_dict in const_json['fragmentation_entries']:
+
+                # Only take entries which are variable names for the FragmentationEntry class
+                frag_entry_dict = {key:frag_entry_dict[key] for key in frag_entry_dict \
+                    if key in FragmentationEntry.__init__.__code__.co_varnames}
+
+                frag_entry = FragmentationEntry(**frag_entry_dict)
+                frag_entries.append(frag_entry)
+
+        const.fragmentation_entries = frag_entries
+
+
+    return const, const_json
+
+
 
 class MetSimGUI(QMainWindow):
     def __init__(self, traj_path, const_json_file=None, met_path=None, lc_path=None, wid_files=None):
@@ -1404,49 +1455,16 @@ class MetSimGUI(QMainWindow):
         # Init the constants
         self.const = Constants()
 
-        ### Calculate atmosphere density coeffs (down to the bottom observed height, limit to 15 km) ###
-
-        # Determine the height range for fitting the density
-        dens_fit_ht_beg = self.const.h_init
-        dens_fit_ht_end = self.traj.rend_ele - 5000
-        if dens_fit_ht_end < 15000:
-            dens_fit_ht_end = 15000
-
-        # Fit the polynomail describing the density
-        dens_co = self.fitAtmosphereDensity(dens_fit_ht_beg, dens_fit_ht_end)
-        self.const.dens_co = dens_co
-
-        print("Atmospheric mass density fit for the range of heights: {:.2f} - {:.2f} km".format(\
-            dens_fit_ht_end/1000, dens_fit_ht_beg/1000))
-
-        ### ###
-
         # If a JSON file with constant was given, load them instead of initing from scratch
         if const_json_file is not None:
 
-            with open(const_json_file) as f:
-                const_json = json.load(f)
-
-            # Fill in the constants
-            for key in const_json:
-                setattr(self.const, key, const_json[key])
+            # Load the constants from the JSON files
+            self.const, const_json = loadConstants(const_json_file)
 
 
-            if 'fragmentation_entries' in const_json:
-
-                # Convert fragmentation entries from dictionaties to objects
-                frag_entries = []
-                if len(const_json['fragmentation_entries']) > 0:
-                    for frag_entry_dict in const_json['fragmentation_entries']:
-
-                        # Only take entries which are variable names for the FragmentationEntry class
-                        frag_entry_dict = {key:frag_entry_dict[key] for key in frag_entry_dict \
-                            if key in FragmentationEntry.__init__.__code__.co_varnames}
-
-                        frag_entry = FragmentationEntry(**frag_entry_dict)
-                        frag_entries.append(frag_entry)
-
-                self.const.fragmentation_entries = frag_entries
+            # Init the fragmentation container for the GUI
+            if len(self.const.fragmentation_entries):
+            
                 self.fragmentation = FragmentationContainer(self, \
                     os.path.join(self.dir_path, self.const.fragmentation_file_name))
                 self.fragmentation.fragmentation_entries = self.const.fragmentation_entries
@@ -1483,9 +1501,6 @@ class MetSimGUI(QMainWindow):
             # # Convert the density coefficients into a numpy array
             # self.const.dens_co = np.array(self.const.dens_co)
 
-            # Set the newly computed atmosphere density parameters
-            self.const.dens_co = dens_co
-
 
         else:
 
@@ -1509,6 +1524,25 @@ class MetSimGUI(QMainWindow):
             self.const.m_init = self.calcPhotometricMass()
             print("Using initial mass: {:.2e} kg".format(self.const.m_init))
 
+
+        ### ###
+
+
+
+        ### Calculate atmosphere density coeffs (down to the bottom observed height, limit to 15 km) ###
+
+        # Determine the height range for fitting the density
+        self.dens_fit_ht_beg = self.const.h_init
+        self.dens_fit_ht_end = self.traj.rend_ele - 5000
+        if self.dens_fit_ht_end < 15000:
+            self.dens_fit_ht_end = 15000
+
+        # Fit the polynomail describing the density
+        dens_co = self.fitAtmosphereDensity(self.dens_fit_ht_beg, self.dens_fit_ht_end)
+        self.const.dens_co = dens_co
+
+        print("Atmospheric mass density fit for the range of heights: {:.2f} - {:.2f} km".format(\
+            self.dens_fit_ht_end/1000, self.dens_fit_ht_beg/1000))
 
         ### ###
 
@@ -1590,6 +1624,7 @@ class MetSimGUI(QMainWindow):
         self.inputElectronDensity.editingFinished.connect(self.electronDensityMeasChanged)
 
         # Plots
+        self.plotAirDensityButton.clicked.connect(self.plotAtmDensity)
         self.plotDynamicPressureButton.clicked.connect(self.plotDynamicPressure)
 
 
@@ -2588,6 +2623,11 @@ class MetSimGUI(QMainWindow):
                     sr.leading_frag_height_arr/1000, color='blue', linestyle='solid', linewidth=1, \
                     alpha=0.5)
 
+                # Plot the magnitude of the eroded and disrupted fragments
+                self.magnitudePlot.canvas.axes.plot(sr.abs_magnitude_eroded, \
+                    sr.leading_frag_height_arr/1000, color='purple', linestyle='dashed', linewidth=1, \
+                    alpha=0.5)
+
 
                 # Plot magnitudes for every fragmentation entry
                 for frag_entry in self.const.fragmentation_entries:
@@ -3519,6 +3559,57 @@ class MetSimGUI(QMainWindow):
         self.updateLagPlot(show_previous=False)
         self.updateWakePlot(show_previous=False)
 
+
+
+    def plotAtmDensity(self):
+        """ Open a separate plot showing the MSISE air density and the polynomial fit. """
+
+        # Init a matplotlib popup window
+        self.mpw = MatplotlibPopupWindow()
+
+        # Set the window title
+        self.mpw.setWindowTitle("Air density fit")
+
+
+
+        # Take mean meteor lat/lon as reference for the atmosphere model
+        lat_mean = np.mean([self.traj.rbeg_lat, self.traj.rend_lat])
+        lon_mean = meanAngle([self.traj.rbeg_lon, self.traj.rend_lon])
+
+
+        # Generate a height array
+        height_arr = np.linspace(self.dens_fit_ht_beg, self.dens_fit_ht_end, 200)
+
+        # Get atmosphere densities from NRLMSISE-00 (use log values for the fit)
+        atm_densities = np.array([getAtmDensity(lat_mean, lon_mean, ht, self.traj.jdt_ref) \
+            for ht in height_arr])
+
+
+        # Get atmosphere densities from the fitted polynomial
+        atm_densities_poly = atmDensPoly(height_arr, self.const.dens_co)
+
+
+        # Plot the MSISE density
+        self.mpw.canvas.axes.semilogx(atm_densities, height_arr/1000, \
+            label="NRLMSISE-00", color='k')
+
+        # Poly poly fit
+        self.mpw.canvas.axes.semilogx(atm_densities_poly, height_arr/1000, \
+            label="Polynomial fit", color='red', linestyle="dashed")
+
+
+        self.mpw.canvas.axes.legend()
+
+        self.mpw.canvas.axes.set_ylabel("Height (km)")
+        self.mpw.canvas.axes.set_xlabel("Atmosphere mass density (kg/m^3)")
+
+        self.mpw.canvas.axes.set_ylim([self.dens_fit_ht_end/1000, self.dens_fit_ht_beg/1000])
+
+        self.mpw.canvas.axes.grid()
+
+        self.mpw.canvas.figure.tight_layout()
+            
+        self.mpw.show()
 
 
     def plotDynamicPressure(self):

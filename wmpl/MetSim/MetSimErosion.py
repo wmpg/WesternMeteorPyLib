@@ -560,6 +560,9 @@ def ablateAll(fragments, const, compute_wake=False):
     # Keep track of the luminosity of the main fragment
     luminosity_main = 0.0
 
+    # Keep track of the luminosity of eroded and disrupted fragments
+    luminosity_eroded = 0.0
+
     # Keep track of the total electron density
     electron_density_total = 0.0
 
@@ -734,53 +737,69 @@ def ablateAll(fragments, const, compute_wake=False):
 
 
         # For fragments born out of complex fragmentation, keep track of their luminosity and height
-        if const.fragmentation_show_individual_lcs and frag.complex:
+        if not frag.main:
 
-            # Find the corresponding fragmentation entry
-            frag_entry = next((x for x in const.fragmentation_entries if x.id == frag.complex_id), None)
+            if const.fragmentation_show_individual_lcs: 
 
-            if frag_entry is not None:
+                # Keep track of magnitudes of complex fragmentation fragments
+                if frag.complex:
 
-                # Store luminosity of grains
-                if frag.grain:
+                    # Find the corresponding fragmentation entry
+                    frag_entry = next((x for x in const.fragmentation_entries if x.id == frag.complex_id), \
+                        None)
 
-                    add_new_entry = False
+                    if frag_entry is not None:
 
-                    # Check if the last time entry corresponds to the current time, and add to it
-                    if not len(frag_entry.grains_time_data):
-                        add_new_entry = True
-                    elif const.total_time != frag_entry.grains_time_data[-1]:
-                        add_new_entry = True
+                        # Store luminosity of grains
+                        if frag.grain:
 
-                    # Add the current integration time
-                    if add_new_entry:
-                        frag_entry.grains_time_data.append(const.total_time)
-                        frag_entry.grains_luminosity.append(frag.lum)
+                            add_new_entry = False
 
-                    # Add to the total luminosity at the current time step that's already been added
-                    else:
-                        frag_entry.grains_luminosity[-1] += frag.lum
-                        
+                            # Check if the last time entry corresponds to the current time, and add to it
+                            if not len(frag_entry.grains_time_data):
+                                add_new_entry = True
+                            elif const.total_time != frag_entry.grains_time_data[-1]:
+                                add_new_entry = True
 
-                # Store parameters of the main fragment
+                            # Add the current integration time
+                            if add_new_entry:
+                                frag_entry.grains_time_data.append(const.total_time)
+                                frag_entry.grains_luminosity.append(frag.lum)
+
+                            # Add to the total luminosity at the current time step that's already been added
+                            else:
+                                frag_entry.grains_luminosity[-1] += frag.lum
+                                
+
+                        # Store parameters of the main fragment
+                        else:
+
+                            add_new_entry = False
+
+                            # Check if the last time entry corresponds to the current time, and add to it
+                            if not len(frag_entry.main_time_data):
+                                add_new_entry = True
+                            elif const.total_time != frag_entry.main_time_data[-1]:
+                                add_new_entry = True
+
+                            # Add the current integration time
+                            if add_new_entry:
+                                frag_entry.main_time_data.append(const.total_time)
+                                frag_entry.main_luminosity.append(frag.lum)
+
+                            # Add to the total luminosity at the current time step that's already been added
+                            else:
+                                frag_entry.main_luminosity[-1] += frag.lum
+
+
+                # Keep track of luminosity of eroded and disrupted fragments ejected directly from the main
+                #   fragment
                 else:
 
-                    add_new_entry = False
+                    luminosity_eroded += frag.lum
 
-                    # Check if the last time entry corresponds to the current time, and add to it
-                    if not len(frag_entry.main_time_data):
-                        add_new_entry = True
-                    elif const.total_time != frag_entry.main_time_data[-1]:
-                        add_new_entry = True
 
-                    # Add the current integration time
-                    if add_new_entry:
-                        frag_entry.main_time_data.append(const.total_time)
-                        frag_entry.main_luminosity.append(frag.lum)
 
-                    # Add to the total luminosity at the current time step that's already been added
-                    else:
-                        frag_entry.main_luminosity[-1] += frag.lum
 
 
         # For non-complex fragmentation only: Check if the erosion should start, given the height, 
@@ -1117,9 +1136,9 @@ def ablateAll(fragments, const, compute_wake=False):
     const.total_time += const.dt
 
 
-    return fragments, const, luminosity_total, luminosity_main, electron_density_total, brightest_height, \
-        brightest_length, brightest_vel, leading_frag_height, leading_frag_length, leading_frag_vel, \
-        mass_total, wake
+    return fragments, const, luminosity_total, luminosity_main, luminosity_eroded, electron_density_total, \
+        brightest_height, brightest_length, brightest_vel, leading_frag_height, leading_frag_length, \
+        leading_frag_vel, mass_total, wake
 
 
 
@@ -1179,17 +1198,17 @@ def runSimulation(const, compute_wake=False):
     while const.n_active > 0:
 
         # Ablate the fragments
-        fragments, const, luminosity_total, luminosity_main, electron_density_total, brightest_height, \
-            brightest_length, brightest_vel, leading_frag_height, leading_frag_length, leading_frag_vel, \
-            mass_total, wake = ablateAll(fragments, const, compute_wake=compute_wake)
+        fragments, const, luminosity_total, luminosity_main, luminosity_eroded, electron_density_total, \
+            brightest_height, brightest_length, brightest_vel, leading_frag_height, leading_frag_length, \
+            leading_frag_vel, mass_total, wake = ablateAll(fragments, const, compute_wake=compute_wake)
 
         # Store wake estimation results
         wake_results.append(wake)
 
         # Stack results list
-        results_list.append([const.total_time, luminosity_total, luminosity_main, electron_density_total, \
-            brightest_height, brightest_length, brightest_vel, leading_frag_height, leading_frag_length, \
-            leading_frag_vel, mass_total])
+        results_list.append([const.total_time, luminosity_total, luminosity_main, luminosity_eroded, \
+            electron_density_total, brightest_height, brightest_length, brightest_vel, leading_frag_height, \
+            leading_frag_length, leading_frag_vel, mass_total])
 
 
 
@@ -1294,9 +1313,9 @@ if __name__ == "__main__":
 
     # Unpack the results
     results_list = np.array(results_list).astype(np.float64)
-    time_arr, luminosity_arr, luminosity_main_arr, electron_density_total_arr, brightest_height_arr, \
-        brightest_length_arr, brightest_vel_arr, leading_frag_height_arr, leading_frag_length_arr, \
-        leading_frag_vel_arr, mass_total_arr = results_list.T
+    time_arr, luminosity_arr, luminosity_main_arr, luminosity_eroded_arr, electron_density_total_arr, \
+        brightest_height_arr, brightest_length_arr, brightest_vel_arr, leading_frag_height_arr, \
+        leading_frag_length_arr, leading_frag_vel_arr, mass_total_arr = results_list.T
 
 
     # Calculate absolute magnitude (apparent @100km) from given luminous intensity
