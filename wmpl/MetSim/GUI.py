@@ -63,7 +63,8 @@ class SimulationResults(object):
         self.time_arr, self.luminosity_arr, self.luminosity_main_arr, self.luminosity_eroded_arr, \
             self.electron_density_total_arr, self.brightest_height_arr, self.brightest_length_arr, \
             self.brightest_vel_arr, self.leading_frag_height_arr, self.leading_frag_length_arr, \
-            self.leading_frag_vel_arr, self.mass_total_arr = results_list.T
+            self.leading_frag_vel_arr, self.mass_total_active_arr, self.main_mass_arr, \
+            self.main_height_arr, self.main_length_arr, self.main_vel_arr = results_list.T
 
 
         # Calculate the total absolute magnitude (apparent @100km), and fix possible NaN values (replace them 
@@ -85,26 +86,27 @@ class SimulationResults(object):
 
         # Compute the absolute magnitude of individual fragmentation entries, and join them a height of the
         #   leading fragment
-        for frag_entry in const.fragmentation_entries:
+        if const.fragmentation_show_individual_lcs:
+            for frag_entry in const.fragmentation_entries:
 
-            # Compute values for the main fragment
-            if len(frag_entry.main_time_data):
+                # Compute values for the main fragment
+                if len(frag_entry.main_time_data):
 
-                # Find the corresponding height for every time
-                frag_entry.main_height_data = leading_frag_ht_interpol(np.array(frag_entry.main_time_data))
+                    # Find the corresponding height for every time
+                    frag_entry.main_height_data = leading_frag_ht_interpol(np.array(frag_entry.main_time_data))
 
-                # Compute the magnitude
-                frag_entry.main_abs_mag = -2.5*np.log10(np.array(frag_entry.main_luminosity)/const.P_0m)
+                    # Compute the magnitude
+                    frag_entry.main_abs_mag = -2.5*np.log10(np.array(frag_entry.main_luminosity)/const.P_0m)
 
 
-            # Compute values for the grains
-            if len(frag_entry.grains_time_data):
+                # Compute values for the grains
+                if len(frag_entry.grains_time_data):
 
-                # Find the corresponding height for every time
-                frag_entry.grains_height_data = leading_frag_ht_interpol(np.array(frag_entry.grains_time_data))
+                    # Find the corresponding height for every time
+                    frag_entry.grains_height_data = leading_frag_ht_interpol(np.array(frag_entry.grains_time_data))
 
-                # Compute the magnitude
-                frag_entry.grains_abs_mag = -2.5*np.log10(np.array(frag_entry.grains_luminosity)/const.P_0m)
+                    # Compute the magnitude
+                    frag_entry.grains_abs_mag = -2.5*np.log10(np.array(frag_entry.grains_luminosity)/const.P_0m)
 
 
         ### Wake simulation ###
@@ -1626,6 +1628,7 @@ class MetSimGUI(QMainWindow):
         # Plots
         self.plotAirDensityButton.clicked.connect(self.plotAtmDensity)
         self.plotDynamicPressureButton.clicked.connect(self.plotDynamicPressure)
+        self.plotMassLossButton.clicked.connect(self.plotMassLoss)
 
 
         ### ###
@@ -3634,9 +3637,9 @@ class MetSimGUI(QMainWindow):
 
             # Compute the dynamic pressure
             brightest_dyn_pressure = dynamicPressure(lat_mean, lon_mean, sr.brightest_height_arr, \
-                self.traj.jdt_ref, sr.brightest_vel_arr)
+                self.traj.jdt_ref, sr.brightest_vel_arr, gamma=self.const.gamma)
             leading_frag_dyn_pressure = dynamicPressure(lat_mean, lon_mean, sr.leading_frag_height_arr, \
-                self.traj.jdt_ref, sr.leading_frag_vel_arr)
+                self.traj.jdt_ref, sr.leading_frag_vel_arr, gamma=self.const.gamma)
 
 
             # Plot dyn pressure
@@ -3661,6 +3664,66 @@ class MetSimGUI(QMainWindow):
             self.mpw.canvas.axes.set_xlabel("Dynamic pressure (MPa)")
 
             self.mpw.canvas.axes.set_ylim([self.plot_end_ht + END_HT_PAD, self.plot_beg_ht + BEG_HT_PAD])
+
+            self.mpw.canvas.axes.grid()
+
+            self.mpw.canvas.figure.tight_layout()
+                
+            self.mpw.show()
+
+
+        else:
+            print("No simulation results to show!")
+
+
+
+    def plotMassLoss(self):
+        """ Open a separate plot with the simulated mass loss. """
+
+
+        if self.simulation_results is not None:
+
+            # Init a matplotlib popup window
+            self.mpw = MatplotlibPopupWindow()
+
+            # Set the window title
+            self.mpw.setWindowTitle("Mass loss")
+
+
+
+            sr = self.simulation_results
+
+            # Take mean meteor lat/lon as reference for the atmosphere model
+            lat_mean = np.mean([self.traj.rbeg_lat, self.traj.rend_lat])
+            lon_mean = meanAngle([self.traj.rbeg_lon, self.traj.rend_lon])
+
+            # Compute the dynamic pressure
+            brightest_dyn_pressure = dynamicPressure(lat_mean, lon_mean, sr.brightest_height_arr, \
+                self.traj.jdt_ref, sr.brightest_vel_arr, gamma=self.const.gamma)
+            main_dyn_pressure = dynamicPressure(lat_mean, lon_mean, sr.main_height_arr, \
+                self.traj.jdt_ref, sr.main_vel_arr, gamma=self.const.gamma)
+
+
+            # Filter out very small masses
+            mass_filter = sr.mass_total_active_arr > 0.001
+
+
+            # Plot mass of all fragments
+            self.mpw.canvas.axes.loglog(brightest_dyn_pressure[mass_filter]/1e6, \
+                sr.mass_total_active_arr[mass_filter], label="Total mass", color='k', linewidth=1, \
+                linestyle='dashed')
+
+            # Plot mass of the main fragment
+            self.mpw.canvas.axes.loglog(main_dyn_pressure[mass_filter]/1e6, sr.main_mass_arr[mass_filter], \
+                label="Main mass", color='k', linewidth=2)
+
+            self.mpw.canvas.axes.set_xlim(xmin=1e-3)
+
+
+            self.mpw.canvas.axes.legend()
+
+            self.mpw.canvas.axes.set_ylabel("Mass (kg)")
+            self.mpw.canvas.axes.set_xlabel("Dynamic pressure (MPa)")
 
             self.mpw.canvas.axes.grid()
 
