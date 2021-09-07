@@ -13,12 +13,14 @@ import copy
 import datetime
 import shutil
 import time
+import signal
 
 import numpy as np
 
 from wmpl.Formats.CAMS import loadFTPDetectInfo
 from wmpl.Trajectory.CorrelateEngine import TrajectoryCorrelator, TrajectoryConstraints
 from wmpl.Utils.Math import generateDatetimeBins
+from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import loadPickle, savePickle
 from wmpl.Utils.TrajConversions import jd2Date
 
@@ -567,6 +569,10 @@ class RMSDataHandle(object):
             ftpdetectinfo_name = None
             platepar_recalibrated_name = None
 
+            # Skip files
+            if os.path.isfile(proc_path):
+                continue
+
             # Find FTPdetectinfo and platepar files
             for name in os.listdir(proc_path):
                     
@@ -710,13 +716,21 @@ class RMSDataHandle(object):
 
         north_america_group = ["CA", "US", "MX"]
 
+        south_america_group = ["AR", "BO", "BR", "CL", "CO", "EC", "FK", "GF", "GY", "GY", "PY", "PE", "SR", \
+            "UY", "VE"]
+
         europe_group = ["AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", \
             "IT", "LV", "LT", "LU", "MT", "NL", "PO", "PT", "RO", "SK", "SI", "ES", "SE", "AL", "AD", "AM", \
             "BY", "BA", "FO", "GE", "GI", "IM", "XK", "LI", "MK", "MD", "MC", "ME", "NO", "RU", "SM", "RS", \
             "CH", "TR", "UA", "UK", "VA"]
 
+        new_zealand_group = ["NZ"]
 
-        country_groups = [north_america_group, europe_group]
+        australia_group = ["AU"]
+
+
+        country_groups = [north_america_group, south_america_group, europe_group, new_zealand_group, \
+            australia_group]
 
 
         # Check that both stations are in the same country group
@@ -806,9 +820,43 @@ class RMSDataHandle(object):
             # If the full trajectory object is given
             station_list = [obs.station_id for obs in traj.observations if obs.ignore_station is False]
 
-        return os.path.join(self.dir_path, OUTPUT_TRAJ_DIR, \
-            jd2Date(traj.jdt_ref, dt_obj=True).strftime("%Y%m%d_%H%M%S.%f")[:-3] + "_" \
-            + "_".join(list(set([stat_id[:2] for stat_id in station_list]))))
+
+        # Datetime of the reference trajectory time
+        dt = jd2Date(traj.jdt_ref, dt_obj=True)
+
+
+        # Year directory
+        year_dir = dt.strftime("%Y")
+
+        # Month directory
+        month_dir = dt.strftime("%Y%m")
+
+        # Date directory
+        date_dir = dt.strftime("%Y%m%d")
+
+        # Name of the trajectory directory
+        traj_dir = dt.strftime("%Y%m%d_%H%M%S.%f")[:-3] + "_" \
+            + "_".join(list(set([stat_id[:2] for stat_id in station_list])))
+
+
+        # Path to the year directory
+        out_path = os.path.join(self.dir_path, OUTPUT_TRAJ_DIR, year_dir)
+        mkdirP(out_path)
+
+        # Path to the year directory
+        out_path = os.path.join(out_path, month_dir)
+        mkdirP(out_path)
+
+        # Path to the date directory
+        out_path = os.path.join(out_path, date_dir)
+        mkdirP(out_path)
+
+        # Path too the trajectory directory
+        out_path = os.path.join(out_path, traj_dir)
+        mkdirP(out_path)
+
+
+        return out_path
 
 
     def saveTrajectoryResults(self, traj, save_plots):
@@ -913,6 +961,29 @@ class RMSDataHandle(object):
             print("File {:s} not found!".format(traj_reduced.traj_file_path))
             
             return None
+
+
+
+    def saveDatabase(self):
+        """ Save the data base. """
+
+        def _breakHandler(signum, frame):
+            """ Do nothing if CTRL + C is pressed. """
+            print("The data base is being saved, the program cannot be exited right now!")
+            pass
+
+        # Prevent quitting while a data base is being saved
+        original_signal = signal.getsignal(signal.SIGINT)
+        signal.signal(signal.SIGINT, _breakHandler)
+
+        # Save the data base
+        print("Saving data base to disk...")
+        self.db.save()
+
+        # Restore the signal functionality
+        signal.signal(signal.SIGINT, original_signal)
+
+
 
 
 
