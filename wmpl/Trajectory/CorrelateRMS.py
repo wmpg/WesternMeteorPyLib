@@ -465,9 +465,12 @@ class RMSDataHandle(object):
         print()
         print("Loading database...")
         self.db = DatabaseJSON(os.path.join(self.dir_path, JSON_DB_NAME))
+        print("   ... done!")
 
         # Find unprocessed meteor files
+        print("Finding unprocessed data...")
         self.processing_list = self.findUnprocessedFolders(station_list)
+        print("   ... done!")
 
         # Load already computed trajectories
         self.loadComputedTrajectories(os.path.join(self.dir_path, OUTPUT_TRAJ_DIR))
