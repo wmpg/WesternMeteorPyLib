@@ -569,7 +569,9 @@ class RMSDataHandle(object):
 
         # Go through folders for processing
         unpaired_met_obs_list = []
-        for station_index, (station_code, rel_proc_path, proc_path, night_dt) in enumerate(processing_list):
+        prev_station = None
+        station_count = 1
+        for station_code, rel_proc_path, proc_path, night_dt in processing_list:
 
             # Check that the night datetime is within the given range of times, if the range is given
             if (dt_range is not None) and (night_dt is not None):
@@ -622,8 +624,11 @@ class RMSDataHandle(object):
 
                 continue
 
+            if station_code != prev_station:
+                station_count += 1
+
             # Save database to mark those with missing data files (only every 50th station, to speed things up)
-            if station_index%50 == 0:
+            if station_count%50 == 0:
                 self.saveDatabase()
 
 
@@ -688,6 +693,7 @@ class RMSDataHandle(object):
             print("  Added {:d} observations!".format(added_count))
 
 
+        print()
         print("  Finished loading unpaired observations!")
         self.saveDatabase()
 
