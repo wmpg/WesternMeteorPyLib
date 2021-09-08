@@ -484,6 +484,29 @@ class RMSDataHandle(object):
         print("   ... done!")
 
 
+        ### Define country groups to speed up the proceessing ###
+
+        north_america_group = ["CA", "US", "MX"]
+
+        south_america_group = ["AR", "BO", "BR", "CL", "CO", "EC", "FK", "GF", "GY", "GY", "PY", "PE", "SR", \
+            "UY", "VE"]
+
+        europe_group = ["AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", \
+            "IT", "LV", "LT", "LU", "MT", "NL", "PO", "PT", "RO", "SK", "SI", "ES", "SE", "AL", "AD", "AM", \
+            "BY", "BA", "FO", "GE", "GI", "IM", "XK", "LI", "MK", "MD", "MC", "ME", "NO", "RU", "SM", "RS", \
+            "CH", "TR", "UA", "UK", "VA"]
+
+        new_zealand_group = ["NZ"]
+
+        australia_group = ["AU"]
+
+
+        self.country_groups = [north_america_group, south_america_group, europe_group, new_zealand_group, \
+            australia_group]
+
+        ### ###
+
+
     def loadStations(self):
         """ Load the station names in the processing folder. """
 
@@ -778,27 +801,8 @@ class RMSDataHandle(object):
         """ Only pair observations if they are in proximity to a given country. """
 
 
-        north_america_group = ["CA", "US", "MX"]
-
-        south_america_group = ["AR", "BO", "BR", "CL", "CO", "EC", "FK", "GF", "GY", "GY", "PY", "PE", "SR", \
-            "UY", "VE"]
-
-        europe_group = ["AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", \
-            "IT", "LV", "LT", "LU", "MT", "NL", "PO", "PT", "RO", "SK", "SI", "ES", "SE", "AL", "AD", "AM", \
-            "BY", "BA", "FO", "GE", "GI", "IM", "XK", "LI", "MK", "MD", "MC", "ME", "NO", "RU", "SM", "RS", \
-            "CH", "TR", "UA", "UK", "VA"]
-
-        new_zealand_group = ["NZ"]
-
-        australia_group = ["AU"]
-
-
-        country_groups = [north_america_group, south_america_group, europe_group, new_zealand_group, \
-            australia_group]
-
-
         # Check that both stations are in the same country group
-        for group in country_groups:
+        for group in self.country_groups:
             if met_obs1.station_code[:2] in group:
                 if met_obs2.station_code[:2] in group:
                     return True
