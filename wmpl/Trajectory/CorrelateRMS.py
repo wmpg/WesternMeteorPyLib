@@ -447,14 +447,20 @@ class PlateparDummy:
 
 
 class RMSDataHandle(object):
-    def __init__(self, dir_path):
+    def __init__(self, dir_path, dt_range=None):
         """ Handles data interfacing between the trajectory correlator and RMS data files on disk. 
     
         Arguments:
             dir_path: [str] Path to the directory with data files. 
+
+        Keyword arguments:
+            dt_range: [list of datetimes] A range of datetimes between which the existing trajectories will be
+                loaded.
         """
 
         self.dir_path = dir_path
+
+        self.dt_range = dt_range
 
         print("Using directory:", self.dir_path)
 
@@ -473,7 +479,9 @@ class RMSDataHandle(object):
         print("   ... done!")
 
         # Load already computed trajectories
+        print("Loading already computed trajectories...")
         self.loadComputedTrajectories(os.path.join(self.dir_path, OUTPUT_TRAJ_DIR))
+        print("   ... done!")
 
 
     def loadStations(self):
@@ -700,6 +708,28 @@ class RMSDataHandle(object):
         return unpaired_met_obs_list
 
 
+    def trajectoryFileInDtRange(self, file_name):
+        """ Check if the trajectory file is in the given datetime range. """
+
+        # If the date range is not given, then skip the trajectory
+        if self.dt_range is None:
+            return True
+
+        # Extract the datetime from the trajectory name
+        date_str, time_str = file_name.split('_')[:2]
+
+        # Make a datetime object
+        dt = datetime.datetime.strptime("_".join([date_str, time_str]), "%Y%m%d_%H%M%S")
+
+        dt_beg, dt_end = self.dt_range
+
+        # Check if the date time is in the time range
+        if (dt >= dt_beg) and (dt <= dt_end):
+            return True
+
+        else:
+            return False
+
 
     def loadComputedTrajectories(self, traj_dir_path):
         """ Load all already estimated trajectories. 
@@ -716,7 +746,8 @@ class RMSDataHandle(object):
             # Find and load all trajectory pickle files
             for file_name in file_names:
                 if file_name.endswith("_trajectory.pickle"):
-                    self.db.addTrajectory(os.path.join(dir_path, file_name))
+                    if self.trajectoryFileInDtRange(file_name):
+                        self.db.addTrajectory(os.path.join(dir_path, file_name))
 
 
     def getComputedTrajectories(self, jd_beg, jd_end):
@@ -1136,20 +1167,6 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         # Clock for measuring script time
         t1 = datetime.datetime.utcnow()
 
-        # Init the data handle
-        dh = RMSDataHandle(cml_args.dir_path)
-
-
-        # If there is nothing to process, stop
-        if not dh.processing_list:
-            print()
-            print("Nothing to process!")
-            print("Probably everything is already processed.")
-            print("Exiting...")
-            sys.exit()
-
-
-
         # If auto run is enabled, compute the time range to use
         event_time_range = None
         if cml_args.auto is not None:
@@ -1186,6 +1203,19 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                 print("    END: {:s}".format(str(dt_end)))
 
                 event_time_range = [dt_beg, dt_end]
+
+
+
+        # Init the data handle
+        dh = RMSDataHandle(cml_args.dir_path, event_time_range)
+
+        # If there is nothing to process, stop
+        if not dh.processing_list:
+            print()
+            print("Nothing to process!")
+            print("Probably everything is already processed.")
+            print("Exiting...")
+            sys.exit()
 
 
         ### GENERATE MONTHLY TIME BINS ###
