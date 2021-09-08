@@ -634,6 +634,7 @@ class RMSDataHandle(object):
 
             if station_code != prev_station:
                 station_count += 1
+                prev_station = station_code
 
             # Save database to mark those with missing data files (only every 50th station, to speed things up)
             if station_count%50 == 0:
