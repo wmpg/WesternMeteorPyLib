@@ -462,6 +462,8 @@ class RMSDataHandle(object):
         station_list = self.loadStations()
 
         # Load database of processed folders
+        print()
+        print("Loading database...")
         self.db = DatabaseJSON(os.path.join(self.dir_path, JSON_DB_NAME))
 
         # Find unprocessed meteor files
