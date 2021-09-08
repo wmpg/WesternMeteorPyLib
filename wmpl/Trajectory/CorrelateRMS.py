@@ -167,6 +167,12 @@ class DatabaseJSON(object):
     def save(self):
         """ Save the database of processed meteors to disk. """
 
+        # Back up the existing data base
+        db_bak_file_path = self.db_file_path + ".bak"
+        if os.path.exists(self.db_file_path):
+            shutil.copy2(self.db_file_path, db_bak_file_path)
+
+        # Save the data base
         with open(self.db_file_path, 'w') as f:
             self2 = copy.deepcopy(self)
 
@@ -176,6 +182,10 @@ class DatabaseJSON(object):
                 for key in self.failed_trajectories}
 
             f.write(json.dumps(self2, default=lambda o: o.__dict__, indent=4, sort_keys=True))
+
+        # Remove the backup file
+        if os.path.exists(db_bak_file_path):
+            os.remove(db_bak_file_path)
 
 
     def addProcessedDir(self, station_name, rel_proc_path):
@@ -554,7 +564,7 @@ class RMSDataHandle(object):
 
         # Go through folders for processing
         unpaired_met_obs_list = []
-        for station_code, rel_proc_path, proc_path, night_dt in processing_list:
+        for station_index, (station_code, rel_proc_path, proc_path, night_dt) in enumerate(processing_list):
 
             # Check that the night datetime is within the given range of times, if the range is given
             if (dt_range is not None) and (night_dt is not None):
@@ -569,9 +579,12 @@ class RMSDataHandle(object):
             ftpdetectinfo_name = None
             platepar_recalibrated_name = None
 
-            # Skip files
+            # Skip files, only take directories
             if os.path.isfile(proc_path):
                 continue
+
+            print()
+            print("Processing station:", station_code)
 
             # Find FTPdetectinfo and platepar files
             for name in os.listdir(proc_path):
@@ -597,15 +610,16 @@ class RMSDataHandle(object):
 
             # Skip these observations if no data files were found inside
             if (ftpdetectinfo_name is None) or (platepar_recalibrated_name is None):
-                print("Skipping {:s} due to missing data files...".format(rel_proc_path))
+                print("  Skipping {:s} due to missing data files...".format(rel_proc_path))
 
                 # Add the folder to the list of processed folders
                 self.db.addProcessedDir(station_code, rel_proc_path)
 
                 continue
 
-            # Save database to mark those with missing data files
-            self.db.save()
+            # Save database to mark those with missing data files (only every 50th station, to speed things up)
+            if station_index%50 == 0:
+                self.saveDatabase()
 
 
             # Load platepars
@@ -617,6 +631,7 @@ class RMSDataHandle(object):
                 ftpdetectinfo_name), platepars_recalibrated_dict)
 
             # Format the observation object to the one required by the trajectory correlator
+            added_count = 0
             for cams_met_obs in cams_met_obs_list:
 
                 # Get the platepar
@@ -660,10 +675,16 @@ class RMSDataHandle(object):
                 # Add only unpaired observations
                 if not self.db.checkObsIfPaired(met_obs):
 
-                    print(station_code, met_obs.reference_dt, rel_proc_path)
+                    # print(" ", station_code, met_obs.reference_dt, rel_proc_path)
+                    added_count += 1
 
                     unpaired_met_obs_list.append(met_obs)
 
+            print("  Added {:d} observations!".format(added_count))
+
+
+        print("  Finished loading unpaired observations!")
+        self.saveDatabase()
 
         return unpaired_met_obs_list
 
@@ -991,7 +1012,7 @@ class RMSDataHandle(object):
         """ Finish the processing run. """
 
         # Save the processed directories to the DB file
-        self.db.save()
+        self.saveDatabase()
 
         # Save the list of processed meteor observations
 
