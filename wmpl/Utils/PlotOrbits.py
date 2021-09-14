@@ -385,7 +385,7 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_eq
     # Save plots to disk (top and side views)
     if save_plots and (plot_path is not None):
 
-        plot_dir, plot_file_name = os.path.split(plot_path)
+        plot_dir, plot_file_name = os.path.split(os.path.abspath(plot_path))
 
 
         # Save side view

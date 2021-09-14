@@ -13,12 +13,14 @@ import copy
 import datetime
 import shutil
 import time
+import signal
 
 import numpy as np
 
 from wmpl.Formats.CAMS import loadFTPDetectInfo
 from wmpl.Trajectory.CorrelateEngine import TrajectoryCorrelator, TrajectoryConstraints
 from wmpl.Utils.Math import generateDatetimeBins
+from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import loadPickle, savePickle
 from wmpl.Utils.TrajConversions import jd2Date
 
@@ -165,6 +167,12 @@ class DatabaseJSON(object):
     def save(self):
         """ Save the database of processed meteors to disk. """
 
+        # Back up the existing data base
+        db_bak_file_path = self.db_file_path + ".bak"
+        if os.path.exists(self.db_file_path):
+            shutil.copy2(self.db_file_path, db_bak_file_path)
+
+        # Save the data base
         with open(self.db_file_path, 'w') as f:
             self2 = copy.deepcopy(self)
 
@@ -174,6 +182,10 @@ class DatabaseJSON(object):
                 for key in self.failed_trajectories}
 
             f.write(json.dumps(self2, default=lambda o: o.__dict__, indent=4, sort_keys=True))
+
+        # Remove the backup file
+        if os.path.exists(db_bak_file_path):
+            os.remove(db_bak_file_path)
 
 
     def addProcessedDir(self, station_name, rel_proc_path):
@@ -435,14 +447,20 @@ class PlateparDummy:
 
 
 class RMSDataHandle(object):
-    def __init__(self, dir_path):
+    def __init__(self, dir_path, dt_range=None):
         """ Handles data interfacing between the trajectory correlator and RMS data files on disk. 
     
         Arguments:
             dir_path: [str] Path to the directory with data files. 
+
+        Keyword arguments:
+            dt_range: [list of datetimes] A range of datetimes between which the existing trajectories will be
+                loaded.
         """
 
         self.dir_path = dir_path
+
+        self.dt_range = dt_range
 
         print("Using directory:", self.dir_path)
 
@@ -450,13 +468,43 @@ class RMSDataHandle(object):
         station_list = self.loadStations()
 
         # Load database of processed folders
+        print()
+        print("Loading database...")
         self.db = DatabaseJSON(os.path.join(self.dir_path, JSON_DB_NAME))
+        print("   ... done!")
 
         # Find unprocessed meteor files
+        print("Finding unprocessed data...")
         self.processing_list = self.findUnprocessedFolders(station_list)
+        print("   ... done!")
 
         # Load already computed trajectories
+        print("Loading already computed trajectories...")
         self.loadComputedTrajectories(os.path.join(self.dir_path, OUTPUT_TRAJ_DIR))
+        print("   ... done!")
+
+
+        ### Define country groups to speed up the proceessing ###
+
+        north_america_group = ["CA", "US", "MX"]
+
+        south_america_group = ["AR", "BO", "BR", "CL", "CO", "EC", "FK", "GF", "GY", "GY", "PY", "PE", "SR", \
+            "UY", "VE"]
+
+        europe_group = ["AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", \
+            "IT", "LV", "LT", "LU", "MT", "NL", "PO", "PT", "RO", "SK", "SI", "ES", "SE", "AL", "AD", "AM", \
+            "BY", "BA", "FO", "GE", "GI", "IM", "XK", "LI", "MK", "MD", "MC", "ME", "NO", "RU", "SM", "RS", \
+            "CH", "TR", "UA", "UK", "VA"]
+
+        new_zealand_group = ["NZ"]
+
+        australia_group = ["AU"]
+
+
+        self.country_groups = [north_america_group, south_america_group, europe_group, new_zealand_group, \
+            australia_group]
+
+        ### ###
 
 
     def loadStations(self):
@@ -552,6 +600,8 @@ class RMSDataHandle(object):
 
         # Go through folders for processing
         unpaired_met_obs_list = []
+        prev_station = None
+        station_count = 1
         for station_code, rel_proc_path, proc_path, night_dt in processing_list:
 
             # Check that the night datetime is within the given range of times, if the range is given
@@ -566,6 +616,13 @@ class RMSDataHandle(object):
 
             ftpdetectinfo_name = None
             platepar_recalibrated_name = None
+
+            # Skip files, only take directories
+            if os.path.isfile(proc_path):
+                continue
+
+            print()
+            print("Processing station:", station_code)
 
             # Find FTPdetectinfo and platepar files
             for name in os.listdir(proc_path):
@@ -591,15 +648,20 @@ class RMSDataHandle(object):
 
             # Skip these observations if no data files were found inside
             if (ftpdetectinfo_name is None) or (platepar_recalibrated_name is None):
-                print("Skipping {:s} due to missing data files...".format(rel_proc_path))
+                print("  Skipping {:s} due to missing data files...".format(rel_proc_path))
 
                 # Add the folder to the list of processed folders
                 self.db.addProcessedDir(station_code, rel_proc_path)
 
                 continue
 
-            # Save database to mark those with missing data files
-            self.db.save()
+            if station_code != prev_station:
+                station_count += 1
+                prev_station = station_code
+
+            # Save database to mark those with missing data files (only every 50th station, to speed things up)
+            if (station_count%50 == 0) and (station_code != prev_station):
+                self.saveDatabase()
 
 
             # Load platepars
@@ -611,6 +673,7 @@ class RMSDataHandle(object):
                 ftpdetectinfo_name), platepars_recalibrated_dict)
 
             # Format the observation object to the one required by the trajectory correlator
+            added_count = 0
             for cams_met_obs in cams_met_obs_list:
 
                 # Get the platepar
@@ -654,13 +717,42 @@ class RMSDataHandle(object):
                 # Add only unpaired observations
                 if not self.db.checkObsIfPaired(met_obs):
 
-                    print(station_code, met_obs.reference_dt, rel_proc_path)
+                    # print(" ", station_code, met_obs.reference_dt, rel_proc_path)
+                    added_count += 1
 
                     unpaired_met_obs_list.append(met_obs)
 
+            print("  Added {:d} observations!".format(added_count))
+
+
+        print()
+        print("  Finished loading unpaired observations!")
+        self.saveDatabase()
 
         return unpaired_met_obs_list
 
+
+    def trajectoryFileInDtRange(self, file_name):
+        """ Check if the trajectory file is in the given datetime range. """
+
+        # If the date range is not given, then skip the trajectory
+        if self.dt_range is None:
+            return True
+
+        # Extract the datetime from the trajectory name
+        date_str, time_str = file_name.split('_')[:2]
+
+        # Make a datetime object
+        dt = datetime.datetime.strptime("_".join([date_str, time_str]), "%Y%m%d_%H%M%S")
+
+        dt_beg, dt_end = self.dt_range
+
+        # Check if the date time is in the time range
+        if (dt >= dt_beg) and (dt <= dt_end):
+            return True
+
+        else:
+            return False
 
 
     def loadComputedTrajectories(self, traj_dir_path):
@@ -678,7 +770,8 @@ class RMSDataHandle(object):
             # Find and load all trajectory pickle files
             for file_name in file_names:
                 if file_name.endswith("_trajectory.pickle"):
-                    self.db.addTrajectory(os.path.join(dir_path, file_name))
+                    if self.trajectoryFileInDtRange(file_name):
+                        self.db.addTrajectory(os.path.join(dir_path, file_name))
 
 
     def getComputedTrajectories(self, jd_beg, jd_end):
@@ -708,19 +801,8 @@ class RMSDataHandle(object):
         """ Only pair observations if they are in proximity to a given country. """
 
 
-        north_america_group = ["CA", "US", "MX"]
-
-        europe_group = ["AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", \
-            "IT", "LV", "LT", "LU", "MT", "NL", "PO", "PT", "RO", "SK", "SI", "ES", "SE", "AL", "AD", "AM", \
-            "BY", "BA", "FO", "GE", "GI", "IM", "XK", "LI", "MK", "MD", "MC", "ME", "NO", "RU", "SM", "RS", \
-            "CH", "TR", "UA", "UK", "VA"]
-
-
-        country_groups = [north_america_group, europe_group]
-
-
         # Check that both stations are in the same country group
-        for group in country_groups:
+        for group in self.country_groups:
             if met_obs1.station_code[:2] in group:
                 if met_obs2.station_code[:2] in group:
                     return True
@@ -806,9 +888,43 @@ class RMSDataHandle(object):
             # If the full trajectory object is given
             station_list = [obs.station_id for obs in traj.observations if obs.ignore_station is False]
 
-        return os.path.join(self.dir_path, OUTPUT_TRAJ_DIR, \
-            jd2Date(traj.jdt_ref, dt_obj=True).strftime("%Y%m%d_%H%M%S.%f")[:-3] + "_" \
-            + "_".join(list(set([stat_id[:2] for stat_id in station_list]))))
+
+        # Datetime of the reference trajectory time
+        dt = jd2Date(traj.jdt_ref, dt_obj=True)
+
+
+        # Year directory
+        year_dir = dt.strftime("%Y")
+
+        # Month directory
+        month_dir = dt.strftime("%Y%m")
+
+        # Date directory
+        date_dir = dt.strftime("%Y%m%d")
+
+        # Name of the trajectory directory
+        traj_dir = dt.strftime("%Y%m%d_%H%M%S.%f")[:-3] + "_" \
+            + "_".join(list(set([stat_id[:2] for stat_id in station_list])))
+
+
+        # Path to the year directory
+        out_path = os.path.join(self.dir_path, OUTPUT_TRAJ_DIR, year_dir)
+        mkdirP(out_path)
+
+        # Path to the year directory
+        out_path = os.path.join(out_path, month_dir)
+        mkdirP(out_path)
+
+        # Path to the date directory
+        out_path = os.path.join(out_path, date_dir)
+        mkdirP(out_path)
+
+        # Path too the trajectory directory
+        out_path = os.path.join(out_path, traj_dir)
+        mkdirP(out_path)
+
+
+        return out_path
 
 
     def saveTrajectoryResults(self, traj, save_plots):
@@ -916,11 +1032,34 @@ class RMSDataHandle(object):
 
 
 
+    def saveDatabase(self):
+        """ Save the data base. """
+
+        def _breakHandler(signum, frame):
+            """ Do nothing if CTRL + C is pressed. """
+            print("The data base is being saved, the program cannot be exited right now!")
+            pass
+
+        # Prevent quitting while a data base is being saved
+        original_signal = signal.getsignal(signal.SIGINT)
+        signal.signal(signal.SIGINT, _breakHandler)
+
+        # Save the data base
+        print("Saving data base to disk...")
+        self.db.save()
+
+        # Restore the signal functionality
+        signal.signal(signal.SIGINT, original_signal)
+
+
+
+
+
     def finish(self):
         """ Finish the processing run. """
 
         # Save the processed directories to the DB file
-        self.db.save()
+        self.saveDatabase()
 
         # Save the list of processed meteor observations
 
@@ -1033,20 +1172,6 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         # Clock for measuring script time
         t1 = datetime.datetime.utcnow()
 
-        # Init the data handle
-        dh = RMSDataHandle(cml_args.dir_path)
-
-
-        # If there is nothing to process, stop
-        if not dh.processing_list:
-            print()
-            print("Nothing to process!")
-            print("Probably everything is already processed.")
-            print("Exiting...")
-            sys.exit()
-
-
-
         # If auto run is enabled, compute the time range to use
         event_time_range = None
         if cml_args.auto is not None:
@@ -1083,6 +1208,19 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                 print("    END: {:s}".format(str(dt_end)))
 
                 event_time_range = [dt_beg, dt_end]
+
+
+
+        # Init the data handle
+        dh = RMSDataHandle(cml_args.dir_path, event_time_range)
+
+        # If there is nothing to process, stop
+        if not dh.processing_list:
+            print()
+            print("Nothing to process!")
+            print("Probably everything is already processed.")
+            print("Exiting...")
+            sys.exit()
 
 
         ### GENERATE MONTHLY TIME BINS ###

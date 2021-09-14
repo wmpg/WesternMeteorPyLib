@@ -117,6 +117,10 @@ class TrajectoryConstraints(object):
         # Number of MC runs to run for low Qc trajectories
         self.low_qc_mc_runs = 20
 
+        # Maximum number of total MC runs that can be done for one trajectory, including retries and
+        #   rejections of bad observations
+        self.mc_runs_max = 100
+
         # Save plots to disk
         self.save_plots = False
 
@@ -552,6 +556,7 @@ class TrajectoryCorrelator(object):
         skip_trajectory = False
         traj_best = None
         ignored_station_dict = {}
+        mc_runs_total = 0
         for _ in range(len(traj.observations)):
         
             # If the trajectory estimation failed, skip this trajectory
@@ -588,6 +593,12 @@ class TrajectoryCorrelator(object):
                 break
 
 
+            # If there have been to many MC runs on this trajectory, stop getting anything out of it
+            if mc_runs_total > self.traj_constraints.mc_runs_max:
+                print("Skipping trajectory, too many MC runs attempted...")
+                skip_trajectory = True
+                break
+
             print()
 
 
@@ -602,6 +613,8 @@ class TrajectoryCorrelator(object):
             # b) Reject all observations with higher residuals than the fixed limit
             # c) Keep all observations with error inside the minimum error limit, even though they
             #   might have been rejected in a previous iteration
+            # d) Only reject a maximum of 50% of stations
+            max_rejections_possible = int(np.ceil(0.5*len(traj_status.observations)))
             for i, obs in enumerate(traj_status.observations):
 
                 # Compute the median angular uncertainty of all other non-ignored stations
@@ -653,6 +666,12 @@ class TrajectoryCorrelator(object):
             # If there are any ignored stations, rerun the solution
             if any_ignored_toggle:
 
+                # Stop if too many observations were rejected
+                if len(ignore_candidates) >= max_rejections_possible:
+                    print("Too many observations ejected!")
+                    skip_trajectory = True
+                    break
+
 
                 # If there any candidate observations to ignore
                 if len(ignore_candidates):
@@ -688,6 +707,7 @@ class TrajectoryCorrelator(object):
 
                 # Init a new trajectory object (make sure to use the new reference Julian date)
                 traj = self.initTrajectory(traj_status.jdt_ref, mc_runs)
+                mc_runs_total += mc_runs
 
                 # Reinitialize the observations with ignored stations
                 for obs in traj_status.observations:
@@ -869,6 +889,8 @@ class TrajectoryCorrelator(object):
                 if (met_obs.reference_dt >= bin_beg) and (met_obs.reference_dt <= bin_end)]
 
 
+            # Counter for the total number of solved trajectories in this bin
+            traj_solved_count = 0
 
             ### CHECK FOR PAIRING WITH PREVIOUSLY ESTIMATED TRAJECTORIES ###
 
@@ -1388,6 +1410,13 @@ class TrajectoryCorrelator(object):
                     # Mark observations as paired in a trajectory if fit successful
                     for _, met_obs_temp, _ in matched_observations:
                         self.dh.markObservationAsPaired(met_obs_temp)
+
+
+                    traj_solved_count += 1
+
+                    # If 50 new trajectories were computed, save the DB
+                    if traj_solved_count%50 == 0:
+                        self.dh.saveDatabase()
 
                 
 

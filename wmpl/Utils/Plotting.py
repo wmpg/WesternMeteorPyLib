@@ -24,6 +24,8 @@ def saveImage(file_path, img, vmin=None, vmax=None, cmap=None, format=None, orig
     FigureCanvas(fig)
     fig.figimage(img, cmap=cmap, vmin=vmin, vmax=vmax, origin=origin)
     fig.savefig(file_path, dpi=1, format=format)
+    fig.clf()
+    del fig
 
 
 
