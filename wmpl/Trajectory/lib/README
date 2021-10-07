@@ -1,0 +1,4 @@
+To compile this library: 
+1) Navigate to the "common" directory and run "make".
+2) Navigate to the "trajectory" directory and run "make".
+3) Done!

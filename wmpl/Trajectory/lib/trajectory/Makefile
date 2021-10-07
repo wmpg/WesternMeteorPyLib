@@ -35,25 +35,25 @@ shared:		$(LIBTS_BUILD)
 %.o:		%.c %.h
 		$(CC) $(CFLAGS) -o $@ -c $<
 
-clean:
-		rm -f $(ALL_OBJS) $(ALL_LIBS) $(ALL_BIN)
+# clean:
+# 		rm -f $(ALL_OBJS) $(ALL_LIBS) $(ALL_BIN)
 
-install-conf:
-		install -m 0755 -d $(HOME)/meteor/etc
-		install -m 0644 conf/trajectorysolution.conf $(HOME)/meteor/etc
+# install-conf:
+# 		install -m 0755 -d $(HOME)/meteor/etc
+# 		install -m 0644 conf/trajectorysolution.conf $(HOME)/meteor/etc
 
-install-base:
-		install -m 0755 -d $(HOME)/meteor/lib
-		install -m 0644 $(ALL_LIBS) $(HOME)/meteor/lib
-		ln -sf $(LIBTS_SO) $(HOME)/meteor/lib/$(LIBTS_SONAME)
+# install-base:
+# 		install -m 0755 -d $(HOME)/meteor/lib
+# 		install -m 0644 $(ALL_LIBS) $(HOME)/meteor/lib
+# 		ln -sf $(LIBTS_SO) $(HOME)/meteor/lib/$(LIBTS_SONAME)
 
-		install -m 0755 -d $(HOME)/meteor/include/trajectorysolution
-		install -m 0644 $(ALL_INCL) $(HOME)/meteor/include/trajectorysolution
+# 		install -m 0755 -d $(HOME)/meteor/include/trajectorysolution
+# 		install -m 0644 $(ALL_INCL) $(HOME)/meteor/include/trajectorysolution
 
-INSTALL=install-base
+# INSTALL=install-base
 
-ifeq ($(strip $(have_conf)),)
-INSTALL+=install-conf
-endif
+# ifeq ($(strip $(have_conf)),)
+# INSTALL+=install-conf
+# endif
 
-install:	$(INSTALL)
+# install:	$(INSTALL)
