@@ -876,8 +876,12 @@ class RMSDataHandle(object):
         return found_traj_obs_pairs
 
 
-    def generateTrajOutputDirectoryPath(self, traj):
-        """ Generate a path to the trajectory output directory. """
+    def generateTrajOutputDirectoryPath(self, traj, make_dirs=False):
+        """ Generate a path to the trajectory output directory. 
+        
+        Keyword arguments:
+            make_dirs: [bool] Make the tree of output directories. False by default.
+        """
 
         # Generate a list of station codes
         if isinstance(traj, TrajectoryReduced):
@@ -909,19 +913,23 @@ class RMSDataHandle(object):
 
         # Path to the year directory
         out_path = os.path.join(self.dir_path, OUTPUT_TRAJ_DIR, year_dir)
-        mkdirP(out_path)
+        if make_dirs:
+            mkdirP(out_path)
 
         # Path to the year directory
         out_path = os.path.join(out_path, month_dir)
-        mkdirP(out_path)
+        if make_dirs:
+            mkdirP(out_path)
 
         # Path to the date directory
         out_path = os.path.join(out_path, date_dir)
-        mkdirP(out_path)
+        if make_dirs:
+            mkdirP(out_path)
 
         # Path too the trajectory directory
         out_path = os.path.join(out_path, traj_dir)
-        mkdirP(out_path)
+        if make_dirs:
+            mkdirP(out_path)
 
 
         return out_path
@@ -932,7 +940,7 @@ class RMSDataHandle(object):
 
 
         # Generate the name for the output directory (add list of country codes at the end)
-        output_dir = self.generateTrajOutputDirectoryPath(traj)
+        output_dir = self.generateTrajOutputDirectoryPath(traj, make_dirs=True)
 
         # Save the report
         traj.saveReport(output_dir, traj.file_name + '_report.txt', uncertainties=traj.uncertainties, 
