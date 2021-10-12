@@ -122,6 +122,6 @@ setup(
         "License :: OSI Approved :: MIT License",
     ],
     setup_requires=["numpy"],
-    install_requires=requirements,
+    #install_requires=requirements,
     include_dirs=[numpy.get_include()]
 )

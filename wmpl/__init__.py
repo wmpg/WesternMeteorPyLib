@@ -4,7 +4,7 @@
 import pkgutil
 
 # Excluded packages
-exclude = ["MetSim.ML"]
+exclude = ["MetSim.ML", "GUI"]
 
 __all__ = []
 for loader, module_name, is_pkg in pkgutil.walk_packages(__path__):
