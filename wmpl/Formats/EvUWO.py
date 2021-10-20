@@ -357,7 +357,7 @@ if __name__ == '__main__':
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Run the trajectory solver on the list of UWO ev files.")
 
-    arg_parser.add_argument('ev_files', metavar='EV_FILES', type=str, \
+    arg_parser.add_argument('ev_files', metavar='EV_FILES', type=str, nargs='+',\
         help='Full path to ev_*.txt files.')
 
     # Add other solver options
@@ -369,8 +369,10 @@ if __name__ == '__main__':
     #########################
 
     # Unpack wildcards
-    ev_files = glob.glob(cml_args.ev_files)
-    
+    if not isinstance(cml_args.ev_files, list):
+        ev_files = glob.glob(cml_args.ev_files)
+    else:
+        ev_files = cml_args.ev_files
 
     event_path = os.path.abspath(ev_files[0])
 
