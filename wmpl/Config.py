@@ -43,7 +43,7 @@ def loadLeapSeconds(leap_seconds_file):
         # Load the leap seconds info from file is the file is younger than 24 hrs
         if os.path.getmtime(leap_seconds_file) > (time.time() - 24*60*60):
 
-            with open(leap_seconds_file) as f:
+            with open(leap_seconds_file, encoding='utf-8') as f:
                 leap_string = '\n'.join(f.readlines())
 
                 leap_file_loaded = True
@@ -69,7 +69,7 @@ def loadLeapSeconds(leap_seconds_file):
             # If the URL download failed, use the local file if it exists
             if os.path.isfile(leap_seconds_file):
 
-                with open(leap_seconds_file) as f:
+                with open(leap_seconds_file, encoding='utf-8') as f:
                     leap_string = '\n'.join(f.readlines())
 
             # If the file does not exist, use the hardcoded defaults

@@ -20,7 +20,7 @@ from UpdateOrbitFiles import updateOrbitFiles
 # README file and 2) it's easier to type in the README file than to put a raw
 # string in below ...
 def read(fname):
-    return open(os.path.join(os.path.dirname(__file__), fname)).read()
+    return open(os.path.join(os.path.dirname(__file__), fname), encoding='utf-8').read()
 
 
 
@@ -55,7 +55,7 @@ for dir_name in os.listdir(dir_path):
 
 
 # Read requirements file
-with open('requirements.txt') as f:
+with open('requirements.txt', encoding='utf-8') as f:
     requirements = f.read().splitlines()
 
 
