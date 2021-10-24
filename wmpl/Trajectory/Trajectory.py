@@ -3960,7 +3960,7 @@ class Trajectory(object):
         out_str += " Range (m), "
         out_str += "Length (m), "
         out_str += "State vect dist (m), "
-        out_str += " Lag (m), "
+        out_str += "  Lag (m), "
         out_str += "Vel (m/s), "
         out_str += "Vel prev avg (m/s), "
         out_str += "H res (m), "
@@ -4013,7 +4013,7 @@ class Trajectory(object):
 
                 point_info.append("{:10.2f}".format(obs.length[i]))
                 point_info.append("{:19.2f}".format(obs.state_vect_dist[i]))
-                point_info.append("{:8.2f}".format(obs.lag[i]))
+                point_info.append("{:9.2f}".format(obs.lag[i]))
 
                 point_info.append("{:9.2f}".format(obs.velocities[i]))
                 point_info.append("{:18.2f}".format(obs.velocities_prev_point[i]))
