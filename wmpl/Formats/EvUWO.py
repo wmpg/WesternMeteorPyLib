@@ -357,7 +357,7 @@ if __name__ == '__main__':
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Run the trajectory solver on the list of UWO ev files.")
 
-    arg_parser.add_argument('ev_files', metavar='EV_FILES', type=str, \
+    arg_parser.add_argument('ev_files', metavar='EV_FILES', type=str, nargs='+',\
         help='Full path to ev_*.txt files.')
 
     # Add other solver options
@@ -369,8 +369,10 @@ if __name__ == '__main__':
     #########################
 
     # Unpack wildcards
-    ev_files = glob.glob(cml_args.ev_files)
-    
+    if not isinstance(cml_args.ev_files, list):
+        ev_files = glob.glob(cml_args.ev_files)
+    else:
+        ev_files = cml_args.ev_files
 
     event_path = os.path.abspath(ev_files[0])
 
@@ -407,5 +409,5 @@ if __name__ == '__main__':
             geometric_uncert=cml_args.uncertgeom, gravity_correction=(not cml_args.disablegravity), 
             plot_all_spatial_residuals=cml_args.plotallspatial, plot_file_type=cml_args.imgformat, \
             show_plots=(not cml_args.hideplots), v_init_part=velpart, v_init_ht=vinitht, \
-            show_jacchia=cml_args.jacchia, estimate_timing_vel=(not cml_args.notimefit), \
+            show_jacchia=cml_args.jacchia, estimate_timing_vel=(False if cml_args.notimefit is None else cml_args.notimefit), \
             mc_noise_std=cml_args.mcstd)

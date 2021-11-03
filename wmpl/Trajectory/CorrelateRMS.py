@@ -1140,9 +1140,9 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         help="""Only compute the trajectories in the given range of time. The time range should be given in the format: "(YYYYMMDD-HHMMSS,YYYYMMDD-HHMMSS)".""", \
             type=str)
 
-    arg_parser.add_argument('-a', '--auto', metavar='PREV_DAYS', type=float, default=None, const=14.0, \
+    arg_parser.add_argument('-a', '--auto', metavar='PREV_DAYS', type=float, default=None, const=5.0, \
         nargs='?', \
-        help="""Run continously taking the data in the last PREV_DAYS to compute the new trajectories and update the old ones. The default time range is 14 days."""
+        help="""Run continously taking the data in the last PREV_DAYS to compute the new trajectories and update the old ones. The default time range is 5 days."""
         )
 
 

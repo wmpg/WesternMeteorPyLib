@@ -2126,7 +2126,9 @@ class Trajectory(object):
             v_init_ht: [float] If given, the initial velocity will be estimated as the average velocity
                 above the given height in kilometers using data from all stations. None by default, in which
                 case the initial velocity will be estimated using the automated siliding fit.
-            estimate_timing_vel: [bool] Try to estimate the difference in timing and velocity. True by default.
+            estimate_timing_vel: [bool/str] Try to estimate the difference in timing and velocity. True by  
+                default. A string with the list of fixed time offsets can also be given, e.g. 
+                "CA001A":0.42,"CA0005":-0.3.
             monte_carlo: [bool] Runs Monte Carlo estimation of uncertainties. True by default.
             mc_runs: [int] Number of Monte Carlo runs. The default value is the number of observed points.
             mc_pick_multiplier: [int] Number of MC samples that will be taken for every point. 1 by default.
@@ -2181,7 +2183,22 @@ class Trajectory(object):
         self.v_init_ht = v_init_ht
 
         # Estimating the difference in timing between stations, and the initial velocity if this flag is True
-        self.estimate_timing_vel = estimate_timing_vel
+        self.fixed_time_offsets = {}
+        if isinstance(estimate_timing_vel, str):
+
+            # If a list of fixed timing offsets was given, parse it into a dictionary
+            for entry in estimate_timing_vel.split(','):
+                station, offset = entry.split(":")
+                self.fixed_time_offsets[station] = float(offset)
+
+            print("Fixed timing given:", self.fixed_time_offsets)
+
+            self.estimate_timing_vel = False
+
+        elif isinstance(estimate_timing_vel, bool):
+            self.estimate_timing_vel = estimate_timing_vel
+        else:
+            self.estimate_timing_vel = True
 
         # Running Monte Carlo simulations to estimate uncertainties
         self.monte_carlo = monte_carlo
@@ -2380,6 +2397,10 @@ class Trajectory(object):
         meas1 = np.array(meas1)
         meas2 = np.array(meas2)
         time_data = np.array(time_data)
+
+        # Add a fixed offset to time data if given
+        if str(station_id) in self.fixed_time_offsets:
+            time_data += self.fixed_time_offsets[str(station_id)]
 
         # Skip the observation if all points were ignored
         if ignore_list is not None:
@@ -3799,7 +3820,7 @@ class Trajectory(object):
 
         out_str += "Timing offsets (from input data):\n"
         for stat_id, t_diff in zip([obs.station_id for obs in self.observations], self.time_diffs_final):
-            out_str += "{:>10s}: {:.6f} s\n".format(str(stat_id), t_diff)
+            out_str += "{:>14s}: {:.6f} s\n".format(str(stat_id), t_diff)
 
         out_str += "\n"
 
@@ -3878,7 +3899,7 @@ class Trajectory(object):
         for obs in self.observations:
 
             station_info = []
-            station_info.append("{:>10s}".format(str(obs.station_id)))
+            station_info.append("{:>14s}".format(str(obs.station_id)))
             station_info.append("{:>7s}".format(str(obs.ignore_station)))
             station_info.append("{:>12.6f}".format(np.degrees(obs.lon)))
             station_info.append("{:>12.6f}".format(np.degrees(obs.lat)))
@@ -3939,7 +3960,7 @@ class Trajectory(object):
         out_str += " Range (m), "
         out_str += "Length (m), "
         out_str += "State vect dist (m), "
-        out_str += " Lag (m), "
+        out_str += "  Lag (m), "
         out_str += "Vel (m/s), "
         out_str += "Vel prev avg (m/s), "
         out_str += "H res (m), "
@@ -3992,7 +4013,7 @@ class Trajectory(object):
 
                 point_info.append("{:10.2f}".format(obs.length[i]))
                 point_info.append("{:19.2f}".format(obs.state_vect_dist[i]))
-                point_info.append("{:8.2f}".format(obs.lag[i]))
+                point_info.append("{:9.2f}".format(obs.lag[i]))
 
                 point_info.append("{:9.2f}".format(obs.velocities[i]))
                 point_info.append("{:18.2f}".format(obs.velocities_prev_point[i]))

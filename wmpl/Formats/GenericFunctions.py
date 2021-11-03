@@ -321,10 +321,10 @@ def addSolverOptions(arg_parser, skip_velpart=False):
         help='Do not use the Monte Carlo solver, but only run the geometric solution.', action="store_true")
 
     arg_parser.add_argument('-e', '--notimefit', \
-        help='Do not estimate timing and velocity togetehr.', \
-        action="store_true")
+        help="Do not estimate timing and velocity together. The times are assumed to be fixed. A list of time offsets per station can be provided, e.g. \"'CA001A':0.42,'CA0005':-0.3\" for speciflying offsets of 0.42 and -0.3 seconds for stations CA001A and CA0005, respectively. Make sure there are no spaces between the arguments, although spaces are fine in the station name.", \
+        type=str, nargs="?", default=True)
     
-    arg_parser.add_argument('-r', '--mcruns', metavar="MC_RUNS", nargs='?', \
+    arg_parser.add_argument('-r', '--mcruns', metavar="MC_RUNS", nargs=1, \
         help='Number of Monte Carlo runs.', type=int, default=100)
 
     arg_parser.add_argument('-u', '--uncertgeom', \
