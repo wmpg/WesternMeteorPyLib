@@ -353,3 +353,32 @@ if __name__ == "__main__":
         plt.legend()
 
         plt.show()
+
+
+
+        ### PLOT METEORITE DROPPING POSSIBILITY
+
+        # define x values
+        x_mu = np.arange(0,10, 0.00005)
+
+        # function for mu = 0, 50 g possible meteorite:
+        fun_mu0 = lambda x_mu:np.log(13.2 - 3*x_mu)
+        y_mu0 = [fun_mu0(i) for i in x_mu]
+
+        # function for mu = 2/3, 50 g possible meteorite:
+        fun_mu23 = lambda x_mu:np.log(4.4 - x_mu)
+        y_mu23 = [fun_mu23(i) for i in x_mu]
+
+        # plot mu0, mu2/3 lines and your poit:
+        plt.plot(x_mu, y_mu0, color='grey', label="mu = 0, 50 g meteorite")
+        plt.plot(x_mu, y_mu23, color='k', label="mu = 2/3, 50 g meteorite")
+        plt.scatter([np.log(alpha*np.sin(traj.orbit.elevation_apparent_norot))], [np.log(beta)], color='r')
+
+        # defite plot parameters
+        plt.xlim((-1, 7))
+        plt.ylim((-3, 4))
+        plt.xlabel("ln(alpha*sin(slope))")
+        plt.ylabel("ln(beta)")
+        plt.axes().set_aspect('equal')
+        plt.legend()
+        plt.show()
