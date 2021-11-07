@@ -1031,6 +1031,10 @@ class RMSDataHandle(object):
         try:
             traj = loadPickle(output_dir, file_name)
 
+            # Check if the traj object as fixed time offsets
+            if not hasattr(traj, 'fixed_time_offsets'):
+                traj.fixed_time_offsets = {}
+
             return traj
 
         except FileNotFoundError:

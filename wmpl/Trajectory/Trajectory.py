@@ -2494,7 +2494,6 @@ class Trajectory(object):
         if not hasattr(obs, 'comment'):
             obs.comment = ''
 
-
         ### ###
 
 
