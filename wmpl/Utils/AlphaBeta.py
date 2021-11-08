@@ -335,7 +335,12 @@ if __name__ == "__main__":
 
 
         # Predict velocity from height
-        ht_arr = np.linspace(traj.rend_ele - 5000, traj.rbeg_ele + 5000, 100)
+        ht_end = traj.rend_ele - 5000
+        if ht_end < 10000:
+            ht_end = 10000
+        elif (ht_end > 20000) and (ht_end < 35000):
+            ht_end = 20000
+        ht_arr = np.linspace(ht_end, traj.rbeg_ele + 5000, 100)
         vel_arr = alphaBetaVelocity(ht_arr, alpha, beta, v_init)
 
 
