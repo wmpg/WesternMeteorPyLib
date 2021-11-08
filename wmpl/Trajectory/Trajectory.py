@@ -3906,8 +3906,11 @@ class Trajectory(object):
             station_info.append("{:>12.6f}".format(np.degrees(obs.lon)))
             station_info.append("{:>12.6f}".format(np.degrees(obs.lat)))
             station_info.append("{:>7.2f}".format(obs.ele))
-            station_info.append("{:>10.6f}".format(obs.jacchia_fit[0]))
-            station_info.append("{:>10.6f}".format(obs.jacchia_fit[1]))
+            jacchia_fit = obs.jacchia_fit
+            if jacchia_fit is None:
+                jacchia_fit = [0, 0]
+            station_info.append("{:>10.6f}".format(jacchia_fit[0]))
+            station_info.append("{:>10.6f}".format(jacchia_fit[1]))
             station_info.append("{:>11.2f}".format(obs.rbeg_ele))
             station_info.append("{:>11.2f}".format(obs.rend_ele))
             station_info.append("{:>17.6f}".format(np.degrees(obs.ang_res_std)))
