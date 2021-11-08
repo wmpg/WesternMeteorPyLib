@@ -3861,8 +3861,11 @@ class Trajectory(object):
 
 
         out_str += "Jacchia fit on lag = -|a1|*exp(|a2|*t):\n"
-        out_str += " a1 = {:.6f}\n".format(self.jacchia_fit[0])
-        out_str += " a2 = {:.6f}\n".format(self.jacchia_fit[1])
+        jacchia_fit = self.jacchia_fit
+        if jacchia_fit is None:
+            jacchia_fit = [0, 0]
+        out_str += " a1 = {:.6f}\n".format(jacchia_fit[0])
+        out_str += " a2 = {:.6f}\n".format(jacchia_fit[1])
         out_str += "\n"
 
         if self.estimate_timing_vel is True:
