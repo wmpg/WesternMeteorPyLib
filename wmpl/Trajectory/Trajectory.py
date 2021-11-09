@@ -1333,6 +1333,9 @@ class MCUncertainties(object):
         # Longitude of perihelion (radians)
         self.pi = None
 
+        # Latitude of perihelion (radians)
+        self.b = None
+
         # Perihelion distance (AU)
         self.q = None
 
@@ -1478,6 +1481,7 @@ def calcMCUncertainties(traj_list, traj_best):
         un.peri = scipy.stats.circstd([traj.orbit.peri for traj in traj_list])
         un.node = scipy.stats.circstd([traj.orbit.node for traj in traj_list])
         un.pi = scipy.stats.circstd([traj.orbit.pi for traj in traj_list])
+        un.b = np.std([traj.orbit.b for traj in traj_list])
         un.q = np.std([traj.orbit.q for traj in traj_list])
         un.Q = np.std([traj.orbit.Q for traj in traj_list])
         un.true_anomaly = scipy.stats.circstd([traj.orbit.true_anomaly for traj in traj_list])

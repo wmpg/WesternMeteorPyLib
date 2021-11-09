@@ -770,10 +770,29 @@ class TrajectoryCorrelator(object):
         # Only proceed if the orbit could be computed
         if traj.orbit.ra_g is not None:
 
-            # Compute uncertainties using Monte Carlo
-            traj.monte_carlo = True
+            ## Compute uncertainties using Monte Carlo ##
+
             print("Stable set of observations found, computing uncertainties using Monte Carlo...")
-            traj.run()
+
+            # Init a new trajectory object (make sure to use the new reference Julian date)
+            traj = self.initTrajectory(traj_status.jdt_ref, mc_runs)
+
+            # Enable Monte Carlo
+            traj.monte_carlo = True
+
+            # Reinitialize the observations with ignored stations
+            for obs in traj_status.observations:
+                traj.infillWithObs(obs)
+
+
+            # Re-run the trajectory solution
+            try:
+                traj = traj.run()
+
+            # If solving has failed, stop solving the trajectory
+            except ValueError:
+                print("Error during trajectory estimation!")
+                return False, None
 
 
             # Check that the average velocity is within the accepted range

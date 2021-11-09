@@ -149,6 +149,9 @@ class Orbit(object):
         # Longitude of perihelion (radians)
         self.pi = None
 
+        # Latitude of perihelion (radians)
+        self.b = None
+
         # Perihelion distance (AU)
         self.q = None
 
@@ -175,6 +178,15 @@ class Orbit(object):
 
         # Orbital period
         self.T = None
+
+
+    def fixMissingParameters(self):
+        """ Some old orbit files might have missing parameters that were not computed. This function computes
+            them.
+        """
+
+        if not hasattr(self, 'b'):
+            self.b = calcLatitudeOfPerihelion(self.peri, self.node, self.i)
 
 
     def __repr__(self, uncertainties=None, v_init_ht=None):
@@ -307,6 +319,9 @@ class Orbit(object):
                 deg=True))
             out_str += "  Pi     = {:>10.6f}{:s} deg\n".format(np.degrees(self.pi), _uncer('{:.4f}', 'pi', 
                 deg=True))
+            if hasattr(self, 'b'):
+                out_str += "  b      = {:>10.6f}{:s} deg\n".format(np.degrees(self.b), _uncer('{:.4f}', 'b', 
+                    deg=True))
             out_str += "  q      = {:>10.6f}{:s} AU\n".format(self.q, _uncer('{:.4f}', 'q'))
             out_str += "  f      = {:>10.6f}{:s} deg\n".format(np.degrees(self.true_anomaly), _uncer('{:.4f}', 
                 'true_anomaly', deg=True))
@@ -344,6 +359,30 @@ class Orbit(object):
 
         return out_str
 
+
+
+def calcLatitudeOfPerihelion(peri, node, incl):
+    """ Calculate the latitude of perihelion. 
+        Source: https://en.wikipedia.org/wiki/Longitude_of_the_periapsis#Derivation_of_ecliptic_longitude_and_latitude_of_perihelion_for_inclined_orbits
+    """
+
+    Ap = np.cos(peri)*np.cos(node) - np.sin(peri)*np.sin(node)*np.cos(incl)
+    Bp = np.cos(J2000_OBLIQUITY)*(np.cos(peri)*np.sin(node) + np.sin(peri)*np.cos(node)*np.cos(incl)) \
+        - np.sin(J2000_OBLIQUITY)*np.sin(peri)*np.sin(incl)
+    Cp = np.sin(J2000_OBLIQUITY)*(np.cos(peri)*np.sin(node) + np.sin(peri)*np.cos(node)*np.cos(incl)) \
+        + np.cos(J2000_OBLIQUITY)*np.sin(peri)*np.sin(incl)
+
+    # RA/Dec of the direction of perihelion
+    ra_p = np.arctan2(Bp, Ap)%(2*np.pi)
+    dec_p = np.arcsin(Cp)
+    
+    # Longitue of perihelion
+    # pi_t = np.arctan2(np.sin(ra_p)*np.cos(J2000_OBLIQUITY) + np.tan(dec_p)*np.sin(J2000_OBLIQUITY), np.cos(ra_p))%(2*np.pi)
+    
+    # Latitude of perihelion
+    b = np.arcsin(np.sin(dec_p)*np.cos(J2000_OBLIQUITY) - np.cos(dec_p)*np.sin(J2000_OBLIQUITY)*np.sin(ra_p))
+
+    return b
 
 
 def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False, reference_init=True, \
@@ -746,6 +785,9 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         # Calculate the longitude of perihelion
         pi = (node + peri)%(2*np.pi)
 
+        # Calculate the latitude of perihelion
+        b = calcLatitudeOfPerihelion(peri, node, incl)
+
 
         ### Calculate true anomaly
         true_anomaly = np.arccos(np.dot(e_vect, meteor_pos)/(vectMag(e_vect)*vectMag(meteor_pos)))
@@ -811,6 +853,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         orb.peri = peri
         orb.node = node
         orb.pi = pi
+        orb.b = b
         orb.q = q
         orb.Q = Q
         orb.true_anomaly = true_anomaly
