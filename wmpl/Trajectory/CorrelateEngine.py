@@ -766,14 +766,14 @@ class TrajectoryCorrelator(object):
         # Use the best trajectory solution
         traj = traj_status
 
-        # Compute uncertainties using Monte Carlo
-        traj.monte_carlo = True
-        print("Stable set of observations found, computing uncertainties using Monte Carlo...")
-        traj.run()
 
-
-        # If the orbits couldn't be computed, skip saving the data files
+        # Only proceed if the orbit could be computed
         if traj.orbit.ra_g is not None:
+
+            # Compute uncertainties using Monte Carlo
+            traj.monte_carlo = True
+            print("Stable set of observations found, computing uncertainties using Monte Carlo...")
+            traj.run()
 
 
             # Check that the average velocity is within the accepted range
@@ -784,6 +784,13 @@ class TrajectoryCorrelator(object):
                     traj.orbit.v_avg/1000, self.traj_constraints.v_avg_max))
 
                 return False, None
+
+
+            # If one of the observations doesn't have an estimated height, skip this trajectory
+            for obs in traj.observations:
+                if (obs.rbeg_ele is None) and (not obs.ignore_station):
+                    print("Heights from observations failed to be estimated!")
+                    return False, None                    
 
             # Set the trajectory fit as successful
             successful_traj_fit = True
