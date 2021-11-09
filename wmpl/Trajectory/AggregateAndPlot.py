@@ -1936,7 +1936,7 @@ if __name__ == "__main__":
         print("Auto generating plots and reports every {:.1f} hours using the last {:d} deg solar longitudes of data...".format(AUTO_RUN_FREQUENCY, cml_args.auto))
 
         if cml_args.autofirst is not None:
-            print("The first run will use {:d} deg solar longitdes of data!".format(cml_args.autofirst))
+            print("The first run will use {:d} deg solar longitudes of data!".format(cml_args.autofirst))
 
         first_run = True
         while True:
