@@ -787,7 +787,7 @@ class TrajectoryCorrelator(object):
 
             # Re-run the trajectory solution
             try:
-                traj = traj.run()
+                traj_status = traj.run()
 
             # If solving has failed, stop solving the trajectory
             except ValueError:
@@ -796,13 +796,16 @@ class TrajectoryCorrelator(object):
 
 
             # If the solve failed, stop
-            if traj is None:
-                
+            if traj_status is None:
+
                 # Add the trajectory to the list of failed trajectories
                 self.dh.addTrajectory(traj, failed_jdt_ref=jdt_ref)
 
                 return False, None
 
+
+            traj = traj_status
+            
 
             # Check that the average velocity is within the accepted range
             if (traj.orbit.v_avg/1000 < self.traj_constraints.v_avg_min) \
