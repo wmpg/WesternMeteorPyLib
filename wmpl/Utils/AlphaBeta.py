@@ -367,16 +367,26 @@ if __name__ == "__main__":
         x_mu = np.arange(0,10, 0.00005)
 
         # function for mu = 0, 50 g possible meteorite:
-        fun_mu0 = lambda x_mu:np.log(13.2 - 3*x_mu)
-        y_mu0 = [fun_mu0(i) for i in x_mu]
+        fun_50g_mu0 = lambda x_mu:np.log(13.2 - 3*x_mu)
+        y_50g_mu0 = [fun_50g_mu0(i) for i in x_mu]
 
         # function for mu = 2/3, 50 g possible meteorite:
-        fun_mu23 = lambda x_mu:np.log(4.4 - x_mu)
-        y_mu23 = [fun_mu23(i) for i in x_mu]
+        fun_50g_mu23 = lambda x_mu:np.log(4.4 - x_mu)
+        y_50g_mu23 = [fun_50g_mu23(i) for i in x_mu]
+
+        # function for mu = 0, 1 kg possible meteorite:
+        fun_1kg_mu0 = lambda x_mu:np.log(10.21 - 3*x_mu)
+        y_1kg_mu0 = [fun_1kg_mu0(i) for i in x_mu]
+
+        # function for mu = 2/3, 1 kg possible meteorite:
+        fun_1kg_mu23 = lambda x_mu:np.log(3.4 - x_mu)
+        y_1kg_mu23 = [fun_1kg_mu23(i) for i in x_mu]
 
         # plot mu0, mu2/3 lines and your poit:
-        plt.plot(x_mu, y_mu0, color='grey', label="mu = 0, 50 g meteorite")
-        plt.plot(x_mu, y_mu23, color='k', label="mu = 2/3, 50 g meteorite")
+        plt.plot(x_mu, y_50g_mu0, color='grey', label="50 g meteorite, mu = 0", linestyle='dashed')
+        plt.plot(x_mu, y_50g_mu23, color='k',   label="50 g meteorite, mu = 2/3", linestyle='dashed')
+        plt.plot(x_mu, y_1kg_mu0, color='grey', label="1 kg meteorite, mu = 0")
+        plt.plot(x_mu, y_1kg_mu23, color='k',   label="1 kg meteorite, mu = 2/3")
         plt.scatter([np.log(alpha*np.sin(traj.orbit.elevation_apparent_norot))], [np.log(beta)], color='r')
 
         # defite plot parameters
