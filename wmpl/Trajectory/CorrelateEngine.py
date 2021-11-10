@@ -795,6 +795,15 @@ class TrajectoryCorrelator(object):
                 return False, None
 
 
+            # If the solve failed, stop
+            if traj is None:
+                
+                # Add the trajectory to the list of failed trajectories
+                self.dh.addTrajectory(traj, failed_jdt_ref=jdt_ref)
+
+                return False, None
+
+
             # Check that the average velocity is within the accepted range
             if (traj.orbit.v_avg/1000 < self.traj_constraints.v_avg_min) \
                 or (traj.orbit.v_avg/1000 > self.traj_constraints.v_avg_max):
