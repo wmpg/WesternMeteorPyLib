@@ -863,7 +863,7 @@ class TrajectoryCorrelator(object):
 
         print()
         print("---------------------------------")
-        print("RUNNING TRAJECTORY CORRELATION...")
+        print("{} RUNNING TRAJECTORY CORRELATION...".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
         print("  TIME BEG: {:s} UTC".format(str(dt_beg)))
         print("  TIME END: {:s} UTC".format(str(dt_end)))
         print("  SPLITTING OBSERVATIONS INTO {:d} BINS".format(len(dt_bin_list)))
@@ -896,6 +896,7 @@ class TrajectoryCorrelator(object):
 
             print()
             print("--------------------------------------------------------------------------")
+            print("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
             print("    1) CHECKING IF PREVIOUSLY ESTIMATED TRAJECTORIES HAVE NEW OBSERVATIONS")
             print("--------------------------------------------------------------------------")
             print()
@@ -917,6 +918,7 @@ class TrajectoryCorrelator(object):
 
 
                 print()
+                print("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
                 print("Checking trajectory at {:s} in countries: {:s}".format( \
                     str(jd2Date(traj_reduced.jdt_ref, dt_obj=True)), 
                     ", ".join(list(set([stat_id[:2] for stat_id in traj_reduced.participating_stations]))) \
@@ -996,6 +998,7 @@ class TrajectoryCorrelator(object):
                 # If there are any good new observations, add them to the trajectory and re-run the solution
                 if candidate_observations:
 
+                    print("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
                     print("Recomputing trajectory with new observations from stations:")
 
                     # Add new observations to the trajectory object
@@ -1033,6 +1036,7 @@ class TrajectoryCorrelator(object):
 
             print()
             print("-------------------------------------------------")
+            print("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
             print("    2) PAIRING OBSERVATIONS INTO NEW TRAJECTORIES")
             print("-------------------------------------------------")
             print()
@@ -1140,6 +1144,7 @@ class TrajectoryCorrelator(object):
             ### Merge all candidate trajectories which share the same observations ###
             print()
             print("---------------------------")
+            print("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
             print("MERGING BROKEN OBSERVATIONS")
             print("---------------------------")
             merged_candidate_trajectories = []
@@ -1272,6 +1277,7 @@ class TrajectoryCorrelator(object):
 
             print()
             print("-----------------------")
+            print("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
             print("SOLVING {:d} TRAJECTORIES".format(len(candidate_trajectories)))
             print("-----------------------")
             print()
@@ -1281,6 +1287,7 @@ class TrajectoryCorrelator(object):
 
                 print()
                 print("-----------------------")
+                print("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
 
 
                 ### If there are duplicate observations from the same station, take the longer one ###
@@ -1426,5 +1433,6 @@ class TrajectoryCorrelator(object):
 
             print()
             print("-----------------")
+            print("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
             print("SOLVING RUN DONE!")
             print("-----------------")

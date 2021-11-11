@@ -1268,6 +1268,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         for bin_beg, bin_end in dt_bins:
 
             print()
+            print("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
             print("PROCESSING TIME BIN:")
             print(bin_beg, bin_end)
             print("-----------------------------")
