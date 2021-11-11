@@ -863,7 +863,8 @@ class TrajectoryCorrelator(object):
 
         print()
         print("---------------------------------")
-        print("{} RUNNING TRAJECTORY CORRELATION...".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
+        print("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
+        print("RUNNING TRAJECTORY CORRELATION...")
         print("  TIME BEG: {:s} UTC".format(str(dt_beg)))
         print("  TIME END: {:s} UTC".format(str(dt_end)))
         print("  SPLITTING OBSERVATIONS INTO {:d} BINS".format(len(dt_bin_list)))
