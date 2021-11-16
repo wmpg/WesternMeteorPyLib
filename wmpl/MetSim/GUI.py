@@ -299,7 +299,7 @@ class SimulationResults(object):
             self.frag_list.append(f_total)
 
             # Plotting Function
-            plotLumEff(self.frag_list)
+            # plotLumEff(self.frag_list)
             
 
         ### Wake simulation ###
