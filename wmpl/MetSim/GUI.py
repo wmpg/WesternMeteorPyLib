@@ -23,7 +23,9 @@ from PyQt5.uic import loadUi
 from wmpl.Formats.Met import loadMet
 from wmpl.MetSim.GUITools import MatplotlibPopupWindow
 from wmpl.MetSim.MetSimErosion import runSimulation, Constants
+from wmpl.MetSim.MetSimErosionCyTools import luminousEfficiency, massLossRK4, decelerationRK4
 from wmpl.Trajectory.Orbit import calcOrbit
+from wmpl.Trajectory.Trajectory import *
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensity, atmDensPoly
 from wmpl.Utils.Math import mergeClosePoints, findClosestPoints, vectMag, lineFunc, meanAngle
 from wmpl.Utils.Physics import calcMass, dynamicPressure
@@ -48,6 +50,154 @@ TEXT_LABEL_HT_PAD = 0.1
 LEGEND_TEXT_SIZE  = 8
 
 ### ###
+
+class FragEntryRes:
+    def __init__(self, name):
+        self.name = name
+        self.t_list = []
+        self.m_list = []
+        self.v_list = []
+        self.h_list = []
+        self.tau_list = []
+
+def calcLumEff(frag_type, h, m, v, t, f_total=None, comp_type=1, sigma=0.03, shape_factor=1, gamma=1, bulk_dens=3500, const_tau=1, \
+                            min_height=0, max_height=100000, bin_size=100):
+
+    """ calcLumEff - Returns luminous efficiency as a function of height, mass, time, and velocity
+
+    frag_type [String] - name of type of fragmentation (main, leading, grain)
+    h [array] - array of heights (descending)
+    m [float] - initial mass of object OR [array] - masses corresponding with heights
+    v [float] - initial velocity of object OR [array] - velocities corresponding with heights
+    t [array] - array of times corresponding with height
+    
+    note m and v both given as floats OR arrays. If both given as arrays, then sigma, shape_factor, 
+    bulk density do not need to be given
+    
+    comp_type [int] - composition type corresponding to model in luminousEfficiency()
+    f_total [FragEntryRes obj] - object containing running total of tau of all objects
+
+    Meteoroid parameters, only required if m and v are given as a float
+    sigma [float] - Ablation coefficient (s^2/m^2).    
+    shape_factor [float] - Shape Factor
+    gamma [float]  - Gamma
+    bulk_dens [float] - Bulk Density kg/m^2
+
+    const_tau [float] - Value of the constant luminous efficiency (percent)
+
+    min_height, max_height [float] - height boundaries for binning luminous efficiencies
+    bin_size [float] - bin of heights for considering mass loss of multiple objects
+
+    ########### Returns:
+    f [FragEntryRes Obj] - details of the object in question
+    f_total [FragEntryRes] - Running total of all objects
+    """
+
+    # check if both v and m are arrays
+    vm_is_array = not (isinstance(m, float) and isinstance(v, float))
+
+    # Length of each bin to consider for total mass loss
+    BIN_SIZE = bin_size
+    HEIGHT_MAX = max_height
+    HEIGHT_MIN = min_height
+
+    # Store a running total of mass for plotting
+    if f_total is None:
+        f_total = FragEntryRes("Total")
+        f_total.tau_list =  [1e-6]*((HEIGHT_MAX - HEIGHT_MIN)//BIN_SIZE + 1)
+        f_total.t_list =    [1e-6]*((HEIGHT_MAX - HEIGHT_MIN)//BIN_SIZE + 1)
+        f_total.m_list =    [1e-6]*((HEIGHT_MAX - HEIGHT_MIN)//BIN_SIZE + 1)
+        f_total.v_list =    [1e-6]*((HEIGHT_MAX - HEIGHT_MIN)//BIN_SIZE + 1)
+        f_total.h_list =    [1e-6]*((HEIGHT_MAX - HEIGHT_MIN)//BIN_SIZE + 1)
+
+    DENS_CONST = np.array([6.96795507e+01, -4.14779163e+03, 9.64506379e+04, -1.16695944e+06, \
+                    7.62346229e+06, -2.55529460e+07, 3.45163318e+07])
+
+    # Create new object
+    f = FragEntryRes(frag_type)
+
+    # Shape-density coefficient (m^2/kg^(2/3)).
+    K = shape_factor*gamma*bulk_dens**(-2/3)
+
+    # derivative loop
+    for i in range(len(h) - 1):
+
+        if h[i] > HEIGHT_MAX or h[i] < HEIGHT_MIN:
+            continue
+
+        dt = t[i + 1] - t[i]
+        dh = h[i + 1] - h[i]
+
+        # Mass loss
+        if vm_is_array:
+            dm = m[i + 1] - m[i]
+            dv = v[i + 1] - v[i]
+        else:
+            rho_atm = atmDensPoly(h[i] + dh/2, DENS_CONST)
+            dm = massLossRK4(dt, K, sigma, m, rho_atm, v)
+            dv = decelerationRK4(dt, K, m, rho_atm, v)
+
+            m += dm*dt
+            v += dv*dt
+
+        f.t_list.append(t[i] + dt/2)
+        f.h_list.append(h[i] + dh/2)
+
+        if vm_is_array:
+            f.m_list.append(m[i])
+            f.v_list.append(v[i])
+        else:
+            f.m_list.append(m)
+            f.v_list.append(v)
+
+        indx = int((h[i])/(HEIGHT_MAX - HEIGHT_MIN)*len(f_total.h_list))
+
+        f_total.m_list[indx] += dm
+        f_total.h_list[indx] = h[i]
+
+        if vm_is_array:
+            tau = luminousEfficiency(comp_type, const_tau, v[i], m[i])
+            f_total.v_list[indx] = v[i]
+        else:
+            tau = luminousEfficiency(comp_type, const_tau, v, m)
+            f_total.v_list[indx] = v
+
+
+        f_total.tau_list[indx] += tau*dm
+
+        f.tau_list.append(tau)
+
+    return f, f_total
+
+def plotLumEff(frag_list):
+
+    main_plotted = False
+    for f in frag_list:
+
+        if f.name == "Main":
+            if main_plotted:
+                plt.plot(np.array(f.h_list)/1000, np.array(f.tau_list)*100, c='r')
+            else:
+                main_plotted = True
+                plt.plot(np.array(f.h_list)/1000, np.array(f.tau_list)*100, label=f.name, c='r')
+        elif f.name == "Grain":
+            plt.plot(np.array(f.h_list)/1000, np.array(f.tau_list)*100, label=f.name, c='c')
+        elif f.name == "Total":
+            order = np.argsort(f.h_list)
+
+            mass_weight = (np.array(f.tau_list)/np.array(f.m_list))*100
+            h = np.array(f.h_list)
+            plt.plot((h/1000)[order], (mass_weight)[order], label=f.name, c='k')
+        elif f.name == "Leading":
+            plt.plot(np.array(f.h_list)/1000, np.array(f.tau_list)*100, label=f.name, c='g')
+
+    plt.legend()
+    plt.xlabel("Height [km]")
+    plt.ylabel("Luminous Efficiency [%]")
+    plt.ylim([0, 20])
+    plt.xlim([35, 80])
+
+    plt.show()
 
 
 
@@ -87,6 +237,13 @@ class SimulationResults(object):
         # Compute the absolute magnitude of individual fragmentation entries, and join them a height of the
         #   leading fragment
         if const.fragmentation_show_individual_lcs:
+            self.frag_list = []
+
+            f, f_total = calcLumEff("Leading", self.main_height_arr, self.main_mass_arr, self.main_vel_arr, self.time_arr, f_total=None, \
+                  comp_type=const.lum_eff_type, const_tau=const.lum_eff)
+
+            self.frag_list.append(f)
+
             for frag_entry in const.fragmentation_entries:
 
                 # Compute values for the main fragment
@@ -98,6 +255,13 @@ class SimulationResults(object):
                     # Compute the magnitude
                     frag_entry.main_abs_mag = -2.5*np.log10(np.array(frag_entry.main_luminosity)/const.P_0m)
 
+                    # Store luminous efficincies of fragment (f), and total (f_total)
+                    f, f_total = calcLumEff("Main", frag_entry.main_height_data, frag_entry.mass, frag_entry.velocity, frag_entry.main_time_data, f_total=f_total, \
+                                    comp_type=const.lum_eff_type, sigma=frag_entry.sigma, shape_factor=const.shape_factor, gamma=const.gamma, bulk_dens=const.rho,\
+                                    const_tau=const.lum_eff)
+
+
+                    self.frag_list.append(f)
 
                 # Compute values for the grains
                 if len(frag_entry.grains_time_data):
@@ -108,6 +272,21 @@ class SimulationResults(object):
                     # Compute the magnitude
                     frag_entry.grains_abs_mag = -2.5*np.log10(np.array(frag_entry.grains_luminosity)/const.P_0m)
 
+                    # Store luminous efficincies of fragment (f), and total (f_total)
+                    f, f_total = calcLumEff("Grain", frag_entry.main_height_data, frag_entry.mass, frag_entry.velocity, frag_entry.main_time_data, f_total=f_total, \
+                                    comp_type=const.lum_eff_type, sigma=frag_entry.sigma, shape_factor=const.shape_factor, gamma=const.gamma, bulk_dens=const.rho, \
+                                    const_tau=const.lum_eff)
+
+                   
+
+                    self.frag_list.append(f)
+
+
+            self.frag_list.append(f_total)
+
+            # Plotting Function
+            plotLumEff(self.frag_list)
+            
 
         ### Wake simulation ###
 
@@ -122,7 +301,6 @@ class SimulationResults(object):
 
 
         ###
-
 
 
 class MetObservations(object):
@@ -2599,6 +2777,8 @@ class MetSimGUI(QMainWindow):
             # ht_arr, abs_mag_arr = temp_arr.T
 
             # Plot the simulated magnitudes
+            # for ii in range(len(sr.abs_magnitude)):
+            #     print("{:}, {:}".format(sr.abs_magnitude[ii], sr.leading_frag_height_arr[ii]/1000))
             self.magnitudePlot.canvas.axes.plot(sr.abs_magnitude, sr.leading_frag_height_arr/1000, \
                 label='Simulated', color='k', alpha=0.5)
 
