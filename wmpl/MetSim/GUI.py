@@ -25,7 +25,7 @@ from wmpl.MetSim.GUITools import MatplotlibPopupWindow
 from wmpl.MetSim.MetSimErosion import runSimulation, Constants
 from wmpl.MetSim.MetSimErosionCyTools import luminousEfficiency, massLossRK4, decelerationRK4
 from wmpl.Trajectory.Orbit import calcOrbit
-from wmpl.Trajectory.Trajectory import *
+from wmpl.Trajectory.Trajectory import Trajectory, ObservedPoints, PlaneIntersection
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensity, atmDensPoly
 from wmpl.Utils.Math import mergeClosePoints, findClosestPoints, vectMag, lineFunc, meanAngle
 from wmpl.Utils.Physics import calcMass, dynamicPressure
@@ -61,7 +61,7 @@ class FragEntryRes:
         self.tau_list = []
 
 def calcLumEff(frag_type, h, m, v, t, f_total=None, comp_type=1, sigma=0.03, shape_factor=1, gamma=1, bulk_dens=3500, const_tau=1, \
-                            min_height=0, max_height=100000, bin_size=100):
+                            min_height=0, max_height=100000, bin_size=100, dens_const=None):
 
     """ calcLumEff - Returns luminous efficiency as a function of height, mass, time, and velocity
 
@@ -87,6 +87,7 @@ def calcLumEff(frag_type, h, m, v, t, f_total=None, comp_type=1, sigma=0.03, sha
 
     min_height, max_height [float] - height boundaries for binning luminous efficiencies
     bin_size [float] - bin of heights for considering mass loss of multiple objects
+    dens_const [ndarray] - array of atmospheric density polynomial coefficients
 
     ########### Returns:
     f [FragEntryRes Obj] - details of the object in question
@@ -110,8 +111,6 @@ def calcLumEff(frag_type, h, m, v, t, f_total=None, comp_type=1, sigma=0.03, sha
         f_total.v_list =    [1e-6]*((HEIGHT_MAX - HEIGHT_MIN)//BIN_SIZE + 1)
         f_total.h_list =    [1e-6]*((HEIGHT_MAX - HEIGHT_MIN)//BIN_SIZE + 1)
 
-    DENS_CONST = np.array([6.96795507e+01, -4.14779163e+03, 9.64506379e+04, -1.16695944e+06, \
-                    7.62346229e+06, -2.55529460e+07, 3.45163318e+07])
 
     # Create new object
     f = FragEntryRes(frag_type)
@@ -133,7 +132,7 @@ def calcLumEff(frag_type, h, m, v, t, f_total=None, comp_type=1, sigma=0.03, sha
             dm = m[i + 1] - m[i]
             dv = v[i + 1] - v[i]
         else:
-            rho_atm = atmDensPoly(h[i] + dh/2, DENS_CONST)
+            rho_atm = atmDensPoly(h[i] + dh/2, dens_const)
             dm = massLossRK4(dt, K, sigma, m, rho_atm, v)
             dv = decelerationRK4(dt, K, m, rho_atm, v)
 
@@ -170,32 +169,45 @@ def calcLumEff(frag_type, h, m, v, t, f_total=None, comp_type=1, sigma=0.03, sha
     return f, f_total
 
 def plotLumEff(frag_list):
+    """
+    Plots the luminous efficiency with height for a list of FragEntryRes objects
+
+    # Arguments
+    frag_list [list] - list of FragEntryRes objects, which have frag_types of "Main", "Grain", "Total", or "Leading"
+    """
 
     main_plotted = False
     for f in frag_list:
 
         if f.name == "Main":
+
+            # Only plot the label once
             if main_plotted:
                 plt.plot(np.array(f.h_list)/1000, np.array(f.tau_list)*100, c='r')
             else:
                 main_plotted = True
                 plt.plot(np.array(f.h_list)/1000, np.array(f.tau_list)*100, label=f.name, c='r')
-        elif f.name == "Grain":
-            plt.plot(np.array(f.h_list)/1000, np.array(f.tau_list)*100, label=f.name, c='c')
-        elif f.name == "Total":
-            order = np.argsort(f.h_list)
 
+        elif f.name == "Grain":
+
+            plt.plot(np.array(f.h_list)/1000, np.array(f.tau_list)*100, label=f.name, c='c')
+
+        elif f.name == "Total":
+
+            order = np.argsort(f.h_list)
             mass_weight = (np.array(f.tau_list)/np.array(f.m_list))*100
             h = np.array(f.h_list)
             plt.plot((h/1000)[order], (mass_weight)[order], label=f.name, c='k')
+
         elif f.name == "Leading":
+
             plt.plot(np.array(f.h_list)/1000, np.array(f.tau_list)*100, label=f.name, c='g')
 
     plt.legend()
     plt.xlabel("Height [km]")
     plt.ylabel("Luminous Efficiency [%]")
     plt.ylim([0, 20])
-    plt.xlim([35, 80])
+    plt.xlim([17, 80])
 
     plt.show()
 
@@ -239,8 +251,10 @@ class SimulationResults(object):
         if const.fragmentation_show_individual_lcs:
             self.frag_list = []
 
-            f, f_total = calcLumEff("Leading", self.main_height_arr, self.main_mass_arr, self.main_vel_arr, self.time_arr, f_total=None, \
-                  comp_type=const.lum_eff_type, const_tau=const.lum_eff)
+            f, f_total = calcLumEff("Leading", self.leading_frag_height_arr, const.m_init, const.v_init, self.time_arr, f_total=None, \
+                  comp_type=const.lum_eff_type, sigma=const.sigma, shape_factor=const.shape_factor, gamma=const.gamma, bulk_dens=const.rho,\
+                                    const_tau=const.lum_eff, dens_const=const.dens_co)
+
 
             self.frag_list.append(f)
 
@@ -258,7 +272,7 @@ class SimulationResults(object):
                     # Store luminous efficincies of fragment (f), and total (f_total)
                     f, f_total = calcLumEff("Main", frag_entry.main_height_data, frag_entry.mass, frag_entry.velocity, frag_entry.main_time_data, f_total=f_total, \
                                     comp_type=const.lum_eff_type, sigma=frag_entry.sigma, shape_factor=const.shape_factor, gamma=const.gamma, bulk_dens=const.rho,\
-                                    const_tau=const.lum_eff)
+                                    const_tau=const.lum_eff, dens_const=const.dens_co)
 
 
                     self.frag_list.append(f)
@@ -275,7 +289,7 @@ class SimulationResults(object):
                     # Store luminous efficincies of fragment (f), and total (f_total)
                     f, f_total = calcLumEff("Grain", frag_entry.main_height_data, frag_entry.mass, frag_entry.velocity, frag_entry.main_time_data, f_total=f_total, \
                                     comp_type=const.lum_eff_type, sigma=frag_entry.sigma, shape_factor=const.shape_factor, gamma=const.gamma, bulk_dens=const.rho, \
-                                    const_tau=const.lum_eff)
+                                    const_tau=const.lum_eff, dens_const=const.dens_co)
 
                    
 
