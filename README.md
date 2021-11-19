@@ -43,7 +43,7 @@ The two sections below describe how to install the library on both Linux and Win
 These are installation instructions for Linux, assuming you have [Anaconda](https://www.anaconda.com/distribution/) installed. You might want to install this in a separate [virtual environment](https://conda.io/docs/user-guide/tasks/manage-environments.html) in Anaconda. I recommend creating a separate environment called ```wmpl``` for this code:
 
 ```
-conda create --name wmpl python=3.7
+conda create --name wmpl python=3.8
 ```
 
 Answer yes to all questions.
@@ -59,10 +59,9 @@ on some systems this may not work, so you will have to write ```source activate 
 We will now install all needed libraries. With the environment activated as described above, run this in the terminal:
 
 ```
-conda install -y -c conda-forge numpy scipy matplotlib cython pytz pyqt proj4=5.2.0
-conda install -y -c conda-forge jplephem pyephem
+conda install -y -c conda-forge numpy scipy matplotlib cython pytz pyqt
+conda install -y -c conda-forge jplephem ephem
 conda install -y -c conda-forge basemap basemap-data-hires
-conda install -y -c conda-forge tensorflow keras
 ```
 
 
@@ -107,12 +106,12 @@ The installation might differ on Windows. I recommend installing Anaconda, which
 2) Open the Anaconda powershell and run:
 	```
 	conda update anaconda
-	conda create -y --name wmpl python=3.7
+	conda create -y --name wmpl python=3.8
 	conda activate wmpl
-	conda install -y -c conda-forge numpy scipy matplotlib cython pytz pyqt proj4=5.2.0
-	conda install -y -c conda-forge jplephem pyephem statsmodels
-	conda install -y -c conda-forge basemap basemap-data-hires
-	```
+        conda install -y -c conda-forge numpy scipy matplotlib cython pytz pyqt
+        conda install -y -c conda-forge jplephem ephem
+        conda install -y -c conda-forge basemap basemap-data-hires	
+        ```
 
 3) Download and install git: [https://git-scm.com/downloads](https://git-scm.com/downloads)
 
