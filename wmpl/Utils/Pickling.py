@@ -11,7 +11,6 @@ from wmpl.Utils.OSTools import mkdirP
 
 
 
-
 def savePickle(obj, dir_path, file_name):
     """ Dump the given object into a file using Python 'pickling'. The file can be loaded into Python
         ('unpickled') afterwards for further use.
@@ -57,6 +56,11 @@ def loadPickle(dir_path, file_name):
 
         if hasattr(p, "uncertanties"):
             p.uncertainties = p.uncertanties
+
+        # Check if the pickle file is a trajectory file
+        if hasattr(p, 'orbit') and hasattr(p, 'observations'):
+            if p.orbit is not None:
+                p.orbit.fixMissingParameters()
 
 
         return p

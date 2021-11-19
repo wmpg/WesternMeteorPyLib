@@ -1333,6 +1333,9 @@ class MCUncertainties(object):
         # Longitude of perihelion (radians)
         self.pi = None
 
+        # Latitude of perihelion (radians)
+        self.b = None
+
         # Perihelion distance (AU)
         self.q = None
 
@@ -1478,6 +1481,7 @@ def calcMCUncertainties(traj_list, traj_best):
         un.peri = scipy.stats.circstd([traj.orbit.peri for traj in traj_list])
         un.node = scipy.stats.circstd([traj.orbit.node for traj in traj_list])
         un.pi = scipy.stats.circstd([traj.orbit.pi for traj in traj_list])
+        un.b = np.std([traj.orbit.b for traj in traj_list])
         un.q = np.std([traj.orbit.q for traj in traj_list])
         un.Q = np.std([traj.orbit.Q for traj in traj_list])
         un.true_anomaly = scipy.stats.circstd([traj.orbit.true_anomaly for traj in traj_list])
@@ -2493,7 +2497,6 @@ class Trajectory(object):
         # Check if the observation object as the comment entry
         if not hasattr(obs, 'comment'):
             obs.comment = ''
-
 
         ### ###
 
@@ -3862,8 +3865,11 @@ class Trajectory(object):
 
 
         out_str += "Jacchia fit on lag = -|a1|*exp(|a2|*t):\n"
-        out_str += " a1 = {:.6f}\n".format(self.jacchia_fit[0])
-        out_str += " a2 = {:.6f}\n".format(self.jacchia_fit[1])
+        jacchia_fit = self.jacchia_fit
+        if jacchia_fit is None:
+            jacchia_fit = [0, 0]
+        out_str += " a1 = {:.6f}\n".format(jacchia_fit[0])
+        out_str += " a2 = {:.6f}\n".format(jacchia_fit[1])
         out_str += "\n"
 
         if self.estimate_timing_vel is True:
@@ -3904,8 +3910,11 @@ class Trajectory(object):
             station_info.append("{:>12.6f}".format(np.degrees(obs.lon)))
             station_info.append("{:>12.6f}".format(np.degrees(obs.lat)))
             station_info.append("{:>7.2f}".format(obs.ele))
-            station_info.append("{:>10.6f}".format(obs.jacchia_fit[0]))
-            station_info.append("{:>10.6f}".format(obs.jacchia_fit[1]))
+            jacchia_fit = obs.jacchia_fit
+            if jacchia_fit is None:
+                jacchia_fit = [0, 0]
+            station_info.append("{:>10.6f}".format(jacchia_fit[0]))
+            station_info.append("{:>10.6f}".format(jacchia_fit[1]))
             station_info.append("{:>11.2f}".format(obs.rbeg_ele))
             station_info.append("{:>11.2f}".format(obs.rend_ele))
             station_info.append("{:>17.6f}".format(np.degrees(obs.ang_res_std)))

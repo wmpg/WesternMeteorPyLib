@@ -61,7 +61,8 @@ class SimulationResults(object):
         # Unpack the results
         results_list = np.array(results_list).astype(np.float64)
         self.time_arr, self.luminosity_arr, self.luminosity_main_arr, self.luminosity_eroded_arr, \
-            self.electron_density_total_arr, self.brightest_height_arr, self.brightest_length_arr, \
+            self.electron_density_total_arr, self.tau_total_arr, self.tau_main_arr, self.tau_eroded_arr, \
+            self.brightest_height_arr, self.brightest_length_arr, \
             self.brightest_vel_arr, self.leading_frag_height_arr, self.leading_frag_length_arr, \
             self.leading_frag_vel_arr, self.mass_total_active_arr, self.main_mass_arr, \
             self.main_height_arr, self.main_length_arr, self.main_vel_arr = results_list.T
@@ -98,6 +99,9 @@ class SimulationResults(object):
                     # Compute the magnitude
                     frag_entry.main_abs_mag = -2.5*np.log10(np.array(frag_entry.main_luminosity)/const.P_0m)
 
+                    # Compute the luminosity weigthed tau
+                    frag_entry.main_tau = np.array(frag_entry.main_tau_over_lum)/np.array(frag_entry.main_luminosity)
+
 
                 # Compute values for the grains
                 if len(frag_entry.grains_time_data):
@@ -107,6 +111,9 @@ class SimulationResults(object):
 
                     # Compute the magnitude
                     frag_entry.grains_abs_mag = -2.5*np.log10(np.array(frag_entry.grains_luminosity)/const.P_0m)
+
+                    # Compute the luminosity weigthed tau
+                    frag_entry.grains_tau = np.array(frag_entry.grains_tau_over_lum)/np.array(frag_entry.grains_luminosity)
 
 
         ### Wake simulation ###
@@ -513,6 +520,11 @@ class FragmentationEntry(object):
         # Absolute magnitude (will be computed after the simulation)
         self.main_abs_mag = []
 
+        # Luminous efficiency of the main parent divided by luminosity
+        self.main_tau_over_lum = []
+
+        # Lumnous efficiency weighted by the luminosity
+        self.main_tau = []
 
 
         # Time data for the grains
@@ -526,6 +538,13 @@ class FragmentationEntry(object):
 
         # Absolute magnitude (will be computed after the simulation)
         self.grains_abs_mag = []
+
+        # Lumionus efficiency of grains divided by luminsotiy
+        self.grains_tau_over_lum = []
+
+        # Lumnous efficiency of grains weighted by the luminosity
+        self.grains_tau = []
+
 
 
     def toString(self):
@@ -1629,6 +1648,9 @@ class MetSimGUI(QMainWindow):
         self.plotAirDensityButton.clicked.connect(self.plotAtmDensity)
         self.plotDynamicPressureButton.clicked.connect(self.plotDynamicPressure)
         self.plotMassLossButton.clicked.connect(self.plotMassLoss)
+        
+        self.plotLumEffButton.clicked.connect(self.plotLumEfficiency)
+        self.plotLumEffButton.setDisabled(True)
 
 
         ### ###
@@ -3737,6 +3759,100 @@ class MetSimGUI(QMainWindow):
 
 
 
+
+    def plotLumEfficiency(self):
+        """ Open a separate plot showing the tau of individual fragments. """
+
+        # Init a matplotlib popup window
+        self.mpw = MatplotlibPopupWindow()
+
+        # Set the window title
+        self.mpw.setWindowTitle("Lumionus efficiency")
+
+
+        sr = self.simulation_results
+
+
+        
+        # Plot the magnitude of the total tau
+        self.mpw.canvas.axes.plot(100*sr.tau_total_arr, sr.leading_frag_height_arr/1000, color='k', \
+            alpha=0.5, label="Total")
+
+        # Plot the magnitude of the initial/main fragment
+        self.mpw.canvas.axes.plot(100*sr.tau_main_arr, sr.leading_frag_height_arr/1000, color='blue', 
+            linestyle='solid', linewidth=1, alpha=0.5, label="Main")
+
+        # Plot the magnitude of the eroded and disrupted fragments
+        self.mpw.canvas.axes.plot(100*sr.tau_eroded_arr, sr.leading_frag_height_arr/1000, color='purple', \
+            linestyle='dashed', linewidth=1, alpha=0.5, label="Erosion")
+
+
+        # Plot magnitudes for every fragmentation entry
+        main_f_label = False
+        main_ef_label = False
+        grains_ef_label = False
+        grains_d_label = False
+
+        for frag_entry in self.const.fragmentation_entries:
+
+            label = None
+
+            # Plot magnitude of the main fragment in the fragmentation (not the grains)
+            if len(frag_entry.main_height_data):
+
+                # Choose the color of the main fragment depending on the fragmentation type
+                if frag_entry.frag_type == "F":
+                    line_color = 'blue'
+                    if not main_f_label:
+                        label = "Main F"
+                        main_f_label = True
+                        
+                elif frag_entry.frag_type == "EF":
+                    line_color = 'green'
+                    if not main_ef_label:
+                        label = "Main EF"
+                        main_ef_label = True
+
+                self.mpw.canvas.axes.plot(100*frag_entry.main_tau, frag_entry.main_height_data/1000, \
+                    color=line_color, linestyle='dashed', linewidth=1, alpha=0.5, label=label)
+
+
+            # Plot magnitude of the grains
+            if len(frag_entry.grains_height_data):
+
+                # Eroding grains are purple, dust grains as red
+                if frag_entry.frag_type == "EF":
+                    line_color = 'purple'
+                    if not grains_ef_label:
+                        label = "Grains EF"
+                        grains_ef_label = True
+
+                elif frag_entry.frag_type == "D":
+                    line_color = 'red'
+                    if not grains_d_label:
+                        label = "Grains D"
+                        grains_d_label = True
+
+                self.mpw.canvas.axes.plot(100*frag_entry.grains_tau, frag_entry.grains_height_data/1000, \
+                    color=line_color, linestyle='dashed', linewidth=1, alpha=0.5, label=label)
+
+
+        self.mpw.canvas.axes.legend()
+
+        self.mpw.canvas.axes.set_ylabel("Height (km)")
+        self.mpw.canvas.axes.set_xlabel("Luminous efficiency (%)")
+
+        self.mpw.canvas.axes.set_ylim([self.plot_end_ht + END_HT_PAD, \
+            self.plot_beg_ht + BEG_HT_PAD])
+
+        self.mpw.canvas.axes.grid()
+
+        self.mpw.canvas.figure.tight_layout()
+            
+        self.mpw.show()
+
+
+
     def runSimulationGUI(self):
 
 
@@ -3797,6 +3913,9 @@ class MetSimGUI(QMainWindow):
 
         # Store simulation results
         self.simulation_results = SimulationResults(self.const, frag_main, results_list, wake_results)
+
+        # Toggle lum eff button to only be available if lum eff was computed
+        self.plotLumEffButton.setDisabled(not self.const.fragmentation_show_individual_lcs)
 
         # Write results in the fragmentation file
         if self.const.fragmentation_on:
@@ -4239,8 +4358,11 @@ class MetSimGUI(QMainWindow):
         self.repaint()
 
 
-        # The plate scale is fixed at 0.5 meters per pixel at 100 km, so the animation is better visible
-        plate_scale = 0.5
+        # # (CAMO) The plate scale is fixed at 0.5 meters per pixel at 100 km, so the animation is better visible
+        # plate_scale = 0.5
+
+        # Moderate FOV plate scale (m/px @ 100 km)
+        plate_scale = 10
 
         # Frame nackground intensity
         background_intensity = 30

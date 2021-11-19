@@ -117,10 +117,6 @@ class TrajectoryConstraints(object):
         # Number of MC runs to run for low Qc trajectories
         self.low_qc_mc_runs = 20
 
-        # Maximum number of total MC runs that can be done for one trajectory, including retries and
-        #   rejections of bad observations
-        self.mc_runs_max = 100
-
         # Save plots to disk
         self.save_plots = False
 
@@ -540,6 +536,9 @@ class TrajectoryCorrelator(object):
         #   so we keep this one as a "hard" reference)
         jdt_ref = traj.jdt_ref
 
+        # Disable Monte Carlo runs until an initial stable set of observations is found
+        traj.monte_carlo = False
+
         # Run the solver
         try:
             traj_status = traj.run()
@@ -556,7 +555,6 @@ class TrajectoryCorrelator(object):
         skip_trajectory = False
         traj_best = None
         ignored_station_dict = {}
-        mc_runs_total = 0
         for _ in range(len(traj.observations)):
         
             # If the trajectory estimation failed, skip this trajectory
@@ -589,13 +587,6 @@ class TrajectoryCorrelator(object):
             # If there are less than 2 stations that are not ignored, skip this solution
             if len([obstmp for obstmp in traj_status.observations if not obstmp.ignore_station]) < 2:
                 print("Skipping trajectory solution, not enough good observations...")
-                skip_trajectory = True
-                break
-
-
-            # If there have been to many MC runs on this trajectory, stop getting anything out of it
-            if mc_runs_total > self.traj_constraints.mc_runs_max:
-                print("Skipping trajectory, too many MC runs attempted...")
                 skip_trajectory = True
                 break
 
@@ -707,7 +698,9 @@ class TrajectoryCorrelator(object):
 
                 # Init a new trajectory object (make sure to use the new reference Julian date)
                 traj = self.initTrajectory(traj_status.jdt_ref, mc_runs)
-                mc_runs_total += mc_runs
+
+                # Disable Monte Carlo runs until an initial stable set of observations is found
+                traj.monte_carlo = False
 
                 # Reinitialize the observations with ignored stations
                 for obs in traj_status.observations:
@@ -774,9 +767,45 @@ class TrajectoryCorrelator(object):
         traj = traj_status
 
 
-        # If the orbits couldn't be computed, skip saving the data files
+        # Only proceed if the orbit could be computed
         if traj.orbit.ra_g is not None:
 
+            ## Compute uncertainties using Monte Carlo ##
+
+            print("Stable set of observations found, computing uncertainties using Monte Carlo...")
+
+            # Init a new trajectory object (make sure to use the new reference Julian date)
+            traj = self.initTrajectory(traj_status.jdt_ref, mc_runs)
+
+            # Enable Monte Carlo
+            traj.monte_carlo = True
+
+            # Reinitialize the observations with ignored stations
+            for obs in traj_status.observations:
+                traj.infillWithObs(obs)
+
+
+            # Re-run the trajectory solution
+            try:
+                traj_status = traj.run()
+
+            # If solving has failed, stop solving the trajectory
+            except ValueError:
+                print("Error during trajectory estimation!")
+                return False, None
+
+
+            # If the solve failed, stop
+            if traj_status is None:
+
+                # Add the trajectory to the list of failed trajectories
+                self.dh.addTrajectory(traj, failed_jdt_ref=jdt_ref)
+
+                return False, None
+
+
+            traj = traj_status
+            
 
             # Check that the average velocity is within the accepted range
             if (traj.orbit.v_avg/1000 < self.traj_constraints.v_avg_min) \
@@ -786,6 +815,13 @@ class TrajectoryCorrelator(object):
                     traj.orbit.v_avg/1000, self.traj_constraints.v_avg_max))
 
                 return False, None
+
+
+            # If one of the observations doesn't have an estimated height, skip this trajectory
+            for obs in traj.observations:
+                if (obs.rbeg_ele is None) and (not obs.ignore_station):
+                    print("Heights from observations failed to be estimated!")
+                    return False, None                    
 
             # Set the trajectory fit as successful
             successful_traj_fit = True
@@ -854,11 +890,11 @@ class TrajectoryCorrelator(object):
 
         # Otherwise, generate bins of datetimes for faster processing
         # Data will be divided into time bins, so the pairing function doesn't have to go pair many
-            #   observations at once and keep all pairs in memory
+        #   observations at once and keep all pairs in memory
         else:
             dt_beg = unpaired_observations_all[0].reference_dt
             dt_end = unpaired_observations_all[-1].reference_dt
-            dt_bin_list = generateDatetimeBins(dt_beg, dt_end, bin_days=7, utc_hour_break=12)
+            dt_bin_list = generateDatetimeBins(dt_beg, dt_end, bin_days=1, utc_hour_break=12)
 
 
         print()

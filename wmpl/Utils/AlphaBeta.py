@@ -335,7 +335,12 @@ if __name__ == "__main__":
 
 
         # Predict velocity from height
-        ht_arr = np.linspace(traj.rend_ele - 5000, traj.rbeg_ele + 5000, 100)
+        ht_end = traj.rend_ele - 5000
+        if ht_end < 10000:
+            ht_end = 10000
+        elif (ht_end > 20000) and (ht_end < 35000):
+            ht_end = 20000
+        ht_arr = np.linspace(ht_end, traj.rbeg_ele + 5000, 100)
         vel_arr = alphaBetaVelocity(ht_arr, alpha, beta, v_init)
 
 
@@ -352,4 +357,43 @@ if __name__ == "__main__":
 
         plt.legend()
 
+        plt.show()
+
+
+
+        ### PLOT METEORITE DROPPING POSSIBILITY
+
+        # define x values
+        x_mu = np.arange(0,10, 0.00005)
+
+        # function for mu = 0, 50 g possible meteorite:
+        fun_50g_mu0 = lambda x_mu:np.log(13.2 - 3*x_mu)
+        y_50g_mu0 = [fun_50g_mu0(i) for i in x_mu]
+
+        # function for mu = 2/3, 50 g possible meteorite:
+        fun_50g_mu23 = lambda x_mu:np.log(4.4 - x_mu)
+        y_50g_mu23 = [fun_50g_mu23(i) for i in x_mu]
+
+        # function for mu = 0, 1 kg possible meteorite:
+        fun_1kg_mu0 = lambda x_mu:np.log(10.21 - 3*x_mu)
+        y_1kg_mu0 = [fun_1kg_mu0(i) for i in x_mu]
+
+        # function for mu = 2/3, 1 kg possible meteorite:
+        fun_1kg_mu23 = lambda x_mu:np.log(3.4 - x_mu)
+        y_1kg_mu23 = [fun_1kg_mu23(i) for i in x_mu]
+
+        # plot mu0, mu2/3 lines and your poit:
+        plt.plot(x_mu, y_50g_mu0, color='grey', label="50 g meteorite, mu = 0", linestyle='dashed')
+        plt.plot(x_mu, y_50g_mu23, color='k',   label="50 g meteorite, mu = 2/3", linestyle='dashed')
+        plt.plot(x_mu, y_1kg_mu0, color='grey', label="1 kg meteorite, mu = 0")
+        plt.plot(x_mu, y_1kg_mu23, color='k',   label="1 kg meteorite, mu = 2/3")
+        plt.scatter([np.log(alpha*np.sin(traj.orbit.elevation_apparent_norot))], [np.log(beta)], color='r')
+
+        # defite plot parameters
+        plt.xlim((-1, 7))
+        plt.ylim((-3, 4))
+        plt.xlabel("ln(alpha*sin(slope))")
+        plt.ylabel("ln(beta)")
+        plt.axes().set_aspect('equal')
+        plt.legend()
         plt.show()
