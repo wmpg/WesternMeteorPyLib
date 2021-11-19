@@ -108,10 +108,10 @@ The installation might differ on Windows. I recommend installing Anaconda, which
 	conda update anaconda
 	conda create -y --name wmpl python=3.8
 	conda activate wmpl
-        conda install -y -c conda-forge numpy scipy matplotlib cython pytz pyqt
-        conda install -y -c conda-forge jplephem ephem
-        conda install -y -c conda-forge basemap basemap-data-hires	
-        ```
+	conda install -y -c conda-forge numpy scipy matplotlib cython pytz pyqt
+	conda install -y -c conda-forge jplephem ephem
+	conda install -y -c conda-forge basemap basemap-data-hires
+	```
 
 3) Download and install git: [https://git-scm.com/downloads](https://git-scm.com/downloads)
 
