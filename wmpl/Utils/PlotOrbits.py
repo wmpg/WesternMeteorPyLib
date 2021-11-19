@@ -318,7 +318,7 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_eq
 
         # Setup the plot
         fig = plt.figure(figsize=(8, 8), dpi=dpi)
-        ax = fig.gca(projection='3d', facecolor=cs.background)
+        ax = fig.add_subplot(projection='3d', facecolor=cs.background)
 
         # Hide the axes
         ax.set_axis_off()
