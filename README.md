@@ -43,10 +43,8 @@ The two sections below describe how to install the library on both Linux and Win
 These are installation instructions for Linux, assuming you have [Anaconda](https://www.anaconda.com/distribution/) installed. You might want to install this in a separate [virtual environment](https://conda.io/docs/user-guide/tasks/manage-environments.html) in Anaconda. I recommend creating a separate environment called ```wmpl``` for this code:
 
 ```
-conda create --name wmpl python=3.8
+conda create -y --name wmpl python=3.8
 ```
-
-Answer yes to all questions.
 
 Every time you run the code, you **will have to activate the environment by typing:**
 
