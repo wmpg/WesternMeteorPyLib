@@ -2044,6 +2044,39 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
     return traj_best, uncertainties
 
 
+def copyUncertainties(traj_source, traj_target, copy_mc_traj_instances=False):
+    """ Copy uncertainties from one trajectory to the other. 
+    
+    Arguments:
+        traj_source: [Trajectory object] Trajectory object with uncertainties.
+        traj_target: [Trajectory object] Trajectory object to which uncertainties will be copied.
+
+    Keyword arguments:
+        copy_mc_traj_instances: [bool] Copy all trajectory instances generated during the MC procedure.
+            This will make the trajectory pickle file very large. False by default.
+
+    Return:
+        traj_target: [Trajectory object] Target trajectory object with copied uncertainties.
+    """
+
+    # Copy covariance matrices
+    traj_target.orbit_cov, traj_target.state_vect_cov = copy.deepcopy(traj_source.orbit_cov), \
+        copy.deepcopy(traj_source.state_vect_cov)
+
+    # Copy uncertainties
+    traj_target.uncertainties = copy.deepcopy(traj_source.uncertainties)
+
+    # Handle individual trajectory instances
+    if not copy_mc_traj_instances:
+        if traj_target.uncertainties is not None:
+            del traj_target.uncertainties.mc_traj_list
+            traj_target.uncertainties.mc_traj_list = []
+
+
+    return traj_target
+
+
+
 
 
 def applyGravityDrop(eci_coord, t, r0, vz):
@@ -5959,11 +5992,6 @@ class Trajectory(object):
                 mc_cores=self.mc_cores)
 
 
-            # Set the covariance matrix to the initial trajectory, so it will be reported in the report
-            self.orbit_cov = traj_best.orbit_cov
-            self.state_vect_cov = traj_best.state_vect_cov
-
-
             ### Save uncertainties to the trajectory object ###
             if uncertainties is not None:
                 traj_uncer = copy.deepcopy(uncertainties)
@@ -5977,6 +6005,10 @@ class Trajectory(object):
                 traj_best.uncertanties = traj_uncer
 
             ######
+
+
+            # Copy uncertainties to the geometrical trajectory
+            self = copyUncertainties(traj_best, self)
 
 
         else:
