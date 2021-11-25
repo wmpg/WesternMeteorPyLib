@@ -7,6 +7,7 @@ import os
 import shutil
 
 import numpy as np
+import scipy.interpolate
 
 from wmpl.Formats.EventUWO import StationData
 from wmpl.Formats.GenericFunctions import addSolverOptions
@@ -184,29 +185,43 @@ def readEvFile(dir_path, file_name):
 
         # If there is a NaN in the magnitude data, interpolate it
         if None in mag_data:
-            none_index = mag_data.index(None)
 
-            # If the first magnitude is NaN, take the magnitude of the second point
-            if none_index == 0:
-                mag_data[none_index] = mag_data[none_index + 1]
+            # Get a list of clean data
+            mag_data_clean = [entry for entry in enumerate(mag_data) if entry[1] is not None]
+            clean_indices, clean_mags = np.array(mag_data_clean).T
 
-            # If the last magnitude is NaN, use the magnitude of the previous point
-            elif none_index == (len(mag_data) - 1):
-                mag_data[none_index] = mag_data[none_index - 1]
+            # Interpolate in linear units
+            intens_interpol = scipy.interpolate.PchipInterpolator(clean_indices, 10**(clean_mags/(-2.5)))
 
-            # If the magnitude is in between, interpolate it
-            else:
 
-                mag_prev = float(mag_data[none_index - 1])
-                mag_next = float(mag_data[none_index + 1])
+            # Interpolate missing magnitudes
+            for i, mag in enumerate(mag_data):
+                if mag is None:
+                    mag_data[i] = -2.5*np.log10(intens_interpol(i))
 
-                # Interpolate in linear units
-                intens_prev = 10**(mag_prev/(-2.5))
-                intens_next = 10**(mag_next/(-2.5))
-                intens_interpol = (intens_prev + intens_next)/2
-                mag_interpol = -2.5*np.log10(intens_interpol)
+            # none_index = mag_data.index(None)
 
-                mag_data[none_index] = mag_interpol
+            # # If the first magnitude is NaN, take the magnitude of the second point
+            # if none_index == 0:
+            #     mag_data[none_index] = mag_data[none_index + 1]
+
+            # # If the last magnitude is NaN, use the magnitude of the previous point
+            # elif none_index == (len(mag_data) - 1):
+            #     mag_data[none_index] = mag_data[none_index - 1]
+
+            # # If the magnitude is in between, interpolate it
+            # else:
+
+            #     mag_prev = float(mag_data[none_index - 1])
+            #     mag_next = float(mag_data[none_index + 1])
+
+            #     # Interpolate in linear units
+            #     intens_prev = 10**(mag_prev/(-2.5))
+            #     intens_next = 10**(mag_next/(-2.5))
+            #     intens_interpol = (intens_prev + intens_next)/2
+            #     mag_interpol = -2.5*np.log10(intens_interpol)
+
+            #     mag_data[none_index] = mag_interpol
 
 
         

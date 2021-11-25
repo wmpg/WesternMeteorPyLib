@@ -33,6 +33,7 @@ class StationData(object):
 
         out_str  = ""
         out_str += "StationData object:\n"
+        out_str += "    Station: {:s}\n".format(self.station_id)
         out_str += "    JD ref: {:s}\n".format(str(self.jd_ref))
         out_str += "    Time ref: {:s}\n".format(jd2Date(self.jd_ref, \
             dt_obj=True).strftime("%Y-%m-%d %H:%M:%S.%f"))
