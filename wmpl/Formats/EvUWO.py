@@ -373,6 +373,9 @@ if __name__ == '__main__':
         ev_files = glob.glob(cml_args.ev_files)
     else:
         ev_files = cml_args.ev_files
+        
+        if len(ev_files) == 1:
+            ev_files = glob.glob(ev_files[0])
 
     event_path = os.path.abspath(ev_files[0])
 
