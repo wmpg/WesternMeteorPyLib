@@ -89,7 +89,10 @@ def computeMass(traj, P_0m):
         # Compute average time difference
         avg_t_diff_max = max(avg_t_diff_max, np.median(obs.time_data[1:] - obs.time_data[:-1]))
 
-        for t, mag in zip(obs.time_data, obs.absolute_magnitudes):
+        # Exclude magnitudes fainter than mag +8
+        mag_filter = obs.absolute_magnitudes < 8
+
+        for t, mag in zip(obs.time_data[mag_filter], obs.absolute_magnitudes[mag_filter]):
             if (mag is not None) and (not np.isnan(mag)):
                 time_mag_arr.append([t, mag])
 
@@ -1421,8 +1424,8 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
         # Go through all files
         for file_name in file_names:
 
-            # Check if the file is a pickel file
-            if file_name.endswith("_trajectory.pickle"):
+            # Check if the file is a pickle file
+            if file_name.endswith("_trajectory.pickle") or file_name.endswith("_trajectory_sim.pickle"):
 
                 # If reading the time from directory failed, try reading it from the file name
                 time_read_failed_file = False
@@ -1478,7 +1481,8 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
 
                 # Delete all stored MC runs to conserve memory
                 if traj.uncertainties is not None:
-                    del traj.uncertainties.mc_traj_list
+                    if hasattr(traj.uncertainties, "mc_traj_list"):
+                        del traj.uncertainties.mc_traj_list
                     
 
                 # Delete plane intersections
@@ -1893,6 +1897,9 @@ if __name__ == "__main__":
         help="""During the first continous run, go back FIRST_PREV_SOLS to generate the plots and report. After that, use PREV_SOLS to run."""
         )
 
+    arg_parser.add_argument('-p', '--plot_all_showers', action="store_true", \
+        help="""Plot showers on the maps showing the whole date ramge."""
+        )
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -1995,7 +2002,11 @@ if __name__ == "__main__":
 
         # Generate summary plots
         print("Plotting all trajectories...")
-        generateTrajectoryPlots(cml_args.dir_path, traj_list, plot_showers=False, time_limited_plot=False)
+        pas = False
+        if cml_args.plot_all_showers is not None:
+            pas = True
+            print('adding shower loci to all maps')
+        generateTrajectoryPlots(cml_args.dir_path, traj_list, plot_showers=pas, time_limited_plot=False)
 
         # Generate station plot
         print("Plotting station plot...")
