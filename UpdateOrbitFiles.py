@@ -50,17 +50,23 @@ def updateOrbitFiles():
 	for fname, url in zip(file_names, url_list):
 		print('Downloading {:s}...'.format(fname))
 
-		# Download the file to a temporary location (as not to overwrite the existing file)
-		try:
+		tries = 0
+		while tries < 5:
 
-			# Download the file to a temporary location
-			urllibrary.urlretrieve(url, temp_path)
+			# Download the file to a temporary location (as not to overwrite the existing file)
+			try:
 
-			# Move the downloaded file to a final location
-			shutil.move(temp_path, os.path.join(dir_path, fname))
+				# Download the file to a temporary location
+				urllibrary.urlretrieve(url, temp_path)
 
-		except Exception as e:
-			print("Download failed with:" + repr(e))
+				# Move the downloaded file to a final location
+				shutil.move(temp_path, os.path.join(dir_path, fname))
+
+				break
+
+			except Exception as e:
+				print("Download failed with:" + repr(e))
+				tries += 1
 
 
 		print(' ... done!')
