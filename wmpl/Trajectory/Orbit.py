@@ -185,7 +185,7 @@ class Orbit(object):
             them.
         """
 
-        if not hasattr(self, 'b'):
+        if (not hasattr(self, 'b')) and (self.v_g is not None):
             self.b = calcLatitudeOfPerihelion(self.peri, self.node, self.i)
 
 
