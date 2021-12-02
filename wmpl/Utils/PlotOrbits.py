@@ -263,7 +263,7 @@ class OrbitPlotColorScheme(object):
 
 
 def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_equinox=True, save_plots=False,\
-    plot_path=None, plt_handle=None, color_scheme='dark', figsize=None, dpi=None, plot_file_type='.png', \
+    plot_path=None, plt_handle=None, color_scheme='dark', figsize=None, dpi=None, plot_file_type='png', \
     **kwargs):
     """ Plot the given orbits in the Solar System. 
 
@@ -319,6 +319,8 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_eq
         # Setup the plot
         fig = plt.figure(figsize=(8, 8), dpi=dpi)
         ax = fig.add_subplot(111, projection='3d', facecolor=cs.background)
+
+        ax = plt.gca()
 
         # Hide the axes
         ax.set_axis_off()
