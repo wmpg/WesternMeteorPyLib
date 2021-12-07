@@ -197,6 +197,45 @@ def meanAngle(angles):
 
 
 
+def circPercentile(data, percentile, q0=None):
+    """ Compute percentiles of angles.
+
+    Source: https://github.com/circstat/pycircstat/blob/53d2efdf54c394fd9ecff8d47eaae165c1458fb0/pycircstat/descriptive.py#L375
+
+    Arguments:
+        data: [array-like] Angles in radians.
+        percentile: [float] Percentile in the [0, 100] range.
+        
+    Keyword arguments:
+        q0: [float] Value of the 0 percentile. None by default, in which case it will be automatically
+            determined, respecting the 0/360 discontinuity.
+
+    Return:
+        [float] Value of the percentile.
+
+    """
+
+    data = np.array(data)
+
+    if q0 is None:
+
+        # If the data is on the 0/360 discontinuity, adjust the 0th percentile
+        if np.abs(np.min(data) - np.max(data)) > np.pi:
+            q0 = np.min(data[data > np.pi])
+
+        # If the data is not on the 0/360 break
+        else:
+            q0 = np.min(data)
+
+
+    # Normalize the data
+    data = (data - q0)%(2*np.pi)
+
+    # Compute the angular percentile
+    return (np.percentile(data, percentile) + q0)%(2*np.pi)
+
+
+
 def normalizeAngleWrap(arr):
     """ Given an array with angles which possibly have values close to 0 and 360, normalize all angles
         to 0 (i.e. values > 180 will be negative).
@@ -731,6 +770,38 @@ def estimateHullOverlapRatio(hull1, hull2, niter=200, volume=False):
 
 
 ##############################################################################################################
+
+
+def confidenceInterval(data, ci, angle=False):
+    """ Compute confidence intervals for the given data.
+
+    Arguments:
+        data: [array-like] Input data.
+        ci: [float] Confidence interval. E.g. 95%.
+
+    Keyword arguments:
+        angle: [bool] Whether the data is an angle or not (radians). False by default.
+
+    Return:
+        (lower, upper): [tuple] Lower and upper values in the confidence interval.
+    """
+
+    # Compute percentiles, given the confidence interval
+    perc_l = 50 - ci/2
+    perc_u = 50 + ci/2
+
+    # Compute the confidence interval for angular values (radians)
+    if angle:
+        val_l = circPercentile(data, perc_l)
+        val_u = circPercentile(data, perc_u)
+    
+    else:
+        val_l = np.percentile(data, perc_l)
+        val_u = np.percentile(data, perc_u)
+
+
+    return val_l, val_u
+    
 
 
 def RMSD(x, weights=None):
