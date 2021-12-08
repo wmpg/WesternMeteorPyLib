@@ -29,7 +29,8 @@ Basemap = importBasemap()
 
 from wmpl.Trajectory.Orbit import calcOrbit
 from wmpl.Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, RMSD, \
-    angleBetweenSphericalCoords, angleBetweenVectors, lineFunc, normalizeAngleWrap
+    angleBetweenSphericalCoords, angleBetweenVectors, lineFunc, normalizeAngleWrap, confidenceInterval
+from wmpl.Utils.Misc import valueFormat
 from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import savePickle
 from wmpl.Utils.Plotting import savePlot
@@ -1222,146 +1223,211 @@ def moveStateVector(state_vect, radiant_eci, observations):
 
 class MCUncertainties(object):
     def __init__(self, mc_traj_list):
-        """ Container for standard deviations of trajectory parameters calculated using Monte Carlo. """
+        """ Container for standard deviations and confidence intervals of trajectory parameters calculated 
+        using Monte Carlo. 
+        """
+
+        # Confidence interval value (95%)
+        self.ci = 95
 
         # A list with all trajectory objects calculated via Monte Carlo
         self.mc_traj_list = mc_traj_list
 
         # State vector position
         self.state_vect_mini = None
+        self.state_vect_mini_ci = None
         self.x = None
+        self.x_ci = None
         self.y = None
+        self.y_ci = None
         self.z = None
+        self.z_ci = None
 
         # Velocity state vector
         self.vx = None
+        self.vx_ci = None
         self.vy = None
+        self.vy_ci = None
         self.vz = None
+        self.vz_ci = None
 
         # Radiant vector
         self.radiant_eci_mini = None
+        self.radiant_eci_mini_ci = None
 
         # Beginning/ending points
         self.rbeg_lon = None
+        self.rbeg_lon_ci = None
+        self.rbeg_lon_m = None
         self.rbeg_lat = None
+        self.rbeg_lat_ci = None
+        self.rbeg_lat_m = None
         self.rbeg_ele = None
+        self.rbeg_ele_ci = None
 
         self.rend_lon = None
+        self.rend_lon_ci = None
+        self.rend_lon_m = None
         self.rend_lat = None
+        self.rend_lat_ci = None
+        self.rend_lat_m = None
         self.rend_ele = None
+        self.rend_ele_ci = None
 
         # Apparent radiant position (radians)
         self.ra = None
+        self.ra_ci = None
         self.dec = None
+        self.dec_ci = None
 
         # Apparent azimuth and altitude
         self.azimuth_apparent = None
+        self.azimuth_apparent_ci = None
         self.elevation_apparent = None
+        self.elevation_apparent_ci = None
 
         # Estimated average velocity
         self.v_avg = None
+        self.v_avg_ci = None
 
         # Estimated initial velocity
         self.v_init = None
+        self.v_init_ci = None
 
         # Longitude of the reference point on the trajectory (rad)
         self.lon_ref = None
+        self.lon_ref_ci = None
 
         # Latitude of the reference point on the trajectory (rad)
         self.lat_ref = None
+        self.lat_ref_ci = None
 
         # Height of the reference point on the trajectory (meters)
         self.ht_ref = None
+        self.ht_ref_ci = None
 
         # Geocentric latitude of the reference point (rad)
         self.lat_geocentric = None
+        self.lat_geocentric_ci = None
 
         # Apparent zenith angle (before the correction for Earth's gravity)
         self.zc = None
+        self.zc_ci = None
 
         # Zenith distance of the geocentric radiant (after the correction for Earth's gravity)
         self.zg = None
+        self.zg_ci = None
 
         # Velocity at infinity
         self.v_inf = None
+        self.v_inf_ci = None
 
         # Geocentric velocity (m/s)
         self.v_g = None
+        self.v_g_ci = None
 
         # Geocentric radiant position (radians)
         self.ra_g = None
+        self.ra_g_ci = None
         self.dec_g = None
+        self.dec_g_ci = None
 
         # Ecliptic coordinates of the radiant (radians)
         self.L_g = None
+        self.L_g_ci = None
         self.B_g = None
+        self.B_g_ci = None
 
         # Sun-centered ecliptic rectangular coordinates of the average position on the meteor's trajectory 
         # (in kilometers)
         self.meteor_pos = None
+        self.meteor_pos_ci = None
 
         # Helioventric velocity of the meteor (m/s)
         self.v_h = None
+        self.v_h_ci = None
 
         # Corrected heliocentric velocity vector of the meteoroid using the method of Sato & Watanabe (2014)
         self.v_h_x = None
+        self.v_h_x_ci = None
         self.v_h_y = None
+        self.v_h_y_ci = None
         self.v_h_z = None
+        self.v_h_z_ci = None
 
         # Corrected ecliptci coordinates of the meteor using the method of Sato & Watanabe (2014)
         self.L_h = None
+        self.L_h_ci = None
         self.B_h = None
+        self.B_h_ci = None
 
         # Solar longitude (radians)
         self.la_sun = None
+        self.la_sun_ci = None
 
         # Semi-major axis (AU)
         self.a = None
+        self.a_ci = None
 
         # Eccentricty
         self.e = None
+        self.e_ci = None
 
         # Inclination (radians)
         self.i = None
+        self.i_ci = None
 
         # Argument of perihelion (radians)
         self.peri = None
+        self.peri_ci = None
 
         # Ascending node (radians)
         self.node = None
+        self.node_ci = None
 
         # Longitude of perihelion (radians)
         self.pi = None
+        self.pi_ci = None
 
         # Latitude of perihelion (radians)
         self.b = None
+        self.b_ci = None
 
         # Perihelion distance (AU)
         self.q = None
+        self.q_ci = None
 
         # Aphelion distance (AU)
         self.Q = None
+        self.Q_ci = None
 
         # True anomaly at the moment of contact with Earth (radians)
         self.true_anomaly = None
+        self.true_anomaly_ci = None
 
         # Exxentric anomaly (radians)
         self.eccentric_anomaly = None
+        self.eccentric_anomaly_ci = None
 
         # Mean anomaly (radians)
         self.mean_anomaly = None
+        self.mean_anomaly_ci = None
 
         # Calculate the date and time of the last perihelion passage (datetime object)
         self.last_perihelion = None
+        self.last_perihelion_ci = None
 
         # Mean motion in the orbit (rad/day)
         self.n = None
+        self.n_ci = None
 
         # Orbital period
         self.T = None
+        self.T_ci = None
 
         # Tisserand's parameter with respect to Jupiter
         self.Tj = None
+        self.Tj_ci = None
 
 # Preserve compatibility with pickle files genrated before the typo fix
 MCUncertanties = MCUncertainties
@@ -1385,121 +1451,203 @@ def calcMCUncertainties(traj_list, traj_best):
 
     # Initial velocity
     un.v_init = np.std([traj.v_init for traj in traj_list])
+    un.v_init_ci = confidenceInterval([traj.v_init for traj in traj_list], un.ci)
 
     # State vector
     un.x = np.std([traj.state_vect_mini[0] for traj in traj_list])
+    un.x_ci = confidenceInterval([traj.state_vect_mini[0] for traj in traj_list], un.ci)
     un.y = np.std([traj.state_vect_mini[1] for traj in traj_list])
+    un.y_ci = confidenceInterval([traj.state_vect_mini[1] for traj in traj_list], un.ci)
     un.z = np.std([traj.state_vect_mini[2] for traj in traj_list])
+    un.z_ci = confidenceInterval([traj.state_vect_mini[2] for traj in traj_list], un.ci)
 
     un.state_vect_mini = np.array([un.x, un.y, un.z])
+    un.state_vect_mini_ci = np.array([un.x_ci, un.y_ci, un.z_ci])
 
 
     rad_x = np.std([traj.radiant_eci_mini[0] for traj in traj_list])
+    rad_x_ci = confidenceInterval([traj.radiant_eci_mini[0] for traj in traj_list], un.ci)
     rad_y = np.std([traj.radiant_eci_mini[1] for traj in traj_list])
+    rad_y_ci = confidenceInterval([traj.radiant_eci_mini[1] for traj in traj_list], un.ci)
     rad_z = np.std([traj.radiant_eci_mini[2] for traj in traj_list])
+    rad_z_ci = confidenceInterval([traj.radiant_eci_mini[2] for traj in traj_list], un.ci)
 
     un.radiant_eci_mini = np.array([rad_x, rad_y, rad_z])
+    un.radiant_eci_mini_ci = np.array([rad_x_ci, rad_y_ci, rad_z_ci])
 
     # Velocity state vector
     un.vx = abs(traj_best.v_init*traj_best.radiant_eci_mini[0]*(un.v_init/traj_best.v_init
         + rad_x/traj_best.radiant_eci_mini[0]))
+    un.vx_ci = confidenceInterval([traj.v_init*traj.radiant_eci_mini[0] for traj in traj_list], un.ci)
     un.vy = abs(traj_best.v_init*traj_best.radiant_eci_mini[1]*(un.v_init/traj_best.v_init
         + rad_y/traj_best.radiant_eci_mini[1]))
+    un.vy_ci = confidenceInterval([traj.v_init*traj.radiant_eci_mini[1] for traj in traj_list], un.ci)
     un.vz = abs(traj_best.v_init*traj_best.radiant_eci_mini[2]*(un.v_init/traj_best.v_init
         + rad_z/traj_best.radiant_eci_mini[2]))
+    un.vz_ci = confidenceInterval([traj.v_init*traj.radiant_eci_mini[2] for traj in traj_list], un.ci)
 
 
     # Beginning/ending points
+    N_beg = EARTH.EQUATORIAL_RADIUS/np.sqrt(1.0 - (EARTH.E**2)*np.sin(traj_best.rbeg_lat)**2)
     un.rbeg_lon = scipy.stats.circstd([traj.rbeg_lon for traj in traj_list])
+    un.rbeg_lon_ci = confidenceInterval([traj.rbeg_lon for traj in traj_list], un.ci, angle=True)
+    un.rbeg_lon_m = np.sin(un.rbeg_lon)*np.cos(traj_best.rbeg_lat)*N_beg
     un.rbeg_lat = np.std([traj.rbeg_lat for traj in traj_list])
+    un.rbeg_lat_ci = confidenceInterval([traj.rbeg_lat for traj in traj_list], un.ci)
+    un.rbeg_lat_m = np.sin(un.rbeg_lat)*N_beg
     un.rbeg_ele = np.std([traj.rbeg_ele for traj in traj_list])
+    un.rbeg_ele_ci = confidenceInterval([traj.rbeg_ele for traj in traj_list], un.ci)
 
+    N_end = EARTH.EQUATORIAL_RADIUS/np.sqrt(1.0 - (EARTH.E**2)*np.sin(traj_best.rend_lat)**2)
     un.rend_lon = scipy.stats.circstd([traj.rend_lon for traj in traj_list])
+    un.rend_lon_ci = confidenceInterval([traj.rend_lon for traj in traj_list], un.ci, angle=True)
+    un.rend_lon_m = np.sin(un.rend_lon)*np.cos(traj_best.rend_lat)*N_end
     un.rend_lat = np.std([traj.rend_lat for traj in traj_list])
+    un.rend_lat_ci = confidenceInterval([traj.rend_lat for traj in traj_list], un.ci)
+    un.rend_lat_m = np.sin(un.rend_lat)*N_end
     un.rend_ele = np.std([traj.rend_ele for traj in traj_list])
+    un.rend_ele_ci = confidenceInterval([traj.rend_ele for traj in traj_list], un.ci)
 
 
     if traj_best.orbit is not None:
 
         # Apparent ECI
         un.ra = scipy.stats.circstd([traj.orbit.ra for traj in traj_list])
+        un.ra_ci = confidenceInterval([traj.orbit.ra for traj in traj_list], un.ci, angle=True)
         un.dec = np.std([traj.orbit.dec for traj in traj_list])
+        un.dec_ci = confidenceInterval([traj.orbit.dec for traj in traj_list], un.ci)
         un.v_avg = np.std([traj.orbit.v_avg for traj in traj_list])
+        un.v_avg_ci = confidenceInterval([traj.orbit.v_avg for traj in traj_list], un.ci)
         un.v_inf = np.std([traj.orbit.v_inf for traj in traj_list])
+        un.v_inf_ci = confidenceInterval([traj.orbit.v_inf for traj in traj_list], un.ci)
         un.azimuth_apparent = scipy.stats.circstd([traj.orbit.azimuth_apparent for traj in traj_list])
+        un.azimuth_apparent_ci = confidenceInterval([traj.orbit.azimuth_apparent for traj in traj_list], \
+            un.ci, angle=True)
         un.elevation_apparent = np.std([traj.orbit.elevation_apparent for traj in traj_list])
+        un.elevation_apparent_ci = confidenceInterval([traj.orbit.elevation_apparent for traj in traj_list], \
+            un.ci)
 
         # Apparent ground-fixed
         un.ra_norot = scipy.stats.circstd([traj.orbit.ra_norot for traj in traj_list])
+        un.ra_norot_ci = confidenceInterval([traj.orbit.ra_norot for traj in traj_list], un.ci, angle=True)
         un.dec_norot = np.std([traj.orbit.dec_norot for traj in traj_list])
+        un.dec_norot_ci = confidenceInterval([traj.orbit.dec_norot for traj in traj_list], un.ci)
         un.v_avg_norot = np.std([traj.orbit.v_avg_norot for traj in traj_list])
+        un.v_avg_norot_ci = confidenceInterval([traj.orbit.v_avg_norot for traj in traj_list], un.ci)
         un.v_init_norot = np.std([traj.orbit.v_init_norot for traj in traj_list])
+        un.v_init_norot_ci = confidenceInterval([traj.orbit.v_init_norot for traj in traj_list], un.ci)
         un.azimuth_apparent_norot = scipy.stats.circstd([traj.orbit.azimuth_apparent_norot for traj \
             in traj_list])
+        un.azimuth_apparent_norot_ci = confidenceInterval([traj.orbit.azimuth_apparent_norot for traj \
+            in traj_list], un.ci, angle=True)
         un.elevation_apparent_norot = np.std([traj.orbit.elevation_apparent_norot for traj in traj_list])
+        un.elevation_apparent_norot_ci = confidenceInterval([traj.orbit.elevation_apparent_norot for traj \
+            in traj_list], un.ci)
 
         # Reference point on the meteor trajectory
         un.lon_ref = scipy.stats.circstd([traj.orbit.lon_ref for traj in traj_list])
+        un.lon_ref_ci = confidenceInterval([traj.orbit.lon_ref for traj in traj_list], un.ci, angle=True)
         un.lat_ref = np.std([traj.orbit.lat_ref for traj in traj_list])
+        un.lat_ref_ci = confidenceInterval([traj.orbit.lat_ref for traj in traj_list], un.ci)
         un.lat_geocentric = np.std([traj.orbit.lat_geocentric for traj in traj_list])
+        un.lat_geocentric_ci = confidenceInterval([traj.orbit.lat_geocentric for traj in traj_list], un.ci)
         un.ht_ref = np.std([traj.orbit.ht_ref for traj in traj_list])
+        un.ht_ref_ci = confidenceInterval([traj.orbit.ht_ref for traj in traj_list], un.ci)
 
         # Geocentric
         un.ra_g = scipy.stats.circstd([traj.orbit.ra_g for traj in traj_list])
+        un.ra_g_ci = confidenceInterval([traj.orbit.ra_g for traj in traj_list], un.ci, angle=True)
         un.dec_g = np.std([traj.orbit.dec_g for traj in traj_list])
+        un.dec_g_ci = confidenceInterval([traj.orbit.dec_g for traj in traj_list], un.ci)
         un.v_g = np.std([traj.orbit.v_g for traj in traj_list])
+        un.v_g_ci = confidenceInterval([traj.orbit.v_g for traj in traj_list], un.ci)
 
         # Meteor position in Sun-centred rectangular coordinates
         meteor_pos_x = np.std([traj.orbit.meteor_pos[0] for traj in traj_list])
+        meteor_pos_x_ci = confidenceInterval([traj.orbit.meteor_pos[0] for traj in traj_list], un.ci)
         meteor_pos_y = np.std([traj.orbit.meteor_pos[1] for traj in traj_list])
+        meteor_pos_y_ci = confidenceInterval([traj.orbit.meteor_pos[1] for traj in traj_list], un.ci)
         meteor_pos_z = np.std([traj.orbit.meteor_pos[2] for traj in traj_list])
+        meteor_pos_z_ci = confidenceInterval([traj.orbit.meteor_pos[2] for traj in traj_list], un.ci)
 
         un.meteor_pos = np.array([meteor_pos_x, meteor_pos_y, meteor_pos_z])
+        un.meteor_pos_ci = np.array([meteor_pos_x_ci, meteor_pos_y_ci, meteor_pos_z_ci])
 
         # Zenith angles
         un.zc = np.std([traj.orbit.zc for traj in traj_list])
+        un.zc_ci = confidenceInterval([traj.orbit.zc for traj in traj_list], un.ci)
         un.zg = np.std([traj.orbit.zg for traj in traj_list])
+        un.zg_ci = confidenceInterval([traj.orbit.zg for traj in traj_list], un.ci)
 
 
         # Ecliptic geocentric
         un.L_g = scipy.stats.circstd([traj.orbit.L_g for traj in traj_list])
+        un.L_g_ci = confidenceInterval([traj.orbit.L_g for traj in traj_list], un.ci, angle=True)
         un.B_g = np.std([traj.orbit.B_g for traj in traj_list])
+        un.B_g_ci = confidenceInterval([traj.orbit.B_g for traj in traj_list], un.ci)
         un.v_h = np.std([traj.orbit.v_h for traj in traj_list])
+        un.v_h_ci = confidenceInterval([traj.orbit.v_h for traj in traj_list], un.ci)
 
         # Ecliptic heliocentric
         un.L_h = scipy.stats.circstd([traj.orbit.L_h for traj in traj_list])
+        un.L_h_ci = confidenceInterval([traj.orbit.L_h for traj in traj_list], un.ci, angle=True)
         un.B_h = np.std([traj.orbit.B_h for traj in traj_list])
+        un.B_h_ci = confidenceInterval([traj.orbit.B_h for traj in traj_list], un.ci)
         un.v_h_x = np.std([traj.orbit.v_h_x for traj in traj_list])
+        un.v_h_x_ci = confidenceInterval([traj.orbit.v_h_x for traj in traj_list], un.ci)
         un.v_h_y = np.std([traj.orbit.v_h_y for traj in traj_list])
+        un.v_h_y_ci = confidenceInterval([traj.orbit.v_h_y for traj in traj_list], un.ci)
         un.v_h_z = np.std([traj.orbit.v_h_z for traj in traj_list])
+        un.v_h_z_ci = confidenceInterval([traj.orbit.v_h_z for traj in traj_list], un.ci)
 
         # Orbital elements
         un.la_sun = scipy.stats.circstd([traj.orbit.la_sun for traj in traj_list])
+        un.la_sun_ci = confidenceInterval([traj.orbit.la_sun for traj in traj_list], un.ci, angle=True)
         un.a = np.std([traj.orbit.a for traj in traj_list])
+        un.a_ci = confidenceInterval([traj.orbit.a for traj in traj_list], un.ci)
         un.e = np.std([traj.orbit.e for traj in traj_list])
+        un.e_ci = confidenceInterval([traj.orbit.e for traj in traj_list], un.ci)
         un.i = np.std([traj.orbit.i for traj in traj_list])
+        un.i_ci = confidenceInterval([traj.orbit.i for traj in traj_list], un.ci)
         un.peri = scipy.stats.circstd([traj.orbit.peri for traj in traj_list])
+        un.peri_ci = confidenceInterval([traj.orbit.peri for traj in traj_list], un.ci, angle=True)
         un.node = scipy.stats.circstd([traj.orbit.node for traj in traj_list])
+        un.node_ci = confidenceInterval([traj.orbit.node for traj in traj_list], un.ci, angle=True)
         un.pi = scipy.stats.circstd([traj.orbit.pi for traj in traj_list])
+        un.pi_ci = confidenceInterval([traj.orbit.pi for traj in traj_list], un.ci, angle=True)
         un.b = np.std([traj.orbit.b for traj in traj_list])
+        un.b_ci = confidenceInterval([traj.orbit.b for traj in traj_list], un.ci)
         un.q = np.std([traj.orbit.q for traj in traj_list])
+        un.q_ci = confidenceInterval([traj.orbit.q for traj in traj_list], un.ci)
         un.Q = np.std([traj.orbit.Q for traj in traj_list])
+        un.Q_ci = confidenceInterval([traj.orbit.Q for traj in traj_list], un.ci)
         un.true_anomaly = scipy.stats.circstd([traj.orbit.true_anomaly for traj in traj_list])
+        un.true_anomaly_ci = confidenceInterval([traj.orbit.true_anomaly for traj in traj_list], un.ci, \
+            angle=True)
         un.eccentric_anomaly = scipy.stats.circstd([traj.orbit.eccentric_anomaly for traj in traj_list])
+        un.eccentric_anomaly_ci = confidenceInterval([traj.orbit.eccentric_anomaly for traj in traj_list], \
+            un.ci, angle=True)
         un.mean_anomaly = scipy.stats.circstd([traj.orbit.mean_anomaly for traj in traj_list])
+        un.mean_anomaly_ci = confidenceInterval([traj.orbit.mean_anomaly for traj in traj_list], un.ci, \
+            angle=True)
 
         # Last perihelion uncertanty (days)
-        un.last_perihelion = np.std([datetime2JD(traj.orbit.last_perihelion) for traj in traj_list if \
-            isinstance(traj.orbit.last_perihelion, datetime.datetime)])
+        un.last_perihelion = np.std([datetime2JD(traj.orbit.last_perihelion) for traj \
+            in traj_list if isinstance(traj.orbit.last_perihelion, datetime.datetime)])
+        un.last_perihelion_ci = confidenceInterval([datetime2JD(traj.orbit.last_perihelion) for traj \
+            in traj_list if isinstance(traj.orbit.last_perihelion, datetime.datetime)], un.ci)
 
         # Mean motion in the orbit (rad/day)
         un.n = np.std([traj.orbit.n for traj in traj_list])
+        un.n_ci = confidenceInterval([traj.orbit.n for traj in traj_list], un.ci)
 
         # Orbital period
         un.T = np.std([traj.orbit.T for traj in traj_list])
+        un.T_ci = confidenceInterval([traj.orbit.T for traj in traj_list], un.ci)
 
         # Tisserand's parameter
         un.Tj = np.std([traj.orbit.Tj for traj in traj_list])
+        un.Tj_ci = confidenceInterval([traj.orbit.Tj for traj in traj_list], un.ci)
     
 
     return un
@@ -3743,17 +3891,30 @@ class Trajectory(object):
             Keyword arguments:
                 multi: [float] Uncertanty multiplier. 1.0 by default. This is used to scale the uncertanty to
                     different units (e.g. from m/s to km/s).
-                deg: [bool] Converet radians to degrees if True. False by defualt.
+                deg: [bool] Converet radians to degrees if True. False by default.
                 """
 
             if deg:
                 multi *= np.degrees(1.0)
 
             if uncertainties is not None:
-                return " +/- " + str_format.format(getattr(uncertainties, std_name)*multi)
+
+                # Construct symmetrical 1 sigma uncertainty
+                ret_str = " +/- " + str_format.format(getattr(uncertainties, std_name)*multi)
+
+                # Add confidence interval if available
+                if hasattr(uncertainties, std_name + "_ci"):
+                    ci_l, ci_u = np.array(getattr(uncertainties, std_name + "_ci"))*multi
+                    ret_str += ", [{:s}, {:s}]".format(str_format.format(ci_l), str_format.format(ci_u))
+
+                return ret_str
 
             else:
                 return ''
+
+
+        # Format longitude in the -180 to 180 deg range
+        _formatLongitude = lambda x: (x + np.pi)%(2*np.pi) - np.pi
 
         
         out_str = ''
@@ -3828,12 +3989,12 @@ class Trajectory(object):
 
         # Write out the state vector
         out_str += "State vector (ECI, epoch of date):\n"
-        out_str += " X =  {:11.2f}{:s} m\n".format(x, _uncer('{:.2f}', 'x'))
-        out_str += " Y =  {:11.2f}{:s} m\n".format(y, _uncer('{:.2f}', 'y'))
-        out_str += " Z =  {:11.2f}{:s} m\n".format(z, _uncer('{:.2f}', 'z'))
-        out_str += " Vx = {:11.2f}{:s} m/s\n".format(vx, _uncer('{:.2f}', 'vx'))
-        out_str += " Vy = {:11.2f}{:s} m/s\n".format(vy, _uncer('{:.2f}', 'vy'))
-        out_str += " Vz = {:11.2f}{:s} m/s\n".format(vz, _uncer('{:.2f}', 'vz'))
+        out_str += " X =  {:s} m\n".format(valueFormat("{:11.2f}", x, '{:7.2f}', uncertainties, 'x'))
+        out_str += " Y =  {:s} m\n".format(valueFormat("{:11.2f}", y, '{:7.2f}', uncertainties, 'y'))
+        out_str += " Z =  {:s} m\n".format(valueFormat("{:11.2f}", z, '{:7.2f}', uncertainties, 'z'))
+        out_str += " Vx = {:s} m/s\n".format(valueFormat("{:11.2f}", vx, '{:7.2f}', uncertainties, 'vx'))
+        out_str += " Vy = {:s} m/s\n".format(valueFormat("{:11.2f}", vy, '{:7.2f}', uncertainties, 'vy'))
+        out_str += " Vz = {:s} m/s\n".format(valueFormat("{:11.2f}", vz, '{:7.2f}', uncertainties, 'vz'))
 
         out_str += "\n"
 
@@ -3863,14 +4024,15 @@ class Trajectory(object):
         if self.orbit is not None:
             out_str += "Reference point on the trajectory:\n"
             out_str += "  Time: " + str(jd2Date(self.orbit.jd_ref, dt_obj=True)) + " UTC\n"
-            out_str += "  Lon     = {:+>10.6f}{:s} deg\n".format(np.degrees(self.orbit.lon_ref), \
-                _uncer('{:.4f}', 'lon_ref', deg=True))
-            out_str += "  Lat     = {:+>10.6f}{:s} deg\n".format(np.degrees(self.orbit.lat_ref), \
-                _uncer('{:.4f}', 'lat_ref', deg=True))
-            out_str += "  Lat geo = {:+>10.6f}{:s} deg\n".format(np.degrees(self.orbit.lat_geocentric), \
-                _uncer('{:.4f}', 'lat_geocentric', deg=True))
-            out_str += "  Ht      = {:>10.2f}{:s} m\n".format(self.orbit.ht_ref, \
-                _uncer('{:.2f}', 'ht_ref', deg=False))
+            out_str += "  Lat     = {:s} deg\n".format(valueFormat("{:>11.6f}", self.orbit.lat_ref, \
+                '{:6.4f}', uncertainties, 'lat_ref', deg=True))
+            out_str += "  Lon     = {:s} deg\n".format(valueFormat("{:>11.6f}", self.orbit.lon_ref, \
+                '{:6.4f}', uncertainties, 'lon_ref', deg=True, callable_val=_formatLongitude, \
+                callable_ci=_formatLongitude))
+            out_str += "  Ht      = {:s} m\n".format(valueFormat("{:>11.2f}", self.orbit.ht_ref, \
+                '{:6.2f}', uncertainties, 'ht_ref', deg=False))
+            out_str += "  Lat geo = {:s} deg\n".format(valueFormat("{:>11.6f}", self.orbit.lat_geocentric, \
+                '{:6.4f}', uncertainties, 'lat_geocentric', deg=True))
             out_str += "\n"
 
             # Write out orbital parameters
@@ -3914,18 +4076,32 @@ class Trajectory(object):
             out_str += "\n"
 
         out_str += "Begin point on the trajectory:\n"
-        out_str += "  Lon = {:>12.6f}{:s} deg\n".format(np.degrees(self.rbeg_lon), _uncer('{:.4f}', 
-            'rbeg_lon', deg=True))
-        out_str += "  Lat = {:>12.6f}{:s} deg\n".format(np.degrees(self.rbeg_lat), _uncer('{:.4f}', 
-            'rbeg_lat', deg=True))
-        out_str += "  Ht  = {:>8.2f}{:s} m\n".format(self.rbeg_ele, _uncer('{:.2f}', 'rbeg_ele'))
+        out_str += "  Lat = {:s} deg\n".format(valueFormat("{:>11.6f}", self.rbeg_lat, "{:6.4f}", \
+            uncertainties, 'rbeg_lat', deg=True))
+        if uncertainties is not None:
+            if hasattr(uncertainties, "rbeg_lat_m"):
+                out_str += "                    +/- {:6.2f} m\n".format(uncertainties.rbeg_lat_m)
+        out_str += "  Lon = {:s} deg\n".format(valueFormat("{:>11.6f}", self.rbeg_lon, "{:6.4f}", \
+            uncertainties, 'rbeg_lon', deg=True, callable_val=_formatLongitude, callable_ci=_formatLongitude))
+        if uncertainties is not None:
+            if hasattr(uncertainties, "rbeg_lon_m"):
+                out_str += "                    +/- {:6.2f} m\n".format(uncertainties.rbeg_lon_m)
+        out_str += "  Ht  = {:s} m\n".format(valueFormat("{:>11.2f}", self.rbeg_ele, "{:6.2f}", \
+            uncertainties, 'rbeg_ele'))
 
         out_str += "End point on the trajectory:\n"
-        out_str += "  Lon = {:>12.6f}{:s} deg\n".format(np.degrees(self.rend_lon), _uncer('{:.4f}', 
-            'rend_lon', deg=True))
-        out_str += "  Lat = {:>12.6f}{:s} deg\n".format(np.degrees(self.rend_lat), _uncer('{:.4f}', 
-            'rend_lat', deg=True))
-        out_str += "  Ht  = {:>8.2f}{:s} m\n".format(self.rend_ele, _uncer('{:.2f}', 'rend_ele'))
+        out_str += "  Lat = {:s} deg\n".format(valueFormat("{:>11.6f}", self.rend_lat, "{:6.4f}", \
+            uncertainties, 'rend_lat', deg=True))
+        if uncertainties is not None:
+            if hasattr(uncertainties, "rend_lat_m"):
+                out_str += "                    +/- {:6.2f} m\n".format(uncertainties.rend_lat_m)
+        out_str += "  Lon = {:s} deg\n".format(valueFormat("{:>11.6f}", self.rend_lon, "{:6.4f}", \
+            uncertainties, 'rend_lon', deg=True, callable_val=_formatLongitude, callable_ci=_formatLongitude))
+        if uncertainties is not None:
+            if hasattr(uncertainties, "rend_lon_m"):
+                out_str += "                    +/- {:6.2f} m\n".format(uncertainties.rend_lon_m)
+        out_str += "  Ht  = {:s} m\n".format(valueFormat("{:>11.2f}", self.rend_ele, "{:6.2f}", \
+            uncertainties, 'rend_ele'))
         out_str += "\n"
 
         ### Write information about stations ###
@@ -3933,7 +4109,7 @@ class Trajectory(object):
         out_str += "Stations\n"
         out_str += "--------\n"
 
-        out_str += "        ID, Ignored, Lon +E (deg), Lat +N (deg),  Ht (m), Jacchia a1, Jacchia a2,  Beg Ht (m),  End Ht (m), +/- Obs ang (deg), +/- V (m), +/- H (m), Persp. angle (deg), Weight, FOV Beg, FOV End, Comment\n"
+        out_str += "            ID, Ignored, Lon +E (deg), Lat +N (deg),  Ht (m), Jacchia a1, Jacchia a2,  Beg Ht (m),  End Ht (m), +/- Obs ang (deg), +/- V (m), +/- H (m), Persp. angle (deg), Weight, FOV Beg, FOV End, Comment\n"
         
         for obs in self.observations:
 
@@ -3979,7 +4155,7 @@ class Trajectory(object):
 
 
         out_str += " No, "
-        out_str += "Station ID, "
+        out_str += "    Station ID, "
         out_str += " Ignore, "
         out_str += " Time (s), "
         out_str += "                  JD, "
@@ -4022,7 +4198,7 @@ class Trajectory(object):
 
                 point_info.append("{:3d}".format(i))
 
-                point_info.append("{:>10s}".format(str(obs.station_id)))
+                point_info.append("{:>14s}".format(str(obs.station_id)))
 
                 point_info.append("{:>7d}".format(obs.ignore_list[i]))
                 
@@ -4106,6 +4282,8 @@ class Trajectory(object):
         out_str += "- Right ascension and declination in the table are given in the epoch of date for the corresponding JD, per every point.\n"
         out_str += "- 'RA and Dec obs' are the right ascension and declination calculated from the observed values, while the 'RA and Dec line' are coordinates of the lines of sight projected on the fitted radiant line. The coordinates are in the epoch of date, and NOT J2000!. 'Azim and alt line' are thus corresponding azimuthal coordinates.\n"
         out_str += "- 'Vel prev avg' is the average velocity including all previous points up to the given point. For the first 4 points this velocity is computed as the average velocity of those 4 points. \n"
+        if uncertainties is not None:
+            out_str += "- The number after +/- is the 1 sigma uncertainty, and the numbers in square brackets are the 95% confidence interval \n"
 
         if verbose:
             print(out_str)
