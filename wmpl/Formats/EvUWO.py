@@ -190,6 +190,10 @@ def readEvFile(dir_path, file_name):
             mag_data_clean = [entry for entry in enumerate(mag_data) if entry[1] is not None]
             clean_indices, clean_mags = np.array(mag_data_clean).T
 
+            # If there aren't at least 2 good points, return None
+            if len(clean_indices) < 2:
+                return None
+
             # Interpolate in linear units
             intens_interpol = scipy.interpolate.PchipInterpolator(clean_indices, 10**(clean_mags/(-2.5)))
 
@@ -282,7 +286,19 @@ def solveTrajectoryEv(ev_file_list, solver='original', velmodel=3, **kwargs):
             # Store the ev file contants into a StationData object
             sd = readEvFile(*os.path.split(ev_file_path))
 
+            # Skip bad ev files
+            if sd is None:
+                print("Skipping {:s}, bad ev file!".format(ev_file_path))
+                continue
+
             station_data_list.append(sd)
+
+
+        # Check that there are at least two good stations present
+        if len(station_data_list) < 2:
+            print('ERROR! The list of ev files does not contain at least 2 good ev files!')
+
+            return False
 
 
         # Normalize all times to earliest reference Julian date
