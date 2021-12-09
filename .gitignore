@@ -21,9 +21,5 @@ dist/
 # Original metsim code
 wmpl/MetSim/native
 # wmpl/share - files are downloaded during setup
-wmpl/share/Amors.txt
-wmpl/share/Apollos.txt
-wmpl/share/Atens.txt
-wmpl/share/ELEMENTS.COMET
 wmpl/share/ShowerLookUpTable.npy
 wmpl/share/streamfulldata.npy

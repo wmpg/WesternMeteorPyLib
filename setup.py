@@ -1,5 +1,6 @@
 import os
 import sys
+import subprocess
 
 if sys.version_info.major < 3:
     import urllib as urllibrary
@@ -101,6 +102,26 @@ cython_modules = [
         include_dirs=[numpy.get_include()])
     ]
 
+
+# Compile Gural solver under Linux
+if "linux" in sys.platform:
+
+    gural_common = os.path.join("wmpl", "Trajectory", "lib", "common")
+    gural_trajectory = os.path.join("wmpl", "Trajectory", "lib", "trajectory")
+
+    print("Building Gural trajectory solver...")
+    subprocess.call(["make", "-C", gural_common])
+    subprocess.call(["make", "-C", gural_trajectory])
+
+    # Add gural library to data files
+    traj_library = os.path.join("wmpl", "Trajectory", 'lib', 'trajectory', 'libtrajectorysolution')
+    if os.path.isfile(traj_library):
+        share_files += [traj_library]
+
+    # Path to the PSO configuration
+    pso_config_path = os.path.join("wmpl", "Trajectory", 'lib', 'trajectory', 'conf', 'trajectorysolution.conf')
+    if os.path.isfile(pso_config_path):
+        share_files += [pso_config_path]
 
 
 setup(
