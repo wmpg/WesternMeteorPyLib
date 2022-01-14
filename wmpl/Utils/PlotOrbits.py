@@ -264,7 +264,7 @@ class OrbitPlotColorScheme(object):
 
 def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_equinox=True, save_plots=False,\
     plot_path=None, plt_handle=None, color_scheme='dark', figsize=None, dpi=None, plot_file_type='png', \
-    **kwargs):
+    plot_limit=6.0, **kwargs):
     """ Plot the given orbits in the Solar System. 
 
     Arguments:
@@ -287,6 +287,7 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_eq
         figsize: [tuple] Size in inches per every dimension (None by default).
         dpi: [int] Dots per inch (None by default).
         plot_file_type: [str] Image file type for the plot. 'png' by default.
+        plot_limit: [float] Plot limits (AU). Default is 6 AU.
         **kwargs: [dict] Extra keyword arguments which will be passes to the orbit plotter.
 
     Return:
@@ -377,9 +378,9 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_eq
         ax.legend()
 
     # Add limits (in AU)
-    ax.set_xlim3d(-6, 6)
-    ax.set_ylim3d(-6, 6)
-    ax.set_zlim3d(-6, 6)
+    ax.set_xlim3d(-plot_limit, plot_limit)
+    ax.set_ylim3d(-plot_limit, plot_limit)
+    ax.set_zlim3d(-plot_limit, plot_limit)
 
     # Set equal aspect ratio
     set3DEqualAxes(ax)
