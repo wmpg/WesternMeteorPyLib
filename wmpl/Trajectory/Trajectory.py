@@ -42,6 +42,9 @@ from wmpl.Utils.TrajConversions import EARTH, G, ecef2ENU, enu2ECEF, geo2Cartesi
 from wmpl.Utils.PyDomainParallelizer import parallelComputeGenerator
 
 
+# Text size of image legends
+LEGEND_TEXT_SIZE = 6
+
 
 class ObservedPoints(object):
     def __init__(self, jdt_ref, meas1, meas2, time_data, lat, lon, ele, meastype, station_id=None, \
@@ -4375,7 +4378,7 @@ class Trajectory(object):
 
             plt.grid()
 
-            plt.legend(prop={'size': 6})
+            plt.legend(prop={'size': LEGEND_TEXT_SIZE})
 
             # Set the residual limits to +/-10m if they are smaller than that
             if (np.max(np.abs(obs.v_residuals)) < 10) and (np.max(np.abs(obs.h_residuals)) < 10):
@@ -4450,7 +4453,7 @@ class Trajectory(object):
 
             plt.grid()
 
-            plt.legend(prop={'size': 6})
+            plt.legend(prop={'size': LEGEND_TEXT_SIZE})
 
             # Set the residual limits to +/-10m if they are smaller than that
             if np.max(np.abs(plt.gca().get_ylim())) < 10:
@@ -4507,7 +4510,7 @@ class Trajectory(object):
 
             plt.grid()
 
-            plt.legend(prop={'size': 6})
+            plt.legend(prop={'size': LEGEND_TEXT_SIZE})
 
             # Set the residual limits to +/-10m if they are smaller than that
             if np.max(np.abs(plt.gca().get_ylim())) < 10:
@@ -4562,7 +4565,7 @@ class Trajectory(object):
 
             plt.grid()
 
-            plt.legend(prop={'size': 6})
+            plt.legend(prop={'size': LEGEND_TEXT_SIZE})
 
             # Set the residual limits to +/-10m if they are smaller than that
             if np.max(np.abs(plt.gca().get_ylim())) < 10:
@@ -4650,7 +4653,7 @@ class Trajectory(object):
 
                 plt.grid()
 
-                plt.legend(prop={'size': 6})
+                plt.legend(prop={'size': LEGEND_TEXT_SIZE})
 
                 # Set the residual limits to +/-10m if they are smaller than that
                 if np.max(np.abs(plt.gca().get_ylim())) < 10:
@@ -4712,7 +4715,7 @@ class Trajectory(object):
 
         plt.grid()
 
-        plt.legend(prop={'size': 6})
+        plt.legend(prop={'size': LEGEND_TEXT_SIZE})
 
         # Set the residual limits to +/-10m if they are smaller than that
         if np.max(np.abs(plt.gca().get_xlim())) < 10:
@@ -4771,7 +4774,7 @@ class Trajectory(object):
         #             label='Lag, ignored points')
 
             
-        #     ax1.legend(prop={'size': 6})
+        #     ax1.legend(prop={'size': LEGEND_TEXT_SIZE})
 
         #     plt.title('Lag, station ' + str(obs.station_id))
         #     ax1.set_xlabel('Lag (m)')
@@ -4805,7 +4808,7 @@ class Trajectory(object):
 
 
         # Generate a list of colors to use for markers
-        colors = cm.viridis(np.linspace(0, 0.9, len(self.observations)))
+        colors = cm.viridis(np.linspace(0, 0.8, len(self.observations)))
 
         # Only use one type of markers if there are not a lot of stations
         plot_markers = ['x']
@@ -4875,7 +4878,7 @@ class Trajectory(object):
         plt.xlabel('Lag (m)')
         plt.ylabel('Time (s)')
 
-        plt.legend(prop={'size': 6})
+        plt.legend(prop={'size': LEGEND_TEXT_SIZE})
         plt.grid()
         plt.gca().invert_yaxis()
 
@@ -4967,7 +4970,7 @@ class Trajectory(object):
         ax1.set_xlabel('Velocity (km/s)')
         ax1.set_ylabel('Time (s)')
 
-        ax1.legend(prop={'size': 6})
+        ax1.legend(prop={'size': LEGEND_TEXT_SIZE})
         ax1.grid()
 
         # Set velocity limits to +/- 3 km/s
@@ -5054,7 +5057,7 @@ class Trajectory(object):
         ax1.set_ylabel('Time (s)')
         ax1.set_xlabel('Distance from state vector (km)')
         
-        ax1.legend(prop={'size': 6})
+        ax1.legend(prop={'size': LEGEND_TEXT_SIZE})
         ax1.grid()
         
         # Set time axis limits
@@ -5135,7 +5138,7 @@ class Trajectory(object):
 
 
         # If there are more than 10 observations, make the legend font smaller
-        legend_font_size = 6
+        legend_font_size = LEGEND_TEXT_SIZE
         if len(self.observations) >= 10:
             legend_font_size = 5
 
@@ -5191,7 +5194,7 @@ class Trajectory(object):
         #     plt.ylim(ymin=0)
 
         #     plt.grid()
-        #     plt.legend(prop={'size': 6})
+        #     plt.legend(prop={'size': LEGEND_TEXT_SIZE})
 
         #     if self.save_results:
         #         savePlot(plt, file_name + '_' + str(obs.station_id) + '_angular_residuals.' \
@@ -5250,7 +5253,7 @@ class Trajectory(object):
         plt.ylim(ymin=0)
 
         plt.grid()
-        plt.legend(prop={'size': 6})
+        plt.legend(prop={'size': LEGEND_TEXT_SIZE})
 
         # Pickle the figure
         if ret_figs:
@@ -5316,7 +5319,7 @@ class Trajectory(object):
 
             plt.gca().invert_yaxis()
 
-            plt.legend(prop={'size': 6})
+            plt.legend(prop={'size': LEGEND_TEXT_SIZE})
 
             plt.grid()
 
@@ -5375,7 +5378,7 @@ class Trajectory(object):
 
             plt.gca().invert_xaxis()
 
-            plt.legend(prop={'size': 6})
+            plt.legend(prop={'size': LEGEND_TEXT_SIZE})
 
             plt.grid()
 
