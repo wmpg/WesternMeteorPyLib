@@ -233,17 +233,17 @@ class Orbit(object):
 
         out_str += "Radiant (apparent ground-fixed, epoch of date):\n"
         out_str += "  R.A.      = {:s} deg\n".format(valueFormat("{:>9.5f}", self.ra_norot, "{:.5f}", \
-            uncertainties, 'ra', deg=True))
+            uncertainties, 'ra_norot', deg=True))
         out_str += "  Dec       = {:s} deg\n".format(valueFormat("{:>+9.5f}", self.dec_norot, "{:.5f}", \
-            uncertainties, 'dec', deg=True))
+            uncertainties, 'dec_norot', deg=True))
         out_str += "  Azimuth   = {:s} deg\n".format(valueFormat("{:>9.5f}", self.azimuth_apparent_norot, \
-            "{:.5f}", uncertainties, 'azimuth_apparent', deg=True))
+            "{:.5f}", uncertainties, 'azimuth_apparent_norot', deg=True))
         out_str += "  Elevation = {:s} deg\n".format(valueFormat("{:>+9.5f}", self.elevation_apparent_norot, \
-            "{:.5f}", uncertainties, 'elevation_apparent', deg=True))
+            "{:.5f}", uncertainties, 'elevation_apparent_norot', deg=True))
         out_str += "  Vavg      = {:s} km/s\n".format(valueFormat("{:>9.5f}", self.v_avg_norot, "{:.5f}", \
-            uncertainties, 'v_avg', multi=1.0/1000))
+            uncertainties, 'v_avg_norot', multi=1.0/1000))
         out_str += "  Vinit     = {:s} km/s{:s}\n".format(valueFormat("{:>9.5f}", self.v_init_norot, \
-            "{:.5f}", uncertainties, 'v_init', multi=1.0/1000), v_init_ht_str)
+            "{:.5f}", uncertainties, 'v_init_norot', multi=1.0/1000), v_init_ht_str)
 
 
 

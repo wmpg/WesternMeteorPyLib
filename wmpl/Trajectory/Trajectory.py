@@ -1635,10 +1635,15 @@ def calcMCUncertainties(traj_list, traj_best):
             angle=True)
 
         # Last perihelion uncertanty (days)
-        un.last_perihelion = np.std([datetime2JD(traj.orbit.last_perihelion) for traj \
-            in traj_list if isinstance(traj.orbit.last_perihelion, datetime.datetime)])
-        un.last_perihelion_ci = confidenceInterval([datetime2JD(traj.orbit.last_perihelion) for traj \
-            in traj_list if isinstance(traj.orbit.last_perihelion, datetime.datetime)], un.ci)
+        last_perihelion_list = [datetime2JD(traj.orbit.last_perihelion) for traj \
+            in traj_list if isinstance(traj.orbit.last_perihelion, datetime.datetime)]
+        if len(last_perihelion_list):
+            un.last_perihelion = np.std(last_perihelion_list)
+            un.last_perihelion_ci = confidenceInterval(last_perihelion_list, un.ci)
+        else:
+            un.last_perihelion = np.nan
+            un.last_perihelion_ci = (np.nan, np.nan)
+        
 
         # Mean motion in the orbit (rad/day)
         un.n = np.std([traj.orbit.n for traj in traj_list])
@@ -3712,7 +3717,7 @@ class Trajectory(object):
 
         with open(os.path.join(dir_path, file_name), 'w') as f:
 
-            for i, obs in enumerate(self.observations):
+            for i, obs in enumerate(sorted(self.observations, key=lambda x:x.rbeg_ele, reverse=True)):
 
                 # Write site coordinates
                 f.write('m->longitude[' + str(i) + '] = ' + str(obs.lon) + ';\n')
@@ -4346,7 +4351,7 @@ class Trajectory(object):
         t0 = min([obs.time_data[0] for obs in self.observations])
 
         # Plot spatial residuals per observing station
-        for obs in self.observations:
+        for obs in sorted(self.observations, key=lambda x: x.rbeg_ele, reverse=True):
 
             ### PLOT SPATIAL RESIDUALS PER STATION ###
             ##################################################################################################
@@ -4422,7 +4427,7 @@ class Trajectory(object):
             ### PLOT ALL SPATIAL RESIDUALS VS. TIME ###
             ##################################################################################################
 
-            for obs in self.observations:
+            for obs in sorted(self.observations, key=lambda x: x.rbeg_ele, reverse=True):
 
                 # Plot vertical residuals
                 vres_plot = plt.scatter(obs.time_data, obs.v_residuals, marker='o', s=4, \
@@ -4479,7 +4484,7 @@ class Trajectory(object):
             ### PLOT ALL SPATIAL RESIDUALS VS LENGTH ###
             ##################################################################################################
 
-            for obs in self.observations:
+            for obs in sorted(self.observations, key=lambda x: x.rbeg_ele, reverse=True):
 
                 # Plot vertical residuals
                 vres_plot = plt.scatter(obs.state_vect_dist/1000, obs.v_residuals, marker='o', s=4, \
@@ -4538,7 +4543,7 @@ class Trajectory(object):
             ### PLOT TOTAL SPATIAL RESIDUALS VS LENGTH ###
             ##################################################################################################
 
-            for i, obs in enumerate(self.observations):
+            for i, obs in enumerate(sorted(self.observations, key=lambda x:x.rbeg_ele, reverse=True)):
 
                 marker, size_multiplier = markers[i%len(markers)]
 
@@ -4596,7 +4601,7 @@ class Trajectory(object):
             # Plot only with gravity compensation is used
             if self.gravity_correction:
 
-                for i, obs in enumerate(self.observations):
+                for i, obs in enumerate(sorted(self.observations, key=lambda x:x.rbeg_ele, reverse=True)):
 
                     marker, size_multiplier = markers[i%len(markers)]
 
@@ -4682,7 +4687,7 @@ class Trajectory(object):
         ### PLOT ALL TOTAL SPATIAL RESIDUALS VS HEIGHT ###
         ##################################################################################################
 
-        for i, obs in enumerate(self.observations):
+        for i, obs in enumerate(sorted(self.observations, key=lambda x:x.rbeg_ele, reverse=True)):
 
             marker, size_multiplier = markers[i%len(markers)]
 
@@ -4743,7 +4748,7 @@ class Trajectory(object):
 
 
         # # Plot lag per observing station
-        # for obs in self.observations:
+        # for obs in sorted(self.observations, key=lambda x: x.rbeg_ele, reverse=True):
             
         #     ### PLOT LAG ###
         #     ##################################################################################################
@@ -5115,7 +5120,7 @@ class Trajectory(object):
 
 
         # Plot locations of all stations and measured positions of the meteor
-        for i, obs in enumerate(self.observations):
+        for i, obs in enumerate(sorted(self.observations, key=lambda x:x.rbeg_ele, reverse=True)):
 
             # Extract marker type and size multiplier
             marker, sm = markers[i%len(markers)]
@@ -5164,7 +5169,7 @@ class Trajectory(object):
 
 
         # # Plot angular residuals for every station separately
-        # for obs in self.observations:
+        # for obs in sorted(self.observations, key=lambda x: x.rbeg_ele, reverse=True):
 
         #     # Calculate residuals in arcseconds
         #     res = np.degrees(obs.ang_res)*3600
@@ -5210,7 +5215,7 @@ class Trajectory(object):
 
         # Plot angular residuals from all stations
         first_ignored_plot = True
-        for i, obs in enumerate(self.observations):
+        for i, obs in enumerate(sorted(self.observations, key=lambda x:x.rbeg_ele, reverse=True)):
 
             # Extract marker type and size multiplier
             marker, sm = markers[i%len(markers)]
@@ -5279,7 +5284,7 @@ class Trajectory(object):
         if np.any([obs.absolute_magnitudes is not None for obs in self.observations]):
 
             # Go through all observations
-            for obs in self.observations:
+            for obs in sorted(self.observations, key=lambda x: x.rbeg_ele, reverse=True):
 
                 # Check if the absolute magnitude was given
                 if obs.absolute_magnitudes is not None:
@@ -5347,7 +5352,7 @@ class Trajectory(object):
         if np.any([obs.absolute_magnitudes is not None for obs in self.observations]):
 
             # Go through all observations
-            for obs in self.observations:
+            for obs in sorted(self.observations, key=lambda x: x.rbeg_ele, reverse=True):
 
                 # Check if the absolute magnitude was given
                 if obs.absolute_magnitudes is not None:
