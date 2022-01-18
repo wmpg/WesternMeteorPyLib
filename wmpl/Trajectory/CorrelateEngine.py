@@ -821,7 +821,13 @@ class TrajectoryCorrelator(object):
             for obs in traj.observations:
                 if (obs.rbeg_ele is None) and (not obs.ignore_station):
                     print("Heights from observations failed to be estimated!")
-                    return False, None                    
+                    return False, None
+
+
+            # Check that the orbit could be computed
+            if traj.orbit.ra_g is None:
+                print("The orbit could not be computed!")
+                return False, None
 
             # Set the trajectory fit as successful
             successful_traj_fit = True
@@ -842,7 +848,7 @@ class TrajectoryCorrelator(object):
             print("Shower: {:s}".format(shower_code))
 
         else:
-            print("Orbit could not the computed...")
+            print("The orbit could not be computed!")
 
         ###
 

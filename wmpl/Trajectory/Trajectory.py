@@ -1961,7 +1961,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
 
     # Break the function of there are no trajectories to process
     if len(mc_results) < 2:
-        print('!!! Not enough good Monte Carlo runus for uncertaintly estimation!')
+        print('!!! Not enough good Monte Carlo runs for uncertaintly estimation!')
         return traj, None
 
 
