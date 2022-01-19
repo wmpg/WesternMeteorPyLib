@@ -1112,7 +1112,7 @@
       </rect>
      </property>
      <property name="text">
-      <string>Vinit obs</string>
+      <string>Vinit obs = ?</string>
      </property>
     </widget>
     <widget class="QLabel" name="vInitSimLabel">
@@ -1125,7 +1125,7 @@
       </rect>
      </property>
      <property name="text">
-      <string>Vinit sim</string>
+      <string>Vinit sim = ?</string>
      </property>
     </widget>
    </widget>
@@ -1529,6 +1529,19 @@
       <height>551</height>
      </rect>
     </property>
+    <widget class="QLabel" name="obsRadiatedEnergyLabel">
+     <property name="geometry">
+      <rect>
+       <x>0</x>
+       <y>530</y>
+       <width>401</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Radiated energy (obs) = ?</string>
+     </property>
+    </widget>
    </widget>
    <widget class="WakeMplWidget" name="wakePlot" native="true">
     <property name="geometry">
@@ -2468,6 +2481,19 @@ LCs</string>
       <string>Lum. eff.</string>
      </property>
     </widget>
+   </widget>
+   <widget class="QLabel" name="simRadiatedEnergyLabel">
+    <property name="geometry">
+     <rect>
+      <x>0</x>
+      <y>550</y>
+      <width>401</width>
+      <height>16</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Radiated energy (sim) = ?</string>
+    </property>
    </widget>
   </widget>
   <widget class="QMenuBar" name="menubar">

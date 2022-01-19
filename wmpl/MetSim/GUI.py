@@ -26,7 +26,7 @@ from wmpl.MetSim.MetSimErosion import runSimulation, Constants
 from wmpl.Trajectory.Orbit import calcOrbit
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensity, atmDensPoly
 from wmpl.Utils.Math import mergeClosePoints, findClosestPoints, vectMag, lineFunc, meanAngle
-from wmpl.Utils.Physics import calcMass, dynamicPressure
+from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy
 from wmpl.Utils.Pickling import loadPickle, savePickle
 from wmpl.Utils.Plotting import saveImage
 from wmpl.Utils.TrajConversions import unixTime2JD, geo2Cartesian, cartesian2Geo, altAz2RADec, \
@@ -1542,7 +1542,7 @@ class MetSimGUI(QMainWindow):
 
 
             # Calculate the photometric mass
-            self.const.m_init = self.calcPhotometricMass()
+            _, self.const.m_init = self.calcPhotometricMass()
             print("Using initial mass: {:.2e} kg".format(self.const.m_init))
 
 
@@ -1877,9 +1877,16 @@ class MetSimGUI(QMainWindow):
         # Average out the magnitudes
         time_arr, mag_arr = mergeClosePoints(time_arr, mag_arr, avg_t_diff_max, method='avg')
 
-        # Compute the photometry mass
-        return calcMass(np.array(time_arr), np.array(mag_arr), self.traj.orbit.v_avg, \
+
+        # Calculate the radiated energy
+        radiated_energy = calcRadiatedEnergy(np.array(time_arr), np.array(mag_arr), P_0m=self.const.P_0m)
+
+        # Compute the photometric mass
+        photom_mass = calcMass(np.array(time_arr), np.array(mag_arr), self.traj.orbit.v_avg, \
             tau=self.const.lum_eff/100, P_0m=self.const.P_0m)
+
+        
+        return radiated_energy, photom_mass
 
 
 
@@ -2568,6 +2575,30 @@ class MetSimGUI(QMainWindow):
                     else:
                         mag_brightest = -2.0
             
+
+        # Update the radiated energy label
+        obs_radiated_energy, _ = self.calcPhotometricMass()
+        obs_radiated_energy_text = "Radiated energy (obs) = {:.2e} J".format(obs_radiated_energy)
+
+        # Print TNT tonnes equivalent if energy > 0.01 T TNT
+        if obs_radiated_energy > 4e7:
+            obs_radiated_energy_text += " ({:.2f} T TNT)".format(obs_radiated_energy*2.39006e-10)
+        self.obsRadiatedEnergyLabel.setText(obs_radiated_energy_text)
+
+        # Compute the simulated energy
+        if sr is not None:
+
+            sim_radiated_energy = calcRadiatedEnergy(sr.time_arr, sr.abs_magnitude, \
+                P_0m=self.const.P_0m)
+            sim_radiated_energy_text = "Radiated energy (sim) = {:.2e} J".format(sim_radiated_energy)
+
+            if sim_radiated_energy > 4e7:
+                sim_radiated_energy_text += " ({:.2f} T TNT)".format(sim_radiated_energy*2.39006e-10)
+
+        else:
+            sim_radiated_energy_text = "Radiated energy (sim) = ?"
+
+        self.simRadiatedEnergyLabel.setText(sim_radiated_energy_text)
 
 
         # Plot additional observations from the .met file (if available)
