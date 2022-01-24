@@ -5032,6 +5032,7 @@ class Trajectory(object):
 
             # Plot ignored points
             if np.any(obs.ignore_list):
+ 
                 ignored_times = obs.time_data[obs.ignore_list > 0]
                 ignored_dists = obs.state_vect_dist[obs.ignore_list > 0]
 
@@ -5052,6 +5053,7 @@ class Trajectory(object):
 
             ax1.plot(lineFunc(t_range, *self.velocity_fit)/1000, t_range, label='Velocity fit', \
                 linestyle='--', alpha=0.5, zorder=3)
+
 
         title = "Distances from state vector"
         if self.estimate_timing_vel:
