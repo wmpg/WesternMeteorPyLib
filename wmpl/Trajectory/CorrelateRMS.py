@@ -1149,6 +1149,9 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         help="""Run continously taking the data in the last PREV_DAYS to compute the new trajectories and update the old ones. The default time range is 5 days."""
         )
 
+    arg_parser.add_argument('-i', '--distribute', metavar='DISTRIBUTE_PROC', \
+        help="""Enable distributed processing. Values: 1=create and store candidates; 2=load and process candidates only.""", \
+            type=int)
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -1160,6 +1163,9 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     else:
         print("Auto running trajectory estimation every {:.1f} hours using the last {:.1f} days of data...".format(AUTO_RUN_FREQUENCY, cml_args.auto))
 
+    distribute = 0
+    if cml_args.distribute is not None:
+        distribute = cml_args.distribute  # enable distributed processing
 
     # Init trajectory constraints
     trajectory_constraints = TrajectoryConstraints()
@@ -1283,7 +1289,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                 dt_range=(bin_beg, bin_end))
 
             # Run the trajectory correlator
-            tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True)
+            tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True, distribute=distribute)
             tc.run(event_time_range=event_time_range)
 
 
