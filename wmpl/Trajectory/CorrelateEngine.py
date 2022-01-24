@@ -4,6 +4,7 @@ from __future__ import print_function, division, absolute_import
 
 import copy
 import datetime
+import json
 import multiprocessing
 
 import numpy as np
@@ -378,10 +379,20 @@ class TrajectoryCorrelator(object):
                     ignore_list[ind] = 1
 
 
+        # Set the FF file name as the comment
+        comment_dict = {}
+        if met.ff_name is not None:
+            comment_dict['ff_name'] = met.ff_name
+
+
+        # Convert the comment dictionary to a JSON string
+        comment = json.dumps(comment_dict, sort_keys=True).replace('\n', '').replace('\r', '')
+
+
         # Init the observation object
         obs = ObservedPoints(datetime2JD(ref_dt), ra_data, dec_data, time_data, np.radians(pp.lat), \
             np.radians(pp.lon), pp.elev, meastype=1, station_id=pp.station_code, magnitudes=mag_data, \
-            ignore_list=ignore_list, fov_beg=met.fov_beg, fov_end=met.fov_end)
+            ignore_list=ignore_list, fov_beg=met.fov_beg, fov_end=met.fov_end, comment=comment)
 
         return obs
 
@@ -525,6 +536,9 @@ class TrajectoryCorrelator(object):
         #   so we keep this one as a "hard" reference)
         jdt_ref = traj.jdt_ref
 
+        # Disable Monte Carlo runs until an initial stable set of observations is found
+        traj.monte_carlo = False
+
         # Run the solver
         try:
             traj_status = traj.run()
@@ -576,7 +590,6 @@ class TrajectoryCorrelator(object):
                 skip_trajectory = True
                 break
 
-
             print()
 
 
@@ -591,6 +604,8 @@ class TrajectoryCorrelator(object):
             # b) Reject all observations with higher residuals than the fixed limit
             # c) Keep all observations with error inside the minimum error limit, even though they
             #   might have been rejected in a previous iteration
+            # d) Only reject a maximum of 50% of stations
+            max_rejections_possible = int(np.ceil(0.5*len(traj_status.observations)))
             for i, obs in enumerate(traj_status.observations):
 
                 # Compute the median angular uncertainty of all other non-ignored stations
@@ -642,6 +657,12 @@ class TrajectoryCorrelator(object):
             # If there are any ignored stations, rerun the solution
             if any_ignored_toggle:
 
+                # Stop if too many observations were rejected
+                if len(ignore_candidates) >= max_rejections_possible:
+                    print("Too many observations ejected!")
+                    skip_trajectory = True
+                    break
+
 
                 # If there any candidate observations to ignore
                 if len(ignore_candidates):
@@ -677,6 +698,9 @@ class TrajectoryCorrelator(object):
 
                 # Init a new trajectory object (make sure to use the new reference Julian date)
                 traj = self.initTrajectory(traj_status.jdt_ref, mc_runs)
+
+                # Disable Monte Carlo runs until an initial stable set of observations is found
+                traj.monte_carlo = False
 
                 # Reinitialize the observations with ignored stations
                 for obs in traj_status.observations:
@@ -743,9 +767,45 @@ class TrajectoryCorrelator(object):
         traj = traj_status
 
 
-        # If the orbits couldn't be computed, skip saving the data files
+        # Only proceed if the orbit could be computed
         if traj.orbit.ra_g is not None:
 
+            ## Compute uncertainties using Monte Carlo ##
+
+            print("Stable set of observations found, computing uncertainties using Monte Carlo...")
+
+            # Init a new trajectory object (make sure to use the new reference Julian date)
+            traj = self.initTrajectory(traj_status.jdt_ref, mc_runs)
+
+            # Enable Monte Carlo
+            traj.monte_carlo = True
+
+            # Reinitialize the observations with ignored stations
+            for obs in traj_status.observations:
+                traj.infillWithObs(obs)
+
+
+            # Re-run the trajectory solution
+            try:
+                traj_status = traj.run()
+
+            # If solving has failed, stop solving the trajectory
+            except ValueError:
+                print("Error during trajectory estimation!")
+                return False, None
+
+
+            # If the solve failed, stop
+            if traj_status is None:
+
+                # Add the trajectory to the list of failed trajectories
+                self.dh.addTrajectory(traj, failed_jdt_ref=jdt_ref)
+
+                return False, None
+
+
+            traj = traj_status
+            
 
             # Check that the average velocity is within the accepted range
             if (traj.orbit.v_avg/1000 < self.traj_constraints.v_avg_min) \
@@ -754,6 +814,19 @@ class TrajectoryCorrelator(object):
                 print("Average velocity outside range: {:.1f} < {:.1f} < {:.1f} km/s, skipping...".format(self.traj_constraints.v_avg_min, \
                     traj.orbit.v_avg/1000, self.traj_constraints.v_avg_max))
 
+                return False, None
+
+
+            # If one of the observations doesn't have an estimated height, skip this trajectory
+            for obs in traj.observations:
+                if (obs.rbeg_ele is None) and (not obs.ignore_station):
+                    print("Heights from observations failed to be estimated!")
+                    return False, None
+
+
+            # Check that the orbit could be computed
+            if traj.orbit.ra_g is None:
+                print("The orbit could not be computed!")
                 return False, None
 
             # Set the trajectory fit as successful
@@ -775,7 +848,7 @@ class TrajectoryCorrelator(object):
             print("Shower: {:s}".format(shower_code))
 
         else:
-            print("Orbit could not the computed...")
+            print("The orbit could not be computed!")
 
         ###
 
@@ -823,15 +896,16 @@ class TrajectoryCorrelator(object):
 
         # Otherwise, generate bins of datetimes for faster processing
         # Data will be divided into time bins, so the pairing function doesn't have to go pair many
-            #   observations at once and keep all pairs in memory
+        #   observations at once and keep all pairs in memory
         else:
             dt_beg = unpaired_observations_all[0].reference_dt
             dt_end = unpaired_observations_all[-1].reference_dt
-            dt_bin_list = generateDatetimeBins(dt_beg, dt_end, bin_days=7, utc_hour_break=12)
+            dt_bin_list = generateDatetimeBins(dt_beg, dt_end, bin_days=1, utc_hour_break=12)
 
 
         print()
         print("---------------------------------")
+        print("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
         print("RUNNING TRAJECTORY CORRELATION...")
         print("  TIME BEG: {:s} UTC".format(str(dt_beg)))
         print("  TIME END: {:s} UTC".format(str(dt_end)))
@@ -858,11 +932,14 @@ class TrajectoryCorrelator(object):
                 if (met_obs.reference_dt >= bin_beg) and (met_obs.reference_dt <= bin_end)]
 
 
+            # Counter for the total number of solved trajectories in this bin
+            traj_solved_count = 0
 
             ### CHECK FOR PAIRING WITH PREVIOUSLY ESTIMATED TRAJECTORIES ###
 
             print()
             print("--------------------------------------------------------------------------")
+            print("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
             print("    1) CHECKING IF PREVIOUSLY ESTIMATED TRAJECTORIES HAVE NEW OBSERVATIONS")
             print("--------------------------------------------------------------------------")
             print()
@@ -884,6 +961,7 @@ class TrajectoryCorrelator(object):
 
 
                 print()
+                print("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
                 print("Checking trajectory at {:s} in countries: {:s}".format( \
                     str(jd2Date(traj_reduced.jdt_ref, dt_obj=True)), 
                     ", ".join(list(set([stat_id[:2] for stat_id in traj_reduced.participating_stations]))) \
@@ -963,6 +1041,7 @@ class TrajectoryCorrelator(object):
                 # If there are any good new observations, add them to the trajectory and re-run the solution
                 if candidate_observations:
 
+                    print("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
                     print("Recomputing trajectory with new observations from stations:")
 
                     # Add new observations to the trajectory object
@@ -1000,6 +1079,7 @@ class TrajectoryCorrelator(object):
 
             print()
             print("-------------------------------------------------")
+            print("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
             print("    2) PAIRING OBSERVATIONS INTO NEW TRAJECTORIES")
             print("-------------------------------------------------")
             print()
@@ -1107,6 +1187,7 @@ class TrajectoryCorrelator(object):
             ### Merge all candidate trajectories which share the same observations ###
             print()
             print("---------------------------")
+            print("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
             print("MERGING BROKEN OBSERVATIONS")
             print("---------------------------")
             merged_candidate_trajectories = []
@@ -1239,6 +1320,7 @@ class TrajectoryCorrelator(object):
 
             print()
             print("-----------------------")
+            print("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
             print("SOLVING {:d} TRAJECTORIES".format(len(candidate_trajectories)))
             print("-----------------------")
             print()
@@ -1248,6 +1330,7 @@ class TrajectoryCorrelator(object):
 
                 print()
                 print("-----------------------")
+                print("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
 
 
                 ### If there are duplicate observations from the same station, take the longer one ###
@@ -1378,6 +1461,13 @@ class TrajectoryCorrelator(object):
                     for _, met_obs_temp, _ in matched_observations:
                         self.dh.markObservationAsPaired(met_obs_temp)
 
+
+                    traj_solved_count += 1
+
+                    # If 50 new trajectories were computed, save the DB
+                    if traj_solved_count%50 == 0:
+                        self.dh.saveDatabase()
+
                 
 
 
@@ -1386,5 +1476,6 @@ class TrajectoryCorrelator(object):
 
             print()
             print("-----------------")
+            print("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
             print("SOLVING RUN DONE!")
             print("-----------------")

@@ -67,6 +67,76 @@ def calcSpatialResidual(jd, state_vect, radiant_eci, stat, meas):
 
 if __name__ == "__main__":
 
+
+    import sys
+
+    import matplotlib.pyplot as plt
+
+    import pyximport
+    pyximport.install(setup_args={'include_dirs':[np.get_include()]})
+    from wmpl.MetSim.MetSimErosionCyTools import luminousEfficiency, ionizationEfficiency
+
+
+
+    ### Plot different lum effs ###
+
+    # Range of velocities
+    vel_range = np.linspace(2000, 72000, 100)
+
+    # Range of masses
+    masses = [1e-11, 1e-9, 1e-7, 1e-5, 0.001, 0.01, 0.1, 1, 10, 100, 1000]
+
+
+    lum_eff_types = [1, 2, 3, 4, 5, 6, 7]
+    lum_eff_labels = ["Revelle & Ceplecha (2001) - Type I", 
+                      "Revelle & Ceplecha (2001) - Type II",
+                      "Revelle & Ceplecha (2001) - Type III",
+                      "Borovicka et al. (2013) - Kosice",
+                      "CAMO faint meteors",
+                      "Ceplecha & McCrosky (1976)",
+                      "Borovicka et al. (2020) - Two strengths"]
+
+    for i, lum_type in enumerate(lum_eff_types):
+
+        for mass in masses:
+
+            lum_list = []
+            for vel in vel_range:
+                lum = luminousEfficiency(lum_type, 0.0, vel, mass)
+
+                lum_list.append(lum)
+
+            plt.plot(vel_range/1000, 100*np.array(lum_list), label="{:s} kg".format(str(mass)), zorder=4)
+
+
+        plt.title(lum_eff_labels[i])
+
+        plt.xlabel("Velocity (km/s)")
+        plt.ylabel("Tau (%)")
+
+        plt.legend()
+
+        plt.grid(color='0.9')
+
+        plt.show()
+
+
+
+    # Plot the ionization efficiency
+    beta_arr = np.array([ionizationEfficiency(vel) for vel in vel_range])
+    plt.semilogy(vel_range/1000, 100*beta_arr, label="Jones (1997)")
+    plt.xlabel("Velocity (km/s)")
+    plt.ylabel("Beta (%)")
+    plt.show()
+
+
+    sys.exit()
+
+    ### ###
+
+
+
+
     from mpl_toolkits.mplot3d import Axes3D
     import matplotlib.pyplot as plt
 

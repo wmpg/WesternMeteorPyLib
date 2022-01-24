@@ -43,10 +43,8 @@ The two sections below describe how to install the library on both Linux and Win
 These are installation instructions for Linux, assuming you have [Anaconda](https://www.anaconda.com/distribution/) installed. You might want to install this in a separate [virtual environment](https://conda.io/docs/user-guide/tasks/manage-environments.html) in Anaconda. I recommend creating a separate environment called ```wmpl``` for this code:
 
 ```
-conda create --name wmpl python=3.7
+conda create -y --name wmpl python=3.8
 ```
-
-Answer yes to all questions.
 
 Every time you run the code, you **will have to activate the environment by typing:**
 
@@ -59,10 +57,9 @@ on some systems this may not work, so you will have to write ```source activate 
 We will now install all needed libraries. With the environment activated as described above, run this in the terminal:
 
 ```
-conda install -y -c conda-forge numpy scipy matplotlib cython pytz pyqt proj4=5.2.0
-conda install -y -c conda-forge jplephem pyephem
+conda install -y -c conda-forge numpy scipy matplotlib cython pytz pyqt
+conda install -y -c conda-forge jplephem ephem
 conda install -y -c conda-forge basemap basemap-data-hires
-conda install -y -c conda-forge tensorflow keras
 ```
 
 
@@ -107,10 +104,10 @@ The installation might differ on Windows. I recommend installing Anaconda, which
 2) Open the Anaconda powershell and run:
 	```
 	conda update anaconda
-	conda create -y --name wmpl python=3.7
+	conda create -y --name wmpl python=3.8
 	conda activate wmpl
-	conda install -y -c conda-forge numpy scipy matplotlib cython pytz pyqt proj4=5.2.0
-	conda install -y -c conda-forge jplephem pyephem statsmodels
+	conda install -y -c conda-forge numpy scipy matplotlib cython pytz pyqt
+	conda install -y -c conda-forge jplephem ephem
 	conda install -y -c conda-forge basemap basemap-data-hires
 	```
 
@@ -143,14 +140,23 @@ If you are getting the following error on Windows: ```Unable to find vcvarsall.b
 
 If you are getting this error when running the setup: ```ModuleNotFoundError: No module named 'wmpl.PythonNRLMSISE00.nrlmsise_00_header'```, it means that you haven't cloned the repository as per instructions. Please read this README file more carefully (hint: the answer is at the top of the file).
 
-##### ```KeyError: 'PROJ_LIB'``` on Windows
-The basemap conda package is terribly broken and no one seems to care to fix it, so we have to do a little bit of "hacking". First, find where your anaconda is installed. Under Windows, it is probably in ```C:\Users\<YOUR_USERNAME>\AppData\Local\Continuum\anaconda3\``` or ```C:\Users\<YOUR_USERNAME>\Anaconda3\```, where you should replace <YOUR_USERNAME> with your username (duh!). From now on I will refer to this path as ```<ANACONDA_DIR>```.
+##### ```KeyError: 'PROJ_LIB'```
+The basemap conda package is terribly broken and no one seems to care to fix it, so we have to do a little bit of "hacking". First, find where your anaconda is installed. 
+
+Under Windows, it is probably in ```C:\Users\<YOUR_USERNAME>\AppData\Local\Continuum\anaconda3\``` or ```C:\Users\<YOUR_USERNAME>\Anaconda3\```, where you should replace <YOUR_USERNAME> with your username (duh!). From now on I will refer to this path as ```<ANACONDA_DIR>```.
 Open the following file in a text editor: ```<ANACONDA_DIR>\envs\wmpl\Lib\site-packages\mpl_toolkits\basemap\__init__.py```. 
 
-Find the line ```pyproj_datadir = os.environ['PROJ_LIB']```, and comment it out by putting a # in front of it. Right below that command, add the following line:
+Under Linux, it is probably in ```/home/<YOUR_USERNAME>/anaconda3```. From now on I will refer to this path as ```<ANACONDA_DIR>```. Open the following file in a text editor: ```<ANACONDA_DIR>/envs/wmpl/lib/python3.7/site-packages/mpl_toolkits/basemap/__init__.py```. 
+
+Find the line ```pyproj_datadir = os.environ['PROJ_LIB']```, and comment it out by putting a # in front of it. Right below that command, add the following line(for Windows):
 ```
 pyproj_datadir = "<ANACONDA_DIR>/envs/wmpl/Library/share"
 ```
+(for Linux):
+```
+pyproj_datadir = "<ANACONDA_DIR>/envs/wmpl/share/basemap"
+```
+
 Just make sure to replace <ANACONDA_DIR> with the full path. Also, make sure to replace all backslashes ```\``` with forward slashes ```/``` in the path.
 
 Save the file. Enjoy.

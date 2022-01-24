@@ -59,12 +59,30 @@ def importBasemap():
         try:
             # If PROJ_LIB could not be found, add it to the enviroment
             import os
-            import conda
 
-            conda_file_dir = conda.__file__
-            conda_dir = conda_file_dir.split('lib')[0]
-            proj_lib = os.path.join(os.path.join(conda_dir, 'share'), 'proj')
+            try:
+                import conda
+
+                conda_file_dir = conda.__file__
+                conda_dir = conda_file_dir.split('lib')[0]
+
+            except:
+
+                # If no "conda" module is found, try making a path from matplotlib
+                import matplotlib
+
+                mpl_path = matplotlib.__file__
+                mpl_path_split = mpl_path.split(os.sep)
+                conda_dir = os.sep.join(mpl_path_split[:mpl_path_split.index("anaconda3") + 1])
+
+
+            if sys.platform == "linux":
+                proj_lib = os.path.join(conda_dir, "envs", "wmpl", "share", "basemap")
+            else:
+                proj_lib = os.path.join(conda_dir, "envs", "wmpl", "Library", "share")
+
             os.environ["PROJ_LIB"] = proj_lib
+
 
             try:
                 from mpl_toolkits.basemap import Basemap
@@ -78,7 +96,7 @@ def importBasemap():
 
         except import_error:
 
-            # If no "conda" module is found, give up
+            # Throw an error if everything failed
             from mpl_toolkits.basemap import Basemap
 
         except FileNotFoundError:

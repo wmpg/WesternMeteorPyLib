@@ -247,8 +247,12 @@ if __name__ == "__main__":
     lon = -81.372350
     jd = datetime2JD(datetime.datetime.now())
 
+    # Height range (km)
+    height_min = 20
+    height_max = 180
+
     # Density evaluation heights (m)
-    heights = np.linspace(60, 180, 100)*1000
+    heights = np.linspace(height_min, height_max, 100)*1000
 
     atm_densities = []
     for height in heights:
@@ -260,7 +264,7 @@ if __name__ == "__main__":
 
 
     # Fit the 6th order poly model
-    dens_co = fitAtmPoly(np.radians(lat), np.radians(lon), 60000, 180000, jd)
+    dens_co = fitAtmPoly(np.radians(lat), np.radians(lon), 1000*height_min, 1000*height_max, jd)
 
     print(dens_co)
 

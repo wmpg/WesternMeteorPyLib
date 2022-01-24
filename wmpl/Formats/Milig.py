@@ -8,7 +8,7 @@ import argparse
 
 import numpy as np
 
-from wmpl.Formats.GenericArgumentParser import addSolverOptions
+from wmpl.Formats.GenericFunctions import addSolverOptions
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.Trajectory.GuralTrajectory import GuralTrajectory
 from wmpl.Utils.TrajConversions import date2JD, jd2Date, jd2LST
@@ -387,7 +387,8 @@ if __name__ == '__main__':
         monte_carlo=(not cml_args.disablemc), mc_runs=cml_args.mcruns, geometric_uncert=cml_args.uncertgeom, \
         gravity_correction=(not cml_args.disablegravity), plot_all_spatial_residuals=cml_args.plotallspatial,
         plot_file_type=cml_args.imgformat, show_plots=(not cml_args.hideplots), v_init_part=velpart, \
-        v_init_ht=vinitht)
+        v_init_ht=vinitht, show_jacchia=cml_args.jacchia, estimate_timing_vel=(False if cml_args.notimefit is None else cml_args.notimefit), \
+        mc_noise_std=cml_args.mcstd)
 
 
 

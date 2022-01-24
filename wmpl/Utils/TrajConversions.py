@@ -822,7 +822,7 @@ def eci2RaDec(eci):
         eci: [3 element ndarray] Earth-centered inertial coordinats
 
     Return:
-        (ra, dec): [tuple of floats] right ascension and declinaton
+        (ra, dec): [tuple of floats] right ascension and declinaton (radians)
     """
 
     # Normalize the ECI coordinates

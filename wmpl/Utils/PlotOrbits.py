@@ -263,8 +263,8 @@ class OrbitPlotColorScheme(object):
 
 
 def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_equinox=True, save_plots=False,\
-    plot_path=None, plt_handle=None, color_scheme='dark', figsize=None, dpi=None, plot_file_type='.png', \
-    **kwargs):
+    plot_path=None, plt_handle=None, color_scheme='dark', figsize=None, dpi=None, plot_file_type='png', \
+    plot_limit=6.0, **kwargs):
     """ Plot the given orbits in the Solar System. 
 
     Arguments:
@@ -287,6 +287,7 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_eq
         figsize: [tuple] Size in inches per every dimension (None by default).
         dpi: [int] Dots per inch (None by default).
         plot_file_type: [str] Image file type for the plot. 'png' by default.
+        plot_limit: [float] Plot limits (AU). Default is 6 AU.
         **kwargs: [dict] Extra keyword arguments which will be passes to the orbit plotter.
 
     Return:
@@ -318,7 +319,9 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_eq
 
         # Setup the plot
         fig = plt.figure(figsize=(8, 8), dpi=dpi)
-        ax = fig.gca(projection='3d', facecolor=cs.background)
+        ax = fig.add_subplot(111, projection='3d', facecolor=cs.background)
+
+        ax = plt.gca()
 
         # Hide the axes
         ax.set_axis_off()
@@ -336,12 +339,12 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_eq
     if plot_equinox:
 
         # Plot the arrow
-        a = Arrow3D([0, -4], [0, 0], [0, 0], mutation_scale=10, lw=1, arrowstyle="-|>", \
+        a = Arrow3D([0, 4], [0, 0], [0, 0], mutation_scale=10, lw=1, arrowstyle="-|>", \
             color=cs.vernal_eq, alpha=0.5)
         ax.add_artist(a)
 
         # Plot the vernal equinox symbol
-        ax.text(-4.1, 0, 0, u'\u2648', fontsize=8, color=cs.vernal_eq, alpha=0.5, \
+        ax.text(4.1, 0, 0, u'\u2648', fontsize=8, color=cs.vernal_eq, alpha=0.5, \
             horizontalalignment='center', verticalalignment='center')
 
 
@@ -375,9 +378,9 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_eq
         ax.legend()
 
     # Add limits (in AU)
-    ax.set_xlim3d(-6, 6)
-    ax.set_ylim3d(-6, 6)
-    ax.set_zlim3d(-6, 6)
+    ax.set_xlim3d(-plot_limit, plot_limit)
+    ax.set_ylim3d(-plot_limit, plot_limit)
+    ax.set_zlim3d(-plot_limit, plot_limit)
 
     # Set equal aspect ratio
     set3DEqualAxes(ax)
@@ -385,15 +388,15 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_eq
     # Save plots to disk (top and side views)
     if save_plots and (plot_path is not None):
 
-        plot_dir, plot_file_name = os.path.split(plot_path)
+        plot_dir, plot_file_name = os.path.split(os.path.abspath(plot_path))
 
 
         # Save side view
-        ax.view_init(elev=0, azim=90)
+        ax.view_init(elev=0, azim=-90)
         savePlot(plt, plot_file_name + '_orbit_side.' + plot_file_type, plot_dir)
         
         # Save top view
-        ax.view_init(elev=90, azim=90)
+        ax.view_init(elev=90, azim=-90)
         savePlot(plt, plot_file_name + '_orbit_top.' + plot_file_type, plot_dir)
 
 
