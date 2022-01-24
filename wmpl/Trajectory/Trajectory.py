@@ -5057,10 +5057,10 @@ class Trajectory(object):
 
         title = "Distances from state vector"
         if self.estimate_timing_vel:
-            stres=self.timing_res
-            if stres is None:
-                stres=0
-            title += ", Time residuals = {:.3e} s".format(stres)
+            if self.timing_res is None:
+                title += ", Time residuals not calculated"
+            else:
+                title += ", Time residuals = {:.3e} s".format(self.timing_res)
 
         plt.title(title)
 
