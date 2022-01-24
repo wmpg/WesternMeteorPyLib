@@ -7,9 +7,10 @@ import os
 import shutil
 
 import numpy as np
+import scipy.interpolate
 
 from wmpl.Formats.EventUWO import StationData
-from wmpl.Formats.GenericArgumentParser import addSolverOptions
+from wmpl.Formats.GenericFunctions import addSolverOptions
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.Trajectory.GuralTrajectory import GuralTrajectory
 from wmpl.Utils.OSTools import mkdirP
@@ -184,29 +185,47 @@ def readEvFile(dir_path, file_name):
 
         # If there is a NaN in the magnitude data, interpolate it
         if None in mag_data:
-            none_index = mag_data.index(None)
 
-            # If the first magnitude is NaN, take the magnitude of the second point
-            if none_index == 0:
-                mag_data[none_index] = mag_data[none_index + 1]
+            # Get a list of clean data
+            mag_data_clean = [entry for entry in enumerate(mag_data) if entry[1] is not None]
+            clean_indices, clean_mags = np.array(mag_data_clean).T
 
-            # If the last magnitude is NaN, use the magnitude of the previous point
-            elif none_index == (len(mag_data) - 1):
-                mag_data[none_index] = mag_data[none_index - 1]
+            # If there aren't at least 2 good points, return None
+            if len(clean_indices) < 2:
+                return None
 
-            # If the magnitude is in between, interpolate it
-            else:
+            # Interpolate in linear units
+            intens_interpol = scipy.interpolate.PchipInterpolator(clean_indices, 10**(clean_mags/(-2.5)))
 
-                mag_prev = float(mag_data[none_index - 1])
-                mag_next = float(mag_data[none_index + 1])
 
-                # Interpolate in linear units
-                intens_prev = 10**(mag_prev/(-2.5))
-                intens_next = 10**(mag_next/(-2.5))
-                intens_interpol = (intens_prev + intens_next)/2
-                mag_interpol = -2.5*np.log10(intens_interpol)
+            # Interpolate missing magnitudes
+            for i, mag in enumerate(mag_data):
+                if mag is None:
+                    mag_data[i] = -2.5*np.log10(intens_interpol(i))
 
-                mag_data[none_index] = mag_interpol
+            # none_index = mag_data.index(None)
+
+            # # If the first magnitude is NaN, take the magnitude of the second point
+            # if none_index == 0:
+            #     mag_data[none_index] = mag_data[none_index + 1]
+
+            # # If the last magnitude is NaN, use the magnitude of the previous point
+            # elif none_index == (len(mag_data) - 1):
+            #     mag_data[none_index] = mag_data[none_index - 1]
+
+            # # If the magnitude is in between, interpolate it
+            # else:
+
+            #     mag_prev = float(mag_data[none_index - 1])
+            #     mag_next = float(mag_data[none_index + 1])
+
+            #     # Interpolate in linear units
+            #     intens_prev = 10**(mag_prev/(-2.5))
+            #     intens_next = 10**(mag_next/(-2.5))
+            #     intens_interpol = (intens_prev + intens_next)/2
+            #     mag_interpol = -2.5*np.log10(intens_interpol)
+
+            #     mag_data[none_index] = mag_interpol
 
 
         
@@ -267,7 +286,19 @@ def solveTrajectoryEv(ev_file_list, solver='original', velmodel=3, **kwargs):
             # Store the ev file contants into a StationData object
             sd = readEvFile(*os.path.split(ev_file_path))
 
+            # Skip bad ev files
+            if sd is None:
+                print("Skipping {:s}, bad ev file!".format(ev_file_path))
+                continue
+
             station_data_list.append(sd)
+
+
+        # Check that there are at least two good stations present
+        if len(station_data_list) < 2:
+            print('ERROR! The list of ev files does not contain at least 2 good ev files!')
+
+            return False
 
 
         # Normalize all times to earliest reference Julian date
@@ -357,7 +388,7 @@ if __name__ == '__main__':
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Run the trajectory solver on the list of UWO ev files.")
 
-    arg_parser.add_argument('ev_files', metavar='EV_FILES', type=str, \
+    arg_parser.add_argument('ev_files', metavar='EV_FILES', type=str, nargs='+',\
         help='Full path to ev_*.txt files.')
 
     # Add other solver options
@@ -369,8 +400,13 @@ if __name__ == '__main__':
     #########################
 
     # Unpack wildcards
-    ev_files = glob.glob(cml_args.ev_files)
-    
+    if not isinstance(cml_args.ev_files, list):
+        ev_files = glob.glob(cml_args.ev_files)
+    else:
+        ev_files = cml_args.ev_files
+        
+        if len(ev_files) == 1:
+            ev_files = glob.glob(ev_files[0])
 
     event_path = os.path.abspath(ev_files[0])
 
@@ -406,4 +442,6 @@ if __name__ == '__main__':
             monte_carlo=(not cml_args.disablemc), mc_runs=cml_args.mcruns, \
             geometric_uncert=cml_args.uncertgeom, gravity_correction=(not cml_args.disablegravity), 
             plot_all_spatial_residuals=cml_args.plotallspatial, plot_file_type=cml_args.imgformat, \
-            show_plots=(not cml_args.hideplots), v_init_part=velpart, v_init_ht=vinitht)
+            show_plots=(not cml_args.hideplots), v_init_part=velpart, v_init_ht=vinitht, \
+            show_jacchia=cml_args.jacchia, estimate_timing_vel=(False if cml_args.notimefit is None else cml_args.notimefit), \
+            mc_noise_std=cml_args.mcstd)

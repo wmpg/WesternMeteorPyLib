@@ -12,6 +12,7 @@ import sys
 import os
 import datetime
 import pickle
+import json
 from operator import attrgetter
 
 import numpy as np
@@ -28,7 +29,8 @@ Basemap = importBasemap()
 
 from wmpl.Trajectory.Orbit import calcOrbit
 from wmpl.Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, RMSD, \
-    angleBetweenSphericalCoords, angleBetweenVectors, lineFunc, normalizeAngleWrap
+    angleBetweenSphericalCoords, angleBetweenVectors, lineFunc, normalizeAngleWrap, confidenceInterval
+from wmpl.Utils.Misc import valueFormat
 from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import savePickle
 from wmpl.Utils.Plotting import savePlot
@@ -40,11 +42,14 @@ from wmpl.Utils.TrajConversions import EARTH, G, ecef2ENU, enu2ECEF, geo2Cartesi
 from wmpl.Utils.PyDomainParallelizer import parallelComputeGenerator
 
 
+# Text size of image legends
+LEGEND_TEXT_SIZE = 6
+
 
 class ObservedPoints(object):
     def __init__(self, jdt_ref, meas1, meas2, time_data, lat, lon, ele, meastype, station_id=None, \
         excluded_time=None, ignore_list=None, ignore_station=False, magnitudes=None, fov_beg=None, \
-        fov_end=None, obs_id=None):
+        fov_end=None, obs_id=None, comment=""):
         """ Structure for containing data of observations from invidiual stations.
         
         Arguments:
@@ -88,6 +93,8 @@ class ObservedPoints(object):
             fov_end: [bool] True if the meteor ended inside the FOV, False otherwise. None by default.
             obs_id: [int] Unique ID of the observation. This is to differentiate different observations from
                 the same station.
+            comment: [str] A comment about the observations. May be used to store RMS FF file number on which
+                the meteor was observed.
         """
 
         ### INPUT DATA ###
@@ -155,6 +162,9 @@ class ObservedPoints(object):
 
         # Unique observation ID
         self.obs_id = obs_id
+
+        # Observations comment (may be the FF file name)
+        self.comment = comment
 
         ######################################################################################################
 
@@ -511,14 +521,14 @@ class PlaneIntersection(object):
         ### Calculate the unit vector pointing from the 1st station to the radiant line ###
         ######################################################################################################
 
-        w1 = np.cross(self.radiant_eci, self.obs1.plane_N)
+        self.w1 = np.cross(self.radiant_eci, self.obs1.plane_N)
 
         # Normalize the vector
-        w1 = vectNorm(w1)
+        self.w1 = vectNorm(self.w1)
 
         # Invert vector orientation if pointing towards the station, not the radiant line
-        if np.dot(w1, self.obs1.meas_eci[0]) < 0:
-            w1 = -w1
+        if np.dot(self.w1, self.obs1.meas_eci[0]) < 0:
+            self.w1 = -self.w1
         
         ######################################################################################################
 
@@ -526,14 +536,14 @@ class PlaneIntersection(object):
         ### Calculate the unit vector pointing from the 2nd station to the radiant line ###
         ######################################################################################################
 
-        w2 = np.cross(self.radiant_eci, self.obs2.plane_N)
+        self.w2 = np.cross(self.radiant_eci, self.obs2.plane_N)
 
         # Normalize the vector
-        w2 = vectNorm(w2)
+        self.w2 = vectNorm(self.w2)
 
         # Invert vector orientation if pointing towards the station, not the radiant line
-        if np.dot(w2, self.obs2.meas_eci[0]) < 0:
-            w2 = -w2
+        if np.dot(self.w2, self.obs2.meas_eci[0]) < 0:
+            self.w2 = -self.w2
         ######################################################################################################
 
 
@@ -544,23 +554,23 @@ class PlaneIntersection(object):
         stat_diff = self.obs1.stat_eci - self.obs2.stat_eci
 
         # Calculate the angle between the pointings to the radiant line
-        stat_cosangle = np.dot(w1, w2)
+        stat_cosangle = np.dot(self.w1, self.w2)
 
 
         # Calculate the range from the 1st station to the radiant line
-        stat_range1 = (stat_cosangle*np.dot(stat_diff, w2) - np.dot(stat_diff, w1))/(1.0 \
+        stat_range1 = (stat_cosangle*np.dot(stat_diff, self.w2) - np.dot(stat_diff, self.w1))/(1.0 \
             - stat_cosangle**2)
 
         # Calculate the CPA vector for the 1st station
-        self.rcpa_stat1 = stat_range1*w1
+        self.rcpa_stat1 = stat_range1*self.w1
 
 
         # Calculate the range from the 2nd station to the radiant line
-        stat_range2 = (np.dot(stat_diff, w2) - stat_cosangle*np.dot(stat_diff, w1))/(1.0 \
+        stat_range2 = (np.dot(stat_diff, self.w2) - stat_cosangle*np.dot(stat_diff, self.w1))/(1.0 \
             - stat_cosangle**2)
 
         # Calculate the CPA vector for the 2nd station
-        self.rcpa_stat2 = stat_range2*w2
+        self.rcpa_stat2 = stat_range2*self.w2
 
 
         # Calculate the position of the CPA with respect to the first camera, in ECI coordinates
@@ -812,7 +822,7 @@ def minimizeAngleCost(params, observations, weights=None, gravity=False):
 
 
 
-def calcSpatialResidual(jd, state_vect, radiant_eci, stat, meas):
+def calcSpatialResidual(jdt_ref, jd, state_vect, radiant_eci, stat, meas, gravity=False):
     """ Calculate horizontal and vertical residuals from the radiant line, for the given observed point.
 
     Arguments:
@@ -821,6 +831,9 @@ def calcSpatialResidual(jd, state_vect, radiant_eci, stat, meas):
         radiant_eci: [3 element ndarray] radiant direction vector in ECI
         stat: [3 element ndarray] position of the station in ECI
         meas: [3 element ndarray] line of sight from the station, in ECI
+
+    Keyword arguments:
+        gravity: [bool] Apply the correction for Earth's gravity.
 
     Return:
         (hres, vres): [tuple of floats] residuals in horitontal and vertical direction from the radiant line
@@ -837,27 +850,22 @@ def calcSpatialResidual(jd, state_vect, radiant_eci, stat, meas):
     # Calculate closest points of approach (observed line of sight to radiant line) from the state vector
     obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, state_vect, radiant_eci)
 
-    # ### STILL IN TESTING !!!
-    # # Calculate the gravitational acceleration at the given height
-    # g = G*EARTH.MASS/(vectMag(rad_cpa)**2)
+    # # Apply the gravity drop
+    # if gravity:
 
-    # # Determine the sign of the initial time
-    # time_sign = np.sign(t_rel)
+    #     # Compute the relative time
+    #     t_rel = 86400*(jd - jdt_ref)
 
-    # # Calculate the amount of gravity drop from a straight trajectory (handle the case when the
-    # #   time is negative)
-    # drop = time_sign*(1/2.0)*g*t_rel**2
+    #     # Correct the point on the trajectory for gravity
+    #     rad_cpa = applyGravityDrop(rad_cpa, t_rel, vectMag(rad_cpa), 0.0)
 
-    # # Apply gravity drop to ECI coordinates
-    # rad_cpa -= drop*vectNorm(rad_cpa)
+    #     # ###########################
 
-    # ###########################
+    #     # # Calculate closest points of approach (observed line of sight to radiant line) from the gravity corrected
+    #     # #   point
+    #     # obs_cpa, _, d = findClosestPoints(stat, meas, rad_cpa, radiant_eci)
 
-    # # Calculate closest points of approach (observed line of sight to radiant line) from the gravity corrected
-    # #   point
-    # obs_cpa, _, d = findClosestPoints(stat, meas, rad_cpa, radiant_eci)
-
-    # ##!!!!!
+    #     # ##!!!!!
 
 
     # Vector pointing from the point on the trajectory to the point on the line of sight
@@ -1218,143 +1226,211 @@ def moveStateVector(state_vect, radiant_eci, observations):
 
 class MCUncertainties(object):
     def __init__(self, mc_traj_list):
-        """ Container for standard deviations of trajectory parameters calculated using Monte Carlo. """
+        """ Container for standard deviations and confidence intervals of trajectory parameters calculated 
+        using Monte Carlo. 
+        """
+
+        # Confidence interval value (95%)
+        self.ci = 95
 
         # A list with all trajectory objects calculated via Monte Carlo
         self.mc_traj_list = mc_traj_list
 
         # State vector position
         self.state_vect_mini = None
+        self.state_vect_mini_ci = None
         self.x = None
+        self.x_ci = None
         self.y = None
+        self.y_ci = None
         self.z = None
+        self.z_ci = None
 
         # Velocity state vector
         self.vx = None
+        self.vx_ci = None
         self.vy = None
-        self.z = None
+        self.vy_ci = None
+        self.vz = None
+        self.vz_ci = None
 
         # Radiant vector
         self.radiant_eci_mini = None
+        self.radiant_eci_mini_ci = None
 
         # Beginning/ending points
         self.rbeg_lon = None
+        self.rbeg_lon_ci = None
+        self.rbeg_lon_m = None
         self.rbeg_lat = None
+        self.rbeg_lat_ci = None
+        self.rbeg_lat_m = None
         self.rbeg_ele = None
+        self.rbeg_ele_ci = None
 
         self.rend_lon = None
+        self.rend_lon_ci = None
+        self.rend_lon_m = None
         self.rend_lat = None
+        self.rend_lat_ci = None
+        self.rend_lat_m = None
         self.rend_ele = None
+        self.rend_ele_ci = None
 
         # Apparent radiant position (radians)
         self.ra = None
+        self.ra_ci = None
         self.dec = None
+        self.dec_ci = None
 
         # Apparent azimuth and altitude
         self.azimuth_apparent = None
+        self.azimuth_apparent_ci = None
         self.elevation_apparent = None
+        self.elevation_apparent_ci = None
 
         # Estimated average velocity
         self.v_avg = None
+        self.v_avg_ci = None
 
         # Estimated initial velocity
         self.v_init = None
+        self.v_init_ci = None
 
         # Longitude of the reference point on the trajectory (rad)
         self.lon_ref = None
+        self.lon_ref_ci = None
 
         # Latitude of the reference point on the trajectory (rad)
         self.lat_ref = None
+        self.lat_ref_ci = None
 
         # Height of the reference point on the trajectory (meters)
         self.ht_ref = None
+        self.ht_ref_ci = None
 
         # Geocentric latitude of the reference point (rad)
         self.lat_geocentric = None
+        self.lat_geocentric_ci = None
 
         # Apparent zenith angle (before the correction for Earth's gravity)
         self.zc = None
+        self.zc_ci = None
 
         # Zenith distance of the geocentric radiant (after the correction for Earth's gravity)
         self.zg = None
+        self.zg_ci = None
 
         # Velocity at infinity
         self.v_inf = None
+        self.v_inf_ci = None
 
         # Geocentric velocity (m/s)
         self.v_g = None
+        self.v_g_ci = None
 
         # Geocentric radiant position (radians)
         self.ra_g = None
+        self.ra_g_ci = None
         self.dec_g = None
+        self.dec_g_ci = None
 
         # Ecliptic coordinates of the radiant (radians)
         self.L_g = None
+        self.L_g_ci = None
         self.B_g = None
+        self.B_g_ci = None
 
         # Sun-centered ecliptic rectangular coordinates of the average position on the meteor's trajectory 
         # (in kilometers)
         self.meteor_pos = None
+        self.meteor_pos_ci = None
 
         # Helioventric velocity of the meteor (m/s)
         self.v_h = None
+        self.v_h_ci = None
 
         # Corrected heliocentric velocity vector of the meteoroid using the method of Sato & Watanabe (2014)
         self.v_h_x = None
+        self.v_h_x_ci = None
         self.v_h_y = None
+        self.v_h_y_ci = None
         self.v_h_z = None
+        self.v_h_z_ci = None
 
         # Corrected ecliptci coordinates of the meteor using the method of Sato & Watanabe (2014)
         self.L_h = None
+        self.L_h_ci = None
         self.B_h = None
+        self.B_h_ci = None
 
         # Solar longitude (radians)
         self.la_sun = None
+        self.la_sun_ci = None
 
         # Semi-major axis (AU)
         self.a = None
+        self.a_ci = None
 
         # Eccentricty
         self.e = None
+        self.e_ci = None
 
         # Inclination (radians)
         self.i = None
+        self.i_ci = None
 
         # Argument of perihelion (radians)
         self.peri = None
+        self.peri_ci = None
 
         # Ascending node (radians)
         self.node = None
+        self.node_ci = None
 
         # Longitude of perihelion (radians)
         self.pi = None
+        self.pi_ci = None
+
+        # Latitude of perihelion (radians)
+        self.b = None
+        self.b_ci = None
 
         # Perihelion distance (AU)
         self.q = None
+        self.q_ci = None
 
         # Aphelion distance (AU)
         self.Q = None
+        self.Q_ci = None
 
         # True anomaly at the moment of contact with Earth (radians)
         self.true_anomaly = None
+        self.true_anomaly_ci = None
 
         # Exxentric anomaly (radians)
         self.eccentric_anomaly = None
+        self.eccentric_anomaly_ci = None
 
         # Mean anomaly (radians)
         self.mean_anomaly = None
+        self.mean_anomaly_ci = None
 
         # Calculate the date and time of the last perihelion passage (datetime object)
         self.last_perihelion = None
+        self.last_perihelion_ci = None
 
         # Mean motion in the orbit (rad/day)
         self.n = None
+        self.n_ci = None
 
         # Orbital period
         self.T = None
+        self.T_ci = None
 
         # Tisserand's parameter with respect to Jupiter
         self.Tj = None
+        self.Tj_ci = None
 
 # Preserve compatibility with pickle files genrated before the typo fix
 MCUncertanties = MCUncertainties
@@ -1378,120 +1454,208 @@ def calcMCUncertainties(traj_list, traj_best):
 
     # Initial velocity
     un.v_init = np.std([traj.v_init for traj in traj_list])
+    un.v_init_ci = confidenceInterval([traj.v_init for traj in traj_list], un.ci)
 
     # State vector
     un.x = np.std([traj.state_vect_mini[0] for traj in traj_list])
+    un.x_ci = confidenceInterval([traj.state_vect_mini[0] for traj in traj_list], un.ci)
     un.y = np.std([traj.state_vect_mini[1] for traj in traj_list])
+    un.y_ci = confidenceInterval([traj.state_vect_mini[1] for traj in traj_list], un.ci)
     un.z = np.std([traj.state_vect_mini[2] for traj in traj_list])
+    un.z_ci = confidenceInterval([traj.state_vect_mini[2] for traj in traj_list], un.ci)
 
     un.state_vect_mini = np.array([un.x, un.y, un.z])
+    un.state_vect_mini_ci = np.array([un.x_ci, un.y_ci, un.z_ci])
 
 
     rad_x = np.std([traj.radiant_eci_mini[0] for traj in traj_list])
+    rad_x_ci = confidenceInterval([traj.radiant_eci_mini[0] for traj in traj_list], un.ci)
     rad_y = np.std([traj.radiant_eci_mini[1] for traj in traj_list])
+    rad_y_ci = confidenceInterval([traj.radiant_eci_mini[1] for traj in traj_list], un.ci)
     rad_z = np.std([traj.radiant_eci_mini[2] for traj in traj_list])
+    rad_z_ci = confidenceInterval([traj.radiant_eci_mini[2] for traj in traj_list], un.ci)
 
     un.radiant_eci_mini = np.array([rad_x, rad_y, rad_z])
+    un.radiant_eci_mini_ci = np.array([rad_x_ci, rad_y_ci, rad_z_ci])
 
     # Velocity state vector
     un.vx = abs(traj_best.v_init*traj_best.radiant_eci_mini[0]*(un.v_init/traj_best.v_init
         + rad_x/traj_best.radiant_eci_mini[0]))
+    un.vx_ci = confidenceInterval([traj.v_init*traj.radiant_eci_mini[0] for traj in traj_list], un.ci)
     un.vy = abs(traj_best.v_init*traj_best.radiant_eci_mini[1]*(un.v_init/traj_best.v_init
         + rad_y/traj_best.radiant_eci_mini[1]))
+    un.vy_ci = confidenceInterval([traj.v_init*traj.radiant_eci_mini[1] for traj in traj_list], un.ci)
     un.vz = abs(traj_best.v_init*traj_best.radiant_eci_mini[2]*(un.v_init/traj_best.v_init
         + rad_z/traj_best.radiant_eci_mini[2]))
+    un.vz_ci = confidenceInterval([traj.v_init*traj.radiant_eci_mini[2] for traj in traj_list], un.ci)
 
 
     # Beginning/ending points
+    N_beg = EARTH.EQUATORIAL_RADIUS/np.sqrt(1.0 - (EARTH.E**2)*np.sin(traj_best.rbeg_lat)**2)
     un.rbeg_lon = scipy.stats.circstd([traj.rbeg_lon for traj in traj_list])
+    un.rbeg_lon_ci = confidenceInterval([traj.rbeg_lon for traj in traj_list], un.ci, angle=True)
+    un.rbeg_lon_m = np.sin(un.rbeg_lon)*np.cos(traj_best.rbeg_lat)*N_beg
     un.rbeg_lat = np.std([traj.rbeg_lat for traj in traj_list])
+    un.rbeg_lat_ci = confidenceInterval([traj.rbeg_lat for traj in traj_list], un.ci)
+    un.rbeg_lat_m = np.sin(un.rbeg_lat)*N_beg
     un.rbeg_ele = np.std([traj.rbeg_ele for traj in traj_list])
+    un.rbeg_ele_ci = confidenceInterval([traj.rbeg_ele for traj in traj_list], un.ci)
 
+    N_end = EARTH.EQUATORIAL_RADIUS/np.sqrt(1.0 - (EARTH.E**2)*np.sin(traj_best.rend_lat)**2)
     un.rend_lon = scipy.stats.circstd([traj.rend_lon for traj in traj_list])
+    un.rend_lon_ci = confidenceInterval([traj.rend_lon for traj in traj_list], un.ci, angle=True)
+    un.rend_lon_m = np.sin(un.rend_lon)*np.cos(traj_best.rend_lat)*N_end
     un.rend_lat = np.std([traj.rend_lat for traj in traj_list])
+    un.rend_lat_ci = confidenceInterval([traj.rend_lat for traj in traj_list], un.ci)
+    un.rend_lat_m = np.sin(un.rend_lat)*N_end
     un.rend_ele = np.std([traj.rend_ele for traj in traj_list])
+    un.rend_ele_ci = confidenceInterval([traj.rend_ele for traj in traj_list], un.ci)
 
 
     if traj_best.orbit is not None:
 
         # Apparent ECI
         un.ra = scipy.stats.circstd([traj.orbit.ra for traj in traj_list])
+        un.ra_ci = confidenceInterval([traj.orbit.ra for traj in traj_list], un.ci, angle=True)
         un.dec = np.std([traj.orbit.dec for traj in traj_list])
+        un.dec_ci = confidenceInterval([traj.orbit.dec for traj in traj_list], un.ci)
         un.v_avg = np.std([traj.orbit.v_avg for traj in traj_list])
+        un.v_avg_ci = confidenceInterval([traj.orbit.v_avg for traj in traj_list], un.ci)
         un.v_inf = np.std([traj.orbit.v_inf for traj in traj_list])
+        un.v_inf_ci = confidenceInterval([traj.orbit.v_inf for traj in traj_list], un.ci)
         un.azimuth_apparent = scipy.stats.circstd([traj.orbit.azimuth_apparent for traj in traj_list])
+        un.azimuth_apparent_ci = confidenceInterval([traj.orbit.azimuth_apparent for traj in traj_list], \
+            un.ci, angle=True)
         un.elevation_apparent = np.std([traj.orbit.elevation_apparent for traj in traj_list])
+        un.elevation_apparent_ci = confidenceInterval([traj.orbit.elevation_apparent for traj in traj_list], \
+            un.ci)
 
         # Apparent ground-fixed
         un.ra_norot = scipy.stats.circstd([traj.orbit.ra_norot for traj in traj_list])
+        un.ra_norot_ci = confidenceInterval([traj.orbit.ra_norot for traj in traj_list], un.ci, angle=True)
         un.dec_norot = np.std([traj.orbit.dec_norot for traj in traj_list])
+        un.dec_norot_ci = confidenceInterval([traj.orbit.dec_norot for traj in traj_list], un.ci)
         un.v_avg_norot = np.std([traj.orbit.v_avg_norot for traj in traj_list])
+        un.v_avg_norot_ci = confidenceInterval([traj.orbit.v_avg_norot for traj in traj_list], un.ci)
         un.v_init_norot = np.std([traj.orbit.v_init_norot for traj in traj_list])
+        un.v_init_norot_ci = confidenceInterval([traj.orbit.v_init_norot for traj in traj_list], un.ci)
         un.azimuth_apparent_norot = scipy.stats.circstd([traj.orbit.azimuth_apparent_norot for traj \
             in traj_list])
+        un.azimuth_apparent_norot_ci = confidenceInterval([traj.orbit.azimuth_apparent_norot for traj \
+            in traj_list], un.ci, angle=True)
         un.elevation_apparent_norot = np.std([traj.orbit.elevation_apparent_norot for traj in traj_list])
+        un.elevation_apparent_norot_ci = confidenceInterval([traj.orbit.elevation_apparent_norot for traj \
+            in traj_list], un.ci)
 
         # Reference point on the meteor trajectory
         un.lon_ref = scipy.stats.circstd([traj.orbit.lon_ref for traj in traj_list])
+        un.lon_ref_ci = confidenceInterval([traj.orbit.lon_ref for traj in traj_list], un.ci, angle=True)
         un.lat_ref = np.std([traj.orbit.lat_ref for traj in traj_list])
+        un.lat_ref_ci = confidenceInterval([traj.orbit.lat_ref for traj in traj_list], un.ci)
         un.lat_geocentric = np.std([traj.orbit.lat_geocentric for traj in traj_list])
+        un.lat_geocentric_ci = confidenceInterval([traj.orbit.lat_geocentric for traj in traj_list], un.ci)
         un.ht_ref = np.std([traj.orbit.ht_ref for traj in traj_list])
+        un.ht_ref_ci = confidenceInterval([traj.orbit.ht_ref for traj in traj_list], un.ci)
 
         # Geocentric
         un.ra_g = scipy.stats.circstd([traj.orbit.ra_g for traj in traj_list])
+        un.ra_g_ci = confidenceInterval([traj.orbit.ra_g for traj in traj_list], un.ci, angle=True)
         un.dec_g = np.std([traj.orbit.dec_g for traj in traj_list])
+        un.dec_g_ci = confidenceInterval([traj.orbit.dec_g for traj in traj_list], un.ci)
         un.v_g = np.std([traj.orbit.v_g for traj in traj_list])
+        un.v_g_ci = confidenceInterval([traj.orbit.v_g for traj in traj_list], un.ci)
 
         # Meteor position in Sun-centred rectangular coordinates
         meteor_pos_x = np.std([traj.orbit.meteor_pos[0] for traj in traj_list])
+        meteor_pos_x_ci = confidenceInterval([traj.orbit.meteor_pos[0] for traj in traj_list], un.ci)
         meteor_pos_y = np.std([traj.orbit.meteor_pos[1] for traj in traj_list])
+        meteor_pos_y_ci = confidenceInterval([traj.orbit.meteor_pos[1] for traj in traj_list], un.ci)
         meteor_pos_z = np.std([traj.orbit.meteor_pos[2] for traj in traj_list])
+        meteor_pos_z_ci = confidenceInterval([traj.orbit.meteor_pos[2] for traj in traj_list], un.ci)
 
         un.meteor_pos = np.array([meteor_pos_x, meteor_pos_y, meteor_pos_z])
+        un.meteor_pos_ci = np.array([meteor_pos_x_ci, meteor_pos_y_ci, meteor_pos_z_ci])
 
         # Zenith angles
         un.zc = np.std([traj.orbit.zc for traj in traj_list])
+        un.zc_ci = confidenceInterval([traj.orbit.zc for traj in traj_list], un.ci)
         un.zg = np.std([traj.orbit.zg for traj in traj_list])
+        un.zg_ci = confidenceInterval([traj.orbit.zg for traj in traj_list], un.ci)
 
 
         # Ecliptic geocentric
         un.L_g = scipy.stats.circstd([traj.orbit.L_g for traj in traj_list])
+        un.L_g_ci = confidenceInterval([traj.orbit.L_g for traj in traj_list], un.ci, angle=True)
         un.B_g = np.std([traj.orbit.B_g for traj in traj_list])
+        un.B_g_ci = confidenceInterval([traj.orbit.B_g for traj in traj_list], un.ci)
         un.v_h = np.std([traj.orbit.v_h for traj in traj_list])
+        un.v_h_ci = confidenceInterval([traj.orbit.v_h for traj in traj_list], un.ci)
 
         # Ecliptic heliocentric
         un.L_h = scipy.stats.circstd([traj.orbit.L_h for traj in traj_list])
+        un.L_h_ci = confidenceInterval([traj.orbit.L_h for traj in traj_list], un.ci, angle=True)
         un.B_h = np.std([traj.orbit.B_h for traj in traj_list])
+        un.B_h_ci = confidenceInterval([traj.orbit.B_h for traj in traj_list], un.ci)
         un.v_h_x = np.std([traj.orbit.v_h_x for traj in traj_list])
+        un.v_h_x_ci = confidenceInterval([traj.orbit.v_h_x for traj in traj_list], un.ci)
         un.v_h_y = np.std([traj.orbit.v_h_y for traj in traj_list])
+        un.v_h_y_ci = confidenceInterval([traj.orbit.v_h_y for traj in traj_list], un.ci)
         un.v_h_z = np.std([traj.orbit.v_h_z for traj in traj_list])
+        un.v_h_z_ci = confidenceInterval([traj.orbit.v_h_z for traj in traj_list], un.ci)
 
         # Orbital elements
         un.la_sun = scipy.stats.circstd([traj.orbit.la_sun for traj in traj_list])
+        un.la_sun_ci = confidenceInterval([traj.orbit.la_sun for traj in traj_list], un.ci, angle=True)
         un.a = np.std([traj.orbit.a for traj in traj_list])
+        un.a_ci = confidenceInterval([traj.orbit.a for traj in traj_list], un.ci)
         un.e = np.std([traj.orbit.e for traj in traj_list])
+        un.e_ci = confidenceInterval([traj.orbit.e for traj in traj_list], un.ci)
         un.i = np.std([traj.orbit.i for traj in traj_list])
+        un.i_ci = confidenceInterval([traj.orbit.i for traj in traj_list], un.ci)
         un.peri = scipy.stats.circstd([traj.orbit.peri for traj in traj_list])
+        un.peri_ci = confidenceInterval([traj.orbit.peri for traj in traj_list], un.ci, angle=True)
         un.node = scipy.stats.circstd([traj.orbit.node for traj in traj_list])
+        un.node_ci = confidenceInterval([traj.orbit.node for traj in traj_list], un.ci, angle=True)
         un.pi = scipy.stats.circstd([traj.orbit.pi for traj in traj_list])
+        un.pi_ci = confidenceInterval([traj.orbit.pi for traj in traj_list], un.ci, angle=True)
+        un.b = np.std([traj.orbit.b for traj in traj_list])
+        un.b_ci = confidenceInterval([traj.orbit.b for traj in traj_list], un.ci)
         un.q = np.std([traj.orbit.q for traj in traj_list])
+        un.q_ci = confidenceInterval([traj.orbit.q for traj in traj_list], un.ci)
         un.Q = np.std([traj.orbit.Q for traj in traj_list])
+        un.Q_ci = confidenceInterval([traj.orbit.Q for traj in traj_list], un.ci)
         un.true_anomaly = scipy.stats.circstd([traj.orbit.true_anomaly for traj in traj_list])
+        un.true_anomaly_ci = confidenceInterval([traj.orbit.true_anomaly for traj in traj_list], un.ci, \
+            angle=True)
         un.eccentric_anomaly = scipy.stats.circstd([traj.orbit.eccentric_anomaly for traj in traj_list])
+        un.eccentric_anomaly_ci = confidenceInterval([traj.orbit.eccentric_anomaly for traj in traj_list], \
+            un.ci, angle=True)
         un.mean_anomaly = scipy.stats.circstd([traj.orbit.mean_anomaly for traj in traj_list])
+        un.mean_anomaly_ci = confidenceInterval([traj.orbit.mean_anomaly for traj in traj_list], un.ci, \
+            angle=True)
 
         # Last perihelion uncertanty (days)
-        un.last_perihelion = np.std([datetime2JD(traj.orbit.last_perihelion) for traj in traj_list if \
-            isinstance(traj.orbit.last_perihelion, datetime.datetime)])
+        last_perihelion_list = [datetime2JD(traj.orbit.last_perihelion) for traj \
+            in traj_list if isinstance(traj.orbit.last_perihelion, datetime.datetime)]
+        if len(last_perihelion_list):
+            un.last_perihelion = np.std(last_perihelion_list)
+            un.last_perihelion_ci = confidenceInterval(last_perihelion_list, un.ci)
+        else:
+            un.last_perihelion = np.nan
+            un.last_perihelion_ci = (np.nan, np.nan)
+        
 
         # Mean motion in the orbit (rad/day)
         un.n = np.std([traj.orbit.n for traj in traj_list])
+        un.n_ci = confidenceInterval([traj.orbit.n for traj in traj_list], un.ci)
 
         # Orbital period
         un.T = np.std([traj.orbit.T for traj in traj_list])
+        un.T_ci = confidenceInterval([traj.orbit.T for traj in traj_list], un.ci)
 
         # Tisserand's parameter
         un.Tj = np.std([traj.orbit.Tj for traj in traj_list])
+        un.Tj_ci = confidenceInterval([traj.orbit.Tj for traj in traj_list], un.ci)
     
 
     return un
@@ -1534,12 +1698,12 @@ def calcCovMatrices(mc_traj_list):
     e_list = np.array([traj.orbit.e for traj in mc_traj_list])
     q_list = np.array([traj.orbit.q for traj in mc_traj_list])
     tp_list = np.array([datetime2JD(traj.orbit.last_perihelion) for traj in mc_traj_list])
-    node_list = normalizeAngleWrap(np.array([traj.orbit.node for traj in mc_traj_list]))
-    peri_list = normalizeAngleWrap(np.array([traj.orbit.peri for traj in mc_traj_list]))
-    i_list = normalizeAngleWrap(np.array([traj.orbit.i for traj in mc_traj_list]))
+    node_list = np.degrees(normalizeAngleWrap(np.array([traj.orbit.node for traj in mc_traj_list])))
+    peri_list = np.degrees(normalizeAngleWrap(np.array([traj.orbit.peri for traj in mc_traj_list])))
+    i_list = np.degrees(normalizeAngleWrap(np.array([traj.orbit.i for traj in mc_traj_list])))
     
 
-    # Calculate the orbital covariance
+    # Calculate the orbital covariance (angles in degrees)
     orbit_input = np.c_[e_list, q_list, tp_list, node_list, peri_list, i_list].T
     orbit_cov = np.cov(orbit_input, aweights=weights)
 
@@ -1646,7 +1810,7 @@ def trajNoiseGenerator(traj, noise_sigma):
             traj_mc.infillTrajectory(azim_noise_list, elev_noise_list, obs.time_data, obs.lat, obs.lon, \
                 obs.ele, station_id=obs.station_id, excluded_time=obs.excluded_time, \
                 ignore_list=obs.ignore_list, magnitudes=obs.magnitudes, fov_beg=obs.fov_beg, \
-                fov_end=obs.fov_end, obs_id=obs.obs_id)
+                fov_end=obs.fov_end, obs_id=obs.obs_id, comment=obs.comment)
 
             
         # Do not show plots or perform additional optimizations
@@ -1802,7 +1966,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
 
     # Break the function of there are no trajectories to process
     if len(mc_results) < 2:
-        print('!!! Not enough good Monte Carlo runus for uncertaintly estimation!')
+        print('!!! Not enough good Monte Carlo runs for uncertaintly estimation!')
         return traj, None
 
 
@@ -1823,7 +1987,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
 
     print('Computing covariance matrices...')
 
-    # Calculate orbital and inital state vector covariance matrices
+    # Calculate orbital and inital state vector covariance matrices (angles in degrees)
     traj_best.orbit_cov, traj_best.state_vect_cov = calcCovMatrices(mc_results)
 
 
@@ -2036,6 +2200,39 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
     return traj_best, uncertainties
 
 
+def copyUncertainties(traj_source, traj_target, copy_mc_traj_instances=False):
+    """ Copy uncertainties from one trajectory to the other. 
+    
+    Arguments:
+        traj_source: [Trajectory object] Trajectory object with uncertainties.
+        traj_target: [Trajectory object] Trajectory object to which uncertainties will be copied.
+
+    Keyword arguments:
+        copy_mc_traj_instances: [bool] Copy all trajectory instances generated during the MC procedure.
+            This will make the trajectory pickle file very large. False by default.
+
+    Return:
+        traj_target: [Trajectory object] Target trajectory object with copied uncertainties.
+    """
+
+    # Copy covariance matrices
+    traj_target.orbit_cov, traj_target.state_vect_cov = copy.deepcopy(traj_source.orbit_cov), \
+        copy.deepcopy(traj_source.state_vect_cov)
+
+    # Copy uncertainties
+    traj_target.uncertainties = copy.deepcopy(traj_source.uncertainties)
+
+    # Handle individual trajectory instances
+    if not copy_mc_traj_instances:
+        if traj_target.uncertainties is not None:
+            del traj_target.uncertainties.mc_traj_list
+            traj_target.uncertainties.mc_traj_list = []
+
+
+    return traj_target
+
+
+
 
 
 def applyGravityDrop(eci_coord, t, r0, vz):
@@ -2093,8 +2290,8 @@ class Trajectory(object):
     def __init__(self, jdt_ref, output_dir='.', max_toffset=None, meastype=4, verbose=True, v_init_part=None,\
         v_init_ht=None, estimate_timing_vel=True, monte_carlo=True, mc_runs=None, mc_pick_multiplier=1, \
         mc_noise_std=1.0, geometric_uncert=False, filter_picks=True, calc_orbit=True, show_plots=True, \
-        save_results=True, gravity_correction=True, plot_all_spatial_residuals=False, plot_file_type='png', \
-        traj_id=None, reject_n_sigma_outliers=3, mc_cores=None):
+        show_jacchia=False, save_results=True, gravity_correction=True, plot_all_spatial_residuals=False, \
+        plot_file_type='png', traj_id=None, reject_n_sigma_outliers=3, mc_cores=None):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -2122,7 +2319,9 @@ class Trajectory(object):
             v_init_ht: [float] If given, the initial velocity will be estimated as the average velocity
                 above the given height in kilometers using data from all stations. None by default, in which
                 case the initial velocity will be estimated using the automated siliding fit.
-            estimate_timing_vel: [bool] Try to estimate the difference in timing and velocity. True by default.
+            estimate_timing_vel: [bool/str] Try to estimate the difference in timing and velocity. True by  
+                default. A string with the list of fixed time offsets can also be given, e.g. 
+                "CA001A":0.42,"CA0005":-0.3.
             monte_carlo: [bool] Runs Monte Carlo estimation of uncertainties. True by default.
             mc_runs: [int] Number of Monte Carlo runs. The default value is the number of observed points.
             mc_pick_multiplier: [int] Number of MC samples that will be taken for every point. 1 by default.
@@ -2135,6 +2334,7 @@ class Trajectory(object):
                 will be removed, and the trajectory will be recalculated.
             calc_orbit: [bool] If True, the orbit is calculates as well. True by default
             show_plots: [bool] Show plots of residuals, velocity, lag, meteor position. True by default.
+            show_jacchia: [bool] Show the Jacchia fit on the plot with meteor dynamics. False by default.
             save_results: [bool] Save results of trajectory estimation to disk. True by default.
             gravity_correction: [bool] Apply the gravity drop when estimating trajectories. True by default.
             plot_all_spatial_residuals: [bool] Plot all spatial residuals on one plot (one vs. time, and
@@ -2176,7 +2376,22 @@ class Trajectory(object):
         self.v_init_ht = v_init_ht
 
         # Estimating the difference in timing between stations, and the initial velocity if this flag is True
-        self.estimate_timing_vel = estimate_timing_vel
+        self.fixed_time_offsets = {}
+        if isinstance(estimate_timing_vel, str):
+
+            # If a list of fixed timing offsets was given, parse it into a dictionary
+            for entry in estimate_timing_vel.split(','):
+                station, offset = entry.split(":")
+                self.fixed_time_offsets[station] = float(offset)
+
+            print("Fixed timing given:", self.fixed_time_offsets)
+
+            self.estimate_timing_vel = False
+
+        elif isinstance(estimate_timing_vel, bool):
+            self.estimate_timing_vel = estimate_timing_vel
+        else:
+            self.estimate_timing_vel = True
 
         # Running Monte Carlo simulations to estimate uncertainties
         self.monte_carlo = monte_carlo
@@ -2202,6 +2417,9 @@ class Trajectory(object):
 
         # If True, plots will be shown on screen when the trajectory estimation is done
         self.show_plots = show_plots
+
+        # Show Jacchia fit on dynamics plots
+        self.show_jacchia = show_jacchia
 
         # Save results to disk if true
         self.save_results = save_results
@@ -2310,7 +2528,7 @@ class Trajectory(object):
         self.uncertainties = None
         self.uncertanties = self.uncertainties
 
-        # Orbital covariance matrix
+        # Orbital covariance matrix (angles in degrees)
         self.orbit_cov = None
 
         # Initial state vector covariance matrix
@@ -2325,7 +2543,7 @@ class Trajectory(object):
 
 
     def infillTrajectory(self, meas1, meas2, time_data, lat, lon, ele, station_id=None, excluded_time=None,
-        ignore_list=None, magnitudes=None, fov_beg=None, fov_end=None, obs_id=None):
+        ignore_list=None, magnitudes=None, fov_beg=None, fov_end=None, obs_id=None, comment=''):
         """ Initialize a set of measurements for a given station. 
     
         Arguments:
@@ -2353,6 +2571,8 @@ class Trajectory(object):
             fov_end: [bool] True if the meteor ended inside the FOV, False otherwise. None by default.
             obs_id: [int] Unique ID of the observation. This is to differentiate different observations from
                 the same station.
+            comment: [str] A comment about the observations. May be used to store RMS FF file number on which
+                the meteor was observed.
         Return:
             None
         """
@@ -2371,6 +2591,10 @@ class Trajectory(object):
         meas2 = np.array(meas2)
         time_data = np.array(time_data)
 
+        # Add a fixed offset to time data if given
+        if str(station_id) in self.fixed_time_offsets:
+            time_data += self.fixed_time_offsets[str(station_id)]
+
         # Skip the observation if all points were ignored
         if ignore_list is not None:
             if np.all(ignore_list):
@@ -2380,7 +2604,7 @@ class Trajectory(object):
         # Init a new structure which will contain the observed data from the given site
         obs = ObservedPoints(self.jdt_ref, meas1, meas2, time_data, lat, lon, ele, station_id=station_id, \
             meastype=self.meastype, excluded_time=excluded_time, ignore_list=ignore_list, \
-            magnitudes=magnitudes, fov_beg=fov_beg, fov_end=fov_end, obs_id=obs_id)
+            magnitudes=magnitudes, fov_beg=fov_beg, fov_end=fov_end, obs_id=obs_id, comment=comment)
             
         # Add observations to the total observations list
         self.observations.append(obs)
@@ -2459,13 +2683,17 @@ class Trajectory(object):
         if not hasattr(obs, 'obs_id'):
             obs.obs_id = None
 
+        # Check if the observation object as the comment entry
+        if not hasattr(obs, 'comment'):
+            obs.comment = ''
 
         ### ###
 
 
         self.infillTrajectory(meas1, meas2, obs.time_data, obs.lat, obs.lon, obs.ele, \
             station_id=obs.station_id, excluded_time=excluded_time, ignore_list=ignore_list, \
-            magnitudes=magnitudes, fov_beg=obs.fov_beg, fov_end=obs.fov_end, obs_id=obs.obs_id)
+            magnitudes=magnitudes, fov_beg=obs.fov_beg, fov_end=obs.fov_end, obs_id=obs.obs_id, \
+            comment=obs.comment)
 
 
 
@@ -2494,7 +2722,8 @@ class Trajectory(object):
             for t, jd, stat, meas in zip(obs.time_data, obs.JD_data, obs.stat_eci_los, obs.meas_eci_los):
 
                 # Calculate horizontal and vertical residuals
-                hres, vres = calcSpatialResidual(jd, state_vect, radiant_eci, stat, meas)
+                hres, vres = calcSpatialResidual(self.jdt_ref, jd, state_vect, radiant_eci, stat, meas, \
+                    gravity=self.gravity_correction)
 
                 # Add residuals to the residual list
                 obs.h_residuals.append(hres)
@@ -2872,79 +3101,100 @@ class Trajectory(object):
         # Timing differences which will be calculated
         time_diffs = np.zeros(len(observations))
 
-        # If the timing difference and velocity difference estimation is not desired to be performed, skip 
-        # the procedure
         if not estimate_timing_vel:
             return True, np.zeros(2), v_init, time_diffs, observations
 
+        # Run timing offset estimation if it needs to be done
+        if estimate_timing_vel:
 
-        # Initial timing difference between sites is 0 (there are N-1 timing differences, as the time 
-        # difference for the reference site is always 0)
-        p0 = np.zeros(shape=(len(self.observations) - 1))
+            # Initial timing difference between sites is 0 (there are N-1 timing differences, as the time 
+            # difference for the reference site is always 0)
+            p0 = np.zeros(shape=(len(self.observations) - 1))
 
-        # # Set the time reference station to be the one with the most used points
-        # obs_points = [obs.kmeas for obs in self.observations]
-        # self.t_ref_station = obs_points.index(max(obs_points))
+            # # Set the time reference station to be the one with the most used points
+            # obs_points = [obs.kmeas for obs in self.observations]
+            # self.t_ref_station = obs_points.index(max(obs_points))
 
-
-        if self.verbose:
-            print('Initial function evaluation:', timingResiduals(p0, observations, self.t_ref_station, 
-                weights=weights))
-
-
-        # Set bounds for timing to +/- given maximum time offset
-        bounds = []
-        for i in range(len(self.observations) - 1):
-            bounds.append([-self.max_toffset, self.max_toffset])
-
-
-        ### Try different methods of optimization until it is successful ##
-
-        #   If there are more than 5 stations, use the advanced L-BFGS-B method by default
-        if len(self.observations) >= 5:
-            methods = [None]
-            maxiter_list = [15000]
-        else:
-            # If there are less than 5, try faster methods first
-            methods = ['SLSQP', 'TNC', None]
-            maxiter_list = [1000, None, 15000]
-
-        # Try different methods to minimize timing residuals
-        for opt_method, maxiter in zip(methods, maxiter_list):
-
-            # Run the minimization of residuals between all stations
-            timing_mini = scipy.optimize.minimize(timingResiduals, p0, args=(observations, \
-                self.t_ref_station, weights), bounds=bounds, method=opt_method, options={'maxiter': maxiter},\
-                tol=1e-12)
-
-            # Stop trying methods if this one was successful
-            if timing_mini.success:
-                if self.verbose:
-                    print('Successful timing optimization with', opt_method)
-
-                break
-
-            else:
-                print('Unsuccessful timing optimization with', opt_method)
-
-        ### ###
-
-        # If the minimization was successful, apply the time corrections
-        if timing_mini.success:
 
             if self.verbose:
-                print("Final function evaluation:", timing_mini.fun)
+                print('Initial function evaluation:', timingResiduals(p0, observations, self.t_ref_station, 
+                    weights=weights))
 
 
-            # Set the final value of the timing residual
-            self.timing_res = timing_mini.fun
-                
+            # Set bounds for timing to +/- given maximum time offset
+            bounds = []
+            for i in range(len(self.observations) - 1):
+                bounds.append([-self.max_toffset, self.max_toffset])
+
+
+            ### Try different methods of optimization until it is successful ##
+
+            #   If there are more than 5 stations, use the advanced L-BFGS-B method by default
+            if len(self.observations) >= 5:
+                methods = [None]
+                maxiter_list = [15000]
+            else:
+                # If there are less than 5, try faster methods first
+                methods = ['SLSQP', 'TNC', None]
+                maxiter_list = [1000, None, 15000]
+
+            # Try different methods to minimize timing residuals
+            for opt_method, maxiter in zip(methods, maxiter_list):
+
+                # Run the minimization of residuals between all stations
+                timing_mini = scipy.optimize.minimize(timingResiduals, p0, args=(observations, \
+                    self.t_ref_station, weights), bounds=bounds, method=opt_method, options={'maxiter': maxiter},\
+                    tol=1e-12)
+
+                # Stop trying methods if this one was successful
+                if timing_mini.success:
+
+                    # Set the final value of the timing residual
+                    self.timing_res = timing_mini.fun
+
+                    if self.verbose:
+                        print('Successful timing optimization with', opt_method)
+                        print("Final function evaluation:", timing_mini.fun)
+
+
+                    break
+
+                else:
+                    print('Unsuccessful timing optimization with', opt_method)
+
+            ### ###
+
+
+            if not timing_mini.success:
+
+                print('Timing difference and initial velocity minimization failed with the message:')
+                print(timing_mini.message)
+                print('Try increasing the range of time offsets!')
+                v_init_mini = v_init
+
+                velocity_fit = np.zeros(2)
+                v_init_mini = 0
+
+
+        # Check if the velocity should be estimated
+        estimate_velocity = False
+        timing_minimization_successful = False
+        if not estimate_timing_vel:
+            estimate_velocity = True
+            timing_minimization_successful = True
+        else:
+            if timing_mini.success:
+                estimate_velocity = True
+                timing_minimization_successful = True
+
+        # If the minimization was successful, apply the time corrections
+        if estimate_velocity:
 
             stat_count = 0
             for i, obs in enumerate(observations):
 
                 # The timing difference for the reference station is always 0
-                if i == self.t_ref_station:
+                if (i == self.t_ref_station) or (not estimate_timing_vel):
                     t_diff = 0
 
                 else:
@@ -3083,20 +3333,10 @@ class Trajectory(object):
                 if self.verbose:
                     print('ESTIMATED Vinit:', v_init_mini, 'm/s')
 
+            
 
 
-        else:
-
-            print('Timing difference and initial velocity minimization failed with the message:')
-            print(timing_mini.message)
-            print('Try increasing the range of time offsets!')
-            v_init_mini = v_init
-
-            velocity_fit = np.zeros(2)
-            v_init_mini = 0
-
-
-        return timing_mini.success, velocity_fit, v_init_mini, time_diffs, observations
+        return timing_minimization_successful, velocity_fit, v_init_mini, time_diffs, observations
 
 
 
@@ -3179,13 +3419,14 @@ class Trajectory(object):
                 obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, state_vect, radiant_eci)
 
 
-                ### Take the gravity drop into account ###
+                ### Take the gravity drop into account ### 
+                if self.gravity_correction:
 
-                # Calculate the time in seconds from the beginning of the meteor
-                t_rel = t - t0
+                    # Calculate the time in seconds from the beginning of the meteor
+                    t_rel = t - t0
 
-                # Apply the gravity drop
-                rad_cpa = applyGravityDrop(rad_cpa, t_rel, r0, v0z)
+                    # Apply the gravity drop
+                    rad_cpa = applyGravityDrop(rad_cpa, t_rel, r0, v0z)
                 
 
                 # Calculate the range to the observed CPA
@@ -3478,7 +3719,7 @@ class Trajectory(object):
 
         with open(os.path.join(dir_path, file_name), 'w') as f:
 
-            for i, obs in enumerate(self.observations):
+            for i, obs in enumerate(sorted(self.observations, key=lambda x:x.rbeg_ele, reverse=True)):
 
                 # Write site coordinates
                 f.write('m->longitude[' + str(i) + '] = ' + str(obs.lon) + ';\n')
@@ -3507,6 +3748,133 @@ class Trajectory(object):
 
 
 
+    def toJson(self):
+        """ Convert the Trajectory object to a JSON string. """
+
+        # Get a list of builtin types
+        try :
+            import __builtin__
+            builtin_types = [t for t in __builtin__.__dict__.itervalues() if isinstance(t, type)]
+        except: 
+            # Python 3.x
+            import builtins
+            builtin_types = [getattr(builtins, d) for d in dir(builtins) if isinstance(getattr(builtins, d), type)]
+            
+
+
+        def _convertDict(d):
+            """ Convert the given object dictionary to JSON-compatible format. """
+
+            d = copy.deepcopy(d)
+
+            d_new = {}
+
+            for key in d:
+
+                # Set the old value to the new dictionary
+                d_new[key] = d[key]
+
+                # Recursively convert all dictionaries
+                if isinstance(d[key], dict):
+                    d_new[key] = _convertDict(d[key])
+
+                # Recursively convert items in lists
+                if isinstance(d[key], list):
+
+                    # Skip empty lists
+                    if len(d[key]) == 0:
+                        continue
+
+                    # Remove the old list
+                    del d_new[key]
+
+                    # Convert the list to a dictionary
+                    d_tmp = {i: item for (i, item) in enumerate(d[key])}
+
+                    # Run the convert procedure
+                    d_tmp = _convertDict(d_tmp)
+
+                    # Unpack the dictionary to a list
+                    index_list = []
+                    value_list = []
+                    for k in d_tmp:
+                        index_list.append(k)
+                        value_list.append(d_tmp[k])
+
+                    # Sort value list by index
+                    value_list = [x for _, x in sorted(zip(index_list, value_list))]
+
+                    d_new[key] = value_list
+
+
+                # Skip None types
+                elif d[key] is None:
+                    continue
+
+                # Convert datetime objects to strings
+                elif isinstance(d[key], datetime.datetime):
+                    d_new[key] = str(d[key])
+
+                # Convert numpy arrays to lists
+                elif isinstance(d[key], np.ndarray):
+                    d_new[key] = d[key].tolist()
+
+                # Convert numpy types to float
+                elif type(d[key]).__module__ == np.__name__:
+                    d_new[key] = float(d[key])
+
+
+                # Recursively convert all non-builtin types
+                elif type(d[key]) not in builtin_types:
+
+                    # Get the name of the class
+                    class_name = type(d[key]).__name__
+                    key_name = class_name
+
+                    # Handle class-specific things
+                    if class_name == "ObservedPoints":
+                        key_name += "." + d[key].station_id
+
+                    elif class_name == "PlaneIntersection":
+                        key_name += "." + d[key].obs1.station_id + "_" + d[key].obs2.station_id
+                        del d[key].obs1
+                        del d[key].obs2
+
+                    # Remove a list of trajectoryes in the uncertainties object
+                    elif class_name == "MCUncertainties":
+                        d[key].mc_traj_list = None
+
+
+                    # Assign the converted dictionary to the given attribute name
+                    del d_new[key]
+                    d_new[key] = {key_name: _convertDict(d[key].__dict__)}
+                    
+
+
+            return d_new
+
+
+
+        traj = copy.deepcopy(self)
+
+        # Remove noise-added observations
+        if hasattr(traj, "obs_noisy"):
+            del traj.obs_noisy
+
+        # Delete duplicate misspelt attribute
+        if hasattr(traj, "uncertanties"):
+            del traj.uncertanties
+
+        # Convert the trajectory object's attributes to JSON-compatible format
+        traj_dict = _convertDict(traj.__dict__)
+
+        # Convert the trajectory object to JSON
+        out_str = json.dumps(traj_dict, indent=4, sort_keys=False)
+
+
+        return out_str
+
+
     def saveReport(self, dir_path, file_name, uncertainties=None, verbose=True, save_results=True):
         """ Save the trajectory estimation report to file. 
     
@@ -3533,17 +3901,30 @@ class Trajectory(object):
             Keyword arguments:
                 multi: [float] Uncertanty multiplier. 1.0 by default. This is used to scale the uncertanty to
                     different units (e.g. from m/s to km/s).
-                deg: [bool] Converet radians to degrees if True. False by defualt.
+                deg: [bool] Converet radians to degrees if True. False by default.
                 """
 
             if deg:
                 multi *= np.degrees(1.0)
 
             if uncertainties is not None:
-                return " +/- " + str_format.format(getattr(uncertainties, std_name)*multi)
+
+                # Construct symmetrical 1 sigma uncertainty
+                ret_str = " +/- " + str_format.format(getattr(uncertainties, std_name)*multi)
+
+                # Add confidence interval if available
+                if hasattr(uncertainties, std_name + "_ci"):
+                    ci_l, ci_u = np.array(getattr(uncertainties, std_name + "_ci"))*multi
+                    ret_str += ", [{:s}, {:s}]".format(str_format.format(ci_l), str_format.format(ci_u))
+
+                return ret_str
 
             else:
                 return ''
+
+
+        # Format longitude in the -180 to 180 deg range
+        _formatLongitude = lambda x: (x + np.pi)%(2*np.pi) - np.pi
 
         
         out_str = ''
@@ -3618,12 +3999,12 @@ class Trajectory(object):
 
         # Write out the state vector
         out_str += "State vector (ECI, epoch of date):\n"
-        out_str += " X =  {:11.2f}{:s} m\n".format(x, _uncer('{:.2f}', 'x'))
-        out_str += " Y =  {:11.2f}{:s} m\n".format(y, _uncer('{:.2f}', 'y'))
-        out_str += " Z =  {:11.2f}{:s} m\n".format(z, _uncer('{:.2f}', 'z'))
-        out_str += " Vx = {:11.2f}{:s} m/s\n".format(vx, _uncer('{:.2f}', 'vx'))
-        out_str += " Vy = {:11.2f}{:s} m/s\n".format(vy, _uncer('{:.2f}', 'vy'))
-        out_str += " Vz = {:11.2f}{:s} m/s\n".format(vz, _uncer('{:.2f}', 'vz'))
+        out_str += " X =  {:s} m\n".format(valueFormat("{:11.2f}", x, '{:7.2f}', uncertainties, 'x'))
+        out_str += " Y =  {:s} m\n".format(valueFormat("{:11.2f}", y, '{:7.2f}', uncertainties, 'y'))
+        out_str += " Z =  {:s} m\n".format(valueFormat("{:11.2f}", z, '{:7.2f}', uncertainties, 'z'))
+        out_str += " Vx = {:s} m/s\n".format(valueFormat("{:11.2f}", vx, '{:7.2f}', uncertainties, 'vx'))
+        out_str += " Vy = {:s} m/s\n".format(valueFormat("{:11.2f}", vy, '{:7.2f}', uncertainties, 'vy'))
+        out_str += " Vz = {:s} m/s\n".format(valueFormat("{:11.2f}", vz, '{:7.2f}', uncertainties, 'vz'))
 
         out_str += "\n"
 
@@ -3646,21 +4027,22 @@ class Trajectory(object):
 
         out_str += "Timing offsets (from input data):\n"
         for stat_id, t_diff in zip([obs.station_id for obs in self.observations], self.time_diffs_final):
-            out_str += "{:>10s}: {:.6f} s\n".format(str(stat_id), t_diff)
+            out_str += "{:>14s}: {:.6f} s\n".format(str(stat_id), t_diff)
 
         out_str += "\n"
 
         if self.orbit is not None:
             out_str += "Reference point on the trajectory:\n"
             out_str += "  Time: " + str(jd2Date(self.orbit.jd_ref, dt_obj=True)) + " UTC\n"
-            out_str += "  Lon     = {:+>10.6f}{:s} deg\n".format(np.degrees(self.orbit.lon_ref), \
-                _uncer('{:.4f}', 'lon_ref', deg=True))
-            out_str += "  Lat     = {:+>10.6f}{:s} deg\n".format(np.degrees(self.orbit.lat_ref), \
-                _uncer('{:.4f}', 'lat_ref', deg=True))
-            out_str += "  Lat geo = {:+>10.6f}{:s} deg\n".format(np.degrees(self.orbit.lat_geocentric), \
-                _uncer('{:.4f}', 'lat_geocentric', deg=True))
-            out_str += "  Ht      = {:>10.2f}{:s} m\n".format(self.orbit.ht_ref, \
-                _uncer('{:.2f}', 'ht_ref', deg=False))
+            out_str += "  Lat     = {:s} deg\n".format(valueFormat("{:>11.6f}", self.orbit.lat_ref, \
+                '{:6.4f}', uncertainties, 'lat_ref', deg=True))
+            out_str += "  Lon     = {:s} deg\n".format(valueFormat("{:>11.6f}", self.orbit.lon_ref, \
+                '{:6.4f}', uncertainties, 'lon_ref', deg=True, callable_val=_formatLongitude, \
+                callable_ci=_formatLongitude))
+            out_str += "  Ht      = {:s} m\n".format(valueFormat("{:>11.2f}", self.orbit.ht_ref, \
+                '{:6.2f}', uncertainties, 'ht_ref', deg=False))
+            out_str += "  Lat geo = {:s} deg\n".format(valueFormat("{:>11.6f}", self.orbit.lat_geocentric, \
+                '{:6.4f}', uncertainties, 'lat_geocentric', deg=True))
             out_str += "\n"
 
             # Write out orbital parameters
@@ -3672,7 +4054,7 @@ class Trajectory(object):
             if self.state_vect_cov is not None:
 
                 out_str += "Orbit covariance matrix:\n"
-                out_str += "             e     ,     q (AU)   ,      Tp (JD) ,   node (rad) ,   peri (rad) ,    i (rad)\n"
+                out_str += "             e     ,     q (AU)   ,      Tp (JD) ,   node (deg) ,   peri (deg) ,    i (deg)\n"
 
                 elements_list = ["e   ", "q   ", "Tp  ", "node", "peri", "i   "]
 
@@ -3688,30 +4070,48 @@ class Trajectory(object):
 
 
         out_str += "Jacchia fit on lag = -|a1|*exp(|a2|*t):\n"
-        out_str += " a1 = {:.6f}\n".format(self.jacchia_fit[0])
-        out_str += " a2 = {:.6f}\n".format(self.jacchia_fit[1])
+        jacchia_fit = self.jacchia_fit
+        if jacchia_fit is None:
+            jacchia_fit = [0, 0]
+        out_str += " a1 = {:.6f}\n".format(jacchia_fit[0])
+        out_str += " a2 = {:.6f}\n".format(jacchia_fit[1])
         out_str += "\n"
 
-        out_str += "Mean time residuals from time vs. length:\n"
-        out_str += "  Station with reference time: {:s}\n".format(str(self.observations[self.t_ref_station].station_id))
         if self.estimate_timing_vel is True:
+            out_str += "Mean time residuals from time vs. length:\n"
+            out_str += "  Station with reference time: {:s}\n".format(
+                str(self.observations[self.t_ref_station].station_id))
             out_str += "  Avg. res. = {:.3e} s\n".format(self.timing_res)
             out_str += "  Stddev    = {:.2e} s\n".format(self.timing_stddev)
-        out_str += "\n"
+            out_str += "\n"
 
         out_str += "Begin point on the trajectory:\n"
-        out_str += "  Lon = {:>12.6f}{:s} deg\n".format(np.degrees(self.rbeg_lon), _uncer('{:.4f}', 
-            'rbeg_lon', deg=True))
-        out_str += "  Lat = {:>12.6f}{:s} deg\n".format(np.degrees(self.rbeg_lat), _uncer('{:.4f}', 
-            'rbeg_lat', deg=True))
-        out_str += "  Ht  = {:>8.2f}{:s} m\n".format(self.rbeg_ele, _uncer('{:.2f}', 'rbeg_ele'))
+        out_str += "  Lat = {:s} deg\n".format(valueFormat("{:>11.6f}", self.rbeg_lat, "{:6.4f}", \
+            uncertainties, 'rbeg_lat', deg=True))
+        if uncertainties is not None:
+            if hasattr(uncertainties, "rbeg_lat_m"):
+                out_str += "                    +/- {:6.2f} m\n".format(uncertainties.rbeg_lat_m)
+        out_str += "  Lon = {:s} deg\n".format(valueFormat("{:>11.6f}", self.rbeg_lon, "{:6.4f}", \
+            uncertainties, 'rbeg_lon', deg=True, callable_val=_formatLongitude, callable_ci=_formatLongitude))
+        if uncertainties is not None:
+            if hasattr(uncertainties, "rbeg_lon_m"):
+                out_str += "                    +/- {:6.2f} m\n".format(uncertainties.rbeg_lon_m)
+        out_str += "  Ht  = {:s} m\n".format(valueFormat("{:>11.2f}", self.rbeg_ele, "{:6.2f}", \
+            uncertainties, 'rbeg_ele'))
 
         out_str += "End point on the trajectory:\n"
-        out_str += "  Lon = {:>12.6f}{:s} deg\n".format(np.degrees(self.rend_lon), _uncer('{:.4f}', 
-            'rend_lon', deg=True))
-        out_str += "  Lat = {:>12.6f}{:s} deg\n".format(np.degrees(self.rend_lat), _uncer('{:.4f}', 
-            'rend_lat', deg=True))
-        out_str += "  Ht  = {:>8.2f}{:s} m\n".format(self.rend_ele, _uncer('{:.2f}', 'rend_ele'))
+        out_str += "  Lat = {:s} deg\n".format(valueFormat("{:>11.6f}", self.rend_lat, "{:6.4f}", \
+            uncertainties, 'rend_lat', deg=True))
+        if uncertainties is not None:
+            if hasattr(uncertainties, "rend_lat_m"):
+                out_str += "                    +/- {:6.2f} m\n".format(uncertainties.rend_lat_m)
+        out_str += "  Lon = {:s} deg\n".format(valueFormat("{:>11.6f}", self.rend_lon, "{:6.4f}", \
+            uncertainties, 'rend_lon', deg=True, callable_val=_formatLongitude, callable_ci=_formatLongitude))
+        if uncertainties is not None:
+            if hasattr(uncertainties, "rend_lon_m"):
+                out_str += "                    +/- {:6.2f} m\n".format(uncertainties.rend_lon_m)
+        out_str += "  Ht  = {:s} m\n".format(valueFormat("{:>11.2f}", self.rend_ele, "{:6.2f}", \
+            uncertainties, 'rend_ele'))
         out_str += "\n"
 
         ### Write information about stations ###
@@ -3719,18 +4119,21 @@ class Trajectory(object):
         out_str += "Stations\n"
         out_str += "--------\n"
 
-        out_str += "        ID, Ignored, Lon +E (deg), Lat +N (deg),  Ht (m), Jacchia a1, Jacchia a2,  Beg Ht (m),  End Ht (m), +/- Obs ang (deg), +/- V (m), +/- H (m), Persp. angle (deg), Weight, FOV Beg, FOV End\n"
+        out_str += "            ID, Ignored, Lon +E (deg), Lat +N (deg),  Ht (m), Jacchia a1, Jacchia a2,  Beg Ht (m),  End Ht (m), +/- Obs ang (deg), +/- V (m), +/- H (m), Persp. angle (deg), Weight, FOV Beg, FOV End, Comment\n"
         
         for obs in self.observations:
 
             station_info = []
-            station_info.append("{:>10s}".format(str(obs.station_id)))
+            station_info.append("{:>14s}".format(str(obs.station_id)))
             station_info.append("{:>7s}".format(str(obs.ignore_station)))
             station_info.append("{:>12.6f}".format(np.degrees(obs.lon)))
             station_info.append("{:>12.6f}".format(np.degrees(obs.lat)))
             station_info.append("{:>7.2f}".format(obs.ele))
-            station_info.append("{:>10.6f}".format(obs.jacchia_fit[0]))
-            station_info.append("{:>10.6f}".format(obs.jacchia_fit[1]))
+            jacchia_fit = obs.jacchia_fit
+            if jacchia_fit is None:
+                jacchia_fit = [0, 0]
+            station_info.append("{:>10.6f}".format(jacchia_fit[0]))
+            station_info.append("{:>10.6f}".format(jacchia_fit[1]))
             station_info.append("{:>11.2f}".format(obs.rbeg_ele))
             station_info.append("{:>11.2f}".format(obs.rend_ele))
             station_info.append("{:>17.6f}".format(np.degrees(obs.ang_res_std)))
@@ -3745,6 +4148,7 @@ class Trajectory(object):
 
             station_info.append("{:>7s}".format(str(obs.fov_beg)))
             station_info.append("{:>7s}".format(str(obs.fov_end)))
+            station_info.append("{:s}".format(str(obs.comment)))
 
 
 
@@ -3761,7 +4165,7 @@ class Trajectory(object):
 
 
         out_str += " No, "
-        out_str += "Station ID, "
+        out_str += "    Station ID, "
         out_str += " Ignore, "
         out_str += " Time (s), "
         out_str += "                  JD, "
@@ -3784,7 +4188,7 @@ class Trajectory(object):
         out_str += " Range (m), "
         out_str += "Length (m), "
         out_str += "State vect dist (m), "
-        out_str += " Lag (m), "
+        out_str += "  Lag (m), "
         out_str += "Vel (m/s), "
         out_str += "Vel prev avg (m/s), "
         out_str += "H res (m), "
@@ -3804,7 +4208,7 @@ class Trajectory(object):
 
                 point_info.append("{:3d}".format(i))
 
-                point_info.append("{:>10s}".format(str(obs.station_id)))
+                point_info.append("{:>14s}".format(str(obs.station_id)))
 
                 point_info.append("{:>7d}".format(obs.ignore_list[i]))
                 
@@ -3837,7 +4241,7 @@ class Trajectory(object):
 
                 point_info.append("{:10.2f}".format(obs.length[i]))
                 point_info.append("{:19.2f}".format(obs.state_vect_dist[i]))
-                point_info.append("{:8.2f}".format(obs.lag[i]))
+                point_info.append("{:9.2f}".format(obs.lag[i]))
 
                 point_info.append("{:9.2f}".format(obs.velocities[i]))
                 point_info.append("{:18.2f}".format(obs.velocities_prev_point[i]))
@@ -3888,6 +4292,8 @@ class Trajectory(object):
         out_str += "- Right ascension and declination in the table are given in the epoch of date for the corresponding JD, per every point.\n"
         out_str += "- 'RA and Dec obs' are the right ascension and declination calculated from the observed values, while the 'RA and Dec line' are coordinates of the lines of sight projected on the fitted radiant line. The coordinates are in the epoch of date, and NOT J2000!. 'Azim and alt line' are thus corresponding azimuthal coordinates.\n"
         out_str += "- 'Vel prev avg' is the average velocity including all previous points up to the given point. For the first 4 points this velocity is computed as the average velocity of those 4 points. \n"
+        if uncertainties is not None:
+            out_str += "- The number after +/- is the 1 sigma uncertainty, and the numbers in square brackets are the 95% confidence interval \n"
 
         if verbose:
             print(out_str)
@@ -3947,7 +4353,7 @@ class Trajectory(object):
         t0 = min([obs.time_data[0] for obs in self.observations])
 
         # Plot spatial residuals per observing station
-        for obs in self.observations:
+        for obs in sorted(self.observations, key=lambda x: x.rbeg_ele, reverse=True):
 
             ### PLOT SPATIAL RESIDUALS PER STATION ###
             ##################################################################################################
@@ -3979,7 +4385,7 @@ class Trajectory(object):
 
             plt.grid()
 
-            plt.legend(prop={'size': 6})
+            plt.legend(prop={'size': LEGEND_TEXT_SIZE})
 
             # Set the residual limits to +/-10m if they are smaller than that
             if (np.max(np.abs(obs.v_residuals)) < 10) and (np.max(np.abs(obs.h_residuals)) < 10):
@@ -4013,8 +4419,8 @@ class Trajectory(object):
          ['o', 1 ],
          ['s', 1 ],
          ['d', 1 ],
-         ['o', 1 ],
-         ['s', 1 ],
+         ['v', 1 ],
+         ['*', 1.5 ],
          ]
          
         if self.plot_all_spatial_residuals:
@@ -4023,7 +4429,7 @@ class Trajectory(object):
             ### PLOT ALL SPATIAL RESIDUALS VS. TIME ###
             ##################################################################################################
 
-            for obs in self.observations:
+            for obs in sorted(self.observations, key=lambda x: x.rbeg_ele, reverse=True):
 
                 # Plot vertical residuals
                 vres_plot = plt.scatter(obs.time_data, obs.v_residuals, marker='o', s=4, \
@@ -4054,7 +4460,7 @@ class Trajectory(object):
 
             plt.grid()
 
-            plt.legend(prop={'size': 6})
+            plt.legend(prop={'size': LEGEND_TEXT_SIZE})
 
             # Set the residual limits to +/-10m if they are smaller than that
             if np.max(np.abs(plt.gca().get_ylim())) < 10:
@@ -4080,7 +4486,7 @@ class Trajectory(object):
             ### PLOT ALL SPATIAL RESIDUALS VS LENGTH ###
             ##################################################################################################
 
-            for obs in self.observations:
+            for obs in sorted(self.observations, key=lambda x: x.rbeg_ele, reverse=True):
 
                 # Plot vertical residuals
                 vres_plot = plt.scatter(obs.state_vect_dist/1000, obs.v_residuals, marker='o', s=4, \
@@ -4111,7 +4517,7 @@ class Trajectory(object):
 
             plt.grid()
 
-            plt.legend(prop={'size': 6})
+            plt.legend(prop={'size': LEGEND_TEXT_SIZE})
 
             # Set the residual limits to +/-10m if they are smaller than that
             if np.max(np.abs(plt.gca().get_ylim())) < 10:
@@ -4139,7 +4545,7 @@ class Trajectory(object):
             ### PLOT TOTAL SPATIAL RESIDUALS VS LENGTH ###
             ##################################################################################################
 
-            for i, obs in enumerate(self.observations):
+            for i, obs in enumerate(sorted(self.observations, key=lambda x:x.rbeg_ele, reverse=True)):
 
                 marker, size_multiplier = markers[i%len(markers)]
 
@@ -4166,7 +4572,7 @@ class Trajectory(object):
 
             plt.grid()
 
-            plt.legend(prop={'size': 6})
+            plt.legend(prop={'size': LEGEND_TEXT_SIZE})
 
             # Set the residual limits to +/-10m if they are smaller than that
             if np.max(np.abs(plt.gca().get_ylim())) < 10:
@@ -4197,7 +4603,7 @@ class Trajectory(object):
             # Plot only with gravity compensation is used
             if self.gravity_correction:
 
-                for i, obs in enumerate(self.observations):
+                for i, obs in enumerate(sorted(self.observations, key=lambda x:x.rbeg_ele, reverse=True)):
 
                     marker, size_multiplier = markers[i%len(markers)]
 
@@ -4254,7 +4660,7 @@ class Trajectory(object):
 
                 plt.grid()
 
-                plt.legend(prop={'size': 6})
+                plt.legend(prop={'size': LEGEND_TEXT_SIZE})
 
                 # Set the residual limits to +/-10m if they are smaller than that
                 if np.max(np.abs(plt.gca().get_ylim())) < 10:
@@ -4283,7 +4689,7 @@ class Trajectory(object):
         ### PLOT ALL TOTAL SPATIAL RESIDUALS VS HEIGHT ###
         ##################################################################################################
 
-        for i, obs in enumerate(self.observations):
+        for i, obs in enumerate(sorted(self.observations, key=lambda x:x.rbeg_ele, reverse=True)):
 
             marker, size_multiplier = markers[i%len(markers)]
 
@@ -4316,7 +4722,7 @@ class Trajectory(object):
 
         plt.grid()
 
-        plt.legend(prop={'size': 6})
+        plt.legend(prop={'size': LEGEND_TEXT_SIZE})
 
         # Set the residual limits to +/-10m if they are smaller than that
         if np.max(np.abs(plt.gca().get_xlim())) < 10:
@@ -4344,7 +4750,7 @@ class Trajectory(object):
 
 
         # # Plot lag per observing station
-        # for obs in self.observations:
+        # for obs in sorted(self.observations, key=lambda x: x.rbeg_ele, reverse=True):
             
         #     ### PLOT LAG ###
         #     ##################################################################################################
@@ -4375,7 +4781,7 @@ class Trajectory(object):
         #             label='Lag, ignored points')
 
             
-        #     ax1.legend(prop={'size': 6})
+        #     ax1.legend(prop={'size': LEGEND_TEXT_SIZE})
 
         #     plt.title('Lag, station ' + str(obs.station_id))
         #     ax1.set_xlabel('Lag (m)')
@@ -4409,7 +4815,7 @@ class Trajectory(object):
 
 
         # Generate a list of colors to use for markers
-        colors = cm.viridis(np.linspace(0, 1, len(self.observations)))
+        colors = cm.viridis(np.linspace(0, 0.8, len(self.observations)))
 
         # Only use one type of markers if there are not a lot of stations
         plot_markers = ['x']
@@ -4450,7 +4856,7 @@ class Trajectory(object):
             marker = plot_markers[i%len(plot_markers)]
 
             # Plot the lag
-            plt_handle = plt.plot(used_lag, used_times, marker=marker, label='Station: ' + str(obs.station_id), 
+            plt_handle = plt.plot(used_lag, used_times, marker=marker, label=str(obs.station_id), 
                 zorder=3, markersize=3, color=colors[i], alpha=alpha)
 
 
@@ -4461,15 +4867,17 @@ class Trajectory(object):
                 ignored_lag = obs.lag[obs.ignore_list > 0]
 
                 plt.scatter(ignored_lag, ignored_times, facecolors='k', edgecolors=plt_handle[0].get_color(), 
-                    marker='o', s=8, zorder=4, label='Station: {:s} ignored points'.format(str(obs.station_id)))
+                    marker='o', s=8, zorder=4, label='{:s} ignored points'.format(str(obs.station_id)))
 
 
 
         # Plot the Jacchia fit on all observations
-        time_all = np.sort(np.hstack([obs.time_data for obs in self.observations]))
-        time_jacchia = np.linspace(np.min(time_all), np.max(time_all), 1000)
-        plt.plot(jacchiaLagFunc(time_jacchia, *self.jacchia_fit), time_jacchia, label='Jacchia fit', 
-            zorder=3, color='k', alpha=0.5, linestyle="dashed")
+        if self.show_jacchia:
+            
+            time_all = np.sort(np.hstack([obs.time_data for obs in self.observations]))
+            time_jacchia = np.linspace(np.min(time_all), np.max(time_all), 1000)
+            plt.plot(jacchiaLagFunc(time_jacchia, *self.jacchia_fit), time_jacchia, label='Jacchia fit', 
+                zorder=3, color='k', alpha=0.5, linestyle="dashed")
 
 
         plt.title('Lags, all stations')
@@ -4477,7 +4885,7 @@ class Trajectory(object):
         plt.xlabel('Lag (m)')
         plt.ylabel('Time (s)')
 
-        plt.legend(prop={'size': 6})
+        plt.legend(prop={'size': LEGEND_TEXT_SIZE})
         plt.grid()
         plt.gca().invert_yaxis()
 
@@ -4545,7 +4953,7 @@ class Trajectory(object):
 
             # Plot all point to point velocities
             ax1.scatter(obs.velocities[1:]/1000, obs.time_data[1:], marker=vel_markers[i%len(vel_markers)], 
-                c=colors[i].reshape(1,-1), alpha=alpha, label='Station: {:s}'.format(str(obs.station_id)), zorder=3)
+                c=colors[i].reshape(1,-1), alpha=alpha, label='{:s}'.format(str(obs.station_id)), zorder=3)
 
 
             # Determine the max/min velocity and height, as this is needed for plotting both height/time axes
@@ -4560,15 +4968,16 @@ class Trajectory(object):
 
 
         # Plot the velocity calculated from the Jacchia model
-        t_vel = np.linspace(t_min, t_max, 1000)
-        ax1.plot(jacchiaVelocityFunc(t_vel, self.jacchia_fit[0], self.jacchia_fit[1], self.v_init)/1000, \
-            t_vel, label='Jacchia fit', alpha=0.5, color='k')
+        if self.show_jacchia:
+            t_vel = np.linspace(t_min, t_max, 1000)
+            ax1.plot(jacchiaVelocityFunc(t_vel, self.jacchia_fit[0], self.jacchia_fit[1], self.v_init)/1000, \
+                t_vel, label='Jacchia fit', alpha=0.5, color='k')
 
         plt.title('Velocity')
         ax1.set_xlabel('Velocity (km/s)')
         ax1.set_ylabel('Time (s)')
 
-        ax1.legend(prop={'size': 6})
+        ax1.legend(prop={'size': LEGEND_TEXT_SIZE})
         ax1.grid()
 
         # Set velocity limits to +/- 3 km/s
@@ -4645,15 +5054,20 @@ class Trajectory(object):
             ax1.plot(lineFunc(t_range, *self.velocity_fit)/1000, t_range, label='Velocity fit', \
                 linestyle='--', alpha=0.5, zorder=3)
 
-        stres=self.timing_res
-        if stres is None:
-            stres=0
-        plt.title('Distances from state vector, Time residuals = {:.3e} s'.format(stres))
+
+        title = "Distances from state vector"
+        if self.estimate_timing_vel:
+            stres=self.timing_res
+            if stres is None:
+                stres=0
+            title += ", Time residuals = {:.3e} s".format(stres)
+
+        plt.title(title)
 
         ax1.set_ylabel('Time (s)')
         ax1.set_xlabel('Distance from state vector (km)')
         
-        ax1.legend(prop={'size': 6})
+        ax1.legend(prop={'size': LEGEND_TEXT_SIZE})
         ax1.grid()
         
         # Set time axis limits
@@ -4711,10 +5125,13 @@ class Trajectory(object):
 
 
         # Plot locations of all stations and measured positions of the meteor
-        for obs in self.observations:
+        for i, obs in enumerate(sorted(self.observations, key=lambda x:x.rbeg_ele, reverse=True)):
+
+            # Extract marker type and size multiplier
+            marker, sm = markers[i%len(markers)]
 
             # Plot stations
-            m.scatter(obs.lat, obs.lon, s=10, label=str(obs.station_id), marker='x')
+            m.scatter(obs.lat, obs.lon, s=sm*10, label=str(obs.station_id), marker=marker)
 
             # Plot measured points
             m.plot(obs.meas_lat[obs.ignore_list == 0], obs.meas_lon[obs.ignore_list == 0], c='r')
@@ -4731,7 +5148,7 @@ class Trajectory(object):
 
 
         # If there are more than 10 observations, make the legend font smaller
-        legend_font_size = 6
+        legend_font_size = LEGEND_TEXT_SIZE
         if len(self.observations) >= 10:
             legend_font_size = 5
 
@@ -4757,7 +5174,7 @@ class Trajectory(object):
 
 
         # # Plot angular residuals for every station separately
-        # for obs in self.observations:
+        # for obs in sorted(self.observations, key=lambda x: x.rbeg_ele, reverse=True):
 
         #     # Calculate residuals in arcseconds
         #     res = np.degrees(obs.ang_res)*3600
@@ -4787,7 +5204,7 @@ class Trajectory(object):
         #     plt.ylim(ymin=0)
 
         #     plt.grid()
-        #     plt.legend(prop={'size': 6})
+        #     plt.legend(prop={'size': LEGEND_TEXT_SIZE})
 
         #     if self.save_results:
         #         savePlot(plt, file_name + '_' + str(obs.station_id) + '_angular_residuals.' \
@@ -4801,20 +5218,9 @@ class Trajectory(object):
         #         plt.close()
 
 
-        # marker type, size multiplier
-        markers = [
-         ['x', 2 ],
-         ['+', 8 ],
-         ['o', 1 ],
-         ['s', 1 ],
-         ['d', 1 ],
-         ['o', 1 ],
-         ['s', 1 ],
-         ]
-
         # Plot angular residuals from all stations
         first_ignored_plot = True
-        for i, obs in enumerate(self.observations):
+        for i, obs in enumerate(sorted(self.observations, key=lambda x:x.rbeg_ele, reverse=True)):
 
             # Extract marker type and size multiplier
             marker, sm = markers[i%len(markers)]
@@ -4845,7 +5251,7 @@ class Trajectory(object):
             res_rms = np.degrees(obs.ang_res_std)*3600
 
             # Plot residuals
-            plt.scatter(obs.time_data, res, s=10*sm, zorder=3, label='Station ' + str(obs.station_id) + \
+            plt.scatter(obs.time_data, res, s=10*sm, zorder=3, label=str(obs.station_id) + \
                 ', RMSD = {:.2f}"'.format(res_rms), marker=marker)
 
 
@@ -4857,7 +5263,7 @@ class Trajectory(object):
         plt.ylim(ymin=0)
 
         plt.grid()
-        plt.legend(prop={'size': 6})
+        plt.legend(prop={'size': LEGEND_TEXT_SIZE})
 
         # Pickle the figure
         if ret_figs:
@@ -4883,17 +5289,26 @@ class Trajectory(object):
         if np.any([obs.absolute_magnitudes is not None for obs in self.observations]):
 
             # Go through all observations
-            for obs in self.observations:
+            for obs in sorted(self.observations, key=lambda x: x.rbeg_ele, reverse=True):
 
                 # Check if the absolute magnitude was given
                 if obs.absolute_magnitudes is not None:
 
-                    # Filter out None absolute magnitudes
+                    # Filter out None absolute magnitudes and magnitudes fainter than mag 10
                     filter_mask = np.array([abs_mag is not None for abs_mag in obs.absolute_magnitudes])
 
                     # Extract data that is not ignored
                     used_times = obs.time_data[filter_mask & (obs.ignore_list == 0)]
                     used_magnitudes = obs.absolute_magnitudes[filter_mask & (obs.ignore_list == 0)]
+
+                    # Filter out magnitudes fainter than mag 10
+                    mag_mask = np.array([abs_mag < 10 for abs_mag in used_magnitudes])
+                    
+                    # avoid crash if no magnitudes exceed the threshold
+                    if isinstance(mag_mask, int):
+                        used_times = used_times[mag_mask]
+                        used_magnitudes = used_magnitudes[mag_mask]
+
 
                     plt_handle = plt.plot(used_times, used_magnitudes, marker='x', \
                         label=str(obs.station_id), zorder=3)
@@ -4914,7 +5329,7 @@ class Trajectory(object):
 
             plt.gca().invert_yaxis()
 
-            plt.legend(prop={'size': 6})
+            plt.legend(prop={'size': LEGEND_TEXT_SIZE})
 
             plt.grid()
 
@@ -4942,7 +5357,7 @@ class Trajectory(object):
         if np.any([obs.absolute_magnitudes is not None for obs in self.observations]):
 
             # Go through all observations
-            for obs in self.observations:
+            for obs in sorted(self.observations, key=lambda x: x.rbeg_ele, reverse=True):
 
                 # Check if the absolute magnitude was given
                 if obs.absolute_magnitudes is not None:
@@ -4973,7 +5388,7 @@ class Trajectory(object):
 
             plt.gca().invert_xaxis()
 
-            plt.legend(prop={'size': 6})
+            plt.legend(prop={'size': LEGEND_TEXT_SIZE})
 
             plt.grid()
 
@@ -5769,11 +6184,6 @@ class Trajectory(object):
                 mc_cores=self.mc_cores)
 
 
-            # Set the covariance matrix to the initial trajectory, so it will be reported in the report
-            self.orbit_cov = traj_best.orbit_cov
-            self.state_vect_cov = traj_best.state_vect_cov
-
-
             ### Save uncertainties to the trajectory object ###
             if uncertainties is not None:
                 traj_uncer = copy.deepcopy(uncertainties)
@@ -5787,6 +6197,10 @@ class Trajectory(object):
                 traj_best.uncertanties = traj_uncer
 
             ######
+
+
+            # Copy uncertainties to the geometrical trajectory
+            self = copyUncertainties(traj_best, self)
 
 
         else:

@@ -6,7 +6,7 @@ import sys
 
 import numpy as np
 
-from wmpl.Formats.GenericArgumentParser import addSolverOptions
+from wmpl.Formats.GenericFunctions import addSolverOptions
 from wmpl.Trajectory.GuralTrajectory import GuralTrajectory
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.Utils.TrajConversions import jd2Date
@@ -33,6 +33,7 @@ class StationData(object):
 
         out_str  = ""
         out_str += "StationData object:\n"
+        out_str += "    Station: {:s}\n".format(self.station_id)
         out_str += "    JD ref: {:s}\n".format(str(self.jd_ref))
         out_str += "    Time ref: {:s}\n".format(jd2Date(self.jd_ref, \
             dt_obj=True).strftime("%Y-%m-%d %H:%M:%S.%f"))
@@ -285,4 +286,6 @@ if __name__ == "__main__":
             monte_carlo=(not cml_args.disablemc), mc_runs=cml_args.mcruns, \
             geometric_uncert=cml_args.uncertgeom, gravity_correction=(not cml_args.disablegravity), 
             plot_all_spatial_residuals=cml_args.plotallspatial, plot_file_type=cml_args.imgformat, \
-            show_plots=(not cml_args.hideplots), v_init_part=velpart, v_init_ht=vinitht)
+            show_plots=(not cml_args.hideplots), v_init_part=velpart, v_init_ht=vinitht, \
+            show_jacchia=cml_args.jacchia, estimate_timing_vel=(False if cml_args.notimefit is None else cml_args.notimefit), 
+            mc_noise_std=cml_args.mcstd)

@@ -1,4 +1,4 @@
-""" Method for fitting the population and mass index based on fitting the gamma distribution on observed
+""" Method for fitting the population and mass index based on fitting the Gamma distribution on observed
     data by MLE method and extracting the slope in the magnitude completeness region. 
 """
 
@@ -25,7 +25,7 @@ def inverseLogline(y, m, k):
 
 
 def fitSlope(input_data, mass, ref_point=None):
-    """ Fit a gamma distribution on the input data and compute the slope at the reference point. 
+    """ Fit a Gamma distribution on the input data and compute the slope at the reference point. 
 
     Arguments:
         input_data: [list] A list of magnitudes or masses (see mass keyword argument).
@@ -50,9 +50,8 @@ def fitSlope(input_data, mass, ref_point=None):
     """
 
 
-    # Fit a gamma distribution to the data
-    df = 10
-    params = scipy.stats.gamma.fit(input_data, df, loc=np.min(input_data))
+    # Fit a Gamma distribution to the data
+    params = scipy.stats.gamma.fit(input_data, loc=np.min(input_data))
 
     # Kolmogorov-Smirnov test
     kstest = scipy.stats.kstest(input_data, scipy.stats.gamma.cdf, params)
@@ -110,7 +109,7 @@ def fitSlope(input_data, mass, ref_point=None):
 
 def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot_save_path=None, \
     nsamples=100, mass_as_intensity=False):
-    """ Estimate the mass or population index from the meteor data by fitting a gamma function to it using
+    """ Estimate the mass or population index from the meteor data by fitting a Gamma function to it using
         MLE and estimating the slope in the completeness region.
 
     Arguments:
@@ -143,7 +142,7 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
     input_data = input_data[~np.isnan(input_data)]
 
 
-    # Reverse the signs of magnitudes to conform with the gamma distribution definition
+    # Reverse the signs of magnitudes to conform with the Gamma distribution definition
     if not mass:
         input_data = -input_data
     
@@ -309,7 +308,7 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
         y_min, y_max = plt.gca().get_ylim()
         
         # # Plot fitted survival function
-        # plt.plot(sign*x_arr, scipy.stats.gamma.sf(x_arr, *params))
+        # plt.plot(sign*x_arr, scipy.stats.gamma.sf(x_arr, *params), label="Gamma fit")
 
 
         # Plot slopes of all lines found during uncertainty estimation

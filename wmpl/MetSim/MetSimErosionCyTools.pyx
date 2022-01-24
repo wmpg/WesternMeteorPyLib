@@ -6,7 +6,7 @@ cimport cython
 
 import numpy as np
 cimport numpy as np
-from libc.math cimport sqrt, M_PI, M_PI_2, atan2
+from libc.math cimport sqrt, M_PI, M_PI_2, atan2, tanh, log, exp, log10
 
 
 # Define cython types for numpy arrays
@@ -289,7 +289,7 @@ cdef double massLoss(double K, double sigma, double m, double rho_atm, double v)
         sigma: [double] Ablation coefficient (s^2/m^2).
         m: [double] Mass (kg).
         rho_atm: [double] Atmosphere density (kg/m^3).
-        v: [double] Velocity (m/S).
+        v: [double] Velocity (m/s).
 
     Return:
         dm/dt: [double] Mass loss in kg/s.
@@ -376,20 +376,122 @@ cpdef double decelerationRK4(double dt, double K, double m, double rho_atm, doub
 
 
 @cython.cdivision(True) 
-cpdef double luminousEfficiency(int lum_eff_type, double lum_eff, double vel):
-    """ Compute the luminous efficienty in percent for the given velocity. 
+cpdef double luminousEfficiency(int lum_eff_type, double lum_eff, double vel, double mass):
+    """ Compute the luminous efficiency of the given type, velocity, and mass.
     
     Arguments:
-        lum_eff_type: [int] Lum. eff. model: 0 - constant, 1 - TDB, ...
+        lum_eff_type: [int] Lum. eff. model: 
+            0 - constant, 
+            1 - Revelle & Ceplecha (2001): a) Type I, 
+            2 - b) Type II, 
+            3 - c) Type III, 
+            4 - Borovicka et al. (2013) Kosice
+            5 - CAMO faint meteors
+            6 - Celpecha & McCrosky (1976)
+            7 - Borovicka et al. (2020) - Two strengths
         lum_eff: [double] Value of the constant luminous efficiency (percent).
         vel: [double] Velocity (m/s).
+        mass: [double] Mass (kg).
 
     Return:
         tau: [double] Luminous efficiency (ratio).
 
     """
 
-    return lum_eff/100.0
+    cdef double c1, c2
+
+    # Constant luminous efficiency
+    if lum_eff_type == 0:
+        return lum_eff/100.0
+
+    # Revelle & Ceplecha (2001)
+    elif (lum_eff_type == 1) or (lum_eff_type == 2) or (lum_eff_type == 3):
+
+        # Type I meteoroids
+        if lum_eff_type == 1:
+            c1 = 0.466
+            c2 = -1.538
+
+        # Type II meteoroids
+        elif lum_eff_type == 2:
+            c1 = -0.955
+            c2 = -2.959
+
+        # Type III meteoroids
+        else:
+            c1 = -2.670
+            c2 = -4.674
+
+
+        # Slow meteoroids
+        if vel < 25372:
+            return (exp(c1 - 10.307*log(vel/1000.0) + 9.781*log(vel/1000.0)**2 - 3.0414*log(vel/1000.0)**3 \
+                + 0.3213*log(vel/1000.0)**4 + 1.15*tanh(0.38*log(mass))))/100.0
+
+        # Fast meteoroids
+        else:
+            return (exp(c2 + log(vel/1000.0) + 1.15*tanh(0.38*log(mass))))/100.0
+
+    # Borovicka et al. (2013) - Kosice
+    elif lum_eff_type == 4:
+        return (exp(-1.45 + log(vel/1000.0) + 0.35*tanh(0.38*log(mass))))/100.0
+
+    # CAMO fast meteors - Subasinghe 2018 & Brown 2020
+    elif lum_eff_type == 5:
+        return exp(-12.59 + 5.58*log(vel/1000.0) - 0.17*log(vel/1000.0)**3 - 1.21*tanh(0.2*log(1e6*mass)))/100.0
+
+    # Ceplecha & McCrosky (1976)
+    elif lum_eff_type == 6:
+
+        # Correction factor to convert from panchromatic magnitude to fraction definition
+        correction_factor = 1500*10000000
+
+        if vel <= 9300:
+            return correction_factor*10**(-12.75)
+
+        elif vel <= 12500:
+            return correction_factor*10**(-15.60 + 2.92*log10(vel/1000.0))
+
+        elif vel <= 17000:
+            return correction_factor*10**(-13.24 + 0.77*log10(vel/1000.0))
+
+        elif vel <= 27000:
+            return correction_factor*10**(-12.50 + 0.17*log10(vel/1000.0))
+
+        else:
+            return correction_factor*10**(-13.69 + 1.00*log10(vel/1000.0))
+
+    # Borovicka et al. (2020) - Two strengths
+    elif lum_eff_type == 7:
+
+        if vel < 25372:
+            return exp(0.567 - 10.307*log(vel/1000.0) 
+                             +  9.781*log(vel/1000.0)**2 
+                             - 3.0414*log(vel/1000.0)**3 
+                             + 0.3213*log(vel/1000.0)**4 
+                             + 0.3470*tanh(0.38*log(mass))
+                        )/100.0
+        else:
+            return exp(-1.4286 + log(vel/1000.0) + 0.347*tanh(0.38*log(mass)))/100.0
+
+
+
+@cython.cdivision(True) 
+cpdef double ionizationEfficiency(double vel):
+    """ Compute the ionization efficienty in percent for the given velocity. Jones (1997) function.
+    
+    Arguments:
+        vel: [double] Velocity (m/s).
+
+    Return:
+        tau: [double] Dimensionless ionization efficiency (ratio, from 0 to 1).
+
+    """
+
+    # Scale velocity to km/s
+    vel = vel/1000
+
+    return 10**(5.84 - 0.09*vel**0.5 - 9.56/(log10(vel)))
 
 
 

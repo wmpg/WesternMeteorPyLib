@@ -8,7 +8,7 @@ import sys
 import numpy as np
 
 from wmpl.Formats.EvUWO import writeEvFile
-from wmpl.Formats.GenericArgumentParser import addSolverOptions
+from wmpl.Formats.GenericFunctions import addSolverOptions
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.TrajConversions import jd2Date
 from wmpl.Trajectory.Trajectory import Trajectory
@@ -186,4 +186,6 @@ if __name__ == "__main__":
         max_toffset=max_toffset, monte_carlo=(not cml_args.disablemc), mc_runs=cml_args.mcruns, \
         geometric_uncert=cml_args.uncertgeom, gravity_correction=(not cml_args.disablegravity), \
         plot_all_spatial_residuals=cml_args.plotallspatial, plot_file_type=cml_args.imgformat, \
-        show_plots=(not cml_args.hideplots), v_init_part=velpart, v_init_ht=vinitht)
+        show_plots=(not cml_args.hideplots), v_init_part=velpart, v_init_ht=vinitht, \
+        show_jacchia=cml_args.jacchia, estimate_timing_vel=(False if cml_args.notimefit is None else cml_args.notimefit), \
+        mc_noise_std=cml_args.mcstd)

@@ -1,5 +1,6 @@
 import os
 import sys
+import subprocess
 
 if sys.version_info.major < 3:
     import urllib as urllibrary
@@ -20,7 +21,19 @@ from UpdateOrbitFiles import updateOrbitFiles
 # README file and 2) it's easier to type in the README file than to put a raw
 # string in below ...
 def read(fname):
-    return open(os.path.join(os.path.dirname(__file__), fname)).read()
+    return open(os.path.join(os.path.dirname(__file__), fname), encoding='utf-8').read()
+
+
+
+
+# Remove all pyc files from the project
+for entry in sorted(os.walk("."), key=lambda x: x[0]):
+
+    dir_path, _, file_names = entry
+
+    for fn in file_names:
+        if fn.lower().endswith(".pyc"):
+            os.remove(os.path.join(dir_path, fn))
 
 
 
@@ -43,7 +56,7 @@ for dir_name in os.listdir(dir_path):
 
 
 # Read requirements file
-with open('requirements.txt') as f:
+with open('requirements.txt', encoding='utf-8') as f:
     requirements = f.read().splitlines()
 
 
@@ -90,6 +103,26 @@ cython_modules = [
     ]
 
 
+# Compile Gural solver under Linux
+if "linux" in sys.platform:
+
+    gural_common = os.path.join("wmpl", "Trajectory", "lib", "common")
+    gural_trajectory = os.path.join("wmpl", "Trajectory", "lib", "trajectory")
+
+    print("Building Gural trajectory solver...")
+    subprocess.call(["make", "-C", gural_common])
+    subprocess.call(["make", "-C", gural_trajectory])
+
+    # Add gural library to data files
+    traj_library = os.path.join("wmpl", "Trajectory", 'lib', 'trajectory', 'libtrajectorysolution')
+    if os.path.isfile(traj_library):
+        share_files += [traj_library]
+
+    # Path to the PSO configuration
+    pso_config_path = os.path.join("wmpl", "Trajectory", 'lib', 'trajectory', 'conf', 'trajectorysolution.conf')
+    if os.path.isfile(pso_config_path):
+        share_files += [pso_config_path]
+
 
 setup(
     name = "westernmeteorpylib",
@@ -110,6 +143,6 @@ setup(
         "License :: OSI Approved :: MIT License",
     ],
     setup_requires=["numpy"],
-    install_requires=requirements,
+    #install_requires=requirements,
     include_dirs=[numpy.get_include()]
 )

@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1908</width>
-    <height>1001</height>
+    <width>1910</width>
+    <height>1091</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -18,7 +18,7 @@
     <property name="geometry">
      <rect>
       <x>1510</x>
-      <y>910</y>
+      <y>970</y>
       <width>171</width>
       <height>41</height>
      </rect>
@@ -318,7 +318,7 @@
     <property name="geometry">
      <rect>
       <x>1510</x>
-      <y>460</y>
+      <y>520</y>
       <width>391</width>
       <height>121</height>
      </rect>
@@ -365,7 +365,7 @@
       </rect>
      </property>
      <property name="text">
-      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;σ&lt;span style=&quot; vertical-align:sub;&quot;&gt;compress&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;P&lt;span style=&quot; vertical-align:sub;&quot;&gt;compress&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
      </property>
      <property name="alignment">
       <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
@@ -560,7 +560,7 @@
       </rect>
      </property>
      <property name="text">
-      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;s&lt;span style=&quot; vertical-align:super;&quot;&gt;2&lt;/span&gt;/km&lt;span style=&quot; vertical-align:super;&quot;&gt;2&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;kg/MJ&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
      </property>
     </widget>
     <widget class="QCheckBox" name="checkBoxDisruptionErosionCoeff">
@@ -573,7 +573,7 @@
       </rect>
      </property>
      <property name="text">
-      <string>Different</string>
+      <string>Change</string>
      </property>
     </widget>
    </widget>
@@ -583,7 +583,7 @@
       <x>1510</x>
       <y>300</y>
       <width>391</width>
-      <height>161</height>
+      <height>221</height>
      </rect>
     </property>
     <property name="title">
@@ -654,7 +654,7 @@
       </rect>
      </property>
      <property name="text">
-      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;s&lt;span style=&quot; vertical-align:super;&quot;&gt;2&lt;/span&gt;/km&lt;span style=&quot; vertical-align:super;&quot;&gt;2&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;kg/MJ&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
      </property>
     </widget>
     <widget class="QLineEdit" name="inputErosionCoeff">
@@ -687,7 +687,7 @@
      <property name="geometry">
       <rect>
        <x>280</x>
-       <y>60</y>
+       <y>90</y>
        <width>71</width>
        <height>23</height>
       </rect>
@@ -697,7 +697,7 @@
      <property name="geometry">
       <rect>
        <x>360</x>
-       <y>60</y>
+       <y>90</y>
        <width>57</width>
        <height>21</height>
       </rect>
@@ -710,7 +710,7 @@
      <property name="geometry">
       <rect>
        <x>210</x>
-       <y>60</y>
+       <y>90</y>
        <width>57</width>
        <height>21</height>
       </rect>
@@ -726,7 +726,7 @@
      <property name="geometry">
       <rect>
        <x>280</x>
-       <y>110</y>
+       <y>140</y>
        <width>71</width>
        <height>23</height>
       </rect>
@@ -736,7 +736,7 @@
      <property name="geometry">
       <rect>
        <x>360</x>
-       <y>110</y>
+       <y>140</y>
        <width>57</width>
        <height>21</height>
       </rect>
@@ -749,7 +749,7 @@
      <property name="geometry">
       <rect>
        <x>210</x>
-       <y>110</y>
+       <y>140</y>
        <width>57</width>
        <height>21</height>
       </rect>
@@ -765,7 +765,7 @@
      <property name="geometry">
       <rect>
        <x>280</x>
-       <y>30</y>
+       <y>60</y>
        <width>71</width>
        <height>23</height>
       </rect>
@@ -775,7 +775,7 @@
      <property name="geometry">
       <rect>
        <x>210</x>
-       <y>30</y>
+       <y>60</y>
        <width>57</width>
        <height>21</height>
       </rect>
@@ -846,7 +846,7 @@
       </rect>
      </property>
      <property name="text">
-      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;s&lt;span style=&quot; vertical-align:super;&quot;&gt;2&lt;/span&gt;/km&lt;span style=&quot; vertical-align:super;&quot;&gt;2&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;kg/MJ&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
      </property>
     </widget>
     <widget class="QLabel" name="label_63">
@@ -882,7 +882,7 @@
      <property name="geometry">
       <rect>
        <x>236</x>
-       <y>84</y>
+       <y>114</y>
        <width>111</width>
        <height>21</height>
       </rect>
@@ -898,7 +898,7 @@
      <property name="geometry">
       <rect>
        <x>236</x>
-       <y>134</y>
+       <y>164</y>
        <width>111</width>
        <height>21</height>
       </rect>
@@ -914,7 +914,7 @@
      <property name="geometry">
       <rect>
        <x>356</x>
-       <y>134</y>
+       <y>164</y>
        <width>61</width>
        <height>21</height>
       </rect>
@@ -927,13 +927,169 @@
      <property name="geometry">
       <rect>
        <x>356</x>
-       <y>84</y>
+       <y>114</y>
        <width>61</width>
        <height>21</height>
       </rect>
      </property>
      <property name="text">
       <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;μm&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+     </property>
+    </widget>
+    <widget class="QCheckBox" name="checkBoxErosionRhoChange">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>160</y>
+       <width>85</width>
+       <height>21</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Change</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_69">
+     <property name="geometry">
+      <rect>
+       <x>30</x>
+       <y>160</y>
+       <width>61</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;ρ&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="inputErosionRhoChange">
+     <property name="geometry">
+      <rect>
+       <x>100</x>
+       <y>160</y>
+       <width>71</width>
+       <height>23</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_68">
+     <property name="geometry">
+      <rect>
+       <x>180</x>
+       <y>160</y>
+       <width>51</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;kg/m&lt;span style=&quot; vertical-align:super;&quot;&gt;3&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+     </property>
+    </widget>
+    <widget class="QCheckBox" name="checkBoxErosionAblationCoeffChange">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>190</y>
+       <width>85</width>
+       <height>21</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Change</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_71">
+     <property name="geometry">
+      <rect>
+       <x>30</x>
+       <y>190</y>
+       <width>57</width>
+       <height>15</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&lt;p&gt;&amp;sigma;&lt;/p&gt;</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="inputErosionAblationCoeffChange">
+     <property name="geometry">
+      <rect>
+       <x>100</x>
+       <y>190</y>
+       <width>71</width>
+       <height>23</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_70">
+     <property name="geometry">
+      <rect>
+       <x>180</x>
+       <y>190</y>
+       <width>71</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;kg/MJ&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+     </property>
+    </widget>
+    <widget class="Line" name="line_4">
+     <property name="geometry">
+      <rect>
+       <x>220</x>
+       <y>90</y>
+       <width>20</width>
+       <height>121</height>
+      </rect>
+     </property>
+     <property name="orientation">
+      <enum>Qt::Vertical</enum>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="inputBinsPer10m">
+     <property name="geometry">
+      <rect>
+       <x>280</x>
+       <y>30</y>
+       <width>71</width>
+       <height>23</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_93">
+     <property name="geometry">
+      <rect>
+       <x>210</x>
+       <y>30</y>
+       <width>57</width>
+       <height>21</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;bins&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_94">
+     <property name="geometry">
+      <rect>
+       <x>360</x>
+       <y>30</y>
+       <width>57</width>
+       <height>21</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-size:6pt;&quot;&gt;log(m)&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
      </property>
     </widget>
    </widget>
@@ -956,7 +1112,7 @@
       </rect>
      </property>
      <property name="text">
-      <string>Vinit obs</string>
+      <string>Vinit obs = ?</string>
      </property>
     </widget>
     <widget class="QLabel" name="vInitSimLabel">
@@ -969,7 +1125,7 @@
       </rect>
      </property>
      <property name="text">
-      <string>Vinit sim</string>
+      <string>Vinit sim = ?</string>
      </property>
     </widget>
    </widget>
@@ -1086,7 +1242,7 @@
       </rect>
      </property>
      <property name="text">
-      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;s&lt;span style=&quot; vertical-align:super;&quot;&gt;2&lt;/span&gt;/km&lt;span style=&quot; vertical-align:super;&quot;&gt;2&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;kg/MJ&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
      </property>
     </widget>
     <widget class="QLabel" name="label_32">
@@ -1313,6 +1469,56 @@
       </rect>
      </property>
     </widget>
+    <widget class="QComboBox" name="lumEffComboBox">
+     <property name="geometry">
+      <rect>
+       <x>190</x>
+       <y>150</y>
+       <width>171</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <item>
+      <property name="text">
+       <string>Constant</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>R&amp;C (2001) - Type I</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>R&amp;C (2001) - Type II</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>R&amp;C (2001) - Type III</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>Borovicka et al. (2013)</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>CAMO faint meteors</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>Ceplecha&amp;McCrosky (1976)</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>Borovicka et al. (2020)</string>
+      </property>
+     </item>
+    </widget>
    </widget>
    <widget class="MagnitudeMplWidget" name="magnitudePlot" native="true">
     <property name="geometry">
@@ -1323,6 +1529,19 @@
       <height>551</height>
      </rect>
     </property>
+    <widget class="QLabel" name="obsRadiatedEnergyLabel">
+     <property name="geometry">
+      <rect>
+       <x>0</x>
+       <y>530</y>
+       <width>401</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Radiated energy (obs) = ?</string>
+     </property>
+    </widget>
    </widget>
    <widget class="WakeMplWidget" name="wakePlot" native="true">
     <property name="geometry">
@@ -1338,7 +1557,7 @@
     <property name="geometry">
      <rect>
       <x>1510</x>
-      <y>580</y>
+      <y>640</y>
       <width>391</width>
       <height>161</height>
      </rect>
@@ -1640,7 +1859,7 @@
     <property name="geometry">
      <rect>
       <x>1510</x>
-      <y>870</y>
+      <y>930</y>
       <width>171</width>
       <height>31</height>
      </rect>
@@ -1653,7 +1872,7 @@
     <property name="geometry">
      <rect>
       <x>1720</x>
-      <y>900</y>
+      <y>960</y>
       <width>171</width>
       <height>21</height>
      </rect>
@@ -1666,7 +1885,7 @@
     <property name="geometry">
      <rect>
       <x>1720</x>
-      <y>930</y>
+      <y>990</y>
       <width>171</width>
       <height>21</height>
      </rect>
@@ -1689,7 +1908,7 @@
     <property name="geometry">
      <rect>
       <x>1510</x>
-      <y>740</y>
+      <y>800</y>
       <width>391</width>
       <height>121</height>
      </rect>
@@ -1887,7 +2106,7 @@ p, li { white-space: pre-wrap; }
     <property name="geometry">
      <rect>
       <x>1720</x>
-      <y>870</y>
+      <y>930</y>
       <width>171</width>
       <height>21</height>
      </rect>
@@ -1896,14 +2115,394 @@ p, li { white-space: pre-wrap; }
      <string>Auto fit refinement</string>
     </property>
    </widget>
+   <widget class="QGroupBox" name="fragmentationGroup">
+    <property name="geometry">
+     <rect>
+      <x>20</x>
+      <y>920</y>
+      <width>941</width>
+      <height>81</height>
+     </rect>
+    </property>
+    <property name="title">
+     <string comment="0">Fragmentation</string>
+    </property>
+    <property name="alignment">
+     <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
+    </property>
+    <property name="flat">
+     <bool>false</bool>
+    </property>
+    <property name="checkable">
+     <bool>true</bool>
+    </property>
+    <property name="checked">
+     <bool>false</bool>
+    </property>
+    <widget class="QPushButton" name="loadFragmentationFileButton">
+     <property name="geometry">
+      <rect>
+       <x>640</x>
+       <y>30</y>
+       <width>80</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Load file</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_72">
+     <property name="geometry">
+      <rect>
+       <x>730</x>
+       <y>19</y>
+       <width>201</width>
+       <height>41</height>
+      </rect>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">font: 6pt &quot;Arial&quot;;</string>
+     </property>
+     <property name="text">
+      <string>fragmentation file path</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="newFragmentationFileButton">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>30</y>
+       <width>80</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>New file</string>
+     </property>
+    </widget>
+    <widget class="Line" name="line_2">
+     <property name="geometry">
+      <rect>
+       <x>100</x>
+       <y>30</y>
+       <width>16</width>
+       <height>31</height>
+      </rect>
+     </property>
+     <property name="orientation">
+      <enum>Qt::Vertical</enum>
+     </property>
+    </widget>
+    <widget class="Line" name="line_3">
+     <property name="geometry">
+      <rect>
+       <x>620</x>
+       <y>30</y>
+       <width>16</width>
+       <height>31</height>
+      </rect>
+     </property>
+     <property name="orientation">
+      <enum>Qt::Vertical</enum>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="mainFragmentStatusChangeButton">
+     <property name="geometry">
+      <rect>
+       <x>330</x>
+       <y>30</y>
+       <width>51</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Main</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="allFragmentsStatusChangeButton">
+     <property name="geometry">
+      <rect>
+       <x>390</x>
+       <y>30</y>
+       <width>51</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>All</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="newSingleBodyFragmentButton">
+     <property name="geometry">
+      <rect>
+       <x>450</x>
+       <y>30</y>
+       <width>51</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>SB frag</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="newErodingFragmentButton">
+     <property name="geometry">
+      <rect>
+       <x>510</x>
+       <y>30</y>
+       <width>51</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Er frag</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="newDustReleaseButton">
+     <property name="geometry">
+      <rect>
+       <x>570</x>
+       <y>30</y>
+       <width>51</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Dust</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_73">
+     <property name="geometry">
+      <rect>
+       <x>258</x>
+       <y>30</y>
+       <width>81</width>
+       <height>20</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>New entry:</string>
+     </property>
+    </widget>
+    <widget class="Line" name="line_5">
+     <property name="geometry">
+      <rect>
+       <x>240</x>
+       <y>30</y>
+       <width>16</width>
+       <height>31</height>
+      </rect>
+     </property>
+     <property name="orientation">
+      <enum>Qt::Vertical</enum>
+     </property>
+    </widget>
+    <widget class="QCheckBox" name="checkBoxFragmentationShowIndividualLCs">
+     <property name="geometry">
+      <rect>
+       <x>120</x>
+       <y>30</y>
+       <width>121</width>
+       <height>31</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Show individual 
+LCs</string>
+     </property>
+    </widget>
+   </widget>
+   <widget class="QGroupBox" name="groupBox_2">
+    <property name="geometry">
+     <rect>
+      <x>1259</x>
+      <y>919</y>
+      <width>241</width>
+      <height>81</height>
+     </rect>
+    </property>
+    <property name="title">
+     <string>Electron line density</string>
+    </property>
+    <widget class="QCheckBox" name="checkBoxPlotElectronLineDensity">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>20</y>
+       <width>51</width>
+       <height>21</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Plot</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_74">
+     <property name="geometry">
+      <rect>
+       <x>50</x>
+       <y>20</y>
+       <width>57</width>
+       <height>15</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;H&lt;span style=&quot; vertical-align:sub;&quot;&gt;meas&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="inputElectronDensityHt">
+     <property name="geometry">
+      <rect>
+       <x>120</x>
+       <y>20</y>
+       <width>71</width>
+       <height>23</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_75">
+     <property name="geometry">
+      <rect>
+       <x>200</x>
+       <y>20</y>
+       <width>31</width>
+       <height>21</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>km</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_76">
+     <property name="geometry">
+      <rect>
+       <x>50</x>
+       <y>50</y>
+       <width>57</width>
+       <height>15</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;q&lt;span style=&quot; vertical-align:sub;&quot;&gt;meas&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="inputElectronDensity">
+     <property name="geometry">
+      <rect>
+       <x>120</x>
+       <y>50</y>
+       <width>71</width>
+       <height>23</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_77">
+     <property name="geometry">
+      <rect>
+       <x>200</x>
+       <y>50</y>
+       <width>31</width>
+       <height>21</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;e&lt;span style=&quot; vertical-align:super;&quot;&gt;-&lt;/span&gt;/m&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+     </property>
+    </widget>
+   </widget>
+   <widget class="QGroupBox" name="groupBox_3">
+    <property name="geometry">
+     <rect>
+      <x>969</x>
+      <y>919</y>
+      <width>281</width>
+      <height>81</height>
+     </rect>
+    </property>
+    <property name="title">
+     <string>Plots</string>
+    </property>
+    <widget class="QPushButton" name="plotDynamicPressureButton">
+     <property name="geometry">
+      <rect>
+       <x>90</x>
+       <y>20</y>
+       <width>91</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Dyn pressure</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="plotAirDensityButton">
+     <property name="geometry">
+      <rect>
+       <x>0</x>
+       <y>20</y>
+       <width>80</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Air dens</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="plotMassLossButton">
+     <property name="geometry">
+      <rect>
+       <x>190</x>
+       <y>20</y>
+       <width>80</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Mass loss</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="plotLumEffButton">
+     <property name="geometry">
+      <rect>
+       <x>0</x>
+       <y>50</y>
+       <width>80</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Lum. eff.</string>
+     </property>
+    </widget>
+   </widget>
+   <widget class="QLabel" name="simRadiatedEnergyLabel">
+    <property name="geometry">
+     <rect>
+      <x>0</x>
+      <y>550</y>
+      <width>401</width>
+      <height>16</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Radiated energy (sim) = ?</string>
+    </property>
+   </widget>
   </widget>
   <widget class="QMenuBar" name="menubar">
    <property name="geometry">
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>1908</width>
-     <height>21</height>
+     <width>1910</width>
+     <height>20</height>
     </rect>
    </property>
   </widget>

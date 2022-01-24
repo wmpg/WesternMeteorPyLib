@@ -438,6 +438,8 @@ def calcDVuncert(Lh1, Lh1_std, Bh1, Bh1_std, sol1, Vh1, Vh1_std, Lh2, Lh2_std, B
     # Calculate the total squared dissimularity
     dissim_2 = v_dissim**2 + (w1*2*ang_dissim) + w2*sol_dissmin**2
 
+    if dissim_2 < 0:
+        dissim_2 = 0
 
     return math.sqrt(dissim_2)
 
@@ -507,6 +509,9 @@ def calcDV(Lh1, Bh1, sol1, Vh1, Lh2, Bh2, sol2, Vh2, d_max=999.0):
 
 
     #dissim = (Vh1 - Vh2)**2 + w1*(1 - dot/mags) + w2*(2*math.sin((sol1 - sol2)/2.0))**2
+
+    if dissim_2 < 0:
+        dissim_2 = 0
 
 
     return math.sqrt(dissim_2)

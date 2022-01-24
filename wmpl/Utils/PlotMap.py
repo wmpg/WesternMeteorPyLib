@@ -112,8 +112,8 @@ class GroundMap(object):
         max_dist += 1000*border_size
 
         # Init the map
-        self.m = Basemap(projection='gnom', lat_0=np.degrees(lat_mean), lon_0=np.degrees(lon_mean), \
-            width=2*max_dist, height=2*max_dist, resolution='i', ax=ax)
+        self.m = Basemap(projection='gnom', lat_0=np.degrees(lat_mean), \
+            lon_0=np.degrees(lon_mean), width=2*max_dist, height=2*max_dist, resolution='i', ax=ax)
 
         # Draw the coast boundary and fill the oceans with the given color
         self.m.drawmapboundary(fill_color=self.cs.map_background)
@@ -164,23 +164,27 @@ class GroundMap(object):
         ######
 
 
-        # Make sure there are always at least 2 and at most 7 parallels and meridians in the plot
+        # Make sure there are always at least 3 and at most 7 parallels and meridians in the plot
         # Use at most 10 iterations
+        meridian_step = parallel_step/np.cos(lat_mean)
         for _ in range(10):
 
             parallel_no = abs(lat_max - lat_min)/parallel_step
 
             if parallel_no > 7:
                 parallel_step *= 2
-                meridian_step *= 2
+                meridian_step *= 2/np.cos(lat_mean)
 
-            elif parallel_no < 3:
+            elif parallel_no < 4:
                 parallel_step /= 2
-                meridian_step /= 2            
+                meridian_step /= 2/np.cos(lat_mean)
 
             else:
                 break
 
+        # Round the meridian step
+        if meridian_step > 1:
+            meridian_step = round(meridian_step)
 
 
         # Draw parallels
