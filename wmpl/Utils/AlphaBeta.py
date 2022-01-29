@@ -8,6 +8,8 @@ import scipy.special
 import scipy.optimize
 
 
+from wmpl.Utils.Math import meanAngle
+from wmpl.Utils.Physics import dynamicPressure
 
 
 # Height normalization constant
@@ -340,7 +342,7 @@ if __name__ == "__main__":
             ht_end = 10000
         elif (ht_end > 20000) and (ht_end < 35000):
             ht_end = 20000
-        ht_arr = np.linspace(ht_end, traj.rbeg_ele + 5000, 100)
+        ht_arr = np.linspace(ht_end, traj.rbeg_ele + 5000, 200)
         vel_arr = alphaBetaVelocity(ht_arr, alpha, beta, v_init)
 
 
@@ -397,3 +399,38 @@ if __name__ == "__main__":
         plt.axes().set_aspect('equal')
         plt.legend()
         plt.show()
+
+
+
+        ### Plot dynamic pressure ###
+
+        # Take mean meteor lat/lon as reference for the atmosphere model
+        lat_mean = np.mean([traj.rbeg_lat, traj.rend_lat])
+        lon_mean = meanAngle([traj.rbeg_lon, traj.rend_lon])
+
+        # Compute the dynamic pressure
+        dyn_pressure = dynamicPressure(lat_mean, lon_mean, ht_arr, traj.jdt_ref, vel_arr)
+
+
+        # Plot dyn pressure
+        plt.plot(dyn_pressure/1e6, ht_arr/1000, color='k')
+
+
+        # Compute and mark peak on the graph
+        peak_dyn_pressure_index = np.argmax(dyn_pressure)
+        peak_dyn_pressure = dyn_pressure[peak_dyn_pressure_index]/1e6
+        peak_dyn_pressure_ht = ht_arr[peak_dyn_pressure_index]/1000
+        plt.scatter(peak_dyn_pressure, peak_dyn_pressure_ht, \
+            label="Peak P = {:.2f} MPa\nHt = {:.2f} km".format(peak_dyn_pressure, peak_dyn_pressure_ht))
+
+
+
+        plt.legend()
+
+        plt.ylabel("Height (km)")
+        plt.xlabel("Dynamic pressure (MPa)")
+
+        plt.show()
+
+
+        ### ###
