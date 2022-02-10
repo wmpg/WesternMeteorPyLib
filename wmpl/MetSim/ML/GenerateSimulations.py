@@ -122,7 +122,7 @@ class ErosionSimParametersCAMO(object):
         self.param_list.append("rho")
 
         # Intrinsic ablation coeff range (s^2/m^2)
-        self.sigma = MetParam(0.001/1e6, 0.5/1e6)
+        self.sigma = MetParam(0.005/1e6, 0.5/1e6)
         self.param_list.append("sigma")
 
         ##
@@ -136,11 +136,11 @@ class ErosionSimParametersCAMO(object):
         self.param_list.append("erosion_height_start")
 
         # Erosion coefficient (s^2/m^2)
-        self.erosion_coeff = MetParam(0.0, 0.5/1e6)
+        self.erosion_coeff = MetParam(0.0, 1.0/1e6)
         self.param_list.append("erosion_coeff")
 
         # Mass index
-        self.erosion_mass_index = MetParam(1.0, 3.0)
+        self.erosion_mass_index = MetParam(1.5, 3.0)
         self.param_list.append("erosion_mass_index")
 
         # Minimum mass for erosion
@@ -271,7 +271,7 @@ class ErosionSimParametersCAMOWide(object):
         self.param_list.append("rho")
 
         # Intrinsic ablation coeff range (s^2/m^2)
-        self.sigma = MetParam(0.001/1e6, 0.5/1e6)
+        self.sigma = MetParam(0.005/1e6, 0.5/1e6)
         self.param_list.append("sigma")
 
         ##
@@ -285,11 +285,11 @@ class ErosionSimParametersCAMOWide(object):
         self.param_list.append("erosion_height_start")
 
         # Erosion coefficient (s^2/m^2)
-        self.erosion_coeff = MetParam(0.0, 0.5/1e6)
+        self.erosion_coeff = MetParam(0.0, 1.0/1e6)
         self.param_list.append("erosion_coeff")
 
         # Mass index
-        self.erosion_mass_index = MetParam(1.0, 3.0)
+        self.erosion_mass_index = MetParam(1.5, 3.0)
         self.param_list.append("erosion_mass_index")
 
         # Minimum mass for erosion
