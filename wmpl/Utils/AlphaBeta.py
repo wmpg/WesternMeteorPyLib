@@ -434,3 +434,40 @@ if __name__ == "__main__":
 
 
         ### ###
+
+
+        ### Plot magnitude vs dynamic pressure ###
+
+
+        for obs in traj.observations:
+
+            if obs.absolute_magnitudes is not None:
+
+                # Don't show magnitudes fainter than mag +8
+                mag_filter = obs.absolute_magnitudes < 5
+
+                if np.any(mag_filter):
+
+                    # Get the model velocities at the observed heights
+                    vel_model_obs = alphaBetaVelocity(obs.model_ht, alpha, beta, v_init)
+
+                    # Compute the dynamic pressure
+                    dyn_pres_station = dynamicPressure(lat_mean, lon_mean, obs.model_ht, traj.jdt_ref, vel_model_obs)
+
+                    # Plot the magnitude
+                    plt.plot(dyn_pres_station[mag_filter]/1e6, obs.absolute_magnitudes[mag_filter], label=obs.station_id)
+
+
+
+
+        plt.xlabel("Dynamic pressure (MPa)")
+        plt.ylabel("Absolute magnitude")
+        plt.gca().invert_yaxis()
+
+        plt.legend()
+
+        plt.show()
+
+
+
+        ###
