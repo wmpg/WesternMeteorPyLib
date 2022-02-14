@@ -1,13 +1,13 @@
 from __future__ import print_function
 
 import multiprocessing
-
+import time
 from contextlib import closing
 
 
-
-def parallelComputeGenerator(generator, workerFunc, resultsCheckFunc, req_num, n_proc=None, 
-    results_check_kwagrs=None, max_runs=None):
+def parallelComputeGenerator(
+    generator, workerFunc, resultsCheckFunc, req_num, n_proc=None, results_check_kwagrs=None, max_runs=None
+):
     """ Given a generator which generates inputs for the workerFunc function, generate and process results 
         until req_num number of results satisfies the resultsCheckFunc function.
 
@@ -30,19 +30,16 @@ def parallelComputeGenerator(generator, workerFunc, resultsCheckFunc, req_num, n
         [list] A list of results.
     """
 
-
     # If the number of processes was not given, use all available CPUs
     if n_proc is None:
         n_proc = multiprocessing.cpu_count()
-
 
     if results_check_kwagrs is None:
         results_check_kwagrs = {}
 
     # Limit the maxlimum number or runs
     if max_runs is None:
-        max_runs = 10*req_num
-
+        max_runs = 10 * req_num
 
     # Init the pool
     with multiprocessing.Pool(processes=n_proc) as pool:
@@ -58,16 +55,14 @@ def parallelComputeGenerator(generator, workerFunc, resultsCheckFunc, req_num, n
         results = pool.map(workerFunc, input_list)
 
         total_runs += len(input_list)
-            
+
         # Only take good results
         results = resultsCheckFunc(results, **results_check_kwagrs)
-
 
         # If there are None, do not continue, as there is obviously a problem
         if len(results) == 0:
             print("No successful results after the initial run!")
             return results
-
 
         # Run the processing until a required number of good values is returned
         while len(results) < req_num:
@@ -95,7 +90,6 @@ def parallelComputeGenerator(generator, workerFunc, resultsCheckFunc, req_num, n
         return results
 
 
-
 def unpackDecorator(func):
     def dec(args):
         return func(*args)
@@ -119,25 +113,27 @@ def domainParallelizer(domain, function, cores=None, kwarg_dict=None):
         results: [list] a list of function results
 
     """
-
+    t1 = time.perf_counter()
 
     def _logResult(result):
         """ Save the result from the async multiprocessing to a results list. """
-        
         results.append(result)
-
+        counter = len(results)
+        total = len(domain)
+        if counter % 100 == 99:
+            now = time.perf_counter()
+            print(
+                f'{counter}/{total}: {counter/total*100}% computed - {int((now - t1)//3600)}h {int((now - t1)//60)}m {(now - t1):.2f}s'
+            )
 
     if kwarg_dict is None:
         kwarg_dict = {}
-
 
     # If the number of cores was not given, use all available cores
     if cores is None:
         cores = multiprocessing.cpu_count()
 
-
-    results = []    
-
+    results = []
 
     # Special case when running on only one core, run without multiprocessing
     if cores == 1:
@@ -147,25 +143,15 @@ def domainParallelizer(domain, function, cores=None, kwarg_dict=None):
     # Run real multiprocessing if more than one core
     elif cores > 1:
 
-        # Maximum number of jobs in waiting
-        max_jobs = 10*cores
-
         # Generate a pool of workers
         with closing(multiprocessing.Pool(cores)) as pool:
 
             # Give workers things to do
-            count = 0
             for args in domain:
-
                 # Give job to worker
-                last_job = pool.apply_async(function, args, kwarg_dict, callback=_logResult)
+                pool.apply_async(function, args, kwarg_dict, callback=_logResult)
 
-                # Limit the amount of jobs in waiting
-                count += 1
-                if count%cores == 0:
-                    if len(pool._cache) > max_jobs:
-                        last_job.wait()
-
+        pool.join()
 
     else:
         print('The number of CPU cores defined is not in an expected range (1 or more.)')
@@ -174,13 +160,13 @@ def domainParallelizer(domain, function, cores=None, kwarg_dict=None):
     return results
 
 
-
 ##############################
 ## USAGE EXAMPLE
 
 
-import time
 import sys
+import time
+
 
 def mpWorker(inputs, wait_time):
     """ Example worker function. This function will print out the name of the worker and wait 'wait_time
@@ -200,14 +186,10 @@ def mpWorker(inputs, wait_time):
     return int(wait_time)
 
 
-
 if __name__ == '__main__':
 
     # List of function arguments for every run
-    data = [
-        ['a', '2'], ['b', '4'], ['c', '6'], ['d', '8'],
-        ['e', '1'], ['f', '3'], ['g', '5'], ['h', '7']
-            ]
+    data = [['a', '2'], ['b', '4'], ['c', '6'], ['d', '8'], ['e', '1'], ['f', '3'], ['g', '5'], ['h', '7']]
 
     # Get the number of cpu cores available
     cpu_cores = multiprocessing.cpu_count()

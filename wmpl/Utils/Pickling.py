@@ -1,14 +1,12 @@
 """ Functions for pickling and unpickling Python objects. """
 
-from __future__ import print_function, absolute_import
+from __future__ import absolute_import, print_function
 
 import os
-import sys
 import pickle
-
+import sys
 
 from wmpl.Utils.OSTools import mkdirP
-
 
 
 def savePickle(obj, dir_path, file_name):
@@ -26,7 +24,6 @@ def savePickle(obj, dir_path, file_name):
 
     with open(os.path.join(dir_path, file_name), 'wb') as f:
         pickle.dump(obj, f, protocol=2)
-
 
 
 def loadPickle(dir_path, file_name):
@@ -48,8 +45,7 @@ def loadPickle(dir_path, file_name):
         else:
             p = pickle.load(f, encoding='latin1')
 
-
-        # Fix attribute compatibility in trajectory objects with older versions which had a 
+        # Fix attribute compatibility in trajectory objects with older versions which had a
         #   typo "uncertanties"
         if hasattr(p, "uncertainties"):
             p.uncertanties = p.uncertainties
@@ -61,6 +57,5 @@ def loadPickle(dir_path, file_name):
         if hasattr(p, 'orbit') and hasattr(p, 'observations'):
             if p.orbit is not None:
                 p.orbit.fixMissingParameters()
-
 
         return p
