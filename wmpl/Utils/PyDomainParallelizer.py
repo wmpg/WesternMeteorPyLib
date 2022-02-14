@@ -123,7 +123,7 @@ def domainParallelizer(domain, function, cores=None, kwarg_dict=None):
         if counter % 100 == 99:
             now = time.perf_counter()
             print(
-                f'{counter}/{total}: {counter/total*100}% computed - {int((now - t1)//3600)}h {int((now - t1)//60)}m {(now - t1):.2f}s'
+                f'{counter}/{total}: {counter/total*100:.2f}% computed - {int((now - t1)//3600)}h {(int((now - t1)//60))%60}m {(now - t1)%60:.2f}s'
             )
 
     if kwarg_dict is None:
