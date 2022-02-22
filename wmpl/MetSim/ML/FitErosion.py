@@ -1,19 +1,20 @@
 """ Fit the erosion model using machine learning. """
 
-from __future__ import print_function, division, absolute_import, unicode_literals
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
 
-import os
 import copy
+import os
 
-import numpy as np
 import keras
-
-
+import numpy as np
+from wmpl.MetSim.ML.GenerateSimulations import (DATA_LENGTH,
+                                                ErosionSimContainer,
+                                                ErosionSimParametersCAMO,
+                                                ErosionSimParametersCAMOWide,
+                                                MetParam, extractSimData)
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PyDomainParallelizer import domainParallelizer
-from wmpl.MetSim.ML.GenerateSimulations import DATA_LENGTH, MetParam, ErosionSimContainer, \
-    ErosionSimParametersCAMO, ErosionSimParametersCAMOWide, extractSimData
-
 
 
 def dataFunction(file_path, param_class_name, postprocess_params):
@@ -198,17 +199,15 @@ class ReportFitGoodness(keras.callbacks.Callback):
 
 
 
-def loadModel(model_file, weights_file):
-
-    
-    with open('model.json', 'r') as json_file:
+def loadModel(model_file='model.json', weights_file='model.h5'):
+    with open(model_file, 'r') as json_file:
 
         # load json and create model    
         loaded_model_json = json_file.read()
         loaded_model = keras.models.model_from_json(loaded_model_json)
         
         # load weights into new model
-        loaded_model.load_weights("model.h5")
+        loaded_model.load_weights(weights_file)
         print("Loaded model from disk")
 
         return loaded_model
@@ -319,9 +318,7 @@ if __name__ == "__main__":
 
     import argparse
 
-
     ### COMMAND LINE ARGUMENTS
-
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Fit the ML model using the files listed in the given text file (file names only, one file per row).")
 

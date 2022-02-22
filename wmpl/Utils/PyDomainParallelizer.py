@@ -97,7 +97,7 @@ def unpackDecorator(func):
     return dec
 
 
-def domainParallelizer(domain, function, cores=None, kwarg_dict=None):
+def domainParallelizer(domain, function, cores=None, kwarg_dict=None, display=True):
     """ Runs N (cores) functions as separate processes with parameters given in the domain list.
 
     Arguments:
@@ -108,6 +108,7 @@ def domainParallelizer(domain, function, cores=None, kwarg_dict=None):
         cores: [int] Number of CPU cores, or number of parallel processes to run simultaneously. None by 
             default, in which case all available cores will be used.
         kwarg_dict: [dictionary] a dictionary of keyword arguments to be passed to the function, None by default
+        display: [bool] Whether to display progress every 100 items in the domain
 
     Return:
         results: [list] a list of function results
@@ -120,7 +121,7 @@ def domainParallelizer(domain, function, cores=None, kwarg_dict=None):
         results.append(result)
         counter = len(results)
         total = len(domain)
-        if counter % 100 == 99:
+        if counter % 100 == 99 and display:
             now = time.perf_counter()
             print(
                 f'{counter}/{total}: {counter/total*100:.2f}% computed - {int((now - t1)//3600)}h {(int((now - t1)//60))%60}m {(now - t1)%60:.2f}s'

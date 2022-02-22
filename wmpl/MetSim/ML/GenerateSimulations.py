@@ -9,7 +9,7 @@ import json
 import os
 import time
 import traceback
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -67,6 +67,9 @@ class MetParam(object):
 
     def linkParam(self, param, method: Optional[str] = None):
         self.link_method = (method, param)
+
+    def __str__(self):
+        return self.val
 
 
 ##############################################################################################################
@@ -231,6 +234,24 @@ class ErosionSimParameters:
         mag_normed = (mag_data - self.mag_brightest) / (self.mag_faintest - self.mag_brightest)
 
         return ht_normed, len_normed, mag_normed
+
+    def convertCamera(self, cls):
+        """ Check if current instance can validly converted into the given camera type.
+        If it converts validly, returns the converted Camera. Otherwise return False
+        
+        Arguments:
+            cls: [type] ErosionSimParametersCAMO, ErosionSimParametersCAMOWide, etc.
+        """
+        tmp_camera = cls()
+        for param in self.param_list:
+            new_camera_param = getattr(tmp_camera, param)
+            camera_param = getattr(self, param).val
+            if new_camera_param.min <= camera_param.val <= new_camera_param.max:
+                new_camera_param.val = camera_param.val
+            else:
+                return None
+
+        return tmp_camera
 
 
 class ErosionSimParametersCAMO(ErosionSimParameters):
@@ -534,6 +555,7 @@ def extractSimData(
     check_only: bool = False,
     param_class_name: Optional[str] = None,
     postprocess_params: Optional[list] = None,
+    sim_type=None,
 ) -> Optional[tuple]:
     """ Extract input parameters and model outputs from the simulation container and normalize them. 
 

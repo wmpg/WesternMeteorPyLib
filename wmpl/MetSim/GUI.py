@@ -1280,6 +1280,17 @@ def loadConstants(sim_fit_json):
 
         const.fragmentation_entries = frag_entries
 
+    # these parameters have default values in the gui, so for consistency, they should be set here.
+    # this only has an effect if the non disruption/erosion parameter is changed in the fit.json
+    if 'disruption_erosion_coeff' not in const_json:
+        const.disruption_erosion_coeff = const.erosion_coeff
+
+    if 'erosion_rho_change' not in const_json:
+        const.erosion_rho_change = const.rho
+
+    if 'erosion_sigma_change' not in const_json:
+        const.erosion_sigma_change = const.sigma
+
     return const, const_json
 
 
@@ -4600,6 +4611,115 @@ class MetSimGUI(QMainWindow):
         self.wakeSaveVideoButton.setStyleSheet("background-color: #efebe7")
 
 
+def collectPaths(traj_pickle: str, met: str, _all: bool, load: str, get_latest: bool = False) -> tuple:
+    """ 
+    Searches directory given by traj_pickle for files relevant to GUI and returns them
+    
+    Return:
+        [tuple] traj_pickle_file, met_file, wid_file, load_file
+            traj_pickle_file: [str] Path to trajectory pickle file
+            met_file: [str] Path to met file
+            wid_file: [list of str] List of paths to wid files
+            load_file: [str] Path to fit parameter file
+    """
+    traj_pickle_file = None
+    met_file = None
+    wid_files = None
+    if _all:
+        # Find all folders that match the given regex
+        for dir_path in glob.glob(os.path.abspath(traj_pickle.rstrip(os.sep) + "*")):
+            # Only take directories
+            if not os.path.isdir(dir_path):
+                continue
+
+            # Try finding the needed files
+            for file_name in sorted(os.listdir(dir_path)):
+
+                file_path = os.path.join(dir_path, file_name)
+
+                # If the folder is the metal folder, don't load the trajectory pickle nor wake files
+                if not os.path.basename(dir_path).endswith("_met"):
+
+                    # If it's a trajectory pickle file, assign it
+                    if traj_pickle_file is None:
+                        if file_name.endswith("_trajectory.pickle"):
+                            traj_pickle_file = file_path
+                            continue
+
+                    # Look for wid files
+                    if wid_files is None:
+                        if file_name.startswith("wid_") and file_name.endswith(".txt"):
+                            wid_files = sorted(glob.glob(os.path.join(dir_path, "wid_*.txt")))
+                            continue
+
+                # Look for state files with magnitude measurements
+                # Note that there is no check if the met_file has already been found, which means that it
+                #   will keep loading state files and take the last one in the end (i.e. the latest one)
+                if file_name.startswith("state") and file_name.endswith(".met"):
+
+                    # Try loading the state file and check if it's the METAL state file
+                    met = loadMet(dir_path, file_name)
+
+                    # Take the file if it's a METAL state file
+                    if not met.mirfit:
+                        met_file = file_path
+
+        # Print notices if certain files were not found
+        if traj_pickle_file is None:
+            print("No trajectory .pickle files found in the given path: {:s}".format(traj_pickle))
+            sys.exit()
+
+        if met_file is None:
+            print("No .met files found in {:s}".format(traj_pickle))
+
+        if wid_files is None:
+            print("No wid files found in {:s}".format(traj_pickle))
+
+    else:
+
+        # Assign individual files
+        traj_pickle_file = os.path.abspath(traj_pickle)
+        met_file = met
+        wid_files = None
+
+    # Handle auto loading fit parameters
+    load_file = None
+    if load == '.':
+
+        # Extract the directory (or more) where the JSON file with fit parametrs could be
+        if os.path.isfile(traj_pickle):
+            dir_path = os.path.abspath(os.path.dirname(traj_pickle))
+
+        else:
+            dir_path = os.path.abspath(traj_pickle.rstrip(os.sep) + "*")
+
+        # Find the JSON file with the fit parameters
+        for dir_path in glob.glob(dir_path):
+
+            # Skip files
+            if not os.path.isdir(dir_path):
+                continue
+
+            # Find the file with fit parametres (but not the latest file, just the saved parameters)
+            for file_name in sorted(os.listdir(dir_path)):
+
+                if file_name.endswith("sim_fit.json"):
+                    load_file = os.path.join(dir_path, file_name)
+                    break
+
+            # in case you want to see the latest if
+            if get_latest and load_file is None:
+                for file_name in sorted(os.listdir(dir_path)):
+                    if file_name.endswith("sim_fit_latest.json"):
+                        load_file = os.path.join(dir_path, file_name)
+                        break
+
+    else:
+        load_file = load
+
+    return traj_pickle_file, met_file, wid_files, load_file
+
+
 if __name__ == "__main__":
 
     ### COMMAND LINE ARGUMENTS
@@ -4690,95 +4810,10 @@ if __name__ == "__main__":
     app = QApplication([])
 
     # Automatically find all input files if the --all option is given
-    traj_pickle_file = None
-    met_file = None
-    wid_files = None
-    if cml_args.all:
 
-        # Find all folders that match the given regex
-        for dir_path in glob.glob(os.path.abspath(cml_args.traj_pickle.rstrip(os.sep) + "*")):
-
-            # Only take directories
-            if not os.path.isdir(dir_path):
-                continue
-
-            # Try finding the needed files
-            for file_name in sorted(os.listdir(dir_path)):
-
-                file_path = os.path.join(dir_path, file_name)
-
-                # If the folder is the metal folder, don't load the trajectory pickle nor wake files
-                if not os.path.basename(dir_path).endswith("_met"):
-
-                    # If it's a trajectory pickle file, assign it
-                    if traj_pickle_file is None:
-                        if file_name.endswith("_trajectory.pickle"):
-                            traj_pickle_file = file_path
-                            continue
-
-                    # Look for wid files
-                    if wid_files is None:
-                        if file_name.startswith("wid_") and file_name.endswith(".txt"):
-                            wid_files = sorted(glob.glob(os.path.join(dir_path, "wid_*.txt")))
-                            continue
-
-                # Look for state files with magnitude measurements
-                # Note that there is no check if the met_file has already been found, which means that it
-                #   will keep loading state files and take the last one in the end (i.e. the latest one)
-                if file_name.startswith("state") and file_name.endswith(".met"):
-
-                    # Try loading the state file and check if it's the METAL state file
-                    met = loadMet(dir_path, file_name)
-
-                    # Take the file if it's a METAL state file
-                    if not met.mirfit:
-                        met_file = file_path
-
-        # Print notices if certain files were not found
-        if traj_pickle_file is None:
-            print("No trajectory .pickle files found in the given path: {:s}".format(cml_args.traj_pickle))
-            sys.exit()
-
-        if met_file is None:
-            print("No .met files found in {:s}".format(cml_args.traj_pickle))
-
-        if wid_files is None:
-            print("No wid files found in {:s}".format(cml_args.traj_pickle))
-
-    else:
-
-        # Assign individual files
-        traj_pickle_file = os.path.abspath(cml_args.traj_pickle)
-        met_file = cml_args.met
-        wid_files = cml_args.wid
-
-    # Handle auto loading fit parameters
-    load_file = None
-    if cml_args.load == '.':
-
-        # Extract the directory (or more) where the JSON file with fit parametrs could be
-        if os.path.isfile(cml_args.traj_pickle):
-            dir_path = os.path.abspath(os.path.dirname(cml_args.traj_pickle))
-
-        else:
-            dir_path = os.path.abspath(cml_args.traj_pickle.rstrip(os.sep) + "*")
-
-        # Find the JSON file with the fit parameters
-        for dir_path in glob.glob(dir_path):
-
-            # Skip files
-            if not os.path.isdir(dir_path):
-                continue
-
-            # Find the file with fit parametres (but not the latest file, just the saved parameters)
-            for file_name in sorted(os.listdir(dir_path)):
-
-                if file_name.endswith("sim_fit.json"):
-                    load_file = os.path.join(dir_path, file_name)
-                    break
-
-    else:
-        load_file = cml_args.load
+    traj_pickle_file, met_file, wid_files, load_file = collectPaths(
+        cml_args.traj_pickle, cml_args.met, cml_args.all, cml_args.load
+    )
 
     print("Loading trajectory pickle file:")
     print(traj_pickle_file)

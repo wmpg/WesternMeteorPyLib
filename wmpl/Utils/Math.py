@@ -828,7 +828,17 @@ def mergeClosePoints(x_array, y_array, delta, x_datetime=False, method='avg'):
     return x_final, y_final
 
 
-def movingAverage(arr, n=3):
+def mergeDatasets(xy1, xy2, ascending=True):
+    """ For two datasets, (x1, y1, ...) and (x2, y2, ...), return a new data set that combines both into one,
+    such that the x values are always increasing """
+    if ascending:
+        i = np.searchsorted(xy1[0], xy2[0])
+    else:
+        i = np.searchsorted(-xy1[0], -xy2[0])
+    return tuple(np.insert(dim1, i, dim2) for dim1, dim2 in zip(xy1, xy2))
+
+
+def movingAverage(arr, n=3, stride=1):
     """ Perform a moving average on an array with the window size n.
 
     Arguments:
@@ -836,6 +846,7 @@ def movingAverage(arr, n=3):
 
     Keyword arguments:
         n: [int] Averaging window.
+        stride: [int] Amount of steps to go between each window (default 1)
 
     Return:
         [ndarray] Averaged array. The size of the array is always by n-1 smaller than the input array.
@@ -846,7 +857,32 @@ def movingAverage(arr, n=3):
 
     ret[n:] = ret[n:] - ret[:-n]
 
-    return ret[n - 1 :] / n
+    return (ret[n - 1 :] / n)[::stride]
+
+
+def movingOperation(arr, func=np.mean, n=3, stride=1, ret_arr=False):
+    """
+    A generalized moving average function to apply to any numpy function. 4-5x slower than movingAverage
+    
+    Arguments:
+        arr: [ndarray] Numpy array of values.
+
+    Keyword arguments:
+        n: [int] Window size.
+        func: [Callabe] Numpy function to apply on each window. Defaults to np.mean
+        stride: [int] Amount of steps to go between each window (default 1)
+        ret_arr: [bool] If True, returns an array of shape (int((arr.size - n) / stride) + 1, n) rather
+            the applying func to it
+
+    Return:
+        [ndarray] Output array. The size of the array is always by n-1 smaller than the input array.
+    """
+    nrows = int(max(arr.size - n, 0) / stride) + 1
+    s = arr.strides[0]
+    a2D = np.lib.stride_tricks.as_strided(arr, shape=(nrows, n), strides=(stride * s, s))
+    if ret_arr:
+        return a2D
+    return func(a2D, axis=1)
 
 
 def subsampleAverage(arr, n=3):
