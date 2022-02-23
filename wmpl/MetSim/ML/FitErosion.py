@@ -202,6 +202,8 @@ class ReportFitGoodness(keras.callbacks.Callback):
         param_name_list = ["M0", "V0", "ZC", "DENS", "ABL", "ERHT", "ERCO", "ER_S", "ERMm", "ERMM"]
         print(" ".join(["{:>6s}".format(param_name) for param_name in param_name_list]))
         print(str(len(percent_errors) * "{:5.2f}% ").format(*percent_errors))
+        print()
+        print()
 
 
 def loadModel(file_path, model_file='model.json', weights_file='model.h5'):
@@ -421,17 +423,23 @@ if __name__ == "__main__":
         help='Inputting this parameter will not train the model, but instead evaluate the model by visually '
         'showing what it predicts compared to the simulation.',
     )
-
+    arg_parser.add_argument(
+        '--grouping',
+        type=int,
+        nargs=2,
+        help='Allows for specifying the batch size and steps per epoch, respectively.',
+    )
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
     #########################
 
     ### INPUTS ###
-
-    batch_size = 20
-
-    steps_per_epoch = 10
+    if cml_args.grouping:
+        batch_size, steps_per_epoch = cml_args.grouping
+    else:
+        batch_size = 256
+        steps_per_epoch = 80
 
     # Model file names
     model_file = f"{cml_args.modelname}.json"
