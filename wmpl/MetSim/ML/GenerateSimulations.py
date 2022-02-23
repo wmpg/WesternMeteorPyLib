@@ -2,7 +2,8 @@
 simulations to disk. """
 
 
-from __future__ import absolute_import, division, print_function, unicode_literals
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
 
 import copy
 import json
@@ -207,6 +208,13 @@ class ErosionSimParameters:
         self.len_min = 0
         self.len_max = self.v_init.max * self.data_length / self.fps
 
+    def setParamValues(self, vals):
+        for val, param in zip(vals, self.param_list):
+            setattr(getattr(self, param), 'val', val)
+
+    def getInputs(self) -> List[float]:
+        return [getattr(self, param_name).val for param_name in self.param_list]
+
     def getNormalizedInputs(self) -> List[float]:
         """ Normalize the physical parameters of the model to the 0-1 range. """
 
@@ -223,6 +231,20 @@ class ErosionSimParameters:
             normalized_values.append(val_normed)
 
         return normalized_values
+
+    def getDenormalizedInputs(self, norm_val_list: List[float]) -> List[float]:
+        denormalized_values = []
+        for norm_val, param_name in zip(norm_val_list, self.param_list):
+
+            # Get the parameter container
+            p = getattr(self, param_name)
+
+            # Compute the normalized value
+            val_denormed = norm_val * (p.max - p.min) + p.min
+
+            denormalized_values.append(val_denormed)
+
+        return denormalized_values
 
     def normalizeSimulations(
         self, ht_data: ArrayLike, len_data: ArrayLike, mag_data: ArrayLike
@@ -245,13 +267,44 @@ class ErosionSimParameters:
         tmp_camera = cls()
         for param in self.param_list:
             new_camera_param = getattr(tmp_camera, param)
-            camera_param = getattr(self, param).val
+            camera_param = getattr(self, param)
             if new_camera_param.min <= camera_param.val <= new_camera_param.max:
                 new_camera_param.val = camera_param.val
             else:
                 return None
 
         return tmp_camera
+
+    def getConst(self, random_seed: int = None, override: bool = True):
+        # Init simulation constants
+        const = Constants()
+        const.dens_co = self.dens_co
+        const.P_0M = self.P_0M
+
+        # Turn on erosion, but disable erosion change
+        const.erosion_on = True
+        const.erosion_height_change = 0
+
+        # Disable disruption
+        const.disruption_on = False
+
+        if random_seed is not None:
+            local_state = np.random.RandomState(random_seed)
+        else:
+            local_state = np.random.RandomState()
+
+        # Randomly sample physical parameters
+        for param_name in self.param_list:
+
+            # Get the parameter container
+            p = getattr(self, param_name)
+
+            if p.val is None or override:
+                p.generateVal(local_state)
+
+            # Assign value to simulation contants
+            setattr(const, param_name, p.val)
+        return const
 
 
 class ErosionSimParametersCAMO(ErosionSimParameters):
@@ -416,34 +469,7 @@ class ErosionSimContainer:
         # Structure defining the range of physical parameters
         self.params = ErosionSimParameters()
 
-        # Init simulation constants
-        self.const = Constants()
-        self.const.dens_co = self.params.dens_co
-        self.const.P_0M = self.params.P_0M
-
-        # Turn on erosion, but disable erosion change
-        self.const.erosion_on = True
-        self.const.erosion_height_change = 0
-
-        # Disable disruption
-        self.const.disruption_on = False
-
-        # If the random seed was given, set the random state
-        if random_seed is not None:
-            local_state = np.random.RandomState(random_seed)
-        else:
-            local_state = np.random.RandomState()
-
-        # Randomly sample physical parameters
-        for param_name in self.params.param_list:
-
-            # Get the parameter container
-            p = getattr(self.params, param_name)
-
-            p.generateVal(local_state)
-
-            # Assign value to simulation contants
-            setattr(self.const, param_name, p.val)
+        self.const = self.params.getConst()
 
         # Generate a file name from simulation_parameters
         self.file_name = "erosion_sim_v{:.2f}_m{:.2e}g_rho{:04d}_z{:04.1f}_abl{:.3f}_eh{:05.1f}_er{:.3f}_s{:.2f}".format(
@@ -461,10 +487,9 @@ class ErosionSimContainer:
         """ Normalize the physical parameters of the model to the 0-1 range. """
         return self.params.getNormalizedInputs()
 
-    def denormalizeInputs(self):
-        """ Rescale input parametrs to physical values. """
-
-        pass
+    def denormalizeInputs(self, inputs):
+        """ Rescale input parameters to physical values. """
+        return self.params.getDenormalizedInputs(inputs)
 
     def normalizeSimulations(
         self, params: ErosionSimParameters, ht_data: ArrayLike, len_data: ArrayLike, mag_data: ArrayLike
@@ -555,7 +580,7 @@ def extractSimData(
     check_only: bool = False,
     param_class_name: Optional[str] = None,
     postprocess_params: Optional[list] = None,
-    sim_type=None,
+    add_noise: bool = False,
 ) -> Optional[tuple]:
     """ Extract input parameters and model outputs from the simulation container and normalize them. 
 
@@ -578,15 +603,22 @@ def extractSimData(
             the conditions.
 
     """
-
-    # Create a frash instance of the system parameters if the same parameters are used as in the simulation
-    if param_class_name is None:
-        # params_obj = getattr(GenerateSimulations, sim.params.__class__.__name__)
-        params = globals()[sim.params.__class__.__name__]()
-
-    # Override the system parameters using the given class
+    if param_class_name is not None:
+        # Override the system parameters using the given class
+        param_obj = SIM_CLASSES_DICT[param_class_name]
+    elif sim.params.__class__.__name__ in SIM_CLASSES_DICT:
+        # Create a frash instance of the system parameters if the same parameters are used as in the simulation
+        param_obj = SIM_CLASSES_DICT[sim.params.__class__.__name__]
     else:
-        params = globals()[param_class_name]()
+        # in case no class name was given and class is storing ErosionSimParameters object. The user should always
+        # have a param_class_name supplied, but this is a default.
+        param_obj = ErosionSimParametersCAMO
+
+    if not sim.params.convertCamera(param_obj):
+        # print('can\'t convert between cameras')
+        return None
+
+    params = param_obj()
 
     ### DRAW LIMITING MAGNITUDE AND LENGTH DELAY ###
 
@@ -620,6 +652,7 @@ def extractSimData(
 
     # If no points were visible, skip this solution
     if not np.any(indices_visible):
+        # print('not visible')
         return None
 
     ### CHECK METEOR VISIBILITY WITH THE BRIGTHER (DETECTION) LIMITING MAGNITUDE ###
@@ -630,6 +663,7 @@ def extractSimData(
 
     # If no points were visible, skip this solution
     if not np.any(indices_visible_brighter):
+        # print('none that are too bright')
         return None
 
     # Compute the minimum time the meteor needs to be visible
@@ -640,6 +674,7 @@ def extractSimData(
 
     # Check if the minimum time is satisfied
     if np.max(time_lim_mag_bright) < min_time_visible:
+        # print('minimum time not satisfied')
         return None
 
     ### ###
@@ -709,6 +744,7 @@ def extractSimData(
 
     # Check that there are any length measurements
     if not np.any(len_sampled > 0):
+        # print('no length measurements')
         return None
 
     # If the simulation should only be checked that it's good, return the postprocess parameters used to
@@ -718,15 +754,16 @@ def extractSimData(
 
     ### ADD NOISE ###
 
-    # Add noise to magnitude data
-    mag_sampled[mag_sampled <= lim_mag] += np.random.normal(
-        loc=0.0, scale=params.mag_noise, size=len(mag_sampled[mag_sampled <= lim_mag])
-    )
+    if add_noise:
+        # Add noise to magnitude data
+        mag_sampled[mag_sampled <= lim_mag] += np.random.normal(
+            loc=0.0, scale=params.mag_noise, size=len(mag_sampled[mag_sampled <= lim_mag])
+        )
 
-    # Add noise to length data
-    len_sampled[first_length_index:] += np.random.normal(
-        loc=0.0, scale=params.len_noise, size=len(len_sampled[first_length_index:])
-    )
+        # Add noise to length data
+        len_sampled[first_length_index:] += np.random.normal(
+            loc=0.0, scale=params.len_noise, size=len(len_sampled[first_length_index:])
+        )
 
     ### ###
 
