@@ -328,7 +328,7 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
     cnn3 = keras.layers.Dense(128, kernel_initializer='normal', activation='relu')(cnn3)
 
     # merge input models
-    merge = keras.layers.merge.concatenate([cnn1, cnn2, cnn3])
+    merge = keras.layers.Concatenate()([cnn1, cnn2, cnn3])
     dense = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(merge)
     dense = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(dense)
     dense = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(dense)
@@ -429,9 +429,9 @@ if __name__ == "__main__":
 
     ### INPUTS ###
 
-    batch_size = 256
+    batch_size = 20
 
-    steps_per_epoch = 80
+    steps_per_epoch = 10
 
     # Model file names
     model_file = f"{cml_args.modelname}.json"
