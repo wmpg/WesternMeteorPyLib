@@ -380,7 +380,7 @@ class GuralTrajectory(object):
     """
 
     def __init__(self, maxcameras, jdt_ref, velmodel, max_toffset=1.0, nummonte=1, meastype=4, verbose=0, 
-        output_dir='.', show_plots=True, traj_id=None):
+        output_dir='.', show_plots=True, traj_id=None, comment=''):
         """ Initialize meteor trajectory solving.
 
         Arguments:
@@ -417,6 +417,7 @@ class GuralTrajectory(object):
                 will be stored.
             show_plots: [bool] Show plots of residuals, velocity, lag, meteor position. True by default.
             traj_id: [str] Trajectory solution identifier.
+            comment: [str] Arbitrary string that can be saved.
         """
 
         # Init input parameters
@@ -453,6 +454,9 @@ class GuralTrajectory(object):
 
         # Trajectory solution identifier
         self.traj_id = str(traj_id)
+
+        # Add the comment
+        self.comment = comment
 
 
 
