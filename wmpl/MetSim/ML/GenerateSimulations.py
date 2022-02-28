@@ -2,8 +2,7 @@
 simulations to disk. """
 
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 import copy
 import json
@@ -38,14 +37,14 @@ MIN_FRAMES_VISIBLE = 10
 
 
 class MetParam(object):
-    def __init__(self, param_min: float, param_max: float, gen_method: str = 'uniform'):
+    def __init__(self, param_min: float, param_max: float, gen_method: str = 'uniform', default=None):
         """ Container for physical meteor parameters. """
 
         # Range of values
         self.min, self.max = param_min, param_max
 
         # Value used in simulation
-        self.val = None
+        self.val = default
 
         # functions to give "smartness" to parameter
         self.method = gen_method
@@ -66,7 +65,17 @@ class MetParam(object):
         elif self.method == 'log10':
             self.val = 10 ** (local_state.uniform(np.log10(_min), np.log10(_max)))
 
+        return self.val
+
     def linkParam(self, param, method: Optional[str] = None):
+        """
+        Required relationship between current parameter and given parameter
+        
+        Arguments:
+            param: [MetParam] 
+            method: [str] 'greater' or 'less'. If 'greater', requires that this parameter is greater than
+                the inputted parameter.
+        """
         self.link_method = (method, param)
 
     def __str__(self):
@@ -78,7 +87,7 @@ class MetParam(object):
 ### MAKE SURE TO ADD ANY NEW CLASSES TO THE "SIM_CLASSES" VARIABLE!
 
 
-class ErosionSimParameters:
+class PhysicalParameters:
     def __init__(self):
         # Define the reference time for the atmosphere density model as J2000
         self.jdt_ref = J2000_JD.days
@@ -87,39 +96,13 @@ class ErosionSimParameters:
         #   Use the atmosphere density for the time at J2000 and coordinates of Elginfield
         self.dens_co = fitAtmPoly(np.radians(43.19301), np.radians(-81.315555), 60000, 180000, self.jdt_ref)
 
-        ##
-
-        # List of simulation parameters
-        self.param_list = []
-
-        ## System parameters ##
-
-        # System limiting magnitude (given as a range)
-        self.lim_mag_faintest = +10
-        self.lim_mag_brightest = +5.0
-
-        # Limiting magnitude for length measurements end (given by a range)
-        #   This should be the same as the two value above for all other systems except for CAMO
-        self.lim_mag_len_end_faintest = +7.5
-        self.lim_mag_len_end_brightest = +6.5
-
         # Power of a zero-magnitude meteor (Watts)
         self.P_0M = 840
 
-        # System FPS
-        self.fps = 100
-
-        # Time lag of length measurements (range in seconds) - accomodate CAMO tracking delay of 8 frames
-        #   This should be 0 for all other systems except for the CAMO mirror tracking system
-        self.len_delay_min = 8.0 / self.fps
-        self.len_delay_max = 15.0 / self.fps
-
-        # Simulation height range (m) that will be used to map the output to a grid
-        self.sim_height = MetParam(70000, 130000)
-
-        ##
-
         ## Physical parameters
+
+        # List of simulation parameters
+        self.param_list = []
 
         # Mass range (kg)
         self.m_init = MetParam(5e-7, 1e-3, 'log10')
@@ -167,47 +150,6 @@ class ErosionSimParameters:
         self.erosion_mass_max.linkParam(self.erosion_mass_min, 'greater')
         self.param_list.append("erosion_mass_max")
 
-        ##
-
-        ### Simulation quality checks ###
-
-        # Minimum time above the limiting magnitude (10 frames)
-        #   This is a minimum for both magnitude and length!
-        self.visibility_time_min = 10.0 / self.fps
-
-        ### ###
-
-        ### Added noise ###
-
-        # Standard deviation of the magnitude Gaussian noise
-        self.mag_noise = 0.1
-
-        # SD of noise in length (m)
-        self.len_noise = 1.0
-
-        ### ###
-
-        ### Fit parameters ###
-
-        # Length of input data arrays that will be given to the neural network
-        self.data_length = DATA_LENGTH
-
-        ### ###
-
-        ### Output normalization range ###
-
-        # Height range (m)
-        self.ht_min = 70000
-        self.ht_max = 130000
-
-        # Magnitude range
-        self.mag_faintest = self.lim_mag_faintest
-        self.mag_brightest = -2
-
-        # Compute length range
-        self.len_min = 0
-        self.len_max = self.v_init.max * self.data_length / self.fps
-
     def setParamValues(self, vals):
         for val, param in zip(vals, self.param_list):
             setattr(getattr(self, param), 'val', val)
@@ -246,35 +188,6 @@ class ErosionSimParameters:
 
         return denormalized_values
 
-    def normalizeSimulations(
-        self, ht_data: ArrayLike, len_data: ArrayLike, mag_data: ArrayLike
-    ) -> Tuple[ArrayLike, ArrayLike, ArrayLike]:
-        """ Normalize simulated data to 0-1 range. """
-
-        ht_normed = (ht_data - self.ht_min) / (self.ht_max - self.ht_min)
-        len_normed = (len_data - self.len_min) / (self.len_max - self.len_min)
-        mag_normed = (mag_data - self.mag_brightest) / (self.mag_faintest - self.mag_brightest)
-
-        return ht_normed, len_normed, mag_normed
-
-    def convertCamera(self, cls):
-        """ Check if current instance can validly converted into the given camera type.
-        If it converts validly, returns the converted Camera. Otherwise return False
-        
-        Arguments:
-            cls: [type] ErosionSimParametersCAMO, ErosionSimParametersCAMOWide, etc.
-        """
-        tmp_camera = cls()
-        for param in self.param_list:
-            new_camera_param = getattr(tmp_camera, param)
-            camera_param = getattr(self, param)
-            if new_camera_param.min <= camera_param.val <= new_camera_param.max:
-                new_camera_param.val = camera_param.val
-            else:
-                return None
-
-        return tmp_camera
-
     def getConst(self, random_seed: int = None, override: bool = True):
         # Init simulation constants
         const = Constants()
@@ -307,31 +220,25 @@ class ErosionSimParameters:
         return const
 
 
-class ErosionSimParametersCAMO(ErosionSimParameters):
+class ErosionSimParameters:
     def __init__(self):
-        """ Range of physical parameters for the erosion model, CAMO system. """
-        super().__init__()
         ## System parameters ##
 
-        # System limiting magnitude (given as a range)
-        self.lim_mag_faintest = +5.8
-        self.lim_mag_brightest = +5.0
+        # System limiting magnitude. Starting LM is the magnitude when the camera will start observing
+        # (the first instance) the meteor, and ending LM is the magnitude where it will stop observing
+        # (the last instance)
+        self.starting_lim_mag = MetParam(10, 5, default=8)
+        self.ending_lim_mag = MetParam(10, 5, default=8)
 
-        # Limiting magnitude for length measurements end (given by a range)
-        #   This should be the same as the two value above for all other systems except for CAMO
-        self.lim_mag_len_end_faintest = +7.5
-        self.lim_mag_len_end_brightest = +6.5
-
-        # Power of a zero-magnitude meteor (Watts)
-        self.P_0M = 840
+        # if lightcurve doesn't reach this magnitude, it's discarded
+        self.peak_mag_faintest = 6
 
         # System FPS
-        self.fps = 80
+        self.fps = 100
 
         # Time lag of length measurements (range in seconds) - accomodate CAMO tracking delay of 8 frames
         #   This should be 0 for all other systems except for the CAMO mirror tracking system
-        self.len_delay_min = 8.0 / self.fps
-        self.len_delay_max = 15.0 / self.fps
+        self.len_delay = MetParam(8.0 / self.fps, 15.0 / self.fps, default=15 / self.fps)
 
         # Simulation height range (m) that will be used to map the output to a grid
         self.sim_height = MetParam(70000, 130000)
@@ -342,7 +249,7 @@ class ErosionSimParametersCAMO(ErosionSimParameters):
 
         # Minimum time above the limiting magnitude (10 frames)
         #   This is a minimum for both magnitude and length!
-        self.visibility_time_min = 10.0 / self.fps
+        self.visibility_time_min = 0.2
 
         ### ###
 
@@ -370,41 +277,31 @@ class ErosionSimParametersCAMO(ErosionSimParameters):
         self.ht_max = 130000
 
         # Magnitude range
-        self.mag_faintest = self.lim_mag_faintest
+        self.mag_faintest = 10
         self.mag_brightest = -2
 
-        # Compute length range
-        self.len_min = 0
-        self.len_max = self.v_init.max * self.data_length / self.fps
 
-        ### ###
-
-
-class ErosionSimParametersCAMOWide(ErosionSimParameters):
+class ErosionSimParametersCAMO(ErosionSimParameters):
     def __init__(self):
         """ Range of physical parameters for the erosion model, CAMO system. """
         super().__init__()
         ## System parameters ##
 
-        # System limiting magnitude (given as a range)
-        self.lim_mag_faintest = +5.8
-        self.lim_mag_brightest = +5.0
+        # System limiting magnitude. Starting LM is the magnitude when the camera will start observing
+        # (the first instance) the meteor, and ending LM is the magnitude where it will stop observing
+        # (the last instance)
+        self.starting_lim_mag = MetParam(10, 5, default=8)  # to be adjusted
+        self.ending_lim_mag = MetParam(10, 5, default=8)  # to be adjusted
 
-        # Limiting magnitude for length measurements end (given by a range)
-        #   This should be the same as the two value above for all other systems except for CAMO
-        self.lim_mag_len_end_faintest = self.lim_mag_faintest
-        self.lim_mag_len_end_brightest = self.lim_mag_brightest
-
-        # Power of a zero-magnitude meteor (Watts)
-        self.P_0M = 840
+        # if lightcurve doesn't reach this magnitude, it's discarded
+        self.peak_mag_faintest = 6  # to be adjusted
 
         # System FPS
         self.fps = 80
 
         # Time lag of length measurements (range in seconds) - accomodate CAMO tracking delay of 8 frames
         #   This should be 0 for all other systems except for the CAMO mirror tracking system
-        self.len_delay_min = 0
-        self.len_delay_max = 0
+        self.len_delay = MetParam(8.0 / self.fps, 15.0 / self.fps, default=15 / self.fps)
 
         # Simulation height range (m) that will be used to map the output to a grid
         self.sim_height = MetParam(70000, 130000)
@@ -415,7 +312,72 @@ class ErosionSimParametersCAMOWide(ErosionSimParameters):
 
         # Minimum time above the limiting magnitude (10 frames)
         #   This is a minimum for both magnitude and length!
-        self.visibility_time_min = 10.0 / self.fps
+        self.visibility_time_min = 0.2
+
+        ### ###
+
+        ### Added noise ###
+
+        # Standard deviation of the magnitude Gaussian noise
+        self.mag_noise = 0.1
+
+        # SD of noise in length (m)
+        self.len_noise = 1.0
+
+        ### ###
+
+        ### Fit parameters ###
+
+        # Length of input data arrays that will be given to the neural network
+        self.data_length = DATA_LENGTH
+
+        ### ###
+
+        ### Output normalization range ###
+
+        # Height range (m)
+        self.ht_min = 70000
+        self.ht_max = 130000
+
+        # Magnitude range
+        self.mag_faintest = 10
+        self.mag_brightest = -2
+
+        ### ###
+
+
+class ErosionSimParametersCAMOWide(ErosionSimParameters):
+    def __init__(self):
+        """ Range of physical parameters for the erosion model, CAMO system. """
+        super().__init__()
+        ## System parameters ##
+
+        # System limiting magnitude. Starting LM is the magnitude when the camera will start observing
+        # (the first instance) the meteor, and ending LM is the magnitude where it will stop observing
+        # (the last instance)
+        self.starting_lim_mag = MetParam(10, 5, default=8)  # to be adjusted
+        self.ending_lim_mag = MetParam(10, 5, default=8)  # to be adjusted
+
+        # if lightcurve doesn't reach this magnitude, it's discarded
+        self.peak_mag_faintest = 6  # to be adjusted
+
+        # System FPS
+        self.fps = 80
+
+        # Time lag of length measurements (range in seconds) - accomodate CAMO tracking delay of 8 frames
+        #   This should be 0 for all other systems except for the CAMO mirror tracking system
+        self.len_delay = MetParam(0, 0, default=0)
+
+        # Simulation height range (m) that will be used to map the output to a grid
+        self.sim_height = MetParam(70000, 130000)
+
+        ##
+
+        ### Simulation quality checks ###
+
+        # Minimum time above the limiting magnitude (10 frames)
+        #   This is a minimum for both magnitude and length!
+        self.visibility_time_min = 0.2
 
         ### ###
 
@@ -443,13 +405,8 @@ class ErosionSimParametersCAMOWide(ErosionSimParameters):
         self.ht_max = 130000
 
         # Magnitude range
-        self.mag_faintest = self.lim_mag_faintest
+        self.mag_faintest = 10
         self.mag_brightest = -2
-
-        # Compute length range
-        self.len_min = 0
-        self.len_max = self.v_init.max * self.data_length / self.fps
-
         ### ###
 
 
@@ -467,7 +424,7 @@ class ErosionSimContainer:
         self.output_dir = output_dir
 
         # Structure defining the range of physical parameters
-        self.params = ErosionSimParameters()
+        self.params = PhysicalParameters()
 
         self.const = self.params.getConst()
 
@@ -491,18 +448,6 @@ class ErosionSimContainer:
         """ Rescale input parameters to physical values. """
         return self.params.getDenormalizedInputs(inputs)
 
-    def normalizeSimulations(
-        self, params: ErosionSimParameters, ht_data: ArrayLike, len_data: ArrayLike, mag_data: ArrayLike
-    ) -> Tuple[ArrayLike, ArrayLike, ArrayLike]:
-        """ Normalize simulated data to 0-1 range. """
-
-        return params.normalizeSimulations(ht_data, len_data, mag_data)
-
-    def denormalizeSimulations(self):
-        """ Rescale outputs to physical values. """
-
-        pass
-
     def saveJSON(self):
         """ Save object as a JSON file. """
 
@@ -512,8 +457,8 @@ class ErosionSimContainer:
         # Convert the density parameters to a list
         if isinstance(self2.const.dens_co, np.ndarray):
             self2.const.dens_co = self2.const.dens_co.tolist()
-        if isinstance(self2.params.dens_co, np.ndarray):
-            self2.params.dens_co = self2.params.dens_co.tolist()
+        if isinstance(self2.params.phys_params.dens_co, np.ndarray):
+            self2.params.phys_params.dens_co = self2.params.phys_params.dens_co.tolist()
 
         # Convert all simulation parameters to lists
         for sim_res_attr in self2.simulation_results.__dict__:
@@ -574,12 +519,32 @@ class ErosionSimContainer:
         # print(f'saved to {os.path.join(dens_folder_path, self.file_name + ".pickle")}')
 
 
+def normalizeSimulations(
+    phys_params: PhysicalParameters,
+    camera_params: ErosionSimParameters,
+    ht_data: ArrayLike,
+    len_data: ArrayLike,
+    mag_data: ArrayLike,
+) -> Tuple[ArrayLike, ArrayLike, ArrayLike]:
+    """ Normalize simulated data to 0-1 range. """
+    # Compute length range
+    len_min = 0
+    len_max = phys_params.v_init.max * camera_params.data_length / camera_params.fps
+
+    ht_normed = (ht_data - camera_params.ht_min) / (camera_params.ht_max - camera_params.ht_min)
+    len_normed = (len_data - len_min) / (len_max - len_min)
+    mag_normed = (mag_data - camera_params.mag_brightest) / (
+        camera_params.mag_faintest - camera_params.mag_brightest
+    )
+
+    return ht_normed, len_normed, mag_normed
+
+
 def extractSimData(
     sim: ErosionSimContainer,
-    min_frames_visible: int = MIN_FRAMES_VISIBLE,
     check_only: bool = False,
     param_class_name: Optional[str] = None,
-    postprocess_params: Optional[list] = None,
+    camera_params: Optional[ErosionSimParameters] = None,
     add_noise: bool = False,
 ) -> Optional[tuple]:
     """ Extract input parameters and model outputs from the simulation container and normalize them. 
@@ -603,42 +568,33 @@ def extractSimData(
             the conditions.
 
     """
-    if param_class_name is not None:
-        # Override the system parameters using the given class
-        param_obj = SIM_CLASSES_DICT[param_class_name]
-    elif sim.params.__class__.__name__ in SIM_CLASSES_DICT:
-        # Create a frash instance of the system parameters if the same parameters are used as in the simulation
-        param_obj = SIM_CLASSES_DICT[sim.params.__class__.__name__]
-    else:
-        # in case no class name was given and class is storing ErosionSimParameters object. The user should always
-        # have a param_class_name supplied, but this is a default.
-        param_obj = ErosionSimParametersCAMO
+    if camera_params is None:
+        if param_class_name is not None:
+            # Override the system parameters using the given class
+            camera_params = SIM_CLASSES_DICT[param_class_name]()
+        elif sim.params.__class__.__name__ in SIM_CLASSES_DICT:
+            # Create a frash instance of the system parameters if the same parameters are used as in the simulation
+            camera_params = SIM_CLASSES_DICT[sim.params.__class__.__name__]()
+        else:
+            # in case no class name was given and class is storing ErosionSimParameters object. The user should always
+            # have a param_class_name supplied, but this is a default.
+            camera_params = ErosionSimParameters()
 
-    if not sim.params.convertCamera(param_obj):
-        # print('can\'t convert between cameras')
-        return None
-
-    params = param_obj()
+    param_dict = {'camera': camera_params, 'physical': sim.params}
+    params = param_dict['camera']
 
     ### DRAW LIMITING MAGNITUDE AND LENGTH DELAY ###
 
     # If the drawn values have already been given, use them
-    if postprocess_params is not None:
-        lim_mag, lim_mag_len, len_delay = postprocess_params
-
+    if add_noise:
+        # Draw limiting magnitude and length end magnitude and length delay
+        starting_lim_mag = params.starting_lim_mag.generateVal()
+        ending_lim_mag = params.ending_lim_mag.generateVal()
+        len_delay = params.len_delay.generateVal()
     else:
-
-        # Draw limiting magnitude and length end magnitude
-        lim_mag = np.random.uniform(params.lim_mag_brightest, params.lim_mag_faintest)
-        lim_mag_len = np.random.uniform(params.lim_mag_len_end_brightest, params.lim_mag_len_end_faintest)
-
-        # Draw the length delay
-        len_delay = np.random.uniform(params.len_delay_min, params.len_delay_max)
-
-        postprocess_params = [lim_mag, lim_mag_len, len_delay]
-
-    lim_mag_faintest = np.max([lim_mag, lim_mag_len])
-    lim_mag_brightest = np.min([lim_mag, lim_mag_len])
+        starting_lim_mag = params.starting_lim_mag.val
+        ending_lim_mag = params.ending_lim_mag.val
+        len_delay = params.len_delay.val
 
     ### ###
 
@@ -647,43 +603,38 @@ def extractSimData(
         sim.simulation_results.abs_magnitude
     )
 
+    # if the peak magnitude is dimmer than the faintest expected peak magnitude, discard it
+    if np.min(sim.simulation_results.abs_magnitude) >= params.peak_mag_faintest:
+        return None
+
     # Get indices that are above the faintest limiting magnitude
-    indices_visible = sim.simulation_results.abs_magnitude <= lim_mag_faintest
+    min_lim_mag = min(starting_lim_mag, ending_lim_mag)
+    indices_visible = np.ones(sim.simulation_results.abs_magnitude.shape, dtype=bool)
+    # filtering out anything before what's visible by the wide camera
+    indices_visible[: np.argmax(sim.simulation_results.abs_magnitude <= starting_lim_mag)] = False
+    # if last element is too bright filtering ending doesn't do anything
+    if sim.simulation_results.abs_magnitude[-1] > ending_lim_mag:
+        indices_visible[-np.argmax(sim.simulation_results.abs_magnitude[::-1] <= ending_lim_mag) :] = False
+    # filtering out anything dimmer than what's visible by wide and narrow cameras
+    indices_visible[sim.simulation_results.abs_magnitude >= min_lim_mag] = False
 
     # If no points were visible, skip this solution
     if not np.any(indices_visible):
-        # print('not visible')
-        return None
-
-    ### CHECK METEOR VISIBILITY WITH THE BRIGTHER (DETECTION) LIMITING MAGNITUDE ###
-    ###     (in the CAMO widefield camera)                                       ###
-
-    # Get indices of magnitudes above the brighter limiting magnitude
-    indices_visible_brighter = sim.simulation_results.abs_magnitude <= lim_mag_brightest
-
-    # If no points were visible, skip this solution
-    if not np.any(indices_visible_brighter):
-        # print('none that are too bright')
+        print('not visible')
         return None
 
     # Compute the minimum time the meteor needs to be visible
-    min_time_visible = min_frames_visible / params.fps + len_delay
+    min_time_visible = params.visibility_time_min
 
-    time_lim_mag_bright = sim.simulation_results.time_arr[indices_visible_brighter]
+    time_lim_mag_bright = sim.simulation_results.time_arr[indices_visible]
     time_lim_mag_bright -= time_lim_mag_bright[0]
 
     # Check if the minimum time is satisfied
     if np.max(time_lim_mag_bright) < min_time_visible:
-        # print('minimum time not satisfied')
+        print('minimum time not satisfied')
         return None
 
     ### ###
-
-    # Get the first index after the magnitude reaches visibility in the wide field
-    index_first_visibility = np.argwhere(indices_visible_brighter)[0][0]
-
-    # Set all visibility indices before the first one visible in the wide field to False
-    indices_visible[:index_first_visibility] = False
 
     # Select time, magnitude, height, and length above the visibility limit
     time_visible = sim.simulation_results.time_arr[indices_visible]
@@ -715,9 +666,6 @@ def extractSimData(
 
     ###
 
-    # Set all magnitudes below the brightest limiting magnitude to the faintest magnitude
-    mag_sampled[mag_sampled > lim_mag] = params.lim_mag_len_end_faintest
-
     # Normalize the first length to zero
     first_length_index = np.argwhere(time_sampled >= len_delay)[0][0]
     len_sampled[first_length_index:] -= len_sampled[first_length_index]
@@ -742,7 +690,7 @@ def extractSimData(
 
     # ### ###
 
-    # Check that there are any length measurements
+    # there should not be any truncation in the data
     if not np.any(len_sampled > 0):
         # print('no length measurements')
         return None
@@ -750,20 +698,21 @@ def extractSimData(
     # If the simulation should only be checked that it's good, return the postprocess parameters used to
     #   generate the data
     if check_only:
-        return postprocess_params
+        return param_dict
 
+    # TODO: add this
     ### ADD NOISE ###
 
-    if add_noise:
-        # Add noise to magnitude data
-        mag_sampled[mag_sampled <= lim_mag] += np.random.normal(
-            loc=0.0, scale=params.mag_noise, size=len(mag_sampled[mag_sampled <= lim_mag])
-        )
+    # if add_noise:
+    #     # Add noise to magnitude data
+    #     mag_sampled[mag_sampled <= lim_mag] += np.random.normal(
+    #         loc=0.0, scale=params.mag_noise, size=len(mag_sampled[mag_sampled <= lim_mag])
+    #     )
 
-        # Add noise to length data
-        len_sampled[first_length_index:] += np.random.normal(
-            loc=0.0, scale=params.len_noise, size=len(len_sampled[first_length_index:])
-        )
+    #     # Add noise to length data
+    #     len_sampled[first_length_index:] += np.random.normal(
+    #         loc=0.0, scale=params.len_noise, size=len(len_sampled[first_length_index:])
+    #     )
 
     ### ###
 
@@ -771,19 +720,36 @@ def extractSimData(
     input_data_normed = sim.getNormalizedInputs()
 
     # Normalize simulated data
-    ht_normed, len_normed, mag_normed = sim.normalizeSimulations(params, ht_sampled, len_sampled, mag_sampled)
+    ht_normed, len_normed, mag_normed = normalizeSimulations(
+        param_dict['physical'], param_dict['camera'], ht_sampled, len_sampled, mag_sampled
+    )
 
     # Generate vector with simulated data
     simulated_data_normed = np.vstack(
         [
-            padOrTruncate(ht_normed, params.data_length),
-            padOrTruncate(len_normed, params.data_length),
-            padOrTruncate(mag_normed, params.data_length),
+            padOrTruncate(ht_normed, params.data_length, side='end'),
+            padOrTruncate(len_normed, params.data_length, side='end'),
+            padOrTruncate(mag_normed, params.data_length, side='end'),
         ]
     )
+    # fig, ax = plt.subplots(4)
+    # ax[0].plot(simulated_data_normed[2], simulated_data_normed[0])
+    # ax[1].plot(simulated_data_normed[1], simulated_data_normed[0])
+    # ax[0].set_xlabel('Mag')
+    # ax[0].set_ylabel('Ht')
+    # ax[1].set_xlabel('Length')
+    # ax[1].set_ylabel('Ht')
 
+    # ax[2].plot(sim.simulation_results.abs_magnitude, sim.simulation_results.brightest_height_arr)
+    # ax[3].plot(sim.simulation_results.brightest_length_arr, sim.simulation_results.brightest_height_arr)
+    # ax[2].set_xlabel('Mag')
+    # ax[2].set_ylabel('Ht')
+    # ax[3].set_xlabel('Length')
+    # ax[3].set_ylabel('Ht')
+
+    # plt.show()
     # Return input data and results
-    return params, input_data_normed, simulated_data_normed
+    return param_dict, input_data_normed, simulated_data_normed
 
 
 def saveCleanData(output_dir: str, random_seed: int):
@@ -926,7 +892,7 @@ if __name__ == "__main__":
 
     # Generate simulations using multiprocessing
     input_list = [[cml_args.output_dir, np.random.randint(0, 2 ** 31 - 1)] for _ in range(cml_args.nsims)]
-    results_list = domainParallelizer(input_list, saveCleanData)
+    results_list = domainParallelizer(input_list, saveCleanDatam, display=True)
 
     # # Save the list of simulations that passed the criteria to disk
     # saveProcessedList(

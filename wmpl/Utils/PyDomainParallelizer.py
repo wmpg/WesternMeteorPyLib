@@ -97,7 +97,7 @@ def unpackDecorator(func):
     return dec
 
 
-def domainParallelizer(domain, function, cores=None, kwarg_dict=None, display=True):
+def domainParallelizer(domain, function, cores=None, kwarg_dict=None, display=False):
     """ Runs N (cores) functions as separate processes with parameters given in the domain list.
 
     Arguments:
