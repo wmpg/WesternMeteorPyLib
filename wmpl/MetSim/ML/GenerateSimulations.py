@@ -892,7 +892,7 @@ if __name__ == "__main__":
 
     # Generate simulations using multiprocessing
     input_list = [[cml_args.output_dir, np.random.randint(0, 2 ** 31 - 1)] for _ in range(cml_args.nsims)]
-    results_list = domainParallelizer(input_list, saveCleanDatam, display=True)
+    results_list = domainParallelizer(input_list, saveCleanData, display=True)
 
     # # Save the list of simulations that passed the criteria to disk
     # saveProcessedList(
