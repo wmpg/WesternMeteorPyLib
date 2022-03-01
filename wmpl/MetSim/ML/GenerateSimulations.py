@@ -28,7 +28,7 @@ from wmpl.Utils.TrajConversions import J2000_JD
 ### CONSTANTS ###
 
 # Length of data that will be used as an input during training
-DATA_LENGTH = 256
+DATA_LENGTH = 512
 
 # Default number of minimum frames for simulation
 MIN_FRAMES_VISIBLE = 10
@@ -50,7 +50,10 @@ class MetParam(object):
         self.method = gen_method
         self.link_method = (None, None)
 
-    def generateVal(self, local_state):
+    def generateVal(self, local_state=None):
+        if local_state is None:
+            local_state = np.random.RandomState()
+
         # setting the min and max based on the param it was linked to
         if self.link_method[0] == 'greater':
             _min, _max = (max(self.link_method[1].val, self.min), self.max)
@@ -426,7 +429,7 @@ class ErosionSimContainer:
         # Structure defining the range of physical parameters
         self.params = PhysicalParameters()
 
-        self.const = self.params.getConst()
+        self.const = self.params.getConst(random_seed)
 
         # Generate a file name from simulation_parameters
         self.file_name = "erosion_sim_v{:.2f}_m{:.2e}g_rho{:04d}_z{:04.1f}_abl{:.3f}_eh{:05.1f}_er{:.3f}_s{:.2f}".format(
@@ -533,7 +536,7 @@ def normalizeSimulations(
 
     ht_normed = (ht_data - camera_params.ht_min) / (camera_params.ht_max - camera_params.ht_min)
     len_normed = (len_data - len_min) / (len_max - len_min)
-    mag_normed = (mag_data - camera_params.mag_brightest) / (
+    mag_normed = (camera_params.mag_faintest - mag_data) / (
         camera_params.mag_faintest - camera_params.mag_brightest
     )
 

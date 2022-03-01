@@ -715,6 +715,21 @@ def estimateHullOverlapRatio(hull1, hull2, niter=200, volume=False):
 ##############################################################################################################
 
 
+def stdOfStd(s, n):
+    """ Given sample standard deviation and number of points used to make that calculation,
+    
+    https://stats.stackexchange.com/questions/631/standard-deviation-of-standard-deviation
+    
+    Input is the sample standard deviation, so it must be calculated with ddof=1
+    """
+    return (
+        s
+        * scipy.special.gamma((n - 1) / 2)
+        / scipy.special.gamma(n / 2)
+        * np.sqrt((n - 1) / 2 - (scipy.special.gamma(n / 2) / scipy.special.gamma((n - 1) / 2)) ** 2)
+    )
+
+
 def confidenceInterval(data, ci, angle=False):
     """ Compute confidence intervals for the given data.
 
@@ -983,22 +998,28 @@ def histogramEdgesEqualDataNumber(x, nbins):
     return np.interp(np.linspace(0, npt, nbins + 1), np.arange(npt), np.sort(x))
 
 
-def padOrTruncate(array, size):
+def padOrTruncate(array, size, side='end'):
     """ Given the array, either pad ti with zeros or cut it to the given size. 
     
     Argumetns:
         array: [ndarray] Inpout numpy array.
         size: [int] Output array size.
+        
+    Keyword Arguments:
+        side: [str] Whether to truncate or pad the 'start' or 'end'
 
     Return:
         [ndarray] Array with the fixed size.
     """
 
     if array.shape[0] > size:
-        return array[:size]
+        if side == 'end':
+            return array[:size]
+        return array[-size:]
 
-    else:
+    if side == 'end':
         return np.hstack((array, np.zeros(size - array.shape[0])))
+    return np.hstack((np.zeros(size - array.shape[0]), array))
 
 
 ### OPTIMIZATION ###

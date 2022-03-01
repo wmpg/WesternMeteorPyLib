@@ -22,19 +22,20 @@ from wmpl.MetSim.ML.GenerateSimulations import (
     ErosionSimParametersCAMO,
     ErosionSimParametersCAMOWide,
     MetParam,
+    PhysicalParameters,
     extractSimData,
 )
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PyDomainParallelizer import domainParallelizer
 
 
-def dataFunction(file_path, param_class_name, postprocess_params=None):
+def dataFunction(file_path, param_class_name):
 
     # Load the pickle file
     sim = loadPickle(*os.path.split(file_path))
 
     # Extract model inputs and outputs
-    return extractSimData(sim, param_class_name=param_class_name, postprocess_params=postprocess_params,)
+    return extractSimData(sim, param_class_name=param_class_name)
 
 
 class DataGenerator(object):
@@ -65,6 +66,8 @@ class DataGenerator(object):
         self.steps_per_epoch = steps_per_epoch
         self.data_list = data_list
 
+        intial_len = len(self.data_list)
+
         self.param_class_name = param_class_name
 
         self.validation = validation
@@ -80,7 +83,7 @@ class DataGenerator(object):
         if total_epochs == 0:
             raise Exception(
                 'Total epochs is zero. Batch size or steps per epoch are too high. '
-                f'At least {data_per_epoch} samples expected with {len(self.data_list)} '
+                f'At least {data_per_epoch} samples expected with {intial_len} '
                 'given.'
             )
 
@@ -102,7 +105,7 @@ class DataGenerator(object):
         self.validation_index_start = self.fit_epochs * data_per_epoch - 1
 
     def __iter__(self):
-
+        data_length = DATA_LENGTH  # default value
         # Select valirable depending on if the validation data is used or not
         if self.validation:
             curr_index = self.validation_index_start
@@ -124,7 +127,7 @@ class DataGenerator(object):
             # Load pickle files and postprocess in parallel
             domain = []
             for file_path in file_list:
-                domain.append([file_path, self.param_class_name, None])
+                domain.append([file_path, self.param_class_name])
 
             # Postprocess the data in parallel
             res_list = domainParallelizer(domain, dataFunction)
@@ -137,7 +140,7 @@ class DataGenerator(object):
 
                 # Skip simulation which did not satisfy filters
                 if res is None:
-                    print("Skipped:", file_path)
+                    # print("Skipped:", file_path)
                     continue
 
                 filtered_res.append(res)
@@ -150,13 +153,13 @@ class DataGenerator(object):
                 file_path = self.data_list[curr_index]
 
                 # Extract model inputs and outputs from the pickle file
-                res = dataFunction(file_path, self.param_class_name, None)
+                res = dataFunction(file_path, self.param_class_name)
 
                 curr_index += 1
 
                 # Skip simulation which did not satisfy filters
                 if res is None:
-                    print("Skipped:", file_path)
+                    # print("Skipped:", file_path)
                     continue
 
                 res_list.append(res)
@@ -165,7 +168,8 @@ class DataGenerator(object):
             for res in res_list:
 
                 # Extract results
-                model_params, input_data_normed, simulated_data_normed = res
+                param_dict, input_data_normed, simulated_data_normed = res
+                data_length = param_dict['camera'].data_length
 
                 # Add data to model input and output lists
                 param_list.append(input_data_normed)
@@ -179,9 +183,9 @@ class DataGenerator(object):
             )
 
             yield [
-                height_data_normed_list.reshape(-1, model_params.data_length, 1),
-                length_data_normed_list.reshape(-1, model_params.data_length, 1),
-                mag_data_normed_list.reshape(-1, model_params.data_length, 1),
+                height_data_normed_list.reshape(-1, data_length, 1),
+                length_data_normed_list.reshape(-1, data_length, 1),
+                mag_data_normed_list.reshape(-1, data_length, 1),
             ], param_list
 
 
@@ -221,8 +225,6 @@ def loadModel(file_path, model_file='model.json', weights_file='model.h5'):
 
 
 def evaluateFit(model, validation_gen, ret_perc=False):
-
-    # Create a copy of the generator
     validation_gen = copy.deepcopy(validation_gen)
 
     # Generate test data
@@ -230,10 +232,10 @@ def evaluateFit(model, validation_gen, ret_perc=False):
     test_outputs, test_inputs = test_data
 
     # Predict data
-    probabilities = model.predict(test_outputs)
+    pred_norm_params = model.predict(test_outputs)
 
     # Compute mean absolute percentage error for every model parameter
-    percent_errors = 100 * np.mean(np.abs(probabilities - test_inputs), axis=0)
+    percent_errors = 100 * np.mean(np.abs(pred_norm_params - test_inputs), axis=0)
 
     if ret_perc:
         return percent_errors
@@ -246,37 +248,38 @@ def evaluateFit(model, validation_gen, ret_perc=False):
         print(str(len(percent_errors) * "{:5.2f}% ").format(*percent_errors))
 
 
-def evaluateFit2(model, file_path, param_class_name):
+def evaluateFit2(model, file_path, param_class_name=None):
     """ Evaluates model by visually comparing expected simulation values to the simulation values 
     given from the prediction """
 
-    fig, ax = plt.subplots(2, sharey=True)
     sim = loadPickle(*os.path.split(file_path))
 
-    for i in range(10):
-        input_param, norm_input_param_vals, norm_sim_data = extractSimData(
-            sim, param_class_name=param_class_name
-        )
-        normalized_output_param_vals = model.predict(
-            tuple(i.reshape(-1, input_param.data_length, 1) for i in norm_sim_data)
-        )
-        param = copy.copy(input_param)
-        param.setParamValues(param.getDenormalizedInputs(normalized_output_param_vals))
-        const = param.getConst()
-        simulation_results = SimulationResults(const, *runSimulation(const))
+    ret = extractSimData(sim, param_class_name=param_class_name)
+    if ret is None:
+        print('Dataset is invalid')
+        return
 
-        print('predicted', param.getInputs())
+    input_param_dict, norm_input_param_vals, norm_sim_data = ret
 
-        ax[0].plot(
-            simulation_results.abs_magnitude,
-            simulation_results.brightest_height_arr / 1000,
-            label='ML predicted output',
-        )
-        ax[1].plot(
-            simulation_results.brightest_length_arr / 1000,
-            simulation_results.brightest_height_arr / 1000,
-            label='ML predicted output',
-        )
+    data_length = input_param_dict['camera'].data_length
+    normalized_output_param_vals = model.predict(tuple(i.reshape(-1, data_length, 1) for i in norm_sim_data))
+    phys_params = copy.deepcopy(input_param_dict['physical'])
+    phys_params.setParamValues(phys_params.getDenormalizedInputs(normalized_output_param_vals))
+    const = phys_params.getConst()
+    simulation_results = SimulationResults(const, *runSimulation(const))
+
+    print('predicted', phys_params.getInputs())
+    fig, ax = plt.subplots(2, sharey=True)
+    ax[0].plot(
+        simulation_results.abs_magnitude,
+        simulation_results.brightest_height_arr / 1000,
+        label='ML predicted output',
+    )
+    ax[1].plot(
+        simulation_results.brightest_length_arr / 1000,
+        simulation_results.brightest_height_arr / 1000,
+        label='ML predicted output',
+    )
 
     ax[0].plot(
         sim.simulation_results.abs_magnitude,
@@ -304,8 +307,13 @@ def evaluateFit2(model, file_path, param_class_name):
 
 
 def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_file):
-
+    # https://machinelearningmastery.com/how-to-develop-convolutional-neural-network-models-for-time-series-forecasting/
     # Height input model
+    checkpoint_filepath = os.path.join(output_dir, 'modelcheckpoint.h5')
+    model_checkpoint_callback = keras.callbacks.ModelCheckpoint(
+        filepath=checkpoint_filepath, mode='min', verbose=1, save_weights_only=True
+    )
+
     visible1 = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 1))
     cnn1 = keras.layers.Conv1D(filters=64, kernel_size=5, activation='relu')(visible1)
     cnn1 = keras.layers.MaxPooling1D(pool_size=2)(cnn1)
@@ -350,7 +358,7 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
         x=iter(data_gen),
         steps_per_epoch=data_gen.steps_per_epoch,
         epochs=data_gen.fit_epochs,
-        callbacks=[ReportFitGoodness(validation_gen)],
+        callbacks=[ReportFitGoodness(validation_gen), model_checkpoint_callback],
         workers=0,
         max_queue_size=1,
     )
@@ -438,7 +446,7 @@ if __name__ == "__main__":
     if cml_args.grouping:
         batch_size, steps_per_epoch = cml_args.grouping
     else:
-        batch_size = 256
+        batch_size = DATA_LENGTH
         steps_per_epoch = 80
 
     # Model file names
@@ -459,7 +467,7 @@ if __name__ == "__main__":
 
     if cml_args.evaluate:
         model = loadModel(cml_args.output_dir, model_file, weights_file)
-        evaluateFit2(model, data_list[0], cml_args.classname)
+        evaluateFit2(model, data_list[2])  # , cml_args.classname)
     else:
         # Init the data generator
         data_gen = DataGenerator(
