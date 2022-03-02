@@ -105,7 +105,6 @@ class DataGenerator(object):
         self.validation_index_start = self.fit_epochs * data_per_epoch - 1
 
     def __iter__(self):
-        data_length = DATA_LENGTH  # default value
         # Select valirable depending on if the validation data is used or not
         if self.validation:
             curr_index = self.validation_index_start
@@ -169,7 +168,6 @@ class DataGenerator(object):
 
                 # Extract results
                 param_dict, input_data_normed, simulated_data_normed = res
-                data_length = param_dict['camera'].data_length
 
                 # Add data to model input and output lists
                 param_list.append(input_data_normed)
@@ -178,14 +176,14 @@ class DataGenerator(object):
             param_list = np.array(param_list)
             result_list = np.array(result_list)
 
-            height_data_normed_list, mag_data_normed_list, length_data_normed_list = np.split(
+            height_data_normed_list, length_data_normed_list, mag_data_normed_list = np.split(
                 result_list, 3, axis=1
             )
 
             yield [
-                height_data_normed_list.reshape(-1, data_length, 1),
-                length_data_normed_list.reshape(-1, data_length, 1),
-                mag_data_normed_list.reshape(-1, data_length, 1),
+                np.moveaxis(height_data_normed_list, 1, 2),
+                np.moveaxis(length_data_normed_list, 1, 2),
+                np.moveaxis(mag_data_normed_list, 1, 2),
             ], param_list
 
 
@@ -225,14 +223,14 @@ def loadModel(file_path, model_file='model.json', weights_file='model.h5'):
 
 
 def evaluateFit(model, validation_gen, ret_perc=False):
+    np.set_printoptions(threshold=np.inf)
     # Generate test data
     test_data = next(validation_gen)
     test_outputs, test_inputs = test_data
-
+    # print([i.shape for i in test_outputs])
     # Predict data
     pred_norm_params = model.predict(test_outputs)
 
-    print(pred_norm_params - test_inputs)
     # Compute mean absolute percentage error for every model parameter
     percent_errors = 100 * np.mean(np.abs(pred_norm_params - test_inputs), axis=0)
 
@@ -261,9 +259,11 @@ def evaluateFit2(model, file_path, validation_gen, param_class_name=None):
         return
 
     input_param_dict, norm_input_param_vals, norm_sim_data = ret
-    print('correct norm', norm_input_param_vals)
+
     data_length = input_param_dict['camera'].data_length
     normalized_output_param_vals = model.predict(tuple(i.reshape(-1, data_length, 1) for i in norm_sim_data))
+    print()
+    print('correct norm', norm_input_param_vals)
     print('pred norm', list(normalized_output_param_vals[0]))
     print()
     print('perc error', list(np.abs(normalized_output_param_vals[0] - np.array(norm_input_param_vals)) * 100))
@@ -472,11 +472,11 @@ if __name__ == "__main__":
 
     if cml_args.evaluate is not None:
         # Init the validation generator
-        validation_gen = DataGenerator(
-            data_list, batch_size, steps_per_epoch, param_class_name=cml_args.classname, validation=True
+        data_gen = DataGenerator(
+            data_list, batch_size, steps_per_epoch, param_class_name=cml_args.classname, validation=False
         )
         model = loadModel(cml_args.output_dir, model_file, weights_file)
-        evaluateFit2(model, data_list[cml_args.evaluate], validation_gen)  # , cml_args.classname)
+        evaluateFit2(model, data_list[cml_args.evaluate], data_gen, cml_args.classname)
     else:
         # Init the data generator
         data_gen = DataGenerator(
