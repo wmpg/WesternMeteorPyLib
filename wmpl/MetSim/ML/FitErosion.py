@@ -232,6 +232,7 @@ def evaluateFit(model, validation_gen, ret_perc=False):
     # Predict data
     pred_norm_params = model.predict(test_outputs)
 
+    print(pred_norm_params - test_inputs)
     # Compute mean absolute percentage error for every model parameter
     percent_errors = 100 * np.mean(np.abs(pred_norm_params - test_inputs), axis=0)
 
