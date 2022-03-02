@@ -28,7 +28,7 @@ from wmpl.Utils.TrajConversions import J2000_JD
 ### CONSTANTS ###
 
 # Length of data that will be used as an input during training
-DATA_LENGTH = 256
+DATA_LENGTH = 512
 
 # Default number of minimum frames for simulation
 MIN_FRAMES_VISIBLE = 10
