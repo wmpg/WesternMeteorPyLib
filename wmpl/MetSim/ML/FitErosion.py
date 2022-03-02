@@ -116,7 +116,7 @@ class DataGenerator(object):
             epochs = self.fit_epochs
 
         # Generate data for every epoch
-        for step in range(epochs * self.steps_per_epoch):
+        while True:
             param_list = []
             result_list = []
 
@@ -150,7 +150,7 @@ class DataGenerator(object):
             # Load more results using one core until the proper length is achieved
             while len(res_list) < self.batch_size:
 
-                file_path = self.data_list[curr_index]
+                file_path = self.data_list[curr_index % len(self.data_list)]
 
                 # Extract model inputs and outputs from the pickle file
                 res = dataFunction(file_path, self.param_class_name)
@@ -194,7 +194,7 @@ class ReportFitGoodness(keras.callbacks.Callback):
   """
 
     def __init__(self, validation_gen):
-        self.validation_gen = validation_gen
+        self.validation_gen = iter(validation_gen)
 
     def on_epoch_end(self, epoch, logs=None):
 
@@ -225,10 +225,8 @@ def loadModel(file_path, model_file='model.json', weights_file='model.h5'):
 
 
 def evaluateFit(model, validation_gen, ret_perc=False):
-    validation_gen = copy.deepcopy(validation_gen)
-
     # Generate test data
-    test_data = next(iter(validation_gen))
+    test_data = next(validation_gen)
     test_outputs, test_inputs = test_data
 
     # Predict data
@@ -248,9 +246,11 @@ def evaluateFit(model, validation_gen, ret_perc=False):
         print(str(len(percent_errors) * "{:5.2f}% ").format(*percent_errors))
 
 
-def evaluateFit2(model, file_path, param_class_name=None):
+def evaluateFit2(model, file_path, validation_gen, param_class_name=None):
     """ Evaluates model by visually comparing expected simulation values to the simulation values 
     given from the prediction """
+    evaluateFit(model, iter(validation_gen))
+    print()
 
     sim = loadPickle(*os.path.split(file_path))
 
@@ -260,11 +260,15 @@ def evaluateFit2(model, file_path, param_class_name=None):
         return
 
     input_param_dict, norm_input_param_vals, norm_sim_data = ret
-
+    print('correct norm', norm_input_param_vals)
     data_length = input_param_dict['camera'].data_length
     normalized_output_param_vals = model.predict(tuple(i.reshape(-1, data_length, 1) for i in norm_sim_data))
+    print('pred norm', list(normalized_output_param_vals[0]))
+    print()
+    print('perc error', list(np.abs(normalized_output_param_vals[0] - np.array(norm_input_param_vals)) * 100))
+    print()
     phys_params = copy.deepcopy(input_param_dict['physical'])
-    phys_params.setParamValues(phys_params.getDenormalizedInputs(normalized_output_param_vals))
+    phys_params.setParamValues(phys_params.getDenormalizedInputs(normalized_output_param_vals[0]))
     const = phys_params.getConst()
     simulation_results = SimulationResults(const, *runSimulation(const))
 
@@ -376,7 +380,7 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
     print("Saved model to disk")
 
     # Evaluate fit quality
-    evaluateFit(model, validation_gen)
+    evaluateFit(model, iter(validation_gen))
 
 
 def getFileList(folder):
@@ -427,7 +431,7 @@ if __name__ == "__main__":
     arg_parser.add_argument(
         '-e',
         '--evaluate',
-        action='store_true',
+        type=int,
         help='Inputting this parameter will not train the model, but instead evaluate the model by visually '
         'showing what it predicts compared to the simulation.',
     )
@@ -465,9 +469,13 @@ if __name__ == "__main__":
 
     print("{:d} inputs used for training/testing...".format(len(data_list)))
 
-    if cml_args.evaluate:
+    if cml_args.evaluate is not None:
+        # Init the validation generator
+        validation_gen = DataGenerator(
+            data_list, batch_size, steps_per_epoch, param_class_name=cml_args.classname, validation=True
+        )
         model = loadModel(cml_args.output_dir, model_file, weights_file)
-        evaluateFit2(model, data_list[2])  # , cml_args.classname)
+        evaluateFit2(model, data_list[cml_args.evaluate], validation_gen)  # , cml_args.classname)
     else:
         # Init the data generator
         data_gen = DataGenerator(

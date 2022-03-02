@@ -28,7 +28,7 @@ from wmpl.Utils.TrajConversions import J2000_JD
 ### CONSTANTS ###
 
 # Length of data that will be used as an input during training
-DATA_LENGTH = 512
+DATA_LENGTH = 256
 
 # Default number of minimum frames for simulation
 MIN_FRAMES_VISIBLE = 10
@@ -82,7 +82,7 @@ class MetParam(object):
         self.link_method = (method, param)
 
     def __str__(self):
-        return self.val
+        return str(self.val)
 
 
 ##############################################################################################################
@@ -155,7 +155,7 @@ class PhysicalParameters:
 
     def setParamValues(self, vals):
         for val, param in zip(vals, self.param_list):
-            setattr(getattr(self, param), 'val', val)
+            getattr(self, param).val = val
 
     def getInputs(self) -> List[float]:
         return [getattr(self, param_name).val for param_name in self.param_list]
@@ -191,7 +191,7 @@ class PhysicalParameters:
 
         return denormalized_values
 
-    def getConst(self, random_seed: int = None, override: bool = True):
+    def getConst(self, random_seed: int = None, override: bool = False):
         # Init simulation constants
         const = Constants()
         const.dens_co = self.dens_co
@@ -215,7 +215,7 @@ class PhysicalParameters:
             # Get the parameter container
             p = getattr(self, param_name)
 
-            if p.val is None or override:
+            if p.val is None or override or p.val > p.max or p.val < p.min:
                 p.generateVal(local_state)
 
             # Assign value to simulation contants
@@ -230,8 +230,8 @@ class ErosionSimParameters:
         # System limiting magnitude. Starting LM is the magnitude when the camera will start observing
         # (the first instance) the meteor, and ending LM is the magnitude where it will stop observing
         # (the last instance)
-        self.starting_lim_mag = MetParam(10, 5, default=8)
-        self.ending_lim_mag = MetParam(10, 5, default=8)
+        self.starting_lim_mag = MetParam(5, 10, default=8)
+        self.ending_lim_mag = MetParam(5, 10, default=8)
 
         # if lightcurve doesn't reach this magnitude, it's discarded
         self.peak_mag_faintest = 6
@@ -293,8 +293,8 @@ class ErosionSimParametersCAMO(ErosionSimParameters):
         # System limiting magnitude. Starting LM is the magnitude when the camera will start observing
         # (the first instance) the meteor, and ending LM is the magnitude where it will stop observing
         # (the last instance)
-        self.starting_lim_mag = MetParam(10, 5, default=8)  # to be adjusted
-        self.ending_lim_mag = MetParam(10, 5, default=8)  # to be adjusted
+        self.starting_lim_mag = MetParam(5, 10, default=8)  # to be adjusted
+        self.ending_lim_mag = MetParam(5, 10, default=8)  # to be adjusted
 
         # if lightcurve doesn't reach this magnitude, it's discarded
         self.peak_mag_faintest = 6  # to be adjusted
@@ -358,8 +358,8 @@ class ErosionSimParametersCAMOWide(ErosionSimParameters):
         # System limiting magnitude. Starting LM is the magnitude when the camera will start observing
         # (the first instance) the meteor, and ending LM is the magnitude where it will stop observing
         # (the last instance)
-        self.starting_lim_mag = MetParam(10, 5, default=8)  # to be adjusted
-        self.ending_lim_mag = MetParam(10, 5, default=8)  # to be adjusted
+        self.starting_lim_mag = MetParam(5, 10, default=8)  # to be adjusted
+        self.ending_lim_mag = MetParam(5, 10, default=8)  # to be adjusted
 
         # if lightcurve doesn't reach this magnitude, it's discarded
         self.peak_mag_faintest = 6  # to be adjusted
