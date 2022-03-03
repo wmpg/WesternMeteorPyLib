@@ -1649,7 +1649,7 @@ def generateAutoPlotsAndReports(dir_path, traj_quality_params, prev_sols=10, sol
     # Compute the time of the next closest integer solar longitude in degrees
     time_now = datetime.datetime.utcnow()
     sol_lon_now = np.degrees(jd2SolLonSteyaert(datetime2JD(time_now)))
-    sol_lon_next = np.floor(sol_lon_now)
+    sol_lon_next = np.ceil(sol_lon_now)
     
 
     # Generate plots for every day
