@@ -47,6 +47,7 @@ class DataGenerator(object):
         param_class_name=None,
         validation=False,
         validation_portion=0.2,
+        random_state=None,
     ):
         """ Generate meteor data for the ML fit function. 
     
@@ -66,6 +67,10 @@ class DataGenerator(object):
         self.steps_per_epoch = steps_per_epoch
         self.data_list = data_list
 
+        self.random_state = random_state
+        if self.random_state is None:
+            self.random_state = random.Random()
+
         intial_len = len(self.data_list)
 
         self.param_class_name = param_class_name
@@ -75,103 +80,84 @@ class DataGenerator(object):
         # Compute the number of files in each epoch
         data_per_epoch = self.batch_size * self.steps_per_epoch
 
-        # Cut the processing list to the steps multiplier
-        self.data_list = self.data_list[: -int(len(self.data_list) % data_per_epoch)]
+        self.training_list = self.data_list[int(intial_len * (1 - validation_portion)) :]
+        self.validation_list = self.data_list[: int(intial_len * (1 - validation_portion))]
 
         # Compute the number of total epochs
-        total_epochs = int(len(self.data_list) // data_per_epoch)
-        if total_epochs == 0:
+        self.total_epochs = int(len(self.data_list) // data_per_epoch)
+        self.validation_epochs = int(len(self.validation_list) // data_per_epoch)
+        self.training_epochs = int(len(self.training_list) // data_per_epoch)
+        if self.total_epochs == 0:
             raise Exception(
                 'Total epochs is zero. Batch size or steps per epoch are too high. '
                 f'At least {data_per_epoch} samples expected with {intial_len} '
                 'given.'
             )
 
-        # Compute the number of epochs for the fit
-        self.fit_epochs = int((1.0 - validation_portion) * total_epochs)
-
-        # Number of validation epochs
-        self.validation_epochs = total_epochs - self.fit_epochs
-
-        # Make sure that there is a minimum of one validation epoch
-        if self.validation_epochs < 1:
-            self.validation_epochs = 1
-            self.fit_epochs -= 1
-
-        # Current data index
-        self.data_index_start = 0
-
-        # Current validation index
-        self.validation_index_start = self.fit_epochs * data_per_epoch - 1
+    @property
+    def epochs(self):
+        if self.validation:
+            return self.validation_epochs
+        return self.training_epochs
 
     def __iter__(self):
-        # Select valirable depending on if the validation data is used or not
+        # Select file list depending on whether validation or training is being done
         if self.validation:
-            curr_index = self.validation_index_start
-            epochs = self.validation_epochs
-
+            data_list = self.validation_list
         else:
-            curr_index = self.data_index_start
-            epochs = self.fit_epochs
+            data_list = self.training_list
 
+        res_list = []
+        curr_index = 0
+        to_delete = []
         # Generate data for every epoch
         while True:
-            param_list = []
-            result_list = []
-
             # Get a portion of files to load
-            beg_index = curr_index
-            file_list = self.data_list[beg_index : (beg_index + self.batch_size)]
+            file_list = data_list[curr_index : curr_index + batch_size]
 
             # Load pickle files and postprocess in parallel
-            domain = []
-            for file_path in file_list:
-                domain.append([file_path, self.param_class_name])
+            domain = [[file_path, self.param_class_name] for file_path in file_list]
 
             # Postprocess the data in parallel
-            res_list = domainParallelizer(domain, dataFunction)
+            res_list += domainParallelizer(domain, dataFunction)
 
-            # Postprocess results
-            filtered_res = []
-            for res in res_list:
-
-                curr_index += 1
-
-                # Skip simulation which did not satisfy filters
+            filtered_res_list = []
+            # discard bad results
+            for i, res in enumerate(res_list[-len(file_list) :]):
                 if res is None:
-                    # print("Skipped:", file_path)
-                    continue
+                    to_delete.append(curr_index + i)
+                else:
+                    filtered_res_list.append(res)
 
-                filtered_res.append(res)
+            res_list = res_list[: -self.batch_size] + filtered_res_list
+            curr_index += self.batch_size
 
-            res_list = filtered_res
+            # if you fully loop data, shuffle it
+            if curr_index >= len(file_list):
+                curr_index = 0
+                data_list = np.delete(data_list, to_delete)
+                self.random_state.shuffle(file_list)
 
-            # Load more results using one core until the proper length is achieved
-            while len(res_list) < self.batch_size:
+            # if there aren't enough results to fill the batch, collect another batch and fill the gaps with it
+            # where extras will be used in subsequent iterations
+            if len(res_list) < self.batch_size:
+                continue
 
-                file_path = self.data_list[curr_index % len(self.data_list)]
-
-                # Extract model inputs and outputs from the pickle file
-                res = dataFunction(file_path, self.param_class_name)
-
-                curr_index += 1
-
-                # Skip simulation which did not satisfy filters
-                if res is None:
-                    # print("Skipped:", file_path)
-                    continue
-
-                res_list.append(res)
+            next_res_list = res_list[self.batch_size :]
+            res_list = res_list[: self.batch_size]
 
             # Split results to input/output list
+            param_list = []
+            result_list = []
             for res in res_list:
-
                 # Extract results
                 param_dict, input_data_normed, simulated_data_normed = res
 
                 # Add data to model input and output lists
                 param_list.append(input_data_normed)
                 result_list.append(simulated_data_normed)
+
+            res_list = next_res_list
 
             param_list = np.array(param_list)
             result_list = np.array(result_list)
@@ -180,6 +166,7 @@ class DataGenerator(object):
                 result_list, 3, axis=1
             )
 
+            # yield dimenions [(batch_size, data_length, 1), ...]
             yield [
                 np.moveaxis(height_data_normed_list, 1, 2),
                 np.moveaxis(length_data_normed_list, 1, 2),
@@ -273,8 +260,17 @@ def evaluateFit2(model, file_path, validation_gen, param_class_name=None):
     const = phys_params.getConst()
     simulation_results = SimulationResults(const, *runSimulation(const))
 
+    starting_height = (
+        simulation_results.brightest_height_arr[np.argmax(simulation_results.abs_magnitude < 8)] / 1000
+    )
+    ending_height = (
+        simulation_results.brightest_height_arr[-np.argmax(simulation_results.abs_magnitude[::-1] < 8) - 1]
+        / 1000
+        - 10
+    )
     print('predicted', phys_params.getInputs())
     fig, ax = plt.subplots(2, sharey=True)
+
     ax[0].plot(
         simulation_results.abs_magnitude,
         simulation_results.brightest_height_arr / 1000,
@@ -306,6 +302,9 @@ def evaluateFit2(model, file_path, validation_gen, param_class_name=None):
     ax[1].set_xlabel("Length (km)")
     ax[1].legend()
 
+    ax[0].set_ylim([ending_height, starting_height])
+    ax[1].set_ylim([ending_height, starting_height])
+    ax[0].set_xlim(right=8)
     print('correct', sim.params.getInputs())
 
     plt.show()
@@ -348,9 +347,13 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
     dense = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(dense)
     dense = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(dense)
     dense = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(dense)
-    output = keras.layers.Dense(10, kernel_initializer='normal', activation="linear", batch_size=batch_size)(
-        dense
-    )
+    output = keras.layers.Dense(
+        10,
+        kernel_initializer='normal',
+        activation="linear",
+        batch_size=batch_size,
+        activity_regularizer=keras.regularizers.l1(0.01),
+    )(dense)
 
     # Tie inputs together
     model = keras.models.Model(inputs=[visible1, visible2, visible3], outputs=output)
@@ -362,7 +365,7 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
     model.fit(
         x=iter(data_gen),
         steps_per_epoch=data_gen.steps_per_epoch,
-        epochs=data_gen.fit_epochs,
+        epochs=data_gen.epochs,
         callbacks=[ReportFitGoodness(validation_gen), model_checkpoint_callback],
         workers=0,
         max_queue_size=1,
