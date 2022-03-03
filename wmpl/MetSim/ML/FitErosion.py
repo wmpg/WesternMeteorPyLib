@@ -80,8 +80,8 @@ class DataGenerator(object):
         # Compute the number of files in each epoch
         data_per_epoch = self.batch_size * self.steps_per_epoch
 
-        self.training_list = self.data_list[int(intial_len * (1 - validation_portion)) :]
-        self.validation_list = self.data_list[: int(intial_len * (1 - validation_portion))]
+        self.training_list = self.data_list[: int(intial_len * (1 - validation_portion))]
+        self.validation_list = self.data_list[int(intial_len * (1 - validation_portion)) :]
 
         # Compute the number of total epochs
         self.total_epochs = int(len(self.data_list) // data_per_epoch)
@@ -133,10 +133,11 @@ class DataGenerator(object):
             curr_index += self.batch_size
 
             # if you fully loop data, shuffle it
-            if curr_index >= len(file_list):
-                curr_index = 0
+            if curr_index >= len(data_list):
                 data_list = np.delete(data_list, to_delete)
-                self.random_state.shuffle(file_list)
+                to_delete = []
+                curr_index = 0
+                self.random_state.shuffle(data_list)
 
             # if there aren't enough results to fill the batch, collect another batch and fill the gaps with it
             # where extras will be used in subsequent iterations
@@ -361,6 +362,14 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
     # Compile the model
     model.compile(optimizer='adam', loss='mse')
 
+    # Save the model to disk BEFORE fitting, so that it plus the checkpoint will have all information
+    model_json = model.to_json()
+
+    model_file = os.path.join(output_dir, model_file)
+    weights_file = os.path.join(output_dir, weights_file)
+    with open(model_file, "w") as json_file:
+        json_file.write(model_json)
+
     # fit model
     model.fit(
         x=iter(data_gen),
@@ -370,14 +379,6 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
         workers=0,
         max_queue_size=1,
     )
-
-    # Save the model to disk
-    model_json = model.to_json()
-
-    model_file = os.path.join(output_dir, model_file)
-    weights_file = os.path.join(output_dir, weights_file)
-    with open(model_file, "w") as json_file:
-        json_file.write(model_json)
 
     # serialize weights to HDF5
     model.save_weights(weights_file)
