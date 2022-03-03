@@ -173,6 +173,7 @@ class MetObservations(object):
 
         self.time_data = {}
         self.height_data = {}
+        self.length_data = {}
         self.lag_data = {}
         self.abs_mag_data = {}
 
@@ -268,7 +269,9 @@ class MetObservations(object):
 
                     abs_mag_data.append(abs_mag)
 
+                # store length data
                 state_vect_dist = np.array(state_vect_dist)
+                self.length_data[site] = state_vect_dist
 
                 # Compute the lag
                 self.lag_data[site] = state_vect_dist - lineFunc(time_rel_picks, *self.traj.velocity_fit)

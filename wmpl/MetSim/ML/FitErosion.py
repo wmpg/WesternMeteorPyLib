@@ -314,10 +314,12 @@ def evaluateFit2(model, file_path, validation_gen, param_class_name=None):
 def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_file):
     # https://machinelearningmastery.com/how-to-develop-convolutional-neural-network-models-for-time-series-forecasting/
     # Height input model
-    checkpoint_filepath = os.path.join(output_dir, 'modelcheckpoint.h5')
+    checkpoint_filepath = os.path.join(output_dir, f'{weights_file[:-3]}_checkpoint.h5')
     model_checkpoint_callback = keras.callbacks.ModelCheckpoint(
         filepath=checkpoint_filepath, mode='min', verbose=1, save_weights_only=True
     )
+
+    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='loss', patience=5, verbose=1)
 
     visible1 = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 1))
     cnn1 = keras.layers.Conv1D(filters=64, kernel_size=5, activation='relu')(visible1)
@@ -344,16 +346,16 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
 
     # merge input models
     merge = keras.layers.Concatenate()([cnn1, cnn2, cnn3])
-    dense = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(merge)
-    dense = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(dense)
-    dense = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(dense)
+    dense = keras.layers.Dense(1024, kernel_initializer='normal', activation='relu')(merge)
+    dense = keras.layers.Dense(1024, kernel_initializer='normal', activation='relu')(dense)
+    dense = keras.layers.Dense(1024, kernel_initializer='normal', activation='relu')(dense)
     dense = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(dense)
     output = keras.layers.Dense(
         10,
         kernel_initializer='normal',
         activation="linear",
         batch_size=batch_size,
-        activity_regularizer=keras.regularizers.l1(0.01),
+        # activity_regularizer=keras.regularizers.l1(0.01),
     )(dense)
 
     # Tie inputs together
@@ -375,7 +377,7 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
         x=iter(data_gen),
         steps_per_epoch=data_gen.steps_per_epoch,
         epochs=data_gen.epochs,
-        callbacks=[ReportFitGoodness(validation_gen), model_checkpoint_callback],
+        callbacks=[ReportFitGoodness(validation_gen), model_checkpoint_callback, early_stopping_callback],
         workers=0,
         max_queue_size=1,
     )

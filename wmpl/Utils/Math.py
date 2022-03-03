@@ -781,8 +781,9 @@ def mergeClosePoints(x_array, y_array, delta, x_datetime=False, method='avg'):
         averages all y values.
 
     Arguments:
-        x_array: [list] A list of x values (must be of the same length as y_array!).
-        y_array: [list] A list of y values (must be of the same length as x_array!).
+        x_array: [list] A list of x values (must be of the same length as y_array!). Must be sorted
+        y_array: [list] A list of y values (must be of the same length as x_array!). Or ndarray with
+            dimensions (len(x_array), n)
         delta: [float] Threshold distance between two points in x to merge them. Can be sampling of data (e.g. 
             half the fps).
 
@@ -824,13 +825,13 @@ def mergeClosePoints(x_array, y_array, delta, x_datetime=False, method='avg'):
 
             # Choose either to take the mean, max, or min of the points in the window
             if method.lower() == "max":
-                y = np.max(y_array[i : i + count])
+                y = np.max(y_array[i : i + count], axis=0)
 
             elif method.lower() == "min":
-                y = np.min(y_array[i : i + count])
+                y = np.min(y_array[i : i + count], axis=0)
 
             else:
-                y = np.mean(y_array[i : i + count])
+                y = np.mean(y_array[i : i + count], axis=0)
 
         # If there are no close points, add the current point to the list
         else:
