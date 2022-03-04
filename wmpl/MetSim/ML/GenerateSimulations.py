@@ -162,7 +162,7 @@ class PhysicalParameters:
 
     def getNormalizedInputs(self) -> List[float]:
         """ Normalize the physical parameters of the model to the 0-1 range. """
-
+        ## if you want to remove variables from the neural network, prevent them from being returned here ##
         # Normalize values in the parameter range
         normalized_values = []
         for param_name in self.param_list:
@@ -278,6 +278,8 @@ class ErosionSimParameters:
         # Height range (m)
         self.ht_min = 70000
         self.ht_max = 130000
+
+        self.max_duration = 10
 
         # Magnitude range
         self.mag_faintest = 10
@@ -525,6 +527,7 @@ class ErosionSimContainer:
 def normalizeSimulations(
     phys_params: PhysicalParameters,
     camera_params: ErosionSimParameters,
+    time_data: ArrayLike,
     ht_data: ArrayLike,
     len_data: ArrayLike,
     mag_data: ArrayLike,
@@ -534,13 +537,14 @@ def normalizeSimulations(
     len_min = 0
     len_max = phys_params.v_init.max * camera_params.data_length / camera_params.fps
 
+    time_normed = time_data / camera_params.max_duration
     ht_normed = (ht_data - camera_params.ht_min) / (camera_params.ht_max - camera_params.ht_min)
     len_normed = (len_data - len_min) / (len_max - len_min)
     mag_normed = (camera_params.mag_faintest - mag_data) / (
         camera_params.mag_faintest - camera_params.mag_brightest
     )
 
-    return ht_normed, len_normed, mag_normed
+    return time_normed, ht_normed, len_normed, mag_normed
 
 
 def extractSimData(
@@ -651,7 +655,8 @@ def extractSimData(
     len_interpol = scipy.interpolate.CubicSpline(time_visible, len_visible)
 
     # Create a new time array according to the FPS
-    time_sampled = np.arange(np.min(time_visible), np.max(time_visible), 1.0 / params.fps)
+    # time_sampled = np.arange(np.min(time_visible), np.max(time_visible), 1.0 / params.fps)
+    time_sampled = np.linspace(np.min(time_visible), np.max(time_visible), params.data_length)
 
     # Create new mag, height and length arrays at FPS frequency
     mag_sampled = mag_interpol(time_sampled)
@@ -695,7 +700,7 @@ def extractSimData(
 
     # there should not be any truncation in the data
     if not np.any(len_sampled > 0):
-        # print('no length measurements')
+        print('no length measurements')
         return None
 
     # If the simulation should only be checked that it's good, return the postprocess parameters used to
@@ -723,21 +728,23 @@ def extractSimData(
     input_data_normed = sim.getNormalizedInputs()
 
     # Normalize simulated data
-    ht_normed, len_normed, mag_normed = normalizeSimulations(
-        param_dict['physical'], param_dict['camera'], ht_sampled, len_sampled, mag_sampled
+    time_normed, ht_normed, len_normed, mag_normed = normalizeSimulations(
+        param_dict['physical'], param_dict['camera'], time_sampled, ht_sampled, len_sampled, mag_sampled
     )
 
     # Generate vector with simulated data
     simulated_data_normed = np.vstack(
         [
+            padOrTruncate(time_normed, params.data_length, side='end'),
             padOrTruncate(ht_normed, params.data_length, side='end'),
             padOrTruncate(len_normed, params.data_length, side='end'),
             padOrTruncate(mag_normed, params.data_length, side='end'),
         ]
     )
+
     # fig, ax = plt.subplots(4)
-    # ax[0].plot(simulated_data_normed[2], simulated_data_normed[0])
-    # ax[1].plot(simulated_data_normed[1], simulated_data_normed[0])
+    # ax[0].plot(simulated_data_normed[3], simulated_data_normed[1])
+    # ax[1].plot(simulated_data_normed[2], simulated_data_normed[1])
     # ax[0].set_xlabel('Mag')
     # ax[0].set_ylabel('Ht')
     # ax[1].set_xlabel('Length')

@@ -138,6 +138,8 @@ class DataGenerator(object):
                 to_delete = []
                 curr_index = 0
                 self.random_state.shuffle(data_list)
+                if len(data_list) == 0:
+                    raise Exception("No valid data")
 
             # if there aren't enough results to fill the batch, collect another batch and fill the gaps with it
             # where extras will be used in subsequent iterations
@@ -152,7 +154,7 @@ class DataGenerator(object):
             result_list = []
             for res in res_list:
                 # Extract results
-                param_dict, input_data_normed, simulated_data_normed = res
+                _, input_data_normed, simulated_data_normed = res
 
                 # Add data to model input and output lists
                 param_list.append(input_data_normed)
@@ -163,12 +165,16 @@ class DataGenerator(object):
             param_list = np.array(param_list)
             result_list = np.array(result_list)
 
-            height_data_normed_list, length_data_normed_list, mag_data_normed_list = np.split(
-                result_list, 3, axis=1
-            )
+            (
+                time_data_normed_list,
+                height_data_normed_list,
+                length_data_normed_list,
+                mag_data_normed_list,
+            ) = np.split(result_list, 4, axis=1)
 
             # yield dimenions [(batch_size, data_length, 1), ...]
             yield [
+                np.moveaxis(time_data_normed_list, 1, 2),
                 np.moveaxis(height_data_normed_list, 1, 2),
                 np.moveaxis(length_data_normed_list, 1, 2),
                 np.moveaxis(mag_data_normed_list, 1, 2),
@@ -319,33 +325,42 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
         filepath=checkpoint_filepath, mode='min', verbose=1, save_weights_only=True
     )
 
-    early_stopping_callback = keras.callbacks.EarlyStopping(monitor='loss', patience=5, verbose=1)
+    early_stopping_callback = keras.callbacks.EarlyStopping(
+        monitor='loss', patience=10, min_delta=0, verbose=1
+    )
+
+    visible0 = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 1))
+    cnn0 = keras.layers.Conv1D(filters=64, kernel_size=10, activation='relu')(visible0)
+    cnn0 = keras.layers.MaxPooling1D(pool_size=2)(cnn0)
+    cnn0 = keras.layers.Flatten()(cnn0)
+    cnn0 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn0)
+    cnn0 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn0)
 
     visible1 = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 1))
-    cnn1 = keras.layers.Conv1D(filters=64, kernel_size=5, activation='relu')(visible1)
+    cnn1 = keras.layers.Conv1D(filters=64, kernel_size=10, activation='relu')(visible1)
     cnn1 = keras.layers.MaxPooling1D(pool_size=2)(cnn1)
     cnn1 = keras.layers.Flatten()(cnn1)
-    cnn1 = keras.layers.Dense(128, kernel_initializer='normal', activation='relu')(cnn1)
-    cnn1 = keras.layers.Dense(128, kernel_initializer='normal', activation='relu')(cnn1)
+    cnn1 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn1)
+    cnn1 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn1)
 
     # Length input model
     visible2 = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 1))
-    cnn2 = keras.layers.Conv1D(filters=64, kernel_size=5, activation='relu')(visible2)
+    cnn2 = keras.layers.Conv1D(filters=64, kernel_size=10, activation='relu')(visible2)
     cnn2 = keras.layers.MaxPooling1D(pool_size=2)(cnn2)
     cnn2 = keras.layers.Flatten()(cnn2)
-    cnn2 = keras.layers.Dense(128, kernel_initializer='normal', activation='relu')(cnn2)
-    cnn2 = keras.layers.Dense(128, kernel_initializer='normal', activation='relu')(cnn2)
+    cnn2 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn2)
+    cnn2 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn2)
 
     # Magnitude input model
     visible3 = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 1))
-    cnn3 = keras.layers.Conv1D(filters=64, kernel_size=5, activation='relu')(visible3)
+    cnn3 = keras.layers.Conv1D(filters=64, kernel_size=10, activation='relu')(visible3)
     cnn3 = keras.layers.MaxPooling1D(pool_size=2)(cnn3)
     cnn3 = keras.layers.Flatten()(cnn3)
-    cnn3 = keras.layers.Dense(128, kernel_initializer='normal', activation='relu')(cnn3)
-    cnn3 = keras.layers.Dense(128, kernel_initializer='normal', activation='relu')(cnn3)
+    cnn3 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn3)
+    cnn3 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn3)
 
     # merge input models
-    merge = keras.layers.Concatenate()([cnn1, cnn2, cnn3])
+    merge = keras.layers.Concatenate()([cnn0, cnn1, cnn2, cnn3])
     dense = keras.layers.Dense(1024, kernel_initializer='normal', activation='relu')(merge)
     dense = keras.layers.Dense(1024, kernel_initializer='normal', activation='relu')(dense)
     dense = keras.layers.Dense(1024, kernel_initializer='normal', activation='relu')(dense)
@@ -359,7 +374,7 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
     )(dense)
 
     # Tie inputs together
-    model = keras.models.Model(inputs=[visible1, visible2, visible3], outputs=output)
+    model = keras.models.Model(inputs=[visible0, visible1, visible2, visible3], outputs=output)
 
     # Compile the model
     model.compile(optimizer='adam', loss='mse')
