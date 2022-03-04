@@ -624,6 +624,10 @@ def extractSimData(
         indices_visible[-np.argmax(sim.simulation_results.abs_magnitude[::-1] <= ending_lim_mag) :] = False
     # filtering out anything dimmer than what's visible by wide and narrow cameras
     indices_visible[sim.simulation_results.abs_magnitude >= min_lim_mag] = False
+    indices_visible[
+        (sim.simulation_results.brightest_height_arr > params.ht_max)
+        | (sim.simulation_results.brightest_height_arr < params.ht_min)
+    ] = False
 
     # If no points were visible, skip this solution
     if not np.any(indices_visible):
@@ -742,22 +746,6 @@ def extractSimData(
         ]
     )
 
-    # fig, ax = plt.subplots(4)
-    # ax[0].plot(simulated_data_normed[3], simulated_data_normed[1])
-    # ax[1].plot(simulated_data_normed[2], simulated_data_normed[1])
-    # ax[0].set_xlabel('Mag')
-    # ax[0].set_ylabel('Ht')
-    # ax[1].set_xlabel('Length')
-    # ax[1].set_ylabel('Ht')
-
-    # ax[2].plot(sim.simulation_results.abs_magnitude, sim.simulation_results.brightest_height_arr)
-    # ax[3].plot(sim.simulation_results.brightest_length_arr, sim.simulation_results.brightest_height_arr)
-    # ax[2].set_xlabel('Mag')
-    # ax[2].set_ylabel('Ht')
-    # ax[3].set_xlabel('Length')
-    # ax[3].set_ylabel('Ht')
-
-    # plt.show()
     # Return input data and results
     return param_dict, input_data_normed, simulated_data_normed
 

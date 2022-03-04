@@ -150,13 +150,15 @@ class DataGenerator(object):
             res_list = res_list[: self.batch_size]
 
             # Split results to input/output list
+            param_dict_list = []
             param_list = []
             result_list = []
             for res in res_list:
                 # Extract results
-                _, input_data_normed, simulated_data_normed = res
+                param_dict, input_data_normed, simulated_data_normed = res
 
                 # Add data to model input and output lists
+                param_dict_list.append(param_dict)
                 param_list.append(input_data_normed)
                 result_list.append(simulated_data_normed)
 
@@ -173,12 +175,20 @@ class DataGenerator(object):
             ) = np.split(result_list, 4, axis=1)
 
             # yield dimenions [(batch_size, data_length, 1), ...]
-            yield [
-                np.moveaxis(time_data_normed_list, 1, 2),
-                np.moveaxis(height_data_normed_list, 1, 2),
-                np.moveaxis(length_data_normed_list, 1, 2),
-                np.moveaxis(mag_data_normed_list, 1, 2),
-            ], param_list
+            if self.validation:
+                yield param_dict_list, [
+                    np.moveaxis(time_data_normed_list, 1, 2),
+                    np.moveaxis(height_data_normed_list, 1, 2),
+                    np.moveaxis(length_data_normed_list, 1, 2),
+                    np.moveaxis(mag_data_normed_list, 1, 2),
+                ], param_list
+            else:
+                yield [
+                    np.moveaxis(time_data_normed_list, 1, 2),
+                    np.moveaxis(height_data_normed_list, 1, 2),
+                    np.moveaxis(length_data_normed_list, 1, 2),
+                    np.moveaxis(mag_data_normed_list, 1, 2),
+                ], param_list
 
 
 class ReportFitGoodness(keras.callbacks.Callback):
@@ -191,13 +201,14 @@ class ReportFitGoodness(keras.callbacks.Callback):
     def on_epoch_end(self, epoch, logs=None):
 
         # Evaluate model accuracy using validation data
-        percent_errors = evaluateFit(self.model, self.validation_gen, ret_perc=True)
+        percent_errors, denorm_err = evaluateFit(self.model, self.validation_gen, ret_perc=True)
 
         print()
         print("Epoch {:d} errors".format(epoch + 1))
         param_name_list = ["M0", "V0", "ZC", "DENS", "ABL", "ERHT", "ERCO", "ER_S", "ERMm", "ERMM"]
-        print(" ".join(["{:>6s}".format(param_name) for param_name in param_name_list]))
-        print(str(len(percent_errors) * "{:5.2f}% ").format(*percent_errors))
+        print(" ".join(["{:>9s}".format(param_name) for param_name in param_name_list]))
+        print(str(len(percent_errors) * "{:8.2f}% ").format(*percent_errors))
+        print(str(len(denorm_err) * "{:9.2E} ").format(*denorm_err))
         print()
         print()
 
@@ -216,33 +227,49 @@ def loadModel(file_path, model_file='model.json', weights_file='model.h5'):
         return loaded_model
 
 
-def evaluateFit(model, validation_gen, ret_perc=False):
-    np.set_printoptions(threshold=np.inf)
+def evaluateFit(model, validation_gen, ret_perc=False, display=False):
+    param_name_list = ["M0", "V0", "ZC", "DENS", "ABL", "ERHT", "ERCO", "ER_S", "ERMm", "ERMM"]
+
     # Generate test data
     test_data = next(validation_gen)
-    test_outputs, test_inputs = test_data
+    param_dict_list, test_outputs, test_inputs = test_data
+    camera_param = param_dict_list[0]['physical']
+
     # print([i.shape for i in test_outputs])
     # Predict data
     pred_norm_params = model.predict(test_outputs)
+    norm_errors = np.abs(pred_norm_params - test_inputs)
+    denorm_errors = np.abs(
+        np.array(camera_param.getDenormalizedInputs(pred_norm_params.T)).T
+        - np.array(camera_param.getDenormalizedInputs(test_inputs.T)).T
+    )
+
+    if display:
+        fig, ax = plt.subplots(len(denorm_errors.T), sharex=True, sharey=True)
+        for a, values, label in zip(ax, norm_errors.T, param_name_list):
+            a.hist(values, bins=40, label=label)
+            a.legend(loc='upper right')
+        plt.show()
 
     # Compute mean absolute percentage error for every model parameter
-    percent_errors = 100 * np.mean(np.abs(pred_norm_params - test_inputs), axis=0)
+    percent_norm_errors = 100 * np.mean(norm_errors, axis=0)
+    denorm_errors_av = np.mean(denorm_errors, axis=0)
 
     if ret_perc:
-        return percent_errors
+        return percent_norm_errors, denorm_errors_av
 
     else:
 
-        print("Mean absolute percentage error per parameter:")
-        param_name_list = ["M0", "V0", "ZC", "DENS", "ABL", "ERHT", "ERCO", "ER_S", "ERMm", "ERMM"]
-        print(" ".join(["{:>6s}".format(param_name) for param_name in param_name_list]))
-        print(str(len(percent_errors) * "{:5.2f}% ").format(*percent_errors))
+        print("Mean absolute percentage error and mean absolute error per parameter:")
+        print(" ".join(["{:>9s}".format(param_name) for param_name in param_name_list]))
+        print(str(len(percent_norm_errors) * "{:8.2f}% ").format(*percent_norm_errors))
+        print(str(len(denorm_errors_av) * "{:9.2E} ").format(*denorm_errors_av))
 
 
 def evaluateFit2(model, file_path, validation_gen, param_class_name=None):
     """ Evaluates model by visually comparing expected simulation values to the simulation values 
     given from the prediction """
-    evaluateFit(model, iter(validation_gen))
+    evaluateFit(model, iter(validation_gen), display=True)
     print()
 
     sim = loadPickle(*os.path.split(file_path))
@@ -276,30 +303,59 @@ def evaluateFit2(model, file_path, validation_gen, param_class_name=None):
         - 10
     )
     print('predicted', phys_params.getInputs())
+
+    fig, ax = plt.subplots(2, 2)
+    ax[0, 0].plot(norm_sim_data[3], norm_sim_data[1])
+    ax[0, 0].set_xlabel('Mag')
+    ax[0, 0].set_ylabel('Ht')
+
+    ax[1, 0].scatter(np.diff(norm_sim_data[2]), norm_sim_data[1][:-1], marker='o', s=2)
+    ax[1, 0].set_xlabel('Velocity')
+    ax[1, 0].set_ylabel('Ht')
+
+    ax[0, 1].plot(sim.simulation_results.abs_magnitude, sim.simulation_results.brightest_height_arr)
+    ax[0, 1].set_xlabel('Mag')
+    ax[0, 1].set_ylabel('Ht')
+
+    ax[1, 1].scatter(
+        np.diff(sim.simulation_results.brightest_length_arr),
+        sim.simulation_results.brightest_height_arr[:-1],
+        marker='o',
+        s=2,
+    )
+    ax[1, 1].set_xlabel('Velocity')
+    ax[1, 1].set_ylabel('Ht')
+
+    plt.show()
+
     fig, ax = plt.subplots(2, sharey=True)
 
     ax[0].plot(
-        simulation_results.abs_magnitude,
-        simulation_results.brightest_height_arr / 1000,
+        simulation_results.abs_magnitude[:-1],
+        simulation_results.brightest_height_arr[:-1] / 1000,
         label='ML predicted output',
     )
-    ax[1].plot(
-        simulation_results.brightest_length_arr / 1000,
-        simulation_results.brightest_height_arr / 1000,
+    ax[1].scatter(
+        np.diff(simulation_results.brightest_length_arr / 1000)[:-1],
+        simulation_results.brightest_height_arr[:-2] / 1000,
+        marker='o',
+        s=2,
         label='ML predicted output',
     )
 
     ax[0].plot(
-        sim.simulation_results.abs_magnitude,
-        sim.simulation_results.brightest_height_arr / 1000,
+        sim.simulation_results.abs_magnitude[:-1],
+        sim.simulation_results.brightest_height_arr[:-1] / 1000,
         label='Correct simulated output',
         c='k',
     )
-    ax[1].plot(
-        sim.simulation_results.brightest_length_arr / 1000,
-        sim.simulation_results.brightest_height_arr / 1000,
-        label='Correct simulated output',
+    ax[1].scatter(
+        np.diff(sim.simulation_results.brightest_length_arr / 1000)[:-1],
+        sim.simulation_results.brightest_height_arr[:-2] / 1000,
+        marker='o',
         c='k',
+        s=2,
+        label='Correct simulated output',
     )
 
     ax[0].set_ylabel('Height (km)')
@@ -326,7 +382,7 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
     )
 
     early_stopping_callback = keras.callbacks.EarlyStopping(
-        monitor='loss', patience=10, min_delta=0, verbose=1
+        monitor='loss', patience=5, min_delta=0, verbose=1
     )
 
     visible0 = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 1))
@@ -370,7 +426,7 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
         kernel_initializer='normal',
         activation="linear",
         batch_size=batch_size,
-        # activity_regularizer=keras.regularizers.l1(0.01),
+        activity_regularizer=keras.regularizers.l1(0.01),
     )(dense)
 
     # Tie inputs together
@@ -494,7 +550,7 @@ if __name__ == "__main__":
     if cml_args.evaluate is not None:
         # Init the validation generator
         data_gen = DataGenerator(
-            data_list, batch_size, steps_per_epoch, param_class_name=cml_args.classname, validation=False
+            data_list, batch_size, steps_per_epoch, param_class_name=cml_args.classname, validation=True
         )
         model = loadModel(cml_args.output_dir, model_file, weights_file)
         evaluateFit2(model, data_list[cml_args.evaluate], data_gen, cml_args.classname)
