@@ -3,6 +3,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import copy
+import datetime
 import os
 import random
 from re import A
@@ -201,7 +202,7 @@ class ReportFitGoodness(keras.callbacks.Callback):
     def on_epoch_end(self, epoch, logs=None):
 
         # Evaluate model accuracy using validation data
-        percent_errors, denorm_err = evaluateFit(self.model, self.validation_gen, ret_perc=True)
+        percent_errors, denorm_err = evaluateFit(self.model, self.validation_gen, output=True)
 
         print()
         print("Epoch {:d} errors".format(epoch + 1))
@@ -227,7 +228,7 @@ def loadModel(file_path, model_file='model.json', weights_file='model.h5'):
         return loaded_model
 
 
-def evaluateFit(model, validation_gen, ret_perc=False, display=False):
+def evaluateFit(model, validation_gen, output=False, display=False):
     param_name_list = ["M0", "V0", "ZC", "DENS", "ABL", "ERHT", "ERCO", "ER_S", "ERMm", "ERMM"]
 
     # Generate test data
@@ -255,15 +256,13 @@ def evaluateFit(model, validation_gen, ret_perc=False, display=False):
     percent_norm_errors = 100 * np.mean(norm_errors, axis=0)
     denorm_errors_av = np.mean(denorm_errors, axis=0)
 
-    if ret_perc:
-        return percent_norm_errors, denorm_errors_av
-
-    else:
-
+    if output:
         print("Mean absolute percentage error and mean absolute error per parameter:")
         print(" ".join(["{:>9s}".format(param_name) for param_name in param_name_list]))
         print(str(len(percent_norm_errors) * "{:8.2f}% ").format(*percent_norm_errors))
         print(str(len(denorm_errors_av) * "{:9.2E} ").format(*denorm_errors_av))
+
+    return percent_norm_errors, denorm_errors_av
 
 
 def evaluateFit2(model, file_path, validation_gen, param_class_name=None):
@@ -376,7 +375,8 @@ def evaluateFit2(model, file_path, validation_gen, param_class_name=None):
 def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_file):
     # https://machinelearningmastery.com/how-to-develop-convolutional-neural-network-models-for-time-series-forecasting/
     # Height input model
-    checkpoint_filepath = os.path.join(output_dir, f'{weights_file[:-3]}_checkpoint.h5')
+    model_title = weights_file[:-3]
+    checkpoint_filepath = os.path.join(output_dir, f'{model_title}_checkpoint.h5')
     model_checkpoint_callback = keras.callbacks.ModelCheckpoint(
         filepath=checkpoint_filepath, mode='min', verbose=1, save_weights_only=True
     )
@@ -417,16 +417,16 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
 
     # merge input models
     merge = keras.layers.Concatenate()([cnn0, cnn1, cnn2, cnn3])
-    dense = keras.layers.Dense(1024, kernel_initializer='normal', activation='relu')(merge)
-    dense = keras.layers.Dense(1024, kernel_initializer='normal', activation='relu')(dense)
-    dense = keras.layers.Dense(1024, kernel_initializer='normal', activation='relu')(dense)
+    dense = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(merge)
+    dense = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(dense)
+    dense = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(dense)
     dense = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(dense)
     output = keras.layers.Dense(
         10,
         kernel_initializer='normal',
         activation="linear",
         batch_size=batch_size,
-        activity_regularizer=keras.regularizers.l1(0.01),
+        # activity_regularizer=keras.regularizers.l1(0.01),
     )(dense)
 
     # Tie inputs together
@@ -444,7 +444,7 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
         json_file.write(model_json)
 
     # fit model
-    model.fit(
+    history = model.fit(
         x=iter(data_gen),
         steps_per_epoch=data_gen.steps_per_epoch,
         epochs=data_gen.epochs,
@@ -456,6 +456,16 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
     # serialize weights to HDF5
     model.save_weights(weights_file)
     print("Saved model to disk")
+
+    new_file = not os.path.exists(os.path.join(output_dir, 'log.csv'))
+    with open(os.path.join(output_dir, 'log.csv'), 'a+') as f:
+        if new_file:
+            f.write('Date,model name,parameters,batch size,step per epoch,epochs,training data,final loss\n')
+        f.write(
+            f"{datetime.datetime.now()},{model_title},{model.count_params()},{data_gen.batch_size},"
+            f"{data_gen.steps_per_epoch}.{data_gen.epochs},{len(data_gen.training_list)},"
+            f"{history.history['loss'][-1]}\n"
+        )
 
     # Evaluate fit quality
     evaluateFit(model, iter(validation_gen))
