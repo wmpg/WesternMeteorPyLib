@@ -168,28 +168,11 @@ class DataGenerator(object):
             param_list = np.array(param_list)
             result_list = np.array(result_list)
 
-            (
-                time_data_normed_list,
-                height_data_normed_list,
-                length_data_normed_list,
-                mag_data_normed_list,
-            ) = np.split(result_list, 4, axis=1)
-
             # yield dimenions [(batch_size, data_length, 1), ...]
             if self.validation:
-                yield param_dict_list, [
-                    np.moveaxis(time_data_normed_list, 1, 2),
-                    np.moveaxis(height_data_normed_list, 1, 2),
-                    np.moveaxis(length_data_normed_list, 1, 2),
-                    np.moveaxis(mag_data_normed_list, 1, 2),
-                ], param_list
+                yield param_dict_list, np.moveaxis(result_list, 1, 2), param_list
             else:
-                yield [
-                    np.moveaxis(time_data_normed_list, 1, 2),
-                    np.moveaxis(height_data_normed_list, 1, 2),
-                    np.moveaxis(length_data_normed_list, 1, 2),
-                    np.moveaxis(mag_data_normed_list, 1, 2),
-                ], param_list
+                yield np.moveaxis(result_list, 1, 2), param_list
 
 
 class ReportFitGoodness(keras.callbacks.Callback):
@@ -385,39 +368,44 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
         monitor='loss', patience=5, min_delta=0, verbose=1
     )
 
-    visible0 = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 1))
-    cnn0 = keras.layers.Conv1D(filters=64, kernel_size=10, activation='relu')(visible0)
-    cnn0 = keras.layers.MaxPooling1D(pool_size=2)(cnn0)
-    cnn0 = keras.layers.Flatten()(cnn0)
-    cnn0 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn0)
-    cnn0 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn0)
+    # visible0 = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 1))
+    # cnn0 = keras.layers.Conv1D(filters=64, kernel_size=10, activation='relu')(visible0)
+    # cnn0 = keras.layers.MaxPooling1D(pool_size=2)(cnn0)
+    # cnn0 = keras.layers.Flatten()(cnn0)
+    # cnn0 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn0)
+    # cnn0 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn0)
 
-    visible1 = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 1))
-    cnn1 = keras.layers.Conv1D(filters=64, kernel_size=10, activation='relu')(visible1)
-    cnn1 = keras.layers.MaxPooling1D(pool_size=2)(cnn1)
-    cnn1 = keras.layers.Flatten()(cnn1)
-    cnn1 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn1)
-    cnn1 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn1)
+    # visible1 = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 1))
+    # cnn1 = keras.layers.Conv1D(filters=64, kernel_size=10, activation='relu')(visible1)
+    # cnn1 = keras.layers.MaxPooling1D(pool_size=2)(cnn1)
+    # cnn1 = keras.layers.Flatten()(cnn1)
+    # cnn1 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn1)
+    # cnn1 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn1)
 
-    # Length input model
-    visible2 = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 1))
-    cnn2 = keras.layers.Conv1D(filters=64, kernel_size=10, activation='relu')(visible2)
-    cnn2 = keras.layers.MaxPooling1D(pool_size=2)(cnn2)
-    cnn2 = keras.layers.Flatten()(cnn2)
-    cnn2 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn2)
-    cnn2 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn2)
+    # # Length input model
+    # visible2 = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 1))
+    # cnn2 = keras.layers.Conv1D(filters=64, kernel_size=10, activation='relu')(visible2)
+    # cnn2 = keras.layers.MaxPooling1D(pool_size=2)(cnn2)
+    # cnn2 = keras.layers.Flatten()(cnn2)
+    # cnn2 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn2)
+    # cnn2 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn2)
 
-    # Magnitude input model
-    visible3 = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 1))
-    cnn3 = keras.layers.Conv1D(filters=64, kernel_size=10, activation='relu')(visible3)
-    cnn3 = keras.layers.MaxPooling1D(pool_size=2)(cnn3)
-    cnn3 = keras.layers.Flatten()(cnn3)
-    cnn3 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn3)
-    cnn3 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn3)
+    # # Magnitude input model
+    # visible3 = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 1))
+    # cnn3 = keras.layers.Conv1D(filters=64, kernel_size=10, activation='relu')(visible3)
+    # cnn3 = keras.layers.MaxPooling1D(pool_size=2)(cnn3)
+    # cnn3 = keras.layers.Flatten()(cnn3)
+    # cnn3 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn3)
+    # cnn3 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn3)
+
+    input = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 4))
+    cnn = keras.layers.Conv1D(filters=64, kernel_size=10, activation='relu')(input)
+    cnn = keras.layers.MaxPooling1D(pool_size=2)(cnn)
+    cnn = keras.layers.Flatten()(cnn)
 
     # merge input models
-    merge = keras.layers.Concatenate()([cnn0, cnn1, cnn2, cnn3])
-    dense = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(merge)
+    # merge = keras.layers.Concatenate()([cnn0, cnn1, cnn2, cnn3])
+    dense = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn)
     dense = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(dense)
     dense = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(dense)
     dense = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(dense)
@@ -430,7 +418,12 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
     )(dense)
 
     # Tie inputs together
-    model = keras.models.Model(inputs=[visible0, visible1, visible2, visible3], outputs=output)
+    model = keras.models.Model(inputs=input, outputs=output)
+
+    # def loss_fn(y_true, y_pred, sample_weight=None):
+    #     weights = keras.backend.zeros_like(y_pred[0, :])
+    #     print(weights[0] + np.ones(10))
+    #     return keras.backend.square(y_true - y_pred) / len(y_pred[0, :])
 
     # Compile the model
     model.compile(optimizer='adam', loss='mse')
@@ -463,7 +456,7 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
             f.write('Date,model name,parameters,batch size,step per epoch,epochs,training data,final loss\n')
         f.write(
             f"{datetime.datetime.now()},{model_title},{model.count_params()},{data_gen.batch_size},"
-            f"{data_gen.steps_per_epoch}.{data_gen.epochs},{len(data_gen.training_list)},"
+            f"{data_gen.steps_per_epoch},{data_gen.epochs},{len(data_gen.training_list)},"
             f"{history.history['loss'][-1]}\n"
         )
 
