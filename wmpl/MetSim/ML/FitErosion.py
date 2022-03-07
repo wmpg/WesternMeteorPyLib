@@ -9,8 +9,10 @@ import random
 from re import A
 
 import keras
+import keras.backend as K
 import matplotlib.pyplot as plt
 import numpy as np
+import tensorflow as tf
 from wmpl.MetSim.GUI import SimulationResults
 from wmpl.MetSim.MetSimErosion import runSimulation
 from wmpl.MetSim.ML.GenerateSimulations import (
@@ -185,16 +187,9 @@ class ReportFitGoodness(keras.callbacks.Callback):
     def on_epoch_end(self, epoch, logs=None):
 
         # Evaluate model accuracy using validation data
-        percent_errors, denorm_err = evaluateFit(self.model, self.validation_gen, output=True)
-
         print()
         print("Epoch {:d} errors".format(epoch + 1))
-        param_name_list = ["M0", "V0", "ZC", "DENS", "ABL", "ERHT", "ERCO", "ER_S", "ERMm", "ERMM"]
-        print(" ".join(["{:>9s}".format(param_name) for param_name in param_name_list]))
-        print(str(len(percent_errors) * "{:8.2f}% ").format(*percent_errors))
-        print(str(len(denorm_err) * "{:9.2E} ").format(*denorm_err))
-        print()
-        print()
+        evaluateFit(self.model, self.validation_gen, output=True)
 
 
 def loadModel(file_path, model_file='model.json', weights_file='model.h5'):
@@ -223,26 +218,31 @@ def evaluateFit(model, validation_gen, output=False, display=False):
     # Predict data
     pred_norm_params = model.predict(test_outputs)
     norm_errors = np.abs(pred_norm_params - test_inputs)
-    denorm_errors = np.abs(
-        np.array(camera_param.getDenormalizedInputs(pred_norm_params.T)).T
-        - np.array(camera_param.getDenormalizedInputs(test_inputs.T)).T
-    )
-
+    correct_output = np.array(camera_param.getDenormalizedInputs(test_inputs.T)).T
+    pred_output = np.array(camera_param.getDenormalizedInputs(pred_norm_params.T)).T
+    denorm_errors = np.abs(pred_output - correct_output)
+    denorm_perc_errors = denorm_errors / correct_output
+    # print(pred_output)
+    # print(correct_output)
     if display:
         fig, ax = plt.subplots(len(denorm_errors.T), sharex=True, sharey=True)
         for a, values, label in zip(ax, norm_errors.T, param_name_list):
-            a.hist(values, bins=40, label=label)
+            a.hist(values, bins='auto', label=label)
             a.legend(loc='upper right')
+        a.set_yscale('log')
+        a.set_xlim([0, 1])
         plt.show()
 
     # Compute mean absolute percentage error for every model parameter
     percent_norm_errors = 100 * np.mean(norm_errors, axis=0)
     denorm_errors_av = np.mean(denorm_errors, axis=0)
+    denorm_perc_errors_av = 100 * np.mean(denorm_perc_errors, axis=0)
 
     if output:
         print("Mean absolute percentage error and mean absolute error per parameter:")
         print(" ".join(["{:>9s}".format(param_name) for param_name in param_name_list]))
         print(str(len(percent_norm_errors) * "{:8.2f}% ").format(*percent_norm_errors))
+        print(str(len(denorm_perc_errors_av) * "{:8.2f}% ").format(*denorm_perc_errors_av))
         print(str(len(denorm_errors_av) * "{:9.2E} ").format(*denorm_errors_av))
 
     return percent_norm_errors, denorm_errors_av
@@ -251,7 +251,7 @@ def evaluateFit(model, validation_gen, output=False, display=False):
 def evaluateFit2(model, file_path, validation_gen, param_class_name=None):
     """ Evaluates model by visually comparing expected simulation values to the simulation values 
     given from the prediction """
-    evaluateFit(model, iter(validation_gen), display=True)
+    evaluateFit(model, iter(validation_gen), display=True, output=True)
     print()
 
     sim = loadPickle(*os.path.split(file_path))
@@ -264,7 +264,8 @@ def evaluateFit2(model, file_path, validation_gen, param_class_name=None):
     input_param_dict, norm_input_param_vals, norm_sim_data = ret
 
     data_length = input_param_dict['camera'].data_length
-    normalized_output_param_vals = model.predict(tuple(i.reshape(-1, data_length, 1) for i in norm_sim_data))
+
+    normalized_output_param_vals = model.predict(norm_sim_data.T[None])  # dimensions (1, 256, 4)
     print()
     print('correct norm', norm_input_param_vals)
     print('pred norm', list(normalized_output_param_vals[0]))
@@ -365,7 +366,7 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
     )
 
     early_stopping_callback = keras.callbacks.EarlyStopping(
-        monitor='loss', patience=5, min_delta=0, verbose=1
+        monitor='loss', patience=0, min_delta=0, verbose=1
     )
 
     # visible0 = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 1))
@@ -420,13 +421,14 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
     # Tie inputs together
     model = keras.models.Model(inputs=input, outputs=output)
 
-    # def loss_fn(y_true, y_pred, sample_weight=None):
-    #     weights = keras.backend.zeros_like(y_pred[0, :])
-    #     print(weights[0] + np.ones(10))
-    #     return keras.backend.square(y_true - y_pred) / len(y_pred[0, :])
+    def loss_fn(y_true, y_pred):
+        weights = tf.constant([0, 0, 0, 0, 0, 0, 0, 0, 1, 0], dtype=tf.float32)
+        # print(K.sum(K.square(y_true - y_pred) * weights))
+        # raise Exception('hey')
+        return K.sum(K.square(y_true - y_pred) * weights, axis=-1)
 
     # Compile the model
-    model.compile(optimizer='adam', loss='mse')
+    model.compile(optimizer='adam', loss=loss_fn)
 
     # Save the model to disk BEFORE fitting, so that it plus the checkpoint will have all information
     model_json = model.to_json()

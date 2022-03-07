@@ -748,7 +748,7 @@ def extractSimData(
             padOrTruncate(time_normed, params.data_length, side='end'),
             padOrTruncate(ht_normed, params.data_length, side='end'),
             padOrTruncate(len_normed, params.data_length, side='end'),
-            renormalize_mag(padOrTruncate(mag_normed, params.data_length, side='end')),
+            padOrTruncate(mag_normed, params.data_length, side='end'),
         ]
     )
 
