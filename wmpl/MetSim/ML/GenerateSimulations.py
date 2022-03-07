@@ -282,7 +282,7 @@ class ErosionSimParameters:
         self.max_duration = 10
 
         # Magnitude range
-        self.mag_faintest = 10
+        self.mag_faintest = 8  # this should be equal to the limiting magnitude
         self.mag_brightest = -2
 
 
@@ -736,13 +736,19 @@ def extractSimData(
         param_dict['physical'], param_dict['camera'], time_sampled, ht_sampled, len_sampled, mag_sampled
     )
 
+    # for magnitudes already normalized to [0,1] based on magnitude values (where 0 is the dimmest),
+    # converts to a normalized luminosity on the range [0,1]
+    renormalize_mag = lambda x: (100 ** (x / 5 * (params.mag_faintest - params.mag_brightest)) - 1) / (
+        100 ** ((params.mag_faintest - params.mag_brightest) / 5) - 1
+    )
+
     # Generate vector with simulated data
     simulated_data_normed = np.vstack(
         [
             padOrTruncate(time_normed, params.data_length, side='end'),
             padOrTruncate(ht_normed, params.data_length, side='end'),
             padOrTruncate(len_normed, params.data_length, side='end'),
-            padOrTruncate(mag_normed, params.data_length, side='end'),
+            renormalize_mag(padOrTruncate(mag_normed, params.data_length, side='end')),
         ]
     )
 
