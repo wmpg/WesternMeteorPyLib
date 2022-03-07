@@ -356,7 +356,7 @@ def evaluateFit2(model, file_path, validation_gen, param_class_name=None):
     plt.show()
 
 
-def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_file):
+def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_file, fit_param=0):
     # https://machinelearningmastery.com/how-to-develop-convolutional-neural-network-models-for-time-series-forecasting/
     # Height input model
     model_title = weights_file[:-3]
@@ -366,7 +366,7 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
     )
 
     early_stopping_callback = keras.callbacks.EarlyStopping(
-        monitor='loss', patience=0, min_delta=0, verbose=1
+        monitor='loss', patience=5, min_delta=0, verbose=1
     )
 
     # visible0 = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 1))
@@ -422,7 +422,7 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
     model = keras.models.Model(inputs=input, outputs=output)
 
     def loss_fn(y_true, y_pred):
-        weights = tf.constant([0, 0, 0, 0, 0, 0, 0, 0, 1, 0], dtype=tf.float32)
+        weights = tf.one_hot(fit_param, 10, dtype=tf.float32)
         # print(K.sum(K.square(y_true - y_pred) * weights))
         # raise Exception('hey')
         return K.sum(K.square(y_true - y_pred) * weights, axis=-1)
@@ -524,6 +524,7 @@ if __name__ == "__main__":
         nargs=2,
         help='Allows for specifying the batch size and steps per epoch, respectively.',
     )
+    arg_parser.add_argument('--fitparam', type=int)
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -579,5 +580,12 @@ if __name__ == "__main__":
         #         print(len(param_list))
 
         # Fit the model
-        fitCNNMultiHeaded(data_gen, validation_gen, cml_args.output_dir, model_file, weights_file)
+        fitCNNMultiHeaded(
+            data_gen,
+            validation_gen,
+            cml_args.output_dir,
+            model_file,
+            weights_file,
+            fit_param=cml_args.fitparam,
+        )
 
