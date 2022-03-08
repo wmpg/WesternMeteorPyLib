@@ -48,8 +48,8 @@ class DataGenerator(object):
         batch_size,
         steps_per_epoch,
         param_class_name=None,
-        validation=False,
-        validation_portion=0.2,
+        test=False,
+        test_portion=0.2,
         random_state=None,
     ):
         """ Generate meteor data for the ML fit function. 
@@ -62,8 +62,8 @@ class DataGenerator(object):
         Keyword arguments:
             param_class_name: [str] Override the simulation parameters object with an instance of the given
                 class. An exact name of the class needs to be given.
-            validation: [bool] Generate validation data. False by default.
-            validation_portion: [float] Portion of input files to be used for validation.
+            test: [bool] Generate test data. False by default.
+            test_portion: [float] Portion of input files to be used for test.
         """
 
         self.batch_size = batch_size
@@ -78,17 +78,17 @@ class DataGenerator(object):
 
         self.param_class_name = param_class_name
 
-        self.validation = validation
+        self.test = test
 
         # Compute the number of files in each epoch
         data_per_epoch = self.batch_size * self.steps_per_epoch
 
-        self.training_list = self.data_list[: int(intial_len * (1 - validation_portion))]
-        self.validation_list = self.data_list[int(intial_len * (1 - validation_portion)) :]
+        self.training_list = self.data_list[: int(intial_len * (1 - test_portion))]
+        self.test_list = self.data_list[int(intial_len * (1 - test_portion)) :]
 
         # Compute the number of total epochs
         self.total_epochs = int(len(self.data_list) // data_per_epoch)
-        self.validation_epochs = int(len(self.validation_list) // data_per_epoch)
+        self.test_epochs = int(len(self.test_list) // data_per_epoch)
         self.training_epochs = int(len(self.training_list) // data_per_epoch)
         if self.total_epochs == 0:
             raise Exception(
@@ -99,14 +99,14 @@ class DataGenerator(object):
 
     @property
     def epochs(self):
-        if self.validation:
-            return self.validation_epochs
+        if self.test:
+            return self.test_epochs
         return self.training_epochs
 
     def __iter__(self):
-        # Select file list depending on whether validation or training is being done
-        if self.validation:
-            data_list = self.validation_list
+        # Select file list depending on whether test or training is being done
+        if self.test:
+            data_list = self.test_list
         else:
             data_list = self.training_list
 
@@ -171,7 +171,7 @@ class DataGenerator(object):
             result_list = np.array(result_list)
 
             # yield dimenions [(batch_size, data_length, 1), ...]
-            if self.validation:
+            if self.test:
                 yield param_dict_list, np.moveaxis(result_list, 1, 2), param_list
             else:
                 yield np.moveaxis(result_list, 1, 2), param_list
@@ -181,15 +181,15 @@ class ReportFitGoodness(keras.callbacks.Callback):
     """ Report the fit goodness at the every epoch end.
   """
 
-    def __init__(self, validation_gen):
-        self.validation_gen = iter(validation_gen)
+    def __init__(self, test_gen):
+        self.test_gen = iter(test_gen)
 
     def on_epoch_end(self, epoch, logs=None):
 
-        # Evaluate model accuracy using validation data
+        # Evaluate model accuracy using test data
         print()
         print("Epoch {:d} errors".format(epoch + 1))
-        evaluateFit(self.model, self.validation_gen, output=True)
+        evaluateFit(self.model, self.test_gen, output=True)
 
 
 def loadModel(file_path, model_file='model.json', weights_file='model.h5'):
@@ -206,11 +206,11 @@ def loadModel(file_path, model_file='model.json', weights_file='model.h5'):
         return loaded_model
 
 
-def evaluateFit(model, validation_gen, output=False, display=False):
+def evaluateFit(model, test_gen, output=False, display=False):
     param_name_list = ["M0", "V0", "ZC", "DENS", "ABL", "ERHT", "ERCO", "ER_S", "ERMm", "ERMM"]
 
     # Generate test data
-    test_data = next(validation_gen)
+    test_data = next(test_gen)
     param_dict_list, test_outputs, test_inputs = test_data
     camera_param = param_dict_list[0]['physical']
 
@@ -225,22 +225,34 @@ def evaluateFit(model, validation_gen, output=False, display=False):
     # print(pred_output)
     # print(correct_output)
     if display:
-        fig, ax = plt.subplots(2, sharey=True, sharex=True)
-        print(test_inputs.shape)
-        ax[0].scatter(*test_inputs[:, [0, -1]].T, label='correct')
-        ax[0].set_yscale('log')
-        ax[0].set_xscale('log')
-        ax[0].set_xlabel('M0')
-        ax[0].set_ylabel('ERMM')
-        ax[0].legend()
-        ax[1].scatter(*pred_norm_params[:, [0, -1]].T, label='predicted')
-        ax[1].set_yscale('log')
-        ax[1].set_xscale('log')
-        ax[1].legend()
-        ax[1].set_xlabel('M0')
-        ax[1].set_ylabel('ERMM')
-        plt.show()
+        # fig, ax = plt.subplots(2, sharey=True, sharex=True)
+        # ax[0].scatter(*test_inputs[:, [1, 7]].T, label='correct')
+        # # ax[0].set_yscale('log')
+        # # ax[0].set_xscale('log')
+        # ax[0].set_xlabel('M0')
+        # ax[0].set_ylabel('ERMM')
+        # ax[0].legend()
+        # ax[1].scatter(*pred_norm_params[:, [1, 7]].T, label='predicted')
+        # # ax[1].set_yscale('log')
+        # # ax[1].set_xscale('log')
+        # ax[1].legend()
+        # ax[1].set_xlabel('M0')
+        # ax[1].set_ylabel('ERMM')
+        # plt.show()
 
+        i = 5
+        fig, ax = plt.subplots(2, 5)
+        log = [True, False, False, False, False, False, False, False, True, True]
+        for i in range(10):
+            ax[np.unravel_index(i, (2, 5))].set_title(param_name_list[i])
+            ax[np.unravel_index(i, (2, 5))].scatter(test_inputs[:, i], pred_norm_params[:, i])
+            ax[np.unravel_index(i, (2, 5))].plot([1e-4, 1], [1e-4, 1])
+            ax[np.unravel_index(i, (2, 5))].set_ylabel('Predicted')
+            ax[np.unravel_index(i, (2, 5))].set_xlabel('Correct')
+            if log[i]:
+                ax[np.unravel_index(i, (2, 5))].set_yscale('log')
+                ax[np.unravel_index(i, (2, 5))].set_xscale('log')
+        plt.show()
         fig, ax = plt.subplots(len(denorm_errors.T), sharex=True, sharey=True)
         for a, values, label in zip(ax, norm_errors.T, param_name_list):
             a.hist(values, bins='auto', label=label)
@@ -264,10 +276,10 @@ def evaluateFit(model, validation_gen, output=False, display=False):
     return percent_norm_errors, denorm_errors_av
 
 
-def evaluateFit2(model, file_path, validation_gen, param_class_name=None):
+def evaluateFit2(model, file_path, test_gen, param_class_name=None):
     """ Evaluates model by visually comparing expected simulation values to the simulation values 
     given from the prediction """
-    evaluateFit(model, iter(validation_gen), display=True, output=True)
+    evaluateFit(model, iter(test_gen), display=True, output=True)
     print()
 
     sim = loadPickle(*os.path.split(file_path))
@@ -301,6 +313,7 @@ def evaluateFit2(model, file_path, validation_gen, param_class_name=None):
         / 1000
         - 10
     )
+    print('correct', input_param_dict['physical'].getInputs())
     print('predicted', phys_params.getInputs())
 
     fig, ax = plt.subplots(2, 2)
@@ -372,7 +385,7 @@ def evaluateFit2(model, file_path, validation_gen, param_class_name=None):
     plt.show()
 
 
-def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_file, fit_param=None):
+def fitCNNMultiHeaded(data_gen, test_gen, output_dir, model_file, weights_file, fit_param=None):
     # https://machinelearningmastery.com/how-to-develop-convolutional-neural-network-models-for-time-series-forecasting/
     # Height input model
     model_title = weights_file[:-3]
@@ -441,7 +454,7 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
         if fit_param:
             weights = tf.one_hot(fit_param, 10, dtype=tf.float32)
         else:
-            weights = tf.Tensor([1, 1, 1, 1, 1, 0, 0, 0, 0, 0], dtype=tf.float32)
+            weights = tf.constant([1, 1, 1, 1, 1, 0, 0, 0, 0, 0], dtype=tf.float32)
         # print(K.sum(K.square(y_true - y_pred) * weights))
         # raise Exception('hey')
         return K.sum(K.square(y_true - y_pred) * weights / K.sum(weights), axis=-1)
@@ -462,7 +475,7 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
         x=iter(data_gen),
         steps_per_epoch=data_gen.steps_per_epoch,
         epochs=data_gen.epochs,
-        callbacks=[ReportFitGoodness(validation_gen), model_checkpoint_callback, early_stopping_callback],
+        callbacks=[ReportFitGoodness(test_gen), model_checkpoint_callback, early_stopping_callback],
         workers=0,
         max_queue_size=1,
     )
@@ -482,7 +495,7 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
         )
 
     # Evaluate fit quality
-    evaluateFit(model, iter(validation_gen))
+    evaluateFit(model, iter(test_gen))
 
 
 def getFileList(folder):
@@ -573,21 +586,21 @@ if __name__ == "__main__":
     print("{:d} inputs used for training/testing...".format(len(data_list)))
 
     if cml_args.evaluate is not None:
-        # Init the validation generator
+        # Init the test generator
         data_gen = DataGenerator(
-            data_list, batch_size, steps_per_epoch, param_class_name=cml_args.classname, validation=True
+            data_list, batch_size, steps_per_epoch, param_class_name=cml_args.classname, test=True
         )
         model = loadModel(cml_args.output_dir, model_file, weights_file)
         evaluateFit2(model, data_list[cml_args.evaluate], data_gen, cml_args.classname)
     else:
         # Init the data generator
         data_gen = DataGenerator(
-            data_list, batch_size, steps_per_epoch, param_class_name=cml_args.classname, validation=False
+            data_list, batch_size, steps_per_epoch, param_class_name=cml_args.classname, test=False
         )
 
-        # Init the validation generator
-        validation_gen = DataGenerator(
-            data_list, batch_size, steps_per_epoch, param_class_name=cml_args.classname, validation=True
+        # Init the test generator
+        test_gen = DataGenerator(
+            data_list, batch_size, steps_per_epoch, param_class_name=cml_args.classname, test=True
         )
 
         # ## TEST DATA GEN ###
@@ -600,11 +613,6 @@ if __name__ == "__main__":
 
         # Fit the model
         fitCNNMultiHeaded(
-            data_gen,
-            validation_gen,
-            cml_args.output_dir,
-            model_file,
-            weights_file,
-            fit_param=cml_args.fitparam,
+            data_gen, test_gen, cml_args.output_dir, model_file, weights_file, fit_param=cml_args.fitparam,
         )
 

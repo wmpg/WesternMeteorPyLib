@@ -15,20 +15,15 @@ import copy
 import math
 
 import numpy as np
-
 # Cython init
 import pyximport
 import scipy.integrate
 import scipy.stats
 
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
-from wmpl.MetSim.MetSimErosionCyTools import (
-    atmDensityPoly,
-    decelerationRK4,
-    ionizationEfficiency,
-    luminousEfficiency,
-    massLossRK4,
-)
+from wmpl.MetSim.MetSimErosionCyTools import (atmDensityPoly, decelerationRK4,
+                                              ionizationEfficiency,
+                                              luminousEfficiency, massLossRK4)
 
 ### DEFINE CONSTANTS
 

@@ -171,7 +171,10 @@ class PhysicalParameters:
             p = getattr(self, param_name)
 
             # Compute the normalized value
-            val_normed = (p.val - p.min) / (p.max - p.min)
+            if p.method == 'log10':
+                val_normed = (np.log10(p.val) - np.log10(p.min)) / (np.log10(p.max) - np.log10(p.min))
+            else:
+                val_normed = (p.val - p.min) / (p.max - p.min)
 
             normalized_values.append(val_normed)
 
@@ -185,7 +188,10 @@ class PhysicalParameters:
             p = getattr(self, param_name)
 
             # Compute the normalized value
-            val_denormed = norm_val * (p.max - p.min) + p.min
+            if p.method == 'log10':
+                val_denormed = p.min * 10 ** (norm_val * (np.log10(p.max) - np.log10(p.min)))
+            else:
+                val_denormed = norm_val * (p.max - p.min) + p.min
 
             denormalized_values.append(val_denormed)
 
@@ -760,7 +766,13 @@ def saveCleanData(output_dir: str, random_seed: int, erosion_on: bool = True):
     # Init simulation container
     erosion_cont = ErosionSimContainer(output_dir, random_seed=random_seed)
 
-    erosion_cont.const.erosion_on = erosion_on
+    if not erosion_on:
+        # make sure erosion isn't being calculated
+        erosion_cont.const.erosion_on = erosion_on
+        erosion_cont.const.erosion_coeff = 0
+        erosion_cont.const.erosion_height_start = 0
+        erosion_cont.const.erosion_height_change = 0
+        erosion_cont.const.erosion_coeff_change = 0
     # print("Running:", erosion_cont.file_name)
 
     # Run the simulation and save results
