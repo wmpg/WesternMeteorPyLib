@@ -676,6 +676,10 @@ def extractSimData(
     # Normalize time to zero
     time_sampled -= time_sampled[0]
 
+    # if the erosion isn't visible, data is bad
+    if ht_sampled[-1] + 5e3 < param_dict['physical'].erosion_height_start.val:
+        return None
+
     ### SIMULATE CAMO tracking delay for length measurements ###
 
     # Zero out all length measurements before the length delay (to simulate the delay of CAMO
@@ -744,9 +748,9 @@ def extractSimData(
 
     # for magnitudes already normalized to [0,1] based on magnitude values (where 0 is the dimmest),
     # converts to a normalized luminosity on the range [0,1]
-    renormalize_mag = lambda x: (100 ** (x / 5 * (params.mag_faintest - params.mag_brightest)) - 1) / (
-        100 ** ((params.mag_faintest - params.mag_brightest) / 5) - 1
-    )
+    # renormalize_mag = lambda x: (100 ** (x / 5 * (params.mag_faintest - params.mag_brightest)) - 1) / (
+    #     100 ** ((params.mag_faintest - params.mag_brightest) / 5) - 1
+    # )
 
     # Generate vector with simulated data
     simulated_data_normed = np.vstack(
