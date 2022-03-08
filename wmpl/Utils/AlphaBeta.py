@@ -3,6 +3,7 @@ Adapted from: https://github.com/desertfireballnetwork/alpha_beta_modules
 """
 
 
+import sys
 import numpy as np
 import scipy.special
 import scipy.optimize
@@ -10,6 +11,7 @@ import scipy.optimize
 
 from wmpl.Utils.Math import meanAngle
 from wmpl.Utils.Physics import dynamicPressure
+from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 
 
 # Height normalization constant
@@ -107,6 +109,156 @@ HT_NORM_CONST = 7160.0
 #     [48625.757255, 11144.4432081],
 #     [48419.7730391, 8582.12152838],
 #     [48139.5273914, 11683.3788851]])
+
+
+
+def rescaleHeightToExponentialAtmosphere(lat, lon, ht_data, jd):
+    """ Given observed heights, rescale them from the real NRLMSISE model to the a simplified exponential
+        atmosphere model used by the Alpha-Beta procedure.
+    
+    Arguments:
+        lat: [ndarray] Latitude in radians.
+        lon: [ndarray] Longitude in radians.
+        ht_data: [ndarray] Height in meters.
+        jd: [float] Julian date.
+
+    Return:
+        rescaled_ht_data
+    """
+
+    def _expAtmosphere(ht_data, rho_atm_0=1.0):
+        """ Compute the atmosphere mass density using a simple exponential model and a scale height. 
+    
+        Arguments:
+            ht_data: [ndarray] Height in meters.
+
+        Keyword arguments: 
+            rho_atm_0: [float] Sea-level atmospheric air density in kg/m^3.
+
+        Return:
+            [float] Atmospheric mass density in kg/m^3.
+        """
+
+        return rho_atm_0*(1/np.e**(ht_data/HT_NORM_CONST))
+
+    def _expAtmosphereHeight(air_density, rho_atm_0=1.0):
+        """ Compute the height given the air density and exponential atmosphere assumption. 
+
+        Arguments:
+            air_density: [float] Air density in kg/m^3.
+
+        Keyword arguments: 
+            rho_atm_0: [float] Sea-level atmospheric air density in kg/m^3.
+
+        Return:
+            [float] Height in meters.
+        """
+
+        return HT_NORM_CONST*np.log(rho_atm_0/air_density)
+
+
+    # Get the atmosphere mass density from the NRLMSISE model for the observed heights
+    atm_dens = getAtmDensity_vect(lat, lon, ht_data, jd)
+
+    # Get the equivalent heights using the exponential atmosphre model
+    ht_rescaled = _expAtmosphereHeight(atm_dens)
+
+    # # Compare the models
+    # plt.semilogy(ht_data/1000, atm_dens, label='NRLMSISE')
+    # plt.semilogy(ht_data/1000, _expAtmosphere(ht_data), label='Exp')
+    # plt.xlabel("Height (km)")
+    # plt.ylabel("log air density kg/m3")
+    # plt.legend()
+    # plt.show()
+
+    # # Compare the heights before and after rescaling
+    # plt.scatter(ht_data/1000, ht_data - ht_rescaled)
+    # plt.xlabel("Height (km)")
+    # plt.ylabel("Height difference (m)")
+    # plt.show()
+    # sys.exit()
+
+    return ht_rescaled
+
+
+def expLinearLag(t, a1, a2, t0, decel):
+    """ Model the lag by assuming that the deceleration is exponential until a point t0, after which
+        the deceleration is constant.
+    """
+
+    # Normalize deceleration for faster convergence
+    decel = -1000*abs(decel)
+
+    lag = np.zeros_like(t)
+
+    # Initial part computed with exponential deceleration
+    lag[t <  t0] = abs(a1) - abs(a1)*np.exp(abs(a2)*t[t < t0])
+
+    # Second part computed with constant deceleration
+    lag[t >= t0] = (-abs(a1)*np.exp(abs(a2)*t0) # Continue at the last point
+                    - abs(a1*a2)*np.exp(abs(a2)*t0)*((t[t >= t0] - t0)) # Continue with the same velocity
+                    + ((t[t >= t0] - t0)**2)*decel/2.0) # Apply constant deceleration
+
+    return lag
+
+
+def expLinearVelocity(t, v0, a1, a2, t0, decel):
+
+    # Normalize deceleration for faster convergence
+    decel = -1000*abs(decel)
+
+    vel = np.zeros_like(t)
+
+    vel += v0
+    vel[t <  t0] += -abs(a1*a2)*np.exp(abs(a2)*t[t < t0])
+    vel[t >= t0] += -abs(a1*a2)*np.exp(abs(a2)*t0) + (t[t >= t0] - t0)*decel
+
+    return vel
+
+
+def lagFitVelocity(time_data, lag_data, vel_data, v0):
+    """ Fit a smooth model to the lag data, to improve the alpha-beta fit. """
+
+    # Guess initial parameters
+    a1 = 20
+    a2 = 1.5
+    t0 = 9/10*np.max(time_data)
+    decel = 6 # km/s^2
+
+    # Initial parameters
+    p0 = [a1, a2, t0, decel]
+
+    # Fit the lag function
+    fit_params, _ = scipy.optimize.curve_fit(expLinearLag, time_data, lag_data, p0=p0, maxfev=10000)
+
+    print("Lag model fit:", fit_params)
+
+    # fig, (ax1, ax2, ax3) = plt.subplots(nrows=3, sharex=True)
+    
+    # # Plot the data
+    # ax1.scatter(time_data, lag_data)
+
+    # # Plot the fit
+    # time_arr = np.linspace(np.min(time_data), np.max(time_data), 100)
+    # ax1.plot(time_arr, expLinearLag(time_arr, *fit_params), color='k', zorder=5)
+
+    # # Plot the residuals
+    # ax2.scatter(time_data, lag_data - expLinearLag(time_data, *fit_params))
+
+
+    # # Plot the observed velocity and the velocity fit
+    # ax3.scatter(time_data, vel_data/1000)
+    # ax3.plot(time_arr, expLinearVelocity(time_arr, v0,  *fit_params)/1000)
+
+    # plt.show()
+
+    # sys.exit()
+
+    # Compute fitted velocity
+    vel_fit = expLinearVelocity(time_data, v0,  *fit_params)
+
+    return vel_fit, fit_params
+
 
 
 def minimizeAlphaBeta(v_normed, ht_normed):
@@ -287,6 +439,10 @@ if __name__ == "__main__":
     arg_parser.add_argument('traj_path', nargs="?", metavar='TRAJ_PATH', type=str, \
         help="Path to the trajectory pickle file.")
 
+    arg_parser.add_argument('-v', '--obsvel', action="store_true", \
+        help="""Fit alpha-beta on the observed velocity instead of the lag-smoothed model. """
+        )
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -302,7 +458,11 @@ if __name__ == "__main__":
 
         # Construct an input data array
         ht_data = []
+        time_data = []
+        lat_data = []
+        lon_data = []
         vel_data = []
+        lag_data = []
         for obs in traj.observations:
             
             if obs.ignore_station:
@@ -311,21 +471,46 @@ if __name__ == "__main__":
             filter_mask = (obs.ignore_list == 0) & (obs.velocities != 0)
 
             ht_data += obs.model_ht[filter_mask].tolist()
+            time_data += obs.time_data[filter_mask].tolist()
+            lat_data += obs.model_lat[filter_mask].tolist()
+            lon_data += obs.model_lon[filter_mask].tolist()
             vel_data += obs.velocities[filter_mask].tolist()
+            lag_data += obs.lag[filter_mask].tolist()
 
 
         ht_data = np.array(ht_data)
+        time_data = np.array(time_data)
+        lat_data = np.array(lat_data)
+        lon_data = np.array(lon_data)
         vel_data = np.array(vel_data)
+        lag_data = np.array(lag_data)
 
         # Sort by height
         vel_data = vel_data[np.argsort(ht_data)]
+        lag_data  = lag_data[np.argsort(ht_data)]
+        time_data = time_data[np.argsort(ht_data)]
+        lat_data = lat_data[np.argsort(ht_data)]
+        lon_data = lon_data[np.argsort(ht_data)]
         ht_data  = ht_data[np.argsort(ht_data)]
+
+
+        # Rescale the heights to the exponential atmosphere used by alpha-beta
+        ht_data = rescaleHeightToExponentialAtmosphere(lat_data, lon_data, ht_data, traj.jdt_ref)
+
+        # Fit a functional model to the lag and use that for the alpha-beta fit instead of the noisy
+        #   point-to-point velocity measurements
+        vel_data_smooth, lag_fit_params = lagFitVelocity(time_data, lag_data, vel_data, traj.v_init)
 
         print("Initial velocity:", traj.v_init)
 
+        # Choose which data will be used for alpha-beta fitting
+        if cml_args.obsvel:
+            vel_input = vel_data
+        else:
+            vel_input = vel_data_smooth
 
         # Estimate the alpha, beta parameters
-        v_init, alpha, beta = fitAlphaBeta(vel_data, ht_data, v_init=traj.v_init)
+        v_init, alpha, beta = fitAlphaBeta(vel_input, ht_data, v_init=traj.v_init)
 
         print("Alpha:", alpha)
         print("Beta:", beta)
@@ -346,18 +531,39 @@ if __name__ == "__main__":
         vel_arr = alphaBetaVelocity(ht_arr, alpha, beta, v_init)
 
 
-        # Plot the data
-        plt.scatter(vel_data/1000, ht_data/1000, s=5)
+        fig, (ax_vel, ax_lag, ax_lag_res) = plt.subplots(ncols=3, sharey=True, figsize=(10, 6))
 
-        # Plot the fit
-        plt.plot(vel_arr/1000, ht_arr/1000, \
+        # Plot the data
+        ax_vel.scatter(vel_data/1000, ht_data/1000, s=5)
+
+        # Plot the smoothed velocity
+        ax_vel.scatter(vel_data_smooth/1000, ht_data/1000, color='r', s=1, \
+            label="Lag-based velocity smoothing")
+
+        # Plot the alpha-beta fit
+        ax_vel.plot(vel_arr/1000, ht_arr/1000, color='k', \
             label="$v_0$ = {:.2f} km/s\n$\\alpha$ = {:.2f}\n$\\beta$ = {:.2f}".format(v_init/1000, alpha, \
                 beta))
 
-        plt.xlabel("Velocity (km/s)")
-        plt.ylabel("Height (km)")
+        ax_vel.set_xlabel("Velocity (km/s)")
+        ax_vel.set_ylabel("Height (km)")
+        ax_vel.legend()
 
-        plt.legend()
+
+        # Plot the lag and the lag fit
+        ax_lag.scatter(lag_data/1000, ht_data/1000, s=5)
+        ax_lag.plot(expLinearLag(time_data, *lag_fit_params)/1000, ht_data/1000, color='r', \
+            label="Lag-based velocity smoothing")
+        ax_lag.set_xlabel("Lag (km)")
+
+
+        # Plot the lag fit residuals
+        ax_lag_res.scatter(lag_data/1000 - expLinearLag(time_data, *lag_fit_params)/1000, ht_data/1000, s=5)
+        ax_lag_res.set_xlabel("Lag fit residuals (km)")
+
+        plt.tight_layout()
+
+        plt.subplots_adjust(wspace=0)
 
         plt.show()
 
