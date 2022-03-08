@@ -14,7 +14,7 @@ from wmpl.Utils.Physics import dynamicPressure
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 
 
-# Height normalization constant
+# Scale height
 HT_NORM_CONST = 7160.0
 
 
