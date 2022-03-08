@@ -225,11 +225,27 @@ def evaluateFit(model, validation_gen, output=False, display=False):
     # print(pred_output)
     # print(correct_output)
     if display:
+        fig, ax = plt.subplots(2, sharey=True, sharex=True)
+        print(test_inputs.shape)
+        ax[0].scatter(*test_inputs[:, [0, -1]].T, label='correct')
+        ax[0].set_yscale('log')
+        ax[0].set_xscale('log')
+        ax[0].set_xlabel('M0')
+        ax[0].set_ylabel('ERMM')
+        ax[0].legend()
+        ax[1].scatter(*pred_norm_params[:, [0, -1]].T, label='predicted')
+        ax[1].set_yscale('log')
+        ax[1].set_xscale('log')
+        ax[1].legend()
+        ax[1].set_xlabel('M0')
+        ax[1].set_ylabel('ERMM')
+        plt.show()
+
         fig, ax = plt.subplots(len(denorm_errors.T), sharex=True, sharey=True)
         for a, values, label in zip(ax, norm_errors.T, param_name_list):
             a.hist(values, bins='auto', label=label)
             a.legend(loc='upper right')
-        a.set_yscale('log')
+        # a.set_yscale('log')
         a.set_xlim([0, 1])
         plt.show()
 
@@ -301,12 +317,12 @@ def evaluateFit2(model, file_path, validation_gen, param_class_name=None):
     ax[0, 1].set_ylabel('Ht')
 
     ax[1, 1].scatter(
-        np.diff(sim.simulation_results.brightest_length_arr),
+        np.diff(sim.simulation_results.brightest_length_arr / 1000) / sim.const.dt,
         sim.simulation_results.brightest_height_arr[:-1],
         marker='o',
         s=2,
     )
-    ax[1, 1].set_xlabel('Velocity')
+    ax[1, 1].set_xlabel('Velocity (km/s)')
     ax[1, 1].set_ylabel('Ht')
 
     plt.show()
@@ -319,7 +335,7 @@ def evaluateFit2(model, file_path, validation_gen, param_class_name=None):
         label='ML predicted output',
     )
     ax[1].scatter(
-        np.diff(simulation_results.brightest_length_arr / 1000)[:-1],
+        np.diff(simulation_results.brightest_length_arr / 1000)[:-1] / sim.const.dt,
         simulation_results.brightest_height_arr[:-2] / 1000,
         marker='o',
         s=2,
@@ -333,7 +349,7 @@ def evaluateFit2(model, file_path, validation_gen, param_class_name=None):
         c='k',
     )
     ax[1].scatter(
-        np.diff(sim.simulation_results.brightest_length_arr / 1000)[:-1],
+        np.diff(sim.simulation_results.brightest_length_arr / 1000)[:-1] / sim.const.dt,
         sim.simulation_results.brightest_height_arr[:-2] / 1000,
         marker='o',
         c='k',
@@ -345,7 +361,7 @@ def evaluateFit2(model, file_path, validation_gen, param_class_name=None):
     ax[0].set_xlabel("Magnitude")
     ax[0].legend()
     ax[1].set_ylabel('Height (km)')
-    ax[1].set_xlabel("Length (km)")
+    ax[1].set_xlabel("Velocity (km/s)")
     ax[1].legend()
 
     ax[0].set_ylim([ending_height, starting_height])
@@ -356,7 +372,7 @@ def evaluateFit2(model, file_path, validation_gen, param_class_name=None):
     plt.show()
 
 
-def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_file, fit_param=0):
+def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_file, fit_param=None):
     # https://machinelearningmastery.com/how-to-develop-convolutional-neural-network-models-for-time-series-forecasting/
     # Height input model
     model_title = weights_file[:-3]
@@ -422,10 +438,13 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
     model = keras.models.Model(inputs=input, outputs=output)
 
     def loss_fn(y_true, y_pred):
-        weights = tf.one_hot(fit_param, 10, dtype=tf.float32)
+        if fit_param:
+            weights = tf.one_hot(fit_param, 10, dtype=tf.float32)
+        else:
+            weights = tf.Tensor([1, 1, 1, 1, 1, 0, 0, 0, 0, 0], dtype=tf.float32)
         # print(K.sum(K.square(y_true - y_pred) * weights))
         # raise Exception('hey')
-        return K.sum(K.square(y_true - y_pred) * weights, axis=-1)
+        return K.sum(K.square(y_true - y_pred) * weights / K.sum(weights), axis=-1)
 
     # Compile the model
     model.compile(optimizer='adam', loss=loss_fn)

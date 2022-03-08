@@ -756,9 +756,11 @@ def extractSimData(
     return param_dict, input_data_normed, simulated_data_normed
 
 
-def saveCleanData(output_dir: str, random_seed: int):
+def saveCleanData(output_dir: str, random_seed: int, erosion_on: bool = True):
     # Init simulation container
     erosion_cont = ErosionSimContainer(output_dir, random_seed=random_seed)
+
+    erosion_cont.const.erosion_on = erosion_on
     # print("Running:", erosion_cont.file_name)
 
     # Run the simulation and save results
@@ -870,6 +872,7 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('nsims', metavar='SIM_NUM', type=int, help="Number of simulations to do.")
 
+    arg_parser.add_argument('--noerosion', action='store_true', help='Whether to simulate without erosion.')
     # group = arg_parser.add_mutually_exclusive_group()
     # group.add_argument(
     #     "-c", "--clean", action='store_true', help='If given, only simulate then save the clean data'
@@ -896,7 +899,9 @@ if __name__ == "__main__":
 
     # Generate simulations using multiprocessing
     input_list = [[cml_args.output_dir, np.random.randint(0, 2 ** 31 - 1)] for _ in range(cml_args.nsims)]
-    results_list = domainParallelizer(input_list, saveCleanData, display=True)
+    results_list = domainParallelizer(
+        input_list, saveCleanData, display=True, kwarg_dict={'erosion_on': not cml_args.noerosion}
+    )
 
     # # Save the list of simulations that passed the criteria to disk
     # saveProcessedList(
