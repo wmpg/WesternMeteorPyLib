@@ -460,7 +460,7 @@ def fitCNNMultiHeaded(data_gen, test_gen, output_dir, model_file, weights_file, 
         return K.sum(K.square(y_true - y_pred) * weights / K.sum(weights), axis=-1)
 
     # Compile the model
-    model.compile(optimizer='adam', loss=loss_fn)
+    model.compile(optimizer='adam', loss='mse')
 
     # Save the model to disk BEFORE fitting, so that it plus the checkpoint will have all information
     model_json = model.to_json()
