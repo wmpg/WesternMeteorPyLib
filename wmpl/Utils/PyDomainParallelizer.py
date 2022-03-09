@@ -146,11 +146,15 @@ def domainParallelizer(domain, function, cores=None, kwarg_dict=None, display=Fa
 
         # Generate a pool of workers
         with closing(multiprocessing.Pool(cores)) as pool:
-
+            jobs = []
             # Give workers things to do
             for args in domain:
                 # Give job to worker
-                pool.apply_async(function, args, kwarg_dict, callback=_logResult)
+                jobs.append(pool.apply_async(function, args, kwarg_dict, callback=_logResult))
+
+            # crashing if you get an error (doesn't catch keyboardinterrupt)
+            for job in jobs:
+                job.get()
 
         pool.join()
 

@@ -116,7 +116,7 @@ class PhysicalParameters:
         self.param_list.append("v_init")
 
         # Zenith angle range
-        self.zenith_angle = MetParam(np.radians(0.0), np.radians(80.0))
+        self.zenith_angle = MetParam(np.radians(0.0), np.radians(70.0))
         self.param_list.append("zenith_angle")
 
         # Density range (kg/m^3)
@@ -620,6 +620,14 @@ def extractSimData(
     if np.min(sim.simulation_results.abs_magnitude) >= params.peak_mag_faintest:
         return None
 
+    # zenith angle above 70 deg is bad
+    if sim.params.zenith_angle.val >= np.radians(70):
+        return None
+
+    # make the density less than the grain density (don't let the grain density be set by the bulk density)
+    if sim.params.rho.val >= 3000:
+        return None
+
     # Get indices that are above the faintest limiting magnitude
     min_lim_mag = min(starting_lim_mag, ending_lim_mag)
     indices_visible = np.ones(sim.simulation_results.abs_magnitude.shape, dtype=bool)
@@ -637,7 +645,7 @@ def extractSimData(
 
     # If no points were visible, skip this solution
     if not np.any(indices_visible):
-        print('not visible')
+        # print('not visible')
         return None
 
     # Compute the minimum time the meteor needs to be visible
@@ -648,7 +656,7 @@ def extractSimData(
 
     # Check if the minimum time is satisfied
     if np.max(time_lim_mag_bright) < min_time_visible:
-        print('minimum time not satisfied')
+        # print('minimum time not satisfied')
         return None
 
     ### ###
@@ -710,7 +718,7 @@ def extractSimData(
 
     # there should not be any truncation in the data
     if not np.any(len_sampled > 0):
-        print('no length measurements')
+        # print('no length measurements')
         return None
 
     # If the simulation should only be checked that it's good, return the postprocess parameters used to

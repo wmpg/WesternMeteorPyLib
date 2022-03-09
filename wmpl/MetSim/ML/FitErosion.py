@@ -209,6 +209,8 @@ def loadModel(file_path, model_file='model.json', weights_file='model.h5'):
 
 def evaluateFit(model, validation_gen, output=False, display=False):
     param_name_list = ["M0", "V0", "ZC", "DENS", "ABL", "ERHT", "ERCO", "ER_S", "ERMm", "ERMM"]
+    param_unit = ['(kg)', '(km/s)', '(deg)', '(kg/m3)', '(kg/MJ)', '(km)', '(kg/MJ)', '', '(kg)', '(kg)']
+    param_scaling = [1, 1 / 1000, 180 / np.pi, 1, 1, 1 / 1000, 1, 1, 1, 1]
 
     # Generate validation data
     validation_data = next(validation_gen)
@@ -252,13 +254,15 @@ def evaluateFit(model, validation_gen, output=False, display=False):
         fig, ax = plt.subplots(2, 5)
         log = [True, False, False, False, False, False, False, False, True, True]
         for i in range(10):
-            min_val = min(np.min(correct_output[:, i]), np.min(pred_output[:, i]))
-            max_val = max(np.max(correct_output[:, i]), np.max(pred_output[:, i]))
+            min_val = min(np.min(correct_output[:, i]), np.min(pred_output[:, i])) * param_scaling[i]
+            max_val = max(np.max(correct_output[:, i]), np.max(pred_output[:, i])) * param_scaling[i]
             ax[np.unravel_index(i, (2, 5))].set_title(param_name_list[i])
-            ax[np.unravel_index(i, (2, 5))].scatter(correct_output[:, i], pred_output[:, i])
+            ax[np.unravel_index(i, (2, 5))].scatter(
+                correct_output[:, i] * param_scaling[i], pred_output[:, i] * param_scaling[i]
+            )
             ax[np.unravel_index(i, (2, 5))].plot([min_val, max_val], [min_val, max_val])
             ax[np.unravel_index(i, (2, 5))].set_ylabel('Predicted')
-            ax[np.unravel_index(i, (2, 5))].set_xlabel('Correct')
+            ax[np.unravel_index(i, (2, 5))].set_xlabel('Correct ' + param_unit[i])
             if log[i]:
                 ax[np.unravel_index(i, (2, 5))].set_yscale('log')
                 ax[np.unravel_index(i, (2, 5))].set_xscale('log')
