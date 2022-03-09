@@ -36,14 +36,19 @@ def loadPickle(dir_path, file_name):
     """
 
     with open(os.path.join(dir_path, file_name), 'rb') as f:
+        try:
+            # Python 2
+            if sys.version_info[0] < 3:
+                p = pickle.load(f)
 
-        # Python 2
-        if sys.version_info[0] < 3:
-            p = pickle.load(f)
+            # Python 3
+            else:
+                p = pickle.load(f, encoding='latin1')
 
-        # Python 3
-        else:
-            p = pickle.load(f, encoding='latin1')
+        except (IOError, EOFError, TypeError, KeyError):
+
+            print('The pickle file was corruped and could not be loaded:', os.path.join(dir_path, file_name))
+            return None
 
         # Fix attribute compatibility in trajectory objects with older versions which had a
         #   typo "uncertanties"
