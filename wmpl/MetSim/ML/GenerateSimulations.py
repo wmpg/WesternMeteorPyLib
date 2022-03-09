@@ -2,8 +2,7 @@
 simulations to disk. """
 
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 import copy
 import json
@@ -38,7 +37,14 @@ MIN_FRAMES_VISIBLE = 10
 
 
 class MetParam(object):
-    def __init__(self, param_min: float, param_max: float, gen_method: str = 'uniform', default=None):
+    def __init__(
+        self,
+        param_min: float,
+        param_max: float,
+        gen_method: str = 'uniform',
+        default: Optional[float] = None,
+        fixed: bool = False,
+    ):
         """ Container for physical meteor parameters. """
 
         # Range of values
@@ -46,12 +52,18 @@ class MetParam(object):
 
         # Value used in simulation
         self.val = default
+        self.fixed = fixed
+        if self.fixed and self.val is None:
+            raise Exception('Parameter cannot be fixed without a default value.')
 
         # functions to give "smartness" to parameter
         self.method = gen_method
         self.link_method = (None, None)
 
     def generateVal(self, local_state=None):
+        if self.fixed:
+            return self.val
+
         if local_state is None:
             local_state = np.random.RandomState()
 
@@ -125,7 +137,7 @@ class PhysicalParameters:
         self.param_list.append("rho")
 
         # Intrinsic ablation coeff range (s^2/m^2)
-        self.sigma = MetParam(0.005 / 1e6, 0.5 / 1e6)
+        self.sigma = MetParam(0.005 / 1e6, 0.5 / 1e6, default=0.05 / 1e6, fixed=True)
         self.param_list.append("sigma")
 
         ##
@@ -134,23 +146,23 @@ class PhysicalParameters:
         ## Assumes no change in erosion once it starts!
 
         # Erosion height range
-        self.erosion_height_start = MetParam(70000, 130000)
+        self.erosion_height_start = MetParam(70000, 130000, default=0, fixed=True)
         self.param_list.append("erosion_height_start")
 
         # Erosion coefficient (s^2/m^2)
-        self.erosion_coeff = MetParam(0.0, 1.0 / 1e6)
+        self.erosion_coeff = MetParam(0.0, 1.0 / 1e6, default=0, fixed=True)
         self.param_list.append("erosion_coeff")
 
         # Mass index
-        self.erosion_mass_index = MetParam(1.5, 3.0)
+        self.erosion_mass_index = MetParam(1.5, 3.0, default=1, fixed=True)
         self.param_list.append("erosion_mass_index")
 
         # Minimum mass for erosion
-        self.erosion_mass_min = MetParam(1e-12, 1e-9, 'log10')
+        self.erosion_mass_min = MetParam(1e-12, 1e-9, 'log10', default=1e-12, fixed=True)
         self.param_list.append("erosion_mass_min")
 
         # Maximum mass for erosion
-        self.erosion_mass_max = MetParam(1e-11, 1e-7, 'log10')
+        self.erosion_mass_max = MetParam(1e-11, 1e-7, 'log10', default=0, fixed=True)
         self.erosion_mass_max.linkParam(self.erosion_mass_min, 'greater')
         self.param_list.append("erosion_mass_max")
 
@@ -625,9 +637,9 @@ def extractSimData(
     if sim.params.zenith_angle.val >= np.radians(70):
         return None
 
-    # make the density less than the grain density (don't let the grain density be set by the bulk density)
-    if sim.params.rho.val >= 3000:
-        return None
+    # # make the density less than the grain density (don't let the grain density be set by the bulk density)
+    # if sim.params.rho.val >= 3000:
+    #     return None
 
     # Get indices that are above the faintest limiting magnitude
     min_lim_mag = min(starting_lim_mag, ending_lim_mag)
