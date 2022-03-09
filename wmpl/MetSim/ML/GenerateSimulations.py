@@ -676,10 +676,6 @@ def extractSimData(
     # Normalize time to zero
     time_sampled -= time_sampled[0]
 
-    # if the erosion isn't visible, data is bad
-    if ht_sampled[-1] + 5e3 < param_dict['physical'].erosion_height_start.val:
-        return None
-
     ### SIMULATE CAMO tracking delay for length measurements ###
 
     # Zero out all length measurements before the length delay (to simulate the delay of CAMO

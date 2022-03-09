@@ -1,6 +1,7 @@
 """ Fit the erosion model using machine learning. """
 
-from __future__ import absolute_import, division, print_function, unicode_literals
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
 
 import copy
 import datetime
@@ -12,22 +13,19 @@ import keras
 import keras.backend as K
 import matplotlib.pyplot as plt
 import numpy as np
+import scipy
 import tensorflow as tf
 from wmpl.MetSim.GUI import SimulationResults
 from wmpl.MetSim.MetSimErosion import runSimulation
-from wmpl.MetSim.ML.GenerateSimulations import (
-    DATA_LENGTH,
-    SIM_CLASSES,
-    SIM_CLASSES_DICT,
-    SIM_CLASSES_NAMES,
-    ErosionSimContainer,
-    ErosionSimParameters,
-    ErosionSimParametersCAMO,
-    ErosionSimParametersCAMOWide,
-    MetParam,
-    PhysicalParameters,
-    extractSimData,
-)
+from wmpl.MetSim.ML.GenerateSimulations import (DATA_LENGTH, SIM_CLASSES,
+                                                SIM_CLASSES_DICT,
+                                                SIM_CLASSES_NAMES,
+                                                ErosionSimContainer,
+                                                ErosionSimParameters,
+                                                ErosionSimParametersCAMO,
+                                                ErosionSimParametersCAMOWide,
+                                                MetParam, PhysicalParameters,
+                                                extractSimData)
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PyDomainParallelizer import domainParallelizer
 
@@ -217,13 +215,20 @@ def evaluateFit(model, validation_gen, output=False, display=False):
     # print([i.shape for i in validation_outputs])
     # Predict data
     pred_norm_params = model.predict(validation_outputs)
+
+    # noramlized data
     norm_errors = np.abs(pred_norm_params - validation_inputs)
+    param_corr = np.corrcoef(pred_norm_params, validation_inputs, rowvar=False)
+    param_corr = param_corr.flatten()[
+        int(param_corr.shape[0] / 2) : int(param_corr.size / 2) : param_corr.shape[0] + 1
+    ]
+
+    # unnormalized data
     correct_output = np.array(camera_param.getDenormalizedInputs(validation_inputs.T)).T
     pred_output = np.array(camera_param.getDenormalizedInputs(pred_norm_params.T)).T
     denorm_errors = np.abs(pred_output - correct_output)
     denorm_perc_errors = denorm_errors / correct_output
-    # print(pred_output)
-    # print(correct_output)
+
     if display:
         # fig, ax = plt.subplots(2, sharey=True, sharex=True)
         # ax[0].scatter(*validation_inputs[:, [1, 7]].T, label='correct')
@@ -244,9 +249,11 @@ def evaluateFit(model, validation_gen, output=False, display=False):
         fig, ax = plt.subplots(2, 5)
         log = [True, False, False, False, False, False, False, False, True, True]
         for i in range(10):
+            min_val = min(np.min(correct_output[:, i]), np.min(pred_output[:, i]))
+            max_val = max(np.max(correct_output[:, i]), np.max(pred_output[:, i]))
             ax[np.unravel_index(i, (2, 5))].set_title(param_name_list[i])
             ax[np.unravel_index(i, (2, 5))].scatter(correct_output[:, i], pred_output[:, i])
-            ax[np.unravel_index(i, (2, 5))].plot([1e-4, 1], [1e-4, 1])
+            ax[np.unravel_index(i, (2, 5))].plot([min_val, max_val], [min_val, max_val])
             ax[np.unravel_index(i, (2, 5))].set_ylabel('Predicted')
             ax[np.unravel_index(i, (2, 5))].set_xlabel('Correct')
             if log[i]:
@@ -263,7 +270,6 @@ def evaluateFit(model, validation_gen, output=False, display=False):
 
     # Compute mean absolute percentage error for every model parameter
     percent_norm_errors = 100 * np.mean(norm_errors, axis=0)
-    denorm_errors_av = np.mean(denorm_errors, axis=0)
     denorm_perc_errors_av = 100 * np.mean(denorm_perc_errors, axis=0)
 
     if output:
@@ -271,9 +277,9 @@ def evaluateFit(model, validation_gen, output=False, display=False):
         print(" ".join(["{:>9s}".format(param_name) for param_name in param_name_list]))
         print(str(len(percent_norm_errors) * "{:8.2f}% ").format(*percent_norm_errors))
         print(str(len(denorm_perc_errors_av) * "{:8.2f}% ").format(*denorm_perc_errors_av))
-        print(str(len(denorm_errors_av) * "{:9.2E} ").format(*denorm_errors_av))
+        print(str(len(param_corr) * "{:9.4f} ").format(*param_corr))
 
-    return percent_norm_errors, denorm_errors_av
+    return percent_norm_errors
 
 
 def evaluateFit2(model, file_path, validation_gen, param_class_name=None):
@@ -456,14 +462,13 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
     def loss_fn(y_true, y_pred):
         if fit_param:
             weights = tf.one_hot(fit_param, 10, dtype=tf.float32)
-        else:
+        elif y_true[5]:
             weights = tf.constant([1, 1, 1, 1, 1, 0, 0, 0, 0, 0], dtype=tf.float32)
-        # print(K.sum(K.square(y_true - y_pred) * weights))
-        # raise Exception('hey')
+
         return K.sum(K.square(y_true - y_pred) * weights / K.sum(weights), axis=-1)
 
     # Compile the model
-    model.compile(optimizer='adam', loss='mse')
+    model.compile(optimizer='adam', loss=loss_fn)
 
     # Save the model to disk BEFORE fitting, so that it plus the checkpoint will have all information
     model_json = model.to_json()
