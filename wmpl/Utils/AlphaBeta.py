@@ -222,8 +222,8 @@ def lagFitVelocity(time_data, lag_data, vel_data, v0):
     # Guess initial parameters
     a1 = 20
     a2 = 1.5
-    t0 = 9/10*np.max(time_data)
-    decel = 6 # km/s^2
+    t0 = 9/10*np.max(time_data) # The transition to constant deceleration always happens close to the end
+    decel = 6 # km/s^2, typical deceleration for meteorite droppers at the end
 
     # Initial parameters
     p0 = [a1, a2, t0, decel]
