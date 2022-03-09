@@ -10,7 +10,7 @@ import scipy.optimize
 
 
 from wmpl.Utils.Math import meanAngle
-from wmpl.Utils.Physics import dynamicPressure
+from wmpl.Utils.Physics import dynamicPressure, dynamicMass
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 
 
@@ -443,6 +443,14 @@ if __name__ == "__main__":
         help="""Fit alpha-beta on the observed velocity instead of the lag-smoothed model. """
         )
 
+    arg_parser.add_argument('-d', '--dens', metavar='DENS', \
+        help='Bulk density in kg/m^3 used to compute the final dynamic mass. Default is 3500 kg/m^3.', \
+        type=float, default=3500)
+
+    arg_parser.add_argument('-g', '--ga', metavar='GAMMA_A', \
+        help='The product of the drag coefficient Gamma and the shape coefficient A. Used for computing the dynamic mass. Default is 0.7.', \
+        type=float, default=0.7)
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -486,12 +494,13 @@ if __name__ == "__main__":
         lag_data = np.array(lag_data)
 
         # Sort by height
-        vel_data = vel_data[np.argsort(ht_data)]
-        lag_data  = lag_data[np.argsort(ht_data)]
-        time_data = time_data[np.argsort(ht_data)]
-        lat_data = lat_data[np.argsort(ht_data)]
-        lon_data = lon_data[np.argsort(ht_data)]
-        ht_data  = ht_data[np.argsort(ht_data)]
+        sorted_indices = np.argsort(ht_data)
+        vel_data = vel_data[sorted_indices]
+        lag_data  = lag_data[sorted_indices]
+        time_data = time_data[sorted_indices]
+        lat_data = lat_data[sorted_indices]
+        lon_data = lon_data[sorted_indices]
+        ht_data  = ht_data[sorted_indices]
 
 
         # Rescale the heights to the exponential atmosphere used by alpha-beta
@@ -540,6 +549,49 @@ if __name__ == "__main__":
         ax_vel.scatter(vel_data_smooth/1000, ht_data/1000, color='r', s=1, \
             label="Lag-based velocity smoothing")
 
+        if not cml_args.obsvel:
+            # If the exponental to linear transition point was used by the fit, plot it
+            t0 = lag_fit_params[2]
+            decel = lag_fit_params[3]
+            if t0 < np.max(time_data):
+
+                # Find the height closest to t0
+                v_t0 = expLinearVelocity(t0, traj.v_init, *lag_fit_params)
+                t0_index = np.argmin(np.abs(vel_data_smooth - v_t0))
+                h_t0 = ht_data[t0_index]
+                ax_vel.scatter([v_t0/1000], [h_t0/1000], label='t0, decel = {:.2f} km/s^2'.format(abs(decel)),\
+                    color='r')
+
+
+                ### Compute the dynamic mass at the end ###
+
+                # Compute the mean values between the inflection point and the end
+                midpoint_index = int(round((t0_index + 0)/2)) # Sorted by increasing height!
+                ht_dyn = ht_data[midpoint_index]
+                t_dyn = time_data[midpoint_index]
+                v_dyn = expLinearVelocity(t_dyn, traj.v_init, *lag_fit_params)
+
+                # Compute the dynamic mass
+                dyn_mass = dynamicMass(cml_args.dens, traj.rend_lat, traj.rend_lon, ht_dyn, traj.jdt_ref, \
+                    v_dyn, 1000*abs(decel), gamma=cml_args.ga, shape_factor=1.0)
+
+
+                print()
+                print("Dynamic mass:")
+                print("-------------")
+                print("Bulk density = {:5d} kg/m^3".format(int(cml_args.dens)))
+                print("Height       = {:5.2f} km".format(ht_dyn/1000))
+                print("Velocity     = {:5.2f} km/s".format(v_dyn/1000))
+                print("Deceleration = {:5.2f} km/s^3".format(abs(decel)))
+                print("Gamma*A      = {:5.2f}".format(cml_args.ga))
+                print()
+                print("Dynamic mass = {:5.3f} kg".format(dyn_mass))
+                print()
+                print("--------------")
+
+                ### ###
+
+
         # Plot the alpha-beta fit
         ax_vel.plot(vel_arr/1000, ht_arr/1000, color='k', \
             label="$v_0$ = {:.2f} km/s\n$\\alpha$ = {:.2f}\n$\\beta$ = {:.2f}".format(v_init/1000, alpha, \
@@ -547,7 +599,8 @@ if __name__ == "__main__":
 
         ax_vel.set_xlabel("Velocity (km/s)")
         ax_vel.set_ylabel("Height (km)")
-        ax_vel.legend()
+        
+        ax_vel.legend(loc='upper left')
 
 
         # Plot the lag and the lag fit
@@ -598,12 +651,13 @@ if __name__ == "__main__":
         plt.scatter([np.log(alpha*np.sin(traj.orbit.elevation_apparent_norot))], [np.log(beta)], color='r')
 
         # defite plot parameters
-        plt.xlim((-1, 7))
-        plt.ylim((-3, 4))
+        plt.xlim((-1, 8))
+        plt.ylim((-5, 4))
         plt.xlabel("ln(alpha*sin(slope))")
         plt.ylabel("ln(beta)")
         plt.axes().set_aspect('equal')
-        plt.legend()
+        plt.legend(loc='upper right')
+        plt.tight_layout()
         plt.show()
 
 
