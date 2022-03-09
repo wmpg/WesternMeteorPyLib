@@ -220,12 +220,12 @@ def lagFitVelocity(time_data, lag_data, vel_data, v0):
     """ Fit a smooth model to the lag data, to improve the alpha-beta fit. """
 
 
-    def _lagMinimization(params, time_data, lag_data):
+    def _lagMinimization(params, time_data, lag_data, weights):
 
         # Compute the sum of absolute residuals (more robust than squared residuals)
-        res = np.sum(np.abs(lag_data - expLinearLag(time_data, *params)))
+        cost = np.sum(weights*np.abs(lag_data - expLinearLag(time_data, *params)))
 
-        return res
+        return cost
 
 
     # Guess initial parameters
@@ -241,7 +241,21 @@ def lagFitVelocity(time_data, lag_data, vel_data, v0):
     #fit_params, _ = scipy.optimize.curve_fit(expLinearLag, time_data, lag_data, p0=p0, maxfev=10000)
 
 
-    res = scipy.optimize.basinhopping(_lagMinimization, p0, minimizer_kwargs={'args':(time_data, lag_data)}) #args=(time_data, lag_data), method='Nelder-Mead')
+    # # Use weights such that they linearly increase from 0.5 at and before the first half of the fireball to 
+    # #   1.0 at the end
+    # # The time is sorted in reverse, so take that into account
+    # weights = np.zeros_like(time_data)
+    # first_part_indices = np.arange(0, len(weights)/2).astype(np.int)
+    # weights[first_part_indices] = 1.0 - 0.5*first_part_indices/np.max(first_part_indices)
+    # weights[~first_part_indices] = 0.5
+    # weights /= np.sum(weights)
+
+    # Don't use weights
+    weights = np.ones_like(time_data)
+
+    # Use robust fitting
+    res = scipy.optimize.basinhopping(_lagMinimization, p0, \
+        minimizer_kwargs={'args':(time_data, lag_data, weights)})
     fit_params = res.x
 
     # fig, (ax1, ax2, ax3) = plt.subplots(nrows=3, sharex=True)
