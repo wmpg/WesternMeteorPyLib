@@ -219,6 +219,15 @@ def expLinearVelocity(t, v0, a1, a2, t0, decel):
 def lagFitVelocity(time_data, lag_data, vel_data, v0):
     """ Fit a smooth model to the lag data, to improve the alpha-beta fit. """
 
+
+    def _lagMinimization(params, time_data, lag_data):
+
+        # Compute the sum of absolute residuals (more robust than squared residuals)
+        res = np.sum(np.abs(lag_data - expLinearLag(time_data, *params)))
+
+        return res
+
+
     # Guess initial parameters
     a1 = 20
     a2 = 1.5
@@ -229,9 +238,11 @@ def lagFitVelocity(time_data, lag_data, vel_data, v0):
     p0 = [a1, a2, t0, decel]
 
     # Fit the lag function
-    fit_params, _ = scipy.optimize.curve_fit(expLinearLag, time_data, lag_data, p0=p0, maxfev=10000)
+    #fit_params, _ = scipy.optimize.curve_fit(expLinearLag, time_data, lag_data, p0=p0, maxfev=10000)
 
-    print("Lag model fit:", fit_params)
+
+    res = scipy.optimize.basinhopping(_lagMinimization, p0, minimizer_kwargs={'args':(time_data, lag_data)}) #args=(time_data, lag_data), method='Nelder-Mead')
+    fit_params = res.x
 
     # fig, (ax1, ax2, ax3) = plt.subplots(nrows=3, sharex=True)
     
@@ -508,9 +519,15 @@ if __name__ == "__main__":
 
         # Fit a functional model to the lag and use that for the alpha-beta fit instead of the noisy
         #   point-to-point velocity measurements
+        print("Fitting lag function...")
         vel_data_smooth, lag_fit_params = lagFitVelocity(time_data, lag_data, vel_data, traj.v_init)
 
         print("Initial velocity:", traj.v_init)
+        print("Lag fit:")
+        print("    - a1    = {:.3f}".format(lag_fit_params[0]))
+        print("    - a2    = {:.3f}".format(lag_fit_params[1]))
+        print("    - t0    = {:.3f}".format(lag_fit_params[2]))
+        print("    - decel = {:.3f}".format(lag_fit_params[3]))
 
         # Choose which data will be used for alpha-beta fitting
         if cml_args.obsvel:
@@ -521,6 +538,7 @@ if __name__ == "__main__":
         # Estimate the alpha, beta parameters
         v_init, alpha, beta = fitAlphaBeta(vel_input, ht_data, v_init=traj.v_init)
 
+        print()
         print("Alpha:", alpha)
         print("Beta:", beta)
 
@@ -550,6 +568,7 @@ if __name__ == "__main__":
             label="Lag-based velocity smoothing")
 
         if not cml_args.obsvel:
+
             # If the exponental to linear transition point was used by the fit, plot it
             t0 = lag_fit_params[2]
             decel = lag_fit_params[3]
