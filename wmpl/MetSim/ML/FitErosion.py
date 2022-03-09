@@ -1,7 +1,6 @@
 """ Fit the erosion model using machine learning. """
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 import copy
 import datetime
@@ -17,15 +16,19 @@ import scipy
 import tensorflow as tf
 from wmpl.MetSim.GUI import SimulationResults
 from wmpl.MetSim.MetSimErosion import runSimulation
-from wmpl.MetSim.ML.GenerateSimulations import (DATA_LENGTH, SIM_CLASSES,
-                                                SIM_CLASSES_DICT,
-                                                SIM_CLASSES_NAMES,
-                                                ErosionSimContainer,
-                                                ErosionSimParameters,
-                                                ErosionSimParametersCAMO,
-                                                ErosionSimParametersCAMOWide,
-                                                MetParam, PhysicalParameters,
-                                                extractSimData)
+from wmpl.MetSim.ML.GenerateSimulations import (
+    DATA_LENGTH,
+    SIM_CLASSES,
+    SIM_CLASSES_DICT,
+    SIM_CLASSES_NAMES,
+    ErosionSimContainer,
+    ErosionSimParameters,
+    ErosionSimParametersCAMO,
+    ErosionSimParametersCAMOWide,
+    MetParam,
+    PhysicalParameters,
+    extractSimData,
+)
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PyDomainParallelizer import domainParallelizer
 
@@ -462,7 +465,7 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
     def loss_fn(y_true, y_pred):
         if fit_param:
             weights = tf.one_hot(fit_param, 10, dtype=tf.float32)
-        elif y_true[5]:
+        else:
             weights = tf.constant([1, 1, 1, 1, 1, 0, 0, 0, 0, 0], dtype=tf.float32)
 
         return K.sum(K.square(y_true - y_pred) * weights / K.sum(weights), axis=-1)
