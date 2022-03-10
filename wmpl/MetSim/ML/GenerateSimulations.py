@@ -129,7 +129,7 @@ class PhysicalParameters:
         self.param_list.append("v_init")
 
         # Zenith angle range
-        self.zenith_angle = MetParam(np.radians(0.0), np.radians(70.0))
+        self.zenith_angle = MetParam(np.radians(20), np.radians(80.0))
         self.param_list.append("zenith_angle")
 
         # Density range (kg/m^3)
@@ -634,12 +634,12 @@ def extractSimData(
         return None
 
     # zenith angle above 70 deg is bad
-    if sim.params.zenith_angle.val >= np.radians(70):
+    if sim.params.zenith_angle.val <= np.radians(20):
         return None
 
     # # make the density less than the grain density (don't let the grain density be set by the bulk density)
-    # if sim.params.rho.val >= 3000:
-    #     return None
+    if sim.params.rho.val >= 3500:
+        return None
 
     # Get indices that are above the faintest limiting magnitude
     min_lim_mag = min(starting_lim_mag, ending_lim_mag)
