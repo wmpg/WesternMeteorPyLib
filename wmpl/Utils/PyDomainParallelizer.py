@@ -97,6 +97,11 @@ def unpackDecorator(func):
     return dec
 
 
+def formatTime(t):
+    """ Converts time in seconds to a string with hours, minutes and seconds """
+    return f'{int(t//3600):2d}h {(int(t//60))%60:2d}m {t%60:5.2f}s'
+
+
 def domainParallelizer(domain, function, cores=None, kwarg_dict=None, display=False):
     """ Runs N (cores) functions as separate processes with parameters given in the domain list.
 
@@ -124,7 +129,11 @@ def domainParallelizer(domain, function, cores=None, kwarg_dict=None, display=Fa
         if counter % 100 == 99 and display:
             now = time.perf_counter()
             print(
-                f'{counter}/{total}: {counter/total*100:.2f}% computed - {int((now - t1)//3600)}h {(int((now - t1)//60))%60}m {(now - t1)%60:.2f}s'
+                " " * (len(str(total)) - len(str(counter)))
+                + f'{counter}/{total}: {counter/total*100:5.2f}% computed  -  '
+                f'Time: {formatTime(now - t1)}  -  '
+                f'ETA: {formatTime((now - t1)/counter*(total - counter))}',
+                end='\r',
             )
 
     if kwarg_dict is None:
