@@ -141,7 +141,7 @@ def rescaleHeightToExponentialAtmosphere(lat, lon, ht_data, jd):
 
         return rho_atm_0*(1/np.e**(ht_data/HT_NORM_CONST))
 
-    def _expAtmosphereHeight(air_density, rho_atm_0=1.0):
+    def _expAtmosphereHeight(air_density, rho_atm_0=1.225):
         """ Compute the height given the air density and exponential atmosphere assumption. 
 
         Arguments:
@@ -255,7 +255,7 @@ def lagFitVelocity(time_data, lag_data, vel_data, v0):
 
     # Use robust fitting
     res = scipy.optimize.basinhopping(_lagMinimization, p0, \
-        minimizer_kwargs={'args':(time_data, lag_data, weights)})
+        minimizer_kwargs={'args':(time_data, lag_data, weights), 'method':'Nelder-Mead'})
     fit_params = res.x
 
     # fig, (ax1, ax2, ax3) = plt.subplots(nrows=3, sharex=True)
@@ -321,7 +321,8 @@ def minimizeAlphaBeta(v_normed, ht_normed):
     bnds = ((xmin[0], xmax[0]), (xmin[1], xmax[1]))
 
     # Compute best-fit alpha-beta values
-    res = scipy.optimize.minimize(_alphaBetaMinimization, x0, args=(v_normed, ht_normed), bounds=bnds, method='Nelder-Mead')
+    res = scipy.optimize.minimize(_alphaBetaMinimization, x0, args=(v_normed, ht_normed), bounds=bnds, \
+        method='Nelder-Mead')
 
     return res.x
 
@@ -445,6 +446,40 @@ def alphaBetaVelocity(ht_data, alpha, beta, v_init):
 
 
 
+def alphaBetaMasses(alpha, beta, slope, mu=0, dens=3500, shape_coeff=1.21, gamma=0.7):
+    """ Compute the initial and final mass given alpha, beta, and the assumed physical properties. 
+    
+    Arguments:
+        alpha: [float]
+        beta: [float]
+        slope: [float] Fireball entry angle (radians).
+
+    Keyword arguments:
+        mu: [float] Shape change coefficient. 0 for no spin, and 2/3 for sufficient spin to equally ablate
+            the whole surface.
+        dens: [float] Bulk density in kg/m^3.
+        shape_coeff: [float] Shape coefficient. 1.21 for sphere, 1.55 for brick.
+        gamma: [float] Drag coefficient (2*Gamma).
+
+    Return:
+        (m_init, m_final): [tuple of floats] Initial and final mass in kg.
+    """
+
+    rho_atm_0 = 1.225
+
+    # Compute the M0_star parameter
+    m0s = (gamma*rho_atm_0*HT_NORM_CONST*shape_coeff/(dens**(2/3.0)))**3
+
+    # Compute the initial mass
+    m_init = m0s/((alpha*np.sin(slope))**3)
+
+    # Compute the final mass
+    m_final = m_init*np.exp(-beta/(1 - mu))
+
+    return m_init, m_final
+
+
+
 if __name__ == "__main__":
 
     import os
@@ -536,13 +571,6 @@ if __name__ == "__main__":
         print("Fitting lag function...")
         vel_data_smooth, lag_fit_params = lagFitVelocity(time_data, lag_data, vel_data, traj.v_init)
 
-        print("Initial velocity:", traj.v_init)
-        print("Lag fit:")
-        print("    - a1    = {:.3f}".format(lag_fit_params[0]))
-        print("    - a2    = {:.3f}".format(lag_fit_params[1]))
-        print("    - t0    = {:.3f}".format(lag_fit_params[2]))
-        print("    - decel = {:.3f}".format(lag_fit_params[3]))
-
         # Choose which data will be used for alpha-beta fitting
         if cml_args.obsvel:
             vel_input = vel_data
@@ -552,14 +580,43 @@ if __name__ == "__main__":
         # Estimate the alpha, beta parameters
         v_init, alpha, beta = fitAlphaBeta(vel_input, ht_data_rescaled, v_init=traj.v_init)
 
-        print()
-        print("Alpha:", alpha)
-        print("Beta:", beta)
+
+        # Compute initial and final mass
+        m_init_mu0, m_final_mu0 = alphaBetaMasses(alpha, beta, traj.orbit.elevation_apparent_norot, \
+            mu=0, dens=cml_args.dens, shape_coeff=cml_args.ga)
+        m_init_mu23, m_final_mu23 = alphaBetaMasses(alpha, beta, traj.orbit.elevation_apparent_norot, \
+            mu=2/3.0, dens=cml_args.dens, shape_coeff=cml_args.ga)
+
 
         print()
-
+        print("Initial velocity = {:.2f} km/s".format(traj.v_init/1000))
+        print()
+        print("Alpha-beta analysis")
+        print("-------------------")
+        print("Alpha = {:.3f}".format(alpha))
+        print("Beta  = {:.3f}".format(beta))
+        print("-------------------")
         print("ln(beta)             = {:.2f}".format(np.log(beta)))
         print("ln(alpha*sin(slope)) = {:.2f}".format(np.log(alpha*np.sin(traj.orbit.elevation_apparent_norot))))
+        print("-------------------")
+        print("Masses with dens = {:d} kg/m^3, sphere:".format(int(cml_args.dens)))
+        print(" * - note that the initial masses are usually 4-10x underestimated!")
+        print("  mu = 0:")
+        print("    Initial = {:.2f} kg".format(m_init_mu0))
+        print("    Final   = {:.2f} kg".format(m_final_mu0))
+        print("  mu = 2/3:")
+        print("    Initial = {:.2f} kg".format(m_init_mu23))
+        print("    Final   = {:.2f} kg".format(m_final_mu23))
+
+        print("*********************************************")
+        print()
+        print("Lag fit:")
+        print("-------------------")
+        print("    - a1    = {:.3f}".format(abs(lag_fit_params[0])))
+        print("    - a2    = {:.3f}".format(abs(lag_fit_params[1])))
+        print("    - t0    = {:.3f} s".format(abs(lag_fit_params[2])))
+        print("    - decel = {:.3f} km/s^2".format(abs(lag_fit_params[3])))
+
 
 
         # Predict velocity from height
@@ -624,9 +681,9 @@ if __name__ == "__main__":
                 h_rescaled_t0 = ht_data_rescaled[t0_index]
 
                 # Plot the t0 point
-                ax_ab.scatter([v_t0/1000], [h_rescaled_t0/1000], label='t0, decel = {:.2f} km/s^2'.format(abs(decel)),\
+                ax_ab.scatter([v_t0/1000], [h_rescaled_t0/1000], label='t0, decel = {:.2f} km/s$^2$'.format(abs(decel)),\
                     color='r')
-                ax_vel.scatter([v_t0/1000], [h_t0/1000], label='t0, decel = {:.2f} km/s^2'.format(abs(decel)),\
+                ax_vel.scatter([v_t0/1000], [h_t0/1000], label='t0, decel = {:.2f} km/s$^2$'.format(abs(decel)),\
                     color='r')
 
 
@@ -648,8 +705,8 @@ if __name__ == "__main__":
 
 
                 print()
-                print("Dynamic mass:")
-                print("-------------")
+                print("Lag fit dynamic mass:")
+                print("---------------------")
                 print("Bulk density = {:5d} kg/m^3".format(int(cml_args.dens)))
                 print("Height       = {:5.2f} km".format(ht_dyn/1000))
                 print("Velocity     = {:5.2f} km/s".format(v_dyn/1000))
@@ -657,8 +714,7 @@ if __name__ == "__main__":
                 print("Gamma*A      = {:5.2f}".format(cml_args.ga))
                 print()
                 print("Dynamic mass = {:5.3f} kg".format(dyn_mass))
-                print()
-                print("--------------")
+                print("---------------------")
 
                 ### ###
 
