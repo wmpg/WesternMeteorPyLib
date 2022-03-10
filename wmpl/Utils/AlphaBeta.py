@@ -529,7 +529,7 @@ if __name__ == "__main__":
 
 
         # Rescale the heights to the exponential atmosphere used by alpha-beta
-        ht_data = rescaleHeightToExponentialAtmosphere(lat_data, lon_data, ht_data, traj.jdt_ref)
+        ht_data_rescaled = rescaleHeightToExponentialAtmosphere(lat_data, lon_data, ht_data, traj.jdt_ref)
 
         # Fit a functional model to the lag and use that for the alpha-beta fit instead of the noisy
         #   point-to-point velocity measurements
@@ -550,7 +550,7 @@ if __name__ == "__main__":
             vel_input = vel_data_smooth
 
         # Estimate the alpha, beta parameters
-        v_init, alpha, beta = fitAlphaBeta(vel_input, ht_data, v_init=traj.v_init)
+        v_init, alpha, beta = fitAlphaBeta(vel_input, ht_data_rescaled, v_init=traj.v_init)
 
         print()
         print("Alpha:", alpha)
@@ -572,10 +572,39 @@ if __name__ == "__main__":
         vel_arr = alphaBetaVelocity(ht_arr, alpha, beta, v_init)
 
 
-        fig, (ax_vel, ax_lag, ax_lag_res) = plt.subplots(ncols=3, sharey=True, figsize=(10, 6))
 
-        # Plot the data
-        ax_vel.scatter(vel_data/1000, ht_data/1000, s=5)
+
+        fig, (ax_ab, ax_vel, ax_lag, ax_lag_res) = plt.subplots(ncols=4, sharey=True, figsize=(14, 6))
+
+
+        ### Alpha-beta plot ###
+
+        # Plot the data rescaled to an exponential atmosphere
+        ax_ab.scatter(vel_data/1000, ht_data_rescaled/1000, s=5, label="Rescaled height to exp. atm")
+
+        # Plot the smoothed velocity
+        ax_ab.scatter(vel_data_smooth/1000, ht_data_rescaled/1000, color='r', s=1, \
+            label="Lag-based velocity smoothing")
+
+        # Plot the alpha-beta fit
+        ax_ab.plot(vel_arr/1000, ht_arr/1000, color='k', \
+            label="$v_0$ = {:.2f} km/s\n$\\alpha$ = {:.2f}\n$\\beta$ = {:.2f}".format(v_init/1000, alpha, \
+                beta))
+
+        ax_ab.set_xlabel("Velocity (km/s)")
+        ax_ab.set_ylabel("Height (km)")
+
+        ax_ab.legend(loc='upper left')
+
+
+        ### ###
+
+
+
+        ### Plot the lag fit ###
+
+        # Plot the original data
+        ax_vel.scatter(vel_data/1000, ht_data/1000, s=5, label="Observed heights")
 
         # Plot the smoothed velocity
         ax_vel.scatter(vel_data_smooth/1000, ht_data/1000, color='r', s=1, \
@@ -592,14 +621,19 @@ if __name__ == "__main__":
                 v_t0 = expLinearVelocity(t0, traj.v_init, *lag_fit_params)
                 t0_index = np.argmin(np.abs(vel_data_smooth - v_t0))
                 h_t0 = ht_data[t0_index]
+                h_rescaled_t0 = ht_data_rescaled[t0_index]
+
+                # Plot the t0 point
+                ax_ab.scatter([v_t0/1000], [h_rescaled_t0/1000], label='t0, decel = {:.2f} km/s^2'.format(abs(decel)),\
+                    color='r')
                 ax_vel.scatter([v_t0/1000], [h_t0/1000], label='t0, decel = {:.2f} km/s^2'.format(abs(decel)),\
                     color='r')
 
 
                 ### Compute the dynamic mass at the end ###
 
-                # Compute the mean values between the inflection point and the end
-                midpoint_index = int(round((t0_index + 0)/2)) # Sorted by increasing height!
+                # Compute the values at the point that is 1/4 before the end and t0
+                midpoint_index = int(round((t0_index + 0)*1/4)) # Sorted by increasing height!
                 ht_dyn = ht_data[midpoint_index]
                 t_dyn = time_data[midpoint_index]
                 v_dyn = expLinearVelocity(t_dyn, traj.v_init, *lag_fit_params)
@@ -607,6 +641,10 @@ if __name__ == "__main__":
                 # Compute the dynamic mass
                 dyn_mass = dynamicMass(cml_args.dens, traj.rend_lat, traj.rend_lon, ht_dyn, traj.jdt_ref, \
                     v_dyn, 1000*abs(decel), gamma=cml_args.ga, shape_factor=1.0)
+
+                # Plot the point where the dynamic mass is estiamted
+                ax_vel.scatter([v_dyn/1000], [ht_dyn/1000], label='Dynamic mass = {:.3f} kg'.format(dyn_mass),\
+                    color='k')
 
 
                 print()
@@ -624,14 +662,9 @@ if __name__ == "__main__":
 
                 ### ###
 
-
-        # Plot the alpha-beta fit
-        ax_vel.plot(vel_arr/1000, ht_arr/1000, color='k', \
-            label="$v_0$ = {:.2f} km/s\n$\\alpha$ = {:.2f}\n$\\beta$ = {:.2f}".format(v_init/1000, alpha, \
-                beta))
+        ###
 
         ax_vel.set_xlabel("Velocity (km/s)")
-        ax_vel.set_ylabel("Height (km)")
         
         ax_vel.legend(loc='upper left')
 
