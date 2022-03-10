@@ -321,7 +321,7 @@ def minimizeAlphaBeta(v_normed, ht_normed):
     bnds = ((xmin[0], xmax[0]), (xmin[1], xmax[1]))
 
     # Compute best-fit alpha-beta values
-    res = scipy.optimize.minimize(_alphaBetaMinimization, x0, args=(v_normed, ht_normed), bounds=bnds)
+    res = scipy.optimize.minimize(_alphaBetaMinimization, x0, args=(v_normed, ht_normed), bounds=bnds, method='Nelder-Mead')
 
     return res.x
 
