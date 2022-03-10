@@ -153,8 +153,8 @@ def domainParallelizer(domain, function, cores=None, kwarg_dict=None, display=Fa
                 jobs.append(pool.apply_async(function, args, kwarg_dict, callback=_logResult))
 
             # crashing if you get an error (doesn't catch keyboardinterrupt)
-            for job in jobs:
-                job.get()
+            # for job in jobs:
+            #     job.get()
 
         pool.join()
 
