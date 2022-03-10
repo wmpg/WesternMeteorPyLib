@@ -141,11 +141,12 @@ class DataGenerator(object):
             # if you fully loop data, shuffle it
             if curr_index >= len(data_list):
                 data_list = np.delete(data_list, to_delete)
+                if len(data_list) == 0:
+                    print(to_delete, data_list)
+                    raise Exception("No valid data")
                 to_delete = []
                 curr_index = 0
                 self.random_state.shuffle(data_list)
-                if len(data_list) == 0:
-                    raise Exception("No valid data")
 
             # if there aren't enough results to fill the batch, collect another batch and fill the gaps with it
             # where extras will be used in subsequent iterations

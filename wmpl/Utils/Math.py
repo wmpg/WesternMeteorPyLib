@@ -721,6 +721,13 @@ def stdOfStd(s, n):
     https://stats.stackexchange.com/questions/631/standard-deviation-of-standard-deviation
     
     Input is the sample standard deviation, so it must be calculated with ddof=1
+    
+    Arguments:
+        s: [ndarray or float] Sample standard deviation measurement
+        n: [ndarray or float] Number of measurements in sample
+        
+    Returns:
+        std_of_std: [ndarray or float]
     """
     return (
         s
@@ -825,13 +832,13 @@ def mergeClosePoints(x_array, y_array, delta, x_datetime=False, method='avg'):
 
             # Choose either to take the mean, max, or min of the points in the window
             if method.lower() == "max":
-                y = np.max(y_array[i : i + count], axis=0)
+                y = np.nanmax(y_array[i : i + count], axis=0)
 
             elif method.lower() == "min":
-                y = np.min(y_array[i : i + count], axis=0)
+                y = np.nanmin(y_array[i : i + count], axis=0)
 
             else:
-                y = np.mean(y_array[i : i + count], axis=0)
+                y = np.nanmean(y_array[i : i + count], axis=0)
 
         # If there are no close points, add the current point to the list
         else:
@@ -842,6 +849,49 @@ def mergeClosePoints(x_array, y_array, delta, x_datetime=False, method='avg'):
         y_final.append(y)
 
     return x_final, y_final
+
+
+def mergeClosePoints2(xy, delta, method='avg'):
+    """
+    Arguments:
+        xy: [tuple of ndarray] (x, y1, y2, y3, ...) where each element is an ndarray with the same length. 
+        delta: [float] Interval to subdivide x into
+        
+    keyword arguments:
+        method: [str] The method for merging close points. 'avg' for average, 'max' for max, 'min' for min
+        
+    Returns:
+        x,y: [tuple] x is an array of x values defined preciely with delta, y is an array calculated based on xy[1:]
+    """
+    start_x = np.min(xy[0])
+    end_x = np.max(xy[0])
+
+    x_arr = xy[0]
+    y_arr = np.array(xy).T
+
+    x_bins = np.arange(start_x, end_x + delta, delta)[1:]  # want to include the largest element
+    output = np.full((len(x_bins), len(xy)), np.nan)
+
+    start_i = 0
+    end_i = 1
+    for i in range(len(x_bins)):
+        while end_i < len(x_arr) and x_arr[end_i] < x_bins[i]:
+            end_i += 1
+
+        if end_i == len(x_arr):
+            end_i = None
+
+        if method == 'avg':
+            func = np.nanmean
+        elif method == 'max':
+            func = np.nanmax
+        else:
+            func = np.nanmin
+
+        output[i] = func(y_arr[start_i:end_i], axis=0)
+        start_i = end_i
+
+    return output
 
 
 def mergeDatasets(xy1, xy2, ascending=True):

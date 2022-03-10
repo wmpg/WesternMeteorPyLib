@@ -450,7 +450,7 @@ class ErosionSimContainer:
         # Structure defining the range of physical parameters
         self.params = PhysicalParameters()
 
-        self.const = self.params.getConst(random_seed)
+        self.const = self.params.getConst(random_seed, override=True)
 
         # Generate a file name from simulation_parameters
         self.file_name = "erosion_sim_v{:.2f}_m{:.2e}g_rho{:04d}_z{:04.1f}_abl{:.3f}_eh{:05.1f}_er{:.3f}_s{:.2f}".format(
