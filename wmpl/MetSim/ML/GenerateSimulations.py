@@ -162,7 +162,7 @@ class PhysicalParameters:
         self.param_list.append("erosion_mass_min")
 
         # Maximum mass for erosion
-        self.erosion_mass_max = MetParam(1e-11, 1e-7, 'log10', default=0, fixed=True)
+        self.erosion_mass_max = MetParam(1e-11, 1e-7, 'log10', default=1e-11, fixed=True)
         self.erosion_mass_max.linkParam(self.erosion_mass_min, 'greater')
         self.param_list.append("erosion_mass_max")
 
