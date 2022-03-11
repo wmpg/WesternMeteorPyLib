@@ -478,7 +478,7 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
         return K.sum(K.square(y_true - y_pred) * weights / K.sum(weights), axis=-1)
 
     # Compile the model
-    model.compile(optimizer='adam', loss=loss_fn)
+    model.compile(optimizer='adam', loss='mse')
 
     # Save the model to disk BEFORE fitting, so that it plus the checkpoint will have all information
     model_json = model.to_json()
@@ -493,7 +493,7 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
         x=iter(data_gen),
         steps_per_epoch=data_gen.steps_per_epoch,
         epochs=data_gen.epochs,
-        callbacks=[ReportFitGoodness(validation_gen), model_checkpoint_callback, early_stopping_callback],
+        callbacks=[ReportFitGoodness(validation_gen), model_checkpoint_callback],
         workers=0,
         max_queue_size=1,
     )

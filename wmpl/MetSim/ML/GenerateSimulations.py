@@ -133,7 +133,7 @@ class PhysicalParameters:
         self.param_list.append("zenith_angle")
 
         # Density range (kg/m^3)
-        self.rho = MetParam(100, 6000)
+        self.rho = MetParam(100, 6000, default=2000)
         self.param_list.append("rho")
 
         # Intrinsic ablation coeff range (s^2/m^2)
@@ -146,23 +146,23 @@ class PhysicalParameters:
         ## Assumes no change in erosion once it starts!
 
         # Erosion height range
-        self.erosion_height_start = MetParam(70000, 130000, default=0, fixed=True)
+        self.erosion_height_start = MetParam(70000, 130000, default=0)
         self.param_list.append("erosion_height_start")
 
         # Erosion coefficient (s^2/m^2)
-        self.erosion_coeff = MetParam(0.0, 1.0 / 1e6, default=0, fixed=True)
+        self.erosion_coeff = MetParam(0.0, 1.0 / 1e6, default=0)
         self.param_list.append("erosion_coeff")
 
         # Mass index
-        self.erosion_mass_index = MetParam(1.5, 3.0, default=1, fixed=True)
+        self.erosion_mass_index = MetParam(1.5, 3.0, default=2)
         self.param_list.append("erosion_mass_index")
 
         # Minimum mass for erosion
-        self.erosion_mass_min = MetParam(1e-12, 1e-9, 'log10', default=1e-12, fixed=True)
+        self.erosion_mass_min = MetParam(1e-12, 1e-9, 'log10', default=1e-12)
         self.param_list.append("erosion_mass_min")
 
         # Maximum mass for erosion
-        self.erosion_mass_max = MetParam(1e-11, 1e-7, 'log10', default=1e-11, fixed=True)
+        self.erosion_mass_max = MetParam(1e-11, 1e-7, 'log10', default=1e-10)
         self.erosion_mass_max.linkParam(self.erosion_mass_min, 'greater')
         self.param_list.append("erosion_mass_max")
 
@@ -443,12 +443,15 @@ SIM_CLASSES_DICT = dict(zip(SIM_CLASSES_NAMES, SIM_CLASSES))
 
 
 class ErosionSimContainer:
-    def __init__(self, output_dir: str, random_seed: Optional[int] = None):
+    def __init__(self, output_dir: str, random_seed: Optional[int] = None, fixed=None):
         """ Simulation container for the erosion model simulation. """
         self.output_dir = output_dir
 
         # Structure defining the range of physical parameters
         self.params = PhysicalParameters()
+        if fixed is not None:
+            for i, p in enumerate(self.params.param_list):
+                getattr(self.params, p).fixed = fixed[i]
 
         self.const = self.params.getConst(random_seed, override=True)
 
@@ -783,9 +786,9 @@ def extractSimData(
     return param_dict, input_data_normed, simulated_data_normed
 
 
-def saveCleanData(output_dir: str, random_seed: int, erosion_on: bool = True):
+def saveCleanData(output_dir: str, random_seed: int, erosion_on: bool = True, fixed=None):
     # Init simulation container
-    erosion_cont = ErosionSimContainer(output_dir, random_seed=random_seed)
+    erosion_cont = ErosionSimContainer(output_dir, random_seed=random_seed, fixed=fixed)
 
     if not erosion_on:
         # make sure erosion isn't being calculated
@@ -906,6 +909,12 @@ if __name__ == "__main__":
     arg_parser.add_argument('nsims', metavar='SIM_NUM', type=int, help="Number of simulations to do.")
 
     arg_parser.add_argument('--noerosion', action='store_true', help='Whether to simulate without erosion.')
+    arg_parser.add_argument(
+        '--fixed',
+        nargs=10,
+        type=int,
+        help='Ten parameters, either 0 or 1 specifying whether a variable is fixed',
+    )
     # group = arg_parser.add_mutually_exclusive_group()
     # group.add_argument(
     #     "-c", "--clean", action='store_true', help='If given, only simulate then save the clean data'
@@ -933,7 +942,10 @@ if __name__ == "__main__":
     # Generate simulations using multiprocessing
     input_list = [[cml_args.output_dir, np.random.randint(0, 2 ** 31 - 1)] for _ in range(cml_args.nsims)]
     results_list = domainParallelizer(
-        input_list, saveCleanData, display=True, kwarg_dict={'erosion_on': not cml_args.noerosion}
+        input_list,
+        saveCleanData,
+        display=True,
+        kwarg_dict={'erosion_on': not cml_args.noerosion, 'fixed': cml_args.fixed},
     )
 
     # # Save the list of simulations that passed the criteria to disk
