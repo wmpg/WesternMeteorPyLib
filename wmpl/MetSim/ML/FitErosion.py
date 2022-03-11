@@ -119,7 +119,7 @@ class DataGenerator(object):
         # Generate data for every epoch
         while True:
             # Get a portion of files to load
-            file_list = data_list[curr_index : curr_index + batch_size]
+            file_list = data_list[curr_index : curr_index + self.batch_size]
 
             # Load pickle files and postprocess in parallel
             domain = [[file_path, self.param_class_name] for file_path in file_list]
@@ -135,7 +135,7 @@ class DataGenerator(object):
                 else:
                     filtered_res_list.append(res)
 
-            res_list = res_list[: -self.batch_size] + filtered_res_list
+            res_list = res_list[: -len(file_list)] + filtered_res_list
             curr_index += self.batch_size
 
             # if you fully loop data, shuffle it
@@ -150,6 +150,7 @@ class DataGenerator(object):
 
             # if there aren't enough results to fill the batch, collect another batch and fill the gaps with it
             # where extras will be used in subsequent iterations
+            # print(len(res_list))
             if len(res_list) < self.batch_size:
                 continue
 
@@ -238,26 +239,27 @@ def evaluateFit(model, validation_gen, output=False, display=False):
     denorm_perc_errors = denorm_errors / correct_output
 
     if display:
-        filter = (
-            (1e-6 < correct_output[:, 0])
-            & (correct_output[:, 0] < 2e-6)
-            & (50000 < correct_output[:, 1])
-            & (correct_output[:, 1] < 60000)
-            & (np.radians(30) < correct_output[:, 2])
-            & (correct_output[:, 2] < np.radians(35))
-        )
+        # filter = (
+        #     (1e-6 < correct_output[:, 0])
+        #     & (correct_output[:, 0] < 2e-6)
+        #     & (50000 < correct_output[:, 1])
+        #     & (correct_output[:, 1] < 60000)
+        #     & (np.radians(30) < correct_output[:, 2])
+        #     & (correct_output[:, 2] < np.radians(35))
+        # )
 
-        if np.sum(filter):
-            data = validation_outputs[filter]
-            fig, ax = plt.subplots(2, sharey=True)
-            ax[0].plot(data[:, :, 3].T, data[:, :, 1].T)  # magnitude
-            ax[1].plot(data[:, :, 2].T, data[:, :, 1].T)
-            ax[0].set_ylabel('Height (km)')
-            ax[0].set_xlabel('Mag')
-            ax[1].set_ylabel('Height (km)')
-            ax[1].set_xlabel('velocity')
-            ax[1].legend()
-            plt.show()
+        # if np.sum(filter):
+        #     data = validation_outputs[filter]
+        #     fig, ax = plt.subplots(2, sharey=True)
+        #     ax[0].plot(data[:, :, 3].T, data[:, :, 1].T)  # magnitude
+        #     ax[1].plot(data[:, :, 2].T, data[:, :, 1].T)
+        #     ax[0].set_ylabel('Height (km)')
+        #     ax[0].set_xlabel('Mag')
+        #     ax[1].set_ylabel('Height (km)')
+        #     ax[1].set_xlabel('velocity')
+        #     ax[1].legend()
+        #     plt.show()
+
         # fig, ax = plt.subplots(2, sharey=True, sharex=True)
         # ax[0].scatter(*validation_inputs[:, [1, 7]].T, label='correct')
         # # ax[0].set_yscale('log')
@@ -274,21 +276,44 @@ def evaluateFit(model, validation_gen, output=False, display=False):
         # plt.show()
 
         i = 5
-        fig, ax = plt.subplots(2, 5)
+        fig, ax = plt.subplots(5, 5, sharex='col', sharey='row')
         log = [True, False, False, False, False, False, False, False, True, True]
-        for i in range(10):
-            min_val = min(np.min(correct_output[:, i]), np.min(pred_output[:, i])) * param_scaling[i]
-            max_val = max(np.max(correct_output[:, i]), np.max(pred_output[:, i])) * param_scaling[i]
-            ax[np.unravel_index(i, (2, 5))].set_title(param_name_list[i])
-            ax[np.unravel_index(i, (2, 5))].scatter(
-                correct_output[:, i] * param_scaling[i], pred_output[:, i] * param_scaling[i]
-            )
-            ax[np.unravel_index(i, (2, 5))].plot([min_val, max_val], [min_val, max_val])
-            ax[np.unravel_index(i, (2, 5))].set_ylabel('Predicted')
-            ax[np.unravel_index(i, (2, 5))].set_xlabel('Correct ' + param_unit[i])
-            if log[i]:
-                ax[np.unravel_index(i, (2, 5))].set_yscale('log')
-                ax[np.unravel_index(i, (2, 5))].set_xscale('log')
+        for i in range(5):
+            for j in range(5):
+                # ax[j, i].set_title(param_name_list[i])
+                ax[j, i].scatter(
+                    correct_output[:, i] * param_scaling[i], pred_output[:, j] * param_scaling[j]
+                )
+                ax[j, i].plot(
+                    [
+                        getattr(camera_param, camera_param.param_list[i]).min * param_scaling[i],
+                        getattr(camera_param, camera_param.param_list[i]).max * param_scaling[i],
+                    ],
+                    [
+                        getattr(camera_param, camera_param.param_list[j]).min * param_scaling[j],
+                        getattr(camera_param, camera_param.param_list[j]).max * param_scaling[j],
+                    ],
+                )
+                if i == 0:
+                    ax[j, i].set_ylabel(f'Predicted {param_name_list[j]} ' + param_unit[j])
+                if j == len(ax) - 1:
+                    ax[j, i].set_xlabel(f'Correct {param_name_list[i]} ' + param_unit[i])
+                if log[j]:
+                    ax[j, i].set_yscale('log')
+                if log[i]:
+                    ax[j, i].set_xscale('log')
+        plt.subplots_adjust(wspace=0, hspace=0)
+        plt.show()
+
+        meteor_err = np.sqrt(np.sum(norm_errors ** 2, axis=1))
+        plt.scatter(
+            correct_output[:, 3] * param_scaling[3],
+            correct_output[:, 4] * param_scaling[4],
+            c=meteor_err / np.max(meteor_err),
+        )
+        plt.xlabel('Density (kg/m3)')
+        plt.ylabel('Ablation coeffient (kg/MJ)')
+        plt.colorbar()
         plt.show()
 
         # fig, ax = plt.subplots(len(denorm_errors.T), sharex=True, sharey=True)
