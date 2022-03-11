@@ -214,7 +214,7 @@ def loadModel(file_path, model_file='model.json', weights_file='model.h5'):
 def evaluateFit(model, validation_gen, output=False, display=False):
     param_name_list = ["M0", "V0", "ZC", "DENS", "ABL", "ERHT", "ERCO", "ER_S", "ERMm", "ERMM"]
     param_unit = ['(kg)', '(km/s)', '(deg)', '(kg/m3)', '(kg/MJ)', '(km)', '(kg/MJ)', '', '(kg)', '(kg)']
-    param_scaling = [1, 1 / 1000, 180 / np.pi, 1, 1, 1 / 1000, 1, 1, 1, 1]
+    param_scaling = np.array([1, 1 / 1000, 180 / np.pi, 1, 1, 1 / 1000, 1, 1, 1, 1])
 
     # Generate validation data
     validation_data = next(validation_gen)
@@ -276,34 +276,52 @@ def evaluateFit(model, validation_gen, output=False, display=False):
         # plt.show()
 
         i = 5
-        fig, ax = plt.subplots(5, 5, sharex='col', sharey='row')
         log = [True, False, False, False, False, False, False, False, True, True]
-        for i in range(5):
-            for j in range(5):
-                # ax[j, i].set_title(param_name_list[i])
-                ax[j, i].scatter(
-                    correct_output[:, i] * param_scaling[i], pred_output[:, j] * param_scaling[j]
-                )
-                ax[j, i].plot(
-                    [
-                        getattr(camera_param, camera_param.param_list[i]).min * param_scaling[i],
-                        getattr(camera_param, camera_param.param_list[i]).max * param_scaling[i],
-                    ],
-                    [
-                        getattr(camera_param, camera_param.param_list[j]).min * param_scaling[j],
-                        getattr(camera_param, camera_param.param_list[j]).max * param_scaling[j],
-                    ],
-                )
-                if i == 0:
-                    ax[j, i].set_ylabel(f'Predicted {param_name_list[j]} ' + param_unit[j])
-                if j == len(ax) - 1:
-                    ax[j, i].set_xlabel(f'Correct {param_name_list[i]} ' + param_unit[i])
-                if log[j]:
-                    ax[j, i].set_yscale('log')
-                if log[i]:
-                    ax[j, i].set_xscale('log')
-        plt.subplots_adjust(wspace=0, hspace=0)
-        plt.show()
+        scaled_corr = correct_output * param_scaling
+        scaled_pred = pred_output * param_scaling
+
+        def correlationPlot(X, Y, log, param_name_list, param_unit, param_pretext):
+            fig, ax = plt.subplots(5, 5, sharex='col', sharey='row')
+            for i in range(5):
+                for j in range(5):
+                    # ax[j, i].set_title(param_name_list[i])
+                    x = X[:, i]
+                    y = Y[:, j]
+
+                    if log[j]:
+                        ax[j, i].set_yscale('log')
+                        ybins = np.logspace(np.log10(np.min(y)), np.log10(np.max(y)), 51)
+                    else:
+                        ybins = np.linspace(np.min(y), np.max(y), 51)
+
+                    if log[i]:
+                        ax[j, i].set_xscale('log')
+                        xbins = np.logspace(np.log10(np.min(x)), np.log10(np.max(x)), 50)
+                    else:
+                        xbins = np.linspace(np.min(x), np.max(x), 50)
+
+                    counts, _, _ = np.histogram2d(x, y, bins=(xbins, ybins))
+                    ax[j, i].pcolormesh(xbins, ybins, counts.T)
+                    # ax[j, i].plot(
+                    #     [
+                    #         getattr(camera_param, camera_param.param_list[i]).min * param_scaling[i],
+                    #         getattr(camera_param, camera_param.param_list[i]).max * param_scaling[i],
+                    #     ],
+                    #     [
+                    #         getattr(camera_param, camera_param.param_list[j]).min * param_scaling[j],
+                    #         getattr(camera_param, camera_param.param_list[j]).max * param_scaling[j],
+                    #     ],
+                    # )
+                    if i == 0:
+                        ax[j, i].set_ylabel(f'{param_pretext[1]} {param_name_list[j]} ' + param_unit[j])
+                    if j == len(ax) - 1:
+                        ax[j, i].set_xlabel(f'{param_pretext[0]} {param_name_list[i]} ' + param_unit[i])
+
+            plt.subplots_adjust(wspace=0, hspace=0)
+            plt.show()
+
+        correlationPlot(scaled_corr, scaled_pred, log, param_name_list, param_unit, ['Correct', 'Predicted'])
+        correlationPlot(scaled_pred, scaled_pred, log, param_name_list, param_unit, ['', ''])
 
         meteor_err = np.sqrt(np.sum(norm_errors ** 2, axis=1))
         plt.scatter(
