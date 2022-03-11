@@ -800,7 +800,9 @@ def saveCleanData(output_dir: str, random_seed: int, erosion_on: bool = True, fi
     # print("Running:", erosion_cont.file_name)
 
     # Run the simulation and save results
+    t1 = time.perf_counter()
     erosion_cont.runSimulation()
+    print(time.perf_counter() - t1)
 
 
 # def generateErosionSim(
@@ -941,12 +943,14 @@ if __name__ == "__main__":
 
     # Generate simulations using multiprocessing
     input_list = [[cml_args.output_dir, np.random.randint(0, 2 ** 31 - 1)] for _ in range(cml_args.nsims)]
+    t1 = time.perf_counter()
     results_list = domainParallelizer(
         input_list,
         saveCleanData,
         display=True,
         kwarg_dict={'erosion_on': not cml_args.noerosion, 'fixed': cml_args.fixed},
     )
+    print('-', time.perf_counter() - t1)
 
     # # Save the list of simulations that passed the criteria to disk
     # saveProcessedList(

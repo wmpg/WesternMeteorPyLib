@@ -238,6 +238,25 @@ def evaluateFit(model, validation_gen, output=False, display=False):
     denorm_perc_errors = denorm_errors / correct_output
 
     if display:
+        filter = (
+            (1e-6 < correct_output[:, 0])
+            & (correct_output[:, 0] < 2e-6)
+            & (50000 < correct_output[:, 1])
+            & (correct_output[:, 1] < 60000)
+            & (np.radians(30) < correct_output[:, 2])
+            & (correct_output[:, 2] < np.radians(35))
+        )
+
+        if np.sum(filter):
+            data = validation_outputs[filter]
+            fig, ax = plt.subplots(2, sharey=True)
+            ax[0].plot(data[:, :, 3].T, data[:, :, 1].T)  # magnitude
+            ax[1].plot(np.diff(data[:, :, 2].T, axis=0), data[:, :, 1].T[:-1])
+            ax[0].set_ylabel('Height (km)')
+            ax[0].set_xlabel('Mag')
+            ax[1].set_ylabel('Height (km)')
+            ax[1].set_xlabel('velocity')
+            plt.show()
         # fig, ax = plt.subplots(2, sharey=True, sharex=True)
         # ax[0].scatter(*validation_inputs[:, [1, 7]].T, label='correct')
         # # ax[0].set_yscale('log')
@@ -270,13 +289,14 @@ def evaluateFit(model, validation_gen, output=False, display=False):
                 ax[np.unravel_index(i, (2, 5))].set_yscale('log')
                 ax[np.unravel_index(i, (2, 5))].set_xscale('log')
         plt.show()
-        fig, ax = plt.subplots(len(denorm_errors.T), sharex=True, sharey=True)
-        for a, values, label in zip(ax, norm_errors.T, param_name_list):
-            a.hist(values, bins='auto', label=label)
-            a.legend(loc='upper right')
-        # a.set_yscale('log')
-        a.set_xlim([0, 1])
-        plt.show()
+
+        # fig, ax = plt.subplots(len(denorm_errors.T), sharex=True, sharey=True)
+        # for a, values, label in zip(ax, norm_errors.T, param_name_list):
+        #     a.hist(values, bins='auto', label=label)
+        #     a.legend(loc='upper right')
+        # # a.set_yscale('log')
+        # a.set_xlim([0, 1])
+        # plt.show()
 
     # Compute mean absolute percentage error for every model parameter
     percent_norm_errors = 100 * np.mean(norm_errors, axis=0)
