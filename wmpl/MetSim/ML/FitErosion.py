@@ -250,8 +250,8 @@ def evaluateFit(model, validation_gen, output=False, display=False):
         if np.sum(filter):
             data = validation_outputs[filter]
             fig, ax = plt.subplots(2, sharey=True)
-            ax[0].plot(data[:, :, 3].T, data[:, :, 1].T, label=correct_output[filter][3:5])  # magnitude
-            ax[1].plot(data[:, :, 2].T, data[:, :, 1].T, label=correct_output[filter][3:5])
+            ax[0].plot(data[:, :, 3].T, data[:, :, 1].T)  # magnitude
+            ax[1].plot(data[:, :, 2].T, data[:, :, 1].T)
             ax[0].set_ylabel('Height (km)')
             ax[0].set_xlabel('Mag')
             ax[1].set_ylabel('Height (km)')
