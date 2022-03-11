@@ -146,11 +146,11 @@ class PhysicalParameters:
         ## Assumes no change in erosion once it starts!
 
         # Erosion height range
-        self.erosion_height_start = MetParam(70000, 130000, default=0)
+        self.erosion_height_start = MetParam(70000, 130000, default=100000)
         self.param_list.append("erosion_height_start")
 
         # Erosion coefficient (s^2/m^2)
-        self.erosion_coeff = MetParam(0.0, 1.0 / 1e6, default=0)
+        self.erosion_coeff = MetParam(0.0, 1.0 / 1e6, default=0.3 / 1e6)
         self.param_list.append("erosion_coeff")
 
         # Mass index
