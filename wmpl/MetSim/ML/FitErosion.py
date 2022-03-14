@@ -542,10 +542,10 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
 
     input = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 4))
     cnn = keras.layers.Conv1D(filters=64, kernel_size=10, activation='relu')(input)
-    # cnn = keras.layers.Conv1D(filters=64, kernel_size=4, activation='relu')(cnn)
-    # cnn = keras.layers.Conv1D(filters=64, kernel_size=4, activation='relu')(cnn)
-    # cnn = keras.layers.Conv1D(filters=64, kernel_size=4, activation='relu')(cnn)
-    # cnn = keras.layers.Conv1D(filters=64, kernel_size=4, activation='relu')(cnn)
+    cnn = keras.layers.Conv1D(filters=64, kernel_size=4, activation='relu')(cnn)
+    cnn = keras.layers.Conv1D(filters=64, kernel_size=4, activation='relu')(cnn)
+    cnn = keras.layers.Conv1D(filters=64, kernel_size=4, activation='relu')(cnn)
+    cnn = keras.layers.Conv1D(filters=64, kernel_size=4, activation='relu')(cnn)
     cnn = keras.layers.MaxPooling1D(pool_size=2)(cnn)
     cnn = keras.layers.Flatten()(cnn)
 
@@ -575,7 +575,7 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
         return K.sum(K.square(y_true - y_pred) * weights / K.sum(weights), axis=-1)
 
     # Compile the model
-    model.compile(optimizer='adam', loss='mse')
+    model.compile(optimizer='adam', loss=loss_fn)
 
     # Save the model to disk BEFORE fitting, so that it plus the checkpoint will have all information
     model_json = model.to_json()
