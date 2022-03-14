@@ -125,17 +125,17 @@ class DataGenerator(object):
             domain = [[file_path, self.param_class_name] for file_path in file_list]
 
             # Postprocess the data in parallel
-            res_list += domainParallelizer(domain, dataFunction)
+            new_res = domainParallelizer(domain, dataFunction)
 
             filtered_res_list = []
             # discard bad results
-            for i, res in enumerate(res_list[-len(file_list) :]):
+            for i, res in enumerate(new_res):
                 if res is None:
                     to_delete.append(curr_index + i)
                 else:
                     filtered_res_list.append(res)
 
-            res_list = res_list[: -len(file_list)] + filtered_res_list
+            res_list += filtered_res_list
             curr_index += self.batch_size
 
             # if you fully loop data, shuffle it
@@ -289,6 +289,30 @@ def evaluateFit(model, validation_gen, output=False, display=False):
             ax[1].set_xlabel('velocity')
             ax[1].legend()
             plt.show()
+
+        # (100, 10) (100, 256, 4)
+        print(pred_norm_params.shape, validation_outputs.shape)
+        dist_mat = scipy.spatial.distance.cdist(pred_norm_params, pred_norm_params)  # (100, 100)
+        print(np.sum(dist_mat == 0))
+        dist_mat = dist_mat[~np.eye(dist_mat.shape[0], dtype=bool)].reshape(dist_mat.shape[0], -1)
+        print(dist_mat)
+        closest_points = np.argpartition(dist_mat, 10, axis=1)[:, 1:10]  # (100, 4)
+        print(closest_points)
+        min_dist = dist_mat[np.arange(dist_mat.shape[0])[:, None], closest_points]  # (100, 4)
+        print(min_dist)
+        # (4, 100, 256, 4) - (100, 256, 4)
+        min_dist_error = np.sum((validation_outputs[closest_points.T] - validation_outputs) ** 2, axis=2)[
+            ..., 2
+        ].T  # (100, 4)
+
+        plt.scatter(
+            correct_output[:, 3],  # + np.random.normal(scale=100, size=correct_output.shape[:1]),
+            correct_output[:, 4],
+            c=np.mean(min_dist_error, axis=1),
+        )
+        plt.colorbar()
+        plt.show()
+        # dist_mat[np.arange(dist_mat.shape[0])[:,None],
 
         plt.scatter(np.sum(validation_outputs[:, :, 2] > 0, axis=1), meteor_err / np.max(meteor_err))
         plt.xlabel('Number of magnitude points')
@@ -542,11 +566,15 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
 
     input = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 4))
     cnn = keras.layers.Conv1D(filters=64, kernel_size=10, activation='relu')(input)
-    cnn = keras.layers.Conv1D(filters=64, kernel_size=4, activation='relu')(cnn)
-    cnn = keras.layers.Conv1D(filters=64, kernel_size=4, activation='relu')(cnn)
-    cnn = keras.layers.Conv1D(filters=64, kernel_size=4, activation='relu')(cnn)
-    cnn = keras.layers.Conv1D(filters=64, kernel_size=4, activation='relu')(cnn)
-    cnn = keras.layers.MaxPooling1D(pool_size=2)(cnn)
+    cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
+    cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
+    cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
+    cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
+    cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
+    cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
+    cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
+    cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
+    cnn = keras.layers.MaxPooling1D(pool_size=5)(cnn)
     cnn = keras.layers.Flatten()(cnn)
 
     # merge input models
@@ -565,6 +593,8 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
 
     # Tie inputs together
     model = keras.models.Model(inputs=input, outputs=output)
+    # model.summary()
+    # raise Exception('hey')
 
     def loss_fn(y_true, y_pred):
         if fit_param:
