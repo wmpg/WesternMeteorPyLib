@@ -240,12 +240,12 @@ def evaluateFit(model, validation_gen, output=False, display=False):
 
     if display:
         filter = (correct_output[:, 3] < 500) & (correct_output[:, 4] < 2e-7)
-        meteor_err = np.sqrt(np.sum(norm_errors ** 2, axis=1))
+        print(norm_errors.shape)
+        meteor_err = np.sqrt(np.sum(norm_errors[:, :5] ** 2, axis=1))
 
         if np.sum(filter):
             data = validation_outputs[filter]
             fig, ax = plt.subplots(2, sharey=True)
-            print(data.shape, meteor_err[filter].shape)
             ax[0].scatter(
                 data[:, :, 3].T,
                 data[:, :, 1].T,
@@ -262,6 +262,11 @@ def evaluateFit(model, validation_gen, output=False, display=False):
             ax[1].set_xlabel('velocity')
             ax[1].legend()
             plt.show()
+
+        plt.scatter(np.sum(validation_outputs[:, :, 2] > 0, axis=1), meteor_err / np.max(meteor_err))
+        plt.xlabel('Number of magnitude points')
+        plt.ylabel('Error')
+        plt.show()
 
         # fig, ax = plt.subplots(2, sharey=True, sharex=True)
         # ax[0].scatter(*validation_inputs[:, [1, 7]].T, label='correct')
