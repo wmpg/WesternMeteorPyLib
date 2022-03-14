@@ -239,26 +239,29 @@ def evaluateFit(model, validation_gen, output=False, display=False):
     denorm_perc_errors = denorm_errors / correct_output
 
     if display:
-        # filter = (
-        #     (1e-6 < correct_output[:, 0])
-        #     & (correct_output[:, 0] < 2e-6)
-        #     & (50000 < correct_output[:, 1])
-        #     & (correct_output[:, 1] < 60000)
-        #     & (np.radians(30) < correct_output[:, 2])
-        #     & (correct_output[:, 2] < np.radians(35))
-        # )
+        filter = (correct_output[:, 3] < 500) & (correct_output[:, 4] < 2e-7)
+        meteor_err = np.sqrt(np.sum(norm_errors ** 2, axis=1))
 
-        # if np.sum(filter):
-        #     data = validation_outputs[filter]
-        #     fig, ax = plt.subplots(2, sharey=True)
-        #     ax[0].plot(data[:, :, 3].T, data[:, :, 1].T)  # magnitude
-        #     ax[1].plot(data[:, :, 2].T, data[:, :, 1].T)
-        #     ax[0].set_ylabel('Height (km)')
-        #     ax[0].set_xlabel('Mag')
-        #     ax[1].set_ylabel('Height (km)')
-        #     ax[1].set_xlabel('velocity')
-        #     ax[1].legend()
-        #     plt.show()
+        if np.sum(filter):
+            data = validation_outputs[filter]
+            fig, ax = plt.subplots(2, sharey=True)
+            print(data.shape, meteor_err[filter].shape)
+            ax[0].scatter(
+                data[:, :, 3].T,
+                data[:, :, 1].T,
+                c=np.stack((meteor_err[filter] / np.max(meteor_err[filter]),) * data.shape[1]),
+            )  # magnitude
+            ax[1].scatter(
+                data[:, :, 2].T,
+                data[:, :, 1].T,
+                c=np.stack((meteor_err[filter] / np.max(meteor_err[filter]),) * data.shape[1]),
+            )
+            ax[0].set_ylabel('Height (km)')
+            ax[0].set_xlabel('Mag')
+            ax[1].set_ylabel('Height (km)')
+            ax[1].set_xlabel('velocity')
+            ax[1].legend()
+            plt.show()
 
         # fig, ax = plt.subplots(2, sharey=True, sharex=True)
         # ax[0].scatter(*validation_inputs[:, [1, 7]].T, label='correct')
@@ -322,8 +325,8 @@ def evaluateFit(model, validation_gen, output=False, display=False):
 
         correlationPlot(scaled_corr, scaled_pred, log, param_name_list, param_unit, ['Correct', 'Predicted'])
         correlationPlot(scaled_pred, scaled_pred, log, param_name_list, param_unit, ['', ''])
+        correlationPlot(scaled_corr, scaled_corr, log, param_name_list, param_unit, ['', ''])
 
-        meteor_err = np.sqrt(np.sum(norm_errors ** 2, axis=1))
         plt.scatter(
             correct_output[:, 3] * param_scaling[3],
             correct_output[:, 4] * param_scaling[4],
