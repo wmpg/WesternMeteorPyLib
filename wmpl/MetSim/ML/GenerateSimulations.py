@@ -633,8 +633,8 @@ def extractSimData(
     )
 
     # if the peak magnitude is dimmer than the faintest expected peak magnitude, discard it
-    if np.min(sim.simulation_results.abs_magnitude) >= params.peak_mag_faintest:
-        return None
+    # if np.min(sim.simulation_results.abs_magnitude) >= params.peak_mag_faintest:
+    #     return None
 
     # zenith angle above 70 deg is bad
     if sim.params.zenith_angle.val <= np.radians(20):
@@ -671,9 +671,9 @@ def extractSimData(
     time_lim_mag_bright -= time_lim_mag_bright[0]
 
     # Check if the minimum time is satisfied
-    if np.max(time_lim_mag_bright) < min_time_visible:
-        # print('minimum time not satisfied')
-        return None
+    # if np.max(time_lim_mag_bright) < min_time_visible:
+    #     # print('minimum time not satisfied')
+    #     return None
 
     ### ###
 

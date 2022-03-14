@@ -240,24 +240,51 @@ def evaluateFit(model, validation_gen, output=False, display=False):
 
     if display:
         filter = (correct_output[:, 3] < 500) & (correct_output[:, 4] < 2e-7)
-        print(norm_errors.shape)
+        filter2 = (
+            (correct_output[:, 3] > 1800) & (correct_output[:, 3] < 2400) & (correct_output[:, 4] < 4e-7)
+        )
+
         meteor_err = np.sqrt(np.sum(norm_errors[:, :5] ** 2, axis=1))
 
         if np.sum(filter):
             data = validation_outputs[filter]
             fig, ax = plt.subplots(2, sharey=True)
-            ax[0].scatter(
+            scat1 = ax[0].scatter(
                 data[:, :, 3].T,
                 data[:, :, 1].T,
                 c=np.stack((meteor_err[filter] / np.max(meteor_err[filter]),) * data.shape[1]),
             )  # magnitude
-            ax[1].scatter(
-                data[:, :, 2].T,
-                data[:, :, 1].T,
-                c=np.stack((meteor_err[filter] / np.max(meteor_err[filter]),) * data.shape[1]),
+            scat2 = ax[1].scatter(
+                np.diff(data[:, :, 2].T, axis=0),
+                data[:, :, 1].T[:-1],
+                c=np.stack((meteor_err[filter] / np.max(meteor_err[filter]),) * data.shape[1])[:-1],
             )
             ax[0].set_ylabel('Height (km)')
             ax[0].set_xlabel('Mag')
+            plt.colorbar(scat1, ax=ax[0])
+            plt.colorbar(scat2, ax=ax[1])
+            ax[1].set_ylabel('Height (km)')
+            ax[1].set_xlabel('velocity')
+            ax[1].legend()
+            plt.show()
+
+        if np.sum(filter2):
+            data = validation_outputs[filter2]
+            fig, ax = plt.subplots(2, sharey=True)
+            scat1 = ax[0].scatter(
+                data[:, :, 3].T,
+                data[:, :, 1].T,
+                c=np.stack((meteor_err / np.max(meteor_err),) * data.shape[1])[:, filter2],
+            )  # magnitude
+            scat2 = ax[1].scatter(
+                np.diff(data[:, :, 2].T, axis=0),
+                data[:, :, 1].T[:-1],
+                c=np.stack((meteor_err / np.max(meteor_err),) * data.shape[1])[:, filter2][:-1],
+            )
+            ax[0].set_ylabel('Height (km)')
+            ax[0].set_xlabel('Mag')
+            plt.colorbar(scat1, ax=ax[0])
+            plt.colorbar(scat2, ax=ax[1])
             ax[1].set_ylabel('Height (km)')
             ax[1].set_xlabel('velocity')
             ax[1].legend()
@@ -330,12 +357,10 @@ def evaluateFit(model, validation_gen, output=False, display=False):
 
         correlationPlot(scaled_corr, scaled_pred, log, param_name_list, param_unit, ['Correct', 'Predicted'])
         correlationPlot(scaled_pred, scaled_pred, log, param_name_list, param_unit, ['', ''])
-        correlationPlot(scaled_corr, scaled_corr, log, param_name_list, param_unit, ['', ''])
+        # correlationPlot(scaled_corr, scaled_corr, log, param_name_list, param_unit, ['', ''])
 
         plt.scatter(
-            correct_output[:, 3] * param_scaling[3],
-            correct_output[:, 4] * param_scaling[4],
-            c=meteor_err / np.max(meteor_err),
+            scaled_corr[:, 3], scaled_corr[:, 4], c=(meteor_err / np.max(meteor_err)),
         )
         plt.xlabel('Density (kg/m3)')
         plt.ylabel('Ablation coeffient (kg/MJ)')
