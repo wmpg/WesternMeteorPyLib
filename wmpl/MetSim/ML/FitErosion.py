@@ -327,11 +327,23 @@ def evaluateFit(model, validation_gen, output=False, display=False):
             )
             ** 2
         ).T
+        peak_height = validation_outputs[
+            np.arange(validation_outputs.shape[0]), np.argmax(validation_outputs[..., 2], axis=-1), 1,
+        ].T
+        peak_mag = np.max(validation_outputs[..., 2], axis=-1)
 
+        plt.subplot(1, 2, 1)
         plt.scatter(
             correct_output[:, 3],  # + np.random.normal(scale=100, size=correct_output.shape[:1]),
             correct_output[:, 4],
-            c=np.mean(min_dist_error / min_dist, axis=1),
+            c=peak_height,
+        )
+        plt.colorbar()
+        plt.subplot(1, 2, 2)
+        plt.scatter(
+            correct_output[:, 3],  # + np.random.normal(scale=100, size=correct_output.shape[:1]),
+            correct_output[:, 4],
+            c=peak_mag,
         )
         plt.colorbar()
         plt.show()
