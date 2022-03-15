@@ -522,8 +522,10 @@ class ErosionSimContainer:
         vel_folder_path = os.path.join(self.output_dir, vel_folder)
 
         # Create the velocity folder if it doesn't already exist
-        if not os.path.isdir(vel_folder_path):
+        try:
             os.makedirs(vel_folder_path)
+        except FileExistsError:
+            pass
 
         # Extract the density part
         dens = 100 * int(float(split_file[4].strip("rho")) / 100)
@@ -533,9 +535,10 @@ class ErosionSimContainer:
         dens_folder_path = os.path.join(vel_folder_path, dens_folder)
 
         # Make the density folder
-        if not os.path.isdir(dens_folder_path):
+        try:
             os.makedirs(dens_folder_path)
-
+        except FileExistsError:
+            pass
         ###
 
         # # Save results as a JSON file
