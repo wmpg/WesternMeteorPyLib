@@ -239,12 +239,13 @@ def evaluateFit(model, validation_gen, output=False, display=False):
     denorm_perc_errors = denorm_errors / correct_output
 
     if display:
+        meteor_err = np.sqrt(np.sum(norm_errors[:, :5] ** 2, axis=1))
+        rel_error = meteor_err / np.max(meteor_err)
+
         filter = (correct_output[:, 3] < 500) & (correct_output[:, 4] < 2e-7)
         filter2 = (
             (correct_output[:, 3] > 1800) & (correct_output[:, 3] < 2400) & (correct_output[:, 4] < 4e-7)
-        )
-
-        meteor_err = np.sqrt(np.sum(norm_errors[:, :5] ** 2, axis=1))
+        ) & (rel_error > 0.5)
 
         if np.sum(filter):
             data = validation_outputs[filter]
@@ -252,12 +253,16 @@ def evaluateFit(model, validation_gen, output=False, display=False):
             scat1 = ax[0].scatter(
                 data[:, :, 3].T,
                 data[:, :, 1].T,
-                c=np.stack((meteor_err[filter] / np.max(meteor_err[filter]),) * data.shape[1]),
+                c=np.stack((rel_error[filter],) * data.shape[1]),
+                s=1,
+                alpha=0.4,
             )  # magnitude
             scat2 = ax[1].scatter(
                 np.diff(data[:, :, 2].T, axis=0),
                 data[:, :, 1].T[:-1],
-                c=np.stack((meteor_err[filter] / np.max(meteor_err[filter]),) * data.shape[1])[:-1],
+                c=np.stack((rel_error[filter],) * data.shape[1])[:-1],
+                s=1,
+                alpha=0.3,
             )
             ax[0].set_ylabel('Height (km)')
             ax[0].set_xlabel('Mag')
@@ -274,12 +279,16 @@ def evaluateFit(model, validation_gen, output=False, display=False):
             scat1 = ax[0].scatter(
                 data[:, :, 3].T,
                 data[:, :, 1].T,
-                c=np.stack((meteor_err / np.max(meteor_err),) * data.shape[1])[:, filter2],
+                c=np.stack((rel_error,) * data.shape[1])[:, filter2],
+                s=1,
+                alpha=0.3,
             )  # magnitude
             scat2 = ax[1].scatter(
                 np.diff(data[:, :, 2].T, axis=0),
                 data[:, :, 1].T[:-1],
-                c=np.stack((meteor_err / np.max(meteor_err),) * data.shape[1])[:, filter2][:-1],
+                c=np.stack((rel_error,) * data.shape[1])[:, filter2][:-1],
+                s=1,
+                alpha=0.3,
             )
             ax[0].set_ylabel('Height (km)')
             ax[0].set_xlabel('Mag')
@@ -301,20 +310,20 @@ def evaluateFit(model, validation_gen, output=False, display=False):
         min_dist = dist_mat[np.arange(dist_mat.shape[0])[:, None], closest_points]  # (100, 4)
         print(min_dist)
         # (4, 100, 256, 4) - (100, 256, 4)
-        min_dist_error = np.sum((validation_outputs[closest_points.T] - validation_outputs) ** 2, axis=2)[
-            ..., 2
-        ].T  # (100, 4)
+        min_dist_error = np.sqrt(
+            np.sum((validation_outputs[closest_points.T] - validation_outputs) ** 2, axis=2)[..., 2].T
+        )  # (100, 4)
 
         plt.scatter(
             correct_output[:, 3],  # + np.random.normal(scale=100, size=correct_output.shape[:1]),
             correct_output[:, 4],
-            c=np.mean(min_dist_error, axis=1),
+            c=np.mean(min_dist_error / min_dist, axis=1),
         )
         plt.colorbar()
         plt.show()
         # dist_mat[np.arange(dist_mat.shape[0])[:,None],
 
-        plt.scatter(np.sum(validation_outputs[:, :, 2] > 0, axis=1), meteor_err / np.max(meteor_err))
+        plt.scatter(np.sum(validation_outputs[:, :, 2] > 0, axis=1), rel_error)
         plt.xlabel('Number of magnitude points')
         plt.ylabel('Error')
         plt.show()
@@ -384,7 +393,7 @@ def evaluateFit(model, validation_gen, output=False, display=False):
         # correlationPlot(scaled_corr, scaled_corr, log, param_name_list, param_unit, ['', ''])
 
         plt.scatter(
-            scaled_corr[:, 3], scaled_corr[:, 4], c=(meteor_err / np.max(meteor_err)),
+            scaled_corr[:, 3], scaled_corr[:, 4], c=rel_error,
         )
         plt.xlabel('Density (kg/m3)')
         plt.ylabel('Ablation coeffient (kg/MJ)')
