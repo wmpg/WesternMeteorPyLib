@@ -211,7 +211,7 @@ def loadModel(file_path, model_file='model.json', weights_file='model.h5'):
         return loaded_model
 
 
-def evaluateFit(model, validation_gen, output=False, display=False):
+def evaluateFit(model, validation_gen, output=False, display=True):
     param_name_list = ["M0", "V0", "ZC", "DENS", "ABL", "ERHT", "ERCO", "ER_S", "ERMm", "ERMM"]
     param_unit = ['(kg)', '(km/s)', '(deg)', '(kg/m3)', '(kg/MJ)', '(km)', '(kg/MJ)', '', '(kg)', '(kg)']
     param_scaling = np.array([1, 1 / 1000, 180 / np.pi, 1, 1, 1 / 1000, 1, 1, 1, 1])
@@ -239,110 +239,110 @@ def evaluateFit(model, validation_gen, output=False, display=False):
     denorm_perc_errors = denorm_errors / correct_output
 
     if display:
-        meteor_err = np.sqrt(np.sum(norm_errors[:, :5] ** 2, axis=1))
-        rel_error = meteor_err / np.max(meteor_err)
+        # meteor_err = np.sqrt(np.sum(norm_errors[:, :5] ** 2, axis=1))
+        # rel_error = meteor_err / np.max(meteor_err)
 
-        filter = (correct_output[:, 3] < 500) & (correct_output[:, 4] < 2e-7)
-        filter2 = (
-            (correct_output[:, 3] > 1800) & (correct_output[:, 3] < 2400) & (correct_output[:, 4] < 4e-7)
-        ) & (rel_error > 0.5)
+        # filter = (correct_output[:, 3] < 500) & (correct_output[:, 4] < 2e-7)
+        # filter2 = (
+        #     (correct_output[:, 3] > 1800) & (correct_output[:, 3] < 2400) & (correct_output[:, 4] < 4e-7)
+        # ) & (rel_error > 0.5)
 
-        if np.sum(filter):
-            data = validation_outputs[filter]
-            fig, ax = plt.subplots(2, sharey=True)
-            scat1 = ax[0].scatter(
-                data[:, :, 3].T,
-                data[:, :, 1].T,
-                c=np.stack((rel_error[filter],) * data.shape[1]),
-                s=1,
-                alpha=0.4,
-            )  # magnitude
-            scat2 = ax[1].scatter(
-                np.diff(data[:, :, 2].T, axis=0),
-                data[:, :, 1].T[:-1],
-                c=np.stack((rel_error[filter],) * data.shape[1])[:-1],
-                s=1,
-                alpha=0.3,
-            )
-            ax[0].set_ylabel('Height (km)')
-            ax[0].set_xlabel('Mag')
-            plt.colorbar(scat1, ax=ax[0])
-            plt.colorbar(scat2, ax=ax[1])
-            ax[1].set_ylabel('Height (km)')
-            ax[1].set_xlabel('velocity')
-            ax[1].legend()
-            plt.show()
+        # if np.sum(filter):
+        #     data = validation_outputs[filter]
+        #     fig, ax = plt.subplots(2, sharey=True)
+        #     scat1 = ax[0].scatter(
+        #         data[:, :, 3].T,
+        #         data[:, :, 1].T,
+        #         c=np.stack((rel_error[filter],) * data.shape[1]),
+        #         s=1,
+        #         alpha=0.4,
+        #     )  # magnitude
+        #     scat2 = ax[1].scatter(
+        #         np.diff(data[:, :, 2].T, axis=0),
+        #         data[:, :, 1].T[:-1],
+        #         c=np.stack((rel_error[filter],) * data.shape[1])[:-1],
+        #         s=1,
+        #         alpha=0.3,
+        #     )
+        #     ax[0].set_ylabel('Height (km)')
+        #     ax[0].set_xlabel('Mag')
+        #     plt.colorbar(scat1, ax=ax[0])
+        #     plt.colorbar(scat2, ax=ax[1])
+        #     ax[1].set_ylabel('Height (km)')
+        #     ax[1].set_xlabel('velocity')
+        #     ax[1].legend()
+        #     plt.show()
 
-        if np.sum(filter2):
-            data = validation_outputs[filter2]
-            fig, ax = plt.subplots(2, sharey=True)
-            scat1 = ax[0].scatter(
-                data[:, :, 3].T,
-                data[:, :, 1].T,
-                c=np.stack((rel_error,) * data.shape[1])[:, filter2],
-                s=1,
-                alpha=0.3,
-            )  # magnitude
-            scat2 = ax[1].scatter(
-                np.diff(data[:, :, 2].T, axis=0),
-                data[:, :, 1].T[:-1],
-                c=np.stack((rel_error,) * data.shape[1])[:, filter2][:-1],
-                s=1,
-                alpha=0.3,
-            )
-            ax[0].set_ylabel('Height (km)')
-            ax[0].set_xlabel('Mag')
-            plt.colorbar(scat1, ax=ax[0])
-            plt.colorbar(scat2, ax=ax[1])
-            ax[1].set_ylabel('Height (km)')
-            ax[1].set_xlabel('velocity')
-            ax[1].legend()
-            plt.show()
+        # if np.sum(filter2):
+        #     data = validation_outputs[filter2]
+        #     fig, ax = plt.subplots(2, sharey=True)
+        #     scat1 = ax[0].scatter(
+        #         data[:, :, 3].T,
+        #         data[:, :, 1].T,
+        #         c=np.stack((rel_error,) * data.shape[1])[:, filter2],
+        #         s=1,
+        #         alpha=0.3,
+        #     )  # magnitude
+        #     scat2 = ax[1].scatter(
+        #         np.diff(data[:, :, 2].T, axis=0),
+        #         data[:, :, 1].T[:-1],
+        #         c=np.stack((rel_error,) * data.shape[1])[:, filter2][:-1],
+        #         s=1,
+        #         alpha=0.3,
+        #     )
+        #     ax[0].set_ylabel('Height (km)')
+        #     ax[0].set_xlabel('Mag')
+        #     plt.colorbar(scat1, ax=ax[0])
+        #     plt.colorbar(scat2, ax=ax[1])
+        #     ax[1].set_ylabel('Height (km)')
+        #     ax[1].set_xlabel('velocity')
+        #     ax[1].legend()
+        #     plt.show()
 
         # (100, 10) (100, 256, 4)
-        print(pred_norm_params.shape, validation_outputs.shape)
-        dist_mat = scipy.spatial.distance.cdist(pred_norm_params, pred_norm_params)  # (100, 100)
-        print(np.sum(dist_mat == 0))
-        dist_mat = dist_mat[~np.eye(dist_mat.shape[0], dtype=bool)].reshape(dist_mat.shape[0], -1)
-        print(dist_mat)
-        closest_points = np.argpartition(dist_mat, 10, axis=1)[:, :10]  # (100, 9)
-        print(closest_points)
-        min_dist = dist_mat[np.arange(dist_mat.shape[0])[:, None], closest_points]  # (100, 9)
-        print(min_dist)
-        closest_output_points = validation_outputs[closest_points.T]
-        # (9, 100, 256, 4) - (100, 256, 4)
-        min_dist_error = (
-            (np.max(closest_output_points[..., 2], axis=-1) - np.max(validation_outputs[..., 2], axis=-1))
-            ** 2
-            + (
-                closest_output_points[
-                    np.arange(closest_output_points.shape[0])[:, None],
-                    np.arange(closest_output_points.shape[1])[None, :],
-                    np.argmax(closest_output_points[..., 2], axis=-1),
-                    1,
-                ]
-                - validation_outputs[
-                    np.arange(validation_outputs.shape[0]), np.argmax(validation_outputs[..., 2], axis=-1), 1,
-                ]
-            )
-            ** 2
-        ).T
-        peak_height = validation_outputs[
-            np.arange(validation_outputs.shape[0]), np.argmax(validation_outputs[..., 2], axis=-1), 1,
-        ].T
-        peak_mag = np.max(validation_outputs[..., 2], axis=-1)
-        plt.scatter(
-            peak_height, peak_mag,
-        )
-        plt.xlabel('Peak height (km)')
-        plt.ylabel('Peak magnitude')
-        plt.show()
+        # print(pred_norm_params.shape, validation_outputs.shape)
+        # dist_mat = scipy.spatial.distance.cdist(pred_norm_params, pred_norm_params)  # (100, 100)
+        # print(np.sum(dist_mat == 0))
+        # dist_mat = dist_mat[~np.eye(dist_mat.shape[0], dtype=bool)].reshape(dist_mat.shape[0], -1)
+        # print(dist_mat)
+        # closest_points = np.argpartition(dist_mat, 10, axis=1)[:, :10]  # (100, 9)
+        # print(closest_points)
+        # min_dist = dist_mat[np.arange(dist_mat.shape[0])[:, None], closest_points]  # (100, 9)
+        # print(min_dist)
+        # closest_output_points = validation_outputs[closest_points.T]
+        # # (9, 100, 256, 4) - (100, 256, 4)
+        # min_dist_error = (
+        #     (np.max(closest_output_points[..., 2], axis=-1) - np.max(validation_outputs[..., 2], axis=-1))
+        #     ** 2
+        #     + (
+        #         closest_output_points[
+        #             np.arange(closest_output_points.shape[0])[:, None],
+        #             np.arange(closest_output_points.shape[1])[None, :],
+        #             np.argmax(closest_output_points[..., 2], axis=-1),
+        #             1,
+        #         ]
+        #         - validation_outputs[
+        #             np.arange(validation_outputs.shape[0]), np.argmax(validation_outputs[..., 2], axis=-1), 1,
+        #         ]
+        #     )
+        #     ** 2
+        # ).T
+        # peak_height = validation_outputs[
+        #     np.arange(validation_outputs.shape[0]), np.argmax(validation_outputs[..., 2], axis=-1), 1,
+        # ].T
+        # peak_mag = np.max(validation_outputs[..., 2], axis=-1)
+        # plt.scatter(
+        #     peak_height, peak_mag,
+        # )
+        # plt.xlabel('Peak height (km)')
+        # plt.ylabel('Peak magnitude')
+        # plt.show()
         # dist_mat[np.arange(dist_mat.shape[0])[:,None],
 
-        plt.scatter(np.sum(validation_outputs[:, :, 2] > 0, axis=1), rel_error)
-        plt.xlabel('Number of magnitude points')
-        plt.ylabel('Error')
-        plt.show()
+        # plt.scatter(np.sum(validation_outputs[:, :, 2] > 0, axis=1), rel_error)
+        # plt.xlabel('Number of magnitude points')
+        # plt.ylabel('Error')
+        # plt.show()
 
         # fig, ax = plt.subplots(2, sharey=True, sharex=True)
         # ax[0].scatter(*validation_inputs[:, [1, 7]].T, label='correct')
@@ -408,13 +408,13 @@ def evaluateFit(model, validation_gen, output=False, display=False):
         correlationPlot(scaled_pred, scaled_pred, log, param_name_list, param_unit, ['', ''])
         # correlationPlot(scaled_corr, scaled_corr, log, param_name_list, param_unit, ['', ''])
 
-        plt.scatter(
-            scaled_corr[:, 3], scaled_corr[:, 4], c=rel_error,
-        )
-        plt.xlabel('Density (kg/m3)')
-        plt.ylabel('Ablation coeffient (kg/MJ)')
-        plt.colorbar()
-        plt.show()
+        # plt.scatter(
+        #     scaled_corr[:, 3], scaled_corr[:, 4], c=rel_error,
+        # )
+        # plt.xlabel('Density (kg/m3)')
+        # plt.ylabel('Ablation coeffient (kg/MJ)')
+        # plt.colorbar()
+        # plt.show()
 
         # fig, ax = plt.subplots(len(denorm_errors.T), sharex=True, sharey=True)
         # for a, values, label in zip(ax, norm_errors.T, param_name_list):
