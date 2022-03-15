@@ -137,7 +137,7 @@ class PhysicalParameters:
         self.param_list.append("rho")
 
         # Intrinsic ablation coeff range (s^2/m^2)
-        self.sigma = MetParam(0.005 / 1e6, 0.5 / 1e6, default=0.05 / 1e6)
+        self.sigma = MetParam(0.005 / 1e6, 0.5 / 1e6, 'log10', default=0.05 / 1e6)
         self.param_list.append("sigma")
 
         ##

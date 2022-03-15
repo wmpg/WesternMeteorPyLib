@@ -305,14 +305,28 @@ def evaluateFit(model, validation_gen, output=False, display=False):
         print(np.sum(dist_mat == 0))
         dist_mat = dist_mat[~np.eye(dist_mat.shape[0], dtype=bool)].reshape(dist_mat.shape[0], -1)
         print(dist_mat)
-        closest_points = np.argpartition(dist_mat, 10, axis=1)[:, 1:10]  # (100, 4)
+        closest_points = np.argpartition(dist_mat, 10, axis=1)[:, 1:10]  # (100, 9)
         print(closest_points)
-        min_dist = dist_mat[np.arange(dist_mat.shape[0])[:, None], closest_points]  # (100, 4)
+        min_dist = dist_mat[np.arange(dist_mat.shape[0])[:, None], closest_points]  # (100, 9)
         print(min_dist)
-        # (4, 100, 256, 4) - (100, 256, 4)
-        min_dist_error = np.sqrt(
-            np.sum((validation_outputs[closest_points.T] - validation_outputs) ** 2, axis=2)[..., 2].T
-        )  # (100, 4)
+        closest_output_points = validation_outputs[closest_points.T]
+        # (9, 100, 256, 4) - (100, 256, 4)
+        min_dist_error = (
+            (np.max(closest_output_points[..., 2], axis=-1) - np.max(validation_outputs[..., 2], axis=-1))
+            ** 2
+            + (
+                closest_output_points[
+                    np.arange(closest_output_points.shape[0])[:, None],
+                    np.arange(closest_output_points.shape[1])[None, :],
+                    np.argmax(closest_output_points[..., 2], axis=-1),
+                    1,
+                ]
+                - validation_outputs[
+                    np.arange(validation_outputs.shape[0]), np.argmax(validation_outputs[..., 2], axis=-1), 1,
+                ]
+            )
+            ** 2
+        ).T
 
         plt.scatter(
             correct_output[:, 3],  # + np.random.normal(scale=100, size=correct_output.shape[:1]),
@@ -629,7 +643,7 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
         x=iter(data_gen),
         steps_per_epoch=data_gen.steps_per_epoch,
         epochs=data_gen.epochs,
-        callbacks=[ReportFitGoodness(validation_gen), model_checkpoint_callback],
+        callbacks=[ReportFitGoodness(validation_gen), model_checkpoint_callback, early_stopping_callback],
         workers=0,
         max_queue_size=1,
     )
