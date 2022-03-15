@@ -305,7 +305,7 @@ def evaluateFit(model, validation_gen, output=False, display=False):
         print(np.sum(dist_mat == 0))
         dist_mat = dist_mat[~np.eye(dist_mat.shape[0], dtype=bool)].reshape(dist_mat.shape[0], -1)
         print(dist_mat)
-        closest_points = np.argpartition(dist_mat, 10, axis=1)[:, 1:10]  # (100, 9)
+        closest_points = np.argpartition(dist_mat, 10, axis=1)[:, :10]  # (100, 9)
         print(closest_points)
         min_dist = dist_mat[np.arange(dist_mat.shape[0])[:, None], closest_points]  # (100, 9)
         print(min_dist)
@@ -331,21 +331,11 @@ def evaluateFit(model, validation_gen, output=False, display=False):
             np.arange(validation_outputs.shape[0]), np.argmax(validation_outputs[..., 2], axis=-1), 1,
         ].T
         peak_mag = np.max(validation_outputs[..., 2], axis=-1)
-
-        plt.subplot(1, 2, 1)
         plt.scatter(
-            correct_output[:, 3],  # + np.random.normal(scale=100, size=correct_output.shape[:1]),
-            correct_output[:, 4],
-            c=peak_height,
+            peak_height, peak_mag,
         )
-        plt.colorbar()
-        plt.subplot(1, 2, 2)
-        plt.scatter(
-            correct_output[:, 3],  # + np.random.normal(scale=100, size=correct_output.shape[:1]),
-            correct_output[:, 4],
-            c=peak_mag,
-        )
-        plt.colorbar()
+        plt.xlabel('Peak height (km)')
+        plt.ylabel('Peak magnitude')
         plt.show()
         # dist_mat[np.arange(dist_mat.shape[0])[:,None],
 
@@ -370,7 +360,7 @@ def evaluateFit(model, validation_gen, output=False, display=False):
         # plt.show()
 
         i = 5
-        log = [True, False, False, False, False, False, False, False, True, True]
+        log = [True, False, False, False, True, False, False, False, True, True]
         scaled_corr = correct_output * param_scaling
         scaled_pred = pred_output * param_scaling
 
