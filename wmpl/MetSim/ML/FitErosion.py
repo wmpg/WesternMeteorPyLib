@@ -41,7 +41,7 @@ def dataFunction(file_path, param_class_name):
         return None
 
     # Extract model inputs and outputs
-    return extractSimData(sim, param_class_name=param_class_name)
+    return extractSimData(sim, param_class_name=param_class_name, roi=cml_args.roi)
 
 
 class DataGenerator(object):
@@ -151,6 +151,7 @@ class DataGenerator(object):
             # if there aren't enough results to fill the batch, collect another batch and fill the gaps with it
             # where extras will be used in subsequent iterations
             # print(len(res_list))
+
             if len(res_list) < self.batch_size:
                 continue
 
@@ -211,7 +212,7 @@ def loadModel(file_path, model_file='model.json', weights_file='model.h5'):
         return loaded_model
 
 
-def evaluateFit(model, validation_gen, output=False, display=False, log=None):
+def evaluateFit(model, validation_gen, output=False, display=True, log=None):
     param_name_list = ["M0", "V0", "ZC", "DENS", "ABL", "ERHT", "ERCO", "ER_S", "ERMm", "ERMM"]
     param_unit = ['(kg)', '(km/s)', '(deg)', '(kg/m3)', '(kg/MJ)', '(km)', '(kg/MJ)', '', '(kg)', '(kg)']
     param_scaling = np.array([1, 1 / 1000, 180 / np.pi, 1, 1e6, 1 / 1000, 1e6, 1, 1, 1])
@@ -430,8 +431,7 @@ def evaluateFit(model, validation_gen, output=False, display=False, log=None):
     denorm_perc_errors_av = 100 * np.mean(denorm_perc_errors, axis=0)
     # mean minimum distance between a correct set of parameters and predicted set. The correct set
     # is the goal "uniformity", so the closest to that the predicted parameters are, the better.
-    dist = scipy.spatial.distance.cdist(validation_inputs[:, 3:5], pred_norm_params[:, 3:5])
-    dens_abl_uniformity = np.abs(np.mean(np.min(dist, axis=0)) - np.mean(np.min(dist, axis=1)))
+    dens_abl_corr = np.corrcoef(*pred_norm_params[:, 3:5].T)[0, 1]
 
     if output:
         print("Mean absolute percentage error and mean absolute error per parameter:")
@@ -439,7 +439,7 @@ def evaluateFit(model, validation_gen, output=False, display=False, log=None):
         print(str(len(percent_norm_errors) * "{:8.2f}% ").format(*percent_norm_errors))
         print(str(len(denorm_perc_errors_av) * "{:8.2f}% ").format(*denorm_perc_errors_av))
         print(str(len(param_corr) * "{:9.4f} ").format(*param_corr))
-        print(f'Density-ablation uniformity: {dens_abl_uniformity}')
+        print(f'Density-ablation correlation: {dens_abl_corr}')
 
     return percent_norm_errors
 
@@ -688,7 +688,7 @@ def fitCNNMultiHeaded(
         )
 
     # Evaluate fit quality
-    evaluateFit(model, iter(validation_gen))
+    evaluateFit(model, iter(validation_gen), output=True)
 
 
 def getFileList(folder):
@@ -760,6 +760,9 @@ if __name__ == "__main__":
         nargs=10,
         help='Providing 1 will specify whether a plot should be a log plot, 0 otherwise. Must be given '
         'when in evaluation mode.',
+    )
+    arg_parser.add_argument(
+        '--roi', type=int,
     )
     arg_parser.add_argument('--fitparam', type=int)
     # Parse the command line arguments

@@ -581,6 +581,7 @@ def extractSimData(
     param_class_name: Optional[str] = None,
     camera_params: Optional[ErosionSimParameters] = None,
     add_noise: bool = False,
+    roi: int = -1,  # remove parameter
 ) -> Optional[tuple]:
     """ Extract input parameters and model outputs from the simulation container and normalize them. 
 
@@ -641,9 +642,20 @@ def extractSimData(
     if sim.params.rho.val >= 3500:
         return None
 
-    # restricting domain to physical values
-    if sim.params.sigma.val >= 3e-7 - 2e-7 * sim.params.rho.val / 3500:
-        return None
+    # DELETE LATER
+    if roi == -1:
+        # restricting domain to physical values
+        if sim.params.sigma.val >= 3e-7 - 2e-7 * sim.params.rho.val / 3500:
+            return None
+    elif roi == 0:
+        if sim.params.sigma.val >= 2e-7 or sim.params.rho.val >= 1000:
+            return None
+    elif roi == 1:
+        if sim.params.sigma.val >= 1e-7 or sim.params.rho.val >= 2500 or sim.param.rho.val <= 1500:
+            return None
+    elif roi == 2:
+        if sim.params.sigma.val >= 1e-7 or sim.params.rho.val >= 2500:
+            return None
 
     # Fix NaN values in the simulated magnitude
     sim.simulation_results.abs_magnitude[np.isnan(sim.simulation_results.abs_magnitude)] = np.nanmax(
