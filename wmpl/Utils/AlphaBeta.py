@@ -254,7 +254,7 @@ def lagFitVelocity(time_data, lag_data, vel_data, v0):
     weights = np.ones_like(time_data)
 
     # Use robust fitting
-    res = scipy.optimize.basinhopping(_lagMinimization, p0, \
+    res = scipy.optimize.basinhopping(_lagMinimization, p0, niter=200, T=2.0,\
         minimizer_kwargs={'args':(time_data, lag_data, weights), 'method':'Nelder-Mead'})
     fit_params = res.x
 
