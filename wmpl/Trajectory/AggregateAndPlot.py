@@ -15,6 +15,7 @@ import scipy.stats
 
 
 from wmpl.Analysis.FitPopulationAndMassIndex import fitSlope, logline
+from wmpl.Trajectory.Trajectory import addTrajectoryID
 from wmpl.Utils.Math import mergeClosePoints, meanAngle, sphericalPointFromHeadingAndDistance, \
     angleBetweenSphericalCoords, generateMonthyTimeBins
 from wmpl.Utils.OSTools import mkdirP
@@ -204,8 +205,8 @@ def writeOrbitSummaryFile(dir_path, traj_list, traj_summary_file_name=TRAJ_SUMMA
     out_str =  ""
     out_str += "# Summary generated on {:s} UTC\n\r".format(str(datetime.datetime.utcnow()))
 
-    header = ["   Beginning      ", "       Beginning          ", "  IAU", " IAU", "  Sol lon ", "  App LST ", "  RAgeo  ", "  +/-  ", "  DECgeo ", "  +/-  ", " LAMgeo  ", "  +/-  ", "  BETgeo ", "  +/-  ", "   Vgeo  ", "   +/- ", " LAMhel  ", "  +/-  ", "  BEThel ", "  +/-  ", "   Vhel  ", "   +/- ", "      a    ", "  +/-  ", "     e    ", "  +/-  ", "     i    ", "  +/-  ", "   peri   ", "   +/-  ", "   node   ", "   +/-  ", "    Pi    ", "  +/-  ", "     b    ", "  +/-  ", "     q    ", "  +/-  ", "     f    ", "  +/-  ", "     M    ", "  +/-  ", "      Q    ", "  +/-  ", "     n    ", "  +/-  ", "     T    ", "  +/-  ", "TisserandJ", "  +/-  ", "  RAapp  ", "  +/-  ", "  DECapp ", "  +/-  ", " Azim +E ", "  +/-  ", "   Elev  ", "  +/-  ", "  Vinit  ", "   +/- ", "   Vavg  ", "   +/- ", "   LatBeg   ", "  +/-  ", "   LonBeg   ", "  +/-  ", "  HtBeg ", "  +/-  ", "   LatEnd   ", "  +/-  ", "   LonEnd   ", "  +/-  ", "  HtEnd ", "  +/-  ", "Duration", " Peak ", " Peak Ht", "  F  ", " Mass kg", "  Qc ", "MedianFitErr", "Beg in", "End in", " Num", "     Participating    "]
-    head_2 = ["  Julian date     ", "        UTC Time          ", "   No", "code", "    deg   ", "    deg   ", "   deg   ", " sigma ", "   deg   ", " sigma ", "   deg   ", " sigma ", "    deg  ", " sigma ", "   km/s  ", "  sigma", "   deg   ", " sigma ", "    deg  ", " sigma ", "   km/s  ", "  sigma", "     AU    ", " sigma ", "          ", " sigma ", "   deg    ", " sigma ", "    deg   ", "  sigma ", "    deg   ", "  sigma ", "   deg    ", " sigma ", "   deg    ", " sigma ", "    AU    ", " sigma ", "   deg    ", " sigma ", "    deg   ", " sigma ", "     AU    ", " sigma ", "  deg/day ", " sigma ", "   years  ", " sigma ", "          ", " sigma ", "   deg   ", " sigma ", "   deg   ", " sigma ", "of N  deg", " sigma ", "    deg  ", " sigma ", "   km/s  ", "  sigma", "   km/s  ", "  sigma", "   +N deg   ", " sigma ", "   +E deg   ", " sigma ", "    km  ", " sigma ", "   +N deg   ", " sigma ", "   +E deg   ", " sigma ", "    km  ", " sigma ", "  sec   ", "AbsMag", "    km  ", "param", "tau=0.7%", " deg ", "   arcsec   ", "  FOV ", "  FOV ", "stat", "        stations      "]
+    header = [" Unique trajectory", "     Beginning      ", "       Beginning          ", "  IAU", " IAU", "  Sol lon ", "  App LST ", "  RAgeo  ", "  +/-  ", "  DECgeo ", "  +/-  ", " LAMgeo  ", "  +/-  ", "  BETgeo ", "  +/-  ", "   Vgeo  ", "   +/- ", " LAMhel  ", "  +/-  ", "  BEThel ", "  +/-  ", "   Vhel  ", "   +/- ", "      a    ", "  +/-  ", "     e    ", "  +/-  ", "     i    ", "  +/-  ", "   peri   ", "   +/-  ", "   node   ", "   +/-  ", "    Pi    ", "  +/-  ", "     b    ", "  +/-  ", "     q    ", "  +/-  ", "     f    ", "  +/-  ", "     M    ", "  +/-  ", "      Q    ", "  +/-  ", "     n    ", "  +/-  ", "     T    ", "  +/-  ", "TisserandJ", "  +/-  ", "  RAapp  ", "  +/-  ", "  DECapp ", "  +/-  ", " Azim +E ", "  +/-  ", "   Elev  ", "  +/-  ", "  Vinit  ", "   +/- ", "   Vavg  ", "   +/- ", "   LatBeg   ", "  +/-  ", "   LonBeg   ", "  +/-  ", "  HtBeg ", "  +/-  ", "   LatEnd   ", "  +/-  ", "   LonEnd   ", "  +/-  ", "  HtEnd ", "  +/-  ", "Duration", " Peak ", " Peak Ht", "  F  ", " Mass kg", "  Qc ", "MedianFitErr", "Beg in", "End in", " Num", "     Participating    "]
+    head_2 = ["     identifier   ", "    Julian date     ", "        UTC Time          ", "   No", "code", "    deg   ", "    deg   ", "   deg   ", " sigma ", "   deg   ", " sigma ", "   deg   ", " sigma ", "    deg  ", " sigma ", "   km/s  ", "  sigma", "   deg   ", " sigma ", "    deg  ", " sigma ", "   km/s  ", "  sigma", "     AU    ", " sigma ", "          ", " sigma ", "   deg    ", " sigma ", "    deg   ", "  sigma ", "    deg   ", "  sigma ", "   deg    ", " sigma ", "   deg    ", " sigma ", "    AU    ", " sigma ", "   deg    ", " sigma ", "    deg   ", " sigma ", "     AU    ", " sigma ", "  deg/day ", " sigma ", "   years  ", " sigma ", "          ", " sigma ", "   deg   ", " sigma ", "   deg   ", " sigma ", "of N  deg", " sigma ", "    deg  ", " sigma ", "   km/s  ", "  sigma", "   km/s  ", "  sigma", "   +N deg   ", " sigma ", "   +E deg   ", " sigma ", "    km  ", " sigma ", "   +N deg   ", " sigma ", "   +E deg   ", " sigma ", "    km  ", " sigma ", "  sec   ", "AbsMag", "    km  ", "param", "tau=0.7%", " deg ", "   arcsec   ", "  FOV ", "  FOV ", "stat", "        stations      "]
     out_str += "# {:s}\n\r".format(delimiter.join(header))
     out_str += "# {:s}\n\r".format(delimiter.join(head_2))
 
@@ -216,6 +217,8 @@ def writeOrbitSummaryFile(dir_path, traj_list, traj_summary_file_name=TRAJ_SUMMA
     for traj in traj_list:
 
         line_info = []
+
+        line_info.append("{:20s}".format(traj.traj_id))
 
         line_info.append("{:20.12f}".format(traj.jdt_ref))
         line_info.append("{:26s}".format(str(jd2Date(traj.jdt_ref, dt_obj=True))))
@@ -1598,6 +1601,11 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
                 ###
 
 
+                # Add the trajectory identified if it's missing
+                traj = addTrajectoryID(traj)
+
+
+                # Add the trajectory to the output list
                 traj_list.append(traj)
 
 
