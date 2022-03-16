@@ -360,7 +360,7 @@ def evaluateFit(model, validation_gen, output=False, display=False):
         # plt.show()
 
         i = 5
-        log = [True, False, False, False, True, False, False, False, True, True]
+        log = [True, False, False, True, True, False, False, False, True, True]
         scaled_corr = correct_output * param_scaling
         scaled_pred = pred_output * param_scaling
 
