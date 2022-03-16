@@ -214,7 +214,7 @@ def loadModel(file_path, model_file='model.json', weights_file='model.h5'):
 def evaluateFit(model, validation_gen, output=False, display=False, log=None):
     param_name_list = ["M0", "V0", "ZC", "DENS", "ABL", "ERHT", "ERCO", "ER_S", "ERMm", "ERMM"]
     param_unit = ['(kg)', '(km/s)', '(deg)', '(kg/m3)', '(kg/MJ)', '(km)', '(kg/MJ)', '', '(kg)', '(kg)']
-    param_scaling = np.array([1, 1 / 1000, 180 / np.pi, 1, 1, 1 / 1000, 1, 1, 1, 1])
+    param_scaling = np.array([1, 1 / 1000, 180 / np.pi, 1, 1e6, 1 / 1000, 1e6, 1, 1, 1])
 
     # Generate validation data
     validation_data = next(validation_gen)

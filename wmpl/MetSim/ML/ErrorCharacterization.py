@@ -9,11 +9,34 @@ from wmpl.Formats.Met import loadMet
 from wmpl.MetSim.GUI import MetObservations, SimulationResults, collectPaths, loadConstants
 from wmpl.MetSim.MetSimErosion import Constants, runSimulation
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly
-from wmpl.Utils.Math import meanAngle, mergeDatasets, movingAverage, movingOperation
+from wmpl.Utils.Math import meanAngle, mergeDatasets, movingAverage, movingOperation, stdOfStd
 from wmpl.Utils.Pickling import loadPickle, savePickle
 
 
-def loadPickleFilesFromDir(folder):
+def distModel(t, x0, v, a, b):
+    return x0 + v * t - np.abs(a) * np.exp(np.abs(b) * t)
+
+
+def velModel(t, v, a, b):
+    return v - np.abs(a * b) * np.exp(np.abs(b) * t)
+
+
+def decelModel(t, a, b):
+    return -np.abs(a * b ** 2) * np.exp(np.abs(b) * t)
+
+
+def fitModelToHeight(model, t, h, y, bounds=None):
+    """ Converts a model that is a function of time into a function of height returning function that takes a
+    height """
+    try:
+        popt, _ = scipy.optimize.curve_fit(model, t, y, bounds=bounds)
+        t_func = scipy.interpolate.interp1d(h, t, bounds_error=False)
+        return lambda _h: model(t_func(_h), *popt)
+    except RuntimeError:
+        return None
+
+
+def loadMeteorDataFromDir(folder):
     """
     Return:
         [tuple] traj, met_obs, const
@@ -22,6 +45,10 @@ def loadPickleFilesFromDir(folder):
             - const: [Constants]
     """
     traj_pickle_file, met_file, _, load_file = collectPaths(folder, '', True, '.', get_latest=True)
+
+    if load_file is None:
+        return None, None, None
+
     traj = loadPickle(*os.path.split(traj_pickle_file))
 
     # Load a METAL .met file if given
@@ -33,10 +60,6 @@ def loadPickleFilesFromDir(folder):
         else:
             print('The .met file does not exist:', met_file)
             sys.exit()
-
-    # get const file
-    if load_file is None:
-        return None, None, None
 
     # Load the constants from the JSON files
     const, _ = loadConstants(load_file)
@@ -53,15 +76,12 @@ def loadPickleFilesFromDir(folder):
     return traj, met_obs, const
 
 
-def displayResiduals(traj, met_obs, const, sr):
+def displayResiduals(traj, met_obs, const):
     ##################################
     # Magnitude
 
     fig, ax = plt.subplots(2, sharey=True)
     # simulation magnitude
-    mag_sim = scipy.interpolate.interp1d(
-        sr.leading_frag_height_arr / 1000, sr.abs_magnitude, bounds_error=False, fill_value=0
-    )
 
     for frag_entry in const.fragmentation_entries:
         if len(frag_entry.main_height_data):
@@ -69,10 +89,6 @@ def displayResiduals(traj, met_obs, const, sr):
         # Plot magnitude of the grains
         if len(frag_entry.grains_height_data):
             ax[0].plot(frag_entry.grains_abs_mag, frag_entry.grains_height_data / 1000, label='frag grains')
-
-    ax[0].plot(sr.abs_magnitude, sr.leading_frag_height_arr / 1000, label='mag')
-    ax[0].plot(sr.abs_magnitude_eroded, sr.leading_frag_height_arr / 1000, label='mag eroded')
-    ax[0].legend()
 
     # collect data from objects
     for obs in traj.observations:
@@ -91,15 +107,12 @@ def displayResiduals(traj, met_obs, const, sr):
         abs_mag_data = abs_mag_data[mag_filter]
 
         ax[0].plot(abs_mag_data, height_data)
+        nan_filter = np.isfinite(abs_mag_data)
         # ax[1].scatter(abs_mag_data - mag_sim(height_data), height_data)
-        ax[1].errorbar(
-            movingAverage(abs_mag_data - mag_sim(height_data), 5, stride=2),
-            movingAverage(height_data, 5, stride=2),
-            xerr=movingOperation(abs_mag_data - mag_sim(height_data), np.std, 5, stride=2),
-            capsize=3,
-            marker='x',
-            linestyle='none',
-        )
+        fit = np.poly1d(np.polyfit(height_data[nan_filter], abs_mag_data[nan_filter], 8))
+        ax[0].plot(fit(height_data), height_data)
+
+        ax[1].scatter(fit(height_data) - abs_mag_data, height_data)
 
     if met_obs is not None:
         # Plot additional magnitudes for all sites
@@ -110,108 +123,50 @@ def displayResiduals(traj, met_obs, const, sr):
             height_data = met_obs.height_data[site] / 1000
             ax[0].plot(abs_mag_data, height_data, label='mag')
             # ax[1].scatter(abs_mag_data - mag_sim(height_data), height_data)
-            ax[1].errorbar(
-                movingAverage(abs_mag_data - mag_sim(height_data), 5, stride=2),
-                movingAverage(height_data, 5, stride=2),
-                xerr=movingOperation(abs_mag_data - mag_sim(height_data), np.std, 5, stride=2),
-                capsize=3,
-                marker='x',
-                linestyle='none',
-            )
+            nan_filter = np.isfinite(abs_mag_data)
+            fit = np.poly1d(np.polyfit(height_data[nan_filter], abs_mag_data[nan_filter], 8))
+            ax[0].plot(fit(height_data), height_data)
+
+            ax[1].scatter(fit(height_data) - abs_mag_data, height_data)
+
+    ax[0].legend()
     plt.show()
 
     #####################
     #####################
     # Velocity
     fig, ax = plt.subplots(2, sharey=True)
-    vel_sim = scipy.interpolate.interp1d(
-        sr.leading_frag_height_arr / 1000, sr.leading_frag_vel_arr / 1000, bounds_error=False, fill_value=0
-    )
-
     for obs in traj.observations:
         # Extract data
+        time_data = obs.time_data[obs.ignore_list == 0][1:]
         vel_data = obs.velocities[obs.ignore_list == 0][1:] / 1000
         height_data = obs.model_ht[obs.ignore_list == 0][1:] / 1000
         ax[0].plot(vel_data, height_data)
-        # ax[1].scatter(vel_data - vel_sim(height_data), height_data)
-        windowed_data = movingOperation(vel_data - vel_sim(height_data), n=8, stride=2, ret_arr=True)
-        med = np.median(windowed_data, axis=1)
-        ax[1].errorbar(
-            med,
-            movingAverage(height_data, n=8, stride=2),
-            xerr=[
-                med - np.percentile(windowed_data, 10, axis=1),
-                np.percentile(windowed_data, 90, axis=1) - med,
-            ],
-            capsize=3,
-            marker='x',
-            linestyle='none',
+        fit = fitModelToHeight(
+            velModel, time_data, height_data, vel_data, bounds=([-np.inf, 0, 0], [np.inf] * 3)
         )
+        if fit:
+            ax[0].plot(fit(height_data), height_data)
+            ax[1].scatter(fit(height_data) - vel_data, height_data)
 
-    ax[0].plot(sr.brightest_vel_arr / 1000, sr.brightest_height_arr / 1000, label='brightest')
-    ax[0].plot(sr.leading_frag_vel_arr / 1000, sr.leading_frag_height_arr / 1000, label='leading frag')
-    ax[0].legend()
     plt.show()
-
     ####################
     ####################
     # Lag
     fig, ax = plt.subplots(2, sharey=True)
-    temp_arr = np.c_[sr.brightest_height_arr, sr.brightest_length_arr]
-    temp_arr = temp_arr[
-        (sr.brightest_height_arr <= traj.rbeg_ele)
-        # & (sr.brightest_height_arr >= plot_end_ht)
-    ]
-    brightest_ht_arr, brightest_len_arr = temp_arr.T
-
-    temp_arr = np.c_[sr.leading_frag_height_arr, sr.leading_frag_length_arr]
-    temp_arr = temp_arr[
-        (sr.leading_frag_height_arr <= traj.rbeg_ele)
-        # & (sr.leading_frag_height_arr >= plot_end_ht)
-    ]
-    leading_ht_arr, leading_frag_len_arr = temp_arr.T
-
-    leading_lag_sim = (
-        leading_frag_len_arr
-        - leading_frag_len_arr[0]
-        - traj.orbit.v_init
-        * np.arange(0, const.dt * len(leading_frag_len_arr), const.dt)[: len(leading_frag_len_arr)]
-    )
-
-    if len(brightest_len_arr):
-
-        # Compute the simulated lag using the observed velocity
-        brightest_lag_sim = (
-            brightest_len_arr
-            - brightest_len_arr[0]
-            - traj.orbit.v_init
-            * np.arange(0, const.dt * len(brightest_len_arr), const.dt)[: len(brightest_len_arr)]
-        )
-        brightest_interp = scipy.interpolate.interp1d(
-            brightest_ht_arr, brightest_lag_sim, bounds_error=False, fill_value=0
-        )
 
     for obs in traj.observations:
-
         # Get observed heights
-        height_data = obs.model_ht[obs.ignore_list == 0]
+        lag_data = obs.lag[obs.ignore_list == 0]
+        height_data = obs.model_ht[obs.ignore_list == 0] / 1000
+        time_data = obs.time_data[obs.ignore_list == 0]
+        ax[0].plot(lag_data, height_data)
 
-        obs.lag[obs.ignore_list == 0], height_data / 1000
-
-        obs_height_indices = height_data > np.min(brightest_ht_arr)
-        obs_hts = height_data[obs_height_indices]
-        brightest_residuals = obs.lag[obs.ignore_list == 0][obs_height_indices] - brightest_interp(obs_hts)
-
-        ax[0].plot(obs.lag[obs.ignore_list == 0][obs_height_indices], obs_hts / 1000)
-        # ax[1].scatter(brightest_residuals, obs_hts / 1000)
-        ax[1].errorbar(
-            movingAverage(brightest_residuals, 20, stride=4),
-            movingAverage(obs_hts / 1000, 20, stride=4),
-            xerr=movingOperation(brightest_residuals, np.std, 20, stride=4),
-            capsize=3,
-            marker='x',
-            linestyle='none',
-        )
+        nan_filter = np.isfinite(lag_data)
+        fit = np.poly1d(np.polyfit(height_data[nan_filter], lag_data[nan_filter], 8))
+        if fit:
+            ax[0].plot(fit(height_data), height_data)
+            ax[1].scatter(fit(height_data) - lag_data, height_data)
 
     if met_obs is not None:
         for site in met_obs.sites:
@@ -219,16 +174,6 @@ def displayResiduals(traj, met_obs, const, sr):
 
             # ax[0].plot(met_obs.lag_data[site], height_data, label='met_obs')
 
-    ax[0].plot(
-        brightest_lag_sim[: len(brightest_ht_arr)],
-        (brightest_ht_arr / 1000)[: len(brightest_lag_sim)],
-        label='brightest',
-    )
-    ax[0].plot(
-        leading_lag_sim[: len(leading_ht_arr)],
-        (leading_ht_arr / 1000)[: len(leading_lag_sim)],
-        label='leading',
-    )
     ax[0].legend()
     plt.show()
 
@@ -241,59 +186,13 @@ def compileFolderData(folder):
     """
     ########################################
     ### collect all data for the folder ####
-    traj, met_obs, const = loadPickleFilesFromDir(folder)
+    traj, met_obs, const = loadMeteorDataFromDir(folder)
     if not const:
         return None
 
-    frag_main, results_list, wake_results = runSimulation(const)
-    sr = SimulationResults(const, frag_main, results_list, wake_results)
+    # displayResiduals(traj, met_obs, const)
 
-    # displayResiduals(traj, met_obs, const, sr)
-
-    kept_data = {'mag': [], 'vel': [], 'lag': []}
-    discard_traj_obs_list = []
-    discard_met_obs_list = []
-    data_type_window_size = {'mag': 5, 'vel': 5, 'lag': 20}
-
-    def getGoodDataset(station, discard_list, height, val, val_sim, data_type='mag'):
-        """ Add data to kept_data based on whether it agrees with simulation 
-        Returns True if it was added """
-
-        n = data_type_window_size[data_type]
-
-        filter_index = np.isfinite(val)
-        val = val[filter_index]
-        height = height[filter_index]
-        residuals = val - val_sim(height)
-
-        windowed_residuals = movingOperation(residuals, n=n, ret_arr=True)
-        mean_residuals = np.mean(windowed_residuals, axis=1)
-        std_residuals = np.std(windowed_residuals, axis=1)
-        print(
-            data_type,
-            station,
-            'height',
-            np.count_nonzero(~np.isnan(height)) / len(height),
-            'val',
-            np.count_nonzero(~np.isnan(val)) / len(val),
-            np.mean(np.abs(mean_residuals) < std_residuals / 2),
-            np.mean(np.abs(mean_residuals) < std_residuals),
-            np.mean(np.abs(mean_residuals)),
-            np.mean(std_residuals),
-        )
-        if (
-            np.isnan(np.mean(mean_residuals))
-            or np.isinf(np.mean(mean_residuals))
-            or np.mean(mean_residuals) > 1e100
-        ):
-            print(height, val, residuals)
-
-        if np.mean(np.abs(mean_residuals) < std_residuals) > 0.5:
-            kept_data[data_type].append((height, val, residuals))
-
-    mag_sim = scipy.interpolate.interp1d(
-        sr.leading_frag_height_arr / 1000, sr.abs_magnitude, bounds_error=False, fill_value=0
-    )
+    kept_data = {'mag': {}, 'vel': {}, 'lag': {}}
 
     #### Extract mag data ###
     for obs in traj.observations:
@@ -306,7 +205,9 @@ def compileFolderData(folder):
         height_data = height_data[mag_filter]
         abs_mag_data = abs_mag_data[mag_filter]
 
-        getGoodDataset(obs.station_id, discard_traj_obs_list, height_data, abs_mag_data, mag_sim, 'mag')
+        nan_filter = np.isfinite(abs_mag_data)
+        fit = np.poly1d(np.polyfit(height_data[nan_filter], abs_mag_data[nan_filter], 8))
+        kept_data['mag'][obs.station_id] = [abs_mag_data - fit(height_data), height_data, fit]
 
     if met_obs is not None:
         # Plot additional magnitudes for all sites
@@ -315,138 +216,198 @@ def compileFolderData(folder):
             abs_mag_data = met_obs.abs_mag_data[site]
             height_data = met_obs.height_data[site] / 1000
 
-            getGoodDataset(site, discard_met_obs_list, height_data, abs_mag_data, mag_sim, 'mag')
+            nan_filter = np.isfinite(abs_mag_data)
+            fit = np.poly1d(np.polyfit(height_data[nan_filter], abs_mag_data[nan_filter], 8))
+            kept_data['mag'][site] = [abs_mag_data - fit(height_data), height_data, fit]
 
     ### extract velocity data ###
-    vel_sim = scipy.interpolate.interp1d(
-        sr.brightest_height_arr / 1000, sr.brightest_vel_arr / 1000, bounds_error=False, fill_value=0
-    )
 
     for obs in traj.observations:
         # Extract data
         vel_data = obs.velocities[obs.ignore_list == 0][1:] / 1000
         height_data = obs.model_ht[obs.ignore_list == 0][1:] / 1000
-
-        getGoodDataset(obs.station_id, discard_traj_obs_list, height_data, vel_data, vel_sim, 'vel')
+        time_data = obs.time_data[obs.ignore_list == 0][1:]
+        fit = fitModelToHeight(
+            velModel, time_data, height_data, vel_data, bounds=([-np.inf, 0, 0], [np.inf] * 3)
+        )
+        if fit:
+            kept_data['vel'][obs.station_id] = [vel_data - fit(height_data), height_data, fit]
 
     ### extract lag ###
 
     # using the simulated brightest point of the meteor to decide its position (rather than largest)
-    temp_arr = np.c_[sr.brightest_height_arr, sr.brightest_length_arr]
-    temp_arr = temp_arr[
-        (sr.brightest_height_arr <= traj.rbeg_ele)
-        # & (sr.brightest_height_arr >= plot_end_ht)
-    ]
-    brightest_ht_arr, brightest_len_arr = temp_arr.T
-
-    brightest_lag_sim = (
-        brightest_len_arr
-        - brightest_len_arr[0]
-        - traj.orbit.v_init
-        * np.arange(0, const.dt * len(brightest_len_arr), const.dt)[: len(brightest_len_arr)]
-    )
-    brightest_interp = scipy.interpolate.interp1d(
-        brightest_ht_arr / 1000, brightest_lag_sim, bounds_error=False, fill_value=0
-    )
 
     for obs in traj.observations:
 
         # Get observed heights
-        height_data = obs.model_ht[obs.ignore_list == 0]
-        obs_height_indices = height_data > np.min(brightest_ht_arr)
-        obs_hts = height_data[obs_height_indices] / 1000
+        height_data = obs.model_ht[obs.ignore_list == 0] / 1000
+        lag_data = obs.lag[obs.ignore_list == 0]
+        time_data = obs.time_data[obs.ignore_list == 0]
 
-        getGoodDataset(
-            obs.station_id,
-            discard_traj_obs_list,
-            obs_hts,
-            obs.lag[obs.ignore_list == 0][obs_height_indices],
-            brightest_interp,
-            'lag',
-        )
+        nan_filter = np.isfinite(lag_data)
+        fit = np.poly1d(np.polyfit(height_data[nan_filter], lag_data[nan_filter], 4))
+        kept_data['lag'][obs.station_id] = [lag_data - fit(height_data), height_data, fit]
+        # fit = fitModelToHeight(
+        #     distModel, time_data, height_data, lag_data, bounds=([-np.inf, -np.inf, 0, 0], [np.inf] * 4)
+        # )
+        # if fit:
+        #     kept_data['lag'][obs.station_id] = [lag_data - fit(height_data), height_data, fit]
 
-    if met_obs is not None:
-        for site in met_obs.sites:
-            height_data = met_obs.height_data[site] / 1000
-            getGoodDataset(
-                site, discard_met_obs_list, height_data, met_obs.lag_data[site], brightest_interp, 'lag'
-            )
+    # if met_obs is not None:
+    #     for site in met_obs.sites:
+    #         height_data = met_obs.height_data[site] / 1000
 
     ###################################
-    # processing data that will be kept. This will compute the moving averages and moving std on
-    # the data after merging them into single arrays
-    processed_data = {
-        'mag': tuple([None] * 5),
-        'vel': tuple([None] * 5),
-        'lag': tuple([None] * 5),
-    }
-    for key, lst in kept_data.items():
-        if not len(lst):  # if part of the data isn't good, then
-            print('Filling with nan')
-            continue
-        else:
-            # if data is good, merge the data so that you can take moving averages with all data
-            val = lst[0]
-            for val2 in lst[1:]:
-                val = mergeDatasets(val, val2, ascending=False)
+    # processing data that will be kept.
 
-        windowed_residuals = movingOperation(val[2], n=5, ret_arr=True)
-        windowed_val = movingOperation(val[1], n=5, ret_arr=True)
-        average_height = movingAverage(val[0], n=5)
+    # {'mag':[(ht, res, mag_fit, vel_fit, lag_fit), ...]}
+    processed_data = {'mag': [], 'vel': [], 'lag': []}
+    for key, dic in kept_data.items():
+        # different stations should be kept in different entries
+        for station in kept_data[key]:
+            if dic.get(station):
+                res, ht, fit = dic[station]
+                new_entry = [ht, res]
 
-        processed_data[key] = (
-            average_height,
-            np.mean(windowed_val, axis=1),
-            np.std(windowed_val, axis=1),
-            np.mean(windowed_residuals, axis=1),
-            np.std(windowed_residuals, axis=1),
-        )
-    # if too much data is bad, don't use dataset
-    if processed_data['mag'][0] is None or processed_data['vel'][0] is None:
-        print('bad fit')
-        return None
+                for dic2 in kept_data.values():
+                    if dic2.get(station):
+                        _, _, fit = dic2[station]
+                        new_entry.append(fit(ht))  # ht may be extrapolating
+                    else:
+                        new_entry.append(ht * np.nan)
+                processed_data[key].append(new_entry)
 
-    ###########################################
-    # process data again so that all data corresponds to since height values. This makes it so that
-    # values can properly be compared with each other, as they occur at the same height.
+    # ignore dataset if is no information in one of the fields
+    for val in processed_data.values():
+        if not val:
+            return None
 
-    # using a height range that exists for all variables
-    selected_var = 'mag'  # variable to choose ht values for
+    processed_data = {key: np.concatenate(val, axis=1) for key, val in processed_data.items()}
+    return processed_data
 
-    ht_values = processed_data[selected_var][0]  # select height values that doesn't contain min_ht or max_ht
-    processed_data2 = [*processed_data[selected_var]]
-    for key, (ht, mean_val, std_val, mean_res, std_res) in processed_data.items():
-        if key == selected_var:
-            continue
-        if ht is None:
-            processed_data2.extend(
-                [
-                    np.full(ht_values.shape, np.nan),
-                    np.full(ht_values.shape, np.nan),
-                    np.full(ht_values.shape, np.nan),
-                    np.full(ht_values.shape, np.nan),
-                ]
-            )
-        else:
-            print(np.min(ht), np.max(ht), np.min(ht_values), np.max(ht_values))
-            processed_data2.extend(
-                [
-                    scipy.interpolate.interp1d(
-                        -ht, mean_val, assume_sorted=True, bounds_error=False, fill_value=np.nan
-                    )(-ht_values),
-                    scipy.interpolate.interp1d(
-                        -ht, std_val, assume_sorted=True, bounds_error=False, fill_value=np.nan
-                    )(-ht_values),
-                    scipy.interpolate.interp1d(
-                        -ht, mean_res, assume_sorted=True, bounds_error=False, fill_value=np.nan
-                    )(-ht_values),
-                    scipy.interpolate.interp1d(
-                        -ht, std_res, assume_sorted=True, bounds_error=False, fill_value=np.nan
-                    )(-ht_values),
-                ]
-            )
 
-    return np.array(processed_data2)
+def plotErrorCharacterization(all_kept_data, plot_variable, title, magbins=20, vbins=20):
+    ### plotting magnitude residuals vs velocity and magnitude ###
+
+    min_mag, max_mag = (
+        np.nanmin(all_kept_data[plot_variable][:, 2]),
+        np.nanmax(all_kept_data[plot_variable][:, 2]),
+    )
+    min_vel, max_vel = (
+        np.nanmin(all_kept_data[plot_variable][:, 3]),
+        np.nanmax(all_kept_data[plot_variable][:, 3]),
+    )
+
+    mag_to_idx = lambda mag: min(int((mag - min_mag) / (max_mag - min_mag) * magbins), magbins - 1)
+    vel_to_idx = lambda vel: min(int((vel - min_vel) / (max_vel - min_vel) * vbins), vbins - 1)
+    idx_to_mag = lambda i: i * (max_mag - min_mag) / magbins + min_mag
+    idx_to_vel = lambda i: i * (max_vel - min_vel) / vbins + min_vel
+
+    res_arr = np.full((magbins, vbins, all_kept_data[plot_variable].shape[0]), np.nan, dtype=np.float64)
+    mag_arr = np.copy(res_arr)
+    vel_arr = np.copy(res_arr)
+
+    for i, data in enumerate(all_kept_data[plot_variable]):
+        if np.isfinite(data[2]) and np.isfinite(data[3]):
+            res_arr[mag_to_idx(data[2]), vel_to_idx(data[3]), i] = data[1]
+            mag_arr[mag_to_idx(data[2]), vel_to_idx(data[3]), i] = data[2]
+            vel_arr[mag_to_idx(data[2]), vel_to_idx(data[3]), i] = data[3]
+
+    nan_arr = np.sum(np.isfinite(res_arr), axis=2)
+    std_arr = np.nanstd(res_arr, axis=2, ddof=1)
+    std_std_arr = stdOfStd(std_arr, nan_arr)
+
+    v_values = np.linspace(min_vel, max_vel, vbins + 1)
+    mag_values = np.linspace(min_mag, max_mag, magbins + 1)
+    fit_2d = lambda x, a, b, c: a * x[0] + b * x[1] + c
+    v_mag_values = np.stack(
+        np.meshgrid((v_values[1:] + v_values[:-1]) / 2, (mag_values[1:] + mag_values[:-1]) / 2)
+    )  # dimensions (2, len(mag_values)-1, len(v_values)-1)
+
+    # print(np.concatenate(v_mag_values)[np.isfinite(std_arr.flatten())].shape)
+    _filter = np.isfinite(std_arr.flatten())
+    data = np.concatenate(v_mag_values.T)[_filter].T
+    print(data, data.shape)
+    popt, pcov = scipy.optimize.curve_fit(
+        fit_2d,
+        data,
+        std_arr.flatten()[_filter],
+        sigma=std_std_arr.flatten()[_filter]
+        # bounds=([0, 0, -np.inf, 0, -np.inf, -np.inf], [np.inf] * 6),
+    )
+    plt.subplot(1, 2, 1)
+    plt.scatter(data[0], std_arr.flatten()[_filter])
+    plt.scatter(data[0], fit_2d(data, *popt), c='r')
+    plt.subplot(1, 2, 2)
+    plt.scatter(data[1], std_arr.flatten()[_filter])
+    plt.scatter(data[1], fit_2d(data, *popt), c='r')
+
+    # plt.plot(
+    #     data, fit_2d(data, *popt),
+    # )
+    plt.show()
+    # print(fit_2d(30, *popt))
+    print(popt)
+    print('fit errors', np.sqrt(np.diag(pcov)))
+
+    plt.pcolormesh(
+        v_values, mag_values, np.abs((std_arr - fit_2d(v_mag_values, *popt)) / std_std_arr), cmap='coolwarm'
+    )  # - fit_2d(v_mag_values, *popt),
+    for i in range(magbins):
+        for j in range(vbins):
+            if nan_arr[i, j] > 1:
+                plt.text(
+                    idx_to_vel(j + 0.5),
+                    idx_to_mag(i + 0.5),
+                    f"{std_std_arr[i, j]:.3f}",
+                    color="k",
+                    ha="center",
+                    va="center",
+                    transform=plt.gca().transData,
+                )
+
+    plt.colorbar()
+    plt.ylabel('Magnitude')
+    plt.xlabel('Velocity (km/s)')
+    plt.title(title)
+
+    plt.xlim(
+        [
+            idx_to_vel(np.min(np.nonzero(np.nansum(std_arr, axis=0)))),
+            idx_to_vel(np.max(np.nonzero(np.nansum(std_arr, axis=0))) + 1),
+        ]
+    )
+    plt.ylim(
+        [
+            idx_to_mag(np.min(np.nonzero(np.nansum(std_arr, axis=1)))),
+            idx_to_mag(np.max(np.nonzero(np.nansum(std_arr, axis=1))) + 1),
+        ]
+    )
+
+    plt.show()
+
+    plt.title(np.sum(nan_arr))
+    data = res_arr.flatten()[np.isfinite(res_arr.flatten())]
+    # hist, bin_edges = np.histogram(data, bins=100, normed=True)
+    ret = scipy.stats.t.fit(res_arr.flatten()[np.isfinite(res_arr.flatten())])
+    plt.hist(data, bins=100, density=True)
+    x = np.linspace(np.min(data), np.max(data), 300)
+    plt.plot(x, scipy.stats.t.pdf(x, ret[0], loc=ret[1], scale=ret[2]))
+    print(ret)
+    plt.show()
+
+    # for i in range(magbins):
+    #     for j in range(vbins):
+    #         if nan_arr[i, j] > 4:
+    #             plt.title(np.sum(nan_arr[i, j]))
+    #             data = res_arr[i, j][np.isfinite(res_arr[i, j])]
+    #             # hist, bin_edges = np.histogram(data, bins=100, normed=True)
+    #             ret = scipy.stats.norm.fit(data)
+    #             plt.hist(data, bins=30, density=True)
+    #             x = np.linspace(np.min(data), np.max(data), 50)
+    #             plt.plot(x, scipy.stats.norm.pdf(x, loc=ret[0], scale=ret[1]))
+    #             print(ret)
+    #             plt.show()
 
 
 def main(cml_args):
@@ -454,61 +415,32 @@ def main(cml_args):
     with open(path) as f:
         path_list = filter(lambda x: not x.startswith('#'), f.read().splitlines())
 
-    all_kept_data = []
+    all_kept_data = {'mag': [], 'vel': [], 'lag': []}
     for _path in path_list:
         print(_path)
         data = compileFolderData(_path)
         if data is not None:
-            all_kept_data.append(data)
+            for key in all_kept_data:
+                all_kept_data[key].append(data[key])
         print('-------------')
+
+    for key in all_kept_data:
+        all_kept_data[key] = np.concatenate(all_kept_data[key], axis=1).T
 
     if not all_kept_data:
         print('No data to work with')
         return
-    print([h.shape for h in all_kept_data])
-    all_kept_data = np.hstack(all_kept_data).T
 
-    np.set_printoptions(threshold=np.inf)
+    # np.set_printoptions(threshold=np.inf)
 
-    min_mag, max_mag = np.nanmin(all_kept_data[:, 1]), np.nanmax(all_kept_data[:, 1])
-    min_vel, max_vel = np.nanmin(all_kept_data[:, 1 + 4]), np.nanmax(all_kept_data[:, 1 + 4])
     vbins = 20
     magbins = 20
-    mag_to_idx = lambda mag: int((mag - min_mag) / (max_mag - min_mag) * (magbins - 1))
-    vel_to_idx = lambda vel: int((vel - min_vel) / (max_vel - min_vel) * (vbins - 1))
-    idx_to_mag = lambda i: i / (magbins - 1) * (max_mag - min_mag) + min_mag
-    idx_to_vel = lambda i: i / (vbins - 1) * (max_vel - min_vel) + min_vel
-    bin_array = np.full((magbins, vbins, all_kept_data.shape[0]), 0, dtype=bool)
-    for i, data in enumerate(all_kept_data):
-        if np.isfinite(data[1]) and np.isfinite(data[1 + 4]):
-            bin_array[mag_to_idx(data[1]), vel_to_idx(data[1 + 4]), i] = 1
-
-    most_common_mag_idx = np.argmax(np.sum(bin_array, axis=(1, 2)))
-    most_common_vel_idx = np.argmax(np.sum(bin_array, axis=(0, 2)))
-
-    plt.figure()
-    for mag_idx in range(magbins):
-        for i, cond in enumerate(bin_array[mag_idx, most_common_vel_idx, :]):
-            if cond:
-                plt.scatter(all_kept_data[i][1], all_kept_data[i][1 + 3])
-    plt.title(
-        f"Velocity range: [{idx_to_vel(most_common_vel_idx):.2f}, {idx_to_vel(most_common_vel_idx+1):.2f}] km/s"
+    plotErrorCharacterization(
+        all_kept_data, 'mag', 'Magnitude residual standard deviation', vbins=vbins, magbins=magbins
     )
-    plt.ylabel('Lag residual standard deviation')
-    plt.xlabel('Magnitude')
-    plt.show()
-
-    plt.figure()
-    for vel_idx in range(vbins):
-        for i, cond in enumerate(bin_array[most_common_mag_idx, vel_idx, :]):
-            if cond:
-                plt.scatter(all_kept_data[i][1 + 4], all_kept_data[i][1 + 3])
-    plt.title(
-        f"Magnitude range: [{idx_to_mag(most_common_mag_idx):.3f}, {idx_to_mag(most_common_mag_idx+1):.3f}]"
+    plotErrorCharacterization(
+        all_kept_data, 'lag', 'Lag residual standard deviation (m)', vbins=vbins, magbins=120
     )
-    plt.ylabel('Lag residual standard deviation')
-    plt.xlabel('Velocity (km/s)')
-    plt.show()
 
 
 if __name__ == '__main__':

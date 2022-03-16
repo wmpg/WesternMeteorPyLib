@@ -133,11 +133,11 @@ class PhysicalParameters:
         self.param_list.append("zenith_angle")
 
         # Density range (kg/m^3)
-        self.rho = MetParam(100, 6000, 'log10', default=2000)
+        self.rho = MetParam(100, 6000, default=2000)
         self.param_list.append("rho")
 
         # Intrinsic ablation coeff range (s^2/m^2)
-        self.sigma = MetParam(0.005 / 1e6, 0.5 / 1e6, 'log10', default=0.05 / 1e6)
+        self.sigma = MetParam(0.005 / 1e6, 0.5 / 1e6, default=0.05 / 1e6)
         self.param_list.append("sigma")
 
         ##
@@ -214,7 +214,7 @@ class PhysicalParameters:
         # Init simulation constants
         const = Constants()
         const.dens_co = self.dens_co
-        const.P_0M = self.P_0M
+        const.P_0m = self.P_0M
 
         # Turn on erosion, but disable erosion change
         const.erosion_on = True
@@ -507,7 +507,7 @@ class ErosionSimContainer:
         """ Run the ablation model and srote results. Stored in self.simulation_results """
         # Run the erosion simulation
         frag_main, results_list, wake_results = runSimulationErosion(self.const, compute_wake=False)
-
+        print(self.const.__dict__)
         # Store simulation results
         self.simulation_results = SimulationResults(self.const, frag_main, results_list, wake_results)
 
