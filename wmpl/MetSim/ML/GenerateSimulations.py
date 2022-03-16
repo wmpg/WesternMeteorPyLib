@@ -133,7 +133,7 @@ class PhysicalParameters:
         self.param_list.append("zenith_angle")
 
         # Density range (kg/m^3)
-        self.rho = MetParam(100, 6000, default=2000)
+        self.rho = MetParam(100, 6000, 'log10', default=2000)
         self.param_list.append("rho")
 
         # Intrinsic ablation coeff range (s^2/m^2)

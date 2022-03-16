@@ -211,7 +211,7 @@ def loadModel(file_path, model_file='model.json', weights_file='model.h5'):
         return loaded_model
 
 
-def evaluateFit(model, validation_gen, output=False, display=True):
+def evaluateFit(model, validation_gen, output=False, display=False):
     param_name_list = ["M0", "V0", "ZC", "DENS", "ABL", "ERHT", "ERCO", "ER_S", "ERMm", "ERMM"]
     param_unit = ['(kg)', '(km/s)', '(deg)', '(kg/m3)', '(kg/MJ)', '(km)', '(kg/MJ)', '', '(kg)', '(kg)']
     param_scaling = np.array([1, 1 / 1000, 180 / np.pi, 1, 1, 1 / 1000, 1, 1, 1, 1])
@@ -374,13 +374,13 @@ def evaluateFit(model, validation_gen, output=False, display=True):
 
                     if log[j]:
                         ax[j, i].set_yscale('log')
-                        ybins = np.logspace(np.log10(np.min(y)), np.log10(np.max(y)), 51)
+                        ybins = np.logspace(np.log10(np.min(y[y > 0])), np.log10(np.max(y)), 50)
                     else:
-                        ybins = np.linspace(np.min(y), np.max(y), 51)
+                        ybins = np.linspace(np.min(y), np.max(y), 50)
 
                     if log[i]:
                         ax[j, i].set_xscale('log')
-                        xbins = np.logspace(np.log10(np.min(x)), np.log10(np.max(x)), 50)
+                        xbins = np.logspace(np.log10(np.min(x[x > 0])), np.log10(np.max(x)), 50)
                     else:
                         xbins = np.linspace(np.min(x), np.max(x), 50)
 
@@ -546,7 +546,9 @@ def evaluateFit2(model, file_path, validation_gen, param_class_name=None):
     plt.show()
 
 
-def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_file, fit_param=None):
+def fitCNNMultiHeaded(
+    data_gen, validation_gen, output_dir, model_file, weights_file, fit_param=None, load=False
+):
     # https://machinelearningmastery.com/how-to-develop-convolutional-neural-network-models-for-time-series-forecasting/
     # Height input model
     model_title = weights_file[:-3]
@@ -590,15 +592,15 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
     # cnn3 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn3)
 
     input = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 4))
-    cnn = keras.layers.Conv1D(filters=64, kernel_size=10, activation='relu')(input)
-    cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
-    cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
-    cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
-    cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
-    cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
-    cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
-    cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
-    cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
+    cnn = keras.layers.Conv1D(filters=10, kernel_size=10, activation='relu')(input)
+    # cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
+    # cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
+    # cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
+    # cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
+    # cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
+    # cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
+    # cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
+    # cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
     cnn = keras.layers.MaxPooling1D(pool_size=5)(cnn)
     cnn = keras.layers.Flatten()(cnn)
 
@@ -616,8 +618,23 @@ def fitCNNMultiHeaded(data_gen, validation_gen, output_dir, model_file, weights_
         # activity_regularizer=keras.regularizers.l1(0.01),
     )(dense)
 
-    # Tie inputs together
-    model = keras.models.Model(inputs=input, outputs=output)
+    if os.path.exists(os.path.join(output_dir, model_file)):
+        # load pre-existing model
+        if load:
+            model = loadModel(output_dir, model_file, weights_file)
+            # rename copy to not override
+            i = 1
+            model_file = f"{model_title}({i}).json"
+            weights_file = f"{model_title}({i}).h5"
+            while os.path.exists(os.path.join(output_dir, model_file)):
+                i += 1
+                model_file = f"{model_title}({i}).json"
+                weights_file = f"{model_title}({i}).h5"
+        else:
+            raise Exception('Model file already exists! Stopping so it won\'t be overrided')
+    else:
+        # Tie inputs together
+        model = keras.models.Model(inputs=input, outputs=output)
     # model.summary()
     # raise Exception('hey')
 
@@ -726,6 +743,11 @@ if __name__ == "__main__":
         nargs=2,
         help='Allows for specifying the batch size and steps per epoch, respectively.',
     )
+    arg_parser.add_argument(
+        '--load',
+        action='store_true',
+        help='Whether  to allow a pre-existing model to be loaded if it exists, and train it.',
+    )
     arg_parser.add_argument('--fitparam', type=int)
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -789,5 +811,6 @@ if __name__ == "__main__":
             model_file,
             weights_file,
             fit_param=cml_args.fitparam,
+            load=cml_args.load,
         )
 
