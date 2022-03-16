@@ -216,6 +216,9 @@ class PhysicalParameters:
         const.dens_co = self.dens_co
         const.P_0M = self.P_0M
 
+        # Set tau to CAMO faint meteor model
+        self.const.lum_eff_type = 5
+
         # Turn on erosion, but disable erosion change
         const.erosion_on = True
         const.erosion_height_change = 0

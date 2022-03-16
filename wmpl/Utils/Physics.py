@@ -74,7 +74,7 @@ def dynamicMass(bulk_density, lat, lon, height, jd, velocity, decel, gamma=1.0, 
     atm_dens = getAtmDensity_vect(lat, lon, height, jd)
 
     # Calculate the dynamic mass
-    dyn_mass = (1.0/(bulk_density**2))*((gamma*(velocity**2)*atm_dens*shape_factor)/decel)**3
+    dyn_mass = (1.0/(bulk_density**2))*((gamma*shape_factor*(velocity**2)*atm_dens)/decel)**3
 
     return dyn_mass
 
