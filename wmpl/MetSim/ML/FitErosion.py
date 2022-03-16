@@ -211,7 +211,7 @@ def loadModel(file_path, model_file='model.json', weights_file='model.h5'):
         return loaded_model
 
 
-def evaluateFit(model, validation_gen, output=False, display=False):
+def evaluateFit(model, validation_gen, output=False, display=False, log=None):
     param_name_list = ["M0", "V0", "ZC", "DENS", "ABL", "ERHT", "ERCO", "ER_S", "ERMm", "ERMM"]
     param_unit = ['(kg)', '(km/s)', '(deg)', '(kg/m3)', '(kg/MJ)', '(km)', '(kg/MJ)', '', '(kg)', '(kg)']
     param_scaling = np.array([1, 1 / 1000, 180 / np.pi, 1, 1, 1 / 1000, 1, 1, 1, 1])
@@ -360,7 +360,8 @@ def evaluateFit(model, validation_gen, output=False, display=False):
         # plt.show()
 
         i = 5
-        log = [True, False, False, True, True, False, False, False, True, True]
+        if log is None:
+            log = [True, False, False, False, False, False, False, False, True, True]
         scaled_corr = correct_output * param_scaling
         scaled_pred = pred_output * param_scaling
 
@@ -438,10 +439,10 @@ def evaluateFit(model, validation_gen, output=False, display=False):
     return percent_norm_errors
 
 
-def evaluateFit2(model, file_path, validation_gen, param_class_name=None):
+def evaluateFit2(model, file_path, validation_gen, param_class_name=None, log=None):
     """ Evaluates model by visually comparing expected simulation values to the simulation values 
     given from the prediction """
-    evaluateFit(model, iter(validation_gen), display=True, output=True)
+    evaluateFit(model, iter(validation_gen), display=True, output=True, log=log)
     print()
 
     sim = loadPickle(*os.path.split(file_path))
@@ -748,6 +749,13 @@ if __name__ == "__main__":
         action='store_true',
         help='Whether  to allow a pre-existing model to be loaded if it exists, and train it.',
     )
+    arg_parser.add_argument(
+        '--logplot',
+        type=int,
+        nargs=10,
+        help='Providing 1 will specify whether a plot should be a log plot, 0 otherwise. Must be given '
+        'when in evaluation mode.',
+    )
     arg_parser.add_argument('--fitparam', type=int)
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -783,7 +791,7 @@ if __name__ == "__main__":
             data_list, batch_size, steps_per_epoch, param_class_name=cml_args.classname, validation=True
         )
         model = loadModel(cml_args.output_dir, model_file, weights_file)
-        evaluateFit2(model, data_list[cml_args.evaluate], data_gen, cml_args.classname)
+        evaluateFit2(model, data_list[cml_args.evaluate], data_gen, cml_args.classname, log=cml_args.logplot)
     else:
         # Init the data generator
         data_gen = DataGenerator(
