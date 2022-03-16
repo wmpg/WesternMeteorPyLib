@@ -428,6 +428,10 @@ def evaluateFit(model, validation_gen, output=False, display=False, log=None):
     # Compute mean absolute percentage error for every model parameter
     percent_norm_errors = 100 * np.mean(norm_errors, axis=0)
     denorm_perc_errors_av = 100 * np.mean(denorm_perc_errors, axis=0)
+    # mean minimum distance between a correct set of parameters and predicted set. The correct set
+    # is the goal "uniformity", so the closest to that the predicted parameters are, the better.
+    dist = scipy.spatial.distance.cdist(validation_inputs[:, 3:5], pred_norm_params[:, 3:5])
+    dens_abl_uniformity = np.abs(np.mean(np.min(dist, axis=0)) - np.mean(np.min(dist, axis=1)))
 
     if output:
         print("Mean absolute percentage error and mean absolute error per parameter:")
@@ -435,6 +439,7 @@ def evaluateFit(model, validation_gen, output=False, display=False, log=None):
         print(str(len(percent_norm_errors) * "{:8.2f}% ").format(*percent_norm_errors))
         print(str(len(denorm_perc_errors_av) * "{:8.2f}% ").format(*denorm_perc_errors_av))
         print(str(len(param_corr) * "{:9.4f} ").format(*param_corr))
+        print(f'Density-ablation uniformity: {dens_abl_uniformity}')
 
     return percent_norm_errors
 

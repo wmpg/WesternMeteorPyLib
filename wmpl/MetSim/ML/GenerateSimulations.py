@@ -217,7 +217,7 @@ class PhysicalParameters:
         const.P_0m = self.P_0M
 
         # Set tau to CAMO faint meteor model
-        self.const.lum_eff_type = 5
+        const.lum_eff_type = 5
 
         # Turn on erosion, but disable erosion change
         const.erosion_on = True
@@ -633,6 +633,18 @@ def extractSimData(
 
     ### ###
 
+    # zenith angle above 70 deg is bad
+    if sim.params.zenith_angle.val <= np.radians(20):
+        return None
+
+    # # make the density less than the grain density (don't let the grain density be set by the bulk density)
+    if sim.params.rho.val >= 3500:
+        return None
+
+    # restricting domain to physical values
+    if sim.params.sigma.val >= 3e-7 - 2e-7 * sim.params.rho.val / 3500:
+        return None
+
     # Fix NaN values in the simulated magnitude
     sim.simulation_results.abs_magnitude[np.isnan(sim.simulation_results.abs_magnitude)] = np.nanmax(
         sim.simulation_results.abs_magnitude
@@ -640,14 +652,6 @@ def extractSimData(
 
     # if the peak magnitude is dimmer than the faintest expected peak magnitude, discard it
     if np.min(sim.simulation_results.abs_magnitude) >= params.peak_mag_faintest:
-        return None
-
-    # zenith angle above 70 deg is bad
-    if sim.params.zenith_angle.val <= np.radians(20):
-        return None
-
-    # # make the density less than the grain density (don't let the grain density be set by the bulk density)
-    if sim.params.rho.val >= 3500:
         return None
 
     # Get indices that are above the faintest limiting magnitude
