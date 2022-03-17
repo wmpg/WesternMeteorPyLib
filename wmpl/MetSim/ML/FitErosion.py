@@ -1,6 +1,7 @@
 """ Fit the erosion model using machine learning. """
 
-from __future__ import absolute_import, division, print_function, unicode_literals
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
 
 import copy
 import datetime
@@ -16,19 +17,15 @@ import scipy
 import tensorflow as tf
 from wmpl.MetSim.GUI import SimulationResults
 from wmpl.MetSim.MetSimErosion import runSimulation
-from wmpl.MetSim.ML.GenerateSimulations import (
-    DATA_LENGTH,
-    SIM_CLASSES,
-    SIM_CLASSES_DICT,
-    SIM_CLASSES_NAMES,
-    ErosionSimContainer,
-    ErosionSimParameters,
-    ErosionSimParametersCAMO,
-    ErosionSimParametersCAMOWide,
-    MetParam,
-    PhysicalParameters,
-    extractSimData,
-)
+from wmpl.MetSim.ML.GenerateSimulations import (DATA_LENGTH, SIM_CLASSES,
+                                                SIM_CLASSES_DICT,
+                                                SIM_CLASSES_NAMES,
+                                                ErosionSimContainer,
+                                                ErosionSimParameters,
+                                                ErosionSimParametersCAMO,
+                                                ErosionSimParametersCAMOWide,
+                                                MetParam, PhysicalParameters,
+                                                extractSimData)
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PyDomainParallelizer import domainParallelizer
 
@@ -155,7 +152,7 @@ class DataGenerator(object):
 
             # if there aren't enough results to fill the batch, collect another batch and fill the gaps with it
             # where extras will be used in subsequent iterations
-            # print(len(data_list), len(res_list), len(filtered_res_list))
+            print(len(data_list), len(res_list), len(filtered_res_list))
 
             if len(res_list) < self.batch_size:
                 continue
