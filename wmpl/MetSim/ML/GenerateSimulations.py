@@ -671,9 +671,9 @@ def extractSimData(
     sim_results.abs_magnitude[np.isnan(sim_results.abs_magnitude)] = np.nanmax(sim_results.abs_magnitude)
 
     # if the peak magnitude is dimmer than the faintest expected peak magnitude, discard it
-    print(np.min(sim_results.abs_magnitude), camera_params.peak_mag_faintest)
+    # print(np.min(sim_results.abs_magnitude), camera_params.peak_mag_faintest)
     if np.min(sim_results.abs_magnitude) >= camera_params.peak_mag_faintest:
-        print('mag')
+        # print('mag')
         return None
 
     # Get indices that are above the faintest limiting magnitude
