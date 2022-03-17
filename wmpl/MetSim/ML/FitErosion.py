@@ -43,9 +43,9 @@ def dataFunction(file_path, param_class_name):
 
     extract_data = extractSimData(sim, param_class_name=param_class_name)
     if extract_data is None:
-        print(file_path, np.min(sim.simulation_results.abs_magnitude))
+        print('bad', file_path, np.min(sim.simulation_results.abs_magnitude))
         return None
-
+    print(file_path, np.min(sim.simulation_results.abs_magnitude))
     # Extract model inputs and outputs
     return sim, extract_data
 
