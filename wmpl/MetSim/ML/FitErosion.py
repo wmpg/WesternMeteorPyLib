@@ -39,11 +39,11 @@ def dataFunction(file_path, param_class_name):
     # Load the pickle file
     sim = loadPickle(*os.path.split(file_path))
     if sim is None:
-        return None
+        return None, file_path
 
     extract_data = extractSimData(sim, param_class_name=param_class_name)
     if extract_data is None:
-        return None
+        return None, file_path
 
     # Extract model inputs and outputs
     return sim, extract_data
@@ -145,20 +145,17 @@ class DataGenerator(object):
             filtered_res_list = []
             # discard bad results
             for i, res in enumerate(new_res):
-                if res is None:
-                    to_delete.append(curr_index + i)
+                if res[0] is None:
+                    to_delete.append(res[1])
                 else:
                     filtered_res_list.append(res)
 
-            print([x[:-10] for x in file_list], curr_index)
-            print([x is None for x in new_res], curr_index)
-            print(to_delete, curr_index)
             res_list += filtered_res_list
             curr_index += self.batch_size
 
             # if you fully loop data, shuffle it
             if curr_index >= len(data_list):
-                data_list = np.delete(data_list, to_delete)
+                data_list = np.setdiff1d(data_list, to_delete)
                 if self.validation:
                     self.validation_list = data_list
                 else:
