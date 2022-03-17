@@ -510,7 +510,6 @@ class ErosionSimContainer:
         """ Run the ablation model and srote results. Stored in self.simulation_results """
         # Run the erosion simulation
         frag_main, results_list, wake_results = runSimulationErosion(self.const, compute_wake=False)
-        print(self.const.__dict__)
         # Store simulation results
         self.simulation_results = SimulationResults(self.const, frag_main, results_list, wake_results)
 
