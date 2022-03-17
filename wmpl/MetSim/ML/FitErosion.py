@@ -150,6 +150,8 @@ class DataGenerator(object):
                 else:
                     filtered_res_list.append(res)
 
+            print([x is None for x in new_res], curr_index)
+            print(to_delete, curr_index)
             res_list += filtered_res_list
             curr_index += self.batch_size
 
