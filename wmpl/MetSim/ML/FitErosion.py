@@ -39,12 +39,10 @@ def dataFunction(file_path, param_class_name):
     # Load the pickle file
     sim = loadPickle(*os.path.split(file_path))
     if sim is None:
-        print('sim none', os.path.split(file_path))
         return None
 
     extract_data = extractSimData(sim, param_class_name=param_class_name)
     if extract_data is None:
-        print('extract data')
         return None
 
     # Extract model inputs and outputs
