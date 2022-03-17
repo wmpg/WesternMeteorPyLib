@@ -43,9 +43,8 @@ def dataFunction(file_path, param_class_name):
 
     extract_data = extractSimData(sim, param_class_name=param_class_name)
     if extract_data is None:
-        print('bad', file_path, np.min(sim.simulation_results.abs_magnitude))
         return None
-    print(file_path, np.min(sim.simulation_results.abs_magnitude))
+
     # Extract model inputs and outputs
     return sim, extract_data
 
@@ -163,11 +162,10 @@ class DataGenerator(object):
                     self.training_list = data_list
 
                 if len(data_list) == 0:
-                    print(to_delete, data_list)
                     raise Exception("No valid data")
                 to_delete = []
                 curr_index = 0
-                self.random_state.shuffle(data_list)
+                # self.random_state.shuffle(data_list)
 
             # if there aren't enough results to fill the batch, collect another batch and fill the gaps with it
             # where extras will be used in subsequent iterations
