@@ -645,12 +645,12 @@ def extractSimData(
 
     # zenith angle above 70 deg is bad
     if phys_params.zenith_angle.val <= np.radians(20):
-        print('zenith')
+        # print('zenith')
         return None
 
     # # make the density less than the grain density (don't let the grain density be set by the bulk density)
     if phys_params.rho.val >= 3500:
-        print('rho')
+        # print('rho')
         return None
 
     # restricting domain to physical values
@@ -671,6 +671,7 @@ def extractSimData(
     sim_results.abs_magnitude[np.isnan(sim_results.abs_magnitude)] = np.nanmax(sim_results.abs_magnitude)
 
     # if the peak magnitude is dimmer than the faintest expected peak magnitude, discard it
+    print(np.min(sim_results.abs_magnitude), camera_params.peak_mag_faintest)
     if np.min(sim_results.abs_magnitude) >= camera_params.peak_mag_faintest:
         print('mag')
         return None
@@ -692,7 +693,7 @@ def extractSimData(
 
     # If no points were visible, skip this solution
     if not np.any(indices_visible):
-        print('not visible')
+        # print('not visible')
         return None
 
     # Compute the minimum time the meteor needs to be visible
@@ -703,7 +704,7 @@ def extractSimData(
 
     # Check if the minimum time is satisfied
     if np.max(time_lim_mag_bright) < min_time_visible:
-        print('minimum time not satisfied')
+        # print('minimum time not satisfied')
         return None
 
     ### ###
