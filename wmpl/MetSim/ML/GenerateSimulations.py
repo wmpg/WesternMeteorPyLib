@@ -133,11 +133,11 @@ class PhysicalParameters:
         self.param_list.append("zenith_angle")
 
         # Density range (kg/m^3)
-        self.rho = MetParam(100, 6000, default=2000)
+        self.rho = MetParam(100, 3500, default=2000)  # 100 - 6000
         self.param_list.append("rho")
 
         # Intrinsic ablation coeff range (s^2/m^2)
-        self.sigma = MetParam(0.005 / 1e6, 0.5 / 1e6, default=0.05 / 1e6)
+        self.sigma = MetParam(0.005 / 1e6, 0.3 / 1e6, default=0.05 / 1e6)
         self.param_list.append("sigma")
 
         ##
@@ -642,16 +642,15 @@ def extractSimData(
     if sim.params.rho.val >= 3500:
         return None
 
-    # DELETE LATER
+    # restricting domain to physical values
     if roi == -1:
-        # restricting domain to physical values
         if sim.params.sigma.val >= 3e-7 - 2e-7 * sim.params.rho.val / 3500:
             return None
     elif roi == 0:
         if sim.params.sigma.val >= 2e-7 or sim.params.rho.val >= 1000:
             return None
     elif roi == 1:
-        if sim.params.sigma.val >= 1e-7 or sim.params.rho.val >= 2500 or sim.param.rho.val <= 1500:
+        if sim.params.sigma.val >= 1e-7 or sim.params.rho.val >= 2500 or sim.params.rho.val <= 1500:
             return None
     elif roi == 2:
         if sim.params.sigma.val >= 1e-7 or sim.params.rho.val >= 2500:

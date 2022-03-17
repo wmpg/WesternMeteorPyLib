@@ -33,7 +33,7 @@ from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PyDomainParallelizer import domainParallelizer
 
 
-def dataFunction(file_path, param_class_name):
+def dataFunction(file_path, param_class_name, roi=None):
 
     # Load the pickle file
     sim = loadPickle(*os.path.split(file_path))
@@ -41,7 +41,7 @@ def dataFunction(file_path, param_class_name):
         return None
 
     # Extract model inputs and outputs
-    return extractSimData(sim, param_class_name=param_class_name, roi=cml_args.roi)
+    return extractSimData(sim, param_class_name=param_class_name, roi=roi)
 
 
 class DataGenerator(object):
@@ -125,7 +125,7 @@ class DataGenerator(object):
             domain = [[file_path, self.param_class_name] for file_path in file_list]
 
             # Postprocess the data in parallel
-            new_res = domainParallelizer(domain, dataFunction)
+            new_res = domainParallelizer(domain, dataFunction, kwarg_dict={'roi': cml_args.roi})
 
             filtered_res_list = []
             # discard bad results
@@ -141,6 +141,11 @@ class DataGenerator(object):
             # if you fully loop data, shuffle it
             if curr_index >= len(data_list):
                 data_list = np.delete(data_list, to_delete)
+                if self.validation:
+                    self.validation_list = data_list
+                else:
+                    self.training_list = data_list
+
                 if len(data_list) == 0:
                     print(to_delete, data_list)
                     raise Exception("No valid data")
@@ -150,7 +155,7 @@ class DataGenerator(object):
 
             # if there aren't enough results to fill the batch, collect another batch and fill the gaps with it
             # where extras will be used in subsequent iterations
-            # print(len(res_list))
+            # print(len(data_list), len(res_list), len(filtered_res_list))
 
             if len(res_list) < self.batch_size:
                 continue
@@ -459,8 +464,6 @@ def evaluateFit2(model, file_path, validation_gen, param_class_name=None, log=No
 
     input_param_dict, norm_input_param_vals, norm_sim_data = ret
 
-    data_length = input_param_dict['camera'].data_length
-
     normalized_output_param_vals = model.predict(norm_sim_data.T[None])  # dimensions (1, 256, 4)
     print()
     print('correct norm', norm_input_param_vals)
@@ -637,7 +640,8 @@ def fitCNNMultiHeaded(
                 model_file = f"{model_title}({i}).json"
                 weights_file = f"{model_title}({i}).h5"
         else:
-            raise Exception('Model file already exists! Stopping so it won\'t be overrided')
+            model = keras.models.Model(inputs=input, outputs=output)
+            # raise Exception('Model file already exists! Stopping so it won\'t be overrided')
     else:
         # Tie inputs together
         model = keras.models.Model(inputs=input, outputs=output)
