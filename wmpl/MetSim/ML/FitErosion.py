@@ -1,13 +1,14 @@
 """ Fit the erosion model using machine learning. """
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 import copy
 import datetime
 import os
 import random
+import time
 from re import A
+from typing import List, Optional, Union
 
 import keras
 import keras.backend as K
@@ -17,28 +18,46 @@ import scipy
 import tensorflow as tf
 from wmpl.MetSim.GUI import SimulationResults
 from wmpl.MetSim.MetSimErosion import runSimulation
-from wmpl.MetSim.ML.GenerateSimulations import (DATA_LENGTH, SIM_CLASSES,
-                                                SIM_CLASSES_DICT,
-                                                SIM_CLASSES_NAMES,
-                                                ErosionSimContainer,
-                                                ErosionSimParameters,
-                                                ErosionSimParametersCAMO,
-                                                ErosionSimParametersCAMOWide,
-                                                MetParam, PhysicalParameters,
-                                                extractSimData)
+from wmpl.MetSim.ML.GenerateSimulations import (
+    DATA_LENGTH,
+    SIM_CLASSES,
+    SIM_CLASSES_DICT,
+    SIM_CLASSES_NAMES,
+    ErosionSimContainer,
+    ErosionSimParameters,
+    ErosionSimParametersCAMO,
+    ErosionSimParametersCAMOWide,
+    MetParam,
+    PhysicalParameters,
+    extractSimData,
+)
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PyDomainParallelizer import domainParallelizer
 
 
-def dataFunction(file_path, param_class_name, roi=None):
-
+def dataFunction(file_path, param_class_name):
     # Load the pickle file
     sim = loadPickle(*os.path.split(file_path))
     if sim is None:
+        print('sim none', os.path.split(file_path))
+        return None
+
+    extract_data = extractSimData(sim, param_class_name=param_class_name)
+    if extract_data is None:
+        print('extract data')
         return None
 
     # Extract model inputs and outputs
-    return extractSimData(sim, param_class_name=param_class_name, roi=roi)
+    return sim, extract_data
+
+
+def calculatePredictedSimulation(phys_params, normalized_output_param_val):
+    # if the param object is passed into dmainParallelizer domain, it will be copied without
+    # explicitly calling copy.deepcopy
+    phys_params.setParamValues(phys_params.getDenormalizedInputs(normalized_output_param_val))
+    const = phys_params.getConst()
+    simulation_results = SimulationResults(const, *runSimulation(const))
+    return phys_params, simulation_results
 
 
 class DataGenerator(object):
@@ -69,6 +88,7 @@ class DataGenerator(object):
         self.batch_size = batch_size
         self.steps_per_epoch = steps_per_epoch
         self.data_list = data_list
+        random.Random(0).shuffle(self.data_list)
 
         self.random_state = random_state
         if self.random_state is None:
@@ -122,7 +142,7 @@ class DataGenerator(object):
             domain = [[file_path, self.param_class_name] for file_path in file_list]
 
             # Postprocess the data in parallel
-            new_res = domainParallelizer(domain, dataFunction, kwarg_dict={'roi': cml_args.roi})
+            new_res = domainParallelizer(domain, dataFunction)
 
             filtered_res_list = []
             # discard bad results
@@ -161,26 +181,17 @@ class DataGenerator(object):
             res_list = res_list[: self.batch_size]
 
             # Split results to input/output list
-            param_dict_list = []
-            param_list = []
-            result_list = []
-            for res in res_list:
-                # Extract results
-                param_dict, input_data_normed, simulated_data_normed = res
-
-                # Add data to model input and output lists
-                param_dict_list.append(param_dict)
-                param_list.append(input_data_normed)
-                result_list.append(simulated_data_normed)
+            sim, extract_data = zip(*res_list)
+            _, result_list, param_list = zip(*extract_data)
 
             res_list = next_res_list
 
             param_list = np.array(param_list)
             result_list = np.array(result_list)
 
-            # yield dimenions [(batch_size, data_length, 1), ...]
+            # yield dimenions [(batch_size, data_length, 4), (batch_size, 10)]
             if self.validation:
-                yield param_dict_list, np.moveaxis(result_list, 1, 2), param_list
+                yield sim, np.moveaxis(result_list, 1, 2), param_list
             else:
                 yield np.moveaxis(result_list, 1, 2), param_list
 
@@ -215,14 +226,24 @@ def loadModel(file_path, model_file='model.json', weights_file='model.h5'):
 
 
 def evaluateFit(model, validation_gen, output=False, display=False, log=None):
+    """
+    Evaluate fit via comparing parameters
+    
+    Arguments:
+        model: []
+        validation_gen: [DataGenerator]
+        output: [bool] Whether to print evaluation info
+        display: [bool] Whether to display evaluation info. Will stop program until plot is closed
+        log: [list of bool] List of 10 boolena elements. If true, when display=True, the axis
+            corresponding to the index will use log scale
+    """
     param_name_list = ["M0", "V0", "ZC", "DENS", "ABL", "ERHT", "ERCO", "ER_S", "ERMm", "ERMM"]
     param_unit = ['(kg)', '(km/s)', '(deg)', '(kg/m3)', '(kg/MJ)', '(km)', '(kg/MJ)', '', '(kg)', '(kg)']
     param_scaling = np.array([1, 1 / 1000, 180 / np.pi, 1, 1e6, 1 / 1000, 1e6, 1, 1, 1])
 
     # Generate validation data
-    validation_data = next(validation_gen)
-    param_dict_list, validation_outputs, validation_inputs = validation_data
-    camera_param = param_dict_list[0]['physical']
+    sim_list, validation_outputs, validation_inputs = next(validation_gen)
+    phys_param = sim_list[0].params
 
     # print([i.shape for i in validation_outputs])
     # Predict data
@@ -236,8 +257,8 @@ def evaluateFit(model, validation_gen, output=False, display=False, log=None):
     ]
 
     # unnormalized data
-    correct_output = np.array(camera_param.getDenormalizedInputs(validation_inputs.T)).T
-    pred_output = np.array(camera_param.getDenormalizedInputs(pred_norm_params.T)).T
+    correct_output = np.array(phys_param.getDenormalizedInputs(validation_inputs.T)).T
+    pred_output = np.array(phys_param.getDenormalizedInputs(pred_norm_params.T)).T
     denorm_errors = np.abs(pred_output - correct_output)
     denorm_perc_errors = denorm_errors / correct_output
 
@@ -446,110 +467,172 @@ def evaluateFit(model, validation_gen, output=False, display=False, log=None):
     return percent_norm_errors
 
 
-def evaluateFit2(model, file_path, validation_gen, param_class_name=None, log=None):
+def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_name=None):
     """ Evaluates model by visually comparing expected simulation values to the simulation values 
-    given from the prediction """
-    evaluateFit(model, iter(validation_gen), display=True, output=True, log=log)
-    print()
+    given from the prediction 
+    
+    Arguments:
+        model: [Model] Trained model to evaluate
+    
+    keyword arguments:
+        mode: [int] 1 for analysis on all meteors in batch, 2 for a random meteor in batch
+    """
 
-    sim = loadPickle(*os.path.split(file_path))
+    sim_list, norm_sim_data, norm_input_param_vals = next(validation_gen)
 
-    ret = extractSimData(sim, param_class_name=param_class_name)
-    if ret is None:
-        print('Dataset is invalid')
-        return
+    # apply neural network on normalized data to get a set of parameters
+    normalized_output_param_vals = model.predict(norm_sim_data)  # dimensions (batch_size, 256, 4)
 
-    input_param_dict, norm_input_param_vals, norm_sim_data = ret
+    # if there is no erosion, set the erosion height to 0 for the simulation
+    if noerosion:
+        normalized_output_param_vals[:, 5] = -1
 
-    normalized_output_param_vals = model.predict(norm_sim_data.T[None])  # dimensions (1, 256, 4)
-    print()
-    print('correct norm', norm_input_param_vals)
-    print('pred norm', list(normalized_output_param_vals[0]))
-    print()
-    print('perc error', list(np.abs(normalized_output_param_vals[0] - np.array(norm_input_param_vals)) * 100))
-    print()
-    phys_params = copy.deepcopy(input_param_dict['physical'])
-    phys_params.setParamValues(phys_params.getDenormalizedInputs(normalized_output_param_vals[0]))
-    const = phys_params.getConst()
-    simulation_results = SimulationResults(const, *runSimulation(const))
+    if mode == 2:
+        print()
+        print('correct norm', list(norm_input_param_vals[0]))
+        print('pred norm', list(normalized_output_param_vals[0]))
+        print()
+        print(
+            'perc error',
+            list(np.abs(normalized_output_param_vals[0] - np.array(norm_input_param_vals[0])) * 100),
+        )
+        print()
 
-    starting_height = (
-        simulation_results.brightest_height_arr[np.argmax(simulation_results.abs_magnitude < 8)] / 1000
-    )
-    ending_height = (
-        simulation_results.brightest_height_arr[-np.argmax(simulation_results.abs_magnitude[::-1] < 8) - 1]
-        / 1000
-        - 10
-    )
-    print('correct', input_param_dict['physical'].getInputs())
-    print('predicted', phys_params.getInputs())
+    camera_param = SIM_CLASSES_DICT.get(param_class_name, ErosionSimParameters)()
+    correct_phys_params = sim_list[0].params
 
-    fig, ax = plt.subplots(2, 2)
-    ax[0, 0].plot(norm_sim_data[3], norm_sim_data[1])
-    ax[0, 0].set_xlabel('Mag')
-    ax[0, 0].set_ylabel('Ht')
+    # run the simulation for each set of parameters in the batch and compare them to what they should be
+    domain = [
+        [correct_phys_params, normalized_output_param_val]
+        for normalized_output_param_val in normalized_output_param_vals
+    ]
 
-    ax[1, 0].scatter(np.diff(norm_sim_data[2]), norm_sim_data[1][:-1], marker='o', s=2)
-    ax[1, 0].set_xlabel('Velocity')
-    ax[1, 0].set_ylabel('Ht')
+    # Postprocess the data in parallel
+    ret = domainParallelizer(domain, calculatePredictedSimulation)
+    phys_param_list, pred_simulation_result_list = zip(*ret)
 
-    ax[0, 1].plot(sim.simulation_results.abs_magnitude, sim.simulation_results.brightest_height_arr)
-    ax[0, 1].set_xlabel('Mag')
-    ax[0, 1].set_ylabel('Ht')
+    if mode == 2:
+        simulation_results = pred_simulation_result_list[0]
+        phys_params = phys_param_list[0]
 
-    ax[1, 1].scatter(
-        np.diff(sim.simulation_results.brightest_length_arr / 1000) / sim.const.dt,
-        sim.simulation_results.brightest_height_arr[:-1],
-        marker='o',
-        s=2,
-    )
-    ax[1, 1].set_xlabel('Velocity (km/s)')
-    ax[1, 1].set_ylabel('Ht')
+        starting_height = (
+            simulation_results.brightest_height_arr[np.argmax(simulation_results.abs_magnitude < 8)] / 1000
+        )
+        ending_height = (
+            simulation_results.brightest_height_arr[
+                -np.argmax(simulation_results.abs_magnitude[::-1] < 8) - 1
+            ]
+            / 1000
+            - 10
+        )
 
-    plt.show()
+        sim = sim_list[0]
+        print('correct', correct_phys_params.getInputs())
+        print('predicted', phys_params.getInputs())
 
-    fig, ax = plt.subplots(2, sharey=True)
+        fig, ax = plt.subplots(2, 2, sharey='col')
+        ax[0, 0].plot(norm_sim_data[0, :, 3], norm_sim_data[0, :, 1])
+        ax[0, 0].set_xlabel('Mag')
+        ax[0, 0].set_ylabel('Ht')
 
-    ax[0].plot(
-        simulation_results.abs_magnitude[:-1],
-        simulation_results.brightest_height_arr[:-1] / 1000,
-        label='ML predicted output',
-    )
-    ax[1].scatter(
-        np.diff(simulation_results.brightest_length_arr / 1000)[:-1] / sim.const.dt,
-        simulation_results.brightest_height_arr[:-2] / 1000,
-        marker='o',
-        s=2,
-        label='ML predicted output',
-    )
+        ax[1, 0].scatter(np.diff(norm_sim_data[0, :, 2]), norm_sim_data[0, :-1, 1], marker='o', s=2)
+        ax[1, 0].set_xlabel('Velocity')
+        ax[1, 0].set_ylabel('Ht')
 
-    ax[0].plot(
-        sim.simulation_results.abs_magnitude[:-1],
-        sim.simulation_results.brightest_height_arr[:-1] / 1000,
-        label='Correct simulated output',
-        c='k',
-    )
-    ax[1].scatter(
-        np.diff(sim.simulation_results.brightest_length_arr / 1000)[:-1] / sim.const.dt,
-        sim.simulation_results.brightest_height_arr[:-2] / 1000,
-        marker='o',
-        c='k',
-        s=2,
-        label='Correct simulated output',
-    )
+        ax[0, 1].plot(sim.simulation_results.abs_magnitude, sim.simulation_results.brightest_height_arr)
+        ax[0, 1].set_xlabel('Mag')
+        ax[0, 1].set_ylabel('Ht')
 
-    ax[0].set_ylabel('Height (km)')
-    ax[0].set_xlabel("Magnitude")
-    ax[0].legend()
-    ax[1].set_ylabel('Height (km)')
-    ax[1].set_xlabel("Velocity (km/s)")
-    ax[1].legend()
+        ax[1, 1].scatter(
+            np.diff(sim.simulation_results.brightest_length_arr / 1000) / sim.const.dt,
+            sim.simulation_results.brightest_height_arr[:-1],
+            marker='o',
+            s=2,
+        )
+        ax[1, 1].set_xlabel('Velocity (km/s)')
+        ax[1, 1].set_ylabel('Ht')
 
-    ax[0].set_ylim([ending_height, starting_height])
-    ax[1].set_ylim([ending_height, starting_height])
-    ax[0].set_xlim(right=8)
+        plt.show()
 
-    plt.show()
+        fig, ax = plt.subplots(2, sharey=True)
+
+        ax[0].plot(
+            simulation_results.abs_magnitude[:-1],
+            simulation_results.brightest_height_arr[:-1] / 1000,
+            label='ML predicted output',
+        )
+        ax[1].scatter(
+            np.diff(simulation_results.brightest_length_arr / 1000)[:-1] / sim.const.dt,
+            simulation_results.brightest_height_arr[:-2] / 1000,
+            marker='o',
+            s=2,
+            label='ML predicted output',
+        )
+
+        ax[0].plot(
+            sim.simulation_results.abs_magnitude[:-1],
+            sim.simulation_results.brightest_height_arr[:-1] / 1000,
+            label='Correct simulated output',
+            c='k',
+        )
+        ax[1].scatter(
+            np.diff(sim.simulation_results.brightest_length_arr / 1000)[:-1] / sim.const.dt,
+            sim.simulation_results.brightest_height_arr[:-2] / 1000,
+            marker='o',
+            c='k',
+            s=2,
+            label='Correct simulated output',
+        )
+
+        ax[0].set_ylabel('Height (km)')
+        ax[0].set_xlabel("Magnitude")
+        ax[0].legend()
+        ax[1].set_ylabel('Height (km)')
+        ax[1].set_xlabel("Velocity (km/s)")
+        ax[1].legend()
+
+        ax[0].set_ylim([ending_height, starting_height])
+        ax[1].set_ylim([ending_height, starting_height])
+        ax[0].set_xlim(right=8)
+
+        plt.show()
+    else:
+        t1 = time.perf_counter()
+        denorm_mag_total_err_arr = np.zeros(len(pred_simulation_result_list))
+        denorm_length_total_err_arr = np.zeros(len(pred_simulation_result_list))
+        for i, (pred_simulation_result, sim) in enumerate(zip(pred_simulation_result_list, sim_list)):
+            pred_mag_func = scipy.interpolate.interp1d(
+                pred_simulation_result.brightest_height_arr, pred_simulation_result.abs_magnitude
+            )
+            pred_length_func = scipy.interpolate.interp1d(
+                pred_simulation_result.brightest_height_arr, pred_simulation_result.brightest_length_arr,
+            )
+
+            filter = (sim.simulation_results.brightest_height_arr > camera_param.ht_min) & (
+                sim.simulation_results.brightest_height_arr < camera_param.ht_max
+            )
+            mag_err = np.abs(
+                pred_mag_func(sim.simulation_results.brightest_height_arr[filter])
+                - sim.simulation_results.abs_magnitude[filter]
+            )
+            length_err = np.abs(
+                pred_length_func(sim.simulation_results.brightest_height_arr[filter])
+                - sim.simulation_results.brightest_length_arr[filter]
+            )
+
+            denorm_mag_total_err_arr[i] = np.sqrt(np.sum(mag_err ** 2))
+            denorm_length_total_err_arr[i] = np.sqrt(np.sum(length_err ** 2))
+
+        print(time.perf_counter() - t1)
+        plt.hist(denorm_mag_total_err_arr, bins='auto')
+        plt.xlabel('Magnitude')
+        plt.ylabel("Count")
+        plt.show()
+
+        plt.hist(denorm_length_total_err_arr / 1000, bins='auto')
+        plt.xlabel('Length (km)')
+        plt.ylabel("Count")
+        plt.show()
 
 
 def fitCNNMultiHeaded(
@@ -654,7 +737,7 @@ def fitCNNMultiHeaded(
         return K.sum(K.square(y_true - y_pred) * weights / K.sum(weights), axis=-1)
 
     # Compile the model
-    model.compile(optimizer='adam', loss=loss_fn)
+    model.compile(optimizer='adam', loss='mse')
 
     # Save the model to disk BEFORE fitting, so that it plus the checkpoint will have all information
     model_json = model.to_json()
@@ -741,8 +824,8 @@ if __name__ == "__main__":
         '-e',
         '--evaluate',
         type=int,
-        help='Inputting this parameter will not train the model, but instead evaluate the model by visually '
-        'showing what it predicts compared to the simulation.',
+        help='0 evaluates based on parameters. 1 evaluates based on simulated data. 2 Evaluates based on '
+        'simulated data but acts on a single meteor and will show extra plots.',
     )
     arg_parser.add_argument(
         '--grouping',
@@ -762,9 +845,7 @@ if __name__ == "__main__":
         help='Providing 1 will specify whether a plot should be a log plot, 0 otherwise. Must be given '
         'when in evaluation mode.',
     )
-    arg_parser.add_argument(
-        '--roi', type=int,
-    )
+    arg_parser.add_argument('--noerosion', action='store_true')
     arg_parser.add_argument('--fitparam', type=int)
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -790,17 +871,21 @@ if __name__ == "__main__":
     data_list = getFileList(cml_args.data_folder)
 
     # randomize the order of the dataset to remove bias
-    random.Random(0).shuffle(data_list)
-
     print("{:d} inputs used for training/testing...".format(len(data_list)))
 
     if cml_args.evaluate is not None:
         # Init the validation generator
-        data_gen = DataGenerator(
-            data_list, batch_size, steps_per_epoch, param_class_name=cml_args.classname, validation=True
+        data_gen = iter(
+            DataGenerator(
+                data_list, batch_size, steps_per_epoch, param_class_name=cml_args.classname, validation=True
+            )
         )
         model = loadModel(cml_args.output_dir, model_file, weights_file)
-        evaluateFit2(model, data_list[cml_args.evaluate], data_gen, cml_args.classname, log=cml_args.logplot)
+
+        if cml_args.evaluate == 0:
+            evaluateFit(model, data_gen, display=True, output=True, log=cml_args.logplot)
+        else:
+            evaluateFit2(model, data_gen, mode=cml_args.evaluate, noerosion=cml_args.noerosion)
     else:
         # Init the data generator
         data_gen = DataGenerator(
@@ -811,14 +896,6 @@ if __name__ == "__main__":
         validation_gen = DataGenerator(
             data_list, batch_size, steps_per_epoch, param_class_name=cml_args.classname, validation=True
         )
-
-        # ## TEST DATA GEN ###
-        # for epoch in range(data_gen.fit_epochs):
-        #     for step in range(data_gen.steps_per_epoch):
-        #         print(epoch, "/", step)
-        #         result_list, param_list = next(iter(data_gen))
-
-        #         print(len(param_list))
 
         # Fit the model
         fitCNNMultiHeaded(

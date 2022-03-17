@@ -575,12 +575,13 @@ def normalizeSimulations(
 
 
 def extractSimData(
-    sim: ErosionSimContainer,
+    sim: Optional[ErosionSimContainer] = None,
+    sim_results: Optional[SimulationResults] = None,
     check_only: bool = False,
     param_class_name: Optional[str] = None,
+    phys_params: Optional[PhysicalParameters] = None,
     camera_params: Optional[ErosionSimParameters] = None,
     add_noise: bool = False,
-    roi: int = -1,  # remove parameter
 ) -> Optional[tuple]:
     """ Extract input parameters and model outputs from the simulation container and normalize them. 
 
@@ -599,10 +600,16 @@ def extractSimData(
     Return: 
         - None if the simulation does not satisfy filter conditions.
         - postprocess_params if check_only=True and the simulation satisfies the conditions.
-        - params, input_data_normed, simulated_data_normed if check_only=False and the simulation satisfies 
+        - params, input_params_normed, simulated_data_normed if check_only=False and the simulation satisfies 
             the conditions.
 
     """
+    if sim is None and (sim_results is None or camera_params is None or phys_params is None):
+        raise Exception(
+            'Must input either an ErosionSimContainer or a SimulationResults with physical and '
+            'camera parameters.'
+        )
+
     if camera_params is None:
         if param_class_name is not None:
             # Override the system parameters using the given class
@@ -615,68 +622,69 @@ def extractSimData(
             # have a param_class_name supplied, but this is a default.
             camera_params = ErosionSimParameters()
 
-    param_dict = {'camera': camera_params, 'physical': sim.params}
-    params = param_dict['camera']
+    if sim is not None:
+        phys_params = sim.params
+        sim_results = sim.simulation_results
+
+    param_dict = {'camera': camera_params, 'physical': phys_params}
 
     ### DRAW LIMITING MAGNITUDE AND LENGTH DELAY ###
 
     # If the drawn values have already been given, use them
     if add_noise:
         # Draw limiting magnitude and length end magnitude and length delay
-        starting_lim_mag = params.starting_lim_mag.generateVal()
-        ending_lim_mag = params.ending_lim_mag.generateVal()
-        len_delay = params.len_delay.generateVal()
+        starting_lim_mag = camera_params.starting_lim_mag.generateVal()
+        ending_lim_mag = camera_params.ending_lim_mag.generateVal()
+        len_delay = camera_params.len_delay.generateVal()
     else:
-        starting_lim_mag = params.starting_lim_mag.val
-        ending_lim_mag = params.ending_lim_mag.val
-        len_delay = params.len_delay.val
+        starting_lim_mag = camera_params.starting_lim_mag.val
+        ending_lim_mag = camera_params.ending_lim_mag.val
+        len_delay = camera_params.len_delay.val
 
     ### ###
 
     # zenith angle above 70 deg is bad
-    if sim.params.zenith_angle.val <= np.radians(20):
+    if phys_params.zenith_angle.val <= np.radians(20):
         return None
 
     # # make the density less than the grain density (don't let the grain density be set by the bulk density)
-    if sim.params.rho.val >= 3500:
+    if phys_params.rho.val >= 3500:
         return None
 
     # restricting domain to physical values
-    if roi == -1:
-        if sim.params.sigma.val >= 3e-7 - 2e-7 * sim.params.rho.val / 3500:
-            return None
-    elif roi == 0:
-        if sim.params.sigma.val >= 2e-7 or sim.params.rho.val >= 1000:
-            return None
-    elif roi == 1:
-        if sim.params.sigma.val >= 1e-7 or sim.params.rho.val >= 2500 or sim.params.rho.val <= 1500:
-            return None
-    elif roi == 2:
-        if sim.params.sigma.val >= 1e-7 or sim.params.rho.val >= 2500:
-            return None
+    # if roi == -1:
+    #     if sim.params.sigma.val >= 3e-7 - 2e-7 * sim.params.rho.val / 3500:
+    #         return None
+    # elif roi == 0:
+    #     if sim.params.sigma.val >= 2e-7 or sim.params.rho.val >= 1000:
+    #         return None
+    # elif roi == 1:
+    #     if sim.params.sigma.val >= 1e-7 or sim.params.rho.val >= 2500 or sim.params.rho.val <= 1500:
+    #         return None
+    # elif roi == 2:
+    #     if sim.params.sigma.val >= 1e-7 or sim.params.rho.val >= 2500:
+    #         return None
 
     # Fix NaN values in the simulated magnitude
-    sim.simulation_results.abs_magnitude[np.isnan(sim.simulation_results.abs_magnitude)] = np.nanmax(
-        sim.simulation_results.abs_magnitude
-    )
+    sim_results.abs_magnitude[np.isnan(sim_results.abs_magnitude)] = np.nanmax(sim_results.abs_magnitude)
 
     # if the peak magnitude is dimmer than the faintest expected peak magnitude, discard it
-    if np.min(sim.simulation_results.abs_magnitude) >= params.peak_mag_faintest:
+    if np.min(sim_results.abs_magnitude) >= camera_params.peak_mag_faintest:
         return None
 
     # Get indices that are above the faintest limiting magnitude
     min_lim_mag = min(starting_lim_mag, ending_lim_mag)
-    indices_visible = np.ones(sim.simulation_results.abs_magnitude.shape, dtype=bool)
+    indices_visible = np.ones(sim_results.abs_magnitude.shape, dtype=bool)
     # filtering out anything before what's visible by the wide camera
-    indices_visible[: np.argmax(sim.simulation_results.abs_magnitude <= starting_lim_mag)] = False
+    indices_visible[: np.argmax(sim_results.abs_magnitude <= starting_lim_mag)] = False
     # if last element is too bright filtering ending doesn't do anything
-    if sim.simulation_results.abs_magnitude[-1] > ending_lim_mag:
-        indices_visible[-np.argmax(sim.simulation_results.abs_magnitude[::-1] <= ending_lim_mag) :] = False
+    if sim_results.abs_magnitude[-1] > ending_lim_mag:
+        indices_visible[-np.argmax(sim_results.abs_magnitude[::-1] <= ending_lim_mag) :] = False
     # filtering out anything dimmer than what's visible by wide and narrow cameras
-    indices_visible[sim.simulation_results.abs_magnitude >= min_lim_mag] = False
+    indices_visible[sim_results.abs_magnitude >= min_lim_mag] = False
     indices_visible[
-        (sim.simulation_results.brightest_height_arr > params.ht_max)
-        | (sim.simulation_results.brightest_height_arr < params.ht_min)
+        (sim_results.brightest_height_arr > camera_params.ht_max)
+        | (sim_results.brightest_height_arr < camera_params.ht_min)
     ] = False
 
     # If no points were visible, skip this solution
@@ -685,9 +693,9 @@ def extractSimData(
         return None
 
     # Compute the minimum time the meteor needs to be visible
-    min_time_visible = params.visibility_time_min
+    min_time_visible = camera_params.visibility_time_min
 
-    time_lim_mag_bright = sim.simulation_results.time_arr[indices_visible]
+    time_lim_mag_bright = sim_results.time_arr[indices_visible]
     time_lim_mag_bright -= time_lim_mag_bright[0]
 
     # Check if the minimum time is satisfied
@@ -698,10 +706,10 @@ def extractSimData(
     ### ###
 
     # Select time, magnitude, height, and length above the visibility limit
-    time_visible = sim.simulation_results.time_arr[indices_visible]
-    mag_visible = sim.simulation_results.abs_magnitude[indices_visible]
-    ht_visible = sim.simulation_results.brightest_height_arr[indices_visible]
-    len_visible = sim.simulation_results.brightest_length_arr[indices_visible]
+    time_visible = sim_results.time_arr[indices_visible]
+    mag_visible = sim_results.abs_magnitude[indices_visible]
+    ht_visible = sim_results.brightest_height_arr[indices_visible]
+    len_visible = sim_results.brightest_length_arr[indices_visible]
 
     # Resample the time to the system FPS
     mag_interpol = scipy.interpolate.CubicSpline(time_visible, mag_visible)
@@ -710,7 +718,7 @@ def extractSimData(
 
     # Create a new time array according to the FPS
     # time_sampled = np.arange(np.min(time_visible), np.max(time_visible), 1.0 / params.fps)
-    time_sampled = np.linspace(np.min(time_visible), np.max(time_visible), params.data_length)
+    time_sampled = np.linspace(np.min(time_visible), np.max(time_visible), camera_params.data_length)
 
     # Create new mag, height and length arrays at FPS frequency
     mag_sampled = mag_interpol(time_sampled)
@@ -779,11 +787,11 @@ def extractSimData(
     ### ###
 
     # Construct input data vector with normalized values
-    input_data_normed = sim.getNormalizedInputs()
+    input_params_normed = phys_params.getNormalizedInputs()
 
     # Normalize simulated data
     time_normed, ht_normed, len_normed, mag_normed = normalizeSimulations(
-        param_dict['physical'], param_dict['camera'], time_sampled, ht_sampled, len_sampled, mag_sampled
+        phys_params, camera_params, time_sampled, ht_sampled, len_sampled, mag_sampled
     )
 
     # for magnitudes already normalized to [0,1] based on magnitude values (where 0 is the dimmest),
@@ -795,15 +803,15 @@ def extractSimData(
     # Generate vector with simulated data
     simulated_data_normed = np.vstack(
         [
-            padOrTruncate(time_normed, params.data_length, side='end'),
-            padOrTruncate(ht_normed, params.data_length, side='end'),
-            padOrTruncate(len_normed, params.data_length, side='end'),
-            padOrTruncate(mag_normed, params.data_length, side='end'),
+            padOrTruncate(time_normed, camera_params.data_length, side='end'),
+            padOrTruncate(ht_normed, camera_params.data_length, side='end'),
+            padOrTruncate(len_normed, camera_params.data_length, side='end'),
+            padOrTruncate(mag_normed, camera_params.data_length, side='end'),
         ]
     )
 
     # Return input data and results
-    return param_dict, input_data_normed, simulated_data_normed
+    return param_dict, simulated_data_normed, input_params_normed
 
 
 def saveCleanData(output_dir: str, random_seed: int, erosion_on: bool = True, fixed=None):
