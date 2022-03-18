@@ -1,6 +1,7 @@
 """ Fit the erosion model using machine learning. """
 
-from __future__ import absolute_import, division, print_function, unicode_literals
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
 
 import copy
 import datetime
@@ -18,19 +19,15 @@ import scipy
 import tensorflow as tf
 from wmpl.MetSim.GUI import SimulationResults
 from wmpl.MetSim.MetSimErosion import runSimulation
-from wmpl.MetSim.ML.GenerateSimulations import (
-    DATA_LENGTH,
-    SIM_CLASSES,
-    SIM_CLASSES_DICT,
-    SIM_CLASSES_NAMES,
-    ErosionSimContainer,
-    ErosionSimParameters,
-    ErosionSimParametersCAMO,
-    ErosionSimParametersCAMOWide,
-    MetParam,
-    PhysicalParameters,
-    extractSimData,
-)
+from wmpl.MetSim.ML.GenerateSimulations import (DATA_LENGTH, SIM_CLASSES,
+                                                SIM_CLASSES_DICT,
+                                                SIM_CLASSES_NAMES,
+                                                ErosionSimContainer,
+                                                ErosionSimParameters,
+                                                ErosionSimParametersCAMO,
+                                                ErosionSimParametersCAMOWide,
+                                                MetParam, PhysicalParameters,
+                                                extractSimData)
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PyDomainParallelizer import domainParallelizer
 
@@ -155,6 +152,7 @@ class DataGenerator(object):
 
             # if you fully loop data, shuffle it
             if curr_index >= len(data_list):
+                # delete specific files since threads don't preserve order
                 data_list = np.setdiff1d(data_list, to_delete)
                 if self.validation:
                     self.validation_list = data_list
@@ -165,12 +163,10 @@ class DataGenerator(object):
                     raise Exception("No valid data")
                 to_delete = []
                 curr_index = 0
-                # self.random_state.shuffle(data_list)
+                self.random_state.shuffle(data_list)
 
             # if there aren't enough results to fill the batch, collect another batch and fill the gaps with it
             # where extras will be used in subsequent iterations
-            print(len(data_list), len(res_list), len(filtered_res_list))
-
             if len(res_list) < self.batch_size:
                 continue
 
@@ -594,9 +590,8 @@ def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_nam
 
         plt.show()
     else:
-        t1 = time.perf_counter()
-        denorm_mag_total_err_arr = np.zeros(len(pred_simulation_result_list))
-        denorm_length_total_err_arr = np.zeros(len(pred_simulation_result_list))
+        mag_err_arr = np.array([])
+        length_err_arr = np.array([])
         for i, (pred_simulation_result, sim) in enumerate(zip(pred_simulation_result_list, sim_list)):
             pred_mag_func = scipy.interpolate.interp1d(
                 pred_simulation_result.brightest_height_arr, pred_simulation_result.abs_magnitude
@@ -608,27 +603,34 @@ def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_nam
             filter = (sim.simulation_results.brightest_height_arr > camera_param.ht_min) & (
                 sim.simulation_results.brightest_height_arr < camera_param.ht_max
             )
-            mag_err = np.abs(
+            mag_err = (
                 pred_mag_func(sim.simulation_results.brightest_height_arr[filter])
                 - sim.simulation_results.abs_magnitude[filter]
             )
-            length_err = np.abs(
+
+            length_err = (
                 pred_length_func(sim.simulation_results.brightest_height_arr[filter])
                 - sim.simulation_results.brightest_length_arr[filter]
             )
 
-            denorm_mag_total_err_arr[i] = np.sqrt(np.sum(mag_err ** 2))
-            denorm_length_total_err_arr[i] = np.sqrt(np.sum(length_err ** 2))
+            mag_err_arr = np.append(mag_err_arr, mag_err)
+            length_err_arr = np.append(length_err_arr, length_err)
 
-        print(time.perf_counter() - t1)
-        plt.hist(denorm_mag_total_err_arr, bins='auto')
-        plt.xlabel('Magnitude')
+        plt.subplot(1, 2, 1)
+        plt.hist(mag_err_arr, bins='auto')
+        plt.xlabel('Magnitude error')
+        plt.ylabel("Count")
+
+        plt.subplot(1, 2, 2)
+        plt.hist(length_err_arr / 1000, bins='auto')
+        plt.xlabel('Length error (km)')
         plt.ylabel("Count")
         plt.show()
 
-        plt.hist(denorm_length_total_err_arr / 1000, bins='auto')
-        plt.xlabel('Length (km)')
-        plt.ylabel("Count")
+        plt.hist2d(mag_err_arr, length_err_arr, bins=[200, 200])
+        plt.xlabel('Magnitude error')
+        plt.ylabel('Length error (km)')
+        plt.colorbar()
         plt.show()
 
 
