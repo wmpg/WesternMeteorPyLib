@@ -1,7 +1,6 @@
 """ Fit the erosion model using machine learning. """
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 import copy
 import datetime
@@ -19,15 +18,19 @@ import scipy
 import tensorflow as tf
 from wmpl.MetSim.GUI import SimulationResults
 from wmpl.MetSim.MetSimErosion import runSimulation
-from wmpl.MetSim.ML.GenerateSimulations import (DATA_LENGTH, SIM_CLASSES,
-                                                SIM_CLASSES_DICT,
-                                                SIM_CLASSES_NAMES,
-                                                ErosionSimContainer,
-                                                ErosionSimParameters,
-                                                ErosionSimParametersCAMO,
-                                                ErosionSimParametersCAMOWide,
-                                                MetParam, PhysicalParameters,
-                                                extractSimData)
+from wmpl.MetSim.ML.GenerateSimulations import (
+    DATA_LENGTH,
+    SIM_CLASSES,
+    SIM_CLASSES_DICT,
+    SIM_CLASSES_NAMES,
+    ErosionSimContainer,
+    ErosionSimParameters,
+    ErosionSimParametersCAMO,
+    ErosionSimParametersCAMOWide,
+    MetParam,
+    PhysicalParameters,
+    extractSimData,
+)
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PyDomainParallelizer import domainParallelizer
 
@@ -47,8 +50,7 @@ def dataFunction(file_path, param_class_name):
 
 
 def calculatePredictedSimulation(phys_params, normalized_output_param_val):
-    # if the param object is passed into dmainParallelizer domain, it will be copied without
-    # explicitly calling copy.deepcopy
+    phys_params = copy.deepcopy(phys_params)
     phys_params.setParamValues(phys_params.getDenormalizedInputs(normalized_output_param_val))
     const = phys_params.getConst()
     simulation_results = SimulationResults(const, *runSimulation(const))
@@ -457,7 +459,7 @@ def evaluateFit(model, validation_gen, output=False, display=False, log=None):
         print(str(len(param_corr) * "{:9.4f} ").format(*param_corr))
         print(f'Density-ablation correlation: {dens_abl_corr}')
 
-    return percent_norm_errors
+    return percent_norm_errors, denorm_perc_errors_av, param_corr
 
 
 def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_name=None):
@@ -478,7 +480,11 @@ def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_nam
 
     # if there is no erosion, set the erosion height to 0 for the simulation
     if noerosion:
+        # normalized_output_param_vals[:, 3] = norm_input_param_vals[:, 3]
+        normalized_output_param_vals[:, :3] = norm_input_param_vals[:, :3]
+        # normalized_output_param_vals[:, :5] = norm_input_param_vals[:, :5]
         normalized_output_param_vals[:, 5] = -1
+        # see what happens with correct values
 
     if mode == 2:
         print()
@@ -501,25 +507,17 @@ def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_nam
     ]
 
     # Postprocess the data in parallel
+    t1 = time.perf_counter()
     ret = domainParallelizer(domain, calculatePredictedSimulation)
     phys_param_list, pred_simulation_result_list = zip(*ret)
+    print(time.perf_counter() - t1)
 
     if mode == 2:
-        simulation_results = pred_simulation_result_list[0]
+        sim = sim_list[0]
+
+        pred_simulation_results = pred_simulation_result_list[0]
         phys_params = phys_param_list[0]
 
-        starting_height = (
-            simulation_results.brightest_height_arr[np.argmax(simulation_results.abs_magnitude < 8)] / 1000
-        )
-        ending_height = (
-            simulation_results.brightest_height_arr[
-                -np.argmax(simulation_results.abs_magnitude[::-1] < 8) - 1
-            ]
-            / 1000
-            - 10
-        )
-
-        sim = sim_list[0]
         print('correct', correct_phys_params.getInputs())
         print('predicted', phys_params.getInputs())
 
@@ -550,13 +548,13 @@ def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_nam
         fig, ax = plt.subplots(2, sharey=True)
 
         ax[0].plot(
-            simulation_results.abs_magnitude[:-1],
-            simulation_results.brightest_height_arr[:-1] / 1000,
+            pred_simulation_results.abs_magnitude[:-1],
+            pred_simulation_results.brightest_height_arr[:-1] / 1000,
             label='ML predicted output',
         )
         ax[1].scatter(
-            np.diff(simulation_results.brightest_length_arr / 1000)[:-1] / sim.const.dt,
-            simulation_results.brightest_height_arr[:-2] / 1000,
+            np.diff(pred_simulation_results.brightest_length_arr / 1000)[:-1] / sim.const.dt,
+            pred_simulation_results.brightest_height_arr[:-2] / 1000,
             marker='o',
             s=2,
             label='ML predicted output',
@@ -584,6 +582,18 @@ def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_nam
         ax[1].set_xlabel("Velocity (km/s)")
         ax[1].legend()
 
+        starting_height = (
+            pred_simulation_results.brightest_height_arr[np.argmax(pred_simulation_results.abs_magnitude < 8)]
+            / 1000
+        )
+        ending_height = (
+            pred_simulation_results.brightest_height_arr[
+                -np.argmax(pred_simulation_results.abs_magnitude[::-1] < 8) - 1
+            ]
+            / 1000
+            - 10
+        )
+
         ax[0].set_ylim([ending_height, starting_height])
         ax[1].set_ylim([ending_height, starting_height])
         ax[0].set_xlim(right=8)
@@ -592,6 +602,10 @@ def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_nam
     else:
         mag_err_arr = np.array([])
         length_err_arr = np.array([])
+
+        dh_arr = np.array([])
+        dm_arr = np.array([])
+
         for i, (pred_simulation_result, sim) in enumerate(zip(pred_simulation_result_list, sim_list)):
             pred_mag_func = scipy.interpolate.interp1d(
                 pred_simulation_result.brightest_height_arr, pred_simulation_result.abs_magnitude
@@ -603,6 +617,14 @@ def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_nam
             filter = (sim.simulation_results.brightest_height_arr > camera_param.ht_min) & (
                 sim.simulation_results.brightest_height_arr < camera_param.ht_max
             )
+
+            cor_i = np.argmin(sim.simulation_results.abs_magnitude)
+            sim_i = np.argmin(pred_simulation_result.abs_magnitude)
+            h1 = sim.simulation_results.brightest_height_arr[cor_i]
+            h2 = pred_simulation_result.brightest_height_arr[sim_i]
+            m1 = sim.simulation_results.abs_magnitude[cor_i]
+            m2 = pred_mag_func(h1)
+
             mag_err = (
                 pred_mag_func(sim.simulation_results.brightest_height_arr[filter])
                 - sim.simulation_results.abs_magnitude[filter]
@@ -615,27 +637,66 @@ def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_nam
 
             mag_err_arr = np.append(mag_err_arr, mag_err)
             length_err_arr = np.append(length_err_arr, length_err)
+            dm_arr = np.append(dm_arr, m2 - m1)
+            dh_arr = np.append(dh_arr, h2 - h1)
 
+        mag_filter = (mag_err_arr > -2) & (mag_err_arr < 2)
+        length_filter = (length_err_arr > -20_000) & (length_err_arr < 20_000)
         plt.subplot(1, 2, 1)
-        plt.hist(mag_err_arr, bins='auto')
+        plt.hist(mag_err_arr[mag_filter], bins=200, density=True)
         plt.xlabel('Magnitude error')
-        plt.ylabel("Count")
+        plt.ylabel("Probability density")
+        plt.title(
+            rf'$\sigma$ = {np.std(mag_err_arr[mag_filter]):.3f},  $\mu$ = {np.mean(mag_err_arr[mag_filter]):.3f}'
+        )
+        # print(list(length_err_arr))
 
         plt.subplot(1, 2, 2)
-        plt.hist(length_err_arr / 1000, bins='auto')
+        plt.hist(length_err_arr[length_filter] / 1000, bins=200, density=True)
         plt.xlabel('Length error (km)')
-        plt.ylabel("Count")
+        plt.ylabel("Probability density")
+        plt.title(
+            rf'$\sigma$ = {np.std(length_err_arr[length_filter])/1000:.3f},  $\mu$ = {np.mean(length_err_arr[length_filter])/1000:.3f}'
+        )
         plt.show()
 
-        plt.hist2d(mag_err_arr, length_err_arr, bins=[200, 200])
+        plt.hist2d(
+            mag_err_arr[mag_filter & length_filter],
+            length_err_arr[mag_filter & length_filter] / 1000,
+            bins=[100, 100],
+        )
         plt.xlabel('Magnitude error')
         plt.ylabel('Length error (km)')
-        plt.colorbar()
+        plt.show()
+
+        plt.subplot(1, 2, 1)
+        plt.hist(dm_arr, bins='auto', density=True)
+        plt.xlabel('Magnitude difference at expected peak height [pred-correct]')
+        plt.ylabel("Probability density")
+
+        plt.subplot(1, 2, 2)
+        plt.hist(dh_arr / 1000, bins='auto', density=True)
+        plt.xlabel('Peak height difference [pred-correct] (km)')
+        plt.ylabel("Probability density")
+        plt.show()
+
+        # plt.hist2d(dm_arr, dh_arr, bins=[40, 40], density=True)
+        plt.scatter(dm_arr, dh_arr / 1000, s=1)
+        plt.xlabel('Magnitude difference at expected peak height [pred-correct]')
+        plt.ylabel('Peak height difference [pred-correct] (km)')
+        # plt.colorbar()
         plt.show()
 
 
 def fitCNNMultiHeaded(
-    data_gen, validation_gen, output_dir, model_file, weights_file, fit_param=None, load=False
+    data_gen,
+    validation_gen,
+    output_dir,
+    model_file,
+    weights_file,
+    fit_param=None,
+    load=False,
+    extra_information=None,
 ):
     # https://machinelearningmastery.com/how-to-develop-convolutional-neural-network-models-for-time-series-forecasting/
     # Height input model
@@ -681,12 +742,8 @@ def fitCNNMultiHeaded(
 
     input = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 4))
     cnn = keras.layers.Conv1D(filters=10, kernel_size=10, activation='relu')(input)
-    # cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
-    # cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
-    # cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
-    # cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
-    # cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
-    # cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
+    cnn = keras.layers.MaxPooling1D(pool_size=5)(cnn)
+    cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
     # cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
     # cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
     cnn = keras.layers.MaxPooling1D(pool_size=5)(cnn)
@@ -760,18 +817,32 @@ def fitCNNMultiHeaded(
     model.save_weights(weights_file)
     print("Saved model to disk")
 
-    new_file = not os.path.exists(os.path.join(output_dir, 'log.csv'))
-    with open(os.path.join(output_dir, 'log.csv'), 'a+') as f:
-        if new_file:
-            f.write('Date,model name,parameters,batch size,step per epoch,epochs,training data,final loss\n')
-        f.write(
-            f"{datetime.datetime.now()},{model_title},{model.count_params()},{data_gen.batch_size},"
-            f"{data_gen.steps_per_epoch},{data_gen.epochs},{len(data_gen.training_list)},"
-            f"{history.history['loss'][-1]}\n"
-        )
-
     # Evaluate fit quality
-    evaluateFit(model, iter(validation_gen), output=True)
+    percent_norm_errors, denorm_perc_errors_av, param_corr = evaluateFit(
+        model, iter(validation_gen), output=False
+    )
+
+    new_file = not os.path.exists(os.path.join(output_dir, 'fitlog.csv'))
+    with open(os.path.join(output_dir, 'fitlog.csv'), 'a+') as f:
+        data = {
+            'Date': datetime.datetime.now(),
+            'model name': model_title,
+            'dataset': extra_information['cml_args'].data_folder,
+            'model parameters': model.count_params(),
+            'batch size': data_gen.batch_size,
+            'step per epoch': data_gen.steps_per_epoch,
+            'epochs': data_gen.epochs,
+            'training data': len(data_gen.training_list),
+            'final loss': history.history['loss'][-1],
+            'percent normalized errors': list(percent_norm_errors),
+            'denormalized percent errors': list(denorm_perc_errors_av),
+            'parameter correlation': list(param_corr),
+        }
+
+        if new_file:
+            f.write('|'.join([str(x) for x in data.keys()]) + '\n')
+
+        f.write('|'.join([str(x) for x in data.values()]) + '\n')
 
 
 def getFileList(folder):
@@ -905,5 +976,6 @@ if __name__ == "__main__":
             weights_file,
             fit_param=cml_args.fitparam,
             load=cml_args.load,
+            extra_information={'cml_args': cml_args},
         )
 

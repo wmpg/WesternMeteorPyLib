@@ -1,6 +1,7 @@
 from __future__ import print_function
 
 import multiprocessing
+import sys
 import time
 from contextlib import closing
 
@@ -114,6 +115,8 @@ def domainParallelizer(domain, function, cores=None, kwarg_dict=None, display=Fa
             default, in which case all available cores will be used.
         kwarg_dict: [dictionary] a dictionary of keyword arguments to be passed to the function, None by default
         display: [bool] Whether to display progress every 100 items in the domain
+        sort_output: [bool] Whether the output should be sorted so that it is in the same order as the
+            inputted domain
 
     Return:
         results: [list] a list of function results
@@ -121,10 +124,13 @@ def domainParallelizer(domain, function, cores=None, kwarg_dict=None, display=Fa
     """
     t1 = time.perf_counter()
 
-    def _logResult(result):
+    def _logResult(result, i):
         """ Save the result from the async multiprocessing to a results list. """
-        results.append(result)
-        counter = len(results)
+        results[i] = result
+
+        # increment counter from outside the scope
+
+        counter = i  # not exactly correct but close enough
         total = len(domain)
         if counter % 100 == 99 and display:
             now = time.perf_counter()
@@ -143,12 +149,12 @@ def domainParallelizer(domain, function, cores=None, kwarg_dict=None, display=Fa
     if cores is None:
         cores = multiprocessing.cpu_count()
 
-    results = []
+    results = [None] * len(domain)
 
     # Special case when running on only one core, run without multiprocessing
     if cores == 1:
-        for args in domain:
-            results.append(function(*args, **kwarg_dict))
+        for i, args in enumerate(domain):
+            results[i] = function(*args, **kwarg_dict)
 
     # Run real multiprocessing if more than one core
     elif cores > 1:
@@ -157,9 +163,13 @@ def domainParallelizer(domain, function, cores=None, kwarg_dict=None, display=Fa
         with closing(multiprocessing.Pool(cores)) as pool:
             jobs = []
             # Give workers things to do
-            for args in domain:
+            for i, args in enumerate(domain):
                 # Give job to worker
-                jobs.append(pool.apply_async(function, args, kwarg_dict, callback=_logResult))
+                jobs.append(
+                    pool.apply_async(
+                        function, args, kwarg_dict, callback=(lambda i: lambda *args: _logResult(*args, i))(i)
+                    )
+                )
 
             # crashing if you get an error (doesn't catch keyboardinterrupt)
             for job in jobs:
@@ -176,10 +186,6 @@ def domainParallelizer(domain, function, cores=None, kwarg_dict=None, display=Fa
 
 ##############################
 ## USAGE EXAMPLE
-
-
-import sys
-import time
 
 
 def mpWorker(inputs, wait_time):

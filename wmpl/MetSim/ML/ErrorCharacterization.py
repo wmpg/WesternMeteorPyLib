@@ -6,10 +6,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy
 from wmpl.Formats.Met import loadMet
-from wmpl.MetSim.GUI import MetObservations, SimulationResults, collectPaths, loadConstants
+from wmpl.MetSim.GUI import (MetObservations, SimulationResults, collectPaths,
+                             loadConstants)
 from wmpl.MetSim.MetSimErosion import Constants, runSimulation
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly
-from wmpl.Utils.Math import meanAngle, mergeDatasets, movingAverage, movingOperation, stdOfStd
+from wmpl.Utils.Math import (meanAngle, mergeDatasets, movingAverage,
+                             movingOperation, stdOfStd)
 from wmpl.Utils.Pickling import loadPickle, savePickle
 
 

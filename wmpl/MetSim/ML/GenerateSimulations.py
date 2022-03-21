@@ -210,17 +210,17 @@ class PhysicalParameters:
 
         return denormalized_values
 
-    def getConst(self, random_seed: int = None, override: bool = False):
+    def getConst(self, random_seed: int = None, override: bool = False, erosion=True):
         # Init simulation constants
         const = Constants()
         const.dens_co = self.dens_co
         const.P_0m = self.P_0M
 
         # Set tau to CAMO faint meteor model
-        const.lum_eff_type = 5
+        const.lum_eff_type = 0
 
         # Turn on erosion, but disable erosion change
-        const.erosion_on = True
+        const.erosion_on = erosion
         const.erosion_height_change = 0
 
         # Disable disruption
