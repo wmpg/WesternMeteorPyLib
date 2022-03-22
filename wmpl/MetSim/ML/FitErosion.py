@@ -480,9 +480,10 @@ def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_nam
 
     # if there is no erosion, set the erosion height to 0 for the simulation
     if noerosion:
-        # normalized_output_param_vals[:, 3] = norm_input_param_vals[:, 3]
-        normalized_output_param_vals[:, :3] = norm_input_param_vals[:, :3]
-        # normalized_output_param_vals[:, :5] = norm_input_param_vals[:, :5]
+        normalized_output_param_vals[:, 2] = norm_input_param_vals[:, 2]  # we already know the zenith angle
+
+        # normalized_output_param_vals[:, :3] = norm_input_param_vals[:, :3]
+        # normalized_output_param_vals[:, 3:5] = norm_input_param_vals[:, 3:5]
         normalized_output_param_vals[:, 5] = -1
         # see what happens with correct values
 
@@ -553,7 +554,8 @@ def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_nam
             label='ML predicted output',
         )
         ax[1].scatter(
-            np.diff(pred_simulation_results.brightest_length_arr / 1000)[:-1] / sim.const.dt,
+            np.diff(pred_simulation_results.brightest_length_arr / 1000)[:-1]
+            / np.diff(pred_simulation_results.time_arr)[:-1],
             pred_simulation_results.brightest_height_arr[:-2] / 1000,
             marker='o',
             s=2,
@@ -601,7 +603,7 @@ def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_nam
         plt.show()
     else:
         mag_err_arr = np.array([])
-        length_err_arr = np.array([])
+        vel_err_arr = np.array([])
 
         dh_arr = np.array([])
         dm_arr = np.array([])
@@ -610,8 +612,15 @@ def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_nam
             pred_mag_func = scipy.interpolate.interp1d(
                 pred_simulation_result.brightest_height_arr, pred_simulation_result.abs_magnitude
             )
-            pred_length_func = scipy.interpolate.interp1d(
-                pred_simulation_result.brightest_height_arr, pred_simulation_result.brightest_length_arr,
+
+            pred_vel_func = scipy.interpolate.interp1d(
+                (
+                    pred_simulation_result.brightest_height_arr[:-1]
+                    + pred_simulation_result.brightest_height_arr[1:]
+                )
+                / 2,
+                np.diff(pred_simulation_result.brightest_length_arr)
+                / np.diff(pred_simulation_result.time_arr),
             )
 
             filter = (sim.simulation_results.brightest_height_arr > camera_param.ht_min) & (
@@ -626,22 +635,21 @@ def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_nam
             m2 = pred_mag_func(h1)
 
             mag_err = (
-                pred_mag_func(sim.simulation_results.brightest_height_arr[filter])
-                - sim.simulation_results.abs_magnitude[filter]
+                pred_mag_func(sim.simulation_results.brightest_height_arr[filter])[:-1]
+                - sim.simulation_results.abs_magnitude[filter][:-1]
             )
-
-            length_err = (
-                pred_length_func(sim.simulation_results.brightest_height_arr[filter])
-                - sim.simulation_results.brightest_length_arr[filter]
+            vel_err = (
+                pred_vel_func(sim.simulation_results.brightest_height_arr[filter])[:-1]
+                - np.diff(sim.simulation_results.brightest_length_arr[filter]) / sim.const.dt
             )
 
             mag_err_arr = np.append(mag_err_arr, mag_err)
-            length_err_arr = np.append(length_err_arr, length_err)
+            vel_err_arr = np.append(vel_err_arr, vel_err)
             dm_arr = np.append(dm_arr, m2 - m1)
             dh_arr = np.append(dh_arr, h2 - h1)
 
         mag_filter = (mag_err_arr > -2) & (mag_err_arr < 2)
-        length_filter = (length_err_arr > -20_000) & (length_err_arr < 20_000)
+        vel_filter = (vel_err_arr > -10_000) & (vel_err_arr < 10_000)
         plt.subplot(1, 2, 1)
         plt.hist(mag_err_arr[mag_filter], bins=200, density=True)
         plt.xlabel('Magnitude error')
@@ -652,17 +660,17 @@ def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_nam
         # print(list(length_err_arr))
 
         plt.subplot(1, 2, 2)
-        plt.hist(length_err_arr[length_filter] / 1000, bins=200, density=True)
-        plt.xlabel('Length error (km)')
+        plt.hist(vel_err_arr[vel_filter] / 1000, bins=200, density=True)
+        plt.xlabel('Velocity error (km/s)')
         plt.ylabel("Probability density")
         plt.title(
-            rf'$\sigma$ = {np.std(length_err_arr[length_filter])/1000:.3f},  $\mu$ = {np.mean(length_err_arr[length_filter])/1000:.3f}'
+            rf'$\sigma$ = {np.std(vel_err_arr[vel_filter])/1000:.3f},  $\mu$ = {np.mean(vel_err_arr[vel_filter])/1000:.3f}'
         )
         plt.show()
 
         plt.hist2d(
-            mag_err_arr[mag_filter & length_filter],
-            length_err_arr[mag_filter & length_filter] / 1000,
+            mag_err_arr[mag_filter & vel_filter],
+            vel_err_arr[mag_filter & vel_filter] / 1000,
             bins=[100, 100],
         )
         plt.xlabel('Magnitude error')
@@ -673,11 +681,13 @@ def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_nam
         plt.hist(dm_arr, bins='auto', density=True)
         plt.xlabel('Magnitude difference at expected peak height [pred-correct]')
         plt.ylabel("Probability density")
+        plt.title(rf'$\sigma$ = {np.std(dm_arr):.3f},  $\mu$ = {np.mean(dm_arr):.3f}')
 
         plt.subplot(1, 2, 2)
         plt.hist(dh_arr / 1000, bins='auto', density=True)
         plt.xlabel('Peak height difference [pred-correct] (km)')
         plt.ylabel("Probability density")
+        plt.title(rf'$\sigma$ = {np.std(dh_arr / 1000):.3f},  $\mu$ = {np.mean(dh_arr / 1000):.3f}')
         plt.show()
 
         # plt.hist2d(dm_arr, dh_arr, bins=[40, 40], density=True)
