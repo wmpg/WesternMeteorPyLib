@@ -385,9 +385,9 @@ def evaluateFit(model, validation_gen, output=False, display=False, log=None):
         scaled_pred = pred_output * param_scaling
 
         def correlationPlot(X, Y, log, param_name_list, param_unit, param_pretext):
-            fig, ax = plt.subplots(5, 5, sharex='col', sharey='row')
-            for i in range(5):
-                for j in range(5):
+            fig, ax = plt.subplots(10, 10, sharex='col', sharey='row')
+            for i in range(10):
+                for j in range(10):
                     # ax[j, i].set_title(param_name_list[i])
                     x = X[:, i]
                     y = Y[:, j]
