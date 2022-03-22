@@ -378,7 +378,6 @@ def evaluateFit(model, validation_gen, output=False, display=False, log=None):
         # ax[1].set_ylabel('ERMM')
         # plt.show()
 
-        i = 5
         if log is None:
             log = [True, False, False, False, False, False, False, False, True, True]
         scaled_corr = correct_output * param_scaling
@@ -391,7 +390,7 @@ def evaluateFit(model, validation_gen, output=False, display=False, log=None):
                     # ax[j, i].set_title(param_name_list[i])
                     x = X[:, i]
                     y = Y[:, j]
-
+                    # making the diagonals histograms is difficult because the y axis would be different
                     if log[j]:
                         ax[j, i].set_yscale('log')
                         ybins = np.logspace(np.log10(np.min(y[y > 0])), np.log10(np.max(y)), 50)
@@ -480,7 +479,8 @@ def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_nam
 
     # if there is no erosion, set the erosion height to 0 for the simulation
     if noerosion:
-        normalized_output_param_vals[:, 2] = norm_input_param_vals[:, 2]  # we already know the zenith angle
+        # we already know the zenith angle
+        normalized_output_param_vals[:, 2] = norm_input_param_vals[:, 2]
 
         # normalized_output_param_vals[:, :3] = norm_input_param_vals[:, :3]
         # normalized_output_param_vals[:, 3:5] = norm_input_param_vals[:, 3:5]
@@ -499,11 +499,11 @@ def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_nam
         print()
 
     camera_param = SIM_CLASSES_DICT.get(param_class_name, ErosionSimParameters)()
-    correct_phys_params = sim_list[0].params
+    example_phys_params = sim_list[0].params
 
     # run the simulation for each set of parameters in the batch and compare them to what they should be
     domain = [
-        [correct_phys_params, normalized_output_param_val]
+        [example_phys_params, normalized_output_param_val]
         for normalized_output_param_val in normalized_output_param_vals
     ]
 
@@ -514,10 +514,12 @@ def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_nam
     print(time.perf_counter() - t1)
 
     if mode == 2:
-        sim = sim_list[0]
+        i = np.random.randint(len(sim_list))
 
-        pred_simulation_results = pred_simulation_result_list[0]
-        phys_params = phys_param_list[0]
+        sim = sim_list[i]
+        correct_phys_params = sim.params
+        pred_simulation_results = pred_simulation_result_list[i]
+        phys_params = phys_param_list[i]
 
         print('correct', correct_phys_params.getInputs())
         print('predicted', phys_params.getInputs())
@@ -607,6 +609,8 @@ def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_nam
 
         dh_arr = np.array([])
         dm_arr = np.array([])
+        dv_arr = np.array([])
+        dv2_arr = np.array([])
 
         for i, (pred_simulation_result, sim) in enumerate(zip(pred_simulation_result_list, sim_list)):
             pred_mag_func = scipy.interpolate.interp1d(
@@ -614,13 +618,7 @@ def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_nam
             )
 
             pred_vel_func = scipy.interpolate.interp1d(
-                (
-                    pred_simulation_result.brightest_height_arr[:-1]
-                    + pred_simulation_result.brightest_height_arr[1:]
-                )
-                / 2,
-                np.diff(pred_simulation_result.brightest_length_arr)
-                / np.diff(pred_simulation_result.time_arr),
+                pred_simulation_result.brightest_height_arr, pred_simulation_result.brightest_vel_arr,
             )
 
             filter = (sim.simulation_results.brightest_height_arr > camera_param.ht_min) & (
@@ -631,22 +629,26 @@ def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_nam
             sim_i = np.argmin(pred_simulation_result.abs_magnitude)
             h1 = sim.simulation_results.brightest_height_arr[cor_i]
             h2 = pred_simulation_result.brightest_height_arr[sim_i]
+            acc_v1 = sim.simulation_results.brightest_vel_arr[cor_i]
+            acc_v2 = pred_simulation_result.brightest_vel_arr[sim_i]
             m1 = sim.simulation_results.abs_magnitude[cor_i]
             m2 = pred_mag_func(h1)
 
             mag_err = (
-                pred_mag_func(sim.simulation_results.brightest_height_arr[filter])[:-1]
-                - sim.simulation_results.abs_magnitude[filter][:-1]
+                pred_mag_func(sim.simulation_results.brightest_height_arr[filter])
+                - sim.simulation_results.abs_magnitude[filter]
             )
             vel_err = (
-                pred_vel_func(sim.simulation_results.brightest_height_arr[filter])[:-1]
-                - np.diff(sim.simulation_results.brightest_length_arr[filter]) / sim.const.dt
+                pred_vel_func(sim.simulation_results.brightest_height_arr[filter])
+                - sim.simulation_results.brightest_vel_arr[filter]
             )
 
             mag_err_arr = np.append(mag_err_arr, mag_err)
             vel_err_arr = np.append(vel_err_arr, vel_err)
             dm_arr = np.append(dm_arr, m2 - m1)
             dh_arr = np.append(dh_arr, h2 - h1)
+            dv_arr = np.append(dv_arr, vel_err[0])
+            dv2_arr = np.append(dv2_arr, acc_v2 - acc_v1 - vel_err[0])
 
         mag_filter = (mag_err_arr > -2) & (mag_err_arr < 2)
         vel_filter = (vel_err_arr > -10_000) & (vel_err_arr < 10_000)
@@ -666,6 +668,7 @@ def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_nam
         plt.title(
             rf'$\sigma$ = {np.std(vel_err_arr[vel_filter])/1000:.3f},  $\mu$ = {np.mean(vel_err_arr[vel_filter])/1000:.3f}'
         )
+
         plt.show()
 
         plt.hist2d(
@@ -677,17 +680,30 @@ def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_nam
         plt.ylabel('Length error (km)')
         plt.show()
 
-        plt.subplot(1, 2, 1)
+        plt.subplot(2, 2, 1)
         plt.hist(dm_arr, bins='auto', density=True)
         plt.xlabel('Magnitude difference at expected peak height [pred-correct]')
         plt.ylabel("Probability density")
         plt.title(rf'$\sigma$ = {np.std(dm_arr):.3f},  $\mu$ = {np.mean(dm_arr):.3f}')
 
-        plt.subplot(1, 2, 2)
+        plt.subplot(2, 2, 2)
         plt.hist(dh_arr / 1000, bins='auto', density=True)
         plt.xlabel('Peak height difference [pred-correct] (km)')
         plt.ylabel("Probability density")
         plt.title(rf'$\sigma$ = {np.std(dh_arr / 1000):.3f},  $\mu$ = {np.mean(dh_arr / 1000):.3f}')
+
+        plt.subplot(2, 2, 3)
+        plt.hist(dv_arr / 1000, bins='auto', density=True)
+        plt.xlabel('Initial Velocity error (km/s)')
+        plt.ylabel("Probability density")
+        plt.title(rf'$\sigma$ = {np.std(dv_arr)/1000:.3f},  $\mu$ = {np.mean(dv_arr)/1000:.3f}')
+
+        plt.subplot(2, 2, 4)
+        plt.hist(dv2_arr / 1000, bins='auto', density=True)
+        plt.xlabel('Peak magnitude velocity decrease error (km/s)')
+        plt.ylabel("Probability density")
+        plt.title(rf'$\sigma$ = {np.std(dv2_arr)/1000:.3f},  $\mu$ = {np.mean(dv2_arr)/1000:.3f}')
+
         plt.show()
 
         # plt.hist2d(dm_arr, dh_arr, bins=[40, 40], density=True)
