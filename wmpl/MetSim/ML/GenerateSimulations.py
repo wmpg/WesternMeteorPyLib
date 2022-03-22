@@ -769,6 +769,9 @@ def extractSimData(
         print('no length measurements')
         return None
 
+    if phys_params.erosion_height_start.val < np.min(ht_sampled) + 2_000:
+        return None
+
     # If the simulation should only be checked that it's good, return the postprocess parameters used to
     #   generate the data
     if check_only:
