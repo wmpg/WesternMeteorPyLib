@@ -307,6 +307,10 @@ class ErosionSimParameters:
         self.mag_faintest = 8  # this should be equal to the limiting magnitude
         self.mag_brightest = -2
 
+        # velocity range (m/2)
+        self.vel_min = 10000
+        self.vel_max = 72000
+
 
 class ErosionSimParametersCAMO(ErosionSimParameters):
     def __init__(self):
@@ -370,6 +374,9 @@ class ErosionSimParametersCAMO(ErosionSimParameters):
         self.mag_faintest = 10
         self.mag_brightest = -2
 
+        # velocity range (m/2)
+        self.vel_min = 10000
+        self.vel_max = 72000
         ### ###
 
 
@@ -434,6 +441,10 @@ class ErosionSimParametersCAMOWide(ErosionSimParameters):
         # Magnitude range
         self.mag_faintest = 10
         self.mag_brightest = -2
+
+        # velocity range (m/2)
+        self.vel_min = 10000
+        self.vel_max = 72000
         ### ###
 
 
@@ -558,6 +569,7 @@ def normalizeSimulations(
     ht_data: ArrayLike,
     len_data: ArrayLike,
     mag_data: ArrayLike,
+    vel_data: ArrayLike,
 ) -> Tuple[ArrayLike, ArrayLike, ArrayLike]:
     """ Normalize simulated data to 0-1 range. """
     # Compute length range
@@ -570,8 +582,9 @@ def normalizeSimulations(
     mag_normed = (camera_params.mag_faintest - mag_data) / (
         camera_params.mag_faintest - camera_params.mag_brightest
     )
+    vel_normed = (vel_data - camera_params.vel_min) / (camera_params.vel_max - camera_params.vel_min)
 
-    return time_normed, ht_normed, len_normed, mag_normed
+    return time_normed, ht_normed, len_normed, mag_normed, vel_normed
 
 
 def extractSimData(
@@ -721,13 +734,14 @@ def extractSimData(
     len_interpol = scipy.interpolate.CubicSpline(time_visible, len_visible)
 
     # Create a new time array according to the FPS
-    # time_sampled = np.arange(np.min(time_visible), np.max(time_visible), 1.0 / params.fps)
-    time_sampled = np.linspace(np.min(time_visible), np.max(time_visible), camera_params.data_length)
+    time_sampled = np.arange(np.min(time_visible), np.max(time_visible), 1.0 / camera_params.fps)
+    # time_sampled = np.linspace(np.min(time_visible), np.max(time_visible), camera_params.data_length)
 
     # Create new mag, height and length arrays at FPS frequency
     mag_sampled = mag_interpol(time_sampled)
     ht_sampled = ht_interpol(time_sampled)
     len_sampled = len_interpol(time_sampled)
+    vel_sampled = np.diff(len_sampled, append=len_sampled[-1]) * camera_params.fps  # padded with 0
 
     # Normalize time to zero
     time_sampled -= time_sampled[0]
@@ -797,8 +811,8 @@ def extractSimData(
     input_params_normed = phys_params.getNormalizedInputs()
 
     # Normalize simulated data
-    time_normed, ht_normed, len_normed, mag_normed = normalizeSimulations(
-        phys_params, camera_params, time_sampled, ht_sampled, len_sampled, mag_sampled
+    time_normed, ht_normed, len_normed, mag_normed, vel_normed = normalizeSimulations(
+        phys_params, camera_params, time_sampled, ht_sampled, len_sampled, mag_sampled, vel_sampled,
     )
 
     # for magnitudes already normalized to [0,1] based on magnitude values (where 0 is the dimmest),
@@ -814,6 +828,7 @@ def extractSimData(
             padOrTruncate(ht_normed, camera_params.data_length, side='end'),
             padOrTruncate(len_normed, camera_params.data_length, side='end'),
             padOrTruncate(mag_normed, camera_params.data_length, side='end'),
+            padOrTruncate(vel_normed, camera_params.data_length, side='end'),
         ]
     )
 

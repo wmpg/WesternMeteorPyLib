@@ -766,7 +766,7 @@ def fitCNNMultiHeaded(
     # cnn3 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn3)
     # cnn3 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn3)
 
-    input = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 4))
+    input = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 5))
     cnn = keras.layers.Conv1D(filters=10, kernel_size=10, activation='relu')(input)
     cnn = keras.layers.MaxPooling1D(pool_size=5)(cnn)
     cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
