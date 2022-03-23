@@ -1813,13 +1813,17 @@ def generateAutoPlotsAndReports(dir_path, traj_quality_params, prev_sols=10, sol
                 header_written = True
 
     # Change the name of the temp file to the summary file
-    shutil.copy2(os.path.join(summary_dir, traj_summary_all_temp), 
-        os.path.join(summary_dir, TRAJ_SUMMARY_ALL))
+    if os.path.isfile(os.path.join(summary_dir, traj_summary_all_temp)):
+        shutil.copy2(os.path.join(summary_dir, traj_summary_all_temp), 
+            os.path.join(summary_dir, TRAJ_SUMMARY_ALL))
 
-    # Remove the temp file
-    os.remove(os.path.join(summary_dir, traj_summary_all_temp))
+        # Remove the temp file
+        os.remove(os.path.join(summary_dir, traj_summary_all_temp))
 
-    print("Saved summary file with all orbits: {:s}".format(TRAJ_SUMMARY_ALL))
+        print("Saved summary file with all orbits: {:s}".format(TRAJ_SUMMARY_ALL))
+
+    else:
+        print("The temp file {:s} was not created!".format(traj_summary_all_temp))
 
 
     ###
