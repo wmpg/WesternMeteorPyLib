@@ -741,7 +741,8 @@ def extractSimData(
     mag_sampled = mag_interpol(time_sampled)
     ht_sampled = ht_interpol(time_sampled)
     len_sampled = len_interpol(time_sampled)
-    vel_sampled = np.diff(len_sampled, append=len_sampled[-1]) * camera_params.fps  # padded with 0
+    vel_sampled = np.diff(len_sampled) / np.diff(time_sampled)  # padded with 0
+    vel_sampled = np.append(vel_sampled, vel_sampled[-1])
 
     # Normalize time to zero
     time_sampled -= time_sampled[0]
@@ -824,11 +825,11 @@ def extractSimData(
     # Generate vector with simulated data
     simulated_data_normed = np.vstack(
         [
-            padOrTruncate(time_normed, camera_params.data_length, side='end'),
-            padOrTruncate(ht_normed, camera_params.data_length, side='end'),
-            padOrTruncate(len_normed, camera_params.data_length, side='end'),
-            padOrTruncate(mag_normed, camera_params.data_length, side='end'),
-            padOrTruncate(vel_normed, camera_params.data_length, side='end'),
+            padOrTruncate(time_normed, camera_params.data_length, side='start'),
+            padOrTruncate(ht_normed, camera_params.data_length, side='start'),
+            padOrTruncate(len_normed, camera_params.data_length, side='start'),
+            padOrTruncate(mag_normed, camera_params.data_length, side='start'),
+            padOrTruncate(vel_normed, camera_params.data_length, side='start'),
         ]
     )
 
