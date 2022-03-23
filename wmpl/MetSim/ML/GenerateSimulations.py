@@ -734,8 +734,8 @@ def extractSimData(
     len_interpol = scipy.interpolate.CubicSpline(time_visible, len_visible)
 
     # Create a new time array according to the FPS
-    time_sampled = np.arange(np.min(time_visible), np.max(time_visible), 1.0 / camera_params.fps)
-    # time_sampled = np.linspace(np.min(time_visible), np.max(time_visible), camera_params.data_length)
+    # time_sampled = np.arange(np.min(time_visible), np.max(time_visible), 1.0 / camera_params.fps)
+    time_sampled = np.linspace(np.min(time_visible), np.max(time_visible), camera_params.data_length)
 
     # Create new mag, height and length arrays at FPS frequency
     mag_sampled = mag_interpol(time_sampled)

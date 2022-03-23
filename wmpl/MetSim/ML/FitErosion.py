@@ -41,7 +41,6 @@ def dataFunction(file_path, param_class_name):
     if sim is None:
         return None, file_path
 
-    print("TESTING  1 2 3")
     extract_data = extractSimData(sim, param_class_name=param_class_name)
     if extract_data is None:
         return None, file_path

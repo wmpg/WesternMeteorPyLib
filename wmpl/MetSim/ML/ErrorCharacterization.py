@@ -2,16 +2,15 @@ import argparse
 import os
 import sys
 
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy
 from wmpl.Formats.Met import loadMet
-from wmpl.MetSim.GUI import (MetObservations, SimulationResults, collectPaths,
-                             loadConstants)
+from wmpl.MetSim.GUI import MetObservations, SimulationResults, collectPaths, loadConstants
 from wmpl.MetSim.MetSimErosion import Constants, runSimulation
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly
-from wmpl.Utils.Math import (meanAngle, mergeDatasets, movingAverage,
-                             movingOperation, stdOfStd)
+from wmpl.Utils.Math import meanAngle, mergeDatasets, movingAverage, movingOperation, stdOfStd
 from wmpl.Utils.Pickling import loadPickle, savePickle
 
 
@@ -288,9 +287,10 @@ def compileFolderData(folder):
     return processed_data
 
 
-def plotErrorCharacterization(all_kept_data, plot_variable, title, magbins=20, vbins=20):
+def plotErrorCharacterization(all_kept_data, plot_variable, title, magbins=20, vbins=20, fit_2d=None):
     ### plotting magnitude residuals vs velocity and magnitude ###
 
+    # calculate range for bins
     min_mag, max_mag = (
         np.nanmin(all_kept_data[plot_variable][:, 2]),
         np.nanmax(all_kept_data[plot_variable][:, 2]),
@@ -300,11 +300,13 @@ def plotErrorCharacterization(all_kept_data, plot_variable, title, magbins=20, v
         np.nanmax(all_kept_data[plot_variable][:, 3]),
     )
 
+    # value-index conversion functions
     mag_to_idx = lambda mag: min(int((mag - min_mag) / (max_mag - min_mag) * magbins), magbins - 1)
     vel_to_idx = lambda vel: min(int((vel - min_vel) / (max_vel - min_vel) * vbins), vbins - 1)
     idx_to_mag = lambda i: i * (max_mag - min_mag) / magbins + min_mag
     idx_to_vel = lambda i: i * (max_vel - min_vel) / vbins + min_vel
 
+    # finding the residual, magnitude and velocity arrays
     res_arr = np.full((magbins, vbins, all_kept_data[plot_variable].shape[0]), np.nan, dtype=np.float64)
     mag_arr = np.copy(res_arr)
     vel_arr = np.copy(res_arr)
@@ -315,46 +317,72 @@ def plotErrorCharacterization(all_kept_data, plot_variable, title, magbins=20, v
             mag_arr[mag_to_idx(data[2]), vel_to_idx(data[3]), i] = data[2]
             vel_arr[mag_to_idx(data[2]), vel_to_idx(data[3]), i] = data[3]
 
+    # calculating the standard deviation of residual array
     nan_arr = np.sum(np.isfinite(res_arr), axis=2)
     std_arr = np.nanstd(res_arr, axis=2, ddof=1)
     std_std_arr = stdOfStd(std_arr, nan_arr)
 
     v_values = np.linspace(min_vel, max_vel, vbins + 1)
     mag_values = np.linspace(min_mag, max_mag, magbins + 1)
-    fit_2d = lambda x, a, b, c: a * x[0] + b * x[1] + c
+    np.set_printoptions(threshold=np.inf)
+
+    # dimensions (2, len(mag_values)-1, len(v_values)-1)
     v_mag_values = np.stack(
         np.meshgrid((v_values[1:] + v_values[:-1]) / 2, (mag_values[1:] + mag_values[:-1]) / 2)
-    )  # dimensions (2, len(mag_values)-1, len(v_values)-1)
-
-    # print(np.concatenate(v_mag_values)[np.isfinite(std_arr.flatten())].shape)
-    _filter = np.isfinite(std_arr.flatten())
-    data = np.concatenate(v_mag_values.T)[_filter].T
-    print(data, data.shape)
-    popt, pcov = scipy.optimize.curve_fit(
-        fit_2d,
-        data,
-        std_arr.flatten()[_filter],
-        sigma=std_std_arr.flatten()[_filter]
-        # bounds=([0, 0, -np.inf, 0, -np.inf, -np.inf], [np.inf] * 6),
     )
-    plt.subplot(1, 2, 1)
-    plt.scatter(data[0], std_arr.flatten()[_filter])
-    plt.scatter(data[0], fit_2d(data, *popt), c='r')
-    plt.subplot(1, 2, 2)
-    plt.scatter(data[1], std_arr.flatten()[_filter])
-    plt.scatter(data[1], fit_2d(data, *popt), c='r')
 
+    _filter = np.isfinite(std_arr.flatten()) & (std_std_arr.flatten() > 0)
+    # (2, len(mag_values) * len(v_values) - filter), 0 is mag, 1 is vel
+    data = np.concatenate(np.moveaxis(v_mag_values, 0, -1))[_filter].T
+
+    if fit_2d is None:
+        fit_2d = (
+            lambda x, a, b, c, d, e, f, g, h, i, j: g
+            * (x[0] + h * x[1])
+            * (x[0] + i * x[1])
+            * (x[0] + j * x[1])
+            + a * x[0] ** 2
+            + b * x[0] * x[1]
+            + c * x[1] ** 2
+            + d * x[0]
+            + e * x[1]
+            + f
+        )  # x[0] mag
+
+    popt, pcov = scipy.optimize.curve_fit(
+        fit_2d, data, std_arr.flatten()[_filter], sigma=std_std_arr.flatten()[_filter]
+    )
+
+    print(popt)
+    print('fit errors', np.sqrt(np.diag(pcov)))
+    low_mag_i = np.min(np.nonzero(np.nansum(std_arr, axis=1)))
+    upper_mag_i = np.max(np.nonzero(np.nansum(std_arr, axis=1))) + 1
+    low_v_i = np.min(np.nonzero(np.nansum(std_arr, axis=0)))
+    upper_v_i = np.max(np.nonzero(np.nansum(std_arr, axis=0))) + 1
+
+    fig = plt.figure()
+    ax = fig.add_subplot(projection='3d')
+    ax.scatter(*data, std_arr.flatten()[_filter])
+    ax.plot_surface(
+        *v_mag_values[:, low_mag_i:upper_mag_i, low_v_i:upper_v_i],
+        fit_2d(v_mag_values[:, low_mag_i:upper_mag_i, low_v_i:upper_v_i], *popt),
+        cmap=matplotlib.cm.coolwarm,
+    )
+    ax.set_xlabel('Velocity (km/s)')
+    ax.set_ylabel('Magnitude')
+    ax.set_zlabel(f'{plot_variable} std')
+    ax.set_xlim([idx_to_vel(low_v_i), idx_to_vel(upper_v_i)])
+    ax.set_ylim([idx_to_mag(low_mag_i), idx_to_mag(upper_mag_i)])
     # plt.plot(
     #     data, fit_2d(data, *popt),
     # )
     plt.show()
     # print(fit_2d(30, *popt))
-    print(popt)
-    print('fit errors', np.sqrt(np.diag(pcov)))
 
     plt.pcolormesh(
         v_values, mag_values, np.abs((std_arr - fit_2d(v_mag_values, *popt)) / std_std_arr), cmap='coolwarm'
     )  # - fit_2d(v_mag_values, *popt),
+    # plt.pcolormesh(v_values, mag_values, std_arr, cmap='coolwarm')
     for i in range(magbins):
         for j in range(vbins):
             if nan_arr[i, j] > 1:
@@ -415,7 +443,7 @@ def plotErrorCharacterization(all_kept_data, plot_variable, title, magbins=20, v
 def main(cml_args):
     path = cml_args.dir_file
     with open(path) as f:
-        path_list = filter(lambda x: not x.startswith('#'), f.read().splitlines())
+        path_list = filter(lambda x: not x.startswith('#') and x.strip(), f.read().splitlines())
 
     all_kept_data = {'mag': [], 'vel': [], 'lag': []}
     for _path in path_list:
@@ -440,8 +468,16 @@ def main(cml_args):
     plotErrorCharacterization(
         all_kept_data, 'mag', 'Magnitude residual standard deviation', vbins=vbins, magbins=magbins
     )
+    second_order = (
+        lambda x, a, b, c, d, e, f: a * x[0] ** 2 + b * x[0] * x[1] + c * x[1] ** 2 + d * x[0] + e * x[1] + f
+    )
     plotErrorCharacterization(
-        all_kept_data, 'lag', 'Lag residual standard deviation (m)', vbins=vbins, magbins=120
+        all_kept_data,
+        'lag',
+        'Lag residual standard deviation (m)',
+        vbins=20,
+        magbins=120,
+        fit_2d=second_order,
     )
 
 
