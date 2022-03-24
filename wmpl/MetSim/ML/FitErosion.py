@@ -478,7 +478,7 @@ def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_nam
     normalized_output_param_vals = model.predict(norm_sim_data)  # dimensions (batch_size, 256, 4)
 
     # if there is no erosion, set the erosion height to 0 for the simulation
-    normalized_output_param_vals[:, 2:] = norm_input_param_vals[:, 2:]
+    normalized_output_param_vals[:, 1:] = norm_input_param_vals[:, 1:]
     if noerosion:
         # we already know the zenith angle
         normalized_output_param_vals[:, 2] = norm_input_param_vals[:, 2]
