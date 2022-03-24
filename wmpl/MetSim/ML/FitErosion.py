@@ -525,11 +525,11 @@ def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_nam
         print('predicted', phys_params.getInputs())
 
         fig, ax = plt.subplots(2, 2, sharey='col')
-        ax[0, 0].plot(norm_sim_data[0, :, 3], norm_sim_data[0, :, 1])
+        ax[0, 0].plot(norm_sim_data[i, :, 3], norm_sim_data[i, :, 1])
         ax[0, 0].set_xlabel('Mag')
         ax[0, 0].set_ylabel('Ht')
 
-        ax[1, 0].scatter(np.diff(norm_sim_data[0, :, 2]), norm_sim_data[0, :-1, 1], marker='o', s=2)
+        ax[1, 0].scatter(np.diff(norm_sim_data[i, :, 2]), norm_sim_data[i, :-1, 1], marker='o', s=2)
         ax[1, 0].set_xlabel('Velocity')
         ax[1, 0].set_ylabel('Ht')
 
