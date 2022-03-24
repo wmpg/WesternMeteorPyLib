@@ -837,7 +837,7 @@ def extractSimData(
     plt.plot(mag_normed, ht_normed)
 
     plt.subplot(1, 2, 2)
-    plt.plot(mag_sampled, ht_sampled)
+    plt.plot(sim_results.abs_magnitude, sim_results.brightest_height_arr)
     plt.show()
 
     # Return input data and results
