@@ -812,9 +812,16 @@ def extractSimData(
     input_params_normed = phys_params.getNormalizedInputs()
 
     # Normalize simulated data
-    time_normed, ht_normed, len_normed, mag_normed, vel_normed = normalizeSimulations(
-        phys_params, camera_params, time_sampled, ht_sampled, len_sampled, mag_sampled, vel_sampled,
+    time_normed, ht_normed, len_normed, mag_normed, vel_normed = (
+        time_sampled,
+        ht_sampled,
+        len_sampled,
+        mag_sampled,
+        vel_sampled,
     )
+    # time_normed, ht_normed, len_normed, mag_normed, vel_normed = normalizeSimulations(
+    #     phys_params, camera_params, time_sampled, ht_sampled, len_sampled, mag_sampled, vel_sampled,
+    # )
 
     # for magnitudes already normalized to [0,1] based on magnitude values (where 0 is the dimmest),
     # converts to a normalized luminosity on the range [0,1]
