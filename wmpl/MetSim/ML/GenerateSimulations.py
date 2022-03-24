@@ -734,8 +734,8 @@ def extractSimData(
     len_interpol = scipy.interpolate.CubicSpline(time_visible, len_visible)
 
     # Create a new time array according to the FPS
-    # time_sampled = np.arange(np.min(time_visible), np.max(time_visible), 1.0 / camera_params.fps)
-    time_sampled = np.linspace(np.min(time_visible), np.max(time_visible), camera_params.data_length)
+    time_sampled = np.arange(np.min(time_visible), np.max(time_visible), 1.0 / camera_params.fps)
+    # time_sampled = np.linspace(np.min(time_visible), np.max(time_visible), camera_params.data_length)
 
     # Create new mag, height and length arrays at FPS frequency
     mag_sampled = mag_interpol(time_sampled)
@@ -833,12 +833,6 @@ def extractSimData(
             padOrTruncate(vel_normed, camera_params.data_length, side='start'),
         ]
     )
-    plt.subplot(1, 2, 1)
-    plt.plot(mag_normed, ht_normed)
-
-    plt.subplot(1, 2, 2)
-    plt.plot(sim_results.abs_magnitude, sim_results.brightest_height_arr)
-    plt.show()
 
     # Return input data and results
     return param_dict, simulated_data_normed, input_params_normed
