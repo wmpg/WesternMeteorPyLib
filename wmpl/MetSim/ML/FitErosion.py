@@ -478,6 +478,7 @@ def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_nam
     normalized_output_param_vals = model.predict(norm_sim_data)  # dimensions (batch_size, 256, 4)
 
     # if there is no erosion, set the erosion height to 0 for the simulation
+    normalized_output_param_vals[:, 2:] = norm_input_param_vals[:, 2:]
     if noerosion:
         # we already know the zenith angle
         normalized_output_param_vals[:, 2] = norm_input_param_vals[:, 2]
@@ -767,7 +768,7 @@ def fitCNNMultiHeaded(
     # cnn3 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn3)
 
     input = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 5))
-    cnn = keras.layers.Conv1D(filters=10, kernel_size=10, activation='relu')(input)
+    cnn = keras.layers.Conv1D(filters=10, kernel_size=50, activation='relu')(input)
     cnn = keras.layers.MaxPooling1D(pool_size=5)(cnn)
     cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
     # cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
