@@ -833,10 +833,10 @@ def extractSimData(
             padOrTruncate(vel_normed, camera_params.data_length, side='start'),
         ]
     )
-    plt.sublpots(1, 2, 1)
+    plt.subplots(1, 2, 1)
     plt.plot(mag_normed, ht_normed)
 
-    plt.sublpots(1, 2, 2)
+    plt.subplots(1, 2, 2)
     plt.plot(mag_sampled, ht_sampled)
     plt.show()
 
