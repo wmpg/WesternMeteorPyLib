@@ -915,8 +915,8 @@ def saveProcessedData(
         if not multiprocess:
             for i, filepath in enumerate(file_list):
                 if i == 1000:
+                    print(i / len(file_list) * 100, time.perf_counter() - t1)
                     raise Exception('STOP')
-                print(i / len(file_list) * 100, time.perf_counter() - t1)
                 sim = loadPickle(data_path, filepath)
                 ret = extractSimData(sim, param_class_name=param_class_name)
                 if ret is None:
@@ -980,7 +980,7 @@ if __name__ == "__main__":
         # r'D:\datasets\meteor',
         r'/home/jkambul2/files/',
         'general_dataset',
-        multiprocess=False,
+        multiprocess=True,
     )
     t1 = time.perf_counter()
     gen = iter(loadProcessedData(r'/home/jkambul2/files/general_dataset.h5', 256))
