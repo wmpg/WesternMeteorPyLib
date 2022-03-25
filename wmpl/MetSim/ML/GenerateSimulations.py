@@ -975,8 +975,10 @@ if __name__ == "__main__":
     # import argparse
 
     saveProcessedData(
-        r'D:\datasets\meteor\no_erosion_dataset',  # r'/home/jkambul2/files/clean_ML_trainingset_v2/',
-        r'D:\datasets\meteor',  # r'/home/jkambul2/files/',
+        # r'D:\datasets\meteor\no_erosion_dataset',
+        r'/home/jkambul2/files/clean_ML_trainingset_v2/',
+        # r'D:\datasets\meteor',
+        r'/home/jkambul2/files/',
         'general_dataset',
         multiprocess=True,
     )
