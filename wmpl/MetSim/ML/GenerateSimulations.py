@@ -980,7 +980,7 @@ if __name__ == "__main__":
         # r'D:\datasets\meteor',
         r'/home/jkambul2/files/',
         'general_dataset',
-        multiprocess=True,
+        multiprocess=False,
     )
     t1 = time.perf_counter()
     gen = iter(loadProcessedData(r'/home/jkambul2/files/general_dataset.h5', 256))
