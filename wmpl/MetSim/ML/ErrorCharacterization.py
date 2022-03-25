@@ -260,7 +260,7 @@ def compileFolderData(folder):
 
     ###################################
     # processing data that will be kept.
-
+    data_length = []
     # {'mag':[(ht, res, mag_fit, vel_fit, lag_fit), ...]}
     processed_data = {'mag': [], 'vel': [], 'lag': []}
     for key, dic in kept_data.items():
@@ -269,6 +269,7 @@ def compileFolderData(folder):
             if dic.get(station):
                 res, ht, fit = dic[station]
                 new_entry = [ht, res]
+                data_length.append(len(res))
 
                 for dic2 in kept_data.values():
                     if dic2.get(station):
@@ -278,6 +279,8 @@ def compileFolderData(folder):
                         new_entry.append(ht * np.nan)
                 processed_data[key].append(new_entry)
 
+    print(data_length)
+    print(np.mean(data_length), np.std(data_length))
     # ignore dataset if is no information in one of the fields
     for val in processed_data.values():
         if not val:

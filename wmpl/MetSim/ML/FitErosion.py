@@ -10,6 +10,7 @@ import time
 from re import A
 from typing import List, Optional, Union
 
+import h5py
 import keras
 import keras.backend as K
 import matplotlib.pyplot as plt
@@ -29,24 +30,12 @@ from wmpl.MetSim.ML.GenerateSimulations import (
     ErosionSimParametersCAMOWide,
     MetParam,
     PhysicalParameters,
+    dataFunction,
     extractSimData,
+    getFileList,
 )
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PyDomainParallelizer import domainParallelizer
-
-
-def dataFunction(file_path, param_class_name):
-    # Load the pickle file
-    sim = loadPickle(*os.path.split(file_path))
-    if sim is None:
-        return None, file_path
-
-    extract_data = extractSimData(sim, param_class_name=param_class_name)
-    if extract_data is None:
-        return None, file_path
-
-    # Extract model inputs and outputs
-    return sim, extract_data
 
 
 def calculatePredictedSimulation(phys_params, normalized_output_param_val):
@@ -135,11 +124,10 @@ class DataGenerator(object):
             # Get a portion of files to load
             file_list = data_list[curr_index : curr_index + self.batch_size]
 
-            # Load pickle files and postprocess in parallel
-            domain = [[file_path, self.param_class_name] for file_path in file_list]
-
             # Postprocess the data in parallel
-            new_res = domainParallelizer(domain, dataFunction)
+            new_res = domainParallelizer(
+                file_list, dataFunction, kwarg_dict={'param_class_name': self.param_class_name}
+            )
 
             filtered_res_list = []
             # discard bad results
@@ -186,9 +174,9 @@ class DataGenerator(object):
 
             # yield dimenions [(batch_size, data_length, 4), (batch_size, 10)]
             if self.validation:
-                yield sim, np.moveaxis(result_list, 1, 2), param_list
+                yield sim, result_list, param_list
             else:
-                yield np.moveaxis(result_list, 1, 2), param_list
+                yield result_list, param_list
 
 
 class ReportFitGoodness(keras.callbacks.Callback):
@@ -767,8 +755,8 @@ def fitCNNMultiHeaded(
     # cnn3 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn3)
     # cnn3 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn3)
 
-    input = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 5))
-    cnn = keras.layers.Conv1D(filters=10, kernel_size=50, activation='relu')(input)
+    input = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 4))
+    cnn = keras.layers.Conv1D(filters=10, kernel_size=20, activation='relu')(input)
     cnn = keras.layers.MaxPooling1D(pool_size=5)(cnn)
     cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
     # cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
@@ -870,16 +858,6 @@ def fitCNNMultiHeaded(
             f.write('|'.join([str(x) for x in data.keys()]) + '\n')
 
         f.write('|'.join([str(x) for x in data.values()]) + '\n')
-
-
-def getFileList(folder):
-    """ Get list of all files contained in folder, found recursively. """
-    # path gives should be files/clean_ML_trainingset
-    file_list = []
-    for root, _, files in os.walk(folder):
-        for file in files:
-            file_list.append(os.path.join(root, file))
-    return file_list
 
 
 if __name__ == "__main__":

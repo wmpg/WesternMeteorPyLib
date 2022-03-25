@@ -917,7 +917,7 @@ def saveProcessedData(
             for i, filepath in enumerate(file_list):
                 if i == 1000:
                     raise Exception('STOP')
-                # print(i / len(file_list) * 100, time.perf_counter() - t1)
+                print(i / len(file_list) * 100, time.perf_counter() - t1)
                 sim = loadPickle(data_path, filepath)
                 ret = extractSimData(sim, param_class_name=param_class_name)
                 if ret is None:
@@ -934,7 +934,7 @@ def saveProcessedData(
             for i in range(loops):
                 if i == 10:
                     raise Exception('STOP')
-                # print(i / loops * 100, time.perf_counter() - t1)
+                print(i / loops * 100, time.perf_counter() - t1)
                 domain = [[file] for file in file_list[i * tasks : (i + 1) * tasks]]
 
                 output = domainParallelizer(
