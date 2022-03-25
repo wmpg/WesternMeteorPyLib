@@ -569,7 +569,6 @@ def normalizeSimulations(
     ht_data: ArrayLike,
     len_data: ArrayLike,
     mag_data: ArrayLike,
-    vel_data: ArrayLike,
 ) -> Tuple[ArrayLike, ArrayLike, ArrayLike]:
     """ Normalize simulated data to 0-1 range. """
     # Compute length range
@@ -905,7 +904,7 @@ def saveProcessedData(
     file_list = getFileList(data_path)
     with h5py.File(f'{os.path.join(output_path, filename)}.h5', 'w') as h5file:
         sim_dataset = h5file.create_dataset(
-            'simulation', shape=(len(file_list), DATA_LENGTH, 5), chunks=True, dtype=np.float32
+            'simulation', shape=(len(file_list), DATA_LENGTH, 4), chunks=True, dtype=np.float32
         )
         param_dataset = h5file.create_dataset(
             'parameters', shape=(len(file_list), 10), chunks=True, dtype=np.float32
@@ -949,7 +948,7 @@ def saveProcessedData(
                     param_dataset[valid] = param_data
                     valid += 1
 
-        sim_dataset.resize((valid, DATA_LENGTH, 5))
+        sim_dataset.resize((valid, DATA_LENGTH, 4))
         param_dataset.resize((valid, 10))
 
 
@@ -976,8 +975,8 @@ if __name__ == "__main__":
     # import argparse
 
     saveProcessedData(
-        r'/home/jkambul2/files/clean_ML_trainingset_v2/',
-        r'/home/jkambul2/files/',
+        r'D:\datasets\meteor\no_erosion_dataset',  # r'/home/jkambul2/files/clean_ML_trainingset_v2/',
+        r'D:\datasets\meteor',  # r'/home/jkambul2/files/',
         'general_dataset',
         multiprocess=True,
     )
