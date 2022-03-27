@@ -1627,8 +1627,6 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
             if i in skipped_indices:
                 continue
 
-            print("Traj: ", jd2Date(traj1.jdt_ref, dt_obj=True))
-
             # Set the first trajectory as the candidate
             candidate_traj = traj1
 
@@ -1637,13 +1635,9 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
                 # Check if the trajectories have the same time
                 if traj1.jdt_ref == traj2.jdt_ref:
 
-                    print("   ... same time:", jd2Date(traj1.jdt_ref, dt_obj=True))
-
                     # Check if they have the same stations
                     if set([obs.station_id for obs in traj1.observations]) \
                         == set([obs.station_id for obs in traj2.observations]):
-
-                        print("Same stations:", set([obs.station_id for obs in traj1.observations]))
 
                         # If the duplicate has a smaller radiant error, take it instead of the first
                         #   trajectory
