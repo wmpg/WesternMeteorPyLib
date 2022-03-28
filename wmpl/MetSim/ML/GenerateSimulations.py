@@ -12,10 +12,9 @@ import time
 import traceback
 from typing import Callable, List, Optional, Tuple, Union
 
-import h5py
 import matplotlib.pyplot as plt
 import numpy as np
-import scipy.interpolate
+import scipy
 from numpy.typing import ArrayLike
 from wmpl.MetSim.GUI import SimulationResults
 from wmpl.MetSim.MetSimErosion import Constants
@@ -850,6 +849,20 @@ def saveCleanData(output_dir: str, random_seed: int, erosion_on: bool = True, fi
     erosion_cont.runSimulation()
 
 
+def dataFunction(file_path, param_class_name=None):
+    # Load the pickle file
+    sim = loadPickle(*os.path.split(file_path))
+    if sim is None:
+        return None, file_path
+
+    extract_data = extractSimData(sim, param_class_name=param_class_name)
+    if extract_data is None:
+        return None, file_path
+
+    # Extract model inputs and outputs
+    return sim, extract_data
+
+
 # def generateErosionSim(
 #     output_dir: str,
 #     erosion_sim_params: ErosionSimParameters,
@@ -871,185 +884,68 @@ def saveCleanData(output_dir: str, random_seed: int, erosion_on: bool = True, fi
 #         return None
 
 
-def dataFunction(file_path, param_class_name=None):
-    # Load the pickle file
-    sim = loadPickle(*os.path.split(file_path))
-    if sim is None:
-        return None, file_path
-
-    extract_data = extractSimData(sim, param_class_name=param_class_name)
-    if extract_data is None:
-        return None, file_path
-
-    # Extract model inputs and outputs
-    return sim, extract_data
-
-
-def saveProcessedData(
-    data_path: str,
-    output_path: str,
-    filename: str,
-    param_class_name: Optional[str] = None,
-    multiprocess=False,
-):
-    """ Save a list of pickle files which passes postprocessing criteria to disk.
-
-    Arguments:
-        data_path: [str] Path to directory with simulation pickle files.
-        param_class_name: [str] Name of the parameter class used for postprocessing.
-
-    """
-
-    # Load one simulation to get simulation parameters
-    file_list = getFileList(data_path)
-    with h5py.File(f'{os.path.join(output_path, filename)}.h5', 'w') as h5file:
-        sim_dataset = h5file.create_dataset(
-            'simulation', shape=(len(file_list), DATA_LENGTH, 4), chunks=True, dtype=np.float32
-        )
-        param_dataset = h5file.create_dataset(
-            'parameters', shape=(len(file_list), 10), chunks=True, dtype=np.float32
-        )
-
-        t1 = time.perf_counter()
-        valid = 0
-        if not multiprocess:
-            for i, filepath in enumerate(file_list):
-                if i == 1000:
-                    print(i / len(file_list) * 100, time.perf_counter() - t1)
-                    raise Exception('STOP')
-                sim = loadPickle(data_path, filepath)
-                ret = extractSimData(sim, param_class_name=param_class_name)
-                if ret is None:
-                    continue
-
-                _, sim_data, param_data = ret
-                sim_dataset[valid] = sim_data
-                param_dataset[valid] = param_data
-                valid += 1
-        else:
-            # this seems slower than without multiprocessing
-            tasks = multiprocessing.cpu_count() * 10
-            loops = int(len(file_list) / tasks) + 1
-            for i in range(loops):
-                if i == 10:
-                    raise Exception('STOP')
-                print(i / loops * 100, time.perf_counter() - t1)
-                domain = [[file] for file in file_list[i * tasks : (i + 1) * tasks]]
-
-                output = domainParallelizer(
-                    domain, dataFunction, kwarg_dict={'param_class_name': param_class_name}
-                )
-                for sim, extractdata in output:
-                    if sim is None:
-                        continue
-
-                    _, sim_data, param_data = extractdata
-                    sim_dataset[valid] = sim_data
-                    param_dataset[valid] = param_data
-                    valid += 1
-
-        sim_dataset.resize((valid, DATA_LENGTH, 4))
-        param_dataset.resize((valid, 10))
-
-
-def loadProcessedData(h5path: str, batchsize: int, validation=False):
-    with h5py.File(h5path, 'r') as h5file:
-        i = 0
-        index_list = list(range(int(len(h5file['simulation']) / batchsize)))
-        while True:
-            batch_sim = h5file['simulation'][index_list[i] * batchsize : (index_list[i] + 1) * batchsize]
-            batch_param = h5file['parameters'][index_list[i] * batchsize : (index_list[i] + 1) * batchsize]
-
-            i += 1
-            if len(batch_sim) < batchsize or i == len(index_list):
-                raise Exception('end')
-                # semi shuffle, since h5py can't handle indexing as complex as numpy (it's also slower)
-                np.random.shuffle(index_list)
-                i = 0
-                continue
-
-            yield batch_sim, batch_param
-
-
 if __name__ == "__main__":
-    # import argparse
+    import argparse
 
-    saveProcessedData(
-        # r'D:\datasets\meteor\no_erosion_dataset',
-        r'/home/jkambul2/files/clean_ML_trainingset_v2/',
-        # r'D:\datasets\meteor',
-        r'/home/jkambul2/files/',
-        'general_dataset',
-        multiprocess=False,
+    ### COMMAND LINE ARGUMENTS
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(
+        description="Randomly generate parameters for the rosion model, run it, and store results to disk."
     )
-    t1 = time.perf_counter()
-    gen = iter(loadProcessedData(r'/home/jkambul2/files/general_dataset.h5', 256))
-    for i in range(10000):
-        next(gen)
-    print(time.perf_counter() - t1)
-    # ### COMMAND LINE ARGUMENTS
-    # # Init the command line arguments parser
-    # arg_parser = argparse.ArgumentParser(
-    #     description="Randomly generate parameters for the rosion model, run it, and store results to disk."
-    # )
+
+    arg_parser.add_argument(
+        'output_dir', metavar='OUTPUT_PATH', type=str, help="Path to the output directory."
+    )
 
     # arg_parser.add_argument(
-    #     'output_dir', metavar='OUTPUT_PATH', type=str, help="Path to the output directory."
+    #     'simclass',
+    #     metavar='SIM_CLASS',
+    #     type=str,
+    #     help="Use simulation parameters from the given class. Options: {:s}".format(
+    #         ", ".join(SIM_CLASSES_NAMES)
+    #     ),
     # )
 
-    # # arg_parser.add_argument(
-    # #     'simclass',
-    # #     metavar='SIM_CLASS',
-    # #     type=str,
-    # #     help="Use simulation parameters from the given class. Options: {:s}".format(
-    # #         ", ".join(SIM_CLASSES_NAMES)
-    # #     ),
-    # # )
+    arg_parser.add_argument('nsims', metavar='SIM_NUM', type=int, help="Number of simulations to do.")
 
-    # arg_parser.add_argument('nsims', metavar='SIM_NUM', type=int, help="Number of simulations to do.")
+    arg_parser.add_argument('--noerosion', action='store_true', help='Whether to simulate without erosion.')
+    arg_parser.add_argument(
+        '--fixed',
+        nargs=10,
+        type=int,
+        help='Ten parameters, either 0 or 1 specifying whether a variable is fixed',
+    )
 
-    # arg_parser.add_argument('--noerosion', action='store_true', help='Whether to simulate without erosion.')
-    # arg_parser.add_argument(
-    #     '--fixed',
-    #     nargs=10,
-    #     type=int,
-    #     help='Ten parameters, either 0 or 1 specifying whether a variable is fixed',
+    # group = arg_parser.add_mutually_exclusive_group()
+    # group.add_argument(
+    #     "-c", "--clean", action='store_true', help='If given, only simulate then save the clean data'
     # )
-    # # group = arg_parser.add_mutually_exclusive_group()
-    # # group.add_argument(
-    # #     "-c", "--clean", action='store_true', help='If given, only simulate then save the clean data'
-    # # )
-    # # group.add_argument(
-    # #     "-pp",
-    # #     "--postprocess",
-    # #     action='store_true',
-    # #     help='If given, will only save post-processed data upon reading from saved clean data',
-    # # )
-
-    # # Parse the command line arguments
-    # cml_args = arg_parser.parse_args()
-
-    # #########################
-
-    # # Make the output directory
-    # mkdirP(cml_args.output_dir)
-
-    # # # Init simulation parameters for CAMO
-    # # if cml_args.simclass not in SIM_CLASSES_NAMES:
-    # #     raise KeyError(f'Sim class is not valid: {cml_args.simclass}')
-    # # erosion_sim_params = SIM_CLASSES_DICT[cml_args.simclass]
-
-    # # Generate simulations using multiprocessing
-    # input_list = [[cml_args.output_dir, np.random.randint(0, 2 ** 31 - 1)] for _ in range(cml_args.nsims)]
-    # results_list = domainParallelizer(
-    #     input_list,
-    #     saveCleanData,
-    #     display=True,
-    #     kwarg_dict={'erosion_on': not cml_args.noerosion, 'fixed': cml_args.fixed},
+    # group.add_argument(
+    #     "-pp",
+    #     "--postprocess",
+    #     action='store_true',
+    #     help='If given, will only save post-processed data upon reading from saved clean data',
     # )
 
-    # # Save the list of simulations that passed the criteria to disk
-    # saveProcessedList(
-    #     cml_args.output_dir, results_list, erosion_sim_params.__class__.__name__, MIN_FRAMES_VISIBLE
-    # )
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    #########################
+
+    # Make the output directory
+    mkdirP(cml_args.output_dir)
+
+    # # Init simulation parameters for CAMO
+    # if cml_args.simclass not in SIM_CLASSES_NAMES:
+    #     raise KeyError(f'Sim class is not valid: {cml_args.simclass}')
+    # erosion_sim_params = SIM_CLASSES_DICT[cml_args.simclass]
+
+    # Generate simulations using multiprocessing
+    input_list = [[cml_args.output_dir, np.random.randint(0, 2 ** 31 - 1)] for _ in range(cml_args.nsims)]
+    results_list = domainParallelizer(
+        input_list,
+        saveCleanData,
+        display=True,
+        kwarg_dict={'erosion_on': not cml_args.noerosion, 'fixed': cml_args.fixed},
+    )
 

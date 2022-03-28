@@ -4,6 +4,7 @@ import multiprocessing
 import sys
 import time
 from contextlib import closing
+from functools import partial
 
 
 def parallelComputeGenerator(
@@ -115,8 +116,6 @@ def domainParallelizer(domain, function, cores=None, kwarg_dict=None, display=Fa
             default, in which case all available cores will be used.
         kwarg_dict: [dictionary] a dictionary of keyword arguments to be passed to the function, None by default
         display: [bool] Whether to display progress every 100 items in the domain
-        sort_output: [bool] Whether the output should be sorted so that it is in the same order as the
-            inputted domain
 
     Return:
         results: [list] a list of function results
@@ -124,21 +123,22 @@ def domainParallelizer(domain, function, cores=None, kwarg_dict=None, display=Fa
     """
     t1 = time.perf_counter()
 
-    def _logResult(result, i):
-        """ Save the result from the async multiprocessing to a results list. """
-        results[i] = result
-
-        # increment counter from outside the scope
-
-        counter = i  # not exactly correct but close enough
+    def _logResult(result, counter=[0]):
+        """ Save the result from the async multiprocessing to a results list.
+        
+        keyword arguments:
+            counter: [list] tracks the amount that the function has been called 
+                (jank but easy and is functionally perfect)
+        """
+        counter[0] += 1
         total = len(domain)
-        if counter % 100 == 99 and display:
+        if counter[0] % 100 == 99 and display:
             now = time.perf_counter()
             print(
-                " " * (len(str(total)) - len(str(counter)))
-                + f'{counter}/{total}: {counter/total*100:5.2f}% computed  -  '
+                " " * (len(str(total)) - len(str(counter[0])))
+                + f'{counter[0]}/{total}: {counter[0]/total*100:5.2f}% computed  -  '
                 f'Time: {formatTime(now - t1)}  -  '
-                f'ETA: {formatTime((now - t1)/counter*(total - counter))}',
+                f'ETA: {formatTime((now - t1)/counter[0]*(total - counter[0]))}',
                 end='\r',
             )
 
@@ -149,56 +149,44 @@ def domainParallelizer(domain, function, cores=None, kwarg_dict=None, display=Fa
     if cores is None:
         cores = multiprocessing.cpu_count()
 
-    results = [None] * len(domain)
-
     # Special case when running on only one core, run without multiprocessing
     if cores == 1:
         for i, args in enumerate(domain):
-            results[i] = function(*args, **kwarg_dict)
+            results = [function(*args, **kwarg_dict)]
 
     # Run real multiprocessing if more than one core
     elif cores > 1:
 
         # Generate a pool of workers
         with closing(multiprocessing.Pool(cores)) as pool:
-            jobs = []
-            # Give workers things to do
-            for i, args in enumerate(domain):
-                # Give job to worker
-                jobs.append(
-                    pool.apply_async(
-                        function, args, kwarg_dict, callback=(lambda i: lambda *args: _logResult(*args, i))(i)
-                    )
-                )
-
-            # crashing if you get an error (doesn't catch keyboardinterrupt)
-            for job in jobs:
-                job.get()
+            results = pool.starmap_async(partial(function, **kwarg_dict), domain, callback=_logResult)
 
         pool.join()
 
     else:
-        print('The number of CPU cores defined is not in an expected range (1 or more.)')
-        print('Use cpu_cores = 1 as a fallback value.')
+        raise ValueError(
+            'The number of CPU cores defined is not in an expected range (1 or more.) '
+            'Use cpu_cores = 1 as a fallback value.'
+        )
 
-    return results
+    return results.get()
 
 
 ##############################
 ## USAGE EXAMPLE
 
 
-def mpWorker(inputs, wait_time):
+def mpWorker(inputs, wait_time, kwarg=0):
     """ Example worker function. This function will print out the name of the worker and wait 'wait_time
         seconds. 
 
     """
 
-    print(" Processs %s\tWaiting %s seconds" % (inputs, wait_time))
+    print(" Processs %s\tWaiting %s seconds. Argument %d" % (inputs, wait_time, kwarg))
 
     time.sleep(int(wait_time))
 
-    print(" Process %s\tDONE" % inputs)
+    print(f" Process {inputs}\tDONE")
 
     # Must use if you want print to be visible on the screen!
     sys.stdout.flush()
@@ -215,7 +203,7 @@ if __name__ == '__main__':
     cpu_cores = multiprocessing.cpu_count()
 
     # Run the parallelized function
-    results = domainParallelizer(data, mpWorker, cores=(cpu_cores - 1))
+    results = domainParallelizer(data, mpWorker, cores=(cpu_cores - 1), kwarg_dict={'kwarg': 3})
 
     print('Results:', results)
 

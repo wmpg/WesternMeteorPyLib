@@ -124,10 +124,11 @@ class DataGenerator(object):
             # Get a portion of files to load
             file_list = data_list[curr_index : curr_index + self.batch_size]
 
+            # Load pickle files and postprocess in parallel
+            domain = [[file_path, self.param_class_name] for file_path in file_list]
+
             # Postprocess the data in parallel
-            new_res = domainParallelizer(
-                file_list, dataFunction, kwarg_dict={'param_class_name': self.param_class_name}
-            )
+            new_res = domainParallelizer(domain, dataFunction)
 
             filtered_res_list = []
             # discard bad results
@@ -755,7 +756,7 @@ def fitCNNMultiHeaded(
     # cnn3 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn3)
     # cnn3 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn3)
 
-    input = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 4))
+    input = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 5))
     cnn = keras.layers.Conv1D(filters=10, kernel_size=20, activation='relu')(input)
     cnn = keras.layers.MaxPooling1D(pool_size=5)(cnn)
     cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
