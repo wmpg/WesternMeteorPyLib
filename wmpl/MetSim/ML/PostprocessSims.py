@@ -49,7 +49,7 @@ def saveProcessedData(
         param_dataset = h5file.create_dataset(
             'parameters', shape=(len(file_list), 10), chunks=True, dtype=np.float32
         )
-
+        display = True
         t1 = time.perf_counter()
         valid = 0
         if not multiprocess:
@@ -86,9 +86,13 @@ def saveProcessedData(
                     sim_dataset[valid] = sim_data
                     param_dataset[valid] = param_data
                     valid += 1
+                    if display:
+                        len(param_data)
+                        display = False
 
         sim_dataset.resize((valid, DATA_LENGTH, 4))
         param_dataset.resize((valid, 10))
+        print(param_dataset.shape)
 
 
 def loadProcessedData(h5path: str, batchsize: int, validation=False, validation_fraction=0.2):
@@ -113,6 +117,14 @@ def loadProcessedData(h5path: str, batchsize: int, validation=False, validation_
                 continue
 
             yield batch_sim, batch_param
+
+
+def loadh5pyData(path):
+    with h5py.File(path, 'r') as f:
+        input_train = f['simulation'][..., 1:]
+        label_train = f['parameters'][..., 1:]
+
+    return input_train, label_train
 
 
 def validateSimulation(dir_path, file_name, param_class_name, min_frames_visible):

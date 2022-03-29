@@ -34,6 +34,7 @@ from wmpl.MetSim.ML.GenerateSimulations import (
     extractSimData,
     getFileList,
 )
+from wmpl.MetSim.ML.PostprocessSims import loadProcessedData
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PyDomainParallelizer import domainParallelizer
 
