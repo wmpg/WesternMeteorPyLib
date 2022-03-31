@@ -49,7 +49,7 @@ def saveProcessedData(
         param_dataset = h5file.create_dataset(
             'parameters', shape=(len(file_list), 10), chunks=True, dtype=np.float32
         )
-        display = True
+
         t1 = time.perf_counter()
         valid = 0
         if not multiprocess:
@@ -86,16 +86,13 @@ def saveProcessedData(
                     sim_dataset[valid] = sim_data
                     param_dataset[valid] = param_data
                     valid += 1
-                    if display:
-                        len(param_data)
-                        display = False
 
         sim_dataset.resize((valid, DATA_LENGTH, 4))
         param_dataset.resize((valid, 10))
-        print(param_dataset.shape)
 
 
 def loadProcessedData(h5path: str, batchsize: int, validation=False, validation_fraction=0.2):
+    """ Generator for loading h5py datasets without loading everything into memory """
     with h5py.File(h5path, 'r') as h5file:
         i = 0
 
@@ -106,7 +103,9 @@ def loadProcessedData(h5path: str, batchsize: int, validation=False, validation_
             index_list = index_list[: -int(len(index_list) * validation_fraction)]
 
         while True:
-            batch_sim = h5file['simulation'][index_list[i] * batchsize : (index_list[i] + 1) * batchsize]
+            batch_sim = h5file['simulation'][
+                index_list[i] * batchsize : (index_list[i] + 1) * batchsize, ..., 1:
+            ]
             batch_param = h5file['parameters'][index_list[i] * batchsize : (index_list[i] + 1) * batchsize]
 
             i += 1
@@ -120,9 +119,13 @@ def loadProcessedData(h5path: str, batchsize: int, validation=False, validation_
 
 
 def loadh5pyData(path):
+    """ 
+    Loads all h5py data from dataset into memory. 
+    WARNING: For larger datasets, this can be on the order of gigabytes. Use only with excess of memory
+    """
     with h5py.File(path, 'r') as f:
         input_train = f['simulation'][..., 1:]
-        label_train = f['parameters'][..., 1:]
+        label_train = f['parameters'][...]
 
     return input_train, label_train
 

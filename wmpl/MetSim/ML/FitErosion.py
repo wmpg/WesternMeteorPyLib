@@ -1,6 +1,7 @@
 """ Fit the erosion model using machine learning. """
 
-from __future__ import absolute_import, division, print_function, unicode_literals
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
 
 import copy
 import datetime
@@ -19,21 +20,16 @@ import scipy
 import tensorflow as tf
 from wmpl.MetSim.GUI import SimulationResults
 from wmpl.MetSim.MetSimErosion import runSimulation
-from wmpl.MetSim.ML.GenerateSimulations import (
-    DATA_LENGTH,
-    SIM_CLASSES,
-    SIM_CLASSES_DICT,
-    SIM_CLASSES_NAMES,
-    ErosionSimContainer,
-    ErosionSimParameters,
-    ErosionSimParametersCAMO,
-    ErosionSimParametersCAMOWide,
-    MetParam,
-    PhysicalParameters,
-    dataFunction,
-    extractSimData,
-    getFileList,
-)
+from wmpl.MetSim.ML.GenerateSimulations import (DATA_LENGTH, SIM_CLASSES,
+                                                SIM_CLASSES_DICT,
+                                                SIM_CLASSES_NAMES,
+                                                ErosionSimContainer,
+                                                ErosionSimParameters,
+                                                ErosionSimParametersCAMO,
+                                                ErosionSimParametersCAMOWide,
+                                                MetParam, PhysicalParameters,
+                                                dataFunction, extractSimData,
+                                                getFileList)
 from wmpl.MetSim.ML.PostprocessSims import loadProcessedData
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PyDomainParallelizer import domainParallelizer
@@ -209,6 +205,46 @@ def loadModel(file_path, model_file='model.json', weights_file='model.h5'):
 
         return loaded_model
 
+def correlationPlot(X, Y, log, param_name_list, param_unit, param_pretext):
+    fig, ax = plt.subplots(10, 10, sharex='col', sharey='row')
+    for i in range(10):
+        for j in range(10):
+            # ax[j, i].set_title(param_name_list[i])
+            x = X[:, i]
+            y = Y[:, j]
+            # making the diagonals histograms is difficult because the y axis would be different
+            if log[j]:
+                ax[j, i].set_yscale('log')
+                ybins = np.logspace(np.log10(np.min(y[y > 0])), np.log10(np.max(y)), 50)
+            else:
+                ybins = np.linspace(np.min(y), np.max(y), 50)
+
+            if log[i]:
+                ax[j, i].set_xscale('log')
+                xbins = np.logspace(np.log10(np.min(x[x > 0])), np.log10(np.max(x)), 50)
+            else:
+                xbins = np.linspace(np.min(x), np.max(x), 50)
+
+            counts, _, _ = np.histogram2d(x, y, bins=(xbins, ybins))
+            ax[j, i].pcolormesh(xbins, ybins, counts.T)
+            # ax[j, i].plot(
+            #     [
+            #         getattr(camera_param, camera_param.param_list[i]).min * param_scaling[i],
+            #         getattr(camera_param, camera_param.param_list[i]).max * param_scaling[i],
+            #     ],
+            #     [
+            #         getattr(camera_param, camera_param.param_list[j]).min * param_scaling[j],
+            #         getattr(camera_param, camera_param.param_list[j]).max * param_scaling[j],
+            #     ],
+            # )
+            if i == 0:
+                ax[j, i].set_ylabel(f'{param_pretext[1]} {param_name_list[j]} ' + param_unit[j])
+            if j == len(ax) - 1:
+                ax[j, i].set_xlabel(f'{param_pretext[0]} {param_name_list[i]} ' + param_unit[i])
+
+    plt.subplots_adjust(wspace=0, hspace=0)
+    plt.show()
+
 
 def evaluateFit(model, validation_gen, output=False, display=False, log=None):
     """
@@ -372,46 +408,6 @@ def evaluateFit(model, validation_gen, output=False, display=False, log=None):
             log = [True, False, False, False, False, False, False, False, True, True]
         scaled_corr = correct_output * param_scaling
         scaled_pred = pred_output * param_scaling
-
-        def correlationPlot(X, Y, log, param_name_list, param_unit, param_pretext):
-            fig, ax = plt.subplots(10, 10, sharex='col', sharey='row')
-            for i in range(10):
-                for j in range(10):
-                    # ax[j, i].set_title(param_name_list[i])
-                    x = X[:, i]
-                    y = Y[:, j]
-                    # making the diagonals histograms is difficult because the y axis would be different
-                    if log[j]:
-                        ax[j, i].set_yscale('log')
-                        ybins = np.logspace(np.log10(np.min(y[y > 0])), np.log10(np.max(y)), 50)
-                    else:
-                        ybins = np.linspace(np.min(y), np.max(y), 50)
-
-                    if log[i]:
-                        ax[j, i].set_xscale('log')
-                        xbins = np.logspace(np.log10(np.min(x[x > 0])), np.log10(np.max(x)), 50)
-                    else:
-                        xbins = np.linspace(np.min(x), np.max(x), 50)
-
-                    counts, _, _ = np.histogram2d(x, y, bins=(xbins, ybins))
-                    ax[j, i].pcolormesh(xbins, ybins, counts.T)
-                    # ax[j, i].plot(
-                    #     [
-                    #         getattr(camera_param, camera_param.param_list[i]).min * param_scaling[i],
-                    #         getattr(camera_param, camera_param.param_list[i]).max * param_scaling[i],
-                    #     ],
-                    #     [
-                    #         getattr(camera_param, camera_param.param_list[j]).min * param_scaling[j],
-                    #         getattr(camera_param, camera_param.param_list[j]).max * param_scaling[j],
-                    #     ],
-                    # )
-                    if i == 0:
-                        ax[j, i].set_ylabel(f'{param_pretext[1]} {param_name_list[j]} ' + param_unit[j])
-                    if j == len(ax) - 1:
-                        ax[j, i].set_xlabel(f'{param_pretext[0]} {param_name_list[i]} ' + param_unit[i])
-
-            plt.subplots_adjust(wspace=0, hspace=0)
-            plt.show()
 
         correlationPlot(scaled_corr, scaled_pred, log, param_name_list, param_unit, ['Correct', 'Predicted'])
         correlationPlot(scaled_pred, scaled_pred, log, param_name_list, param_unit, ['', ''])
