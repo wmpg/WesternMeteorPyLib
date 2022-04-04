@@ -122,15 +122,15 @@ class PhysicalParameters:
         self.param_list = []
 
         # Mass range (kg)
-        self.m_init = MetParam(5e-7, 1e-3, 'log10')
+        self.m_init = MetParam(5e-7, 1e-3, 'log10', default=2.4671e-6, fixed=True)
         self.param_list.append("m_init")
 
         # Initial velocity range (m/s)
-        self.v_init = MetParam(11000, 72000)
+        self.v_init = MetParam(11000, 72000, default=3.0520e4, fixed=True)
         self.param_list.append("v_init")
 
         # Zenith angle range
-        self.zenith_angle = MetParam(np.radians(20), np.radians(80.0))
+        self.zenith_angle = MetParam(np.radians(20), np.radians(80.0), default=np.radians(39.200), fixed=True)
         self.param_list.append("zenith_angle")
 
         # Density range (kg/m^3)
@@ -147,23 +147,23 @@ class PhysicalParameters:
         ## Assumes no change in erosion once it starts!
 
         # Erosion height range
-        self.erosion_height_start = MetParam(70000, 130000, default=100000)
+        self.erosion_height_start = MetParam(70000, 130000, default=70000, fixed=True)
         self.param_list.append("erosion_height_start")
 
         # Erosion coefficient (s^2/m^2)
-        self.erosion_coeff = MetParam(0.0, 1.0 / 1e6, default=0.3 / 1e6)
+        self.erosion_coeff = MetParam(0.0, 1.0 / 1e6, default=0, fixed=True)
         self.param_list.append("erosion_coeff")
 
         # Mass index
-        self.erosion_mass_index = MetParam(1.5, 3.0, default=2)
+        self.erosion_mass_index = MetParam(1.5, 3.0, default=2, fixed=True)
         self.param_list.append("erosion_mass_index")
 
         # Minimum mass for erosion
-        self.erosion_mass_min = MetParam(1e-12, 1e-9, 'log10', default=1e-12)
+        self.erosion_mass_min = MetParam(1e-12, 1e-9, 'log10', default=1e-12, fixed=True)
         self.param_list.append("erosion_mass_min")
 
         # Maximum mass for erosion
-        self.erosion_mass_max = MetParam(1e-11, 1e-7, 'log10', default=1e-10)
+        self.erosion_mass_max = MetParam(1e-11, 1e-7, 'log10', default=1e-10, fixed=True)
         self.erosion_mass_max.linkParam(self.erosion_mass_min, 'greater')
         self.param_list.append("erosion_mass_max")
 
@@ -592,6 +592,7 @@ def extractSimData(
     phys_params: Optional[PhysicalParameters] = None,
     camera_params: Optional[ErosionSimParameters] = None,
     add_noise: bool = False,
+    display: bool = False,
 ) -> Optional[tuple]:
     """ Extract input parameters and model outputs from the simulation container and normalize them. 
 
@@ -655,12 +656,14 @@ def extractSimData(
 
     # zenith angle above 70 deg is bad
     if phys_params.zenith_angle.val <= np.radians(20):
-        # print('zenith')
+        if display:
+            print('zenith')
         return None
 
     # # make the density less than the grain density (don't let the grain density be set by the bulk density)
     if phys_params.rho.val >= 3500:
-        # print('rho')
+        if display:
+            print('rho')
         return None
 
     # restricting domain to physical values
@@ -683,7 +686,8 @@ def extractSimData(
     # if the peak magnitude is dimmer than the faintest expected peak magnitude, discard it
     # print(np.min(sim_results.abs_magnitude), camera_params.peak_mag_faintest)
     if np.min(sim_results.abs_magnitude) >= camera_params.peak_mag_faintest:
-        # print('mag')
+        if display:
+            print('mag')
         return None
 
     # Get indices that are above the faintest limiting magnitude
@@ -703,7 +707,8 @@ def extractSimData(
 
     # If no points were visible, skip this solution
     if not np.any(indices_visible):
-        # print('not visible')
+        if display:
+            print('not visible')
         return None
 
     # Compute the minimum time the meteor needs to be visible
@@ -714,7 +719,8 @@ def extractSimData(
 
     # Check if the minimum time is satisfied
     if np.max(time_lim_mag_bright) < min_time_visible:
-        # print('minimum time not satisfied')
+        if display:
+            print('minimum time not satisfied')
         return None
 
     ### ###
@@ -776,7 +782,8 @@ def extractSimData(
 
     # there should not be any truncation in the data
     if not np.any(len_sampled > 0):
-        print('no length measurements')
+        if display:
+            print('no length measurements')
         return None
 
     # if phys_params.erosion_height_start.val < np.min(ht_sampled) + 2_000:

@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>993</width>
-    <height>712</height>
+    <width>963</width>
+    <height>707</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -32,16 +32,58 @@
        <property name="title">
         <string>Fit parameters</string>
        </property>
-       <widget class="QWidget" name="layoutWidget">
+       <widget class="QWidget" name="layoutWidget_2">
         <property name="geometry">
          <rect>
-          <x>3</x>
-          <y>10</y>
-          <width>221</width>
+          <x>8</x>
+          <y>0</y>
+          <width>201</width>
           <height>581</height>
          </rect>
         </property>
         <layout class="QGridLayout" name="gridLayout">
+         <item row="4" column="2">
+          <widget class="QSlider" name="DensityInput">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+          </widget>
+         </item>
+         <item row="9" column="3">
+          <widget class="QLabel" name="ErosionMassMinValue">
+           <property name="text">
+            <string>TextLabel</string>
+           </property>
+          </widget>
+         </item>
+         <item row="10" column="3">
+          <widget class="QLabel" name="ErosionMassMaxValue">
+           <property name="text">
+            <string>TextLabel</string>
+           </property>
+          </widget>
+         </item>
+         <item row="8" column="3">
+          <widget class="QLabel" name="MassIndexValue">
+           <property name="text">
+            <string>TextLabel</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="2">
+          <widget class="QSlider" name="InitialMassInput">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+          </widget>
+         </item>
+         <item row="9" column="0">
+          <widget class="QCheckBox" name="ErosionMassMinCheckbox">
+           <property name="text">
+            <string>ERMm</string>
+           </property>
+          </widget>
+         </item>
          <item row="7" column="0">
           <widget class="QCheckBox" name="ErosionCoefficientCheckbox">
            <property name="text">
@@ -62,40 +104,12 @@
            </property>
           </widget>
          </item>
-         <item row="9" column="0">
-          <widget class="QCheckBox" name="ErosionMassMinCheckbox">
-           <property name="text">
-            <string>ERMm</string>
-           </property>
-          </widget>
-         </item>
-         <item row="5" column="1">
-          <widget class="QLineEdit" name="AblationCoefficientInput"/>
-         </item>
-         <item row="9" column="1">
-          <widget class="QLineEdit" name="ErosionMassMinInput"/>
-         </item>
-         <item row="7" column="1">
-          <widget class="QLineEdit" name="ErosionCoefficientInput"/>
-         </item>
          <item row="5" column="0">
           <widget class="QCheckBox" name="AblationCoefficientCheckbox">
            <property name="text">
             <string>ABL</string>
            </property>
           </widget>
-         </item>
-         <item row="0" column="1">
-          <widget class="QLineEdit" name="InitialMassInput"/>
-         </item>
-         <item row="2" column="1">
-          <widget class="QLineEdit" name="InitialVelocityInput"/>
-         </item>
-         <item row="3" column="1">
-          <widget class="QLineEdit" name="ZenithInput"/>
-         </item>
-         <item row="4" column="1">
-          <widget class="QLineEdit" name="DensityInput"/>
          </item>
          <item row="2" column="0">
           <widget class="QCheckBox" name="InitialVelocityCheckbox">
@@ -104,11 +118,12 @@
            </property>
           </widget>
          </item>
-         <item row="6" column="1">
-          <widget class="QLineEdit" name="ErosionHeightInput"/>
-         </item>
-         <item row="8" column="1">
-          <widget class="QLineEdit" name="MassIndexInput"/>
+         <item row="8" column="0">
+          <widget class="QCheckBox" name="MassIndexCheckbox">
+           <property name="text">
+            <string>ER_S</string>
+           </property>
+          </widget>
          </item>
          <item row="6" column="0">
           <widget class="QCheckBox" name="ErosionHeightCheckbox">
@@ -124,20 +139,17 @@
            </property>
           </widget>
          </item>
-         <item row="8" column="0">
-          <widget class="QCheckBox" name="MassIndexCheckbox">
-           <property name="text">
-            <string>ER_S</string>
-           </property>
-          </widget>
-         </item>
-         <item row="10" column="1">
-          <widget class="QLineEdit" name="ErosionMassMaxInput"/>
-         </item>
          <item row="3" column="0">
           <widget class="QCheckBox" name="ZenithCheckbox">
            <property name="text">
             <string>Zc</string>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="3">
+          <widget class="QLabel" name="InitialVelocityValue">
+           <property name="text">
+            <string>TextLabel</string>
            </property>
           </widget>
          </item>
@@ -148,108 +160,136 @@
            </property>
           </widget>
          </item>
-         <item row="0" column="2">
+         <item row="0" column="3">
           <widget class="QLabel" name="InitialMassValue">
            <property name="text">
             <string>TextLabel</string>
            </property>
           </widget>
          </item>
-         <item row="2" column="2">
-          <widget class="QLabel" name="InitialVelocityValue">
-           <property name="text">
-            <string>TextLabel</string>
-           </property>
-          </widget>
-         </item>
-         <item row="3" column="2">
+         <item row="3" column="3">
           <widget class="QLabel" name="ZenithValue">
            <property name="text">
             <string>TextLabel</string>
            </property>
           </widget>
          </item>
-         <item row="4" column="2">
+         <item row="4" column="3">
           <widget class="QLabel" name="DensityValue">
            <property name="text">
             <string>TextLabel</string>
            </property>
           </widget>
          </item>
-         <item row="5" column="2">
-          <widget class="QLabel" name="AblationCoefficientValue">
-           <property name="text">
-            <string>TextLabel</string>
-           </property>
-          </widget>
-         </item>
-         <item row="6" column="2">
+         <item row="6" column="3">
           <widget class="QLabel" name="ErosionHeightValue">
            <property name="text">
             <string>TextLabel</string>
            </property>
           </widget>
          </item>
-         <item row="7" column="2">
+         <item row="5" column="3">
+          <widget class="QLabel" name="AblationCoefficientValue">
+           <property name="text">
+            <string>TextLabel</string>
+           </property>
+          </widget>
+         </item>
+         <item row="7" column="3">
           <widget class="QLabel" name="ErosionCoefficientValue">
            <property name="text">
             <string>TextLabel</string>
            </property>
           </widget>
          </item>
-         <item row="8" column="2">
-          <widget class="QLabel" name="MassIndexValue">
-           <property name="text">
-            <string>TextLabel</string>
+         <item row="2" column="2">
+          <widget class="QSlider" name="InitialVelocityInput">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
            </property>
           </widget>
          </item>
-         <item row="9" column="2">
-          <widget class="QLabel" name="ErosionMassMinValue">
-           <property name="text">
-            <string>TextLabel</string>
+         <item row="5" column="2">
+          <widget class="QSlider" name="AblationCoefficientInput">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+          </widget>
+         </item>
+         <item row="3" column="2">
+          <widget class="QSlider" name="ZenithInput">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+          </widget>
+         </item>
+         <item row="6" column="2">
+          <widget class="QSlider" name="ErosionHeightInput">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+          </widget>
+         </item>
+         <item row="7" column="2">
+          <widget class="QSlider" name="ErosionCoefficientInput">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+          </widget>
+         </item>
+         <item row="8" column="2">
+          <widget class="QSlider" name="MassIndexInput">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
            </property>
           </widget>
          </item>
          <item row="10" column="2">
-          <widget class="QLabel" name="ErosionMassMaxValue">
-           <property name="text">
-            <string>TextLabel</string>
+          <widget class="QSlider" name="ErosionMassMaxInput">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+          </widget>
+         </item>
+         <item row="9" column="2">
+          <widget class="QSlider" name="ErosionMassMinInput">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
            </property>
           </widget>
          </item>
         </layout>
        </widget>
-       <widget class="QLabel" name="ComputationEnabledLabel">
-        <property name="geometry">
-         <rect>
-          <x>20</x>
-          <y>580</y>
-          <width>181</width>
-          <height>20</height>
-         </rect>
-        </property>
-        <property name="text">
-         <string>Recomputation Enabled</string>
-        </property>
-        <property name="alignment">
-         <set>Qt::AlignCenter</set>
-        </property>
-       </widget>
        <widget class="QLabel" name="CoordinatesLabel">
         <property name="geometry">
          <rect>
-          <x>16</x>
-          <y>610</y>
+          <x>8</x>
+          <y>555</y>
           <width>201</width>
-          <height>20</height>
+          <height>56</height>
          </rect>
         </property>
         <property name="text">
          <string>TextLabel</string>
         </property>
         <property name="alignment">
-         <set>Qt::AlignCenter</set>
+         <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
+        </property>
+       </widget>
+       <widget class="QCheckBox" name="SimulationModeCheckbox">
+        <property name="geometry">
+         <rect>
+          <x>8</x>
+          <y>611</y>
+          <width>201</width>
+          <height>20</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Simulation Mode</string>
+        </property>
+        <property name="checked">
+         <bool>false</bool>
         </property>
        </widget>
       </widget>
@@ -262,7 +302,7 @@
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>993</width>
+     <width>963</width>
      <height>22</height>
     </rect>
    </property>

@@ -14,15 +14,23 @@ import tensorflow as tf
 from matplotlib.backends.backend_qt5agg import FigureCanvas, NavigationToolbar2QT
 from matplotlib.figure import Figure
 from matplotlib.widgets import Slider
-from PyQt5.QtCore import pyqtSignal, pyqtSlot
+from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
 from PyQt5.QtGui import QTransform
 from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
 from PyQt5.uic import loadUi
 from pyqtgraph import PlotWidget, plot
+from scipy.stats.stats import pearsonr
 from sklearn.decomposition import PCA
 from wmpl.MetSim.GUITools import MatplotlibPopupWindow
+from wmpl.MetSim.MetSimErosion import runSimulation
 from wmpl.MetSim.ML.FitErosion import correlationPlot
-from wmpl.MetSim.ML.GenerateSimulations import DATA_LENGTH, PhysicalParameters
+from wmpl.MetSim.ML.GenerateSimulations import (
+    DATA_LENGTH,
+    ErosionSimParameters,
+    PhysicalParameters,
+    SimulationResults,
+    extractSimData,
+)
 from wmpl.MetSim.ML.PostprocessSims import loadh5pyData
 
 
@@ -56,7 +64,22 @@ class LatentDistanceGUI(QMainWindow):
         loadUi(os.path.join(os.path.dirname(__file__), "LatentDistanceGUI.ui"), self)
         self.setWindowTitle("LatentDistance")
 
+        self.sim_popup = None
+        self.computation_enabled = False
+        self.simulation_mode = False
         ## variables used for computation ##
+
+        # grid coordinates
+        self.n = 100
+        self.coords = (
+            np.concatenate(np.meshgrid(np.linspace(0, 1, self.n), np.linspace(0, 1, self.n)))
+            .reshape(2, self.n * self.n)
+            .T[:, ::-1]
+        )  # (n*n, 2)
+
+        self.current_index = 0
+        self.set_index = 0
+
         self.param_obj = PhysicalParameters()
         self.model = model
         self.params = np.zeros((10,), dtype=np.float64)
@@ -71,29 +94,18 @@ class LatentDistanceGUI(QMainWindow):
         )
         self.parameter_scaling = np.array([1, 1 / 1000, 180 / np.pi, 1, 1e6, 1 / 1000, 1e6, 1, 1, 1])
 
-        # grid coordinates
-        self.n = 100
-        self.coords = (
-            np.concatenate(np.meshgrid(np.linspace(0, 1, self.n), np.linspace(0, 1, self.n)))
-            .reshape(2, self.n * self.n)
-            .T[:, ::-1]
-        )  # (n*n, 2)
-        self.current_index = 0
-        self.set_index = 0
-
-        ## informative label ##
-        self.computation_enabled = False
-        self.ComputationEnabledLabel.setText('Recomputation Enabled')
-        self.ComputationEnabledLabel.setStyleSheet("color: #006325")
+        ## simulation mode ##
+        self.SimulationModeCheckbox.stateChanged.connect(self.setSimulationMode)
 
         ## image plot ##
         # self.graphWidget.setLimits(xMin=0, xMax=1, yMin=0, yMax=1)
         self.graphWidget.setMouseEnabled(x=False, y=False)
 
         cm = pg.ColorMap(
-            [0, 0.03, 0.1, 0.2, 1], [(0, 0, 0), (255, 255, 0), (255, 0, 0), (255, 255, 255), (0, 0, 255)]
+            [0, 0.03, 0.1, 0.2, 1], [(255, 255, 255), (255, 0, 0), (255, 255, 0), (0, 255, 0), (0, 0, 255)]
         )
-        self.image = ClickableImageItem(np.eye(self.n), levels=(0, 3))
+        self.cmap_max = 3
+        self.image = ClickableImageItem(np.eye(self.n), levels=(0, self.cmap_max))
         self.CoordinatesLabel.setText('(0, 0)')
         self.setImageTransform()
         self.image.setColorMap(cm)
@@ -153,8 +165,12 @@ class LatentDistanceGUI(QMainWindow):
             checkbox.stateChanged.connect(partial(self.checkboxStateChange, i))
             checkbox.setChecked(self.variable_params[i])
 
-            input.setText(str(self.params[i]))
-            input.editingFinished.connect(partial(self.entryChanged, i))
+            input.setMinimum(0)
+            input.setMaximum(100)
+            # input.setTickInterval(50)
+            # input.setValue(0)
+            input.sliderReleased.connect(partial(self.sliderReleased, i))
+            input.valueChanged.connect(partial(self.valueChanged, i))
 
         self.updateParameterValue()
 
@@ -163,6 +179,12 @@ class LatentDistanceGUI(QMainWindow):
         self.computeLatentSpace()
 
     ## signal functions ##
+    def setSimulationMode(self):
+        if self.SimulationModeCheckbox.checkState() > 0:
+            self.simulation_mode = True
+        else:
+            self.simulation_mode = False
+
     def checkboxStateChange(self, i):
         checkbox = self.parameter_checkboxes[i]
         input = self.parameter_inputs[i]
@@ -173,12 +195,15 @@ class LatentDistanceGUI(QMainWindow):
 
         if np.sum([checkbox.checkState() > 0 for checkbox in self.parameter_checkboxes]) != 2:
             self.computation_enabled = False
-            self.ComputationEnabledLabel.setText('Recomputation Disabled')
-            self.ComputationEnabledLabel.setStyleSheet("color: #b40000")
+            for i, checkbox in enumerate(self.parameter_checkboxes):
+                if self.variable_params[i]:
+                    checkbox.setStyleSheet("color: #b40000; font-weight: bold")
+                else:
+                    checkbox.setStyleSheet('')
         else:
             self.computation_enabled = True
-            self.ComputationEnabledLabel.setText('Recomputation Enabled')
-            self.ComputationEnabledLabel.setStyleSheet("color: #006325")
+            for checkbox in self.parameter_checkboxes:
+                checkbox.setStyleSheet("")
 
             text = self.parameter_names[self.variable_params]
             units = self.parameter_units[self.variable_params]
@@ -188,6 +213,72 @@ class LatentDistanceGUI(QMainWindow):
         if self.computation_enabled:
             self.computeLatentSpace()
             self.setImageTransform()
+
+    def sliderReleased(self, i):
+        self.computeLatentSpace()
+
+    def valueChanged(self, i):
+        self.params[i] = self.parameter_inputs[i].value() / self.parameter_inputs[i].maximum()
+        self.updateParameterValue(i)
+
+    def onClicked(self, image, ev):
+        pos = np.array([ev.pos().x(), ev.pos().y()])
+        if not self.simulation_mode:
+            self.set_index = np.ravel_multi_index(np.floor(pos).astype(int), (self.n, self.n))
+        else:
+            self.simulateData()
+        # no need to compute distance
+
+    def onMoved(self, image, ev):
+        pos = np.array([ev.pos().x(), ev.pos().y()])
+        self.current_index = np.ravel_multi_index(np.floor(pos).astype(int), (self.n, self.n))
+
+        if not self.simulation_mode:
+            self.computeDistances()
+
+    ## other functions ##
+    def simulateData(self):
+        values = self.params.copy()
+        values[self.variable_params] = self.coords[self.current_index]
+        # print(np.max(self.image.image.flatten()[self.current_index]))
+        color = self.image.getColorMap().map(
+            self.image.image.flatten()[self.current_index] / self.cmap_max, mode='qcolor'
+        )
+
+        if self.sim_popup is None:
+            self.sim_popup = SimulationPopup()
+
+        self.sim_popup.runSimulation(values, color)
+        self.sim_popup.show()
+
+    def computeLatentSpace(self):
+        """
+        When the fit parameters are changed in any way, the latent space must be recomputed
+        """
+        if not self.computation_enabled:
+            return
+
+        input_values = np.stack((self.params,) * self.n * self.n, axis=0)  # (n*n, 10)
+        input_values[:, self.variable_params] = self.coords
+        self.latent_space = self.model.predict(input_values)
+
+        self.computeDistances()
+
+    def computeDistances(self):
+        """
+        When latent space or current index is updated, this should be called
+        """
+        if self.image.mouse_in:
+            i = self.current_index
+        else:
+            i = self.set_index
+
+        clicked_coord = self.latent_space[i : i + 1]  # keep dim of (1, n*n)
+        dist = np.sqrt(np.sum((self.latent_space - clicked_coord) ** 2, axis=1))
+        self.image.setImage(dist.reshape(self.n, self.n), levels=(0, self.cmap_max))
+
+        transformed_pos = pg.transformCoordinates(self.transform, self.coords[i] * self.n)
+        self.CoordinatesLabel.setText(f'({transformed_pos[0]:.4e}, {transformed_pos[1]:.4e})')
 
     def setImageTransform(self):
         xy_range = [[], []]
@@ -213,59 +304,6 @@ class LatentDistanceGUI(QMainWindow):
 
         self.graphWidget.setRange(xRange=xy_range[0], yRange=xy_range[1], padding=0)
 
-    def entryChanged(self, i):
-        changed = False
-        try:
-            new_value = float(self.parameter_inputs[i].text())
-            changed = new_value != self.params[i]
-            self.params[i] = new_value
-        except ValueError:
-            self.parameter_inputs[i].setText(str(self.params[i]))
-
-        if changed:
-            self.computeLatentSpace()
-            self.updateParameterValue(i)
-
-    def onClicked(self, image, ev):
-        pos = np.array([ev.pos().x(), ev.pos().y()])
-        self.set_index = np.ravel_multi_index(np.floor(pos).astype(int), (self.n, self.n))
-        # no need to compute distance
-
-    def onMoved(self, image, ev):
-        pos = np.array([ev.pos().x(), ev.pos().y()])
-        self.current_index = np.ravel_multi_index(np.floor(pos).astype(int), (self.n, self.n))
-        self.computeDistances()
-
-    ## other functions ##
-    def computeLatentSpace(self):
-        """
-        When the fit parameters are changed in any way, the latent space must be recomputed
-        """
-        if not self.computation_enabled:
-            return
-
-        input_values = np.stack((self.params,) * self.n * self.n, axis=0)  # (n*n, 10)
-        input_values[:, self.variable_params] = self.coords
-        self.latent_space = self.model.predict(input_values)
-
-        self.computeDistances()
-
-    def computeDistances(self):
-        """
-        When latent space or current index is updated, this should be called
-        """
-        if self.image.mouse_in:
-            i = self.current_index
-        else:
-            i = self.set_index
-
-        clicked_coord = self.latent_space[i : i + 1]  # keep dim of (1, n*n)
-        dist = np.sqrt(np.sum((self.latent_space - clicked_coord) ** 2, axis=1))
-        self.image.setImage(dist.reshape(self.n, self.n), levels=(0, 3))
-
-        transformed_pos = pg.transformCoordinates(self.transform, self.coords[i] * self.n)
-        self.CoordinatesLabel.setText(f'({transformed_pos[0]:.4e}, {transformed_pos[1]:.4e})')
-
     def updateParameterValue(self, i: Optional[int] = None):
         values = self.param_obj.getDenormalizedInputs(self.params)
         if i is None:
@@ -277,6 +315,71 @@ class LatentDistanceGUI(QMainWindow):
             self.parameter_values[i].setText(
                 f'{values[i]*self.parameter_scaling[i]:.4e} {self.parameter_units[i]}'
             )
+
+
+class SimulationPopup(pg.GraphicsView):
+    def __init__(self, *args, **kwargs):
+        super(SimulationPopup, self).__init__(*args, **kwargs)
+        self.resize(800, 600)
+        layout = pg.GraphicsLayout()
+        self.setCentralItem(layout)
+
+        self.phys_param = None
+
+        self.magnitude_plot = layout.addPlot(0, 0)
+        self.magnitude_plot.showGrid(x=True, y=True, alpha=0.3)
+        self.magnitude_plot.setLabel('bottom', 'Magnitude')
+        self.magnitude_plot.setLabel('left', 'Height (km)')
+        self.magnitude_plot.setXRange(8, -2)
+
+        self.velocity_plot = layout.addPlot(0, 1)
+        self.velocity_plot.showGrid(x=True, y=True, alpha=0.3)
+        self.velocity_plot.setLabel('bottom', 'Velocity (km/s)')
+        self.velocity_plot.setLabel('left', 'Height (km)')
+        self.velocity_plot.setXRange(20, 80)
+        self.velocity_plot.setYRange(70, 140)
+
+        self.norm_magnitude_plot = layout.addPlot(1, 0)
+        self.norm_magnitude_plot.showGrid(x=True, y=True, alpha=0.3)
+        self.norm_magnitude_plot.setLabel('bottom', 'Magnitude')
+        self.norm_magnitude_plot.setLabel('left', 'Height')
+
+        self.norm_velocity_plot = layout.addPlot(1, 1)
+        self.norm_velocity_plot.showGrid(x=True, y=True, alpha=0.3)
+        self.norm_velocity_plot.setLabel('bottom', 'Velocity')
+        self.norm_velocity_plot.setLabel('left', 'Height')
+
+        self.magnitude_plot.setYLink(self.velocity_plot)
+        self.norm_magnitude_plot.setYLink(self.norm_velocity_plot)
+
+    def runSimulation(self, norm_values, color):
+        self.phys_param = PhysicalParameters()
+        denorm_values = self.phys_param.getDenormalizedInputs(norm_values)
+        self.phys_param.setParamValues(denorm_values)
+        const = self.phys_param.getConst()
+
+        simulation_results = SimulationResults(const, *runSimulation(const, compute_wake=False))
+        self.plot(simulation_results, color)
+
+    def plot(self, sim: SimulationResults, color):
+        ret = extractSimData(
+            sim_results=sim, phys_params=self.phys_param, camera_params=ErosionSimParameters()
+        )
+        if ret is not None:
+            param_dict, sim_data_normed, params_normed = ret
+            self.norm_magnitude_plot.plot(sim_data_normed[:, 3], sim_data_normed[:, 1], pen=color)
+            self.norm_velocity_plot.plot(sim_data_normed[:, 2], sim_data_normed[:, 1], pen=color)
+
+        self.magnitude_plot.plot(sim.abs_magnitude, sim.brightest_height_arr / 1000, pen=color)
+        self.velocity_plot.plot(sim.brightest_vel_arr / 1000, sim.brightest_height_arr / 1000, pen=color)
+
+    def closeEvent(self, event):
+        self.norm_magnitude_plot.clear()
+        self.norm_velocity_plot.clear()
+
+        self.magnitude_plot.clear()
+        self.velocity_plot.clear()
+        super().closeEvent(event)
 
 
 class Autoencoder(keras.models.Model):
@@ -365,19 +468,45 @@ def trainParamPrediction(
 
     input_train, label_train = loadh5pyData(data_path)
 
+    # def build_model(hp):
+    #     # relu, adam, 190, 6
+    #     activation = hp.Choice("activation", ["relu", "tanh"])
+    #     optimizer = hp.Choice('optimizer', ['adagrad', 'adam', 'adamax', 'nadam', 'sgd', 'rmsprop'])
+    #     units = hp.Int('units', min_value=20, max_value=200, step=10)
+    #     hidden_layers = hp.Int('layers', min_value=1, max_value=10, step=1)
+    #     model = keras.Sequential()
+    #     model.add(keras.layers.Input(shape=(20,)))
+    #     for i in range(hidden_layers):
+    #         model.add(keras.layers.Dense(units, activation=activation))
+
+    #     model.add(keras.layers.Dense(10))
+    #     model.compile(optimizer=optimizer, loss='mse')
+    #     return model
+
+    # tuner = kt.RandomSearch(build_model, objective='val_loss', max_trials=100)
+    # tuner.search(
+    #     autoencoder.encoder.predict(input_train),
+    #     label_train,
+    #     epochs=1,
+    #     validation_split=0.2,
+    #     batch_size=batchsize,
+    # )
+    # model = tuner.get_best_models()[0]
+
     model = keras.Sequential(
         [
             keras.layers.Input(shape=(20,)),
-            keras.layers.Dense(50, activation='relu'),
-            keras.layers.Dense(50, activation='relu'),
-            keras.layers.Dense(50, activation='relu'),
-            keras.layers.Dense(50, activation='relu'),
-            keras.layers.Dense(50, activation='relu'),
+            keras.layers.Dense(190),
+            keras.layers.Dense(190),
+            keras.layers.Dense(190),
+            keras.layers.Dense(190),
+            keras.layers.Dense(190),
+            keras.layers.Dense(190),
             keras.layers.Dense(10),
         ]
     )
-
     model.compile(optimizer='adam', loss='mse')
+
     model.fit(
         x=autoencoder.encoder.predict(input_train),
         y=label_train,
@@ -390,6 +519,47 @@ def trainParamPrediction(
     keras.models.save_model(
         model, os.path.join(output_dir, model_name + '_encoder_translator.hdf5'), save_format='h5'
     )
+
+
+def trainAutoencoderVaryingSpace(
+    data_path: str,
+    output_dir: str,
+    autoencoder_path: str,
+    epochs: int,
+    steps_per_epoch: int,
+    batchsize: int,
+    model_name: str = 'model',
+):
+    autoencoder = keras.models.load_model(autoencoder_path)
+
+    input_train, label_train = loadh5pyData(data_path)
+
+    # label_train[:, 3] >
+
+    model = keras.Sequential(
+        [
+            keras.layers.Input(shape=(20,)),
+            keras.layers.Dense(190),
+            keras.layers.Dense(190),
+            keras.layers.Dense(190),
+            keras.layers.Dense(190),
+            keras.layers.Dense(190),
+            keras.layers.Dense(190),
+            keras.layers.Dense(10),
+        ]
+    )
+    model.compile(optimizer='adam', loss='mse')
+
+    model.fit(
+        x=autoencoder.encoder.predict(input_train),
+        y=label_train,
+        batch_size=batchsize,
+        steps_per_epoch=steps_per_epoch,
+        epochs=5,
+        validation_split=0.2,
+    )
+    prediction = model.predict(autoencoder.encoder.predict(input_train))
+    print(pearsonr(prediction[:, 3], label_train[:, 3])[0], pearsonr(prediction[:, 4], label_train[:, 4])[0])
 
 
 def trainLatentSpaceFinder(
@@ -413,19 +583,30 @@ def trainLatentSpaceFinder(
     pca = PCA(n_components=20)
     pca.fit(autoencoder.encoder.predict(input_train[:5000]))
 
-    model = keras.Sequential(
-        [
-            keras.layers.Input(shape=(10,)),
-            keras.layers.Dense(50, activation='relu'),
-            keras.layers.Dense(50, activation='relu'),
-            keras.layers.Dense(50, activation='relu'),
-            keras.layers.Dense(50, activation='relu'),
-            keras.layers.Dense(50, activation='relu'),
-            keras.layers.Dense(20),
-        ]
-    )
+    def build_model(hp):
+        # relu, adam, 190, 10
+        activation = hp.Choice("activation", ["relu", "tanh"])
+        optimizer = hp.Choice('optimizer', ['adagrad', 'adam', 'adamax', 'nadam', 'sgd', 'rmsprop'])
+        units = hp.Int('units', min_value=20, max_value=200, step=10)
+        hidden_layers = hp.Int('layers', min_value=1, max_value=10, step=1)
+        model = keras.Sequential()
+        model.add(keras.layers.Input(shape=(10,)))
+        for i in range(hidden_layers):
+            model.add(keras.layers.Dense(units, activation=activation))
 
-    model.compile(optimizer='adam', loss='mse')
+        model.add(keras.layers.Dense(20))
+        model.compile(optimizer=optimizer, loss='mse')
+        return model
+
+    tuner = kt.RandomSearch(build_model, objective='val_loss', max_trials=100)
+    tuner.search(
+        label_train,
+        pca.transform(autoencoder.encoder.predict(input_train)),
+        epochs=1,
+        validation_split=0.2,
+        batch_size=batchsize,
+    )
+    model = tuner.get_best_models()[0]
     model.fit(
         x=label_train,
         y=pca.transform(autoencoder.encoder.predict(input_train)),
@@ -540,13 +721,11 @@ def visualizeLatentSpaceDistance(model_path):
 def main():
     data_path = r'D:\datasets\meteor\norestrictions_dataset.h5'
     model_path = r'D:\datasets\meteor\saturn\trained_models\trained2'
-    model_name = 'inverseproblem'
+    model_name = 'tuned'
     autoencoder_path = rf'D:\datasets\meteor\saturn\trained_models\trained2\model_encoder'
-    translator_path = (
-        rf'D:\datasets\meteor\saturn\trained_models\trained2\{model_name}_encoder_translator.hdf5'
-    )
+    translator_path = rf'D:\datasets\meteor\saturn\trained_models\trained2\tuned_encoder_translator.hdf5'
     latentspacefinder_path = (
-        rf'D:\datasets\meteor\saturn\trained_models\trained2\{model_name}_latentspace_finder.hdf5'
+        rf'D:\datasets\meteor\saturn\trained_models\trained2\tuned_latentspace_finder.hdf5'
     )
 
     # trainAutoencoder(data_path, model_path, 30, 50, 500, model_name=model_name)
