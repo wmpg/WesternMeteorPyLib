@@ -220,4 +220,4 @@ if __name__ == "__main__":
 
     #########################
 
-    saveProcessedData(cml_args.data_path, cml_args.output_path, cml_args.filename, multiprocess=True)
+    saveProcessedData(cml_args.data_path, cml_args.output_path, cml_args.filename, multiprocess=False)
