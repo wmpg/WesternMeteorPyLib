@@ -6,6 +6,7 @@ from functools import partial
 from typing import Optional
 
 import keras
+import keras.backend as K
 import keras_tuner as kt
 import matplotlib.pyplot as plt
 import numpy as np
@@ -31,7 +32,7 @@ from wmpl.MetSim.ML.GenerateSimulations import (
     SimulationResults,
     extractSimData,
 )
-from wmpl.MetSim.ML.PostprocessSims import loadh5pyData
+from wmpl.MetSim.ML.PostprocessSims import loadh5pyData, loadProcessedData
 
 
 class ClickableImageItem(pg.ImageItem):
@@ -107,6 +108,7 @@ class LatentDistanceGUI(QMainWindow):
         self.cmap_max = 3
         self.image = ClickableImageItem(np.eye(self.n), levels=(0, self.cmap_max))
         self.CoordinatesLabel.setText('(0, 0)')
+        self.CoordinatesLabel2.setText('')
         self.setImageTransform()
         self.image.setColorMap(cm)
         self.graphWidget.addItem(self.image)
@@ -233,8 +235,14 @@ class LatentDistanceGUI(QMainWindow):
         pos = np.array([ev.pos().x(), ev.pos().y()])
         self.current_index = np.ravel_multi_index(np.floor(pos).astype(int), (self.n, self.n))
 
+        transformed_pos = pg.transformCoordinates(self.transform, pos)
+
         if not self.simulation_mode:
             self.computeDistances()
+            self.CoordinatesLabel.setText(f'({transformed_pos[0]:.4e}, {transformed_pos[1]:.4e})')
+            self.CoordinatesLabel2.setText('')
+        else:
+            self.CoordinatesLabel2.setText(f'({transformed_pos[0]:.4e}, {transformed_pos[1]:.4e})')
 
     ## other functions ##
     def simulateData(self):
@@ -277,8 +285,9 @@ class LatentDistanceGUI(QMainWindow):
         dist = np.sqrt(np.sum((self.latent_space - clicked_coord) ** 2, axis=1))
         self.image.setImage(dist.reshape(self.n, self.n), levels=(0, self.cmap_max))
 
-        transformed_pos = pg.transformCoordinates(self.transform, self.coords[i] * self.n)
-        self.CoordinatesLabel.setText(f'({transformed_pos[0]:.4e}, {transformed_pos[1]:.4e})')
+        if not self.image.mouse_in:
+            transformed_pos = pg.transformCoordinates(self.transform, self.coords[i] * self.n)
+            self.CoordinatesLabel.setText(f'({transformed_pos[0]:.4e}, {transformed_pos[1]:.4e})')
 
     def setImageTransform(self):
         xy_range = [[], []]
@@ -465,8 +474,12 @@ def trainParamPrediction(
     model_name: str = 'model',
 ):
     autoencoder = keras.models.load_model(autoencoder_path)
+    to_pca = keras.models.load_model(
+        rf'D:\datasets\meteor\saturn\trained_models\trained2\tuned_latentspace_finder.hdf5'
+    )
 
-    input_train, label_train = loadh5pyData(data_path)
+    generator = loadProcessedData(data_path, batchsize, validation_split=0.2)
+    generator = ((autoencoder.encoder.predict(sim), param) for (sim, param) in generator)
 
     # def build_model(hp):
     #     # relu, adam, 190, 6
@@ -493,6 +506,13 @@ def trainParamPrediction(
     # )
     # model = tuner.get_best_models()[0]
 
+    def loss_fn(y_true, y_pred):
+        # it doesn't matter if the predicted values are good, just that they correspond to the same plot
+        x_true = to_pca(y_true, training=False)[0]
+        x_pred = to_pca(y_pred, training=False)[0]
+
+        return K.mean(K.square(x_true - x_pred), axis=-1)
+
     model = keras.Sequential(
         [
             keras.layers.Input(shape=(20,)),
@@ -508,12 +528,7 @@ def trainParamPrediction(
     model.compile(optimizer='adam', loss='mse')
 
     model.fit(
-        x=autoencoder.encoder.predict(input_train),
-        y=label_train,
-        batch_size=batchsize,
-        steps_per_epoch=steps_per_epoch,
-        epochs=epochs,
-        validation_split=0.2,
+        x=generator, batch_size=batchsize, steps_per_epoch=steps_per_epoch, epochs=epochs,
     )
 
     keras.models.save_model(
@@ -700,7 +715,8 @@ def visualizeInverseSolving(
         )
     else:
         correlationPlot(
-            label_train,
+            # label_train,
+            model.predict(autoencoder.encoder.predict(input_train)),
             model.predict(autoencoder.encoder.predict(input_train)),
             [False] * 10,
             [''] * 10,
@@ -719,9 +735,9 @@ def visualizeLatentSpaceDistance(model_path):
 
 
 def main():
-    data_path = r'D:\datasets\meteor\norestrictions_dataset.h5'
+    data_path = r'D:\datasets\meteor\very_restricted_dataset.h5'
     model_path = r'D:\datasets\meteor\saturn\trained_models\trained2'
-    model_name = 'tuned'
+    model_name = 'restricted_domain'
     autoencoder_path = rf'D:\datasets\meteor\saturn\trained_models\trained2\model_encoder'
     translator_path = rf'D:\datasets\meteor\saturn\trained_models\trained2\tuned_encoder_translator.hdf5'
     latentspacefinder_path = (
@@ -735,7 +751,12 @@ def main():
 
     # visualizeLatentSpace(autoencoder_path, data_path)
 
-    # visualizeInverseSolving(autoencoder_path, latentspacefinder_path, data_path, forward=True)
+    # visualizeInverseSolving(
+    #     autoencoder_path,
+    #     r'D:\datasets\meteor\saturn\trained_models\trained2\restricted_domain_encoder_translator.hdf5',
+    #     data_path,
+    #     forward=False,
+    # )
 
     visualizeLatentSpaceDistance(latentspacefinder_path)
 

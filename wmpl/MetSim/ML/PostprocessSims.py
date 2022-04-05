@@ -91,16 +91,16 @@ def saveProcessedData(
         param_dataset.resize((valid, 10))
 
 
-def loadProcessedData(h5path: str, batchsize: int, validation=False, validation_fraction=0.2):
+def loadProcessedData(h5path: str, batchsize: int, validation: bool = False, validation_split: float = 0.2):
     """ Generator for loading h5py datasets without loading everything into memory """
     with h5py.File(h5path, 'r') as h5file:
         i = 0
 
         index_list = list(range(int(len(h5file['simulation']) / batchsize)))
         if validation:
-            index_list = index_list[-int(len(index_list) * validation_fraction) :]
+            index_list = index_list[-int(len(index_list) * validation_split) :]
         else:
-            index_list = index_list[: -int(len(index_list) * validation_fraction)]
+            index_list = index_list[: -int(len(index_list) * validation_split)]
 
         while True:
             batch_sim = h5file['simulation'][

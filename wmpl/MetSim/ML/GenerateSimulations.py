@@ -2,7 +2,8 @@
 simulations to disk. """
 
 
-from __future__ import absolute_import, division, print_function, unicode_literals
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
 
 import copy
 import json
@@ -122,15 +123,15 @@ class PhysicalParameters:
         self.param_list = []
 
         # Mass range (kg)
-        self.m_init = MetParam(5e-7, 1e-3, 'log10', default=2.4671e-6, fixed=True)
+        self.m_init = MetParam(5e-7, 1e-3, 'log10', default=2.4671e-6)
         self.param_list.append("m_init")
 
         # Initial velocity range (m/s)
-        self.v_init = MetParam(11000, 72000, default=3.0520e4, fixed=True)
+        self.v_init = MetParam(11000, 72000, default=3.0520e4)
         self.param_list.append("v_init")
 
         # Zenith angle range
-        self.zenith_angle = MetParam(np.radians(20), np.radians(80.0), default=np.radians(39.200), fixed=True)
+        self.zenith_angle = MetParam(np.radians(20), np.radians(80.0), default=np.radians(39.200))
         self.param_list.append("zenith_angle")
 
         # Density range (kg/m^3)
@@ -147,23 +148,23 @@ class PhysicalParameters:
         ## Assumes no change in erosion once it starts!
 
         # Erosion height range
-        self.erosion_height_start = MetParam(70000, 130000, default=70000, fixed=True)
+        self.erosion_height_start = MetParam(70000, 130000, default=70000)
         self.param_list.append("erosion_height_start")
 
         # Erosion coefficient (s^2/m^2)
-        self.erosion_coeff = MetParam(0.0, 1.0 / 1e6, default=0, fixed=True)
+        self.erosion_coeff = MetParam(0.0, 1.0 / 1e6, default=0)
         self.param_list.append("erosion_coeff")
 
         # Mass index
-        self.erosion_mass_index = MetParam(1.5, 3.0, default=2, fixed=True)
+        self.erosion_mass_index = MetParam(1.5, 3.0, default=2)
         self.param_list.append("erosion_mass_index")
 
         # Minimum mass for erosion
-        self.erosion_mass_min = MetParam(1e-12, 1e-9, 'log10', default=1e-12, fixed=True)
+        self.erosion_mass_min = MetParam(1e-12, 1e-9, 'log10', default=1e-12)
         self.param_list.append("erosion_mass_min")
 
         # Maximum mass for erosion
-        self.erosion_mass_max = MetParam(1e-11, 1e-7, 'log10', default=1e-10, fixed=True)
+        self.erosion_mass_max = MetParam(1e-11, 1e-7, 'log10', default=1e-10)
         self.erosion_mass_max.linkParam(self.erosion_mass_min, 'greater')
         self.param_list.append("erosion_mass_max")
 
@@ -655,16 +656,16 @@ def extractSimData(
     ### ###
 
     # zenith angle above 70 deg is bad
-    if phys_params.zenith_angle.val <= np.radians(20):
-        if display:
-            print('zenith')
-        return None
+    # if phys_params.zenith_angle.val <= np.radians(20):
+    #     if display:
+    #         print('zenith')
+    #     return None
 
     # # make the density less than the grain density (don't let the grain density be set by the bulk density)
-    if phys_params.rho.val >= 3500:
-        if display:
-            print('rho')
-        return None
+    # if phys_params.rho.val >= 3500:
+    #     if display:
+    #         print('rho')
+    #     return None
 
     # restricting domain to physical values
     # if roi == -1:

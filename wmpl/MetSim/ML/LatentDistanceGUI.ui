@@ -263,10 +263,10 @@
        <widget class="QLabel" name="CoordinatesLabel">
         <property name="geometry">
          <rect>
-          <x>8</x>
-          <y>555</y>
-          <width>201</width>
-          <height>56</height>
+          <x>10</x>
+          <y>580</y>
+          <width>181</width>
+          <height>16</height>
          </rect>
         </property>
         <property name="text">
@@ -279,8 +279,8 @@
        <widget class="QCheckBox" name="SimulationModeCheckbox">
         <property name="geometry">
          <rect>
-          <x>8</x>
-          <y>611</y>
+          <x>10</x>
+          <y>620</y>
           <width>201</width>
           <height>20</height>
          </rect>
@@ -290,6 +290,22 @@
         </property>
         <property name="checked">
          <bool>false</bool>
+        </property>
+       </widget>
+       <widget class="QLabel" name="CoordinatesLabel2">
+        <property name="geometry">
+         <rect>
+          <x>10</x>
+          <y>600</y>
+          <width>181</width>
+          <height>16</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>TextLabel</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
         </property>
        </widget>
       </widget>
