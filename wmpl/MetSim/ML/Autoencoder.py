@@ -11,6 +11,7 @@ import keras_tuner as kt
 import matplotlib.pyplot as plt
 import numpy as np
 import pyqtgraph as pg
+import pyswarms as ps
 import tensorflow as tf
 from matplotlib.backends.backend_qt5agg import FigureCanvas, NavigationToolbar2QT
 from matplotlib.figure import Figure
@@ -67,7 +68,6 @@ class LatentDistanceGUI(QMainWindow):
 
         self.sim_popup = None
         self.computation_enabled = False
-        self.simulation_mode = False
         ## variables used for computation ##
 
         # grid coordinates
@@ -77,9 +77,6 @@ class LatentDistanceGUI(QMainWindow):
             .reshape(2, self.n * self.n)
             .T[:, ::-1]
         )  # (n*n, 2)
-
-        self.current_index = 0
-        self.set_index = 0
 
         self.param_obj = PhysicalParameters()
         self.model = model
@@ -95,8 +92,12 @@ class LatentDistanceGUI(QMainWindow):
         )
         self.parameter_scaling = np.array([1, 1 / 1000, 180 / np.pi, 1, 1e6, 1 / 1000, 1e6, 1, 1, 1])
 
+        self.current_index = 0
+        self.set_index = 0
+        self.set_latent_space = self.latent_space[0]
+
         ## simulation mode ##
-        self.SimulationModeCheckbox.stateChanged.connect(self.setSimulationMode)
+        self.SensitivityModeCheckbox.stateChanged.connect(self.recomputeDisplay)
 
         ## image plot ##
         # self.graphWidget.setLimits(xMin=0, xMax=1, yMin=0, yMax=1)
@@ -123,7 +124,9 @@ class LatentDistanceGUI(QMainWindow):
         # signals
         self.image.sigHover.connect(self.onMoved)
         self.image.sigClicked.connect(self.onClicked)
-        self.image.sigMouseExit.connect(self.computeDistances)
+        self.image.sigMouseExit.connect(
+            lambda: self.computeDistances() if not self.getSensitivityMode() else None
+        )
 
         ## Parameter inputs ##
         self.parameter_checkboxes = [
@@ -180,12 +183,18 @@ class LatentDistanceGUI(QMainWindow):
         self.computation_enabled = True
         self.computeLatentSpace()
 
+    def getSimulationMode(self):
+        return self.SimulationModeCheckbox.checkState() > 0
+
+    def getSensitivityMode(self):
+        return self.SensitivityModeCheckbox.checkState() > 0
+
     ## signal functions ##
-    def setSimulationMode(self):
-        if self.SimulationModeCheckbox.checkState() > 0:
-            self.simulation_mode = True
+    def recomputeDisplay(self):
+        if self.getSensitivityMode():
+            self.computeSensitivity()
         else:
-            self.simulation_mode = False
+            self.computeLatentSpace()
 
     def checkboxStateChange(self, i):
         checkbox = self.parameter_checkboxes[i]
@@ -213,11 +222,11 @@ class LatentDistanceGUI(QMainWindow):
             self.graphWidget.setLabel('left', text=f'{text[1]} ({units[1]})')
 
         if self.computation_enabled:
-            self.computeLatentSpace()
+            self.recomputeDisplay()
             self.setImageTransform()
 
     def sliderReleased(self, i):
-        self.computeLatentSpace()
+        self.recomputeDisplay()
 
     def valueChanged(self, i):
         self.params[i] = self.parameter_inputs[i].value() / self.parameter_inputs[i].maximum()
@@ -225,8 +234,9 @@ class LatentDistanceGUI(QMainWindow):
 
     def onClicked(self, image, ev):
         pos = np.array([ev.pos().x(), ev.pos().y()])
-        if not self.simulation_mode:
+        if not self.getSimulationMode():
             self.set_index = np.ravel_multi_index(np.floor(pos).astype(int), (self.n, self.n))
+            self.set_latent_space = self.latent_space[self.set_index]
         else:
             self.simulateData()
         # no need to compute distance
@@ -237,14 +247,28 @@ class LatentDistanceGUI(QMainWindow):
 
         transformed_pos = pg.transformCoordinates(self.transform, pos)
 
-        if not self.simulation_mode:
-            self.computeDistances()
+        if not self.getSimulationMode():
+            if not self.getSensitivityMode():
+                self.computeDistances()
             self.CoordinatesLabel.setText(f'({transformed_pos[0]:.4e}, {transformed_pos[1]:.4e})')
             self.CoordinatesLabel2.setText('')
         else:
             self.CoordinatesLabel2.setText(f'({transformed_pos[0]:.4e}, {transformed_pos[1]:.4e})')
 
     ## other functions ##
+    def computeSensitivity(self):
+        # automatic differentiation
+        with tf.GradientTape() as tape:
+            input_values = np.stack((self.params,) * self.n * self.n, axis=0)  # (n*n, 10)
+            input_values[:, self.variable_params] = self.coords
+            input_values = tf.convert_to_tensor(input_values)
+            tape.watch(input_values)
+            self.latent_space = self.model(input_values)
+            jacobian = tape.batch_jacobian(self.latent_space, input_values)
+            sensitivity = tf.sqrt(K.sum(jacobian ** 2, axis=(1, 2)))
+
+        self.image.setImage(sensitivity.numpy().reshape(self.n, self.n), levels=(0, 100))
+
     def simulateData(self):
         values = self.params.copy()
         values[self.variable_params] = self.coords[self.current_index]
@@ -278,15 +302,15 @@ class LatentDistanceGUI(QMainWindow):
         """
         if self.image.mouse_in:
             i = self.current_index
+            clicked_coord = self.latent_space[i : i + 1]  # keep dim of (1, n*n)
         else:
-            i = self.set_index
+            clicked_coord = self.set_latent_space
 
-        clicked_coord = self.latent_space[i : i + 1]  # keep dim of (1, n*n)
         dist = np.sqrt(np.sum((self.latent_space - clicked_coord) ** 2, axis=1))
         self.image.setImage(dist.reshape(self.n, self.n), levels=(0, self.cmap_max))
 
         if not self.image.mouse_in:
-            transformed_pos = pg.transformCoordinates(self.transform, self.coords[i] * self.n)
+            transformed_pos = pg.transformCoordinates(self.transform, self.coords[self.set_index] * self.n)
             self.CoordinatesLabel.setText(f'({transformed_pos[0]:.4e}, {transformed_pos[1]:.4e})')
 
     def setImageTransform(self):
@@ -334,6 +358,15 @@ class SimulationPopup(pg.GraphicsView):
         self.setCentralItem(layout)
 
         self.phys_param = None
+        self.forward_model = keras.models.load_model(
+            r'D:\datasets\meteor\trained_models\trained2\model_forward_problem_vel.hdf5', compile=False
+        )
+        self.optimizer = ps.single.GlobalBestPSO(
+            n_particles=3000,
+            dimensions=10,
+            options={'c1': 1.5, 'c2': 3, 'w': 0.5},
+            bounds=(np.full(10, 0), np.full(10, 1.0)),
+        )
 
         self.magnitude_plot = layout.addPlot(0, 0)
         self.magnitude_plot.showGrid(x=True, y=True, alpha=0.3)
@@ -361,7 +394,19 @@ class SimulationPopup(pg.GraphicsView):
         self.magnitude_plot.setYLink(self.velocity_plot)
         self.norm_magnitude_plot.setYLink(self.norm_velocity_plot)
 
+    def function(self, X, heights=None, goal=None):
+        """ pyswarms optimize function """
+        input_data = np.concatenate(
+            (np.tile(heights, X.shape[0])[:, None], np.repeat(X, heights.shape[0], axis=0)), axis=1
+        )
+        return np.mean(
+            (self.forward_model.predict(input_data).reshape(X.shape[0], heights.shape[0], 2) - goal[None])
+            ** 2,
+            axis=(1, 2),
+        )
+
     def runSimulation(self, norm_values, color):
+        print(norm_values)
         self.phys_param = PhysicalParameters()
         denorm_values = self.phys_param.getDenormalizedInputs(norm_values)
         self.phys_param.setParamValues(denorm_values)
@@ -370,14 +415,40 @@ class SimulationPopup(pg.GraphicsView):
         simulation_results = SimulationResults(const, *runSimulation(const, compute_wake=False))
         self.plot(simulation_results, color)
 
+        heights = np.linspace(0, 1, 256)
+        input_data = np.concatenate(
+            (heights[:, None], np.repeat(norm_values[None], heights.shape[0], axis=0)), axis=1
+        )
+        input_data = np.concatenate((input_data, input_data[:, 0:1] < input_data[:, 6:7]), axis=1)
+        prediction = self.forward_model(input_data, training=False)
+        self.norm_magnitude_plot.plot(prediction[:, 0], heights)
+        # self.norm_velocity_plot.plot(prediction[:, 0], heights)
+
+        # cost, joint_vars = self.optimizer.optimize(self.function, iters=10, heights=heights, goal=prediction)
+        # print(joint_vars)
+        # heights = np.linspace(0, 1, 256)
+        # input_data = np.concatenate(
+        #     (heights[:, None], np.repeat(joint_vars[None], heights.shape[0], axis=0)), axis=1
+        # )
+
+        # prediction = self.forward_model(input_data, training=False)
+        # self.norm_magnitude_plot.plot(prediction[:, 1], heights)
+        # self.norm_velocity_plot.plot(prediction[:, 0], heights)
+
     def plot(self, sim: SimulationResults, color):
         ret = extractSimData(
             sim_results=sim, phys_params=self.phys_param, camera_params=ErosionSimParameters()
         )
         if ret is not None:
-            param_dict, sim_data_normed, params_normed = ret
+            _, sim_data_normed, _ = ret
             self.norm_magnitude_plot.plot(sim_data_normed[:, 3], sim_data_normed[:, 1], pen=color)
             self.norm_velocity_plot.plot(sim_data_normed[:, 2], sim_data_normed[:, 1], pen=color)
+
+            # cost, joint_vars = self.optimizer.optimize(
+            #     self.function, iters=10, heights=sim_data_normed[:, 1], goal=sim_data_normed[:, 2:4]
+            # )
+            # print(joint_vars)
+            # self.computed = True
 
         self.magnitude_plot.plot(sim.abs_magnitude, sim.brightest_height_arr / 1000, pen=color)
         self.velocity_plot.plot(sim.brightest_vel_arr / 1000, sim.brightest_height_arr / 1000, pen=color)
@@ -397,7 +468,7 @@ class Autoencoder(keras.models.Model):
         self.latent_dim = latent_dim
         self.encoder = keras.Sequential(
             [
-                keras.layers.Input(shape=(DATA_LENGTH, 3)),
+                keras.layers.Input(shape=(DATA_LENGTH, 1)),
                 keras.layers.Conv1D(16, 20, activation='relu', padding='same'),
                 keras.layers.MaxPooling1D(5, padding='same'),
                 keras.layers.Conv1D(8, 20, activation='relu', padding='same'),
@@ -414,7 +485,7 @@ class Autoencoder(keras.models.Model):
                 keras.layers.Reshape((DATA_LENGTH, 1)),
                 keras.layers.Conv1D(16, 20, activation='relu', padding='same'),
                 keras.layers.Conv1D(16, 20, activation='relu', padding='same'),
-                keras.layers.Conv1D(3, 20, padding='same'),
+                keras.layers.Conv1D(1, 20, padding='same'),
             ]
         )
 
@@ -442,8 +513,8 @@ def trainAutoencoder(
     input_train, label_train = loadh5pyData(data_path)
 
     history = autoencoder.fit(
-        x=input_train,
-        y=input_train,
+        x=input_train[..., 2:3],
+        y=input_train[..., 2:3],
         batch_size=batchsize,
         steps_per_epoch=steps_per_epoch,
         epochs=epochs,
@@ -451,16 +522,18 @@ def trainAutoencoder(
     )
 
     pca = PCA(n_components=latent_dim)
-    pca.fit(autoencoder.encoder.predict(input_train[:5000]))
+    pca.fit(autoencoder.encoder.predict(input_train[:5000, :, 2:3]))
     print(list(pca.explained_variance_ratio_ * 100))
 
-    # save model
-    # model_json = autoencoder.to_json()
-    # model_file = os.path.join(output_dir, f'{model_name}.h5')
-    # weights_file = os.path.join(output_dir, f'{model_name}.json')
-    # with open(model_file, "w") as json_file:
-    #     json_file.write(model_json)
-    # autoencoder.save_weights(weights_file)
+    plt.plot(autoencoder.decoder.predict(pca.inverse_transform(K.one_hot(0, 20)[None]))[0])
+    plt.show()
+    # # save model
+    # # model_json = autoencoder.to_json()
+    # # model_file = os.path.join(output_dir, f'{model_name}.h5')
+    # # weights_file = os.path.join(output_dir, f'{model_name}.json')
+    # # with open(model_file, "w") as json_file:
+    # #     json_file.write(model_json)
+    # # autoencoder.save_weights(weights_file)
     keras.models.save_model(autoencoder, os.path.join(output_dir, model_name + '_encoder'), save_format='tf')
 
 
@@ -649,7 +722,7 @@ def visualizeLatentSpace(autoencoder_path: str, data_path: str):
     autoencoder = keras.models.load_model(autoencoder_path)
     input_train, label_train = loadh5pyData(data_path)
 
-    latent_space = autoencoder.encoder.predict(input_train[:5000])
+    latent_space = autoencoder.encoder.predict(input_train[:5000, :, 2:3])
     pca = PCA(n_components=20)
     pca.fit(latent_space)
 
@@ -670,8 +743,9 @@ def visualizeLatentSpace(autoencoder_path: str, data_path: str):
     data = autoencoder.decoder.predict(pca.inverse_transform(input_data))[0]
 
     fig, ax = plt.subplots(2)
-    (line1,) = ax[0].plot(data[:, 2])
-    (line2,) = ax[1].plot(data[:, 1])
+    # (line1,) = ax[0].plot(data[:, 2])
+    # (line2,) = ax[1].plot(data[:, 1])
+    (line3,) = ax[0].plot(data[:, 0])
     ax[0].set_ylabel('Normalized Magnitude')
     ax[1].set_ylabel('Normalized length')
 
@@ -680,9 +754,10 @@ def visualizeLatentSpace(autoencoder_path: str, data_path: str):
         data = autoencoder.decoder.predict(pca.inverse_transform(input_data))[0]
 
         # line1.set_ydata(data[:, 0])
-        line1.set_ydata(data[:, 2])
+        # line1.set_ydata(data[:, 2])
         # line2.set_ydata(data[:, 0])
-        line2.set_ydata(data[:, 1])
+        # line2.set_ydata(data[:, 1])
+        line3.set_ydata(data[:, 0])
         fig.canvas.draw_idle()
 
     for slider in sliders:
@@ -736,27 +811,26 @@ def visualizeLatentSpaceDistance(model_path):
 
 def main():
     data_path = r'D:\datasets\meteor\very_restricted_dataset.h5'
-    model_path = r'D:\datasets\meteor\saturn\trained_models\trained2'
+    data_path2 = r'D:\datasets\meteor\norestrictions2_dataset.h5'
+    model_path = r'D:\datasets\meteor\trained_models\trained2'
     model_name = 'restricted_domain'
-    autoencoder_path = rf'D:\datasets\meteor\saturn\trained_models\trained2\model_encoder'
-    translator_path = rf'D:\datasets\meteor\saturn\trained_models\trained2\tuned_encoder_translator.hdf5'
-    latentspacefinder_path = (
-        rf'D:\datasets\meteor\saturn\trained_models\trained2\tuned_latentspace_finder.hdf5'
-    )
+    autoencoder_path = rf'D:\datasets\meteor\trained_models\trained2\model_encoder'
+    translator_path = rf'D:\datasets\meteor\trained_models\trained2\tuned_encoder_translator.hdf5'
+    latentspacefinder_path = rf'D:\datasets\meteor\trained_models\trained2\tuned_latentspace_finder.hdf5'
 
-    # trainAutoencoder(data_path, model_path, 30, 50, 500, model_name=model_name)
+    # trainAutoencoder(data_path2, model_path, 30, 50, 500, model_name='test2')
 
     # trainParamPrediction(data_path, model_path, autoencoder_path, 30, 300, 500, model_name=model_name)
     # trainLatentSpaceFinder(data_path, model_path, autoencoder_path, 30, 300, 500, model_name=model_name)
 
-    # visualizeLatentSpace(autoencoder_path, data_path)
+    # visualizeLatentSpace(rf'D:\datasets\meteor\trained_models\trained2\test2_encoder', data_path2)
 
     # visualizeInverseSolving(
     #     autoencoder_path,
     #     r'D:\datasets\meteor\saturn\trained_models\trained2\restricted_domain_encoder_translator.hdf5',
     #     data_path,
     #     forward=False,
-    # )
+    # )[:]
 
     visualizeLatentSpaceDistance(latentspacefinder_path)
 

@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>963</width>
-    <height>707</height>
+    <width>1024</width>
+    <height>779</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -19,8 +19,8 @@
      <rect>
       <x>20</x>
       <y>10</y>
-      <width>941</width>
-      <height>651</height>
+      <width>931</width>
+      <height>671</height>
      </rect>
     </property>
     <layout class="QHBoxLayout" name="horizontalLayout" stretch="3,1">
@@ -308,6 +308,22 @@
          <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
         </property>
        </widget>
+       <widget class="QCheckBox" name="SensitivityModeCheckbox">
+        <property name="geometry">
+         <rect>
+          <x>10</x>
+          <y>640</y>
+          <width>201</width>
+          <height>20</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Sensitivity Mode</string>
+        </property>
+        <property name="checked">
+         <bool>false</bool>
+        </property>
+       </widget>
       </widget>
      </item>
     </layout>
@@ -318,7 +334,7 @@
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>963</width>
+     <width>1024</width>
      <height>22</height>
     </rect>
    </property>

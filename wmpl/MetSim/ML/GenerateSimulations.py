@@ -2,8 +2,7 @@
 simulations to disk. """
 
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 import copy
 import json
@@ -581,6 +580,29 @@ def normalizeSimulations(
     mag_normed = (camera_params.mag_faintest - mag_data) / (
         camera_params.mag_faintest - camera_params.mag_brightest
     )
+
+    return time_normed, ht_normed, len_normed, mag_normed
+
+
+def denormalizeSimulations(
+    phys_params: PhysicalParameters,
+    camera_params: ErosionSimParameters,
+    time_data: ArrayLike,
+    ht_data: ArrayLike,
+    len_data: ArrayLike,
+    mag_data: ArrayLike,
+) -> Tuple[ArrayLike, ArrayLike, ArrayLike]:
+    """ Denormalize simulations from the 0-1 range to the actual range """
+    # Compute length range
+    len_min = 0
+    len_max = phys_params.v_init.max * camera_params.data_length / camera_params.fps
+
+    time_normed = time_data * camera_params.max_duration
+    ht_normed = (camera_params.ht_max - camera_params.ht_min) * ht_data + camera_params.ht_min
+    len_normed = (len_max - len_min) * len_data + len_min
+    mag_normed = (
+        camera_params.mag_faintest - camera_params.mag_brightest
+    ) * mag_data + camera_params.mag_faintest
 
     return time_normed, ht_normed, len_normed, mag_normed
 

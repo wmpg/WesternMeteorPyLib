@@ -15,15 +15,20 @@ import copy
 import math
 
 import numpy as np
+
 # Cython init
 import pyximport
 import scipy.integrate
 import scipy.stats
 
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
-from wmpl.MetSim.MetSimErosionCyTools import (atmDensityPoly, decelerationRK4,
-                                              ionizationEfficiency,
-                                              luminousEfficiency, massLossRK4)
+from wmpl.MetSim.MetSimErosionCyTools import (
+    atmDensityPoly,
+    decelerationRK4,
+    ionizationEfficiency,
+    luminousEfficiency,
+    massLossRK4,
+)
 
 ### DEFINE CONSTANTS
 
@@ -603,7 +608,7 @@ def ablateAll(fragments, const, compute_wake=False):
 
         # If the total mass after ablation in this step is below zero, ablate what's left of the whole mass
         if (frag.m + mass_loss_total) < 0:
-            mass_loss_total = mass_loss_total + frag.m
+            mass_loss_total = mass_loss_total + frag.m  # I think this should be mass_loss_total = -frag.m
 
         # Compute new mass
         m_new = frag.m + mass_loss_total

@@ -1,36 +1,42 @@
 """ Fit the erosion model using machine learning. """
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 import copy
 import datetime
 import os
 import random
 import time
+from multiprocessing import parent_process
 from re import A
 from typing import List, Optional, Union
 
 import h5py
 import keras
 import keras.backend as K
+import keras_tuner as kt
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy
 import tensorflow as tf
 from wmpl.MetSim.GUI import SimulationResults
 from wmpl.MetSim.MetSimErosion import runSimulation
-from wmpl.MetSim.ML.GenerateSimulations import (DATA_LENGTH, SIM_CLASSES,
-                                                SIM_CLASSES_DICT,
-                                                SIM_CLASSES_NAMES,
-                                                ErosionSimContainer,
-                                                ErosionSimParameters,
-                                                ErosionSimParametersCAMO,
-                                                ErosionSimParametersCAMOWide,
-                                                MetParam, PhysicalParameters,
-                                                dataFunction, extractSimData,
-                                                getFileList)
-from wmpl.MetSim.ML.PostprocessSims import loadProcessedData
+from wmpl.MetSim.ML.GenerateSimulations import (
+    DATA_LENGTH,
+    SIM_CLASSES,
+    SIM_CLASSES_DICT,
+    SIM_CLASSES_NAMES,
+    ErosionSimContainer,
+    ErosionSimParameters,
+    ErosionSimParametersCAMO,
+    ErosionSimParametersCAMOWide,
+    MetParam,
+    PhysicalParameters,
+    dataFunction,
+    extractSimData,
+    getFileList,
+)
+from wmpl.MetSim.ML.PostprocessSims import getProcessedDataLength, loadProcessedData, saveData
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PyDomainParallelizer import domainParallelizer
 
@@ -205,6 +211,7 @@ def loadModel(file_path, model_file='model.json', weights_file='model.h5'):
 
         return loaded_model
 
+
 def correlationPlot(X, Y, log, param_name_list, param_unit, param_pretext):
     fig, ax = plt.subplots(10, 10, sharex='col', sharey='row')
     for i in range(10):
@@ -263,10 +270,11 @@ def evaluateFit(model, validation_gen, output=False, display=False, log=None):
     param_scaling = np.array([1, 1 / 1000, 180 / np.pi, 1, 1e6, 1 / 1000, 1e6, 1, 1, 1])
 
     # Generate validation data
-    sim_list, validation_outputs, validation_inputs = next(validation_gen)
-    phys_param = sim_list[0].params
+    # sim_list, validation_outputs, validation_inputs = next(validation_gen)
+    # phys_param = sim_list[0].params
+    validation_outputs, validation_inputs = next(validation_gen)
+    phys_param = PhysicalParameters()
 
-    # print([i.shape for i in validation_outputs])
     # Predict data
     pred_norm_params = model.predict(validation_outputs)
 
@@ -701,16 +709,243 @@ def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_nam
         plt.show()
 
 
-def fitCNNMultiHeaded(
+def testFitModels(data_gen, validation_gen, batch_size, steps_per_epoch, epochs):
+    def generateModel(hp):
+        model = keras.Sequential()
+        conv_layers = hp.Int("conv layers", min_value=1, max_value=4, step=1)
+        filters = hp.Int('filters', min_value=15, max_value=30, step=3)
+        kernels = hp.Int('kernels', min_value=4, max_value=20, step=2)
+        # pooling = hp.Boolean('pooling')
+        # pooling_size = hp.Int('pooling size', min_value=2, max_value=10, step=2)
+        units = hp.Int('units', min_value=400, max_value=800, step=20)
+        dense_layers = hp.Int('dense layers', min_value=3, max_value=6, step=1)
+
+        model.add(keras.layers.Input(shape=(DATA_LENGTH, 3)))
+        for i in range(conv_layers):
+            model.add(
+                keras.layers.Conv1D(filters=filters, kernel_size=kernels, activation='relu', padding='same')
+            )
+            # if pooling:
+            #     model.add(keras.layers.MaxPooling1D(pool_size=pooling_size, padding='same'))
+        model.add(keras.layers.Flatten())
+
+        for i in range(dense_layers):
+            model.add(keras.layers.Dense(units, activation='relu', kernel_initializer='normal'))
+
+        model.add(keras.layers.Dense(10, kernel_initializer='normal'))
+        model.compile(optimizer='adam', loss='mse')
+
+        return model
+
+    tuner = kt.RandomSearch(generateModel, 'loss', max_trials=500)
+    tuner.search(
+        x=iter(data_gen),
+        # validation_data=iter(validation_gen),
+        steps_per_epoch=steps_per_epoch,
+        batch_size=batch_size,
+        epochs=1,
+    )
+
+    model = tuner.get_best_models()[0]
+    model.fit(
+        x=iter(data_gen),
+        validation_data=iter(validation_gen),
+        steps_per_epoch=steps_per_epoch,
+        batch_size=batch_size,
+        epochs=epochs,
+    )
+
+    print(tuner.get_best_hyperparameters()[0].values)
+
+
+def fit_data(yi):
+    try:
+        filter = yi[:, 2] > 0
+        dist_func = lambda t, h0, v, a, b: h0 + v * t - np.abs(a) * np.exp(np.abs(b) * t)
+        t0 = yi[0, 0]
+        popt1, pcov = scipy.optimize.curve_fit(dist_func, yi[filter, 0] - t0, yi[filter, 2], maxfev=100_000)
+
+        filter = yi[:, 3] > 0
+        mag_func = lambda t, a, b, c, loc, scale: c * scipy.stats.beta.pdf(t, a, b, loc, scale)
+        popt2, pcov = scipy.optimize.curve_fit(
+            mag_func,
+            yi[filter, 1],
+            yi[filter, 3],
+            maxfev=10_000,
+            bounds=([1, 1, 0, 0, 0], [np.inf, np.inf, np.inf, 1, 2]),
+        )
+
+        return np.append(popt1, popt2)
+    except RuntimeError:
+        return np.array([np.nan] * 9)
+
+
+def fitCurveInverse(
     data_gen,
     validation_gen,
-    output_dir,
-    model_file,
-    weights_file,
-    fit_param=None,
-    load=False,
-    extra_information=None,
+    output_dir: str,
+    model_file: str,
+    weights_file: str,
+    batch_size: Optional[int] = None,
+    steps_per_epoch: Optional[int] = None,
+    epochs: Optional[int] = None,
 ):
+    model_name = weights_file[:-3]
+
+    def feature_engineer(gen):
+        for y, x in gen:
+            new_y = np.array(domainParallelizer(y[:, None], fit_data))
+            # print(new_y.shape)
+            # dist_func = lambda t, a, b, c, loc, scale: c * scipy.stats.beta.pdf(t, a, b, loc, scale)
+
+            # for i in range(10):
+            #     plt.plot(y[i, :, 0] - y[i, 0, 0], func(y[i, :, 0] - y[i, 0, 0], *new_y[i]) - y[i, :, 2])
+            # print(new_y[0])
+            # for i in range(10):
+            #     plt.plot(y[i, :, 1], dist_func(y[i, :, 1], *new_y[i]))
+            #     plt.plot(y[i, :, 1], y[i, :, 3])
+            #     plt.show()
+            # raise Exception('hey')
+            yield new_y, x
+
+    data_gen = saveData(feature_engineer(data_gen), output_dir, 'fit_dataset', 'y', 'x')
+
+    model = keras.Sequential()
+    model.add(keras.layers.Input(shape=(9,)))
+    for i in range(10):
+        model.add(keras.layers.Dense(100, activation='relu'))
+    model.add(keras.layers.Dense(10))
+
+    model.compile(loss='mse', optimizer='adam')
+    model.fit(x=data_gen, steps_per_epoch=steps_per_epoch, epochs=epochs)
+    keras.models.save_model(
+        model, os.path.join(output_dir, model_name + '_fit_inverse_solver.hdf5'), save_format='h5'
+    )
+
+
+def fitForwardProblem(
+    data_gen,
+    validation_gen,
+    output_dir: str,
+    model_file: str,
+    weights_file: str,
+    batch_size: Optional[int] = None,
+    steps_per_epoch: Optional[int] = None,
+    epochs: Optional[int] = None,
+):
+    model_name = weights_file[:-3]
+
+    # restructuring b=(batchsize, nparams) and a=(batchsize, DATA_LENGTH, 3) ->
+    #   (batchsize*DATA_LENGTH, 1+nparams) and (batchsize*DATA_LENGTH, 2)
+
+    data_gen = (
+        (
+            np.concatenate((np.concatenate(a[..., 1:2]), np.repeat(b, DATA_LENGTH, axis=0)), axis=1),
+            np.concatenate(a[..., 3:4]),
+        )
+        for (a, b) in data_gen
+    )
+
+    def feature_engineer(gen):
+        for x, y in gen:
+            x = np.concatenate((x, x[:, 0:1] < x[:, 6:7]), axis=1)
+            yield x, y
+
+    validation_gen = (
+        (
+            np.concatenate((np.concatenate(a[..., 1:2]), np.repeat(b, DATA_LENGTH, axis=0)), axis=1),
+            np.concatenate(a[..., 3:4]),
+        )
+        for (a, b) in validation_gen
+    )
+
+    data_gen = feature_engineer(data_gen)
+    # def build_model(hp):
+    #     # relu, adam, 190, 6
+    #     units = hp.Int('units', min_value=10, max_value=150, step=10)
+    #     hidden_layers = hp.Int('layers', min_value=1, max_value=10, step=1)
+
+    #     model = keras.Sequential()
+    #     model.add(keras.layers.Input(shape=(11,)))
+    #     for i in range(hidden_layers):
+    #         model.add(keras.layers.Dense(units, activation='relu'))
+
+    #     model.add(keras.layers.Dense(2))
+    #     model.compile(optimizer='adam', loss='mse')
+    #     return model
+
+    # tuner = kt.RandomSearch(build_model, objective='loss', max_trials=100)
+    # tuner.search(
+    #     data_gen,
+    #     # validation_data=validation_gen,
+    #     epochs=2,
+    #     batch_size=batch_size,
+    #     steps_per_epoch=steps_per_epoch,
+    # )
+    model = keras.Sequential()
+    model.add(keras.layers.Input(shape=(1 + 10 + 1,)))
+    for i in range(7):
+        model.add(keras.layers.Dense(110, activation='relu'))
+    model.add(keras.layers.Dense(1))
+
+    def loss_fn(y_true, y_pred):
+        # penalty = K.mean(
+        #     keras.activations.relu(y_pred[:, 1:, 0] - y_pred[:, :-1, 0])
+        #     * K.cast(y_true[:, :-1, 0] > 0, 'float32'),
+        #     axis=1,
+        # )
+        # require that heights decrease
+        err = K.square(y_true - y_pred)  # (batchsize, 2)
+        return err[:, 0] * (K.cast(y_true[:, 0] > 0, 'float32'))  # + err[:, 1] * (
+        #     K.cast(y_true[:, 1] > 0, 'float32')
+        # )
+
+    model.compile(optimizer='adam', loss=loss_fn)
+    model.fit(x=data_gen, steps_per_epoch=steps_per_epoch, epochs=epochs)
+    keras.models.save_model(
+        model, os.path.join(output_dir, model_name + '_forward_problem_vel.hdf5'), save_format='h5'
+    )
+
+
+def fitInverseProblem(
+    data_gen,
+    validation_gen,
+    output_dir: str,
+    model_file: str,
+    weights_file: str,
+    batch_size: Optional[int] = None,
+    steps_per_epoch: Optional[int] = None,
+    epochs: Optional[int] = None,
+    load: bool = False,
+    fit_param: Optional[List[int]] = None,
+    extra_information: Optional[dict] = None,
+):
+    """
+    Trains and saves neural network
+    
+    Arguments:
+        data_gen: [generator] Generator which will be iterated over to get data
+        validation_gen: [generator] Generator which will iterated over to get validation data
+        model_file: [str] Name of model file to save/load (does include .json extension)
+        weights_file: [str] Name of weights file to save/load (does include .h5 extension)
+
+    
+    keyword arguments:
+        batch_size: [int] Batch size. If not given, will read from data_gen
+        steps_per_epoch: [int] Number of steps per epoch
+        epochs: [int] Number of epochs
+        load: [bool] Whether to load function
+        fit_param: [list[int]] A list of 10 values that are either 0 or 1. If 1, the corresponding parameter
+            will not be considered in loss function
+        extra_information: [dict] Dictionary of extra information that will be saved to a file upon completion
+    
+    """
+    # define epochs and steps per epoch
+    if steps_per_epoch is None or epochs is None:
+        batch_size = data_gen.batch_size
+        steps_per_epoch = data_gen.steps_per_epoch
+        epochs = data_gen.epochs
+
     # https://machinelearningmastery.com/how-to-develop-convolutional-neural-network-models-for-time-series-forecasting/
     # Height input model
     model_title = weights_file[:-3]
@@ -723,57 +958,20 @@ def fitCNNMultiHeaded(
         monitor='loss', patience=5, min_delta=0, verbose=1
     )
 
-    # visible0 = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 1))
-    # cnn0 = keras.layers.Conv1D(filters=64, kernel_size=10, activation='relu')(visible0)
-    # cnn0 = keras.layers.MaxPooling1D(pool_size=2)(cnn0)
-    # cnn0 = keras.layers.Flatten()(cnn0)
-    # cnn0 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn0)
-    # cnn0 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn0)
-
-    # visible1 = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 1))
-    # cnn1 = keras.layers.Conv1D(filters=64, kernel_size=10, activation='relu')(visible1)
-    # cnn1 = keras.layers.MaxPooling1D(pool_size=2)(cnn1)
-    # cnn1 = keras.layers.Flatten()(cnn1)
-    # cnn1 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn1)
-    # cnn1 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn1)
-
-    # # Length input model
-    # visible2 = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 1))
-    # cnn2 = keras.layers.Conv1D(filters=64, kernel_size=10, activation='relu')(visible2)
-    # cnn2 = keras.layers.MaxPooling1D(pool_size=2)(cnn2)
-    # cnn2 = keras.layers.Flatten()(cnn2)
-    # cnn2 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn2)
-    # cnn2 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn2)
-
-    # # Magnitude input model
-    # visible3 = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 1))
-    # cnn3 = keras.layers.Conv1D(filters=64, kernel_size=10, activation='relu')(visible3)
-    # cnn3 = keras.layers.MaxPooling1D(pool_size=2)(cnn3)
-    # cnn3 = keras.layers.Flatten()(cnn3)
-    # cnn3 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn3)
-    # cnn3 = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn3)
-
-    input = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 5))
-    cnn = keras.layers.Conv1D(filters=10, kernel_size=20, activation='relu')(input)
-    cnn = keras.layers.MaxPooling1D(pool_size=5)(cnn)
-    cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
-    # cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
-    # cnn = keras.layers.Conv1D(filters=10, kernel_size=6, activation='relu')(cnn)
-    cnn = keras.layers.MaxPooling1D(pool_size=5)(cnn)
+    input = keras.engine.input_layer.Input(shape=(DATA_LENGTH, 3))
+    cnn = keras.layers.Conv1D(filters=22, kernel_size=10, activation='relu')(input)
+    cnn = keras.layers.Conv1D(filters=22, kernel_size=10, activation='relu')(cnn)
     cnn = keras.layers.Flatten()(cnn)
 
-    # merge input models
-    # merge = keras.layers.Concatenate()([cnn0, cnn1, cnn2, cnn3])
-    dense = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(cnn)
-    dense = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(dense)
-    dense = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(dense)
-    dense = keras.layers.Dense(256, kernel_initializer='normal', activation='relu')(dense)
+    dense = keras.layers.Dense(500, kernel_initializer='normal', activation='relu')(cnn)
+    for i in range(5):
+        dense = keras.layers.Dense(500, kernel_initializer='normal', activation='relu')(dense)
     output = keras.layers.Dense(
         10,
         kernel_initializer='normal',
         activation="linear",
         batch_size=batch_size,
-        activity_regularizer=keras.regularizers.l1(0.01),
+        # activity_regularizer=keras.regularizers.l1(0.01),
     )(dense)
 
     if os.path.exists(os.path.join(output_dir, model_file)):
@@ -801,16 +999,15 @@ def fitCNNMultiHeaded(
         if fit_param:
             weights = tf.one_hot(fit_param, 10, dtype=tf.float32)
         else:
-            weights = tf.constant([1, 1, 1, 1, 1, 0, 0, 0, 0, 0], dtype=tf.float32)
+            weights = tf.constant([0, 0, 0, 1, 1, 0, 0, 0, 0, 0], dtype=tf.float32)
 
         return K.sum(K.square(y_true - y_pred) * weights / K.sum(weights), axis=-1)
 
     # Compile the model
-    model.compile(optimizer='adam', loss='mse')
+    model.compile(optimizer='adam', loss=loss_fn)
 
     # Save the model to disk BEFORE fitting, so that it plus the checkpoint will have all information
     model_json = model.to_json()
-
     model_file = os.path.join(output_dir, model_file)
     weights_file = os.path.join(output_dir, weights_file)
     with open(model_file, "w") as json_file:
@@ -819,8 +1016,8 @@ def fitCNNMultiHeaded(
     # fit model
     history = model.fit(
         x=iter(data_gen),
-        steps_per_epoch=data_gen.steps_per_epoch,
-        epochs=data_gen.epochs,
+        steps_per_epoch=steps_per_epoch,
+        epochs=epochs,
         callbacks=[ReportFitGoodness(validation_gen), model_checkpoint_callback, early_stopping_callback],
         workers=0,
         max_queue_size=1,
@@ -842,10 +1039,10 @@ def fitCNNMultiHeaded(
             'model name': model_title,
             'dataset': extra_information['cml_args'].data_folder,
             'model parameters': model.count_params(),
-            'batch size': data_gen.batch_size,
-            'step per epoch': data_gen.steps_per_epoch,
-            'epochs': data_gen.epochs,
-            'training data': len(data_gen.training_list),
+            'batch size': batch_size,
+            'step per epoch': steps_per_epoch,
+            'epochs': epochs,
+            'training data': extra_information['length'],
             'final loss': history.history['loss'][-1],
             'percent normalized errors': list(percent_norm_errors),
             'denormalized percent errors': list(denorm_perc_errors_av),
@@ -903,8 +1100,8 @@ if __name__ == "__main__":
     arg_parser.add_argument(
         '--grouping',
         type=int,
-        nargs=2,
-        help='Allows for specifying the batch size and steps per epoch, respectively.',
+        nargs=3,
+        help='Allows for specifying the batch size, steps per epoch and epochs, respectively.',
     )
     arg_parser.add_argument(
         '--load',
@@ -918,6 +1115,11 @@ if __name__ == "__main__":
         help='Providing 1 will specify whether a plot should be a log plot, 0 otherwise. Must be given '
         'when in evaluation mode.',
     )
+    arg_parser.add_argument(
+        '--pickle',
+        action='store_true',
+        help='Whether or not to load a dataset which contains pickled simulations',
+    )
     arg_parser.add_argument('--noerosion', action='store_true')
     arg_parser.add_argument('--fitparam', type=int)
     # Parse the command line arguments
@@ -927,39 +1129,24 @@ if __name__ == "__main__":
 
     ### INPUTS ###
     if cml_args.grouping:
-        batch_size, steps_per_epoch = cml_args.grouping
+        batch_size, steps_per_epoch, epochs = cml_args.grouping
     else:
-        batch_size = DATA_LENGTH
-        steps_per_epoch = 80
+        batch_size = 500
+        steps_per_epoch = 300
+        epochs = 50
 
     # Model file names
     model_file = f"{cml_args.modelname}.json"
     weights_file = f"{cml_args.modelname}.h5"
 
     ### ###
+    # load data
+    if cml_args.pickle:
+        # Load the list of files from the given input file and randomly drawn limiting magnitude and length
+        #   measurement delay used to generate the data
+        data_list = []
+        data_list = getFileList(cml_args.data_folder)
 
-    # Load the list of files from the given input file and randomly drawn limiting magnitude and length
-    #   measurement delay used to generate the data
-    data_list = []
-    data_list = getFileList(cml_args.data_folder)
-
-    # randomize the order of the dataset to remove bias
-    print("{:d} inputs used for training/testing...".format(len(data_list)))
-
-    if cml_args.evaluate is not None:
-        # Init the validation generator
-        data_gen = iter(
-            DataGenerator(
-                data_list, batch_size, steps_per_epoch, param_class_name=cml_args.classname, validation=True
-            )
-        )
-        model = loadModel(cml_args.output_dir, model_file, weights_file)
-
-        if cml_args.evaluate == 0:
-            evaluateFit(model, data_gen, display=True, output=True, log=cml_args.logplot)
-        else:
-            evaluateFit2(model, data_gen, mode=cml_args.evaluate, noerosion=cml_args.noerosion)
-    else:
         # Init the data generator
         data_gen = DataGenerator(
             data_list, batch_size, steps_per_epoch, param_class_name=cml_args.classname, validation=False
@@ -970,15 +1157,61 @@ if __name__ == "__main__":
             data_list, batch_size, steps_per_epoch, param_class_name=cml_args.classname, validation=True
         )
 
+        # randomize the order of the dataset to remove bias
+        length = len(data_list)
+
+    else:
+        data_gen = loadProcessedData(cml_args.data_folder, batch_size, validation_split=0.2)
+        validation_gen = loadProcessedData(
+            cml_args.data_folder, batch_size, validation_split=0.2, validation=True
+        )
+        length = getProcessedDataLength(cml_args.data_folder)
+
+    print("{:d} inputs used for training/testing...".format(length))
+
+    # train neural network or evaluate it
+    if cml_args.evaluate is not None:
+        data_gen = loadProcessedData(cml_args.data_folder, batch_size, validation_split=0)
+        model = loadModel(cml_args.output_dir, model_file, weights_file)
+
+        if cml_args.evaluate == 0:
+            evaluateFit(model, iter(data_gen), display=True, output=True, log=cml_args.logplot)
+        else:
+            evaluateFit2(model, iter(data_gen), mode=cml_args.evaluate, noerosion=cml_args.noerosion)
+    else:
         # Fit the model
-        fitCNNMultiHeaded(
+        # testFitModels(data_gen, validation_gen, batch_size, steps_per_epoch, epochs)
+        # fitForwardProblem(
+        #     data_gen,
+        #     validation_gen,
+        #     cml_args.output_dir,
+        #     model_file,
+        #     weights_file,
+        #     steps_per_epoch=steps_per_epoch,
+        #     epochs=epochs,
+        #     batch_size=batch_size,
+        # )
+        fitCurveInverse(
             data_gen,
             validation_gen,
             cml_args.output_dir,
             model_file,
             weights_file,
-            fit_param=cml_args.fitparam,
-            load=cml_args.load,
-            extra_information={'cml_args': cml_args},
+            steps_per_epoch=steps_per_epoch,
+            epochs=epochs,
+            batch_size=batch_size,
         )
+        # fitInverseProblem(
+        #     data_gen,
+        #     validation_gen,
+        #     cml_args.output_dir,
+        #     model_file,
+        #     weights_file,
+        #     batch_size=batch_size,
+        #     steps_per_epoch=steps_per_epoch,
+        #     epochs=epochs,
+        #     fit_param=cml_args.fitparam,
+        #     load=cml_args.load,
+        #     extra_information={'cml_args': cml_args, 'length': length},
+        # )
 

@@ -91,21 +91,54 @@ def saveProcessedData(
         param_dataset.resize((valid, 10))
 
 
+def saveData(gen, output_path: str, filename: str, dataset1_name: str = 'x', dataset2_name: str = 'y'):
+    """ Decorator for a generator that will save data outputted from the generator """
+    with h5py.File(f'{os.path.join(output_path, filename)}.h5', 'w') as h5file:
+        x, y = next(gen)
+        batch_size = x.shape[0]
+
+        x_dataset = h5file.create_dataset(
+            dataset1_name,
+            shape=(batch_size, *x.shape[1:]),
+            maxshape=(None, *x.shape[1:]),
+            chunks=True,
+            dtype=np.float32,
+        )
+        y_dataset = h5file.create_dataset(
+            dataset2_name,
+            shape=(batch_size, *y.shape[1:]),
+            maxshape=(None, *y.shape[1:]),
+            chunks=True,
+            dtype=np.float32,
+        )
+        x_dataset[:] = x
+        y_dataset[:] = y
+
+        yield x, y
+        for i, (x, y) in enumerate(gen):
+            x_dataset.resize((batch_size * (i + 2), *x.shape[1:]))
+            y_dataset.resize((batch_size * (i + 2), *y.shape[1:]))
+            x_dataset[batch_size * (i + 1) : batch_size * (i + 2)] = x
+            y_dataset[batch_size * (i + 1) : batch_size * (i + 2)] = y
+
+            yield x, y
+
+
 def loadProcessedData(h5path: str, batchsize: int, validation: bool = False, validation_split: float = 0.2):
     """ Generator for loading h5py datasets without loading everything into memory """
     with h5py.File(h5path, 'r') as h5file:
         i = 0
 
         index_list = list(range(int(len(h5file['simulation']) / batchsize)))
+
+        divider = int(len(index_list) * validation_split)
         if validation:
-            index_list = index_list[-int(len(index_list) * validation_split) :]
+            index_list = index_list[:divider]
         else:
-            index_list = index_list[: -int(len(index_list) * validation_split)]
+            index_list = index_list[divider:]
 
         while True:
-            batch_sim = h5file['simulation'][
-                index_list[i] * batchsize : (index_list[i] + 1) * batchsize, ..., 1:
-            ]
+            batch_sim = h5file['simulation'][index_list[i] * batchsize : (index_list[i] + 1) * batchsize]
             batch_param = h5file['parameters'][index_list[i] * batchsize : (index_list[i] + 1) * batchsize]
 
             i += 1
@@ -113,9 +146,16 @@ def loadProcessedData(h5path: str, batchsize: int, validation: bool = False, val
                 # semi shuffle, since h5py can't handle indexing as complex as numpy (it's also slower)
                 np.random.shuffle(index_list)
                 i = 0
-                continue
 
             yield batch_sim, batch_param
+
+
+def getProcessedDataLength(path: str):
+    """
+    Get length of processed data
+    """
+    with h5py.File(path, 'r') as f:
+        return f['parameters'].shape[0]
 
 
 def loadh5pyData(path):
@@ -124,7 +164,7 @@ def loadh5pyData(path):
     WARNING: For larger datasets, this can be on the order of gigabytes. Use only with excess of memory
     """
     with h5py.File(path, 'r') as f:
-        input_train = f['simulation'][..., 1:]
+        input_train = f['simulation'][...]
         label_train = f['parameters'][...]
 
     return input_train, label_train
