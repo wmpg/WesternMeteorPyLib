@@ -3,6 +3,7 @@ import os
 import sys
 import time
 from functools import partial
+from tkinter import Y
 from typing import Optional
 
 import keras
@@ -359,7 +360,10 @@ class SimulationPopup(pg.GraphicsView):
 
         self.phys_param = None
         self.forward_model = keras.models.load_model(
-            r'D:\datasets\meteor\trained_models\trained2\model_forward_problem_vel.hdf5', compile=False
+            r'D:\datasets\meteor\trained_models\trained2\model_forward_problem_mag.hdf5', compile=False
+        )
+        self.generator = loadProcessedData(
+            r'D:\datasets\meteor\norestrictions2_dataset.h5', 1, validation_split=0
         )
         self.optimizer = ps.single.GlobalBestPSO(
             n_particles=3000,
@@ -406,7 +410,11 @@ class SimulationPopup(pg.GraphicsView):
         )
 
     def runSimulation(self, norm_values, color):
-        print(norm_values)
+        y, x = next(self.generator)
+        norm_values = x[0]
+        self.norm_magnitude_plot.plot(y[0, :, 3], y[0, :, 1])
+        self.norm_velocity_plot.plot(y[0, :, 2], y[0, :, 1])
+
         self.phys_param = PhysicalParameters()
         denorm_values = self.phys_param.getDenormalizedInputs(norm_values)
         self.phys_param.setParamValues(denorm_values)
@@ -419,7 +427,14 @@ class SimulationPopup(pg.GraphicsView):
         input_data = np.concatenate(
             (heights[:, None], np.repeat(norm_values[None], heights.shape[0], axis=0)), axis=1
         )
-        input_data = np.concatenate((input_data, input_data[:, 0:1] < input_data[:, 6:7]), axis=1)
+        # feature engineering
+        input_data = np.concatenate(
+            (input_data, input_data[:, 0:1] < input_data[:, 6:7]), axis=1
+        )  # add boolean erosion parameter
+        input_data = np.concatenate(
+            (input_data, input_data[:, 6:11] * (input_data[:, 0:1] < input_data[:, 6:7])), axis=1
+        )
+
         prediction = self.forward_model(input_data, training=False)
         self.norm_magnitude_plot.plot(prediction[:, 0], heights)
         # self.norm_velocity_plot.plot(prediction[:, 0], heights)
@@ -468,7 +483,7 @@ class Autoencoder(keras.models.Model):
         self.latent_dim = latent_dim
         self.encoder = keras.Sequential(
             [
-                keras.layers.Input(shape=(DATA_LENGTH, 1)),
+                keras.layers.Input(shape=(DATA_LENGTH, 2)),
                 keras.layers.Conv1D(16, 20, activation='relu', padding='same'),
                 keras.layers.MaxPooling1D(5, padding='same'),
                 keras.layers.Conv1D(8, 20, activation='relu', padding='same'),
@@ -513,8 +528,8 @@ def trainAutoencoder(
     input_train, label_train = loadh5pyData(data_path)
 
     history = autoencoder.fit(
-        x=input_train[..., 2:3],
-        y=input_train[..., 2:3],
+        x=input_train[..., 2:4],
+        y=input_train[..., 2:4],
         batch_size=batchsize,
         steps_per_epoch=steps_per_epoch,
         epochs=epochs,
@@ -522,7 +537,7 @@ def trainAutoencoder(
     )
 
     pca = PCA(n_components=latent_dim)
-    pca.fit(autoencoder.encoder.predict(input_train[:5000, :, 2:3]))
+    pca.fit(autoencoder.encoder.predict(input_train[:5000, :, 2:4]))
     print(list(pca.explained_variance_ratio_ * 100))
 
     plt.plot(autoencoder.decoder.predict(pca.inverse_transform(K.one_hot(0, 20)[None]))[0])
@@ -818,7 +833,7 @@ def main():
     translator_path = rf'D:\datasets\meteor\trained_models\trained2\tuned_encoder_translator.hdf5'
     latentspacefinder_path = rf'D:\datasets\meteor\trained_models\trained2\tuned_latentspace_finder.hdf5'
 
-    # trainAutoencoder(data_path2, model_path, 30, 50, 500, model_name='test2')
+    trainAutoencoder(data_path2, model_path, 30, 50, 500, model_name='test2')
 
     # trainParamPrediction(data_path, model_path, autoencoder_path, 30, 300, 500, model_name=model_name)
     # trainLatentSpaceFinder(data_path, model_path, autoencoder_path, 30, 300, 500, model_name=model_name)
@@ -832,7 +847,7 @@ def main():
     #     forward=False,
     # )[:]
 
-    visualizeLatentSpaceDistance(latentspacefinder_path)
+    # visualizeLatentSpaceDistance(latentspacefinder_path)
 
 
 if __name__ == '__main__':

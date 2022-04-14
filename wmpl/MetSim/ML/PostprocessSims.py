@@ -124,12 +124,19 @@ def saveData(gen, output_path: str, filename: str, dataset1_name: str = 'x', dat
             yield x, y
 
 
-def loadProcessedData(h5path: str, batchsize: int, validation: bool = False, validation_split: float = 0.2):
+def loadProcessedData(
+    h5path: str,
+    batchsize: int,
+    validation: bool = False,
+    validation_split: float = 0.2,
+    xlabel='simulation',
+    ylabel='parameters',
+):
     """ Generator for loading h5py datasets without loading everything into memory """
     with h5py.File(h5path, 'r') as h5file:
         i = 0
 
-        index_list = list(range(int(len(h5file['simulation']) / batchsize)))
+        index_list = list(range(int(len(h5file[xlabel]) / batchsize)))
 
         divider = int(len(index_list) * validation_split)
         if validation:
@@ -138,8 +145,8 @@ def loadProcessedData(h5path: str, batchsize: int, validation: bool = False, val
             index_list = index_list[divider:]
 
         while True:
-            batch_sim = h5file['simulation'][index_list[i] * batchsize : (index_list[i] + 1) * batchsize]
-            batch_param = h5file['parameters'][index_list[i] * batchsize : (index_list[i] + 1) * batchsize]
+            batch_sim = h5file[xlabel][index_list[i] * batchsize : (index_list[i] + 1) * batchsize]
+            batch_param = h5file[ylabel][index_list[i] * batchsize : (index_list[i] + 1) * batchsize]
 
             i += 1
             if len(batch_sim) < batchsize or i == len(index_list):
@@ -150,22 +157,22 @@ def loadProcessedData(h5path: str, batchsize: int, validation: bool = False, val
             yield batch_sim, batch_param
 
 
-def getProcessedDataLength(path: str):
+def getProcessedDataLength(path: str, ylabel='parameters'):
     """
     Get length of processed data
     """
     with h5py.File(path, 'r') as f:
-        return f['parameters'].shape[0]
+        return f[ylabel].shape[0]
 
 
-def loadh5pyData(path):
+def loadh5pyData(path, xlabel='simulation', ylabel='parameters'):
     """ 
     Loads all h5py data from dataset into memory. 
     WARNING: For larger datasets, this can be on the order of gigabytes. Use only with excess of memory
     """
     with h5py.File(path, 'r') as f:
-        input_train = f['simulation'][...]
-        label_train = f['parameters'][...]
+        input_train = f[xlabel][...]
+        label_train = f[ylabel][...]
 
     return input_train, label_train
 

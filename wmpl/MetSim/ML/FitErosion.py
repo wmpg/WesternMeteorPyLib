@@ -36,7 +36,7 @@ from wmpl.MetSim.ML.GenerateSimulations import (
     extractSimData,
     getFileList,
 )
-from wmpl.MetSim.ML.PostprocessSims import getProcessedDataLength, loadProcessedData, saveData
+from wmpl.MetSim.ML.PostprocessSims import getProcessedDataLength, loadh5pyData, loadProcessedData, saveData
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PyDomainParallelizer import domainParallelizer
 
@@ -212,21 +212,27 @@ def loadModel(file_path, model_file='model.json', weights_file='model.h5'):
         return loaded_model
 
 
-def correlationPlot(X, Y, log, param_name_list, param_unit, param_pretext):
-    fig, ax = plt.subplots(10, 10, sharex='col', sharey='row')
-    for i in range(10):
-        for j in range(10):
+def correlationPlot(X, Y, logx, logy, param_name_list=None, param_unit=None, param_pretext=None):
+    fig, ax = plt.subplots(Y.shape[1], X.shape[1], sharex='col', sharey='row')
+    for i in range(X.shape[1]):
+        for j in range(Y.shape[1]):
             # ax[j, i].set_title(param_name_list[i])
-            x = X[:, i]
-            y = Y[:, j]
+            filter = (
+                (X[:, i] <= np.quantile(X[:, i], 0.95))
+                & (X[:, i] >= np.quantile(X[:, i], 0.05))
+                & (Y[:, j] <= np.quantile(Y[:, j], 0.95))
+                & (Y[:, j] >= np.quantile(Y[:, j], 0.05))
+            )
+            x = X[filter, i]
+            y = Y[filter, j]
             # making the diagonals histograms is difficult because the y axis would be different
-            if log[j]:
+            if logy[j]:
                 ax[j, i].set_yscale('log')
                 ybins = np.logspace(np.log10(np.min(y[y > 0])), np.log10(np.max(y)), 50)
             else:
                 ybins = np.linspace(np.min(y), np.max(y), 50)
 
-            if log[i]:
+            if logx[i]:
                 ax[j, i].set_xscale('log')
                 xbins = np.logspace(np.log10(np.min(x[x > 0])), np.log10(np.max(x)), 50)
             else:
@@ -244,11 +250,10 @@ def correlationPlot(X, Y, log, param_name_list, param_unit, param_pretext):
             #         getattr(camera_param, camera_param.param_list[j]).max * param_scaling[j],
             #     ],
             # )
-            if i == 0:
-                ax[j, i].set_ylabel(f'{param_pretext[1]} {param_name_list[j]} ' + param_unit[j])
-            if j == len(ax) - 1:
-                ax[j, i].set_xlabel(f'{param_pretext[0]} {param_name_list[i]} ' + param_unit[i])
-
+            # if i == 0:
+            #     ax[j, i].set_ylabel(f'{param_pretext[1]} {param_name_list[j]} ' + param_unit[j])
+            # if j == len(ax) - 1:
+            #     ax[j, i].set_xlabel(f'{param_pretext[0]} {param_name_list[i]} ' + param_unit[i])
     plt.subplots_adjust(wspace=0, hspace=0)
     plt.show()
 
@@ -763,7 +768,13 @@ def fit_data(yi):
         filter = yi[:, 2] > 0
         dist_func = lambda t, h0, v, a, b: h0 + v * t - np.abs(a) * np.exp(np.abs(b) * t)
         t0 = yi[0, 0]
-        popt1, pcov = scipy.optimize.curve_fit(dist_func, yi[filter, 0] - t0, yi[filter, 2], maxfev=100_000)
+        popt1, pcov = scipy.optimize.curve_fit(
+            dist_func,
+            yi[filter, 0] - t0,
+            yi[filter, 2],
+            maxfev=10_000,
+            bounds=([-1, 0, 0, 0], [0, 10, 1, np.inf]),
+        )
 
         filter = yi[:, 3] > 0
         mag_func = lambda t, a, b, c, loc, scale: c * scipy.stats.beta.pdf(t, a, b, loc, scale)
@@ -772,9 +783,11 @@ def fit_data(yi):
             yi[filter, 1],
             yi[filter, 3],
             maxfev=10_000,
-            bounds=([1, 1, 0, 0, 0], [np.inf, np.inf, np.inf, 1, 2]),
+            bounds=([1, 1, 0, 0, 0], [np.inf, np.inf, np.inf, 1, np.inf]),
         )
-
+        # print(popt1)
+        # print(popt2)
+        # print('--------')
         return np.append(popt1, popt2)
     except RuntimeError:
         return np.array([np.nan] * 9)
@@ -808,8 +821,13 @@ def fitCurveInverse(
             # raise Exception('hey')
             yield new_y, x
 
-    data_gen = saveData(feature_engineer(data_gen), output_dir, 'fit_dataset', 'y', 'x')
-
+    normalization_array = np.array(
+        [-1 / 0.1, 1 / 4, 1 / 5e-3, 1 / 160, 1 / 1.6, 1 / 1e4, 1, 1 / 0.5, 1 / 1e4]
+    )[None]
+    data_gen = saveData(feature_engineer(data_gen), output_dir, 'fit_dataset2', 'y', 'x')
+    data_gen = ((y * normalization_array, x) for (y, x) in data_gen)
+    print(list(next(data_gen)[0][0:5]))
+    # raise Exception('ehy')
     model = keras.Sequential()
     model.add(keras.layers.Input(shape=(9,)))
     for i in range(10):
@@ -821,6 +839,24 @@ def fitCurveInverse(
     keras.models.save_model(
         model, os.path.join(output_dir, model_name + '_fit_inverse_solver.hdf5'), save_format='h5'
     )
+    # x, y = next(
+    #     loadProcessedData(r'D:\datasets\meteor\fit_dataset.h5', xlabel='y', ylabel='x', batchsize=100_000)
+    # )
+    # print(x.shape, y.shape)
+    # model = keras.models.load_model(os.path.join(output_dir, model_name + '_fit_inverse_solver.hdf5'))
+
+    # pred_y = model.predict(x)
+    # print(pred_y.shape)
+    # correlationPlot(
+    #     x,
+    #     x,
+    #     [False, False, True, False, False, False, False, False, False],
+    #     [False, False, True, False, False, False, False, False, False],
+    #     [''] * 10,
+    #     [''] * 10,
+    #     [''] * 10,
+    # )
+    # plt.show()
 
 
 def fitForwardProblem(
@@ -848,7 +884,10 @@ def fitForwardProblem(
 
     def feature_engineer(gen):
         for x, y in gen:
-            x = np.concatenate((x, x[:, 0:1] < x[:, 6:7]), axis=1)
+            # (h, m0, v0, z, dens, sigma, erh, erc, s, mm, MM, er_bool, )
+            x = np.concatenate((x, x[:, 0:1] < x[:, 6:7]), axis=1)  # add boolean erosion parameter
+            x = np.concatenate((x, x[:, 6:11] * (x[:, 0:1] < x[:, 6:7])), axis=1)
+            # zero out parameters that aren't used
             yield x, y
 
     validation_gen = (
@@ -883,7 +922,7 @@ def fitForwardProblem(
     #     steps_per_epoch=steps_per_epoch,
     # )
     model = keras.Sequential()
-    model.add(keras.layers.Input(shape=(1 + 10 + 1,)))
+    model.add(keras.layers.Input(shape=(1 + 10 + 1 + 5,)))
     for i in range(7):
         model.add(keras.layers.Dense(110, activation='relu'))
     model.add(keras.layers.Dense(1))
@@ -903,7 +942,7 @@ def fitForwardProblem(
     model.compile(optimizer='adam', loss=loss_fn)
     model.fit(x=data_gen, steps_per_epoch=steps_per_epoch, epochs=epochs)
     keras.models.save_model(
-        model, os.path.join(output_dir, model_name + '_forward_problem_vel.hdf5'), save_format='h5'
+        model, os.path.join(output_dir, model_name + '_forward_problem_mag.hdf5'), save_format='h5'
     )
 
 
@@ -1132,8 +1171,8 @@ if __name__ == "__main__":
         batch_size, steps_per_epoch, epochs = cml_args.grouping
     else:
         batch_size = 500
-        steps_per_epoch = 300
-        epochs = 50
+        steps_per_epoch = 30
+        epochs = 20
 
     # Model file names
     model_file = f"{cml_args.modelname}.json"
