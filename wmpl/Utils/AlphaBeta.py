@@ -710,7 +710,7 @@ if __name__ == "__main__":
                 print("Bulk density = {:5d} kg/m^3".format(int(cml_args.dens)))
                 print("Height       = {:5.2f} km".format(ht_dyn/1000))
                 print("Velocity     = {:5.2f} km/s".format(v_dyn/1000))
-                print("Deceleration = {:5.2f} km/s^3".format(abs(decel)))
+                print("Deceleration = {:5.2f} km/s^2".format(abs(decel)))
                 print("Gamma*A      = {:5.2f}".format(cml_args.ga))
                 print()
                 print("Dynamic mass = {:5.3f} kg".format(dyn_mass))
