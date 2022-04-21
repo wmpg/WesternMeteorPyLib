@@ -1917,7 +1917,7 @@ class MetSimGUI(QMainWindow):
         self.inputRho.setText("{:d}".format(int(const.rho)))
         self.inputRhoGrain.setText("{:d}".format(int(const.rho_grain)))
         self.inputMassInit.setText("{:.1e}".format(const.m_init))
-        self.inputAblationCoeff.setText("{:.3f}".format(const.sigma*1e6))
+        self.inputAblationCoeff.setText("{:.4f}".format(const.sigma*1e6))
         self.inputVelInit.setText("{:.3f}".format(const.v_init/1000))
         self.inputShapeFact.setText("{:.2f}".format(const.shape_factor))
         self.inputGamma.setText("{:.2f}".format(const.gamma))
