@@ -3,6 +3,7 @@ import os
 import sys
 import time
 from functools import partial
+from select import select
 from tkinter import Y
 from typing import Optional
 
@@ -22,6 +23,7 @@ from PyQt5.QtGui import QTransform
 from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
 from PyQt5.uic import loadUi
 from pyqtgraph import PlotWidget, plot
+from scipy.stats import gaussian_kde
 from scipy.stats.stats import pearsonr
 from sklearn.decomposition import PCA
 from wmpl.MetSim.GUITools import MatplotlibPopupWindow
@@ -80,7 +82,13 @@ class LatentDistanceGUI(QMainWindow):
         )  # (n*n, 2)
 
         self.param_obj = PhysicalParameters()
-        self.model = model
+        self.pca_forward_model = model
+        self.forward_model = keras.models.load_model(
+            r'D:\datasets\meteor\trained_models\trained2\noersion_model_ls_forward.hdf5'
+        )
+        self.inverse_model = keras.models.load_model(
+            r'D:\datasets\meteor\trained_models\trained2\noersion_model_encoder_translator.hdf5'
+        )
         self.params = np.zeros((10,), dtype=np.float64)
         self.variable_params = np.full((10,), False, dtype=bool)
         self.variable_params[3:5] = True
@@ -96,6 +104,7 @@ class LatentDistanceGUI(QMainWindow):
         self.current_index = 0
         self.set_index = 0
         self.set_latent_space = self.latent_space[0]
+        self.var_error_index = 0
 
         ## simulation mode ##
         self.SensitivityModeCheckbox.stateChanged.connect(self.recomputeDisplay)
@@ -235,9 +244,13 @@ class LatentDistanceGUI(QMainWindow):
 
     def onClicked(self, image, ev):
         pos = np.array([ev.pos().x(), ev.pos().y()])
-        if not self.getSimulationMode():
+        if not self.getSimulationMode() and not self.getSensitivityMode():
             self.set_index = np.ravel_multi_index(np.floor(pos).astype(int), (self.n, self.n))
             self.set_latent_space = self.latent_space[self.set_index]
+        elif self.getSensitivityMode():
+            self.var_error_index += 1
+            self.var_error_index %= 5
+            self.computeSensitivity()
         else:
             self.simulateData()
         # no need to compute distance
@@ -259,16 +272,23 @@ class LatentDistanceGUI(QMainWindow):
     ## other functions ##
     def computeSensitivity(self):
         # automatic differentiation
-        with tf.GradientTape() as tape:
-            input_values = np.stack((self.params,) * self.n * self.n, axis=0)  # (n*n, 10)
-            input_values[:, self.variable_params] = self.coords
-            input_values = tf.convert_to_tensor(input_values)
-            tape.watch(input_values)
-            self.latent_space = self.model(input_values)
-            jacobian = tape.batch_jacobian(self.latent_space, input_values)
-            sensitivity = tf.sqrt(K.sum(jacobian ** 2, axis=(1, 2)))
+        # with tf.GradientTape() as tape:
+        #     input_values = np.stack((self.params,) * self.n * self.n, axis=0)  # (n*n, 10)
+        #     input_values[:, self.variable_params] = self.coords
+        #     input_values = tf.convert_to_tensor(input_values)
+        #     tape.watch(input_values)
+        #     self.latent_space = self.pca_forward_model(input_values)
+        #     jacobian = tape.batch_jacobian(self.latent_space, input_values)
+        #     sensitivity = tf.sqrt(K.sum(jacobian ** 2, axis=(1, 2)))
 
-        self.image.setImage(sensitivity.numpy().reshape(self.n, self.n), levels=(0, 100))
+        # self.image.setImage(sensitivity.numpy().reshape(self.n, self.n), levels=(0, 100))
+        input_values = np.stack((self.params,) * self.n * self.n, axis=0)  # (n*n, 10)
+        input_values[:, self.variable_params] = self.coords
+        latent_space = self.forward_model.predict(input_values)
+        output_values = self.inverse_model.predict(latent_space)
+        dist = np.sqrt(((input_values - output_values) ** 2)[:, self.var_error_index])
+        print(np.mean(dist), np.std(dist), np.min(dist), np.max(dist))
+        self.image.setImage(dist.reshape(self.n, self.n), levels=(0, 0.5))
 
     def simulateData(self):
         values = self.params.copy()
@@ -293,7 +313,7 @@ class LatentDistanceGUI(QMainWindow):
 
         input_values = np.stack((self.params,) * self.n * self.n, axis=0)  # (n*n, 10)
         input_values[:, self.variable_params] = self.coords
-        self.latent_space = self.model.predict(input_values)
+        self.latent_space = self.pca_forward_model.predict(input_values)
 
         self.computeDistances()
 
@@ -362,9 +382,7 @@ class SimulationPopup(pg.GraphicsView):
         self.forward_model = keras.models.load_model(
             r'D:\datasets\meteor\trained_models\trained2\model_forward_problem_mag.hdf5', compile=False
         )
-        self.generator = loadProcessedData(
-            r'D:\datasets\meteor\norestrictions2_dataset.h5', 1, validation_split=0
-        )
+        self.generator = loadProcessedData(r'D:\datasets\meteor\noerosion_dataset.h5', 1, validation_split=0)
         self.optimizer = ps.single.GlobalBestPSO(
             n_particles=3000,
             dimensions=10,
@@ -561,70 +579,125 @@ def trainParamPrediction(
     batchsize: int,
     model_name: str = 'model',
 ):
-    autoencoder = keras.models.load_model(autoencoder_path)
-    to_pca = keras.models.load_model(
-        rf'D:\datasets\meteor\saturn\trained_models\trained2\tuned_latentspace_finder.hdf5'
-    )
-
-    generator = loadProcessedData(data_path, batchsize, validation_split=0.2)
-    generator = ((autoencoder.encoder.predict(sim), param) for (sim, param) in generator)
-
-    # def build_model(hp):
-    #     # relu, adam, 190, 6
-    #     activation = hp.Choice("activation", ["relu", "tanh"])
-    #     optimizer = hp.Choice('optimizer', ['adagrad', 'adam', 'adamax', 'nadam', 'sgd', 'rmsprop'])
-    #     units = hp.Int('units', min_value=20, max_value=200, step=10)
-    #     hidden_layers = hp.Int('layers', min_value=1, max_value=10, step=1)
-    #     model = keras.Sequential()
-    #     model.add(keras.layers.Input(shape=(20,)))
-    #     for i in range(hidden_layers):
-    #         model.add(keras.layers.Dense(units, activation=activation))
-
-    #     model.add(keras.layers.Dense(10))
-    #     model.compile(optimizer=optimizer, loss='mse')
-    #     return model
-
-    # tuner = kt.RandomSearch(build_model, objective='val_loss', max_trials=100)
-    # tuner.search(
-    #     autoencoder.encoder.predict(input_train),
-    #     label_train,
-    #     epochs=1,
-    #     validation_split=0.2,
-    #     batch_size=batchsize,
-    # )
-    # model = tuner.get_best_models()[0]
-
-    def loss_fn(y_true, y_pred):
-        # it doesn't matter if the predicted values are good, just that they correspond to the same plot
-        x_true = to_pca(y_true, training=False)[0]
-        x_pred = to_pca(y_pred, training=False)[0]
-
-        return K.mean(K.square(x_true - x_pred), axis=-1)
-
     model = keras.Sequential(
         [
-            keras.layers.Input(shape=(20,)),
-            keras.layers.Dense(190),
-            keras.layers.Dense(190),
-            keras.layers.Dense(190),
-            keras.layers.Dense(190),
-            keras.layers.Dense(190),
-            keras.layers.Dense(190),
-            keras.layers.Dense(10),
+            keras.layers.Input(shape=(9,)),
+            keras.layers.Dense(100, activation='relu',),  # kernel_regularizer=keras.regularizers.L2(1e-3)
+            keras.layers.Dense(100, activation='relu',),  # kernel_regularizer=keras.regularizers.L2(1e-3)
+            keras.layers.Dense(100, activation='relu',),  # kernel_regularizer=keras.regularizers.L2(1e-3)
+            keras.layers.Dense(100, activation='relu',),  # kernel_regularizer=keras.regularizers.L2(1e-3)
+            keras.layers.Dense(100, activation='relu',),  # kernel_regularizer=keras.regularizers.L2(1e-3)
+            keras.layers.Dense(5),
         ]
     )
-    model.compile(optimizer='adam', loss='mse')
 
+    x, y = loadh5pyData(data_path, 'x', 'y')
+
+    model.compile(loss='mse', optimizer='adam')
     model.fit(
-        x=generator, batch_size=batchsize, steps_per_epoch=steps_per_epoch, epochs=epochs,
+        (y - y.mean(axis=0)) / y.std(axis=0),
+        (x[:, :5] - x[:, :5].mean(axis=0)) / x[:, :5].std(axis=0),
+        batch_size=batchsize,
+        epochs=epochs,
     )
 
-    keras.models.save_model(
-        model, os.path.join(output_dir, model_name + '_encoder_translator.hdf5'), save_format='h5'
+    correlationPlot(
+        model.predict((y - y.mean(axis=0)) / y.std(axis=0)),
+        (x[:, :5] - x[:, :5].mean(axis=0)) / x[:, :5].std(axis=0),
     )
 
 
-def trainAutoencoderVaryingSpace(
+def trainParamPredictionRegions(
+    data_path: str,
+    output_dir: str,
+    autoencoder_path: str,
+    epochs: int,
+    steps_per_epoch: int,
+    batchsize: int,
+    model_name: str = 'model',
+):
+    autoencoder = keras.models.load_model(autoencoder_path)
+    forward = keras.models.load_model(
+        r'D:\datasets\meteor\trained_models\trained2\noersion_model_ls_forward.hdf5'
+    )
+    # to_pca = keras.models.load_model(
+    #     rf'D:\datasets\meteor\trained_models\trained2\tuned_latentspace_finder.hdf5'
+    # )
+
+    y, x = loadh5pyData(data_path)
+    # y = autoencoder.encoder.predict(y[..., 1:])
+    # generator = loadProcessedData(data_path, batchsize, validation_split=0.2)
+    # generator = ((autoencoder.encoder.predict(sim[..., 1:]), param) for (sim, param) in generator)
+
+    # pca = PCA(n_components=20)
+    # pca.fit(y[:5000])
+    # pca_weights = pca.explained_variance_ratio_
+    # print(np.ceil(pca_weights * 100))
+    # print(np.prod(np.ceil(pca_weights * 100)))
+    # print(np.prod(np.ceil(pca_weights * 100)[:7]))
+    # H, edges = np.histogramdd(pca.transform(y)[:, :7], bins=np.ceil(pca_weights * 100).astype(int)[:7])
+    # p = gaussian_kde(y[:2000].T)(y.T)
+    # p = np.where(p > 0, 1 / p, 0)
+    # p /= np.sum(p)
+
+    # selected_indices = np.random.choice(np.arange(len(p)), size=(len(p) * 10,), p=p)
+
+    H, edges = np.histogramdd(x[:, :5], bins=4)
+    error_arr = np.zeros(H.shape)
+    print(error_arr.shape)
+    print(H.min(), H.max(), H.mean(), H.std(), np.sum(H < 30))
+    # raise Exception('hey')
+    index_list = np.arange(H.size)
+    np.random.shuffle(index_list)
+    for bin_index_ in index_list:
+        gen_x = np.random.uniform(low=0, high=1, size=x.shape)
+        # bin_index_ = 100
+        bin_index = np.unravel_index(bin_index_, H.shape)
+        for dim in range(len(bin_index)):
+            gen_x[:, dim] = (
+                gen_x[:, dim] * (edges[dim][bin_index[dim] + 1] - edges[dim][bin_index[dim]])
+                + edges[dim][bin_index[dim]]
+            )
+        gen_y = forward.predict(gen_x)
+
+        model = keras.Sequential(
+            [
+                keras.layers.Input(shape=(20,)),
+                keras.layers.Dense(200, activation='relu',),  # kernel_regularizer=keras.regularizers.L2(1e-3)
+                keras.layers.Dense(200, activation='relu',),  # kernel_regularizer=keras.regularizers.L2(1e-3)
+                keras.layers.Dense(200, activation='relu',),  # kernel_regularizer=keras.regularizers.L2(1e-3)
+                keras.layers.Dense(200, activation='relu',),  # kernel_regularizer=keras.regularizers.L2(1e-3)
+                keras.layers.Dense(200, activation='relu',),  # kernel_regularizer=keras.regularizers.L2(1e-3)
+                keras.layers.Dense(5),
+            ]
+        )
+        model.compile(optimizer='adam', loss='mse')
+        i = slice(0, 5)
+        history = model.fit(
+            x=(gen_y - gen_y.mean(axis=0)) / gen_y.std(axis=0),
+            y=((gen_x - gen_x.mean(axis=0)) / gen_x.std(axis=0))[:, i],
+            batch_size=1000,
+            epochs=20,
+            verbose=0,
+        )
+
+        # correlationPlot(
+        #     ((gen_x - gen_x.mean(axis=0)) / gen_x.std(axis=0))[:, i],
+        #     model.predict((gen_y - gen_y.mean(axis=0)) / gen_y.std(axis=0)),
+        # )
+        print(bin_index_, history.history['loss'][-1])
+        # print()
+        error_arr[bin_index] = history.history['loss'][-1]
+        # raise Exception('hey')
+
+    # keras.models.save_model(
+    #     model, os.path.join(output_dir, model_name + '_encoder_translator_sampled.hdf5'), save_format='h5'
+    # )
+    np.save('file.npy', error_arr)
+    np.savez('file2.npz', *edges)
+
+
+def trainAutoencoderFindLatentSpace(
     data_path: str,
     output_dir: str,
     autoencoder_path: str,
@@ -641,28 +714,31 @@ def trainAutoencoderVaryingSpace(
 
     model = keras.Sequential(
         [
-            keras.layers.Input(shape=(20,)),
-            keras.layers.Dense(190),
-            keras.layers.Dense(190),
-            keras.layers.Dense(190),
-            keras.layers.Dense(190),
-            keras.layers.Dense(190),
-            keras.layers.Dense(190),
-            keras.layers.Dense(10),
+            keras.layers.Input(shape=(10,)),
+            keras.layers.Dense(190, activation='relu'),
+            keras.layers.Dense(190, activation='relu'),
+            keras.layers.Dense(190, activation='relu'),
+            keras.layers.Dense(190, activation='relu'),
+            keras.layers.Dense(190, activation='relu'),
+            keras.layers.Dense(190, activation='relu'),
+            keras.layers.Dense(20),
         ]
     )
     model.compile(optimizer='adam', loss='mse')
 
     model.fit(
-        x=autoencoder.encoder.predict(input_train),
-        y=label_train,
+        x=label_train,
+        y=autoencoder.encoder.predict(input_train[..., 1:]),
         batch_size=batchsize,
         steps_per_epoch=steps_per_epoch,
-        epochs=5,
+        epochs=epochs,
         validation_split=0.2,
     )
-    prediction = model.predict(autoencoder.encoder.predict(input_train))
-    print(pearsonr(prediction[:, 3], label_train[:, 3])[0], pearsonr(prediction[:, 4], label_train[:, 4])[0])
+    keras.models.save_model(
+        model, os.path.join(output_dir, f'{model_name}_ls_forward_.hdf5'), save_format='h5'
+    )
+    # prediction = model.predict(autoencoder.encoder.predict(input_train))
+    # print(pearsonr(prediction[:, 3], label_train[:, 3])[0], pearsonr(prediction[:, 4], label_train[:, 4])[0])
 
 
 def trainLatentSpaceFinder(
@@ -710,6 +786,7 @@ def trainLatentSpaceFinder(
         batch_size=batchsize,
     )
     model = tuner.get_best_models()[0]
+
     model.fit(
         x=label_train,
         y=pca.transform(autoencoder.encoder.predict(input_train)),
@@ -737,7 +814,7 @@ def visualizeLatentSpace(autoencoder_path: str, data_path: str):
     autoencoder = keras.models.load_model(autoencoder_path)
     input_train, label_train = loadh5pyData(data_path)
 
-    latent_space = autoencoder.encoder.predict(input_train[:5000, :, 2:3])
+    latent_space = autoencoder.encoder.predict(input_train[:20000, :, 2:3])
     pca = PCA(n_components=20)
     pca.fit(latent_space)
 
@@ -792,26 +869,23 @@ def visualizeInverseSolving(
     input_train, label_train = loadh5pyData(data_path)
 
     if forward:
-        pca = PCA(n_components=20)
-        pca.fit(autoencoder.encoder.predict(input_train[:5000]))
+        # pca = PCA(n_components=20)
+        # pca.fit(autoencoder.encoder.predict(input_train[:5000]))
 
-        correlationPlot(
-            model.predict(label_train),
-            pca.transform(autoencoder.encoder.predict(input_train)),
-            [False] * 10,
-            [''] * 10,
-            [''] * 10,
-            ['', ''],
-        )
+        # correlationPlot(
+        #     model.predict(label_train),
+        #     pca.transform(autoencoder.encoder.predict(input_train)),
+        #     [False] * 10,
+        #     [''] * 10,
+        #     [''] * 10,
+        #     ['', ''],
+        # )
+        correlationPlot(model.predict(label_train), autoencoder.encoder.predict(input_train[..., 1:]))
     else:
         correlationPlot(
-            # label_train,
-            model.predict(autoencoder.encoder.predict(input_train)),
-            model.predict(autoencoder.encoder.predict(input_train)),
-            [False] * 10,
-            [''] * 10,
-            [''] * 10,
-            ['', ''],
+            label_train,
+            model.predict(autoencoder.encoder.predict(input_train[..., 1:])),
+            # model.predict(autoencoder.encoder.predict(input_train)),
         )
 
 
@@ -827,27 +901,32 @@ def visualizeLatentSpaceDistance(model_path):
 def main():
     data_path = r'D:\datasets\meteor\very_restricted_dataset.h5'
     data_path2 = r'D:\datasets\meteor\norestrictions2_dataset.h5'
+    data_path3 = r'D:\datasets\meteor\noerosion_dataset.h5'
+    fit_data_path = r'D:\datasets\meteor\fit_dataset2.h5'
     model_path = r'D:\datasets\meteor\trained_models\trained2'
-    model_name = 'restricted_domain'
+    model_name = 'noersion_model'
     autoencoder_path = rf'D:\datasets\meteor\trained_models\trained2\model_encoder'
     translator_path = rf'D:\datasets\meteor\trained_models\trained2\tuned_encoder_translator.hdf5'
     latentspacefinder_path = rf'D:\datasets\meteor\trained_models\trained2\tuned_latentspace_finder.hdf5'
 
-    trainAutoencoder(data_path2, model_path, 30, 50, 500, model_name='test2')
+    # trainAutoencoder(data_path3, model_path, 30, 50, 500, model_name=model_name)
 
-    # trainParamPrediction(data_path, model_path, autoencoder_path, 30, 300, 500, model_name=model_name)
-    # trainLatentSpaceFinder(data_path, model_path, autoencoder_path, 30, 300, 500, model_name=model_name)
+    # trainParamPrediction(fit_data_path, model_path, autoencoder_path, 5, 300, 500, model_name=model_name)
+    # trainParamPredictionRegions(data_path3, model_path, autoencoder_path, 5, 300, 500, model_name=model_name)
+    # trainAutoencoderFindLatentSpace(
+    #     data_path3, model_path, autoencoder_path, 30, 300, 500, model_name=model_name
+    # )
 
     # visualizeLatentSpace(rf'D:\datasets\meteor\trained_models\trained2\test2_encoder', data_path2)
 
     # visualizeInverseSolving(
     #     autoencoder_path,
-    #     r'D:\datasets\meteor\saturn\trained_models\trained2\restricted_domain_encoder_translator.hdf5',
-    #     data_path,
+    #     r'D:\datasets\meteor\trained_models\trained2\noersion_model_encoder_translator_sampled.hdf5',
+    #     data_path3,
     #     forward=False,
-    # )[:]
+    # )
 
-    # visualizeLatentSpaceDistance(latentspacefinder_path)
+    visualizeLatentSpaceDistance(latentspacefinder_path)
 
 
 if __name__ == '__main__':

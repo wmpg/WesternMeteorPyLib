@@ -1,6 +1,7 @@
 """ Fit the erosion model using machine learning. """
 
-from __future__ import absolute_import, division, print_function, unicode_literals
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
 
 import copy
 import datetime
@@ -21,22 +22,19 @@ import scipy
 import tensorflow as tf
 from wmpl.MetSim.GUI import SimulationResults
 from wmpl.MetSim.MetSimErosion import runSimulation
-from wmpl.MetSim.ML.GenerateSimulations import (
-    DATA_LENGTH,
-    SIM_CLASSES,
-    SIM_CLASSES_DICT,
-    SIM_CLASSES_NAMES,
-    ErosionSimContainer,
-    ErosionSimParameters,
-    ErosionSimParametersCAMO,
-    ErosionSimParametersCAMOWide,
-    MetParam,
-    PhysicalParameters,
-    dataFunction,
-    extractSimData,
-    getFileList,
-)
-from wmpl.MetSim.ML.PostprocessSims import getProcessedDataLength, loadh5pyData, loadProcessedData, saveData
+from wmpl.MetSim.ML.GenerateSimulations import (DATA_LENGTH, SIM_CLASSES,
+                                                SIM_CLASSES_DICT,
+                                                SIM_CLASSES_NAMES,
+                                                ErosionSimContainer,
+                                                ErosionSimParameters,
+                                                ErosionSimParametersCAMO,
+                                                ErosionSimParametersCAMOWide,
+                                                MetParam, PhysicalParameters,
+                                                dataFunction, extractSimData,
+                                                getFileList)
+from wmpl.MetSim.ML.PostprocessSims import (getProcessedDataLength,
+                                            loadh5pyData, loadProcessedData,
+                                            saveData)
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PyDomainParallelizer import domainParallelizer
 
@@ -212,8 +210,23 @@ def loadModel(file_path, model_file='model.json', weights_file='model.h5'):
         return loaded_model
 
 
-def correlationPlot(X, Y, logx, logy, param_name_list=None, param_unit=None, param_pretext=None):
+def correlationPlot(X, Y, logx=None, logy=None, param_name_list=None, param_unit=None, param_pretext=None):
+    if logx is None:
+        logx = [False] * X.shape[1]
+    if logy is None:
+        logy = [False] * Y.shape[1]
+
     fig, ax = plt.subplots(Y.shape[1], X.shape[1], sharex='col', sharey='row')
+    
+    # reshape output to have dimensinos (Y.shape[1], X.shape[1])
+    if not isinstance(ax, np.ndarray):
+        ax = np.array([[ax]])
+    elif len(X.shape) == 1:
+        if Y.shape[1] == 1:
+            ax = ax[None, :]
+        else:
+            ax = ax[:, None]
+
     for i in range(X.shape[1]):
         for j in range(Y.shape[1]):
             # ax[j, i].set_title(param_name_list[i])
@@ -824,21 +837,22 @@ def fitCurveInverse(
     normalization_array = np.array(
         [-1 / 0.1, 1 / 4, 1 / 5e-3, 1 / 160, 1 / 1.6, 1 / 1e4, 1, 1 / 0.5, 1 / 1e4]
     )[None]
-    data_gen = saveData(feature_engineer(data_gen), output_dir, 'fit_dataset2', 'y', 'x')
-    data_gen = ((y * normalization_array, x) for (y, x) in data_gen)
-    print(list(next(data_gen)[0][0:5]))
-    # raise Exception('ehy')
-    model = keras.Sequential()
-    model.add(keras.layers.Input(shape=(9,)))
-    for i in range(10):
-        model.add(keras.layers.Dense(100, activation='relu'))
-    model.add(keras.layers.Dense(10))
+    # data_gen = saveData(feature_engineer(data_gen), output_dir, 'fit_dataset2', 'y', 'x')
+    # data_gen = ((y * normalization_array, x) for (y, x) in data_gen)
+    # print(list(next(data_gen)[0][0:5]))
+    # # raise Exception('ehy')
+    # model = keras.Sequential()
+    # model.add(keras.layers.Input(shape=(9,)))
+    # for i in range(10):
+    #     model.add(keras.layers.Dense(100, activation='relu'))
+    # model.add(keras.layers.Dense(10))
 
-    model.compile(loss='mse', optimizer='adam')
-    model.fit(x=data_gen, steps_per_epoch=steps_per_epoch, epochs=epochs)
-    keras.models.save_model(
-        model, os.path.join(output_dir, model_name + '_fit_inverse_solver.hdf5'), save_format='h5'
-    )
+    # model.compile(loss='mse', optimizer='adam')
+    # model.fit(x=data_gen, steps_per_epoch=steps_per_epoch, epochs=epochs)
+    # keras.models.save_model(
+    #     model, os.path.join(output_dir, model_name + '_fit_inverse_solver.hdf5'), save_format='h5'
+    # )
+
     # x, y = next(
     #     loadProcessedData(r'D:\datasets\meteor\fit_dataset.h5', xlabel='y', ylabel='x', batchsize=100_000)
     # )
@@ -857,6 +871,25 @@ def fitCurveInverse(
     #     [''] * 10,
     # )
     # plt.show()
+
+    # x, y = next(
+    #     loadProcessedData(r'D:\datasets\meteor\fit_dataset.h5', xlabel='y', ylabel='x', batchsize=300_000)
+    # )
+    # model = keras.Sequential()
+    # model.add(keras.layers.Input(shape=(5,)))
+    # for i in range(10):
+    #     model.add(keras.layers.Dense(100, activation='relu'))
+    # model.add(keras.layers.Dense(9))
+
+    # print((x * normalization_array)[0])
+    # print(y[0])
+
+    # # raise Exception('hey')
+    # model.compile(loss='mse', optimizer='adam')
+    # model.fit(x=y[:, :5], y=x * normalization_array, epochs=epochs, batch_size=batch_size)
+    # keras.models.save_model(
+    #     model, os.path.join(output_dir, model_name + '_param_to_fit.hdf5'), save_format='h5'
+    # )
 
 
 def fitForwardProblem(
