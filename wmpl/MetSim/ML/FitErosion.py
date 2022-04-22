@@ -1,7 +1,6 @@
 """ Fit the erosion model using machine learning. """
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 import copy
 import datetime
@@ -22,24 +21,35 @@ import scipy
 import tensorflow as tf
 from wmpl.MetSim.GUI import SimulationResults
 from wmpl.MetSim.MetSimErosion import runSimulation
-from wmpl.MetSim.ML.GenerateSimulations import (DATA_LENGTH, SIM_CLASSES,
-                                                SIM_CLASSES_DICT,
-                                                SIM_CLASSES_NAMES,
-                                                ErosionSimContainer,
-                                                ErosionSimParameters,
-                                                ErosionSimParametersCAMO,
-                                                ErosionSimParametersCAMOWide,
-                                                MetParam, PhysicalParameters,
-                                                dataFunction, extractSimData,
-                                                getFileList)
-from wmpl.MetSim.ML.PostprocessSims import (getProcessedDataLength,
-                                            loadh5pyData, loadProcessedData,
-                                            saveData)
+from wmpl.MetSim.ML.GenerateSimulations import (
+    DATA_LENGTH,
+    SIM_CLASSES,
+    SIM_CLASSES_DICT,
+    SIM_CLASSES_NAMES,
+    ErosionSimContainer,
+    ErosionSimParameters,
+    ErosionSimParametersCAMO,
+    ErosionSimParametersCAMOWide,
+    MetParam,
+    PhysicalParameters,
+    dataFunction,
+    extractSimData,
+    getFileList,
+)
+from wmpl.MetSim.ML.PostprocessSims import getProcessedDataLength, loadh5pyData, loadProcessedData, saveData
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PyDomainParallelizer import domainParallelizer
 
 
 def calculatePredictedSimulation(phys_params, normalized_output_param_val):
+    """ 
+    Run simulation on normalized parameters. Used with multiprocessing
+    
+    Arguments:
+        phys_params: [PhysicalParameters] physical parameters object to modify
+        normalized_output_param_val: [list] List of normalied physical parameter values      
+    
+    """
     phys_params = copy.deepcopy(phys_params)
     phys_params.setParamValues(phys_params.getDenormalizedInputs(normalized_output_param_val))
     const = phys_params.getConst()
@@ -58,7 +68,8 @@ class DataGenerator(object):
         validation_portion=0.2,
         random_state=None,
     ):
-        """ Generate meteor data for the ML fit function. 
+        """ Generate meteor data for the ML fit function. Used on simulation pickle files.
+        h5py databases should be used instead of this (see postprocesssims.py)
     
         Arguments:
             data_list: [list] A list of files that will be used as inputs.
@@ -182,8 +193,7 @@ class DataGenerator(object):
 
 
 class ReportFitGoodness(keras.callbacks.Callback):
-    """ Report the fit goodness at the every epoch end.
-  """
+    """ Report the fit goodness at the every epoch end """
 
     def __init__(self, validation_gen):
         self.validation_gen = iter(validation_gen)
@@ -197,6 +207,11 @@ class ReportFitGoodness(keras.callbacks.Callback):
 
 
 def loadModel(file_path, model_file='model.json', weights_file='model.h5'):
+    """ 
+    Load model constructed with a .json file for the model shape and a .h5 file for the weights
+    
+    It is more convenient to use keras.models.load_model on a single .hdf5 file, so this should be avoided
+    """
     with open(os.path.join(file_path, model_file), 'r') as json_file:
 
         # load json and create model
@@ -211,13 +226,28 @@ def loadModel(file_path, model_file='model.json', weights_file='model.h5'):
 
 
 def correlationPlot(X, Y, logx=None, logy=None, param_name_list=None, param_unit=None, param_pretext=None):
+    """
+    Plots a grid of heatmaps to illustrate the covariance matrix between X and Y
+    
+    Arguments:
+        X: [ndarray] 2d array with shape (k, nxparams)
+        Y: [ndarray] 2d arra with shape (k, nyparams)
+        
+    keyword arguments:
+        logx: [list[bool] or None] List of booleans stating whether the ith row should have its x axis 
+            be in log scale. If None, all are set to False
+        logy: [list[bool] or None] List of booleans stating whether the ith column should have its y axis
+            be in log scale. If None, all are set of False
+        
+    other parameters can be used to for labels
+    """
     if logx is None:
         logx = [False] * X.shape[1]
     if logy is None:
         logy = [False] * Y.shape[1]
 
     fig, ax = plt.subplots(Y.shape[1], X.shape[1], sharex='col', sharey='row')
-    
+
     # reshape output to have dimensinos (Y.shape[1], X.shape[1])
     if not isinstance(ax, np.ndarray):
         ax = np.array([[ax]])
@@ -474,14 +504,18 @@ def evaluateFit(model, validation_gen, output=False, display=False, log=None):
 
 
 def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_name=None):
-    """ Evaluates model by visually comparing expected simulation values to the simulation values 
-    given from the prediction 
+    """ 
+    Evaluates model by visually comparing expected simulation values to the simulation values 
+    given from the prediction
     
     Arguments:
         model: [Model] Trained model to evaluate
+        validation_gen: [DataGeneration]
     
     keyword arguments:
         mode: [int] 1 for analysis on all meteors in batch, 2 for a random meteor in batch
+        noerosion: [bool] If a database with no erosion is used
+        param_class_name: [str] Name of parameter class
     """
 
     sim_list, norm_sim_data, norm_input_param_vals = next(validation_gen)
@@ -526,6 +560,7 @@ def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_nam
     phys_param_list, pred_simulation_result_list = zip(*ret)
     print(time.perf_counter() - t1)
 
+    # plotting data
     if mode == 2:
         i = np.random.randint(len(sim_list))
 
@@ -728,6 +763,10 @@ def evaluateFit2(model, validation_gen, mode=1, noerosion=False, param_class_nam
 
 
 def testFitModels(data_gen, validation_gen, batch_size, steps_per_epoch, epochs):
+    """
+    Testing out keras tuner to optimize the cnn
+    """
+
     def generateModel(hp):
         model = keras.Sequential()
         conv_layers = hp.Int("conv layers", min_value=1, max_value=4, step=1)
@@ -777,6 +816,7 @@ def testFitModels(data_gen, validation_gen, batch_size, steps_per_epoch, epochs)
 
 
 def fit_data(yi):
+    """ Function to fit curves to data, used in multiprocessing """
     try:
         filter = yi[:, 2] > 0
         dist_func = lambda t, h0, v, a, b: h0 + v * t - np.abs(a) * np.exp(np.abs(b) * t)
@@ -816,6 +856,19 @@ def fitCurveInverse(
     steps_per_epoch: Optional[int] = None,
     epochs: Optional[int] = None,
 ):
+    """ 
+    Neural network to fit curves to simulation data and map that to physical parameters
+
+    Arguments:
+        data_gen: [generator] Generator that supplies data for training
+        validation_gen: [generator] Generator that supplies data for testing
+        output_dir: [str] Directory to save model to
+        model_file: [str] 
+        weights_file: [str]
+        epochs: [int] Number of epochs to train data with
+        steps_per_epoch: [int] Number of batches until it is considered an epoch
+        batch_size: [int] Number of values in batch
+    """
     model_name = weights_file[:-3]
 
     def feature_engineer(gen):
@@ -834,10 +887,15 @@ def fitCurveInverse(
             # raise Exception('hey')
             yield new_y, x
 
-    normalization_array = np.array(
-        [-1 / 0.1, 1 / 4, 1 / 5e-3, 1 / 160, 1 / 1.6, 1 / 1e4, 1, 1 / 0.5, 1 / 1e4]
-    )[None]
-    # data_gen = saveData(feature_engineer(data_gen), output_dir, 'fit_dataset2', 'y', 'x')
+    data_gen = saveData(feature_engineer(data_gen), output_dir, 'fit_dataset2', 'y', 'x')
+
+    # save data generated
+    for val in data_gen:
+        pass
+
+    # normalization_array = np.array(
+    #     [-1 / 0.1, 1 / 4, 1 / 5e-3, 1 / 160, 1 / 1.6, 1 / 1e4, 1, 1 / 0.5, 1 / 1e4]
+    # )[None]
     # data_gen = ((y * normalization_array, x) for (y, x) in data_gen)
     # print(list(next(data_gen)[0][0:5]))
     # # raise Exception('ehy')
@@ -896,13 +954,23 @@ def fitForwardProblem(
     data_gen,
     validation_gen,
     output_dir: str,
-    model_file: str,
-    weights_file: str,
+    model_name: str,
     batch_size: Optional[int] = None,
     steps_per_epoch: Optional[int] = None,
     epochs: Optional[int] = None,
 ):
-    model_name = weights_file[:-3]
+    """ 
+    Neural network to fit forward problem
+
+    Arguments:
+        data_gen: [generator] Generator that supplies data for training
+        validation_gen: [generator] Generator that supplies data for testing
+        output_dir: [str] Directory to save model to
+        model_name: [str] Name of model to save (will be appended with _forward_problem_mag.hdf5)
+        epochs: [int] Number of epochs to train data with
+        steps_per_epoch: [int] Number of batches until it is considered an epoch
+        batch_size: [int] Number of values in batch
+    """
 
     # restructuring b=(batchsize, nparams) and a=(batchsize, DATA_LENGTH, 3) ->
     #   (batchsize*DATA_LENGTH, 1+nparams) and (batchsize*DATA_LENGTH, 2)
@@ -960,6 +1028,7 @@ def fitForwardProblem(
         model.add(keras.layers.Dense(110, activation='relu'))
     model.add(keras.layers.Dense(1))
 
+    # custom loss function (loss function can't be saved, so the loaded model can't be compiled)
     def loss_fn(y_true, y_pred):
         # penalty = K.mean(
         #     keras.activations.relu(y_pred[:, 1:, 0] - y_pred[:, :-1, 0])
@@ -1018,7 +1087,6 @@ def fitInverseProblem(
         steps_per_epoch = data_gen.steps_per_epoch
         epochs = data_gen.epochs
 
-    # https://machinelearningmastery.com/how-to-develop-convolutional-neural-network-models-for-time-series-forecasting/
     # Height input model
     model_title = weights_file[:-3]
     checkpoint_filepath = os.path.join(output_dir, f'{model_title}_checkpoint.h5')
@@ -1064,8 +1132,6 @@ def fitInverseProblem(
     else:
         # Tie inputs together
         model = keras.models.Model(inputs=input, outputs=output)
-    # model.summary()
-    # raise Exception('hey')
 
     def loss_fn(y_true, y_pred):
         if fit_param:
@@ -1104,6 +1170,7 @@ def fitInverseProblem(
         model, iter(validation_gen), output=False
     )
 
+    # save log (this can be substituted with the mlflow library)
     new_file = not os.path.exists(os.path.join(output_dir, 'fitlog.csv'))
     with open(os.path.join(output_dir, 'fitlog.csv'), 'a+') as f:
         data = {

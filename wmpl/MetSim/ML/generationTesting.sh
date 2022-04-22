@@ -1,3 +1,5 @@
+# file used to generate different datasets and train models on those datasets, all in sequence
+
 cd /home/jkambul2/WesternMeteorPyLib
 #python -m wmpl.MetSim.ML.GenerateSimulations /home/jkambul2/files/fixed_erosion_dataset 6000000 --noerosion --fixed 0 0 0 0 0 1 1 1 1 1
 #python -m wmpl.MetSim.ML.FitErosion /home/jkambul2/files/fixed_erosion_dataset /home/jkambul2/files/trained_models -mn fixederosion --grouping 256 50

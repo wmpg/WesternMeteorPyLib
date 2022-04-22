@@ -78,6 +78,9 @@ def loadMeteorDataFromDir(folder):
 
 
 def displayResiduals(traj, met_obs, const):
+    """
+    Plot the fit residuals for magnitude, velocity and lag for a single meteor observation
+    """
     ##################################
     # Magnitude
 
@@ -181,9 +184,15 @@ def displayResiduals(traj, met_obs, const):
 
 def compileFolderData(folder):
     """
-    Collects all data from folder, decides whether it's good or not, then merges all data from different
-    cameras then takes moving averages over them
+    Collects all data from folder, fits a model to it, and assembled residuals and data into a data stucture
     
+    arguments:
+        folder: [str] mir fit folder path to load data from
+    
+    returns:
+        processed_data: [dict or None] key:data
+            key: [str] mag, vel, lag
+            data: [ndarray] [[ht, res, mag_fit, vel_fit, lag_fit],...], where the dimensions are (k, 5)
     """
     ########################################
     ### collect all data for the folder ####
@@ -291,6 +300,20 @@ def compileFolderData(folder):
 
 
 def plotErrorCharacterization(all_kept_data, plot_variable, title, magbins=20, vbins=20, fit_2d=None):
+    """
+    Plot heatmap of error values, 3d scatter plot of error values with fit, and distribution of error values
+    
+    arguments:
+        all_kept_data: [dict] 
+        plot_variable: [str] mag, vel, lag. Variable to characterize the error for
+        title: [str] Title of plot
+    
+    keyword arguments:
+        magbins: [int] Number of bins to separate magnitude
+        vbins: [int] Number of bins to separate velocity
+        fit_2d: [function or None] function (F: R2 -> R1) to fit error with, if None, 
+            a polynomial fit will be used 
+    """
     ### plotting magnitude residuals vs velocity and magnitude ###
 
     # calculate range for bins
@@ -448,6 +471,7 @@ def main(cml_args):
     with open(path) as f:
         path_list = filter(lambda x: not x.startswith('#') and x.strip(), f.read().splitlines())
 
+    # compile all data from list of files
     all_kept_data = {'mag': [], 'vel': [], 'lag': []}
     for _path in path_list:
         print(_path)
@@ -466,6 +490,7 @@ def main(cml_args):
 
     # np.set_printoptions(threshold=np.inf)
 
+    # plot characterization of data
     vbins = 20
     magbins = 20
     plotErrorCharacterization(

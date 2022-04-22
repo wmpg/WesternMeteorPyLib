@@ -44,7 +44,7 @@ This approach involves converting $\bold{y}(t)$ to a 2d array, where one dimensi
 Using various convolutional layers followed by densely interconnected layers performs well on some physical parameters but worse on others.
 
 * It can predict initial mass, initial velocity and zenith angle
-* It struggles with predicting density and ablation coefficient. It often predicts the values to be larger than they should be, but to a maximum. Though it performs better on ablation coefficient
+* It struggles with predicting density and ablation coefficient. It often predicts the values to be larger than they should be, but to a maximum. Though it performs better on ablation coefficient. It also correlates the two variables non-linearly.
 * It can somewhat accurately detect erosion height
 * It struggles with erosion coefficient
 * It assumes mass index, minimum mass and maximum mass are constants, and thus completely fails on the parameters.
@@ -128,11 +128,17 @@ There is a recurring problem with solving the inverse problem: certain parameter
 The method for visualizing the accuracy of the neural network is to plot the correlations between the expected/correct physical parameters and the predicted physical parameters as outputted by the neural network. My method of visualizing this was to make a heatmap (as supposed to a scatter plot) where all predicted physical parameters are plotted against all correct physical parameters. Along the diagonal, you want straight lines and any of these plots which aren't straight lines were improperly fitted. Everywhere else, the variables should be indepedent, so you would expect each plot to be uniformly distributed.
 
 Another primary tool for visualization is the autoencoder from approach 2, which is especially precise in the no-erosion case. Here the neural network and principal component analysis is able to assemble all data into a few important independent parameters $\bold{a}(\bold{x})$. $\bold{a}$ can then be used to measure similiarity between different sets of parameters $\bold{x}$. For instance, the similarity between two sets of parameters can be defined as follows:
-$$S(\bold{x}_1, \bold{x}_2)=||\bold{a}(\bold{x}_1)-\bold{a}(\bold{x}_2)||^2$$
+
+$$D(\bold{x}_1, \bold{x}_2)=||\bold{a}(\bold{x}_1)-\bold{a}(\bold{x}_2)||^2$$
+
 This parameter can also be used to measure sensitivity of the output on $\bold{x}$. One way that this can be forumated is as follows:
-$$ D(\bold{x})=\sqrt{\sum_{ij}\left(\frac{\partial a_i}{\partial x_j}\right)^2}$$
+
+$$ S(\bold{x})=\sqrt{\sum_{ij}\left(\frac{\partial a_i}{\partial x_j}\right)^2}$$
+
 Another visualization is one that measures fit accuracy, that is, the how well the inverse model performs on different physical parameters $\bold{x}$. Suppose we have an encoder part of an autoencoder which maps magnitude and velocity data to a small set of parameters. Mapping these parameters to the physical parameters is the inverse problem, and mapping the physical parameters to these parameters is the forward problem. The forward model $F$ is able to be fit quite accurately, but not the inverse model $F^{-1}$. So we can measure fit accuracy of physical parameter in the following way:
+
 $$ \bold{A}(\bold{x})=(F^{-1}(F(\bold{x}))-\bold{x})^2$$
+
 where the exponenta A is applied element-wise.
 
 Each of the three above metrics can be visualized in the gui that I developed that can visualize high dimensional space by plotting a heatmap with two dimensions at a time. However, even with this visualization done, it's not clear to me exactly how this visualization corresponds to a bad fit.
@@ -141,14 +147,34 @@ A method that I attempted to interpret this was to train a neural network using 
 
 ## Physical parameter uncertainties
 
+### Uncertainties from forward or inverse neural networks
+
 The error associated with physical parameters can be found easily for certain approaches. If an approach uses a neural network to output physical parameters when inputting some values with known uncertainty, the error in the output can be calculated quickly and easily.
 
 Suppose we have a neural network $F$ that takes in an input array $\bold{y}$ of some sort and outputs physical parameters $\bold{x}$. The error in $\bold{x}$ can be found with propagation of uncertainties:
+
 $$s_{x_i}=\sqrt{\sum_{n} \left(\frac{\partial x_i}{\partial y_n}\right)^2 s_{y_n}}$$
+
 where $s_{x_i}$ is the uncertainty in the $i\text{th}$ physical parameter and $s_{y_i}$ is the uncertainty of each value inputted into the neural network. The assumption here is that the parameters inputted into the neural network are independent of each other. Otherwise the covariance matrix would be required with the following equation
+
 $$S_x=JS_yJ^\top$$
+
 where $J$ is the jacobian and $S_x$ and $S_y$ are both covariance matrices. We can make this calculation because the jacobian can be calculated using the automatic differentiation feature of some machine learning libraries.
+
+### Error characterization
 
 In order to make this calculation, and even for approaches that don't involve knowledge of the jacobian, we need uncertainties and possibly a covariance matrix meteoroid measurements. This can be found by characterizing the error in the magnitude and velocity plots, since these plots are the primary locations with noise. Both of these plots are non-linear functions of time and height so using a naive method for calculating the covariance matrix won't work. Instead, I fit a high order polynomial to the data to the magnitude and fit the equation $x+vt+ae^{-bt}$ to the distance, then compiled all the residuals. With these residuals, the variance can be calculated for different bins of velocity, magnitude and lag. Fitting a curve to the variance at each bin, we get a value for $s_y(v,M,d)$ at any desired point. Finally, we assume that due to the non-linear nature of magnitude and velocity, they are not correlated.
 
-Another method for computing uncertainties is by using the similarity quantity $S(\bold{x}_1, \bold{x}_2)$ mentioned in the previous section. This quantity is useful since it can be used as a way to approximate the uncertainty in some $\bold{x}$ measurement, which may have been found manually. For instance, given some measurement $\bold{x}_0$, we can find a region of possible values which could also be solutions to the data due to each of the $\bold{x}$ values having similar outputs. Picking a reasonable constant $s$, we can find a region of $X$ where $S(\bold{x}_0, \bold{x})\leq s, \forall \bold{x}\in X$. Then we can easily find the covariance matrix for all $\bold{x}\in X$.
+### Uncertainties from parameter similarity
+
+Another method for computing uncertainties is by using the similarity quantity $D(\bold{x}_1, \bold{x}_2)$ mentioned in the previous section. This quantity is useful since it can be used as a way to approximate the uncertainty in some $\bold{x}$ measurement, which may have been found manually. For instance, given some measurement $\bold{x}_0$, we can find a region of possible values which could also be solutions to the data due to each of the $\bold{x}$ values having similar outputs. Picking a reasonable constant $s$, we can find a region of $X$ where $D(\bold{x}_0, \bold{x})\leq s, \forall \bold{x}\in X$. Then we can easily find the covariance matrix for all $\bold{x}\in X$.
+
+The problem with the above option is that it is very computationally difficult to find $X$ in a high dimensional space, especially since the neural network can be computationally intensive to evaluate. Here is a method to solve the problem which I thought of
+
+* For the point $\bold{x}$, evaluate the neural network at a series of points adjacent to it $\bold{x}_i$
+* Use netwon's method along a line defined with unit vector $\bold{\hat{u}}_i$, $\bold{x}_i'=\bold{x}_i-\frac{D(\bold{x}_i, \bold{x})-s}{\hat{\bold{u}}_i\cdot\nabla D(\bold{x}_i, \bold{x})}\hat{\bold{u}_i}$
+* With the set of points $\bold{x}_i$ at the edge of the shape, you will form a high dimensional concave polytope. We then must uniformly generate points in this polytope in [this](https://math.stackexchange.com/questions/563129/the-distribution-of-barycentric-coordinates/871220#871220) way.
+* Apply the neural network on all points generated in this way, and filter any points that don't obey the condition.
+* With the filtered list of points, we can find its covariance matrix, as desired.
+
+This process is quite computationally intensive, but it is much more precise than arbitrarily picking two or three dimensions, filtering the points that are not similar enough to the point in question, then taking the standard deviation and mean of that.

@@ -40,6 +40,8 @@ from wmpl.MetSim.ML.PostprocessSims import loadh5pyData, loadProcessedData
 
 
 class ClickableImageItem(pg.ImageItem):
+    """ pyqtgraph image item that sends clicked, hover and mouse exit signals """
+
     sigClicked = pyqtSignal(object, object)
     sigHover = pyqtSignal(object, object)
     sigMouseExit = pyqtSignal(object, object)
@@ -64,6 +66,8 @@ class ClickableImageItem(pg.ImageItem):
 
 
 class LatentDistanceGUI(QMainWindow):
+    """ GUI for visualizing the high-dimenional latent space of the autoencoder """
+
     def __init__(self, model):
         QMainWindow.__init__(self)
         loadUi(os.path.join(os.path.dirname(__file__), "LatentDistanceGUI.ui"), self)
@@ -71,7 +75,6 @@ class LatentDistanceGUI(QMainWindow):
 
         self.sim_popup = None
         self.computation_enabled = False
-        ## variables used for computation ##
 
         # grid coordinates
         self.n = 100
@@ -81,14 +84,17 @@ class LatentDistanceGUI(QMainWindow):
             .T[:, ::-1]
         )  # (n*n, 2)
 
-        self.param_obj = PhysicalParameters()
-        self.pca_forward_model = model
+        # debug models
         self.forward_model = keras.models.load_model(
             r'D:\datasets\meteor\trained_models\trained2\noersion_model_ls_forward.hdf5'
         )
         self.inverse_model = keras.models.load_model(
             r'D:\datasets\meteor\trained_models\trained2\noersion_model_encoder_translator.hdf5'
         )
+
+        # parameter variables
+        self.param_obj = PhysicalParameters()
+        self.pca_forward_model = model
         self.params = np.zeros((10,), dtype=np.float64)
         self.variable_params = np.full((10,), False, dtype=bool)
         self.variable_params[3:5] = True
@@ -101,16 +107,15 @@ class LatentDistanceGUI(QMainWindow):
         )
         self.parameter_scaling = np.array([1, 1 / 1000, 180 / np.pi, 1, 1e6, 1 / 1000, 1e6, 1, 1, 1])
 
-        self.current_index = 0
-        self.set_index = 0
-        self.set_latent_space = self.latent_space[0]
-        self.var_error_index = 0
+        self.current_index = 0  # index hovering on
+        self.set_index = 0  # index clicked on
+        self.set_latent_space = self.latent_space[0]  # latent space clicked on
+        self.var_error_index = 0  # index of parameter to visualize fit accuracy
 
         ## simulation mode ##
         self.SensitivityModeCheckbox.stateChanged.connect(self.recomputeDisplay)
 
         ## image plot ##
-        # self.graphWidget.setLimits(xMin=0, xMax=1, yMin=0, yMax=1)
         self.graphWidget.setMouseEnabled(x=False, y=False)
 
         cm = pg.ColorMap(
@@ -193,12 +198,6 @@ class LatentDistanceGUI(QMainWindow):
         self.computation_enabled = True
         self.computeLatentSpace()
 
-    def getSimulationMode(self):
-        return self.SimulationModeCheckbox.checkState() > 0
-
-    def getSensitivityMode(self):
-        return self.SensitivityModeCheckbox.checkState() > 0
-
     ## signal functions ##
     def recomputeDisplay(self):
         if self.getSensitivityMode():
@@ -253,7 +252,7 @@ class LatentDistanceGUI(QMainWindow):
             self.computeSensitivity()
         else:
             self.simulateData()
-        # no need to compute distance
+        # no need to recompute distance
 
     def onMoved(self, image, ev):
         pos = np.array([ev.pos().x(), ev.pos().y()])
@@ -270,27 +269,39 @@ class LatentDistanceGUI(QMainWindow):
             self.CoordinatesLabel2.setText(f'({transformed_pos[0]:.4e}, {transformed_pos[1]:.4e})')
 
     ## other functions ##
-    def computeSensitivity(self):
-        # automatic differentiation
-        # with tf.GradientTape() as tape:
-        #     input_values = np.stack((self.params,) * self.n * self.n, axis=0)  # (n*n, 10)
-        #     input_values[:, self.variable_params] = self.coords
-        #     input_values = tf.convert_to_tensor(input_values)
-        #     tape.watch(input_values)
-        #     self.latent_space = self.pca_forward_model(input_values)
-        #     jacobian = tape.batch_jacobian(self.latent_space, input_values)
-        #     sensitivity = tf.sqrt(K.sum(jacobian ** 2, axis=(1, 2)))
+    def getSimulationMode(self):
+        return self.SimulationModeCheckbox.checkState() > 0
 
-        # self.image.setImage(sensitivity.numpy().reshape(self.n, self.n), levels=(0, 100))
-        input_values = np.stack((self.params,) * self.n * self.n, axis=0)  # (n*n, 10)
-        input_values[:, self.variable_params] = self.coords
-        latent_space = self.forward_model.predict(input_values)
-        output_values = self.inverse_model.predict(latent_space)
-        dist = np.sqrt(((input_values - output_values) ** 2)[:, self.var_error_index])
-        print(np.mean(dist), np.std(dist), np.min(dist), np.max(dist))
-        self.image.setImage(dist.reshape(self.n, self.n), levels=(0, 0.5))
+    def getSensitivityMode(self):
+        return self.SensitivityModeCheckbox.checkState() > 0
+
+    def computeSensitivity(self):
+        # plotting sensitivity
+        with tf.GradientTape() as tape:
+            input_values = np.stack((self.params,) * self.n * self.n, axis=0)  # (n*n, 10)
+            input_values[:, self.variable_params] = self.coords
+            input_values = tf.convert_to_tensor(input_values)
+            tape.watch(input_values)
+            self.latent_space = self.pca_forward_model(input_values)
+            jacobian = tape.batch_jacobian(self.latent_space, input_values)
+            sensitivity = tf.sqrt(K.sum(jacobian ** 2, axis=(1, 2)))
+
+        self.image.setImage(sensitivity.numpy().reshape(self.n, self.n), levels=(0, 100))
+
+        # plotting fit accuracy (this can be added to another function)
+        # input_values = np.stack((self.params,) * self.n * self.n, axis=0)  # (n*n, 10)
+        # input_values[:, self.variable_params] = self.coords
+        # latent_space = self.forward_model.predict(input_values)
+        # output_values = self.inverse_model.predict(latent_space)
+        # dist = np.sqrt(((input_values - output_values) ** 2)[:, self.var_error_index])
+        # print(np.mean(dist), np.std(dist), np.min(dist), np.max(dist))
+        # self.image.setImage(dist.reshape(self.n, self.n), levels=(0, 0.5))
 
     def simulateData(self):
+        """ 
+        When you click on the plot in simulation mode, a popup will be made and it will 
+        be plotted to
+        """
         values = self.params.copy()
         values[self.variable_params] = self.coords[self.current_index]
         # print(np.max(self.image.image.flatten()[self.current_index]))
@@ -334,6 +345,12 @@ class LatentDistanceGUI(QMainWindow):
             transformed_pos = pg.transformCoordinates(self.transform, self.coords[self.set_index] * self.n)
             self.CoordinatesLabel.setText(f'({transformed_pos[0]:.4e}, {transformed_pos[1]:.4e})')
 
+        yy, xx = np.meshgrid(np.linspace(0, 1, self.n), np.linspace(0, 1, self.n))
+        filter = dist <= 0.01 * self.cmap_max
+        print(xx.flatten()[filter].mean(), xx.flatten()[filter].std())
+        print(yy.flatten()[filter].mean(), yy.flatten()[filter].std())
+        print()
+
     def setImageTransform(self):
         xy_range = [[], []]
 
@@ -372,6 +389,8 @@ class LatentDistanceGUI(QMainWindow):
 
 
 class SimulationPopup(pg.GraphicsView):
+    """ Popup window for plots """
+
     def __init__(self, *args, **kwargs):
         super(SimulationPopup, self).__init__(*args, **kwargs)
         self.resize(800, 600)
@@ -403,21 +422,21 @@ class SimulationPopup(pg.GraphicsView):
         self.velocity_plot.setXRange(20, 80)
         self.velocity_plot.setYRange(70, 140)
 
-        self.norm_magnitude_plot = layout.addPlot(1, 0)
-        self.norm_magnitude_plot.showGrid(x=True, y=True, alpha=0.3)
-        self.norm_magnitude_plot.setLabel('bottom', 'Magnitude')
-        self.norm_magnitude_plot.setLabel('left', 'Height')
+        # self.norm_magnitude_plot = layout.addPlot(1, 0)
+        # self.norm_magnitude_plot.showGrid(x=True, y=True, alpha=0.3)
+        # self.norm_magnitude_plot.setLabel('bottom', 'Magnitude')
+        # self.norm_magnitude_plot.setLabel('left', 'Height')
 
-        self.norm_velocity_plot = layout.addPlot(1, 1)
-        self.norm_velocity_plot.showGrid(x=True, y=True, alpha=0.3)
-        self.norm_velocity_plot.setLabel('bottom', 'Velocity')
-        self.norm_velocity_plot.setLabel('left', 'Height')
+        # self.norm_velocity_plot = layout.addPlot(1, 1)
+        # self.norm_velocity_plot.showGrid(x=True, y=True, alpha=0.3)
+        # self.norm_velocity_plot.setLabel('bottom', 'Velocity')
+        # self.norm_velocity_plot.setLabel('left', 'Height')
 
         self.magnitude_plot.setYLink(self.velocity_plot)
-        self.norm_magnitude_plot.setYLink(self.norm_velocity_plot)
+        # self.norm_magnitude_plot.setYLink(self.norm_velocity_plot)
 
     def function(self, X, heights=None, goal=None):
-        """ pyswarms optimize function """
+        """ pyswarms optimize function (testing purposes)"""
         input_data = np.concatenate(
             (np.tile(heights, X.shape[0])[:, None], np.repeat(X, heights.shape[0], axis=0)), axis=1
         )
@@ -428,35 +447,47 @@ class SimulationPopup(pg.GraphicsView):
         )
 
     def runSimulation(self, norm_values, color):
-        y, x = next(self.generator)
-        norm_values = x[0]
-        self.norm_magnitude_plot.plot(y[0, :, 3], y[0, :, 1])
-        self.norm_velocity_plot.plot(y[0, :, 2], y[0, :, 1])
+        """
+        Runs simulation on normalized parameter values
+        
+        Arguments:
+            norm_values: [list] List of normalized parameter values to simulate
+            color: [Qcolor] Color of plot
+        """
+        # see how model performs on data it trained on
+        # y, x = next(self.generator)
+        # norm_values = x[0]
+        # self.norm_magnitude_plot.plot(y[0, :, 3], y[0, :, 1])
+        # self.norm_velocity_plot.plot(y[0, :, 2], y[0, :, 1])
 
+        # denormalize values
         self.phys_param = PhysicalParameters()
         denorm_values = self.phys_param.getDenormalizedInputs(norm_values)
         self.phys_param.setParamValues(denorm_values)
         const = self.phys_param.getConst()
 
+        # run simulation and plot
         simulation_results = SimulationResults(const, *runSimulation(const, compute_wake=False))
         self.plot(simulation_results, color)
 
-        heights = np.linspace(0, 1, 256)
-        input_data = np.concatenate(
-            (heights[:, None], np.repeat(norm_values[None], heights.shape[0], axis=0)), axis=1
-        )
-        # feature engineering
-        input_data = np.concatenate(
-            (input_data, input_data[:, 0:1] < input_data[:, 6:7]), axis=1
-        )  # add boolean erosion parameter
-        input_data = np.concatenate(
-            (input_data, input_data[:, 6:11] * (input_data[:, 0:1] < input_data[:, 6:7])), axis=1
-        )
+        # simulate forward problem
+        # heights = np.linspace(0, 1, 256)
+        # input_data = np.concatenate(
+        #     (heights[:, None], np.repeat(norm_values[None], heights.shape[0], axis=0)), axis=1
+        # )
+        # # feature engineering
+        # input_data = np.concatenate(
+        #     (input_data, input_data[:, 0:1] < input_data[:, 6:7]), axis=1
+        # )  # add boolean erosion parameter
+        # input_data = np.concatenate(
+        #     (input_data, input_data[:, 6:11] * (input_data[:, 0:1] < input_data[:, 6:7])), axis=1
+        # )
 
-        prediction = self.forward_model(input_data, training=False)
-        self.norm_magnitude_plot.plot(prediction[:, 0], heights)
+        # prediction = self.forward_model(input_data, training=False)
+        # self.norm_magnitude_plot.plot(prediction[:, 0], heights)
         # self.norm_velocity_plot.plot(prediction[:, 0], heights)
 
+        # trying pyswam optimization
         # cost, joint_vars = self.optimizer.optimize(self.function, iters=10, heights=heights, goal=prediction)
         # print(joint_vars)
         # heights = np.linspace(0, 1, 256)
@@ -469,30 +500,48 @@ class SimulationPopup(pg.GraphicsView):
         # self.norm_velocity_plot.plot(prediction[:, 0], heights)
 
     def plot(self, sim: SimulationResults, color):
-        ret = extractSimData(
-            sim_results=sim, phys_params=self.phys_param, camera_params=ErosionSimParameters()
-        )
-        if ret is not None:
-            _, sim_data_normed, _ = ret
-            self.norm_magnitude_plot.plot(sim_data_normed[:, 3], sim_data_normed[:, 1], pen=color)
-            self.norm_velocity_plot.plot(sim_data_normed[:, 2], sim_data_normed[:, 1], pen=color)
+        """ 
+        Plot simulation
+        
+        Arguments:
+            sim: [simulationresults] Simulation results to plot
+            color: [qcolor] color to plot
+        """
+        # ret = extractSimData(
+        #     sim_results=sim, phys_params=self.phys_param, camera_params=ErosionSimParameters()
+        # )
+        # if ret is not None:
+        #     _, sim_data_normed, _ = ret
+        #     self.norm_magnitude_plot.plot(sim_data_normed[:, 3], sim_data_normed[:, 1], pen=color)
+        #     self.norm_velocity_plot.plot(sim_data_normed[:, 2], sim_data_normed[:, 1], pen=color)
 
-            # cost, joint_vars = self.optimizer.optimize(
-            #     self.function, iters=10, heights=sim_data_normed[:, 1], goal=sim_data_normed[:, 2:4]
-            # )
-            # print(joint_vars)
-            # self.computed = True
+        #     # cost, joint_vars = self.optimizer.optimize(
+        #     #     self.function, iters=10, heights=sim_data_normed[:, 1], goal=sim_data_normed[:, 2:4]
+        #     # )
+        #     # print(joint_vars)
+        #     # self.computed = True
 
         self.magnitude_plot.plot(sim.abs_magnitude, sim.brightest_height_arr / 1000, pen=color)
         self.velocity_plot.plot(sim.brightest_vel_arr / 1000, sim.brightest_height_arr / 1000, pen=color)
 
     def closeEvent(self, event):
+        """ When you close the window, reopening it should have all the data cleared """
         self.norm_magnitude_plot.clear()
         self.norm_velocity_plot.clear()
 
         self.magnitude_plot.clear()
         self.velocity_plot.clear()
         super().closeEvent(event)
+
+
+def visualizeLatentSpaceDistance(model_path):
+    """ Run gui """
+    model = keras.models.load_model(model_path)
+
+    app = QApplication([])
+    main_window = LatentDistanceGUI(model)
+    main_window.show()
+    sys.exit(app.exec_())
 
 
 class Autoencoder(keras.models.Model):
@@ -536,6 +585,17 @@ def trainAutoencoder(
     batchsize: int,
     model_name: str = 'model',
 ):
+    """ 
+    Train autoencoder to output what it inputs and save it to a file
+    
+    Arguments:
+        data_path: [str] file path to .h5 database file
+        output_dir: [str] Directory to save model to
+        epochs: [int] Number of epochs to train data with
+        steps_per_epoch: [int] Number of batches until it is considered an epoch
+        batchsize: [int] Number of values in batch
+        model_name: [str] Model name. _encoder will by appended to it when saving
+    """
     # early_stopping_callback = keras.callbacks.EarlyStopping(
     #     monitor='loss', patience=5, min_delta=0, verbose=1
     # )
@@ -579,6 +639,18 @@ def trainParamPrediction(
     batchsize: int,
     model_name: str = 'model',
 ):
+    """ 
+    Train model to input latent space data (few dimensions) and output physical parameters.
+    
+    Arguments:
+        data_path: [str] file path to .h5 database file
+        output_dir: [str] Directory to save model to
+        autoencoder_path: [str] Path to autoencoder model file
+        epochs: [int] Number of epochs to train data with
+        steps_per_epoch: [int] Number of batches until it is considered an epoch
+        batchsize: [int] Number of values in batch
+        model_name: [str] Model name. _encoder will by appended to it when saving (unused)
+    """
     model = keras.Sequential(
         [
             keras.layers.Input(shape=(9,)),
@@ -616,6 +688,19 @@ def trainParamPredictionRegions(
     batchsize: int,
     model_name: str = 'model',
 ):
+    """ 
+    Trains models on different regions of parameter space to see how they perform. Saves final error 
+    in an array to a .npy and .npz file.
+    
+    Arguments:
+        data_path: [str] file path to .h5 database file
+        output_dir: [str] Directory to save model to
+        autoencoder_path: [str] Path to autoencoder model file
+        epochs: [int] Number of epochs to train data with
+        steps_per_epoch: [int] Number of batches until it is considered an epoch
+        batchsize: [int] Number of values in batch
+        model_name: [str] Model name. _encoder will by appended to it when saving
+    """
     autoencoder = keras.models.load_model(autoencoder_path)
     forward = keras.models.load_model(
         r'D:\datasets\meteor\trained_models\trained2\noersion_model_ls_forward.hdf5'
@@ -706,6 +791,18 @@ def trainAutoencoderFindLatentSpace(
     batchsize: int,
     model_name: str = 'model',
 ):
+    """ 
+    Train model to perform forward problem, map physical parameters to latent space
+    
+    Arguments:
+        data_path: [str] file path to .h5 database file
+        output_dir: [str] Directory to save model to
+        autoencoder_path: [str] Path to autoencoder model file
+        epochs: [int] Number of epochs to train data with
+        steps_per_epoch: [int] Number of batches until it is considered an epoch
+        batchsize: [int] Number of values in batch
+        model_name: [str] Model name. _ls_forward_.hdf5 will by appended to it when saving
+    """
     autoencoder = keras.models.load_model(autoencoder_path)
 
     input_train, label_train = loadh5pyData(data_path)
@@ -750,11 +847,20 @@ def trainLatentSpaceFinder(
     batchsize: int,
     model_name: str = 'model',
 ):
-
     """
     Solves the inverse problem to the param prediction model, it transforms physical parameters to parameters
     in the pca latent space
+    
+    Arguments:
+        data_path: [str] file path to .h5 database file
+        output_dir: [str] Directory to save model to
+        autoencoder_path: [str] Path to autoencoder model file
+        epochs: [int] Number of epochs to train data with
+        steps_per_epoch: [int] Number of batches until it is considered an epoch
+        batchsize: [int] Number of values in batch
+        model_name: [str] Model name. _latentspace_finder.hdf5 will by appended to it when saving
     """
+
     autoencoder = keras.models.load_model(autoencoder_path)
 
     input_train, label_train = loadh5pyData(data_path)
@@ -863,6 +969,12 @@ def visualizeInverseSolving(
 ):
     """
     Visualize how effectively autoencoder can solve the inverse problem
+    
+    Arguments:
+        autoencoder_path: [str] Path to autoencoder model file
+        param_model_path: [str] Path to model file to test out
+        data_path: [str] Path to database .h5 file
+        forward: [bool] Whether the model saved sat param_model_path is the forward model or inverse model
     """
     autoencoder = keras.models.load_model(autoencoder_path)
     model = keras.models.load_model(param_model_path)
@@ -887,15 +999,6 @@ def visualizeInverseSolving(
             model.predict(autoencoder.encoder.predict(input_train[..., 1:])),
             # model.predict(autoencoder.encoder.predict(input_train)),
         )
-
-
-def visualizeLatentSpaceDistance(model_path):
-    model = keras.models.load_model(model_path)
-
-    app = QApplication([])
-    main_window = LatentDistanceGUI(model)
-    main_window.show()
-    sys.exit(app.exec_())
 
 
 def main():
