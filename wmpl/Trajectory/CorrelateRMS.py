@@ -1232,8 +1232,9 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         # Init the data handle
         dh = RMSDataHandle(cml_args.dir_path, event_time_range)
 
-        # If there is nothing to process, stop
-        if not dh.processing_list:
+        # If there is nothing to process, stop, unless we're in distributed 
+        # processing mode 2 
+        if not dh.processing_list and distribute !=2:
             print()
             print("Nothing to process!")
             print("Probably everything is already processed.")
@@ -1255,7 +1256,9 @@ contain data folders. Data folders should have FTPdetectinfo files together with
             proc_dir_dts = [dt for dt in proc_dir_dts \
                 if (dt >= dt_beg - datetime.timedelta(days=1)) and \
                     (dt <= dt_end + datetime.timedelta(days=1))]
-
+            # to avoid excluding all possible dates
+            if proc_dir_dts == []: 
+                proc_dir_dts=[dt_beg - datetime.timedelta(days=1), dt_end + datetime.timedelta(days=1)]
 
         # Determine the limits of data
         proc_dir_dt_beg = min(proc_dir_dts)

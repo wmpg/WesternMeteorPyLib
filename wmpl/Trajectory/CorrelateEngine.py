@@ -919,7 +919,7 @@ class TrajectoryCorrelator(object):
         # Go though all time bins and split the list of observations
         for bin_beg, bin_end in dt_bin_list:
 
-
+            # pair up objects, unless in distribute mode 2.
             if self.distribute < 2:
                 print()
                 print("-----------------------------------")
