@@ -2,22 +2,21 @@
 
 """
 
-from __future__ import division, print_function, absolute_import
+from __future__ import absolute_import, division, print_function
 
 import datetime
-import pytz
 
 import numpy as np
-from numpy.core.umath_tests import inner1d
+import pytz
 import scipy.linalg
-import scipy.stats
-import scipy.spatial
 import scipy.optimize
-
-
+import scipy.spatial
+import scipy.stats
+from numpy.core.umath_tests import inner1d
 
 ### BASIC FUNCTIONS ###
 ##############################################################################################################
+
 
 def lineFunc(x, m, k):
     """ A line function.
@@ -31,11 +30,10 @@ def lineFunc(x, m, k):
         y: [float] Line evaluation.
     """
 
-    return m*x + k
+    return m * x + k
 
 
 ##############################################################################################################
-
 
 
 ### VECTORS ###
@@ -45,15 +43,13 @@ def lineFunc(x, m, k):
 def vectNorm(vect):
     """ Convert a given vector to a unit vector. """
 
-    return vect/vectMag(vect)
-
+    return vect / vectMag(vect)
 
 
 def vectMag(vect):
     """ Calculate the magnitude of the given vector. """
 
     return np.sqrt(inner1d(vect, vect))
-
 
 
 def rotateVector(vect, axis, theta):
@@ -68,11 +64,10 @@ def rotateVector(vect, axis, theta):
         [3 element ndarray] rotated vector
 
     """
-    
-    rot_M = scipy.linalg.expm(np.cross(np.eye(3), axis/vectMag(axis)*theta))
+
+    rot_M = scipy.linalg.expm(np.cross(np.eye(3), axis / vectMag(axis) * theta))
 
     return np.dot(rot_M, vect)
-
 
 
 def rotatePoint(origin, point, angle):
@@ -95,11 +90,10 @@ def rotatePoint(origin, point, angle):
     ox, oy = origin
     px, py = point
 
-    qx = ox + np.cos(angle)*(px - ox) - np.sin(angle)*(py - oy)
-    qy = oy + np.sin(angle)*(px - ox) + np.cos(angle)*(py - oy)
+    qx = ox + np.cos(angle) * (px - ox) - np.sin(angle) * (py - oy)
+    qy = oy + np.sin(angle) * (px - ox) + np.cos(angle) * (py - oy)
 
     return qx, qy
-
 
 
 def getRotMatrix(v1, v2):
@@ -119,15 +113,13 @@ def getRotMatrix(v1, v2):
     w = vectNorm(w)
 
     # Skew-symmetric cross-product matrix
-    w_hat = np.array([[    0, -w[2],  w[1]],
-                      [ w[2],     0, -w[0]],
-                      [-w[1], w[0],     0]])
+    w_hat = np.array([[0, -w[2], w[1]], [w[2], 0, -w[0]], [-w[1], w[0], 0]])
 
     # Rotation angle
     theta = np.arccos(np.dot(vectNorm(v1), vectNorm(v2)))
 
     # Construct the rotation matrix
-    R = np.eye(3) + w_hat*np.sin(theta) + np.dot(w_hat, w_hat)*(1 - np.cos(theta))
+    R = np.eye(3) + w_hat * np.sin(theta) + np.dot(w_hat, w_hat) * (1 - np.cos(theta))
 
     return R
 
@@ -143,7 +135,7 @@ def angleBetweenVectors(a, b):
         [float] Angle between a and b (radians).
     """
 
-    return np.arccos(np.dot(a, b)/(vectMag(a)*vectMag(b)))
+    return np.arccos(np.dot(a, b) / (vectMag(a) * vectMag(b)))
 
 
 def vectorFromPointDirectionAndAngle(pos, dir_hat, angle):
@@ -165,15 +157,13 @@ def vectorFromPointDirectionAndAngle(pos, dir_hat, angle):
     dir_hat = vectNorm(dir_hat)
 
     # Compute the scalar which will scale the unit direction vector
-    beta = np.arccos(np.dot(dir_hat, pos)/vectMag(pos)) - angle
-    k = vectMag(pos)*np.sin(angle)/np.sin(beta)
+    beta = np.arccos(np.dot(dir_hat, pos) / vectMag(pos)) - angle
+    k = vectMag(pos) * np.sin(angle) / np.sin(beta)
 
-    return pos + k*dir_hat
-    
+    return pos + k * dir_hat
+
 
 ##############################################################################################################
-
-
 
 
 ### POLAR/ANGULAR FUNCTIONS ###
@@ -193,8 +183,6 @@ def meanAngle(angles):
     angles = np.array(angles)
 
     return np.arctan2(np.sum(np.sin(angles)), np.sum(np.cos(angles)))
-
-
 
 
 def circPercentile(data, percentile, q0=None):
@@ -227,13 +215,11 @@ def circPercentile(data, percentile, q0=None):
         else:
             q0 = np.min(data)
 
-
     # Normalize the data
-    data = (data - q0)%(2*np.pi)
+    data = (data - q0) % (2 * np.pi)
 
     # Compute the angular percentile
-    return (np.percentile(data, percentile) + q0)%(2*np.pi)
-
+    return (np.percentile(data, percentile) + q0) % (2 * np.pi)
 
 
 def normalizeAngleWrap(arr):
@@ -249,7 +235,6 @@ def normalizeAngleWrap(arr):
 
     """
 
-
     min_ang = np.min(arr)
     max_ang = np.max(arr)
 
@@ -259,11 +244,9 @@ def normalizeAngleWrap(arr):
         arr = np.array(arr)
 
         # Subtract 360 from large angles
-        arr[arr >= np.pi] -= 2*np.pi
-
+        arr[arr >= np.pi] -= 2 * np.pi
 
     return arr
-
 
 
 def cartesianToPolar(x, y, z):
@@ -285,7 +268,6 @@ def cartesianToPolar(x, y, z):
     return theta, phi
 
 
-
 def polarToCartesian(theta, phi):
     """ Converts 3D spherical coordinates to 3D cartesian coordinates. 
 
@@ -297,13 +279,11 @@ def polarToCartesian(theta, phi):
         (x, y, z): [tuple of floats] Coordinates of the point in 3D cartiesian coordinates.
     """
 
-
-    x = np.sin(phi)*np.cos(theta)
-    y = np.sin(phi)*np.sin(theta)
+    x = np.sin(phi) * np.cos(theta)
+    y = np.sin(phi) * np.sin(theta)
     z = np.cos(phi)
 
     return x, y, z
-
 
 
 def sphericalToCartesian(r, theta, phi):
@@ -318,12 +298,11 @@ def sphericalToCartesian(r, theta, phi):
         (x, y, z): [tuple of floats] Coordinates of the point in 3D cartiesian coordinates.
     """
 
-    x = r*np.sin(theta)*np.cos(phi)
-    y = r*np.sin(theta)*np.sin(phi)
-    z = r*np.cos(theta)
+    x = r * np.sin(theta) * np.cos(phi)
+    y = r * np.sin(theta) * np.sin(phi)
+    z = r * np.cos(theta)
 
     return x, y, z
-
 
 
 def cartesianToSpherical(x, y, z):
@@ -342,17 +321,15 @@ def cartesianToSpherical(x, y, z):
     """
 
     # Radius
-    r = np.sqrt(x**2 + y**2 + z**2)
+    r = np.sqrt(x ** 2 + y ** 2 + z ** 2)
 
     # Azimuith
     phi = np.arctan2(y, x)
 
     # Elevation
-    theta = np.arccos(z/r)
-
+    theta = np.arccos(z / r)
 
     return r, theta, phi
-
 
 
 def angleBetweenSphericalCoords(phi1, lambda1, phi2, lambda2):
@@ -368,8 +345,7 @@ def angleBetweenSphericalCoords(phi1, lambda1, phi2, lambda2):
         [float] Angle between two coordinates (radians).
     """
 
-    return np.arccos(np.sin(phi1)*np.sin(phi2) + np.cos(phi1)*np.cos(phi2)*np.cos(lambda2 - lambda1))
-
+    return np.arccos(np.sin(phi1) * np.sin(phi2) + np.cos(phi1) * np.cos(phi2) * np.cos(lambda2 - lambda1))
 
 
 @np.vectorize
@@ -388,22 +364,21 @@ def sphericalPointFromHeadingAndDistance(phi, lam, heading, distance):
     """
 
     # Compute the new declination
-    phi_new = np.arcsin(np.sin(phi)*np.cos(distance) + np.cos(phi)*np.sin(distance)*np.cos(heading))
+    phi_new = np.arcsin(np.sin(phi) * np.cos(distance) + np.cos(phi) * np.sin(distance) * np.cos(heading))
 
     # Handle poles and compute right ascension
     if np.cos(phi_new) == 0:
-       lam_new = lam
+        lam_new = lam
 
     else:
-       lam_new = (lam - np.arcsin(np.sin(heading)*np.sin(distance)/np.cos(phi_new)) + np.pi)%(2*np.pi) - np.pi
+        lam_new = (lam - np.arcsin(np.sin(heading) * np.sin(distance) / np.cos(phi_new)) + np.pi) % (
+            2 * np.pi
+        ) - np.pi
 
-
-    return phi_new, lam_new%(2*np.pi)
+    return phi_new, lam_new % (2 * np.pi)
 
 
 ##############################################################################################################
-
-
 
 
 ### 3D FUNCTIONS ###
@@ -439,20 +414,19 @@ def findClosestPoints(P, u, Q, v):
     d = np.dot(u, w)
     e = np.dot(v, w)
 
-    sc = (b*e - c*d)/(a*c - b**2)
-    tc = (a*e - b*d)/(a*c - b**2)
+    sc = (b * e - c * d) / (a * c - b ** 2)
+    tc = (a * e - b * d) / (a * c - b ** 2)
 
     # Point on the 1st observer's line of sight closest to the LoS of the 2nd observer
-    S = P + u*sc
+    S = P + u * sc
 
     # Point on the 2nd observer's line of sight closest to the LoS of the 1st observer
-    T = Q + v*tc
+    T = Q + v * tc
 
     # Calculate the distance between S and T
     d = np.linalg.norm(S - T)
 
     return S, T, d
-
 
 
 def lineAndSphereIntersections(centre, radius, origin, direction):
@@ -473,7 +447,6 @@ def lineAndSphereIntersections(centre, radius, origin, direction):
 
     intersection_list = []
 
-
     # Make sure the direction is a unit vector
     direction = vectNorm(direction)
 
@@ -481,15 +454,13 @@ def lineAndSphereIntersections(centre, radius, origin, direction):
     v = centre - origin
 
     # Projection of the centre on the line
-    pc = origin + np.dot(direction, v)/vectMag(direction)*direction
+    pc = origin + np.dot(direction, v) / vectMag(direction) * direction
 
-    
     # No solutions
     if vectMag(centre - pc) > radius:
 
         # No intersection
         return intersection_list
-
 
     # Check if the line is only skimming the sphere
     elif vectMag(centre - pc) == radius:
@@ -498,7 +469,6 @@ def lineAndSphereIntersections(centre, radius, origin, direction):
 
         return intersection_list
 
-
     # There are 2 solutions
     else:
 
@@ -506,48 +476,41 @@ def lineAndSphereIntersections(centre, radius, origin, direction):
         if np.dot(v, direction) < 0:
 
             # Distance from the projection to the intersection
-            dist = np.sqrt(radius**2 - vectMag(pc - centre)**2)
-            
+            dist = np.sqrt(radius ** 2 - vectMag(pc - centre) ** 2)
+
             # Intersection at the front
             dil = dist - vectMag(pc - origin)
-            intersection = origin + direction*dil
+            intersection = origin + direction * dil
 
             intersection_list.append(intersection)
 
-
             # Intersection at the back
             dil = dist + vectMag(pc - origin)
-            intersection = origin - direction*dil
+            intersection = origin - direction * dil
 
             intersection_list.append(intersection)
 
             return intersection_list
 
-
         # If the sphere is in front of the origin
         else:
 
-
             # Distance from the projection to the intersection
-            dist = np.sqrt(radius**2 - vectMag(pc - centre)**2)
+            dist = np.sqrt(radius ** 2 - vectMag(pc - centre) ** 2)
 
-            
             # Intersection at the front
             dil = vectMag(pc - origin) - dist
-            intersection = origin + direction*dil
+            intersection = origin + direction * dil
 
             intersection_list.append(intersection)
 
             # Intersection at the back
             dil = vectMag(pc - origin) + dist
-            intersection = origin + direction*dil
+            intersection = origin + direction * dil
 
             intersection_list.append(intersection)
 
-
             return intersection_list
-
-
 
 
 def pointInsidePolygon(x, y, poly):
@@ -567,28 +530,27 @@ def pointInsidePolygon(x, y, poly):
     n = len(poly)
     inside = False
 
-    p1x,p1y = poly[0]
+    p1x, p1y = poly[0]
 
-    for i in range(n+1):
+    for i in range(n + 1):
 
-        p2x,p2y = poly[i % n]
+        p2x, p2y = poly[i % n]
 
-        if y > min(p1y,p2y):
+        if y > min(p1y, p2y):
 
-            if y <= max(p1y,p2y):
+            if y <= max(p1y, p2y):
 
-                if x <= max(p1x,p2x):
+                if x <= max(p1x, p2x):
 
                     if p1y != p2y:
-                        xinters = (y - p1y)*(p2x - p1x)/(p2y - p1y) + p1x
+                        xinters = (y - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
 
                     if p1x == p2x or x <= xinters:
                         inside = not inside
 
-        p1x,p1y = p2x,p2y
+        p1x, p1y = p2x, p2y
 
     return inside
-
 
 
 def pointInsideConvexHull(hull_vertices, point):
@@ -610,11 +572,10 @@ def pointInsideConvexHull(hull_vertices, point):
     new_hull = scipy.spatial.ConvexHull(np.concatenate((hull.points, [point])))
 
     # Check if the veretices have remained the same
-    if np.array_equal(new_hull.vertices, hull.vertices): 
+    if np.array_equal(new_hull.vertices, hull.vertices):
         return True
-    
-    return False
 
+    return False
 
 
 def samplePointsFromHull(hull_vertices, n_points):
@@ -628,18 +589,15 @@ def samplePointsFromHull(hull_vertices, n_points):
         samples_hull: [list] A list of points sampled from the hull.
     """
 
-
     # Find a rectangular cuboid which envelops the given hull
-    min_point = np.array([ np.inf,  np.inf,  np.inf])
+    min_point = np.array([np.inf, np.inf, np.inf])
     max_point = np.array([-np.inf, -np.inf, -np.inf])
 
     for vert in hull_vertices:
         min_point = np.min([min_point, vert], axis=0)
         max_point = np.max([max_point, vert], axis=0)
 
-
     samples_hull = []
-
 
     while True:
 
@@ -658,9 +616,7 @@ def samplePointsFromHull(hull_vertices, n_points):
         if len(samples_hull) == n_points:
             break
 
-
     return np.array(samples_hull)
-
 
 
 def estimateHullOverlapRatio(hull1, hull2, niter=200, volume=False):
@@ -683,8 +639,6 @@ def estimateHullOverlapRatio(hull1, hull2, niter=200, volume=False):
     # Randomly generate a point inside the first convex hull
     test_points = samplePointsFromHull(hull1, niter)
 
-
-
     ## TEST
     # inside_points = []
     ###
@@ -701,10 +655,7 @@ def estimateHullOverlapRatio(hull1, hull2, niter=200, volume=False):
             ## TEST
             # inside_points.append(test_points[i])
 
-
-    ratio = float(inside_count)/niter
-
-
+    ratio = float(inside_count) / niter
 
     # from mpl_toolkits.mplot3d import Axes3D
     # import matplotlib.pyplot as plt
@@ -729,13 +680,11 @@ def estimateHullOverlapRatio(hull1, hull2, niter=200, volume=False):
     #         # Plot the edge
     #         ax.plot(verts[simp, 0], verts[simp, 1], verts[simp, 2], c=color)
 
-
     # # Plot convex hull1 vertices
     # #ax.scatter(hull1[:, 0], hull1[:, 1], hull1[:, 2], c='g')
 
     # # Plot convex hull2 vertices
     # #ax.scatter(hull2[:, 0], hull2[:, 1], hull2[:, 2], c='y')
-
 
     # # Plot all points
     # for pt in test_points:
@@ -749,27 +698,43 @@ def estimateHullOverlapRatio(hull1, hull2, niter=200, volume=False):
     #     # Plot corner
     #     ax.scatter(*pt, c='r')
 
-
     # # ax.set_xlim([-1, 1])
     # # ax.set_ylim([-1, 1])
     # # ax.set_zlim([-1, 1])
     # plt.show()
 
-
-
-
     # Return common volume if it was requested
     if volume:
-        return ratio*scipy.spatial.ConvexHull(hull1).volume
-
+        return ratio * scipy.spatial.ConvexHull(hull1).volume
 
     # Return ratio otherwise
     else:
         return ratio
 
 
-
 ##############################################################################################################
+
+
+def stdOfStd(s, n):
+    """ Given sample standard deviation and number of points used to make that calculation,
+    
+    https://stats.stackexchange.com/questions/631/standard-deviation-of-standard-deviation
+    
+    Input is the sample standard deviation, so it must be calculated with ddof=1
+    
+    Arguments:
+        s: [ndarray or float] Sample standard deviation measurement
+        n: [ndarray or float] Number of measurements in sample
+        
+    Returns:
+        std_of_std: [ndarray or float]
+    """
+    return (
+        s
+        * scipy.special.gamma((n - 1) / 2)
+        / scipy.special.gamma(n / 2)
+        * np.sqrt((n - 1) / 2 - (scipy.special.gamma(n / 2) / scipy.special.gamma((n - 1) / 2)) ** 2)
+    )
 
 
 def confidenceInterval(data, ci, angle=False):
@@ -787,21 +752,19 @@ def confidenceInterval(data, ci, angle=False):
     """
 
     # Compute percentiles, given the confidence interval
-    perc_l = 50 - ci/2
-    perc_u = 50 + ci/2
+    perc_l = 50 - ci / 2
+    perc_u = 50 + ci / 2
 
     # Compute the confidence interval for angular values (radians)
     if angle:
         val_l = circPercentile(data, perc_l)
         val_u = circPercentile(data, perc_u)
-    
+
     else:
         val_l = np.percentile(data, perc_l)
         val_u = np.percentile(data, perc_u)
 
-
     return val_l, val_u
-    
 
 
 def RMSD(x, weights=None):
@@ -817,8 +780,7 @@ def RMSD(x, weights=None):
     if weights is None:
         weights = np.ones_like(x)
 
-    return np.sqrt(np.sum(weights*x**2)/np.sum(weights))
-    
+    return np.sqrt(np.sum(weights * x ** 2) / np.sum(weights))
 
 
 def mergeClosePoints(x_array, y_array, delta, x_datetime=False, method='avg'):
@@ -826,8 +788,9 @@ def mergeClosePoints(x_array, y_array, delta, x_datetime=False, method='avg'):
         averages all y values.
 
     Arguments:
-        x_array: [list] A list of x values (must be of the same length as y_array!).
-        y_array: [list] A list of y values (must be of the same length as x_array!).
+        x_array: [list] A list of x values (must be of the same length as y_array!). Must be sorted
+        y_array: [list] A list of y values (must be of the same length as x_array!). Or ndarray with
+            dimensions (len(x_array), n)
         delta: [float] Threshold distance between two points in x to merge them. Can be sampling of data (e.g. 
             half the fps).
 
@@ -851,7 +814,6 @@ def mergeClosePoints(x_array, y_array, delta, x_datetime=False, method='avg'):
             skip -= 1
             continue
 
-
         # Calculate the difference between this point and all others
         diff = np.abs(x_array - x)
 
@@ -859,7 +821,6 @@ def mergeClosePoints(x_array, y_array, delta, x_datetime=False, method='avg'):
         if x_datetime:
             diff_iter = (time_diff.total_seconds() for time_diff in diff)
             diff = np.fromiter(diff_iter, np.float64, count=len(diff))
-
 
         # Count the number of close points to this element
         count = np.count_nonzero(diff < delta)
@@ -871,30 +832,79 @@ def mergeClosePoints(x_array, y_array, delta, x_datetime=False, method='avg'):
 
             # Choose either to take the mean, max, or min of the points in the window
             if method.lower() == "max":
-                y = np.max(y_array[i : i + count])
+                y = np.nanmax(y_array[i : i + count], axis=0)
 
             elif method.lower() == "min":
-                y = np.min(y_array[i : i + count])
-                
-            else:
-                y = np.mean(y_array[i : i + count])
+                y = np.nanmin(y_array[i : i + count], axis=0)
 
+            else:
+                y = np.nanmean(y_array[i : i + count], axis=0)
 
         # If there are no close points, add the current point to the list
         else:
 
             y = y_array[i]
 
-
         x_final.append(x)
         y_final.append(y)
-
 
     return x_final, y_final
 
 
+def mergeClosePoints2(xy, delta, method='avg'):
+    """
+    Arguments:
+        xy: [tuple of ndarray] (x, y1, y2, y3, ...) where each element is an ndarray with the same length. 
+        delta: [float] Interval to subdivide x into
+        
+    keyword arguments:
+        method: [str] The method for merging close points. 'avg' for average, 'max' for max, 'min' for min
+        
+    Returns:
+        x,y: [tuple] x is an array of x values defined preciely with delta, y is an array calculated based on xy[1:]
+    """
+    start_x = np.min(xy[0])
+    end_x = np.max(xy[0])
 
-def movingAverage(arr, n=3):
+    x_arr = xy[0]
+    y_arr = np.array(xy).T
+
+    x_bins = np.arange(start_x, end_x + delta, delta)[1:]  # want to include the largest element
+    output = np.full((len(x_bins), len(xy)), np.nan)
+
+    start_i = 0
+    end_i = 1
+    for i in range(len(x_bins)):
+        while end_i < len(x_arr) and x_arr[end_i] < x_bins[i]:
+            end_i += 1
+
+        if end_i == len(x_arr):
+            end_i = None
+
+        if method == 'avg':
+            func = np.nanmean
+        elif method == 'max':
+            func = np.nanmax
+        else:
+            func = np.nanmin
+
+        output[i] = func(y_arr[start_i:end_i], axis=0)
+        start_i = end_i
+
+    return output
+
+
+def mergeDatasets(xy1, xy2, ascending=True):
+    """ For two datasets, (x1, y1, ...) and (x2, y2, ...), return a new data set that combines both into one,
+    such that the x values are always increasing """
+    if ascending:
+        i = np.searchsorted(xy1[0], xy2[0])
+    else:
+        i = np.searchsorted(-xy1[0], -xy2[0])
+    return tuple(np.insert(dim1, i, dim2) for dim1, dim2 in zip(xy1, xy2))
+
+
+def movingAverage(arr, n=3, stride=1):
     """ Perform a moving average on an array with the window size n.
 
     Arguments:
@@ -902,6 +912,7 @@ def movingAverage(arr, n=3):
 
     Keyword arguments:
         n: [int] Averaging window.
+        stride: [int] Amount of steps to go between each window (default 1)
 
     Return:
         [ndarray] Averaged array. The size of the array is always by n-1 smaller than the input array.
@@ -912,7 +923,32 @@ def movingAverage(arr, n=3):
 
     ret[n:] = ret[n:] - ret[:-n]
 
-    return ret[n - 1:]/n
+    return (ret[n - 1 :] / n)[::stride]
+
+
+def movingOperation(arr, func=np.mean, n=3, stride=1, ret_arr=False):
+    """
+    A generalized moving average function to apply to any numpy function. 4-5x slower than movingAverage
+    
+    Arguments:
+        arr: [ndarray] Numpy array of values.
+
+    Keyword arguments:
+        n: [int] Window size.
+        func: [Callabe] Numpy function to apply on each window. Defaults to np.mean
+        stride: [int] Amount of steps to go between each window (default 1)
+        ret_arr: [bool] If True, returns an array of shape (int((arr.size - n) / stride) + 1, n) rather
+            the applying func to it
+
+    Return:
+        [ndarray] Output array. The size of the array is always by n-1 smaller than the input array.
+    """
+    nrows = int(max(arr.size - n, 0) / stride) + 1
+    s = arr.strides[0]
+    a2D = np.lib.stride_tricks.as_strided(arr, shape=(nrows, n), strides=(stride * s, s))
+    if ret_arr:
+        return a2D
+    return func(a2D, axis=1)
 
 
 def subsampleAverage(arr, n=3):
@@ -931,10 +967,9 @@ def subsampleAverage(arr, n=3):
 
     """
 
-    end =  n*int(len(arr)/n)
+    end = n * int(len(arr) / n)
 
     return np.mean(arr[:end].reshape(-1, n), 1)
-
 
 
 def checkContinuity(sequence):
@@ -987,18 +1022,15 @@ def checkContinuity(sequence):
         else:
             return True, 0, change_indx
 
-
     elif np.count_nonzero(diffs) == 2:
 
         # Check if that continous sequence is a sequence of ones, or a sequence of zeros
         first, last = np.argwhere(diffs != 0)
 
-        if np.count_nonzero(sequence[first[0]+1:last[0]] == 1):
+        if np.count_nonzero(sequence[first[0] + 1 : last[0]] == 1):
             return True, first[0] + 1, last[0]
 
     return False, 0, 0
-
-
 
 
 def histogramEdgesEqualDataNumber(x, nbins):
@@ -1017,25 +1049,28 @@ def histogramEdgesEqualDataNumber(x, nbins):
     return np.interp(np.linspace(0, npt, nbins + 1), np.arange(npt), np.sort(x))
 
 
-
-
-def padOrTruncate(array, size):
+def padOrTruncate(array, size, side='end'):
     """ Given the array, either pad ti with zeros or cut it to the given size. 
     
     Argumetns:
         array: [ndarray] Inpout numpy array.
         size: [int] Output array size.
+        
+    Keyword Arguments:
+        side: [str] Whether to truncate or pad the 'start' or 'end'
 
     Return:
         [ndarray] Array with the fixed size.
     """
 
     if array.shape[0] > size:
-        return array[0: size]
+        if side == 'end':
+            return array[:size]
+        return array[-size:]
 
-    else:
+    if side == 'end':
         return np.hstack((array, np.zeros(size - array.shape[0])))
-
+    return np.hstack((np.zeros(size - array.shape[0]), array))
 
 
 ### OPTIMIZATION ###
@@ -1073,7 +1108,6 @@ def fitConfidenceInterval(x_data, y_data, conf=0.95, x_array=None, func=None):
     # Fit a line
     fit_params, _ = scipy.optimize.curve_fit(func, x_data, y_data)
 
-
     alpha = 1.0 - conf
     n = x_data.size
 
@@ -1085,33 +1119,30 @@ def fitConfidenceInterval(x_data, y_data, conf=0.95, x_array=None, func=None):
     y_array = func(x_array, *fit_params)
 
     # Auxiliary definitions
-    sxd = np.sum((x_data - x_data.mean())**2)
-    sx = (x_array - x_data.mean())**2
+    sxd = np.sum((x_data - x_data.mean()) ** 2)
+    sx = (x_array - x_data.mean()) ** 2
 
     # Quantile of Student's t distribution for p=1-alpha/2
-    q = scipy.stats.t.ppf(1.0 - alpha/2.0, n-2)
+    q = scipy.stats.t.ppf(1.0 - alpha / 2.0, n - 2)
 
-    # Std. deviation of an individual measurement (Bevington, eq. 6.15)  
-    N = np.size(x_data)  
-    sd = 1.0/(N - 2.0)*np.sum((y_data - func(x_data, *fit_params))**2)
+    # Std. deviation of an individual measurement (Bevington, eq. 6.15)
+    N = np.size(x_data)
+    sd = 1.0 / (N - 2.0) * np.sum((y_data - func(x_data, *fit_params)) ** 2)
     sd = np.sqrt(sd)
 
     # Confidence band
-    dy = q*sd*np.sqrt(1 + 1.0/n + sx/sxd)
-    
+    dy = q * sd * np.sqrt(1 + 1.0 / n + sx / sxd)
+
     # Upper confidence band
-    ucb = y_array + dy    
+    ucb = y_array + dy
 
     # Lower confidence band
-    lcb = y_array - dy    
-
+    lcb = y_array - dy
 
     return fit_params, sd, lcb, ucb, x_array
 
 
 ##############################################################################################################
-
-
 
 
 ### TIME FUNCTIONS ###
@@ -1141,9 +1172,8 @@ def generateDatetimeBins(dt_beg, dt_end, bin_days=7, utc_hour_break=12, tzinfo=N
     dt_beg = dt_beg.replace(tzinfo=tzinfo)
     dt_end = dt_end.replace(tzinfo=tzinfo)
 
-
     # Compute the total number of bins
-    n_bins = np.ceil((dt_end - dt_beg).total_seconds()/(bin_days*86400))
+    n_bins = np.ceil((dt_end - dt_beg).total_seconds() / (bin_days * 86400))
 
     # Generate time bins
     time_bins = []
@@ -1155,7 +1185,7 @@ def generateDatetimeBins(dt_beg, dt_end, bin_days=7, utc_hour_break=12, tzinfo=N
             bin_beg = dt_beg
 
         else:
-            bin_beg = dt_beg + datetime.timedelta(days=i*bin_days)
+            bin_beg = dt_beg + datetime.timedelta(days=i * bin_days)
             bin_beg = bin_beg.replace(hour=int(utc_hour_break), minute=0, second=0, microsecond=0)
 
         # Generate the bin ending edge
@@ -1168,16 +1198,13 @@ def generateDatetimeBins(dt_beg, dt_end, bin_days=7, utc_hour_break=12, tzinfo=N
             bin_end = dt_end
             end_reached = True
 
-
         time_bins.append([bin_beg, bin_end])
 
         # Stop iterating if the end was reached
         if end_reached:
             break
 
-
     return time_bins
-
 
 
 def generateMonthyTimeBins(dt_beg, dt_end):
@@ -1193,12 +1220,12 @@ def generateMonthyTimeBins(dt_beg, dt_end):
 
     """
 
-
     monthly_bins = []
 
     # Compute the next beginning of the month after dt_end
-    month_end_prev = (datetime.datetime(dt_end.year, dt_end.month, 1, 0, 0, 0) \
-        + datetime.timedelta(days=32)).replace(day=1)
+    month_end_prev = (
+        datetime.datetime(dt_end.year, dt_end.month, 1, 0, 0, 0) + datetime.timedelta(days=32)
+    ).replace(day=1)
     month_end_next = datetime.datetime(dt_end.year, dt_end.month, 1, 0, 0, 0)
 
     # Go backwards one month until the beginning dt is reached
@@ -1210,12 +1237,9 @@ def generateMonthyTimeBins(dt_beg, dt_end):
         month_end_next = (month_end_prev - datetime.timedelta(days=32)).replace(day=1)
         month_end_prev = month_end_temp
 
-
     monthly_bins.append([month_end_next, month_end_prev])
-    
-    
-    return monthly_bins
 
+    return monthly_bins
 
 
 ##############################################################################################################
@@ -1224,11 +1248,10 @@ def generateMonthyTimeBins(dt_beg, dt_end):
 if __name__ == "__main__":
 
     import sys
+
     import matplotlib.pyplot as plt
 
     ### TESTS
-
-
     # Cx, Cy
     cx, cy = 229, 163
 
@@ -1249,17 +1272,14 @@ if __name__ == "__main__":
 
     cx_rot, cy_rot = rotatePoint((320, 240), (cx, cy), angle)
 
-    y_diff = (img_rot0 - img0)/2
-    x_diff = (img_rot1 - img1)/2
+    y_diff = (img_rot0 - img0) / 2
+    x_diff = (img_rot1 - img1) / 2
 
     print(cx_rot + x_diff, cy_rot + y_diff)
 
-
-
-
     # Test cartesian to spherical transform
-    x = -3125996.00181 
-    y = 5180605.28206 
+    x = -3125996.00181
+    y = 5180605.28206
     z = 4272017.20178
 
     print('X, Y, Z')
@@ -1277,16 +1297,12 @@ if __name__ == "__main__":
     print('Converted X, Y, Z')
     print(x2, y2, z2)
 
-
-
-
     # Generate fake data, fit a line and get confidence interval
     x_data = np.linspace(1, 10, 100)
     y_data = np.random.normal(0, 1, size=len(x_data))
 
     # Fit a line with the given confidence interval
     line_params, lcb, ucb, x_array = fitConfidenceInterval(x_data, y_data, conf=0.95)
-
 
     plt.scatter(x_data, y_data)
     plt.plot(x_array, lineFunc(x_array, *line_params))
@@ -1297,26 +1313,25 @@ if __name__ == "__main__":
 
     plt.show()
 
-
-
     sys.exit()
 
     # Test hull functions
-    from mpl_toolkits.mplot3d import Axes3D
     import matplotlib.pyplot as plt
-
+    from mpl_toolkits.mplot3d import Axes3D
 
     # Define hull points
-    hull_vertices = np.array([
-        [100, 100, 120],
-        [ 98,  10, 120],
-        [  5,   8, 120],
-        [  3, 103, 120],
-
-        [80, 78,  70],
-        [81, 21,  70],
-        [22, 23,  70],
-        [19, 85, 70]])
+    hull_vertices = np.array(
+        [
+            [100, 100, 120],
+            [98, 10, 120],
+            [5, 8, 120],
+            [3, 103, 120],
+            [80, 78, 70],
+            [81, 21, 70],
+            [22, 23, 70],
+            [19, 85, 70],
+        ]
+    )
 
     # Point to check
     point = np.array([10, 50, 80])
@@ -1324,9 +1339,7 @@ if __name__ == "__main__":
     fig = plt.figure()
     ax = fig.add_subplot(111, projection="3d")
 
-
     print("Point", point, "inside the hull:", pointInsideConvexHull(hull_vertices, point))
-
 
     # Take samples from the hull
     samples_hull = samplePointsFromHull(hull_vertices, 100)

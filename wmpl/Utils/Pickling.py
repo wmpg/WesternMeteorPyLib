@@ -1,14 +1,12 @@
 """ Functions for pickling and unpickling Python objects. """
 
-from __future__ import print_function, absolute_import
+from __future__ import absolute_import, print_function
 
 import os
-import sys
 import pickle
-
+import sys
 
 from wmpl.Utils.OSTools import mkdirP
-
 
 
 def savePickle(obj, dir_path, file_name):
@@ -28,7 +26,6 @@ def savePickle(obj, dir_path, file_name):
         pickle.dump(obj, f, protocol=2)
 
 
-
 def loadPickle(dir_path, file_name):
     """ Loads pickle file.
 	
@@ -39,17 +36,21 @@ def loadPickle(dir_path, file_name):
     """
 
     with open(os.path.join(dir_path, file_name), 'rb') as f:
+        try:
+            # Python 2
+            if sys.version_info[0] < 3:
+                p = pickle.load(f)
 
-        # Python 2
-        if sys.version_info[0] < 3:
-            p = pickle.load(f)
+            # Python 3
+            else:
+                p = pickle.load(f, encoding='latin1')
 
-        # Python 3
-        else:
-            p = pickle.load(f, encoding='latin1')
+        except (IOError, EOFError, TypeError, KeyError):
 
+            print('The pickle file was corruped and could not be loaded:', os.path.join(dir_path, file_name))
+            return None
 
-        # Fix attribute compatibility in trajectory objects with older versions which had a 
+        # Fix attribute compatibility in trajectory objects with older versions which had a
         #   typo "uncertanties"
         if hasattr(p, "uncertainties"):
             p.uncertanties = p.uncertainties
@@ -61,6 +62,5 @@ def loadPickle(dir_path, file_name):
         if hasattr(p, 'orbit') and hasattr(p, 'observations'):
             if p.orbit is not None:
                 p.orbit.fixMissingParameters()
-
 
         return p
