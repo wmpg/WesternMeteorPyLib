@@ -89,15 +89,50 @@ def loadAsteroidsElements(asteroids_file):
     return asteroids_list
 
 
+def loadMeteoritesElements(meteorites_file):
+    """ Loads orbital elements of meteorites with orbits."""
+
+    meteorites_list = []
+
+    with open(meteorites_file) as f:
+
+        for line in f:
+
+            # Skip commented lines
+            if line.startswith("#"):
+                continue
+
+
+            line = line.split(';')
+
+            meteorite_name = line[1]
+
+            a = float(line[8])
+            e = float(line[10])
+
+            # Compute perihelion
+            q = a*(1 - e)
+
+            incl = float(line[12])
+            peri = float(line[14])
+            node = float(line[16])
+
+            meteorites_list.append([meteorite_name, q, e, incl, peri, node])
+
+
+    return meteorites_list
+
+
 
 # Load the parent body database
 comets_elements = loadCometsElements(config.comets_elements_file)
 asteroids_elements = loadAsteroidsElements(config.asteroids_amors_file)
 asteroids_elements += loadAsteroidsElements(config.asteroids_apollos_file)
 asteroids_elements += loadAsteroidsElements(config.asteroids_atens_file)
+meteorites_elements = loadMeteoritesElements(config.meteorites_orbit_file)
 
 
-def findParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10):
+def findParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10, meteorites=False):
     """ Compares the given orbit to the orbit of asteroids and comets from the database using the given
         D criterion function and returns top N best maches.
     
@@ -113,6 +148,7 @@ def findParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10):
             Jopek.
         top_n: [int] How many objects with the heighest orbit similarity will be returned. 10 is default.
             If -1 is given, the whole list of bodies will be returned.
+        meteorites: [bool] Use known orbits of meteorites for comparison instead of comets and asteroids.
 
     Return:
         [list] A list of best maching objects: [Object name, q, e, i, peri, node, D criterion value].
@@ -134,8 +170,15 @@ def findParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10):
         dFunc = calcDSH
 
 
-    # Combine comets and asteroids into one parent body list
-    parent_body_elements = comets_elements + asteroids_elements
+    # Use meteorite orbits instead of comets and asteroids
+    if meteorites:
+        parent_body_elements = meteorites_elements
+
+    else:
+
+        # Combine comets and asteroids into one parent body list
+        parent_body_elements = comets_elements + asteroids_elements
+
 
     dcrit_list = []
 
@@ -220,6 +263,10 @@ if __name__ == "__main__":
     arg_parser.add_argument('-d', '--dcrit', metavar='D_CRIT', help="D criterion type. 'dsh' by default, options are: 'dsh' for Southworth and Hawkins, 'dd' for Drummond, and 'dh' for Jopek.", \
         type=str, default='dsh')
 
+    arg_parser.add_argument('-m', '--meteorites', action="store_true", \
+        help="""Use meteorites with orbits for comparison instead of asteroids and comets. """
+        )
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -278,7 +325,7 @@ if __name__ == "__main__":
 
     # Find parent bodies for the given orbit
     parent_matches = findParentBodies(q, e, np.radians(incl), np.radians(peri), np.radians(node), \
-        d_crit=d_crit_type, top_n=10)
+        d_crit=d_crit_type, top_n=10, meteorites=cml_args.meteorites)
 
     print("Top 10 matches:")
     print('Name                               ,     q,     e,   incl,    peri,    node, D crit', d_crit_type)

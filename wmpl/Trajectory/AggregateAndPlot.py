@@ -1365,7 +1365,8 @@ def inTimeRange(traj_dt, time_beg, time_end):
 
 
 
-def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end=None, verbose=False):
+def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end=None, verbose=False, \
+    filter_duplicates=True):
     """ Load trajectory pickle files with the given quality constraints and in the given time range. 
     
     Arguments:
@@ -1377,6 +1378,8 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
             named in the following format: YYYYMMDD_hhmmss.us_STATION
         time_end: [datetime] Last time to load.
         verbose: [bool] Print how many trajectoories were loaded. False by default.
+        filter_duplicates: [bool] Filter duplicate trajectories (starting at the same time and observed
+            by the same stations).
 
 
     Return:
@@ -1609,6 +1612,71 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
                 traj_list.append(traj)
 
 
+    # Sort trajectories by time
+    traj_list = sorted(traj_list, key=lambda x: x.jdt_ref)
+
+    # Remove duplicate trajectories
+    if filter_duplicates:
+        
+        filtered_traj_list = []
+        skipped_indices = []
+
+        for i, traj1 in enumerate(traj_list):
+
+            # Skip already checked duplicates
+            if i in skipped_indices:
+                continue
+
+            # Set the first trajectory as the candidate
+            candidate_traj = traj1
+
+            for traj2 in traj_list[i + 1:]:
+
+                # Check if the trajectories have the same time
+                if traj1.jdt_ref == traj2.jdt_ref:
+
+                    # Check if they have the same stations
+                    if set([obs.station_id for obs in traj1.observations]) \
+                        == set([obs.station_id for obs in traj2.observations]):
+
+                        # If the duplicate has a smaller radiant error, take it instead of the first
+                        #   trajectory
+                        if hasattr(traj1, 'uncertainties') and hasattr(traj2, 'uncertainties'):
+                                
+                            if traj1.uncertainties is not None:
+
+                                if traj2.uncertainties is not None:
+
+                                    # Compute the radiant errors
+                                    traj1_rad_error = np.hypot(traj1.uncertainties.ra_g, \
+                                        traj1.uncertainties.dec_g)
+                                    traj2_rad_error = np.hypot(traj2.uncertainties.ra_g, \
+                                        traj2.uncertainties.dec_g)
+
+                                    # Take the second candidate if the radiant error is smaller
+                                    if traj2_rad_error < traj1_rad_error:
+                                        candidate_traj = traj2
+
+
+                            # If the first candidate doesn't have estimated errors, but the second one does,
+                            #   use that one
+                            else:
+                                if traj2.uncertainties is not None:
+                                    candidate_traj = traj2
+
+                        
+                        # Add duplicate to the already checked list
+                        skipped_indices.append(traj_list.index(traj2))
+
+
+
+
+            filtered_traj_list.append(candidate_traj)
+
+
+        traj_list = filtered_traj_list
+
+
 
     return traj_list
 
@@ -1813,13 +1881,17 @@ def generateAutoPlotsAndReports(dir_path, traj_quality_params, prev_sols=10, sol
                 header_written = True
 
     # Change the name of the temp file to the summary file
-    shutil.copy2(os.path.join(summary_dir, traj_summary_all_temp), 
-        os.path.join(summary_dir, TRAJ_SUMMARY_ALL))
+    if os.path.isfile(os.path.join(summary_dir, traj_summary_all_temp)):
+        shutil.copy2(os.path.join(summary_dir, traj_summary_all_temp), 
+            os.path.join(summary_dir, TRAJ_SUMMARY_ALL))
 
-    # Remove the temp file
-    os.remove(os.path.join(summary_dir, traj_summary_all_temp))
+        # Remove the temp file
+        os.remove(os.path.join(summary_dir, traj_summary_all_temp))
 
-    print("Saved summary file with all orbits: {:s}".format(TRAJ_SUMMARY_ALL))
+        print("Saved summary file with all orbits: {:s}".format(TRAJ_SUMMARY_ALL))
+
+    else:
+        print("The temp file {:s} was not created!".format(traj_summary_all_temp))
 
 
     ###
