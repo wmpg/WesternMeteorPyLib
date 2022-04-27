@@ -268,6 +268,13 @@ class DatabaseJSON(object):
             # Init the reduced trajectory object
             traj_reduced = TrajectoryReduced(traj_file_path)
 
+            # Skip if failed
+            if traj_reduced is None:
+                return None
+
+            if not hasattr(traj_reduced, "jdt_ref"):
+                return None
+
         else:
 
             # Use the provided trajectory object
@@ -283,9 +290,8 @@ class DatabaseJSON(object):
 
 
         # Add the trajectory to the list (key is the reference JD)
-        if traj_reduced is not None:
-            if traj_reduced.jdt_ref not in traj_dict:
-                traj_dict[traj_reduced.jdt_ref] = traj_reduced
+        if traj_reduced.jdt_ref not in traj_dict:
+            traj_dict[traj_reduced.jdt_ref] = traj_reduced
 
 
 
