@@ -64,7 +64,11 @@ class TrajectoryReduced(object):
                 self.traj_file_path = traj_file_path
 
                 # Load the trajectory object
-                traj = loadPickle(*os.path.split(traj_file_path))
+                try:
+                    traj = loadPickle(*os.path.split(traj_file_path))
+                except EOFError:
+                    print("Pickle file could not be loaded:", traj_file_path)
+                    return None
 
             else:
 
@@ -279,8 +283,9 @@ class DatabaseJSON(object):
 
 
         # Add the trajectory to the list (key is the reference JD)
-        if traj_reduced.jdt_ref not in traj_dict:
-            traj_dict[traj_reduced.jdt_ref] = traj_reduced
+        if traj_reduced is not None:
+            if traj_reduced.jdt_ref not in traj_dict:
+                traj_dict[traj_reduced.jdt_ref] = traj_reduced
 
 
 
