@@ -200,6 +200,12 @@ def readEvFile(dir_path, file_name):
 
             # Interpolate missing magnitudes
             for i, mag in enumerate(mag_data):
+
+                # Don't interpolate at the edges if there are NaNs
+                if (i < np.min(clean_indices)) or (i > np.max(clean_indices)):
+                    mag_data[i] = np.nan
+                    continue
+
                 if mag is None:
                     mag_data[i] = -2.5*np.log10(intens_interpol(i))
 
