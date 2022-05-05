@@ -918,6 +918,15 @@ if __name__ == "__main__":
     arg_parser.add_argument('-e', '--ele', help='Height of the reference position on the trajectory (km).', \
         type=float, default=None)
 
+    arg_parser.add_argument('--lat2', help='Latitude +N of the end position on the trajectory (deg). Optional, if the radiant is not given. ', \
+        type=float, default=None)
+
+    arg_parser.add_argument('--lon2', help='Longitude +E of the end position on the trajectory (deg). Optional, if the radiant is not given. ', \
+        type=float, default=None)
+
+    arg_parser.add_argument('--ele2', help='Height of the end position on the trajectory (km). Optional, if the radiant is not given. ', \
+        type=float, default=None)
+
     arg_parser.add_argument('-j', '--j2000', \
         help="Give the radiant in J2000.", \
         action="store_true")
@@ -956,21 +965,6 @@ if __name__ == "__main__":
 
     parameter_missing_message = "To compute the orbit without the existing trajectory file, {:s} must also be provided!"
 
-    if cml_args.ra is not None:
-        ra = np.radians(cml_args.ra)
-    elif traj is not None:
-        ra = traj.orbit.ra
-    else:
-        print(parameter_missing_message.format('RA'))
-        sys.exit()
-
-    if cml_args.dec is not None:
-        dec = np.radians(cml_args.dec)
-    elif traj is not None:
-        dec = traj.orbit.dec
-    else:
-        print(parameter_missing_message.format('Dec'))
-        sys.exit()
 
     if cml_args.vinit is not None:
         v_init = 1000*cml_args.vinit
@@ -1045,12 +1039,78 @@ if __name__ == "__main__":
 
 
 
-    # Presess to epoch of date if given in J2000
-    if cml_args.j2000:
-        ra, dec = equatorialCoordPrecession(J2000_JD.days, jd_ref, ra, dec)
+    # Parse the optional end location
+    if (cml_args.lat2 is None) and (cml_args.lon2 is None) and (cml_args.ele2 is None):
 
-    # Compute the radiant vector in ECI coordinates
-    radiant_eci = np.array(raDec2ECI(ra, dec))
+
+        # If the optional end location was not given, then compute the ECI radiant from the radiant coords
+
+        if cml_args.ra is not None:
+            ra = np.radians(cml_args.ra)
+        elif traj is not None:
+            ra = traj.orbit.ra
+        else:
+            print(parameter_missing_message.format('RA'))
+            sys.exit()
+
+        if cml_args.dec is not None:
+            dec = np.radians(cml_args.dec)
+        elif traj is not None:
+            dec = traj.orbit.dec
+        else:
+            print(parameter_missing_message.format('Dec'))
+            sys.exit()
+
+        # Precess to epoch of date if given in J2000
+        if cml_args.j2000:
+            ra, dec = equatorialCoordPrecession(J2000_JD.days, jd_ref, ra, dec)
+
+        # Compute the radiant vector in ECI coordinates
+        radiant_eci = np.array(raDec2ECI(ra, dec))
+
+
+    else:
+
+        # Parse individual location parameters
+        if cml_args.lat2 is not None:
+            lat2 = np.radians(cml_args.lat2)
+        elif traj is not None:
+            lat2 = traj.rend_lat
+        else:
+            print(parameter_missing_message.format('lat2'))
+            sys.exit()
+
+        if cml_args.lon2 is not None:
+            lon2 = np.radians(cml_args.lon2)
+        elif traj is not None:
+            lon2 = traj.rend_lon
+        else:
+            print(parameter_missing_message.format('lon2'))
+            sys.exit()
+
+        if cml_args.ele2 is not None:
+            ht2 = 1000*cml_args.ele2
+        elif traj is not None:
+            ht2 = traj.rend_ele
+        else:
+            print(parameter_missing_message.format('ele2'))
+            sys.exit()
+
+
+        ### Compute the radiant vector in ECI ###
+
+        # Get ECI coordinates of the end location
+        eci_end = geo2Cartesian(lat2, lon2, ht2, jd_ref)
+
+        # Compute the radiant
+        radiant_eci = np.array(eci_ref) - np.array(eci_end)
+        radiant_eci /= vectMag(radiant_eci)
+
+        ### ###
+
+
+
+
 
 
     # Set the right flags
