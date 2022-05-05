@@ -1057,7 +1057,6 @@ if __name__ == "__main__":
             # Compute ra/dec from alt/az
             ra, dec = altAz2RADec(np.radians(cml_args.azim), np.radians(cml_args.alt), jd_ref, lat_ref, \
                 lon_ref)
-            print("Computed RA, DEc:", np.degrees(ra), np.degrees(dec))
 
         # Try loading equatorial coordinates if alt/az are not given
         else:
