@@ -24,7 +24,7 @@ from wmpl.Utils.Pickling import savePickle
 #TRAJ_LIBRARY = os.path.join('lib', 'libtrajectorysolution')
 TRAJ_LIBRARY = os.path.join('lib', 'trajectory', 'libtrajectorysolution')
 
-# Path to the PSO configuration
+# Path to the default PSO configuration
 PSO_CONFIG_PATH = os.path.join('lib', 'trajectory', 'conf', 'trajectorysolution.conf')
 
 
@@ -380,7 +380,8 @@ class GuralTrajectory(object):
     """
 
     def __init__(self, maxcameras, jdt_ref, velmodel, max_toffset=1.0, nummonte=1, meastype=4, verbose=0,
-        output_dir='.', show_plots=True, save_results=True, traj_id=None, comment=''):
+        output_dir='.', pso_config=None, show_plots=True, save_results=True, traj_id=None,
+        comment=''):
         """ Initialize meteor trajectory solving.
 
         Arguments:
@@ -591,6 +592,12 @@ class GuralTrajectory(object):
         # Uncertainties (currently not used!)
         self.uncertainties = None
 
+        # use the default pso config file shipped with the module if none is specified
+        if pso_config is None:
+            self.pso_config = os.path.join(os.path.dirname(__file__), PSO_CONFIG_PATH)
+        else:
+            self.pso_config = pso_config
+
         ######
 
 
@@ -661,8 +668,7 @@ class GuralTrajectory(object):
         self.traj_lib.InitTrajectoryStructure(maxcameras, self.traj)
 
         # Read PSO parameters
-        self.traj_lib.ReadTrajectoryPSOconfig(os.path.join(os.path.dirname(__file__), \
-            PSO_CONFIG_PATH).encode('ascii'), self.traj)
+        self.traj_lib.ReadTrajectoryPSOconfig(self.pso_config.encode('ascii'), self.traj)
 
         # Reset the trajectory structure
         self.traj_lib.ResetTrajectoryStructure(jdt_ref, max_toffset, velmodel, nummonte, meastype, verbose,
