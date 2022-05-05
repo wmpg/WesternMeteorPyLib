@@ -45,8 +45,8 @@ PPPDOUBLE = ct.POINTER(PPDOUBLE)
 
 
 class PSO_info(ct.Structure):
-    """ Mimicks PSO_info structure from the TrajectorySolution.h file, in Python-understandable 
-        ctypes format. 
+    """ Mimicks PSO_info structure from the TrajectorySolution.h file, in Python-understandable
+        ctypes format.
     """
 
     _fields_ = [
@@ -64,7 +64,7 @@ class PSO_info(ct.Structure):
 
 
 class TrajectoryInfo(ct.Structure):
-    """ Mimicks the TrajectoryInfo structure from the TrajectorySolution.h file, in Python-understandable 
+    """ Mimicks the TrajectoryInfo structure from the TrajectorySolution.h file, in Python-understandable
         ctypes format.
     """
 
@@ -170,7 +170,7 @@ class TrajectoryInfo(ct.Structure):
         ('meas_hkm', PPDOUBLE),
         ('meas_range', PPDOUBLE),
         ('meas_vel', PPDOUBLE),
-        
+
         ('model_lat', PPDOUBLE),
         ('model_lon', PPDOUBLE),
         ('model_hkm', PPDOUBLE),
@@ -205,8 +205,8 @@ class TrajectoryInfo(ct.Structure):
 
 
 def double2ArrayToPointer(arr):
-    """ Converts a 2D numpy to ctypes 2D array. 
-    
+    """ Converts a 2D numpy to ctypes 2D array.
+
     Arguments:
         arr: [ndarray] 2D numpy float64 array
 
@@ -235,15 +235,15 @@ def double2ArrayToPointer(arr):
 
 
 def double1pointerToArray(ptr, n):
-    """ Converts ctypes 1D array into a 1D numpy array. 
-    
+    """ Converts ctypes 1D array into a 1D numpy array.
+
     Arguments:
         ptr: [ctypes double pointer]
         n: [int] number of cameras
 
     Return:
         arr: [ndarrays] converted numpy array
-        
+
     """
 
     # Init a new empty data array
@@ -258,8 +258,8 @@ def double1pointerToArray(ptr, n):
 
 
 def double2pointerToArray(ptr, n, m_sizes):
-    """ Converts ctypes 2D array into a 2D numpy array. 
-    
+    """ Converts ctypes 2D array into a 2D numpy array.
+
     Arguments:
         ptr: [ctypes double pointer]
         n: [int] number of cameras
@@ -268,7 +268,7 @@ def double2pointerToArray(ptr, n, m_sizes):
     Return:
         arr_list: [list of ndarrays] list of numpy arrays, each list entry containing data for individual
             cameras
-        
+
     """
 
     arr_list = []
@@ -291,8 +291,8 @@ def double2pointerToArray(ptr, n, m_sizes):
 
 
 def double3pointerToArray(ptr, n, m_sizes, p):
-    """ Converts ctypes 3D array into a 3D numpy array. 
-    
+    """ Converts ctypes 3D array into a 3D numpy array.
+
     Arguments:
         ptr: [ctypes double pointer]
         n: [int] number of cameras
@@ -302,7 +302,7 @@ def double3pointerToArray(ptr, n, m_sizes, p):
     Return:
         arr_list: [list of ndarrays] list of numpy arrays, each list entry containing data for individual
             cameras
-        
+
     """
 
     arr_list = []
@@ -354,27 +354,27 @@ def fitLagIntercept(time, length, v_init, initial_intercept=0.0):
     quart_time = time[:quart_size]
 
     # Redo the lag fit, but with fixed velocity
-    lag_intercept, _ = scipy.optimize.curve_fit(lambda x, intercept: lineFunc(x, v_init, intercept), 
+    lag_intercept, _ = scipy.optimize.curve_fit(lambda x, intercept: lineFunc(x, v_init, intercept),
         quart_time, quart_length, p0=[initial_intercept])
 
     return v_init, lag_intercept[0]
 
 
 class GuralTrajectory(object):
-    """ Meteor trajectory estimation, using the Gural solver. 
+    """ Meteor trajectory estimation, using the Gural solver.
 
     IMPORTANT NOTE: If you are accessing measured/modeled data after running the solver, be sure to access it
     this way:
-        
+
         traj = Trajectory(maxcameras, jdt_ref, ...)
-        
+
         ...
         # Data input and solving...
         ...
 
         site_id = 0
         site_velocities = traj.meas_vel[site_id]
-        
+
         # That way, you will select the data of the camera/site you want.
 
     """
@@ -385,10 +385,10 @@ class GuralTrajectory(object):
 
         Arguments:
             maxcameras: [int] Maximum number of cameras expected (to initially allocate arrays)
-            jdt_ref: [float] Reference Julian date/time that the measurements times are provided relative to. 
-                This is user selectable and can be the time of the first camera, or the first measurement, 
-                or some average time for the meteor, but should be close to the time of passage of the meteor. 
-                This same reference date/time will be used on all camera measurements for the purposes of 
+            jdt_ref: [float] Reference Julian date/time that the measurements times are provided relative to.
+                This is user selectable and can be the time of the first camera, or the first measurement,
+                or some average time for the meteor, but should be close to the time of passage of the meteor.
+                This same reference date/time will be used on all camera measurements for the purposes of
                 computing local sidereal time and making  geocentric coordinate transformations.
             velmodel: [int] Velocity propagation model
                 0    = constant   v(t) = vinf
@@ -432,7 +432,7 @@ class GuralTrajectory(object):
 
         # Check if the initial velocity should be computed as the average velocity of the first half
         if 'fha' in velmodel:
-            
+
             self.fha_velocity = True
 
             velmodel = int(velmodel.replace('fha', ''))
@@ -444,7 +444,7 @@ class GuralTrajectory(object):
 
 
         self.velmodel = velmodel
-        
+
 
         # Directory where the trajectory estimation results will be saved
         self.output_dir = output_dir
@@ -471,7 +471,7 @@ class GuralTrajectory(object):
 
         ###
         # Init trajectory results (WARNING, there are more results to be read in, these are just some chosen
-        # parameters. Please take a look at TrajectorySolution.h file and the TrajectoryInfo structure for 
+        # parameters. Please take a look at TrajectorySolution.h file and the TrajectoryInfo structure for
         # more solution parameters.)
 
         # Arrays of camera coordinates (angles in radians, height in km), per every station
@@ -496,53 +496,53 @@ class GuralTrajectory(object):
         # Average velocity
         self.vavg = 0
         # Deceleration term 1 defined by the given velocity model
-        self.decel1 = 0         
+        self.decel1 = 0
         # Deceleration term 2 defined by the given velocity model
-        self.decel2 = 0           
+        self.decel2 = 0
 
         # Standard deviation of radiant right ascension in radians
-        self.ra_sigma = 0         
+        self.ra_sigma = 0
         # Standard deviation of radiant declination in radians
-        self.dec_sigma = 0       
+        self.dec_sigma = 0
         # Standard deviation of vbegin in km/sec
-        self.vbegin_sigma = 0    
+        self.vbegin_sigma = 0
         # Standard deviation of decceleration term 1
-        self.decel1_sigma = 0    
+        self.decel1_sigma = 0
         # Standard deviation of decceleration term 2
-        self.decel2_sigma = 0    
+        self.decel2_sigma = 0
 
         # Array of geodetic latitudes closest to trail for each measurement
-        self.meas_lat = 0        
+        self.meas_lat = 0
         # Array of +east longitudes closest to trail for each measurement
-        self.meas_lon = 0         
+        self.meas_lon = 0
         # Array of heights re WGS84 closest to trail for each measurement
-        self.meas_hkm = 0        
+        self.meas_hkm = 0
         # Array of ranges from site along measurement to the CPA of the trail
-        self.meas_range = 0      
+        self.meas_range = 0
         # Array of velocity along the trail for each measurement
-        self.meas_vel = 0 
+        self.meas_vel = 0
 
         # Array of geodetic latitudes for the model positions
-        self.model_lat = 0       
+        self.model_lat = 0
         # Array of +east longitudes for the model positions
-        self.model_lon = 0       
+        self.model_lon = 0
         # Array of heights re WGS84 for the model positions
-        self.model_hkm = 0       
+        self.model_hkm = 0
         # Array of ranges from site to the model positions
-        self.model_range = 0     
+        self.model_range = 0
         # Array of velocity on the trail at each model position
-        self.model_vel = 0       
+        self.model_vel = 0
 
         # Array of timing offsets in seconds
         self.tref_offsets = 0
 
         ## Model fit vectors which follow the same "meastype" on output with dimension #cameras x #measurements(camera)
         # Array of 1st data sequence containing the model fit in meastype format
-        self.model_fit1 = 0      
+        self.model_fit1 = 0
         # Array of 2nd data sequence containing the model fit in meastype format
-        self.model_fit2 = 0      
+        self.model_fit2 = 0
         # Array of model time which includes offsets relative to the reference time
-        self.model_time = 0  
+        self.model_time = 0
 
         ########
 
@@ -599,13 +599,13 @@ class GuralTrajectory(object):
         ### Define trajectory function types and argument types ###
         ######################################################################################################
 
-        
+
         self.traj_lib.MeteorTrajectory.restype = ct.c_int
         self.traj_lib.MeteorTrajectory.argtypes = [
             ct.POINTER(TrajectoryInfo)
         ]
 
-        
+
         self.traj_lib.InitTrajectoryStructure.restype = ct.c_void_p
         self.traj_lib.InitTrajectoryStructure.argtypes = [
             ct.c_int,
@@ -663,13 +663,13 @@ class GuralTrajectory(object):
             PSO_CONFIG_PATH).encode('ascii'), self.traj)
 
         # Reset the trajectory structure
-        self.traj_lib.ResetTrajectoryStructure(jdt_ref, max_toffset, velmodel, nummonte, meastype, verbose, 
+        self.traj_lib.ResetTrajectoryStructure(jdt_ref, max_toffset, velmodel, nummonte, meastype, verbose,
             self.traj)
 
 
 
     def infillTrajectory(self, theta_data, phi_data, time_data, lat, lon, ele, noise=None, station_id=None):
-        """ Fills in the trajectory structure with given observations: azimuth in radians, zenith angle in 
+        """ Fills in the trajectory structure with given observations: azimuth in radians, zenith angle in
             radians, time in seconds relative to jdt_ref. This function should be called for each observing
             site, not more than 'maxcameras' times.
 
@@ -697,8 +697,8 @@ class GuralTrajectory(object):
             noise = np.zeros_like(time_data)*0.0
 
         # Fill the trajectory structure for site 1
-        self.traj_lib.InfillTrajectoryStructure(nummeas, npct.as_ctypes(theta_data), 
-            npct.as_ctypes(phi_data), npct.as_ctypes(time_data), npct.as_ctypes(noise), lat, lon, ele/1000.0, 
+        self.traj_lib.InfillTrajectoryStructure(nummeas, npct.as_ctypes(theta_data),
+            npct.as_ctypes(phi_data), npct.as_ctypes(time_data), npct.as_ctypes(noise), lat, lon, ele/1000.0,
             self.traj)
 
 
@@ -711,11 +711,11 @@ class GuralTrajectory(object):
         self.stations_eci_cameras = []
         self.times = []
         self.JD_data_cameras = []
-        
+
 
         # Calculate positions of stations in ECI coordinates, for every point on the meteor's trajectory
         for kmeas, (lat, lon, hkm) in enumerate(zip(self.camera_lat, self.camera_lon, self.camera_hkm)):
-            
+
             station_pos = []
 
             # Calculate time with time offsets included
@@ -751,7 +751,7 @@ class GuralTrajectory(object):
 
             # If inputs are RA and Dec
             if self.meastype == 1:
-                
+
                 ra_data = meas1
                 dec_data = meas2
 
@@ -761,7 +761,7 @@ class GuralTrajectory(object):
 
             # If inputs are azimuth +east of due north, and elevation angle
             elif self.meastype == 2:
-                
+
                 azim_data = meas1
                 elev_data = meas2
 
@@ -789,7 +789,7 @@ class GuralTrajectory(object):
 
             self.meas_eci_los_cameras.append(stat_los_eci)
 
-            
+
 
         ######
 
@@ -800,7 +800,7 @@ class GuralTrajectory(object):
         rad_cpa_all_stations = []
         max_ht = 0
         beg_cpa = None
-        
+
         # Calculate ECI coordinates of all LoS projections on the trajectory
         for stat_eci_los, meas_eci_los in zip(self.stations_eci_cameras, self.meas_eci_los_cameras):
 
@@ -956,7 +956,7 @@ class GuralTrajectory(object):
             # plt.show()
 
 
-        
+
 
     def calcLag(self):
         """ Calculates the lag. """
@@ -1000,7 +1000,7 @@ class GuralTrajectory(object):
             # Calculate ECI coordinated for every point on the meteor's track
             for j in range(self.nummeas_lst[kmeas]):
 
-                eci_list.append(geo2Cartesian(self.model_lat[kmeas][j], self.model_lon[kmeas][j], 
+                eci_list.append(geo2Cartesian(self.model_lat[kmeas][j], self.model_lon[kmeas][j],
                     1000*self.model_hkm[kmeas][j], self.JD_data_cameras[kmeas][j]))
 
             eci_list = np.array(eci_list)
@@ -1035,7 +1035,7 @@ class GuralTrajectory(object):
         ### PLOT RESIDUALS
 
         # Go through every stations
-        for i, (time_data, meas1, model1, meas2, model2) in enumerate(zip(self.times, self.meas1, 
+        for i, (time_data, meas1, model1, meas2, model2) in enumerate(zip(self.times, self.meas1,
             self.model_fit1, self.meas2, self.model_fit2)):
 
             # Calculate angular deviations in azimuth and elevation
@@ -1057,10 +1057,10 @@ class GuralTrajectory(object):
 
 
         plt.title('Observed vs. Radiant LoS Residuals, all stations')
-        
+
         plt.ylabel('Angle (arcsec)')
         plt.xlabel('Time (s)')
-        
+
         plt.ylim(ymin=0)
 
         plt.grid()
@@ -1092,7 +1092,7 @@ class GuralTrajectory(object):
         ######
 
 
-        
+
         ### PLOT VELOCITIES
 
         # Possible markers for velocity
@@ -1100,18 +1100,18 @@ class GuralTrajectory(object):
 
         # Generate a list of colors to use for markers
         colors = cm.rainbow(np.linspace(0, 1 , len(self.times)))
-        
+
         for i, (time_obs, vel_obs) in enumerate(zip(self.times, self.velocities)):
 
             # Plot the measured velocity
-            plt.scatter(vel_obs[1:], time_obs[1:], c=colors[i], marker=markers[i%len(markers)], alpha=0.5, 
+            plt.scatter(vel_obs[1:], time_obs[1:], c=colors[i], marker=markers[i%len(markers)], alpha=0.5,
                 label='Measured, station: ' + str(i + 1), zorder=3)
 
 
         for i, (time_model, vel_model) in enumerate(zip(self.model_time, self.model_vel)):
 
             # Plot modelled velocity
-            plt.plot(vel_model*1000.0, time_model, c=colors[i], zorder=3, alpha=0.5, 
+            plt.plot(vel_model*1000.0, time_model, c=colors[i], zorder=3, alpha=0.5,
                 label='Modelled, station: ' + str(i + 1))
 
 
@@ -1237,10 +1237,10 @@ class GuralTrajectory(object):
 
         # Get the first Julian date of all observations
         jd_first = np.min([np.min(jd_data) for jd_data in self.JD_data_cameras])
-        
+
 
         # Calculate the orbit
-        self.orbit = calcOrbit(self.radiant_eci, self.vbegin*1000, v_avg, self.state_vect, jd_first, 
+        self.orbit = calcOrbit(self.radiant_eci, self.vbegin*1000, v_avg, self.state_vect, jd_first,
             stations_fixed=False, reference_init=True)
         print(self.orbit)
 
@@ -1275,7 +1275,7 @@ class GuralTrajectory(object):
 
 if __name__ == "__main__":
 
-    
+
 
     ### TEST DATA
     maxcameras = 2
@@ -1298,7 +1298,7 @@ if __name__ == "__main__":
     phi2 = np.array([53.277395606543514, 53.378894622674743, 53.479956569118926, 53.581583564486643, 53.684034387407628, 53.785592745520816, 53.888221858788505, 53.989652095989705, 54.091286379162753, 54.193602941001174, 54.295489508972871, 54.39680492261197, 54.498476109777449, 54.600324950506916, 54.701540003200897, 54.803176858628973, 54.905770160432461, 55.007812728006726, 55.109255891578165, 55.210470634952003, 55.311514652098822, 55.413530094031998, 55.515323573286715, 55.616651349503798, 55.718365072619598, 55.81929890161981, 55.920171553847844, 56.021613048812512, 56.122821258097112, 56.224678899349627, 56.325865881424491, 56.426926299896216, 56.52861756575669, 56.629470224659684, 56.730172326265581, 56.831015465257991, 56.932197458064081, 57.033194520779368, 57.133991458819061, 57.234684773453658, 57.334955465097238, 57.435791110725937, 57.536108210586804, 57.63636328763743, 57.736907767451896, 57.837175586955425, 57.937203809457536, 58.036781893703278, 58.136978754564268, 58.236686044195643, 58.336377908906051, 58.43535465814314, 58.534625554011399, 58.6333660935654, 58.732691095623927, 58.831079484821906, 58.928886668384948, 59.026971367888081, 59.124250755486784, 59.221517041956538, 59.318507836373392, 59.414909920684529, 59.512434568208263, 59.608138099768297, 59.703628259049658, 59.799124823225796, 59.891752747734891, 59.983964699509606, 60.075068063440163, 60.161279720285414])
     theta2 = np.array([101.53457826463746, 101.51641844358608, 101.49838475808278, 101.48029817266169, 101.46211330853345, 101.44413445103872, 101.42601386963629, 101.40815190889943, 101.3903005255073, 101.37237603253595, 101.35457316211422, 101.3369156085497, 101.3192413904863, 101.30158154144411, 101.28407617303588, 101.26654229652355, 101.24888830028594, 101.23137351945253, 101.21400528102164, 101.19671926225118, 101.17950508630588, 101.16216841059016, 101.14491224554251, 101.12777721128521, 101.1106189746513, 101.09363369919245, 101.07669966495487, 101.05971116018192, 101.04280246671952, 101.02582610588094, 101.00900182871261, 100.99223844387629, 100.97541036501492, 100.95876039276899, 100.94217411607163, 100.92560326192354, 100.90901536078817, 100.89249613221422, 100.87604760647557, 100.85965363121295, 100.84336561880852, 100.82702299646236, 100.81080116796716, 100.79462576794111, 100.77843999684811, 100.76233476558444, 100.74630362442984, 100.73037973345876, 100.71439203286904, 100.69851722922239, 100.68267935704768, 100.66698899065921, 100.65128571495896, 100.63569963309027, 100.62005459779738, 100.60458982468012, 100.58924850257456, 100.57389559776691, 100.5587001573241, 100.5435378536578, 100.52844926863388, 100.51348253940968, 100.49837205688057, 100.48357341370303, 100.46883689073712, 100.45412830754735, 100.43988903856147, 100.42574044202429, 100.41178798399015, 100.39860839656382])
 
-    # NOTE: For some reason, you can't do this: theta1 = npct.as_ctypes(theta1). For some reason, the memory 
+    # NOTE: For some reason, you can't do this: theta1 = npct.as_ctypes(theta1). For some reason, the memory
     # is not well allocated in that case...
     # The conversion must be done directly upon calling a function.
 
@@ -1347,7 +1347,7 @@ if __name__ == "__main__":
     #sys.exit()
 
     ##########################################################################################################
-    
+
     site_id = 0
 
     meas_x, meas_y, meas_z = sphericalToCartesian(traj_solve.meas_hkm[site_id]*1000, traj_solve.meas_lat[site_id], traj_solve.meas_lon[site_id])
@@ -1363,7 +1363,7 @@ if __name__ == "__main__":
     plt.show()
     plt.clf()
 
-    
+
 
     plt.scatter(traj_solve.meas_vel[0], time1, marker='+')
     plt.scatter(traj_solve.meas_vel[1], time2, marker='x')
