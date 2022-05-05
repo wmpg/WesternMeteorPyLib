@@ -379,8 +379,8 @@ class GuralTrajectory(object):
 
     """
 
-    def __init__(self, maxcameras, jdt_ref, velmodel, max_toffset=1.0, nummonte=1, meastype=4, verbose=0, 
-        output_dir='.', show_plots=True, traj_id=None, comment=''):
+    def __init__(self, maxcameras, jdt_ref, velmodel, max_toffset=1.0, nummonte=1, meastype=4, verbose=0,
+        output_dir='.', show_plots=True, save_results=True, traj_id=None, comment=''):
         """ Initialize meteor trajectory solving.
 
         Arguments:
@@ -451,6 +451,8 @@ class GuralTrajectory(object):
 
         # If True, plots will be shown on screen when the trajectory estimation is done
         self.show_plots = show_plots
+
+        self.save_results = save_results
 
         # Trajectory solution identifier
         self.traj_id = str(traj_id)
@@ -1262,8 +1264,9 @@ class GuralTrajectory(object):
             fha_suffix = ''
 
         # Save the picked trajectory structure with original points
-        savePickle(self, self.output_dir, self.file_name \
-            + '_gural{:d}{:s}_trajectory.pickle'.format(self.velmodel, fha_suffix))
+        if self.save_results:
+            savePickle(self, self.output_dir, self.file_name \
+                + '_gural{:d}{:s}_trajectory.pickle'.format(self.velmodel, fha_suffix))
 
 
         ######################################################################################################
