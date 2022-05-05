@@ -900,6 +900,12 @@ if __name__ == "__main__":
     arg_parser.add_argument('-d', '--dec', help='Custom declination of the apparent radiant (deg) in the epoch of date (use option --j2000 to use the J2000 epoch).', type=float, \
         default=None)
 
+    arg_parser.add_argument('--azim', help='Azimuth (+E of due N) of the apparent radiant (deg) (optional, if equatorial coordinates are not given).', type=float, \
+        default=None)
+
+    arg_parser.add_argument('--alt', help='Altitude above the horizon of the apparent radiant (deg) (optional, if equatorial coordinates are not given).', type=float, \
+        default=None)
+
     arg_parser.add_argument('-v', '--vinit', help='Custom initial velocity in km/s.', type=float, \
         default=None)
 
@@ -1045,25 +1051,36 @@ if __name__ == "__main__":
 
         # If the optional end location was not given, then compute the ECI radiant from the radiant coords
 
-        if cml_args.ra is not None:
-            ra = np.radians(cml_args.ra)
-        elif traj is not None:
-            ra = traj.orbit.ra
-        else:
-            print(parameter_missing_message.format('RA'))
-            sys.exit()
+        # Check if alt/az is given
+        if (cml_args.azim is not None) and (cml_args.alt is not None):
 
-        if cml_args.dec is not None:
-            dec = np.radians(cml_args.dec)
-        elif traj is not None:
-            dec = traj.orbit.dec
-        else:
-            print(parameter_missing_message.format('Dec'))
-            sys.exit()
+            # Compute ra/dec from alt/az
+            ra, dec = altAz2RADec(np.radians(cml_args.azim), np.radians(cml_args.alt), jd_ref, lat_ref, \
+                lon_ref)
+            print("Computed RA, DEc:", np.degrees(ra), np.degrees(dec))
 
-        # Precess to epoch of date if given in J2000
-        if cml_args.j2000:
-            ra, dec = equatorialCoordPrecession(J2000_JD.days, jd_ref, ra, dec)
+        # Try loading equatorial coordinates if alt/az are not given
+        else:
+
+            if cml_args.ra is not None:
+                ra = np.radians(cml_args.ra)
+            elif traj is not None:
+                ra = traj.orbit.ra
+            else:
+                print(parameter_missing_message.format('RA'))
+                sys.exit()
+
+            if cml_args.dec is not None:
+                dec = np.radians(cml_args.dec)
+            elif traj is not None:
+                dec = traj.orbit.dec
+            else:
+                print(parameter_missing_message.format('Dec'))
+                sys.exit()
+
+            # Precess to epoch of date if given in J2000
+            if cml_args.j2000:
+                ra, dec = equatorialCoordPrecession(J2000_JD.days, jd_ref, ra, dec)
 
         # Compute the radiant vector in ECI coordinates
         radiant_eci = np.array(raDec2ECI(ra, dec))
