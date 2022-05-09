@@ -47,6 +47,12 @@ TEXT_LABEL_HT_PAD = 0.1
 # Legend text size
 LEGEND_TEXT_SIZE  = 8
 
+# Fragmentation file
+FRAG_FILE_NAME = "metsim_fragmentation.txt"
+
+# Simulation output file name
+SIM_RESULTS_CSV = "metsim_results.csv"
+
 ### ###
 
 
@@ -129,6 +135,35 @@ class SimulationResults(object):
 
 
         ###
+
+
+    def writeCSV(self, dir_path, file_name):
+
+        # Combine data into one array
+        out_arr = np.c_[
+            self.time_arr,
+            self.brightest_height_arr/1000, self.brightest_length_arr/1000, self.brightest_vel_arr/1000, 
+            self.leading_frag_height_arr/1000, self.leading_frag_length_arr/1000, self.leading_frag_vel_arr/1000, 
+            self.main_height_arr/1000, self.main_length_arr/1000, self.main_vel_arr/1000,
+            self.tau_total_arr, self.tau_main_arr, self.tau_eroded_arr,
+            self.abs_magnitude, self.abs_magnitude_main, self.abs_magnitude_eroded,
+            np.log10(self.luminosity_arr), np.log10(self.luminosity_main_arr), np.log10(self.luminosity_eroded_arr), 
+            np.log10(self.electron_density_total_arr),
+            self.mass_total_active_arr, self.main_mass_arr
+            ]
+
+        header  = "B = brightest mass bin, L = leading fragment, M = main\n"
+        header += "Time (s), B ht (km), B len (km), B vel (km/s), L ht (km), L len (km), L vel (km/s), " + \
+                  "M ht (km), M len (km), M vel (km/s), Tau total (%), Tau main (%), Tau grain (%), " + \
+                  "Abs mag total, Abs mag main, Abs mag grain, " + \
+                  "log10 Lum total (W), log10 Lum main (W), log10 Lum grain (W), "+\
+                  "log10 Electron line density (-/m), Mass total (kg), Mass main (kg)"
+
+        with open(os.path.join(dir_path, file_name), 'w') as f:
+
+            # Write the data
+            np.savetxt(f, out_arr, fmt='%.5e', delimiter=',', newline='\n', header=header, comments="# ")
+
 
 
 
@@ -1514,7 +1549,7 @@ class MetSimGUI(QMainWindow):
             # if 'fragmentation_string' in const_json:
             #     if const_json['fragmentation_string'] is not None:
             #         self.fragmentation = FragmentationContainer(self, os.path.join(self.dir_path, \
-            #             "metsim_fragmentation.txt"))
+            #             FRAG_FILE_NAME))
             #         self.fragmentation.loadFromString(const_json['fragmentation_string'])
             #         self.fragmentation.writeFragmentationFile()
 
@@ -3945,6 +3980,10 @@ class MetSimGUI(QMainWindow):
         # Store simulation results
         self.simulation_results = SimulationResults(self.const, frag_main, results_list, wake_results)
 
+        # Save simulated parametrs to file
+        self.simulation_results.writeCSV(self.dir_path, SIM_RESULTS_CSV)
+        print("Saved simulation results to:", os.path.join(self.dir_path, SIM_RESULTS_CSV))
+
         # Toggle lum eff button to only be available if lum eff was computed
         self.plotLumEffButton.setDisabled(not self.const.fragmentation_show_individual_lcs)
 
@@ -4261,7 +4300,7 @@ class MetSimGUI(QMainWindow):
 
         # Choose the location of the new file
         fragmentation_file_path = QFileDialog.getSaveFileName(self, "Choose the fragmentation file", \
-            os.path.join(self.dir_path, "metsim_fragmentation.txt"), "Fragmentation file (*.txt)")[0]
+            os.path.join(self.dir_path, FRAG_FILE_NAME), "Fragmentation file (*.txt)")[0]
 
         # If it was cancelled, end function
         if not fragmentation_file_path:
