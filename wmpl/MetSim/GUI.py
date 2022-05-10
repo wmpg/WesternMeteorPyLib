@@ -61,17 +61,18 @@ class SimulationResults(object):
     def __init__(self, const, frag_main, results_list, wake_results):
         """ Container for simulation results. """
 
-        # Final physical parametrs of the main fragment
+        # Final physical parameters of the main fragment
         self.frag_main = frag_main
 
         # Unpack the results
         results_list = np.array(results_list).astype(np.float64)
         self.time_arr, self.luminosity_arr, self.luminosity_main_arr, self.luminosity_eroded_arr, \
             self.electron_density_total_arr, self.tau_total_arr, self.tau_main_arr, self.tau_eroded_arr, \
-            self.brightest_height_arr, self.brightest_length_arr, \
-            self.brightest_vel_arr, self.leading_frag_height_arr, self.leading_frag_length_arr, \
-            self.leading_frag_vel_arr, self.mass_total_active_arr, self.main_mass_arr, \
-            self.main_height_arr, self.main_length_arr, self.main_vel_arr = results_list.T
+            self.brightest_height_arr, self.brightest_length_arr, self.brightest_vel_arr, \
+            self.leading_frag_height_arr, self.leading_frag_length_arr, self.leading_frag_vel_arr, \
+            self.leading_frag_dyn_press_arr, self.mass_total_active_arr, \
+            self.main_mass_arr, self.main_height_arr, self.main_length_arr, self.main_vel_arr, \
+            self.main_dyn_press_arr = results_list.T
 
 
         # Calculate the total absolute magnitude (apparent @100km), and fix possible NaN values (replace them 
@@ -143,8 +144,10 @@ class SimulationResults(object):
         out_arr = np.c_[
             self.time_arr,
             self.brightest_height_arr/1000, self.brightest_length_arr/1000, self.brightest_vel_arr/1000, 
-            self.leading_frag_height_arr/1000, self.leading_frag_length_arr/1000, self.leading_frag_vel_arr/1000, 
-            self.main_height_arr/1000, self.main_length_arr/1000, self.main_vel_arr/1000,
+            self.leading_frag_height_arr/1000, self.leading_frag_length_arr/1000, 
+            self.leading_frag_vel_arr/1000, self.leading_frag_dyn_press_arr/1e6,
+            self.main_height_arr/1000, self.main_length_arr/1000, self.main_vel_arr/1000, \
+            self.main_dyn_press_arr/1e6,
             self.tau_total_arr, self.tau_main_arr, self.tau_eroded_arr,
             self.abs_magnitude, self.abs_magnitude_main, self.abs_magnitude_eroded,
             np.log10(self.luminosity_arr), np.log10(self.luminosity_main_arr), np.log10(self.luminosity_eroded_arr), 
@@ -153,8 +156,10 @@ class SimulationResults(object):
             ]
 
         header  = "B = brightest mass bin, L = leading fragment, M = main\n"
-        header += "Time (s), B ht (km), B len (km), B vel (km/s), L ht (km), L len (km), L vel (km/s), " + \
-                  "M ht (km), M len (km), M vel (km/s), Tau total (%), Tau main (%), Tau grain (%), " + \
+        header += "Time (s), B ht (km), B len (km), B vel (km/s), " + \
+                  "L ht (km), L len (km), L vel (km/s), L dyn press (Gamma = 1.0; MPa), " + \
+                  "M ht (km), M len (km), M vel (km/s), M dyn press (Gamma = 1.0; MPa), " + \
+                  "Tau total (%), Tau main (%), Tau grain (%), " + \
                   "Abs mag total, Abs mag main, Abs mag grain, " + \
                   "log10 Lum total (W), log10 Lum main (W), log10 Lum grain (W), "+\
                   "log10 Electron line density (-/m), Mass total (kg), Mass main (kg)"
