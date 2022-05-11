@@ -489,6 +489,9 @@ class GuralTrajectory(object):
         # parameters. Please take a look at TrajectorySolution.h file and the TrajectoryInfo structure for
         # more solution parameters.)
 
+        # Tracks the number of cameras actually populated by the solver library
+        self.num_cameras = 0
+
         # Arrays of camera coordinates (angles in radians, height in km), per every station
         self.camera_lat = 0
         self.camera_lon = 0
@@ -501,6 +504,10 @@ class GuralTrajectory(object):
 
         # Convergence angle
         self.max_convergence = 0
+
+        # intersecting planes radiant
+        self.ra_radiant_ip = 0
+        self.dec_radiant_ip = 0
 
         # Radiant right ascension in radians (multi-parameter fit)
         self.ra_radiant = 0
@@ -558,6 +565,22 @@ class GuralTrajectory(object):
         self.model_fit2 = 0
         # Array of model time which includes offsets relative to the reference time
         self.model_time = 0
+
+        # computed begin point
+        self.rbeg_lat = 0
+        self.rbeg_lon = 0
+        self.rbeg_ht = 0
+        self.rbeg_lat_sigma = 0
+        self.rbeg_lon_sigma = 0
+        self.rbeg_hkm_sigma = 0
+
+        # computed begin point
+        self.rend_lat = 0
+        self.rend_lon = 0
+        self.rend_ht = 0
+        self.rend_lat_sigma = 0
+        self.rend_lon_sigma = 0
+        self.rend_hkm_sigma = 0
 
         ########
 
@@ -1178,6 +1201,9 @@ class GuralTrajectory(object):
 
         ### Read out the results
 
+        # The actual number of cameras populated
+        self.num_cameras = self.traj.numcameras
+
         # Camera coordinates (angles in radians, height in km)
         self.camera_lat = double1pointerToArray(self.traj.camera_lat, self.maxcameras)
         self.camera_lon = double1pointerToArray(self.traj.camera_lon, self.maxcameras)
@@ -1198,6 +1224,9 @@ class GuralTrajectory(object):
         # Read out the convergence angle (radians)
         self.max_convergence = np.frombuffer(self.traj.max_convergence, float)[0]
 
+        # Read out the intersecting planes radiant (radians)
+        self.ra_radiant_ip = np.frombuffer(self.traj.ra_radiant_IP, float)[0]
+        self.dec_radiant_ip = np.frombuffer(self.traj.dec_radiant_IP, float)[0]
 
         # Read out beginning velocity
         self.vbegin = np.frombuffer(self.traj.vbegin, float)[0]
@@ -1238,6 +1267,21 @@ class GuralTrajectory(object):
         self.model_fit2 = double2pointerToArray(self.traj.model_fit2, self.maxcameras, self.nummeas_lst)
         self.model_time = double2pointerToArray(self.traj.model_time, self.maxcameras, self.nummeas_lst)
 
+        # Read out begin point
+        self.rbeg_lat = np.frombuffer(self.traj.rbeg_lat, float)[0]
+        self.rbeg_lon = np.frombuffer(self.traj.rbeg_lon, float)[0]
+        self.rbeg_hkm = np.frombuffer(self.traj.rbeg_hkm, float)[0]
+        self.rbeg_lat_sigma = np.frombuffer(self.traj.rbeg_lat_sigma, float)[0]
+        self.rbeg_lon_sigma = np.frombuffer(self.traj.rbeg_lon_sigma, float)[0]
+        self.rbeg_hkm_sigma = np.frombuffer(self.traj.rbeg_hkm_sigma, float)[0]
+
+        # Read out end point
+        self.rend_lat = np.frombuffer(self.traj.rend_lat, float)[0]
+        self.rend_lon = np.frombuffer(self.traj.rend_lon, float)[0]
+        self.rend_hkm = np.frombuffer(self.traj.rend_hkm, float)[0]
+        self.rend_lat_sigma = np.frombuffer(self.traj.rend_lat_sigma, float)[0]
+        self.rend_lon_sigma = np.frombuffer(self.traj.rend_lon_sigma, float)[0]
+        self.rend_hkm_sigma = np.frombuffer(self.traj.rend_hkm_sigma, float)[0]
         ###
 
         print('Freeing trajectory structure...')
