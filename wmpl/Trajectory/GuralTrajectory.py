@@ -478,6 +478,9 @@ class GuralTrajectory(object):
         # Track the comment associated with each camera
         self.station_comments = []
 
+        # Track magnitudes
+        self.magnitudes = []
+
         # Construct a file name for this event
         self.file_name = jd2Date(self.jdt_ref, dt_obj=True).strftime('%Y%m%d_%H%M%S')
 
@@ -685,8 +688,8 @@ class GuralTrajectory(object):
 
 
 
-    def infillTrajectory(self, theta_data, phi_data, time_data, lat, lon, ele, noise=None, station_id=None,
-        obs_id=None, comment=None):
+    def infillTrajectory(self, theta_data, phi_data, time_data, lat, lon, ele, noise=None, magnitudes=None,
+        station_id=None, obs_id=None, comment=None):
         """ Fills in the trajectory structure with given observations: azimuth in radians, zenith angle in
             radians, time in seconds relative to jdt_ref. This function should be called for each observing
             site, not more than 'maxcameras' times.
@@ -701,6 +704,7 @@ class GuralTrajectory(object):
 
         Kwargs:
             noise: [ndarray] observation noise in radians (0 if not provided)
+            magnitudes: [list] A list of apparent magnitudes of the meteor. None by default.
             station_id: [str] Station ID.
             obs_id: [int] Unique ID of the observation. This is to differentiate different observations from
                 the same station.
@@ -717,6 +721,9 @@ class GuralTrajectory(object):
 
         # Track the obs_id of each site
         self.obs_ids.append(obs_id)
+
+        # Track the magnitudes of each site
+        self.magnitudes.append(magnitudes)
 
         # Track the comment of each site
         if comment is None:
