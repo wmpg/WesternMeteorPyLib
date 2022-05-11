@@ -164,6 +164,24 @@ class SimulationResults(object):
                   "log10 Lum total (W), log10 Lum main (W), log10 Lum grain (W), "+\
                   "log10 Electron line density (-/m), Mass total (kg), Mass main (kg)"
 
+
+        # If the file cannot be opened, throw an error message
+        try:
+            with open(os.path.join(dir_path, file_name), 'w') as f:
+                pass
+
+        except PermissionError:
+
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Critical)
+            msg.setWindowTitle("File permission error")
+            msg.setText("Cannot save file " + os.path.join(dir_path, file_name))
+            msg.setInformativeText("Make sure you have write permissions, or close the file if it's open in another program.")
+            msg.exec_()
+
+            return None
+
+
         with open(os.path.join(dir_path, file_name), 'w') as f:
 
             # Write the data
