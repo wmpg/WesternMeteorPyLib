@@ -18,6 +18,7 @@ from wmpl.Trajectory.Orbit import calcOrbit
 from wmpl.Utils.TrajConversions import geo2Cartesian, raDec2ECI, altAz2RADec_vect, \
     raDec2AltAz_vect, jd2Date
 from wmpl.Utils.Math import vectMag, findClosestPoints, sphericalToCartesian, lineFunc
+from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import savePickle
 
 # Path to the compiled trajectory library
@@ -751,6 +752,7 @@ class GuralTrajectory(object):
         # Track the comment of each site
         if comment is None:
             comment = ''
+
         self.station_comments.append(comment)
 
         # If the measurement noise is not given, set it to 0
@@ -1188,6 +1190,272 @@ class GuralTrajectory(object):
 
 
 
+    def saveReport(self, dir_path, file_name, uncertainties=None, verbose=True, save_results=True):
+        """
+        Save the trajectory estimation report to file.
+        This function loosely mimics the output of Trajectory.py
+
+        Arguments:
+            dir_path: [str] Path to the directory where the report will be saved.
+            file_name: [str] Name of the report time.
+
+        Keyword arguments:
+            uncertainties: [MCUncertainties object] (UNUSED) Object contaning uncertainties of every parameter.
+            verbose: [bool] Print the report to the screen. True by default.
+            save_results: [bool] If True, the results will be saved to a file.
+        """
+        # Format longitude in the -180 to 180 deg range
+        _formatLongitude = lambda x: (x + np.pi)%(2*np.pi) - np.pi
+
+        out = 'Input measurement type: '
+
+        # Write out measurement type
+        if self.meastype == 1:
+            out += 'Right Ascension for meas1, Declination for meas2, epoch of date\n'
+        elif self.meastype == 2:
+            out += 'Azimuth +east of due north for meas1, Elevation angle above the horizon for meas2\n'
+        elif self.meastype == 3:
+            out += 'Azimuth +west of due south for meas1, Zenith angle for meas2\n'
+        elif self.meastype == 4:
+            out += 'Azimuth +north of due east for meas1, Zenith angle for meas2\n'
+
+        out += "\n"
+        out += f'Reference JD: {self.jdt_ref:20.12f}\n'
+        out += f'Time: {str(jd2Date(self.orbit.jd_ref, dt_obj=True))} UTC'
+
+        out += '\n\n'
+
+        # gural solver doesn't report all candidates, only selected plane intersection
+        # and station ids used are not reported
+        out += 'Plane intersections\n'
+        out += '-------------------\n'
+        out += 'Intersection 1 - Station IDs unavailable\n'
+        out += f' Convergence Angle = {np.degrees(self.max_convergence):.5f} deg\n'
+        out += f' R.A. = {np.degrees(self.ra_radiant_ip):>9.5f}'
+        out += f'  Dec = {np.degrees(self.dec_radiant_ip):>+9.5f} deg\n'
+
+        out += '\n'
+        out += f'Best intersection: Station IDs unavailable with Qconv = {np.degrees(self.max_convergence):.2f} deg\n'
+
+        out += '\n\n'
+
+        out += 'Multi-parameter fit solution\n'
+        out += '----------------------------\n'
+
+        # gural solver doesn't provide uncertainties for these
+        # values out of the solver are in km and km/s
+        out += 'State vector (ECI, epoch of date):\n'
+        out += f' X =  {self.solution[0] * 1000.0:11.2f} m\n'
+        out += f' Y =  {self.solution[1] * 1000.0:11.2f} m\n'
+        out += f' Z =  {self.solution[2] * 1000.0:11.2f} m\n'
+        out += f' Vx = {self.solution[3] * 1000.0:11.2f} m/s\n'
+        out += f' Vy = {self.solution[4] * 1000.0:11.2f} m/s\n'
+        out += f' Vz = {self.solution[5] * 1000.0:11.2f} m/s\n'
+
+        out += '\n'
+        out += 'State vector covariance matrix (X, Y, Z, Vx, Vy, Vz):\n'
+        out += ' Not available\n'
+
+        out += '\n'
+        out += 'Timing offsets (from input data)\n'
+
+        for station_id, toffset in zip(self.station_ids, self.tref_offsets):
+            out += f'{station_id:>14s}: {toffset:.6f}\n'
+
+        if self.orbit is not None:
+            out += '\n'
+            out += 'Reference point on the trajectory\n'
+            out += f'  Time: {str(jd2Date(self.orbit.jd_ref, dt_obj=True))} UTC\n'
+            out += f'  Lat     = {np.degrees(self.orbit.lat_ref):>11.6f}\n'
+            out += f'  Lon     = {np.degrees(_formatLongitude(self.orbit.lon_ref)):>+11.6}\n'
+            out += f'  Ht      = {self.orbit.ht_ref}\n'
+            out += f'  Lat geo = {np.degrees(self.orbit.lat_geocentric)}\n'
+
+            # Write out orbital parameters
+            out += '\n'
+            out += repr(self.orbit)
+
+            # We don't have the orbital covariance matrix so skip it
+
+        out += '\n'
+        out += 'Jacchia fit on lag:\n'
+        out += ' Not available\n'
+
+        # Once again heights are in km
+        out += '\n'
+        out += 'Begin point on the trajectory (error estimate at 1.0 sigma):\n'
+        out += f'  Lat = {np.degrees(self.rbeg_lat):>11.6f}'
+        out += f' +/- {np.degrees(self.rbeg_lat_sigma):6.4f} deg\n'
+        out += f'  Lon = {np.degrees(_formatLongitude(self.rbeg_lon)):>+11.6f}'
+        out += f' +/- {np.degrees(self.rbeg_lon_sigma):6.4f} deg\n'
+        out += f'  Ht  = {self.rbeg_hkm * 1000.0:>11.2f}'
+        out += f' +/- {self.rbeg_hkm_sigma * 1000.0:6.2f} m\n'
+
+        out += 'End point on the trajectory:\n'
+        out += f'  Lat = {np.degrees(self.rend_lat):>11.6f}'
+        out += f' +/- {np.degrees(self.rend_lat_sigma):6.4f} deg\n'
+        out += f'  Lon = {np.degrees(_formatLongitude(self.rend_lon)):>+11.6f}'
+        out += f' +/- {np.degrees(self.rend_lon_sigma):6.4f} deg\n'
+        out += f'  Ht  = {self.rend_hkm * 1000.0:>11.2f}'
+        out += f' +/- {self.rend_hkm_sigma * 1000.0:6.2f} m\n'
+
+        ### Write information about stations ###
+        ######################################################################################################
+        out += '\n'
+        out += "Stations\n"
+        out += "--------\n"
+
+        # Note we only have a single global acceleration computation for the entire trajectory
+        # not a Jacchia fit for each station's lags as we have with the pylig solver
+        # we make do with what we have...
+        out += '            ID, Ignored, Lon +E (deg), Lat +N (deg),  Ht (m),   Accel a1,   Accel a2,  Beg Ht (m),  End Ht (m), +/- Obs ang (deg), +/- V (m), +/- H (m), Persp. angle (deg), Weight, FOV Beg, FOV End, Comment\n'
+
+        for cam in range(0, self.num_cameras):
+            endpt = self.nummeas_lst[cam] - 1
+
+            info = []
+            info.append(f'{self.station_ids[cam]:>14s}')
+            info.append(f'{0:>7d}')
+            info.append(f'{np.degrees(self.camera_lon[cam]):>12.6f}')
+            info.append(f'{np.degrees(self.camera_lat[cam]):>12.6f}')
+            info.append(f'{self.camera_hkm[cam] * 1000.0:>7.2f}')
+            info.append(f'{self.decel1:>10.6f}')
+            info.append(f'{self.decel2:>10.6f}')
+            info.append(f'{self.model_hkm[cam][0] * 1000.0:>11.2f}')
+            info.append(f'{self.model_hkm[cam][endpt] * 1000.0:>11.2f}')
+            info.append(f'{"None":>17s}')
+            info.append(f'{"None":>9s}')
+            info.append(f'{"None":>9s}')
+            info.append(f'{"None":>18s}')
+            info.append(f'{"None":>6s}')
+            info.append(f'{"None":>7s}')
+            info.append(f'{"None":>7s}')
+            info.append(f'{self.station_comments[cam]:s}')
+
+            out += ', '.join(info) + '\n'
+
+        ### Write information about individual points ###
+        ######################################################################################################
+        out += '\n'
+        out += "Points\n"
+        out += "------\n"
+
+        out += " No, "
+        out += "    Station ID, "
+        out += " Ignore, "
+        out += " Time (s), "
+        out += "                  JD, "
+        out += "    meas1, "
+        out += "    meas2, "
+        out += "Azim +E of due N (deg), "
+        out += "Alt (deg), "
+        out += "Azim line (deg), "
+        out += "Alt line (deg), "
+        out += "RA obs (deg), "
+        out += "Dec obs (deg), "
+        out += "RA line (deg), "
+        out += "Dec line (deg), "
+        out += "      X (m), "
+        out += "      Y (m), "
+        out += "      Z (m), "
+        out += "Latitude (deg), "
+        out += "Longitude (deg), "
+        out += "Height (m), "
+        out += " Range (m), "
+        out += "Length (m), "
+        out += "State vect dist (m), "
+        out += "  Lag (m), "
+        out += "Vel (m/s), "
+        out += "Vel prev avg (m/s), "
+        out += "H res (m), "
+        out += "V res (m), "
+        out += "Ang res (asec), "
+        out += "AppMag, "
+        out += "AbsMag"
+        out += "\n"
+
+        # A number of these fields were never implemented by the GuralTrajectory
+        # solver and are thus omitted here (left as 'None')
+        for cam in range(0, self.num_cameras):
+            for pt in range(0, self.nummeas_lst[cam]):
+                info = []
+                info.append(f'{pt:3d}')
+                info.append(f'{self.station_ids[cam]:>14s}')
+                info.append(f'{0:>7d}')
+
+                info.append(f'{self.model_time[cam][pt]:9.6f}')
+                info.append(f'{self.JD_data_cameras[cam][pt]:20.12f}')
+
+                info.append(f'{np.degrees(self.meas1[cam][pt]):9.5f}')
+                info.append(f'{np.degrees(self.meas2[cam][pt]):9.5f}')
+
+                # Not yet implemented - would need to convert from meas & model
+                # (lat,lon) or ECI coords at each point
+                info.append(f'{"None":>22s}')
+                info.append(f'{"None":>9s}')
+                info.append(f'{"None":>15s}')
+                info.append(f'{"None":>14s}')
+                info.append(f'{"None":>12s}')
+                info.append(f'{"None":>13s}')
+                info.append(f'{"None":>13s}')
+                info.append(f'{"None":>14s}')
+
+                for eci in range(0,3):
+                    info.append(f'{self.model_eci_cameras[cam][pt][eci]:11.2f}')
+
+                info.append(f'{np.degrees(self.model_lat[cam][pt]):14.6f}')
+                info.append(f'{np.degrees(self.model_lon[cam][pt]):+15.6f}')
+                info.append(f'{self.model_hkm[cam][pt] * 1000.0:10.2f}')
+                info.append(f'{self.model_range[cam][pt] * 1000.0:10.2f}')
+
+                info.append(f'{self.lengths[cam][pt]:10.2f}')
+                info.append(f'{self.state_vector_distances[cam][pt]:19.2f}')
+                info.append(f'{self.lags[cam][pt]:9.2f}')
+
+                # velocities_prev_point was never implemented
+                info.append(f'{self.velocities[cam][pt]:9.2f}')
+                info.append(f'{"None":>18s}')
+
+                # residual data are not available
+                info.append(f'{"None":>9s}')
+                info.append(f'{"None":>9s}')
+                info.append(f'{"None":>14s}')
+
+                if self.magnitudes[cam] is not None:
+                    info.append(f'{self.magnitudes[cam][pt]:+6.2f}')
+                else:
+                    info.append(f'{"None":>6s}')
+
+                info.append(f'{"None":>6s}')
+
+                out += ", ".join(info) + '\n'
+
+        out += '\n'
+
+        out += 'Notes\n'
+        out += '-----\n'
+        out += '- Not all fields in this table are presently available using the GuralTrajectory solver, some may be left blank\n'
+        out += '- Points that have not been taken into consideration when computing the trajectory have \'1\' in the \'Ignore\' column.\n'
+        out += '- The time already has time offsets applied to it.\n'
+        out += '- \'meas1\' and \'meas2\' are given input points.\n'
+        out += '- X, Y, Z are ECI (Earth-Centered Inertial) positions of projected lines of sight on the radiant line.\n'
+        out += '- Zc is the observed zenith distance of the entry angle, while the Zg is the entry zenith distance corrected for Earth\'s gravity.\n'
+        out += '- Latitude (deg) and Longitude (deg) are in WGS84 coordinates, while Height (m) is in the EGM96 datum. There values are coordinates of each point on the radiant line.\n'
+        out += '- Jacchia (1955) deceleration equation fit was done on the lag.\n'
+        out += '- Right ascension and declination in the table are given in the epoch of date for the corresponding JD, per every point.\n'
+
+
+        if verbose:
+            print(out)
+
+        # Save the report to a file
+        if save_results:
+            mkdirP(dir_path)
+
+            with open(os.path.join(dir_path, file_name), 'w') as f:
+                f.write(out)
+
+        return out
 
 
 
