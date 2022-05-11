@@ -97,7 +97,7 @@ class TrajectoryInfo(ct.Structure):
         ('malloced', ct.POINTER(ct.c_int)),
 
         # Camera/site information
-        ('numcameras ', ct.c_int),
+        ('numcameras', ct.c_int),
         ('camera_lat', PDOUBLE),
         ('camera_lon', PDOUBLE),
         ('camera_hkm', PDOUBLE),
