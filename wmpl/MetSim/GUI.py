@@ -4362,6 +4362,10 @@ class MetSimGUI(QMainWindow):
     def addFragmentation(self, frag_type):
         """ Add a fragmentation line."""
 
+        # Open a few fragmentation file, if one doesn't exist
+        if self.fragmentation is None:
+            self.newFragmentationFile()
+
         self.fragmentation.addFragmentation(frag_type)
 
 
