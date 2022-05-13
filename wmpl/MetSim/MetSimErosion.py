@@ -1086,7 +1086,7 @@ def ablateAll(fragments, const, compute_wake=False):
 
                         # Set physical conditions at the moment of fragmentation
                         frag_entry.time = const.total_time
-                        frag_entry.dyn_press = dyn_press
+                        frag_entry.dyn_pressure = dyn_press
                         frag_entry.velocity = frag.v
                         frag_entry.parent_mass = parent_initial_mass
 
