@@ -1557,6 +1557,9 @@ class GuralTrajectory(object):
         # Free memory for trajectory
         self.traj_lib.FreeTrajectoryStructure(self.traj)
 
+        # Delete all library bindings and ctypes variables, so the object can be pickled
+        del self.traj_lib
+        del self.traj
 
         # Extract the state vector from the solution (convert to meters)
         self.state_vect = np.array(self.solution[:3]*1000.0)
@@ -1602,10 +1605,6 @@ class GuralTrajectory(object):
         ### SAVE RESULTS ###
         ######################################################################################################
 
-        # Delete all library bindings and ctypes variables, so the object can be pickled
-        del self.traj_lib
-        del self.traj
-
         if self.fha_velocity:
             fha_suffix = 'fha'
         else:
@@ -1621,6 +1620,36 @@ class GuralTrajectory(object):
 
 
         return self
+
+
+
+    def savePickle(self, dir_path, file_name):
+        """
+        pickle the object taking care to omit lingering unserializable
+        trajectory library references
+        """
+        # copy and remove from the object
+        # it's okay if these don't exist
+        try:
+            backup_traj_lib = self.traj_lib
+            del self.traj_lib
+        except AttributeError:
+            backup_traj_lib = None
+
+        try:
+            backup_traj = self.traj
+            del self.traj
+        except AttributeError:
+            backup_traj = None
+
+        savePickle(self, dir_path, file_name)
+
+        # ... and now restore them
+        if backup_traj_lib:
+            self.traj_lib = backup_traj_lib
+
+        if backup_traj:
+            self.traj = backup_traj
 
 
 
