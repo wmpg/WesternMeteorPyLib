@@ -23,3 +23,5 @@ wmpl/MetSim/native
 # wmpl/share - files are downloaded during setup
 wmpl/share/ShowerLookUpTable.npy
 wmpl/share/streamfulldata.npy
+wmpl/MetSim/MetSimErosionCyTools.c
+.vscode/settings.json
