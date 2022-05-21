@@ -122,7 +122,7 @@ class ErosionSimParametersCAMO(object):
         self.param_list.append("rho")
 
         # Intrinsic ablation coeff range (s^2/m^2)
-        self.sigma = MetParam(0.001/1e6, 0.5/1e6)
+        self.sigma = MetParam(0.005/1e6, 0.5/1e6)
         self.param_list.append("sigma")
 
         ##
@@ -136,11 +136,11 @@ class ErosionSimParametersCAMO(object):
         self.param_list.append("erosion_height_start")
 
         # Erosion coefficient (s^2/m^2)
-        self.erosion_coeff = MetParam(0.0, 0.5/1e6)
+        self.erosion_coeff = MetParam(0.0, 1.0/1e6)
         self.param_list.append("erosion_coeff")
 
         # Mass index
-        self.erosion_mass_index = MetParam(1.0, 3.0)
+        self.erosion_mass_index = MetParam(1.5, 3.0)
         self.param_list.append("erosion_mass_index")
 
         # Minimum mass for erosion
@@ -271,7 +271,7 @@ class ErosionSimParametersCAMOWide(object):
         self.param_list.append("rho")
 
         # Intrinsic ablation coeff range (s^2/m^2)
-        self.sigma = MetParam(0.001/1e6, 0.5/1e6)
+        self.sigma = MetParam(0.005/1e6, 0.5/1e6)
         self.param_list.append("sigma")
 
         ##
@@ -285,19 +285,19 @@ class ErosionSimParametersCAMOWide(object):
         self.param_list.append("erosion_height_start")
 
         # Erosion coefficient (s^2/m^2)
-        self.erosion_coeff = MetParam(0.0, 0.5/1e6)
+        self.erosion_coeff = MetParam(0.0, 1.0/1e6)
         self.param_list.append("erosion_coeff")
 
         # Mass index
-        self.erosion_mass_index = MetParam(1.0, 3.0)
+        self.erosion_mass_index = MetParam(1.5, 3.0)
         self.param_list.append("erosion_mass_index")
 
         # Minimum mass for erosion
-        self.erosion_mass_min = MetParam(1e-12, 1e-9)
+        self.erosion_mass_min = MetParam(5e-12, 1e-8)
         self.param_list.append("erosion_mass_min")
 
         # Maximum mass for erosion
-        self.erosion_mass_max = MetParam(1e-11, 1e-7)
+        self.erosion_mass_max = MetParam(1e-11, 5e-7)
         self.param_list.append("erosion_mass_max")
 
         ## 
@@ -372,6 +372,9 @@ class ErosionSimContainer(object):
         self.const.dens_co = self.params.dens_co
         self.const.P_0M = self.params.P_0M
 
+        # Set tau to CAMO faint meteor model
+        self.const.lum_eff_type = 5
+
 
         # Turn on erosion, but disable erosion change
         self.const.erosion_on = True
@@ -414,6 +417,10 @@ class ErosionSimContainer(object):
 
             # Assign value to simulation contants
             setattr(self.const, param_name, p.val)
+
+
+        # Make sure the min grain mass is not > max grain mass and vice versa
+        # TBD
 
 
 

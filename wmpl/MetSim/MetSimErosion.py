@@ -297,6 +297,9 @@ class Fragment(object):
         # Electron line density
         self.q = 0
 
+        # Dynamic pressure (Gamma = 1.0, Pa)
+        self.dyn_press = 0
+
         # Erosion coefficient value
         self.erosion_coeff = 0
 
@@ -586,6 +589,7 @@ def ablateAll(fragments, const, compute_wake=False):
     main_height = 0.0
     main_length = 0.0
     main_vel = 0.0
+    main_dyn_press = 0.0
 
     frag_children_all = []
 
@@ -630,6 +634,7 @@ def ablateAll(fragments, const, compute_wake=False):
         # If the deceleration is negative (i.e. the fragment is accelerating), then stop the fragment
         if deceleration_total > 0:
             frag.vv = frag.vh = frag.v = 0
+            deceleration_total = 0
 
         # Otherwise update the velocity
         else:
@@ -678,14 +683,15 @@ def ablateAll(fragments, const, compute_wake=False):
         frag.m = m_new
         frag.h = frag.h + frag.vv*const.dt
 
-        # # Compute ablated luminosity (including the deceleration term) for one fragment/grain
-        # # NOTE: Not numerically stable!
-        # lum = -luminousEfficiency(const.lum_eff_type, const.lum_eff, frag.v, frag.m) \
-        #     *((mass_loss_ablation/const.dt*frag.v**2)/2 - frag.m*frag.v*deceleration_total)
-
-        # Compute luminosity without the deceleration term
+        # Get the luminous efficiency
         tau = luminousEfficiency(const.lum_eff_type, const.lum_eff, frag.v, frag.m)
-        lum = -tau*((mass_loss_ablation/const.dt*frag.v**2)/2)
+
+        # # Compute luminosity for one grain/fragment (without the deceleration term)
+        # lum = -tau*((mass_loss_ablation/const.dt*frag.v**2)/2)
+
+        # Compute luminosity for one grain/fragment (with the deceleration term)
+        # NOTE: The deceleration term can sometimes be numerically unstable for some reason...
+        lum = -tau*((mass_loss_ablation/const.dt*frag.v**2)/2 + frag.m*frag.v*deceleration_total)
 
         # Compute the electron line density
         beta = ionizationEfficiency(frag.v)
@@ -709,6 +715,24 @@ def ablateAll(fragments, const, compute_wake=False):
         tau_total += tau*frag.lum
 
 
+        # Compute aerodynamic loading on the grain (always assume Gamma = 1.0)
+        #dyn_press = frag.gamma*rho_atm*frag.v**2
+        dyn_press = 1.0*rho_atm*frag.v**2
+        frag.dyn_press = dyn_press
+
+        # if frag.id == 0:
+        #     print('----- id:', frag.id)
+        #     print('t:', const.total_time)
+        #     print('V:', frag.v/1000)
+        #     print('H:', frag.h/1000)
+        #     print('m:', frag.m)
+        #     print('DynPress:', dyn_press/1000, 'kPa')
+
+
+        # Update length along the track
+        frag.length += frag.v*const.dt
+
+
         # Keep track of the parameters of the main fragment
         if frag.main:
             luminosity_main = frag.lum
@@ -717,10 +741,8 @@ def ablateAll(fragments, const, compute_wake=False):
             main_height = frag.h
             main_length = frag.length
             main_vel = frag.v
+            main_dyn_press = dyn_press
 
-
-        # Update length along the track
-        frag.length += frag.v*const.dt
 
 
         # If the fragment is done, stop ablating
@@ -738,18 +760,6 @@ def ablateAll(fragments, const, compute_wake=False):
             brightest_height = frag.h
             brightest_length = frag.length
             brightest_vel = frag.v
-
-
-        # Compute aerodynamic loading on the grain
-        dyn_press = frag.gamma*rho_atm*frag.v**2
-
-        # if frag.id == 0:
-        #     print('----- id:', frag.id)
-        #     print('t:', const.total_time)
-        #     print('V:', frag.v/1000)
-        #     print('H:', frag.h/1000)
-        #     print('m:', frag.m)
-        #     print('DynPress:', dyn_press/1000, 'kPa')
 
 
         # For fragments born out of complex fragmentation, keep track of their luminosity and height
@@ -1103,13 +1113,15 @@ def ablateAll(fragments, const, compute_wake=False):
     active_fragments = [frag for frag in fragments if frag.active]
     if len(active_fragments):
         leading_frag = max(active_fragments, key=lambda x: x.length)
-        leading_frag_length = leading_frag.length
-        leading_frag_height = leading_frag.h
-        leading_frag_vel    = leading_frag.v
+        leading_frag_length    = leading_frag.length
+        leading_frag_height    = leading_frag.h
+        leading_frag_vel       = leading_frag.v
+        leading_frag_dyn_press = leading_frag.dyn_press
     else:
-        leading_frag_length = None
-        leading_frag_height = None
-        leading_frag_vel    = None
+        leading_frag_length    = None
+        leading_frag_height    = None
+        leading_frag_vel       = None
+        leading_frag_dyn_press = None
 
 
     ### Compute the wake profile ###
@@ -1174,8 +1186,8 @@ def ablateAll(fragments, const, compute_wake=False):
 
     return fragments, const, luminosity_total, luminosity_main, luminosity_eroded, electron_density_total, \
         tau_total, tau_main, tau_eroded, brightest_height, brightest_length, brightest_vel, \
-        leading_frag_height, leading_frag_length, leading_frag_vel, mass_total_active, main_mass, \
-        main_height, main_length, main_vel, wake
+        leading_frag_height, leading_frag_length, leading_frag_vel, leading_frag_dyn_press, \
+        mass_total_active, main_mass, main_height, main_length, main_vel, main_dyn_press, wake
 
 
 
@@ -1237,8 +1249,9 @@ def runSimulation(const, compute_wake=False):
         # Ablate the fragments
         fragments, const, luminosity_total, luminosity_main, luminosity_eroded, electron_density_total, \
             tau_total, tau_main, tau_eroded, brightest_height, brightest_length, brightest_vel, \
-            leading_frag_height, leading_frag_length, leading_frag_vel, mass_total_active, main_mass, \
-            main_height, main_length, main_vel, wake = ablateAll(fragments, const, compute_wake=compute_wake)
+            leading_frag_height, leading_frag_length, leading_frag_vel, leading_frag_dyn_press, \
+            mass_total_active, main_mass, main_height, main_length, main_vel, main_dyn_press, \
+            wake = ablateAll(fragments, const, compute_wake=compute_wake)
 
         # Store wake estimation results
         wake_results.append(wake)
@@ -1246,8 +1259,9 @@ def runSimulation(const, compute_wake=False):
         # Stack results list
         results_list.append([const.total_time, luminosity_total, luminosity_main, luminosity_eroded, \
             electron_density_total, tau_total, tau_main, tau_eroded, brightest_height, brightest_length, \
-            brightest_vel, leading_frag_height, leading_frag_length, leading_frag_vel, mass_total_active, \
-            main_mass, main_height, main_length, main_vel])
+            brightest_vel, leading_frag_height, leading_frag_length, leading_frag_vel, \
+            leading_frag_dyn_press, mass_total_active, main_mass, main_height, main_length, main_vel, \
+            main_dyn_press])
 
 
 
@@ -1356,7 +1370,8 @@ if __name__ == "__main__":
     time_arr, luminosity_arr, luminosity_main_arr, luminosity_eroded_arr, electron_density_total_arr, \
         tau_total_arr, tau_main_arr, tau_eroded_arr, brightest_height_arr, brightest_length_arr, \
         brightest_vel_arr, leading_frag_height_arr, leading_frag_length_arr, leading_frag_vel_arr, \
-        mass_total_active_arr, main_mass_arr, main_height_arr, main_length_arr, main_vel_arr = results_list.T
+        leading_frag_dyn_press_arr, mass_total_active_arr, main_mass_arr, main_height_arr, main_length_arr, \
+        main_vel_arr, main_dyn_press_arr = results_list.T
 
 
     # Calculate absolute magnitude (apparent @100km) from given luminous intensity

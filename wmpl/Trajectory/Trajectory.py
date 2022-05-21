@@ -14,6 +14,8 @@ import datetime
 import pickle
 import json
 from operator import attrgetter
+import base64
+import hashlib
 
 import numpy as np
 import scipy.optimize
@@ -2270,6 +2272,46 @@ def applyGravityDrop(eci_coord, t, r0, vz):
 
     # Apply gravity drop to ECI coordinates
     return eci_coord - drop*vectNorm(eci_coord)
+
+
+
+def generateTrajectoryID(traj):
+    """ Given trajectory parameters, generate a unique trajectory ID. 
+    
+    Arguments:
+        traj: [Trajectory object]
+
+    Return:
+        traj_id: [str] Trajectory ID in the YYYYMMDDHHMMSS_#hash format.
+
+    """
+
+    # Get the timestamp
+    timestamp = jd2Date(traj.jdt_ref, dt_obj=True).strftime("%Y%m%d%H%M%S")
+
+    # Serialize the measurements and stick them into the hashing function
+    hashable_string = "{:.10f}".format(traj.jdt_ref) + str(traj.jdt_ref) + str(traj.rbeg_lat) \
+        + str(traj.rbeg_lon) + str(traj.rbeg_ele) + str(traj.rend_lat) + str(traj.rend_lon) \
+        + str(traj.rend_ele)
+
+    # Make an MD5 hash and only take the first 5 characters
+    hasher = hashlib.md5(hashable_string.encode())
+    hash_str = base64.urlsafe_b64encode(hasher.digest()).decode()[:5]
+    hash_str = hash_str.replace(";", "0").replace(",", '1').replace("_", '2').replace("-", '3')
+
+    traj_id = timestamp + "_" + hash_str
+
+    return traj_id
+
+
+def addTrajectoryID(traj):
+    """ Checks if the trajectory ID is present or not, and add it if it's missing. """
+
+    if (traj.traj_id is None) or (traj.traj_id == "None"):
+        traj.traj_id = generateTrajectoryID(traj)
+
+    return traj
+
 
 
 
@@ -5294,20 +5336,23 @@ class Trajectory(object):
                 # Check if the absolute magnitude was given
                 if obs.absolute_magnitudes is not None:
 
-                    # Filter out None absolute magnitudes and magnitudes fainter than mag 10
+                    # Filter out None absolute magnitudes
                     filter_mask = np.array([abs_mag is not None for abs_mag in obs.absolute_magnitudes])
 
                     # Extract data that is not ignored
                     used_times = obs.time_data[filter_mask & (obs.ignore_list == 0)]
                     used_magnitudes = obs.absolute_magnitudes[filter_mask & (obs.ignore_list == 0)]
 
-                    # Filter out magnitudes fainter than mag 10
-                    mag_mask = np.array([abs_mag < 10 for abs_mag in used_magnitudes])
+                    # Filter out magnitudes fainter than mag 8
+                    mag_mask = np.array([abs_mag < 8 for abs_mag in used_magnitudes])
                     
-                    # avoid crash if no magnitudes exceed the threshold
-                    if isinstance(mag_mask, int):
+                    # Avoid crash if no magnitudes exceed the threshold
+                    if np.any(mag_mask):
                         used_times = used_times[mag_mask]
                         used_magnitudes = used_magnitudes[mag_mask]
+
+                    else:
+                        continue
 
 
                     plt_handle = plt.plot(used_times, used_magnitudes, marker='x', \
@@ -5368,6 +5413,17 @@ class Trajectory(object):
                     # Extract data that is not ignored
                     used_heights = obs.model_ht[filter_mask & (obs.ignore_list == 0)]
                     used_magnitudes = obs.absolute_magnitudes[filter_mask & (obs.ignore_list == 0)]
+
+                    # Filter out magnitudes fainter than mag 8
+                    mag_mask = np.array([abs_mag < 8 for abs_mag in used_magnitudes])
+                    
+                    # Avoid crash if no magnitudes exceed the threshold
+                    if np.any(mag_mask):
+                        used_heights = used_heights[mag_mask]
+                        used_magnitudes = used_magnitudes[mag_mask]
+
+                    else:
+                        continue
 
                     plt_handle = plt.plot(used_magnitudes, used_heights/1000, marker='x', \
                         label=str(obs.station_id), zorder=3)
@@ -6210,6 +6266,14 @@ class Trajectory(object):
         #### SAVE RESULTS ###
         ######################################################################################################
 
+        # Compute the trajectory ID
+        if (self.traj_id is None) or (self.traj_id == "None"):
+            self.traj_id = generateTrajectoryID(self)
+
+        if self.monte_carlo:
+            traj_best = addTrajectoryID(traj_best)
+
+
         if self.save_results or self.show_plots:
 
             # Save Monte Carlo results
@@ -6287,7 +6351,6 @@ class Trajectory(object):
 
         else:
             return self
-
 
 
 

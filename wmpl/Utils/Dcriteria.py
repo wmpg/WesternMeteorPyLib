@@ -521,6 +521,135 @@ def calcDV(Lh1, Bh1, sol1, Vh1, Lh2, Bh2, sol2, Vh2, d_max=999.0):
 
 if __name__ == "__main__":
 
+    import os
+    import sys
+    import argparse
+
+    import numpy as np
+
+    from wmpl.Utils.Pickling import loadPickle
+
+
+    ### COMMAND LINE ARGUMENTS
+
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Compare two trajectory files by computing their D criteria.")
+
+    arg_parser.add_argument('traj_path', metavar='TRAJ_PATH', type=str, \
+        help="Path to a trajectory pickle file.")
+
+    arg_parser.add_argument('traj_path2', metavar='TRAJ_PATH', type=str, \
+        help="Path to an optional second trajectory pickle file. If it's not given, then the orbital parameters need to be specified manually.")
+
+    arg_parser.add_argument('-q', '--q', metavar='PERIHELION_DIST', help="Perihelion distance in AU.", \
+        type=float)
+
+    arg_parser.add_argument('-e', '--e', metavar='ECCENTRICITY', help="Eccentricity.", \
+        type=float)
+
+    arg_parser.add_argument('-i', '--i', metavar='INCLINATION', help="Inclination (deg).", \
+        type=float)
+
+    arg_parser.add_argument('-p', '--peri', metavar='ARG_OF_PERI', help="Argument of perihelion (deg).", \
+        type=float)
+
+    arg_parser.add_argument('-n', '--node', metavar='ASCENDING_NODE', help="Ascending node (deg).", \
+        type=float)
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    #########################
+
+    print("Input files:")
+    print("First  =", cml_args.traj_path)
+    print("Second =", cml_args.traj_path2)
+
+    # Load the reference trajectory pickle file
+    traj_ref = loadPickle(*os.path.split(cml_args.traj_path))
+
+    # Load orbital elements
+    q_ref = traj_ref.orbit.q
+    e_ref = traj_ref.orbit.e
+    incl_ref = np.degrees(traj_ref.orbit.i)
+    peri_ref = np.degrees(traj_ref.orbit.peri)
+    node_ref = np.degrees(traj_ref.orbit.node)
+
+
+
+    # If the trajectory pickle was given as a second argument, load the orbital elements from it
+    if cml_args.traj_path2 is not None:
+
+        # Load the trajectory pickle
+        traj = loadPickle(*os.path.split(cml_args.traj_path2))
+
+        # Load orbital elements
+        q = traj.orbit.q
+        e = traj.orbit.e
+        incl = np.degrees(traj.orbit.i)
+        peri = np.degrees(traj.orbit.peri)
+        node = np.degrees(traj.orbit.node)
+
+
+    # Otherwise, load orbital elements from the manual entry
+    else:
+
+        # Check that all elements are given
+        if (cml_args.q is not None) and (cml_args.e is not None) and (cml_args.i is not None) \
+            and (cml_args.peri is not None) and (cml_args.node is not None):
+
+            q = cml_args.q
+            e = cml_args.e
+            incl = cml_args.i
+            peri = cml_args.peri
+            node = cml_args.node
+
+        else:
+            print("All orbital elements need to be specified: q, e, i, peri, node!")
+            sys.exit()
+
+
+
+    # Print reference orbital elements
+    print("Reference orbital elements:")
+    print("  q = {:.5f} AU".format(q_ref))
+    print("  e = {:.5f}".format(e_ref))
+    print("  i = {:.5f} deg".format(incl_ref))
+    print("  w = {:.5f} deg".format(peri_ref))
+    print("  O = {:.5f} deg".format(node_ref))
+    print()
+    print("Comparison orbital elements:")
+    print("  q = {:.5f} AU".format(q))
+    print("  e = {:.5f}".format(e))
+    print("  i = {:.5f} deg".format(incl))
+    print("  w = {:.5f} deg".format(peri))
+    print("  O = {:.5f} deg".format(node))
+    print()
+
+
+
+    # Compute various D criteria
+    d_sh = calcDSH(q_ref, e_ref, np.radians(incl_ref), np.radians(node_ref), np.radians(peri_ref), \
+        q, e, np.radians(incl), np.radians(node), np.radians(peri))
+    d_d = calcDD(q_ref, e_ref, np.radians(incl_ref), np.radians(node_ref), np.radians(peri_ref), \
+        q, e, np.radians(incl), np.radians(node), np.radians(peri))
+    d_h = calcDH(q_ref, e_ref, np.radians(incl_ref), np.radians(node_ref), np.radians(peri_ref), \
+        q, e, np.radians(incl), np.radians(node), np.radians(peri))
+
+    print()
+    print("Results:")
+    print("D_SH = {:.4f}".format(d_sh))
+    print("D_D  = {:.4f}".format(d_d))
+    print("D_H  = {:.4f}".format(d_h))
+
+
+
+
+    sys.exit()
+
+    ##########################################################################################################
+
+
     from wmpl.Utils.PlotCelestial import CelestialPlot
 
 
