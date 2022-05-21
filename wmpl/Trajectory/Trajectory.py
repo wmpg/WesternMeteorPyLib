@@ -3143,6 +3143,8 @@ class Trajectory(object):
         # Timing differences which will be calculated
         time_diffs = np.zeros(len(observations))
 
+        if not estimate_timing_vel:
+            return True, np.zeros(2), v_init, time_diffs, observations
 
         # Run timing offset estimation if it needs to be done
         if estimate_timing_vel:
@@ -5072,10 +5074,10 @@ class Trajectory(object):
 
             # Plot ignored points
             if np.any(obs.ignore_list):
-
+ 
                 ignored_times = obs.time_data[obs.ignore_list > 0]
                 ignored_dists = obs.state_vect_dist[obs.ignore_list > 0]
-                    
+
                 ax1.scatter(ignored_dists/1000, ignored_times, facecolors='k', 
                     edgecolors=plt_handle[0].get_color(), marker='o', s=8, zorder=5, \
                     label='{:s} ignored points'.format(str(obs.station_id)))
@@ -5094,10 +5096,13 @@ class Trajectory(object):
             ax1.plot(lineFunc(t_range, *self.velocity_fit)/1000, t_range, label='Velocity fit', \
                 linestyle='--', alpha=0.5, zorder=3)
 
-        
+
         title = "Distances from state vector"
         if self.estimate_timing_vel:
-            title += ", Time residuals = {:.3e} s".format(self.timing_res)
+            if self.timing_res is None:
+                title += ", Time residuals not calculated"
+            else:
+                title += ", Time residuals = {:.3e} s".format(self.timing_res)
 
         plt.title(title)
 
@@ -5996,6 +6001,7 @@ class Trajectory(object):
 
         # If estimating the timing failed, skip any further steps
         if not self.timing_minimization_successful:
+            print('unable to minimise timing')
             return None
 
 

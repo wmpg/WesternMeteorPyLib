@@ -1160,6 +1160,9 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         help="""Run continously taking the data in the last PREV_DAYS to compute the new trajectories and update the old ones. The default time range is 5 days."""
         )
 
+    arg_parser.add_argument('-i', '--distribute', metavar='DISTRIBUTE_PROC', \
+        help="""Enable distributed processing. Values: 1=create and store candidates; 2=load and process candidates only.""", \
+            type=int)
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -1171,6 +1174,9 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     else:
         print("Auto running trajectory estimation every {:.1f} hours using the last {:.1f} days of data...".format(AUTO_RUN_FREQUENCY, cml_args.auto))
 
+    distribute = 0
+    if cml_args.distribute is not None:
+        distribute = cml_args.distribute  # enable distributed processing
 
     # Init trajectory constraints
     trajectory_constraints = TrajectoryConstraints()
@@ -1237,8 +1243,9 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         # Init the data handle
         dh = RMSDataHandle(cml_args.dir_path, event_time_range)
 
-        # If there is nothing to process, stop
-        if not dh.processing_list:
+        # If there is nothing to process, stop, unless we're in distributed 
+        # processing mode 2 
+        if not dh.processing_list and distribute !=2:
             print()
             print("Nothing to process!")
             print("Probably everything is already processed.")
@@ -1260,7 +1267,9 @@ contain data folders. Data folders should have FTPdetectinfo files together with
             proc_dir_dts = [dt for dt in proc_dir_dts \
                 if (dt >= dt_beg - datetime.timedelta(days=1)) and \
                     (dt <= dt_end + datetime.timedelta(days=1))]
-
+            # to avoid excluding all possible dates
+            if proc_dir_dts == []: 
+                proc_dir_dts=[dt_beg - datetime.timedelta(days=1), dt_end + datetime.timedelta(days=1)]
 
         # Determine the limits of data
         proc_dir_dt_beg = min(proc_dir_dts)
@@ -1294,7 +1303,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                 dt_range=(bin_beg, bin_end))
 
             # Run the trajectory correlator
-            tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True)
+            tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True, distribute=distribute)
             tc.run(event_time_range=event_time_range)
 
 
