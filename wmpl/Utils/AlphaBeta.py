@@ -394,6 +394,6 @@ if __name__ == "__main__":
         plt.ylim((-3, 4))
         plt.xlabel("ln(alpha*sin(slope))")
         plt.ylabel("ln(beta)")
-        plt.axes().set_aspect('equal')
+        #plt.axes().set_aspect('equal')
         plt.legend()
         plt.show()
