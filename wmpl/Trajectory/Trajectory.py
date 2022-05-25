@@ -5020,6 +5020,10 @@ class Trajectory(object):
         ax1.legend(prop={'size': LEGEND_TEXT_SIZE})
         ax1.grid()
 
+        # Set absolute limits for velocities
+        vel_min = max(vel_min, -20)
+        vel_max = min(vel_max, 100)
+
         # Set velocity limits to +/- 3 km/s
         ax1.set_xlim([vel_min - 3, vel_max + 3])
 
