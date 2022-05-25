@@ -417,6 +417,8 @@ if __name__ == "__main__":
         vel_eval, decel + 2*decel_std, gamma=1.0, shape_factor=gamma_a)
 
 
+    final_decel = final_decel_hi = final_decel_lo = 0
+
     # Run the fragment until the final velocity of 3 km/s
     if vel_eval > 3000:
 
@@ -428,6 +430,14 @@ if __name__ == "__main__":
 
         final_sr_lo, final_mass_lo, final_lat_lo, final_lon_lo, final_ele_lo = computeFragEndParams(traj, \
             dyn_mass_lo, bulk_density, ht_eval, vel_eval, gamma_a)
+
+        # Get the deceleration in the last point
+        final_decel = (final_sr.main_vel_arr[-1] - final_sr.main_vel_arr[-2]) \
+            /(final_sr.time_arr[-1] - final_sr.time_arr[-2])
+        final_decel_hi = (final_sr_hi.main_vel_arr[-1] - final_sr_hi.main_vel_arr[-2]) \
+            /(final_sr_hi.time_arr[-1] - final_sr_hi.time_arr[-2])
+        final_decel_lo = (final_sr_lo.main_vel_arr[-1] - final_sr_lo.main_vel_arr[-2]) \
+            /(final_sr_lo.time_arr[-1] - final_sr_lo.time_arr[-2])
 
         # Plot the simulated velocity until the end (time plot)
         ax2.plot(final_sr_lo.main_vel_arr/1000, final_sr_lo.time_arr + time_eval, label='Simulation (-2sigma)', color='k', linestyle='dashed')
@@ -458,20 +468,23 @@ if __name__ == "__main__":
     print("Simulation down to 3 km/s:")
     print("------------------------------------")
     print("Final end coordinates (-2sigma mass)")
-    print("Mass     = {:.3f} kg".format(final_mass_lo))
-    print("Lat (+N) = {:.5f} deg".format(final_lat_lo))
-    print("Lon (+E) = {:.5f} deg".format(final_lon_lo))
-    print("Ele MSL  = {:.2f} km".format(final_ele_lo))
+    print("Mass      = {:.3f} kg".format(final_mass_lo))
+    print("Lat (+N)  = {:.5f} deg".format(final_lat_lo))
+    print("Lon (+E)  = {:.5f} deg".format(final_lon_lo))
+    print("Ele MSL   = {:.2f} km".format(final_ele_lo))
+    print("End decel = {:.3f} km/s^2".format(final_decel_lo/1000))
     print("Final end coordinates (nominal mass)")
-    print("Mass     = {:.3f} kg".format(final_mass))
-    print("Lat (+N) = {:.5f} deg".format(final_lat))
-    print("Lon (+E) = {:.5f} deg".format(final_lon))
-    print("Ele MSL  = {:.2f} km".format(final_ele))
+    print("Mass      = {:.3f} kg".format(final_mass))
+    print("Lat (+N)  = {:.5f} deg".format(final_lat))
+    print("Lon (+E)  = {:.5f} deg".format(final_lon))
+    print("Ele MSL   = {:.2f} km".format(final_ele))
+    print("End decel = {:.3f} km/s^2".format(final_decel/1000))
     print("Final end coordinates (+2sigma mass)")
-    print("Mass     = {:.3f} kg".format(final_mass_hi))
-    print("Lat (+N) = {:.5f} deg".format(final_lat_hi))
-    print("Lon (+E) = {:.5f} deg".format(final_lon_hi))
-    print("Ele MSL  = {:.2f} km".format(final_ele_hi))
+    print("Mass      = {:.3f} kg".format(final_mass_hi))
+    print("Lat (+N)  = {:.5f} deg".format(final_lat_hi))
+    print("Lon (+E)  = {:.5f} deg".format(final_lon_hi))
+    print("Ele MSL   = {:.2f} km".format(final_ele_hi))
+    print("End decel = {:.3f} km/s^2".format(final_decel_hi/1000))
 
 
     ax2.invert_yaxis()

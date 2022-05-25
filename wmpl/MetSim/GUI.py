@@ -6,9 +6,11 @@ import sys
 import copy
 import argparse
 import time
+import datetime
 import json
 import glob
 import multiprocessing as mp
+import importlib.machinery
 
 import numpy as np
 import scipy.stats
@@ -23,13 +25,14 @@ from PyQt5.uic import loadUi
 from wmpl.Formats.Met import loadMet
 from wmpl.MetSim.GUITools import MatplotlibPopupWindow
 from wmpl.MetSim.MetSimErosion import runSimulation, Constants
-from wmpl.Trajectory.Orbit import calcOrbit
+from wmpl.Trajectory.Trajectory import Trajectory, ObservedPoints
+from wmpl.Trajectory.Orbit import calcOrbit, Orbit
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensity, atmDensPoly
-from wmpl.Utils.Math import mergeClosePoints, findClosestPoints, vectMag, lineFunc, meanAngle
+from wmpl.Utils.Math import mergeClosePoints, findClosestPoints, vectMag, vectNorm, lineFunc, meanAngle
 from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy
 from wmpl.Utils.Pickling import loadPickle, savePickle
 from wmpl.Utils.Plotting import saveImage
-from wmpl.Utils.TrajConversions import unixTime2JD, geo2Cartesian, cartesian2Geo, altAz2RADec, \
+from wmpl.Utils.TrajConversions import unixTime2JD, datetime2JD, geo2Cartesian, cartesian2Geo, altAz2RADec, \
     altAz2RADec_vect, raDec2ECI
 
 
@@ -1353,8 +1356,170 @@ def loadConstants(sim_fit_json):
 
 
 
+def loadUSGInputFile(dir_path, usg_file):
+    """ Load the USG input file into a trajectory. """
+
+
+    # Load the file data
+    loader = importlib.machinery.SourceFileLoader('data', os.path.join(dir_path, usg_file))
+    data = loader.load_module()
+
+    # Convert time from string to datetime
+    try:
+        data.dt = datetime.datetime.strptime(data.time, "%Y-%m-%d %H:%M:%S.%f")
+    except ValueError:
+        data.dt = datetime.datetime.strptime(data.time, "%Y-%m-%d %H:%M:%S")
+
+    # Convert time to JD
+    data.jd = datetime2JD(data.dt)
+
+
+    ### Compute light curve ###
+    
+    data.usg_intensity_data = np.array(data.usg_intensity_data)
+
+    # Extract the time
+    data.time_data = data.usg_intensity_data[:,0]
+
+    # Compute the light curve (see Brown et al. 1996, St. Robert paper)
+    data.absolute_magnitudes = -2.5*np.log10(data.usg_intensity_data[:,1]/248)
+
+    ### ###
+
+
+    ### Prepare all light curves as input ###
+
+    # Add USG/CNEOS data
+    lc_data = {}
+    lc_data["CNEOS"] = np.c_[np.array(data.time_data), np.array(data.absolute_magnitudes)]
+
+    # Add any additional light curves (note that the time base needs to be the same)
+    if hasattr(data, "additional_lcs"):
+        lc_data.update(data.additional_lcs)
+
+
+    ### ###
+
+
+    
+
+    # Get the reference point in ECI
+    eci_ref = np.array(geo2Cartesian(np.radians(data.lat), np.radians(data.lon), 1000*data.ht, data.jd))
+
+    # Get the radiant in ECI coordiantes
+    ra_rad, dec_rad = altAz2RADec(np.radians(data.azimuth), np.radians(data.entry_angle), data.jd, \
+        np.radians(data.lat), np.radians(data.lon))
+    eci_rad = vectNorm(np.array(raDec2ECI(ra_rad, dec_rad)))
+
+
+
+    # Init the trajectory structure
+    traj = Trajectory(data.jd, output_dir=dir_path, meastype=2)
+
+
+    # Keep track of the beg/end point
+    rbeg_lat = 0
+    rend_lat = 0
+    rbeg_lon = 0
+    rend_lon = 0
+    rbeg_ele = 0
+    rend_ele = np.inf
+
+    # Go though all available light curves
+    for station_id in lc_data:
+
+        time_data, abs_mag_data = np.array(lc_data[station_id]).T
+
+
+        ### Compute the height array ###
+
+        # Compute height of the fireball over time
+        lat_data = []
+        lon_data = []
+        height_data = []
+        for t in time_data:
+
+            # Compute the length relative to the reference point (in meters)
+            l = t*1000*data.v
+
+            # Compute the ECI coordinates of the fireball
+            eci = eci_ref - l*eci_rad
+
+            # Compute reference julian date
+            jd = data.jd + t/86400
+
+            # Compute geo coordinates of the point on the trajectory at the given time
+            lat, lon, h = cartesian2Geo(jd, *eci)
+
+            lat_data.append(lat)
+            lon_data.append(lon)
+            height_data.append(h)
+
+        lat_data = np.array(lat_data)
+        lon_data = np.array(lon_data)
+        height_data = np.array(height_data)
+
+        ### ###
+
+
+        # Init the observations
+        obs = ObservedPoints(data.jd, np.zeros_like(abs_mag_data), \
+            np.zeros_like(abs_mag_data), time_data, np.radians(data.lat), np.radians(data.lon), \
+            1000*data.ht, 2, station_id=station_id)
+
+        # Assign magnitude data
+        obs.absolute_magnitudes = abs_mag_data
+
+        # Assign dynamics
+        obs.velocities = np.zeros_like(obs.absolute_magnitudes) + 1000*data.v
+        obs.lag = np.zeros_like(obs.absolute_magnitudes)
+
+        # Assign computed heights
+        obs.model_ht = obs.meas_ht = height_data
+
+        # Assign computed geo coordinates
+        obs.model_lat = obs.meas_lat = lat_data
+        obs.model_lon = obs.meas_lon = lon_data
+
+        # Add the observations to the trajectory
+        traj.observations.append(obs)
+
+
+        # Keep track of the begin/final point
+        top_index = np.argmax(height_data)
+        bottom_index = np.argmin(height_data)
+        if height_data[top_index] > rbeg_ele:
+            rbeg_lat = lat_data[top_index]
+            rbeg_lon = lon_data[top_index]
+            rbeg_ele = height_data[top_index]
+
+        if height_data[bottom_index] < rend_ele:
+            rend_lat = lat_data[bottom_index]
+            rend_lon = lon_data[bottom_index]
+            rend_ele = height_data[bottom_index]
+
+
+
+    # Assign trajectory parameters
+    traj.rbeg_lat = rbeg_lat
+    traj.rend_lat = rend_lat
+    traj.rbeg_lon = rbeg_lon
+    traj.rend_lon = rend_lon
+    traj.rbeg_ele = rbeg_ele
+    traj.rend_ele = rend_ele
+    traj.orbit = Orbit()
+    traj.orbit.zc = np.radians(90 - data.entry_angle)
+    traj.orbit.v_avg = traj.orbit.v_avg_norot = 1000*data.v
+    traj.orbit.v_init = traj.orbit.v_init_norot = 1000*data.v
+
+
+    return data, traj
+
+
+
 class MetSimGUI(QMainWindow):
-    def __init__(self, traj_path, const_json_file=None, met_path=None, lc_path=None, wid_files=None):
+    def __init__(self, traj_path, const_json_file=None, met_path=None, lc_path=None, wid_files=None, \
+        usg_input=False):
         """ GUI tool for MetSim. 
     
         Arguments:
@@ -1365,13 +1530,24 @@ class MetSimGUI(QMainWindow):
             met_path: [str] Path to the METAL or mirfit .met file with additional magnitude or lag information.
             lc_path: [str] Path to the light curve CSV file.
             wid_files: [str] Mirfit wid files containing the meteor wake information.
+            usg_input: [bool] Instead of a trajectory pickle file, a special input file for CNEOS data is 
+                given.
         """
         
 
         self.traj_path = traj_path
 
-        # Load the trajectory pickle file
-        self.traj = loadPickle(*os.path.split(traj_path))
+        self.usg_data = None
+        if not usg_input:
+
+            # Load the trajectory pickle file
+            self.traj = loadPickle(*os.path.split(traj_path))
+
+        else:
+
+            # Load the trajectory from USG input file
+            self.usg_data, self.traj = loadUSGInputFile(*os.path.split(traj_path))
+
 
         # Extract the directory path
         self.dir_path = os.path.dirname(traj_path)
@@ -1533,6 +1709,14 @@ class MetSimGUI(QMainWindow):
 
         # Init the constants
         self.const = Constants()
+
+        # Assign USG values from the input file, if given
+        if self.usg_data is not None:
+
+            self.const.v_init = 1000*self.usg_data.v
+            self.const.zenith_angle = np.radians(90 - self.usg_data.entry_angle)
+            self.const.P_0m = self.usg_data.P_0m_bolo
+
 
         # If a JSON file with constant was given, load them instead of initing from scratch
         if const_json_file is not None:
@@ -1974,7 +2158,7 @@ class MetSimGUI(QMainWindow):
 
         self.inputRho.setText("{:d}".format(int(const.rho)))
         self.inputRhoGrain.setText("{:d}".format(int(const.rho_grain)))
-        self.inputMassInit.setText("{:.1e}".format(const.m_init))
+        self.inputMassInit.setText("{:.2e}".format(const.m_init))
         self.inputAblationCoeff.setText("{:.4f}".format(const.sigma*1e6))
         self.inputVelInit.setText("{:.3f}".format(const.v_init/1000))
         self.inputShapeFact.setText("{:.2f}".format(const.shape_factor))
@@ -4603,10 +4787,19 @@ if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser(description="Run meteor ablation modelling using the given trajectory file.")
 
     arg_parser.add_argument('traj_pickle', metavar='TRAJ_PICKLE', type=str, \
-        help="Either the .pickle file with the trajectory solution and the magnitudes, or the path to the folder when the --all option is given.")
+        help="Either the .pickle file with the trajectory solution and the magnitudes, or the path to the \
+        folder when the --all option is given. If the --usg option is given, the trajectory will be loaded \
+        from a file specifing a reference points and a light curve.")
+
+    arg_parser.add_argument('--usg', \
+        help=""" Flag for US government (CNEOS) data. The trajectory is given in a special input file \
+        instead of a pickle file.
+        """, \
+        action="store_true")
 
     arg_parser.add_argument('-l', '--load', metavar='LOAD_JSON', \
-        help="Load JSON file with fit parameters. Instead of giving the full path to the file, you can call it as '--load .' and it will automatically find the file if it exists.", type=str)
+        help="Load JSON file with fit parameters. Instead of giving the full path to the file, you can call \
+        it as '--load .' and it will automatically find the file if it exists.", type=str)
 
     arg_parser.add_argument('-m', '--met', metavar='MET_FILE', \
         help='Load additional observations from a METAL or mirfit .met file.', type=str)
@@ -4660,7 +4853,7 @@ if __name__ == "__main__":
     traj_pickle_file = None
     met_file = None
     wid_files = None
-    if cml_args.all:
+    if cml_args.all and not cml_args.usg:
 
         # Find all folders that match the given regex
         for dir_path in glob.glob(os.path.abspath(cml_args.traj_pickle.rstrip(os.sep) + "*")):
@@ -4778,7 +4971,7 @@ if __name__ == "__main__":
 
     # Init the MetSimGUI application
     main_window = MetSimGUI(traj_pickle_file, const_json_file=load_file, \
-        met_path=met_file, lc_path=cml_args.lc, wid_files=wid_files)
+        met_path=met_file, lc_path=cml_args.lc, wid_files=wid_files, usg_input=cml_args.usg)
 
 
     main_window.show()

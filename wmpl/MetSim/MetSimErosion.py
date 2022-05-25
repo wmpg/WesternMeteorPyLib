@@ -634,6 +634,7 @@ def ablateAll(fragments, const, compute_wake=False):
         # If the deceleration is negative (i.e. the fragment is accelerating), then stop the fragment
         if deceleration_total > 0:
             frag.vv = frag.vh = frag.v = 0
+            deceleration_total = 0
 
         # Otherwise update the velocity
         else:
@@ -682,12 +683,15 @@ def ablateAll(fragments, const, compute_wake=False):
         frag.m = m_new
         frag.h = frag.h + frag.vv*const.dt
 
-        # Compute luminosity for one grain/fragment (without the deceleration term)
+        # Get the luminous efficiency
         tau = luminousEfficiency(const.lum_eff_type, const.lum_eff, frag.v, frag.m)
-        lum = -tau*((mass_loss_ablation/const.dt*frag.v**2)/2)
 
-        # # NOTE: Not the deceleration term is not numerically stable for some reason...
-        #lum = -tau*((mass_loss_ablation/const.dt*frag.v**2)/2 - frag.m*frag.v*deceleration_total)
+        # # Compute luminosity for one grain/fragment (without the deceleration term)
+        # lum = -tau*((mass_loss_ablation/const.dt*frag.v**2)/2)
+
+        # Compute luminosity for one grain/fragment (with the deceleration term)
+        # NOTE: The deceleration term can sometimes be numerically unstable for some reason...
+        lum = -tau*((mass_loss_ablation/const.dt*frag.v**2)/2 + frag.m*frag.v*deceleration_total)
 
         # Compute the electron line density
         beta = ionizationEfficiency(frag.v)
