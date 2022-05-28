@@ -181,6 +181,9 @@ class ConfigStruct(object):
 
         ###
 
+        # Meteorites with orbits
+        self.meteorites_orbit_file = os.path.join(abs_path, 'share', 'Meteorites_with_Orbits.csv')
+
 
         ### SHOWER ASSOCIATION
 

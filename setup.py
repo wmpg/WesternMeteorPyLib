@@ -113,15 +113,14 @@ if "linux" in sys.platform:
     subprocess.call(["make", "-C", gural_common])
     subprocess.call(["make", "-C", gural_trajectory])
 
-    # Add gural library to data files
-    traj_library = os.path.join("wmpl", "Trajectory", 'lib', 'trajectory', 'libtrajectorysolution')
-    if os.path.isfile(traj_library):
-        share_files += [traj_library]
+    # Add gural library files to install - shared libraries & PSO configuration
+    gural_files = [ 
+        os.path.join(gural_trajectory, 'libtrajectorysolution.so'),
+        os.path.join(gural_trajectory, 'libtrajectorysolution.so.0'),
+        os.path.join(gural_trajectory, 'conf', 'trajectorysolution.conf'),
+    ]
 
-    # Path to the PSO configuration
-    pso_config_path = os.path.join("wmpl", "Trajectory", 'lib', 'trajectory', 'conf', 'trajectorysolution.conf')
-    if os.path.isfile(pso_config_path):
-        share_files += [pso_config_path]
+    share_files += [file for file in gural_files if os.path.isfile(file)]
 
 
 setup(
