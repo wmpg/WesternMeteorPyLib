@@ -803,7 +803,9 @@ if __name__ == "__main__":
         plt.ylim((-5, 4))
         plt.xlabel("ln(alpha*sin(slope))")
         plt.ylabel("ln(beta)")
-        #plt.legend(loc='upper right')
+
+        plt.axes().set_aspect('equal')
+        plt.legend(loc='upper right')
         plt.tight_layout()
         plt.show()
 
