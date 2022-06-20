@@ -482,6 +482,10 @@ class GuralTrajectory(object):
         # Track magnitudes
         self.magnitudes = []
 
+        # Track begin & end in FOV flags
+        self.fov_beg = []
+        self.fov_end = []
+
         # Construct a file name for this event
         self.file_name = jd2Date(self.jdt_ref, dt_obj=True).strftime('%Y%m%d_%H%M%S')
 
@@ -713,7 +717,7 @@ class GuralTrajectory(object):
 
 
     def infillTrajectory(self, theta_data, phi_data, time_data, lat, lon, ele, noise=None, magnitudes=None,
-        station_id=None, obs_id=None, comment=None):
+        station_id=None, obs_id=None, fov_beg=None, fov_end=None, comment=None):
         """ Fills in the trajectory structure with given observations: azimuth in radians, zenith angle in
             radians, time in seconds relative to jdt_ref. This function should be called for each observing
             site, not more than 'maxcameras' times.
@@ -748,6 +752,10 @@ class GuralTrajectory(object):
 
         # Track the magnitudes of each site
         self.magnitudes.append(magnitudes)
+
+        # Track the beg/end fov flags
+        self.fov_beg.append(fov_beg)
+        self.fov_end.append(fov_end)
 
         # Track the comment of each site
         if comment is None:
@@ -1328,8 +1336,8 @@ class GuralTrajectory(object):
             info.append(f'{"None":>9s}')
             info.append(f'{"None":>18s}')
             info.append(f'{"None":>6s}')
-            info.append(f'{"None":>7s}')
-            info.append(f'{"None":>7s}')
+            info.append(f'{self.fov_beg[cam]:>7s}')
+            info.append(f'{self.fov_end[cam]:>7s}')
             info.append(f'{self.station_comments[cam]:s}')
 
             out += ', '.join(info) + '\n'
