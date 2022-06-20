@@ -1576,7 +1576,7 @@ class GuralTrajectory(object):
         self.radiant_eci = np.array(raDec2ECI(self.ra_radiant, self.dec_radiant))
 
         # Deceleration parameters
-        self.decel = np.array(self.solution[6:9])
+        self.decel = np.array(self.solution[6:8])
 
         print('RA:', np.degrees(self.ra_radiant))
         print('Dec:', np.degrees(self.dec_radiant))
