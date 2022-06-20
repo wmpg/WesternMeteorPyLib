@@ -1336,8 +1336,8 @@ class GuralTrajectory(object):
             info.append(f'{"None":>9s}')
             info.append(f'{"None":>18s}')
             info.append(f'{"None":>6s}')
-            info.append(f'{self.fov_beg[cam]:>7s}')
-            info.append(f'{self.fov_end[cam]:>7s}')
+            info.append(f'{str(self.fov_beg[cam]):>7s}')
+            info.append(f'{str(self.fov_end[cam]):>7s}')
             info.append(f'{self.station_comments[cam]:s}')
 
             out += ', '.join(info) + '\n'
