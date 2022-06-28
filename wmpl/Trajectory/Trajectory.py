@@ -39,9 +39,13 @@ from wmpl.Utils.Plotting import savePlot
 from wmpl.Utils.PlotOrbits import plotOrbits
 from wmpl.Utils.PlotCelestial import CelestialPlot
 from wmpl.Utils.PlotMap import GroundMap
+from wmpl.Utils.PlotMap_OSM import OSMMap
 from wmpl.Utils.TrajConversions import EARTH, G, ecef2ENU, enu2ECEF, geo2Cartesian, geo2Cartesian_vect, \
     cartesian2Geo, altAz2RADec_vect, raDec2AltAz, raDec2AltAz_vect, raDec2ECI, eci2RaDec, jd2Date, datetime2JD
 from wmpl.Utils.PyDomainParallelizer import parallelComputeGenerator
+
+import cartopy.crs as ccrs
+import cartopy.io.img_tiles as cimgt
 
 
 # Text size of image legends
