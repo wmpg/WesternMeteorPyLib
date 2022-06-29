@@ -18,13 +18,14 @@ from wmpl.Trajectory.Orbit import calcOrbit
 from wmpl.Utils.TrajConversions import geo2Cartesian, raDec2ECI, altAz2RADec_vect, \
     raDec2AltAz_vect, jd2Date
 from wmpl.Utils.Math import vectMag, findClosestPoints, sphericalToCartesian, lineFunc
+from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import savePickle
 
 # Path to the compiled trajectory library
 #TRAJ_LIBRARY = os.path.join('lib', 'libtrajectorysolution')
 TRAJ_LIBRARY = os.path.join('lib', 'trajectory', 'libtrajectorysolution')
 
-# Path to the PSO configuration
+# Path to the default PSO configuration
 PSO_CONFIG_PATH = os.path.join('lib', 'trajectory', 'conf', 'trajectorysolution.conf')
 
 
@@ -45,8 +46,8 @@ PPPDOUBLE = ct.POINTER(PPDOUBLE)
 
 
 class PSO_info(ct.Structure):
-    """ Mimicks PSO_info structure from the TrajectorySolution.h file, in Python-understandable 
-        ctypes format. 
+    """ Mimicks PSO_info structure from the TrajectorySolution.h file, in Python-understandable
+        ctypes format.
     """
 
     _fields_ = [
@@ -64,7 +65,7 @@ class PSO_info(ct.Structure):
 
 
 class TrajectoryInfo(ct.Structure):
-    """ Mimicks the TrajectoryInfo structure from the TrajectorySolution.h file, in Python-understandable 
+    """ Mimicks the TrajectoryInfo structure from the TrajectorySolution.h file, in Python-understandable
         ctypes format.
     """
 
@@ -97,7 +98,7 @@ class TrajectoryInfo(ct.Structure):
         ('malloced', ct.POINTER(ct.c_int)),
 
         # Camera/site information
-        ('numcameras ', ct.c_int),
+        ('numcameras', ct.c_int),
         ('camera_lat', PDOUBLE),
         ('camera_lon', PDOUBLE),
         ('camera_hkm', PDOUBLE),
@@ -170,7 +171,7 @@ class TrajectoryInfo(ct.Structure):
         ('meas_hkm', PPDOUBLE),
         ('meas_range', PPDOUBLE),
         ('meas_vel', PPDOUBLE),
-        
+
         ('model_lat', PPDOUBLE),
         ('model_lon', PPDOUBLE),
         ('model_hkm', PPDOUBLE),
@@ -205,8 +206,8 @@ class TrajectoryInfo(ct.Structure):
 
 
 def double2ArrayToPointer(arr):
-    """ Converts a 2D numpy to ctypes 2D array. 
-    
+    """ Converts a 2D numpy to ctypes 2D array.
+
     Arguments:
         arr: [ndarray] 2D numpy float64 array
 
@@ -235,15 +236,15 @@ def double2ArrayToPointer(arr):
 
 
 def double1pointerToArray(ptr, n):
-    """ Converts ctypes 1D array into a 1D numpy array. 
-    
+    """ Converts ctypes 1D array into a 1D numpy array.
+
     Arguments:
         ptr: [ctypes double pointer]
         n: [int] number of cameras
 
     Return:
         arr: [ndarrays] converted numpy array
-        
+
     """
 
     # Init a new empty data array
@@ -258,8 +259,8 @@ def double1pointerToArray(ptr, n):
 
 
 def double2pointerToArray(ptr, n, m_sizes):
-    """ Converts ctypes 2D array into a 2D numpy array. 
-    
+    """ Converts ctypes 2D array into a 2D numpy array.
+
     Arguments:
         ptr: [ctypes double pointer]
         n: [int] number of cameras
@@ -268,7 +269,7 @@ def double2pointerToArray(ptr, n, m_sizes):
     Return:
         arr_list: [list of ndarrays] list of numpy arrays, each list entry containing data for individual
             cameras
-        
+
     """
 
     arr_list = []
@@ -291,8 +292,8 @@ def double2pointerToArray(ptr, n, m_sizes):
 
 
 def double3pointerToArray(ptr, n, m_sizes, p):
-    """ Converts ctypes 3D array into a 3D numpy array. 
-    
+    """ Converts ctypes 3D array into a 3D numpy array.
+
     Arguments:
         ptr: [ctypes double pointer]
         n: [int] number of cameras
@@ -302,7 +303,7 @@ def double3pointerToArray(ptr, n, m_sizes, p):
     Return:
         arr_list: [list of ndarrays] list of numpy arrays, each list entry containing data for individual
             cameras
-        
+
     """
 
     arr_list = []
@@ -354,41 +355,42 @@ def fitLagIntercept(time, length, v_init, initial_intercept=0.0):
     quart_time = time[:quart_size]
 
     # Redo the lag fit, but with fixed velocity
-    lag_intercept, _ = scipy.optimize.curve_fit(lambda x, intercept: lineFunc(x, v_init, intercept), 
+    lag_intercept, _ = scipy.optimize.curve_fit(lambda x, intercept: lineFunc(x, v_init, intercept),
         quart_time, quart_length, p0=[initial_intercept])
 
     return v_init, lag_intercept[0]
 
 
 class GuralTrajectory(object):
-    """ Meteor trajectory estimation, using the Gural solver. 
+    """ Meteor trajectory estimation, using the Gural solver.
 
     IMPORTANT NOTE: If you are accessing measured/modeled data after running the solver, be sure to access it
     this way:
-        
+
         traj = Trajectory(maxcameras, jdt_ref, ...)
-        
+
         ...
         # Data input and solving...
         ...
 
         site_id = 0
         site_velocities = traj.meas_vel[site_id]
-        
+
         # That way, you will select the data of the camera/site you want.
 
     """
 
-    def __init__(self, maxcameras, jdt_ref, velmodel, max_toffset=1.0, nummonte=1, meastype=4, verbose=0, 
-        output_dir='.', show_plots=True, traj_id=None, comment=''):
+    def __init__(self, maxcameras, jdt_ref, velmodel, max_toffset=1.0, nummonte=1, meastype=4, verbose=0,
+        output_dir='.', pso_config=None, show_plots=True, save_results=True, traj_id=None,
+        comment=''):
         """ Initialize meteor trajectory solving.
 
         Arguments:
             maxcameras: [int] Maximum number of cameras expected (to initially allocate arrays)
-            jdt_ref: [float] Reference Julian date/time that the measurements times are provided relative to. 
-                This is user selectable and can be the time of the first camera, or the first measurement, 
-                or some average time for the meteor, but should be close to the time of passage of the meteor. 
-                This same reference date/time will be used on all camera measurements for the purposes of 
+            jdt_ref: [float] Reference Julian date/time that the measurements times are provided relative to.
+                This is user selectable and can be the time of the first camera, or the first measurement,
+                or some average time for the meteor, but should be close to the time of passage of the meteor.
+                This same reference date/time will be used on all camera measurements for the purposes of
                 computing local sidereal time and making  geocentric coordinate transformations.
             velmodel: [int] Velocity propagation model
                 0    = constant   v(t) = vinf
@@ -432,7 +434,7 @@ class GuralTrajectory(object):
 
         # Check if the initial velocity should be computed as the average velocity of the first half
         if 'fha' in velmodel:
-            
+
             self.fha_velocity = True
 
             velmodel = int(velmodel.replace('fha', ''))
@@ -444,13 +446,15 @@ class GuralTrajectory(object):
 
 
         self.velmodel = velmodel
-        
+
 
         # Directory where the trajectory estimation results will be saved
         self.output_dir = output_dir
 
         # If True, plots will be shown on screen when the trajectory estimation is done
         self.show_plots = show_plots
+
+        self.save_results = save_results
 
         # Trajectory solution identifier
         self.traj_id = str(traj_id)
@@ -466,13 +470,32 @@ class GuralTrajectory(object):
         # Track the number of measurements per each camera
         self.nummeas_lst = []
 
+        # Track the station IDs of each camera
+        self.station_ids = []
+
+        # Track the obs_id of each camera
+        self.obs_ids = []
+
+        # Track the comment associated with each camera
+        self.station_comments = []
+
+        # Track magnitudes
+        self.magnitudes = []
+
+        # Track begin & end in FOV flags
+        self.fov_beg = []
+        self.fov_end = []
+
         # Construct a file name for this event
         self.file_name = jd2Date(self.jdt_ref, dt_obj=True).strftime('%Y%m%d_%H%M%S')
 
         ###
         # Init trajectory results (WARNING, there are more results to be read in, these are just some chosen
-        # parameters. Please take a look at TrajectorySolution.h file and the TrajectoryInfo structure for 
+        # parameters. Please take a look at TrajectorySolution.h file and the TrajectoryInfo structure for
         # more solution parameters.)
+
+        # Tracks the number of cameras actually populated by the solver library
+        self.num_cameras = 0
 
         # Arrays of camera coordinates (angles in radians, height in km), per every station
         self.camera_lat = 0
@@ -487,6 +510,10 @@ class GuralTrajectory(object):
         # Convergence angle
         self.max_convergence = 0
 
+        # intersecting planes radiant
+        self.ra_radiant_ip = 0
+        self.dec_radiant_ip = 0
+
         # Radiant right ascension in radians (multi-parameter fit)
         self.ra_radiant = 0
         # Radiant declination in radians (multi-parameter fit)
@@ -496,53 +523,69 @@ class GuralTrajectory(object):
         # Average velocity
         self.vavg = 0
         # Deceleration term 1 defined by the given velocity model
-        self.decel1 = 0         
+        self.decel1 = 0
         # Deceleration term 2 defined by the given velocity model
-        self.decel2 = 0           
+        self.decel2 = 0
 
         # Standard deviation of radiant right ascension in radians
-        self.ra_sigma = 0         
+        self.ra_sigma = 0
         # Standard deviation of radiant declination in radians
-        self.dec_sigma = 0       
+        self.dec_sigma = 0
         # Standard deviation of vbegin in km/sec
-        self.vbegin_sigma = 0    
+        self.vbegin_sigma = 0
         # Standard deviation of decceleration term 1
-        self.decel1_sigma = 0    
+        self.decel1_sigma = 0
         # Standard deviation of decceleration term 2
-        self.decel2_sigma = 0    
+        self.decel2_sigma = 0
 
         # Array of geodetic latitudes closest to trail for each measurement
-        self.meas_lat = 0        
+        self.meas_lat = 0
         # Array of +east longitudes closest to trail for each measurement
-        self.meas_lon = 0         
+        self.meas_lon = 0
         # Array of heights re WGS84 closest to trail for each measurement
-        self.meas_hkm = 0        
+        self.meas_hkm = 0
         # Array of ranges from site along measurement to the CPA of the trail
-        self.meas_range = 0      
+        self.meas_range = 0
         # Array of velocity along the trail for each measurement
-        self.meas_vel = 0 
+        self.meas_vel = 0
 
         # Array of geodetic latitudes for the model positions
-        self.model_lat = 0       
+        self.model_lat = 0
         # Array of +east longitudes for the model positions
-        self.model_lon = 0       
+        self.model_lon = 0
         # Array of heights re WGS84 for the model positions
-        self.model_hkm = 0       
+        self.model_hkm = 0
         # Array of ranges from site to the model positions
-        self.model_range = 0     
+        self.model_range = 0
         # Array of velocity on the trail at each model position
-        self.model_vel = 0       
+        self.model_vel = 0
 
         # Array of timing offsets in seconds
         self.tref_offsets = 0
 
         ## Model fit vectors which follow the same "meastype" on output with dimension #cameras x #measurements(camera)
         # Array of 1st data sequence containing the model fit in meastype format
-        self.model_fit1 = 0      
+        self.model_fit1 = 0
         # Array of 2nd data sequence containing the model fit in meastype format
-        self.model_fit2 = 0      
+        self.model_fit2 = 0
         # Array of model time which includes offsets relative to the reference time
-        self.model_time = 0  
+        self.model_time = 0
+
+        # computed begin point
+        self.rbeg_lat = 0
+        self.rbeg_lon = 0
+        self.rbeg_ht = 0
+        self.rbeg_lat_sigma = 0
+        self.rbeg_lon_sigma = 0
+        self.rbeg_hkm_sigma = 0
+
+        # computed begin point
+        self.rend_lat = 0
+        self.rend_lon = 0
+        self.rend_ht = 0
+        self.rend_lat_sigma = 0
+        self.rend_lon_sigma = 0
+        self.rend_hkm_sigma = 0
 
         ########
 
@@ -589,6 +632,12 @@ class GuralTrajectory(object):
         # Uncertainties (currently not used!)
         self.uncertainties = None
 
+        # use the default pso config file shipped with the module if none is specified
+        if pso_config is None:
+            self.pso_config = os.path.join(os.path.dirname(__file__), PSO_CONFIG_PATH)
+        else:
+            self.pso_config = pso_config
+
         ######
 
 
@@ -599,13 +648,13 @@ class GuralTrajectory(object):
         ### Define trajectory function types and argument types ###
         ######################################################################################################
 
-        
+
         self.traj_lib.MeteorTrajectory.restype = ct.c_int
         self.traj_lib.MeteorTrajectory.argtypes = [
             ct.POINTER(TrajectoryInfo)
         ]
 
-        
+
         self.traj_lib.InitTrajectoryStructure.restype = ct.c_void_p
         self.traj_lib.InitTrajectoryStructure.argtypes = [
             ct.c_int,
@@ -659,17 +708,17 @@ class GuralTrajectory(object):
         self.traj_lib.InitTrajectoryStructure(maxcameras, self.traj)
 
         # Read PSO parameters
-        self.traj_lib.ReadTrajectoryPSOconfig(os.path.join(os.path.dirname(__file__), \
-            PSO_CONFIG_PATH).encode('ascii'), self.traj)
+        self.traj_lib.ReadTrajectoryPSOconfig(self.pso_config.encode('ascii'), self.traj)
 
         # Reset the trajectory structure
-        self.traj_lib.ResetTrajectoryStructure(jdt_ref, max_toffset, velmodel, nummonte, meastype, verbose, 
+        self.traj_lib.ResetTrajectoryStructure(jdt_ref, max_toffset, velmodel, nummonte, meastype, verbose,
             self.traj)
 
 
 
-    def infillTrajectory(self, theta_data, phi_data, time_data, lat, lon, ele, noise=None, station_id=None):
-        """ Fills in the trajectory structure with given observations: azimuth in radians, zenith angle in 
+    def infillTrajectory(self, theta_data, phi_data, time_data, lat, lon, ele, noise=None, magnitudes=None,
+        station_id=None, obs_id=None, fov_beg=None, fov_end=None, comment=None):
+        """ Fills in the trajectory structure with given observations: azimuth in radians, zenith angle in
             radians, time in seconds relative to jdt_ref. This function should be called for each observing
             site, not more than 'maxcameras' times.
 
@@ -683,8 +732,11 @@ class GuralTrajectory(object):
 
         Kwargs:
             noise: [ndarray] observation noise in radians (0 if not provided)
-            station_id: [str] Station ID. NOT USED - here only to match the function interface of the
-                Monte Carlo solver.
+            magnitudes: [list] A list of apparent magnitudes of the meteor. None by default.
+            station_id: [str] Station ID.
+            obs_id: [int] Unique ID of the observation. This is to differentiate different observations from
+                the same station.
+            comment: [str] A comment about the observations.
         """
 
         nummeas = time_data.shape[0]
@@ -692,13 +744,32 @@ class GuralTrajectory(object):
         # Track the number of measurement per each site
         self.nummeas_lst.append(nummeas)
 
+        # Track the station ID of each site
+        self.station_ids.append(station_id)
+
+        # Track the obs_id of each site
+        self.obs_ids.append(obs_id)
+
+        # Track the magnitudes of each site
+        self.magnitudes.append(magnitudes)
+
+        # Track the beg/end fov flags
+        self.fov_beg.append(fov_beg)
+        self.fov_end.append(fov_end)
+
+        # Track the comment of each site
+        if comment is None:
+            comment = ''
+
+        self.station_comments.append(comment)
+
         # If the measurement noise is not given, set it to 0
         if noise is None:
             noise = np.zeros_like(time_data)*0.0
 
         # Fill the trajectory structure for site 1
-        self.traj_lib.InfillTrajectoryStructure(nummeas, npct.as_ctypes(theta_data), 
-            npct.as_ctypes(phi_data), npct.as_ctypes(time_data), npct.as_ctypes(noise), lat, lon, ele/1000.0, 
+        self.traj_lib.InfillTrajectoryStructure(nummeas, npct.as_ctypes(theta_data),
+            npct.as_ctypes(phi_data), npct.as_ctypes(time_data), npct.as_ctypes(noise), lat, lon, ele/1000.0,
             self.traj)
 
 
@@ -711,11 +782,11 @@ class GuralTrajectory(object):
         self.stations_eci_cameras = []
         self.times = []
         self.JD_data_cameras = []
-        
+
 
         # Calculate positions of stations in ECI coordinates, for every point on the meteor's trajectory
         for kmeas, (lat, lon, hkm) in enumerate(zip(self.camera_lat, self.camera_lon, self.camera_hkm)):
-            
+
             station_pos = []
 
             # Calculate time with time offsets included
@@ -751,7 +822,7 @@ class GuralTrajectory(object):
 
             # If inputs are RA and Dec
             if self.meastype == 1:
-                
+
                 ra_data = meas1
                 dec_data = meas2
 
@@ -761,7 +832,7 @@ class GuralTrajectory(object):
 
             # If inputs are azimuth +east of due north, and elevation angle
             elif self.meastype == 2:
-                
+
                 azim_data = meas1
                 elev_data = meas2
 
@@ -789,7 +860,7 @@ class GuralTrajectory(object):
 
             self.meas_eci_los_cameras.append(stat_los_eci)
 
-            
+
 
         ######
 
@@ -800,7 +871,7 @@ class GuralTrajectory(object):
         rad_cpa_all_stations = []
         max_ht = 0
         beg_cpa = None
-        
+
         # Calculate ECI coordinates of all LoS projections on the trajectory
         for stat_eci_los, meas_eci_los in zip(self.stations_eci_cameras, self.meas_eci_los_cameras):
 
@@ -956,7 +1027,7 @@ class GuralTrajectory(object):
             # plt.show()
 
 
-        
+
 
     def calcLag(self):
         """ Calculates the lag. """
@@ -1000,7 +1071,7 @@ class GuralTrajectory(object):
             # Calculate ECI coordinated for every point on the meteor's track
             for j in range(self.nummeas_lst[kmeas]):
 
-                eci_list.append(geo2Cartesian(self.model_lat[kmeas][j], self.model_lon[kmeas][j], 
+                eci_list.append(geo2Cartesian(self.model_lat[kmeas][j], self.model_lon[kmeas][j],
                     1000*self.model_hkm[kmeas][j], self.JD_data_cameras[kmeas][j]))
 
             eci_list = np.array(eci_list)
@@ -1035,7 +1106,7 @@ class GuralTrajectory(object):
         ### PLOT RESIDUALS
 
         # Go through every stations
-        for i, (time_data, meas1, model1, meas2, model2) in enumerate(zip(self.times, self.meas1, 
+        for i, (time_data, meas1, model1, meas2, model2) in enumerate(zip(self.times, self.meas1,
             self.model_fit1, self.meas2, self.model_fit2)):
 
             # Calculate angular deviations in azimuth and elevation
@@ -1057,10 +1128,10 @@ class GuralTrajectory(object):
 
 
         plt.title('Observed vs. Radiant LoS Residuals, all stations')
-        
+
         plt.ylabel('Angle (arcsec)')
         plt.xlabel('Time (s)')
-        
+
         plt.ylim(ymin=0)
 
         plt.grid()
@@ -1092,7 +1163,7 @@ class GuralTrajectory(object):
         ######
 
 
-        
+
         ### PLOT VELOCITIES
 
         # Possible markers for velocity
@@ -1100,18 +1171,18 @@ class GuralTrajectory(object):
 
         # Generate a list of colors to use for markers
         colors = cm.rainbow(np.linspace(0, 1 , len(self.times)))
-        
+
         for i, (time_obs, vel_obs) in enumerate(zip(self.times, self.velocities)):
 
             # Plot the measured velocity
-            plt.scatter(vel_obs[1:], time_obs[1:], c=colors[i], marker=markers[i%len(markers)], alpha=0.5, 
+            plt.scatter(vel_obs[1:], time_obs[1:], c=colors[i], marker=markers[i%len(markers)], alpha=0.5,
                 label='Measured, station: ' + str(i + 1), zorder=3)
 
 
         for i, (time_model, vel_model) in enumerate(zip(self.model_time, self.model_vel)):
 
             # Plot modelled velocity
-            plt.plot(vel_model*1000.0, time_model, c=colors[i], zorder=3, alpha=0.5, 
+            plt.plot(vel_model*1000.0, time_model, c=colors[i], zorder=3, alpha=0.5,
                 label='Modelled, station: ' + str(i + 1))
 
 
@@ -1127,6 +1198,272 @@ class GuralTrajectory(object):
 
 
 
+    def saveReport(self, dir_path, file_name, uncertainties=None, verbose=True, save_results=True):
+        """
+        Save the trajectory estimation report to file.
+        This function loosely mimics the output of Trajectory.py
+
+        Arguments:
+            dir_path: [str] Path to the directory where the report will be saved.
+            file_name: [str] Name of the report time.
+
+        Keyword arguments:
+            uncertainties: [MCUncertainties object] (UNUSED) Object contaning uncertainties of every parameter.
+            verbose: [bool] Print the report to the screen. True by default.
+            save_results: [bool] If True, the results will be saved to a file.
+        """
+        # Format longitude in the -180 to 180 deg range
+        _formatLongitude = lambda x: (x + np.pi)%(2*np.pi) - np.pi
+
+        out = 'Input measurement type: '
+
+        # Write out measurement type
+        if self.meastype == 1:
+            out += 'Right Ascension for meas1, Declination for meas2, epoch of date\n'
+        elif self.meastype == 2:
+            out += 'Azimuth +east of due north for meas1, Elevation angle above the horizon for meas2\n'
+        elif self.meastype == 3:
+            out += 'Azimuth +west of due south for meas1, Zenith angle for meas2\n'
+        elif self.meastype == 4:
+            out += 'Azimuth +north of due east for meas1, Zenith angle for meas2\n'
+
+        out += "\n"
+        out += f'Reference JD: {self.jdt_ref:20.12f}\n'
+        out += f'Time: {str(jd2Date(self.orbit.jd_ref, dt_obj=True))} UTC'
+
+        out += '\n\n'
+
+        # gural solver doesn't report all candidates, only selected plane intersection
+        # and station ids used are not reported
+        out += 'Plane intersections\n'
+        out += '-------------------\n'
+        out += 'Intersection 1 - Station IDs unavailable\n'
+        out += f' Convergence Angle = {np.degrees(self.max_convergence):.5f} deg\n'
+        out += f' R.A. = {np.degrees(self.ra_radiant_ip):>9.5f}'
+        out += f'  Dec = {np.degrees(self.dec_radiant_ip):>+9.5f} deg\n'
+
+        out += '\n'
+        out += f'Best intersection: Station IDs unavailable with Qconv = {np.degrees(self.max_convergence):.2f} deg\n'
+
+        out += '\n\n'
+
+        out += 'Multi-parameter fit solution\n'
+        out += '----------------------------\n'
+
+        # gural solver doesn't provide uncertainties for these
+        # values out of the solver are in km and km/s
+        out += 'State vector (ECI, epoch of date):\n'
+        out += f' X =  {self.solution[0] * 1000.0:11.2f} m\n'
+        out += f' Y =  {self.solution[1] * 1000.0:11.2f} m\n'
+        out += f' Z =  {self.solution[2] * 1000.0:11.2f} m\n'
+        out += f' Vx = {self.solution[3] * 1000.0:11.2f} m/s\n'
+        out += f' Vy = {self.solution[4] * 1000.0:11.2f} m/s\n'
+        out += f' Vz = {self.solution[5] * 1000.0:11.2f} m/s\n'
+
+        out += '\n'
+        out += 'State vector covariance matrix (X, Y, Z, Vx, Vy, Vz):\n'
+        out += ' Not available\n'
+
+        out += '\n'
+        out += 'Timing offsets (from input data)\n'
+
+        for station_id, toffset in zip(self.station_ids, self.tref_offsets):
+            out += f'{station_id:>14s}: {toffset:.6f}\n'
+
+        if self.orbit is not None:
+            out += '\n'
+            out += 'Reference point on the trajectory\n'
+            out += f'  Time: {str(jd2Date(self.orbit.jd_ref, dt_obj=True))} UTC\n'
+            out += f'  Lat     = {np.degrees(self.orbit.lat_ref):>11.6f}\n'
+            out += f'  Lon     = {np.degrees(_formatLongitude(self.orbit.lon_ref)):>+11.6}\n'
+            out += f'  Ht      = {self.orbit.ht_ref}\n'
+            out += f'  Lat geo = {np.degrees(self.orbit.lat_geocentric)}\n'
+
+            # Write out orbital parameters
+            out += '\n'
+            out += repr(self.orbit)
+
+            # We don't have the orbital covariance matrix so skip it
+
+        out += '\n'
+        out += 'Jacchia fit on lag:\n'
+        out += ' Not available\n'
+
+        # Once again heights are in km
+        out += '\n'
+        out += 'Begin point on the trajectory (error estimate at 1.0 sigma):\n'
+        out += f'  Lat = {np.degrees(self.rbeg_lat):>11.6f}'
+        out += f' +/- {np.degrees(self.rbeg_lat_sigma):6.4f} deg\n'
+        out += f'  Lon = {np.degrees(_formatLongitude(self.rbeg_lon)):>+11.6f}'
+        out += f' +/- {np.degrees(self.rbeg_lon_sigma):6.4f} deg\n'
+        out += f'  Ht  = {self.rbeg_hkm * 1000.0:>11.2f}'
+        out += f' +/- {self.rbeg_hkm_sigma * 1000.0:6.2f} m\n'
+
+        out += 'End point on the trajectory:\n'
+        out += f'  Lat = {np.degrees(self.rend_lat):>11.6f}'
+        out += f' +/- {np.degrees(self.rend_lat_sigma):6.4f} deg\n'
+        out += f'  Lon = {np.degrees(_formatLongitude(self.rend_lon)):>+11.6f}'
+        out += f' +/- {np.degrees(self.rend_lon_sigma):6.4f} deg\n'
+        out += f'  Ht  = {self.rend_hkm * 1000.0:>11.2f}'
+        out += f' +/- {self.rend_hkm_sigma * 1000.0:6.2f} m\n'
+
+        ### Write information about stations ###
+        ######################################################################################################
+        out += '\n'
+        out += "Stations\n"
+        out += "--------\n"
+
+        # Note we only have a single global acceleration computation for the entire trajectory
+        # not a Jacchia fit for each station's lags as we have with the pylig solver
+        # we make do with what we have...
+        out += '            ID, Ignored, Lon +E (deg), Lat +N (deg),  Ht (m),   Accel a1,   Accel a2,  Beg Ht (m),  End Ht (m), +/- Obs ang (deg), +/- V (m), +/- H (m), Persp. angle (deg), Weight, FOV Beg, FOV End, Comment\n'
+
+        for cam in range(0, self.num_cameras):
+            endpt = self.nummeas_lst[cam] - 1
+
+            info = []
+            info.append(f'{self.station_ids[cam]:>14s}')
+            info.append(f'{0:>7d}')
+            info.append(f'{np.degrees(self.camera_lon[cam]):>12.6f}')
+            info.append(f'{np.degrees(self.camera_lat[cam]):>12.6f}')
+            info.append(f'{self.camera_hkm[cam] * 1000.0:>7.2f}')
+            info.append(f'{self.decel1:>10.6f}')
+            info.append(f'{self.decel2:>10.6f}')
+            info.append(f'{self.model_hkm[cam][0] * 1000.0:>11.2f}')
+            info.append(f'{self.model_hkm[cam][endpt] * 1000.0:>11.2f}')
+            info.append(f'{"None":>17s}')
+            info.append(f'{"None":>9s}')
+            info.append(f'{"None":>9s}')
+            info.append(f'{"None":>18s}')
+            info.append(f'{"None":>6s}')
+            info.append(f'{str(self.fov_beg[cam]):>7s}')
+            info.append(f'{str(self.fov_end[cam]):>7s}')
+            info.append(f'{self.station_comments[cam]:s}')
+
+            out += ', '.join(info) + '\n'
+
+        ### Write information about individual points ###
+        ######################################################################################################
+        out += '\n'
+        out += "Points\n"
+        out += "------\n"
+
+        out += " No, "
+        out += "    Station ID, "
+        out += " Ignore, "
+        out += " Time (s), "
+        out += "                  JD, "
+        out += "    meas1, "
+        out += "    meas2, "
+        out += "Azim +E of due N (deg), "
+        out += "Alt (deg), "
+        out += "Azim line (deg), "
+        out += "Alt line (deg), "
+        out += "RA obs (deg), "
+        out += "Dec obs (deg), "
+        out += "RA line (deg), "
+        out += "Dec line (deg), "
+        out += "      X (m), "
+        out += "      Y (m), "
+        out += "      Z (m), "
+        out += "Latitude (deg), "
+        out += "Longitude (deg), "
+        out += "Height (m), "
+        out += " Range (m), "
+        out += "Length (m), "
+        out += "State vect dist (m), "
+        out += "  Lag (m), "
+        out += "Vel (m/s), "
+        out += "Vel prev avg (m/s), "
+        out += "H res (m), "
+        out += "V res (m), "
+        out += "Ang res (asec), "
+        out += "AppMag, "
+        out += "AbsMag"
+        out += "\n"
+
+        # A number of these fields were never implemented by the GuralTrajectory
+        # solver and are thus omitted here (left as 'None')
+        for cam in range(0, self.num_cameras):
+            for pt in range(0, self.nummeas_lst[cam]):
+                info = []
+                info.append(f'{pt:3d}')
+                info.append(f'{self.station_ids[cam]:>14s}')
+                info.append(f'{0:>7d}')
+
+                info.append(f'{self.model_time[cam][pt]:9.6f}')
+                info.append(f'{self.JD_data_cameras[cam][pt]:20.12f}')
+
+                info.append(f'{np.degrees(self.meas1[cam][pt]):9.5f}')
+                info.append(f'{np.degrees(self.meas2[cam][pt]):9.5f}')
+
+                # Not yet implemented - would need to convert from meas & model
+                # (lat,lon) or ECI coords at each point
+                info.append(f'{"None":>22s}')
+                info.append(f'{"None":>9s}')
+                info.append(f'{"None":>15s}')
+                info.append(f'{"None":>14s}')
+                info.append(f'{"None":>12s}')
+                info.append(f'{"None":>13s}')
+                info.append(f'{"None":>13s}')
+                info.append(f'{"None":>14s}')
+
+                for eci in range(0,3):
+                    info.append(f'{self.model_eci_cameras[cam][pt][eci]:11.2f}')
+
+                info.append(f'{np.degrees(self.model_lat[cam][pt]):14.6f}')
+                info.append(f'{np.degrees(self.model_lon[cam][pt]):+15.6f}')
+                info.append(f'{self.model_hkm[cam][pt] * 1000.0:10.2f}')
+                info.append(f'{self.model_range[cam][pt] * 1000.0:10.2f}')
+
+                info.append(f'{self.lengths[cam][pt]:10.2f}')
+                info.append(f'{self.state_vector_distances[cam][pt]:19.2f}')
+                info.append(f'{self.lags[cam][pt]:9.2f}')
+
+                # velocities_prev_point was never implemented
+                info.append(f'{self.velocities[cam][pt]:9.2f}')
+                info.append(f'{"None":>18s}')
+
+                # residual data are not available
+                info.append(f'{"None":>9s}')
+                info.append(f'{"None":>9s}')
+                info.append(f'{"None":>14s}')
+
+                if self.magnitudes[cam] is not None:
+                    info.append(f'{self.magnitudes[cam][pt]:+6.2f}')
+                else:
+                    info.append(f'{"None":>6s}')
+
+                info.append(f'{"None":>6s}')
+
+                out += ", ".join(info) + '\n'
+
+        out += '\n'
+
+        out += 'Notes\n'
+        out += '-----\n'
+        out += '- Not all fields in this table are presently available using the GuralTrajectory solver, some may be left blank\n'
+        out += '- Points that have not been taken into consideration when computing the trajectory have \'1\' in the \'Ignore\' column.\n'
+        out += '- The time already has time offsets applied to it.\n'
+        out += '- \'meas1\' and \'meas2\' are given input points.\n'
+        out += '- X, Y, Z are ECI (Earth-Centered Inertial) positions of projected lines of sight on the radiant line.\n'
+        out += '- Zc is the observed zenith distance of the entry angle, while the Zg is the entry zenith distance corrected for Earth\'s gravity.\n'
+        out += '- Latitude (deg) and Longitude (deg) are in WGS84 coordinates, while Height (m) is in the EGM96 datum. There values are coordinates of each point on the radiant line.\n'
+        out += '- Jacchia (1955) deceleration equation fit was done on the lag.\n'
+        out += '- Right ascension and declination in the table are given in the epoch of date for the corresponding JD, per every point.\n'
+
+
+        if verbose:
+            print(out)
+
+        # Save the report to a file
+        if save_results:
+            mkdirP(dir_path)
+
+            with open(os.path.join(dir_path, file_name), 'w') as f:
+                f.write(out)
+
+        return out
 
 
 
@@ -1139,6 +1476,9 @@ class GuralTrajectory(object):
         print('Running done! Reading out results...')
 
         ### Read out the results
+
+        # The actual number of cameras populated
+        self.num_cameras = self.traj.numcameras
 
         # Camera coordinates (angles in radians, height in km)
         self.camera_lat = double1pointerToArray(self.traj.camera_lat, self.maxcameras)
@@ -1160,6 +1500,9 @@ class GuralTrajectory(object):
         # Read out the convergence angle (radians)
         self.max_convergence = np.frombuffer(self.traj.max_convergence, float)[0]
 
+        # Read out the intersecting planes radiant (radians)
+        self.ra_radiant_ip = np.frombuffer(self.traj.ra_radiant_IP, float)[0]
+        self.dec_radiant_ip = np.frombuffer(self.traj.dec_radiant_IP, float)[0]
 
         # Read out beginning velocity
         self.vbegin = np.frombuffer(self.traj.vbegin, float)[0]
@@ -1200,6 +1543,21 @@ class GuralTrajectory(object):
         self.model_fit2 = double2pointerToArray(self.traj.model_fit2, self.maxcameras, self.nummeas_lst)
         self.model_time = double2pointerToArray(self.traj.model_time, self.maxcameras, self.nummeas_lst)
 
+        # Read out begin point
+        self.rbeg_lat = np.frombuffer(self.traj.rbeg_lat, float)[0]
+        self.rbeg_lon = np.frombuffer(self.traj.rbeg_lon, float)[0]
+        self.rbeg_hkm = np.frombuffer(self.traj.rbeg_hkm, float)[0]
+        self.rbeg_lat_sigma = np.frombuffer(self.traj.rbeg_lat_sigma, float)[0]
+        self.rbeg_lon_sigma = np.frombuffer(self.traj.rbeg_lon_sigma, float)[0]
+        self.rbeg_hkm_sigma = np.frombuffer(self.traj.rbeg_hkm_sigma, float)[0]
+
+        # Read out end point
+        self.rend_lat = np.frombuffer(self.traj.rend_lat, float)[0]
+        self.rend_lon = np.frombuffer(self.traj.rend_lon, float)[0]
+        self.rend_hkm = np.frombuffer(self.traj.rend_hkm, float)[0]
+        self.rend_lat_sigma = np.frombuffer(self.traj.rend_lat_sigma, float)[0]
+        self.rend_lon_sigma = np.frombuffer(self.traj.rend_lon_sigma, float)[0]
+        self.rend_hkm_sigma = np.frombuffer(self.traj.rend_hkm_sigma, float)[0]
         ###
 
         print('Freeing trajectory structure...')
@@ -1207,6 +1565,9 @@ class GuralTrajectory(object):
         # Free memory for trajectory
         self.traj_lib.FreeTrajectoryStructure(self.traj)
 
+        # Delete all library bindings and ctypes variables, so the object can be pickled
+        del self.traj_lib
+        del self.traj
 
         # Extract the state vector from the solution (convert to meters)
         self.state_vect = np.array(self.solution[:3]*1000.0)
@@ -1215,7 +1576,7 @@ class GuralTrajectory(object):
         self.radiant_eci = np.array(raDec2ECI(self.ra_radiant, self.dec_radiant))
 
         # Deceleration parameters
-        self.decel = np.array(self.solution[6:9])
+        self.decel = np.array(self.solution[6:8])
 
         print('RA:', np.degrees(self.ra_radiant))
         print('Dec:', np.degrees(self.dec_radiant))
@@ -1237,10 +1598,10 @@ class GuralTrajectory(object):
 
         # Get the first Julian date of all observations
         jd_first = np.min([np.min(jd_data) for jd_data in self.JD_data_cameras])
-        
+
 
         # Calculate the orbit
-        self.orbit = calcOrbit(self.radiant_eci, self.vbegin*1000, v_avg, self.state_vect, jd_first, 
+        self.orbit = calcOrbit(self.radiant_eci, self.vbegin*1000, v_avg, self.state_vect, jd_first,
             stations_fixed=False, reference_init=True)
         print(self.orbit)
 
@@ -1252,18 +1613,15 @@ class GuralTrajectory(object):
         ### SAVE RESULTS ###
         ######################################################################################################
 
-        # Delete all library bindings and ctypes variables, so the object can be pickled
-        del self.traj_lib
-        del self.traj
-
         if self.fha_velocity:
             fha_suffix = 'fha'
         else:
             fha_suffix = ''
 
         # Save the picked trajectory structure with original points
-        savePickle(self, self.output_dir, self.file_name \
-            + '_gural{:d}{:s}_trajectory.pickle'.format(self.velmodel, fha_suffix))
+        if self.save_results:
+            savePickle(self, self.output_dir, self.file_name \
+                + '_gural{:d}{:s}_trajectory.pickle'.format(self.velmodel, fha_suffix))
 
 
         ######################################################################################################
@@ -1273,9 +1631,39 @@ class GuralTrajectory(object):
 
 
 
+    def savePickle(self, dir_path, file_name):
+        """
+        pickle the object taking care to omit lingering unserializable
+        trajectory library references
+        """
+        # copy and remove from the object
+        # it's okay if these don't exist
+        try:
+            backup_traj_lib = self.traj_lib
+            del self.traj_lib
+        except AttributeError:
+            backup_traj_lib = None
+
+        try:
+            backup_traj = self.traj
+            del self.traj
+        except AttributeError:
+            backup_traj = None
+
+        savePickle(self, dir_path, file_name)
+
+        # ... and now restore them
+        if backup_traj_lib:
+            self.traj_lib = backup_traj_lib
+
+        if backup_traj:
+            self.traj = backup_traj
+
+
+
 if __name__ == "__main__":
 
-    
+
 
     ### TEST DATA
     maxcameras = 2
@@ -1298,7 +1686,7 @@ if __name__ == "__main__":
     phi2 = np.array([53.277395606543514, 53.378894622674743, 53.479956569118926, 53.581583564486643, 53.684034387407628, 53.785592745520816, 53.888221858788505, 53.989652095989705, 54.091286379162753, 54.193602941001174, 54.295489508972871, 54.39680492261197, 54.498476109777449, 54.600324950506916, 54.701540003200897, 54.803176858628973, 54.905770160432461, 55.007812728006726, 55.109255891578165, 55.210470634952003, 55.311514652098822, 55.413530094031998, 55.515323573286715, 55.616651349503798, 55.718365072619598, 55.81929890161981, 55.920171553847844, 56.021613048812512, 56.122821258097112, 56.224678899349627, 56.325865881424491, 56.426926299896216, 56.52861756575669, 56.629470224659684, 56.730172326265581, 56.831015465257991, 56.932197458064081, 57.033194520779368, 57.133991458819061, 57.234684773453658, 57.334955465097238, 57.435791110725937, 57.536108210586804, 57.63636328763743, 57.736907767451896, 57.837175586955425, 57.937203809457536, 58.036781893703278, 58.136978754564268, 58.236686044195643, 58.336377908906051, 58.43535465814314, 58.534625554011399, 58.6333660935654, 58.732691095623927, 58.831079484821906, 58.928886668384948, 59.026971367888081, 59.124250755486784, 59.221517041956538, 59.318507836373392, 59.414909920684529, 59.512434568208263, 59.608138099768297, 59.703628259049658, 59.799124823225796, 59.891752747734891, 59.983964699509606, 60.075068063440163, 60.161279720285414])
     theta2 = np.array([101.53457826463746, 101.51641844358608, 101.49838475808278, 101.48029817266169, 101.46211330853345, 101.44413445103872, 101.42601386963629, 101.40815190889943, 101.3903005255073, 101.37237603253595, 101.35457316211422, 101.3369156085497, 101.3192413904863, 101.30158154144411, 101.28407617303588, 101.26654229652355, 101.24888830028594, 101.23137351945253, 101.21400528102164, 101.19671926225118, 101.17950508630588, 101.16216841059016, 101.14491224554251, 101.12777721128521, 101.1106189746513, 101.09363369919245, 101.07669966495487, 101.05971116018192, 101.04280246671952, 101.02582610588094, 101.00900182871261, 100.99223844387629, 100.97541036501492, 100.95876039276899, 100.94217411607163, 100.92560326192354, 100.90901536078817, 100.89249613221422, 100.87604760647557, 100.85965363121295, 100.84336561880852, 100.82702299646236, 100.81080116796716, 100.79462576794111, 100.77843999684811, 100.76233476558444, 100.74630362442984, 100.73037973345876, 100.71439203286904, 100.69851722922239, 100.68267935704768, 100.66698899065921, 100.65128571495896, 100.63569963309027, 100.62005459779738, 100.60458982468012, 100.58924850257456, 100.57389559776691, 100.5587001573241, 100.5435378536578, 100.52844926863388, 100.51348253940968, 100.49837205688057, 100.48357341370303, 100.46883689073712, 100.45412830754735, 100.43988903856147, 100.42574044202429, 100.41178798399015, 100.39860839656382])
 
-    # NOTE: For some reason, you can't do this: theta1 = npct.as_ctypes(theta1). For some reason, the memory 
+    # NOTE: For some reason, you can't do this: theta1 = npct.as_ctypes(theta1). For some reason, the memory
     # is not well allocated in that case...
     # The conversion must be done directly upon calling a function.
 
@@ -1347,7 +1735,7 @@ if __name__ == "__main__":
     #sys.exit()
 
     ##########################################################################################################
-    
+
     site_id = 0
 
     meas_x, meas_y, meas_z = sphericalToCartesian(traj_solve.meas_hkm[site_id]*1000, traj_solve.meas_lat[site_id], traj_solve.meas_lon[site_id])
@@ -1363,7 +1751,7 @@ if __name__ == "__main__":
     plt.show()
     plt.clf()
 
-    
+
 
     plt.scatter(traj_solve.meas_vel[0], time1, marker='+')
     plt.scatter(traj_solve.meas_vel[1], time2, marker='x')

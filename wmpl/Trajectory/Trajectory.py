@@ -4869,7 +4869,7 @@ class Trajectory(object):
         # If there are more than 5 stations, interleave the colors with another colormap and change up
         #   markers
         if len(self.observations) > 5:
-            colors_alt = cm.inferno(np.linspace(0, 1, len(self.observations)))
+            colors_alt = cm.inferno(np.linspace(0, 0.8, len(self.observations)))
             for i in range(len(self.observations)):
                 if i%2 == 1:
                     colors[i] = colors_alt[i]
@@ -5021,6 +5021,10 @@ class Trajectory(object):
 
         ax1.legend(prop={'size': LEGEND_TEXT_SIZE})
         ax1.grid()
+
+        # Set absolute limits for velocities
+        vel_min = max(vel_min, -20)
+        vel_max = min(vel_max, 100)
 
         # Set velocity limits to +/- 3 km/s
         ax1.set_xlim([vel_min - 3, vel_max + 3])
