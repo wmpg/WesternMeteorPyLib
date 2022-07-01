@@ -71,7 +71,7 @@ class OSMMap(object):
 
         # Calculate the mean latitude and longitude by including station positions
         
-        # remove coord duplicates for 
+        # remove coord duplicates for centering the map
         (lats, lons) = np.unique(np.array([lat_list, lon_list]).T, axis=0).T  
         
         # calculate mean longitude and latitude and center the map
@@ -101,17 +101,7 @@ class OSMMap(object):
             if c > max_dist:
                 max_dist = c
 
-            # saving the max lat and lon distance
-        #    if delta_lon > max_delta_lon:
-        #        max_delta_lon = delta_lon
-        #    if delta_lat > max_delta_lat:
-        #        max_delta_lat = delta_lat
-              
-        #print(np.degrees(max_dist))
-				
-				# fix the longitude extent
-        #max_delta_lon = max_delta_lon * 2
-        #max_delta_lat = max_delta_lat * 2
+        # fix the longitude extent
         max_delta_lon = max_dist * 2
         max_delta_lat = max_dist
 
