@@ -1376,19 +1376,32 @@ def loadUSGInputFile(dir_path, usg_file):
 
     ### Compute light curve ###
     
-    data.intensity_data = np.array(data.intensity_data)
+    data.usg_intensity_data = np.array(data.usg_intensity_data)
 
     # Extract the time
-    data.time_data = data.intensity_data[:,0]
+    data.time_data = data.usg_intensity_data[:,0]
 
     # Compute the light curve (see Brown et al. 1996, St. Robert paper)
-    data.absolute_magnitudes = -2.5*np.log10(data.intensity_data[:,1]/248)
+    data.absolute_magnitudes = -2.5*np.log10(data.usg_intensity_data[:,1]/248)
 
     ### ###
 
 
+    ### Prepare all light curves as input ###
 
-    ### Compute the height array ###
+    # Add USG/CNEOS data
+    lc_data = {}
+    lc_data["CNEOS"] = np.c_[np.array(data.time_data), np.array(data.absolute_magnitudes)]
+
+    # Add any additional light curves (note that the time base needs to be the same)
+    if hasattr(data, "additional_lcs"):
+        lc_data.update(data.additional_lcs)
+
+
+    ### ###
+
+
+    
 
     # Get the reference point in ECI
     eci_ref = np.array(geo2Cartesian(np.radians(data.lat), np.radians(data.lon), 1000*data.ht, data.jd))
@@ -1398,61 +1411,102 @@ def loadUSGInputFile(dir_path, usg_file):
         np.radians(data.lat), np.radians(data.lon))
     eci_rad = vectNorm(np.array(raDec2ECI(ra_rad, dec_rad)))
 
-    # Compute height of the fireball over time
-    lat_data = []
-    lon_data = []
-    height_data = []
-    for t in data.time_data:
-
-        # Compute the length relative to the reference point (in meters)
-        l = t*1000*data.v
-
-        # Compute the ECI coordinates of the fireball
-        eci = eci_ref - l*eci_rad
-
-        # Compute height of the point
-        lat, lon, h = cartesian2Geo(data.jd, *eci)
-
-        lat_data.append(lat)
-        lon_data.append(lon)
-        height_data.append(h)
-
-    data.lat_data = np.array(lat_data)
-    data.lon_data = np.array(lon_data)
-    data.height_data = np.array(height_data)
-
-    ### ###
 
 
-    # Init the observations
-    obs = ObservedPoints(data.jd, np.zeros_like(data.absolute_magnitudes), \
-        np.zeros_like(data.absolute_magnitudes), data.time_data, np.radians(data.lat), np.radians(data.lon), \
-        1000*data.ht, 2, station_id="CNEOS")
-
-    # Assign magnitude data
-    obs.absolute_magnitudes = data.absolute_magnitudes
-
-    # Assign dynamics
-    obs.velocities = np.zeros_like(obs.absolute_magnitudes) + 1000*data.v
-    obs.lag = np.zeros_like(obs.absolute_magnitudes)
-
-    # Assign computed heights
-    obs.model_ht = data.height_data
-    obs.meas_ht = data.height_data
-    
     # Init the trajectory structure
     traj = Trajectory(data.jd, output_dir=dir_path, meastype=2)
 
-    # Add the observations
-    traj.observations.append(obs)
+
+    # Keep track of the beg/end point
+    rbeg_lat = 0
+    rend_lat = 0
+    rbeg_lon = 0
+    rend_lon = 0
+    rbeg_ele = 0
+    rend_ele = np.inf
+
+    # Go though all available light curves
+    for station_id in lc_data:
+
+        time_data, abs_mag_data = np.array(lc_data[station_id]).T
+
+
+        ### Compute the height array ###
+
+        # Compute height of the fireball over time
+        lat_data = []
+        lon_data = []
+        height_data = []
+        for t in time_data:
+
+            # Compute the length relative to the reference point (in meters)
+            l = t*1000*data.v
+
+            # Compute the ECI coordinates of the fireball
+            eci = eci_ref - l*eci_rad
+
+            # Compute reference julian date
+            jd = data.jd + t/86400
+
+            # Compute geo coordinates of the point on the trajectory at the given time
+            lat, lon, h = cartesian2Geo(jd, *eci)
+
+            lat_data.append(lat)
+            lon_data.append(lon)
+            height_data.append(h)
+
+        lat_data = np.array(lat_data)
+        lon_data = np.array(lon_data)
+        height_data = np.array(height_data)
+
+        ### ###
+
+
+        # Init the observations
+        obs = ObservedPoints(data.jd, np.zeros_like(abs_mag_data), \
+            np.zeros_like(abs_mag_data), time_data, np.radians(data.lat), np.radians(data.lon), \
+            1000*data.ht, 2, station_id=station_id)
+
+        # Assign magnitude data
+        obs.absolute_magnitudes = abs_mag_data
+
+        # Assign dynamics
+        obs.velocities = np.zeros_like(obs.absolute_magnitudes) + 1000*data.v
+        obs.lag = np.zeros_like(obs.absolute_magnitudes)
+
+        # Assign computed heights
+        obs.model_ht = obs.meas_ht = height_data
+
+        # Assign computed geo coordinates
+        obs.model_lat = obs.meas_lat = lat_data
+        obs.model_lon = obs.meas_lon = lon_data
+
+        # Add the observations to the trajectory
+        traj.observations.append(obs)
+
+
+        # Keep track of the begin/final point
+        top_index = np.argmax(height_data)
+        bottom_index = np.argmin(height_data)
+        if height_data[top_index] > rbeg_ele:
+            rbeg_lat = lat_data[top_index]
+            rbeg_lon = lon_data[top_index]
+            rbeg_ele = height_data[top_index]
+
+        if height_data[bottom_index] < rend_ele:
+            rend_lat = lat_data[bottom_index]
+            rend_lon = lon_data[bottom_index]
+            rend_ele = height_data[bottom_index]
+
+
 
     # Assign trajectory parameters
-    traj.rbeg_lat = data.lat_data[0]
-    traj.rend_lat = data.lat_data[-1]
-    traj.rbeg_lon = data.lon_data[0]
-    traj.rend_lon = data.lon_data[-1]
-    traj.rbeg_ele = data.height_data[0]
-    traj.rend_ele = data.height_data[-1]
+    traj.rbeg_lat = rbeg_lat
+    traj.rend_lat = rend_lat
+    traj.rbeg_lon = rbeg_lon
+    traj.rend_lon = rend_lon
+    traj.rbeg_ele = rbeg_ele
+    traj.rend_ele = rend_ele
     traj.orbit = Orbit()
     traj.orbit.zc = np.radians(90 - data.entry_angle)
     traj.orbit.v_avg = traj.orbit.v_avg_norot = 1000*data.v
@@ -1460,6 +1514,7 @@ def loadUSGInputFile(dir_path, usg_file):
 
 
     return data, traj
+
 
 
 class MetSimGUI(QMainWindow):
