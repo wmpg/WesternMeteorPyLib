@@ -71,7 +71,7 @@ class OSMMap(object):
 
         # Calculate the mean latitude and longitude by including station positions
         
-        # remove coord duplicates
+        # remove coord duplicates for 
         (lats, lons) = np.unique(np.array([lat_list, lon_list]).T, axis=0).T  
         
         # calculate mean longitude and latitude and center the map
@@ -83,31 +83,43 @@ class OSMMap(object):
       
         lat1 = lat_mean
         lon1 = lon_mean
-        max_delta_lon = 0
-        max_delta_lat = 0
+        #max_delta_lon = 0
+        #max_delta_lat = 0
+        max_dist = 0
 
         for lat2, lon2 in geo_coords:
 
             # Calculate the angular distance between two coordinates
             delta_lat = lat2 - lat1
             delta_lon = lon2 - lon1
+            
+            a = np.sin(delta_lat/2)**2 + np.cos(lat1)*np.cos(lat2)*np.sin(delta_lon/2)**2
+            c = 2*np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+            #d = 6371000*c
+
+            # Set the current distance as maximum if it is larger than the previously found max value
+            if c > max_dist:
+                max_dist = c
 
             # saving the max lat and lon distance
-            if delta_lon > max_delta_lon:
-                max_delta_lon = delta_lon
-            if delta_lat > max_delta_lat:
-                max_delta_lat = delta_lat
+        #    if delta_lon > max_delta_lon:
+        #        max_delta_lon = delta_lon
+        #    if delta_lat > max_delta_lat:
+        #        max_delta_lat = delta_lat
               
+        #print(np.degrees(max_dist))
 				
 				# fix the longitude extent
-        max_delta_lon = max_delta_lon * 2
-        max_delta_lat = max_delta_lat * 2
+        #max_delta_lon = max_delta_lon * 2
+        #max_delta_lat = max_delta_lat * 2
+        max_delta_lon = max_dist * 2
+        max_delta_lat = max_dist
 
         # Init the map
-        request = cimgt.OSM()  
+        request = cimgt.OSM()
         self.ax = plt.axes(projection=request.crs)
         
-				# calculate map extent
+        # calculate map extent
         lon_min = np.degrees(lon_mean - max_delta_lon)
         lon_max = np.degrees(lon_mean + max_delta_lon)
         lat_min = np.degrees(lat_mean - max_delta_lat)
@@ -126,10 +138,10 @@ class OSMMap(object):
         else:
 
             if lon_min < 0:
-                lon_min = 0
+                lon_min = 360 + lon_min
 
             if lon_max > 360:
-                lon_max = 360
+                lon_max = lon_max - 360
 
         if lat_min < -90:
             lat_min = -90
