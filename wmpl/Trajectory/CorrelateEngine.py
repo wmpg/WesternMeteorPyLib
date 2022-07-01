@@ -1371,6 +1371,8 @@ class TrajectoryCorrelator(object):
                         #print(str(ref_dt).replace(" ", "_"))
                         picklename = str(ref_dt.timestamp()) + '.pickle'
                         savePickle(matched_observations, savepath, picklename)
+
+                    p = loadPickle(savepath, picklename)
                     return
             # end of "if self.distribute < 2"
 
