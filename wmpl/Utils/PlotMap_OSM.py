@@ -9,8 +9,22 @@ Basemap = importBasemap()
 
 import cartopy.crs as ccrs
 import cartopy.io.img_tiles as cimgt
+import io
+from PIL import Image
+from urllib.request import urlopen, Request
 
 from wmpl.Utils.Math import meanAngle
+
+def image_spoof(self, tile): # this function pretends not to be a Python script
+    url = self._image_url(tile) # get the url of the street map API
+    req = Request(url) # start request
+    req.add_header('User-agent','Anaconda 3') # add user agent to request
+    fh = urlopen(req) 
+    im_data = io.BytesIO(fh.read()) # get image
+    fh.close() # close url
+    img = Image.open(im_data) # open image with PIL
+    img = img.convert(self.desired_tile_form) # set image format
+    return img, self.tileextent(tile), 'lower' # reformat for cartopy
 
 
 class MapColorScheme(object):
@@ -106,6 +120,7 @@ class OSMMap(object):
         max_delta_lat = max_dist
 
         # Init the map
+        cimgt.OSM.get_image = image_spoof
         request = cimgt.OSM()
         self.ax = plt.axes(projection=request.crs)
         
@@ -145,7 +160,7 @@ class OSMMap(object):
         self.ax.set_extent(extent)
         
         # adding map with zoom ratio
-        self.ax.add_image(request, 6)
+        self.ax.add_image(request, 7)
 
 
     def scatter(self, lat_list, lon_list, **kwargs):

@@ -350,6 +350,9 @@ def addSolverOptions(arg_parser, skip_velpart=False):
 
     arg_parser.add_argument('-x', '--hideplots', \
         help="Don't show generated plots on the screen, just save them to disk.", action="store_true")
+        
+    arg_parser.add_argument('-o', '--enableOSM', \
+        help="Enable OSM based groung plots.", action="store_true")        
 
 
     return arg_parser
