@@ -160,7 +160,7 @@ class OSMMap(object):
         self.ax.set_extent(extent)
         
         # adding map with zoom ratio
-        self.ax.add_image(request, 7)
+        self.ax.add_image(request, 6)
 
 
     def scatter(self, lat_list, lon_list, **kwargs):
