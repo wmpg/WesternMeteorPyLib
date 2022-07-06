@@ -5227,8 +5227,8 @@ class Trajectory(object):
         if (self.enable_OSM_plot):
         	
             from wmpl.Utils.PlotMap_OSM import OSMMap
-            import cartopy.crs as ccrs
-            import cartopy.io.img_tiles as cimgt
+            #import cartopy.crs as ccrs
+            #import cartopy.io.img_tiles as cimgt
                 
             # Calculate mean latitude and longitude of all meteor points
             met_lon_mean = meanAngle([x for x in obs.meas_lon for obs in self.observations])
