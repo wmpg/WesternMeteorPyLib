@@ -251,6 +251,9 @@ class CelestialPlot(object):
         except AttributeError:
             self.ax.ticklabel_format(useOffset=False, style='plain')
 
+        except:
+            print("PlotCelestia: Cannot turn off scientific format for map axes.")
+
 
 
     def plot(self, ra_data, dec_data, **kwargs):
