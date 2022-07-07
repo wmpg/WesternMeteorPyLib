@@ -243,8 +243,13 @@ class CelestialPlot(object):
         self.m.drawmapboundary(fill_color=bgcolor)
 
         # Turn off shortening numbers into offsets
-        self.ax.get_xaxis().get_major_formatter().set_useOffset(False)
-        self.ax.get_yaxis().get_major_formatter().set_useOffset(False)
+        try:
+            # This doesn't work on some versions of matplotlib
+            self.ax.get_xaxis().get_major_formatter().set_useOffset(False)
+            self.ax.get_yaxis().get_major_formatter().set_useOffset(False)
+
+        except AttributeError:
+            self.ax.ticklabel_format(useOffset=False, style='plain')
 
 
 
