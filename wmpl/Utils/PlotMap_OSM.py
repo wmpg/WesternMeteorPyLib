@@ -9,6 +9,7 @@ Basemap = importBasemap()
 
 import cartopy.crs as ccrs
 import cartopy.io.img_tiles as cimgt
+from cartopy.mpl.gridliner import LONGITUDE_FORMATTER, LATITUDE_FORMATTER
 import io
 from PIL import Image
 from urllib.request import urlopen, Request
@@ -123,6 +124,14 @@ class OSMMap(object):
         cimgt.OSM.get_image = image_spoof
         request = cimgt.OSM()
         self.ax = plt.axes(projection=request.crs)
+        
+        # add grid lines
+        gl = self.ax.gridlines(draw_labels=True, alpha=0.2)
+        gl.xlabels_top = gl.ylabels_right = False
+        gl.xformatter = LONGITUDE_FORMATTER
+        gl.yformatter = LATITUDE_FORMATTER
+        gl.xlabel_style = {'size': 8, 'color': 'black'}
+        gl.ylabel_style = {'size': 8, 'color': 'black'}
         
         # calculate map extent
         lon_min = np.degrees(lon_mean - max_delta_lon)
