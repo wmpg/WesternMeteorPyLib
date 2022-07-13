@@ -717,7 +717,7 @@ class GuralTrajectory(object):
 
 
     def infillTrajectory(self, theta_data, phi_data, time_data, lat, lon, ele, noise=None, magnitudes=None,
-        station_id=None, obs_id=None, fov_beg=None, fov_end=None, comment=None, magnitudes=None):
+        station_id=None, obs_id=None, fov_beg=None, fov_end=None, comment=None):
         """ Fills in the trajectory structure with given observations: azimuth in radians, zenith angle in
             radians, time in seconds relative to jdt_ref. This function should be called for each observing
             site, not more than 'maxcameras' times.
@@ -732,12 +732,13 @@ class GuralTrajectory(object):
 
         Kwargs:
             noise: [ndarray] observation noise in radians (0 if not provided)
-            magnitudes: [list] A list of apparent magnitudes of the meteor. None by default.
+            magnitudes: [list, IGNORED] A list of apparent magnitudes of the meteor. None by default. 
+                Argument not used for now.
             station_id: [str] Station ID.
             obs_id: [int] Unique ID of the observation. This is to differentiate different observations from
                 the same station.
             comment: [str] A comment about the observations.
-            magnitudes: [IGNORED] Argument not used for now.
+            
         """
 
         nummeas = time_data.shape[0]
