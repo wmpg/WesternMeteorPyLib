@@ -2099,7 +2099,7 @@ class MetSimGUI(QMainWindow):
                 for t, mag in zip(obs.time_data[obs.ignore_list == 0], \
                     obs.absolute_magnitudes[obs.ignore_list == 0]):
 
-                    if (mag is not None) and (not np.isnan(mag)):
+                    if (mag is not None) and (not np.isnan(mag)) and (not np.isinf(mag)):
                         time_mag_arr.append([t, mag])
 
         
@@ -2830,7 +2830,10 @@ class MetSimGUI(QMainWindow):
         # Compute the simulated energy
         if sr is not None:
 
-            sim_radiated_energy = calcRadiatedEnergy(sr.time_arr, sr.abs_magnitude, \
+            # Filter out NaNs and Infs from magnitude array
+            mag_filter = ~np.isnan(sr.abs_magnitude) & ~np.isinf(sr.abs_magnitude)
+
+            sim_radiated_energy = calcRadiatedEnergy(sr.time_arr[mag_filter], sr.abs_magnitude[mag_filter], \
                 P_0m=self.const.P_0m)
             sim_radiated_energy_text = "Radiated energy (sim) = {:.2e} J".format(sim_radiated_energy)
 
@@ -4598,7 +4601,7 @@ class MetSimGUI(QMainWindow):
             suffix = str("")
 
         dir_path, file_name = os.path.split(self.traj_path)
-        file_name = file_name.replace('trajectory.pickle', '') + "sim_fit{:s}.json".format(suffix)
+        file_name = file_name.replace('trajectory.pickle', '').replace(".txt", "_") + "sim_fit{:s}.json".format(suffix)
 
 
         # Create a copy of the fit parameters
