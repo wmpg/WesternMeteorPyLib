@@ -64,6 +64,9 @@ class SimulationResults(object):
     def __init__(self, const, frag_main, results_list, wake_results):
         """ Container for simulation results. """
 
+        # Save the constants used to compute the results
+        self.const = copy.deepcopy(const)
+
         # Final physical parameters of the main fragment
         self.frag_main = frag_main
 
@@ -80,15 +83,15 @@ class SimulationResults(object):
 
         # Calculate the total absolute magnitude (apparent @100km), and fix possible NaN values (replace them 
         #   with the faintest magnitude)
-        self.abs_magnitude = -2.5*np.log10(self.luminosity_arr/const.P_0m)
+        self.abs_magnitude = -2.5*np.log10(self.luminosity_arr/self.const.P_0m)
         self.abs_magnitude[np.isnan(self.abs_magnitude)] = np.nanmax(self.abs_magnitude)
 
         # Compute the absolute magnitude of the main fragment
-        self.abs_magnitude_main = -2.5*np.log10(self.luminosity_main_arr/const.P_0m)
+        self.abs_magnitude_main = -2.5*np.log10(self.luminosity_main_arr/self.const.P_0m)
         self.abs_magnitude_main[np.isnan(self.abs_magnitude_main)] = np.nanmax(self.abs_magnitude_main)
 
         # Compute the absolute magnitude of the eroded and disruped grains
-        self.abs_magnitude_eroded = -2.5*np.log10(self.luminosity_eroded_arr/const.P_0m)
+        self.abs_magnitude_eroded = -2.5*np.log10(self.luminosity_eroded_arr/self.const.P_0m)
         self.abs_magnitude_eroded[np.isnan(self.abs_magnitude_eroded)] = np.nanmax(self.abs_magnitude_eroded)   
 
 
@@ -97,8 +100,8 @@ class SimulationResults(object):
 
         # Compute the absolute magnitude of individual fragmentation entries, and join them a height of the
         #   leading fragment
-        if const.fragmentation_show_individual_lcs:
-            for frag_entry in const.fragmentation_entries:
+        if self.const.fragmentation_show_individual_lcs:
+            for frag_entry in self.const.fragmentation_entries:
 
                 # Compute values for the main fragment
                 if len(frag_entry.main_time_data):
@@ -107,23 +110,29 @@ class SimulationResults(object):
                     frag_entry.main_height_data = leading_frag_ht_interpol(np.array(frag_entry.main_time_data))
 
                     # Compute the magnitude
-                    frag_entry.main_abs_mag = -2.5*np.log10(np.array(frag_entry.main_luminosity)/const.P_0m)
+                    frag_entry.main_abs_mag = -2.5*np.log10(np.array(frag_entry.main_luminosity)
+                                                                /self.const.P_0m)
 
                     # Compute the luminosity weigthed tau
-                    frag_entry.main_tau = np.array(frag_entry.main_tau_over_lum)/np.array(frag_entry.main_luminosity)
+                    frag_entry.main_tau = np.array(frag_entry.main_tau_over_lum)\
+                                            /np.array(frag_entry.main_luminosity)
 
 
                 # Compute values for the grains
                 if len(frag_entry.grains_time_data):
 
                     # Find the corresponding height for every time
-                    frag_entry.grains_height_data = leading_frag_ht_interpol(np.array(frag_entry.grains_time_data))
+                    frag_entry.grains_height_data = leading_frag_ht_interpol(
+                        np.array(frag_entry.grains_time_data)
+                        )
 
                     # Compute the magnitude
-                    frag_entry.grains_abs_mag = -2.5*np.log10(np.array(frag_entry.grains_luminosity)/const.P_0m)
+                    frag_entry.grains_abs_mag = -2.5*np.log10(np.array(frag_entry.grains_luminosity)
+                                                                /self.const.P_0m)
 
                     # Compute the luminosity weigthed tau
-                    frag_entry.grains_tau = np.array(frag_entry.grains_tau_over_lum)/np.array(frag_entry.grains_luminosity)
+                    frag_entry.grains_tau = np.array(frag_entry.grains_tau_over_lum) \
+                                                /np.array(frag_entry.grains_luminosity)
 
 
         ### Wake simulation ###
@@ -2934,7 +2943,7 @@ class MetSimGUI(QMainWindow):
 
 
                 # Plot magnitudes for every fragmentation entry
-                for frag_entry in self.const.fragmentation_entries:
+                for frag_entry in sr.const.fragmentation_entries:
 
                     # Plot magnitude of the main fragment in the fragmentation (not the grains)
                     if len(frag_entry.main_height_data):
@@ -4590,6 +4599,8 @@ class MetSimGUI(QMainWindow):
 
         # If USG data is used, only the orbit can be saved
         if self.usg_data is not None:
+
+            # Save orbit report using USG data
             with open(os.path.join(dir_path, "updated_orbit.txt"), 'w') as f:
                 f.write(traj_updated.orbit.__repr__())
 
@@ -4598,9 +4609,10 @@ class MetSimGUI(QMainWindow):
             traj_updated.saveReport(dir_path, report_file_name, uncertainties=self.traj.uncertainties,
                 verbose=False)
 
-        # Save the updated pickle file
-        updated_pickle_file_name = file_name.replace('trajectory.pickle', 'trajectory_sim.pickle')
-        savePickle(traj_updated, dir_path, updated_pickle_file_name)
+            updated_pickle_file_name = file_name.replace('trajectory.pickle', 'trajectory_sim.pickle')
+
+            # Save the updated pickle file
+            savePickle(traj_updated, dir_path, updated_pickle_file_name)
 
 
 
