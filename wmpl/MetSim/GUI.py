@@ -1509,8 +1509,11 @@ def loadUSGInputFile(dir_path, usg_file):
     traj.rend_ele = rend_ele
     traj.orbit = Orbit()
     traj.orbit.zc = np.radians(90 - data.entry_angle)
-    traj.orbit.v_avg = traj.orbit.v_avg_norot = 1000*data.v
-    traj.orbit.v_init = traj.orbit.v_init_norot = 1000*data.v
+    traj.v_avg = traj.orbit.v_avg = traj.orbit.v_avg_norot = 1000*data.v
+    traj.v_init = traj.orbit.v_init = traj.orbit.v_init_norot = 1000*data.v
+    traj.radiant_eci_mini = eci_rad
+    traj.state_vect_mini = eci_ref
+    traj.rbeg_jd = data.jd
 
 
     return data, traj
@@ -4585,8 +4588,15 @@ class MetSimGUI(QMainWindow):
         dir_path, file_name = os.path.split(self.traj_path)
         report_file_name = file_name.replace('trajectory.pickle', '') + 'report_sim.txt'
 
-        # Save the report with updated orbit
-        traj_updated.saveReport(dir_path, report_file_name, uncertainties=self.traj.uncertainties, verbose=False)
+        # If USG data is used, only the orbit can be saved
+        if self.usg_data is not None:
+            with open(os.path.join(dir_path, "updated_orbit.txt"), 'w') as f:
+                f.write(traj_updated.orbit.__repr__())
+
+        else:
+            # Save the report with updated orbit
+            traj_updated.saveReport(dir_path, report_file_name, uncertainties=self.traj.uncertainties,
+                verbose=False)
 
         # Save the updated pickle file
         updated_pickle_file_name = file_name.replace('trajectory.pickle', 'trajectory_sim.pickle')
