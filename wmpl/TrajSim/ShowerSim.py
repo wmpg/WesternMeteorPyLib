@@ -1537,6 +1537,7 @@ def generateTrajectoryData(station_list, sim_met, velocity_model):
         azim_data = []
         elev_data = []
         time_data = []
+        mag_data = []
 
         model_lat_data = []
         model_lon_data = []
@@ -1612,6 +1613,7 @@ def generateTrajectoryData(station_list, sim_met, velocity_model):
             else:
 
                 current_velocity = sim_met.v_init
+                magnitude = None
 
 
             ### Take only those points inside the FOV of the observer ###
@@ -1684,6 +1686,7 @@ def generateTrajectoryData(station_list, sim_met, velocity_model):
             azim_data.append(azim)
             elev_data.append(elev)
             time_data.append(t)
+            mag_data.append(magnitude)
 
             # Calculate geographical coordinates of every trajectory point
             model_lat, model_lon, model_elev = cartesian2Geo(jd, *traj_eci)
@@ -1709,6 +1712,7 @@ def generateTrajectoryData(station_list, sim_met, velocity_model):
         azim_data = np.array(azim_data)
         elev_data = np.array(elev_data)
         time_data = np.array(time_data)
+        mag_data  = np.array(mag_data)
 
         model_lat_data = np.array(model_lat_data)
         model_lon_data = np.array(model_lon_data)
@@ -1737,7 +1741,7 @@ def generateTrajectoryData(station_list, sim_met, velocity_model):
 
         # Init new ObservedPoints with simulated values
         obs = ObservedPoints(sim_met.jdt_ref, azim_data, elev_data, time_data, stat.lat, stat.lon, stat.elev,
-            meastype=2, station_id=stat.station_id)
+            meastype=2, station_id=stat.station_id, magnitudes=mag_data)
 
 
         # Add the calculated points to meteor observations

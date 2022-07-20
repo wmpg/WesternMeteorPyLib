@@ -213,7 +213,7 @@ if __name__ == "__main__":
                 for obs in sim_met.observations:
 
                     traj.infillTrajectory(obs.meas1, obs.meas2, obs.time_data, obs.lat, obs.lon, obs.ele, \
-                        station_id=obs.station_id)
+                        station_id=obs.station_id, magnitudes=obs.magnitudes)
 
 
                 # Solve trajectory

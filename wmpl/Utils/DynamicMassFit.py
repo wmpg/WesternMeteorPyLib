@@ -295,6 +295,8 @@ if __name__ == "__main__":
     # Load the trajectory
     traj = loadPickle(*os.path.split(os.path.abspath(cml_args.traj_path)))
 
+    dir_path = os.path.dirname(cml_args.traj_path)
+
 
     # Top height (if nagative, e.g. -3, the last 3 km from the bottom will be taken)
     if cml_args.ht_max < 0:
@@ -451,7 +453,7 @@ if __name__ == "__main__":
 
     # Plot the evaluation point
     ax2.scatter(vel_eval/1000, time_eval, color='g', marker='o', s=50,\
-        label="Dyn mass = [{:.3f}, {:.3f}, {:.3f}] kg\nDecel = {:.2f} +/- {:.2f} km/s$^2$\nV = {:.2f} km/s\nh = {:.2f} km".format(\
+        label="Dyn mass = [{:.3f}, {:.3f}, {:.3f}] kg\nDecel = {:.2f} $\\pm$ {:.2f} km/s$^2$\nV = {:.2f} km/s\nh = {:.2f} km".format(\
             dyn_mass_lo, dyn_mass, dyn_mass_hi, decel/1000, decel_std/1000, vel_eval/1000, ht_eval/1000))
 
 
@@ -496,4 +498,9 @@ if __name__ == "__main__":
 
 
     plt.tight_layout()
+
+
+    # Save plot to pickle directory
+    plt.savefig(os.path.join(dir_path, traj.file_name + "_dyn_mass_fit.png"), dpi=300)
+
     plt.show()

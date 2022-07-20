@@ -732,11 +732,13 @@ class GuralTrajectory(object):
 
         Kwargs:
             noise: [ndarray] observation noise in radians (0 if not provided)
-            magnitudes: [list] A list of apparent magnitudes of the meteor. None by default.
+            magnitudes: [list, IGNORED] A list of apparent magnitudes of the meteor. None by default. 
+                Argument not used for now.
             station_id: [str] Station ID.
             obs_id: [int] Unique ID of the observation. This is to differentiate different observations from
                 the same station.
             comment: [str] A comment about the observations.
+            
         """
 
         nummeas = time_data.shape[0]
