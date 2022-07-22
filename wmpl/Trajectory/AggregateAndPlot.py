@@ -1377,7 +1377,7 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
         time_beg: [datetime] First time to load. Note that it is assumed that the trajectory is in a folder 
             named in the following format: YYYYMMDD_hhmmss.us_STATION
         time_end: [datetime] Last time to load.
-        verbose: [bool] Print how many trajectoories were loaded. False by default.
+        verbose: [bool] Print how many trajectories were loaded. False by default.
         filter_duplicates: [bool] Filter duplicate trajectories (starting at the same time and observed
             by the same stations).
 

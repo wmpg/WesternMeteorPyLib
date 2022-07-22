@@ -32,7 +32,7 @@ def parallelComputeGenerator(generator, workerFunc, resultsCheckFunc, req_num, n
 
 
     # If the number of processes was not given, use all available CPUs
-    if n_proc is None:
+    if (n_proc is None) or (n_proc == -1):
         n_proc = multiprocessing.cpu_count()
 
 
