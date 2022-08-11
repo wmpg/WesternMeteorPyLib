@@ -2044,7 +2044,7 @@ if __name__ == "__main__":
         help="""Plot showers on the maps showing the whole date ramge."""
         )
 
-    arg_parser.add_argument('-o', '--output', metavar='OUTPUT_DIR', type=int, \
+    arg_parser.add_argument('-o', '--output', metavar='OUTPUT_DIR', type=str, \
         help="""Output directory. If not given, the data directory will be used."""
         )
 
