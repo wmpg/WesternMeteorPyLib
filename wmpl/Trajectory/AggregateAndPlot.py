@@ -531,7 +531,7 @@ def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir, 
             np.degrees(np.array(y_data)), bins=(lon_bins, lat_bins))
 
         # Apply Gaussian filter to it
-        data = scipy.ndimage.filters.gaussian_filter(data, 1.0)*4*np.pi
+        data = scipy.ndimage.gaussian_filter(data, 1.0)*4*np.pi
 
         plt_handle = celes_plot.m.imshow(data.T, origin='lower', extent=[lon_min, lon_max, lat_min, lat_max],\
             #interpolation='gaussian', norm=matplotlib.colors.PowerNorm(gamma=1./2.), cmap=cmap)
