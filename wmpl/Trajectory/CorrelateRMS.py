@@ -154,7 +154,14 @@ class DatabaseJSON(object):
 
         if os.path.exists(self.db_file_path):
             with open(self.db_file_path) as f:
+
+                db_file_path_bak = self.db_file_path
+
+                # Load the value from the database
                 self.__dict__ = json.load(f)
+
+                # Overwrite the database path
+                self.db_file_path = db_file_path_bak
 
                 # Convert trajectories from JSON to TrajectoryReduced objects
                 for traj_dict_str in ["trajectories", "failed_trajectories"]:
