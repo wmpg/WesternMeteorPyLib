@@ -649,7 +649,7 @@ class RMSDataHandle(object):
                     
                 # Find FTPdetectinfo
                 if name.startswith("FTPdetectinfo") and name.endswith('.txt') and \
-                    (not "backup" in name) and (not "uncalibrated" in name):
+                    (not "backup" in name) and (not "uncalibrated" in name) and (not "unfiltered" in name):
                     ftpdetectinfo_name = name
                     continue
 
