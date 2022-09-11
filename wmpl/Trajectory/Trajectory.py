@@ -1942,7 +1942,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
 
 
     # Init the trajectory noise generator
-    traj_generator = trajNoiseGenerator(traj, noise_sigma)
+    traj_generator = trajNoiseGenerator(traj, noise_sigma, n_proc=mc_cores)
 
     
     # Run the MC solutions
@@ -1959,7 +1959,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
         geometric_uncert = True
         results_check_kwagrs["geometric_uncert"] = geometric_uncert
         mc_results = parallelComputeGenerator(traj_generator, _MCTrajSolve, checkMCTrajectories, mc_runs, \
-            results_check_kwagrs=results_check_kwagrs)
+            results_check_kwagrs=results_check_kwagrs, n_proc=mc_cores)
 
 
     # Add the original trajectory in the Monte Carlo results, if it is the one which has the best length match
