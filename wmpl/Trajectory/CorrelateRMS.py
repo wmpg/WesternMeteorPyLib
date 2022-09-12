@@ -14,6 +14,7 @@ import datetime
 import shutil
 import time
 import signal
+import multiprocessing
 
 import numpy as np
 
@@ -153,7 +154,14 @@ class DatabaseJSON(object):
 
         if os.path.exists(self.db_file_path):
             with open(self.db_file_path) as f:
+
+                db_file_path_bak = self.db_file_path
+
+                # Load the value from the database
                 self.__dict__ = json.load(f)
+
+                # Overwrite the database path
+                self.db_file_path = db_file_path_bak
 
                 # Convert trajectories from JSON to TrajectoryReduced objects
                 for traj_dict_str in ["trajectories", "failed_trajectories"]:
@@ -479,9 +487,10 @@ class RMSDataHandle(object):
         station_list = self.loadStations()
 
         # Load database of processed folders
+        database_path = os.path.join(self.dir_path, JSON_DB_NAME)
         print()
-        print("Loading database...")
-        self.db = DatabaseJSON(os.path.join(self.dir_path, JSON_DB_NAME))
+        print("Loading database: {:s}".format(database_path))
+        self.db = DatabaseJSON(database_path)
         print("   ... done!")
 
         # Find unprocessed meteor files
@@ -640,7 +649,7 @@ class RMSDataHandle(object):
                     
                 # Find FTPdetectinfo
                 if name.startswith("FTPdetectinfo") and name.endswith('.txt') and \
-                    (not "backup" in name) and (not "uncalibrated" in name):
+                    (not "backup" in name) and (not "uncalibrated" in name) and (not "unfiltered" in name):
                     ftpdetectinfo_name = name
                     continue
 
@@ -1164,6 +1173,10 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         help="""Enable distributed processing. Values: 1=create and store candidates; 2=load and process candidates only.""", \
             type=int)
 
+    arg_parser.add_argument("--cpucores", type=int, default=-1,
+        help="Number of CPU codes to use for computation. -1 to use all cores minus one (default).",
+    )
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -1193,6 +1206,12 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     if cml_args.maxerr is not None:
         trajectory_constraints.max_arcsec_err = cml_args.maxerr
 
+    # Set the number of CPU cores
+    cpu_cores = cml_args.cpucores
+    if (cpu_cores < 1) or (cpu_cores > multiprocessing.cpu_count()):
+        cpu_cores = multiprocessing.cpu_count()
+    trajectory_constraints.mc_cores = cpu_cores
+    print("Running using {:d} CPU cores.".format(cpu_cores))
 
     # Run processing. If the auto run more is not on, the loop will break after one run
     previous_start_time = None

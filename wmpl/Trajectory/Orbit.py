@@ -375,6 +375,208 @@ def calcLatitudeOfPerihelion(peri, node, incl):
     return b
 
 
+
+def calcOrbitalElements(jd_ref, ra_g, dec_g, v_g, eci_ref):
+    """ Compute keplerian orbital elements (+ a few other parametrs), given the geocentric radiant and
+        a reference ECI location.
+
+    Arguments:
+        jd_ref: [float] Reference Julian date of the meteor trajectory.
+        eci_ref: [ndarry] X, Y, Z components of ECI coordinates at the reference Julian date (meters).
+        ra_g: [float] Geocentric radiant, right ascension (J2000, radians).
+        dec_g: [float] Geocentric radiant, declination (J2000, radians).
+        v_g: [float] Geocentic velocity (m/s).
+
+    Return:
+        (tuple): orbital elements
+    """
+
+    # Calculate the dynamical JD
+    jd_dyn = jd2DynamicalTimeJD(jd_ref)
+
+    # Calculate the ecliptic latitude and longitude of the geocentric radiant (J2000 epoch)
+    L_g, B_g = raDec2Ecliptic(J2000_JD.days, ra_g, dec_g)
+
+
+    # Load the JPL ephemerids data
+    jpl_ephem_data = SPK.open(config.jpl_ephem_file)
+    
+    # Get the position of the Earth (km) and its velocity (km/s) at the given Julian date (J2000 epoch)
+    # The position is given in the ecliptic coordinates, origin of the coordinate system is in the centre
+    # of the Sun
+    earth_pos, earth_vel = calcEarthRectangularCoordJPL(jd_dyn, jpl_ephem_data, sun_centre_origin=True)
+
+    # print('Earth position:')
+    # print(earth_pos)
+    # print('Earth velocity:')
+    # print(earth_vel)
+
+    # Convert the Earth's position to rectangular equatorial coordinates (FK5)
+    earth_pos_eq = rotateVector(earth_pos, np.array([1, 0, 0]), J2000_OBLIQUITY)
+
+    # print('Earth position (FK5):')
+    # print(earth_pos_eq)
+
+    # print('Meteor ECI:')
+    # print(eci_ref)
+
+    # Add the position of the meteor's trajectory to the position of the Earth to calculate the 
+    # equatorial coordinates of the meteor (in kilometers)
+    meteor_pos = earth_pos_eq + eci_ref/1000
+
+
+    # print('Meteor position (FK5):')
+    # print(meteor_pos)
+
+    # Convert the position of the trajectory from FK5 to heliocentric ecliptic coordinates
+    meteor_pos = rotateVector(meteor_pos, np.array([1, 0, 0]), -J2000_OBLIQUITY)
+
+    # print('Meteor position:')
+    # print(meteor_pos)
+
+
+    ##########################################################################################################
+
+    # Calculate components of the heliocentric velocity of the meteor (km/s)
+    v_h = np.array(earth_vel) + np.array(eclipticToRectangularVelocityVect(L_g, B_g, v_g/1000))
+
+    # Calculate the heliocentric velocity in km/s
+    v_h_mag = vectMag(v_h)
+
+
+    # Calculate the heliocentric ecliptic coordinates of the meteoroid using the method of 
+    # Sato and Watanabe (2014).
+    L_h, B_h, met_v_h = correctedEclipticCoord(L_g, B_g, v_g/1000, earth_vel)
+
+
+    # Calculate the solar longitude
+    la_sun = jd2SolLonJPL(jd_dyn)
+
+
+    # Calculations below done using Dave Clark's Master thesis equations
+
+    # Specific orbital energy
+    epsilon = (vectMag(v_h)**2)/2 - SUN_MU/vectMag(meteor_pos)
+
+    # Semi-major axis in AU
+    a = -SUN_MU/(2*epsilon*AU)
+
+    # Calculate mean motion in rad/day
+    n = np.sqrt(G*SUN_MASS/((np.abs(a)*AU*1000.0)**3))*86400.0
+
+
+    # Calculate the orbital period in years
+    # avoid floating point error if orbit is hyperbolic
+    if a > 0: 
+        T = 2*np.pi*np.sqrt(((a*AU)**3)/SUN_MU)/(86400*SIDEREAL_YEAR)
+    else:
+        T = np.nan
+
+    # Calculate the orbit angular momentum
+    h_vect = np.cross(meteor_pos, v_h)
+    
+    # Calculate inclination
+    incl = np.arccos(h_vect[2]/vectMag(h_vect))
+
+
+    # Calculate eccentricity
+    e_vect = np.cross(v_h, h_vect)/SUN_MU - vectNorm(meteor_pos)
+    eccentricity = vectMag(e_vect)
+
+
+    # Calculate perihelion distance (source: Jenniskens et al., 2011, CAMS overview paper)
+    if eccentricity == 1:
+        q = (vectMag(meteor_pos) + np.dot(e_vect, meteor_pos))/(1 + vectMag(e_vect))
+    else:
+        q = a*(1.0 - eccentricity)
+
+    # Calculate the aphelion distance
+    Q = a*(1.0 + eccentricity)
+
+
+    # Normal vector to the XY reference frame
+    k_vect = np.array([0, 0, 1])
+
+    # Vector from the Sun pointing to the ascending node
+    n_vect = np.cross(k_vect, h_vect)
+
+    # Calculate node
+    if vectMag(n_vect) == 0:
+        node = 0
+    else:
+        node = np.arctan2(n_vect[1], n_vect[0])
+
+    node = node%(2*np.pi)
+
+
+    # Calculate argument of perihelion
+    if vectMag(n_vect) != 0:
+        peri = np.arccos(np.dot(n_vect, e_vect)/(vectMag(n_vect)*vectMag(e_vect)))
+
+        if e_vect[2] < 0:
+            peri = 2*np.pi - peri
+
+    else:
+        peri = np.arccos(e_vect[0]/vectMag(e_vect))
+
+    peri = peri%(2*np.pi)
+
+
+
+    # Calculate the longitude of perihelion
+    pi = (node + peri)%(2*np.pi)
+
+    # Calculate the latitude of perihelion
+    b = calcLatitudeOfPerihelion(peri, node, incl)
+
+
+    ### Calculate true anomaly
+    true_anomaly = np.arccos(np.dot(e_vect, meteor_pos)/(vectMag(e_vect)*vectMag(meteor_pos)))
+    if np.dot(meteor_pos, v_h) < 0:
+        true_anomaly = 2*np.pi - true_anomaly
+
+    true_anomaly = true_anomaly%(2*np.pi)
+
+    ###
+
+
+    # Calculate eccentric anomaly
+    # not meaningful for eccentricity > 1
+    if eccentricity < 1: 
+        eccentric_anomaly = np.arctan2(np.sqrt(1 - eccentricity**2)*np.sin(true_anomaly), eccentricity \
+            + np.cos(true_anomaly))
+
+        # Calculate mean anomaly
+        mean_anomaly = eccentric_anomaly - eccentricity * np.sin(eccentric_anomaly)
+        mean_anomaly = mean_anomaly % (2 * np.pi)
+    else:
+        eccentric_anomaly = np.nan
+        mean_anomaly = np.nan
+
+    # Calculate the time in days since the last perihelion passage of the meteoroid
+    # not meaningful for non-closed orbits
+    if a > 0:
+        dt_perihelion = (mean_anomaly*a**(3.0/2))/0.01720209895
+    else:
+        dt_perihelion = np.nan
+
+    if not np.isnan(dt_perihelion):
+        
+        # Calculate the date and time of the last perihelion passage
+        last_perihelion = jd2Date(jd_dyn - dt_perihelion, dt_obj=True)
+
+    else:
+        last_perihelion = None
+
+
+    # Calculate Tisserand's parameter with respect to Jupiter
+    Tj = 2*np.sqrt((1 - eccentricity**2)*a/5.204267)*np.cos(incl) + 5.204267/a
+
+    return (meteor_pos, L_g, B_g , met_v_h, L_h, B_h, v_h_mag*1000, la_sun, a, eccentricity, incl, 
+        peri, node, pi, b, q, Q, true_anomaly, eccentric_anomaly, mean_anomaly, last_perihelion, n, T, Tj)
+
+
+
 def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False, reference_init=True, \
     rotation_correction=False):
     """ Calculate the meteor's orbit from the given meteor trajectory. The orbit of the meteoroid is defined 
@@ -646,183 +848,11 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         ra_g, dec_g = equatorialCoordPrecession(jd_ref, J2000_JD.days, ra_g, dec_g)
 
 
-        # Calculate the ecliptic latitude and longitude of the geocentric radiant (J2000 epoch)
-        L_g, B_g = raDec2Ecliptic(J2000_JD.days, ra_g, dec_g)
-
-
-        # Load the JPL ephemerids data
-        jpl_ephem_data = SPK.open(config.jpl_ephem_file)
-        
-        # Get the position of the Earth (km) and its velocity (km/s) at the given Julian date (J2000 epoch)
-        # The position is given in the ecliptic coordinates, origin of the coordinate system is in the centre
-        # of the Sun
-        earth_pos, earth_vel = calcEarthRectangularCoordJPL(jd_dyn, jpl_ephem_data, sun_centre_origin=True)
-
-        # print('Earth position:')
-        # print(earth_pos)
-        # print('Earth velocity:')
-        # print(earth_vel)
-
-        # Convert the Earth's position to rectangular equatorial coordinates (FK5)
-        earth_pos_eq = rotateVector(earth_pos, np.array([1, 0, 0]), J2000_OBLIQUITY)
-
-        # print('Earth position (FK5):')
-        # print(earth_pos_eq)
-
-        # print('Meteor ECI:')
-        # print(eci_ref)
-
-        # Add the position of the meteor's trajectory to the position of the Earth to calculate the 
-        # equatorial coordinates of the meteor (in kilometers)
-        meteor_pos = earth_pos_eq + eci_ref/1000
-
-
-        # print('Meteor position (FK5):')
-        # print(meteor_pos)
-
-        # Convert the position of the trajectory from FK5 to heliocentric ecliptic coordinates
-        meteor_pos = rotateVector(meteor_pos, np.array([1, 0, 0]), -J2000_OBLIQUITY)
-
-        # print('Meteor position:')
-        # print(meteor_pos)
-
-
-        ##########################################################################################################
-
-        # Calculate components of the heliocentric velocity of the meteor (km/s)
-        v_h = np.array(earth_vel) + np.array(eclipticToRectangularVelocityVect(L_g, B_g, v_g/1000))
-
-        # Calculate the heliocentric velocity in km/s
-        v_h_mag = vectMag(v_h)
-
-
-        # Calculate the heliocentric ecliptic coordinates of the meteoroid using the method of 
-        # Sato and Watanabe (2014).
-        L_h, B_h, met_v_h = correctedEclipticCoord(L_g, B_g, v_g/1000, earth_vel)
-
-
-        # Calculate the solar longitude
-        la_sun = jd2SolLonJPL(jd_dyn)
-
-
-        # Calculations below done using Dave Clark's Master thesis equations
-
-        # Specific orbital energy
-        epsilon = (vectMag(v_h)**2)/2 - SUN_MU/vectMag(meteor_pos)
-
-        # Semi-major axis in AU
-        a = -SUN_MU/(2*epsilon*AU)
-
-        # Calculate mean motion in rad/day
-        n = np.sqrt(G*SUN_MASS/((np.abs(a)*AU*1000.0)**3))*86400.0
-
-
-        # Calculate the orbital period in years
-        # avoid floating point error if orbit is hyperbolic
-        if a > 0: 
-            T = 2*np.pi*np.sqrt(((a*AU)**3)/SUN_MU)/(86400*SIDEREAL_YEAR)
-        else:
-            T = np.nan
-
-        # Calculate the orbit angular momentum
-        h_vect = np.cross(meteor_pos, v_h)
-        
-        # Calculate inclination
-        incl = np.arccos(h_vect[2]/vectMag(h_vect))
-
-
-        # Calculate eccentricity
-        e_vect = np.cross(v_h, h_vect)/SUN_MU - vectNorm(meteor_pos)
-        eccentricity = vectMag(e_vect)
-
-
-        # Calculate perihelion distance (source: Jenniskens et al., 2011, CAMS overview paper)
-        if eccentricity == 1:
-            q = (vectMag(meteor_pos) + np.dot(e_vect, meteor_pos))/(1 + vectMag(e_vect))
-        else:
-            q = a*(1.0 - eccentricity)
-
-        # Calculate the aphelion distance
-        Q = a*(1.0 + eccentricity)
-
-
-        # Normal vector to the XY reference frame
-        k_vect = np.array([0, 0, 1])
-
-        # Vector from the Sun pointing to the ascending node
-        n_vect = np.cross(k_vect, h_vect)
-
-        # Calculate node
-        if vectMag(n_vect) == 0:
-            node = 0
-        else:
-            node = np.arctan2(n_vect[1], n_vect[0])
-
-        node = node%(2*np.pi)
-
-
-        # Calculate argument of perihelion
-        if vectMag(n_vect) != 0:
-            peri = np.arccos(np.dot(n_vect, e_vect)/(vectMag(n_vect)*vectMag(e_vect)))
-
-            if e_vect[2] < 0:
-                peri = 2*np.pi - peri
-
-        else:
-            peri = np.arccos(e_vect[0]/vectMag(e_vect))
-
-        peri = peri%(2*np.pi)
-
-
-
-        # Calculate the longitude of perihelion
-        pi = (node + peri)%(2*np.pi)
-
-        # Calculate the latitude of perihelion
-        b = calcLatitudeOfPerihelion(peri, node, incl)
-
-
-        ### Calculate true anomaly
-        true_anomaly = np.arccos(np.dot(e_vect, meteor_pos)/(vectMag(e_vect)*vectMag(meteor_pos)))
-        if np.dot(meteor_pos, v_h) < 0:
-            true_anomaly = 2*np.pi - true_anomaly
-
-        true_anomaly = true_anomaly%(2*np.pi)
-
-        ###
-
-
-        # Calculate eccentric anomaly
-        # not meaningful for eccentricity > 1
-        if eccentricity < 1: 
-            eccentric_anomaly = np.arctan2(np.sqrt(1 - eccentricity**2)*np.sin(true_anomaly), eccentricity \
-                + np.cos(true_anomaly))
-
-            # Calculate mean anomaly
-            mean_anomaly = eccentric_anomaly - eccentricity * np.sin(eccentric_anomaly)
-            mean_anomaly = mean_anomaly % (2 * np.pi)
-        else:
-            eccentric_anomaly = np.nan
-            mean_anomaly = np.nan
-
-        # Calculate the time in days since the last perihelion passage of the meteoroid
-        # not meaningful for non-closed orbits
-        if a > 0:
-            dt_perihelion = (mean_anomaly*a**(3.0/2))/0.01720209895
-        else:
-            dt_perihelion = np.nan
-
-        if not np.isnan(dt_perihelion):
-            
-            # Calculate the date and time of the last perihelion passage
-            last_perihelion = jd2Date(jd_dyn - dt_perihelion, dt_obj=True)
-
-        else:
-            last_perihelion = None
-
-
-        # Calculate Tisserand's parameter with respect to Jupiter
-        Tj = 2*np.sqrt((1 - eccentricity**2)*a/5.204267)*np.cos(incl) + 5.204267/a
+        # Compute the orbital elements
+        (
+            meteor_pos, L_g, B_g , met_v_h, L_h, B_h, v_h_mag, la_sun, a, eccentricity, incl, 
+            peri, node, pi, b, q, Q, true_anomaly, eccentric_anomaly, mean_anomaly, last_perihelion, n, T, Tj
+        ) = calcOrbitalElements(jd_ref, ra_g, dec_g, v_g, eci_ref)
 
 
 
@@ -832,6 +862,9 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         orb.v_g = v_g
         orb.ra_g = ra_g
         orb.dec_g = dec_g
+        orb.zc = zc
+        orb.zg = zg
+
 
         orb.meteor_pos = meteor_pos
         orb.L_g = L_g
@@ -841,10 +874,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
         orb.L_h = L_h
         orb.B_h = B_h
 
-        orb.zc = zc
-        orb.zg = zg
-
-        orb.v_h = v_h_mag*1000
+        orb.v_h = v_h_mag
 
         orb.la_sun = la_sun
 

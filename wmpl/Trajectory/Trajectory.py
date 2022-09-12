@@ -1948,7 +1948,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
     # Run the MC solutions
     results_check_kwagrs = {"timing_res": traj.timing_res, "geometric_uncert": geometric_uncert}
     mc_results = parallelComputeGenerator(traj_generator, _MCTrajSolve, checkMCTrajectories, mc_runs, \
-        results_check_kwagrs=results_check_kwagrs)
+        results_check_kwagrs=results_check_kwagrs, n_proc=mc_cores)
 
 
     # If there are no MC runs which were successful, recompute using geometric uncertainties
