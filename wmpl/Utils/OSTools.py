@@ -41,7 +41,7 @@ def walkDirsToDepth(dir_path, depth=-1):
             - dir_list - list of directories in the path
             - file_list - list of files in the path
     """
-
+    
     final_list = []
     dir_list = []
     file_list = []
