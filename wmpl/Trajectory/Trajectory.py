@@ -2014,7 +2014,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
 
 
     # Init the trajectory noise generator
-    traj_generator = trajNoiseGenerator(traj, noise_sigma, n_proc=mc_cores)
+    traj_generator = trajNoiseGenerator(traj, noise_sigma)
 
     
     # Run the MC solutions
