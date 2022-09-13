@@ -531,7 +531,7 @@ def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir, 
             np.degrees(np.array(y_data)), bins=(lon_bins, lat_bins))
 
         # Apply Gaussian filter to it
-        data = scipy.ndimage.filters.gaussian_filter(data, 1.0)*4*np.pi
+        data = scipy.ndimage.gaussian_filter(data, 1.0)*4*np.pi
 
         plt_handle = celes_plot.m.imshow(data.T, origin='lower', extent=[lon_min, lon_max, lat_min, lat_max],\
             #interpolation='gaussian', norm=matplotlib.colors.PowerNorm(gamma=1./2.), cmap=cmap)
@@ -1741,7 +1741,7 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
 
 
 
-def generateAutoPlotsAndReports(dir_path, traj_quality_params, prev_sols=10, sol_window=1):
+def generateAutoPlotsAndReports(dir_path, traj_quality_params, prev_sols=10, sol_window=1, output_dir=None):
     """ Auto generate plots per degree of solar longitude and put them in the AUTO_OUTPUT_DATA_DIR that is 
         in the parent directory of dir_path. 
     
@@ -1752,13 +1752,15 @@ def generateAutoPlotsAndReports(dir_path, traj_quality_params, prev_sols=10, sol
     Keyword arguments:
         prev_sols: [int] Number of previous degrees of solar longitdes to go back for and re-generate plots and reports.
         sol_window: [float] Window of solar longitudes for plots and graphs in degrees.
-
+        output_dir: [str] Output directory. If None, dir_path will be used.
     """
 
+    if output_dir is None:
+        
+        # Make path to the output directory
+        parent_dir = os.path.abspath(os.path.join(dir_path, os.pardir))
+        output_dir = os.path.join(parent_dir, AUTO_OUTPUT_DATA_DIR)
 
-    # Make path to the output directory
-    parent_dir = os.path.abspath(os.path.join(dir_path, os.pardir))
-    output_dir = os.path.join(parent_dir, AUTO_OUTPUT_DATA_DIR)
     mkdirP(output_dir)
 
     # Make the plots directory
@@ -2041,6 +2043,11 @@ if __name__ == "__main__":
     arg_parser.add_argument('-p', '--plot_all_showers', action="store_true", \
         help="""Plot showers on the maps showing the whole date ramge."""
         )
+
+    arg_parser.add_argument('-o', '--output', metavar='OUTPUT_DIR', type=str, \
+        help="""Output directory. If not given, the data directory will be used."""
+        )
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -2103,7 +2110,8 @@ if __name__ == "__main__":
 
 
             # Generate the latest plots
-            generateAutoPlotsAndReports(cml_args.dir_path, traj_quality_params, prev_sols=prev_sols)
+            generateAutoPlotsAndReports(cml_args.dir_path, traj_quality_params, prev_sols=prev_sols, \
+                output_dir=cml_args.output)
 
 
 
@@ -2132,14 +2140,19 @@ if __name__ == "__main__":
         traj_list = loadTrajectoryPickles(cml_args.dir_path, traj_quality_params, verbose=True)
 
 
+        # Determine the output directory
+        output_dir = cml_args.output
+        if output_dir is None:
+            output_dir = cml_args.dir_path
+
 
         # Generate shower plots
         print("Plotting showers...")
-        generateShowerPlots(cml_args.dir_path, traj_list, min_members=30, P_0m=P_0M, max_radiant_err=0.5)
+        generateShowerPlots(output_dir, traj_list, min_members=30, P_0m=P_0M, max_radiant_err=0.5)
 
         # Generate the orbit summary file
         print("Writing summary file...")
-        writeOrbitSummaryFile(cml_args.dir_path, traj_list, P_0m=P_0M)
+        writeOrbitSummaryFile(output_dir, traj_list, P_0m=P_0M)
 
         # Generate summary plots
         print("Plotting all trajectories...")
@@ -2147,11 +2160,11 @@ if __name__ == "__main__":
         if cml_args.plot_all_showers is not None:
             pas = True
             print('adding shower loci to all maps')
-        generateTrajectoryPlots(cml_args.dir_path, traj_list, plot_showers=pas, time_limited_plot=False)
+        generateTrajectoryPlots(output_dir, traj_list, plot_showers=pas, time_limited_plot=False)
 
         # Generate station plot
         print("Plotting station plot...")
-        generateStationPlot(cml_args.dir_path, traj_list)
+        generateStationPlot(output_dir, traj_list)
 
 
 
@@ -2175,6 +2188,6 @@ if __name__ == "__main__":
 
 
             # Plot graphs per solar longitude
-            generateTrajectoryPlots(cml_args.dir_path, traj_list_sol, \
+            generateTrajectoryPlots(output_dir, traj_list_sol, \
                 plot_name="scecliptic_solrange_{:05.1f}-{:05.1f}".format(sol_min, sol_max), plot_sol=False, \
                 plot_showers=True, time_limited_plot=True)

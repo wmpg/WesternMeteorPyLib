@@ -154,7 +154,14 @@ class DatabaseJSON(object):
 
         if os.path.exists(self.db_file_path):
             with open(self.db_file_path) as f:
+
+                db_file_path_bak = self.db_file_path
+
+                # Load the value from the database
                 self.__dict__ = json.load(f)
+
+                # Overwrite the database path
+                self.db_file_path = db_file_path_bak
 
                 # Convert trajectories from JSON to TrajectoryReduced objects
                 for traj_dict_str in ["trajectories", "failed_trajectories"]:
@@ -480,9 +487,10 @@ class RMSDataHandle(object):
         station_list = self.loadStations()
 
         # Load database of processed folders
+        database_path = os.path.join(self.dir_path, JSON_DB_NAME)
         print()
-        print("Loading database...")
-        self.db = DatabaseJSON(os.path.join(self.dir_path, JSON_DB_NAME))
+        print("Loading database: {:s}".format(database_path))
+        self.db = DatabaseJSON(database_path)
         print("   ... done!")
 
         # Find unprocessed meteor files
@@ -641,7 +649,7 @@ class RMSDataHandle(object):
                     
                 # Find FTPdetectinfo
                 if name.startswith("FTPdetectinfo") and name.endswith('.txt') and \
-                    (not "backup" in name) and (not "uncalibrated" in name):
+                    (not "backup" in name) and (not "uncalibrated" in name) and (not "unfiltered" in name):
                     ftpdetectinfo_name = name
                     continue
 
