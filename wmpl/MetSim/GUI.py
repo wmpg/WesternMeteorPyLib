@@ -1396,6 +1396,10 @@ def loadUSGInputFile(dir_path, usg_file):
     ### ###
 
 
+    # Align the time so that the reference time 0 is at the height of the peak magnitude #
+    data.time_data -= data.time_data[np.nanargmin(data.absolute_magnitudes)]
+
+
     ### Prepare all light curves as input ###
 
     # Add USG/CNEOS data
