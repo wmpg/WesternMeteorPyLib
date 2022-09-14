@@ -1396,8 +1396,9 @@ def loadUSGInputFile(dir_path, usg_file):
     ### ###
 
 
-    # Align the time so that the reference time 0 is at the height of the peak magnitude #
-    data.time_data -= data.time_data[np.nanargmin(data.absolute_magnitudes)]
+    # Align the time so that the reference time 0 is at the height of the peak magnitude
+    peak_time_offset = data.time_data[np.nanargmin(data.absolute_magnitudes)] 
+    data.time_data -= peak_time_offset
 
 
     ### Prepare all light curves as input ###
@@ -1408,6 +1409,16 @@ def loadUSGInputFile(dir_path, usg_file):
 
     # Add any additional light curves (note that the time base needs to be the same)
     if hasattr(data, "additional_lcs"):
+
+        # Apply time offset to the additional LCs
+        for obs in data.additional_lcs:
+
+            additional_time, additional_mag = np.array(data.additional_lcs[obs]).T
+            additional_time -= peak_time_offset
+
+            data.additional_lcs[obs] = np.c_[additional_time, additional_mag]
+            
+
         lc_data.update(data.additional_lcs)
 
 
