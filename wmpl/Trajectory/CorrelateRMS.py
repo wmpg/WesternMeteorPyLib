@@ -605,7 +605,7 @@ class RMSDataHandle(object):
             stations_dict = {station_code: [np.radians(pp.lat), np.radians(pp.lon), pp.elev]}
 
             # Load the FTPdetectinfo file
-            meteor_list = loadFTPDetectInfo(ftpdetectinfo_path, stations_dict)
+            meteor_list = loadFTPDetectInfo(ftpdetectinfo_path, stations_dict, join_broken_meteors=False)
 
         else:
             meteor_list = []
@@ -700,6 +700,7 @@ class RMSDataHandle(object):
                 if cams_met_obs.ff_name in platepars_recalibrated_dict:
                     pp_dict = platepars_recalibrated_dict[cams_met_obs.ff_name]
                 else:
+                    print("    Skipping {:s}, not found in platepar dict".format(cams_met_obs.ff_name))
                     continue
 
                 pp = PlateparDummy(**pp_dict)
