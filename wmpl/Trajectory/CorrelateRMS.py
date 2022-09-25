@@ -605,7 +605,7 @@ class RMSDataHandle(object):
             stations_dict = {station_code: [np.radians(pp.lat), np.radians(pp.lon), pp.elev]}
 
             # Load the FTPdetectinfo file
-            meteor_list = loadFTPDetectInfo(ftpdetectinfo_path, stations_dict)
+            meteor_list = loadFTPDetectInfo(ftpdetectinfo_path, stations_dict, join_broken_meteors=False)
 
         else:
             meteor_list = []
