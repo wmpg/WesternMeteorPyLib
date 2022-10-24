@@ -452,9 +452,22 @@ if __name__ == "__main__":
 
 
     # Plot the evaluation point
-    ax2.scatter(vel_eval/1000, time_eval, color='g', marker='o', s=50,\
-        label="Dyn mass = [{:.3f}, {:.3f}, {:.3f}] kg\nDecel = {:.2f} $\\pm$ {:.2f} km/s$^2$\nV = {:.2f} km/s\nh = {:.2f} km".format(\
-            dyn_mass_lo, dyn_mass, dyn_mass_hi, decel/1000, decel_std/1000, vel_eval/1000, ht_eval/1000))
+    ax2.scatter(vel_eval/1000, time_eval, color='g', marker='o', s=50, \
+        label="Dyn $m$ = [{:.3f}, {:.3f}, {:.3f}] kg\n"
+        "Final $m$ = [{:.3f}, {:.3f}, {:.3f}] kg\n"
+        "Decel = {:.2f} $\\pm$ {:.2f} km/s$^2$\n"
+        "V = {:.2f} km/s\n"
+        "h = {:.2f} km\n"
+        "$\\rho_m$ = {:d} kg/m$^3$\n"
+        "$\\Gamma A$ = {:.2f}".format( \
+            dyn_mass_lo, dyn_mass, dyn_mass_hi, 
+            final_mass_lo, final_mass, final_mass_hi, 
+            decel/1000, decel_std/1000, 
+            vel_eval/1000, 
+            ht_eval/1000, 
+            int(bulk_density), 
+            gamma_a)
+        )
 
 
     print()
@@ -495,6 +508,10 @@ if __name__ == "__main__":
     
     ax1.legend()
     ax2.legend()
+
+    # Add padding to the simulation axis so the legend fits
+    ax2_y_min, ax2_y_max = ax2.get_ylim()
+    ax2.set_ylim(ax2_y_min, 0.75*ax2_y_max)
 
 
     plt.tight_layout()
