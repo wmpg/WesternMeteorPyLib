@@ -169,7 +169,7 @@ if __name__ == "__main__":
         type=float, default=0.4)
 
     arg_parser.add_argument('-w', '--walk', \
-        help="Recursively find all ECSV files in the given folder and use them for trajectory estimation.", \
+        help="Recursively find all ECSV files in the given folder and use them for trajectory estimation. If a directory containing the file contains the word 'REJECT', it will be skipped. ", \
         action="store_true")
 
     # Parse the command line arguments
@@ -194,6 +194,11 @@ if __name__ == "__main__":
         for entry in sorted(os.walk(dir_path), key=lambda x: x[0]):
 
             dir_name, _, file_names = entry
+
+            # Skip all directories with the word "REJECT" in them
+            if "REJECT" in dir_name:
+                print("Directory {:s} skipped because it contains 'REJECT'.".format(dir_name))
+                continue
 
             # Add all ECSV files with picks to the processing list
             for fn in file_names:
