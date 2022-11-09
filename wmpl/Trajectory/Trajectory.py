@@ -208,6 +208,9 @@ class ObservedPoints(object):
         # Initial velocity
         self.v_init = None
 
+        # Direct fit standard deviation of the initial velocity
+        self.v_init_stddev = None
+
         # Jacchia fit parameters for these observations
         self.jacchia_fit = None
 
@@ -3316,9 +3319,14 @@ class Trajectory(object):
                     weights_list_path = weight_list[part_beg:part_end]
 
                     # Fit a line to time vs. state_vect_dist
-                    velocity_fit = scipy.optimize.least_squares(lineFuncLS, [v_init, 1], args=(times_part, \
+                    fit_params = scipy.optimize.least_squares(lineFuncLS, [v_init, 1], args=(times_part, \
                         state_vect_dist_part, weights_list_path), loss='soft_l1')
-                    velocity_fit = velocity_fit.x
+                    velocity_fit = fit_params.x
+
+                    # Compute the standard deviation of the velocity fit
+                    jac = fit_params.jac
+                    vel_cov = np.linalg.inv(jac.T.dot(jac))
+                    velocity_stddev = np.sqrt(np.diagonal(vel_cov))[0]
 
                     # Calculate the lag and fit a line to it
                     lag_temp = state_vect_dist - lineFunc(times, *velocity_fit)
@@ -3333,7 +3341,7 @@ class Trajectory(object):
                         # Calculate the standard deviation of the line fit and add it to the list of solutions
                         line_stddev = RMSD(state_vect_dist_part - lineFunc(times_part, *velocity_fit), \
                             weights=weights_list_path)
-                        stddev_list.append([line_stddev, velocity_fit])
+                        stddev_list.append([line_stddev, velocity_fit, velocity_stddev])
 
 
             # stddev_arr = np.array([std[0] for std in stddev_list])
@@ -3352,9 +3360,13 @@ class Trajectory(object):
                 v_init_mini = v_init
 
                 # Redo the lag fit, but with fixed velocity
-                vel_intercept, _ = scipy.optimize.curve_fit(lambda x, intercept: lineFunc(x, v_init_mini, \
+                vel_intercept, vel_cov = scipy.optimize.curve_fit(lambda x, intercept: lineFunc(x, v_init_mini, \
                     intercept), times, state_vect_dist, p0=[0])
 
+                # Compute the fit standard deviation
+                vel_stddev = np.sqrt(np.diagonal(vel_cov))[0]
+
+                # Construct a velocity fit vector
                 velocity_fit = [v_init_mini, vel_intercept[0]]
 
 
@@ -3363,6 +3375,7 @@ class Trajectory(object):
                 # Take the velocity fit with the minimum line standard deviation
                 stddev_min_ind = np.argmin([std[0] for std in stddev_list])
                 velocity_fit = stddev_list[stddev_min_ind][1]
+                vel_stddev = stddev_list[stddev_min_ind][2]
 
                 # Make sure the velocity is positive
                 v_init_mini = np.abs(velocity_fit[0])
@@ -3372,13 +3385,14 @@ class Trajectory(object):
                     obs.lag = obs.state_vect_dist - lineFunc(obs.time_data, *velocity_fit)
 
 
-                if self.verbose:
-                    print('ESTIMATED Vinit:', v_init_mini, 'm/s')
+
+            if self.verbose:
+                print('ESTIMATED Vinit: {:.2f} +/- {:.2f} m/s'.format(v_init_mini, vel_stddev))
 
             
 
 
-        return timing_minimization_successful, velocity_fit, v_init_mini, time_diffs, observations
+        return timing_minimization_successful, velocity_fit, v_init_mini, vel_stddev, time_diffs, observations
 
 
 
@@ -4087,6 +4101,7 @@ class Trajectory(object):
                 '{:6.4f}', uncertainties, 'lat_geocentric', deg=True))
             out_str += "\n"
 
+
             # Write out orbital parameters
             out_str += self.orbit.__repr__(uncertainties=uncertainties, v_init_ht=self.v_init_ht)
             out_str += "\n"
@@ -4335,7 +4350,7 @@ class Trajectory(object):
         out_str += "- 'RA and Dec obs' are the right ascension and declination calculated from the observed values, while the 'RA and Dec line' are coordinates of the lines of sight projected on the fitted radiant line. The coordinates are in the epoch of date, and NOT J2000!. 'Azim and alt line' are thus corresponding azimuthal coordinates.\n"
         out_str += "- 'Vel prev avg' is the average velocity including all previous points up to the given point. For the first 4 points this velocity is computed as the average velocity of those 4 points. \n"
         if uncertainties is not None:
-            out_str += "- The number after +/- is the 1 sigma uncertainty, and the numbers in square brackets are the 95% confidence interval \n"
+            out_str += "- The number after +/- is the 1 sigma uncertainty, and the numbers in square brackets are the 95% confidence intervals. \n"
 
         if verbose:
             print(out_str)
@@ -5998,9 +6013,18 @@ class Trajectory(object):
             
 
         # Estimate the timing difference between stations and the initial velocity and update the time
-        self.timing_minimization_successful, self.velocity_fit, self.v_init, self.time_diffs, \
-            self.observations = self.estimateTimingAndVelocity(self.observations, weights, \
-                estimate_timing_vel=self.estimate_timing_vel)
+        (
+            self.timing_minimization_successful, 
+            self.velocity_fit, 
+            self.v_init, 
+            self.v_init_stddev,
+            self.time_diffs, 
+            self.observations 
+        ) = self.estimateTimingAndVelocity(
+            self.observations, 
+            weights,
+            estimate_timing_vel=self.estimate_timing_vel
+            )
 
 
         # If estimating the timing failed, skip any further steps
@@ -6221,7 +6245,7 @@ class Trajectory(object):
             # which needs to have fixed stations and the average velocity should be the reference velocity
             self.orbit = calcOrbit(self.radiant_eci_mini, self.v_init, self.v_avg, self.state_vect_mini, \
                 self.rbeg_jd, stations_fixed=(not minimize_solution.success), \
-                reference_init=minimize_solution.success)
+                reference_init=minimize_solution.success, v_init_stddev_direct=self.v_init_stddev)
 
             if self.verbose:
                 print(self.orbit.__repr__(v_init_ht=self.v_init_ht))
