@@ -25,3 +25,7 @@ wmpl/share/ShowerLookUpTable.npy
 wmpl/share/streamfulldata.npy
 wmpl/MetSim/MetSimErosionCyTools.c
 .vscode/settings.json
+wmpl/share/Amors.txt
+wmpl/share/Atens.txt
+wmpl/share/Apollos.txt
+wmpl/share/ELEMENTS.COMET
