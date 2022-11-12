@@ -1,7 +1,7 @@
 numpy
 cython
 scipy
-matplotlib
+matplotlib==3.1.2
 jplephem
 pyephem
 https://github.com/matplotlib/basemap/archive/master.zip ; sys_platform != 'win32'
@@ -11,5 +11,6 @@ pyyaml
 pyswarms
 keras
 pytz
-cartopy
 basemap-data-hires
+# INSTALL CARTOPY WITH CONDA
+#cartopy
