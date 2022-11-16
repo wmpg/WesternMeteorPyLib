@@ -2872,7 +2872,7 @@ class Trajectory(object):
                 time_part = time_part[filter_mask]
                 len_part = len_part[filter_mask]
 
-                if len(time_part):
+                if len(time_part) > 1:
 
                     # Fit a line through time vs. length data
                     popt, _ = scipy.optimize.curve_fit(lineFunc, time_part, len_part)

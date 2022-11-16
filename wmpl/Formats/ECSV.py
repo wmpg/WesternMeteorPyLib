@@ -139,6 +139,13 @@ def loadECSVs(ecsv_paths):
 
             meteor.finish()
 
+
+            # Check that the observation has a minimum number of points
+            if len(meteor.time_data) < 4:
+                print("The station {:s} has too few points (<4), skipping: {:s}".format(station_id, ecsv_file))
+                continue
+
+
             meteor_list.append(meteor)
 
 
