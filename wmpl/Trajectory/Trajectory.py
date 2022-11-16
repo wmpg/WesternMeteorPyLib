@@ -3329,10 +3329,19 @@ class Trajectory(object):
                         state_vect_dist_part, weights_list_path), loss='soft_l1')
                     velocity_fit = fit_params.x
 
-                    # Compute the standard deviation of the velocity fit
+                    ### Compute the standard deviation of the velocity fit
+                    
                     jac = fit_params.jac
-                    vel_cov = np.linalg.inv(jac.T.dot(jac))
-                    velocity_stddev = np.sqrt(np.diagonal(vel_cov))[0]
+                    jac_dot = jac.T.dot(jac)
+
+                    # Make sure the Jacobian matrix is not singular
+                    if np.det(jac_dot) == 0:
+                        vel_stddev = 0
+                    else:
+                        vel_cov = np.linalg.inv(jac_dot)
+                        velocity_stddev = np.sqrt(np.diagonal(vel_cov))[0]
+
+                    ###
 
                     # Calculate the lag and fit a line to it
                     lag_temp = state_vect_dist - lineFunc(times, *velocity_fit)
