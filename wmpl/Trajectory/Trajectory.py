@@ -3335,7 +3335,7 @@ class Trajectory(object):
                     jac_dot = jac.T.dot(jac)
 
                     # Make sure the Jacobian matrix is not singular
-                    if np.det(jac_dot) == 0:
+                    if np.linalg.det(jac_dot) == 0:
                         vel_stddev = 0
                     else:
                         vel_cov = np.linalg.inv(jac_dot)
