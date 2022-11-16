@@ -881,7 +881,11 @@ class RMSDataHandle(object):
         for met_obs in unpaired_observations:
 
             # Check that the stations are in the same region / group of countres
-            if not self.countryFilter(met_obs.station_code, traj_reduced.participating_stations[0]):
+            if not self.countryFilter(
+                met_obs.station_code, 
+                (traj_reduced.participating_stations + traj_reduced.ignored_stations)[0]
+                ):
+            
                 continue
 
             # Skip all stations that are already participating in the trajectory solution
