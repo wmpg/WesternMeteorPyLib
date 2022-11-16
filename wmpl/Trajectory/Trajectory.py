@@ -3146,12 +3146,13 @@ class Trajectory(object):
         # Take the initial velocity as the median velocity between all sites
         v_init_list = np.array([obs.v_init for obs in observations if obs.v_init is not None])
         v_init = np.median(v_init_list)
+        vel_stddev = 0
 
         # Timing differences which will be calculated
         time_diffs = np.zeros(len(observations))
 
         if not estimate_timing_vel:
-            return True, np.zeros(2), v_init, time_diffs, observations
+            return True, np.zeros(2), v_init, 0, time_diffs, observations
 
         # Run timing offset estimation if it needs to be done
         if estimate_timing_vel:
@@ -3222,6 +3223,7 @@ class Trajectory(object):
                 v_init_mini = v_init
 
                 velocity_fit = np.zeros(2)
+                vel_stddev = 0
                 v_init_mini = 0
 
 
