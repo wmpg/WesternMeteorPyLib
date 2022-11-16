@@ -2708,6 +2708,10 @@ class Trajectory(object):
         if hasattr(obs, 'ignore_list'):
             ignore_list = obs.ignore_list
 
+            # If the ignore list differens in length from time data, reinit
+            if len(ignore_list) != len(obs.time_data):
+                ignore_list = np.zeros(len(obs.time_data), dtype=np.uint8)
+
         else:
             ignore_list = np.zeros(len(obs.time_data), dtype=np.uint8)
 
