@@ -312,13 +312,20 @@ def minimizeAlphaBeta(v_normed, ht_normed):
 
     # Compute initial alpha-beta guess
     b0 = 1.0
-    a0 = np.exp(ht_normed[-1])/(2.0*b0)
+    a0 = np.exp(np.min(ht_normed))/(2.0*b0)
     x0 = [a0, b0]
 
     # Set alpha-beta limits
     xmin = [    0.001,  0.00001]
     xmax = [10000.0,   50.0]
     bnds = ((xmin[0], xmax[0]), (xmin[1], xmax[1]))
+
+    # If the initial guess is outside the bounds, set a middle value
+    for i, initial_param in enumerate(x0):
+        if (initial_param < xmin[i]) or (initial_param > xmax[i]):
+            x0[i] = (xmin[i] + xmax[i])/2
+
+    print("Initial guess:", x0)
 
     # Compute best-fit alpha-beta values
     res = scipy.optimize.minimize(_alphaBetaMinimization, x0, args=(v_normed, ht_normed), bounds=bnds, \
