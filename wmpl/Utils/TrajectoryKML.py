@@ -283,6 +283,90 @@ def generateTrajectoryKML(traj, dir_path):
 
     ###
 
+    ###
+
+
+    ### Add stations
+
+    for obs in traj.observations:
+
+
+        # Add station pin
+        kml += \
+"""
+    <Placemark> 
+        <name>{:s}</name>""".format(obs.station_id)
+
+        kml += \
+        """
+        <description>"""
+        kml += \
+"""
+            Lat = {:.6f} deg
+            Lon = {:.6f} deg
+            Ht  = {:.0f} m""".format(np.degrees(obs.lat), np.degrees(obs.lon), obs.ele)
+        kml += \
+    """
+        </description>
+        <Point>
+            <coordinates>
+"""
+        kml += \
+"""
+                {:.6f},{:.6f},{:.2f}""".format(np.degrees(obs.lon), np.degrees(obs.lat), 0)
+        kml += \
+"""
+            </coordinates>
+            <altitudeMode>clampToGround</altitudeMode>
+        </Point> 
+    </Placemark>
+""" 
+
+        # Add station observing extent
+        kml += \
+"""
+    <Placemark id="{:s}">""".format(str(obs.station_id) + " observed extent")
+        kml += \
+"""
+        <LineString>
+            <coordinates>"""
+
+        # First observed point
+        kml += \
+"""
+                {:.6f},{:.6f},{:.2f}""".format(np.degrees(obs.model_lon[0]), np.degrees(obs.model_lat[0]), obs.model_ht[0])
+
+        # Station coordinates
+        kml += \
+"""
+                {:.6f},{:.6f},{:.2f}""".format(np.degrees(obs.lon), np.degrees(obs.lat), obs.ele)
+
+        # Last observed point
+        kml += \
+"""
+                {:.6f},{:.6f},{:.2f}""".format(np.degrees(obs.model_lon[-1]), np.degrees(obs.model_lat[-1]), obs.model_ht[-1])
+
+        kml += \
+"""
+            </coordinates>
+            <altitudeMode>absolute</altitudeMode>
+        </LineString>
+         
+        <Style> 
+            <LineStyle>  
+                <color>#ff000000</color>
+                <width>2</width>
+            </LineStyle> 
+        </Style>
+    </Placemark>
+"""
+
+
+    ###
+
+
+
+    # Close the KML
     kml += \
 """
 
@@ -290,8 +374,6 @@ def generateTrajectoryKML(traj, dir_path):
     </Folder>
     </kml> 
 """
-
-    ###
 
 
     # Save the KML file to the directory with the platepar
