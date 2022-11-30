@@ -81,7 +81,31 @@ def _plotSphereAndArrow(centre, radius, origin, direction, intersection_list):
 
 
 
-def sampleTrajectory(dir_path, file_name, beg_ht, end_ht, sample_step):
+class TrajectorySamples(object):
+    def __init__(self, traj):
+
+        self.traj = traj
+
+        self.t_est = []
+        self.ht = []
+        self.lat = []
+        self.lon = []
+        self.ele_geo = []
+        self.azim_norot = []
+        self.elev_norot = []
+
+    def addSample(self, t_est, ht, lat, lon, ele_geo, azim_norot, elev_norot):
+
+        self.t_est.append(t_est)
+        self.ht.append(ht)
+        self.lat.append(lat)
+        self.lon.append(lon)
+        self.ele_geo.append(ele_geo)
+        self.azim_norot.append(azim_norot)
+        self.elev_norot.append(elev_norot)
+
+
+def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False):
     """ Given the trajectory, beginning, end and step in km, this function will interpolate the 
         fireball height vs. distance and return the coordinates of sampled positions and compute the azimuth
         and elevation for every point.
@@ -92,23 +116,13 @@ def sampleTrajectory(dir_path, file_name, beg_ht, end_ht, sample_step):
     Return:
     """
 
-    # Load the trajectory file
-    traj = loadPickle(dir_path, file_name)
-
 
     # Set begin and end heights, if not given
     if beg_ht < 0:
-        beg_ht = traj.rbeg_ele/1000
+        beg_ht = traj.rbeg_ele
 
     if end_ht < 0:
-        end_ht = traj.rend_ele/1000
-
-
-
-    # Convert heights to meters
-    beg_ht *= 1000
-    end_ht *= 1000
-    sample_step *= 1000
+        end_ht = traj.rend_ele
 
 
     # Generate heights for sampling
@@ -124,8 +138,10 @@ def sampleTrajectory(dir_path, file_name, beg_ht, end_ht, sample_step):
         time_data += obs.time_data.tolist()
         height_data += obs.model_ht.tolist()
 
-        # Plot the station data
-        plt.scatter(obs.time_data, obs.model_ht/1000, label=obs.station_id, marker='x', zorder=3)
+        if show_plots:
+
+            # Plot the station data
+            plt.scatter(obs.time_data, obs.model_ht/1000, label=obs.station_id, marker='x', zorder=3)
 
 
     height_data = np.array(height_data)
@@ -144,7 +160,8 @@ def sampleTrajectory(dir_path, file_name, beg_ht, end_ht, sample_step):
     # Apply Savitzky-Golay to smooth out the height change
     height_data = scipy.signal.savgol_filter(height_data, 21, 5)
 
-    plt.scatter(time_data, height_data/1000, label='Savitzky-Golay filtered', marker='+', zorder=3)
+    if show_plots:
+        plt.scatter(time_data, height_data/1000, label='Savitzky-Golay filtered', marker='+', zorder=3)
 
 
     # Sort the arrays by increasing heights (needed for interpolation)
@@ -161,18 +178,19 @@ def sampleTrajectory(dir_path, file_name, beg_ht, end_ht, sample_step):
     ht_arr = np.linspace(np.min(height_data), np.max(height_data), 1000)
     time_arr = ht_vs_time_interp(ht_arr)
 
-    plt.plot(time_arr, ht_arr/1000, label='Interpolation', zorder=3)
+    if show_plots:
+        plt.plot(time_arr, ht_arr/1000, label='Interpolation', zorder=3)
 
 
-    plt.legend()
+        plt.legend()
 
 
-    plt.xlabel('Time (s)')
-    plt.ylabel('Height (km)')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Height (km)')
 
-    plt.grid()
+        plt.grid()
 
-    plt.show()
+        plt.show()
 
     ###
 
@@ -184,13 +202,19 @@ def sampleTrajectory(dir_path, file_name, beg_ht, end_ht, sample_step):
     # Compute distance from the centre of the Earth to each height
     radius_array = ref_radius + height_array
 
-    print('Beginning coordinates (observed):')
-    print('    Lat: {:.6f}'.format(np.degrees(traj.rbeg_lat)))
-    print('    Lon: {:.6f}'.format(np.degrees(traj.rbeg_lon)))
-    print('    Elev: {:.1f}'.format(traj.rbeg_ele))
-    print()
-    print("Ground-fixed azimuth and altitude:")
-    print(' Time(s), Sample ht (m),  Lat (deg),   Lon (deg), Height (m), Azim (deg), Elev (deg)')
+    if show_plots:
+
+        print('Beginning coordinates (observed):')
+        print('    Lat: {:.6f}'.format(np.degrees(traj.rbeg_lat)))
+        print('    Lon: {:.6f}'.format(np.degrees(traj.rbeg_lon)))
+        print('    Elev: {:.1f}'.format(traj.rbeg_ele))
+        print()
+        print("Ground-fixed azimuth and altitude:")
+        print(' Time(s), Sample ht (m),  Lat (deg),   Lon (deg), Height (m), Azim (deg), Elev (deg)')
+
+
+    # Open a trajectory sample container
+    traj_samples = TrajectorySamples(traj)
 
     # Go through every distance from the Earth centre and compute the geo coordinates at the given distance,
     #   as well as the point-to-point azimuth and elevation
@@ -281,16 +305,27 @@ def sampleTrajectory(dir_path, file_name, beg_ht, end_ht, sample_step):
 
         prev_eci = np.copy(height_eci)
 
-        print("{:s}{:7.3f}, {:13.1f}, {:10.6f}, {:11.6f}, {:10.1f}, {:10.6f}, {:10.6f}".format(time_marker, t_est, ht, np.degrees(lat), np.degrees(lon), ele_geo, np.degrees(azim_norot), np.degrees(elev_norot)))
 
-    print('The star * denotes heights extrapolated after the end of the fireball, with the fixed velocity of 3 km/s.')
-    print("The horizontal coordinates are apparent above a fixed ground, not topocentric in J2000!")
+        # Add point parameters
+        traj_samples.addSample(t_est, ht, lat, lon, ele_geo, azim_norot, elev_norot)
+
+        if show_plots:
+
+            print("{:s}{:7.3f}, {:13.1f}, {:10.6f}, {:11.6f}, {:10.1f}, {:10.6f}, {:10.6f}".format(time_marker, t_est, ht, np.degrees(lat), np.degrees(lon), ele_geo, np.degrees(azim_norot), np.degrees(elev_norot)))
 
 
-    print('End coordinates (observed):')
-    print('    Lat: {:.6f}'.format(np.degrees(traj.rend_lat)))
-    print('    Lon: {:.6f}'.format(np.degrees(traj.rend_lon)))
-    print('    Elev: {:.1f}'.format(traj.rend_ele))
+    if show_plots:
+        print('The star * denotes heights extrapolated after the end of the fireball, with the fixed velocity of 3 km/s.')
+        print("The horizontal coordinates are apparent above a fixed ground, not topocentric in J2000!")
+
+
+        print('End coordinates (observed):')
+        print('    Lat: {:.6f}'.format(np.degrees(traj.rend_lat)))
+        print('    Lon: {:.6f}'.format(np.degrees(traj.rend_lon)))
+        print('    Elev: {:.1f}'.format(traj.rend_ele))
+
+
+    return traj_samples
 
 
 
@@ -322,9 +357,10 @@ if __name__ == "__main__":
     # Unpack the file name and the directory path from the given arguments
     dir_path, file_name = os.path.split(cml_args.traj_pickle_file)
 
-    beg_ht = cml_args.beg_height
-    end_ht = cml_args.end_height
-    sample_step = cml_args.height_step
+    # Convert units to meters
+    beg_ht = 1000*cml_args.beg_height
+    end_ht = 1000*cml_args.end_height
+    sample_step = 1000*cml_args.height_step
 
     ############################
 
@@ -336,20 +372,24 @@ if __name__ == "__main__":
     # file_name = "20180117_010828_trajectory.pickle"
 
 
-    # # Beginning height of sampling (km)
+    # # Beginning height of sampling (m)
     # #   Use -1 for the beginning hieght of the fireball
-    # beg_ht = 50.0
+    # beg_ht = 50000.0
 
-    # # End height of sampling (km)
+    # # End height of sampling (m)
     # #   Use -1 for the final height
-    # end_ht = 10.0
+    # end_ht = 10000.0
 
-    # # Sampling step (km)
-    # sample_step = 0.1
+    # # Sampling step (m)
+    # sample_step = 100
+
+
+    # Load the trajectory file
+    traj = loadPickle(dir_path, file_name)
 
 
     # Run trajectory sampling
-    sampleTrajectory(dir_path, file_name, beg_ht, end_ht, sample_step)
+    sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=True)
 
 
     # # Test the line and sphere intersection
@@ -365,7 +405,3 @@ if __name__ == "__main__":
     # print(intersection)
 
     # _plotSphereAndArrow(centre, radius, origin, direction, intersection)
-
-if __name__ == '__main__':
-
-    pass
