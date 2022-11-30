@@ -377,7 +377,7 @@ def generateTrajectoryKML(traj, dir_path):
 
 
     # Save the KML file to the directory with the platepar
-    kml_path = os.path.join(dir_path, "{:s}.kml".format(traj_name))
+    kml_path = os.path.join(dir_path, "{:s}_trajectory.kml".format(traj_name))
     with open(kml_path, 'w') as f:
         f.write(kml)
 
