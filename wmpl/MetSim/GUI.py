@@ -2133,7 +2133,7 @@ class MetSimGUI(QMainWindow):
         # If there are no magnitudes, assume that the initial mass is 0.2 grams
         if not time_mag_arr:
             print("No photometry, assuming default mass:", self.const.m_init)
-            return self.const.m_init
+            return 0, self.const.m_init
 
         print("NOTE: The mass was computing using a constant luminous efficiency defined in the GUI!")
 
