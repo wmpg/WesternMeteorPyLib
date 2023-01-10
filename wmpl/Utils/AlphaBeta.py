@@ -797,21 +797,35 @@ if __name__ == "__main__":
         lat_mean = np.mean([traj.rbeg_lat, traj.rend_lat])
         lon_mean = meanAngle([traj.rbeg_lon, traj.rend_lon])
 
-        # Compute the dynamic pressure
+        # Compute the dynamic pressure using alpha and beta
         dyn_pressure = dynamicPressure(lat_mean, lon_mean, ht_arr, traj.jdt_ref, vel_arr)
+
+        # Compute the dynamic pressure with the lag fit
+        dyn_pressure_lag = dynamicPressure(lat_mean, lon_mean, ht_data_rescaled, traj.jdt_ref, 
+            vel_data_smooth)
 
 
         # Plot dyn pressure
-        plt.plot(dyn_pressure/1e6, ht_arr/1000, color='k')
+        plt.plot(dyn_pressure/1e6, ht_arr/1000, color='k', label='AlphaBeta')
+        plt.plot(dyn_pressure_lag/1e6, ht_data_rescaled/1000, color='r', label='Lag fit')
 
+        def findPeakDynPressure(dyn_pressure, ht_arr):
+            """Find the peak dynamic pressure. """
+            peak_dyn_pressure_index = np.argmax(dyn_pressure)
+            peak_dyn_pressure = dyn_pressure[peak_dyn_pressure_index]/1e6
+            peak_dyn_pressure_ht = ht_arr[peak_dyn_pressure_index]/1000
+            return peak_dyn_pressure, peak_dyn_pressure_ht
 
-        # Compute and mark peak on the graph
-        peak_dyn_pressure_index = np.argmax(dyn_pressure)
-        peak_dyn_pressure = dyn_pressure[peak_dyn_pressure_index]/1e6
-        peak_dyn_pressure_ht = ht_arr[peak_dyn_pressure_index]/1000
-        plt.scatter(peak_dyn_pressure, peak_dyn_pressure_ht, \
+        # Compute and mark alpha-beta dyn pressure peak on the graph
+        peak_dyn_pressure, peak_dyn_pressure_ht = findPeakDynPressure(dyn_pressure, ht_arr)
+        plt.scatter(peak_dyn_pressure, peak_dyn_pressure_ht, c='k', \
             label="Peak P = {:.2f} MPa\nHt = {:.2f} km".format(peak_dyn_pressure, peak_dyn_pressure_ht))
 
+        # Compute and mark lag fit dyn pressure peak on the graph
+        peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag = findPeakDynPressure(dyn_pressure_lag, 
+            ht_data_rescaled)
+        plt.scatter(peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag, c='r', \
+            label="Peak P = {:.2f} MPa\nHt = {:.2f} km".format(peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag))
 
 
         plt.legend()
