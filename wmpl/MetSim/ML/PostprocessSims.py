@@ -8,8 +8,10 @@ import random
 
 import numpy as np
 
-from wmpl.MetSim.ML.GenerateSimulations import MetParam, ErosionSimContainer, ErosionSimParametersCAMO, \
-    extractSimData, saveProcessedList, SIM_CLASSES_NAMES
+# Have to import all to make sure the classes are registered, otherwise pickle loading won't work
+from wmpl.MetSim.ML.GenerateSimulations import *
+
+
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PyDomainParallelizer import domainParallelizer
 

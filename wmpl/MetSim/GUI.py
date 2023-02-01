@@ -3100,7 +3100,7 @@ class MetSimGUI(QMainWindow):
             self.velocityPlot.canvas.axes.plot(sr.brightest_vel_arr/1000, sr.brightest_height_arr/1000, \
                 label='Simulated - brightest', color='k', alpha=0.5)
 
-            # Plot the simulated velocity at the brightest point
+            # Plot the simulated velocity at the leading fragment
             self.velocityPlot.canvas.axes.plot(sr.leading_frag_vel_arr/1000, sr.leading_frag_height_arr/1000,\
                 label='Simulated - leading', color='k', alpha=0.5, linestyle="dashed")
 

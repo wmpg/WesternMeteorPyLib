@@ -153,7 +153,8 @@ class DataGenerator(object):
             for res in res_list:
 
                 # Extract results
-                model_params, input_data_normed, simulated_data_normed = res
+                model_params, ht_sampled, len_sampled, mag_sampled, input_data_normed, \
+                    simulated_data_normed = res
 
                 # Add data to model input and output lists
                 param_list.append(input_data_normed)
