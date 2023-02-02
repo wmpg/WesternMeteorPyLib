@@ -497,11 +497,6 @@ class ErosionSimContainer(object):
                 setattr(self2.simulation_results, sim_res_attr, attr.tolist())
 
 
-        # Strip constants from simulation results
-        if hasattr(self2.simulation_results, "const"):
-            del self2.simulation_results.const
-
-
         file_path = os.path.join(self.output_dir, self.file_name + ".json")
         with open(file_path, 'w') as f:
             json.dump(self2, f, default=lambda o: o.__dict__, indent=4)
@@ -530,16 +525,22 @@ class ErosionSimContainer(object):
         # Store simulation results
         self.simulation_results = SimulationResults(self.const, frag_main, results_list, wake_results)
 
+        # Delete constants in the simulation results
+        if hasattr(self.simulation_results, "const"):
+            del self.simulation_results.const
+
         # Compute synthetic observations
         res = extractSimData(self, check_only=True)
+        self.time_sampled = None
         self.ht_sampled = None
         self.len_sampled = None
         self.mag_sampled = None
         if res is not None:
-            _, self.ht_sampled, self.len_sampled, self.mag_sampled, _, \
+            _, self.time_sampled, self.ht_sampled, self.len_sampled, self.mag_sampled, _, \
                 _ = extractSimData(self, check_only=False)
 
             # Convert synthetic data to lists
+            self.time_sampled = self.time_sampled.tolist()
             self.ht_sampled = self.ht_sampled.tolist()
             self.len_sampled = self.len_sampled.tolist()
             self.mag_sampled = self.mag_sampled.tolist()
@@ -787,7 +788,7 @@ def extractSimData(sim, min_frames_visible=MIN_FRAMES_VISIBLE, check_only=False,
 
 
     # Return input data and results
-    return params, ht_sampled, len_sampled, mag_sampled, input_data_normed, simulated_data_normed
+    return params, time_sampled, ht_sampled, len_sampled, mag_sampled, input_data_normed, simulated_data_normed
 
 
 
