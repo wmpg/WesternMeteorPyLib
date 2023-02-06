@@ -288,6 +288,13 @@ def generateTrajectoryKML(traj, dir_path):
 
     ### Add stations
 
+    # Add a folder for the stations
+    kml += \
+"""
+
+    <Folder><name>Stations</name><open>1</open>
+"""
+
     for obs in traj.observations:
 
 
@@ -361,6 +368,11 @@ def generateTrajectoryKML(traj, dir_path):
     </Placemark>
 """
 
+    # Close the stations folder
+    kml += \
+"""
+    </Folder>
+"""
 
     ###
 
