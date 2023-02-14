@@ -1,0 +1,790 @@
+import os
+import copy
+import re
+import json
+from collections import OrderedDict
+
+import numpy as np
+import matplotlib.pyplot as plt
+import scipy.interpolate
+import scipy.optimize
+
+from wmpl.Formats.Met import loadMet
+from wmpl.Trajectory.Trajectory import Trajectory
+from wmpl.MetSim.GUI import loadConstants, saveConstants, SimulationResults, MetObservations
+from wmpl.MetSim.MetSimErosion import runSimulation, Constants
+from wmpl.Utils.AtmosphereDensity import fitAtmPoly
+from wmpl.Utils.Math import meanAngle
+from wmpl.Utils.Pickling import loadPickle
+
+
+def costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False):
+    """ Compute the difference between the simulated and the observed meteor. 
+    
+    Arguments:
+        traj: [Trajectory] Trajectory object.
+        met_obs: [MetObservations] Meteor observations.
+        sr: [SimulationResults] Simulation results.
+        mag_sigma: [float] Magnitude residual sigma.
+        len_sigma: [float] Length residual sigma.
+
+    Keyword arguments:
+        plot_residuals: [bool] Plot the residuals.
+
+    Returns:
+        mag_res: [float] Magnitude residual.
+        len_res: [float] Length residual.
+        cost: [float] Cost function value (magnitude residual + length residual)
+    """
+
+    mag_res_sum = 0
+    mag_res_count = 0
+    len_res_sum = 0
+    len_res_count = 0
+
+
+    # Interpolate the simulated magnitude
+    sim_mag_interp = scipy.interpolate.interp1d(sr.leading_frag_height_arr, sr.abs_magnitude,
+        bounds_error=False, fill_value='extrapolate')
+
+    # Interpolate the simulated length by height
+    sim_len_interp = scipy.interpolate.interp1d(sr.leading_frag_height_arr, sr.leading_frag_length_arr,
+        bounds_error=False, fill_value='extrapolate')
+
+    # Interpolate the simulated time
+    sim_time_interp = scipy.interpolate.interp1d(sr.leading_frag_height_arr, sr.time_arr,
+        bounds_error=False, fill_value='extrapolate')
+
+    # Interpolate the velocity
+    sim_vel_interp = scipy.interpolate.interp1d(sr.leading_frag_height_arr, sr.leading_frag_vel_arr,
+        bounds_error=False, fill_value='extrapolate')
+
+    
+    # Find the simulated length at the trajectory begining
+    sim_len_beg = sim_len_interp(traj.rbeg_ele)
+
+    # Find the simulated time at the trajectory begining
+    sim_time_beg = sim_time_interp(traj.rbeg_ele)
+
+    # Find the simulated velocity at the trajectory begining
+    sim_vel_beg = sim_vel_interp(traj.rbeg_ele)
+
+    # Set the simulated length at the beginning of observations to zero
+    norm_sim_len = sr.leading_frag_length_arr - sim_len_beg
+
+    # Compute the normalized time
+    norm_sim_time = sr.time_arr - sim_time_beg
+
+
+    norm_sim_ht = sr.leading_frag_height_arr[norm_sim_len > 0]
+    norm_sim_time = norm_sim_time[norm_sim_len > 0]
+    norm_sim_len = norm_sim_len[norm_sim_len > 0]
+
+    # Interpolate the normalized length by time
+    sim_norm_len_interp = scipy.interpolate.interp1d(norm_sim_time, norm_sim_len,
+        bounds_error=False, fill_value='extrapolate')
+
+    
+    ### TEST
+
+    # plt.plot(norm_sim_time, norm_sim_len)
+    # for obs in traj.observations:
+    #     plt.scatter(obs.time_data, obs.state_vect_dist)
+
+    # plt.show()
+
+    ###
+
+
+
+    # Init a new plot
+    if plot_residuals:
+        fig, (ax_mag, ax_magres, ax_lag, ax_lenres) = plt.subplots(ncols=4, sharey=True)
+
+    # Compute the magnitude and length residuals from the trajectory object
+    for obs in traj.observations:
+        if obs.absolute_magnitudes is not None:
+
+            # Filter out observations with NaN magnitudes
+            obs.absolute_magnitudes = obs.absolute_magnitudes[~np.isnan(obs.absolute_magnitudes)]
+            obs.state_vect_dist = obs.state_vect_dist[~np.isnan(obs.absolute_magnitudes)]
+
+
+            # Sample the simulated magnitude at the observation heights
+            sim_mag_sampled = sim_mag_interp(obs.model_ht)
+
+            # Compute the magnitude residual
+            mag_res_sum += np.sum(np.abs(obs.absolute_magnitudes - sim_mag_sampled))
+            mag_res_count += len(obs.absolute_magnitudes)
+
+
+        # Sample the simulated normalized length at observed times
+        sim_norm_len_sampled = sim_norm_len_interp(obs.time_data)
+
+        # Compute the length residual
+        len_res_sum += np.sum(np.abs(obs.state_vect_dist - sim_norm_len_sampled))
+        len_res_count += len(obs.state_vect_dist)
+
+
+        # Plot the observed and simulated magnitudes
+        if plot_residuals:
+
+            if obs.absolute_magnitudes is not None:
+                ax_mag.scatter(obs.absolute_magnitudes, obs.model_ht/1000, label=obs.station_id)
+                ax_mag.plot(sim_mag_sampled, obs.model_ht/1000)
+                ax_magres.scatter(obs.absolute_magnitudes - sim_mag_sampled, obs.model_ht/1000)
+
+            # ax_len.scatter(obs.state_vect_dist, obs.model_ht/1000, label=obs.station_id)
+            # ax_len.plot(sim_norm_len_sampled, obs.model_ht/1000)
+            ax_lenres.scatter(obs.state_vect_dist - sim_norm_len_sampled, obs.model_ht/1000)
+
+            # Compute the simulated lag
+            sim_lag = sim_norm_len_sampled - sim_vel_beg*obs.time_data
+
+            # Compute the observed lag using the simulated velocity
+            obs_lag = obs.state_vect_dist - sim_vel_beg*obs.time_data
+
+            # Plot the lag
+            ax_lag.scatter(obs_lag, obs.model_ht/1000, label=obs.station_id)
+            ax_lag.plot(sim_lag, obs.model_ht/1000)
+
+
+
+    # Compute magnitude residuals from the .met file
+    if met_obs is not None:
+
+        # Plot magnitudes for all sites
+        for site in met_obs.sites:
+
+            # Extract data (filter out inf values)
+            height_data = met_obs.height_data[site][~np.isinf(met_obs.abs_mag_data[site])]
+            abs_mag_data = met_obs.abs_mag_data[site][~np.isinf(met_obs.abs_mag_data[site])]
+
+            # Sample the simulated magnitude at the observation heights
+            sim_mag_sampled = sim_mag_interp(height_data)
+
+            # Compute the magnitude residual
+            mag_res_sum += np.sum(np.abs(abs_mag_data - sim_mag_sampled))
+            mag_res_count += len(abs_mag_data)
+
+
+            # Plot the observed and simulated magnitudes
+            if plot_residuals:
+                ax_mag.scatter(abs_mag_data, height_data/1000, label=site)
+                ax_mag.plot(sim_mag_sampled, height_data/1000)
+
+                ax_magres.scatter(abs_mag_data - sim_mag_sampled, height_data/1000)
+
+
+    # Compute the average magnitude residual
+    if mag_res_count > 0:
+        mag_res = mag_res_sum/mag_res_count
+    
+    # Compute the average length residual
+    if len_res_count > 0:
+        len_res = len_res_sum/len_res_count
+
+
+    # Compute the weighted residuals
+    mag_res = mag_res/mag_sigma
+    len_res = len_res/len_sigma
+
+    # Compute the cost function
+    cost = mag_res + len_res
+
+
+    if plot_residuals:
+
+        ax_mag.set_ylabel("Height (km)")
+        ax_mag.set_xlabel("Magnitude")
+        ax_magres.set_xlabel("Mag residual")
+
+        #ax_len.set_xlabel("Length (m)")
+        ax_lag.set_xlabel("Lag (m)")
+        ax_lenres.set_xlabel("Len residual (m)")
+
+        # Invert magnitude axes
+        ax_mag.invert_xaxis()
+        ax_magres.invert_xaxis()
+
+        # # Invert length axes
+        # ax_len.invert_yaxis()
+        # ax_lenres.invert_yaxis()
+        # ax_lag.invert_yaxis()
+
+        plt.tight_layout()
+        ax_mag.legend()
+        plt.show()
+
+
+    return mag_res, len_res, cost
+            
+
+
+def residualFun(params, fit_options, traj, met_obs, const):
+    """ Take the fit parameters and return the value of the cost function. 
+    
+    Arguments:
+
+    
+    """
+
+    # Make a copy of the constants
+    const = copy.deepcopy(const)
+
+    # Update the constants with the fit parameters
+    for i, param_name in enumerate(fit_options["fit_params"]):
+
+        # Extract the normalization factor
+        norm_fact = fit_options["norm_factors"][i]
+
+        setattr(const, param_name, norm_fact*params[i])
+
+    # Print values of the fit parameters
+    print("Fit parameters: ", end="")
+    for i, param_name in enumerate(fit_options["fit_params"]):
+
+        # Extract the normalization factor
+        norm_fact = fit_options["norm_factors"][i]
+
+        print("{} = {:.4e}, ".format(param_name, norm_fact*params[i]), end="")
+    print()
+
+    # Run the simulation
+    sr = SimulationResults(const, *runSimulation(const, compute_wake=False))
+
+    # Extract the weights
+    mag_sigma, len_sigma = fit_options["mag_sigma"], fit_options["len_sigma"]
+
+    # Compute the cost function
+    mag_res, len_res, cost = costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False)
+
+    print("Magnitude residual: {:f}".format(mag_res))
+    print("Length residual: {:f}".format(len_res))
+    print("Cost: {:f}".format(cost))
+    print()
+
+    return cost
+
+
+
+def autoFit(fit_options, traj, met_obs, const):
+    """ Automatically fit the parameters to the observations. """
+
+    # Make a copy of the constants
+    const = copy.deepcopy(const)
+
+    # Extract the initial parameters
+    x0 = [getattr(const, param_name) for param_name in fit_options["fit_params"]]
+
+    # Store the initial parameters as normalization factors
+    fit_options["norm_factors"] = x0
+
+    # Normalize the initial parameters
+    x0 = [x0[i]/fit_options["norm_factors"][i] for i in range(len(x0))]
+
+    # Extract the bounds (compute either absolute values or relative values)
+    bounds = []
+    for i, (bound_type, bound_min, bound_max) in enumerate(fit_options["fit_bounds"]):
+            
+        # Absolute bounds
+        if bound_type == "abs":
+
+            # Normalize the absolute bounds
+            if bound_min is not None:
+                abs_bound_min = bound_min/fit_options["norm_factors"][i]
+            else:
+                abs_bound_min = bound_min
+            
+            if bound_max is not None:
+                abs_bound_max = bound_max/fit_options["norm_factors"][i]
+            else:
+                abs_bound_max = bound_max
+
+            bounds.append((abs_bound_min, abs_bound_max))
+
+        # Relative bounds
+        elif bound_type == "rel":
+
+            if bound_min is not None:
+                rel_bound_min = bound_min*x0[i]
+            else:
+                rel_bound_min = bound_min
+
+            if bound_max is not None:
+                rel_bound_max = bound_max*x0[i]
+            else:
+                rel_bound_max = bound_max
+
+            bounds.append((rel_bound_min, rel_bound_max))
+
+        # Invalid bound type
+        else:
+            raise ValueError("Invalid bound type: {}".format(bound_type))
+
+
+    # Print initial parameters and bounds for each
+    print("Initial parameters:")
+    for i, param_name in enumerate(fit_options["fit_params"]):
+        n = fit_options["norm_factors"][i]
+        print("\t{}: {:f} [{:f}, {:f}]".format(param_name, n*x0[i], n*bounds[i][0], n*bounds[i][1]))
+
+
+    # # Run the optimization using basinhopping
+    # res = scipy.optimize.basinhopping(residualFun, x0, 
+    #     minimizer_kwargs={"args": (fit_options, traj, met_obs, const), "method": "L-BFGS-B", "bounds": bounds})
+
+    # Run the optimization using Nelder-Mead
+    res = scipy.optimize.minimize(residualFun, x0, args=(fit_options, traj, met_obs, const), 
+        method="Nelder-Mead", bounds=bounds)
+
+    # Extract the optimized parameters into Constants
+    for i, param_name in enumerate(fit_options["fit_params"]):
+
+        # Extract the normalization factor
+        norm_fact = fit_options["norm_factors"][i]
+
+        setattr(const, param_name, norm_fact*res.x[i])
+
+    # Print the results
+    print(res)
+
+    # Return the optimized constants
+    return const
+
+
+
+def loadFitOptions(dir_path, file_name):
+    """ Load the fit options from the JSON file. """
+
+    # Open the JSON file
+    with open(os.path.join(dir_path, file_name), "r") as f:
+        filtered_lines = []
+        for line in f:
+
+            # Skip the comments
+            if line.strip().startswith("#"):
+                continue
+
+            # Skip the empty lines
+            if len(line.replace(" ", "").replace("\t", "").replace("\n", "")) == 0:
+                continue
+
+            # Replace all "True" and "False" with "true" and "false"
+            line = line.replace("True", "true").replace("False", "false")
+
+            # Replaced apostrophes with double quotes
+            line = line.replace("'", '"')
+
+            filtered_lines.append(line)
+
+        # Join the lines into a single string
+        lines = "".join(filtered_lines)
+
+        # Remove the trailing commas after ] and when the next line starts with a }
+        lines = re.sub(r",[\n\s\t]*(?=[}\]])", "", lines)
+
+        # Print the filtered lines
+        print(lines)
+
+        # Load the JSON file as an ordered dictionary
+        fit_options = json.loads(lines, object_pairs_hook=OrderedDict)
+
+
+    return fit_options
+
+
+
+
+if __name__ == "__main__":
+
+    import argparse
+
+
+    #########################
+
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Refine meteoroid ablation model parameters using automated optimization.")
+
+    arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str, \
+        help="Path to the directory containing the meteor data. The direction has to contain the trajectory pickle file, the simulated parameters .json file, and optionally a METAL .met file with the wide-field lightcurve.")
+
+    arg_parser.add_argument("fit_options_file", metavar="FIT_OPTIONS_FILE", type=str, \
+        help="Name of the file containing the fit options. It is assumed the file is located in the same directory as the meteor data.")
+
+    arg_parser.add_argument('--updated', action='store_true', \
+        help="Load the updated simulation JSON file insted of the original one.")
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    #########################
+
+    # Extract the directory path
+    dir_path = cml_args.dir_path
+
+
+    # Select which simulation JSON file to load
+    normal_json_suffix = "_sim_fit.json"
+    fitted_json_suffix = "_sim_fit_fitted.json"
+    if cml_args.updated:
+        sim_suffix = fitted_json_suffix
+    else:
+        sim_suffix = "_sim_fit.json"
+
+
+    # # Path to meteor data
+    # #dir_path = "/home/dvida/Dropbox/UWO/Projects/metsim_fitting/nicks_events/20190831_035548"
+    # dir_path = "/home/dvida/Dropbox/UWO/Projects/metsim_fitting/nicks_events/20190927_041513"
+    # #dir_path = "/home/dvida/Dropbox/UWO/Projects/metsim_fitting/nicks_events/20200521_075907"
+    # #dir_path = "/home/dvida/Dropbox/UWO/Projects/metsim_fitting/nicks_events/20220531_033542"
+
+
+    ### FIT OPTIONS ###
+
+    # Load the fit options from the JSON file
+    fit_options = loadFitOptions(dir_path, cml_args.fit_options_file)
+
+
+    # # Dictionary which defines the parameters to fit and the weights
+    # # of each parameter in the cost function
+    # fit_options = OrderedDict()
+
+    # # Define the magnitude variance (used to weight the cost function)
+    # fit_options["mag_sigma"] = 0.2 # mag
+
+    # # Define the length variance (used to weight the cost function)
+    # fit_options["len_sigma"] = 2.0 # m
+
+
+    # # The "fit_params" are names of variables in the Constants from MetSimErosion
+    # fit_sets = []
+    
+    # # The bounds can either be absolute values or a fraction of the initial value. This is defined by either
+    # # 'abs' or 'rel' in the tuple. For example, ('abs', 0.0, None) means the parameter cannot be less than 
+    # # 0.0 and there is no upper bound. ('rel', 0.5, 2.0) means the parameter cannot be less than 0.5 and
+    # # cannot be greater than 2 times the initial value.
+
+    # # Initial adjustment
+    # fp = OrderedDict()
+    # fp["m_init"] = ('rel', 0.50, 2.00)
+    # fp["v_init"] = ('rel', 0.98, 1.02)
+    # fit_sets.append(fp)
+
+    # # Multi-parameter refinement
+    # fp = OrderedDict()
+    # fp["m_init"]               = ('rel', 0.50, 2.00)
+    # fp["v_init"]               = ('rel', 0.98, 1.02)
+    # fp["rho"]                  = ('rel', 0.80, 1.20)
+    # fp["sigma"]                = ('rel', 0.75, 1.25)
+    # fp["erosion_coeff"]        = ('rel', 0.75, 1.25)
+    # fp["erosion_height_start"] = ('rel', 0.90, 1.10)
+    # fit_sets.append(fp)
+
+    # # Erosion refinement
+    # fp = OrderedDict()
+    # fp["erosion_coeff"]        = ('rel', 0.75, 1.25)
+    # fp["erosion_height_start"] = ('rel', 0.90, 1.10)
+    # fp["erosion_mass_min"]     = ('rel', 0.20, 4.00)
+    # fp["erosion_mass_max"]     = ('rel', 0.20, 4.00)
+    # fit_sets.append(fp)
+
+    # ### ###
+
+    # # Add the fit sets to the fit options
+    # fit_options["fit_sets"] = fit_sets
+
+
+    ### FIND INPUT FILES ###
+
+    # Find the _trajectory.pickle file in the dir_path
+    traj_path = None
+    for file_name in os.listdir(dir_path):
+        if file_name.endswith("_trajectory.pickle"):
+            traj_path = os.path.join(dir_path, file_name)
+            break
+
+
+    # Load the simulation params from _sim_fit.json
+    sim_params_path = None
+    for file_name in os.listdir(dir_path):
+        if file_name.endswith(sim_suffix):
+            sim_params_path = os.path.join(dir_path, file_name)
+            break
+
+
+    # Find the state.met file
+    state_met_path = None
+    for file_name in os.listdir(dir_path):
+        if file_name.startswith("state") and file_name.endswith(".met"):
+            state_met_path = os.path.join(dir_path, file_name)
+            break
+            
+    ### ###
+
+
+    # Load the trajectory
+    traj = loadPickle(*os.path.split(os.path.abspath(traj_path)))
+
+
+    # Load the simulation constants
+    const, _ = loadConstants(sim_params_path)
+    print()
+    print("Loaded simulation constants from: {}".format(sim_params_path))
+    print()
+
+    # Load the METAL state file
+    if state_met_path is not None:
+        met = loadMet(*os.path.split(os.path.abspath(state_met_path)))
+        met_obs = MetObservations(met, traj)
+    else:
+        met_obs = None
+
+
+
+    ### Fit the atmospheric density polynomial ###
+
+
+    # Determine the height range for fitting the density
+    dens_fit_ht_beg = const.h_init
+    dens_fit_ht_end = traj.rend_ele - 5000
+    if dens_fit_ht_end < 15000:
+        dens_fit_ht_end = 15000
+
+    print("Atmospheric mass density fit for the range of heights: {:.2f} - {:.2f} km".format(\
+        dens_fit_ht_end/1000, dens_fit_ht_beg/1000))
+
+    # Take mean meteor lat/lon as reference for the atmosphere model
+    lat_mean = np.mean([traj.rbeg_lat, traj.rend_lat])
+    lon_mean = meanAngle([traj.rbeg_lon, traj.rend_lon])
+
+    # Fit the polynomail describing the density
+    dens_co = fitAtmPoly(lat_mean, lon_mean, dens_fit_ht_end, dens_fit_ht_beg, traj.jdt_ref)
+
+
+    # Assign the density coefficients
+    const.dens_co = dens_co
+
+    ### ###
+
+
+    # Run the simulation and extract simulation results
+    print("Running the simulation...")
+    sr = SimulationResults(const, *runSimulation(const, compute_wake=False))
+    print("Done!")
+
+    # Cost function test
+    costFunc(traj, met_obs, sr, fit_options["mag_sigma"], fit_options["len_sigma"], plot_residuals=True)
+
+
+    # Go though all the fit sets
+    for fp in fit_options["fit_sets"]:
+
+        # Run the automated fitting only if the fit set is enabled
+        if fp["enabled"]:
+
+            # Split the parameter names and bounds into separate lists
+            fit_options["fit_params"] = [key for key in fp.keys() if key != "enabled"]
+            fit_options["fit_bounds"] = [fp[key] for key in fp.keys() if key != "enabled"]
+
+            # Run the automated fitting
+            print("Auto fitting...")
+            const = autoFit(fit_options, traj, met_obs, const)
+            print("Fitting done!")
+
+
+    # Save the fitted constants
+    saveConstants(const, dir_path, 
+        os.path.basename(sim_params_path).replace(normal_json_suffix, fitted_json_suffix))
+
+
+    # Run the simulation and extract simulation results
+    print("Running the simulation...")
+    sr = SimulationResults(const, *runSimulation(const, compute_wake=False))
+    print("Done!")
+
+
+    # Cost function test
+    costFunc(traj, met_obs, sr, fit_options["mag_sigma"], fit_options["len_sigma"], plot_residuals=True)
+
+
+
+
+
+    
+    # Interpolate the simulated length by height
+    sim_len_interp = scipy.interpolate.interp1d(sr.leading_frag_height_arr, sr.leading_frag_length_arr,
+        bounds_error=False, fill_value='extrapolate')
+
+    # Interpolate the simulated time
+    sim_time_interp = scipy.interpolate.interp1d(sr.leading_frag_height_arr, sr.time_arr,
+        bounds_error=False, fill_value='extrapolate')
+
+    # Interpolate the velocity
+    sim_vel_interp = scipy.interpolate.interp1d(sr.leading_frag_height_arr, sr.leading_frag_vel_arr,
+        bounds_error=False, fill_value='extrapolate')
+
+
+    # Find the simulated length at the trajectory begining
+    sim_len_beg = sim_len_interp(traj.rbeg_ele)
+
+    # Find the simulated time at the trajectory begining
+    sim_time_beg = sim_time_interp(traj.rbeg_ele)
+
+    # Find the simulated velocity at the trajectory begining
+    sim_vel_beg = sim_vel_interp(traj.rbeg_ele)
+
+    # Set the simulated length at the beginning of observations to zero
+    norm_sim_len = sr.leading_frag_length_arr - sim_len_beg
+
+    # Compute the normalized time
+    norm_sim_time = sr.time_arr - sim_time_beg
+
+
+    norm_sim_ht = sr.leading_frag_height_arr[norm_sim_len > 0]
+    norm_sim_time = norm_sim_time[norm_sim_len > 0]
+    norm_sim_len = norm_sim_len[norm_sim_len > 0]
+
+    # Interpolate the normalized length by time
+    sim_norm_len_interp = scipy.interpolate.interp1d(norm_sim_time, norm_sim_len,
+        bounds_error=False, fill_value='extrapolate')
+
+    # Interpolate the height by normalized length
+    sim_norm_ht_interp = scipy.interpolate.interp1d(norm_sim_len, norm_sim_ht,
+        bounds_error=False, fill_value='extrapolate')
+
+
+    # Compute the simulated lag
+    sim_lag = sim_norm_len_interp(norm_sim_time) - sim_vel_beg*norm_sim_time
+
+    # Compute the height for the simulated lag
+    sim_lag_ht = norm_sim_ht
+
+
+    ### ###
+
+        
+
+    
+    fig, (ax_mag, ax_vel, ax_lag, ax_lagres) = plt.subplots(ncols=4, figsize=(14, 8), sharey=True)
+
+
+    ### Plot the observations ###
+
+    ht_max = -np.inf
+    ht_min = np.inf
+
+    # Plot the observations from the traj file
+    for obs in traj.observations:
+
+        # Plot the magnitude
+        if obs.absolute_magnitudes is not None:
+            ax_mag.plot(obs.absolute_magnitudes, obs.model_ht/1000, marker='x', ms=8, alpha=0.5, label=obs.station_id)
+
+
+        # Compute the observed lag
+        obs_lag = obs.state_vect_dist - sim_vel_beg*obs.time_data
+
+        # Compute the corrected heights, so the simulations and the observations match
+        obs_ht_corr = sim_norm_ht_interp(obs.state_vect_dist)
+
+        # Plot the observed lag
+        lag_handle = ax_lag.plot(obs_lag, obs_ht_corr/1000, 'x', ms=8, alpha=0.5, linestyle='dashed', 
+            label=obs.station_id, markersize=10, linewidth=2)
+
+
+        # Plot the velocity
+        ax_vel.plot(obs.velocities[1:]/1000, obs_ht_corr[1:]/1000, 'x', ms=8, alpha=0.5, linestyle='dashed', 
+            label=obs.station_id, markersize=10, linewidth=2)
+
+        # Update the min/max height
+        ht_max = max(ht_max, np.max(obs.model_ht/1000))
+        ht_min = min(ht_min, np.min(obs.model_ht/1000))
+
+
+        # Sample the simulated normalized length at observed times
+        sim_norm_len_sampled = sim_norm_len_interp(obs.time_data)
+
+        # Compute the length residuals
+        len_res = obs.state_vect_dist - sim_norm_len_sampled
+
+        # Plot the length residuals
+        ax_lagres.scatter(len_res, obs_ht_corr/1000, marker='+', \
+            c=lag_handle[0].get_color(), label="Brightest, {:s}".format(obs.station_id), s=6)
+
+
+    # Plot the magnitudes from the met file
+    if met_obs is not None:
+
+        # Plot magnitudes for all sites
+        for site in met_obs.sites:
+
+            # Extract data
+            abs_mag_data = met_obs.abs_mag_data[site]
+            height_data = met_obs.height_data[site]/1000
+
+            # Plot the data
+            ax_mag.plot(abs_mag_data, height_data, marker='x', linestyle='dashed', label=str(site), 
+                markersize=5, linewidth=1)
+
+            # Update the min/max height
+            ht_max = max(ht_max, np.max(height_data))
+            ht_min = min(ht_min, np.min(height_data))
+
+
+    # Store mag range before simulations are plotted
+    mag_min, mag_max = ax_mag.get_xlim()
+
+    # Store the velocity range before simulations are plotted
+    vel_min, vel_max = ax_vel.get_xlim()
+
+    # Store the lag range before simulations are plotted
+    lag_min, lag_max = ax_lag.get_xlim()
+
+    ### ###
+
+
+    ### Plot the simulation results ###
+
+    # Plot the magnitude
+    ax_mag.plot(sr.abs_magnitude, sr.leading_frag_height_arr/1000, label='Simulated', color='k', alpha=0.5)
+
+    # Plot the velocity
+    ax_vel.plot(sr.leading_frag_vel_arr/1000, sr.leading_frag_height_arr/1000, label='Simulated', color='k', alpha=0.5)
+
+    # Plot the lag
+    ax_lag.plot(sim_lag, sim_lag_ht/1000, label='Simulated - leading', color='k', alpha=0.5)
+
+
+   
+    ### ###
+
+
+
+    # Set the height limits
+    ax_mag.set_ylim(ht_min - 5, ht_max + 5)
+
+    # Set the magnitude limits
+    ax_mag.set_xlim(mag_max, mag_min)
+
+    # Set the velocity limits
+    ax_vel.set_xlim(vel_min, vel_max)
+
+    # Set the lag limits
+    ax_lag.set_xlim(lag_min, lag_max)
+
+    ax_mag.set_xlabel("Absolute magnitude")
+    ax_mag.set_ylabel("Height (km)")
+    ax_mag.legend()
+
+    ax_vel.set_xlabel("Velocity (km/s)")
+    ax_lag.set_xlabel("Lag (m)")
+    ax_lagres.set_xlabel("Lag residuals (m)")
+
+
+    plt.tight_layout()
+    plt.subplots_adjust(wspace=0.00)
+    
+    plt.show()
+
+    ### ###

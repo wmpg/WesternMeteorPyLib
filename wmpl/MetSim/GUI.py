@@ -1365,6 +1365,36 @@ def loadConstants(sim_fit_json):
 
 
 
+def saveConstants(const, dir_path, file_name):
+    """ Save the simulation constants to a JSON file.
+
+    Arguments:
+        const: [Constants object] The constants to save.
+        dir_path: [str] The directory path to save the file to.
+        file_name: [str] The name of the file to save.
+
+    """
+
+
+    # Create a copy of the fit parameters
+    const = copy.deepcopy(const)
+
+
+    # Convert the density parameters to a list
+    if isinstance(const.dens_co, np.ndarray):
+        const.dens_co = const.dens_co.tolist()
+
+    # Remove fragments from entries becuase they can't be saved in JSON
+    for frag_entry in const.fragmentation_entries:
+        del frag_entry.fragments
+        frag_entry.resetOutputParameters()
+
+
+    file_path = os.path.join(dir_path, file_name)
+    with open(file_path, 'w') as f:
+        json.dump(const, f, default=lambda o: o.__dict__, indent=4)
+
+
 def loadUSGInputFile(dir_path, usg_file):
     """ Load the USG input file into a trajectory. """
 
@@ -4640,26 +4670,10 @@ class MetSimGUI(QMainWindow):
         dir_path, file_name = os.path.split(self.traj_path)
         file_name = file_name.replace('trajectory.pickle', '').replace(".txt", "_") + "sim_fit{:s}.json".format(suffix)
 
+        # Save the fit parameters to disk in JSON format
+        saveConstants(self.const, dir_path, file_name)
 
-        # Create a copy of the fit parameters
-        const = copy.deepcopy(self.const)
-
-
-        # Convert the density parameters to a list
-        if isinstance(const.dens_co, np.ndarray):
-            const.dens_co = const.dens_co.tolist()
-
-        # Remove fragments from entries becuase they can't be saved in JSON
-        for frag_entry in const.fragmentation_entries:
-            del frag_entry.fragments
-            frag_entry.resetOutputParameters()
-
-
-        file_path = os.path.join(dir_path, file_name)
-        with open(file_path, 'w') as f:
-            json.dump(const, f, default=lambda o: o.__dict__, indent=4)
-
-        print("Saved fit parameters to:", file_path)
+        print("Saved fit parameters to:", os.path.join(dir_path, file_name))
 
 
 

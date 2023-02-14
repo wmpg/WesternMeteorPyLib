@@ -1,0 +1,66 @@
+# This file is read by the MetSim auto fit script. It is a modified JSON format which allows comments
+
+# This file should be placed in the same directory as the data files
+
+## Fit parameters that can be refined
+# Meteoroid properties:
+# - m_init - Initial meteoroid mass (kg)
+# - v_init - Initial meteoroid veocity (m/s)
+# - rho - Meteoroid bulk density (kg/m^3)
+# - sigma - Main fragment ablation coefficient (s^2/km^2)
+# Erosion properties:
+# - erosion_height_start - Height at which the erosion starts (meters)
+# - erosion_coeff - Erosion coefficient (s^2/m^2)
+# - erosion_mass_index - Grain mass distribution index
+# - erosion_mass_min - Minimum grain mass (kg)
+# - erosion_mass_max - Maximum grain mass (kg)
+# Erosion change properties:
+# - erosion_height_change - Height at which the erosion coefficient changes (meters)
+# - erosion_coeff_change - Erosion coefficient after the change (s^2/m^2)
+# - erosion_rho_change - Density after erosion change
+# - erosion_sigma_change - Ablation coeff after erosion change (s^2/m^2)
+
+# The bounds can either be absolute values or a fraction of the initial value. This is defined by either
+# 'abs' or 'rel' in the tuple. For example, ['abs', 0.0, None] means the parameter cannot be less than 
+# 0.0 and there is no upper bound. If we do ['rel', 0.5, 2.0], it means the parameter cannot be less than 0.5 
+# and cannot be greater than 2 times the initial value.
+
+{
+    # Define the magnitude variance (used to weight the cost function)
+    "mag_sigma": 0.2,
+
+    # Define the length variance in meters (used to weight the cost function)
+    "len_sigma": 2.0,
+
+    # Define the fit parameters and bounds
+    "fit_sets":
+    [   
+        # Fits can be chained and will occur one after the other
+        # The use of individual fits is turned on and off by setting the "enabled" parameter to true or false
+
+        # Simple fit - quick refinement of basics
+        {
+            "enabled":              true,
+            "m_init":               ["rel", 0.50, 2.00],
+            "v_init":               ["rel", 0.98, 1.02],
+        },
+        # More complex fit - refinement of all parameters
+        {
+            "enabled":              false,
+            "m_init":               ["rel", 0.50, 2.00],
+            "v_init":               ["rel", 0.98, 1.02],
+            "rho":                  ["rel", 0.80, 1.20],
+            "erosion_coeff":        ["rel", 0.75, 1.25],
+            "sigma":                ["rel", 0.75, 1.25],
+            "erosion_height_start": ["rel", 0.90, 1.10],
+        },
+        # Custom refinement of erosion parameters
+        {
+            "enabled":              false,
+            "erosion_coeff":        ["rel", 0.75,  1.25],
+            "erosion_mass_index":   ["abs", 1.5 ,  3.0 ],
+            "erosion_mass_min":     ["rel", 0.1 , 10.0 ],
+            "erosion_mass_max":     ["rel", 0.1 , 10.0 ],
+        }
+    ]
+}

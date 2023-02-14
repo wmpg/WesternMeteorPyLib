@@ -159,7 +159,7 @@ class Constants(object):
         # Density after erosion change (density of small chondrules by default)
         self.erosion_rho_change = 3700
 
-        # Abaltion coeff after erosion change
+        # Ablation coeff after erosion change
         self.erosion_sigma_change = self.sigma
 
 
