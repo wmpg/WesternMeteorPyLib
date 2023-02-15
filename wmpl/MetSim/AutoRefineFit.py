@@ -537,10 +537,28 @@ if __name__ == "__main__":
     
     # Load the simulation params from _sim_fit.json
     sim_params_path = None
+    sim_params_path_orig = None
     for file_name in os.listdir(dir_path):
+
+        # Load the desired file
         if file_name.endswith(sim_suffix):
             sim_params_path = os.path.join(dir_path, file_name)
-            break
+
+        # Load the original file
+        if file_name.endswith(normal_json_suffix):
+            sim_params_path_orig = os.path.join(dir_path, file_name)
+
+
+
+    if cml_args.updated:
+
+        # If the updated file is not found, use the original file
+        if sim_params_path is None:
+
+            sim_params_path = sim_params_path_orig
+            
+            print()
+            print("Using the original simulation params file as the updated file was not found: {}".format(sim_params_path))
 
     if sim_params_path is None:
         raise Exception("Could not find the simulation params file in {}".format(dir_path))
