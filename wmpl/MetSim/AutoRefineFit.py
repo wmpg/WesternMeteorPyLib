@@ -167,7 +167,6 @@ def costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False):
             mag_res_sum += np.sum(np.abs(abs_mag_data - sim_mag_sampled))
             mag_res_count += len(abs_mag_data)
 
-
             # Plot the observed and simulated magnitudes
             if plot_residuals:
                 ax_mag.scatter(abs_mag_data, height_data/1000, label=site)
@@ -504,7 +503,38 @@ if __name__ == "__main__":
             traj_path = os.path.join(dir_path, file_name)
             break
 
+    if traj_path is None:
+        raise Exception("Trajectory pickle file not found in {}".format(dir_path))
 
+    # Load the trajectory
+    traj = loadPickle(*os.path.split(os.path.abspath(traj_path)))
+
+
+    # Find the state.met file
+    state_met_path = None
+    met_obs = None
+    for file_name in sorted(os.listdir(dir_path)):
+        if file_name.startswith("state") and file_name.endswith(".met"):
+
+            state_met_path = os.path.join(dir_path, file_name)
+
+            # Load the mirfit met file
+            met = loadMet(*os.path.split(os.path.abspath(state_met_path)))
+
+            # Check that the met file is a METAL and not mirfit state file
+            if not met.mirfit:
+                
+                # Load the meteor observations
+                met_obs = MetObservations(met, traj)
+
+                print("Loaded METAL state.met file: {}".format(state_met_path))
+
+                break
+
+            else:
+                state_met_path = None
+
+    
     # Load the simulation params from _sim_fit.json
     sim_params_path = None
     for file_name in os.listdir(dir_path):
@@ -512,34 +542,16 @@ if __name__ == "__main__":
             sim_params_path = os.path.join(dir_path, file_name)
             break
 
-
-    # Find the state.met file
-    state_met_path = None
-    for file_name in os.listdir(dir_path):
-        if file_name.startswith("state") and file_name.endswith(".met"):
-            state_met_path = os.path.join(dir_path, file_name)
-            break
-            
-    ### ###
-
-
-    # Load the trajectory
-    traj = loadPickle(*os.path.split(os.path.abspath(traj_path)))
-
+    if sim_params_path is None:
+        raise Exception("Could not find the simulation params file in {}".format(dir_path))
 
     # Load the simulation constants
     const, _ = loadConstants(sim_params_path)
     print()
     print("Loaded simulation constants from: {}".format(sim_params_path))
     print()
-
-    # Load the METAL state file
-    if state_met_path is not None:
-        met = loadMet(*os.path.split(os.path.abspath(state_met_path)))
-        met_obs = MetObservations(met, traj)
-    else:
-        met_obs = None
-
+        
+    ### ###
 
 
     ### Fit the atmospheric density polynomial ###
