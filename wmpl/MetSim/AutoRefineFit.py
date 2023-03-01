@@ -740,7 +740,7 @@ if __name__ == "__main__":
 
         # Plot the length residuals
         ax_lagres.scatter(len_res, obs_ht_corr/1000, marker='+', \
-            c=lag_handle[0].get_color(), label="Brightest, {:s}".format(obs.station_id), s=6)
+            c=lag_handle[0].get_color(), label="Leading, {:s}".format(obs.station_id), s=6)
 
 
     # Plot the magnitudes from the met file

@@ -216,6 +216,7 @@ class MetObservations(object):
 
         self.time_data = {}
         self.height_data = {}
+        self.state_vect_dist_data = {}
         self.lag_data = {}
         self.abs_mag_data = {}
 
@@ -316,6 +317,8 @@ class MetObservations(object):
 
                 state_vect_dist = np.array(state_vect_dist)
 
+                # Store the state vector distance
+                self.state_vect_dist_data[site] = state_vect_dist
 
                 # Compute the lag
                 self.lag_data[site] = state_vect_dist - lineFunc(time_rel_picks, *self.traj.velocity_fit)
@@ -3070,6 +3073,62 @@ class MetSimGUI(QMainWindow):
         self.magnitudePlot.canvas.draw()
 
 
+    def updateInterpolations(self, show_previous=False):
+        """ Update variables interpolating simulation results and interfacing with the trajectory.
+            This is used to correctly compute the lag and to accurately compare simulated and observed 
+            heights.
+        """
+
+        # Choose to show current or previous results
+        if show_previous:
+            sr = self.simulation_results_prev
+        else:
+            sr = self.simulation_results
+
+
+        if sr is not None:
+
+            # Interpolate the simulated length by height
+            self.sim_len_interp = scipy.interpolate.interp1d(sr.leading_frag_height_arr, sr.leading_frag_length_arr,
+                bounds_error=False, fill_value='extrapolate')
+
+            # Interpolate the simulated time
+            self.sim_time_interp = scipy.interpolate.interp1d(sr.leading_frag_height_arr, sr.time_arr,
+                bounds_error=False, fill_value='extrapolate')
+
+            # Interpolate the velocity
+            self.sim_vel_interp = scipy.interpolate.interp1d(sr.leading_frag_height_arr, sr.leading_frag_vel_arr,
+                bounds_error=False, fill_value='extrapolate')
+
+
+            # Find the simulated length at the trajectory begining
+            self.sim_len_beg = self.sim_len_interp(self.traj.rbeg_ele)
+
+            # Find the simulated time at the trajectory begining
+            self.sim_time_beg = self.sim_time_interp(self.traj.rbeg_ele)
+
+            # Find the simulated velocity at the trajectory begining
+            self.sim_vel_beg = self.sim_vel_interp(self.traj.rbeg_ele)
+
+            # Set the simulated length at the beginning of observations to zero
+            norm_sim_len = sr.leading_frag_length_arr - self.sim_len_beg
+
+            # Compute the normalized time
+            norm_sim_time = sr.time_arr - self.sim_time_beg
+
+
+            self.norm_sim_ht = sr.leading_frag_height_arr[norm_sim_len > 0]
+            self.norm_sim_time = norm_sim_time[norm_sim_len > 0]
+            self.norm_sim_len = norm_sim_len[norm_sim_len > 0]
+
+            # Interpolate the normalized length by time
+            self.sim_norm_len_interp = scipy.interpolate.interp1d(self.norm_sim_time, self.norm_sim_len,
+                bounds_error=False, fill_value='extrapolate')
+
+            # Interpolate the height by normalized length
+            self.sim_norm_ht_interp = scipy.interpolate.interp1d(self.norm_sim_len, self.norm_sim_ht,
+                bounds_error=False, fill_value='extrapolate')
+
 
     def updateVelocityPlot(self, show_previous=False):
         """ Update the velocity plot. 
@@ -3101,6 +3160,12 @@ class MetSimGUI(QMainWindow):
             # Extract data
             vel_data = obs.velocities[obs.ignore_list == 0][1:]/1000
             height_data = obs.model_ht[obs.ignore_list == 0][1:]/1000
+
+            # If there is a simulation, correct the heights
+            if sr is not None:
+
+                # Compute the corrected heights, so the simulations and the observations match
+                height_data = self.sim_norm_ht_interp(obs.state_vect_dist[obs.ignore_list == 0][1:])/1000
 
             self.velocityPlot.canvas.axes.plot(vel_data, height_data, marker='o', label=obs.station_id, \
                 markersize=1, linestyle='none')
@@ -3139,8 +3204,8 @@ class MetSimGUI(QMainWindow):
             ### Compute the simulated average velocity ###
 
             # Select only the height range from observations
-            sim_vel_obs_range = sr.brightest_vel_arr[(sr.brightest_height_arr <= self.traj.rbeg_ele) \
-                & (sr.brightest_height_arr >= self.traj.rend_ele)]
+            sim_vel_obs_range = sr.leading_frag_vel_arr[(sr.leading_frag_height_arr <= self.traj.rbeg_ele) \
+                & (sr.leading_frag_height_arr >= self.traj.rend_ele)]
 
             # Compute the simulated average velocity
             v_avg_sim = np.mean(sim_vel_obs_range)
@@ -3206,49 +3271,53 @@ class MetSimGUI(QMainWindow):
         # Compute things needed for the simulated lag
         if sr is not None:
 
-            # Get the model velocity at the observed beginning height
-            sim_beg_ht_indx = np.argmin(np.abs(self.traj.rbeg_ele - sr.brightest_height_arr))
-            v_init_sim = sr.brightest_vel_arr[sim_beg_ht_indx]
+            # Compute the simulated lag
+            sim_lag = self.sim_norm_len_interp(self.norm_sim_time) - self.sim_vel_beg*self.norm_sim_time
+
+            # Compute the height for the simulated lag
+            sim_lag_ht = self.norm_sim_ht
+
+
 
             # Update the simulated initial velocity label
-            self.vInitSimLabel.setText("Vinit sim = {:.3f} km/s".format(v_init_sim/1000))
+            self.vInitSimLabel.setText("Vinit sim = {:.3f} km/s".format(self.sim_vel_beg/1000))
 
 
-            ### Compute parameters for the brightest point on the trajectory ###
+            # ### Compute parameters for the brightest point on the trajectory ###
 
-            # Cut the part with same beginning heights as observations
-            temp_arr = np.c_[sr.brightest_height_arr, sr.brightest_length_arr]
-            temp_arr = temp_arr[(sr.brightest_height_arr <= self.traj.rbeg_ele) \
-                & (sr.brightest_height_arr >= self.plot_end_ht)]
-            brightest_ht_arr, brightest_len_arr = temp_arr.T
+            # # Cut the part with same beginning heights as observations
+            # temp_arr = np.c_[sr.brightest_height_arr, sr.brightest_length_arr]
+            # temp_arr = temp_arr[(sr.brightest_height_arr <= self.traj.rbeg_ele) \
+            #     & (sr.brightest_height_arr >= self.plot_end_ht)]
+            # brightest_ht_arr, brightest_len_arr = temp_arr.T
 
-            if len(brightest_len_arr):
+            # if len(brightest_len_arr):
 
-                # Compute the simulated lag using the observed velocity
-                brightest_lag_sim = brightest_len_arr - brightest_len_arr[0] \
-                    - self.traj.orbit.v_init*np.arange(0, self.const.dt*len(brightest_len_arr), \
-                                                       self.const.dt)[:len(brightest_len_arr)]
+            #     # Compute the simulated lag using the observed velocity
+            #     brightest_lag_sim = brightest_len_arr - brightest_len_arr[0] \
+            #         - self.traj.orbit.v_init*np.arange(0, self.const.dt*len(brightest_len_arr), \
+            #                                            self.const.dt)[:len(brightest_len_arr)]
 
-                ###
+            #     ###
 
 
-                ### Compute parameters for the leading point on the trajectory ###
+            #     ### Compute parameters for the leading point on the trajectory ###
 
-                # Cut the part with same beginning heights as observations
-                temp_arr = np.c_[sr.leading_frag_height_arr, sr.leading_frag_length_arr]
-                temp_arr = temp_arr[(sr.leading_frag_height_arr <= self.traj.rbeg_ele) \
-                    & (sr.leading_frag_height_arr >= self.plot_end_ht)]
-                leading_ht_arr, leading_frag_len_arr = temp_arr.T
+            #     # Cut the part with same beginning heights as observations
+            #     temp_arr = np.c_[sr.leading_frag_height_arr, sr.leading_frag_length_arr]
+            #     temp_arr = temp_arr[(sr.leading_frag_height_arr <= self.traj.rbeg_ele) \
+            #         & (sr.leading_frag_height_arr >= self.plot_end_ht)]
+            #     leading_ht_arr, leading_frag_len_arr = temp_arr.T
 
-                # Compute the simulated lag using the observed velocity
-                leading_lag_sim = leading_frag_len_arr - leading_frag_len_arr[0] \
-                                  - self.traj.orbit.v_init*np.arange(0, self.const.dt*len(leading_frag_len_arr), \
-                                                                     self.const.dt)[:len(leading_frag_len_arr)]
+            #     # Compute the simulated lag using the observed velocity
+            #     leading_lag_sim = leading_frag_len_arr - leading_frag_len_arr[0] \
+            #                       - self.traj.orbit.v_init*np.arange(0, self.const.dt*len(leading_frag_len_arr), \
+            #                                                          self.const.dt)[:len(leading_frag_len_arr)]
 
-                ###
+            #     ###
 
-            else:
-                sr = None
+            # else:
+            #     sr = None
 
 
 
@@ -3266,50 +3335,75 @@ class MetSimGUI(QMainWindow):
         # Plot the lag from observations
         for obs in self.traj.observations:
 
-            # Get observed heights
-            height_data = obs.model_ht[obs.ignore_list == 0]
+            if sr is None:
 
-            # Plot observed lag
-            lag_handle = lag_plot.plot(obs.lag[obs.ignore_list == 0], height_data/1000, marker='x', \
-                linestyle='dashed', label=obs.station_id, markersize=3, linewidth=0.5)
-
-
-            # Plot the lag residuals from simulated
-            if sr is not None:
-
-                ### Compute the residuals from simulated, brightest point on the trajectory ###
-
-                # Get simulated lags at the same height as observed
-                brightest_interp =  scipy.interpolate.interp1d(-brightest_ht_arr, brightest_lag_sim, \
-                    bounds_error=False, fill_value=0)
-
-                obs_height_indices = height_data > np.min(brightest_ht_arr)
-                obs_hts = height_data[obs_height_indices]
-                brightest_residuals = obs.lag[obs.ignore_list == 0][obs_height_indices] \
-                    - brightest_interp(-obs_hts)
-
-                # Plot the lag residuals
-                lag_residuals_plot.scatter(brightest_residuals, obs_hts/1000, marker='+', \
-                    c=lag_handle[0].get_color(), label="Brightest, {:s}".format(obs.station_id), s=6)
-
-                ### ###
+                # Get observed heights
+                height_data = obs.model_ht[obs.ignore_list == 0]
+                
+                # Plot observed lag directly from observations if no simulations are available
+                lag_handle = lag_plot.plot(obs.lag[obs.ignore_list == 0], height_data/1000, marker='x', \
+                    linestyle='dashed', label=obs.station_id, markersize=3, linewidth=0.5)
 
 
-                ### Compute the residuals from simulated, leading point on the trajectory ###
+            # Recompute the lag using simulated parameters
+            else:
 
-                # Get simulated lags at the same height as observed
-                leading_interp =  scipy.interpolate.interp1d(-leading_ht_arr, leading_lag_sim, \
-                    bounds_error=False, fill_value=0)
-                obs_height_indices = height_data > np.min(leading_ht_arr)
-                obs_hts = height_data[obs_height_indices]
-                leading_residuals = obs.lag[obs.ignore_list == 0][obs_height_indices] \
-                    - leading_interp(-obs_hts)
+                # Compute the observed lag
+                obs_lag = obs.state_vect_dist - self.sim_vel_beg*obs.time_data
 
-                # Plot the lag residuals
-                lag_residuals_plot.scatter(leading_residuals, obs_hts/1000, marker='s', \
+                # Compute the corrected heights, so the simulations and the observations match
+                obs_ht_corr = self.sim_norm_ht_interp(obs.state_vect_dist)
+
+                # Plot the observed lag
+                lag_handle = lag_plot.plot(obs_lag, obs_ht_corr/1000, marker='x', \
+                    linestyle='dashed', label=obs.station_id, markersize=3, linewidth=0.5)
+                
+
+                # Sample the simulated normalized length at observed times
+                sim_norm_len_sampled = self.sim_norm_len_interp(obs.time_data)
+
+                # Compute the length residuals
+                len_res = obs.state_vect_dist - sim_norm_len_sampled
+
+                # Plot the length residuals
+                lag_residuals_plot.scatter(len_res, obs_ht_corr/1000, marker='+', \
                     c=lag_handle[0].get_color(), label="Leading, {:s}".format(obs.station_id), s=6)
+                
 
-                ### ###
+
+                # ### Compute the residuals from simulated, brightest point on the trajectory ###
+
+                # # Get simulated lags at the same height as observed
+                # brightest_interp =  scipy.interpolate.interp1d(-brightest_ht_arr, brightest_lag_sim, \
+                #     bounds_error=False, fill_value=0)
+
+                # obs_height_indices = height_data > np.min(brightest_ht_arr)
+                # obs_hts = height_data[obs_height_indices]
+                # brightest_residuals = obs.lag[obs.ignore_list == 0][obs_height_indices] \
+                #     - brightest_interp(-obs_hts)
+
+                # # Plot the lag residuals
+                # lag_residuals_plot.scatter(brightest_residuals, obs_hts/1000, marker='+', \
+                #     c=lag_handle[0].get_color(), label="Brightest, {:s}".format(obs.station_id), s=6)
+
+                # ### ###
+
+
+                # ### Compute the residuals from simulated, leading point on the trajectory ###
+
+                # # Get simulated lags at the same height as observed
+                # leading_interp =  scipy.interpolate.interp1d(-leading_ht_arr, leading_lag_sim, \
+                #     bounds_error=False, fill_value=0)
+                # obs_height_indices = height_data > np.min(leading_ht_arr)
+                # obs_hts = height_data[obs_height_indices]
+                # leading_residuals = obs.lag[obs.ignore_list == 0][obs_height_indices] \
+                #     - leading_interp(-obs_hts)
+
+                # # Plot the lag residuals
+                # lag_residuals_plot.scatter(leading_residuals, obs_hts/1000, marker='s', \
+                #     c=lag_handle[0].get_color(), label="Leading, {:s}".format(obs.station_id), s=6)
+
+                # ### ###
 
 
 
@@ -3319,12 +3413,32 @@ class MetSimGUI(QMainWindow):
             # Plot additional lags for all sites (plot only mirfit lags)
             for site in self.met_obs.sites:
 
-                height_data = self.met_obs.height_data[site]/1000
+                time_data = self.met_obs.time_data[site]
+                state_vect_dist_data = self.met_obs.state_vect_dist_data[site]
 
                 # Only plot mirfit lags
                 if self.met.mirfit:
-                    lag_plot.plot(self.met_obs.lag_data[site], height_data, marker='x', \
+
+                    # Compute the observed lag
+                    obs_lag = state_vect_dist_data - self.sim_vel_beg*time_data
+
+                    # Compute the corrected heights, so the simulations and the observations match
+                    obs_ht_corr = self.sim_norm_ht_interp(state_vect_dist_data)
+
+                    # Plot the observed lag
+                    lag_handle = lag_plot.plot(obs_lag, obs_ht_corr/1000, marker='x', \
                         linestyle='dashed', label=str(site),  markersize=5, linewidth=1)
+                    
+
+                    # Sample the simulated normalized length at observed times
+                    sim_norm_len_sampled = self.sim_norm_len_interp(time_data)
+
+                    # Compute the length residuals
+                    len_res = state_vect_dist_data - sim_norm_len_sampled
+
+                    # Plot the length residuals
+                    lag_residuals_plot.scatter(len_res, obs_ht_corr/1000, marker='+', \
+                        c=lag_handle[0].get_color(), label="Leading, {:s}".format(str(site)), s=6)
 
 
         # Get X plot limits before the simulated lag is plotted
@@ -3335,16 +3449,20 @@ class MetSimGUI(QMainWindow):
         # Plot simulated lag
         if sr is not None:
 
-
-            # Plot lag of the brightest point on the trajectory
-            lag_plot.plot(brightest_lag_sim[:len(brightest_ht_arr)], \
-                         (brightest_ht_arr/1000)[:len(brightest_lag_sim)], \
-                         label='Simulated - brightest', color='k', alpha=0.5)
+            # Plot the lag
+            lag_plot.plot(sim_lag, sim_lag_ht/1000, 
+                          label='Simulated - leading', color='k', alpha=0.5, linestyle='dashed')
 
 
-            # Plot lag of the leading fragment
-            lag_plot.plot(leading_lag_sim[:len(leading_ht_arr)], (leading_ht_arr/1000)[:len(leading_lag_sim)], 
-                label='Simulated - leading', color='k', alpha=0.5, linestyle='dashed')
+            # # Plot lag of the brightest point on the trajectory
+            # lag_plot.plot(brightest_lag_sim[:len(brightest_ht_arr)], \
+            #              (brightest_ht_arr/1000)[:len(brightest_lag_sim)], \
+            #              label='Simulated - brightest', color='k', alpha=0.5)
+
+
+            # # Plot lag of the leading fragment
+            # lag_plot.plot(leading_lag_sim[:len(leading_ht_arr)], (leading_ht_arr/1000)[:len(leading_lag_sim)], 
+            #     label='Simulated - leading', color='k', alpha=0.5, linestyle='dashed')
 
 
 
@@ -3901,6 +4019,7 @@ class MetSimGUI(QMainWindow):
         if self.simulation_results_prev is not None:
 
             self.updateInputBoxes(show_previous=True)
+            self.updateInterpolations(show_previous=True)
             self.updateMagnitudePlot(show_previous=True)
             self.updateVelocityPlot(show_previous=True)
             self.updateLagPlot(show_previous=True)
@@ -3912,6 +4031,7 @@ class MetSimGUI(QMainWindow):
         """ Show current simulation results and parameters. """
 
         self.updateInputBoxes(show_previous=False)
+        self.updateInterpolations(show_previous=False)
         self.updateMagnitudePlot(show_previous=False)
         self.updateVelocityPlot(show_previous=False)
         self.updateLagPlot(show_previous=False)
@@ -4187,7 +4307,7 @@ class MetSimGUI(QMainWindow):
 
 
     def runSimulationGUI(self):
-
+        """ Run the simulation and show the results. """
 
         # If the fragmentation is turned on and no fragmentation data is given, notify the user
         if self.const.fragmentation_on and (self.fragmentation is None):
