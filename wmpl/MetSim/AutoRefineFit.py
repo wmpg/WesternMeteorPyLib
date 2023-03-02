@@ -507,13 +507,14 @@ if __name__ == "__main__":
         raise Exception("Trajectory pickle file not found in {}".format(dir_path))
 
     # Load the trajectory
+    print("Using trajectory file: {:s}".format(traj_path))
     traj = loadPickle(*os.path.split(os.path.abspath(traj_path)))
 
 
     # Find the state.met file
     state_met_path = None
     met_obs = None
-    for file_name in sorted(os.listdir(dir_path)):
+    for file_name in sorted(os.listdir(dir_path), reverse=True):
         if file_name.startswith("state") and file_name.endswith(".met"):
 
             state_met_path = os.path.join(dir_path, file_name)
@@ -523,11 +524,11 @@ if __name__ == "__main__":
 
             # Check that the met file is a METAL and not mirfit state file
             if not met.mirfit:
+
+                print("Loaded METAL state.met file: {}".format(state_met_path))
                 
                 # Load the meteor observations
                 met_obs = MetObservations(met, traj)
-
-                print("Loaded METAL state.met file: {}".format(state_met_path))
 
                 break
 
