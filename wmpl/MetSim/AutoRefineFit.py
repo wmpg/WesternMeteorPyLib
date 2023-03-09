@@ -220,12 +220,20 @@ def costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False):
             
 
 
-def residualFun(params, fit_options, traj, met_obs, const):
+def residualFun(params, fit_options, traj, met_obs, const, change_update_params):
     """ Take the fit parameters and return the value of the cost function. 
     
     Arguments:
+        params: [list] A list of values for the parameters that are being fit.
+        fit_options: [dict] A dictionary of options for the fit.
+        traj: [Trajectory] A Trajectory object containing the observed data.
+        met_obs: [MetObs] A MetObs object containing the observed data from the METAL .met file.
+        const: [Constants] Constants defining the erosion model.
+        change_update_params: [list] A list of change parameters that should be updated together with their
+            nominal parameter.
 
-    
+    Returns:
+        cost: [float] The value of the cost function.
     """
 
     # Make a copy of the constants
@@ -237,7 +245,18 @@ def residualFun(params, fit_options, traj, met_obs, const):
         # Extract the normalization factor
         norm_fact = fit_options["norm_factors"][i]
 
-        setattr(const, param_name, norm_fact*params[i])
+        # Compute the unnormalized parameter value
+        param_val = norm_fact*params[i]
+
+        setattr(const, param_name, param_val)
+
+
+        # Update parameters which should be updated after the change, if they are not explicitly refined
+        for nominal_param_i, change_param_i in change_update_params:
+            if param_name == nominal_param_i:
+                setattr(const, change_param_i, param_val)
+
+
 
     # Print values of the fit parameters
     print("Fit parameters: ", end="")
@@ -269,6 +288,51 @@ def residualFun(params, fit_options, traj, met_obs, const):
 
 def autoFit(fit_options, traj, met_obs, const):
     """ Automatically fit the parameters to the observations. """
+
+
+    ### Handle the change parameters ###
+
+    # A list of parameters with variants that defined the changed value at the given height
+    change_params = [
+        ["erosion_coeff", "erosion_coeff_change"],
+        ["rho", "erosion_rho_change"],
+        ["sigma", "erosion_sigma_change"]
+    ]
+    change_params_nominal = [param_i[0] for param_i in change_params]
+
+    # Make a list of change parameters that should follow the nominal parameter
+    change_update_params = []
+    for param_name in fit_options["fit_params"]:
+
+        # Check if the parameter is one of the change parameters
+        if param_name in change_params_nominal:
+
+            # Iterate over the parameters and update them if their change counterpart is not being refined,
+            # and is the same as the nominal parameter (meaning that the user didn't set a separamte value 
+            # for it)
+            for nominal_param_i, change_param_i in change_params:
+
+                # Get value of the change parameters and compare it to the nominal parameter before it was
+                # set to the new value by the optimizer
+                nominal_param_val = getattr(const, nominal_param_i)
+                change_param_val = getattr(const, change_param_i)
+
+                if (param_name == nominal_param_i) \
+                    and (change_param_i not in fit_options["fit_params"]) \
+                    and (nominal_param_val == change_param_val):
+
+                    # Add the change parameter to the list of parameters to be updated
+                    change_update_params.append([nominal_param_i, change_param_i])
+
+    if len(change_update_params):
+        print()
+        print("Change parameters that will follow the nominal parameter:")
+        for nominal_param_i, change_param_i in change_update_params:
+            print("    {} -> {}".format(nominal_param_i, change_param_i))
+        print()
+
+    ### ###
+
 
     # Make a copy of the constants
     const = copy.deepcopy(const)
@@ -323,10 +387,12 @@ def autoFit(fit_options, traj, met_obs, const):
 
 
     # Print initial parameters and bounds for each
+    print()
     print("Initial parameters:")
     for i, param_name in enumerate(fit_options["fit_params"]):
         n = fit_options["norm_factors"][i]
         print("\t{}: {:f} [{:f}, {:f}]".format(param_name, n*x0[i], n*bounds[i][0], n*bounds[i][1]))
+    print()
 
 
     # # Run the optimization using basinhopping
@@ -334,7 +400,8 @@ def autoFit(fit_options, traj, met_obs, const):
     #     minimizer_kwargs={"args": (fit_options, traj, met_obs, const), "method": "L-BFGS-B", "bounds": bounds})
 
     # Run the optimization using Nelder-Mead
-    res = scipy.optimize.minimize(residualFun, x0, args=(fit_options, traj, met_obs, const), 
+    res = scipy.optimize.minimize(residualFun, x0, args=(fit_options, traj, met_obs, const, 
+                                                         change_update_params), 
         method="Nelder-Mead", bounds=bounds)
 
     # Extract the optimized parameters into Constants
@@ -344,6 +411,10 @@ def autoFit(fit_options, traj, met_obs, const):
         norm_fact = fit_options["norm_factors"][i]
 
         setattr(const, param_name, norm_fact*res.x[i])
+
+    # Set the change parameters to follow the nominal parameters
+    for nominal_param_i, change_param_i in change_update_params:
+        setattr(const, change_param_i, getattr(const, nominal_param_i))
 
     # Print the results
     print(res)
@@ -442,7 +513,11 @@ if __name__ == "__main__":
     ### FIT OPTIONS ###
 
     # Load the fit options from the JSON file
-    fit_options = loadFitOptions(dir_path, cml_args.fit_options_file)
+    if os.path.exists(os.path.join(dir_path, cml_args.fit_options_file)):
+        fit_options = loadFitOptions(dir_path, cml_args.fit_options_file)
+    else:
+        raise FileNotFoundError("Fit options file not found: {}".format(os.path.join(dir_path, 
+            cml_args.fit_options_file)))
 
 
     # # Dictionary which defines the parameters to fit and the weights
@@ -504,7 +579,7 @@ if __name__ == "__main__":
             break
 
     if traj_path is None:
-        raise Exception("Trajectory pickle file not found in {}".format(dir_path))
+        raise FileNotFoundError("Trajectory pickle file not found in {}".format(dir_path))
 
     # Load the trajectory
     print("Using trajectory file: {:s}".format(traj_path))
@@ -619,6 +694,8 @@ if __name__ == "__main__":
             fit_options["fit_bounds"] = [fp[key] for key in fp.keys() if key != "enabled"]
 
             # Run the automated fitting
+            print()
+            print("#"*80)
             print("Auto fitting...")
             const = autoFit(fit_options, traj, met_obs, const)
             print("Fitting done!")

@@ -2260,7 +2260,7 @@ class MetSimGUI(QMainWindow):
         self.inputErosionMassMin.setText("{:.2e}".format(const.erosion_mass_min))
         self.inputErosionMassMax.setText("{:.2e}".format(const.erosion_mass_max))
         self.inputErosionRhoChange.setText("{:d}".format(int(const.erosion_rho_change)))
-        self.inputErosionAblationCoeffChange.setText("{:.3f}".format(const.erosion_sigma_change*1e6))
+        self.inputErosionAblationCoeffChange.setText("{:.4f}".format(const.erosion_sigma_change*1e6))
 
         ### ###
 
