@@ -38,23 +38,23 @@
         # Fits can be chained and will occur one after the other
         # The use of individual fits is turned on and off by setting the "enabled" parameter to true or false
 
-        # Simple fit - quick refinement of basics
+        # Simple fit - quick refinement of the basics
         {
             "enabled":              true,
             "m_init":               ["rel", 0.50, 2.00],
             "v_init":               ["rel", 0.98, 1.02],
         },
-        # More complex fit - refinement of all parameters
+        # More complex fit - overall fit
         {
             "enabled":              false,
-            "m_init":               ["rel", 0.50, 2.00],
-            "v_init":               ["rel", 0.98, 1.02],
+            "m_init":               ["rel", 0.80, 2.20],
+            "v_init":               ["rel", 0.90, 1.10],
             "rho":                  ["rel", 0.80, 1.20],
-            "erosion_coeff":        ["rel", 0.75, 1.25],
-            "sigma":                ["rel", 0.75, 1.25],
-            "erosion_height_start": ["rel", 0.90, 1.10],
+            "erosion_height_start": ["rel", 0.95, 1.05],
+            "erosion_coeff":        ["rel", 0.50, 2.00],
+            "erosion_mass_index":   ["abs", 1.50, 3.00],
         },
-        # Custom refinement of erosion parameters
+        # Custom refinement of erosion parameters - improves wake
         {
             "enabled":              false,
             "erosion_coeff":        ["rel", 0.75,  1.25],
