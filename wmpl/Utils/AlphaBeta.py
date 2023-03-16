@@ -245,7 +245,7 @@ def lagFitVelocity(time_data, lag_data, vel_data, v0):
     # #   1.0 at the end
     # # The time is sorted in reverse, so take that into account
     # weights = np.zeros_like(time_data)
-    # first_part_indices = np.arange(0, len(weights)/2).astype(np.int)
+    # first_part_indices = np.arange(0, len(weights)/2).astype(int)
     # weights[first_part_indices] = 1.0 - 0.5*first_part_indices/np.max(first_part_indices)
     # weights[~first_part_indices] = 0.5
     # weights /= np.sum(weights)
