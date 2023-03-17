@@ -792,7 +792,10 @@ if __name__ == "__main__":
 
         # Plot the magnitude
         if obs.absolute_magnitudes is not None:
-            ax_mag.plot(obs.absolute_magnitudes, obs.model_ht/1000, marker='x', ms=8, alpha=0.5, label=obs.station_id)
+
+            mag_filter = obs.absolute_magnitudes < 9
+
+            ax_mag.plot(obs.absolute_magnitudes[mag_filter], obs.model_ht[mag_filter]/1000, marker='x', ms=8, alpha=0.5, label=obs.station_id)
 
 
         # Compute the observed lag
