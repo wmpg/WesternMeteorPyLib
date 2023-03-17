@@ -109,13 +109,16 @@ def costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False):
             obs.absolute_magnitudes = obs.absolute_magnitudes[~np.isnan(obs.absolute_magnitudes)]
             obs.state_vect_dist = obs.state_vect_dist[~np.isnan(obs.absolute_magnitudes)]
 
+            # Filter out observations with magnitude fainter than +9
+            mag_filter = obs.absolute_magnitudes < 9
+
 
             # Sample the simulated magnitude at the observation heights
-            sim_mag_sampled = sim_mag_interp(obs.model_ht)
+            sim_mag_sampled = sim_mag_interp(obs.model_ht[mag_filter])
 
             # Compute the magnitude residual
-            mag_res_sum += np.sum(np.abs(obs.absolute_magnitudes - sim_mag_sampled))
-            mag_res_count += len(obs.absolute_magnitudes)
+            mag_res_sum += np.sum(np.abs(obs.absolute_magnitudes[mag_filter] - sim_mag_sampled))
+            mag_res_count += len(obs.absolute_magnitudes[mag_filter])
 
 
         # Sample the simulated normalized length at observed times
@@ -130,9 +133,11 @@ def costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False):
         if plot_residuals:
 
             if obs.absolute_magnitudes is not None:
-                ax_mag.scatter(obs.absolute_magnitudes, obs.model_ht/1000, label=obs.station_id)
-                ax_mag.plot(sim_mag_sampled, obs.model_ht/1000)
-                ax_magres.scatter(obs.absolute_magnitudes - sim_mag_sampled, obs.model_ht/1000)
+                ax_mag.scatter(obs.absolute_magnitudes[mag_filter], obs.model_ht[mag_filter]/1000, 
+                               label=obs.station_id)
+                ax_mag.plot(sim_mag_sampled, obs.model_ht[mag_filter]/1000)
+                ax_magres.scatter(obs.absolute_magnitudes[mag_filter] - sim_mag_sampled, 
+                                  obs.model_ht[mag_filter]/1000)
 
             # ax_len.scatter(obs.state_vect_dist, obs.model_ht/1000, label=obs.station_id)
             # ax_len.plot(sim_norm_len_sampled, obs.model_ht/1000)
