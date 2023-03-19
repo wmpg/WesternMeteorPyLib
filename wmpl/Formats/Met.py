@@ -631,6 +631,14 @@ def loadMet(dir_path, file_name, photom_dict=None):
     # Extract picks into pick objects
     met = extractPicks(met, mirfit=mirfit, photom_dict=photom_dict)
 
+    # Remove sites with no picks
+    for site in met.sites:
+        if not site in met.picks_objs:
+            print()
+            print("WARNING! No picks found for site {:s}, removing it from the list of sites!".format(site))
+            print()
+            met.sites.remove(site)
+
     return met
 
           

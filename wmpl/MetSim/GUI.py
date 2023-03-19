@@ -1619,6 +1619,8 @@ class MetSimGUI(QMainWindow):
         self.met = None
         if met_path is not None:
             if os.path.isfile(met_path):
+                print()
+                print("Loading .met file: {:s}".format(met_path))
                 self.met = loadMet(*os.path.split(os.path.abspath(met_path)))
             else:
                 print('The .met file does not exist:', met_path)
