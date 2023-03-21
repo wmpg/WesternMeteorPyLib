@@ -2879,7 +2879,15 @@ class Trajectory(object):
                 if len(time_part) > 1:
 
                     # Fit a line through time vs. length data
-                    popt, _ = scipy.optimize.curve_fit(lineFunc, time_part, len_part)
+                    try:
+                        popt, _ = scipy.optimize.curve_fit(lineFunc, time_part, len_part)
+
+                    # Check for this fit error, which happens extrememly rarely:
+                    # RuntimeError: Optimal parameters not found: gtol=0.000000 is too small, func(x) is 
+                    # orthogonal to the columns of the Jacobian to machine precision.
+                    except RuntimeError:
+                        print("A velocity fit failed with a RuntimeError, skipping this iteration.")
+                        popt = [np.nan]
 
                     velocities_prev_point.append(popt[0])
 
