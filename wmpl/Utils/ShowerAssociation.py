@@ -31,7 +31,7 @@ class MeteorShower(object):
 
 
         # Find the shower code and name in the IAU table
-        IAU_Shower_line = iau_shower_list[iau_shower_list[:, 1].astype(np.int) == self.IAU_no][0]
+        IAU_Shower_line = iau_shower_list[iau_shower_list[:, 1].astype(int) == self.IAU_no][0]
         self.IAU_code = IAU_Shower_line[3]
         self.IAU_name = IAU_Shower_line[4]
 

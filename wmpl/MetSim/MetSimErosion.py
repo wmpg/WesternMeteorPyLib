@@ -159,7 +159,7 @@ class Constants(object):
         # Density after erosion change (density of small chondrules by default)
         self.erosion_rho_change = 3700
 
-        # Abaltion coeff after erosion change
+        # Ablation coeff after erosion change
         self.erosion_sigma_change = self.sigma
 
 
@@ -1345,6 +1345,9 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
 
 
+    from wmpl.Utils.AtmosphereDensity import fitAtmPoly
+    from wmpl.Utils.TrajConversions import date2JD
+
 
     # Show wake
     show_wake = False
@@ -1352,6 +1355,80 @@ if __name__ == "__main__":
 
     # Init the constants
     const = Constants()
+
+    # Fit atmosphere density polynomial for the given location and time on Earth, and the range of simulation 
+    # heights
+    const.dens_co = fitAtmPoly(
+        np.radians(45.3), # lat +N
+        np.radians(18.1), # lon +E
+         70000, # height_min in m
+        180000, # height_max in m (this needs to be the same as the beginning of simulation)
+        date2JD(2020, 4, 20, 16, 15, 0) # Julian date
+        )
+
+
+    ### Set some physical parameters of the meteoroid ###
+
+    # Set the power of a zero magnitude meteor for silicon sensors (W)
+    const.P_0m = 1210
+
+    # Initial mass (kg)
+    const.m_init = 1e-5
+
+    # Bulk density (kg/m^3)
+    const.rho = 300
+
+    # Grain density (kg/m^3)
+    const.rho_grain = 3000
+
+    # Initial velocity (m/s)
+    const.v_init = 45000
+
+    # Ablation coefficient (kg/MJ or s^2/km^2)
+    const.sigma = 0.023/1e6
+
+    # Zenith angle = 90 - elevation angle
+    const.zenith_angle = math.radians(45)
+
+    # Grain bulk density (kg/m^3) - used for erosion, 3000 is used for faint meteors and 3500 for fireballs
+    const.rho_grain = 3000
+
+    # Luminous efficiency type (5 for faint meteors, 7 for fireballs)
+    const.lum_eff_type = 5
+
+
+
+    # Toggle erosion on/off
+    const.erosion_on = True
+
+    # Bins per order of magnitude mass (2 is enough for firebals and a large range of masses, 
+    # 5 for fainter meteors)
+    const.erosion_bins_per_10mass = 5
+    
+    # Height at which the erosion starts (meters)
+    const.erosion_height_start = 102000
+
+    # Erosion coefficient (kg/MJ or s^2/km^2)
+    const.erosion_coeff = 0.33/1e6
+
+   
+    # Height at which the erosion coefficient changes - for no change is should be below the end height 
+    # (meters)
+    const.erosion_height_change = 0
+
+
+    # Grain mass distribution index
+    const.erosion_mass_index = 2.0
+
+    # Mass range for grains (kg)
+    const.erosion_mass_min = 1.0e-11
+    const.erosion_mass_max = 5.0e-10
+
+    # Disable disruption
+    const.disruption_on = False
+
+    ### ###
+
 
 
     # Run the ablation simulation
@@ -1362,7 +1439,7 @@ if __name__ == "__main__":
     ### ANALYZE RESULTS ###
 
 
-    # System limiting magnitude
+    # System limiting magnitude (used for plotting the wake)
     lim_mag = 6.0
 
     # Unpack the results

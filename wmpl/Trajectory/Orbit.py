@@ -47,6 +47,9 @@ class Orbit(object):
         # Estimated initial velocity (ECI)
         self.v_init = None
 
+        # Estimated initial velocity standard deviation from the direct fit (ECI)
+        self.v_init_stddev = None
+
         ### ###
 
 
@@ -224,6 +227,12 @@ class Orbit(object):
 
         out_str += "  Vinit     = {:s} km/s{:s}\n".format(valueFormat("{:>9.5f}", self.v_init, "{:.5f}", \
             uncertainties, 'v_init', multi=1.0/1000), v_init_ht_str)
+
+
+        # Write out the direct fit velocity standard deviation
+        if hasattr(self, "v_init_stddev"):
+            if self.v_init_stddev is not None:
+                out_str += "  Vstddev   = {:>9.5f} km/s (direct fit)\n".format(self.v_init_stddev/1000.0)
 
 
         ### ###
@@ -578,7 +587,7 @@ def calcOrbitalElements(jd_ref, ra_g, dec_g, v_g, eci_ref):
 
 
 def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False, reference_init=True, \
-    rotation_correction=False):
+    rotation_correction=False, v_init_stddev_direct=None):
     """ Calculate the meteor's orbit from the given meteor trajectory. The orbit of the meteoroid is defined 
         relative to the centre of the Sun (heliocentric).
 
@@ -614,6 +623,8 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
             be performed. False by default. This should ONLY be True if the coordiante system for trajectory
             estimation was ECEF, i.e. did not rotate with the Earth. In all other cases it should be False, 
             even if fixed station coordinates were used in the ECI coordinate system!
+        v_init_stddev_direct: [float] Standard deviation of the direct velocity fit derived without Monte
+            Carlo. None by default.
 
     Return:
         orb: [Orbit object] Object containing the calculated orbit.
@@ -772,6 +783,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
     # Calculate apparent RA and Dec from radiant state vector
     orb.ra, orb.dec = eci2RaDec(radiant_eci)
     orb.v_init = v_init
+    orb.v_init_stddev = v_init_stddev_direct
     orb.v_avg = v_avg
 
     # Calculate the apparent azimuth and altitude (geodetic latitude, because ra/dec are calculated from ECI,

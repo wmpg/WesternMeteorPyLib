@@ -4,7 +4,7 @@ from __future__ import print_function, division, absolute_import
 
 
 import numpy as np
-import scipy.interpolate
+import scipy.integrate
 
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 
@@ -101,8 +101,8 @@ def calcRadiatedEnergy(time, mag_abs, P_0m=840.0):
     # Calculate the intensities from absolute magnitudes
     intens = P_0m*10**(-0.4*mag_abs)
 
-    # Interpolate I
-    intens_interpol = scipy.interpolate.PchipInterpolator(time, intens)
+    # # Interpolate I
+    # intens_interpol = scipy.interpolate.PchipInterpolator(time, intens)
 
     # x_data = np.linspace(np.min(time), np.max(time), 1000)
     # plt.plot(x_data, intens_interpol(x_data))
@@ -110,7 +110,8 @@ def calcRadiatedEnergy(time, mag_abs, P_0m=840.0):
     # plt.show()
 
     # Integrate the interpolated I
-    intens_int = intens_interpol.integrate(np.min(time), np.max(time))
+    #intens_int = intens_interpol.integrate(np.min(time), np.max(time))
+    intens_int = scipy.integrate.simps(intens, time)
 
     return intens_int
 

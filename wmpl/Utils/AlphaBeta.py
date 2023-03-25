@@ -245,7 +245,7 @@ def lagFitVelocity(time_data, lag_data, vel_data, v0):
     # #   1.0 at the end
     # # The time is sorted in reverse, so take that into account
     # weights = np.zeros_like(time_data)
-    # first_part_indices = np.arange(0, len(weights)/2).astype(np.int)
+    # first_part_indices = np.arange(0, len(weights)/2).astype(int)
     # weights[first_part_indices] = 1.0 - 0.5*first_part_indices/np.max(first_part_indices)
     # weights[~first_part_indices] = 0.5
     # weights /= np.sum(weights)
@@ -312,13 +312,20 @@ def minimizeAlphaBeta(v_normed, ht_normed):
 
     # Compute initial alpha-beta guess
     b0 = 1.0
-    a0 = np.exp(ht_normed[-1])/(2.0*b0)
+    a0 = np.exp(np.min(ht_normed))/(2.0*b0)
     x0 = [a0, b0]
 
     # Set alpha-beta limits
     xmin = [    0.001,  0.00001]
     xmax = [10000.0,   50.0]
     bnds = ((xmin[0], xmax[0]), (xmin[1], xmax[1]))
+
+    # If the initial guess is outside the bounds, set a middle value
+    for i, initial_param in enumerate(x0):
+        if (initial_param < xmin[i]) or (initial_param > xmax[i]):
+            x0[i] = (xmin[i] + xmax[i])/2
+
+    print("Initial guess:", x0)
 
     # Compute best-fit alpha-beta values
     res = scipy.optimize.minimize(_alphaBetaMinimization, x0, args=(v_normed, ht_normed), bounds=bnds, \
@@ -790,21 +797,35 @@ if __name__ == "__main__":
         lat_mean = np.mean([traj.rbeg_lat, traj.rend_lat])
         lon_mean = meanAngle([traj.rbeg_lon, traj.rend_lon])
 
-        # Compute the dynamic pressure
+        # Compute the dynamic pressure using alpha and beta
         dyn_pressure = dynamicPressure(lat_mean, lon_mean, ht_arr, traj.jdt_ref, vel_arr)
+
+        # Compute the dynamic pressure with the lag fit
+        dyn_pressure_lag = dynamicPressure(lat_mean, lon_mean, ht_data_rescaled, traj.jdt_ref, 
+            vel_data_smooth)
 
 
         # Plot dyn pressure
-        plt.plot(dyn_pressure/1e6, ht_arr/1000, color='k')
+        plt.plot(dyn_pressure/1e6, ht_arr/1000, color='k', label='AlphaBeta')
+        plt.plot(dyn_pressure_lag/1e6, ht_data_rescaled/1000, color='r', label='Lag fit')
 
+        def findPeakDynPressure(dyn_pressure, ht_arr):
+            """Find the peak dynamic pressure. """
+            peak_dyn_pressure_index = np.argmax(dyn_pressure)
+            peak_dyn_pressure = dyn_pressure[peak_dyn_pressure_index]/1e6
+            peak_dyn_pressure_ht = ht_arr[peak_dyn_pressure_index]/1000
+            return peak_dyn_pressure, peak_dyn_pressure_ht
 
-        # Compute and mark peak on the graph
-        peak_dyn_pressure_index = np.argmax(dyn_pressure)
-        peak_dyn_pressure = dyn_pressure[peak_dyn_pressure_index]/1e6
-        peak_dyn_pressure_ht = ht_arr[peak_dyn_pressure_index]/1000
-        plt.scatter(peak_dyn_pressure, peak_dyn_pressure_ht, \
+        # Compute and mark alpha-beta dyn pressure peak on the graph
+        peak_dyn_pressure, peak_dyn_pressure_ht = findPeakDynPressure(dyn_pressure, ht_arr)
+        plt.scatter(peak_dyn_pressure, peak_dyn_pressure_ht, c='k', \
             label="Peak P = {:.2f} MPa\nHt = {:.2f} km".format(peak_dyn_pressure, peak_dyn_pressure_ht))
 
+        # Compute and mark lag fit dyn pressure peak on the graph
+        peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag = findPeakDynPressure(dyn_pressure_lag, 
+            ht_data_rescaled)
+        plt.scatter(peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag, c='r', \
+            label="Peak P = {:.2f} MPa\nHt = {:.2f} km".format(peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag))
 
 
         plt.legend()

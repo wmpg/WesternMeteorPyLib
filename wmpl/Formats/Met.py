@@ -313,7 +313,7 @@ def extractPicks(met, mirfit=False, photom_dict=None):
         else:
 
             # Extract frames
-            frames = np.array(met.picks[site])[:, 2].astype(np.int)
+            frames = np.array(met.picks[site])[:, 2].astype(int)
 
             # Extract original centroids
             cx_data, cy_data = np.hsplit(np.array(met.picks[site])[:, 4:6].astype(np.float64), 2)
@@ -326,7 +326,7 @@ def extractPicks(met, mirfit=False, photom_dict=None):
             theta, phi = np.hsplit(np.radians(np.array(met.picks[site])[:, 12:14].astype(np.float64)), 2)
 
             # Apparent magnitudes
-            mag_data = np.array(met.picks[site])[:, 17].astype(np.float)
+            mag_data = np.array(met.picks[site])[:, 17].astype(float)
 
 
             # Init a list of picks for this site
@@ -630,6 +630,14 @@ def loadMet(dir_path, file_name, photom_dict=None):
 
     # Extract picks into pick objects
     met = extractPicks(met, mirfit=mirfit, photom_dict=photom_dict)
+
+    # Remove sites with no picks
+    for site in met.sites:
+        if not site in met.picks_objs:
+            print()
+            print("WARNING! No picks found for site {:s}, removing it from the list of sites!".format(site))
+            print()
+            met.sites.remove(site)
 
     return met
 
