@@ -476,7 +476,6 @@ class ErosionSimContainer(object):
         pass
 
 
-
     def saveJSON(self):
         """ Save object as a JSON file. """
 
@@ -498,7 +497,6 @@ class ErosionSimContainer(object):
                 setattr(self2.simulation_results, sim_res_attr, attr.tolist())
 
 
-
         file_path = os.path.join(self.output_dir, self.file_name + ".json")
         with open(file_path, 'w') as f:
             json.dump(self2, f, default=lambda o: o.__dict__, indent=4)
@@ -514,14 +512,38 @@ class ErosionSimContainer(object):
 
 
     def runSimulation(self):
-        """ Run the ablation model and srote results. """
+        """ Run the ablation model and srote results. 
+        
+        Returns:
+            [str]: Path to the save picke file.
+        """
 
 
         # Run the erosion simulation
-        results_list, wake_results = runSimulationErosion(self.const, compute_wake=False)
+        frag_main, results_list, wake_results = runSimulationErosion(self.const, compute_wake=False)
 
         # Store simulation results
-        self.simulation_results = SimulationResults(self.const, results_list, wake_results)
+        self.simulation_results = SimulationResults(self.const, frag_main, results_list, wake_results)
+
+        # Delete constants in the simulation results
+        if hasattr(self.simulation_results, "const"):
+            del self.simulation_results.const
+
+        # Compute synthetic observations
+        res = extractSimData(self, check_only=True)
+        self.time_sampled = None
+        self.ht_sampled = None
+        self.len_sampled = None
+        self.mag_sampled = None
+        if res is not None:
+            _, self.time_sampled, self.ht_sampled, self.len_sampled, self.mag_sampled, _, \
+                _ = extractSimData(self, check_only=False)
+
+            # Convert synthetic data to lists
+            self.time_sampled = self.time_sampled.tolist()
+            self.ht_sampled = self.ht_sampled.tolist()
+            self.len_sampled = self.len_sampled.tolist()
+            self.mag_sampled = self.mag_sampled.tolist()
 
 
         ### Sort saved files into a directory structure split by velocity and density ###
@@ -554,11 +576,13 @@ class ErosionSimContainer(object):
         ###
 
 
-        # # Save results as a JSON file
-        # self.saveJSON()
+        # Save results as a JSON file
+        self.saveJSON()
 
         # Save results as a pickle file
         savePickle(self, dens_folder_path, self.file_name + ".pickle")
+
+        return os.path.join(dens_folder_path, self.file_name + ".pickle")
 
 
 
@@ -582,8 +606,8 @@ def extractSimData(sim, min_frames_visible=MIN_FRAMES_VISIBLE, check_only=False,
     Return: 
         - None if the simulation does not satisfy filter conditions.
         - postprocess_params if check_only=True and the simulation satisfies the conditions.
-        - params, input_data_normed, simulated_data_normed if check_only=False and the simulation satisfies 
-            the conditions.
+        - params, ht_sampled, len_sampled, mag_sampled, input_data_normed, simulated_data_normed 
+            if check_only=False and the simulation satisfies the conditions.
 
     """
 
@@ -764,7 +788,7 @@ def extractSimData(sim, min_frames_visible=MIN_FRAMES_VISIBLE, check_only=False,
 
 
     # Return input data and results
-    return params, input_data_normed, simulated_data_normed
+    return params, time_sampled, ht_sampled, len_sampled, mag_sampled, input_data_normed, simulated_data_normed
 
 
 
@@ -778,7 +802,7 @@ def generateErosionSim(output_dir, erosion_sim_params, random_seed, min_frames_v
     print("Running:", erosion_cont.file_name)
 
     # Run the simulation and save results
-    erosion_cont.runSimulation()
+    file_path = erosion_cont.runSimulation()
 
     # Check if the simulation satisfies the visibility criteria
     res = extractSimData(erosion_cont, min_frames_visible=min_frames_visible, check_only=True)
@@ -787,7 +811,7 @@ def generateErosionSim(output_dir, erosion_sim_params, random_seed, min_frames_v
     del erosion_cont
 
     if res is not None:
-        return [file_name, res]
+        return [file_path, res]
 
     else:
         return None
@@ -810,7 +834,7 @@ def saveProcessedList(data_path, results_list, param_class_name, min_frames_visi
     good_list = [entry for entry in results_list if entry is not None]
 
     # Load one simulation to get simulation parameters
-    sim = loadPickle(data_path, good_list[0][0])
+    sim = loadPickle(*os.path.split(good_list[0][0]))
 
     # Compute the average minimum time the meteor needs to be visible
     min_time_visible = min_frames_visible/sim.params.fps \
@@ -861,7 +885,7 @@ if __name__ == "__main__":
     ### COMMAND LINE ARGUMENTS
 
     # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(description="Randomly generate parameters for the rosion model, run it, and store results to disk.")
+    arg_parser = argparse.ArgumentParser(description="Randomly generate parameters for the erosion model, run it, and store results to disk.")
 
     arg_parser.add_argument('output_dir', metavar='OUTPUT_PATH', type=str, \
         help="Path to the output directory.")
@@ -872,6 +896,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('nsims', metavar='SIM_NUM', type=int, \
         help="Number of simulations to do.")
 
+    arg_parser.add_argument('--cores', metavar='CORES', type=int, default=None, \
+        help="Number of cores to use. All by default.")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -881,14 +908,13 @@ if __name__ == "__main__":
     # Make the output directory
     mkdirP(cml_args.output_dir)
 
-
-    # Init simulation parameters for CAMO
-    erosion_sim_params = ErosionSimParametersCAMO()
+    # Init simulation parameters with the given class name
+    erosion_sim_params = SIM_CLASSES[SIM_CLASSES_NAMES.index(cml_args.simclass)]()
 
     # Generate simulations using multiprocessing
     input_list = [[cml_args.output_dir, copy.deepcopy(erosion_sim_params), \
         np.random.randint(0, 2**31 - 1)] for _ in range(cml_args.nsims)]
-    results_list = domainParallelizer(input_list, generateErosionSim)
+    results_list = domainParallelizer(input_list, generateErosionSim, cores=cml_args.cores)
 
 
     # Save the list of simulations that passed the criteria to disk

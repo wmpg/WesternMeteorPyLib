@@ -817,14 +817,13 @@ class RMSDataHandle(object):
         return self.unpaired_observations
 
 
-    def countryFilter(self, met_obs1, met_obs2):
+    def countryFilter(self, station_code1, station_code2):
         """ Only pair observations if they are in proximity to a given country. """
-
 
         # Check that both stations are in the same country group
         for group in self.country_groups:
-            if met_obs1.station_code[:2] in group:
-                if met_obs2.station_code[:2] in group:
+            if station_code1[:2] in group:
+                if station_code2[:2] in group:
                     return True
                 else:
                     return False
@@ -859,7 +858,7 @@ class RMSDataHandle(object):
                 continue
 
             # Check that the stations are in the same region / group of countres
-            if not self.countryFilter(met_obs, met_obs2):
+            if not self.countryFilter(met_obs.station_code, met_obs2.station_code):
                 continue
 
             # Take observations which are within the given time window
@@ -880,6 +879,14 @@ class RMSDataHandle(object):
 
         # Go through all unpaired observations
         for met_obs in unpaired_observations:
+
+            # Check that the stations are in the same region / group of countres
+            if not self.countryFilter(
+                met_obs.station_code, 
+                (traj_reduced.participating_stations + traj_reduced.ignored_stations)[0]
+                ):
+            
+                continue
 
             # Skip all stations that are already participating in the trajectory solution
             if (met_obs.station_code in traj_reduced.participating_stations) or \

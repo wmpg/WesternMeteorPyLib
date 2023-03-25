@@ -144,6 +144,7 @@ def domainParallelizer(domain, function, cores=None, kwarg_dict=None):
         for args in domain:
             results.append(function(*args, **kwarg_dict))
 
+
     # Run real multiprocessing if more than one core
     elif cores > 1:
 
@@ -153,6 +154,8 @@ def domainParallelizer(domain, function, cores=None, kwarg_dict=None):
         # Generate a pool of workers
         with closing(multiprocessing.Pool(cores)) as pool:
 
+            job_list = []
+
             # Give workers things to do
             count = 0
             for args in domain:
@@ -160,16 +163,28 @@ def domainParallelizer(domain, function, cores=None, kwarg_dict=None):
                 # Give job to worker
                 last_job = pool.apply_async(function, args, kwarg_dict, callback=_logResult)
 
+                job_list.append(last_job)
+
                 # Limit the amount of jobs in waiting
                 count += 1
                 if count%cores == 0:
                     if len(pool._cache) > max_jobs:
                         last_job.wait()
 
+            # Close the pool
+            pool.close()
+
+            # Wait for all jobs to finish
+            pool.join()
+
+        # Extract results from the pool
+        results = [job.get() for job in job_list]
+
 
     else:
         print('The number of CPU cores defined is not in an expected range (1 or more.)')
         print('Use cpu_cores = 1 as a fallback value.')
+
 
     return results
 
