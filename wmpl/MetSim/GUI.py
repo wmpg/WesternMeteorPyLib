@@ -24,7 +24,7 @@ from PyQt5.uic import loadUi
 
 from wmpl.Formats.Met import loadMet
 from wmpl.MetSim.GUITools import MatplotlibPopupWindow
-from wmpl.MetSim.MetSimErosion import runSimulation, Constants
+from wmpl.MetSim.MetSimErosion import runSimulation, Constants, zenithAngleAtSimulationBegin
 from wmpl.Trajectory.Trajectory import Trajectory, ObservedPoints
 from wmpl.Trajectory.Orbit import calcOrbit, Orbit
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensity, atmDensPoly
@@ -33,7 +33,7 @@ from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy
 from wmpl.Utils.Pickling import loadPickle, savePickle
 from wmpl.Utils.Plotting import saveImage
 from wmpl.Utils.TrajConversions import unixTime2JD, datetime2JD, geo2Cartesian, cartesian2Geo, altAz2RADec, \
-    altAz2RADec_vect, raDec2ECI
+    altAz2RADec_vect, raDec2ECI, EARTH
 
 
 
@@ -1775,8 +1775,6 @@ class MetSimGUI(QMainWindow):
         # Assign USG values from the input file, if given
         if self.usg_data is not None:
 
-            self.const.v_init = 1000*self.usg_data.v
-            self.const.zenith_angle = np.radians(90 - self.usg_data.entry_angle)
             self.const.P_0m = self.usg_data.P_0m_bolo
 
 
@@ -1829,8 +1827,11 @@ class MetSimGUI(QMainWindow):
 
         else:
 
+            # Compute the radius of the Earth at the latitude of the observer
+            self.const.r_earth = \
+                EARTH.EQUATORIAL_RADIUS/np.sqrt(1.0 - (EARTH.E**2)*np.sin(self.traj.rbeg_lat)**2)
+
             # Set the constants value from the trajectory
-            self.const.zenith_angle = self.traj.orbit.zc
             self.const.v_init = self.traj.orbit.v_init
 
             # Set kill height to the observed end height
@@ -1844,6 +1845,9 @@ class MetSimGUI(QMainWindow):
             self.const.erosion_on = False
             self.const.disruption_on = False
 
+            # Compute the zenith angle at the beginning of the simulation, taking Earth's curvature into 
+            # account
+            self.computeSimZenithAngle()
 
             # Calculate the photometric mass
             _, self.const.m_init = self.calcPhotometricMass()
@@ -1994,6 +1998,16 @@ class MetSimGUI(QMainWindow):
         lon_mean = meanAngle([self.traj.rbeg_lon, self.traj.rend_lon])
 
         return fitAtmPoly(lat_mean, lon_mean, dens_fit_ht_end, dens_fit_ht_beg, self.traj.jdt_ref)
+    
+    def computeSimZenithAngle(self):
+        """ Compute the zenith angle at the beginning of the simulation, taking Earth's curvature into 
+        account.
+        
+        """
+
+        # Compute the zenith angle at the beginning of the simulation
+        self.const.zenith_angle = zenithAngleAtSimulationBegin(self.const.h_init, self.traj.rbeg_ele, 
+            self.traj.orbit.zc, self.const.r_earth)
 
 
     def loadWakeFile(self, file_path):
@@ -3351,24 +3365,28 @@ class MetSimGUI(QMainWindow):
             else:
 
                 # Compute the observed lag
-                obs_lag = obs.state_vect_dist - self.sim_vel_beg*obs.time_data
+                obs_lag = obs.state_vect_dist[obs.ignore_list == 0] \
+                    - self.sim_vel_beg*obs.time_data[obs.ignore_list == 0]
 
                 # Compute the corrected heights, so the simulations and the observations match
-                obs_ht_corr = self.sim_norm_ht_interp(obs.state_vect_dist)
+                obs_ht = self.sim_norm_ht_interp(obs.state_vect_dist[obs.ignore_list == 0])
+                
+                # # Take the observed heights
+                # obs_ht = obs.model_ht[obs.ignore_list == 0]
 
                 # Plot the observed lag
-                lag_handle = lag_plot.plot(obs_lag, obs_ht_corr/1000, marker='x', \
+                lag_handle = lag_plot.plot(obs_lag, obs_ht/1000, marker='x', \
                     linestyle='dashed', label=obs.station_id, markersize=3, linewidth=0.5)
                 
 
                 # Sample the simulated normalized length at observed times
-                sim_norm_len_sampled = self.sim_norm_len_interp(obs.time_data)
+                sim_norm_len_sampled = self.sim_norm_len_interp(obs.time_data[obs.ignore_list == 0])
 
                 # Compute the length residuals
-                len_res = obs.state_vect_dist - sim_norm_len_sampled
+                len_res = obs.state_vect_dist[obs.ignore_list == 0] - sim_norm_len_sampled
 
                 # Plot the length residuals
-                lag_residuals_plot.scatter(len_res, obs_ht_corr/1000, marker='+', \
+                lag_residuals_plot.scatter(len_res, obs_ht/1000, marker='+', \
                     c=lag_handle[0].get_color(), label="Leading, {:s}".format(obs.station_id), s=6)
                 
 
@@ -3425,10 +3443,13 @@ class MetSimGUI(QMainWindow):
                     obs_lag = state_vect_dist_data - self.sim_vel_beg*time_data
 
                     # Compute the corrected heights, so the simulations and the observations match
-                    obs_ht_corr = self.sim_norm_ht_interp(state_vect_dist_data)
+                    obs_ht = self.sim_norm_ht_interp(state_vect_dist_data)
+
+                    # # Get observed heights
+                    # obs_ht = self.met_obs.height_data[site]
 
                     # Plot the observed lag
-                    lag_handle = lag_plot.plot(obs_lag, obs_ht_corr/1000, marker='x', \
+                    lag_handle = lag_plot.plot(obs_lag, obs_ht/1000, marker='x', \
                         linestyle='dashed', label=str(site),  markersize=5, linewidth=1)
                     
 
@@ -3439,7 +3460,7 @@ class MetSimGUI(QMainWindow):
                     len_res = state_vect_dist_data - sim_norm_len_sampled
 
                     # Plot the length residuals
-                    lag_residuals_plot.scatter(len_res, obs_ht_corr/1000, marker='+', \
+                    lag_residuals_plot.scatter(len_res, obs_ht/1000, marker='+', \
                         c=lag_handle[0].get_color(), label="Leading, {:s}".format(str(site)), s=6)
 
 
@@ -4334,6 +4355,7 @@ class MetSimGUI(QMainWindow):
 
             # Write the fragmentation file
             self.fragmentation.writeFragmentationFile()
+
 
 
         # Store previous run results

@@ -802,15 +802,18 @@ if __name__ == "__main__":
         obs_lag = obs.state_vect_dist - sim_vel_beg*obs.time_data
 
         # Compute the corrected heights, so the simulations and the observations match
-        obs_ht_corr = sim_norm_ht_interp(obs.state_vect_dist)
+        obs_ht = sim_norm_ht_interp(obs.state_vect_dist)
+
+        # # Use observed heights
+        # obs_ht = obs.model_ht
 
         # Plot the observed lag
-        lag_handle = ax_lag.plot(obs_lag, obs_ht_corr/1000, 'x', ms=8, alpha=0.5, linestyle='dashed', 
+        lag_handle = ax_lag.plot(obs_lag, obs_ht/1000, 'x', ms=8, alpha=0.5, linestyle='dashed', 
             label=obs.station_id, markersize=10, linewidth=2)
 
 
         # Plot the velocity
-        ax_vel.plot(obs.velocities[1:]/1000, obs_ht_corr[1:]/1000, 'x', ms=8, alpha=0.5, linestyle='dashed', 
+        ax_vel.plot(obs.velocities[1:]/1000, obs_ht[1:]/1000, 'x', ms=8, alpha=0.5, linestyle='dashed', 
             label=obs.station_id, markersize=10, linewidth=2)
 
         # Update the min/max height
@@ -825,7 +828,7 @@ if __name__ == "__main__":
         len_res = obs.state_vect_dist - sim_norm_len_sampled
 
         # Plot the length residuals
-        ax_lagres.scatter(len_res, obs_ht_corr/1000, marker='+', \
+        ax_lagres.scatter(len_res, obs_ht/1000, marker='+', \
             c=lag_handle[0].get_color(), label="Leading, {:s}".format(obs.station_id), s=6)
 
 
