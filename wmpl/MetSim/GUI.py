@@ -5080,6 +5080,7 @@ if __name__ == "__main__":
         scaling_factor = 1
 
     # Destroy the QApplication object
+    app.quit()
     del app
 
     ### ###
