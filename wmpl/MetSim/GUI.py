@@ -5057,8 +5057,8 @@ if __name__ == "__main__":
     screen_width = screen_size.width()
     screen_height = screen_size.height()
 
-    # Only scale the window if the screen resolution is not 1920x1080
-    if (screen_width != 1920) or (screen_height != 1080):
+    # Only scale the window if the screen resolution is not 1080p
+    if screen_height != 1080:
 
         # Compute the scaling factor, taking 1080p as the reference resolution (compute the ratio of 
         # diagonals)
