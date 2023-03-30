@@ -5057,17 +5057,27 @@ if __name__ == "__main__":
     screen_width = screen_size.width()
     screen_height = screen_size.height()
 
-    # Compute the scaling factor, taking 1080p as the reference resolution (compute the ratio of diagonals)
-    scaling_factor = np.sqrt(screen_width**2 + screen_height**2) / np.sqrt(1920**2 + 1080**2)
+    # Only scale the window if the screen resolution is not 1920x1080
+    if (screen_width != 1920) or (screen_height != 1080):
 
-    # If the scaling factor is > 1, reduce it by 2% to avoid too large fonts
-    if scaling_factor > 1:
-        scaling_factor *= 0.98
+        # Compute the scaling factor, taking 1080p as the reference resolution (compute the ratio of 
+        # diagonals)
+        # Use the screen height as the reference to avoid issues with very wide screens, and assume that the 
+        # screen size ratio is 1.6 (16:10)
+        screen_width_calc = int(screen_height*1.6)
+        scaling_factor = np.sqrt(screen_width_calc**2 + screen_height**2) / np.sqrt(1920**2 + 1080**2)
 
-        if scaling_factor < 1:
-            scaling_factor = 1
+        # If the scaling factor is > 1, reduce it by 2% to avoid too large fonts
+        if scaling_factor > 1:
+            scaling_factor *= 0.98
 
-    os.environ["QT_SCALE_FACTOR"] = str(scaling_factor)
+            if scaling_factor < 1:
+                scaling_factor = 1
+
+        os.environ["QT_SCALE_FACTOR"] = str(scaling_factor)
+
+    else:    
+        scaling_factor = 1
 
     # Destroy the QApplication object
     del app
