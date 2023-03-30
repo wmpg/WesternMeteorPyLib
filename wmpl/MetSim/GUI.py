@@ -5081,7 +5081,7 @@ if __name__ == "__main__":
     # Set a font for the whole application
     font = QFont()
     font.setFamily("Arial")
-    font.setPointSize(6)
+    font.setPointSize(int(np.ceil(8/scaling_factor)))
     app.setFont(font)
 
     
