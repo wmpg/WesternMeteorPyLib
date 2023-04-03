@@ -1016,7 +1016,7 @@ def checkWeights(observations, weights):
 
 
 
-def timingResiduals(params, observations, t_ref_station, weights=None, ret_stddev=False):
+def timingResiduals(params, observations, t_ref_station, fixed_time_offsets, weights=None, ret_stddev=False):
     """ Calculate the sum of absolute differences between timings of given stations using the length from
         respective stations.
     
@@ -1025,6 +1025,7 @@ def timingResiduals(params, observations, t_ref_station, weights=None, ret_stdde
             in this list).
         observations: [list] A list of ObservedPoints objects.
         t_ref_station: [int] Index of the reference station.
+        fixed_time_offsets: [list] A list of fixed time offsets for every station.
 
     Keyword arguments:
         weights: [list] A list of statistical weights for every station.
@@ -1046,8 +1047,12 @@ def timingResiduals(params, observations, t_ref_station, weights=None, ret_stdde
     # Go through observations from all stations
     for i, obs in enumerate(observations):
 
-        # Time difference is 0 for the reference stations
-        if i == t_ref_station:
+        # Check if the station has a given fixed time offset and assign it
+        if str(obs.station_id) in fixed_time_offsets:
+            t_diff = fixed_time_offsets[obs.station_id]
+
+        # Time difference is 0 for the reference stations (only if no fixed times are given)
+        elif (i == t_ref_station) and not len(fixed_time_offsets):
             t_diff = 0
 
         else:
@@ -2336,7 +2341,7 @@ class Trajectory(object):
         v_init_ht=None, estimate_timing_vel=True, monte_carlo=True, mc_runs=None, mc_pick_multiplier=1, \
         mc_noise_std=1.0, geometric_uncert=False, filter_picks=True, calc_orbit=True, show_plots=True, \
         show_jacchia=False, save_results=True, gravity_correction=True, plot_all_spatial_residuals=False, \
-        plot_file_type='png', traj_id=None, reject_n_sigma_outliers=3, mc_cores=None):
+        plot_file_type='png', traj_id=None, reject_n_sigma_outliers=3, mc_cores=None, fixed_times=None):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -2390,6 +2395,8 @@ class Trajectory(object):
                 This value is 3 (sigma) by default.
             mc_cores: [int] Number of CPU cores to use for Monte Carlo parallell processing. None by default,
                 which means that all cores will be used.
+            fixed_times: [dict] Dictionary of fixed times for each station. None by default, meaning that
+                all stations will be estimated. Only used if estimate_timing_vel is True.
 
         """
 
@@ -2437,6 +2444,20 @@ class Trajectory(object):
             self.estimate_timing_vel = estimate_timing_vel
         else:
             self.estimate_timing_vel = True
+
+
+        # Extract the fixed times from the fixed time offsets
+        self.fixed_times = fixed_times
+        if isinstance(estimate_timing_vel, bool) and isinstance(self.fixed_times, str):
+
+            if estimate_timing_vel:
+
+                self.fixed_time_offsets = {}
+
+                for entry in self.fixed_times.split(','):
+                    station, offset = entry.split(":")
+                    self.fixed_time_offsets[station] = float(offset)
+
 
         # Running Monte Carlo simulations to estimate uncertainties
         self.monte_carlo = monte_carlo
@@ -2953,10 +2974,10 @@ class Trajectory(object):
             
             if self.timing_res is None:
                 self.timing_res = timingResiduals(zero_timing_res, self.observations, self.t_ref_station, \
-                    weights)
+                    self.fixed_time_offsets, weights=weights)
 
             self.timing_stddev = timingResiduals(zero_timing_res, self.observations, self.t_ref_station, \
-                weights, ret_stddev=True)
+                self.fixed_time_offsets, weights=weights, ret_stddev=True)
 
 
     def calcAvgVelocityAboveHt(self, observations, bottom_ht, weights):
@@ -3167,7 +3188,15 @@ class Trajectory(object):
 
             # Initial timing difference between sites is 0 (there are N-1 timing differences, as the time 
             # difference for the reference site is always 0)
-            p0 = np.zeros(shape=(len(self.observations) - 1))
+            if len(self.fixed_time_offsets):
+                p0 = np.zeros(shape=(len(self.observations)))
+            else:    
+                p0 = np.zeros(shape=(len(self.observations) - 1))
+
+            # Set the fixed times for stations which have it
+            for i, obs in enumerate(observations):
+                if str(obs.station_id) in self.fixed_time_offsets:
+                    p0[i] = self.fixed_time_offsets[str(obs.station_id)]
 
             # # Set the time reference station to be the one with the most used points
             # obs_points = [obs.kmeas for obs in self.observations]
@@ -3176,21 +3205,29 @@ class Trajectory(object):
 
             if self.verbose:
                 print('Initial function evaluation:', timingResiduals(p0, observations, self.t_ref_station, 
-                    weights=weights))
+                    self.fixed_time_offsets, weights=weights))
 
 
             # Set bounds for timing to +/- given maximum time offset
             bounds = []
-            for i in range(len(self.observations) - 1):
-                bounds.append([-self.max_toffset, self.max_toffset])
+            for i in range(len(p0)):
+                
+                t_off = 0
+                station_id = str(self.observations[i].station_id)
+
+                if station_id in self.fixed_time_offsets:
+                    t_off = self.fixed_time_offsets[station_id]
+
+                bounds.append([t_off - self.max_toffset, t_off + self.max_toffset])
 
 
             ### Try different methods of optimization until it is successful ##
 
-            #   If there are more than 5 stations, use the advanced L-BFGS-B method by default
+            # If there are more than 5 stations, use the advanced L-BFGS-B method by default
             if len(self.observations) >= 5:
                 methods = [None]
                 maxiter_list = [15000]
+
             else:
                 # If there are less than 5, try faster methods first
                 methods = ['SLSQP', 'TNC', None]
@@ -3201,8 +3238,8 @@ class Trajectory(object):
 
                 # Run the minimization of residuals between all stations
                 timing_mini = scipy.optimize.minimize(timingResiduals, p0, args=(observations, \
-                    self.t_ref_station, weights), bounds=bounds, method=opt_method, options={'maxiter': maxiter},\
-                    tol=1e-12)
+                    self.t_ref_station, self.fixed_time_offsets, weights), bounds=bounds, method=opt_method, 
+                    options={'maxiter': maxiter}, tol=1e-12)
 
                 # Stop trying methods if this one was successful
                 if timing_mini.success:
@@ -3214,14 +3251,12 @@ class Trajectory(object):
                         print('Successful timing optimization with', opt_method)
                         print("Final function evaluation:", timing_mini.fun)
 
-
                     break
 
                 else:
                     print('Unsuccessful timing optimization with', opt_method)
 
             ### ###
-
 
             if not timing_mini.success:
 
@@ -3252,13 +3287,20 @@ class Trajectory(object):
             stat_count = 0
             for i, obs in enumerate(observations):
 
-                # The timing difference for the reference station is always 0
-                if (i == self.t_ref_station) or (not estimate_timing_vel):
+                # The timing difference for the reference station is always 0 (skip if a fixed station is
+                # used as a reference)
+                if ((i == self.t_ref_station) or (not estimate_timing_vel)) and \
+                    not (len(self.fixed_time_offsets)):
+
                     t_diff = 0
 
                 else:
                     t_diff = timing_mini.x[stat_count]
                     stat_count += 1
+
+                    # If the station is fixed, use the fixed time offset
+                    if str(obs.station_id) in self.fixed_time_offsets:
+                        t_diff = self.fixed_time_offsets[str(obs.station_id)]
 
                 if self.verbose:
                     print('STATION ' + str(obs.station_id) + ' TIME OFFSET = ' + str(t_diff) + ' s')
