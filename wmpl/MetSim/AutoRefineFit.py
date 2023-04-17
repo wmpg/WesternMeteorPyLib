@@ -103,15 +103,14 @@ def costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False):
 
     # Compute the magnitude and length residuals from the trajectory object
     for obs in traj.observations:
+
+        # Set a default filter which takes all observations
+        mag_filter = np.ones(len(obs.model_ht), dtype=bool)
+
         if obs.absolute_magnitudes is not None:
 
-            # Filter out observations with NaN magnitudes
-            obs.absolute_magnitudes = obs.absolute_magnitudes[~np.isnan(obs.absolute_magnitudes)]
-            obs.state_vect_dist = obs.state_vect_dist[~np.isnan(obs.absolute_magnitudes)]
-
-            # Filter out observations with magnitude fainter than +9
-            mag_filter = obs.absolute_magnitudes < 9
-
+            # Filter out observations with magnitude fainter than +9 or with NaN magnitudes
+            mag_filter = (obs.absolute_magnitudes < 9) & (~np.isnan(obs.absolute_magnitudes))
 
             # Sample the simulated magnitude at the observation heights
             sim_mag_sampled = sim_mag_interp(obs.model_ht[mag_filter])
@@ -122,10 +121,10 @@ def costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False):
 
 
         # Sample the simulated normalized length at observed times
-        sim_norm_len_sampled = sim_norm_len_interp(obs.time_data)
+        sim_norm_len_sampled = sim_norm_len_interp(obs.time_data[mag_filter])
 
         # Compute the length residual
-        len_res_sum += np.sum(np.abs(obs.state_vect_dist - sim_norm_len_sampled))
+        len_res_sum += np.sum(np.abs(obs.state_vect_dist[mag_filter] - sim_norm_len_sampled))
         len_res_count += len(obs.state_vect_dist)
 
 
@@ -139,19 +138,21 @@ def costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False):
                 ax_magres.scatter(obs.absolute_magnitudes[mag_filter] - sim_mag_sampled, 
                                   obs.model_ht[mag_filter]/1000)
 
-            # ax_len.scatter(obs.state_vect_dist, obs.model_ht/1000, label=obs.station_id)
-            # ax_len.plot(sim_norm_len_sampled, obs.model_ht/1000)
-            ax_lenres.scatter(obs.state_vect_dist - sim_norm_len_sampled, obs.model_ht/1000)
+            # ax_len.scatter(obs.state_vect_dist[mag_filter], obs.model_ht[mag_filter]/1000, 
+            #   label=obs.station_id)
+            # ax_len.plot(sim_norm_len_sampled, obs.model_ht[mag_filter]/1000)
+            ax_lenres.scatter(obs.state_vect_dist[mag_filter] - sim_norm_len_sampled, 
+                              obs.model_ht[mag_filter]/1000)
 
             # Compute the simulated lag
-            sim_lag = sim_norm_len_sampled - sim_vel_beg*obs.time_data
+            sim_lag = sim_norm_len_sampled - sim_vel_beg*obs.time_data[mag_filter]
 
             # Compute the observed lag using the simulated velocity
-            obs_lag = obs.state_vect_dist - sim_vel_beg*obs.time_data
+            obs_lag = obs.state_vect_dist[mag_filter] - sim_vel_beg*obs.time_data[mag_filter]
 
             # Plot the lag
-            ax_lag.scatter(obs_lag, obs.model_ht/1000, label=obs.station_id)
-            ax_lag.plot(sim_lag, obs.model_ht/1000)
+            ax_lag.scatter(obs_lag, obs.model_ht[mag_filter]/1000, label=obs.station_id)
+            ax_lag.plot(sim_lag, obs.model_ht[mag_filter]/1000)
 
 
 
