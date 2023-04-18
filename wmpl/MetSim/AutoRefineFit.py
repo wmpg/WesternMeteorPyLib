@@ -1,4 +1,6 @@
+
 import os
+import sys
 import copy
 import re
 import json
@@ -395,9 +397,60 @@ def autoFit(fit_options, traj, met_obs, const):
     # Print initial parameters and bounds for each
     print()
     print("Initial parameters:")
+
     for i, param_name in enumerate(fit_options["fit_params"]):
+
+        # Extract the normalization factor
         n = fit_options["norm_factors"][i]
-        print("\t{}: {:f} [{:f}, {:f}]".format(param_name, n*x0[i], n*bounds[i][0], n*bounds[i][1]))
+
+        # Compute the parameter value
+        param_val = n*x0[i]
+
+        # Compute the bounds
+        bound_min = n*bounds[i][0]
+        bound_max = n*bounds[i][1]
+
+        # Construct the format string
+        decimal_places = 6
+        decimal_places_scientific = 2
+
+        # If the parameter value is smaller than possible to represent in the given number of decimal places,
+        # then use scientific notation
+        if param_val < 10**(-decimal_places):
+            format_str = "{{:.{}e}}".format(decimal_places_scientific)
+        else:
+            format_str = "{{:.{}f}}".format(decimal_places)
+
+
+        print("\t{}: {} [{}, {}]".format(param_name, format_str.format(param_val),
+            format_str.format(bound_min), format_str.format(bound_max)))
+        
+        bound_error_text = """
+******************************************************************************
+
+ERROR: The initial parameter value for {:s} is outside the bounds!
+
+Please check the initial parameter values and the bounds.
+
+Exiting...
+
+******************************************************************************
+        """.format(param_name)
+        
+        # If the intial parameter value is outside the bounds, then throw an error
+        if (bound_min is not None) and (param_val < bound_min):
+            print(bound_error_text)
+            print("Initial parameter value is smaller than the lower bound: {} < {}".format(
+                param_val, bound_min))
+            sys.exit(1)
+        
+        if (bound_max is not None) and (param_val > bound_max):
+            print(bound_error_text)
+            print("Initial parameter value is larger than the upper bound: {} > {}".format(
+                param_val, bound_max))
+            sys.exit(1)
+
+
     print()
 
 
