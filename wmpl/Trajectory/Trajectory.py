@@ -3077,7 +3077,14 @@ class Trajectory(object):
                 quart_time = obs.time_data[:init_part_size]
 
                 # Fit a line to the data, estimate the velocity
-                obs.lag_line, _ = scipy.optimize.curve_fit(lineFunc, quart_time, quart_length)
+                try:
+                    obs.lag_line, _ = scipy.optimize.curve_fit(lineFunc, quart_time, quart_length)
+
+                # Handle this error:
+                # RuntimeError: Optimal parameters not found: gtol=0.000000 is too small, func(x) is orthogonal to the columns of
+                #   the Jacobian to machine precision.
+                except RuntimeError:
+                    obs.lag_line = [0, 0]
 
                 # Calculate lag
                 obs.lag = obs.length - lineFunc(obs.time_data, *obs.lag_line)
