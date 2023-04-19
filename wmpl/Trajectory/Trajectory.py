@@ -3230,11 +3230,7 @@ class Trajectory(object):
             
             # Generate an initial guess for stations which have no fixed time
             p0 = np.zeros(len([val for val in self.stations_time_dict.values() if val is True]))
-
-            print()
-            print("**************")
-            print(self.stations_time_dict)
-            print(p0)
+            
 
             if self.verbose:
                 print('Initial function evaluation:', timingResiduals(p0, observations, 
