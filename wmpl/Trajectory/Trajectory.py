@@ -2336,7 +2336,7 @@ class Trajectory(object):
         v_init_ht=None, estimate_timing_vel=True, monte_carlo=True, mc_runs=None, mc_pick_multiplier=1, \
         mc_noise_std=1.0, geometric_uncert=False, filter_picks=True, calc_orbit=True, show_plots=True, \
         show_jacchia=False, save_results=True, gravity_correction=True, plot_all_spatial_residuals=False, \
-        plot_file_type='png', traj_id=None, reject_n_sigma_outliers=3, mc_cores=None):
+        plot_file_type='png', traj_id=None, reject_n_sigma_outliers=3, mc_cores=None, enable_OSM_plot=False):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -2449,6 +2449,9 @@ class Trajectory(object):
 
         # Standard deviatons of measurement noise to add during Monte Carlo runs
         self.mc_noise_std = mc_noise_std
+        
+        # Enable OSM plot if required
+        self.enable_OSM_plot = enable_OSM_plot 
 
         # If True, pure geometric uncertainties will be computed and culling of solutions based on cost
         #   function value will not be done
@@ -5260,7 +5263,88 @@ class Trajectory(object):
         else:
             plt.clf()
             plt.close()
+            
+        ######################################################################################################
 
+        ### Plot lat/lon of the meteor using OSM ###
+        ######################################################################################################
+            
+        if (self.enable_OSM_plot):
+        	
+            from wmpl.Utils.PlotMap_OSM import OSMMap
+            #import cartopy.crs as ccrs
+            #import cartopy.io.img_tiles as cimgt
+                
+            # Calculate mean latitude and longitude of all meteor points
+            met_lon_mean = meanAngle([x for x in obs.meas_lon for obs in self.observations])
+            met_lat_mean = meanAngle([x for x in obs.meas_lat for obs in self.observations])
+
+
+            # Put coordinates of all sites and the meteor in the one list
+            lat_list = [obs.lat for obs in self.observations]
+            lat_list.append(met_lat_mean)
+            lon_list = [obs.lon for obs in self.observations]
+            lon_list.append(met_lon_mean)
+
+            # Put edge points of the meteor in the list
+            lat_list.append(self.rbeg_lat)
+            lon_list.append(self.rbeg_lon)
+            lat_list.append(self.rend_lat)
+            lon_list.append(self.rend_lon)
+            lat_list.append(self.orbit.lat_ref)
+            lon_list.append(self.orbit.lon_ref)
+
+
+            # Init the map
+            m = OSMMap(lat_list, lon_list, border_size=50, color_scheme='light')
+
+
+            # Plot locations of all stations and measured positions of the meteor
+            for i, obs in enumerate(sorted(self.observations, key=lambda x:x.rbeg_ele, reverse=True)):
+
+                # Extract marker type and size multiplier
+                marker, sm = markers[i%len(markers)]
+
+                # Plot stations
+                m.scatter(obs.lat, obs.lon, s=sm*10, label=str(obs.station_id), marker=marker)
+
+                # Plot measured points
+                m.plot(obs.meas_lat[obs.ignore_list == 0], obs.meas_lon[obs.ignore_list == 0], c='r')
+
+                # Plot ignored points
+                if np.any(obs.ignore_list != 0):
+                    m.scatter(obs.meas_lat[obs.ignore_list != 0], obs.meas_lon[obs.ignore_list != 0], c='k', \
+                        marker='x', s=5, alpha=0.5)
+
+
+
+            # Plot a point marking the final point of the meteor
+            m.scatter(self.rend_lat, self.rend_lon, c='k', marker='+', s=50, alpha=0.75, label='Lowest height')
+
+
+            # If there are more than 10 observations, make the legend font smaller
+            legend_font_size = LEGEND_TEXT_SIZE
+            if len(self.observations) >= 10:
+                legend_font_size = 5
+
+            plt.legend(loc='upper left', prop={'size': legend_font_size})
+
+
+
+            # Pickle the figure
+            if ret_figs:
+                fig_pickle_dict["OSM_ground_track"] = pickle.dumps(plt.gcf(), protocol=2)
+
+            if self.save_results:
+                savePlot(plt, file_name + '_OSM_ground_track.' + self.plot_file_type, output_dir)
+
+            if show_plots:
+                plt.show()
+
+            else:
+                plt.clf()
+                plt.close()
+                
         ######################################################################################################
 
 
