@@ -553,6 +553,8 @@ if __name__ == "__main__":
     # Check that scipy version is at least 1.7.0 - older versions don't support Nelder-Mead with bounds
     if scipy.__version__ < "1.7.0":
         print("ERROR: scipy version must be at least 1.7.0! Please upgrade scipy.")
+        print("If you're using conda, then run:")
+        print("conda install -c conda-forge scipy=1.7.3")
         sys.exit(1)
 
 
