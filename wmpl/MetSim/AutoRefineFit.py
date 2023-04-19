@@ -549,6 +549,14 @@ if __name__ == "__main__":
 
     #########################
 
+
+    # Check that scipy version is at least 1.7.0 - older versions don't support Nelder-Mead with bounds
+    if scipy.__version__ < "1.7.0":
+        print("ERROR: scipy version must be at least 1.7.0! Please upgrade scipy.")
+        sys.exit(1)
+
+
+
     # Extract the directory path
     dir_path = cml_args.dir_path
 
