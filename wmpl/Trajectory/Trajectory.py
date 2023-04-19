@@ -11,6 +11,7 @@ import copy
 import sys
 import os
 import datetime
+import collections
 import pickle
 import json
 from operator import attrgetter
@@ -1016,7 +1017,7 @@ def checkWeights(observations, weights):
 
 
 
-def timingResiduals(params, observations, t_ref_station, fixed_time_offsets, weights=None, ret_stddev=False):
+def timingResiduals(params, observations, time_dict, weights=None, ret_stddev=False):
     """ Calculate the sum of absolute differences between timings of given stations using the length from
         respective stations.
     
@@ -1024,8 +1025,9 @@ def timingResiduals(params, observations, t_ref_station, fixed_time_offsets, wei
         params: [ndarray] Timing differences from the reference station (NOTE: reference station should NOT be 
             in this list).
         observations: [list] A list of ObservedPoints objects.
-        t_ref_station: [int] Index of the reference station.
-        fixed_time_offsets: [list] A list of fixed time offsets for every station.
+        time_dict: [dict] A dictionary of timing differences for every station. The keys are station IDs and
+            the values are timing differences. If a fixed time difference is not given for a station, the
+            timing difference is set to 0.
 
     Keyword arguments:
         weights: [list] A list of statistical weights for every station.
@@ -1048,18 +1050,13 @@ def timingResiduals(params, observations, t_ref_station, fixed_time_offsets, wei
     for i, obs in enumerate(observations):
 
         # Check if the station has a given fixed time offset and assign it
-        if str(obs.station_id) in fixed_time_offsets:
-            t_diff = fixed_time_offsets[obs.station_id]
-
-        # Time difference is 0 for the reference stations (only if no fixed times are given)
-        elif (i == t_ref_station) and not len(fixed_time_offsets):
-            t_diff = 0
+        if not isinstance(time_dict[str(obs.station_id)], bool):
+            t_diff = time_dict[str(obs.station_id)]
 
         else:
             # Take the estimated time difference for all other stations
             t_diff = params[stat_count]
             stat_count += 1
-
 
         # Calculate the shifted time
         time_shifted = obs.time_data + t_diff
@@ -2647,6 +2644,24 @@ class Trajectory(object):
         if station_id is None:
             station_id = self.meas_count
 
+        # If the station id already exists, add a suffix _2, _3, etc.
+        if str(station_id) in [str(x.station_id) for x in self.observations]:
+
+            # Find if there are already stations with suffixes
+            suffixes = []
+            for obs in self.observations:
+                if obs.station_id.startswith(str(station_id) + '_'):
+                    suffixes.append(int(obs.station_id.split('_')[-1]))
+
+            # If there are no suffixes, add _2
+            if len(suffixes) == 0:
+                station_id = str(station_id) + '_2'
+
+            # If there are suffixes, add the next one
+            else:
+                station_id = str(station_id) + '_' + str(np.max(suffixes) + 1)
+
+
         # If obs_id was not given, assign it
         if obs_id is None:
             obs_id = self.meas_count
@@ -2973,11 +2988,11 @@ class Trajectory(object):
             # Calculate the timing offset between the meteor time vs. length
             
             if self.timing_res is None:
-                self.timing_res = timingResiduals(zero_timing_res, self.observations, self.t_ref_station, \
-                    self.fixed_time_offsets, weights=weights)
+                self.timing_res = timingResiduals(zero_timing_res, self.observations, self.stations_time_dict, 
+                                                  weights=weights)
 
-            self.timing_stddev = timingResiduals(zero_timing_res, self.observations, self.t_ref_station, \
-                self.fixed_time_offsets, weights=weights, ret_stddev=True)
+            self.timing_stddev = timingResiduals(zero_timing_res, self.observations, self.stations_time_dict, 
+                                                 weights=weights, ret_stddev=True)
 
 
     def calcAvgVelocityAboveHt(self, observations, bottom_ht, weights):
@@ -3193,39 +3208,44 @@ class Trajectory(object):
         # Run timing offset estimation if it needs to be done
         if estimate_timing_vel:
 
-            # Initial timing difference between sites is 0 (there are N-1 timing differences, as the time 
-            # difference for the reference site is always 0)
-            if len(self.fixed_time_offsets):
-                p0 = np.zeros(shape=(len(self.observations)))
-            else:    
-                p0 = np.zeros(shape=(len(self.observations) - 1))
 
-            # Set the fixed times for stations which have it
-            for i, obs in enumerate(observations):
+            # Make a dictionary of station IDs and the time offset estimation status
+            # - if the time is fixed, a number is given
+            # - if the time is to be estimated, True is set
+            self.stations_time_dict = collections.OrderedDict()
+            station_list = [str(obs.station_id) for obs in observations]
+            for obs in observations:
                 if str(obs.station_id) in self.fixed_time_offsets:
-                    p0[i] = self.fixed_time_offsets[str(obs.station_id)]
+                    self.stations_time_dict[str(obs.station_id)] = self.fixed_time_offsets[str(obs.station_id)]
+                else:
+                    self.stations_time_dict[str(obs.station_id)] = True
 
-            # # Set the time reference station to be the one with the most used points
-            # obs_points = [obs.kmeas for obs in self.observations]
-            # self.t_ref_station = obs_points.index(max(obs_points))
+            # If no fixed times are given, set the station with the longest track as the reference station
+            #   (time difference = 0)
+            if len(self.fixed_time_offsets) == 0:
+                obs_points = [obs.kmeas for obs in observations]
+                ref_index = obs_points.index(max(obs_points))
+                self.stations_time_dict[station_list[ref_index]] = 0
+                
+            
+            # Generate an initial guess for stations which have no fixed time
+            p0 = np.zeros(len([val for val in self.stations_time_dict.values() if val is True]))
 
+            print()
+            print("**************")
+            print(self.stations_time_dict)
+            print(p0)
 
             if self.verbose:
-                print('Initial function evaluation:', timingResiduals(p0, observations, self.t_ref_station, 
-                    self.fixed_time_offsets, weights=weights))
+                print('Initial function evaluation:', timingResiduals(p0, observations, 
+                                                                      self.stations_time_dict, 
+                                                                      weights=weights))
 
 
             # Set bounds for timing to +/- given maximum time offset
             bounds = []
             for i in range(len(p0)):
-                
-                t_off = 0
-                station_id = str(self.observations[i].station_id)
-
-                if station_id in self.fixed_time_offsets:
-                    t_off = self.fixed_time_offsets[station_id]
-
-                bounds.append([t_off - self.max_toffset, t_off + self.max_toffset])
+                bounds.append([-self.max_toffset, self.max_toffset])
 
 
             ### Try different methods of optimization until it is successful ##
@@ -3245,7 +3265,7 @@ class Trajectory(object):
 
                 # Run the minimization of residuals between all stations
                 timing_mini = scipy.optimize.minimize(timingResiduals, p0, args=(observations, \
-                    self.t_ref_station, self.fixed_time_offsets, weights), bounds=bounds, method=opt_method, 
+                    self.stations_time_dict, weights), bounds=bounds, method=opt_method, 
                     options={'maxiter': maxiter}, tol=1e-12)
 
                 # Stop trying methods if this one was successful
@@ -3294,20 +3314,18 @@ class Trajectory(object):
             stat_count = 0
             for i, obs in enumerate(observations):
 
-                # The timing difference for the reference station is always 0 (skip if a fixed station is
-                # used as a reference)
-                if ((i == self.t_ref_station) or (not estimate_timing_vel)) and \
-                    not (len(self.fixed_time_offsets)):
+                # Check the station timing dictionary to see if the station is fixed
+                stat_status = self.stations_time_dict[str(obs.station_id)]
 
-                    t_diff = 0
+                # If the station has a fixed time offset, read it
+                if not isinstance(stat_status, bool):
+                    t_diff = stat_status
 
+                # Otherwise read the estimated offset
                 else:
                     t_diff = timing_mini.x[stat_count]
                     stat_count += 1
 
-                    # If the station is fixed, use the fixed time offset
-                    if str(obs.station_id) in self.fixed_time_offsets:
-                        t_diff = self.fixed_time_offsets[str(obs.station_id)]
 
                 if self.verbose:
                     print('STATION ' + str(obs.station_id) + ' TIME OFFSET = ' + str(t_diff) + ' s')
