@@ -535,8 +535,12 @@ class ErosionSimContainer(object):
 
 
 
-    def runSimulation(self):
+    def runSimulation(self, min_frames_visible=MIN_FRAMES_VISIBLE):
         """ Run the ablation model and srote results. 
+
+        Arguments:
+            min_frames_visible: [int] Minimum number of frames the meteor has to be visible for to be 
+            considered a detection.
         
         Returns:
             [str]: Path to the save picke file.
@@ -554,14 +558,16 @@ class ErosionSimContainer(object):
             del self.simulation_results.const
 
         # Compute synthetic observations
-        res = extractSimData(self, check_only=True, param_class=self.params.__class__)
+        res = extractSimData(self, min_frames_visible=min_frames_visible, check_only=True, 
+                             param_class=self.params.__class__)
         self.time_sampled = None
         self.ht_sampled = None
         self.len_sampled = None
         self.mag_sampled = None
         if res is not None:
             _, self.time_sampled, self.ht_sampled, self.len_sampled, self.mag_sampled, _, \
-                _ = extractSimData(self, check_only=False, param_class=self.params.__class__)
+                _ = extractSimData(self, min_frames_visible=min_frames_visible, check_only=False, 
+                                   param_class=self.params.__class__)
 
             # Convert synthetic data to lists
             self.time_sampled = self.time_sampled.tolist()
@@ -831,10 +837,11 @@ def generateErosionSim(output_dir, erosion_sim_params, random_seed, min_frames_v
     print("Running:", erosion_cont.file_name)
 
     # Run the simulation and save results
-    file_path = erosion_cont.runSimulation()
+    file_path = erosion_cont.runSimulation(min_frames_visible=min_frames_visible)
 
     # Check if the simulation satisfies the visibility criteria
-    res = extractSimData(erosion_cont, min_frames_visible=min_frames_visible, check_only=True, param_class=erosion_cont.params.__class__)
+    res = extractSimData(erosion_cont, min_frames_visible=min_frames_visible, check_only=True, 
+                         param_class=erosion_cont.params.__class__)
         
     # Free up memory
     del erosion_cont
@@ -942,7 +949,7 @@ if __name__ == "__main__":
 
     # Generate simulations using multiprocessing
     input_list = [[cml_args.output_dir, copy.deepcopy(erosion_sim_params), \
-        np.random.randint(0, 2**31 - 1)] for _ in range(cml_args.nsims)]
+        np.random.randint(0, 2**31 - 1), MIN_FRAMES_VISIBLE] for _ in range(cml_args.nsims)]
     results_list = domainParallelizer(input_list, generateErosionSim, cores=cml_args.cores)
 
 
