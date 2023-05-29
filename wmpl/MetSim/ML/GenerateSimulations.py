@@ -357,6 +357,26 @@ SIM_CLASSES_NAMES = [c.__name__ for c in SIM_CLASSES]
 ##############################################################################################################
 
 
+def samplePowerLaw(exponent, lower_bound, upper_bound):
+    """
+    Generates a random number from a power-law distribution with the given lower and upper bounds and exponent.
+
+    Args:
+        exponent (float): The power-law exponent.
+        lower_bound (float): The lower bound of the range.
+        upper_bound (float): The upper bound of the range.
+
+    Returns:
+        float: A random number from the power-law distribution.
+    """
+
+    u = np.random.uniform()
+
+    x = (lower_bound**(exponent + 1) + u*(upper_bound**(exponent + 1) - lower_bound**(exponent + 1)))**(1/(exponent + 1))
+
+    return x
+
+
 class ErosionSimContainer(object):
     def __init__(self, output_dir, erosion_sim_params, random_seed=None):
         """ Simulation container for the erosion model simulation. """
@@ -401,12 +421,16 @@ class ErosionSimContainer(object):
 
 
             # Draw parameters from a distribution:
-            # a) Generate all masses distributed logarithmically
-            if (param_name == "m_init") or (param_name == "erosion_mass_min") \
-                or (param_name == "erosion_mass_max"):
+            # a) Generate all grain masses distributed logarithmically
+            if (param_name == "erosion_mass_min") or (param_name == "erosion_mass_max"):
 
                 p.val = 10**(local_state.uniform(np.log10(p.min), np.log10(p.max)))
 
+            # Generate meteoroid masses distributed according to a power-law
+            elif param_name == "m_init":
+                
+                # Use a sampling mass index of 2
+                p.val = samplePowerLaw(2.0, p.min, p.max)
 
             # b) Distribute all other values uniformely
             else:
@@ -420,8 +444,8 @@ class ErosionSimContainer(object):
 
 
         # Make sure the min grain mass is not > max grain mass and vice versa
-        # TBD
-
+        if self.params.erosion_mass_min.val > self.params.erosion_mass_max.val:
+            self.params.erosion_mass_min.val, self.params.erosion_mass_max.val = self.params.erosion_mass_max.val, self.params.erosion_mass_min.val
 
 
         # Generate a file name from simulation_parameters
