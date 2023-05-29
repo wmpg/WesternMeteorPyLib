@@ -611,8 +611,8 @@ class ErosionSimContainer(object):
 
 
 
-def extractSimData(sim, min_frames_visible=MIN_FRAMES_VISIBLE, check_only=False, param_class_name=None, \
-    postprocess_params=None):
+def extractSimData(sim, min_frames_visible=MIN_FRAMES_VISIBLE, check_only=False, param_class=None, \
+    param_class_name=None, postprocess_params=None):
     """ Extract input parameters and model outputs from the simulation container and normalize them. 
 
     Arguments:
@@ -622,6 +622,7 @@ def extractSimData(sim, min_frames_visible=MIN_FRAMES_VISIBLE, check_only=False,
         min_frames_visible: [int] Minimum number of frames above the limiting magnitude
         check_only: [bool] Only check if the simulation satisfies filters, don' compute eveything.
             Speed up the evaluation. False by default.
+        param_class: [object] Override the simulation parameters object with the given instance.
         param_class_name: [str] Override the simulation parameters object with an instance of the given
             class. An exact name of the class needs to be given.
         postprocess_params: [list] A list of limiting magnitude for wide and narrow fields, and the delay in
@@ -635,12 +636,16 @@ def extractSimData(sim, min_frames_visible=MIN_FRAMES_VISIBLE, check_only=False,
 
     """
 
-    # Create a frash instance of the system parameters if the same parameters are used as in the simulation
-    if param_class_name is None:
-        #params_obj = getattr(GenerateSimulations, sim.params.__class__.__name__)
+    # Create a fresh instance of the system parameters if the same parameters are used as in the simulation
+    if param_class is not None:
+        params = param_class()
+
+    # Create a fresh class given its name
+    elif param_class_name is None:
+
         params = globals()[sim.params.__class__.__name__]()
 
-    # Override the system parameters using the given class
+    # Override the system parameters using the given class name
     else:
         params = globals()[param_class_name]()
 
