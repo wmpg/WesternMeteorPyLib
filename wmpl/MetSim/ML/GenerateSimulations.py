@@ -430,7 +430,7 @@ class ErosionSimContainer(object):
             elif param_name == "m_init":
                 
                 # Use a sampling mass index of 2
-                p.val = samplePowerLaw(2.0, p.min, p.max)
+                p.val = samplePowerLaw(-2.0, p.min, p.max)
 
             # b) Distribute all other values uniformely
             else:
