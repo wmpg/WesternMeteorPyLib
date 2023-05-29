@@ -554,14 +554,14 @@ class ErosionSimContainer(object):
             del self.simulation_results.const
 
         # Compute synthetic observations
-        res = extractSimData(self, check_only=True)
+        res = extractSimData(self, check_only=True, param_class=self.params.__class__)
         self.time_sampled = None
         self.ht_sampled = None
         self.len_sampled = None
         self.mag_sampled = None
         if res is not None:
             _, self.time_sampled, self.ht_sampled, self.len_sampled, self.mag_sampled, _, \
-                _ = extractSimData(self, check_only=False)
+                _ = extractSimData(self, check_only=False, param_class=self.params.__class__)
 
             # Convert synthetic data to lists
             self.time_sampled = self.time_sampled.tolist()
@@ -834,7 +834,7 @@ def generateErosionSim(output_dir, erosion_sim_params, random_seed, min_frames_v
     file_path = erosion_cont.runSimulation()
 
     # Check if the simulation satisfies the visibility criteria
-    res = extractSimData(erosion_cont, min_frames_visible=min_frames_visible, check_only=True)
+    res = extractSimData(erosion_cont, min_frames_visible=min_frames_visible, check_only=True, param_class=erosion_cont.params.__class__)
         
     # Free up memory
     del erosion_cont
