@@ -10,3 +10,4 @@ pyyaml
 pyswarms
 keras
 pytz
+pandas
