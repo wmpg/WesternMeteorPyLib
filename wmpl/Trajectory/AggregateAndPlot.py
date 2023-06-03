@@ -1789,6 +1789,7 @@ def generateAutoPlotsAndReports(dir_path, traj_quality_params, prev_sols=10, sol
     sol_lon_next = np.ceil(sol_lon_now)
 
     # Pre-load all trajectory directories, so they don't have to be listed every time
+    print("Loading directory tree with all trajectories...")
     walk_dirs_all = walkDirsToDepth(dir_path, depth=TRAJ_DIRS_WALK_DEPTH)
 
     # Generate plots for every day
