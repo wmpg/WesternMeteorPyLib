@@ -255,7 +255,7 @@ def associateShower(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=None, \
 
 
     # Init a shower object
-    l0, L_l0, B_g, v_g, IAU_no = best_shower
+    l0, L_l0, B_g, v_g, _, IAU_no = best_shower
     shower_obj = MeteorShower(l0, (L_l0 + l0)%(2*np.pi), B_g, v_g, int(round(IAU_no)))
 
 
