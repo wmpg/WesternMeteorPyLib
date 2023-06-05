@@ -213,15 +213,16 @@ def associateShower(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=None, \
         return None
 
     
-    # Find all showers within the maximum radiant distance radius
+    # Compute the angular distance between the shower radiants and the reference radiant
     radiant_distances = angleBetweenSphericalCoords(temp_shower_list[:, 2], temp_shower_list[:, 1], B_g, \
         (L_g - la_sun)%(2*np.pi))
     
     # Use the measured dispersion if no maximum radius is given
     if max_radius is None:
-        temp_shower_list = temp_shower_list[radiant_distances <= temp_shower_list[:, 4]]
-    else:
-        temp_shower_list = temp_shower_list[radiant_distances <= np.radians(max_radius)]
+        max_radius = np.degrees(temp_shower_list[:, 4])
+    
+    # Filter the showers
+    temp_shower_list = temp_shower_list[radiant_distances <= np.radians(max_radius)]
 
 
     # Check if any associations were found
@@ -264,7 +265,7 @@ def associateShower(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=None, \
 
 
 
-def associateShowerTraj(traj, sol_window=1.0, max_radius=3.0, \
+def associateShowerTraj(traj, sol_window=1.0, max_radius=None, \
     max_veldif_percent=10.0):
     """ Given a Trajectory object, associate it to a meteor shower using the GMN shower list.
 
@@ -273,7 +274,8 @@ def associateShowerTraj(traj, sol_window=1.0, max_radius=3.0, \
 
     Keyword arguments:
         sol_window: [float] Solar longitude window of association (deg).
-        max_radius: [float] Maximum angular separation from reference radiant (deg).
+        max_radius: [float] Maximum angular separation from reference radiant (deg). If None, the
+            measured dispersion of the shower from the table will be used.
         max_veldif_percent: [float] Maximum velocity difference in percent.
 
     Return:
