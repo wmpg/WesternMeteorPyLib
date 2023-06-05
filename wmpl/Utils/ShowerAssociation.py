@@ -219,10 +219,18 @@ def associateShower(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=None, \
     
     # Use the measured dispersion if no maximum radius is given
     if max_radius is None:
+        
         max_radius = np.degrees(temp_shower_list[:, 4])
     
-    # Filter the showers
-    temp_shower_list = temp_shower_list[radiant_distances <= np.radians(max_radius)]
+        # Filter the showers
+        filter_mask = radiant_distances <= np.radians(max_radius)
+        temp_shower_list = temp_shower_list[filter_mask]
+        max_radius = max_radius[filter_mask]
+
+    else:
+
+        # Filter the showers using a fixed radius
+        temp_shower_list = temp_shower_list[radiant_distances <= np.radians(max_radius)]
 
 
     # Check if any associations were found
