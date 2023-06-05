@@ -530,6 +530,8 @@ if __name__ == "__main__":
         # Load the trajectory pickle
         traj = loadPickle(*os.path.split(cml_args.traj_path))
 
+        # Dictionary for storing time, height, and velocity data per station
+        ht_data_dict = {}
 
         # Construct an input data array
         ht_data = []
@@ -552,6 +554,10 @@ if __name__ == "__main__":
             vel_data += obs.velocities[filter_mask].tolist()
             lag_data += obs.lag[filter_mask].tolist()
 
+            # Store the data for each station
+            ht_data_dict[obs.station_id] = [obs.time_data[filter_mask], obs.model_ht[filter_mask], 
+                                            obs.velocities[filter_mask]]
+
 
         ht_data = np.array(ht_data)
         time_data = np.array(time_data)
@@ -559,6 +565,19 @@ if __name__ == "__main__":
         lon_data = np.array(lon_data)
         vel_data = np.array(vel_data)
         lag_data = np.array(lag_data)
+
+
+        # Print time, height, velocity for each station
+        for station_id, data in ht_data_dict.items():
+
+            t, h, v = data
+
+            print()
+            print("Station:", station_id)
+            print("Time (s)   Height (km)   Velocity (km/s)")
+            for i in range(len(t)):
+                print("{:8.3f}   {:11.3f}   {:15.2f}".format(t[i], h[i]/1000, v[i]/1000))
+
 
         # Sort by height
         sorted_indices = np.argsort(ht_data)
