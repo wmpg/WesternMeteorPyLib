@@ -139,6 +139,8 @@ def loadGMNShowerTable(dir_path, file_name):
             if line.startswith('#'):
                 continue
 
+            line = line.strip()
+
             # Skip empty lines
             if not line:
                 continue
@@ -257,13 +259,14 @@ def associateShower(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=None, \
     velocity_filter = velocity_diff_percents <= max_veldif_percent
     temp_shower_list = temp_shower_list[velocity_filter]
 
-    # Filter the max radius if it's a numpy array
-    if isinstance(max_radius, np.ndarray):
-        max_radius = max_radius[velocity_filter]
-
+    
     # Check if any associations were found
     if not len(temp_shower_list):
         return None
+    
+    # Filter the max radius if it's a numpy array
+    if isinstance(max_radius, np.ndarray):
+        max_radius = max_radius[velocity_filter]
 
 
     ### Choose the best matching shower by the solar longitude, radiant, and velocity closeness ###

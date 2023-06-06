@@ -114,12 +114,12 @@ def fitRadiantDrift(sol_data, sce_lon_data, bg_data, vg_data, sol_lon_ref=None):
 
 
 def dispersionFunction(sol, sol_ref_beg, disp_beg, sol_ref_mid, disp_mid, sol_ref_end, disp_end, 
-                       dispersion_factor=2.0):
+                       dispersion_peak_factor=2.0):
     """ 
     A function modelling radiant dispersion. All sol before the sol_ref_beg are set to disp_beg, all sol 
     after sol_ref_end are set to disp_end, and all sol in between are interpolated linearly. 
 
-    The dispersion at the peak is then multiplied by the dispersion_factor, while the edge dispersions are 
+    The dispersion at the peak is then multiplied by the dispersion_peak_factor, while the edge dispersions are 
     left unchanged. The idea is that the dispersion at the peak is measured the best, while the dispersion 
     at the edges have too much influence from the sporadics and might be inflated.
 
@@ -133,7 +133,7 @@ def dispersionFunction(sol, sol_ref_beg, disp_beg, sol_ref_mid, disp_mid, sol_re
         disp_end: [float] Dispersion at the end of the dispersion (deg).
 
     Keyword arguments:
-        dispersion_factor: [float] Dispersion factor. The dispersion at the peak is multiplied by this factor
+        dispersion_peak_factor: [float] Dispersion factor. The dispersion at the peak is multiplied by this factor
             while the edge dispersions are left unchanged. Default is 2.0.
     """
     
@@ -150,7 +150,7 @@ def dispersionFunction(sol, sol_ref_beg, disp_beg, sol_ref_mid, disp_mid, sol_re
     sol_ref_diff_end = (sol_ref_diff_end + 180)%360 - 180
 
     # Multipy the peak dispersion by the dispersion factor
-    disp_mid = disp_mid*dispersion_factor
+    disp_mid = disp_mid*dispersion_peak_factor
 
     # Compute the dispersion for the given sol
 
@@ -178,7 +178,7 @@ def dispersionFunction(sol, sol_ref_beg, disp_beg, sol_ref_mid, disp_mid, sol_re
 # Vectorized version of the dispersion function (sol is a numpy array)
 dispersionFunctionVec = np.vectorize(dispersionFunction, excluded=["sol_ref_beg", "disp_beg", "sol_ref_mid", 
                                                                    "disp_mid", "sol_ref_end", "disp_end", 
-                                                                   "dispersion_factor"])
+                                                                   "dispersion_peak_factor"])
     
 
 if __name__ == "__main__":
@@ -202,9 +202,22 @@ if __name__ == "__main__":
     # Minimum number of meteors per shower for the fit
     min_meteors_per_shower = 10
 
+    ## DISPERSION ###
 
-    # Minimum dispersion (deg)
+    # If there are less than this number of meteors in the edge bin, set a fixed dispersion
+    min_meteors_edge_bin = 50
+    fixed_edge_dispersion = 3.0
+
+    # Minimum dispersion for the edges (deg)
     min_dispersion = 1.5
+
+    # Minimum dispersion at the peak (deg)
+    min_peak_dispersion = 2.0
+
+    # Maximum dispersion at the peak (deg)
+    max_peak_dispersion = 3.5
+
+    ##
 
     # Shower association velocity percentage
     shower_assoc_vel_perc = 10
@@ -213,7 +226,7 @@ if __name__ == "__main__":
     sol_delta = 0.2
 
     # Median dispersion mulitplier
-    dispersion_factor = 2.5
+    dispersion_peak_factor = 2.5
 
     # New lookup table file name
     new_table_file_name = "gmn_shower_table.txt"
@@ -530,12 +543,14 @@ if __name__ == "__main__":
             sol_lon_steps_diff = (sol_lon_steps - sol_lon_ref + 180)%360 - 180
 
             # Compute the median dispersion from the beginning up to 1 deg sol before the reference solar longitude
-            dispersion_median_before_sol = np.nanmedian(sol_lon_steps_diff[sol_lon_steps_diff < -1]) + sol_lon_ref
-            dispersion_median_before = np.nanmedian(rolling_dispersion[sol_lon_steps_diff < -1])
+            before_filter = sol_lon_steps_diff < -1
+            dispersion_median_before_sol = np.nanmedian(sol_lon_steps_diff[before_filter]) + sol_lon_ref
+            dispersion_median_before = np.nanmedian(rolling_dispersion[before_filter])
 
             # Compute the median dispersion from 1 deg sol after the reference solar longitude up to the end
-            dispersion_median_after_sol = np.nanmedian(sol_lon_steps_diff[sol_lon_steps_diff > 1]) + sol_lon_ref
-            dispersion_median_after = np.nanmedian(rolling_dispersion[sol_lon_steps_diff > 1])
+            after_filter = sol_lon_steps_diff > 1
+            dispersion_median_after_sol = np.nanmedian(sol_lon_steps_diff[after_filter]) + sol_lon_ref
+            dispersion_median_after = np.nanmedian(rolling_dispersion[after_filter])
 
             # If any of the before or after dispersion medians are nan, set them to the reference dispersion
             if np.isnan(dispersion_median_before):
@@ -544,13 +559,31 @@ if __name__ == "__main__":
             if np.isnan(dispersion_median_after):
                 dispersion_median_after = dispersion_median
 
-            # Set the minimum dispersion
-            if dispersion_median_before < min_dispersion:
-                dispersion_median_before = min_dispersion
-            if dispersion_median < min_dispersion:
-                dispersion_median = min_dispersion
-            if dispersion_median_after < min_dispersion:
-                dispersion_median_after = min_dispersion
+            # Limit the peak dispersion to the maximum dispersion
+            uncorrected_peak_dispersion_max = max_peak_dispersion/dispersion_peak_factor
+            uncorrected_peak_dispersion_min = min_peak_dispersion/dispersion_peak_factor
+            if dispersion_median > uncorrected_peak_dispersion_max:
+                dispersion_median = uncorrected_peak_dispersion_max
+
+            elif dispersion_median < uncorrected_peak_dispersion_min:
+                dispersion_median = uncorrected_peak_dispersion_min
+
+            # Set a fixed dispersion for the edges if there are not enough meteors
+            if np.sum(rolling_count[before_filter]) < min_meteors_edge_bin:
+                dispersion_median_before = fixed_edge_dispersion
+
+            else:
+
+                # Set the minimum dispersion for the edges
+                if dispersion_median_before < min_dispersion:
+                    dispersion_median_before = min_dispersion
+
+
+            if np.sum(rolling_count[after_filter]) < min_meteors_edge_bin:
+                dispersion_median_after = fixed_edge_dispersion
+            else:
+                if dispersion_median_after < min_dispersion:
+                    dispersion_median_after = min_dispersion
 
             # Handle the case when the shower spans the 0 deg solar longitude
             if (sol_lon_min > sol_lon_max) and (dispersion_median_before_sol > 180):
@@ -622,7 +655,7 @@ if __name__ == "__main__":
 
             # Compute the association radius using the dispersion function
             shower_assoc_dispersion = dispersionFunctionVec(shower_data["Sol lon (deg)"], *dispersion_fit, 
-                                                            dispersion_factor=dispersion_factor)
+                                                            dispersion_peak_factor=dispersion_peak_factor)
 
             ### Select meteors inside the given association radius for the radians and the velocity and the new activity period ###
 
@@ -687,7 +720,7 @@ if __name__ == "__main__":
 
                     # Compute the radiant dispersion
                     dispersion_step = dispersionFunction(sol_lon_step, *dispersion_fit, 
-                                                         dispersion_factor=dispersion_factor)
+                                                         dispersion_peak_factor=dispersion_peak_factor)
 
                     new_shower_lookup_values.append([
                         sol_lon_step%360, lg_step%360, bg_step, vg_step, dispersion_step, 
@@ -750,7 +783,7 @@ if __name__ == "__main__":
 
 
             # Compute the association radius using the dispersion function
-            shower_assoc_dispersion_plot = dispersionFunctionVec(sol_lon_plot, *dispersion_fit, dispersion_factor=dispersion_factor)
+            shower_assoc_dispersion_plot = dispersionFunctionVec(sol_lon_plot, *dispersion_fit, dispersion_peak_factor=dispersion_peak_factor)
 
             # Plot a 3 degree line around the drift to indicate the association radius
             lg_aspect = 1.0/np.cos(np.radians(bgDriftFunc(sol_lon_plot_normed, *bg_drift)))
@@ -806,6 +839,8 @@ if __name__ == "__main__":
                             label='Sol = {:.2f}, Disp = {:.2f}'.format(dispersion_median_before_sol, dispersion_median_before))
             ax_disp.scatter(sol_lon_ref, dispersion_median, color="black", s=15, zorder=10, marker="o", 
                             label='Sol = {:.2f}, Disp = {:.2f}'.format(sol_lon_ref, dispersion_median))
+            ax_disp.scatter(sol_lon_ref, dispersion_median*dispersion_peak_factor, color="black", s=15, zorder=10, marker="^", 
+                            label='Sol = {:.2f}, Disp* = {:.2f}'.format(sol_lon_ref, dispersion_median*dispersion_peak_factor))
             ax_disp.scatter(dispersion_median_after_sol, dispersion_median_after, color="black", s=15, zorder=10, marker="s", 
                             label='Sol = {:.2f}, Disp = {:.2f}'.format(dispersion_median_after_sol, dispersion_median_after))
 
@@ -948,6 +983,24 @@ if __name__ == "__main__":
 
     # Save the data in a txt file
     with open(new_table_path, 'w') as f:
+
+        # Write the header
+        head = """# Shower lookup table measured using GMN data up to May 18, 2023
+# Using the wmpl.Utils.ShowerTableMeasurement script in WMPL
+# 
+# The table is sampled at 0.2 deg solar longitude. The SCE (Sun-centered 
+# ecliptic) longitude is the ecliptic longitude minus the solar 
+# longitude. The "Disp" column is the measured dispersion which changes 
+# over time. A meteor is considered a shower member if it has been observed 
+# within 1 deg of solar longitude of a table entry, within 10% of Vg, and
+# within the listed dispersion.
+# 
+# Sol  SCE lon  SCE lat       Vg  Disp  IAU IAU
+# deg      deg      deg     km/s  deg    No  cd
+# 
+"""
+        f.write(head)
+
         for str_formatted in new_table_values:
             f.write(str_formatted + "\n")
 
