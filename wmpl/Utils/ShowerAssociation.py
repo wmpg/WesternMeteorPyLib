@@ -219,7 +219,7 @@ def associateShower(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=None, \
     
     # Use the measured dispersion if no maximum radius is given
     if max_radius is None:
-        
+
         max_radius = np.degrees(temp_shower_list[:, 4])
     
         # Filter the showers
@@ -240,7 +240,12 @@ def associateShower(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=None, \
 
     # Find all showers within the maximum velocity difference limit
     velocity_diff_percents = np.abs(100*(temp_shower_list[:, 3] - v_g)/temp_shower_list[:, 3])
-    temp_shower_list = temp_shower_list[velocity_diff_percents <= max_veldif_percent]
+    velocity_filter = velocity_diff_percents <= max_veldif_percent
+    temp_shower_list = temp_shower_list[velocity_filter]
+
+    # Filter the max radius if it's a numpy array
+    if isinstance(max_radius, np.ndarray):
+        max_radius = max_radius[velocity_filter]
 
     # Check if any associations were found
     if not len(temp_shower_list):
