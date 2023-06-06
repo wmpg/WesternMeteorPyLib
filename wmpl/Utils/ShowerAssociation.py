@@ -20,13 +20,26 @@ from wmpl.Utils.Pickling import loadPickle
 
 
 class MeteorShower(object):
-    def __init__(self, la_sun, L_g, B_g, v_g, IAU_no):
-        """ Container for meteor shower parameters. """
+    def __init__(self, la_sun, L_g, B_g, v_g, IAU_no, dispersion=None):
+        """ Container for meteor shower parameters. 
+        
+        Arguments:
+            la_sun: [float] Solar longitude of the shower radiant (radians).
+            L_g: [float] Galactic longitude of the shower radiant (radians).
+            B_g: [float] Galactic latitude of the shower radiant (radians).
+            v_g: [float] Geocentric velocity of the shower radiant (m/s).
+            IAU_no: [int] IAU number of the shower.
+
+        Keyword arguments:
+            dispersion: [float] Dispersion of the shower radiant (radians). None by default.
+        
+        """
 
         self.la_sun = la_sun
         self.L_g = L_g
         self.B_g = B_g
         self.v_g = v_g
+        self.dispersion = dispersion
         self.IAU_no = IAU_no
 
 
@@ -220,6 +233,7 @@ def associateShower(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=None, \
     # Use the measured dispersion if no maximum radius is given
     if max_radius is None:
         
+        # Get the maximum radius for each shower
         max_radius = np.degrees(temp_shower_list[:, 4])
     
         # Filter the showers
@@ -264,8 +278,8 @@ def associateShower(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=None, \
 
 
     # Init a shower object
-    l0, L_l0, B_g, v_g, _, IAU_no = best_shower
-    shower_obj = MeteorShower(l0, (L_l0 + l0)%(2*np.pi), B_g, v_g, int(round(IAU_no)))
+    l0, L_l0, B_g, v_g, dispersion, IAU_no = best_shower
+    shower_obj = MeteorShower(l0, (L_l0 + l0)%(2*np.pi), B_g, v_g, int(round(IAU_no)), dispersion=dispersion)
 
 
     return shower_obj
