@@ -296,6 +296,54 @@ if __name__ == "__main__":
     known_showers["JRD"] = [ 72  ,  74  , 75   ]
     known_showers["NET"] = [223.5, 225.5, 227.5]
 
+
+    # Parameters of additional showers
+    additional_shower_params = {}
+        # IAU code, IAU No, Sol beg, Sol peak, Sol end, SCElon ref, SCElon drift, BET ref, BET drift,  Vg ref, Vg drift,  disp
+    additional_shower_params["BTU"] = {
+             "BTU",    108,  352.15,   352.25,  352.52,    306.365,       -4.627, -76.865,    -1.433,  30.549,   -2.122,  1.95
+    }
+    additional_shower_params["OZP"] = {
+             "OZP",   1131,  211.24,   211.35,  211.42,    211.911,        7.596,  13.290,    -4.576,  47.353,   22.628,  1.04
+    }
+    additional_shower_params["OCR"] = {
+             "OCR",   1033,  290.61,   290.75,  290.96,    295.459,        1.043, -68.539,     1.889,  40.158,    6.532,  1.52
+    }
+
+    # Additional showers with measured activity periods (no need to sort)
+    additional_shower_entries = [
+        "352.1  306.842  -76.717   30.768  1.95  108 BTU",
+        "352.3  305.917  -77.004   30.344  1.95  108 BTU",
+        "211.2  211.079   13.790   44.877  1.04 1131 OZP",
+        "185.0   77.70   -34.50    10.70   3.00 1130 ARD",
+        "185.0   65.1    -26.6     11.00   3.00 1130 ARD",
+        "186.0   77.70   -34.50    10.70   3.00 1130 ARD",
+        "186.0   65.1    -26.6     11.00   3.00 1130 ARD",
+        "187.0   77.70   -34.50    10.70   3.00 1130 ARD",
+        "187.0   65.1    -26.6     11.00   3.00 1130 ARD",
+        "188.0   77.70   -34.50    10.70   3.00 1130 ARD",
+        "188.0   65.1    -26.6     11.00   3.00 1130 ARD",
+        "189.0   77.70   -34.50    10.70   3.00 1130 ARD",
+        "189.0   65.1    -26.6     11.00   3.00 1130 ARD",
+        "190.0   77.70   -34.50    10.70   3.00 1130 ARD",
+        "190.0   65.1    -26.6     11.00   3.00 1130 ARD",
+        "191.0   77.70   -34.50    10.70   3.00 1130 ARD",
+        "191.0   65.1    -26.6     11.00   3.00 1130 ARD",
+        "192.0   77.70   -34.50    10.70   3.00 1130 ARD",
+        "192.0   65.1    -26.6     11.00   3.00 1130 ARD",
+        "193.0   77.70   -34.50    10.70   3.00 1130 ARD",
+        "193.0   65.1    -26.6     11.00   3.00 1130 ARD",
+        "194.0   77.70   -34.50    10.70   3.00 1130 ARD",
+        "194.0   65.1    -26.6     11.00   3.00 1130 ARD",
+        "290.6  295.308  -68.813   39.212  1.52 1033 OCR",
+        "290.8  295.517  -68.435   40.518  1.52 1033 OCR"
+    ]
+
+    # Get a list of additional shower codes
+    additional_shower_codes = [entry.split()[-1] for entry in additional_shower_entries]
+    additional_shower_codes += additional_shower_params.keys()
+    additional_shower_codes = list(set(additional_shower_codes))
+
     #####################
 
 
@@ -406,7 +454,8 @@ if __name__ == "__main__":
             # If there are not enough meteors, skip the shower
             if len(shower_data) < min_meteors_per_shower:
                 print("Not enough meteors, skipping the shower.")
-                showers_not_enough_data.append(shower_code)
+                if shower_code not in additional_shower_codes:
+                    showers_not_enough_data.append(shower_code)
                 continue
 
 
@@ -695,7 +744,12 @@ if __name__ == "__main__":
             # If there are not enough meteors, skip the shower
             if len(new_associated_data) < min_meteors_per_shower:
                 print("Not enough meteors, skipping the shower.")
-                showers_not_enough_data.append(shower_code)
+
+
+                # Only add the shower to the list if it's not in additional showers
+                if shower_code not in additional_shower_codes:
+                    showers_not_enough_data.append(shower_code)
+
                 continue
 
             # Re-fit the drift using the new association
@@ -816,7 +870,8 @@ if __name__ == "__main__":
                     vg_sample_points.append(vg_step)
 
             if len(sol_sample_points) == 0:
-                showers_not_enough_data.append(shower_code)
+                if shower_code not in additional_shower_codes:
+                    showers_not_enough_data.append(shower_code)
                 continue
 
             # Check if lg crosses the 0/360 boundary
@@ -976,7 +1031,11 @@ if __name__ == "__main__":
 
 
     ### Save the data for all showers in a single file, but first sort by the solar longitude ###
+
     new_table_path = os.path.join(dir_path_traj_summary, new_table_file_name)
+
+    # Add additional shower entries to the table
+    new_table_values += additional_shower_entries
 
     # Sort the data by solar longitude, where the solar longitude is the first element in the string
     new_table_values = sorted(new_table_values, key=lambda x: float(x.split()[0]))
@@ -994,6 +1053,25 @@ if __name__ == "__main__":
 # over time. A meteor is considered a shower member if it has been observed 
 # within 1 deg of solar longitude of a table entry, within 10% of Vg, and
 # within the listed dispersion.
+#
+"""
+        head += "# IAU showers not present in the table:\n# "
+        # Limit the line length to 80 characters, break after commas
+        showers_not_enough_data_str = ""
+        current_line = ""
+        for shower_code in showers_not_enough_data:
+
+            if len(current_line + shower_code + ", ") > 77:
+                showers_not_enough_data_str += current_line + "\n# "
+                current_line = ""
+
+            current_line += shower_code + ", "
+
+        showers_not_enough_data_str += current_line
+
+        head += showers_not_enough_data_str
+        
+        head += """
 # 
 # Sol  SCE lon  SCE lat       Vg  Disp  IAU IAU
 # deg      deg      deg     km/s  deg    No  cd

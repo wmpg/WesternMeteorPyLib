@@ -52,7 +52,7 @@ def _set_data_types(dataframe: pd.DataFrame) -> None:
 
 
 
-def loadTrajSummary(dir_path, file_name):
+def loadTrajectorySummary(dir_path, file_name):
     """ Loads the meteor trajectory summary file into a pandas DataFrame.
     
     Arguments:
@@ -110,7 +110,7 @@ def loadTrajectorySummaryFast(dir_path_traj_summary, traj_summary_file_name, qui
     else:
 
         print("Loading the trajectory CSV file...")
-        data = loadTrajSummary(dir_path_traj_summary, traj_summary_file_name)
+        data = loadTrajectorySummary(dir_path_traj_summary, traj_summary_file_name)
         print(data)
 
         # Save the data in the quick load format
