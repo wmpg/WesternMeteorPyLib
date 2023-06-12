@@ -7,10 +7,9 @@
 # over time. A meteor is considered a shower member if it has been observed 
 # within 1 deg of solar longitude of a table entry, within 10% of Vg, and
 # within the listed dispersion.
-# 
-# IAU showers not present in the table:
-# XRI, BIN, OSE, NDD, LOP, FSO, DRG, MXA, HNJ, FCL, LAP, NMV, AAC, VOL, ZPH, ILU, EGR, TPG, JDP, ODS, CRN, 
-# OEV, TSC, MBA, BEC, AST, ZPA, EVO, NMD, JMD, OAB, SEC, FVI, AGE, ATH, OVI, PPE, FBO, OMH
+# IAU showers not present in the table:XRI, BIN, OSE, NDD, LOP, FSO, DRG, MXA, HNJ, FCL, LAP, NMV, AAC, VOL, ZPH, ILU, EGR, TPG, JDP, ODS, CRN, OEV, TSC, MBA, BEC, AST
+, ZPA, EVO, NMD, JMD, OAB, SEC, FVI, AGE, ATH, OVI, PPE, FBO, OMH
+
 # 
 # Sol  SCE lon  SCE lat       Vg  Disp  IAU IAU
 # deg      deg      deg     km/s  deg    No  cd

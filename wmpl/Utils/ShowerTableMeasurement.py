@@ -186,6 +186,9 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
     import scipy.optimize
 
+    #################
+
+    show_plots = False
 
     # Path to the raw trajectory summary file
     dir_path_traj_summary = "C:\\temp\\traj_summary"
@@ -248,6 +251,12 @@ if __name__ == "__main__":
         [130, 148],
         [148, 165]
     ]
+    # known_showers["ETA"] = [ 30  ,  46  ,  76  ]
+    multi_part_showers["ETA"] = [
+        [30, 57],
+        [57, 77]
+    ]
+
 
     # List of showers with measured activity periods
     known_showers = {}
@@ -268,7 +277,7 @@ if __name__ == "__main__":
     known_showers["NTA"] = [217  , 224.5, 241  ]
     known_showers["MON"] = [250  , 261  , 266  ]
     known_showers["LMI"] = [199  , 208.7, 221  ]
-    known_showers["ETA"] = [ 30  ,  46  ,  66  ]
+    #known_showers["ETA"] = [ 30  ,  46  ,  76  ]
     known_showers["SSG"] = [ 71  ,  86  ,  96  ]
     known_showers["ARI"] = [ 62  ,  78.5,  99  ]
     known_showers["PAU"] = [124  , 136  , 142  ]
@@ -401,6 +410,7 @@ if __name__ == "__main__":
     # shower_codes = ["ZCY", "EVI", "STA", "ORI", "PER"]
     # shower_codes = ["PER"]
     # shower_codes = ["XHE", "BCO", "UCE", "BAU", "ZCY", "EVI", "AUD", "NUE", "EDR"]
+    # shower_codes = ["ETA"]
 
 
 
@@ -954,6 +964,9 @@ if __name__ == "__main__":
             # Plot the contour at level 2 using the interpolated model
             ax_dens.contour(X, Y, Z, levels=[1], linewidths=0.5, colors='red', extent=extent)
 
+            # Invert the x-axis
+            ax_dens.invert_xaxis()
+
             # Remove hbin_associated as it was only used for binning
             hbin_associated.remove()
 
@@ -995,8 +1008,8 @@ if __name__ == "__main__":
 
             plt.savefig(plot_path, dpi=300)
 
-
-            # plt.show()
+            if show_plots:
+                plt.show()
             
             plt.close(fig)
 
@@ -1070,7 +1083,7 @@ if __name__ == "__main__":
         showers_not_enough_data_str += current_line
 
         head += showers_not_enough_data_str
-        
+
         head += """
 # 
 # Sol  SCE lon  SCE lat       Vg  Disp  IAU IAU
