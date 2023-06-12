@@ -141,11 +141,11 @@ def loadGMNShowerTable(dir_path, file_name):
 
             line = line.strip()
 
+            line = line.replace('\n', '').replace('\r', '')
+
             # Skip empty lines
             if not line:
                 continue
-
-            line = line.replace('\n', '').replace('\r', '')
 
             # Unpack the shower data
             la_sun, L_g, B_g, v_g, dispersion, IAU_no, IAU_code = line.split()
