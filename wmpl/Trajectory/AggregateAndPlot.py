@@ -767,15 +767,16 @@ def generateTrajectoryPlots(output_dir, traj_list, plot_name='scecliptic', plot_
             B_g_mean = np.mean([sh.B_g for sh in shower_obj_dict[shower_no]])
             v_g_mean = np.mean([sh.v_g for sh in shower_obj_dict[shower_no]])
 
-            # Compute the mean dispersion (replace with PLOT_SHOWER_RADIUS if None)
-            dispersion_mean = np.mean(
+            # Compute the maximum dispersion (replace with PLOT_SHOWER_RADIUS if None)
+            # The maximum is chosen so it encompasses all the members of the shower in the plot
+            dispersion_max = np.max(
                 [np.radians(PLOT_SHOWER_RADIUS) if sh.dispersion is None else sh.dispersion \
                 for sh in shower_obj_dict[shower_no]]
                 )
 
             # Init a new shower object
             shower_obj_mean = MeteorShower(la_sun_mean, L_g_mean, B_g_mean, v_g_mean, shower_no, 
-                                           dispersion=dispersion_mean)
+                                           dispersion=dispersion_max)
 
             shower_obj_list.append(shower_obj_mean)
 

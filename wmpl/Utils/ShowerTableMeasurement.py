@@ -304,6 +304,7 @@ if __name__ == "__main__":
     known_showers["DSX"] = [182  , 189  , 194  ]
     known_showers["JRD"] = [ 72  ,  74  , 75   ]
     known_showers["NET"] = [223.5, 225.5, 227.5]
+    known_showers["JEO"] = [ 80,    90.8,  94.0]
 
 
     # Parameters of additional showers
