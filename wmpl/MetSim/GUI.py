@@ -1865,8 +1865,8 @@ class MetSimGUI(QMainWindow):
         # Determine the height range for fitting the density
         self.dens_fit_ht_beg = self.const.h_init
         self.dens_fit_ht_end = self.traj.rend_ele - 5000
-        if self.dens_fit_ht_end < 15000:
-            self.dens_fit_ht_end = 15000
+        if self.dens_fit_ht_end < 14000:
+            self.dens_fit_ht_end = 14000
 
         # Fit the polynomail describing the density
         dens_co = self.fitAtmosphereDensity(self.dens_fit_ht_beg, self.dens_fit_ht_end)
@@ -3180,7 +3180,7 @@ class MetSimGUI(QMainWindow):
             height_data = obs.model_ht[obs.ignore_list == 0][1:]/1000
 
             # If there is a simulation, correct the heights
-            if sr is not None:
+            if (sr is not None) and (obs.state_vect_dist is not None):
 
                 # Compute the corrected heights, so the simulations and the observations match
                 height_data = self.sim_norm_ht_interp(obs.state_vect_dist[obs.ignore_list == 0][1:])/1000
@@ -3353,7 +3353,7 @@ class MetSimGUI(QMainWindow):
         # Plot the lag from observations
         for obs in self.traj.observations:
 
-            if sr is None:
+            if (sr is None) or (obs.state_vect_dist is None):
 
                 # Get observed heights
                 height_data = obs.model_ht[obs.ignore_list == 0]
