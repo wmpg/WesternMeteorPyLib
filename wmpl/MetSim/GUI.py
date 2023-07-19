@@ -1578,6 +1578,112 @@ def loadUSGInputFile(dir_path, usg_file):
     return data, traj
 
 
+def loadWakeFile(traj, file_path):
+    """ Load a mirfit wake "wid" file. 
+    
+    Arguments:
+        traj: Trajectory object.
+        file_path: Path to the wid file.
+
+    Return:
+        wake_container: WakeContainer object.
+    
+    """
+
+
+    # Extract the site ID and the frame number from the file name
+    site_id, frame_n = os.path.basename(file_path).replace('.txt', '').split('_')[1:]
+    site_id = str(int(site_id))
+    frame_n = int(frame_n)
+
+    print('wid file: ', site_id, frame_n, end='')
+
+
+    # Extract geo coordinates of sites
+    lat_dict = {obs.station_id:obs.lat for obs in traj.observations}
+    lon_dict = {obs.station_id:obs.lon for obs in traj.observations}
+    ele_dict = {obs.station_id:obs.ele for obs in traj.observations}
+
+    wake_container = None
+    leading_state_vect_dist = 0
+    with open(file_path) as f:
+        for line in f:
+
+            if line.startswith('#'):
+                continue
+
+            line = line.replace('\n', '').replace('\r', '').split()
+
+            if not line:
+                continue
+
+
+            # Init the wake container
+            if wake_container is None:
+                wake_container = WakeContainter(site_id, frame_n)
+
+            # Read the wake point
+            n, th, phi, _, _, _, _, intens_sum, amp, r, b, c = list(map(float, line))
+
+            # Skip bad measurements
+            if np.any(np.isnan([th, phi])):
+                continue
+
+            ### Compute the projection of the wake line of sight to the trajectory ###
+
+            # Calculate RA/Dec
+            ra, dec = altAz2RADec(np.pi/2 - np.radians(phi), np.pi/2 - np.radians(th), \
+                traj.jdt_ref, lat_dict[site_id], lon_dict[site_id])
+
+            # Compute the station coordinates at the given time
+            stat = geo2Cartesian(lat_dict[site_id], lon_dict[site_id], ele_dict[site_id], \
+                traj.jdt_ref)
+
+            # Compute measurement rays in cartesian coordinates
+            meas = np.array(raDec2ECI(ra, dec))
+
+            # Calculate closest points of approach (observed line of sight to radiant line)
+            obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, traj.state_vect_mini, \
+                traj.radiant_eci_mini)
+
+            # If the projected point is above the state vector, use negative lengths
+            state_vect_dist_sign = 1.0
+            if vectMag(rad_cpa) > vectMag(traj.state_vect_mini):
+                state_vect_dist_sign = -1.0
+
+
+            # Compute Distance from the state vector to the projected point on the radiant line
+            state_vect_dist = state_vect_dist_sign*vectMag(traj.state_vect_mini - rad_cpa)
+
+            # Compute the height (meters)
+            _, _, ht = cartesian2Geo(traj.jdt_ref, *rad_cpa)
+
+            ### ###
+
+            # Record the state vector distance of the leading fragment
+            if int(n) == 0:
+                leading_state_vect_dist = state_vect_dist
+
+            wake_container.addPoint(n, th, phi, intens_sum, amp, r, b, c, state_vect_dist, ht)
+
+
+        # If there are no points in the wake container, don't use it
+        if wake_container is not None:
+            if len(wake_container.points) == 0:
+                wake_container = None
+
+        # Compute lengths of the leading fragment
+        if wake_container is not None:
+            for wake_pt in wake_container.points:
+                wake_pt.leading_frag_length = wake_pt.state_vect_dist - leading_state_vect_dist
+
+    if wake_container is None:
+        print("... rejected")
+    else:
+        print("... loaded!")
+
+    return wake_container
+
 
 class MetSimGUI(QMainWindow):
     def __init__(self, traj_path, const_json_file=None, met_path=None, lc_path=None, wid_files=None, \
@@ -2015,100 +2121,7 @@ class MetSimGUI(QMainWindow):
     def loadWakeFile(self, file_path):
         """ Load a mirfit wake "wid" file. """
 
-
-        # Extract the site ID and the frame number from the file name
-        site_id, frame_n = os.path.basename(file_path).replace('.txt', '').split('_')[1:]
-        site_id = str(int(site_id))
-        frame_n = int(frame_n)
-
-        print('wid file: ', site_id, frame_n, end='')
-
-
-        # Extract geo coordinates of sites
-        lat_dict = {obs.station_id:obs.lat for obs in self.traj.observations}
-        lon_dict = {obs.station_id:obs.lon for obs in self.traj.observations}
-        ele_dict = {obs.station_id:obs.ele for obs in self.traj.observations}
-
-        wake_container = None
-        leading_state_vect_dist = 0
-        with open(file_path) as f:
-            for line in f:
-
-                if line.startswith('#'):
-                    continue
-
-                line = line.replace('\n', '').replace('\r', '').split()
-
-                if not line:
-                    continue
-
-
-                # Init the wake container
-                if wake_container is None:
-                    wake_container = WakeContainter(site_id, frame_n)
-
-                # Read the wake point
-                n, th, phi, _, _, _, _, intens_sum, amp, r, b, c = list(map(float, line))
-
-                # Skip bad measurements
-                if np.any(np.isnan([th, phi])):
-                    continue
-
-                ### Compute the projection of the wake line of sight to the trajectory ###
-
-                # Calculate RA/Dec
-                ra, dec = altAz2RADec(np.pi/2 - np.radians(phi), np.pi/2 - np.radians(th), \
-                    self.traj.jdt_ref, lat_dict[site_id], lon_dict[site_id])
-
-                # Compute the station coordinates at the given time
-                stat = geo2Cartesian(lat_dict[site_id], lon_dict[site_id], ele_dict[site_id], \
-                    self.traj.jdt_ref)
-
-                # Compute measurement rays in cartesian coordinates
-                meas = np.array(raDec2ECI(ra, dec))
-
-                # Calculate closest points of approach (observed line of sight to radiant line)
-                obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, self.traj.state_vect_mini, \
-                    self.traj.radiant_eci_mini)
-
-                # If the projected point is above the state vector, use negative lengths
-                state_vect_dist_sign = 1.0
-                if vectMag(rad_cpa) > vectMag(self.traj.state_vect_mini):
-                    state_vect_dist_sign = -1.0
-
-
-                # Compute Distance from the state vector to the projected point on the radiant line
-                state_vect_dist = state_vect_dist_sign*vectMag(self.traj.state_vect_mini - rad_cpa)
-
-                # Compute the height (meters)
-                _, _, ht = cartesian2Geo(self.traj.jdt_ref, *rad_cpa)
-
-                ### ###
-
-                # Record the state vector distance of the leading fragment
-                if int(n) == 0:
-                    leading_state_vect_dist = state_vect_dist
-
-                wake_container.addPoint(n, th, phi, intens_sum, amp, r, b, c, state_vect_dist, ht)
-
-
-            # If there are no points in the wake container, don't use it
-            if wake_container is not None:
-                if len(wake_container.points) == 0:
-                    wake_container = None
-
-            # Compute lengths of the leading fragment
-            if wake_container is not None:
-                for wake_pt in wake_container.points:
-                    wake_pt.leading_frag_length = wake_pt.state_vect_dist - leading_state_vect_dist
-
-        if wake_container is None:
-            print("... rejected")
-        else:
-            print("... loaded!")
-
-        return wake_container
-
+        return loadWakeFile(self.traj, file_path)
 
 
     def calcPhotometricMass(self):
