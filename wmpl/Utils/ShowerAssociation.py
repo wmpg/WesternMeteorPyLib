@@ -52,10 +52,11 @@ class MeteorShower(object):
     def __repr__(self):
 
         out_str  = "Shower: {:d} {:s} {:s}\n".format(self.IAU_no, self.IAU_code, self.IAU_name)
-        out_str += "    Sol: {:.6f} deg\n".format(np.degrees(self.la_sun))
-        out_str += "    L_g: {:.6f} deg\n".format(np.degrees(self.L_g))
-        out_str += "    B_g: {:.6f} deg\n".format(np.degrees(self.B_g))
-        out_str += "    V_g: {:.3f} km/s\n".format(self.v_g/1000)
+        out_str += "    Sol       = {:10.6f} deg\n".format(np.degrees(self.la_sun))
+        out_str += "    L_g       = {:10.6f} deg\n".format(np.degrees(self.L_g))
+        out_str += "    L_g - Sol = {:10.6f} deg\n".format(np.degrees(self.L_g - self.la_sun)%360)
+        out_str += "    B_g       = {:10.6f} deg\n".format(np.degrees(self.B_g))
+        out_str += "    V_g       = {:10.3f} km/s\n".format(self.v_g/1000)
 
 
         return out_str
@@ -364,11 +365,21 @@ if __name__ == "__main__":
         shower_obj = associateShowerTraj(traj, sol_window=cml_args.solwindow, max_radius=cml_args.radius, \
             max_veldif_percent=cml_args.velperc)
 
+        # Print meteor orbital parameters
+        print("Meteor orbital parameters:")
+        print("    Sol       = {:10.6f} deg".format(np.degrees(traj.orbit.la_sun)))
+        print("    L_g       = {:10.6f} deg".format(np.degrees(traj.orbit.L_g)))
+        print("    L_g - Sol = {:10.6f} deg".format(np.degrees(traj.orbit.L_g - traj.orbit.la_sun)%360))
+        print("    B_g       = {:10.6f} deg".format(np.degrees(traj.orbit.B_g)))
+        print("    V_g       = {:10.3f} km/s".format(traj.orbit.v_g/1000))
+        print()
+
 
         if shower_obj is None:
             print("Sporadic")
         
         else:
+            print("Shower parameters:")
             print(shower_obj)
 
 
