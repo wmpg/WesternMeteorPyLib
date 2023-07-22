@@ -10,7 +10,7 @@ import os
 
 import numpy as np
 
-from wmpl.Trajectory.Trajectory import ObservedPoints, PlaneIntersection, Trajectory
+from wmpl.Trajectory.Trajectory import ObservedPoints, PlaneIntersection, Trajectory, moveStateVector
 from wmpl.Utils.Earth import greatCircleDistance
 from wmpl.Utils.Math import vectNorm, vectMag, angleBetweenVectors, vectorFromPointDirectionAndAngle, \
     findClosestPoints, generateDatetimeBins, meanAngle, angleBetweenSphericalCoords
@@ -19,6 +19,71 @@ from wmpl.Utils.TrajConversions import J2000_JD, geo2Cartesian, cartesian2Geo, r
     raDec2ECI, datetime2JD, jd2Date, equatorialCoordPrecession_vect
 from wmpl.Utils.Pickling import loadPickle, savePickle
 
+MAX_STATIONS = 9999
+
+
+def pickBestStations(obslist, max_stns):
+    """
+    Find the stations with the best statistics
+    This is to reduce computation workload and failures in cases where
+    many cameras detect the same event. 
+
+    paramters 
+    - obslist[]  - list of observations in a candidate
+    - max_stns   - max number of stations to include in solution
+
+    each observation in oblist is a tuple of 
+        [ObservedPoints, MeteorObsRMS, PlaneIntersection]
+    """
+    # only filter if more than max_stns entries
+    if len(obslist) <= max_stns:
+        return obslist
+
+    # mean error in the fit for each station - want the best fits
+    # TODO actually not sure this is available here
+    fit_errs=[1 for obs in obslist]
+
+    # max magnitude seen by each station. Overbright events may be nearby but
+    # may saturate the sensor so should be downweighted
+    # TODO decide weighting to apply
+    mags = [min(obs[0].magnitudes) for obs in obslist]
+    mag_wgts = [1 for x in mags]
+
+    # test if the meteor started and ended in the field of view
+    # not sure this is needed
+    in_fovs = [obs[0].fov_beg & obs[0].fov_end for obs in obslist]
+
+    # work out what fraction of the event each camera saw - more is better
+    durations = [obs[0].JD_data[-1] - obs[0].JD_data[0] for obs in obslist]
+    frac_missed = [1 - d/max(durations) for d in durations]
+
+    # calculate the angle of incidence - nearer 90 degrees is better
+    approx_state_vects = [moveStateVector(obs[2].cpa_eci, obs[2].radiant_eci, [obs[0]]) for obs in obslist]
+    ws = [vectNorm(sv - obs[0].stat_eci) for sv, obs in zip(approx_state_vects, obslist)]
+    cos_inc_angles = [abs(np.dot(obs[2].radiant_eci, w)) for w,obs in zip(ws, obslist)]
+
+    # distance from the station - prefer the nearest ones
+    dists = [np.linalg.norm(obs[0].stat_eci - sv)/1000 for sv, obs in zip(approx_state_vects, obslist)] 
+    #
+    # Cost function is the product of the values
+    #  
+    costs = [f*c*d*e*m for f,c,d,e,m in zip(frac_missed, cos_inc_angles, dists, fit_errs, mag_wgts)] 
+    #
+    print(dists, mag_wgts, cos_inc_angles, in_fovs, frac_missed, fit_errs)
+    print(costs)
+
+    # now select the best.
+    # there's a tiny chance that two or more stations may have identical costs,
+    # and we'll exclude them both but cost is a float so the chance is small
+    threshold = sorted(costs)[max_stns]
+    for i in range(len(obslist)):
+        if costs[i] >= threshold:
+            obslist[i][0].ignore_station = True
+            obslist[i][0].ignore_list = np.ones(len(obslist[i][0].time_data), dtype=np.uint8)
+            print(f'skipping {obslist[i][0].station_id}, cost {costs[i]:.3f}')
+        else:
+            print(f'selecting {obslist[i][0].station_id}, cost {costs[i]:.3f}')
+    return obslist
 
 
 class TrajectoryConstraints(object):
@@ -148,7 +213,8 @@ class TrajectoryConstraints(object):
 
 
 class TrajectoryCorrelator(object):
-    def __init__(self, data_handle, traj_constraints, v_init_part, data_in_j2000=True, distribute=0):
+    def __init__(self, data_handle, traj_constraints, v_init_part, data_in_j2000=True, distribute=0, 
+                 max_stations=MAX_STATIONS, enableOSM=False):
         """ Correlates meteor trajectories using meteor data given to it through a data handle. A data handle
         is a class instance with a common interface between e.g. files on the disk in various formats or 
         meteors in a database.
@@ -167,6 +233,9 @@ class TrajectoryCorrelator(object):
 
         self.distribute = distribute
 
+        self.max_stations = max_stations
+
+        self.enableOSM = enableOSM
 
     def trajectoryRangeCheck(self, traj_reduced, platepar):
         """ Check that the trajectory is within the range limits. 
@@ -523,7 +592,7 @@ class TrajectoryCorrelator(object):
             mc_runs=mc_runs, mc_runs_max=2*mc_runs,
             show_plots=False, verbose=False, save_results=False, 
             reject_n_sigma_outliers=2, mc_cores=self.traj_constraints.mc_cores, 
-            geometric_uncert=self.traj_constraints.geometric_uncert)
+            geometric_uncert=self.traj_constraints.geometric_uncert, enable_OSM_plot=self.enableOSM)
 
         return traj
 
@@ -1462,13 +1531,17 @@ class TrajectoryCorrelator(object):
                     # Sort observations by station code
                     matched_observations = sorted(matched_observations, key=lambda x: str(x[1].station_code))
 
+                    # XXXXXXX
+                    if self.max_stations < MAX_STATIONS and len(matched_observations) > self.max_stations:
+                        print('Selecting best {} stations'.format(self.max_stations))
+                        matched_observations = pickBestStations(matched_observations, self.max_stations)
 
                     # Print info about observations which are being solved
                     print()
                     print("Observations:")
                     for entry in matched_observations:
-                        _, met_obs, _ = entry
-                        print(met_obs.station_code, met_obs.mean_dt)
+                        obs_pts, met_obs, _ = entry
+                        print(met_obs.station_code, met_obs.mean_dt, obs_pts.ignore_station)
 
 
 
