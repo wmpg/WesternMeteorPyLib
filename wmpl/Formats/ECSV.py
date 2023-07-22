@@ -31,6 +31,7 @@ def loadECSVs(ecsv_paths):
         station_lon = None
         station_ele = None
         station_id = None
+        image_file = ''
 
         # Load the station information from the ECSV file
         with open(ecsv_file) as f:
@@ -49,6 +50,9 @@ def loadECSVs(ecsv_paths):
 
                         if "obs_elevation" in line[0]:
                             station_ele = float(line[1])
+
+                        if 'image_file' in line[0]:
+                            image_file = line[1].strip().strip("'")
 
                         if "camera_id" in line[0]:
                             station_id = line[1].strip().strip("'")
@@ -125,11 +129,11 @@ def loadECSVs(ecsv_paths):
             # Precess to J2000
             ra_data, dec_data = equatorialCoordPrecession_vect(jdt_ref, J2000_JD.days, ra_data, dec_data)
 
-
+            comment = '{"ff_name":' + f'"{image_file}"' +'}'
 
             # Init the meteor object
             meteor = MeteorObservation(jdt_ref, station_id, np.radians(station_lat), \
-                np.radians(station_lon), station_ele, FPS)
+                np.radians(station_lon), station_ele, FPS, ff_name=comment)
 
             # Add data to meteor object
             for t_rel, x_centroid, y_centroid, ra, dec, azim, alt, mag in zip(time_data, x_data, y_data, \
@@ -267,6 +271,6 @@ if __name__ == "__main__":
         plot_all_spatial_residuals=cml_args.plotallspatial, plot_file_type=cml_args.imgformat, \
         show_plots=(not cml_args.hideplots), v_init_part=velpart, v_init_ht=vinitht, \
         show_jacchia=cml_args.jacchia, estimate_timing_vel=(False if cml_args.notimefit is None else cml_args.notimefit), \
-        mc_noise_std=cml_args.mcstd)
-    
+        mc_noise_std=cml_args.mcstd, enable_OSM_plot=cml_args.enableOSM)
+
 
