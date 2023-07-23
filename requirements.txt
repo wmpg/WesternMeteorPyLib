@@ -13,3 +13,5 @@ pyswarms
 keras
 pytz
 pandas
+cartopy
+basemap-data-hires

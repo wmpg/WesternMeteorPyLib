@@ -1575,7 +1575,6 @@ class TrajectoryCorrelator(object):
                         for _, met_obs_temp, _ in matched_observations:
                             self.dh.markObservationAsPaired(met_obs_temp)
 
-
                         traj_solved_count += 1
 
                         # If 50 new trajectories were computed, save the DB
