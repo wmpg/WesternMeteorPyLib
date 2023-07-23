@@ -40,11 +40,6 @@ from wmpl.Utils.Plotting import savePlot
 from wmpl.Utils.PlotOrbits import plotOrbits
 from wmpl.Utils.PlotCelestial import CelestialPlot
 from wmpl.Utils.PlotMap import GroundMap
-try:
-    from wmpl.Utils.PlotMap_OSM import OSMMap
-    osm = True
-except:
-    osm = False
 from wmpl.Utils.TrajConversions import EARTH, G, ecef2ENU, enu2ECEF, geo2Cartesian, geo2Cartesian_vect, \
     cartesian2Geo, altAz2RADec_vect, raDec2AltAz, raDec2AltAz_vect, raDec2ECI, eci2RaDec, jd2Date, datetime2JD
 from wmpl.Utils.PyDomainParallelizer import parallelComputeGenerator
