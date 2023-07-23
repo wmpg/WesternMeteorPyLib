@@ -20,13 +20,26 @@ from wmpl.Utils.Pickling import loadPickle
 
 
 class MeteorShower(object):
-    def __init__(self, la_sun, L_g, B_g, v_g, IAU_no):
-        """ Container for meteor shower parameters. """
+    def __init__(self, la_sun, L_g, B_g, v_g, IAU_no, dispersion=None):
+        """ Container for meteor shower parameters. 
+        
+        Arguments:
+            la_sun: [float] Solar longitude of the shower radiant (radians).
+            L_g: [float] Galactic longitude of the shower radiant (radians).
+            B_g: [float] Galactic latitude of the shower radiant (radians).
+            v_g: [float] Geocentric velocity of the shower radiant (m/s).
+            IAU_no: [int] IAU number of the shower.
+
+        Keyword arguments:
+            dispersion: [float] Dispersion of the shower radiant (radians). None by default.
+        
+        """
 
         self.la_sun = la_sun
         self.L_g = L_g
         self.B_g = B_g
         self.v_g = v_g
+        self.dispersion = dispersion
         self.IAU_no = IAU_no
 
 
@@ -39,36 +52,95 @@ class MeteorShower(object):
     def __repr__(self):
 
         out_str  = "Shower: {:d} {:s} {:s}\n".format(self.IAU_no, self.IAU_code, self.IAU_name)
-        out_str += "    Sol: {:.6f} deg\n".format(np.degrees(self.la_sun))
-        out_str += "    L_g: {:.6f} deg\n".format(np.degrees(self.L_g))
-        out_str += "    B_g: {:.6f} deg\n".format(np.degrees(self.B_g))
-        out_str += "    V_g: {:.3f} km/s\n".format(self.v_g/1000)
+        out_str += "    Sol       = {:10.6f} deg\n".format(np.degrees(self.la_sun))
+        out_str += "    L_g       = {:10.6f} deg\n".format(np.degrees(self.L_g))
+        out_str += "    L_g - Sol = {:10.6f} deg\n".format(np.degrees(self.L_g - self.la_sun)%360)
+        out_str += "    B_g       = {:10.6f} deg\n".format(np.degrees(self.B_g))
+        out_str += "    V_g       = {:10.3f} km/s\n".format(self.v_g/1000)
 
 
         return out_str
 
 
-def loadJenniskensShowers(dir_path, file_name):
-    """ Load the showers from the Jenniskens et al. (2018) table and init MeteorShower objects. """
+# def loadJenniskensShowers(dir_path, file_name):
+#     """ Load the showers from the Jenniskens et al. (2018) table and init MeteorShower objects. """
 
 
-    jenniskens_shower_list = []
+#     jenniskens_shower_list = []
+
+#     with open(os.path.join(dir_path, file_name), encoding='cp1252') as f:
+
+#         data_start = 0
+#         for line in f:
+
+#             # Find the beginning of the data table
+#             if "====================================" in line:
+#                 data_start += 1
+#                 continue
+
+
+#             # Skip all non-data lines
+#             if data_start < 2:
+#                 continue
+
+
+#             line = line.replace('\n', '').replace('\r', '')
+
+#             # Skip empty lines
+#             if not line:
+#                 continue
+
+
+#             # Stop if the final line was reached
+#             if "[FINAL]" in line:
+#                 break
+
+#             # Unpack the shower data
+#             l0, L_l0, B_g, v_g, IAU_no = line.split()
+
+#             # Convert values to radians and m/s
+#             jenniskens_shower_list.append([np.radians(float(l0)), np.radians(float(L_l0)), 
+#                 np.radians(float(B_g)), 1000*float(v_g), int(IAU_no)])
+
+
+
+#     return np.array(jenniskens_shower_list)
+
+
+
+# # Load the Jenniskens table on startup
+# if os.path.isfile(config.jenniskens_shower_table_npy):
+
+#     # Load the npy file (faster) if available
+#     jenniskens_shower_list = np.load(config.jenniskens_shower_table_npy)
+# else:
+
+#     # If not, load the text file and store the npy for faster loading later
+#     jenniskens_shower_list = loadJenniskensShowers(*os.path.split(config.jenniskens_shower_table_file))
+#     np.save(config.jenniskens_shower_table_npy, jenniskens_shower_list)
+
+
+def loadGMNShowerTable(dir_path, file_name):
+    """ Load the showers from the GMN table and init MeteorShower objects. 
+    
+    Arguments:
+        dir_path: [str] Path to the directory containing the GMN table.
+        file_name: [str] Name of the GMN table file.
+
+    Return:
+        [list] List of shower activity measurements and radiant positions (in radians and m/s).
+    """
+
+    gmn_shower_list = []
 
     with open(os.path.join(dir_path, file_name), encoding='cp1252') as f:
-
-        data_start = 0
         for line in f:
 
-            # Find the beginning of the data table
-            if "====================================" in line:
-                data_start += 1
+            # Skip the header (lines starting with #)
+            if line.startswith('#'):
                 continue
 
-
-            # Skip all non-data lines
-            if data_start < 2:
-                continue
-
+            line = line.strip()
 
             line = line.replace('\n', '').replace('\r', '')
 
@@ -76,34 +148,35 @@ def loadJenniskensShowers(dir_path, file_name):
             if not line:
                 continue
 
-
-            # Stop if the final line was reached
-            if "[FINAL]" in line:
-                break
-
             # Unpack the shower data
-            l0, L_l0, B_g, v_g, IAU_no = line.split()
+            la_sun, L_g, B_g, v_g, dispersion, IAU_no, IAU_code = line.split()
 
             # Convert values to radians and m/s
-            jenniskens_shower_list.append([np.radians(float(l0)), np.radians(float(L_l0)), 
-                np.radians(float(B_g)), 1000*float(v_g), int(IAU_no)])
+            gmn_shower_list.append([
+                np.radians(float(la_sun)), 
+                np.radians(float(L_g)),
+                np.radians(float(B_g)), 
+                1000*float(v_g), 
+                np.radians(float(dispersion)), 
+                int(IAU_no)
+                ]
+            )
 
 
-
-    return np.array(jenniskens_shower_list)
-
+    return np.array(gmn_shower_list)
 
 
-# Load the Jenniskens table on startup
-if os.path.isfile(config.jenniskens_shower_table_npy):
-
+# Load the GMN table on startup
+if os.path.isfile(config.gmn_shower_table_npy):
+    
     # Load the npy file (faster) if available
-    jenniskens_shower_list = np.load(config.jenniskens_shower_table_npy)
+    gmn_shower_list = np.load(config.gmn_shower_table_npy)
+
 else:
 
     # If not, load the text file and store the npy for faster loading later
-    jenniskens_shower_list = loadJenniskensShowers(*os.path.split(config.jenniskens_shower_table_file))
-    np.save(config.jenniskens_shower_table_npy, jenniskens_shower_list)
+    gmn_shower_list = loadGMNShowerTable(*os.path.split(config.gmn_shower_table_file))
+    np.save(config.gmn_shower_table_npy, gmn_shower_list)
 
 
 # Load the IAU table
@@ -111,6 +184,7 @@ if os.path.isfile(config.iau_shower_table_npy):
 
     # Load the npy file (faster) if available
     iau_shower_list = np.load(config.iau_shower_table_npy)
+
 else:
 
     # If not, load the text file and store the npy file for faster loading later
@@ -119,10 +193,10 @@ else:
 
 
 
-def associateShower(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=3.0, \
+def associateShower(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=None, \
     max_veldif_percent=10.0):
     """ Given a shower radiant in Sun-centered ecliptic coordinates, associate it to a meteor shower
-        using the showers listed in the Jenniskens et al. (2018) paper. 
+        using the showers listed in the GMN shower list.
 
     Arguments:
         la_sun: [float] Solar longitude (radians).
@@ -133,15 +207,16 @@ def associateShower(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=3.0, \
 
     Keyword arguments:
         sol_window: [float] Solar longitude window of association (deg).
-        max_radius: [float] Maximum angular separation from reference radiant (deg).
+        max_radius: [float] Maximum angular separation from reference radiant (deg). None by default, 
+            which will use the measured dispersion of the shower from the table.
         max_veldif_percent: [float] Maximum velocity difference in percent.
 
     Return:
         [MeteorShower instance] MeteorShower instance for the closest match, or None for sporadics.
     """
 
-    # Create a working copy of the Jenniskens shower list
-    temp_shower_list = copy.deepcopy(jenniskens_shower_list)
+    # Create a working copy of the shower table
+    temp_shower_list = copy.deepcopy(gmn_shower_list)
 
 
     # Find all showers in the solar longitude window
@@ -154,11 +229,25 @@ def associateShower(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=3.0, \
         return None
 
     
-    # Find all showers within the maximum radiant distance radius
+    # Compute the angular distance between the shower radiants and the reference radiant
     radiant_distances = angleBetweenSphericalCoords(temp_shower_list[:, 2], temp_shower_list[:, 1], B_g, \
         (L_g - la_sun)%(2*np.pi))
-    temp_shower_list = temp_shower_list[radiant_distances <= np.radians(max_radius)]
+    
+    # Use the measured dispersion if no maximum radius is given
+    if max_radius is None:
+        
+        # Get the maximum radius for each shower
+        max_radius = np.degrees(temp_shower_list[:, 4])
+    
+        # Filter the showers
+        filter_mask = radiant_distances <= np.radians(max_radius)
+        temp_shower_list = temp_shower_list[filter_mask]
+        max_radius = max_radius[filter_mask]
 
+    else:
+
+        # Filter the showers using a fixed radius
+        temp_shower_list = temp_shower_list[radiant_distances <= np.radians(max_radius)]
 
 
     # Check if any associations were found
@@ -168,11 +257,17 @@ def associateShower(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=3.0, \
 
     # Find all showers within the maximum velocity difference limit
     velocity_diff_percents = np.abs(100*(temp_shower_list[:, 3] - v_g)/temp_shower_list[:, 3])
-    temp_shower_list = temp_shower_list[velocity_diff_percents <= max_veldif_percent]
+    velocity_filter = velocity_diff_percents <= max_veldif_percent
+    temp_shower_list = temp_shower_list[velocity_filter]
 
+    
     # Check if any associations were found
     if not len(temp_shower_list):
         return None
+    
+    # Filter the max radius if it's a numpy array
+    if isinstance(max_radius, np.ndarray):
+        max_radius = max_radius[velocity_filter]
 
 
     ### Choose the best matching shower by the solar longitude, radiant, and velocity closeness ###
@@ -192,8 +287,8 @@ def associateShower(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=3.0, \
 
 
     # Init a shower object
-    l0, L_l0, B_g, v_g, IAU_no = best_shower
-    shower_obj = MeteorShower(l0, (L_l0 + l0)%360, B_g, v_g, int(round(IAU_no)))
+    l0, L_l0, B_g, v_g, dispersion, IAU_no = best_shower
+    shower_obj = MeteorShower(l0, (L_l0 + l0)%(2*np.pi), B_g, v_g, int(round(IAU_no)), dispersion=dispersion)
 
 
     return shower_obj
@@ -201,17 +296,17 @@ def associateShower(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=3.0, \
 
 
 
-def associateShowerTraj(traj, sol_window=1.0, max_radius=3.0, \
+def associateShowerTraj(traj, sol_window=1.0, max_radius=None, \
     max_veldif_percent=10.0):
-    """ Given a Trajectory object, associate it to a meteor shower using the showers listed in the 
-        Jenniskens et al. (2018) paper. 
+    """ Given a Trajectory object, associate it to a meteor shower using the GMN shower list.
 
     Arguments:
         traj: [Trajectory object] A trajectory object.
 
     Keyword arguments:
         sol_window: [float] Solar longitude window of association (deg).
-        max_radius: [float] Maximum angular separation from reference radiant (deg).
+        max_radius: [float] Maximum angular separation from reference radiant (deg). If None, the
+            measured dispersion of the shower from the table will be used.
         max_veldif_percent: [float] Maximum velocity difference in percent.
 
     Return:
@@ -247,7 +342,7 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-r', '--radius', metavar='RADIUS', \
         help="Maximum distance from reference radiant for association (deg).", \
-        type=float, default=3.0)
+        type=float, default=None)
 
     arg_parser.add_argument('-v', '--velperc', metavar='VEL_PERC', \
         help="Maximum difference in geocentric velocity (in percent) from the reference radiant.", \
@@ -270,11 +365,21 @@ if __name__ == "__main__":
         shower_obj = associateShowerTraj(traj, sol_window=cml_args.solwindow, max_radius=cml_args.radius, \
             max_veldif_percent=cml_args.velperc)
 
+        # Print meteor orbital parameters
+        print("Meteor orbital parameters:")
+        print("    Sol       = {:10.6f} deg".format(np.degrees(traj.orbit.la_sun)))
+        print("    L_g       = {:10.6f} deg".format(np.degrees(traj.orbit.L_g)))
+        print("    L_g - Sol = {:10.6f} deg".format(np.degrees(traj.orbit.L_g - traj.orbit.la_sun)%360))
+        print("    B_g       = {:10.6f} deg".format(np.degrees(traj.orbit.B_g)))
+        print("    V_g       = {:10.3f} km/s".format(traj.orbit.v_g/1000))
+        print()
+
 
         if shower_obj is None:
             print("Sporadic")
         
         else:
+            print("Shower parameters:")
             print(shower_obj)
 
 

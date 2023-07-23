@@ -843,8 +843,9 @@ if __name__ == "__main__":
             geometric_uncert=cml_args.uncertgeom, gravity_correction=(not cml_args.disablegravity), 
             plot_all_spatial_residuals=cml_args.plotallspatial, plot_file_type=cml_args.imgformat, \
             show_plots=(not cml_args.hideplots), v_init_part=velpart, v_init_ht=vinitht, \
-            show_jacchia=cml_args.jacchia, estimate_timing_vel=(False if cml_args.notimefit is None else cml_args.notimefit), \
-            mc_noise_std=cml_args.mcstd)
+            show_jacchia=cml_args.jacchia, 
+            estimate_timing_vel=(False if cml_args.notimefit is None else cml_args.notimefit), \
+            fixed_times=cml_args.fixedtimes, mc_noise_std=cml_args.mcstd)
 
 
     # print(met.scale_plates.items())

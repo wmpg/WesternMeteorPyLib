@@ -574,12 +574,18 @@ def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir, 
             bet = shower_obj.B_g
 
 
-            ### Plot a <PLOT_SHOWER_RADIUS> deg radius circle around the shower centre ###
+            ### Plot a circle around the shower centre ###
+
+            # If the shower dispersion is availabe, use it. Over otherwise, use a default value
+            if shower_obj.dispersion is not None:
+                shower_radius = np.degrees(shower_obj.dispersion)
+            else:
+                shower_radius = PLOT_SHOWER_RADIUS
             
             # Generate circle data points
             heading_arr = np.linspace(0, 2*np.pi, 50)
             bet_arr, lam_arr = sphericalPointFromHeadingAndDistance(bet, lam, heading_arr, \
-                np.radians(PLOT_SHOWER_RADIUS))
+                np.radians(shower_radius))
 
             # If the circle is on the 90 deg boundary, split the arrays into two parts
             lam_arr_check = (lam_arr - np.radians(270))%(2*np.pi)
@@ -631,7 +637,7 @@ def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir, 
 
             # Get the shower name location
             bet_txt, lam_txt = sphericalPointFromHeadingAndDistance(bet, lam, heading, \
-                np.radians(PLOT_SHOWER_RADIUS))
+                np.radians(shower_radius))
 
             # Plot the shower name
             celes_plot.text(shower_obj.IAU_code, lam_txt, bet_txt, ha=ha, va=va, color='w', alpha=0.5)
@@ -761,14 +767,22 @@ def generateTrajectoryPlots(output_dir, traj_list, plot_name='scecliptic', plot_
             B_g_mean = np.mean([sh.B_g for sh in shower_obj_dict[shower_no]])
             v_g_mean = np.mean([sh.v_g for sh in shower_obj_dict[shower_no]])
 
+            # Compute the maximum dispersion (replace with PLOT_SHOWER_RADIUS if None)
+            # The maximum is chosen so it encompasses all the members of the shower in the plot
+            dispersion_max = np.max(
+                [np.radians(PLOT_SHOWER_RADIUS) if sh.dispersion is None else sh.dispersion \
+                for sh in shower_obj_dict[shower_no]]
+                )
+
             # Init a new shower object
-            shower_obj_mean = MeteorShower(la_sun_mean, L_g_mean, B_g_mean, v_g_mean, shower_no)
+            shower_obj_mean = MeteorShower(la_sun_mean, L_g_mean, B_g_mean, v_g_mean, shower_no, 
+                                           dispersion=dispersion_max)
 
             shower_obj_list.append(shower_obj_mean)
 
 
-
-    print("Hyperbolic percentage: {:.2f}%".format(100*hypo_count/len(traj_list)))
+    if len(traj_list):
+        print("Hyperbolic percentage: {:.2f}%".format(100*hypo_count/len(traj_list)))
 
     # Compute the range of solar longitudes
     sol_min = np.degrees(jd2SolLonSteyaert(jd_min))
@@ -1789,6 +1803,7 @@ def generateAutoPlotsAndReports(dir_path, traj_quality_params, prev_sols=10, sol
     sol_lon_next = np.ceil(sol_lon_now)
 
     # Pre-load all trajectory directories, so they don't have to be listed every time
+    print("Loading directory tree with all trajectories...")
     walk_dirs_all = walkDirsToDepth(dir_path, depth=TRAJ_DIRS_WALK_DEPTH)
 
     # Generate plots for every day
