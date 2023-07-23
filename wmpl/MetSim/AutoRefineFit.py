@@ -1,4 +1,6 @@
+
 import os
+import sys
 import copy
 import re
 import json
@@ -11,7 +13,8 @@ import scipy.optimize
 
 from wmpl.Formats.Met import loadMet
 from wmpl.Trajectory.Trajectory import Trajectory
-from wmpl.MetSim.GUI import loadConstants, saveConstants, SimulationResults, MetObservations
+from wmpl.MetSim.GUI import loadConstants, saveConstants, MetObservations
+from wmpl.MetSim.SimResults import SimulationResults
 from wmpl.MetSim.MetSimErosion import runSimulation, Constants
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly
 from wmpl.Utils.Math import meanAngle
@@ -103,15 +106,14 @@ def costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False):
 
     # Compute the magnitude and length residuals from the trajectory object
     for obs in traj.observations:
+
+        # Set a default filter which takes all observations
+        mag_filter = np.ones(len(obs.model_ht), dtype=bool)
+
         if obs.absolute_magnitudes is not None:
 
-            # Filter out observations with NaN magnitudes
-            obs.absolute_magnitudes = obs.absolute_magnitudes[~np.isnan(obs.absolute_magnitudes)]
-            obs.state_vect_dist = obs.state_vect_dist[~np.isnan(obs.absolute_magnitudes)]
-
-            # Filter out observations with magnitude fainter than +9
-            mag_filter = obs.absolute_magnitudes < 9
-
+            # Filter out observations with magnitude fainter than +9 or with NaN magnitudes
+            mag_filter = (obs.absolute_magnitudes < 9) & (~np.isnan(obs.absolute_magnitudes))
 
             # Sample the simulated magnitude at the observation heights
             sim_mag_sampled = sim_mag_interp(obs.model_ht[mag_filter])
@@ -122,10 +124,10 @@ def costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False):
 
 
         # Sample the simulated normalized length at observed times
-        sim_norm_len_sampled = sim_norm_len_interp(obs.time_data)
+        sim_norm_len_sampled = sim_norm_len_interp(obs.time_data[mag_filter])
 
         # Compute the length residual
-        len_res_sum += np.sum(np.abs(obs.state_vect_dist - sim_norm_len_sampled))
+        len_res_sum += np.sum(np.abs(obs.state_vect_dist[mag_filter] - sim_norm_len_sampled))
         len_res_count += len(obs.state_vect_dist)
 
 
@@ -139,19 +141,21 @@ def costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False):
                 ax_magres.scatter(obs.absolute_magnitudes[mag_filter] - sim_mag_sampled, 
                                   obs.model_ht[mag_filter]/1000)
 
-            # ax_len.scatter(obs.state_vect_dist, obs.model_ht/1000, label=obs.station_id)
-            # ax_len.plot(sim_norm_len_sampled, obs.model_ht/1000)
-            ax_lenres.scatter(obs.state_vect_dist - sim_norm_len_sampled, obs.model_ht/1000)
+            # ax_len.scatter(obs.state_vect_dist[mag_filter], obs.model_ht[mag_filter]/1000, 
+            #   label=obs.station_id)
+            # ax_len.plot(sim_norm_len_sampled, obs.model_ht[mag_filter]/1000)
+            ax_lenres.scatter(obs.state_vect_dist[mag_filter] - sim_norm_len_sampled, 
+                              obs.model_ht[mag_filter]/1000)
 
             # Compute the simulated lag
-            sim_lag = sim_norm_len_sampled - sim_vel_beg*obs.time_data
+            sim_lag = sim_norm_len_sampled - sim_vel_beg*obs.time_data[mag_filter]
 
             # Compute the observed lag using the simulated velocity
-            obs_lag = obs.state_vect_dist - sim_vel_beg*obs.time_data
+            obs_lag = obs.state_vect_dist[mag_filter] - sim_vel_beg*obs.time_data[mag_filter]
 
             # Plot the lag
-            ax_lag.scatter(obs_lag, obs.model_ht/1000, label=obs.station_id)
-            ax_lag.plot(sim_lag, obs.model_ht/1000)
+            ax_lag.scatter(obs_lag, obs.model_ht[mag_filter]/1000, label=obs.station_id)
+            ax_lag.plot(sim_lag, obs.model_ht[mag_filter]/1000)
 
 
 
@@ -394,9 +398,60 @@ def autoFit(fit_options, traj, met_obs, const):
     # Print initial parameters and bounds for each
     print()
     print("Initial parameters:")
+
     for i, param_name in enumerate(fit_options["fit_params"]):
+
+        # Extract the normalization factor
         n = fit_options["norm_factors"][i]
-        print("\t{}: {:f} [{:f}, {:f}]".format(param_name, n*x0[i], n*bounds[i][0], n*bounds[i][1]))
+
+        # Compute the parameter value
+        param_val = n*x0[i]
+
+        # Compute the bounds
+        bound_min = n*bounds[i][0]
+        bound_max = n*bounds[i][1]
+
+        # Construct the format string
+        decimal_places = 6
+        decimal_places_scientific = 2
+
+        # If the parameter value is smaller than possible to represent in the given number of decimal places,
+        # then use scientific notation
+        if param_val < 10**(-decimal_places):
+            format_str = "{{:.{}e}}".format(decimal_places_scientific)
+        else:
+            format_str = "{{:.{}f}}".format(decimal_places)
+
+
+        print("\t{}: {} [{}, {}]".format(param_name, format_str.format(param_val),
+            format_str.format(bound_min), format_str.format(bound_max)))
+        
+        bound_error_text = """
+******************************************************************************
+
+ERROR: The initial parameter value for {:s} is outside the bounds!
+
+Please check the initial parameter values and the bounds.
+
+Exiting...
+
+******************************************************************************
+        """.format(param_name)
+        
+        # If the intial parameter value is outside the bounds, then throw an error
+        if (bound_min is not None) and (param_val < bound_min):
+            print(bound_error_text)
+            print("Initial parameter value is smaller than the lower bound: {} < {}".format(
+                param_val, bound_min))
+            sys.exit(1)
+        
+        if (bound_max is not None) and (param_val > bound_max):
+            print(bound_error_text)
+            print("Initial parameter value is larger than the upper bound: {} > {}".format(
+                param_val, bound_max))
+            sys.exit(1)
+
+
     print()
 
 
@@ -494,6 +549,16 @@ if __name__ == "__main__":
     cml_args = arg_parser.parse_args()
 
     #########################
+
+
+    # Check that scipy version is at least 1.7.0 - older versions don't support Nelder-Mead with bounds
+    if scipy.__version__ < "1.7.0":
+        print("ERROR: scipy version must be at least 1.7.0! Please upgrade scipy.")
+        print("If you're using conda, then run:")
+        print("conda install -c conda-forge scipy=1.7.3")
+        sys.exit(1)
+
+
 
     # Extract the directory path
     dir_path = cml_args.dir_path
@@ -802,15 +867,18 @@ if __name__ == "__main__":
         obs_lag = obs.state_vect_dist - sim_vel_beg*obs.time_data
 
         # Compute the corrected heights, so the simulations and the observations match
-        obs_ht_corr = sim_norm_ht_interp(obs.state_vect_dist)
+        obs_ht = sim_norm_ht_interp(obs.state_vect_dist)
+
+        # # Use observed heights
+        # obs_ht = obs.model_ht
 
         # Plot the observed lag
-        lag_handle = ax_lag.plot(obs_lag, obs_ht_corr/1000, 'x', ms=8, alpha=0.5, linestyle='dashed', 
+        lag_handle = ax_lag.plot(obs_lag, obs_ht/1000, 'x', ms=8, alpha=0.5, linestyle='dashed', 
             label=obs.station_id, markersize=10, linewidth=2)
 
 
         # Plot the velocity
-        ax_vel.plot(obs.velocities[1:]/1000, obs_ht_corr[1:]/1000, 'x', ms=8, alpha=0.5, linestyle='dashed', 
+        ax_vel.plot(obs.velocities[1:]/1000, obs_ht[1:]/1000, 'x', ms=8, alpha=0.5, linestyle='dashed', 
             label=obs.station_id, markersize=10, linewidth=2)
 
         # Update the min/max height
@@ -825,7 +893,7 @@ if __name__ == "__main__":
         len_res = obs.state_vect_dist - sim_norm_len_sampled
 
         # Plot the length residuals
-        ax_lagres.scatter(len_res, obs_ht_corr/1000, marker='+', \
+        ax_lagres.scatter(len_res, obs_ht/1000, marker='+', \
             c=lag_handle[0].get_color(), label="Leading, {:s}".format(obs.station_id), s=6)
 
 

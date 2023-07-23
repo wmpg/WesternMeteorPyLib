@@ -57,7 +57,7 @@ on some systems this may not work, so you will have to write ```source activate 
 We will now install all needed libraries. With the environment activated as described above, run this in the terminal:
 
 ```
-conda install -y -c conda-forge numpy scipy matplotlib cython pytz pyqt
+conda install -y -c conda-forge numpy scipy matplotlib cython pytz pyqt pandas
 conda install -y -c conda-forge jplephem ephem
 conda install -y -c conda-forge basemap basemap-data-hires
 ```
@@ -91,7 +91,10 @@ If you experience any issues, please see the "Troubleshooting" section below.
 
 ### Windows
 
-The installation might differ on Windows. I recommend installing Anaconda, which should install most of the packages you will need. Contact me for more details about Windows installation if you are stuck.
+Updates from Mark McIntyre, 2022. 
+I recommend installing Anaconda or Miniconda to create the virtual environment but then use PIP to 
+install the packages from the Requirements file. This has been tested on Windows 10 and should work 
+best. Ask in the globalmeteornetwork groups.io group if you have issues
 
 
 1) Install [Anaconda Python 3.*](https://www.anaconda.com/download/), IMPORTANT: during the installation, make sure to select the following:
@@ -100,13 +103,22 @@ The installation might differ on Windows. I recommend installing Anaconda, which
 
 	b) Install only for "me" (single user)
 
+1a) OR, install [ Miniconda ](https://docs.conda.io/en/latest/miniconda.html) which will take up much less diskspace but provides the same experience. 
 
-2) Open the Anaconda powershell and run:
+
+2) Download and install git: [https://git-scm.com/downloads](https://git-scm.com/downloads)
+
+
+3) Open git bash, navigate to where you want to pull the code and run:
+	```
+	git clone --recursive https://github.com/wmpg/WesternMeteorPyLib.git
+	```
+4) From the Start Menu, open Anaconda powershell and run:
 	```
 	conda update anaconda
 	conda create -y --name wmpl python=3.8
 	conda activate wmpl
-	conda install -y -c conda-forge numpy scipy matplotlib cython pytz pyqt
+	conda install -y -c conda-forge numpy scipy matplotlib cython pytz pyqt pandas
 	conda install -y -c conda-forge jplephem ephem
 	conda install -y -c conda-forge basemap basemap-data-hires
 	```
@@ -120,9 +132,11 @@ The installation might differ on Windows. I recommend installing Anaconda, which
 	```
 	
 
-
 5) From the Anaconda powershell prompt navigate to the the cloned WesternMeteorPyLib directory and inside run:
 	```
+	conda activate wmpl
+	pip install -r requirements.txt
+	conda install -y cartopy
 	python setup.py install
 	```
 
@@ -141,26 +155,18 @@ If you are getting the following error on Windows: ```Unable to find vcvarsall.b
 If you are getting this error when running the setup: ```ModuleNotFoundError: No module named 'wmpl.PythonNRLMSISE00.nrlmsise_00_header'```, it means that you haven't cloned the repository as per instructions. Please read this README file more carefully (hint: the answer is at the top of the file).
 
 ##### ```KeyError: 'PROJ_LIB'```
-The basemap conda package is terribly broken and no one seems to care to fix it, so we have to do a little bit of "hacking". First, find where your anaconda is installed. 
+Python's basemap map-plotting package needs access to a database of projections to allow it to convert the Earth's surface into a flat map. We may need to tell it where that is. 
 
-Under Windows, it is probably in ```C:\Users\<YOUR_USERNAME>\AppData\Local\Continuum\anaconda3\``` or ```C:\Users\<YOUR_USERNAME>\Anaconda3\```, where you should replace <YOUR_USERNAME> with your username (duh!). From now on I will refer to this path as ```<ANACONDA_DIR>```.
-Open the following file in a text editor: ```<ANACONDA_DIR>\envs\wmpl\Lib\site-packages\mpl_toolkits\basemap\__init__.py```. 
+First, find where your anaconda packages are installed.  Under Windows, it is probably in ```C:\Users\<YOUR_USERNAME>\anaconda3\pkgs\``` or ```C:\Users\<YOUR_USERNAME>\miniconda3\pkgs\```, where you should replace <YOUR_USERNAME> with your username. Under Linux, it is probably in ```/home/<YOUR_USERNAME>/anaconda3```. From now on I will refer to this path as ```<ANACONDA_DIR>```. 
 
-Under Linux, it is probably in ```/home/<YOUR_USERNAME>/anaconda3```. From now on I will refer to this path as ```<ANACONDA_DIR>```. Open the following file in a text editor: ```<ANACONDA_DIR>/envs/wmpl/lib/python3.7/site-packages/mpl_toolkits/basemap/__init__.py```. 
 
-Find the line ```pyproj_datadir = os.environ['PROJ_LIB']```, and comment it out by putting a # in front of it. Right below that command, add the following line(for Windows):
-```
-pyproj_datadir = "<ANACONDA_DIR>/envs/wmpl/Library/share"
-```
-(for Linux):
-```
-pyproj_datadir = "<ANACONDA_DIR>/envs/wmpl/share/basemap"
-```
+In this folder, locate the folder starting with "proj-". For example on my PC it is "proj-9.1.0-h3863b3b_0". Lets call this <PROJPATH>
 
-Just make sure to replace <ANACONDA_DIR> with the full path. Also, make sure to replace all backslashes ```\``` with forward slashes ```/``` in the path.
+Now create an environment variable PROJ_LIB pointing to ```<ANACONDA_DIR>\<PROJPATH>\Library\share\proj```
 
-Save the file. Enjoy.
+NB: If you're installing on Linux, remember to use / rather than \ in the path. 
 
+#### ```EPSG is missing```
 If after this you get this error:
 
 ```FileNotFoundError: [Errno 2] No such file or directory: '<ANACONDA_DIR>/envs/wmpl/Library/share\\epsg'```
@@ -170,16 +176,9 @@ then you have to manually download the ```epsg``` file ([LINK](https://raw.githu
 
 #### ```ImportError: cannot import name 'dedent' from 'matplotlib.cbook'``` error
 
-In the recent matplotlib versions, the maintainters really droped the ball and started shipping buggy versions. Fortunately, we can revert to an old matplotlib version to fix this:
-
+You should not get this version as we've fixed the matplotlib version at 3.3.2 but if you do, then revert to an old matplotlib version to fix this:
 ```
-conda install -c conda-forge matplotlib=3.1.2
-conda upgrade matplotlib
-```
-
-If it's still not working, try this:
-```
-conda install -c conda-forge matplotlib=2.2.4
+pip install matplotlib==3.3.2
 ```
 
 #### ```ImportError: No module named PyQt5.QtWidgets``` error

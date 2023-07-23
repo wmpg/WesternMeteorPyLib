@@ -80,11 +80,18 @@ updateOrbitFiles()
 # Delete npy shower files
 jenniskens_shower_table_npy = os.path.join('wmpl', 'share', 'ShowerLookUpTable.npy')
 if os.path.isfile(jenniskens_shower_table_npy):
+    print('Deleting Jenniskens shower table npy file...')
     os.remove(jenniskens_shower_table_npy)
 
 iau_shower_table_npy = os.path.join('wmpl', 'share', 'streamfulldata.npy')
 if os.path.isfile(iau_shower_table_npy):
+    print('Deleting IAU shower table npy file...')
     os.remove(iau_shower_table_npy)
+
+gmn_shower_table_npy = os.path.join('wmpl', 'share', 'gmn_shower_table_20230518.npy')
+if os.path.isfile(gmn_shower_table_npy):
+    print('Deleting GMN shower table npy file...')
+    os.remove(gmn_shower_table_npy)
 
 
 # Get all data files in 'share'

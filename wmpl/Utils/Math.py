@@ -401,6 +401,33 @@ def sphericalPointFromHeadingAndDistance(phi, lam, heading, distance):
     return phi_new, lam_new%(2*np.pi)
 
 
+def isAngleBetween(left, ang, right):
+    """ Checks if ang is between the angle on the left and right. 
+    
+    Arguments:
+        left: [float] Left (counter-clockwise) angle (radians).
+        ang: [float] Angle to check (radians),
+        right: [float] Right (clockwise) angle (radiant).
+
+    Return:
+        [bool] True if the angle is in between, false otherwise.
+    """
+
+    if right - left < 0:
+        right = right - left + 2*np.pi
+    else:
+        right = right - left
+
+
+    if ang - left < 0:
+        ang = ang - left + 2*np.pi
+    else:
+        ang = ang - left
+
+
+    return ang < right
+
+
 ##############################################################################################################
 
 

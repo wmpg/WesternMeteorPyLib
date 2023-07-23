@@ -1,15 +1,17 @@
 numpy
 cython
 scipy
-matplotlib
+matplotlib==3.1.2 ; platform_machine != 'aarch64'
+matplotlib==3.3.2 ; platform_machine == 'aarch64'
 jplephem
 pyephem
-https://github.com/matplotlib/basemap/archive/master.zip ; sys_platform != 'win32'
-basemap ; sys_platform == 'win32'
+https://github.com/matplotlib/basemap/archive/master.zip ; sys_platform != 'win32' and platform_machine != 'aarch64'
+basemap ; sys_platform == 'win32' or platform_machine == 'aarch64'
 PyQt5 ; platform_machine != 'aarch64'
 pyyaml
 pyswarms
 keras
 pytz
+pandas
 cartopy
 basemap-data-hires

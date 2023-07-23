@@ -24,7 +24,7 @@ from wmpl.Utils.Math import generateDatetimeBins
 from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import loadPickle, savePickle
 from wmpl.Utils.TrajConversions import jd2Date
-
+from wmpl.Trajectory.CorrelateEngine import MAX_STATIONS
 
 
 ### CONSTANTS ###
@@ -1185,6 +1185,13 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         help="Number of CPU codes to use for computation. -1 to use all cores minus one (default).",
     )
 
+    arg_parser.add_argument('-x', '--maxstations', type=int, default=-1,
+        help="Use best N stations in the solution (default is use all stations).",
+    )
+
+    arg_parser.add_argument('-o', '--enableOSM', \
+        help="Enable OSM based groung plots. Internet connection required.", action="store_true")     
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -1220,6 +1227,16 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         cpu_cores = multiprocessing.cpu_count()
     trajectory_constraints.mc_cores = cpu_cores
     print("Running using {:d} CPU cores.".format(cpu_cores))
+
+    # Set max stations to use in a solution, minimum 2.
+    # The best N will be chosen. -1 means use all.
+    if cml_args.maxstations == -1:
+        # Set to large number, so we can easily test later
+        max_stations = MAX_STATIONS 
+        print('Solutions will use all available stations.')
+    else:
+        max_stations = max(2, cml_args.maxstations)
+        print('Solutions will use the best {} stations.'.format(max_stations))
 
     # Run processing. If the auto run more is not on, the loop will break after one run
     previous_start_time = None
@@ -1330,7 +1347,8 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                 dt_range=(bin_beg, bin_end))
 
             # Run the trajectory correlator
-            tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True, distribute=distribute)
+            tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True, 
+                                      distribute=distribute, max_stations = max_stations, enableOSM=cml_args.enableOSM)
             tc.run(event_time_range=event_time_range)
 
 

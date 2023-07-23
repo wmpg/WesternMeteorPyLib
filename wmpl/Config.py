@@ -48,7 +48,7 @@ def loadLeapSeconds(leap_seconds_file):
 
                 leap_file_loaded = True
 
-                print('Loaded leap seconds from a local file:', leap_seconds_file)
+                #print('Loaded leap seconds from a local file:', leap_seconds_file)
             
 
 
@@ -57,7 +57,7 @@ def loadLeapSeconds(leap_seconds_file):
         # Try reading the leap second file from URL
         try:
             leap_string = urllibrary.urlopen(usno_leap_url, timeout=1).read()
-            print('Downloaded leap seconds from:', usno_leap_url)
+            #print('Downloaded leap seconds from:', usno_leap_url)
 
             # Save the leap seconds file locally
             with open(leap_seconds_file, 'w') as f:
@@ -75,7 +75,7 @@ def loadLeapSeconds(leap_seconds_file):
             # If the file does not exist, use the hardcoded defaults
             else:
 
-                print('Leap second data could not be downloaded from', usno_leap_url, 'using default values...')
+                #print('Leap second data could not be downloaded from', usno_leap_url, 'using default values...')
 
                 # If the data cannot be loaded, use the hardcoded values
                 leap_string = """ 1961 JAN  1 =JD 2437300.5  TAI-UTC=   1.4228180 S + (MJD - 37300.) X 0.001296 S
@@ -192,6 +192,12 @@ class ConfigStruct(object):
 
         # Jenniskens shower table in numpy format, for faster loading
         self.jenniskens_shower_table_npy = os.path.join(abs_path, 'share', 'ShowerLookUpTable.npy')
+
+        # GMN shower table
+        self.gmn_shower_table_file = os.path.join(abs_path, 'share', 'gmn_shower_table_20230518.txt')
+
+        # GMN shower table in numpy format, for faster loading
+        self.gmn_shower_table_npy = os.path.join(abs_path, 'share', 'gmn_shower_table_20230518.npy')
 
         # IAU shower table
         self.iau_shower_table_file = os.path.join(abs_path, 'share', 'streamfulldata.csv')
