@@ -386,13 +386,13 @@ if __name__ == "__main__":
     vel_fit_std = np.sqrt(np.diag(vel_fit_cov))
     decel_std = vel_fit_std[0]
 
-    # Remove 3 sigma outliers from the data and re-fit
-    vel_filter = np.abs(vel_data - lineFunc(time_data, *vel_fit)) < 3*decel_std
+    # Remove 5 sigma outliers from the data and re-fit
+    vel_filter = np.abs(vel_data - lineFunc(time_data, *vel_fit)) < 5*decel_std
     vel_fit, vel_fit_cov = scipy.optimize.curve_fit(lineFunc, time_data[vel_filter], vel_data[vel_filter])
 
     # Plot the selected outliers as an empty red circle
     ax2.scatter(vel_data[~vel_filter]/1000, time_data[~vel_filter], s=20, marker='o', facecolors='none', 
-        edgecolors='r', label="$3\\sigma$ outliers")
+        edgecolors='r', label="$5\\sigma$ outliers")
 
 
 

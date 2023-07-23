@@ -78,7 +78,7 @@ class Arrow3D(FancyArrowPatch):
     def draw(self, renderer):
         self.do_3d_projection(renderer)
 
-    def do_3d_projection(self, renderer):
+    def do_3d_projection(self, renderer=None):
 
         xs3d, ys3d, zs3d = self._verts3d
 
@@ -86,7 +86,8 @@ class Arrow3D(FancyArrowPatch):
 
         self.set_positions((xs[0], ys[0]),(xs[1], ys[1]))
 
-        FancyArrowPatch.draw(self, renderer)
+        if renderer is not None:
+            FancyArrowPatch.draw(self, renderer)
 
         return np.min(zs) if zs.size else np.nan
 

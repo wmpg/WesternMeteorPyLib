@@ -357,6 +357,26 @@ SIM_CLASSES_NAMES = [c.__name__ for c in SIM_CLASSES]
 ##############################################################################################################
 
 
+def samplePowerLaw(exponent, lower_bound, upper_bound):
+    """
+    Generates a random number from a power-law distribution with the given lower and upper bounds and exponent.
+
+    Args:
+        exponent (float): The power-law exponent.
+        lower_bound (float): The lower bound of the range.
+        upper_bound (float): The upper bound of the range.
+
+    Returns:
+        float: A random number from the power-law distribution.
+    """
+
+    u = np.random.uniform()
+
+    x = (lower_bound**(exponent + 1) + u*(upper_bound**(exponent + 1) - lower_bound**(exponent + 1)))**(1/(exponent + 1))
+
+    return x
+
+
 class ErosionSimContainer(object):
     def __init__(self, output_dir, erosion_sim_params, random_seed=None):
         """ Simulation container for the erosion model simulation. """
@@ -401,12 +421,16 @@ class ErosionSimContainer(object):
 
 
             # Draw parameters from a distribution:
-            # a) Generate all masses distributed logarithmically
-            if (param_name == "m_init") or (param_name == "erosion_mass_min") \
-                or (param_name == "erosion_mass_max"):
+            # a) Generate all grain masses distributed logarithmically
+            if (param_name == "erosion_mass_min") or (param_name == "erosion_mass_max"):
 
                 p.val = 10**(local_state.uniform(np.log10(p.min), np.log10(p.max)))
 
+            # Generate meteoroid masses distributed according to a power-law
+            elif param_name == "m_init":
+                
+                # Use a sampling mass index of 2
+                p.val = samplePowerLaw(-2.0, p.min, p.max)
 
             # b) Distribute all other values uniformely
             else:
@@ -420,8 +444,8 @@ class ErosionSimContainer(object):
 
 
         # Make sure the min grain mass is not > max grain mass and vice versa
-        # TBD
-
+        if self.params.erosion_mass_min.val > self.params.erosion_mass_max.val:
+            self.params.erosion_mass_min.val, self.params.erosion_mass_max.val = self.params.erosion_mass_max.val, self.params.erosion_mass_min.val
 
 
         # Generate a file name from simulation_parameters
@@ -511,8 +535,12 @@ class ErosionSimContainer(object):
 
 
 
-    def runSimulation(self):
+    def runSimulation(self, min_frames_visible=MIN_FRAMES_VISIBLE):
         """ Run the ablation model and srote results. 
+
+        Arguments:
+            min_frames_visible: [int] Minimum number of frames the meteor has to be visible for to be 
+            considered a detection.
         
         Returns:
             [str]: Path to the save picke file.
@@ -530,14 +558,16 @@ class ErosionSimContainer(object):
             del self.simulation_results.const
 
         # Compute synthetic observations
-        res = extractSimData(self, check_only=True)
+        res = extractSimData(self, min_frames_visible=min_frames_visible, check_only=True, 
+                             param_class=self.params.__class__)
         self.time_sampled = None
         self.ht_sampled = None
         self.len_sampled = None
         self.mag_sampled = None
         if res is not None:
             _, self.time_sampled, self.ht_sampled, self.len_sampled, self.mag_sampled, _, \
-                _ = extractSimData(self, check_only=False)
+                _ = extractSimData(self, min_frames_visible=min_frames_visible, check_only=False, 
+                                   param_class=self.params.__class__)
 
             # Convert synthetic data to lists
             self.time_sampled = self.time_sampled.tolist()
@@ -587,8 +617,8 @@ class ErosionSimContainer(object):
 
 
 
-def extractSimData(sim, min_frames_visible=MIN_FRAMES_VISIBLE, check_only=False, param_class_name=None, \
-    postprocess_params=None):
+def extractSimData(sim, min_frames_visible=MIN_FRAMES_VISIBLE, check_only=False, param_class=None, \
+    param_class_name=None, postprocess_params=None):
     """ Extract input parameters and model outputs from the simulation container and normalize them. 
 
     Arguments:
@@ -598,6 +628,7 @@ def extractSimData(sim, min_frames_visible=MIN_FRAMES_VISIBLE, check_only=False,
         min_frames_visible: [int] Minimum number of frames above the limiting magnitude
         check_only: [bool] Only check if the simulation satisfies filters, don' compute eveything.
             Speed up the evaluation. False by default.
+        param_class: [object] Override the simulation parameters object with the given instance.
         param_class_name: [str] Override the simulation parameters object with an instance of the given
             class. An exact name of the class needs to be given.
         postprocess_params: [list] A list of limiting magnitude for wide and narrow fields, and the delay in
@@ -611,12 +642,16 @@ def extractSimData(sim, min_frames_visible=MIN_FRAMES_VISIBLE, check_only=False,
 
     """
 
-    # Create a frash instance of the system parameters if the same parameters are used as in the simulation
-    if param_class_name is None:
-        #params_obj = getattr(GenerateSimulations, sim.params.__class__.__name__)
+    # Create a fresh instance of the system parameters if the same parameters are used as in the simulation
+    if param_class is not None:
+        params = param_class()
+
+    # Create a fresh class given its name
+    elif param_class_name is None:
+
         params = globals()[sim.params.__class__.__name__]()
 
-    # Override the system parameters using the given class
+    # Override the system parameters using the given class name
     else:
         params = globals()[param_class_name]()
 
@@ -802,10 +837,11 @@ def generateErosionSim(output_dir, erosion_sim_params, random_seed, min_frames_v
     print("Running:", erosion_cont.file_name)
 
     # Run the simulation and save results
-    file_path = erosion_cont.runSimulation()
+    file_path = erosion_cont.runSimulation(min_frames_visible=min_frames_visible)
 
     # Check if the simulation satisfies the visibility criteria
-    res = extractSimData(erosion_cont, min_frames_visible=min_frames_visible, check_only=True)
+    res = extractSimData(erosion_cont, min_frames_visible=min_frames_visible, check_only=True, 
+                         param_class=erosion_cont.params.__class__)
         
     # Free up memory
     del erosion_cont
@@ -913,7 +949,7 @@ if __name__ == "__main__":
 
     # Generate simulations using multiprocessing
     input_list = [[cml_args.output_dir, copy.deepcopy(erosion_sim_params), \
-        np.random.randint(0, 2**31 - 1)] for _ in range(cml_args.nsims)]
+        np.random.randint(0, 2**31 - 1), MIN_FRAMES_VISIBLE] for _ in range(cml_args.nsims)]
     results_list = domainParallelizer(input_list, generateErosionSim, cores=cml_args.cores)
 
 

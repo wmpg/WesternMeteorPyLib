@@ -20,14 +20,13 @@ from wmpl.Utils.Math import lineAndSphereIntersections, vectMag, vectNorm
 from wmpl.Utils.Pickling import loadPickle
 
 
-
 def _plotSphereAndArrow(centre, radius, origin, direction, intersection_list):
-
-
+    from itertools import product, combinations
+    
     from mpl_toolkits.mplot3d import Axes3D
     import matplotlib.pyplot as plt
     import numpy as np
-    from itertools import product, combinations
+    from wmpl.Utils.Plotting import Arrow3D
 
 
     fig = plt.figure()
@@ -46,23 +45,6 @@ def _plotSphereAndArrow(centre, radius, origin, direction, intersection_list):
     ax.scatter(*origin, color="g", s=100)
 
     # draw a vector
-    from matplotlib.patches import FancyArrowPatch
-    from mpl_toolkits.mplot3d import proj3d
-
-
-    class Arrow3D(FancyArrowPatch):
-
-        def __init__(self, xs, ys, zs, *args, **kwargs):
-            FancyArrowPatch.__init__(self, (0, 0), (0, 0), *args, **kwargs)
-            self._verts3d = xs, ys, zs
-
-        def draw(self, renderer):
-            xs3d, ys3d, zs3d = self._verts3d
-            xs, ys, zs = proj3d.proj_transform(xs3d, ys3d, zs3d, renderer.M)
-            self.set_positions((xs[0], ys[0]), (xs[1], ys[1]))
-            FancyArrowPatch.draw(self, renderer)
-
-
     xa, ya, za = np.c_[origin, origin + direction]
 
     a = Arrow3D(xa, ya, za, mutation_scale=20,

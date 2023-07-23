@@ -33,9 +33,6 @@ from wmpl.MetSim.MetSimErosionCyTools import massLossRK4, decelerationRK4, lumin
 # Earth acceleration in m/s^2 on the surface
 G0 = 9.81
 
-# Earth radius (m) at 43.930723 deg latitude
-R_EARTH = 6367888.0
-
 ###
 
 
@@ -73,7 +70,9 @@ class Constants(object):
         # Atmosphere density coefficients
         self.dens_co = np.array([6.96795507e+01, -4.14779163e+03, 9.64506379e+04, -1.16695944e+06, \
             7.62346229e+06, -2.55529460e+07, 3.45163318e+07])
-
+        
+        # Radius of the Earth (m)
+        self.r_earth = 6_371_008.7714
 
         self.total_fragments = 0
 
@@ -288,6 +287,9 @@ class Fragment(object):
         self.vv = 0
         self.vh = 0
 
+        # Total drop due to gravity (m)
+        self.h_grav_drop_total = 0
+
         # Length along the trajectory
         self.length = 0
 
@@ -405,6 +407,47 @@ class Wake(object):
 
             self.wake_luminosity_profile += frag_lum*scipy.stats.norm.pdf(self.length_array, loc=frag_len, \
                 scale=const.wake_psf)
+
+
+
+
+def zenithAngleAtSimulationBegin(h0_sim, hb, zc, r_earth):
+    """ Compute the meteor zenith angle at the beginning of the simulation, given the observed begin height
+        and the observed zenith angle.
+
+    Arguments:
+        h0_sim: [float] Initial height of the simulation (m).
+        hb: [float] Observed begin height (m).
+        zc: [float] Observed zenith angle (radians).
+
+    Returns:
+        beta: [float] Zenith angle at the beginning of the simulation (radians).
+        
+    """
+
+    beta = np.arcsin((hb + r_earth)/(h0_sim + r_earth)*np.sin(zc))
+
+    return beta
+
+
+
+def heightCurvature(h0, zc, l, r_earth):
+    """ Compute the height at a given distance l from the origin, assuming a curved Earth.
+    
+    Arguments:
+        h0: [float] Initial height (m).
+        zc: [float] Zenith angle (radians).
+        l: [float] Distance from the origin (m).
+        r_earth: [float] Earth radius (m).
+
+    Returns:
+        h: [float] Height at distance l from the origin (m).
+    """
+
+    # Compute the height with the Earth's curvature taken into account
+    h = np.sqrt(h0**2 - 2*l*np.cos(zc)*(h0 + r_earth) + 2*h0*r_earth + l**2 + r_earth**2) - r_earth
+
+    return h
 
 
 
@@ -639,31 +682,37 @@ def ablateAll(fragments, const, compute_wake=False):
         # Otherwise update the velocity
         else:
 
+            # Compute g at given height
+            gv = G0/((1 + frag.h/const.r_earth)**2)
+
 
             # ### Add velocity change due to Earth's gravity ###
 
-            # # Compute g at given height
-            # gv = G0/((1 + frag.h/R_EARTH)**2)
-
             # # Vertical component of a
-            # av = -gv - deceleration_total*frag.vv/frag.v + frag.vh*frag.v/(R_EARTH + frag.h)
+            # av = -gv - deceleration_total*frag.vv/frag.v + frag.vh*frag.v/(const.r_earth + frag.h)
 
             # # Horizontal component of a
-            # ah = -deceleration_total*frag.vh/frag.v - frag.vv*frag.v/(R_EARTH + frag.h)
+            # ah = -deceleration_total*frag.vh/frag.v - frag.vv*frag.v/(const.r_earth + frag.h)
 
             # ### ###
 
 
-            ### Compute deceleration wihout effect of gravity (to reconstruct the initial velocity without the 
-            #   gravity component)
+            ### Compute deceleration without the effects of gravity (to reconstruct the initial velocity 
+            # without the gravity component)
 
             # Vertical component of a
-            av = -deceleration_total*frag.vv/frag.v + frag.vh*frag.v/(R_EARTH + frag.h)
+            av = -deceleration_total*frag.vv/frag.v + frag.vh*frag.v/(const.r_earth + frag.h)
 
             # Horizontal component of a
-            ah = -deceleration_total*frag.vh/frag.v - frag.vv*frag.v/(R_EARTH + frag.h)
+            ah = -deceleration_total*frag.vh/frag.v - frag.vv*frag.v/(const.r_earth + frag.h)
 
             ###
+
+            # Compute the drop due to gravity
+            h_grav_drop = 0.5*gv*const.dt**2
+
+            # Track the total drop due to gravity
+            frag.h_grav_drop_total += h_grav_drop
 
             # Update the velocity
             frag.vv -= av*const.dt
@@ -679,9 +728,18 @@ def ablateAll(fragments, const, compute_wake=False):
                 frag.h = 0
 
 
-        # Update fragment parameters
+        # Update length along the track
+        frag.length += frag.v*const.dt
+
+        # Update the mass
         frag.m = m_new
-        frag.h = frag.h + frag.vv*const.dt
+
+        # Old way of computing height which did not include the curvature of the Earth
+        #frag.h = frag.h + frag.vv*const.dt
+
+        # Compute the height taking the curvature of the Earth and the gravity drop into account
+        frag.h = heightCurvature(const.h_init, const.zenith_angle, frag.length, const.r_earth)
+        frag.h -= frag.h_grav_drop_total
 
         # Get the luminous efficiency
         tau = luminousEfficiency(const.lum_eff_type, const.lum_eff, frag.v, frag.m)
@@ -727,10 +785,6 @@ def ablateAll(fragments, const, compute_wake=False):
         #     print('H:', frag.h/1000)
         #     print('m:', frag.m)
         #     print('DynPress:', dyn_press/1000, 'kPa')
-
-
-        # Update length along the track
-        frag.length += frag.v*const.dt
 
 
         # Keep track of the parameters of the main fragment
