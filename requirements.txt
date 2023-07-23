@@ -12,6 +12,4 @@ pyyaml
 pyswarms
 keras
 pytz
-basemap-data-hires
-# INSTALL CARTOPY WITH CONDA
-#cartopy
+pandas

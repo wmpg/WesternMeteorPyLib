@@ -19,13 +19,15 @@ import scipy.optimize
 import scipy.signal
 import matplotlib.pyplot as plt
 
+import PyQt5.QtCore
+from PyQt5.QtGui import QFont, QFontDatabase
 from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox, QFileDialog
 from PyQt5.uic import loadUi
 from wmpl.MetSim.SimResults import SimulationResults
 
 from wmpl.Formats.Met import loadMet
 from wmpl.MetSim.GUITools import MatplotlibPopupWindow
-from wmpl.MetSim.MetSimErosion import runSimulation, Constants
+from wmpl.MetSim.MetSimErosion import runSimulation, Constants, zenithAngleAtSimulationBegin
 from wmpl.Trajectory.Trajectory import Trajectory, ObservedPoints
 from wmpl.Trajectory.Orbit import calcOrbit, Orbit
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensity, atmDensPoly
@@ -34,7 +36,7 @@ from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy
 from wmpl.Utils.Pickling import loadPickle, savePickle
 from wmpl.Utils.Plotting import saveImage
 from wmpl.Utils.TrajConversions import unixTime2JD, datetime2JD, geo2Cartesian, cartesian2Geo, altAz2RADec, \
-    altAz2RADec_vect, raDec2ECI
+    altAz2RADec_vect, raDec2ECI, EARTH
 
 
 
@@ -1439,6 +1441,112 @@ def loadUSGInputFile(dir_path, usg_file):
     return data, traj
 
 
+def loadWakeFile(traj, file_path):
+    """ Load a mirfit wake "wid" file. 
+    
+    Arguments:
+        traj: Trajectory object.
+        file_path: Path to the wid file.
+
+    Return:
+        wake_container: WakeContainer object.
+    
+    """
+
+
+    # Extract the site ID and the frame number from the file name
+    site_id, frame_n = os.path.basename(file_path).replace('.txt', '').split('_')[1:]
+    site_id = str(int(site_id))
+    frame_n = int(frame_n)
+
+    print('wid file: ', site_id, frame_n, end='')
+
+
+    # Extract geo coordinates of sites
+    lat_dict = {obs.station_id:obs.lat for obs in traj.observations}
+    lon_dict = {obs.station_id:obs.lon for obs in traj.observations}
+    ele_dict = {obs.station_id:obs.ele for obs in traj.observations}
+
+    wake_container = None
+    leading_state_vect_dist = 0
+    with open(file_path) as f:
+        for line in f:
+
+            if line.startswith('#'):
+                continue
+
+            line = line.replace('\n', '').replace('\r', '').split()
+
+            if not line:
+                continue
+
+
+            # Init the wake container
+            if wake_container is None:
+                wake_container = WakeContainter(site_id, frame_n)
+
+            # Read the wake point
+            n, th, phi, _, _, _, _, intens_sum, amp, r, b, c = list(map(float, line))
+
+            # Skip bad measurements
+            if np.any(np.isnan([th, phi])):
+                continue
+
+            ### Compute the projection of the wake line of sight to the trajectory ###
+
+            # Calculate RA/Dec
+            ra, dec = altAz2RADec(np.pi/2 - np.radians(phi), np.pi/2 - np.radians(th), \
+                traj.jdt_ref, lat_dict[site_id], lon_dict[site_id])
+
+            # Compute the station coordinates at the given time
+            stat = geo2Cartesian(lat_dict[site_id], lon_dict[site_id], ele_dict[site_id], \
+                traj.jdt_ref)
+
+            # Compute measurement rays in cartesian coordinates
+            meas = np.array(raDec2ECI(ra, dec))
+
+            # Calculate closest points of approach (observed line of sight to radiant line)
+            obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, traj.state_vect_mini, \
+                traj.radiant_eci_mini)
+
+            # If the projected point is above the state vector, use negative lengths
+            state_vect_dist_sign = 1.0
+            if vectMag(rad_cpa) > vectMag(traj.state_vect_mini):
+                state_vect_dist_sign = -1.0
+
+
+            # Compute Distance from the state vector to the projected point on the radiant line
+            state_vect_dist = state_vect_dist_sign*vectMag(traj.state_vect_mini - rad_cpa)
+
+            # Compute the height (meters)
+            _, _, ht = cartesian2Geo(traj.jdt_ref, *rad_cpa)
+
+            ### ###
+
+            # Record the state vector distance of the leading fragment
+            if int(n) == 0:
+                leading_state_vect_dist = state_vect_dist
+
+            wake_container.addPoint(n, th, phi, intens_sum, amp, r, b, c, state_vect_dist, ht)
+
+
+        # If there are no points in the wake container, don't use it
+        if wake_container is not None:
+            if len(wake_container.points) == 0:
+                wake_container = None
+
+        # Compute lengths of the leading fragment
+        if wake_container is not None:
+            for wake_pt in wake_container.points:
+                wake_pt.leading_frag_length = wake_pt.state_vect_dist - leading_state_vect_dist
+
+    if wake_container is None:
+        print("... rejected")
+    else:
+        print("... loaded!")
+
+    return wake_container
+
 
 class MetSimGUI(QMainWindow):
     def __init__(self, traj_path, const_json_file=None, met_path=None, lc_path=None, wid_files=None, \
@@ -1638,8 +1746,6 @@ class MetSimGUI(QMainWindow):
         # Assign USG values from the input file, if given
         if self.usg_data is not None:
 
-            self.const.v_init = 1000*self.usg_data.v
-            self.const.zenith_angle = np.radians(90 - self.usg_data.entry_angle)
             self.const.P_0m = self.usg_data.P_0m_bolo
 
 
@@ -1692,8 +1798,11 @@ class MetSimGUI(QMainWindow):
 
         else:
 
+            # Compute the radius of the Earth at the latitude of the observer
+            self.const.r_earth = \
+                EARTH.EQUATORIAL_RADIUS/np.sqrt(1.0 - (EARTH.E**2)*np.sin(self.traj.rbeg_lat)**2)
+
             # Set the constants value from the trajectory
-            self.const.zenith_angle = self.traj.orbit.zc
             self.const.v_init = self.traj.orbit.v_init
 
             # Set kill height to the observed end height
@@ -1707,6 +1816,9 @@ class MetSimGUI(QMainWindow):
             self.const.erosion_on = False
             self.const.disruption_on = False
 
+            # Compute the zenith angle at the beginning of the simulation, taking Earth's curvature into 
+            # account
+            self.computeSimZenithAngle()
 
             # Calculate the photometric mass
             _, self.const.m_init = self.calcPhotometricMass()
@@ -1722,8 +1834,8 @@ class MetSimGUI(QMainWindow):
         # Determine the height range for fitting the density
         self.dens_fit_ht_beg = self.const.h_init
         self.dens_fit_ht_end = self.traj.rend_ele - 5000
-        if self.dens_fit_ht_end < 15000:
-            self.dens_fit_ht_end = 15000
+        if self.dens_fit_ht_end < 14000:
+            self.dens_fit_ht_end = 14000
 
         # Fit the polynomail describing the density
         dens_co = self.fitAtmosphereDensity(self.dens_fit_ht_beg, self.dens_fit_ht_end)
@@ -1857,105 +1969,22 @@ class MetSimGUI(QMainWindow):
         lon_mean = meanAngle([self.traj.rbeg_lon, self.traj.rend_lon])
 
         return fitAtmPoly(lat_mean, lon_mean, dens_fit_ht_end, dens_fit_ht_beg, self.traj.jdt_ref)
+    
+    def computeSimZenithAngle(self):
+        """ Compute the zenith angle at the beginning of the simulation, taking Earth's curvature into 
+        account.
+        
+        """
+
+        # Compute the zenith angle at the beginning of the simulation
+        self.const.zenith_angle = zenithAngleAtSimulationBegin(self.const.h_init, self.traj.rbeg_ele, 
+            self.traj.orbit.zc, self.const.r_earth)
 
 
     def loadWakeFile(self, file_path):
         """ Load a mirfit wake "wid" file. """
 
-
-        # Extract the site ID and the frame number from the file name
-        site_id, frame_n = os.path.basename(file_path).replace('.txt', '').split('_')[1:]
-        site_id = str(int(site_id))
-        frame_n = int(frame_n)
-
-        print('wid file: ', site_id, frame_n, end='')
-
-
-        # Extract geo coordinates of sites
-        lat_dict = {obs.station_id:obs.lat for obs in self.traj.observations}
-        lon_dict = {obs.station_id:obs.lon for obs in self.traj.observations}
-        ele_dict = {obs.station_id:obs.ele for obs in self.traj.observations}
-
-        wake_container = None
-        leading_state_vect_dist = 0
-        with open(file_path) as f:
-            for line in f:
-
-                if line.startswith('#'):
-                    continue
-
-                line = line.replace('\n', '').replace('\r', '').split()
-
-                if not line:
-                    continue
-
-
-                # Init the wake container
-                if wake_container is None:
-                    wake_container = WakeContainter(site_id, frame_n)
-
-                # Read the wake point
-                n, th, phi, _, _, _, _, intens_sum, amp, r, b, c = list(map(float, line))
-
-                # Skip bad measurements
-                if np.any(np.isnan([th, phi])):
-                    continue
-
-                ### Compute the projection of the wake line of sight to the trajectory ###
-
-                # Calculate RA/Dec
-                ra, dec = altAz2RADec(np.pi/2 - np.radians(phi), np.pi/2 - np.radians(th), \
-                    self.traj.jdt_ref, lat_dict[site_id], lon_dict[site_id])
-
-                # Compute the station coordinates at the given time
-                stat = geo2Cartesian(lat_dict[site_id], lon_dict[site_id], ele_dict[site_id], \
-                    self.traj.jdt_ref)
-
-                # Compute measurement rays in cartesian coordinates
-                meas = np.array(raDec2ECI(ra, dec))
-
-                # Calculate closest points of approach (observed line of sight to radiant line)
-                obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, self.traj.state_vect_mini, \
-                    self.traj.radiant_eci_mini)
-
-                # If the projected point is above the state vector, use negative lengths
-                state_vect_dist_sign = 1.0
-                if vectMag(rad_cpa) > vectMag(self.traj.state_vect_mini):
-                    state_vect_dist_sign = -1.0
-
-
-                # Compute Distance from the state vector to the projected point on the radiant line
-                state_vect_dist = state_vect_dist_sign*vectMag(self.traj.state_vect_mini - rad_cpa)
-
-                # Compute the height (meters)
-                _, _, ht = cartesian2Geo(self.traj.jdt_ref, *rad_cpa)
-
-                ### ###
-
-                # Record the state vector distance of the leading fragment
-                if int(n) == 0:
-                    leading_state_vect_dist = state_vect_dist
-
-                wake_container.addPoint(n, th, phi, intens_sum, amp, r, b, c, state_vect_dist, ht)
-
-
-            # If there are no points in the wake container, don't use it
-            if wake_container is not None:
-                if len(wake_container.points) == 0:
-                    wake_container = None
-
-            # Compute lengths of the leading fragment
-            if wake_container is not None:
-                for wake_pt in wake_container.points:
-                    wake_pt.leading_frag_length = wake_pt.state_vect_dist - leading_state_vect_dist
-
-        if wake_container is None:
-            print("... rejected")
-        else:
-            print("... loaded!")
-
-        return wake_container
-
+        return loadWakeFile(self.traj, file_path)
 
 
     def calcPhotometricMass(self):
@@ -3027,7 +3056,7 @@ class MetSimGUI(QMainWindow):
             height_data = obs.model_ht[obs.ignore_list == 0][1:]/1000
 
             # If there is a simulation, correct the heights
-            if sr is not None:
+            if (sr is not None) and (obs.state_vect_dist is not None):
 
                 # Compute the corrected heights, so the simulations and the observations match
                 height_data = self.sim_norm_ht_interp(obs.state_vect_dist[obs.ignore_list == 0][1:])/1000
@@ -3200,7 +3229,7 @@ class MetSimGUI(QMainWindow):
         # Plot the lag from observations
         for obs in self.traj.observations:
 
-            if sr is None:
+            if (sr is None) or (obs.state_vect_dist is None):
 
                 # Get observed heights
                 height_data = obs.model_ht[obs.ignore_list == 0]
@@ -3214,24 +3243,28 @@ class MetSimGUI(QMainWindow):
             else:
 
                 # Compute the observed lag
-                obs_lag = obs.state_vect_dist - self.sim_vel_beg*obs.time_data
+                obs_lag = obs.state_vect_dist[obs.ignore_list == 0] \
+                    - self.sim_vel_beg*obs.time_data[obs.ignore_list == 0]
 
                 # Compute the corrected heights, so the simulations and the observations match
-                obs_ht_corr = self.sim_norm_ht_interp(obs.state_vect_dist)
+                obs_ht = self.sim_norm_ht_interp(obs.state_vect_dist[obs.ignore_list == 0])
+                
+                # # Take the observed heights
+                # obs_ht = obs.model_ht[obs.ignore_list == 0]
 
                 # Plot the observed lag
-                lag_handle = lag_plot.plot(obs_lag, obs_ht_corr/1000, marker='x', \
+                lag_handle = lag_plot.plot(obs_lag, obs_ht/1000, marker='x', \
                     linestyle='dashed', label=obs.station_id, markersize=3, linewidth=0.5)
                 
 
                 # Sample the simulated normalized length at observed times
-                sim_norm_len_sampled = self.sim_norm_len_interp(obs.time_data)
+                sim_norm_len_sampled = self.sim_norm_len_interp(obs.time_data[obs.ignore_list == 0])
 
                 # Compute the length residuals
-                len_res = obs.state_vect_dist - sim_norm_len_sampled
+                len_res = obs.state_vect_dist[obs.ignore_list == 0] - sim_norm_len_sampled
 
                 # Plot the length residuals
-                lag_residuals_plot.scatter(len_res, obs_ht_corr/1000, marker='+', \
+                lag_residuals_plot.scatter(len_res, obs_ht/1000, marker='+', \
                     c=lag_handle[0].get_color(), label="Leading, {:s}".format(obs.station_id), s=6)
                 
 
@@ -3288,10 +3321,13 @@ class MetSimGUI(QMainWindow):
                     obs_lag = state_vect_dist_data - self.sim_vel_beg*time_data
 
                     # Compute the corrected heights, so the simulations and the observations match
-                    obs_ht_corr = self.sim_norm_ht_interp(state_vect_dist_data)
+                    obs_ht = self.sim_norm_ht_interp(state_vect_dist_data)
+
+                    # # Get observed heights
+                    # obs_ht = self.met_obs.height_data[site]
 
                     # Plot the observed lag
-                    lag_handle = lag_plot.plot(obs_lag, obs_ht_corr/1000, marker='x', \
+                    lag_handle = lag_plot.plot(obs_lag, obs_ht/1000, marker='x', \
                         linestyle='dashed', label=str(site),  markersize=5, linewidth=1)
                     
 
@@ -3302,7 +3338,7 @@ class MetSimGUI(QMainWindow):
                     len_res = state_vect_dist_data - sim_norm_len_sampled
 
                     # Plot the length residuals
-                    lag_residuals_plot.scatter(len_res, obs_ht_corr/1000, marker='+', \
+                    lag_residuals_plot.scatter(len_res, obs_ht/1000, marker='+', \
                         c=lag_handle[0].get_color(), label="Leading, {:s}".format(str(site)), s=6)
 
 
@@ -4199,6 +4235,7 @@ class MetSimGUI(QMainWindow):
             self.fragmentation.writeFragmentationFile()
 
 
+
         # Store previous run results
         self.const_prev = copy.deepcopy(self.const)
         self.simulation_results_prev = copy.deepcopy(self.simulation_results)
@@ -4884,9 +4921,57 @@ if __name__ == "__main__":
 
     #########################
 
+    # os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1" # bool
+
+
+    ### Compute the window scaling factor for high resolution displays ###
+
+    # Get the screen resolution
+    app = QApplication([])
+    screen = app.primaryScreen()
+    screen_size = screen.size()
+    screen_width = screen_size.width()
+    screen_height = screen_size.height()
+
+    # Only scale the window if the screen resolution is not 1080p
+    if screen_height != 1080:
+
+        # Compute the scaling factor, taking 1080p as the reference resolution (compute the ratio of 
+        # diagonals)
+        # Use the screen height as the reference to avoid issues with very wide screens, and assume that the 
+        # screen size ratio is 1.6 (16:10)
+        screen_width_calc = int(screen_height*1.6)
+        scaling_factor = np.sqrt(screen_width_calc**2 + screen_height**2) / np.sqrt(1920**2 + 1080**2)
+
+        # If the scaling factor is > 1, reduce it by 2% to avoid too large fonts
+        if scaling_factor > 1:
+            scaling_factor *= 0.98
+
+            if scaling_factor < 1:
+                scaling_factor = 1
+
+        os.environ["QT_SCALE_FACTOR"] = str(scaling_factor)
+
+    else:    
+        scaling_factor = 1
+
+    # Destroy the QApplication object
+    app.quit()
+    del app
+
+    ### ###
+    
+
     # Init PyQt5 window
     app = QApplication([])
 
+    # Set a font for the whole application
+    font = QFont()
+    font.setFamily("Arial")
+    font.setPointSize(int(np.ceil(8/scaling_factor)))
+    app.setFont(font)
+
+    
 
     # Automatically find all input files if the --all option is given
     traj_pickle_file = None
