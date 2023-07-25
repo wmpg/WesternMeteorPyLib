@@ -2312,10 +2312,15 @@ def plotObsAndSimComparison(traj, sr, met_obs, plot_dir, wake_containers=None, p
         handles = []
 
         handles.append(mlines.Line2D([0], [0], **plot_params_dict["sim"]))
-        for site_id in plot_params_dict["sites-wide"]:
-            handles.append(mlines.Line2D([0], [0], **plot_params_dict["sites-wide"][site_id]))
+
+        if met_obs is not None:
+            for site_id in plot_params_dict["sites-wide"]:
+                if str(site_id) in map(str, met_obs.sites):
+                    handles.append(mlines.Line2D([0], [0], **plot_params_dict["sites-wide"][site_id]))
+
         for site_id in plot_params_dict["sites-narrow"]:
-            handles.append(mlines.Line2D([0], [0], **plot_params_dict["sites-narrow"][site_id]))
+            if str(site_id) in map(str, [obs.station_id for obs in traj.observations]):
+                handles.append(mlines.Line2D([0], [0], **plot_params_dict["sites-narrow"][site_id]))
         
         # Add the legend
         ax_mag.legend(handles=handles, fontsize=8)
@@ -4854,10 +4859,22 @@ class MetSimGUI(QMainWindow):
         print()
 
         if self.simulation_results is not None:
+
+            # Check if plotting CAMO data
+            camo = False
+
+            if len(self.wake_meas):
+                camo = True
+
+            if self.met_obs is not None:
+                if self.met_obs.met.mirfit:
+                    camo = True
             
+
+
             # Plot the comparison between the simulations and observations (excluding the wake)
             plotObsAndSimComparison(self.traj, self.simulation_results, self.met_obs, self.dir_path, 
-                                    wake_containers=None, plot_lag=True)
+                                    wake_containers=None, plot_lag=True, camo=camo)
 
             # Show a message box
             msg = QMessageBox()
