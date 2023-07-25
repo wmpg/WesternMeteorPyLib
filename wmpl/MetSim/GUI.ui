@@ -2481,6 +2481,19 @@ LCs</string>
       <string>Lum. eff.</string>
      </property>
     </widget>
+    <widget class="QPushButton" name="plotObsVsSimComparisonButton">
+     <property name="geometry">
+      <rect>
+       <x>90</x>
+       <y>50</y>
+       <width>91</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Obs vs sim</string>
+     </property>
+    </widget>
    </widget>
    <widget class="QLabel" name="simRadiatedEnergyLabel">
     <property name="geometry">
