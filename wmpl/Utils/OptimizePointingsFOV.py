@@ -6,6 +6,7 @@ from __future__ import print_function, division, absolute_import
 
 import copy
 import datetime
+import multiprocessing
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -15,6 +16,7 @@ import scipy.optimize
 from wmpl.TrajSim.ShowerSim import initStationList, plotStationFovs
 from wmpl.Utils.TrajConversions import datetime2JD
 from wmpl.Utils.Math import estimateHullOverlapRatio
+from wmpl.Utils.PyDomainParallelizer import domainParallelizer
 
 
 
@@ -151,9 +153,44 @@ def stationsCommonVolume(station_list, fixed_cameras, jd, max_height, min_height
 #     print(np.degrees(res.x))
 
 
+def _computePointing(azim_centre_orig, elev_centre_orig, stat_moving, i, jd, \
+                                      d_range, elev_ind, d_elev, azim_ind, d_azim):
 
+    # Calculate the azimuth of centre
+    azim = (azim_centre_orig + d_azim)%(2*np.pi)
 
-def explorePointings(station_list, fixed_cameras, min_height, max_height, moving_ranges, steps):
+    # Calculate the elevation of the centre
+    elev = elev_centre_orig + d_elev
+
+    if elev > np.pi/2:
+        elev = (np.pi/2 - elev)%(np.pi/2)
+
+    if elev < 0:
+        elev = np.abs(elev)
+
+    # Set the new centre to the station
+    stat_moving.azim_centre = azim
+    stat_moving.elev_centre = elev
+
+    # Assign the changed parameter to the moving camera
+    station_list[i] = stat_moving
+
+    # Estimate the volume only for this moving camera
+    fix_cam = [True]*len(station_list)
+    fix_cam[i] = False
+
+    # Estimate the intersection volume
+    vol = stationsCommonVolume(station_list, fix_cam, jd, max_height, min_height)
+
+    # Print status messages
+    print()
+    print('Azim: {:d}/{:d}, elev: {:d}/{:d}'.format(azim_ind + 1, \
+        len(d_range), elev_ind + 1, len(d_range)))
+    print('Azim {:.2f} elev {:.2f} vol {:e}'.format(np.degrees(azim), np.degrees(elev), vol))
+
+    return [azim, elev, vol]
+
+def explorePointings(station_list, fixed_cameras, min_height, max_height, moving_ranges, steps, parallel_jobs = 1):
     """ Given the list of cameras, a range of heights and a range of possible movements for the camera,
         construct a map of volume overlaps for each camera position. The map will be saves as an image.
 
@@ -166,6 +203,7 @@ def explorePointings(station_list, fixed_cameras, min_height, max_height, moving
         moving_ranges: [list] A list of possible movement for each non-fixed camera (degrees).
         steps: [int] Steps to take inside the moving range. The map will thus have a resolution of
             range/steps.
+        parallel_jobs: [int] number of parallel jobs. Default: 1
 
     Return:
         None
@@ -198,48 +236,22 @@ def explorePointings(station_list, fixed_cameras, min_height, max_height, moving
 
             d_range = np.linspace(-mv_range/2.0, +mv_range/2, steps)
 
-            # Make a grid of movements
-            total_runs = 1
+            # Make a grid of movements in list of parameters that will be passed to each
+            # _computePointing parallel instance
+            pointings = []
             for elev_ind, d_elev in enumerate(d_range):
                 for azim_ind, d_azim in enumerate(d_range):
+                    pointings.append([azim_centre_orig, elev_centre_orig, stat_moving, i, jd, \
+                                      d_range, elev_ind, d_elev, azim_ind, d_azim])
 
-                    # Calculate the azimuth of centre
-                    azim = (azim_centre_orig + d_azim)%(2*np.pi)
+            print()
+            print("-> Pointings to compute: {:d}".format(len(pointings)))
 
-                    # Calculate the elevation of the centre
-                    elev = elev_centre_orig + d_elev
+            # run parallel jobs to compute pointings
+            volume_results = domainParallelizer(pointings, _computePointing, cores=parallel_jobs)
 
-                    if elev > np.pi/2:
-                        elev = (np.pi/2 - elev)%(np.pi/2)
-
-                    if elev < 0:
-                        elev = np.abs(elev)
-
-                    # Set the new centre to the station
-                    stat_moving.azim_centre = azim
-                    stat_moving.elev_centre = elev
-
-                    # Assign the changed parameter to the moving camera
-                    station_list[i] = stat_moving
-
-                    # Estimate the volume only for this moving camera
-                    fix_cam = [True]*len(station_list)
-                    fix_cam[i] = False
-
-                    # Estimate the intersection volume
-                    vol = stationsCommonVolume(station_list, fix_cam, jd, max_height, min_height)
-
-                    volume_results.append([azim, elev, vol])
-
-                    # Print status messages
-                    print()
-                    print('Azim: {:d}/{:d}, elev: {:d}/{:d}, total runs: {:d}/{:d}'.format(azim_ind + 1, \
-                    	len(d_range), elev_ind + 1, len(d_range), total_runs, \
-                    	len(d_range)**2))
-                    print('Azim {:.2f} elev {:.2f} vol {:e}'.format(np.degrees(azim), np.degrees(elev), vol))
-
-                    total_runs += 1
-
+            print()
+            print("-> Pointings computed: {:d}".format(len(volume_results)))
 
 
             volume_results = np.array(volume_results)
@@ -418,7 +430,8 @@ if __name__ == "__main__":
     # Steps of movement to explore
     steps = 21
 
-
+    # How many parallel jobs computing pointings
+    parallel_jobs = multiprocessing.cpu_count() # use all available CPUs
 
     ##########################################################################################################
 
@@ -434,7 +447,7 @@ if __name__ == "__main__":
     plotStationFovs(station_list, datetime2JD(datetime.datetime.now()), min_height, max_height)
 
     # Do an assessment for the whole range of given rights
-    explorePointings(station_list, fixed_cameras, min_height, max_height, moving_ranges, steps)
+    explorePointings(station_list, fixed_cameras, min_height, max_height, moving_ranges, steps, parallel_jobs)
 
     # # Do the anaysis for ranges of heights
 
