@@ -7,7 +7,8 @@ import numpy as np
 
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.Trajectory.GuralTrajectory import GuralTrajectory
-from wmpl.Utils.TrajConversions import J2000_JD, jd2Date, equatorialCoordPrecession_vect, raDec2AltAz_vect
+from wmpl.Utils.TrajConversions import J2000_JD, jd2Date, equatorialCoordPrecession_vect, raDec2AltAz_vect, \
+    jd2LST
 
 
 
@@ -291,6 +292,85 @@ def solveTrajectoryGeneric(jdt_ref, meteor_list, dir_path, solver='original', **
     traj = traj.run()
 
     return traj
+
+
+
+def writeMiligInputFileMeteorObservation(jdt_ref, meteor_list, file_path, convergation_fact=1.0):
+    """ Write the MILIG input file.
+    
+    Arguments:
+        jdt_ref: [float] reference Julian date.
+        meteor_list: [list] A list of MeteorObservation objects.
+        file_path: [str] Path to the MILIG input file which will be written.
+
+    Keyword arguments:
+        convergation_fact: [float] Convergation control factor. Iteration is stopped when increments of all 
+            parameters are smaller than a fixed value. This factor scales those fixed values such that 
+            tolerance can be increased or decreased. By default, evcorr sets this to 0.01 (stricter 
+            tolerances) and METAL uses 1.0 (default tolerances).
+
+    Return:
+        None
+    """
+    
+    # Take the first station's longitude for the GST calculation
+    lon = meteor_list[0].longitude
+
+    # Calculate the Greenwich Mean Time
+    _, gst = jd2LST(jdt_ref, np.degrees(lon))
+
+    datetime_obj = jd2Date(jdt_ref, dt_obj=True)
+
+    with open(file_path, 'w') as f:
+
+        datetime_str = datetime_obj.strftime("%Y%m%d%H%M%S.%f")[:16]
+
+        # Write the first line with the date, GST and Convergation control factor
+        f.write(datetime_str + '{:10.3f}{:10.3f}\n'.format(gst, convergation_fact))
+
+        # Go through every meteor
+        for i, meteor in enumerate(meteor_list):
+
+            # Extract the station ID - if it can be converted to an integer, use it. If not, use the
+            # index of the meteor in the list
+            try:
+                station_id = int(meteor.station_id)
+
+            except:
+                station_id = i + 1
+
+            # Write station ID and meteor coordinates. The weight of the station is set to 1
+            f.write("{:3d}{:+10.5f}{:10.6f}{:5.3f}{:5.2f}\n".format(station_id, 
+                np.degrees(meteor.longitude), np.degrees(meteor.latitude), meteor.height/1000.0, 1.0))
+
+            # Go through every point in the meteor
+            for i, (azim, elev, t) in enumerate(zip(meteor.azim_data, meteor.elev_data, meteor.time_data)):
+
+                # Compute the zenith angle from the elevation angle
+                zangle = np.pi/2 - elev
+
+                last_pick = 0
+
+                # If this is the last point, last_pick is 9
+                if i == len(meteor.time_data) - 1:
+                    last_pick = 9
+
+                # Write individual meteor points. If the 4th column is 1, the point will be ignored.
+                if t < 0:
+                    time_format = "{:+8.5f}"
+                else:
+                    time_format = "{:8.6f}"
+                f.write(("{:9.5f}{:8.5f}{:3d}{:3d}" + time_format + "\n").format(np.degrees(azim), \
+                    np.degrees(zangle), last_pick, 0, t))
+
+        # Flag indicating that the meteor data ends here
+        f.write('-1\n')
+
+        # Initial aproximations
+        f.write(' 0.0 0.0 0.0 0.0 0.0 0.0 0.0\n')
+
+        # Optional parameters
+        f.write('RFIX\n \n')
 
 
 

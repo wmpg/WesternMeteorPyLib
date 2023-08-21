@@ -10,7 +10,7 @@ import datetime
 import numpy as np
 
 from wmpl.Formats.GenericFunctions import addSolverOptions, solveTrajectoryGeneric, MeteorObservation, \
-    prepareObservations
+    prepareObservations, writeMiligInputFileMeteorObservation
 from wmpl.Utils.TrajConversions import J2000_JD, datetime2JD, altAz2RADec_vect, equatorialCoordPrecession_vect
 
 
@@ -178,6 +178,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('-w', '--walk', \
         help="Recursively find all ECSV files in the given folder and use them for trajectory estimation. If a directory containing the file contains the word 'REJECT', it will be skipped. ", \
         action="store_true")
+    
+    arg_parser.add_argument('--writemilig', metavar='MILIG_PATH', type=str, \
+        help="Write the observations to a MILIG input file and exit. The MILIG_PATH argument is the path to the output file.")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -216,6 +219,8 @@ if __name__ == "__main__":
                         ecsv_paths.append(os.path.join(dir_name, fn))
                         ecsv_names.append(fn)
 
+                        print(fn)
+
 
     else:
         for ecsv_p in cml_args.ecsv_files:
@@ -232,6 +237,19 @@ if __name__ == "__main__":
 
         # Extract dir path
         dir_path = os.path.dirname(ecsv_paths[0])
+
+
+    # Load the observations into container objects
+    jdt_ref, meteor_list = loadECSVs(ecsv_paths)
+
+
+    # Write the observations to a MILIG input file and exit
+    if cml_args.writemilig:
+        writeMiligInputFileMeteorObservation(jdt_ref, meteor_list, cml_args.writemilig)
+        print("MILIG input file written to:", cml_args.writemilig)
+        print("Exiting...")
+        sys.exit()
+
 
 
     # Check that there are more than 2 ECSV files given
@@ -253,11 +271,6 @@ if __name__ == "__main__":
         vinitht = cml_args.vinitht[0]
 
     ### ###
-
-
-
-    # Load the observations into container objects
-    jdt_ref, meteor_list = loadECSVs(ecsv_paths)
 
 
     # Solve the trajectory
