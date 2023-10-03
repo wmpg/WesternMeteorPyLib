@@ -8,7 +8,7 @@ import argparse
 
 import numpy as np
 
-from wmpl.Formats.GenericFunctions import addSolverOptions
+from wmpl.Formats.GenericFunctions import addSolverOptions, writeMiligInputFileMeteorObservation
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.Trajectory.GuralTrajectory import GuralTrajectory
 from wmpl.Utils.TrajConversions import date2JD, jd2Date, jd2LST
@@ -263,6 +263,18 @@ def solveTrajectoryMILIG(dir_path, file_name, solver='original', **kwargs):
 
 
 def writeMiligInputFile(jdt_ref, meteor_list, file_path, convergation_fact=1.0):
+
+    # If the first element of meteor_list is a StationData object, use the approprite function
+    if isinstance(meteor_list[0], StationData):
+        return writeMiligInputFileStationData(jdt_ref, meteor_list, file_path, convergation_fact=convergation_fact)
+    
+    else:
+        return writeMiligInputFileMeteorObservation(jdt_ref, meteor_list, file_path, convergation_fact=convergation_fact)
+    
+
+
+
+def writeMiligInputFileStationData(jdt_ref, meteor_list, file_path, convergation_fact=1.0):
     """ Write the MILIG input file. 
 
     Arguments:
@@ -318,7 +330,7 @@ def writeMiligInputFile(jdt_ref, meteor_list, file_path, convergation_fact=1.0):
                     time_format = "{:+8.5f}"
                 else:
                     time_format = "{:8.6f}"
-                f.write(("{:9.5f}{:8.5}{:3d}{:3d}" + time_format + "\n").format(np.degrees(azim), \
+                f.write(("{:9.5f}{:8.5f}{:3d}{:3d}" + time_format + "\n").format(np.degrees(azim), \
                     np.degrees(zangle), last_pick, 0, t))
 
         # Flag indicating that the meteor data ends here

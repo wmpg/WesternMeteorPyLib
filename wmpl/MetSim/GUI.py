@@ -18,6 +18,8 @@ import scipy.interpolate
 import scipy.optimize
 import scipy.signal
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import matplotlib.lines as mlines
 
 import PyQt5.QtCore
 from PyQt5.QtGui import QFont, QFontDatabase
@@ -35,8 +37,8 @@ from wmpl.Utils.Math import mergeClosePoints, findClosestPoints, vectMag, vectNo
 from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy
 from wmpl.Utils.Pickling import loadPickle, savePickle
 from wmpl.Utils.Plotting import saveImage
-from wmpl.Utils.TrajConversions import unixTime2JD, datetime2JD, geo2Cartesian, cartesian2Geo, altAz2RADec, \
-    altAz2RADec_vect, raDec2ECI, EARTH
+from wmpl.Utils.TrajConversions import unixTime2JD, datetime2JD, jd2Date, geo2Cartesian, cartesian2Geo, \
+    altAz2RADec, altAz2RADec_vect, raDec2ECI, EARTH
 
 
 
@@ -1548,6 +1550,665 @@ def loadWakeFile(traj, file_path):
     return wake_container
 
 
+
+def extractWake(sr, wake_containers, wake_fraction=0.5, peak_region=20, site_id=None, max_len_shift=50):
+    """ Extract the wake from the simulation results. 
+    
+    Arguments:
+        sr: [SimulationResults object] Simulation results.
+        wake_containers: [list of WakeContainer objects] List of wake containers.
+
+    Keyword arguments:
+        wake_fraction: [float] Fraction of the wake height to probe. 0 is the height when tracking began and
+            1 is the height when the tracking stopped.
+        peak_region: [float] Region around the peak to use for the wake normalization (m). If None, the whole
+            wake will be used.
+        site_id: [int] Name of the site where the meteor was observed. 1 for Tavistock and 2 for Elginfield. 
+            If None, both will be taken.
+        max_len_shift: [float] Maximum length shift allowed when aligning the observed and simulated wakes (m).
+            If the shift is larger than this, the wake will not be aligned.
+    """
+
+    if peak_region is None:
+        peak_region = np.inf
+
+    # Filter wake containers by site
+    if site_id is not None:
+        wake_containers = [wake_container for wake_container in wake_containers 
+                           if wake_container.site_id == site_id]
+
+    # Get a list of all heights in the wake
+    wake_heights = [wake_container.points[0].ht for wake_container in wake_containers]
+
+    # Compute the range of heights
+    ht_range = np.max(wake_heights) - np.min(wake_heights)
+
+    # Compute the probing heights
+    ht_ref = np.max(wake_heights) - wake_fraction*ht_range
+
+    # Find the container which are closest to reference height of the wake fraction
+    ht_ref_idx = np.argmin(np.abs(np.array(wake_heights) - ht_ref))
+
+    # Get the two containers with observations
+    wake_container_ref = wake_containers[ht_ref_idx]
+
+    # Find the wake index closest to the given wake height, ignoring nana
+    wake_res_indx_ref =  np.nanargmin(np.abs(ht_ref - sr.leading_frag_height_arr))
+
+    # Extract the wake results
+    wake_ref = sr.wake_results[wake_res_indx_ref]
+
+    # Extract the wake points from the containers
+    len_ref_array = []
+    wake_ref_intensity_array = []
+    for wake_pt in wake_container_ref.points:
+        len_ref_array.append(wake_pt.leading_frag_length)
+        wake_ref_intensity_array.append(wake_pt.intens_sum)
+
+    len_ref_array = np.array(len_ref_array)
+    wake_ref_intensity_array = np.array(wake_ref_intensity_array)
+
+    # Normalize the wake intensity so the areas are equal between the observed and simulated wakes
+    # Only take the points +/- peak_region m from the maximum intensity
+    obslen_ref_max_intens = len_ref_array[np.argmax(wake_ref_intensity_array)]
+    obslen_ref_filter = np.abs(len_ref_array - obslen_ref_max_intens) < peak_region
+    obs_area_ref = np.trapz(wake_ref_intensity_array[obslen_ref_filter], len_ref_array[obslen_ref_filter])
+    simlen_ref_max_intens = wake_ref.length_array[np.argmax(wake_ref.wake_luminosity_profile)]
+    simlen_ref_filter = np.abs(wake_ref.length_array - simlen_ref_max_intens) < peak_region
+    sim_area_ref = np.trapz(wake_ref.wake_luminosity_profile[simlen_ref_filter], wake_ref.length_array[simlen_ref_filter])
+
+    # Normalize the observed wake intensity
+    wake_ref_intensity_array = wake_ref_intensity_array*sim_area_ref/obs_area_ref
+
+
+
+    ### Align the observed and simulated wakes by correlation ###
+    
+    # Interpolate the model values and sample them at observed points
+    sim_wake_interp = scipy.interpolate.interp1d(wake_ref.length_array, \
+        wake_ref.wake_luminosity_profile, bounds_error=False, fill_value=0)
+    model_wake_obs_len_sample = sim_wake_interp(-len_ref_array)
+
+    # Correlate the wakes and find the shift
+    wake_shift = np.argmax(np.correlate(model_wake_obs_len_sample, wake_ref_intensity_array, \
+        "full")) + 1
+
+    # Find the index of the zero observed length
+    obs_len_zero_indx = np.argmin(np.abs(len_ref_array))
+
+    # Compute the length shift
+    len_shift = len_ref_array[(obs_len_zero_indx + wake_shift)%len(model_wake_obs_len_sample)]
+
+    # If the shift is larger than the maximum allowed, do not align the wakes
+    if np.abs(len_shift) > max_len_shift:
+        len_shift = 0
+
+    # Add the offset to the observed length
+    len_ref_array += len_shift
+
+    ### ###
+
+
+    return (
+        ht_ref, # Return the reference height
+        wake_ref.length_array, wake_ref.wake_luminosity_profile, # Return the simulated wake at the ref ht
+        -len_ref_array, wake_ref_intensity_array # Return the observed wake at the ref ht
+    )
+
+
+def plotWakeOverview(sr, wake_containers, plot_dir, event_name, site_id=None, wake_samples=8,
+                     first_height_ratio=0.1, final_height_ratio=0.75, peak_region=20):
+    """ Plot the wake at a range of heights showing the match between the observed and simulated wake. 
+
+    Arguments:
+        sr: [SimulationResults object] Simulation results.
+        wake_containers: [list of WakeContainer objects] List of wake containers.
+        plot_dir: [str] Path to the directory where the plots will be saved.
+        event_name: [str] Name of the event.
+
+    Keyword arguments:
+        site_id: [int] Name of the site where the meteor was observed. 1 for Tavistock and 2 for Elginfield.
+            If None, both will be taken.
+        wake_samples: [int] Number of wake samples to plot.
+        first_height_ratio: [float] Fraction of the wake height to probe for the first sample. 0 is the height
+            when tracking began and 1 is the height when the tracking stopped.
+        final_height_ratio: [float] Fraction of the wake height to probe for the last sample. 0 is the height
+            when tracking began and 1 is the height when the tracking stopped.
+        peak_region: [float] Region around the peak to use for the wake normalization (m). If None, the whole
+            wake will be used.
+
+    """
+
+    # Make N plots for wake_samples heights
+    height_fractions = np.linspace(first_height_ratio, final_height_ratio, wake_samples)
+
+    # Set up the plot
+    fig, axes = plt.subplots(figsize=(8, 8), nrows=wake_samples, sharex=True)
+
+    # Length at which text is plotted
+    txt_len_coord = 50 # m
+
+    # Loop through the heights
+    for i, height_fraction in enumerate(height_fractions):
+            
+        # Get the wake results
+        (
+            ht_ref, # Return the reference height
+            wake_len_array, wake_lum_array, # Return the simulated wake at the ref ht
+            obs_len_array, obs_lum_array # Return the observed wake at the ref ht
+        ) = extractWake(sr, wake_containers, wake_fraction=height_fraction, site_id=site_id, 
+                        peak_region=peak_region)
+
+        # Plot the observed wake
+        axes[i].plot(obs_len_array, obs_lum_array, color="black", linestyle="--", linewidth=1, alpha=0.75)
+
+        # Plot the simulated wake
+        axes[i].plot(wake_len_array, wake_lum_array, color="black", linestyle="solid", linewidth=1, alpha=0.75)
+
+        # Get the height label as halfway between the peak model wake and 0
+        txt_ht = np.max(wake_lum_array)/2
+
+        # Set the height label
+        axes[i].text(txt_len_coord, txt_ht, "{:.1f} km".format(ht_ref/1000), fontsize=8, ha="right", va="center")
+
+    # Remove Y ticks on all axes
+    for ax in axes:
+        ax.set_yticks([])
+
+    # Set the X label
+    axes[-1].set_xlabel("Length (m)", fontsize=12)
+
+    # Set X axis limits
+    axes[-1].set_xlim(-200, 80)
+
+    # Invert X axis
+    axes[-1].invert_xaxis()
+
+    # Remove vertical space between subplots
+    plt.subplots_adjust(hspace=0)
+
+    if not os.path.exists(plot_dir):
+        os.makedirs(plot_dir)
+
+    # Save the plot
+    plt.savefig(os.path.join(plot_dir, "{:s}_wake_overview.png".format(event_name)), dpi=300, 
+                bbox_inches="tight")
+
+    # Close the plot
+    plt.close(fig)
+
+
+
+def plotObsAndSimComparison(traj, sr, met_obs, plot_dir, wake_containers=None, plot_lag=False, camo=False):
+    """ Plot a comparison between observed and simulated data. Plot the light curve and velocity comparison
+        and wake if given.
+
+        TO DO:
+            - Include arbitrary light curves and USG data.
+            - Show LCs of individual fragments.
+
+    Arguments:
+        traj: [Trajectory object] Trajectory object.
+        sr: [SimulationResults object] Simulation results.
+        met_obs: [MetObservations object] Meteor observations.
+        plot_dir: [str] Path to the directory where the plots will be saved.
+
+    Keyword arguments:
+        wake_containers: [list of WakeContainer objects] List of wake containers.
+        plot_lag: [bool] If True, plot the lag comparison instead of length residuals.
+        camo: [bool] Should be True if CAMO mirror tracking data is used and False otherwise.
+    """
+
+    # Define plot properties for CAMO (wake_containers are given or "camo" is True)
+    if (wake_containers is not None) or camo:
+
+        # Set the camo varaible to True if any wake is given, so the correct plot parameters are used
+        camo = True
+
+        plot_params_dict = {
+            "sites-narrow":
+                {   
+                    # Blue empty circles for Tavistock
+                    "1": {"color": "blue", "marker": "o", "markerfacecolor": "none", "markersize": 5, 
+                          "linestyle": "", "label": "NF - Tavistock"},
+                    # Green empty squares for Elginfield
+                    "2": {"color": "green", "marker": "s", "markerfacecolor": "none", "markersize": 5, 
+                          "linestyle": "", "label": "NF - Elginfield"},
+                },
+            "sites-wide":
+                {
+                    # Small blue full circles for Tavistock
+                    "1": {"color": "blue", "marker": "o", "markersize": 3, 
+                          "linestyle": "", "label": "WF - Tavistock"},
+                    # Small green full squares for Elginfield
+                    "2": {"color": "green", "marker": "s", "markersize": 3, 
+                          "linestyle": "", "label": "WF - Elginfield"},
+                },
+            # Black line for simulated data (no marker)
+            "sim": {"color": "black", "marker": None, "linewidth": 1, "label": "Simulated"}
+        }
+
+    # For other data, define different plot parameters
+    else:
+        
+        plot_params_dict = {
+            # Black line for simulated data (no marker)
+            "sim": {"color": "black", "marker": None, "linewidth": 1, "label": "Simulated"}
+        }
+
+        # Generate a unique list of station codes using the trajectory and .met file
+        station_codes  = [str(obs.station_id) for obs in traj.observations]
+        if met_obs is not None:
+            station_codes += [str(site) for site in met_obs.sites]
+
+        station_codes = list(set(station_codes))
+
+        # For each station, generate plot parameters with a unique color and marker
+        markers = ["o", "o", "s", "s", "v", "v", "D", "D", "X", "+", "*"]
+        colors = ["blue", "green", "red", "orange", "purple", "brown", "pink", "cyan"]
+        for i, station_code in enumerate(station_codes):
+            
+            # Get the color
+            color = colors[i%len(colors)]
+
+            # Get the marker
+            marker = markers[i%len(markers)]
+
+            # Alternate between empty and full markers
+            if (i%len(colors) == 0) and (marker not in ["X", "+", "*"]):
+                markerfacecolor = "none"
+            else:
+                markerfacecolor = color
+
+            # Define the plot parameters
+            plot_params_dict[station_code] = {
+                "color": color, "marker": marker, "markerfacecolor": markerfacecolor,
+                "markersize": 3, "linestyle": "", "label": station_code
+            }
+
+
+
+    # Interpolate the simulated magnitude
+    sim_mag_interp = scipy.interpolate.interp1d(sr.leading_frag_height_arr, sr.abs_magnitude,
+                                                bounds_error=False, fill_value='extrapolate')
+
+    # Interpolate the simulated length by height
+    sim_len_interp = scipy.interpolate.interp1d(sr.leading_frag_height_arr, sr.leading_frag_length_arr,
+                                                bounds_error=False, fill_value='extrapolate')
+
+    # Interpolate the simulated time
+    sim_time_interp = scipy.interpolate.interp1d(sr.leading_frag_height_arr, sr.time_arr,
+                                                bounds_error=False, fill_value='extrapolate')
+
+    # Interpolate the velocity
+    sim_vel_interp = scipy.interpolate.interp1d(sr.leading_frag_height_arr, sr.leading_frag_vel_arr,
+                                                bounds_error=False, fill_value='extrapolate')
+
+    # Find the simulated length at the trajectory begining
+    sim_len_beg = sim_len_interp(traj.rbeg_ele)
+
+    # Find the simulated time at the trajectory begining
+    sim_time_beg = sim_time_interp(traj.rbeg_ele)
+
+    # Find the simulated velocity at the trajectory begining
+    sim_vel_beg = sim_vel_interp(traj.rbeg_ele)
+
+    # Set the simulated length at the beginning of observations to zero
+    norm_sim_len = sr.leading_frag_length_arr - sim_len_beg
+
+    # Compute the normalized time
+    norm_sim_time = sr.time_arr - sim_time_beg
+
+    norm_sim_ht = sr.leading_frag_height_arr[norm_sim_len > 0]
+    norm_sim_time = norm_sim_time[norm_sim_len > 0]
+    norm_sim_len = norm_sim_len[norm_sim_len > 0]
+
+    # Interpolate the normalized length by time
+    sim_norm_len_interp = scipy.interpolate.interp1d(norm_sim_time, norm_sim_len,
+                                                    bounds_error=False, fill_value='extrapolate')
+    
+    # Interpolate the simulated height by time
+    sim_norm_ht_interp = scipy.interpolate.interp1d(norm_sim_time, norm_sim_ht,
+                                                    bounds_error=False, fill_value='extrapolate')
+
+
+
+    #fig, (ax_mag, ax_magres, ax_lag, ax_lenres) = plt.subplots(ncols=4, sharey=True)
+    #fig, (ax_mag, ax_lenres) = plt.subplots(ncols=2, sharey=True)
+
+    # Make four subplots in one row. Two for magnitude and two for length residuals. The other
+    # two are for wake1 and wake2. These should be in the third panel to the right, but one on top of 
+    # the other. Use gridspec.
+
+    # If the wake is shown, add the thried column for the wake plots
+    if wake_containers is not None:
+        fig = plt.figure(figsize=(12, 6))
+        gs = gridspec.GridSpec(nrows=2, ncols=3, width_ratios=[1, 1, 1], height_ratios=[1, 1])
+        ax_mag = fig.add_subplot(gs[:, 0])
+        ax_lenres = fig.add_subplot(gs[:, 1], sharey=ax_mag)
+        ax_wake1 = fig.add_subplot(gs[0, 2])
+        ax_wake2 = fig.add_subplot(gs[1, 2], sharex=ax_wake1)
+    else:
+
+        # Just have a two column plot with magnitudes and lenres
+        fig, (ax_mag, ax_lenres) = plt.subplots(ncols=2, sharey=True, figsize=(8, 6))
+
+
+    # Compute the magnitude and length residuals from the trajectory object
+    ht_obs_max = -np.inf
+    ht_obs_min = np.inf
+    mag_obs_faintest = -np.inf
+    mag_obs_brightest = np.inf
+    time_obs_min = np.inf
+    time_obs_max = -np.inf
+    for obs in traj.observations:
+
+        # Set a default filter which takes all observations
+        mag_filter = np.ones(len(obs.model_ht), dtype=bool)
+
+        if obs.absolute_magnitudes is not None:
+
+            # Filter out observations with magnitude fainter than +9 or with NaN magnitudes
+            mag_filter = (obs.absolute_magnitudes < 9) & (~np.isnan(obs.absolute_magnitudes))
+
+            # # Sample the simulated magnitude at the observation heights
+            # sim_mag_sampled = sim_mag_interp(obs.model_ht[mag_filter])
+
+        # Sample the simulated normalized length at observed times
+        sim_norm_len_sampled = sim_norm_len_interp(obs.time_data[mag_filter])
+
+
+        # Select plot parameters for the current station
+        if camo:
+            plot_params = plot_params_dict["sites-narrow"][str(obs.station_id)]
+        else:
+            plot_params = plot_params_dict[str(obs.station_id)]
+
+
+        if obs.absolute_magnitudes is not None:
+
+            # Plot the observations
+            ax_mag.plot(obs.absolute_magnitudes[mag_filter], obs.model_ht[mag_filter]/1000,
+                        **plot_params)
+            
+            # # Plot the simulated magnitude
+            # ax_mag.plot(sim_mag_sampled, obs.model_ht[mag_filter]/1000, 
+            #             **plot_params_dict["sim"])
+
+            # ax_magres.scatter(obs.absolute_magnitudes[mag_filter] - sim_mag_sampled,
+            #                 obs.model_ht[mag_filter]/1000)
+
+            # Keep track of the observed magnitude range
+            mag_obs_faintest = max(mag_obs_faintest, np.max(obs.absolute_magnitudes[mag_filter]))
+            mag_obs_brightest = min(mag_obs_brightest, np.min(obs.absolute_magnitudes[mag_filter]))
+
+        # ax_len.scatter(obs.state_vect_dist[mag_filter], obs.model_ht[mag_filter]/1000,
+        #   label=obs.station_id)
+        # ax_len.plot(sim_norm_len_sampled, obs.model_ht[mag_filter]/1000)
+
+
+        if plot_lag:
+            
+            # # Compute the simulated lag
+            # sim_lag = sim_norm_len_sampled - sim_vel_beg*obs.time_data[mag_filter]
+
+            # Compute the observed lag using the simulated velocity
+            obs_lag = obs.state_vect_dist[mag_filter] - sim_vel_beg*obs.time_data[mag_filter]
+
+            # Plot the observed lag
+            ax_lenres.plot(obs_lag, obs.model_ht[mag_filter]/1000, **plot_params)
+            
+            # ax_lenres.plot(sim_lag, obs.model_ht[mag_filter]/1000, **plot_params_dict["sim"])
+
+        else:
+
+            # Compute the length residuals
+            len_residuals = obs.state_vect_dist[mag_filter] - sim_norm_len_sampled
+
+            # Demean the residuals
+            len_residuals = len_residuals - np.median(len_residuals)
+
+            # Plot the length residuals
+            ax_lenres.plot(len_residuals, obs.model_ht[mag_filter]/1000, **plot_params)
+
+
+        # Keep track of the observed height range
+        ht_obs_max = max(ht_obs_max, np.max(obs.model_ht[mag_filter]))
+        ht_obs_min = min(ht_obs_min, np.min(obs.model_ht[mag_filter]))
+
+        # Keep track of the observed time range
+        time_obs_max = max(time_obs_max, np.max(obs.time_data[mag_filter]))
+        time_obs_min = min(time_obs_min, np.min(obs.time_data[mag_filter]))
+
+
+
+    # Compute magnitude residuals from the .met file
+    if met_obs is not None:
+
+        # If 2 and 4 are the sites, rename them to 1 and 2
+        if camo and ("2" in met_obs.sites) and ("4" in met_obs.sites):
+
+            # Rename the list entries to 1 and 2
+            temp_sites = []
+            for site in met_obs.sites:
+                if site == "2":
+                    temp_sites.append("1")
+                elif site == "4":
+                    temp_sites.append("2")
+                else:
+                    temp_sites.append(site)
+            
+            # Replace the sites list
+            met_obs.sites = temp_sites
+
+            # Swap keys in height_data and abs_mag_data
+            temp_height_data = met_obs.height_data["2"]
+            temp_abs_mag_data = met_obs.abs_mag_data["2"]
+            met_obs.height_data["2"] = met_obs.height_data["4"]
+            met_obs.abs_mag_data["2"] = met_obs.abs_mag_data["4"]
+            met_obs.height_data["1"] = temp_height_data
+            met_obs.abs_mag_data["1"] = temp_abs_mag_data
+
+
+        # Plot magnitudes for all sites
+        for site in met_obs.sites:
+
+            # Extract data (filter out inf values)
+            height_data = met_obs.height_data[site][~np.isinf(met_obs.abs_mag_data[site])]
+            abs_mag_data = met_obs.abs_mag_data[site][~np.isinf(met_obs.abs_mag_data[site])]
+
+            # # Sample the simulated magnitude at the observation heights
+            # sim_mag_sampled = sim_mag_interp(height_data)
+
+            # Select plot parameters for the current station
+            if camo:
+                plot_params = plot_params_dict["sites-wide"][str(site)]
+            else:
+                plot_params = plot_params_dict[str(site)]
+
+            # Plot the observed and simulated magnitudes
+            ax_mag.plot(abs_mag_data, height_data/1000, **plot_params)
+            # ax_mag.plot(sim_mag_sampled, height_data/1000, **plot_params_dict["sim"])
+
+            # ax_magres.scatter(abs_mag_data - sim_mag_sampled, height_data/1000)
+
+            # Keep track of the observed height range
+            ht_obs_max = max(ht_obs_max, np.max(height_data))
+            ht_obs_min = min(ht_obs_min, np.min(height_data))
+
+            # Keep track of the observed magnitude range
+            mag_obs_faintest = max(mag_obs_faintest, np.max(abs_mag_data))
+            mag_obs_brightest = min(mag_obs_brightest, np.min(abs_mag_data))
+
+            # Keep track of the observed time range
+            time_obs_max = max(time_obs_max, np.max(met_obs.time_data[site]))
+            time_obs_min = min(time_obs_min, np.min(met_obs.time_data[site]))
+
+
+    ### Plot the simulated magnitude ###
+
+    # Plot the simulated magnitude +/- 2 km from the observed height range
+    ht_sim_min = ht_obs_min - 2000
+    ht_sim_max = ht_obs_max + 2000
+    ht_sim_arr = np.linspace(ht_sim_min, ht_sim_max, 1000)
+    mag_sim_arr = sim_mag_interp(ht_sim_arr)
+
+    # Limit the plotted simulated magnitude to +/- 2 mag from the observed magnitude range
+    mag_sim_min = mag_obs_brightest - 2
+    mag_sim_max = mag_obs_faintest + 2
+    mag_range_filter = (mag_sim_arr > mag_sim_min) & (mag_sim_arr < mag_sim_max)
+    ht_sim_arr = ht_sim_arr[mag_range_filter]
+    mag_sim_arr = mag_sim_arr[mag_range_filter]
+
+    # Plot the simulated magnitude
+    ax_mag.plot(mag_sim_arr, ht_sim_arr/1000, **plot_params_dict["sim"])
+
+    ### ###
+
+    # If lag is plotted, sample the simulated length between the observed time range
+    if plot_lag:
+
+        time_sim_arr = np.linspace(time_obs_min, time_obs_max, 1000)
+        len_sim_arr = sim_norm_len_interp(time_sim_arr)
+        ht_sim_arr = sim_norm_ht_interp(time_sim_arr)
+
+        # Compute the lag
+        lag_sim_arr = len_sim_arr - sim_vel_beg*time_sim_arr
+
+        # Plot the simulated lag
+        ax_lenres.plot(lag_sim_arr, ht_sim_arr/1000, **plot_params_dict["sim"])
+
+
+
+    
+    ### Plot the wake ###
+    if wake_containers is not None:
+
+        # Determine where the plots along the range of wake heights should be made (at the beginning 
+        # and the middle, 0 and 0.5)
+        wake_1_fraction = 0
+        wake_2_fraction = 0.5
+
+        # Extract the observed and simulated wakes at the given reference heights
+        (
+            ht_top1,
+            sim_len_top1, sim_wake_top1, 
+            obs_len_top1, obs_wake_top1
+        ) = extractWake(sr, wake_containers, wake_fraction=wake_1_fraction, peak_region=20)
+        (
+            ht_btm2,
+            sim_len_btm2, sim_wake_btm2, 
+            obs_len_btm2, obs_wake_btm2
+        ) = extractWake(sr, wake_containers, wake_fraction=wake_2_fraction, peak_region=20)
+
+
+        # Plot the simulated wakes
+        ax_wake1.plot(sim_len_top1, sim_wake_top1, label='Simulated', color='k')
+        ax_wake2.plot(sim_len_btm2, sim_wake_btm2, color='k')
+
+        # Plot the observed wakes
+        ax_wake1.plot(obs_len_top1, obs_wake_top1, label='Observed', color='k', linestyle='--')
+        ax_wake2.plot(obs_len_btm2, obs_wake_btm2, color='k', linestyle='--')
+        
+        ax_wake1.legend(loc='upper right', fontsize=12)
+        
+        # Add horizontal lines to magnitude and lenres plots to show the top1% and btm2% limits of heights
+        ax_mag.axhline(y=ht_top1/1000, color='k', linestyle='dashed', linewidth=1)
+        ax_mag.axhline(y=ht_btm2/1000, color='k', linestyle='dotted', linewidth=1)
+        ax_lenres.axhline(y=ht_top1/1000, color='k', linestyle='dashed', linewidth=1)
+        ax_lenres.axhline(y=ht_btm2/1000, color='k', linestyle='dotted', linewidth=1)
+
+        # Add the text labels above the horizontal lines indicating the heights of the wakes
+        axmag_min, axmag_max = ax_mag.get_xlim()
+        ax_mag.text(axmag_max - 0.05, ht_top1/1000 + 0.1, "Wake at {:.2f} km".format(ht_top1/1000), size=8)
+        ax_mag.text(axmag_max - 0.05, ht_btm2/1000 + 0.1, "Wake at {:.2f} km".format(ht_btm2/1000), size=8)
+
+        # Add titles to the wake plots indicating the height
+        ax_wake1.set_title("Height = {:.2f} km".format(ht_top1/1000))
+        ax_wake2.set_title("Height = {:.2f} km".format(ht_btm2/1000))
+
+
+        # invert x axis
+        ax_wake1.invert_xaxis()
+
+        # Set labels
+        ax_wake1.set_ylabel("Intensity")
+        ax_wake2.set_xlabel("Distance behind leading fragment (m)")
+        ax_wake2.set_ylabel("Intensity")
+        
+        ###
+
+
+    # # Add a title with the meteor number and timestamp
+    # met_timestamp = jd2Date(traj.jdt_ref, dt_obj=True).strftime("%Y-%m-%d %H:%M:%S")
+    # #fig.suptitle("#{} - {}".format(met_num, met_timestamp))
+    # fig.suptitle("{} - {}".format(formatDirNameToEventName(entry), met_timestamp))
+
+    ax_mag.set_ylabel("Height (km)")
+    ax_mag.set_xlabel("Magnitude")
+
+    #ax_len.set_xlabel("Length (m)")
+    
+    if plot_lag:
+        ax_lenres.set_xlabel("Lag (m)")
+    else:
+        ax_lenres.set_xlabel("Length residuals (m)")
+
+    # Plot a vertical line at 0 on the length residual plot
+    ax_lenres.axvline(0, color='0.5', linewidth=1, linestyle='dashed')
+
+    # Invert magnitude axes
+    ax_mag.invert_xaxis()
+    #ax_magres.invert_xaxis()
+
+    # # Invert length axes
+    # ax_len.invert_yaxis()
+    # ax_lenres.invert_yaxis()
+    # ax_lag.invert_yaxis()
+
+    plt.tight_layout()
+
+    # Remove current legent entries and make new ones based on the plot_params_dict
+    if camo:
+
+        ax_mag.legend().remove()
+        handles = []
+
+        handles.append(mlines.Line2D([0], [0], **plot_params_dict["sim"]))
+
+        if met_obs is not None:
+            for site_id in plot_params_dict["sites-wide"]:
+                if str(site_id) in map(str, met_obs.sites):
+                    handles.append(mlines.Line2D([0], [0], **plot_params_dict["sites-wide"][site_id]))
+
+        for site_id in plot_params_dict["sites-narrow"]:
+            if str(site_id) in map(str, [obs.station_id for obs in traj.observations]):
+                handles.append(mlines.Line2D([0], [0], **plot_params_dict["sites-narrow"][site_id]))
+        
+        # Add the legend
+        ax_mag.legend(handles=handles, fontsize=8)
+
+    else:
+        ax_mag.legend(fontsize=8)
+
+
+
+
+    # Save the figure
+    if not os.path.exists(plot_dir):
+        os.makedirs(plot_dir)
+
+    # Generate a plot name using the timestamp
+    met_timestamp = jd2Date(traj.jdt_ref, dt_obj=True).strftime("%Y%m%d_%H%M%S")
+    plot_name = "{:s}_metsim_fit".format(met_timestamp)
+
+    plt.savefig(os.path.join(plot_dir, plot_name + ".png"), dpi=300)
+
+    # plt.show()
+
+    plt.close(fig)
+
+
 class MetSimGUI(QMainWindow):
     def __init__(self, traj_path, const_json_file=None, met_path=None, lc_path=None, wid_files=None, \
         usg_input=False):
@@ -1927,6 +2588,7 @@ class MetSimGUI(QMainWindow):
         self.plotAirDensityButton.clicked.connect(self.plotAtmDensity)
         self.plotDynamicPressureButton.clicked.connect(self.plotDynamicPressure)
         self.plotMassLossButton.clicked.connect(self.plotMassLoss)
+        self.plotObsVsSimComparisonButton.clicked.connect(self.plotObsVsSimComparison)
         
         self.plotLumEffButton.clicked.connect(self.plotLumEfficiency)
         self.plotLumEffButton.setDisabled(True)
@@ -4050,6 +4712,76 @@ class MetSimGUI(QMainWindow):
 
         else:
             print("No simulation results to show!")
+
+
+    def plotObsVsSimComparison(self):
+        """ Plot the comparison between the simulations and observations + wake overview and save to data
+            directory.
+        """
+
+        print()
+
+        if self.simulation_results is not None:
+
+            # Check if plotting CAMO data
+            camo = False
+
+            if len(self.wake_meas):
+                camo = True
+
+            if self.met_obs is not None:
+                if self.met_obs.met.mirfit:
+                    camo = True
+            
+
+
+            # Plot the comparison between the simulations and observations (excluding the wake)
+            plotObsAndSimComparison(self.traj, self.simulation_results, self.met_obs, self.dir_path, 
+                                    wake_containers=None, plot_lag=True, camo=camo)
+
+            # Show a message box
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Information)
+            msg.setText("Saved obs vs sim comparison plots to {:s}".format(self.dir_path))
+            msg.setWindowTitle("Saved")
+            msg.setStandardButtons(QMessageBox.Ok)
+            msg.exec_()
+
+            print("Saved obs vs sim comparison plots to {:s}".format(self.dir_path))         
+
+            # Plot the wake overview if the wake simulation is available and wake measurements are given
+            if self.wake_meas is not None:
+
+                # Run only if not all elements in the wake results are None
+                if not all([w is None for w in self.simulation_results.wake_results]):
+
+                    event_name = jd2Date(self.traj.jdt_ref, dt_obj=True).strftime("%Y%m%d_%H%M%S")
+                    plotWakeOverview(self.simulation_results, self.wake_meas, self.dir_path, event_name)
+
+                else:
+                    
+                    # Show warning message
+                    msg = QMessageBox()
+                    msg.setIcon(QMessageBox.Warning)
+                    msg.setText("No simulated wake to plot! Run the wake simulation first and press the button again.")
+                    msg.setWindowTitle("Warning")
+                    msg.setStandardButtons(QMessageBox.Ok)
+                    msg.exec_()
+
+                    print("No simulated wake to plot! Run the wake simulation first and press the button again.")
+
+        else:
+            
+            # Show warning
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Warning)
+            msg.setText("No simulation results to show! Run the simulation first and press the button again.")
+            msg.setWindowTitle("Warning")
+            msg.setStandardButtons(QMessageBox.Ok)
+            msg.exec_()
+
+            print("No simulation results to show! Run the simulation first and press the button again.")
+
 
 
 

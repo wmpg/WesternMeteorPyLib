@@ -11,7 +11,7 @@ from jplephem.spk import SPK
 
 from wmpl.Config import config
 from wmpl.Utils.Earth import calcEarthRectangularCoordJPL
-from wmpl.Utils.TrajConversions import date2JD
+from wmpl.Utils.TrajConversions import date2JD, jd2Date, datetime2JD
 
 
 
@@ -1464,13 +1464,31 @@ if __name__ == "__main__":
 
     ### Test all solar longitude functions and see the difference between the solar longitudes they return
 
-    year = 2012
+    dt_now = datetime.datetime.utcnow()
+    year = dt_now.year
+
+    # Compute the values for now
+    jd_now = datetime2JD(dt_now)
+    print('------------------------------------')
+    print('Date now = {:4d}-{:02d}-{:02d} {:02d}:{:02d}:{:.3f}'.format(year, dt_now.month, dt_now.day, dt_now.hour, dt_now.minute, dt_now.second + dt_now.microsecond/1e6))
+    print('JD now   = {:.12f}'.format(jd_now))
+
+    print('Steyaert = {:.12f}'.format(np.degrees(jd2SolLonSteyaert(jd_now))))
+    print('VSOP     = {:.12f}'.format(np.degrees(jd2SolLonVSOP(jd_now))))
+    print('JPL:     = {:.12f}'.format(np.degrees(jd2SolLonJPL(jd_now))))
+
+    print('------------------------------------')
+    print("RANDOM DATES:")
+
 
     for month in range(1, 13):
 
         for day in [1, 10, 20]:
 
-            jd = date2JD(year, month, day, np.random.uniform(0, 24), np.random.uniform(0, 60), np.random.uniform(0, 60))
+            hour = int(np.random.uniform(0, 24))
+            minute = int(np.random.uniform(0, 60))
+            second = np.random.uniform(0, 60)
+            jd = date2JD(year, month, day, hour, minute, second)
 
             #jd = date2JD(2011, 2, 4, 23, 20, 42.16)
             #jd = date2JD(2012, 12, 13, 8, 20, 33.07)
@@ -1479,11 +1497,12 @@ if __name__ == "__main__":
             #jd = date2JD(2012, 12, 13, 8, 24, 01.63)
 
             print('------------------------------------')
-            print('JD: {:.12f}'.format(jd))
+            print('Date     = {:4d}-{:02d}-{:02d} {:02d}:{:02d}:{:.3f}'.format(year, month, day, hour, minute, second))
+            print('JD       = {:.12f}'.format(jd))
 
-            print('Steyaert:', np.degrees(jd2SolLonSteyaert(jd)))
-            print('VSOP:', np.degrees(jd2SolLonVSOP(jd)))
-            print('JPL:', np.degrees(jd2SolLonJPL(jd)))
+            print('Steyaert = {:.12f}'.format(np.degrees(jd2SolLonSteyaert(jd))))
+            print('VSOP     = {:.12f}'.format(np.degrees(jd2SolLonVSOP(jd))))
+            print('JPL:     = {:.12f}'.format(np.degrees(jd2SolLonJPL(jd))))
 
 
             # Solar longitude to Julian date
