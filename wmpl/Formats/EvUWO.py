@@ -256,130 +256,130 @@ def readEvFile(dir_path, file_name):
 
 
 def solveTrajectoryEv(ev_file_list, solver='original', velmodel=3, **kwargs):
-        """ Runs the trajectory solver on UWO style ev file. 
-    
-        Arguments:
-            ev_file_list: [list] A list of paths to ev files.
+    """ Runs the trajectory solver on UWO style ev file. 
+
+    Arguments:
+        ev_file_list: [list] A list of paths to ev files.
 
 
-        Keyword arguments:
-            solver: [str] Trajectory solver to use:
-                - 'original' (default) - "in-house" trajectory solver implemented in Python
-                - 'gural' - Pete Gural's PSO solver
-            velmodel: [int] Velocity propagation model for the Gural solver
-                0 = constant   v(t) = vinf
-                1 = linear     v(t) = vinf - |acc1| * t
-                2 = quadratic  v(t) = vinf - |acc1| * t + acc2 * t^2
-                3 = exponent   v(t) = vinf - |acc1| * |acc2| * exp( |acc2| * t ) (default)
+    Keyword arguments:
+        solver: [str] Trajectory solver to use:
+            - 'original' (default) - "in-house" trajectory solver implemented in Python
+            - 'gural' - Pete Gural's PSO solver
+        velmodel: [int] Velocity propagation model for the Gural solver
+            0 = constant   v(t) = vinf
+            1 = linear     v(t) = vinf - |acc1| * t
+            2 = quadratic  v(t) = vinf - |acc1| * t + acc2 * t^2
+            3 = exponent   v(t) = vinf - |acc1| * |acc2| * exp( |acc2| * t ) (default)
 
 
-        Return:
-            traj: [Trajectory instance] Solved trajectory
-        """
+    Return:
+        traj: [Trajectory instance] Solved trajectory
+    """
 
 
-        # Check that there are at least two stations present
-        if len(ev_file_list) < 2:
-            print('ERROR! The list of ev files does not contain multistation data!')
+    # Check that there are at least two stations present
+    if len(ev_file_list) < 2:
+        print('ERROR! The list of ev files does not contain multistation data!')
 
-            return False
-
-
-        # Load the ev file
-        station_data_list = []
-        for ev_file_path in ev_file_list:
-            
-            # Store the ev file contants into a StationData object
-            sd = readEvFile(*os.path.split(ev_file_path))
-
-            # Skip bad ev files
-            if sd is None:
-                print("Skipping {:s}, bad ev file!".format(ev_file_path))
-                continue
-
-            station_data_list.append(sd)
+        return False
 
 
-        # Check that there are at least two good stations present
-        if len(station_data_list) < 2:
-            print('ERROR! The list of ev files does not contain at least 2 good ev files!')
+    # Load the ev file
+    station_data_list = []
+    for ev_file_path in ev_file_list:
+        
+        # Store the ev file contants into a StationData object
+        sd = readEvFile(*os.path.split(ev_file_path))
 
-            return False
+        # Skip bad ev files
+        if sd is None:
+            print("Skipping {:s}, bad ev file!".format(ev_file_path))
+            continue
 
-
-        # Normalize all times to earliest reference Julian date
-        jdt_ref = min([sd_temp.jd_ref for sd_temp in station_data_list])
-        for sd in station_data_list:
-            for i in range(len(sd.time_data)):
-                sd.time_data[i] += (sd.jd_ref - jdt_ref)*86400
-            
-            sd.jd_ref = jdt_ref
-
-
-        for sd in station_data_list:
-            print(sd)
+        station_data_list.append(sd)
 
 
-        # Get the base path of these ev files
-        root_path = os.path.dirname(ev_file_list[0])
+    # Check that there are at least two good stations present
+    if len(station_data_list) < 2:
+        print('ERROR! The list of ev files does not contain at least 2 good ev files!')
 
-        # Create a new output directory
-        dir_path = os.path.join(root_path, jd2Date(jdt_ref, dt_obj=True).strftime("traj_%Y%m%d_%H%M%S.%f"))
-        mkdirP(dir_path)
+        return False
 
 
+    # Normalize all times to earliest reference Julian date
+    jdt_ref = min([sd_temp.jd_ref for sd_temp in station_data_list])
+    for sd in station_data_list:
+        for i in range(len(sd.time_data)):
+            sd.time_data[i] += (sd.jd_ref - jdt_ref)*86400
+        
+        sd.jd_ref = jdt_ref
+
+
+    for sd in station_data_list:
+        print(sd)
+
+
+    # Get the base path of these ev files
+    root_path = os.path.dirname(ev_file_list[0])
+
+    # Create a new output directory
+    dir_path = os.path.join(root_path, jd2Date(jdt_ref, dt_obj=True).strftime("traj_%Y%m%d_%H%M%S.%f"))
+    mkdirP(dir_path)
+
+
+    if solver == 'original':
+
+        # Init the new trajectory solver object
+        traj = Trajectory(jdt_ref, output_dir=dir_path, meastype=4, **kwargs)
+
+    elif solver.startswith('gural'):
+
+        # Extract velocity model is given
+        try:
+            velmodel = int(solver[-1])
+
+        except: 
+            # Default to the exponential model
+            velmodel = 3
+
+        # Select extra keyword arguments that are present only for the gural solver
+        gural_keys = ['max_toffset', 'nummonte', 'meastype', 'verbose', 'show_plots']
+        gural_kwargs = {key: kwargs[key] for key in gural_keys if key in kwargs}
+
+        # Init the new Gural trajectory solver object
+        traj = GuralTrajectory(len(station_data_list), jdt_ref, velmodel, verbose=1, \
+            output_dir=dir_path, meastype=4, **gural_kwargs)
+
+
+    # Infill trajectories from each site
+    for sd in station_data_list:
+
+        # MC solver
         if solver == 'original':
 
-            # Init the new trajectory solver object
-            traj = Trajectory(jdt_ref, output_dir=dir_path, meastype=4, **kwargs)
-
-        elif solver.startswith('gural'):
-
-            # Extract velocity model is given
-            try:
-                velmodel = int(solver[-1])
-
-            except: 
-                # Default to the exponential model
-                velmodel = 3
-
-            # Select extra keyword arguments that are present only for the gural solver
-            gural_keys = ['max_toffset', 'nummonte', 'meastype', 'verbose', 'show_plots']
-            gural_kwargs = {key: kwargs[key] for key in gural_keys if key in kwargs}
-
-            # Init the new Gural trajectory solver object
-            traj = GuralTrajectory(len(station_data_list), jdt_ref, velmodel, verbose=1, \
-                output_dir=dir_path, meastype=4, **gural_kwargs)
+            traj.infillTrajectory(sd.phi_data, sd.theta_data, sd.time_data, sd.lat, sd.lon, sd.height, \
+                station_id=sd.station_id, magnitudes=sd.mag_data)
+        
+        # Gural solver
+        else:
+            traj.infillTrajectory(sd.phi_data, sd.theta_data, sd.time_data, sd.lat, sd.lon, sd.height)
 
 
-        # Infill trajectories from each site
-        for sd in station_data_list:
-
-            # MC solver
-            if solver == 'original':
-
-                traj.infillTrajectory(sd.phi_data, sd.theta_data, sd.time_data, sd.lat, sd.lon, sd.height, \
-                    station_id=sd.station_id, magnitudes=sd.mag_data)
-            
-            # Gural solver
-            else:
-                traj.infillTrajectory(sd.phi_data, sd.theta_data, sd.time_data, sd.lat, sd.lon, sd.height)
+    print('Filling done!')
 
 
-        print('Filling done!')
+    # Solve the trajectory
+    traj = traj.run()
 
 
-        # Solve the trajectory
-        traj = traj.run()
-
-
-        # Copy the ev files into the output directory
-        for ev_file_path in ev_file_list:
-            shutil.copy2(ev_file_path, os.path.join(dir_path, os.path.basename(ev_file_path)))
+    # Copy the ev files into the output directory
+    for ev_file_path in ev_file_list:
+        shutil.copy2(ev_file_path, os.path.join(dir_path, os.path.basename(ev_file_path)))
 
 
 
-        return traj
+    return traj
 
 
 
