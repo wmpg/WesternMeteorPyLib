@@ -7,6 +7,7 @@ import numpy as np
 
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.Trajectory.GuralTrajectory import GuralTrajectory
+from wmpl.Utils.GeoidHeightEGM96 import mslToWGS84Height
 from wmpl.Utils.TrajConversions import J2000_JD, jd2Date, equatorialCoordPrecession_vect, raDec2AltAz_vect, \
     jd2LST
 
@@ -340,8 +341,12 @@ def writeMiligInputFileMeteorObservation(jdt_ref, meteor_list, file_path, conver
                 station_id = i + 1
 
             # Write station ID and meteor coordinates. The weight of the station is set to 1
-            f.write("{:3d}{:+10.5f}{:10.6f}{:5.3f}{:5.2f}\n".format(station_id, 
-                np.degrees(meteor.longitude), np.degrees(meteor.latitude), meteor.height/1000.0, 1.0))
+            f.write("{:3d}{:+10.5f}{:10.6f}{:5.3f}{:5.2f}\n".format(
+                station_id, 
+                np.degrees(meteor.longitude), np.degrees(meteor.latitude), 
+                mslToWGS84Height(meteor.latitude, meteor.longitude, meteor.height)/1000.0, 
+                1.0)
+                )
 
             # Go through every point in the meteor
             for i, (azim, elev, t) in enumerate(zip(meteor.azim_data, meteor.elev_data, meteor.time_data)):
