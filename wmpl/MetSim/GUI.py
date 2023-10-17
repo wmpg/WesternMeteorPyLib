@@ -1896,23 +1896,38 @@ def plotObsAndSimComparison(traj, sr, met_obs, plot_dir, wake_containers=None, p
         camo: [bool] Should be True if CAMO mirror tracking data is used and False otherwise.
     """
 
+    # Generate a unique list of station codes using the trajectory and .met file
+    station_codes  = [str(obs.station_id) for obs in traj.observations]
+    if met_obs is not None:
+        station_codes += [str(site) for site in met_obs.sites]
+
+    station_codes = list(set(station_codes))
+    
+
+    # Init plot parameters
+    plot_params_dict = {}
+
+    # Add plot parameters for simulated data
+    # Black line for simulated data (no marker)
+    plot_params_dict["sim"] = {"color": "black", "marker": None, "linewidth": 1, "label": "Simulated"}
+
     # Define plot properties for CAMO (wake_containers are given or "camo" is True)
     if (wake_containers is not None) or camo:
 
         # Set the camo varaible to True if any wake is given, so the correct plot parameters are used
         camo = True
 
-        plot_params_dict = {
-            "sites-narrow":
-                {   
-                    # Blue empty circles for Tavistock
-                    "1": {"color": "blue", "marker": "o", "markerfacecolor": "none", "markersize": 5, 
-                          "linestyle": "", "label": "NF - Tavistock"},
-                    # Green empty squares for Elginfield
-                    "2": {"color": "green", "marker": "s", "markerfacecolor": "none", "markersize": 5, 
-                          "linestyle": "", "label": "NF - Elginfield"},
-                },
-            "sites-wide":
+        plot_params_dict["sites-narrow"] = \
+            {   
+                # Blue empty circles for Tavistock
+                "1": {"color": "blue", "marker": "o", "markerfacecolor": "none", "markersize": 5, 
+                        "linestyle": "", "label": "NF - Tavistock"},
+                # Green empty squares for Elginfield
+                "2": {"color": "green", "marker": "s", "markerfacecolor": "none", "markersize": 5, 
+                        "linestyle": "", "label": "NF - Elginfield"},
+            }
+        
+        plot_params_dict["sites-wide"] = \
                 {
                     # Small blue full circles for Tavistock
                     "1": {"color": "blue", "marker": "o", "markersize": 3, 
@@ -1920,25 +1935,43 @@ def plotObsAndSimComparison(traj, sr, met_obs, plot_dir, wake_containers=None, p
                     # Small green full squares for Elginfield
                     "2": {"color": "green", "marker": "s", "markersize": 3, 
                           "linestyle": "", "label": "WF - Elginfield"},
-                },
-            # Black line for simulated data (no marker)
-            "sim": {"color": "black", "marker": None, "linewidth": 1, "label": "Simulated"}
-        }
+                }
+
+        # If there are other stations than just CAMO (1 and 2), add them to the plot parameters
+        if (len(station_codes) > 2) or ("1" not in station_codes) or ("2" not in station_codes):
+
+            # Generate plot parameters for other stations which are not 1 or 2
+            markers = ["v", "v", "D", "D", "X", "+", "*"]
+            colors = ["red", "orange", "purple", "brown", "pink", "cyan"]
+
+            for i, station_code in enumerate(station_codes):
+
+                # Skip Tavistock and Elginfield
+                if station_code in ["1", "2"]:
+                    continue
+
+                # Get the color
+                color = colors[i%len(colors)]
+
+                # Get the marker
+                marker = markers[i%len(markers)]
+
+                # Alternate between empty and full markers
+                if (i%len(colors) == 0) and (marker not in ["X", "+", "*"]):
+                    markerfacecolor = "none"
+                else:
+                    markerfacecolor = color
+
+                # Define the plot parameters
+                plot_params_dict["sites-wide"][station_code] = {
+                    "color": color, "marker": marker, "markerfacecolor": markerfacecolor,
+                    "markersize": 3, "linestyle": "", "label": station_code
+                }
+
+
 
     # For other data, define different plot parameters
     else:
-        
-        plot_params_dict = {
-            # Black line for simulated data (no marker)
-            "sim": {"color": "black", "marker": None, "linewidth": 1, "label": "Simulated"}
-        }
-
-        # Generate a unique list of station codes using the trajectory and .met file
-        station_codes  = [str(obs.station_id) for obs in traj.observations]
-        if met_obs is not None:
-            station_codes += [str(site) for site in met_obs.sites]
-
-        station_codes = list(set(station_codes))
 
         # For each station, generate plot parameters with a unique color and marker
         markers = ["o", "o", "s", "s", "v", "v", "D", "D", "X", "+", "*"]
@@ -2159,7 +2192,12 @@ def plotObsAndSimComparison(traj, sr, met_obs, plot_dir, wake_containers=None, p
 
             # Select plot parameters for the current station
             if camo:
-                plot_params = plot_params_dict["sites-wide"][str(site)]
+
+                if str(site) in plot_params_dict["sites-wide"]:
+                    plot_params = plot_params_dict["sites-wide"][str(site)]
+                else:
+                    plot_params = plot_params_dict[str(site)]
+
             else:
                 plot_params = plot_params_dict[str(site)]
 
