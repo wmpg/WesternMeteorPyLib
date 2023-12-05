@@ -284,7 +284,7 @@ if __name__ == "__main__":
     known_showers["AUR"] = [154.2, 158.6, 167.7]
     known_showers["SPE"] = [161.9, 166.8, 178.4]
     known_showers["AND"] = [213  , 239  , 250  ]
-    known_showers["COM"] = [253  , 263  , 290  ]
+    known_showers["COM"] = [249  , 263  , 290  ]
     known_showers["GDR"] = [122  , 125.5, 128  ]
     known_showers["ERI"] = [118  , 137  , 145  ]
     known_showers["NOO"] = [233  , 245  , 255  ]
