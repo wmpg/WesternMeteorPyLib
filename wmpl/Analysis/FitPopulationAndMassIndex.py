@@ -159,8 +159,8 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
         # Sample the distribution with replacement
         sampled_data = np.random.choice(input_data, len(input_data))
 
-        # Fit the slope again
-        unc_results = fitSlope(sampled_data, mass)
+        # Fit the slope to the sampled data
+        unc_results = fitSlope(sampled_data, mass, ref_point=ref_point)
 
         unc_results_list.append(unc_results)
 
