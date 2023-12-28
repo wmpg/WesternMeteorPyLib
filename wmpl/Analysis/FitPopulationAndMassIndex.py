@@ -187,6 +187,10 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
     slope_report_unc_list = [entry[5] for entry in unc_results_list]
     slope_report_std = np.std(slope_report_unc_list)
 
+    # Compute the 95% confidence interval of the slope
+    slope_report_95ci_lower = np.percentile(slope_report_unc_list, 2.5)
+    slope_report_95ci_upper = np.percentile(slope_report_unc_list, 97.5)
+
     # If the standard deviation is larger than 10 or is nan, set it to 10
     if (slope_report_std > 10) or np.isnan(slope_report_std):
         slope_report_std = 10
@@ -195,6 +199,10 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
     # Compute the standard deviation of the effective limiting magnitude
     lim_point_unc_list = [entry[7] for entry in unc_results_list]
     lim_point_std = np.std(lim_point_unc_list)
+
+    # Compute the 95% confidence interval of the effective limiting magnitude
+    lim_point_95ci_lower = np.percentile(lim_point_unc_list, 2.5)
+    lim_point_95ci_upper = np.percentile(lim_point_unc_list, 97.5)
 
     # # Reject all 3 sigma outliers and recompute the std
     # slope_report_unc_list = [slp for slp in slope_report_unc_list if (slp < slope_report \
@@ -332,8 +340,9 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
 
         # Plot the tangential line with the slope
         plt.plot(sign*x_arr, logline(-x_arr, slope, intercept), color='r', \
-            label='{:s} = {:.2f} $\pm$ {:.2f} \nKS test D = {:.3f} \nKS test p-value = {:.3f}'.format(\
-                slope_name, slope_report, slope_report_std, kstest.statistic, kstest.pvalue), zorder=5)
+            label='{:s} = {:.2f} $\pm$ {:.2f}, [{:.2f}, {:.2f}] 95% CI\nKS test D = {:.3f} \nKS test p-value = {:.3f}'.format(\
+                slope_name, slope_report, slope_report_std, slope_report_95ci_lower, slope_report_95ci_upper,\
+                kstest.statistic, kstest.pvalue), zorder=5)
 
 
 
@@ -373,7 +382,8 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
 
 
 
-    return params, sign*ref_point, sign*inflection_point, slope_report, slope_report_std, kstest
+    return params, sign*ref_point, sign*inflection_point, slope_report, slope_report_std, \
+        slope_report_95ci_lower,  slope_report_95ci_upper, kstest
 
 
 
