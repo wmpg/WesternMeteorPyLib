@@ -188,8 +188,8 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
     slope_report_std = np.std(slope_report_unc_list)
 
     # Compute the 95% confidence interval of the slope
-    slope_report_95ci_lower = np.percentile(slope_report_unc_list, 2.5)
-    slope_report_95ci_upper = np.percentile(slope_report_unc_list, 97.5)
+    slope_report_95ci_lower = np.nanpercentile(slope_report_unc_list, 2.5)
+    slope_report_95ci_upper = np.nanpercentile(slope_report_unc_list, 97.5)
 
     # If the standard deviation is larger than 10 or is nan, set it to 10
     if (slope_report_std > 10) or np.isnan(slope_report_std):
@@ -201,8 +201,8 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
     lim_point_std = np.std(lim_point_unc_list)
 
     # Compute the 95% confidence interval of the effective limiting magnitude
-    lim_point_95ci_lower = np.percentile(lim_point_unc_list, 2.5)
-    lim_point_95ci_upper = np.percentile(lim_point_unc_list, 97.5)
+    lim_point_95ci_lower = np.nanpercentile(lim_point_unc_list, 2.5)
+    lim_point_95ci_upper = np.nanpercentile(lim_point_unc_list, 97.5)
 
     # # Reject all 3 sigma outliers and recompute the std
     # slope_report_unc_list = [slp for slp in slope_report_unc_list if (slp < slope_report \
@@ -357,7 +357,15 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
         else:
             lim_label = "Eff. lim. mag"
         plt.scatter(lim_point, 1.0, c='b', marker='s', \
-            label="{:s} = {:+.2f} $\pm$ {:.2f}".format(lim_label, lim_point, lim_point_std), zorder=6)
+            label="{:s} = {:+.2f} $\pm$ {:.2f}, [{:.2f}, {:.2f}] 95% CI".format(
+                lim_label, 
+                lim_point, 
+                lim_point_std, 
+                lim_point_95ci_lower, 
+                lim_point_95ci_upper
+                ), 
+            zorder=6
+            )
 
 
         plt.ylim([y_min, y_max])
