@@ -169,7 +169,7 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
     for _ in range(3):
         slopes = [scipy.stats.gamma.pdf(entry[3], *entry[0]) for entry in unc_results_list]
         median_slope = np.median(slopes)
-        slope_std = np.std(slopes)
+        slope_std = np.nanstd(slopes)
 
         unc_results_list_filtered = []
         for i, unc_slope in enumerate(slopes):
@@ -185,7 +185,7 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
 
     # Compute the standard deviation of the slope
     slope_report_unc_list = [entry[5] for entry in unc_results_list]
-    slope_report_std = np.std(slope_report_unc_list)
+    slope_report_std = np.nanstd(slope_report_unc_list)
 
     # Compute the 95% confidence interval of the slope
     slope_report_95ci_lower = np.nanpercentile(slope_report_unc_list, 2.5)
@@ -198,7 +198,7 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
 
     # Compute the standard deviation of the effective limiting magnitude
     lim_point_unc_list = [entry[7] for entry in unc_results_list]
-    lim_point_std = np.std(lim_point_unc_list)
+    lim_point_std = np.nanstd(lim_point_unc_list)
 
     # Compute the 95% confidence interval of the effective limiting magnitude
     lim_point_95ci_lower = np.nanpercentile(lim_point_unc_list, 2.5)
@@ -209,7 +209,7 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
     #     + 3*slope_report_std) and (slp > slope_report - 3*slope_report_std)]
 
     # # Recompute the standard deviation
-    # slope_report_std = np.std(slope_report_unc_list)
+    # slope_report_std = np.nanstd(slope_report_unc_list)
 
 
     # Make plots
@@ -276,7 +276,7 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
 
         # Compute standard deviation of reference point
         # The sddev is not computed for inflection point as it has the same value
-        ref_point_std = np.std(ref_point_unc_list)
+        ref_point_std = np.nanstd(ref_point_unc_list)
         
         plt.scatter(sign*ref_point, slope_pdf, color='r', zorder=5, \
             label='Reference point = {:.2f} $\pm$ {:.2f}'.format(sign*ref_point, ref_point_std))
