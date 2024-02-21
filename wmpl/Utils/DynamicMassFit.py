@@ -14,7 +14,7 @@ from wmpl.MetSim.MetSimErosion import Constants, runSimulation
 from wmpl.MetSim.GUI import SimulationResults
 
 
-def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle):
+def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a):
 
     # Init simulation constants
     const = Constants()
@@ -32,8 +32,10 @@ def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle):
     const.v_init = v_init
     const.h_init = ht_beg
     const.rho = density
-    const.gamma = 1.0
+    #const.gamma = 1.0
+    #const.shape_factor = 1.21
     const.shape_factor = 1.21
+    const.gamma = 0.7
     
 
     # Ablation coeff of chondritic material
@@ -200,7 +202,7 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
     
 
     # Run the simulation until ablation stops
-    sr = runFragSim(dyn_mass, density, lat, lon, jd, hend, vend, entry_angle)
+    sr = runFragSim(dyn_mass, density, lat, lon, jd, hend, vend, entry_angle, gamma_a)
 
     # Extract the final height
     final_ht = 0
