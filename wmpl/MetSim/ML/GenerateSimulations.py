@@ -500,7 +500,7 @@ class ErosionSimContainer(object):
         pass
 
 
-    def saveJSON(self):
+    def saveJSON(self, output_dir):
         """ Save object as a JSON file. """
 
 
@@ -521,7 +521,7 @@ class ErosionSimContainer(object):
                 setattr(self2.simulation_results, sim_res_attr, attr.tolist())
 
 
-        file_path = os.path.join(self.output_dir, self.file_name + ".json")
+        file_path = os.path.join(output_dir, self.file_name + ".json")
         with open(file_path, 'w') as f:
             json.dump(self2, f, default=lambda o: o.__dict__, indent=4)
 
@@ -607,7 +607,7 @@ class ErosionSimContainer(object):
 
 
         # Save results as a JSON file
-        self.saveJSON()
+        self.saveJSON(dens_folder_path)
 
         # Save results as a pickle file
         savePickle(self, dens_folder_path, self.file_name + ".pickle")
