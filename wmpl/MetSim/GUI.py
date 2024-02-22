@@ -466,7 +466,7 @@ class WakeContainter(object):
 
 class FragmentationEntry(object):
     def __init__(self, frag_type, height, number, mass_percent, sigma, gamma, erosion_coeff, grain_mass_min, \
-        grain_mass_max, mass_index, normalize_units=False):
+        grain_mass_max, mass_index, normalize_units=False, upward_only=None):
         """ A container for every fragmentation entry. 
 
         normalize_units: [bool] Convert the units of sigma and erosion coeff from s^2 km^-2 to s^2 m^-2,
@@ -494,6 +494,21 @@ class FragmentationEntry(object):
 
 
         self.frag_type = frag_type.strip()
+
+        # If the height starts with the character "U", it means that the fragmentation is only applied
+        # when the object is going up. This is only used when Earth grazers are simulated.
+        if upward_only is None:
+
+            self.upward_only = False
+            
+            if isinstance(height, str):
+                if height.strip().upper().startswith("U"):
+                    self.upward_only = True
+                    height = height.strip().upper().strip("U")
+
+        else:
+            self.upward_only = upward_only
+
 
         self.height = (1000**norm)*float(height)
 
@@ -631,7 +646,15 @@ class FragmentationEntry(object):
 
         line_entries.append("{:>6s}".format(self.frag_type))
 
-        line_entries.append("{:11.3f}".format(self.height/1000))
+        # If the height is upward only, add a prefix "U"
+        if self.upward_only:
+            height_prefix = "U"
+            height_fmt = "{:10.3f}"
+        else:
+            height_prefix = ""
+            height_fmt = "{:11.3f}"
+
+        line_entries.append("{:s}{:s}".format(height_prefix, height_fmt.format(self.height/1000)))
 
         if self.number is not None:
             line_entries.append("{:6d}".format(self.number))
@@ -747,7 +770,15 @@ class FragmentationContainer(object):
     def sortByHeight(self):
         """ Sort the fragmentation entries by height, from highest to lowest. """
 
-        self.fragmentation_entries = sorted(self.fragmentation_entries, key=lambda x: x.height, reverse=True)
+        # Sort fragmentations when fireball is going down by decreasing height
+        frags_down = [frag_entry for frag_entry in self.fragmentation_entries if not frag_entry.upward_only]
+        frags_down = sorted(frags_down, key=lambda x: x.height, reverse=True)
+
+        # Sort fragmentations when fireball is going up by increasing height
+        frags_up = [frag_entry for frag_entry in self.fragmentation_entries if frag_entry.upward_only]
+        frags_up = sorted(frags_up, key=lambda x: x.height)
+
+        self.fragmentation_entries = frags_down + frags_up
 
 
     def resetAll(self):
@@ -832,6 +863,9 @@ class FragmentationContainer(object):
 #   - D    - Dust release. Only the grain mass range needs to be specified. A mass index of 2.0 will be assumed if not given.
 #           - REQUIRED: Height, Mass (%), Grain MIN mass, Grain MAX mass.
 #           - Possible: Mass index.
+# 
+# If the character "U" is added before the height (e.g. U92.500), the fragmentation will only be applied when the object is going up.
+# This feature is useful for modelling Earth grazers.
 #
 #                             INPUTS (leave unchanged fields empty)                                      #        OUTPUTS  (do not fill in!)                                  #
 # ------------------------------------------------------------------------------------------------------ # ------------------------------------------------------------------ #
@@ -1876,7 +1910,8 @@ def plotWakeOverview(sr, wake_containers, plot_dir, event_name, site_id=None, wa
 
 
 
-def plotObsAndSimComparison(traj, sr, met_obs, plot_dir, wake_containers=None, plot_lag=False, camo=False):
+def plotObsAndSimComparison(traj, sr, met_obs, lc_data, plot_dir, 
+                            wake_containers=None, plot_lag=False, camo=False):
     """ Plot a comparison between observed and simulated data. Plot the light curve and velocity comparison
         and wake if given.
 
@@ -1888,6 +1923,7 @@ def plotObsAndSimComparison(traj, sr, met_obs, plot_dir, wake_containers=None, p
         traj: [Trajectory object] Trajectory object.
         sr: [SimulationResults object] Simulation results.
         met_obs: [MetObservations object] Meteor observations.
+        lc_data: [dict] Dictionary of additional light curves.
         plot_dir: [str] Path to the directory where the plots will be saved.
 
     Keyword arguments:
@@ -2109,8 +2145,9 @@ def plotObsAndSimComparison(traj, sr, met_obs, plot_dir, wake_containers=None, p
             #                 obs.model_ht[mag_filter]/1000)
 
             # Keep track of the observed magnitude range
-            mag_obs_faintest = max(mag_obs_faintest, np.max(obs.absolute_magnitudes[mag_filter]))
-            mag_obs_brightest = min(mag_obs_brightest, np.min(obs.absolute_magnitudes[mag_filter]))
+            if len(obs.absolute_magnitudes[mag_filter]):
+                mag_obs_faintest = max(mag_obs_faintest, np.max(obs.absolute_magnitudes[mag_filter]))
+                mag_obs_brightest = min(mag_obs_brightest, np.min(obs.absolute_magnitudes[mag_filter]))
 
         # ax_len.scatter(obs.state_vect_dist[mag_filter], obs.model_ht[mag_filter]/1000,
         #   label=obs.station_id)
@@ -2142,13 +2179,14 @@ def plotObsAndSimComparison(traj, sr, met_obs, plot_dir, wake_containers=None, p
             ax_lenres.plot(len_residuals, obs.model_ht[mag_filter]/1000, **plot_params)
 
 
-        # Keep track of the observed height range
-        ht_obs_max = max(ht_obs_max, np.max(obs.model_ht[mag_filter]))
-        ht_obs_min = min(ht_obs_min, np.min(obs.model_ht[mag_filter]))
+        if len(obs.model_ht[mag_filter]):
+            # Keep track of the observed height range
+            ht_obs_max = max(ht_obs_max, np.max(obs.model_ht[mag_filter]))
+            ht_obs_min = min(ht_obs_min, np.min(obs.model_ht[mag_filter]))
 
-        # Keep track of the observed time range
-        time_obs_max = max(time_obs_max, np.max(obs.time_data[mag_filter]))
-        time_obs_min = min(time_obs_min, np.min(obs.time_data[mag_filter]))
+            # Keep track of the observed time range
+            time_obs_max = max(time_obs_max, np.max(obs.time_data[mag_filter]))
+            time_obs_min = min(time_obs_min, np.min(obs.time_data[mag_filter]))
 
 
 
@@ -2218,6 +2256,36 @@ def plotObsAndSimComparison(traj, sr, met_obs, plot_dir, wake_containers=None, p
             # Keep track of the observed time range
             time_obs_max = max(time_obs_max, np.max(met_obs.time_data[site]))
             time_obs_min = min(time_obs_min, np.min(met_obs.time_data[site]))
+
+
+    # Plot additional observations from the light curve CSV file (if available)
+    if lc_data is not None:
+
+        # Plot additional magnitudes for all sites
+        for site in lc_data.sites:
+
+            # Extract data
+            abs_mag_data = lc_data.abs_mag_data[site]
+            height_data = lc_data.height_data[site]/1000
+
+            # self.magnitudePlot.canvas.axes.plot(abs_mag_data, \
+            #     height_data, marker='x', linestyle='dashed', label=str(site), markersize=1, linewidth=1)
+
+            # self.magnitudePlot.canvas.axes.plot(abs_mag_data, \
+            #     height_data, marker='x', linestyle='none', label=str(site), markersize=2, linewidth=1)
+            
+            # Plot the observations
+            ax_mag.plot(abs_mag_data, height_data, marker='x', linestyle='none', label=str(site), 
+                        markersize=2, linewidth=1)
+            
+
+            # Keep track of the observed height range
+            ht_obs_max = max(ht_obs_max, np.max(1000*height_data))
+            ht_obs_min = min(ht_obs_min, np.min(1000*height_data))
+
+            # Keep track of the observed magnitude range
+            mag_obs_faintest = max(mag_obs_faintest, np.max(abs_mag_data))
+            mag_obs_brightest = min(mag_obs_brightest, np.min(abs_mag_data))
 
 
     ### Plot the simulated magnitude ###
@@ -2941,6 +3009,7 @@ class MetSimGUI(QMainWindow):
         self.inputMassKill.setText("{:.1e}".format(const.m_kill))
         self.inputVelKill.setText("{:.3f}".format(const.v_kill/1000))
         self.inputHtKill.setText("{:.3f}".format(const.h_kill/1000))
+        self.inputLenKill.setText("{:.1f}".format(const.len_kill/1000))
 
         ### ###
 
@@ -3303,10 +3372,11 @@ class MetSimGUI(QMainWindow):
         self.const.dt = self._tryReadBox(self.inputTimeStep, self.const.dt)
         self.const.P_0m = self._tryReadBox(self.inputP0M, self.const.P_0m)
 
-        self.const.h_init = 1000*self._tryReadBox(self.inputHtInit, self.const.h_init/1000)
-        self.const.m_kill = self._tryReadBox(self.inputMassKill, self.const.m_kill)
-        self.const.v_kill = 1000*self._tryReadBox(self.inputVelKill, self.const.v_kill/1000)
-        self.const.h_kill = 1000*self._tryReadBox(self.inputHtKill, self.const.h_kill/1000)
+        self.const.h_init   = 1000*self._tryReadBox(self.inputHtInit, self.const.h_init/1000)
+        self.const.m_kill   = self._tryReadBox(self.inputMassKill, self.const.m_kill)
+        self.const.v_kill   = 1000*self._tryReadBox(self.inputVelKill, self.const.v_kill/1000)
+        self.const.h_kill   = 1000*self._tryReadBox(self.inputHtKill, self.const.h_kill/1000)
+        self.const.len_kill = 1000*self._tryReadBox(self.inputLenKill, self.const.len_kill/1000)
 
         ### ###
 
@@ -4911,7 +4981,8 @@ class MetSimGUI(QMainWindow):
 
 
             # Plot the comparison between the simulations and observations (excluding the wake)
-            plotObsAndSimComparison(self.traj, self.simulation_results, self.met_obs, self.dir_path, 
+            plotObsAndSimComparison(self.traj, self.simulation_results, self.met_obs, self.lc_data, 
+                                    self.dir_path, 
                                     wake_containers=None, plot_lag=True, camo=camo)
 
             # Show a message box
