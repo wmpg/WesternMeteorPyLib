@@ -338,6 +338,14 @@ if __name__ == "__main__":
         ht = obs.meas_ht[1:][~ignored]
         t = obs.time_data[1:][~ignored]
 
+        # Only take velocities inside a reasonable range
+        vel_filter = (vel > 0) & (vel < 73_000)
+
+        # Filter out all data
+        vel = vel[vel_filter]
+        ht = ht[vel_filter]
+        t = t[vel_filter]
+
         # Store all data
         vel_data += vel.tolist()
         ht_data += ht.tolist()
