@@ -986,13 +986,6 @@ def ablateAll(fragments, const, compute_wake=False):
                         and (frag.h > frag_entry.height) 
                         and (frag.h > const.main_bottom_ht)
                         ):
-
-                        if frag_entry.upward_only:
-                            print("UP!")
-                        else:
-                            print("DOWN!")
-                        
-                        print("Height: {:.2f}, Main bottom: {:.2f}".format(frag.h/1000, const.main_bottom_ht/1000))
                         
                         parent_initial_mass = frag.m
 
