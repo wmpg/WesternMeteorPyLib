@@ -696,7 +696,7 @@ def extractSimData(sim, min_frames_visible=MIN_FRAMES_VISIBLE, check_only=False,
     ###     (in the CAMO widefield camera)                                       ###
 
     # Get indices of magnitudes above the brighter limiting magnitude
-    indices_visible_brighter = sim.simulation_results.abs_magnitude <= lim_mag_brightest
+    indices_visible_brighter = sim.simulation_results.abs_magnitude >= lim_mag_brightest
 
     # If no points were visible, skip this solution
     if not np.any(indices_visible_brighter):
