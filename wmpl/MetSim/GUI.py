@@ -1384,6 +1384,10 @@ def loadConstants(sim_fit_json):
         for key in const_json:
             setattr(const, key, const_json[key])
 
+    if 'const' in const_json:
+       # Open the constants parameters part of .jsobn file for simulations
+       for key in const_json['const']:
+           setattr(const, key, const_json['const'][key])
 
     if 'fragmentation_entries' in const_json:
 
