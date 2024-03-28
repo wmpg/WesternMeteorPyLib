@@ -776,28 +776,11 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
                 t_rel = t - t0
 
                 # Compute the model point modified due to gravity, assuming zero vertical velocity
-                rad_cpa = applyGravityDrop(rad_cpa, t_rel, vectMag(rad_cpa), 0.0)
+                # An improvement would be to make v0z a global variable and pass it to this function instead of using zero vertical velocity 0.0 as the last parameter
+                # This effect would be minor and therefore hard to notice but without it we nullify the improvement of the complex gravity field formula
+                rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, vectMag(rad_cpa), 0.0)
+                _, rad_cpa, _ = findClosestPoints(stat_eci, meas_eci, rad_cpa_grav, radiant_eci)
 
-                # # Calculate the gravitational acceleration at the given height
-                # g = G*EARTH.MASS/(vectMag(rad_cpa)**2)
-
-                # # Determing the sign of the initial time
-                # time_sign = np.sign(t_rel)
-
-                # # Calculate the amount of gravity drop from a straight trajectory (handle the case when the time
-                # #   can be negative)
-                # drop = time_sign*(1.0/2)*g*t_rel**2
-
-                # # Apply gravity drop to ECI coordinates
-                # rad_cpa -= drop*vectNorm(rad_cpa)
-
-
-                # print('-----')
-                # print('Station:', obs.station_id)
-                # print('t:', t_rel)
-                # print('g:', g)
-
-                # print('Drop:', drop)
 
 
             # Calculate the unit vector pointing from the station to the point on the trajectory
@@ -856,22 +839,26 @@ def calcSpatialResidual(jdt_ref, jd, state_vect, radiant_eci, stat, meas, gravit
     # Calculate closest points of approach (observed line of sight to radiant line) from the state vector
     obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, state_vect, radiant_eci)
 
-    # # Apply the gravity drop
-    # if gravity:
+    # Apply the gravity drop
+    if gravity:
 
-    #     # Compute the relative time
-    #     t_rel = 86400*(jd - jdt_ref)
+        # Compute the relative time
+        t_rel = 86400*(jd - jdt_ref)
 
-    #     # Correct the point on the trajectory for gravity
-    #     rad_cpa = applyGravityDrop(rad_cpa, t_rel, vectMag(rad_cpa), 0.0)
+        # Correct the point on the trajectory for gravity
+        # An improvement would be to make v0z a global variable and pass it to this function once calculated instead of 0.0
+        rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, vectMag(rad_cpa), 0.0)
 
-    #     # ###########################
+        # ###########################
 
-    #     # # Calculate closest points of approach (observed line of sight to radiant line) from the gravity corrected
-    #     # #   point
-    #     # obs_cpa, _, d = findClosestPoints(stat, meas, rad_cpa, radiant_eci)
+        # # Calculate closest points of approach (observed line of sight to radiant line) from the gravity corrected
+        # # point
+        obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, rad_cpa_grav, radiant_eci)
 
-    #     # ##!!!!!
+        # Works by creating a dummy point ON the gravity dropped trajectory, 
+        # then re-doing the find closest points fit to get better CPA vectors.
+        # Note that the find closest points algorithm doesn't care whether it uses the state vector or a random point
+        # further down the trajectory AS LONG AS it's gravity corrected.
 
 
     # Vector pointing from the point on the trajectory to the point on the line of sight
@@ -2244,9 +2231,9 @@ def copyUncertainties(traj_source, traj_target, copy_mc_traj_instances=False):
 
 def applyGravityDrop(eci_coord, t, r0, vz):
     """ Given the ECI position of the meteor and the duration of flight, this function calculates the
-        drop caused by gravity and returns ECI coordinates of the meteor corrected for gravity drop. As the 
-        gravitational acceleration changes with height, the drop is changes too. We assumed that the vertical
-        component of the meteor's velocity is constant dervied the modified drop equation.
+        drop caused by gravity and returns ECI coordinates of the meteor corrected for gravity drop. As
+        gravitational acceleration changes with height, the rate of drop changes too. We assumed that the vertical
+        component of the meteor's velocity is constant to derive the modified drop equation.
 
     Arguments:
         eci_coord: [ndarray] (x, y, z) ECI coordinates of the meteor at the given time t (meters).
@@ -3505,7 +3492,7 @@ class Trajectory(object):
         for obs in observations:
         
             # Calculate closest points of approach (observed line of sight to radiant line)
-            obs_cpa, rad_cpa, d = findClosestPoints(obs.stat_eci_los[0], obs.meas_eci_los[0], state_vect, \
+            obs_cpa, rad_cpa, _ = findClosestPoints(obs.stat_eci_los[0], obs.meas_eci_los[0], state_vect, \
                 radiant_eci)
 
             eci_list.append(rad_cpa)
@@ -3519,16 +3506,18 @@ class Trajectory(object):
 
         
         ### Compute the apparent zenith angle ###
+        # Radiant should be calculated from radiant_eci, not state_vect_mini, which is always a near 
+        # vertical ##
 
         # Compute the apparent radiant
-        ra_a, dec_a = eci2RaDec(self.state_vect_mini)
+        ra_a, dec_a = eci2RaDec(radiant_eci)
 
         # Compute alt/az of the apparent radiant
         lat_0, lon_0, _ = cartesian2Geo(self.jdt_ref, *eci0)
         _, alt_a = raDec2AltAz(ra_a, dec_a, self.jdt_ref, lat_0, lon_0)
 
         # Compute the apparent zenith angle
-        zc = np.pi - alt_a
+        zc = np.pi/2 - alt_a
 
         ####
 
@@ -3568,7 +3557,10 @@ class Trajectory(object):
                     t_rel = t - t0
 
                     # Apply the gravity drop
-                    rad_cpa = applyGravityDrop(rad_cpa, t_rel, r0, v0z)
+                    rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, r0, v0z)
+
+                    # Re-do the vector points of closest approach. This is really important!
+                    obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, rad_cpa_grav, radiant_eci)
                 
 
                 # Calculate the range to the observed CPA
@@ -3665,8 +3657,45 @@ class Trajectory(object):
 
         """
 
+        ### Compute parameters for gravity drop ###
+
         # Determine the first time of observation
         t0 = min([obs.time_data[0] for obs in observations])
+
+        # Determine the largest distance from the centre of the Earth and use it as the beginning point
+        eci_list = []
+        for obs in observations:
+        
+            # Calculate closest points of approach (observed line of sight to radiant line)
+            _, rad_cpa, _ = findClosestPoints(obs.stat_eci_los[0], obs.meas_eci_los[0], state_vect, \
+                radiant_eci)
+
+            eci_list.append(rad_cpa)
+
+        # Find the largest distance from the centre of the Earth
+        max_dist_indx = np.argmax([vectMag(r) for r in eci_list])
+
+        # Get ECI coordinates of the largest distance and the distance itself
+        eci0 = eci_list[max_dist_indx]
+        r0 = vectMag(eci0)
+
+        
+        ### Compute the apparent zenith angle ###
+
+        # Compute the apparent radiant
+        ra_a, dec_a = eci2RaDec(radiant_eci)
+
+        # Compute alt/az of the apparent radiant
+        lat_0, lon_0, _ = cartesian2Geo(self.jdt_ref, *eci0)
+        _, alt_a = raDec2AltAz(ra_a, dec_a, self.jdt_ref, lat_0, lon_0)
+
+        # Compute the apparent zenith angle
+        zc = np.pi/2 - alt_a
+                 
+        # Compute the vertical component of the velocity if the orbit was already computed
+        v0z = -self.v_init*np.cos(zc)
+
+        ####
 
         # Go through observations from all stations
         for obs in observations:
@@ -3688,24 +3717,23 @@ class Trajectory(object):
                 obs.meas_eci_los)):
 
                 # Calculate closest points of approach (observed line of sight to radiant line)
-                obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, state_vect, radiant_eci)
+                _, rad_cpa, _ = findClosestPoints(stat, meas, state_vect, radiant_eci)
 
+                ### Take the gravity drop into account ### 
 
-                # # Calculate the time in seconds from the beginning of the meteor
-                # t_rel = t - t0
+                if self.gravity_correction:
 
-                # # Calculate the gravitational acceleration at the given height
-                # g = G*EARTH.MASS/(vectMag(rad_cpa)**2)
+                    # Calculate the time in seconds from the beginning of the meteor
+                    t_rel = t - t0
 
-                # # Determine the sign of the initial time
-                # time_sign = np.sign(t_rel)
+                    # Apply the gravity drop
+                    rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, r0, v0z)
 
-                # # Calculate the amount of gravity drop from a straight trajectory (handle the case when the
-                # #   time is negative)
-                # drop = time_sign*(1/2.0)*g*t_rel**2
-
-                # # Apply gravity drop to ECI coordinates
-                # rad_cpa -= drop*vectNorm(rad_cpa)
+                    # Re-do find closest points after gravity drop. This is really important!
+                    # The algorithm doesn't care which trajectory point is used to construct the line for the fit,
+                    # but it MUST be gravity corrected.
+                    _, rad_cpa, _ = findClosestPoints(stat, meas, rad_cpa_grav, radiant_eci)
+                
 
 
                 # Set the ECI position of the CPA on the radiant line, as seen by this observer
@@ -3720,7 +3748,7 @@ class Trajectory(object):
                 obs.model_dec[i] = model_dec
 
                 # Calculate the azimuth and elevation of the modelled point from the observer's point of view
-                model_azim, model_elev = raDec2AltAz(model_ra, model_dec, obs.JD_data[i], obs.lat, obs.lon)
+                model_azim, model_elev = raDec2AltAz(model_ra, model_dec, jd, obs.lat, obs.lon)
 
                 obs.model_azim[i] = model_azim
                 obs.model_elev[i] = model_elev
@@ -4740,93 +4768,6 @@ class Trajectory(object):
             ##################################################################################################
 
 
-            ### PLOT TOTAL SPATIAL RESIDUALS VS LENGTH (with influence of gravity) ###
-            ##################################################################################################
-
-            # Plot only with gravity compensation is used
-            if self.gravity_correction:
-
-                for i, obs in enumerate(sorted(self.observations, key=lambda x:x.rbeg_ele, reverse=True)):
-
-                    marker, size_multiplier = markers[i%len(markers)]
-
-
-                    ## Compute residual from gravity corrected point ##
-
-                    res_total_grav_list = []
-
-                    # Go through all individual position measurements from each site
-                    #for t, jd, stat, meas in zip(obs.time_data, obs.JD_data, obs.stat_eci_los, obs.meas_eci_los):
-                    for jd, tlat, tlon, tht, mlat, mlon, mht in zip(obs.JD_data, obs.model_lat, \
-                        obs.model_lon, obs.model_ht, obs.meas_lat, obs.meas_lon, obs.meas_ht):
-
-
-                        # Compute cartiesian coordinates of trajectory points
-                        traj_eci = np.array(geo2Cartesian(tlat, tlon, tht, jd))
-
-                        # Compute cartiesian coordinates of measurement points
-                        meas_eci = np.array(geo2Cartesian(mlat, mlon, mht, jd))
-
-                        # Compute the total distance between the points
-                        res_total_grav = vectMag(traj_eci - meas_eci)
-
-                        # The sign of the residual is the vertical component (meas higher than trajectory is
-                        #   positive)
-                        if vectMag(meas_eci) > vectMag(traj_eci):
-                            res_total_grav = -res_total_grav
-
-
-                        res_total_grav_list.append(res_total_grav)
-                        
-
-                    res_total_grav_list = np.array(res_total_grav_list)
-
-                    ## ##
-
-                    # Plot total residuals
-                    plt.scatter(obs.state_vect_dist/1000, res_total_grav_list, marker=marker, 
-                        s=10*size_multiplier, label='{:s}'.format(str(obs.station_id)), zorder=3)
-
-                    # Mark ignored points
-                    if np.any(obs.ignore_list):
-
-                        ignored_length = obs.state_vect_dist[obs.ignore_list > 0]
-                        ignored_tot_res = res_total_grav_list[obs.ignore_list > 0]
-
-                        plt.scatter(ignored_length/1000, ignored_tot_res, facecolors='none', edgecolors='k', \
-                            marker='o', zorder=3, s=20)
-
-
-                plt.title('Total spatial residuals (gravity corrected)')
-                plt.xlabel('Length (km)')
-                plt.ylabel('Residuals (m), vertical sign')
-
-                plt.grid()
-
-                plt.legend(prop={'size': LEGEND_TEXT_SIZE})
-
-                # Set the residual limits to +/-10m if they are smaller than that
-                if np.max(np.abs(plt.gca().get_ylim())) < 10:
-                    plt.ylim([-10, 10])
-
-                # Pickle the figure
-                if ret_figs:
-                    fig_pickle_dict["total_spatial_residuals_length_grav"] = pickle.dumps(plt.gcf(), \
-                        protocol=2)
-
-                if self.save_results:
-                    savePlot(plt, file_name + '_total_spatial_residuals_length_grav.' + self.plot_file_type, \
-                        output_dir)
-
-                if show_plots:
-                    plt.show()
-
-                else:
-                    plt.clf()
-                    plt.close()
-
-
-            ##################################################################################################
 
 
         ### PLOT ALL TOTAL SPATIAL RESIDUALS VS HEIGHT ###
