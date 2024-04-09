@@ -5227,14 +5227,58 @@ class Trajectory(object):
         m = GroundMap(lat_list, lon_list, border_size=50, color_scheme='light')
 
 
+        # Create a list of unique stations names, such that if there are multiple stations with identical
+        # coordinates but only differ in the suffix, they will be plotted as one station
+        station_name_mapping = {}
+        for i, obs in enumerate(self.observations):
+
+            # If the station is already in the mapping, skip it
+            if obs.station_id in station_name_mapping:
+                continue
+
+            # Check if there are duplicate coordinates
+            for obs2 in self.observations[i+1:]:
+
+                if (obs.lat == obs2.lat) and (obs.lon == obs2.lon):
+
+                    # Only take the common part of the two station names
+                    common_name = os.path.commonprefix([obs.station_id, obs2.station_id])
+
+                    # Get the difference between the two station names
+                    diff1 = obs.station_id[len(common_name):]
+                    diff2 = obs2.station_id[len(common_name):]
+
+                    # If the difference is e.g. _1, _2, _3, etc., it is a suffix
+                    # Strip out _
+                    # This will catch duplicates such as USL00N and USL00N_2
+                    if (diff1.strip("_").isdigit()) or (diff2.strip("_").isdigit()):
+                    
+                        station_name_mapping[obs.station_id] = common_name
+                        station_name_mapping[obs2.station_id] = common_name
+
+
+            # If the station is not in the mapping, add it
+            if obs.station_id not in station_name_mapping:
+                station_name_mapping[obs.station_id] = obs.station_id
+                    
+
+
+
         # Plot locations of all stations and measured positions of the meteor
+        plotted_codes = []
         for i, obs in enumerate(sorted(self.observations, key=lambda x:x.rbeg_ele, reverse=True)):
+
+            station_name = station_name_mapping[obs.station_id]
+
+            # If the station ID is already plotted, skip it
+            if station_name in plotted_codes:
+                continue
 
             # Extract marker type and size multiplier
             marker, sm = markers[i%len(markers)]
 
             # Plot stations
-            m.scatter(obs.lat, obs.lon, s=sm*10, label=str(obs.station_id), marker=marker)
+            m.scatter(obs.lat, obs.lon, s=sm*10, label=str(station_name), marker=marker)
 
             # Plot measured points
             m.plot(obs.meas_lat[obs.ignore_list == 0], obs.meas_lon[obs.ignore_list == 0], c='r')
@@ -5243,6 +5287,9 @@ class Trajectory(object):
             if np.any(obs.ignore_list != 0):
                 m.scatter(obs.meas_lat[obs.ignore_list != 0], obs.meas_lon[obs.ignore_list != 0], c='k', \
                     marker='x', s=5, alpha=0.5)
+                
+            # Add the station to the list of plotted stations
+            plotted_codes.append(station_name)
 
 
 
