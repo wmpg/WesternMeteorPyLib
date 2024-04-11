@@ -5251,7 +5251,8 @@ class Trajectory(object):
                     # If the difference is e.g. _1, _2, _3, etc., it is a suffix
                     # Strip out _
                     # This will catch duplicates such as USL00N and USL00N_2
-                    if (diff1.strip("_").isdigit()) or (diff2.strip("_").isdigit()):
+                    if (str(diff1).startswith("_") or str(diff2).startswith("_")) \
+                        and ((diff1.strip("_").isdigit()) or (diff2.strip("_").isdigit())):
                     
                         station_name_mapping[obs.station_id] = common_name
                         station_name_mapping[obs2.station_id] = common_name
@@ -5268,6 +5269,17 @@ class Trajectory(object):
         plotted_codes = []
         for i, obs in enumerate(sorted(self.observations, key=lambda x:x.rbeg_ele, reverse=True)):
 
+
+            # Plot measured points
+            m.plot(obs.meas_lat[obs.ignore_list == 0], obs.meas_lon[obs.ignore_list == 0], c='r')
+
+            # Plot ignored points
+            if np.any(obs.ignore_list != 0):
+                m.scatter(obs.meas_lat[obs.ignore_list != 0], obs.meas_lon[obs.ignore_list != 0], c='k', \
+                    marker='x', s=5, alpha=0.5)
+                
+
+
             station_name = station_name_mapping[obs.station_id]
 
             # If the station ID is already plotted, skip it
@@ -5279,14 +5291,6 @@ class Trajectory(object):
 
             # Plot stations
             m.scatter(obs.lat, obs.lon, s=sm*10, label=str(station_name), marker=marker)
-
-            # Plot measured points
-            m.plot(obs.meas_lat[obs.ignore_list == 0], obs.meas_lon[obs.ignore_list == 0], c='r')
-
-            # Plot ignored points
-            if np.any(obs.ignore_list != 0):
-                m.scatter(obs.meas_lat[obs.ignore_list != 0], obs.meas_lon[obs.ignore_list != 0], c='k', \
-                    marker='x', s=5, alpha=0.5)
                 
             # Add the station to the list of plotted stations
             plotted_codes.append(station_name)
