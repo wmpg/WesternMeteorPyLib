@@ -269,6 +269,12 @@ class ObservedPoints(object):
         self.rend_ele = None
         self.rend_jd = None
 
+        # Coordinates of the lowest point (observed)
+        self.htmin_lat = None
+        self.htmin_lon = None
+        self.htmin_ele = None
+        self.htmin_jd = None
+
         # Absolute magntiudes
         self.absolute_magnitudes = None
 
@@ -1277,6 +1283,16 @@ class MCUncertainties(object):
         self.rend_ele = None
         self.rend_ele_ci = None
 
+        # Lowest height point (used for grazers)
+        self.htmin_lon = None
+        self.htmin_lon_ci = None
+        self.htmin_lon_m = None
+        self.htmin_lat = None
+        self.htmin_lat_ci = None
+        self.htmin_lat_m = None
+        self.htmin_ele = None
+        self.htmin_ele_ci = None
+
         # Apparent radiant position (radians)
         self.ra = None
         self.ra_ci = None
@@ -1510,6 +1526,17 @@ def calcMCUncertainties(traj_list, traj_best):
     un.rend_lat_m = np.sin(un.rend_lat)*N_end
     un.rend_ele = np.std([traj.rend_ele for traj in traj_list])
     un.rend_ele_ci = confidenceInterval([traj.rend_ele for traj in traj_list], un.ci)
+
+    # Lowest point
+    N_end = EARTH.EQUATORIAL_RADIUS/np.sqrt(1.0 - (EARTH.E**2)*np.sin(traj_best.htmin_lat)**2)
+    un.htmin_lon = scipy.stats.circstd([traj.htmin_lon for traj in traj_list])
+    un.htmin_lon_ci = confidenceInterval([traj.htmin_lon for traj in traj_list], un.ci, angle=True)
+    un.htmin_lon_m = np.sin(un.htmin_lon)*np.cos(traj_best.htmin_lat)*N_end
+    un.htmin_lat = np.std([traj.htmin_lat for traj in traj_list])
+    un.htmin_lat_ci = confidenceInterval([traj.htmin_lat for traj in traj_list], un.ci)
+    un.htmin_lat_m = np.sin(un.htmin_lat)*N_end
+    un.htmin_ele = np.std([traj.htmin_ele for traj in traj_list])
+    un.htmin_ele_ci = confidenceInterval([traj.htmin_ele for traj in traj_list], un.ci)
 
 
     if traj_best.orbit is not None:
@@ -2534,6 +2561,12 @@ class Trajectory(object):
         self.rend_lon = None
         self.rend_ele = None
         self.rend_jd = None
+
+        # Coordinates of the lowest point (used for grazers)
+        self.htmin_lat = None
+        self.htmin_lon = None
+        self.htmin_ele = None
+        self.htmin_jd = None
 
 
         # Intersecting planes state vector
@@ -3608,7 +3641,17 @@ class Trajectory(object):
                 obs.rend_ele = obs.model_ht[obs.ignore_list == 0][-1]
                 obs.rend_jd = obs.JD_data[obs.ignore_list == 0][-1]
 
-            # If the station is compltely ignored, compute the coordinates including all points
+                # Determine index the lowest point on the trajectory
+                htmin_index = np.argmin(obs.model_ht[obs.ignore_list == 0])
+
+                # Set the coordinates of the lowest point on the trajectory, taking the ignored points into account
+                obs.htmin_lat = obs.model_lat[obs.ignore_list == 0][htmin_index]
+                obs.htmin_lon = obs.model_lon[obs.ignore_list == 0][htmin_index]
+                obs.htmin_ele = obs.model_ht[obs.ignore_list == 0][htmin_index]
+                obs.htmin_jd = obs.JD_data[obs.ignore_list == 0][htmin_index]
+                
+
+            # If the station is completely ignored, compute the coordinates including all points
             else:
 
                 # Set the coordinates of the first point on the trajectory, taking the ignored points into account
@@ -3623,14 +3666,23 @@ class Trajectory(object):
                 obs.rend_ele = obs.model_ht[-1]
                 obs.rend_jd = obs.JD_data[-1]
 
+                # Determine index the lowest point on the trajectory
+                htmin_index = np.argmin(obs.model_ht)
+
+                # Set the coordinates of the lowest point on the trajectory, taking the ignored points into account
+                obs.htmin_lat = obs.model_lat[htmin_index]
+                obs.htmin_lon = obs.model_lon[htmin_index]
+                obs.htmin_ele = obs.model_ht[htmin_index]
+                obs.htmin_jd = obs.JD_data[htmin_index]
+
 
 
         # Make a list of observations without any ignored stations in them
         nonignored_observations = [obs for obs in self.observations if not obs.ignore_station]
 
-        # Find the highest beginning height
-        beg_hts = [obs.rbeg_ele for obs in nonignored_observations]
-        first_begin = beg_hts.index(max(beg_hts))
+        # Find the beginning height with the lowest length
+        min_svd_list = [np.min(obs.state_vect_dist) for obs in nonignored_observations]
+        first_begin = min_svd_list.index(min(min_svd_list))
 
         # Set the coordinates of the height point as the first point
         self.rbeg_lat = nonignored_observations[first_begin].rbeg_lat
@@ -3639,15 +3691,23 @@ class Trajectory(object):
         self.rbeg_jd = nonignored_observations[first_begin].rbeg_jd
 
 
-        # Find the lowest ending height
-        end_hts = [obs.rend_ele for obs in nonignored_observations]
-        last_end = end_hts.index(min(end_hts))
+        # Find the ending height with the largest length
+        max_svd_list = [np.max(obs.state_vect_dist) for obs in nonignored_observations]
+        last_end = max_svd_list.index(max(max_svd_list))
 
         # Set coordinates of the lowest point as the last point
         self.rend_lat = nonignored_observations[last_end].rend_lat
         self.rend_lon = nonignored_observations[last_end].rend_lon
         self.rend_ele = nonignored_observations[last_end].rend_ele
         self.rend_jd = nonignored_observations[last_end].rend_jd
+
+
+        # Find the lowest point on the trajectory
+        min_ht_list = [obs.htmin_ele for obs in nonignored_observations]
+        self.htmin_lat = nonignored_observations[np.argmin(min_ht_list)].htmin_lat
+        self.htmin_lon = nonignored_observations[np.argmin(min_ht_list)].htmin_lon
+        self.htmin_ele = nonignored_observations[np.argmin(min_ht_list)].htmin_ele
+        self.htmin_jd = nonignored_observations[np.argmin(min_ht_list)].htmin_jd
 
 
 
@@ -4289,6 +4349,20 @@ class Trajectory(object):
                 out_str += "                    +/- {:6.2f} m\n".format(uncertainties.rend_lon_m)
         out_str += "  Ht  = {:s} m\n".format(valueFormat("{:>11.2f}", self.rend_ele, "{:6.2f}", \
             uncertainties, 'rend_ele'))
+
+        out_str += "Lowest point on the trajectory:\n"
+        out_str += "  Lat = {:s} deg\n".format(valueFormat("{:>11.6f}", self.htmin_lat, "{:6.4f}", \
+            uncertainties, 'htmin_lat', deg=True))
+        if uncertainties is not None:
+            if hasattr(uncertainties, "htmin_lat_m"):
+                out_str += "                    +/- {:6.2f} m\n".format(uncertainties.htmin_lat_m)
+        out_str += "  Lon = {:s} deg\n".format(valueFormat("{:>11.6f}", self.htmin_lon, "{:6.4f}", \
+            uncertainties, 'htmin_lon', deg=True, callable_val=_formatLongitude, callable_ci=_formatLongitude))
+        if uncertainties is not None:
+            if hasattr(uncertainties, "htmin_lon_m"):
+                out_str += "                    +/- {:6.2f} m\n".format(uncertainties.htmin_lon_m)
+        out_str += "  Ht  = {:s} m\n".format(valueFormat("{:>11.2f}", self.htmin_ele, "{:6.2f}", \
+            uncertainties, 'htmin_ele'))
         out_str += "\n"
 
         ### Write information about stations ###
@@ -5298,7 +5372,7 @@ class Trajectory(object):
 
 
         # Plot a point marking the final point of the meteor
-        m.scatter(self.rend_lat, self.rend_lon, c='k', marker='+', s=50, alpha=0.75, label='Lowest height')
+        m.scatter(self.htmin_lat, self.htmin_lon, c='k', marker='+', s=50, alpha=0.75, label='Lowest height')
 
 
         # If there are more than 10 observations, make the legend font smaller
