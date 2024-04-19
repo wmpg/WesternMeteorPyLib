@@ -10,11 +10,12 @@ import numpy as np
 import scipy.interpolate
 
 from wmpl.Formats.EventUWO import StationData
-from wmpl.Formats.GenericFunctions import addSolverOptions
+from wmpl.Formats.GenericFunctions import addSolverOptions, solveTrajectoryGeneric, MeteorObservation, \
+    prepareObservations
 from wmpl.Trajectory.Trajectory import Trajectory
 from wmpl.Trajectory.GuralTrajectory import GuralTrajectory
 from wmpl.Utils.OSTools import mkdirP
-from wmpl.Utils.TrajConversions import jd2Date, jd2UnixTime, unixTime2JD
+from wmpl.Utils.TrajConversions import jd2Date, jd2UnixTime, unixTime2JD, altAz2RADec
 
 
 def writeEvFile(dir_path, file_name, jdt_ref, station_id, lat, lon, ele, time_data, theta_data, phi_data, 
@@ -132,6 +133,8 @@ def readEvFile(dir_path, file_name):
 
 
         time_data = []
+        x_data = []
+        y_data = []
         theta_data = []
         phi_data = []
         mag_data = []
@@ -170,6 +173,8 @@ def readEvFile(dir_path, file_name):
                 line = line.split()
 
                 time_data.append(float(line[1]))
+                x_data.append(float(line[4]))
+                y_data.append(float(line[5]))
                 theta_data.append(float(line[6]))
                 phi_data.append(float(line[7]))
 
@@ -244,7 +249,8 @@ def readEvFile(dir_path, file_name):
         # Init the StationData object
         sd = StationData(jdt_ref, np.radians(lat), np.radians(lon), elev, site + stream)
         sd.time_data = np.array(time_data)
-        #sd.time_data -= sd.time_data[0] # Normalize to 0
+        sd.x_data = np.array(x_data)
+        sd.y_data = np.array(y_data)
         sd.theta_data = np.radians(theta_data)
         sd.phi_data = np.radians(phi_data)
         sd.mag_data = np.array(mag_data)
@@ -254,8 +260,58 @@ def readEvFile(dir_path, file_name):
 
 
 
+def readEvFileIntoMeteorObject(ev_file_path):
+    """ Read the UWO-style ev file into a MeteorObservation object.
 
-def solveTrajectoryEv(ev_file_list, solver='original', velmodel=3, **kwargs):
+    Arguments:
+        ev_file_path: [str] Path to the ev file.
+
+    Return:
+        [MeteorObservation instance]
+    """
+
+    # Store the ev file contants into a StationData object
+    sd = readEvFile(*os.path.split(ev_file_path))
+
+    # Skip bad ev files
+    if sd is None:
+        print("Skipping {:s}, bad ev file!".format(ev_file_path))
+        return None
+
+    # Estimate the FPS from the time data
+    fps = round(1.0/np.median(np.diff(sd.time_data)), 2)
+
+    # Init the meteor object
+    meteor = MeteorObservation(sd.jd_ref, sd.station_id, sd.lat, sd.lon, sd.height, fps)
+
+    # Add data to meteor object
+    for t_rel, x_centroid, y_centroid, theta, phi, mag in zip(sd.time_data, sd.x_data, sd.y_data,\
+        sd.theta_data, sd.phi_data, sd.mag_data):
+
+        # Convert theta, phi to azim, alt
+        azim = np.pi/2 - phi
+        alt = np.pi/2 - theta
+
+        # Compute the JD of the data point
+        jd = sd.jd_ref + t_rel/86400.0
+
+        # Convert azim, alt to RA, Dec
+        ra, dec = altAz2RADec(azim, alt, jd, sd.lat, sd.lon)
+        
+        meteor.addPoint(
+            t_rel*fps, 
+            x_centroid, y_centroid, 
+            np.degrees(azim), np.degrees(alt), 
+            np.degrees(ra), np.degrees(dec), 
+            mag
+            )
+
+    meteor.finish()
+
+    return meteor
+
+
+def solveTrajectoryEv(ev_file_list, solver='original', **kwargs):
     """ Runs the trajectory solver on UWO style ev file. 
 
     Arguments:
@@ -266,12 +322,6 @@ def solveTrajectoryEv(ev_file_list, solver='original', velmodel=3, **kwargs):
         solver: [str] Trajectory solver to use:
             - 'original' (default) - "in-house" trajectory solver implemented in Python
             - 'gural' - Pete Gural's PSO solver
-        velmodel: [int] Velocity propagation model for the Gural solver
-            0 = constant   v(t) = vinf
-            1 = linear     v(t) = vinf - |acc1| * t
-            2 = quadratic  v(t) = vinf - |acc1| * t + acc2 * t^2
-            3 = exponent   v(t) = vinf - |acc1| * |acc2| * exp( |acc2| * t ) (default)
-
 
     Return:
         traj: [Trajectory instance] Solved trajectory
@@ -286,38 +336,33 @@ def solveTrajectoryEv(ev_file_list, solver='original', velmodel=3, **kwargs):
 
 
     # Load the ev file
-    station_data_list = []
+    meteor_list = []
     for ev_file_path in ev_file_list:
-        
-        # Store the ev file contants into a StationData object
-        sd = readEvFile(*os.path.split(ev_file_path))
 
-        # Skip bad ev files
-        if sd is None:
-            print("Skipping {:s}, bad ev file!".format(ev_file_path))
+        # Read the ev file into a MeteorObservation object        
+        meteor = readEvFileIntoMeteorObject(ev_file_path)
+
+        if meteor is None:
             continue
 
-        station_data_list.append(sd)
+        # Check that the observation has a minimum number of points
+        if len(meteor.time_data) < 4:
+            print("The station {:s} has too few points (<4), skipping: {:s}".format(sd.station_id, ev_file_path))
+            continue
+
+
+        meteor_list.append(meteor)
+
+
+    # Normalize all observations to the same JD and precess from J2000 to the epoch of date
+    jdt_ref, meteor_list = prepareObservations(meteor_list)
 
 
     # Check that there are at least two good stations present
-    if len(station_data_list) < 2:
+    if len(meteor_list) < 2:
         print('ERROR! The list of ev files does not contain at least 2 good ev files!')
 
         return False
-
-
-    # Normalize all times to earliest reference Julian date
-    jdt_ref = min([sd_temp.jd_ref for sd_temp in station_data_list])
-    for sd in station_data_list:
-        for i in range(len(sd.time_data)):
-            sd.time_data[i] += (sd.jd_ref - jdt_ref)*86400
-        
-        sd.jd_ref = jdt_ref
-
-
-    for sd in station_data_list:
-        print(sd)
 
 
     # Get the base path of these ev files
@@ -327,50 +372,7 @@ def solveTrajectoryEv(ev_file_list, solver='original', velmodel=3, **kwargs):
     dir_path = os.path.join(root_path, jd2Date(jdt_ref, dt_obj=True).strftime("traj_%Y%m%d_%H%M%S.%f"))
     mkdirP(dir_path)
 
-
-    if solver == 'original':
-
-        # Init the new trajectory solver object
-        traj = Trajectory(jdt_ref, output_dir=dir_path, meastype=4, **kwargs)
-
-    elif solver.startswith('gural'):
-
-        # Extract velocity model is given
-        try:
-            velmodel = int(solver[-1])
-
-        except: 
-            # Default to the exponential model
-            velmodel = 3
-
-        # Select extra keyword arguments that are present only for the gural solver
-        gural_keys = ['max_toffset', 'nummonte', 'meastype', 'verbose', 'show_plots']
-        gural_kwargs = {key: kwargs[key] for key in gural_keys if key in kwargs}
-
-        # Init the new Gural trajectory solver object
-        traj = GuralTrajectory(len(station_data_list), jdt_ref, velmodel, verbose=1, \
-            output_dir=dir_path, meastype=4, **gural_kwargs)
-
-
-    # Infill trajectories from each site
-    for sd in station_data_list:
-
-        # MC solver
-        if solver == 'original':
-
-            traj.infillTrajectory(sd.phi_data, sd.theta_data, sd.time_data, sd.lat, sd.lon, sd.height, \
-                station_id=sd.station_id, magnitudes=sd.mag_data)
-        
-        # Gural solver
-        else:
-            traj.infillTrajectory(sd.phi_data, sd.theta_data, sd.time_data, sd.lat, sd.lon, sd.height)
-
-
-    print('Filling done!')
-
-
-    # Solve the trajectory
-    traj = traj.run()
+    traj = solveTrajectoryGeneric(jdt_ref, meteor_list, dir_path, solver=solver, **kwargs)
 
 
     # Copy the ev files into the output directory
