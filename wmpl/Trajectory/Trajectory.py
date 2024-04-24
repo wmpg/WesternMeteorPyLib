@@ -715,7 +715,8 @@ def numStationsNotIgnored(observations):
 
 
 
-def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=None, gravity=False):
+def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=None, gravity=False, 
+                              gravity_factor=1.0, v0z=None):
     """ Sum all angles between the radiant line and measurement lines of sight.
 
         This function is used as a cost function for the least squares radiant solution of Borovicka et 
@@ -730,6 +731,8 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
     Keyword arguments:
         weights: [list] A list of statistical weights for every station. None by default.
         gravity: [bool] If True, the gravity drop will be taken into account.
+        gravity_factor: [float] Factor by which the gravity correction will be multiplied. 1.0 by default.
+        v0z: [float] Initial vertical velocity of the meteor. If None, 0.0 will be used.
 
     Return:
         angle_sum: [float] Sum of angles between the estimated trajectory line and individual lines of sight.
@@ -788,9 +791,9 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
                 t_rel = t - t0
 
                 # Compute the model point modified due to gravity, assuming zero vertical velocity
-                # An improvement would be to make v0z a global variable and pass it to this function instead of using zero vertical velocity 0.0 as the last parameter
-                # This effect would be minor and therefore hard to notice but without it we nullify the improvement of the complex gravity field formula
-                rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, vectMag(rad_cpa), 0.0)
+                if v0z is None:
+                    v0z = 0.0
+                rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, vectMag(rad_cpa), gravity_factor, v0z)
                 _, rad_cpa, _ = findClosestPoints(stat_eci, meas_eci, rad_cpa_grav, radiant_eci)
 
 
@@ -813,17 +816,19 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
 
 
 
-def minimizeAngleCost(params, observations, weights=None, gravity=False):
+def minimizeAngleCost(params, observations, weights=None, gravity=False, gravity_factor=1.0, v0z=None):
     """ A helper function for minimization of angle deviations. """
 
     state_vect, radiant_eci = np.hsplit(params, 2)
     
-    return angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=weights, gravity=gravity)
+    return angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=weights, gravity=gravity,\
+        gravity_factor=gravity_factor, v0z=v0z)
 
 
 
 
-def calcSpatialResidual(jdt_ref, jd, state_vect, radiant_eci, stat, meas, gravity=False):
+def calcSpatialResidual(jdt_ref, jd, state_vect, radiant_eci, stat, meas, gravity=False, gravity_factor=1.0, 
+                        v0z=None):
     """ Calculate horizontal and vertical residuals from the radiant line, for the given observed point.
 
     Arguments:
@@ -835,6 +840,8 @@ def calcSpatialResidual(jdt_ref, jd, state_vect, radiant_eci, stat, meas, gravit
 
     Keyword arguments:
         gravity: [bool] Apply the correction for Earth's gravity.
+        gravity_factor: [float] Factor by which the gravity correction will be multiplied. 1.0 by default.
+        v0z: [float] Initial vertical velocity of the meteor. If None, 0.0 will be used.
 
     Return:
         (hres, vres): [tuple of floats] residuals in horitontal and vertical direction from the radiant line
@@ -858,8 +865,9 @@ def calcSpatialResidual(jdt_ref, jd, state_vect, radiant_eci, stat, meas, gravit
         t_rel = 86400*(jd - jdt_ref)
 
         # Correct the point on the trajectory for gravity
-        # An improvement would be to make v0z a global variable and pass it to this function once calculated instead of 0.0
-        rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, vectMag(rad_cpa), 0.0)
+        if v0z is None:
+            v0z = 0.0
+        rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, vectMag(rad_cpa), gravity_factor, v0z)
 
         # ###########################
 
@@ -2262,7 +2270,7 @@ def copyUncertainties(traj_source, traj_target, copy_mc_traj_instances=False):
 
 
 
-def applyGravityDrop(eci_coord, t, r0, vz):
+def applyGravityDrop(eci_coord, t, r0, gravity_factor, vz):
     """ Given the ECI position of the meteor and the duration of flight, this function calculates the
         drop caused by gravity and returns ECI coordinates of the meteor corrected for gravity drop. As
         gravitational acceleration changes with height, the rate of drop changes too. We assumed that the vertical
@@ -2272,6 +2280,7 @@ def applyGravityDrop(eci_coord, t, r0, vz):
         eci_coord: [ndarray] (x, y, z) ECI coordinates of the meteor at the given time t (meters).
         t: [float] Time of meteor since the beginning of the trajectory.
         r0: [float] Distance from the centre of the Earth of the beginning of the meteor.
+        gravity_factor: [float] Factor by which the gravity drop will be multiplied.
         vz: [float] Vertical component of the meteor's velocity.
 
     """
@@ -2296,7 +2305,7 @@ def applyGravityDrop(eci_coord, t, r0, vz):
     
 
     # Apply gravity drop to ECI coordinates
-    return eci_coord - drop*vectNorm(eci_coord)
+    return eci_coord - gravity_factor*drop*vectNorm(eci_coord)
 
 
 
@@ -2357,8 +2366,9 @@ class Trajectory(object):
     def __init__(self, jdt_ref, output_dir='.', max_toffset=None, meastype=4, verbose=True, v_init_part=None,\
         v_init_ht=None, estimate_timing_vel=True, monte_carlo=True, mc_runs=None, mc_pick_multiplier=1, \
         mc_noise_std=1.0, geometric_uncert=False, filter_picks=True, calc_orbit=True, show_plots=True, \
-        show_jacchia=False, save_results=True, gravity_correction=True, plot_all_spatial_residuals=False, \
-        plot_file_type='png', traj_id=None, reject_n_sigma_outliers=3, mc_cores=None, fixed_times=None):
+        show_jacchia=False, save_results=True, gravity_correction=True, gravity_factor=1.0, \
+        plot_all_spatial_residuals=False, plot_file_type='png', traj_id=None, reject_n_sigma_outliers=3, 
+        mc_cores=None, fixed_times=None):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -2404,6 +2414,8 @@ class Trajectory(object):
             show_jacchia: [bool] Show the Jacchia fit on the plot with meteor dynamics. False by default.
             save_results: [bool] Save results of trajectory estimation to disk. True by default.
             gravity_correction: [bool] Apply the gravity drop when estimating trajectories. True by default.
+            gravity_factor: [flat] Gravity correction factor. 1.0 by default (full correction). 
+                Can be between 0 - 1. Lower values used for lift compensation.
             plot_all_spatial_residuals: [bool] Plot all spatial residuals on one plot (one vs. time, and
                 the other vs. length). False by default.
             plot_file_type: [str] File extansion of the plot image. 'png' by default, can be 'pdf', 'eps', ...
@@ -2510,6 +2522,14 @@ class Trajectory(object):
         # Apply the correction for gravity when estimating the trajectory
         self.gravity_correction = gravity_correction
 
+        # Gravity correction factor, limit to 0 - 1
+        self.gravity_factor = gravity_factor
+
+        if self.gravity_factor < 0:
+            self.gravity_factor = 0
+        elif self.gravity_factor > 1:
+            self.gravity_factor = 1
+
         # Plot all spatial residuals on one plot
         self.plot_all_spatial_residuals = plot_all_spatial_residuals
 
@@ -2585,6 +2605,9 @@ class Trajectory(object):
 
         # Calculated initial velocity
         self.v_init = None
+
+        # V0z (vertical component of the initial velocity)
+        self.v0z = None
 
         # Calculated average velocity
         self.v_avg = None
@@ -2834,7 +2857,7 @@ class Trajectory(object):
 
                 # Calculate horizontal and vertical residuals
                 hres, vres = calcSpatialResidual(self.jdt_ref, jd, state_vect, radiant_eci, stat, meas, \
-                    gravity=self.gravity_correction)
+                    gravity=self.gravity_correction, gravity_factor=self.gravity_factor, v0z=self.v0z)
 
                 # Add residuals to the residual list
                 obs.h_residuals.append(hres)
@@ -3562,7 +3585,7 @@ class Trajectory(object):
 
             
         # Compute the vertical component of the velocity if the orbit was already computed
-        v0z = -self.v_init*np.cos(zc)
+        self.v0z = -self.v_init*np.cos(zc)
 
         ###########################################
 
@@ -3596,7 +3619,7 @@ class Trajectory(object):
                     t_rel = t - t0
 
                     # Apply the gravity drop
-                    rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, r0, v0z)
+                    rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, r0, self.gravity_factor, self.v0z)
 
                     # Re-do the vector points of closest approach. This is really important!
                     obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, rad_cpa_grav, radiant_eci)
@@ -3759,7 +3782,7 @@ class Trajectory(object):
         zc = np.pi/2 - alt_a
                  
         # Compute the vertical component of the velocity if the orbit was already computed
-        v0z = -self.v_init*np.cos(zc)
+        self.v0z = -self.v_init*np.cos(zc)
 
         ####
 
@@ -3793,7 +3816,7 @@ class Trajectory(object):
                     t_rel = t - t0
 
                     # Apply the gravity drop
-                    rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, r0, v0z)
+                    rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, r0, self.gravity_factor, self.v0z)
 
                     # Re-do find closest points after gravity drop. This is really important!
                     # The algorithm doesn't care which trajectory point is used to construct the line for the fit,
@@ -6010,7 +6033,9 @@ class Trajectory(object):
         # Calculate the initial sum and angles deviating from the radiant line
         angle_sum = angleSumMeasurements2Line(self.observations, self.state_vect, \
              self.best_conv_inter.radiant_eci, weights=weights, \
-             gravity=(_rerun_timing and self.gravity_correction))
+             gravity=(_rerun_timing and self.gravity_correction), gravity_factor=self.gravity_factor, 
+             v0z=self.v0z
+             )
 
         if self.verbose:
             print('Initial angle sum:', angle_sum)
@@ -6022,7 +6047,7 @@ class Trajectory(object):
         # Perform the minimization of angle deviations. The gravity will only be compansated for after the
         #   initial estimate of timing differences
         minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=(self.observations, weights, 
-            (_rerun_timing and self.gravity_correction)), method="Nelder-Mead")
+            (_rerun_timing and self.gravity_correction), self.gravity_factor, self.v0z), method="Nelder-Mead")
 
         # NOTE
         # Other minimization methods were tried as well, but all produce higher fit residuals than Nelder-Mead.
@@ -6050,7 +6075,8 @@ class Trajectory(object):
             print('BOUNDS:', bounds)
             print('p0:', p0)
             minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=(self.observations, \
-                weights, (_rerun_timing and self.gravity_correction)), bounds=bounds, method='SLSQP')
+                weights, (_rerun_timing and self.gravity_correction), self.gravity_factor, self.v0z), 
+                bounds=bounds, method='SLSQP')
 
 
         if self.verbose:

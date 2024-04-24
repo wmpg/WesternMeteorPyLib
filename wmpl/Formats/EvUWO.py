@@ -449,6 +449,7 @@ if __name__ == '__main__':
     solveTrajectoryEv(ev_files, solver=cml_args.solver, max_toffset=max_toffset, \
             monte_carlo=(not cml_args.disablemc), mc_runs=cml_args.mcruns, \
             geometric_uncert=cml_args.uncertgeom, gravity_correction=(not cml_args.disablegravity), 
+            gravity_factor=cml_args.gfact,
             plot_all_spatial_residuals=cml_args.plotallspatial, plot_file_type=cml_args.imgformat, \
             show_plots=(not cml_args.hideplots), v_init_part=velpart, v_init_ht=vinitht, \
             show_jacchia=cml_args.jacchia, \
