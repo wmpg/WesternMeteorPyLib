@@ -35,7 +35,7 @@ from matplotlib.pyplot import cm
 from wmpl.Utils.OSTools import importBasemap
 Basemap = importBasemap()
 
-
+import wmpl
 from wmpl.Trajectory.Orbit import calcOrbit
 from wmpl.Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, RMSD, \
     angleBetweenSphericalCoords, angleBetweenVectors, lineFunc, normalizeAngleWrap, confidenceInterval
@@ -1281,6 +1281,8 @@ class MCUncertainties(object):
         self.rbeg_lat_m = None
         self.rbeg_ele = None
         self.rbeg_ele_ci = None
+        self.rbeg_ele_wgs84 = None
+        self.rbeg_ele_wgs84_ci = None
 
         self.rend_lon = None
         self.rend_lon_ci = None
@@ -1290,6 +1292,8 @@ class MCUncertainties(object):
         self.rend_lat_m = None
         self.rend_ele = None
         self.rend_ele_ci = None
+        self.rend_ele_wgs84 = None
+        self.rend_ele_wgs84_ci = None
 
         # Lowest height point (used for grazers)
         self.htmin_lon = None
@@ -1300,6 +1304,8 @@ class MCUncertainties(object):
         self.htmin_lat_m = None
         self.htmin_ele = None
         self.htmin_ele_ci = None
+        self.htmin_ele_wgs84 = None
+        self.htmin_ele_wgs84_ci = None
 
         # Apparent radiant position (radians)
         self.ra = None
@@ -1524,6 +1530,8 @@ def calcMCUncertainties(traj_list, traj_best):
     un.rbeg_lat_m = np.sin(un.rbeg_lat)*N_beg
     un.rbeg_ele = np.std([traj.rbeg_ele for traj in traj_list])
     un.rbeg_ele_ci = confidenceInterval([traj.rbeg_ele for traj in traj_list], un.ci)
+    un.rbeg_ele_wgs84 = np.std([traj.rbeg_ele_wgs84 for traj in traj_list])
+    un.rbeg_ele_wgs84_ci = confidenceInterval([traj.rbeg_ele_wgs84 for traj in traj_list], un.ci)
 
     N_end = EARTH.EQUATORIAL_RADIUS/np.sqrt(1.0 - (EARTH.E**2)*np.sin(traj_best.rend_lat)**2)
     un.rend_lon = scipy.stats.circstd([traj.rend_lon for traj in traj_list])
@@ -1534,6 +1542,8 @@ def calcMCUncertainties(traj_list, traj_best):
     un.rend_lat_m = np.sin(un.rend_lat)*N_end
     un.rend_ele = np.std([traj.rend_ele for traj in traj_list])
     un.rend_ele_ci = confidenceInterval([traj.rend_ele for traj in traj_list], un.ci)
+    un.rend_ele_wgs84 = np.std([traj.rend_ele_wgs84 for traj in traj_list])
+    un.rend_ele_wgs84_ci = confidenceInterval([traj.rend_ele_wgs84 for traj in traj_list], un.ci)
 
     # Lowest point
     N_end = EARTH.EQUATORIAL_RADIUS/np.sqrt(1.0 - (EARTH.E**2)*np.sin(traj_best.htmin_lat)**2)
@@ -1545,6 +1555,8 @@ def calcMCUncertainties(traj_list, traj_best):
     un.htmin_lat_m = np.sin(un.htmin_lat)*N_end
     un.htmin_ele = np.std([traj.htmin_ele for traj in traj_list])
     un.htmin_ele_ci = confidenceInterval([traj.htmin_ele for traj in traj_list], un.ci)
+    un.htmin_ele_wgs84 = np.std([traj.htmin_ele_wgs84 for traj in traj_list])
+    un.htmin_ele_wgs84_ci = confidenceInterval([traj.htmin_ele_wgs84 for traj in traj_list], un.ci)
 
 
     if traj_best.orbit is not None:
@@ -1591,6 +1603,8 @@ def calcMCUncertainties(traj_list, traj_best):
         un.lat_geocentric_ci = confidenceInterval([traj.orbit.lat_geocentric for traj in traj_list], un.ci)
         un.ht_ref = np.std([traj.orbit.ht_ref for traj in traj_list])
         un.ht_ref_ci = confidenceInterval([traj.orbit.ht_ref for traj in traj_list], un.ci)
+        un.ht_ref_wgs84 = np.std([traj.orbit.ht_ref_wgs84 for traj in traj_list])
+        un.ht_ref_wgs84_ci = confidenceInterval([traj.orbit.ht_ref_wgs84 for traj in traj_list], un.ci)
 
         # Geocentric
         un.ra_g = scipy.stats.circstd([traj.orbit.ra_g for traj in traj_list])
@@ -2574,18 +2588,21 @@ class Trajectory(object):
         self.rbeg_lat = None
         self.rbeg_lon = None
         self.rbeg_ele = None
+        self.rbeg_ele_wgs84 = None
         self.rbeg_jd = None
 
         # Coordinates of the end point
         self.rend_lat = None
         self.rend_lon = None
         self.rend_ele = None
+        self.rend_ele_wgs84 = None
         self.rend_jd = None
 
         # Coordinates of the lowest point (used for grazers)
         self.htmin_lat = None
         self.htmin_lon = None
         self.htmin_ele = None
+        self.htmin_ele_wgs84 = None
         self.htmin_jd = None
 
 
@@ -3713,6 +3730,9 @@ class Trajectory(object):
         self.rbeg_ele = nonignored_observations[first_begin].rbeg_ele
         self.rbeg_jd = nonignored_observations[first_begin].rbeg_jd
 
+        # Compute the begin height in WGS84
+        self.rbeg_ele_wgs84 = wmpl.Utils.GeoidHeightEGM96.mslToWGS84Height(self.rbeg_lat, self.rbeg_lon, self.rbeg_ele)
+
 
         # Find the ending height with the largest length
         max_svd_list = [np.max(obs.state_vect_dist) for obs in nonignored_observations]
@@ -3724,6 +3744,9 @@ class Trajectory(object):
         self.rend_ele = nonignored_observations[last_end].rend_ele
         self.rend_jd = nonignored_observations[last_end].rend_jd
 
+        # Compute the end height in WGS84
+        self.rend_ele_wgs84 = wmpl.Utils.GeoidHeightEGM96.mslToWGS84Height(self.rend_lat, self.rend_lon, self.rend_ele)
+
 
         # Find the lowest point on the trajectory
         min_ht_list = [obs.htmin_ele for obs in nonignored_observations]
@@ -3731,6 +3754,9 @@ class Trajectory(object):
         self.htmin_lon = nonignored_observations[np.argmin(min_ht_list)].htmin_lon
         self.htmin_ele = nonignored_observations[np.argmin(min_ht_list)].htmin_ele
         self.htmin_jd = nonignored_observations[np.argmin(min_ht_list)].htmin_jd
+
+        # Compute the lowest height in WGS84
+        self.htmin_ele_wgs84 = wmpl.Utils.GeoidHeightEGM96.mslToWGS84Height(self.htmin_lat, self.htmin_lon, self.htmin_ele)
 
 
 
@@ -4293,13 +4319,15 @@ class Trajectory(object):
         if self.orbit is not None:
             out_str += "Reference point on the trajectory:\n"
             out_str += "  Time: " + str(jd2Date(self.orbit.jd_ref, dt_obj=True)) + " UTC\n"
-            out_str += "  Lat     = {:s} deg\n".format(valueFormat("{:>11.6f}", self.orbit.lat_ref, \
+            out_str += "  Lat      = {:s} deg\n".format(valueFormat("{:>11.6f}", self.orbit.lat_ref, \
                 '{:6.4f}', uncertainties, 'lat_ref', deg=True))
-            out_str += "  Lon     = {:s} deg\n".format(valueFormat("{:>11.6f}", self.orbit.lon_ref, \
+            out_str += "  Lon      = {:s} deg\n".format(valueFormat("{:>11.6f}", self.orbit.lon_ref, \
                 '{:6.4f}', uncertainties, 'lon_ref', deg=True, callable_val=_formatLongitude, \
                 callable_ci=_formatLongitude))
-            out_str += "  Ht      = {:s} m\n".format(valueFormat("{:>11.2f}", self.orbit.ht_ref, \
+            out_str += "  Ht MSL   = {:s} m\n".format(valueFormat("{:>11.2f}", self.orbit.ht_ref, \
                 '{:6.2f}', uncertainties, 'ht_ref', deg=False))
+            out_str += "  Ht WGS84 = {:s} m\n".format(valueFormat("{:>11.2f}", self.orbit.ht_ref_wgs84, \
+                '{:6.2f}', uncertainties, 'ht_ref_wgs84', deg=False))
             out_str += "  Lat geo = {:s} deg\n".format(valueFormat("{:>11.6f}", self.orbit.lat_geocentric, \
                 '{:6.4f}', uncertainties, 'lat_geocentric', deg=True))
             out_str += "\n"
@@ -4345,47 +4373,56 @@ class Trajectory(object):
             out_str += "  Stddev    = {:.2e} s\n".format(self.timing_stddev)
             out_str += "\n"
 
+        out_str += "\n"
         out_str += "Begin point on the trajectory:\n"
-        out_str += "  Lat = {:s} deg\n".format(valueFormat("{:>11.6f}", self.rbeg_lat, "{:6.4f}", \
+        out_str += "  Lat (+N) = {:s} deg\n".format(valueFormat("{:>11.6f}", self.rbeg_lat, "{:6.4f}", \
             uncertainties, 'rbeg_lat', deg=True))
         if uncertainties is not None:
             if hasattr(uncertainties, "rbeg_lat_m"):
-                out_str += "                    +/- {:6.2f} m\n".format(uncertainties.rbeg_lat_m)
-        out_str += "  Lon = {:s} deg\n".format(valueFormat("{:>11.6f}", self.rbeg_lon, "{:6.4f}", \
+                out_str += "                         +/- {:6.2f} m\n".format(uncertainties.rbeg_lat_m)
+        out_str += "  Lon (+E) = {:s} deg\n".format(valueFormat("{:>11.6f}", self.rbeg_lon, "{:6.4f}", \
             uncertainties, 'rbeg_lon', deg=True, callable_val=_formatLongitude, callable_ci=_formatLongitude))
         if uncertainties is not None:
             if hasattr(uncertainties, "rbeg_lon_m"):
-                out_str += "                    +/- {:6.2f} m\n".format(uncertainties.rbeg_lon_m)
-        out_str += "  Ht  = {:s} m\n".format(valueFormat("{:>11.2f}", self.rbeg_ele, "{:6.2f}", \
+                out_str += "                         +/- {:6.2f} m\n".format(uncertainties.rbeg_lon_m)
+        out_str += "  Ht MSL   = {:s} m\n".format(valueFormat("{:>11.2f}", self.rbeg_ele, "{:6.2f}", \
             uncertainties, 'rbeg_ele'))
+        out_str += "  Ht WGS84 = {:s} m\n".format(valueFormat("{:>11.2f}", self.rbeg_ele_wgs84, "{:6.2f}", \
+            uncertainties, 'rbeg_ele_wgs84'))
 
+        out_str += "\n"
         out_str += "End point on the trajectory:\n"
-        out_str += "  Lat = {:s} deg\n".format(valueFormat("{:>11.6f}", self.rend_lat, "{:6.4f}", \
+        out_str += "  Lat (+N) = {:s} deg\n".format(valueFormat("{:>11.6f}", self.rend_lat, "{:6.4f}", \
             uncertainties, 'rend_lat', deg=True))
         if uncertainties is not None:
             if hasattr(uncertainties, "rend_lat_m"):
-                out_str += "                    +/- {:6.2f} m\n".format(uncertainties.rend_lat_m)
-        out_str += "  Lon = {:s} deg\n".format(valueFormat("{:>11.6f}", self.rend_lon, "{:6.4f}", \
+                out_str += "                         +/- {:6.2f} m\n".format(uncertainties.rend_lat_m)
+        out_str += "  Lon (+E) = {:s} deg\n".format(valueFormat("{:>11.6f}", self.rend_lon, "{:6.4f}", \
             uncertainties, 'rend_lon', deg=True, callable_val=_formatLongitude, callable_ci=_formatLongitude))
         if uncertainties is not None:
             if hasattr(uncertainties, "rend_lon_m"):
-                out_str += "                    +/- {:6.2f} m\n".format(uncertainties.rend_lon_m)
-        out_str += "  Ht  = {:s} m\n".format(valueFormat("{:>11.2f}", self.rend_ele, "{:6.2f}", \
+                out_str += "                         +/- {:6.2f} m\n".format(uncertainties.rend_lon_m)
+        out_str += "  Ht MSL   = {:s} m\n".format(valueFormat("{:>11.2f}", self.rend_ele, "{:6.2f}", \
             uncertainties, 'rend_ele'))
+        out_str += "  Ht WGS84 = {:s} m\n".format(valueFormat("{:>11.2f}", self.rend_ele_wgs84, "{:6.2f}", \
+            uncertainties, 'rend_ele_wgs84'))
 
+        out_str += "\n"
         out_str += "Lowest point on the trajectory:\n"
-        out_str += "  Lat = {:s} deg\n".format(valueFormat("{:>11.6f}", self.htmin_lat, "{:6.4f}", \
+        out_str += "  Lat (+N) = {:s} deg\n".format(valueFormat("{:>11.6f}", self.htmin_lat, "{:6.4f}", \
             uncertainties, 'htmin_lat', deg=True))
         if uncertainties is not None:
             if hasattr(uncertainties, "htmin_lat_m"):
-                out_str += "                    +/- {:6.2f} m\n".format(uncertainties.htmin_lat_m)
-        out_str += "  Lon = {:s} deg\n".format(valueFormat("{:>11.6f}", self.htmin_lon, "{:6.4f}", \
+                out_str += "                         +/- {:6.2f} m\n".format(uncertainties.htmin_lat_m)
+        out_str += "  Lon (+E) = {:s} deg\n".format(valueFormat("{:>11.6f}", self.htmin_lon, "{:6.4f}", \
             uncertainties, 'htmin_lon', deg=True, callable_val=_formatLongitude, callable_ci=_formatLongitude))
         if uncertainties is not None:
             if hasattr(uncertainties, "htmin_lon_m"):
-                out_str += "                    +/- {:6.2f} m\n".format(uncertainties.htmin_lon_m)
-        out_str += "  Ht  = {:s} m\n".format(valueFormat("{:>11.2f}", self.htmin_ele, "{:6.2f}", \
+                out_str += "                         +/- {:6.2f} m\n".format(uncertainties.htmin_lon_m)
+        out_str += "  Ht MSL   = {:s} m\n".format(valueFormat("{:>11.2f}", self.htmin_ele, "{:6.2f}", \
             uncertainties, 'htmin_ele'))
+        out_str += "  Ht WGS84 = {:s} m\n".format(valueFormat("{:>11.2f}", self.htmin_ele_wgs84, "{:6.2f}", \
+            uncertainties, 'htmin_ele_wgs84'))
         out_str += "\n"
 
         ### Write information about stations ###

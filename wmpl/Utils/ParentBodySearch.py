@@ -116,19 +116,19 @@ def loadMeteoritesElements(meteorites_file):
             try:
                 incl = float(line[12])
             except:
-                print("No inclination for meteorite", meteorite_name)
+                # print("No inclination for meteorite", meteorite_name)
                 continue
 
             try:
                 peri = float(line[14])
             except:
-                print("No argument of perihelion for meteorite", meteorite_name)
+                # print("No argument of perihelion for meteorite", meteorite_name)
                 continue
 
             try:
                 node = float(line[16])
             except:
-                print("No ascending node for meteorite", meteorite_name)
+                # print("No ascending node for meteorite", meteorite_name)
                 continue
 
             meteorites_list.append([meteorite_name, q, e, incl, peri, node])
