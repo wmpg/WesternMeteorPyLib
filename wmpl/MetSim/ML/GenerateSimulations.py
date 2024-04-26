@@ -724,8 +724,8 @@ def extractSimData(sim, min_frames_visible=MIN_FRAMES_VISIBLE, check_only=False,
     # Select time, magnitude, height, and length above the visibility limit
     time_visible = sim.simulation_results.time_arr[indices_visible]
     mag_visible  = sim.simulation_results.abs_magnitude[indices_visible]
-    ht_visible   = sim.simulation_results.brightest_height_arr[indices_visible]
-    len_visible  = sim.simulation_results.brightest_length_arr[indices_visible]
+    ht_visible   = sim.simulation_results.leading_frag_height_arr[indices_visible]
+    len_visible  = sim.simulation_results.leading_frag_length_arr[indices_visible]
 
 
     # Resample the time to the system FPS
