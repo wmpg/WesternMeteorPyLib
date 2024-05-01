@@ -18,6 +18,12 @@ from operator import attrgetter
 import base64
 import hashlib
 
+try:
+    import git
+    HAS_GITPYTHON = True
+except ImportError:
+    HAS_GITPYTHON = False
+
 import numpy as np
 import scipy.optimize
 import scipy.interpolate
@@ -29,7 +35,7 @@ from matplotlib.pyplot import cm
 from wmpl.Utils.OSTools import importBasemap
 Basemap = importBasemap()
 
-
+import wmpl
 from wmpl.Trajectory.Orbit import calcOrbit
 from wmpl.Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, RMSD, \
     angleBetweenSphericalCoords, angleBetweenVectors, lineFunc, normalizeAngleWrap, confidenceInterval
@@ -265,6 +271,12 @@ class ObservedPoints(object):
         self.rend_lon = None
         self.rend_ele = None
         self.rend_jd = None
+
+        # Coordinates of the lowest point (observed)
+        self.htmin_lat = None
+        self.htmin_lon = None
+        self.htmin_ele = None
+        self.htmin_jd = None
 
         # Absolute magntiudes
         self.absolute_magnitudes = None
@@ -706,7 +718,8 @@ def numStationsNotIgnored(observations):
 
 
 
-def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=None, gravity=False):
+def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=None, gravity=False, 
+                              gravity_factor=1.0, v0z=None):
     """ Sum all angles between the radiant line and measurement lines of sight.
 
         This function is used as a cost function for the least squares radiant solution of Borovicka et 
@@ -721,6 +734,8 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
     Keyword arguments:
         weights: [list] A list of statistical weights for every station. None by default.
         gravity: [bool] If True, the gravity drop will be taken into account.
+        gravity_factor: [float] Factor by which the gravity correction will be multiplied. 1.0 by default.
+        v0z: [float] Initial vertical velocity of the meteor. If None, 0.0 will be used.
 
     Return:
         angle_sum: [float] Sum of angles between the estimated trajectory line and individual lines of sight.
@@ -779,28 +794,11 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
                 t_rel = t - t0
 
                 # Compute the model point modified due to gravity, assuming zero vertical velocity
-                rad_cpa = applyGravityDrop(rad_cpa, t_rel, vectMag(rad_cpa), 0.0)
+                if v0z is None:
+                    v0z = 0.0
+                rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, vectMag(rad_cpa), gravity_factor, v0z)
+                _, rad_cpa, _ = findClosestPoints(stat_eci, meas_eci, rad_cpa_grav, radiant_eci)
 
-                # # Calculate the gravitational acceleration at the given height
-                # g = G*EARTH.MASS/(vectMag(rad_cpa)**2)
-
-                # # Determing the sign of the initial time
-                # time_sign = np.sign(t_rel)
-
-                # # Calculate the amount of gravity drop from a straight trajectory (handle the case when the time
-                # #   can be negative)
-                # drop = time_sign*(1.0/2)*g*t_rel**2
-
-                # # Apply gravity drop to ECI coordinates
-                # rad_cpa -= drop*vectNorm(rad_cpa)
-
-
-                # print('-----')
-                # print('Station:', obs.station_id)
-                # print('t:', t_rel)
-                # print('g:', g)
-
-                # print('Drop:', drop)
 
 
             # Calculate the unit vector pointing from the station to the point on the trajectory
@@ -821,17 +819,19 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
 
 
 
-def minimizeAngleCost(params, observations, weights=None, gravity=False):
+def minimizeAngleCost(params, observations, weights=None, gravity=False, gravity_factor=1.0, v0z=None):
     """ A helper function for minimization of angle deviations. """
 
     state_vect, radiant_eci = np.hsplit(params, 2)
     
-    return angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=weights, gravity=gravity)
+    return angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=weights, gravity=gravity,\
+        gravity_factor=gravity_factor, v0z=v0z)
 
 
 
 
-def calcSpatialResidual(jdt_ref, jd, state_vect, radiant_eci, stat, meas, gravity=False):
+def calcSpatialResidual(jdt_ref, jd, state_vect, radiant_eci, stat, meas, gravity=False, gravity_factor=1.0, 
+                        v0z=None):
     """ Calculate horizontal and vertical residuals from the radiant line, for the given observed point.
 
     Arguments:
@@ -843,6 +843,8 @@ def calcSpatialResidual(jdt_ref, jd, state_vect, radiant_eci, stat, meas, gravit
 
     Keyword arguments:
         gravity: [bool] Apply the correction for Earth's gravity.
+        gravity_factor: [float] Factor by which the gravity correction will be multiplied. 1.0 by default.
+        v0z: [float] Initial vertical velocity of the meteor. If None, 0.0 will be used.
 
     Return:
         (hres, vres): [tuple of floats] residuals in horitontal and vertical direction from the radiant line
@@ -859,22 +861,27 @@ def calcSpatialResidual(jdt_ref, jd, state_vect, radiant_eci, stat, meas, gravit
     # Calculate closest points of approach (observed line of sight to radiant line) from the state vector
     obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, state_vect, radiant_eci)
 
-    # # Apply the gravity drop
-    # if gravity:
+    # Apply the gravity drop
+    if gravity:
 
-    #     # Compute the relative time
-    #     t_rel = 86400*(jd - jdt_ref)
+        # Compute the relative time
+        t_rel = 86400*(jd - jdt_ref)
 
-    #     # Correct the point on the trajectory for gravity
-    #     rad_cpa = applyGravityDrop(rad_cpa, t_rel, vectMag(rad_cpa), 0.0)
+        # Correct the point on the trajectory for gravity
+        if v0z is None:
+            v0z = 0.0
+        rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, vectMag(rad_cpa), gravity_factor, v0z)
 
-    #     # ###########################
+        # ###########################
 
-    #     # # Calculate closest points of approach (observed line of sight to radiant line) from the gravity corrected
-    #     # #   point
-    #     # obs_cpa, _, d = findClosestPoints(stat, meas, rad_cpa, radiant_eci)
+        # # Calculate closest points of approach (observed line of sight to radiant line) from the gravity corrected
+        # # point
+        obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, rad_cpa_grav, radiant_eci)
 
-    #     # ##!!!!!
+        # Works by creating a dummy point ON the gravity dropped trajectory, 
+        # then re-doing the find closest points fit to get better CPA vectors.
+        # Note that the find closest points algorithm doesn't care whether it uses the state vector or a random point
+        # further down the trajectory AS LONG AS it's gravity corrected.
 
 
     # Vector pointing from the point on the trajectory to the point on the line of sight
@@ -1277,6 +1284,8 @@ class MCUncertainties(object):
         self.rbeg_lat_m = None
         self.rbeg_ele = None
         self.rbeg_ele_ci = None
+        self.rbeg_ele_wgs84 = None
+        self.rbeg_ele_wgs84_ci = None
 
         self.rend_lon = None
         self.rend_lon_ci = None
@@ -1286,6 +1295,20 @@ class MCUncertainties(object):
         self.rend_lat_m = None
         self.rend_ele = None
         self.rend_ele_ci = None
+        self.rend_ele_wgs84 = None
+        self.rend_ele_wgs84_ci = None
+
+        # Lowest height point (used for grazers)
+        self.htmin_lon = None
+        self.htmin_lon_ci = None
+        self.htmin_lon_m = None
+        self.htmin_lat = None
+        self.htmin_lat_ci = None
+        self.htmin_lat_m = None
+        self.htmin_ele = None
+        self.htmin_ele_ci = None
+        self.htmin_ele_wgs84 = None
+        self.htmin_ele_wgs84_ci = None
 
         # Apparent radiant position (radians)
         self.ra = None
@@ -1510,6 +1533,8 @@ def calcMCUncertainties(traj_list, traj_best):
     un.rbeg_lat_m = np.sin(un.rbeg_lat)*N_beg
     un.rbeg_ele = np.std([traj.rbeg_ele for traj in traj_list])
     un.rbeg_ele_ci = confidenceInterval([traj.rbeg_ele for traj in traj_list], un.ci)
+    un.rbeg_ele_wgs84 = np.std([traj.rbeg_ele_wgs84 for traj in traj_list])
+    un.rbeg_ele_wgs84_ci = confidenceInterval([traj.rbeg_ele_wgs84 for traj in traj_list], un.ci)
 
     N_end = EARTH.EQUATORIAL_RADIUS/np.sqrt(1.0 - (EARTH.E**2)*np.sin(traj_best.rend_lat)**2)
     un.rend_lon = scipy.stats.circstd([traj.rend_lon for traj in traj_list])
@@ -1520,6 +1545,21 @@ def calcMCUncertainties(traj_list, traj_best):
     un.rend_lat_m = np.sin(un.rend_lat)*N_end
     un.rend_ele = np.std([traj.rend_ele for traj in traj_list])
     un.rend_ele_ci = confidenceInterval([traj.rend_ele for traj in traj_list], un.ci)
+    un.rend_ele_wgs84 = np.std([traj.rend_ele_wgs84 for traj in traj_list])
+    un.rend_ele_wgs84_ci = confidenceInterval([traj.rend_ele_wgs84 for traj in traj_list], un.ci)
+
+    # Lowest point
+    N_end = EARTH.EQUATORIAL_RADIUS/np.sqrt(1.0 - (EARTH.E**2)*np.sin(traj_best.htmin_lat)**2)
+    un.htmin_lon = scipy.stats.circstd([traj.htmin_lon for traj in traj_list])
+    un.htmin_lon_ci = confidenceInterval([traj.htmin_lon for traj in traj_list], un.ci, angle=True)
+    un.htmin_lon_m = np.sin(un.htmin_lon)*np.cos(traj_best.htmin_lat)*N_end
+    un.htmin_lat = np.std([traj.htmin_lat for traj in traj_list])
+    un.htmin_lat_ci = confidenceInterval([traj.htmin_lat for traj in traj_list], un.ci)
+    un.htmin_lat_m = np.sin(un.htmin_lat)*N_end
+    un.htmin_ele = np.std([traj.htmin_ele for traj in traj_list])
+    un.htmin_ele_ci = confidenceInterval([traj.htmin_ele for traj in traj_list], un.ci)
+    un.htmin_ele_wgs84 = np.std([traj.htmin_ele_wgs84 for traj in traj_list])
+    un.htmin_ele_wgs84_ci = confidenceInterval([traj.htmin_ele_wgs84 for traj in traj_list], un.ci)
 
 
     if traj_best.orbit is not None:
@@ -1566,6 +1606,8 @@ def calcMCUncertainties(traj_list, traj_best):
         un.lat_geocentric_ci = confidenceInterval([traj.orbit.lat_geocentric for traj in traj_list], un.ci)
         un.ht_ref = np.std([traj.orbit.ht_ref for traj in traj_list])
         un.ht_ref_ci = confidenceInterval([traj.orbit.ht_ref for traj in traj_list], un.ci)
+        un.ht_ref_wgs84 = np.std([traj.orbit.ht_ref_wgs84 for traj in traj_list])
+        un.ht_ref_wgs84_ci = confidenceInterval([traj.orbit.ht_ref_wgs84 for traj in traj_list], un.ci)
 
         # Geocentric
         un.ra_g = scipy.stats.circstd([traj.orbit.ra_g for traj in traj_list])
@@ -2245,16 +2287,17 @@ def copyUncertainties(traj_source, traj_target, copy_mc_traj_instances=False):
 
 
 
-def applyGravityDrop(eci_coord, t, r0, vz):
+def applyGravityDrop(eci_coord, t, r0, gravity_factor, vz):
     """ Given the ECI position of the meteor and the duration of flight, this function calculates the
-        drop caused by gravity and returns ECI coordinates of the meteor corrected for gravity drop. As the 
-        gravitational acceleration changes with height, the drop is changes too. We assumed that the vertical
-        component of the meteor's velocity is constant dervied the modified drop equation.
+        drop caused by gravity and returns ECI coordinates of the meteor corrected for gravity drop. As
+        gravitational acceleration changes with height, the rate of drop changes too. We assumed that the vertical
+        component of the meteor's velocity is constant to derive the modified drop equation.
 
     Arguments:
         eci_coord: [ndarray] (x, y, z) ECI coordinates of the meteor at the given time t (meters).
         t: [float] Time of meteor since the beginning of the trajectory.
         r0: [float] Distance from the centre of the Earth of the beginning of the meteor.
+        gravity_factor: [float] Factor by which the gravity drop will be multiplied.
         vz: [float] Vertical component of the meteor's velocity.
 
     """
@@ -2279,7 +2322,7 @@ def applyGravityDrop(eci_coord, t, r0, vz):
     
 
     # Apply gravity drop to ECI coordinates
-    return eci_coord - drop*vectNorm(eci_coord)
+    return eci_coord - gravity_factor*drop*vectNorm(eci_coord)
 
 
 
@@ -2340,8 +2383,9 @@ class Trajectory(object):
     def __init__(self, jdt_ref, output_dir='.', max_toffset=None, meastype=4, verbose=True, v_init_part=None,\
         v_init_ht=None, estimate_timing_vel=True, monte_carlo=True, mc_runs=None, mc_pick_multiplier=1, \
         mc_noise_std=1.0, geometric_uncert=False, filter_picks=True, calc_orbit=True, show_plots=True, \
-        show_jacchia=False, save_results=True, gravity_correction=True, plot_all_spatial_residuals=False, \
-        plot_file_type='png', traj_id=None, reject_n_sigma_outliers=3, mc_cores=None, fixed_times=None, enable_OSM_plot=False):
+        show_jacchia=False, save_results=True, gravity_correction=True, gravity_factor=1.0, \
+        plot_all_spatial_residuals=False, plot_file_type='png', traj_id=None, reject_n_sigma_outliers=3, \
+        mc_cores=None, fixed_times=None, enable_OSM_plot=False):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -2387,6 +2431,8 @@ class Trajectory(object):
             show_jacchia: [bool] Show the Jacchia fit on the plot with meteor dynamics. False by default.
             save_results: [bool] Save results of trajectory estimation to disk. True by default.
             gravity_correction: [bool] Apply the gravity drop when estimating trajectories. True by default.
+            gravity_factor: [flat] Gravity correction factor. 1.0 by default (full correction). 
+                Can be between 0 - 1. Lower values used for lift compensation.
             plot_all_spatial_residuals: [bool] Plot all spatial residuals on one plot (one vs. time, and
                 the other vs. length). False by default.
             plot_file_type: [str] File extansion of the plot image. 'png' by default, can be 'pdf', 'eps', ...
@@ -2496,6 +2542,14 @@ class Trajectory(object):
         # Apply the correction for gravity when estimating the trajectory
         self.gravity_correction = gravity_correction
 
+        # Gravity correction factor, limit to 0 - 1
+        self.gravity_factor = gravity_factor
+
+        if self.gravity_factor < 0:
+            self.gravity_factor = 0
+        elif self.gravity_factor > 1:
+            self.gravity_factor = 1
+
         # Plot all spatial residuals on one plot
         self.plot_all_spatial_residuals = plot_all_spatial_residuals
 
@@ -2540,13 +2594,22 @@ class Trajectory(object):
         self.rbeg_lat = None
         self.rbeg_lon = None
         self.rbeg_ele = None
+        self.rbeg_ele_wgs84 = None
         self.rbeg_jd = None
 
         # Coordinates of the end point
         self.rend_lat = None
         self.rend_lon = None
         self.rend_ele = None
+        self.rend_ele_wgs84 = None
         self.rend_jd = None
+
+        # Coordinates of the lowest point (used for grazers)
+        self.htmin_lat = None
+        self.htmin_lon = None
+        self.htmin_ele = None
+        self.htmin_ele_wgs84 = None
+        self.htmin_jd = None
 
 
         # Intersecting planes state vector
@@ -2565,6 +2628,9 @@ class Trajectory(object):
 
         # Calculated initial velocity
         self.v_init = None
+
+        # V0z (vertical component of the initial velocity)
+        self.v0z = None
 
         # Calculated average velocity
         self.v_avg = None
@@ -2814,7 +2880,7 @@ class Trajectory(object):
 
                 # Calculate horizontal and vertical residuals
                 hres, vres = calcSpatialResidual(self.jdt_ref, jd, state_vect, radiant_eci, stat, meas, \
-                    gravity=self.gravity_correction)
+                    gravity=self.gravity_correction, gravity_factor=self.gravity_factor, v0z=self.v0z)
 
                 # Add residuals to the residual list
                 obs.h_residuals.append(hres)
@@ -3511,7 +3577,7 @@ class Trajectory(object):
         for obs in observations:
         
             # Calculate closest points of approach (observed line of sight to radiant line)
-            obs_cpa, rad_cpa, d = findClosestPoints(obs.stat_eci_los[0], obs.meas_eci_los[0], state_vect, \
+            obs_cpa, rad_cpa, _ = findClosestPoints(obs.stat_eci_los[0], obs.meas_eci_los[0], state_vect, \
                 radiant_eci)
 
             eci_list.append(rad_cpa)
@@ -3525,22 +3591,24 @@ class Trajectory(object):
 
         
         ### Compute the apparent zenith angle ###
+        # Radiant should be calculated from radiant_eci, not state_vect_mini, which is always a near 
+        # vertical ##
 
         # Compute the apparent radiant
-        ra_a, dec_a = eci2RaDec(self.state_vect_mini)
+        ra_a, dec_a = eci2RaDec(radiant_eci)
 
         # Compute alt/az of the apparent radiant
         lat_0, lon_0, _ = cartesian2Geo(self.jdt_ref, *eci0)
         _, alt_a = raDec2AltAz(ra_a, dec_a, self.jdt_ref, lat_0, lon_0)
 
         # Compute the apparent zenith angle
-        zc = np.pi - alt_a
+        zc = np.pi/2 - alt_a
 
         ####
 
             
         # Compute the vertical component of the velocity if the orbit was already computed
-        v0z = -self.v_init*np.cos(zc)
+        self.v0z = -self.v_init*np.cos(zc)
 
         ###########################################
 
@@ -3574,7 +3642,10 @@ class Trajectory(object):
                     t_rel = t - t0
 
                     # Apply the gravity drop
-                    rad_cpa = applyGravityDrop(rad_cpa, t_rel, r0, v0z)
+                    rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, r0, self.gravity_factor, self.v0z)
+
+                    # Re-do the vector points of closest approach. This is really important!
+                    obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, rad_cpa_grav, radiant_eci)
                 
 
                 # Calculate the range to the observed CPA
@@ -3616,7 +3687,17 @@ class Trajectory(object):
                 obs.rend_ele = obs.model_ht[obs.ignore_list == 0][-1]
                 obs.rend_jd = obs.JD_data[obs.ignore_list == 0][-1]
 
-            # If the station is compltely ignored, compute the coordinates including all points
+                # Determine index the lowest point on the trajectory
+                htmin_index = np.argmin(obs.model_ht[obs.ignore_list == 0])
+
+                # Set the coordinates of the lowest point on the trajectory, taking the ignored points into account
+                obs.htmin_lat = obs.model_lat[obs.ignore_list == 0][htmin_index]
+                obs.htmin_lon = obs.model_lon[obs.ignore_list == 0][htmin_index]
+                obs.htmin_ele = obs.model_ht[obs.ignore_list == 0][htmin_index]
+                obs.htmin_jd = obs.JD_data[obs.ignore_list == 0][htmin_index]
+                
+
+            # If the station is completely ignored, compute the coordinates including all points
             else:
 
                 # Set the coordinates of the first point on the trajectory, taking the ignored points into account
@@ -3631,14 +3712,23 @@ class Trajectory(object):
                 obs.rend_ele = obs.model_ht[-1]
                 obs.rend_jd = obs.JD_data[-1]
 
+                # Determine index the lowest point on the trajectory
+                htmin_index = np.argmin(obs.model_ht)
+
+                # Set the coordinates of the lowest point on the trajectory, taking the ignored points into account
+                obs.htmin_lat = obs.model_lat[htmin_index]
+                obs.htmin_lon = obs.model_lon[htmin_index]
+                obs.htmin_ele = obs.model_ht[htmin_index]
+                obs.htmin_jd = obs.JD_data[htmin_index]
+
 
 
         # Make a list of observations without any ignored stations in them
         nonignored_observations = [obs for obs in self.observations if not obs.ignore_station]
 
-        # Find the highest beginning height
-        beg_hts = [obs.rbeg_ele for obs in nonignored_observations]
-        first_begin = beg_hts.index(max(beg_hts))
+        # Find the beginning height with the lowest length
+        min_svd_list = [np.min(obs.state_vect_dist) for obs in nonignored_observations]
+        first_begin = min_svd_list.index(min(min_svd_list))
 
         # Set the coordinates of the height point as the first point
         self.rbeg_lat = nonignored_observations[first_begin].rbeg_lat
@@ -3646,16 +3736,33 @@ class Trajectory(object):
         self.rbeg_ele = nonignored_observations[first_begin].rbeg_ele
         self.rbeg_jd = nonignored_observations[first_begin].rbeg_jd
 
+        # Compute the begin height in WGS84
+        self.rbeg_ele_wgs84 = wmpl.Utils.GeoidHeightEGM96.mslToWGS84Height(self.rbeg_lat, self.rbeg_lon, self.rbeg_ele)
 
-        # Find the lowest ending height
-        end_hts = [obs.rend_ele for obs in nonignored_observations]
-        last_end = end_hts.index(min(end_hts))
+
+        # Find the ending height with the largest length
+        max_svd_list = [np.max(obs.state_vect_dist) for obs in nonignored_observations]
+        last_end = max_svd_list.index(max(max_svd_list))
 
         # Set coordinates of the lowest point as the last point
         self.rend_lat = nonignored_observations[last_end].rend_lat
         self.rend_lon = nonignored_observations[last_end].rend_lon
         self.rend_ele = nonignored_observations[last_end].rend_ele
         self.rend_jd = nonignored_observations[last_end].rend_jd
+
+        # Compute the end height in WGS84
+        self.rend_ele_wgs84 = wmpl.Utils.GeoidHeightEGM96.mslToWGS84Height(self.rend_lat, self.rend_lon, self.rend_ele)
+
+
+        # Find the lowest point on the trajectory
+        min_ht_list = [obs.htmin_ele for obs in nonignored_observations]
+        self.htmin_lat = nonignored_observations[np.argmin(min_ht_list)].htmin_lat
+        self.htmin_lon = nonignored_observations[np.argmin(min_ht_list)].htmin_lon
+        self.htmin_ele = nonignored_observations[np.argmin(min_ht_list)].htmin_ele
+        self.htmin_jd = nonignored_observations[np.argmin(min_ht_list)].htmin_jd
+
+        # Compute the lowest height in WGS84
+        self.htmin_ele_wgs84 = wmpl.Utils.GeoidHeightEGM96.mslToWGS84Height(self.htmin_lat, self.htmin_lon, self.htmin_ele)
 
 
 
@@ -3671,8 +3778,45 @@ class Trajectory(object):
 
         """
 
+        ### Compute parameters for gravity drop ###
+
         # Determine the first time of observation
         t0 = min([obs.time_data[0] for obs in observations])
+
+        # Determine the largest distance from the centre of the Earth and use it as the beginning point
+        eci_list = []
+        for obs in observations:
+        
+            # Calculate closest points of approach (observed line of sight to radiant line)
+            _, rad_cpa, _ = findClosestPoints(obs.stat_eci_los[0], obs.meas_eci_los[0], state_vect, \
+                radiant_eci)
+
+            eci_list.append(rad_cpa)
+
+        # Find the largest distance from the centre of the Earth
+        max_dist_indx = np.argmax([vectMag(r) for r in eci_list])
+
+        # Get ECI coordinates of the largest distance and the distance itself
+        eci0 = eci_list[max_dist_indx]
+        r0 = vectMag(eci0)
+
+        
+        ### Compute the apparent zenith angle ###
+
+        # Compute the apparent radiant
+        ra_a, dec_a = eci2RaDec(radiant_eci)
+
+        # Compute alt/az of the apparent radiant
+        lat_0, lon_0, _ = cartesian2Geo(self.jdt_ref, *eci0)
+        _, alt_a = raDec2AltAz(ra_a, dec_a, self.jdt_ref, lat_0, lon_0)
+
+        # Compute the apparent zenith angle
+        zc = np.pi/2 - alt_a
+                 
+        # Compute the vertical component of the velocity if the orbit was already computed
+        self.v0z = -self.v_init*np.cos(zc)
+
+        ####
 
         # Go through observations from all stations
         for obs in observations:
@@ -3694,24 +3838,23 @@ class Trajectory(object):
                 obs.meas_eci_los)):
 
                 # Calculate closest points of approach (observed line of sight to radiant line)
-                obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, state_vect, radiant_eci)
+                _, rad_cpa, _ = findClosestPoints(stat, meas, state_vect, radiant_eci)
 
+                ### Take the gravity drop into account ### 
 
-                # # Calculate the time in seconds from the beginning of the meteor
-                # t_rel = t - t0
+                if self.gravity_correction:
 
-                # # Calculate the gravitational acceleration at the given height
-                # g = G*EARTH.MASS/(vectMag(rad_cpa)**2)
+                    # Calculate the time in seconds from the beginning of the meteor
+                    t_rel = t - t0
 
-                # # Determine the sign of the initial time
-                # time_sign = np.sign(t_rel)
+                    # Apply the gravity drop
+                    rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, r0, self.gravity_factor, self.v0z)
 
-                # # Calculate the amount of gravity drop from a straight trajectory (handle the case when the
-                # #   time is negative)
-                # drop = time_sign*(1/2.0)*g*t_rel**2
-
-                # # Apply gravity drop to ECI coordinates
-                # rad_cpa -= drop*vectNorm(rad_cpa)
+                    # Re-do find closest points after gravity drop. This is really important!
+                    # The algorithm doesn't care which trajectory point is used to construct the line for the fit,
+                    # but it MUST be gravity corrected.
+                    _, rad_cpa, _ = findClosestPoints(stat, meas, rad_cpa_grav, radiant_eci)
+                
 
 
                 # Set the ECI position of the CPA on the radiant line, as seen by this observer
@@ -3726,7 +3869,7 @@ class Trajectory(object):
                 obs.model_dec[i] = model_dec
 
                 # Calculate the azimuth and elevation of the modelled point from the observer's point of view
-                model_azim, model_elev = raDec2AltAz(model_ra, model_dec, obs.JD_data[i], obs.lat, obs.lon)
+                model_azim, model_elev = raDec2AltAz(model_ra, model_dec, jd, obs.lat, obs.lon)
 
                 obs.model_azim[i] = model_azim
                 obs.model_elev[i] = model_elev
@@ -4182,13 +4325,15 @@ class Trajectory(object):
         if self.orbit is not None:
             out_str += "Reference point on the trajectory:\n"
             out_str += "  Time: " + str(jd2Date(self.orbit.jd_ref, dt_obj=True)) + " UTC\n"
-            out_str += "  Lat     = {:s} deg\n".format(valueFormat("{:>11.6f}", self.orbit.lat_ref, \
+            out_str += "  Lat      = {:s} deg\n".format(valueFormat("{:>11.6f}", self.orbit.lat_ref, \
                 '{:6.4f}', uncertainties, 'lat_ref', deg=True))
-            out_str += "  Lon     = {:s} deg\n".format(valueFormat("{:>11.6f}", self.orbit.lon_ref, \
+            out_str += "  Lon      = {:s} deg\n".format(valueFormat("{:>11.6f}", self.orbit.lon_ref, \
                 '{:6.4f}', uncertainties, 'lon_ref', deg=True, callable_val=_formatLongitude, \
                 callable_ci=_formatLongitude))
-            out_str += "  Ht      = {:s} m\n".format(valueFormat("{:>11.2f}", self.orbit.ht_ref, \
+            out_str += "  Ht MSL   = {:s} m\n".format(valueFormat("{:>11.2f}", self.orbit.ht_ref, \
                 '{:6.2f}', uncertainties, 'ht_ref', deg=False))
+            out_str += "  Ht WGS84 = {:s} m\n".format(valueFormat("{:>11.2f}", self.orbit.ht_ref_wgs84, \
+                '{:6.2f}', uncertainties, 'ht_ref_wgs84', deg=False))
             out_str += "  Lat geo = {:s} deg\n".format(valueFormat("{:>11.6f}", self.orbit.lat_geocentric, \
                 '{:6.4f}', uncertainties, 'lat_geocentric', deg=True))
             out_str += "\n"
@@ -4234,33 +4379,56 @@ class Trajectory(object):
             out_str += "  Stddev    = {:.2e} s\n".format(self.timing_stddev)
             out_str += "\n"
 
+        out_str += "\n"
         out_str += "Begin point on the trajectory:\n"
-        out_str += "  Lat = {:s} deg\n".format(valueFormat("{:>11.6f}", self.rbeg_lat, "{:6.4f}", \
+        out_str += "  Lat (+N) = {:s} deg\n".format(valueFormat("{:>11.6f}", self.rbeg_lat, "{:6.4f}", \
             uncertainties, 'rbeg_lat', deg=True))
         if uncertainties is not None:
             if hasattr(uncertainties, "rbeg_lat_m"):
-                out_str += "                    +/- {:6.2f} m\n".format(uncertainties.rbeg_lat_m)
-        out_str += "  Lon = {:s} deg\n".format(valueFormat("{:>11.6f}", self.rbeg_lon, "{:6.4f}", \
+                out_str += "                         +/- {:6.2f} m\n".format(uncertainties.rbeg_lat_m)
+        out_str += "  Lon (+E) = {:s} deg\n".format(valueFormat("{:>11.6f}", self.rbeg_lon, "{:6.4f}", \
             uncertainties, 'rbeg_lon', deg=True, callable_val=_formatLongitude, callable_ci=_formatLongitude))
         if uncertainties is not None:
             if hasattr(uncertainties, "rbeg_lon_m"):
-                out_str += "                    +/- {:6.2f} m\n".format(uncertainties.rbeg_lon_m)
-        out_str += "  Ht  = {:s} m\n".format(valueFormat("{:>11.2f}", self.rbeg_ele, "{:6.2f}", \
+                out_str += "                         +/- {:6.2f} m\n".format(uncertainties.rbeg_lon_m)
+        out_str += "  Ht MSL   = {:s} m\n".format(valueFormat("{:>11.2f}", self.rbeg_ele, "{:6.2f}", \
             uncertainties, 'rbeg_ele'))
+        out_str += "  Ht WGS84 = {:s} m\n".format(valueFormat("{:>11.2f}", self.rbeg_ele_wgs84, "{:6.2f}", \
+            uncertainties, 'rbeg_ele_wgs84'))
 
+        out_str += "\n"
         out_str += "End point on the trajectory:\n"
-        out_str += "  Lat = {:s} deg\n".format(valueFormat("{:>11.6f}", self.rend_lat, "{:6.4f}", \
+        out_str += "  Lat (+N) = {:s} deg\n".format(valueFormat("{:>11.6f}", self.rend_lat, "{:6.4f}", \
             uncertainties, 'rend_lat', deg=True))
         if uncertainties is not None:
             if hasattr(uncertainties, "rend_lat_m"):
-                out_str += "                    +/- {:6.2f} m\n".format(uncertainties.rend_lat_m)
-        out_str += "  Lon = {:s} deg\n".format(valueFormat("{:>11.6f}", self.rend_lon, "{:6.4f}", \
+                out_str += "                         +/- {:6.2f} m\n".format(uncertainties.rend_lat_m)
+        out_str += "  Lon (+E) = {:s} deg\n".format(valueFormat("{:>11.6f}", self.rend_lon, "{:6.4f}", \
             uncertainties, 'rend_lon', deg=True, callable_val=_formatLongitude, callable_ci=_formatLongitude))
         if uncertainties is not None:
             if hasattr(uncertainties, "rend_lon_m"):
-                out_str += "                    +/- {:6.2f} m\n".format(uncertainties.rend_lon_m)
-        out_str += "  Ht  = {:s} m\n".format(valueFormat("{:>11.2f}", self.rend_ele, "{:6.2f}", \
+                out_str += "                         +/- {:6.2f} m\n".format(uncertainties.rend_lon_m)
+        out_str += "  Ht MSL   = {:s} m\n".format(valueFormat("{:>11.2f}", self.rend_ele, "{:6.2f}", \
             uncertainties, 'rend_ele'))
+        out_str += "  Ht WGS84 = {:s} m\n".format(valueFormat("{:>11.2f}", self.rend_ele_wgs84, "{:6.2f}", \
+            uncertainties, 'rend_ele_wgs84'))
+
+        out_str += "\n"
+        out_str += "Lowest point on the trajectory:\n"
+        out_str += "  Lat (+N) = {:s} deg\n".format(valueFormat("{:>11.6f}", self.htmin_lat, "{:6.4f}", \
+            uncertainties, 'htmin_lat', deg=True))
+        if uncertainties is not None:
+            if hasattr(uncertainties, "htmin_lat_m"):
+                out_str += "                         +/- {:6.2f} m\n".format(uncertainties.htmin_lat_m)
+        out_str += "  Lon (+E) = {:s} deg\n".format(valueFormat("{:>11.6f}", self.htmin_lon, "{:6.4f}", \
+            uncertainties, 'htmin_lon', deg=True, callable_val=_formatLongitude, callable_ci=_formatLongitude))
+        if uncertainties is not None:
+            if hasattr(uncertainties, "htmin_lon_m"):
+                out_str += "                         +/- {:6.2f} m\n".format(uncertainties.htmin_lon_m)
+        out_str += "  Ht MSL   = {:s} m\n".format(valueFormat("{:>11.2f}", self.htmin_ele, "{:6.2f}", \
+            uncertainties, 'htmin_ele'))
+        out_str += "  Ht WGS84 = {:s} m\n".format(valueFormat("{:>11.2f}", self.htmin_ele_wgs84, "{:6.2f}", \
+            uncertainties, 'htmin_ele_wgs84'))
         out_str += "\n"
 
         ### Write information about stations ###
@@ -4443,6 +4611,15 @@ class Trajectory(object):
         out_str += "- 'Vel prev avg' is the average velocity including all previous points up to the given point. For the first 4 points this velocity is computed as the average velocity of those 4 points. \n"
         if uncertainties is not None:
             out_str += "- The number after +/- is the 1 sigma uncertainty, and the numbers in square brackets are the 95% confidence intervals. \n"
+
+        # Add the wmpl version and the date of the version and the date of the report
+        out_str += "\n\n"
+        out_str += "Report generated by the Western Meteor Physics Library (WMPL) on {:s} UTC\n".format(str(datetime.datetime.now()))
+
+        if HAS_GITPYTHON:
+            repo = git.Repo(search_parent_directories=True)
+            out_str += "WMPL version commit: {:s}\n".format(repo.head.object.hexsha)
+            out_str += "WMPL version date: {:s}\n".format(datetime.datetime.fromtimestamp(repo.head.commit.committed_date).strftime('%Y-%m-%d %H:%M:%S'))
 
         if verbose:
             print(out_str)
@@ -4746,93 +4923,6 @@ class Trajectory(object):
             ##################################################################################################
 
 
-            ### PLOT TOTAL SPATIAL RESIDUALS VS LENGTH (with influence of gravity) ###
-            ##################################################################################################
-
-            # Plot only with gravity compensation is used
-            if self.gravity_correction:
-
-                for i, obs in enumerate(sorted(self.observations, key=lambda x:x.rbeg_ele, reverse=True)):
-
-                    marker, size_multiplier = markers[i%len(markers)]
-
-
-                    ## Compute residual from gravity corrected point ##
-
-                    res_total_grav_list = []
-
-                    # Go through all individual position measurements from each site
-                    #for t, jd, stat, meas in zip(obs.time_data, obs.JD_data, obs.stat_eci_los, obs.meas_eci_los):
-                    for jd, tlat, tlon, tht, mlat, mlon, mht in zip(obs.JD_data, obs.model_lat, \
-                        obs.model_lon, obs.model_ht, obs.meas_lat, obs.meas_lon, obs.meas_ht):
-
-
-                        # Compute cartiesian coordinates of trajectory points
-                        traj_eci = np.array(geo2Cartesian(tlat, tlon, tht, jd))
-
-                        # Compute cartiesian coordinates of measurement points
-                        meas_eci = np.array(geo2Cartesian(mlat, mlon, mht, jd))
-
-                        # Compute the total distance between the points
-                        res_total_grav = vectMag(traj_eci - meas_eci)
-
-                        # The sign of the residual is the vertical component (meas higher than trajectory is
-                        #   positive)
-                        if vectMag(meas_eci) > vectMag(traj_eci):
-                            res_total_grav = -res_total_grav
-
-
-                        res_total_grav_list.append(res_total_grav)
-                        
-
-                    res_total_grav_list = np.array(res_total_grav_list)
-
-                    ## ##
-
-                    # Plot total residuals
-                    plt.scatter(obs.state_vect_dist/1000, res_total_grav_list, marker=marker, 
-                        s=10*size_multiplier, label='{:s}'.format(str(obs.station_id)), zorder=3)
-
-                    # Mark ignored points
-                    if np.any(obs.ignore_list):
-
-                        ignored_length = obs.state_vect_dist[obs.ignore_list > 0]
-                        ignored_tot_res = res_total_grav_list[obs.ignore_list > 0]
-
-                        plt.scatter(ignored_length/1000, ignored_tot_res, facecolors='none', edgecolors='k', \
-                            marker='o', zorder=3, s=20)
-
-
-                plt.title('Total spatial residuals (gravity corrected)')
-                plt.xlabel('Length (km)')
-                plt.ylabel('Residuals (m), vertical sign')
-
-                plt.grid()
-
-                plt.legend(prop={'size': LEGEND_TEXT_SIZE})
-
-                # Set the residual limits to +/-10m if they are smaller than that
-                if np.max(np.abs(plt.gca().get_ylim())) < 10:
-                    plt.ylim([-10, 10])
-
-                # Pickle the figure
-                if ret_figs:
-                    fig_pickle_dict["total_spatial_residuals_length_grav"] = pickle.dumps(plt.gcf(), \
-                        protocol=2)
-
-                if self.save_results:
-                    savePlot(plt, file_name + '_total_spatial_residuals_length_grav.' + self.plot_file_type, \
-                        output_dir)
-
-                if show_plots:
-                    plt.show()
-
-                else:
-                    plt.clf()
-                    plt.close()
-
-
-            ##################################################################################################
 
 
         ### PLOT ALL TOTAL SPATIAL RESIDUALS VS HEIGHT ###
@@ -5277,14 +5367,48 @@ class Trajectory(object):
         m = GroundMap(lat_list, lon_list, border_size=50, color_scheme='light')
 
 
+        # Create a list of unique stations names, such that if there are multiple stations with identical
+        # coordinates but only differ in the suffix, they will be plotted as one station
+        station_name_mapping = {}
+        for i, obs in enumerate(self.observations):
+
+            # If the station is already in the mapping, skip it
+            if obs.station_id in station_name_mapping:
+                continue
+
+            # Check if there are duplicate coordinates
+            for obs2 in self.observations[i+1:]:
+
+                if (obs.lat == obs2.lat) and (obs.lon == obs2.lon):
+
+                    # Only take the common part of the two station names
+                    common_name = os.path.commonprefix([obs.station_id, obs2.station_id])
+
+                    # Get the difference between the two station names
+                    diff1 = obs.station_id[len(common_name):]
+                    diff2 = obs2.station_id[len(common_name):]
+
+                    # If the difference is e.g. _1, _2, _3, etc., it is a suffix
+                    # Strip out _
+                    # This will catch duplicates such as USL00N and USL00N_2
+                    if (str(diff1).startswith("_") or str(diff2).startswith("_")) \
+                        and ((diff1.strip("_").isdigit()) or (diff2.strip("_").isdigit())):
+                    
+                        station_name_mapping[obs.station_id] = common_name
+                        station_name_mapping[obs2.station_id] = common_name
+
+
+            # If the station is not in the mapping, add it
+            if obs.station_id not in station_name_mapping:
+                station_name_mapping[obs.station_id] = obs.station_id
+                    
+
+
+
         # Plot locations of all stations and measured positions of the meteor
+        plotted_codes = []
         for i, obs in enumerate(sorted(self.observations, key=lambda x:x.rbeg_ele, reverse=True)):
 
-            # Extract marker type and size multiplier
-            marker, sm = markers[i%len(markers)]
-
-            # Plot stations
-            m.scatter(obs.lat, obs.lon, s=sm*10, label=str(obs.station_id), marker=marker)
 
             # Plot measured points
             m.plot(obs.meas_lat[obs.ignore_list == 0], obs.meas_lon[obs.ignore_list == 0], c='r')
@@ -5293,11 +5417,28 @@ class Trajectory(object):
             if np.any(obs.ignore_list != 0):
                 m.scatter(obs.meas_lat[obs.ignore_list != 0], obs.meas_lon[obs.ignore_list != 0], c='k', \
                     marker='x', s=5, alpha=0.5)
+                
+
+
+            station_name = station_name_mapping[obs.station_id]
+
+            # If the station ID is already plotted, skip it
+            if station_name in plotted_codes:
+                continue
+
+            # Extract marker type and size multiplier
+            marker, sm = markers[i%len(markers)]
+
+            # Plot stations
+            m.scatter(obs.lat, obs.lon, s=sm*10, label=str(station_name), marker=marker)
+                
+            # Add the station to the list of plotted stations
+            plotted_codes.append(station_name)
 
 
 
         # Plot a point marking the final point of the meteor
-        m.scatter(self.rend_lat, self.rend_lon, c='k', marker='+', s=50, alpha=0.75, label='Lowest height')
+        m.scatter(self.htmin_lat, self.htmin_lon, c='k', marker='+', s=50, alpha=0.75, label='Lowest height')
 
 
         # If there are more than 10 observations, make the legend font smaller
@@ -6015,7 +6156,9 @@ class Trajectory(object):
         # Calculate the initial sum and angles deviating from the radiant line
         angle_sum = angleSumMeasurements2Line(self.observations, self.state_vect, \
              self.best_conv_inter.radiant_eci, weights=weights, \
-             gravity=(_rerun_timing and self.gravity_correction))
+             gravity=(_rerun_timing and self.gravity_correction), gravity_factor=self.gravity_factor, 
+             v0z=self.v0z
+             )
 
         if self.verbose:
             print('Initial angle sum:', angle_sum)
@@ -6027,7 +6170,7 @@ class Trajectory(object):
         # Perform the minimization of angle deviations. The gravity will only be compansated for after the
         #   initial estimate of timing differences
         minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=(self.observations, weights, 
-            (_rerun_timing and self.gravity_correction)), method="Nelder-Mead")
+            (_rerun_timing and self.gravity_correction), self.gravity_factor, self.v0z), method="Nelder-Mead")
 
         # NOTE
         # Other minimization methods were tried as well, but all produce higher fit residuals than Nelder-Mead.
@@ -6055,7 +6198,8 @@ class Trajectory(object):
             print('BOUNDS:', bounds)
             print('p0:', p0)
             minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=(self.observations, \
-                weights, (_rerun_timing and self.gravity_correction)), bounds=bounds, method='SLSQP')
+                weights, (_rerun_timing and self.gravity_correction), self.gravity_factor, self.v0z), 
+                bounds=bounds, method='SLSQP')
 
 
         if self.verbose:

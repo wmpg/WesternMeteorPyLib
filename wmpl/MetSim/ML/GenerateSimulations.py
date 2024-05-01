@@ -500,7 +500,7 @@ class ErosionSimContainer(object):
         pass
 
 
-    def saveJSON(self):
+    def saveJSON(self, output_dir):
         """ Save object as a JSON file. """
 
 
@@ -521,7 +521,7 @@ class ErosionSimContainer(object):
                 setattr(self2.simulation_results, sim_res_attr, attr.tolist())
 
 
-        file_path = os.path.join(self.output_dir, self.file_name + ".json")
+        file_path = os.path.join(output_dir, self.file_name + ".json")
         with open(file_path, 'w') as f:
             json.dump(self2, f, default=lambda o: o.__dict__, indent=4)
 
@@ -607,7 +607,7 @@ class ErosionSimContainer(object):
 
 
         # Save results as a JSON file
-        self.saveJSON()
+        self.saveJSON(dens_folder_path)
 
         # Save results as a pickle file
         savePickle(self, dens_folder_path, self.file_name + ".pickle")
@@ -696,7 +696,7 @@ def extractSimData(sim, min_frames_visible=MIN_FRAMES_VISIBLE, check_only=False,
     ###     (in the CAMO widefield camera)                                       ###
 
     # Get indices of magnitudes above the brighter limiting magnitude
-    indices_visible_brighter = sim.simulation_results.abs_magnitude <= lim_mag_brightest
+    indices_visible_brighter = sim.simulation_results.abs_magnitude >= lim_mag_brightest
 
     # If no points were visible, skip this solution
     if not np.any(indices_visible_brighter):
@@ -724,8 +724,8 @@ def extractSimData(sim, min_frames_visible=MIN_FRAMES_VISIBLE, check_only=False,
     # Select time, magnitude, height, and length above the visibility limit
     time_visible = sim.simulation_results.time_arr[indices_visible]
     mag_visible  = sim.simulation_results.abs_magnitude[indices_visible]
-    ht_visible   = sim.simulation_results.brightest_height_arr[indices_visible]
-    len_visible  = sim.simulation_results.brightest_length_arr[indices_visible]
+    ht_visible   = sim.simulation_results.leading_frag_height_arr[indices_visible]
+    len_visible  = sim.simulation_results.leading_frag_length_arr[indices_visible]
 
 
     # Resample the time to the system FPS
@@ -733,8 +733,28 @@ def extractSimData(sim, min_frames_visible=MIN_FRAMES_VISIBLE, check_only=False,
     ht_interpol  = scipy.interpolate.CubicSpline(time_visible, ht_visible)
     len_interpol = scipy.interpolate.CubicSpline(time_visible, len_visible)
 
-    # Create a new time array according to the FPS
-    time_sampled = np.arange(np.min(time_visible), np.max(time_visible), 1.0/params.fps)
+    # Sample the time according to the FPS from one camera
+    time_sampled_cam1 = np.arange(np.min(time_visible), np.max(time_visible), 1.0/params.fps)
+
+    # Simulate sampling of the data from a second camera, with a random phase shift
+    time_sampled_cam2 = time_sampled_cam1 + np.random.uniform(-1.0/params.fps, 1.0/params.fps)
+
+    # The second camera will only capture 50 - 100% of the data, simulate this
+    cam2_portion = np.random.uniform(0.5, 1.0)
+    cam2_start = np.random.uniform(0, 1.0 - cam2_portion)
+    cam2_start_index = int(cam2_start*len(time_sampled_cam2))
+    cam2_end_index = int((cam2_start + cam2_portion)*len(time_sampled_cam2))
+
+    # Cut the cam2 time to the portion of the data it will capture
+    time_sampled_cam2 = time_sampled_cam2[cam2_start_index:cam2_end_index]
+
+    # Cut the time array to the length of the visible data
+    time_sampled_cam2 = time_sampled_cam2[(time_sampled_cam2 >= np.min(time_visible)) 
+                                          & (time_sampled_cam2 <= np.max(time_visible))]
+    
+    # Combine the two camera time arrays
+    time_sampled = np.sort(np.concatenate([time_sampled_cam1, time_sampled_cam2]))
+
 
     # Create new mag, height and length arrays at FPS frequency
     mag_sampled = mag_interpol(time_sampled)

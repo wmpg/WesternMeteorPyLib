@@ -159,8 +159,8 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
         # Sample the distribution with replacement
         sampled_data = np.random.choice(input_data, len(input_data))
 
-        # Fit the slope again
-        unc_results = fitSlope(sampled_data, mass)
+        # Fit the slope to the sampled data
+        unc_results = fitSlope(sampled_data, mass, ref_point=ref_point)
 
         unc_results_list.append(unc_results)
 
@@ -169,7 +169,7 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
     for _ in range(3):
         slopes = [scipy.stats.gamma.pdf(entry[3], *entry[0]) for entry in unc_results_list]
         median_slope = np.median(slopes)
-        slope_std = np.std(slopes)
+        slope_std = np.nanstd(slopes)
 
         unc_results_list_filtered = []
         for i, unc_slope in enumerate(slopes):
@@ -185,7 +185,11 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
 
     # Compute the standard deviation of the slope
     slope_report_unc_list = [entry[5] for entry in unc_results_list]
-    slope_report_std = np.std(slope_report_unc_list)
+    slope_report_std = np.nanstd(slope_report_unc_list)
+
+    # Compute the 95% confidence interval of the slope
+    slope_report_95ci_lower = np.nanpercentile(slope_report_unc_list, 2.5)
+    slope_report_95ci_upper = np.nanpercentile(slope_report_unc_list, 97.5)
 
     # If the standard deviation is larger than 10 or is nan, set it to 10
     if (slope_report_std > 10) or np.isnan(slope_report_std):
@@ -194,14 +198,18 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
 
     # Compute the standard deviation of the effective limiting magnitude
     lim_point_unc_list = [entry[7] for entry in unc_results_list]
-    lim_point_std = np.std(lim_point_unc_list)
+    lim_point_std = np.nanstd(lim_point_unc_list)
+
+    # Compute the 95% confidence interval of the effective limiting magnitude
+    lim_point_95ci_lower = np.nanpercentile(lim_point_unc_list, 2.5)
+    lim_point_95ci_upper = np.nanpercentile(lim_point_unc_list, 97.5)
 
     # # Reject all 3 sigma outliers and recompute the std
     # slope_report_unc_list = [slp for slp in slope_report_unc_list if (slp < slope_report \
     #     + 3*slope_report_std) and (slp > slope_report - 3*slope_report_std)]
 
     # # Recompute the standard deviation
-    # slope_report_std = np.std(slope_report_unc_list)
+    # slope_report_std = np.nanstd(slope_report_unc_list)
 
 
     # Make plots
@@ -268,7 +276,7 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
 
         # Compute standard deviation of reference point
         # The sddev is not computed for inflection point as it has the same value
-        ref_point_std = np.std(ref_point_unc_list)
+        ref_point_std = np.nanstd(ref_point_unc_list)
         
         plt.scatter(sign*ref_point, slope_pdf, color='r', zorder=5, \
             label='Reference point = {:.2f} $\pm$ {:.2f}'.format(sign*ref_point, ref_point_std))
@@ -332,8 +340,9 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
 
         # Plot the tangential line with the slope
         plt.plot(sign*x_arr, logline(-x_arr, slope, intercept), color='r', \
-            label='{:s} = {:.2f} $\pm$ {:.2f} \nKS test D = {:.3f} \nKS test p-value = {:.3f}'.format(\
-                slope_name, slope_report, slope_report_std, kstest.statistic, kstest.pvalue), zorder=5)
+            label='{:s} = {:.2f} $\pm$ {:.2f}, [{:.2f}, {:.2f}] 95% CI\nKS test D = {:.3f} \nKS test p-value = {:.3f}'.format(\
+                slope_name, slope_report, slope_report_std, slope_report_95ci_lower, slope_report_95ci_upper,\
+                kstest.statistic, kstest.pvalue), zorder=5)
 
 
 
@@ -348,7 +357,15 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
         else:
             lim_label = "Eff. lim. mag"
         plt.scatter(lim_point, 1.0, c='b', marker='s', \
-            label="{:s} = {:+.2f} $\pm$ {:.2f}".format(lim_label, lim_point, lim_point_std), zorder=6)
+            label="{:s} = {:+.2f} $\pm$ {:.2f}, [{:.2f}, {:.2f}] 95% CI".format(
+                lim_label, 
+                lim_point, 
+                lim_point_std, 
+                lim_point_95ci_lower, 
+                lim_point_95ci_upper
+                ), 
+            zorder=6
+            )
 
 
         plt.ylim([y_min, y_max])
@@ -373,7 +390,8 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
 
 
 
-    return params, sign*ref_point, sign*inflection_point, slope_report, slope_report_std, kstest
+    return params, sign*ref_point, sign*inflection_point, slope_report, slope_report_std, \
+        slope_report_95ci_lower,  slope_report_95ci_upper, kstest
 
 
 
