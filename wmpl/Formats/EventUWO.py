@@ -24,6 +24,8 @@ class StationData(object):
         self.height = height
 
         self.time_data = []
+        self.x_data = []
+        self.y_data = []
         self.theta_data = []
         self.phi_data = []
         self.mag_data = []

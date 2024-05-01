@@ -14,7 +14,7 @@ from wmpl.MetSim.MetSimErosion import Constants, runSimulation
 from wmpl.MetSim.SimResults import SimulationResults
 
 
-def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle):
+def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a):
 
     # Init simulation constants
     const = Constants()
@@ -32,8 +32,10 @@ def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle):
     const.v_init = v_init
     const.h_init = ht_beg
     const.rho = density
-    const.gamma = 1.0
+    #const.gamma = 1.0
+    #const.shape_factor = 1.21
     const.shape_factor = 1.21
+    const.gamma = 0.7
     
 
     # Ablation coeff of chondritic material
@@ -200,7 +202,7 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
     
 
     # Run the simulation until ablation stops
-    sr = runFragSim(dyn_mass, density, lat, lon, jd, hend, vend, entry_angle)
+    sr = runFragSim(dyn_mass, density, lat, lon, jd, hend, vend, entry_angle, gamma_a)
 
     # Extract the final height
     final_ht = 0
@@ -274,6 +276,10 @@ if __name__ == "__main__":
     arg_parser.add_argument('-e', '--eval', metavar='EVAL_PT', \
         help='Point where to evaluate the dynamic mass (0 = ht_min, 1 = ht_max). Default is 0.5.', \
         type=float, default=0.5)
+    
+    arg_parser.add_argument('--maxvel', metavar='MAX_VEL', \
+        help='Maximum velocity in km/s to consider in the height window. Used to remove outliers. No filter by default.', \
+        type=float, default=None)
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -290,6 +296,14 @@ if __name__ == "__main__":
 
     # Gamma*A factor
     gamma_a = cml_args.ga
+
+    # Read the maximum velocity
+    max_vel = cml_args.maxvel
+    if max_vel is not None:
+        max_vel *= 1000
+    
+    else:
+        max_vel = 73_000
     
 
     # Load the trajectory
@@ -338,6 +352,14 @@ if __name__ == "__main__":
         ht = obs.meas_ht[1:][~ignored]
         t = obs.time_data[1:][~ignored]
 
+        # Only take velocities inside a reasonable range
+        vel_filter = (vel > 0) & (vel < 73_000)
+
+        # Filter out all data
+        vel = vel[vel_filter]
+        ht = ht[vel_filter]
+        t = t[vel_filter]
+
         # Store all data
         vel_data += vel.tolist()
         ht_data += ht.tolist()
@@ -368,11 +390,15 @@ if __name__ == "__main__":
     ht_data = ht_data[ht_sort]
 
 
+    # Set up a velocity filter to remove outliers
+    vel_filter = vel_data < max_vel
+
+
     # Only take data in the approprite range of heights
     ht_filter = (ht_data/1000 >= ht_min) & (ht_data/1000 <= ht_max)
-    vel_data = vel_data[ht_filter]
-    time_data = time_data[ht_filter]
-    ht_data = ht_data[ht_filter]
+    vel_data = vel_data[ht_filter & vel_filter]
+    time_data = time_data[ht_filter & vel_filter]
+    ht_data = ht_data[ht_filter & vel_filter]
 
     # Plot the selected data
     ax2.scatter(vel_data/1000, time_data, s=5, label="Measurements")

@@ -1923,8 +1923,80 @@ def generateAutoPlotsAndReports(dir_path, traj_quality_params, prev_sols=10, sol
     ### 
 
 
+    ### Create one summary file with data per year ###
+    
+    # Go through all monthly summaries to get a range of years
+    year_list = []
+    for summary_name in sorted(os.listdir(summary_monthly_dir)):
+        if summary_name.startswith("traj_summary_monthly_"):
 
-    ### Create one summary file with all data
+            summary_name_split = summary_name.split("_")
+
+            if len(summary_name_split) < 4:
+                continue
+
+            try:
+                year = int(summary_name_split[3][:4])
+            except:
+                print("Failed to read year from summary file: {:s}".format(summary_name))
+                continue
+
+            if year not in year_list:
+                year_list.append(year)
+
+    
+    # Create a summary file for each year
+    for year in year_list:
+        traj_summary_year_temp = "traj_summary_yearly_{:d}.tmp".format(year)
+        with open(os.path.join(summary_dir, traj_summary_year_temp), 'w') as f_year:
+
+            f_year.write("# Summary generated on {:s} UTC\n\r".format(str(datetime.datetime.utcnow())))
+
+            # Find all monthly trajectory reports
+            header_written = False
+            skipped_summary_date = False
+            for summary_name in sorted(os.listdir(summary_monthly_dir)):
+                if summary_name.startswith("traj_summary_monthly_{:d}".format(year)):
+
+                    # Load the monthly summary file and write entries to the collective file
+                    with open(os.path.join(summary_monthly_dir, summary_name)) as f_monthly:
+                        for line in f_monthly:
+
+                            # Skip the header if it was already written
+                            if header_written:
+                                if line.startswith("#"):
+                                    continue
+
+                            else:
+                                # If the header was not written, copy it, but skip the summary date at the top
+                                if not skipped_summary_date:
+                                    skipped_summary_date = True
+                                    continue
+
+                            f_year.write(line)
+
+                    # Write the header only once
+                    header_written = True
+
+        # Change the name of the temp file to the summary file
+        if os.path.isfile(os.path.join(summary_dir, traj_summary_year_temp)):
+            
+            shutil.copy2(os.path.join(summary_dir, traj_summary_year_temp), \
+                os.path.join(summary_dir, "traj_summary_yearly_{:d}.txt".format(year)))
+
+            # Remove the temp file
+            os.remove(os.path.join(summary_dir, traj_summary_year_temp))
+
+            print("Saved summary file for year {:d}".format(year))
+
+        else:
+            print("The temp file {:s} was not created!".format(traj_summary_year_temp))
+
+
+    ### ###
+
+
+    ### Create one summary file with all data from the beginning
 
     # Open the full file for writing (first write to a temp file, then move it to a completed file)
     traj_summary_all_temp = TRAJ_SUMMARY_ALL + ".tmp"

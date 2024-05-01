@@ -100,6 +100,9 @@ share_files = [os.path.join('wmpl', 'share', file_name) for file_name in os.list
 # Add MetSim input file
 share_files += [os.path.join("wmpl", "MetSim", "Metsim0001_input.txt")]
 
+# Add MetSim GUI definition file
+share_files += [os.path.join("wmpl", "MetSim", "GUI.ui")]
+
 
 
 
