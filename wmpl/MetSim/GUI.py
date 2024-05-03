@@ -1717,8 +1717,8 @@ def loadUSGInputFile(dir_path, usg_file):
         # Write the header
         f.write("# Trajectory data computed from the USG input file.\n")
         f.write("#\n")
-        f.write("# Begin time (UTC) = {}\n".format(data.dt))
-        f.write("# Begin JD         = {:.6f}\n".format(data.jd))
+        f.write("# Reference time (UTC) = {}\n".format(data.dt))
+        f.write("# Reference JD         = {:.6f}\n".format(data.jd))
         f.write("# Begin point\n")
         f.write("#     Lat    = {:+11.6f} deg\n".format(np.degrees(rbeg_lat)))
         f.write("#     Lon    = {:11.6f} deg\n".format(np.degrees(rbeg_lon)))
