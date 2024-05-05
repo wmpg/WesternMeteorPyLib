@@ -236,6 +236,8 @@ class FileMonitorApp(QMainWindow):
         # Indicate that the trajectory is being computed
         self.setStatus('red', "Computing trajectory...")
 
+        QApplication.processEvents()
+
         print(f'Computing trajectory for {len(ecsv_paths)} files...')
         for file_path in ecsv_paths:
             print(f'Processing file: {os.path.basename(file_path)}')
