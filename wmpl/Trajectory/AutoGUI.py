@@ -94,7 +94,7 @@ class FileMonitorApp(QMainWindow):
         self.status_light = QLabel()
 
         # Initial light color (red by default, green when ready)
-        self.setStatus('red', "Computing trajectory...")
+        self.setStatus('gray', "Waiting for data...")
 
         self.status_layout.addWidget(self.status_light)
         self.status_layout.addWidget(self.status_label)
@@ -245,8 +245,7 @@ class FileMonitorApp(QMainWindow):
 
         # Check that there are more than 2 ECSV files given
         if len(ecsv_paths) < 2:
-            # print("At least 2 files are needed for trajectory estimation!")
-            self.setStatus('gray', "At least 2 files are needed for trajectory estimation!", "Ready!")
+            self.setStatus('gray', "At least two stations are needed for trajectory estimation!")
             return False
         
         # Unpack the kwargs into an object
