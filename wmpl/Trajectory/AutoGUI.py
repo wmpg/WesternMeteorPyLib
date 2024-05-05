@@ -66,6 +66,12 @@ class FileMonitorApp(QMainWindow):
         # Initialize the checksum dictionary
         self.file_checksums = {}
 
+        # Initialize the points to highlight on the plots
+        self.highlighted_points = []
+
+        # Plotted points
+        self.plotted_points = {}
+
         self.initUI()
         self.initialRun()
         self.initObserver()
@@ -291,6 +297,123 @@ class FileMonitorApp(QMainWindow):
         self.setStatus('green', "Ready!")
 
 
+    def onClick(self, event):
+        """ Mark the clicked point on all plots. """
+
+        all_axes = [
+            # Ax handle, y_type, x_type
+            [self.ax_res, "ht", "res"],
+            [self.ax_mag, "ht", "mag"],
+            [self.ax_lag, "time", "lag"],
+            [self.ax_vel, "time", "vel"]
+            ]
+
+        if event.inaxes is None:
+            return
+
+        xdata = event.xdata
+        ydata = event.ydata
+
+        min_dist = float('inf')
+        closest_point = None
+        closest_label = None
+
+        # Check all artists in the axes
+        for ax, y_type, x_type in all_axes:
+
+            # Normalize the x and y scales using the data limits
+            xlim, ylim = ax.get_xlim(), ax.get_ylim()
+            aspect = (xlim[1]-xlim[0])/(ylim[1]-ylim[0])
+
+            # Handle lines
+            for line in ax.get_lines():
+
+                xd, yd = line.get_xdata(), line.get_ydata()
+                label = line.get_label()
+
+                for x, y in zip(xd, yd):
+
+                    dist = np.sqrt((x - xdata)**2 + (aspect*(y - ydata))**2)
+
+                    if dist < min_dist:
+                        min_dist = dist
+                        closest_point = (y_type, x, y)
+                        closest_label = label
+
+            # Handle scatter plots
+            for coll in ax.collections:
+                
+                # Get the offsets which are the points in the scatter
+                offsets = coll.get_offsets()
+
+                for x, y in offsets:
+                    dist = np.sqrt((x - xdata)**2 + (aspect*(y - ydata))**2)
+
+                    if dist < min_dist:
+                        min_dist = dist
+                        closest_point = (y_type, x, y)
+                        closest_label = coll.get_label()
+
+        # Clear previously highlighted points
+        for point in self.highlighted_points:
+            point.remove()
+        self.highlighted_points.clear()
+
+        # Highlight the new closest point in all relevant plots
+        if closest_point and closest_label:
+
+            for ax, y_type, x_type in all_axes:
+
+                pt_y_type, x_coord, y_coord = closest_point
+
+                # Get the time and height arrays for the station
+                time_data, ht_data = self.plotted_points["time_ht_mapping"][closest_label]
+
+                # Get the index of the plotted point given the Y type
+                idx = 0
+                if pt_y_type == "ht":
+                    idx = np.argmin(np.abs(ht_data - y_coord))
+                elif pt_y_type == "time":
+                    idx = np.argmin(np.abs(time_data - y_coord))
+
+                # If y_type is different, look up the Y value in the trajectory data
+                if y_type != pt_y_type:
+
+                    # Look up the Y value in the required type
+                    if y_type == "ht":
+                        y_coord = ht_data[idx]
+                    elif y_type == "time":
+                        y_coord = time_data[idx]
+
+                # Get the X value in the required type using the index
+                if x_type == "res":
+                    
+                    # Find the index of the closest point in the residual plot
+                    plot_idx = np.argmin(np.abs(self.plotted_points["res"][closest_label][1] - y_coord))
+                    x_coord = self.plotted_points["res"][closest_label][0][plot_idx]
+
+                elif x_type == "mag":
+                    if closest_label in self.plotted_points["mag"]:
+                        plot_idx = np.argmin(np.abs(self.plotted_points["mag"][closest_label][1] - y_coord))
+                        x_coord = self.plotted_points["mag"][closest_label][0][plot_idx]
+                    else:
+                        continue
+
+                elif x_type == "lag":
+                    plot_idx = np.argmin(np.abs(self.plotted_points["lag"][closest_label][1] - y_coord))
+                    x_coord = self.plotted_points["lag"][closest_label][0][plot_idx]
+
+                elif x_type == "vel":
+                    plot_idx = np.argmin(np.abs(self.plotted_points["vel"][closest_label][1] - y_coord))
+                    x_coord = self.plotted_points["vel"][closest_label][0][plot_idx]
+            
+                # Plot the point
+                scatter = ax.scatter(x_coord, y_coord, zorder=5, s=100, edgecolor='r', facecolor='none')
+                self.highlighted_points.append(scatter)
+
+            self.canvas.draw()
+
+
     def updatePlot(self):
 
         # Clear all axes
@@ -299,7 +422,22 @@ class FileMonitorApp(QMainWindow):
         self.ax_lag.clear()
         self.ax_vel.clear()
 
+        # Reset the plotted points
+        self.plotted_points = {
+            "res": {},
+            "mag": {},
+            "lag": {},
+            "vel": {},
+            "time_ht_mapping": {}
+        }
+
         if self.traj is not None:
+
+            # Add time-height mapping for each station
+            for obs in self.traj.observations:
+                self.plotted_points["time_ht_mapping"][str(obs.station_id)] = [obs.time_data, 
+                                                                               obs.model_ht/1000
+                                                                               ]
 
             # marker type, size multiplier
             markers = [
@@ -325,8 +463,10 @@ class FileMonitorApp(QMainWindow):
 
                 # Plot total residuals
                 self.ax_res.scatter(tot_res, obs.meas_ht/1000, marker=marker, \
-                    s=10*size_multiplier, label='{:s}, RMSD = {:.2f} m'.format(str(obs.station_id), \
-                    total_res_rms), zorder=3)
+                    s=10*size_multiplier, label=str(obs.station_id), zorder=3)
+                
+                # Add data to plotted points
+                self.plotted_points['res'][str(obs.station_id)] = [tot_res, obs.meas_ht/1000]
 
                 # Mark ignored points
                 if np.any(obs.ignore_list):
@@ -380,6 +520,9 @@ class FileMonitorApp(QMainWindow):
 
                         plt_handle = self.ax_mag.plot(used_magnitudes, used_heights/1000, marker='x', \
                             label=str(obs.station_id), zorder=3)
+                        
+                        # Add data to plotted points
+                        self.plotted_points['mag'][str(obs.station_id)] = [used_magnitudes, used_heights/1000]
 
                         # Mark ignored absolute magnitudes
                         if np.any(obs.ignore_list):
@@ -403,8 +546,6 @@ class FileMonitorApp(QMainWindow):
 
 
             
-
-
             # Generate a list of colors to use for markers
             colors = cm.viridis(np.linspace(0, 0.8, len(self.traj.observations)))
 
@@ -445,6 +586,9 @@ class FileMonitorApp(QMainWindow):
                 # Plot the lag
                 plt_handle = self.ax_lag.plot(used_lag, used_times, marker=marker, label=str(obs.station_id), 
                     zorder=3, markersize=3, color=colors[i], alpha=alpha)
+                
+                # Add data to plotted points
+                self.plotted_points['lag'][str(obs.station_id)] = [used_lag, used_times]
 
 
                 # Plot ignored lag points
@@ -499,8 +643,10 @@ class FileMonitorApp(QMainWindow):
 
                 # Plot all point to point velocities
                 self.ax_vel.scatter(obs.velocities[1:]/1000, obs.time_data[1:], marker=vel_markers[i%len(vel_markers)], 
-                    c=colors[i].reshape(1,-1), alpha=alpha, label='{:s}'.format(str(obs.station_id)), zorder=3)
-
+                    c=colors[i].reshape(1,-1), alpha=alpha, label=str(obs.station_id), zorder=3)
+                
+                # Add data to plotted points
+                self.plotted_points['vel'][str(obs.station_id)] = [obs.velocities[1:]/1000, obs.time_data[1:]]
 
                 # Determine the max/min velocity and height, as this is needed for plotting both height/time axes
                 vel_max = max(np.max(obs.velocities[1:]/1000), vel_max)
@@ -525,6 +671,9 @@ class FileMonitorApp(QMainWindow):
 
         # Set a tight layout
         self.figure.tight_layout()
+
+        # Connect the click event
+        self.figure.canvas.mpl_connect('button_press_event', self.onClick)
 
         self.canvas.draw()
 
