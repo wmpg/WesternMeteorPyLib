@@ -12,3 +12,4 @@ keras
 pytz
 pandas
 gitpython
+watchdog
