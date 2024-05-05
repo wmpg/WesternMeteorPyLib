@@ -4,21 +4,51 @@ updates the trajectory solution which is shown in a plot. """
 import sys
 import time
 import os
+import hashlib
 
 import numpy as np
 
-from watchdog.observers import Observer
+from watchdog.observers.polling import PollingObserver
 from watchdog.events import PatternMatchingEventHandler
 
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib import cm
 
-from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QDesktopWidget
+from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QLabel, QHBoxLayout
+from PyQt5.QtGui import QPixmap, QIcon, QColor, QPainter
 from PyQt5.QtCore import Qt
 
 from wmpl.Formats.ECSV import loadECSVs
 from wmpl.Formats.GenericFunctions import solveTrajectoryGeneric, addSolverOptions
+from wmpl.Utils.Pickling import savePickle
+
+
+
+class DirectoryMonitor(PatternMatchingEventHandler):
+    def __init__(self, callback, **kwargs):
+        super().__init__(**kwargs)
+        self.callback = callback
+
+    def on_created(self, event):
+        print(f"Detected creation: {event.src_path}")
+        self.callback(event)
+
+    def on_modified(self, event):
+        if event.is_directory:
+            return
+        self.callback(event)
+
+    def on_moved(self, event):
+        """ Extended event handler for file moves. """
+        print(f"Detected move from {event.src_path} to {event.dest_path}")
+        self.callback(event)
+
+    def on_deleted(self, event):
+        print(f"Detected deletion: {event.src_path}")
+        self.callback(event)
+
+
 
 class FileMonitorApp(QMainWindow):
     def __init__(self, dir_path, solver_kwargs):
@@ -32,6 +62,9 @@ class FileMonitorApp(QMainWindow):
         # Save the trajectory solver keyword arguments
         self.solver_kwargs = solver_kwargs
 
+        # Initialize the checksum dictionary
+        self.file_checksums = {}
+
         self.initUI()
         self.initialRun()
         self.initObserver()
@@ -42,7 +75,27 @@ class FileMonitorApp(QMainWindow):
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         layout = QVBoxLayout(self.central_widget)
+        layout.setSpacing(10)  # Adds spacing between widgets in the layout
+        layout.setContentsMargins(10, 10, 10, 10)  # Adds margins around the entire layout (left, top, right, bottom)
 
+
+        # Status bar setup
+        self.status_bar = QWidget()
+        self.status_bar.setMaximumHeight(30)  # Limit the maximum height of the status bar
+        self.status_layout = QHBoxLayout(self.status_bar)
+        self.status_layout.setContentsMargins(0, 0, 0, 0)  # No additional margins needed within the status bar
+        self.status_label = QLabel("Ready")
+        self.status_light = QLabel()
+
+        # Initial light color (red by default, green when ready)
+        self.setStatus('red', "Computing trajectory...")
+
+        self.status_layout.addWidget(self.status_light)
+        self.status_layout.addWidget(self.status_label)
+        self.status_layout.addStretch(1)
+        layout.addWidget(self.status_bar)
+
+        # Add a canvas for the plot
         self.figure, ((self.ax_res, self.ax_mag), (self.ax_lag, self.ax_vel)) = plt.subplots(nrows=2, ncols=2, dpi=150, figsize=(10, 5))
         self.canvas = FigureCanvas(self.figure)
         layout.addWidget(self.canvas)
@@ -57,60 +110,124 @@ class FileMonitorApp(QMainWindow):
         self.setWindowTitle('Trajectory Plotter')
         self.show()
 
-    def initObserver(self):
+        self.canvas.draw()
 
-        self.observer = Observer()
-        event_handler = PatternMatchingEventHandler(patterns=["*.ecsv"], ignore_directories=True)
-        event_handler.on_modified = self.onModified
+    def initObserver(self):
+        
+        # Poll the directory for changes every 2 seconds
+        self.observer = PollingObserver(timeout=2.0)
+
+        # Create the event handler
+        event_handler = DirectoryMonitor(self.onModified, patterns=["*.ecsv"], ignore_directories=False)
         self.observer.schedule(event_handler, self.dir_path, recursive=True)
         self.observer.start()
 
     def initialRun(self):
 
         # Find all .ecsv files at startup and plot their trajectories, ignoring "REJECT" directories
-        file_paths = self.findEcsvFiles(self.dir_path)
+        file_paths, self.file_checksums = self.findEcsvFiles(self.dir_path)
 
         if file_paths:
             self.computeTrajectory(file_paths)
 
+    
     def findEcsvFiles(self, directory):
+
         file_paths = []
+        file_checksums = {}
+
         for dirpath, dirnames, files in os.walk(directory):
 
             # Skip directories with "REJECT" in the name
             dirnames[:] = [d for d in dirnames if "REJECT" not in d.upper()]
-            file_paths.extend([os.path.join(dirpath, f) for f in files if f.endswith('.ecsv')])
 
-        return file_paths
+            for f in files:
+                if f.endswith('.ecsv'):
+
+                    full_path = os.path.join(dirpath, f)
+                    file_paths.append(full_path)
+
+                    # Compute the checksum
+                    with open(full_path, "rb") as file:
+                        file_contents = file.read()
+                        checksum = hashlib.md5(file_contents).hexdigest()
+                        file_checksums[full_path] = checksum
+
+        return file_paths, file_checksums
+    
+
+    def setStatus(self, color, text):
+
+        # Create a pixmap of a circle with the desired color
+        pixmap = QPixmap(16, 16)
+        pixmap.fill(QColor('transparent'))
+        painter = QPainter(pixmap)
+        painter.setBrush(QColor(color))
+        painter.setPen(QColor('black'))
+        painter.drawEllipse(0, 0, 16, 16)
+        painter.end()
+        self.status_light.setPixmap(pixmap)
+
+        self.status_label.setText(text)
+
 
     def onModified(self, event):
 
         current_time = time.time()
+        max_update_rate = 1.0 # seconds
 
-        if "REJECT" in os.path.dirname(event.src_path):
 
-            print(f'Ignoring processing for file in "REJECT" directory: {event.src_path}')
+        needs_update = False
+
+        # Check if the event is move/rename
+        if event.event_type == 'moved':
+
+            if "_REJECT" in os.path.basename(event.dest_path).upper():
+                print(f"Directory marked as REJECT: {event.dest_path}")
+                return None
             
-            # Skip processing for files in "REJECT" directories
-            return None
+            elif "_REJECT" in os.path.basename(event.src_path).upper():
+                print(f"Directory unmarked as REJECT: {event.src_path}")
+                needs_update = True
 
-        # Limit the update rate
-        max_update_rate = 0.5 # seconds
+        if event.event_type == 'deleted':
+            print(f"Item deleted: {event.src_path}")
+            needs_update = True
 
-        if event.src_path.endswith('.ecsv') and (current_time - self.last_update_time >= max_update_rate):
-
-            file_paths = self.findEcsvFiles(self.dir_path)
+        if event.src_path.endswith('.ecsv') or needs_update:
+            if current_time - self.last_update_time >= max_update_rate:
             
-            print(f'Update triggered by modification in: {event.src_path}')
+                file_paths, new_checksums = self.findEcsvFiles(self.dir_path)
 
-            self.computeTrajectory(file_paths)
+                # Check for changes using checksums
+                unchanged = all(self.file_checksums.get(path) == checksum for path, checksum in new_checksums.items() if path in self.file_checksums)
 
-            self.updatePlot()
+                # If the file names used in the trajectory computation have changed, recompute the trajectory
+                # Check that the keys in the new and old checksums are the same
+                files_changed = set(self.file_checksums.keys()) != set(new_checksums.keys())
 
-            self.last_update_time = current_time
+                
+                if not unchanged or not self.file_checksums or files_changed:
+                    
+                    # Update stored checksums
+                    self.file_checksums = new_checksums
+
+                    print(f'Update triggered by modification in: {event.src_path}')
+
+                    self.computeTrajectory(file_paths)
+                    self.updatePlot()
+
+                    self.last_update_time = current_time
+
+                else:
+                    print("No changes detected in the .ecsv files since the last computation.")
+
 
     def computeTrajectory(self, ecsv_paths):
         """ Compute the trajectory solution for the given .ecsv files. """
+
+        # Indicate that the trajectory is being computed
+        self.setStatus('red', "Computing trajectory...")
 
         print(f'Computing trajectory for {len(ecsv_paths)} files...')
         for file_path in ecsv_paths:
@@ -121,7 +238,8 @@ class FileMonitorApp(QMainWindow):
 
         # Check that there are more than 2 ECSV files given
         if len(ecsv_paths) < 2:
-            print("At least 2 files are needed for trajectory estimation!")
+            # print("At least 2 files are needed for trajectory estimation!")
+            self.setStatus('gray', "At least 2 files are needed for trajectory estimation!", "Ready!")
             return False
         
         # Unpack the kwargs into an object
@@ -150,9 +268,19 @@ class FileMonitorApp(QMainWindow):
             show_jacchia=kwargs.jacchia,
             estimate_timing_vel=(False if kwargs.notimefit is None else kwargs.notimefit), \
             fixed_times=kwargs.fixedtimes, mc_noise_std=kwargs.mcstd)
+
+        
+        # Save the report and the pickle file
+        savePickle(self.traj, self.traj.output_dir, self.traj.file_name + '_self.trajectory.pickle')
+
+        # Save self.trajectory report with original points
+        self.traj.saveReport(self.traj.output_dir, self.traj.file_name + '_report.txt', \
+            uncertainties=None, verbose=False)
         
 
         self.updatePlot()
+
+        self.setStatus('green', "Ready!")
 
 
     def updatePlot(self):
