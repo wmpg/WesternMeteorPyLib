@@ -422,6 +422,11 @@ class FileMonitorApp(QMainWindow):
         self.ax_lag.clear()
         self.ax_vel.clear()
 
+        # Clear highlighted points
+        for point in self.highlighted_points:
+            point.remove()
+        self.highlighted_points.clear()
+
         # Reset the plotted points
         self.plotted_points = {
             "res": {},
