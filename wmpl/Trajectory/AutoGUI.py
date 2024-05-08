@@ -127,8 +127,8 @@ class FileMonitorApp(QMainWindow):
 
     def initObserver(self):
         
-        # Poll the directory for changes every 2 seconds
-        self.observer = PollingObserver(timeout=2.0)
+        # Poll the directory for changes every 1 second
+        self.observer = PollingObserver(timeout=1.0)
 
         # Create the event handler
         event_handler = DirectoryMonitor(self.onModified, patterns=["*.ecsv"], ignore_directories=False)
