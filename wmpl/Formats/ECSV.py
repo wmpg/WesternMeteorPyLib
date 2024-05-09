@@ -172,7 +172,7 @@ if __name__ == "__main__":
     arg_parser.add_argument('ecsv_files', nargs="+", metavar='ECSV_PATH', type=str, \
         help="Path to 2 of more ECSV files. Wildcards are supported, so e.g. /path/to/*.ecsv also works.")
 
-        # Add other solver options
+    # Add other solver options
     arg_parser = addSolverOptions(arg_parser, skip_velpart=True)
 
     arg_parser.add_argument('-p', '--velpart', metavar='VELOCITY_PART', \

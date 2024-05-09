@@ -1416,10 +1416,10 @@ def loadUSGInputFile(dir_path, usg_file):
     data.usg_intensity_data = np.array(data.usg_intensity_data)
 
     # Extract the time
-    data.time_data = data.usg_intensity_data[:,0]
+    data.time_data = data.usg_intensity_data[:, 0]
 
     # Compute the light curve (see Brown et al. 1996, St. Robert paper)
-    data.absolute_magnitudes = -2.5*np.log10(data.usg_intensity_data[:,1]/248)
+    data.absolute_magnitudes = -2.5*np.log10(data.usg_intensity_data[:, 1]/248)
 
     ### ###
 
@@ -1566,6 +1566,50 @@ def loadUSGInputFile(dir_path, usg_file):
     traj.radiant_eci_mini = eci_rad
     traj.state_vect_mini = eci_ref
     traj.rbeg_jd = data.jd
+
+
+    ### Save the computed trajectory information to a CSV file. Metadata are added in comments (lines ###
+    ### starting  with #)
+
+    # Output file path
+    traj_file_path = os.path.join(dir_path, usg_file.replace('.txt', '') + "_trajectory.csv")
+
+    # Open the output file
+    with open(traj_file_path, 'w') as f:
+
+        # Write the header
+        f.write("# Trajectory data computed from the USG input file.\n")
+        f.write("#\n")
+        f.write("# Reference time (UTC) = {}\n".format(data.dt))
+        f.write("# Reference JD         = {:.6f}\n".format(data.jd))
+        f.write("# Begin point\n")
+        f.write("#     Lat    = {:+11.6f} deg\n".format(np.degrees(rbeg_lat)))
+        f.write("#     Lon    = {:11.6f} deg\n".format(np.degrees(rbeg_lon)))
+        f.write("#     Height = {:8.4f} km\n".format(rbeg_ele/1000))
+        f.write("# End point\n")
+        f.write("#     Lat    = {:+11.6f} deg\n".format(np.degrees(rend_lat)))
+        f.write("#     Lon    = {:11.6f} deg\n".format(np.degrees(rend_lon)))
+        f.write("#     Height = {:8.4f} km\n".format(rend_ele/1000))
+        f.write("# Radiant\n")
+        f.write("#     RA     = {:8.4f} deg\n".format(np.degrees(ra_rad)))
+        f.write("#     Dec    = {:+8.4f} deg\n".format(np.degrees(dec_rad)))
+        f.write("#     Az     = {:8.4f} deg\n".format(data.azimuth))
+        f.write("#     Alt    = {:+8.4f} deg\n".format(data.entry_angle))
+        f.write("#\n")
+        f.write("# Time (s), Ht. (km),  Lat. (deg),  Lon. (deg), AbsMag\n")
+
+        # Write the trajectory data
+        for t, h, lat, lon, mag in zip(time_data, height_data, lat_data, lon_data, abs_mag_data):
+
+            # Skip NaN magnitudes
+            if np.isnan(mag):
+                continue
+
+            f.write("{:10.6f}, {:8.4f}, {:+11.6f}, {:11.6f}, {:+6.2f}\n".format(t, h/1000, np.degrees(lat), np.degrees(lon), mag))
+
+
+    ### ###
+
 
 
     return data, traj

@@ -280,6 +280,10 @@ if __name__ == "__main__":
     arg_parser.add_argument('--maxvel', metavar='MAX_VEL', \
         help='Maximum velocity in km/s to consider in the height window. Used to remove outliers. No filter by default.', \
         type=float, default=None)
+    
+    arg_parser.add_argument('--maxmass', metavar='MAX_MASS', \
+                            help='Maximum mass in kg for the dynamic mass measurements. Used to avoid inf values. Default is 50 kg.', \
+                            type=float, default=50)
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -445,13 +449,32 @@ if __name__ == "__main__":
     vel_eval = lineFunc(time_eval, *vel_fit)
     ht_eval = lineFunc(time_eval, *ht_fit)
 
+    # Compute +/- 2 sigma deceleartion
+    decel_lo = decel - 2*decel_std
+    decel_hi = decel + 2*decel_std
+
+    # Limit the deceleration to a minimum of 0
+    if decel < 0:
+        decel = 0
+    if decel_lo < 0:
+        decel_lo = 0
+    if decel_hi < 0:
+        decel_hi = 0
+
     # Compute the dynamic mass (and +/- 2 sigma)
     dyn_mass = dynamicMass(bulk_density, traj.rend_lat, traj.rend_lon, traj.rend_ele, traj.jdt_ref, \
         vel_eval, decel, gamma=1.0, shape_factor=gamma_a)
     dyn_mass_hi = dynamicMass(bulk_density, traj.rend_lat, traj.rend_lon, traj.rend_ele, traj.jdt_ref, \
-        vel_eval, decel - 2*decel_std, gamma=1.0, shape_factor=gamma_a)
+        vel_eval, decel_lo, gamma=1.0, shape_factor=gamma_a)
     dyn_mass_lo = dynamicMass(bulk_density, traj.rend_lat, traj.rend_lon, traj.rend_ele, traj.jdt_ref, \
-        vel_eval, decel + 2*decel_std, gamma=1.0, shape_factor=gamma_a)
+        vel_eval, decel_hi, gamma=1.0, shape_factor=gamma_a)
+    
+
+    # Limit the dynamic mass to a 0 - maxmass range
+    mass_max = cml_args.maxmass
+    dyn_mass = np.clip(dyn_mass, 0, mass_max)
+    dyn_mass_hi = np.clip(dyn_mass_hi, 0, mass_max)
+    dyn_mass_lo = np.clip(dyn_mass_lo, 0, mass_max)
 
 
     final_decel = final_decel_hi = final_decel_lo = 0
@@ -459,14 +482,36 @@ if __name__ == "__main__":
     # Run the fragment until the final velocity of 3 km/s
     if vel_eval > 3000:
 
+        print()
+        print("Running simulation down to 3 km/s...")
+        print()
+        print("  init vel = {:.2f} km/s".format(vel_eval/1000))
+        print("  init ht  = {:.2f} km".format(ht_eval/1000))
+        print("  decel   = {:.2f} km/s^2".format(decel/1000))
+        print("  init mass = {:.3f} kg".format(dyn_mass))
+        print()
         final_sr, final_mass, final_lat, final_lon, final_ele = computeFragEndParams(traj, dyn_mass, \
             bulk_density, ht_eval, vel_eval, gamma_a)
 
+        print()
+        print("Running simulation down to 3 km/s (+2 sigma mass)...")
+        print()
+        print("  decel = {:.2f} km/s^2".format(decel_hi/1000))
+        print("  init mass = {:.3f} kg".format(dyn_mass_hi))
+        print()
         final_sr_hi, final_mass_hi, final_lat_hi, final_lon_hi, final_ele_hi = computeFragEndParams(traj, \
             dyn_mass_hi, bulk_density, ht_eval, vel_eval, gamma_a)
 
+        print()
+        print("Running simulation down to 3 km/s (-2 sigma mass)...")
+        print()
+        print("  decel = {:.2f} km/s^2".format(decel_lo/1000))
+        print("  init mass = {:.3f} kg".format(dyn_mass_lo))
+        print()
         final_sr_lo, final_mass_lo, final_lat_lo, final_lon_lo, final_ele_lo = computeFragEndParams(traj, \
             dyn_mass_lo, bulk_density, ht_eval, vel_eval, gamma_a)
+        
+        print()
 
         # Get the deceleration in the last point
         final_decel = (final_sr.main_vel_arr[-1] - final_sr.main_vel_arr[-2]) \
