@@ -5378,6 +5378,9 @@ class Trajectory(object):
                     # Only take the common part of the two station names
                     common_name = os.path.commonprefix([obs.station_id, obs2.station_id])
 
+                    # Strip "_" from the end of the common name
+                    common_name = common_name.rstrip("_")
+
                     # Get the difference between the two station names
                     diff1 = obs.station_id[len(common_name):]
                     diff2 = obs2.station_id[len(common_name):]
@@ -5401,8 +5404,7 @@ class Trajectory(object):
 
         # Plot locations of all stations and measured positions of the meteor
         plotted_codes = []
-        for i, obs in enumerate(sorted(self.observations, key=lambda x:x.rbeg_ele, reverse=True)):
-
+        for i, obs in enumerate(sorted(self.observations, key=lambda x:np.min(x.state_vect_dist), reverse=False)):
 
             # Plot measured points
             m.plot(obs.meas_lat[obs.ignore_list == 0], obs.meas_lon[obs.ignore_list == 0], c='r')
