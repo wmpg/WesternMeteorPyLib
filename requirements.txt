@@ -4,10 +4,11 @@ scipy
 matplotlib
 jplephem
 pyephem
-https://github.com/matplotlib/basemap/archive/master.zip
+# https://github.com/matplotlib/basemap/archive/master.zip
 PyQt5 ; platform_machine != 'aarch64'
 pyyaml
 pyswarms
+ml-dtypes
 keras
 pytz
 pandas
