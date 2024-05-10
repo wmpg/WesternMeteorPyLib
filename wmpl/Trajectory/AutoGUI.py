@@ -321,6 +321,14 @@ class FileMonitorApp(QMainWindow):
         self.setStatus('green', "Ready!")
 
 
+    def clearSelectedPoint(self):
+
+        # Clear previously highlighted points
+        for point in self.highlighted_points:
+            point.remove()
+        self.highlighted_points.clear()
+
+
     def onClick(self, event):
         """ Mark the clicked point on all plots. """
 
@@ -378,10 +386,7 @@ class FileMonitorApp(QMainWindow):
                         closest_point = (y_type, x, y)
                         closest_label = coll.get_label()
 
-        # Clear previously highlighted points
-        for point in self.highlighted_points:
-            point.remove()
-        self.highlighted_points.clear()
+        self.clearSelectedPoint()
 
         # Highlight the new closest point in all relevant plots
         if closest_point and closest_label:
@@ -442,6 +447,8 @@ class FileMonitorApp(QMainWindow):
 
         if self.traj is not None:
 
+            self.clearSelectedPoint()
+
             print("Saving screenshot...")
 
             # Get the trajectory base file name
@@ -473,10 +480,7 @@ class FileMonitorApp(QMainWindow):
         self.ax_lag.clear()
         self.ax_vel.clear()
 
-        # Clear highlighted points
-        for point in self.highlighted_points:
-            point.remove()
-        self.highlighted_points.clear()
+        self.clearSelectedPoint()
 
         # Reset the plotted points
         self.plotted_points = {
