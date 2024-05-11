@@ -109,6 +109,9 @@ class TrajectoryReduced(object):
             self.rend_ele = traj.rend_ele
             self.rend_jd = traj.rend_jd
 
+            # Save the gravity factor
+            self.gravity_factor = traj.gravity_factor
+
             # Stations participating in the solution
             self.participating_stations = sorted([obs.station_id for obs in traj.observations \
                 if obs.ignore_station == False])
