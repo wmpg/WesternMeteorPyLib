@@ -785,6 +785,8 @@ class RMSDataHandle(object):
             traj_dir_path: [str] Full path to a directory with trajectory pickles.
         """
 
+        counter = 0
+
         # Find and load all trajectory objects
         for entry in sorted(os.walk(traj_dir_path), key=lambda x: x[0]):
 
@@ -792,9 +794,18 @@ class RMSDataHandle(object):
 
             # Find and load all trajectory pickle files
             for file_name in file_names:
+
                 if file_name.endswith("_trajectory.pickle"):
+
                     if self.trajectoryFileInDtRange(file_name):
+
                         self.db.addTrajectory(os.path.join(dir_path, file_name))
+
+                        # Print every 1000th trajectory
+                        if counter%1000 == 0:
+                            print("  Loaded {:6d} trajectories, currently on {:s}".format(counter, file_name))
+
+                        counter += 1
 
 
     def getComputedTrajectories(self, jd_beg, jd_end):
