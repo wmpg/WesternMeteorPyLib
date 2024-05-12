@@ -535,7 +535,7 @@ class RMSDataHandle(object):
 
         station_list = []
 
-        for dir_name in os.listdir(self.dir_path):
+        for dir_name in sorted(os.listdir(self.dir_path)):
 
             # Check if the dir name matches the station name pattern
             if os.path.isdir(os.path.join(self.dir_path, dir_name)):
