@@ -801,6 +801,7 @@ class RMSDataHandle(object):
 
         dt_beg, dt_end = self.dt_range
 
+
         # Check if the date time is in the time range
         if len(dir_name) >= 4:
 
@@ -815,7 +816,7 @@ class RMSDataHandle(object):
                     dt_end_test = datetime.datetime(dt.year, dt.month, 1) + datetime.timedelta(days=31)
 
                     # Check if the month is in the range
-                    if (dt_beg_test >= dt_beg) and (dt_end_test <= dt_end):
+                    if (dt_end_test >= dt_beg) and (dt_beg_test <= dt_end):
 
                         # If the day is also given, check that it's within the range
                         if len(dir_name) >= 8:
@@ -825,13 +826,16 @@ class RMSDataHandle(object):
                             dt_end_test = datetime.datetime(dt.year, dt.month, dt.day) + datetime.timedelta(days=1)
 
                             # Check if the day is in the range
-                            if (dt_beg_test >= dt_beg) and (dt_end_test <= dt_end):
+                            if (dt_end_test >= dt_beg) and (dt_beg_test <= dt_end):
                                 return True
 
                             else:
                                 return False
 
                         return True
+                    
+                    else:
+                        return False
 
                 return True
             
