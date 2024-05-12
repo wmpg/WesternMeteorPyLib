@@ -869,6 +869,9 @@ class RMSDataHandle(object):
             traj_dir_path: [str] Full path to a directory with trajectory pickles.
         """
 
+        print("  Loading trajectories from:", traj_dir_path)
+        print("  Datetime range:", self.dt_range)
+
         counter = 0
 
         # Construct a list of all ddirectory paths to visit. The trajectory directories are sorted in 
@@ -880,7 +883,7 @@ class RMSDataHandle(object):
             
             if self.yearMonthDayDirInDtRange(yyyy):
 
-                print("  Loading trajectories from year\n- ", yyyy)
+                print("- year    ", yyyy)
                 
                 # Check the month
                 for yyyymm in sorted(os.listdir(os.path.join(traj_dir_path, yyyy))):
@@ -896,11 +899,11 @@ class RMSDataHandle(object):
 
                                 print("    - day ", yyyymmdd)
 
-                                traj_dir_path = os.path.join(traj_dir_path, yyyy, yyyymm, yyyymmdd)
+                                yyyymmdd_dir_path = os.path.join(traj_dir_path, yyyy, yyyymm, yyyymmdd)
 
                                 # Add the directory to the list of directories to visit
-                                if os.path.isdir(traj_dir_path) and (not traj_dir_path in dir_paths):
-                                    dir_paths.append(traj_dir_path)
+                                if os.path.isdir(yyyymmdd_dir_path) and (not yyyymmdd_dir_path in dir_paths):
+                                    dir_paths.append(yyyymmdd_dir_path)
 
 
 
