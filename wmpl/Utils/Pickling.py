@@ -67,6 +67,10 @@ def loadPickle(dir_path, file_name):
             # If the gravity factor is missing, add it
             if not hasattr(p, 'gravity_factor'):
                 p.gravity_factor = 1.0
+
+            # If v0z is missing, add it
+            if not hasattr(p, 'v0z'):
+                p.v0z = 0.0
                 
 
         return p
