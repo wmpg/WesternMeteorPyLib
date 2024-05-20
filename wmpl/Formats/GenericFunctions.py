@@ -2,6 +2,7 @@
 
 
 import os
+import time
 
 import numpy as np
 
@@ -290,7 +291,10 @@ def solveTrajectoryGeneric(jdt_ref, meteor_list, dir_path, solver='original', **
 
 
     # Solve the trajectory
+    t1 = time.time()
     traj = traj.run()
+
+    print('Trajectory solver took:', time.time() - t1, 'seconds')
 
     return traj
 

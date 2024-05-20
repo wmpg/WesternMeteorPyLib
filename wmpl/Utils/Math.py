@@ -13,6 +13,15 @@ import scipy.stats
 import scipy.spatial
 import scipy.optimize
 
+try:
+    # If Numba is available, use the jit decorator with specified options
+    from numba import njit
+
+except ImportError:
+    # If Numba is not available, define a no-op decorator that just returns the function unchanged
+    def njit(func, *args, **kwargs):
+        return func
+
 
 ### BASIC FUNCTIONS ###
 ##############################################################################################################
@@ -39,13 +48,13 @@ def lineFunc(x, m, k):
 ### VECTORS ###
 ##############################################################################################################
 
-
+@njit
 def vectNorm(vect):
     """Convert a given vector to a unit vector."""
 
     return vect/vectMag(vect)
 
-
+@njit
 def vectMag(vect):
     """Calculate the magnitude of the given vector."""
 
@@ -65,7 +74,7 @@ def rotateVector(vect, axis, theta):
 
     """
 
-    rot_M = scipy.linalg.expm(np.cross(np.eye(3), axis / vectMag(axis) * theta))
+    rot_M = scipy.linalg.expm(np.cross(np.eye(3), axis/vectMag(axis)*theta))
 
     return np.dot(rot_M, vect)
 
@@ -415,7 +424,7 @@ def isAngleBetween(left, ang, right):
 ### 3D FUNCTIONS ###
 ##############################################################################################################
 
-
+@njit
 def findClosestPoints(P, u, Q, v):
     """Calculate coordinates of closest point of approach (CPA) between lines of sight (LoS) of two
         observers.
@@ -445,14 +454,14 @@ def findClosestPoints(P, u, Q, v):
     d = np.dot(u, w)
     e = np.dot(v, w)
 
-    sc = (b * e - c * d) / (a * c - b**2)
-    tc = (a * e - b * d) / (a * c - b**2)
+    sc = (b*e - c*d) / (a*c - b**2)
+    tc = (a*e - b*d) / (a*c - b**2)
 
     # Point on the 1st observer's line of sight closest to the LoS of the 2nd observer
-    S = P + u * sc
+    S = P + u*sc
 
     # Point on the 2nd observer's line of sight closest to the LoS of the 1st observer
-    T = Q + v * tc
+    T = Q + v*tc
 
     # Calculate the distance between S and T
     d = np.linalg.norm(S - T)
