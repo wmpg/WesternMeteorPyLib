@@ -13,5 +13,6 @@ keras
 pytz
 pandas
 gitpython
+numba
 watchdog==3.0.0; python_version == '3.7'
 watchdog; python_version >= '3.8'

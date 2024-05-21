@@ -454,8 +454,16 @@ def findClosestPoints(P, u, Q, v):
     d = np.dot(u, w)
     e = np.dot(v, w)
 
-    sc = (b*e - c*d) / (a*c - b**2)
-    tc = (a*e - b*d) / (a*c - b**2)
+    # Calculate the denominator
+    denom = (a*c - b**2)
+
+    # Check if the denominator is close to zero, meaning the lines are parallel
+    # In that case, return NaNs as the closest points cannot be calculated
+    if np.abs(denom) < 1e-10:
+        return np.nan, np.nan, np.nan
+
+    sc = (b*e - c*d)/denom
+    tc = (a*e - b*d)/denom
 
     # Point on the 1st observer's line of sight closest to the LoS of the 2nd observer
     S = P + u*sc
