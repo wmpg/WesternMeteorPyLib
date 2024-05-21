@@ -352,10 +352,15 @@ def angleBetweenSphericalCoords(phi1, lambda1, phi2, lambda2):
         [float] Angle between two coordinates (radians).
     """
 
-    return np.arccos(
-        np.sin(phi1) * np.sin(phi2)
-        + np.cos(phi1) * np.cos(phi2) * np.cos(lambda2 - lambda1)
-    )
+    # Compute the cosine of the angle
+    cos_angle = (np.sin(phi1)*np.sin(phi2) +
+                 np.cos(phi1)*np.cos(phi2)*np.cos(lambda2 - lambda1))
+
+    # Clamp the value to the valid range of arccos
+    cos_angle = np.clip(cos_angle, -1.0, 1.0)
+
+    # Return the angle in radians
+    return np.arccos(cos_angle)
 
 
 @np.vectorize
