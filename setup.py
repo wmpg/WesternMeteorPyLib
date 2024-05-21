@@ -94,6 +94,10 @@ if os.path.isfile(gmn_shower_table_npy):
     os.remove(gmn_shower_table_npy)
 
 
+# This will generate the numpy shower tables
+from wmpl.Utils.ShowerAssociation import loadGMNShowerTable
+
+
 # Get all data files in 'share'
 share_files = [os.path.join('wmpl', 'share', file_name) for file_name in os.listdir(os.path.join(dir_path, 'wmpl', 'share'))]
 
@@ -102,6 +106,9 @@ share_files += [os.path.join("wmpl", "MetSim", "Metsim0001_input.txt")]
 
 # Add MetSim GUI definition file
 share_files += [os.path.join("wmpl", "MetSim", "GUI.ui")]
+
+# Add numpy shower tables to install
+share_files += [iau_shower_table_npy, gmn_shower_table_npy]
 
 
 
