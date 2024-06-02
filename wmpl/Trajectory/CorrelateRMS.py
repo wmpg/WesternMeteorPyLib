@@ -879,6 +879,8 @@ class RMSDataHandle(object):
             traj_dir_path: [str] Full path to a directory with trajectory pickles.
         """
 
+        if not os.path.isdir(traj_dir_path):
+            return
         print("  Loading trajectories from:", traj_dir_path)
         print("  Datetime range:", self.dt_range)
 
