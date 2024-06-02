@@ -28,9 +28,10 @@ from PyQt5.uic import loadUi
 from wmpl.MetSim.SimResults import SimulationResults
 
 from wmpl.Formats.Met import loadMet
+from wmpl.Formats.ECSV import loadECSVs
 from wmpl.MetSim.GUITools import MatplotlibPopupWindow
 from wmpl.MetSim.MetSimErosion import runSimulation, Constants, zenithAngleAtSimulationBegin
-from wmpl.Trajectory.Trajectory import Trajectory, ObservedPoints
+from wmpl.Trajectory.Trajectory import Trajectory, ObservedPoints, PlaneIntersection
 from wmpl.Trajectory.Orbit import calcOrbit, Orbit
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensity, atmDensPoly
 from wmpl.Utils.Math import mergeClosePoints, findClosestPoints, vectMag, vectNorm, lineFunc, meanAngle
@@ -65,6 +66,99 @@ SIM_RESULTS_CSV = "metsim_results.csv"
 
 
 
+
+
+class ECSVObservations(object):
+    def __init__(self, ecsv_data, traj):
+        """ Container for observations loaded from an ECSV file. Computes the lag and apparent magnitude
+            given the base trajectory solution.
+        """
+
+        self.ecsv_data = ecsv_data
+        self.traj = traj
+
+        self.sites = []
+
+        self.time_data = {}
+        self.height_data = {}
+        self.state_vect_dist_data = {}
+        self.lag_data = {}
+        self.abs_mag_data = {}
+
+        # Compute the lag and the magnitude using the given observations
+        if self.ecsv_data is not None:
+
+            jdt_ref, meteor_list_epoch_of_date = self.ecsv_data
+
+            # Extract the camera IDs
+            self.sites = [meteor.station_id for meteor in meteor_list_epoch_of_date]
+
+            for meteor in meteor_list_epoch_of_date:
+
+                site = meteor.station_id
+
+                # Compute the Julian date of each frame
+                jd_data = jdt_ref + meteor.time_data/86400
+
+                # List of distances from the state vector (m)
+                state_vect_dist = []
+
+                # List of heights (m)
+                height_data = []
+
+                # List of absolute magnitudes
+                abs_mag_data = []
+
+                                # Project rays to the trajectory line
+                for i, (jd, ra, dec, mag) in enumerate(np.c_[jd_data, meteor.ra_data, meteor.dec_data, meteor.mag_data]):
+
+                    # Compute the station coordinates at the given time
+                    stat = geo2Cartesian(meteor.latitude, meteor.longitude, meteor.height, jd)
+
+                    # Compute measurement rays in cartesian coordinates
+                    meas = np.array(raDec2ECI(ra, dec))
+
+
+                    # Calculate closest points of approach (observed line of sight to radiant line)
+                    obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, self.traj.state_vect_mini, \
+                        self.traj.radiant_eci_mini)
+
+                    # Compute the height (meters)
+                    _, _, ht = cartesian2Geo(jd, *rad_cpa)
+                    height_data.append(ht)
+
+
+                    # If the height is higher than the beginning height, make the state vector distance 
+                    #   negative
+                    state_vect_dist_sign = 1
+                    if ht > self.traj.rbeg_ele:
+                        state_vect_dist_sign = -1
+
+                    # Distance from the state vector to the projected point on the radiant line
+                    state_vect_dist.append(state_vect_dist_sign*vectMag(self.traj.state_vect_mini - rad_cpa))
+
+                    # Compute the range to the station and the absolute magnitude
+                    if mag is not None:
+                        r = vectMag(rad_cpa - stat)
+                        abs_mag = mag + 5*np.log10(100000/r)
+                    else:
+                        abs_mag = np.nan
+
+                    abs_mag_data.append(abs_mag)
+
+
+                state_vect_dist = np.array(state_vect_dist)
+
+                # Store the state vector distance
+                self.state_vect_dist_data[site] = state_vect_dist
+
+                # Compute the lag
+                self.lag_data[site] = state_vect_dist - lineFunc(meteor.time_data, *self.traj.velocity_fit)
+
+                # Store the time, heights, magnitudes
+                self.time_data[site] = np.array(meteor.time_data)
+                self.height_data[site] = np.array(height_data)
+                self.abs_mag_data[site] = np.array(abs_mag_data)
 
 
 
@@ -148,7 +242,7 @@ class MetObservations(object):
                 for i, (jd, ra, dec, mag) in enumerate(np.c_[jd_picks, ra_picks, dec_picks, mag_picks]):
 
                     # Compute the station coordinates at the given time
-                    stat = geo2Cartesian(met.lat[site], met.lon[site], met.elev[site], jd)
+                    stat = np.array(geo2Cartesian(met.lat[site], met.lon[site], met.elev[site], jd))
 
                     # Compute measurement rays in cartesian coordinates
                     meas = np.array(raDec2ECI(ra, dec))
@@ -329,7 +423,7 @@ class WakeContainter(object):
 
 class FragmentationEntry(object):
     def __init__(self, frag_type, height, number, mass_percent, sigma, gamma, erosion_coeff, grain_mass_min, \
-        grain_mass_max, mass_index, normalize_units=False):
+        grain_mass_max, mass_index, normalize_units=False, upward_only=None):
         """ A container for every fragmentation entry. 
 
         normalize_units: [bool] Convert the units of sigma and erosion coeff from s^2 km^-2 to s^2 m^-2,
@@ -357,6 +451,21 @@ class FragmentationEntry(object):
 
 
         self.frag_type = frag_type.strip()
+
+        # If the height starts with the character "U", it means that the fragmentation is only applied
+        # when the object is going up. This is only used when Earth grazers are simulated.
+        if upward_only is None:
+
+            self.upward_only = False
+            
+            if isinstance(height, str):
+                if height.strip().upper().startswith("U"):
+                    self.upward_only = True
+                    height = height.strip().upper().strip("U")
+
+        else:
+            self.upward_only = upward_only
+
 
         self.height = (1000**norm)*float(height)
 
@@ -494,7 +603,15 @@ class FragmentationEntry(object):
 
         line_entries.append("{:>6s}".format(self.frag_type))
 
-        line_entries.append("{:11.3f}".format(self.height/1000))
+        # If the height is upward only, add a prefix "U"
+        if self.upward_only:
+            height_prefix = "U"
+            height_fmt = "{:10.3f}"
+        else:
+            height_prefix = ""
+            height_fmt = "{:11.3f}"
+
+        line_entries.append("{:s}{:s}".format(height_prefix, height_fmt.format(self.height/1000)))
 
         if self.number is not None:
             line_entries.append("{:6d}".format(self.number))
@@ -610,7 +727,15 @@ class FragmentationContainer(object):
     def sortByHeight(self):
         """ Sort the fragmentation entries by height, from highest to lowest. """
 
-        self.fragmentation_entries = sorted(self.fragmentation_entries, key=lambda x: x.height, reverse=True)
+        # Sort fragmentations when fireball is going down by decreasing height
+        frags_down = [frag_entry for frag_entry in self.fragmentation_entries if not frag_entry.upward_only]
+        frags_down = sorted(frags_down, key=lambda x: x.height, reverse=True)
+
+        # Sort fragmentations when fireball is going up by increasing height
+        frags_up = [frag_entry for frag_entry in self.fragmentation_entries if frag_entry.upward_only]
+        frags_up = sorted(frags_up, key=lambda x: x.height)
+
+        self.fragmentation_entries = frags_down + frags_up
 
 
     def resetAll(self):
@@ -695,6 +820,9 @@ class FragmentationContainer(object):
 #   - D    - Dust release. Only the grain mass range needs to be specified. A mass index of 2.0 will be assumed if not given.
 #           - REQUIRED: Height, Mass (%), Grain MIN mass, Grain MAX mass.
 #           - Possible: Mass index.
+# 
+# If the character "U" is added before the height (e.g. U92.500), the fragmentation will only be applied when the object is going up.
+# This feature is useful for modelling Earth grazers.
 #
 #                             INPUTS (leave unchanged fields empty)                                      #        OUTPUTS  (do not fill in!)                                  #
 # ------------------------------------------------------------------------------------------------------ # ------------------------------------------------------------------ #
@@ -1288,10 +1416,10 @@ def loadUSGInputFile(dir_path, usg_file):
     data.usg_intensity_data = np.array(data.usg_intensity_data)
 
     # Extract the time
-    data.time_data = data.usg_intensity_data[:,0]
+    data.time_data = data.usg_intensity_data[:, 0]
 
     # Compute the light curve (see Brown et al. 1996, St. Robert paper)
-    data.absolute_magnitudes = -2.5*np.log10(data.usg_intensity_data[:,1]/248)
+    data.absolute_magnitudes = -2.5*np.log10(data.usg_intensity_data[:, 1]/248)
 
     ### ###
 
@@ -1440,6 +1568,50 @@ def loadUSGInputFile(dir_path, usg_file):
     traj.rbeg_jd = data.jd
 
 
+    ### Save the computed trajectory information to a CSV file. Metadata are added in comments (lines ###
+    ### starting  with #)
+
+    # Output file path
+    traj_file_path = os.path.join(dir_path, usg_file.replace('.txt', '') + "_trajectory.csv")
+
+    # Open the output file
+    with open(traj_file_path, 'w') as f:
+
+        # Write the header
+        f.write("# Trajectory data computed from the USG input file.\n")
+        f.write("#\n")
+        f.write("# Reference time (UTC) = {}\n".format(data.dt))
+        f.write("# Reference JD         = {:.6f}\n".format(data.jd))
+        f.write("# Begin point\n")
+        f.write("#     Lat    = {:+11.6f} deg\n".format(np.degrees(rbeg_lat)))
+        f.write("#     Lon    = {:11.6f} deg\n".format(np.degrees(rbeg_lon)))
+        f.write("#     Height = {:8.4f} km\n".format(rbeg_ele/1000))
+        f.write("# End point\n")
+        f.write("#     Lat    = {:+11.6f} deg\n".format(np.degrees(rend_lat)))
+        f.write("#     Lon    = {:11.6f} deg\n".format(np.degrees(rend_lon)))
+        f.write("#     Height = {:8.4f} km\n".format(rend_ele/1000))
+        f.write("# Radiant\n")
+        f.write("#     RA     = {:8.4f} deg\n".format(np.degrees(ra_rad)))
+        f.write("#     Dec    = {:+8.4f} deg\n".format(np.degrees(dec_rad)))
+        f.write("#     Az     = {:8.4f} deg\n".format(data.azimuth))
+        f.write("#     Alt    = {:+8.4f} deg\n".format(data.entry_angle))
+        f.write("#\n")
+        f.write("# Time (s), Ht. (km),  Lat. (deg),  Lon. (deg), AbsMag\n")
+
+        # Write the trajectory data
+        for t, h, lat, lon, mag in zip(time_data, height_data, lat_data, lon_data, abs_mag_data):
+
+            # Skip NaN magnitudes
+            if np.isnan(mag):
+                continue
+
+            f.write("{:10.6f}, {:8.4f}, {:+11.6f}, {:11.6f}, {:+6.2f}\n".format(t, h/1000, np.degrees(lat), np.degrees(lon), mag))
+
+
+    ### ###
+
+
+
     return data, traj
 
 
@@ -1501,8 +1673,8 @@ def loadWakeFile(traj, file_path):
                 traj.jdt_ref, lat_dict[site_id], lon_dict[site_id])
 
             # Compute the station coordinates at the given time
-            stat = geo2Cartesian(lat_dict[site_id], lon_dict[site_id], ele_dict[site_id], \
-                traj.jdt_ref)
+            stat = np.array(geo2Cartesian(lat_dict[site_id], lon_dict[site_id], ele_dict[site_id], \
+                traj.jdt_ref))
 
             # Compute measurement rays in cartesian coordinates
             meas = np.array(raDec2ECI(ra, dec))
@@ -1739,7 +1911,8 @@ def plotWakeOverview(sr, wake_containers, plot_dir, event_name, site_id=None, wa
 
 
 
-def plotObsAndSimComparison(traj, sr, met_obs, plot_dir, wake_containers=None, plot_lag=False, camo=False):
+def plotObsAndSimComparison(traj, sr, ecsv_obs, met_obs, lc_data, plot_dir, 
+                            wake_containers=None, plot_lag=False, camo=False):
     """ Plot a comparison between observed and simulated data. Plot the light curve and velocity comparison
         and wake if given.
 
@@ -1750,7 +1923,9 @@ def plotObsAndSimComparison(traj, sr, met_obs, plot_dir, wake_containers=None, p
     Arguments:
         traj: [Trajectory object] Trajectory object.
         sr: [SimulationResults object] Simulation results.
+        ecsv_obs: [dict] Dictionary of observed data.
         met_obs: [MetObservations object] Meteor observations.
+        lc_data: [dict] Dictionary of additional light curves.
         plot_dir: [str] Path to the directory where the plots will be saved.
 
     Keyword arguments:
@@ -1759,49 +1934,90 @@ def plotObsAndSimComparison(traj, sr, met_obs, plot_dir, wake_containers=None, p
         camo: [bool] Should be True if CAMO mirror tracking data is used and False otherwise.
     """
 
+    # Generate a unique list of station codes using the trajectory and .met file
+    station_codes  = [str(obs.station_id) for obs in traj.observations]
+    
+    if ecsv_obs is not None:
+        station_codes += [str(site) for site in ecsv_obs.sites]
+
+    if met_obs is not None:
+        station_codes += [str(site) for site in met_obs.sites]
+
+    station_codes = list(set(station_codes))
+    
+
+    # Init plot parameters
+    plot_params_dict = {}
+
+    # Add plot parameters for simulated data
+    # Black line for simulated data (no marker)
+    plot_params_dict["sim"] = {"color": "black", "marker": None, "linewidth": 1, "label": "Simulated"}
+
     # Define plot properties for CAMO (wake_containers are given or "camo" is True)
     if (wake_containers is not None) or camo:
 
         # Set the camo varaible to True if any wake is given, so the correct plot parameters are used
         camo = True
 
-        plot_params_dict = {
-            "sites-narrow":
-                {   
-                    # Blue empty circles for Tavistock
-                    "1": {"color": "blue", "marker": "o", "markerfacecolor": "none", "markersize": 5, 
-                          "linestyle": "", "label": "NF - Tavistock"},
-                    # Green empty squares for Elginfield
-                    "2": {"color": "green", "marker": "s", "markerfacecolor": "none", "markersize": 5, 
-                          "linestyle": "", "label": "NF - Elginfield"},
-                },
-            "sites-wide":
+        plot_params_dict["sites-narrow"] = \
+            {   
+                # Blue empty circles for Tavistock
+                "1": {"color": "blue", "marker": "o", "markerfacecolor": "none", "markersize": 5, 
+                        "linestyle": "", "label": "NF - Tavistock"},
+                # Green empty squares for Elginfield
+                "2": {"color": "green", "marker": "s", "markerfacecolor": "none", "markersize": 5, 
+                        "linestyle": "", "label": "NF - Elginfield"},
+            }
+        
+        plot_params_dict["sites-wide"] = \
                 {
                     # Small blue full circles for Tavistock
                     "1": {"color": "blue", "marker": "o", "markersize": 3, 
                           "linestyle": "", "label": "WF - Tavistock"},
+                    "01K": {"color": "blue", "marker": "o", "markersize": 3, 
+                          "linestyle": "", "label": "WF - Tavistock"},
                     # Small green full squares for Elginfield
                     "2": {"color": "green", "marker": "s", "markersize": 3, 
                           "linestyle": "", "label": "WF - Elginfield"},
-                },
-            # Black line for simulated data (no marker)
-            "sim": {"color": "black", "marker": None, "linewidth": 1, "label": "Simulated"}
-        }
+                    "02K": {"color": "green", "marker": "s", "markersize": 3, 
+                          "linestyle": "", "label": "WF - Elginfield"},
+                }
+
+        # If there are other stations than just CAMO (1 and 2), add them to the plot parameters
+        if (len(station_codes) > 2) or ("1" not in station_codes) or ("2" not in station_codes):
+
+            # Generate plot parameters for other stations which are not 1 or 2
+            markers = ["v", "v", "D", "D", "X", "+", "*"]
+            colors = ["red", "orange", "purple", "brown", "pink", "cyan"]
+
+            for i, station_code in enumerate(station_codes):
+
+                # Skip Tavistock and Elginfield
+                if station_code in ["1", "2"]:
+                    continue
+
+                # Get the color
+                color = colors[i%len(colors)]
+
+                # Get the marker
+                marker = markers[i%len(markers)]
+
+                # Alternate between empty and full markers
+                if (i%len(colors) == 0) and (marker not in ["X", "+", "*"]):
+                    markerfacecolor = "none"
+                else:
+                    markerfacecolor = color
+
+                # Define the plot parameters
+                plot_params_dict["sites-wide"][station_code] = {
+                    "color": color, "marker": marker, "markerfacecolor": markerfacecolor,
+                    "markersize": 3, "linestyle": "", "label": station_code
+                }
+
+
 
     # For other data, define different plot parameters
     else:
-        
-        plot_params_dict = {
-            # Black line for simulated data (no marker)
-            "sim": {"color": "black", "marker": None, "linewidth": 1, "label": "Simulated"}
-        }
-
-        # Generate a unique list of station codes using the trajectory and .met file
-        station_codes  = [str(obs.station_id) for obs in traj.observations]
-        if met_obs is not None:
-            station_codes += [str(site) for site in met_obs.sites]
-
-        station_codes = list(set(station_codes))
 
         # For each station, generate plot parameters with a unique color and marker
         markers = ["o", "o", "s", "s", "v", "v", "D", "D", "X", "+", "*"]
@@ -1939,8 +2155,9 @@ def plotObsAndSimComparison(traj, sr, met_obs, plot_dir, wake_containers=None, p
             #                 obs.model_ht[mag_filter]/1000)
 
             # Keep track of the observed magnitude range
-            mag_obs_faintest = max(mag_obs_faintest, np.max(obs.absolute_magnitudes[mag_filter]))
-            mag_obs_brightest = min(mag_obs_brightest, np.min(obs.absolute_magnitudes[mag_filter]))
+            if len(obs.absolute_magnitudes[mag_filter]):
+                mag_obs_faintest = max(mag_obs_faintest, np.max(obs.absolute_magnitudes[mag_filter]))
+                mag_obs_brightest = min(mag_obs_brightest, np.min(obs.absolute_magnitudes[mag_filter]))
 
         # ax_len.scatter(obs.state_vect_dist[mag_filter], obs.model_ht[mag_filter]/1000,
         #   label=obs.station_id)
@@ -1972,14 +2189,53 @@ def plotObsAndSimComparison(traj, sr, met_obs, plot_dir, wake_containers=None, p
             ax_lenres.plot(len_residuals, obs.model_ht[mag_filter]/1000, **plot_params)
 
 
-        # Keep track of the observed height range
-        ht_obs_max = max(ht_obs_max, np.max(obs.model_ht[mag_filter]))
-        ht_obs_min = min(ht_obs_min, np.min(obs.model_ht[mag_filter]))
+        if len(obs.model_ht[mag_filter]):
+            # Keep track of the observed height range
+            ht_obs_max = max(ht_obs_max, np.max(obs.model_ht[mag_filter]))
+            ht_obs_min = min(ht_obs_min, np.min(obs.model_ht[mag_filter]))
 
-        # Keep track of the observed time range
-        time_obs_max = max(time_obs_max, np.max(obs.time_data[mag_filter]))
-        time_obs_min = min(time_obs_min, np.min(obs.time_data[mag_filter]))
+            # Keep track of the observed time range
+            time_obs_max = max(time_obs_max, np.max(obs.time_data[mag_filter]))
+            time_obs_min = min(time_obs_min, np.min(obs.time_data[mag_filter]))
 
+
+    # Compute the magnitude residuals from the ECSV files
+    if ecsv_obs is not None:
+
+        # Plot additional magnitudes for all sites
+        for site in ecsv_obs.sites:
+
+            # Extract data (filter out inf values)
+            height_data = ecsv_obs.height_data[site][~np.isinf(ecsv_obs.abs_mag_data[site])]
+            abs_mag_data = ecsv_obs.abs_mag_data[site][~np.isinf(ecsv_obs.abs_mag_data[site])]
+
+            # # Sample the simulated magnitude at the observation heights
+            # sim_mag_sampled = sim_mag_interp(height_data)
+
+            # Check if the site is in the plot parameters for wide field CAMO
+            if str(site) in plot_params_dict["sites-wide"]:
+                plot_params = plot_params_dict["sites-wide"][str(site)]
+
+            else:
+                plot_params = plot_params_dict[str(site)]
+
+            # Plot the observed and simulated magnitudes
+            ax_mag.plot(abs_mag_data, height_data/1000, **plot_params)
+            # ax_mag.plot(sim_mag_sampled, height_data/1000, **plot_params_dict["sim"])
+
+            # ax_magres.scatter(abs_mag_data - sim_mag_sampled, height_data/1000)
+
+            # Keep track of the observed height range
+            ht_obs_max = max(ht_obs_max, np.max(height_data))
+            ht_obs_min = min(ht_obs_min, np.min(height_data))
+
+            # Keep track of the observed magnitude range
+            mag_obs_faintest = max(mag_obs_faintest, np.max(abs_mag_data))
+            mag_obs_brightest = min(mag_obs_brightest, np.min(abs_mag_data))
+
+            # Keep track of the observed time range
+            time_obs_max = max(time_obs_max, np.max(ecsv_obs.time_data[site]))
+            time_obs_min = min(time_obs_min, np.min(ecsv_obs.time_data[site]))
 
 
     # Compute magnitude residuals from the .met file
@@ -2022,7 +2278,12 @@ def plotObsAndSimComparison(traj, sr, met_obs, plot_dir, wake_containers=None, p
 
             # Select plot parameters for the current station
             if camo:
-                plot_params = plot_params_dict["sites-wide"][str(site)]
+
+                if str(site) in plot_params_dict["sites-wide"]:
+                    plot_params = plot_params_dict["sites-wide"][str(site)]
+                else:
+                    plot_params = plot_params_dict[str(site)]
+
             else:
                 plot_params = plot_params_dict[str(site)]
 
@@ -2043,6 +2304,36 @@ def plotObsAndSimComparison(traj, sr, met_obs, plot_dir, wake_containers=None, p
             # Keep track of the observed time range
             time_obs_max = max(time_obs_max, np.max(met_obs.time_data[site]))
             time_obs_min = min(time_obs_min, np.min(met_obs.time_data[site]))
+
+
+    # Plot additional observations from the light curve CSV file (if available)
+    if lc_data is not None:
+
+        # Plot additional magnitudes for all sites
+        for site in lc_data.sites:
+
+            # Extract data
+            abs_mag_data = lc_data.abs_mag_data[site]
+            height_data = lc_data.height_data[site]/1000
+
+            # self.magnitudePlot.canvas.axes.plot(abs_mag_data, \
+            #     height_data, marker='x', linestyle='dashed', label=str(site), markersize=1, linewidth=1)
+
+            # self.magnitudePlot.canvas.axes.plot(abs_mag_data, \
+            #     height_data, marker='x', linestyle='none', label=str(site), markersize=2, linewidth=1)
+            
+            # Plot the observations
+            ax_mag.plot(abs_mag_data, height_data, marker='x', linestyle='none', label=str(site), 
+                        markersize=2, linewidth=1)
+            
+
+            # Keep track of the observed height range
+            ht_obs_max = max(ht_obs_max, np.max(1000*height_data))
+            ht_obs_min = min(ht_obs_min, np.min(1000*height_data))
+
+            # Keep track of the observed magnitude range
+            mag_obs_faintest = max(mag_obs_faintest, np.max(abs_mag_data))
+            mag_obs_brightest = min(mag_obs_brightest, np.min(abs_mag_data))
 
 
     ### Plot the simulated magnitude ###
@@ -2176,9 +2467,17 @@ def plotObsAndSimComparison(traj, sr, met_obs, plot_dir, wake_containers=None, p
 
         handles.append(mlines.Line2D([0], [0], **plot_params_dict["sim"]))
 
-        if met_obs is not None:
+        if (met_obs is not None) or (ecsv_obs is not None):
+            
+            # Get a list of sites from both the .met and ECSV files
+            site_list = []
+            if met_obs is not None:
+                site_list += list(map(str, met_obs.sites))
+            if ecsv_obs is not None:
+                site_list += list(map(str, ecsv_obs.sites))
+
             for site_id in plot_params_dict["sites-wide"]:
-                if str(site_id) in map(str, met_obs.sites):
+                if str(site_id) in site_list:
                     handles.append(mlines.Line2D([0], [0], **plot_params_dict["sites-wide"][site_id]))
 
         for site_id in plot_params_dict["sites-narrow"]:
@@ -2210,8 +2509,8 @@ def plotObsAndSimComparison(traj, sr, met_obs, plot_dir, wake_containers=None, p
 
 
 class MetSimGUI(QMainWindow):
-    def __init__(self, traj_path, const_json_file=None, met_path=None, lc_path=None, wid_files=None, \
-        usg_input=False):
+    def __init__(self, traj_path, const_json_file=None, ecsv_files=None, met_path=None, lc_path=None, 
+                 wid_files=None, usg_input=False):
         """ GUI tool for MetSim. 
     
         Arguments:
@@ -2219,6 +2518,7 @@ class MetSimGUI(QMainWindow):
 
         Keyword arguments:
             const_json_file: [str] Path to the JSON file with simulation parameters.
+            ecsv_files: [list of str] Paths to the ECSV files with additional light curve data.
             met_path: [str] Path to the METAL or mirfit .met file with additional magnitude or lag information.
             lc_path: [str] Path to the light curve CSV file.
             wid_files: [str] Mirfit wid files containing the meteor wake information.
@@ -2243,6 +2543,24 @@ class MetSimGUI(QMainWindow):
 
         # Extract the directory path
         self.dir_path = os.path.dirname(traj_path)
+
+
+        ### Load data from ECSV files ###
+        
+        self.ecsv_data = None
+        self.ecsv_obs = None
+
+        if ecsv_files is not None:
+
+            # Load the ECSV files
+            self.ecsv_data = loadECSVs(ecsv_files)
+
+            # Init the container for the light curve data
+            self.ecsv_obs = ECSVObservations(self.ecsv_data, self.traj)
+
+        ### ###
+
+        
 
 
         ### LOAD .met FILE ###
@@ -2657,23 +2975,44 @@ class MetSimGUI(QMainWindow):
         # If the magnitudes are given from the met file, use them instead of the trajectory file
         time_mag_arr = []
         avg_t_diff_max = 0
-        if self.met_obs is not None:
+        if (self.met_obs is not None) or (self.ecsv_obs is not None):
 
-            print("Photometric mass computed from the .met file!")
+            if self.met_obs is not None:
 
-            # Extract time vs. magnitudes from the met file
-            for site in self.met_obs.sites:
+                print("Photometric mass computed from the .met file!")
 
-                # Extract data
-                abs_mag_data = self.met_obs.abs_mag_data[site]
-                time_data = self.met_obs.time_data[site]
+                # Extract time vs. magnitudes from the met file
+                for site in self.met_obs.sites:
 
-                # Compute the average time difference
-                avg_t_diff_max = max(avg_t_diff_max, np.median(time_data[1:] - time_data[:-1]))
+                    # Extract data
+                    abs_mag_data = self.met_obs.abs_mag_data[site]
+                    time_data = self.met_obs.time_data[site]
 
-                for t, mag in zip(time_data, abs_mag_data):
-                    if (mag is not None) and (not np.isnan(mag)):
-                        time_mag_arr.append([t, mag])
+                    # Compute the average time difference
+                    avg_t_diff_max = max(avg_t_diff_max, np.median(time_data[1:] - time_data[:-1]))
+
+                    for t, mag in zip(time_data, abs_mag_data):
+                        if (mag is not None) and (not np.isnan(mag)):
+                            time_mag_arr.append([t, mag])
+
+            else:
+                    
+                print("Photometric mass computed from the ECSV file!")
+
+                # Extract time vs. magnitudes from the ECSV file
+                for site in self.ecsv_obs.sites:
+
+                    # Extract data
+                    abs_mag_data = self.ecsv_obs.abs_mag_data[site]
+                    time_data = self.ecsv_obs.time_data[site]
+
+                    # Compute the average time difference
+                    avg_t_diff_max = max(avg_t_diff_max, np.median(time_data[1:] - time_data[:-1]))
+
+                    for t, mag in zip(time_data, abs_mag_data):
+                        if (mag is not None) and (not np.isnan(mag)):
+                            time_mag_arr.append([t, mag])
+
 
         # If the magnitudes are given
         elif self.lc_data is not None:
@@ -2766,6 +3105,7 @@ class MetSimGUI(QMainWindow):
         self.inputMassKill.setText("{:.1e}".format(const.m_kill))
         self.inputVelKill.setText("{:.3f}".format(const.v_kill/1000))
         self.inputHtKill.setText("{:.3f}".format(const.h_kill/1000))
+        self.inputLenKill.setText("{:.1f}".format(const.len_kill/1000))
 
         ### ###
 
@@ -3128,10 +3468,11 @@ class MetSimGUI(QMainWindow):
         self.const.dt = self._tryReadBox(self.inputTimeStep, self.const.dt)
         self.const.P_0m = self._tryReadBox(self.inputP0M, self.const.P_0m)
 
-        self.const.h_init = 1000*self._tryReadBox(self.inputHtInit, self.const.h_init/1000)
-        self.const.m_kill = self._tryReadBox(self.inputMassKill, self.const.m_kill)
-        self.const.v_kill = 1000*self._tryReadBox(self.inputVelKill, self.const.v_kill/1000)
-        self.const.h_kill = 1000*self._tryReadBox(self.inputHtKill, self.const.h_kill/1000)
+        self.const.h_init   = 1000*self._tryReadBox(self.inputHtInit, self.const.h_init/1000)
+        self.const.m_kill   = self._tryReadBox(self.inputMassKill, self.const.m_kill)
+        self.const.v_kill   = 1000*self._tryReadBox(self.inputVelKill, self.const.v_kill/1000)
+        self.const.h_kill   = 1000*self._tryReadBox(self.inputHtKill, self.const.h_kill/1000)
+        self.const.len_kill = 1000*self._tryReadBox(self.inputLenKill, self.const.len_kill/1000)
 
         ### ###
 
@@ -3284,8 +3625,20 @@ class MetSimGUI(QMainWindow):
             plot_beg_ht = max(plot_beg_ht, np.max(height_data))
             plot_end_ht = min(plot_end_ht, np.min(height_data))
 
+        # Track heights of additional observations from the ECSV file (if available)
+        if self.ecsv_obs is not None:
 
-        # Track heihgts of additional observations from the .met file (if available)
+            # Plot additional lags for all sites (plot only mirfit lags)
+            for site in self.ecsv_obs.sites:
+
+                height_data = self.ecsv_obs.height_data[site]/1000
+
+                # Keep track of the height limits
+                plot_beg_ht = max(plot_beg_ht, np.max(height_data))
+                plot_end_ht = min(plot_end_ht, np.min(height_data))
+
+
+        # Track heights of additional observations from the .met file (if available)
         if self.met_obs is not None:
 
             # Plot additional lags for all sites (plot only mirfit lags)
@@ -3460,6 +3813,23 @@ class MetSimGUI(QMainWindow):
             sim_radiated_energy_text = "Radiated energy (sim) = ?"
 
         self.simRadiatedEnergyLabel.setText(sim_radiated_energy_text)
+
+        # Plot additional observations from the ECSV files (if available)
+        if self.ecsv_obs is not None:
+                
+            # Plot additional magnitudes for all sites
+            for site in self.ecsv_obs.sites:
+
+                # Extract data
+                abs_mag_data = self.ecsv_obs.abs_mag_data[site]
+                height_data = self.ecsv_obs.height_data[site]/1000
+
+                self.magnitudePlot.canvas.axes.plot(abs_mag_data, height_data, marker='x', 
+                    linestyle='dashed', label=str(site), markersize=5, linewidth=1)
+
+                # Keep track of the faintest and the brightest magnitude
+                mag_brightest = min(mag_brightest, np.min(abs_mag_data[~np.isinf(abs_mag_data)]))
+                mag_faintest = max(mag_faintest, np.max(abs_mag_data[~np.isinf(abs_mag_data)]))
 
 
         # Plot additional observations from the .met file (if available)
@@ -3967,7 +4337,7 @@ class MetSimGUI(QMainWindow):
 
 
 
-        # Plot additional observations from the .met file (if available)
+        # Plot additional observations from the .met file (if available, only for CAMO)
         if self.met_obs is not None:
 
             # Plot additional lags for all sites (plot only mirfit lags)
@@ -4736,7 +5106,8 @@ class MetSimGUI(QMainWindow):
 
 
             # Plot the comparison between the simulations and observations (excluding the wake)
-            plotObsAndSimComparison(self.traj, self.simulation_results, self.met_obs, self.dir_path, 
+            plotObsAndSimComparison(self.traj, self.simulation_results, self.ecsv_obs, self.met_obs, 
+                                    self.lc_data, self.dir_path, 
                                     wake_containers=None, plot_lag=True, camo=camo)
 
             # Show a message box
@@ -5088,6 +5459,25 @@ class MetSimGUI(QMainWindow):
             temp_arr = temp_arr[~np.isinf(abs_mag_data)]
 
             temp_list.append(temp_arr)
+
+
+        # Add data from the ECSV files (if available)
+        if self.ecsv_obs is not None:
+
+            for site in self.ecsv_obs.sites:
+
+                # Extract data
+                height_data = self.ecsv_obs.height_data[site]
+                abs_mag_data = self.ecsv_obs.abs_mag_data[site]
+                lag_data = self.ecsv_obs.lag_data[site]
+
+
+                temp_arr = np.c_[height_data, abs_mag_data, lag_data]
+
+                # Skip infinite magnitude
+                temp_arr = temp_arr[~np.isinf(abs_mag_data)]
+
+                temp_list.append(temp_arr)
 
 
         # Add data from the met file (if available)
@@ -5611,6 +6001,10 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-m', '--met', metavar='MET_FILE', \
         help='Load additional observations from a METAL or mirfit .met file.', type=str)
+    
+    arg_parser.add_argument('-e', '--ecsv', metavar='ECSV_FILES', \
+        help='Load additional observations from a list of ECSV files. Wildcards can be used, e.g. /path/*.ecsv.', \
+        type=str, nargs='+')
 
     arg_parser.add_argument('-c', '--lc', metavar='LIGHT_CURVE', \
         help="""Additional light curve given in a comma-separated CSV file. The beginning of every station \
@@ -5636,13 +6030,13 @@ if __name__ == "__main__":
         """, type=str)
 
     arg_parser.add_argument('-w', '--wid', metavar='WID_FILES', \
-        help='Load mirfit wid files which will be used for wake plotting. Wildchars can be used, e.g. /path/wid*.txt.', 
+        help='Load mirfit wid files which will be used for wake plotting. Wildcards can be used, e.g. /path/wid*.txt.', 
         type=str, nargs='+')
 
     arg_parser.add_argument('-a', '--all', \
-        help="""Automatically find and load the trajectory pickle file, the metal met file, and the wid \
-        files. Instead of the path to the trajectory pickle file, a path to folders with data files should \
-        be given. For example, if the data is in /home/user/data/20200526_012345_mir and \
+        help="""Automatically find and load the trajectory pickle file, ECSV files, the metal met file, and \
+        the wid files. Instead of the path to the trajectory pickle file, a path to folders with data files \
+        should be given. For example, if the data is in /home/user/data/20200526_012345_mir and \
         /home/user/data/20200526_012345_met, you should call this module as as: \
         python -m wmpl.MetSim.GUI /home/user/data/20200526_012345 --all --load . \
         """, \
@@ -5709,6 +6103,7 @@ if __name__ == "__main__":
     traj_pickle_file = None
     met_file = None
     wid_files = None
+    ecsv_files = None
     if cml_args.all and not cml_args.usg:
 
         # Find all folders that match the given regex
@@ -5752,10 +6147,22 @@ if __name__ == "__main__":
                         met_file = file_path
 
 
+                # Load the ECSV files
+                if file_name.endswith(".ecsv"):
+                    
+                    if ecsv_files is None:
+                        ecsv_files = []
+                    
+                    ecsv_files.append(file_path)
+
+
         # Print notices if certain files were not found
         if traj_pickle_file is None:
             print("No trajectory .pickle files found in the given path: {:s}".format(cml_args.traj_pickle))
             sys.exit()
+
+        if ecsv_files is None:
+            print("No .ecsv files found in {:s}".format(cml_args.traj_pickle))
 
         if met_file is None:
             print("No .met files found in {:s}".format(cml_args.traj_pickle))
@@ -5768,9 +6175,9 @@ if __name__ == "__main__":
 
         # Assign individual files
         traj_pickle_file = os.path.abspath(cml_args.traj_pickle)
+        ecsv_files = cml_args.ecsv
         met_file = cml_args.met
         wid_files = cml_args.wid
-
 
 
     # Handle auto loading fit parameters
@@ -5803,18 +6210,28 @@ if __name__ == "__main__":
         load_file = cml_args.load
 
 
+    print()
     print("Loading trajectory pickle file:")
     print(traj_pickle_file)
 
+    if ecsv_files is not None:
+        print()
+        print("Loading additional magnitudes from ECSV files:")
+        for ecsv_file in ecsv_files:
+            print(ecsv_file)
+
     if met_file is not None:
+        print()
         print("Loading additional magnitudes from .met file:")
         print(met_file)
 
     if cml_args.lc is not None:
+        print()
         print("Loading additional light curve from a light curve CSV file:")
         print(cml_args.lc)
 
     if wid_files is not None:
+        print()
         print("Loading wake data from:")
         for wfile in wid_files:
             print(wfile)
@@ -5826,8 +6243,9 @@ if __name__ == "__main__":
 
 
     # Init the MetSimGUI application
-    main_window = MetSimGUI(traj_pickle_file, const_json_file=load_file, \
-        met_path=met_file, lc_path=cml_args.lc, wid_files=wid_files, usg_input=cml_args.usg)
+    main_window = MetSimGUI(traj_pickle_file, const_json_file=load_file,
+        ecsv_files=ecsv_files, met_path=met_file, lc_path=cml_args.lc, wid_files=wid_files, 
+        usg_input=cml_args.usg)
 
 
     main_window.show()
