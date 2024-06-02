@@ -421,7 +421,7 @@ def calcOrbitalElements(jd_ref, ra_g, dec_g, v_g, eci_ref):
     # print(earth_vel)
 
     # Convert the Earth's position to rectangular equatorial coordinates (FK5)
-    earth_pos_eq = rotateVector(earth_pos, np.array([1, 0, 0]), J2000_OBLIQUITY)
+    earth_pos_eq = rotateVector(earth_pos, np.array([1.0, 0.0, 0.0]), J2000_OBLIQUITY)
 
     # print('Earth position (FK5):')
     # print(earth_pos_eq)
@@ -438,7 +438,7 @@ def calcOrbitalElements(jd_ref, ra_g, dec_g, v_g, eci_ref):
     # print(meteor_pos)
 
     # Convert the position of the trajectory from FK5 to heliocentric ecliptic coordinates
-    meteor_pos = rotateVector(meteor_pos, np.array([1, 0, 0]), -J2000_OBLIQUITY)
+    meteor_pos = rotateVector(meteor_pos, np.array([1.0, 0.0, 0.0]), -J2000_OBLIQUITY)
 
     # print('Meteor position:')
     # print(meteor_pos)

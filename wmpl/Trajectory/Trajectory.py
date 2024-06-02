@@ -35,6 +35,17 @@ from matplotlib.pyplot import cm
 from wmpl.Utils.OSTools import importBasemap
 Basemap = importBasemap()
 
+
+try:
+    # If Numba is available, use the jit decorator with specified options
+    from numba import njit
+
+except ImportError:
+    # If Numba is not available, define a no-op decorator that just returns the function unchanged
+    def njit(func, *args, **kwargs):
+        return func
+    
+
 import wmpl
 from wmpl.Trajectory.Orbit import calcOrbit
 from wmpl.Utils.Math import vectNorm, vectMag, meanAngle, findClosestPoints, RMSD, \
@@ -332,7 +343,9 @@ class ObservedPoints(object):
 
         # Calculate positions of the station in ECI coordinates, for each JD of individual measurements
         # (used for the lines of sight least squares approach)
-        self.stat_eci_los = np.array(geo2Cartesian_vect(self.lat, self.lon, self.ele, self.JD_data)).T
+        self.stat_eci_los = np.ascontiguousarray(
+            np.array(geo2Cartesian_vect(self.lat, self.lon, self.ele, self.JD_data)).T
+            )
 
         # Fit a plane through the given points
         self.plane_N = self.planeFit()
@@ -462,7 +475,7 @@ class ObservedPoints(object):
         self.x_eci, self.y_eci, self.z_eci = self.meas_eci.T
 
         # Calculate measurement ECI coordinates for the line of sight method
-        self.meas_eci_los = np.array(raDec2ECI(self.ra_data_los, self.dec_data_los)).T
+        self.meas_eci_los = np.ascontiguousarray(np.array(raDec2ECI(self.ra_data_los, self.dec_data_los)).T)
         self.x_eci_los, self.y_eci_los, self.z_eci_los = self.meas_eci_los.T
 
 
@@ -762,6 +775,9 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
 
     # Move the state vector to the beginning of the trajectory
     state_vect = moveStateVector(state_vect, radiant_eci, observations)
+
+    # Make sure that the radiant vector is a contigous array for faster calculations
+    radiant_eci = np.ascontiguousarray(radiant_eci)
 
     # Find the earliest point in time
     t0 = min([obs.time_data[0] for obs in observations])
@@ -1236,7 +1252,7 @@ def moveStateVector(state_vect, radiant_eci, observations):
         rad_cpa_beg = rad_cpa_list[np.argmin([rad_ang_dist for rad_ang_dist in radiant_ang_dist_list])]
 
 
-        return rad_cpa_beg
+        return np.ascontiguousarray(rad_cpa_beg)
 
 
 
@@ -2286,7 +2302,7 @@ def copyUncertainties(traj_source, traj_target, copy_mc_traj_instances=False):
 
 
 
-
+@njit
 def applyGravityDrop(eci_coord, t, r0, gravity_factor, vz):
     """ Given the ECI position of the meteor and the duration of flight, this function calculates the
         drop caused by gravity and returns ECI coordinates of the meteor corrected for gravity drop. As
@@ -2302,6 +2318,9 @@ def applyGravityDrop(eci_coord, t, r0, gravity_factor, vz):
 
     """
 
+    # Define the mass of the Earth
+    earth_mass = 5.9722e24 # kg
+
     # Determing the sign of the initial time
     time_sign = np.sign(t)
 
@@ -2309,7 +2328,7 @@ def applyGravityDrop(eci_coord, t, r0, gravity_factor, vz):
     if abs(vz) < 100:
 
         # Calculate gravitational acceleration at given ECI coordinates
-        g = G*EARTH.MASS/r0**2
+        g = G*earth_mass/r0**2
 
         # Calculate the amount of gravity drop from a straight trajectory
         drop = time_sign*(1.0/2)*g*t**2
@@ -2318,7 +2337,7 @@ def applyGravityDrop(eci_coord, t, r0, gravity_factor, vz):
     else:
 
         # Compute the drop using a drop model with a constant vertical velocity
-        drop = time_sign*(G*EARTH.MASS/vz**2)*(r0/(r0 + vz*t) + np.log((r0 + vz*t)/r0) - 1)
+        drop = time_sign*(G*earth_mass/vz**2)*(r0/(r0 + vz*t) + np.log((r0 + vz*t)/r0) - 1)
     
 
     # Apply gravity drop to ECI coordinates
@@ -5388,6 +5407,9 @@ class Trajectory(object):
                     # Only take the common part of the two station names
                     common_name = os.path.commonprefix([obs.station_id, obs2.station_id])
 
+                    # Strip "_" from the end of the common name
+                    common_name = common_name.rstrip("_")
+
                     # Get the difference between the two station names
                     diff1 = obs.station_id[len(common_name):]
                     diff2 = obs2.station_id[len(common_name):]
@@ -5411,8 +5433,7 @@ class Trajectory(object):
 
         # Plot locations of all stations and measured positions of the meteor
         plotted_codes = []
-        for i, obs in enumerate(sorted(self.observations, key=lambda x:x.rbeg_ele, reverse=True)):
-
+        for i, obs in enumerate(sorted(self.observations, key=lambda x:np.min(x.state_vect_dist), reverse=False)):
 
             # Plot measured points
             m.plot(obs.meas_lat[obs.ignore_list == 0], obs.meas_lon[obs.ignore_list == 0], c='r')

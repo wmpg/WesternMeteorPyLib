@@ -150,10 +150,10 @@ def calcEarthRectangularCoordJPL(jd, jpl_data, sun_centre_origin=False):
 
 
     # Rotate the position to the ecliptic reference frame (from the Earth equator reference frame)
-    position = rotateVector(position, np.array([1, 0, 0]), -wmpl.Utils.TrajConversions.J2000_OBLIQUITY)
+    position = rotateVector(position, np.array([1.0, 0.0, 0.0]), -wmpl.Utils.TrajConversions.J2000_OBLIQUITY)
 
     # Rotate the velocity vector to the ecliptic reference frame (from the Earth equator reference frame)
-    velocity = rotateVector(velocity, np.array([1, 0, 0]), -wmpl.Utils.TrajConversions.J2000_OBLIQUITY)
+    velocity = rotateVector(velocity, np.array([1.0, 0.0, 0.0]), -wmpl.Utils.TrajConversions.J2000_OBLIQUITY)
 
     # Return the position and the velocity of the Earth with respect to the Sun
     return position, velocity

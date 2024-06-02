@@ -59,8 +59,18 @@ def loadPickle(dir_path, file_name):
 
         # Check if the pickle file is a trajectory file
         if hasattr(p, 'orbit') and hasattr(p, 'observations'):
+
+            # If there is no orbit object, create one
             if p.orbit is not None:
                 p.orbit.fixMissingParameters()
 
+            # If the gravity factor is missing, add it
+            if not hasattr(p, 'gravity_factor'):
+                p.gravity_factor = 1.0
+
+            # If v0z is missing, add it
+            if not hasattr(p, 'v0z'):
+                p.v0z = 0.0
+                
 
         return p

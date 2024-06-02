@@ -242,7 +242,7 @@ class MetObservations(object):
                 for i, (jd, ra, dec, mag) in enumerate(np.c_[jd_picks, ra_picks, dec_picks, mag_picks]):
 
                     # Compute the station coordinates at the given time
-                    stat = geo2Cartesian(met.lat[site], met.lon[site], met.elev[site], jd)
+                    stat = np.array(geo2Cartesian(met.lat[site], met.lon[site], met.elev[site], jd))
 
                     # Compute measurement rays in cartesian coordinates
                     meas = np.array(raDec2ECI(ra, dec))
@@ -1673,8 +1673,8 @@ def loadWakeFile(traj, file_path):
                 traj.jdt_ref, lat_dict[site_id], lon_dict[site_id])
 
             # Compute the station coordinates at the given time
-            stat = geo2Cartesian(lat_dict[site_id], lon_dict[site_id], ele_dict[site_id], \
-                traj.jdt_ref)
+            stat = np.array(geo2Cartesian(lat_dict[site_id], lon_dict[site_id], ele_dict[site_id], \
+                traj.jdt_ref))
 
             # Compute measurement rays in cartesian coordinates
             meas = np.array(raDec2ECI(ra, dec))
