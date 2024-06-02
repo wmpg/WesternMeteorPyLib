@@ -109,6 +109,12 @@ class TrajectoryReduced(object):
             self.rend_ele = traj.rend_ele
             self.rend_jd = traj.rend_jd
 
+            # Save the gravity factor
+            self.gravity_factor = traj.gravity_factor
+
+            # Save the vertical velocity v0z
+            self.v0z = traj.v0z
+
             # Stations participating in the solution
             self.participating_stations = sorted([obs.station_id for obs in traj.observations \
                 if obs.ignore_station == False])
@@ -494,11 +500,13 @@ class RMSDataHandle(object):
         print("   ... done!")
 
         # Find unprocessed meteor files
+        print()
         print("Finding unprocessed data...")
         self.processing_list = self.findUnprocessedFolders(station_list)
         print("   ... done!")
 
         # Load already computed trajectories
+        print()
         print("Loading already computed trajectories...")
         self.loadComputedTrajectories(os.path.join(self.dir_path, OUTPUT_TRAJ_DIR))
         print("   ... done!")
@@ -532,7 +540,7 @@ class RMSDataHandle(object):
 
         station_list = []
 
-        for dir_name in os.listdir(self.dir_path):
+        for dir_name in sorted(os.listdir(self.dir_path)):
 
             # Check if the dir name matches the station name pattern
             if os.path.isdir(os.path.join(self.dir_path, dir_name)):
@@ -751,7 +759,95 @@ class RMSDataHandle(object):
         self.saveDatabase()
 
         return unpaired_met_obs_list
+    
 
+    def yearMonthDayDirInDtRange(self, dir_name):
+        """ Given a directory name which is either YYYY, YYYYMM or YYYYMMDD, check if it is in the given 
+            datetime range. 
+
+        Arguments:
+            dir_name: [str] Directory name which is either YYYY, YYYYMM or YYYYMMDD.
+
+        Return:
+            [bool] True if the directory is in the datetime range, False otherwise.
+        """
+
+        # If the date range is not given, then skip the directory
+        if self.dt_range is None:
+            return True
+        
+        # Check in which format the directory name is
+        if len(dir_name) == 4:
+            date_fmt = "%Y"
+
+            # Check if the directory name starts with a year
+            if not re.match("^\d{4}", dir_name):
+                return False
+
+        elif len(dir_name) == 6:
+            date_fmt = "%Y%m"
+
+            # Check if the directory name starts with a year and month
+            if not re.match("^\d{6}", dir_name):
+                return False
+
+        elif len(dir_name) == 8:
+            date_fmt = "%Y%m%d"
+
+            # Check if the directory name starts with a year, month and day
+            if not re.match("^\d{8}", dir_name):
+                return False
+
+        else:
+            return False
+        
+        
+        # Make a datetime object from the directory name
+        dt = datetime.datetime.strptime(dir_name, date_fmt)
+
+        dt_beg, dt_end = self.dt_range
+
+
+        # Check if the date time is in the time range
+        if len(dir_name) >= 4:
+
+            # Check if the year is in the range
+            if (dt.year >= dt_beg.year) and (dt.year <= dt_end.year):
+
+                # If the month is also given, check that it's within the range
+                if len(dir_name) >= 6:
+                    
+                    # Construct test datetime objects with the first and last times within the given month
+                    dt_beg_test = datetime.datetime(dt.year, dt.month, 1)
+                    dt_end_test = datetime.datetime(dt.year, dt.month, 1) + datetime.timedelta(days=31)
+
+                    # Check if the month is in the range
+                    if (dt_end_test >= dt_beg) and (dt_beg_test <= dt_end):
+
+                        # If the day is also given, check that it's within the range
+                        if len(dir_name) >= 8:
+
+                            # Construct test datetime objects with the first and last times within the given day
+                            dt_beg_test = datetime.datetime(dt.year, dt.month, dt.day)
+                            dt_end_test = datetime.datetime(dt.year, dt.month, dt.day) + datetime.timedelta(days=1)
+
+                            # Check if the day is in the range
+                            if (dt_end_test >= dt_beg) and (dt_beg_test <= dt_end):
+                                return True
+
+                            else:
+                                return False
+
+                        return True
+                    
+                    else:
+                        return False
+
+                return True
+            
+            else:
+                return False
+            
 
     def trajectoryFileInDtRange(self, file_name):
         """ Check if the trajectory file is in the given datetime range. """
@@ -783,16 +879,61 @@ class RMSDataHandle(object):
             traj_dir_path: [str] Full path to a directory with trajectory pickles.
         """
 
-        # Find and load all trajectory objects
-        for entry in sorted(os.walk(traj_dir_path), key=lambda x: x[0]):
+        print("  Loading trajectories from:", traj_dir_path)
+        print("  Datetime range:", self.dt_range)
 
-            dir_path, _, file_names = entry
+        counter = 0
+
+        # Construct a list of all ddirectory paths to visit. The trajectory directories are sorted in 
+        # YYYY/YYYYMM/YYYYMMDD, so visit them in that order to check if they are in the datetime range
+        dir_paths = []
+
+        # Check the year
+        for yyyy in sorted(os.listdir(traj_dir_path)):
+            
+            if self.yearMonthDayDirInDtRange(yyyy):
+
+                print("- year    ", yyyy)
+                
+                # Check the month
+                for yyyymm in sorted(os.listdir(os.path.join(traj_dir_path, yyyy))):
+
+                    if self.yearMonthDayDirInDtRange(yyyymm):
+
+                        print("  - month ", yyyymm)
+
+                        # Check the day
+                        for yyyymmdd in sorted(os.listdir(os.path.join(traj_dir_path, yyyy, yyyymm))):
+
+                            if self.yearMonthDayDirInDtRange(yyyymmdd):
+
+                                print("    - day ", yyyymmdd)
+
+                                yyyymmdd_dir_path = os.path.join(traj_dir_path, yyyy, yyyymm, yyyymmdd)
+
+                                # Add the directory to the list of directories to visit
+                                if os.path.isdir(yyyymmdd_dir_path) and (not yyyymmdd_dir_path in dir_paths):
+                                    dir_paths.append(yyyymmdd_dir_path)
+
+
+
+        # Find and load all trajectory objects
+        for dir_path in dir_paths:
 
             # Find and load all trajectory pickle files
-            for file_name in file_names:
+            for file_name in sorted(os.listdir(dir_path)):
+
                 if file_name.endswith("_trajectory.pickle"):
+
                     if self.trajectoryFileInDtRange(file_name):
+
                         self.db.addTrajectory(os.path.join(dir_path, file_name))
+
+                        # Print every 1000th trajectory
+                        if counter%1000 == 0:
+                            print("  Loaded {:6d} trajectories, currently on {:s}".format(counter, file_name))
+
+                        counter += 1
 
 
     def getComputedTrajectories(self, jd_beg, jd_end):

@@ -59,6 +59,8 @@ We will now install all needed libraries. With the environment activated as desc
 ```
 conda install -y -c conda-forge numpy scipy matplotlib cython pytz pyqt pandas
 conda install -y -c conda-forge jplephem ephem
+conda install -y -c conda-forge watchdog
+conda install -y -c conda-forge numba
 conda install -y -c conda-forge basemap basemap-data-hires
 ```
 

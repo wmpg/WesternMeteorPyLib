@@ -151,6 +151,46 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0):
 
 
 
+def calcKB(lat, lon, ht_beg, jd, v, zenith_angle, gmn_correction=False):
+    """ Calculate the Celpecha (1958) KB parameter.
+    
+    Arguments:
+        lat: [float] Latitude of the meteor (radians).
+        lon: [float] Longitude of the meteor (radians).
+        ht_beg: [float] Beginning height of the meteor (meters).
+        jd: [float] Julian date of the meteor.
+        v: [float] Velocity of the meteor (m/s).
+        zenith_angle: [float] Zenith angle of the meteor (radians).
+
+    Keyword arguments:
+        gmn_correction: [bool] Apply the correction for GMN data. False by default.
+            The correction is described in:
+            Cordonnier et al. (2024) - Meteor persisent trains
+
+    Return:
+        kb: [float] KB parameter.
+    
+    """
+
+    # Get the atmospheric density at the meteor begin height
+    rho_a = getAtmDensity_vect(lat, lon, ht_beg, jd)
+
+    # Convert atmospheric density from kg/m^3 to g/cm^3
+    rho_a /= 1000.0
+
+    # Convert speed from m/s to cm/s
+    v *= 100.0
+
+    # Calculate the KB parameter
+    kb = np.log10(rho_a) + 2.5*np.log10(v) - 0.5*np.log10(np.cos(zenith_angle))
+
+    # Apply the GMN correction
+    if gmn_correction:
+        kb -= 0.1
+
+    return kb
+
+
 
 if __name__ == "__main__":
 
@@ -166,3 +206,15 @@ if __name__ == "__main__":
     velocity = 41500 #m/s
 
     print('Dynamic pressure:', dynamicPressure(lat, lon, height, jd, velocity), 'Pa')
+
+
+
+    # Test the KB function using an example GMN meteor (lambda-Sculptorid at  2023-12-12 12:46:23.484238)
+    lat = np.radians(-30.904705)
+    lon = np.radians(115.970139)
+    ht_beg = 92.8401 # km
+    jd = 2460291.03221625
+    v_init = 14.70719 # km/s
+    zenith_angle = np.radians(90 - 75.07381)
+
+    print('KB:', calcKB(lat, lon, ht_beg*1000, jd, v_init*1000, zenith_angle, gmn_correction=True))

@@ -9,9 +9,8 @@ import numpy as np
 
 from jplephem.spk import SPK
 
-
+import wmpl
 from wmpl.Config import config
-
 from wmpl.Utils.Earth import calcEarthRectangularCoordJPL
 from wmpl.Utils.ShowerAssociation import associateShower
 from wmpl.Utils.SolarLongitude import jd2SolLonJPL
@@ -92,6 +91,7 @@ class Orbit(object):
 
         # Height of the reference point on the trajectory (meters)
         self.ht_ref = None
+        self.ht_ref_wgs84 = None
 
         # Geocentric latitude of the reference point on the trajectory (rad)
         self.lat_geocentric = None
@@ -421,7 +421,7 @@ def calcOrbitalElements(jd_ref, ra_g, dec_g, v_g, eci_ref):
     # print(earth_vel)
 
     # Convert the Earth's position to rectangular equatorial coordinates (FK5)
-    earth_pos_eq = rotateVector(earth_pos, np.array([1, 0, 0]), J2000_OBLIQUITY)
+    earth_pos_eq = rotateVector(earth_pos, np.array([1.0, 0.0, 0.0]), J2000_OBLIQUITY)
 
     # print('Earth position (FK5):')
     # print(earth_pos_eq)
@@ -438,7 +438,7 @@ def calcOrbitalElements(jd_ref, ra_g, dec_g, v_g, eci_ref):
     # print(meteor_pos)
 
     # Convert the position of the trajectory from FK5 to heliocentric ecliptic coordinates
-    meteor_pos = rotateVector(meteor_pos, np.array([1, 0, 0]), -J2000_OBLIQUITY)
+    meteor_pos = rotateVector(meteor_pos, np.array([1.0, 0.0, 0.0]), -J2000_OBLIQUITY)
 
     # print('Meteor position:')
     # print(meteor_pos)
@@ -794,6 +794,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
     orb.lon_ref = lon_ref
     orb.lat_ref = lat_ref
     orb.ht_ref = ht_ref
+    orb.ht_ref_wgs84 = wmpl.Utils.GeoidHeightEGM96.mslToWGS84Height(orb.lat_ref, orb.lon_ref, orb.ht_ref)
     orb.lat_geocentric = lat_geocentric
 
     # Assume that the velocity in infinity is the same as the initial velocity (after rotation correction, if
