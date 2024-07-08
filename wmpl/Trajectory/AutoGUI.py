@@ -337,7 +337,10 @@ class FileMonitorApp(QMainWindow):
 
         # Clear previously highlighted points
         for point in self.highlighted_points:
-            point.remove()
+
+            if point in self.ax_res.collections:
+                point.remove()
+
         self.highlighted_points.clear()
 
 
@@ -479,7 +482,9 @@ class FileMonitorApp(QMainWindow):
 
         if self.traj is not None:
             print("Saving all plots...")
+            self.traj.save_results = True
             self.traj.savePlots(self.traj.output_dir, self.traj.file_name, show_plots=False, ret_figs=False)
+            self.traj.save_results = False
             print("   Done!")
 
 
