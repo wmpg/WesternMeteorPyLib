@@ -96,6 +96,15 @@ class FileMonitorApp(QMainWindow):
         self.initObserver()
 
 
+    def initPlot(self):
+        """ Initialize the plot in matplotlib. """
+
+        self.figure, (
+            (self.ax_res, self.ax_mag), (self.ax_lag, self.ax_vel)
+            ) = plt.subplots(
+            nrows=2, ncols=2, dpi=150, figsize=(10, 5)
+            )
+
     def initUI(self):
 
         self.central_widget = QWidget()
@@ -127,7 +136,7 @@ class FileMonitorApp(QMainWindow):
         layout.addWidget(self.status_bar)
 
         # Add a canvas for the plot
-        self.figure, ((self.ax_res, self.ax_mag), (self.ax_lag, self.ax_vel)) = plt.subplots(nrows=2, ncols=2, dpi=150, figsize=(10, 5))
+        self.initPlot()
         self.canvas = FigureCanvas(self.figure)
         layout.addWidget(self.canvas)
 
@@ -150,8 +159,8 @@ class FileMonitorApp(QMainWindow):
 
         # Initial window positioning (temporary values)
         screen = QApplication.primaryScreen().geometry()
-        initial_width = screen.width() // 2  # Half the screen width
-        initial_height = screen.height()*0.9     # Full screen height (minus the taskbar)
+        initial_width = screen.width()// 2     # Half the screen width
+        initial_height = screen.height()*0.9   # Full screen height (minus the taskbar)
         initial_left = screen.width() - initial_width  # Right aligned
 
         self.setGeometry(int(initial_left), int(50), int(initial_width), int(initial_height))
@@ -481,15 +490,27 @@ class FileMonitorApp(QMainWindow):
         """ Save individual plots to disk. """
 
         if self.traj is not None:
+
+            # Clear the plot so the individual plots can be made
+            plt.clf()
+            plt.close()
+
             print("Saving all plots...")
             self.traj.save_results = True
             self.traj.savePlots(self.traj.output_dir, self.traj.file_name, show_plots=False, ret_figs=False)
             self.traj.save_results = False
             print("   Done!")
 
+            # Refresh the plot
+            self.initUI()
+            self.updatePlot()
+
+
+
 
 
     def updatePlot(self):
+        """ Update the plot with the new trajectory data. """
 
         # Clear all axes
         self.ax_res.clear()
@@ -758,7 +779,6 @@ class FileMonitorApp(QMainWindow):
         self.figure.canvas.mpl_connect('button_press_event', self.onClick)
 
         self.canvas.draw()
-
 
     def closeEvent(self, event):
         """ Override closeEvent to prompt for saving and then handle application exit. """
