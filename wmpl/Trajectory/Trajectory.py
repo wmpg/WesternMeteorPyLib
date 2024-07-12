@@ -812,7 +812,15 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
                 # Compute the model point modified due to gravity, assuming zero vertical velocity
                 if v0z is None:
                     v0z = 0.0
-                rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, vectMag(rad_cpa), gravity_factor, v0z)
+
+                # Get the magnitude of the radiant vector
+                rad_cpa_mag = vectMag(rad_cpa)
+
+                # If the magnitude is 0, set it to 1 to avoid a division by zero issue
+                if rad_cpa_mag == 0:
+                    rad_cpa_mag = 1.0
+
+                rad_cpa_grav = applyGravityDrop(rad_cpa, t_rel, rad_cpa_mag, gravity_factor, v0z)
                 _, rad_cpa, _ = findClosestPoints(stat_eci, meas_eci, rad_cpa_grav, radiant_eci)
 
 
