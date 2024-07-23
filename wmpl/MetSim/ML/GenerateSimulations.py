@@ -86,7 +86,7 @@ class ErosionSimParametersCAMO(object):
 
 
         # Power of a zero-magnitude meteor (Watts)
-        self.P_0M = 840
+        self.P_0m = 840
 
         # System FPS
         self.fps = 80
@@ -235,7 +235,7 @@ class ErosionSimParametersCAMOWide(object):
 
 
         # Power of a zero-magnitude meteor (Watts)
-        self.P_0M = 840
+        self.P_0m = 840
 
         # System FPS
         self.fps = 80
@@ -390,7 +390,7 @@ class ErosionSimContainer(object):
         # Init simulation constants
         self.const = Constants()
         self.const.dens_co = self.params.dens_co
-        self.const.P_0M = self.params.P_0M
+        self.const.P_0m = self.params.P_0m
 
         # Set tau to CAMO faint meteor model
         self.const.lum_eff_type = 5
@@ -409,7 +409,7 @@ class ErosionSimContainer(object):
         else:
             local_state = np.random.RandomState()
 
-        # Randomly sample physical parameters
+        # Randomly sample physical parameters 
         for param_name in self.params.param_list:
 
             # Get the parameter container
@@ -426,11 +426,22 @@ class ErosionSimContainer(object):
 
                 p.val = 10**(local_state.uniform(np.log10(p.min), np.log10(p.max)))
 
-            # Generate meteoroid masses distributed according to a power-law
-            elif param_name == "m_init":
+            # # Generate meteoroid masses distributed according to a power-law
+            # elif param_name == "m_init":
                 
-                # Use a sampling mass index of 2
-                p.val = samplePowerLaw(-2.0, p.min, p.max)
+            #     # # Use a sampling mass index of 2
+            #     p.val = samplePowerLaw(-2.0, p.min, p.max)
+            #     # # p.val = samplePowerLaw(-1.1, p.min, p.max)
+            #     # # p.val = np.random.uniform(p.min, p.max)
+            #     # # p.val = local_state.uniform(p.min, p.max)
+
+            # Generate meteoroid v_init distributed according to a gaussian-law with their p.min, p.max at 5 sigman
+            elif param_name == 'v_init' or param_name == 'zenith_angle':
+                mean = (p.min + p.max) / 2
+                std_dev = (p.max - p.min) / 10  # Ensure the range covers ±5 sigma
+
+                # Sample a value from the Gaussian distribution
+                p.val = local_state.normal(mean, std_dev)
 
             # b) Distribute all other values uniformely
             else:
@@ -564,8 +575,10 @@ class ErosionSimContainer(object):
         self.ht_sampled = None
         self.len_sampled = None
         self.mag_sampled = None
+        self.vel_sampled = None
+        self.lag_sampled = None
         if res is not None:
-            _, self.time_sampled, self.ht_sampled, self.len_sampled, self.mag_sampled, _, \
+            _, self.time_sampled, self.ht_sampled, self.len_sampled, self.mag_sampled, self.vel_sampled, self.lag_sampled, _, \
                 _ = extractSimData(self, min_frames_visible=min_frames_visible, check_only=False, 
                                    param_class=self.params.__class__)
 
@@ -574,45 +587,50 @@ class ErosionSimContainer(object):
             self.ht_sampled = self.ht_sampled.tolist()
             self.len_sampled = self.len_sampled.tolist()
             self.mag_sampled = self.mag_sampled.tolist()
+            self.vel_sampled = self.vel_sampled.tolist()
+            self.lag_sampled = self.lag_sampled.tolist()
 
 
-        ### Sort saved files into a directory structure split by velocity and density ###
+            ### Sort saved files into a directory structure split by velocity and density ###
 
-        # Extract the velocity part
-        split_file = self.file_name.split("_")
-        vel = float(split_file[2].strip("v"))
+            # Extract the velocity part
+            split_file = self.file_name.split("_")
+            vel = float(split_file[2].strip("v"))
 
-        # Make velocity folder name
-        vel_folder = "v{:02d}".format(int(vel))
-        vel_folder_path = os.path.join(self.output_dir, vel_folder)
+            # Make velocity folder name
+            vel_folder = "v{:02d}".format(int(vel))
+            vel_folder_path = os.path.join(self.output_dir, vel_folder)
 
-        # Create the velocity folder if it doesn't already exist
-        if not os.path.isdir(vel_folder_path):
-            os.makedirs(vel_folder_path)
-
-
-        # Extract the density part
-        dens = 100*int(float(split_file[4].strip("rho"))/100)
-
-        # Make density folder name
-        dens_folder = "rho{:04d}".format(dens)
-        dens_folder_path = os.path.join(vel_folder_path, dens_folder)
-
-        # Make the density folder
-        if not os.path.isdir(dens_folder_path):
-            os.makedirs(dens_folder_path)
+            # Create the velocity folder if it doesn't already exist
+            if not os.path.isdir(vel_folder_path):
+                os.makedirs(vel_folder_path)
 
 
-        ###
+            # Extract the density part
+            dens = 100*int(float(split_file[4].strip("rho"))/100)
+
+            # Make density folder name
+            dens_folder = "rho{:04d}".format(dens)
+            dens_folder_path = os.path.join(vel_folder_path, dens_folder)
+
+            # Make the density folder
+            if not os.path.isdir(dens_folder_path):
+                os.makedirs(dens_folder_path)
 
 
-        # Save results as a JSON file
-        self.saveJSON(dens_folder_path)
+            ### 
 
-        # Save results as a pickle file
-        savePickle(self, dens_folder_path, self.file_name + ".pickle")
+        
+            # Save results as a JSON file
+            self.saveJSON(dens_folder_path)
 
-        return os.path.join(dens_folder_path, self.file_name + ".pickle")
+            # Save results as a pickle file
+            savePickle(self, dens_folder_path, self.file_name + ".pickle")
+
+            return os.path.join(dens_folder_path, self.file_name + ".pickle")
+        else:
+            return None
+
 
 
 
@@ -667,6 +685,7 @@ def extractSimData(sim, min_frames_visible=MIN_FRAMES_VISIBLE, check_only=False,
 
         # Draw limiting magnitude and length end magnitude
         lim_mag     = np.random.uniform(params.lim_mag_brightest, params.lim_mag_faintest)
+
         lim_mag_len = np.random.uniform(params.lim_mag_len_end_brightest, params.lim_mag_len_end_faintest)
 
         # Draw the length delay
@@ -675,8 +694,8 @@ def extractSimData(sim, min_frames_visible=MIN_FRAMES_VISIBLE, check_only=False,
         postprocess_params = [lim_mag, lim_mag_len, len_delay]
 
 
-    lim_mag_faintest  = np.max([lim_mag, lim_mag_len])
-    lim_mag_brightest = np.min([lim_mag, lim_mag_len])
+    # lim_mag_faintest  = np.max([lim_mag, lim_mag_len])
+    # lim_mag_brightest = np.min([lim_mag, lim_mag_len])
 
     ### ###
 
@@ -684,9 +703,11 @@ def extractSimData(sim, min_frames_visible=MIN_FRAMES_VISIBLE, check_only=False,
     sim.simulation_results.abs_magnitude[np.isnan(sim.simulation_results.abs_magnitude)] \
         = np.nanmax(sim.simulation_results.abs_magnitude)
 
-
     # Get indices that are above the faintest limiting magnitude
-    indices_visible = sim.simulation_results.abs_magnitude <= lim_mag_faintest
+    # indices_visible = sim.simulation_results.abs_magnitude <= lim_mag_faintest
+
+    # define the indices that are smller than the lim_mag
+    indices_visible = sim.simulation_results.abs_magnitude <= params.lim_mag_faintest
 
     # If no points were visible, skip this solution
     if not np.any(indices_visible):
@@ -695,17 +716,33 @@ def extractSimData(sim, min_frames_visible=MIN_FRAMES_VISIBLE, check_only=False,
     ### CHECK METEOR VISIBILITY WITH THE BRIGTHER (DETECTION) LIMITING MAGNITUDE ###
     ###     (in the CAMO widefield camera)                                       ###
 
-    # Get indices of magnitudes above the brighter limiting magnitude
-    indices_visible_brighter = sim.simulation_results.abs_magnitude >= lim_mag_brightest
+    # # Get indices of magnitudes above the brighter limiting magnitude
+    # indices_visible_brighter = sim.simulation_results.abs_magnitude <= lim_mag_brightest
+
+    # define the indices that are smaller than the lim_mag_len
+    indices_visible_brighter = sim.simulation_results.abs_magnitude <= lim_mag_len
 
     # If no points were visible, skip this solution
     if not np.any(indices_visible_brighter):
         return None
+    
+    # Find the first index of indices_visible
+    first_visible_index = np.where(indices_visible)[0][0]
+
+    # Find the last index of indices_visible_brighter
+    last_visible_brighter_index = np.where(indices_visible_brighter)[0][-1]
+
+    # randomly chose between first_visible_index and first_visible_index-1
+    first_visible_index = np.random.choice([first_visible_index, first_visible_index-1])
+    # Create a mask that includes all points between the first and last indices
+    indices_range = np.arange(first_visible_index, last_visible_brighter_index + 1)
+    indices_visible = np.zeros_like(indices_visible, dtype=bool)
+    indices_visible[indices_range] = True
 
     # Compute the minimum time the meteor needs to be visible
     min_time_visible = min_frames_visible/params.fps + len_delay
 
-    time_lim_mag_bright  = sim.simulation_results.time_arr[indices_visible_brighter]
+    time_lim_mag_bright  = sim.simulation_results.time_arr[indices_visible]
     time_lim_mag_bright -= time_lim_mag_bright[0]
 
     # Check if the minimum time is satisfied
@@ -714,24 +751,28 @@ def extractSimData(sim, min_frames_visible=MIN_FRAMES_VISIBLE, check_only=False,
 
     ### ###
 
-    # Get the first index after the magnitude reaches visibility in the wide field
-    index_first_visibility = np.argwhere(indices_visible_brighter)[0][0]
+    # # Get the first index after the magnitude reaches visibility
+    # index_first_visibility = np.argwhere(indices_visible)[0][0]
 
-    # Set all visibility indices before the first one visible in the wide field to False
-    indices_visible[:index_first_visibility] = False
+    # # Set all visibility indices before the first one visible to False
+    # indices_visible[:index_first_visibility] = False
 
 
     # Select time, magnitude, height, and length above the visibility limit
     time_visible = sim.simulation_results.time_arr[indices_visible]
     mag_visible  = sim.simulation_results.abs_magnitude[indices_visible]
-    ht_visible   = sim.simulation_results.leading_frag_height_arr[indices_visible]
-    len_visible  = sim.simulation_results.leading_frag_length_arr[indices_visible]
+    ht_visible   = sim.simulation_results.brightest_height_arr[indices_visible]
+    len_visible  = sim.simulation_results.brightest_length_arr[indices_visible]
+    vel_visible  = sim.simulation_results.leading_frag_vel_arr[indices_visible]
+    # print('-------------------')
+    # print("mag_visible", mag_visible[-1])
 
 
     # Resample the time to the system FPS
     mag_interpol = scipy.interpolate.CubicSpline(time_visible, mag_visible)
     ht_interpol  = scipy.interpolate.CubicSpline(time_visible, ht_visible)
     len_interpol = scipy.interpolate.CubicSpline(time_visible, len_visible)
+    vel_interpol = scipy.interpolate.CubicSpline(time_visible, vel_visible)
 
     # Sample the time according to the FPS from one camera
     time_sampled_cam1 = np.arange(np.min(time_visible), np.max(time_visible), 1.0/params.fps)
@@ -751,16 +792,43 @@ def extractSimData(sim, min_frames_visible=MIN_FRAMES_VISIBLE, check_only=False,
     # Cut the time array to the length of the visible data
     time_sampled_cam2 = time_sampled_cam2[(time_sampled_cam2 >= np.min(time_visible)) 
                                           & (time_sampled_cam2 <= np.max(time_visible))]
-    
+
     # Combine the two camera time arrays
     time_sampled = np.sort(np.concatenate([time_sampled_cam1, time_sampled_cam2]))
-
 
     # Create new mag, height and length arrays at FPS frequency
     mag_sampled = mag_interpol(time_sampled)
     ht_sampled = ht_interpol(time_sampled)
     len_sampled = len_interpol(time_sampled)
+    vel_sampled = vel_interpol(time_sampled)
 
+    # print("mag_sampled", mag_sampled[-1])
+
+    # check if the last value in mag_sampled is smaller than params.lim_mag_len_end_brightest then add an other time_sampled[-1]+1.0/params.fps
+    mag_diff=(mag_sampled[-1]-params.lim_mag_len_end_brightest)
+    # check if the difference is negative or positive
+    if mag_diff < 0:
+        time_sampled_temp = np.append(time_sampled, time_sampled[-1]+1.0/params.fps)
+        mag_sampled_temp = mag_interpol(time_sampled_temp)
+        if abs(mag_diff)>abs(mag_sampled_temp[-1]-params.lim_mag_len_end_brightest):
+            time_sampled = time_sampled_temp
+            mag_sampled = mag_sampled_temp
+            ht_sampled = ht_interpol(time_sampled)
+            len_sampled = len_interpol(time_sampled)
+            vel_sampled = vel_interpol(time_sampled) 
+            
+    elif mag_diff > 0:
+        time_sampled_temp = time_sampled[:-1]
+        mag_sampled_temp = mag_interpol(time_sampled_temp)
+        if abs(mag_diff)>abs(mag_sampled_temp[-1]-params.lim_mag_len_end_brightest): #lim_mag_len_end_faintest
+            time_sampled = time_sampled_temp
+            mag_sampled = mag_sampled_temp
+            ht_sampled = ht_interpol(time_sampled)
+            len_sampled = len_interpol(time_sampled)
+            vel_sampled = vel_interpol(time_sampled)
+
+    # print("NEW")
+    # print("mag_sampled NEW: ", mag_sampled[-1])
 
     # Normalize time to zero
     time_sampled -= time_sampled[0]
@@ -774,8 +842,9 @@ def extractSimData(sim, min_frames_visible=MIN_FRAMES_VISIBLE, check_only=False,
 
     ###
 
-    # Set all magnitudes below the brightest limiting magnitude to the faintest magnitude
-    mag_sampled[mag_sampled > lim_mag] = params.lim_mag_len_end_faintest
+    #############WRONG################
+    # # Set all magnitudes below the brightest limiting magnitude to the faintest magnitude
+    # mag_sampled[mag_sampled > lim_mag] = params.lim_mag_len_end_faintest
 
 
     # Normalize the first length to zero
@@ -841,9 +910,21 @@ def extractSimData(sim, min_frames_visible=MIN_FRAMES_VISIBLE, check_only=False,
         padOrTruncate(len_normed, params.data_length), \
         padOrTruncate(mag_normed, params.data_length)])
 
+    lag_sampled=len_sampled-(vel_sampled[0]*time_sampled+len_sampled[0])
+
+    # get the new velocity with noise
+    for vel_ii in range(1,len(time_sampled)):
+        if time_sampled[vel_ii]-time_sampled[vel_ii-1]<1.0/params.fps:
+        # if time_sampled[vel_ii] % 0.03125 < 0.000000001:
+            if vel_ii+1<len(len_sampled):
+                vel_sampled[vel_ii+1]=(len_sampled[vel_ii+1]-len_sampled[vel_ii-1])/(time_sampled[vel_ii+1]-time_sampled[vel_ii-1])
+        else:
+            vel_sampled[vel_ii]=(len_sampled[vel_ii]-len_sampled[vel_ii-1])/(time_sampled[vel_ii]-time_sampled[vel_ii-1])
+    
 
     # Return input data and results
-    return params, time_sampled, ht_sampled, len_sampled, mag_sampled, input_data_normed, simulated_data_normed
+    return params, time_sampled, ht_sampled, len_sampled, mag_sampled, vel_sampled, lag_sampled, input_data_normed, simulated_data_normed
+
 
 
 
@@ -855,6 +936,18 @@ def generateErosionSim(output_dir, erosion_sim_params, random_seed, min_frames_v
     erosion_cont = ErosionSimContainer(output_dir, copy.deepcopy(erosion_sim_params), random_seed=random_seed)
     file_name = erosion_cont.file_name
     print("Running:", erosion_cont.file_name)
+
+    # check if among there is a value called real_duration
+    if hasattr(erosion_sim_params, "real_duration"):
+        erosion_cont.real_duration=erosion_sim_params.real_duration
+        erosion_cont.real_peak_abs_mag=erosion_sim_params.real_peak_abs_mag
+        erosion_cont.real_peak_mag_height=erosion_sim_params.real_peak_mag_height
+        erosion_cont.real_begin_height=erosion_sim_params.real_begin_height
+        erosion_cont.real_end_height=erosion_sim_params.real_end_height
+
+    else:
+        # print all the names of the variable names in params
+        print("No real params among: ", erosion_sim_params.__dict__.keys())
 
     # Run the simulation and save results
     file_path = erosion_cont.runSimulation(min_frames_visible=min_frames_visible)
