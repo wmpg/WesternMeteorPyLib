@@ -2915,8 +2915,18 @@ class MetSimGUI(QMainWindow):
         else:
 
             # Compute the radius of the Earth at the latitude of the observer
-            self.const.r_earth = \
-                EARTH.EQUATORIAL_RADIUS/np.sqrt(1.0 - (EARTH.E**2)*np.sin(self.traj.rbeg_lat)**2)
+            a = EARTH.EQUATORIAL_RADIUS
+            b = EARTH.POLAR_RADIUS
+            lat = self.traj.rbeg_lat
+            self.const.r_earth = np.sqrt(
+                (
+                    (np.cos(lat)*a**2)**2 + (np.sin(lat)*b**2)**2
+                ) /
+                (
+                    (np.cos(lat)*a)**2 + (np.sin(lat)*b)**2
+                )
+            )
+            
 
             # Set the constants value from the trajectory
             self.const.v_init = self.traj.orbit.v_init
