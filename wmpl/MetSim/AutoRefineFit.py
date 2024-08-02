@@ -221,7 +221,8 @@ def costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False):
 
         plt.tight_layout()
         ax_mag.legend()
-        plt.show()
+        # plt.show()
+        plt.close()
 
 
     return mag_res, len_res, cost
@@ -968,6 +969,7 @@ if __name__ == "__main__":
     plt.tight_layout()
     plt.subplots_adjust(wspace=0.00)
     
-    plt.show()
+    # plt.show()
+    plt.close()
 
     ### ###
