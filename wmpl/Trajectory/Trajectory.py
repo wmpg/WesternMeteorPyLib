@@ -2332,6 +2332,10 @@ def applyGravityDrop(eci_coord, t, r0, gravity_factor, vz):
     # The derived drop function does not work for small vz's, thus the classical drop function is used
     if abs(vz) < 100:
 
+        # Make sure r0 is not 0
+        if r0 == 0:
+            r0 = 1e-10
+
         # Calculate gravitational acceleration at given ECI coordinates
         g = G*earth_mass/r0**2
 
@@ -2341,8 +2345,16 @@ def applyGravityDrop(eci_coord, t, r0, gravity_factor, vz):
 
     else:
 
+        if r0 == 0:
+            r0 = 1e-10
+
+        # Compute the denominator to check it's not 0
+        denominator = r0 + vz*t
+        if denominator == 0:
+            denominator = 1e-10
+
         # Compute the drop using a drop model with a constant vertical velocity
-        drop = time_sign*(G*earth_mass/vz**2)*(r0/(r0 + vz*t) + np.log((r0 + vz*t)/r0) - 1)
+        drop = time_sign*(G*earth_mass/vz**2)*(r0/denominator + np.log(denominator/r0) - 1)
     
 
     # Apply gravity drop to ECI coordinates
