@@ -5373,130 +5373,131 @@ class Trajectory(object):
 
 
         ### Plot lat/lon of the meteor ###
-            
-        # Calculate mean latitude and longitude of all meteor points
-        met_lon_mean = meanAngle([x for x in obs.meas_lon for obs in self.observations])
-        met_lat_mean = meanAngle([x for x in obs.meas_lat for obs in self.observations])
+        try:    
+            # Calculate mean latitude and longitude of all meteor points
+            met_lon_mean = meanAngle([x for x in obs.meas_lon for obs in self.observations])
+            met_lat_mean = meanAngle([x for x in obs.meas_lat for obs in self.observations])
 
 
-        # Put coordinates of all sites and the meteor in the one list
-        lat_list = [obs.lat for obs in self.observations]
-        lat_list.append(met_lat_mean)
-        lon_list = [obs.lon for obs in self.observations]
-        lon_list.append(met_lon_mean)
+            # Put coordinates of all sites and the meteor in the one list
+            lat_list = [obs.lat for obs in self.observations]
+            lat_list.append(met_lat_mean)
+            lon_list = [obs.lon for obs in self.observations]
+            lon_list.append(met_lon_mean)
 
-        # Put edge points of the meteor in the list
-        lat_list.append(self.rbeg_lat)
-        lon_list.append(self.rbeg_lon)
-        lat_list.append(self.rend_lat)
-        lon_list.append(self.rend_lon)
-        lat_list.append(self.orbit.lat_ref)
-        lon_list.append(self.orbit.lon_ref)
-
-
-        # Init the map
-        m = GroundMap(lat_list, lon_list, border_size=50, color_scheme='light')
+            # Put edge points of the meteor in the list
+            lat_list.append(self.rbeg_lat)
+            lon_list.append(self.rbeg_lon)
+            lat_list.append(self.rend_lat)
+            lon_list.append(self.rend_lon)
+            lat_list.append(self.orbit.lat_ref)
+            lon_list.append(self.orbit.lon_ref)
 
 
-        # Create a list of unique stations names, such that if there are multiple stations with identical
-        # coordinates but only differ in the suffix, they will be plotted as one station
-        station_name_mapping = {}
-        for i, obs in enumerate(self.observations):
+            # Init the map
+            m = GroundMap(lat_list, lon_list, border_size=50, color_scheme='light')
 
-            # If the station is already in the mapping, skip it
-            if obs.station_id in station_name_mapping:
-                continue
 
-            # Check if there are duplicate coordinates
-            for obs2 in self.observations[i+1:]:
+            # Create a list of unique stations names, such that if there are multiple stations with identical
+            # coordinates but only differ in the suffix, they will be plotted as one station
+            station_name_mapping = {}
+            for i, obs in enumerate(self.observations):
 
-                if (obs.lat == obs2.lat) and (obs.lon == obs2.lon):
+                # If the station is already in the mapping, skip it
+                if obs.station_id in station_name_mapping:
+                    continue
 
-                    # Only take the common part of the two station names
-                    common_name = os.path.commonprefix([obs.station_id, obs2.station_id])
+                # Check if there are duplicate coordinates
+                for obs2 in self.observations[i+1:]:
 
-                    # Strip "_" from the end of the common name
-                    common_name = common_name.rstrip("_")
+                    if (obs.lat == obs2.lat) and (obs.lon == obs2.lon):
 
-                    # Get the difference between the two station names
-                    diff1 = obs.station_id[len(common_name):]
-                    diff2 = obs2.station_id[len(common_name):]
+                        # Only take the common part of the two station names
+                        common_name = os.path.commonprefix([obs.station_id, obs2.station_id])
 
-                    # If the difference is e.g. _1, _2, _3, etc., it is a suffix
-                    # Strip out _
-                    # This will catch duplicates such as USL00N and USL00N_2
-                    if (str(diff1).startswith("_") or str(diff2).startswith("_")) \
-                        and ((diff1.strip("_").isdigit()) or (diff2.strip("_").isdigit())):
+                        # Strip "_" from the end of the common name
+                        common_name = common_name.rstrip("_")
+
+                        # Get the difference between the two station names
+                        diff1 = obs.station_id[len(common_name):]
+                        diff2 = obs2.station_id[len(common_name):]
+
+                        # If the difference is e.g. _1, _2, _3, etc., it is a suffix
+                        # Strip out _
+                        # This will catch duplicates such as USL00N and USL00N_2
+                        if (str(diff1).startswith("_") or str(diff2).startswith("_")) \
+                            and ((diff1.strip("_").isdigit()) or (diff2.strip("_").isdigit())):
+                        
+                            station_name_mapping[obs.station_id] = common_name
+                            station_name_mapping[obs2.station_id] = common_name
+
+
+                # If the station is not in the mapping, add it
+                if obs.station_id not in station_name_mapping:
+                    station_name_mapping[obs.station_id] = obs.station_id
+                        
+
+
+
+            # Plot locations of all stations and measured positions of the meteor
+            plotted_codes = []
+            for i, obs in enumerate(sorted(self.observations, key=lambda x:np.min(x.state_vect_dist), reverse=False)):
+
+                # Plot measured points
+                m.plot(obs.meas_lat[obs.ignore_list == 0], obs.meas_lon[obs.ignore_list == 0], c='r')
+
+                # Plot ignored points
+                if np.any(obs.ignore_list != 0):
+                    m.scatter(obs.meas_lat[obs.ignore_list != 0], obs.meas_lon[obs.ignore_list != 0], c='k', \
+                        marker='x', s=5, alpha=0.5)
                     
-                        station_name_mapping[obs.station_id] = common_name
-                        station_name_mapping[obs2.station_id] = common_name
 
 
-            # If the station is not in the mapping, add it
-            if obs.station_id not in station_name_mapping:
-                station_name_mapping[obs.station_id] = obs.station_id
+                station_name = station_name_mapping[obs.station_id]
+
+                # If the station ID is already plotted, skip it
+                if station_name in plotted_codes:
+                    continue
+
+                # Extract marker type and size multiplier
+                marker, sm = markers[i%len(markers)]
+
+                # Plot stations
+                m.scatter(obs.lat, obs.lon, s=sm*10, label=str(station_name), marker=marker)
                     
+                # Add the station to the list of plotted stations
+                plotted_codes.append(station_name)
 
 
 
-        # Plot locations of all stations and measured positions of the meteor
-        plotted_codes = []
-        for i, obs in enumerate(sorted(self.observations, key=lambda x:np.min(x.state_vect_dist), reverse=False)):
-
-            # Plot measured points
-            m.plot(obs.meas_lat[obs.ignore_list == 0], obs.meas_lon[obs.ignore_list == 0], c='r')
-
-            # Plot ignored points
-            if np.any(obs.ignore_list != 0):
-                m.scatter(obs.meas_lat[obs.ignore_list != 0], obs.meas_lon[obs.ignore_list != 0], c='k', \
-                    marker='x', s=5, alpha=0.5)
-                
+            # Plot a point marking the final point of the meteor
+            m.scatter(self.htmin_lat, self.htmin_lon, c='k', marker='+', s=50, alpha=0.75, label='Lowest height')
 
 
-            station_name = station_name_mapping[obs.station_id]
+            # If there are more than 10 observations, make the legend font smaller
+            legend_font_size = LEGEND_TEXT_SIZE
+            if len(self.observations) >= 10:
+                legend_font_size = 5
 
-            # If the station ID is already plotted, skip it
-            if station_name in plotted_codes:
-                continue
-
-            # Extract marker type and size multiplier
-            marker, sm = markers[i%len(markers)]
-
-            # Plot stations
-            m.scatter(obs.lat, obs.lon, s=sm*10, label=str(station_name), marker=marker)
-                
-            # Add the station to the list of plotted stations
-            plotted_codes.append(station_name)
+            plt.legend(loc='upper left', prop={'size': legend_font_size})
 
 
 
-        # Plot a point marking the final point of the meteor
-        m.scatter(self.htmin_lat, self.htmin_lon, c='k', marker='+', s=50, alpha=0.75, label='Lowest height')
+            # Pickle the figure
+            if ret_figs:
+                fig_pickle_dict["ground_track"] = pickle.dumps(plt.gcf(), protocol=2)
 
+            if self.save_results:
+                savePlot(plt, file_name + '_ground_track.' + self.plot_file_type, output_dir)
 
-        # If there are more than 10 observations, make the legend font smaller
-        legend_font_size = LEGEND_TEXT_SIZE
-        if len(self.observations) >= 10:
-            legend_font_size = 5
+            if show_plots:
+                plt.show()
 
-        plt.legend(loc='upper left', prop={'size': legend_font_size})
-
-
-
-        # Pickle the figure
-        if ret_figs:
-            fig_pickle_dict["ground_track"] = pickle.dumps(plt.gcf(), protocol=2)
-
-        if self.save_results:
-            savePlot(plt, file_name + '_ground_track.' + self.plot_file_type, output_dir)
-
-        if show_plots:
-            plt.show()
-
-        else:
-            plt.clf()
-            plt.close()
-            
+            else:
+                plt.clf()
+                plt.close()
+        except:
+            pass            
         ######################################################################################################
 
         ### Plot lat/lon of the meteor using OSM ###
