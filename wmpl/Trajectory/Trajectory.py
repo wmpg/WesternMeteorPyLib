@@ -4359,8 +4359,11 @@ class Trajectory(object):
                 callable_ci=_formatLongitude))
             out_str += "  Ht MSL   = {:s} m\n".format(valueFormat("{:>11.2f}", self.orbit.ht_ref, \
                 '{:6.2f}', uncertainties, 'ht_ref', deg=False))
-            out_str += "  Ht WGS84 = {:s} m\n".format(valueFormat("{:>11.2f}", self.orbit.ht_ref_wgs84, \
-                '{:6.2f}', uncertainties, 'ht_ref_wgs84', deg=False))
+            try:
+                out_str += "  Ht WGS84 = {:s} m\n".format(valueFormat("{:>11.2f}", self.orbit.ht_ref_wgs84, \
+                    '{:6.2f}', uncertainties, 'ht_ref_wgs84', deg=False))
+            except:
+                pass
             out_str += "  Lat geo = {:s} deg\n".format(valueFormat("{:>11.6f}", self.orbit.lat_geocentric, \
                 '{:6.4f}', uncertainties, 'lat_geocentric', deg=True))
             out_str += "\n"
@@ -4420,8 +4423,11 @@ class Trajectory(object):
                 out_str += "                         +/- {:6.2f} m\n".format(uncertainties.rbeg_lon_m)
         out_str += "  Ht MSL   = {:s} m\n".format(valueFormat("{:>11.2f}", self.rbeg_ele, "{:6.2f}", \
             uncertainties, 'rbeg_ele'))
-        out_str += "  Ht WGS84 = {:s} m\n".format(valueFormat("{:>11.2f}", self.rbeg_ele_wgs84, "{:6.2f}", \
-            uncertainties, 'rbeg_ele_wgs84'))
+        try:
+            out_str += "  Ht WGS84 = {:s} m\n".format(valueFormat("{:>11.2f}", self.rbeg_ele_wgs84, "{:6.2f}", \
+                uncertainties, 'rbeg_ele_wgs84'))
+        except:
+            pass
 
         out_str += "\n"
         out_str += "End point on the trajectory:\n"
@@ -4437,8 +4443,11 @@ class Trajectory(object):
                 out_str += "                         +/- {:6.2f} m\n".format(uncertainties.rend_lon_m)
         out_str += "  Ht MSL   = {:s} m\n".format(valueFormat("{:>11.2f}", self.rend_ele, "{:6.2f}", \
             uncertainties, 'rend_ele'))
-        out_str += "  Ht WGS84 = {:s} m\n".format(valueFormat("{:>11.2f}", self.rend_ele_wgs84, "{:6.2f}", \
-            uncertainties, 'rend_ele_wgs84'))
+        try:
+            out_str += "  Ht WGS84 = {:s} m\n".format(valueFormat("{:>11.2f}", self.rend_ele_wgs84, "{:6.2f}", \
+                uncertainties, 'rend_ele_wgs84'))
+        except:
+            pass
 
         out_str += "\n"
         out_str += "Lowest point on the trajectory:\n"
@@ -4454,8 +4463,11 @@ class Trajectory(object):
                 out_str += "                         +/- {:6.2f} m\n".format(uncertainties.htmin_lon_m)
         out_str += "  Ht MSL   = {:s} m\n".format(valueFormat("{:>11.2f}", self.htmin_ele, "{:6.2f}", \
             uncertainties, 'htmin_ele'))
-        out_str += "  Ht WGS84 = {:s} m\n".format(valueFormat("{:>11.2f}", self.htmin_ele_wgs84, "{:6.2f}", \
-            uncertainties, 'htmin_ele_wgs84'))
+        try:
+            out_str += "  Ht WGS84 = {:s} m\n".format(valueFormat("{:>11.2f}", self.htmin_ele_wgs84, "{:6.2f}", \
+                uncertainties, 'htmin_ele_wgs84'))
+        except:
+            pass
         out_str += "\n"
 
         ### Write information about stations ###
