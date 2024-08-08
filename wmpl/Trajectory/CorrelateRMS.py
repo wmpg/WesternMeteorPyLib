@@ -1158,7 +1158,10 @@ class RMSDataHandle(object):
         # Save the plots
         if save_plots:
             traj.save_results = True
-            traj.savePlots(output_dir, traj.file_name, show_plots=False)
+            try:
+                traj.savePlots(output_dir, traj.file_name, show_plots=False)
+            except:
+                pass
             traj.save_results = False
 
 
