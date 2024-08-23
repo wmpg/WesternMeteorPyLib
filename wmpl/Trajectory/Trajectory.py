@@ -1215,49 +1215,49 @@ def timingResiduals(params, observations, time_dict, weights=None, ret_stddev=Fa
 
 
 def moveStateVector(state_vect, radiant_eci, observations):
-        """ Moves the state vector position along the radiant line until it is before any points which are
-            projected on it. This is used to make sure that lengths and lags are properly calculated.
+    """ Moves the state vector position along the radiant line until it is before any points which are
+        projected on it. This is used to make sure that lengths and lags are properly calculated.
+    
+    Arguments:
+        state_vect: [ndarray] (x, y, z) ECI coordinates of the initial state vector (meters).
+        radiant_eci: [ndarray] (x, y, z) components of the unit radiant direction vector.
+        observations: [list] A list of ObservationPoints objects which hold measurements from individual
+            stations.
+
+    Return:
+        rad_cpa_beg: [ndarray] (x, y, z) ECI coordinates of the beginning point of the trajectory.
+
+    """
+
+    rad_cpa_list = []
+    radiant_ang_dist_list = []
+
+    # Go through all non-ignored observations from all stations
+    nonignored_observations = [obstmp for obstmp in observations if not obstmp.ignore_station]
+    for obs in nonignored_observations:
+
+        # Calculate closest points of approach (observed line of sight to radiant line) of the first point
+        # on the trajectory across all stations
+        _, rad_cpa, _ = findClosestPoints(obs.stat_eci_los[0], obs.meas_eci_los[0], state_vect, 
+            radiant_eci)
+
+        rad_cpa_list.append(rad_cpa)
+
+
+        # Compute angular distance from the first point to the radiant
+        rad_ang_dist = angleBetweenVectors(radiant_eci, vectNorm(rad_cpa))
+        radiant_ang_dist_list.append(rad_ang_dist)
+
         
-        Arguments:
-            state_vect: [ndarray] (x, y, z) ECI coordinates of the initial state vector (meters).
-            radiant_eci: [ndarray] (x, y, z) components of the unit radiant direction vector.
-            observations: [list] A list of ObservationPoints objects which hold measurements from individual
-                stations.
 
-        Return:
-            rad_cpa_beg: [ndarray] (x, y, z) ECI coordinates of the beginning point of the trajectory.
+    # # Choose the state vector with the largest height
+    # rad_cpa_beg = rad_cpa_list[np.argmax([vectMag(rad_cpa_temp) for rad_cpa_temp in rad_cpa_list])]
 
-        """
-
-        rad_cpa_list = []
-        radiant_ang_dist_list = []
-
-        # Go through all non-ignored observations from all stations
-        nonignored_observations = [obstmp for obstmp in observations if not obstmp.ignore_station]
-        for obs in nonignored_observations:
-
-            # Calculate closest points of approach (observed line of sight to radiant line) of the first point
-            # on the trajectory across all stations
-            _, rad_cpa, _ = findClosestPoints(obs.stat_eci_los[0], obs.meas_eci_los[0], state_vect, 
-                radiant_eci)
-
-            rad_cpa_list.append(rad_cpa)
+    # Choose the state vector as the point of initial observation closest to the radiant
+    rad_cpa_beg = rad_cpa_list[np.argmin([rad_ang_dist for rad_ang_dist in radiant_ang_dist_list])]
 
 
-            # Compute angular distance from the first point to the radiant
-            rad_ang_dist = angleBetweenVectors(radiant_eci, vectNorm(rad_cpa))
-            radiant_ang_dist_list.append(rad_ang_dist)
-
-            
-
-        # # Choose the state vector with the largest height
-        # rad_cpa_beg = rad_cpa_list[np.argmax([vectMag(rad_cpa_temp) for rad_cpa_temp in rad_cpa_list])]
-
-        # Choose the state vector as the point of initial observation closest to the radiant
-        rad_cpa_beg = rad_cpa_list[np.argmin([rad_ang_dist for rad_ang_dist in radiant_ang_dist_list])]
-
-
-        return np.ascontiguousarray(rad_cpa_beg)
+    return np.ascontiguousarray(rad_cpa_beg)
 
 
 
@@ -2332,6 +2332,10 @@ def applyGravityDrop(eci_coord, t, r0, gravity_factor, vz):
     # The derived drop function does not work for small vz's, thus the classical drop function is used
     if abs(vz) < 100:
 
+        # Make sure r0 is not 0
+        if r0 == 0:
+            r0 = 1e-10
+
         # Calculate gravitational acceleration at given ECI coordinates
         g = G*earth_mass/r0**2
 
@@ -2341,8 +2345,16 @@ def applyGravityDrop(eci_coord, t, r0, gravity_factor, vz):
 
     else:
 
+        if r0 == 0:
+            r0 = 1e-10
+
+        # Compute the denominator to check it's not 0
+        denominator = r0 + vz*t
+        if denominator == 0:
+            denominator = 1e-10
+
         # Compute the drop using a drop model with a constant vertical velocity
-        drop = time_sign*(G*earth_mass/vz**2)*(r0/(r0 + vz*t) + np.log((r0 + vz*t)/r0) - 1)
+        drop = time_sign*(G*earth_mass/vz**2)*(r0/denominator + np.log(denominator/r0) - 1)
     
 
     # Apply gravity drop to ECI coordinates
