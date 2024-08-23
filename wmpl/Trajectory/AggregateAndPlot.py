@@ -206,7 +206,7 @@ def writeOrbitSummaryFile(dir_path, traj_list, traj_summary_file_name=TRAJ_SUMMA
     delimiter = "; "
 
     out_str =  ""
-    out_str += "# Summary generated on {:s} UTC\n\r".format(str(datetime.datetime.utcnow()))
+    out_str += "# Summary generated on {:s} UTC\n\r".format(str(datetime.datetime.now(datetime.timezone.utc)))
 
     header = [" Unique trajectory", "     Beginning      ", "       Beginning          ", "  IAU", " IAU", "  Sol lon ", "  App LST ", "  RAgeo  ", "  +/-  ", "  DECgeo ", "  +/-  ", " LAMgeo  ", "  +/-  ", "  BETgeo ", "  +/-  ", "   Vgeo  ", "   +/- ", " LAMhel  ", "  +/-  ", "  BEThel ", "  +/-  ", "   Vhel  ", "   +/- ", "      a    ", "  +/-  ", "     e    ", "  +/-  ", "     i    ", "  +/-  ", "   peri   ", "   +/-  ", "   node   ", "   +/-  ", "    Pi    ", "  +/-  ", "     b    ", "  +/-  ", "     q    ", "  +/-  ", "     f    ", "  +/-  ", "     M    ", "  +/-  ", "      Q    ", "  +/-  ", "     n    ", "  +/-  ", "     T    ", "  +/-  ", "TisserandJ", "  +/-  ", "  RAapp  ", "  +/-  ", "  DECapp ", "  +/-  ", " Azim +E ", "  +/-  ", "   Elev  ", "  +/-  ", "  Vinit  ", "   +/- ", "   Vavg  ", "   +/- ", "   LatBeg   ", "  +/-  ", "   LonBeg   ", "  +/-  ", "  HtBeg ", "  +/-  ", "   LatEnd   ", "  +/-  ", "   LonEnd   ", "  +/-  ", "  HtEnd ", "  +/-  ", "Duration", " Peak ", " Peak Ht", "  F  ", " Mass kg", "  Qc ", "MedianFitErr", "Beg in", "End in", " Num", "     Participating    "]
     head_2 = ["     identifier   ", "    Julian date     ", "        UTC Time          ", "   No", "code", "    deg   ", "    deg   ", "   deg   ", " sigma ", "   deg   ", " sigma ", "   deg   ", " sigma ", "    deg  ", " sigma ", "   km/s  ", "  sigma", "   deg   ", " sigma ", "    deg  ", " sigma ", "   km/s  ", "  sigma", "     AU    ", " sigma ", "          ", " sigma ", "   deg    ", " sigma ", "    deg   ", "  sigma ", "    deg   ", "  sigma ", "   deg    ", " sigma ", "   deg    ", " sigma ", "    AU    ", " sigma ", "   deg    ", " sigma ", "    deg   ", " sigma ", "     AU    ", " sigma ", "  deg/day ", " sigma ", "   years  ", " sigma ", "          ", " sigma ", "   deg   ", " sigma ", "   deg   ", " sigma ", "of N  deg", " sigma ", "    deg  ", " sigma ", "   km/s  ", "  sigma", "   km/s  ", "  sigma", "   +N deg   ", " sigma ", "   +E deg   ", " sigma ", "    km  ", " sigma ", "   +N deg   ", " sigma ", "   +E deg   ", " sigma ", "    km  ", " sigma ", "  sec   ", "AbsMag", "    km  ", "param", "tau=0.7%", " deg ", "   arcsec   ", "  FOV ", "  FOV ", "stat", "        stations      "]
@@ -1798,7 +1798,7 @@ def generateAutoPlotsAndReports(dir_path, traj_quality_params, prev_sols=10, sol
     ### Generate daily plots for the last N days ###
 
     # Compute the time of the next closest integer solar longitude in degrees
-    time_now = datetime.datetime.utcnow()
+    time_now = datetime.datetime.now(datetime.timezone.utc)
     sol_lon_now = np.degrees(jd2SolLonSteyaert(datetime2JD(time_now)))
     sol_lon_next = np.ceil(sol_lon_now)
 
@@ -1950,7 +1950,9 @@ def generateAutoPlotsAndReports(dir_path, traj_quality_params, prev_sols=10, sol
         traj_summary_year_temp = "traj_summary_yearly_{:d}.tmp".format(year)
         with open(os.path.join(summary_dir, traj_summary_year_temp), 'w') as f_year:
 
-            f_year.write("# Summary generated on {:s} UTC\n\r".format(str(datetime.datetime.utcnow())))
+            f_year.write("# Summary generated on {:s} UTC\n\r".format(
+                str(datetime.datetime.now(datetime.timezone.utc)))
+                )
 
             # Find all monthly trajectory reports
             header_written = False
@@ -2002,7 +2004,9 @@ def generateAutoPlotsAndReports(dir_path, traj_quality_params, prev_sols=10, sol
     traj_summary_all_temp = TRAJ_SUMMARY_ALL + ".tmp"
     with open(os.path.join(summary_dir, traj_summary_all_temp), 'w') as f_all:
 
-        f_all.write("# Summary generated on {:s} UTC\n\r".format(str(datetime.datetime.utcnow())))
+        f_all.write("# Summary generated on {:s} UTC\n\r".format(
+            str(datetime.datetime.now(datetime.timezone.utc)))
+            )
 
         # Find all monthly trajectory reports
         header_written = False
@@ -2184,7 +2188,7 @@ if __name__ == "__main__":
         while True:
 
             # Clock for measuring script time
-            t1 = datetime.datetime.utcnow()
+            t1 = datetime.datetime.now(datetime.timezone.utc)
 
 
             # Set the number of solar longitudes to use for the auto run
@@ -2204,15 +2208,16 @@ if __name__ == "__main__":
 
             # Wait to run AUTO_RUN_FREQUENCY hours after the beginning
             wait_time = (datetime.timedelta(hours=AUTO_RUN_FREQUENCY) \
-                - (datetime.datetime.utcnow() - t1)).total_seconds()
+                - (datetime.datetime.now(datetime.timezone.utc) - t1)).total_seconds()
 
             # Compute next run time
-            next_run_time = datetime.datetime.utcnow() + datetime.timedelta(seconds=wait_time)
+            next_run_time = datetime.datetime.now(datetime.timezone.utc) \
+                + datetime.timedelta(seconds=wait_time)
 
             # Wait to run
-            while next_run_time > datetime.datetime.utcnow():
-                print("Waiting {:s} to generate plots and summary again...          ".format(str(next_run_time \
-                    - datetime.datetime.utcnow())), end='\r')
+            while next_run_time > datetime.datetime.now(datetime.timezone.utc):
+                print("Waiting {:s} to generate plots and summary again...        ".format(str(next_run_time \
+                    - datetime.datetime.now(datetime.timezone.utc))), end='\r')
                 time.sleep(2)
 
 

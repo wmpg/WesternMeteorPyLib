@@ -1364,7 +1364,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     while True: 
 
         # Clock for measuring script time
-        t1 = datetime.datetime.utcnow()
+        t1 = datetime.datetime.now(datetime.timezone.utc)
 
         # If auto run is enabled, compute the time range to use
         event_time_range = None
@@ -1470,7 +1470,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
 
 
         
-        print("Total run time: {:s}".format(str(datetime.datetime.utcnow() - t1)))
+        print("Total run time: {:s}".format(str(datetime.datetime.now(datetime.timezone.utc) - t1)))
 
         # Store the previous start time
         previous_start_time = copy.deepcopy(t1)
@@ -1483,7 +1483,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
 
             # Otherwise wait to run AUTO_RUN_FREQUENCY hours after the beginning
             wait_time = (datetime.timedelta(hours=AUTO_RUN_FREQUENCY) \
-                - (datetime.datetime.utcnow() - t1)).total_seconds()
+                - (datetime.datetime.now(datetime.timezone.utc) - t1)).total_seconds()
 
             # Run immediately if the wait time has elapsed
             if wait_time < 0:

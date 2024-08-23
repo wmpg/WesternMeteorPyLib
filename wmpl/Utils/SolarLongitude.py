@@ -1464,7 +1464,7 @@ if __name__ == "__main__":
 
     ### Test all solar longitude functions and see the difference between the solar longitudes they return
 
-    dt_now = datetime.datetime.utcnow()
+    dt_now = datetime.datetime.now(datetime.timezone.utc)
     year = dt_now.year
 
     # Compute the values for now

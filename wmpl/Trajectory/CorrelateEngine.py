@@ -288,7 +288,7 @@ class TrajectoryCorrelator(object):
 
 
         # Use now as a reference time for FOV overlap check
-        ref_jd = datetime2JD(datetime.datetime.utcnow())
+        ref_jd = datetime2JD(datetime.datetime.now(datetime.timezone.utc))
 
         # Compute ECI coordinates of both stations
         reference_stat_eci = np.array(geo2Cartesian(lat1, lon1, elev1, ref_jd))
