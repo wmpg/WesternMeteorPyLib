@@ -817,8 +817,9 @@ class RMSDataHandle(object):
                 if len(dir_name) >= 6:
                     
                     # Construct test datetime objects with the first and last times within the given month
-                    dt_beg_test = datetime.datetime(dt.year, dt.month, 1)
-                    dt_end_test = datetime.datetime(dt.year, dt.month, 1) + datetime.timedelta(days=31)
+                    dt_beg_test = datetime.datetime(dt.year, dt.month, 1, tzinfo=datetime.timezone.utc)
+                    dt_end_test = datetime.datetime(dt.year, dt.month, 1, tzinfo=datetime.timezone.utc) \
+                        + datetime.timedelta(days=31)
 
                     # Check if the month is in the range
                     if (dt_end_test >= dt_beg) and (dt_beg_test <= dt_end):
@@ -827,8 +828,12 @@ class RMSDataHandle(object):
                         if len(dir_name) >= 8:
 
                             # Construct test datetime objects with the first and last times within the given day
-                            dt_beg_test = datetime.datetime(dt.year, dt.month, dt.day)
-                            dt_end_test = datetime.datetime(dt.year, dt.month, dt.day) + datetime.timedelta(days=1)
+                            dt_beg_test = datetime.datetime(
+                                dt.year, dt.month, dt.day, tzinfo=datetime.timezone.utc
+                                )
+                            dt_end_test = datetime.datetime(
+                                dt.year, dt.month, dt.day, tzinfo=datetime.timezone.utc
+                                ) + datetime.timedelta(days=1)
 
                             # Check if the day is in the range
                             if (dt_end_test >= dt_beg) and (dt_beg_test <= dt_end):
@@ -1421,7 +1426,8 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         
         # Find the range of datetimes of all folders (take only those after the year 2000)
         proc_dir_dts = [entry[3] for entry in dh.processing_list if entry[3] is not None]
-        proc_dir_dts = [dt for dt in proc_dir_dts if dt > datetime.datetime(2000, 1, 1, 0, 0, 0)]
+        proc_dir_dts = [dt for dt in proc_dir_dts if dt > datetime.datetime(2000, 1, 1, 0, 0, 0, 
+                                                                            tzinfo=datetime.timezone.utc)]
 
         # Reject all folders not within the time range of interest +/- 1 day
         if event_time_range is not None:
