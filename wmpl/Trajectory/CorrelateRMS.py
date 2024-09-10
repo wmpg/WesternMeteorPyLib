@@ -580,7 +580,7 @@ class RMSDataHandle(object):
                 # Extract the date and time of directory, if possible
                 try:
                     night_dt = datetime.datetime.strptime("_".join(night_name.split("_")[1:3]), \
-                        "%Y%m%d_%H%M%S")
+                        "%Y%m%d_%H%M%S").replace(tzinfo=datetime.timezone.utc)
                 except:
                     print("Could not parse the date of the night dir: {:s}".format(night_path))
                     night_dt = None
@@ -802,7 +802,7 @@ class RMSDataHandle(object):
         
         
         # Make a datetime object from the directory name
-        dt = datetime.datetime.strptime(dir_name, date_fmt)
+        dt = datetime.datetime.strptime(dir_name, date_fmt).replace(tzinfo=datetime.timezone.utc)
 
         dt_beg, dt_end = self.dt_range
 
@@ -864,7 +864,9 @@ class RMSDataHandle(object):
         date_str, time_str = file_name.split('_')[:2]
 
         # Make a datetime object
-        dt = datetime.datetime.strptime("_".join([date_str, time_str]), "%Y%m%d_%H%M%S")
+        dt = datetime.datetime.strptime(
+            "_".join([date_str, time_str]), "%Y%m%d_%H%M%S"
+            ).replace(tzinfo=datetime.timezone.utc)
 
         dt_beg, dt_end = self.dt_range
 
@@ -1399,8 +1401,14 @@ contain data folders. Data folders should have FTPdetectinfo files together with
 
                 # Extract time range
                 time_beg, time_end = cml_args.timerange.strip("(").strip(")").split(",")
-                dt_beg = datetime.datetime.strptime(time_beg, "%Y%m%d-%H%M%S")
-                dt_end = datetime.datetime.strptime(time_end, "%Y%m%d-%H%M%S")
+                
+                dt_beg = datetime.datetime.strptime(
+                    time_beg, "%Y%m%d-%H%M%S"
+                    ).replace(tzinfo=datetime.timezone.utc)
+                
+                dt_end = datetime.datetime.strptime(
+                    time_end, "%Y%m%d-%H%M%S"
+                    ).replace(tzinfo=datetime.timezone.utc)
 
                 print("Custom time range:")
                 print("    BEG: {:s}".format(str(dt_beg)))
