@@ -1437,7 +1437,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
             sys.exit()
 
 
-        ### GENERATE MONTHLY TIME BINS ###
+        ### GENERATE DAILY TIME BINS ###
         
         # Find the range of datetimes of all folders (take only those after the year 2000)
         proc_dir_dts = [entry[3] for entry in dh.processing_list if entry[3] is not None]
@@ -1458,8 +1458,8 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         proc_dir_dt_beg = min(proc_dir_dts)
         proc_dir_dt_end = max(proc_dir_dts)
 
-        # Split the processing into monthly chunks
-        dt_bins = generateDatetimeBins(proc_dir_dt_beg, proc_dir_dt_end, bin_days=30, 
+        # Split the processing into daily chunks
+        dt_bins = generateDatetimeBins(proc_dir_dt_beg, proc_dir_dt_end, bin_days=1, 
                                        tzinfo=datetime.timezone.utc)
 
         print()
