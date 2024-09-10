@@ -1452,7 +1452,8 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         proc_dir_dt_end = max(proc_dir_dts)
 
         # Split the processing into monthly chunks
-        dt_bins = generateDatetimeBins(proc_dir_dt_beg, proc_dir_dt_end, bin_days=30)
+        dt_bins = generateDatetimeBins(proc_dir_dt_beg, proc_dir_dt_end, bin_days=30, 
+                                       tzinfo=datetime.timezone.utc)
 
         print()
         print("ALL TIME BINS:")
