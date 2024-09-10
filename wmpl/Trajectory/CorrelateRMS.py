@@ -735,8 +735,14 @@ class RMSDataHandle(object):
 
 
                 # Init the new meteor observation object
-                met_obs = MeteorObsRMS(station_code, jd2Date(cams_met_obs.jdt_ref, dt_obj=True), pp, \
-                    meteor_data, rel_proc_path, ff_name=cams_met_obs.ff_name)
+                met_obs = MeteorObsRMS(
+                    station_code, 
+                    jd2Date(cams_met_obs.jdt_ref, dt_obj=True, tzinfo=datetime.timezone.utc), 
+                    pp,
+                    meteor_data, 
+                    rel_proc_path, 
+                    ff_name=cams_met_obs.ff_name
+                    )
 
                 # Skip bad observations
                 if met_obs.bad_data:
@@ -1027,7 +1033,8 @@ class RMSDataHandle(object):
         found_traj_obs_pairs = []
 
         # Compute the middle time of the trajectory as reference time
-        traj_mid_dt = jd2Date((traj_reduced.rbeg_jd + traj_reduced.rend_jd)/2, dt_obj=True)
+        traj_mid_dt = jd2Date((traj_reduced.rbeg_jd + traj_reduced.rend_jd)/2, dt_obj=True, 
+                              tzinfo=datetime.timezone.utc)
 
         # Go through all unpaired observations
         for met_obs in unpaired_observations:
@@ -1073,7 +1080,7 @@ class RMSDataHandle(object):
 
 
         # Datetime of the reference trajectory time
-        dt = jd2Date(traj.jdt_ref, dt_obj=True)
+        dt = jd2Date(traj.jdt_ref, dt_obj=True, tzinfo=datetime.timezone.utc)
 
 
         # Year directory
