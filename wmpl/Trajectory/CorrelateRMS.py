@@ -1371,7 +1371,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         if cml_args.auto is not None:
 
             # Compute first date and time to use for auto run
-            dt_beg = datetime.datetime.now() - datetime.timedelta(days=cml_args.auto)
+            dt_beg = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=cml_args.auto)
 
             # If the beginning time is later than the beginning of the previous run, use the beginning of the
             # previous run minus two days as the beginning time
@@ -1381,7 +1381,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
 
 
             # Use now as the upper time limit
-            dt_end = datetime.datetime.now()
+            dt_end = datetime.datetime.now(datetime.timezone.utc)
 
             event_time_range = [dt_beg, dt_end]
 
@@ -1454,7 +1454,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         for bin_beg, bin_end in dt_bins:
 
             print()
-            print("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
+            print("{}".format(datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dZ%H:%M:%S')))
             print("PROCESSING TIME BIN:")
             print(bin_beg, bin_end)
             print("-----------------------------")
@@ -1493,10 +1493,10 @@ contain data folders. Data folders should have FTPdetectinfo files together with
             else:
 
                 # Compute next run time
-                next_run_time = datetime.datetime.now() + datetime.timedelta(seconds=wait_time)
+                next_run_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=wait_time)
 
                 # Wait to run
-                while next_run_time > datetime.datetime.now():
+                while next_run_time > datetime.datetime.now(datetime.timezone.utc):
                     print("Waiting {:s} to run the trajectory solver...          ".format(str(next_run_time \
-                        - datetime.datetime.now())), end='\r')
+                        - datetime.datetime.now(datetime.timezone.utc))), end='\r')
                     time.sleep(2)

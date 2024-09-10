@@ -225,7 +225,7 @@ import wmpl.Utils.TrajConversions as trajconv
 import wmpl.Utils.SolarLongitude as sollon
 
 # Compute the Julian date of the current time
-jd_now = trajconv.datetime2JD(datetime.datetime.now())
+jd_now = trajconv.datetime2JD(datetime.datetime.now(datetime.timezone.utc))
 
 # Get the solar longitude of the current time (in radians)
 lasun = sollon.jd2SolLonJPL(jd_now)
