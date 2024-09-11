@@ -873,7 +873,7 @@ class TrajectoryCorrelator(object):
 
         # Remove all observations done prior to 2000, to weed out those with bad time
         unpaired_observations_all = [met_obs for met_obs in unpaired_observations_all \
-            if met_obs.reference_dt > datetime.datetime(2000, 1, 1, 0, 0, 0)]
+            if met_obs.reference_dt > datetime.datetime(2000, 1, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)]
 
 
         # Normalize all reference times and time data so that the reference time is at t = 0 s
@@ -963,7 +963,7 @@ class TrajectoryCorrelator(object):
                 print()
                 print("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
                 print("Checking trajectory at {:s} in countries: {:s}".format( \
-                    str(jd2Date(traj_reduced.jdt_ref, dt_obj=True)), 
+                    str(jd2Date(traj_reduced.jdt_ref, dt_obj=True, tzinfo=datetime.timezone.utc)), \
                     ", ".join(list(set([stat_id[:2] for stat_id in traj_reduced.participating_stations]))) \
                     ) \
                 )
@@ -1005,7 +1005,7 @@ class TrajectoryCorrelator(object):
 
                     # Init observation object using the new meteor observation
                     obs_new = self.initObservationsObject(met_obs, platepar, \
-                        ref_dt=jd2Date(traj_reduced.jdt_ref, dt_obj=True))
+                        ref_dt=jd2Date(traj_reduced.jdt_ref, dt_obj=True, tzinfo=datetime.timezone.utc))
 
 
                     # Get an observation from the trajectory object with the maximum convergence angle to
