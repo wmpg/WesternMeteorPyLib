@@ -687,8 +687,8 @@ class RMSDataHandle(object):
                 station_count += 1
                 prev_station = station_code
 
-            # Save database to mark those with missing data files (only every 50th station, to speed things up)
-            if (station_count%50 == 0) and (station_code != prev_station):
+            # Save database to mark those with missing data files (only every 250th station, to speed things up)
+            if (station_count%250 == 0) and (station_code != prev_station):
                 self.saveDatabase()
 
 

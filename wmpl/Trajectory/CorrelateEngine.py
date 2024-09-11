@@ -1464,8 +1464,8 @@ class TrajectoryCorrelator(object):
 
                     traj_solved_count += 1
 
-                    # If 50 new trajectories were computed, save the DB
-                    if traj_solved_count%50 == 0:
+                    # If 250 new trajectories were computed, save the DB
+                    if traj_solved_count%250 == 0:
                         self.dh.saveDatabase()
 
                 
