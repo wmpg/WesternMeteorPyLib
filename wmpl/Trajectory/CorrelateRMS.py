@@ -472,7 +472,7 @@ class PlateparDummy:
 
 
 class RMSDataHandle(object):
-    def __init__(self, dir_path, dt_range=None):
+    def __init__(self, dir_path, dt_range=None, db_dir=None):
         """ Handles data interfacing between the trajectory correlator and RMS data files on disk. 
     
         Arguments:
@@ -481,6 +481,8 @@ class RMSDataHandle(object):
         Keyword arguments:
             dt_range: [list of datetimes] A range of datetimes between which the existing trajectories will be
                 loaded.
+            db_dir: [str] Path to the directory with the database file. None by default, in which case the
+                database file will be loaded from the dir_path.
         """
 
         self.dir_path = dir_path
@@ -492,8 +494,13 @@ class RMSDataHandle(object):
         # Load the list of stations
         station_list = self.loadStations()
 
+        # Set the database directory
+        if db_dir is None:
+            db_dir = self.dir_path
+        self.db_dir = db_dir
+
         # Load database of processed folders
-        database_path = os.path.join(self.dir_path, JSON_DB_NAME)
+        database_path = os.path.join(self.db_dir, JSON_DB_NAME)
         print()
         print("Loading database: {:s}".format(database_path))
         self.db = DatabaseJSON(database_path)
@@ -1339,6 +1346,9 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         help="Number of CPU codes to use for computation. -1 to use all cores minus one (default).",
     )
 
+    arg_parser.add_argument("--dbdir", type=str, default=None,
+        help="Path to the directory where the trajectory database file will be stored. If not given, the database will be stored in the data directory.")
+
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -1426,7 +1436,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
 
 
         # Init the data handle
-        dh = RMSDataHandle(cml_args.dir_path, event_time_range)
+        dh = RMSDataHandle(cml_args.dir_path, event_time_range, db_dir=cml_args.dbdir)
 
         # If there is nothing to process, stop
         if not dh.processing_list:
