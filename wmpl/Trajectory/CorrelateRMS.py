@@ -472,7 +472,7 @@ class PlateparDummy:
 
 
 class RMSDataHandle(object):
-    def __init__(self, dir_path, dt_range=None, db_dir=None):
+    def __init__(self, dir_path, dt_range=None, db_dir=None, output_dir=None):
         """ Handles data interfacing between the trajectory correlator and RMS data files on disk. 
     
         Arguments:
@@ -483,6 +483,8 @@ class RMSDataHandle(object):
                 loaded.
             db_dir: [str] Path to the directory with the database file. None by default, in which case the
                 database file will be loaded from the dir_path.
+            output_dir: [str] Path to the directory where the output files will be saved. None by default, in
+                which case the output files will be saved in the dir_path.
         """
 
         self.dir_path = dir_path
@@ -491,13 +493,21 @@ class RMSDataHandle(object):
 
         print("Using directory:", self.dir_path)
 
-        # Load the list of stations
-        station_list = self.loadStations()
 
         # Set the database directory
         if db_dir is None:
             db_dir = self.dir_path
         self.db_dir = db_dir
+
+        # Set the output directory
+        if output_dir is None:
+            output_dir = self.dir_path
+        self.output_dir = output_dir
+
+        ############################
+
+        # Load the list of stations
+        station_list = self.loadStations()
 
         # Load database of processed folders
         database_path = os.path.join(self.db_dir, JSON_DB_NAME)
@@ -515,7 +525,7 @@ class RMSDataHandle(object):
         # Load already computed trajectories
         print()
         print("Loading already computed trajectories...")
-        self.loadComputedTrajectories(os.path.join(self.dir_path, OUTPUT_TRAJ_DIR))
+        self.loadComputedTrajectories(os.path.join(self.output_dir, OUTPUT_TRAJ_DIR))
         print("   ... done!")
 
 
@@ -1105,7 +1115,7 @@ class RMSDataHandle(object):
 
 
         # Path to the year directory
-        out_path = os.path.join(self.dir_path, OUTPUT_TRAJ_DIR, year_dir)
+        out_path = os.path.join(self.output_dir, OUTPUT_TRAJ_DIR, year_dir)
         if make_dirs:
             mkdirP(out_path)
 
@@ -1348,6 +1358,9 @@ contain data folders. Data folders should have FTPdetectinfo files together with
 
     arg_parser.add_argument("--dbdir", type=str, default=None,
         help="Path to the directory where the trajectory database file will be stored. If not given, the database will be stored in the data directory.")
+    
+    arg_parser.add_argument("--outdir", type=str, default=None,
+        help="Path to the directory where the trajectory output files will be stored. If not given, the output will be stored in the data directory.")
 
 
     # Parse the command line arguments
@@ -1436,7 +1449,10 @@ contain data folders. Data folders should have FTPdetectinfo files together with
 
 
         # Init the data handle
-        dh = RMSDataHandle(cml_args.dir_path, event_time_range, db_dir=cml_args.dbdir)
+        dh = RMSDataHandle(
+            cml_args.dir_path, dt_range=event_time_range, 
+            db_dir=cml_args.dbdir, output_dir=cml_args.outdir
+            )
 
         # If there is nothing to process, stop
         if not dh.processing_list:
