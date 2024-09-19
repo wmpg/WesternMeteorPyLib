@@ -785,24 +785,31 @@ class TrajectoryCorrelator(object):
             # Enable Monte Carlo
             traj.monte_carlo = True
 
-            # Reinitialize the observations, rejecting ignored stations
-            for obs in traj_status.observations:
-                if not obs.ignore_station:
-                    traj.infillWithObs(obs)
-
+            # Get all non-ignored observations
+            non_ignored_observations = [obs for obs in traj_status.observations if not obs.ignore_station]
 
             ### TO DO - improve the logic of choosing stations ###
-            
-            # If there are more than the maximum number of stations, choose the ones with the smallest residuals
-            if len(traj.observations) > self.traj_constraints.max_stations:
-                    
+
+            # If there are more than the maximum number of stations, choose the ones with the smallest
+            # residuals
+            if len(non_ignored_observations) > self.traj_constraints.max_stations:
+
                 # Sort the observations by residuals (smallest first)
-                traj.observations = sorted(traj.observations, key=lambda x: x.ang_res_std)
+                obs_sorted = sorted(non_ignored_observations, key=lambda x: x.ang_res_std)
 
                 # Keep only the first <max_stations> stations with the smallest residuals
-                traj.observations = traj.observations[:self.traj_constraints.max_stations]
+                obs_selected = obs_sorted[:self.traj_constraints.max_stations]
+
+            else:
+                obs_selected = non_ignored_observations
 
             ### ###
+
+
+            # Reinitialize the observations, rejecting ignored stations
+            for obs in obs_selected:
+                if not obs.ignore_station:
+                    traj.infillWithObs(obs)
 
 
             # Re-run the trajectory solution
