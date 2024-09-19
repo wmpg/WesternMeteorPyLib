@@ -972,7 +972,7 @@ class TrajectoryCorrelator(object):
             for traj_reduced in computed_traj_list:
 
                 # If the trajectory already has more than the maximum number of stations, skip it
-                if len(traj_reduced.observations) >= self.traj_constraints.max_stations:
+                if len(traj_reduced.participating_stations) >= self.traj_constraints.max_stations:
                     
                     print(
                         "Trajectory {:s} has already reached the maximum number of stations, "
