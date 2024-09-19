@@ -976,7 +976,9 @@ class TrajectoryCorrelator(object):
                     
                     print(
                         "Trajectory {:s} has already reached the maximum number of stations, "
-                        "skipping...".format(traj_reduced.traj_id)
+                        "skipping...".format(
+                            str(jd2Date(traj_reduced.jdt_ref, dt_obj=True, tzinfo=datetime.timezone.utc))
+                            )
                         )
                     
                     continue
