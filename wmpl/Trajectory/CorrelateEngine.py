@@ -44,6 +44,10 @@ class TrajectoryConstraints(object):
         self.min_qc = 3.0
 
 
+        # Maximum number of stations included in the trajectory solution (for speed)
+        self.max_stations = 8
+
+
         ### Velocity filters ###
 
         # Max difference between velocities from difference stations (percent)
@@ -702,9 +706,10 @@ class TrajectoryCorrelator(object):
                 # Disable Monte Carlo runs until an initial stable set of observations is found
                 traj.monte_carlo = False
 
-                # Reinitialize the observations with ignored stations
+                # Reinitialize the observations, rejecting the ignored stations
                 for obs in traj_status.observations:
-                    traj.infillWithObs(obs)
+                    if not obs.ignore_station:
+                        traj.infillWithObs(obs)
 
                 
                 # Re-run the trajectory solution
@@ -780,9 +785,24 @@ class TrajectoryCorrelator(object):
             # Enable Monte Carlo
             traj.monte_carlo = True
 
-            # Reinitialize the observations with ignored stations
+            # Reinitialize the observations, rejecting ignored stations
             for obs in traj_status.observations:
-                traj.infillWithObs(obs)
+                if not obs.ignore_station:
+                    traj.infillWithObs(obs)
+
+
+            ### TO DO - improve the logic of choosing stations ###
+            
+            # If there are more than the maximum number of stations, choose the ones with the smallest residuals
+            if len(traj.observations) > self.traj_constraints.max_stations:
+                    
+                # Sort the observations by residuals (smallest first)
+                traj.observations = sorted(traj.observations, key=lambda x: x.ang_res_std)
+
+                # Keep only the first <max_stations> stations with the smallest residuals
+                traj.observations = traj.observations[:self.traj_constraints.max_stations]
+
+            ### ###
 
 
             # Re-run the trajectory solution
@@ -950,6 +970,16 @@ class TrajectoryCorrelator(object):
 
             # Find all unpaired observations that match already existing trajectories
             for traj_reduced in computed_traj_list:
+
+                # If the trajectory already has more than the maximum number of stations, skip it
+                if len(traj_reduced.observations) >= self.traj_constraints.max_stations:
+                    
+                    print(
+                        "Trajectory {:s} has already reached the maximum number of stations, "
+                        "skipping...".format(traj_reduced.traj_id)
+                        )
+                    
+                    continue
 
                 # Get all unprocessed observations which are close in time to the reference trajectory
                 traj_time_pairs = self.dh.getTrajTimePairs(traj_reduced, unpaired_observations, \
