@@ -518,7 +518,7 @@ class TrajectoryCorrelator(object):
         traj = Trajectory(jdt_ref, \
             max_toffset=self.traj_constraints.max_toffset, meastype=1, \
             v_init_part=self.v_init_part, monte_carlo=self.traj_constraints.run_mc, \
-            mc_runs=mc_runs, mc_max_runs=2*mc_runs,
+            mc_runs=mc_runs, mc_runs_max=2*mc_runs,
             show_plots=False, verbose=False, save_results=False, \
             reject_n_sigma_outliers=2, mc_cores=self.traj_constraints.mc_cores, \
             geometric_uncert=self.traj_constraints.geometric_uncert)

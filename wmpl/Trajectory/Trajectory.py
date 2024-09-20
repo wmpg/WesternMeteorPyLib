@@ -2422,7 +2422,7 @@ class Trajectory(object):
         mc_noise_std=1.0, geometric_uncert=False, filter_picks=True, calc_orbit=True, show_plots=True, \
         show_jacchia=False, save_results=True, gravity_correction=True, gravity_factor=1.0, \
         plot_all_spatial_residuals=False, plot_file_type='png', traj_id=None, reject_n_sigma_outliers=3, 
-        mc_cores=None, fixed_times=None, mc_max_runs=None):
+        mc_cores=None, fixed_times=None, mc_runs_max=None):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -2480,7 +2480,7 @@ class Trajectory(object):
                 which means that all cores will be used.
             fixed_times: [dict] Dictionary of fixed times for each station. None by default, meaning that
                 all stations will be estimated. Only used if estimate_timing_vel is True.
-            mc_max_runs: [int] Maximum number of Monte Carlo runs. None by default, which will limit the runs
+            mc_runs_max: [int] Maximum number of Monte Carlo runs. None by default, which will limit the runs
                 to 10x req_num.
 
         """
@@ -2551,7 +2551,7 @@ class Trajectory(object):
         self.mc_runs = mc_runs
 
         # Maximum number of Monte Carlo runs, in case the MC runs have to be repeated many times
-        self.max_mc_runs = mc_max_runs
+        self.mc_runs_max = mc_runs_max
 
         # Number of MC samples that will be taken for every point
         self.mc_pick_multiplier = mc_pick_multiplier
@@ -6546,7 +6546,7 @@ class Trajectory(object):
             traj_best, uncertainties = monteCarloTrajectory(self, mc_runs=self.mc_runs, \
                 mc_pick_multiplier=self.mc_pick_multiplier, noise_sigma=self.mc_noise_std, \
                 geometric_uncert=self.geometric_uncert, plot_results=self.save_results, \
-                mc_cores=self.mc_cores, max_runs=self.mc_max_runs)
+                mc_cores=self.mc_cores, max_runs=self.mc_runs_max)
 
 
             ### Save uncertainties to the trajectory object ###
