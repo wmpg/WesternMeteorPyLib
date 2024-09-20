@@ -803,6 +803,9 @@ class TrajectoryCorrelator(object):
                 # Keep only the first <max_stations> stations with the smallest residuals
                 obs_selected = obs_sorted[:self.traj_constraints.max_stations]
 
+                print("More than {:d} stations, keeping only the best ones...".format(self.traj_constraints.max_stations))
+                print("    Selected stations: {:s}".format(', '.join([obs.station_id for obs in obs_selected])))
+
             else:
                 obs_selected = non_ignored_observations
 
