@@ -499,10 +499,17 @@ class RMSDataHandle(object):
             db_dir = self.dir_path
         self.db_dir = db_dir
 
+        # Create the database directory if it doesn't exist
+        mkdirP(self.db_dir)
+
+
         # Set the output directory
         if output_dir is None:
             output_dir = self.dir_path
         self.output_dir = output_dir
+
+        # Create the output directory if it doesn't exist
+        mkdirP(self.output_dir)
 
         ############################
 
