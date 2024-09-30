@@ -411,7 +411,7 @@ class MeteorObsRMS(object):
 
         # If the predicted point is inside the FOV, mark it as such
         if (x_pre_begin > 0) and (x_pre_begin <= self.platepar.X_res) and (y_pre_begin > 0) \
-            and (y_pre_begin < self.platepar.Y_res):
+                and (y_pre_begin < self.platepar.Y_res):
 
             self.fov_beg = True
 
@@ -444,7 +444,7 @@ class MeteorObsRMS(object):
 
         # If the predicted point is inside the FOV, mark it as such
         if (x_post_end > 0) and (x_post_end <= self.platepar.X_res) and (y_post_end > 0) \
-            and (y_post_end <= self.platepar.Y_res):
+                and (y_post_end <= self.platepar.Y_res):
             
             self.fov_end = True
 
@@ -1361,7 +1361,8 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         help="""Enable distributed processing. Values: 1=create and store candidates; 2=load and process candidates only.""", 
             type=int)
     arg_parser.add_argument("--cpucores", type=int, default=-1,
-        help="Number of CPU codes to use for computation. -1 to use all cores minus one (default).",)
+        help="Number of CPU codes to use for computation. -1 to use all cores minus one (default).",
+    )
 
     arg_parser.add_argument("--dbdir", type=str, default=None,
         help="Path to the directory where the trajectory database file will be stored. If not given, the database will be stored in the data directory.")
@@ -1417,11 +1418,11 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     # The best N will be chosen. -1 means use all.
     if cml_args.maxstations == -1:
         # Set to large number, so we can easily test later
-        max_stations = MAX_STATIONS 
+        trajectory_constraints.max_stations = MAX_STATIONS 
         print('Solutions will use all available stations.')
     else:
-        max_stations = max(2, cml_args.maxstations)
-        print('Solutions will use the best {} stations.'.format(max_stations))
+        trajectory_constraints.max_stations = max(2, cml_args.maxstations)
+        print('Solutions will use the best {} stations.'.format(trajectory_constraints.max_stations))
 
     # Run processing. If the auto run more is not on, the loop will break after one run
     previous_start_time = None
@@ -1461,11 +1462,11 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                 
                 dt_beg = datetime.datetime.strptime(
                     time_beg, "%Y%m%d-%H%M%S"
-                    ).replace(tzinfo=datetime.timezone.utc)
+                ).replace(tzinfo=datetime.timezone.utc)
                 
                 dt_end = datetime.datetime.strptime(
                     time_end, "%Y%m%d-%H%M%S"
-                    ).replace(tzinfo=datetime.timezone.utc)
+                ).replace(tzinfo=datetime.timezone.utc)
 
                 print("Custom time range:")
                 print("    BEG: {:s}".format(str(dt_beg)))
@@ -1479,7 +1480,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         dh = RMSDataHandle(
             cml_args.dir_path, dt_range=event_time_range, 
             db_dir=cml_args.dbdir, output_dir=cml_args.outdir
-            )
+        )
 
         # If there is nothing to process, stop, unless we're in distributed 
         # processing mode 2 
@@ -1543,7 +1544,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
 
             # Run the trajectory correlator
             tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True, 
-                                      distribute=distribute, max_stations = max_stations, enableOSM=cml_args.enableOSM)
+                                      distribute=distribute, enableOSM=cml_args.enableOSM)
             tc.run(event_time_range=event_time_range)
 
 

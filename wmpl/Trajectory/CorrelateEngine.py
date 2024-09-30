@@ -213,8 +213,7 @@ class TrajectoryConstraints(object):
 
 
 class TrajectoryCorrelator(object):
-    def __init__(self, data_handle, traj_constraints, v_init_part, data_in_j2000=True, distribute=0, 
-                 max_stations=MAX_STATIONS, enableOSM=False):
+    def __init__(self, data_handle, traj_constraints, v_init_part, data_in_j2000=True, distribute=0, enableOSM=False):
         """ Correlates meteor trajectories using meteor data given to it through a data handle. A data handle
         is a class instance with a common interface between e.g. files on the disk in various formats or 
         meteors in a database.
@@ -232,8 +231,6 @@ class TrajectoryCorrelator(object):
         self.data_in_j2000 = data_in_j2000
 
         self.distribute = distribute
-
-        self.max_stations = max_stations
 
         self.enableOSM = enableOSM
 
@@ -703,8 +700,7 @@ class TrajectoryCorrelator(object):
                 # Check if the current observations is larger than the minimum limit, and
                 # outside the median limit or larger than the maximum limit
                 if (obs.ang_res_std > np.radians(self.traj_constraints.min_arcsec_err/3600)) \
-                    and ((obs.ang_res_std 
-                        > ang_res_median*self.traj_constraints.bad_station_obs_ang_limit) 
+                    and ((obs.ang_res_std > ang_res_median*self.traj_constraints.bad_station_obs_ang_limit) 
                     or (obs.ang_res_std > np.radians(self.traj_constraints.max_arcsec_err/3600))):
 
                     # Add an ignore candidate and store its angular error
@@ -1053,22 +1049,22 @@ class TrajectoryCorrelator(object):
                 #   Reducted trajectory objects are returned
                 computed_traj_list = self.dh.getComputedTrajectories(datetime2JD(bin_beg), datetime2JD(bin_end))
 
-            # Find all unpaired observations that match already existing trajectories
-            for traj_reduced in computed_traj_list:
+                # Find all unpaired observations that match already existing trajectories
+                for traj_reduced in computed_traj_list:
 
-                # If the trajectory already has more than the maximum number of stations, skip it
-                if len(traj_reduced.participating_stations) >= self.traj_constraints.max_stations:
-                    
-                    print(
-                        "Trajectory {:s} has already reached the maximum number of stations, "
-                        "skipping...".format(
-                            str(jd2Date(traj_reduced.jdt_ref, dt_obj=True, tzinfo=datetime.timezone.utc))))
-                    
-                    continue
+                    # If the trajectory already has more than the maximum number of stations, skip it
+                    if len(traj_reduced.participating_stations) >= self.traj_constraints.max_stations:
+                        
+                        print(
+                            "Trajectory {:s} has already reached the maximum number of stations, "
+                            "skipping...".format(
+                                str(jd2Date(traj_reduced.jdt_ref, dt_obj=True, tzinfo=datetime.timezone.utc))))
+                        
+                        continue
 
-                # Get all unprocessed observations which are close in time to the reference trajectory
-                traj_time_pairs = self.dh.getTrajTimePairs(traj_reduced, unpaired_observations, 
-                    self.traj_constraints.max_toffset)
+                    # Get all unprocessed observations which are close in time to the reference trajectory
+                    traj_time_pairs = self.dh.getTrajTimePairs(traj_reduced, unpaired_observations, 
+                        self.traj_constraints.max_toffset)
 
                 # Skip trajectory if there are no new obervations
                 if not traj_time_pairs:
@@ -1136,14 +1132,14 @@ class TrajectoryCorrelator(object):
                             obs_traj_best = obs_tmp
 
 
-                        # Do a quick trajectory solution and perform sanity checks
-                        plane_intersection = self.quickTrajectorySolution(obs_traj_best, obs_new)
-                        if plane_intersection is None:
-                            continue
+                    # Do a quick trajectory solution and perform sanity checks
+                    plane_intersection = self.quickTrajectorySolution(obs_traj_best, obs_new)
+                    if plane_intersection is None:
+                        continue
 
-                        ### ###
+                    ### ###
 
-                        candidate_observations.append([met_obs, obs_new])
+                    candidate_observations.append([met_obs, obs_new])
 
 
                     # Skip the candidate trajectory if it couldn't be loaded from disk
@@ -1441,7 +1437,7 @@ class TrajectoryCorrelator(object):
                         picklename = str(ref_dt.timestamp()) + '.pickle'
                         savePickle(matched_observations, savepath, picklename)
 
-                    p = loadPickle(savepath, picklename)
+                    #p = loadPickle(savepath, picklename)
                     return
             # end of "if self.distribute < 2"
 
@@ -1532,9 +1528,9 @@ class TrajectoryCorrelator(object):
                     matched_observations = sorted(matched_observations, key=lambda x: str(x[1].station_code))
 
                     # XXXXXXX
-                    if self.max_stations < MAX_STATIONS and len(matched_observations) > self.max_stations:
-                        print('Selecting best {} stations'.format(self.max_stations))
-                        matched_observations = pickBestStations(matched_observations, self.max_stations)
+                    #if self.max_stations < MAX_STATIONS and len(matched_observations) > self.max_stations:
+                    #    print('Selecting best {} stations'.format(self.max_stations))
+                    #    matched_observations = pickBestStations(matched_observations, self.max_stations)
 
                     # Print info about observations which are being solved
                     print()
