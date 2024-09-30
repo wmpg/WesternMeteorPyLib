@@ -213,8 +213,7 @@ class TrajectoryConstraints(object):
 
 
 class TrajectoryCorrelator(object):
-    def __init__(self, data_handle, traj_constraints, v_init_part, data_in_j2000=True, distribute=0, 
-                 max_stations=MAX_STATIONS, enableOSM=False):
+    def __init__(self, data_handle, traj_constraints, v_init_part, data_in_j2000=True, distribute=0, enableOSM=False):
         """ Correlates meteor trajectories using meteor data given to it through a data handle. A data handle
         is a class instance with a common interface between e.g. files on the disk in various formats or 
         meteors in a database.
@@ -233,8 +232,6 @@ class TrajectoryCorrelator(object):
 
         self.distribute = distribute
 
-        self.max_stations = max_stations
-
         self.enableOSM = enableOSM
 
     def trajectoryRangeCheck(self, traj_reduced, platepar):
@@ -249,12 +246,12 @@ class TrajectoryCorrelator(object):
         """
 
         # Compute distance between station and trajectory beginning
-        beg_dist = greatCircleDistance(traj_reduced.rbeg_lat, traj_reduced.rbeg_lon, \
+        beg_dist = greatCircleDistance(traj_reduced.rbeg_lat, traj_reduced.rbeg_lon, 
             np.radians(platepar.lat), np.radians(platepar.lon))
 
 
         # Compute distance between station and trajectory end
-        end_dist = greatCircleDistance(traj_reduced.rend_lat, traj_reduced.rend_lon, \
+        end_dist = greatCircleDistance(traj_reduced.rend_lat, traj_reduced.rend_lon, 
             np.radians(platepar.lat), np.radians(platepar.lon))
 
 
@@ -296,7 +293,7 @@ class TrajectoryCorrelator(object):
         fov_eci = vectNorm(np.array(raDec2ECI(ra, dec)))
 
         # Compute the closest point of approach between the middle of the FOV and the trajectory line
-        obs_cpa, rad_cpa, d = findClosestPoints(stat_eci, fov_eci, np.array(traj_reduced.state_vect_mini), \
+        obs_cpa, rad_cpa, d = findClosestPoints(stat_eci, fov_eci, np.array(traj_reduced.state_vect_mini), 
             np.array(traj_reduced.radiant_eci_mini))
 
         # Convert to unit vectors
@@ -323,7 +320,7 @@ class TrajectoryCorrelator(object):
         """
 
         # Compute the distance between stations (km)
-        dist = greatCircleDistance(np.radians(rp.lat), np.radians(rp.lon), np.radians(tp.lat), \
+        dist = greatCircleDistance(np.radians(rp.lat), np.radians(rp.lon), np.radians(tp.lat), 
             np.radians(tp.lon))
 
         print("Distance between {:s} and {:s} = {:.1f} km".format(rp.station_code, tp.station_code, dist))
@@ -381,7 +378,7 @@ class TrajectoryCorrelator(object):
         for height_above_ground in [95000, 70000, 115000, 50000]:
 
             # Compute points in the middle of FOVs of both stations at given heights
-            reference_fov_point = reference_stat_eci + reference_fov_eci*(height_above_ground \
+            reference_fov_point = reference_stat_eci + reference_fov_eci*(height_above_ground 
                 - elev1)/np.sin(alt1)
             test_fov_point = test_stat_eci + test_fov_eci*(height_above_ground - elev2)/np.sin(alt2)
 
@@ -400,9 +397,9 @@ class TrajectoryCorrelator(object):
             test_fov_gnd = test_fov_point - test_stat_eci
 
             # Compute vectors moved towards the other station by half the FOV diameter
-            reference_moved = reference_stat_eci + vectorFromPointDirectionAndAngle(reference_fov_gnd, \
+            reference_moved = reference_stat_eci + vectorFromPointDirectionAndAngle(reference_fov_gnd, 
                 reference_to_test, reference_fov/2)
-            test_moved = test_stat_eci + vectorFromPointDirectionAndAngle(test_fov_gnd, test_to_reference, \
+            test_moved = test_stat_eci + vectorFromPointDirectionAndAngle(test_fov_gnd, test_to_reference, 
                 test_fov/2)
 
             # Compute the vector pointing from one station to the moved point of the other station
@@ -465,8 +462,8 @@ class TrajectoryCorrelator(object):
 
 
         # Init the observation object
-        obs = ObservedPoints(datetime2JD(ref_dt), ra_data, dec_data, time_data, np.radians(pp.lat), \
-            np.radians(pp.lon), pp.elev, meastype=1, station_id=pp.station_code, magnitudes=mag_data, \
+        obs = ObservedPoints(datetime2JD(ref_dt), ra_data, dec_data, time_data, np.radians(pp.lat), 
+            np.radians(pp.lon), pp.elev, meastype=1, station_id=pp.station_code, magnitudes=mag_data, 
             ignore_list=ignore_list, fov_beg=met.fov_beg, fov_end=met.fov_end, comment=comment)
 
         return obs
@@ -480,7 +477,7 @@ class TrajectoryCorrelator(object):
         jd = obs.JD_data[indx]
 
         # Calculate closest points of approach (observed line of sight to radiant line)
-        _, rad_cpa, _ = findClosestPoints(obs.stat_eci, meas_vector, plane_intersection.cpa_eci, \
+        _, rad_cpa, _ = findClosestPoints(obs.stat_eci, meas_vector, plane_intersection.cpa_eci, 
             plane_intersection.radiant_eci)
 
         lat, lon, elev = cartesian2Geo(jd, *rad_cpa)
@@ -497,7 +494,7 @@ class TrajectoryCorrelator(object):
         plane_intersection = PlaneIntersection(obs1, obs2)
 
         ra_cand, dec_cand = plane_intersection.radiant_eq
-        print("Candidate radiant: RA = {:.3f}, Dec = {:+.3f}".format(np.degrees(ra_cand), \
+        print("Candidate radiant: RA = {:.3f}, Dec = {:+.3f}".format(np.degrees(ra_cand), 
             np.degrees(dec_cand)))
         
 
@@ -561,7 +558,7 @@ class TrajectoryCorrelator(object):
         v_avg = (vel1 + vel2)/2
         if (v_avg < self.traj_constraints.v_avg_min) or (v_avg > self.traj_constraints.v_avg_max):
             
-            print("Average veocity outside velocity bounds: {:.1f} < {:.1f} < {:.1f}".format(self.traj_constraints.v_avg_min, \
+            print("Average veocity outside velocity bounds: {:.1f} < {:.1f} < {:.1f}".format(self.traj_constraints.v_avg_min, 
                 v_avg, self.traj_constraints.v_avg_max))
             return None
 
@@ -586,12 +583,12 @@ class TrajectoryCorrelator(object):
             traj: [Trajectory]
         """
 
-        traj = Trajectory(jdt_ref, \
-            max_toffset=self.traj_constraints.max_toffset, meastype=1, \
-            v_init_part=self.v_init_part, monte_carlo=self.traj_constraints.run_mc, \
+        traj = Trajectory(jdt_ref, 
+            max_toffset=self.traj_constraints.max_toffset, meastype=1, 
+            v_init_part=self.v_init_part, monte_carlo=self.traj_constraints.run_mc, 
             mc_runs=mc_runs, mc_runs_max=2*mc_runs,
-            show_plots=False, verbose=False, save_results=False, \
-            reject_n_sigma_outliers=2, mc_cores=self.traj_constraints.mc_cores, \
+            show_plots=False, verbose=False, save_results=False, 
+            reject_n_sigma_outliers=2, mc_cores=self.traj_constraints.mc_cores, 
             geometric_uncert=self.traj_constraints.geometric_uncert, enable_OSM_plot=self.enableOSM)
 
         return traj
@@ -651,7 +648,7 @@ class TrajectoryCorrelator(object):
                 # Check if the current trajectory has smaller median residuals than the best
                 #    trajectory and store it as the best trajectory
                 elif np.median([obstmp.ang_res_std for obstmp in traj_status.observations 
-                    if not obstmp.ignore_station]) < np.median([obstmp.ang_res_std for obstmp \
+                    if not obstmp.ignore_station]) < np.median([obstmp.ang_res_std for obstmp 
                     in traj_best.observations if not obstmp.ignore_station]):
 
                     traj_best = copy.deepcopy(traj_status)
@@ -687,7 +684,7 @@ class TrajectoryCorrelator(object):
             for i, obs in enumerate(traj_status.observations):
 
                 # Compute the median angular uncertainty of all other non-ignored stations
-                ang_res_list = [obstmp.ang_res_std for j, obstmp in \
+                ang_res_list = [obstmp.ang_res_std for j, obstmp in 
                     enumerate(traj_status.observations) if (i != j) and not obstmp.ignore_station]
 
                 # If all other stations are ignored, skip this procedure
@@ -703,8 +700,7 @@ class TrajectoryCorrelator(object):
                 # Check if the current observations is larger than the minimum limit, and
                 # outside the median limit or larger than the maximum limit
                 if (obs.ang_res_std > np.radians(self.traj_constraints.min_arcsec_err/3600)) \
-                    and ((obs.ang_res_std \
-                        > ang_res_median*self.traj_constraints.bad_station_obs_ang_limit) \
+                    and ((obs.ang_res_std > ang_res_median*self.traj_constraints.bad_station_obs_ang_limit) 
                     or (obs.ang_res_std > np.radians(self.traj_constraints.max_arcsec_err/3600))):
 
                     # Add an ignore candidate and store its angular error
@@ -746,7 +742,7 @@ class TrajectoryCorrelator(object):
                 if len(ignore_candidates):
 
                     # Choose the observation with the largest error
-                    obs_ignore_indx = max(ignore_candidates, \
+                    obs_ignore_indx = max(ignore_candidates, 
                         key=lambda x: ignore_candidates.get(x)[0])
                     obs = traj_status.observations[obs_ignore_indx]
 
@@ -765,7 +761,7 @@ class TrajectoryCorrelator(object):
                     ang_res_median = ignore_candidates[obs_ignore_indx][1]
                     print("Ignoring station {:s}".format(obs.station_id))
                     print("   obs std: {:.2f} arcsec".format(3600*np.degrees(obs.ang_res_std)))
-                    print("   bad lim: {:.2f} arcsec".format(3600*np.degrees(ang_res_median\
+                    print("   bad lim: {:.2f} arcsec".format(3600*np.degrees(ang_res_median
                         *self.traj_constraints.bad_station_obs_ang_limit)))
                     print("   max err: {:.2f} arcsec".format(self.traj_constraints.max_arcsec_err))
 
@@ -831,7 +827,7 @@ class TrajectoryCorrelator(object):
         # If there are only two stations, make sure to reject solutions which have stations with 
         #   residuals higher than the maximum limit
         if len(traj_status.observations) == 2:
-            if np.any([(obstmp.ang_res_std > np.radians(self.traj_constraints.max_arcsec_err/3600)) \
+            if np.any([(obstmp.ang_res_std > np.radians(self.traj_constraints.max_arcsec_err/3600)) 
                 for obstmp in traj_status.observations]):
 
                 print("2 station only solution, one station has an error above the maximum limit, skipping!")
@@ -915,7 +911,7 @@ class TrajectoryCorrelator(object):
             if (traj.orbit.v_avg/1000 < self.traj_constraints.v_avg_min) \
                 or (traj.orbit.v_avg/1000 > self.traj_constraints.v_avg_max):
 
-                print("Average velocity outside range: {:.1f} < {:.1f} < {:.1f} km/s, skipping...".format(self.traj_constraints.v_avg_min, \
+                print("Average velocity outside range: {:.1f} < {:.1f} < {:.1f} km/s, skipping...".format(self.traj_constraints.v_avg_min, 
                     traj.orbit.v_avg/1000, self.traj_constraints.v_avg_max))
 
                 return False, None
@@ -971,12 +967,12 @@ class TrajectoryCorrelator(object):
 
         # Get unpaired observations, filter out observations with too little points and sort them by time
         unpaired_observations_all = self.dh.getUnpairedObservations()
-        unpaired_observations_all = [mettmp for mettmp in unpaired_observations_all \
+        unpaired_observations_all = [mettmp for mettmp in unpaired_observations_all 
             if len(mettmp.data) >= self.traj_constraints.min_meas_pts]
         unpaired_observations_all = sorted(unpaired_observations_all, key=lambda x: x.reference_dt)
 
         # Remove all observations done prior to 2000, to weed out those with bad time
-        unpaired_observations_all = [met_obs for met_obs in unpaired_observations_all \
+        unpaired_observations_all = [met_obs for met_obs in unpaired_observations_all 
             if met_obs.reference_dt > datetime.datetime(2000, 1, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)]
 
 
@@ -1033,7 +1029,7 @@ class TrajectoryCorrelator(object):
 
 
                 # Select observations in the given time bin
-                unpaired_observations = [met_obs for met_obs in unpaired_observations_all \
+                unpaired_observations = [met_obs for met_obs in unpaired_observations_all 
                     if (met_obs.reference_dt >= bin_beg) and (met_obs.reference_dt <= bin_end)]
 
 
@@ -1053,23 +1049,21 @@ class TrajectoryCorrelator(object):
                 #   Reducted trajectory objects are returned
                 computed_traj_list = self.dh.getComputedTrajectories(datetime2JD(bin_beg), datetime2JD(bin_end))
 
-            # Find all unpaired observations that match already existing trajectories
-            for traj_reduced in computed_traj_list:
+                # Find all unpaired observations that match already existing trajectories
+                for traj_reduced in computed_traj_list:
 
-                # If the trajectory already has more than the maximum number of stations, skip it
-                if len(traj_reduced.participating_stations) >= self.traj_constraints.max_stations:
-                    
-                    print(
-                        "Trajectory {:s} has already reached the maximum number of stations, "
-                        "skipping...".format(
-                            str(jd2Date(traj_reduced.jdt_ref, dt_obj=True, tzinfo=datetime.timezone.utc))
-                            )
-                        )
-                    
-                    continue
+                    # If the trajectory already has more than the maximum number of stations, skip it
+                    if len(traj_reduced.participating_stations) >= self.traj_constraints.max_stations:
+                        
+                        print(
+                            "Trajectory {:s} has already reached the maximum number of stations, "
+                            "skipping...".format(
+                                str(jd2Date(traj_reduced.jdt_ref, dt_obj=True, tzinfo=datetime.timezone.utc))))
+                        
+                        continue
 
                     # Get all unprocessed observations which are close in time to the reference trajectory
-                    traj_time_pairs = self.dh.getTrajTimePairs(traj_reduced, unpaired_observations, \
+                    traj_time_pairs = self.dh.getTrajTimePairs(traj_reduced, unpaired_observations, 
                         self.traj_constraints.max_toffset)
 
                     # Skip trajectory if there are no new obervations
@@ -1077,14 +1071,12 @@ class TrajectoryCorrelator(object):
                         continue
 
 
-                print()
-                print("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
-                print("Checking trajectory at {:s} in countries: {:s}".format( \
-                    str(jd2Date(traj_reduced.jdt_ref, dt_obj=True, tzinfo=datetime.timezone.utc)), \
-                    ", ".join(list(set([stat_id[:2] for stat_id in traj_reduced.participating_stations]))) \
-                    ) \
-                )
-                print("--------")
+                    print()
+                    print("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
+                    print("Checking trajectory at {:s} in countries: {:s}".format( 
+                        str(jd2Date(traj_reduced.jdt_ref, dt_obj=True, tzinfo=datetime.timezone.utc)), 
+                        ", ".join(list(set([stat_id[:2] for stat_id in traj_reduced.participating_stations])))))
+                    print("--------")
 
 
                     # Filter out bad matches and only keep the good ones
@@ -1118,11 +1110,11 @@ class TrajectoryCorrelator(object):
                                 break
 
 
-                        ### Do a rough trajectory solution and perform a quick quality control ###
+                            ### Do a rough trajectory solution and perform a quick quality control ###
 
-                    # Init observation object using the new meteor observation
-                    obs_new = self.initObservationsObject(met_obs, platepar, \
-                        ref_dt=jd2Date(traj_reduced.jdt_ref, dt_obj=True, tzinfo=datetime.timezone.utc))
+                            # Init observation object using the new meteor observation
+                            obs_new = self.initObservationsObject(met_obs, platepar, 
+                                ref_dt=jd2Date(traj_reduced.jdt_ref, dt_obj=True, tzinfo=datetime.timezone.utc))
 
 
                         # Get an observation from the trajectory object with the maximum convergence angle to
@@ -1140,14 +1132,14 @@ class TrajectoryCorrelator(object):
                                 obs_traj_best = obs_tmp
 
 
-                        # Do a quick trajectory solution and perform sanity checks
-                        plane_intersection = self.quickTrajectorySolution(obs_traj_best, obs_new)
-                        if plane_intersection is None:
-                            continue
+                    # Do a quick trajectory solution and perform sanity checks
+                    plane_intersection = self.quickTrajectorySolution(obs_traj_best, obs_new)
+                    if plane_intersection is None:
+                        continue
 
-                        ### ###
+                    ### ###
 
-                        candidate_observations.append([met_obs, obs_new])
+                    candidate_observations.append([met_obs, obs_new])
 
 
                     # Skip the candidate trajectory if it couldn't be loaded from disk
@@ -1221,14 +1213,14 @@ class TrajectoryCorrelator(object):
 
                     # Find all meteors from other stations that are close in time to this meteor
                     plane_intersection_good = None
-                    time_pairs = self.dh.findTimePairs(met_obs, unpaired_observations, \
+                    time_pairs = self.dh.findTimePairs(met_obs, unpaired_observations, 
                         self.traj_constraints.max_toffset)
                     for met_pair_candidate in time_pairs:
 
                         print()
                         print("Processing pair:")
                         print("{:s} and {:s}".format(met_obs.station_code, met_pair_candidate.station_code))
-                        print("{:s} and {:s}".format(str(met_obs.reference_dt), \
+                        print("{:s} and {:s}".format(str(met_obs.reference_dt), 
                             str(met_pair_candidate.reference_dt)))
                         print("-----------------------")
 
@@ -1243,7 +1235,7 @@ class TrajectoryCorrelator(object):
 
                         # Check the FOV overlap
                         if not self.checkFOVOverlap(reference_platepar, candidate_platepar):
-                            print("Station FOV does not overlap: {:s} and {:s}".format(met_obs.station_code, \
+                            print("Station FOV does not overlap: {:s} and {:s}".format(met_obs.station_code, 
                                 met_pair_candidate.station_code))
                             continue
 
@@ -1254,7 +1246,7 @@ class TrajectoryCorrelator(object):
                         ### Do a rough trajectory solution and perform a quick quality control ###
 
                         # Init observations
-                        obs2 = self.initObservationsObject(met_pair_candidate, candidate_platepar, \
+                        obs2 = self.initObservationsObject(met_pair_candidate, candidate_platepar, 
                             ref_dt=met_obs.reference_dt)
 
                         # Do a quick trajectory solution and perform sanity checks
@@ -1377,7 +1369,7 @@ class TrajectoryCorrelator(object):
                         dec_mean_test = np.mean([dec for _, dec in plane_radiants_test])
 
                         # Skip the mergning attempt if the estimated radiants are too far off
-                        if np.degrees(angleBetweenSphericalCoords(dec_mean_ref, ra_mean_ref, dec_mean_test, \
+                        if np.degrees(angleBetweenSphericalCoords(dec_mean_ref, ra_mean_ref, dec_mean_test, 
                             ra_mean_test)) > self.traj_constraints.max_merge_radiant_angle:
 
                             continue
@@ -1445,7 +1437,7 @@ class TrajectoryCorrelator(object):
                         picklename = str(ref_dt.timestamp()) + '.pickle'
                         savePickle(matched_observations, savepath, picklename)
 
-                    p = loadPickle(savepath, picklename)
+                    #p = loadPickle(savepath, picklename)
                     return
             # end of "if self.distribute < 2"
 
@@ -1464,7 +1456,7 @@ class TrajectoryCorrelator(object):
                         loadedpickle = loadPickle(savepath, fil)
                         candidate_trajectories.append(loadedpickle)
                         # move the loaded file so we don't try to reprocess it on a subsequent pass
-                        procpath =  os.path.join(savepath, 'processed')  
+                        procpath = os.path.join(savepath, 'processed')  
                         os.makedirs(procpath, exist_ok=True)
                         procfile = os.path.join(procpath, fil)
                         if os.path.isfile(procfile):
@@ -1491,7 +1483,7 @@ class TrajectoryCorrelator(object):
                     ### If there are duplicate observations from the same station, take the longer one ###
 
                     # Find unique station counts
-                    station_counts = np.unique([entry[1].station_code for entry in matched_observations], \
+                    station_counts = np.unique([entry[1].station_code for entry in matched_observations], 
                         return_counts=True)
 
                     # If there are duplicates, choose the longest one
@@ -1536,9 +1528,9 @@ class TrajectoryCorrelator(object):
                     matched_observations = sorted(matched_observations, key=lambda x: str(x[1].station_code))
 
                     # XXXXXXX
-                    if self.max_stations < MAX_STATIONS and len(matched_observations) > self.max_stations:
-                        print('Selecting best {} stations'.format(self.max_stations))
-                        matched_observations = pickBestStations(matched_observations, self.max_stations)
+                    #if self.max_stations < MAX_STATIONS and len(matched_observations) > self.max_stations:
+                    #    print('Selecting best {} stations'.format(self.max_stations))
+                    #    matched_observations = pickBestStations(matched_observations, self.max_stations)
 
                     # Print info about observations which are being solved
                     print()
@@ -1552,7 +1544,7 @@ class TrajectoryCorrelator(object):
                     # Check if the maximum convergence angle is large enough
                     qc_max = np.degrees(max([entry[2].conv_angle for entry in matched_observations]))
                     if qc_max < self.traj_constraints.min_qc:
-                        print("Max convergence angle too small: {:.1f} < {:.1f} deg".format(qc_max, \
+                        print("Max convergence angle too small: {:.1f} < {:.1f} deg".format(qc_max, 
                             self.traj_constraints.min_qc))
 
                         continue
@@ -1623,7 +1615,7 @@ class TrajectoryCorrelator(object):
                         traj_solved_count += 1
 
                     # If 250 new trajectories were computed, save the DB
-                    if traj_solved_count%250 == 0:
+                    if traj_solved_count % 250 == 0:
                         self.dh.saveDatabase()
 
             # end of "if self.distribute != 1"                    
