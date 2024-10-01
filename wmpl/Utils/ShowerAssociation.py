@@ -200,9 +200,8 @@ def associateShower(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=None, \
 
     Arguments:
         la_sun: [float] Solar longitude (radians).
-        L_g: [float] Sun-centered ecliptic longitude (i.e. geocentric ecliptic longitude minus the 
-            solar longitude) (radians).
-        B_g: [float] Sun-centered geocentric ecliptic latitude (radians).
+        L_g: [float] Geocentric ecliptic longitude (NOT Sun-centered) (radians).
+        B_g: [float] Geocentric ecliptic latitude (radians).
         v_g: [float] Geocentric velocity (m/s).
 
     Keyword arguments:
