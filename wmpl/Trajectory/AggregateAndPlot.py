@@ -1950,7 +1950,9 @@ def generateAutoPlotsAndReports(dir_path, traj_quality_params, prev_sols=10, sol
         traj_summary_year_temp = "traj_summary_yearly_{:d}.tmp".format(year)
         with open(os.path.join(summary_dir, traj_summary_year_temp), 'w') as f_year:
 
-            f_year.write("# Summary generated on {:s} UTC\n\r".format(str(datetime.datetime.now(datetime.timezone.utc))))
+            f_year.write("# Summary generated on {:s} UTC\n\r".format(
+                str(datetime.datetime.now(datetime.timezone.utc)))
+                )
 
             # Find all monthly trajectory reports
             header_written = False
@@ -2002,7 +2004,9 @@ def generateAutoPlotsAndReports(dir_path, traj_quality_params, prev_sols=10, sol
     traj_summary_all_temp = TRAJ_SUMMARY_ALL + ".tmp"
     with open(os.path.join(summary_dir, traj_summary_all_temp), 'w') as f_all:
 
-        f_all.write("# Summary generated on {:s} UTC\n\r".format(str(datetime.datetime.now(datetime.timezone.utc))))
+        f_all.write("# Summary generated on {:s} UTC\n\r".format(
+            str(datetime.datetime.now(datetime.timezone.utc)))
+            )
 
         # Find all monthly trajectory reports
         header_written = False
@@ -2207,7 +2211,8 @@ if __name__ == "__main__":
                 - (datetime.datetime.now(datetime.timezone.utc) - t1)).total_seconds()
 
             # Compute next run time
-            next_run_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=wait_time)
+            next_run_time = datetime.datetime.now(datetime.timezone.utc) \
+                + datetime.timedelta(seconds=wait_time)
 
             # Wait to run
             while next_run_time > datetime.datetime.now(datetime.timezone.utc):

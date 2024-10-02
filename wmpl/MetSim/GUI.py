@@ -128,7 +128,8 @@ class SimulationResults(object):
 
                     # Find the corresponding height for every time
                     frag_entry.grains_height_data = leading_frag_ht_interpol(
-                        np.array(frag_entry.grains_time_data))
+                        np.array(frag_entry.grains_time_data)
+                        )
 
                     # Compute the magnitude
                     frag_entry.grains_abs_mag = -2.5*np.log10(np.array(frag_entry.grains_luminosity)
@@ -147,7 +148,7 @@ class SimulationResults(object):
         if np.any(wake_results):
             
             # Determine the wake plot upper limit
-            self.wake_max_lum = max([max(wake.wake_luminosity_profile) for wake in wake_results 
+            self.wake_max_lum = max([max(wake.wake_luminosity_profile) for wake in wake_results \
                 if wake is not None])
 
 
@@ -162,13 +163,14 @@ class SimulationResults(object):
             self.brightest_height_arr/1000, self.brightest_length_arr/1000, self.brightest_vel_arr/1000, 
             self.leading_frag_height_arr/1000, self.leading_frag_length_arr/1000, 
             self.leading_frag_vel_arr/1000, self.leading_frag_dyn_press_arr/1e6,
-            self.main_height_arr/1000, self.main_length_arr/1000, self.main_vel_arr/1000, 
+            self.main_height_arr/1000, self.main_length_arr/1000, self.main_vel_arr/1000, \
             self.main_dyn_press_arr/1e6,
             self.tau_total_arr, self.tau_main_arr, self.tau_eroded_arr,
             self.abs_magnitude, self.abs_magnitude_main, self.abs_magnitude_eroded,
             np.log10(self.luminosity_arr), np.log10(self.luminosity_main_arr), np.log10(self.luminosity_eroded_arr), 
             np.log10(self.electron_density_total_arr),
-            self.mass_total_active_arr, self.main_mass_arr]
+            self.mass_total_active_arr, self.main_mass_arr
+            ]
 
         header = "B = brightest mass bin, L = leading fragment, M = main\n"
         header += "Time (s), B ht (km), B len (km), B vel (km/s), " + \
@@ -186,12 +188,14 @@ class SimulationResults(object):
                 pass
 
         except PermissionError:
+
             msg = QMessageBox()
             msg.setIcon(QMessageBox.Critical)
             msg.setWindowTitle("File permission error")
             msg.setText("Cannot save file " + os.path.join(dir_path, file_name))
             msg.setInformativeText("Make sure you have write permissions, or close the file if it's open in another program.")
             msg.exec_()
+
             return None
 
 
@@ -2922,6 +2926,8 @@ class MetSimGUI(QMainWindow):
                     (np.cos(lat)*a)**2 + (np.sin(lat)*b)**2
                 )
             )
+
+
             # Set the constants value from the trajectory
             self.const.v_init = self.traj.orbit.v_init
 
