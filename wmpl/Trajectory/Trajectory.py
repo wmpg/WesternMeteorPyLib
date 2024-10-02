@@ -2554,7 +2554,7 @@ class Trajectory(object):
 
         # Maximum number of Monte Carlo runs, in case the MC runs have to be repeated many times
         self.mc_runs_max = mc_runs_max
-        
+    
         # Number of MC samples that will be taken for every point
         self.mc_pick_multiplier = mc_pick_multiplier
 

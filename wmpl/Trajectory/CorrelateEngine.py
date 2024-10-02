@@ -975,7 +975,7 @@ class TrajectoryCorrelator(object):
 
         # Remove all observations done prior to 2000, to weed out those with bad time
         unpaired_observations_all = [met_obs for met_obs in unpaired_observations_all \
-            if met_obs.reference_dt > datetime.datetime(2000, 1, 1, 0, 0, 0, tzinfo=datetime.timezone.ut)]
+            if met_obs.reference_dt > datetime.datetime(2000, 1, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)]
 
 
         # Normalize all reference times and time data so that the reference time is at t = 0 s
