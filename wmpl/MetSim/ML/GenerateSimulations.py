@@ -12,7 +12,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy.interpolate
 
-from wmpl.MetSim.SimResults import SimulationResults
+from wmpl.MetSim.GUI import SimulationResults
 from wmpl.MetSim.MetSimErosion import Constants
 from wmpl.MetSim.MetSimErosion import runSimulation as runSimulationErosion
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly
