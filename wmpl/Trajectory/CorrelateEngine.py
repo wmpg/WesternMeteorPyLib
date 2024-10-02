@@ -110,6 +110,10 @@ class TrajectoryConstraints(object):
         self.min_qc = 3.0
 
 
+        # Maximum number of stations included in the trajectory solution (for speed)
+        self.max_stations = 8
+
+
         ### Velocity filters ###
 
         # Max difference between velocities from difference stations (percent)
@@ -209,8 +213,8 @@ class TrajectoryConstraints(object):
 
 
 class TrajectoryCorrelator(object):
-    def __init__(self, data_handle, traj_constraints, v_init_part, data_in_j2000=True, distribute=0, 
-                 max_stations=MAX_STATIONS, enableOSM=False):
+    def __init__(self, data_handle, traj_constraints, v_init_part, data_in_j2000=True, 
+                 distribute=0, enableOSM=False):
         """ Correlates meteor trajectories using meteor data given to it through a data handle. A data handle
         is a class instance with a common interface between e.g. files on the disk in various formats or 
         meteors in a database.
@@ -228,8 +232,6 @@ class TrajectoryCorrelator(object):
         self.data_in_j2000 = data_in_j2000
 
         self.distribute = distribute
-
-        self.max_stations = max_stations
 
         self.enableOSM = enableOSM
 
@@ -359,7 +361,7 @@ class TrajectoryCorrelator(object):
 
 
         # Use now as a reference time for FOV overlap check
-        ref_jd = datetime2JD(datetime.datetime.utcnow())
+        ref_jd = datetime2JD(datetime.datetime.now(datetime.timezone.utc))
 
         # Compute ECI coordinates of both stations
         reference_stat_eci = np.array(geo2Cartesian(lat1, lon1, elev1, ref_jd))
@@ -571,7 +573,9 @@ class TrajectoryCorrelator(object):
 
     def initTrajectory(self, jdt_ref, mc_runs):
         """ Initialize the Trajectory solver.
-        
+       
+        Limits the number of maximum MC runs to 2*mc_runs.
+
         Arguments:
             jdt_ref: [datetime] Reference Julian date.
             mc_runs: [int] Number of Monte Carlo runs.
@@ -583,7 +587,8 @@ class TrajectoryCorrelator(object):
         traj = Trajectory(jdt_ref, \
             max_toffset=self.traj_constraints.max_toffset, meastype=1, \
             v_init_part=self.v_init_part, monte_carlo=self.traj_constraints.run_mc, \
-            mc_runs=mc_runs, show_plots=False, verbose=False, save_results=False, \
+            mc_runs=mc_runs, mc_runs_max=2*mc_runs,
+            show_plots=False, verbose=False, save_results=False, \
             reject_n_sigma_outliers=2, mc_cores=self.traj_constraints.mc_cores, \
             geometric_uncert=self.traj_constraints.geometric_uncert, enable_OSM_plot=self.enableOSM)
 
@@ -773,9 +778,10 @@ class TrajectoryCorrelator(object):
                 # Disable Monte Carlo runs until an initial stable set of observations is found
                 traj.monte_carlo = False
 
-                # Reinitialize the observations with ignored stations
+                # Reinitialize the observations, rejecting the ignored stations
                 for obs in traj_status.observations:
-                    traj.infillWithObs(obs)
+                    if not obs.ignore_station:
+                        traj.infillWithObs(obs)
 
                 
                 # Re-run the trajectory solution
@@ -851,9 +857,34 @@ class TrajectoryCorrelator(object):
             # Enable Monte Carlo
             traj.monte_carlo = True
 
-            # Reinitialize the observations with ignored stations
-            for obs in traj_status.observations:
-                traj.infillWithObs(obs)
+            # Get all non-ignored observations
+            non_ignored_observations = [obs for obs in traj_status.observations if not obs.ignore_station]
+
+            ### TO DO - improve the logic of choosing stations ###
+
+            # If there are more than the maximum number of stations, choose the ones with the smallest
+            # residuals
+            if len(non_ignored_observations) > self.traj_constraints.max_stations:
+
+                # Sort the observations by residuals (smallest first)
+                obs_sorted = sorted(non_ignored_observations, key=lambda x: x.ang_res_std)
+
+                # Keep only the first <max_stations> stations with the smallest residuals
+                obs_selected = obs_sorted[:self.traj_constraints.max_stations]
+
+                print("More than {:d} stations, keeping only the best ones...".format(self.traj_constraints.max_stations))
+                print("    Selected stations: {:s}".format(', '.join([obs.station_id for obs in obs_selected])))
+
+            else:
+                obs_selected = non_ignored_observations
+
+            ### ###
+
+
+            # Reinitialize the observations, rejecting ignored stations
+            for obs in obs_selected:
+                if not obs.ignore_station:
+                    traj.infillWithObs(obs)
 
 
             # Re-run the trajectory solution
@@ -944,7 +975,7 @@ class TrajectoryCorrelator(object):
 
         # Remove all observations done prior to 2000, to weed out those with bad time
         unpaired_observations_all = [met_obs for met_obs in unpaired_observations_all \
-            if met_obs.reference_dt > datetime.datetime(2000, 1, 1, 0, 0, 0)]
+            if met_obs.reference_dt > datetime.datetime(2000, 1, 1, 0, 0, 0, tzinfo=datetime.timezone.ut)]
 
 
         # Normalize all reference times and time data so that the reference time is at t = 0 s
@@ -1023,6 +1054,18 @@ class TrajectoryCorrelator(object):
                 # Find all unpaired observations that match already existing trajectories
                 for traj_reduced in computed_traj_list:
 
+                    # If the trajectory already has more than the maximum number of stations, skip it
+                    if len(traj_reduced.participating_stations) >= self.traj_constraints.max_stations:
+
+                        print(
+                            "Trajectory {:s} has already reached the maximum number of stations, "
+                            "skipping...".format(
+                                str(jd2Date(traj_reduced.jdt_ref, dt_obj=True, tzinfo=datetime.timezone.utc))
+                                )
+                            )
+
+                        continue
+                
                     # Get all unprocessed observations which are close in time to the reference trajectory
                     traj_time_pairs = self.dh.getTrajTimePairs(traj_reduced, unpaired_observations, \
                         self.traj_constraints.max_toffset)
@@ -1077,7 +1120,7 @@ class TrajectoryCorrelator(object):
 
                         # Init observation object using the new meteor observation
                         obs_new = self.initObservationsObject(met_obs, platepar, \
-                            ref_dt=jd2Date(traj_reduced.jdt_ref, dt_obj=True))
+                            ref_dt=jd2Date(traj_reduced.jdt_ref, dt_obj=True, tzinfo=datetime.timezone.utc))
 
 
                         # Get an observation from the trajectory object with the maximum convergence angle to

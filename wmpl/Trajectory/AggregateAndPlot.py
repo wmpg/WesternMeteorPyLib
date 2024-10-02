@@ -2216,7 +2216,7 @@ if __name__ == "__main__":
 
             # Wait to run
             while next_run_time > datetime.datetime.now(datetime.timezone.utc):
-                print("Waiting {:s} to generate plots and summary again...          ".format(str(next_run_time \
+                print("Waiting {:s} to generate plots and summary again...        ".format(str(next_run_time \
                     - datetime.datetime.now(datetime.timezone.utc))), end='\r')
                 time.sleep(2)
 
