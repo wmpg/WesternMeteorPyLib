@@ -135,7 +135,7 @@ def stationsCommonVolume(station_list, fixed_cameras, jd, max_height, min_height
 
 #     # Use the current Julian date as the reference time (this is just used to convert the coordinated to ECI,
 #     # it has no operational importance whatsoever).
-#     jd = datetime2JD(datetime.datetime.now(datetime.timezone.utc))
+#     jd = datetime2JD(datetime.datetime.now())
 
     
 #     # Construct the initial parameters list
@@ -216,7 +216,7 @@ def explorePointings(station_list, fixed_cameras, min_height, max_height, moving
 
     # Use the current Julian date as the reference time (this is just used to convert the coordinated to ECI,
     # it has no operational importance whatsoever).
-    jd = datetime2JD(datetime.datetime.now(datetime.timezone.utc))
+    jd = datetime2JD(datetime.datetime.now())
 
     # Go through all moving cameras
     for i, stat_moving in enumerate(station_list):
@@ -444,7 +444,7 @@ if __name__ == "__main__":
 
 
     # Show current FOV overlap
-    plotStationFovs(station_list, datetime2JD(datetime.datetime.now(datetime.timezone.utc)), min_height, max_height)
+    plotStationFovs(station_list, datetime2JD(datetime.datetime.now()), min_height, max_height)
 
     # Do an assessment for the whole range of given rights
     explorePointings(station_list, fixed_cameras, min_height, max_height, moving_ranges, steps, parallel_jobs)

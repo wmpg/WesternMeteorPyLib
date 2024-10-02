@@ -245,7 +245,7 @@ if __name__ == "__main__":
     
     lat = 44.327234
     lon = -81.372350
-    jd = datetime2JD(datetime.datetime.now(datetime.timezone.utc))
+    jd = datetime2JD(datetime.datetime.now())
 
     # Height range (km)
     height_min = 20

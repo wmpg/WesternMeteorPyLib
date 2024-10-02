@@ -221,7 +221,7 @@ def datetime2JD(dt):
 
 
 
-def jd2Date(jd, UT_corr=0, dt_obj=False, tzinfo=None):
+def jd2Date(jd, UT_corr=0, dt_obj=False):
     """ Converts the given Julian date to (year, month, day, hour, minute, second, millisecond) tuple. 
 
     Arguments:
@@ -230,7 +230,6 @@ def jd2Date(jd, UT_corr=0, dt_obj=False, tzinfo=None):
     Keyword arguments:
         UT_corr: [float] UT correction in hours (difference from local time to UT)
         dt_obj: [bool] returns a datetime object if True. False by default.
-        tzinfo: [timezone object] timezone information for the datetime object
 
     Return:
         (year, month, day, hour, minute, second, millisecond)
@@ -251,11 +250,6 @@ def jd2Date(jd, UT_corr=0, dt_obj=False, tzinfo=None):
 
     # Return a datetime object if dt_obj == True
     if dt_obj:
-
-        # Set the timezone
-        if tzinfo is not None:
-            date = date.replace(tzinfo=tzinfo)
-
         return date
 
     return date.year, date.month, date.day, date.hour, date.minute, date.second, date.microsecond/1000.0

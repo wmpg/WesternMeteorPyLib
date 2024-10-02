@@ -20,16 +20,7 @@ from wmpl.Utils.TrajConversions import J2000_JD, datetime2JD, altAz2RADec_vect, 
 FPS = 15
 
 
-def loadECSVs(ecsv_paths, no_prepare=False):
-    """ Load meteor observations from ECSV files. 
-    
-    Arguments:
-        ecsv_paths: [list] List of paths to ECSV files.
-
-    Keyword arguments:
-        no_prepare: [bool] If True, only load the observations, do not prepare them for the solver.
-    
-    """
+def loadECSVs(ecsv_paths):
 
     # Init meteor objects
     meteor_list = []
@@ -162,13 +153,8 @@ def loadECSVs(ecsv_paths, no_prepare=False):
             meteor_list.append(meteor)
 
 
-    if no_prepare:
-        return jdt_ref, meteor_list
-
-    else:
-        
-        # Normalize all observations to the same JD and precess from J2000 to the epoch of date
-        return prepareObservations(meteor_list)
+    # Normalize all observations to the same JD and precess from J2000 to the epoch of date
+    return prepareObservations(meteor_list)
 
 
 

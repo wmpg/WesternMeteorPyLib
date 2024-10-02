@@ -2652,7 +2652,7 @@ if __name__ == "__main__":
         lim_magnitudes=lim_magnitudes, P_0m_list=P_0m_list, min_ang_velocities=min_ang_velocities)
 
     # Plot FOVs of stations at ceiling height of 120km
-    plotStationFovs(station_list, datetime2JD(datetime.datetime.now(datetime.timezone.utc)), 70*1000, 120*1000)
+    plotStationFovs(station_list, datetime2JD(datetime.datetime.now()), 70*1000, 120*1000)
 
 
     ### METEOR SHOWER PARAMETERS ###
