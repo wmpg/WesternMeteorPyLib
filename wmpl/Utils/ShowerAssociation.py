@@ -194,15 +194,14 @@ else:
 
 
 def associateShower(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=None, \
-    max_veldif_percent=10.0):
+    max_veldif_percent=10.0, disp_factor=1.0):
     """ Given a shower radiant in Sun-centered ecliptic coordinates, associate it to a meteor shower
         using the showers listed in the GMN shower list.
 
     Arguments:
         la_sun: [float] Solar longitude (radians).
-        L_g: [float] Sun-centered ecliptic longitude (i.e. geocentric ecliptic longitude minus the 
-            solar longitude) (radians).
-        B_g: [float] Sun-centered geocentric ecliptic latitude (radians).
+        L_g: [float] Geocentric ecliptic longitude (NOT Sun-centered) (radians).
+        B_g: [float] Geocentric ecliptic latitude (radians).
         v_g: [float] Geocentric velocity (m/s).
 
     Keyword arguments:
@@ -210,6 +209,8 @@ def associateShower(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=None, \
         max_radius: [float] Maximum angular separation from reference radiant (deg). None by default, 
             which will use the measured dispersion of the shower from the table.
         max_veldif_percent: [float] Maximum velocity difference in percent.
+        disp_factor: [float] Factor by which to multiply the dispersion of the shower. 1.0 by default.
+            If max_radius is given, this factor will be ignored.
 
     Return:
         [MeteorShower instance] MeteorShower instance for the closest match, or None for sporadics.
@@ -238,6 +239,10 @@ def associateShower(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=None, \
         
         # Get the maximum radius for each shower
         max_radius = np.degrees(temp_shower_list[:, 4])
+
+        # Apply the dispersion factor
+        if disp_factor is not None:
+            max_radius *= disp_factor
     
         # Filter the showers
         filter_mask = radiant_distances <= np.radians(max_radius)
@@ -297,7 +302,7 @@ def associateShower(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=None, \
 
 
 def associateShowerTraj(traj, sol_window=1.0, max_radius=None, \
-    max_veldif_percent=10.0):
+    max_veldif_percent=10.0, disp_factor=1.0):
     """ Given a Trajectory object, associate it to a meteor shower using the GMN shower list.
 
     Arguments:
@@ -308,6 +313,8 @@ def associateShowerTraj(traj, sol_window=1.0, max_radius=None, \
         max_radius: [float] Maximum angular separation from reference radiant (deg). If None, the
             measured dispersion of the shower from the table will be used.
         max_veldif_percent: [float] Maximum velocity difference in percent.
+        disp_factor: [float] Factor by which to multiply the dispersion of the shower. 1.0 by default.
+            If max_radius is given, this factor will be ignored.
 
     Return:
         [MeteorShower instance] MeteorShower instance for the closest match, or None for sporadics.
@@ -315,7 +322,8 @@ def associateShowerTraj(traj, sol_window=1.0, max_radius=None, \
 
     if traj.orbit.ra_g is not None:
         return associateShower(traj.orbit.la_sun, traj.orbit.L_g, traj.orbit.B_g, traj.orbit.v_g, \
-            sol_window=sol_window, max_radius=max_radius, max_veldif_percent=max_veldif_percent)
+            sol_window=sol_window, max_radius=max_radius, max_veldif_percent=max_veldif_percent, \
+            disp_factor=disp_factor)
 
     else:
         return None
