@@ -11,7 +11,7 @@ from wmpl.Utils.TrajConversions import cartesian2Geo
 from wmpl.Utils.Physics import dynamicMass
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.MetSim.MetSimErosion import Constants, runSimulation
-from wmpl.MetSim.SimResults import SimulationResults
+from wmpl.MetSim.GUI import SimulationResults
 
 
 def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a):
