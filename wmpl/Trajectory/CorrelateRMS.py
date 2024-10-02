@@ -26,7 +26,6 @@ from wmpl.Utils.Pickling import loadPickle, savePickle
 from wmpl.Utils.TrajConversions import jd2Date
 from wmpl.Trajectory.CorrelateEngine import MAX_STATIONS
 
-
 ### CONSTANTS ###
 
 # Name of the ouput trajectory directory
@@ -485,7 +484,7 @@ class RMSDataHandle(object):
                 database file will be loaded from the dir_path.
             output_dir: [str] Path to the directory where the output files will be saved. None by default, in
                 which case the output files will be saved in the dir_path.
- """
+        """
 
         self.dir_path = dir_path
 
@@ -763,7 +762,7 @@ class RMSDataHandle(object):
                 met_obs = MeteorObsRMS(
                     station_code, 
                     jd2Date(cams_met_obs.jdt_ref, dt_obj=True, tzinfo=datetime.timezone.utc), 
-                    pp, 
+                    pp,
                     meteor_data, 
                     rel_proc_path, 
                     ff_name=cams_met_obs.ff_name
@@ -859,9 +858,12 @@ class RMSDataHandle(object):
                         if len(dir_name) >= 8:
 
                             # Construct test datetime objects with the first and last times within the given day
-                            dt_beg_test = datetime.datetime(dt.year, dt.month, dt.day, tzinfo=datetime.timezone.utc)
-                            dt_end_test = datetime.datetime(dt.year, dt.month, dt.day, tzinfo=datetime.timezone.utc) \
-                                + datetime.timedelta(days=1)
+                            dt_beg_test = datetime.datetime(
+                                dt.year, dt.month, dt.day, tzinfo=datetime.timezone.utc
+                                )
+                            dt_end_test = datetime.datetime(
+                                dt.year, dt.month, dt.day, tzinfo=datetime.timezone.utc
+                                ) + datetime.timedelta(days=1)
 
                             # Check if the day is in the range
                             if (dt_end_test >= dt_beg) and (dt_beg_test <= dt_end):
@@ -1462,8 +1464,13 @@ contain data folders. Data folders should have FTPdetectinfo files together with
 
                 # Extract time range
                 time_beg, time_end = cml_args.timerange.strip("(").strip(")").split(",")
-                dt_beg = datetime.datetime.strptime(time_beg, "%Y%m%d-%H%M%S").replace(tzinfo=datetime.timezone.utc)
-                dt_end = datetime.datetime.strptime(time_end, "%Y%m%d-%H%M%S").replace(tzinfo=datetime.timezone.utc)
+                dt_beg = datetime.datetime.strptime(
+                    time_beg, "%Y%m%d-%H%M%S"
+                    ).replace(tzinfo=datetime.timezone.utc)
+                
+                dt_end = datetime.datetime.strptime(
+                    time_end, "%Y%m%d-%H%M%S"
+                    ).replace(tzinfo=datetime.timezone.utc)
 
                 print("Custom time range:")
                 print("    BEG: {:s}".format(str(dt_beg)))
@@ -1493,7 +1500,8 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         
         # Find the range of datetimes of all folders (take only those after the year 2000)
         proc_dir_dts = [entry[3] for entry in dh.processing_list if entry[3] is not None]
-        proc_dir_dts = [dt for dt in proc_dir_dts if dt > datetime.datetime(2000, 1, 1, 0, 0, 0)]
+        proc_dir_dts = [dt for dt in proc_dir_dts if dt > datetime.datetime(2000, 1, 1, 0, 0, 0,
+                                                                            tzinfo=datetime.timezone.utc)]
 
         # Reject all folders not within the time range of interest +/- 1 day
         if event_time_range is not None:
@@ -1512,7 +1520,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         proc_dir_dt_end = max(proc_dir_dts)
 
         # Split the processing into daily chunks
-        dt_bins = generateDatetimeBins(proc_dir_dt_beg, proc_dir_dt_end, bin_days=1,
+        dt_bins = generateDatetimeBins(proc_dir_dt_beg, proc_dir_dt_end, bin_days=1, 
                                        tzinfo=datetime.timezone.utc)
 
         print()
@@ -1572,7 +1580,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                 next_run_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=wait_time)
 
                 # Wait to run
-                while next_run_time > datetime.datetime.now():
+                while next_run_time > datetime.datetime.now(datetime.timezone.utc):
                     print("Waiting {:s} to run the trajectory solver...          ".format(str(next_run_time \
                         - datetime.datetime.now(datetime.timezone.utc))), end='\r')
                     time.sleep(2)
