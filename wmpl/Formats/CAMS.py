@@ -622,9 +622,8 @@ if __name__ == "__main__":
             gravity_factor=cml_args.gfact,
             plot_all_spatial_residuals=cml_args.plotallspatial, plot_file_type=cml_args.imgformat, \
             show_plots=(not cml_args.hideplots), v_init_part=velpart, v_init_ht=vinitht, \
-            show_jacchia=cml_args.jacchia, \
-            estimate_timing_vel=(False if cml_args.notimefit is None else cml_args.notimefit), \
-            fixed_times=cml_args.fixedtimes, mc_noise_std=cml_args.mcstd,enable_OSM_plot=cml_args.enableOSM)
+            show_jacchia=cml_args.jacchia, estimate_timing_vel=(False if cml_args.notimefit is None else cml_args.notimefit), \
+            mc_noise_std=cml_args.mcstd, fixed_times=cml_args.fixedtimes, enable_OSM_plot=cml_args.enableOSM)
 
 
     # ### PERFORM PHOTOMETRY

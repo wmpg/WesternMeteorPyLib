@@ -14,6 +14,8 @@ ml-dtypes
 keras
 pytz
 pandas
+cartopy
+basemap-data-hires
 gitpython
 numba
 watchdog==3.0.0; python_version == '3.7'

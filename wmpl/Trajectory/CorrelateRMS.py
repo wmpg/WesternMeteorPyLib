@@ -252,7 +252,7 @@ class DatabaseJSON(object):
             for obs in traj.observations:
                 
                 if not ((obs.station_id in failed_traj.participating_stations) 
-                    or (obs.station_id in failed_traj.ignored_stations)):
+                        or (obs.station_id in failed_traj.ignored_stations)):
 
                     all_match = False
                     break
@@ -1360,10 +1360,16 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     arg_parser.add_argument('-i', '--distribute', metavar='DISTRIBUTE_PROC', 
         help="""Enable distributed processing. Values: 1=create and store candidates; 2=load and process candidates only.""", 
             type=int)
-    arg_parser.add_argument("--cpucores", type=int, default=-1,
-        help="Number of CPU codes to use for computation. -1 to use all cores minus one (default).",
-    )
 
+    arg_parser.add_argument("--cpucores", type=int, default=-1,
+        help="Number of CPU codes to use for computation. -1 to use all cores minus one (default).")
+
+    arg_parser.add_argument('-x', '--maxstations', type=int, default=8,
+        help="Use best N stations in the solution (default is use all stations).")
+
+    arg_parser.add_argument('-o', '--enableOSM', 
+        help="Enable OSM based groung plots. Internet connection required.", action="store_true") 
+        
     arg_parser.add_argument("--dbdir", type=str, default=None,
         help="Path to the directory where the trajectory database file will be stored. If not given, the database will be stored in the data directory.")
     

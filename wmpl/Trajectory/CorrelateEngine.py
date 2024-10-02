@@ -761,7 +761,7 @@ class TrajectoryCorrelator(object):
                     ang_res_median = ignore_candidates[obs_ignore_indx][1]
                     print("Ignoring station {:s}".format(obs.station_id))
                     print("   obs std: {:.2f} arcsec".format(3600*np.degrees(obs.ang_res_std)))
-                    print("   bad lim: {:.2f} arcsec".format(3600*np.degrees(ang_res_median 
+                    print("   bad lim: {:.2f} arcsec".format(3600*np.degrees(ang_res_median
                         *self.traj_constraints.bad_station_obs_ang_limit)))
                     print("   max err: {:.2f} arcsec".format(self.traj_constraints.max_arcsec_err))
 
@@ -1066,9 +1066,9 @@ class TrajectoryCorrelator(object):
                     traj_time_pairs = self.dh.getTrajTimePairs(traj_reduced, unpaired_observations, 
                         self.traj_constraints.max_toffset)
 
-                # Skip trajectory if there are no new obervations
-                if not traj_time_pairs:
-                    continue
+                    # Skip trajectory if there are no new obervations
+                    if not traj_time_pairs:
+                        continue
 
 
                 print()
@@ -1079,57 +1079,57 @@ class TrajectoryCorrelator(object):
                 print("--------")
 
 
-                # Filter out bad matches and only keep the good ones
-                candidate_observations = []
-                traj_full = None
-                skip_traj_check = False
-                for met_obs in traj_time_pairs:
+                    # Filter out bad matches and only keep the good ones
+                    candidate_observations = []
+                    traj_full = None
+                    skip_traj_check = False
+                    for met_obs in traj_time_pairs:
 
-                    print("Candidate observation: {:s}".format(met_obs.station_code))
+                        print("Candidate observation: {:s}".format(met_obs.station_code))
 
-                    platepar = self.dh.getPlatepar(met_obs)
+                        platepar = self.dh.getPlatepar(met_obs)
 
-                    # Check that the trajectory beginning and end are within the distance limit
-                    if not self.trajectoryRangeCheck(traj_reduced, platepar):
-                        continue
-
-
-                    # Check that the trajectory is within the field of view
-                    if not self.trajectoryInFOV(traj_reduced, platepar):
-                        continue
+                        # Check that the trajectory beginning and end are within the distance limit
+                        if not self.trajectoryRangeCheck(traj_reduced, platepar):
+                            continue
 
 
-                    # Load the full trajectory object
-                    if traj_full is None:
-                        traj_full = self.dh.loadFullTraj(traj_reduced)
+                        # Check that the trajectory is within the field of view
+                        if not self.trajectoryInFOV(traj_reduced, platepar):
+                            continue
 
-                        # If the full trajectory couldn't be loaded, skip checking this trajectory
+
+                        # Load the full trajectory object
                         if traj_full is None:
-                            
-                            skip_traj_check = True
-                            break
+                            traj_full = self.dh.loadFullTraj(traj_reduced)
+
+                            # If the full trajectory couldn't be loaded, skip checking this trajectory
+                            if traj_full is None:
+                                
+                                skip_traj_check = True
+                                break
 
 
-                    ### Do a rough trajectory solution and perform a quick quality control ###
+                            ### Do a rough trajectory solution and perform a quick quality control ###
 
                     # Init observation object using the new meteor observation
                     obs_new = self.initObservationsObject(met_obs, platepar, 
                         ref_dt=jd2Date(traj_reduced.jdt_ref, dt_obj=True, tzinfo=datetime.timezone.utc))
 
 
-                    # Get an observation from the trajectory object with the maximum convergence angle to
-                    #   the reference observations
-                    obs_traj_best = None
-                    qc_max = 0.0
-                    for obs_tmp in traj_full.observations:
-                        
-                        # Compute the plane intersection between the new and one of trajectory observations
-                        pi = PlaneIntersection(obs_new, obs_tmp)
+                        # Get an observation from the trajectory object with the maximum convergence angle to
+                        #   the reference observations
+                        obs_traj_best = None
+                        qc_max = 0.0
+                        for obs_tmp in traj_full.observations:
+                            
+                            # Compute the plane intersection between the new and one of trajectory observations
+                            pi = PlaneIntersection(obs_new, obs_tmp)
 
-                        # Take the observation with the maximum convergence angle
-                        if (obs_traj_best is None) or (pi.conv_angle > qc_max):
-                            qc_max = pi.conv_angle
-                            obs_traj_best = obs_tmp
+                            # Take the observation with the maximum convergence angle
+                            if (obs_traj_best is None) or (pi.conv_angle > qc_max):
+                                qc_max = pi.conv_angle
+                                obs_traj_best = obs_tmp
 
 
                     # Do a quick trajectory solution and perform sanity checks
