@@ -711,7 +711,7 @@ class RMSDataHandle(object):
                 prev_station = station_code
 
             # Save database to mark those with missing data files (only every 250th station, to speed things up)
-            if (station_count % 250 == 0) and (station_code != prev_station):
+            if (station_count%250 == 0) and (station_code != prev_station):
                 self.saveDatabase()
 
 
@@ -1500,7 +1500,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         
         # Find the range of datetimes of all folders (take only those after the year 2000)
         proc_dir_dts = [entry[3] for entry in dh.processing_list if entry[3] is not None]
-        proc_dir_dts = [dt for dt in proc_dir_dts if dt > datetime.datetime(2000, 1, 1, 0, 0, 0,
+        proc_dir_dts = [dt for dt in proc_dir_dts if dt > datetime.datetime(2000, 1, 1, 0, 0, 0, 
                                                                             tzinfo=datetime.timezone.utc)]
 
         # Reject all folders not within the time range of interest +/- 1 day

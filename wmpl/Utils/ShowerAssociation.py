@@ -243,7 +243,7 @@ def associateShower(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=None, \
         # Apply the dispersion factor
         if disp_factor is not None:
             max_radius *= disp_factor
-
+    
         # Filter the showers
         filter_mask = radiant_distances <= np.radians(max_radius)
         temp_shower_list = temp_shower_list[filter_mask]
