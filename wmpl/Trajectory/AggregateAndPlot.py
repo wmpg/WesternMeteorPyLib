@@ -1755,7 +1755,10 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
 
 
 
-def generateAutoPlotsAndReports(dir_path, traj_quality_params, prev_sols=10, sol_window=1, output_dir=None):
+def generateAutoPlotsAndReports(
+        dir_path, traj_quality_params, 
+        prev_sols=10, sol_window=1, output_dir=None, skip_plots=False
+        ):
     """ Auto generate plots per degree of solar longitude and put them in the AUTO_OUTPUT_DATA_DIR that is 
         in the parent directory of dir_path. 
     
@@ -1767,6 +1770,7 @@ def generateAutoPlotsAndReports(dir_path, traj_quality_params, prev_sols=10, sol
         prev_sols: [int] Number of previous degrees of solar longitdes to go back for and re-generate plots and reports.
         sol_window: [float] Window of solar longitudes for plots and graphs in degrees.
         output_dir: [str] Output directory. If None, dir_path will be used.
+        skip_plots: [bool] Skip plotting. False by default.
     """
 
     if output_dir is None:
@@ -1778,12 +1782,13 @@ def generateAutoPlotsAndReports(dir_path, traj_quality_params, prev_sols=10, sol
     mkdirP(output_dir)
 
     # Make the plots directory
-    plots_dir         = os.path.join(output_dir, AUTO_OUTPUT_PLOT_DIR)
-    plots_daily_dir   = os.path.join(plots_dir,  AUTO_OUTPUT_DAILY_DIR)
-    plots_monthly_dir = os.path.join(plots_dir,  AUTO_OUTPUT_MONTHLY_DIR)
-    mkdirP(plots_dir)
-    mkdirP(plots_daily_dir)
-    mkdirP(plots_monthly_dir)
+    if not skip_plots:
+        plots_dir         = os.path.join(output_dir, AUTO_OUTPUT_PLOT_DIR)
+        plots_daily_dir   = os.path.join(plots_dir,  AUTO_OUTPUT_DAILY_DIR)
+        plots_monthly_dir = os.path.join(plots_dir,  AUTO_OUTPUT_MONTHLY_DIR)
+        mkdirP(plots_dir)
+        mkdirP(plots_daily_dir)
+        mkdirP(plots_monthly_dir)
 
     # Make the trajectory summary directory
     summary_dir         = os.path.join(output_dir,  AUTO_OUTPUT_SUMMARY_DIR)
@@ -1795,7 +1800,7 @@ def generateAutoPlotsAndReports(dir_path, traj_quality_params, prev_sols=10, sol
 
 
 
-    ### Generate daily plots for the last N days ###
+    ### Generate daily plots and summary files for the last N days ###
 
     # Compute the time of the next closest integer solar longitude in degrees
     time_now = datetime.datetime.now(datetime.timezone.utc)
@@ -1836,21 +1841,23 @@ def generateAutoPlotsAndReports(dir_path, traj_quality_params, prev_sols=10, sol
             continue
 
 
-        # Plot graphs per solar longitude
-        plot_name = "scecliptic_{:4d}{:02d}{:02d}_solrange_{:05.1f}-{:05.1f}".format(time_beg.year, \
-            time_beg.month, time_beg.day, sol_lon_beg, sol_lon_end)
-        print("Plotting sol range {:05.1f}-{:05.1f}...".format(sol_lon_beg, sol_lon_end))
-        generateTrajectoryPlots(plots_daily_dir, traj_list, plot_name=plot_name, plot_sol=False, \
-            plot_showers=True, time_limited_plot=True, low_density=True)
+        if not skip_plots:
 
-        # Store the most recent plot
-        if most_recent_plot_file is None:
-            most_recent_plot_file = plot_name
+            # Plot graphs per solar longitude
+            plot_name = "scecliptic_{:4d}{:02d}{:02d}_solrange_{:05.1f}-{:05.1f}".format(time_beg.year, \
+                time_beg.month, time_beg.day, sol_lon_beg, sol_lon_end)
+            print("Plotting sol range {:05.1f}-{:05.1f}...".format(sol_lon_beg, sol_lon_end))
+            generateTrajectoryPlots(plots_daily_dir, traj_list, plot_name=plot_name, plot_sol=False, \
+                plot_showers=True, time_limited_plot=True, low_density=True)
 
-        else:
-            # Store the yesterday's plot
-            if yesterday_plot_file is None:
-                yesterday_plot_file = plot_name
+            # Store the most recent plot
+            if most_recent_plot_file is None:
+                most_recent_plot_file = plot_name
+
+            else:
+                # Store the yesterday's plot
+                if yesterday_plot_file is None:
+                    yesterday_plot_file = plot_name
 
 
         # Write the trajectory summary
@@ -1898,21 +1905,23 @@ def generateAutoPlotsAndReports(dir_path, traj_quality_params, prev_sols=10, sol
             continue
 
 
-        # Plot graphs per month
-        plot_name = "scecliptic_monthly_{:4d}{:02d}".format(dt_beg.year, dt_beg.month)
-        print("Plotting month: {:s}".format(dt_beg.strftime("%B %Y")))
-        generateTrajectoryPlots(plots_monthly_dir, traj_list, plot_name=plot_name, plot_sol=False, \
-            plot_showers=True, time_limited_plot=True, low_density=False)
+        if not skip_plots:
+
+            # Plot graphs per month
+            plot_name = "scecliptic_monthly_{:4d}{:02d}".format(dt_beg.year, dt_beg.month)
+            print("Plotting month: {:s}".format(dt_beg.strftime("%B %Y")))
+            generateTrajectoryPlots(plots_monthly_dir, traj_list, plot_name=plot_name, plot_sol=False, \
+                plot_showers=True, time_limited_plot=True, low_density=False)
 
 
-        # Store this month's plot
-        if latest_monthly_plot_file is None:
-            latest_monthly_plot_file = plot_name
+            # Store this month's plot
+            if latest_monthly_plot_file is None:
+                latest_monthly_plot_file = plot_name
 
-        else:
-            # Store the last month's plot
-            if last_month_plot_file is None:
-                last_month_plot_file = plot_name
+            else:
+                # Store the last month's plot
+                if last_month_plot_file is None:
+                    last_month_plot_file = plot_name
 
 
         # Write the trajectory summary
@@ -2054,25 +2063,27 @@ def generateAutoPlotsAndReports(dir_path, traj_quality_params, prev_sols=10, sol
 
     ### Link to latest files ###
 
-    plot_copy_list = [
-        [plots_daily_dir,   most_recent_plot_file,    "scecliptic_latest_daily"], \
-        [plots_daily_dir,   yesterday_plot_file,      "scecliptic_yesterday"], \
-        [plots_monthly_dir, latest_monthly_plot_file, "scecliptic_latest_monthly"], \
-        [plots_monthly_dir, last_month_plot_file,     "scecliptic_last_month"]]
+    if not skip_plots:
 
-    # Link latest plots per day and month
-    for plots_dir, plot_copy_name, plot_name in plot_copy_list:
+        plot_copy_list = [
+            [plots_daily_dir,   most_recent_plot_file,    "scecliptic_latest_daily"], \
+            [plots_daily_dir,   yesterday_plot_file,      "scecliptic_yesterday"], \
+            [plots_monthly_dir, latest_monthly_plot_file, "scecliptic_latest_monthly"], \
+            [plots_monthly_dir, last_month_plot_file,     "scecliptic_last_month"]]
 
-        # Set the most recent daily plots
-        if plot_copy_name is not None:
+        # Link latest plots per day and month
+        for plots_dir, plot_copy_name, plot_name in plot_copy_list:
 
-            print("Copying latest plots...")
+            # Set the most recent daily plots
+            if plot_copy_name is not None:
 
-            # Set latest plots
-            suffix_list = ["_vg.png", "_density.png"]
-            for suffix in suffix_list:
-                shutil.copy2(os.path.join(plots_dir, plot_copy_name + suffix), \
-                    os.path.join(plots_dir, plot_name + suffix))
+                print("Copying latest plots...")
+
+                # Set latest plots
+                suffix_list = ["_vg.png", "_density.png"]
+                for suffix in suffix_list:
+                    shutil.copy2(os.path.join(plots_dir, plot_copy_name + suffix), \
+                        os.path.join(plots_dir, plot_name + suffix))
 
     
     # Link to latest summary files
@@ -2134,10 +2145,36 @@ if __name__ == "__main__":
     arg_parser.add_argument('-p', '--plot_all_showers', action="store_true", \
         help="""Plot showers on the maps showing the whole date ramge."""
         )
+    
+    arg_parser.add_argument('--skipplots', action="store_true", \
+        help="""Skip plotting the graphs and maps."""
+        )
 
     arg_parser.add_argument('-o', '--output', metavar='OUTPUT_DIR', type=str, \
         help="""Output directory. If not given, the data directory will be used."""
         )
+    
+    # Add custom specifcation for the trajectory quality parameters
+    arg_parser.add_argument('--min_traj_points', metavar='MIN_POINTS', type=int,
+        help='Minimum number of points on the trajectory for the station with the most points.')
+    
+    arg_parser.add_argument('--min_qc', metavar='MIN_QC', type=float,
+        help='Minimum convergence angle (deg).')
+    
+    arg_parser.add_argument('--max_e', metavar='MAX_E', type=float,
+        help='Maximum eccentricity.')
+    
+    arg_parser.add_argument('--max_radiant_err', metavar='MAX_RAD_ERR', type=float,
+        help='Maximum radiant error (deg).')
+    
+    arg_parser.add_argument('--max_vg_err', metavar='MAX_VG_ERR', type=float,
+        help='Maximum geocentric velocity error (percent).')
+    
+    arg_parser.add_argument('--max_begin_ht', metavar='MAX_BEGIN_HT', type=float,
+        help='Begin height filter (km).')
+    
+    arg_parser.add_argument('--min_end_ht', metavar='MIN_END_HT', type=float,
+        help='End height filter (km).')
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -2173,6 +2210,29 @@ if __name__ == "__main__":
 
     traj_quality_params = TrajQualityParams()
 
+
+    # Apply custom filters given in the command line arguments
+    if cml_args.min_traj_points is not None:
+        traj_quality_params.min_traj_points = cml_args.min_traj_points
+
+    if cml_args.min_qc is not None:
+        traj_quality_params.min_qc = cml_args.min_qc
+
+    if cml_args.max_e is not None:
+        traj_quality_params.max_e = cml_args.max_e
+
+    if cml_args.max_radiant_err is not None:
+        traj_quality_params.max_radiant_err = cml_args.max_radiant_err
+
+    if cml_args.max_vg_err is not None:
+        traj_quality_params.max_vg_err = cml_args.max_vg_err
+
+    if cml_args.max_begin_ht is not None:
+        traj_quality_params.max_begin_ht = cml_args.max_begin_ht
+
+    if cml_args.min_end_ht is not None:
+        traj_quality_params.min_end_ht = cml_args.min_end_ht
+
     ### ###
 
 
@@ -2202,7 +2262,7 @@ if __name__ == "__main__":
 
             # Generate the latest plots
             generateAutoPlotsAndReports(cml_args.dir_path, traj_quality_params, prev_sols=prev_sols, \
-                output_dir=cml_args.output)
+                output_dir=cml_args.output, skip_plots=cml_args.skipplots)
 
 
 
@@ -2238,48 +2298,52 @@ if __name__ == "__main__":
             output_dir = cml_args.dir_path
 
 
-        # Generate shower plots
-        print("Plotting showers...")
-        generateShowerPlots(output_dir, traj_list, min_members=30, P_0m=P_0M, max_radiant_err=0.5)
-
         # Generate the orbit summary file
         print("Writing summary file...")
         writeOrbitSummaryFile(output_dir, traj_list, P_0m=P_0M)
 
-        # Generate summary plots
-        print("Plotting all trajectories...")
-        pas = False
-        if cml_args.plot_all_showers is not None:
-            pas = True
-            print('adding shower loci to all maps')
-        generateTrajectoryPlots(output_dir, traj_list, plot_showers=pas, time_limited_plot=False)
+        if not cml_args.skipplots:
 
-        # Generate station plot
-        print("Plotting station plot...")
-        generateStationPlot(output_dir, traj_list)
+            # Generate shower plots
+            print("Plotting showers...")
+            generateShowerPlots(output_dir, traj_list, min_members=30, P_0m=P_0M, max_radiant_err=0.5)
 
+            # Generate summary plots
+            print("Plotting all trajectories...")
+            pas = False
+            if cml_args.plot_all_showers is not None:
+                pas = True
+                print('adding shower loci to all maps')
+            generateTrajectoryPlots(output_dir, traj_list, plot_showers=pas, time_limited_plot=False)
 
-
-
-        # Generate radiant plots per solar longitude (degrees)
-        step = cml_args.solstep
-        for sol_min in np.arange(0, 360 + step, step):
-            sol_max = sol_min + step
-
-            # Extract only those trajectories with solar longitudes in the given range
-            traj_list_sol = [traj_temp for traj_temp in traj_list if \
-                (np.degrees(traj_temp.orbit.la_sun) >= sol_min) \
-                and (np.degrees(traj_temp.orbit.la_sun) < sol_max)]
+            # Generate station plot
+            print("Plotting station plot...")
+            generateStationPlot(output_dir, traj_list)
 
 
-            # Skip solar longitudes with no data
-            if len(traj_list_sol) == 0:
-                continue
-
-            print("Plotting solar longitude range: {:.1f} - {:.1f}".format(sol_min, sol_max))
 
 
-            # Plot graphs per solar longitude
-            generateTrajectoryPlots(output_dir, traj_list_sol, \
-                plot_name="scecliptic_solrange_{:05.1f}-{:05.1f}".format(sol_min, sol_max), plot_sol=False, \
-                plot_showers=True, time_limited_plot=True)
+            # Generate radiant plots per solar longitude (degrees)
+            step = cml_args.solstep
+            for sol_min in np.arange(0, 360 + step, step):
+                sol_max = sol_min + step
+
+                # Extract only those trajectories with solar longitudes in the given range
+                traj_list_sol = [traj_temp for traj_temp in traj_list if \
+                    (np.degrees(traj_temp.orbit.la_sun) >= sol_min) \
+                    and (np.degrees(traj_temp.orbit.la_sun) < sol_max)]
+
+
+                # Skip solar longitudes with no data
+                if len(traj_list_sol) == 0:
+                    continue
+
+                print("Plotting solar longitude range: {:.1f} - {:.1f}".format(sol_min, sol_max))
+
+
+                # Plot graphs per solar longitude
+                generateTrajectoryPlots(
+                    output_dir, traj_list_sol,
+                    plot_name="scecliptic_solrange_{:05.1f}-{:05.1f}".format(sol_min, sol_max),
+                    plot_sol=False, plot_showers=True, time_limited_plot=True
+                    )
