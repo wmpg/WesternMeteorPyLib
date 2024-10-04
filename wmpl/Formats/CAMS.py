@@ -624,8 +624,7 @@ if __name__ == "__main__":
             show_plots=(not cml_args.hideplots), v_init_part=velpart, v_init_ht=vinitht, \
             show_jacchia=cml_args.jacchia, \
             estimate_timing_vel=(False if cml_args.notimefit is None else cml_args.notimefit), \
-            fixed_times=cml_args.fixedtimes, mc_noise_std=cml_args.mcstd, 
-            enable_OSM_plot=cml_args.enableOSM)
+            fixed_times=cml_args.fixedtimes, mc_noise_std=cml_args.mcstd)
 
 
     # ### PERFORM PHOTOMETRY

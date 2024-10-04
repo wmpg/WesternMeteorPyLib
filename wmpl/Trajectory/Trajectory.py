@@ -35,6 +35,13 @@ from matplotlib.pyplot import cm
 from wmpl.Utils.OSTools import importBasemap
 Basemap = importBasemap()
 
+try:
+    from wmpl.Utils.PlotMap_OSM import OSMMap
+    HAS_OSM = True
+except ImportError:
+    HAS_OSM = False
+
+
 
 try:
     # If Numba is available, use the jit decorator with specified options
@@ -2421,8 +2428,8 @@ class Trajectory(object):
         v_init_ht=None, estimate_timing_vel=True, monte_carlo=True, mc_runs=None, mc_pick_multiplier=1, \
         mc_noise_std=1.0, geometric_uncert=False, filter_picks=True, calc_orbit=True, show_plots=True, \
         show_jacchia=False, save_results=True, gravity_correction=True, gravity_factor=1.0, \
-        plot_all_spatial_residuals=False, plot_file_type='png', traj_id=None, reject_n_sigma_outliers=3, \
-        mc_cores=None, fixed_times=None, mc_runs_max=None, enable_OSM_plot=False):
+        plot_all_spatial_residuals=False, plot_file_type='png', traj_id=None, reject_n_sigma_outliers=3, 
+        mc_cores=None, fixed_times=None, mc_runs_max=None):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -2482,7 +2489,6 @@ class Trajectory(object):
                 all stations will be estimated. Only used if estimate_timing_vel is True.
             mc_runs_max: [int] Maximum number of Monte Carlo runs. None by default, which will limit the runs
                 to 10x req_num.
-            enable_OSM_plot: [bool] enable OS Map based ground maps in addition to standard ones. Default None
 
         """
 
@@ -2559,9 +2565,6 @@ class Trajectory(object):
 
         # Standard deviatons of measurement noise to add during Monte Carlo runs
         self.mc_noise_std = mc_noise_std
-
-        # Enable OSM plot if required
-        self.enable_OSM_plot = enable_OSM_plot         
 
         # If True, pure geometric uncertainties will be computed and culling of solutions based on cost
         #   function value will not be done
@@ -5531,9 +5534,7 @@ class Trajectory(object):
         ### Plot lat/lon of the meteor using OSM ###
         ######################################################################################################
             
-        if (self.enable_OSM_plot):
-
-            from wmpl.Utils.PlotMap_OSM import OSMMap
+        if (HAS_OSM):
 
             # Calculate mean latitude and longitude of all meteor points
             met_lon_mean = meanAngle([x for x in obs.meas_lon for obs in self.observations])
