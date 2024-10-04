@@ -1060,10 +1060,7 @@ class TrajectoryCorrelator(object):
                         print(
                             "Trajectory {:s} has already reached the maximum number of stations, "
                             "skipping...".format(
-                                str(jd2Date(traj_reduced.jdt_ref, dt_obj=True, tzinfo=datetime.timezone.utc))
-                                )
-                            )
-
+                                str(jd2Date(traj_reduced.jdt_ref, dt_obj=True, tzinfo=datetime.timezone.utc))))
                         continue
                 
                     # Get all unprocessed observations which are close in time to the reference trajectory
@@ -1534,9 +1531,9 @@ class TrajectoryCorrelator(object):
                     matched_observations = sorted(matched_observations, key=lambda x: str(x[1].station_code))
 
                     # XXXXXXX
-                    if self.max_stations < MAX_STATIONS and len(matched_observations) > self.max_stations:
-                        print('Selecting best {} stations'.format(self.max_stations))
-                        matched_observations = pickBestStations(matched_observations, self.max_stations)
+                    if self.traj_constraints.max_stations < MAX_STATIONS and len(matched_observations) > self.traj_constraints.max_stations:
+                        print('Selecting best {} stations'.format(self.traj_constraints.max_stations))
+                        matched_observations = pickBestStations(matched_observations, self.traj_constraints.max_stations)
 
                     # Print info about observations which are being solved
                     print()

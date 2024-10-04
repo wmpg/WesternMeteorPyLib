@@ -61,9 +61,6 @@ from wmpl.Utils.TrajConversions import EARTH, G, ecef2ENU, enu2ECEF, geo2Cartesi
     cartesian2Geo, altAz2RADec_vect, raDec2AltAz, raDec2AltAz_vect, raDec2ECI, eci2RaDec, jd2Date, datetime2JD
 from wmpl.Utils.PyDomainParallelizer import parallelComputeGenerator
 
-#import cartopy.crs as ccrs
-#import cartopy.io.img_tiles as cimgt
-
 
 # Text size of image legends
 LEGEND_TEXT_SIZE = 6
@@ -1989,6 +1986,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
         plot_results: [bool] Plot the trajectory and orbit spread. True by default.
         mc_cores: [int] Number of CPU cores to use for Monte Carlo parallel procesing. None by default,
             which means that all available cores will be used.
+        max_runs: [int] Maximum number of runs. None by default, which will limit the runs to 10x req_num.
     """
 
 
@@ -2484,6 +2482,7 @@ class Trajectory(object):
                 all stations will be estimated. Only used if estimate_timing_vel is True.
             mc_runs_max: [int] Maximum number of Monte Carlo runs. None by default, which will limit the runs
                 to 10x req_num.
+            enable_OSM_plot: [bool] enable OS Map based ground maps in addition to standard ones. Default None
 
         """
 
@@ -5535,8 +5534,6 @@ class Trajectory(object):
         if (self.enable_OSM_plot):
 
             from wmpl.Utils.PlotMap_OSM import OSMMap
-            #import cartopy.crs as ccrs
-            #import cartopy.io.img_tiles as cimgt        
 
             # Calculate mean latitude and longitude of all meteor points
             met_lon_mean = meanAngle([x for x in obs.meas_lon for obs in self.observations])
