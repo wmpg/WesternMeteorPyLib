@@ -15,6 +15,8 @@ import shutil
 import time
 import signal
 import multiprocessing
+import logging
+import logging.handlers
 
 import numpy as np
 
@@ -67,7 +69,7 @@ class TrajectoryReduced(object):
                 try:
                     traj = loadPickle(*os.path.split(traj_file_path))
                 except EOFError:
-                    print("Pickle file could not be loaded:", traj_file_path)
+                    log.info("Pickle file could not be loaded: " + traj_file_path)
                     return None
 
             else:
@@ -195,7 +197,7 @@ class DatabaseJSON(object):
 
             # Convert reduced trajectory objects to JSON objects
             self2.trajectories = {key: self.trajectories[key].__dict__ for key in self.trajectories}
-            self2.failed_trajectories = {key: self.failed_trajectories[key].__dict__ 
+            self2.failed_trajectories = {key: self.failed_trajectories[key].__dict__ \
                 for key in self.failed_trajectories}
 
             f.write(json.dumps(self2, default=lambda o: o.__dict__, indent=4, sort_keys=True))
@@ -250,7 +252,7 @@ class DatabaseJSON(object):
             all_match = True
             for obs in traj.observations:
                 
-                if not ((obs.station_id in failed_traj.participating_stations) 
+                if not ((obs.station_id in failed_traj.participating_stations) \
                     or (obs.station_id in failed_traj.ignored_stations)):
 
                     all_match = False
@@ -386,7 +388,7 @@ class MeteorObsRMS(object):
         self.processed = False 
 
         # Mean datetime of the observation
-        self.mean_dt = self.reference_dt + datetime.timedelta(seconds=np.mean([entry.time_rel 
+        self.mean_dt = self.reference_dt + datetime.timedelta(seconds=np.mean([entry.time_rel \
             for entry in self.data]))
 
         
@@ -399,9 +401,9 @@ class MeteorObsRMS(object):
 
 
         # Find angular velocity at the beginning per every axis
-        dxdf_beg = (self.data[half_index].x - self.data[0].x)/(self.data[half_index].frame 
+        dxdf_beg = (self.data[half_index].x - self.data[0].x)/(self.data[half_index].frame \
             - self.data[0].frame)
-        dydf_beg = (self.data[half_index].y - self.data[0].y)/(self.data[half_index].frame 
+        dydf_beg = (self.data[half_index].y - self.data[0].y)/(self.data[half_index].frame \
             - self.data[0].frame)
 
         # Compute locations of centroids 2 frames before the beginning
@@ -432,9 +434,9 @@ class MeteorObsRMS(object):
 
 
         # Find angular velocity at the ending per every axis
-        dxdf_end = (self.data[-1].x - self.data[half_index].x)/(self.data[-1].frame 
+        dxdf_end = (self.data[-1].x - self.data[half_index].x)/(self.data[-1].frame \
             - self.data[half_index].frame)
-        dydf_end = (self.data[-1].y - self.data[half_index].y)/(self.data[-1].frame 
+        dydf_end = (self.data[-1].y - self.data[half_index].y)/(self.data[-1].frame \
             - self.data[half_index].frame)
 
         # Compute locations of centroids 2 frames after the end
@@ -457,7 +459,7 @@ class MeteorObsRMS(object):
         # Generate a unique observation ID, the format is: STATIONID_YYYYMMDD-HHMMSS.us_CHECKSUM
         #  where CHECKSUM is the last four digits of the sum of all observation image X cordinates
         checksum = int(np.sum([entry.x for entry in self.data]) % 10000)
-        self.id = "{:s}_{:s}_{:04d}".format(self.station_code, self.mean_dt.strftime("%Y%m%d-%H%M%S.%f"), 
+        self.id = "{:s}_{:s}_{:04d}".format(self.station_code, self.mean_dt.strftime("%Y%m%d-%H%M%S.%f"), \
             checksum)
 
 
@@ -490,7 +492,7 @@ class RMSDataHandle(object):
 
         self.dt_range = dt_range
 
-        print("Using directory:", self.dir_path)
+        log.info("Using directory: " + self.dir_path)
 
 
         # Set the database directory
@@ -517,34 +519,34 @@ class RMSDataHandle(object):
 
         # Load database of processed folders
         database_path = os.path.join(self.db_dir, JSON_DB_NAME)
-        print()
-        print("Loading database: {:s}".format(database_path))
+        log.info("")
+        log.info("Loading database: {:s}".format(database_path))
         self.db = DatabaseJSON(database_path)
-        print("   ... done!")
+        log.info("   ... done!")
 
         # Find unprocessed meteor files
-        print()
-        print("Finding unprocessed data...")
+        log.info("")
+        log.info("Finding unprocessed data...")
         self.processing_list = self.findUnprocessedFolders(station_list)
-        print("   ... done!")
+        log.info("   ... done!")
 
         # Load already computed trajectories
-        print()
-        print("Loading already computed trajectories...")
+        log.info("")
+        log.info("Loading already computed trajectories...")
         self.loadComputedTrajectories(os.path.join(self.output_dir, OUTPUT_TRAJ_DIR))
-        print("   ... done!")
+        log.info("   ... done!")
 
 
         ### Define country groups to speed up the proceessing ###
 
         north_america_group = ["CA", "US", "MX"]
 
-        south_america_group = ["AR", "BO", "BR", "CL", "CO", "EC", "FK", "GF", "GY", "GY", "PY", "PE", "SR", 
+        south_america_group = ["AR", "BO", "BR", "CL", "CO", "EC", "FK", "GF", "GY", "GY", "PY", "PE", "SR", \
             "UY", "VE"]
 
-        europe_group = ["AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", 
-            "IT", "LV", "LT", "LU", "MT", "NL", "PO", "PT", "RO", "SK", "SI", "ES", "SE", "AL", "AD", "AM", 
-            "BY", "BA", "FO", "GE", "GI", "IM", "XK", "LI", "MK", "MD", "MC", "ME", "NO", "RU", "SM", "RS", 
+        europe_group = ["AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", \
+            "IT", "LV", "LT", "LU", "MT", "NL", "PO", "PT", "RO", "SK", "SI", "ES", "SE", "AL", "AD", "AM", \
+            "BY", "BA", "FO", "GE", "GI", "IM", "XK", "LI", "MK", "MD", "MC", "ME", "NO", "RU", "SM", "RS", \
             "CH", "TR", "UA", "UK", "VA"]
 
         new_zealand_group = ["NZ"]
@@ -552,7 +554,7 @@ class RMSDataHandle(object):
         australia_group = ["AU"]
 
 
-        self.country_groups = [north_america_group, south_america_group, europe_group, new_zealand_group, 
+        self.country_groups = [north_america_group, south_america_group, europe_group, new_zealand_group, \
             australia_group]
 
         ### ###
@@ -568,10 +570,10 @@ class RMSDataHandle(object):
             # Check if the dir name matches the station name pattern
             if os.path.isdir(os.path.join(self.dir_path, dir_name)):
                 if re.match("^[A-Z]{2}[A-Z0-9]{4}$", dir_name):
-                    print("Using station:", dir_name)
+                    log.info("Using station: " + dir_name)
                     station_list.append(dir_name)
                 else:
-                    print("Skipping directory:", dir_name)
+                    log.info("Skipping directory: " + dir_name)
 
 
         return station_list
@@ -602,10 +604,10 @@ class RMSDataHandle(object):
 
                 # Extract the date and time of directory, if possible
                 try:
-                    night_dt = datetime.datetime.strptime("_".join(night_name.split("_")[1:3]), 
+                    night_dt = datetime.datetime.strptime("_".join(night_name.split("_")[1:3]), \
                         "%Y%m%d_%H%M%S").replace(tzinfo=datetime.timezone.utc)
                 except:
-                    print("Could not parse the date of the night dir: {:s}".format(night_path))
+                    log.info("Could not parse the date of the night dir: {:s}".format(night_path))
                     night_dt = None
 
                 # # If the night path is not in the processed list, add it to the processing list
@@ -619,7 +621,7 @@ class RMSDataHandle(object):
 
 
         # if skipped_dirs:
-        #     print("Skipped {:d} processed directories".format(skipped_dirs))
+        #     log.info("Skipped {:d} processed directories".format(skipped_dirs))
 
         return processing_list
 
@@ -672,8 +674,8 @@ class RMSDataHandle(object):
             if os.path.isfile(proc_path):
                 continue
 
-            print()
-            print("Processing station:", station_code)
+            log.info("")
+            log.info("Processing station: " + station_code)
 
             # Find FTPdetectinfo and platepar files
             for name in os.listdir(proc_path):
@@ -699,7 +701,7 @@ class RMSDataHandle(object):
 
             # Skip these observations if no data files were found inside
             if (ftpdetectinfo_name is None) or (platepar_recalibrated_name is None):
-                print("  Skipping {:s} due to missing data files...".format(rel_proc_path))
+                log.info("  Skipping {:s} due to missing data files...".format(rel_proc_path))
 
                 # Add the folder to the list of processed folders
                 self.db.addProcessedDir(station_code, rel_proc_path)
@@ -720,7 +722,7 @@ class RMSDataHandle(object):
                 platepars_recalibrated_dict = json.load(f)
 
             # If all files exist, init the meteor container object
-            cams_met_obs_list = self.initMeteorObs(station_code, os.path.join(proc_path, 
+            cams_met_obs_list = self.initMeteorObs(station_code, os.path.join(proc_path, \
                 ftpdetectinfo_name), platepars_recalibrated_dict)
 
             # Format the observation object to the one required by the trajectory correlator
@@ -731,7 +733,7 @@ class RMSDataHandle(object):
                 if cams_met_obs.ff_name in platepars_recalibrated_dict:
                     pp_dict = platepars_recalibrated_dict[cams_met_obs.ff_name]
                 else:
-                    print("    Skipping {:s}, not found in platepar dict".format(cams_met_obs.ff_name))
+                    log.info("    Skipping {:s}, not found in platepar dict".format(cams_met_obs.ff_name))
                     continue
 
                 pp = PlateparDummy(**pp_dict)
@@ -740,19 +742,19 @@ class RMSDataHandle(object):
                 # Skip observations which weren't recalibrated
                 if hasattr(pp, "auto_recalibrated"):
                     if not pp.auto_recalibrated:
-                        print("    Skipping {:s}, not recalibrated!".format(cams_met_obs.ff_name))
+                        log.info("    Skipping {:s}, not recalibrated!".format(cams_met_obs.ff_name))
                         continue
 
 
                 # Init meteor data
                 meteor_data = []
-                for entry in zip(cams_met_obs.frames, cams_met_obs.time_data, cams_met_obs.x_data,
-                    cams_met_obs.y_data, cams_met_obs.azim_data, cams_met_obs.elev_data, 
+                for entry in zip(cams_met_obs.frames, cams_met_obs.time_data, cams_met_obs.x_data,\
+                    cams_met_obs.y_data, cams_met_obs.azim_data, cams_met_obs.elev_data, \
                     cams_met_obs.ra_data, cams_met_obs.dec_data, cams_met_obs.mag_data):
 
                     frame, time_rel, x, y, azim, alt, ra, dec, mag = entry
 
-                    met_point = MeteorPointRMS(frame, time_rel, x, y, np.degrees(ra), np.degrees(dec), 
+                    met_point = MeteorPointRMS(frame, time_rel, x, y, np.degrees(ra), np.degrees(dec), \
                         np.degrees(azim), np.degrees(alt), mag)
 
                     meteor_data.append(met_point)
@@ -780,11 +782,11 @@ class RMSDataHandle(object):
 
                     unpaired_met_obs_list.append(met_obs)
 
-            print("  Added {:d} observations!".format(added_count))
+            log.info("  Added {:d} observations!".format(added_count))
 
 
-        print()
-        print("  Finished loading unpaired observations!")
+        log.info("")
+        log.info("  Finished loading unpaired observations!")
         self.saveDatabase()
 
         return unpaired_met_obs_list
@@ -919,8 +921,12 @@ class RMSDataHandle(object):
         if not os.path.isdir(traj_dir_path):
             return
         
-        print("  Loading trajectories from:", traj_dir_path)
-        print("  Datetime range:", self.dt_range)
+        log.info("  Loading trajectories from: " + traj_dir_path)
+        log.info("  Datetime range: {:s} - {:s}".format(
+            self.dt_range[0].strftime("%Y-%m-%d %H:%M:%S"), 
+            self.dt_range[1].strftime("%Y-%m-%d %H:%M:%S")
+            ))
+
 
         counter = 0
 
@@ -933,21 +939,21 @@ class RMSDataHandle(object):
             
             if self.yearMonthDayDirInDtRange(yyyy):
 
-                print("- year    ", yyyy)
+                log.info("- year    " + str(yyyy))
                 
                 # Check the month
                 for yyyymm in sorted(os.listdir(os.path.join(traj_dir_path, yyyy))):
 
                     if self.yearMonthDayDirInDtRange(yyyymm):
 
-                        print("  - month ", yyyymm)
+                        log.info("  - month " + str(yyyymm))
 
                         # Check the day
                         for yyyymmdd in sorted(os.listdir(os.path.join(traj_dir_path, yyyy, yyyymm))):
 
                             if self.yearMonthDayDirInDtRange(yyyymmdd):
 
-                                print("    - day ", yyyymmdd)
+                                log.info("    - day " + str(yyyymmdd))
 
                                 yyyymmdd_dir_path = os.path.join(traj_dir_path, yyyy, yyyymm, yyyymmdd)
 
@@ -971,7 +977,7 @@ class RMSDataHandle(object):
 
                         # Print every 1000th trajectory
                         if counter % 1000 == 0:
-                            print("  Loaded {:6d} trajectories, currently on {:s}".format(counter, file_name))
+                            log.info("  Loaded {:6d} trajectories, currently on {:s}".format(counter, file_name))
 
                         counter += 1
 
@@ -980,8 +986,8 @@ class RMSDataHandle(object):
         """ Returns a list of computed trajectories between the Julian dates.
         """
 
-        return [self.db.trajectories[key] for key in self.db.trajectories 
-            if (self.db.trajectories[key].jdt_ref >= jd_beg) 
+        return [self.db.trajectories[key] for key in self.db.trajectories \
+            if (self.db.trajectories[key].jdt_ref >= jd_beg) \
                 and (self.db.trajectories[key].jdt_ref <= jd_end)]
                 
 
@@ -1251,7 +1257,7 @@ class RMSDataHandle(object):
             return traj
 
         except FileNotFoundError:
-            print("File {:s} not found!".format(traj_reduced.traj_file_path))
+            log.info("File {:s} not found!".format(traj_reduced.traj_file_path))
             
             return None
 
@@ -1262,7 +1268,7 @@ class RMSDataHandle(object):
 
         def _breakHandler(signum, frame):
             """ Do nothing if CTRL + C is pressed. """
-            print("The data base is being saved, the program cannot be exited right now!")
+            log.info("The data base is being saved, the program cannot be exited right now!")
             pass
 
         # Prevent quitting while a data base is being saved
@@ -1270,7 +1276,7 @@ class RMSDataHandle(object):
         signal.signal(signal.SIGINT, _breakHandler)
 
         # Save the data base
-        print("Saving data base to disk...")
+        log.info("Saving data base to disk...")
         self.db.save()
 
         # Restore the signal functionality
@@ -1320,51 +1326,47 @@ contain data folders. Data folders should have FTPdetectinfo files together with
 
     arg_parser.add_argument('dir_path', type=str, help='Path to the root data directory. Trajectory helper files will be stored here as well.')
 
-    arg_parser.add_argument('-t', '--maxtoffset', metavar='MAX_TOFFSET', 
+    arg_parser.add_argument('-t', '--maxtoffset', metavar='MAX_TOFFSET', \
         help='Maximum time offset between the stations. Default is 5 seconds.', type=float, default=10.0)
 
-    arg_parser.add_argument('-s', '--maxstationdist', metavar='MAX_STATION_DIST', 
-        help='Maximum distance (km) between stations of paired meteors. Default is 600 km.', type=float, 
+    arg_parser.add_argument('-s', '--maxstationdist', metavar='MAX_STATION_DIST', \
+        help='Maximum distance (km) between stations of paired meteors. Default is 600 km.', type=float, \
         default=600.0)
 
-    arg_parser.add_argument('-m', '--minerr', metavar='MIN_ARCSEC_ERR', 
-        help="Minimum error in arc seconds below which the station won't be rejected. 30 arcsec by default.", 
+    arg_parser.add_argument('-m', '--minerr', metavar='MIN_ARCSEC_ERR', \
+        help="Minimum error in arc seconds below which the station won't be rejected. 30 arcsec by default.", \
         type=float)
 
-    arg_parser.add_argument('-M', '--maxerr', metavar='MAX_ARCSEC_ERR', 
-        help="Maximum error in arc seconds, above which the station will be rejected. 180 arcsec by default.", 
+    arg_parser.add_argument('-M', '--maxerr', metavar='MAX_ARCSEC_ERR', \
+        help="Maximum error in arc seconds, above which the station will be rejected. 180 arcsec by default.", \
         type=float)
 
-    arg_parser.add_argument('-v', '--maxveldiff', metavar='MAX_VEL_DIFF', 
-        help='Maximum difference in percent between velocities between two stations. Default is 25 percent.', 
+    arg_parser.add_argument('-v', '--maxveldiff', metavar='MAX_VEL_DIFF', \
+        help='Maximum difference in percent between velocities between two stations. Default is 25 percent.', \
         type=float, default=25.0)
 
-    arg_parser.add_argument('-p', '--velpart', metavar='VELOCITY_PART', 
-        help='Fixed part from the beginning of the meteor on which the initial velocity estimation using the sliding fit will start. Default is 0.4 (40 percent), but for noisier data this should be bumped up to 0.5.', 
+    arg_parser.add_argument('-p', '--velpart', metavar='VELOCITY_PART', \
+        help='Fixed part from the beginning of the meteor on which the initial velocity estimation using the sliding fit will start. Default is 0.4 (40 percent), but for noisier data this should be bumped up to 0.5.', \
         type=float, default=0.40)
 
-    arg_parser.add_argument('-d', '--disablemc', 
+    arg_parser.add_argument('-d', '--disablemc', \
         help='Disable Monte Carlo.', action="store_true")
 
-    arg_parser.add_argument('-u', '--uncerttime', 
-        help="Compute uncertainties by culling solutions with worse value of the time fit than the LoS solution. This may increase the computation time considerably.", 
+    arg_parser.add_argument('-u', '--uncerttime', \
+        help="Compute uncertainties by culling solutions with worse value of the time fit than the LoS solution. This may increase the computation time considerably.", \
         action="store_true")
 
-    arg_parser.add_argument('-l', '--saveplots', 
+    arg_parser.add_argument('-l', '--saveplots', \
         help='Save plots to disk.', action="store_true")
 
-    arg_parser.add_argument('-r', '--timerange', metavar='TIME_RANGE', 
-        help="""Only compute the trajectories in the given range of time. The time range should be given in the format: "(YYYYMMDD-HHMMSS,YYYYMMDD-HHMMSS)".""", 
+    arg_parser.add_argument('-r', '--timerange', metavar='TIME_RANGE', \
+        help="""Only compute the trajectories in the given range of time. The time range should be given in the format: "(YYYYMMDD-HHMMSS,YYYYMMDD-HHMMSS)".""", \
             type=str)
 
-    arg_parser.add_argument('-a', '--auto', metavar='PREV_DAYS', type=float, default=None, const=5.0, 
-        nargs='?', 
+    arg_parser.add_argument('-a', '--auto', metavar='PREV_DAYS', type=float, default=None, const=5.0, \
+        nargs='?', \
         help="""Run continously taking the data in the last PREV_DAYS to compute the new trajectories and update the old ones. The default time range is 5 days."""
         )
-
-    arg_parser.add_argument('-i', '--distribute', metavar='DISTRIBUTE_PROC', 
-        help="""Enable distributed processing. Values: 1=create and store candidates; 2=load and process candidates only.""", 
-            type=int)
 
     arg_parser.add_argument("--cpucores", type=int, default=-1,
         help="Number of CPU codes to use for computation. -1 to use all cores minus one (default).",
@@ -1375,23 +1377,67 @@ contain data folders. Data folders should have FTPdetectinfo files together with
 
     arg_parser.add_argument("--outdir", type=str, default=None,
         help="Path to the directory where the trajectory output files will be stored. If not given, the output will be stored in the data directory.")
+        
+    arg_parser.add_argument("--logdir", type=str, default=None,
+        help="Path to the directory where the log files will be stored. If not given, the logs will be stored in the output directory.")
+        
     
+    arg_parser.add_argument('-i', '--distribute', metavar='DISTRIBUTE_PROC', 
+        help="""Enable distributed processing. Values: 1=create and store candidates; 2=load and process candidates only.""", 
+            type=int)
+
     arg_parser.add_argument('-x', '--maxstations', type=int, default=-1,
         help="Use best N stations in the solution (default is use all stations).",
     )
-
-    arg_parser.add_argument('-o', '--enableOSM', 
-        help="Enable OSM based groung plots. Internet connection required.", action="store_true")     
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
     ############################
 
+
+
+    ### Init logging - roll over every day ###
+
+    # Find the log directory
+    log_dir = cml_args.logdir
+    if log_dir is None:
+        log_dir = cml_args.outdir
+    if log_dir is None:
+        log_dir = cml_args.dir_path
+
+    # Create a log dir if it doesn't exist
+    if not os.path.isdir(log_dir):
+        os.makedirs(log_dir)
+
+    # Init the logger
+    log = logging.getLogger("traj_correlator")
+    log.setLevel(logging.DEBUG)
+
+    # Init the log formatter
+    log_formatter = logging.Formatter(
+        fmt='%(asctime)s-%(levelname)-5s-%(module)-15s:%(lineno)-5d- %(message)s',
+        datefmt='%Y/%m/%d %H:%M:%S'
+        )
+
+    # Init the file handler
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = os.path.join(log_dir, f"correlate_rms_{timestamp}.log")
+    file_handler = logging.handlers.TimedRotatingFileHandler(log_file, when="midnight", backupCount=7)
+    file_handler.setFormatter(log_formatter)
+    log.addHandler(file_handler)
+
+    # Init the console handler (i.e. print to console)
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(log_formatter)
+    log.addHandler(console_handler)
+
+    ###
+
     if cml_args.auto is None:
-        print("Running trajectory estimation once!")
+        log.info("Running trajectory estimation once!")
     else:
-        print("Auto running trajectory estimation every {:.1f} hours using the last {:.1f} days of data...".format(AUTO_RUN_FREQUENCY, cml_args.auto))
+        log.info("Auto running trajectory estimation every {:.1f} hours using the last {:.1f} days of data...".format(AUTO_RUN_FREQUENCY, cml_args.auto))
 
     distribute = 0
     if cml_args.distribute is not None:
@@ -1432,7 +1478,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     if (cpu_cores < 1) or (cpu_cores > multiprocessing.cpu_count()):
         cpu_cores = multiprocessing.cpu_count()
     trajectory_constraints.mc_cores = cpu_cores
-    print("Running using {:d} CPU cores.".format(cpu_cores))
+    log.info("Running using {:d} CPU cores.".format(cpu_cores))
 
     # Run processing. If the auto run more is not on, the loop will break after one run
     previous_start_time = None
@@ -1470,15 +1516,16 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                 # Extract time range
                 time_beg, time_end = cml_args.timerange.strip("(").strip(")").split(",")
                 dt_beg = datetime.datetime.strptime(
-                    time_beg, "%Y%m%d-%H%M%S").replace(tzinfo=datetime.timezone.utc)
+                    time_beg, "%Y%m%d-%H%M%S"
+                    ).replace(tzinfo=datetime.timezone.utc)
                 
                 dt_end = datetime.datetime.strptime(
                     time_end, "%Y%m%d-%H%M%S"
                     ).replace(tzinfo=datetime.timezone.utc)
 
-                print("Custom time range:")
-                print("    BEG: {:s}".format(str(dt_beg)))
-                print("    END: {:s}".format(str(dt_end)))
+                log.info("Custom time range:")
+                log.info("    BEG: {:s}".format(str(dt_beg)))
+                log.info("    END: {:s}".format(str(dt_end)))
 
                 event_time_range = [dt_beg, dt_end]
 
@@ -1487,15 +1534,15 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         # Init the data handle
         dh = RMSDataHandle(
             cml_args.dir_path, dt_range=event_time_range, 
-            db_dir=cml_args.dbdir, output_dir=cml_args.outdir)
+            db_dir=cml_args.dbdir, output_dir=cml_args.outdir
+            )
         
-        # If there is nothing to process, stop, unless we're in distributed 
-        # processing mode 2 
+        # If there is nothing to process, stop, unless we're in distributed processing mode 2 
         if not dh.processing_list and distribute !=2:
-            print()
-            print("Nothing to process!")
-            print("Probably everything is already processed.")
-            print("Exiting...")
+            log.info("")
+            log.info("Nothing to process!")
+            log.info("Probably everything is already processed.")
+            log.info("Exiting...")
             sys.exit()
 
 
@@ -1511,8 +1558,9 @@ contain data folders. Data folders should have FTPdetectinfo files together with
 
             dt_beg, dt_end = event_time_range
 
-            proc_dir_dts = [dt for dt in proc_dir_dts 
-                if (dt >= dt_beg - datetime.timedelta(days=1)) and (dt <= dt_end + datetime.timedelta(days=1))]
+            proc_dir_dts = [dt for dt in proc_dir_dts \
+                if (dt >= dt_beg - datetime.timedelta(days=1)) and \
+                	(dt <= dt_end + datetime.timedelta(days=1))]
             # to avoid excluding all possible dates
             if proc_dir_dts == []: 
                 proc_dir_dts=[dt_beg - datetime.timedelta(days=1), dt_end + datetime.timedelta(days=1)]
@@ -1525,11 +1573,11 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         dt_bins = generateDatetimeBins(proc_dir_dt_beg, proc_dir_dt_end, bin_days=1, 
                                        tzinfo=datetime.timezone.utc)
 
-        print()
-        print("ALL TIME BINS:")
-        print("----------")
+        log.info("")
+        log.info("ALL TIME BINS:")
+        log.info("----------")
         for bin_beg, bin_end in dt_bins:
-            print("{:s}, {:s}".format(str(bin_beg), str(bin_end)))
+            log.info("{:s}, {:s}".format(str(bin_beg), str(bin_end)))
 
 
         ### ###
@@ -1538,25 +1586,24 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         # Go through all chunks in time
         for bin_beg, bin_end in dt_bins:
 
-            print()
-            print("{}".format(datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dZ%H:%M:%S')))
-            print("PROCESSING TIME BIN:")
-            print(bin_beg, bin_end)
-            print("-----------------------------")
-            print()
+            log.info("")
+            log.info("{}".format(datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dZ%H:%M:%S')))
+            log.info("PROCESSING TIME BIN:")
+            log.info("{:s}, {:s}".format(str(bin_beg), str(bin_end)))
+            log.info("-----------------------------")
+            log.info("")
 
             # Load data of unprocessed observations
-            dh.unpaired_observations = dh.loadUnpairedObservations(dh.processing_list, 
+            dh.unpaired_observations = dh.loadUnpairedObservations(dh.processing_list, \
                 dt_range=(bin_beg, bin_end))
 
             # Run the trajectory correlator
-            tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True, 
-                                      distribute=distribute, enableOSM=cml_args.enableOSM)
+            tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True, distribute=distribute)
             tc.run(event_time_range=event_time_range)
 
 
         
-        print("Total run time: {:s}".format(str(datetime.datetime.now(datetime.timezone.utc) - t1)))
+        log.info("Total run time: {:s}".format(str(datetime.datetime.now(datetime.timezone.utc) - t1)))
 
         # Store the previous start time
         previous_start_time = copy.deepcopy(t1)
@@ -1568,7 +1615,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         else:
 
             # Otherwise wait to run AUTO_RUN_FREQUENCY hours after the beginning
-            wait_time = (datetime.timedelta(hours=AUTO_RUN_FREQUENCY) 
+            wait_time = (datetime.timedelta(hours=AUTO_RUN_FREQUENCY) \
                 - (datetime.datetime.now(datetime.timezone.utc) - t1)).total_seconds()
 
             # Run immediately if the wait time has elapsed
@@ -1583,6 +1630,6 @@ contain data folders. Data folders should have FTPdetectinfo files together with
 
                 # Wait to run
                 while next_run_time > datetime.datetime.now(datetime.timezone.utc):
-                    print("Waiting {:s} to run the trajectory solver...          ".format(str(next_run_time 
+                    log.info("Waiting {:s} to run the trajectory solver...          ".format(str(next_run_time \
                         - datetime.datetime.now(datetime.timezone.utc))), end='\r')
                     time.sleep(2)
