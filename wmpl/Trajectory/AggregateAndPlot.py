@@ -1002,8 +1002,8 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, max_radiant_err=0.5
             lam_err = np.array([traj.uncertainties.L_g for traj in shower_trajs])
             bet_err = np.array([traj.uncertainties.B_g for traj in shower_trajs])
         else:
-            lam_err = np.array([0 for traj in shower_trajs])
-            bet_err = np.array([0 for traj in shower_trajs])
+            lam_err = np.array([1 for traj in shower_trajs])
+            bet_err = np.array([1 for traj in shower_trajs])
         # Compute masses (only take trajectories which are completely inside the FOV, otherwise set the 
         #   mass to None)
         mass_data = np.array([computeMass(traj, P_0m) if all(checkMeteorFOVBegEnd(traj)) else None \
