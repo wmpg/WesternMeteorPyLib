@@ -1080,7 +1080,7 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, max_radiant_err=0.5
             lam_sol_data_nodrift = lam_sol_data_nodrift[filter_indices]
             bet_data_nodrift    = bet_data_nodrift[filter_indices]
             if lam_err is not None:
-                print(lam_err)
+                print(lam_err, filter_indices)
                 lam_err             = lam_err[filter_indices]
                 bet_err             = bet_err[filter_indices]
             else:
