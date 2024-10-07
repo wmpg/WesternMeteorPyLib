@@ -1083,8 +1083,8 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, max_radiant_err=0.5
                 lam_err             = lam_err[filter_indices]
                 bet_err             = bet_err[filter_indices]
             else:
-                lam_err = 0
-                bet_err = 0
+                lam_err = [0]*len(filter_indices)
+                bet_err = [0]*len(filter_indices)
             mass_data           = mass_data[filter_indices]
             ht_beg_shower       = ht_beg_shower[filter_indices]
             ht_end_shower       = ht_end_shower[filter_indices]
