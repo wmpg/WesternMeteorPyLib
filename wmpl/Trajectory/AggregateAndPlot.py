@@ -999,12 +999,11 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, max_radiant_err=0.5
 
         # Get the errors
         if traj.uncertainties is not None:
-            print('uncertainties exist')
             lam_err = np.array([traj.uncertainties.L_g for traj in shower_trajs])
             bet_err = np.array([traj.uncertainties.B_g for traj in shower_trajs])
         else:
-            lam_err = None
-            bet_err = None
+            lam_err = np.array([0 for traj in shower_trajs])
+            bet_err = np.array([0 for traj in shower_trajs])
         # Compute masses (only take trajectories which are completely inside the FOV, otherwise set the 
         #   mass to None)
         mass_data = np.array([computeMass(traj, P_0m) if all(checkMeteorFOVBegEnd(traj)) else None \
@@ -1080,13 +1079,8 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, max_radiant_err=0.5
             lam_sol_data        = lam_sol_data[filter_indices]
             lam_sol_data_nodrift = lam_sol_data_nodrift[filter_indices]
             bet_data_nodrift    = bet_data_nodrift[filter_indices]
-            if lam_err is not None:
-                print(lam_err, filter_indices)
-                lam_err             = lam_err[filter_indices]
-                bet_err             = bet_err[filter_indices]
-            else:
-                lam_err = [0]*len(filter_indices)
-                bet_err = [0]*len(filter_indices)
+            lam_err             = lam_err[filter_indices]
+            bet_err             = bet_err[filter_indices]
             mass_data           = mass_data[filter_indices]
             ht_beg_shower       = ht_beg_shower[filter_indices]
             ht_end_shower       = ht_end_shower[filter_indices]
