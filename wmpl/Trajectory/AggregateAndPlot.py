@@ -999,6 +999,7 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, max_radiant_err=0.5
 
         # Get the errors
         if traj.uncertainties is not None:
+            print('uncertainties exist')
             lam_err = np.array([traj.uncertainties.L_g for traj in shower_trajs])
             bet_err = np.array([traj.uncertainties.B_g for traj in shower_trajs])
         else:
