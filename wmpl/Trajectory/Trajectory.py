@@ -2715,6 +2715,9 @@ class Trajectory(object):
         # Initial state vector covariance matrix
         self.state_vect_cov = None
 
+        # flag to indicate whether only phase 1 solving ha been run
+        # default False to handle existing trajectory data
+        self.phase_1_only = False
 
 
     def generateFileName(self):

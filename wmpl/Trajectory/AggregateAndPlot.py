@@ -703,6 +703,7 @@ def generateTrajectoryPlots(output_dir, traj_list, plot_name='scecliptic', plot_
             If True, this will disable the sol and time text on the image.
     """
 
+    mkdirP(output_dir)
 
 
     ### Plot Sun-centered geocentric ecliptic plots ###
@@ -2297,6 +2298,7 @@ if __name__ == "__main__":
         if output_dir is None:
             output_dir = cml_args.dir_path
 
+        mkdirP(output_dir)
 
         # Generate the orbit summary file
         print("Writing summary file...")

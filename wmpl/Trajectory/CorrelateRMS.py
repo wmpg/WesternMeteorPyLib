@@ -17,6 +17,7 @@ import signal
 import multiprocessing
 import logging
 import logging.handlers
+import glob
 
 import numpy as np
 
@@ -124,6 +125,10 @@ class TrajectoryReduced(object):
             self.ignored_stations = sorted([obs.station_id for obs in traj.observations 
                 if obs.ignore_station is True])
 
+            if hasattr(traj, 'phase_1_only'):
+                self.phase_1_only = traj.phase_1_only
+            else:
+                self.phase_1_only = False
 
         # Load values from a dictionary
         else:
@@ -199,6 +204,8 @@ class DatabaseJSON(object):
             self2.trajectories = {key: self.trajectories[key].__dict__ for key in self.trajectories}
             self2.failed_trajectories = {key: self.failed_trajectories[key].__dict__ \
                 for key in self.failed_trajectories}
+            if hasattr(self2, 'phase1Trajectories'):
+                delattr(self2, 'phase1Trajectories')
 
             f.write(json.dumps(self2, default=lambda o: o.__dict__, indent=4, sort_keys=True))
 
@@ -473,7 +480,7 @@ class PlateparDummy:
 
 
 class RMSDataHandle(object):
-    def __init__(self, dir_path, dt_range=None, db_dir=None, output_dir=None):
+    def __init__(self, dir_path, dt_range=None, db_dir=None, output_dir=None, mcmode=0):
         """ Handles data interfacing between the trajectory correlator and RMS data files on disk. 
     
         Arguments:
@@ -512,10 +519,12 @@ class RMSDataHandle(object):
         # Create the output directory if it doesn't exist
         mkdirP(self.output_dir)
 
-        ############################
+        # create the directory for phase1 simple trajectories, if needed
+        if mcmode > 0:
+            self.phase1_dir = os.path.join(self.output_dir, 'phase1')
+            mkdirP(os.path.join(self.phase1_dir, 'processed'))
 
-        # Load the list of stations
-        station_list = self.loadStations()
+        ############################
 
         # Load database of processed folders
         database_path = os.path.join(self.db_dir, JSON_DB_NAME)
@@ -524,18 +533,26 @@ class RMSDataHandle(object):
         self.db = DatabaseJSON(database_path)
         log.info("   ... done!")
 
-        # Find unprocessed meteor files
-        log.info("")
-        log.info("Finding unprocessed data...")
-        self.processing_list = self.findUnprocessedFolders(station_list)
-        log.info("   ... done!")
+        # these data are not needed in the mc-only stage of processing
+        if mcmode != 2: 
+            # Load the list of stations
+            station_list = self.loadStations()
 
-        # Load already computed trajectories
-        log.info("")
-        log.info("Loading already computed trajectories...")
-        self.loadComputedTrajectories(os.path.join(self.output_dir, OUTPUT_TRAJ_DIR))
-        log.info("   ... done!")
+            # Find unprocessed meteor files
+            log.info("")
+            log.info("Finding unprocessed data...")
+            self.processing_list = self.findUnprocessedFolders(station_list)
+            log.info("   ... done!")
 
+            # Load already computed trajectories
+            log.info("")
+            log.info("Loading already computed trajectories...")
+            self.loadComputedTrajectories(os.path.join(self.output_dir, OUTPUT_TRAJ_DIR))
+            log.info("   ... done!")
+        else:
+            dt_beg, dt_end = self.loadPhase1Trajectories()
+            self.processing_list = None
+            self.dt_range=[dt_beg, dt_end]
 
         ### Define country groups to speed up the proceessing ###
 
@@ -897,8 +914,7 @@ class RMSDataHandle(object):
 
         # Make a datetime object
         dt = datetime.datetime.strptime(
-            "_".join([date_str, time_str]), "%Y%m%d_%H%M%S"
-            ).replace(tzinfo=datetime.timezone.utc)
+            "_".join([date_str, time_str]), "%Y%m%d_%H%M%S").replace(tzinfo=datetime.timezone.utc)
 
         dt_beg, dt_end = self.dt_range
 
@@ -924,8 +940,7 @@ class RMSDataHandle(object):
         log.info("  Loading trajectories from: " + traj_dir_path)
         log.info("  Datetime range: {:s} - {:s}".format(
             self.dt_range[0].strftime("%Y-%m-%d %H:%M:%S"), 
-            self.dt_range[1].strftime("%Y-%m-%d %H:%M:%S")
-            ))
+            self.dt_range[1].strftime("%Y-%m-%d %H:%M:%S")))
 
 
         counter = 0
@@ -1123,30 +1138,16 @@ class RMSDataHandle(object):
         date_dir = dt.strftime("%Y%m%d")
 
         # Name of the trajectory directory
-        traj_dir = dt.strftime("%Y%m%d_%H%M%S.%f")[:-3] + "_" \
-            + "_".join(list(set([stat_id[:2] for stat_id in station_list])))
+        # sort the list of country codes otherwise we can end up with duplicate trajectories
+        ctry_list = list(set([stat_id[:2] for stat_id in station_list]))
+        ctry_list.sort()
+        traj_dir = dt.strftime("%Y%m%d_%H%M%S.%f")[:-3] + "_" + "_".join(ctry_list)
 
 
         # Path to the year directory
-        out_path = os.path.join(self.output_dir, OUTPUT_TRAJ_DIR, year_dir)
+        out_path = os.path.join(self.output_dir, OUTPUT_TRAJ_DIR, year_dir, month_dir, date_dir, traj_dir)
         if make_dirs:
             mkdirP(out_path)
-
-        # Path to the year directory
-        out_path = os.path.join(out_path, month_dir)
-        if make_dirs:
-            mkdirP(out_path)
-
-        # Path to the date directory
-        out_path = os.path.join(out_path, date_dir)
-        if make_dirs:
-            mkdirP(out_path)
-
-        # Path too the trajectory directory
-        out_path = os.path.join(out_path, traj_dir)
-        if make_dirs:
-            mkdirP(out_path)
-
 
         return out_path
 
@@ -1164,6 +1165,8 @@ class RMSDataHandle(object):
 
         # Save the picked trajectory structure
         savePickle(traj, output_dir, traj.file_name + '_trajectory.pickle')
+        if traj.phase_1_only:
+            savePickle(traj, self.phase1_dir, traj.file_name + '_trajectory.pickle')
 
         # Save the plots
         if save_plots:
@@ -1261,6 +1264,33 @@ class RMSDataHandle(object):
             
             return None
 
+    def loadPhase1Trajectories(self):
+        pickles = glob.glob1(self.phase1_dir, "*_trajectory.pickle")
+        pickles.sort()
+        self.phase1Trajectories = []
+        dt_beg = datetime.datetime.strptime(pickles[0][:15], '%Y%m%d_%H%M%S').replace(tzinfo=datetime.timezone.utc)
+        dt_end = datetime.datetime.strptime(pickles[-1][:15], '%Y%m%d_%H%M%S').replace(tzinfo=datetime.timezone.utc)
+        for pick in pickles:
+            # Try loading a full trajectory
+            try:
+                traj = loadPickle(self.phase1_dir, pick)
+
+                # Check if the traj object as fixed time offsets
+                if not hasattr(traj, 'fixed_time_offsets'):
+                    traj.fixed_time_offsets = {}
+
+                # now we've loaded the phase 1 solution, move it to prevent accidental reprocessing
+                procpath = os.path.join(self.phase1_dir, 'processed')    
+                procfile = os.path.join(procpath, pick)
+                if os.path.isfile(procfile):
+                    os.remove(procfile)
+                os.rename(os.path.join(self.phase1_dir, pick), procfile)
+
+            except FileNotFoundError:
+                log.info("File {:s} not found!".format(pick))
+            self.phase1Trajectories.append(traj)
+            log.info(f'loaded {traj.traj_id}')
+        return dt_beg, dt_end
 
 
     def saveDatabase(self):
@@ -1381,14 +1411,11 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     arg_parser.add_argument("--logdir", type=str, default=None,
         help="Path to the directory where the log files will be stored. If not given, the logs will be stored in the output directory.")
         
-    
-    arg_parser.add_argument('-i', '--distribute', metavar='DISTRIBUTE_PROC', 
-        help="""Enable distributed processing. Values: 1=create and store candidates; 2=load and process candidates only.""", 
-            type=int)
+    arg_parser.add_argument('-x', '--maxstations', type=int, default=8,
+        help="Use best N stations in the solution (default is use all stations).")
 
-    arg_parser.add_argument('-x', '--maxstations', type=int, default=-1,
-        help="Use best N stations in the solution (default is use all stations).",
-    )
+    arg_parser.add_argument('--mcmode', '--mcmode', type=int, default=0,
+        help="Run just simple soln (1), just monte-carlos (2) or both (0).")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -1439,23 +1466,19 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     else:
         log.info("Auto running trajectory estimation every {:.1f} hours using the last {:.1f} days of data...".format(AUTO_RUN_FREQUENCY, cml_args.auto))
 
-    distribute = 0
-    if cml_args.distribute is not None:
-        distribute = cml_args.distribute  # enable distributed processing
-
     # Set max stations to use in a solution, minimum 2.
     # The best N will be chosen. -1 means use all. Default is 8
     if cml_args.maxstations is not None:
         if cml_args.maxstations == -1:
             # Set to large number, so we can easily test later
             max_stations = MAX_STATIONS 
-            print('Solutions will use all available stations.')
+            log.info('Solutions will use all available stations.')
         else:
             max_stations = max(2, cml_args.maxstations)
-            print('Solutions will use the best {} stations.'.format(max_stations))
+            log.info('Solutions will use the best {} stations.'.format(max_stations))
     else:
         max_stations = 8
-        print('Solutions will use the best {} stations.'.format(max_stations))
+        log.info('Solutions will use the best {} stations.'.format(max_stations))
 
     # Init trajectory constraints
     trajectory_constraints = TrajectoryConstraints()
@@ -1534,11 +1557,11 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         # Init the data handle
         dh = RMSDataHandle(
             cml_args.dir_path, dt_range=event_time_range, 
-            db_dir=cml_args.dbdir, output_dir=cml_args.outdir
-            )
+            db_dir=cml_args.dbdir, output_dir=cml_args.outdir,
+            mcmode = cml_args.mcmode)
         
-        # If there is nothing to process, stop, unless we're in distributed processing mode 2 
-        if not dh.processing_list and distribute !=2:
+        # If there is nothing to process, stop, unless we're in mcmode 2 (processing_list is not used in this case)
+        if not dh.processing_list and cml_args.mcmode < 2:
             log.info("")
             log.info("Nothing to process!")
             log.info("Probably everything is already processed.")
@@ -1547,31 +1570,34 @@ contain data folders. Data folders should have FTPdetectinfo files together with
 
 
         ### GENERATE DAILY TIME BINS ###
-        
-        # Find the range of datetimes of all folders (take only those after the year 2000)
-        proc_dir_dts = [entry[3] for entry in dh.processing_list if entry[3] is not None]
-        proc_dir_dts = [dt for dt in proc_dir_dts if dt > datetime.datetime(2000, 1, 1, 0, 0, 0, 
-                                                                            tzinfo=datetime.timezone.utc)]
 
-        # Reject all folders not within the time range of interest +/- 1 day
-        if event_time_range is not None:
+        if cml_args.mcmode != 2:
+            # Find the range of datetimes of all folders (take only those after the year 2000)
+            proc_dir_dts = [entry[3] for entry in dh.processing_list if entry[3] is not None]
+            proc_dir_dts = [dt for dt in proc_dir_dts if dt > datetime.datetime(2000, 1, 1, 0, 0, 0, 
+                                                                                tzinfo=datetime.timezone.utc)]
 
-            dt_beg, dt_end = event_time_range
+            # Reject all folders not within the time range of interest +/- 1 day
+            if event_time_range is not None:
 
-            proc_dir_dts = [dt for dt in proc_dir_dts \
-                if (dt >= dt_beg - datetime.timedelta(days=1)) and \
-                	(dt <= dt_end + datetime.timedelta(days=1))]
-            # to avoid excluding all possible dates
-            if proc_dir_dts == []: 
-                proc_dir_dts=[dt_beg - datetime.timedelta(days=1), dt_end + datetime.timedelta(days=1)]
+                dt_beg, dt_end = event_time_range
 
-        # Determine the limits of data
-        proc_dir_dt_beg = min(proc_dir_dts)
-        proc_dir_dt_end = max(proc_dir_dts)
+                proc_dir_dts = [dt for dt in proc_dir_dts \
+                    if (dt >= dt_beg - datetime.timedelta(days=1)) and \
+                        (dt <= dt_end + datetime.timedelta(days=1))]
+                
+                # to avoid excluding all possible dates
+                if proc_dir_dts == []: 
+                    proc_dir_dts=[dt_beg - datetime.timedelta(days=1), dt_end + datetime.timedelta(days=1)]
 
-        # Split the processing into daily chunks
-        dt_bins = generateDatetimeBins(proc_dir_dt_beg, proc_dir_dt_end, bin_days=1, 
-                                       tzinfo=datetime.timezone.utc)
+            # Determine the limits of data
+            proc_dir_dt_beg = min(proc_dir_dts)
+            proc_dir_dt_end = max(proc_dir_dts)
+            # Split the processing into daily chunks
+            dt_bins = generateDatetimeBins(proc_dir_dt_beg, proc_dir_dt_end, bin_days=1, 
+                                        tzinfo=datetime.timezone.utc)
+        else:
+            dt_bins = [(dh.dt_range[0], dh.dt_range[1])]
 
         log.info("")
         log.info("ALL TIME BINS:")
@@ -1594,12 +1620,13 @@ contain data folders. Data folders should have FTPdetectinfo files together with
             log.info("")
 
             # Load data of unprocessed observations
-            dh.unpaired_observations = dh.loadUnpairedObservations(dh.processing_list, \
-                dt_range=(bin_beg, bin_end))
+            if cml_args.mcmode != 2:
+                dh.unpaired_observations = dh.loadUnpairedObservations(dh.processing_list, \
+                    dt_range=(bin_beg, bin_end))
 
             # Run the trajectory correlator
-            tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True, distribute=distribute)
-            tc.run(event_time_range=event_time_range)
+            tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True)
+            tc.run(event_time_range=event_time_range, mcmode=cml_args.mcmode)
 
 
         
