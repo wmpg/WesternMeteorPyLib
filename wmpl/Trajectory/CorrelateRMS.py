@@ -27,7 +27,6 @@ from wmpl.Utils.Math import generateDatetimeBins
 from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import loadPickle, savePickle
 from wmpl.Utils.TrajConversions import jd2Date
-from wmpl.Trajectory.CorrelateEngine import MAX_STATIONS
 
 ### CONSTANTS ###
 
@@ -1471,7 +1470,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     if cml_args.maxstations is not None:
         if cml_args.maxstations == -1:
             # Set to large number, so we can easily test later
-            max_stations = MAX_STATIONS 
+            max_stations = 9999
             log.info('Solutions will use all available stations.')
         else:
             max_stations = max(2, cml_args.maxstations)

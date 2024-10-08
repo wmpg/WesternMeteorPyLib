@@ -18,8 +18,6 @@ from wmpl.Utils.ShowerAssociation import associateShowerTraj
 from wmpl.Utils.TrajConversions import J2000_JD, geo2Cartesian, cartesian2Geo, raDec2AltAz, altAz2RADec, \
     raDec2ECI, datetime2JD, jd2Date, equatorialCoordPrecession_vect
 
-MAX_STATIONS = 9999
-
 # Grab the logger from the main thread
 log = logging.getLogger("traj_correlator")
 
@@ -60,10 +58,13 @@ def pickBestStations(obslist, max_stns):
     frac_missed = [1 - d/max(durations) for d in durations]
 
     # calculate the angle of incidence - nearer 90 degrees is better
-    approx_state_vects = [moveStateVector(obs[2].cpa_eci, obs[2].radiant_eci, [obs[0]]) for obs in obslist]
-    ws = [vectNorm(sv - obs[0].stat_eci) for sv, obs in zip(approx_state_vects, obslist)]
-    cos_inc_angles = [abs(np.dot(obs[2].radiant_eci, w)) for w,obs in zip(ws, obslist)]
-
+    try:
+        approx_state_vects = [moveStateVector(obs[2].cpa_eci, obs[2].radiant_eci, [obs[0]]) for obs in obslist]
+        ws = [vectNorm(sv - obs[0].stat_eci) for sv, obs in zip(approx_state_vects, obslist)]
+        cos_inc_angles = [abs(np.dot(obs[2].radiant_eci, w)) for w,obs in zip(ws, obslist)]
+    except Exception:
+        cos_inc_angles = [1 for obs in obslist]
+        
     # distance from the station - prefer the nearest ones
     dists = [np.linalg.norm(obs[0].stat_eci - sv)/1000 for sv, obs in zip(approx_state_vects, obslist)] 
     #
@@ -71,8 +72,8 @@ def pickBestStations(obslist, max_stns):
     #  
     costs = [f*c*d*e*m for f,c,d,e,m in zip(frac_missed, cos_inc_angles, dists, fit_errs, mag_wgts)] 
     #
-    log.info(f'{dists}, {mag_wgts}, {cos_inc_angles}, {in_fovs}, {frac_missed}, {fit_errs}')
-    log.info(f'{costs}')
+    #log.info(f'{dists}, {mag_wgts}, {cos_inc_angles}, {in_fovs}, {frac_missed}, {fit_errs}')
+    #log.info(f'{costs}')
 
     # now select the best.
     # there's a tiny chance that two or more stations may have identical costs,
@@ -895,6 +896,7 @@ class TrajectoryCorrelator(object):
 
                     # Sort the observations by residuals (smallest first)
                     # TODO: implement better sorting algorithm
+                    log.info('Selecting best {} stations'.format(self.traj_constraints.max_stations))
                     obs_sorted = sorted(non_ignored_observations, key=lambda x: x.ang_res_std)
 
                     # Keep only the first <max_stations> stations with the smallest residuals
@@ -1547,7 +1549,7 @@ class TrajectoryCorrelator(object):
                     log.info("Observations:")
                     for entry in matched_observations:
                         _, met_obs, _ = entry
-                        log.info("{:s} - {:s}".format(str(met_obs.station_code), str(met_obs.mean_dt)))
+                        log.info(f'{met_obs.station_code} - {met_obs.mean_dt} - {met_obs.ignore_station}')
 
 
 
