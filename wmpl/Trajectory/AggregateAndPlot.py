@@ -672,7 +672,7 @@ def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir, 
             xy=(0, 1), xycoords='axes fraction', color='w', size=10, family='monospace')
 
 
-    plt.tight_layout()
+    #plt.tight_layout()
 
     plt.savefig(os.path.join(output_dir, file_name), dpi=100, facecolor=fig.get_facecolor(), \
         edgecolor='none')
