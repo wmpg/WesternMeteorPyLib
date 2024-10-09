@@ -1549,7 +1549,7 @@ class TrajectoryCorrelator(object):
                     log.info("Observations:")
                     for entry in matched_observations:
                         _, met_obs, _ = entry
-                        log.info(f'{met_obs.station_code} - {met_obs.mean_dt} - {met_obs.ignore_station}')
+                        log.info(f'{met_obs.station_code} - {met_obs.mean_dt}')
 
 
 
