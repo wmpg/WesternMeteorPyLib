@@ -66,7 +66,8 @@ def pickBestStations(obslist, max_stns):
         cos_inc_angles = [1 for obs in obslist]
         
     # distance from the station - prefer the nearest ones
-    dists = [np.linalg.norm(obs[0].stat_eci - sv)/1000 for sv, obs in zip(approx_state_vects, obslist)] 
+    # dists = [np.linalg.norm(obs[0].stat_eci - sv)/1000 for sv, obs in zip(approx_state_vects, obslist)] 
+    dists = [1 for obs in obslist]
     #
     # Cost function is the product of the values
     #  
