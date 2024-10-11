@@ -1644,7 +1644,7 @@ class TrajectoryCorrelator(object):
                 successful_traj_fit, traj = self.solveTrajectory(traj, mc_runs, mcmode=mcmode)
 
                 # restore the original traj_id so that the phase1 and phase 2 results use the same ID
-                if mcmode == 2:
+                if mcmode == 2 and successful_traj_fit is True:
                     traj.traj_id = saved_traj_id
 
                 # Save the trajectory if successful. 
