@@ -1430,6 +1430,9 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     arg_parser.add_argument('--mcmode', '--mcmode', type=int, default=0,
         help="Run just simple soln (1), just monte-carlos (2) or both (0).")
 
+    arg_parser.add_argument('--maxtrajs', '--maxtrajs', type=int, default=0,
+        help="Max number of trajectories to reload in each pass when doing the Monte-Carlo phase")
+    
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
