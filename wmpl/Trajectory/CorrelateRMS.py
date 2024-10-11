@@ -1509,9 +1509,11 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     if cml_args.maxerr is not None:
         trajectory_constraints.max_arcsec_err = cml_args.maxerr
 
-    maxtrajs = 1000
+    max_trajs = 1000
     if cml_args.maxtrajs is not None:
-        maxtrajs = int(cml_args.maxtrajs)
+        max_trajs = int(cml_args.maxtrajs)
+    if cml_args.mcmode == 2:
+        log.info(f'Reloading at most {max_trajs} phase1 trajectories.')
 
     # Set the number of CPU cores
     cpu_cores = cml_args.cpucores
@@ -1575,7 +1577,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         dh = RMSDataHandle(
             cml_args.dir_path, dt_range=event_time_range, 
             db_dir=cml_args.dbdir, output_dir=cml_args.outdir,
-            mcmode=cml_args.mcmode, maxtrajs=maxtrajs)
+            mcmode=cml_args.mcmode, maxtrajs=max_trajs)
         
         # If there is nothing to process, stop, unless we're in mcmode 2 (processing_list is not used in this case)
         if not dh.processing_list and cml_args.mcmode < 2:
