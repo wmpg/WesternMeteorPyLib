@@ -479,7 +479,7 @@ class PlateparDummy:
 
 
 class RMSDataHandle(object):
-    def __init__(self, dir_path, dt_range=None, db_dir=None, output_dir=None, mcmode=0):
+    def __init__(self, dir_path, dt_range=None, db_dir=None, output_dir=None, mcmode=0, max_trajs=1000):
         """ Handles data interfacing between the trajectory correlator and RMS data files on disk. 
     
         Arguments:
@@ -549,7 +549,7 @@ class RMSDataHandle(object):
             self.loadComputedTrajectories(os.path.join(self.output_dir, OUTPUT_TRAJ_DIR))
             log.info("   ... done!")
         else:
-            dt_beg, dt_end = self.loadPhase1Trajectories()
+            dt_beg, dt_end = self.loadPhase1Trajectories(max_trajs=1000)
             self.processing_list = None
             self.dt_range=[dt_beg, dt_end]
 
@@ -1263,9 +1263,23 @@ class RMSDataHandle(object):
             
             return None
 
-    def loadPhase1Trajectories(self):
+    def loadPhase1Trajectories(self, maxtrajs=1000):
+        """
+        Load trajectories calculated by the intersecting-planes phase 1. These trajectories
+        do not include uncertainties which are calculated in the Monte-Carlo phase 2
+
+        keyword arguments:
+        maxtrajs: [int] maximum number of trajectories to load in each pass, to avoid taking too long per pass.
+
+
+        returns:
+        dt_beg, dt_end: [datetime] The earliest and latest date/time of the loaded trajectories. Used later to set the 
+                                    number of time buckets to process data in. 
+
+        """
         pickles = glob.glob1(self.phase1_dir, "*_trajectory.pickle")
         pickles.sort()
+        pickles = pickles[:maxtrajs]
         self.phase1Trajectories = []
         dt_beg = datetime.datetime.strptime(pickles[0][:15], '%Y%m%d_%H%M%S').replace(tzinfo=datetime.timezone.utc)
         dt_end = datetime.datetime.strptime(pickles[-1][:15], '%Y%m%d_%H%M%S').replace(tzinfo=datetime.timezone.utc)
@@ -1495,6 +1509,10 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     if cml_args.maxerr is not None:
         trajectory_constraints.max_arcsec_err = cml_args.maxerr
 
+    maxtrajs = 1000
+    if cml_args.maxtrajs is not None:
+        maxtrajs = int(cml_args.maxtrajs)
+
     # Set the number of CPU cores
     cpu_cores = cml_args.cpucores
     if (cpu_cores < 1) or (cpu_cores > multiprocessing.cpu_count()):
@@ -1557,7 +1575,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         dh = RMSDataHandle(
             cml_args.dir_path, dt_range=event_time_range, 
             db_dir=cml_args.dbdir, output_dir=cml_args.outdir,
-            mcmode = cml_args.mcmode)
+            mcmode=cml_args.mcmode, maxtrajs=maxtrajs)
         
         # If there is nothing to process, stop, unless we're in mcmode 2 (processing_list is not used in this case)
         if not dh.processing_list and cml_args.mcmode < 2:
