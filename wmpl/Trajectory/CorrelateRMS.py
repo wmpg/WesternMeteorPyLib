@@ -1263,7 +1263,7 @@ class RMSDataHandle(object):
             
             return None
 
-    def loadPhase1Trajectories(self, maxtrajs=1000):
+    def loadPhase1Trajectories(self, max_trajs=1000):
         """
         Load trajectories calculated by the intersecting-planes phase 1. These trajectories
         do not include uncertainties which are calculated in the Monte-Carlo phase 2
@@ -1279,7 +1279,7 @@ class RMSDataHandle(object):
         """
         pickles = glob.glob1(self.phase1_dir, "*_trajectory.pickle")
         pickles.sort()
-        pickles = pickles[:maxtrajs]
+        pickles = pickles[:max_trajs]
         self.phase1Trajectories = []
         dt_beg = datetime.datetime.strptime(pickles[0][:15], '%Y%m%d_%H%M%S').replace(tzinfo=datetime.timezone.utc)
         dt_end = datetime.datetime.strptime(pickles[-1][:15], '%Y%m%d_%H%M%S').replace(tzinfo=datetime.timezone.utc)
