@@ -984,6 +984,7 @@ class TrajectoryCorrelator(object):
 
             else:
                 log.info("The orbit could not be computed!")
+                return False, None
 
 
 
