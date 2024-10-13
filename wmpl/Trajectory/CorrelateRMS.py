@@ -1435,6 +1435,9 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     arg_parser.add_argument('--maxtrajs', '--maxtrajs', type=int, default=1000,
         help="Max number of trajectories to reload in each pass when doing the Monte-Carlo phase")
     
+    arg_parser.add_argument('--autofreq', '--autofreq', type=int, default=360,
+        help="Minutes to wait between runs in auto-mode")
+    
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -1478,6 +1481,8 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     log.addHandler(console_handler)
 
     ###
+    if cml_args.autofreq is not None:
+        AUTO_RUN_FREQUENCY = cml_args.autofreq/60
 
     if cml_args.auto is None:
         log.info("Running trajectory estimation once!")
