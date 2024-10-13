@@ -1631,7 +1631,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
             # in mcmode 2 we want to process all loaded trajectories so set the bin start/end accordingly
             dt_bins = [(dh.dt_range[0], dh.dt_range[1])]
 
-        if dh.dt_range[0] is not None:
+        if dh.dt_range is not None:
             # there's some data to process
             log.info("")
             log.info("ALL TIME BINS:")

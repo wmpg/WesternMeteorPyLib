@@ -18,6 +18,9 @@ from wmpl.Utils.ShowerAssociation import associateShowerTraj
 from wmpl.Utils.TrajConversions import J2000_JD, geo2Cartesian, cartesian2Geo, raDec2AltAz, altAz2RADec, \
     raDec2ECI, datetime2JD, jd2Date, equatorialCoordPrecession_vect
 
+import ray
+
+
 # Grab the logger from the main thread
 log = logging.getLogger("traj_correlator")
 
@@ -596,7 +599,8 @@ class TrajectoryCorrelator(object):
 
 
 
-    def solveTrajectory(self, traj, mc_runs, mcmode=0):
+    @ray.remote
+    def solveTrajectory(self, traj, mc_runs, mcmode=0, matched_obs = None):
         """ Given an initialized Trajectory object with observation, run the solver and automatically
             reject bad observations.
 
@@ -616,6 +620,7 @@ class TrajectoryCorrelator(object):
         # Reference Julian date (the one in the traj object may change later, after timing offset estimation,
         #   so we keep this one as a "hard" reference)
         jdt_ref = traj.jdt_ref
+        saved_traj_id = traj.traj_id
 
         # run the first phase of the solver if mcmode is 0 or 1 
         if mcmode < 2: 
@@ -629,7 +634,7 @@ class TrajectoryCorrelator(object):
             # If solving has failed, stop solving the trajectory
             except ValueError:
                 log.info("Error during trajectory estimation!")
-                return False, None
+                return False
 
 
             # Reject bad observations until a stable set is found, but only if there are more than 2    
@@ -798,7 +803,7 @@ class TrajectoryCorrelator(object):
                     # If solving has failed, stop solving the trajectory
                     except ValueError:
                         log.info("Error during trajectory estimation!")
-                        return False, None
+                        return False
 
 
                     # If the trajectory estimation failed, skip this trajectory
@@ -821,11 +826,11 @@ class TrajectoryCorrelator(object):
                 # Add the trajectory to the list of failed trajectories
                 self.dh.addTrajectory(traj, failed_jdt_ref=jdt_ref)
 
-                return False, None
+                return False
 
                 # # If the trajectory solutions was not done at any point, skip the trajectory completely
                 # if traj_best is None:
-                #     return False, None
+                #     return False
 
                 # # Otherwise, use the best trajectory solution until the solving failed
                 # else:
@@ -844,7 +849,7 @@ class TrajectoryCorrelator(object):
                     # Add the trajectory to the list of failed trajectories
                     self.dh.addTrajectory(traj_status, failed_jdt_ref=jdt_ref)
 
-                    return False, None
+                    return False
 
 
             # Use the best trajectory solution
@@ -925,7 +930,7 @@ class TrajectoryCorrelator(object):
                 # If solving has failed, stop solving the trajectory
                 except ValueError:
                     log.info("Error during trajectory estimation!")
-                    return False, None
+                    return False
 
 
                 # If the solve failed, stop
@@ -934,7 +939,7 @@ class TrajectoryCorrelator(object):
                     # Add the trajectory to the list of failed trajectories
                     self.dh.addTrajectory(traj, failed_jdt_ref=jdt_ref)
 
-                    return False, None
+                    return False
 
 
                 traj = traj_status
@@ -947,20 +952,20 @@ class TrajectoryCorrelator(object):
                     log.info("Average velocity outside range: {:.1f} < {:.1f} < {:.1f} km/s, skipping...".format(self.traj_constraints.v_avg_min, \
                         traj.orbit.v_avg/1000, self.traj_constraints.v_avg_max))
 
-                    return False, None
+                    return False
 
 
                 # If one of the observations doesn't have an estimated height, skip this trajectory
                 for obs in traj.observations:
                     if (obs.rbeg_ele is None) and (not obs.ignore_station):
                         log.info("Heights from observations failed to be estimated!")
-                        return False, None
+                        return False
 
 
                 # Check that the orbit could be computed
                 if traj.orbit.ra_g is None:
                     log.info("The orbit could not be computed!")
-                    return False, None
+                    return False
 
                 # Set the trajectory fit as successful
                 successful_traj_fit = True
@@ -984,11 +989,29 @@ class TrajectoryCorrelator(object):
 
             else:
                 log.info("The orbit could not be computed!")
-                return False, None
+                return False
 
 
 
-        return successful_traj_fit, traj
+        # restore the original traj_id so that the phase1 and phase 2 results use the same ID
+        if mcmode == 2 and successful_traj_fit is True:
+            traj.traj_id = saved_traj_id
+
+        # Save the trajectory if successful. 
+        if successful_traj_fit:
+            if mcmode == 1:
+                traj.phase_1_only = True
+
+            log.info('Saving trajectory and updating database....')
+            self.dh.saveTrajectoryResults(traj, self.traj_constraints.save_plots)
+            self.dh.addTrajectory(traj)
+
+            # Mark observations as paired in a trajectory if fit successful
+            if mcmode != 2: 
+                for _, met_obs_temp, _ in matched_obs:
+                    self.dh.markObservationAsPaired(met_obs_temp)
+
+        return successful_traj_fit
 
 
 
@@ -1055,10 +1078,11 @@ class TrajectoryCorrelator(object):
 
         # Go though all time bins and split the list of observations
         for bin_beg, bin_end in dt_bin_list:
+            # Counter for the total number of solved trajectories in this bin
+            traj_solved_count = 0
 
             # if we're in MC mode 0 or 1 we have to find the candidate trajectories
             if mcmode < 2:
-
                 log.info("")
                 log.info("-----------------------------------")
                 log.info("  PAIRING TRAJECTORIES IN TIME BIN:")
@@ -1072,9 +1096,6 @@ class TrajectoryCorrelator(object):
                 unpaired_observations = [met_obs for met_obs in unpaired_observations_all \
                     if (met_obs.reference_dt >= bin_beg) and (met_obs.reference_dt <= bin_end)]
 
-
-                # Counter for the total number of solved trajectories in this bin
-                traj_solved_count = 0
 
                 ### CHECK FOR PAIRING WITH PREVIOUSLY ESTIMATED TRAJECTORIES ###
 
@@ -1204,28 +1225,17 @@ class TrajectoryCorrelator(object):
 
 
                         # Re-run the trajectory fit
-                        successful_traj_fit, traj_new = self.solveTrajectory(traj_full, traj_full.mc_runs, mcmode=mcmode)
+                        successful_traj_fit = self.solveTrajectory(traj_full, traj_full.mc_runs, mcmode=mcmode, matched_obs=candidate_observations)
                         
                         # If the new trajectory solution succeeded, save it
                         if successful_traj_fit:
 
-                            log.info("Saving the improved trajectory...")
-
-                            if mcmode == 1:
-                                traj_new.phase_1_only = True
-
-                            # Mark the observations as paired and remove them from the processing list
+                            log.info("Mark the observations as paired and remove them from the processing list...")
                             for met_obs_temp, _ in candidate_observations:
-                                self.dh.markObservationAsPaired(met_obs_temp)
                                 unpaired_observations.remove(met_obs_temp)
 
-                            # Remove the old trajectory
+                            log.info("Removing the previous solution...")
                             self.dh.removeTrajectory(traj_reduced)
-
-                            # Save the new trajectory
-                            self.dh.saveTrajectoryResults(traj_new, self.traj_constraints.save_plots)
-                            self.dh.addTrajectory(traj_new)
-
                         else:
                             log.info("New trajectory solution failed, keeping the old trajectory...")
 
@@ -1484,7 +1494,9 @@ class TrajectoryCorrelator(object):
             log.info("")
 
             # Go through all candidate trajectories and compute the complete trajectory solution
-            traj_solved_count = 0
+            traj_to_solve = []
+            mc_runs_to_use = []
+            matched_obs_used = []
             for matched_observations in candidate_trajectories:
 
                 log.info("")
@@ -1613,6 +1625,9 @@ class TrajectoryCorrelator(object):
                         log.info("The same trajectory already failed to be computed in previous runs!")
                         continue
 
+                    mc_runs_to_use.append(0)
+                    traj_to_solve.append(traj)
+                    matched_obs_used.append(matched_observations)
                     # end of if mcmode != 2
                 else:
                     # mcmode is 2 and so we have a list of trajectories that were solved in phase 1
@@ -1639,34 +1654,15 @@ class TrajectoryCorrelator(object):
                     # If the number of MC runs is not a multiple of CPU cores, increase it until it is
                     #   This will increase the number of MC runs while keeping the processing time the same
                     mc_runs = int(np.ceil(mc_runs/self.traj_constraints.mc_cores)*self.traj_constraints.mc_cores)
-                    saved_traj_id = traj.traj_id
+                    mc_runs_to_use.append(mc_runs)
+                    traj_to_solve.append(traj)
+                    matched_obs_used.append(None)
 
-                # Solve the trajectory
-                successful_traj_fit, traj = self.solveTrajectory(traj, mc_runs, mcmode=mcmode)
+            results = [self.solveTrajectory.remote(self=self, traj=tr, mc_runs=mc, mcmode=mcmode, matched_obs=mo) for tr,mc,mo in zip(traj_to_solve, mc_runs_to_use, matched_obs_used)]
+            outcomes = ray.get(results)
 
-                # restore the original traj_id so that the phase1 and phase 2 results use the same ID
-                if mcmode == 2 and successful_traj_fit is True:
-                    traj.traj_id = saved_traj_id
-
-                # Save the trajectory if successful. 
-                if successful_traj_fit:
-                    if mcmode == 1:
-                        traj.phase_1_only = True
-
-                    self.dh.saveTrajectoryResults(traj, self.traj_constraints.save_plots)
-                    self.dh.addTrajectory(traj)
-
-                    # Mark observations as paired in a trajectory if fit successful
-                    if mcmode != 2: 
-                        for _, met_obs_temp, _ in matched_observations:
-                            self.dh.markObservationAsPaired(met_obs_temp)
-
-                    traj_solved_count += 1
-
-                    # If 250 new trajectories were computed, save the DB
-                    if traj_solved_count % 250 == 0:
-                        self.dh.saveDatabase()
-
+            self.dh.saveDatabase()
+            log.info(f'SOLVED {sum(outcomes)} TRAJECTORIES')
 
             # Finish the correlation run (update the database with new values)
             self.dh.finish()
