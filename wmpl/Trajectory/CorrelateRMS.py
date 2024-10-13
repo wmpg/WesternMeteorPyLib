@@ -1688,5 +1688,5 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                 # Wait to run
                 while next_run_time > datetime.datetime.now(datetime.timezone.utc):
                     log.info("Waiting {:s} to run the trajectory solver...          ".format(str(next_run_time \
-                        - datetime.datetime.now(datetime.timezone.utc))), end='\r')
+                        - datetime.datetime.now(datetime.timezone.utc))))
                     time.sleep(2)
