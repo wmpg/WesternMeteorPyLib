@@ -1281,6 +1281,8 @@ class RMSDataHandle(object):
         pickles.sort()
         pickles = pickles[:max_trajs]
         self.phase1Trajectories = []
+        if len(pickles) == 0:
+            return None, None
         dt_beg = datetime.datetime.strptime(pickles[0][:15], '%Y%m%d_%H%M%S').replace(tzinfo=datetime.timezone.utc)
         dt_end = datetime.datetime.strptime(pickles[-1][:15], '%Y%m%d_%H%M%S').replace(tzinfo=datetime.timezone.utc)
         for pick in pickles:
@@ -1587,8 +1589,10 @@ contain data folders. Data folders should have FTPdetectinfo files together with
             log.info("")
             log.info("Nothing to process!")
             log.info("Probably everything is already processed.")
-            log.info("Exiting...")
-            sys.exit()
+            if cml_args.auto is None:
+                break
+            else:
+                continue
 
 
         ### GENERATE DAILY TIME BINS ###
@@ -1619,36 +1623,39 @@ contain data folders. Data folders should have FTPdetectinfo files together with
             dt_bins = generateDatetimeBins(proc_dir_dt_beg, proc_dir_dt_end, bin_days=1, 
                                         tzinfo=datetime.timezone.utc)
         else:
+            # in mcmode 2 we want to process all loaded trajectories so set the bin start/end accordingly
             dt_bins = [(dh.dt_range[0], dh.dt_range[1])]
 
-        log.info("")
-        log.info("ALL TIME BINS:")
-        log.info("----------")
-        for bin_beg, bin_end in dt_bins:
-            log.info("{:s}, {:s}".format(str(bin_beg), str(bin_end)))
-
-
-        ### ###
-
-
-        # Go through all chunks in time
-        for bin_beg, bin_end in dt_bins:
-
+        if dh.dt_range[0] is not None:
+            # there's some data to process
             log.info("")
-            log.info("{}".format(datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dZ%H:%M:%S')))
-            log.info("PROCESSING TIME BIN:")
-            log.info("{:s}, {:s}".format(str(bin_beg), str(bin_end)))
-            log.info("-----------------------------")
-            log.info("")
+            log.info("ALL TIME BINS:")
+            log.info("----------")
+            for bin_beg, bin_end in dt_bins:
+                log.info("{:s}, {:s}".format(str(bin_beg), str(bin_end)))
 
-            # Load data of unprocessed observations
-            if cml_args.mcmode != 2:
-                dh.unpaired_observations = dh.loadUnpairedObservations(dh.processing_list, \
-                    dt_range=(bin_beg, bin_end))
 
-            # Run the trajectory correlator
-            tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True)
-            tc.run(event_time_range=event_time_range, mcmode=cml_args.mcmode)
+            ### ###
+
+
+            # Go through all chunks in time
+            for bin_beg, bin_end in dt_bins:
+
+                log.info("")
+                log.info("{}".format(datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dZ%H:%M:%S')))
+                log.info("PROCESSING TIME BIN:")
+                log.info("{:s}, {:s}".format(str(bin_beg), str(bin_end)))
+                log.info("-----------------------------")
+                log.info("")
+
+                # Load data of unprocessed observations
+                if cml_args.mcmode != 2:
+                    dh.unpaired_observations = dh.loadUnpairedObservations(dh.processing_list, \
+                        dt_range=(bin_beg, bin_end))
+
+                # Run the trajectory correlator
+                tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True)
+                tc.run(event_time_range=event_time_range, mcmode=cml_args.mcmode)
 
 
         
