@@ -1627,6 +1627,11 @@ contain data folders. Data folders should have FTPdetectinfo files together with
             # Split the processing into daily chunks
             dt_bins = generateDatetimeBins(proc_dir_dt_beg, proc_dir_dt_end, bin_days=1, 
                                         tzinfo=datetime.timezone.utc)
+            
+            # check if we've created an extra bucket (might happen if requested timeperiod is less than 24h)
+            if event_time_range is not None:
+                if dt_bins[-1][0] > event_time_range[1]: 
+                    dt_bins.pop(-1)
         else:
             # in mcmode 2 we want to process all loaded trajectories so set the bin start/end accordingly
             dt_bins = [(dh.dt_range[0], dh.dt_range[1])]

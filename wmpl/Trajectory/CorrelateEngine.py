@@ -602,7 +602,7 @@ class TrajectoryCorrelator(object):
 
 
 
-    @ray.remote(max_calls=1)
+    #@ray.remote(num_cpus=8, max_calls=1)
     def solveTrajectory(self, traj, mc_runs, mcmode=0, matched_obs = None):
         """ Given an initialized Trajectory object with observation, run the solver and automatically
             reject bad observations.
@@ -1517,7 +1517,7 @@ class TrajectoryCorrelator(object):
             traj_to_solve = []
             mc_runs_to_use = []
             matched_obs_used = []
-            use_ray = True
+            use_ray = False
             if use_ray:
                 log.info('parallelising')
             else:
