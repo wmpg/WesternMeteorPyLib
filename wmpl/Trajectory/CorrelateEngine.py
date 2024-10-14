@@ -574,7 +574,7 @@ class TrajectoryCorrelator(object):
 
 
 
-    def initTrajectory(self, jdt_ref, mc_runs):
+    def initTrajectory(self, jdt_ref, mc_runs, verbose=False):
         """ Initialize the Trajectory solver.
        
         Limits the number of maximum MC runs to 2*mc_runs.
@@ -582,6 +582,9 @@ class TrajectoryCorrelator(object):
         Arguments:
             jdt_ref: [datetime] Reference Julian date.
             mc_runs: [int] Number of Monte Carlo runs.
+
+        Keyword Arguments:
+            verbose: [bool] Enable or disable verbose logging
 
         Return:
             traj: [Trajectory]
@@ -591,7 +594,7 @@ class TrajectoryCorrelator(object):
             max_toffset=self.traj_constraints.max_toffset, meastype=1, \
             v_init_part=self.v_init_part, monte_carlo=self.traj_constraints.run_mc, \
             mc_runs=mc_runs, mc_runs_max=2*mc_runs,
-            show_plots=False, verbose=False, save_results=False, \
+            show_plots=False, verbose=verbose, save_results=False, \
             reject_n_sigma_outliers=2, mc_cores=self.traj_constraints.mc_cores, \
             geometric_uncert=self.traj_constraints.geometric_uncert)
 
@@ -599,7 +602,7 @@ class TrajectoryCorrelator(object):
 
 
 
-    @ray.remote
+    @ray.remote(max_calls=1)
     def solveTrajectory(self, traj, mc_runs, mcmode=0, matched_obs = None):
         """ Given an initialized Trajectory object with observation, run the solver and automatically
             reject bad observations.
@@ -621,6 +624,10 @@ class TrajectoryCorrelator(object):
         #   so we keep this one as a "hard" reference)
         jdt_ref = traj.jdt_ref
         saved_traj_id = traj.traj_id
+        log.info("")
+        log.info(f"Solving the trajectory {traj.traj_id}...")
+        print(f"Solving the trajectory for {jd2Date(jdt_ref)}...")
+
 
         # run the first phase of the solver if mcmode is 0 or 1 
         if mcmode < 2: 
@@ -632,8 +639,10 @@ class TrajectoryCorrelator(object):
                 traj_status = traj.run()
 
             # If solving has failed, stop solving the trajectory
-            except ValueError:
+            except ValueError as e:
                 log.info("Error during trajectory estimation!")
+                print(f"1 Error during trajectory estimation for {jd2Date(jdt_ref)}")
+                print(e)
                 return False
 
 
@@ -648,6 +657,7 @@ class TrajectoryCorrelator(object):
                 # If the trajectory estimation failed, skip this trajectory
                 if traj_status is None:
                     log.info("Trajectory estimation failed!")
+                    print(f"Trajectory 1 estimation failed for {jd2Date(jdt_ref)}")
                     skip_trajectory = True
                     break
 
@@ -675,6 +685,7 @@ class TrajectoryCorrelator(object):
                 # If there are less than 2 stations that are not ignored, skip this solution
                 if len([obstmp for obstmp in traj_status.observations if not obstmp.ignore_station]) < 2:
                     log.info("Skipping trajectory solution, not enough good observations...")
+                    print(f"Skipping trajectory solution, not enough good observations for {jd2Date(jdt_ref)}")
                     skip_trajectory = True
                     break
 
@@ -748,6 +759,7 @@ class TrajectoryCorrelator(object):
                     # Stop if too many observations were rejected
                     if len(ignore_candidates) >= max_rejections_possible:
                         log.info("Too many observations ejected!")
+                        print(f"Too many observations ejected for {jd2Date(jdt_ref)}")
                         skip_trajectory = True
                         break
 
@@ -783,9 +795,10 @@ class TrajectoryCorrelator(object):
 
                     log.info("")
                     log.info("Rerunning the trajectory solution...")
+                    print("Rerunning the trajectory solution...")
 
                     # Init a new trajectory object (make sure to use the new reference Julian date)
-                    traj = self.initTrajectory(traj_status.jdt_ref, mc_runs)
+                    traj = self.initTrajectory(traj_status.jdt_ref, mc_runs, verbose=False)
 
                     # Disable Monte Carlo runs until an initial stable set of observations is found
                     traj.monte_carlo = False
@@ -803,12 +816,14 @@ class TrajectoryCorrelator(object):
                     # If solving has failed, stop solving the trajectory
                     except ValueError:
                         log.info("Error during trajectory estimation!")
+                        print(f"2 Error during trajectory estimation for {jd2Date(jdt_ref)}")
                         return False
 
 
                     # If the trajectory estimation failed, skip this trajectory
                     if traj_status is None:
                         log.info("Trajectory estimation failed!")
+                        print(f"Trajectory estimation failed for {jd2Date(jdt_ref)}")
                         skip_trajectory = True
                         break
 
@@ -825,7 +840,8 @@ class TrajectoryCorrelator(object):
 
                 # Add the trajectory to the list of failed trajectories
                 self.dh.addTrajectory(traj, failed_jdt_ref=jdt_ref)
-
+                log.info("Trajectory skipped and added to fails!")
+                print(f"Trajectory skipped and added to fails for {jd2Date(jdt_ref)}")
                 return False
 
                 # # If the trajectory solutions was not done at any point, skip the trajectory completely
@@ -888,7 +904,7 @@ class TrajectoryCorrelator(object):
                 log.info("Stable set of observations found, computing uncertainties using Monte Carlo...")
 
                 # Init a new trajectory object (make sure to use the new reference Julian date)
-                traj = self.initTrajectory(traj_status.jdt_ref, mc_runs)
+                traj = self.initTrajectory(traj_status.jdt_ref, mc_runs, verbose=False)
 
                 # Enable Monte Carlo
                 traj.monte_carlo = True
@@ -930,6 +946,7 @@ class TrajectoryCorrelator(object):
                 # If solving has failed, stop solving the trajectory
                 except ValueError:
                     log.info("Error during trajectory estimation!")
+                    print(f"Error during trajectory estimation for {jd2Date(jdt_ref)}")
                     return False
 
 
@@ -1003,6 +1020,7 @@ class TrajectoryCorrelator(object):
                 traj.phase_1_only = True
 
             log.info('Saving trajectory and updating database....')
+            print('Saving trajectory and updating database....')
             self.dh.saveTrajectoryResults(traj, self.traj_constraints.save_plots)
             self.dh.addTrajectory(traj)
 
@@ -1010,6 +1028,8 @@ class TrajectoryCorrelator(object):
             if mcmode != 2: 
                 for _, met_obs_temp, _ in matched_obs:
                     self.dh.markObservationAsPaired(met_obs_temp)
+        else:
+            print('unable to fit trajectory')
 
         return successful_traj_fit
 
@@ -1497,6 +1517,12 @@ class TrajectoryCorrelator(object):
             traj_to_solve = []
             mc_runs_to_use = []
             matched_obs_used = []
+            use_ray = True
+            if use_ray:
+                log.info('parallelising')
+            else:
+                log.info('NOT parallelising')
+
             for matched_observations in candidate_trajectories:
 
                 log.info("")
@@ -1606,7 +1632,7 @@ class TrajectoryCorrelator(object):
                     # Init the solver (use the earliest date as the reference)
                     ref_dt = min([met_obs.reference_dt for _, met_obs, _ in matched_observations])
                     jdt_ref = datetime2JD(ref_dt)
-                    traj = self.initTrajectory(jdt_ref, mc_runs)
+                    traj = self.initTrajectory(jdt_ref, mc_runs, verbose=False)
 
 
                     # Feed the observations into the trajectory solver
@@ -1618,16 +1644,37 @@ class TrajectoryCorrelator(object):
 
                         traj.infillWithObs(obs_temp)
 
+                    ### Recompute the reference JD and all times so that the first time starts at 0 ###
+
+                    # Determine the first relative time from reference JD
+                    t0 = min([obs.time_data[0] for obs in traj.observations if (not obs.ignore_station) \
+                        or (not np.all(obs.ignore_list))])
+
+                    # If the first time is not 0, normalize times so that the earliest time is 0
+                    if t0 != 0.0:
+
+                        # Offset all times by t0
+                        for i in range(len(traj.observations)):
+                            traj.observations[i].time_data -= t0
+
+
+                        # Recompute the reference JD to corresponds with t0
+                        traj.jdt_ref = traj.jdt_ref + t0/86400.0
+
 
                     # If this trajectory already failed to be computed, don't try to recompute it again unless
                     #   new observations are added
                     if self.dh.checkTrajIfFailed(traj):
                         log.info("The same trajectory already failed to be computed in previous runs!")
                         continue
+                    if use_ray:
+                        mc_runs_to_use.append(mc_runs)
+                        traj_to_solve.append(traj)
+                        matched_obs_used.append(matched_observations)
+                    else:
+                        result = self.solveTrajectory(traj, mc_runs, mcmode=mcmode, matched_obs=matched_observations)
+                        traj_solved_count += int(result)
 
-                    mc_runs_to_use.append(0)
-                    traj_to_solve.append(traj)
-                    matched_obs_used.append(matched_observations)
                     # end of if mcmode != 2
                 else:
                     # mcmode is 2 and so we have a list of trajectories that were solved in phase 1
@@ -1654,12 +1701,22 @@ class TrajectoryCorrelator(object):
                     # If the number of MC runs is not a multiple of CPU cores, increase it until it is
                     #   This will increase the number of MC runs while keeping the processing time the same
                     mc_runs = int(np.ceil(mc_runs/self.traj_constraints.mc_cores)*self.traj_constraints.mc_cores)
-                    mc_runs_to_use.append(mc_runs)
-                    traj_to_solve.append(traj)
-                    matched_obs_used.append(None)
+                    if use_ray:
+                        mc_runs_to_use.append(mc_runs)
+                        traj_to_solve.append(traj)
+                        matched_obs_used.append(None)
+                    else:
+                        result = self.solveTrajectory(traj, mc_runs, mcmode=mcmode, matched_obs=matched_observations)
+                        traj_solved_count += int(result)
 
-            results = [self.solveTrajectory.remote(self=self, traj=tr, mc_runs=mc, mcmode=mcmode, matched_obs=mo) for tr,mc,mo in zip(traj_to_solve, mc_runs_to_use, matched_obs_used)]
-            outcomes = ray.get(results)
+            # end of "for matched_observations in candidate_trajectories"
+            if use_ray:
+                log.info(f'parallel processing {len(traj_to_solve)} trajectories')
+                results = [self.solveTrajectory.remote(self=self, traj=tr, mc_runs=mc, mcmode=mcmode, matched_obs=mo) for tr,mc,mo in zip(traj_to_solve, mc_runs_to_use, matched_obs_used)]
+                log.info(f'received {len(results)} results')
+                outcomes = ray.get(results)
+            else:
+                outcomes = [traj_solved_count]
 
             self.dh.saveDatabase()
             log.info(f'SOLVED {sum(outcomes)} TRAJECTORIES')
