@@ -52,7 +52,7 @@ def pickBestStations(obslist, max_stns):
 
     # test if the meteor started and ended in the field of view
     # not sure this is needed
-    in_fovs = [obs[0].fov_beg & obs[0].fov_end for obs in obslist]
+    # in_fovs = [obs[0].fov_beg & obs[0].fov_end for obs in obslist]
 
     # work out what fraction of the event each camera saw - more is better
     durations = [obs[0].JD_data[-1] - obs[0].JD_data[0] for obs in obslist]
@@ -524,13 +524,13 @@ class TrajectoryCorrelator(object):
 
         # Check if begin height are within the specified range
         if (ht1_beg > self.traj_constraints.max_begin_ht) \
-            or (ht1_beg < self.traj_constraints.min_begin_ht) \
-            or (ht2_beg > self.traj_constraints.max_begin_ht) \
-            or (ht2_beg < self.traj_constraints.min_begin_ht) \
-            or (ht1_end > self.traj_constraints.max_end_ht) \
-            or (ht1_end < self.traj_constraints.min_end_ht) \
-            or (ht2_end > self.traj_constraints.max_end_ht) \
-            or (ht2_end < self.traj_constraints.min_end_ht):
+                or (ht1_beg < self.traj_constraints.min_begin_ht) \
+                or (ht2_beg > self.traj_constraints.max_begin_ht) \
+                or (ht2_beg < self.traj_constraints.min_begin_ht) \
+                or (ht1_end > self.traj_constraints.max_end_ht) \
+                or (ht1_end < self.traj_constraints.min_end_ht) \
+                or (ht2_end > self.traj_constraints.max_end_ht) \
+                or (ht2_end < self.traj_constraints.min_end_ht):
 
             log.info("Meteor heights outside allowed range!")
             log.info("H1_beg: {:.2f}, H1_end: {:.2f}".format(ht1_beg, ht1_end))
@@ -665,7 +665,7 @@ class TrajectoryCorrelator(object):
                     #    trajectory and store it as the best trajectory
                     elif np.median([obstmp.ang_res_std for obstmp in traj_status.observations 
                         if not obstmp.ignore_station]) < np.median([obstmp.ang_res_std for obstmp 
-                        in traj_best.observations if not obstmp.ignore_station]):
+                            in traj_best.observations if not obstmp.ignore_station]):
 
                         traj_best = copy.deepcopy(traj_status)
 
@@ -716,8 +716,8 @@ class TrajectoryCorrelator(object):
                     # Check if the current observations is larger than the minimum limit, and
                     # outside the median limit or larger than the maximum limit
                     if (obs.ang_res_std > np.radians(self.traj_constraints.min_arcsec_err/3600)) \
-                        and ((obs.ang_res_std > ang_res_median*self.traj_constraints.bad_station_obs_ang_limit) 
-                        or (obs.ang_res_std > np.radians(self.traj_constraints.max_arcsec_err/3600))):
+                            and ((obs.ang_res_std > ang_res_median*self.traj_constraints.bad_station_obs_ang_limit) 
+                            or (obs.ang_res_std > np.radians(self.traj_constraints.max_arcsec_err/3600))):
 
                         # Add an ignore candidate and store its angular error
                         if obs.obs_id not in ignored_station_dict:
@@ -845,7 +845,7 @@ class TrajectoryCorrelator(object):
             #   residuals higher than the maximum limit
             if len(traj_status.observations) == 2:
                 if np.any([(obstmp.ang_res_std > np.radians(self.traj_constraints.max_arcsec_err/3600)) 
-                    for obstmp in traj_status.observations]):
+                        for obstmp in traj_status.observations]):
 
                     log.info("2 station only solution, one station has an error above the maximum limit, skipping!")
 
@@ -1001,6 +1001,7 @@ class TrajectoryCorrelator(object):
             # restore the original traj_id so that the phase1 and phase 2 results use the same ID
             if mcmode == 2:
                 traj.traj_id = saved_traj_id
+                traj.phase_1_only = False
 
             if mcmode == 1:
                 traj.phase_1_only = True
@@ -1008,9 +1009,12 @@ class TrajectoryCorrelator(object):
             if orig_traj:
                 log.info("Removing the previous solution...")
                 self.dh.removeTrajectory(orig_traj)
-            log.info('Saving trajectory and updating database....')
+            log.info('Saving trajectory....')
             self.dh.saveTrajectoryResults(traj, self.traj_constraints.save_plots)
-            self.dh.addTrajectory(traj)
+            if mcmode !=2:
+                # we do not need to update the database for phase2 
+                log.info('Updating database....')
+                self.dh.addTrajectory(traj)
 
             # Mark observations as paired in a trajectory if fit successful
             if mcmode != 2 and matched_obs is not None: 
@@ -1031,6 +1035,14 @@ class TrajectoryCorrelator(object):
                 events should be used. None by default, which uses all available events.
             mcmode: [int] flag to indicate whether or not to run monte-carlos
         """
+
+        # a bit of logging to let readers know what we're doing
+        if mcmode == 2: 
+            mcmodestr = ' - MONTE CARLO STAGE'
+        elif mcmode == 1:
+            mcmodestr = ' - SIMPLE STAGE'
+        else:
+            mcmodestr = ' '
 
         if mcmode != 2:
             # Get unpaired observations, filter out observations with too little points and sort them by time
@@ -1491,7 +1503,7 @@ class TrajectoryCorrelator(object):
             log.info("")
             log.info("-----------------------")
             log.info("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
-            log.info("SOLVING {:d} TRAJECTORIES".format(len(candidate_trajectories)))
+            log.info(f'SOLVING {len(candidate_trajectories)} TRAJECTORIES {mcmodestr}')
             log.info("-----------------------")
             log.info("")
 

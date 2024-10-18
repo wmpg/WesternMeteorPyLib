@@ -416,7 +416,7 @@ class MeteorObsRMS(object):
 
         # If the predicted point is inside the FOV, mark it as such
         if (x_pre_begin > 0) and (x_pre_begin <= self.platepar.X_res) and (y_pre_begin > 0) \
-            and (y_pre_begin < self.platepar.Y_res):
+                and (y_pre_begin < self.platepar.Y_res):
 
             self.fov_beg = True
 
@@ -449,7 +449,7 @@ class MeteorObsRMS(object):
 
         # If the predicted point is inside the FOV, mark it as such
         if (x_post_end > 0) and (x_post_end <= self.platepar.X_res) and (y_post_end > 0) \
-            and (y_post_end <= self.platepar.Y_res):
+                and (y_post_end <= self.platepar.Y_res):
             
             self.fov_end = True
 
@@ -696,7 +696,7 @@ class RMSDataHandle(object):
                     
                 # Find FTPdetectinfo
                 if name.startswith("FTPdetectinfo") and name.endswith('.txt') and \
-                    ("backup" not in name) and ("uncalibrated" not in name) and ("unfiltered" not in name):
+                        ("backup" not in name) and ("uncalibrated" not in name) and ("unfiltered" not in name):
                     ftpdetectinfo_name = name
                     continue
 
@@ -763,8 +763,8 @@ class RMSDataHandle(object):
                 # Init meteor data
                 meteor_data = []
                 for entry in zip(cams_met_obs.frames, cams_met_obs.time_data, cams_met_obs.x_data,
-                    cams_met_obs.y_data, cams_met_obs.azim_data, cams_met_obs.elev_data, 
-                    cams_met_obs.ra_data, cams_met_obs.dec_data, cams_met_obs.mag_data):
+                        cams_met_obs.y_data, cams_met_obs.azim_data, cams_met_obs.elev_data, 
+                        cams_met_obs.ra_data, cams_met_obs.dec_data, cams_met_obs.mag_data):
 
                     frame, time_rel, x, y, azim, alt, ra, dec, mag = entry
 
@@ -1079,16 +1079,11 @@ class RMSDataHandle(object):
         for met_obs in unpaired_observations:
 
             # Check that the stations are in the same region / group of countres
-            if not self.countryFilter(
-                met_obs.station_code, 
-                (traj_reduced.participating_stations + traj_reduced.ignored_stations)[0]):
-            
+            if not self.countryFilter(met_obs.station_code, (traj_reduced.participating_stations + traj_reduced.ignored_stations)[0]):
                 continue
 
             # Skip all stations that are already participating in the trajectory solution
-            if (met_obs.station_code in traj_reduced.participating_stations) or \
-                (met_obs.station_code in traj_reduced.ignored_stations):
-
+            if (met_obs.station_code in traj_reduced.participating_stations) or (met_obs.station_code in traj_reduced.ignored_stations):
                 continue
 
 
@@ -1295,10 +1290,11 @@ class RMSDataHandle(object):
                     os.remove(procfile)
                 os.rename(os.path.join(self.phase1_dir, pick), procfile)
 
-            except FileNotFoundError:
-                log.info("File {:s} not found!".format(pick))
-            self.phase1Trajectories.append(traj)
-            log.info(f'loaded {traj.traj_id}')
+                self.phase1Trajectories.append(traj)
+                log.info(f'loaded {traj.traj_id}')
+            except Exception:
+                # if the file couldn't be read, then skip it for now - we'll get it in the next pass
+                log.info(f'File {pick} skipped for now')
         return dt_beg, dt_end
 
 
