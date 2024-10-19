@@ -391,7 +391,7 @@ def calcOrbitalElements(jd_ref, ra_g, dec_g, v_g, eci_ref):
 
     Arguments:
         jd_ref: [float] Reference Julian date of the meteor trajectory.
-        eci_ref: [ndarry] X, Y, Z components of ECI coordinates at the reference Julian date (meters).
+        eci_ref: [ndarry] X, Y, Z components of ECI coordinates at the reference Julian date (meters) in J2000.
         ra_g: [float] Geocentric radiant, right ascension (J2000, radians).
         dec_g: [float] Geocentric radiant, declination (J2000, radians).
         v_g: [float] Geocentic velocity (m/s).
