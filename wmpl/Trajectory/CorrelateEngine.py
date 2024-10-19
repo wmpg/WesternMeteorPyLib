@@ -1512,9 +1512,6 @@ class TrajectoryCorrelator(object):
                 log.info("")
                 log.info("-----------------------")
                 log.info("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
-                log.info("")
-                log.info("-----------------------")
-                log.info("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
 
 
                 # if mcmode is 0 or 1, prepare to calculate the intersecting planes solutions

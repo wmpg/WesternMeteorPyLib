@@ -576,7 +576,7 @@ class RMSDataHandle(object):
         ### ###
 
 
-    def purgePhase1ProcessedData(dir_path):
+    def purgePhase1ProcessedData(self, dir_path):
         refdt = time.time() - 14 * 86400
         result=[os.remove(file) for file in (os.path.join(path, file)
                     for path, _, files in os.walk(dir_path) for file in files) if os.stat(file).st_mtime < refdt]
