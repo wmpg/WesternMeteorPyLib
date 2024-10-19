@@ -520,6 +520,8 @@ class RMSDataHandle(object):
         if mcmode > 0:
             self.phase1_dir = os.path.join(self.output_dir, 'phase1')
             mkdirP(os.path.join(self.phase1_dir, 'processed'))
+            self.purgePhase1ProcessedData(os.path.join(self.phase1_dir, 'processed'))
+
 
         ############################
 
@@ -573,6 +575,12 @@ class RMSDataHandle(object):
 
         ### ###
 
+
+    def purgePhase1ProcessedData(dir_path):
+        refdt = time.time() - 14 * 86400
+        result=[os.remove(file) for file in (os.path.join(path, file)
+                    for path, _, files in os.walk(dir_path) for file in files) if os.stat(file).st_mtime < refdt]
+        return result
 
     def loadStations(self):
         """ Load the station names in the processing folder. """
@@ -825,21 +833,21 @@ class RMSDataHandle(object):
             date_fmt = "%Y"
 
             # Check if the directory name starts with a year
-            if not re.match("^\d{4}", dir_name):
+            if not re.match("^\d{4}", dir_name):   # noqa: W605 
                 return False
 
         elif len(dir_name) == 6:
             date_fmt = "%Y%m"
 
             # Check if the directory name starts with a year and month
-            if not re.match("^\d{6}", dir_name):
+            if not re.match("^\d{6}", dir_name): # noqa: W605 
                 return False
 
         elif len(dir_name) == 8:
             date_fmt = "%Y%m%d"
 
             # Check if the directory name starts with a year, month and day
-            if not re.match("^\d{8}", dir_name):
+            if not re.match("^\d{8}", dir_name): # noqa: W605 
                 return False
 
         else:
