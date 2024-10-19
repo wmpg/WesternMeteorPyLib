@@ -69,6 +69,7 @@ class TrajectoryReduced(object):
                     traj = loadPickle(*os.path.split(traj_file_path))
                 except EOFError:
                     log.info("Pickle file could not be loaded: " + traj_file_path)
+                    log.info("Pickle file could not be loaded: " + traj_file_path)
                     return None
 
             else:
@@ -497,6 +498,7 @@ class RMSDataHandle(object):
         self.dt_range = dt_range
 
         log.info("Using directory: " + self.dir_path)
+        log.info("Using directory: " + self.dir_path)
 
 
         # Set the database directory
@@ -527,6 +529,8 @@ class RMSDataHandle(object):
 
         # Load database of processed folders
         database_path = os.path.join(self.db_dir, JSON_DB_NAME)
+        log.info("")
+        log.info("Loading database: {:s}".format(database_path))
         log.info("")
         log.info("Loading database: {:s}".format(database_path))
         self.db = DatabaseJSON(database_path)
@@ -593,8 +597,10 @@ class RMSDataHandle(object):
             if os.path.isdir(os.path.join(self.dir_path, dir_name)):
                 if re.match("^[A-Z]{2}[A-Z0-9]{4}$", dir_name):
                     log.info("Using station: " + dir_name)
+                    log.info("Using station: " + dir_name)
                     station_list.append(dir_name)
                 else:
+                    log.info("Skipping directory: " + dir_name)
                     log.info("Skipping directory: " + dir_name)
 
 
@@ -630,6 +636,7 @@ class RMSDataHandle(object):
                         "%Y%m%d_%H%M%S").replace(tzinfo=datetime.timezone.utc)
                 except:
                     log.info("Could not parse the date of the night dir: {:s}".format(night_path))
+                    log.info("Could not parse the date of the night dir: {:s}".format(night_path))
                     night_dt = None
 
                 # # If the night path is not in the processed list, add it to the processing list
@@ -643,6 +650,7 @@ class RMSDataHandle(object):
 
 
         # if skipped_dirs:
+        #     log.info("Skipped {:d} processed directories".format(skipped_dirs))
         #     log.info("Skipped {:d} processed directories".format(skipped_dirs))
 
         return processing_list
@@ -698,6 +706,8 @@ class RMSDataHandle(object):
 
             log.info("")
             log.info("Processing station: " + station_code)
+            log.info("")
+            log.info("Processing station: " + station_code)
 
             # Find FTPdetectinfo and platepar files
             for name in os.listdir(proc_path):
@@ -723,6 +733,7 @@ class RMSDataHandle(object):
 
             # Skip these observations if no data files were found inside
             if (ftpdetectinfo_name is None) or (platepar_recalibrated_name is None):
+                log.info("  Skipping {:s} due to missing data files...".format(rel_proc_path))
                 log.info("  Skipping {:s} due to missing data files...".format(rel_proc_path))
 
                 # Add the folder to the list of processed folders
@@ -765,6 +776,7 @@ class RMSDataHandle(object):
                 if hasattr(pp, "auto_recalibrated"):
                     if not pp.auto_recalibrated:
                         log.info("    Skipping {:s}, not recalibrated!".format(cams_met_obs.ff_name))
+                        log.info("    Skipping {:s}, not recalibrated!".format(cams_met_obs.ff_name))
                         continue
 
 
@@ -804,8 +816,11 @@ class RMSDataHandle(object):
                     unpaired_met_obs_list.append(met_obs)
 
             log.info("  Added {:d} observations!".format(added_count))
+            log.info("  Added {:d} observations!".format(added_count))
 
 
+        log.info("")
+        log.info("  Finished loading unpaired observations!")
         log.info("")
         log.info("  Finished loading unpaired observations!")
         self.saveDatabase()
@@ -957,6 +972,7 @@ class RMSDataHandle(object):
             if self.yearMonthDayDirInDtRange(yyyy):
 
                 log.info("- year    " + str(yyyy))
+                log.info("- year    " + str(yyyy))
                 
                 # Check the month
                 for yyyymm in sorted(os.listdir(os.path.join(traj_dir_path, yyyy))):
@@ -964,12 +980,14 @@ class RMSDataHandle(object):
                     if self.yearMonthDayDirInDtRange(yyyymm):
 
                         log.info("  - month " + str(yyyymm))
+                        log.info("  - month " + str(yyyymm))
 
                         # Check the day
                         for yyyymmdd in sorted(os.listdir(os.path.join(traj_dir_path, yyyy, yyyymm))):
 
                             if self.yearMonthDayDirInDtRange(yyyymmdd):
 
+                                log.info("    - day " + str(yyyymmdd))
                                 log.info("    - day " + str(yyyymmdd))
 
                                 yyyymmdd_dir_path = os.path.join(traj_dir_path, yyyy, yyyymm, yyyymmdd)
@@ -1257,6 +1275,7 @@ class RMSDataHandle(object):
 
         except FileNotFoundError:
             log.info("File {:s} not found!".format(traj_reduced.traj_file_path))
+            log.info("File {:s} not found!".format(traj_reduced.traj_file_path))
             
             return None
 
@@ -1312,6 +1331,7 @@ class RMSDataHandle(object):
         def _breakHandler(signum, frame):
             """ Do nothing if CTRL + C is pressed. """
             log.info("The data base is being saved, the program cannot be exited right now!")
+            log.info("The data base is being saved, the program cannot be exited right now!")
             pass
 
         # Prevent quitting while a data base is being saved
@@ -1319,6 +1339,7 @@ class RMSDataHandle(object):
         signal.signal(signal.SIGINT, _breakHandler)
 
         # Save the data base
+        log.info("Saving data base to disk...")
         log.info("Saving data base to disk...")
         self.db.save()
 
@@ -1685,7 +1706,11 @@ contain data folders. Data folders should have FTPdetectinfo files together with
             else:
 
                 # Compute next run time
-                next_run_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=wait_time)
+                next_run_time = datetime.datetime.now(datetime.timezone.utc) \
+                    + datetime.timedelta(seconds=wait_time)
+                
+                log.info("Next run time: {:s}, waiting {:d} seconds...".format(str(next_run_time), 
+                                                                               int(wait_time)))
 
                 # Wait to run
                 while next_run_time > datetime.datetime.now(datetime.timezone.utc):

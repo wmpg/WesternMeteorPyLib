@@ -2112,9 +2112,6 @@ def generateAutoPlotsAndReports(
 
 
 
-
-
-
 if __name__ == "__main__":
 
     from wmpl.Utils.OSTools import importBasemap
