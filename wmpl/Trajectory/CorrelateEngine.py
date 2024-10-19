@@ -265,7 +265,6 @@ class TrajectoryCorrelator(object):
 
         else:
             log.info("Distance between station and trajectory too large!")
-            log.info("Distance between station and trajectory too large!")
             return False
 
 
@@ -310,7 +309,6 @@ class TrajectoryCorrelator(object):
 
         else:
             log.info("Trajectory not in station FOV!")
-            log.info("Trajectory not in station FOV!")
             return False
 
     
@@ -328,12 +326,10 @@ class TrajectoryCorrelator(object):
             np.radians(tp.lon))
 
         log.info("Distance between {:s} and {:s} = {:.1f} km".format(rp.station_code, tp.station_code, dist))
-        log.info("Distance between {:s} and {:s} = {:.1f} km".format(rp.station_code, tp.station_code, dist))
 
         if (dist < self.traj_constraints.min_station_dist) \
                 or (dist > self.traj_constraints.max_station_dist):
 
-            log.info("Rejecting station combination...")
             log.info("Rejecting station combination...")
             return False
         else:
@@ -500,8 +496,7 @@ class TrajectoryCorrelator(object):
         plane_intersection = PlaneIntersection(obs1, obs2)
 
         ra_cand, dec_cand = plane_intersection.radiant_eq
-        log.info("Candidate radiant: RA = {:.3f}, Dec = {:+.3f}".format(np.degrees(ra_cand), 
-            np.degrees(dec_cand)))
+        log.info("Candidate radiant: RA = {:.3f}, Dec = {:+.3f}".format(np.degrees(ra_cand), np.degrees(dec_cand)))
         
 
         ### Compute meteor begin and end points
@@ -524,7 +519,6 @@ class TrajectoryCorrelator(object):
         # Check the end height is lower than begin height
         if (ht1_end > ht1_beg) or (ht2_end > ht2_beg):
             log.info("Begin height lower than the end height!")
-            log.info("Begin height lower than the end height!")
             return None
 
         # Check if begin height are within the specified range
@@ -537,9 +531,6 @@ class TrajectoryCorrelator(object):
                 or (ht2_end > self.traj_constraints.max_end_ht) \
                 or (ht2_end < self.traj_constraints.min_end_ht):
 
-            log.info("Meteor heights outside allowed range!")
-            log.info("H1_beg: {:.2f}, H1_end: {:.2f}".format(ht1_beg, ht1_end))
-            log.info("H2_beg: {:.2f}, H2_end: {:.2f}".format(ht2_beg, ht2_end))
             log.info("Meteor heights outside allowed range!")
             log.info("H1_beg: {:.2f}, H1_end: {:.2f}".format(ht1_beg, ht1_end))
             log.info("H2_beg: {:.2f}, H2_end: {:.2f}".format(ht2_beg, ht2_end))
@@ -560,7 +551,6 @@ class TrajectoryCorrelator(object):
 
         if percent_diff > self.traj_constraints.max_vel_percent_diff:
 
-            log.info("Velocity difference too high: {:.2f} vs {:.2f} km/s".format(vel1/1000, vel2/1000))
             log.info("Velocity difference too high: {:.2f} vs {:.2f} km/s".format(vel1/1000, vel2/1000))
             return None
 
