@@ -7,7 +7,6 @@ import datetime
 import json
 import multiprocessing
 import logging
-import logging
 
 import numpy as np
 
