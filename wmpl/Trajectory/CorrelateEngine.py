@@ -608,6 +608,8 @@ class TrajectoryCorrelator(object):
 
         Keyword Arguments:
             mcmode: [int] whether to run both intersecting-planes and monte carlo (0), just IP (1) or just MC (2)
+            matched_obs [list] default none: list of new observations being used in the traj.
+            orig_traj [trajectory] default none: original trajectory being updated, required to delete the old data if new soln found. 
 
         Return:
             successful: [bool] True if successfully solved
@@ -622,6 +624,9 @@ class TrajectoryCorrelator(object):
         log.info("")
         log.info(f"Solving the trajectory at {jd2Date(jdt_ref, dt_obj=True, tzinfo=datetime.timezone.utc).strftime('%Y-%m-%dZ%H:%M:%S')}...")
 
+        # make a note of how many observations are already marked ignored.
+        initial_ignore_count = len([obs for obs in traj.observations if obs.ignore_station])
+        log.info(f'initially ignoring {initial_ignore_count} stations...')
 
         # run the first phase of the solver if mcmode is 0 or 1 
         if mcmode < 2: 
@@ -900,7 +905,10 @@ class TrajectoryCorrelator(object):
 
                 # If there are more than the maximum number of stations, choose the ones with the smallest
                 # residuals
-                if len(non_ignored_observations) > self.traj_constraints.max_stations:
+                # Don't do this in mc-only mode since phase1 has already selected the stations and we could 
+                # create duplicate orbits if we now exclude some stations from the solution
+                # TODO should we do this here *at all* ? 
+                if len(non_ignored_observations) > self.traj_constraints.max_stations and mcmode != 2:
 
                     # Sort the observations by residuals (smallest first)
                     # TODO: implement better sorting algorithm
@@ -1115,6 +1123,7 @@ class TrajectoryCorrelator(object):
                 unpaired_observations = [met_obs for met_obs in unpaired_observations_all 
                     if (met_obs.reference_dt >= bin_beg) and (met_obs.reference_dt <= bin_end)]
 
+                log.info(f'Analysing {len(unpaired_observations)} observations...')
 
                 ### CHECK FOR PAIRING WITH PREVIOUSLY ESTIMATED TRAJECTORIES ###
 
@@ -1140,6 +1149,9 @@ class TrajectoryCorrelator(object):
                             "skipping...".format(
                                 str(jd2Date(traj_reduced.jdt_ref, dt_obj=True, tzinfo=datetime.timezone.utc))))
 
+                        # TODO DECIDE WHETHER WE ACTUALLY WANT TO DO THIS
+                        # the problem is that we could end up with unpaired observations that form a new trajectory instead of
+                        # being added to an existing one
                         continue
                 
                     # Get all unprocessed observations which are close in time to the reference trajectory
@@ -1219,7 +1231,7 @@ class TrajectoryCorrelator(object):
 
                         ### ###
 
-                        candidate_observations.append([met_obs, obs_new])
+                        candidate_observations.append([obs_new, met_obs])
 
 
                     # Skip the candidate trajectory if it couldn't be loaded from disk
@@ -1230,23 +1242,23 @@ class TrajectoryCorrelator(object):
                     # If there are any good new observations, add them to the trajectory and re-run the solution
                     if candidate_observations:
 
-                        log.info("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
                         log.info("Recomputing trajectory with new observations from stations:")
 
                         # Add new observations to the trajectory object
-                        for _, obs_new in candidate_observations:
+                        for obs_new, _ in candidate_observations:
                             log.info(obs_new.station_id)
                             traj_full.infillWithObs(obs_new)
 
 
                         # Re-run the trajectory fit
+                        # pass in orig_traj here so that it can be deleted from disk if the new solution succeeds
                         successful_traj_fit = self.solveTrajectory(traj_full, traj_full.mc_runs, mcmode=mcmode, orig_traj=traj_reduced)
                         
-                        # If the new trajectory solution succeeded, remove the old one
+                        # If the new trajectory solution succeeded, remove the now-paired observations
                         if successful_traj_fit:
 
                             log.info("Remove paired observations from the processing list...")
-                            for met_obs_temp, _ in candidate_observations:
+                            for _, met_obs_temp in candidate_observations:
                                 self.dh.markObservationAsPaired(met_obs_temp)
                                 unpaired_observations.remove(met_obs_temp)
 
@@ -1290,8 +1302,7 @@ class TrajectoryCorrelator(object):
                         log.info("")
                         log.info("Processing pair:")
                         log.info("{:s} and {:s}".format(met_obs.station_code, met_pair_candidate.station_code))
-                        log.info("{:s} and {:s}".format(str(met_obs.reference_dt), 
-                            str(met_pair_candidate.reference_dt)))
+                        log.info("{:s} and {:s}".format(str(met_obs.reference_dt), str(met_pair_candidate.reference_dt)))
                         log.info("-----------------------")
 
                         ### Check if the stations are close enough and have roughly overlapping fields of view ###
@@ -1648,6 +1659,7 @@ class TrajectoryCorrelator(object):
                         log.info("The same trajectory already failed to be computed in previous runs!")
                         continue
 
+                    # pass in matched_observations here so that solveTrajectory can mark them paired if they're used
                     result = self.solveTrajectory(traj, mc_runs, mcmode=mcmode, matched_obs=matched_observations)
                     traj_solved_count += int(result)
 
@@ -1677,6 +1689,7 @@ class TrajectoryCorrelator(object):
                     #   This will increase the number of MC runs while keeping the processing time the same
                     mc_runs = int(np.ceil(mc_runs/self.traj_constraints.mc_cores)*self.traj_constraints.mc_cores)
 
+                    # pass in matched_observations here so that solveTrajectory can mark them paired if they're used
                     result = self.solveTrajectory(traj, mc_runs, mcmode=mcmode, matched_obs=matched_observations)
                     traj_solved_count += int(result)
 
