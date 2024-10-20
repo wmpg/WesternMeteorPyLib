@@ -619,14 +619,14 @@ class RMSDataHandle(object):
 
         for station in self.db.processed_dirs:
             arch_processed = [dirname for dirname in self.db.processed_dirs[station] if 
-                                datetime.datetime.strptime(dirname[14:29], '%Y%m%d_%H%M%S').replace(tzinfo=datetime.timezone.utc) < archdate]
+                                datetime.datetime.strptime(dirname[14:22], '%Y%m%d').replace(tzinfo=datetime.timezone.utc) < archdate]
             for dirname in arch_processed:
                 archdb.addProcessedDir(station, dirname)
                 self.db.processed_dirs[station].remove(dirname)
 
         for station in self.db.paired_obs:
             arch_processed = [obs_id for obs_id in self.db.paired_obs[station] if 
-                                datetime.datetime.strptime(obs_id[7:22], '%Y%m%d-%H%M%S').replace(tzinfo=datetime.timezone.utc) < archdate]
+                                datetime.datetime.strptime(obs_id[7:15], '%Y%m%d').replace(tzinfo=datetime.timezone.utc) < archdate]
             for obs_id in arch_processed:
                 archdb.addPairedObservation(DummyMetObs(station, obs_id))
                 self.db.paired_obs[station].remove(obs_id)
