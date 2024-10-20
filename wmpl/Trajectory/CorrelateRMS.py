@@ -17,7 +17,7 @@ import multiprocessing
 import logging
 import logging.handlers
 import glob
-
+from dateutil.relativedelta import relativedelta
 import numpy as np
 
 from wmpl.Formats.CAMS import loadFTPDetectInfo
@@ -25,7 +25,7 @@ from wmpl.Trajectory.CorrelateEngine import TrajectoryCorrelator, TrajectoryCons
 from wmpl.Utils.Math import generateDatetimeBins
 from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import loadPickle, savePickle
-from wmpl.Utils.TrajConversions import jd2Date
+from wmpl.Utils.TrajConversions import datetime2JD, jd2Date
 
 ### CONSTANTS ###
 
@@ -40,6 +40,7 @@ AUTO_RUN_FREQUENCY = 6
 
 ### ###
 
+log = logging.getLogger("traj_correlator")
 
 
 class TrajectoryReduced(object):
@@ -490,6 +491,7 @@ class RMSDataHandle(object):
                 database file will be loaded from the dir_path.
             output_dir: [str] Path to the directory where the output files will be saved. None by default, in
                 which case the output files will be saved in the dir_path.
+            max_trajs: [int] maximum number of phase1 trajectories to load at a time. Improves throughput.
         """
 
         self.dir_path = dir_path
@@ -530,7 +532,10 @@ class RMSDataHandle(object):
         log.info("")
         log.info("Loading database: {:s}".format(database_path))
         self.db = DatabaseJSON(database_path)
+        log.info('Archiving older entries....')
+        self.archiveOldRecords(older_than=3)
         log.info("   ... done!")
+
 
         # these data are not needed in the mc-only stage of processing
         if mcmode != 2: 
@@ -549,7 +554,7 @@ class RMSDataHandle(object):
             self.loadComputedTrajectories(os.path.join(self.output_dir, OUTPUT_TRAJ_DIR))
             log.info("   ... done!")
         else:
-            dt_beg, dt_end = self.loadPhase1Trajectories(max_trajs=1000)
+            dt_beg, dt_end = self.loadPhase1Trajectories(max_trajs=max_trajs)
             self.processing_list = None
             self.dt_range=[dt_beg, dt_end]
 
@@ -581,6 +586,54 @@ class RMSDataHandle(object):
         result=[os.remove(file) for file in (os.path.join(path, file)
                     for path, _, files in os.walk(dir_path) for file in files) if os.stat(file).st_mtime < refdt]
         return result
+
+
+    def archiveOldRecords(self, older_than=3):
+        """
+        Archive off old records to keep the database size down
+
+        Keyword Arguments:
+            older_than: [int] number of months to keep, default 3
+        """
+        class DummyMetObs():
+            def __init__(self, station, obs_id):
+                self.station_code = station
+                self.id = obs_id
+
+        archdate = datetime.datetime.now(datetime.timezone.utc) - relativedelta(months=older_than)
+        archdate_jd = datetime2JD(archdate)
+
+        arch_db_path = os.path.join(self.db_dir, f'{archdate.strftime("%Y%m")}_{JSON_DB_NAME}')
+        archdb = DatabaseJSON(arch_db_path)
+        log.info(f'Archiving db records to {arch_db_path}...')
+
+        for traj in [t for t in self.db.trajectories if t < archdate_jd]:
+            if traj < archdate_jd:
+                archdb.addTrajectory(None, self.db.trajectories[traj], False)
+                self.db.removeTrajectory(self.db.trajectories[traj])
+
+        for traj in [t for t in self.db.failed_trajectories if t < archdate_jd]:
+            if traj < archdate_jd:
+                archdb.addTrajectory(None, self.db.failed_trajectories[traj], True)
+                self.db.removeTrajectory(self.db.failed_trajectories[traj])
+
+        for station in self.db.processed_dirs:
+            arch_processed = [dirname for dirname in self.db.processed_dirs[station] if 
+                                datetime.datetime.strptime(dirname[14:29], '%Y%m%d_%H%M%S').replace(tzinfo=datetime.timezone.utc) < archdate]
+            for dirname in arch_processed:
+                archdb.addProcessedDir(station, dirname)
+                self.db.processed_dirs[station].remove(dirname)
+
+        for station in self.db.paired_obs:
+            arch_processed = [obs_id for obs_id in self.db.paired_obs[station] if 
+                                datetime.datetime.strptime(obs_id[7:22], '%Y%m%d-%H%M%S').replace(tzinfo=datetime.timezone.utc) < archdate]
+            for obs_id in arch_processed:
+                archdb.addPairedObservation(DummyMetObs(station, obs_id))
+                self.db.paired_obs[station].remove(obs_id)
+
+        archdb.save()
+        self.db.save()
+        return 
 
     def loadStations(self):
         """ Load the station names in the processing folder. """
@@ -1455,7 +1508,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         os.makedirs(log_dir)
 
     # Init the logger
-    log = logging.getLogger("traj_correlator")
+    #log = logging.getLogger("traj_correlator")
     log.setLevel(logging.DEBUG)
 
     # Init the log formatter
