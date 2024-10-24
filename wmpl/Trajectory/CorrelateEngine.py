@@ -52,7 +52,7 @@ def pickBestStations(obslist, max_stns):
 
     # test if the meteor started and ended in the field of view
     # not sure this is needed
-    # in_fovs = [obs[0].fov_beg & obs[0].fov_end for obs in obslist]
+    in_fovs = [obs[0].fov_beg & obs[0].fov_end for obs in obslist]
 
     # work out what fraction of the event each camera saw - more is better
     durations = [obs[0].JD_data[-1] - obs[0].JD_data[0] for obs in obslist]
@@ -84,10 +84,10 @@ def pickBestStations(obslist, max_stns):
     for i in range(len(obslist)):
         if costs[i] >= threshold:
             obslist[i][0].ignore_station = True
-            obslist[i][0].ignore_list = np.ones(len(obslist[i][0].time_data), dtype=np.uint8)
-            log.info(f'skipping {obslist[i][0].station_id}, cost {costs[i]:.3f}')
-        else:
-            log.info(f'selecting {obslist[i][0].station_id}, cost {costs[i]:.3f}')
+            # obslist[i][0].ignore_list = np.ones(len(obslist[i][0].time_data), dtype=np.uint8)
+            # log.info(f'skipping {obslist[i][0].station_id}, cost {costs[i]:.3f}')
+        #else:
+        #    log.info(f'selecting {obslist[i][0].station_id}, cost {costs[i]:.3f}')
     return obslist
 
 
@@ -699,8 +699,10 @@ class TrajectoryCorrelator(object):
                 # b) Reject all observations with higher residuals than the fixed limit
                 # c) Keep all observations with error inside the minimum error limit, even though they
                 #   might have been rejected in a previous iteration
-                # d) Only reject a maximum of 50% of stations
-                max_rejections_possible = int(np.ceil(0.5*len(traj_status.observations)))
+                # d) Only reject a maximum of 50% of non-ignored stations
+                
+                max_rejections_possible = int(np.ceil(0.5*len(traj_status.observations))) + initial_ignore_count
+                log.info(f'max stations allowed to be rejected is {max_rejections_possible}')
                 for i, obs in enumerate(traj_status.observations):
 
                     # Compute the median angular uncertainty of all other non-ignored stations
@@ -753,7 +755,7 @@ class TrajectoryCorrelator(object):
 
                     # Stop if too many observations were rejected
                     if len(ignore_candidates) >= max_rejections_possible:
-                        log.info("Too many observations ejected!")
+                        log.info(f"Too many observations ejected! Only {len(ignore_candidates)} left")
                         skip_trajectory = True
                         break
 
@@ -1525,10 +1527,8 @@ class TrajectoryCorrelator(object):
                 log.info("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
 
 
-                # if mcmode is 0 or 1, prepare to calculate the intersecting planes solutions
+                # if mcmode is not 2, prepare to calculate the intersecting planes solutions
                 if mcmode != 2:
-                    ### If there are duplicate observations from the same station, take the longer one ###
-
                     # Find unique station counts
                     station_counts = np.unique([entry[1].station_code for entry in matched_observations], 
                         return_counts=True)
@@ -1577,14 +1577,18 @@ class TrajectoryCorrelator(object):
                     # TODO: work out better algorithm here
                     if len(matched_observations) > self.traj_constraints.max_stations:
                         log.info('Selecting best {} stations'.format(self.traj_constraints.max_stations))
+
+                        # pickBestStations selects the best and marks the others "ignored". This keeps
+                        # them in the dataset without using them in the solver. Otherwise if they're not markeed as used
+                        # on the next pass through the solver they wil be picked up as a different trajectory.
                         matched_observations = pickBestStations(matched_observations, self.traj_constraints.max_stations)
 
                     # Print info about observations which are being solved
                     log.info("")
                     log.info("Observations:")
                     for entry in matched_observations:
-                        _, met_obs, _ = entry
-                        log.info(f'{met_obs.station_code} - {met_obs.mean_dt}')
+                        obs, met_obs, _ = entry
+                        log.info(f'{met_obs.station_code} - {met_obs.mean_dt} - {obs.ignore_station}')
 
 
 

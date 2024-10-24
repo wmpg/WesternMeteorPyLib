@@ -2727,7 +2727,7 @@ class Trajectory(object):
 
 
     def infillTrajectory(self, meas1, meas2, time_data, lat, lon, ele, station_id=None, excluded_time=None,
-        ignore_list=None, magnitudes=None, fov_beg=None, fov_end=None, obs_id=None, comment=''):
+        ignore_list=None, magnitudes=None, fov_beg=None, fov_end=None, obs_id=None, comment='', ignore_station=False):
         """ Initialize a set of measurements for a given station. 
     
         Arguments:
@@ -2804,8 +2804,8 @@ class Trajectory(object):
 
 
         # Init a new structure which will contain the observed data from the given site
-        obs = ObservedPoints(self.jdt_ref, meas1, meas2, time_data, lat, lon, ele, station_id=station_id, \
-            meastype=self.meastype, excluded_time=excluded_time, ignore_list=ignore_list, \
+        obs = ObservedPoints(self.jdt_ref, meas1, meas2, time_data, lat, lon, ele, station_id=station_id, 
+            meastype=self.meastype, excluded_time=excluded_time, ignore_list=ignore_list, ignore_station=ignore_station, 
             magnitudes=magnitudes, fov_beg=fov_beg, fov_end=fov_end, obs_id=obs_id, comment=comment)
             
         # Add observations to the total observations list
@@ -2899,7 +2899,7 @@ class Trajectory(object):
         self.infillTrajectory(meas1, meas2, obs.time_data, obs.lat, obs.lon, obs.ele, \
             station_id=obs.station_id, excluded_time=excluded_time, ignore_list=ignore_list, \
             magnitudes=magnitudes, fov_beg=obs.fov_beg, fov_end=obs.fov_end, obs_id=obs.obs_id, \
-            comment=obs.comment)
+            comment=obs.comment, ignore_station=obs.ignore_station)
 
 
 
