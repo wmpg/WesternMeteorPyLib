@@ -2187,6 +2187,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('--verbose', '--verbose', action="store_true", 
         help="""verbose mode, prints more messages.""")
     
+    arg_parser.add_argument('--autofreq', '--autofreq', type=int, default=360,
+        help="Minutes to wait between runs in auto-mode")
+    
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -2245,6 +2248,8 @@ if __name__ == "__main__":
     if cml_args.min_end_ht is not None:
         traj_quality_params.min_end_ht = cml_args.min_end_ht
 
+    if cml_args.autofreq is not None:
+        AUTO_RUN_FREQUENCY = cml_args.autofreq/60
     ### ###
 
 
