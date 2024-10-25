@@ -1309,7 +1309,7 @@ class RMSDataHandle(object):
             return traj
 
         except FileNotFoundError:
-            log.info("File {:s} not found!".format(traj_reduced.traj_file_path))
+            log.info("File {:s} not found!".format(os.path.join(output_dir, file_name)))
             
             return None
 
