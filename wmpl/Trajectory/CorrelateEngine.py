@@ -52,7 +52,7 @@ def pickBestStations(obslist, max_stns):
 
     # test if the meteor started and ended in the field of view
     # not sure this is needed
-    in_fovs = [obs[0].fov_beg & obs[0].fov_end for obs in obslist]
+    # in_fovs = [obs[0].fov_beg & obs[0].fov_end for obs in obslist]
 
     # work out what fraction of the event each camera saw - more is better
     durations = [obs[0].JD_data[-1] - obs[0].JD_data[0] for obs in obslist]
@@ -947,10 +947,11 @@ class TrajectoryCorrelator(object):
 
 
                 # If the solve failed, stop
-                if traj_status is None:
+                if traj_status is None :
 
                     # Add the trajectory to the list of failed trajectories
-                    self.dh.addTrajectory(traj, failed_jdt_ref=jdt_ref)
+                    if mcmode != 2:
+                        self.dh.addTrajectory(traj, failed_jdt_ref=jdt_ref)
 
                     return False
 
@@ -1015,12 +1016,12 @@ class TrajectoryCorrelator(object):
             if mcmode == 1:
                 traj.phase_1_only = True
 
-            if orig_traj:
+            if orig_traj and mcmode != 2:
                 log.info("Removing the previous solution...")
                 self.dh.removeTrajectory(orig_traj)
             log.info('Saving trajectory....')
             self.dh.saveTrajectoryResults(traj, self.traj_constraints.save_plots)
-            if mcmode !=2:
+            if mcmode != 2:
                 # we do not need to update the database for phase2 
                 log.info('Updating database....')
                 self.dh.addTrajectory(traj)

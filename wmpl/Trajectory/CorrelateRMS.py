@@ -530,15 +530,13 @@ class RMSDataHandle(object):
         # Load database of processed folders
         database_path = os.path.join(self.db_dir, JSON_DB_NAME)
         log.info("")
-        log.info("Loading database: {:s}".format(database_path))
-        self.db = DatabaseJSON(database_path)
-        log.info('Archiving older entries....')
-        self.archiveOldRecords(older_than=3)
-        log.info("   ... done!")
+        if mcmode != 2:
+            log.info("Loading database: {:s}".format(database_path))
+            self.db = DatabaseJSON(database_path)
+            log.info('Archiving older entries....')
+            self.archiveOldRecords(older_than=3)
+            log.info("   ... done!")
 
-
-        # these data are not needed in the mc-only stage of processing
-        if mcmode != 2: 
             # Load the list of stations
             station_list = self.loadStations()
 
@@ -557,6 +555,7 @@ class RMSDataHandle(object):
             dt_beg, dt_end = self.loadPhase1Trajectories(max_trajs=max_trajs)
             self.processing_list = None
             self.dt_range=[dt_beg, dt_end]
+            self.db = None
 
         ### Define country groups to speed up the proceessing ###
 
@@ -1231,6 +1230,8 @@ class RMSDataHandle(object):
     def markObservationAsProcessed(self, met_obs):
         """ Mark the given meteor observation as processed. """
 
+        if self.db is None:
+            return 
         self.db.addProcessedDir(met_obs.station_code, met_obs.rel_proc_path)
 
 
@@ -1238,6 +1239,8 @@ class RMSDataHandle(object):
     def markObservationAsPaired(self, met_obs):
         """ Mark the given meteor observation as paired in a trajectory. """
 
+        if self.db is None:
+            return 
         self.db.addPairedObservation(met_obs)
 
 
@@ -1250,6 +1253,8 @@ class RMSDataHandle(object):
             failed_jdt_ref: [float] Reference Julian date of the failed trajectory. None by default.
         """
 
+        if self.db is None:
+            return 
         # Set the correct output path
         traj.output_dir = self.generateTrajOutputDirectoryPath(traj)
 
@@ -1268,6 +1273,8 @@ class RMSDataHandle(object):
     def removeTrajectory(self, traj_reduced):
         """ Remove the trajectory from the data base and disk. """
 
+        if self.db is None:
+            return 
         self.db.removeTrajectory(traj_reduced)
 
 
@@ -1278,6 +1285,8 @@ class RMSDataHandle(object):
 
         """
 
+        if self.db is None:
+            return 
         return self.db.checkTrajIfFailed(traj)
 
 
@@ -1367,6 +1376,8 @@ class RMSDataHandle(object):
             log.info("The data base is being saved, the program cannot be exited right now!")
             pass
 
+        if self.db is None:
+            return 
         # Prevent quitting while a data base is being saved
         original_signal = signal.getsignal(signal.SIGINT)
         signal.signal(signal.SIGINT, _breakHandler)
