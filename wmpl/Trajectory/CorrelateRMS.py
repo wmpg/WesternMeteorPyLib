@@ -1273,7 +1273,11 @@ class RMSDataHandle(object):
     def removeTrajectory(self, traj_reduced):
         """ Remove the trajectory from the data base and disk. """
 
-        if self.db is None:
+        if self.db is None: 
+            # in mcmode 2 the database isn't loaded but we still need to delete updated trajectories
+            if os.path.isfile(traj_reduced.traj_file_path):
+                traj_dir = os.path.dirname(traj_reduced.traj_file_path)
+                shutil.rmtree(traj_dir)
             return 
         self.db.removeTrajectory(traj_reduced)
 
@@ -1348,6 +1352,11 @@ class RMSDataHandle(object):
             # Try loading a full trajectory
             try:
                 traj = loadPickle(self.phase1_dir, pick)
+
+                # Add the filepath if not present so we can remove updated trajectories
+                if not hasattr(traj, 'traj_file_path'):
+                    traj_dir = self.generateTrajOutputDirectoryPath(traj, make_dirs=False)
+                    traj.traj_file_path = os.path.join(traj_dir, pick)
 
                 # Check if the traj object as fixed time offsets
                 if not hasattr(traj, 'fixed_time_offsets'):

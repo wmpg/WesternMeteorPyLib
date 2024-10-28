@@ -622,7 +622,7 @@ class TrajectoryCorrelator(object):
         jdt_ref = traj.jdt_ref
         saved_traj_id = traj.traj_id
         log.info("")
-        log.info(f"Solving the trajectory at {jd2Date(jdt_ref, dt_obj=True, tzinfo=datetime.timezone.utc).strftime('%Y-%m-%dZ%H:%M:%S')}...")
+        log.info(f"Solving the trajectory at {jd2Date(jdt_ref, dt_obj=True, tzinfo=datetime.timezone.utc).strftime('%Y-%m-%dZ%H:%M:%S.%f')}...")
 
         # make a note of how many observations are already marked ignored.
         initial_ignore_count = len([obs for obs in traj.observations if obs.ignore_station])
@@ -1016,7 +1016,7 @@ class TrajectoryCorrelator(object):
             if mcmode == 1:
                 traj.phase_1_only = True
 
-            if orig_traj and mcmode != 2:
+            if orig_traj:
                 log.info("Removing the previous solution...")
                 self.dh.removeTrajectory(orig_traj)
             log.info('Saving trajectory....')
@@ -1695,7 +1695,7 @@ class TrajectoryCorrelator(object):
                     mc_runs = int(np.ceil(mc_runs/self.traj_constraints.mc_cores)*self.traj_constraints.mc_cores)
 
                     # pass in matched_observations here so that solveTrajectory can mark them paired if they're used
-                    result = self.solveTrajectory(traj, mc_runs, mcmode=mcmode, matched_obs=matched_observations)
+                    result = self.solveTrajectory(traj, mc_runs, mcmode=mcmode, matched_obs=matched_observations, orig_traj=traj)
                     traj_solved_count += int(result)
 
             # end of "for matched_observations in candidate_trajectories"
