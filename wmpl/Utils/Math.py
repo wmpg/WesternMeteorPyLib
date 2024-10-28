@@ -1100,8 +1100,9 @@ def generateDatetimeBins(dt_beg, dt_end, bin_days=7, utc_hour_break=12, tzinfo=N
     dt_beg = dt_beg.replace(tzinfo=tzinfo)
     dt_end = dt_end.replace(tzinfo=tzinfo)
 
-    # Compute the total number of bins
-    n_bins = np.ceil((dt_end - dt_beg).total_seconds() / (bin_days * 86400))
+    # Compute the total number of bins - add one to cater for cases where the end time is after 12:00,
+    # the code will stop once it's reached the end date anyway. 
+    n_bins = np.ceil((dt_end - dt_beg).total_seconds() / (bin_days * 86400)) + 1
 
     # Generate time bins
     time_bins = []
@@ -1113,15 +1114,11 @@ def generateDatetimeBins(dt_beg, dt_end, bin_days=7, utc_hour_break=12, tzinfo=N
 
         else:
             bin_beg = dt_beg + datetime.timedelta(days=i * bin_days)
-            bin_beg = bin_beg.replace(
-                hour=int(utc_hour_break), minute=0, second=0, microsecond=0
-            )
+            bin_beg = bin_beg.replace(hour=int(utc_hour_break), minute=0, second=0, microsecond=0)
 
         # Generate the bin ending edge
         bin_end = bin_beg + datetime.timedelta(days=bin_days)
-        bin_end = bin_end.replace(
-            hour=int(utc_hour_break), minute=0, second=0, microsecond=0
-        )
+        bin_end = bin_end.replace(hour=int(utc_hour_break), minute=0, second=0, microsecond=0)
 
         # Check that the ending bin is not beyond the end dt
         end_reached = False
