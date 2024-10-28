@@ -947,7 +947,7 @@ class TrajectoryCorrelator(object):
 
 
                 # If the solve failed, stop
-                if traj_status is None :
+                if traj_status is None:
 
                     # Add the trajectory to the list of failed trajectories
                     if mcmode != 2:
