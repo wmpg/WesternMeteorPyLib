@@ -1037,7 +1037,7 @@ class TrajectoryCorrelator(object):
 
 
 
-    def run(self, event_time_range=None, mcmode=0):
+    def run(self, event_time_range=None, bin_time_range=None, mcmode=0):
         """ Run meteor corellation using available data. 
 
         Keyword arguments:
@@ -1089,7 +1089,7 @@ class TrajectoryCorrelator(object):
             else:
                 dt_beg = unpaired_observations_all[0].reference_dt
                 dt_end = unpaired_observations_all[-1].reference_dt
-                dt_bin_list = generateDatetimeBins(dt_beg, dt_end, bin_days=1, utc_hour_break=12, tzinfo=datetime.timezone.utc)
+            dt_bin_list = generateDatetimeBins(dt_beg, dt_end, bin_days=1, utc_hour_break=12, tzinfo=datetime.timezone.utc)
         else:
             dt_beg = self.dh.dt_range[0]
             dt_end = self.dh.dt_range[1]
