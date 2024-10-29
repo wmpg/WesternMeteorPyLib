@@ -952,7 +952,7 @@ class TrajectoryCorrelator(object):
                     # Add the trajectory to the list of failed trajectories
                     if mcmode != 2:
                         self.dh.addTrajectory(traj, failed_jdt_ref=jdt_ref)
-
+                    log.info('Trajectory failed to solve')
                     return False
 
 
@@ -1132,7 +1132,6 @@ class TrajectoryCorrelator(object):
 
                 log.info("")
                 log.info("--------------------------------------------------------------------------")
-                log.info("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
                 log.info("    1) CHECKING IF PREVIOUSLY ESTIMATED TRAJECTORIES HAVE NEW OBSERVATIONS")
                 log.info("--------------------------------------------------------------------------")
                 log.info("")
@@ -1167,7 +1166,6 @@ class TrajectoryCorrelator(object):
 
 
                     log.info("")
-                    log.info("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
                     log.info("Checking trajectory at {:s} in countries: {:s}".format( 
                         str(jd2Date(traj_reduced.jdt_ref, dt_obj=True, tzinfo=datetime.timezone.utc)), 
                         ", ".join(list(set([stat_id[:2] for stat_id in traj_reduced.participating_stations])))))
@@ -1273,7 +1271,6 @@ class TrajectoryCorrelator(object):
 
                 log.info("")
                 log.info("-------------------------------------------------")
-                log.info("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
                 log.info("    2) PAIRING OBSERVATIONS INTO NEW TRAJECTORIES")
                 log.info("-------------------------------------------------")
                 log.info("")
@@ -1380,7 +1377,6 @@ class TrajectoryCorrelator(object):
                 ### Merge all candidate trajectories which share the same observations ###
                 log.info("")
                 log.info("---------------------------")
-                log.info("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
                 log.info("MERGING BROKEN OBSERVATIONS")
                 log.info("---------------------------")
                 merged_candidate_trajectories = []
@@ -1515,7 +1511,6 @@ class TrajectoryCorrelator(object):
 
             log.info("")
             log.info("-----------------------")
-            log.info("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
             log.info(f'SOLVING {len(candidate_trajectories)} TRAJECTORIES {mcmodestr}')
             log.info("-----------------------")
             log.info("")
@@ -1525,7 +1520,6 @@ class TrajectoryCorrelator(object):
 
                 log.info("")
                 log.info("-----------------------")
-                log.info("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
 
 
                 # if mcmode is not 2, prepare to calculate the intersecting planes solutions
@@ -1709,6 +1703,5 @@ class TrajectoryCorrelator(object):
 
             log.info("")
             log.info("-----------------")
-            log.info("{}".format(datetime.datetime.now().strftime('%Y-%m-%dZ%H:%M:%S')))
             log.info("SOLVING RUN DONE!")
             log.info("-----------------")
