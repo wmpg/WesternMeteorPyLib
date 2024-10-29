@@ -1717,7 +1717,6 @@ contain data folders. Data folders should have FTPdetectinfo files together with
             for bin_beg, bin_end in dt_bins:
 
                 log.info("")
-                log.info("{}".format(datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dZ%H:%M:%S')))
                 log.info("PROCESSING TIME BIN:")
                 log.info("{:s}, {:s}".format(str(bin_beg), str(bin_end)))
                 log.info("-----------------------------")
@@ -1730,7 +1729,8 @@ contain data folders. Data folders should have FTPdetectinfo files together with
 
                 # Run the trajectory correlator
                 tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True)
-                tc.run(event_time_range=event_time_range, mcmode=cml_args.mcmode)
+                bin_event_time_range = [bin_beg, bin_end]
+                tc.run(event_time_range=bin_event_time_range, mcmode=cml_args.mcmode)
         else:
             # there were no datasets to process
             log.info('no data to process yet')
