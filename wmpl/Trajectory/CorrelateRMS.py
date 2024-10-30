@@ -682,7 +682,7 @@ class RMSDataHandle(object):
                     night_dt = None
                     continue
                 # skip folders more than a day older the requested date range
-                if night_dt < (self.dt_range[0] + datetime.timedelta(days=-1)):
+                if night_dt < (self.dt_range[0]+ datetime.timedelta(days=-1)).replace(tzinfo=datetime.timezone.utc):
                     continue
 
                 night_path = os.path.join(station_path, night_name)
