@@ -673,16 +673,20 @@ class RMSDataHandle(object):
             # Go through all directories in stations
             for night_name in os.listdir(station_path):
 
-                night_path = os.path.join(station_path, night_name)
-                night_path_rel = os.path.join(station_name, night_name)
-
                 # Extract the date and time of directory, if possible
                 try:
                     night_dt = datetime.datetime.strptime("_".join(night_name.split("_")[1:3]), 
                         "%Y%m%d_%H%M%S").replace(tzinfo=datetime.timezone.utc)
                 except:
-                    log.info("Could not parse the date of the night dir: {:s}".format(night_path))
+                    log.info(f'Could not parse the date of the night dir: {night_name}')
                     night_dt = None
+                    continue
+                # skip folders more than a day older the requested date range
+                if night_dt < (self.dt_range[0] + datetime.timedelta(days=-1)):
+                    continue
+
+                night_path = os.path.join(station_path, night_name)
+                night_path_rel = os.path.join(station_name, night_name)
 
                 # # If the night path is not in the processed list, add it to the processing list
                 # if night_path_rel not in self.db.processed_dirs[station_name]:

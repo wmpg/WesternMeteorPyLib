@@ -1089,7 +1089,7 @@ class TrajectoryCorrelator(object):
             else:
                 dt_beg = unpaired_observations_all[0].reference_dt
                 dt_end = unpaired_observations_all[-1].reference_dt
-            dt_bin_list = generateDatetimeBins(dt_beg, dt_end, bin_days=1, utc_hour_break=12, tzinfo=datetime.timezone.utc)
+                dt_bin_list = generateDatetimeBins(dt_beg, dt_end, bin_days=1, utc_hour_break=12, tzinfo=datetime.timezone.utc)
         else:
             dt_beg = self.dh.dt_range[0]
             dt_end = self.dh.dt_range[1]
@@ -1138,7 +1138,19 @@ class TrajectoryCorrelator(object):
 
                 # Get a list of all already computed trajectories within the given time bin
                 #   Reducted trajectory objects are returned
-                computed_traj_list = self.dh.getComputedTrajectories(datetime2JD(bin_beg), datetime2JD(bin_end))
+                
+                if bin_time_range:
+                    # restrict checks to the bin range supplied to run()
+                    log.info(f'Getting computed trajectories for bin {str(bin_time_range[0])} to {str(bin_time_range[1])}')
+                    computed_traj_list = self.dh.getComputedTrajectories(datetime2JD(bin_time_range[0]), datetime2JD(bin_time_range[1]))
+                    if len(computed_traj_list) > 0:
+                        log.info(f'computed trajectory range {str(jd2Date(computed_traj_list[0].jdt_ref))}, {str(jd2Date(computed_traj_list[-1].jdt_ref))}')
+                    if len(unpaired_observations) > 0:
+                        log.info(f'unpaired obs range {unpaired_observations[0].reference_dt}, {unpaired_observations[-1].reference_dt}')
+                else:
+                    # use the current bin. 
+                    log.info(f'Getting computed trajectories for {str(bin_beg)} to {str(bin_end)}')
+                    computed_traj_list = self.dh.getComputedTrajectories(datetime2JD(bin_beg), datetime2JD(bin_end))
 
                 # Find all unpaired observations that match already existing trajectories
                 for traj_reduced in computed_traj_list:
