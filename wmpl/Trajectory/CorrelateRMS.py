@@ -491,7 +491,7 @@ class RMSDataHandle(object):
                 database file will be loaded from the dir_path.
             output_dir: [str] Path to the directory where the output files will be saved. None by default, in
                 which case the output files will be saved in the dir_path.
-            max_trajs: [int] maximum number of phase1 trajectories to load at a time. Improves throughput.
+            max_trajs: [int] maximum number of phase1 trajectories to load at a time when adding uncertainties. Improves throughput.
         """
 
         self.dir_path = dir_path
@@ -681,9 +681,10 @@ class RMSDataHandle(object):
                     log.info(f'Could not parse the date of the night dir: {night_name}')
                     night_dt = None
                     continue
-                # skip folders more than a day older the requested date range
-                if night_dt < (self.dt_range[0]+ datetime.timedelta(days=-1)).replace(tzinfo=datetime.timezone.utc):
-                    continue
+                if self.dt_range is not None:
+                    # skip folders more than a day older the requested date range
+                    if night_dt < (self.dt_range[0]+ datetime.timedelta(days=-1)).replace(tzinfo=datetime.timezone.utc):
+                        continue
 
                 night_path = os.path.join(station_path, night_name)
                 night_path_rel = os.path.join(station_name, night_name)
@@ -996,9 +997,10 @@ class RMSDataHandle(object):
             return
         
         log.info("  Loading trajectories from: " + traj_dir_path)
-        log.info("  Datetime range: {:s} - {:s}".format(
-            self.dt_range[0].strftime("%Y-%m-%d %H:%M:%S"), 
-            self.dt_range[1].strftime("%Y-%m-%d %H:%M:%S")))
+        if self.dt_range is not None:
+            log.info("  Datetime range: {:s} - {:s}".format(
+                self.dt_range[0].strftime("%Y-%m-%d %H:%M:%S"), 
+                self.dt_range[1].strftime("%Y-%m-%d %H:%M:%S")))
 
 
         counter = 0
@@ -1218,7 +1220,9 @@ class RMSDataHandle(object):
         # Save the picked trajectory structure
         savePickle(traj, output_dir, traj.file_name + '_trajectory.pickle')
         if traj.phase_1_only:
-            savePickle(traj, self.phase1_dir, traj.file_name + '_trajectory.pickle')
+            # make sure the name is as unique as can be
+            save_name = os.path.split(output_dir)[-1]
+            savePickle(traj, self.phase1_dir, save_name + '_trajectory.pickle')
 
         # Save the plots
         if save_plots:
@@ -1678,7 +1682,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
             proc_dir_dts = [dt for dt in proc_dir_dts if dt > datetime.datetime(2000, 1, 1, 0, 0, 0, 
                                                                                 tzinfo=datetime.timezone.utc)]
 
-            # Reject all folders not within the time range of interest +/- 1 day
+            # Reject all folders not within the time range of interest +/- 1 day, to reduce the amount of data to be loaded
             if event_time_range is not None:
 
                 dt_beg, dt_end = event_time_range
