@@ -1140,13 +1140,9 @@ class TrajectoryCorrelator(object):
                 #   Reducted trajectory objects are returned
                 
                 if bin_time_range:
-                    # restrict checks to the bin range supplied to run()
+                    # restrict checks to the bin range supplied to run() plus a day to allow for data upload times
                     log.info(f'Getting computed trajectories for bin {str(bin_time_range[0])} to {str(bin_time_range[1])}')
-                    computed_traj_list = self.dh.getComputedTrajectories(datetime2JD(bin_time_range[0]), datetime2JD(bin_time_range[1]))
-                    if len(computed_traj_list) > 0:
-                        log.info(f'computed trajectory range {str(jd2Date(computed_traj_list[0].jdt_ref))}, {str(jd2Date(computed_traj_list[-1].jdt_ref))}')
-                    if len(unpaired_observations) > 0:
-                        log.info(f'unpaired obs range {unpaired_observations[0].reference_dt}, {unpaired_observations[-1].reference_dt}')
+                    computed_traj_list = self.dh.getComputedTrajectories(datetime2JD(bin_time_range[0]), datetime2JD(bin_time_range[1])+1)
                 else:
                     # use the current bin. 
                     log.info(f'Getting computed trajectories for {str(bin_beg)} to {str(bin_end)}')
