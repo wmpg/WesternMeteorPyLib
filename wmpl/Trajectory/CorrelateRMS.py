@@ -1286,6 +1286,8 @@ class RMSDataHandle(object):
             if os.path.isfile(traj_reduced.traj_file_path):
                 traj_dir = os.path.dirname(traj_reduced.traj_file_path)
                 shutil.rmtree(traj_dir)
+            else:
+                log.warning(f'unable to find {traj_reduced.traj_file_path}')
             return 
         self.db.removeTrajectory(traj_reduced)
 
@@ -1364,7 +1366,10 @@ class RMSDataHandle(object):
                 # Add the filepath if not present so we can remove updated trajectories
                 if not hasattr(traj, 'traj_file_path'):
                     traj_dir = self.generateTrajOutputDirectoryPath(traj, make_dirs=False)
-                    traj.traj_file_path = os.path.join(traj_dir, pick)
+                    # stored filename includes the millisecs and countries, to help make it unique
+                    # so we need to chop that off again to set up the true pickle name
+                    real_pick_name = pick[:15] + '_trajectory.pickle'
+                    traj.traj_file_path = os.path.join(traj_dir, real_pick_name)
 
                 # Check if the traj object as fixed time offsets
                 if not hasattr(traj, 'fixed_time_offsets'):
