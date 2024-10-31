@@ -754,8 +754,9 @@ class TrajectoryCorrelator(object):
                 if any_ignored_toggle:
 
                     # Stop if too many observations were rejected
-                    if len(ignore_candidates) >= max_rejections_possible:
-                        log.info(f"Too many observations ejected! Only {len(ignore_candidates)} left")
+                    remaining_stations = len(traj_status.observations) - len(ignore_candidates)
+                    if len(ignore_candidates) > max_rejections_possible:
+                        log.info(f"Too many observations ejected! Only {remaining_stations} left")
                         skip_trajectory = True
                         break
 
