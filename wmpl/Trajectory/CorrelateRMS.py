@@ -1222,6 +1222,8 @@ class RMSDataHandle(object):
         if traj.phase_1_only:
             # make sure the name is as unique as can be
             save_name = os.path.split(output_dir)[-1]
+            # keep track of when we originally saved a solution
+            traj.save_date = datetime.datetime.now().replace(tzinfo=datetime.timezone.utc)
             savePickle(traj, self.phase1_dir, save_name + '_trajectory.pickle')
 
         # Save the plots
