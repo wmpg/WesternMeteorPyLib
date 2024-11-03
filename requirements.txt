@@ -2,11 +2,9 @@ numpy
 cython
 scipy
 matplotlib
-#matplotlib==3.1.2 ; platform_machine != 'aarch64'
-#matplotlib==3.3.2 ; platform_machine == 'aarch64'
 jplephem
 pyephem
-basemap ; sys_platform == 'win32' or platform_machine == 'aarch64'
+# https://github.com/matplotlib/basemap/archive/master.zip
 PyQt5 ; platform_machine != 'aarch64'
 pyyaml
 pyswarms
@@ -14,7 +12,6 @@ ml-dtypes
 keras
 pytz
 pandas
-basemap-data-hires
 gitpython
 numba
 watchdog==3.0.0; python_version == '3.7'

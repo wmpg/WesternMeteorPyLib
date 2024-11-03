@@ -23,10 +23,3 @@ wmpl/MetSim/native
 # wmpl/share - files are downloaded during setup
 wmpl/share/ShowerLookUpTable.npy
 wmpl/share/streamfulldata.npy
-wmpl/MetSim/MetSimErosionCyTools.c
-.vscode/settings.json
-wmpl/share/Amors.txt
-wmpl/share/Atens.txt
-wmpl/share/Apollos.txt
-wmpl/share/ELEMENTS.COMET
-wmpl/share/gmn_shower_table_20230518.npy
