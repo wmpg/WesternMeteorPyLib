@@ -1290,6 +1290,17 @@ class RMSDataHandle(object):
                 shutil.rmtree(traj_dir)
             else:
                 log.warning(f'unable to find {traj_reduced.traj_file_path}')
+
+            # move the processed pickle now we're done with it
+            pick = self.generateTrajOutputDirectoryPath(traj_reduced, make_dirs=False) + '_trajectory.pickle'
+            pick = os.path.split(pick)[-1]
+            if os.path.isfile(os.path.join(self.phase1_dir, pick + '_processing')):
+                processed_name = os.path.join(self.phase1_dir, 'processed', pick)
+                if os.path.isfile(processed_name):
+                    os.remove(processed_name)
+                os.rename(os.path.join(self.phase1_dir, pick + '_processing'), processed_name)
+            else:
+                log.warning(f'unable to find _processing file {os.path.join(self.phase1_dir, pick + "_processing")}')
             return 
         self.db.removeTrajectory(traj_reduced)
 
@@ -1378,8 +1389,7 @@ class RMSDataHandle(object):
                     traj.fixed_time_offsets = {}
 
                 # now we've loaded the phase 1 solution, move it to prevent accidental reprocessing
-                procpath = os.path.join(self.phase1_dir, 'processed')    
-                procfile = os.path.join(procpath, pick)
+                procfile = os.path.join(self.phase1_dir, pick + '_processing')
                 if os.path.isfile(procfile):
                     os.remove(procfile)
                 os.rename(os.path.join(self.phase1_dir, pick), procfile)
