@@ -494,6 +494,8 @@ class RMSDataHandle(object):
             max_trajs: [int] maximum number of phase1 trajectories to load at a time when adding uncertainties. Improves throughput.
         """
 
+        self.mc_mode = mcmode
+
         self.dir_path = dir_path
 
         self.dt_range = dt_range
@@ -519,7 +521,7 @@ class RMSDataHandle(object):
         mkdirP(self.output_dir)
 
         # create the directory for phase1 simple trajectories, if needed
-        if mcmode > 0:
+        if self.mc_mode > 0:
             self.phase1_dir = os.path.join(self.output_dir, 'phase1')
             mkdirP(os.path.join(self.phase1_dir, 'processed'))
             self.purgePhase1ProcessedData(os.path.join(self.phase1_dir, 'processed'))
@@ -581,7 +583,7 @@ class RMSDataHandle(object):
 
 
     def purgePhase1ProcessedData(self, dir_path):
-        refdt = time.time() - 14 * 86400
+        refdt = time.time() - 90 * 86400
         result=[os.remove(file) for file in (os.path.join(path, file)
                     for path, _, files in os.walk(dir_path) for file in files) if os.stat(file).st_mtime < refdt]
         return result
@@ -1217,14 +1219,26 @@ class RMSDataHandle(object):
         traj.saveReport(output_dir, traj.file_name + '_report.txt', uncertainties=traj.uncertainties, 
             verbose=False)
 
+        # Add the trajectory foldername to the saved traj. We may need this later, for example
+        # if additional observations are found then the refdt or country list may change quite a bit
+        traj.longname = os.path.split(output_dir)[-1]
+
+        if self.mc_mode == 1:
+            # The MC phase may change the refdt so save a copy of the the original name.
+            traj.pre_mc_longname = traj.longname
+
+            # keep track of when we originally saved a solution, so we can check how long its taking
+            traj.save_date = datetime.datetime.now().replace(tzinfo=datetime.timezone.utc)
+
         # Save the picked trajectory structure
         savePickle(traj, output_dir, traj.file_name + '_trajectory.pickle')
-        if traj.phase_1_only:
-            # make sure the name is as unique as can be
-            save_name = os.path.split(output_dir)[-1]
-            # keep track of when we originally saved a solution
-            traj.save_date = datetime.datetime.now().replace(tzinfo=datetime.timezone.utc)
-            savePickle(traj, self.phase1_dir, save_name + '_trajectory.pickle')
+
+        if self.mc_mode == 1:
+            savePickle(traj, self.phase1_dir, traj.pre_mc_longname + '_trajectory.pickle')
+        elif self.mc_mode == 2:
+            # we save this in MC mode the MC phase may alter the trajectory details and if later on 
+            # we're including additional observations we need to use the most recent version of the trajectory
+            savePickle(traj, os.path.join(self.phase1_dir, 'processed'), traj.pre_mc_longname + '_trajectory.pickle')
 
         # Save the plots
         if save_plots:
@@ -1283,35 +1297,24 @@ class RMSDataHandle(object):
     def removeTrajectory(self, traj_reduced):
         """ Remove the trajectory from the data base and disk. """
 
-        if self.db is None: 
-            # in mcmode 2 the database isn't loaded but we still need to delete updated trajectories
+        # in mcmode 2 the database isn't loaded but we still need to delete updated trajectories
+        if self.mc_mode == 2: 
             if os.path.isfile(traj_reduced.traj_file_path):
                 traj_dir = os.path.dirname(traj_reduced.traj_file_path)
                 shutil.rmtree(traj_dir)
             else:
                 log.warning(f'unable to find {traj_reduced.traj_file_path}')
 
-            # move the processed pickle now we're done with it
-            self.cleanupPhase2TempPickle(traj_reduced)
+            # remove the processed pickle now we're done with it
+            fldr_name = os.path.split(self.generateTrajOutputDirectoryPath(traj_reduced, make_dirs=False))[-1] 
+            pick = os.path.join(self.phase1_dir, fldr_name + '_trajectory.pickle_processing')
+            if os.path.isfile(pick):
+                os.remove(pick)
+            else:
+                log.warning(f'unable to find _processing file {pick}')
 
             return 
         self.db.removeTrajectory(traj_reduced)
-
-
-    def cleanupPhase2TempPickle(self, traj_reduced):
-        # move the phase 2 processed pickle now we're done with it
-        if self.db is None: 
-            pick = self.generateTrajOutputDirectoryPath(traj_reduced, make_dirs=False) + '_trajectory.pickle'
-            pick = os.path.split(pick)[-1]
-            if os.path.isfile(os.path.join(self.phase1_dir, pick + '_processing')):
-                processed_name = os.path.join(self.phase1_dir, 'processed', pick)
-                if os.path.isfile(processed_name):
-                    os.remove(processed_name)
-                os.rename(os.path.join(self.phase1_dir, pick + '_processing'), processed_name)
-            else:
-                log.warning(f'unable to find _processing file {os.path.join(self.phase1_dir, pick + "_processing")}')
-        return 
-    
 
 
     def checkTrajIfFailed(self, traj):
@@ -1342,9 +1345,18 @@ class RMSDataHandle(object):
         # Get the file name
         file_name = os.path.basename(traj_reduced.traj_file_path)
 
-        # Try loading a full trajectory
+        # Try loading a full trajectory, first from the standard output area, then from the phase-1 folders
+        full_traj_loc = os.path.join(output_dir, file_name)
+        if not os.path.isfile(full_traj_loc):
+            full_traj_loc = os.path.join(self.phase1_dir, file_name)
+        if not os.path.isfile(full_traj_loc):
+            full_traj_loc = os.path.join(self.phase1_dir, 'processed', file_name)
+        if not os.path.isfile(full_traj_loc):
+            log.info(f'File {full_traj_loc} not found!')
+            return None
+
         try:
-            traj = loadPickle(output_dir, file_name)
+            traj = loadPickle(*os.path.split(full_traj_loc))
 
             # Check if the traj object as fixed time offsets
             if not hasattr(traj, 'fixed_time_offsets'):
@@ -1353,7 +1365,7 @@ class RMSDataHandle(object):
             return traj
 
         except FileNotFoundError:
-            log.info("File {:s} not found!".format(os.path.join(output_dir, file_name)))
+            log.info(f'File {full_traj_loc} not found!')
             
             return None
 
@@ -1384,13 +1396,19 @@ class RMSDataHandle(object):
             try:
                 traj = loadPickle(self.phase1_dir, pick)
 
+                traj_dir = self.generateTrajOutputDirectoryPath(traj, make_dirs=False)
                 # Add the filepath if not present so we can remove updated trajectories
                 if not hasattr(traj, 'traj_file_path'):
-                    traj_dir = self.generateTrajOutputDirectoryPath(traj, make_dirs=False)
                     # stored filename includes the millisecs and countries, to help make it unique
                     # so we need to chop that off again to set up the true pickle name
                     real_pick_name = pick[:15] + '_trajectory.pickle'
                     traj.traj_file_path = os.path.join(traj_dir, real_pick_name)
+
+                if not hasattr(traj, 'longname'):
+                    traj.longname = os.path.split(traj_dir)[-1]
+
+                if not hasattr(traj, 'pre_mc_longname'):
+                    traj.pre_mc_longname = os.path.split(traj_dir)[-1]
 
                 # Check if the traj object as fixed time offsets
                 if not hasattr(traj, 'fixed_time_offsets'):

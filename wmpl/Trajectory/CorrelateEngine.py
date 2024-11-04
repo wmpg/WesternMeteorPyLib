@@ -1030,7 +1030,9 @@ class TrajectoryCorrelator(object):
             if orig_traj:
                 log.info("Removing the previous solution...")
                 self.dh.removeTrajectory(orig_traj)
+                traj.pre_mc_longname = orig_traj.pre_mc_longname
             log.info('Saving trajectory....')
+
             self.dh.saveTrajectoryResults(traj, self.traj_constraints.save_plots)
             if mcmode != 2:
                 # we do not need to update the database for phase2 
