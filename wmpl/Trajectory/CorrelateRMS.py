@@ -1302,23 +1302,40 @@ class RMSDataHandle(object):
             if os.path.isfile(traj_reduced.traj_file_path):
                 traj_dir = os.path.dirname(traj_reduced.traj_file_path)
                 shutil.rmtree(traj_dir)
+            elif hasattr(traj_reduced, 'pre_mc_longname'):
+                traj_dir = os.path.dirname(traj_reduced.traj_file_path)
+                base_dir = os.path.split(traj_dir)[0]
+                traj_dir = os.path.join(base_dir, traj_reduced.pre_mc_longname)
+                if os.path.isdir(traj_dir):
+                    shutil.rmtree(traj_dir)
+                else:
+                    log.warning(f'unable to find {traj_dir}')
             else:
                 log.warning(f'unable to find {traj_reduced.traj_file_path}')
 
             # remove the processed pickle now we're done with it
-            self.cleanupPhase2TempPickle(traj_reduced)
+            self.cleanupPhase2TempPickle(traj_reduced, True)
 
             return 
         self.db.removeTrajectory(traj_reduced)
 
 
-    def cleanupPhase2TempPickle(self, traj_reduced):
-        fldr_name = os.path.split(self.generateTrajOutputDirectoryPath(traj_reduced, make_dirs=False))[-1] 
+    def cleanupPhase2TempPickle(self, traj, success=False):
+        """
+        At the start of phase 2 monte-carlo sim calculation, the phase1 pickles are renamed to indicate they're being processed.
+        Once each one is processed (fail or succeed) we need to clean up the file. If the MC step failed, we still want to keep
+        the pickle, because we might later on get new data and it might become solvable. Otherwise, we can just delete the file 
+        since the MC solver will have saved an updated one already.
+        """
+        fldr_name = os.path.split(self.generateTrajOutputDirectoryPath(traj, make_dirs=False))[-1] 
         pick = os.path.join(self.phase1_dir, fldr_name + '_trajectory.pickle_processing')
         if os.path.isfile(pick):
             os.remove(pick)
         else:
             log.warning(f'unable to find _processing file {pick}')
+        if not success:
+            # save the pickle in case we get new data later and can solve it
+            savePickle(traj, os.path.join(self.phase1_dir, 'processed'), fldr_name + '_trajectory.pickle')
         return 
 
 
