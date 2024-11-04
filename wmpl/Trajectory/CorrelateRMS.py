@@ -1306,15 +1306,20 @@ class RMSDataHandle(object):
                 log.warning(f'unable to find {traj_reduced.traj_file_path}')
 
             # remove the processed pickle now we're done with it
-            fldr_name = os.path.split(self.generateTrajOutputDirectoryPath(traj_reduced, make_dirs=False))[-1] 
-            pick = os.path.join(self.phase1_dir, fldr_name + '_trajectory.pickle_processing')
-            if os.path.isfile(pick):
-                os.remove(pick)
-            else:
-                log.warning(f'unable to find _processing file {pick}')
+            self.cleanupPhase2TempPickle(traj_reduced)
 
             return 
         self.db.removeTrajectory(traj_reduced)
+
+
+    def cleanupPhase2TempPickle(self, traj_reduced):
+        fldr_name = os.path.split(self.generateTrajOutputDirectoryPath(traj_reduced, make_dirs=False))[-1] 
+        pick = os.path.join(self.phase1_dir, fldr_name + '_trajectory.pickle_processing')
+        if os.path.isfile(pick):
+            os.remove(pick)
+        else:
+            log.warning(f'unable to find _processing file {pick}')
+        return 
 
 
     def checkTrajIfFailed(self, traj):
