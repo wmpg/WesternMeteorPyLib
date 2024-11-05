@@ -7,6 +7,7 @@ import datetime
 import json
 import multiprocessing
 import logging
+import os
 
 import numpy as np
 
@@ -1030,7 +1031,12 @@ class TrajectoryCorrelator(object):
             if orig_traj:
                 log.info("Removing the previous solution...")
                 self.dh.removeTrajectory(orig_traj)
-                traj.pre_mc_longname = orig_traj.pre_mc_longname
+                if hasattr(orig_traj, 'pre_mc_longname'):
+                    traj.pre_mc_longname = orig_traj.pre_mc_longname
+                else:
+                    traj_dir = self.generateTrajOutputDirectoryPath(orig_traj, make_dirs=False)
+                    traj.pre_mc_longname = os.path.split(traj_dir)[-1]
+
             log.info('Saving trajectory....')
 
             self.dh.saveTrajectoryResults(traj, self.traj_constraints.save_plots)
