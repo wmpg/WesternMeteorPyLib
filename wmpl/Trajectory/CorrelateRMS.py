@@ -1363,6 +1363,7 @@ class RMSDataHandle(object):
 
         # Generate the path to the output directory
         output_dir = self.generateTrajOutputDirectoryPath(traj_reduced)
+        phase1_name = os.path.split(output_dir)[-1] + '_trajectory.pickle'
 
         # Get the file name
         file_name = os.path.basename(traj_reduced.traj_file_path)
@@ -1370,9 +1371,9 @@ class RMSDataHandle(object):
         # Try loading a full trajectory, first from the standard output area, then from the phase-1 folders
         full_traj_loc = os.path.join(output_dir, file_name)
         if not os.path.isfile(full_traj_loc):
-            full_traj_loc = os.path.join(self.phase1_dir, file_name)
+            full_traj_loc = os.path.join(self.phase1_dir, phase1_name)
         if not os.path.isfile(full_traj_loc):
-            full_traj_loc = os.path.join(self.phase1_dir, 'processed', file_name)
+            full_traj_loc = os.path.join(self.phase1_dir, 'processed', phase1_name)
         if not os.path.isfile(full_traj_loc):
             log.info(f'File {full_traj_loc} not found!')
             return None
