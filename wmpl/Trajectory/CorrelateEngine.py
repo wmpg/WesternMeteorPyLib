@@ -1031,11 +1031,7 @@ class TrajectoryCorrelator(object):
             if orig_traj:
                 log.info("Removing the previous solution...")
                 self.dh.removeTrajectory(orig_traj)
-                if hasattr(orig_traj, 'pre_mc_longname'):
-                    traj.pre_mc_longname = orig_traj.pre_mc_longname
-                else:
-                    traj_dir = self.generateTrajOutputDirectoryPath(orig_traj, make_dirs=False)
-                    traj.pre_mc_longname = os.path.split(traj_dir)[-1]
+                traj.pre_mc_longname = os.path.split(self.dh.generateTrajOutputDirectoryPath(orig_traj, make_dirs=False))[-1] 
 
             log.info('Saving trajectory....')
 
