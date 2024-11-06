@@ -988,8 +988,6 @@ class RMSDataHandle(object):
         dt = datetime.datetime.strptime(
             "_".join([date_str, time_str]), "%Y%m%d_%H%M%S").replace(tzinfo=datetime.timezone.utc)
 
-        dt_beg, dt_end = self.dt_range
-
         # Check if the date time is in the time range
         if (dt >= dt_beg) and (dt <= dt_end):
             return True
