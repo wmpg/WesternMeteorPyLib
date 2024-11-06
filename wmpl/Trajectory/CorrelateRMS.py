@@ -968,11 +968,17 @@ class RMSDataHandle(object):
                 return False
             
 
-    def trajectoryFileInDtRange(self, file_name):
+    def trajectoryFileInDtRange(self, file_name, dt_range=None):
         """ Check if the trajectory file is in the given datetime range. """
 
+        if dt_range is None:
+            dt_beg, dt_end = self.dt_range
+        else:
+            dt_beg, dt_end = dt_range
+
+
         # If the date range is not given, then skip the trajectory
-        if self.dt_range is None:
+        if dt_beg is None or dt_end is None:
             return True
 
         # Extract the datetime from the trajectory name
@@ -1022,7 +1028,7 @@ class RMSDataHandle(object):
 
 
     def loadComputedTrajectories(self, traj_dir_path, dt_range=None):
-        """ Load all already estimated trajectories. 
+        """ Load already estimated trajectories from disk within a date range. 
 
         Arguments:
             traj_dir_path: [str] Full path to a directory with trajectory pickles.
@@ -1033,17 +1039,15 @@ class RMSDataHandle(object):
             return
 
         if dt_range is None:
-            beg_dt = self.dt_range[0]
-            end_dt = self.dt_range[1]
+            dt_beg, dt_end = self.dt_range
         else:
-            beg_dt = dt_range[0]
-            end_dt = dt_range[1]
+            dt_beg, dt_end = dt_range
 
         log.info("  Loading trajectories from: " + traj_dir_path)
         if self.dt_range is not None:
             log.info("  Datetime range: {:s} - {:s}".format(
-                beg_dt.strftime("%Y-%m-%d %H:%M:%S"), 
-                end_dt.strftime("%Y-%m-%d %H:%M:%S")))
+                dt_beg.strftime("%Y-%m-%d %H:%M:%S"), 
+                dt_end.strftime("%Y-%m-%d %H:%M:%S")))
 
         counter = 0
 
@@ -1052,8 +1056,8 @@ class RMSDataHandle(object):
         dir_paths = []
 
         #iterate over the days in the range
-        jdt_beg = int(np.floor(datetime2JD(beg_dt)))
-        jdt_end = int(np.ceil(datetime2JD(end_dt)))
+        jdt_beg = int(np.floor(datetime2JD(dt_beg)))
+        jdt_end = int(np.ceil(datetime2JD(dt_end)))
 
         yyyy = 0
         mm = 0
@@ -1083,7 +1087,7 @@ class RMSDataHandle(object):
                 full_traj_dir = os.path.join(yyyymmdd_dir_path, traj_dir)
                 if os.path.isdir(full_traj_dir) and (full_traj_dir not in dir_paths):
                     for file_name in glob.glob1(full_traj_dir, '*_trajectory.pickle'):
-                        if self.trajectoryFileInDtRange(file_name):
+                        if self.trajectoryFileInDtRange(file_name, dt_range=dt_range):
                             self.db.addTrajectory(os.path.join(full_traj_dir, file_name))
 
                             # Print every 1000th trajectory
