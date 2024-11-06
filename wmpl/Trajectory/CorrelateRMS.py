@@ -1013,7 +1013,7 @@ class RMSDataHandle(object):
             traj_reduced = self.db.trajectories[trajkey]
             traj_path = os.path.join(self.output_dir, traj_reduced.traj_file_path)
             if not os.path.isfile(traj_path):
-                log.info(f' removing {os.path.split(traj_reduced.traj_file_path)[1]}')
+                log.info(f' removing {traj_reduced.traj_file_path}')
                 trajs_to_remove.append(traj_reduced)
         for traj in trajs_to_remove:
             self.db.removeTrajectory(traj)
