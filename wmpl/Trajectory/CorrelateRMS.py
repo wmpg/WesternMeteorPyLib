@@ -1059,7 +1059,7 @@ class RMSDataHandle(object):
         mm = 0
         dd = 0
         start_time = datetime.datetime.now()
-        for jdt in range(jdt_beg, jdt_end):
+        for jdt in range(jdt_beg, jdt_end + 1):
 
             curr_dt = jd2Date(jdt, dt_obj=True)
             if curr_dt.year != yyyy:
