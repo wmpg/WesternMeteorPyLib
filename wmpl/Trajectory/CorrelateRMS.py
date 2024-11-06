@@ -1051,6 +1051,7 @@ class RMSDataHandle(object):
         yyyy = 0
         mm = 0
         dd = 0
+        start_time = datetime.datetime.now()
         for jdt in range(jdt_beg, jdt_end):
 
             curr_dt = jd2Date(jdt, dt_obj=True)
@@ -1087,6 +1088,10 @@ class RMSDataHandle(object):
                                 print(f"  Loaded {counter:6d} trajectories, currently on {file_name}")
                             counter += 1
                     dir_paths.append(full_traj_dir)
+
+        dur = (datetime.datetime.now() - start_time).total_seconds()
+        log.info(f"  Loaded {counter:6d} trajectories in {dur:.0f} seconds")
+        print(f"  Loaded {counter:6d} trajectories in {dur:.0f} seconds")
         
 
 
