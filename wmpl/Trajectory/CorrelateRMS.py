@@ -551,13 +551,13 @@ class RMSDataHandle(object):
             self.processing_list = self.findUnprocessedFolders(station_list)
             log.info("   ... done!")
 
-            # Load already computed trajectories
-            log.info("")
-            log.info('Removing any deleted trajectories...')
-            self.removeDeletedTrajectories()
-            log.info("Loading already computed trajectories...")
-            self.loadComputedTrajectories(os.path.join(self.output_dir, OUTPUT_TRAJ_DIR))
-            log.info("   ... done!")
+            # Load already computed trajectories - no, do this later to avoid performance hits and ensure currency
+            #log.info("")
+            #log.info('Removing any deleted trajectories...')
+            #self.removeDeletedTrajectories()
+            #log.info("Loading already computed trajectories...")
+            #self.loadComputedTrajectories(os.path.join(self.output_dir, OUTPUT_TRAJ_DIR))
+            #log.info("   ... done!")
         else:
             dt_beg, dt_end = self.loadPhase1Trajectories(max_trajs=max_trajs)
             self.processing_list = None
@@ -1021,7 +1021,7 @@ class RMSDataHandle(object):
         return 
 
 
-    def loadComputedTrajectories(self, traj_dir_path):
+    def loadComputedTrajectories(self, traj_dir_path, dt_range=None):
         """ Load all already estimated trajectories. 
 
         Arguments:
@@ -1031,12 +1031,19 @@ class RMSDataHandle(object):
         # defend against the case where there are no existing trajectories and traj_dir_path doesn't exist
         if not os.path.isdir(traj_dir_path):
             return
-        
+
+        if dt_range is None:
+            beg_dt = self.dt_range[0]
+            end_dt = self.dt_range[1]
+        else:
+            beg_dt = dt_range[0]
+            end_dt = dt_range[1]
+
         log.info("  Loading trajectories from: " + traj_dir_path)
         if self.dt_range is not None:
             log.info("  Datetime range: {:s} - {:s}".format(
-                self.dt_range[0].strftime("%Y-%m-%d %H:%M:%S"), 
-                self.dt_range[1].strftime("%Y-%m-%d %H:%M:%S")))
+                beg_dt.strftime("%Y-%m-%d %H:%M:%S"), 
+                end_dt.strftime("%Y-%m-%d %H:%M:%S")))
 
         counter = 0
 
@@ -1045,8 +1052,8 @@ class RMSDataHandle(object):
         dir_paths = []
 
         #iterate over the days in the range
-        jdt_beg = int(np.floor(datetime2JD(self.dt_range[0])))
-        jdt_end = int(np.ceil(datetime2JD(self.dt_range[1])))
+        jdt_beg = int(np.floor(datetime2JD(beg_dt)))
+        jdt_end = int(np.ceil(datetime2JD(end_dt)))
 
         yyyy = 0
         mm = 0
@@ -1058,19 +1065,16 @@ class RMSDataHandle(object):
             if curr_dt.year != yyyy:
                 yyyy = curr_dt.year
                 log.info("- year    " + str(yyyy))
-                print("- year    " + str(yyyy))
 
             if curr_dt.month != mm:
                 mm = curr_dt.month
                 yyyymm = f'{yyyy}{mm:02d}'
                 log.info("  - month " + str(yyyymm))
-                print("  - month " + str(yyyymm))
 
             if curr_dt.day != dd:
                 dd = curr_dt.day
                 yyyymmdd = f'{yyyy}{mm:02d}{dd:02d}'
                 log.info("    - day " + str(yyyymmdd))
-                print("    - day " + str(yyyymmdd))
 
             yyyymmdd_dir_path = os.path.join(traj_dir_path, f'{yyyy}', f'{yyyymm}', f'{yyyymmdd}')
 
@@ -1085,13 +1089,11 @@ class RMSDataHandle(object):
                             # Print every 1000th trajectory
                             if counter % 1000 == 0:
                                 log.info(f"  Loaded {counter:6d} trajectories, currently on {file_name}")
-                                print(f"  Loaded {counter:6d} trajectories, currently on {file_name}")
                             counter += 1
                     dir_paths.append(full_traj_dir)
 
         dur = (datetime.datetime.now() - start_time).total_seconds()
         log.info(f"  Loaded {counter:6d} trajectories in {dur:.0f} seconds")
-        print(f"  Loaded {counter:6d} trajectories in {dur:.0f} seconds")
         
 
 
@@ -1836,6 +1838,10 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                 if cml_args.mcmode != 2:
                     dh.unpaired_observations = dh.loadUnpairedObservations(dh.processing_list, 
                         dt_range=(bin_beg, bin_end))
+
+                # refresh list of calculated trajectories
+                dh.removeDeletedTrajectories()
+                dh.loadComputedTrajectories(os.path.join(dh.output_dir, OUTPUT_TRAJ_DIR), dt_range=[bin_beg, bin_end])
 
                 # Run the trajectory correlator
                 tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True)
