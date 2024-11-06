@@ -536,7 +536,10 @@ class RMSDataHandle(object):
             log.info("Loading database: {:s}".format(database_path))
             self.db = DatabaseJSON(database_path)
             log.info('Archiving older entries....')
-            self.archiveOldRecords(older_than=3)
+            try:
+                self.archiveOldRecords(older_than=3)
+            except: 
+                pass
             log.info("   ... done!")
 
             # Load the list of stations
