@@ -550,6 +550,8 @@ class RMSDataHandle(object):
 
             # Load already computed trajectories
             log.info("")
+            #log.info('Removing any deleted trajectories...')
+            #self.removeDeletedTrajectories()
             log.info("Loading already computed trajectories...")
             self.loadComputedTrajectories(os.path.join(self.output_dir, OUTPUT_TRAJ_DIR))
             log.info("   ... done!")
@@ -987,6 +989,29 @@ class RMSDataHandle(object):
             return False
 
 
+    def removeDeletedTrajectories(self):
+        """ Purge the database of any trajectories that no longer exist on disk.
+            These can arise because the monte-carlo stage may update the data. 
+        """
+
+        if not os.path.isdir(self.output_dir):
+            return 
+        
+        log.info("  Removing deleted trajectories from: " + self.output_dir)
+        if self.dt_range is not None:
+            log.info("  Datetime range: {:s} - {:s}".format(
+                self.dt_range[0].strftime("%Y-%m-%d %H:%M:%S"), 
+                self.dt_range[1].strftime("%Y-%m-%d %H:%M:%S")))
+
+        for traj_reduced in self.db.trajectories:
+            traj_path = os.path.join(self.output_dir, traj_reduced.traj_file_path)
+            if not os.path.isfile(traj_path):
+                log.info(f' removing {traj_reduced.traj_file_path}')
+                #self.db.removeTrajectory(traj_reduced)
+        #self.saveDatabase()
+        return 
+
+
     def loadComputedTrajectories(self, traj_dir_path):
         """ Load all already estimated trajectories. 
 
@@ -1003,7 +1028,6 @@ class RMSDataHandle(object):
             log.info("  Datetime range: {:s} - {:s}".format(
                 self.dt_range[0].strftime("%Y-%m-%d %H:%M:%S"), 
                 self.dt_range[1].strftime("%Y-%m-%d %H:%M:%S")))
-
 
         counter = 0
 
