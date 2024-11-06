@@ -1052,21 +1052,24 @@ class RMSDataHandle(object):
         mm = 0
         dd = 0
         for jdt in range(jdt_beg, jdt_end):
-            
+
             curr_dt = jd2Date(jdt, dt_obj=True)
             if curr_dt.year != yyyy:
                 yyyy = curr_dt.year
                 log.info("- year    " + str(yyyy))
+                print("- year    " + str(yyyy))
 
             if curr_dt.month != mm:
                 mm = curr_dt.month
                 yyyymm = f'{yyyy}{mm:02d}'
                 log.info("  - month " + str(yyyymm))
+                print("  - month " + str(yyyymm))
 
             if curr_dt.day != dd:
                 dd = curr_dt.day
                 yyyymmdd = f'{yyyy}{mm:02d}{dd:02d}'
                 log.info("    - day " + str(yyyymmdd))
+                print("    - day " + str(yyyymmdd))
 
             yyyymmdd_dir_path = os.path.join(traj_dir_path, f'{yyyy}', f'{yyyymm}', f'{yyyymmdd}')
 
@@ -1086,7 +1089,7 @@ class RMSDataHandle(object):
                 if file_name.endswith("_trajectory.pickle"):
 
                     if self.trajectoryFileInDtRange(file_name):
-
+                        print(file_name)
                         self.db.addTrajectory(os.path.join(dir_path, file_name))
 
                         # Print every 1000th trajectory
