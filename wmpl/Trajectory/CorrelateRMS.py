@@ -550,8 +550,8 @@ class RMSDataHandle(object):
 
             # Load already computed trajectories
             log.info("")
-            #log.info('Removing any deleted trajectories...')
-            #self.removeDeletedTrajectories()
+            log.info('Removing any deleted trajectories...')
+            self.removeDeletedTrajectories()
             log.info("Loading already computed trajectories...")
             self.loadComputedTrajectories(os.path.join(self.output_dir, OUTPUT_TRAJ_DIR))
             log.info("   ... done!")
@@ -1011,10 +1011,7 @@ class RMSDataHandle(object):
             traj_path = os.path.join(self.output_dir, traj_reduced.traj_file_path)
             if not os.path.isfile(traj_path):
                 log.info(f' removing {os.path.split(traj_reduced.traj_file_path)[1]}')
-                print(f'removing {os.path.split(traj_reduced.traj_file_path)[1]}')
                 trajs_to_remove.append(traj_reduced)
-            else:
-                print(f'keeping {os.path.split(traj_reduced.traj_file_path)[1]}')
         for traj in trajs_to_remove:
             self.db.removeTrajectory(traj)
         #self.saveDatabase()
@@ -1084,7 +1081,6 @@ class RMSDataHandle(object):
 
                     if self.trajectoryFileInDtRange(file_name):
 
-                        print(f'adding {file_name}')
                         self.db.addTrajectory(os.path.join(dir_path, file_name))
 
                         # Print every 1000th trajectory
