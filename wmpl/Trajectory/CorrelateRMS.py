@@ -1079,12 +1079,12 @@ class RMSDataHandle(object):
                 if os.path.isdir(full_traj_dir) and (full_traj_dir not in dir_paths):
                     for file_name in glob.glob1(full_traj_dir, '*_trajectory.pickle'):
                         if self.trajectoryFileInDtRange(file_name):
-                            print(file_name)
                             self.db.addTrajectory(os.path.join(full_traj_dir, file_name))
 
                             # Print every 1000th trajectory
                             if counter % 1000 == 0:
-                                log.info("  Loaded {:6d} trajectories, currently on {:s}".format(counter, file_name))
+                                log.info(f"  Loaded {counter:6d} trajectories, currently on {file_name}")
+                                print(f"  Loaded {counter:6d} trajectories, currently on {file_name}")
                             counter += 1
                     dir_paths.append(full_traj_dir)
         
