@@ -1077,9 +1077,9 @@ class RMSDataHandle(object):
                 # Add the directory to the list of directories to visit
                 full_traj_dir = os.path.join(yyyymmdd_dir_path, traj_dir)
                 if os.path.isdir(full_traj_dir) and (full_traj_dir not in dir_paths):
-                    for file_name in sorted(os.listdir(full_traj_dir)):
+                    for file_name in glob.glob1(full_traj_dir, '*_trajectory.pickle'):
                         if self.trajectoryFileInDtRange(file_name):
-                            #print(file_name)
+                            print(file_name)
                             self.db.addTrajectory(os.path.join(full_traj_dir, file_name))
 
                             # Print every 1000th trajectory
