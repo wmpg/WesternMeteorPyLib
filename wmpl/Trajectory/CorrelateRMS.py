@@ -1044,35 +1044,38 @@ class RMSDataHandle(object):
         # YYYY/YYYYMM/YYYYMMDD, so visit them in that order to check if they are in the datetime range
         dir_paths = []
 
-        # Check the year
-        for yyyy in sorted(os.listdir(traj_dir_path)):
+        #iterate over the days in the range
+        jdt_beg = int(np.floor(datetime2JD(self.dt_range[0])))
+        jdt_end = int(np.ceil(datetime2JD(self.dt_range[1])))
+
+        yyyy = 0
+        mm = 0
+        dd = 0
+        for jdt in range(jdt_beg, jdt_end):
             
-            if self.yearMonthDayDirInDtRange(yyyy):
-
+            curr_dt = jd2Date(jdt, dt_obj=True)
+            if curr_dt.year != yyyy:
+                yyyy = curr_dt.year
                 log.info("- year    " + str(yyyy))
-                
-                # Check the month
-                for yyyymm in sorted(os.listdir(os.path.join(traj_dir_path, yyyy))):
 
-                    if self.yearMonthDayDirInDtRange(yyyymm):
+            if curr_dt.month != mm:
+                mm = curr_dt.month
+                yyyymm = f'{yyyy}{mm:02d}'
+                log.info("  - month " + str(yyyymm))
 
-                        log.info("  - month " + str(yyyymm))
+            if curr_dt.day != dd:
+                dd = curr_dt.day
+                yyyymmdd = f'{yyyy}{mm:02d}{dd:02d}'
+                log.info("    - day " + str(yyyymmdd))
 
-                        # Check the day
-                        for yyyymmdd in sorted(os.listdir(os.path.join(traj_dir_path, yyyy, yyyymm))):
+            yyyymmdd_dir_path = os.path.join(traj_dir_path, f'{yyyy}', f'{yyyymm}', f'{yyyymmdd}')
 
-                            if self.yearMonthDayDirInDtRange(yyyymmdd):
-
-                                log.info("    - day " + str(yyyymmdd))
-
-                                yyyymmdd_dir_path = os.path.join(traj_dir_path, yyyy, yyyymm, yyyymmdd)
-
-                                for traj_dir in sorted(os.listdir(yyyymmdd_dir_path)):
-                                    # Add the directory to the list of directories to visit
-                                    full_traj_dir = os.path.join(yyyymmdd_dir_path, traj_dir)
-                                    if os.path.isdir(full_traj_dir) and (full_traj_dir not in dir_paths):
-                                        dir_paths.append(full_traj_dir)
-
+            for traj_dir in sorted(os.listdir(yyyymmdd_dir_path)):
+                # Add the directory to the list of directories to visit
+                full_traj_dir = os.path.join(yyyymmdd_dir_path, traj_dir)
+                if os.path.isdir(full_traj_dir) and (full_traj_dir not in dir_paths):
+                    dir_paths.append(full_traj_dir)
+        
 
         # Find and load all trajectory objects
         for dir_path in dir_paths:
