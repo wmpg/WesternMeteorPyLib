@@ -1002,12 +1002,21 @@ class RMSDataHandle(object):
             log.info("  Datetime range: {:s} - {:s}".format(
                 self.dt_range[0].strftime("%Y-%m-%d %H:%M:%S"), 
                 self.dt_range[1].strftime("%Y-%m-%d %H:%M:%S")))
-
-        for traj_reduced in self.db.trajectories:
+        jdt_start = datetime2JD(self.dt_range[0]) 
+        jdt_end = datetime2JD(self.dt_range[1])
+        trajs_to_remove = []
+        keys = [k for k in self.db.trajectories.keys() if k >= jdt_start and k <= jdt_end]
+        for trajkey in keys:
+            traj_reduced = self.db.trajectories[trajkey]
             traj_path = os.path.join(self.output_dir, traj_reduced.traj_file_path)
             if not os.path.isfile(traj_path):
-                log.info(f' removing {traj_reduced.traj_file_path}')
-                #self.db.removeTrajectory(traj_reduced)
+                log.info(f' removing {os.path.split(traj_reduced.traj_file_path)[1]}')
+                print(f'removing {os.path.split(traj_reduced.traj_file_path)[1]}')
+                trajs_to_remove.append(traj_reduced)
+            else:
+                print(f'keeping {os.path.split(traj_reduced.traj_file_path)[1]}')
+        for traj in trajs_to_remove:
+            self.db.removeTrajectory(traj)
         #self.saveDatabase()
         return 
 
@@ -1061,9 +1070,10 @@ class RMSDataHandle(object):
                                 # Add the directory to the list of directories to visit
                                 if os.path.isdir(yyyymmdd_dir_path) and (yyyymmdd_dir_path not in dir_paths):
                                     dir_paths.append(yyyymmdd_dir_path)
+                                    print(f'appending {yyyymmdd_dir_path}')
 
 
-
+        print(dir_paths)
         # Find and load all trajectory objects
         for dir_path in dir_paths:
 
@@ -1074,6 +1084,7 @@ class RMSDataHandle(object):
 
                     if self.trajectoryFileInDtRange(file_name):
 
+                        print(f'adding {file_name}')
                         self.db.addTrajectory(os.path.join(dir_path, file_name))
 
                         # Print every 1000th trajectory
