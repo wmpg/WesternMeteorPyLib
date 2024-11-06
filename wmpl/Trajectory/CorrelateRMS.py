@@ -551,7 +551,7 @@ class RMSDataHandle(object):
             self.processing_list = self.findUnprocessedFolders(station_list)
             log.info("   ... done!")
 
-            # Load already computed trajectories - no, do this later to avoid performance hits and ensure currency
+            # Load already computed trajectories - do this later to avoid performance hits and ensure the most current data
             #log.info("")
             #log.info('Removing any deleted trajectories...')
             #self.removeDeletedTrajectories()
@@ -1839,7 +1839,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                     dh.unpaired_observations = dh.loadUnpairedObservations(dh.processing_list, 
                         dt_range=(bin_beg, bin_end))
 
-                # refresh list of calculated trajectories
+                # refresh list of calculated trajectories from disk
                 dh.removeDeletedTrajectories()
                 dh.loadComputedTrajectories(os.path.join(dh.output_dir, OUTPUT_TRAJ_DIR), dt_range=[bin_beg, bin_end])
 
