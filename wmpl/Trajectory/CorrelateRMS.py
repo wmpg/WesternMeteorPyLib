@@ -1095,7 +1095,7 @@ class RMSDataHandle(object):
                     dir_paths.append(full_traj_dir)
 
         dur = (datetime.datetime.now() - start_time).total_seconds()
-        log.info(f"  Loaded {counter:6d} trajectories in {dur:.0f} seconds")
+        log.info(f"  Loaded {counter:6d} trajectories in {dur:.0f} seconds, last one was {file_name}")
         
 
 
