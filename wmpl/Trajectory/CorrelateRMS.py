@@ -1067,13 +1067,13 @@ class RMSDataHandle(object):
 
                                 yyyymmdd_dir_path = os.path.join(traj_dir_path, yyyy, yyyymm, yyyymmdd)
 
-                                # Add the directory to the list of directories to visit
-                                if os.path.isdir(yyyymmdd_dir_path) and (yyyymmdd_dir_path not in dir_paths):
-                                    dir_paths.append(yyyymmdd_dir_path)
-                                    print(f'appending {yyyymmdd_dir_path}')
+                                for traj_dir in sorted(os.listdir(yyyymmdd_dir_path)):
+                                    # Add the directory to the list of directories to visit
+                                    full_traj_dir = os.path.join(yyyymmdd_dir_path, traj_dir)
+                                    if os.path.isdir(full_traj_dir) and (full_traj_dir not in dir_paths):
+                                        dir_paths.append(full_traj_dir)
 
 
-        print(dir_paths)
         # Find and load all trajectory objects
         for dir_path in dir_paths:
 
