@@ -1077,26 +1077,17 @@ class RMSDataHandle(object):
                 # Add the directory to the list of directories to visit
                 full_traj_dir = os.path.join(yyyymmdd_dir_path, traj_dir)
                 if os.path.isdir(full_traj_dir) and (full_traj_dir not in dir_paths):
+                    for file_name in sorted(os.listdir(full_traj_dir)):
+                        if self.trajectoryFileInDtRange(file_name):
+                            #print(file_name)
+                            self.db.addTrajectory(os.path.join(full_traj_dir, file_name))
+
+                            # Print every 1000th trajectory
+                            if counter % 1000 == 0:
+                                log.info("  Loaded {:6d} trajectories, currently on {:s}".format(counter, file_name))
+                            counter += 1
                     dir_paths.append(full_traj_dir)
         
-
-        # Find and load all trajectory objects
-        for dir_path in dir_paths:
-
-            # Find and load all trajectory pickle files
-            for file_name in sorted(os.listdir(dir_path)):
-
-                if file_name.endswith("_trajectory.pickle"):
-
-                    if self.trajectoryFileInDtRange(file_name):
-                        print(file_name)
-                        self.db.addTrajectory(os.path.join(dir_path, file_name))
-
-                        # Print every 1000th trajectory
-                        if counter % 1000 == 0:
-                            log.info("  Loaded {:6d} trajectories, currently on {:s}".format(counter, file_name))
-
-                        counter += 1
 
 
     def getComputedTrajectories(self, jd_beg, jd_end):
