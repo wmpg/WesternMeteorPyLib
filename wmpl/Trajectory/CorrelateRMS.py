@@ -1080,19 +1080,21 @@ class RMSDataHandle(object):
 
             yyyymmdd_dir_path = os.path.join(traj_dir_path, f'{yyyy}', f'{yyyymm}', f'{yyyymmdd}')
 
-            for traj_dir in sorted(os.listdir(yyyymmdd_dir_path)):
-                # Add the directory to the list of directories to visit
-                full_traj_dir = os.path.join(yyyymmdd_dir_path, traj_dir)
-                if os.path.isdir(full_traj_dir) and (full_traj_dir not in dir_paths):
-                    for file_name in glob.glob1(full_traj_dir, '*_trajectory.pickle'):
-                        if self.trajectoryFileInDtRange(file_name, dt_range=dt_range):
-                            self.db.addTrajectory(os.path.join(full_traj_dir, file_name))
+            # catch for folder not existing for some reason
+            if os.path.isdir(yyyymmdd_dir_path):
+                for traj_dir in sorted(os.listdir(yyyymmdd_dir_path)):
+                    # Add the directory to the list of directories to visit
+                    full_traj_dir = os.path.join(yyyymmdd_dir_path, traj_dir)
+                    if os.path.isdir(full_traj_dir) and (full_traj_dir not in dir_paths):
+                        for file_name in glob.glob1(full_traj_dir, '*_trajectory.pickle'):
+                            if self.trajectoryFileInDtRange(file_name, dt_range=dt_range):
+                                self.db.addTrajectory(os.path.join(full_traj_dir, file_name))
 
-                            # Print every 1000th trajectory
-                            if counter % 1000 == 0:
-                                log.info(f"  Loaded {counter:6d} trajectories, currently on {file_name}")
-                            counter += 1
-                    dir_paths.append(full_traj_dir)
+                                # Print every 1000th trajectory
+                                if counter % 1000 == 0:
+                                    log.info(f"  Loaded {counter:6d} trajectories, currently on {file_name}")
+                                counter += 1
+                        dir_paths.append(full_traj_dir)
 
         dur = (datetime.datetime.now() - start_time).total_seconds()
         log.info(f"  Loaded {counter:6d} trajectories in {dur:.0f} seconds, last one was {file_name}")
