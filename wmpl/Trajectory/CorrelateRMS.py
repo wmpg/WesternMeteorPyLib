@@ -996,6 +996,8 @@ class RMSDataHandle(object):
 
         if not os.path.isdir(self.output_dir):
             return 
+        if self.db is None:
+            return 
         
         log.info("  Removing deleted trajectories from: " + self.output_dir)
         if self.dt_range is not None:
@@ -1029,6 +1031,9 @@ class RMSDataHandle(object):
         if not os.path.isdir(traj_dir_path):
             return
 
+        if self.db is None:
+            return 
+        
         if dt_range is None:
             dt_beg, dt_end = self.dt_range
         else:
