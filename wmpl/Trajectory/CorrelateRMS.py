@@ -1596,10 +1596,14 @@ contain data folders. Data folders should have FTPdetectinfo files together with
             else:
 
                 # Compute next run time
-                next_run_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=wait_time)
+                next_run_time = datetime.datetime.now(datetime.timezone.utc) \
+                    + datetime.timedelta(seconds=wait_time)
+                
+                log.info("Next run time: {:s}, waiting {:d} seconds...".format(str(next_run_time), 
+                                                                               int(wait_time)))
 
                 # Wait to run
                 while next_run_time > datetime.datetime.now(datetime.timezone.utc):
-                    log.info("Waiting {:s} to run the trajectory solver...          ".format(str(next_run_time \
+                    print("Waiting {:s} to run the trajectory solver...          ".format(str(next_run_time \
                         - datetime.datetime.now(datetime.timezone.utc))), end='\r')
                     time.sleep(2)

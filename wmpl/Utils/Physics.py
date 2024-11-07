@@ -111,7 +111,7 @@ def calcRadiatedEnergy(time, mag_abs, P_0m=840.0):
 
     # Integrate the interpolated I
     #intens_int = intens_interpol.integrate(np.min(time), np.max(time))
-    intens_int = scipy.integrate.simps(intens, time)
+    intens_int = scipy.integrate.simpson(intens, x=time)
 
     return intens_int
 
