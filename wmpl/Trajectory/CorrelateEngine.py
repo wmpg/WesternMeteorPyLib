@@ -801,6 +801,7 @@ class TrajectoryCorrelator(object):
                     # Reinitialize the observations, rejecting the ignored stations
                     for obs in traj_status.observations:
                         if not obs.ignore_station:
+                            log.info(f'Adding {obs.station_id}')
                             traj.infillWithObs(obs)
 
                     log.info("")
