@@ -1615,8 +1615,8 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     arg_parser.add_argument("--logdir", type=str, default=None,
         help="Path to the directory where the log files will be stored. If not given, the logs will be stored in the output directory.")
         
-    arg_parser.add_argument('-x', '--maxstations', type=int, default=8,
-        help="Use best N stations in the solution (default is use all stations).")
+    arg_parser.add_argument('-x', '--maxstations', type=int, default=15,
+        help="Use best N stations in the solution (default is use 15 stations).")
 
     arg_parser.add_argument('--mcmode', '--mcmode', type=int, default=0,
         help="Run just simple soln (1), just monte-carlos (2) or both (0).")
@@ -1678,7 +1678,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         log.info("Auto running trajectory estimation every {:.1f} hours using the last {:.1f} days of data...".format(AUTO_RUN_FREQUENCY, cml_args.auto))
 
     # Set max stations to use in a solution, minimum 2.
-    # The best N will be chosen. -1 means use all. Default is 8
+    # The best N will be chosen. -1 means use all. 
     if cml_args.maxstations is not None:
         if cml_args.maxstations == -1:
             # Set to large number, so we can easily test later
@@ -1688,7 +1688,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
             max_stations = max(2, cml_args.maxstations)
             log.info('Solutions will use the best {} stations.'.format(max_stations))
     else:
-        max_stations = 8
+        max_stations = 15
         log.info('Solutions will use the best {} stations.'.format(max_stations))
 
     # Init trajectory constraints

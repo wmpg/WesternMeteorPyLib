@@ -791,8 +791,6 @@ class TrajectoryCorrelator(object):
 
 
 
-                    log.info("")
-                    log.info("Rerunning the trajectory solution...")
 
                     # Init a new trajectory object (make sure to use the new reference Julian date)
                     traj = self.initTrajectory(traj_status.jdt_ref, mc_runs, verbose=False)
@@ -805,7 +803,8 @@ class TrajectoryCorrelator(object):
                         if not obs.ignore_station:
                             traj.infillWithObs(obs)
 
-                    
+                    log.info("")
+                    log.info(f'Rerunning the trajectory solution with {len(traj.observations)} stations...')
                     # Re-run the trajectory solution
                     try:
                         traj_status = traj.run()
