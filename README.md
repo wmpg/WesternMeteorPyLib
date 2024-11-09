@@ -43,7 +43,7 @@ The two sections below describe how to install the library on both Linux and Win
 These are installation instructions for Linux, assuming you have [Anaconda](https://www.anaconda.com/distribution/) installed. You might want to install this in a separate [virtual environment](https://conda.io/docs/user-guide/tasks/manage-environments.html) in Anaconda. I recommend creating a separate environment called ```wmpl``` for this code:
 
 ```
-conda create -y --name wmpl python=3.8
+conda create -y --name wmpl python=3.11
 ```
 
 Every time you run the code, you **will have to activate the environment by typing:**
@@ -106,10 +106,12 @@ The installation might differ on Windows. I recommend installing Anaconda, which
 2) Open the Anaconda powershell and run:
 	```
 	conda update anaconda
-	conda create -y --name wmpl python=3.8
+	conda create -y --name wmpl python=3.11
 	conda activate wmpl
 	conda install -y -c conda-forge numpy scipy matplotlib cython pytz pyqt pandas
 	conda install -y -c conda-forge jplephem ephem
+	conda install -y -c conda-forge watchdog
+	conda install -y -c conda-forge numba
 	conda install -y -c conda-forge basemap basemap-data-hires
 	```
 
