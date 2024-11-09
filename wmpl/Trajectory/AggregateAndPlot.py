@@ -526,6 +526,7 @@ def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir,
         lon_corr_temp[lon_corr <= 180] = ((180 - lon_corr[lon_corr <= 180] - 180)*np.cos(y_data[lon_corr <= 180]))
         lon_corr = lon_corr_temp
 
+
         # Compute the histogram
         data, _, _ = np.histogram2d(lon_corr, 
             np.degrees(np.array(y_data)), bins=(lon_bins, lat_bins))
