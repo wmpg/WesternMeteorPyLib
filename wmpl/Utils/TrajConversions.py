@@ -247,6 +247,9 @@ def jd2Date(jd, UT_corr=0, dt_obj=False, tzinfo=None):
     # library. Time handling should be switched to astropy.time
     except OverflowError:
         date = datetime(MINYEAR, 1, 1, 0, 0, 0)
+    # on rare occasions the date might be not-a-number, we need to trap that. 
+    except ValueError:
+        date = datetime(MINYEAR, 1, 1, 0, 0, 0)
 
 
     # Return a datetime object if dt_obj == True
