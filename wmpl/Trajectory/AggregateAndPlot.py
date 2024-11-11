@@ -13,6 +13,12 @@ import scipy.integrate
 import scipy.ndimage
 import scipy.stats
 
+# Import the correct scipy.integrate.simpson function
+try:
+    from scipy.integrate import simps as simpson
+except ImportError:
+    from scipy.integrate import simpson as simpson
+
 
 from wmpl.Analysis.FitPopulationAndMassIndex import fitSlope, logline
 from wmpl.Trajectory.Trajectory import addTrajectoryID
@@ -672,7 +678,11 @@ def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir, 
             xy=(0, 1), xycoords='axes fraction', color='w', size=10, family='monospace')
 
 
-    plt.tight_layout()
+    try:
+        plt.tight_layout()
+    except AttributeError:
+        # Manually adjust the plot
+        plt.subplots_adjust(left=0.01, right=0.99, top=0.99, bottom=0.01)
 
     plt.savefig(os.path.join(output_dir, file_name), dpi=100, facecolor=fig.get_facecolor(), \
         edgecolor='none')
@@ -1214,7 +1224,7 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, max_radiant_err=0.5
         # Plot the fitted Rayleigh distribution (normalize the integral to 1)
         x_arr = np.linspace(np.min(rad_dists), np.max(rad_dists), 100)
         ray_pdf_values = scipy.stats.rayleigh.pdf(x_arr, *ray_params)
-        ray_integ = scipy.integrate.simpson(ray_pdf_values, x=np.degrees(x_arr))
+        ray_integ = simpson(ray_pdf_values, x=np.degrees(x_arr))
         ax_rayleigh.plot(np.degrees(x_arr), ray_pdf_values/ray_integ, color='k', \
             label="Rayleigh, $\\sigma = $" + "{:.2f}".format(np.degrees(ray_std)) + "$^{\\circ}$")
 
