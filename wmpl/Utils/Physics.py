@@ -6,6 +6,12 @@ from __future__ import print_function, division, absolute_import
 import numpy as np
 import scipy.integrate
 
+# Import the correct scipy.integrate.simpson function
+try:
+    from scipy.integrate import simps as simpson
+except ImportError:
+    from scipy.integrate import simpson as simpson
+
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 
 
@@ -111,7 +117,7 @@ def calcRadiatedEnergy(time, mag_abs, P_0m=840.0):
 
     # Integrate the interpolated I
     #intens_int = intens_interpol.integrate(np.min(time), np.max(time))
-    intens_int = scipy.integrate.simpson(intens, x=time)
+    intens_int = simpson(intens, x=time)
 
     return intens_int
 
