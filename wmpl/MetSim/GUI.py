@@ -1473,6 +1473,10 @@ def loadConstants(sim_fit_json):
     with open(sim_fit_json) as f:
         const_json = json.load(f)
 
+        # If instead of just a constant file the MetSim GenerateSimulations file is given, extract the 
+        # constants
+        if 'const' in const_json:
+            const_json = const_json['const']
 
         # Fill in the constants
         for key in const_json:
