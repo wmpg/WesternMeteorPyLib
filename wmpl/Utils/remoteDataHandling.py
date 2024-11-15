@@ -121,8 +121,8 @@ def moveRemoteTrajectories(output_dir):
             report_file = src.replace('_trajectory.pickle','_report.txt')
             if os.path.isfile(report_file):
                 dst = dst.replace('_trajectory.pickle','_report.txt')
-                shutil.copyfile(src, dst)
-                os.remove(src)
+                shutil.copyfile(report_file, dst)
+                os.remove(report_file)
     return
 
 
