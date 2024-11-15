@@ -98,7 +98,7 @@ def uploadTrajToRemote(remotehost, trajfile, output_dir):
 def moveRemoteTrajectories(output_dir):
     """
     Move remotely processed pickle files to their target location in the trajectories area,
-    making sure we clean up any previously-calculated trajectory
+    making sure we clean up any previously-calculated trajectory and temporary files
     """
     phase2_dir = os.path.join(output_dir, 'remoteuploads')
     if os.path.isdir(phase2_dir):
@@ -115,6 +115,7 @@ def moveRemoteTrajectories(output_dir):
                 log.info(f'  Moving {phase1_name} to processed folder...')
                 dst = os.path.join(output_dir, 'phase1', 'processed', phase1_name + '_trajectory.pickle')
                 shutil.copyfile(processed_traj_file, dst)
+                os.remove(processed_traj_file)
 
             phase2_name = traj.longname
             traj_dir = f'{output_dir}/trajectories/{phase2_name[:4]}/{phase2_name[:6]}/{phase2_name[:8]}/{phase2_name}'
