@@ -75,7 +75,7 @@ def uploadTrajToRemote(remotehost, trajfile, output_dir):
     if ftpcli is None:
         return 
 
-    remote_phase2_dir = os.path.join(remote_dir, 'phase2').replace('\\','/')
+    remote_phase2_dir = os.path.join(remote_dir, 'remoteuploads').replace('\\','/')
     try:
         ftpcli.mkdir(remote_phase2_dir)
     except Exception:
@@ -100,7 +100,7 @@ def moveRemoteTrajectories(output_dir):
     Move remotely processed pickle files to their target location in the trajectories area,
     making sure we clean up any previously-calculated trajectory
     """
-    phase2_dir = os.path.join(output_dir, 'phase2')
+    phase2_dir = os.path.join(output_dir, 'remoteuploads')
     if os.path.isdir(phase2_dir):
         log.info('Checking for remotely calculated trajectories...')
         pickles = glob.glob1(phase2_dir, '*.pickle')

@@ -555,7 +555,7 @@ class RMSDataHandle(object):
 
         else:
             # move any remotely calculated pickles to their target locations
-            if os.path.isdir(os.path.join(self.output_dir, 'phase2')):
+            if os.path.isdir(os.path.join(self.output_dir, 'remoteuploads')):
                 moveRemoteTrajectories(self.output_dir)
 
             # retrieve pickles from a remote host, if configured
@@ -1300,6 +1300,7 @@ class RMSDataHandle(object):
             if self.remotehost is not None:
                 log.info('saving to remote host')
                 uploadTrajToRemote(remotehost, traj.file_name + '_trajectory.pickle', output_dir)
+                log.info(' ...done')
 
         # Save the plots
         if save_plots:
