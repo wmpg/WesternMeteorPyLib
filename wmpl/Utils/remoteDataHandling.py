@@ -42,7 +42,7 @@ def collectRemoteTrajectories(remotehost, max_trajs, output_dir):
     if ftpcli is None:
         return 
     remote_phase1_dir = os.path.join(remote_dir, 'phase1').replace('\\','/')
-    log.info(f'looking in {remote_phase1_dir}')
+    log.info(f'Looking in {remote_phase1_dir} on remote host')
     try:
         files = ftpcli.listdir(remote_phase1_dir)
         files = [f for f in files if '.pickle' in f and 'processing' not in f]
@@ -145,6 +145,7 @@ def getSFTPConnection(remotehost):
         port = 22
         remote_data_dir = hostdets[1]
     user,host = hostdets[0].split('@')
+    log.info(f'Connecting to {host}....')
     ssh_client = paramiko.SSHClient()
     ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     if not os.path.isfile(os.path.expanduser('~/.ssh/trajsolver')):
