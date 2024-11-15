@@ -102,18 +102,24 @@ def moveRemoteTrajectories(output_dir):
     """
     phase2_dir = os.path.join(output_dir, 'phase2')
     if os.path.isdir(phase2_dir):
+        log.info('Checking for remotely calculated trajectories...')
         pickles = glob.glob1(phase2_dir, '*.pickle')
         for pick in pickles:
             traj = loadPickle(phase2_dir, pick)
-
             phase1_name = traj.pre_mc_longname
             traj_dir = f'{output_dir}/trajectories/{phase1_name[:4]}/{phase1_name[:6]}/{phase1_name[:8]}/{phase1_name}'
             if os.path.isdir(traj_dir):
                 shutil.rmtree(traj_dir)
+            processed_traj_file = os.path.join(output_dir, 'phase1', phase1_name + '_trajectory.pickle_processing')
+            if os.path.isfile(processed_traj_file):
+                log.info(f'  Moving {phase1_name} to processed folder...')
+                dst = os.path.join(output_dir, 'phase1', 'processed', phase1_name + '_trajectory.pickle')
+                shutil.copyfile(processed_traj_file, dst)
 
             phase2_name = traj.longname
             traj_dir = f'{output_dir}/trajectories/{phase2_name[:4]}/{phase2_name[:6]}/{phase2_name[:8]}/{phase2_name}'
             mkdirP(traj_dir)
+            log.info(f'  Moving {phase2_name} to {traj_dir}...')
             src = os.path.join(phase2_dir, pick)
             dst = os.path.join(traj_dir, pick[:15]+'_trajectory.pickle')
             shutil.copyfile(src, dst)
@@ -123,6 +129,7 @@ def moveRemoteTrajectories(output_dir):
                 dst = dst.replace('_trajectory.pickle','_report.txt')
                 shutil.copyfile(report_file, dst)
                 os.remove(report_file)
+        log.info(f'Moved {len(pickles)} trajectories.')
     return
 
 
