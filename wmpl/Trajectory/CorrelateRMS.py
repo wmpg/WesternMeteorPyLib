@@ -26,6 +26,7 @@ from wmpl.Utils.Math import generateDatetimeBins
 from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import loadPickle, savePickle
 from wmpl.Utils.TrajConversions import datetime2JD, jd2Date
+from wmpl.Utils.remoteDataHandling import collectRemoteTrajectories, moveRemoteTrajectories, uploadTrajToRemote
 
 ### CONSTANTS ###
 
@@ -478,7 +479,7 @@ class PlateparDummy:
 
 
 class RMSDataHandle(object):
-    def __init__(self, dir_path, dt_range=None, db_dir=None, output_dir=None, mcmode=0, max_trajs=1000):
+    def __init__(self, dir_path, dt_range=None, db_dir=None, output_dir=None, mcmode=0, max_trajs=1000, remotehost=None):
         """ Handles data interfacing between the trajectory correlator and RMS data files on disk. 
     
         Arguments:
@@ -526,6 +527,7 @@ class RMSDataHandle(object):
             mkdirP(os.path.join(self.phase1_dir, 'processed'))
             self.purgePhase1ProcessedData(os.path.join(self.phase1_dir, 'processed'))
 
+        self.remotehost = remotehost
 
         ############################
 
@@ -552,6 +554,15 @@ class RMSDataHandle(object):
             log.info("   ... done!")
 
         else:
+            # move any remotely calculated pickles to their target locations
+            if os.path.isdir(os.path.join(self.output_dir, 'phase2')):
+                moveRemoteTrajectories(self.output_dir)
+
+            # retrieve pickles from a remote host, if configured
+            if self.remotehost is not None:
+                collectRemoteTrajectories(remotehost, max_trajs, self.phase1_dir)
+
+            # reload the phase1 trajectories
             dt_beg, dt_end = self.loadPhase1Trajectories(max_trajs=max_trajs)
             self.processing_list = None
             self.dt_range=[dt_beg, dt_end]
@@ -1286,6 +1297,10 @@ class RMSDataHandle(object):
             # we're including additional observations we need to use the most recent version of the trajectory
             savePickle(traj, os.path.join(self.phase1_dir, 'processed'), traj.pre_mc_longname + '_trajectory.pickle')
 
+            if self.remotehost is not None:
+                log.info('saving to remote host')
+                uploadTrajToRemote(remotehost, traj.file_name + '_trajectory.pickle', output_dir)
+
         # Save the plots
         if save_plots:
             traj.save_results = True
@@ -1627,6 +1642,9 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     arg_parser.add_argument('--autofreq', '--autofreq', type=int, default=360,
         help="Minutes to wait between runs in auto-mode")
     
+    arg_parser.add_argument('--remotehost', '--remotehost', type=str, default=None,
+        help="Remote host to collect and return MC phase solutions to. Supports internet-distributed processing.")
+    
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -1707,9 +1725,20 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     if cml_args.maxerr is not None:
         trajectory_constraints.max_arcsec_err = cml_args.maxerr
 
-    max_trajs = 1000
+    remotehost = cml_args.remotehost
+    if cml_args.mcmode !=2 and remotehost is not None:
+        log.info('remotehost only applicable in mcmode 2')
+        remotehost = None
+
+    # set the maximum number of trajectories to reprocess when doing the MC uncertainties
+    # set a default of 10 for remote processing and 1000 for local processing
+    if cml_args.remotehost is not None:
+        max_trajs = 10
+    else:
+        max_trajs = 1000
     if cml_args.maxtrajs is not None:
         max_trajs = int(cml_args.maxtrajs)
+        
     if cml_args.mcmode == 2:
         log.info(f'Reloading at most {max_trajs} phase1 trajectories.')
 
@@ -1767,13 +1796,11 @@ contain data folders. Data folders should have FTPdetectinfo files together with
 
                 event_time_range = [dt_beg, dt_end]
 
-
-
         # Init the data handle
         dh = RMSDataHandle(
             cml_args.dir_path, dt_range=event_time_range, 
             db_dir=cml_args.dbdir, output_dir=cml_args.outdir,
-            mcmode=cml_args.mcmode, max_trajs=max_trajs)
+            mcmode=cml_args.mcmode, max_trajs=max_trajs, remotehost=remotehost)
         
         # If there is nothing to process, stop, unless we're in mcmode 2 (processing_list is not used in this case)
         if not dh.processing_list and cml_args.mcmode < 2:
