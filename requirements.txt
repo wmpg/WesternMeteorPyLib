@@ -8,6 +8,7 @@ pyephem
 PyQt5 ; platform_machine != 'aarch64'
 pyyaml
 pyswarms
+pkgconfig
 ml-dtypes
 keras
 pytz
