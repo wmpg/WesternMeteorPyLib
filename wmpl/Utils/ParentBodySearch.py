@@ -137,7 +137,6 @@ def loadMeteoritesElements(meteorites_file):
     return meteorites_list
 
 
-
 # Load the parent body database - avoid crash on first initialisation
 if os.path.isfile(config.comets_elements_file):
     comets_elements = loadCometsElements(config.comets_elements_file)
