@@ -1619,7 +1619,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         help="Use best N stations in the solution (default is use 15 stations).")
 
     arg_parser.add_argument('--mcmode', '--mcmode', type=int, default=0,
-        help="Run just simple soln (1), just monte-carlos (2) or both (0).")
+        help="Run just simple soln (1), just monte-carlos (2) or both (0, default).")
 
     arg_parser.add_argument('--maxtrajs', '--maxtrajs', type=int, default=1000,
         help="Max number of trajectories to reload in each pass when doing the Monte-Carlo phase")
