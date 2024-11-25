@@ -40,7 +40,7 @@ FRIPON_STATION_FILE = "FRIPON_location_list.csv"
 
 
 
-def loadFripon(dir_path, fripon_paths, overwrite_fripon_stations=False):
+def loadFripon(dir_path, fripon_paths):
 
 
     ### Download FRIPON station data from the web, or load it locally if available ###
@@ -48,25 +48,22 @@ def loadFripon(dir_path, fripon_paths, overwrite_fripon_stations=False):
     # Local path to the file where it will be saved
     station_file_path = os.path.join(dir_path, FRIPON_STATION_FILE)
 
-    # If a file available locally, use it unless the overwrite flag is set
-    if not os.path.exists(station_file_path) or overwrite_fripon_stations:
+    try:
+        # Download the FRIPON station files
+        print("Downloading FRIPON station file from:", FRIPON_STATIONS_URL)
+        urllibrary.urlretrieve(FRIPON_STATIONS_URL, station_file_path)
+    except:
 
-        try:
-            # Download the FRIPON station files
-            print("Downloading FRIPON station file from:", FRIPON_STATIONS_URL)
-            urllibrary.urlretrieve(FRIPON_STATIONS_URL, station_file_path)
-        except:
+        # If the file cannot be downloaded, try loading it locally
+        print("The FRIPON station file could not be retrieved!")
+        
 
-            # If the file cannot be downloaded, try loading it locally
-            print("The FRIPON station file could not be retrieved!")
-            
+        if os.path.exists(station_file_path):
+            print("Loading a local file...")
 
-            if os.path.exists(station_file_path):
-                print("Loading a local file...")
-
-            else:
-                print("A local station file could not be found:", station_file_path)
-                sys.exit("Could not read station data")
+        else:
+            print("A local station file could not be found:", station_file_path)
+            sys.exit("Could not read station data")
 
 
     ###
@@ -193,10 +190,6 @@ if __name__ == "__main__":
     arg_parser.add_argument('-w', '--walk', \
         help="Recursively find FRIPON .met files in the given folder and use them for trajectory estimation.", \
         action="store_true")
-    
-    arg_parser.add_argument('--updatestations', \
-        help="Force update of the FRIPON station data file.", \
-        action="store_true")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -271,8 +264,7 @@ if __name__ == "__main__":
 
 
     # Load the observations into container objects
-    jdt_ref, meteor_list = loadFripon(dir_path, fripon_paths, 
-                                      overwrite_fripon_stations=cml_args.updatestations)
+    jdt_ref, meteor_list = loadFripon(dir_path, fripon_paths)
 
 
     # Save the data as RMS JSON files
