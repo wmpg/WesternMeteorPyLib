@@ -138,12 +138,17 @@ def loadMeteoritesElements(meteorites_file):
 
 
 
-# Load the parent body database
-comets_elements = loadCometsElements(config.comets_elements_file)
-asteroids_elements = loadAsteroidsElements(config.asteroids_amors_file)
-asteroids_elements += loadAsteroidsElements(config.asteroids_apollos_file)
-asteroids_elements += loadAsteroidsElements(config.asteroids_atens_file)
-meteorites_elements = loadMeteoritesElements(config.meteorites_orbit_file)
+# Load the parent body database - avoid crash on first initialisation
+if os.path.isfile(config.comets_elements_file):
+    comets_elements = loadCometsElements(config.comets_elements_file)
+if os.path.isfile(config.asteroids_amors_file):
+    asteroids_elements = loadAsteroidsElements(config.asteroids_amors_file)
+if os.path.isfile(config.asteroids_apollos_file):
+    asteroids_elements += loadAsteroidsElements(config.asteroids_apollos_file)
+if os.path.isfile(config.asteroids_atens_file):
+    asteroids_elements += loadAsteroidsElements(config.asteroids_atens_file)
+if os.path.isfile(config.meteorites_orbit_file):
+    meteorites_elements = loadMeteoritesElements(config.meteorites_orbit_file)
 
 
 def findParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10, meteorites=False):
