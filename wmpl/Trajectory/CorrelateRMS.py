@@ -215,9 +215,9 @@ class DatabaseJSON(object):
                 os.remove(db_bak_file_path)
 
         except Exception as e:
-            log.warning(f'unable to save the database, likely corrupt data')
+            log.warning('unable to save the database, likely corrupt data')
             shutil.copy2(db_bak_file_path, self.db_file_path)
-            log.warning('e')
+            log.warning(e)
 
     def addProcessedDir(self, station_name, rel_proc_path):
         """ Add the processed directory to the list. """
