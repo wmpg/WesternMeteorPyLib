@@ -6379,7 +6379,10 @@ class Trajectory(object):
                 for obs in temp_observations:
                     self.infillWithObs(obs)
 
-                
+                # Reset fixed times to 0, as the timing offsets have already been applied
+                for station in self.fixed_time_offsets:
+                    self.fixed_time_offsets[station] = 0.0
+
                 # Re-run the trajectory estimation with updated timings. This will update all calculated
                 # values up to this point
                 self.run(_rerun_timing=True, _prev_toffsets=self.time_diffs, _orig_obs=_orig_obs)
