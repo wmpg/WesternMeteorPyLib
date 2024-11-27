@@ -1,4 +1,4 @@
-numpy
+numpy < 2.0
 cython
 scipy
 matplotlib
@@ -17,3 +17,4 @@ gitpython
 numba
 watchdog==3.0.0; python_version == '3.7'
 watchdog; python_version >= '3.8'
+paramiko

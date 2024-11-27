@@ -26,6 +26,7 @@ from wmpl.Utils.Math import generateDatetimeBins
 from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import loadPickle, savePickle
 from wmpl.Utils.TrajConversions import datetime2JD, jd2Date
+from wmpl.Utils.remoteDataHandling import collectRemoteTrajectories, moveRemoteTrajectories, uploadTrajToRemote
 
 ### CONSTANTS ###
 
@@ -196,22 +197,27 @@ class DatabaseJSON(object):
             shutil.copy2(self.db_file_path, db_bak_file_path)
 
         # Save the data base
-        with open(self.db_file_path, 'w') as f:
-            self2 = copy.deepcopy(self)
+        try:
+            with open(self.db_file_path, 'w') as f:
+                self2 = copy.deepcopy(self)
 
-            # Convert reduced trajectory objects to JSON objects
-            self2.trajectories = {key: self.trajectories[key].__dict__ for key in self.trajectories}
-            self2.failed_trajectories = {key: self.failed_trajectories[key].__dict__ 
-                for key in self.failed_trajectories}
-            if hasattr(self2, 'phase1Trajectories'):
-                delattr(self2, 'phase1Trajectories')
+                # Convert reduced trajectory objects to JSON objects
+                self2.trajectories = {key: self.trajectories[key].__dict__ for key in self.trajectories}
+                self2.failed_trajectories = {key: self.failed_trajectories[key].__dict__ 
+                    for key in self.failed_trajectories}
+                if hasattr(self2, 'phase1Trajectories'):
+                    delattr(self2, 'phase1Trajectories')
 
-            f.write(json.dumps(self2, default=lambda o: o.__dict__, indent=4, sort_keys=True))
+                f.write(json.dumps(self2, default=lambda o: o.__dict__, indent=4, sort_keys=True))
 
-        # Remove the backup file
-        if os.path.exists(db_bak_file_path):
-            os.remove(db_bak_file_path)
+            # Remove the backup file
+            if os.path.exists(db_bak_file_path):
+                os.remove(db_bak_file_path)
 
+        except Exception as e:
+            log.warning(f'unable to save the database, likely corrupt data')
+            shutil.copy2(db_bak_file_path, self.db_file_path)
+            log.warning('e')
 
     def addProcessedDir(self, station_name, rel_proc_path):
         """ Add the processed directory to the list. """
@@ -478,7 +484,7 @@ class PlateparDummy:
 
 
 class RMSDataHandle(object):
-    def __init__(self, dir_path, dt_range=None, db_dir=None, output_dir=None, mcmode=0, max_trajs=1000):
+    def __init__(self, dir_path, dt_range=None, db_dir=None, output_dir=None, mcmode=0, max_trajs=1000, remotehost=None):
         """ Handles data interfacing between the trajectory correlator and RMS data files on disk. 
     
         Arguments:
@@ -526,6 +532,7 @@ class RMSDataHandle(object):
             mkdirP(os.path.join(self.phase1_dir, 'processed'))
             self.purgePhase1ProcessedData(os.path.join(self.phase1_dir, 'processed'))
 
+        self.remotehost = remotehost
 
         ############################
 
@@ -552,6 +559,15 @@ class RMSDataHandle(object):
             log.info("   ... done!")
 
         else:
+            # move any remotely calculated pickles to their target locations
+            if os.path.isdir(os.path.join(self.output_dir, 'remoteuploads')):
+                moveRemoteTrajectories(self.output_dir)
+
+            # retrieve pickles from a remote host, if configured
+            if self.remotehost is not None:
+                collectRemoteTrajectories(remotehost, max_trajs, self.phase1_dir)
+
+            # reload the phase1 trajectories
             dt_beg, dt_end = self.loadPhase1Trajectories(max_trajs=max_trajs)
             self.processing_list = None
             self.dt_range=[dt_beg, dt_end]
@@ -1286,6 +1302,11 @@ class RMSDataHandle(object):
             # we're including additional observations we need to use the most recent version of the trajectory
             savePickle(traj, os.path.join(self.phase1_dir, 'processed'), traj.pre_mc_longname + '_trajectory.pickle')
 
+            if self.remotehost is not None:
+                log.info('saving to remote host')
+                uploadTrajToRemote(remotehost, traj.file_name + '_trajectory.pickle', output_dir)
+                log.info(' ...done')
+
         # Save the plots
         if save_plots:
             traj.save_results = True
@@ -1373,6 +1394,8 @@ class RMSDataHandle(object):
         the pickle, because we might later on get new data and it might become solvable. Otherwise, we can just delete the file 
         since the MC solver will have saved an updated one already.
         """
+        if not self.mc_mode != 2:
+            return 
         fldr_name = os.path.split(self.generateTrajOutputDirectoryPath(traj, make_dirs=False))[-1] 
         pick = os.path.join(self.phase1_dir, fldr_name + '_trajectory.pickle_processing')
         if os.path.isfile(pick):
@@ -1627,6 +1650,9 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     arg_parser.add_argument('--autofreq', '--autofreq', type=int, default=360,
         help="Minutes to wait between runs in auto-mode")
     
+    arg_parser.add_argument('--remotehost', '--remotehost', type=str, default=None,
+        help="Remote host to collect and return MC phase solutions to. Supports internet-distributed processing.")
+    
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -1707,9 +1733,20 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     if cml_args.maxerr is not None:
         trajectory_constraints.max_arcsec_err = cml_args.maxerr
 
-    max_trajs = 1000
+    remotehost = cml_args.remotehost
+    if cml_args.mcmode !=2 and remotehost is not None:
+        log.info('remotehost only applicable in mcmode 2')
+        remotehost = None
+
+    # set the maximum number of trajectories to reprocess when doing the MC uncertainties
+    # set a default of 10 for remote processing and 1000 for local processing
+    if cml_args.remotehost is not None:
+        max_trajs = 10
+    else:
+        max_trajs = 1000
     if cml_args.maxtrajs is not None:
         max_trajs = int(cml_args.maxtrajs)
+        
     if cml_args.mcmode == 2:
         log.info(f'Reloading at most {max_trajs} phase1 trajectories.')
 
@@ -1767,13 +1804,11 @@ contain data folders. Data folders should have FTPdetectinfo files together with
 
                 event_time_range = [dt_beg, dt_end]
 
-
-
         # Init the data handle
         dh = RMSDataHandle(
             cml_args.dir_path, dt_range=event_time_range, 
             db_dir=cml_args.dbdir, output_dir=cml_args.outdir,
-            mcmode=cml_args.mcmode, max_trajs=max_trajs)
+            mcmode=cml_args.mcmode, max_trajs=max_trajs, remotehost=remotehost)
         
         # If there is nothing to process, stop, unless we're in mcmode 2 (processing_list is not used in this case)
         if not dh.processing_list and cml_args.mcmode < 2:
@@ -1782,87 +1817,85 @@ contain data folders. Data folders should have FTPdetectinfo files together with
             log.info("Probably everything is already processed.")
             if cml_args.auto is None:
                 break
-            else:
-                continue
+        else:
 
+            ### GENERATE DAILY TIME BINS ###
 
-        ### GENERATE DAILY TIME BINS ###
+            if cml_args.mcmode != 2:
+                # Find the range of datetimes of all folders (take only those after the year 2000)
+                proc_dir_dts = [entry[3] for entry in dh.processing_list if entry[3] is not None]
+                proc_dir_dts = [dt for dt in proc_dir_dts if dt > datetime.datetime(2000, 1, 1, 0, 0, 0, 
+                                                                                    tzinfo=datetime.timezone.utc)]
 
-        if cml_args.mcmode != 2:
-            # Find the range of datetimes of all folders (take only those after the year 2000)
-            proc_dir_dts = [entry[3] for entry in dh.processing_list if entry[3] is not None]
-            proc_dir_dts = [dt for dt in proc_dir_dts if dt > datetime.datetime(2000, 1, 1, 0, 0, 0, 
-                                                                                tzinfo=datetime.timezone.utc)]
+                # Reject all folders not within the time range of interest +/- 1 day, to reduce the amount of data to be loaded
+                if event_time_range is not None:
 
-            # Reject all folders not within the time range of interest +/- 1 day, to reduce the amount of data to be loaded
-            if event_time_range is not None:
+                    dt_beg, dt_end = event_time_range
 
-                dt_beg, dt_end = event_time_range
+                    proc_dir_dts = [dt for dt in proc_dir_dts 
+                        if (dt >= dt_beg - datetime.timedelta(days=1)) and (dt <= dt_end + datetime.timedelta(days=1))]
+                    
+                    # to avoid excluding all possible dates
+                    if proc_dir_dts == []: 
+                        proc_dir_dts=[dt_beg - datetime.timedelta(days=1), dt_end + datetime.timedelta(days=1)]
 
-                proc_dir_dts = [dt for dt in proc_dir_dts 
-                    if (dt >= dt_beg - datetime.timedelta(days=1)) and (dt <= dt_end + datetime.timedelta(days=1))]
+                # Determine the limits of data
+                proc_dir_dt_beg = min(proc_dir_dts)
+                proc_dir_dt_end = max(proc_dir_dts)
+                # Split the processing into daily chunks
+                dt_bins = generateDatetimeBins(proc_dir_dt_beg, proc_dir_dt_end, bin_days=1, 
+                                            tzinfo=datetime.timezone.utc)
                 
-                # to avoid excluding all possible dates
-                if proc_dir_dts == []: 
-                    proc_dir_dts=[dt_beg - datetime.timedelta(days=1), dt_end + datetime.timedelta(days=1)]
+                # check if we've created an extra bucket (might happen if requested timeperiod is less than 24h)
+                if event_time_range is not None:
+                    if dt_bins[-1][0] > event_time_range[1]: 
+                        dt_bins.pop(-1)
+            else:
+                # in mcmode 2 we want to process all loaded trajectories so set the bin start/end accordingly
+                dt_bins = [(dh.dt_range[0], dh.dt_range[1])]
 
-            # Determine the limits of data
-            proc_dir_dt_beg = min(proc_dir_dts)
-            proc_dir_dt_end = max(proc_dir_dts)
-            # Split the processing into daily chunks
-            dt_bins = generateDatetimeBins(proc_dir_dt_beg, proc_dir_dt_end, bin_days=1, 
-                                        tzinfo=datetime.timezone.utc)
+            if dh.dt_range is not None:
+                # there's some data to process
+                log.info("")
+                log.info("ALL TIME BINS:")
+                log.info("----------")
+                for bin_beg, bin_end in dt_bins:
+                    log.info("{:s}, {:s}".format(str(bin_beg), str(bin_end)))
+
+
+                ### ###
+
+
+                # Go through all chunks in time
+                for bin_beg, bin_end in dt_bins:
+
+                    log.info("")
+                    log.info("PROCESSING TIME BIN:")
+                    log.info("{:s}, {:s}".format(str(bin_beg), str(bin_end)))
+                    log.info("-----------------------------")
+                    log.info("")
+
+                    # Load data of unprocessed observations
+                    if cml_args.mcmode != 2:
+                        dh.unpaired_observations = dh.loadUnpairedObservations(dh.processing_list, 
+                            dt_range=(bin_beg, bin_end))
+
+                    # refresh list of calculated trajectories from disk
+                    dh.removeDeletedTrajectories()
+                    dh.loadComputedTrajectories(os.path.join(dh.output_dir, OUTPUT_TRAJ_DIR), dt_range=[bin_beg, bin_end])
+
+                    # Run the trajectory correlator
+                    tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True)
+                    bin_time_range = [bin_beg, bin_end]
+                    tc.run(event_time_range=event_time_range, mcmode=cml_args.mcmode, bin_time_range=bin_time_range)
+            else:
+                # there were no datasets to process
+                log.info('no data to process yet')
             
-            # check if we've created an extra bucket (might happen if requested timeperiod is less than 24h)
-            if event_time_range is not None:
-                if dt_bins[-1][0] > event_time_range[1]: 
-                    dt_bins.pop(-1)
-        else:
-            # in mcmode 2 we want to process all loaded trajectories so set the bin start/end accordingly
-            dt_bins = [(dh.dt_range[0], dh.dt_range[1])]
+            log.info("Total run time: {:s}".format(str(datetime.datetime.now(datetime.timezone.utc) - t1)))
 
-        if dh.dt_range is not None:
-            # there's some data to process
-            log.info("")
-            log.info("ALL TIME BINS:")
-            log.info("----------")
-            for bin_beg, bin_end in dt_bins:
-                log.info("{:s}, {:s}".format(str(bin_beg), str(bin_end)))
-
-
-            ### ###
-
-
-            # Go through all chunks in time
-            for bin_beg, bin_end in dt_bins:
-
-                log.info("")
-                log.info("PROCESSING TIME BIN:")
-                log.info("{:s}, {:s}".format(str(bin_beg), str(bin_end)))
-                log.info("-----------------------------")
-                log.info("")
-
-                # Load data of unprocessed observations
-                if cml_args.mcmode != 2:
-                    dh.unpaired_observations = dh.loadUnpairedObservations(dh.processing_list, 
-                        dt_range=(bin_beg, bin_end))
-
-                # refresh list of calculated trajectories from disk
-                dh.removeDeletedTrajectories()
-                dh.loadComputedTrajectories(os.path.join(dh.output_dir, OUTPUT_TRAJ_DIR), dt_range=[bin_beg, bin_end])
-
-                # Run the trajectory correlator
-                tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True)
-                bin_time_range = [bin_beg, bin_end]
-                tc.run(event_time_range=event_time_range, mcmode=cml_args.mcmode, bin_time_range=bin_time_range)
-        else:
-            # there were no datasets to process
-            log.info('no data to process yet')
-        
-        log.info("Total run time: {:s}".format(str(datetime.datetime.now(datetime.timezone.utc) - t1)))
-
-        # Store the previous start time
-        previous_start_time = copy.deepcopy(t1)
+            # Store the previous start time
+            previous_start_time = copy.deepcopy(t1)
 
         # Break after one loop if auto mode is not on
         if cml_args.auto is None:

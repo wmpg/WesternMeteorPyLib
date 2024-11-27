@@ -887,7 +887,7 @@ class TrajectoryCorrelator(object):
             log.info('finished initial solution')
 
         ##### end of simple soln phase 
-        ##### now run the Monte-carlo phase, if the mcmode is not 0 (do both) or 2 (mc-only)
+        ##### now run the Monte-carlo phase, if the mcmode is 0 (do both) or 2 (mc-only)
         if mcmode == 0 or mcmode == 2: 
             if mcmode == 2:
                 traj_status = traj
@@ -1046,7 +1046,7 @@ class TrajectoryCorrelator(object):
                 for _, met_obs_temp, _ in matched_obs:
                     self.dh.markObservationAsPaired(met_obs_temp)
         else:
-            print('unable to fit trajectory')
+            log.info('unable to fit trajectory')
 
         return successful_traj_fit
 
