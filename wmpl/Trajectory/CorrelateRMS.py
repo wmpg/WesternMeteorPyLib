@@ -1644,7 +1644,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     arg_parser.add_argument('--mcmode', '--mcmode', type=int, default=0,
         help="Run just simple soln (1), just monte-carlos (2) or both (0, default).")
 
-    arg_parser.add_argument('--maxtrajs', '--maxtrajs', type=int, default=1000,
+    arg_parser.add_argument('--maxtrajs', '--maxtrajs', type=int, default=None,
         help="Max number of trajectories to reload in each pass when doing the Monte-Carlo phase")
     
     arg_parser.add_argument('--autofreq', '--autofreq', type=int, default=360,

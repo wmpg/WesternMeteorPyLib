@@ -42,7 +42,7 @@ def collectRemoteTrajectories(remotehost, max_trajs, output_dir):
     if ftpcli is None:
         return 
     remote_phase1_dir = os.path.join(remote_dir, 'phase1').replace('\\','/')
-    log.info(f'Looking in {remote_phase1_dir} on remote host')
+    log.info(f'Looking in {remote_phase1_dir} on remote host for up to {max_trajs} trajectories')
     try:
         files = ftpcli.listdir(remote_phase1_dir)
         files = [f for f in files if '.pickle' in f and 'processing' not in f]
