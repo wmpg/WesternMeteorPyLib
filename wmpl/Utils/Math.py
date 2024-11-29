@@ -5,7 +5,6 @@
 from __future__ import division, print_function, absolute_import
 
 import datetime
-import pytz
 
 import numpy as np
 import scipy.linalg
@@ -53,6 +52,7 @@ def vectNorm(vect):
     """Convert a given vector to a unit vector."""
 
     return vect/vectMag(vect)
+
 
 @njit
 def vectMag(vect):
@@ -353,8 +353,7 @@ def angleBetweenSphericalCoords(phi1, lambda1, phi2, lambda2):
     """
 
     # Compute the cosine of the angle
-    cos_angle = (np.sin(phi1)*np.sin(phi2) +
-                 np.cos(phi1)*np.cos(phi2)*np.cos(lambda2 - lambda1))
+    cos_angle = (np.sin(phi1)*np.sin(phi2) + np.cos(phi1)*np.cos(phi2)*np.cos(lambda2 - lambda1))
 
     # Clamp the value to the valid range of arccos
     cos_angle = np.clip(cos_angle, -1.0, 1.0)
@@ -849,13 +848,13 @@ def mergeClosePoints(x_array, y_array, delta, x_datetime=False, method="avg"):
 
             # Choose either to take the mean, max, or min of the points in the window
             if method.lower() == "max":
-                y = np.max(y_array[i : i + count])
+                y = np.max(y_array[i: i + count])
 
             elif method.lower() == "min":
-                y = np.min(y_array[i : i + count])
+                y = np.min(y_array[i: i + count])
 
             else:
-                y = np.mean(y_array[i : i + count])
+                y = np.mean(y_array[i: i + count])
 
         # If there are no close points, add the current point to the list
         else:
@@ -885,7 +884,7 @@ def movingAverage(arr, n=3):
 
     ret[n:] = ret[n:] - ret[:-n]
 
-    return ret[n - 1 :] / n
+    return ret[n - 1:] / n
 
 
 def subsampleAverage(arr, n=3):
@@ -961,7 +960,7 @@ def checkContinuity(sequence):
         # Check if that continous sequence is a sequence of ones, or a sequence of zeros
         first, last = np.argwhere(diffs != 0)
 
-        if np.count_nonzero(sequence[first[0] + 1 : last[0]] == 1):
+        if np.count_nonzero(sequence[first[0] + 1: last[0]] == 1):
             return True, first[0] + 1, last[0]
 
     return False, 0, 0
@@ -1077,7 +1076,7 @@ def fitConfidenceInterval(x_data, y_data, conf=0.95, x_array=None, func=None):
 ##############################################################################################################
 
 
-def generateDatetimeBins(dt_beg, dt_end, bin_days=7, utc_hour_break=12, tzinfo=None):
+def generateDatetimeBins(dt_beg, dt_end, bin_days=7, utc_hour_break=12, tzinfo=None, reverse=False):
     """Given a beginning and end datetime, bin this time range into bins bin_days long. The bin edges will
         be at utc_hour_break UTC. 12:00 UTC is chosen because at that time it is midnight at the International
         Date Line, and it is very unlikely that there are any meteor cameras there.
@@ -1131,6 +1130,9 @@ def generateDatetimeBins(dt_beg, dt_end, bin_days=7, utc_hour_break=12, tzinfo=N
         # Stop iterating if the end was reached
         if end_reached:
             break
+
+    if reverse:
+        time_bins.reverse()
 
     return time_bins
 
@@ -1243,7 +1245,7 @@ if __name__ == "__main__":
     sys.exit()
 
     # Test hull functions
-    from mpl_toolkits.mplot3d import Axes3D
+    #from mpl_toolkits.mplot3d import Axes3D
     import matplotlib.pyplot as plt
 
     # Define hull points
