@@ -215,9 +215,9 @@ class DatabaseJSON(object):
                 os.remove(db_bak_file_path)
 
         except Exception as e:
-            log.warning(f'unable to save the database, likely corrupt data')
+            log.warning('unable to save the database, likely corrupt data')
             shutil.copy2(db_bak_file_path, self.db_file_path)
-            log.warning('e')
+            log.warning(e)
 
     def addProcessedDir(self, station_name, rel_proc_path):
         """ Add the processed directory to the list. """
@@ -321,7 +321,7 @@ class DatabaseJSON(object):
 
 
 
-    def removeTrajectory(self, traj_reduced):
+    def removeTrajectory(self, traj_reduced, keepFolder=False):
         """ Remove the trajectory from the data base and disk. """
 
         # Remove the trajectory data base entry
@@ -329,9 +329,9 @@ class DatabaseJSON(object):
             del self.trajectories[traj_reduced.jdt_ref]
 
         # Remove the trajectory folder on the disk
-        if os.path.isfile(traj_reduced.traj_file_path):
-
+        if not keepFolder and os.path.isfile(traj_reduced.traj_file_path):
             traj_dir = os.path.dirname(traj_reduced.traj_file_path)
+            log.info(f'removing {traj_dir}')
             shutil.rmtree(traj_dir)
 
 
@@ -625,12 +625,12 @@ class RMSDataHandle(object):
         for traj in [t for t in self.db.trajectories if t < archdate_jd]:
             if traj < archdate_jd:
                 archdb.addTrajectory(None, self.db.trajectories[traj], False)
-                self.db.removeTrajectory(self.db.trajectories[traj])
+                self.db.removeTrajectory(self.db.trajectories[traj], keepFolder=True)
 
         for traj in [t for t in self.db.failed_trajectories if t < archdate_jd]:
             if traj < archdate_jd:
                 archdb.addTrajectory(None, self.db.failed_trajectories[traj], True)
-                self.db.removeTrajectory(self.db.failed_trajectories[traj])
+                self.db.removeTrajectory(self.db.failed_trajectories[traj], keepFolder=True)
 
         for station in self.db.processed_dirs:
             arch_processed = [dirname for dirname in self.db.processed_dirs[station] if 
@@ -1394,7 +1394,7 @@ class RMSDataHandle(object):
         the pickle, because we might later on get new data and it might become solvable. Otherwise, we can just delete the file 
         since the MC solver will have saved an updated one already.
         """
-        if not self.mc_mode != 2:
+        if self.mc_mode != 2:
             return 
         fldr_name = os.path.split(self.generateTrajOutputDirectoryPath(traj, make_dirs=False))[-1] 
         pick = os.path.join(self.phase1_dir, fldr_name + '_trajectory.pickle_processing')
@@ -1644,7 +1644,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     arg_parser.add_argument('--mcmode', '--mcmode', type=int, default=0,
         help="Run just simple soln (1), just monte-carlos (2) or both (0, default).")
 
-    arg_parser.add_argument('--maxtrajs', '--maxtrajs', type=int, default=1000,
+    arg_parser.add_argument('--maxtrajs', '--maxtrajs', type=int, default=None,
         help="Max number of trajectories to reload in each pass when doing the Monte-Carlo phase")
     
     arg_parser.add_argument('--autofreq', '--autofreq', type=int, default=360,
@@ -1803,6 +1803,11 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                 log.info("    END: {:s}".format(str(dt_end)))
 
                 event_time_range = [dt_beg, dt_end]
+            else:
+                # set the timerange to cover all possible dates
+                dt_beg = datetime.datetime(2000,1,1,0,0,0).replace(tzinfo=datetime.timezone.utc)
+                dt_end = datetime.datetime.now().replace(tzinfo=datetime.timezone.utc)
+                event_time_range = [dt_beg, dt_end]
 
         # Init the data handle
         dh = RMSDataHandle(
@@ -1843,9 +1848,8 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                 proc_dir_dt_beg = min(proc_dir_dts)
                 proc_dir_dt_end = max(proc_dir_dts)
                 # Split the processing into daily chunks
-                dt_bins = generateDatetimeBins(proc_dir_dt_beg, proc_dir_dt_end, bin_days=1, 
-                                            tzinfo=datetime.timezone.utc)
-                
+                dt_bins = generateDatetimeBins(proc_dir_dt_beg, proc_dir_dt_end, bin_days=1, tzinfo=datetime.timezone.utc, reverse=True)
+
                 # check if we've created an extra bucket (might happen if requested timeperiod is less than 24h)
                 if event_time_range is not None:
                     if dt_bins[-1][0] > event_time_range[1]: 
