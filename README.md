@@ -59,7 +59,7 @@ We will now install all needed libraries. With the environment activated as desc
 ```
 conda install -y -c conda-forge numpy scipy matplotlib cython pytz pyqt pandas
 conda install -y -c conda-forge jplephem ephem
-conda install -y -c conda-forge watchdog
+conda install -y -c conda-forge watchdog h5py
 conda install -y -c conda-forge numba
 conda install -y -c conda-forge basemap basemap-data-hires
 ```
@@ -110,7 +110,7 @@ The installation might differ on Windows. I recommend installing Anaconda, which
 	conda activate wmpl
 	conda install -y -c conda-forge numpy scipy matplotlib cython pytz pyqt pandas
 	conda install -y -c conda-forge jplephem ephem
-	conda install -y -c conda-forge watchdog
+	conda install -y -c conda-forge watchdog h5py
 	conda install -y -c conda-forge numba
 	conda install -y -c conda-forge basemap basemap-data-hires
 	```

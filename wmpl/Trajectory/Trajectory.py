@@ -35,7 +35,6 @@ from matplotlib.pyplot import cm
 from wmpl.Utils.OSTools import importBasemap
 Basemap = importBasemap()
 
-
 try:
     # If Numba is available, use the jit decorator with specified options
     from numba import njit
@@ -2356,7 +2355,7 @@ def applyGravityDrop(eci_coord, t, r0, gravity_factor, vz):
 
         # Compute the drop using a drop model with a constant vertical velocity
         drop = time_sign*(G*earth_mass/vz**2)*(r0/denominator + np.log(denominator/r0) - 1)
-    
+
 
     # Apply gravity drop to ECI coordinates
     return eci_coord - gravity_factor*drop*vectNorm(eci_coord)
@@ -2552,7 +2551,7 @@ class Trajectory(object):
 
         # Maximum number of Monte Carlo runs, in case the MC runs have to be repeated many times
         self.mc_runs_max = mc_runs_max
-
+    
         # Number of MC samples that will be taken for every point
         self.mc_pick_multiplier = mc_pick_multiplier
 
@@ -2708,6 +2707,9 @@ class Trajectory(object):
         # Initial state vector covariance matrix
         self.state_vect_cov = None
 
+        # flag to indicate whether only phase 1 solving ha been run
+        # default False to handle existing trajectory data
+        self.phase_1_only = False
 
 
     def generateFileName(self):
@@ -2717,7 +2719,7 @@ class Trajectory(object):
 
 
     def infillTrajectory(self, meas1, meas2, time_data, lat, lon, ele, station_id=None, excluded_time=None,
-        ignore_list=None, magnitudes=None, fov_beg=None, fov_end=None, obs_id=None, comment=''):
+        ignore_list=None, magnitudes=None, fov_beg=None, fov_end=None, obs_id=None, comment='', ignore_station=False):
         """ Initialize a set of measurements for a given station. 
     
         Arguments:
@@ -2794,8 +2796,8 @@ class Trajectory(object):
 
 
         # Init a new structure which will contain the observed data from the given site
-        obs = ObservedPoints(self.jdt_ref, meas1, meas2, time_data, lat, lon, ele, station_id=station_id, \
-            meastype=self.meastype, excluded_time=excluded_time, ignore_list=ignore_list, \
+        obs = ObservedPoints(self.jdt_ref, meas1, meas2, time_data, lat, lon, ele, station_id=station_id, 
+            meastype=self.meastype, excluded_time=excluded_time, ignore_list=ignore_list, ignore_station=ignore_station, 
             magnitudes=magnitudes, fov_beg=fov_beg, fov_end=fov_end, obs_id=obs_id, comment=comment)
             
         # Add observations to the total observations list
@@ -2889,7 +2891,7 @@ class Trajectory(object):
         self.infillTrajectory(meas1, meas2, obs.time_data, obs.lat, obs.lon, obs.ele, \
             station_id=obs.station_id, excluded_time=excluded_time, ignore_list=ignore_list, \
             magnitudes=magnitudes, fov_beg=obs.fov_beg, fov_end=obs.fov_end, obs_id=obs.obs_id, \
-            comment=obs.comment)
+            comment=obs.comment, ignore_station=obs.ignore_station)
 
 
 
@@ -4371,8 +4373,11 @@ class Trajectory(object):
                 callable_ci=_formatLongitude))
             out_str += "  Ht MSL   = {:s} m\n".format(valueFormat("{:>11.2f}", self.orbit.ht_ref, \
                 '{:6.2f}', uncertainties, 'ht_ref', deg=False))
-            out_str += "  Ht WGS84 = {:s} m\n".format(valueFormat("{:>11.2f}", self.orbit.ht_ref_wgs84, \
-                '{:6.2f}', uncertainties, 'ht_ref_wgs84', deg=False))
+            try:
+                out_str += "  Ht WGS84 = {:s} m\n".format(valueFormat("{:>11.2f}", self.orbit.ht_ref_wgs84, \
+                    '{:6.2f}', uncertainties, 'ht_ref_wgs84', deg=False))
+            except:
+                pass
             out_str += "  Lat geo = {:s} deg\n".format(valueFormat("{:>11.6f}", self.orbit.lat_geocentric, \
                 '{:6.4f}', uncertainties, 'lat_geocentric', deg=True))
             out_str += "\n"
@@ -4432,8 +4437,11 @@ class Trajectory(object):
                 out_str += "                         +/- {:6.2f} m\n".format(uncertainties.rbeg_lon_m)
         out_str += "  Ht MSL   = {:s} m\n".format(valueFormat("{:>11.2f}", self.rbeg_ele, "{:6.2f}", \
             uncertainties, 'rbeg_ele'))
-        out_str += "  Ht WGS84 = {:s} m\n".format(valueFormat("{:>11.2f}", self.rbeg_ele_wgs84, "{:6.2f}", \
-            uncertainties, 'rbeg_ele_wgs84'))
+        try:
+            out_str += "  Ht WGS84 = {:s} m\n".format(valueFormat("{:>11.2f}", self.rbeg_ele_wgs84, "{:6.2f}", \
+                uncertainties, 'rbeg_ele_wgs84'))
+        except:
+            pass
 
         out_str += "\n"
         out_str += "End point on the trajectory:\n"
@@ -4449,8 +4457,11 @@ class Trajectory(object):
                 out_str += "                         +/- {:6.2f} m\n".format(uncertainties.rend_lon_m)
         out_str += "  Ht MSL   = {:s} m\n".format(valueFormat("{:>11.2f}", self.rend_ele, "{:6.2f}", \
             uncertainties, 'rend_ele'))
-        out_str += "  Ht WGS84 = {:s} m\n".format(valueFormat("{:>11.2f}", self.rend_ele_wgs84, "{:6.2f}", \
-            uncertainties, 'rend_ele_wgs84'))
+        try:
+            out_str += "  Ht WGS84 = {:s} m\n".format(valueFormat("{:>11.2f}", self.rend_ele_wgs84, "{:6.2f}", \
+                uncertainties, 'rend_ele_wgs84'))
+        except:
+            pass
 
         out_str += "\n"
         out_str += "Lowest point on the trajectory:\n"
@@ -4466,8 +4477,11 @@ class Trajectory(object):
                 out_str += "                         +/- {:6.2f} m\n".format(uncertainties.htmin_lon_m)
         out_str += "  Ht MSL   = {:s} m\n".format(valueFormat("{:>11.2f}", self.htmin_ele, "{:6.2f}", \
             uncertainties, 'htmin_ele'))
-        out_str += "  Ht WGS84 = {:s} m\n".format(valueFormat("{:>11.2f}", self.htmin_ele_wgs84, "{:6.2f}", \
-            uncertainties, 'htmin_ele_wgs84'))
+        try:
+            out_str += "  Ht WGS84 = {:s} m\n".format(valueFormat("{:>11.2f}", self.htmin_ele_wgs84, "{:6.2f}", \
+                uncertainties, 'htmin_ele_wgs84'))
+        except:
+            pass
         out_str += "\n"
 
         ### Write information about stations ###
@@ -5385,7 +5399,6 @@ class Trajectory(object):
 
 
         ### Plot lat/lon of the meteor ###
-            
         # Calculate mean latitude and longitude of all meteor points
         met_lon_mean = meanAngle([x for x in obs.meas_lon for obs in self.observations])
         met_lat_mean = meanAngle([x for x in obs.meas_lat for obs in self.observations])
@@ -6366,7 +6379,10 @@ class Trajectory(object):
                 for obs in temp_observations:
                     self.infillWithObs(obs)
 
-                
+                # Reset fixed times to 0, as the timing offsets have already been applied
+                for station in self.fixed_time_offsets:
+                    self.fixed_time_offsets[station] = 0.0
+
                 # Re-run the trajectory estimation with updated timings. This will update all calculated
                 # values up to this point
                 self.run(_rerun_timing=True, _prev_toffsets=self.time_diffs, _orig_obs=_orig_obs)

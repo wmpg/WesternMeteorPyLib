@@ -127,13 +127,13 @@ def computePeakMagHt(traj):
     """ Compute the peak magnitude and peak height. """
 
     # Compute peak magnitude from all stations
-    peak_mags = [np.min(obs.absolute_magnitudes[obs.ignore_list == 0]) for obs in traj.observations \
-        if obs.ignore_station == False]
+    peak_mags = [np.min(obs.absolute_magnitudes[obs.ignore_list == 0]) for obs in traj.observations 
+        if obs.ignore_station is False]
     peak_mag = np.min(peak_mags)
 
     # Compute the peak height
-    peak_ht = [obs.model_ht[np.argmin(obs.absolute_magnitudes[obs.ignore_list == 0])] \
-        for obs in traj.observations if obs.ignore_station == False][np.argmin(peak_mags)]
+    peak_ht = [obs.model_ht[np.argmin(obs.absolute_magnitudes[obs.ignore_list == 0])] 
+        for obs in traj.observations if obs.ignore_station is False][np.argmin(peak_mags)]
 
 
     return peak_mag, peak_ht
@@ -146,7 +146,7 @@ def checkMeteorFOVBegEnd(traj):
 
     # Check if the meteor begins in the FOV of at least one camera
     fov_beg = None
-    fov_beg_list = [obs.fov_beg for obs in traj.observations if (obs.ignore_station == False) \
+    fov_beg_list = [obs.fov_beg for obs in traj.observations if (obs.ignore_station is False) 
         and hasattr(obs, "fov_beg")]
     if len(fov_beg_list) > 0:
         fov_beg = np.any(fov_beg_list)
@@ -154,7 +154,7 @@ def checkMeteorFOVBegEnd(traj):
 
     # Meteor ends inside the FOV
     fov_end = None
-    fov_end_list = [obs.fov_end for obs in traj.observations if (obs.ignore_station == False) \
+    fov_end_list = [obs.fov_end for obs in traj.observations if (obs.ignore_station is False) 
         and hasattr(obs, "fov_end")]
     if len(fov_end_list) > 0:
         fov_end = np.any(fov_end_list)
@@ -211,7 +211,7 @@ def writeOrbitSummaryFile(dir_path, traj_list, traj_summary_file_name=TRAJ_SUMMA
 
     delimiter = "; "
 
-    out_str =  ""
+    out_str = ""
     out_str += "# Summary generated on {:s} UTC\n\r".format(str(datetime.datetime.now(datetime.timezone.utc)))
 
     header = [" Unique trajectory", "     Beginning      ", "       Beginning          ", "  IAU", " IAU", "  Sol lon ", "  App LST ", "  RAgeo  ", "  +/-  ", "  DECgeo ", "  +/-  ", " LAMgeo  ", "  +/-  ", "  BETgeo ", "  +/-  ", "   Vgeo  ", "   +/- ", " LAMhel  ", "  +/-  ", "  BEThel ", "  +/-  ", "   Vhel  ", "   +/- ", "      a    ", "  +/-  ", "     e    ", "  +/-  ", "     i    ", "  +/-  ", "   peri   ", "   +/-  ", "   node   ", "   +/-  ", "    Pi    ", "  +/-  ", "     b    ", "  +/-  ", "     q    ", "  +/-  ", "     f    ", "  +/-  ", "     M    ", "  +/-  ", "      Q    ", "  +/-  ", "     n    ", "  +/-  ", "     T    ", "  +/-  ", "TisserandJ", "  +/-  ", "  RAapp  ", "  +/-  ", "  DECapp ", "  +/-  ", " Azim +E ", "  +/-  ", "   Elev  ", "  +/-  ", "  Vinit  ", "   +/- ", "   Vavg  ", "   +/- ", "   LatBeg   ", "  +/-  ", "   LonBeg   ", "  +/-  ", "  HtBeg ", "  +/-  ", "   LatEnd   ", "  +/-  ", "   LonEnd   ", "  +/-  ", "  HtEnd ", "  +/-  ", "Duration", " Peak ", " Peak Ht", "  F  ", " Mass kg", "  Qc ", "MedianFitErr", "Beg in", "End in", " Num", "     Participating    "]
@@ -337,8 +337,8 @@ def writeOrbitSummaryFile(dir_path, traj_list, traj_summary_file_name=TRAJ_SUMMA
         
         
         # Compute the duration
-        duration = max([np.max(obs.time_data[obs.ignore_list == 0]) for obs in traj.observations \
-            if obs.ignore_station == False])
+        duration = max([np.max(obs.time_data[obs.ignore_list == 0]) for obs in traj.observations 
+            if obs.ignore_station is False])
         
 
         # Compute the peak magnitude and height
@@ -364,7 +364,7 @@ def writeOrbitSummaryFile(dir_path, traj_list, traj_summary_file_name=TRAJ_SUMMA
         line_info.append("{:5.2f}".format(np.degrees(traj.best_conv_inter.conv_angle)))
 
         # Median fit error in arcsec
-        line_info.append("{:12.2f}".format(3600*np.degrees(np.median([obs.ang_res_std for obs \
+        line_info.append("{:12.2f}".format(3600*np.degrees(np.median([obs.ang_res_std for obs 
             in traj.observations if not obs.ignore_station]))))
 
 
@@ -376,8 +376,8 @@ def writeOrbitSummaryFile(dir_path, traj_list, traj_summary_file_name=TRAJ_SUMMA
 
 
         # Participating stations
-        participating_stations = sorted([obs.station_id for obs in traj.observations \
-            if obs.ignore_station == False])
+        participating_stations = sorted([obs.station_id for obs in traj.observations 
+            if obs.ignore_station is False])
         line_info.append("{:>4d}".format(len(participating_stations)))
         line_info.append("{:s}".format(",".join(participating_stations)))
 
@@ -396,10 +396,10 @@ def writeOrbitSummaryFile(dir_path, traj_list, traj_summary_file_name=TRAJ_SUMMA
 
 
 
-def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir, \
-    file_name, density_plot=False, low_density=False, high_density=False, cmap=None, \
-    cmap_reverse=False, plot_showers=False, shower_obj_list=None, show_sol_range=True, sol_range=None, \
-    dt_range=None, import_matplotlib=False):
+def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir, 
+    file_name, density_plot=False, low_density=False, high_density=False, cmap=None, 
+    cmap_reverse=False, plot_showers=False, shower_obj_list=None, show_sol_range=True, sol_range=None, 
+        dt_range=None, import_matplotlib=False):
     """ Plot the given data in Sun-centered ecliptic coordinates.
 
     Arguments:
@@ -524,13 +524,14 @@ def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir, 
         # Rotate all coordinates by 90 deg to make them Sun-centered
         x_data = np.array(x_data)
         y_data = np.array(y_data)
-        lon_corr = (np.degrees(x_data) + 90)%360
+        lon_corr = (np.degrees(x_data) + 90) % 360
 
         # Do a sinus projection
         lon_corr_temp = np.zeros_like(lon_corr)
         lon_corr_temp[lon_corr > 180] = ((180 - lon_corr[lon_corr > 180] + 180)*np.cos(y_data[lon_corr > 180]))
         lon_corr_temp[lon_corr <= 180] = ((180 - lon_corr[lon_corr <= 180] - 180)*np.cos(y_data[lon_corr <= 180]))
         lon_corr = lon_corr_temp
+
 
         # Compute the histogram
         data, _, _ = np.histogram2d(lon_corr, 
@@ -590,11 +591,11 @@ def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir, 
             
             # Generate circle data points
             heading_arr = np.linspace(0, 2*np.pi, 50)
-            bet_arr, lam_arr = sphericalPointFromHeadingAndDistance(bet, lam, heading_arr, \
+            bet_arr, lam_arr = sphericalPointFromHeadingAndDistance(bet, lam, heading_arr, 
                 np.radians(shower_radius))
 
             # If the circle is on the 90 deg boundary, split the arrays into two parts
-            lam_arr_check = (lam_arr - np.radians(270))%(2*np.pi)
+            lam_arr_check = (lam_arr - np.radians(270)) % (2*np.pi)
             if np.any(lam_arr_check < np.pi) and np.any(lam_arr_check >= np.pi):
 
                 temp_arr = np.c_[lam_arr, bet_arr]
@@ -624,7 +625,7 @@ def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir, 
             # The name orientation is determined by the quadrant, so all names "radiate" from the 
             #   centre of the plot
             heading = 0
-            lam_check = (lam - np.radians(270))%(2*np.pi)
+            lam_check = (lam - np.radians(270)) % (2*np.pi)
             va = 'top'
             if lam_check < np.pi:
                 ha = 'right'
@@ -642,7 +643,7 @@ def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir, 
                     heading = 3*np.pi/4
 
             # Get the shower name location
-            bet_txt, lam_txt = sphericalPointFromHeadingAndDistance(bet, lam, heading, \
+            bet_txt, lam_txt = sphericalPointFromHeadingAndDistance(bet, lam, heading, 
                 np.radians(shower_radius))
 
             # Plot the shower name
@@ -672,9 +673,9 @@ def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir, 
         #     + u"\n$\lambda_{\u2609 max} =$" + u"{:>5.2f}\u00b0".format(sol_max), \
         #     xy=(0, 1), xycoords='axes fraction', color='w', size=12, family='monospace')
         plt.annotate(
-              u"Sol min = {:>6.2f}\u00b0 ({:s})\n".format(sol_min, dt_min.strftime("%Y/%m/%d %H:%M")) \
+            u"Sol min = {:>6.2f}\u00b0 ({:s})\n".format(sol_min, dt_min.strftime("%Y/%m/%d %H:%M"))
             + u"Sol max = {:>6.2f}\u00b0 ({:s})\n".format(sol_max, dt_max.strftime("%Y/%m/%d %H:%M"))
-            +  "Count = {:d}".format(len(x_data)), \
+            + "Count = {:d}".format(len(x_data)),
             xy=(0, 1), xycoords='axes fraction', color='w', size=10, family='monospace')
 
 
@@ -684,7 +685,7 @@ def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir, 
         # Manually adjust the plot
         plt.subplots_adjust(left=0.01, right=0.99, top=0.99, bottom=0.01)
 
-    plt.savefig(os.path.join(output_dir, file_name), dpi=100, facecolor=fig.get_facecolor(), \
+    plt.savefig(os.path.join(output_dir, file_name), dpi=100, facecolor=fig.get_facecolor(), 
         edgecolor='none')
 
     plt.close()
@@ -693,8 +694,8 @@ def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir, 
 
 
 
-def generateTrajectoryPlots(output_dir, traj_list, plot_name='scecliptic', plot_vg=True, plot_sol=True, \
-    plot_density=True, low_density=False, plot_showers=False, time_limited_plot=False):
+def generateTrajectoryPlots(output_dir, traj_list, plot_name='scecliptic', plot_vg=True, plot_sol=True, 
+        plot_density=True, low_density=False, plot_showers=False, time_limited_plot=False):
     """ Given a path with trajectory .pickle files, generate orbits plots. 
     
     Arguments:
@@ -713,6 +714,7 @@ def generateTrajectoryPlots(output_dir, traj_list, plot_name='scecliptic', plot_
             If True, this will disable the sol and time text on the image.
     """
 
+    mkdirP(output_dir)
 
 
     ### Plot Sun-centered geocentric ecliptic plots ###
@@ -780,9 +782,8 @@ def generateTrajectoryPlots(output_dir, traj_list, plot_name='scecliptic', plot_
             # Compute the maximum dispersion (replace with PLOT_SHOWER_RADIUS if None)
             # The maximum is chosen so it encompasses all the members of the shower in the plot
             dispersion_max = np.max(
-                [np.radians(PLOT_SHOWER_RADIUS) if sh.dispersion is None else sh.dispersion \
-                for sh in shower_obj_dict[shower_no]]
-                )
+                [np.radians(PLOT_SHOWER_RADIUS) if sh.dispersion is None else sh.dispersion 
+                for sh in shower_obj_dict[shower_no]])
 
             # Init a new shower object
             shower_obj_mean = MeteorShower(la_sun_mean, L_g_mean, B_g_mean, v_g_mean, shower_no, 
@@ -805,17 +806,17 @@ def generateTrajectoryPlots(output_dir, traj_list, plot_name='scecliptic', plot_
     # Plot SCE vs Vg
     if plot_vg:
         plotSCE(lambda_list, beta_list, vg_list, 
-            "Sun-centered geocentric ecliptic coordinates", "$V_g$ (km/s)", output_dir, plot_name + "_vg.png", \
-            shower_obj_list=shower_obj_list, plot_showers=plot_showers, show_sol_range=time_limited_plot, \
+            "Sun-centered geocentric ecliptic coordinates", "$V_g$ (km/s)", output_dir, plot_name + "_vg.png", 
+            shower_obj_list=shower_obj_list, plot_showers=plot_showers, show_sol_range=time_limited_plot, 
             sol_range=(sol_min, sol_max), dt_range=(dt_min, dt_max))
 
 
     # Plot SCE vs Sol
     if plot_sol:
-        plotSCE(lambda_list, beta_list, sol_list, \
-            "Sun-centered geocentric ecliptic coordinates", "Solar longitude (deg)", output_dir, \
-            plot_name + "_sol.png", shower_obj_list=shower_obj_list, plot_showers=plot_showers, \
-            show_sol_range=time_limited_plot, sol_range=(sol_min, sol_max), \
+        plotSCE(lambda_list, beta_list, sol_list, 
+            "Sun-centered geocentric ecliptic coordinates", "Solar longitude (deg)", output_dir, 
+            plot_name + "_sol.png", shower_obj_list=shower_obj_list, plot_showers=plot_showers, 
+            show_sol_range=time_limited_plot, sol_range=(sol_min, sol_max), 
             dt_range=(dt_min, dt_max))
     
 
@@ -823,9 +824,9 @@ def generateTrajectoryPlots(output_dir, traj_list, plot_name='scecliptic', plot_
     # Plot SCE orbit density
     if plot_density:
         plotSCE(lambda_list, beta_list, None, 
-            "Sun-centered geocentric ecliptic coordinates", "Count", output_dir, plot_name + "_density.png", \
+            "Sun-centered geocentric ecliptic coordinates", "Count", output_dir, plot_name + "_density.png", 
             density_plot=True, low_density=low_density, shower_obj_list=shower_obj_list, 
-            plot_showers=plot_showers, show_sol_range=time_limited_plot, sol_range=(sol_min, sol_max), \
+            plot_showers=plot_showers, show_sol_range=time_limited_plot, sol_range=(sol_min, sol_max), 
             dt_range=(dt_min, dt_max))
 
 
@@ -936,8 +937,7 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, max_radiant_err=0.5
     for i, traj in enumerate(traj_list):
 
         if traj.uncertainties is not None:
-            if np.degrees(np.hypot(np.cos(traj.orbit.dec_g)*traj.uncertainties.ra_g, \
-                traj.uncertainties.dec_g)) > max_radiant_err:
+            if np.degrees(np.hypot(np.cos(traj.orbit.dec_g)*traj.uncertainties.ra_g, traj.uncertainties.dec_g)) > max_radiant_err:
 
                 reject_indices.append(i)
 
@@ -966,12 +966,11 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, max_radiant_err=0.5
 
 
     # Extract all data
-    ht_beg_all  = np.array([traj.rbeg_ele for i, traj in enumerate(traj_list) if i not in reject_indices])
-    ht_end_all  = np.array([traj.rend_ele for i, traj in enumerate(traj_list) if i not in reject_indices])
-    v_g_all     = np.array([traj.orbit.v_g for i, traj in enumerate(traj_list) if i not in reject_indices])
-    tj_all      = np.array([traj.orbit.Tj for i, traj in enumerate(traj_list) if i not in reject_indices])
-    ht_max_all  = np.array([computePeakMagHt(traj)[1] for i, traj in enumerate(traj_list) \
-        if i not in reject_indices])
+    ht_beg_all = np.array([traj.rbeg_ele for i, traj in enumerate(traj_list) if i not in reject_indices])      # noqa: E221
+    ht_end_all = np.array([traj.rend_ele for i, traj in enumerate(traj_list) if i not in reject_indices])      # noqa: E221
+    v_g_all    = np.array([traj.orbit.v_g for i, traj in enumerate(traj_list) if i not in reject_indices])     # noqa: E221
+    tj_all     = np.array([traj.orbit.Tj for i, traj in enumerate(traj_list) if i not in reject_indices])      # noqa: E221
+    ht_max_all = np.array([computePeakMagHt(traj)[1] for i, traj in enumerate(traj_list) if i not in reject_indices]) 
 
 
     # Generate shower plots
@@ -992,7 +991,7 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, max_radiant_err=0.5
 
 
         # Init the plot
-        fig, ((ax_rad, ax_radnodrift, ax_rayleigh), (ax_mass, ax_ht, ax_tj)) = plt.subplots(nrows=2, ncols=3,\
+        fig, ((ax_rad, ax_radnodrift, ax_rayleigh), (ax_mass, ax_ht, ax_tj)) = plt.subplots(nrows=2, ncols=3,
             figsize=(10, 6))
 
 
@@ -1004,21 +1003,24 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, max_radiant_err=0.5
         sol_data = np.array([traj.orbit.la_sun for traj in shower_trajs])
         lam_data = np.array([traj.orbit.L_g for traj in shower_trajs])
         bet_data = np.array([traj.orbit.B_g for traj in shower_trajs])
-        lam_sol_data = (lam_data - sol_data)%(2*np.pi)
+        lam_sol_data = (lam_data - sol_data) % (2*np.pi)
 
         # Get the errors
-        lam_err = np.array([traj.uncertainties.L_g for traj in shower_trajs])
-        bet_err = np.array([traj.uncertainties.B_g for traj in shower_trajs])
-
+        if traj.uncertainties is not None:
+            lam_err = np.array([traj.uncertainties.L_g for traj in shower_trajs])
+            bet_err = np.array([traj.uncertainties.B_g for traj in shower_trajs])
+        else:
+            lam_err = np.array([1 for traj in shower_trajs])
+            bet_err = np.array([1 for traj in shower_trajs])
         # Compute masses (only take trajectories which are completely inside the FOV, otherwise set the 
         #   mass to None)
-        mass_data = np.array([computeMass(traj, P_0m) if all(checkMeteorFOVBegEnd(traj)) else None \
+        mass_data = np.array([computeMass(traj, P_0m) if all(checkMeteorFOVBegEnd(traj)) else None 
             for traj in shower_trajs])
 
         # Begin/end/peak heights and initial velocities
         ht_beg_shower = np.array([traj.rbeg_ele for traj in shower_trajs])
         ht_end_shower = np.array([traj.rend_ele for traj in shower_trajs])
-        ht_max_shower = np.array([computePeakMagHt(traj)[1] if all(checkMeteorFOVBegEnd(traj)) else None \
+        ht_max_shower = np.array([computePeakMagHt(traj)[1] if all(checkMeteorFOVBegEnd(traj)) else None 
             for traj in shower_trajs])
         v_g_shower = np.array([traj.orbit.v_g for traj in shower_trajs])
 
@@ -1032,12 +1034,12 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, max_radiant_err=0.5
 
         def circleXYLineFunc(x, m, k):
             """ Fit a line through circular data, both X and Y. """
-            return (m*x%(2*np.pi) + k)%(2*np.pi)
+            return (m*x % (2*np.pi) + k) % (2*np.pi)
 
 
         def circleXLineFunc(x, m, k):
             """ Fit a line through circular data, only X. """
-            return m*x%(2*np.pi) + k
+            return m*x % (2*np.pi) + k
 
 
         ###
@@ -1065,7 +1067,7 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, max_radiant_err=0.5
             
 
             # Compute distances from the drift-corrected mean radiant
-            rad_dists = np.array([angleBetweenSphericalCoords(0.0, 0.0, bet_nodrift, lam_sol_nodrift) \
+            rad_dists = np.array([angleBetweenSphericalCoords(0.0, 0.0, bet_nodrift, lam_sol_nodrift) 
                 for lam_sol_nodrift, bet_nodrift in zip(lam_sol_data_nodrift, bet_data_nodrift)])
 
             # Fit a Rayleigh distribution to radiant distances and get the standard deviation
@@ -1078,27 +1080,27 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, max_radiant_err=0.5
                 break
 
             # Reject all showers outside 3 standard deviations
-            filter_indices      = rad_dists < 3*ray_std
-            sol_data            = sol_data[filter_indices]
-            lam_data            = lam_data[filter_indices]
-            bet_data            = bet_data[filter_indices]
-            lam_sol_data        = lam_sol_data[filter_indices]
+            filter_indices      = rad_dists < 3*ray_std         # noqa: E221
+            sol_data            = sol_data[filter_indices]      # noqa: E221
+            lam_data            = lam_data[filter_indices]      # noqa: E221
+            bet_data            = bet_data[filter_indices]      # noqa: E221
+            lam_sol_data        = lam_sol_data[filter_indices]  # noqa: E221
             lam_sol_data_nodrift = lam_sol_data_nodrift[filter_indices]
-            bet_data_nodrift    = bet_data_nodrift[filter_indices]
-            lam_err             = lam_err[filter_indices]
-            bet_err             = bet_err[filter_indices]
-            mass_data           = mass_data[filter_indices]
-            ht_beg_shower       = ht_beg_shower[filter_indices]
-            ht_end_shower       = ht_end_shower[filter_indices]
-            ht_max_shower       = ht_max_shower[filter_indices]
-            v_g_shower          = v_g_shower[filter_indices]
-            tj_shower           = tj_shower[filter_indices]
+            bet_data_nodrift    = bet_data_nodrift[filter_indices]  # noqa: E221
+            lam_err             = lam_err[filter_indices]   # noqa: E221
+            bet_err             = bet_err[filter_indices]   # noqa: E221
+            mass_data           = mass_data[filter_indices] # noqa: E221
+            ht_beg_shower       = ht_beg_shower[filter_indices] # noqa: E221
+            ht_end_shower       = ht_end_shower[filter_indices] # noqa: E221
+            ht_max_shower       = ht_max_shower[filter_indices] # noqa: E221
+            v_g_shower          = v_g_shower[filter_indices]    # noqa: E221
+            tj_shower           = tj_shower[filter_indices] # noqa: E221
 
             ##
 
 
         # Compute mean radiant values
-        lam_sol_avg = meanAngle(lam_sol_data)%(2*np.pi)
+        lam_sol_avg = meanAngle(lam_sol_data) % (2*np.pi)
         bet_avg = np.mean(bet_data)
 
 
@@ -1108,15 +1110,15 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, max_radiant_err=0.5
 
         ### Plot the radiants (no drift correction) ###
 
-        cp = CelestialPlot(lam_sol_data, bet_data, projection="stere", ax=ax_rad, bgcolor='w', \
+        cp = CelestialPlot(lam_sol_data, bet_data, projection="stere", ax=ax_rad, bgcolor='w', 
             tick_text_size=label_text_size)
         cp.scatter(lam_sol_data, bet_data, c='k', s=1)
 
 
         # Plot the mean radiant
-        cp.scatter([lam_sol_avg], [bet_avg], c='red', marker='x', alpha=0.5, s=20, \
-            label="Mean $\\lambda_{g} - \\lambda_{\\odot} = $" \
-                + "{:.2f}$^\\circ$".format(np.degrees(lam_sol_avg)) \
+        cp.scatter([lam_sol_avg], [bet_avg], c='red', marker='x', alpha=0.5, s=20, 
+            label="Mean $\\lambda_{g} - \\lambda_{\\odot} = $" 
+                + "{:.2f}$^\\circ$".format(np.degrees(lam_sol_avg)) 
                 + "\nMean $B_g = $" + "{:.2f}$^\\circ$".format(np.degrees(bet_avg)))
         
         ax_rad.legend(prop={'size': label_text_size}, loc='upper left')
@@ -1132,16 +1134,15 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, max_radiant_err=0.5
 
 
         # Plot the errors (scale the X error by the cos of the latitude)
-        ax_radnodrift.errorbar(np.degrees(lam_sol_data_nodrift), np.degrees(bet_data_nodrift), \
-            xerr=np.degrees(lam_err)*np.cos(bet_data), yerr=np.degrees(bet_err), color='k', ms=0.5, fmt="o", \
-            zorder=3, elinewidth=0.5, \
-            label="Drift $\\lambda_{g} - \\lambda_{\\odot} = $" \
-                + "{:.3f}".format(lam_sol_drift_params[0]) \
-                + "\nDrift $B_g = $" + "{:.3f}".format(bet_drift_params[0]))
+        ax_radnodrift.errorbar(np.degrees(lam_sol_data_nodrift), np.degrees(bet_data_nodrift), 
+            xerr=np.degrees(lam_err)*np.cos(bet_data), yerr=np.degrees(bet_err), color='k', ms=0.5, fmt="o", 
+            zorder=3, elinewidth=0.5, 
+            label="Drift $\\lambda_{g} - \\lambda_{\\odot} = $" + f"{lam_sol_drift_params[0]:.3f}\nDrift $B_g = ${bet_drift_params[0]:.3f}" 
+        )
             
         ax_radnodrift.legend(prop={'size': label_text_size}, loc='upper left')
 
-        ax_radnodrift.set_xlabel("$(\\lambda_g - \\lambda_{\\odot}) - (\\lambda_g - \\lambda_{\\odot})'$", \
+        ax_radnodrift.set_xlabel("$(\\lambda_g - \\lambda_{\\odot}) - (\\lambda_g - \\lambda_{\\odot})'$", 
             fontsize=label_text_size)
         ax_radnodrift.set_ylabel("$\\beta_g - \\beta'_g$", fontsize=label_text_size)
 
@@ -1204,7 +1205,7 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, max_radiant_err=0.5
 
         # Plot the histogram of radiant distances
         nbins = int(np.sqrt(len(rad_dists))) if len(rad_dists) > 100 else 10
-        _, bins, _ = ax_rayleigh.hist(np.degrees(rad_dists), density=True, bins=nbins, histtype='step', \
+        _, bins, _ = ax_rayleigh.hist(np.degrees(rad_dists), density=True, bins=nbins, histtype='step', 
             color='0.5', label="Data")
 
         # # Get angular residuals that are above and below the median mass
@@ -1233,7 +1234,7 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, max_radiant_err=0.5
         y_min, y_max = ax_rayleigh.get_ylim()
         y_arr = np.linspace(y_min, y_max, 10)
         ax_rayleigh.plot(np.degrees(rad_dists_median) + np.zeros_like(y_arr), y_arr, linestyle='dashed', 
-            linewidth=0.5, color='k', zorder=3, \
+            linewidth=0.5, color='k', zorder=3, 
             label="Median deviation = {:.2}".format(np.degrees(rad_dists_median)) + "$^{\\circ}$")
 
 
@@ -1256,7 +1257,7 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, max_radiant_err=0.5
         ### Plot the mass distribution ###
 
         # Plot the cumulative distribution
-        ax_mass.hist(np.log10(mass_data_filt), bins=len(mass_data_filt), cumulative=-1, \
+        ax_mass.hist(np.log10(mass_data_filt), bins=len(mass_data_filt), cumulative=-1, 
             density=True, log=True, histtype='step', color='k', zorder=4)
 
 
@@ -1266,8 +1267,8 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, max_radiant_err=0.5
 
 
         # Plot the tangential line with the slope
-        ax_mass.plot(sign*x_arr, logline(-x_arr, slope, intercept), color='r', \
-            label="s = {:.2f} \nKS test D = {:.3f} \nKS test p-value = {:.3f}".format(\
+        ax_mass.plot(sign*x_arr, logline(-x_arr, slope, intercept), color='r', 
+            label="s = {:.2f} \nKS test D = {:.3f} \nKS test p-value = {:.3f}".format(
                 slope_report, kstest.statistic, kstest.pvalue), zorder=5)
 
         ax_mass.legend(prop={'size': label_text_size}, loc='lower left')
@@ -1297,7 +1298,7 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, max_radiant_err=0.5
         ax_ht.scatter(v_g_all/1000, ht_end_all/1000, s=0.1, c='k', alpha=0.2, zorder=3)
 
         # Plot begin and end heights of shower meteors
-        ax_ht.scatter(v_g_shower/1000, ht_beg_shower/1000, s=0.5, c='r', alpha=0.25, label='Begin', \
+        ax_ht.scatter(v_g_shower/1000, ht_beg_shower/1000, s=0.5, c='r', alpha=0.25, label='Begin', 
             zorder=4)
         ax_ht.scatter(v_g_shower/1000, ht_end_shower/1000, s=0.5, c='b', alpha=0.25, label='End', zorder=4)
 
@@ -1332,7 +1333,7 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, max_radiant_err=0.5
 
 
         # Plot the shower data
-        ax_tj.scatter(tj_shower_filter, ht_max_shower_filter/1000, s=0.5, c='r', alpha=0.5, \
+        ax_tj.scatter(tj_shower_filter, ht_max_shower_filter/1000, s=0.5, c='r', alpha=0.5, 
             zorder=4)
 
 
@@ -1396,7 +1397,7 @@ def checkTrajDirInTimeRange(dir_name, time_beg, time_end):
     """
 
     # Extract the name of the trajectory folder
-    traj_dir_name =  os.path.basename(os.path.normpath(dir_name))
+    traj_dir_name = os.path.basename(os.path.normpath(dir_name))
 
     traj_dir_split = traj_dir_name.split("_")
 
@@ -1409,7 +1410,7 @@ def checkTrajDirInTimeRange(dir_name, time_beg, time_end):
         traj_time = traj_dir_split[1]
 
         try:
-            traj_dt = datetime.datetime.strptime("{:s}-{:s}".format(traj_date, traj_time), \
+            traj_dt = datetime.datetime.strptime("{:s}-{:s}".format(traj_date, traj_time), 
                 "%Y%m%d-%H%M%S.%f")
         except:
             return None
@@ -1421,8 +1422,8 @@ def checkTrajDirInTimeRange(dir_name, time_beg, time_end):
     return True
 
 
-def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end=None, verbose=False, \
-    filter_duplicates=True, walk_rms_traj_dirs=False, walk_dirs_all=None):
+def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end=None, verbose=False, 
+        filter_duplicates=True, walk_rms_traj_dirs=False, walk_dirs_all=None):
     """ Load trajectory pickle files with the given quality constraints and in the given time range. 
     
     Arguments:
@@ -1488,7 +1489,7 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
 
         traj_dir_path, dir_list, file_names = entry
 
-        # If talking through RMS standard directories, the trajectory directories MUST satisfy the timestamp
+        # If walking through RMS standard directories, the trajectory directories MUST satisfy the timestamp
         #   format, and that has already been checked
         time_read_failed_dir = False
         if not walk_rms_traj_dirs:
@@ -1525,11 +1526,12 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
                     traj_time = file_name_split[1]
 
                     try:
-                        traj_dt = datetime.datetime.strptime("{:s}-{:s}".format(traj_date, traj_time), \
+                        traj_dt = datetime.datetime.strptime("{:s}-{:s}".format(traj_date, traj_time), 
                             "%Y%m%d-%H%M%S")
 
                         # Test the time range
                         if not inTimeRange(traj_dt, time_beg, time_end):
+                            print(f'skipping {file_name} as not in range...')
                             continue
 
                     except:
@@ -1544,7 +1546,7 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
                     traj = loadPickle(traj_dir_path, file_name)
 
                 except:
-                    print("Error opening trajectory file: {:s}".format(traj_dir_path, file_name))
+                    print("Error opening trajectory file: {:s}".format(os.path.join(traj_dir_path, file_name)))
                     continue
 
                 # If reading the time from the file name has failed, read it from the pickle
@@ -1555,6 +1557,8 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
 
                     # Test the time range
                     if not inTimeRange(traj_dt, time_beg, time_end):
+                        if verbose:
+                            print(f'skipping {file_name} as not in range...')
                         continue
 
 
@@ -1562,7 +1566,7 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
 
                 # Print loading progress
                 if verbose:
-                    if loaded_trajs_count%1000 == 0:
+                    if loaded_trajs_count % 1000 == 0:
                         print("Loaded {:d} trajectories...".format(loaded_trajs_count))
 
 
@@ -1619,21 +1623,26 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
                 
                 # Skip those with no orbit solution
                 if traj.orbit.ra_g is None:
+                    if verbose:
+                        print(f"Skipping {file_name} as no orbit solution...")
                     continue
 
 
                 ### MINIMUM POINTS
                 ### Reject all trajectories with small number of used points ###
-                points_count = [len(obs.time_data[obs.ignore_list == 0]) for obs in traj.observations \
-                    if obs.ignore_station == False]
+                points_count = [len(obs.time_data[obs.ignore_list == 0]) for obs in traj.observations 
+                    if obs.ignore_station is False]
 
                 if not points_count:
+                    if verbose:
+                        print(f'skipping {file_name}, no points in this solution...')
                     continue
 
                 max_points = max(points_count)
 
                 if max_points < traj_quality_params.min_traj_points:
-                    # print("Skipping {:.2f} due to the small number of points...".format(traj.jdt_ref))
+                    if verbose:
+                        print(f"Skipping {file_name} due to the small number of points...")
                     continue
 
                 ###
@@ -1643,7 +1652,8 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
                 ### Reject all trajectories with a too small convergence angle ###
 
                 if np.degrees(traj.best_conv_inter.conv_angle) < traj_quality_params.min_qc:
-                    # print("Skipping {:.2f} due to the small convergence angle...".format(traj.jdt_ref))
+                    if verbose:
+                        print(f"Skipping {file_name} due to the small convergence angle...")
                     continue
 
                 ###
@@ -1652,6 +1662,8 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
                 ### MAXIMUM ECCENTRICITY ###
 
                 if traj.orbit.e > traj_quality_params.max_e:
+                    if verbose:
+                        print(f"Skipping {file_name} due to excessive eccentricity...")
                     continue
 
                 ###
@@ -1660,9 +1672,10 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
                 ### MAXIMUM RADIANT ERROR ###
 
                 if traj.uncertainties is not None:
-                    if np.degrees(np.hypot(np.cos(traj.orbit.dec_g)*traj.uncertainties.ra_g, \
-                        traj.uncertainties.dec_g)) > traj_quality_params.max_radiant_err:
-
+                    if np.degrees(np.hypot(np.cos(traj.orbit.dec_g)*traj.uncertainties.ra_g, 
+                            traj.uncertainties.dec_g)) > traj_quality_params.max_radiant_err:
+                        if verbose:
+                            print(f"Skipping {file_name} due to excessive radiant error...")
                         continue
 
 
@@ -1671,6 +1684,8 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
 
                 if traj.uncertainties is not None:
                     if traj.uncertainties.v_g > traj.orbit.v_g*traj_quality_params.max_vg_err/100:
+                        if verbose:
+                            print(f"Skipping {file_name} due to excessive velocity error...")
                         continue
 
                 ###
@@ -1679,9 +1694,13 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
                 ### HEIGHT FILTER ###
 
                 if traj.rbeg_ele/1000 > traj_quality_params.max_begin_ht:
+                    if verbose:
+                        print(f"Skipping {file_name} due to high start height...")
                     continue
 
                 if traj.rend_ele/1000 < traj_quality_params.min_end_ht:
+                    if verbose:
+                        print(f"Skipping {file_name} due to low end height...")
                     continue
 
                 ###
@@ -1719,8 +1738,7 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
                 if traj1.jdt_ref == traj2.jdt_ref:
 
                     # Check if they have the same stations
-                    if set([obs.station_id for obs in traj1.observations]) \
-                        == set([obs.station_id for obs in traj2.observations]):
+                    if set([obs.station_id for obs in traj1.observations]) == set([obs.station_id for obs in traj2.observations]):
 
                         # If the duplicate has a smaller radiant error, take it instead of the first
                         #   trajectory
@@ -1731,9 +1749,9 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
                                 if traj2.uncertainties is not None:
 
                                     # Compute the radiant errors
-                                    traj1_rad_error = np.hypot(traj1.uncertainties.ra_g, \
+                                    traj1_rad_error = np.hypot(traj1.uncertainties.ra_g, 
                                         traj1.uncertainties.dec_g)
-                                    traj2_rad_error = np.hypot(traj2.uncertainties.ra_g, \
+                                    traj2_rad_error = np.hypot(traj2.uncertainties.ra_g, 
                                         traj2.uncertainties.dec_g)
 
                                     # Take the second candidate if the radiant error is smaller
@@ -1767,8 +1785,7 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
 
 def generateAutoPlotsAndReports(
         dir_path, traj_quality_params, 
-        prev_sols=10, sol_window=1, output_dir=None, skip_plots=False
-        ):
+        prev_sols=10, sol_window=1, output_dir=None, skip_plots=False):
     """ Auto generate plots per degree of solar longitude and put them in the AUTO_OUTPUT_DATA_DIR that is 
         in the parent directory of dir_path. 
     
@@ -1793,17 +1810,17 @@ def generateAutoPlotsAndReports(
 
     # Make the plots directory
     if not skip_plots:
-        plots_dir         = os.path.join(output_dir, AUTO_OUTPUT_PLOT_DIR)
-        plots_daily_dir   = os.path.join(plots_dir,  AUTO_OUTPUT_DAILY_DIR)
-        plots_monthly_dir = os.path.join(plots_dir,  AUTO_OUTPUT_MONTHLY_DIR)
+        plots_dir         = os.path.join(output_dir, AUTO_OUTPUT_PLOT_DIR)      # noqa: E221
+        plots_daily_dir   = os.path.join(plots_dir, AUTO_OUTPUT_DAILY_DIR)      # noqa: E221
+        plots_monthly_dir = os.path.join(plots_dir, AUTO_OUTPUT_MONTHLY_DIR)    # noqa: E221
         mkdirP(plots_dir)
         mkdirP(plots_daily_dir)
         mkdirP(plots_monthly_dir)
 
     # Make the trajectory summary directory
-    summary_dir         = os.path.join(output_dir,  AUTO_OUTPUT_SUMMARY_DIR)
-    summary_daily_dir   = os.path.join(summary_dir, AUTO_OUTPUT_DAILY_DIR)
-    summary_monthly_dir = os.path.join(summary_dir, AUTO_OUTPUT_MONTHLY_DIR)
+    summary_dir         = os.path.join(output_dir, AUTO_OUTPUT_SUMMARY_DIR)     # noqa: E221
+    summary_daily_dir   = os.path.join(summary_dir, AUTO_OUTPUT_DAILY_DIR)      # noqa: E221
+    summary_monthly_dir = os.path.join(summary_dir, AUTO_OUTPUT_MONTHLY_DIR)    # noqa: E221
     mkdirP(summary_dir)
     mkdirP(summary_daily_dir)
     mkdirP(summary_monthly_dir)
@@ -1828,20 +1845,20 @@ def generateAutoPlotsAndReports(
     yesterday_summary_file = None
     for sol_decrement in range(prev_sols):
 
-        sol_lon_end = (sol_lon_next - sol_decrement)%360
-        sol_lon_beg = (sol_lon_end - sol_window)%360
+        sol_lon_end = (sol_lon_next - sol_decrement) % 360
+        sol_lon_beg = (sol_lon_end - sol_window) % 360
 
         # Compute beg/end dates from solar longitudes
         time_end_est = time_now - datetime.timedelta(days=sol_decrement*365.25/360.0)
-        time_end = jd2Date(solLon2jdSteyaert(time_end_est.year, time_end_est.month, \
+        time_end = jd2Date(solLon2jdSteyaert(time_end_est.year, time_end_est.month, 
             np.radians(sol_lon_end)), dt_obj=True)
         time_beg_est = time_end_est - datetime.timedelta(days=sol_window)
-        time_beg = jd2Date(solLon2jdSteyaert(time_beg_est.year, time_beg_est.month, \
+        time_beg = jd2Date(solLon2jdSteyaert(time_beg_est.year, time_beg_est.month, 
             np.radians(sol_lon_beg)), dt_obj=True)
 
 
         # Load all trajectories within the given time range
-        traj_list = loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=time_beg, \
+        traj_list = loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=time_beg, 
             time_end=time_end, verbose=True, walk_rms_traj_dirs=True, walk_dirs_all=walk_dirs_all)
 
 
@@ -1854,10 +1871,10 @@ def generateAutoPlotsAndReports(
         if not skip_plots:
 
             # Plot graphs per solar longitude
-            plot_name = "scecliptic_{:4d}{:02d}{:02d}_solrange_{:05.1f}-{:05.1f}".format(time_beg.year, \
+            plot_name = "scecliptic_{:4d}{:02d}{:02d}_solrange_{:05.1f}-{:05.1f}".format(time_beg.year, 
                 time_beg.month, time_beg.day, sol_lon_beg, sol_lon_end)
             print("Plotting sol range {:05.1f}-{:05.1f}...".format(sol_lon_beg, sol_lon_end))
-            generateTrajectoryPlots(plots_daily_dir, traj_list, plot_name=plot_name, plot_sol=False, \
+            generateTrajectoryPlots(plots_daily_dir, traj_list, plot_name=plot_name, plot_sol=False, 
                 plot_showers=True, time_limited_plot=True, low_density=True)
 
             # Store the most recent plot
@@ -1871,7 +1888,7 @@ def generateAutoPlotsAndReports(
 
 
         # Write the trajectory summary
-        summary_name = "traj_summary_{:4d}{:02d}{:02d}_solrange_{:05.1f}-{:05.1f}.txt".format(time_beg.year, \
+        summary_name = "traj_summary_{:4d}{:02d}{:02d}_solrange_{:05.1f}-{:05.1f}.txt".format(time_beg.year, 
             time_beg.month, time_beg.day, sol_lon_beg, sol_lon_end)
         writeOrbitSummaryFile(summary_daily_dir, traj_list, summary_name)
 
@@ -1891,13 +1908,13 @@ def generateAutoPlotsAndReports(
     ### Generate monthly plots ###
 
     month_dt_beg_est = time_now - datetime.timedelta(days=prev_sols*365.25/360.0)
-    month_dt_beg = jd2Date(solLon2jdSteyaert(month_dt_beg_est.year, month_dt_beg_est.month, \
+    month_dt_beg = jd2Date(solLon2jdSteyaert(month_dt_beg_est.year, month_dt_beg_est.month, 
             np.radians(sol_lon_end)), dt_obj=True)
     month_dt_end = time_now
 
     # Generate pairs of datetimes with edges as the beginning/end of each month which fully encompasses
     #   the given range of times
-    monthly_bins =  generateMonthyTimeBins(month_dt_beg, month_dt_end)
+    monthly_bins = generateMonthyTimeBins(month_dt_beg, month_dt_end)
 
     # Plot data and create trajectory summaries for monthly bins
     latest_monthly_plot_file = None
@@ -1905,7 +1922,7 @@ def generateAutoPlotsAndReports(
     for dt_beg, dt_end in monthly_bins:
 
         # Load all trajectories within the given time range
-        traj_list = loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=dt_beg, \
+        traj_list = loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=dt_beg, 
             time_end=dt_end, verbose=True, walk_rms_traj_dirs=True, walk_dirs_all=walk_dirs_all)
 
 
@@ -1920,7 +1937,7 @@ def generateAutoPlotsAndReports(
             # Plot graphs per month
             plot_name = "scecliptic_monthly_{:4d}{:02d}".format(dt_beg.year, dt_beg.month)
             print("Plotting month: {:s}".format(dt_beg.strftime("%B %Y")))
-            generateTrajectoryPlots(plots_monthly_dir, traj_list, plot_name=plot_name, plot_sol=False, \
+            generateTrajectoryPlots(plots_monthly_dir, traj_list, plot_name=plot_name, plot_sol=False, 
                 plot_showers=True, time_limited_plot=True, low_density=False)
 
 
@@ -1970,8 +1987,7 @@ def generateAutoPlotsAndReports(
         with open(os.path.join(summary_dir, traj_summary_year_temp), 'w') as f_year:
 
             f_year.write("# Summary generated on {:s} UTC\n\r".format(
-                str(datetime.datetime.now(datetime.timezone.utc)))
-                )
+                str(datetime.datetime.now(datetime.timezone.utc))))
 
             # Find all monthly trajectory reports
             header_written = False
@@ -2002,7 +2018,7 @@ def generateAutoPlotsAndReports(
         # Change the name of the temp file to the summary file
         if os.path.isfile(os.path.join(summary_dir, traj_summary_year_temp)):
             
-            shutil.copy2(os.path.join(summary_dir, traj_summary_year_temp), \
+            shutil.copy2(os.path.join(summary_dir, traj_summary_year_temp), 
                 os.path.join(summary_dir, "traj_summary_yearly_{:d}.txt".format(year)))
 
             # Remove the temp file
@@ -2024,8 +2040,7 @@ def generateAutoPlotsAndReports(
     with open(os.path.join(summary_dir, traj_summary_all_temp), 'w') as f_all:
 
         f_all.write("# Summary generated on {:s} UTC\n\r".format(
-            str(datetime.datetime.now(datetime.timezone.utc)))
-            )
+            str(datetime.datetime.now(datetime.timezone.utc))))
 
         # Find all monthly trajectory reports
         header_written = False
@@ -2076,10 +2091,10 @@ def generateAutoPlotsAndReports(
     if not skip_plots:
 
         plot_copy_list = [
-            [plots_daily_dir,   most_recent_plot_file,    "scecliptic_latest_daily"], \
-            [plots_daily_dir,   yesterday_plot_file,      "scecliptic_yesterday"], \
-            [plots_monthly_dir, latest_monthly_plot_file, "scecliptic_latest_monthly"], \
-            [plots_monthly_dir, last_month_plot_file,     "scecliptic_last_month"]]
+            [plots_daily_dir,   most_recent_plot_file,    "scecliptic_latest_daily"],   # noqa: E241
+            [plots_daily_dir,   yesterday_plot_file,      "scecliptic_yesterday"],      # noqa: E241
+            [plots_monthly_dir, latest_monthly_plot_file, "scecliptic_latest_monthly"], # noqa: E241
+            [plots_monthly_dir, last_month_plot_file,     "scecliptic_last_month"]]     # noqa: E241
 
         # Link latest plots per day and month
         for plots_dir, plot_copy_name, plot_name in plot_copy_list:
@@ -2092,15 +2107,14 @@ def generateAutoPlotsAndReports(
                 # Set latest plots
                 suffix_list = ["_vg.png", "_density.png"]
                 for suffix in suffix_list:
-                    shutil.copy2(os.path.join(plots_dir, plot_copy_name + suffix), \
+                    shutil.copy2(os.path.join(plots_dir, plot_copy_name + suffix), 
                         os.path.join(plots_dir, plot_name + suffix))
 
     
     # Link to latest summary files
     summary_copy_list = [
-        [summary_daily_dir, most_recent_summary_file, "traj_summary_latest_daily.txt"], \
-        [summary_daily_dir, yesterday_summary_file,   "traj_summary_yesterday.txt"]
-        ]
+        [summary_daily_dir, most_recent_summary_file, "traj_summary_latest_daily.txt"], 
+        [summary_daily_dir, yesterday_summary_file,   "traj_summary_yesterday.txt"]] # noqa: E241
 
     for summary_dir, summary_copy_name, summary_name in summary_copy_list:
         
@@ -2110,11 +2124,14 @@ def generateAutoPlotsAndReports(
             print("Copying latest report...")
 
             # Set latest summary file
-            shutil.copy2(os.path.join(summary_dir, summary_copy_name), \
+            shutil.copy2(os.path.join(summary_dir, summary_copy_name), 
                 os.path.join(summary_dir, summary_name))
 
 
     ### ###
+
+
+
 
 
 
@@ -2137,29 +2154,24 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('dir_path', type=str, help='Path to the data directory. Trajectory pickle files are found in all subdirectories.')
 
-    arg_parser.add_argument('-s', '--solstep', metavar='SOL_STEP', \
+    arg_parser.add_argument('-s', '--solstep', metavar='SOL_STEP', 
         help='Step in solar longitude for plotting (degrees). 5 deg by default.', type=float, default=5.0)
 
-    arg_parser.add_argument('-a', '--auto', metavar='PREV_SOLS', type=int, default=None, const=10, \
-        nargs='?', \
-        help="""Run continously taking the data in the last PREV_SOLS degrees of solar longitudes to generate new plots and reports, and update old ones."""
-        )
+    arg_parser.add_argument('-a', '--auto', metavar='PREV_SOLS', type=int, default=None, const=10, 
+        nargs='?', 
+        help="""Run continously taking the data in the last PREV_SOLS degrees of solar longitudes to generate new plots and reports, and update old ones.""")
 
-    arg_parser.add_argument('-f', '--autofirst', metavar='FIRST_PREV_SOLS', type=int, \
-        help="""During the first continous run, go back FIRST_PREV_SOLS to generate the plots and report. After that, use PREV_SOLS to run."""
-        )
+    arg_parser.add_argument('-f', '--autofirst', metavar='FIRST_PREV_SOLS', type=int, 
+        help="""During the first continous run, go back FIRST_PREV_SOLS to generate the plots and report. After that, use PREV_SOLS to run.""")
 
-    arg_parser.add_argument('-p', '--plot_all_showers', action="store_true", \
-        help="""Plot showers on the maps showing the whole date ramge."""
-        )
+    arg_parser.add_argument('-p', '--plot_all_showers', action="store_true", 
+        help="""Plot showers on the maps showing the whole date ramge.""")
     
-    arg_parser.add_argument('--skipplots', action="store_true", \
-        help="""Skip plotting the graphs and maps."""
-        )
+    arg_parser.add_argument('--skipplots', action="store_true", 
+        help="""Skip plotting the graphs and maps.""")
 
-    arg_parser.add_argument('-o', '--output', metavar='OUTPUT_DIR', type=str, \
-        help="""Output directory. If not given, the data directory will be used."""
-        )
+    arg_parser.add_argument('-o', '--output', metavar='OUTPUT_DIR', type=str, 
+        help="""Output directory. If not given, the data directory will be used.""")
     
     # Add custom specifcation for the trajectory quality parameters
     arg_parser.add_argument('--min_traj_points', metavar='MIN_POINTS', type=int,
@@ -2183,6 +2195,12 @@ if __name__ == "__main__":
     arg_parser.add_argument('--min_end_ht', metavar='MIN_END_HT', type=float,
         help='End height filter (km).')
 
+    arg_parser.add_argument('--verbose', '--verbose', action="store_true", 
+        help="""verbose mode, prints more messages.""")
+    
+    arg_parser.add_argument('--autofreq', '--autofreq', type=int, default=360,
+        help="Minutes to wait between runs in auto-mode")
+    
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -2191,6 +2209,7 @@ if __name__ == "__main__":
 
 
     ### FILTERS ###
+
 
     class TrajQualityParams(object):
         def __init__(self):
@@ -2240,6 +2259,8 @@ if __name__ == "__main__":
     if cml_args.min_end_ht is not None:
         traj_quality_params.min_end_ht = cml_args.min_end_ht
 
+    if cml_args.autofreq is not None:
+        AUTO_RUN_FREQUENCY = cml_args.autofreq/60
     ### ###
 
 
@@ -2268,22 +2289,21 @@ if __name__ == "__main__":
 
 
             # Generate the latest plots
-            generateAutoPlotsAndReports(cml_args.dir_path, traj_quality_params, prev_sols=prev_sols, \
+            generateAutoPlotsAndReports(cml_args.dir_path, traj_quality_params, prev_sols=prev_sols, 
                 output_dir=cml_args.output, skip_plots=cml_args.skipplots)
 
 
 
             # Wait to run AUTO_RUN_FREQUENCY hours after the beginning
-            wait_time = (datetime.timedelta(hours=AUTO_RUN_FREQUENCY) \
+            wait_time = (datetime.timedelta(hours=AUTO_RUN_FREQUENCY) 
                 - (datetime.datetime.now(datetime.timezone.utc) - t1)).total_seconds()
 
             # Compute next run time
-            next_run_time = datetime.datetime.now(datetime.timezone.utc) \
-                + datetime.timedelta(seconds=wait_time)
+            next_run_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=wait_time)
 
             # Wait to run
             while next_run_time > datetime.datetime.now(datetime.timezone.utc):
-                print("Waiting {:s} to generate plots and summary again...        ".format(str(next_run_time \
+                print("Waiting {:s} to generate plots and summary again...        ".format(str(next_run_time 
                     - datetime.datetime.now(datetime.timezone.utc))), end='\r')
                 time.sleep(2)
 
@@ -2296,7 +2316,7 @@ if __name__ == "__main__":
         # Run once
 
         # Get a list of paths of all trajectory pickle files
-        traj_list = loadTrajectoryPickles(cml_args.dir_path, traj_quality_params, verbose=True)
+        traj_list = loadTrajectoryPickles(cml_args.dir_path, traj_quality_params, verbose=cml_args.verbose)
 
 
         # Determine the output directory
@@ -2304,6 +2324,7 @@ if __name__ == "__main__":
         if output_dir is None:
             output_dir = cml_args.dir_path
 
+        mkdirP(output_dir)
 
         # Generate the orbit summary file
         print("Writing summary file...")
@@ -2336,8 +2357,8 @@ if __name__ == "__main__":
                 sol_max = sol_min + step
 
                 # Extract only those trajectories with solar longitudes in the given range
-                traj_list_sol = [traj_temp for traj_temp in traj_list if \
-                    (np.degrees(traj_temp.orbit.la_sun) >= sol_min) \
+                traj_list_sol = [traj_temp for traj_temp in traj_list if 
+                    (np.degrees(traj_temp.orbit.la_sun) >= sol_min) 
                     and (np.degrees(traj_temp.orbit.la_sun) < sol_max)]
 
 
@@ -2352,5 +2373,4 @@ if __name__ == "__main__":
                 generateTrajectoryPlots(
                     output_dir, traj_list_sol,
                     plot_name="scecliptic_solrange_{:05.1f}-{:05.1f}".format(sol_min, sol_max),
-                    plot_sol=False, plot_showers=True, time_limited_plot=True
-                    )
+                    plot_sol=False, plot_showers=True, time_limited_plot=True)
