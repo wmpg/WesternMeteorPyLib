@@ -539,6 +539,10 @@ class RMSDataHandle(object):
         # Load database of processed folders
         database_path = os.path.join(self.db_dir, JSON_DB_NAME)
         log.info("")
+        # move any remotely calculated pickles to their target locations
+        if os.path.isdir(os.path.join(self.output_dir, 'remoteuploads')):
+            moveRemoteTrajectories(self.output_dir)
+
         if mcmode != 2:
             log.info("Loading database: {:s}".format(database_path))
             self.db = DatabaseJSON(database_path)
@@ -559,10 +563,6 @@ class RMSDataHandle(object):
             log.info("   ... done!")
 
         else:
-            # move any remotely calculated pickles to their target locations
-            if os.path.isdir(os.path.join(self.output_dir, 'remoteuploads')):
-                moveRemoteTrajectories(self.output_dir)
-
             # retrieve pickles from a remote host, if configured
             if self.remotehost is not None:
                 collectRemoteTrajectories(remotehost, max_trajs, self.phase1_dir)
