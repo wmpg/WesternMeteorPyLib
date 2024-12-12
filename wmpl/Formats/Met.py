@@ -786,7 +786,7 @@ if __name__ == "__main__":
         help='Full path to the .met file.')
 
     # Add option to compute CAMO narrowfield photometry
-    arg_parser.add_argument('-n', '--photom', metavar='PHOTOM_OFFSERS', \
+    arg_parser.add_argument('-n', '--photom', metavar='PHOTOM_OFFSETS', \
         help="Photometric offsets used to compute narrowfield photometry from LSP values in the met file. Format should be e.g. 1=16.8,2=15.9, where the 1 is Tavis and 16.8 is the photometric zero point.", type=str)
 
     # Add other solver options

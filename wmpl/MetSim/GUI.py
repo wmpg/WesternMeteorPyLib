@@ -250,7 +250,7 @@ class ECSVObservations(object):
                 for i, (jd, ra, dec, mag) in enumerate(np.c_[jd_data, meteor.ra_data, meteor.dec_data, meteor.mag_data]):
 
                     # Compute the station coordinates at the given time
-                    stat = geo2Cartesian(meteor.latitude, meteor.longitude, meteor.height, jd)
+                    stat = np.array(geo2Cartesian(meteor.latitude, meteor.longitude, meteor.height, jd))
 
                     # Compute measurement rays in cartesian coordinates
                     meas = np.array(raDec2ECI(ra, dec))
