@@ -172,7 +172,7 @@ class SimulationResults(object):
             self.mass_total_active_arr, self.main_mass_arr
             ]
 
-        header = "B = brightest mass bin, L = leading fragment, M = main\n"
+        header  = "B = brightest mass bin, L = leading fragment, M = main\n"
         header += "Time (s), B ht (km), B len (km), B vel (km/s), " + \
                   "L ht (km), L len (km), L vel (km/s), L dyn press (Gamma = 1.0; MPa), " + \
                   "M ht (km), M len (km), M vel (km/s), M dyn press (Gamma = 1.0; MPa), " + \
@@ -250,7 +250,7 @@ class ECSVObservations(object):
                 for i, (jd, ra, dec, mag) in enumerate(np.c_[jd_data, meteor.ra_data, meteor.dec_data, meteor.mag_data]):
 
                     # Compute the station coordinates at the given time
-                    stat = geo2Cartesian(meteor.latitude, meteor.longitude, meteor.height, jd)
+                    stat = np.array(geo2Cartesian(meteor.latitude, meteor.longitude, meteor.height, jd))
 
                     # Compute measurement rays in cartesian coordinates
                     meas = np.array(raDec2ECI(ra, dec))
@@ -2930,7 +2930,7 @@ class MetSimGUI(QMainWindow):
                     (np.cos(lat)*a)**2 + (np.sin(lat)*b)**2
                 )
             )
-
+            
 
             # Set the constants value from the trajectory
             self.const.v_init = self.traj.orbit.v_init
