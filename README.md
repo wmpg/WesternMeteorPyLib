@@ -62,6 +62,7 @@ conda install -y -c conda-forge jplephem ephem
 conda install -y -c conda-forge watchdog h5py
 conda install -y -c conda-forge numba
 conda install -y -c conda-forge basemap basemap-data-hires
+conda install -y -c conda-forge cartopy paramiko
 ```
 
 
@@ -113,6 +114,7 @@ The installation might differ on Windows. I recommend installing Anaconda, which
 	conda install -y -c conda-forge watchdog h5py
 	conda install -y -c conda-forge numba
 	conda install -y -c conda-forge basemap basemap-data-hires
+ 	conda install -y -c conda-forge cartopy paramiko
 	```
 
 3) Download and install git: [https://git-scm.com/downloads](https://git-scm.com/downloads)
