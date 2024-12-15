@@ -1629,6 +1629,9 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     arg_parser.add_argument("--cpucores", type=int, default=-1,
         help="Number of CPU codes to use for computation. -1 to use all cores minus one (default).",)
 
+    arg_parser.add_argument('-o', '--enableOSM', 
+        help="Enable OSM based groung plots. Internet connection required.", action="store_true")     
+
     arg_parser.add_argument("--dbdir", type=str, default=None,
         help="Path to the directory where the trajectory database file will be stored. If not given, the database will be stored in the data directory.")
 
@@ -1889,7 +1892,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                     dh.loadComputedTrajectories(os.path.join(dh.output_dir, OUTPUT_TRAJ_DIR), dt_range=[bin_beg, bin_end])
 
                     # Run the trajectory correlator
-                    tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True)
+                    tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True, enableOSM=cml_args.enableOSM)
                     bin_time_range = [bin_beg, bin_end]
                     tc.run(event_time_range=event_time_range, mcmode=cml_args.mcmode, bin_time_range=bin_time_range)
             else:
