@@ -7,6 +7,11 @@ import sys
 import errno
 
 
+# not used here but required to force-load Cartopy before basemap. Otherwise
+# loadBaseMap() crashes on Windows 10
+import cartopy.io.img_tiles as cimgt 
+
+
 def mkdirP(path):
     """ Makes a directory and handles all errors.
     """
