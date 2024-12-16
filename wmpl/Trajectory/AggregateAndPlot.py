@@ -110,6 +110,9 @@ def computeMass(traj, P_0m):
             if (mag is not None) and (not np.isnan(mag)):
                 time_mag_arr.append([t, mag])
 
+    # If there are no magnitudes, return 0
+    if len(time_mag_arr) == 0:
+        return 0
 
     # Compute the mass
     time_mag_arr = np.array(sorted(time_mag_arr, key=lambda x: x[0]))
