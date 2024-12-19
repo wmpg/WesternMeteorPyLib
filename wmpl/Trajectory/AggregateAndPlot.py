@@ -102,10 +102,17 @@ def computeMass(traj, P_0m):
         # Exclude magnitudes fainter than mag +8
         mag_filter = obs.absolute_magnitudes < 8
 
+        # If all magnitudes are fainter than 8, skip the station
+        if np.all(mag_filter):
+            continue
+
         for t, mag in zip(obs.time_data[mag_filter], obs.absolute_magnitudes[mag_filter]):
             if (mag is not None) and (not np.isnan(mag)):
                 time_mag_arr.append([t, mag])
 
+    # If there are no magnitudes, return 0
+    if len(time_mag_arr) == 0:
+        return 0
 
     # Compute the mass
     time_mag_arr = np.array(sorted(time_mag_arr, key=lambda x: x[0]))
