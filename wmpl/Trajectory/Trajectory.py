@@ -5607,6 +5607,7 @@ class Trajectory(object):
                     plt.clf()
                     plt.close()            
             except:
+                print('OSM plots not available')
                 pass
         ######################################################################################################
 
