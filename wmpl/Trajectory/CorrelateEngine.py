@@ -219,7 +219,7 @@ class TrajectoryConstraints(object):
 
 
 class TrajectoryCorrelator(object):
-    def __init__(self, data_handle, traj_constraints, v_init_part, data_in_j2000=True):
+    def __init__(self, data_handle, traj_constraints, v_init_part, data_in_j2000=True, enableOSM=False):
         """ Correlates meteor trajectories using meteor data given to it through a data handle. A data handle
         is a class instance with a common interface between e.g. files on the disk in various formats or 
         meteors in a database.
@@ -236,6 +236,8 @@ class TrajectoryCorrelator(object):
         # Indicate that the data is in J2000
         self.data_in_j2000 = data_in_j2000
 
+        # enable OS style ground maps if true
+        self.enableOSM = enableOSM
 
     def trajectoryRangeCheck(self, traj_reduced, platepar):
         """ Check that the trajectory is within the range limits. 
@@ -594,7 +596,7 @@ class TrajectoryCorrelator(object):
             mc_runs=mc_runs, mc_runs_max=2*mc_runs,
             show_plots=False, verbose=verbose, save_results=False, 
             reject_n_sigma_outliers=2, mc_cores=self.traj_constraints.mc_cores, 
-            geometric_uncert=self.traj_constraints.geometric_uncert)
+            geometric_uncert=self.traj_constraints.geometric_uncert, enable_OSM_plot=self.enableOSM)
 
         return traj
 
