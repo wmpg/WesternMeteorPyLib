@@ -1850,8 +1850,12 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                 # Determine the limits of data
                 proc_dir_dt_beg = min(proc_dir_dts)
                 proc_dir_dt_end = max(proc_dir_dts)
+
                 # Split the processing into daily chunks
-                dt_bins = generateDatetimeBins(proc_dir_dt_beg, proc_dir_dt_end, bin_days=1, tzinfo=datetime.timezone.utc, reverse=True)
+                dt_bins = generateDatetimeBins(
+                    proc_dir_dt_beg, proc_dir_dt_end, 
+                    bin_days=1, tzinfo=datetime.timezone.utc, reverse=False
+                    )
 
                 # check if we've created an extra bucket (might happen if requested timeperiod is less than 24h)
                 if event_time_range is not None:
