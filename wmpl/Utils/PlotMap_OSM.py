@@ -7,8 +7,11 @@ import matplotlib.pyplot as plt
 from wmpl.Utils.OSTools import importBasemap
 Basemap = importBasemap()
 
-import cartopy.crs as ccrs
-import cartopy.io.img_tiles as cimgt
+try: 
+    import cartopy.crs as ccrs
+    import cartopy.io.img_tiles as cimgt
+except:
+    pass
 
 from wmpl.Utils.Math import meanAngle
 

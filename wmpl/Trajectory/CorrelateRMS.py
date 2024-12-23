@@ -332,7 +332,7 @@ class DatabaseJSON(object):
         if not keepFolder and os.path.isfile(traj_reduced.traj_file_path):
             traj_dir = os.path.dirname(traj_reduced.traj_file_path)
             log.info(f'removing {traj_dir}')
-            shutil.rmtree(traj_dir)
+            shutil.rmtree(traj_dir, ignore_errors=True)
 
 
 
@@ -1368,13 +1368,13 @@ class RMSDataHandle(object):
         if self.mc_mode == 2: 
             if os.path.isfile(traj_reduced.traj_file_path):
                 traj_dir = os.path.dirname(traj_reduced.traj_file_path)
-                shutil.rmtree(traj_dir)
+                shutil.rmtree(traj_dir, ignore_errors=True)
             elif hasattr(traj_reduced, 'pre_mc_longname'):
                 traj_dir = os.path.dirname(traj_reduced.traj_file_path)
                 base_dir = os.path.split(traj_dir)[0]
                 traj_dir = os.path.join(base_dir, traj_reduced.pre_mc_longname)
                 if os.path.isdir(traj_dir):
-                    shutil.rmtree(traj_dir)
+                    shutil.rmtree(traj_dir, ignore_errors=True)
                 else:
                     log.warning(f'unable to find {traj_dir}')
             else:
