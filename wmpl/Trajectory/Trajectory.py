@@ -907,38 +907,54 @@ def calcSpatialResidual(jdt_ref, jd, state_vect, radiant_eci, stat, meas, gravit
     # Vector pointing from the point on the trajectory to the point on the line of sight
     p = obs_cpa - rad_cpa
 
-    # # Calculate geographical coordinates of the point on the trajectory
-    # lat, lon, elev = cartesian2Geo(jd, *rad_cpa)
+    # Calculate geographical coordinates of the point on the trajectory (rad_cpa)
+    # Used for lat/long of local ENU reference frame.
+    lat, lon, elev = cartesian2Geo(jd, *rad_cpa)
 
-    # Calculate geographical coordinates of the state vector
-    lat, lon, elev = cartesian2Geo(jd, *state_vect)
+    # Derive radiant azim/elev
+    rad_RA,rad_Dec = eci2RaDec(radiant_eci)
+    rad_azim,rad_elev = raDec2AltAz(rad_RA, rad_Dec, jd, lat, lon)
 
-    # Calculate ENU (East, North, Up) vector at the position of the state vector, and direction of the radiant
-    nn = np.array(ecef2ENU(lat, lon, *radiant_eci))
+    # Form an orthgoonal right handed reference frame in ENU coordinates with the x axis pointing to the radiant.
+    # y axis pointing along horizon at 90 degrees counter-clockwise to radiant.
+    # z-axis such that vz = hx^hy
 
-    # Convert the vector to polar coordinates
-    theta = np.arctan2(nn[1], nn[0])
-    phi = np.arccos(nn[2]/vectMag(nn))
+    # Azimx points towards the radiant
+    azimx = rad_azim
+    elevx = rad_elev
 
-    # Local reference frame unit vectors
-    hx = np.array([            -np.cos(theta),              np.sin(theta),         0.0])
-    vz = np.array([-np.cos(phi)*np.sin(theta), -np.cos(phi)*np.cos(theta), np.sin(phi)])
-    hy = np.array([ np.sin(phi)*np.sin(theta),  np.sin(phi)*np.cos(theta), np.cos(phi)])
-    
-    # Calculate local reference frame unit vectors in ECEF coordinates
-    ehorzx = enu2ECEF(lat, lon, *hx)
-    ehorzy = enu2ECEF(lat, lon, *hy)
-    evert  = enu2ECEF(lat, lon, *vz)
+    # If radiant elevation is in the zenith, set reference frame x-axis to zero degrees azimuth (North)
+    if np.abs(np.pi/2.0 - elevx) <= 10e-13:
+        azimx = 0
 
-    ehx = np.dot(p, ehorzx)
-    ehy = np.dot(p, ehorzy)
+    # If looking at the radiant azimy will be on your left along the horizon  
+    azimy = (azimx - np.pi/2.0)%(2*np.pi)
+    elevy = 0.0            
+
+    # If looking towards the radiant, azim z is behind you   
+    azimz = (azimx + np.pi)%(2*np.pi)
+    elevz = (np.pi/2.0) - elevx
+
+    # Find RA and Dec points in the sky that the 3 axes point towards.        
+    rax,decx = altAz2RADec_vect(azimx, elevx, jd, lat, lon)
+    ray,decy = altAz2RADec_vect(azimy, elevy, jd, lat, lon)
+    raz,decz = altAz2RADec_vect(azimz, elevz, jd, lat, lon)
+
+    # From these create unit vectors in ECI coordinates
+    hx_eci = raDec2ECI(rax, decx)
+    hy_eci = raDec2ECI(ray, decy)
+    vz_eci = raDec2ECI(raz, decz)
+
+    #  Calculate dot products to resolve p into its components
+    ehx = np.dot(p, hx_eci)
+    ehy = np.dot(p, hy_eci)
+                                                    
+    # Calculate horizontal residuals
+    hres = np.sign(ehy)*np.hypot(ehx, ehy)
 
     # Calculate vertical residuals
-    vres = np.sign(ehx)*np.hypot(ehx, ehy)
-
-    # Calculate horizontal residuals
-    hres = np.dot(p, evert)
-
+    vres = np.dot(p, vz_eci)
+                                                    
     return hres, vres
 
 

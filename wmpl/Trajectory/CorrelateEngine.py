@@ -1106,7 +1106,11 @@ class TrajectoryCorrelator(object):
             else:
                 dt_beg = unpaired_observations_all[0].reference_dt
                 dt_end = unpaired_observations_all[-1].reference_dt
-                dt_bin_list = generateDatetimeBins(dt_beg, dt_end, bin_days=1, utc_hour_break=12, tzinfo=datetime.timezone.utc, reverse=True)
+                dt_bin_list = generateDatetimeBins(
+                    dt_beg, dt_end, 
+                    bin_days=1, utc_hour_break=12, tzinfo=datetime.timezone.utc, reverse=False
+                    )
+                
         else:
             dt_beg = self.dh.dt_range[0]
             dt_end = self.dh.dt_range[1]
