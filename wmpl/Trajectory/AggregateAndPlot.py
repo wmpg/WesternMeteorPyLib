@@ -1233,7 +1233,7 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, max_radiant_err=0.5
         x_arr = np.linspace(np.min(rad_dists), np.max(rad_dists), 100)
         ray_pdf_values = scipy.stats.rayleigh.pdf(x_arr, *ray_params)
         ray_integ = simpson(ray_pdf_values, x=np.degrees(x_arr))
-        ax_rayleigh.plot(np.degrees(x_arr), ray_pdf_values/ray_integ, color='k', \
+        ax_rayleigh.plot(np.degrees(x_arr), ray_pdf_values/ray_integ, color='k', 
             label="Rayleigh, $\\sigma = $" + "{:.2f}".format(np.degrees(ray_std)) + "$^{\\circ}$")
 
         # Plot the median deviation
@@ -1634,6 +1634,11 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
                         print(f"Skipping {file_name} as no orbit solution...")
                     continue
 
+                if np.isnan(traj.orbit.ra_g):
+                    if verbose:
+                        print(f"Skipping {file_name} as ra_g is NaN...")
+                    continue
+                 
 
                 ### MINIMUM POINTS
                 ### Reject all trajectories with small number of used points ###
@@ -1665,6 +1670,15 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
 
                 ###
 
+
+                ### UNREALISTIC VELOCITY              
+
+                if traj.orbit.v_g/1000 > traj_quality_params.max_vg:
+                    if verbose:
+                        print(f"Skipping {file_name} due to unrealistic velocity...")
+                    continue
+
+                ###
 
                 ### MAXIMUM ECCENTRICITY ###
 
@@ -2232,6 +2246,9 @@ if __name__ == "__main__":
 
             # Maximum radiant error (deg)
             self. max_radiant_err = 2.0
+
+            # maximum realistic velocity (km/s)
+            self.max_vg = 120.0
 
             # Maximum geocentric velocity error (percent)
             self. max_vg_err = 10.0
