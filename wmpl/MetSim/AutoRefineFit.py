@@ -20,7 +20,7 @@ from wmpl.Utils.Math import meanAngle
 from wmpl.Utils.Pickling import loadPickle
 
 
-def costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False):
+def costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False, hideplots=False):
     """ Compute the difference between the simulated and the observed meteor. 
     
     Arguments:
@@ -221,14 +221,21 @@ def costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False):
 
         plt.tight_layout()
         ax_mag.legend()
-        plt.show()
+
+        # Show the plot only if hideplots is False
+        if not hideplots:
+            plt.show()
+
+        else:
+            plt.clf()
+            plt.close()
 
 
     return mag_res, len_res, cost
             
 
 
-def residualFun(params, fit_options, traj, met_obs, const, change_update_params):
+def residualFun(params, fit_options, traj, met_obs, const, change_update_params, hideplots=False):
     """ Take the fit parameters and return the value of the cost function. 
     
     Arguments:
@@ -283,7 +290,7 @@ def residualFun(params, fit_options, traj, met_obs, const, change_update_params)
     mag_sigma, len_sigma = fit_options["mag_sigma"], fit_options["len_sigma"]
 
     # Compute the cost function
-    mag_res, len_res, cost = costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False)
+    mag_res, len_res, cost = costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False, hideplots=hideplots)
 
     print("Magnitude residual: {:f}".format(mag_res))
     print("Length residual: {:f}".format(len_res))
@@ -294,7 +301,7 @@ def residualFun(params, fit_options, traj, met_obs, const, change_update_params)
 
 
 
-def autoFit(fit_options, traj, met_obs, const):
+def autoFit(fit_options, traj, met_obs, const, hideplots=False):
     """ Automatically fit the parameters to the observations. """
 
 
@@ -460,7 +467,7 @@ Exiting...
 
     # Run the optimization using Nelder-Mead
     res = scipy.optimize.minimize(residualFun, x0, args=(fit_options, traj, met_obs, const, 
-                                                         change_update_params), 
+                                                         change_update_params, hideplots), 
         method="Nelder-Mead", bounds=bounds)
 
     # Extract the optimized parameters into Constants
@@ -543,6 +550,9 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('--updated', action='store_true', \
         help="Load the updated simulation JSON file insted of the original one.")
+    
+    arg_parser.add_argument('-x', '--hideplots', \
+        help="Don't show generated plots on the screen, just save them to disk.", action="store_true")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -749,7 +759,7 @@ if __name__ == "__main__":
     print("Done!")
 
     # Cost function test
-    costFunc(traj, met_obs, sr, fit_options["mag_sigma"], fit_options["len_sigma"], plot_residuals=True)
+    costFunc(traj, met_obs, sr, fit_options["mag_sigma"], fit_options["len_sigma"], plot_residuals=True, hideplots=cml_args.hideplots)
 
 
     # Go though all the fit sets
@@ -766,7 +776,7 @@ if __name__ == "__main__":
             print()
             print("#"*80)
             print("Auto fitting...")
-            const = autoFit(fit_options, traj, met_obs, const)
+            const = autoFit(fit_options, traj, met_obs, const, hideplots=cml_args.hideplots)
             print("Fitting done!")
 
 
@@ -782,7 +792,7 @@ if __name__ == "__main__":
 
 
     # Cost function test
-    costFunc(traj, met_obs, sr, fit_options["mag_sigma"], fit_options["len_sigma"], plot_residuals=True)
+    costFunc(traj, met_obs, sr, fit_options["mag_sigma"], fit_options["len_sigma"], plot_residuals=True, hideplots=cml_args.hideplots)
 
 
 
@@ -968,6 +978,12 @@ if __name__ == "__main__":
     plt.tight_layout()
     plt.subplots_adjust(wspace=0.00)
     
-    plt.show()
+    # Show the plot only if hideplots is False
+    if not cml_args.hideplots:
+        plt.show()
+
+    else:
+        plt.clf()
+        plt.close()
 
     ### ###
