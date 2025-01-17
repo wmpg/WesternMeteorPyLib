@@ -130,8 +130,9 @@ class TrajectoryReduced(object):
             else:
                 self.phase_1_only = False
 
-            #if hasattr(traj, 'traj_id'):
-            self.traj_id = traj.traj_id
+            if hasattr(traj, 'traj_id'):
+                self.traj_id = traj.traj_id
+            print(f'traj id is {self.traj_id}')
 
         # Load values from a dictionary
         else:
