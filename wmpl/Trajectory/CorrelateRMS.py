@@ -321,10 +321,11 @@ class DatabaseJSON(object):
 
         # Add the trajectory to the list (key is the reference JD)
         if traj_reduced.jdt_ref not in traj_dict:
+            print(f'adding trajectory {traj_reduced.traj_id}')
             traj_dict[traj_reduced.jdt_ref] = traj_reduced
         else:
-            log.info(f'{traj_file_path} already in database')
             traj_dict[traj_reduced.jdt_ref].traj_id = traj_reduced.traj_id
+            print(f'adding {traj_reduced.traj_id} to traj')
 
 
     def checkForDuplicate(self, traj_reduced):
