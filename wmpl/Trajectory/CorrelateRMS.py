@@ -319,11 +319,11 @@ class DatabaseJSON(object):
 
 
         # Add the trajectory to the list (key is the reference JD)
-        if self.checkForDuplicate(traj_reduced):
-            if traj_reduced.jdt_ref not in traj_dict:
-                traj_dict[traj_reduced.jdt_ref] = traj_reduced
+        if traj_reduced.jdt_ref not in traj_dict:
+            traj_dict[traj_reduced.jdt_ref] = traj_reduced
         else:
             log.info(f'{traj_file_path} already in database')
+
 
     def checkForDuplicate(self, traj_reduced):
         """ Remove duplicate trajectories. These can arise if a new improved 
@@ -348,6 +348,7 @@ class DatabaseJSON(object):
         ret_val = True
         for trajkey in keys:
             traj_test = self.trajectories[trajkey]
+            # whoops i need the traj_id here
             if traj_test.traj_id == traj_reduced.traj_id:
                 # we have a duplicate. Keep the one with most stations
                 if len(traj_reduced.participating_stations) > len(traj_test.participating_stations):
@@ -1171,6 +1172,10 @@ class RMSDataHandle(object):
                 and (self.db.trajectories[key].jdt_ref <= jd_end)]
                 
 
+    def removeDuplicateTrajectories(self):
+        log.info('removing duplicate trajectories')
+        return 
+    
 
     def getPlatepar(self, met_obs):
         """ Return the platepar of the meteor observation. """
@@ -1934,6 +1939,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                     # refresh list of calculated trajectories from disk
                     dh.removeDeletedTrajectories()
                     dh.loadComputedTrajectories(os.path.join(dh.output_dir, OUTPUT_TRAJ_DIR), dt_range=[bin_beg, bin_end])
+                    dh.removeDuplicateTrajectories()
 
                     # Run the trajectory correlator
                     tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True, enableOSM=cml_args.enableOSM)
