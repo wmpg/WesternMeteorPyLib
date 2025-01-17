@@ -17,6 +17,7 @@ import multiprocessing
 import logging
 import logging.handlers
 import glob
+import pandas as pd
 from dateutil.relativedelta import relativedelta
 import numpy as np
 
@@ -325,43 +326,6 @@ class DatabaseJSON(object):
             traj_dict[traj_reduced.jdt_ref].traj_id = traj_reduced.traj_id
 
 
-    def checkForDuplicate(self, traj_reduced):
-        """ Remove duplicate trajectories. These can arise if a new improved 
-            solution was created, but the previous one wasn't deleted
-        
-        Arguments:
-            the trajectory to test for duplicates
-
-        Returns:
-            True if we're keeping traj_reduced
-            False if we are not keeping it (ie its a dupe)
-        """
-
-        if not hasattr(traj_reduced, 'traj_id'):
-            return True
-        
-        # check trajectories at +/- 10s for duplicate traj_ids
-        jdt_start = traj_reduced.jdt_ref - 10/86400
-        jdt_end = traj_reduced.jdt_ref + 10/86400
-        trajs_to_remove = []
-        keys = [k for k in self.trajectories.keys() if k >= jdt_start and k <= jdt_end]
-        ret_val = True
-        for trajkey in keys:
-            traj_test = self.trajectories[trajkey]
-            # whoops i need the traj_id here
-            if traj_test.traj_id == traj_reduced.traj_id:
-                # we have a duplicate. Keep the one with most stations
-                if len(traj_reduced.participating_stations) > len(traj_test.participating_stations):
-                    trajs_to_remove.append(traj_test)
-                else:
-                    trajs_to_remove.append(traj_reduced)
-                    ret_val = False
-
-        for traj in trajs_to_remove:
-            self.removeTrajectory(traj) 
-
-        return ret_val
-    
 
     def removeTrajectory(self, traj_reduced, keepFolder=False):
         """ Remove the trajectory from the data base and disk. """
@@ -1173,10 +1137,37 @@ class RMSDataHandle(object):
                 
 
     def removeDuplicateTrajectories(self):
+        """ Remove trajectories with duplicate IDs
+            keeping the one with the most station observations
+        """
+
         log.info('removing duplicate trajectories')
-        print('removing duplicate trajectories')
-        tr = [{jdt_ref,self.db.trajectories[jdt_ref].traj_id} for jdt_ref in self.db.trajectories if hasattr(self.db.trajectories[jdt_ref],'traj_id')]
-        print(f'there are {len(tr)} trajectories')
+        # 
+        tr_to_check = [{'jdt_ref':jdt_ref,'traj_id':self.db.trajectories[jdt_ref].traj_id} for 
+              jdt_ref in self.db.trajectories if hasattr(self.db.trajectories[jdt_ref],'traj_id')]
+        tr_df = pd.DataFrame(tr_to_check)
+        tr_df['dupe']=tr_df.duplicated(subset=['traj_id'])
+        dupeids = tr_df[tr_df.dupe].sort_values(by=['traj_id']).traj_id
+        duperows = tr_df[tr_df.traj_id.isin(dupeids)]
+
+        print(f'there are {len(tr_df)/2} duplicate trajectories')
+        
+        # iterate over the duplicates, finding the best and removing the others
+        for traj_id in duperows.traj_id.unique():
+            num_stats = 0
+            best_traj = None
+            # find duplicate with largest number of observations
+            for testdt in duperows[duperows.traj_id==traj_id].jdt_ref.values:
+                if len(dh.db.trajectories[testdt].participating_stations) > num_stats:
+                    best_traj = testdt
+                    num_stats = len(dh.db.trajectories[testdt].participating_stations)
+
+            # now remove all except the best
+            for testdt in duperows[duperows.traj_id==traj_id].jdt_ref.values:
+                if testdt != best_traj:
+                    print(f'removing {dh.db.trajectories[testdt].traj_file_path}')
+                    self.db.removeTrajectory(dh.db.trajectories[testdt])
+         
         return 
     
 
