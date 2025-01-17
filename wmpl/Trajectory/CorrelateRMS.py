@@ -130,8 +130,8 @@ class TrajectoryReduced(object):
             else:
                 self.phase_1_only = False
 
-            if hasattr(traj, 'traj_id'):
-                self.traj_id = traj.traj_id
+            #if hasattr(traj, 'traj_id'):
+            self.traj_id = traj.traj_id
 
         # Load values from a dictionary
         else:
@@ -296,7 +296,7 @@ class DatabaseJSON(object):
 
             # Init the reduced trajectory object
             traj_reduced = TrajectoryReduced(traj_file_path)
-            log.info(f' loaded {traj_file_path}')
+            log.info(f' loaded {traj_file_path}, traj_id {traj_reduced.traj_id}')
             # Skip if failed
             if traj_reduced is None:
                 return None
@@ -305,9 +305,9 @@ class DatabaseJSON(object):
                 return None
 
         else:
-            log.info('using traj_obj')
             # Use the provided trajectory object
             traj_reduced = traj_obj
+            log.info(f' loaded {traj_obj.traj_file_path}, traj_id {traj_reduced.traj_id}')
 
 
         # Choose to which dictionary the trajectory will be added
