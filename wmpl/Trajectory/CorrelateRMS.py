@@ -305,7 +305,7 @@ class DatabaseJSON(object):
                 return None
 
         else:
-
+            log.info('using traj_obj')
             # Use the provided trajectory object
             traj_reduced = traj_obj
 
