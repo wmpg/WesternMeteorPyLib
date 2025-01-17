@@ -296,7 +296,7 @@ class DatabaseJSON(object):
 
             # Init the reduced trajectory object
             traj_reduced = TrajectoryReduced(traj_file_path)
-
+            log.info(f' loaded {traj_file_path}')
             # Skip if failed
             if traj_reduced is None:
                 return None
@@ -319,10 +319,11 @@ class DatabaseJSON(object):
 
 
         # Add the trajectory to the list (key is the reference JD)
-        if traj_reduced.jdt_ref not in traj_dict:
-            if self.checkForDuplicate(traj_reduced):
+        if self.checkForDuplicate(traj_reduced):
+            if traj_reduced.jdt_ref not in traj_dict:
                 traj_dict[traj_reduced.jdt_ref] = traj_reduced
-
+        else:
+            log.info(f'{traj_file_path} already in database')
 
     def checkForDuplicate(self, traj_reduced):
         """ Remove duplicate trajectories. These can arise if a new improved 
