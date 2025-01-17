@@ -323,6 +323,7 @@ class DatabaseJSON(object):
             traj_dict[traj_reduced.jdt_ref] = traj_reduced
         else:
             log.info(f'{traj_file_path} already in database')
+            traj_dict[traj_reduced.jdt_ref].traj_id = traj_reduced.traj_id
 
 
     def checkForDuplicate(self, traj_reduced):
