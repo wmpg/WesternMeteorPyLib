@@ -325,7 +325,7 @@ class DatabaseJSON(object):
             traj_dict[traj_reduced.jdt_ref] = traj_reduced
         else:
             traj_dict[traj_reduced.jdt_ref].traj_id = traj_reduced.traj_id
-            print(f'adding {traj_reduced.traj_id} to traj')
+            print(f'adding {traj_reduced.traj_id} to traj with {traj_reduced.jdt_ref}')
 
 
     def checkForDuplicate(self, traj_reduced):
