@@ -132,7 +132,6 @@ class TrajectoryReduced(object):
 
             if hasattr(traj, 'traj_id'):
                 self.traj_id = traj.traj_id
-            print(f'traj id is {self.traj_id}')
 
         # Load values from a dictionary
         else:
@@ -321,11 +320,9 @@ class DatabaseJSON(object):
 
         # Add the trajectory to the list (key is the reference JD)
         if traj_reduced.jdt_ref not in traj_dict:
-            print(f'adding trajectory {traj_reduced.traj_id}')
             traj_dict[traj_reduced.jdt_ref] = traj_reduced
         else:
             traj_dict[traj_reduced.jdt_ref].traj_id = traj_reduced.traj_id
-            print(f'adding {traj_reduced.traj_id} to traj with {traj_reduced.jdt_ref}')
 
 
     def checkForDuplicate(self, traj_reduced):
@@ -1177,6 +1174,9 @@ class RMSDataHandle(object):
 
     def removeDuplicateTrajectories(self):
         log.info('removing duplicate trajectories')
+        print('removing duplicate trajectories')
+        tr = [{jdt_ref,self.db.trajectories[jdt_ref].traj_id} for jdt_ref in self.db.trajectories if hasattr(self.db.trajectories[jdt_ref],'traj_id')]
+        print(f'there are {len(tr)} trajectories')
         return 
     
 
