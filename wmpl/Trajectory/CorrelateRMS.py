@@ -130,6 +130,9 @@ class TrajectoryReduced(object):
             else:
                 self.phase_1_only = False
 
+            if hasattr(traj, 'traj_id'):
+                self.traj_id = traj.traj_id
+
         # Load values from a dictionary
         else:
             self.__dict__ = json_dict
@@ -317,9 +320,46 @@ class DatabaseJSON(object):
 
         # Add the trajectory to the list (key is the reference JD)
         if traj_reduced.jdt_ref not in traj_dict:
-            traj_dict[traj_reduced.jdt_ref] = traj_reduced
+            if self.checkForDuplicate(traj_reduced):
+                traj_dict[traj_reduced.jdt_ref] = traj_reduced
 
 
+    def checkForDuplicate(self, traj_reduced):
+        """ Remove duplicate trajectories. These can arise if a new improved 
+            solution was created, but the previous one wasn't deleted
+        
+        Arguments:
+            the trajectory to test for duplicates
+
+        Returns:
+            True if we're keeping traj_reduced
+            False if we are not keeping it (ie its a dupe)
+        """
+
+        if not hasattr(traj_reduced, 'traj_id'):
+            return True
+        
+        # check trajectories at +/- 10s for duplicate traj_ids
+        jdt_start = traj_reduced.jdt_ref - 10/86400
+        jdt_end = traj_reduced.jdt_ref + 10/86400
+        trajs_to_remove = []
+        keys = [k for k in self.trajectories.keys() if k >= jdt_start and k <= jdt_end]
+        ret_val = True
+        for trajkey in keys:
+            traj_test = self.trajectories[trajkey]
+            if traj_test.traj_id == traj_reduced.traj_id:
+                # we have a duplicate. Keep the one with most stations
+                if len(traj_reduced.participating_stations) > len(traj_test.participating_stations):
+                    trajs_to_remove.append(traj_test)
+                else:
+                    trajs_to_remove.append(traj_reduced)
+                    ret_val = False
+
+        for traj in trajs_to_remove:
+            self.removeTrajectory(traj) 
+
+        return ret_val
+    
 
     def removeTrajectory(self, traj_reduced, keepFolder=False):
         """ Remove the trajectory from the data base and disk. """
@@ -1854,8 +1894,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                 # Split the processing into daily chunks
                 dt_bins = generateDatetimeBins(
                     proc_dir_dt_beg, proc_dir_dt_end, 
-                    bin_days=1, tzinfo=datetime.timezone.utc, reverse=False
-                    )
+                    bin_days=1, tzinfo=datetime.timezone.utc, reverse=False)
 
                 # check if we've created an extra bucket (might happen if requested timeperiod is less than 24h)
                 if event_time_range is not None:
