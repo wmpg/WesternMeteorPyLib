@@ -1740,18 +1740,20 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
 
     # Remove duplicate trajectories
     if filter_duplicates:
-        print('filtering duplicates')
+        if verbose:
+            print('filtering duplicates by traj_id', datetime.datetime.now().replace(tzinfo=datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))
 
         # check for duplicate trajectory IDs and keep the one with the most stations
         # Create a dataframe of trajectory IDs and trajectories
-        tr_to_check = [{'traj':tr,'traj_id':tr.traj_id} for tr in traj_list]
+        tr_to_check = [{'traj':tr,'traj_id':tr.traj_id, 'jdt_ref':tr.jdt_ref} for tr in traj_list]
         tr_df = pd.DataFrame(tr_to_check)
 
         # find the duplicate ones
         tr_df['dupe']=tr_df.duplicated(subset=['traj_id'])
         dupeids = tr_df[tr_df.dupe].sort_values(by=['traj_id']).traj_id
         duperows = tr_df[tr_df.traj_id.isin(dupeids)]
-        print(f'there are {len(duperows.traj_id.unique())} duplicate trajectory IDs')
+        if verbose:
+            print(f'there are {len(duperows.traj_id.unique())} duplicate trajectory IDs')
 
         # iterate over the dataframe containing the duplicate rows
         for traj_id in duperows.traj_id.unique():
@@ -1769,6 +1771,8 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
                     traj_list.remove(test_traj)
         
         # now filter for events with the same timestamp
+        if verbose:
+            print('filtering by timestamp', datetime.datetime.now().replace(tzinfo=datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))
         filtered_traj_list = []
         skipped_indices = []
 
@@ -1825,7 +1829,8 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
 
 
         traj_list = filtered_traj_list
-
+        if verbose:
+            print('done filtering', datetime.datetime.now().replace(tzinfo=datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))
 
 
     return traj_list
