@@ -1748,7 +1748,7 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
         tr_to_check = [{'traj':tr,'traj_id':tr.traj_id, 'jdt_ref':tr.jdt_ref} for tr in traj_list]
         tr_df = pd.DataFrame(tr_to_check)
 
-        # find the duplicate ones
+        # find the duplicates by Trajectory ID
         tr_df['dupe']=tr_df.duplicated(subset=['traj_id'])
         dupeids = tr_df[tr_df.dupe].sort_values(by=['traj_id']).traj_id
         duperows = tr_df[tr_df.traj_id.isin(dupeids)]
@@ -1773,6 +1773,14 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
         # now filter for events with the same timestamp
         if verbose:
             print('filtering by timestamp', datetime.datetime.now().replace(tzinfo=datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))
+
+        tr_df['dupe']=tr_df.duplicated(subset=['jdt_ref'])
+        dupeids = tr_df[tr_df.dupe].sort_values(by=['jdt_ref']).jdt_ref
+        duperows = tr_df[tr_df.jdt_ref.isin(dupeids)]
+        if verbose:
+            print(f'there are {len(duperows.jdt_ref.unique())} duplicate julian dates', 
+                  datetime.datetime.now().replace(tzinfo=datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))
+
         filtered_traj_list = []
         skipped_indices = []
 
