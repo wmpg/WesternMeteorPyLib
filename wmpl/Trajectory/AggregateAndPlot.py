@@ -1743,31 +1743,32 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
         print('filtering duplicates')
 
         # check for duplicate trajectory IDs and keep the one with the most stations
+        # Create a dataframe of trajectory IDs and trajectories
         tr_to_check = [{'traj':tr,'traj_id':tr.traj_id} for tr in traj_list]
         tr_df = pd.DataFrame(tr_to_check)
+
+        # find the duplicate ones
         tr_df['dupe']=tr_df.duplicated(subset=['traj_id'])
         dupeids = tr_df[tr_df.dupe].sort_values(by=['traj_id']).traj_id
         duperows = tr_df[tr_df.traj_id.isin(dupeids)]
-        print(f'there are {len(duperows.traj_id.unique())} duplicates')
+        print(f'there are {len(duperows.traj_id.unique())} duplicate trajectory IDs')
 
+        # iterate over the dataframe containing the duplicate rows
         for traj_id in duperows.traj_id.unique():
-            #print('checking', traj_id)
             num_stats = 0
             best_traj = None
             # find duplicate with largest number of observations
-            print(f'there are {len(duperows[duperows.traj_id==traj_id])} for {traj_id}')
             for test_traj in duperows[duperows.traj_id==traj_id].traj:
                 participating_stations = sorted([obs.station_id for obs in test_traj.observations if obs.ignore_station is False])
                 if len(participating_stations) > num_stats:
                     num_stats = len(participating_stations)
                     best_traj = test_traj
-                    print(best_traj.longname)
             # now remove all except the best
             for test_traj in duperows[duperows.traj_id==traj_id].traj:
                 if test_traj != best_traj:
-                    print('need to skip', test_traj.traj_id, test_traj.longname)
                     traj_list.remove(test_traj)
         
+        # now filter for events with the same timestamp
         filtered_traj_list = []
         skipped_indices = []
 
