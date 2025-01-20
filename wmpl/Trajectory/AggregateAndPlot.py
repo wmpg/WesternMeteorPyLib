@@ -1782,11 +1782,11 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
 
         # iterate over the dataframe containing the duplicate rows
         for jdt_ref in duperows.jdt_ref.unique():
-            matches = duperows[duperows.jdt_ref==jdt_ref].traj
+            matches = duperows[duperows.jdt_ref==jdt_ref]
             for i in range(len(matches)):
                 traj1 = matches.iloc[i].traj
                 part_sta1 = sorted([obs.station_id for obs in traj1.observations if obs.ignore_station is False])
-                for j in range(i+1, matches+1):
+                for j in range(i+1, matches):
                     traj2 = matches.iloc[j].traj
                     part_sta2 = sorted([obs.station_id for obs in traj2.observations if obs.ignore_station is False])
                     # if the same stations involved, its probably a duplicate
