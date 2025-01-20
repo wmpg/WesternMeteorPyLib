@@ -1778,7 +1778,7 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
         dupeids = tr_df[tr_df.dupe].sort_values(by=['jdt_ref']).jdt_ref
         duperows = tr_df[tr_df.jdt_ref.isin(dupeids)]
         if verbose:
-            print(f'there are {len(duperows.jdt_ref.unique())} duplicate julian dates')
+            print(f'there are {len(duperows.jdt_ref.unique())} duplicates by julian date')
 
         # iterate over the dataframe containing the duplicate rows
         for jdt_ref in duperows.jdt_ref.unique():
