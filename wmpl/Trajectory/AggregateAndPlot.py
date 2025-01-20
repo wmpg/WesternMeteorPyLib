@@ -1786,9 +1786,11 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
             for traj1 in matches:
                 part_sta1 = sorted([obs.station_id for obs in traj1.observations if obs.ignore_station is False])
                 for traj2 in matches:
-                    if traj1 == traj2:
+                    # avoid comparing to itself
+                    if traj1.traj_id == traj2.traj_id:
                         continue
                     part_sta2 = sorted([obs.station_id for obs in traj2.observations if obs.ignore_station is False])
+                    # if the same stations involved, its probably a duplicate
                     if part_sta1 == part_sta2:
                         worse_traj = None
                         # If the duplicate has a smaller radiant error, take it instead of the first trajectory
