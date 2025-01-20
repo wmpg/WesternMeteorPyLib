@@ -17,7 +17,6 @@ import multiprocessing
 import logging
 import logging.handlers
 import glob
-import pandas as pd
 from dateutil.relativedelta import relativedelta
 import numpy as np
 
@@ -130,9 +129,6 @@ class TrajectoryReduced(object):
                 self.phase_1_only = traj.phase_1_only
             else:
                 self.phase_1_only = False
-
-            if hasattr(traj, 'traj_id'):
-                self.traj_id = traj.traj_id
 
         # Load values from a dictionary
         else:
@@ -297,7 +293,7 @@ class DatabaseJSON(object):
 
             # Init the reduced trajectory object
             traj_reduced = TrajectoryReduced(traj_file_path)
-            log.info(f' loaded {traj_file_path}, traj_id {traj_reduced.traj_id}')
+
             # Skip if failed
             if traj_reduced is None:
                 return None
@@ -306,9 +302,9 @@ class DatabaseJSON(object):
                 return None
 
         else:
+
             # Use the provided trajectory object
             traj_reduced = traj_obj
-            log.info(f' loaded {traj_obj.traj_file_path}, traj_id {traj_reduced.traj_id}')
 
 
         # Choose to which dictionary the trajectory will be added
@@ -322,8 +318,6 @@ class DatabaseJSON(object):
         # Add the trajectory to the list (key is the reference JD)
         if traj_reduced.jdt_ref not in traj_dict:
             traj_dict[traj_reduced.jdt_ref] = traj_reduced
-        else:
-            traj_dict[traj_reduced.jdt_ref].traj_id = traj_reduced.traj_id
 
 
 
@@ -1136,40 +1130,6 @@ class RMSDataHandle(object):
                 and (self.db.trajectories[key].jdt_ref <= jd_end)]
                 
 
-    def removeDuplicateTrajectories(self):
-        """ Remove trajectories with duplicate IDs
-            keeping the one with the most station observations
-        """
-
-        log.info('removing duplicate trajectories')
-        # 
-        tr_to_check = [{'jdt_ref':jdt_ref,'traj_id':self.db.trajectories[jdt_ref].traj_id} for 
-              jdt_ref in self.db.trajectories if hasattr(self.db.trajectories[jdt_ref],'traj_id')]
-        tr_df = pd.DataFrame(tr_to_check)
-        tr_df['dupe']=tr_df.duplicated(subset=['traj_id'])
-        dupeids = tr_df[tr_df.dupe].sort_values(by=['traj_id']).traj_id
-        duperows = tr_df[tr_df.traj_id.isin(dupeids)]
-
-        print(f'there are {len(tr_df)/2} duplicate trajectories')
-        
-        # iterate over the duplicates, finding the best and removing the others
-        for traj_id in duperows.traj_id.unique():
-            num_stats = 0
-            best_traj = None
-            # find duplicate with largest number of observations
-            for testdt in duperows[duperows.traj_id==traj_id].jdt_ref.values:
-                if len(dh.db.trajectories[testdt].participating_stations) > num_stats:
-                    best_traj = testdt
-                    num_stats = len(dh.db.trajectories[testdt].participating_stations)
-
-            # now remove all except the best
-            for testdt in duperows[duperows.traj_id==traj_id].jdt_ref.values:
-                if testdt != best_traj:
-                    print(f'removing {dh.db.trajectories[testdt].traj_file_path}')
-                    self.db.removeTrajectory(dh.db.trajectories[testdt])
-         
-        return 
-    
 
     def getPlatepar(self, met_obs):
         """ Return the platepar of the meteor observation. """
@@ -1894,7 +1854,8 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                 # Split the processing into daily chunks
                 dt_bins = generateDatetimeBins(
                     proc_dir_dt_beg, proc_dir_dt_end, 
-                    bin_days=1, tzinfo=datetime.timezone.utc, reverse=False)
+                    bin_days=1, tzinfo=datetime.timezone.utc, reverse=False
+                    )
 
                 # check if we've created an extra bucket (might happen if requested timeperiod is less than 24h)
                 if event_time_range is not None:
@@ -1933,7 +1894,6 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                     # refresh list of calculated trajectories from disk
                     dh.removeDeletedTrajectories()
                     dh.loadComputedTrajectories(os.path.join(dh.output_dir, OUTPUT_TRAJ_DIR), dt_range=[bin_beg, bin_end])
-                    dh.removeDuplicateTrajectories()
 
                     # Run the trajectory correlator
                     tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True, enableOSM=cml_args.enableOSM)
