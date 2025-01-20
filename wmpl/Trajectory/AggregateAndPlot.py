@@ -1810,9 +1810,12 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
                             else:
                                 if traj2.uncertainties is not None:
                                     worse_traj = traj1
-                        if worse_traj:
+                        if worse_traj is not None:
                             print(f'removing {worse_traj.traj_id}')
-                            traj_list.remove(worse_traj)
+                            try:
+                                traj_list.remove(worse_traj)
+                            except:
+                                pass
         if verbose:
             print('done filtering', datetime.datetime.now().replace(tzinfo=datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))
 
