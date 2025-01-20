@@ -443,10 +443,10 @@ def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir,
         import matplotlib
         import matplotlib.pyplot as plt
 
-    # Otherwise, use global variables
+    # Otherwise, use global variables (and suppress linter warnings)
     else:
-        global matplotlib
-        global plt
+        global matplotlib   # type: ignore
+        global plt          # type: ignore
 
 
     ### PLOT SUN-CENTERED GEOCENTRIC ECLIPTIC RADIANTS ###
@@ -1778,65 +1778,40 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
         dupeids = tr_df[tr_df.dupe].sort_values(by=['jdt_ref']).jdt_ref
         duperows = tr_df[tr_df.jdt_ref.isin(dupeids)]
         if verbose:
-            print(f'there are {len(duperows.jdt_ref.unique())} duplicate julian dates', 
-                  datetime.datetime.now().replace(tzinfo=datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))
+            print(f'there are {len(duperows.jdt_ref.unique())} duplicate julian dates')
 
-        filtered_traj_list = []
-        skipped_indices = []
-
-        for i, traj1 in enumerate(traj_list):
-
-            # Skip already checked duplicates
-            if i in skipped_indices:
-                continue
-
-            # Set the first trajectory as the candidate
-            candidate_traj = traj1
-
-            for traj2 in traj_list[i + 1:]:
-
-                # Check if the trajectories have the same time
-                if traj1.jdt_ref == traj2.jdt_ref:
-
-                    # Check if they have the same stations
-                    if set([obs.station_id for obs in traj1.observations]) == set([obs.station_id for obs in traj2.observations]):
-
-                        # If the duplicate has a smaller radiant error, take it instead of the first
-                        #   trajectory
+        # iterate over the dataframe containing the duplicate rows
+        for jdt_ref in duperows.jdt_ref.unique():
+            matches = duperows[duperows.jdt_ref==jdt_ref].traj
+            for traj1 in matches:
+                part_sta1 = sorted([obs.station_id for obs in traj1.observations if obs.ignore_station is False])
+                for traj2 in matches:
+                    if traj1 == traj2:
+                        continue
+                    part_sta2 = sorted([obs.station_id for obs in traj2.observations if obs.ignore_station is False])
+                    if part_sta1 == part_sta2:
+                        worse_traj = None
+                        # If the duplicate has a smaller radiant error, take it instead of the first trajectory
                         if hasattr(traj1, 'uncertainties') and hasattr(traj2, 'uncertainties'):
-                                
                             if traj1.uncertainties is not None:
-
                                 if traj2.uncertainties is not None:
-
                                     # Compute the radiant errors
                                     traj1_rad_error = np.hypot(traj1.uncertainties.ra_g, 
                                         traj1.uncertainties.dec_g)
                                     traj2_rad_error = np.hypot(traj2.uncertainties.ra_g, 
                                         traj2.uncertainties.dec_g)
-
-                                    # Take the second candidate if the radiant error is smaller
                                     if traj2_rad_error < traj1_rad_error:
-                                        candidate_traj = traj2
-
+                                        worse_traj = traj1
+                                    else:
+                                        worse_traj = traj2
 
                             # If the first candidate doesn't have estimated errors, but the second one does,
                             #   use that one
                             else:
                                 if traj2.uncertainties is not None:
-                                    candidate_traj = traj2
-
-                        
-                        # Add duplicate to the already checked list
-                        skipped_indices.append(traj_list.index(traj2))
-
-
-
-
-            filtered_traj_list.append(candidate_traj)
-
-
-        traj_list = filtered_traj_list
+                                    worse_traj = traj1
+                        if worse_traj:
+                            traj_list.remove(worse_traj)
         if verbose:
             print('done filtering', datetime.datetime.now().replace(tzinfo=datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))
 
