@@ -1812,7 +1812,8 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
                                 if traj2.uncertainties is not None:
                                     worse_traj = traj1
                         if worse_traj is not None:
-                            print(f'removing {worse_traj.traj_id}')
+                            if verbose:
+                                print(f'removing {worse_traj.traj_id}')
                             try:
                                 traj_list.remove(worse_traj)
                             except:
