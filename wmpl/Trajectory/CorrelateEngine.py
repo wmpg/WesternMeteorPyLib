@@ -1109,7 +1109,7 @@ class TrajectoryCorrelator(object):
                 dt_bin_list = generateDatetimeBins(
                     dt_beg, dt_end, 
                     bin_days=1, utc_hour_break=12, tzinfo=datetime.timezone.utc, reverse=False
-                    )
+                )
                 
         else:
             dt_beg = self.dh.dt_range[0]
