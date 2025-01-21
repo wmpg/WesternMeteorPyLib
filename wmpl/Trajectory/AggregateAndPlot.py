@@ -9,6 +9,7 @@ import datetime
 import shutil
 
 import numpy as np
+import pandas as pd
 import scipy.integrate
 import scipy.ndimage
 import scipy.stats
@@ -442,10 +443,10 @@ def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir,
         import matplotlib
         import matplotlib.pyplot as plt
 
-    # Otherwise, use global variables
+    # Otherwise, use global variables (and suppress linter warnings)
     else:
-        global matplotlib
-        global plt
+        global matplotlib   # type: ignore
+        global plt          # type: ignore
 
 
     ### PLOT SUN-CENTERED GEOCENTRIC ECLIPTIC RADIANTS ###
@@ -1734,70 +1735,91 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
                 # Add the trajectory to the output list
                 traj_list.append(traj)
 
-
     # Sort trajectories by time
     traj_list = sorted(traj_list, key=lambda x: x.jdt_ref)
 
     # Remove duplicate trajectories
     if filter_duplicates:
+        if verbose:
+            print('filtering duplicates by traj_id', datetime.datetime.now().replace(tzinfo=datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))
+
+        # check for duplicate trajectory IDs and keep the one with the most stations
+        # Create a dataframe of trajectory IDs and trajectories
+        tr_to_check = [{'traj':tr,'traj_id':tr.traj_id, 'jdt_ref':tr.jdt_ref} for tr in traj_list]
+        tr_df = pd.DataFrame(tr_to_check)
+
+        # find the duplicates by Trajectory ID
+        tr_df['dupe']=tr_df.duplicated(subset=['traj_id'])
+        dupeids = tr_df[tr_df.dupe].sort_values(by=['traj_id']).traj_id
+        duperows = tr_df[tr_df.traj_id.isin(dupeids)]
+        if verbose:
+            print(f'there are {len(duperows.traj_id.unique())} duplicate trajectory IDs')
+
+        # iterate over the dataframe containing the duplicate rows
+        for traj_id in duperows.traj_id.unique():
+            num_stats = 0
+            best_traj = None
+            # find duplicate with largest number of observations
+            for test_traj in duperows[duperows.traj_id==traj_id].traj:
+                participating_stations = sorted([obs.station_id for obs in test_traj.observations if obs.ignore_station is False])
+                if len(participating_stations) > num_stats:
+                    num_stats = len(participating_stations)
+                    best_traj = test_traj
+            # now remove all except the best
+            for test_traj in duperows[duperows.traj_id==traj_id].traj:
+                if test_traj != best_traj:
+                    traj_list.remove(test_traj)
         
-        filtered_traj_list = []
-        skipped_indices = []
+        # now filter for events with the same timestamp
+        if verbose:
+            print('filtering by timestamp', datetime.datetime.now().replace(tzinfo=datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))
 
-        for i, traj1 in enumerate(traj_list):
+        tr_df['dupe']=tr_df.duplicated(subset=['jdt_ref'])
+        dupeids = tr_df[tr_df.dupe].sort_values(by=['jdt_ref']).jdt_ref
+        duperows = tr_df[tr_df.jdt_ref.isin(dupeids)]
+        if verbose:
+            print(f'there are {len(duperows.jdt_ref.unique())} duplicates by julian date')
 
-            # Skip already checked duplicates
-            if i in skipped_indices:
-                continue
-
-            # Set the first trajectory as the candidate
-            candidate_traj = traj1
-
-            for traj2 in traj_list[i + 1:]:
-
-                # Check if the trajectories have the same time
-                if traj1.jdt_ref == traj2.jdt_ref:
-
-                    # Check if they have the same stations
-                    if set([obs.station_id for obs in traj1.observations]) == set([obs.station_id for obs in traj2.observations]):
-
-                        # If the duplicate has a smaller radiant error, take it instead of the first
-                        #   trajectory
+        # iterate over the dataframe containing the duplicate rows
+        for jdt_ref in duperows.jdt_ref.unique():
+            matches = duperows[duperows.jdt_ref==jdt_ref]
+            for i in range(len(matches)):
+                traj1 = matches.iloc[i].traj
+                part_sta1 = sorted([obs.station_id for obs in traj1.observations if obs.ignore_station is False])
+                for j in range(i+1, len(matches)):
+                    traj2 = matches.iloc[j].traj
+                    part_sta2 = sorted([obs.station_id for obs in traj2.observations if obs.ignore_station is False])
+                    # if the same stations involved, its probably a duplicate
+                    if part_sta1 == part_sta2:
+                        worse_traj = None
+                        # If the duplicate has a smaller radiant error, take it instead of the first trajectory
                         if hasattr(traj1, 'uncertainties') and hasattr(traj2, 'uncertainties'):
-                                
                             if traj1.uncertainties is not None:
-
                                 if traj2.uncertainties is not None:
-
                                     # Compute the radiant errors
                                     traj1_rad_error = np.hypot(traj1.uncertainties.ra_g, 
                                         traj1.uncertainties.dec_g)
                                     traj2_rad_error = np.hypot(traj2.uncertainties.ra_g, 
                                         traj2.uncertainties.dec_g)
-
-                                    # Take the second candidate if the radiant error is smaller
                                     if traj2_rad_error < traj1_rad_error:
-                                        candidate_traj = traj2
-
+                                        worse_traj = traj1
+                                    else:
+                                        worse_traj = traj2
 
                             # If the first candidate doesn't have estimated errors, but the second one does,
                             #   use that one
                             else:
                                 if traj2.uncertainties is not None:
-                                    candidate_traj = traj2
-
-                        
-                        # Add duplicate to the already checked list
-                        skipped_indices.append(traj_list.index(traj2))
-
-
-
-
-            filtered_traj_list.append(candidate_traj)
-
-
-        traj_list = filtered_traj_list
-
+                                    worse_traj = traj1
+                        if worse_traj is not None:
+                            if verbose:
+                                print(f'removing {worse_traj.traj_id}')
+                            try:
+                                traj_list.remove(worse_traj)
+                            except:
+                                pass
+        if verbose:
+            print('done filtering', datetime.datetime.now().replace(tzinfo=datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))
 
 
     return traj_list
