@@ -1168,8 +1168,8 @@ class RMSDataHandle(object):
 
             # now remove all except the best
             for testdt in duperows[duperows.traj_id==traj_id].jdt_ref.values:
+                traj = dh.db.trajectories[testdt]
                 if testdt != best_traj_dt:
-                    traj = dh.db.trajectories[testdt]
                     # get the current trajectory's location. If its the same as that of the best trajectory
                     # don't try to delete the solution from disk even if there's a small difference in jdt_ref
                     keepFolder = False
