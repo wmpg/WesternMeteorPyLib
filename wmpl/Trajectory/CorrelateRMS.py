@@ -1149,9 +1149,11 @@ class RMSDataHandle(object):
         duperows = tr_df[tr_df.traj_id.isin(dupeids)]
 
         log.info(f'there are {int(len(duperows)/2)} duplicate trajectories')
+
         
         # iterate over the duplicates, finding the best and removing the others
         for traj_id in duperows.traj_id.unique():
+            print(traj_id, duperows[duperows.traj_id==traj_id].traj_file_path)
             num_stats = 0
             best_traj_dt = None
             # find duplicate with largest number of observations
@@ -1169,7 +1171,7 @@ class RMSDataHandle(object):
                     traj_file_name = os.path.split(traj.traj_file_path)[1]
                     traj.traj_file_path = os.path.join(traj_path, traj_file_name)
                     log.info(f'removing duplicate {traj.traj_file_path}')
-                    self.db.removeTrajectory(traj)
+                    #self.db.removeTrajectory(traj)
          
         return 
     
