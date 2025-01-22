@@ -1180,7 +1180,7 @@ class RMSDataHandle(object):
                     traj_file_name = os.path.split(traj.traj_file_path)[1]
                     traj.traj_file_path = os.path.join(traj_path, traj_file_name)
                     log.info(f'removing duplicate {traj.traj_id} keep {traj.traj_file_path} {keepFolder}')
-                    #self.db.removeTrajectory(traj, keepFolder=keepFolder)
+                    self.db.removeTrajectory(traj, keepFolder=keepFolder)
                 else:
                     log.info(f'keeping {traj.traj_id} {traj.traj_file_path}')
          
