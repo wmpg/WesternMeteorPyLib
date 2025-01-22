@@ -1134,15 +1134,16 @@ class RMSDataHandle(object):
                 and (self.db.trajectories[key].jdt_ref <= jd_end)]
                 
 
-    def removeDuplicateTrajectories(self):
+    def removeDuplicateTrajectories(self, dt_range):
         """ Remove trajectories with duplicate IDs
             keeping the one with the most station observations
         """
-
+        
         log.info('removing duplicate trajectories')
-        # 
-        tr_to_check = [{'jdt_ref':jdt_ref,'traj_id':self.db.trajectories[jdt_ref].traj_id} for 
-              jdt_ref in self.db.trajectories if hasattr(self.db.trajectories[jdt_ref],'traj_id')]
+        
+        tr_in_scope = self.getComputedTrajectories(datetime2JD(dt_range[0]), datetime2JD(dt_range[1]))
+        tr_to_check = [{'jdt_ref':traj.jdt_ref,'traj_id':traj.traj_id, 'traj': traj} for traj in tr_in_scope if hasattr(traj,'traj_id')]
+        
         tr_df = pd.DataFrame(tr_to_check)
         tr_df['dupe']=tr_df.duplicated(subset=['traj_id'])
         dupeids = tr_df[tr_df.dupe].sort_values(by=['traj_id']).traj_id
@@ -1155,22 +1156,31 @@ class RMSDataHandle(object):
         for traj_id in duperows.traj_id.unique():
             num_stats = 0
             best_traj_dt = None
+            best_traj_path = None
             # find duplicate with largest number of observations
             for testdt in duperows[duperows.traj_id==traj_id].jdt_ref.values:
                 if len(dh.db.trajectories[testdt].participating_stations) > num_stats:
                     best_traj_dt = testdt
                     num_stats = len(dh.db.trajectories[testdt].participating_stations)
+                    # sometimes the database contains duplicates that differ by microseconds in jdt. These
+                    # will have overwritten each other in the folder so make a note of the  location.
+                    best_traj_path = dh.db.trajectories[testdt].traj_file_path
 
             # now remove all except the best
             for testdt in duperows[duperows.traj_id==traj_id].jdt_ref.values:
                 if testdt != best_traj_dt:
                     traj = dh.db.trajectories[testdt]
+                    # get the current trajectory's location. If its the same as that of the best trajectory
+                    # don't try to delete the solution from disk even if there's a small difference in jdt_ref
+                    keepFolder = False
+                    if traj.traj_file_path == best_traj_path:
+                        keepFolder = True
                     # Update the trajectory path to make sure we're working with the correct filesystem
                     traj_path = self.generateTrajOutputDirectoryPath(traj)
                     traj_file_name = os.path.split(traj.traj_file_path)[1]
                     traj.traj_file_path = os.path.join(traj_path, traj_file_name)
-                    log.info(f'removing duplicate {traj.traj_id} {traj.traj_file_path}')
-                    #self.db.removeTrajectory(traj)
+                    log.info(f'removing duplicate {traj.traj_id} keep {traj.traj_file_path} {keepFolder}')
+                    #self.db.removeTrajectory(traj, keepFolder=keepFolder)
                 else:
                     log.info(f'keeping {traj.traj_id} {traj.traj_file_path}')
          
@@ -1940,7 +1950,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                     # refresh list of calculated trajectories from disk
                     dh.removeDeletedTrajectories()
                     dh.loadComputedTrajectories(os.path.join(dh.output_dir, OUTPUT_TRAJ_DIR), dt_range=[bin_beg, bin_end])
-                    dh.removeDuplicateTrajectories()
+                    dh.removeDuplicateTrajectories(dt_range=[bin_beg, bin_end])
 
                     # Run the trajectory correlator
                     tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True, enableOSM=cml_args.enableOSM)
