@@ -337,10 +337,9 @@ class DatabaseJSON(object):
         # Remove the trajectory folder on the disk
         if not keepFolder and os.path.isfile(traj_reduced.traj_file_path):
             traj_dir = os.path.dirname(traj_reduced.traj_file_path)
-            log.info(f'removing {traj_dir}')
             shutil.rmtree(traj_dir, ignore_errors=True)
-        if os.path.isfile(traj_reduced.traj_file_path):
-            log.info(f'unable to remove {traj_dir}')
+            if os.path.isfile(traj_reduced.traj_file_path):
+                log.info(f'unable to remove {traj_dir}')
 
 
 
@@ -1033,9 +1032,9 @@ class RMSDataHandle(object):
             traj_reduced = self.db.trajectories[trajkey]
             traj_path = os.path.join(self.output_dir, traj_reduced.traj_file_path)
             if not os.path.isfile(traj_path):
-                log.info(f' removing {traj_reduced.traj_file_path}')
                 trajs_to_remove.append(traj_reduced)
         for traj in trajs_to_remove:
+            log.info(f' removing deleted {traj.traj_file_path}')
             self.db.removeTrajectory(traj)
         #self.saveDatabase()
         return 
@@ -1169,8 +1168,8 @@ class RMSDataHandle(object):
                     traj_path = self.generateTrajOutputDirectoryPath(traj)
                     traj_file_name = os.path.split(traj.traj_file_path)[1]
                     traj.traj_file_path = os.path.join(traj_path, traj_file_name)
-                    print(f'removing {traj.traj_file_path}')
-                    #self.db.removeTrajectory(traj)
+                    log.info(f'removing duplicate {traj.traj_file_path}')
+                    self.db.removeTrajectory(traj)
          
         return 
     

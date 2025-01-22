@@ -1031,7 +1031,7 @@ class TrajectoryCorrelator(object):
                 traj.phase_1_only = True
 
             if orig_traj:
-                log.info("Removing the previous solution...")
+                log.info(f"Removing the previous solution {os.path.dirname(orig_traj.traj_file_path)} ...")
                 self.dh.removeTrajectory(orig_traj)
                 traj.pre_mc_longname = os.path.split(self.dh.generateTrajOutputDirectoryPath(orig_traj, make_dirs=False))[-1] 
 
