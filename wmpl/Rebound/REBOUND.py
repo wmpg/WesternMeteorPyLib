@@ -8,7 +8,7 @@ import rebound as rb
 import reboundx
 from reboundx import constants as rbxConstants
 
-from astropy.time import Time
+import astropy.time
 
 from wmpl.Utils.TrajConversions import (
     J2000_JD,
@@ -220,8 +220,12 @@ def reboundSimulate(
 
 
     # Convert from UTC to TDB
-    time_utc = Time(julian_date, format='jd', scale='utc')
+    time_utc = astropy.time.Time(julian_date, format='jd', scale='utc')
     time_tdb = time_utc.tdb.jd
+
+    # TEST - compare to the already computed dynamical time
+    print("astropy dynamical time:", time_tdb)
+    print("computed dynamical time:", jd2DynamicalTimeJD(julian_date))
 
     # Set up the number of outputs and the time array
     if direction == "forward":
