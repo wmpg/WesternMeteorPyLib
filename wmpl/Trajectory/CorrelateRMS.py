@@ -164,7 +164,7 @@ class DatabaseJSON(object):
         self.verbose = False
         if verbose:
             self.verbose = True
-        print(f'self.verbose is {self.verbose}')
+        print(f'self.verbose is {self.verbose} here')
 
         # Load the database from a JSON file
         self.load()
@@ -195,6 +195,7 @@ class DatabaseJSON(object):
 
                     # Set the trajectory dictionary
                     setattr(self, traj_dict_str, trajectories_obj_dict)
+        print(f'self.verbose is {self.verbose} here')
 
 
     def save(self):
