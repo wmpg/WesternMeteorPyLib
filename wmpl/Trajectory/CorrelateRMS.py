@@ -1031,11 +1031,12 @@ class RMSDataHandle(object):
         for trajkey in keys:
             traj_reduced = self.db.trajectories[trajkey]
             traj_path = os.path.join(self.output_dir, traj_reduced.traj_file_path)
+            log.info(f' testing {traj_path}')
             if not os.path.isfile(traj_path):
                 trajs_to_remove.append(traj_reduced)
         for traj in trajs_to_remove:
             log.info(f' removing deleted {traj.traj_file_path}')
-            self.db.removeTrajectory(traj)
+            self.db.removeTrajectory(traj, True)
         #self.saveDatabase()
         return 
 
@@ -1151,7 +1152,7 @@ class RMSDataHandle(object):
         dupeids = tr_df[tr_df.dupe].sort_values(by=['traj_id']).traj_id
         duperows = tr_df[tr_df.traj_id.isin(dupeids)]
 
-        log.info(f'there are {int(len(duperows)/2)} duplicate trajectories')
+        log.info(f'there are {duperows} duplicate trajectories')
 
         
         # iterate over the duplicates, finding the best and removing the others
