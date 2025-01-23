@@ -141,7 +141,7 @@ class TrajectoryReduced(object):
 
 
 class DatabaseJSON(object):
-    def __init__(self, db_file_path):
+    def __init__(self, db_file_path, verbose=False):
 
         self.db_file_path = db_file_path
 
@@ -160,6 +160,8 @@ class DatabaseJSON(object):
         # List of failed trajectories (keys are trajectory reference julian dates, values are \
         #   TrajectoryReduced objects)
         self.failed_trajectories = {}
+
+        self.verbose = verbose
 
         # Load the database from a JSON file
         self.load()
@@ -308,7 +310,8 @@ class DatabaseJSON(object):
         else:
             # Use the provided trajectory object
             traj_reduced = traj_obj
-            log.info(f' loaded {traj_obj.traj_file_path}, traj_id {traj_reduced.traj_id}')
+            if self.verbose:
+                log.info(f' loaded {traj_obj.traj_file_path}, traj_id {traj_reduced.traj_id}')
 
 
         # Choose to which dictionary the trajectory will be added
@@ -551,7 +554,7 @@ class RMSDataHandle(object):
 
         if mcmode != 2:
             log.info("Loading database: {:s}".format(database_path))
-            self.db = DatabaseJSON(database_path)
+            self.db = DatabaseJSON(database_path, verbose=self.verbose)
             log.info('Archiving older entries....')
             try:
                 self.archiveOldRecords(older_than=3)
@@ -625,7 +628,7 @@ class RMSDataHandle(object):
         archdate_jd = datetime2JD(archdate)
 
         arch_db_path = os.path.join(self.db_dir, f'{archdate.strftime("%Y%m")}_{JSON_DB_NAME}')
-        archdb = DatabaseJSON(arch_db_path)
+        archdb = DatabaseJSON(arch_db_path, verbose=self.verbose)
         log.info(f'Archiving db records to {arch_db_path}...')
 
         for traj in [t for t in self.db.trajectories if t < archdate_jd]:
