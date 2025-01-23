@@ -386,12 +386,12 @@ if __name__ == "__main__":
 
     # Print the -60 and +60 days simulation orbital elements
     print("Orbital elements {:.2f} days from the epoch {:.6f} {:s}".format(sim_days, traj.jdt_ref, direction))
-    print("a = ", sim_outputs[-1][2].a)
-    print("e = ", sim_outputs[-1][2].e)
-    print("inc = ", sim_outputs[-1][2].inc)
-    print("Omega = ", sim_outputs[-1][2].Omega)
-    print("omega = ", sim_outputs[-1][2].omega)
-    print("f = ", sim_outputs[-1][2].f)
+    print("a    = {:>10.6} AU", sim_outputs[-1][2].a)
+    print("e    = {:>10.6}", sim_outputs[-1][2].e)
+    print("i    = {:>10.6} deg", np.degrees(sim_outputs[-1][2].inc))
+    print("peri = {:>10.6} deg", np.degrees(sim_outputs[-1][2].Omega))
+    print("node = {:>10.6} deg", np.degrees(sim_outputs[-1][2].omega))
+    print("f    = {:>10.6} deg", np.degrees(sim_outputs[-1][2].f))
 
     # Plot the orbital elements of the before and after simulation on the same plot (one subplot for each element)
     fig, axs = plt.subplots(3, 2, figsize=(12, 8))
