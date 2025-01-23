@@ -1,8 +1,15 @@
-import rebound as rb
+""" Functions for running REBOUND simulations on wmpl trajectories. """
+
 import numpy as np
-import reboundx
 import scipy
+import matplotlib.pyplot as plt
+
+import rebound as rb
+import reboundx
 from reboundx import constants as rbxConstants
+
+from astropy.time import Time
+
 from wmpl.Utils.TrajConversions import (
     J2000_JD,
     equatorialCoordPrecession,
@@ -12,7 +19,6 @@ from wmpl.Utils.TrajConversions import (
     raDec2ECI
 )
 from wmpl.Utils.Earth import calcTrueObliquity
-from astropy.time import Time
 
 
 def convertToBarycentric(state_vect, jd, log_file_path=""):
@@ -150,7 +156,7 @@ def convertToBarycentric(state_vect, jd, log_file_path=""):
 def reboundSimulate(
         julian_date, state_vect, traj=None, 
         direction="forward", tsimend=60, n_outputs=500, obj_name="obj", obj_mass=0.0, 
-        state_vect_log=""):
+        verbose=False):
     """ Takes an state vector (or a Trajectory object), runs REBOUND and produces orbital elements for the 
     object at the end of the simulation or at the specified time.
 
@@ -171,13 +177,32 @@ def reboundSimulate(
         obj_mass: [float] Mass of object in solar masses if asteroid or larger object, default is 0.0.
 
     Keyword arguments:
-        state_vect_log: [str] Path to a log file where the state vector output will be written. If not given,
-            the output will be written to the standard output.
+        verbose: [bool] If True, print out the progress of the simulation.
 
     Return:
-        None
+        outputs: [list] List of outputs, each containing the time, state vector and orbital elements at that 
+            time.
 
     """
+
+    # If the trajectory is given, override the julian_date and state_vect arguments
+    if traj is not None:
+
+        # Extract the state vector from the trajectory
+        x, y, z = traj.state_vect_mini
+        vx, vy, vz = traj.v_init*traj.radiant_eci_mini
+        state_vect = [x, y, z, vx, vy, vz]
+
+        # Extract the Julian date from the trajectory
+        julian_date = traj.jdt_ref
+
+    # If the state vector is not given, raise an error
+    if state_vect is None:
+        raise ValueError("The state_vect argument must be given if the traj argument is not given.")
+    
+    # If the Julian date is not given, raise an error
+    if julian_date is None:
+        raise ValueError("The julian_date argument must be given if the traj argument is not given.")
 
     # Set up the simulation
     sim = rb.Simulation()
@@ -223,7 +248,16 @@ def reboundSimulate(
 
     # To start the meteoroid in the right spot, we need to feed in x,y,z barycentric position in AU
     # The velocity should be in AU/year divided by 2pi
-    state_vect_rot = convertToBarycentric(state_vect, time_tdb, state_vect_log)
+    state_vect_rot = convertToBarycentric(state_vect, time_tdb)
+
+    if verbose:
+        print("Initial state vector in ECI coordinates:")
+        print("[ x,  y,  z] = ", state_vect[:3])
+        print("[vx, vy, vz] = ", state_vect[3:])
+
+        print("Initial state vector in barycentric coordinates:")
+        print("[ x,  y,  z] = ", state_vect_rot[:3])
+        print("[vx, vy, vz] = ", state_vect_rot[3:])
 
     # Add the meteoroid to the simulation
     sim.add(
@@ -262,27 +296,28 @@ def reboundSimulate(
     sim.collision_resolve_keep_sorted = 1
     sim.track_energy_offset = 1
 
-    with open(f"{obj_name}.txt", "a") as log_file:
+    outputs = []
 
-        def log(message):
-            log_file.write(message + "\n")
+    # Integrate the simulation and save the state vectors and orbital elements in the output list
+    # These are not time steps, but the times at which the simulation state is saved
+    for i, time in enumerate(times):
 
-        for i, time in enumerate(times):
-            if i % 25 == 0:
-                print(f"loop iter = {i}, {time}")
-            sim.move_to_com()
-            sim.integrate(time)
-            sim.move_to_hel()
-            if i == 0:
-                log(f"Heliocentric J2000 State Vec: {ps[obj_name]}")
-        log("Integrated Object Orbital Elements (J2000, Heliocentric, 60 days prior):")
-        log(f'a (AU): {ps[obj_name].orbit(primary=ps["Sun"]).a}')
-        log(f'e: {ps[obj_name].orbit(primary=ps["Sun"]).e}')
-        log(f'i (degrees): {np.rad2deg(ps[obj_name].orbit(primary=ps["Sun"]).inc)}')
-        log(
-            f'node (degrees): {np.rad2deg(ps[obj_name].orbit(primary=ps["Sun"]).Omega)}'
-        )
-    return
+        if verbose and (i%25 == 0):
+            print(f"loop iter = {i}, {time}")
+
+        sim.move_to_com()
+        sim.integrate(time)
+        sim.move_to_hel()
+
+        # Extract the heliocentric state vector
+        state_vect_hel = [ps[obj_name].x, ps[obj_name].y, ps[obj_name].z, ps[obj_name].vx, ps[obj_name].vy, ps[obj_name].vz]
+
+        # Extract the orbital elements
+        orb_elem = ps[obj_name].orbit(primary=ps["Sun"])
+
+        outputs.append([time, state_vect_hel, orb_elem])
+
+    return outputs
 
 
 if __name__ == "__main__":
@@ -306,13 +341,58 @@ if __name__ == "__main__":
     # Load the trajectory data from a pickle file
     traj = loadPickle(*os.path.split(args.pickle_path))
 
+    
+    # Run the simulation -60 and +60 days from the epoch of the trajectory
+    sims_60back = reboundSimulate(None, None, traj=traj, direction="backward", tsimend=60, 
+                                  obj_name=traj.traj_id)
+    sims_60fwrd = reboundSimulate(None, None, traj=traj, direction="forward",  tsimend=60, 
+                                  obj_name=traj.traj_id)
 
-    # import pandas as pd
-    # import ast
 
-    # # Read in the test objects
-    # df = pd.read_csv("test_objects.csv", header=0)
+    # Print the -60 and +60 days simulation orbital elements
+    print("Orbital elements -60 days:")
+    print("a = ", sims_60back[-1][2].a)
+    print("e = ", sims_60back[-1][2].e)
+    print("inc = ", sims_60back[-1][2].inc)
+    print("Omega = ", sims_60back[-1][2].Omega)
+    print("omega = ", sims_60back[-1][2].omega)
+    print("f = ", sims_60back[-1][2].f)
+    print()
+    print("Orbital elements +60 days:")
+    print("a = ", sims_60fwrd[-1][2].a)
+    print("e = ", sims_60fwrd[-1][2].e)
+    print("inc = ", sims_60fwrd[-1][2].inc)
+    print("Omega = ", sims_60fwrd[-1][2].Omega)
+    print("omega = ", sims_60fwrd[-1][2].omega)
+    print("f = ", sims_60fwrd[-1][2].f)
 
+    # Plot the orbital elements of the before and after simulation on the same plot (one subplot for each element)
+    fig, axs = plt.subplots(3, 2, figsize=(12, 8))
 
-    # for i in range(len(df)):
-    #     reboundSimulate(df["julian_date"].values[i], np.array(ast.literal_eval(df["state_vect"].values[i])), df["obj_name"].values[i])
+    for out_arr, name in [[sims_60back, "Backwards"], [sims_60fwrd, "Forwards"]]:
+        a = [x[2].a for x in out_arr]
+        e = [x[2].e for x in out_arr]
+        i = [x[2].inc for x in out_arr]
+        Omega = [x[2].Omega for x in out_arr]
+        omega = [x[2].omega for x in out_arr]
+        f = [x[2].f for x in out_arr]
+
+        axs[0, 0].plot(a, label=name)
+        axs[0, 1].plot(e, label=name)
+        axs[1, 0].plot(i, label=name)
+        axs[1, 1].plot(Omega, label=name)
+        axs[2, 0].plot(omega, label=name)
+        axs[2, 1].plot(f, label=name)
+
+    axs[0, 0].set_title("Semi-major axis (a)")
+    axs[0, 1].set_title("Eccentricity (e)")
+    axs[1, 0].set_title("Inclination (i)")
+    axs[1, 1].set_title("Longitude of the ascending node (Omega)")
+    axs[2, 0].set_title("Argument of pericenter (omega)")
+    axs[2, 1].set_title("True anomaly (f)")
+
+    for ax in axs.flatten():
+        ax.legend()
+
+    plt.tight_layout()
+    plt.show()
