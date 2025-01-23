@@ -328,7 +328,9 @@ def reboundSimulate(
         sim.move_to_hel()
 
         # If the particle is not in the simulation anymore, break the loop
-        if obj_name not in ps:
+        try:
+            ps[obj_name]
+        except rb.ParticleNotFound:
             break
 
         # Extract the heliocentric state vector
