@@ -435,10 +435,9 @@ if __name__ == "__main__":
     # Plot the distance from the Earth
     axs[0, 2].plot(t, earth_dist)
 
-    # Limit the X axis to the exit time
+    # Mark the exit from the Earth's Hill sphere
     if exit_index is not None:
-        for ax in axs.flatten():
-            ax.set_xlim([t[0], t[exit_index]])
+        axs[0, 2].axvline(t[exit_index], color="red", linestyle="--", label="Exit from Earth's Hill sphere")
 
     # Set the axis labels
     for ax in axs.flatten():
