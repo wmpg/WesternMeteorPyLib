@@ -161,16 +161,11 @@ class DatabaseJSON(object):
         #   TrajectoryReduced objects)
         self.failed_trajectories = {}
 
-        self.verbose = verbose
-        print(f'self.verbose is {self.verbose} during init')
-
-        self.potato=True
-
         # Load the database from a JSON file
-        self.load()
+        self.load(verbose=verbose)
 
 
-    def load(self):
+    def load(self, verbose=False):
         """ Load the database from a JSON file. """
 
         if os.path.exists(self.db_file_path):
@@ -195,8 +190,9 @@ class DatabaseJSON(object):
 
                     # Set the trajectory dictionary
                     setattr(self, traj_dict_str, trajectories_obj_dict)
-        print(f'self.potato is {self.potato} here')
-        print(f'self.verbose is {self.verbose} here')
+
+        # do this here because the object dict is overwritten during the load operation above
+        self.verbose = verbose
 
 
     def save(self):
