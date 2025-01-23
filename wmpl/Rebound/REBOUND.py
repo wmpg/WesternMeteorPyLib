@@ -334,7 +334,15 @@ def reboundSimulate(
             break
 
         # Extract the heliocentric state vector
-        state_vect_hel = [ps[obj_name].x, ps[obj_name].y, ps[obj_name].z, ps[obj_name].vx, ps[obj_name].vy, ps[obj_name].vz]
+        state_vect_pos = [ps[obj_name].x, ps[obj_name].y, ps[obj_name].z]
+        state_vect_vel [ps[obj_name].vx, ps[obj_name].vy, ps[obj_name].vz]
+        state_vect_hel = state_vect_pos + state_vect_vel
+
+        # Get the coordinates of the Earth
+        earth_coords = [ps["Earth"].x, ps["Earth"].y, ps["Earth"].z]
+
+        # Compute the distance between the meteoroid and the Earth
+        earth_dist = np.linalg.norm(np.array(state_vect_pos) - np.array(earth_coords))
 
         # Extract the orbital elements
         orb_elem = ps[obj_name].orbit(primary=ps["Sun"])
@@ -342,7 +350,7 @@ def reboundSimulate(
         if verbose and (i%25 == 0):
             print(f"loop iter = {i}, {time}, a = {orb_elem.a}, e = {orb_elem.e}, inc = {orb_elem.inc}, Omega = {orb_elem.Omega}, omega = {orb_elem.omega}, f = {orb_elem.f}")
 
-        outputs.append([time, state_vect_hel, orb_elem])
+        outputs.append([time, state_vect_hel, orb_elem, earth_dist])
 
     return outputs
 
@@ -394,7 +402,7 @@ if __name__ == "__main__":
     print("f    = {:>10.6} deg".format(np.degrees(sim_outputs[-1][2].f)))
 
     # Plot the orbital elements of the before and after simulation on the same plot (one subplot for each element)
-    fig, axs = plt.subplots(3, 2, figsize=(12, 8))
+    fig, axs = plt.subplots(3, 3, figsize=(12, 8))
 
     # Time in days
     t = [x[0] for x in sim_outputs]
@@ -406,12 +414,18 @@ if __name__ == "__main__":
     omega = [x[2].omega for x in sim_outputs]
     f = [x[2].f for x in sim_outputs]
 
+    # Distance from the Earth
+    earth_dist = [x[3] for x in sim_outputs]
+
     axs[0, 0].plot(t, a)
     axs[0, 1].plot(t, e)
     axs[1, 0].plot(t, np.degrees(i))
     axs[1, 1].plot(t, np.degrees(Omega))
     axs[2, 0].plot(t, np.degrees(omega))
     axs[2, 1].plot(t, np.degrees(f))
+
+    # Plot the distance from the Earth
+    axs[0, 2].plot(t, earth_dist)
 
     # Set the axis labels
     for ax in axs.flatten():
@@ -423,6 +437,7 @@ if __name__ == "__main__":
     axs[1, 1].set_ylabel("Omega [deg]")
     axs[2, 0].set_ylabel("omega [deg]")
     axs[2, 1].set_ylabel("f [deg]")
+    axs[0, 2].set_ylabel("Earth distance [AU]")
 
     for ax in axs.flatten():
         ax.legend()
