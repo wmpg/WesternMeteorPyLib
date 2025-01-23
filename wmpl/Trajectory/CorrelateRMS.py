@@ -161,7 +161,9 @@ class DatabaseJSON(object):
         #   TrajectoryReduced objects)
         self.failed_trajectories = {}
 
-        self.verbose = verbose
+        self.verbose = False
+        if verbose:
+            self.verbose = True
         print(f'self.verbose is {self.verbose}')
 
         # Load the database from a JSON file
