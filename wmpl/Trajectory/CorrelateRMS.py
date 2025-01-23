@@ -1030,7 +1030,8 @@ class RMSDataHandle(object):
         keys = [k for k in self.db.trajectories.keys() if k >= jdt_start and k <= jdt_end]
         for trajkey in keys:
             traj_reduced = self.db.trajectories[trajkey]
-            traj_path = os.path.join(self.output_dir, traj_reduced.traj_file_path)
+            # Update the trajectory path to make sure we're working with the correct filesystem
+            traj_path = self.generateTrajOutputDirectoryPath(traj_reduced)
             log.info(f' testing {traj_path}')
             if not os.path.isfile(traj_path):
                 trajs_to_remove.append(traj_reduced)
