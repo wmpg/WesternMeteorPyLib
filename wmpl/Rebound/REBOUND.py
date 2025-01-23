@@ -402,7 +402,7 @@ if __name__ == "__main__":
     print("f    = {:>10.6} deg".format(np.degrees(sim_outputs[-1][2].f)))
 
     # Plot the orbital elements of the before and after simulation on the same plot (one subplot for each element)
-    fig, axs = plt.subplots(3, 3, figsize=(12, 8))
+    fig, axs = plt.subplots(3, 3, figsize=(12, 8), sharex=True)
 
     # Time in days
     t = [x[0] for x in sim_outputs]
@@ -417,6 +417,14 @@ if __name__ == "__main__":
     # Distance from the Earth
     earth_dist = [x[3] for x in sim_outputs]
 
+    # Find the time when the object exits the Earth's Hill sphere
+    earth_hill = 0.01 # AU
+    exit_index = None
+    for i, dist in enumerate(earth_dist):
+        if dist > earth_hill:
+            exit_index = i
+            break
+
     axs[0, 0].plot(t, a)
     axs[0, 1].plot(t, e)
     axs[1, 0].plot(t, np.degrees(i))
@@ -426,6 +434,11 @@ if __name__ == "__main__":
 
     # Plot the distance from the Earth
     axs[0, 2].plot(t, earth_dist)
+
+    # Limit the X axis to the exit time
+    if exit_index is not None:
+        for ax in axs.flatten():
+            ax.set_xlim([t[0], t[exit_index]])
 
     # Set the axis labels
     for ax in axs.flatten():
