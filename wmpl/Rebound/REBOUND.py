@@ -444,9 +444,8 @@ if __name__ == "__main__":
 
         # For every axis, set the Y limits filtered by the exit index
         for ax in axs.flatten():
-            ax.set_ylim(ymin=min(ax.get_ylim()[0], min(ax.get_ylim()[1], min(ax.get_ylim()[1:exit_index])))
-            ax.set_ylim(ymax=max(ax.get_ylim()[1], max(ax.get_ylim()[0], max(ax.get_ylim()[1:exit_index])))
-
+            ax.set_ylim(ymin=min(ax.get_ylim()[0], min(ax.get_ylim()[1], min(ax.get_ylim()[1:exit_index]))))
+            ax.set_ylim(ymax=max(ax.get_ylim()[1], max(ax.get_ylim()[0], max(ax.get_ylim()[1:exit_index]))))
 
     # Set the axis labels
     for ax in axs.flatten():
