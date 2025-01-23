@@ -335,7 +335,7 @@ def reboundSimulate(
 
         # Extract the heliocentric state vector
         state_vect_pos = [ps[obj_name].x, ps[obj_name].y, ps[obj_name].z]
-        state_vect_vel [ps[obj_name].vx, ps[obj_name].vy, ps[obj_name].vz]
+        state_vect_vel = [ps[obj_name].vx, ps[obj_name].vy, ps[obj_name].vz]
         state_vect_hel = state_vect_pos + state_vect_vel
 
         # Get the coordinates of the Earth
