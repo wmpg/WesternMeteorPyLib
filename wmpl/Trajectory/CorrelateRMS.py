@@ -299,7 +299,8 @@ class DatabaseJSON(object):
 
             # Init the reduced trajectory object
             traj_reduced = TrajectoryReduced(traj_file_path)
-            log.info(f' loaded {traj_file_path}, traj_id {traj_reduced.traj_id}')
+            if self.verbose:
+                log.info(f' loaded {traj_file_path}, traj_id {traj_reduced.traj_id}')
             # Skip if failed
             if traj_reduced is None:
                 return None
