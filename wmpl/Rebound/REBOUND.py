@@ -251,7 +251,7 @@ def reboundSimulate(
 
     else:
         sim.dt = -0.001
-        times = np.linspace(0, -year*tsimend, n_outputs))
+        times = np.linspace(0, -year*tsimend, n_outputs)
 
     # Add the Sun and the planets
     sim.add("Sun", date=f"JD{time_tdb:.6f}", hash="Sun")
