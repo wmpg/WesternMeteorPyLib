@@ -323,18 +323,22 @@ def reboundSimulate(
     # These are not time steps, but the times at which the simulation state is saved
     for i, time in enumerate(times):
 
-        if verbose and (i%25 == 0):
-            print(f"loop iter = {i}, {time}")
-
         sim.move_to_com()
         sim.integrate(time)
         sim.move_to_hel()
+
+        # If the particle is not in the simulation anymore, break the loop
+        if obj_name not in ps:
+            break
 
         # Extract the heliocentric state vector
         state_vect_hel = [ps[obj_name].x, ps[obj_name].y, ps[obj_name].z, ps[obj_name].vx, ps[obj_name].vy, ps[obj_name].vz]
 
         # Extract the orbital elements
         orb_elem = ps[obj_name].orbit(primary=ps["Sun"])
+
+        if verbose and (i%25 == 0):
+            print(f"loop iter = {i}, {time}, a = {orb_elem.a}, e = {orb_elem.e}, inc = {orb_elem.inc}, Omega = {orb_elem.Omega}, omega = {orb_elem.omega}, f = {orb_elem.f}")
 
         outputs.append([time, state_vect_hel, orb_elem])
 
