@@ -15,25 +15,46 @@ from wmpl.Utils.Earth import calcTrueObliquity
 from astropy.time import Time
 
 
-def state_vec_convert(state_vec, jd, log_file_path=""):
+def convertToBarycentric(state_vect, jd, log_file_path=""):
+    """ Takes a state vector in ECI coordinates (m and m/s), Julian date and converts from ECI (geocentric) to 
+    Solar System barycentric coordiantes. The units are changed to AU and AU/year.
+
+    Arguments:
+        state_vect: [list] Position and velocity components in ECI coordinates (epoch of date) in m and m/s, 
+        [x, y, z, vx, vy, vz], as given in the WMPL trajectory solution.
+        jd: [float] Julian date (decimal).
+
+    Keyword arguments:
+        log_file_path: [str] Path to the log file where the output will be written.
+
+    Return:
+        [list] Position and velocity components in barycentric coordinates in AU and AU/year, eg. 
+            [x, y, z, vx, vy, vz]
     """
-    Takes a state vector, date and julian date and converts from ECI to barycentric, changes units to
-    AU for lengths and AU/code year for velocities, and logs output to a file if log_file_path name given.
-    """
+
+    # If a log file is specified, open it
     if len(log_file_path):
         log_file = open(log_file_path, "w")
         
         def log(message):
             log_file.write(message + "\n")
+
         log(f"Reference Julian date (TDB): {jd}")
 
+    # Create a REBOUND simulation
     sim = rb.Simulation()
+
     # Uses JPL Horizons to query for J2000 ecliptic SSB, geometric states vector correction
     sim.add("Geocenter", date=f"JD{jd:.6f}", hash="Earth")
+
     ps = sim.particles
+
+    # Convert the state vector to REBOUND units
     aum = rb.units.lengths_SI["au"]
-    eci_pos = np.array(state_vec[:3])
-    eci_vel = np.array(state_vec[3:])
+
+    # Extract the position and velocity vectors
+    eci_pos = np.array(state_vect[:3])
+    eci_vel = np.array(state_vect[3:])
 
     if len(log_file_path):
         log(f"Position vector in equatorial ECI, epoch of date (m): {eci_pos}")
@@ -42,7 +63,8 @@ def state_vec_convert(state_vec, jd, log_file_path=""):
     # Convert rectangular to spherical coordinates
     re = vectMag(eci_pos)
     alpha_e, delta_e = eci2RaDec(eci_pos)
-    
+
+    # Convert the Julian date to dynamical time
     jd_dyn = jd2DynamicalTimeJD(jd)
     alpha_ej, delta_ej = equatorialCoordPrecession(
         jd_dyn, J2000_JD.days, alpha_e, delta_e
@@ -63,7 +85,7 @@ def state_vec_convert(state_vec, jd, log_file_path=""):
     rotM = scipy.linalg.expm(
         np.cross(
             np.eye(3),
-            np.array([1, 0, 0]) / np.linalg.norm(np.array([1, 0, 0])) * eps,
+            np.array([1, 0, 0])/np.linalg.norm(np.array([1, 0, 0]))*eps,
         )
     )
     pos_vec_rot = np.dot(rotM, geo_pos)
@@ -93,70 +115,99 @@ def state_vec_convert(state_vec, jd, log_file_path=""):
     if len(log_file_path):
         log(f"Velocity vector in ecliptic ECI, J2000: {vel_vec_rot}")
 
-    state_vec_rot = np.concatenate((pos_vec_rot, vel_vec_rot))
-    state_vec_rot = [x / aum for x in state_vec_rot]
-    state_vec_rot[3] *= 60 * 60 * 24 * 365.25 / (2 * np.pi)
-    state_vec_rot[4] *= 60 * 60 * 24 * 365.25 / (2 * np.pi)
-    state_vec_rot[5] *= 60 * 60 * 24 * 365.25 / (2 * np.pi)
+    # Convert the state vector to AU and AU/year
+    state_vect_rot = np.concatenate((pos_vec_rot, vel_vec_rot))
+    state_vect_rot = [x/aum for x in state_vect_rot]
+    state_vect_rot[3] *= 60*60*24*365.25/(2*np.pi)
+    state_vect_rot[4] *= 60*60*24*365.25/(2*np.pi)
+    state_vect_rot[5] *= 60*60*24*365.25/(2*np.pi)
 
     if len(log_file_path):
         log(
-            f"Meteor state vector in ecliptic ECI, J2000 (AU, AU/year where year = 2pi): {state_vec_rot}"
+            f"Meteor state vector in ecliptic ECI, J2000 (AU, AU/year where year = 2pi): {state_vect_rot}"
         )
         log(
             f"Earth state vector in ecliptic solar system barycentric, J2000 (AU, AU/year where year = 2pi): {[ps['Earth'].x, ps['Earth'].y, ps['Earth'].z, ps['Earth'].vx, ps['Earth'].vy, ps['Earth'].vz]}"
         )
 
-    state_vec_rot[0] += ps["Earth"].x
-    state_vec_rot[1] += ps["Earth"].y
-    state_vec_rot[2] += ps["Earth"].z
-    state_vec_rot[3] += ps["Earth"].vx
-    state_vec_rot[4] += ps["Earth"].vy
-    state_vec_rot[5] += ps["Earth"].vz
+    # Add the Earth's position and velocity to the meteoroid's position and velocity
+    state_vect_rot[0] += ps["Earth"].x
+    state_vect_rot[1] += ps["Earth"].y
+    state_vect_rot[2] += ps["Earth"].z
+    state_vect_rot[3] += ps["Earth"].vx
+    state_vect_rot[4] += ps["Earth"].vy
+    state_vect_rot[5] += ps["Earth"].vz
 
     if len(log_file_path):
         log(
-            f"Meteor state vector in barycentric, J2000 (AU, AU/year where year = 2pi): {state_vec_rot}"
+            f"Meteor state vector in barycentric, J2000 (AU, AU/year where year = 2pi): {state_vect_rot}"
         )
         log_file.close()
 
-    return state_vec_rot
+    return state_vect_rot
 
 
-def rb_sim(julian_date, state_vec, direction="forward", tsimend=60, obj_name="obj", obj_mass=0.0, state_vec_log=""):
+def reboundSimulate(
+        julian_date, state_vect, traj=None, 
+        direction="forward", tsimend=60, n_outputs=500, obj_name="obj", obj_mass=0.0, 
+        state_vect_log=""):
+    """ Takes an state vector (or a Trajectory object), runs REBOUND and produces orbital elements for the 
+    object at the end of the simulation or at the specified time.
+
+    Arguments:
+        julian_date: [float] Reference Julian date (decimal). If None, the data from the Trajectory object 
+            will be used.
+        state_vect: [list] Position and velocity components in ECI coordinates (epoch of date) in m and m/s,
+            [x, y, z, vx, vy, vz], as given in the WMPL trajectory solution. If None, the data from the
+            Trajectory object will be used.
+
+    Keyword arguments:
+        traj: [Trajectory] Trajectory object with the meteoroid data. If given, the julian_date and state_vect
+            arguments will be ignored.
+        direction: [str] Direction of the simulation, either "forward" or "backward".
+        tsimend: [float] Length of integration in days, default is 60 days.
+        n_outputs: [int] Number of outputs (samples along the simulation), default is 500.
+        obj_name: [str] Name of the object that's being integrated, default is "obj".
+        obj_mass: [float] Mass of object in solar masses if asteroid or larger object, default is 0.0.
+
+    Keyword arguments:
+        state_vect_log: [str] Path to a log file where the state vector output will be written. If not given,
+            the output will be written to the standard output.
+
+    Return:
+        None
+
     """
-    Takes an object and its parameters, runs rebound and returns a csv with the orbital elements over time period.
-    Inputs:
-        julian_date: UTC julian date (float)
-        state_vec: array with the position and velocity vector components in m and m/s eg. [x, y, z, vx, vy, vz] (np.array)
-        direction: default is forward time but if you want reversed time, you can specify direction="backward"
-        tsimend: length of integration in days, default is 60 days
-        obj_name: name of the object that's being integrated, default is just "obj"
-        obj_mass: mass of object in solar masses if asteroid or larger object, default is 0.0
-        state_vec_log: name of the log file if you want one generated for the state vector conversion to rebound units
-    """
+
+    # Set up the simulation
     sim = rb.Simulation()
     aum = rb.units.lengths_SI["au"]  # 1 au in m
-    aukm = aum / 1e3  # au in km
-    # used for Earth's J2 component
-    RE_eq = 6378.135 / aukm
+    aukm = aum/1e3  # au in km
+
+
+    # Constants (gravitational harmonics of Earth, Earth radius, time conversion)
+    RE_eq = 6378.135/aukm
     J2 = 1.0826157e-3
     J4 = -1.620e-6
     dmin = 4.326e-5  # Earth radius in au
-    tsimend = tsimend / 365.25  # simulation endtime in years
-    Noutputs = 500
-    year = 2.0 * np.pi  # One year in units where G=1
+    tsimend = tsimend/365.25  # simulation endtime in years
+    year = 2.0*np.pi  # One year in units where G=1
+
+
     # Convert from UTC to TDB
     time_utc = Time(julian_date, format='jd', scale='utc')
     time_tdb = time_utc.tdb.jd
 
+    # Set up the number of outputs and the time array
     if direction == "forward":
         sim.dt = 0.001
-        times = np.linspace(0, year * tsimend, Noutputs)
+        times = np.linspace(0, year*tsimend, n_outputs)
+
     else:
         sim.dt = -0.001
-        times = np.linspace(0, -year * tsimend, Noutputs)
+        times = np.linspace(0, -year*tsimend, n_outputs))
 
+    # Add the Sun and the planets
     sim.add("Sun", date=f"JD{time_tdb:.6f}", hash="Sun")
     sim.add("Mercury", date=f"JD{time_tdb:.6f}", hash="Mercury")
     sim.add("Venus", date=f"JD{time_tdb:.6f}", hash="Venus")
@@ -169,18 +220,20 @@ def rb_sim(julian_date, state_vec, direction="forward", tsimend=60, obj_name="ob
     sim.add("Neptune", date=f"JD{time_tdb:.6f}", hash="Neptune")
 
     ps = sim.particles
+
     # To start the meteoroid in the right spot, we need to feed in x,y,z barycentric position in AU
     # The velocity should be in AU/year divided by 2pi
-    state_vec_rot = state_vec_convert(state_vec, time_tdb, state_vec_log)
+    state_vect_rot = convertToBarycentric(state_vect, time_tdb, state_vect_log)
 
+    # Add the meteoroid to the simulation
     sim.add(
         m=obj_mass,
-        x=state_vec_rot[0],
-        y=state_vec_rot[1],
-        z=state_vec_rot[2],
-        vx=state_vec_rot[3],
-        vy=state_vec_rot[4],
-        vz=state_vec_rot[5],
+        x=state_vect_rot[0],
+        y=state_vect_rot[1],
+        z=state_vect_rot[2],
+        vx=state_vect_rot[3],
+        vy=state_vect_rot[4],
+        vz=state_vect_rot[5],
         hash=obj_name,
     )
 
@@ -192,15 +245,18 @@ def rb_sim(julian_date, state_vec, direction="forward", tsimend=60, obj_name="ob
     ps["Earth"].params["J4"] = J4
     ps["Earth"].params["R_eq"] = RE_eq
     ps["Earth"].r = dmin  # set size of Earth
-    ps["Luna"].r = dmin / 4  # set size of Moon
-    # gr is the general relativity correction for just the Sun, gr_full is the correction for all bodies in the sim
+    ps["Luna"].r = dmin/4  # set size of Moon
+
+
+    # gr is the general relativity correction for just the Sun, gr_full is the correction for all bodies
     gr = rebx.load_force("gr_full")
     rebx.add_force(gr)
     gr.params["c"] = rbxConstants.C
 
-    sim.move_to_com()  # We always move to the center of momentum frame before an integration
+    # We always move to the center of momentum frame before an integration
+    sim.move_to_com()
 
-    # Specify how simulation should resolve collision
+    # Specify how simulation should resolve collisions
     sim.collision = "direct"
     sim.collision_resolve = "merge"
     sim.collision_resolve_keep_sorted = 1
@@ -228,9 +284,35 @@ def rb_sim(julian_date, state_vec, direction="forward", tsimend=60, obj_name="ob
         )
     return
 
-# To test the above code:
-# import pandas as pd
-# import ast
-# df = pd.read_csv("test_objects.csv", header=0)
-# for i in range(len(df)):
-#     rb_sim(df["julian_date"].values[i], np.array(ast.literal_eval(df["state_vec"].values[i])), df["obj_name"].values[i])
+
+if __name__ == "__main__":
+
+    import os
+    import argparse
+
+    from wmpl.Utils.Pickling import loadPickle
+
+
+    ###
+
+    parser = argparse.ArgumentParser(description="Run REBOUND simulation for a given trajectory pickle file.")
+
+    parser.add_argument("pickle_path", type=str, help="Path to the pickle file with the trajectory data.")
+
+    args = parser.parse_args()
+
+    ###
+
+    # Load the trajectory data from a pickle file
+    traj = loadPickle(*os.path.split(args.pickle_path))
+
+
+    # import pandas as pd
+    # import ast
+
+    # # Read in the test objects
+    # df = pd.read_csv("test_objects.csv", header=0)
+
+
+    # for i in range(len(df)):
+    #     reboundSimulate(df["julian_date"].values[i], np.array(ast.literal_eval(df["state_vect"].values[i])), df["obj_name"].values[i])
