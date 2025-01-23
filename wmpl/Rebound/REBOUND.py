@@ -399,6 +399,10 @@ if __name__ == "__main__":
     fig, axs = plt.subplots(3, 2, figsize=(12, 8))
 
     for out_arr, name in [[sims_60back, "Backwards"], [sims_60fwrd, "Forwards"]]:
+
+        # Time in days
+        t = [x[0] for x in out_arr]
+
         a = [x[2].a for x in out_arr]
         e = [x[2].e for x in out_arr]
         i = [x[2].inc for x in out_arr]
@@ -406,19 +410,23 @@ if __name__ == "__main__":
         omega = [x[2].omega for x in out_arr]
         f = [x[2].f for x in out_arr]
 
-        axs[0, 0].plot(a, label=name)
-        axs[0, 1].plot(e, label=name)
-        axs[1, 0].plot(i, label=name)
-        axs[1, 1].plot(Omega, label=name)
-        axs[2, 0].plot(omega, label=name)
-        axs[2, 1].plot(f, label=name)
+        axs[0, 0].plot(t, a, label=name)
+        axs[0, 1].plot(t, e, label=name)
+        axs[1, 0].plot(t, np.degrees(i), label=name)
+        axs[1, 1].plot(t, np.degrees(Omega), label=name)
+        axs[2, 0].plot(t, np.degrees(omega), label=name)
+        axs[2, 1].plot(t, np.degrees(f), label=name)
 
-    axs[0, 0].set_title("Semi-major axis (a)")
-    axs[0, 1].set_title("Eccentricity (e)")
-    axs[1, 0].set_title("Inclination (i)")
-    axs[1, 1].set_title("Longitude of the ascending node (Omega)")
-    axs[2, 0].set_title("Argument of pericenter (omega)")
-    axs[2, 1].set_title("True anomaly (f)")
+    # Set the axis labels
+    for ax in axs.flatten():
+        ax.set_xlabel("Time [days]")
+    
+    axs[0, 0].set_ylabel("a [AU]")
+    axs[0, 1].set_ylabel("e")
+    axs[1, 0].set_ylabel("inc [deg]")
+    axs[1, 1].set_ylabel("Omega [deg]")
+    axs[2, 0].set_ylabel("omega [deg]")
+    axs[2, 1].set_ylabel("f [deg]")
 
     for ax in axs.flatten():
         ax.legend()
