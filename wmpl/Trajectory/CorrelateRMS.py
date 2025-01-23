@@ -1032,11 +1032,16 @@ class RMSDataHandle(object):
             traj_reduced = self.db.trajectories[trajkey]
             # Update the trajectory path to make sure we're working with the correct filesystem
             traj_path = self.generateTrajOutputDirectoryPath(traj_reduced)
+            traj_file_name = os.path.split(traj_reduced.traj_file_path)[1]
+            traj_path = os.path.join(traj_path, traj_file_name)
             log.info(f' testing {traj_path}')
             if not os.path.isfile(traj_path):
+                traj_reduced.traj_file_path = traj_path
                 trajs_to_remove.append(traj_reduced)
         for traj in trajs_to_remove:
             log.info(f' removing deleted {traj.traj_file_path}')
+            # remove from the database but not from the disk: they're already not on the disk and this avoids
+            # accidentally deleting a different traj with a timestamp which is within a millisecond
             self.db.removeTrajectory(traj, True)
         #self.saveDatabase()
         return 
@@ -1153,7 +1158,7 @@ class RMSDataHandle(object):
         dupeids = tr_df[tr_df.dupe].sort_values(by=['traj_id']).traj_id
         duperows = tr_df[tr_df.traj_id.isin(dupeids)]
 
-        log.info(f'there are {duperows} duplicate trajectories')
+        log.info(f'there are {len(duperows.traj_id.unique())} duplicate trajectories')
 
         
         # iterate over the duplicates, finding the best and removing the others
