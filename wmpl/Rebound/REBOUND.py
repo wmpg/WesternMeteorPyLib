@@ -4,9 +4,16 @@ import numpy as np
 import scipy
 import matplotlib.pyplot as plt
 
-import rebound as rb
-import reboundx
-from reboundx import constants as rbxConstants
+try:
+    import rebound as rb
+    import reboundx
+    from reboundx import constants as rbxConstants
+
+    REBOUND_FOUND = True
+
+except ImportError:
+    print("REBOUND package not found. Install REBOUND and reboundx packages to use the REBOUND functions.")
+    REBOUND_FOUND = False
 
 import astropy.time
 
@@ -37,6 +44,11 @@ def convertToBarycentric(state_vect, jd, log_file_path=""):
         [list] Position and velocity components in barycentric coordinates in AU and AU/year, eg. 
             [x, y, z, vx, vy, vz]
     """
+
+    # Skip if REBOUND is not found
+    if not REBOUND_FOUND:
+        print("REBOUND package not found. Install REBOUND and reboundx packages to use the REBOUND functions.")
+        return None
 
     # If a log file is specified, open it
     if len(log_file_path):
@@ -184,6 +196,11 @@ def reboundSimulate(
             time.
 
     """
+
+    # Skip if REBOUND is not found
+    if not REBOUND_FOUND:
+        print("REBOUND package not found. Install REBOUND and reboundx packages to use the REBOUND functions.")
+        return None
 
     # If the trajectory is given, override the julian_date and state_vect arguments
     if traj is not None:
