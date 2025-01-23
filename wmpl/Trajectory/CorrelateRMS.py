@@ -488,7 +488,7 @@ class PlateparDummy:
 
 
 class RMSDataHandle(object):
-    def __init__(self, dir_path, dt_range=None, db_dir=None, output_dir=None, mcmode=0, max_trajs=1000, remotehost=None):
+    def __init__(self, dir_path, dt_range=None, db_dir=None, output_dir=None, mcmode=0, max_trajs=1000, remotehost=None, verbose=False):
         """ Handles data interfacing between the trajectory correlator and RMS data files on disk. 
     
         Arguments:
@@ -537,6 +537,8 @@ class RMSDataHandle(object):
             self.purgePhase1ProcessedData(os.path.join(self.phase1_dir, 'processed'))
 
         self.remotehost = remotehost
+
+        self.verbose = verbose
 
         ############################
 
@@ -1024,9 +1026,12 @@ class RMSDataHandle(object):
             log.info("  Datetime range: {:s} - {:s}".format(
                 self.dt_range[0].strftime("%Y-%m-%d %H:%M:%S"), 
                 self.dt_range[1].strftime("%Y-%m-%d %H:%M:%S")))
+            
         jdt_start = datetime2JD(self.dt_range[0]) 
         jdt_end = datetime2JD(self.dt_range[1])
+
         trajs_to_remove = []
+
         keys = [k for k in self.db.trajectories.keys() if k >= jdt_start and k <= jdt_end]
         for trajkey in keys:
             traj_reduced = self.db.trajectories[trajkey]
@@ -1034,16 +1039,21 @@ class RMSDataHandle(object):
             traj_path = self.generateTrajOutputDirectoryPath(traj_reduced)
             traj_file_name = os.path.split(traj_reduced.traj_file_path)[1]
             traj_path = os.path.join(traj_path, traj_file_name)
-            log.info(f' testing {traj_path}')
+
+            if self.verbose:
+                log.info(f' testing {traj_path}')
+
             if not os.path.isfile(traj_path):
                 traj_reduced.traj_file_path = traj_path
                 trajs_to_remove.append(traj_reduced)
+
         for traj in trajs_to_remove:
             log.info(f' removing deleted {traj.traj_file_path}')
+
             # remove from the database but not from the disk: they're already not on the disk and this avoids
             # accidentally deleting a different traj with a timestamp which is within a millisecond
-            self.db.removeTrajectory(traj, True)
-        #self.saveDatabase()
+            self.db.removeTrajectory(traj, keepFolder=True)
+
         return 
 
 
@@ -1150,16 +1160,17 @@ class RMSDataHandle(object):
         
         tr_in_scope = self.getComputedTrajectories(datetime2JD(dt_range[0]), datetime2JD(dt_range[1]))
         tr_to_check = [{'jdt_ref':traj.jdt_ref,'traj_id':traj.traj_id, 'traj': traj} for traj in tr_in_scope if hasattr(traj,'traj_id')]
-        if len(tr_to_check) ==0:
+
+        if len(tr_to_check) == 0:
             log.info('no trajectories in range')
             return 
+        
         tr_df = pd.DataFrame(tr_to_check)
         tr_df['dupe']=tr_df.duplicated(subset=['traj_id'])
         dupeids = tr_df[tr_df.dupe].sort_values(by=['traj_id']).traj_id
         duperows = tr_df[tr_df.traj_id.isin(dupeids)]
 
         log.info(f'there are {len(duperows.traj_id.unique())} duplicate trajectories')
-
         
         # iterate over the duplicates, finding the best and removing the others
         for traj_id in duperows.traj_id.unique():
@@ -1168,17 +1179,21 @@ class RMSDataHandle(object):
             best_traj_path = None
             # find duplicate with largest number of observations
             for testdt in duperows[duperows.traj_id==traj_id].jdt_ref.values:
+
                 if len(dh.db.trajectories[testdt].participating_stations) > num_stats:
+
                     best_traj_dt = testdt
                     num_stats = len(dh.db.trajectories[testdt].participating_stations)
                     # sometimes the database contains duplicates that differ by microseconds in jdt. These
-                    # will have overwritten each other in the folder so make a note of the  location.
+                    # will have overwritten each other in the folder so make a note of the location.
                     best_traj_path = dh.db.trajectories[testdt].traj_file_path
 
             # now remove all except the best
             for testdt in duperows[duperows.traj_id==traj_id].jdt_ref.values:
+
                 traj = dh.db.trajectories[testdt]
                 if testdt != best_traj_dt:
+
                     # get the current trajectory's location. If its the same as that of the best trajectory
                     # don't try to delete the solution from disk even if there's a small difference in jdt_ref
                     keepFolder = False
@@ -1188,10 +1203,13 @@ class RMSDataHandle(object):
                     traj_path = self.generateTrajOutputDirectoryPath(traj)
                     traj_file_name = os.path.split(traj.traj_file_path)[1]
                     traj.traj_file_path = os.path.join(traj_path, traj_file_name)
-                    log.info(f'removing duplicate {traj.traj_id} keep {traj.traj_file_path} {keepFolder}')
+                    log.info(f'removing duplicate {traj.traj_id} keep {traj_file_name} {keepFolder}')
+
                     self.db.removeTrajectory(traj, keepFolder=keepFolder)
+
                 else:
-                    log.info(f'keeping {traj.traj_id} {traj.traj_file_path}')
+                    if self.verbose:
+                        log.info(f'keeping {traj.traj_id} {traj.traj_file_path}')
          
         return 
     
@@ -1722,6 +1740,8 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     arg_parser.add_argument('--remotehost', '--remotehost', type=str, default=None,
         help="Remote host to collect and return MC phase solutions to. Supports internet-distributed processing.")
     
+    arg_parser.add_argument('--verbose', '--verbose', help='Verbose logging.', default=False, action="store_true")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -1882,7 +1902,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         dh = RMSDataHandle(
             cml_args.dir_path, dt_range=event_time_range, 
             db_dir=cml_args.dbdir, output_dir=cml_args.outdir,
-            mcmode=cml_args.mcmode, max_trajs=max_trajs, remotehost=remotehost)
+            mcmode=cml_args.mcmode, max_trajs=max_trajs, remotehost=remotehost, verbose=cml_args.verbose)
         
         # If there is nothing to process, stop, unless we're in mcmode 2 (processing_list is not used in this case)
         if not dh.processing_list and cml_args.mcmode < 2:
