@@ -357,13 +357,21 @@ if __name__ == "__main__":
 
     ###
 
-    parser = argparse.ArgumentParser(description="Run REBOUND simulation for a given trajectory pickle file.")
+    parser = argparse.ArgumentParser(description="Run REBOUND simulation for a given trajectory pickle file. The simulation is run 60 days backwards by default.")
 
     parser.add_argument("pickle_path", type=str, help="Path to the pickle file with the trajectory data.")
 
+    parser.add_argument("--days", type=float, help="Run the simulation for the given number of days.", default=60)
+
+    parser.add_argument("--forward", type=str, help="Run the simulation forward for the given number of days.")
+    
     parser.add_argument("--verbose", action="store_true", help="Print out the progress of the simulation.")
 
     args = parser.parse_args()
+
+    # Extract the number of days from the arguments and the simulation direction
+    sim_days = args.days
+    direction = "backward" if args.forward is None else "forward"
 
     ###
 
@@ -372,50 +380,38 @@ if __name__ == "__main__":
 
     
     # Run the simulation -60 and +60 days from the epoch of the trajectory
-    sims_60back = reboundSimulate(None, None, traj=traj, direction="backward", tsimend=60, 
-                                  obj_name=traj.traj_id, verbose=args.verbose)
-    sims_60fwrd = reboundSimulate(None, None, traj=traj, direction="forward",  tsimend=60, 
+    sim_outputs = reboundSimulate(None, None, traj=traj, direction=direction, tsimend=sim_days,
                                   obj_name=traj.traj_id, verbose=args.verbose)
 
 
     # Print the -60 and +60 days simulation orbital elements
-    print("Orbital elements -60 days:")
-    print("a = ", sims_60back[-1][2].a)
-    print("e = ", sims_60back[-1][2].e)
-    print("inc = ", sims_60back[-1][2].inc)
-    print("Omega = ", sims_60back[-1][2].Omega)
-    print("omega = ", sims_60back[-1][2].omega)
-    print("f = ", sims_60back[-1][2].f)
-    print()
-    print("Orbital elements +60 days:")
-    print("a = ", sims_60fwrd[-1][2].a)
-    print("e = ", sims_60fwrd[-1][2].e)
-    print("inc = ", sims_60fwrd[-1][2].inc)
-    print("Omega = ", sims_60fwrd[-1][2].Omega)
-    print("omega = ", sims_60fwrd[-1][2].omega)
-    print("f = ", sims_60fwrd[-1][2].f)
+    print("Orbital elements {:.2f} days from the epoch {:.6f} {:s}".format(sim_days, traj.jdt_ref, direction))
+    print("a = ", sim_outputs[-1][2].a)
+    print("e = ", sim_outputs[-1][2].e)
+    print("inc = ", sim_outputs[-1][2].inc)
+    print("Omega = ", sim_outputs[-1][2].Omega)
+    print("omega = ", sim_outputs[-1][2].omega)
+    print("f = ", sim_outputs[-1][2].f)
 
     # Plot the orbital elements of the before and after simulation on the same plot (one subplot for each element)
     fig, axs = plt.subplots(3, 2, figsize=(12, 8))
 
-    for out_arr, name in [[sims_60back, "Backwards"], [sims_60fwrd, "Forwards"]]:
+    # Time in days
+    t = [x[0] for x in sim_outputs]
 
-        # Time in days
-        t = [x[0] for x in out_arr]
+    a = [x[2].a for x in sim_outputs]
+    e = [x[2].e for x in sim_outputs]
+    i = [x[2].inc for x in sim_outputs]
+    Omega = [x[2].Omega for x in sim_outputs]
+    omega = [x[2].omega for x in sim_outputs]
+    f = [x[2].f for x in sim_outputs]
 
-        a = [x[2].a for x in out_arr]
-        e = [x[2].e for x in out_arr]
-        i = [x[2].inc for x in out_arr]
-        Omega = [x[2].Omega for x in out_arr]
-        omega = [x[2].omega for x in out_arr]
-        f = [x[2].f for x in out_arr]
-
-        axs[0, 0].plot(t, a, label=name)
-        axs[0, 1].plot(t, e, label=name)
-        axs[1, 0].plot(t, np.degrees(i), label=name)
-        axs[1, 1].plot(t, np.degrees(Omega), label=name)
-        axs[2, 0].plot(t, np.degrees(omega), label=name)
-        axs[2, 1].plot(t, np.degrees(f), label=name)
+    axs[0, 0].plot(t, a)
+    axs[0, 1].plot(t, e)
+    axs[1, 0].plot(t, np.degrees(i))
+    axs[1, 1].plot(t, np.degrees(Omega))
+    axs[2, 0].plot(t, np.degrees(omega))
+    axs[2, 1].plot(t, np.degrees(f))
 
     # Set the axis labels
     for ax in axs.flatten():
