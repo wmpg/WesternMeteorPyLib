@@ -557,6 +557,7 @@ class RMSDataHandle(object):
         if mcmode != 2:
             log.info("Loading database: {:s}".format(database_path))
             self.db = DatabaseJSON(database_path, verbose=self.verbose)
+            print(f'self.db.verbose is {self.db.verbose}')
             log.info('Archiving older entries....')
             try:
                 self.archiveOldRecords(older_than=3)
