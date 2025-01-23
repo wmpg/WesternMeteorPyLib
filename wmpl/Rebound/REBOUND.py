@@ -409,7 +409,7 @@ if __name__ == "__main__":
 
     a = [x[2].a for x in sim_outputs]
     e = [x[2].e for x in sim_outputs]
-    i = [x[2].inc for x in sim_outputs]
+    incl = [x[2].inc for x in sim_outputs]
     Omega = [x[2].Omega for x in sim_outputs]
     omega = [x[2].omega for x in sim_outputs]
     f = [x[2].f for x in sim_outputs]
@@ -427,7 +427,7 @@ if __name__ == "__main__":
 
     axs[0, 0].plot(t, a)
     axs[0, 1].plot(t, e)
-    axs[1, 0].plot(t, np.degrees(i))
+    axs[1, 0].plot(t, np.degrees(incl))
     axs[1, 1].plot(t, np.degrees(Omega))
     axs[2, 0].plot(t, np.degrees(omega))
     axs[2, 1].plot(t, np.degrees(f))
@@ -445,9 +445,9 @@ if __name__ == "__main__":
     
     axs[0, 0].set_ylabel("a [AU]")
     axs[0, 1].set_ylabel("e")
-    axs[1, 0].set_ylabel("inc [deg]")
-    axs[1, 1].set_ylabel("Omega [deg]")
-    axs[2, 0].set_ylabel("omega [deg]")
+    axs[1, 0].set_ylabel("i [deg]")
+    axs[1, 1].set_ylabel("peri [deg]")
+    axs[2, 0].set_ylabel("node [deg]")
     axs[2, 1].set_ylabel("f [deg]")
     axs[0, 2].set_ylabel("Earth distance [AU]")
 
