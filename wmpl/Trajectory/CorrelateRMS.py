@@ -162,6 +162,7 @@ class DatabaseJSON(object):
         self.failed_trajectories = {}
 
         self.verbose = verbose
+        print(f'self.verbose is {self.verbose}')
 
         # Load the database from a JSON file
         self.load()
