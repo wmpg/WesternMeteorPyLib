@@ -1143,7 +1143,9 @@ class RMSDataHandle(object):
         
         tr_in_scope = self.getComputedTrajectories(datetime2JD(dt_range[0]), datetime2JD(dt_range[1]))
         tr_to_check = [{'jdt_ref':traj.jdt_ref,'traj_id':traj.traj_id, 'traj': traj} for traj in tr_in_scope if hasattr(traj,'traj_id')]
-        
+        if len(tr_to_check) ==0:
+            log.info('no trajectories in range')
+            return 
         tr_df = pd.DataFrame(tr_to_check)
         tr_df['dupe']=tr_df.duplicated(subset=['traj_id'])
         dupeids = tr_df[tr_df.dupe].sort_values(by=['traj_id']).traj_id
