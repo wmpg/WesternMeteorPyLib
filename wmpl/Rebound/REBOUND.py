@@ -265,8 +265,6 @@ def reboundSimulate(
     sim.add("Uranus", date=f"JD{time_tdb:.6f}", hash="Uranus")
     sim.add("Neptune", date=f"JD{time_tdb:.6f}", hash="Neptune")
 
-    ps = sim.particles
-
     # To start the meteoroid in the right spot, we need to feed in x,y,z barycentric position in AU
     # The velocity should be in AU/year divided by 2pi
     state_vect_rot = convertToBarycentric(state_vect, time_tdb)
@@ -291,6 +289,8 @@ def reboundSimulate(
         vz=state_vect_rot[5],
         hash=obj_name,
     )
+
+    ps = sim.particles
 
     # Add gravitational harmonics of Earth
     rebx = reboundx.Extras(sim)
@@ -355,6 +355,8 @@ if __name__ == "__main__":
 
     parser.add_argument("pickle_path", type=str, help="Path to the pickle file with the trajectory data.")
 
+    parser.add_argument("--verbose", action="store_true", help="Print out the progress of the simulation.")
+
     args = parser.parse_args()
 
     ###
@@ -365,9 +367,9 @@ if __name__ == "__main__":
     
     # Run the simulation -60 and +60 days from the epoch of the trajectory
     sims_60back = reboundSimulate(None, None, traj=traj, direction="backward", tsimend=60, 
-                                  obj_name=traj.traj_id)
+                                  obj_name=traj.traj_id, verbose=args.verbose)
     sims_60fwrd = reboundSimulate(None, None, traj=traj, direction="forward",  tsimend=60, 
-                                  obj_name=traj.traj_id)
+                                  obj_name=traj.traj_id, verbose=args.verbose)
 
 
     # Print the -60 and +60 days simulation orbital elements
