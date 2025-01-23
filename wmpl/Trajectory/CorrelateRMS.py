@@ -1984,7 +1984,8 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                     # refresh list of calculated trajectories from disk
                     dh.removeDeletedTrajectories()
                     dh.loadComputedTrajectories(os.path.join(dh.output_dir, OUTPUT_TRAJ_DIR), dt_range=[bin_beg, bin_end])
-                    dh.removeDuplicateTrajectories(dt_range=[bin_beg, bin_end])
+                    if cml_args.mcmode != 2:
+                        dh.removeDuplicateTrajectories(dt_range=[bin_beg, bin_end])
 
                     # Run the trajectory correlator
                     tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True, enableOSM=cml_args.enableOSM)
