@@ -267,9 +267,12 @@ def reboundSimulate(
         for i in range(mc_runs):
 
             # Sample the state vector from the uncertainties
-            state_vect_realization = np.random.multivariate_normal(state_vect, cov)
+            sv_realization = np.random.multivariate_normal(state_vect, cov)
 
-            state_vect_realizations.append(state_vect_realization)
+            state_vect_realizations.append(sv_realization)
+
+            if verbose:
+                print(f"MC realization {i}: {sv_realization}")
 
         
 
