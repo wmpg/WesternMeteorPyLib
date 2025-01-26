@@ -1630,18 +1630,6 @@ class RMSDataHandle(object):
         # Restore the signal functionality
         signal.signal(signal.SIGINT, original_signal)
 
-
-
-
-
-    def finish(self):
-        """ Finish the processing run. """
-
-        # Save the processed directories to the DB file
-        self.saveDatabase()
-
-        # Save the list of processed meteor observations
-
         
 
 

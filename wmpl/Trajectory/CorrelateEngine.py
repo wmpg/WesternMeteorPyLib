@@ -1724,11 +1724,9 @@ class TrajectoryCorrelator(object):
             # end of "for matched_observations in candidate_trajectories"
             outcomes = [traj_solved_count]
 
+            # Finish the correlation run (update the database with new values)
             self.dh.saveDatabase()
             log.info(f'SOLVED {sum(outcomes)} TRAJECTORIES')
-
-            # Finish the correlation run (update the database with new values)
-            self.dh.finish()
 
             log.info("")
             log.info("-----------------")
