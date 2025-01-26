@@ -168,28 +168,39 @@ class DatabaseJSON(object):
     def load(self, verbose=False):
         """ Load the database from a JSON file. """
 
+        # location of last backup of the database, in case we need to use it
+        db_bak_file_path = self.db_file_path + ".bak"
+
         if os.path.exists(self.db_file_path):
-            with open(self.db_file_path) as f:
+            db_file_path_saved = self.db_file_path
 
-                db_file_path_bak = self.db_file_path
+            # Load the value from the database
+            # if there's a problem with the file, try using the last backup
+            try:
+                self.__dict__ = json.load(open(self.db_file_path))
+            except Exception:
+                try:
+                    if os.path.exists(db_bak_file_path):
+                        shutil.copy2(db_bak_file_path, self.db_file_path)
+                        self.__dict__ = json.load(open(self.db_file_path))
+                except Exception:
+                    log.warning('unable to find a useable trajectory database')
 
-                # Load the value from the database
-                self.__dict__ = json.load(f)
 
-                # Overwrite the database path
-                self.db_file_path = db_file_path_bak
+            # Overwrite the database path
+            self.db_file_path = db_file_path_saved
 
-                # Convert trajectories from JSON to TrajectoryReduced objects
-                for traj_dict_str in ["trajectories", "failed_trajectories"]:
-                    traj_dict = getattr(self, traj_dict_str)
-                    trajectories_obj_dict = {}
-                    for traj_json in traj_dict:
-                        traj_reduced_tmp = TrajectoryReduced(None, json_dict=traj_dict[traj_json])
+            # Convert trajectories from JSON to TrajectoryReduced objects
+            for traj_dict_str in ["trajectories", "failed_trajectories"]:
+                traj_dict = getattr(self, traj_dict_str)
+                trajectories_obj_dict = {}
+                for traj_json in traj_dict:
+                    traj_reduced_tmp = TrajectoryReduced(None, json_dict=traj_dict[traj_json])
 
-                        trajectories_obj_dict[traj_reduced_tmp.jdt_ref] = traj_reduced_tmp
+                    trajectories_obj_dict[traj_reduced_tmp.jdt_ref] = traj_reduced_tmp
 
-                    # Set the trajectory dictionary
-                    setattr(self, traj_dict_str, trajectories_obj_dict)
+                # Set the trajectory dictionary
+                setattr(self, traj_dict_str, trajectories_obj_dict)
 
         # do this here because the object dict is overwritten during the load operation above
         self.verbose = verbose
