@@ -142,32 +142,31 @@ If you experience any issues, please see the "Troubleshooting" section below.
 
 #### Troubleshooting
 
-If you are getting the following error on Windows: ```Unable to find vcvarsall.bat```, that means you need to install [Visual C++ Build Tools 2015](http://go.microsoft.com/fwlink/?LinkId=691126).
+If you are getting the following error on Windows: ```Unable to find vcvarsall.bat```, that means you need to install [Visual C++ Build Tools 2015](http://go.microsoft.com/fwlink/?LinkId=691126) or 2022. 
 
 If you are getting this error when running the setup: ```ModuleNotFoundError: No module named 'wmpl.PythonNRLMSISE00.nrlmsise_00_header'```, it means that you haven't cloned the repository as per instructions. Please read this README file more carefully (hint: the answer is at the top of the file).
 
 ##### ```KeyError: 'PROJ_LIB'```
 The basemap conda package is terribly broken and no one seems to care to fix it, so we have to do a little bit of "hacking". First, find where your anaconda is installed. 
 
-Under Windows, it is probably in ```C:\Users\<YOUR_USERNAME>\AppData\Local\Continuum\anaconda3\``` or ```C:\Users\<YOUR_USERNAME>\Anaconda3\```, where you should replace <YOUR_USERNAME> with your username (duh!). From now on I will refer to this path as ```<ANACONDA_DIR>```.
-Open the following file in a text editor: ```<ANACONDA_DIR>\envs\wmpl\Lib\site-packages\mpl_toolkits\basemap\__init__.py```. 
+Under Windows, it is probably in ```C:\Users\<YOUR_USERNAME>\AppData\Local\Continuum\anaconda3\``` or ```C:\Users\<YOUR_USERNAME>\Anaconda3\```, where you should replace <YOUR_USERNAME> with your username (duh!). From now on I will refer to this path as ```<ANACONDA_DIR>```. 
 
-Under Linux, it is probably in ```/home/<YOUR_USERNAME>/anaconda3```. From now on I will refer to this path as ```<ANACONDA_DIR>```. Open the following file in a text editor: ```<ANACONDA_DIR>/envs/wmpl/lib/python3.7/site-packages/mpl_toolkits/basemap/__init__.py```. 
+Look in the pkgs directory. You should find a folder named something like ```proj-9.5.1-h4f671f6_0```. The exact details vary and you may have more than one version installed. Make a note of the name of the newest one. I will refer to this as ```<PROJDIR>```
 
-Find the line ```pyproj_datadir = os.environ['PROJ_LIB']```, and comment it out by putting a # in front of it. Right below that command, add the following line(for Windows):
-```
-pyproj_datadir = "<ANACONDA_DIR>/envs/wmpl/Library/share"
-```
-(for Linux):
-```
-pyproj_datadir = "<ANACONDA_DIR>/envs/wmpl/share/basemap"
-```
+Now, create a new Environment Variable. Note the differences between Windows and Linux.
 
-Just make sure to replace <ANACONDA_DIR> with the full path. Also, make sure to replace all backslashes ```\``` with forward slashes ```/``` in the path.
+Windows: ```<ANACONDA_DIR>\pkgs\<PROJDIR>\Library\share\proj\```. 
+Linux:   ```<ANACONDA_DIR>/pkgs/<PROJDIR>/share/proj/```. 
 
-Save the file. Enjoy.
+For example on my Windows PC, the location is 
+```C:\Users\Mark\miniconda3\pkgs\proj-9.5.1-h4f671f6_0\Library\share\proj\```
+and on my Linux server it is 
+```$HOME/miniconda3/pkgs/proj-9.3.1-he5811b7_0/share/proj```
 
-If after this you get this error:
+Restart any termina, CMD or Powershell windows, and you should find that the error has been resolved.  If not, try one of the other versions of proj thats probably in your pkgs folder. 
+
+##### Missing epsg file
+If you get this error:
 
 ```FileNotFoundError: [Errno 2] No such file or directory: '<ANACONDA_DIR>/envs/wmpl/Library/share\\epsg'```
 
