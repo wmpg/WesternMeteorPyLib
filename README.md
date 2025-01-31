@@ -147,23 +147,23 @@ If you are getting the following error on Windows: ```Unable to find vcvarsall.b
 If you are getting this error when running the setup: ```ModuleNotFoundError: No module named 'wmpl.PythonNRLMSISE00.nrlmsise_00_header'```, it means that you haven't cloned the repository as per instructions. Please read this README file more carefully (hint: the answer is at the top of the file).
 
 ##### ```KeyError: 'PROJ_LIB'```
-The basemap conda package is terribly broken and no one seems to care to fix it, so we have to do a little bit of "hacking". First, find where your anaconda is installed. 
+The basemap conda package is terribly broken and no one seems to care to fix it, so we have to do a little bit of "hacking". 
 
-Under Windows, it is probably in ```C:\Users\<YOUR_USERNAME>\AppData\Local\Continuum\anaconda3\``` or ```C:\Users\<YOUR_USERNAME>\Anaconda3\```, where you should replace <YOUR_USERNAME> with your username (duh!). From now on I will refer to this path as ```<ANACONDA_DIR>```. 
+First, find where your anaconda is installed. Under Windows, it is probably in ```C:\Users\<YOUR_USERNAME>\AppData\Local\Continuum\anaconda3\``` or ```C:\Users\<YOUR_USERNAME>\Anaconda3\```, where you should replace <YOUR_USERNAME> with your username (duh!). From now on I will refer to this path as ```<ANACONDA_DIR>```. 
 
-Look in the pkgs directory. You should find a folder named something like ```proj-9.5.1-h4f671f6_0```. The exact details vary and you may have more than one version installed. Make a note of the name of the newest one. I will refer to this as ```<PROJDIR>```
+In this folder, look in the ```pkgs``` folder. You should find a folder named something like ```proj-9.5.1-h4f671f6_0```. The exact details vary and you may have more than one version installed. Make a note of the name of the newest one. I will refer to this as ```<PROJDIR>```
 
 Now, create a new Environment Variable. Note the differences between Windows and Linux.
 
-Windows: ```<ANACONDA_DIR>\pkgs\<PROJDIR>\Library\share\proj\```. 
-Linux:   ```<ANACONDA_DIR>/pkgs/<PROJDIR>/share/proj/```. 
+Windows: ```<ANACONDA_DIR>\pkgs\<PROJDIR>\Library\share\proj\```
+Linux:   ```<ANACONDA_DIR>/pkgs/<PROJDIR>/share/proj/```
 
 For example on my Windows PC, the location is 
 ```C:\Users\Mark\miniconda3\pkgs\proj-9.5.1-h4f671f6_0\Library\share\proj\```
 and on my Linux server it is 
 ```$HOME/miniconda3/pkgs/proj-9.3.1-he5811b7_0/share/proj```
 
-Restart any termina, CMD or Powershell windows, and you should find that the error has been resolved.  If not, try one of the other versions of proj thats probably in your pkgs folder. 
+Restart any terminal, CMD or Powershell windows, and you should find that the error has been resolved.  If not, try one of the other versions of proj thats probably in your pkgs folder. 
 
 ##### Missing epsg file
 If you get this error:
