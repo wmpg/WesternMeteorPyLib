@@ -1736,6 +1736,9 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
                 traj_list.append(traj)
 
     # Sort trajectories by time
+    if verbose:
+        print(f"Loaded {loaded_trajs_count} trajectories...")
+        print(f'of which {loaded_trajs_count - len(traj_list)} were rejected')
     traj_list = sorted(traj_list, key=lambda x: x.jdt_ref)
 
     # Remove duplicate trajectories
