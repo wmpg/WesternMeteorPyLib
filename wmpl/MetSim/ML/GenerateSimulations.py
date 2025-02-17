@@ -615,8 +615,14 @@ class ErosionSimContainer(object):
 
             # Make the density folder
             if not os.path.isdir(dens_folder_path):
-                os.makedirs(dens_folder_path)
-
+                # Needed when multiplrocessing or some other process creates the directory before this one
+                os.makedirs(dens_folder_path, exist_ok=True)
+                # Needed when multiplrocessing but slower
+                # try:
+                #     os.makedirs(dens_folder_path)
+                # except FileExistsError:
+                #     # The directory already exists; no action needed
+                #     pass
 
             ### 
 
@@ -887,6 +893,13 @@ def extractSimData(sim, min_frames_visible=MIN_FRAMES_VISIBLE, check_only=False,
 
     ### ADD NOISE ###
 
+    # lag_sampled=len_sampled[first_length_index:]-(vel_sampled[0]*time_sampled+len_sampled[0]) # +len_sampled[0]
+
+    # lag_sampled+= np.random.normal(loc=0.0, scale=params.len_noise, \
+    #     size=len(len_sampled[first_length_index:]))
+    
+    # lag_sampled=lag_sampled-lag_sampled[0]
+
     # Add noise to magnitude data
     mag_sampled[mag_sampled <= lim_mag] += np.random.normal(loc=0.0, scale=params.mag_noise, \
         size=len(mag_sampled[mag_sampled <= lim_mag]))
@@ -910,7 +923,11 @@ def extractSimData(sim, min_frames_visible=MIN_FRAMES_VISIBLE, check_only=False,
         padOrTruncate(len_normed, params.data_length), \
         padOrTruncate(mag_normed, params.data_length)])
 
-    lag_sampled=len_sampled-(vel_sampled[0]*time_sampled+len_sampled[0])
+    # vel_sampled+= np.random.normal(loc=0.0, scale=params.len_noise*np.sqrt(2)/(1.0/params.fps), \
+    #     size=len(len_sampled[first_length_index:]))
+    # rmsd_t0_lag/1000*np.sqrt(2)/(1.0/fps)
+
+    lag_sampled=len_sampled[first_length_index:]-(vel_sampled[first_length_index]*time_sampled) # +len_sampled[0]
 
     # get the new velocity with noise
     for vel_ii in range(1,len(time_sampled)):
@@ -921,6 +938,7 @@ def extractSimData(sim, min_frames_visible=MIN_FRAMES_VISIBLE, check_only=False,
         else:
             vel_sampled[vel_ii]=(len_sampled[vel_ii]-len_sampled[vel_ii-1])/(time_sampled[vel_ii]-time_sampled[vel_ii-1])
     
+    # vel_sampled[0]=vel_sampled[first_length_index]
 
     # Return input data and results
     return params, time_sampled, ht_sampled, len_sampled, mag_sampled, vel_sampled, lag_sampled, input_data_normed, simulated_data_normed
@@ -979,8 +997,10 @@ def saveProcessedList(data_path, results_list, param_class_name, min_frames_visi
 
     """
 
-    # Reject all None's from the results
-    good_list = [entry for entry in results_list if entry is not None]
+    # # Reject all None's from the results
+    # good_list = [entry for entry in results_list if entry is not None]
+    # Reject all None's from the results and entries where the filename is None
+    good_list = [entry for entry in results_list if entry is not None and entry[0] is not None]
 
     # Load one simulation to get simulation parameters
     sim = loadPickle(*os.path.split(good_list[0][0]))

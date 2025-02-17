@@ -532,36 +532,27 @@ def loadFitOptions(dir_path, file_name):
 
 
 
-if __name__ == "__main__":
+def runAutoRefine(dir_path_main, fit_options_file_main, updated_main=False, hideplots_main=True):
+    """
+    Run the automated fitting of the meteor parameters uing the Refine meteoroid ablation model parameters 
+    using automated optimization. As folows are shown the 4 arguments that are passed to the function:
+      -  dir_path_main = Path to the directory containing the meteor data. The direction has to contain the trajectory pickle file, the simulated parameters .json file, and optionally a METAL .met file with the wide-field lightcurve.
+      -  fit_options_file_main = Name of the file containing the fit options. It is assumed the file is located in the same directory as the meteor data.
+      -  updated_main = Load the updated simulation JSON file that has been refined insted of the original one. Default is False.
+      -  hideplots_main = Don't show generated plots on the screen, just save them to disk. Default is True.
+    """
 
-    import argparse
+    # initlize cml_args
+    class cml_args:
+        pass
 
-
-    #########################
-
-    # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(description="Refine meteoroid ablation model parameters using automated optimization.")
-
-    arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str, \
-        help="Path to the directory containing the meteor data. The direction has to contain the trajectory pickle file, the simulated parameters .json file, and optionally a METAL .met file with the wide-field lightcurve.")
-
-    arg_parser.add_argument("fit_options_file", metavar="FIT_OPTIONS_FILE", type=str, \
-        help="Name of the file containing the fit options. It is assumed the file is located in the same directory as the meteor data.")
-
-    arg_parser.add_argument('--updated', action='store_true', \
-        help="Load the updated simulation JSON file insted of the original one.")
-    
-    arg_parser.add_argument('-x', '--hideplots', \
-        help="Don't show generated plots on the screen, just save them to disk.", action="store_true")
-
-    # Parse the command line arguments
-    cml_args = arg_parser.parse_args()
-
-    #########################
-
+    cml_args.dir_path = dir_path_main
+    cml_args.fit_options_file = fit_options_file_main
+    cml_args.updated = updated_main
+    cml_args.hideplots = hideplots_main
 
     # Check that scipy version is at least 1.7.0 - older versions don't support Nelder-Mead with bounds
-    if scipy.__version__ < "1.7.0":
+    if tuple(map(int, scipy.__version__.split('.'))) < (1, 7, 0):
         print("ERROR: scipy version must be at least 1.7.0! Please upgrade scipy.")
         print("If you're using conda, then run:")
         print("conda install -c conda-forge scipy=1.7.3")
@@ -869,7 +860,7 @@ if __name__ == "__main__":
 
             mag_filter = obs.absolute_magnitudes < 9
 
-            ax_mag.plot(obs.absolute_magnitudes[mag_filter], obs.model_ht[mag_filter]/1000, marker='x', ms=8, alpha=0.5, label=obs.station_id)
+            ax_mag.plot(obs.absolute_magnitudes[mag_filter], obs.model_ht[mag_filter]/1000, marker='x', markersize=8, alpha=0.5, label=obs.station_id)
 
 
         # Compute the observed lag
@@ -882,12 +873,12 @@ if __name__ == "__main__":
         # obs_ht = obs.model_ht
 
         # Plot the observed lag
-        lag_handle = ax_lag.plot(obs_lag, obs_ht/1000, 'x', ms=8, alpha=0.5, linestyle='dashed', 
+        lag_handle = ax_lag.plot(obs_lag, obs_ht/1000, 'x', alpha=0.5, linestyle='dashed', 
             label=obs.station_id, markersize=10, linewidth=2)
 
 
         # Plot the velocity
-        ax_vel.plot(obs.velocities[1:]/1000, obs_ht[1:]/1000, 'x', ms=8, alpha=0.5, linestyle='dashed', 
+        ax_vel.plot(obs.velocities[1:]/1000, obs_ht[1:]/1000, 'x', alpha=0.5, linestyle='dashed', 
             label=obs.station_id, markersize=10, linewidth=2)
 
         # Update the min/max height
@@ -987,3 +978,34 @@ if __name__ == "__main__":
         plt.close()
 
     ### ###
+
+
+
+if __name__ == "__main__":
+
+    import argparse
+
+
+    #########################
+
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Refine meteoroid ablation model parameters using automated optimization.")
+
+    arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str, \
+        help="Path to the directory containing the meteor data. The direction has to contain the trajectory pickle file, the simulated parameters .json file, and optionally a METAL .met file with the wide-field lightcurve.")
+
+    arg_parser.add_argument("fit_options_file", metavar="FIT_OPTIONS_FILE", type=str, \
+        help="Name of the file containing the fit options. It is assumed the file is located in the same directory as the meteor data.")
+
+    arg_parser.add_argument('--updated', action='store_true', \
+        help="Load the updated simulation JSON file that has been refined insted of the original one.")
+    
+    arg_parser.add_argument('-x', '--hideplots', \
+        help="Do not show generated plots on the screen, just save them to disk.", action="store_true")
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    #########################
+
+    runAutoRefine(cml_args.dir_path, cml_args.fit_options_file, cml_args.updated, cml_args.hideplots)
