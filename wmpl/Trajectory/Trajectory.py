@@ -948,11 +948,25 @@ def calcSpatialResidual(jdt_ref, jd, state_vect, radiant_eci, stat, meas, gravit
     #  Calculate dot products to resolve p into its components
     ehx = np.dot(p, hx_eci)
     ehy = np.dot(p, hy_eci)
+
+    # Explanation of the residuals:
+    # The vertical residuals have a positive sign for any "measured" CPA point lying above the plane of the 
+    # fitted (model) trajectory. The reference frame x-axis points towards the radiant, and as you look 
+    # towards the radiant the y-axis points to your left. The horizontal residual is effectively the dot 
+    # product with the y-axis which therefore has a positive sign for measured CPA's to the left of the model 
+    # trajectory. Since the CPA vector is calculated to be perpendicular to the x-axis, the dot product of 
+    # this is vanishingly small. We retain the form of square root of the x & y axes dot products for 
+    # completeness, and this would also become important if a velocity model was used. It is also important 
+    # that z = x^y for right-handed axes.
                                                     
     # Calculate horizontal residuals
+    # Looking along the trajectory (radiant behind you, you're on top of the trajectory), 
+    # positive residuals are to the right
     hres = np.sign(ehy)*np.hypot(ehx, ehy)
 
     # Calculate vertical residuals
+    # Looking along the trajectory (radiant behind you, you're on top of the trajectory), 
+    # positive residuals are upwards
     vres = np.dot(p, vz_eci)
                                                     
     return hres, vres
@@ -4788,7 +4802,9 @@ class Trajectory(object):
 
             plt.grid()
 
-            plt.legend(prop={'size': LEGEND_TEXT_SIZE})
+            plt.legend(prop={'size': LEGEND_TEXT_SIZE}, 
+                       title="Looking down the trajectory:\nVert +up, Horiz +right.")
+            plt.setp(plt.gca().get_legend().get_title(), fontsize=LEGEND_TEXT_SIZE)
 
             # Set the residual limits to +/-10m if they are smaller than that
             if (np.max(np.abs(obs.v_residuals)) < 10) and (np.max(np.abs(obs.h_residuals)) < 10):
@@ -4863,7 +4879,9 @@ class Trajectory(object):
 
             plt.grid()
 
-            plt.legend(prop={'size': LEGEND_TEXT_SIZE})
+            plt.legend(prop={'size': LEGEND_TEXT_SIZE}, 
+                       title="Looking down the trajectory:\nVert +up, Horiz +right.")
+            plt.setp(plt.gca().get_legend().get_title(), fontsize=LEGEND_TEXT_SIZE)
 
             # Set the residual limits to +/-10m if they are smaller than that
             if np.max(np.abs(plt.gca().get_ylim())) < 10:
@@ -4920,7 +4938,9 @@ class Trajectory(object):
 
             plt.grid()
 
-            plt.legend(prop={'size': LEGEND_TEXT_SIZE})
+            plt.legend(prop={'size': LEGEND_TEXT_SIZE}, 
+                       title="Looking down the trajectory:\nVert +up, Horiz +right.")
+            plt.setp(plt.gca().get_legend().get_title(), fontsize=LEGEND_TEXT_SIZE)
 
             # Set the residual limits to +/-10m if they are smaller than that
             if np.max(np.abs(plt.gca().get_ylim())) < 10:
