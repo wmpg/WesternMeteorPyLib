@@ -115,6 +115,7 @@ The installation might differ on Windows. I recommend installing Anaconda, which
 	conda install -y -c conda-forge numba
 	conda install -y -c conda-forge basemap basemap-data-hires
  	conda install -y -c conda-forge cartopy paramiko
+	conda install -y -c astropy astropy
 	```
 
 3) Download and install git: [https://git-scm.com/downloads](https://git-scm.com/downloads)
