@@ -1031,7 +1031,7 @@ class TrajectoryCorrelator(object):
                 traj.phase_1_only = True
 
             if orig_traj:
-                log.info("Removing the previous solution...")
+                log.info(f"Removing the previous solution {os.path.dirname(orig_traj.traj_file_path)} ...")
                 self.dh.removeTrajectory(orig_traj)
                 traj.pre_mc_longname = os.path.split(self.dh.generateTrajOutputDirectoryPath(orig_traj, make_dirs=False))[-1] 
 
@@ -1109,7 +1109,7 @@ class TrajectoryCorrelator(object):
                 dt_bin_list = generateDatetimeBins(
                     dt_beg, dt_end, 
                     bin_days=1, utc_hour_break=12, tzinfo=datetime.timezone.utc, reverse=False
-                    )
+                )
                 
         else:
             dt_beg = self.dh.dt_range[0]
@@ -1724,11 +1724,9 @@ class TrajectoryCorrelator(object):
             # end of "for matched_observations in candidate_trajectories"
             outcomes = [traj_solved_count]
 
+            # Finish the correlation run (update the database with new values)
             self.dh.saveDatabase()
             log.info(f'SOLVED {sum(outcomes)} TRAJECTORIES')
-
-            # Finish the correlation run (update the database with new values)
-            self.dh.finish()
 
             log.info("")
             log.info("-----------------")

@@ -17,6 +17,7 @@ import multiprocessing
 import logging
 import logging.handlers
 import glob
+import pandas as pd
 from dateutil.relativedelta import relativedelta
 import numpy as np
 
@@ -130,6 +131,9 @@ class TrajectoryReduced(object):
             else:
                 self.phase_1_only = False
 
+            if hasattr(traj, 'traj_id'):
+                self.traj_id = traj.traj_id
+
         # Load values from a dictionary
         else:
             self.__dict__ = json_dict
@@ -137,7 +141,7 @@ class TrajectoryReduced(object):
 
 
 class DatabaseJSON(object):
-    def __init__(self, db_file_path):
+    def __init__(self, db_file_path, verbose=False):
 
         self.db_file_path = db_file_path
 
@@ -158,23 +162,43 @@ class DatabaseJSON(object):
         self.failed_trajectories = {}
 
         # Load the database from a JSON file
-        self.load()
+        self.load(verbose=verbose)
 
 
-    def load(self):
+    def load(self, verbose=False):
         """ Load the database from a JSON file. """
 
+        # location of last backup of the database, in case we need to use it
+        db_bak_file_path = self.db_file_path + ".bak"
+
         if os.path.exists(self.db_file_path):
-            with open(self.db_file_path) as f:
+            db_file_path_saved = self.db_file_path
 
-                db_file_path_bak = self.db_file_path
+            # Load the value from the database
+            # if there's a problem with the file, try using the last backup
+            db_is_ok = False
+            try:
+                self.__dict__ = json.load(open(self.db_file_path))
+                db_is_ok = True
 
-                # Load the value from the database
-                self.__dict__ = json.load(f)
+            except Exception:
+                db_is_ok = False
+                log.warning('trajectory database damaged, trying backup')
 
-                # Overwrite the database path
-                self.db_file_path = db_file_path_bak
+                try:
+                    if os.path.exists(db_bak_file_path):
+                        shutil.copy2(db_bak_file_path, self.db_file_path)
+                        self.__dict__ = json.load(open(self.db_file_path))
+                        db_is_ok = True
 
+                except Exception:
+                    log.warning('unable to find a useable trajectory database')
+                    db_is_ok = False
+
+            # Overwrite the database path with the saved one
+            self.db_file_path = db_file_path_saved
+
+            if db_is_ok:
                 # Convert trajectories from JSON to TrajectoryReduced objects
                 for traj_dict_str in ["trajectories", "failed_trajectories"]:
                     traj_dict = getattr(self, traj_dict_str)
@@ -186,6 +210,9 @@ class DatabaseJSON(object):
 
                     # Set the trajectory dictionary
                     setattr(self, traj_dict_str, trajectories_obj_dict)
+
+        # do this here because the object dict is overwritten during the load operation above
+        self.verbose = verbose
 
 
     def save(self):
@@ -293,7 +320,8 @@ class DatabaseJSON(object):
 
             # Init the reduced trajectory object
             traj_reduced = TrajectoryReduced(traj_file_path)
-
+            if self.verbose:
+                log.info(f' loaded {traj_file_path}, traj_id {traj_reduced.traj_id}')
             # Skip if failed
             if traj_reduced is None:
                 return None
@@ -302,9 +330,10 @@ class DatabaseJSON(object):
                 return None
 
         else:
-
             # Use the provided trajectory object
             traj_reduced = traj_obj
+            if self.verbose:
+                log.info(f' loaded {traj_obj.traj_file_path}, traj_id {traj_reduced.traj_id}')
 
 
         # Choose to which dictionary the trajectory will be added
@@ -318,6 +347,8 @@ class DatabaseJSON(object):
         # Add the trajectory to the list (key is the reference JD)
         if traj_reduced.jdt_ref not in traj_dict:
             traj_dict[traj_reduced.jdt_ref] = traj_reduced
+        else:
+            traj_dict[traj_reduced.jdt_ref].traj_id = traj_reduced.traj_id
 
 
 
@@ -331,11 +362,9 @@ class DatabaseJSON(object):
         # Remove the trajectory folder on the disk
         if not keepFolder and os.path.isfile(traj_reduced.traj_file_path):
             traj_dir = os.path.dirname(traj_reduced.traj_file_path)
-            log.info(f'removing {traj_dir}')
             shutil.rmtree(traj_dir, ignore_errors=True)
-
-
-
+            if os.path.isfile(traj_reduced.traj_file_path):
+                log.info(f'unable to remove {traj_dir}')
 
 
 
@@ -484,7 +513,7 @@ class PlateparDummy:
 
 
 class RMSDataHandle(object):
-    def __init__(self, dir_path, dt_range=None, db_dir=None, output_dir=None, mcmode=0, max_trajs=1000, remotehost=None):
+    def __init__(self, dir_path, dt_range=None, db_dir=None, output_dir=None, mcmode=0, max_trajs=1000, remotehost=None, verbose=False):
         """ Handles data interfacing between the trajectory correlator and RMS data files on disk. 
     
         Arguments:
@@ -534,6 +563,8 @@ class RMSDataHandle(object):
 
         self.remotehost = remotehost
 
+        self.verbose = verbose
+
         ############################
 
         # Load database of processed folders
@@ -545,7 +576,7 @@ class RMSDataHandle(object):
 
         if mcmode != 2:
             log.info("Loading database: {:s}".format(database_path))
-            self.db = DatabaseJSON(database_path)
+            self.db = DatabaseJSON(database_path, verbose=self.verbose)
             log.info('Archiving older entries....')
             try:
                 self.archiveOldRecords(older_than=3)
@@ -619,7 +650,7 @@ class RMSDataHandle(object):
         archdate_jd = datetime2JD(archdate)
 
         arch_db_path = os.path.join(self.db_dir, f'{archdate.strftime("%Y%m")}_{JSON_DB_NAME}')
-        archdb = DatabaseJSON(arch_db_path)
+        archdb = DatabaseJSON(arch_db_path, verbose=self.verbose)
         log.info(f'Archiving db records to {arch_db_path}...')
 
         for traj in [t for t in self.db.trajectories if t < archdate_jd]:
@@ -1020,19 +1051,34 @@ class RMSDataHandle(object):
             log.info("  Datetime range: {:s} - {:s}".format(
                 self.dt_range[0].strftime("%Y-%m-%d %H:%M:%S"), 
                 self.dt_range[1].strftime("%Y-%m-%d %H:%M:%S")))
+            
         jdt_start = datetime2JD(self.dt_range[0]) 
         jdt_end = datetime2JD(self.dt_range[1])
+
         trajs_to_remove = []
+
         keys = [k for k in self.db.trajectories.keys() if k >= jdt_start and k <= jdt_end]
         for trajkey in keys:
             traj_reduced = self.db.trajectories[trajkey]
-            traj_path = os.path.join(self.output_dir, traj_reduced.traj_file_path)
+            # Update the trajectory path to make sure we're working with the correct filesystem
+            traj_path = self.generateTrajOutputDirectoryPath(traj_reduced)
+            traj_file_name = os.path.split(traj_reduced.traj_file_path)[1]
+            traj_path = os.path.join(traj_path, traj_file_name)
+
+            if self.verbose:
+                log.info(f' testing {traj_path}')
+
             if not os.path.isfile(traj_path):
-                log.info(f' removing {traj_reduced.traj_file_path}')
+                traj_reduced.traj_file_path = traj_path
                 trajs_to_remove.append(traj_reduced)
+
         for traj in trajs_to_remove:
-            self.db.removeTrajectory(traj)
-        #self.saveDatabase()
+            log.info(f' removing deleted {traj.traj_file_path}')
+
+            # remove from the database but not from the disk: they're already not on the disk and this avoids
+            # accidentally deleting a different traj with a timestamp which is within a millisecond
+            self.db.removeTrajectory(traj, keepFolder=True)
+
         return 
 
 
@@ -1130,6 +1176,68 @@ class RMSDataHandle(object):
                 and (self.db.trajectories[key].jdt_ref <= jd_end)]
                 
 
+    def removeDuplicateTrajectories(self, dt_range):
+        """ Remove trajectories with duplicate IDs
+            keeping the one with the most station observations
+        """
+        
+        log.info('removing duplicate trajectories')
+        
+        tr_in_scope = self.getComputedTrajectories(datetime2JD(dt_range[0]), datetime2JD(dt_range[1]))
+        tr_to_check = [{'jdt_ref':traj.jdt_ref,'traj_id':traj.traj_id, 'traj': traj} for traj in tr_in_scope if hasattr(traj,'traj_id')]
+
+        if len(tr_to_check) == 0:
+            log.info('no trajectories in range')
+            return 
+        
+        tr_df = pd.DataFrame(tr_to_check)
+        tr_df['dupe']=tr_df.duplicated(subset=['traj_id'])
+        dupeids = tr_df[tr_df.dupe].sort_values(by=['traj_id']).traj_id
+        duperows = tr_df[tr_df.traj_id.isin(dupeids)]
+
+        log.info(f'there are {len(duperows.traj_id.unique())} duplicate trajectories')
+        
+        # iterate over the duplicates, finding the best and removing the others
+        for traj_id in duperows.traj_id.unique():
+            num_stats = 0
+            best_traj_dt = None
+            best_traj_path = None
+            # find duplicate with largest number of observations
+            for testdt in duperows[duperows.traj_id==traj_id].jdt_ref.values:
+
+                if len(dh.db.trajectories[testdt].participating_stations) > num_stats:
+
+                    best_traj_dt = testdt
+                    num_stats = len(dh.db.trajectories[testdt].participating_stations)
+                    # sometimes the database contains duplicates that differ by microseconds in jdt. These
+                    # will have overwritten each other in the folder so make a note of the location.
+                    best_traj_path = dh.db.trajectories[testdt].traj_file_path
+
+            # now remove all except the best
+            for testdt in duperows[duperows.traj_id==traj_id].jdt_ref.values:
+
+                traj = dh.db.trajectories[testdt]
+                if testdt != best_traj_dt:
+
+                    # get the current trajectory's location. If its the same as that of the best trajectory
+                    # don't try to delete the solution from disk even if there's a small difference in jdt_ref
+                    keepFolder = False
+                    if traj.traj_file_path == best_traj_path:
+                        keepFolder = True
+                    # Update the trajectory path to make sure we're working with the correct filesystem
+                    traj_path = self.generateTrajOutputDirectoryPath(traj)
+                    traj_file_name = os.path.split(traj.traj_file_path)[1]
+                    traj.traj_file_path = os.path.join(traj_path, traj_file_name)
+                    log.info(f'removing duplicate {traj.traj_id} keep {traj_file_name} {keepFolder}')
+
+                    self.db.removeTrajectory(traj, keepFolder=keepFolder)
+
+                else:
+                    if self.verbose:
+                        log.info(f'keeping {traj.traj_id} {traj.traj_file_path}')
+         
+        return 
+    
 
     def getPlatepar(self, met_obs):
         """ Return the platepar of the meteor observation. """
@@ -1294,6 +1402,7 @@ class RMSDataHandle(object):
 
         # Save the picked trajectory structure
         savePickle(traj, output_dir, traj.file_name + '_trajectory.pickle')
+        log.info(f'saved {traj.traj_id} to {output_dir}')
 
         if self.mc_mode == 1:
             savePickle(traj, self.phase1_dir, traj.pre_mc_longname + '_trajectory.pickle')
@@ -1541,18 +1650,6 @@ class RMSDataHandle(object):
         # Restore the signal functionality
         signal.signal(signal.SIGINT, original_signal)
 
-
-
-
-
-    def finish(self):
-        """ Finish the processing run. """
-
-        # Save the processed directories to the DB file
-        self.saveDatabase()
-
-        # Save the list of processed meteor observations
-
         
 
 
@@ -1656,6 +1753,8 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     arg_parser.add_argument('--remotehost', '--remotehost', type=str, default=None,
         help="Remote host to collect and return MC phase solutions to. Supports internet-distributed processing.")
     
+    arg_parser.add_argument('--verbose', '--verbose', help='Verbose logging.', default=False, action="store_true")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -1816,7 +1915,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         dh = RMSDataHandle(
             cml_args.dir_path, dt_range=event_time_range, 
             db_dir=cml_args.dbdir, output_dir=cml_args.outdir,
-            mcmode=cml_args.mcmode, max_trajs=max_trajs, remotehost=remotehost)
+            mcmode=cml_args.mcmode, max_trajs=max_trajs, remotehost=remotehost, verbose=cml_args.verbose)
         
         # If there is nothing to process, stop, unless we're in mcmode 2 (processing_list is not used in this case)
         if not dh.processing_list and cml_args.mcmode < 2:
@@ -1854,8 +1953,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                 # Split the processing into daily chunks
                 dt_bins = generateDatetimeBins(
                     proc_dir_dt_beg, proc_dir_dt_end, 
-                    bin_days=1, tzinfo=datetime.timezone.utc, reverse=False
-                    )
+                    bin_days=1, tzinfo=datetime.timezone.utc, reverse=False)
 
                 # check if we've created an extra bucket (might happen if requested timeperiod is less than 24h)
                 if event_time_range is not None:
@@ -1894,6 +1992,8 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                     # refresh list of calculated trajectories from disk
                     dh.removeDeletedTrajectories()
                     dh.loadComputedTrajectories(os.path.join(dh.output_dir, OUTPUT_TRAJ_DIR), dt_range=[bin_beg, bin_end])
+                    if cml_args.mcmode != 2:
+                        dh.removeDuplicateTrajectories(dt_range=[bin_beg, bin_end])
 
                     # Run the trajectory correlator
                     tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True, enableOSM=cml_args.enableOSM)
