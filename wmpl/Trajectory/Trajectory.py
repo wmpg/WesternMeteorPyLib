@@ -3406,7 +3406,7 @@ class Trajectory(object):
                 maxiter_list = [1000, None, 15000]
 
             # Try different methods to minimize timing residuals
-            for opt_method, opt, maxiter in zip(methods, maxiter_type, maxiter_list):
+            for opt_method, opt, maxiter in zip(methods, opt_list, maxiter_list):
 
                 # Run the minimization of residuals between all stations
                 timing_mini = scipy.optimize.minimize(timingResiduals, p0, args=(observations, \
