@@ -3396,20 +3396,22 @@ class Trajectory(object):
             # If there are more than 5 stations, use the advanced L-BFGS-B method by default
             if len(self.observations) >= 5:
                 methods = [None]
+                opt_list = ['maxiter']
                 maxiter_list = [15000]
 
             else:
                 # If there are less than 5, try faster methods first
                 methods = ['SLSQP', 'TNC', None]
+                opt_list = ['maxiter','maxfun','maxiter']
                 maxiter_list = [1000, None, 15000]
 
             # Try different methods to minimize timing residuals
-            for opt_method, maxiter in zip(methods, maxiter_list):
+            for opt_method, opt, maxiter in zip(methods, opt_list, maxiter_list):
 
                 # Run the minimization of residuals between all stations
                 timing_mini = scipy.optimize.minimize(timingResiduals, p0, args=(observations, \
                     self.stations_time_dict, weights), bounds=bounds, method=opt_method, 
-                    options={'maxiter': maxiter}, tol=1e-12)
+                    options={opt: maxiter}, tol=1e-12)
 
                 # Stop trying methods if this one was successful
                 if timing_mini.success:
