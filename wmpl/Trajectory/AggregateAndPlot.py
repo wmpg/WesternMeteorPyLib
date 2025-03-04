@@ -104,7 +104,7 @@ def computeMass(traj, P_0m):
         mag_filter = obs.absolute_magnitudes < 8
 
         # If all magnitudes are fainter than 8, skip the station
-        if np.all(mag_filter):
+        if not np.any(mag_filter):
             continue
 
         for t, mag in zip(obs.time_data[mag_filter], obs.absolute_magnitudes[mag_filter]):
