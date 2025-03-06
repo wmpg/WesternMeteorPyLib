@@ -1741,6 +1741,10 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
         print(f'of which {loaded_trajs_count - len(traj_list)} were rejected')
     traj_list = sorted(traj_list, key=lambda x: x.jdt_ref)
 
+    # no need to filter a zero-length list, and in fact this avoids a crash
+    if len(traj_list) == 0:
+        return traj_list
+    
     # Remove duplicate trajectories
     if filter_duplicates:
         if verbose:
