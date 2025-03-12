@@ -1264,35 +1264,36 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, max_radiant_err=0.5
 
         ### Plot the mass distribution ###
 
-        # Plot the cumulative distribution
-        ax_mass.hist(np.log10(mass_data_filt), bins=len(mass_data_filt), cumulative=-1, 
-            density=True, log=True, histtype='step', color='k', zorder=4)
-
-
-        # Fit the slope to the data
-        params, x_arr, inflection_point, ref_point, slope, slope_report, intercept, lim_point, sign, \
-            kstest = fitSlope(np.log10(mass_data_filt), True)
-
-
-        # Plot the tangential line with the slope
-        ax_mass.plot(sign*x_arr, logline(-x_arr, slope, intercept), color='r', 
-            label="s = {:.2f} \nKS test D = {:.3f} \nKS test p-value = {:.3f}".format(
-                slope_report, kstest.statistic, kstest.pvalue), zorder=5)
-
-        ax_mass.legend(prop={'size': label_text_size}, loc='lower left')
-
-
-        ax_mass.set_xlabel("Log10 mass (kg)", fontsize=label_text_size)
-        ax_mass.set_ylabel("Cumulative count", fontsize=label_text_size)
-
-        ax_mass.set_ylim(ymax=1.0)
-        ax_mass.set_xlim([-8.0, -3.0])
-
-
-        # Set smaller tick size
-        ax_mass.xaxis.set_tick_params(labelsize=label_text_size)
-        ax_mass.yaxis.set_tick_params(labelsize=label_text_size)
-
+        # Plot the cumulative distribution, provided there are some non-zero masses to plot
+        if sum(mass_data_filt) > 0:
+            ax_mass.hist(np.log10(mass_data_filt), bins=len(mass_data_filt), cumulative=-1, 
+                density=True, log=True, histtype='step', color='k', zorder=4)
+    
+    
+            # Fit the slope to the data
+            params, x_arr, inflection_point, ref_point, slope, slope_report, intercept, lim_point, sign, \
+                kstest = fitSlope(np.log10(mass_data_filt), True)
+    
+    
+            # Plot the tangential line with the slope
+            ax_mass.plot(sign*x_arr, logline(-x_arr, slope, intercept), color='r', 
+                label="s = {:.2f} \nKS test D = {:.3f} \nKS test p-value = {:.3f}".format(
+                    slope_report, kstest.statistic, kstest.pvalue), zorder=5)
+    
+            ax_mass.legend(prop={'size': label_text_size}, loc='lower left')
+    
+    
+            ax_mass.set_xlabel("Log10 mass (kg)", fontsize=label_text_size)
+            ax_mass.set_ylabel("Cumulative count", fontsize=label_text_size)
+    
+            ax_mass.set_ylim(ymax=1.0)
+            ax_mass.set_xlim([-8.0, -3.0])
+    
+    
+            # Set smaller tick size
+            ax_mass.xaxis.set_tick_params(labelsize=label_text_size)
+            ax_mass.yaxis.set_tick_params(labelsize=label_text_size)
+    
         ###
 
 
@@ -1741,6 +1742,10 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
         print(f'of which {loaded_trajs_count - len(traj_list)} were rejected')
     traj_list = sorted(traj_list, key=lambda x: x.jdt_ref)
 
+    # no need to filter a zero-length list, and in fact this avoids a crash
+    if len(traj_list) == 0:
+        return traj_list
+    
     # Remove duplicate trajectories
     if filter_duplicates:
         if verbose:

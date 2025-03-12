@@ -201,6 +201,7 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False):
     # Go through every distance from the Earth centre and compute the geo coordinates at the given distance,
     #   as well as the point-to-point azimuth and elevation
     prev_eci = None
+    good_data = False
     for ht, radius in zip(height_array, radius_array):
 
         # If the height is lower than the eng height, use a fixed velocity of 3 km/s
@@ -218,7 +219,12 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False):
         # Compute the intersection between the trajectory line and the sphere of radius at the given height
         intersections = lineAndSphereIntersections(np.array([0, 0, 0]), radius, traj.state_vect_mini, 
             traj.radiant_eci_mini)
-
+        
+        # if there are no intersections it means that the height was outside the observed start/end height of the meteor
+        if len(intersections) == 0:
+            continue
+        # if we get here we have at least one valid row of data 
+        good_data = True
 
         # Choose the intersection that is closer to the state vector
         inter_min_dist_indx = np.argmin([vectMag(inter - traj.state_vect_mini) for inter in intersections])
@@ -296,6 +302,10 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False):
             print("{:s}{:7.3f}, {:13.1f}, {:10.6f}, {:11.6f}, {:10.1f}, {:10.6f}, {:10.6f}".format(time_marker, t_est, ht, np.degrees(lat), np.degrees(lon), ele_geo, np.degrees(azim_norot), np.degrees(elev_norot)))
 
 
+    if not good_data: 
+        # if the height is outside the observed range
+        print('nothing produced - probably the height range you chose was outside the observed meteor heights printed above and below')
+        
     if show_plots:
         print('The star * denotes heights extrapolated after the end of the fireball, with the fixed velocity of 3 km/s.')
         print("The horizontal coordinates are apparent above a fixed ground, not topocentric in J2000!")
