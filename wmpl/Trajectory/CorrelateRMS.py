@@ -628,9 +628,15 @@ class RMSDataHandle(object):
 
 
     def purgePhase1ProcessedData(self, dir_path):
-        refdt = time.time() - 90 * 86400
-        result=[os.remove(file) for file in (os.path.join(path, file)
-                    for path, _, files in os.walk(dir_path) for file in files) if os.stat(file).st_mtime < refdt]
+        """ Purge old phase1 processed data if it is older than 90 days. """
+
+        refdt = time.time() - 90*86400
+        result = [
+            os.remove(file) 
+            for file in (os.path.join(path, file) for path, _, files in os.walk(dir_path) for file in files) 
+            if os.path.exists(file) and (os.stat(file).st_mtime < refdt)
+            ]
+        
         return result
 
 
