@@ -285,6 +285,7 @@ if __name__ == "__main__":
         ["Krizevci    -  H6",       3.70,             65.71,      50.0,     18.21],
         ["Novo Mesto  -  L5",      11.25,             47.85,    2500.0,     21.11],
         ["   2023CX1  - L56",       3.80,             49.09,     660.0,     14.04],
+        ["   2024BX1  - Aub",       2.17,             75.56,     140.0,     15.20],
     ]
 
     # Test the Pf function - this value should return 1
