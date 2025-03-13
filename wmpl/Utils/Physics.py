@@ -197,6 +197,51 @@ def calcKB(lat, lon, ht_beg, jd, v, zenith_angle, gmn_correction=False):
     return kb
 
 
+def calcPf(p_max, zangle, mass, v_0):
+    """ The Borovicka et al. (2022) Pf parameter calculation.
+    
+    Arguments:
+        p_max: [float] Maximum dynamic pressure (Pa).
+        zangle: [float] Zenith angle (radians).
+        mass: [float] Mass of the meteoroid (kg).
+        v_0: [float] Initial velocity of the meteoroid (m/s).
+
+    Return:
+        (pf, pf_category): [tuple]
+            - pf: [float] Pf parameter.
+            - pf_category: [int] Pf category (1 to 5).
+
+    """
+
+    ### Convert units to match the paper ###
+    
+    # Pressue in MPa
+    p_max /= 1e6
+
+    # Entry speed in km/s
+    v_0 /= 1e3
+
+    ### ###
+
+    # Calculate the Pf parameter
+    pf = 100*p_max/(np.cos(zangle)*mass**(1/3.0)*v_0**(3/2))
+
+    # Determine the Pf category
+    if 0.85 < pf:
+        pf_category = 1
+    elif 0.27 < pf <= 0.85:
+        pf_category = 2
+    elif 0.085 < pf <= 0.27:
+        pf_category = 3
+    elif 0.027 < pf <= 0.085:
+        pf_category = 4
+    else:
+        pf_category = 5
+
+
+    return pf, pf_category
+
+
 
 if __name__ == "__main__":
 
@@ -224,3 +269,30 @@ if __name__ == "__main__":
     zenith_angle = np.radians(90 - 75.07381)
 
     print('KB:', calcKB(lat, lon, ht_beg*1000, jd, v_init*1000, zenith_angle, gmn_correction=True))
+
+
+
+    ### Test the Pf function ###
+
+    print()
+    print("Borovicka et al. (2022) Pf parameter calculation:")
+
+    # Test cases for Pf calculation
+    pf_table = [
+        # Label,              Pmax (MPa), Entry angle (deg), mass (kg), v_0 (km/s)
+        ["Tagish Lake - C2u",       1.20,             18.00,  56_000.0,     15.80],
+        ["Winchcombe  - CM2",       0.59,             41.87,      13.0,     13.61],
+        ["Krizevci    -  H6",       3.70,             65.71,      50.0,     18.21],
+        ["Novo Mesto  -  L5",      11.25,             47.85,    2500.0,     21.11],
+        ["   2023CX1  - L56",       3.80,             49.09,     660.0,     14.04],
+    ]
+
+    # Test the Pf function - this value should return 1
+    print("Pf test (should return ~1):", calcPf(1e6, 0, 1.0, 21.5e3))
+
+    # Print the Pf parameters for the test cases
+    for label, p_max, entry_angle, mass, v_0 in pf_table:
+
+        pf, pf_category = calcPf(p_max*1e6, np.radians(90 - entry_angle), mass, v_0*1e3)
+
+        print("  - {:s}: Pf = {:.2f}, Pf category = {:d}".format(label, pf, pf_category))
