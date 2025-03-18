@@ -74,6 +74,10 @@ class TrajectoryReduced(object):
                     log.info("Pickle file could not be loaded: " + traj_file_path)
                     return None
 
+                except FileNotFoundError:
+                    log.info("Pickle file not found: " + traj_file_path)
+                    return None
+
             else:
 
                 # Load values from a given trajectory file
