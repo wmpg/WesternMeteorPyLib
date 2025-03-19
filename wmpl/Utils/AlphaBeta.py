@@ -821,6 +821,37 @@ if __name__ == "__main__":
         # Compute the dynamic pressure with the lag fit
         dyn_pressure_lag = dynamicPressure(lat_mean, lon_mean, ht_data_rescaled, traj.jdt_ref, 
             vel_data_smooth)
+        
+
+        # Print height, model velocity (from alpha-beta and lag), and the dynamic pressure computed from both
+        print()
+        print("AlphaBeta model:")
+        print("Height (km)  Vel (km/s)  DynPress (MPa)")
+        for i in range(len(ht_arr)):
+
+            # Compute the index from reverse
+            i_rev = len(ht_arr) - i - 1
+            print("{:11.2f}  {:10.4f}  {:14.5f}".format(
+                ht_arr[i_rev]/1000, 
+                vel_arr[i_rev]/1000, 
+                dyn_pressure[i_rev]/1e6
+                )
+                )
+
+        print()
+        print("Lag fit:")
+        print("Height (km)  Vel (km/s)  DynPress (MPa)")
+        for i in range(len(ht_data_rescaled)):
+
+            # Compute the index from reverse
+            i_rev = len(ht_data_rescaled) - i - 1
+
+            print("{:11.2f}  {:10.4f}  {:14.5f}".format(
+                ht_data_rescaled[i_rev]/1000, 
+                vel_data_smooth[i_rev]/1000,
+                dyn_pressure_lag[i_rev]/1e6
+                )
+                )
 
 
         # Plot dyn pressure
