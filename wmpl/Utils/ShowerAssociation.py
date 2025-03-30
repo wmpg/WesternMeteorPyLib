@@ -20,7 +20,7 @@ from wmpl.Utils.Pickling import loadPickle
 
 
 class MeteorShower(object):
-    def __init__(self, la_sun, L_g, B_g, v_g, IAU_no, dispersion=None):
+    def __init__(self, la_sun, L_g, B_g, v_g, IAU_no, dispersion=None, iau_code=None):
         """ Container for meteor shower parameters. 
         
         Arguments:
@@ -32,6 +32,8 @@ class MeteorShower(object):
 
         Keyword arguments:
             dispersion: [float] Dispersion of the shower radiant (radians). None by default.
+            iau_code: [str] IAU code of the shower. None by default.
+                If None, it will be read from the IAU shower table.
         
         """
 
@@ -43,10 +45,19 @@ class MeteorShower(object):
         self.IAU_no = IAU_no
 
 
-        # Find the shower code and name in the IAU table
-        IAU_Shower_line = iau_shower_list[iau_shower_list[:, 1].astype(int) == self.IAU_no][0]
-        self.IAU_code = IAU_Shower_line[3]
-        self.IAU_name = IAU_Shower_line[4]
+        # Use the IAU code if given, otherwise read it from the IAU shower table (some new showers are not 
+        # in the table)
+        if iau_code is not None:
+            
+            self.IAU_code = iau_code
+            self.IAU_name = iau_code
+
+        else:
+
+            # Find the shower code and name in the IAU table
+            IAU_Shower_line = iau_shower_list[iau_shower_list[:, 1].astype(int) == self.IAU_no][0]
+            self.IAU_code = IAU_Shower_line[3]
+            self.IAU_name = IAU_Shower_line[4]
 
 
     def __repr__(self):
@@ -158,10 +169,13 @@ def loadGMNShowerTable(dir_path, file_name):
                 np.radians(float(B_g)), 
                 1000*float(v_g), 
                 np.radians(float(dispersion)), 
-                int(IAU_no)
+                int(IAU_no),
+                IAU_code.strip()
                 ]
             )
 
+    # Sort by the solar longitude
+    gmn_shower_list = sorted(gmn_shower_list, key=lambda x: x[0])
 
     return np.array(gmn_shower_list)
 
@@ -219,10 +233,23 @@ def associateShower(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=None, \
     # Create a working copy of the shower table
     temp_shower_list = copy.deepcopy(gmn_shower_list)
 
+    # Extract the numeric part and the string part of the shower list (last column is the IAU code)
+    if temp_shower_list.shape[1] == 7:
+        iau_codes = temp_shower_list[:, -1]
+        temp_shower_list = temp_shower_list[:, :-1].astype(float)
+    else:
+        iau_code = None
+        iau_codes = None
+        temp_shower_list = temp_shower_list.astype(float)
+
 
     # Find all showers in the solar longitude window
     la_sun_diffs = np.abs((temp_shower_list[:, 0] - la_sun + np.pi)%(2*np.pi) - np.pi)
-    temp_shower_list = temp_shower_list[la_sun_diffs <= np.radians(sol_window)]
+    la_sun_mask = la_sun_diffs <= np.radians(sol_window)
+    temp_shower_list = temp_shower_list[la_sun_mask]
+    
+    if iau_codes is not None:
+        iau_codes = iau_codes[la_sun_mask]
 
 
     # Check if any associations were found
@@ -249,10 +276,17 @@ def associateShower(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=None, \
         temp_shower_list = temp_shower_list[filter_mask]
         max_radius = max_radius[filter_mask]
 
+        if iau_codes is not None:
+            iau_codes = iau_codes[filter_mask]
+
     else:
 
         # Filter the showers using a fixed radius
-        temp_shower_list = temp_shower_list[radiant_distances <= np.radians(max_radius)]
+        radius_mask = radiant_distances <= np.radians(max_radius)
+        temp_shower_list = temp_shower_list[radius_mask]
+
+        if iau_codes is not None:
+            iau_codes = iau_codes[radius_mask]
 
 
     # Check if any associations were found
@@ -264,6 +298,9 @@ def associateShower(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=None, \
     velocity_diff_percents = np.abs(100*(temp_shower_list[:, 3] - v_g)/temp_shower_list[:, 3])
     velocity_filter = velocity_diff_percents <= max_veldif_percent
     temp_shower_list = temp_shower_list[velocity_filter]
+
+    if iau_codes is not None:
+        iau_codes = iau_codes[velocity_filter]
 
     
     # Check if any associations were found
@@ -288,12 +325,25 @@ def associateShower(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=None, \
     # Choose the best matching shower
     best_shower = temp_shower_list[np.argmin(closeness_param)]
 
-    ### ###
+    # Select the IAU code of the best matching shower
+    if iau_codes is not None:
+        iau_code = iau_codes[np.argmin(closeness_param)]
 
+    ### ###
 
     # Init a shower object
     l0, L_l0, B_g, v_g, dispersion, IAU_no = best_shower
-    shower_obj = MeteorShower(l0, (L_l0 + l0)%(2*np.pi), B_g, v_g, int(round(IAU_no)), dispersion=dispersion)
+
+    # If the IAU number is 999, it means that the shower is a recent addition and it's not in the IAU table
+    # In this case, pass the IAU code directly to the MeteorShower object
+    if IAU_no != 999:
+        iau_code = None
+        
+
+    shower_obj = MeteorShower(
+        l0, (L_l0 + l0)%(2*np.pi), B_g, v_g, int(round(IAU_no)), 
+        dispersion=dispersion, iau_code=iau_code
+        )
 
 
     return shower_obj
