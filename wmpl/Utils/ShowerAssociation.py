@@ -55,9 +55,20 @@ class MeteorShower(object):
         else:
 
             # Find the shower code and name in the IAU table
-            IAU_Shower_line = iau_shower_list[iau_shower_list[:, 1].astype(int) == self.IAU_no][0]
-            self.IAU_code = IAU_Shower_line[3]
-            self.IAU_name = IAU_Shower_line[4]
+            try:
+                IAU_Shower_line = iau_shower_list[iau_shower_list[:, 1].astype(int) == self.IAU_no][0]
+                self.IAU_code = IAU_Shower_line[3]
+                self.IAU_name = IAU_Shower_line[4]
+
+            except IndexError:
+                
+                # Find the shower number and code in the GMN table
+                gmn_table_index = np.where(gmn_shower_list[:, 5].astype(int) == self.IAU_no)[0]
+                if len(gmn_table_index) > 0:
+                    self.IAU_code = gmn_iau_codes[gmn_table_index[0]]
+                    self.IAU_name = gmn_iau_codes[gmn_table_index[0]]
+                
+
 
 
     def __repr__(self):
@@ -193,6 +204,16 @@ else:
     np.save(config.gmn_shower_table_npy, gmn_shower_list)
 
 
+# Extract the numeric part and the string part of the shower list (last column is the IAU code)
+if gmn_shower_list.shape[1] == 7:
+    gmn_iau_codes = gmn_shower_list[:, -1]
+    gmn_shower_list = gmn_shower_list[:, :-1].astype(float)
+
+else:
+    gmn_iau_codes = None
+    gmn_shower_list = gmn_shower_list.astype(float)
+
+
 # Load the IAU table
 if os.path.isfile(config.iau_shower_table_npy):
 
@@ -233,14 +254,12 @@ def associateShower(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=None, \
     # Create a working copy of the shower table
     temp_shower_list = copy.deepcopy(gmn_shower_list)
 
-    # Extract the numeric part and the string part of the shower list (last column is the IAU code)
-    if temp_shower_list.shape[1] == 7:
-        iau_codes = temp_shower_list[:, -1]
-        temp_shower_list = temp_shower_list[:, :-1].astype(float)
+    # Make a copy of the iau_codes for the working copy of the shower table
+    if gmn_iau_codes is not None:
+        iau_codes = copy.deepcopy(gmn_iau_codes)
     else:
-        iau_code = None
         iau_codes = None
-        temp_shower_list = temp_shower_list.astype(float)
+        iau_code = None
 
 
     # Find all showers in the solar longitude window
@@ -334,9 +353,9 @@ def associateShower(la_sun, L_g, B_g, v_g, sol_window=1.0, max_radius=None, \
     # Init a shower object
     l0, L_l0, B_g, v_g, dispersion, IAU_no = best_shower
 
-    # If the IAU number is 999, it means that the shower is a recent addition and it's not in the IAU table
+    # If the IAU number is >9000, it means that the shower is a recent addition and it's not in the IAU table
     # In this case, pass the IAU code directly to the MeteorShower object
-    if IAU_no != 999:
+    if int(IAU_no) < 9000:
         iau_code = None
         
 
