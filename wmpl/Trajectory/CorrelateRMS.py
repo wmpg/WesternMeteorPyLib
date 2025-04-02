@@ -642,10 +642,15 @@ class RMSDataHandle(object):
 
                 file_path = os.path.join(path, file)
 
+                # Check if the file is older than the reference date
+                try:
+                    file_dt = os.stat(file_path).st_mtime
+                except FileNotFoundError:
+                    log.warning(f"File not found: {file_path}")
+                    continue
+
                 if (
-                    os.path.exists(file_path) and 
-                    (os.stat(file_path).st_mtime < refdt) and 
-                    os.path.isfile(file_path)
+                    os.path.exists(file_path) and (file_dt < refdt) and os.path.isfile(file_path)
                     ):
                     
                     try:
