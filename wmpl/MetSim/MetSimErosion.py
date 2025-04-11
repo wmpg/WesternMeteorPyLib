@@ -369,6 +369,87 @@ class Fragment(object):
         self.K = self.gamma*self.const.shape_factor*self.rho**(-2/3.0)
 
 
+    def __deepcopy__(self, memodict={}):
+        output = Fragment()
+
+        output.id = self.id
+
+        output.const = self.const # keep const as reference, not deepcopy
+
+        # Shape-density coeff
+        output.K = self.K
+
+        # Initial fragment mass
+        output.m_init = self.m_init
+
+        # Instantaneous fragment mass Mass (kg)
+        output.m = self.m
+
+        # Density (kg/m^3)
+        output.rho = self.rho
+
+        # Ablation coefficient (s^2/m^2)
+        output.sigma = self.sigma
+
+        # Velocity (m/s)
+        output.v = self.v
+
+        # Velocity components (vertical and horizontal)
+        output.vv = self.vv
+        output.vh = self.vh
+
+        # Total drop due to gravity (m)
+        output.h_grav_drop_total = self.h_grav_drop_total
+
+        # Length along the trajectory
+        output.length = self.length
+
+        # Luminous intensity (Watts)
+        output.lum = self.lum
+
+        # Electron line density
+        output.q = self.q
+
+        # Dynamic pressure (Gamma = 1.0, Pa)
+        output.dyn_press = self.dyn_press
+
+        # Erosion coefficient value
+        output.erosion_coeff = self.erosion_coeff
+
+        # Grain mass distribution index
+        output.erosion_mass_index = self.erosion_mass_index
+
+        # Mass range for grains (kg)
+        output.erosion_mass_min = self.erosion_mass_min
+        output.erosion_mass_max = self.erosion_mass_max
+
+
+        output.erosion_enabled = self.erosion_enabled
+
+        output.disruption_enabled = self.disruption_enabled
+
+        output.active = self.active
+        output.n_grains = self.n_grains
+
+        # Indicate that this is the main fragment
+        output.main = self.main
+
+        # Indicate that the fragment is a grain
+        output.grain = self.grain
+
+        # Indicate that this is born out of complex fragmentation
+        output.complex = self.complex
+
+        # Identifier of the compex fragmentation entry
+        output.complex_id = self.complex_id
+
+        output.h = self.h
+        output.gamma = self.gamma
+        output.zenith_angle = self.zenith_angle
+
+        return output
+
+
 class Wake(object):
     def __init__(self, const, frag_list, leading_frag_length, length_array):
         """ Container for the evaluated wake. 
@@ -441,10 +522,12 @@ def heightCurvature(h0, zc, l, r_earth):
         h: [float] Height at distance l from the origin (m).
     """
 
-    # Compute the height with the Earth's curvature taken into account
-    h = np.sqrt(h0**2 - 2*l*np.cos(zc)*(h0 + r_earth) + 2*h0*r_earth + l**2 + r_earth**2) - r_earth
+#    # Compute the height with the Earth's curvature taken into account
+#    h = np.sqrt(h0**2 - 2*l*np.cos(zc)*(h0 + r_earth) + 2*h0*r_earth + l**2 + r_earth**2) - r_earth
+#
+#    return h
 
-    return h
+    return np.sqrt((h0 + r_earth)**2 - 2*l*np.cos(zc)*(h0 + r_earth) + l**2) - r_earth
 
 
 def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mass_max, keep_eroding=False,
