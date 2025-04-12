@@ -370,84 +370,32 @@ class Fragment(object):
 
 
     def __deepcopy__(self, memodict={}):
-        output = Fragment()
+        """Create a deep copy of the Fragment instance. All parameters are deep-copied except for 'const',
+        which is shallow-copied as it's shared across all fragments.
 
-        output.id = self.id
+        - Most attributes are deep-copied to ensure the clone is independent of the original.
+        - The 'const' attribute is explicitly shallow-copied to preserve its reference (assumed shared configuration).
+        """
 
-        output.const = self.const # keep const as reference, not deepcopy
+        # Create a new instance without calling __init__ (to avoid reinitializing values).
+        cls = self.__class__
+        result = cls.__new__(cls)
 
-        # Shape-density coeff
-        output.K = self.K
+        # Register this object in the memo dictionary to avoid infinite recursion on self-references.
+        memodict[id(self)] = result
 
-        # Initial fragment mass
-        output.m_init = self.m_init
+        # Iterate over all attributes of the object
+        for key, value in self.__dict__.items():
+            
+            if key == 'const':
+                # Shallow copy for 'const' — it is assumed to be a shared reference, not unique to the object.
+                setattr(result, key, value)
+                
+            else:
+                # Deep copy all other attributes to create a fully independent clone.
+                setattr(result, key, copy.deepcopy(value, memodict))
 
-        # Instantaneous fragment mass Mass (kg)
-        output.m = self.m
-
-        # Density (kg/m^3)
-        output.rho = self.rho
-
-        # Ablation coefficient (s^2/m^2)
-        output.sigma = self.sigma
-
-        # Velocity (m/s)
-        output.v = self.v
-
-        # Velocity components (vertical and horizontal)
-        output.vv = self.vv
-        output.vh = self.vh
-
-        # Total drop due to gravity (m)
-        output.h_grav_drop_total = self.h_grav_drop_total
-
-        # Length along the trajectory
-        output.length = self.length
-
-        # Luminous intensity (Watts)
-        output.lum = self.lum
-
-        # Electron line density
-        output.q = self.q
-
-        # Dynamic pressure (Gamma = 1.0, Pa)
-        output.dyn_press = self.dyn_press
-
-        # Erosion coefficient value
-        output.erosion_coeff = self.erosion_coeff
-
-        # Grain mass distribution index
-        output.erosion_mass_index = self.erosion_mass_index
-
-        # Mass range for grains (kg)
-        output.erosion_mass_min = self.erosion_mass_min
-        output.erosion_mass_max = self.erosion_mass_max
-
-
-        output.erosion_enabled = self.erosion_enabled
-
-        output.disruption_enabled = self.disruption_enabled
-
-        output.active = self.active
-        output.n_grains = self.n_grains
-
-        # Indicate that this is the main fragment
-        output.main = self.main
-
-        # Indicate that the fragment is a grain
-        output.grain = self.grain
-
-        # Indicate that this is born out of complex fragmentation
-        output.complex = self.complex
-
-        # Identifier of the compex fragmentation entry
-        output.complex_id = self.complex_id
-
-        output.h = self.h
-        output.gamma = self.gamma
-        output.zenith_angle = self.zenith_angle
-
-        return output
+        return result
 
 
 class Wake(object):
