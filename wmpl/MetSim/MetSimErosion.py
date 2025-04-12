@@ -390,7 +390,7 @@ class Fragment(object):
             if key == 'const':
                 # Shallow copy for 'const' — it is assumed to be a shared reference, not unique to the object.
                 setattr(result, key, value)
-                
+
             else:
                 # Deep copy all other attributes to create a fully independent clone.
                 setattr(result, key, copy.deepcopy(value, memodict))
@@ -469,11 +469,6 @@ def heightCurvature(h0, zc, l, r_earth):
     Returns:
         h: [float] Height at distance l from the origin (m).
     """
-
-#    # Compute the height with the Earth's curvature taken into account
-#    h = np.sqrt(h0**2 - 2*l*np.cos(zc)*(h0 + r_earth) + 2*h0*r_earth + l**2 + r_earth**2) - r_earth
-#
-#    return h
 
     return np.sqrt((h0 + r_earth)**2 - 2*l*np.cos(zc)*(h0 + r_earth) + l**2) - r_earth
 
