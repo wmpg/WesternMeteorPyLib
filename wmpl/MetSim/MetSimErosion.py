@@ -369,6 +369,35 @@ class Fragment(object):
         self.K = self.gamma*self.const.shape_factor*self.rho**(-2/3.0)
 
 
+    def __deepcopy__(self, memodict={}):
+        """Create a deep copy of the Fragment instance. All parameters are deep-copied except for 'const',
+        which is shallow-copied as it's shared across all fragments.
+
+        - Most attributes are deep-copied to ensure the clone is independent of the original.
+        - The 'const' attribute is explicitly shallow-copied to preserve its reference (assumed shared configuration).
+        """
+
+        # Create a new instance without calling __init__ (to avoid reinitializing values).
+        cls = self.__class__
+        result = cls.__new__(cls)
+
+        # Register this object in the memo dictionary to avoid infinite recursion on self-references.
+        memodict[id(self)] = result
+
+        # Iterate over all attributes of the object
+        for key, value in self.__dict__.items():
+            
+            if key == 'const':
+                # Shallow copy for 'const' — it is assumed to be a shared reference, not unique to the object.
+                setattr(result, key, value)
+
+            else:
+                # Deep copy all other attributes to create a fully independent clone.
+                setattr(result, key, copy.deepcopy(value, memodict))
+
+        return result
+
+
 class Wake(object):
     def __init__(self, const, frag_list, leading_frag_length, length_array):
         """ Container for the evaluated wake. 
@@ -441,10 +470,7 @@ def heightCurvature(h0, zc, l, r_earth):
         h: [float] Height at distance l from the origin (m).
     """
 
-    # Compute the height with the Earth's curvature taken into account
-    h = np.sqrt(h0**2 - 2*l*np.cos(zc)*(h0 + r_earth) + 2*h0*r_earth + l**2 + r_earth**2) - r_earth
-
-    return h
+    return np.sqrt((h0 + r_earth)**2 - 2*l*np.cos(zc)*(h0 + r_earth) + l**2) - r_earth
 
 
 def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mass_max, keep_eroding=False,
