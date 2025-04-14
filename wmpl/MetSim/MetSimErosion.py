@@ -13,7 +13,6 @@ from __future__ import print_function, division, absolute_import
 
 
 import math
-import copy
 
 import numpy as np
 import scipy.stats
@@ -368,34 +367,18 @@ class Fragment(object):
 
         self.K = self.gamma*self.const.shape_factor*self.rho**(-2/3.0)
 
-
-    def __deepcopy__(self, memodict={}):
-        """Create a deep copy of the Fragment instance. All parameters are deep-copied except for 'const',
-        which is shallow-copied as it's shared across all fragments.
-
-        - Most attributes are deep-copied to ensure the clone is independent of the original.
-        - The 'const' attribute is explicitly shallow-copied to preserve its reference (assumed shared configuration).
+    def spawn_child(self):
+        """ Create a child of the Fragment instance. Copy over the reference to the shared 'const' object 
+        and copy values of all other attributes. Note: if a mutable attribute that is not shared across 
+        Fragment instances is added, this function will need to be revised. 
         """
-
-        # Create a new instance without calling __init__ (to avoid reinitializing values).
+        
         cls = self.__class__
-        result = cls.__new__(cls)
-
-        # Register this object in the memo dictionary to avoid infinite recursion on self-references.
-        memodict[id(self)] = result
-
-        # Iterate over all attributes of the object
-        for key, value in self.__dict__.items():
-            
-            if key == 'const':
-                # Shallow copy for 'const' — it is assumed to be a shared reference, not unique to the object.
-                setattr(result, key, value)
-
-            else:
-                # Deep copy all other attributes to create a fully independent clone.
-                setattr(result, key, copy.deepcopy(value, memodict))
-
-        return result
+        child = cls.__new__(cls)
+                
+        child.__dict__.update(self.__dict__)
+    
+        return child
 
 
 class Wake(object):
@@ -530,7 +513,7 @@ def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mas
         if n_grains_bin_round > 0:
 
             # Init the new fragment with params of the parent
-            frag_child = copy.deepcopy(frag_parent)
+            frag_child = frag_parent.spawn_child()
 
             # Assign the number of grains this fragment stands for (make sure to preserve the previous value
             #   if erosion is done for more fragments)
@@ -1061,7 +1044,7 @@ def ablateAll(fragments, const, compute_wake=False):
                                 frag.m -= new_frag_mass
 
                                 # Create the new fragment
-                                frag_new = copy.deepcopy(frag)
+                                frag_new = frag.spawn_child()
                                 frag_new.active = True
                                 frag_new.main = False
                                 frag_new.disruption_enabled = False
@@ -1108,7 +1091,7 @@ def ablateAll(fragments, const, compute_wake=False):
                             frag.m -= dust_mass
 
                             # Create the new fragment
-                            frag_new = copy.deepcopy(frag)
+                            frag_new = frag.spawn_child()
                             frag_new.active = True
                             frag_new.main = False
                             frag_new.disruption_enabled = False
@@ -1178,7 +1161,7 @@ def ablateAll(fragments, const, compute_wake=False):
             # Take only those lengths inside the wake window
             if frag.active:
                 if (frag.length > back_len) and (frag.length < front_len):
-                    frag_list.append(copy.deepcopy(frag))
+                    frag_list.append(frag.spawn_child())
 
         # Store evaluated wake
         wake = Wake(const, frag_list, leading_frag_length, length_array)
