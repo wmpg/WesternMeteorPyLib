@@ -1,10 +1,5 @@
 """ Functions for running REBOUND simulations on wmpl trajectories. """
 
-### HOTFIX: Solve the cert issue
-import ssl
-ssl._create_default_https_context = ssl._create_unverified_context
-###
-
 import numpy as np
 import scipy
 import scipy.stats
@@ -233,6 +228,11 @@ def reboundSimulate(
             time.
 
     """
+
+    ### HOTFIX: Solve the cert issue
+    import ssl
+    ssl._create_default_https_context = ssl._create_unverified_context
+    ###
 
     # Skip if REBOUND is not found
     if not REBOUND_FOUND:
