@@ -65,6 +65,14 @@ conda install -y -c conda-forge basemap basemap-data-hires
 conda install -y -c conda-forge cartopy paramiko
 ```
 
+Optionally, if you want to use the REBOUND orbital integrator (Linux-only!), install:
+
+```
+conda install -y -c conda-forge astropy
+conda install -y -c conda-forge rebound
+pip install reboundx
+```
+
 
 Next, navigate to a folder where you will be keeping the code, e.g. ```~/source/```. Create this folder if it doesn't exist.
 
