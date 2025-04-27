@@ -396,11 +396,14 @@ def reboundSimulate(
     # We always move to the center of momentum frame before an integration
     sim.move_to_com()
 
-    # Specify how simulation should resolve collisions
-    sim.collision = "direct"
-    sim.collision_resolve = "merge"
-    sim.collision_resolve_keep_sorted = 1
-    sim.track_energy_offset = 1
+    # # Specify how simulation should resolve collisions
+    # sim.collision = "direct"
+    # sim.collision_resolve = "merge"
+    # sim.collision_resolve_keep_sorted = 1
+    # sim.track_energy_offset = 1
+    
+    # Disable collision detection
+    sim.collision = "none"
 
     outputs = []
     outputs_mc = {}
