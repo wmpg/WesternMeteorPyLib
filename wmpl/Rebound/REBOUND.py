@@ -1,5 +1,10 @@
 """ Functions for running REBOUND simulations on wmpl trajectories. """
 
+### HOTFIX: Solve the cert issue
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context
+###
+
 import numpy as np
 import scipy
 import scipy.stats
@@ -279,6 +284,8 @@ def reboundSimulate(
 
     # Set up the simulation
     sim = rb.Simulation()
+    rebx = reboundx.Extras(sim)
+    
     aum = rb.units.lengths_SI["au"]  # 1 au in m
     aukm = aum/1e3  # au in km
 
@@ -372,7 +379,6 @@ def reboundSimulate(
     ps = sim.particles
 
     # Add gravitational harmonics of Earth
-    rebx = reboundx.Extras(sim)
     gh = rebx.load_force("gravitational_harmonics")
     rebx.add_force(gh)
     ps["Earth"].params["J2"] = J2
