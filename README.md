@@ -57,7 +57,7 @@ on some systems this may not work, so you will have to write ```source activate 
 We will now install all needed libraries. With the environment activated as described above, run this in the terminal:
 
 ```
-conda install -y -c conda-forge numpy scipy matplotlib cython pytz pyqt pandas
+conda install -y -c conda-forge "numpy<2.0" scipy matplotlib cython pytz pyqt pandas
 conda install -y -c conda-forge jplephem ephem
 conda install -y -c conda-forge watchdog h5py
 conda install -y -c conda-forge numba
