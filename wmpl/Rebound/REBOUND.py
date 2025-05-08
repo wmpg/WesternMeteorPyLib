@@ -531,9 +531,9 @@ if __name__ == "__main__":
         f_95ci_high = np.percentile(f_mc, 97.5)
 
         # Compute the standard deviation of the orbital elements
-        a_std = np.std(a_mc)
-        e_std = np.std(e_mc)
-        incl_std = np.std(incl_mc)
+        a_std = ((a_95ci_high - a_95ci_low)/2.0)/1.96 # Use 95% CI to ignore outliers
+        e_std = ((e_95ci_high - e_95ci_low)/2.0)/1.96 # Use 95% CI to ignore outliers
+        incl_std = ((incl_95ci_high - incl_95ci_low)/2.0)/1.96 # Use 95% CI to ignore outliers
         Omega_std = scipy.stats.circstd(Omega_mc)
         omega_std = scipy.stats.circstd(omega_mc)
         f_std = scipy.stats.circstd(f_mc)
