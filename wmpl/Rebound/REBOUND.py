@@ -167,12 +167,13 @@ def convertToBarycentric(state_vect, jd, log_file_path=""):
 
 
 
-def extractSimParams(ps, obj_name):
+def extractSimParams(ps, obj_name, planet_names):
     """ Extracts the state vector, orbital elements and distance from the Earth from a REBOUND simulation.
 
     Arguments:
         ps: [REBOUND simulation] REBOUND simulation object.
         obj_name: [str] Name of the object in the simulation.
+        planet_names: [list] List of planet names in the simulation.
 
     Return:
         state_vect_hel: [list] Heliocentric state vector of the object in the simulation, [x, y, z, vx, vy, vz].
@@ -186,21 +187,24 @@ def extractSimParams(ps, obj_name):
     state_vect_vel = [ps[obj_name].vx, ps[obj_name].vy, ps[obj_name].vz]
     state_vect_hel = state_vect_pos + state_vect_vel
 
-    # Get the coordinates of the Earth
-    earth_coords = [ps["Earth"].x, ps["Earth"].y, ps["Earth"].z]
+    planet_dists = {}
+    for planet in planet_names:
 
-    # Compute the distance between the meteoroid and the Earth
-    earth_dist = np.linalg.norm(np.array(state_vect_pos) - np.array(earth_coords))
+        # Get the coordinates of the planet
+        planet_coords = [ps[planet].x, ps[planet].y, ps[planet].z]
+
+        # Compute the distance between the meteoroid and the planet
+        planet_dists[planet] = np.linalg.norm(np.array(state_vect_pos) - np.array(planet_coords))
 
     # Extract the orbital elements
     orb_elem = ps[obj_name].orbit(primary=ps["Sun"])
 
-    return state_vect_hel, orb_elem, earth_dist
+    return state_vect_hel, orb_elem, planet_dists
 
 
 def reboundSimulate(
         julian_date, state_vect, traj=None, 
-        direction="forward", tsimend=60, n_outputs=500, obj_name="obj", obj_mass=0.0, mc_runs=100,
+        direction="forward", sim_days=60, n_outputs=500, obj_name="obj", obj_mass=0.0, mc_runs=100,
         verbose=False):
     """ Takes an state vector (or a Trajectory object), runs REBOUND and produces orbital elements for the 
     object at the end of the simulation or at the specified time.
@@ -216,7 +220,7 @@ def reboundSimulate(
         traj: [Trajectory] Trajectory object with the meteoroid data. If given, the julian_date and state_vect
             arguments will be ignored.
         direction: [str] Direction of the simulation, either "forward" or "backward".
-        tsimend: [float] Length of integration in days, default is 60 days.
+        sim_days: [float] Length of integration in days, default is 60 days.
         n_outputs: [int] Number of outputs (samples along the simulation), default is 500.
         obj_name: [str] Name of the object that's being integrated, default is "obj".
         obj_mass: [float] Mass of object in solar masses if asteroid or larger object, default is 0.0.
@@ -295,7 +299,7 @@ def reboundSimulate(
     J2 = 1.0826157e-3
     J4 = -1.620e-6
     dmin = 4.326e-5  # Earth radius in au
-    tsimend = tsimend/365.25  # simulation endtime in years
+    tsimend = sim_days/365.25  # simulation endtime in years
     year = 2.0*np.pi  # One year in units where G=1
 
 
@@ -303,9 +307,9 @@ def reboundSimulate(
     time_utc = astropy.time.Time(julian_date, format='jd', scale='utc')
     time_tdb = time_utc.tdb.jd
 
-    # TEST - compare to the already computed dynamical time
-    print("astropy dynamical time:", time_tdb)
-    print("computed dynamical time:", jd2DynamicalTimeJD(julian_date))
+    # # TEST - compare to the already computed dynamical time
+    # print("astropy dynamical time:", time_tdb)
+    # print("computed dynamical time:", jd2DynamicalTimeJD(julian_date))
 
     # Set up the number of outputs and the time array
     if direction == "forward":
@@ -317,6 +321,11 @@ def reboundSimulate(
         times = np.linspace(0, -year*tsimend, n_outputs)
 
     # Add the Sun and the planets
+    planet_names = [
+        "Sun", 
+        "Mercury", "Venus", "Earth", "Luna", "Mars", 
+        "Jupiter", "Saturn", "Uranus", "Neptune"
+    ]
     sim.add("Sun", date=f"JD{time_tdb:.6f}", hash="Sun")
     sim.add("Mercury", date=f"JD{time_tdb:.6f}", hash="Mercury")
     sim.add("Venus", date=f"JD{time_tdb:.6f}", hash="Venus")
@@ -343,7 +352,7 @@ def reboundSimulate(
 
     # Add the meteoroid to the simulation
     sim.add(
-        m=obj_mass,
+        # m=obj_mass, # Ignore the mass of meteoroids
         x=state_vect_rot[0],
         y=state_vect_rot[1],
         z=state_vect_rot[2],
@@ -358,12 +367,15 @@ def reboundSimulate(
     mc_realization_names = []
     for i, state_vect_realization in enumerate(state_vect_realizations):
 
+        if verbose:
+            print(f"MC realization {i + 1}: {state_vect_realization}")
+
         sv_mc_rot = convertToBarycentric(state_vect_realization, time_tdb)
 
         mc_name = f"{obj_name}_MC_{i}"
 
         sim.add(
-            m=obj_mass,
+            # m=obj_mass, # Ignore the mass of the meteoroid for the Monte Carlo realizations
             x=sv_mc_rot[0],
             y=sv_mc_rot[1],
             z=sv_mc_rot[2],
@@ -375,6 +387,9 @@ def reboundSimulate(
 
         mc_realization_names.append(mc_name)
 
+    # Set the number of active paticles in the simulation to the number of massive objects (so that the 
+    # interaction between massless particles is not computed)
+    sim.N_active = len(planet_names)
 
     ps = sim.particles
 
@@ -408,6 +423,12 @@ def reboundSimulate(
     outputs = []
     outputs_mc = {}
 
+    if verbose:
+        print("Running simulation...")
+        print(f"Simulation time: {tsimend:.2f} years ({tsimend*365.25:.2f} days)")
+        print(f"Number of outputs: {n_outputs}")
+        print(f"Direction: {direction}")
+
     # Integrate the simulation and save the state vectors and orbital elements in the output list
     # These are not time steps, but the times at which the simulation state is saved
     for i, time in enumerate(times):
@@ -423,12 +444,12 @@ def reboundSimulate(
             break
 
         # Extract the state vector and the orbital elements
-        state_vect_hel, orb_elem, earth_dist = extractSimParams(ps, obj_name)
+        state_vect_hel, orb_elem, planet_dists = extractSimParams(ps, obj_name, planet_names)
 
         if verbose and (i%25 == 0):
             print(f"{i}: t = {time:.6f} d, a = {orb_elem.a:10.6f}, e = {orb_elem.e:10.6f}, inc = {orb_elem.inc:10.6f}, Omega = {orb_elem.Omega:10.6f}, omega = {orb_elem.omega:10.6f}, f = {orb_elem.f:10.6f}")
 
-        outputs.append([time, state_vect_hel, orb_elem, earth_dist])
+        outputs.append([time, state_vect_hel, orb_elem, planet_dists])
 
 
         # Extract the state vector and the orbital elements for the Monte Carlo realizations
@@ -439,12 +460,12 @@ def reboundSimulate(
             except rb.ParticleNotFound:
                 continue
 
-            state_vect_hel, orb_elem, earth_dist = extractSimParams(ps, mc_name)
+            state_vect_hel, orb_elem, planet_dists = extractSimParams(ps, mc_name, planet_names)
 
             if mc_name not in outputs_mc:
                 outputs_mc[mc_name] = []
 
-            outputs_mc[mc_name].append([time, state_vect_hel, orb_elem, earth_dist])
+            outputs_mc[mc_name].append([time, state_vect_hel, orb_elem, planet_dists])
 
 
     return outputs, outputs_mc
@@ -485,7 +506,7 @@ if __name__ == "__main__":
     traj = loadPickle(*os.path.split(args.pickle_path))
 
     
-    # Run the simulation -60 and +60 days from the epoch of the trajectory
+    # Run the simulation for the given number of days from the epoch of the trajectory
     sim_outputs, sim_outputs_mc = reboundSimulate(
         None, None, traj=traj, direction=direction, tsimend=sim_days,
         obj_name=traj.traj_id, mc_runs=args.mc, verbose=args.verbose
@@ -572,8 +593,9 @@ if __name__ == "__main__":
     omega = [x[2].omega for x in sim_outputs]
     f = [x[2].f for x in sim_outputs]
 
-    # Distance from the Earth
-    earth_dist = [x[3] for x in sim_outputs]
+    # Distance from the planets
+    planet_dists = [x[3] for x in sim_outputs]
+    earth_dist = [x["Earth"] for x in planet_dists]
 
     # Find the time when the object exits the Earth's Hill sphere
     earth_hill = 0.01 # AU
@@ -620,6 +642,27 @@ if __name__ == "__main__":
         # Set the X axis limit so the maximum time is at the exit from the Earth's Hill sphere
         axs[0, 2].set_xlim(xmax=t[exit_index])
 
+
+
+    # Plot the distance from the Sun + inner planets
+    inner_planets = ["Sun", "Mercury", "Venus", "Earth", "Luna", "Mars"]
+    for planet in inner_planets:
+        planet_dist = [x[3][planet] for x in sim_outputs]
+        axs[1, 2].plot(t, planet_dist, label=planet)
+
+    axs[1, 2].set_ylabel("Distance [AU]")
+    axs[1, 2].legend()
+
+    # Plot the distance from the outer planets
+    outer_planets = ["Jupiter", "Saturn", "Uranus", "Neptune"]
+    for planet in outer_planets:
+        planet_dist = [x[3][planet] for x in sim_outputs]
+        axs[2, 2].plot(t, planet_dist, label=planet)
+
+    axs[2, 2].set_ylabel("Distance [AU]")
+    axs[2, 2].legend()
+
+
     # Set the axis labels
     for ax in axs.flatten():
         ax.set_xlabel("Time [days]")
@@ -634,7 +677,7 @@ if __name__ == "__main__":
         Omega_mc = [x[2].Omega for x in sim_outputs_mc[mc_name]]
         omega_mc = [x[2].omega for x in sim_outputs_mc[mc_name]]
         f_mc = [x[2].f for x in sim_outputs_mc[mc_name]]
-        earth_dist = [x[3] for x in sim_outputs_mc[mc_name]]
+        earth_dist = [x[3]["Earth"] for x in sim_outputs_mc[mc_name]]
 
         axs[0, 0].plot(t, a_mc, alpha=0.5, color='k', lw=0.5)
         axs[0, 1].plot(t, e_mc, alpha=0.5, color='k', lw=0.5)
