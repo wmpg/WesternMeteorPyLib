@@ -387,10 +387,9 @@ def reboundSimulate(
 
         mc_realization_names.append(mc_name)
 
-    # Set the number of active paticles in the simulation to the number of massive objects (so that the 
-    # interaction between massless particles is not computed)
-    sim.N_active = len(planet_names)
 
+
+    # Extract the particles from the simulation
     ps = sim.particles
 
     # Add gravitational harmonics of Earth
@@ -419,6 +418,15 @@ def reboundSimulate(
     
     # Disable collision detection
     sim.collision = "none"
+
+    # Set the number of active paticles in the simulation to the number of massive objects (so that the 
+    # interaction between massless particles is not computed)
+    sim.N_active = len(planet_names)
+
+    # Disable the influence of meteoroids on the planets (should already be set to 0 by default)
+    sim.testparticle_type = 0
+
+
 
     outputs = []
     outputs_mc = {}
