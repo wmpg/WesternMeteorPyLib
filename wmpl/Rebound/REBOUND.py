@@ -447,7 +447,7 @@ def reboundSimulate(
         state_vect_hel, orb_elem, planet_dists = extractSimParams(ps, obj_name, planet_names)
 
         if verbose and (i%25 == 0):
-            print(f"{i}: t = {time:.6f} d, a = {orb_elem.a:10.6f}, e = {orb_elem.e:10.6f}, inc = {orb_elem.inc:10.6f}, Omega = {orb_elem.Omega:10.6f}, omega = {orb_elem.omega:10.6f}, f = {orb_elem.f:10.6f}")
+            print(f"{i}: t = {time:.6f} d, a = {orb_elem.a:10.6f}, e = {orb_elem.e:10.6f}, inc = {np.degrees(orb_elem.inc):10.6f}, Omega = {np.degrees(orb_elem.Omega):10.6f}, omega = {np.degrees(orb_elem.omega):10.6f}, f = {np.degrees(orb_elem.f):10.6f}")
 
         outputs.append([time, state_vect_hel, orb_elem, planet_dists])
 
@@ -508,12 +508,13 @@ if __name__ == "__main__":
     
     # Run the simulation for the given number of days from the epoch of the trajectory
     sim_outputs, sim_outputs_mc = reboundSimulate(
-        None, None, traj=traj, direction=direction, tsimend=sim_days,
+        None, None, traj=traj, direction=direction, sim_days=sim_days,
         obj_name=traj.traj_id, mc_runs=args.mc, verbose=args.verbose
         )
 
     # Compute the 95% CI for the orbital elements from the Monte Carlo realizations
     a_ci_str = ""
+    q_ci_str = ""
     e_ci_str = ""
     incl_ci_str = ""
     Omega_ci_str = ""
@@ -523,6 +524,7 @@ if __name__ == "__main__":
 
         # Extract the orbital elements at the end for each MC realization
         a_mc = []
+        q_mc = []
         e_mc = []
         incl_mc = []
         Omega_mc = []
@@ -530,8 +532,11 @@ if __name__ == "__main__":
         f_mc = []
 
         for mc_name in sim_outputs_mc:
-            a_mc.append(sim_outputs_mc[mc_name][-1][2].a)
-            e_mc.append(sim_outputs_mc[mc_name][-1][2].e)
+            a = sim_outputs_mc[mc_name][-1][2].a
+            e = sim_outputs_mc[mc_name][-1][2].e
+            a_mc.append(a)
+            e_mc.append(e)
+            q_mc.append((1 - e)*a)
             incl_mc.append(sim_outputs_mc[mc_name][-1][2].inc)
             Omega_mc.append(sim_outputs_mc[mc_name][-1][2].Omega)
             omega_mc.append(sim_outputs_mc[mc_name][-1][2].omega)
@@ -540,6 +545,8 @@ if __name__ == "__main__":
 
         a_95ci_low = np.percentile(a_mc, 2.5)
         a_95ci_high = np.percentile(a_mc, 97.5)
+        q_95ci_low = np.percentile(q_mc, 2.5)
+        q_95ci_high = np.percentile(q_mc, 97.5)
         e_95ci_low = np.percentile(e_mc, 2.5)
         e_95ci_high = np.percentile(e_mc, 97.5)
         incl_95ci_low = np.percentile(incl_mc, 2.5)
@@ -553,6 +560,7 @@ if __name__ == "__main__":
 
         # Compute the standard deviation of the orbital elements
         a_std = ((a_95ci_high - a_95ci_low)/2.0)/1.96 # Use 95% CI to ignore outliers
+        q_std = ((q_95ci_high - q_95ci_low)/2.0)/1.96 # Use 95% CI to ignore outliers
         e_std = ((e_95ci_high - e_95ci_low)/2.0)/1.96 # Use 95% CI to ignore outliers
         incl_std = ((incl_95ci_high - incl_95ci_low)/2.0)/1.96 # Use 95% CI to ignore outliers
         Omega_std = scipy.stats.circstd(Omega_mc)
@@ -560,8 +568,9 @@ if __name__ == "__main__":
         f_std = scipy.stats.circstd(f_mc)
 
 
-        a_ci_str = f" +/- {np.degrees(a_std):.6f} [{a_95ci_low:10.6f}, {a_95ci_high:10.6f}]"
-        e_ci_str = f" +/- {np.degrees(e_std):.6f} [{e_95ci_low:10.6f}, {e_95ci_high:10.6f}]"
+        a_ci_str = f" +/- {a_std:.6f} [{a_95ci_low:10.6f}, {a_95ci_high:10.6f}]"
+        q_ci_str = f" +/- {q_std:.6f} [{q_95ci_low:10.6f}, {q_95ci_high:10.6f}]"
+        e_ci_str = f" +/- {e_std:.6f} [{e_95ci_low:10.6f}, {e_95ci_high:10.6f}]"
         incl_ci_str = f" +/- {np.degrees(incl_std):.6f} [{np.degrees(incl_95ci_low):10.6f}, {np.degrees(incl_95ci_high):10.6f}]"
         Omega_ci_str = f" +/- {np.degrees(Omega_std):.6f} [{np.degrees(Omega_95ci_low):10.6f}, {np.degrees(Omega_95ci_high):10.6f}]"
         omega_ci_str = f" +/- {np.degrees(omega_std):.6f} [{np.degrees(omega_95ci_low):10.6f}, {np.degrees(omega_95ci_high):10.6f}]"
@@ -571,14 +580,47 @@ if __name__ == "__main__":
 
 
 
-    # Print the -60 and +60 days simulation orbital elements
+    # Print the simulation orbital elements
     print("Orbital elements {:.2f} days from the epoch {:.6f} {:s}".format(sim_days, traj.jdt_ref, direction))
-    print("a    = {:>10.6}{:s} AU".format(sim_outputs[-1][2].a, a_ci_str))
-    print("e    = {:>10.6}{:s}".format(sim_outputs[-1][2].e, e_ci_str))
-    print("i    = {:>10.6}{:s} deg".format(np.degrees(sim_outputs[-1][2].inc), incl_ci_str))
-    print("peri = {:>10.6}{:s} deg".format(np.degrees(sim_outputs[-1][2].Omega), Omega_ci_str))
-    print("node = {:>10.6}{:s} deg".format(np.degrees(sim_outputs[-1][2].omega), omega_ci_str))
-    print("f    = {:>10.6}{:s} deg".format(np.degrees(sim_outputs[-1][2].f), f_ci_str))
+    print("a    = {:>10.6f}{:s} AU".format(sim_outputs[-1][2].a, a_ci_str))
+    print("q    = {:>10.6f}{:s} AU".format((1 - sim_outputs[-1][2].e)*sim_outputs[-1][2].a, q_ci_str))
+    print("e    = {:>10.6f}{:s}".format(sim_outputs[-1][2].e, e_ci_str))
+    print("i    = {:>10.6f}{:s} deg".format(np.degrees(sim_outputs[-1][2].inc), incl_ci_str))
+    print("peri = {:>10.6f}{:s} deg".format(np.degrees(sim_outputs[-1][2].Omega), Omega_ci_str))
+    print("node = {:>10.6f}{:s} deg".format(np.degrees(sim_outputs[-1][2].omega), omega_ci_str))
+    print("f    = {:>10.6f}{:s} deg".format(np.degrees(sim_outputs[-1][2].f), f_ci_str))
+
+
+    # Save the results to a file
+    with open(os.path.join(os.path.dirname(args.pickle_path), "rebound_simulation_results.txt"), "w") as f:
+
+        # Save the nominal orbital elements and the errors
+        f.write("Orbital elements {:.2f} days from the epoch {:.6f} {:s}\n".format(sim_days, traj.jdt_ref, direction))
+        f.write("a    = {:>10.6f}{:s} AU\n".format(sim_outputs[-1][2].a, a_ci_str))
+        f.write("q    = {:>10.6f}{:s} AU\n".format((1 - sim_outputs[-1][2].e)*sim_outputs[-1][2].a, q_ci_str))
+        f.write("e    = {:>10.6f}{:s}\n".format(sim_outputs[-1][2].e, e_ci_str))
+        f.write("i    = {:>10.6f}{:s} deg\n".format(np.degrees(sim_outputs[-1][2].inc), incl_ci_str))
+        f.write("peri = {:>10.6f}{:s} deg\n".format(np.degrees(sim_outputs[-1][2].Omega), Omega_ci_str))
+        f.write("node = {:>10.6f}{:s} deg\n".format(np.degrees(sim_outputs[-1][2].omega), omega_ci_str))
+        f.write("f    = {:>10.6f}{:s} deg\n".format(np.degrees(sim_outputs[-1][2].f), f_ci_str))
+
+        # Save the nominal orbital elements from the initial to end time of the simulation
+        f.write("\nOrbital elements from the initial to end time of the simulation:\n")
+        for i, output in enumerate(sim_outputs):
+            f.write(f"t = {output[0]:.6f} d, a = {output[2].a:10.6f}, e = {output[2].e:10.6f}, i = {np.degrees(output[2].inc):10.6f}, Omega = {np.degrees(output[2].Omega):10.6f}, omega = {np.degrees(output[2].omega):10.6f}, f = {np.degrees(output[2].f):10.6f}\n")
+
+        # If the MC was run, save orbital elements of individual MC runs
+        if len(sim_outputs_mc):
+            f.write("\nOrbital elements of individual Monte Carlo runs:\n")
+            for mc_name in sim_outputs_mc:
+                f.write(f"{mc_name}:\n")
+                f.write("a    = {:>10.6f} AU\n".format(sim_outputs_mc[mc_name][-1][2].a))
+                f.write("q    = {:>10.6f} AU\n".format((1 - sim_outputs_mc[mc_name][-1][2].e)*sim_outputs_mc[mc_name][-1][2].a))
+                f.write("e    = {:>10.6f}\n".format(sim_outputs_mc[mc_name][-1][2].e))
+                f.write("i    = {:>10.6f} deg\n".format(np.degrees(sim_outputs_mc[mc_name][-1][2].inc)))
+                f.write("peri = {:>10.6f} deg\n".format(np.degrees(sim_outputs_mc[mc_name][-1][2].Omega)))
+                f.write("node = {:>10.6f} deg\n".format(np.degrees(sim_outputs_mc[mc_name][-1][2].omega)))
+                f.write("f    = {:>10.6f} deg\n".format(np.degrees(sim_outputs_mc[mc_name][-1][2].f)))
 
     # Plot the orbital elements of the before and after simulation on the same plot (one subplot for each element)
     fig, axs = plt.subplots(3, 3, figsize=(12, 8), sharex=True)
@@ -701,4 +743,8 @@ if __name__ == "__main__":
         ax.legend()
 
     plt.tight_layout()
+
+    # Save the figure
+    plt.savefig(os.path.join(os.path.dirname(args.pickle_path), "rebound_simulation.png"))
+
     plt.show()
