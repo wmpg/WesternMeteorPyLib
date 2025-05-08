@@ -447,7 +447,7 @@ def reboundSimulate(
         state_vect_hel, orb_elem, planet_dists = extractSimParams(ps, obj_name, planet_names)
 
         if verbose and (i%25 == 0):
-            print(f"{i}: t = {time:.6f} d, a = {orb_elem.a:10.6f}, e = {orb_elem.e:10.6f}, inc = {np.degrees(orb_elem.inc):10.6f}, Omega = {np.degrees(orb_elem.Omega):10.6f}, omega = {np.degrees(orb_elem.omega):10.6f}, f = {np.degrees(orb_elem.f):10.6f}")
+            print(f"{i}: t = {time/(2*np.pi)*365.25:.6f} d, a = {orb_elem.a:10.6f}, e = {orb_elem.e:10.6f}, inc = {np.degrees(orb_elem.inc):10.6f}, Omega = {np.degrees(orb_elem.Omega):10.6f}, omega = {np.degrees(orb_elem.omega):10.6f}, f = {np.degrees(orb_elem.f):10.6f}")
 
         outputs.append([time, state_vect_hel, orb_elem, planet_dists])
 
@@ -577,11 +577,23 @@ if __name__ == "__main__":
         f_ci_str = f" +/- {np.degrees(f_std):.6f} [{np.degrees(f_95ci_low):10.6f}, {np.degrees(f_95ci_high):10.6f}]"
 
 
+    ### Compute the epoch of the final simulation
 
+    # Extract the final time in days
+    final_sim_days = sim_outputs[-1][0]/(2*np.pi)*365.25
 
+    # Compute the final epoch
+    final_epoch_jd = traj.jdt_ref + final_sim_days
+
+    # Convert the epoch to UTC
+    time_utc = astropy.time.Time(final_epoch_jd, format='jd', scale='utc')
+
+    ###
 
     # Print the simulation orbital elements
     print("Orbital elements {:.2f} days from the epoch {:.6f} {:s}".format(sim_days, traj.jdt_ref, direction))
+    print("Epoch= {:.6f} JD (TDB)".format(final_epoch_jd))
+    print("Epoch= {:s} UTC".format(time_utc.iso))
     print("a    = {:>10.6f}{:s} AU".format(sim_outputs[-1][2].a, a_ci_str))
     print("q    = {:>10.6f}{:s} AU".format((1 - sim_outputs[-1][2].e)*sim_outputs[-1][2].a, q_ci_str))
     print("e    = {:>10.6f}{:s}".format(sim_outputs[-1][2].e, e_ci_str))
@@ -607,7 +619,9 @@ if __name__ == "__main__":
         # Save the nominal orbital elements from the initial to end time of the simulation
         f.write("\nOrbital elements from the initial to end time of the simulation:\n")
         for i, output in enumerate(sim_outputs):
-            f.write(f"t = {output[0]:.6f} d, a = {output[2].a:10.6f}, e = {output[2].e:10.6f}, i = {np.degrees(output[2].inc):10.6f}, Omega = {np.degrees(output[2].Omega):10.6f}, omega = {np.degrees(output[2].omega):10.6f}, f = {np.degrees(output[2].f):10.6f}\n")
+
+            # Save the orbital elements at the given time
+            f.write(f"t = {output[0]/(2*np.pi)*365.25:.6f} d, a = {output[2].a:10.6f}, e = {output[2].e:10.6f}, i = {np.degrees(output[2].inc):10.6f}, Omega = {np.degrees(output[2].Omega):10.6f}, omega = {np.degrees(output[2].omega):10.6f}, f = {np.degrees(output[2].f):10.6f}\n")
 
         # If the MC was run, save orbital elements of individual MC runs
         if len(sim_outputs_mc):
@@ -623,10 +637,10 @@ if __name__ == "__main__":
                 f.write("f    = {:>10.6f} deg\n".format(np.degrees(sim_outputs_mc[mc_name][-1][2].f)))
 
     # Plot the orbital elements of the before and after simulation on the same plot (one subplot for each element)
-    fig, axs = plt.subplots(3, 3, figsize=(12, 8), sharex=True)
+    fig, axs = plt.subplots(3, 3, figsize=(14, 10), sharex=True)
 
     # Time in days
-    t = [x[0] for x in sim_outputs]
+    t = [x[0]/(2*np.pi)*365.25 for x in sim_outputs]
 
     a = [x[2].a for x in sim_outputs]
     e = [x[2].e for x in sim_outputs]
@@ -707,7 +721,11 @@ if __name__ == "__main__":
 
     # Set the axis labels
     for ax in axs.flatten():
+
         ax.set_xlabel("Time [days]")
+
+        # Disable offset and scientific notation
+        ax.ticklabel_format(useOffset=False, style='plain')
 
 
     # Plot the MC realizations (all in thin alpha=0.5 lines)
