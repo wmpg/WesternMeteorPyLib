@@ -307,9 +307,9 @@ def reboundSimulate(
     time_utc = astropy.time.Time(julian_date, format='jd', scale='utc')
     time_tdb = time_utc.tdb.jd
 
-    # TEST - compare to the already computed dynamical time
-    print("astropy dynamical time:", time_tdb)
-    print("computed dynamical time:", jd2DynamicalTimeJD(julian_date))
+    # # TEST - compare to the already computed dynamical time
+    # print("astropy dynamical time:", time_tdb)
+    # print("computed dynamical time:", jd2DynamicalTimeJD(julian_date))
 
     # Set up the number of outputs and the time array
     if direction == "forward":
@@ -352,7 +352,7 @@ def reboundSimulate(
 
     # Add the meteoroid to the simulation
     sim.add(
-        m=obj_mass,
+        # m=obj_mass, # Ignore the mass of meteoroids
         x=state_vect_rot[0],
         y=state_vect_rot[1],
         z=state_vect_rot[2],
@@ -367,12 +367,15 @@ def reboundSimulate(
     mc_realization_names = []
     for i, state_vect_realization in enumerate(state_vect_realizations):
 
+        if verbose:
+            print(f"MC realization {i + 1}: {state_vect_realization}")
+
         sv_mc_rot = convertToBarycentric(state_vect_realization, time_tdb)
 
         mc_name = f"{obj_name}_MC_{i}"
 
         sim.add(
-            m=obj_mass,
+            # m=obj_mass, # Ignore the mass of the meteoroid for the Monte Carlo realizations
             x=sv_mc_rot[0],
             y=sv_mc_rot[1],
             z=sv_mc_rot[2],
@@ -384,6 +387,9 @@ def reboundSimulate(
 
         mc_realization_names.append(mc_name)
 
+    # Set the number of active paticles in the simulation to the number of massive objects (so that the 
+    # interaction between massless particles is not computed)
+    sim.N_active = len(planet_names)
 
     ps = sim.particles
 
@@ -416,6 +422,12 @@ def reboundSimulate(
 
     outputs = []
     outputs_mc = {}
+
+    if verbose:
+        print("Running simulation...")
+        print(f"Simulation time: {tsimend:.2f} days ({tsimend*365.25:.2f} years)")
+        print(f"Number of outputs: {n_outputs}")
+        print(f"Direction: {direction}")
 
     # Integrate the simulation and save the state vectors and orbital elements in the output list
     # These are not time steps, but the times at which the simulation state is saved
@@ -540,13 +552,12 @@ if __name__ == "__main__":
         f_95ci_high = np.percentile(f_mc, 97.5)
 
         # Compute the standard deviation of the orbital elements
-        # Before computing the stddev, remove the outliers (outside the 99% CI)
-        a_std = np.std(a_mc[np.logical_and(a_mc > np.percentile(a_mc, 0.5), a_mc < np.percentile(a_mc, 99.5))])
-        e_std = np.std(e_mc[np.logical_and(e_mc > np.percentile(e_mc, 0.5), e_mc < np.percentile(e_mc, 99.5))])
-        incl_std = np.std(incl_mc[np.logical_and(incl_mc > np.percentile(incl_mc, 0.5), incl_mc < np.percentile(incl_mc, 99.5))])
-        Omega_std = scipy.stats.circstd(Omega_mc[np.logical_and(Omega_mc > np.percentile(Omega_mc, 0.5), Omega_mc < np.percentile(Omega_mc, 99.5))])
-        omega_std = scipy.stats.circstd(omega_mc[np.logical_and(omega_mc > np.percentile(omega_mc, 0.5), omega_mc < np.percentile(omega_mc, 99.5))])
-        f_std = scipy.stats.circstd(f_mc[np.logical_and(f_mc > np.percentile(f_mc, 0.5), f_mc < np.percentile(f_mc, 99.5))])
+        a_std = np.std(a_mc)
+        e_std = np.std(e_mc)
+        incl_std = np.std(incl_mc)
+        Omega_std = np.std(Omega_mc)
+        omega_std = np.std(omega_mc)
+        f_std = np.std(f_mc)
 
 
         a_ci_str = f" +/- {np.degrees(a_std):.6f} [{a_95ci_low:10.6f}, {a_95ci_high:10.6f}]"
