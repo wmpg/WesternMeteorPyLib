@@ -204,7 +204,7 @@ def extractSimParams(ps, obj_name, planet_names):
 
 def reboundSimulate(
         julian_date, state_vect, traj=None, 
-        direction="forward", tsimend=60, n_outputs=500, obj_name="obj", obj_mass=0.0, mc_runs=100,
+        direction="forward", sim_days=60, n_outputs=500, obj_name="obj", obj_mass=0.0, mc_runs=100,
         verbose=False):
     """ Takes an state vector (or a Trajectory object), runs REBOUND and produces orbital elements for the 
     object at the end of the simulation or at the specified time.
@@ -220,7 +220,7 @@ def reboundSimulate(
         traj: [Trajectory] Trajectory object with the meteoroid data. If given, the julian_date and state_vect
             arguments will be ignored.
         direction: [str] Direction of the simulation, either "forward" or "backward".
-        tsimend: [float] Length of integration in days, default is 60 days.
+        sim_days: [float] Length of integration in days, default is 60 days.
         n_outputs: [int] Number of outputs (samples along the simulation), default is 500.
         obj_name: [str] Name of the object that's being integrated, default is "obj".
         obj_mass: [float] Mass of object in solar masses if asteroid or larger object, default is 0.0.
@@ -299,7 +299,7 @@ def reboundSimulate(
     J2 = 1.0826157e-3
     J4 = -1.620e-6
     dmin = 4.326e-5  # Earth radius in au
-    tsimend = tsimend/365.25  # simulation endtime in years
+    tsimend = sim_days/365.25  # simulation endtime in years
     year = 2.0*np.pi  # One year in units where G=1
 
 
@@ -425,7 +425,7 @@ def reboundSimulate(
 
     if verbose:
         print("Running simulation...")
-        print(f"Simulation time: {tsimend:.2f} days ({tsimend*365.25:.2f} years)")
+        print(f"Simulation time: {tsimend:.2f} years ({tsimend*365.25:.2f} days)")
         print(f"Number of outputs: {n_outputs}")
         print(f"Direction: {direction}")
 
