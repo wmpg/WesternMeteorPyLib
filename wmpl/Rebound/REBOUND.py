@@ -167,12 +167,13 @@ def convertToBarycentric(state_vect, jd, log_file_path=""):
 
 
 
-def extractSimParams(ps, obj_name):
+def extractSimParams(ps, obj_name, planet_names):
     """ Extracts the state vector, orbital elements and distance from the Earth from a REBOUND simulation.
 
     Arguments:
         ps: [REBOUND simulation] REBOUND simulation object.
         obj_name: [str] Name of the object in the simulation.
+        planet_names: [list] List of planet names in the simulation.
 
     Return:
         state_vect_hel: [list] Heliocentric state vector of the object in the simulation, [x, y, z, vx, vy, vz].
@@ -186,16 +187,19 @@ def extractSimParams(ps, obj_name):
     state_vect_vel = [ps[obj_name].vx, ps[obj_name].vy, ps[obj_name].vz]
     state_vect_hel = state_vect_pos + state_vect_vel
 
-    # Get the coordinates of the Earth
-    earth_coords = [ps["Earth"].x, ps["Earth"].y, ps["Earth"].z]
+    planet_dists = {}
+    for planet in planet_names:
 
-    # Compute the distance between the meteoroid and the Earth
-    earth_dist = np.linalg.norm(np.array(state_vect_pos) - np.array(earth_coords))
+        # Get the coordinates of the planet
+        planet_coords = [ps[planet].x, ps[planet].y, ps[planet].z]
+
+        # Compute the distance between the meteoroid and the planet
+        planet_dists[planet] = np.linalg.norm(np.array(state_vect_pos) - np.array(planet_coords))
 
     # Extract the orbital elements
     orb_elem = ps[obj_name].orbit(primary=ps["Sun"])
 
-    return state_vect_hel, orb_elem, earth_dist
+    return state_vect_hel, orb_elem, planet_dists
 
 
 def reboundSimulate(
@@ -317,6 +321,11 @@ def reboundSimulate(
         times = np.linspace(0, -year*tsimend, n_outputs)
 
     # Add the Sun and the planets
+    planet_names = [
+        "Sun", 
+        "Mercury", "Venus", "Earth", "Luna", "Mars", 
+        "Jupiter", "Saturn", "Uranus", "Neptune"
+    ]
     sim.add("Sun", date=f"JD{time_tdb:.6f}", hash="Sun")
     sim.add("Mercury", date=f"JD{time_tdb:.6f}", hash="Mercury")
     sim.add("Venus", date=f"JD{time_tdb:.6f}", hash="Venus")
@@ -423,12 +432,12 @@ def reboundSimulate(
             break
 
         # Extract the state vector and the orbital elements
-        state_vect_hel, orb_elem, earth_dist = extractSimParams(ps, obj_name)
+        state_vect_hel, orb_elem, planet_dists = extractSimParams(ps, obj_name, planet_names)
 
         if verbose and (i%25 == 0):
             print(f"{i}: t = {time:.6f} d, a = {orb_elem.a:10.6f}, e = {orb_elem.e:10.6f}, inc = {orb_elem.inc:10.6f}, Omega = {orb_elem.Omega:10.6f}, omega = {orb_elem.omega:10.6f}, f = {orb_elem.f:10.6f}")
 
-        outputs.append([time, state_vect_hel, orb_elem, earth_dist])
+        outputs.append([time, state_vect_hel, orb_elem, planet_dists])
 
 
         # Extract the state vector and the orbital elements for the Monte Carlo realizations
@@ -439,12 +448,12 @@ def reboundSimulate(
             except rb.ParticleNotFound:
                 continue
 
-            state_vect_hel, orb_elem, earth_dist = extractSimParams(ps, mc_name)
+            state_vect_hel, orb_elem, planet_dists = extractSimParams(ps, mc_name, planet_names)
 
             if mc_name not in outputs_mc:
                 outputs_mc[mc_name] = []
 
-            outputs_mc[mc_name].append([time, state_vect_hel, orb_elem, earth_dist])
+            outputs_mc[mc_name].append([time, state_vect_hel, orb_elem, planet_dists])
 
 
     return outputs, outputs_mc
@@ -485,7 +494,7 @@ if __name__ == "__main__":
     traj = loadPickle(*os.path.split(args.pickle_path))
 
     
-    # Run the simulation -60 and +60 days from the epoch of the trajectory
+    # Run the simulation for the given number of days from the epoch of the trajectory
     sim_outputs, sim_outputs_mc = reboundSimulate(
         None, None, traj=traj, direction=direction, tsimend=sim_days,
         obj_name=traj.traj_id, mc_runs=args.mc, verbose=args.verbose
@@ -531,12 +540,13 @@ if __name__ == "__main__":
         f_95ci_high = np.percentile(f_mc, 97.5)
 
         # Compute the standard deviation of the orbital elements
-        a_std = np.std(a_mc)
-        e_std = np.std(e_mc)
-        incl_std = np.std(incl_mc)
-        Omega_std = scipy.stats.circstd(Omega_mc)
-        omega_std = scipy.stats.circstd(omega_mc)
-        f_std = scipy.stats.circstd(f_mc)
+        # Before computing the stddev, remove the outliers (outside the 99% CI)
+        a_std = np.std(a_mc[np.logical_and(a_mc > np.percentile(a_mc, 0.5), a_mc < np.percentile(a_mc, 99.5))])
+        e_std = np.std(e_mc[np.logical_and(e_mc > np.percentile(e_mc, 0.5), e_mc < np.percentile(e_mc, 99.5))])
+        incl_std = np.std(incl_mc[np.logical_and(incl_mc > np.percentile(incl_mc, 0.5), incl_mc < np.percentile(incl_mc, 99.5))])
+        Omega_std = scipy.stats.circstd(Omega_mc[np.logical_and(Omega_mc > np.percentile(Omega_mc, 0.5), Omega_mc < np.percentile(Omega_mc, 99.5))])
+        omega_std = scipy.stats.circstd(omega_mc[np.logical_and(omega_mc > np.percentile(omega_mc, 0.5), omega_mc < np.percentile(omega_mc, 99.5))])
+        f_std = scipy.stats.circstd(f_mc[np.logical_and(f_mc > np.percentile(f_mc, 0.5), f_mc < np.percentile(f_mc, 99.5))])
 
 
         a_ci_str = f" +/- {np.degrees(a_std):.6f} [{a_95ci_low:10.6f}, {a_95ci_high:10.6f}]"
@@ -572,8 +582,9 @@ if __name__ == "__main__":
     omega = [x[2].omega for x in sim_outputs]
     f = [x[2].f for x in sim_outputs]
 
-    # Distance from the Earth
-    earth_dist = [x[3] for x in sim_outputs]
+    # Distance from the planets
+    planet_dists = [x[3] for x in sim_outputs]
+    earth_dist = [x["Earth"] for x in planet_dists]
 
     # Find the time when the object exits the Earth's Hill sphere
     earth_hill = 0.01 # AU
@@ -620,6 +631,27 @@ if __name__ == "__main__":
         # Set the X axis limit so the maximum time is at the exit from the Earth's Hill sphere
         axs[0, 2].set_xlim(xmax=t[exit_index])
 
+
+
+    # Plot the distance from the Sun + inner planets
+    inner_planets = ["Sun", "Mercury", "Venus", "Earth", "Luna", "Mars"]
+    for planet in inner_planets:
+        planet_dist = [x[3][planet] for x in sim_outputs]
+        axs[1, 2].plot(t, planet_dist, label=planet)
+
+    axs[1, 2].set_ylabel("Distance [AU]")
+    axs[1, 2].legend()
+
+    # Plot the distance from the outer planets
+    outer_planets = ["Jupiter", "Saturn", "Uranus", "Neptune"]
+    for planet in outer_planets:
+        planet_dist = [x[3][planet] for x in sim_outputs]
+        axs[2, 2].plot(t, planet_dist, label=planet)
+
+    axs[2, 2].set_ylabel("Distance [AU]")
+    axs[2, 2].legend()
+
+
     # Set the axis labels
     for ax in axs.flatten():
         ax.set_xlabel("Time [days]")
@@ -634,7 +666,7 @@ if __name__ == "__main__":
         Omega_mc = [x[2].Omega for x in sim_outputs_mc[mc_name]]
         omega_mc = [x[2].omega for x in sim_outputs_mc[mc_name]]
         f_mc = [x[2].f for x in sim_outputs_mc[mc_name]]
-        earth_dist = [x[3] for x in sim_outputs_mc[mc_name]]
+        earth_dist = [x[3]["Earth"] for x in sim_outputs_mc[mc_name]]
 
         axs[0, 0].plot(t, a_mc, alpha=0.5, color='k', lw=0.5)
         axs[0, 1].plot(t, e_mc, alpha=0.5, color='k', lw=0.5)
