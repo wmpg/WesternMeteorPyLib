@@ -9,14 +9,13 @@ try:
     import rebound as rb
     import reboundx
     from reboundx import constants as rbxConstants
+    import astropy.time
 
     REBOUND_FOUND = True
 
 except ImportError:
     print("REBOUND package not found. Install REBOUND and reboundx packages to use the REBOUND functions.")
     REBOUND_FOUND = False
-
-import astropy.time
 
 from wmpl.Utils.TrajConversions import (
     J2000_JD,
