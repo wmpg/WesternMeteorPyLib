@@ -1,0 +1,11 @@
+# param_class_name = ErosionSimParametersCAMOWide
+# File name, lim mag, lim mag length, length delay (s)
+/mnt/bulk/test/metsim/simulations/v42/rho1600/erosion_sim_v42.48_m8.05e-03g_rho1647_z65.1_abl0.264_eh115.4_er0.041_s2.34.pickle, 5.21076002, 5.69181690, 0.00000000
+/mnt/bulk/test/metsim/simulations/v19/rho4000/erosion_sim_v19.30_m7.34e-02g_rho4085_z22.3_abl0.435_eh092.7_er0.549_s2.79.pickle, 5.21076002, 5.69181690, 0.00000000
+/mnt/bulk/test/metsim/simulations/v37/rho3500/erosion_sim_v37.27_m3.49e-02g_rho3506_z18.9_abl0.347_eh116.7_er0.867_s1.89.pickle, 5.21076002, 5.69181690, 0.00000000
+/mnt/bulk/test/metsim/simulations/v61/rho4000/erosion_sim_v61.71_m2.41e-01g_rho4083_z32.7_abl0.441_eh097.1_er0.815_s2.65.pickle, 5.21076002, 5.69181690, 0.00000000
+/mnt/bulk/test/metsim/simulations/v30/rho1300/erosion_sim_v30.44_m3.12e-01g_rho1331_z60.0_abl0.052_eh084.4_er0.677_s1.98.pickle, 5.74957464, 5.03488163, 0.00000000
+/mnt/bulk/test/metsim/simulations/v35/rho5300/erosion_sim_v35.28_m3.71e-02g_rho5346_z55.7_abl0.262_eh112.3_er0.493_s2.13.pickle, 5.74957464, 5.03488163, 0.00000000
+/mnt/bulk/test/metsim/simulations/v64/rho5100/erosion_sim_v64.04_m1.35e-02g_rho5136_z54.6_abl0.037_eh071.0_er0.180_s1.89.pickle, 5.63062865, 5.07489956, 0.00000000
+/mnt/bulk/test/metsim/simulations/v34/rho0200/erosion_sim_v34.70_m5.69e-02g_rho0265_z10.9_abl0.155_eh123.0_er0.724_s1.90.pickle, 5.18272842, 5.40322329, 0.00000000
+/mnt/bulk/test/metsim/simulations/v50/rho2000/erosion_sim_v50.16_m6.34e-04g_rho2001_z19.3_abl0.141_eh086.5_er0.958_s2.00.pickle, 5.63062865, 5.07489956, 0.00000000
