@@ -228,6 +228,8 @@ if __name__ == '__main__':
 
     from wmpl.Utils.Pickling import loadPickle
     from wmpl.Trajectory.Trajectory import jacchiaLengthFunc
+    from wmpl.Utils.Math import meanAngle
+    from wmpl.Utils.Physics import dynamicPressure
 
     
     ### COMMAND LINE ARGUMENTS
@@ -361,12 +363,36 @@ if __name__ == '__main__':
 
     dist_s, vel_s = x_smooth[:,0], x_smooth[:,1]
 
+
     # Print initial and final speed
     print(f"Initial speed: {vel_s[0]/1000:.2f} km/s")
     print(f"Final speed:   {vel_s[-1]/1000:.2f} km/s")
+
+
+
+    ### Compute the dynamic pressure ###
+
+    def findPeakDynPressure(dyn_pressure, ht_arr):
+            """Find the peak dynamic pressure. """
+            peak_dyn_pressure_index = np.argmax(dyn_pressure)
+            peak_dyn_pressure = dyn_pressure[peak_dyn_pressure_index]/1e6
+            peak_dyn_pressure_ht = ht_arr[peak_dyn_pressure_index]/1000
+            return peak_dyn_pressure, peak_dyn_pressure_ht
+
+    # Take mean meteor lat/lon as reference for the atmosphere model
+    lat_mean = np.mean([traj.rbeg_lat, traj.rend_lat])
+    lon_mean = meanAngle([traj.rbeg_lon, traj.rend_lon])
+
+    # Compute the dynamic pressure using alpha and beta
+    dyn_pressure = dynamicPressure(lat_mean, lon_mean, ht_data, traj.jdt_ref, vel_s)
+
+    peak_dyn_pressure, peak_dyn_pressure_ht = findPeakDynPressure(dyn_pressure, ht_data)
+
+    ### ###
+
     
 
-    fig, (ax_dist, ax_distres, ax_vel, ax_decel) = plt.subplots(1, 4, sharey=True, figsize=(12, 6))
+    fig, (ax_dist, ax_distres, ax_vel, ax_decel, ax_dynpress) = plt.subplots(1, 5, sharey=True, figsize=(14, 6))
 
     # Define a constant velcotiy model using the initial velocity
     def distConstVel(t, v0):
@@ -395,16 +421,27 @@ if __name__ == '__main__':
     ax_vel.set_xlabel('Velocity (m/s)')
     ax_vel.legend()
 
+    # Set X axis to 95th percentile of velocity
+    ax_vel.set_xlim(np.percentile(vel_data[vel_data > 0], 0.5)/1000, np.percentile(vel_data[vel_data > 0], 97.5)/1000)
+
+
     # Plot the deceleration
+    # NOTE: If the deceleration appears jagged, it's because it's plotted by height but smoothed by time.
     decel = np.zeros_like(vel_s)
     decel[1:] = np.diff(vel_s)/np.diff(time_data)
     ax_decel.plot(decel[1:]/1000, ht_data[1:]/1000, '-', label='Deceleration', color='red')
     ax_decel.axvline(0, color='black', linestyle='--')
     ax_decel.set_xlabel('Deceleration (km/s$^2$)')
 
+    # Plot the dynamic pressure
+    ax_dynpress.plot(dyn_pressure/1e6, ht_data/1000, '-', label='Dynamic pressure', color='red')
+    ax_dynpress.set_xlabel('Dynamic pressure (MPa)')
 
-    # Set X axis to 95th percentile of velocity
-    ax_vel.set_xlim(np.percentile(vel_data[vel_data > 0], 0.5)/1000, np.percentile(vel_data[vel_data > 0], 97.5)/1000)
+    plt.scatter(peak_dyn_pressure, peak_dyn_pressure_ht, c='k', \
+            label="Peak P = {:.2f} MPa\nHt = {:.2f} km".format(peak_dyn_pressure, peak_dyn_pressure_ht))
+    
+    ax_dynpress.legend()
+
 
     plt.tight_layout()
     
