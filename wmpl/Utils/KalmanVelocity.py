@@ -364,6 +364,19 @@ if __name__ == '__main__':
     # Print initial and final speed
     print(f"Initial speed: {vel_s[0]/1000:.2f} km/s")
     print(f"Final speed:   {vel_s[-1]/1000:.2f} km/s")
+
+
+    # Print the filtered data
+    print()
+    print("Filtered data:")
+    print("Time (s)   Height (km)   Distance (km)   Velocity (km/s) Deceleration (km/s^2)")
+    for i in range(len(time_data)):
+        if i == 0:
+            decel = 0.0
+        else:
+            decel = (vel_s[i] - vel_s[i-1])/(time_data[i] - time_data[i-1])
+        print("{:8.4f}   {:11.3f}   {:13.3f}   {:15.4f}   {:15.3f}".format(
+            time_data[i], ht_data[i]/1000, dist_s[i]/1000, vel_s[i]/1000, decel/1000))
     
 
     fig, (ax_dist, ax_distres, ax_vel, ax_decel) = plt.subplots(1, 4, sharey=True, figsize=(12, 6))
