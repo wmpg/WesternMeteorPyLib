@@ -53,8 +53,9 @@ def loadCometsElements(comets_file):
             incl = float(line[75:84])
             peri = float(line[85:94])
             node = float(line[95:104])
+            h_mag = -1 # Not present in the JPL file, but needed for the MPC format
 
-            comets_list.append([comet_name, q, e, incl, peri, node])
+            comets_list.append([comet_name, q, e, incl, peri, node, h_mag])
 
     return comets_list
 
@@ -83,7 +84,12 @@ def loadAsteroidsElements(asteroids_file):
             peri = float(line[89:94])
             node = float(line[95:100])
 
-            asteroids_list.append([asteroid_name, q, e, incl, peri, node])
+            try:
+                h_mag = float(line[63:70])  # Asteroid H magnitude
+            except ValueError:
+                h_mag = -1
+
+            asteroids_list.append([asteroid_name, q, e, incl, peri, node, h_mag])
 
 
     return asteroids_list
@@ -130,8 +136,11 @@ def loadMeteoritesElements(meteorites_file):
             except:
                 # print("No ascending node for meteorite", meteorite_name)
                 continue
+            
+            # Meteorites do not have H magnitude in the orbit file
+            h_mag = -1
 
-            meteorites_list.append([meteorite_name, q, e, incl, peri, node])
+            meteorites_list.append([meteorite_name, q, e, incl, peri, node, h_mag])
 
 
     return meteorites_list
@@ -204,7 +213,7 @@ def findParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10, meteorites=
     for k, body in enumerate(parent_body_elements):
 
         # Extract body orbital elments
-        name, q2, e2, incl2, peri2, node2 = body
+        name, q2, e2, incl2, peri2, node2 = body[:6]  # Exclude H magnitude
 
         # Convert the body elements to radians
         incl2 = np.radians(incl2)
@@ -346,9 +355,9 @@ if __name__ == "__main__":
         d_crit=d_crit_type, top_n=10, meteorites=cml_args.meteorites)
 
     print("Top 10 matches:")
-    print('Name                               ,     q,     e,   incl,    peri,    node, D crit', d_crit_type)
+    print('Name                               ,     q,     e,   incl,    peri,    node,  Hmag, D crit', d_crit_type)
     for entry in parent_matches:
-        print("{:35s}, {:.3f}, {:.3f}, {:6.2f}, {:7.3f}, {:7.3f}, {:.3f}".format(*entry))
+        print("{:35s}, {:.3f}, {:.3f}, {:6.2f}, {:7.3f}, {:7.3f}, {:5.2f}, {:.3f}".format(*entry))
 
 
 
