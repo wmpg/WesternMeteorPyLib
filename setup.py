@@ -7,7 +7,9 @@ if sys.version_info.major < 3:
 else:
     import urllib.request as urllibrary
 
-
+import platform
+from packaging.requirements import Requirement
+from packaging.markers import default_environment
 from setuptools import setup, find_packages, Extension
 from Cython.Build import cythonize
 import numpy
@@ -55,9 +57,32 @@ for dir_name in os.listdir(dir_path):
             packages.append(dir_name)
 
 
-# Read requirements file
+# Read requirements.txt and drop any reboundx line on Windows
 with open('requirements.txt', encoding='utf-8') as f:
-    requirements = f.read().splitlines()
+    raw_reqs = f.read().splitlines()
+
+requirements = []
+is_windows = platform.system() == "Windows"
+
+for raw in raw_reqs:
+    line = raw.strip()
+    if not line or line.startswith('#'):
+        continue
+
+    # If this requirement mentions 'reboundx' and we're on Windows, skip it.
+    if is_windows and 'reboundx' in line.lower():
+        print("Skipping reboundx on Windows:", line)
+        continue
+
+    # If this is PyQt5 on Windows, skip it entirely as it's probably installed via conda
+    if is_windows and line.lower().startswith('pyqt5'):
+        print(">> Skipping PyQt5 on Windows (no METADATA present)")
+        continue
+
+    # Otherwise, keep it verbatim (markers included). pip/setuptools will handle them.
+    requirements.append(line)
+
+print("Final install_requires:", requirements)
 
 
 
