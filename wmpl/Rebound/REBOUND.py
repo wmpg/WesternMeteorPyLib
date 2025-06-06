@@ -166,13 +166,19 @@ def convertToBarycentric(state_vect, jd, log_file_path=""):
 
 
 
-def extractSimParams(ps, obj_name, planet_names):
+def extractSimParams(ps, obj_name, planet_names, reference_frame="heliocentric"):
     """ Extracts the state vector, orbital elements and distance from the Earth from a REBOUND simulation.
 
     Arguments:
         ps: [REBOUND simulation] REBOUND simulation object.
         obj_name: [str] Name of the object in the simulation.
         planet_names: [list] List of planet names in the simulation.
+
+    Keyword arguments:
+        reference_frame: [str] Reference frame to use for the state vector. Options: 
+            - "heliocentric"
+            - "geocentric"
+            Default is "heliocentric".
 
     Return:
         state_vect_hel: [list] Heliocentric state vector of the object in the simulation, [x, y, z, vx, vy, vz].
@@ -195,8 +201,12 @@ def extractSimParams(ps, obj_name, planet_names):
         # Compute the distance between the meteoroid and the planet
         planet_dists[planet] = np.linalg.norm(np.array(state_vect_pos) - np.array(planet_coords))
 
+    ref_object = 'Sun'
+    if reference_frame == "geocentric":
+        ref_object = 'Earth'
+
     # Extract the orbital elements
-    orb_elem = ps[obj_name].orbit(primary=ps["Sun"])
+    orb_elem = ps[obj_name].orbit(primary=ps[ref_object])
 
     return state_vect_hel, orb_elem, planet_dists
 
@@ -204,6 +214,7 @@ def extractSimParams(ps, obj_name, planet_names):
 def reboundSimulate(
         julian_date, state_vect, traj=None, 
         direction="forward", sim_days=60, n_outputs=500, obj_name="obj", obj_mass=0.0, mc_runs=100,
+        reference_frame="heliocentric",
         verbose=False):
     """ Takes an state vector (or a Trajectory object), runs REBOUND and produces orbital elements for the 
     object at the end of the simulation or at the specified time.
@@ -224,6 +235,9 @@ def reboundSimulate(
         obj_name: [str] Name of the object that's being integrated, default is "obj".
         obj_mass: [float] Mass of object in solar masses if asteroid or larger object, default is 0.0.
         mc_runs: [int] Number of Monte Carlo simulations to run, default is 100.
+        reference_frame: [str] Reference frame to use for the state vector. Options:
+            - "heliocentric" (default)
+            - "geocentric"
         verbose: [bool] If True, print out the progress of the simulation.
 
     Return:
@@ -451,7 +465,8 @@ def reboundSimulate(
             break
 
         # Extract the state vector and the orbital elements
-        state_vect_hel, orb_elem, planet_dists = extractSimParams(ps, obj_name, planet_names)
+        state_vect_hel, orb_elem, planet_dists = extractSimParams(ps, obj_name, planet_names, 
+                                                                  reference_frame=reference_frame)
 
         if verbose and (i%25 == 0):
             print(f"{i}: t = {time/(2*np.pi)*365.25:.6f} d, a = {orb_elem.a:10.6f}, e = {orb_elem.e:10.6f}, inc = {np.degrees(orb_elem.inc):10.6f}, Omega = {np.degrees(orb_elem.Omega):10.6f}, omega = {np.degrees(orb_elem.omega):10.6f}, f = {np.degrees(orb_elem.f):10.6f}")
@@ -467,7 +482,8 @@ def reboundSimulate(
             except rb.ParticleNotFound:
                 continue
 
-            state_vect_hel, orb_elem, planet_dists = extractSimParams(ps, mc_name, planet_names)
+            state_vect_hel, orb_elem, planet_dists = extractSimParams(ps, mc_name, planet_names,
+                                                                      reference_frame=reference_frame)
 
             if mc_name not in outputs_mc:
                 outputs_mc[mc_name] = []
@@ -499,6 +515,9 @@ if __name__ == "__main__":
     parser.add_argument("--mc", type=int, help="Run the simulation for the given number of Monte Carlo simulations."
                         "The default is 0", default=0)
     
+    parser.add_argument("--geocentric", action="store_true",
+                        help="Run the simulation in geocentric reference frame. Default is heliocentric.")
+    
     parser.add_argument("--verbose", action="store_true", help="Print out the progress of the simulation.")
 
     args = parser.parse_args()
@@ -512,11 +531,30 @@ if __name__ == "__main__":
     # Load the trajectory data from a pickle file
     traj = loadPickle(*os.path.split(args.pickle_path))
 
+
+    ### Set reference frame settings ###
+    reference_frame = "heliocentric"
+    if args.geocentric:
+        reference_frame = "geocentric"
+        print("Running the simulation in geocentric reference frame.")
+
+    
+    # Set semi-major axis and periapsis units depending on the reference frame
+    a_units = "AU"
+    q_units = "AU"
+    dist_unit_multiplier = 1.0  # Default is AU
+    if reference_frame == "geocentric":
+        a_units = "km"
+        q_units = "km"
+        dist_unit_multiplier = 149597870.7  # Convert AU to km
+
+    ### ###
+
     
     # Run the simulation for the given number of days from the epoch of the trajectory
     sim_outputs, sim_outputs_mc = reboundSimulate(
         None, None, traj=traj, direction=direction, sim_days=sim_days,
-        obj_name=traj.traj_id, mc_runs=args.mc, verbose=args.verbose
+        obj_name=traj.traj_id, mc_runs=args.mc, reference_frame=reference_frame, verbose=args.verbose
         )
 
     # Compute the 95% CI for the orbital elements from the Monte Carlo realizations
@@ -539,7 +577,7 @@ if __name__ == "__main__":
         f_mc = []
 
         for mc_name in sim_outputs_mc:
-            a = sim_outputs_mc[mc_name][-1][2].a
+            a = sim_outputs_mc[mc_name][-1][2].a*dist_unit_multiplier
             e = sim_outputs_mc[mc_name][-1][2].e
             a_mc.append(a)
             e_mc.append(e)
@@ -601,8 +639,8 @@ if __name__ == "__main__":
     print("Orbital elements {:.2f} days from the epoch {:.6f} {:s}".format(sim_days, traj.jdt_ref, direction))
     print("Epoch= {:.6f} JD (TDB)".format(final_epoch_jd))
     print("Epoch= {:s} UTC".format(time_utc.iso))
-    print("a    = {:>10.6f}{:s} AU".format(sim_outputs[-1][2].a, a_ci_str))
-    print("q    = {:>10.6f}{:s} AU".format((1 - sim_outputs[-1][2].e)*sim_outputs[-1][2].a, q_ci_str))
+    print("a    = {:>10.6f}{:s} {:s}".format(sim_outputs[-1][2].a*dist_unit_multiplier, a_ci_str, a_units))
+    print("q    = {:>10.6f}{:s} {:s}".format((1 - sim_outputs[-1][2].e)*sim_outputs[-1][2].a*dist_unit_multiplier, q_ci_str, q_units))
     print("e    = {:>10.6f}{:s}".format(sim_outputs[-1][2].e, e_ci_str))
     print("i    = {:>10.6f}{:s} deg".format(np.degrees(sim_outputs[-1][2].inc), incl_ci_str))
     print("peri = {:>10.6f}{:s} deg".format(np.degrees(sim_outputs[-1][2].Omega), Omega_ci_str))
@@ -615,8 +653,8 @@ if __name__ == "__main__":
 
         # Save the nominal orbital elements and the errors
         f.write("Orbital elements {:.2f} days from the epoch {:.6f} {:s}\n".format(sim_days, traj.jdt_ref, direction))
-        f.write("a    = {:>10.6f}{:s} AU\n".format(sim_outputs[-1][2].a, a_ci_str))
-        f.write("q    = {:>10.6f}{:s} AU\n".format((1 - sim_outputs[-1][2].e)*sim_outputs[-1][2].a, q_ci_str))
+        f.write("a    = {:>10.6f}{:s} {:s}\n".format(sim_outputs[-1][2].a*dist_unit_multiplier, a_ci_str, a_units))
+        f.write("q    = {:>10.6f}{:s} {:s}\n".format((1 - sim_outputs[-1][2].e)*sim_outputs[-1][2].a*dist_unit_multiplier, q_ci_str, q_units))
         f.write("e    = {:>10.6f}{:s}\n".format(sim_outputs[-1][2].e, e_ci_str))
         f.write("i    = {:>10.6f}{:s} deg\n".format(np.degrees(sim_outputs[-1][2].inc), incl_ci_str))
         f.write("peri = {:>10.6f}{:s} deg\n".format(np.degrees(sim_outputs[-1][2].Omega), Omega_ci_str))
@@ -628,15 +666,15 @@ if __name__ == "__main__":
         for i, output in enumerate(sim_outputs):
 
             # Save the orbital elements at the given time
-            f.write(f"t = {output[0]/(2*np.pi)*365.25:.6f} d, a = {output[2].a:10.6f}, e = {output[2].e:10.6f}, i = {np.degrees(output[2].inc):10.6f}, Omega = {np.degrees(output[2].Omega):10.6f}, omega = {np.degrees(output[2].omega):10.6f}, f = {np.degrees(output[2].f):10.6f}\n")
+            f.write(f"t = {output[0]/(2*np.pi)*365.25:.6f} d, a = {output[2].a*dist_unit_multiplier:10.6f}, e = {output[2].e:10.6f}, i = {np.degrees(output[2].inc):10.6f}, Omega = {np.degrees(output[2].Omega):10.6f}, omega = {np.degrees(output[2].omega):10.6f}, f = {np.degrees(output[2].f):10.6f}\n")
 
         # If the MC was run, save orbital elements of individual MC runs
         if len(sim_outputs_mc):
             f.write("\nOrbital elements of individual Monte Carlo runs:\n")
             for mc_name in sim_outputs_mc:
                 f.write(f"{mc_name}:\n")
-                f.write("a    = {:>10.6f} AU\n".format(sim_outputs_mc[mc_name][-1][2].a))
-                f.write("q    = {:>10.6f} AU\n".format((1 - sim_outputs_mc[mc_name][-1][2].e)*sim_outputs_mc[mc_name][-1][2].a))
+                f.write("a    = {:>10.6f} {:s}\n".format(sim_outputs_mc[mc_name][-1][2].a*dist_unit_multiplier, a_units))
+                f.write("q    = {:>10.6f} {:s}\n".format((1 - sim_outputs_mc[mc_name][-1][2].e)*sim_outputs_mc[mc_name][-1][2].a*dist_unit_multiplier, q_units))
                 f.write("e    = {:>10.6f}\n".format(sim_outputs_mc[mc_name][-1][2].e))
                 f.write("i    = {:>10.6f} deg\n".format(np.degrees(sim_outputs_mc[mc_name][-1][2].inc)))
                 f.write("peri = {:>10.6f} deg\n".format(np.degrees(sim_outputs_mc[mc_name][-1][2].Omega)))
@@ -649,7 +687,7 @@ if __name__ == "__main__":
     # Time in days
     t = [x[0]/(2*np.pi)*365.25 for x in sim_outputs]
 
-    a = [x[2].a for x in sim_outputs]
+    a = [x[2].a*dist_unit_multiplier for x in sim_outputs]
     e = [x[2].e for x in sim_outputs]
     incl = [x[2].inc for x in sim_outputs]
     Omega = [x[2].Omega for x in sim_outputs]
@@ -696,7 +734,7 @@ if __name__ == "__main__":
 
 
     # Plot the distance from the Earth
-    axs[0, 2].plot(t, earth_dist)
+    axs[0, 2].plot(t, np.array(earth_dist)*dist_unit_multiplier)
 
     # Mark the exit from the Earth's Hill sphere
     if exit_index is not None:
@@ -738,7 +776,7 @@ if __name__ == "__main__":
     # Plot the MC realizations (all in thin alpha=0.5 lines)
     for mc_name in sim_outputs_mc:
 
-        a_mc = [x[2].a for x in sim_outputs_mc[mc_name]]
+        a_mc = [x[2].a*dist_unit_multiplier for x in sim_outputs_mc[mc_name]]
         e_mc = [x[2].e for x in sim_outputs_mc[mc_name]]
         incl_mc = [x[2].inc for x in sim_outputs_mc[mc_name]]
         Omega_mc = [x[2].Omega for x in sim_outputs_mc[mc_name]]
@@ -752,17 +790,17 @@ if __name__ == "__main__":
         axs[1, 1].plot(t, np.degrees(Omega_mc), alpha=0.5, color='k', lw=0.5)
         axs[2, 0].plot(t, np.degrees(omega_mc), alpha=0.5, color='k', lw=0.5)
         axs[2, 1].plot(t, np.degrees(f_mc), alpha=0.5, color='k', lw=0.5)
-        axs[0, 2].plot(t, earth_dist, alpha=0.5, color='k', lw=0.5)
+        axs[0, 2].plot(t, np.array(earth_dist)*dist_unit_multiplier, alpha=0.5, color='k', lw=0.5)
 
     
     
-    axs[0, 0].set_ylabel("a [AU]")
+    axs[0, 0].set_ylabel("a [{:s}]".format(a_units))
     axs[0, 1].set_ylabel("e")
     axs[1, 0].set_ylabel("i [deg]")
     axs[1, 1].set_ylabel("peri [deg]")
     axs[2, 0].set_ylabel("node [deg]")
     axs[2, 1].set_ylabel("f [deg]")
-    axs[0, 2].set_ylabel("Earth distance [AU]")
+    axs[0, 2].set_ylabel("Earth distance [{:s}]".format(a_units))
 
     for ax in axs.flatten():
         ax.legend()
