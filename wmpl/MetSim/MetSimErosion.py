@@ -456,9 +456,11 @@ def heightCurvature(h0, zc, l, r_earth):
     return np.sqrt((h0 + r_earth)**2 - 2*l*np.cos(zc)*(h0 + r_earth) + l**2) - r_earth
 
 
-def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mass_max, keep_eroding=False,
-    disruption=False):
-    """ Given the parent fragment, fragment it into daughter fragments using a power law mass distribution.
+def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mass_max, 
+                      keep_eroding=False, disruption=False, mass_model='powerlaw'):
+    """ Given the parent fragment, fragment it into daughter fragments using either:
+        - a power law mass distribution - appropriate for fragmentation of rock;
+        - a gamma distribution - appropriate for spraying of droplets (iron meteoroids).
 
     Masses are binned and one daughter fragment may represent several fragments/grains, which is specified 
     with the n_grains atribute.
@@ -475,6 +477,9 @@ def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mas
         keep_eroding: [bool] Whether the daughter fragments should keep eroding.
         disruption: [bool] Indicates that the disruption occured, uses a separate erosion parameter for
             disrupted daughter fragments.
+        mass_model: [bool] Fragment mass distribution model to use. Options: 
+            - 'powerlaw' (default) - a power law mass distribution, appropriate for fragmentation of rock.
+            - 'gamma' - a gamma size distribution, appropriate for spraying of droplets (iron meteoroids).
 
     Return:
         frag_children: [list] A list of Fragment instances - these are the generated daughter fragments.
@@ -484,14 +489,82 @@ def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mas
     # Compute the mass bin coefficient
     mass_bin_coeff = 10**(-1.0/const.erosion_bins_per_10mass)
 
-    # Compute the number of mass bins
+    # Compute the total number of mass bins across the specified mass range
     k = int(1 + math.log10(mass_min/mass_max)/math.log10(mass_bin_coeff))
 
-    # Compute the number of the largest grains
-    if mass_index == 2:
-        n0 = eroded_mass/(mass_max*k)
+    # Use the gamma distribution if specified (e.g. for iron meteoroids which spray droplets)
+    if mass_model == 'gamma':
+
+        # Compute the number of needed bins for the gamma distribution
+        mass_bins = np.array([mass_max*(mass_bin_coeff**i) for i in range(k)])
+        bin_widths = mass_bins*(1 - mass_bin_coeff)        
+
+        # Compute the expected value from the mass power-law distribution 
+        log_range = math.log(mass_max/mass_min)
+
+        # The mass index has been adjusted to compute the peak of the gamma distribution
+        # - For s = 1, the peak mass is the arithmetic mean of the min and max masses.
+        # - For s = 2, the peak mass is the harmonic mean of the min and max masses.
+        # - For other s, the peak mass is computed using the formula below
+        if mass_index == 1.0:
+            
+            # For mass_index = 1, the peak is the arithmetic mean
+            m_mean = (mass_max - mass_min)/log_range
+
+        elif mass_index == 2.0:
+            
+            # For mass_index = 2, the peak is the harmonic mean
+            m_mean = log_range/(1.0/mass_min - 1.0/mass_max)
+
+        else:
+            # For other mass indices, compute the mean using the formula, computing each step separatelly to save time
+            a = 2 - mass_index
+            b = 1 - mass_index
+            m_max_a = mass_max**a
+            m_min_a = mass_min**a
+            m_max_b = mass_max**b
+            m_min_b = mass_min**b
+
+            num = (m_max_a - m_min_a)/a
+            den = (m_max_b - m_min_b)/b
+            m_mean = num/den
+
+        # Convert mean mass to mean diameter using the formula for spherical grains
+        D_mean = (6*m_mean/(math.pi*const.rho_grain))**(1/3)
+        # print(f"Mean mass (kg): {m_mean:.4g}")
+        # print(f"Mean diameter (µm): { D_mean*1e6:.4g}")
+
+        # The gamma function value for 5/3, used in the gamma distribution
+        gamma_5_3 = 0.90274529295093375313996375552960671484470367431640625  # gamma(5/3)
+        s = (D_mean*gamma_5_3)**3
+
+        # Compute the grain diameter and convert it to mass
+        grain_diameter = (6*mass_bins/(math.pi*const.rho_grain))**(1/3)
+
+        # Compute the number of grains in the bin for diameter distribution
+        n_D = (3*grain_diameter **2/s)*np.exp(-grain_diameter **3/s)
+
+        # Compute the derivative of the diameter with respect to mass
+        dD_dm = (1/3)*(6/(math.pi*const.rho_grain))**(1/3)*mass_bins**(-2/3)
+
+        # Compute the number of grains in the bin for unit mass distribution
+        n_m_raw = n_D*np.abs(dD_dm)
+
+        # Compute the mass per bin from the unit mass distribution
+        mass_per_bin_raw = n_m_raw*bin_widths*mass_bins
+
+        # Scale the number of grains in the bin to match the eroded mass
+        scaling = eroded_mass/np.sum(mass_per_bin_raw)
+        n_m_scaled = n_m_raw*scaling
+
+
+    # Use the power-law mass distribution by default
     else:
-        n0 = abs((eroded_mass/mass_max)*(1 - mass_bin_coeff**(2 - mass_index))/(1 - mass_bin_coeff**((2 - mass_index)*k)))
+        # Compute the number of the largest grains
+        if mass_index == 2:
+            n0 = eroded_mass/(mass_max*k)
+        else:
+            n0 = abs((eroded_mass/mass_max)*(1 - mass_bin_coeff**(2 - mass_index))/(1 - mass_bin_coeff**((2 - mass_index)*k)))
 
 
     # Go though every mass bin
@@ -499,15 +572,30 @@ def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mas
     leftover_mass = 0
     for i in range(0, k):
 
-        # Compute the mass of all grains in the bin (per grain)
-        m_grain = mass_max*mass_bin_coeff**i
+        # Gamma size distribution (droplets)
+        if mass_model == 'gamma':
 
-        # Compute the number of grains in the bin
-        n_grains_bin = n0*(mass_max/m_grain)**(mass_index - 1) + leftover_mass/m_grain
-        n_grains_bin_round = int(math.floor(n_grains_bin))
+            # Extract the mass of the grain in the bin
+            m_grain = mass_bins[i]
 
-        # Compute the leftover mass
-        leftover_mass = (n_grains_bin - n_grains_bin_round)*m_grain
+            # Compute the number of grains in the bin
+            n_grains_bin = n_m_scaled[i]*bin_widths[i] + leftover_mass/m_grain
+            n_grains_bin_round = int(math.floor(n_grains_bin)) # int(expected_count)
+
+            # Compute the leftover mass
+            leftover_mass = (n_grains_bin - n_grains_bin_round)*m_grain
+
+        # Power-law mass distribution
+        else:
+            # Compute the mass of all grains in the bin (per grain)
+            m_grain = mass_max*mass_bin_coeff**i
+
+            # Compute the number of grains in the bin
+            n_grains_bin = n0*(mass_max/m_grain)**(mass_index - 1) + leftover_mass/m_grain
+            n_grains_bin_round = int(math.floor(n_grains_bin))
+
+            # Compute the leftover mass
+            leftover_mass = (n_grains_bin - n_grains_bin_round)*m_grain
 
         # If there are any grains to erode, erode them
         if n_grains_bin_round > 0:
