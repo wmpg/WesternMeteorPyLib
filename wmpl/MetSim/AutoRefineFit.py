@@ -20,7 +20,7 @@ from wmpl.Utils.Math import meanAngle
 from wmpl.Utils.Pickling import loadPickle
 
 
-def costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False):
+def costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False, hideplots=False):
     """ Compute the difference between the simulated and the observed meteor. 
     
     Arguments:
@@ -221,14 +221,21 @@ def costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False):
 
         plt.tight_layout()
         ax_mag.legend()
-        plt.show()
+
+        # Show the plot only if hideplots is False
+        if not hideplots:
+            plt.show()
+
+        else:
+            plt.clf()
+            plt.close()
 
 
     return mag_res, len_res, cost
             
 
 
-def residualFun(params, fit_options, traj, met_obs, const, change_update_params):
+def residualFun(params, fit_options, traj, met_obs, const, change_update_params, hideplots=False):
     """ Take the fit parameters and return the value of the cost function. 
     
     Arguments:
@@ -283,7 +290,7 @@ def residualFun(params, fit_options, traj, met_obs, const, change_update_params)
     mag_sigma, len_sigma = fit_options["mag_sigma"], fit_options["len_sigma"]
 
     # Compute the cost function
-    mag_res, len_res, cost = costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False)
+    mag_res, len_res, cost = costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False, hideplots=hideplots)
 
     print("Magnitude residual: {:f}".format(mag_res))
     print("Length residual: {:f}".format(len_res))
@@ -294,7 +301,7 @@ def residualFun(params, fit_options, traj, met_obs, const, change_update_params)
 
 
 
-def autoFit(fit_options, traj, met_obs, const):
+def autoFit(fit_options, traj, met_obs, const, hideplots=False):
     """ Automatically fit the parameters to the observations. """
 
 
@@ -460,7 +467,7 @@ Exiting...
 
     # Run the optimization using Nelder-Mead
     res = scipy.optimize.minimize(residualFun, x0, args=(fit_options, traj, met_obs, const, 
-                                                         change_update_params), 
+                                                         change_update_params, hideplots), 
         method="Nelder-Mead", bounds=bounds)
 
     # Extract the optimized parameters into Constants
@@ -525,30 +532,24 @@ def loadFitOptions(dir_path, file_name):
 
 
 
-if __name__ == "__main__":
+def runAutoRefine(dir_path_main, fit_options_file_main, updated_main=False, hideplots_main=True):
+    """
+    Run the automated fitting of the meteor parameters uing the Refine meteoroid ablation model parameters 
+    using automated optimization. As folows are shown the 4 arguments that are passed to the function:
+      -  dir_path_main = Path to the directory containing the meteor data. The direction has to contain the trajectory pickle file, the simulated parameters .json file, and optionally a METAL .met file with the wide-field lightcurve.
+      -  fit_options_file_main = Name of the file containing the fit options. It is assumed the file is located in the same directory as the meteor data.
+      -  updated_main = Load the updated simulation JSON file that has been refined insted of the original one. Default is False.
+      -  hideplots_main = Don't show generated plots on the screen, just save them to disk. Default is True.
+    """
 
-    import argparse
+    # initlize cml_args
+    class cml_args:
+        pass
 
-
-    #########################
-
-    # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(description="Refine meteoroid ablation model parameters using automated optimization.")
-
-    arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str, \
-        help="Path to the directory containing the meteor data. The direction has to contain the trajectory pickle file, the simulated parameters .json file, and optionally a METAL .met file with the wide-field lightcurve.")
-
-    arg_parser.add_argument("fit_options_file", metavar="FIT_OPTIONS_FILE", type=str, \
-        help="Name of the file containing the fit options. It is assumed the file is located in the same directory as the meteor data.")
-
-    arg_parser.add_argument('--updated', action='store_true', \
-        help="Load the updated simulation JSON file insted of the original one.")
-
-    # Parse the command line arguments
-    cml_args = arg_parser.parse_args()
-
-    #########################
-
+    cml_args.dir_path = dir_path_main
+    cml_args.fit_options_file = fit_options_file_main
+    cml_args.updated = updated_main
+    cml_args.hideplots = hideplots_main
 
     # Check that scipy version is at least 1.7.0 - older versions don't support Nelder-Mead with bounds
     if tuple(map(int, scipy.__version__.split('.'))) < (1, 7, 0):
@@ -749,7 +750,7 @@ if __name__ == "__main__":
     print("Done!")
 
     # Cost function test
-    costFunc(traj, met_obs, sr, fit_options["mag_sigma"], fit_options["len_sigma"], plot_residuals=True)
+    costFunc(traj, met_obs, sr, fit_options["mag_sigma"], fit_options["len_sigma"], plot_residuals=True, hideplots=cml_args.hideplots)
 
 
     # Go though all the fit sets
@@ -766,7 +767,7 @@ if __name__ == "__main__":
             print()
             print("#"*80)
             print("Auto fitting...")
-            const = autoFit(fit_options, traj, met_obs, const)
+            const = autoFit(fit_options, traj, met_obs, const, hideplots=cml_args.hideplots)
             print("Fitting done!")
 
 
@@ -782,7 +783,7 @@ if __name__ == "__main__":
 
 
     # Cost function test
-    costFunc(traj, met_obs, sr, fit_options["mag_sigma"], fit_options["len_sigma"], plot_residuals=True)
+    costFunc(traj, met_obs, sr, fit_options["mag_sigma"], fit_options["len_sigma"], plot_residuals=True, hideplots=cml_args.hideplots)
 
 
 
@@ -859,7 +860,7 @@ if __name__ == "__main__":
 
             mag_filter = obs.absolute_magnitudes < 9
 
-            ax_mag.plot(obs.absolute_magnitudes[mag_filter], obs.model_ht[mag_filter]/1000, marker='x', ms=8, alpha=0.5, label=obs.station_id)
+            ax_mag.plot(obs.absolute_magnitudes[mag_filter], obs.model_ht[mag_filter]/1000, marker='x', markersize=8, alpha=0.5, label=obs.station_id)
 
 
         # Compute the observed lag
@@ -872,12 +873,12 @@ if __name__ == "__main__":
         # obs_ht = obs.model_ht
 
         # Plot the observed lag
-        lag_handle = ax_lag.plot(obs_lag, obs_ht/1000, 'x', ms=8, alpha=0.5, linestyle='dashed', 
+        lag_handle = ax_lag.plot(obs_lag, obs_ht/1000, 'x', alpha=0.5, linestyle='dashed', 
             label=obs.station_id, markersize=10, linewidth=2)
 
 
         # Plot the velocity
-        ax_vel.plot(obs.velocities[1:]/1000, obs_ht[1:]/1000, 'x', ms=8, alpha=0.5, linestyle='dashed', 
+        ax_vel.plot(obs.velocities[1:]/1000, obs_ht[1:]/1000, 'x', alpha=0.5, linestyle='dashed', 
             label=obs.station_id, markersize=10, linewidth=2)
 
         # Update the min/max height
@@ -968,6 +969,43 @@ if __name__ == "__main__":
     plt.tight_layout()
     plt.subplots_adjust(wspace=0.00)
     
-    plt.show()
+    # Show the plot only if hideplots is False
+    if not cml_args.hideplots:
+        plt.show()
+
+    else:
+        plt.clf()
+        plt.close()
 
     ### ###
+
+
+
+if __name__ == "__main__":
+
+    import argparse
+
+
+    #########################
+
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Refine meteoroid ablation model parameters using automated optimization.")
+
+    arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str, \
+        help="Path to the directory containing the meteor data. The direction has to contain the trajectory pickle file, the simulated parameters .json file, and optionally a METAL .met file with the wide-field lightcurve.")
+
+    arg_parser.add_argument("fit_options_file", metavar="FIT_OPTIONS_FILE", type=str, \
+        help="Name of the file containing the fit options. It is assumed the file is located in the same directory as the meteor data.")
+
+    arg_parser.add_argument('--updated', action='store_true', \
+        help="Load the updated simulation JSON file that has been refined insted of the original one.")
+    
+    arg_parser.add_argument('-x', '--hideplots', \
+        help="Do not show generated plots on the screen, just save them to disk.", action="store_true")
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    #########################
+
+    runAutoRefine(cml_args.dir_path, cml_args.fit_options_file, cml_args.updated, cml_args.hideplots)
