@@ -3391,13 +3391,16 @@ class Trajectory(object):
             
             # Generate an initial guess for stations which have no fixed time
             p0 = np.zeros(len([val for val in self.stations_time_dict.values() if val is True]))
+
+            # If all stations are supplied with a time offset value, set them all to zero
+            if len([val for val in self.stations_time_dict.values() if val is True]) == 0:
+                p0 = np.zeros(1)
             
 
             if self.verbose:
                 print('Initial function evaluation:', timingResiduals(p0, observations, 
                                                                       self.stations_time_dict, 
                                                                       weights=weights))
-
 
             # Set bounds for timing to +/- given maximum time offset
             bounds = []
