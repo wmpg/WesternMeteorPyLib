@@ -162,6 +162,8 @@ class Constants(object):
         # Ablation coeff after erosion change
         self.erosion_sigma_change = self.sigma
 
+        # Grain distribution model ('powerlaw' mass or 'gamma' diameters)
+        self.erosion_grain_distribution = 'powerlaw'
 
         # Grain mass distribution index
         self.erosion_mass_index = 2.5
@@ -985,7 +987,7 @@ def ablateAll(fragments, const, compute_wake=False):
 
                 grain_children, const = generateFragments(const, frag, abs(mass_loss_erosion), \
                     frag.erosion_mass_index, frag.erosion_mass_min, frag.erosion_mass_max, \
-                    keep_eroding=False)
+                    keep_eroding=False, mass_model=const.erosion_grain_distribution)
 
                 const.n_active += len(grain_children)
                 frag_children_all += grain_children
@@ -1028,7 +1030,8 @@ def ablateAll(fragments, const, compute_wake=False):
                     # Generate larger fragments, possibly assign them a separate erosion coefficient
                     frag_children, const = generateFragments(const, frag, mass_frag_disruption, \
                         const.disruption_mass_index, disruption_mass_min, disruption_mass_max, \
-                        keep_eroding=const.erosion_on, disruption=True)
+                        keep_eroding=const.erosion_on, disruption=True, 
+                        mass_model=const.erosion_grain_distribution)
 
                     frag_children_all += frag_children
                     const.n_active += len(frag_children)
@@ -1052,7 +1055,7 @@ def ablateAll(fragments, const, compute_wake=False):
                 if mass_grain_disruption > 0:
                     grain_children, const = generateFragments(const, frag, mass_grain_disruption, 
                         frag.erosion_mass_index, frag.erosion_mass_min, frag.erosion_mass_max, \
-                        keep_eroding=False)
+                        keep_eroding=False, mass_model=const.erosion_grain_distribution)
 
                     frag_children_all += grain_children
                     const.n_active += len(grain_children)
@@ -1193,7 +1196,7 @@ def ablateAll(fragments, const, compute_wake=False):
                             # Generate dust grains
                             grain_children, const = generateFragments(const, frag_new, dust_mass, \
                                 frag_entry.mass_index, frag_entry.grain_mass_min, frag_entry.grain_mass_max, \
-                                keep_eroding=False)
+                                keep_eroding=False, mass_model=const.erosion_grain_distribution)
 
                             # Add fragments to the list
                             frag_children_all += grain_children

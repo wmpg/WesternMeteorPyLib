@@ -1083,9 +1083,9 @@
      <property name="geometry">
       <rect>
        <x>220</x>
-       <y>90</y>
+       <y>30</y>
        <width>20</width>
-       <height>121</height>
+       <height>181</height>
       </rect>
      </property>
      <property name="orientation">
@@ -1129,6 +1129,42 @@
      </property>
      <property name="text">
       <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-size:6pt;&quot;&gt;log(m)&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+     </property>
+    </widget>
+    <widget class="QComboBox" name="inputGrainModel">
+     <property name="geometry">
+      <rect>
+       <x>280</x>
+       <y>190</y>
+       <width>101</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <item>
+      <property name="text">
+       <string>powerlaw</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>gamma</string>
+      </property>
+     </item>
+    </widget>
+    <widget class="QLabel" name="label_78">
+     <property name="geometry">
+      <rect>
+       <x>210</x>
+       <y>190</y>
+       <width>59</width>
+       <height>15</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>model</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
      </property>
     </widget>
    </widget>
