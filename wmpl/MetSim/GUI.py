@@ -2988,6 +2988,7 @@ class MetSimGUI(QMainWindow):
         # Update shown grain diameters when the grain mass is updated
         self.inputErosionMassMin.editingFinished.connect(self.updateGrainDiameters)
         self.inputErosionMassMax.editingFinished.connect(self.updateGrainDiameters)
+        self.inputGrainModel.currentIndexChanged.connect(self.updateGrainModel)
 
         # Update the photometric mass when the luminous efficiency is changed
         self.inputLumEff.editingFinished.connect(self.updateInitialMass)
@@ -3237,7 +3238,6 @@ class MetSimGUI(QMainWindow):
         return radiated_energy, photom_mass
 
 
-
     def updateInputBoxes(self, show_previous=False):
         """ Update input boxes with values from the Constants object. """
 
@@ -3306,6 +3306,10 @@ class MetSimGUI(QMainWindow):
         self.inputErosionMassIndex.setText("{:.2f}".format(const.erosion_mass_index))
         self.inputErosionMassMin.setText("{:.2e}".format(const.erosion_mass_min))
         self.inputErosionMassMax.setText("{:.2e}".format(const.erosion_mass_max))
+        
+        # Set the combo box for the grain model
+        self.inputGrainModel.setCurrentIndex(0 if const.erosion_grain_distribution == 'powerlaw' else 1)
+
         self.inputErosionRhoChange.setText("{:d}".format(int(const.erosion_rho_change)))
         self.inputErosionAblationCoeffChange.setText("{:.4f}".format(const.erosion_sigma_change*1e6))
 
@@ -3412,6 +3416,12 @@ class MetSimGUI(QMainWindow):
             + "{:.0f}".format(1e6*grain_diam_max))
 
 
+    def updateGrainModel(self):
+        """ Update the grain model based on the selected option. """
+
+        # Read the grain model
+        self.const.erosion_grain_distribution = 'powerlaw' if self.inputGrainModel.currentIndex() == 0 \
+            else 'gamma'
 
 
     def checkBoxWakeSignal(self, event):
@@ -3466,6 +3476,7 @@ class MetSimGUI(QMainWindow):
         self.inputErosionMassIndex.setDisabled(not self.const.erosion_on)
         self.inputErosionMassMin.setDisabled(not self.const.erosion_on)
         self.inputErosionMassMax.setDisabled(not self.const.erosion_on)
+        self.inputGrainModel.setDisabled(not self.const.erosion_on)
 
         self.checkBoxErosionRhoSignal(None)
         self.checkBoxErosionAblationCoeffSignal(None)
@@ -3676,6 +3687,8 @@ class MetSimGUI(QMainWindow):
         self.const.erosion_mass_min = self._tryReadBox(self.inputErosionMassMin, self.const.erosion_mass_min)
         self.const.erosion_mass_max = self._tryReadBox(self.inputErosionMassMax, self.const.erosion_mass_max)
 
+        # Read the grain model combo box
+        self.updateGrainModel()
 
         # If a different density value after the change of erosion is used, read it
         if self.erosion_different_rho:
