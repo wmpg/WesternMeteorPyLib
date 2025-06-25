@@ -11,7 +11,8 @@ import numpy as np
 
 from wmpl.Formats.GenericFunctions import addSolverOptions, solveTrajectoryGeneric, MeteorObservation, \
     prepareObservations, writeMiligInputFileMeteorObservation
-from wmpl.Utils.TrajConversions import J2000_JD, datetime2JD, altAz2RADec_vect, equatorialCoordPrecession_vect
+from wmpl.Utils.TrajConversions import J2000_JD, datetime2JD, altAz2RADec_vect, \
+    equatorialCoordPrecession_vect, jd2Date
 
 
 
@@ -170,6 +171,150 @@ def loadECSVs(ecsv_paths, no_prepare=False):
         
         # Normalize all observations to the same JD and precess from J2000 to the epoch of date
         return prepareObservations(meteor_list)
+
+
+
+def saveECSV(dir_path, meteor_observations, 
+             network_name='RMS', x_res=None, y_res=None, photom_band=None, img_name=None, calib_stars=None, 
+             fov_mid_azim=None, fov_mid_elev=None, fov_mid_rot_horiz=None, fov_horiz=None, fov_vert=None):
+    """ Save meteor observations to ECSV files. 
+    
+    Arguments:
+        dir_path: [str] Directory path where the ECSV files will be saved.
+        meteor_observations: [list] List of MeteorObservation objects to save.
+
+    Keyword arguments:
+        network_name: [str] Name of the network, used in the ECSV file name and header. "RMS" by default.
+        x_res: [int] Horizontal resolution of the camera in pixels.
+        y_res: [int] Vertical resolution of the camera in pixels.
+        photom_band: [str] Photometric band of the star catalogue, e.g. "B", "V", etc.
+        img_name: [str] Name of the original image or video file, used in the ECSV header.
+        calib_stars: [int] Number of stars used in the astrometric calibration, used in the ECSV header.
+        fov_mid_azim: [float] Azimuth of the centre of the field of view in decimal degrees. North = 0, 
+            increasing to the East.
+        fov_mid_elev: [float] Elevation of the centre of the field of view in decimal degrees. Horizon = 0,
+            Zenith = 90.
+        fov_mid_rot_horiz: [float] Rotation of the field of view from horizontal, decimal degrees. Clockwise 
+            is positive.
+        fov_horiz: [float] Horizontal extent of the field of view in decimal degrees.
+        fov_vert: [float] Vertical extent of the field of view in decimal degrees.
+    
+    """
+
+    for meteor in meteor_observations:
+        
+        # Get the reference datetime
+        dt_ref = jd2Date(meteor.jdt_ref, dt_obj=True)
+
+        isodate_format_file = "%Y-%m-%dT%H_%M_%S"
+        isodate_format_entry = "%Y-%m-%dT%H:%M:%S.%f"
+
+        # Construct the file name
+        # E.g. 2025-06-24T07_55_23_RMS_CA003D.ecsv
+        ecsv_name = f"{dt_ref.strftime(isodate_format_file)}_{network_name}_{meteor.station_id}.ecsv"
+        ecsv_path = os.path.join(dir_path, ecsv_name)
+
+        
+        # Prepare the metadata/header
+        meta_dict = {
+            'obs_latitude': np.degrees(meteor.latitude),   # Decimal signed latitude (-90 S to +90 N)
+            'obs_longitude': np.degrees(meteor.longitude), # Decimal signed longitude (-180 W to +180 E)
+            'obs_elevation': meteor.height,                # Altitude in metres above MSL. Note not WGS84
+            'origin': 'SkyFit2',                           # The software which produced the data file
+            'camera_id': meteor.station_id,                # The code name of the camera, likely to be network-specific
+            'cx' : x_res,                                  # Horizontal camera resolution in pixels
+            'cy' : y_res,                                  # Vertical camera resolution in pixels
+            'photometric_band' : photom_band,              # The photometric band of the star catalogue
+            'image_file' : img_name,                       # The name of the original image or video
+            'isodate_start_obs': str(dt_ref.strftime(isodate_format_entry)), # The date and time of the start of the video or exposure
+            'astrometry_number_stars' : calib_stars,       # The number of stars identified and used in the astrometric calibration
+            'mag_label': 'mag_data',                       # The label of the Magnitude column in the Point Observation data
+            'no_frags': 1,                                 # The number of meteoroid fragments described in this data
+            'obs_az': fov_mid_azim,                        # The azimuth of the centre of the field of view in decimal degrees. North = 0, increasing to the East
+            'obs_ev': fov_mid_elev,                        # The elevation of the centre of the field of view in decimal degrees. Horizon =0, Zenith = 90
+            'obs_rot': fov_mid_rot_horiz,                  # Rotation of the field of view from horizontal, decimal degrees. Clockwise is positive
+            'fov_horiz': fov_horiz,                        # Horizontal extent of the field of view, decimal degrees
+            'fov_vert': fov_vert,                          # Vertical extent of the field of view, decimal degrees
+           }
+
+                # Write the header
+        out_str = """# %ECSV 0.9
+# ---
+# datatype:
+# - {name: datetime, datatype: string}
+# - {name: ra, unit: deg, datatype: float64}
+# - {name: dec, unit: deg, datatype: float64}
+# - {name: azimuth, datatype: float64}
+# - {name: altitude, datatype: float64}
+# - {name: x_image, unit: pix, datatype: float64}
+# - {name: y_image, unit: pix, datatype: float64}
+# - {name: integrated_pixel_value, datatype: int64}
+# - {name: background_pixel_value, datatype: int64}
+# - {name: saturated_pixels, datatype: bool}
+# - {name: mag_data, datatype: float64}
+# - {name: err_minus_mag, datatype: float64}
+# - {name: err_plus_mag, datatype: float64}
+# - {name: snr, datatype: float64}
+# delimiter: ','
+# meta: !!omap
+"""
+        # Add the meta information
+        for key in meta_dict:
+
+            value = meta_dict[key]
+
+            if isinstance(value, str):
+                value_str = "'{:s}'".format(value)
+            else:
+                value_str = str(value)
+
+            out_str += "# - {" + "{:s}: {:s}".format(key, value_str) + "}\n"
+
+        
+        out_str += "# schema: astropy-2.0\n"
+        out_str += "datetime,ra,dec,azimuth,altitude,x_image,y_image,mag_data\n"
+
+
+        # Go though the meteor points
+        for (
+            t_rel, 
+            x_centroid, y_centroid, 
+            azim, alt, ra, dec, 
+            mag
+            ) in zip(
+            meteor.time_data, 
+            meteor.x_data, meteor.y_data, 
+            meteor.azim_data, meteor.elev_data, meteor.ra_data, meteor.dec_data, 
+            meteor.mag_data
+            ):
+
+            # Compute the absolute time
+            frame_time = dt_ref + datetime.timedelta(seconds=t_rel)
+
+
+            # Precess RA/Dec to J2000
+            ra_J2000, dec_J2000 = equatorialCoordPrecession_vect(meteor.jdt_ref, J2000_JD.days, ra, dec)
+
+
+            # Add an entry to the ECSV file
+            entry = [
+                frame_time.strftime(isodate_format_entry),
+                "{:10.6f}".format(np.degrees(ra_J2000)), "{:+10.6f}".format(np.degrees(dec_J2000)),
+                "{:10.6f}".format(np.degrees(azim)), "{:+10.6f}".format(np.degrees(alt)),
+                "{:9.3f}".format(x_centroid), "{:9.3f}".format(y_centroid),
+                "{:+7.2f}".format(mag)
+                ]
+
+            out_str += ",".join(entry) + "\n"
+
+
+        # Write file to disk
+        with open(ecsv_path, 'w') as f:
+            f.write(out_str)
+
+
+        print("ESCV file saved to:", ecsv_path)
+            
 
 
 

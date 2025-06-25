@@ -19,6 +19,7 @@ import numpy as np
 from wmpl.Formats.GenericFunctions import addSolverOptions, solveTrajectoryGeneric, MeteorObservation, \
     prepareObservations
 from wmpl.Formats.RMSJSON import saveJSON
+from wmpl.Formats.ECSV import saveECSV
 from wmpl.Utils.TrajConversions import datetime2JD, raDec2AltAz_vect
 
 
@@ -275,9 +276,13 @@ if __name__ == "__main__":
                                       overwrite_fripon_stations=cml_args.updatestations)
 
 
-    # Save the data as RMS JSON files
-    saveJSON(dir_path, meteor_list)
+    # # Save the data as RMS JSON files
+    # print("Saving data as RMS JSON files...")
+    # saveJSON(dir_path, meteor_list)
 
+    # Save the data as ECSV files
+    print("Saving data as ECSV files...")
+    saveECSV(dir_path, meteor_list, network_name='FRIPON')
 
     # Solve the trajectory
     traj = solveTrajectoryGeneric(jdt_ref, meteor_list, dir_path, solver=cml_args.solver, \
