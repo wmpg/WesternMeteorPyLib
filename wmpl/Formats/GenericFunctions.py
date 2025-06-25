@@ -355,6 +355,9 @@ def writeMiligInputFileMeteorObservation(jdt_ref, meteor_list, file_path, conver
                 # Compute the zenith angle from the elevation angle
                 zangle = np.pi/2 - elev
 
+                # Compute the azimuth as West of due South
+                azim = (azim - np.pi)%(2*np.pi)
+
                 last_pick = 0
 
                 # If this is the last point, last_pick is 9
