@@ -3,7 +3,10 @@
 from __future__ import print_function, absolute_import, division
 
 import os
+import re
 import sys
+from collections import OrderedDict
+
 import numpy as np
 import scipy.stats
 import matplotlib.pyplot as plt
@@ -136,10 +139,10 @@ class MetStruct(object):
             for pick in self.picks[site]:
 
                 # Extract frame number
-                frame = pick[0]
+                # frame = pick['fr']
 
                 # Get pick frame time
-                ts, tu = pick[11], pick[12]
+                ts, tu = pick['ts'], pick['tu']
                 frame_time = ts + tu/(10**6)
 
                 # Calculate mirror positions
@@ -149,8 +152,8 @@ class MetStruct(object):
                 # print 'fr', frame, 'frtime, {:f}'.format(frame_time), 'hx', hx, 'hy', hy
 
                 # Append mirror positions to the pick
-                pick.append(hx)
-                pick.append(hy)
+                pick['hx'] = hx
+                pick['hy'] = hy
 
 
 
@@ -241,24 +244,27 @@ def extractPicks(met, mirfit=False, photom_dict=None):
         if mirfit: 
 
             # Extract frames
-            frames = np.array(met.picks[site])[:,0]
+            frames = np.array([pick['fr'] for pick in met.picks[site]]).astype(int)
 
             # Fragment ID
-            id_data = np.array(met.picks[site])[:,1]
+            id_data = np.array([pick['id'] for pick in met.picks[site]]).astype(int)
 
             # Extract original centroids
-            cx_data, cy_data = np.hsplit(np.array(met.picks[site])[:,2:4], 2)
+            cx_data = np.array([pick['cx'] for pick in met.picks[site]]).astype(np.float64)
+            cy_data = np.array([pick['cy'] for pick in met.picks[site]]).astype(np.float64)
 
             # Extract UNIX time
-            ts_data, tu_data = np.hsplit(np.array(met.picks[site])[:,11:13], 2)
+            ts_data = np.array([pick['ts'] for pick in met.picks[site]]).astype(np.float64)
+            tu_data = np.array([pick['tu'] for pick in met.picks[site]]).astype(np.float64)
             time_data = ts_data + tu_data/1000000
 
             # Extract log sum pixel
-            lsp_data = np.array(met.picks[site])[:,7]
+            lsp_data = np.array([pick['lsp'] for pick in met.picks[site]]).astype(np.float64)
 
 
             # Extract mirror positions on each frame
-            hx_data, hy_data = np.hsplit(np.array(met.picks[site])[:,22:24], 2)
+            hx_data = np.array([pick['hx'] for pick in met.picks[site]]).astype(np.float64)
+            hy_data = np.array([pick['hy'] for pick in met.picks[site]]).astype(np.float64)
 
             # Init theta, phi arrays
             theta = np.zeros_like(cx_data)
@@ -313,20 +319,23 @@ def extractPicks(met, mirfit=False, photom_dict=None):
         else:
 
             # Extract frames
-            frames = np.array(met.picks[site])[:, 2].astype(int)
+            frames = np.array([pick['fr'] for pick in met.picks[site]]).astype(int)
 
             # Extract original centroids
-            cx_data, cy_data = np.hsplit(np.array(met.picks[site])[:, 4:6].astype(np.float64), 2)
+            cx_data = np.array([pick['cx'] for pick in met.picks[site]]).astype(np.float64)
+            cy_data = np.array([pick['cy'] for pick in met.picks[site]]).astype(np.float64)
 
             # Extract UNIX time
-            ts_data, tu_data = np.hsplit(np.array(met.picks[site])[:, 23:25].astype(np.float64), 2)
+            ts_data = np.array([pick['ts'] for pick in met.picks[site]]).astype(np.float64)
+            tu_data = np.array([pick['tu'] for pick in met.picks[site]]).astype(np.float64)
             time_data = ts_data + tu_data/1000000
 
             # Azimuthal coordinates
-            theta, phi = np.hsplit(np.radians(np.array(met.picks[site])[:, 12:14].astype(np.float64)), 2)
+            theta = np.radians(np.array([pick['th'] for pick in met.picks[site]]).astype(np.float64))
+            phi = np.radians(np.array([pick['phi'] for pick in met.picks[site]]).astype(np.float64))
 
             # Apparent magnitudes
-            mag_data = np.array(met.picks[site])[:, 17].astype(float)
+            mag_data = np.array([pick['mag'] for pick in met.picks[site]]).astype(np.float64)
 
 
             # Init a list of picks for this site
@@ -360,6 +369,54 @@ def extractPicks(met, mirfit=False, photom_dict=None):
 
 
 
+def parseMetalLine(metal_line):
+    """
+    Parses a log string with a specific key-value format into a dictionary.
+
+    Args:
+        metal_line (str): The input string to be parsed.
+
+    Returns:
+        dict: A dictionary containing the parsed key-value pairs.
+    """
+
+    # Initialize an empty dictionary to store the results.
+    data = OrderedDict()
+    
+    # Regular expression to find all key-value pairs in the string.
+    # It looks for a word (the key) followed by a value.
+    # The value can be either a single-quoted string or any non-space, non-quote sequence.
+    # The pattern is: (\w+) grabs the key, and the non-capturing group (?:...|...) handles the two types of values.
+    # '([^']*)' captures content within single quotes.
+    # ([^\s']+) captures a value without quotes.
+    pattern = r"(\w+)\s+(?:'([^']*)'|([^\s']+))"
+
+    # Find all matches in the log string. re.findall returns a list of tuples.
+    # Each tuple contains the key, the captured quoted string (or an empty string),
+    # and the captured unquoted value (or an empty string).
+    matches = re.findall(pattern, metal_line)
+
+    # Iterate through the found matches.
+    for key, quoted_value, unquoted_value in matches:
+
+        # Determine which value was captured.
+        value = quoted_value if quoted_value else unquoted_value
+
+        # Try to convert the value to a numerical type (int or float).
+        # If conversion fails, keep the value as a string.
+        try:
+            # First, try to convert to an integer.
+            data[key] = int(value)
+        except (ValueError, TypeError):
+            try:
+                # If int conversion fails, try to convert to a float.
+                data[key] = float(value)
+            except (ValueError, TypeError):
+
+                # If both fail, the value is a string.
+                data[key] = value
+                
+    return data
 
 
 def loadMet(dir_path, file_name, photom_dict=None):
@@ -410,24 +467,27 @@ def loadMet(dir_path, file_name, photom_dict=None):
             if site_prefix in line:
 
                 # Extract the site ID
-                line = line.strip(site_prefix).split()
-                site_id = line[1]
+                line_split = line.strip(site_prefix).split()
+                site_id = line_split[1]
 
                 # If there is no plate for this site, skip it
-                if 'NULL' in line[2]:
+                if 'NULL' in line_split[2]:
                     continue
 
 
                 # Add the site ID to the list of sites
                 sites.append(site_id)
 
-
                 # Extract site geographical coordinates is METAL file was given
                 if not mirfit:
 
-                    met.lat[site_id] = float(line[11])
-                    met.lon[site_id] = float(line[13])
-                    met.elev[site_id] = float(line[15])
+                    # Extract the METAL line into a dictionary
+                    line_data = parseMetalLine(line)
+
+                    # Extract site geographical coordinates
+                    met.lat[site_id] = float(line_data['lat'])
+                    met.lon[site_id] = float(line_data['lon'])
+                    met.elev[site_id] = float(line_data['elv'])
 
 
         met.sites = sites
@@ -561,23 +621,13 @@ def loadMet(dir_path, file_name, photom_dict=None):
                         # Mirfit-style pick
 
                         # Extract pick data
-                        pick_data = line.replace(pick_prefix, '').split()[1::2]
-                        pick_data = list(map(float, pick_data))
-
-                        met.picks[site].append(pick_data)
+                        met.picks[site].append(parseMetalLine(line.replace(pick_prefix, '')))
 
                     else:
 
                         # METAL-style pick
-
-                        # Extract pick data
-                        pick_data = line.replace(pick_prefix, '').split()[0::2]
-
-                        # Check that it is a meteor pick
                         if 'type meteor' in line:
-                            pick_data = list(map(float, pick_data[:29] + pick_data[31:]))
-
-                            met.picks[site].append(pick_data)
+                            met.picks[site].append(parseMetalLine(line.replace("mark ;", '')))
 
 
                 # Check if vid file name
