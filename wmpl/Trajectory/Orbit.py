@@ -636,6 +636,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
     ##########################################################################################################
 
     eci_x, eci_y, eci_z = eci_ref
+    eci_ref = np.array(eci_ref)
 
     # Calculate the geocentric latitude (latitude which considers the Earth as an elipsoid) of the reference 
     # trajectory point
