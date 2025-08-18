@@ -2269,27 +2269,38 @@ if __name__ == "__main__":
         def __init__(self):
 
             # Minimum number of points on the trajectory for the station with the most points
-            self. min_traj_points = 6
+            self.min_traj_points = 6
 
             # Minimum convergence angle (deg)
-            self. min_qc = 5.0
+            self.min_qc = 5.0
 
             # Maximum eccentricity
-            self. max_e = 1.5
+            self.max_e = 1.5
 
             # Maximum radiant error (deg)
-            self. max_radiant_err = 2.0
+            self.max_radiant_err = 2.0
 
             # maximum realistic velocity (km/s)
             self.max_vg = 120.0
 
             # Maximum geocentric velocity error (percent)
-            self. max_vg_err = 10.0
+            self.max_vg_err = 10.0
 
             # Begin/end height filters (km)
-            self. max_begin_ht = 160
-            self. min_end_ht = 20
+            self.max_begin_ht = 160
+            self.min_end_ht = 20
 
+        def __repr__(self):
+            out_str = "Trajectory quality parameters:\n"
+            out_str += "  Minimum trajectory points: {:d}\n".format(self.min_traj_points)
+            out_str += "  Minimum convergence angle: {:.1f} deg\n".format(self.min_qc)
+            out_str += "  Maximum eccentricity: {:.2f}\n".format(self.max_e)
+            out_str += "  Maximum radiant error: {:.2f} deg\n".format(self.max_radiant_err)
+            out_str += "  Maximum geocentric velocity: {:.1f} km/s\n".format(self.max_vg)
+            out_str += "  Maximum geocentric velocity error: {:.1f} percent\n".format(self.max_vg_err)
+            out_str += "  Maximum begin height: {:.1f} km\n".format(self.max_begin_ht)
+            out_str += "  Minimum end height: {:.1f} km\n".format(self.min_end_ht)
+            return out_str
 
     traj_quality_params = TrajQualityParams()
 
@@ -2319,6 +2330,11 @@ if __name__ == "__main__":
     if cml_args.autofreq is not None:
         AUTO_RUN_FREQUENCY = cml_args.autofreq/60
     ### ###
+
+
+    print()
+    print("Trajectory quality parameters:")
+    print(traj_quality_params)
 
 
     # If auto trajectories should run, run in an infinite loop
