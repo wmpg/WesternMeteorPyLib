@@ -117,7 +117,7 @@ The installation might differ on Windows. I recommend installing Anaconda, which
 	conda update anaconda
 	conda create -y --name wmpl python=3.11
 	conda activate wmpl
-	conda install -y -c conda-forge numpy scipy matplotlib cython pytz pyqt pandas
+	conda install -y -c conda-forge numpy scipy matplotlib cython pytz pyqt'<6.0' pandas
 	conda install -y -c conda-forge jplephem ephem
 	conda install -y -c conda-forge watchdog h5py
 	conda install -y -c conda-forge numba
