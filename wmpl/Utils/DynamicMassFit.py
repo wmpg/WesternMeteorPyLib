@@ -270,8 +270,8 @@ if __name__ == "__main__":
         type=float, default=3500)
 
     arg_parser.add_argument('-g', '--ga', metavar='GAMMA_A', \
-        help='The product of the drag coefficient Gamma and the shape coefficient A. Used for computing the dynamic mass. Default is 0.7.', \
-        type=float, default=0.7)
+        help='The product of the drag coefficient Gamma and the shape coefficient A. Used for computing the dynamic mass. Default is 0.55.', \
+        type=float, default=0.55)
 
     arg_parser.add_argument('-e', '--eval', metavar='EVAL_PT', \
         help='Point where to evaluate the dynamic mass (0 = ht_min, 1 = ht_max). Default is 0.5.', \
