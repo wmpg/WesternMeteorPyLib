@@ -2,7 +2,6 @@
 
 
 import pkgutil
-import importlib
 import sys
 
 # Excluded packages
