@@ -2,6 +2,8 @@
 
 
 import pkgutil
+import importlib
+import sys
 
 # Excluded packages
 exclude = ["MetSim.ML", "GUI"]
@@ -32,5 +34,8 @@ for loader, module_name, is_pkg in pkgutil.walk_packages(__path__):
 
 
     __all__.append(module_name)
-    module = loader.find_module(module_name).load_module(module_name)
+    if sys.version_info.major <= 3 and sys.version_info.minor <= 11:
+        module = loader.find_module(module_name).load_module(module_name)
+    else:
+        module = loader.find_spec(module_name).loader.load_module(module_name)
     exec('%s = module' % module_name)
