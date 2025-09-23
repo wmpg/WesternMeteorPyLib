@@ -3966,6 +3966,11 @@ class MetSimGUI(QMainWindow):
             # Filter out NaNs and Infs from magnitude array
             mag_filter = ~np.isnan(sr.abs_magnitude) & ~np.isinf(sr.abs_magnitude)
 
+            # If there are no valid magnitudes, skip the energy computation
+            if np.sum(mag_filter) == 0:
+                self.simRadiatedEnergyLabel.setText("Radiated energy (sim) = ?")
+                return
+
             sim_radiated_energy = calcRadiatedEnergy(sr.time_arr[mag_filter], sr.abs_magnitude[mag_filter], \
                 P_0m=self.const.P_0m)
             sim_radiated_energy_text = "Radiated energy (sim) = {:.2e} J".format(sim_radiated_energy)
