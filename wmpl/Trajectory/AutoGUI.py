@@ -184,6 +184,10 @@ class FileMonitorApp(QMainWindow):
         # Find all .ecsv files at startup and plot their trajectories, ignoring "REJECT" directories
         file_paths, self.file_checksums = self.findEcsvFiles(self.dir_path)
 
+        if not file_paths:
+            print("No .ecsv files found in the given directory.")
+            return None
+
         if file_paths:
             self.computeTrajectory(file_paths)
 
@@ -258,6 +262,11 @@ class FileMonitorApp(QMainWindow):
             if current_time - self.last_update_time >= max_update_rate:
             
                 file_paths, new_checksums = self.findEcsvFiles(self.dir_path)
+
+                # If there are no .ecsv files, skip
+                if not file_paths:
+                    print("No .ecsv files found in the given directory.")
+                    return None
 
                 # Check for changes using checksums
                 unchanged = all(self.file_checksums.get(path) == checksum for path, checksum in new_checksums.items() if path in self.file_checksums)
