@@ -46,7 +46,7 @@ def _set_data_types(dataframe: pd.DataFrame) -> None:
     ].astype("string")
     dataframe["Participating (stations)"] = dataframe[
         "Participating (stations)"
-    ].apply(lambda x: x[1:-1].split(","))
+    ].apply(lambda x: x.strip().split(","))
 
     dataframe.set_index("Unique trajectory (identifier)", inplace=True)
 
@@ -68,10 +68,11 @@ def loadTrajectorySummary(dir_path, file_name):
     meteor_trajectory_df = pd.read_csv(
             file_path,
             engine="python",
-            sep=r"\s*;\s*",
+            sep=";",
+            skipinitialspace=True,
             skiprows=[0, 5, 6],
             header=[0, 1],
-            na_values=["nan", "...", "None"],
+            na_values=["nan", "...", "None"]
         )
 
     def extract_header(text: str) -> str:
@@ -81,6 +82,22 @@ def loadTrajectorySummary(dir_path, file_name):
         lambda h: extract_header(h[0]) + (
             f" ({extract_header(h[1])})" if "Unnamed" not in h[1] else "")
     )
+
+    # Section to create unique sigma column names
+    new_columns = list(meteor_trajectory_df.columns)
+    for i, col in enumerate(new_columns):
+        if col.startswith('+/-'):
+            # Get the name of the previous column (e.g., "RAgeo (deg)")
+            parameter_col_name = new_columns[i-1]
+            
+            # Extract the first word (e.g., "RAgeo")
+            parameter_name = parameter_col_name.split(' ')[0]
+            
+            # Create the new unique name and update it in the list
+            new_columns[i] = f"{parameter_name}_sigma"
+            
+    # Assign the list of unique column names back to the DataFrame
+    meteor_trajectory_df.columns = new_columns
 
     _set_data_types(meteor_trajectory_df)
 
