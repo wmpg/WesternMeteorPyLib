@@ -559,9 +559,11 @@ class RMSDataHandle(object):
         # Create the output directory if it doesn't exist
         mkdirP(self.output_dir)
 
+        # Phase 1 trajectory pickle directory needed to reload previous results.
+        self.phase1_dir = os.path.join(self.output_dir, 'phase1')
+
         # create the directory for phase1 simple trajectories, if needed
         if self.mc_mode > 0:
-            self.phase1_dir = os.path.join(self.output_dir, 'phase1')
             mkdirP(os.path.join(self.phase1_dir, 'processed'))
             self.purgePhase1ProcessedData(os.path.join(self.phase1_dir, 'processed'))
 
