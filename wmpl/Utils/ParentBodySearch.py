@@ -38,7 +38,7 @@ def loadCometsElements(comets_file):
 
     comets_list = []
 
-    with open(comets_file) as f:
+    with open(comets_file, encoding="utf-8", errors="replace") as f:
 
         for k, line in enumerate(f):
 
@@ -65,7 +65,7 @@ def loadAsteroidsElements(asteroids_file):
 
     asteroids_list = []
 
-    with open(asteroids_file) as f:
+    with open(asteroids_file, encoding="utf-8", errors="replace") as f:
 
         for i, line in enumerate(f):
             
@@ -100,7 +100,7 @@ def loadMeteoritesElements(meteorites_file):
 
     meteorites_list = []
 
-    with open(meteorites_file) as f:
+    with open(meteorites_file, encoding="utf-8", errors="replace") as f:
 
         for line in f:
 
