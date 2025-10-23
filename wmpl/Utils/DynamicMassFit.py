@@ -295,13 +295,13 @@ def _robust_linear_fit(x, y, p0=(1.0, 1.0), loss='soft_l1'):
         s_sq = np.sum(r_raw**2) / dof
     else:
         s_sq = 1.0  # fallback to avoid zero-division for tiny datasets
-    pcov = pcov * s_sq
+    pcov = pcov*s_sq
 
     perr = np.sqrt(np.diag(pcov))
     return popt, pcov, perr
 
 
-def fit_velocity(time_data, vel_data, p0=(1.0, 1.0), loss='soft_l1', sigma_clip=5.0):
+def fit_velocity(time_data, vel_data, p0=(1.0, 1.0), loss='soft_l1', sigma_clip=3.0):
     """ Perform a robust velocity fit and iterative outlier rejection.
         Uses robust least-squares (soft L1 loss) both before and after sigma-clipping.
 
@@ -324,13 +324,13 @@ def fit_velocity(time_data, vel_data, p0=(1.0, 1.0), loss='soft_l1', sigma_clip=
     resid = np.asarray(vel_data, dtype=float) - yhat
 
     mad = np.median(np.abs(resid - np.median(resid)))
-    resid_std = 1.4826 * mad if mad > 0 else np.std(resid, ddof=1)
+    resid_std = 1.4826*mad if mad > 0 else np.std(resid, ddof=1)
     if not np.isfinite(resid_std) or resid_std == 0:
         resid_std = np.finfo(float).eps
-    mask = np.abs(resid) < sigma_clip * resid_std
+    mask = np.abs(resid) < sigma_clip*resid_std
 
     print("Outlier rejection: kept {}/{} points.".format(np.count_nonzero(mask), len(mask)))
-    print("Decel std: {:.6f}".format(decel_std))
+    print("Residual std dev: {:.3f}".format(resid_std))
     print(mask)
     print("Residuals:", resid)
 
@@ -379,6 +379,10 @@ if __name__ == "__main__":
     arg_parser.add_argument('-e', '--eval', metavar='EVAL_PT', \
         help='Point where to evaluate the dynamic mass (0 = ht_min, 1 = ht_max). Default is 0.5.', \
         type=float, default=0.5)
+    
+    arg_parser.add_argument('--sigma_clip', metavar='SIGMA_CLIP', \
+        help='Sigma threshold for outlier rejection in the velocity fit. Default is 3.0.', \
+        type=float, default=3.0)
     
     arg_parser.add_argument('--maxvel', metavar='MAX_VEL', \
         help='Maximum velocity in km/s to consider in the height window. Used to remove outliers. No filter by default.', \
@@ -511,19 +515,10 @@ if __name__ == "__main__":
     ax2.scatter(vel_data/1000, time_data, s=5, label="Measurements")
     
 
-
     # Fit a line to the velocity data in the range
-    #vel_fit, vel_fit_cov = scipy.optimize.curve_fit(lineFunc, time_data, vel_data, loss='soft_l1')
-
-    # Example usage consistent with your variable expectations
     popt_robust, pcov_robust, perr_robust = _robust_linear_fit(time_data, vel_data, p0=(1.0, 1.0), loss='soft_l1')
-    vel_fit = popt_robust
-    vel_fit_cov = pcov_robust
-    vel_fit_std = perr_robust
-    decel_std = vel_fit_std[0]
-
     popt_final, pcov_final, perr_final, vel_filter = fit_velocity(
-        time_data, vel_data, p0=vel_fit, loss='soft_l1', sigma_clip=5.0
+        time_data, vel_data, p0=popt_robust, loss='soft_l1', sigma_clip=cml_args.sigma_clip
     )
 
     vel_fit = popt_final
@@ -581,11 +576,11 @@ if __name__ == "__main__":
         decel_hi = 0
 
     # Compute the dynamic mass (and +/- 2 sigma)
-    dyn_mass = dynamicMass(bulk_density, traj.rend_lat, traj.rend_lon, traj.rend_ele, traj.jdt_ref, \
+    dyn_mass = dynamicMass(bulk_density, traj.rend_lat, traj.rend_lon, ht_eval, traj.jdt_ref, \
         vel_eval, decel, gamma=1.0, shape_factor=gamma_a)
-    dyn_mass_hi = dynamicMass(bulk_density, traj.rend_lat, traj.rend_lon, traj.rend_ele, traj.jdt_ref, \
+    dyn_mass_hi = dynamicMass(bulk_density, traj.rend_lat, traj.rend_lon, ht_eval, traj.jdt_ref, \
         vel_eval, decel_lo, gamma=1.0, shape_factor=gamma_a)
-    dyn_mass_lo = dynamicMass(bulk_density, traj.rend_lat, traj.rend_lon, traj.rend_ele, traj.jdt_ref, \
+    dyn_mass_lo = dynamicMass(bulk_density, traj.rend_lat, traj.rend_lon, ht_eval, traj.jdt_ref, \
         vel_eval, decel_hi, gamma=1.0, shape_factor=gamma_a)
     
 
