@@ -2,6 +2,7 @@ import os
 
 import numpy as np
 import scipy.optimize
+import scipy.linalg
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import cm
 
@@ -245,6 +246,108 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
     return sr, sr.frag_main.m, np.degrees(final_lat), np.degrees(final_lon), final_ele/1000
 
 
+
+def _robust_linear_fit(x, y, p0=(1.0, 1.0), loss='soft_l1'):
+    """ Fit a linear model y = m*x + c using robust least-squares optimization.
+        Covariance is estimated via SVD inversion of the Jacobian.
+
+    Arguments:
+        x: [ndarray] Independent variable.
+        y: [ndarray] Dependent variable.
+        p0: [tuple(float, float)] Initial guess for slope and intercept.
+        loss: [str] Loss function for robust fitting (passed to least_squares).
+
+    Return:
+        popt: [ndarray] Optimal parameters [m, c].
+        pcov: [ndarray] 2x2 covariance matrix of the fit.
+        perr: [ndarray] Standard deviations of parameters [sigma_m, sigma_c].
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+
+    def residualFunc(params, xx, yy):
+        m, c = params
+        return yy - lineFunc(xx, m, c)
+
+    res = scipy.optimize.least_squares(
+        residualFunc, p0, args=(x, y), loss=loss, jac='2-point'
+    )
+    if not res.success:
+        raise RuntimeError("least_squares did not find a solution: " + res.message)
+
+    popt = res.x
+    J = res.jac
+
+    U, s, VT = scipy.linalg.svd(J, full_matrices=False)
+    eps = np.finfo(float).eps
+    threshold = eps*max(J.shape)*s[0]
+    good = s > threshold
+    if not np.any(good):
+        raise RuntimeError("Jacobian is rank-deficient; cannot compute covariance.")
+
+    s = s[good]
+    VT = VT[:s.size]
+    pcov = np.dot(VT.T / s**2, VT)
+
+    r_raw = y - lineFunc(x, *popt)
+    dof = max(0, x.size - 2)
+    if dof > 0:
+        s_sq = np.sum(r_raw**2) / dof
+    else:
+        s_sq = 1.0  # fallback to avoid zero-division for tiny datasets
+    pcov = pcov * s_sq
+
+    perr = np.sqrt(np.diag(pcov))
+    return popt, pcov, perr
+
+
+def fit_velocity(time_data, vel_data, p0=(1.0, 1.0), loss='soft_l1', sigma_clip=5.0):
+    """ Perform a robust velocity fit and iterative outlier rejection.
+        Uses robust least-squares (soft L1 loss) both before and after sigma-clipping.
+
+    Arguments:
+        time_data: [ndarray] Time data points.
+        vel_data: [ndarray] Velocity data points.
+        p0: [tuple(float, float)] Initial parameter guess (slope, intercept).
+        loss: [str] Loss function for robust fitting.
+        sigma_clip: [float] Sigma threshold for outlier rejection based on slope uncertainty.
+
+    Return:
+        popt: [ndarray] Final optimal parameters [m, c].
+        pcov: [ndarray] 2x2 covariance matrix of the final fit.
+        perr: [ndarray] Standard deviations of parameters [sigma_m, sigma_c].
+        mask: [ndarray(bool)] Boolean mask of inlier points used in final fit.
+    """
+    popt, pcov, perr = _robust_linear_fit(time_data, vel_data, p0=p0, loss=loss)
+
+    yhat = lineFunc(np.asarray(time_data, dtype=float), *popt)
+    resid = np.asarray(vel_data, dtype=float) - yhat
+
+    mad = np.median(np.abs(resid - np.median(resid)))
+    resid_std = 1.4826 * mad if mad > 0 else np.std(resid, ddof=1)
+    if not np.isfinite(resid_std) or resid_std == 0:
+        resid_std = np.finfo(float).eps
+    mask = np.abs(resid) < sigma_clip * resid_std
+
+    print("Outlier rejection: kept {}/{} points.".format(np.count_nonzero(mask), len(mask)))
+    print("Decel std: {:.6f}".format(decel_std))
+    print(mask)
+    print("Residuals:", resid)
+
+    if np.count_nonzero(mask) < 2:
+        return popt, pcov, perr, np.ones_like(mask, dtype=bool)
+
+    popt2, pcov2, perr2 = _robust_linear_fit(
+        np.asarray(time_data)[mask],
+        np.asarray(vel_data)[mask],
+        p0=popt,
+        loss=loss
+    )
+
+    return popt2, pcov2, perr2, mask
+
+
+
 if __name__ == "__main__":
 
     import argparse
@@ -410,15 +513,31 @@ if __name__ == "__main__":
 
 
     # Fit a line to the velocity data in the range
-    vel_fit, vel_fit_cov = scipy.optimize.curve_fit(lineFunc, time_data, vel_data)
+    #vel_fit, vel_fit_cov = scipy.optimize.curve_fit(lineFunc, time_data, vel_data, loss='soft_l1')
 
-    # Compute the standard deviations of the fit
-    vel_fit_std = np.sqrt(np.diag(vel_fit_cov))
+    # Example usage consistent with your variable expectations
+    popt_robust, pcov_robust, perr_robust = _robust_linear_fit(time_data, vel_data, p0=(1.0, 1.0), loss='soft_l1')
+    vel_fit = popt_robust
+    vel_fit_cov = pcov_robust
+    vel_fit_std = perr_robust
     decel_std = vel_fit_std[0]
 
-    # Remove 5 sigma outliers from the data and re-fit
-    vel_filter = np.abs(vel_data - lineFunc(time_data, *vel_fit)) < 5*decel_std
-    vel_fit, vel_fit_cov = scipy.optimize.curve_fit(lineFunc, time_data[vel_filter], vel_data[vel_filter])
+    popt_final, pcov_final, perr_final, vel_filter = fit_velocity(
+        time_data, vel_data, p0=vel_fit, loss='soft_l1', sigma_clip=5.0
+    )
+
+    vel_fit = popt_final
+    vel_fit_cov = pcov_final
+    vel_fit_std = perr_final
+    decel_std = vel_fit_std[0]
+
+    # Compute the standard deviations of the fit
+    #vel_fit_std = np.sqrt(np.diag(vel_fit_cov))
+    #decel_std = vel_fit_std[0]
+
+    # # Remove 5 sigma outliers from the data and re-fit
+    # vel_filter = np.abs(vel_data - lineFunc(time_data, *vel_fit)) < 5*decel_std
+    # vel_fit, vel_fit_cov = scipy.optimize.curve_fit(lineFunc, time_data[vel_filter], vel_data[vel_filter])
 
     # Plot the selected outliers as an empty red circle
     ax2.scatter(vel_data[~vel_filter]/1000, time_data[~vel_filter], s=20, marker='o', facecolors='none', 
