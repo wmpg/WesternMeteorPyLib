@@ -119,10 +119,7 @@ class Constants(object):
         self.rho_grain = 3000
 
 
-        # Luminous efficiency type
-        #   0 - Constant
-        #   1 - TDB
-        #   2 - TDB ...
+        # Luminous efficiency type (1 - 8, see luminousEfficiency function)
         self.lum_eff_type = 0
 
         # Constant luminous efficiency (percent)
