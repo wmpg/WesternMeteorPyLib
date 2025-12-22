@@ -247,7 +247,7 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
 
 
 
-def _robust_linear_fit(x, y, p0=(1.0, 1.0), loss='soft_l1'):
+def _robust_linear_fit(x, y, p0=(1.0, 1.0), loss='soft_l1', **kwargs):
     """ Fit a linear model y = m*x + c using robust least-squares optimization.
         Covariance is estimated via SVD inversion of the Jacobian.
 
@@ -256,6 +256,7 @@ def _robust_linear_fit(x, y, p0=(1.0, 1.0), loss='soft_l1'):
         y: [ndarray] Dependent variable.
         p0: [tuple(float, float)] Initial guess for slope and intercept.
         loss: [str] Loss function for robust fitting (passed to least_squares).
+        **kwargs: Additional arguments passed to least_squares (e.g. f_scale).
 
     Return:
         popt: [ndarray] Optimal parameters [m, c].
@@ -270,7 +271,7 @@ def _robust_linear_fit(x, y, p0=(1.0, 1.0), loss='soft_l1'):
         return yy - lineFunc(xx, m, c)
 
     res = scipy.optimize.least_squares(
-        residualFunc, p0, args=(x, y), loss=loss, jac='2-point'
+        residualFunc, p0, args=(x, y), loss=loss, jac='2-point', **kwargs
     )
     if not res.success:
         raise RuntimeError("least_squares did not find a solution: " + res.message)
@@ -290,18 +291,24 @@ def _robust_linear_fit(x, y, p0=(1.0, 1.0), loss='soft_l1'):
     pcov = np.dot(VT.T / s**2, VT)
 
     r_raw = y - lineFunc(x, *popt)
-    dof = max(0, x.size - 2)
-    if dof > 0:
-        s_sq = np.sum(r_raw**2) / dof
-    else:
-        s_sq = 1.0  # fallback to avoid zero-division for tiny datasets
+    
+    # Use robust variance estimation (MAD)
+    mad = np.median(np.abs(r_raw - np.median(r_raw)))
+    resid_std = 1.4826*mad if mad > 0 else np.std(r_raw, ddof=1)
+    
+    # Fallback to standard deviation if MAD is zero (e.g. perfect fit)
+    if resid_std == 0:
+        resid_std = np.std(r_raw, ddof=1)
+         
+    s_sq = resid_std**2
     pcov = pcov*s_sq
 
     perr = np.sqrt(np.diag(pcov))
+    
     return popt, pcov, perr
 
 
-def fit_velocity(time_data, vel_data, p0=(1.0, 1.0), loss='soft_l1', sigma_clip=3.0):
+def fitVelocity(time_data, vel_data, p0=(1.0, 1.0), loss='soft_l1', sigma_clip=3.0):
     """ Perform a robust velocity fit and iterative outlier rejection.
         Uses robust least-squares (soft L1 loss) both before and after sigma-clipping.
 
@@ -318,15 +325,20 @@ def fit_velocity(time_data, vel_data, p0=(1.0, 1.0), loss='soft_l1', sigma_clip=
         perr: [ndarray] Standard deviations of parameters [sigma_m, sigma_c].
         mask: [ndarray(bool)] Boolean mask of inlier points used in final fit.
     """
+
+    # Initial robust fit
     popt, pcov, perr = _robust_linear_fit(time_data, vel_data, p0=p0, loss=loss)
 
     yhat = lineFunc(np.asarray(time_data, dtype=float), *popt)
     resid = np.asarray(vel_data, dtype=float) - yhat
 
+    # Compute robust std dev of residuals using MAD
     mad = np.median(np.abs(resid - np.median(resid)))
     resid_std = 1.4826*mad if mad > 0 else np.std(resid, ddof=1)
     if not np.isfinite(resid_std) or resid_std == 0:
         resid_std = np.finfo(float).eps
+
+    # Outlier rejection - Create mask for points within sigma_clip * resid_std
     mask = np.abs(resid) < sigma_clip*resid_std
 
     print("Outlier rejection: kept {}/{} points.".format(np.count_nonzero(mask), len(mask)))
@@ -337,11 +349,13 @@ def fit_velocity(time_data, vel_data, p0=(1.0, 1.0), loss='soft_l1', sigma_clip=
     if np.count_nonzero(mask) < 2:
         return popt, pcov, perr, np.ones_like(mask, dtype=bool)
 
+    # Final robust fit on clipped data
     popt2, pcov2, perr2 = _robust_linear_fit(
         np.asarray(time_data)[mask],
         np.asarray(vel_data)[mask],
         p0=popt,
-        loss=loss
+        loss=loss,
+        f_scale=resid_std
     )
 
     return popt2, pcov2, perr2, mask
@@ -517,7 +531,7 @@ if __name__ == "__main__":
 
     # Fit a line to the velocity data in the range
     popt_robust, pcov_robust, perr_robust = _robust_linear_fit(time_data, vel_data, p0=(1.0, 1.0), loss='soft_l1')
-    popt_final, pcov_final, perr_final, vel_filter = fit_velocity(
+    popt_final, pcov_final, perr_final, vel_filter = fitVelocity(
         time_data, vel_data, p0=popt_robust, loss='soft_l1', sigma_clip=cml_args.sigma_clip
     )
 
