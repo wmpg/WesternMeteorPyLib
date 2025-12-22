@@ -5556,7 +5556,10 @@ class MetSimGUI(QMainWindow):
         self.showCurrentResults()
 
         # Save the latest run parameters
-        self.saveFitParameters(False, suffix="_latest")
+        try:
+            self.saveFitParameters(False, suffix="_latest")
+        except PermissionError:
+            print("Could not save latest fit parameters file! Permission error.")
 
         # Enable the simulation button
         self.runSimButton.setDisabled(False)
