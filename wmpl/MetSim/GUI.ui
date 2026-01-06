@@ -1593,6 +1593,11 @@
        <string>Borovicka et al. (2020)</string>
       </property>
      </item>
+     <item>
+      <property name="text">
+       <string>Pecina &amp; Ceplecha (1983)</string>
+      </property>
+     </item>
     </widget>
    </widget>
    <widget class="MagnitudeMplWidget" name="magnitudePlot" native="true">
@@ -2590,7 +2595,7 @@ LCs</string>
      <x>0</x>
      <y>0</y>
      <width>1910</width>
-     <height>20</height>
+     <height>22</height>
     </rect>
    </property>
   </widget>

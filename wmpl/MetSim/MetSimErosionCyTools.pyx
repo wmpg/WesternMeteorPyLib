@@ -444,6 +444,7 @@ cpdef double luminousEfficiency(int lum_eff_type, double lum_eff, double vel, do
     elif lum_eff_type == 6:
 
         # Correction factor to convert from panchromatic magnitude to fraction definition
+        # Assume a P0M = 1500 W
         correction_factor = 1500*10000000
 
         if vel <= 9300:
@@ -473,6 +474,31 @@ cpdef double luminousEfficiency(int lum_eff_type, double lum_eff, double vel, do
                         )/100.0
         else:
             return exp(-1.4286 + log(vel/1000.0) + 0.347*tanh(0.38*log(mass)))/100.0
+
+    # Pecina & Ceplecha (1983)
+    elif lum_eff_type == 8:
+        
+        # P0M = 1500 W (conversion from panchromatic magnitude) and the 10^7 correction factor
+        # This converts the CGS-based tau into fractions
+        correction_factor = 1500.0*10000000.0
+        
+        # Convert m/s to km/s for the formula
+        v_km_s = vel/1000.0
+        lv = log10(v_km_s)
+        
+        # Equation (40) for v < 25.372 km/s
+        if v_km_s < 25.372:
+            tau = 10**(-12.834 
+                       - 10.307*lv 
+                       + 22.522*lv**2 
+                       - 16.125*lv**3 
+                       + 3.922*lv**4)
+        
+        # Linear log-relation for v >= 25.372 km/s
+        else:
+            tau = 10**(lv - 13.70)
+            
+        return tau*correction_factor
 
 
 
