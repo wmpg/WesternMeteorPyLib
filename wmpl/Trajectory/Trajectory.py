@@ -2544,12 +2544,14 @@ class Trajectory(object):
 
         # Estimating the difference in timing between stations, and the initial velocity if this flag is True
         self.fixed_time_offsets = {}
+        self.fixed_time_offsets_copy = {}
         if isinstance(estimate_timing_vel, str):
 
             # If a list of fixed timing offsets was given, parse it into a dictionary
             for entry in estimate_timing_vel.split(','):
                 station, offset = entry.split(":")
                 self.fixed_time_offsets[station] = float(offset)
+                self.fixed_time_offsets_copy[station] = float(offset)
 
             print("Fixed timing given:", self.fixed_time_offsets)
 
@@ -2568,10 +2570,12 @@ class Trajectory(object):
             if estimate_timing_vel:
 
                 self.fixed_time_offsets = {}
+                self.fixed_time_offsets_copy = {}
 
                 for entry in self.fixed_times.split(','):
                     station, offset = entry.split(":")
                     self.fixed_time_offsets[station] = float(offset)
+                    self.fixed_time_offsets_copy[station] = float(offset)
 
 
         # Running Monte Carlo simulations to estimate uncertainties
@@ -2822,6 +2826,12 @@ class Trajectory(object):
         # Add a fixed offset to time data if given
         if str(station_id) in self.fixed_time_offsets:
             time_data += self.fixed_time_offsets[str(station_id)]
+
+            # Make a copy of the fixed offset values for output display purposes.
+            self.fixed_time_offsets_copy[str(station_id)] = self.fixed_time_offsets[str(station_id)]
+
+            # set the original value to zero as it has already been applied.
+            self.fixed_time_offsets[str(station_id)] = 0
 
         # Skip the observation if all points were ignored
         if ignore_list is not None:
@@ -3360,12 +3370,15 @@ class Trajectory(object):
             # - if the time is fixed, a number is given
             # - if the time is to be estimated, True is set
             self.stations_time_dict = collections.OrderedDict()
+            self.stations_time_dict_copy = collections.OrderedDict()
             station_list = [str(obs.station_id) for obs in observations]
             for obs in observations:
                 if str(obs.station_id) in self.fixed_time_offsets:
                     self.stations_time_dict[str(obs.station_id)] = self.fixed_time_offsets[str(obs.station_id)]
+                    self.stations_time_dict_copy[str(obs.station_id)] = self.fixed_time_offsets_copy[str(obs.station_id)]
                 else:
                     self.stations_time_dict[str(obs.station_id)] = True
+                    self.stations_time_dict_copy[str(obs.station_id)] = True
 
             # If no fixed times are given, set the station with the longest track as the reference station
             #   (time difference = 0)
@@ -3373,17 +3386,21 @@ class Trajectory(object):
                 obs_points = [obs.kmeas for obs in observations]
                 ref_index = obs_points.index(max(obs_points))
                 self.stations_time_dict[station_list[ref_index]] = 0
+                self.stations_time_dict_copy[station_list[ref_index]] = 0
                 
             
             # Generate an initial guess for stations which have no fixed time
             p0 = np.zeros(len([val for val in self.stations_time_dict.values() if val is True]))
+
+            # If all stations are supplied with a time offset value, set them all to zero
+            if len([val for val in self.stations_time_dict.values() if val is True]) == 0:
+                p0 = np.zeros(1)
             
 
             if self.verbose:
                 print('Initial function evaluation:', timingResiduals(p0, observations, 
                                                                       self.stations_time_dict, 
                                                                       weights=weights))
-
 
             # Set bounds for timing to +/- given maximum time offset
             bounds = []
@@ -3462,18 +3479,31 @@ class Trajectory(object):
                 # Check the station timing dictionary to see if the station is fixed
                 stat_status = self.stations_time_dict[str(obs.station_id)]
 
+                # Make a copy of the time offset from the original values stored before they were zeroed.
+                stat_status_copy = self.stations_time_dict_copy[str(obs.station_id)]
+
                 # If the station has a fixed time offset, read it
                 if not isinstance(stat_status, bool):
                     t_diff = stat_status
+                    t_diff_copy = stat_status_copy
+
+                    # Add the final time difference of the site to the list
+                    time_diffs[i] = t_diff_copy
+
+                    if self.verbose:
+                        print('STATION ' + str(obs.station_id) + ' TIME OFFSET = ' + str(t_diff_copy) + ' s (fixed offset applied)')
 
                 # Otherwise read the estimated offset
                 else:
                     t_diff = timing_mini.x[stat_count]
                     stat_count += 1
 
+                    # Add the final time difference of the site to the list
+                    time_diffs[i] = t_diff
 
-                if self.verbose:
-                    print('STATION ' + str(obs.station_id) + ' TIME OFFSET = ' + str(t_diff) + ' s')
+                    if self.verbose:
+                        print('STATION ' + str(obs.station_id) + ' TIME OFFSET = ' + str(t_diff) + ' s')
+
 
                 # Skip NaN and inf time offsets
                 if np.isnan(t_diff) or np.isinf(t_diff):
@@ -3485,9 +3515,6 @@ class Trajectory(object):
                 # Apply the time shift to the excluded time
                 if obs.excluded_time is not None:
                     obs.excluded_time = [ex_time + t_diff for ex_time in obs.excluded_time]
-
-                # Add the final time difference of the site to the list
-                time_diffs[i] = t_diff
 
 
 
