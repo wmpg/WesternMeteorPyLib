@@ -6219,46 +6219,11 @@ if __name__ == "__main__":
 
     #########################
 
-    # os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1" # bool
+    # Enable high DPI scaling
+    os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
+    QApplication.setAttribute(PyQt5.QtCore.Qt.AA_EnableHighDpiScaling, True)
+    QApplication.setAttribute(PyQt5.QtCore.Qt.AA_UseHighDpiPixmaps, True)
 
-
-    ### Compute the window scaling factor for high resolution displays ###
-
-    # Get the screen resolution
-    app = QApplication([])
-    screen = app.primaryScreen()
-    screen_size = screen.size()
-    screen_width = screen_size.width()
-    screen_height = screen_size.height()
-
-    # Only scale the window if the screen resolution is not 1080p
-    if screen_height != 1080:
-
-        # Compute the scaling factor, taking 1080p as the reference resolution (compute the ratio of 
-        # diagonals)
-        # Use the screen height as the reference to avoid issues with very wide screens, and assume that the 
-        # screen size ratio is 1.6 (16:10)
-        screen_width_calc = int(screen_height*1.6)
-        scaling_factor = np.sqrt(screen_width_calc**2 + screen_height**2) / np.sqrt(1920**2 + 1080**2)
-
-        # If the scaling factor is > 1, reduce it by 2% to avoid too large fonts
-        if scaling_factor > 1:
-            scaling_factor *= 0.98
-
-            if scaling_factor < 1:
-                scaling_factor = 1
-
-        os.environ["QT_SCALE_FACTOR"] = str(scaling_factor)
-
-    else:    
-        scaling_factor = 1
-
-    # Destroy the QApplication object
-    app.quit()
-    del app
-
-    ### ###
-    
 
     # Init PyQt5 window
     app = QApplication([])
@@ -6266,7 +6231,7 @@ if __name__ == "__main__":
     # Set a font for the whole application
     font = QFont()
     font.setFamily("Arial")
-    font.setPointSize(int(np.ceil(8/scaling_factor)))
+    font.setPointSize(8)
     app.setFont(font)
 
     
