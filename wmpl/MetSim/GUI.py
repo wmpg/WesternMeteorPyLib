@@ -4667,7 +4667,7 @@ class MetSimGUI(QMainWindow):
             if line_handle is not None:
                 try:
                     line_handle.remove()
-                except ValueError:
+                except (ValueError, NotImplementedError):
                     pass
 
 
@@ -4694,7 +4694,7 @@ class MetSimGUI(QMainWindow):
                 if label_handle is not None:
                     try:
                         label_handle.remove()
-                    except ValueError:
+                    except (ValueError, NotImplementedError):
                         pass
 
                 # Draw the wake line label
