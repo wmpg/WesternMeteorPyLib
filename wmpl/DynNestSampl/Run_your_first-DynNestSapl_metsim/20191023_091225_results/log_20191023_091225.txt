@@ -52,6 +52,6 @@ erosion_mass_max:	9.789655966394682e-08
 noise_lag:	10.90227261371072
 noise_lum:	6.703580952166081
 
-Best fit logL: -181.06860874927605
+Best fit logL: -181.06860874927605 
 
 Time to run dynesty: 7:48:28.781154
