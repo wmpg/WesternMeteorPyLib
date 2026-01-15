@@ -1,0 +1,35 @@
+# MetSim fragmentation file priors.
+# Any of the parameter can be given a range if not given a range and is a REQUIRED value it will be fix
+# you can give a range of min and max give range with a normal distribution or invgamma or a log distribution
+# usefull for parameters that vary multiple order of magnitudes as expalin in the .prior file
+# Types of entries:
+#   - M    - Main fragment - parameter change.
+#           - REQUIRED: height. 
+#           - Possible: sigma, erosion_coeff, grain_mass_min, grain_mass_max, mass_index.
+#   - A    - All fragments - parameter change.
+#           - REQUIRED: height.
+#           - Possible: sigma, gamma.
+#   - F    - New single-body fragment - parameter change.
+#           - REQUIRED: height, number, mass_percent. 
+#           - Possible: sigma.
+#   - EF   - New eroding fragment. A mass index of 2.0 will be assumed if not given.
+#           - REQUIRED: height, number, mass_percent, erosion_coeff, grain_mass_min, grain_mass_max.
+#           - Possible: sigma, mass_index.
+#   - D    - Dust release. Only the grain mass range needs to be specified. A mass index of 2.0 will be assumed if not given.
+#           - REQUIRED: height, mass_percent, grain_mass_min, grain_mass_max.
+#           - Possible: mass_index.
+# (if nan the value will be : height= try to find possible flare onset range if fix first frame, 
+#   number=from a single fragment to 3 if fix 1, mass_percent=percent mass loss 10% to 100% or if fix 10%, 
+#	gamma=from 0.4 to 2.4 or if fix 1.2, mass_index,sigma,erosion_coeff,grain_mass_min,grain_mass_max= take the rage 
+#   from priors or if fix take the same value of the current simulation or if not in bound take defaul value)
+# Define the type of entry e.g - M or - A (can be multiple one after an other) in the next line define name and ranges:
+# name var, min, max, options
+- EF
+height,h_end,h_beg-(h_beg-h_end)/2
+mass_percent,100,fix
+number,1,fix
+sigma,0.001/1e6,0.05/1e6
+erosion_coeff,0.0,1e-6,log
+grain_mass_min,5e-12,1e-9,log
+grain_mass_max,1e-10,1e-7,log
+mass_index,1,3

@@ -1,0 +1,34 @@
+# Each line represents a (min, max) tuple
+# you can input expression and numpy functions (e.g. np.pi)
+# without options it consider by default a uniform distribution with min and max value
+# options:
+# - nan     : set it to default values or estimate the most likely for v_init,zenith_angle,m_init,erosion_height_start (default norm sigma only for v_init 500 and zenith_angle 0.01)
+# - norm    : considers instead of uniform distribution a normal distribution and substitutes min and max with mean and sigma, good for velocity or zenith angle
+# - invgamma: considers instead of uniform distribution a inverse gamma distribution that peak around the mode and have a long trail so it substitutes min and max with alpha and mode, good for noise uncertanty
+# - log     : cosider the log10 of the range given consider it for priors that extend for multiple order of magnitude (if 0.0 is set to 1e-12)
+# - fix     : fix the value to the first value given so it is not estimated by dynesty, the assumend noise in lag (noise_lag) for EMCCD is 40 m and CAMO is 5 m while for both in luminosity (noise_lum) is 2.5 J/s
+# You can also reference observation-based helper variables in expressions:
+# h_beg (begin height, default=max(height)), h_end (end height, default=min(height)), h_peak (peak luminosity height),
+# plus v_0/m_0/zc_0 (initial speed/mass/zenith-angle guesses) and n_lag0/n_lum0 (initial noise guesses for lag/lum)
+# what is writen after '#' is ignored
+# name var, min/sigma/alpha, max/mean/mode, options
+
+v_init,500,v_0,norm   		 	    												# v_init [m/s] (gausian distribution)
+zenith_angle,zc_0,fix 	            											  	# zenith_angle [rad] (fix by default)
+lum_eff_type,7,fix 	                    											# lum eff efficiency type Borovicka et Al. (2020) (fix by default)
+m_init, 10**(np.floor(np.log10(m_0)-1)), 2*10**(np.floor(np.log10(m_0)+1))			# m_init [kg]
+rho,100,4000                     													# rho [kg/m^3]
+sigma,0.001/1e6,0.05/1e6          													# sigma [kg/J]
+erosion_height_start,h_beg-100-(h_beg - h_peak)/2,h_beg + 100+(h_beg - h_peak)/2    # erosion_height_start [m]
+erosion_coeff,0.0,1e-6,log          												# erosion_coeff [kg/J] (np.log10 applied)
+erosion_mass_index,1,3          													# erosion_mass_index [-]
+erosion_mass_min,5e-12,1e-9,log     												# erosion_mass_min [kg] (np.log10 applied)
+erosion_mass_max,1e-10,1e-7,log     												# erosion_mass_max [kg] (np.log10 applied)
+disruption_on,True,fix																# activate distruption
+compressive_strength,0.1,100000,log     											# compressive strength [Pa] (np.log10 applied)
+disruption_mass_index,1,3               											# mass index [-]
+disruption_mass_min_ratio,0.00001,0.5,log   										# Ratio of smallest disrupted grains / total mass at disruption [-] (np.log10 applied)
+disruption_mass_max_ratio,0.00001,0.5,log   										# Ratio of largest disrupted grains / total mass at disruption [-] (np.log10 applied)
+disruption_mass_grain_ratio,0,1    													# Ratio of total mass at disruption which go into the smallest grains [-]
+noise_lag,10,n_lag0,invgamma           												# noise_lag [m] (inverse gamma distribution)
+noise_lum,5,n_lum0,invgamma            												# noise_lum [J/s] (inverse gamma distribution)
