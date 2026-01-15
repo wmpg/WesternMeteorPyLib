@@ -7,8 +7,7 @@ Author: Maximilian Vovk
 Date: 2025-02-25
 """
 
-import numpy as np
-import pandas as pd
+
 import pickle
 import gzip
 import sys
@@ -16,32 +15,46 @@ import json, base64
 import os
 import io
 import copy
-import matplotlib.pyplot as plt
-import dynesty
-from dynesty import plotting as dyplot
-from dynesty.utils import quantile as _quantile
-from scipy.ndimage import gaussian_filter as norm_kde
+import shutil
 import time
-from matplotlib.ticker import ScalarFormatter
-import scipy
 import warnings
 import datetime
 import re
-import matplotlib.gridspec as gridspec
-from scipy.optimize import minimize,curve_fit
-from scipy.stats import norm, invgamma
-import shutil
-import matplotlib.ticker as ticker
-import matplotlib.gridspec as gridspec
-from matplotlib.patches import Patch
 import multiprocessing
 import math
-import matplotlib.cm as cm
-import multiprocessing as mp
+import signal
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from matplotlib.ticker import MaxNLocator
+
+
+import numpy as np
+import pandas as pd
+import scipy
+from scipy.ndimage import gaussian_filter as norm_kde
+from scipy.optimize import minimize,curve_fit
+from scipy.stats import norm, invgamma
+# Import the correct scipy.integrate.simpson function
+try:
+    from scipy.integrate import simps as simpson
+except ImportError:
+    from scipy.integrate import simpson as simpson
+
+import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
+import matplotlib.cm as cm
+from matplotlib.ticker import MaxNLocator, ScalarFormatter, FormatStrFormatter
 from matplotlib.colors import Normalize
+import matplotlib.gridspec as gridspec
+
+try:
+    import dynesty
+    from dynesty import plotting as dyplot
+    from dynesty.utils import quantile as _quantile
+    DYNESTY_FOUND = True
+except ImportError:
+    print("Dynesty package not found. Install dynesty to use the Dynesty functions.")
+    DYNESTY_FOUND = False
+
 from wmpl.MetSim.GUI import loadConstants, SimulationResults, FragmentationEntry, saveConstants
 from wmpl.MetSim.MetSimErosion import runSimulation, Constants, zenithAngleAtSimulationBegin
 from wmpl.Utils.Math import lineFunc, mergeClosePoints, meanAngle
@@ -52,13 +65,6 @@ from wmpl.Utils.AtmosphereDensity import fitAtmPoly
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.MetSim.MetSimErosionCyTools import luminousEfficiency
 
-# Import the correct scipy.integrate.simpson function
-try:
-    from scipy.integrate import simps as simpson
-except ImportError:
-    from scipy.integrate import simpson as simpson
-
-import signal
 
 class TimeoutException(Exception):
     """Custom exception for timeouts."""
@@ -67,13 +73,15 @@ class TimeoutException(Exception):
 def timeout_handler(signum, frame):
     raise TimeoutException("Function execution timed out")
 
-# create a txt file where you save averithing that has been printed
+# create a txt file where you save everything that has been printed
 class Logger(object):
     def __init__(self, directory=".", filename="log.txt"):
         self.terminal = sys.stdout
+
         # Ensure the directory exists
         if not os.path.exists(directory):
             os.makedirs(directory)
+
         # Combine the directory and filename to create the full path
         filepath = os.path.join(directory, filename)
         self.log = open(filepath, "a")
@@ -91,7 +99,7 @@ class Logger(object):
         self.log.close()
 
 
-def json_default(o):
+def jsonDefault(o):
     # numpy arrays -> lists
     if isinstance(o, np.ndarray):
         return o.tolist()
@@ -112,17 +120,23 @@ def json_default(o):
     return str(o)
 
 
-# 100^((m-6.96)/5) =(114007.25/100000)^2
-# math.log((114007.25/100000)^2, 100)*5+6.96
-def meteor_abs_magnitude_to_apparent(abs_mag, distance):
-    apparent_mag = []
-    # check if it is an array
-    if isinstance(abs_mag, np.ndarray):
-        for ii in range(len(abs_mag)):
-            apparent_mag.append(math.log((distance[ii]/100000)**2, 100)*5+abs_mag[ii])
-    else: 
-        apparent_mag = math.log((distance/100000)**2, 100)*5+abs_mag
-    return apparent_mag
+
+def meteorAbsMagnitudeToApparent(abs_mag, distance):
+    """ Calculate apparent magnitude from absolute magnitude and distance.
+
+    Either a single set of values can be given (i.e. every argument is a float number), or all arguments 
+    must be numpy arrays.
+        
+    Arguments:
+        abs_mag: [float or ndarray] Absolute magnitude of the meteor.
+        distance: [float or ndarray] Distance to the meteor (meters).
+
+    Return:
+        apparent_mag: [float or ndarray] Apparent magnitude.
+
+    """
+    
+    return 5*np.log10(distance/100000) + abs_mag
 
 
 def _prep_unique_sorted(x, y):
@@ -132,7 +146,7 @@ def _prep_unique_sorted(x, y):
     _, ui = np.unique(x, return_index=True)
     return x[ui], y[ui]
 
-def build_global_time_axis(
+def buildGlobalTimeAxis(
     data,
     height_key="height",
     time_key="time",
@@ -142,11 +156,28 @@ def build_global_time_axis(
     v_init=None,             # if given, recompute lag = length - v_init*time
     min_overlap_pts=8,
     offset_tol=2e-3,):
-    """
-    Align station clocks to the station that starts at the highest altitude.
+    """ Align station clocks to the station that starts at the highest altitude.
+
     If length exists, also align length and re-zero it at the same global start.
     If v_init is provided and length exists, recompute lag from (length,time).
-    Returns (out, did_align).
+
+    Arguments:
+        data: [dict] Dictionary containing the observation data (height, time, station, etc.).
+
+    Keyword arguments:
+        height_key: [str] Key for height data. "height" by default.
+        time_key: [str] Key for time data. "time" by default.
+        station_key: [str] Key for station identifiers. "flag_station" by default.
+        length_key: [str] Key for length data. "length" by default.
+        lag_key: [str] Key for lag data. "lag" by default.
+        v_init: [float] Initial velocity. If provided, lag is recomputed. None by default.
+        min_overlap_pts: [int] Minimum number of overlapping points required for alignment. 8 by default.
+        offset_tol: [float] Offset tolerance for time alignment. 2e-3 by default.
+
+    Return:
+        out: [dict] Updated data dictionary with aligned time (and optionally length/lag).
+        did_align: [bool] True if alignment was performed.
+
     """
     out = {k: np.asarray(v) for k, v in data.items()}
     h = out[height_key].astype(float)
@@ -158,14 +189,6 @@ def build_global_time_axis(
         # sort by time + set t0 at first finite
         idx = np.argsort(t)
         out = {k: np.asarray(v)[idx] for k, v in out.items()}
-        # finite = np.isfinite(out[time_key])
-        # if np.any(finite):
-        #     out[time_key] = out[time_key] - out[time_key][np.flatnonzero(finite)[0]]
-        # # also re-zero length/lag at same first point if present
-        # if length_key in out:
-        #     out[length_key] = out[length_key] - out[length_key][np.flatnonzero(finite)[0]]
-        # if lag_key in out:
-        #     out[lag_key] = out[lag_key] - out[lag_key][np.flatnonzero(finite)[0]]
         return out, False
 
     # Reference station = highest max height
@@ -248,7 +271,7 @@ def build_global_time_axis(
 
         # Recompute lag consistently if possible
         if has_length and (v_init is not None):
-            out[lag_key] = out[length_key] - (float(v_init) * out[time_key])
+            out[lag_key] = out[length_key] - (float(v_init)*out[time_key])
         elif lag_key in out:
             # at least re-zero lag at the same global start
             lag0 = out[lag_key][ref_mask][idx_ref_top]
@@ -272,16 +295,33 @@ def build_global_time_axis(
 # Function: plotting function
 ###############################################################################
 
-def plot_json_data_vs_obs(obs_data,out_folder,best_noise_lum=0,best_noise_lag=0):
-    ''' Plot data from json files in the output folder 
-    the real LogL is computed with the best noise levels if provided
-    Initially is defined as guess'''
+def plotJSONDataVsObs(obs_data, out_folder, best_noise_lum=0, best_noise_lag=0):
+    """ Plot data from json files in the output folder against observations.
+    
+    The real LogL is computed with the best noise levels if provided. Initially is defined as guess.
+
+    Arguments:
+        obs_data: [object] Object containing the observational data.
+        out_folder: [str] Path to the output folder.
+
+    Keyword arguments:
+        best_noise_lum: [float] Best noise level for luminosity. 0 by default.
+        best_noise_lag: [float] Best noise level for lag. 0 by default.
+
+    Return:
+        None
+
+    """
+
     # check if there are json files in the output folder that could be plotted
     json_files = [f for f in os.listdir(out_folder) if f.endswith('.json')]
+
     # delete any json file that start with obs_data_
     json_files = [f for f in json_files if not f.startswith('obs_data_')]
+
     # delete any json file that ends with _with_noise.json
     json_files = [f for f in json_files if not f.endswith('_with_noise.json')]
+    
     for const_json_name in json_files:
         print(f"Plotting simulation from json file: {const_json_name}")
         # create the full path to the json file
@@ -296,7 +336,7 @@ def plot_json_data_vs_obs(obs_data,out_folder,best_noise_lum=0,best_noise_lag=0)
             # delete the .json from the name:
             json_name = const_json_name[:-5]
 
-            # create a fake guess_real dictionary to run log_likelihood_dynesty
+            # create a fake guess_real dictionary to run logLikelihoodDynesty
             fixed_values_manual = {}   
             for key in const_manual.__dict__.keys():
                 # put all the keys in fixed_values_manual
@@ -314,29 +354,44 @@ def plot_json_data_vs_obs(obs_data,out_folder,best_noise_lum=0,best_noise_lag=0)
                 flags_dict_manual["noise_lag"] = ["invgamma"]
             
             # compute log likelihood between obs_data and simulation_manual_MetSim_object
-            manual_logL = log_likelihood_dynesty(guess_manual, obs_data, flags_dict_manual, fixed_values_manual, timeout=20)
+            manual_logL = logLikelihoodDynesty(guess_manual, obs_data, flags_dict_manual, fixed_values_manual, timeout=20)
             # run the simulation with the same parameters and same proecess as in run_simulation
             var_names_manual = list(flags_dict_manual.keys())
-            simulation_manual_MetSim_object = run_simulation(guess_manual, obs_data, var_names_manual, fixed_values_manual)
+            simulation_manual_MetSim_object = runSimulation(guess_manual, obs_data, var_names_manual, fixed_values_manual)
             if best_noise_lum!=0 and best_noise_lag!=0:
                 print(f"{json_name} real LogL = {manual_logL:.1f}")
                 # Plot the data with residuals and the best fit
-                plot_data_with_residuals_and_real(obs_data, simulation_manual_MetSim_object, json_plots_folder, json_name, color_sim='slategray', label_sim=f'LogL={manual_logL:.1f}')
-                plot_all_vs_height(obs_data, simulation_manual_MetSim_object, json_plots_folder, json_name, color_sim='slategray', label_sim=f'LogL={manual_logL:.1f}')
+                plotSimVsObsResiduals(obs_data, simulation_manual_MetSim_object, json_plots_folder, json_name, color_sim='slategray', label_sim=f'LogL={manual_logL:.1f}')
+                plotObsVsHeight(obs_data, simulation_manual_MetSim_object, json_plots_folder, json_name, color_sim='slategray', label_sim=f'LogL={manual_logL:.1f}')
 
             else:
                 print(f"{json_name} intial guess LogL ~ {manual_logL:.1f}")
                 # Plot the data with residuals and the best fit
-                plot_data_with_residuals_and_real(obs_data, simulation_manual_MetSim_object, json_plots_folder, json_name, color_sim='slategray', label_sim=f'LogL$\\approx${manual_logL:.1f}')
-                plot_all_vs_height(obs_data, simulation_manual_MetSim_object, json_plots_folder, json_name, color_sim='slategray', label_sim=f'LogL$\\approx${manual_logL:.1f}')
+                plotSimVsObsResiduals(obs_data, simulation_manual_MetSim_object, json_plots_folder, json_name, color_sim='slategray', label_sim=f'LogL$\\approx${manual_logL:.1f}')
+                plotObsVsHeight(obs_data, simulation_manual_MetSim_object, json_plots_folder, json_name, color_sim='slategray', label_sim=f'LogL$\\approx${manual_logL:.1f}')
 
         except Exception as e:
             print(f"Error encountered loading json file {const_json_file}: {e}")
 
 
 # Plotting function
-def plot_data_with_residuals_and_real(obs_data, sim_data=None, output_folder='',file_name='', color_sim='black', label_sim='Best Fit'):
-    ''' Plot the data with residuals and real data '''
+def plotSimVsObsResiduals(obs_data, sim_data=None, output_folder='', file_name='', color_sim='black', label_sim='Best Fit'):
+    """ Plot the observations vs simulation data with residuals.
+
+    Arguments:
+        obs_data: [object] Object containing the observational data.
+
+    Keyword arguments:
+        sim_data: [object] Object containing the simulation data. None by default.
+        output_folder: [str] Path to the output folder. Empty string by default.
+        file_name: [str] Name of the file. Empty string by default.
+        color_sim: [str] Color for the simulation plot. 'black' by default.
+        label_sim: [str] Label for the simulation plot. 'Best Fit' by default.
+
+    Return:
+        None
+
+    """
 
     # Create the figure and main GridSpec with specified height ratios
     fig = plt.figure(figsize=(14, 6))
@@ -400,7 +455,7 @@ def plot_data_with_residuals_and_real(obs_data, sim_data=None, output_folder='',
     
 
     ax1.fill_betweenx([np.min(obs_data.height_lum)/1000,np.max(obs_data.height_lum)/1000], -obs_data.noise_mag, obs_data.noise_mag, color='darkgray', alpha=0.2)
-    ax1.fill_betweenx([np.min(obs_data.height_lum)/1000,np.max(obs_data.height_lum)/1000], -obs_data.noise_mag * 2, obs_data.noise_mag * 2, color='lightgray', alpha=0.2)
+    ax1.fill_betweenx([np.min(obs_data.height_lum)/1000,np.max(obs_data.height_lum)/1000], -obs_data.noise_mag*2, obs_data.noise_mag*2, color='lightgray', alpha=0.2)
     ax1.plot([0, 0], [np.min(obs_data.height_lum)/1000,np.max(obs_data.height_lum)/1000],color='lightgray')
     ax1.set_xlabel('Res.Mag')
     # flip the x-axis
@@ -446,7 +501,7 @@ def plot_data_with_residuals_and_real(obs_data, sim_data=None, output_folder='',
     ax4.set_ylim(ylim_lum)
 
     ax5.fill_betweenx([np.min(obs_data.height_lum)/1000,np.max(obs_data.height_lum)/1000], -obs_data.noise_lum, obs_data.noise_lum, color='darkgray', alpha=0.2)
-    ax5.fill_betweenx([np.min(obs_data.height_lum)/1000,np.max(obs_data.height_lum)/1000], -obs_data.noise_lum * 2, obs_data.noise_lum * 2, color='lightgray', alpha=0.2)
+    ax5.fill_betweenx([np.min(obs_data.height_lum)/1000,np.max(obs_data.height_lum)/1000], -obs_data.noise_lum*2, obs_data.noise_lum*2, color='lightgray', alpha=0.2)
     ax5.plot([0, 0], [np.min(obs_data.height_lum)/1000,np.max(obs_data.height_lum)/1000],color='lightgray')
     ax5.set_xlabel('Res.Lum [J/s]')
     # ax5.tick_params(axis='x', rotation=45)
@@ -494,7 +549,7 @@ def plot_data_with_residuals_and_real(obs_data, sim_data=None, output_folder='',
             second_last_index = min(second_last_index, np.argsort(station_time)[1])
     # Plot 6: Res.Vel vs. Time
     ax6.fill_between([obs_data.time_lag[second_last_index], np.max(obs_data.time_lag)], -obs_data.noise_vel/1000, obs_data.noise_vel/1000, color='darkgray', alpha=0.2)
-    ax6.fill_between([obs_data.time_lag[second_last_index], np.max(obs_data.time_lag)], -obs_data.noise_vel * 2/1000, obs_data.noise_vel * 2/1000, color='lightgray', alpha=0.2)
+    ax6.fill_between([obs_data.time_lag[second_last_index], np.max(obs_data.time_lag)], -obs_data.noise_vel*2/1000, obs_data.noise_vel*2/1000, color='lightgray', alpha=0.2)
     ax6.plot([obs_data.time_lag[second_last_index], np.max(obs_data.time_lag)], [0, 0], color='lightgray')
     ax6.set_xlabel('Time [s]')
     ax6.set_ylabel('Res.Vel [km/s]')
@@ -530,7 +585,7 @@ def plot_data_with_residuals_and_real(obs_data, sim_data=None, output_folder='',
 
     # Plot 7: Res.Vel vs. Time
     ax7.fill_between([np.min(obs_data.time_lag), np.max(obs_data.time_lag)], -obs_data.noise_lag, obs_data.noise_lag, color='darkgray', alpha=0.2)
-    ax7.fill_between([np.min(obs_data.time_lag), np.max(obs_data.time_lag)], -obs_data.noise_lag * 2, obs_data.noise_lag * 2, color='lightgray', alpha=0.2)
+    ax7.fill_between([np.min(obs_data.time_lag), np.max(obs_data.time_lag)], -obs_data.noise_lag*2, obs_data.noise_lag*2, color='lightgray', alpha=0.2)
     ax7.plot([np.min(obs_data.time_lag), np.max(obs_data.time_lag)], [0, 0], color='lightgray')
     ax7.set_xlabel('Time [s]')
     ax7.set_ylabel('Res.Lag [m]')
@@ -623,7 +678,7 @@ def plot_data_with_residuals_and_real(obs_data, sim_data=None, output_folder='',
 
         # integration time step in self.const.dt for luminosity integration and abs_magnitude_integration check if any sim_data.stations_lum does not have '1T' or '2T' in the name as CAMO narrowfield do not have smearing because it follows the meteor
         if ((1/obs_data.fps_lum) > sim_data.const.dt): # and (not any('1T' in station for station in obs_data.stations_lum) or not any('2T' in station for station in obs_data.stations_lum)):
-            sim_data.luminosity_arr, sim_data.abs_magnitude = luminosity_integration(sim_data.time_arr,sim_data.time_arr,sim_data.luminosity_arr,sim_data.const.dt,obs_data.fps_lum,obs_data.P_0m)
+            sim_data.luminosity_arr, sim_data.abs_magnitude = integrateLuminosity(sim_data.time_arr,sim_data.time_arr,sim_data.luminosity_arr,sim_data.const.dt,obs_data.fps_lum,obs_data.P_0m)
 
         # Plot simulated data
         ax0.plot(sim_data.abs_magnitude, sim_data.leading_frag_height_arr/1000, color=color_sim, label=label_sim)
@@ -768,14 +823,14 @@ def _compute_sim_lag(sim, obs_data):
     idx = np.flatnonzero(valid)[idx_in_valid]
 
     v0 = getattr(obs_data, 'v_init', np.nan)  # use obs_data.v_init as in your code
-    lag = (L - L[idx]) - (v0 * (t - t[idx]))
+    lag = (L - L[idx]) - (v0*(t - t[idx]))
     lag = lag - lag[idx]  # zero at reference
     return lag
 
 
 def _worker_simulate_and_interp(sample_equal_row):
     """
-    Runs one posterior sample through run_simulation() and returns
+    Runs one posterior sample through runSimulation() and returns
     (lum_at_hl, mag_at_hl, vel_at_hl, lag_at_hl) as 1D arrays.
     Returns None on failure (caller will skip).
     """
@@ -787,7 +842,7 @@ def _worker_simulate_and_interp(sample_equal_row):
         align_height = _GLOBALS['align_height']
 
         pars = _apply_log_flags_to_sample(sample_equal_row, variables, flags_dict)
-        sim  = run_simulation(pars, obs_data, variables, fixed_values)
+        sim  = runSimulation(pars, obs_data, variables, fixed_values)
 
         const_saved = sim.const  # save original const
 
@@ -831,8 +886,8 @@ def _worker_simulate_and_interp(sample_equal_row):
                 mass_at_erosion_change = mass[np.argmin(np.abs(h[:-1] - erosion_height_change))]
             # compute rho_mass_weighted
             erosion_rho_change = const_saved.erosion_rho_change
-            rho_mass_weighted = const_saved.rho*(abs(const_saved.m_init-mass_at_erosion_change) / const_saved.m_init) + erosion_rho_change * (mass_at_erosion_change / const_saved.m_init)
-            rho_volume_weighted = const_saved.m_init / ((abs(const_saved.m_init-mass_at_erosion_change) / const_saved.rho) + (mass_at_erosion_change / erosion_rho_change))
+            rho_mass_weighted = const_saved.rho*(abs(const_saved.m_init-mass_at_erosion_change)/const_saved.m_init) + erosion_rho_change*(mass_at_erosion_change/const_saved.m_init)
+            rho_volume_weighted = const_saved.m_init/((abs(const_saved.m_init-mass_at_erosion_change)/const_saved.rho) + (mass_at_erosion_change/erosion_rho_change))
             # print(f"rho_mass_weighted: {rho_mass_weighted} rho_volume_weighted: {rho_volume_weighted} and rho: {const_saved.rho}")
             erosion_dyn_press_change = sim.leading_frag_dyn_press_arr[np.argmin(np.abs(sim.leading_frag_height_arr[:-1] - erosion_height_change))]
         else:
@@ -884,8 +939,8 @@ def _maybe_integrate_luminosity(sim, obs_data):
         return  # nothing we can do
 
     try:
-        if fps > 0 and (1.0 / float(fps)) > float(dt):
-            L_new, mag_new = luminosity_integration(
+        if fps > 0 and (1.0/float(fps)) > float(dt):
+            L_new, mag_new = integrateLuminosity(
                 np.asarray(sim.time_arr),
                 np.asarray(sim.time_arr),            # same as your call
                 np.asarray(sim.luminosity_arr),
@@ -898,6 +953,9 @@ def _maybe_integrate_luminosity(sim, obs_data):
         pass
 
 def _plot_distrib_weighted(rho_mass_weighted_list, weights, output_folder="", file_name="name",var_name="var", label="var", colors='black'):
+    if not DYNESTY_FOUND:
+        return np.nan, np.nan, np.nan
+        
     print("Creating distribution plot...")
     var_corrected_lo, var_corrected_median, var_corrected_hi = _quantile(rho_mass_weighted_list, [0.025, 0.5, 0.975], weights=weights)
     # Create figure tau
@@ -906,10 +964,10 @@ def _plot_distrib_weighted(rho_mass_weighted_list, weights, output_folder="", fi
 
     smooth = 0.02
     lo, hi = np.min(rho_mass_weighted_list), np.max(rho_mass_weighted_list)
-    nbins = int(round(10. / smooth))
+    nbins = int(round(10./smooth))
     hist, edges = np.histogram(rho_mass_weighted_list, bins=nbins, weights=weights, range=(lo, hi))
     hist = norm_kde(hist, 10.0)
-    bin_centers = 0.5 * (edges[:-1] + edges[1:])
+    bin_centers = 0.5*(edges[:-1] + edges[1:])
 
     ax_dist.fill_between(bin_centers, hist, color=colors, alpha=0.6)
 
@@ -936,7 +994,7 @@ def _plot_distrib_weighted(rho_mass_weighted_list, weights, output_folder="", fi
     plt.savefig(os.path.join(output_folder, f"{file_name}_{var_name}_distribution.png"), bbox_inches='tight')
     return var_corrected_median, var_corrected_lo, var_corrected_hi
 
-def posterior_bands_vs_height_parallel(
+def posteriorBandsVsHeightParallel(
     dynesty_results,
     obs_data,
     flags_dict,
@@ -949,10 +1007,44 @@ def posterior_bands_vs_height_parallel(
     chunksize=8,             # tune for your machine
     color_best='black',
     label_best='Best Fit'):
+    """ Parallel computation of posterior bands at observation heights/times.
+
+    This function resamples the Dynesty posterior (equal weights), runs simulations in parallel
+    for each sample, and computes quantile bands for luminosity, magnitude, velocity, and lag.
+    It also plots the results and returns a dictionary of data.
+
+    Arguments:
+        dynesty_results: [object] Result object from dynesty sampling.
+        obs_data: [object] Object containing the observational data.
+        flags_dict: [dict] Dictionary of flags for parameters.
+        fixed_values: [dict] Dictionary of fixed parameter values.
+
+    Keyword arguments:
+        output_folder: [str] Path to save plots. '' by default.
+        file_name: [str] Base name for output files. '' by default.
+        nsamples: [int] Number of posterior samples to draw. 500 by default.
+        seed: [int] Random seed for resampling. 0 by default.
+        n_workers: [int] Number of parallel workers. Defaults to os.cpu_count()-1.
+        chunksize: [int] Chunksize for process pool. 8 by default.
+        color_best: [str] Color for the best fit line in plots. 'black' by default.
+        label_best: [str] Label for the best fit line. 'Best Fit' by default.
+
+    Return:
+        results: [dict] Dictionary containing:
+            - 'samples_eq': Resampled parameters.
+            - 'weights': weights used.
+            - 'lum_samples', 'mag_samples', 'vel_samples', 'lag_samples': Arrays of simulated data.
+            - 'bands': Dictionary of quantile bands for each observable.
+            - 'best_guess': Dictionary of best fit data.
+            - 'sim_best': Simulation object for the best fit.
+            - 'rho_mass_weighted_estimate': Statistics on mass-weighted density.
+
     """
-    Parallel version: computes posterior bands at obs_data.height_lum using a
-    process pool. Returns the same structure as before; plotting code unchanged.
-    """
+
+    if not DYNESTY_FOUND:
+        print("Dynesty package not found. Install dynesty to use the Dynesty functions.")
+        return None
+
     rng = np.random.default_rng(seed)
     variables = list(flags_dict.keys())
 
@@ -973,7 +1065,7 @@ def posterior_bands_vs_height_parallel(
     mag_samples = np.full((S, H_l), np.nan)
     vel_samples = np.full((S, H_v), np.nan)
     lag_samples = np.full((S, H_v), np.nan)
-    const_backups = [None] * S  # to store const backups if needed
+    const_backups = [None]*S  # to store const backups if needed
 
     align_height = np.max(obs_data.height_lag) if hasattr(obs_data, 'height_lag') and len(obs_data.height_lag) > 0 \
                    else np.max(obs_data.height_lum)
@@ -985,7 +1077,7 @@ def posterior_bands_vs_height_parallel(
     # --- try parallel; if anything goes wrong, do sequential as fallback ---
     ran_parallel = False
     try:
-        ctx = mp.get_context("spawn")  # Windows-safe
+        ctx = multiprocessing.get_context("spawn")  # Windows-safe
         print(f"[{file_name}] Running {S} simulations with {n_workers} workers...", flush=True)
         with ProcessPoolExecutor(
             max_workers=n_workers,
@@ -1048,7 +1140,7 @@ def posterior_bands_vs_height_parallel(
     # Best-guess curve (re-use your existing code)
     best_idx  = int(np.argmax(dynesty_results.logl))
     best_pars = _apply_log_flags_to_sample(dynesty_results.samples[best_idx], variables, flags_dict)
-    sim_best  = run_simulation(best_pars, obs_data, variables, fixed_values)
+    sim_best  = runSimulation(best_pars, obs_data, variables, fixed_values)
     _maybe_integrate_luminosity(sim_best, obs_data)
     best_lag_full = _compute_sim_lag(sim_best, obs_data)
 
@@ -1136,8 +1228,8 @@ def _plot_bands_obs_best(
     if output_folder:
         os.makedirs(output_folder, exist_ok=True)
 
-    heights_km_lum = np.asarray(hl) / 1000.0
-    heights_km_lag = np.asarray(hv) / 1000.0
+    heights_km_lum = np.asarray(hl)/1000.0
+    heights_km_lag = np.asarray(hv)/1000.0
 
     fig = plt.figure(figsize=(15, 4))
     gs  = gridspec.GridSpec(1, 4, figure=fig, wspace=0.3)
@@ -1269,7 +1361,7 @@ def _plot_bands_obs_best(
     plt.close(fig)
 
 
-def posterior_bands_topk_check(
+def posteriorBandsTopkCheck(
     dynesty_results,
     obs_data,
     flags_dict,
@@ -1280,9 +1372,33 @@ def posterior_bands_topk_check(
     n_workers=None,
     color_best='black',
     label_best='Best Fit',):
-    """
-    Quick-check version: run only the best `top_k` samples (highest logl).
-    Returns the same structure as the full function.
+    """ Quick-check version: run only the best `top_k` samples (highest logl).
+
+    This function selects the top k samples from the posterior based on log-likelihood,
+    creates a subset of results, and runs the parallel band computation on this subset.
+    Useful for quick visualization of the best fits.
+
+    Arguments:
+        dynesty_results: [object] Result object from dynesty sampling.
+        obs_data: [object] Object containing the observational data.
+        flags_dict: [dict] Dictionary of flags for parameters.
+        fixed_values: [dict] Dictionary of fixed parameter values.
+
+    Keyword arguments:
+        top_k: [int] Number of top samples to use. 10 by default.
+        output_folder: [str] Path to save plots. '' by default.
+        file_name: [str] Base name for output files. 'topk_check' by default.
+        n_workers: [int] Number of parallel workers. None by default (uses posteriorBandsVsHeightParallel default).
+        color_best: [str] Color for the best fit line in plots. 'black' by default.
+        label_best: [str] Label for the best fit line. 'Best Fit' by default.
+
+    Return:
+        results: [dict] Dictionary containing the same structure as posteriorBandsVsHeightParallel.
+            - 'samples_eq': Subset of parameters (top k).
+            - 'weights': Equal weights/zeros (as passed to parallel func).
+            - 'lum_samples', 'mag_samples', ...: Arrays of simulated data for the top k samples.
+            - ... (see posteriorBandsVsHeightParallel for full details).
+
     """
     # pick top-K by log-likelihood
     logl = np.asarray(dynesty_results.logl)
@@ -1303,7 +1419,7 @@ def posterior_bands_topk_check(
     mini.logl    = logl[top_idx]
 
     # Reuse the parallel function but tell it “nsamples=k” so it won’t subsample
-    return posterior_bands_vs_height_parallel(
+    return posteriorBandsVsHeightParallel(
         dynesty_results=mini,
         obs_data=obs_data,
         flags_dict=flags_dict,
@@ -1317,7 +1433,23 @@ def posterior_bands_topk_check(
     )
 
 
-def plot_all_vs_height(obs_data, sim_data=None, output_folder='', file_name='', color_sim='black', label_sim='Best Fit'):
+def plotObsVsHeight(obs_data, sim_data=None, output_folder='', file_name='', color_sim='black', label_sim='Best Fit'):
+    """ Plot various observables vs height (Luminosity, Absolute Magnitude, Velocity, Lag).
+
+    Arguments:
+        obs_data: [object] Object containing the observational data.
+
+    Keyword arguments:
+        sim_data: [object] Object containing the simulation data. None by default.
+        output_folder: [str] Path to the output folder. Empty string by default.
+        file_name: [str] Name of the file. Empty string by default.
+        color_sim: [str] Color for the simulation plot. 'black' by default.
+        label_sim: [str] Label for the simulation plot. 'Best Fit' by default.
+
+    Return:
+        None
+
+    """
     fig = plt.figure(figsize=(15, 4))
     # # take only the reg ex with YYYYMMDD_HHMMSS
     file_name_print = re.search(r'\d{8}_\d{6}', file_name)
@@ -1332,7 +1464,7 @@ def plot_all_vs_height(obs_data, sim_data=None, output_folder='', file_name='', 
     station_handles = []
     station_labels  = []
 
-    def get_color(station):
+    def getColor(station):
         if station not in station_colors:
             station_colors[station] = cmap(len(station_colors) % 10)
         return station_colors[station]
@@ -1355,15 +1487,15 @@ def plot_all_vs_height(obs_data, sim_data=None, output_folder='', file_name='', 
     # LUMINOSITY (with camera legend)
     for station in np.unique(obs_data.stations_lum):
         mask = obs_data.stations_lum == station
-        color = get_color(station)
-        ax_lum.plot(obs_data.luminosity[mask], obs_data.height_lum[mask] / 1000, 'x--', color=color)
+        color = getColor(station)
+        ax_lum.plot(obs_data.luminosity[mask], obs_data.height_lum[mask]/1000, 'x--', color=color)
 
     # # Draw a line for extra lag-only cameras (not in lum)
     # if not np.array_equal(np.unique(obs_data.stations_lag), np.unique(obs_data.stations_lum)):
     #     stations_lag_only = np.setdiff1d(np.unique(obs_data.stations_lag), np.unique(obs_data.stations_lum))
     #     if len(stations_lag_only) > 0:
     #         mask = np.isin(obs_data.stations_lag, stations_lag_only)
-    #         ax_lum.plot(obs_data.luminosity[mask], obs_data.height_lag[mask] / 1000, 'x--', color='gray', label='Lag-only')
+    #         ax_lum.plot(obs_data.luminosity[mask], obs_data.height_lag[mask]/1000, 'x--', color='gray', label='Lag-only')
 
     ax_lum.set_xlabel("Luminosity [W]")
     ax_lum.set_ylabel("Height [km]")
@@ -1379,8 +1511,8 @@ def plot_all_vs_height(obs_data, sim_data=None, output_folder='', file_name='', 
     # ABS MAGNITUDE
     for station in np.unique(obs_data.stations_lum):
         mask = obs_data.stations_lum == station
-        color = get_color(station)
-        h, = ax_mag.plot(obs_data.absolute_magnitudes[mask], obs_data.height_lum[mask] / 1000, 'x--', color=color)
+        color = getColor(station)
+        h, = ax_mag.plot(obs_data.absolute_magnitudes[mask], obs_data.height_lum[mask]/1000, 'x--', color=color)
         station_handles.append(h); station_labels.append(str(station))
     ax_mag.set_xlabel("Abs. Magnitude")
     ax_mag.invert_xaxis()
@@ -1396,9 +1528,9 @@ def plot_all_vs_height(obs_data, sim_data=None, output_folder='', file_name='', 
     # VELOCITY
     for station in np.unique(obs_data.stations_lag):
         mask = obs_data.stations_lag == station
-        color = get_color(station)
-        height_plot = obs_data.height_lag[mask] / 1000
-        vel_plot = obs_data.velocities[mask] / 1000
+        color = getColor(station)
+        height_plot = obs_data.height_lag[mask]/1000
+        vel_plot = obs_data.velocities[mask]/1000
         ax_vel.plot(vel_plot[1:], height_plot[1:], 'x--', color=color)
     ax_vel.set_xlabel("Velocity [km/s]")
     ax_vel.grid(True, linestyle='--', color='lightgray')
@@ -1413,9 +1545,9 @@ def plot_all_vs_height(obs_data, sim_data=None, output_folder='', file_name='', 
     # LAG
     for station in np.unique(obs_data.stations_lag):
         mask = obs_data.stations_lag == station
-        color = get_color(station)
+        color = getColor(station)
         # obs_data.lag[mask] = (obs_data.length[mask]) - ((24610)*(obs_data.time_lag[mask]))
-        h, = ax_lag.plot(obs_data.lag[mask], obs_data.height_lag[mask] / 1000, 'x--', color=color, label=station)
+        h, = ax_lag.plot(obs_data.lag[mask], obs_data.height_lag[mask]/1000, 'x--', color=color, label=station)
         station_handles.append(h); station_labels.append(str(station))
     ax_lag.set_xlabel("Lag [m]")
     ax_lag.grid(True, linestyle='--', color='lightgray')
@@ -1445,16 +1577,16 @@ def plot_all_vs_height(obs_data, sim_data=None, output_folder='', file_name='', 
     #### SIMULATED DATA (Interpolated) ####
     if sim_data is not None:
         # # Integrate luminosity/magnitude if needed
-        # if (1 / obs_data.fps_lum) > sim_data.const.dt:
-        #     sim_data.luminosity_arr, sim_data.abs_magnitude = luminosity_integration(
+        # if (1/obs_data.fps_lum) > sim_data.const.dt:
+        #     sim_data.luminosity_arr, sim_data.abs_magnitude = integrateLuminosity(
         #         sim_data.time_arr, sim_data.time_arr, sim_data.luminosity_arr,
         #         sim_data.const.dt, obs_data.fps_lum, obs_data.P_0m
         #     )
 
         # SMOOTH PLOTTING using time-based sampling
-        ax_lum.plot(sim_data.luminosity_arr, sim_data.leading_frag_height_arr / 1000, color=color_sim, label=label_sim)
-        ax_mag.plot(sim_data.abs_magnitude, sim_data.leading_frag_height_arr / 1000, color=color_sim)
-        ax_vel.plot(sim_data.leading_frag_vel_arr / 1000, sim_data.leading_frag_height_arr / 1000, color=color_sim)
+        ax_lum.plot(sim_data.luminosity_arr, sim_data.leading_frag_height_arr/1000, color=color_sim, label=label_sim)
+        ax_mag.plot(sim_data.abs_magnitude, sim_data.leading_frag_height_arr/1000, color=color_sim)
+        ax_vel.plot(sim_data.leading_frag_vel_arr/1000, sim_data.leading_frag_height_arr/1000, color=color_sim)
 
         index = np.argmin(np.abs(sim_data.leading_frag_height_arr[~np.isnan(sim_data.leading_frag_height_arr)]-np.max(obs_data.height_lag)))
         # plot lag_arr vs leading_frag_time_arr withouth nan values
@@ -1463,40 +1595,40 @@ def plot_all_vs_height(obs_data, sim_data=None, output_folder='', file_name='', 
             #   - ((24710)*(sim_data.time_arr-sim_data.time_arr[index]))        
         sim_lag -= sim_lag[index]
 
-        best_line, = ax_lag.plot(sim_lag, sim_data.leading_frag_height_arr / 1000, color=color_sim, label=label_sim)
+        best_line, = ax_lag.plot(sim_lag, sim_data.leading_frag_height_arr/1000, color=color_sim, label=label_sim)
         
         # RESIDUALS (interpolated at obs heights)
         lum_res = obs_data.luminosity - np.interp(obs_data.height_lum, np.flip(sim_data.leading_frag_height_arr), np.flip(sim_data.luminosity_arr))
         mag_res = np.interp(obs_data.height_lum, np.flip(sim_data.leading_frag_height_arr), np.flip(sim_data.abs_magnitude)) - obs_data.absolute_magnitudes
-        vel_res = (obs_data.velocities - np.interp(obs_data.height_lag, np.flip(sim_data.leading_frag_height_arr), np.flip(sim_data.leading_frag_vel_arr))) / 1000
+        vel_res = (obs_data.velocities - np.interp(obs_data.height_lag, np.flip(sim_data.leading_frag_height_arr), np.flip(sim_data.leading_frag_vel_arr)))/1000
         lag_res = obs_data.lag - np.interp(obs_data.height_lag, np.flip(sim_data.leading_frag_height_arr), np.flip(sim_lag))
 
-        # ax_lum_res.plot(lum_res, obs_data.height_lum / 1000, '.', color=color_sim)
-        # ax_mag_res.plot(mag_res, obs_data.height_lum / 1000, '.', color=color_sim)
-        # ax_vel_res.plot(vel_res, obs_data.height_lag / 1000, '.', color=color_sim)
-        # ax_lag_res.plot(lag_res, obs_data.height_lag / 1000, '.', color=color_sim)
+        # ax_lum_res.plot(lum_res, obs_data.height_lum/1000, '.', color=color_sim)
+        # ax_mag_res.plot(mag_res, obs_data.height_lum/1000, '.', color=color_sim)
+        # ax_vel_res.plot(vel_res, obs_data.height_lag/1000, '.', color=color_sim)
+        # ax_lag_res.plot(lag_res, obs_data.height_lag/1000, '.', color=color_sim)
 
         # LUMINOSITY residuals (station-based)
         for station in np.unique(obs_data.stations_lum):
             mask = np.where(obs_data.stations_lum == station)
-            ax_lum_res.plot(lum_res[mask], obs_data.height_lum[mask] / 1000, '.', color=station_colors[station])
+            ax_lum_res.plot(lum_res[mask], obs_data.height_lum[mask]/1000, '.', color=station_colors[station])
 
         # MAGNITUDE residuals (station-based)
         for station in np.unique(obs_data.stations_lum):
             mask = np.where(obs_data.stations_lum == station)
-            ax_mag_res.plot(mag_res[mask], obs_data.height_lum[mask] / 1000, '.', color=station_colors[station])
+            ax_mag_res.plot(mag_res[mask], obs_data.height_lum[mask]/1000, '.', color=station_colors[station])
 
         # VELOCITY residuals (station-based)
         for station in np.unique(obs_data.stations_lag):
             mask = np.where(obs_data.stations_lag == station)
-            height_plot = obs_data.height_lag[mask] / 1000
+            height_plot = obs_data.height_lag[mask]/1000
             vel_plot = vel_res[mask]
             ax_vel_res.plot(vel_plot[1:], height_plot[1:], '.', color=station_colors[station])
 
         # LAG residuals (station-based)
         for station in np.unique(obs_data.stations_lag):
             mask = np.where(obs_data.stations_lag == station)
-            ax_lag_res.plot(lag_res[mask], obs_data.height_lag[mask] / 1000, '.', color=station_colors[station])
+            ax_lag_res.plot(lag_res[mask], obs_data.height_lag[mask]/1000, '.', color=station_colors[station])
 
     # take the index of the unique station_handles and station_labels
     unique_stations = {}
@@ -1516,9 +1648,30 @@ def plot_all_vs_height(obs_data, sim_data=None, output_folder='', file_name='', 
     plt.close(fig)
 
 
-# Plotting function dynesty
-def plot_dynesty(dynesty_run_results, obs_data, flags_dict, fixed_values, output_folder='', file_name='', log_file='', cores=None, save_backup=False):
-    ''' Plot the dynesty results '''
+def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, output_folder='', file_name='', log_file='', cores=None, save_backup=False):
+    """ Plot the dynesty results (trace plots, corner plots) and save them.
+    
+    Arguments:
+        dynesty_run_results: [object] Result object from dynesty sampling.
+        obs_data: [object] Object containing the observational data.
+        flags_dict: [dict] Dictionary of flags for parameters.
+        fixed_values: [dict] Dictionary of fixed parameter values.
+
+    Keyword arguments:
+        output_folder: [str] Path to save plots. '' by default.
+        file_name: [str] Base name for output files. '' by default.
+        log_file: [str] Path to log file. '' by default.
+        cores: [int] Number of cores (unused in this function but kept for signature compatibility). None by default.
+        save_backup: [bool] Flag to save backup json files. False by default.
+
+    Return:
+        None
+
+    """
+
+    if not DYNESTY_FOUND:
+        print("Dynesty package not found. Install dynesty to use the Dynesty functions.")
+        return
 
     if log_file == '':
         log_file = os.path.join(output_folder, f"log_{file_name}.txt")
@@ -1667,12 +1820,12 @@ def plot_dynesty(dynesty_run_results, obs_data, flags_dict, fixed_values, output
             labels_plot[i] =r"$\log_{10}$(" +labels_plot[i]+")"
         # check variable is 'v_init' or 'erosion_height_start' divide by 1000
         if 'v_init' in variable or 'height' in variable:
-            samples_equal[:, i] = samples_equal[:, i] / 1000
-            best_guess_table[i] = best_guess_table[i] / 1000
+            samples_equal[:, i] = samples_equal[:, i]/1000
+            best_guess_table[i] = best_guess_table[i]/1000
         # check variable is 'erosion_coeff' or 'sigma' divide by 1e6
         if 'sigma' in variable or 'erosion_coeff' in variable:
-            samples_equal[:, i] = samples_equal[:, i] * 1e6
-            best_guess_table[i] = best_guess_table[i] * 1e6
+            samples_equal[:, i] = samples_equal[:, i]*1e6
+            best_guess_table[i] = best_guess_table[i]*1e6
 
     constjson_bestfit = Constants()
 
@@ -1695,7 +1848,7 @@ def plot_dynesty(dynesty_run_results, obs_data, flags_dict, fixed_values, output
             constjson_bestfit.__dict__[variable] = fixed_values[variable]
             print(f"Fixed value for {variable}: {fixed_values[variable]}")
 
-    def convert_to_serializable(obj):
+    def convertToSerializable(obj):
         if isinstance(obj, np.ndarray):
             return obj.tolist()
         elif isinstance(obj, (np.integer, np.int32, np.int64)):
@@ -1707,9 +1860,9 @@ def plot_dynesty(dynesty_run_results, obs_data, flags_dict, fixed_values, output
         elif obj is None:
             return None
         elif isinstance(obj, dict):
-            return {key: convert_to_serializable(value) for key, value in obj.items()}
+            return {key: convertToSerializable(value) for key, value in obj.items()}
         elif isinstance(obj, list):
-            return [convert_to_serializable(item) for item in obj]
+            return [convertToSerializable(item) for item in obj]
         else:
             return obj
 
@@ -1720,7 +1873,7 @@ def plot_dynesty(dynesty_run_results, obs_data, flags_dict, fixed_values, output
     # print('logL:', dynesty_run_results.logl[sim_num])
     # copy the dynesty_run_results results to a variable avoid overwriting the original one
     dynesty_run_results_new = copy.deepcopy(dynesty_run_results)
-    best_guess_logL = log_likelihood_dynesty(dynesty_run_results_new.samples[sim_num], obs_data, flags_dict, fixed_values, timeout=20)
+    best_guess_logL = logLikelihoodDynesty(dynesty_run_results_new.samples[sim_num], obs_data, flags_dict, fixed_values, timeout=20)
     print('logL:', best_guess_logL, ' dynesty logL:', dynesty_run_results.logl[sim_num])
 
     real_logL = None
@@ -1751,9 +1904,9 @@ def plot_dynesty(dynesty_run_results, obs_data, flags_dict, fixed_values, output
             if 'log' in flags_dict_real[variable]:
                 flags_dict_real[variable] = [flag for flag in flags_dict_real[variable] if flag != 'log']
 
-        real_logL = log_likelihood_dynesty(guess_real, obs_data, flags_dict_real, fixed_values_real, timeout=20)
+        real_logL = logLikelihoodDynesty(guess_real, obs_data, flags_dict_real, fixed_values_real, timeout=20)
         diff_logL = best_guess_logL - real_logL
-        # use log_likelihood_dynesty to compute the logL
+        # use logLikelihoodDynesty to compute the logL
         print('REAL logL:', real_logL)
         print('DIFF logL:', diff_logL)
 
@@ -1763,11 +1916,11 @@ def plot_dynesty(dynesty_run_results, obs_data, flags_dict, fixed_values, output
     if not os.path.exists(output_folder +os.sep+ 'fit_plots'):
         os.makedirs(output_folder +os.sep+ 'fit_plots')
 
-    best_guess_obj_plot = run_simulation(best_guess, obs_data, variables, fixed_values)
+    best_guess_obj_plot = runSimulation(best_guess, obs_data, variables, fixed_values)
 
     # find the index of m_init in variables
     i_m_init = variables.index('m_init')
-    tau = (calcRadiatedEnergy(np.array(obs_data.time_lum), np.array(obs_data.absolute_magnitudes), P_0m=obs_data.P_0m))*2/(samples_equal[:, i_m_init]*obs_data.velocities[0]**2) * 100
+    tau = (calcRadiatedEnergy(np.array(obs_data.time_lum), np.array(obs_data.absolute_magnitudes), P_0m=obs_data.P_0m))*2/(samples_equal[:, i_m_init]*obs_data.velocities[0]**2)*100
     # calculate the weights calculate the weighted median and the 95 CI for tau
     # tau_low95, tau_median, tau_high95 = _quantile(tau, [0.025, 0.5, 0.975],  weights=weights)
     tau_median, tau_low95, tau_high95 = _plot_distrib_weighted(
@@ -1795,7 +1948,7 @@ def plot_dynesty(dynesty_run_results, obs_data, flags_dict, fixed_values, output
             mass_before = mass_best[np.argmin(np.abs(heights - erosion_height_change))]
         
         # # precise erosion tal energy calculation ########################
-        rho_total_arr = samples_equal[:, variables.index('rho')].astype(float)*(abs(m_init-mass_before) / m_init) + samples_equal[:, variables.index('erosion_rho_change')].astype(float) * (mass_before / m_init)
+        rho_total_arr = samples_equal[:, variables.index('rho')].astype(float)*(abs(m_init-mass_before)/m_init) + samples_equal[:, variables.index('erosion_rho_change')].astype(float)*(mass_before/m_init)
     else:
         rho_total_arr = samples_equal[:, variables.index('rho')].astype(float)
 
@@ -1831,7 +1984,7 @@ def plot_dynesty(dynesty_run_results, obs_data, flags_dict, fixed_values, output
 
     # try:
     #     # find the index of m_init in variables
-    #     tau_real = (calcRadiatedEnergy(np.array(obs_data.time_lum), np.array(obs_data.absolute_magnitudes), P_0m=obs_data.P_0m))/(simpson(np.array(best_guess_obj_plot.luminosity_arr[index_up:index_down]),x=np.array(best_guess_obj_plot.time_arr[index_up:index_down]))/lum_eff_val) * 100
+    #     tau_real = (calcRadiatedEnergy(np.array(obs_data.time_lum), np.array(obs_data.absolute_magnitudes), P_0m=obs_data.P_0m))/(simpson(np.array(best_guess_obj_plot.luminosity_arr[index_up:index_down]),x=np.array(best_guess_obj_plot.time_arr[index_up:index_down]))/lum_eff_val)*100
     #     print(f"first heigth obs: {np.max(obs_data.height_lum):.2f} m, last height obs: {obs_data.height_lum[-1]:.2f} m, first height sim: {best_guess_obj_plot.leading_frag_height_arr[index_up]:.2f} m, last height sim: {best_guess_obj_plot.leading_frag_height_arr[index_down]:.2f} m")
     #     print(f"total radiated energy:", calcRadiatedEnergy(np.array(obs_data.time_lum), np.array(obs_data.absolute_magnitudes), P_0m=obs_data.P_0m), "J and total simulated radiated energy:",simpson(np.array(best_guess_obj_plot.luminosity_arr[index_up:index_down]),x=np.array(best_guess_obj_plot.time_arr[index_up:index_down]))/lum_eff_val,"J")
     #     print(f"Tau real best fit: {tau_real:.4f} %")
@@ -1840,21 +1993,34 @@ def plot_dynesty(dynesty_run_results, obs_data, flags_dict, fixed_values, output
     #     tau_real = None
 
     # Plot the data with residuals and the best fit
-    plot_data_with_residuals_and_real(obs_data, best_guess_obj_plot, output_folder +os.sep+ 'fit_plots', file_name + "_best_fit")
-    plot_all_vs_height(obs_data, best_guess_obj_plot, output_folder +os.sep+ 'fit_plots', file_name + "_best_fit")
-    # plot_all_vs_height(obs_data, None, output_folder , file_name + "_data_only")
+    plotSimVsObsResiduals(obs_data, best_guess_obj_plot, output_folder +os.sep+ 'fit_plots', file_name + "_best_fit")
+    plotObsVsHeight(obs_data, best_guess_obj_plot, output_folder +os.sep+ 'fit_plots', file_name + "_best_fit")
+    # plotObsVsHeight(obs_data, None, output_folder , file_name + "_data_only")
 
-    _ = build_const(best_guess, obs_data, variables, fixed_values, dir_path=output_folder +os.sep+ 'fit_plots', file_name= file_name + '_sim_fit_dynesty_BestGuess.json')
+    _ = constructConstants(best_guess, obs_data, variables, fixed_values, dir_path=output_folder +os.sep+ 'fit_plots', file_name= file_name + '_sim_fit_dynesty_BestGuess.json')
 
     ### TABLE OF POSTERIOR SUMMARY STATISTICS ###
 
-    def summarize_res_table(results,
+    def summaryResultsTable(results,
                             variables,
                             labels_plot,
                             flags_dict_total,
                             smooth=0.02):
-        """
-        Summarize dynesty results, using the sample of max weight as the mode.
+        """ Summarize dynesty results, using the sample of max weight as the mode.
+        
+        Arguments:
+            results: [object] Dynesty results object.
+            variables: [list] List of variable names.
+            labels_plot: [list] List of variable labels for plotting.
+            flags_dict_total: [dict] Dictionary of flags for parameter transformation.
+
+        Keyword arguments:
+            smooth: [float or int] Smoothing parameter for histogram, or number of bins if int. 0.02 by default.
+
+        Return:
+            summary_df: [pandas.DataFrame] DataFrame containing detailed statistics (Low95, Mode, Mean, Median, High95) with units.
+            summary_df_sml: [pandas.DataFrame] DataFrame containing statistics with only log transformations applied.
+
         """
         samples = results.samples               # shape (nsamps, ndim)
         weights = results.importance_weights()  # shape (nsamps,)
@@ -1887,7 +2053,7 @@ def plot_dynesty(dynesty_run_results, obs_data, flags_dict, fixed_values, output
                                         [0.025, 0.5, 0.975],
                                         weights=w_valid)
             # weighted mean
-            mean_raw = np.sum(x_valid * w_valid)
+            mean_raw = np.sum(x_valid*w_valid)
             # simple mode from max-weight sample
             mode_value = mode_raw[i]
 
@@ -1896,10 +2062,10 @@ def plot_dynesty(dynesty_run_results, obs_data, flags_dict, fixed_values, output
             if isinstance(smooth, int):
                 hist, edges = np.histogram(x, bins=smooth, weights=w, range=(lo,hi))
             else:
-                nbins = int(round(10. / smooth))
+                nbins = int(round(10./smooth))
                 hist, edges = np.histogram(x, bins=nbins, weights=w, range=(lo,hi))
                 hist = norm_kde(hist, 10.0)
-            centers = 0.5 * (edges[1:] + edges[:-1])
+            centers = 0.5*(edges[1:] + edges[:-1])
             mode_Ndim = centers[np.argmax(hist)]
 
             # now apply your log & unit transforms *after* computing stats
@@ -1907,9 +2073,9 @@ def plot_dynesty(dynesty_run_results, obs_data, flags_dict, fixed_values, output
                 if 'log' in flags_dict_total.get(var, ''):
                     v = 10**v
                 if 'v_init' in var or 'height' in var:
-                    v = v / 1e3
+                    v = v/1e3
                 if 'sigma' in var or 'erosion_coeff' in var:
-                    v = v * 1e6
+                    v = v*1e6
                 return v
             
             def log_transf(v):
@@ -1944,7 +2110,7 @@ def plot_dynesty(dynesty_run_results, obs_data, flags_dict, fixed_values, output
         return pd.DataFrame( rows,columns=["Variable","Label","Low95","Mode","Mode_{Ndim}","Mean","Median","High95"]), pd.DataFrame( rows_sml,columns=["Variable","Label","Low95","Mode","Mode_{Ndim}","Mean","Median","High95"])
 
     
-    summary_df, summary_df_sml = summarize_res_table(
+    summary_df, summary_df_sml = summaryResultsTable(
     dynesty_run_results,
     variables,
     labels,
@@ -1979,40 +2145,40 @@ def plot_dynesty(dynesty_run_results, obs_data, flags_dict, fixed_values, output
     # def approximate_mode_1d(samples):
     #     hist, bin_edges = np.histogram(samples, bins='auto', density=True)
     #     idx_max = np.argmax(hist)
-    #     return 0.5 * (bin_edges[idx_max] + bin_edges[idx_max + 1])
+    #     return 0.5*(bin_edges[idx_max] + bin_edges[idx_max + 1])
 
     # approx_modes = [approximate_mode_1d(samples_equal[:, d]) for d in range(ndim)]
     # approx_modes_all = [approximate_mode_1d(all_samples[:, d]) for d in range(ndim)]
 
     ### MODE PLOT and json ###
 
-    approx_mode_obj_plot = run_simulation(approx_modes_all, obs_data, variables, fixed_values)
+    approx_mode_obj_plot = runSimulation(approx_modes_all, obs_data, variables, fixed_values)
 
     # Plot the data with residuals and the best fit
-    plot_data_with_residuals_and_real(obs_data, approx_mode_obj_plot, output_folder +os.sep+ 'fit_plots', file_name+'_mode','red', 'Mode')
-    plot_all_vs_height(obs_data, approx_mode_obj_plot, output_folder +os.sep+ 'fit_plots', file_name + "_mode_height", color_sim='red', label_sim='Mode')
+    plotSimVsObsResiduals(obs_data, approx_mode_obj_plot, output_folder +os.sep+ 'fit_plots', file_name+'_mode','red', 'Mode')
+    plotObsVsHeight(obs_data, approx_mode_obj_plot, output_folder +os.sep+ 'fit_plots', file_name + "_mode_height", color_sim='red', label_sim='Mode')
 
-    _ = build_const(approx_modes_all, obs_data, variables, fixed_values, dir_path=output_folder +os.sep+ 'fit_plots', file_name= file_name + '_sim_fit_dynesty_mode.json')
+    _ = constructConstants(approx_modes_all, obs_data, variables, fixed_values, dir_path=output_folder +os.sep+ 'fit_plots', file_name= file_name + '_sim_fit_dynesty_mode.json')
 
     ### MEAN PLOT and json ###
 
-    mean_obj_plot = run_simulation(all_samples_mean, obs_data, variables, fixed_values)
+    mean_obj_plot = runSimulation(all_samples_mean, obs_data, variables, fixed_values)
 
     # Plot the data with residuals and the best fit
-    plot_data_with_residuals_and_real(obs_data, mean_obj_plot, output_folder +os.sep+ 'fit_plots', file_name+'_mean','blue', 'Mean')
-    plot_all_vs_height(obs_data, mean_obj_plot, output_folder +os.sep+ 'fit_plots', file_name + "_mean_height", color_sim='blue', label_sim='Mean')
+    plotSimVsObsResiduals(obs_data, mean_obj_plot, output_folder +os.sep+ 'fit_plots', file_name+'_mean','blue', 'Mean')
+    plotObsVsHeight(obs_data, mean_obj_plot, output_folder +os.sep+ 'fit_plots', file_name + "_mean_height", color_sim='blue', label_sim='Mean')
 
-    _ = build_const(all_samples_mean, obs_data, variables, fixed_values, dir_path=output_folder +os.sep+ 'fit_plots', file_name= file_name + '_sim_fit_dynesty_mean.json')
+    _ = constructConstants(all_samples_mean, obs_data, variables, fixed_values, dir_path=output_folder +os.sep+ 'fit_plots', file_name= file_name + '_sim_fit_dynesty_mean.json')
 
     ### MEDIAN PLOT and json ###
 
-    median_obj_plot = run_simulation(all_samples_median, obs_data, variables, fixed_values)
+    median_obj_plot = runSimulation(all_samples_median, obs_data, variables, fixed_values)
 
     # Plot the data with residuals and the best fit
-    plot_data_with_residuals_and_real(obs_data, median_obj_plot, output_folder +os.sep+ 'fit_plots', file_name+'_median','cornflowerblue', 'Median')
-    plot_all_vs_height(obs_data, median_obj_plot, output_folder +os.sep+ 'fit_plots', file_name + "_median_height", color_sim='cornflowerblue', label_sim='Median')
+    plotSimVsObsResiduals(obs_data, median_obj_plot, output_folder +os.sep+ 'fit_plots', file_name+'_median','cornflowerblue', 'Median')
+    plotObsVsHeight(obs_data, median_obj_plot, output_folder +os.sep+ 'fit_plots', file_name + "_median_height", color_sim='cornflowerblue', label_sim='Median')
 
-    _ = build_const(all_samples_median, obs_data, variables, fixed_values, dir_path=output_folder +os.sep+ 'fit_plots', file_name= file_name + '_sim_fit_dynesty_median.json')
+    _ = constructConstants(all_samples_median, obs_data, variables, fixed_values, dir_path=output_folder +os.sep+ 'fit_plots', file_name= file_name + '_sim_fit_dynesty_median.json')
 
     ### PLOT JSON DATA VS OBS ###
 
@@ -2031,7 +2197,7 @@ def plot_dynesty(dynesty_run_results, obs_data, flags_dict, fixed_values, output
         print('No noise_lum found in variables or fixed_values')
 
     print('Correct the LogL with the best noise values for the json files (if any):')
-    plot_json_data_vs_obs(obs_data,output_folder,best_noise_lum=best_noise_lum,best_noise_lag=best_noise_lag)
+    plotJSONDataVsObs(obs_data,output_folder,best_noise_lum=best_noise_lum,best_noise_lag=best_noise_lag)
 
     ### PLOT posterior bands vs height and save to backup ###
 
@@ -2074,12 +2240,12 @@ def plot_dynesty(dynesty_run_results, obs_data, flags_dict, fixed_values, output
             print(f"Running all the simulations to have the uncertaty regions with {cores} cores")        
 
             # # ONLY FOR TESTING PURPOSES
-            # backup_data = posterior_bands_topk_check(
+            # backup_data = posteriorBandsTopkCheck(
             #     dynesty_run_results, obs_data, flags_dict, fixed_values,
             #     top_k=10, output_folder=output_folder, file_name=f'{file_name}_top1000_check',
             # )
 
-            backup_data = posterior_bands_vs_height_parallel(
+            backup_data = posteriorBandsVsHeightParallel(
                 dynesty_results=dynesty_run_results,
                 obs_data=obs_data,
                 flags_dict=flags_dict,
@@ -2175,16 +2341,16 @@ def plot_dynesty(dynesty_run_results, obs_data, flags_dict, fixed_values, output
         for i, variable in enumerate(variables): 
             # check variable is 'v_init' or 'erosion_height_start' divide by 1000
             if 'v_init' in variable or 'height' in variable:
-                truths[i] = truths[i] / 1000
+                truths[i] = truths[i]/1000
             # check variable is 'erosion_coeff' or 'sigma' divide by 1e6
             if 'sigma' in variable or 'erosion_coeff' in variable:
-                truths[i] = truths[i] * 1e6
+                truths[i] = truths[i]*1e6
 
         # Compare to true theta
         # bias = posterior_mean - truths
         bias = best_guess_table - truths
         abs_error = np.abs(bias)
-        rel_error = abs_error / np.abs(truths) * 100
+        rel_error = abs_error/np.abs(truths)*100
 
         # Coverage check
         coverage_mask = (truths >= lower_95) & (truths <= upper_95)
@@ -2303,9 +2469,9 @@ def plot_dynesty(dynesty_run_results, obs_data, flags_dict, fixed_values, output
         if 'log' in flags_dict.get(var, '') and ('mass_min' in var or 'mass_max' in var or 'm_init' in var or 'compressive_strength' in var):
             labels_plot_copy_plot[j] =r"$\log_{10}$(" +labels_plot_copy_plot[j]+")"
         if 'v_init' in var or 'height' in var:
-            combined_samples_copy_plot[:, j] = combined_samples_copy_plot[:, j] / 1000.0
+            combined_samples_copy_plot[:, j] = combined_samples_copy_plot[:, j]/1000.0
         if 'sigma' in var or 'erosion_coeff' in var:
-            combined_samples_copy_plot[:, j] = combined_samples_copy_plot[:, j] * 1e6
+            combined_samples_copy_plot[:, j] = combined_samples_copy_plot[:, j]*1e6
 
     print('saving distribution plot...')
 
@@ -2313,7 +2479,7 @@ def plot_dynesty(dynesty_run_results, obs_data, flags_dict, fixed_values, output
     samples = combined_samples_copy_plot
     # samples = combined_results.samples
     weights = dynesty_run_results.importance_weights()
-    w = weights / np.sum(weights)
+    w = weights/np.sum(weights)
     ndim = samples.shape[1]
 
     # Plot grid settings
@@ -2321,8 +2487,8 @@ def plot_dynesty(dynesty_run_results, obs_data, flags_dict, fixed_values, output
         ncols = 5
     else:
         ncols = 4
-    nrows = math.ceil(ndim / ncols)
-    fig, axes = plt.subplots(nrows, ncols, figsize=(3.5 * ncols, 2.5 * nrows))
+    nrows = math.ceil(ndim/ncols)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(3.5*ncols, 2.5*nrows))
     axes = axes.flatten()
 
     # Define smoothing value
@@ -2344,11 +2510,11 @@ def plot_dynesty(dynesty_run_results, obs_data, flags_dict, fixed_values, output
         if isinstance(smooth, int):
             hist, edges = np.histogram(x_valid, bins=smooth, weights=w_valid, range=(lo, hi))
         else:
-            nbins = int(round(10. / smooth))
+            nbins = int(round(10./smooth))
             hist, edges = np.histogram(x_valid, bins=nbins, weights=w_valid, range=(lo, hi))
             hist = norm_kde(hist, 10.0)  # dynesty-style smoothing
 
-        centers = 0.5 * (edges[1:] + edges[:-1])
+        centers = 0.5*(edges[1:] + edges[:-1])
 
         # Fill under the curve
         ax.fill_between(centers, hist, color='blue', alpha=0.6)
@@ -2460,12 +2626,12 @@ def plot_dynesty(dynesty_run_results, obs_data, flags_dict, fixed_values, output
         x = np.asarray(x)
         y = np.asarray(y)
         w_sum = w.sum()
-        x_mean = (w * x).sum() / w_sum
-        y_mean = (w * y).sum() / w_sum
-        cov_xy = (w * (x - x_mean) * (y - y_mean)).sum() / w_sum
-        var_x  = (w * (x - x_mean)**2).sum() / w_sum
-        var_y  = (w * (y - y_mean)**2).sum() / w_sum
-        return cov_xy / np.sqrt(var_x * var_y)
+        x_mean = (w*x).sum()/w_sum
+        y_mean = (w*y).sum()/w_sum
+        cov_xy = (w*(x - x_mean)*(y - y_mean)).sum()/w_sum
+        var_x  = (w*(x - x_mean)**2).sum()/w_sum
+        var_y  = (w*(y - y_mean)**2).sum()/w_sum
+        return cov_xy/np.sqrt(var_x*var_y)
 
 
     # Trace Plots
@@ -2542,9 +2708,9 @@ def plot_dynesty(dynesty_run_results, obs_data, flags_dict, fixed_values, output
 
             # Only update the formatter if we actually have tick locations:
             if len(x_locs) > 0:
-                ax_.xaxis.set_major_formatter(ticker.FormatStrFormatter('%.4g'))
+                ax_.xaxis.set_major_formatter(FormatStrFormatter('%.4g'))
             if len(y_locs) > 0:
-                ax_.yaxis.set_major_formatter(ticker.FormatStrFormatter('%.4g'))
+                ax_.yaxis.set_major_formatter(FormatStrFormatter('%.4g'))
 
     for i in range(ndim):
         for j in range(ndim):
@@ -2649,8 +2815,22 @@ def plot_dynesty(dynesty_run_results, obs_data, flags_dict, fixed_values, output
 ###############################################################################
 
 
-def read_prior_to_bounds(object_meteor, file_path="", user_inputs=None):
-    ''' Read the prior file and generate the bounds for the dynesty sampler '''
+def loadPriorsAndGenerateBounds(object_meteor, file_path="", user_inputs=None):
+    """ Read the prior file and generate the bounds, flags, and fixed values for the dynesty sampler.
+
+    Arguments:
+        object_meteor: [object] Meteor object containing observational data.
+
+    Keyword arguments:
+        file_path: [str] Path to the prior file. Empty string by default.
+        user_inputs: [dict] Dictionary of user override values. None by default.
+
+    Return:
+        bounds: [list] List of tuples defining the bounds for each parameter.
+        flags_dict: [dict] Dictionary of flags for parameter transformation (e.g., 'log', 'norm').
+        fixed_values: [dict] Dictionary of fixed parameter values.
+
+    """
 
     user_inputs = {} if user_inputs is None else dict(user_inputs)
 
@@ -2685,21 +2865,21 @@ def read_prior_to_bounds(object_meteor, file_path="", user_inputs=None):
         "zenith_angle": (0.01, np.nan),
         "m_init": (np.nan, np.nan),
         "rho": (100, 4000),
-        "sigma": (0.001 / 1e6, 0.05 / 1e6),
+        "sigma": (0.001/1e6, 0.05/1e6),
         "erosion_height_start": (
-            h_beg - 100 - (h_beg - h_peak) / 2,
-            h_beg + 100 + (h_beg - h_peak) / 2),
+            h_beg - 100 - (h_beg - h_peak)/2,
+            h_beg + 100 + (h_beg - h_peak)/2),
         # h_beg -100- (h_beg - h_peak),\
         # h_beg +100+ abs(h_beg - h_end)), 
-        "erosion_coeff": (1 / 1e12, 2 / 1e6),  # log transformation applied later
+        "erosion_coeff": (1/1e12, 2/1e6),  # log transformation applied later
         "erosion_mass_index": (1, 3),
         "erosion_mass_min": (5e-12, 1e-9),  # log transformation applied later
         "erosion_mass_max": (1e-10, 1e-7),  # log transformation applied later
         "rho_grain": (3000, 3500),
         "erosion_height_change": (h_end - 100, h_beg + 100),
         "erosion_rho_change": (100, 4000),
-        "erosion_sigma_change": (0.001 / 1e6, 0.05 / 1e6),
-        "erosion_coeff_change": (1 / 1e12, 2 / 1e6),  # log transformation applied later
+        "erosion_sigma_change": (0.001/1e6, 0.05/1e6),
+        "erosion_coeff_change": (1/1e12, 2/1e6),  # log transformation applied later
         "noise_lag": (10, object_meteor.noise_lag), # more of a peak around the real value
         "noise_lum": (5, object_meteor.noise_lum) # look for more values at higher uncertainty can be because of the noise
     }
@@ -2773,9 +2953,9 @@ def read_prior_to_bounds(object_meteor, file_path="", user_inputs=None):
             "zenith_angle": float(get_estimate("zenith_angle") if get_estimate("zenith_angle") is not None else object_meteor.zenith_angle),
             "rho_grain": rho_grain_real,
             "erosion_height_change": 1,
-            "erosion_coeff_change": 1 / 1e7,
+            "erosion_coeff_change": 1/1e7,
             "erosion_rho_change": rho_grain_real,
-            "erosion_sigma_change": 0.001 / 1e6
+            "erosion_sigma_change": 0.001/1e6
         }
 
     else:
@@ -2827,7 +3007,7 @@ def read_prior_to_bounds(object_meteor, file_path="", user_inputs=None):
                 max_val = safe_eval(max_val) if isinstance(max_val, str) and max_val.lower() != "nan" else default_bounds.get(name, (np.nan, np.nan))[1]
                 # print(f"Setting bounds for '{name}': min={min_val}, max={max_val}, flags={flags}")
 
-                min_val, max_val, flags = bounds_min_max_flags(
+                min_val, max_val, flags = boundsMinMaxFlags(
                     name, object_meteor, min_val, max_val, flags, default_bounds, default_flags
                 )
                 # Store flags
@@ -2853,11 +3033,27 @@ def read_prior_to_bounds(object_meteor, file_path="", user_inputs=None):
     return bounds, flags_dict, fixed_values
 
 
-def append_extraprior_to_bounds(object_meteor, bounds, flags_dict, fixed_values, file_path, user_inputs=None):
-    """
-    Append extra priors from a .extraprior file to existing bounds, flags, and fixed values.
+def appendExtraPriorsToBounds(object_meteor, bounds, flags_dict, fixed_values, file_path, user_inputs=None):
+    """ Append extra priors from a .extraprior file to existing bounds, flags, and fixed values.
+
     Adds numbering to identical fragment types (e.g., M0, M1).
     Ensures all required fragmentation parameters are present per block context.
+    
+    Arguments:
+        object_meteor: [object] Meteor object containing observational data.
+        bounds: [list] Existing bounds list.
+        flags_dict: [dict] Existing flags dictionary.
+        fixed_values: [dict] Existing fixed values dictionary.
+        file_path: [str] Path to the extra prior file.
+
+    Keyword arguments:
+        user_inputs: [dict] Dictionary of user override values. None by default.
+
+    Return:
+        bounds: [list] Updated bounds list.
+        flags_dict: [dict] Updated flags dictionary.
+        fixed_values: [dict] Updated fixed values dictionary.
+
     """
     
     # optional user overrides
@@ -2883,12 +3079,12 @@ def append_extraprior_to_bounds(object_meteor, bounds, flags_dict, fixed_values,
         print("WARNING: Provided file is not an .extraprior file, return bounds, flags and fixed parameters")
         return bounds, flags_dict, fixed_values
 
-    flare_start_end, flare_start_init = find_strongest_flare(object_meteor.height_lum, object_meteor.absolute_magnitudes)
+    flare_start_end, flare_start_init = findStrongestFlare(object_meteor.height_lum, object_meteor.absolute_magnitudes)
 
     default_bounds = {
         "height": (flare_start_end, flare_start_init),
-        "sigma": (0.001 / 1e6, 0.05 / 1e6),
-        "erosion_coeff": (1 / 1e12, 2 / 1e6),
+        "sigma": (0.001/1e6, 0.05/1e6),
+        "erosion_coeff": (1/1e12, 2/1e6),
         "grain_mass_min": (5e-12, 1e-9),
         "grain_mass_max": (1e-10, 1e-7),
         "mass_index": (1, 3),
@@ -3050,7 +3246,7 @@ def append_extraprior_to_bounds(object_meteor, bounds, flags_dict, fixed_values,
             min_val = safe_eval(min_val) if isinstance(min_val, str) and min_val.lower() != "nan" else default_bounds.get(name, (np.nan, np.nan))[0]
             max_val = safe_eval(max_val) if isinstance(max_val, str) and max_val.lower() != "nan" else default_bounds.get(name, (np.nan, np.nan))[1]
 
-            min_val, max_val, flags = bounds_min_max_flags(name, object_meteor, min_val, max_val, flags, default_bounds, default_flags)
+            min_val, max_val, flags = boundsMinMaxFlags(name, object_meteor, min_val, max_val, flags, default_bounds, default_flags)
 
             extraprior_flags[var_name] = flags
             extraprior_bounds.append((min_val, max_val))
@@ -3064,7 +3260,24 @@ def append_extraprior_to_bounds(object_meteor, bounds, flags_dict, fixed_values,
     return bounds, flags_dict, fixed_values
 
 
-def bounds_min_max_flags(name, object_meteor, min_val, max_val, flags, default_bounds, default_flags):
+def boundsMinMaxFlags(name, object_meteor, min_val, max_val, flags, default_bounds, default_flags):
+    """ Calculate the bounds, min, max, and flags for a given parameter.
+
+    Arguments:
+        name: [str] Name of the parameter.
+        object_meteor: [object] Meteor object containing observational data.
+        min_val: [float] Minimum value for the parameter.
+        max_val: [float] Maximum value for the parameter.
+        flags: [list] List of flags for the parameter.
+        default_bounds: [dict] Dictionary of default bounds.
+        default_flags: [dict] Dictionary of default flags.
+
+    Return:
+        min_val: [float] Calculated minimum value.
+        max_val: [float] Calculated maximum value.
+        flags: [list] List of flags for the parameter.
+    
+    """
 
     # check if min_val is a string and replace it with np.nan
     if isinstance(min_val, str):
@@ -3100,7 +3313,7 @@ def bounds_min_max_flags(name, object_meteor, min_val, max_val, flags, default_b
             max_val = object_meteor.__dict__[name] + default_bounds.get(name, (np.nan, np.nan))[0]
         else:
             # max_val = object_meteor.__dict__[name] + 10**int(np.floor(np.log10(abs(object_meteor.__dict__[name]))))#object_meteor.__dict__[name]/10/2
-            max_val = 2 * 10**int(np.floor(np.log10(abs(object_meteor.__dict__[name]))) + 1)#object_meteor.__dict__[name]/10/2
+            max_val = 2*10**int(np.floor(np.log10(abs(object_meteor.__dict__[name]))) + 1)#object_meteor.__dict__[name]/10/2
                     
     #### rest of variables ####
     if np.isnan(min_val) and ("norm" in flags or "invgamma" in flags):
@@ -3142,25 +3355,25 @@ def bounds_min_max_flags(name, object_meteor, min_val, max_val, flags, default_b
     return min_val, max_val, flags
 
 
-def find_strongest_flare(height, magnitude, preflare_points=-1, sigma_threshold=3):
-    """
-    Detect all flares (onset to end) and select the strongest one based on envelope length.
+def findStrongestFlare(height, magnitude, preflare_points=-1, sigma_threshold=3):
+    """ Detect all flares (onset to end) and select the strongest one based on envelope length.
     
-    Parameters:
-        height (array-like): Heights (descending order)
-        magnitude (array-like): Absolute magnitude (brightness)
-        preflare_points (int): Number of points to fit baseline parabola
-        sigma_threshold (float): Sigma threshold for flare detection
+    Arguments:
+        height: [array-like] Heights (descending order).
+        magnitude: [array-like] Absolute magnitude (brightness).
 
-    Returns:
-        flare_start_range: (min_height, max_height) for the strongest flare onset
-        strongest_flare_onset: Onset height of the strongest flare
-        strongest_flare_end: End height of the strongest flare
-        strongest_flare_peak: Peak height of the strongest flare
+    Keyword arguments:
+        preflare_points: [int] Number of points to fit baseline parabola. -1 by default (auto-detect).
+        sigma_threshold: [float] Sigma threshold for flare detection. 3 by default.
+
+    Return:
+        min_height: [float] Minimum height of the strongest flare onset range.
+        max_height: [float] Maximum height of the strongest flare onset range.
+
     """
 
     def parabola(x, a, b, c):
-        return a * x**2 + b * x + c
+        return a*x**2 + b*x + c
     
     height_real = height
 
@@ -3168,7 +3381,7 @@ def find_strongest_flare(height, magnitude, preflare_points=-1, sigma_threshold=
     magnitude = np.array(magnitude)
 
     # Normalize height for numerical stability
-    height_norm = height / 1e5
+    height_norm = height/1e5
 
     if preflare_points <= 1:
         # preflare_points = int(len(height)/3)
@@ -3205,12 +3418,12 @@ def find_strongest_flare(height, magnitude, preflare_points=-1, sigma_threshold=
     for idx in range(preflare_points, len(residuals)):
         if not in_flare:
             # Flare onset detection
-            if residuals[idx] < baseline_mean - sigma_threshold * baseline_std:
+            if residuals[idx] < baseline_mean - sigma_threshold*baseline_std:
                 onset_idx = idx
                 in_flare = True
         else:
             # Flare end detection (merge-back to parabola)
-            if residuals[idx] >= baseline_mean - sigma_threshold * baseline_std:
+            if residuals[idx] >= baseline_mean - sigma_threshold*baseline_std:
                 end_idx = idx
                 flares.append((onset_idx, end_idx))
                 in_flare = False
@@ -3237,7 +3450,7 @@ def find_strongest_flare(height, magnitude, preflare_points=-1, sigma_threshold=
 
     # Compute search range around onset
     # envelope_length = flare_lengths[strongest_idx]
-    # search_range = envelope_fraction * envelope_length
+    # search_range = envelope_fraction*envelope_length
     search_range = abs(strongest_flare_peak-strongest_flare_onset)/2
     # flare_start_range = (strongest_flare_onset - search_range, strongest_flare_onset + search_range)
     print(f"Strongest flare detected: Onset={strongest_flare_onset}, End={strongest_flare_end}, Peak={strongest_flare_peak}")
@@ -3249,8 +3462,23 @@ def find_strongest_flare(height, magnitude, preflare_points=-1, sigma_threshold=
 # Load observation data and create an object
 ###############################################################################
 
-def luminosity_integration(all_simulated_time,time_fps,luminosity_arr,dt,fps,P_0m):
-    ''' Function to integrate the luminosity over time and create a new luminosity array '''
+def integrateLuminosity(all_simulated_time, time_fps, luminosity_arr, dt, fps, P_0m):
+    """ Integrate the luminosity over time and create a new luminosity array.
+
+    Arguments:
+        all_simulated_time: [ndarray] Array of all simulated time steps.
+        time_fps: [ndarray] Array of time steps corresponding to the frames (observed time).
+        luminosity_arr: [ndarray] Array of simulated luminosity values corresponding to `all_simulated_time`.
+        dt: [float] Simulation time step (not actively used in simple mean calculation but kept for signature).
+        fps: [float] Frames per second, defining the integration window (1/fps).
+        P_0m: [float] Power of a zero-magnitude meteor (approx 840 W).
+
+    Return:
+        new_luminosity_arr: [ndarray] integrated/averaged luminosity at `time_fps` points.
+        new_abs_magnitude: [ndarray] Calculated absolute magnitude from the new luminosity.
+
+    """
+    
     # make a copy of the luminosity_arr to make the new_luminosity_arr
     new_luminosity_arr = np.full(len(time_fps), np.nan) 
     new_abs_magnitude = np.full(len(time_fps), np.nan)
@@ -3266,9 +3494,24 @@ def luminosity_integration(all_simulated_time,time_fps,luminosity_arr,dt,fps,P_0
     return new_luminosity_arr, new_abs_magnitude
 
 
-class observation_data:
-    ''' class to load the observation data and create an object '''
-    def __init__(self, obs_file_path,use_all_cameras=False, lag_noise_prior=40, lum_noise_prior=2.5, fps_prior=np.nan, P_0m_prior=np.nan, pick_position=0, prior_file_path=""):
+class ObservationData:
+    """ Class to load the observation data and create an object.
+
+    Arguments:
+        obs_file_path: [str or list] Path to the observation file(s) (pickle or json).
+
+    Keyword arguments:
+        use_all_cameras: [bool] Flag to use all cameras. False by default.
+        lag_noise_prior: [float] Prior estimate for lag noise (in meters). 40 by default.
+        lum_noise_prior: [float] Prior estimate for luminosity noise (in mag). 2.5 by default.
+        fps_prior: [float] Prior override for FPS. np.nan by default.
+        P_0m_prior: [float] Prior override for P_0m (power of zero magnitude, in Watts). np.nan by default.
+        pick_position: [int] Index to pick specific position/station data. 0 by default.
+        prior_file_path: [str] Path to a prior file. Empty string by default.
+
+    """
+    def __init__(self, obs_file_path, use_all_cameras=False, lag_noise_prior=40, lum_noise_prior=2.5, 
+                 fps_prior=np.nan, P_0m_prior=np.nan, pick_position=0, prior_file_path=""):
         self.noise_lag = lag_noise_prior
         self.noise_lum = lum_noise_prior
         self.file_name = obs_file_path
@@ -3279,15 +3522,16 @@ class observation_data:
 
         # check if the file is a json file
         if obs_file_path.endswith('.pickle'):
-            self.load_pickle_data(use_all_cameras,pick_position,prior_file_path, fps_prior, P_0m_prior)
+            self.loadPickleData(use_all_cameras,pick_position,prior_file_path, fps_prior, P_0m_prior)
         elif obs_file_path.endswith('.json'):
-            self.load_json_data(use_all_cameras)
+            self.loadJSONData(use_all_cameras)
         else:
             # file type not supported
             raise ValueError("File type not supported, only .json and .pickle files are supported")
 
-    def save_to_json(self, filepath="output.json"):
+    def saveToJSON(self, filepath="output.json"):
         """Save all attributes of self to a JSON file (numpy arrays converted to lists)."""
+
         def convert(obj):
             if isinstance(obj, np.ndarray):
                 return obj.tolist()
@@ -3304,12 +3548,21 @@ class observation_data:
         
         print(f"Saved object state to {filepath}")
 
-    def load_pickle_data(self, use_all_cameras=False, pick_position=0, prior_file_path="", fps_prior=np.nan, P_0m_prior=np.nan):
+    def loadPickleData(self, use_all_cameras=False, pick_position=0, prior_file_path="", fps_prior=np.nan, 
+                       P_0m_prior=np.nan):
+        """ Load the pickle file(s) and create a dictionary keyed by each file name.
+
+        Each file's data (e.g., list of station IDs, dens_co, zenith_angle, etc.) goes into a sub-dict.
+        
+        Keyword arguments:
+            use_all_cameras: [bool] Flag to use all cameras (i.e. not filtering for specific types). False by default.
+            pick_position: [int] Index to pick specific position/station data. 0 by default.
+            prior_file_path: [str] Path to a prior file. Empty string by default.
+            fps_prior: [float] Prior override for FPS. np.nan by default.
+            P_0m_prior: [float] Prior override for P_0m (power of zero magnitude, in Watts). np.nan by default.
+
         """
-        Load the pickle file(s) and create a dictionary keyed by each file name.
-        Each files data (e.g., list of station IDs, dens_co, zenith_angle, etc.)
-        goes into a sub-dict.
-        """
+        
         print('Loading pickle file(s):', self.file_name)
         
         # Top-level dictionary.
@@ -3379,7 +3632,7 @@ class observation_data:
                     'length': np.array(obs.state_vect_dist), # m
                     'time_lag': np.array(obs.time_data), # s
                     'height_lag': np.array(obs.model_ht), # m
-                    'apparent_magnitudes': np.array(meteor_abs_magnitude_to_apparent(np.array(obs.absolute_magnitudes), np.array(obs.meas_range))) # model_range
+                    'apparent_magnitudes': np.array(meteorAbsMagnitudeToApparent(np.array(obs.absolute_magnitudes), np.array(obs.meas_range))) # model_range
                     }
                 obs_data_camera['velocities'][0] = obs.v_init
                 obs_data_dict.append(obs_data_camera)
@@ -3422,12 +3675,12 @@ class observation_data:
             # check if among unique_stations there is one of the following 01G or 02G or 01F or 02F
             if any(("1G" in station) or ("2G" in station) or ("1F" in station) or ("2F" in station) for station in unique_stations):
                 camera_name_lag = [camera for camera in unique_stations if "1G" in camera or "2G" in camera or "1F" in camera or "2F" in camera]
-                lum_data, lum_files = self.extract_lum_data(combined_obs_dict, camera_name_lag)
+                lum_data, lum_files = self.extractLumData(combined_obs_dict, camera_name_lag)
                 self.P_0m = 935
                 self.fps_lum = 32
             elif any(("1K" in station) or ("2K" in station) or ("1T" in station) or ("2T" in station) for station in unique_stations):
                 camera_name_lag = [camera for camera in unique_stations if "1K" in camera or "2K" in camera or "1T" in camera or "2T" in camera]
-                lum_data, lum_files = self.extract_lum_data(combined_obs_dict, camera_name_lag)
+                lum_data, lum_files = self.extractLumData(combined_obs_dict, camera_name_lag)
                 self.P_0m = 840
                 self.fps_lum = 80
             else:
@@ -3439,17 +3692,17 @@ class observation_data:
             if any(("1T" in station) or ("2T" in station) for station in unique_stations):
                 # find the name of the camera that has 1T or 2T
                 camera_name_lag = [camera for camera in unique_stations if "1T" in camera or "2T" in camera]
-                lag_data, lag_files = self.extract_lag_data(combined_obs_dict, camera_name_lag)
+                lag_data, lag_files = self.extractLagData(combined_obs_dict, camera_name_lag)
                 self.fps_lag = 80
             elif any(("1G" in station) or ("2G" in station) or ("1F" in station) or ("2F" in station) for station in unique_stations):
                 # find the name of the camera that has 1G or 2G or 1F or 2F
                 camera_name_lag = [camera for camera in unique_stations if "1G" in camera or "2G" in camera or "1F" in camera or "2F" in camera]
-                lag_data, lag_files = self.extract_lag_data(combined_obs_dict, camera_name_lag)
+                lag_data, lag_files = self.extractLagData(combined_obs_dict, camera_name_lag)
                 self.fps_lag = 32
             elif any(("1K" in station) or ("2K" in station) for station in unique_stations):
                 # find the name of the camera that has 1K or 2K
                 camera_name_lag = [camera for camera in unique_stations if "1K" in camera or "2K" in camera]
-                lag_data, lag_files = self.extract_lag_data(combined_obs_dict, camera_name_lag)
+                lag_data, lag_files = self.extractLagData(combined_obs_dict, camera_name_lag)
                 self.fps_lag = 80
             else:
                 # print the unique_stations
@@ -3533,7 +3786,7 @@ class observation_data:
             offset_tol_use=0.2*(1/self.fps_lum)
         else:
             offset_tol_use=0.2*(1/80.0)
-        lum_data, lum_aligned = build_global_time_axis(lum_data,offset_tol=offset_tol_use)
+        lum_data, lum_aligned = buildGlobalTimeAxis(lum_data,offset_tol=offset_tol_use)
         if lum_aligned:
             print('Luminosity data aligned to global time axis.')
 
@@ -3541,7 +3794,7 @@ class observation_data:
             offset_tol_use=0.2*(1/self.fps_lag)
         else:
             offset_tol_use=0.2*(1/80.0)
-        lag_data, lag_aligned = build_global_time_axis(
+        lag_data, lag_aligned = buildGlobalTimeAxis(
             lag_data,
             offset_tol=offset_tol_use,
             v_init=self.v_init,          # important: recompute lag from length & time
@@ -3592,13 +3845,13 @@ class observation_data:
 
         # usually noise_lum = 2.5
         if np.isnan(self.noise_lum):
-            self.noise_lum = self.define_SNR_lum_noise()
+            self.noise_lum = self.fitLumNoise()
             print('Assumed Noise in luminosity based on SNR:',self.noise_lum)
         self.noise_mag = 0.1
         
         # usually noise_lag = 40 or 5 for CAMO
         if np.isnan(self.noise_lag):
-            self.noise_lag = self.define_polyn_fit_lag_noise()
+            self.noise_lag = self.fitLagNoise()
             print('Assumed Noise in lag based on polynomial fit:',self.noise_lag)
         self.noise_vel = self.noise_lag*np.sqrt(2)/(1.0/self.fps_lag)
 
@@ -3746,9 +3999,11 @@ class observation_data:
         # # save the data to a json file base on self.obs_file_path but with .json extension for DEBUGGING purposes
         # if json_file_path.endswith('.pickle'):
         #     json_file_path = json_file_path.replace('.pickle', '.json')
-        # self.save_to_json(json_file_path)
+        # self.saveToJSON(json_file_path)
                     
-    def extract_lag_data(self, combined_obs_dict, camera_name_lag):
+    def extractLagData(self, combined_obs_dict, camera_name_lag):
+        """ Extract lag data from the combined observation dictionary. """
+
         lag_dict = []
         combined_lag_dict = {}
         lag_files = []
@@ -3784,7 +4039,9 @@ class observation_data:
 
         return combined_lag_dict, lag_files
     
-    def extract_lum_data(self, combined_obs_dict, camera_name_lum):
+    def extractLumData(self, combined_obs_dict, camera_name_lum):
+        """ Extract luminosity data from the combined observation dictionary. """
+        
         # consider that has to have height_lum absolute_magnitudes luminosity time_lum stations_lum apparent_magnitudes
         lum_dict = []
         combined_lum_dict = {}
@@ -3808,7 +4065,7 @@ class observation_data:
             # Prepend the first difference to align array lengths
             diffheight = np.concatenate(([diffs[0]], diffs))
             # Compute middle heights
-            lum_data['height_middle'] = heights - diffheight / 2
+            lum_data['height_middle'] = heights - diffheight/2
             lum_dict.append(lum_data)
             lum_files.append(lum_file)
         # sort the indices by time in lum_dict
@@ -3821,11 +4078,11 @@ class observation_data:
 
         return combined_lum_dict, lum_files
         
-    def define_polyn_fit_lag_noise(self):
+    def fitLagNoise(self):
         ''' Define the lag fit noise '''
         # Fit a polynomial to the lag data
 
-        def polyn_lag(t, a, b, c, t0):
+        def lagPoly(t, a, b, c, t0):
             """
             Quadratic lag function.
             """
@@ -3850,31 +4107,32 @@ class observation_data:
 
             return lag_funct
         
-        def lag_residual_polyn(params, t_time, l_data):
+        def lagPolyRes(params, t_time, l_data):
             """
             Residual function for the optimization.
             """
 
-            return np.sum((l_data - polyn_lag(t_time, *params))**2)
+            return np.sum((l_data - lagPoly(t_time, *params))**2)
 
         # initial guess of deceleration decel equal to linear fit of velocity
         p0 = [np.mean(self.lag), 0, 0, np.mean(self.time_lag)]
 
-        opt_res = minimize(lag_residual_polyn, p0, args=(np.array(self.time_lag), np.array(self.lag)), method='Nelder-Mead')
+        opt_res = minimize(lagPolyRes, p0, args=(np.array(self.time_lag), np.array(self.lag)), method='Nelder-Mead')
 
         # sample the fit for the velocity and acceleration
         a_t0, b_t0, c_t0, t0 = opt_res.x
-        fitted_lag_t0 = polyn_lag(self.time_lag, a_t0, b_t0, c_t0, t0)
+        fitted_lag_t0 = lagPoly(self.time_lag, a_t0, b_t0, c_t0, t0)
         residuals_t0 = self.lag - fitted_lag_t0
         # avg_residual = np.mean(abs(residuals))
         rmsd_lag_polyn = np.sqrt(np.mean(residuals_t0**2))
 
         return rmsd_lag_polyn
     
-    def define_SNR_lum_noise(self):
+    def fitLumNoise(self):
         ''' Define the SNR luminosity noise '''
+
         # Compute the SNR of the luminosity data
-        shower_code = self.find_IAU_code()
+        shower_code = self.findIAUCode()
         # check if shower_code is None
         if shower_code is None:
             print("No IAU code found")
@@ -3901,7 +4159,7 @@ class observation_data:
             b, log_a = np.polyfit(log_velocities, log_offsets, 1)
             a = np.exp(log_a)
         
-            const = a * self.v_init**b
+            const = a*self.v_init**b
 
         apparent_mag = np.max(self.apparent_magnitudes)
         # find the index of the apparent magnitude in the list
@@ -3911,7 +4169,7 @@ class observation_data:
 
         return lum_noise
 
-    def find_IAU_code(self):
+    def findIAUCode(self):
         # check if self.file_name is a array or a string
         if not isinstance(self.file_name, str):
             # check if among the file_name there is one that contains _mir if so take it
@@ -3989,33 +4247,33 @@ class observation_data:
             if diff_0 < diff_1 and avg_mag_0 < avg_mag_1:
                 self.absolute_magnitudes[station_1_indices] -= avg_diff
                 # Update luminosity for station_1
-                self.luminosity[station_1_indices] = self.P_0m * (10 ** (self.absolute_magnitudes[station_1_indices] / (-2.5)))
+                self.luminosity[station_1_indices] = self.P_0m*(10 ** (self.absolute_magnitudes[station_1_indices]/(-2.5)))
             elif diff_0 < diff_1 and avg_mag_0 > avg_mag_1:
                 self.absolute_magnitudes[station_1_indices] += avg_diff
                 # Update luminosity for station_1
-                self.luminosity[station_1_indices] = self.P_0m * (10 ** (self.absolute_magnitudes[station_1_indices] / (-2.5)))
+                self.luminosity[station_1_indices] = self.P_0m*(10 ** (self.absolute_magnitudes[station_1_indices]/(-2.5)))
             elif diff_0 > diff_1 and avg_mag_0 > avg_mag_1:
                 self.absolute_magnitudes[station_0_indices] -= avg_diff
                 # Update luminosity for station_0
-                self.luminosity[station_0_indices] = self.P_0m * (10 ** (self.absolute_magnitudes[station_0_indices] / (-2.5)))
+                self.luminosity[station_0_indices] = self.P_0m*(10 ** (self.absolute_magnitudes[station_0_indices]/(-2.5)))
             elif diff_0 > diff_1 and avg_mag_0 < avg_mag_1:
                 self.absolute_magnitudes[station_0_indices] += avg_diff
                 # Update luminosity for station_0
-                self.luminosity[station_0_indices] = self.P_0m * (10 ** (self.absolute_magnitudes[station_0_indices] / (-2.5)))
+                self.luminosity[station_0_indices] = self.P_0m*(10 ** (self.absolute_magnitudes[station_0_indices]/(-2.5)))
         else: 
             # Apply correction to station_0's absolute magnitudes
             if avg_mag_0 > avg_mag_1:
                 self.absolute_magnitudes[station_0_indices] -= avg_diff
                 # Update luminosity for station_0
-                self.luminosity[station_0_indices] = self.P_0m * (10 ** (self.absolute_magnitudes[station_0_indices] / (-2.5)))
+                self.luminosity[station_0_indices] = self.P_0m*(10 ** (self.absolute_magnitudes[station_0_indices]/(-2.5)))
             else:
                 self.absolute_magnitudes[station_1_indices] -= avg_diff
                 # Update luminosity for station_1
-                self.luminosity[station_1_indices] = self.P_0m * (10 ** (self.absolute_magnitudes[station_1_indices] / (-2.5)))
+                self.luminosity[station_1_indices] = self.P_0m*(10 ** (self.absolute_magnitudes[station_1_indices]/(-2.5)))
 
 
 
-    def load_json_data(self,use_all_cameras):
+    def loadJSONData(self, use_all_cameras):
 
         '''
         dict_keys(['const', 'frag_main', 'time_arr', 'luminosity_arr', 'luminosity_main_arr', 'luminosity_eroded_arr', 
@@ -4118,8 +4376,10 @@ class observation_data:
             self.fps_lum = 32
            
             if 1/self.fps_lum > self.const.dt:
+
                 # integration time step lumionosity
-                self.luminosity_arr, self.abs_magnitude = luminosity_integration(self.time_arr,self.time_arr,self.luminosity_arr,self.const.dt,self.fps_lum,self.P_0m)
+                self.luminosity_arr, self.abs_magnitude = integrateLuminosity(self.time_arr, self.time_arr, 
+                    self.luminosity_arr, self.const.dt, self.fps_lum, self.P_0m)
 
             # add a gausian noise to the luminosity of 2.5
             lum_obs_data = self.luminosity_arr + np.random.normal(loc=0, scale=self.noise_lum, size=len(self.luminosity_arr))
@@ -4152,7 +4412,7 @@ class observation_data:
             self.dens_co = np.array(self.const.dens_co) 
 
             # Compute absolute magnitudes
-            absolute_magnitudes_check = -2.5 * np.log10(lum_obs_data / self.P_0m)
+            absolute_magnitudes_check = -2.5*np.log10(lum_obs_data/self.P_0m)
 
             # Check if absolute_magnitudes_check exceeds 8
             if len(indices_visible) > 0:
@@ -4210,8 +4470,10 @@ class observation_data:
                 self.noise_vel = self.noise_lag*np.sqrt(2)/(1.0/self.fps_lag)
                 # multiply by a number between 0.6 and 0.4 for the time to track for CAMO
                 time_to_track = (time_visible[-1]-time_visible[0])*np.random.uniform(0.3,0.6)
-                time_sampled_lag, stations_array_lag = self.mimic_fps_camera(time_visible,time_to_track,self.fps_lag,self.stations[2],self.stations[3])
-                time_sampled_lum, stations_array_lum = self.mimic_fps_camera(time_visible,0,fps_lum,self.stations[0],self.stations[1])
+                time_sampled_lag, stations_array_lag = self.mimicCameraFPS(time_visible, time_to_track, 
+                    self.fps_lag, self.stations[2], self.stations[3])
+                time_sampled_lum, stations_array_lum = self.mimicCameraFPS(time_visible, 0, fps_lum, 
+                    self.stations[0], self.stations[1])
             else:
                 self.stations = ['01F','02F']
                 self.fps_lag = 32
@@ -4220,7 +4482,8 @@ class observation_data:
                     self.noise_lag = 40
                 self.noise_vel = self.noise_lag*np.sqrt(2)/(1.0/self.fps_lag)
                 time_to_track = 0
-                time_sampled_lag, stations_array_lag = self.mimic_fps_camera(time_visible,time_to_track,self.fps_lag,self.stations[0],self.stations[1])
+                time_sampled_lag, stations_array_lag = self.mimicCameraFPS(time_visible, time_to_track, 
+                    self.fps_lag, self.stations[0], self.stations[1])
                 time_sampled_lum, stations_array_lum = time_sampled_lag, stations_array_lag
 
             # Create new mag, height and length arrays at FPS frequency
@@ -4241,7 +4504,7 @@ class observation_data:
 
             # Compute the theoretical lag (without noise)
             lag_no_noise = (self.leading_frag_length_arr - self.leading_frag_length_arr[index]) - \
-                           (self.v_init * (self.time_arr - self.time_arr[index]))
+                           (self.v_init*(self.time_arr - self.time_arr[index]))
             lag_no_noise -= lag_no_noise[index]
 
             # Interpolate to align with observed height_lag
@@ -4261,7 +4524,21 @@ class observation_data:
             self.new_json_file_save = self._save_json_data()
 
 
-    def mimic_fps_camera(self, time_visible, time_to_track, fps, station1, station2):
+    def mimicCameraFPS(self, time_visible, time_to_track, fps, station1, station2):
+        """ Mimic the camera FPS by sampling the time array.
+        
+        Arguments:
+            time_visible: [ndarray] Array of time steps where the meteor is visible.
+            time_to_track: [float] Duration of tracking time to skip at start (simulating tracking delay).
+            fps: [float] Frames per second of the camera.
+            station1: [str] Name of the first station.
+            station2: [str] Name of the second station.
+
+        Return:
+            time_sampled: [ndarray] Array of time steps sampled at the camera FPS.
+            stations: [ndarray] Array of station names corresponding to `time_sampled`.
+
+        """
 
         # Sample the time according to the FPS from one camera
         time_sampled_cam1 = np.arange(np.min(time_visible)+time_to_track, np.max(time_visible), 1.0/fps)
@@ -4307,19 +4584,19 @@ class observation_data:
         json_self_save = copy.deepcopy(self)
 
         # Convert all numpy arrays in `self2` to lists
-        def convert_to_serializable(obj):
+        def convertToSerializable(obj):
             if isinstance(obj, np.ndarray):
                 return obj.tolist()
             elif isinstance(obj, dict):
-                return {k: convert_to_serializable(v) for k, v in obj.items()}
+                return {k: convertToSerializable(v) for k, v in obj.items()}
             elif isinstance(obj, list):
-                return [convert_to_serializable(v) for v in obj]
+                return [convertToSerializable(v) for v in obj]
             elif hasattr(obj, '__dict__'):  # Convert objects with __dict__
-                return convert_to_serializable(obj.__dict__)
+                return convertToSerializable(obj.__dict__)
             else:
                 return obj  # Leave as is if it's already serializable
 
-        serializable_dict = convert_to_serializable(json_self_save.__dict__)
+        serializable_dict = convertToSerializable(json_self_save.__dict__)
 
         # Define file path for saving
         json_file_save = os.path.splitext(self.file_name)[0] + "_with_noise.json"
@@ -4347,10 +4624,33 @@ class observation_data:
 # find dynestyfile and priors
 ###############################################################################
 
-def setup_folder_and_run_dynesty(input_dir, output_dir='', prior='', resume=True, use_all_cameras=True, only_plot=True, cores=None, pool_MPI=None, pick_position=0, extraprior_file='', save_backup=True):
+def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_all_cameras=True, 
+    only_plot=True, cores=None, pool_MPI=None, pick_position=0, extraprior_file='', save_backup=True):
+    """ Create the output folder if it doesn't exist and run the Dynesty simulation.
+
+    Arguments:
+        input_dir: [str or list] Input directory path(s) or file path(s) containing observations.
+
+    Keyword arguments:
+        output_dir: [str] Path to the output directory. Empty string by default.
+        prior: [str] Path to the prior file. Empty string by default.
+        resume: [bool] Flag to resume a previous run. True by default.
+        use_all_cameras: [bool] Flag to use all cameras. True by default.
+        only_plot: [bool] Flag to only generate plots and skip the Dynesty run. True by default.
+        cores: [int] Number of CPU cores to use. None by default (uses all available).
+        pool_MPI: [object] MPI pool object for parallel execution. None by default.
+        pick_position: [int] Index to pick specific position/station data. 0 by default.
+        extraprior_file: [str] Path to an extra prior file. Empty string by default.
+        save_backup: [bool] Flag to save a backup of the results. True by default.
+
+    Return:
+        None
+
     """
-    Create the output folder if it doesn't exist.
-    """
+
+    if not DYNESTY_FOUND:
+        print("Dynesty package not found. Install dynesty to use the Dynesty functions.")
+        return
 
     # initlize cml_args
     class cml_args:
@@ -4387,7 +4687,7 @@ def setup_folder_and_run_dynesty(input_dir, output_dir='', prior='', resume=True
         print(f"Processing {input_dirfile} look for all files...")
 
         # Use the class to find .dynesty, load prior, and decide output folders
-        finder = find_dynestyfile_and_priors(
+        finder = autoSetupDynestyFiles(
             input_dir_or_file=input_dirfile,
             prior_file=cml_args.prior,
             resume=cml_args.resume,
@@ -4412,13 +4712,13 @@ def setup_folder_and_run_dynesty(input_dir, output_dir='', prior='', resume=True
             finder.report_txt)):
 
             dynesty_file, pickle_file, bounds, flags_dict, fixed_values = dynesty_info
-            obs_data = finder.observation_instance(base_name)
+            obs_data = finder.obsInstance(base_name)
             obs_data.file_name = pickle_file # update teh file name in the observation data object
 
             # update the log file with the error join out_folder,"log_"+base_name+".txt"
             log_file_path = os.path.join(out_folder, f"log_{base_name}.txt")
 
-            dynesty_file = setup_dynesty_output_folder(out_folder, obs_data, bounds, flags_dict, fixed_values, pickle_file, dynesty_file, prior_path, base_name, log_file_path, report_txt)
+            dynesty_file = setupDynestyOutputDir(out_folder, obs_data, bounds, flags_dict, fixed_values, pickle_file, dynesty_file, prior_path, base_name, log_file_path, report_txt)
             
             ### set up obs_data const values to run same simultaions in run_simulation #################
 
@@ -4452,11 +4752,11 @@ def setup_folder_and_run_dynesty(input_dir, output_dir='', prior='', resume=True
                 print("NOTE: Saving backup of dynesty files restuls.")
 
             # Plot obs data vs json file if present
-            plot_json_data_vs_obs(obs_data, out_folder)
+            plotJSONDataVsObs(obs_data, out_folder)
 
             obs_data_json_file = os.path.join(out_folder, f"obs_data_{base_name}.json")
             with open(obs_data_json_file, "w") as f:
-                json.dump(vars(obs_data), f, indent=4, default=json_default)
+                json.dump(vars(obs_data), f, indent=4, default=jsonDefault)
 
 
             if not cml_args.only_plot: 
@@ -4465,9 +4765,9 @@ def setup_folder_and_run_dynesty(input_dir, output_dir='', prior='', resume=True
                 start_time = time.time()
                 # Run dynesty
                 try:
-                    main_dynestsy(dynesty_file, obs_data, bounds, flags_dict, fixed_values, cml_args.cores, output_folder=out_folder, file_name=base_name, log_file_path=log_file_path, pool_MPI=pool_MPI)
+                    dynestyMainRun(dynesty_file, obs_data, bounds, flags_dict, fixed_values, cml_args.cores, output_folder=out_folder, file_name=base_name, log_file_path=log_file_path, pool_MPI=pool_MPI)
                     dsampler = dynesty.DynamicNestedSampler.restore(dynesty_file)
-                    plot_dynesty(dsampler.results, obs_data, flags_dict, fixed_values, out_folder, base_name,log_file_path,cml_args.cores,save_backup=save_backup)
+                    plotDynestyResults(dsampler.results, obs_data, flags_dict, fixed_values, out_folder, base_name,log_file_path,cml_args.cores,save_backup=save_backup)
                 except Exception as e:
                     # Open the file in append mode and write the error message
                     with open(log_file_path, "a") as log_file:
@@ -4476,7 +4776,7 @@ def setup_folder_and_run_dynesty(input_dir, output_dir='', prior='', resume=True
                     # now try and plot the dynesty file results
                     try:
                         dsampler = dynesty.DynamicNestedSampler.restore(dynesty_file)
-                        plot_dynesty(dsampler.results, obs_data, flags_dict, fixed_values, out_folder, base_name,log_file_path,cml_args.cores,save_backup=save_backup)
+                        plotDynestyResults(dsampler.results, obs_data, flags_dict, fixed_values, out_folder, base_name,log_file_path,cml_args.cores,save_backup=save_backup)
                     except Exception as e:
                         with open(log_file_path, "a") as log_file:
                             log_file.write(f"Error encountered in dynestsy plot: {e}")
@@ -4506,14 +4806,14 @@ def setup_folder_and_run_dynesty(input_dir, output_dir='', prior='', resume=True
                 print("Only plotting requested. Skipping dynesty run.")
                 dsampler = dynesty.DynamicNestedSampler.restore(dynesty_file)
                 # dsampler = dynesty oad DynamicNestedSampler by restore(dynesty_file)
-                plot_dynesty(dsampler.results, obs_data, flags_dict, fixed_values, out_folder, base_name,log_file_path,cml_args.cores,save_backup=save_backup)
+                plotDynestyResults(dsampler.results, obs_data, flags_dict, fixed_values, out_folder, base_name,log_file_path,cml_args.cores,save_backup=save_backup)
 
             else:
                 print("Fail to generate dynesty plots, dynasty file not found:",dynesty_file)
                 print("If you want to run the dynasty file set only_plot to False")
 
 
-def setup_dynesty_output_folder(out_folder, obs_data, bounds, flags_dict, fixed_values, pickle_files='', dynesty_file='', prior_path='', base_name='', log_file_path='', report_txt=''):
+def setupDynestyOutputDir(out_folder, obs_data, bounds, flags_dict, fixed_values, pickle_files='', dynesty_file='', prior_path='', base_name='', log_file_path='', report_txt=''):
     """
     Create the output folder and set up the log file.
     """
@@ -4552,7 +4852,7 @@ def setup_dynesty_output_folder(out_folder, obs_data, bounds, flags_dict, fixed_
 
     # create output folder and put the image
     os.makedirs(out_folder, exist_ok=True)
-    plot_data_with_residuals_and_real(obs_data, output_folder=out_folder, file_name=base_name)
+    plotSimVsObsResiduals(obs_data, output_folder=out_folder, file_name=base_name)
     
     dynesty_file_in_output_path = os.path.join(out_folder,os.path.basename(dynesty_file))
     # copy the dynesty file to the output folder if not already there
@@ -4628,7 +4928,7 @@ def setup_dynesty_output_folder(out_folder, obs_data, bounds, flags_dict, fixed_
     return dynesty_file_in_output_path
 
 
-def read_prior_noise_fps_P_0m(file_path, user_inputs=None, object_meteor=None):
+def readSimParams(file_path, user_inputs=None, object_meteor=None):
     """
     check if present and read the prior file and return the bounds, flags, and fixed values.
     """
@@ -4740,7 +5040,7 @@ def read_prior_noise_fps_P_0m(file_path, user_inputs=None, object_meteor=None):
     return noise_lag_prior, noise_lum_prior, fps, P_0m
 
 
-class find_dynestyfile_and_priors:
+class autoSetupDynestyFiles:
     """
     Automatically prepares .dynesty output filenames and associated prior configurations 
     for meteor observation data, supporting both single files and large directory trees 
@@ -4774,12 +5074,27 @@ class find_dynestyfile_and_priors:
          - Prior bounds and flags
          - Output folder
          - Path to associated `report.txt` (or `report_sim.txt`) for IAU identification
-         - Fully initialized `observation_data` instance, accessible via `observation_instance(base_name)`
+         - Fully initialized `ObservationData` instance, accessible via `obsInstance(base_name)`
 
     This class streamlines the processing of diverse meteor datasets by automatically grouping observations, assigning priors, and managing file I/O in a reproducible way, enabling large-scale nested sampling analysis on multi-camera meteor networks.
     """
 
-    def __init__(self, input_dir_or_file, prior_file="", resume=False, output_dir="", use_all_cameras=False,pick_position=0, extraprior_file=""):
+    def __init__(self, input_dir_or_file, prior_file="", resume=False, output_dir="", use_all_cameras=False,
+                 pick_position=0, extraprior_file=""):
+        """ Initialize the autoSetupDynestyFiles class.
+
+        Arguments:
+            input_dir_or_file: [str] Path to the input directory or file.
+
+        Keyword arguments:
+            prior_file: [str] Path to the prior file. Empty string by default.
+            resume: [bool] Flag to resume a previous run. False by default.
+            output_dir: [str] Path to the output directory. Empty string by default.
+            use_all_cameras: [bool] Flag to use all cameras. False by default.
+            pick_position: [int] Index to pick specific position/station data. 0 by default.
+            extraprior_file: [str] Path to an extra prior file. Empty string by default.
+
+        """
         self.input_dir_or_file = input_dir_or_file
         self.prior_file = prior_file
         self.resume = resume
@@ -4797,9 +5112,9 @@ class find_dynestyfile_and_priors:
         self.observation_objects = {}  # {base_name: observation_instance}
 
         # Kick off processing
-        self._process_input()
+        self.processInput()
 
-    def _process_input(self):
+    def processInput(self):
         """Decide if input is file or directory, build .dynesty, figure out prior, and store results."""
         if os.path.isfile(self.input_dir_or_file):
             # Single file case
@@ -4807,7 +5122,7 @@ class find_dynestyfile_and_priors:
             root = os.path.dirname(input_file)
             # take all the files in the folder
             files = os.listdir(root)
-            self._main_folder_costructor(input_file,root,files)
+            self.mainDirConstructor(input_file,root,files)
 
         else:
 
@@ -4825,7 +5140,7 @@ class find_dynestyfile_and_priors:
             print(all_pickle_files)
 
             # Call function to process found pickle files
-            clusters = self._combine_meteor_camera_pickle(all_pickle_files)
+            clusters = self.combinePickleFiles(all_pickle_files)
 
             print(f"Found {len(clusters)} meteors in {self.input_dir_or_file}")
             for i, cluster_info in enumerate(clusters, start=1):
@@ -4841,7 +5156,7 @@ class find_dynestyfile_and_priors:
                     input_file = cluster_info['filenames'][0]
                     root = os.path.dirname(input_file)
                     files = os.listdir(root)
-                    self._main_folder_costructor(input_file,root,files)
+                    self.mainDirConstructor(input_file,root,files)
 
                 elif len(cluster_info['filenames']) > 1:
                     # Combine multiple files into a single observation instance
@@ -4850,7 +5165,7 @@ class find_dynestyfile_and_priors:
                     if all(os.path.dirname(cluster_info['filenames'][0]) == os.path.dirname(f) for f in cluster_info['filenames']):
                         root = os.path.dirname(cluster_info['filenames'][0])
                         files = os.listdir(root)
-                        self._main_folder_costructor(cluster_info['filenames'],root,files,cluster_info['cluster_name'])
+                        self.mainDirConstructor(cluster_info['filenames'],root,files,cluster_info['cluster_name'])
                     else:
                         # join self.input_dir_or_file and cluster_info['cluster_name'] to create a new folder
                         new_combined_input_folder = os.path.join(self.input_dir_or_file, cluster_info['cluster_name'])
@@ -4858,13 +5173,13 @@ class find_dynestyfile_and_priors:
                         if os.path.exists(new_combined_input_folder):
                             root = new_combined_input_folder
                             files = os.listdir(root)
-                            self._main_folder_costructor(cluster_info['filenames'],root,files,cluster_info['cluster_name'])
+                            self.mainDirConstructor(cluster_info['filenames'],root,files,cluster_info['cluster_name'])
                         else:
-                            self._main_folder_costructor(cluster_info['filenames'],new_combined_input_folder,[],cluster_info['cluster_name'])
+                            self.mainDirConstructor(cluster_info['filenames'],new_combined_input_folder,[],cluster_info['cluster_name'])
 
 
 
-    def _combine_meteor_camera_pickle(self, all_pickle_files, time_threshold=1/86400):
+    def combinePickleFiles(self, all_pickle_files, time_threshold=1/86400):
         """
         Group the given pickle files by time (within `time_threshold` in JD).
         
@@ -4961,14 +5276,14 @@ class find_dynestyfile_and_priors:
             cluster_time = []
             for jd_value in jd_values:
                 # transform the jd_value to a datetime object
-                timestamp = (jd_value - 2440587.5) * 86400.0
+                timestamp = (jd_value - 2440587.5)*86400.0
                 dt = datetime.datetime.utcfromtimestamp(timestamp)
                 base_str = dt.strftime("%Y%m%d_%H%M%S")
                 msec = dt.microsecond // 1000
                 cluster_time.append(f"{base_str}.{msec:03d}")
             # put jd_values in 
             avg_jd = np.mean(jd_values)
-            timestamp = (avg_jd - 2440587.5) * 86400.0
+            timestamp = (avg_jd - 2440587.5)*86400.0
             avg_dt = datetime.datetime.utcfromtimestamp(timestamp)
 
             base_str = avg_dt.strftime("%Y%m%d_%H%M%S")
@@ -5004,7 +5319,7 @@ class find_dynestyfile_and_priors:
         return clusters_result
 
 
-    def _main_folder_costructor(self, input_file, root, files, base_name=""):
+    def mainDirConstructor(self, input_file, root, files, base_name=""):
         """ Main function to return the observation instance """
 
         lag_noise_prior = np.nan
@@ -5014,13 +5329,13 @@ class find_dynestyfile_and_priors:
         # If user gave a valid .prior path, read it once.
         if os.path.isfile(self.prior_file):
             prior_path_noise = self.prior_file
-            lag_noise_prior, lum_noise_prior, fps_prior, P_0m_prior = read_prior_noise_fps_P_0m(self.prior_file)
+            lag_noise_prior, lum_noise_prior, fps_prior, P_0m_prior = readSimParams(self.prior_file)
         else:
             # Look for local .prior
             existing_prior_list = [f for f in files if f.endswith(".prior")]
             if existing_prior_list:
                 prior_path_noise = os.path.join(root, existing_prior_list[0])
-                lag_noise_prior, lum_noise_prior, fps_prior, P_0m_prior = read_prior_noise_fps_P_0m(prior_path_noise)
+                lag_noise_prior, lum_noise_prior, fps_prior, P_0m_prior = readSimParams(prior_path_noise)
 
         if not (np.isnan(lag_noise_prior) or np.isnan(lum_noise_prior)):
             print("Found noise in prior file: lag",lag_noise_prior,"m, lum",lum_noise_prior,"J/s")
@@ -5039,7 +5354,8 @@ class find_dynestyfile_and_priors:
                 # default
                 prior_path = ""
 
-        observation_instance = observation_data(input_file, self.use_all_cameras, lag_noise_prior, lum_noise_prior, fps_prior, P_0m_prior, self.pick_position, prior_path)
+        observation_instance = ObservationData(input_file, self.use_all_cameras, lag_noise_prior, 
+            lum_noise_prior, fps_prior, P_0m_prior, self.pick_position, prior_path)
 
        # check if any camera was found if not return
         if not hasattr(observation_instance,'stations_lag'):
@@ -5101,7 +5417,7 @@ class find_dynestyfile_and_priors:
                 if self.resume:
                     dynesty_file = possible_dynesty
                 else:
-                    dynesty_file = self._build_new_dynesty_name(possible_dynesty)
+                    dynesty_file = self.constructNewDynestyName(possible_dynesty)
             else:
                 dynesty_file = possible_dynesty
         else:
@@ -5111,13 +5427,13 @@ class find_dynestyfile_and_priors:
         # If user gave a valid .prior path, read it once.
         if os.path.isfile(self.prior_file):
             prior_path = self.prior_file
-            bounds, flags_dict, fixed_values = read_prior_to_bounds(observation_instance,self.prior_file)
+            bounds, flags_dict, fixed_values = loadPriorsAndGenerateBounds(observation_instance,self.prior_file)
         else:
-            bounds, flags_dict, fixed_values = read_prior_to_bounds(observation_instance,prior_path)
+            bounds, flags_dict, fixed_values = loadPriorsAndGenerateBounds(observation_instance,prior_path)
 
         # if given open the extra prior file and append the bounds, flags_dict, fixed_values
         if os.path.isfile(self.extraprior_file):
-            bounds, flags_dict, fixed_values = append_extraprior_to_bounds(observation_instance,bounds, flags_dict, fixed_values, file_path=self.extraprior_file)
+            bounds, flags_dict, fixed_values = appendExtraPriorsToBounds(observation_instance,bounds, flags_dict, fixed_values, file_path=self.extraprior_file)
             # if extraprior_file is find then add the path to the prior_path as an array of strings but since is a single file, it will need to be exteded
             prior_path = [prior_path, self.extraprior_file]
         else:
@@ -5127,11 +5443,11 @@ class find_dynestyfile_and_priors:
                 extraprior_path = os.path.join(root, existing_extraprior_list[0])
                 # print the prior path has been found
                 print(f"Take the first extraprior file found in the same folder as the observation file: {extraprior_path}")
-                bounds, flags_dict, fixed_values = append_extraprior_to_bounds(observation_instance,bounds, flags_dict, fixed_values, file_path=extraprior_path)
+                bounds, flags_dict, fixed_values = appendExtraPriorsToBounds(observation_instance,bounds, flags_dict, fixed_values, file_path=extraprior_path)
                 prior_path = [prior_path, extraprior_path]
 
         if base_name == "":
-            base_name = self._extract_base_name(input_file)
+            base_name = self.extractBaseName(input_file)
             
         if self.output_dir=="":
             # # if root do not exist create it
@@ -5154,16 +5470,19 @@ class find_dynestyfile_and_priors:
         self.observation_objects[base_name] = observation_instance
 
 
-    def observation_instance(self, base_name):
+    def obsInstance(self, base_name):
         """Return the observation instance corresponding to a specific base name."""
         return self.observation_objects.get(base_name, None)
 
-    def _extract_base_name(self, file_path):
-        """
-        Extracts a base name from the file:
-        - If the filename starts with "YYYYMMDD_HHMMSS" (e.g., 20230811_082648_trajectory.pickle),
-          return only the first 15 characters: "20230811_082648"
-        - Otherwise, return the filename without extension.
+    def extractBaseName(self, file_path):
+        """ Extract the base name (timestamp) from a file path.
+
+        Arguments:
+            file_path: [str] Full path or filename of the file.
+
+        Return:
+            base_name: [str] Extracted base name (e.g. "YYYYMMDD_HHMMSS") or filename without extension.
+
         """
         filename = os.path.basename(file_path)  # Extract just the file name
         name_without_ext, _ = os.path.splitext(filename)  # Remove extension
@@ -5178,17 +5497,24 @@ class find_dynestyfile_and_priors:
         else:
             return name_without_ext  # Return the full name if no match
 
-    def _find_prior_in_folder(self, folder):
+    def findPriorFile(self, folder):
         """Return the first .prior file found, or None if none."""
         for f in os.listdir(folder):
             if f.endswith(".prior"):
                 return os.path.join(folder, f)
         return None
 
-    def _build_new_dynesty_name(self, existing_dynesty_path):
-        """
-        If resume=False and we want to avoid overwriting an existing .dynesty file,
-        append _n1, _n2, etc. until no file collision occurs.
+    def constructNewDynestyName(self, existing_dynesty_path):
+        """ Generate a new unique filename to avoid overwriting an existing file.
+        
+        Appends _n1, _n2, etc. to the base name until no file collision occurs.
+
+        Arguments:
+            existing_dynesty_path: [str] The original path of the .dynesty file.
+
+        Return:
+            new_path: [str] A unique path that does not exist on the filesystem.
+
         """
         folder = os.path.dirname(existing_dynesty_path)
         base = os.path.splitext(os.path.basename(existing_dynesty_path))[0]
@@ -5207,7 +5533,23 @@ class find_dynestyfile_and_priors:
 # Function: run simulations
 ###############################################################################
 
-def build_const(parameter_guess, real_event, var_names, fix_var, dir_path="", file_name=""):
+def constructConstants(parameter_guess, real_event, var_names, fix_var, dir_path="", file_name=""):
+    """ Construct the constants object for the simulation from the input parameters.
+
+    Arguments:
+        parameter_guess: [list/ndarray] List of parameter values (sampled).
+        real_event: [object] Object containing the real event data (e.g. initial velocity, density coeffs).
+        var_names: [list] List of variable names corresponding to `parameter_guess`.
+        fix_var: [dict] Dictionary of fixed variables.
+
+    Keyword arguments:
+        dir_path: [str] Directory path to save the constants. Empty string by default.
+        file_name: [str] Filename to save the constants. Empty string by default.
+
+    Return:
+        const_nominal: [object] Constants object populated with the simulation parameters.
+
+    """
 
     # Load the nominal simulation parameters
     const_nominal = Constants()
@@ -5281,7 +5623,7 @@ def build_const(parameter_guess, real_event, var_names, fix_var, dir_path="", fi
         combined_frag_dic.update(var_frag_dic)       # keep sampled variables (e.g., height_EF0)
         combined_frag_dic.update(fix_var_frag_dic)   # fixed values override if duplicated
         # use the function thaht add them in the const_nominal
-        const_nominal = add_fragmentation_to_cost(const_nominal, combined_frag_dic)
+        const_nominal = addFragToConst(const_nominal, combined_frag_dic)
 
     if dir_path!="" and file_name!="":
         _, _, _ = runSimulation(const_nominal, compute_wake=False) # completes the some fields in const_nominal that will be saved
@@ -5289,13 +5631,22 @@ def build_const(parameter_guess, real_event, var_names, fix_var, dir_path="", fi
 
     return const_nominal
 
-def run_simulation(parameter_guess, real_event, var_names, fix_var):
-    '''
-    path_and_file = must be a json file generated file from the generate_simulationsm function or from Metsim file
-    '''
+def runSimulation(parameter_guess, real_event, var_names, fix_var):
+    """ Run the MetSim simulation with the given parameters.
+
+    Arguments:
+        parameter_guess: [list/ndarray] List of parameter values (sampled).
+        real_event: [object] Object containing the real event data (e.g. observation data).
+        var_names: [list] List of variable names corresponding to `parameter_guess`.
+        fix_var: [dict] Dictionary of fixed variables.
+
+    Return:
+        simulation_MetSim_object: [object] SimulationResults object containing the simulation results.
+
+    """
 
     # build the const to run the 
-    const_nominal = build_const(parameter_guess, real_event, var_names, fix_var)
+    const_nominal = constructConstants(parameter_guess, real_event, var_names, fix_var)
 
     try:
         # Run the simulation
@@ -5311,10 +5662,19 @@ def run_simulation(parameter_guess, real_event, var_names, fix_var):
 
     return simulation_MetSim_object
 
-def add_fragmentation_to_cost(const_nominal, var_frag_dic):
-    """
-    Add fragmentation variables from var_frag_dic into const_nominal.
-    Organizes variables by fragmentation type and index, creates FragmentationEntry objects.
+def addFragToConst(const_nominal, var_frag_dic):
+    """ Add fragmentation variables from the dictionary into the constants object.
+
+    Organizes variables by fragmentation type and index, creates FragmentationEntry objects,
+    and appends them to the constants object.
+
+    Arguments:
+        const_nominal: [object] Constants object to be updated.
+        var_frag_dic: [dict] Dictionary of fragmentation variables (e.g. {'height_M0': 90000, ...}).
+
+    Return:
+        const_nominal: [object] Updated Constants object.
+
     """
 
     frag_entries = {}
@@ -5480,9 +5840,21 @@ def add_fragmentation_to_cost(const_nominal, var_frag_dic):
 # Function: dynesty
 ###############################################################################
 
-def log_likelihood_dynesty(guess_var, obs_metsim_obj, flags_dict, fix_var, timeout=20):
-    """
-    Runs the simulation with a timeout in a separate process to allow parallel execution.
+def logLikelihoodDynesty(guess_var, obs_metsim_obj, flags_dict, fix_var, timeout=20):
+    """ Calculate the log-likelihood for Dynesty.
+
+    Arguments:
+        guess_var: [list/ndarray] List of parameter values (guess).
+        obs_metsim_obj: [object] Observation object containing observed data.
+        flags_dict: [dict] Dictionary of flags defining variable types and transformations.
+        fix_var: [dict] Dictionary of fixed variables.
+
+    Keyword arguments:
+        timeout: [int] Timeout in seconds for the simulation. 20 by default.
+
+    Return:
+        log_likelihood: [float] Calculated log-likelihood (or -np.inf if invalid/timeout).
+
     """
 
     var_names = list(flags_dict.keys())
@@ -5527,14 +5899,14 @@ def log_likelihood_dynesty(guess_var, obs_metsim_obj, flags_dict, fix_var, timeo
     # check if the OS is not Linux
     if os.name != 'posix':
         # If not Linux, run the simulation without timeout
-        simulation_results = run_simulation(guess_var, obs_metsim_obj, var_names, fix_var)
+        simulation_results = runSimulation(guess_var, obs_metsim_obj, var_names, fix_var)
     else:
         # Set timeout handler
         signal.signal(signal.SIGALRM, timeout_handler)
         signal.alarm(timeout)  # Start the timer for timeout
         # get simulated LC intensity onthe object
         try: # try to run the simulation
-            simulation_results = run_simulation(guess_var, obs_metsim_obj, var_names, fix_var)
+            simulation_results = runSimulation(guess_var, obs_metsim_obj, var_names, fix_var)
         except TimeoutException:
             print('timeout')
             return -np.inf  # immediately return -np.inf if times out
@@ -5554,7 +5926,7 @@ def log_likelihood_dynesty(guess_var, obs_metsim_obj, flags_dict, fix_var, timeo
     all_simulated_time = simulation_results.time_arr- simulated_time[0]#
     # find the integral of the luminosity in time in between FPS but not valid for CAMO narrowfield cameras as there is no smearing becuse it follows the meteor
     if (1/obs_metsim_obj.fps_lum > simulation_results.const.dt): # and (not any('1T' in station for station in obs_metsim_obj.stations_lum) or not any('2T' in station for station in obs_metsim_obj.stations_lum)): # FPS is lower than the simulation time step need to integrate the luminosity
-        simulated_lc_intensity, _ = luminosity_integration(all_simulated_time,obs_metsim_obj.time_lum,simulation_results.luminosity_arr,simulation_results.const.dt,obs_metsim_obj.fps_lum,obs_metsim_obj.P_0m)
+        simulated_lc_intensity, _ = integrateLuminosity(all_simulated_time,obs_metsim_obj.time_lum,simulation_results.luminosity_arr,simulation_results.const.dt,obs_metsim_obj.fps_lum,obs_metsim_obj.P_0m)
     else:
         # too high frame rate, just interpolate the luminosity
         simulated_lc_intensity = np.interp(obs_metsim_obj.height_lum, 
@@ -5566,7 +5938,7 @@ def log_likelihood_dynesty(guess_var, obs_metsim_obj, flags_dict, fix_var, timeo
 
     ### LAG CALC ###
 
-    lag_sim = simulation_results.leading_frag_length_arr - (obs_metsim_obj.v_init * simulation_results.time_arr)
+    lag_sim = simulation_results.leading_frag_length_arr - (obs_metsim_obj.v_init*simulation_results.time_arr)
 
     simulated_lag = np.interp(obs_metsim_obj.height_lag, 
                               np.flip(simulation_results.leading_frag_height_arr), 
@@ -5600,26 +5972,34 @@ def log_likelihood_dynesty(guess_var, obs_metsim_obj, flags_dict, fix_var, timeo
 
     ### Log Likelihood ###
 
-    log_likelihood_lum = np.nansum(-0.5 * np.log(2*np.pi*obs_metsim_obj.noise_lum**2) - 0.5 / (obs_metsim_obj.noise_lum**2) * (obs_metsim_obj.luminosity - simulated_lc_intensity) ** 2)
+    log_likelihood_lum = np.nansum(-0.5*np.log(2*np.pi*obs_metsim_obj.noise_lum**2) - 0.5/(obs_metsim_obj.noise_lum**2)*(obs_metsim_obj.luminosity - simulated_lc_intensity) ** 2)
     # print("log_likelihood_lum:", log_likelihood_lum)
-    log_likelihood_lag = np.nansum(-0.5 * np.log(2*np.pi*obs_metsim_obj.noise_lag**2) - 0.5 / (obs_metsim_obj.noise_lag**2) * (obs_metsim_obj.lag - lag_sim) ** 2)
+    log_likelihood_lag = np.nansum(-0.5*np.log(2*np.pi*obs_metsim_obj.noise_lag**2) - 0.5/(obs_metsim_obj.noise_lag**2)*(obs_metsim_obj.lag - lag_sim) ** 2)
     # print("log_likelihood_lag:", log_likelihood_lag)
 
     log_likelihood_tot = log_likelihood_lum + log_likelihood_lag
 
     ### Chi Square ###
 
-    # chi_square_lum = - 0.5/(obs_metsim_obj.noise_lum**2) * np.nansum((obs_metsim_obj.luminosity_arr - simulated_lc_intensity) ** 2)  # add the error
-    # chi_square_lag = - 0.5/(obs_metsim_obj.noise_lag**2) * np.nansum((obs_metsim_obj.lag - lag_sim) ** 2)  # add the error
+    # chi_square_lum = - 0.5/(obs_metsim_obj.noise_lum**2)*np.nansum((obs_metsim_obj.luminosity_arr - simulated_lc_intensity) ** 2)  # add the error
+    # chi_square_lag = - 0.5/(obs_metsim_obj.noise_lag**2)*np.nansum((obs_metsim_obj.lag - lag_sim) ** 2)  # add the error
 
     # log_likelihood_tot = chi_square_lum + chi_square_lag
 
     return log_likelihood_tot
 
 
-def prior_dynesty(cube,bounds,flags_dict):
-    """
-    Transform the unit cube to a uniform prior
+def priorDynesty(cube, bounds, flags_dict):
+    """ Transform the unit cube samples to the prior distribution.
+
+    Arguments:
+        cube: [list/ndarray] Unit hypercube samples (values between 0 and 1).
+        bounds: [list] List of tuples defining bounds or parameters (min/max or sigma/mean) for each variable.
+        flags_dict: [dict] Dictionary of flags specifying the distribution type (e.g., 'norm', 'invgamma') for each variable.
+
+    Return:
+        x: [ndarray] Transformed parameter values in the prior space.
+
     """
     x = np.array(cube)  # Copy u to avoid modifying it directly
     param_names = list(flags_dict.keys())
@@ -5629,17 +6009,35 @@ def prior_dynesty(cube,bounds,flags_dict):
         if 'norm' in flags_dict[param_name]:
             x[i_prior] = norm.ppf(cube[i_prior], loc=MAX_or_mean, scale=min_or_sigma)
         elif 'invgamma' in flags_dict[param_name]:
-            x[i_prior] = invgamma.ppf(cube[i_prior], min_or_sigma, scale=MAX_or_mean * (min_or_sigma + 1))
+            x[i_prior] = invgamma.ppf(cube[i_prior], min_or_sigma, scale=MAX_or_mean*(min_or_sigma + 1))
         else:
-            x[i_prior] = cube[i_prior] * (MAX_or_mean - min_or_sigma) + min_or_sigma  # Scale and shift
+            x[i_prior] = cube[i_prior]*(MAX_or_mean - min_or_sigma) + min_or_sigma  # Scale and shift
         i_prior += 1
 
     return x
 
 
-def main_dynestsy(dynesty_file, obs_data, bounds, flags_dict, fixed_values, n_core=1, output_folder="", file_name="",log_file_path="", pool_MPI=None):
-    """
-    Main function to run dynesty.
+def dynestyMainRun(dynesty_file, obs_data, bounds, flags_dict, fixed_values, n_core=1, output_folder="", 
+                    file_name="",log_file_path="", pool_MPI=None):
+    """ Main function to run the Dynesty nested sampling.
+
+    Arguments:
+        dynesty_file: [str] Path to the Dynesty checkpoint file.
+        obs_data: [object] Observation object containing observed data.
+        bounds: [list] List of tuples defining bounds or parameters for each variable.
+        flags_dict: [dict] Dictionary of flags specifying the distribution type for each variable.
+        fixed_values: [dict] Dictionary of fixed variables.
+
+    Keyword arguments:
+        n_core: [int] Number of CPU cores to use. 1 by default.
+        output_folder: [str] Path to the output directory. Empty string by default.
+        file_name: [str] Base name of the file (used for logging/naming). Empty string by default.
+        log_file_path: [str] Full path to the log file. Empty string by default.
+        pool_MPI: [object] MPI pool object for parallel execution. None by default.
+
+    Return:
+        None
+
     """
 
     print("Starting dynesty run...")  
@@ -5678,7 +6076,7 @@ def main_dynestsy(dynesty_file, obs_data, bounds, flags_dict, fixed_values, n_co
             ### NEW RUN
 
             # Provide logl_args and ptform_args with a single argument
-            dsampler = dynesty.DynamicNestedSampler(log_likelihood_dynesty, prior_dynesty, ndim,
+            dsampler = dynesty.DynamicNestedSampler(logLikelihoodDynesty, priorDynesty, ndim,
                                                     logl_args=(obs_data, flags_dict, fixed_values, 20),
                                                     ptform_args=(bounds, flags_dict),
                                                     sample='rslice', # nlive=1000,
@@ -5703,7 +6101,7 @@ def main_dynestsy(dynesty_file, obs_data, bounds, flags_dict, fixed_values, n_co
         if not os.path.exists(dynesty_file):
             print("Starting new run:")
             # Start new run
-            with dynesty.pool.Pool(n_core, log_likelihood_dynesty, prior_dynesty,
+            with dynesty.pool.Pool(n_core, logLikelihoodDynesty, priorDynesty,
                                 logl_args=(obs_data, flags_dict, fixed_values, 20),
                                 ptform_args=(bounds, flags_dict)) as pool:
                 ### NEW RUN
@@ -5717,7 +6115,7 @@ def main_dynestsy(dynesty_file, obs_data, bounds, flags_dict, fixed_values, n_co
             print("Resuming previous run:")
             print('Warning: make sure the number of parameters and the bounds are the same as the previous run!')
             # Resume previous run
-            with dynesty.pool.Pool(n_core, log_likelihood_dynesty, prior_dynesty,
+            with dynesty.pool.Pool(n_core, logLikelihoodDynesty, priorDynesty,
                                 logl_args=(obs_data, flags_dict, fixed_values, 20),
                                 ptform_args=(bounds, flags_dict)) as pool:
                 ### RESUME:
@@ -5802,6 +6200,6 @@ if __name__ == "__main__":
     if cml_args.pick_pos < 0 or cml_args.pick_pos > 1:
         raise ValueError("pick_position must be between 0 and 1, 0 leading edge, 0.5 centroid full meteor, 1 trailing edge.")
 
-    setup_folder_and_run_dynesty(cml_args.input_dir, output_dir=cml_args.output_dir, prior=cml_args.prior, resume=cml_args.new_dynesty, use_all_cameras=cml_args.all_cameras, only_plot=cml_args.only_plot, cores=cml_args.cores, pick_position=cml_args.pick_pos, extraprior_file=cml_args.extraprior, save_backup=cml_args.save_backup)
+    setupDirAndRunDynesty(cml_args.input_dir, output_dir=cml_args.output_dir, prior=cml_args.prior, resume=cml_args.new_dynesty, use_all_cameras=cml_args.all_cameras, only_plot=cml_args.only_plot, cores=cml_args.cores, pick_position=cml_args.pick_pos, extraprior_file=cml_args.extraprior, save_backup=cml_args.save_backup)
 
     print("\nDONE: Completed processing of all files in the input directory.\n")
