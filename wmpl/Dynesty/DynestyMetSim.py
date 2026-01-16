@@ -357,7 +357,7 @@ def plotJSONDataVsObs(obs_data, out_folder, best_noise_lum=0, best_noise_lag=0):
             manual_logL = logLikelihoodDynesty(guess_manual, obs_data, flags_dict_manual, fixed_values_manual, timeout=20)
             # run the simulation with the same parameters and same proecess as in run_simulation
             var_names_manual = list(flags_dict_manual.keys())
-            simulation_manual_MetSim_object = runSimulation(guess_manual, obs_data, var_names_manual, fixed_values_manual)
+            simulation_manual_MetSim_object = runSimulationDynesty(guess_manual, obs_data, var_names_manual, fixed_values_manual)
             if best_noise_lum!=0 and best_noise_lag!=0:
                 print(f"{json_name} real LogL = {manual_logL:.1f}")
                 # Plot the data with residuals and the best fit
@@ -842,7 +842,7 @@ def _worker_simulate_and_interp(sample_equal_row):
         align_height = _GLOBALS['align_height']
 
         pars = _apply_log_flags_to_sample(sample_equal_row, variables, flags_dict)
-        sim  = runSimulation(pars, obs_data, variables, fixed_values)
+        sim  = runSimulationDynesty(pars, obs_data, variables, fixed_values)
 
         const_saved = sim.const  # save original const
 
@@ -1140,7 +1140,7 @@ def posteriorBandsVsHeightParallel(
     # Best-guess curve (re-use your existing code)
     best_idx  = int(np.argmax(dynesty_results.logl))
     best_pars = _apply_log_flags_to_sample(dynesty_results.samples[best_idx], variables, flags_dict)
-    sim_best  = runSimulation(best_pars, obs_data, variables, fixed_values)
+    sim_best  = runSimulationDynesty(best_pars, obs_data, variables, fixed_values)
     _maybe_integrate_luminosity(sim_best, obs_data)
     best_lag_full = _compute_sim_lag(sim_best, obs_data)
 
@@ -1916,7 +1916,7 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
     if not os.path.exists(output_folder +os.sep+ 'fit_plots'):
         os.makedirs(output_folder +os.sep+ 'fit_plots')
 
-    best_guess_obj_plot = runSimulation(best_guess, obs_data, variables, fixed_values)
+    best_guess_obj_plot = runSimulationDynesty(best_guess, obs_data, variables, fixed_values)
 
     # find the index of m_init in variables
     i_m_init = variables.index('m_init')
@@ -2152,7 +2152,7 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
 
     ### MODE PLOT and json ###
 
-    approx_mode_obj_plot = runSimulation(approx_modes_all, obs_data, variables, fixed_values)
+    approx_mode_obj_plot = runSimulationDynesty(approx_modes_all, obs_data, variables, fixed_values)
 
     # Plot the data with residuals and the best fit
     plotSimVsObsResiduals(obs_data, approx_mode_obj_plot, output_folder +os.sep+ 'fit_plots', file_name+'_mode','red', 'Mode')
@@ -2162,7 +2162,7 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
 
     ### MEAN PLOT and json ###
 
-    mean_obj_plot = runSimulation(all_samples_mean, obs_data, variables, fixed_values)
+    mean_obj_plot = runSimulationDynesty(all_samples_mean, obs_data, variables, fixed_values)
 
     # Plot the data with residuals and the best fit
     plotSimVsObsResiduals(obs_data, mean_obj_plot, output_folder +os.sep+ 'fit_plots', file_name+'_mean','blue', 'Mean')
@@ -2172,7 +2172,7 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
 
     ### MEDIAN PLOT and json ###
 
-    median_obj_plot = runSimulation(all_samples_median, obs_data, variables, fixed_values)
+    median_obj_plot = runSimulationDynesty(all_samples_median, obs_data, variables, fixed_values)
 
     # Plot the data with residuals and the best fit
     plotSimVsObsResiduals(obs_data, median_obj_plot, output_folder +os.sep+ 'fit_plots', file_name+'_median','cornflowerblue', 'Median')
@@ -5631,7 +5631,7 @@ def constructConstants(parameter_guess, real_event, var_names, fix_var, dir_path
 
     return const_nominal
 
-def runSimulation(parameter_guess, real_event, var_names, fix_var):
+def runSimulationDynesty(parameter_guess, real_event, var_names, fix_var):
     """ Run the MetSim simulation with the given parameters.
 
     Arguments:
@@ -5899,14 +5899,14 @@ def logLikelihoodDynesty(guess_var, obs_metsim_obj, flags_dict, fix_var, timeout
     # check if the OS is not Linux
     if os.name != 'posix':
         # If not Linux, run the simulation without timeout
-        simulation_results = runSimulation(guess_var, obs_metsim_obj, var_names, fix_var)
+        simulation_results = runSimulationDynesty(guess_var, obs_metsim_obj, var_names, fix_var)
     else:
         # Set timeout handler
         signal.signal(signal.SIGALRM, timeout_handler)
         signal.alarm(timeout)  # Start the timer for timeout
         # get simulated LC intensity onthe object
         try: # try to run the simulation
-            simulation_results = runSimulation(guess_var, obs_metsim_obj, var_names, fix_var)
+            simulation_results = runSimulationDynesty(guess_var, obs_metsim_obj, var_names, fix_var)
         except TimeoutException:
             print('timeout')
             return -np.inf  # immediately return -np.inf if times out
