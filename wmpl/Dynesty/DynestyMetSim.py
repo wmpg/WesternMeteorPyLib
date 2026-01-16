@@ -8,21 +8,22 @@ Date: 2025-02-25
 """
 
 
-import pickle
-import gzip
-import sys
-import json, base64
-import os
-import io
+import base64
 import copy
+import datetime
+import gzip
+import io
+import json
+import math
+import multiprocessing
+import os
+import pickle
+import re
 import shutil
+import signal
+import sys
 import time
 import warnings
-import datetime
-import re
-import multiprocessing
-import math
-import signal
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
@@ -31,7 +32,7 @@ import numpy as np
 import pandas as pd
 import scipy
 from scipy.ndimage import gaussian_filter as norm_kde
-from scipy.optimize import minimize,curve_fit
+from scipy.optimize import curve_fit, minimize
 from scipy.stats import norm, invgamma
 # Import the correct scipy.integrate.simpson function
 try:
@@ -55,10 +56,10 @@ except ImportError:
     print("Dynesty package not found. Install dynesty to use the Dynesty functions.")
     DYNESTY_FOUND = False
 
-from wmpl.MetSim.GUI import loadConstants, SimulationResults, FragmentationEntry, saveConstants
-from wmpl.MetSim.MetSimErosion import runSimulation, Constants, zenithAngleAtSimulationBegin
-from wmpl.Utils.Math import lineFunc, mergeClosePoints, meanAngle
-from wmpl.MetSim.ML.GenerateSimulations import generateErosionSim,saveProcessedList,MetParam
+from wmpl.MetSim.GUI import FragmentationEntry, SimulationResults, loadConstants, saveConstants
+from wmpl.MetSim.MetSimErosion import Constants, runSimulation, zenithAngleAtSimulationBegin
+from wmpl.MetSim.ML.GenerateSimulations import MetParam, generateErosionSim, saveProcessedList
+from wmpl.Utils.Math import lineFunc, meanAngle, mergeClosePoints
 from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy
 from wmpl.Utils.TrajConversions import J2000_JD, date2JD
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly
@@ -540,17 +541,24 @@ def plotSimVsObsResiduals(obs_data, sim_data=None, output_folder='', file_name='
     ax2.set_ylim(ylim_vel)
 
     
-    # pick the second to first tat is the samllest between the all the stations
+    # pick the earliest "second" time across stations (fallback to first time)
+    second_times = []
     for station in np.unique(obs_data.stations_lag):
         station_time = obs_data.time_lag[np.where(obs_data.stations_lag == station)]
-        if 'second_last_index' not in locals():
-            second_last_index = np.argsort(station_time)[1]
-        else:
-            second_last_index = min(second_last_index, np.argsort(station_time)[1])
+        if station_time.size >= 2:
+            second_times.append(np.sort(station_time)[1])
+        elif station_time.size == 1:
+            second_times.append(station_time[0])
+
+    if len(second_times) == 0:
+        second_time = np.nanmin(obs_data.time_lag)
+    else:
+        second_time = np.nanmin(second_times)
+
     # Plot 6: Res.Vel vs. Time
-    ax6.fill_between([obs_data.time_lag[second_last_index], np.max(obs_data.time_lag)], -obs_data.noise_vel/1000, obs_data.noise_vel/1000, color='darkgray', alpha=0.2)
-    ax6.fill_between([obs_data.time_lag[second_last_index], np.max(obs_data.time_lag)], -obs_data.noise_vel*2/1000, obs_data.noise_vel*2/1000, color='lightgray', alpha=0.2)
-    ax6.plot([obs_data.time_lag[second_last_index], np.max(obs_data.time_lag)], [0, 0], color='lightgray')
+    ax6.fill_between([second_time, np.max(obs_data.time_lag)], -obs_data.noise_vel/1000, obs_data.noise_vel/1000, color='darkgray', alpha=0.2)
+    ax6.fill_between([second_time, np.max(obs_data.time_lag)], -obs_data.noise_vel*2/1000, obs_data.noise_vel*2/1000, color='lightgray', alpha=0.2)
+    ax6.plot([second_time, np.max(obs_data.time_lag)], [0, 0], color='lightgray')
     ax6.set_xlabel('Time [s]')
     ax6.set_ylabel('Res.Vel [km/s]')
     ax6.grid(True, linestyle='--', color='lightgray')
@@ -807,11 +815,11 @@ def _compute_sim_lag(sim, obs_data):
     L = np.asarray(sim.leading_frag_length_arr)
 
     # Fallback if no height_lag in obs_data
-    ref_h = getattr(obs_data, 'height_lag', None)
-    if ref_h is None or len(ref_h) == 0:
+    height_lag = getattr(obs_data, 'height_lag', None)
+    if height_lag is None or len(height_lag) == 0:
         ref_h = np.asarray(getattr(obs_data, 'height_lum', [np.nan]))[0]
     else:
-        ref_h = np.asarray(obs_data.height_lag)[0]
+        ref_h = np.nanmax(np.asarray(height_lag))
 
     valid = ~np.isnan(h)
     if not np.any(valid):
@@ -880,16 +888,23 @@ def _worker_simulate_and_interp(sample_equal_row):
         if 'erosion_height_change' in variables:
             mass_at_erosion_change = const_saved.mass_at_erosion_change
             erosion_height_change = const_saved.erosion_height_change
-            mass = np.asarray(sim.mass_total_active_arr)[:-1]
-            # if mass_before is None use the old method
+            h_raw = np.asarray(sim.leading_frag_height_arr)
+            mass = np.asarray(sim.mass_total_active_arr)
+
+            min_len = min(h_raw.size, mass.size)
+            h_raw = h_raw[:min_len]
+            mass = mass[:min_len]
+
+            # if mass_before is None use the old method with aligned height/mass arrays
             if mass_at_erosion_change is None:
-                mass_at_erosion_change = mass[np.argmin(np.abs(h[:-1] - erosion_height_change))]
+                idx = np.nanargmin(np.abs(h_raw - erosion_height_change))
+                mass_at_erosion_change = mass[idx]
             # compute rho_mass_weighted
             erosion_rho_change = const_saved.erosion_rho_change
             rho_mass_weighted = const_saved.rho*(abs(const_saved.m_init-mass_at_erosion_change)/const_saved.m_init) + erosion_rho_change*(mass_at_erosion_change/const_saved.m_init)
             rho_volume_weighted = const_saved.m_init/((abs(const_saved.m_init-mass_at_erosion_change)/const_saved.rho) + (mass_at_erosion_change/erosion_rho_change))
             # print(f"rho_mass_weighted: {rho_mass_weighted} rho_volume_weighted: {rho_volume_weighted} and rho: {const_saved.rho}")
-            erosion_dyn_press_change = sim.leading_frag_dyn_press_arr[np.argmin(np.abs(sim.leading_frag_height_arr[:-1] - erosion_height_change))]
+            erosion_dyn_press_change = sim.leading_frag_dyn_press_arr[np.nanargmin(np.abs(h_raw - erosion_height_change))]
         else:
             rho_mass_weighted = const_saved.rho
             rho_volume_weighted = const_saved.rho
