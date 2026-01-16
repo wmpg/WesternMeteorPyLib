@@ -2307,9 +2307,16 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
 
         rho_median_real, rho_lo_real, rho_hi_real = backup_small['dynesty']['rho_mass_weighted_estimate']['median'], backup_small['dynesty']['rho_mass_weighted_estimate']['low95'], backup_small['dynesty']['rho_mass_weighted_estimate']['high95']
         rho_total_arr = backup_small['dynesty']['rho_array']
+
+        # If all the weights are available, run the full weights:
+        if len(weights) != len(rho_total_arr):
+            weights_plot = None
+        else:
+            weights_plot = weights
+
         _plot_distrib_weighted(
             rho_total_arr,
-            weights=None,
+            weights=weights_plot,
             output_folder=output_folder,
             file_name=file_name,
             var_name='rho_mass_weighted',
