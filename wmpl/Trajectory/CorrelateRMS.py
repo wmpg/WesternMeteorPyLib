@@ -23,7 +23,7 @@ import numpy as np
 
 from wmpl.Formats.CAMS import loadFTPDetectInfo
 from wmpl.Trajectory.CorrelateEngine import TrajectoryCorrelator, TrajectoryConstraints
-from wmpl.Trajectory.CorrelateEngine import MCMODE_NONE, MCMODE_PHASE2, CANDMODE_LOAD
+from wmpl.Trajectory.CorrelateEngine import MCMODE_NONE, MCMODE_PHASE2, CANDMODE_LOAD, CANDMODE_SAVE
 from wmpl.Utils.Math import generateDatetimeBins
 from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import loadPickle, savePickle
@@ -1832,6 +1832,11 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         cpu_cores = multiprocessing.cpu_count()
     trajectory_constraints.mc_cores = cpu_cores
     log.info("Running using {:d} CPU cores.".format(cpu_cores))
+
+    if cml_args.candmode == CANDMODE_LOAD:
+        log.info('Loading Candidates')
+    elif cml_args.candmode == CANDMODE_SAVE:
+        log.info('Saving Candidates')
 
     # Run processing. If the auto run more is not on, the loop will break after one run
     previous_start_time = None
