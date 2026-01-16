@@ -33,9 +33,9 @@ from wmpl.Utils.Pickling import loadPickle
 log = logging.getLogger("traj_correlator")
 
 
-def collectRemoteTrajectories(remotehost, max_trajs, output_dir):
+def collectRemoteData(remotehost, max_trajs, output_dir, datatype='traj'):
     """
-    Collect trajectory pickles from a remote server for local phase2 (monte-carlo) processing
+    Collect trajectory or candidate pickles from a remote server for local processing
     NB: do NOT use os.path.join here, as it will break on Windows
     """
 
@@ -77,7 +77,7 @@ def collectRemoteTrajectories(remotehost, max_trajs, output_dir):
     return 
 
 
-def uploadTrajToRemote(remotehost, trajfile, output_dir):
+def uploadDataToRemote(remotehost, trajfile, output_dir, datatype='traj'):
     """
     At the end of MC phase, upload the trajectory pickle and report to a remote host for integration
     into the solved dataset
@@ -107,7 +107,7 @@ def uploadTrajToRemote(remotehost, trajfile, output_dir):
     return
 
 
-def moveRemoteTrajectories(output_dir):
+def moveRemoteData(output_dir, datatype='traj'):
     """
     Move remotely processed pickle files to their target location in the trajectories area,
     making sure we clean up any previously-calculated trajectory and temporary files
