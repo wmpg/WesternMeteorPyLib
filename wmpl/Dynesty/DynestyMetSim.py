@@ -2309,7 +2309,7 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
         rho_total_arr = backup_small['dynesty']['rho_array']
         _plot_distrib_weighted(
             rho_total_arr,
-            weights=weights,
+            weights=None,
             output_folder=output_folder,
             file_name=file_name,
             var_name='rho_mass_weighted',
