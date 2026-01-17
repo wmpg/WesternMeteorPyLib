@@ -1570,15 +1570,16 @@ class TrajectoryCorrelator(object):
                         merged_candidate_trajectories.append(merged_candidate)
 
                     candidate_trajectories = merged_candidate_trajectories
-
+                    log.info("-----------------------")
                     log.info(f'There are {remaining_unpaired} remaining unpaired observations in this bucket.')
+                    log.info("-----------------------")
 
                     # in candidatemode mode 1 we want to save the candidates to disk
                     if self.candidatemode == CANDMODE_SAVE: 
                         self.getCandidateFolders()
-                        print("-----------------------")
-                        print('SAVING {} CANDIDATES'.format(len(candidate_trajectories)))
-                        print("-----------------------")
+                        log.info("-----------------------")
+                        log.info('SAVING {} CANDIDATES'.format(len(candidate_trajectories)))
+                        log.info("-----------------------")
 
                         for matched_observations in candidate_trajectories:
                             # randomly select a node from the list of nodes then check that its actually listening
@@ -1602,22 +1603,24 @@ class TrajectoryCorrelator(object):
 
                         for curr_node in self.node_list.keys():
                             save_path = self.node_list[curr_node]['node_path']
+                            log.info("-----------------------")
                             log.info(f'There are {len(glob.glob(os.path.join(save_path, "*.pickle")))} candidates for {curr_node}')
+                            log.info("-----------------------")
                         return
                     else:
-                        print("-----------------------")
-                        print('PROCESSING {} CANDIDATES'.format(len(candidate_trajectories)))
-                        print("-----------------------")
+                        log.info("-----------------------")
+                        log.info('PROCESSING {} CANDIDATES'.format(len(candidate_trajectories)))
+                        log.info("-----------------------")
 
                 # end of 'if self.candidatemode != CANDMODE_LOAD'
                 ### ###
-                # otherwise we doing self.candidatemode == CANDMODE_SAVE
                 else:
+                    # candidatemode is LOAD so load any available candidates for processing
                     traj_solved_count = 0
                     candidate_trajectories = []
-                    print("-----------------------")
-                    print('LOADING CANDIDATES')
-                    print("-----------------------")
+                    log.info("-----------------------")
+                    log.info('LOADING CANDIDATES')
+                    log.info("-----------------------")
                     self.getCandidateFolders()
                     # only load candidates from this node's candidate folder
                     save_path = self.node_list[platform.uname()[1]]['node_path']
@@ -1636,9 +1639,9 @@ class TrajectoryCorrelator(object):
                             os.rename(os.path.join(save_path, fil), procfile)
                         except Exception: 
                             print(f'Candidate {fil} went away, probably picked up by another process')
-                    print("-----------------------")
-                    print('LOADED {} TRAJECTORIES'.format(len(candidate_trajectories)))
-                    print("-----------------------")
+                    log.info("-----------------------")
+                    log.info('LOADED {} CANDIDATES'.format(len(candidate_trajectories)))
+                    log.info("-----------------------")
                 # end of 'self.candidatemode == CANDMODE_LOAD'
             # end of 'if mcmode != MCMODE_PHASE2' 
             else: 
@@ -1834,7 +1837,7 @@ class TrajectoryCorrelator(object):
                     #   This will increase the number of MC runs while keeping the processing time the same
                     mc_runs = int(np.ceil(mc_runs/self.traj_constraints.mc_cores)*self.traj_constraints.mc_cores)
 
-                    # pass in matched_observations here so that solveTrajectory can mark them paired if they're used
+                    # pass in matched_observations here so that solveTrajectory can mark them unpaired if the solver fails
                     result = self.solveTrajectory(traj, mc_runs, mcmode=mcmode, matched_obs=matched_observations, orig_traj=traj)
                     traj_solved_count += int(result)
 
