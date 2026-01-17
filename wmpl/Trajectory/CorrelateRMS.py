@@ -559,7 +559,7 @@ class RMSDataHandle(object):
                 for stat_id in self.db.paired_obs.keys():
                     for obs_id in self.db.paired_obs[stat_id]:
                         addPairedObs(self.observations_db, stat_id, obs_id)
-                        del self.dh.db.paired_obs[stat_id][obs_id]
+                        del self.db.paired_obs[stat_id][obs_id]
                 print('done')
             if archivemonths != 0:
                 log.info('Archiving older entries....')
