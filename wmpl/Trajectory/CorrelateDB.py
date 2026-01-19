@@ -6,19 +6,40 @@ import logging
 import logging.handlers
 import argparse
 import datetime
+
+from wmpl.Utils.TrajConversions import datetime2JD
+
 log = logging.getLogger("traj_correlator")
 
 
 def openObsDatabase(db_path, db_name='observations'):
+    """
+    openObsDatabase - open the observations sqlite database and return a database handle
+                      
+    The database is created if it doesn't exist.
+
+    :param db_path: the path to the database
+    :param db_name: the name of the database to open, default 'observations'
+    :return: database handle 
+    """
+
     db_full_name = os.path.join(db_path, f'{db_name}.db')
     log.info(f'opening database {db_full_name}')
     con = sqlite3.connect(db_full_name)
     cur = con.cursor()
     res = cur.execute("SELECT name FROM sqlite_master WHERE name='paired_obs'")
     if res.fetchone() is None:
-        cur.execute("CREATE TABLE paired_obs(station_code, obs_id unique, status)")
+        cur.execute("CREATE TABLE paired_obs(station_code VARCHAR(8), obs_id VARCHAR(36) UNIQUE, obs_date REAL, status INTEGER)")
     con.commit()
+    cur.close()
     return con
+
+
+def commitObsDatabase(dbhandle):
+    """ commit the obs db 
+    """
+    dbhandle.commit()
+    return 
 
 
 def closeObsDatabase(dbhandle):
@@ -28,20 +49,32 @@ def closeObsDatabase(dbhandle):
 
 
 def checkObsPaired(dbhandle, station_code, obs_id):
+    """
+    checkObsPaired - check if an observation is already paired
+
+    :param dbhandle: the database
+    :param station_code: the station ID
+    :param obs_id; the observation id
+    :return: true if matched, false otherwise
+
+    """
     cur = dbhandle.cursor()
     res = cur.execute(f"SELECT obs_id FROM paired_obs WHERE station_code='{station_code}' and obs_id='{obs_id}' and status=1")
     if res.fetchone() is None:
         return False
+    cur.close()
     return True
 
 
-def addPairedObs(dbhandle,station_code, obs_id, commitnow=True):
+def addPairedObs(dbhandle,station_code, obs_id, obs_date, commitnow=True):
     """
     addPairedObs - add a potentially paired Observation to the database
     
     :param dbhandle: database connection handle
     :param station_code: station code eg UK12345
     :param obs_id: met_obs observation ID
+    :param commitnow: boolean true to force commit immediately
+
     :return: true if successful, false if the object already exists
     :rtype: bool
     """
@@ -49,11 +82,12 @@ def addPairedObs(dbhandle,station_code, obs_id, commitnow=True):
     res = cur.execute(f"SELECT obs_id FROM paired_obs WHERE station_code='{station_code}' and obs_id='{obs_id}'")
     if res.fetchone() is None:
         log.info(f'adding {obs_id} to paired_obs table')
-        sqlstr = f"insert into paired_obs values ('{station_code}','{obs_id}',1)"
+        sqlstr = f"insert into paired_obs values ('{station_code}','{obs_id}', {datetime2JD(obs_date)}, 1)"
     else:
         log.info(f'updating {obs_id} in paired_obs table')
         sqlstr = f"update paired_obs set status=1 where station_code='{station_code}' and obs_id='{obs_id}'"
     cur.execute(sqlstr)
+    cur.close()
     if commitnow:
         dbhandle.commit()
     if not checkObsPaired(dbhandle, station_code, obs_id):
@@ -62,18 +96,38 @@ def addPairedObs(dbhandle,station_code, obs_id, commitnow=True):
     return True
 
 
-def commitObsDb(dbhandle):
-    """ commit the obs db, called only during initialisation    
-    """
-    dbhandle.commit()
-    return 
-
-
 def unpairObs(dbhandle, station_code, obs_id):
+    """
+    unpairObs - mark an observation unpaired by setting the status to zero
+
+    :param dbhandle: the database
+    :param station_code: the station ID
+    :param obs_id; the observation id
+    
+    """
+
     cur = dbhandle.cursor()
     cur.execute(f"update paired_obs set status=0 where station_code='{station_code}' and obs_id='{obs_id}'")
     dbhandle.commit()
+    cur.close()
     return True
+
+
+def archiveObsDatabase(dbhandle, db_path, arch_prefix, archdate_jd):
+    # create the database if it doesnt exist
+    archdb_name = f'{arch_prefix}_observations'
+    archdb = openObsDatabase(db_path, archdb_name)
+    closeObsDatabase(archdb)
+
+    # attach the arch db and copy the records then delete them
+    cur = dbhandle.cursor()
+    archdb_fullname = os.path.join(db_path, f'{archdb_name}.db')
+    cur.execute(f"attach database '{archdb_fullname}' as archdb")
+    cur.execute(f'insert into archdb.paired_obs select * from paired_obs where obs_date < {archdate_jd}')
+    cur.execute(f'delete from paired_obs where obs_date < {archdate_jd}')
+    commitObsDatabase()
+    cur.close()
+    return 
 
 
 def openTrajDatabase(db_path, db_name='processed_trajectories'):

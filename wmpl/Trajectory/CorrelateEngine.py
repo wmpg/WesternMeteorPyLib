@@ -1438,7 +1438,7 @@ class TrajectoryCorrelator(object):
                         # Mark observations as processed
                         for _, met_obs_temp, _ in matched_observations:
                             met_obs_temp.processed = True
-                            if addPairedObs(self.dh.observations_db, met_obs_temp.station_code, met_obs_temp.id):
+                            if addPairedObs(self.dh.observations_db, met_obs_temp.station_code, met_obs_temp.mean_dt, met_obs_temp.id):
                                 remaining_unpaired -= 1
 
                         # Store candidate trajectories

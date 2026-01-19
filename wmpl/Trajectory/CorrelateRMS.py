@@ -29,7 +29,7 @@ from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import loadPickle, savePickle
 from wmpl.Utils.TrajConversions import datetime2JD, jd2Date
 from wmpl.Utils.remoteDataHandling import collectRemoteData, moveRemoteData, uploadDataToRemote
-from wmpl.Trajectory.CorrelateDB import openObsDatabase, closeObsDatabase, commitObsDb 
+from wmpl.Trajectory.CorrelateDB import openObsDatabase, closeObsDatabase, commitObsDatabase, archiveObsDatabase
 from wmpl.Trajectory.CorrelateDB import checkObsPaired, addPairedObs, unpairObs
 from wmpl.Trajectory.Trajectory import Trajectory
 
@@ -556,15 +556,21 @@ class RMSDataHandle(object):
             self.db = DatabaseJSON(database_path, verbose=self.verbose)
             self.observations_db = openObsDatabase(db_dir, 'observations')
             if hasattr(self.db, 'paired_obs') and len(self.db.paired_obs) > 0:
+                log.info('-----------------------------')
                 log.info('moving observations to sqlite')
-                print('moving observations to sqlite')
                 keylist = self.db.paired_obs.keys()
                 for stat_id in keylist:
                     for obs_id in self.db.paired_obs[stat_id]:
-                        addPairedObs(self.observations_db, stat_id, obs_id, commitnow=False)
+                        try:
+                            obs_date = datetime.datetime.strptime(obs_id.split('_')[1], '%Y%m%d-%H%M%S.%f')
+                        except Exception:
+                            obs_date = datetime.datetime(2000,1,1,0,0,0)
+                        addPairedObs(self.observations_db, stat_id, obs_id, obs_date, commitnow=False)
                 del self.db.paired_obs
-                commitObsDb(self.observations_db)
-                print('done')
+                commitObsDatabase(self.observations_db)
+                self.saveDatabase()
+                log.info('done')
+                log.info('-----------------------------')
             if archivemonths != 0:
                 log.info('Archiving older entries....')
                 try:
@@ -664,6 +670,8 @@ class RMSDataHandle(object):
 
         archdate = datetime.datetime.now(datetime.timezone.utc) - relativedelta(months=older_than)
         archdate_jd = datetime2JD(archdate)
+
+        archiveObsDatabase(self.observations_db, self.db_dir, archdate.strftime("%Y%m"), archdate_jd)
 
         arch_db_path = os.path.join(self.db_dir, f'{archdate.strftime("%Y%m")}_{JSON_DB_NAME}')
         archdb = DatabaseJSON(arch_db_path, verbose=self.verbose, archiveYM=archdate.strftime("%Y%m"))
