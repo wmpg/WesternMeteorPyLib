@@ -1303,6 +1303,10 @@ def ablateAll(fragments, const, compute_wake=False):
 def runSimulation(const, compute_wake=False):
     """ Run the ablation simulation. """
 
+    # Ensure that the grain mass min is smaller than the grain mass max
+    if const.erosion_mass_min > const.erosion_mass_max:
+        const.erosion_mass_min, const.erosion_mass_max = const.erosion_mass_max, const.erosion_mass_min
+
     ###
 
 

@@ -3747,6 +3747,15 @@ class MetSimGUI(QMainWindow):
         self.const.erosion_mass_min = self._tryReadBox(self.inputErosionMassMin, self.const.erosion_mass_min)
         self.const.erosion_mass_max = self._tryReadBox(self.inputErosionMassMax, self.const.erosion_mass_max)
 
+        # Ensure that the grain mass min is smaller than the grain mass max
+        if self.const.erosion_mass_min > self.const.erosion_mass_max:
+            self.const.erosion_mass_min, self.const.erosion_mass_max = self.const.erosion_mass_max, \
+                self.const.erosion_mass_min
+
+            # Update the input boxes
+            self.inputErosionMassMin.setText("{:.1e}".format(self.const.erosion_mass_min))
+            self.inputErosionMassMax.setText("{:.1e}".format(self.const.erosion_mass_max))
+
         # Read the grain model combo box
         self.updateGrainModel()
 
