@@ -1503,6 +1503,11 @@ def loadConstants(sim_fit_json):
         const.fragmentation_entries = frag_entries
 
 
+    # If wake_psf is a float, but it in a list
+    if isinstance(const.wake_psf, float):
+        const.wake_psf = [const.wake_psf]
+        
+
     return const, const_json
 
 
@@ -3289,7 +3294,7 @@ class MetSimGUI(QMainWindow):
         self.checkBoxWake.setChecked(self.wake_on)
         self.checkBoxWakeMassBins.setChecked(self.wake_show_mass_bins)
 
-        self.inputWakePSF.setText("{:.1f}".format(const.wake_psf))
+        self.inputWakePSF.setText(",".join(["{:.1f}".format(x) for x in const.wake_psf]))
         self.inputWakeExt.setText("{:d}".format(int(const.wake_extension)))
         self.inputWakePlotHt.setText("{:.3f}".format(self.wake_plot_ht/1000))
 
@@ -3667,7 +3672,7 @@ class MetSimGUI(QMainWindow):
 
         ### Wake parameters ###
 
-        self.const.wake_psf = self._tryReadBox(self.inputWakePSF, self.const.wake_psf)
+        self.const.wake_psf = self._tryReadBox(self.inputWakePSF, self.const.wake_psf, value_type=lambda x: [float(y) for y in x.split(",")])
         self.const.wake_extension = self._tryReadBox(self.inputWakeExt, self.const.wake_extension)
         self.wake_plot_ht = 1000*self._tryReadBox(self.inputWakePlotHt, self.wake_plot_ht/1000)
 
@@ -4670,7 +4675,7 @@ class MetSimGUI(QMainWindow):
             if line_handle is not None:
                 try:
                     line_handle.remove()
-                except ValueError:
+                except (ValueError, NotImplementedError):
                     pass
 
 
@@ -4697,7 +4702,7 @@ class MetSimGUI(QMainWindow):
                 if label_handle is not None:
                     try:
                         label_handle.remove()
-                    except ValueError:
+                    except (ValueError, NotImplementedError):
                         pass
 
                 # Draw the wake line label
@@ -6037,8 +6042,8 @@ class MetSimGUI(QMainWindow):
 
 
         # Init the Gaussian
-        gauss = scipy.stats.multivariate_normal([0.0, 0.0], [[self.const.wake_psf/np.sqrt(2)/plate_scale, 0 ], 
-                                                 [        0,     self.const.wake_psf/np.sqrt(2)/plate_scale]])
+        gauss = scipy.stats.multivariate_normal([0.0, 0.0], [[self.const.wake_psf[0]/np.sqrt(2)/plate_scale, 0 ], 
+                                                 [        0,     self.const.wake_psf[0]/np.sqrt(2)/plate_scale]])
 
 
         # Get the directory path
@@ -6088,7 +6093,7 @@ class MetSimGUI(QMainWindow):
                     continue
 
                 # Evaluate the gaussian, normalize so that the brightest peak of the meteor is saturating
-                gauss_eval = self.const.wake_psf/plate_scale*lum*gauss.pdf(mesh_list).reshape(grid_size, \
+                gauss_eval = self.const.wake_psf[0]/plate_scale*lum*gauss.pdf(mesh_list).reshape(grid_size, \
                     grid_size)
 
 

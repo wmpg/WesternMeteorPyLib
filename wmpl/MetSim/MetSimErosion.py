@@ -83,7 +83,7 @@ class Constants(object):
         ### Wake parameters ###
 
         # PSF stddev (m)
-        self.wake_psf = 3.0
+        self.wake_psf = [3.0, 20]
 
         # Wake extension from the leading fragment (m)
         self.wake_extension = 200
@@ -416,8 +416,9 @@ class Wake(object):
         
         for frag_lum, frag_len in zip(self.luminosity_points, self.length_points):
 
-            self.wake_luminosity_profile += frag_lum*scipy.stats.norm.pdf(self.length_array, loc=frag_len, \
-                scale=const.wake_psf)
+            for psf_m in const.wake_psf:
+                self.wake_luminosity_profile += frag_lum*scipy.stats.norm.pdf(self.length_array, loc=frag_len, \
+                    scale=psf_m)
 
 
 def zenithAngleAtSimulationBegin(h0_sim, hb, zc, r_earth):
@@ -1235,7 +1236,7 @@ def ablateAll(fragments, const, compute_wake=False):
     if compute_wake and (leading_frag_length is not None):
 
         # Evaluate the Gaussian from +3 sigma in front of the leading fragment to behind
-        front_len = leading_frag_length + 3*const.wake_psf
+        front_len = leading_frag_length + 3*const.wake_psf[0]
         back_len = leading_frag_length - const.wake_extension
 
         ### Compute the wake as convoluted luminosities with the PSF ###
