@@ -29,7 +29,9 @@ from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import loadPickle, savePickle
 from wmpl.Utils.TrajConversions import datetime2JD, jd2Date
 from wmpl.Utils.remoteDataHandling import collectRemoteData, moveRemoteData, uploadDataToRemote
-from wmpl.Trajectory.CorrelateDB import openObsDatabase, checkObsPaired, addPairedObs, closeObsDatabase
+from wmpl.Trajectory.CorrelateDB import openObsDatabase, closeObsDatabase, commitObsDb 
+from wmpl.Trajectory.CorrelateDB import checkObsPaired, addPairedObs, unpairObs
+from wmpl.Trajectory.Trajectory import Trajectory
 
 ### CONSTANTS ###
 
@@ -553,13 +555,15 @@ class RMSDataHandle(object):
             log.info("Loading database: {:s}".format(database_path))
             self.db = DatabaseJSON(database_path, verbose=self.verbose)
             self.observations_db = openObsDatabase(db_dir, 'observations')
-            if len(self.db.paired_obs) > 0:
+            if hasattr(self.db, 'paired_obs') and len(self.db.paired_obs) > 0:
                 log.info('moving observations to sqlite')
                 print('moving observations to sqlite')
-                for stat_id in self.db.paired_obs.keys():
+                keylist = self.db.paired_obs.keys()
+                for stat_id in keylist:
                     for obs_id in self.db.paired_obs[stat_id]:
-                        addPairedObs(self.observations_db, stat_id, obs_id)
-                        del self.db.paired_obs[stat_id][obs_id]
+                        addPairedObs(self.observations_db, stat_id, obs_id, commitnow=False)
+                del self.db.paired_obs
+                commitObsDb(self.observations_db)
                 print('done')
             if archivemonths != 0:
                 log.info('Archiving older entries....')
@@ -900,7 +904,6 @@ class RMSDataHandle(object):
 
         log.info("")
         log.info("  Finished loading unpaired observations!")
-        self.saveDatabase()
 
         return unpaired_met_obs_list
     
@@ -1484,6 +1487,45 @@ class RMSDataHandle(object):
             savePickle(traj, os.path.join(self.phase1_dir, 'processed'), fldr_name + '_trajectory.pickle')
         return 
 
+    def excludeAlreadyFailedCandidates(self, matched_observations, remaining_unpaired):
+        # TODO make this function work! 
+        # wants to go through the candidates and check if they correspond to already-failed
+        candidate_trajectories=[]
+        for cand in matched_observations:
+            ref_dt = min([met_obs.reference_dt for _, met_obs, _ in cand])
+            jdt_ref = datetime2JD(ref_dt)
+            traj = Trajectory(jdt_ref, verbose=False)
+            # Feed the observations into the trajectory solver
+            for obs_temp, met_obs, _ in cand:
+
+                # Normalize the observations to the reference Julian date
+                jdt_ref_curr = datetime2JD(met_obs.reference_dt)
+                obs_temp.time_data += (jdt_ref_curr - jdt_ref)*86400
+
+                traj.infillWithObs(obs_temp)
+
+            ### Recompute the reference JD and all times so that the first time starts at 0 ###
+
+            # Determine the first relative time from reference JD
+            t0 = min([obs.time_data[0] for obs in traj.observations if (not obs.ignore_station) 
+                or (not np.all(obs.ignore_list))])
+
+            # If the first time is not 0, normalize times so that the earliest time is 0
+            if t0 != 0.0:
+                # Recompute the reference JD to corresponds with t0
+                traj.jdt_ref = traj.jdt_ref + t0/86400.0
+
+            if self.checkTrajIfFailed(traj):
+                log.info('--------')
+                log.info(f'Trajectory at {jd2Date(traj.jdt_ref,dt_obj=True).isoformat()} already failed, skipping')
+                for _, met_obs_temp, _ in cand:
+                    log.info(f'Marking {met_obs_temp.id} unpaired')
+                    unpairObs(self.observations_db, met_obs_temp.station_code, met_obs_temp.id)
+                    remaining_unpaired -= 1
+            else:
+                candidate_trajectories.append(cand)
+    
+        return candidate_trajectories, remaining_unpaired
 
     def checkTrajIfFailed(self, traj):
         """ Check if the given trajectory has been computed with the same observations and has failed to be
