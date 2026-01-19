@@ -1506,6 +1506,10 @@ def loadConstants(sim_fit_json):
     # If wake_psf is a float, but it in a list
     if isinstance(const.wake_psf, float):
         const.wake_psf = [const.wake_psf]
+
+    # If the wake PSF wake list lenght is different from the wake PSF list lenght, set all weights to 1
+    if len(const.wake_psf) != len(const.wake_psf_weights):
+        const.wake_psf_weights = np.ones(len(const.wake_psf))
         
 
     return const, const_json
@@ -3294,7 +3298,14 @@ class MetSimGUI(QMainWindow):
         self.checkBoxWake.setChecked(self.wake_on)
         self.checkBoxWakeMassBins.setChecked(self.wake_show_mass_bins)
 
-        self.inputWakePSF.setText(",".join(["{:.1f}".format(x) for x in const.wake_psf]))
+        # Combine the wake PSF weights with the PSF widths in m so that weight:psf, weight:psf,...
+        wake_psf_str = ''
+        for i, (w, p) in enumerate(zip(const.wake_psf_weights, const.wake_psf)):
+            wake_psf_str += "{}:{}".format(w, p)
+            if i < len(const.wake_psf) - 1:
+                wake_psf_str += ','
+
+        self.inputWakePSF.setText(wake_psf_str)
         self.inputWakeExt.setText("{:d}".format(int(const.wake_extension)))
         self.inputWakePlotHt.setText("{:.3f}".format(self.wake_plot_ht/1000))
 
@@ -3672,7 +3683,48 @@ class MetSimGUI(QMainWindow):
 
         ### Wake parameters ###
 
-        self.const.wake_psf = self._tryReadBox(self.inputWakePSF, self.const.wake_psf, value_type=lambda x: [float(y) for y in x.split(",")])
+        # Read the PSF wake either in the format:
+        # - single float, where the PSF is a constant and then set the weight as 1.0
+        # - multiple comma-separated floats, where the PSF is given and all weights are set to 1.0
+        # - multiple comma-separated entries where each entry is weight:psf_value
+
+        try:
+            # Parse the wake PSF input
+            wake_psf_weights = []
+            wake_psf = []
+            text = self.inputWakePSF.text()
+            
+            # Split by comma
+            parts = text.split(',')
+            
+            for part in parts:
+                if ':' in part:
+                    weight, psf = part.split(':')
+                    wake_psf_weights.append(float(weight))
+                    wake_psf.append(float(psf))
+                else:
+                    wake_psf_weights.append(1.0)
+                    wake_psf.append(float(part))
+                    
+            # Normalize weights
+            total_weight = sum(wake_psf_weights)
+            if total_weight > 0:
+                wake_psf_weights = [w / total_weight for w in wake_psf_weights]
+            
+            # Update the constants
+            self.const.wake_psf = wake_psf
+            self.const.wake_psf_weights = wake_psf_weights
+
+        except:
+            # Revert to old values if parsing fails
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Critical)
+            msg.setWindowTitle("Input parsing error")
+            msg.setText("Error reading input box " + self.inputWakePSF.objectName())
+            msg.setInformativeText("Setting it back to: " + str(self.const.wake_psf))
+            msg.exec_()
+
+        
         self.const.wake_extension = self._tryReadBox(self.inputWakeExt, self.const.wake_extension)
         self.wake_plot_ht = 1000*self._tryReadBox(self.inputWakePlotHt, self.wake_plot_ht/1000)
 

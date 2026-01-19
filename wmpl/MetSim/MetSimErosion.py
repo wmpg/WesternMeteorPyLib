@@ -83,6 +83,7 @@ class Constants(object):
         ### Wake parameters ###
 
         # PSF stddev (m)
+        self.wake_psf_weights = [0.9, 0.1]
         self.wake_psf = [3.0, 20]
 
         # Wake extension from the leading fragment (m)
@@ -413,11 +414,18 @@ class Wake(object):
 
         # Evalute the Gaussian at every fragment an add to the estimated wake
         self.wake_luminosity_profile = np.zeros_like(length_array)
+
+        # If there is not entry for the wake PSF weights, initialize it
+        if not hasattr(self.const, 'wake_psf_weights'):
+            self.const.wake_psf_weights = np.ones_like(self.const.wake_psf)
+
+        # Normalize the wake weights so they sum to 1
+        self.const.wake_psf_weights = self.const.wake_psf_weights/np.sum(self.const.wake_psf_weights)
         
         for frag_lum, frag_len in zip(self.luminosity_points, self.length_points):
 
-            for psf_m in const.wake_psf:
-                self.wake_luminosity_profile += frag_lum*scipy.stats.norm.pdf(self.length_array, loc=frag_len, \
+            for psf_m, psf_weight in zip(self.const.wake_psf, self.const.wake_psf_weights):
+                self.wake_luminosity_profile += psf_weight*frag_lum*scipy.stats.norm.pdf(self.length_array, loc=frag_len, \
                     scale=psf_m)
 
 
