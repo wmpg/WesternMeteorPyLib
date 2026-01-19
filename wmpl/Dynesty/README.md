@@ -20,13 +20,13 @@
 
 ## Overview
 
-The tool searches a specified input directory for `.pickle` data files. If multiple matching pickle files are found for the same event, e.g. one containing the light curve and another containing the decleration, it creates a combined dataset.
+The tool searches a specified input directory for `.pickle` data files. If multiple matching pickle files are found for the same event, e.g. one containing the light curve (from EMCCD) and another containing the deceleration (from CAMO narrow-field), it creates a combined dataset with EMCCD light curve and CAMO narrow-field deceleration.
 
 **Key Features:**
 * **Automated Data Fusion:** Combines data streams automatically based on timestamps.
-* **Robust Execution:** Designed as a "run and forget" tool. If a run fails, it logs the error and proceeds to the next solution without halting.
+* **Robust Execution:** Designed as a "run and forget" tool. If a run fails, it logs the error and proceeds to the next solution without halting (the log file will be called log_error_ ).
 * **Resume Capability:** If interrupted, the code can resume from the existing `.dynesty` file without overwriting previous progress.
-* **MetSim Compatibility:** Supports MetSim JSON data inputs.
+* **MetSim Compatibility:** Supports MetSim JSON data as inputs for model validation, the code will introduce noise (if requested) to test how the posteriory distribution is affectd by noise.
 
 ---
 
@@ -37,20 +37,29 @@ The tool searches a specified input directory for `.pickle` data files. If multi
 * **Hardware:** These simulations are computationally intensive.
     * Typical runtime: **1 to 2 days** on 96 cores per meteor.
     * Complex cases (bright fireballs or bad data): Up to **6 days** per event.
+
+## installation--setup
+
+Install Dynesty in wmpl conda enviroment.
+```text
+pip install dynesty
+```
+specific error with dynsty installation please check : https://dynesty.readthedocs.io/en/v3.0.0/index.html
+
 ---
 
 ## Usage
 
 ### Basic Command
-To run the simulation, provide the path to the input folder containing your data and the path to the configuration files.
+To run the simulation, provide the path to the input folder containing your data and the path to the configuration files (if the configuration files are already in the input folder no need to specify).
 
 ```
 python -m wmpl.Dynesty.DynestyMetSim "PATH_TO_INPUT_FOLDER" --output_dir "PATH_TO_OUTPUT_FOLDER" --prior "PATH_TO_PRIOR_FILE"
 ```
 
 * **Input Folder:** Can contain either a single pickle trajectory file, or a folder containing multiple pickle trajectory files for batch processing. Multiple paths can be separated by a comma.
-* **Output Folder:** If unspecified, results are saved in the input directory.
-* **Prior File:** Bayesian priors for the model parameters. Select one of the templates in wmpl/Dynesty/priors, as appropriate for your case, of create a custom file.If unspecified, the tool looks for a `.prior` file in the input directory. If none is found, it defaults to a single fragmentation model (stony_meteoroid_1ErosFrag.prior).
+* **Output Folder:** The folder where it will be generated a new folder named after each event found in the input folder. If unspecified, results are saved in each of the input directory found with pickle data.
+* **Prior File:** Bayesian priors for the model parameters. Select one of the templates in wmpl/Dynesty/priors, as appropriate for your case, of create a custom file. If unspecified, the tool looks for a `.prior` file in the input directory. If none is found, it defaults to a modified single fragmentation model (~stony_meteoroid_1ErosFrag.prior).
 
 **Example with multiple inputs:**
 ```
@@ -66,15 +75,38 @@ python -m wmpl.Dynesty.DynestyMetSim "PATH_TO_INPUT_FOLDER_1, PATH_TO_INPUT_FOLD
 | `--extraprior` | Path to an `.extraprior` file for advanced tuning (e.g., dust release, erosion heights). |
 | `--pick_pos` | Adjusts the pick position in the meteor frame (0 to 1). <br>• `0`: Leading edge (default).<br>• `0.5`: Centroid (recommended for fireballs). |
 | `--cores` | Specify the number of CPU cores to use. Default uses all available cores. |
-| `-new` | Forces a new simulation in the output folder. Prevents mixing data if a `.dynesty` file already exists (though separate folders are recommended). |
-| `-all` | Uses all available data (ensure magnitudes overlap and declarations are computed from the same pickle file). |
-| `-plot` | Generates plots based on the current state of the `.dynesty` file without running the simulation. Useful for checking progress. |
-| `-NoBackup` | Skips the generation of the `posterior_backup.pkl.gz` file. Saves ~10-20 minutes if extended data is not needed. |
+| `-new` | Forces a new simulation in the output folder does not continue the dynesty simulation if interrupted. Prevents mixing data if a `.dynesty` file already exists (though separate folders are recommended). |
+| `-all` | Uses all available data, only necesary if using EMCCD and CAMO narrow-field, wide-field data! By default the code will take lightcurve from EMCCD if not present it will combine CAMO narrow-field with wide-field data, while for the decelaration (lag) the code will take first CAMO narrow-field, then if not present EMCCD and if neither are present it will use CAMO wide-field. |
+| `-plot` | Generates plots based on the current state of the `.dynesty` file without running the simulation. Useful to make sure everything is loaded correctly and when .dynesty file is created to check on progress. |
+| `-NoBackup` | Skips the generation of the `posterior_backup.pkl.gz` file. Saves ~10-20 minutes if extended data is not needed (if `posterior_backup.pkl.gz` is already present it's not going to generate a new file in any case). |
 
 ### Monitoring Progress
 When the simulation is running, the terminal will display a status line (Dynesty progress):
 
-`[Iteration count] [Time elapsed] ... [Log Likelihood Stats] ... [Evidence Estimates]`
+```text
+328433it [59:38:25,  7.78s/it, batch: 3 | bound: 4 | nc: 97 | ncall: 2878565 | eff(%):  0.971 | loglstar: -437.933 < -436.032 < -432.656 | logz: -472.176 +/-  0.219 | stop:  1.179]
+```
+
+What each part means:
+
+* **`328433it`** — Total number of accepted **iterations** so far.
+* **`[59:38:25, 7.78s/it, ...]`**
+
+  * `59:38:25` = **elapsed wall time**
+  * `7.78s/it` = **average time per iteration**
+* **`batch: 3`** — **Dynamic nested sampling batch** index (Dynesty may add batches of live points to refine the solution).
+* **`bound: 4`** — Current **bounding region** used to draw proposals (higher values usually mean later/updated bounds, often tighter regions around high-likelihood parts of parameter space).
+* **`nc: 97`** — Number of **proposal attempts / likelihood calls needed to accept the last sample** (higher = harder to find a valid point under the current likelihood constraint).
+* **`ncall: 2878565`** — **Total number of log-likelihood evaluations** so far (main driver of runtime).
+* **`eff(%): 0.971`** — **Sampling efficiency** (accepted samples per likelihood call, in percent; low efficiency means many rejected proposals).
+* **`loglstar: -437.933 < -436.032 < -432.656`** — **Log-likelihood constraint / bounds** summary for the current stage:
+
+  * middle value is the current **likelihood threshold** (new samples must exceed this),
+  * outer values summarize the current lower/upper context reported by Dynesty (early on these may show `-inf` and `inf`).
+* **`logz: -472.176 +/- 0.219`** — Current estimate of **log-evidence** (`logZ`) and its **uncertainty**.
+* **`stop: 1.179`** — **Stopping metric**: how close Dynesty is to termination (a “remaining evidence / stopping” diagnostic). When this drops below the configured stopping threshold, Dynesty stops.
+
+more in: https://dynesty.readthedocs.io/en/v3.0.0/quickstart.html
 
 **To visualize intermediate results:**
 You can generate plots of the current progress without interrupting the run:
@@ -92,13 +124,13 @@ If a simulation is interrupted, simply run the command again pointing to the sam
 ## Configuration
 
 ### The Prior File
-The `.prior` file defines the range and distribution of parameters for the simulation. You can edit this file to adjust the model   .
+The `.prior` file defines the range and distribution of parameters for the simulation. You can edit this file to adjust the model.
 
 **Format:**
 `Variable_Name, Min/Sigma/Alpha, Max/Mean/Mode, Option`
 
 * Lines starting with `#` are comments.
-* Numpy functions (e.g., `np.pi`) are supported in expressions.
+* Numpy functions (e.g., `np.pi`) are supported in expressions, and you can also reference observation-based helper variables in expressions: h_beg (begin height, default=max(height)), h_end (end height, default=min(height)), h_peak (peak luminosity height), plus v_0/m_0/zc_0 (initial speed/mass/zenith-angle guesses) and n_lag0/n_lum0 (initial noise guesses for lag/lum)
 
 **Distribution Options:**
 * **(default)**: Uniform distribution between Min and Max.
@@ -116,23 +148,45 @@ The `.prior` file defines the range and distribution of parameters for the simul
 v_init, 500, nan, norm              # Velocity [m/s] (Gaussian)
 zenith_angle, nan, fix              # Zenith angle [rad] (Fixed)
 m_init, nan, nan                    # Initial mass [kg]
-rho, 10, 4000, log                  # Density [kg/m^3] (Log10 applied)
+rho, 10, 4000                       # Density [kg/m^3]
 sigma, 0.001/1e6, 0.05/1e6          # Ablation coeff [kg/J]
-erosion_mass_min, 5e-12, 1e-9, log  # Min erosion mass [kg]
+erosion_height_start,nan,nan     	  # erosion_height_start [m]
+erosion_coeff,0.0,1e-6,log          # erosion_coeff [kg/J] (np.log10 applied)
+erosion_mass_index,1,3          		# erosion_mass_index [-]
+erosion_mass_min,5e-12,1e-9,log     # erosion_mass_min [kg] (np.log10 applied)
+erosion_mass_max,1e-10,1e-7,log    	# erosion_mass_max [kg] (np.log10 applied)
 noise_lag, 10, nan, invgamma        # Lag noise [m] (Inverse Gamma)
 noise_lum, 5, nan, invgamma         # Luminosity noise [J/s]
 ```
 
+The same can be express with helper variables as :
+```properties
+# name var, min/sigma/alpha, max/mean/mode, options
+
+v_init, 500, v_0, norm              # Velocity [m/s] (Gaussian)
+zenith_angle, zc_0, fix             # Zenith angle [rad] (Fixed)
+m_init, 10**(np.floor(np.log10(m_0)-1)), 2*10**(np.floor(np.log10(m_0)+1))  # Initial mass [kg]
+rho, 10, 4000, log                  # Density [kg/m^3] (Log10 applied)
+sigma, 0.001/1e6, 0.05/1e6          # Ablation coeff [kg/J]
+erosion_height_start,h_beg-100-(h_beg - h_peak)/2,h_beg + 100+(h_beg - h_peak)/2 # erosion_height_start [m]
+erosion_coeff,0.0,1e-6,log          # erosion_coeff [kg/J] (np.log10 applied)
+erosion_mass_index,1,3          		# erosion_mass_index [-]
+erosion_mass_min,5e-12,1e-9,log     # erosion_mass_min [kg] (np.log10 applied)
+erosion_mass_max,1e-10,1e-7,log    	# erosion_mass_max [kg] (np.log10 applied)
+noise_lag, 10, n_lag0, invgamma     # Lag noise [m] (Inverse Gamma)
+noise_lum, 5, n_lum0, invgamma      # Luminosity noise [J/s] (Inverse Gamma)
+```
+
 **Notes on Specific Settings:**
-* **Fragmentation:** To disable double fragmentation, remove the second fragmentation parameters from the prior file.
-* **Camera Settings:** If using non-standard cameras, fix the Zero Magnitude Power and FPS:
+* **Fragmentation:** To disable double fragmentation, remove the second fragmentation parameters from the prior file (it will be set at 1 km effectivelly disabling it).
+* **Camera Settings:** If using non-standard cameras, fix the Zero Magnitude Power and FPS (these will be the same values share across all the cameras if more than one camera type are present):
     ```properties
     P_0m, 840, fix
     fps, 20, fix
     ```
 
 ### Advanced Configuration
-For greater flexibility, use the `--extraprior` flag with a specialized file. This allows tuning of over 30 variables, including dust release and specific erosion height changes.
+For greater flexibility, use the `--extraprior` flag with a specialized file. This allows tuning of over 30 variables, including dust release and specific erosion height changes (usefull for fireballs or to introduce a third fragmentation).
 * *Warning:* Adding too many variables (>30) may prevent Dynesty from converging on a solution.
 
 ---
@@ -153,7 +207,7 @@ When finished, a `_results` folder is generated (e.g., `20191023_091225_results`
 * **`fit_plots/`**: Folder containing best-fit model images.
 * **`*.json`**: Solution files compatible with the MetSim GUI.
 * **`*_correlation_plot.png`**: Parameter correlations.
-* **`*_posterior_bands_vs_height.png`**: Shows the range where most solutions lie.
+* **`*_posterior_bands_vs_height.png`**: Shows the range where most solutions lie (generated only if the backup file is created).
 * **`*_rho_mass_weighted_distribution.png`**: Useful for multiple fragmentations; shows mass-weighted density.
 * **`*_tau_distribution.png`**: Luminous efficiency ($\tau$) derived from photometric mass ($\tau = 2 E_{rad} / (m_{init} v_0^2)$).
 * **`posterior_backup.pkl.gz`**: A compressed archive containing comprehensive simulation data (samples, weights, best guesses, erosion dynamics).
@@ -176,11 +230,20 @@ backup_small = {
     "bands": {                        # Posterior bands for plotting
         "lum": ..., "mag": ..., "vel": ..., "lag": ...
     },
-    "const_backups": {                # Physics constants per simulation
+    "const_backups": {                # Physics constants per each generated simulation
         "rho_mass_weighted": ...,
+        "rho_volume_weighted": ...,
         "erosion_beg_dyn_press": ...,
         "energy_per_mass_before_erosion": ...,
-        # ... other dynamic variables
+        "erosion_beg_vel": ...,
+        "erosion_beg_mas": ...,
+        "erosion_beg_dyn_press": ...,
+        "mass_at_erosion_change": ...,
+        "dyn_press_at_erosion_change": ...,
+        "energy_per_cs_before_erosion": ...,
+        "energy_per_mass_before_erosion": ...,
+        "main_mass_exhaustion_ht": ...,
+        "main_bottom_ht": ...,
     }
 }
 ```
