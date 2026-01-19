@@ -1443,7 +1443,7 @@ class TrajectoryCorrelator(object):
 
                         # Store candidate trajectories
                         log.info("")
-                        log.info(" --- ADDING CANDIDATE ---")
+                        log.info(f" --- ADDING CANDIDATE at {met_obs.reference_dt.isoformat()} ---")
                         candidate_trajectories.append(matched_observations)
 
                     ### Merge all candidate trajectories which share the same observations ###
@@ -1569,7 +1569,11 @@ class TrajectoryCorrelator(object):
                         # Add the merged observation to the final list
                         merged_candidate_trajectories.append(merged_candidate)
 
-                    candidate_trajectories = merged_candidate_trajectories
+                    log.info("-----------------------")
+                    log.info('CHECKING FOR ALREADY-FAILED CANDIDATES')
+                    log.info("-----------------------")
+                    candidate_trajectories, remaining_unpaired = self.dh.excludeAlreadyFailedCandidates(merged_candidate_trajectories, remaining_unpaired)
+
                     log.info("-----------------------")
                     log.info(f'There are {remaining_unpaired} remaining unpaired observations in this bucket.')
                     log.info("-----------------------")

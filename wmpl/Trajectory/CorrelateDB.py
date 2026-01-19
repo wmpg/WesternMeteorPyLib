@@ -33,7 +33,7 @@ def checkObsPaired(dbhandle, station_code, obs_id):
     return True
 
 
-def addPairedObs(dbhandle,station_code, obs_id):
+def addPairedObs(dbhandle,station_code, obs_id, commitnow=True):
     """
     addPairedObs - add a potentially paired Observation to the database
     
@@ -52,11 +52,19 @@ def addPairedObs(dbhandle,station_code, obs_id):
         log.info(f'updating {obs_id} in paired_obs table')
         sqlstr = f"update paired_obs set status=1 where station_code='{station_code}' and obs_id='{obs_id}'"
     cur.execute(sqlstr)
-    dbhandle.commit()
+    if commitnow:
+        dbhandle.commit()
     if not checkObsPaired(dbhandle, station_code, obs_id):
         log.info(f'failed to add {obs_id} to paired_obs table')
         return False
     return True
+
+
+def commitObsDb(dbhandle):
+    """ commit the obs db, called only during initialisation    
+    """
+    dbhandle.commit()
+    return 
 
 
 def unpairObs(dbhandle, station_code, obs_id):
