@@ -66,7 +66,7 @@ def checkObsPaired(dbhandle, station_code, obs_id):
     return True
 
 
-def addPairedObs(dbhandle,station_code, obs_id, obs_date, commitnow=True):
+def addPairedObs(dbhandle,station_code, obs_id, obs_date, commitnow=True, verbose=False):
     """
     addPairedObs - add a potentially paired Observation to the database
     
@@ -82,22 +82,24 @@ def addPairedObs(dbhandle,station_code, obs_id, obs_date, commitnow=True):
     cur = dbhandle.cursor()
     res = cur.execute(f"SELECT obs_id FROM paired_obs WHERE station_code='{station_code}' and obs_id='{obs_id}'")
     if res.fetchone() is None:
-        log.info(f'adding {obs_id} to paired_obs table')
+        if verbose:
+            log.info(f'adding {obs_id} to paired_obs table')
         sqlstr = f"insert into paired_obs values ('{station_code}','{obs_id}', {datetime2JD(obs_date)}, 1)"
     else:
-        log.info(f'updating {obs_id} in paired_obs table')
+        if verbose:
+            log.info(f'updating {obs_id} in paired_obs table')
         sqlstr = f"update paired_obs set status=1 where station_code='{station_code}' and obs_id='{obs_id}'"
     cur.execute(sqlstr)
     cur.close()
     if commitnow:
         dbhandle.commit()
     if not checkObsPaired(dbhandle, station_code, obs_id):
-        log.info(f'failed to add {obs_id} to paired_obs table')
+        log.warning(f'failed to add {obs_id} to paired_obs table')
         return False
     return True
 
 
-def unpairObs(dbhandle, station_code, obs_id):
+def unpairObs(dbhandle, station_code, obs_id, verbose=False):
     """
     unpairObs - mark an observation unpaired by setting the status to zero
 
@@ -108,6 +110,8 @@ def unpairObs(dbhandle, station_code, obs_id):
     """
 
     cur = dbhandle.cursor()
+    if verbose:
+        log.info(f'unpairing {obs_id}')
     cur.execute(f"update paired_obs set status=0 where station_code='{station_code}' and obs_id='{obs_id}'")
     dbhandle.commit()
     cur.close()
