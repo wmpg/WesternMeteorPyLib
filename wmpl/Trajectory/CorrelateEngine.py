@@ -1740,7 +1740,6 @@ class TrajectoryCorrelator(object):
                         log.info("Max convergence angle too small: {:.1f} < {:.1f} deg".format(qc_max, 
                             self.traj_constraints.min_qc))
                         for _, met_obs_temp, _ in matched_observations:
-                            log.info(f'Marking {met_obs_temp.id} unpaired')
                             unpairObs(self.dh.observations_db, met_obs_temp.station_code, met_obs_temp.id)
 
                         continue
@@ -1807,7 +1806,6 @@ class TrajectoryCorrelator(object):
                     if self.dh.checkTrajIfFailed(traj):
                         log.info("The same trajectory already failed to be computed in previous runs!")
                         for _, met_obs_temp, _ in matched_observations:
-                            log.info(f'Marking {met_obs_temp.id} unpaired')
                             unpairObs(self.dh.observations_db, met_obs_temp.station_code, met_obs_temp.id)
                         continue
 
