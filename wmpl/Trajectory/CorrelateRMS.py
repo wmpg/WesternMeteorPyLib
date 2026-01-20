@@ -557,7 +557,8 @@ class RMSDataHandle(object):
             self.observations_db = openObsDatabase(db_dir, 'observations')
             if hasattr(self.db, 'paired_obs') and len(self.db.paired_obs) > 0:
                 log.info('-----------------------------')
-                log.info('moving observations to sqlite')
+                log.info('moving observations to sqlite - this may take some time....')
+                i = 0
                 keylist = self.db.paired_obs.keys()
                 for stat_id in keylist:
                     for obs_id in self.db.paired_obs[stat_id]:
@@ -566,10 +567,13 @@ class RMSDataHandle(object):
                         except Exception:
                             obs_date = datetime.datetime(2000,1,1,0,0,0)
                         addPairedObs(self.observations_db, stat_id, obs_id, obs_date, commitnow=False)
+                        i += 1
+                        if i % 1000:
+                            log.info(f'moved {i} observations')
                 del self.db.paired_obs
                 commitObsDatabase(self.observations_db)
                 self.saveDatabase()
-                log.info('done')
+                log.info(f'done - moved {i} observations')
                 log.info('-----------------------------')
             if archivemonths != 0:
                 log.info('Archiving older entries....')
@@ -1527,7 +1531,6 @@ class RMSDataHandle(object):
                 log.info('--------')
                 log.info(f'Trajectory at {jd2Date(traj.jdt_ref,dt_obj=True).isoformat()} already failed, skipping')
                 for _, met_obs_temp, _ in cand:
-                    log.info(f'Marking {met_obs_temp.id} unpaired')
                     unpairObs(self.observations_db, met_obs_temp.station_code, met_obs_temp.id)
                     remaining_unpaired -= 1
             else:
