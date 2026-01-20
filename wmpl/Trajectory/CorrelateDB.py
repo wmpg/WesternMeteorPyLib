@@ -73,6 +73,7 @@ def addPairedObs(dbhandle,station_code, obs_id, obs_date, commitnow=True):
     :param dbhandle: database connection handle
     :param station_code: station code eg UK12345
     :param obs_id: met_obs observation ID
+    :param obs_date: observation date/time 
     :param commitnow: boolean true to force commit immediately
 
     :return: true if successful, false if the object already exists
@@ -123,9 +124,19 @@ def archiveObsDatabase(dbhandle, db_path, arch_prefix, archdate_jd):
     cur = dbhandle.cursor()
     archdb_fullname = os.path.join(db_path, f'{archdb_name}.db')
     cur.execute(f"attach database '{archdb_fullname}' as archdb")
-    cur.execute(f'insert into archdb.paired_obs select * from paired_obs where obs_date < {archdate_jd}')
+    try:
+        cur.execute(f'insert into archdb.paired_obs select * from paired_obs where obs_date < {archdate_jd}')
+    except Exception:
+        log.info('Some records already exist in archdb, doing row-wise copy')
+        cur.execute(f'select * from paired_obs where obs_date < {archdate_jd}')
+        for row in cur.fetchall():
+            try:
+                cur.execute(f"insert into archdb.paired_obs values('{row[0]}','{row[1]}',{row[2]},{row[3]})")
+            except Exception:
+                log.info(f'{row[1]} already exists in target')
+
     cur.execute(f'delete from paired_obs where obs_date < {archdate_jd}')
-    commitObsDatabase()
+    commitObsDatabase(dbhandle)
     cur.close()
     return 
 
