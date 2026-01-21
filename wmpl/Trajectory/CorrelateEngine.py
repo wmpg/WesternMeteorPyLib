@@ -1662,10 +1662,11 @@ class TrajectoryCorrelator(object):
             log.info("")
 
             # Go through all candidate trajectories and compute the complete trajectory solution
-            for matched_observations in candidate_trajectories:
+            for i, matched_observations in enumerate(candidate_trajectories):
 
                 log.info("")
                 log.info("-----------------------")
+                log.info(f'processing candidate {i+1}')
 
 
                 # if mcmode is not 2, prepare to calculate the intersecting planes solutions
