@@ -21,7 +21,6 @@ from wmpl.Utils.ShowerAssociation import associateShowerTraj
 from wmpl.Utils.TrajConversions import J2000_JD, geo2Cartesian, cartesian2Geo, raDec2AltAz, altAz2RADec, \
     raDec2ECI, datetime2JD, jd2Date, equatorialCoordPrecession_vect
 from wmpl.Utils.Pickling import loadPickle, savePickle
-from wmpl.Trajectory.CorrelateDB import addPairedObs, unpairObs
 
 CANDMODE_NONE = 0
 CANDMODE_SAVE = 1
@@ -883,8 +882,8 @@ class TrajectoryCorrelator(object):
                 log.info("Trajectory skipped and added to fails!")
                 if matched_obs:
                     for _, met_obs_temp, _ in matched_obs:
-                        log.info(f'Marking {met_obs_temp.id} unpaired')
-                        unpairObs(self.dh.observations_db, met_obs_temp.station_code, met_obs_temp.id)
+                        # log.info(f'Marking {met_obs_temp.id} unpaired')
+                        self.dh.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id)
                 return False
 
             # If there are only two stations, make sure to reject solutions which have stations with 
@@ -899,7 +898,7 @@ class TrajectoryCorrelator(object):
                     self.dh.addTrajectory(traj_status, failed_jdt_ref=jdt_ref)
                     for _, met_obs_temp, _ in matched_obs:
                         log.info(f'Marking {met_obs_temp.id} unpaired')
-                        unpairObs(self.dh.observations_db, met_obs_temp.station_code, met_obs_temp.id)
+                        self.dh.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id)
                     return False
 
 
@@ -1337,7 +1336,7 @@ class TrajectoryCorrelator(object):
 
                             else:
                                 for met_obs_temp, _ in candidate_observations:
-                                    unpairObs(self.dh.observations_db, met_obs_temp.station_code, met_obs_temp.id)
+                                    self.dh.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id)
                                 log.info("New trajectory solution failed, keeping the old trajectory...")
 
                     ### ###
@@ -1438,7 +1437,7 @@ class TrajectoryCorrelator(object):
                         # Mark observations as processed
                         for _, met_obs_temp, _ in matched_observations:
                             met_obs_temp.processed = True
-                            if addPairedObs(self.dh.observations_db, met_obs_temp.station_code, met_obs_temp.id, met_obs_temp.mean_dt):
+                            if self.dh.observations_db.addPairedObs(met_obs_temp.station_code, met_obs_temp.id, met_obs_temp.mean_dt):
                                 remaining_unpaired -= 1
 
                         # Store candidate trajectories
@@ -1481,7 +1480,6 @@ class TrajectoryCorrelator(object):
                         # Check for pairs
                         found_first_pair = False
                         for j, traj_cand_test in enumerate(candidate_trajectories[(i + 1):]):
-
                             # Skip same observations
                             if traj_cand_ref[0] == traj_cand_test[0]:
                                 continue
@@ -1520,9 +1518,8 @@ class TrajectoryCorrelator(object):
                             ra_mean_test = meanAngle([ra for ra, _ in plane_radiants_test])
                             dec_mean_test = np.mean([dec for _, dec in plane_radiants_test])
 
-                            # Skip the mergning attempt if the estimated radiants are too far off
+                            # Skip the merging attempt if the estimated radiants are too far off
                             if np.degrees(angleBetweenSphericalCoords(dec_mean_ref, ra_mean_ref, dec_mean_test, ra_mean_test)) > self.traj_constraints.max_merge_radiant_angle:
-
                                 continue
 
 
@@ -1535,9 +1532,9 @@ class TrajectoryCorrelator(object):
                                 for entry in traj_cand_test:
 
                                     # Make sure the added observation is not from a station that's already added
-                                    if entry[1].station_code in ref_stations:
-                                        continue
-
+                                    #if entry[1].station_code in ref_stations:
+                                    #    print('station code already in ref stations')
+                                    #    continue
                                     if entry[1] not in obs_list_ref:
 
                                         # Print the reference and the merged radiants
@@ -1554,6 +1551,7 @@ class TrajectoryCorrelator(object):
                                         traj_cand_ref.append(entry)
 
                                         log.info("Merged radiant:    RA = {:.2f}, Dec = {:.2f}".format(np.degrees(ra_mean_test), np.degrees(dec_mean_test)))
+                                        log.info(f'Candidate contains {len(traj_cand_ref)} obs')
 
                                         
 
@@ -1572,6 +1570,7 @@ class TrajectoryCorrelator(object):
                     log.info("-----------------------")
                     log.info('CHECKING FOR ALREADY-FAILED CANDIDATES')
                     log.info("-----------------------")
+
                     candidate_trajectories, remaining_unpaired = self.dh.excludeAlreadyFailedCandidates(merged_candidate_trajectories, remaining_unpaired)
 
                     log.info("-----------------------")
@@ -1740,7 +1739,7 @@ class TrajectoryCorrelator(object):
                         log.info("Max convergence angle too small: {:.1f} < {:.1f} deg".format(qc_max, 
                             self.traj_constraints.min_qc))
                         for _, met_obs_temp, _ in matched_observations:
-                            unpairObs(self.dh.observations_db, met_obs_temp.station_code, met_obs_temp.id)
+                            self.dh.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id)
 
                         continue
 
@@ -1806,7 +1805,7 @@ class TrajectoryCorrelator(object):
                     if self.dh.checkTrajIfFailed(traj):
                         log.info("The same trajectory already failed to be computed in previous runs!")
                         for _, met_obs_temp, _ in matched_observations:
-                            unpairObs(self.dh.observations_db, met_obs_temp.station_code, met_obs_temp.id)
+                            self.dh.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id)
                         continue
 
                     # pass in matched_observations here so that solveTrajectory can mark them paired if they're used

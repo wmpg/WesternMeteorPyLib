@@ -29,8 +29,7 @@ from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import loadPickle, savePickle
 from wmpl.Utils.TrajConversions import datetime2JD, jd2Date
 from wmpl.Utils.remoteDataHandling import collectRemoteData, moveRemoteData, uploadDataToRemote
-from wmpl.Trajectory.CorrelateDB import openObsDatabase, closeObsDatabase, commitObsDatabase, archiveObsDatabase
-from wmpl.Trajectory.CorrelateDB import checkObsPaired, addPairedObs, unpairObs
+from wmpl.Trajectory.CorrelateDB import ObservationDatabase
 from wmpl.Trajectory.Trajectory import Trajectory
 
 ### CONSTANTS ###
@@ -554,7 +553,7 @@ class RMSDataHandle(object):
         if mcmode != MCMODE_PHASE2:
             log.info("Loading database: {:s}".format(database_path))
             self.db = DatabaseJSON(database_path, verbose=self.verbose)
-            self.observations_db = openObsDatabase(db_dir, 'observations')
+            self.observations_db = ObservationDatabase(db_dir, 'observations')
             if hasattr(self.db, 'paired_obs') and len(self.db.paired_obs) > 0:
                 log.info('-----------------------------')
                 log.info('moving observations to sqlite - this may take some time....')
@@ -566,15 +565,15 @@ class RMSDataHandle(object):
                             obs_date = datetime.datetime.strptime(obs_id.split('_')[1], '%Y%m%d-%H%M%S.%f')
                         except Exception:
                             obs_date = datetime.datetime(2000,1,1,0,0,0)
-                        addPairedObs(self.observations_db, stat_id, obs_id, obs_date, commitnow=False)
+                        self.observations_db.addPairedObs(stat_id, obs_id, obs_date, commitnow=False)
                         i += 1
-                        if i % 1000:
+                        if not i % 100000:
                             log.info(f'moved {i} observations')
                 del self.db.paired_obs
-                commitObsDatabase(self.observations_db)
-                self.saveDatabase()
+                self.observations_db.commitObsDatabase()
                 log.info(f'done - moved {i} observations')
                 log.info('-----------------------------')
+                self.saveDatabase()
             if archivemonths != 0:
                 log.info('Archiving older entries....')
                 try:
@@ -675,7 +674,7 @@ class RMSDataHandle(object):
         archdate = datetime.datetime.now(datetime.timezone.utc) - relativedelta(months=older_than)
         archdate_jd = datetime2JD(archdate)
 
-        archiveObsDatabase(self.observations_db, self.db_dir, archdate.strftime("%Y%m"), archdate_jd)
+        self.observations_db.archiveObsDatabase(self.db_dir, archdate.strftime("%Y%m"), archdate_jd)
 
         arch_db_path = os.path.join(self.db_dir, f'{archdate.strftime("%Y%m")}_{JSON_DB_NAME}')
         archdb = DatabaseJSON(arch_db_path, verbose=self.verbose, archiveYM=archdate.strftime("%Y%m"))
@@ -906,7 +905,7 @@ class RMSDataHandle(object):
                     continue
 
                 # Add only unpaired observations
-                if not checkObsPaired(self.observations_db, met_obs.station_code, met_obs.id):
+                if not self.observations_db.checkObsPaired(met_obs.station_code, met_obs.id):
                     # print(" ", station_code, met_obs.reference_dt, rel_proc_path)
                     added_count += 1
                     unpaired_met_obs_list.append(met_obs)
@@ -1500,8 +1499,7 @@ class RMSDataHandle(object):
         return 
 
     def excludeAlreadyFailedCandidates(self, matched_observations, remaining_unpaired):
-        # TODO make this function work! 
-        # wants to go through the candidates and check if they correspond to already-failed
+        # go through the candidates and check if they correspond to already-failed
         candidate_trajectories=[]
         for cand in matched_observations:
             ref_dt = min([met_obs.reference_dt for _, met_obs, _ in cand])
@@ -1531,7 +1529,7 @@ class RMSDataHandle(object):
                 log.info('--------')
                 log.info(f'Trajectory at {jd2Date(traj.jdt_ref,dt_obj=True).isoformat()} already failed, skipping')
                 for _, met_obs_temp, _ in cand:
-                    unpairObs(self.observations_db, met_obs_temp.station_code, met_obs_temp.id)
+                    self.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id)
                     remaining_unpaired -= 1
             else:
                 candidate_trajectories.append(cand)
@@ -2033,7 +2031,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                     bin_time_range = [bin_beg, bin_end]
                     tc.run(event_time_range=event_time_range, mcmode=cml_args.mcmode, bin_time_range=bin_time_range, candidatemode=cml_args.candmode)
 
-                closeObsDatabase(dh.observations_db)
+                dh.observations_db.closeObsDatabase()
             else:
                 # there were no datasets to process
                 log.info('no data to process yet')
