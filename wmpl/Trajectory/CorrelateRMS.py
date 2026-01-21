@@ -553,27 +553,14 @@ class RMSDataHandle(object):
         if mcmode != MCMODE_PHASE2:
             log.info("Loading database: {:s}".format(database_path))
             self.db = DatabaseJSON(database_path, verbose=self.verbose)
-            self.observations_db = ObservationDatabase(db_dir, 'observations')
+
+            self.observations_db = ObservationDatabase(db_dir)
+            # move any legacy paired obs data into sqlite
             if hasattr(self.db, 'paired_obs') and len(self.db.paired_obs) > 0:
-                log.info('-----------------------------')
-                log.info('moving observations to sqlite - this may take some time....')
-                i = 0
-                keylist = self.db.paired_obs.keys()
-                for stat_id in keylist:
-                    for obs_id in self.db.paired_obs[stat_id]:
-                        try:
-                            obs_date = datetime.datetime.strptime(obs_id.split('_')[1], '%Y%m%d-%H%M%S.%f')
-                        except Exception:
-                            obs_date = datetime.datetime(2000,1,1,0,0,0)
-                        self.observations_db.addPairedObs(stat_id, obs_id, obs_date, commitnow=False)
-                        i += 1
-                        if not i % 100000:
-                            log.info(f'moved {i} observations')
+                self.observations_db.moveJsonRecords(self.db.paired_obs)
                 del self.db.paired_obs
-                self.observations_db.commitObsDatabase()
-                log.info(f'done - moved {i} observations')
-                log.info('-----------------------------')
                 self.saveDatabase()
+
             if archivemonths != 0:
                 log.info('Archiving older entries....')
                 try:
