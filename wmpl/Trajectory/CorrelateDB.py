@@ -11,23 +11,28 @@ from wmpl.Utils.TrajConversions import datetime2JD
 
 log = logging.getLogger("traj_correlator")
 
+############################################################
 # classes to handle the Observation and Trajectory databases
+############################################################
 
 
 class ObservationDatabase():
 
     # A class to handle the sqlite observations database transparently.
 
-    def __init__(self, db_path, db_name='observations'):
-        self.dbhandle = self.openObsDatabase(db_path, db_name)
+    def __init__(self, db_path, db_name='observations.db', purge_records=False):
+        self.dbhandle = self.openObsDatabase(db_path, db_name, purge_records)
         
-    def openObsDatabase(self, db_path, db_name='observations'):
-        # open the database, creating it and adding the required table if necessary
+    def openObsDatabase(self, db_path, db_name='observations.db', purge_records=False):
+        # Open the database, creating it and adding the required table if necessary.
+        # If purge_records is true, delete any existing records. 
 
-        db_full_name = os.path.join(db_path, f'{db_name}.db')
+        db_full_name = os.path.join(db_path, f'{db_name}')
         log.info(f'opening database {db_full_name}')
         con = sqlite3.connect(db_full_name)
         cur = con.cursor()
+        if purge_records:
+            cur.execute('drop table paired_obs')
         res = cur.execute("SELECT name FROM sqlite_master WHERE name='paired_obs'")
         if res.fetchone() is None:
             cur.execute("CREATE TABLE paired_obs(station_code VARCHAR(8), obs_id VARCHAR(36) UNIQUE, obs_date REAL, status INTEGER)")
@@ -107,21 +112,20 @@ class ObservationDatabase():
         # archive records older than archdate_jd to a database {arch_prefix}_observations.db
 
         # create the database and table if it doesnt exist
-        archdb_name = f'{arch_prefix}_observations'
+        archdb_name = f'{arch_prefix}_observations.db'
         archdb = self.openObsDatabase(db_path, archdb_name)
         archdb.commit()
         archdb.close()
 
         # attach the arch db, copy the records then delete them
         cur = self.dbhandle.cursor()
-        archdb_fullname = os.path.join(db_path, f'{archdb_name}.db')
+        archdb_fullname = os.path.join(db_path, f'{archdb_name}')
         cur.execute(f"attach database '{archdb_fullname}' as archdb")
         try:
             # bulk-copy if possible
-            cur.execute(f'insert into archdb.paired_obs select * from paired_obs where obs_date < {archdate_jd}')
+            cur.execute(f'insert or replace into archdb.paired_obs select * from paired_obs where obs_date < {archdate_jd}')
         except Exception:
             # otherwise, one by one 
-            log.info('Some records already exist in archdb, doing row-wise copy')
             cur.execute(f'select * from paired_obs where obs_date < {archdate_jd}')
             for row in cur.fetchall():
                 try:
@@ -134,9 +138,55 @@ class ObservationDatabase():
         cur.close()
         return 
 
+    def moveJsonRecords(self, paired_obs):
+        log.info('-----------------------------')
+        log.info('moving observations to sqlite - this may take some time....')
+        i = 0
+        keylist = paired_obs.keys()
+        for stat_id in keylist:
+            for obs_id in paired_obs[stat_id]:
+                try:
+                    obs_date = datetime.datetime.strptime(obs_id.split('_')[1], '%Y%m%d-%H%M%S.%f')
+                except Exception:
+                    obs_date = datetime.datetime(2000,1,1,0,0,0)
+                self.addPairedObs(stat_id, obs_id, obs_date, commitnow=False)
+                i += 1
+                if not i % 100000:
+                    log.info(f'moved {i} observations')
+        self.commitObsDatabase()
+        log.info(f'done - moved {i} observations')
+        log.info('-----------------------------')
 
-def openTrajDatabase(db_path, db_name='processed_trajectories'):
-    db_full_name = os.path.join(db_path, f'{db_name}.db')
+        return 
+
+    def mergeObsDatabase(self, source_db_path):
+        # merge in records from another observation database, for example from a remote node
+
+        if not os.path.isfile(source_db_path):
+            log.warning(f'source database missing: {source_db_path}')
+            return 
+        # attach the other db, copy the records then detach it
+        cur = self.dbhandle.cursor()
+        cur.execute(f"attach database '{source_db_path}' as sourcedb")
+        try:
+            # bulk-copy if possible
+            cur.execute('insert or replace into paired_obs select * from sourcedb.paired_obs')
+        except Exception:
+            # otherwise, one by one 
+            log.info('Some records already exist, doing row-wise copy')
+            cur.execute('select * from sourcedb.paired_obs')
+            for row in cur.fetchall():
+                self.addPairedObs(row[0], row[1],row[2])
+        self.commitObsDatabase()
+        cur.execute("detach database 'sourcedb'")
+        cur.close()
+        return 
+
+
+############################################################
+
+def openTrajDatabase(db_path, db_name='processed_trajectories.db'):
+    db_full_name = os.path.join(db_path, f'{db_name}')
     log.info(f'opening database {db_full_name}')
     con = sqlite3.connect(db_full_name)
     cur = con.cursor()
