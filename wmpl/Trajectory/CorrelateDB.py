@@ -11,21 +11,17 @@ from wmpl.Utils.TrajConversions import datetime2JD
 
 log = logging.getLogger("traj_correlator")
 
+# classes to handle the Observation and Trajectory databases
+
 
 class ObservationDatabase():
+
+    # A class to handle the sqlite observations database transparently.
+
     def __init__(self, db_path, db_name='observations'):
         self.dbhandle = self.openObsDatabase(db_path, db_name)
         
     def openObsDatabase(self, db_path, db_name='observations'):
-        """
-        openObsDatabase - open the observations sqlite database and return a database handle
-                        
-        The database is created if it doesn't exist.
-
-        :param db_path: the path to the database
-        :param db_name: the name of the database to open, default 'observations'
-        :return: database handle 
-        """
 
         db_full_name = os.path.join(db_path, f'{db_name}.db')
         log.info(f'opening database {db_full_name}')
@@ -51,15 +47,8 @@ class ObservationDatabase():
 
 
     def checkObsPaired(self, station_code, obs_id):
-        """
-        checkObsPaired - check if an observation is already paired
-
-        :param dbhandle: the database
-        :param station_code: the station ID
-        :param obs_id; the observation id
-        :return: true if matched, false otherwise
-
-        """
+        # return True if there is an observation with the correct station code, id and status = 1 
+        
         cur = self.dbhandle.cursor()
         res = cur.execute(f"SELECT obs_id FROM paired_obs WHERE station_code='{station_code}' and obs_id='{obs_id}' and status=1")
         if res.fetchone() is None:
@@ -69,18 +58,7 @@ class ObservationDatabase():
 
 
     def addPairedObs(self, station_code, obs_id, obs_date, commitnow=True, verbose=False):
-        """
-        addPairedObs - add a potentially paired Observation to the database
-        
-        :param dbhandle: database connection handle
-        :param station_code: station code eg UK12345
-        :param obs_id: met_obs observation ID
-        :param obs_date: observation date/time 
-        :param commitnow: boolean true to force commit immediately
-
-        :return: true if successful, false if the object already exists
-        :rtype: bool
-        """
+        # add or update an entry in the database, setting status = 1
         cur = self.dbhandle.cursor()
         res = cur.execute(f"SELECT obs_id FROM paired_obs WHERE station_code='{station_code}' and obs_id='{obs_id}'")
         if res.fetchone() is None:
@@ -102,15 +80,9 @@ class ObservationDatabase():
 
 
     def unpairObs(self, station_code, obs_id, verbose=False):
-        """
-        unpairObs - mark an observation unpaired by setting the status to zero
-
-        :param dbhandle: the database
-        :param station_code: the station ID
-        :param obs_id; the observation id
-        
-        """
-
+        # if an entry exists, update the status to 0. 
+        # this allows us to mark an observation paired, then unpair it later if the solution fails
+        # or we want to force a rerun. 
         cur = self.dbhandle.cursor()
         if verbose:
             log.info(f'unpairing {obs_id}')
@@ -125,19 +97,23 @@ class ObservationDatabase():
 
 
     def archiveObsDatabase(self, db_path, arch_prefix, archdate_jd):
-        # create the database if it doesnt exist
+        # archive records older than archdate_jd to a database {arch_prefix}_observations.db
+
+        # create the database and table if it doesnt exist
         archdb_name = f'{arch_prefix}_observations'
         archdb = self.openObsDatabase(db_path, archdb_name)
         archdb.commit()
         archdb.close()
 
-        # attach the arch db and copy the records then delete them
+        # attach the arch db, copy the records then delete them
         cur = self.dbhandle.cursor()
         archdb_fullname = os.path.join(db_path, f'{archdb_name}.db')
         cur.execute(f"attach database '{archdb_fullname}' as archdb")
         try:
+            # bulk-copy if possible
             cur.execute(f'insert into archdb.paired_obs select * from paired_obs where obs_date < {archdate_jd}')
         except Exception:
+            # otherwise, one by one 
             log.info('Some records already exist in archdb, doing row-wise copy')
             cur.execute(f'select * from paired_obs where obs_date < {archdate_jd}')
             for row in cur.fetchall():
