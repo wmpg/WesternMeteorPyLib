@@ -22,6 +22,7 @@ class ObservationDatabase():
         self.dbhandle = self.openObsDatabase(db_path, db_name)
         
     def openObsDatabase(self, db_path, db_name='observations'):
+        # open the database, creating it and adding the required table if necessary
 
         db_full_name = os.path.join(db_path, f'{db_name}.db')
         log.info(f'opening database {db_full_name}')
@@ -35,26 +36,29 @@ class ObservationDatabase():
         return con
 
     def commitObsDatabase(self):
-        """ commit the obs db 
-        """
+        # commit the obs db. This function exists so we can do lazy writes in some cases
+
         self.dbhandle.commit()
         return 
 
     def closeObsDatabase(self):
+        # close the database, making sure we commit any pending updates
+
         self.dbhandle.commit()
         self.dbhandle.close()
         return 
 
 
     def checkObsPaired(self, station_code, obs_id):
-        # return True if there is an observation with the correct station code, id and status = 1 
+        # return True if there is an observation with the correct station code, obs id and with status = 1 
         
+        paired = True
         cur = self.dbhandle.cursor()
         res = cur.execute(f"SELECT obs_id FROM paired_obs WHERE station_code='{station_code}' and obs_id='{obs_id}' and status=1")
         if res.fetchone() is None:
-            return False
+            paired = False
         cur.close()
-        return True
+        return paired 
 
 
     def addPairedObs(self, station_code, obs_id, obs_date, commitnow=True, verbose=False):
@@ -71,6 +75,7 @@ class ObservationDatabase():
             sqlstr = f"update paired_obs set status=1 where station_code='{station_code}' and obs_id='{obs_id}'"
         cur.execute(sqlstr)
         cur.close()
+
         if commitnow:
             self.dbhandle.commit()
         if not self.checkObsPaired(station_code, obs_id):
@@ -83,15 +88,17 @@ class ObservationDatabase():
         # if an entry exists, update the status to 0. 
         # this allows us to mark an observation paired, then unpair it later if the solution fails
         # or we want to force a rerun. 
-        cur = self.dbhandle.cursor()
         if verbose:
             log.info(f'unpairing {obs_id}')
+
+        cur = self.dbhandle.cursor()
         try:
             cur.execute(f"update paired_obs set status=0 where station_code='{station_code}' and obs_id='{obs_id}'")
+            self.dbhandle.commit()
         except Exception:
             # obs wasn't in the database so no need to unpair it
             pass
-        self.dbhandle.commit()
+        
         cur.close()
         return True
 
