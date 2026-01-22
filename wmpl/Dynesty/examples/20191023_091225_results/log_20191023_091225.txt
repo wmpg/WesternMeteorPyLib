@@ -24,15 +24,14 @@ niter: 24179
 ncall: 1754248
 eff(%):  1.266
 logz: -521.098 +/-  0.151
-H info.gain: 24.193
+
 niter i.e number of metsim simulated events
 ncall i.e. number of likelihood evaluations
 eff(%) i.e. (niter/ncall)*100 eff. of the logL call 
 logz i.e. final estimated evidence
-H info.gain i.e. big H very small peak posterior, low H broad posterior distribution no need for a lot of live points
 
 Tau: 0.42 95CI (0.34 - 0.48) %
-Approx. mass weighted $\rho$ : 284.29 95CI (108.87 - 1047.48) kg/m^3
+Approx. mass weighted $\rho$ : 285.20 95CI (108.86 - 1061.69) kg/m^3
 Real mass weighted $\rho$ : 285.51 95CI (109.08 - 1048.64) kg/m^3
 
 Best fit Noise:
@@ -52,6 +51,4 @@ erosion_mass_max:	9.789655966394682e-08
 noise_lag:	10.90227261371072
 noise_lum:	6.703580952166081
 
-Best fit logL: -181.06860874927605 
-
-Time to run dynesty: 7:48:28.781154
+Best fit logL: -181.06861181822148
