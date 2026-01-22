@@ -32,6 +32,7 @@ logz i.e. final estimated evidence
 
 Tau: 0.42 95CI (0.34 - 0.48) %
 Approx. mass weighted $\rho$ : 285.20 95CI (108.86 - 1061.69) kg/m^3
+Real mass weighted $\rho$ : 285.51 95CI (109.08 - 1048.64) kg/m^3
 
 Best fit Noise:
 Noise:  | Abs.Mag [-]|     Lum [W]|  Vel [km/s]|     Lag [m]|
