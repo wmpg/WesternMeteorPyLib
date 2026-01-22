@@ -20,12 +20,12 @@
 
 ## Overview
 
-The tool searches a specified input directory for `.pickle` data files. If multiple matching pickle files are found for the same event, e.g. one containing the light curve (from EMCCD) and another containing the deceleration (from CAMO narrow-field), it creates a combined dataset with EMCCD light curve and CAMO narrow-field deceleration.
+The tool searches a specified input directory for `.pickle` data files. If multiple matching pickle files are found for the same input folder or any other subfolders, unite all the data together in a single dataset and run dynamic nested sampling (implemented via dynesty https://dynesty.readthedocs.io/en/v3.0.0/), each event found in the input directory is one by one proces and saved in a separate folder.
 
 **Key Features:**
 * **Automated Data Fusion:** Combines data streams automatically based on timestamps.
 * **Robust Execution:** Designed as a "run and forget" tool. If a run fails, it logs the error and proceeds to the next solution without halting (the log file will be called log_error_ ).
-* **Resume Capability:** If interrupted, the code can resume from the existing `.dynesty` file without overwriting previous progress.
+* **Resume Capability:** If interrupted, the code can resume from the existing `.dynesty` file without overwriting previous progress. Note: .dynesty files can be finicky and may fail to load if they were created on a different machine or under a slightly different conda environment.
 * **MetSim Compatibility:** Supports MetSim JSON data as inputs for model validation, the code will introduce noise (if requested) to test how the posteriory distribution is affectd by noise.
 
 ---
@@ -65,6 +65,7 @@ python -m wmpl.Dynesty.DynestyMetSim "PATH_TO_INPUT_FOLDER" --output_dir "PATH_T
 ```
 python -m wmpl.Dynesty.DynestyMetSim "PATH_TO_INPUT_FOLDER_1, PATH_TO_INPUT_FOLDER_2" --output_dir "PATH_TO_OUTPUT_FOLDER" --prior "PATH_TO_PRIOR_FILE"
 ```
+remember if you put both PATH_TO_INPUT_FOLDER_1 and PATH_TO_INPUT_FOLDER_2 in the same folder and run it from the folder where both are stored the code will do the exact same as separating them with a comma, as long as they have all different events (or for the events that share the same name it will try to merge camera data).
 
 ### Command Line Arguments
 
@@ -76,9 +77,9 @@ python -m wmpl.Dynesty.DynestyMetSim "PATH_TO_INPUT_FOLDER_1, PATH_TO_INPUT_FOLD
 | `--pick_pos` | Adjusts the pick position in the meteor frame (0 to 1). <br>• `0`: Leading edge (default).<br>• `0.5`: Centroid (recommended for fireballs). |
 | `--cores` | Specify the number of CPU cores to use. Default uses all available cores. |
 | `-new` | Forces a new simulation in the output folder does not continue the dynesty simulation if interrupted. Prevents mixing data if a `.dynesty` file already exists (though separate folders are recommended). |
-| `-all` | Uses all available data, only necesary if using EMCCD and CAMO narrow-field, wide-field data! By default the code will take lightcurve from EMCCD if not present it will combine CAMO narrow-field with wide-field data, while for the decelaration (lag) the code will take first CAMO narrow-field, then if not present EMCCD and if neither are present it will use CAMO wide-field. |
+| `-all` | Merges all available data from multiple cameras, only necesary if using EMCCD and CAMO narrow-field, wide-field data! By default the code will take lightcurve from EMCCD if not present it will combine CAMO narrow-field with wide-field data, while for the decelaration (lag) the code will take first CAMO narrow-field, then if not present EMCCD and if neither are present it will use CAMO wide-field. |
 | `-plot` | Generates plots based on the current state of the `.dynesty` file without running the simulation. Useful to make sure everything is loaded correctly and when .dynesty file is created to check on progress. |
-| `-NoBackup` | Skips the generation of the `posterior_backup.pkl.gz` file. Saves ~10-20 minutes if extended data is not needed (if `posterior_backup.pkl.gz` is already present it's not going to generate a new file in any case). |
+| `-NoBackup` | Skips the generation of the `posterior_backup.pkl.gz` file (gets ovewritten at the end of a run, it must save the backup). Saves ~5-20 minutes if extended data is not needed (if `posterior_backup.pkl.gz` is already present it's not going to generate a new file in any case, only if a run has finished). |
 
 ### Monitoring Progress
 When the simulation is running, the terminal will display a status line (Dynesty progress):
@@ -216,35 +217,48 @@ When finished, a `_results` folder is generated (e.g., `20191023_091225_results`
 
 ## Programmatic Data Access
 
-The `posterior_backup.pkl.gz` file contains detailed simulation data stored in a dictionary structure.
+The `posterior_backup.pkl.gz` file contains detailed simulation data stored in a dictionary structure. This way if the .dynesty cannot be open in an other machine is always possible to open the `posterior_backup.pkl.gz` file and load the results. All plots can be recreated from the backup file except for 2 plots from dynesty that require to open the oiginal .dynesty file (i.e. _dynesty_runplot.png and _trace_plot.png).
 
 ### Structure of Backup Data
 ```python
 backup_small = {
     "dynesty": {
-        "samples_eq": [...],          # Equal-weighted samples
-        "weights": [...],             # Weights for samples
-        "rho_mass_weighted_estimate": { ... } # Median, low95, high95
+        "file_name": file_name,  # event/run id
+
+        "samples": [...],              # dynesty samples (nsamp, ndim)
+        "importance_weights": [...],   # dynesty weights for samples
+        "weights": [...],              # pipeline weights for samples
+
+        "logl": [...],                 # log-likelihood per sample
+        "logwt": [...],                # log-weights per sample
+        "logz": [...],                 # evidence history (final = logz[-1])
+        "logzerr": [...],              # evidence err history (or None)
+
+        "niter": ...,                  # total iterations
+        "ncall": ...,                  # total likelihood calls
+        "eff": ...,                    # sampling efficiency (%)
+        "summary": "...",              # summary text block
+
+        "variables": [...],            # parameter names (matches samples columns)
+        "flags_dict": {...},           # prior flags
+        "fixed_values": {...},         # fixed params from .prior
+
+        "median": [...],               # posterior median
+        "mean": [...],                 # posterior mean
+        "approx_modes": [...],         # approx posterior modes
+        "95_CI_lower": [...],          # 95% CI lower
+        "95_CI_upper": [...],          # 95% CI upper
+
+        "rho_array": [...],            # rho per sample/sim
+        "rho_mass_weighted_estimate": {...},  # rho stats [median][low95][high95]
+        "const_backups": {...}         # extra physics diagnostics
     },
-    "best_guess": { ... },            # Best fit parameter values
+    "best_guess": {
+            'luminosity': ..., "abs_magnitude": ..., "velocity": ..., "lag": ...
+       }, # Best fit points
     "bands": {                        # Posterior bands for plotting
         "lum": ..., "mag": ..., "vel": ..., "lag": ...
     },
-    "const_backups": {                # Physics constants per each generated simulation
-        "rho_mass_weighted": ...,
-        "rho_volume_weighted": ...,
-        "erosion_beg_dyn_press": ...,
-        "energy_per_mass_before_erosion": ...,
-        "erosion_beg_vel": ...,
-        "erosion_beg_mas": ...,
-        "erosion_beg_dyn_press": ...,
-        "mass_at_erosion_change": ...,
-        "dyn_press_at_erosion_change": ...,
-        "energy_per_cs_before_erosion": ...,
-        "energy_per_mass_before_erosion": ...,
-        "main_mass_exhaustion_ht": ...,
-        "main_bottom_ht": ...,
-    }
 }
 ```
 
