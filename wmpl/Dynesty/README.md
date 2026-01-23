@@ -23,10 +23,11 @@
 The tool searches a specified input directory for `.pickle` data files. If multiple matching pickle files are found for the same input folder or any other subfolders, unite all the data together in a single dataset and run dynamic nested sampling (implemented via dynesty https://dynesty.readthedocs.io/en/v3.0.0/), each event found in the input directory is one by one proces and saved in a separate folder.
 
 **Key Features:**
-* **Automated Data Fusion:** Combines data streams automatically based on timestamps.
+* **Automated Data Fusion:** Combines .pickle trajectory data automatically based on timestamps.
 * **Robust Execution:** Designed as a "run and forget" tool. If a run fails, it logs the error and proceeds to the next solution without halting (the log file will be called log_error_ ).
 * **Resume Capability:** If interrupted, the code can resume from the existing `.dynesty` file without overwriting previous progress. Note: .dynesty files can be finicky and may fail to load if they were created on a different machine or under a slightly different conda environment.
-* **MetSim Compatibility:** Supports MetSim JSON data as inputs for model validation, the code will introduce noise (if requested) to test how the posteriory distribution is affectd by noise.
+* **MetSim Compatibility:** Supports MetSim JSON data as inputs for model validation if specified as input, the code will introduce noise (if requested) to test how the posteriory distribution is affectd by noise.
+* **LogL for Metsim json files :** The code computes the logL likelyhood for the json files in the MetSim format found in the input directory, initially with the first guess of lag and luminoisty noise and later when the simulations are done recomputs them again with the best guess of the noise found.
 
 ---
 
