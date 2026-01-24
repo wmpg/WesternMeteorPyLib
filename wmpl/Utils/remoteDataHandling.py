@@ -25,86 +25,153 @@ import paramiko
 import logging
 import glob
 import shutil
+from configparser import ConfigParser
 
 from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import loadPickle
 
 
+
 log = logging.getLogger("traj_correlator")
 
 
-def collectRemoteData(remotehost, max_trajs, output_dir, datatype='traj'):
-    """
-    Collect trajectory or candidate pickles from a remote server for local processing
-    NB: do NOT use os.path.join here, as it will break on Windows
-    """
-
-    ftpcli, remote_dir, sshcli = getSFTPConnection(remotehost) 
-    if ftpcli is None:
-        return 
-    
-    remote_phase1_dir = os.path.join(remote_dir, 'phase1').replace('\\','/')
-
-    log.info(f'Looking in {remote_phase1_dir} on remote host for up to {max_trajs} trajectories')
-
-    try:
-        files = ftpcli.listdir(remote_phase1_dir)
-        files = [f for f in files if '.pickle' in f and 'processing' not in f]
-        files = files[:max_trajs]
-
-        if len(files) == 0:
-            log.info('no data available at this time')
-            ftpcli.close()
-            sshcli.close()
-            return
+class RemoteDataHandler():
+    def __init__(self, cfg_file):
+        self.initialised = False
+        if not os.path.isfile(cfg_file):
+            log.warning(f'unable to find {cfg_file}, aborting remote processing')
+            return 
         
-        for trajfile in files:
-            fullname = os.path.join(remote_phase1_dir, trajfile).replace('\\','/')
-            localname = os.path.join(output_dir, trajfile)
-            ftpcli.get(fullname, localname)
-            ftpcli.rename(fullname, f'{fullname}_processing')
+        cfg = ConfigParser()
+        cfg.read(cfg_file)
+        self.mode = cfg['mode']['mode']
+        if self.mode not in ['master', 'child']:
+            log.warning('remote cfg: mode must be master or child, aborting remote processing')
+            return 
+        if self.mode == 'master':
+            if 'children' not in cfg.sections() or 'capacity' not in cfg.sections():
+                log.warning('remote cfg: capacity or children sections missing, aborting remote processing')
+                return 
+            
+            self.nodes = [k for k in cfg['children'].values()]
+            self.capacity = [int(k) for k in cfg['capacity'].values()]
+            if len(self.nodes) != len(self.capacity):
+                log.warning('remote cfg: capacity and children not same length, aborting remote processing')
+                return
+        else:
+            if 'key' not in cfg['sftp'] or 'host' not in cfg['sftp'] or 'user' not in cfg['sftp']:
+                log.warning('remote cfg: child user, key or host missing, aborting remote processing')
+                return
+            
+            self.remotehost = cfg['sftp']['host']
+            self.user = cfg['sftp']['user']
+            self.key = os.path.normpath(os.path.expanduser(cfg['sftp']['key']))
+            if 'port' not in cfg['sftp']:
+                self.port = 22
+            else: 
+                self.port = int(cfg['sftp']['port'])
 
-        log.info(f'Obtained {len(files)} trajectories')
+        self.initialised = True
+        self.ssh_client = None
+        self.sftp_client = None
+        return 
+    
+    def getSFTPConnection(self):
+        if not self.initialised:
+            return False
+        log.info(f'Connecting to {self.host}:{self.port} as {self.user}....')
+
+        if not os.path.isfile(os.path.expanduser(self.key)):
+            log.warning(f'ssh keyfile {self.key} missing')
+            return False
+        
+        self.ssh_client = paramiko.SSHClient()
+        self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        pkey = paramiko.RSAKey.from_private_key_file(self.key) 
+        try:
+            self.ssh_client.connect(hostname=self.host, username=self.user, port=self.port, pkey=pkey, look_for_keys=False)
+            self.ftp_client = self.ssh_client.open_sftp()
+            return True
+        
+        except Exception as e:
+
+            log.warning('sftp connection to remote host failed')
+            log.warning(e)
+            self.ssh_client.close()
+            return False
+        
+    def closeSFTPConnection(self):
+        if self.sftp_client: 
+            self.sftp_client.close()
+        if self.ssh_client: 
+            self.ssh_client.close()
+        return
+
+    def getRemoteCandidates(self):
+        return 
+    
+
+    def collectRemotePhase1(self, max_trajs, output_dir):
+        """
+        Collect trajectory or candidate pickles from a remote server for local processing
+        NB: do NOT use os.path.join here, as it will break on Windows
+        """
+
+        if not self.initialised or not self.getSFTPConnection():
+            return 
+        
+        try:
+            files = self.ftp_client.listdir('phase1')
+            files = [f for f in files if '.pickle' in f and 'processing' not in f]
+            files = files[:max_trajs]
+
+            if len(files) == 0:
+                log.info('no data available at this time')
+                self.closeSFTPConnection()
+                return
+            
+            for trajfile in files:
+                fullname = os.path.join('phase1', trajfile).replace('\\','/')
+                localname = os.path.join(output_dir, trajfile)
+                self.ftp_client.get(fullname, localname)
+                self.ftp_client.rename(fullname, f'{fullname}_processing')
+            log.info(f'Obtained {len(files)} trajectories')
 
 
-    except Exception as e:
-        log.warning('Problem with download')
-        log.info(e)
+        except Exception as e:
+            log.warning('Problem with download')
+            log.info(e)
 
-    ftpcli.close()
-    sshcli.close()
-
-    return 
-
-
-def uploadDataToRemote(remotehost, trajfile, output_dir, datatype='traj'):
-    """
-    At the end of MC phase, upload the trajectory pickle and report to a remote host for integration
-    into the solved dataset
-    """
-
-    ftpcli, remote_dir, sshcli = getSFTPConnection(remotehost) 
-    if ftpcli is None:
+        self.closeSFTPConnection()
         return 
 
-    remote_phase2_dir = os.path.join(remote_dir, 'remoteuploads').replace('\\','/')
-    try:
-        ftpcli.mkdir(remote_phase2_dir)
-    except Exception:
-        pass
 
-    localname = os.path.join(output_dir, trajfile)
-    remotename = os.path.join(remote_phase2_dir, trajfile).replace('\\','/')
-    ftpcli.put(localname, remotename)
-    
-    localname = localname.replace('_trajectory.pickle', '_report.txt')
-    remotename = remotename.replace('_trajectory.pickle', '_report.txt')
-    if os.path.isfile(localname):
-        ftpcli.put(localname, remotename)
+    def uploadToRemote(self, trajfile, output_dir, operation_mode=None):
+        """
+        upload the trajectory pickle and report to a remote host for integration
+        into the solved dataset
+        """
 
-    ftpcli.close()
-    sshcli.close()
-    return
+        if not self.initialised or not self.getSFTPConnection():
+            return 
+
+        remote_phase2_dir = ''
+        try:
+            self.sftp_client.mkdir(remote_phase2_dir)
+        except Exception:
+            pass
+
+        localname = os.path.join(output_dir, trajfile)
+        remotename = os.path.join(remote_phase2_dir, trajfile).replace('\\','/')
+        self.ftp_client.put(localname, remotename)
+        
+        localname = localname.replace('_trajectory.pickle', '_report.txt')
+        remotename = remotename.replace('_trajectory.pickle', '_report.txt')
+        if os.path.isfile(localname):
+            self.ftp_client.put(localname, remotename)
+
+        self.closeSFTPConnection()
+        return
 
 
 def moveRemoteData(output_dir, datatype='traj'):
@@ -154,45 +221,7 @@ def moveRemoteData(output_dir, datatype='traj'):
     return
 
 
-def getSFTPConnection(remotehost):
-
-    hostdets = remotehost.split(':')
-
-    if len(hostdets) < 2 or '@' not in hostdets[0]:
-        log.warning(f'{remotehost} malformed, should be user@host:port:/path/to/dataroot')
-        return None, None, None
-    
-    if len(hostdets) == 3:
-        port = int(hostdets[1])
-        remote_data_dir = hostdets[2]
-
-    else:
-        port = 22
-        remote_data_dir = hostdets[1]
-
-    user,host = hostdets[0].split('@')
-    log.info(f'Connecting to {host}....')
 
 
-    ssh_client = paramiko.SSHClient()
-    ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-
-
-    if not os.path.isfile(os.path.expanduser('~/.ssh/trajsolver')):
-        log.warning('ssh keyfile ~/.ssh/trajsolver missing')
-        ssh_client.close()
-        return None, None, None
-    
-    pkey = paramiko.RSAKey.from_private_key_file(os.path.expanduser('~/.ssh/trajsolver')) 
-    try:
-        ssh_client.connect(hostname=host, username=user, port=port, pkey=pkey, look_for_keys=False)
-        ftp_client = ssh_client.open_sftp()
-        return ftp_client, remote_data_dir, ssh_client
-    
-    except Exception as e:
-
-        log.warning('sftp connection to remote host failed')
-        log.warning(e)
-        ssh_client.close()
-        
-        return None, None, None
+def putPhase1Trajectories():
+    return 

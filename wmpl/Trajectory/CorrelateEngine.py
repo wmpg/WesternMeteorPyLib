@@ -22,13 +22,13 @@ from wmpl.Utils.TrajConversions import J2000_JD, geo2Cartesian, cartesian2Geo, r
     raDec2ECI, datetime2JD, jd2Date, equatorialCoordPrecession_vect
 from wmpl.Utils.Pickling import loadPickle, savePickle
 
-CANDMODE_NONE = 0
-CANDMODE_SAVE = 1
-CANDMODE_LOAD = 2
-
 MCMODE_NONE = 0
 MCMODE_PHASE1 = 1
 MCMODE_PHASE2 = 2
+MCMODE_CANDS = 4
+MCMODE_ALL = MCMODE_CANDS + MCMODE_PHASE1 + MCMODE_PHASE2
+MCMODE_SIMPLE = MCMODE_CANDS + MCMODE_PHASE1
+
 
 # Grab the logger from the main thread
 log = logging.getLogger("traj_correlator")
@@ -642,7 +642,7 @@ class TrajectoryCorrelator(object):
         return traj
 
 
-    def solveTrajectory(self, traj, mc_runs, mcmode=MCMODE_NONE, matched_obs=None, orig_traj=None):
+    def solveTrajectory(self, traj, mc_runs, mcmode=MCMODE_ALL, matched_obs=None, orig_traj=None):
         """ Given an initialized Trajectory object with observation, run the solver and automatically
             reject bad observations.
 
@@ -671,9 +671,10 @@ class TrajectoryCorrelator(object):
         # make a note of how many observations are already marked ignored.
         initial_ignore_count = len([obs for obs in traj.observations if obs.ignore_station])
         log.info(f'initially ignoring {initial_ignore_count} stations...')
+        successful_traj_fit = False
 
-        # run the first phase of the solver if mcmode is MCMODE_NONE or MCMODE_PHASE1
-        if mcmode != MCMODE_PHASE2: 
+        # run the first phase of the solver if mcmode is MCMODE_PHASE1
+        if mcmode & MCMODE_PHASE1: 
             # Disable Monte Carlo runs until an initial stable set of observations is found
             traj.monte_carlo = False
 
@@ -841,14 +842,21 @@ class TrajectoryCorrelator(object):
                     # Disable Monte Carlo runs until an initial stable set of observations is found
                     traj.monte_carlo = False
 
-                    # Reinitialize the observations, rejecting the ignored stations
+                    # Reinitialize the observations. Note we *include* the ignored obs as they're internally marked ignored
+                    # and so will be skipped, but to avoid confusion in the logs we only print the names of the non-ignored ones
                     for obs in traj_status.observations:
+                        traj.infillWithObs(obs)
                         if not obs.ignore_station:
                             log.info(f'Adding {obs.station_id}')
-                            traj.infillWithObs(obs)
 
                     log.info("")
-                    log.info(f'Rerunning the trajectory solution with {len(traj.observations)} stations...')
+                    active_stns = len([obs for obs in traj.observations if not obs.ignore_station])
+                    if active_stns < 2:
+                        log.info(f"Only {active_stns} stations left - trajectory estimation failed!")
+                        skip_trajectory = True
+                        break
+
+                    log.info(f'Rerunning the trajectory solution with {active_stns} stations...')
                     # Re-run the trajectory solution
                     try:
                         traj_status = traj.run()
@@ -879,10 +887,10 @@ class TrajectoryCorrelator(object):
 
                 # Add the trajectory to the list of failed trajectories
                 self.dh.addTrajectory(traj, failed_jdt_ref=jdt_ref)
-                log.info("Trajectory skipped and added to fails!")
+                log.info(f"Trajectory at {jdt_ref} skipped and added to fails!")
                 if matched_obs:
                     for _, met_obs_temp, _ in matched_obs:
-                        # log.info(f'Marking {met_obs_temp.id} unpaired')
+                        log.info(f'Marking {met_obs_temp.id} unpaired')
                         self.dh.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id)
                 return False
 
@@ -922,14 +930,15 @@ class TrajectoryCorrelator(object):
                 else:
                     shower_code = shower_obj.IAU_code
                 log.info("Shower: {:s}".format(shower_code))
+
+        if mcmode & MCMODE_PHASE1:
             successful_traj_fit = True
             log.info('finished initial solution')
 
         ##### end of simple soln phase 
         ##### now run the Monte-carlo phase, if the mcmode is 0 (do both) or 2 (mc-only)
-        if mcmode == MCMODE_NONE or mcmode == MCMODE_PHASE2: 
-            if mcmode == MCMODE_PHASE2:
-                traj_status = traj
+        if mcmode & MCMODE_PHASE2: 
+            traj_status = traj
 
             # save the traj in case we need to clean it up
             save_traj = traj
@@ -1069,7 +1078,8 @@ class TrajectoryCorrelator(object):
 
             if orig_traj:
                 log.info(f"Removing the previous solution {os.path.dirname(orig_traj.traj_file_path)} ...")
-                self.dh.removeTrajectory(orig_traj)
+                remove_phase1 = True if abs(round((traj.jdt_ref-orig_traj.jdt_ref)*86400000,0)) > 0 else False
+                self.dh.removeTrajectory(orig_traj, remove_phase1)
                 traj.pre_mc_longname = os.path.split(self.dh.generateTrajOutputDirectoryPath(orig_traj, make_dirs=False))[-1] 
 
             log.info('Saving trajectory....')
@@ -1086,7 +1096,7 @@ class TrajectoryCorrelator(object):
         return successful_traj_fit
 
 
-    def run(self, event_time_range=None, bin_time_range=None, mcmode=MCMODE_NONE, candidatemode=CANDMODE_NONE):
+    def run(self, event_time_range=None, bin_time_range=None, mcmode=MCMODE_ALL):
         """ Run meteor corellation using available data. 
 
         Keyword arguments:
@@ -1100,12 +1110,13 @@ class TrajectoryCorrelator(object):
             mcmodestr = ' - MONTE CARLO STAGE'
         elif mcmode == MCMODE_PHASE1:
             mcmodestr = ' - SIMPLE STAGE'
+        elif mcmode == MCMODE_CANDS:
+            mcmodestr = ' - CANDIDATE STAGE'
         else:
-            mcmodestr = ' '
-        self.candidatemode = candidatemode
+            mcmodestr = 'FULL SOLVER'
 
         if mcmode != MCMODE_PHASE2:
-            if candidatemode != CANDMODE_LOAD:
+            if mcmode & MCMODE_CANDS:
                 # Get unpaired observations, filter out observations with too little points and sort them by time
                 unpaired_observations_all = self.dh.getUnpairedObservations()
                 unpaired_observations_all = [mettmp for mettmp in unpaired_observations_all 
@@ -1138,7 +1149,7 @@ class TrajectoryCorrelator(object):
             # Data will be divided into time bins, so the pairing function doesn't have to go pair many
             #   observations at once and keep all pairs in memory
             else:
-                if candidatemode != CANDMODE_LOAD:
+                if mcmode & MCMODE_CANDS:
                     dt_beg = unpaired_observations_all[0].reference_dt
                     dt_end = unpaired_observations_all[-1].reference_dt
                 else: 
@@ -1163,6 +1174,7 @@ class TrajectoryCorrelator(object):
         log.info("---------------------------------")
         log.info("")
 
+        log.info(f'mcmode is {mcmode}')
 
         # Go though all time bins and split the list of observations
         for bin_beg, bin_end in dt_bin_list:
@@ -1172,7 +1184,7 @@ class TrajectoryCorrelator(object):
             # if we're in MC mode 0 or 1 we have to find the candidate trajectories
             if mcmode != MCMODE_PHASE2:
                 ## we are in candidatemode mode 0 or 1 and want to find candidates 
-                if self.candidatemode != CANDMODE_LOAD:
+                if mcmode & MCMODE_CANDS:
                     log.info("")
                     log.info("-----------------------------------")
                     log.info("  PAIRING TRAJECTORIES IN TIME BIN:")
@@ -1332,7 +1344,9 @@ class TrajectoryCorrelator(object):
                                 log.info("Remove paired observations from the processing list...")
                                 for _, met_obs_temp in candidate_observations:
                                     unpaired_observations.remove(met_obs_temp)
-                                    remaining_unpaired -= 1
+                                    if self.dh.observations_db.addPairedObs(met_obs_temp.station_code, met_obs_temp.id, met_obs_temp.mean_dt):
+                                        remaining_unpaired -= 1
+
 
                             else:
                                 for met_obs_temp, _ in candidate_observations:
@@ -1577,8 +1591,8 @@ class TrajectoryCorrelator(object):
                     log.info(f'There are {remaining_unpaired} remaining unpaired observations in this bucket.')
                     log.info("-----------------------")
 
-                    # in candidatemode mode 1 we want to save the candidates to disk
-                    if self.candidatemode == CANDMODE_SAVE: 
+                    # in candidate mode we want to save the candidates to disk
+                    if mcmode == MCMODE_CANDS: 
                         self.getCandidateFolders()
                         log.info("-----------------------")
                         log.info('SAVING {} CANDIDATES'.format(len(candidate_trajectories)))
@@ -1739,9 +1753,25 @@ class TrajectoryCorrelator(object):
                     if qc_max < self.traj_constraints.min_qc:
                         log.info("Max convergence angle too small: {:.1f} < {:.1f} deg".format(qc_max, 
                             self.traj_constraints.min_qc))
+
+                        # create a traj object to add to the failed database so we don't try to recompute this one again
+                        ref_dt = min([met_obs.reference_dt for _, met_obs, _ in matched_observations])
+                        jdt_ref = datetime2JD(ref_dt)
+
+                        failed_traj = self.initTrajectory(jdt_ref, 0, verbose=False)
+                        for obs_temp, met_obs, _ in matched_observations:
+                            failed_traj.infillWithObs(obs_temp)
+
+                        t0 = min([obs.time_data[0] for obs in failed_traj.observations if (not obs.ignore_station) 
+                            or (not np.all(obs.ignore_list))])
+                        if t0 != 0.0:
+                            failed_traj.jdt_ref = failed_traj.jdt_ref + t0/86400.0
+
+                        self.dh.addTrajectory(failed_traj, failed_traj.jdt_ref)
+
                         for _, met_obs_temp, _ in matched_observations:
                             self.dh.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id)
-
+                        log.info("Trajectory skipped and added to fails!")
                         continue
 
 

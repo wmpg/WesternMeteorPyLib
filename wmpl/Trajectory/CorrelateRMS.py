@@ -23,14 +23,15 @@ import numpy as np
 
 from wmpl.Formats.CAMS import loadFTPDetectInfo
 from wmpl.Trajectory.CorrelateEngine import TrajectoryCorrelator, TrajectoryConstraints
-from wmpl.Trajectory.CorrelateEngine import MCMODE_NONE, MCMODE_PHASE2, CANDMODE_LOAD, CANDMODE_SAVE
 from wmpl.Utils.Math import generateDatetimeBins
 from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import loadPickle, savePickle
 from wmpl.Utils.TrajConversions import datetime2JD, jd2Date
-from wmpl.Utils.remoteDataHandling import collectRemoteData, moveRemoteData, uploadDataToRemote
+from wmpl.Utils.remoteDataHandling import RemoteDataHandler
 from wmpl.Trajectory.CorrelateDB import ObservationDatabase
 from wmpl.Trajectory.Trajectory import Trajectory
+
+from wmpl.Trajectory.CorrelateEngine import MCMODE_CANDS, MCMODE_PHASE1, MCMODE_PHASE2, MCMODE_ALL
 
 ### CONSTANTS ###
 
@@ -79,6 +80,10 @@ class TrajectoryReduced(object):
 
                 except FileNotFoundError:
                     log.info("Pickle file not found: " + traj_file_path)
+                    return None
+                
+                finally:
+                    log.info("Pickle file could not be loaded: " + traj_file_path)
                     return None
 
             else:
@@ -338,7 +343,7 @@ class DatabaseJSON(object):
             traj_dir = os.path.dirname(traj_reduced.traj_file_path)
             shutil.rmtree(traj_dir, ignore_errors=True)
             if os.path.isfile(traj_reduced.traj_file_path):
-                log.info(f'unable to remove {traj_dir}')
+                log.info(f'unable to remove {traj_dir}')        
 
 
 
@@ -487,7 +492,7 @@ class PlateparDummy:
 
 
 class RMSDataHandle(object):
-    def __init__(self, dir_path, dt_range=None, db_dir=None, output_dir=None, mcmode=MCMODE_NONE, max_trajs=1000, remotehost=None, verbose=False, archivemonths=3):
+    def __init__(self, dir_path, dt_range=None, db_dir=None, output_dir=None, mcmode=MCMODE_ALL, max_trajs=1000, remotehost=None, verbose=False, archivemonths=3):
         """ Handles data interfacing between the trajectory correlator and RMS data files on disk. 
     
         Arguments:
@@ -500,6 +505,7 @@ class RMSDataHandle(object):
                 database file will be loaded from the dir_path.
             output_dir: [str] Path to the directory where the output files will be saved. None by default, in
                 which case the output files will be saved in the dir_path.
+            mcmode: [int] the operation mode, candidates, phase1 simple solns, mc phase or a combination
             max_trajs: [int] maximum number of phase1 trajectories to load at a time when adding uncertainties. Improves throughput.
         """
 
@@ -533,7 +539,7 @@ class RMSDataHandle(object):
         self.phase1_dir = os.path.join(self.output_dir, 'phase1')
 
         # create the directory for phase1 simple trajectories, if needed
-        if self.mc_mode > MCMODE_NONE:
+        if self.mc_mode & MCMODE_PHASE1:
             mkdirP(os.path.join(self.phase1_dir, 'processed'))
             self.purgePhase1ProcessedData(os.path.join(self.phase1_dir, 'processed'))
 
@@ -546,9 +552,11 @@ class RMSDataHandle(object):
         # Load database of processed folders
         database_path = os.path.join(self.db_dir, JSON_DB_NAME)
         log.info("")
+        remote_cfg = os.path.join(self.db_dir, 'wmpl_remote.cfg')
+        self.remotedatahandler = RemoteDataHandler(remote_cfg)
         # move any remotely calculated pickles to their target locations
         if os.path.isdir(os.path.join(self.output_dir, 'remoteuploads')):
-            moveRemoteData(self.output_dir)
+            self.remotedatahandler.moveRemoteData(self.output_dir)
 
         if mcmode != MCMODE_PHASE2:
             log.info("Loading database: {:s}".format(database_path))
@@ -581,7 +589,7 @@ class RMSDataHandle(object):
         else:
             # retrieve pickles from a remote host, if configured
             if self.remotehost is not None:
-                collectRemoteData(remotehost, max_trajs, self.phase1_dir)
+                self.remotedatahandler.collectRemoteData(remotehost, max_trajs, self.phase1_dir)
 
             # reload the phase1 trajectories
             dt_beg, dt_end = self.loadPhase1Trajectories(max_trajs=max_trajs)
@@ -1382,7 +1390,7 @@ class RMSDataHandle(object):
         # if additional observations are found then the refdt or country list may change quite a bit
         traj.longname = os.path.split(output_dir)[-1]
 
-        if self.mc_mode == 1:
+        if self.mc_mode & MCMODE_PHASE1:
             # The MC phase may change the refdt so save a copy of the the original name.
             traj.pre_mc_longname = traj.longname
 
@@ -1393,16 +1401,16 @@ class RMSDataHandle(object):
         savePickle(traj, output_dir, traj.file_name + '_trajectory.pickle')
         log.info(f'saved {traj.traj_id} to {output_dir}')
 
-        if self.mc_mode == 1:
+        if self.mc_mode == MCMODE_PHASE1:
             savePickle(traj, self.phase1_dir, traj.pre_mc_longname + '_trajectory.pickle')
-        elif self.mc_mode == 2:
+        elif self.mc_mode & MCMODE_PHASE2:
             # we save this in MC mode the MC phase may alter the trajectory details and if later on 
             # we're including additional observations we need to use the most recent version of the trajectory
             savePickle(traj, os.path.join(self.phase1_dir, 'processed'), traj.pre_mc_longname + '_trajectory.pickle')
 
             if self.remotehost is not None:
                 log.info('saving to remote host')
-                uploadDataToRemote(remotehost, traj.file_name + '_trajectory.pickle', output_dir)
+                self.remotedatahandler.uploadDataToRemote(remotehost, traj.file_name + '_trajectory.pickle', output_dir)
                 log.info(' ...done')
 
         # Save the plots
@@ -1439,11 +1447,11 @@ class RMSDataHandle(object):
 
 
 
-    def removeTrajectory(self, traj_reduced):
+    def removeTrajectory(self, traj_reduced, remove_phase1=False):
         """ Remove the trajectory from the data base and disk. """
 
         # in mcmode 2 the database isn't loaded but we still need to delete updated trajectories
-        if self.mc_mode == MCMODE_PHASE2: 
+        if self.mc_mode & MCMODE_PHASE2: 
             if os.path.isfile(traj_reduced.traj_file_path):
                 traj_dir = os.path.dirname(traj_reduced.traj_file_path)
                 shutil.rmtree(traj_dir, ignore_errors=True)
@@ -1460,8 +1468,16 @@ class RMSDataHandle(object):
 
             # remove the processed pickle now we're done with it
             self.cleanupPhase2TempPickle(traj_reduced, True)
+            return
+        if self.mcmode & MCMODE_PHASE1 and remove_phase1:
+            # remove any solution from the phase1 folder
+            phase1_traj = os.path.join(self.phase1_dir, os.path.basename(traj_reduced.traj_file_path))
+            if os.path.isfile(phase1_traj):
+                try:
+                    os.remove(phase1_traj)
+                except Exception: 
+                    pass
 
-            return 
         self.db.removeTrajectory(traj_reduced)
 
 
@@ -1472,7 +1488,7 @@ class RMSDataHandle(object):
         the pickle, because we might later on get new data and it might become solvable. Otherwise, we can just delete the file 
         since the MC solver will have saved an updated one already.
         """
-        if self.mc_mode != 2:
+        if not self.mc_mode & MCMODE_PHASE2:
             return 
         fldr_name = os.path.split(self.generateTrajOutputDirectoryPath(traj, make_dirs=False))[-1] 
         pick = os.path.join(self.phase1_dir, fldr_name + '_trajectory.pickle_processing')
@@ -1513,7 +1529,6 @@ class RMSDataHandle(object):
                 traj.jdt_ref = traj.jdt_ref + t0/86400.0
 
             if self.checkTrajIfFailed(traj):
-                log.info('--------')
                 log.info(f'Trajectory at {jd2Date(traj.jdt_ref,dt_obj=True).isoformat()} already failed, skipping')
                 for _, met_obs_temp, _ in cand:
                     self.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id)
@@ -1521,7 +1536,7 @@ class RMSDataHandle(object):
             else:
                 candidate_trajectories.append(cand)
     
-        return candidate_trajectories, remaining_unpaired
+        return candidate_trajectories, max(0,remaining_unpaired)
 
     def checkTrajIfFailed(self, traj):
         """ Check if the given trajectory has been computed with the same observations and has failed to be
@@ -1750,9 +1765,6 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     arg_parser.add_argument('--mcmode', '--mcmode', type=int, default=0,
         help="Run just simple soln (1), just monte-carlos (2) or both (0, default).")
 
-    arg_parser.add_argument('--candmode', '--candmode', type=int, default=0,
-        help="Run normally (0), create candidates only (1), load previously-created candidates(2).")
-
     arg_parser.add_argument('--archiveoldrecords', '--archiveoldrecords', type=int, default=3,
         help="Months back to archive old data. Default 3. Zero means don't archive (useful in testing).")
 
@@ -1847,8 +1859,17 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     if cml_args.maxerr is not None:
         trajectory_constraints.max_arcsec_err = cml_args.maxerr
 
+    # mcmode values
+    # mcmode = 1 -> load candidates and do simple solutions
+    # mcmode = 2 -> load simple solns and do MC solutions
+    # mcmode = 4 -> find candidates only
+    # mcmode = 7 -> do everything
+    # mcmode = 0 -> same as mode 7
+    
+    mcmode = MCMODE_ALL if cml_args.mcmode == 0 else cml_args.mcmode
+    
     remotehost = cml_args.remotehost
-    if cml_args.mcmode !=MCMODE_PHASE2 and remotehost is not None:
+    if mcmode !=MCMODE_PHASE2 and remotehost is not None:
         log.info('remotehost only applicable in mcmode 2')
         remotehost = None
 
@@ -1861,7 +1882,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     if cml_args.maxtrajs is not None:
         max_trajs = int(cml_args.maxtrajs)
         
-    if cml_args.mcmode == MCMODE_PHASE2:
+    if mcmode == MCMODE_PHASE2:
         log.info(f'Reloading at most {max_trajs} phase1 trajectories.')
 
     # Set the number of CPU cores
@@ -1871,10 +1892,12 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     trajectory_constraints.mc_cores = cpu_cores
     log.info("Running using {:d} CPU cores.".format(cpu_cores))
 
-    if cml_args.candmode == CANDMODE_LOAD:
-        log.info('Loading Candidates')
-    elif cml_args.candmode == CANDMODE_SAVE:
-        log.info('Saving Candidates')
+    if mcmode == MCMODE_CANDS:
+        log.info('Saving Candidates only')
+    elif mcmode == MCMODE_PHASE1:
+        log.info('Loading Candidates if needed')
+    elif mcmode == MCMODE_ALL:
+        log.info('Full processing mode')
 
     # Run processing. If the auto run more is not on, the loop will break after one run
     previous_start_time = None
@@ -1932,10 +1955,10 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         dh = RMSDataHandle(
             cml_args.dir_path, dt_range=event_time_range, 
             db_dir=cml_args.dbdir, output_dir=cml_args.outdir,
-            mcmode=cml_args.mcmode, max_trajs=max_trajs, remotehost=remotehost, verbose=cml_args.verbose, archivemonths=cml_args.archiveoldrecords)
+            mcmode=mcmode, max_trajs=max_trajs, remotehost=remotehost, verbose=cml_args.verbose, archivemonths=cml_args.archiveoldrecords)
         
-        # If there is nothing to process, stop, unless we're in mcmode 2 (processing_list is not used in this case)
-        if not dh.processing_list and cml_args.mcmode != MCMODE_PHASE2:
+        # If there is nothing to process and we're in Candidate mode, stop
+        if not dh.processing_list and (mcmode & MCMODE_CANDS):
             log.info("")
             log.info("Nothing to process!")
             log.info("Probably everything is already processed.")
@@ -1945,7 +1968,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
 
             ### GENERATE DAILY TIME BINS ###
 
-            if cml_args.mcmode != MCMODE_PHASE2:
+            if mcmode != MCMODE_PHASE2:
                 # Find the range of datetimes of all folders (take only those after the year 2000)
                 proc_dir_dts = [entry[3] for entry in dh.processing_list if entry[3] is not None]
                 proc_dir_dts = [dt for dt in proc_dir_dts if dt > datetime.datetime(2000, 1, 1, 0, 0, 0, 
@@ -2001,8 +2024,8 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                     log.info("-----------------------------")
                     log.info("")
 
-                    # Load data of unprocessed observations
-                    if cml_args.mcmode != MCMODE_PHASE2 and cml_args.candmode != CANDMODE_LOAD:
+                    # Load data of unprocessed observations only if creating candidates
+                    if mcmode & MCMODE_CANDS:
                         dh.unpaired_observations = dh.loadUnpairedObservations(dh.processing_list, 
                             dt_range=(bin_beg, bin_end))
                         log.info(f'loaded {len(dh.unpaired_observations)} observations')
@@ -2010,15 +2033,16 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                     # refresh list of calculated trajectories from disk
                     dh.removeDeletedTrajectories()
                     dh.loadComputedTrajectories(os.path.join(dh.output_dir, OUTPUT_TRAJ_DIR), dt_range=[bin_beg, bin_end])
-                    if cml_args.mcmode != MCMODE_PHASE2:
+                    if mcmode != MCMODE_PHASE2:
                         dh.removeDuplicateTrajectories(dt_range=[bin_beg, bin_end])
 
                     # Run the trajectory correlator
                     tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True, enableOSM=cml_args.enableOSM)
                     bin_time_range = [bin_beg, bin_end]
-                    tc.run(event_time_range=event_time_range, mcmode=cml_args.mcmode, bin_time_range=bin_time_range, candidatemode=cml_args.candmode)
+                    tc.run(event_time_range=event_time_range, mcmode=mcmode, bin_time_range=bin_time_range)
 
-                dh.observations_db.closeObsDatabase()
+                if mcmode & MCMODE_CANDS:
+                    dh.observations_db.closeObsDatabase()
             else:
                 # there were no datasets to process
                 log.info('no data to process yet')
@@ -2056,4 +2080,4 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                 while next_run_time > datetime.datetime.now(datetime.timezone.utc):
                     print("Waiting {:s} to run the trajectory solver...          ".format(str(next_run_time 
                         - datetime.datetime.now(datetime.timezone.utc))))
-                    time.sleep(2)
+                    time.sleep(10)
