@@ -1865,6 +1865,9 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     # mcmode = 4 -> find candidates only
     # mcmode = 7 -> do everything
     # mcmode = 0 -> same as mode 7
+    # bitwise combinations are permissioble so:
+    #   4+1 will find candidates and then run simple solutions to populate "phase1"
+    #   1+2 will load candidates from "candidates" and solve them completely
     
     mcmode = MCMODE_ALL if cml_args.mcmode == 0 else cml_args.mcmode
     
