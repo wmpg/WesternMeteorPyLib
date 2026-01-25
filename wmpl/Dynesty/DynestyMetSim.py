@@ -24,6 +24,8 @@ import signal
 import sys
 import time
 import warnings
+from dataclasses import dataclass, field
+from typing import Any, Iterator
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
@@ -1663,7 +1665,7 @@ def plotObsVsHeight(obs_data, sim_data=None, output_folder='', file_name='', col
     plt.close(fig)
 
 
-def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, output_folder='', file_name='', log_file='', cores=None, save_backup=False):
+def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, output_folder='', file_name='', log_file='', cores=None, save_backup=False, finish_run=False):
     """ Plot the dynesty results (trace plots, corner plots) and save them.
     
     Arguments:
@@ -1696,32 +1698,45 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
         # remove _combined from the file_name
         file_name = file_name.replace('_combined', '')
 
+    # Capture the printed output of summary()
+    summary_buffer = io.StringIO()
+    sys.stdout = summary_buffer  # Redirect stdout
     print(dynesty_run_results.summary())
-    print('information gain:', dynesty_run_results.information[-1])
-    print('niter i.e number of metsim simulated events\n')
-
-    fig, axes = dyplot.runplot(dynesty_run_results,
-                                label_kwargs={"fontsize": 15},  # Reduce axis label size
-                                )
-    # save the figure
-    plt.savefig(output_folder +os.sep+ file_name +'_dynesty_runplot.png', 
-                bbox_inches='tight',
-                pad_inches=0.1,       # a little padding around the edge
-                dpi=300)
-    plt.close(fig)
-
+    # dynesty_run_results.summary()  # This prints to the buffer instead of stdout
+    sys.stdout = sys.__stdout__  # Reset stdout
+    summary_str = summary_buffer.getvalue()  # Get the captured text
+    # delete None if present
+    summary_str = summary_str.replace('None', '')
+    # print the summary to screen
+    print(summary_str)
+    try:
+        fig, axes = dyplot.runplot(dynesty_run_results,
+                                    label_kwargs={"fontsize": 15},  # Reduce axis label size
+                                    )
+        # save the figure
+        plt.savefig(output_folder +os.sep+ file_name +'_dynesty_runplot.png', 
+                    bbox_inches='tight',
+                    pad_inches=0.1,       # a little padding around the edge
+                    dpi=300)
+        plt.close(fig)
+    except Exception as e:
+        print(f"\nError generating dynesty runplot: {e}\nSkipping dynesty runplot generation, only possible when .dynesty is correctly read.\n")
+        
     variables = list(flags_dict.keys())
 
-    logwt = dynesty_run_results.logwt
+    # logwt = dynesty_run_results.logwt
 
-    # Subtract the maximum logwt for numerical stability
-    logwt_shifted = logwt - np.max(logwt)
-    weights = np.exp(logwt_shifted)
+    # # Subtract the maximum logwt for numerical stability
+    # logwt_shifted = logwt - np.max(logwt)
+    # weights = np.exp(logwt_shifted)
+
+    weights = dynesty_run_results.importance_weights()
 
     # Normalize so that sum(weights) = 1
     weights /= np.sum(weights)
 
-    samples_equal = dynesty.utils.resample_equal(dynesty_run_results.samples, weights)
+    samples_equal = dynesty_run_results.samples.copy() 
+
     # all_samples = dynesty.utils.resample_equal(dynesty_run_results.samples, weights)
 
     # Mapping of original variable names to LaTeX-style labels
@@ -2220,7 +2235,8 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
         
         # check if there is a _posterior_backup.pkl.gz file in the output_folder
         backup_file_check = os.path.join(output_folder, f"{file_name}_posterior_backup.pkl.gz")
-        if os.path.exists(backup_file_check):
+        # if exists load it, unless finish_run is True then it has to run again just to overwrite any 
+        if os.path.exists(backup_file_check) and finish_run == False:
             print(f"Loading existing backup file: {backup_file_check}")
              # to load the backup file later
             with gzip.open(backup_file_check, "rb") as f:
@@ -2275,14 +2291,28 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
             backup_small = {
                 "dynesty": {
                     "file_name": file_name,
-                    "samples_eq": backup_data["samples_eq"].tolist(),
-                    "weights": backup_data["weights"].tolist(),
+                    "samples": np.asarray(dynesty_run_results.samples, dtype=np.float64).tolist(),
+                    "importance_weights": np.asarray(dynesty_run_results.importance_weights(), dtype=np.float64).tolist(),
+                    "weights": np.asarray(weights, dtype=np.float64).tolist(),
+                    "logl": np.asarray(dynesty_run_results.logl, dtype=np.float64).tolist(),
+                    "logwt": np.asarray(dynesty_run_results.logwt, dtype=np.float64).tolist(),
+                    "logz": np.asarray(dynesty_run_results.logz, dtype=np.float64).tolist(),
+                    "logzerr": np.asarray(dynesty_run_results.logzerr, dtype=np.float64).tolist() if dynesty_run_results.logzerr is not None else None,
+                    "niter": dynesty_run_results.niter,
+                    "ncall": dynesty_run_results.ncall,
+                    "eff": dynesty_run_results.eff,
+                    "summary": dynesty_run_results.summary(),
                     "variables": variables,
                     "flags_dict": flags_dict,
                     "fixed_values": fixed_values,
-                    "const_backups": backup_data["const_backups"],
+                    "median": np.asarray(posterior_median, dtype=np.float32).tolist(),
+                    "mean": np.asarray(posterior_mean, dtype=np.float32).tolist(),
+                    "approx_modes": np.asarray(approx_modes, dtype=np.float32).tolist(),
+                    "95_CI_lower": np.asarray(lower_95, dtype=np.float32).tolist(),
+                    "95_CI_upper": np.asarray(upper_95, dtype=np.float32).tolist(),
                     "rho_array": backup_data["rho_array"],
-                    "rho_mass_weighted_estimate": {k: float(v) for k, v in backup_data["rho_mass_weighted_estimate"].items()}
+                    "rho_mass_weighted_estimate": {k: float(v) for k, v in backup_data["rho_mass_weighted_estimate"].items()},
+                    "const_backups": backup_data["const_backups"]
                 },
 
                 "best_guess": {
@@ -2434,12 +2464,6 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
     \label{tab:posterior_summary}
     \end{table}"""
 
-    # Capture the printed output of summary()
-    summary_buffer = io.StringIO()
-    sys.stdout = summary_buffer  # Redirect stdout
-    dynesty_run_results.summary()  # This prints to the buffer instead of stdout
-    sys.stdout = sys.__stdout__  # Reset stdout
-    summary_str = summary_buffer.getvalue()  # Get the captured text
 
     # Save to a .tex file
     with open(output_folder+os.sep+file_name+"_results_table.tex", "w") as f:
@@ -2449,12 +2473,12 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
     # add to the log_file
     with open(log_file, "a") as f:
         f.write('\n'+summary_str)
-        f.write("H info.gain: "+str(np.round(dynesty_run_results.information[-1],3))+'\n')
+        # f.write("H info.gain: "+str(np.round(dynesty_run_results.information[-1],3))+'\n')
         f.write("niter i.e number of metsim simulated events\n")
         f.write("ncall i.e. number of likelihood evaluations\n")
         f.write("eff(%) i.e. (niter/ncall)*100 eff. of the logL call \n")
         f.write("logz i.e. final estimated evidence\n")
-        f.write("H info.gain i.e. big H very small peak posterior, low H broad posterior distribution no need for a lot of live points\n")
+        # f.write("H info.gain i.e. big H very small peak posterior, low H broad posterior distribution no need for a lot of live points\n")
         f.write(f"\nTau: {tau_median:.2f} 95CI ({tau_low95:.2f} - {tau_high95:.2f}) %\n")
         f.write(f"Approx. mass weighted $\\rho$ : {rho_median_approx:.2f} 95CI ({rho_low95_approx:.2f} - {rho_high95_approx:.2f}) kg/m^3\n")
         if save_backup:
@@ -2595,47 +2619,48 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
     ### Plot the trace plot ###
 
     print('saving trace plot...')
+    try:
+        if hasattr(obs_data, 'const'):
+            # 25310it [5:59:39,  1.32s/it, batch: 0 | bound: 10 | nc: 30 | ncall: 395112 | eff(%):  6.326 | loglstar:   -inf < -16256.467 <    inf | logz: -16269.475 +/-  0.049 | dlogz: 15670.753 >  0.010]
+            truth_plot = np.array([truth_values_plot[variable] for variable in variables])
+            fig, axes = dyplot.traceplot(dynesty_run_results, truths=truth_plot, labels=labels_plot,
+                                        label_kwargs={"fontsize": 15},  # Reduce axis label size
+                                        title_kwargs={"fontsize": 15},  # Reduce title font size
+                                        title_fmt='.2e',  # Scientific notation for titles
+                                        truth_color='black', show_titles=True,
+                                        trace_cmap='viridis', connect=True,
+                                        connect_highlight=range(5))
+            # # make a super title
+            # fig.suptitle(f"Simulated Test case {file_name}", fontsize=16, fontweight='bold')  # Adjust y for better spacing
 
-    if hasattr(obs_data, 'const'):
-        # 25310it [5:59:39,  1.32s/it, batch: 0 | bound: 10 | nc: 30 | ncall: 395112 | eff(%):  6.326 | loglstar:   -inf < -16256.467 <    inf | logz: -16269.475 +/-  0.049 | dlogz: 15670.753 >  0.010]
-        truth_plot = np.array([truth_values_plot[variable] for variable in variables])
+        else:
 
-        fig, axes = dyplot.traceplot(dynesty_run_results, truths=truth_plot, labels=labels_plot,
-                                    label_kwargs={"fontsize": 15},  # Reduce axis label size
-                                    title_kwargs={"fontsize": 15},  # Reduce title font size
-                                    title_fmt='.2e',  # Scientific notation for titles
-                                    truth_color='black', show_titles=True,
-                                    trace_cmap='viridis', connect=True,
-                                    connect_highlight=range(5))
-        # # make a super title
-        # fig.suptitle(f"Simulated Test case {file_name}", fontsize=16, fontweight='bold')  # Adjust y for better spacing
+            fig, axes = dyplot.traceplot(dynesty_run_results, labels=labels_plot,
+                                        label_kwargs={"fontsize": 15},  # Reduce axis label size
+                                        title_kwargs={"fontsize": 15},  # Reduce title font size
+                                        title_fmt='.2e',  # Scientific notation for titles
+                                        show_titles=True,
+                                        trace_cmap='viridis', connect=True,
+                                        connect_highlight=range(5))
+            # # make a super title
+            # fig.suptitle(f"{file_name}", fontsize=16, fontweight='bold')  # Adjust y for better spacing
 
-    else:
+        # Adjust spacing and tick label size
+        fig.subplots_adjust(hspace=0.5)  # Increase spacing between plots
 
-        fig, axes = dyplot.traceplot(dynesty_run_results, labels=labels_plot,
-                                    label_kwargs={"fontsize": 15},  # Reduce axis label size
-                                    title_kwargs={"fontsize": 15},  # Reduce title font size
-                                    title_fmt='.2e',  # Scientific notation for titles
-                                    show_titles=True,
-                                    trace_cmap='viridis', connect=True,
-                                    connect_highlight=range(5))
-        # # make a super title
-        # fig.suptitle(f"{file_name}", fontsize=16, fontweight='bold')  # Adjust y for better spacing
+        # make so that the the upper part of plot that is not used cropped out
 
-    # Adjust spacing and tick label size
-    fig.subplots_adjust(hspace=0.5)  # Increase spacing between plots
+        # save the figure
+        plt.savefig(output_folder+os.sep+file_name+'_trace_plot.png', 
+                bbox_inches='tight',
+                pad_inches=0.1,       # a little padding around the edge
+                dpi=300)
 
-    # make so that the the upper part of plot that is not used cropped out
-
-    # save the figure
-    plt.savefig(output_folder+os.sep+file_name+'_trace_plot.png', 
-            bbox_inches='tight',
-            pad_inches=0.1,       # a little padding around the edge
-            dpi=300)
-
-    # show the trace plot
-    # plt.show()
-    plt.close(fig)
+        # show the trace plot
+        # plt.show()
+        plt.close(fig)
+    except Exception as e:
+        print(f"\nError generating trace plot: {e}\nSkipping trace plot generation, only possible when .dynesty file is correctly read.\n")
 
     ### Plot the corner plot ###
 
@@ -2656,145 +2681,164 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
         return cov_xy/np.sqrt(var_x*var_y)
 
 
-    # Trace Plots
-    fig, axes = plt.subplots(ndim, ndim, figsize=(35, 15))
-    axes = axes.reshape((ndim, ndim))  # reshape axes
-
-    # Plot grid settings
-    if ndim > 12:
-        label_fontsize = 10
-        title_fontsize = 12
-    else:
-        label_fontsize = 13
-        title_fontsize = 18
-
-    if hasattr(obs_data, 'const'):
-        # Increase spacing between subplots
-        fg, ax = dyplot.cornerplot(
-            dynesty_run_results, 
-            color='blue', 
-            truths=truth_plot,  # Use the defined truth values
-            truth_color='black', 
-            show_titles=True, 
-            max_n_ticks=3, 
-            quantiles=None, 
-            labels=labels_plot,  # Update axis labels
-            label_kwargs={"fontsize": label_fontsize},  # Reduce axis label size
-            title_kwargs={"fontsize": title_fontsize},  # Reduce title font size
-            title_fmt='.2e',  # Scientific notation for titles
-            fig=(fig, axes[:, :ndim])
-        )
-        # add a super title
-        # fg.suptitle(f"Simulated Test case {file_name}", fontsize=16, fontweight='bold')  # Adjust y for better spacing
-
-    else:
-
-        # Increase spacing between subplots
-        fg, ax = dyplot.cornerplot(
-            dynesty_run_results, 
-            color='blue', 
-            show_titles=True, 
-            max_n_ticks=3, 
-            quantiles=None, 
-            labels=labels_plot,  # Update axis labels
-            label_kwargs={"fontsize": label_fontsize},  # Reduce axis label size
-            title_kwargs={"fontsize": title_fontsize},  # Reduce title font size
-            title_fmt='.2e',  # Scientific notation for titles
-            fig=(fig, axes[:, :ndim])
-        )
-        # add a super title
-        # fg.suptitle(f"{file_name}", fontsize=16, fontweight='bold')  # Adjust y for better spacing
-
-    # # Reduce tick size
-    # for ax_row in ax:
-    #     for ax_ in ax_row:
-    #         ax_.tick_params(axis='both', labelsize=6)  # Reduce tick number size
-
-    # Apply scientific notation and horizontal tick labels
-    for ax_row in ax:
-        for ax_ in ax_row:
-            ax_.tick_params(axis='both', labelsize=10, direction='in')
-
-            # Set tick labels to be horizontal
-            for label in ax_.get_xticklabels():
-                label.set_rotation(0)
-            for label in ax_.get_yticklabels():
-                label.set_rotation(45)
-
-            if ax_ is None:
-                continue  # if cornerplot left some entries as None
-            
-            # Get the actual major tick locations.
-            x_locs = ax_.xaxis.get_majorticklocs()
-            y_locs = ax_.yaxis.get_majorticklocs()
-
-            # Only update the formatter if we actually have tick locations:
-            if len(x_locs) > 0:
-                ax_.xaxis.set_major_formatter(FormatStrFormatter('%.4g'))
-            if len(y_locs) > 0:
-                ax_.yaxis.set_major_formatter(FormatStrFormatter('%.4g'))
-
-    for i in range(ndim):
-        for j in range(ndim):
-            # In some corner-plot setups, the upper-right triangle can be None
-            if ax[i, j] is None:
-                continue
-            
-            # Remove y-axis labels (numbers) on the first column (j==0)
-            if j != 0:
-                ax[i, j].set_yticklabels([])  
-                # or ax[i, j].tick_params(labelleft=False) if you prefer
-
-            # Remove x-axis labels (numbers) on the bottom row (i==ndim-1)
-            if i != ndim - 1:
-                ax[i, j].set_xticklabels([])  
-                # or ax[i, j].tick_params(labelbottom=False)
-
-
-    # Overlay weighted correlations in the upper triangle
-    norm = Normalize(vmin=-1, vmax=1)
-    cmap = cm.get_cmap('coolwarm')
     samples = dynesty_run_results['samples'].T  # shape (ndim, nsamps)
     weights = dynesty_run_results.importance_weights()
 
-    cmap = plt.colormaps['coolwarm']
-    norm = Normalize(vmin=-1, vmax=1)
+    try:
 
-    for i in range(ndim):
-        for j in range(ndim):
-            if j <= i or ax[i, j] is None:
-                continue
+        # Trace Plots
+        fig, axes = plt.subplots(ndim, ndim, figsize=(35, 15))
+        axes = axes.reshape((ndim, ndim))  # reshape axes
 
-            panel = ax[i, j]
-            x = samples[j]
-            y = samples[i]
-            weigh_corr = weighted_corr(x, y, weights)
+        # Plot grid settings
+        if ndim > 12:
+            label_fontsize = 10
+            title_fontsize = 12
+        else:
+            label_fontsize = 13
+            title_fontsize = 18
 
-            color = cmap(norm(weigh_corr))
-            # paint the background patch
-            panel.patch.set_facecolor(color)
-            panel.patch.set_alpha(1.0)
+        if hasattr(obs_data, 'const'):
+            # Increase spacing between subplots
+            fg, ax = dyplot.cornerplot(
+                dynesty_run_results, 
+                color='blue', 
+                truths=truth_plot,  # Use the defined truth values
+                truth_color='black', 
+                show_titles=True, 
+                max_n_ticks=3, 
+                quantiles=None, 
+                labels=labels_plot,  # Update axis labels
+                label_kwargs={"fontsize": label_fontsize},  # Reduce axis label size
+                title_kwargs={"fontsize": title_fontsize},  # Reduce title font size
+                title_fmt='.2e',  # Scientific notation for titles
+                fig=(fig, axes[:, :ndim])
+            )
+            # add a super title
+            # fg.suptitle(f"Simulated Test case {file_name}", fontsize=16, fontweight='bold')  # Adjust y for better spacing
 
-            # fallback rectangle if needed
-            panel.add_patch(
-                plt.Rectangle(
-                    (0,0), 1, 1,
-                    transform=panel.transAxes,
-                    facecolor=color,
-                    zorder=0
+        else:
+
+            # Increase spacing between subplots
+            fg, ax = dyplot.cornerplot(
+                dynesty_run_results, 
+                color='blue', 
+                show_titles=True, 
+                max_n_ticks=3, 
+                quantiles=None, 
+                labels=labels_plot,  # Update axis labels
+                label_kwargs={"fontsize": label_fontsize},  # Reduce axis label size
+                title_kwargs={"fontsize": title_fontsize},  # Reduce title font size
+                title_fmt='.2e',  # Scientific notation for titles
+                fig=(fig, axes[:, :ndim])
+            )
+            # add a super title
+            # fg.suptitle(f"{file_name}", fontsize=16, fontweight='bold')  # Adjust y for better spacing
+
+        # # Reduce tick size
+        # for ax_row in ax:
+        #     for ax_ in ax_row:
+        #         ax_.tick_params(axis='both', labelsize=6)  # Reduce tick number size
+
+        # Apply scientific notation and horizontal tick labels
+        for ax_row in ax:
+            for ax_ in ax_row:
+                ax_.tick_params(axis='both', labelsize=10, direction='in')
+
+                # Set tick labels to be horizontal
+                for label in ax_.get_xticklabels():
+                    label.set_rotation(0)
+                for label in ax_.get_yticklabels():
+                    label.set_rotation(45)
+
+                if ax_ is None:
+                    continue  # if cornerplot left some entries as None
+                
+                # Get the actual major tick locations.
+                x_locs = ax_.xaxis.get_majorticklocs()
+                y_locs = ax_.yaxis.get_majorticklocs()
+
+                # Only update the formatter if we actually have tick locations:
+                if len(x_locs) > 0:
+                    ax_.xaxis.set_major_formatter(FormatStrFormatter('%.4g'))
+                if len(y_locs) > 0:
+                    ax_.yaxis.set_major_formatter(FormatStrFormatter('%.4g'))
+
+        for i in range(ndim):
+            for j in range(ndim):
+                # In some corner-plot setups, the upper-right triangle can be None
+                if ax[i, j] is None:
+                    continue
+                
+                # Remove y-axis labels (numbers) on the first column (j==0)
+                if j != 0:
+                    ax[i, j].set_yticklabels([])  
+                    # or ax[i, j].tick_params(labelleft=False) if you prefer
+
+                # Remove x-axis labels (numbers) on the bottom row (i==ndim-1)
+                if i != ndim - 1:
+                    ax[i, j].set_xticklabels([])  
+                    # or ax[i, j].tick_params(labelbottom=False)
+
+
+        # Overlay weighted correlations in the upper triangle
+        norm = Normalize(vmin=-1, vmax=1)
+        cmap = cm.get_cmap('coolwarm')
+
+        cmap = plt.colormaps['coolwarm']
+        norm = Normalize(vmin=-1, vmax=1)
+
+        for i in range(ndim):
+            for j in range(ndim):
+                if j <= i or ax[i, j] is None:
+                    continue
+
+                panel = ax[i, j]
+                x = samples[j]
+                y = samples[i]
+                weigh_corr = weighted_corr(x, y, weights)
+
+                color = cmap(norm(weigh_corr))
+                # paint the background patch
+                panel.patch.set_facecolor(color)
+                panel.patch.set_alpha(1.0)
+
+                # fallback rectangle if needed
+                panel.add_patch(
+                    plt.Rectangle(
+                        (0,0), 1, 1,
+                        transform=panel.transAxes,
+                        facecolor=color,
+                        zorder=0
+                    )
                 )
-            )
 
-            panel.text(
-                0.5, 0.5,
-                f"{weigh_corr:.2f}",
-                transform=panel.transAxes,
-                ha='center', va='center',
-                fontsize=25, color='black'
-            )
-            panel.set_xticks([]); panel.set_yticks([])
-            for spine in panel.spines.values():
-                spine.set_visible(False)
+                panel.text(
+                    0.5, 0.5,
+                    f"{weigh_corr:.2f}",
+                    transform=panel.transAxes,
+                    ha='center', va='center',
+                    fontsize=25, color='black'
+                )
+                panel.set_xticks([]); panel.set_yticks([])
+                for spine in panel.spines.values():
+                    spine.set_visible(False)
+
+        # fg.subplots_adjust(
+        #     left=0.05, right=0.95,    # whatever margins you like
+        #     bottom=0.05, top=0.8,    # top < 1.0 to open space for the suptitle
+        #     wspace=0.1, hspace=0.3)  # Increase spacing between plots
+
+        # Adjust spacing and tick label size
+        fg.subplots_adjust(wspace=0.1, hspace=0.3, top=0.978) # Increase spacing between plots
+
+        # save the figure
+        plt.savefig(output_folder+os.sep+file_name+'_correlation_plot.png', dpi=300)
+
+        # close the figure
+        plt.close(fig)
+    except Exception as e:
+        print(f"\nError generating correlation plot: {e}\nSkipping correlation plot generation, only possible when .dynesty file is correctly read.\n")
 
     # Build the NxN matrix of weigh_corr_ij
     corr_mat = np.zeros((ndim, ndim))
@@ -2817,20 +2861,6 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
     df_corr.to_csv(outpath, float_format="%.4f")
     print(f"Saved weighted correlation matrix to:\n  {outpath}")
 
-
-    # fg.subplots_adjust(
-    #     left=0.05, right=0.95,    # whatever margins you like
-    #     bottom=0.05, top=0.8,    # top < 1.0 to open space for the suptitle
-    #     wspace=0.1, hspace=0.3)  # Increase spacing between plots
-
-    # Adjust spacing and tick label size
-    fg.subplots_adjust(wspace=0.1, hspace=0.3, top=0.978) # Increase spacing between plots
-
-    # save the figure
-    plt.savefig(output_folder+os.sep+file_name+'_correlation_plot.png', dpi=300)
-
-    # close the figure
-    plt.close(fig)
 
 ###############################################################################
 # Function: read prior to generate bounds
@@ -4787,28 +4817,52 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
                 start_time = time.time()
                 # Run dynesty
                 try:
-                    dynestyMainRun(dynesty_file, obs_data, bounds, flags_dict, fixed_values, cml_args.cores, output_folder=out_folder, file_name=base_name, log_file_path=log_file_path, pool_MPI=pool_MPI)
-                    dsampler = dynesty.DynamicNestedSampler.restore(dynesty_file)
-                    plotDynestyResults(dsampler.results, obs_data, flags_dict, fixed_values, out_folder, base_name,log_file_path,cml_args.cores,save_backup=save_backup)
+                    dynestyMainRun(dynesty_file, obs_data, bounds, flags_dict, fixed_values, cml_args.cores, output_folder=out_folder, base_name=base_name, log_file_path=log_file_path, pool_MPI=pool_MPI, save_backup=save_backup)
                 except Exception as e:
                     # Open the file in append mode and write the error message
                     with open(log_file_path, "a") as log_file:
-                        log_file.write(f"\nError encountered in dynestsy run: {e}")
-                    print(f"Error encountered in dynestsy run: {e}")
+                        log_file.write(f"\nError encountered in dynestsy run: {e}\n")
+                    print(f"\nError encountered in dynestsy run: {e}\n")
                     # now try and plot the dynesty file results
                     try:
                         dsampler = dynesty.DynamicNestedSampler.restore(dynesty_file)
-                        plotDynestyResults(dsampler.results, obs_data, flags_dict, fixed_values, out_folder, base_name,log_file_path,cml_args.cores,save_backup=save_backup)
+                        dsampler_results = dsampler.results
+                        
                     except Exception as e:
                         with open(log_file_path, "a") as log_file:
-                            log_file.write(f"Error encountered in dynestsy plot: {e}")
-                        print(f"Error encountered in dynestsy plot: {e}")
+                            log_file.write(f"\nError encountered loading the dynestsy file : {e}\nNote: .dynesty files can be finicky and may fail to load if they were created on a different machine or under a slightly different conda environment.\n")
+                        print(f"\nError encountered loading the dynestsy file: {e}\nNote: .dynesty files can be finicky and may fail to load if they were created on a different machine or under a slightly different conda environment.\n")
+                    
+                        # try to load the backup dynesty file if present {base_name}_posterior_backup.pkl.gz
+                        backup_dynesty_file = os.path.join(out_folder, f"{base_name}_posterior_backup.pkl.gz")
+                        if os.path.isfile(backup_dynesty_file):
+                            try:
+                                dsampler_results, _ , _ = restoreBackupDynesty(backup_dynesty_file)
+                                print(f"Loaded backup dynesty file: {backup_dynesty_file}")
+                            except Exception as e:
+                                with open(log_file_path, "a") as log_file:
+                                    log_file.write(f"\nError encountered loading the backup dynestsy file : {e}\n")
+                                print(f"\nError encountered loading the backup dynestsy file: {e}\n")
+                        else:
+                            print(f"No backup dynesty file found at: {backup_dynesty_file}\n")
+                        
+                    try:
+                        plotDynestyResults(dsampler_results, obs_data, flags_dict, fixed_values, out_folder, base_name,log_file_path,cml_args.cores,save_backup=save_backup)
+                    except Exception as e:
+                        with open(log_file_path, "a") as log_file:
+                            log_file.write(f"\nError encountered plotting the dynestsy results : {e}\n")
+                        print(f"\nError encountered plotting the dynestsy results: {e}\n")
+
                         
                     # take only the name of the log file and the path
                     path_log_file, log_file_name = os.path.split(log_file_path)
                     # chenge the name log_file_name of the log_file_path to log_file_path_error adding error_ at the beginning
                     log_file_path_error = os.path.join(path_log_file, f"error_{log_file_name}")
                     # rename the log_file_path to log_file_path_error
+                    try:
+                        os.remove(log_file_path_error)
+                    except FileNotFoundError:
+                        pass
                     os.rename(log_file_path, log_file_path_error)
                     print(f"Log file renamed to {log_file_path_error}")
                     log_file_path = log_file_path_error
@@ -4826,13 +4880,150 @@ def setupDirAndRunDynesty(input_dir, output_dir='', prior='', resume=True, use_a
 
             elif cml_args.only_plot and os.path.isfile(dynesty_file): 
                 print("Only plotting requested. Skipping dynesty run.")
-                dsampler = dynesty.DynamicNestedSampler.restore(dynesty_file)
+
+                try:
+                    dsampler = dynesty.DynamicNestedSampler.restore(dynesty_file)
+                    dsampler_results = dsampler.results
+
+                except Exception as e:
+                    with open(log_file_path, "a") as log_file:
+                        log_file.write(f"\nError encountered loading the dynestsy file : {e}\nNote: .dynesty files can be finicky and may fail to load if they were created on a different machine or under a slightly different conda environment.\n")
+                    print(f"\nError encountered loading the dynestsy file: {e}\nNote: .dynesty files can be finicky and may fail to load if they were created on a different machine or under a slightly different conda environment.\n")
+                
+                    # try to load the backup dynesty file if present {base_name}_posterior_backup.pkl.gz
+                    backup_dynesty_file = os.path.join(out_folder, f"{base_name}_posterior_backup.pkl.gz")
+                    if os.path.isfile(backup_dynesty_file):
+                        try:
+                            dsampler_results, _ , _ = restoreBackupDynesty(backup_dynesty_file)
+                            print(f"Loaded backup dynesty file: {backup_dynesty_file}")
+                        except Exception as e:
+                            with open(log_file_path, "a") as log_file:
+                                log_file.write(f"\nError encountered loading the backup dynestsy file : {e}")
+                            print(f"\nError encountered loading the backup dynestsy file: {e}")
+                    else:
+                        print(f"No backup dynesty file found at: {backup_dynesty_file}")
+
                 # dsampler = dynesty oad DynamicNestedSampler by restore(dynesty_file)
-                plotDynestyResults(dsampler.results, obs_data, flags_dict, fixed_values, out_folder, base_name,log_file_path,cml_args.cores,save_backup=save_backup)
+                plotDynestyResults(dsampler_results, obs_data, flags_dict, fixed_values, out_folder, base_name,log_file_path,cml_args.cores,save_backup=save_backup)
 
             else:
                 print("Fail to generate dynesty plots, dynasty file not found:",dynesty_file)
                 print("If you want to run the dynasty file set only_plot to False")
+
+
+
+@dataclass
+class RestoredDynestyResults:
+    """Small 'dynesty Results-like' wrapper."""
+    samples: np.ndarray
+    logl: np.ndarray
+    logwt: np.ndarray
+    logz: np.ndarray
+    logzerr: np.ndarray | None = None
+    niter: int | None = None
+    ncall: int | None = None
+    eff: float | None = None
+    _summary_text: str | None = None
+
+    # anything else you want to stash/retrieve by key
+    _extra: dict[str, Any] = field(default_factory=dict)
+
+    # ---- dict-like interface ----
+    def __getitem__(self, key: str) -> Any:
+        if hasattr(self, key):
+            return getattr(self, key)
+        if key in self._extra:
+            return self._extra[key]
+        raise KeyError(key)
+
+    def get(self, key: str, default=None) -> Any:
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def keys(self) -> Iterator[str]:
+        base = [f.name for f in self.__dataclass_fields__.values()
+                if not f.name.startswith("_")]
+        # base includes _extra only if you didn't filter; so keep this simple:
+        base = ["samples", "logl", "logwt", "logz", "logzerr", "niter", "ncall", "eff"]
+        return iter(base + list(self._extra.keys()))
+
+    def items(self):
+        for k in self.keys():
+            yield k, self.get(k)
+
+    def importance_weights(self) -> np.ndarray:
+        """
+        Reconstruct normalized posterior weights (same concept as dynesty's importance_weights()).
+        """
+        if self.logz is None or len(self.logz) == 0:
+            raise ValueError("Cannot compute importance weights: missing logz.")
+        logz_final = self.logz[-1]
+
+        # Unnormalized weights
+        w = np.exp(self.logwt - logz_final)
+
+        # Normalize safely
+        s = np.sum(w)
+        if not np.isfinite(s) or s <= 0:
+            raise ValueError("Importance weights are not finite/positive after reconstruction.")
+        return w / s
+
+    def summary(self) -> str:
+        # Prefer stored exact text so printing reproduces exactly
+        if self._summary_text is not None:
+            return self._summary_text
+
+        # Otherwise rebuild something close to dynesty's summary output
+        w_eff = self.eff if self.eff is not None else float("nan")
+        niter = self.niter if self.niter is not None else len(self.samples)
+        ncall = self.ncall if self.ncall is not None else -1
+        logz = self.logz[-1] if self.logz is not None and len(self.logz) else float("nan")
+        logzerr = (self.logzerr[-1] if self.logzerr is not None and len(self.logzerr) else float("nan"))
+
+        # check if ncall is an array
+        if isinstance(ncall, (list, np.ndarray)):
+            # sum all the ncall values
+            ncall = np.sum(ncall)
+
+        return (
+            "Summary\n"
+            "=======\n"
+            f"niter: {niter}\n"
+            f"ncall: {ncall}\n"
+            f"eff(%):  {w_eff:.3f}\n"
+            f"logz: {logz:.3f} +/-  {logzerr:.3f}\n"
+        )
+
+
+def restoreBackupDynesty(backup_file: str):
+    print(f"Loading existing backup file: {backup_file}")
+    with gzip.open(backup_file, "rb") as f:
+        backup_small = pickle.load(f)
+
+    d = backup_small["dynesty"]
+
+    dynesty_res = RestoredDynestyResults(
+        samples=np.asarray(d["samples"], dtype=np.float64),
+        logl=np.asarray(d["logl"], dtype=np.float64),
+        logwt=np.asarray(d["logwt"], dtype=np.float64),
+        logz=np.asarray(d["logz"], dtype=np.float64),
+        logzerr=np.asarray(d["logzerr"], dtype=np.float64) if "logzerr" in d else None,
+        niter=d.get("niter"),
+        ncall=d.get("ncall"),
+        eff=d.get("eff"),
+        _summary_text=d.get("summary"),
+    )
+
+    bands = backup_small.get("bands", {})
+    bands_lum = bands.get("lum", {})
+    bands_mag = bands.get("mag", {})
+    bands_vel = bands.get("vel", {})
+    bands_lag = bands.get("lag", {})
+
+    return dynesty_res, (bands_lum, bands_mag, bands_vel, bands_lag), backup_small
+
 
 
 def setupDynestyOutputDir(out_folder, obs_data, bounds, flags_dict, fixed_values, pickle_files='', dynesty_file='', prior_path='', base_name='', log_file_path='', report_txt=''):
@@ -6040,7 +6231,7 @@ def priorDynesty(cube, bounds, flags_dict):
 
 
 def dynestyMainRun(dynesty_file, obs_data, bounds, flags_dict, fixed_values, n_core=1, output_folder="", 
-                    file_name="",log_file_path="", pool_MPI=None):
+                    base_name="",log_file_path="", pool_MPI=None, save_backup=True):
     """ Main function to run the Dynesty nested sampling.
 
     Arguments:
@@ -6152,6 +6343,8 @@ def dynestyMainRun(dynesty_file, obs_data, bounds, flags_dict, fixed_values, n_c
         print("Copying dynesty file to output folder...")
         shutil.copy(dynesty_file, output_folder)
         print("dynesty file copied to:", output_folder)
+    
+    plotDynestyResults(dsampler.results, obs_data, flags_dict, fixed_values, output_folder, base_name, log_file_path, n_core, save_backup=save_backup, finish_run=True)
 
 
 
