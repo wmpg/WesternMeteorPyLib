@@ -1401,7 +1401,7 @@ class RMSDataHandle(object):
         savePickle(traj, output_dir, traj.file_name + '_trajectory.pickle')
         log.info(f'saved {traj.traj_id} to {output_dir}')
 
-        if self.mc_mode == MCMODE_PHASE1:
+        if self.mc_mode & MCMODE_PHASE1 and self.mc_mode != MCMODE_ALL:
             savePickle(traj, self.phase1_dir, traj.pre_mc_longname + '_trajectory.pickle')
         elif self.mc_mode & MCMODE_PHASE2:
             # we save this in MC mode the MC phase may alter the trajectory details and if later on 
