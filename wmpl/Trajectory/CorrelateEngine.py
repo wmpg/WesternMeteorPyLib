@@ -749,7 +749,8 @@ class TrajectoryCorrelator(object):
                 max_rejections_possible = int(np.ceil(0.5*len(traj_status.observations))) + initial_ignore_count
                 log.info(f'max stations allowed to be rejected is {max_rejections_possible}')
                 for i, obs in enumerate(traj_status.observations):
-
+                    if obs.ignore_station:
+                        continue
                     # Compute the median angular uncertainty of all other non-ignored stations
                     ang_res_list = [obstmp.ang_res_std for j, obstmp in 
                         enumerate(traj_status.observations) if (i != j) and not obstmp.ignore_station]
