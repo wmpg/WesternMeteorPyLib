@@ -283,7 +283,7 @@ class DatabaseJSON(object):
         return False
 
 
-    def addTrajectory(self, traj_file_path, traj_obj=None, failed=False):
+    def addTrajectory(self, traj_reduced, failed=False):
         """ Add a computed trajectory to the list. 
     
         Arguments:
@@ -294,25 +294,11 @@ class DatabaseJSON(object):
             failed: [bool] Add as a failed trajectory. False by default.
         """
 
-        # Load the trajectory from disk
-        if traj_obj is None:
+        if traj_reduced is None or not hasattr(traj_reduced, "jdt_ref"):
+            return None
 
-            # Init the reduced trajectory object
-            traj_reduced = TrajectoryReduced(traj_file_path)
-            if self.verbose:
-                log.info(f' loaded {traj_file_path}, traj_id {traj_reduced.traj_id}')
-            # Skip if failed
-            if traj_reduced is None:
-                return None
-
-            if not hasattr(traj_reduced, "jdt_ref"):
-                return None
-
-        else:
-            # Use the provided trajectory object
-            traj_reduced = traj_obj
-            if self.verbose:
-                log.info(f' loaded {traj_obj.traj_file_path}, traj_id {traj_reduced.traj_id}')
+        if self.verbose:
+            log.info(f' loaded {traj_reduced.traj_file_path}, traj_id {traj_reduced.traj_id}')
 
 
         # Choose to which dictionary the trajectory will be added
@@ -677,12 +663,12 @@ class RMSDataHandle(object):
 
         for traj in [t for t in self.db.trajectories if t < archdate_jd]:
             if traj < archdate_jd:
-                archdb.addTrajectory(None, self.db.trajectories[traj], False)
+                archdb.addTrajectory(self.db.trajectories[traj], False)
                 del self.db.trajectories[traj]
 
         for traj in [t for t in self.db.failed_trajectories if t < archdate_jd]:
             if traj < archdate_jd:
-                archdb.addTrajectory(None, self.db.failed_trajectories[traj], True)
+                archdb.addTrajectory(self.db.failed_trajectories[traj], True)
                 del self.db.failed_trajectories[traj]
 
         archdb.save()
@@ -1150,7 +1136,7 @@ class RMSDataHandle(object):
 
                             if self.trajectoryFileInDtRange(file_name, dt_range=dt_range):
 
-                                self.db.addTrajectory(os.path.join(full_traj_dir, file_name))
+                                self.db.addTrajectory(TrajectoryReduced(os.path.join(full_traj_dir, file_name)))
 
                                 # Print every 1000th trajectory
                                 if counter % 1000 == 0:
@@ -1443,7 +1429,7 @@ class RMSDataHandle(object):
         if failed_jdt_ref is not None:
             traj_reduced.jdt_ref = failed_jdt_ref
 
-        self.db.addTrajectory(None, traj_obj=traj_reduced, failed=(failed_jdt_ref is not None))
+        self.db.addTrajectory(traj_reduced, failed=(failed_jdt_ref is not None))
 
 
 
