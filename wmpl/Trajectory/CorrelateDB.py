@@ -6,8 +6,11 @@ import logging
 import logging.handlers
 import argparse
 import datetime
+import json
+import shutil
 
 from wmpl.Utils.TrajConversions import datetime2JD
+
 
 log = logging.getLogger("traj_correlator")
 
@@ -185,21 +188,304 @@ class ObservationDatabase():
 
 ############################################################
 
-def openTrajDatabase(db_path, db_name='processed_trajectories.db'):
-    db_full_name = os.path.join(db_path, f'{db_name}')
-    log.info(f'opening database {db_full_name}')
-    con = sqlite3.connect(db_full_name)
-    cur = con.cursor()
-    res = cur.execute("SELECT name FROM sqlite_master WHERE name='failed_trajectories'")
-    if res.fetchone() is None:
-        cur.execute("CREATE TABLE failed_trajectories()")
+class DummyTrajReduced():
+    # a dummy class for use in a couple of fuctions in the TrajectoryDatabase
+    def __init__(self, jdt_ref, traj_id, traj_file_path):
+        self.jdt_ref = jdt_ref
+        self.traj_id = traj_id
+        self.traj_file_path = traj_file_path
 
-    res = cur.execute("SELECT name FROM sqlite_master WHERE name='trajectories'")
-    if res.fetchone() is None:
-        cur.execute("CREATE TABLE trajectories()")
-    con.commit()
-    return con
 
+class TrajectoryDatabase():
+
+    # A class to handle the sqlite trajectory database transparently.
+
+    def __init__(self, db_path, db_name='trajectories.db', purge_records=False):
+        self.dbhandle = self.openTrajDatabase(db_path, db_name, purge_records)
+        
+    def openTrajDatabase(self, db_path, db_name='trajectories.db', purge_records=False):
+        # Open the database, creating it and adding the required table if necessary.
+        # If purge_records is true, delete any existing records. 
+
+        db_full_name = os.path.join(db_path, f'{db_name}')
+        log.info(f'opening database {db_full_name}')
+        con = sqlite3.connect(db_full_name)
+        cur = con.cursor()
+        if purge_records:
+            cur.execute('drop table trajectories')
+            cur.execute('drop table failed_trajectories')
+        res = cur.execute("SELECT name FROM sqlite_master WHERE name='trajectories'")
+        if res.fetchone() is None:
+            cur.execute("""CREATE TABLE trajectories(
+                        jdt_ref REAL UNIQUE,
+                        traj_id VARCHAR UNIQUE,
+                        traj_file_path VARCHAR,
+                        participating_stations VARCHAR, 
+                        radiant_eci_mini VARCHAR,
+                        state_vect_mini VARCHAR,
+                        ignored_stations VARCHAR,
+                        phase_1_only INTEGER,
+                        v_init REAL,
+                        gravity_factor REAL,
+                        v0z REAL,
+                        v_avg REAL,
+                        rbeg_jd REAL, 
+                        rend_jd REAL,
+                        rbeg_lat REAL, 
+                        rbeg_lon REAL, 
+                        rbeg_ele REAL,
+                        rend_lat REAL, 
+                        rend_lon REAL,
+                        rend_ele REAL,
+                        status INTEGER) """)
+
+        res = cur.execute("SELECT name FROM sqlite_master WHERE name='failed_trajectories'")
+        if res.fetchone() is None:
+            cur.execute("""CREATE TABLE failed_trajectories(
+                        jdt_ref REAL UNIQUE,
+                        traj_id VARCHAR UNIQUE,
+                        traj_file_path VARCHAR,
+                        participating_stations VARCHAR, 
+                        ignored_stations VARCHAR,
+                        radiant_eci_mini VARCHAR,
+                        state_vect_mini VARCHAR,
+                        phase_1_only INTEGER,
+                        v_init REAL,
+                        gravity_factor REAL,
+                        status INTEGER) """)
+                        
+        con.commit()
+        cur.close()
+        return con
+
+    def commitTrajDatabase(self):
+        # commit the obs db. This function exists so we can do lazy writes in some cases
+
+        self.dbhandle.commit()
+        return 
+
+    def closeTrajDatabase(self):
+        # close the database, making sure we commit any pending updates
+
+        self.dbhandle.commit()
+        self.dbhandle.close()
+        return 
+
+
+    def checkTrajIfFailed(self, traj_reduced, verbose=False):
+        # return True if there is an observation with the same jdt_ref and matching list of stations
+
+        if not hasattr(traj_reduced, 'jdt_ref'):
+            return False
+        
+        station_list = list(set(traj_reduced.participating_stations + traj_reduced.ignored_stations))
+        cur = self.dbhandle.cursor()
+        res = cur.execute(f"SELECT traj_id FROM failed_trajectories WHERE jdt_ref={traj_reduced.jdt_ref} and status=1")
+        if res.fetchone() is None:
+            cur.close()
+            return False
+        else:
+            res = cur.execute(f"SELECT participating_stations, ignored_stations FROM failed_trajectories WHERE jdt_ref={traj_reduced.jdt_ref}")
+            row = res.fetchone()
+            traj_stations = list(set(json.loads(row[0]) + json.loads(row[1])))
+            if traj_stations == station_list:
+                cur.close()
+                return True
+            else:
+                cur.close()
+                return False
+
+
+    def addTrajectory(self, traj_reduced, failed=False, verbose=False, commitnow=True):
+        # add or update an entry in the database, setting status = 1
+
+        if verbose:
+            log.info(f'adding {traj_reduced.traj_id} with jdt {traj_reduced.jdt_ref}')
+        cur = self.dbhandle.cursor()
+        if failed:
+            cur.execute(f'insert or replace into failed_trajectories values ('
+                        f"{traj_reduced.jdt_ref}, '{traj_reduced.traj_id}', '{traj_reduced.traj_file_path}',"
+                        f"'{json.dumps(traj_reduced.participating_stations)}',"
+                        f"'{json.dumps(traj_reduced.ignored_stations)}',"
+                        f"'{json.dumps(traj_reduced.radiant_eci_mini)}',"
+                        f"'{json.dumps(traj_reduced.state_vect_mini)}',"
+                        f"{traj_reduced.phase_1_only},{traj_reduced.v_init},{traj_reduced.gravity_factor},1)")
+        else:
+            cur.execute(f'insert or replace into trajectories values ('
+                        f"{traj_reduced.jdt_ref}, '{traj_reduced.traj_id}', '{traj_reduced.traj_file_path}',"
+                        f"'{json.dumps(traj_reduced.participating_stations)}',"
+                        f"'{json.dumps(traj_reduced.ignored_stations)}',"
+                        f"'{json.dumps(traj_reduced.radiant_eci_mini)}',"
+                        f"'{json.dumps(traj_reduced.state_vect_mini)}',"
+                        f"{traj_reduced.phase_1_only},{traj_reduced.v_init},{traj_reduced.gravity_factor},"
+                        f"{traj_reduced.v0z},{traj_reduced.v_avg},"
+                        f"{traj_reduced.rbeg_jd},{traj_reduced.rend_jd},"
+                        f"{traj_reduced.rbeg_lat},{traj_reduced.rbeg_lon},{traj_reduced.rbeg_ele},"
+                        f"{traj_reduced.rend_lat},{traj_reduced.rend_lon},{traj_reduced.rend_ele},1)")
+
+        if commitnow:
+            self.dbhandle.commit()
+
+        cur.close()
+        return True
+
+
+    def removeTrajectory(self, traj_reduced, keepFolder=False, failed=False, verbose=False):
+        # if an entry exists, update the status to 0. 
+        # this allows us to mark an observation paired, then unpair it later if the solution fails
+        # or we want to force a rerun. 
+        if verbose:
+            log.info(f'removing {traj_reduced.traj_id}')
+        table_name = 'failed_trajectories' if failed else 'trajectories'
+
+        cur = self.dbhandle.cursor()
+        try:
+            cur.execute(f"update {table_name} set status=0 where jdt_ref='{traj_reduced.jdt_ref}'")
+            self.dbhandle.commit()
+        except Exception:
+            # traj wasn't in the database so no action required
+            pass
+        cur.close()
+
+        # Remove the trajectory folder on the disk
+        if not keepFolder and os.path.isfile(traj_reduced.traj_file_path):
+            traj_dir = os.path.dirname(traj_reduced.traj_file_path)
+            shutil.rmtree(traj_dir, ignore_errors=True)
+            if os.path.isfile(traj_reduced.traj_file_path):
+                log.info(f'unable to remove {traj_dir}')        
+
+        return True
+
+    
+    def getTrajectories(self, jdt_start, jdt_end=None, failed=False, verbose=False):
+
+        table_name = 'failed_trajectories' if failed else 'trajectories'
+        if verbose:
+            log.info(f'getting trajectories between {jdt_start} and {jdt_end}')
+        print(f'getting trajectories between {jdt_start} and {jdt_end}')
+
+
+        cur = self.dbhandle.cursor()
+        if not jdt_end:
+            res = cur.execute(f"SELECT * FROM {table_name} WHERE jdt_ref={jdt_start}")
+            rows = res.fetchall()
+        else:
+            res = cur.execute(f"SELECT * FROM {table_name} WHERE jdt_ref>={jdt_start} and jdt_ref<={jdt_end}")
+            rows = res.fetchall()
+        cur.close()
+        trajs = []
+        for rw in rows:
+            json_dict = {'jdt_ref':rw[0], 'traj_id':rw[1], 'traj_file_path':rw[2],
+                         'participating_stations': json.loads(rw[3]),
+                         'ignored_stations': json.loads(rw[4]),
+                         'radiant_eci_mini': json.loads(rw[5]),
+                         'state_vect_mini': json.loads(rw[6]),
+                         'phase_1_only': rw[7], 'v_init': rw[8],'gravity_factor': rw[9],
+                         'v0z': rw[10], 'v_avg': rw[11], 
+                         'rbeg_jd': rw[12], 'rend_id': rw[13], 
+                         'rbeg_lat': rw[14], 'rbeg_lon': rw[15], 'rbeg_ele': rw[16], 
+                         'rend_lat': rw[17], 'rend_lon': rw[18], 'rend_ele': rw[19]                        
+                         }
+            
+            trajs.append(json_dict)
+        return trajs
+
+
+    def removeDeletedTrajectories(self, jdt_start, jdt_end=None, failed=False, verbose=False):
+
+        table_name = 'failed_trajectories' if failed else 'trajectories'
+        if verbose:
+            log.info(f'getting trajectories between {jdt_start} and {jdt_end}')
+
+        cur = self.dbhandle.cursor()
+        if not jdt_end:
+            res = cur.execute(f"SELECT * FROM {table_name} WHERE jdt_ref={jdt_start}")
+            rows = res.fetchall()
+        else:
+            res = cur.execute(f"SELECT * FROM {table_name} WHERE jdt_ref>={jdt_start} and jdt_ref<={jdt_end}")
+            rows = res.fetchall()
+        cur.close()
+        for rw in rows:
+            if not os.path.isfile(rw[2]):
+                log.info(f'removing traj {rw[0]} from database')
+                self.removeTrajectory(DummyTrajReduced(rw[0], rw[1], rw[2]), keepFolder=True)
+        return 
+
+
+    def archiveTrajDatabase(self, db_path, arch_prefix, archdate_jd):
+        # archive records older than archdate_jd to a database {arch_prefix}_trajectories.db
+
+        # create the database and table if it doesnt exist
+        archdb_name = f'{arch_prefix}_trajectories.db'
+        archdb = self.openObsDatabase(db_path, archdb_name)
+        archdb.commit()
+        archdb.close()
+
+        # attach the arch db, copy the records then delete them
+        cur = self.dbhandle.cursor()
+        archdb_fullname = os.path.join(db_path, f'{archdb_name}')
+        cur.execute(f"attach database '{archdb_fullname}' as archdb")
+        for table_name in ['trajectories', 'failed_trajectories']:
+            try:
+                # bulk-copy if possible
+                cur.execute(f'insert or replace into archdb.{table_name} select * from {table_name} where jdt_ref < {archdate_jd}')
+                cur.execute(f'delete from {table_name} where jdt_ref < {archdate_jd}')
+            except Exception:
+                log.warning(f'unable to archive {table_name}')
+
+        self.commitTrajDatabase()
+        cur.close()
+        return 
+
+    def moveJsonRecords(self, trajectories, failed_trajectories):
+        log.info('-----------------------------')
+        log.info('moving trajectories to sqlite - this may take some time....')
+        i = 0
+        keylist = trajectories.keys()
+        for jdt_ref in keylist:
+            self.addTrajectory(trajectories[jdt_ref])
+            i += 1
+            if not i % 100000:
+                log.info(f'moved {i} trajectories')
+        log.info(f'done - moved {i} trajectories')
+        log.info('-----------------------------')
+        keylist = failed_trajectories.keys()
+        for jdt_ref in keylist:
+            self.addTrajectory(failed_trajectories[jdt_ref], failed=True)
+            i += 1
+            if not i % 100000:
+                log.info(f'moved {i} failed_trajectories')
+        self.commitTrajDatabase()
+        log.info(f'done - moved {i} failed_trajectories')
+        log.info('-----------------------------')
+
+        return 
+
+    def mergeTrajDatabase(self, source_db_path):
+        # merge in records from another observation database, for example from a remote node
+
+        if not os.path.isfile(source_db_path):
+            log.warning(f'source database missing: {source_db_path}')
+            return 
+        # attach the other db, copy the records then detach it
+        cur = self.dbhandle.cursor()
+        cur.execute(f"attach database '{source_db_path}' as sourcedb")
+
+        # TODO need to correct the traj_file_path to account for server locations
+
+        for table_name in ['trajectories', 'failed_trajectories']:
+            try:
+                # bulk-copy if possible
+                cur.execute(f'insert or replace into {table_name} select * from sourcedb.{table_name}')
+            except Exception:
+                log.warning(f'unable to merge data from {source_db_path}')
+        self.commitTrajDatabase()
+        cur.execute("detach database 'sourcedb'")
+        cur.close()
+        return 
+
+
+############################################################
 
 if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser(description="""Automatically compute trajectories from RMS data in the given directory.""",
