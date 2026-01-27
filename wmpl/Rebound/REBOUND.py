@@ -14,7 +14,7 @@ try:
     REBOUND_FOUND = True
 
 except ImportError:
-    print("REBOUND package not found. Install REBOUND and reboundx packages to use the REBOUND functions.")
+    # don't print a message here as its already printed whenever REBOUND_FOUND is False
     REBOUND_FOUND = False
 
 from wmpl.Utils.TrajConversions import (
