@@ -203,7 +203,8 @@ class DatabaseJSON(object):
             # Overwrite the database path with the saved one
             self.db_file_path = db_file_path_saved
 
-            if db_is_ok:
+            # if the trajectories attribute is not present, then the database has been converted to sqlite            
+            if db_is_ok and hasattr(self, 'trajectories'):
                 # Convert trajectories from JSON to TrajectoryReduced objects
                 for traj_dict_str in ["trajectories", "failed_trajectories"]:
                     traj_dict = getattr(self, traj_dict_str)
@@ -236,8 +237,10 @@ class DatabaseJSON(object):
                 self2 = copy.deepcopy(self)
 
                 # Convert reduced trajectory objects to JSON objects
-                self2.trajectories = {key: self.trajectories[key].__dict__ for key in self.trajectories}
-                self2.failed_trajectories = {key: self.failed_trajectories[key].__dict__ 
+                if hasattr(self2,'trajectories'):
+                    self2.trajectories = {key: self.trajectories[key].__dict__ for key in self.trajectories}
+                if hasattr(self2, 'failed_trajectories'):
+                    self2.failed_trajectories = {key: self.failed_trajectories[key].__dict__ 
                     for key in self.failed_trajectories}
                 if hasattr(self2, 'phase1Trajectories'):
                     delattr(self2, 'phase1Trajectories')

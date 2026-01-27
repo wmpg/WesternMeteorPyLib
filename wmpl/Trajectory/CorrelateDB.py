@@ -9,7 +9,7 @@ import datetime
 import json
 import shutil
 
-from wmpl.Utils.TrajConversions import datetime2JD
+from wmpl.Utils.TrajConversions import datetime2JD, jd2Date
 
 
 log = logging.getLogger("traj_correlator")
@@ -303,13 +303,17 @@ class TrajectoryDatabase():
             log.info(f'adding {traj_reduced.traj_id} with jdt {traj_reduced.jdt_ref}')
         cur = self.dbhandle.cursor()
         if failed:
+            v_init = 0 if traj_reduced.v_init is None else traj_reduced.v_init
+            radiant_eci_mini = [0,0,0] if traj_reduced.radiant_eci_mini is None else traj_reduced.radiant_eci_mini
+            state_vect_mini = [0,0,0] if traj_reduced.state_vect_mini is None else traj_reduced.state_vect_mini
+
             cur.execute(f'insert or replace into failed_trajectories values ('
                         f"{traj_reduced.jdt_ref}, '{traj_reduced.traj_id}', '{traj_reduced.traj_file_path}',"
                         f"'{json.dumps(traj_reduced.participating_stations)}',"
                         f"'{json.dumps(traj_reduced.ignored_stations)}',"
-                        f"'{json.dumps(traj_reduced.radiant_eci_mini)}',"
-                        f"'{json.dumps(traj_reduced.state_vect_mini)}',"
-                        f"{traj_reduced.phase_1_only},{traj_reduced.v_init},{traj_reduced.gravity_factor},1)")
+                        f"'{json.dumps(radiant_eci_mini)}',"
+                        f"'{json.dumps(state_vect_mini)}',"
+                        f"0,{v_init},{traj_reduced.gravity_factor},1)")
         else:
             cur.execute(f'insert or replace into trajectories values ('
                         f"{traj_reduced.jdt_ref}, '{traj_reduced.traj_id}', '{traj_reduced.traj_file_path}',"
@@ -361,9 +365,7 @@ class TrajectoryDatabase():
 
         table_name = 'failed_trajectories' if failed else 'trajectories'
         if verbose:
-            log.info(f'getting trajectories between {jdt_start} and {jdt_end}')
-        print(f'getting trajectories between {jdt_start} and {jdt_end}')
-
+            log.info(f'getting trajectories between {jd2Date(jdt_start, dt_obj=True).strftime("%Y%m%d_%M%M%S.%f")} and {jd2Date(jdt_end, dt_obj=True).strftime("%Y%m%d_%M%M%S.%f")}')
 
         cur = self.dbhandle.cursor()
         if not jdt_end:
@@ -382,7 +384,7 @@ class TrajectoryDatabase():
                          'state_vect_mini': json.loads(rw[6]),
                          'phase_1_only': rw[7], 'v_init': rw[8],'gravity_factor': rw[9],
                          'v0z': rw[10], 'v_avg': rw[11], 
-                         'rbeg_jd': rw[12], 'rend_id': rw[13], 
+                         'rbeg_jd': rw[12], 'rend_jd': rw[13], 
                          'rbeg_lat': rw[14], 'rbeg_lon': rw[15], 'rbeg_ele': rw[16], 
                          'rend_lat': rw[17], 'rend_lon': rw[18], 'rend_ele': rw[19]                        
                          }
@@ -407,7 +409,8 @@ class TrajectoryDatabase():
         cur.close()
         for rw in rows:
             if not os.path.isfile(rw[2]):
-                log.info(f'removing traj {rw[0]} from database')
+                if verbose:
+                    log.info(f'removing traj {jd2Date(rw[0], dt_obj=True).strftime("%Y%m%d_%M%M%S.%f")} from database')
                 self.removeTrajectory(DummyTrajReduced(rw[0], rw[1], rw[2]), keepFolder=True)
         return 
 
