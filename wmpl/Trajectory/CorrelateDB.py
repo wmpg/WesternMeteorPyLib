@@ -566,6 +566,12 @@ if __name__ == '__main__':
             print(f'and       {len(cur.fetchall())} unpaired obs')
         obsdb.closeObsDatabase()
     elif dbname == 'trajectories':
-        print('hello')
+        trajdb = TrajectoryDatabase(cml_args.dir_path)
+        if action == 'read':
+            cur = trajdb.dbhandle.cursor()
+            cur.execute('select * from trajectories where status=1')
+            print(f'there are {len(cur.fetchall())} successful trajectories')
+            cur.execute('select * from failed_trajectories')
+            print(f'and       {len(cur.fetchall())} failed trajectories')
     else:
         log.info('valid database not specified')
