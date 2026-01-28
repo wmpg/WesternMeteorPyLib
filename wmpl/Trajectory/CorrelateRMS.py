@@ -1953,15 +1953,16 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                             dt_range=(bin_beg, bin_end))
                         log.info(f'loaded {len(dh.unpaired_observations)} observations')
 
-                    # remove any trajectories that no longer exist on disk
-                    dh.removeDeletedTrajectories()
-                    # load computed trajectories from disk into sqlite
-                    dh.loadComputedTrajectories(dt_range=(bin_beg, bin_end))
-                    # move any legacy failed traj into sqlite
-                    if hasattr(dh.old_db, 'failed_trajectories'):
-                        dh.db.moveFailedTrajectories(dh.old_db.failed_trajectories, (bin_beg, bin_end))
-                        if dh.old_db.removeTrajectories((bin_beg, bin_end), failed=True) > 0:
-                            dh.saveDatabase()
+                    if mcmode != MCMODE_PHASE2:
+                        # remove any trajectories that no longer exist on disk
+                        dh.removeDeletedTrajectories()
+                        # load computed trajectories from disk into sqlite
+                        dh.loadComputedTrajectories(dt_range=(bin_beg, bin_end))
+                        # move any legacy failed traj into sqlite
+                        if hasattr(dh.old_db, 'failed_trajectories'):
+                            dh.db.moveFailedTrajectories(dh.old_db.failed_trajectories, (bin_beg, bin_end))
+                            if dh.old_db.removeTrajectories((bin_beg, bin_end), failed=True) > 0:
+                                dh.saveDatabase()
 
 
                     # Run the trajectory correlator
