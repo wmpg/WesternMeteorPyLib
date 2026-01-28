@@ -335,6 +335,20 @@ class DatabaseJSON(object):
                 log.info(f'unable to remove {traj_dir}')        
 
 
+    def removeTrajectories(self, dt_range, failed=False):
+        jd_beg = datetime2JD(dt_range[0])
+        jd_end = datetime2JD(dt_range[1])
+        if not failed:
+            keys = [k for k in self.trajectories.keys() if float(k) >= jd_beg and float(k) <= jd_end]
+            for jdt in keys:
+                del self.trajectories[jdt]
+        else:
+            keys = [k for k in self.failed_trajectories.keys() if float(k) >= jd_beg and float(k) <= jd_end]
+            for jdt in keys:
+                del self.failed_trajectories[jdt]
+        log.info(f'deleted {len(keys)} keys from {"failed_trajectories" if failed else "trajectories"}')
+        return len(keys)
+
 
 class MeteorPointRMS(object):
     def __init__(self, frame, time_rel, x, y, ra, dec, azim, alt, mag):
@@ -550,15 +564,10 @@ class RMSDataHandle(object):
         if mcmode != MCMODE_PHASE2:
             log.info("Loading database: {:s}".format(database_path))
             self.old_db = DatabaseJSON(database_path, verbose=self.verbose)
-            self.db = TrajectoryDatabase(db_dir)
-            # move any legacy paired obs data into sqlite
-            if hasattr(self.old_db, 'trajectories'):
-                self.db.moveJsonRecords(self.old_db.trajectories, self.old_db.failed_trajectories)
-                del self.old_db.trajectories
-                del self.old_db.failed_trajectories
-                self.saveDatabase()
 
+            self.db = TrajectoryDatabase(db_dir)
             self.observations_db = ObservationDatabase(db_dir)
+
             # move any legacy paired obs data into sqlite
             if hasattr(self.old_db, 'paired_obs'):
                 self.observations_db.moveJsonRecords(self.old_db.paired_obs)
@@ -1053,13 +1062,13 @@ class RMSDataHandle(object):
         return 
 
 
-    def loadComputedTrajectories(self, traj_dir_path, dt_range=None):
+    def loadComputedTrajectories(self, dt_range=None):
         """ Load already estimated trajectories from disk within a date range. 
 
         Arguments:
-            traj_dir_path: [str] Full path to a directory with trajectory pickles.
+            dt_range: [datetime, datetime] range of dates to load data for
         """
-
+        traj_dir_path = os.path.join(self.output_dir, OUTPUT_TRAJ_DIR)
         # defend against the case where there are no existing trajectories and traj_dir_path doesn't exist
         if not os.path.isdir(traj_dir_path):
             return
@@ -1072,7 +1081,7 @@ class RMSDataHandle(object):
         else:
             dt_beg, dt_end = dt_range
 
-        log.info("  Loading trajectories from: " + traj_dir_path)
+        log.info("  Loading found trajectories from: " + traj_dir_path)
         if self.dt_range is not None:
             log.info("  Datetime range: {:s} - {:s}".format(
                 dt_beg.strftime("%Y-%m-%d %H:%M:%S"), 
@@ -1097,17 +1106,17 @@ class RMSDataHandle(object):
             curr_dt = jd2Date(jdt, dt_obj=True)
             if curr_dt.year != yyyy:
                 yyyy = curr_dt.year
-                log.info("- year    " + str(yyyy))
+                #log.info("- year    " + str(yyyy))
 
             if curr_dt.month != mm:
                 mm = curr_dt.month
                 yyyymm = f'{yyyy}{mm:02d}'
-                log.info("  - month " + str(yyyymm))
+                #log.info("  - month " + str(yyyymm))
 
             if curr_dt.day != dd:
                 dd = curr_dt.day
                 yyyymmdd = f'{yyyy}{mm:02d}{dd:02d}'
-                log.info("    - day " + str(yyyymmdd))
+                #log.info("    - day " + str(yyyymmdd))
 
             yyyymmdd_dir_path = os.path.join(traj_dir_path, f'{yyyy}', f'{yyyymm}', f'{yyyymmdd}')
 
@@ -1128,7 +1137,7 @@ class RMSDataHandle(object):
 
                                 # Print every 1000th trajectory
                                 if counter % 1000 == 0:
-                                    log.info(f"  Loaded {counter:6d} trajectories, currently on {file_name}")
+                                    log.info(f"  Loaded {counter:6d} trajectories")
                                 counter += 1
 
                         dir_paths.append(full_traj_dir)
@@ -1944,9 +1953,16 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                             dt_range=(bin_beg, bin_end))
                         log.info(f'loaded {len(dh.unpaired_observations)} observations')
 
-                    # refresh list of calculated trajectories from disk
+                    # remove any trajectories that no longer exist on disk
                     dh.removeDeletedTrajectories()
-                    dh.loadComputedTrajectories(os.path.join(dh.output_dir, OUTPUT_TRAJ_DIR), dt_range=[bin_beg, bin_end])
+                    # load computed trajectories from disk into sqlite
+                    dh.loadComputedTrajectories(dt_range=(bin_beg, bin_end))
+                    # move any legacy failed traj into sqlite
+                    if hasattr(dh.old_db, 'failed_trajectories'):
+                        dh.db.moveFailedTrajectories(dh.old_db.failed_trajectories, (bin_beg, bin_end))
+                        if dh.old_db.removeTrajectories((bin_beg, bin_end), failed=True) > 0:
+                            dh.saveDatabase()
+
 
                     # Run the trajectory correlator
                     tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True, enableOSM=cml_args.enableOSM)

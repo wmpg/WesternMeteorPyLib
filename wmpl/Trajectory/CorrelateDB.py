@@ -303,19 +303,20 @@ class TrajectoryDatabase():
             log.info(f'adding {traj_reduced.traj_id} with jdt {traj_reduced.jdt_ref}')
         cur = self.dbhandle.cursor()
         if failed:
+            traj_id = 'None' if not hasattr(traj_reduced, 'traj_id') or traj_reduced.traj_id is None else traj_reduced.traj_id
             v_init = 0 if traj_reduced.v_init is None else traj_reduced.v_init
             radiant_eci_mini = [0,0,0] if traj_reduced.radiant_eci_mini is None else traj_reduced.radiant_eci_mini
             state_vect_mini = [0,0,0] if traj_reduced.state_vect_mini is None else traj_reduced.state_vect_mini
 
             cur.execute(f'insert or replace into failed_trajectories values ('
-                        f"{traj_reduced.jdt_ref}, '{traj_reduced.traj_id}', '{traj_reduced.traj_file_path}',"
+                        f"{traj_reduced.jdt_ref}, '{traj_id}', '{traj_reduced.traj_file_path}',"
                         f"'{json.dumps(traj_reduced.participating_stations)}',"
                         f"'{json.dumps(traj_reduced.ignored_stations)}',"
                         f"'{json.dumps(radiant_eci_mini)}',"
                         f"'{json.dumps(state_vect_mini)}',"
                         f"0,{v_init},{traj_reduced.gravity_factor},1)")
         else:
-            cur.execute(f'insert or replace into trajectories values ('
+            sql_str = (f'insert or replace into trajectories values ('
                         f"{traj_reduced.jdt_ref}, '{traj_reduced.traj_id}', '{traj_reduced.traj_file_path}',"
                         f"'{json.dumps(traj_reduced.participating_stations)}',"
                         f"'{json.dumps(traj_reduced.ignored_stations)}',"
@@ -326,7 +327,8 @@ class TrajectoryDatabase():
                         f"{traj_reduced.rbeg_jd},{traj_reduced.rend_jd},"
                         f"{traj_reduced.rbeg_lat},{traj_reduced.rbeg_lon},{traj_reduced.rbeg_ele},"
                         f"{traj_reduced.rend_lat},{traj_reduced.rend_lon},{traj_reduced.rend_ele},1)")
-
+            sql_str = sql_str.replace('nan','"NaN"')
+            cur.execute(sql_str)
         if commitnow:
             self.dbhandle.commit()
 
@@ -407,11 +409,13 @@ class TrajectoryDatabase():
             res = cur.execute(f"SELECT * FROM {table_name} WHERE jdt_ref>={jdt_start} and jdt_ref<={jdt_end}")
             rows = res.fetchall()
         cur.close()
-        for rw in rows:
+        i = 0 # initial value in case there are zero rows
+        for i, rw in enumerate(rows):
             if not os.path.isfile(rw[2]):
                 if verbose:
                     log.info(f'removing traj {jd2Date(rw[0], dt_obj=True).strftime("%Y%m%d_%M%M%S.%f")} from database')
                 self.removeTrajectory(DummyTrajReduced(rw[0], rw[1], rw[2]), keepFolder=True)
+        log.info(f'removed {i} deleted trajectories')
         return 
 
 
@@ -448,7 +452,7 @@ class TrajectoryDatabase():
         for jdt_ref in keylist:
             self.addTrajectory(trajectories[jdt_ref])
             i += 1
-            if not i % 100000:
+            if not i % 10000:
                 log.info(f'moved {i} trajectories')
         log.info(f'done - moved {i} trajectories')
         log.info('-----------------------------')
@@ -456,7 +460,7 @@ class TrajectoryDatabase():
         for jdt_ref in keylist:
             self.addTrajectory(failed_trajectories[jdt_ref], failed=True)
             i += 1
-            if not i % 100000:
+            if not i % 10000:
                 log.info(f'moved {i} failed_trajectories')
         self.commitTrajDatabase()
         log.info(f'done - moved {i} failed_trajectories')
@@ -464,6 +468,23 @@ class TrajectoryDatabase():
 
         return 
 
+    def moveFailedTrajectories(self, failed_trajectories, dt_range):
+        jd_beg = datetime2JD(dt_range[0])
+        jd_end = datetime2JD(dt_range[1])
+        log.info('moving trajectories to sqlite - this may take some time....')
+        keylist = [k for k in failed_trajectories.keys() if float(k) >= jd_beg and float(k) <= jd_end]
+        i = 0 # just in case there aren't any trajectories to move
+        for i,jdt_ref in enumerate(keylist):
+            self.addTrajectory(failed_trajectories[jdt_ref], failed=True, commitnow=False)
+            i += 1
+            if not i % 10000:
+                self.commitTrajDatabase()
+                log.info(f'moved {i} failed_trajectories')
+        self.commitTrajDatabase()
+        log.info(f'done - moved {i} failed_trajectories')
+
+        return 
+    
     def mergeTrajDatabase(self, source_db_path):
         # merge in records from another observation database, for example from a remote node
 
