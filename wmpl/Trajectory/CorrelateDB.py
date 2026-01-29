@@ -316,7 +316,7 @@ class TrajectoryDatabase():
             if verbose:
                 log.info(sql_str)
             cur.execute(sql_str)
-            cur.execute(f"select * from failed_trajectories where jdt_ref = '{traj_reduced.jdt_ref}")
+            cur.execute(f"select * from failed_trajectories where jdt_ref = {traj_reduced.jdt_ref})
             print(cur.fetchall())
         else:
             sql_str = (f'insert or replace into trajectories values ('
