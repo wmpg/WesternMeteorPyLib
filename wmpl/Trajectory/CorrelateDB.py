@@ -273,41 +273,37 @@ class TrajectoryDatabase():
     def checkTrajIfFailed(self, traj_reduced, verbose=False):
         # return True if there is an observation with the same jdt_ref and matching list of stations
 
-        if not hasattr(traj_reduced, 'jdt_ref'):
+        if not hasattr(traj_reduced, 'jdt_ref') or not hasattr(traj_reduced, 'participating_stations') or not hasattr(traj_reduced, 'ignored_stations'):
             return False
         
+        found = False
         station_list = list(set(traj_reduced.participating_stations + traj_reduced.ignored_stations))
         cur = self.dbhandle.cursor()
-        res = cur.execute(f"SELECT traj_id FROM failed_trajectories WHERE jdt_ref={traj_reduced.jdt_ref} and status=1")
-        if res.fetchone() is None:
-            cur.close()
-            return False
+        res = cur.execute(f"SELECT traj_id,participating_stations, ignored_stations FROM failed_trajectories WHERE jdt_ref={traj_reduced.jdt_ref} and status=1")
+        row = res.fetchone()
+        if row is None:
+            found = False
         else:
-            res = cur.execute(f"SELECT participating_stations, ignored_stations FROM failed_trajectories WHERE jdt_ref={traj_reduced.jdt_ref}")
-            row = res.fetchone()
-            traj_stations = list(set(json.loads(row[0]) + json.loads(row[1])))
-            if traj_stations == station_list:
-                cur.close()
-                return True
-            else:
-                cur.close()
-                return False
-
+            traj_stations = list(set(json.loads(row[1]) + json.loads(row[2])))
+            found = True if (traj_stations == station_list) else False
+        cur.close()
+        return found
 
     def addTrajectory(self, traj_reduced, failed=False, verbose=False):
         # add or update an entry in the database, setting status = 1
 
         if verbose:
-            log.info(f'adding {traj_reduced.traj_id} with jdt {traj_reduced.jdt_ref} to {"failed" if failed else "traj"}')
+            log.info(f'adding jdt {traj_reduced.jdt_ref} to {"failed" if failed else "trajectories"}')
         cur = self.dbhandle.cursor()
         if failed:
             traj_id = 'None' if not hasattr(traj_reduced, 'traj_id') or traj_reduced.traj_id is None else traj_reduced.traj_id
             v_init = 0 if traj_reduced.v_init is None else traj_reduced.v_init
             radiant_eci_mini = [0,0,0] if traj_reduced.radiant_eci_mini is None else traj_reduced.radiant_eci_mini
             state_vect_mini = [0,0,0] if traj_reduced.state_vect_mini is None else traj_reduced.state_vect_mini
+            traj_file_path = traj_reduced.traj_file_path[traj_reduced.traj_file_path.find('trajectories'):]
 
             sql_str = (f'insert or replace into failed_trajectories values ('
-                        f"{traj_reduced.jdt_ref}, '{traj_id}', '{traj_reduced.traj_file_path}',"
+                        f"{traj_reduced.jdt_ref}, '{traj_id}', '{traj_file_path}',"
                         f"'{json.dumps(traj_reduced.participating_stations)}',"
                         f"'{json.dumps(traj_reduced.ignored_stations)}',"
                         f"'{json.dumps(radiant_eci_mini)}',"
@@ -318,9 +314,12 @@ class TrajectoryDatabase():
             cur.execute(sql_str)
             cur.execute(f"select * from failed_trajectories where jdt_ref = {traj_reduced.jdt_ref}")
             print(cur.fetchall())
+            cur.execute("select count(jdt_ref) from failed_trajectories")
+            print('there are', cur.fetchall(),'fails')
         else:
+            traj_file_path = traj_reduced.traj_file_path[traj_reduced.traj_file_path.find('trajectories'):]
             sql_str = (f'insert or replace into trajectories values ('
-                        f"{traj_reduced.jdt_ref}, '{traj_reduced.traj_id}', '{traj_reduced.traj_file_path}',"
+                        f"{traj_reduced.jdt_ref}, '{traj_reduced.traj_id}', '{traj_file_path}',"
                         f"'{json.dumps(traj_reduced.participating_stations)}',"
                         f"'{json.dumps(traj_reduced.ignored_stations)}',"
                         f"'{json.dumps(traj_reduced.radiant_eci_mini)}',"
@@ -335,7 +334,6 @@ class TrajectoryDatabase():
         self.dbhandle.commit()
         cur.close()
         return True
-
 
     def removeTrajectory(self, traj_reduced, keepFolder=False, failed=False, verbose=False):
         # if an entry exists, update the status to 0. 
@@ -364,7 +362,7 @@ class TrajectoryDatabase():
         return True
 
     
-    def getTrajectories(self, jdt_start, jdt_end=None, failed=False, verbose=False):
+    def getTrajectories(self, output_dir, jdt_start, jdt_end=None, failed=False, verbose=False):
 
         table_name = 'failed_trajectories' if failed else 'trajectories'
         if verbose:
@@ -380,7 +378,7 @@ class TrajectoryDatabase():
         cur.close()
         trajs = []
         for rw in rows:
-            json_dict = {'jdt_ref':rw[0], 'traj_id':rw[1], 'traj_file_path':rw[2],
+            json_dict = {'jdt_ref':rw[0], 'traj_id':rw[1], 'traj_file_path':os.path.join(output_dir, rw[2]),
                          'participating_stations': json.loads(rw[3]),
                          'ignored_stations': json.loads(rw[4]),
                          'radiant_eci_mini': json.loads(rw[5]),

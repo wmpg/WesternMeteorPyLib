@@ -671,6 +671,7 @@ class RMSDataHandle(object):
                 self.station_code = station
                 self.id = obs_id
 
+        # TODO FIX ME I AM BROKEN BECAUSE OF NOO DATABASE 
         archdate = datetime.datetime.now(datetime.timezone.utc) - relativedelta(months=older_than)
         archdate_jd = datetime2JD(archdate)
 
@@ -1150,7 +1151,7 @@ class RMSDataHandle(object):
     def getComputedTrajectories(self, jd_beg, jd_end):
         """ Returns a list of computed trajectories between the Julian dates.
         """
-        json_dicts = self.db.getTrajectories(jd_beg, jd_end)
+        json_dicts = self.db.getTrajectories(self.output_dir, jd_beg, jd_end)
         trajs = [TrajectoryReduced(None, json_dict=j) for j in json_dicts]
         return trajs
                
