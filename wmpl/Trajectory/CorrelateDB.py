@@ -36,8 +36,8 @@ class ObservationDatabase():
         cur = con.cursor()
         if purge_records:
             cur.execute('drop table paired_obs')
-        res = cur.execute("SELECT name FROM sqlite_master WHERE name='paired_obs'")
-        if res.fetchone() is None:
+        cur.execute("SELECT name FROM sqlite_master WHERE name='paired_obs'")
+        if cur.fetchone() is None:
             cur.execute("CREATE TABLE paired_obs(station_code VARCHAR(8), obs_id VARCHAR(36) UNIQUE, obs_date REAL, status INTEGER)")
         con.commit()
         cur.close()
@@ -62,8 +62,8 @@ class ObservationDatabase():
         
         paired = True
         cur = self.dbhandle.cursor()
-        res = cur.execute(f"SELECT obs_id FROM paired_obs WHERE station_code='{station_code}' and obs_id='{obs_id}' and status=1")
-        if res.fetchone() is None:
+        cur.execute(f"SELECT obs_id FROM paired_obs WHERE obs_id='{obs_id}' and status=1")
+        if cur.fetchone() is None:
             paired = False
         cur.close()
         return paired 
@@ -71,16 +71,10 @@ class ObservationDatabase():
 
     def addPairedObs(self, station_code, obs_id, obs_date, verbose=False):
         # add or update an entry in the database, setting status = 1
+        if verbose:
+            log.info(f'adding {obs_id} to paired_obs table')
         cur = self.dbhandle.cursor()
-        res = cur.execute(f"SELECT obs_id FROM paired_obs WHERE station_code='{station_code}' and obs_id='{obs_id}'")
-        if res.fetchone() is None:
-            if verbose:
-                log.info(f'adding {obs_id} to paired_obs table')
-            sqlstr = f"insert into paired_obs values ('{station_code}','{obs_id}', {datetime2JD(obs_date)}, 1)"
-        else:
-            if verbose:
-                log.info(f'updating {obs_id} in paired_obs table')
-            sqlstr = f"update paired_obs set status=1 where station_code='{station_code}' and obs_id='{obs_id}'"
+        sqlstr = f"insert or replace into paired_obs values ('{station_code}','{obs_id}', {datetime2JD(obs_date)}, 1)"
         cur.execute(sqlstr)
         cur.close()
 
@@ -367,11 +361,11 @@ class TrajectoryDatabase():
 
         cur = self.dbhandle.cursor()
         if not jdt_end:
-            res = cur.execute(f"SELECT * FROM {table_name} WHERE jdt_ref={jdt_start}")
-            rows = res.fetchall()
+            cur.execute(f"SELECT * FROM {table_name} WHERE jdt_ref={jdt_start}")
+            rows = cur.fetchall()
         else:
-            res = cur.execute(f"SELECT * FROM {table_name} WHERE jdt_ref>={jdt_start} and jdt_ref<={jdt_end}")
-            rows = res.fetchall()
+            cur.execute(f"SELECT * FROM {table_name} WHERE jdt_ref>={jdt_start} and jdt_ref<={jdt_end}")
+            rows = cur.fetchall()
         cur.close()
         trajs = []
         for rw in rows:
@@ -399,11 +393,11 @@ class TrajectoryDatabase():
 
         cur = self.dbhandle.cursor()
         if not jdt_end:
-            res = cur.execute(f"SELECT * FROM {table_name} WHERE jdt_ref={jdt_start}")
-            rows = res.fetchall()
+            cur.execute(f"SELECT * FROM {table_name} WHERE jdt_ref={jdt_start}")
+            rows = cur.fetchall()
         else:
-            res = cur.execute(f"SELECT * FROM {table_name} WHERE jdt_ref>={jdt_start} and jdt_ref<={jdt_end}")
-            rows = res.fetchall()
+            cur.execute(f"SELECT * FROM {table_name} WHERE jdt_ref>={jdt_start} and jdt_ref<={jdt_end}")
+            rows = cur.fetchall()
         cur.close()
         i = 0 # initial value in case there are zero rows
         for i, rw in enumerate(rows):
