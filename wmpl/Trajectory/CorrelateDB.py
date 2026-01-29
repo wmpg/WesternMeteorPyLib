@@ -399,12 +399,13 @@ class TrajectoryDatabase():
             cur.execute(f"SELECT * FROM {table_name} WHERE jdt_ref>={jdt_start} and jdt_ref<={jdt_end}")
             rows = cur.fetchall()
         cur.close()
-        i = 0 # initial value in case there are zero rows
-        for i, rw in enumerate(rows):
+        i = 0 
+        for rw in rows:
             if not os.path.isfile(os.path.join(output_dir, rw[2])):
                 if verbose:
                     log.info(f'removing traj {jd2Date(rw[0], dt_obj=True).strftime("%Y%m%d_%M%M%S.%f")} from database')
                 self.removeTrajectory(DummyTrajReduced(rw[0], rw[1], rw[2]), keepFolder=True)
+                i += 1
         log.info(f'removed {i} deleted trajectories')
         return 
 
