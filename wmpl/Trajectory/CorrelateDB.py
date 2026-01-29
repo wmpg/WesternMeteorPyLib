@@ -385,7 +385,7 @@ class TrajectoryDatabase():
         return trajs
 
 
-    def removeDeletedTrajectories(self, jdt_start, jdt_end=None, failed=False, verbose=False):
+    def removeDeletedTrajectories(self, output_dir, jdt_start, jdt_end=None, failed=False, verbose=False):
 
         table_name = 'failed_trajectories' if failed else 'trajectories'
         if verbose:
@@ -401,7 +401,7 @@ class TrajectoryDatabase():
         cur.close()
         i = 0 # initial value in case there are zero rows
         for i, rw in enumerate(rows):
-            if not os.path.isfile(rw[2]):
+            if not os.path.isfile(os.path.join(output_dir, rw[2])):
                 if verbose:
                     log.info(f'removing traj {jd2Date(rw[0], dt_obj=True).strftime("%Y%m%d_%M%M%S.%f")} from database')
                 self.removeTrajectory(DummyTrajReduced(rw[0], rw[1], rw[2]), keepFolder=True)

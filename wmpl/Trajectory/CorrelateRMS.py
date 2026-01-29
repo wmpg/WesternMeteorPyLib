@@ -1058,7 +1058,7 @@ class RMSDataHandle(object):
         jdt_start = datetime2JD(self.dt_range[0]) 
         jdt_end = datetime2JD(self.dt_range[1])
 
-        self.db.removeDeletedTrajectories(jdt_start, jdt_end)
+        self.db.removeDeletedTrajectories(self.output_dir, jdt_start, jdt_end)
 
         return 
 
