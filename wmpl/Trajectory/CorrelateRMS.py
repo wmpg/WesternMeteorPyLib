@@ -1341,7 +1341,7 @@ class RMSDataHandle(object):
                 pass
             traj.save_results = False
 
-    def addTrajectory(self, traj, failed_jdt_ref=None):
+    def addTrajectory(self, traj, failed_jdt_ref=None, verbose=False):
         """ Add the resulting trajectory to the database. 
 
         Arguments:
@@ -1362,7 +1362,7 @@ class RMSDataHandle(object):
         if failed_jdt_ref is not None:
             traj_reduced.jdt_ref = failed_jdt_ref
 
-        self.db.addTrajectory(traj_reduced, failed=(failed_jdt_ref is not None), verbose=True)
+        self.db.addTrajectory(traj_reduced, failed=(failed_jdt_ref is not None), verbose=verbose)
 
 
 
