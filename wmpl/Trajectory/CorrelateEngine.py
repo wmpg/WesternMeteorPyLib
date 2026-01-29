@@ -904,7 +904,7 @@ class TrajectoryCorrelator(object):
 
                     # Add the trajectory to the list of failed trajectories
                     self.dh.addTrajectory(traj_status, failed_jdt_ref=jdt_ref, verbose=True)
-                    for _, met_obs_temp, _ in traj_status.observations:
+                    for _, met_obs_temp, _ in matched_obs:
                         self.dh.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id, verbose=True)
                     return False
 
