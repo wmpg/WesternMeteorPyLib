@@ -300,7 +300,7 @@ class TrajectoryDatabase():
         # add or update an entry in the database, setting status = 1
 
         if verbose:
-            log.info(f'adding {traj_reduced.traj_id} with jdt {traj_reduced.jdt_ref}')
+            log.info(f'adding {traj_reduced.traj_id} with jdt {traj_reduced.jdt_ref} to {"failed" if failed else "traj"}')
         cur = self.dbhandle.cursor()
         if failed:
             traj_id = 'None' if not hasattr(traj_reduced, 'traj_id') or traj_reduced.traj_id is None else traj_reduced.traj_id

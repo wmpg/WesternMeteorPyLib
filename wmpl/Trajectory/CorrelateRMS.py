@@ -1362,7 +1362,7 @@ class RMSDataHandle(object):
         if failed_jdt_ref is not None:
             traj_reduced.jdt_ref = failed_jdt_ref
 
-        self.db.addTrajectory(traj_reduced, failed=(failed_jdt_ref is not None))
+        self.db.addTrajectory(traj_reduced, failed=(failed_jdt_ref is not None), verbose=True)
 
 
 
@@ -1450,7 +1450,7 @@ class RMSDataHandle(object):
             if self.checkTrajIfFailed(traj):
                 log.info(f'Trajectory at {jd2Date(traj.jdt_ref,dt_obj=True).isoformat()} already failed, skipping')
                 for _, met_obs_temp, _ in cand:
-                    self.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id)
+                    self.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id, verbose=True)
                     remaining_unpaired -= 1
             else:
                 candidate_trajectories.append(cand)
