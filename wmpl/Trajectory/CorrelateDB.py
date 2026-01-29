@@ -69,7 +69,7 @@ class ObservationDatabase():
         return paired 
 
 
-    def addPairedObs(self, station_code, obs_id, obs_date, commitnow=True, verbose=False):
+    def addPairedObs(self, station_code, obs_id, obs_date, verbose=False):
         # add or update an entry in the database, setting status = 1
         cur = self.dbhandle.cursor()
         res = cur.execute(f"SELECT obs_id FROM paired_obs WHERE station_code='{station_code}' and obs_id='{obs_id}'")
@@ -84,8 +84,6 @@ class ObservationDatabase():
         cur.execute(sqlstr)
         cur.close()
 
-        if commitnow:
-            self.dbhandle.commit()
         if not self.checkObsPaired(station_code, obs_id):
             log.warning(f'failed to add {obs_id} to paired_obs table')
             return False
@@ -152,7 +150,7 @@ class ObservationDatabase():
                     obs_date = datetime.datetime.strptime(obs_id.split('_')[1], '%Y%m%d-%H%M%S.%f')
                 except Exception:
                     obs_date = datetime.datetime(2000,1,1,0,0,0)
-                self.addPairedObs(stat_id, obs_id, obs_date, commitnow=False)
+                self.addPairedObs(stat_id, obs_id, obs_date)
                 i += 1
                 if not i % 100000:
                     log.info(f'moved {i} observations')
@@ -296,7 +294,7 @@ class TrajectoryDatabase():
                 return False
 
 
-    def addTrajectory(self, traj_reduced, failed=False, verbose=False, commitnow=True):
+    def addTrajectory(self, traj_reduced, failed=False, verbose=False):
         # add or update an entry in the database, setting status = 1
 
         if verbose:
@@ -332,9 +330,7 @@ class TrajectoryDatabase():
                         f"{traj_reduced.rend_lat},{traj_reduced.rend_lon},{traj_reduced.rend_ele},1)")
             sql_str = sql_str.replace('nan','"NaN"')
             cur.execute(sql_str)
-        if commitnow:
-            self.dbhandle.commit()
-
+        self.dbhandle.commit()
         cur.close()
         return True
 
@@ -478,7 +474,7 @@ class TrajectoryDatabase():
         keylist = [k for k in failed_trajectories.keys() if float(k) >= jd_beg and float(k) <= jd_end]
         i = 0 # just in case there aren't any trajectories to move
         for i,jdt_ref in enumerate(keylist):
-            self.addTrajectory(failed_trajectories[jdt_ref], failed=True, commitnow=False)
+            self.addTrajectory(failed_trajectories[jdt_ref], failed=True)
             i += 1
             if not i % 10000:
                 self.commitTrajDatabase()
