@@ -239,9 +239,10 @@ class TrajectoryDatabase():
 
         res = cur.execute("SELECT name FROM sqlite_master WHERE name='failed_trajectories'")
         if res.fetchone() is None:
+            # note: traj_id not unique here as some fails will have traj-id None
             cur.execute("""CREATE TABLE failed_trajectories(
                         jdt_ref REAL UNIQUE,
-                        traj_id VARCHAR UNIQUE,
+                        traj_id VARCHAR, 
                         traj_file_path VARCHAR,
                         participating_stations VARCHAR, 
                         ignored_stations VARCHAR,
