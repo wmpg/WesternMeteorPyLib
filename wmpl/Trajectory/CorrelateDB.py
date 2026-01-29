@@ -308,13 +308,16 @@ class TrajectoryDatabase():
             radiant_eci_mini = [0,0,0] if traj_reduced.radiant_eci_mini is None else traj_reduced.radiant_eci_mini
             state_vect_mini = [0,0,0] if traj_reduced.state_vect_mini is None else traj_reduced.state_vect_mini
 
-            cur.execute(f'insert or replace into failed_trajectories values ('
+            sql_str = (f'insert or replace into failed_trajectories values ('
                         f"{traj_reduced.jdt_ref}, '{traj_id}', '{traj_reduced.traj_file_path}',"
                         f"'{json.dumps(traj_reduced.participating_stations)}',"
                         f"'{json.dumps(traj_reduced.ignored_stations)}',"
                         f"'{json.dumps(radiant_eci_mini)}',"
                         f"'{json.dumps(state_vect_mini)}',"
                         f"0,{v_init},{traj_reduced.gravity_factor},1)")
+            if verbose:
+                log.info(sql_str)
+            cur.execute(sql_str)
         else:
             sql_str = (f'insert or replace into trajectories values ('
                         f"{traj_reduced.jdt_ref}, '{traj_reduced.traj_id}', '{traj_reduced.traj_file_path}',"
