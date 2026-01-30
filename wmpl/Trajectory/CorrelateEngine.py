@@ -8,8 +8,6 @@ import json
 import multiprocessing
 import logging
 import os
-import glob
-from random import randrange
 import platform
 import numpy as np
 
@@ -20,14 +18,15 @@ from wmpl.Utils.Math import vectNorm, vectMag, angleBetweenVectors, vectorFromPo
 from wmpl.Utils.ShowerAssociation import associateShowerTraj
 from wmpl.Utils.TrajConversions import J2000_JD, geo2Cartesian, cartesian2Geo, raDec2AltAz, altAz2RADec, \
     raDec2ECI, datetime2JD, jd2Date, equatorialCoordPrecession_vect
-from wmpl.Utils.Pickling import loadPickle, savePickle
+from wmpl.Utils.Pickling import loadPickle
 
 MCMODE_NONE = 0
 MCMODE_PHASE1 = 1
 MCMODE_PHASE2 = 2
 MCMODE_CANDS = 4
-MCMODE_ALL = MCMODE_CANDS + MCMODE_PHASE1 + MCMODE_PHASE2
 MCMODE_SIMPLE = MCMODE_CANDS + MCMODE_PHASE1
+MCMODE_BOTH = MCMODE_PHASE1 + MCMODE_PHASE2
+MCMODE_ALL = MCMODE_CANDS + MCMODE_PHASE1 + MCMODE_PHASE2
 
 
 # Grab the logger from the main thread
@@ -1597,31 +1596,7 @@ class TrajectoryCorrelator(object):
                         log.info('SAVING {} CANDIDATES'.format(len(candidate_trajectories)))
                         log.info("-----------------------")
 
-                        for matched_observations in candidate_trajectories:
-                            # randomly select a node from the list of nodes then check that its actually listening
-                            # and hasn't already received its max allocation. The master node gets anything left
-                            while True:
-                                curr_node = list(self.node_list.keys())[randrange(len(self.node_list.keys()))]
-                                save_path = self.node_list[curr_node]['node_path']
-                                if curr_node == platform.uname()[1]:
-                                    break
-                                listen_file = os.path.join(save_path, f'{curr_node}.listening')
-                                if os.path.isfile(listen_file):
-                                    #  if the folder already has enough candidates then use the master node
-                                    if len(glob.glob(os.path.join(save_path, '*.pickle'))) >= self.node_list[curr_node]['node_max']:
-                                        save_path = self.node_list[platform.uname()[1]]['node_path']
-                                    break
-
-                            ref_dt = min([met_obs.reference_dt for _, met_obs, _ in matched_observations])                    
-                            #log.debug(str(ref_dt).replace(" ", "_"))
-                            picklename = str(ref_dt.timestamp()) + '.pickle'
-                            savePickle(matched_observations, save_path, picklename)
-
-                        for curr_node in self.node_list.keys():
-                            save_path = self.node_list[curr_node]['node_path']
-                            log.info("-----------------------")
-                            log.info(f'There are {len(glob.glob(os.path.join(save_path, "*.pickle")))} candidates for {curr_node}')
-                            log.info("-----------------------")
+                        self.dh.saveCandidates(candidate_trajectories)
                         return
                     else:
                         log.info("-----------------------")

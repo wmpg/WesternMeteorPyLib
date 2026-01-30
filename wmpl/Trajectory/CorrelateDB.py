@@ -54,6 +54,7 @@ class ObservationDatabase():
 
         self.dbhandle.commit()
         self.dbhandle.close()
+        self.dbhandle = None
         return 
 
 
@@ -262,6 +263,7 @@ class TrajectoryDatabase():
 
         self.dbhandle.commit()
         self.dbhandle.close()
+        self.dbhandle = None
         return 
 
 

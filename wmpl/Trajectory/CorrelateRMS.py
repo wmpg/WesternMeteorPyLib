@@ -19,6 +19,8 @@ import logging.handlers
 import glob
 from dateutil.relativedelta import relativedelta
 import numpy as np
+from random import randrange
+import platform
 
 from wmpl.Formats.CAMS import loadFTPDetectInfo
 from wmpl.Trajectory.CorrelateEngine import TrajectoryCorrelator, TrajectoryConstraints
@@ -30,7 +32,7 @@ from wmpl.Utils.remoteDataHandling import RemoteDataHandler
 from wmpl.Trajectory.CorrelateDB import ObservationDatabase, TrajectoryDatabase
 from wmpl.Trajectory.Trajectory import Trajectory
 
-from wmpl.Trajectory.CorrelateEngine import MCMODE_CANDS, MCMODE_PHASE1, MCMODE_PHASE2, MCMODE_ALL
+from wmpl.Trajectory.CorrelateEngine import MCMODE_CANDS, MCMODE_PHASE1, MCMODE_PHASE2, MCMODE_ALL, MCMODE_BOTH
 
 ### CONSTANTS ###
 
@@ -349,6 +351,25 @@ class DatabaseJSON(object):
         log.info(f'deleted {len(keys)} keys from {"failed_trajectories" if failed else "trajectories"}')
         return len(keys)
 
+    def archiveRecords(self, db_dir, arch_prefix, archdate_jd):
+        arch_db_path = os.path.join(db_dir, f'{arch_prefix}_{JSON_DB_NAME}')
+        archdb = DatabaseJSON(arch_db_path, verbose=self.verbose, archiveYM=arch_prefix)
+        log.info(f'Archiving db records to {arch_db_path}...')
+
+        for traj in [t for t in self.old_db.trajectories if t < archdate_jd]:
+            if traj < archdate_jd:
+                archdb.addTrajectory(self.old_db.trajectories[traj], False)
+                del self.old_db.trajectories[traj]
+
+        for traj in [t for t in self.old_db.failed_trajectories if t < archdate_jd]:
+            if traj < archdate_jd:
+                archdb.addTrajectory(self.old_db.failed_trajectories[traj], True)
+                del self.old_db.failed_trajectories[traj]
+
+        archdb.save()
+        self.db.save()
+
+
 
 class MeteorPointRMS(object):
     def __init__(self, frame, time_rel, x, y, ra, dec, azim, alt, mag):
@@ -495,7 +516,7 @@ class PlateparDummy:
 
 
 class RMSDataHandle(object):
-    def __init__(self, dir_path, dt_range=None, db_dir=None, output_dir=None, mcmode=MCMODE_ALL, max_trajs=1000, remotehost=None, verbose=False, archivemonths=3):
+    def __init__(self, dir_path, dt_range=None, db_dir=None, output_dir=None, mcmode=MCMODE_ALL, max_trajs=1000, verbose=False, archivemonths=3):
         """ Handles data interfacing between the trajectory correlator and RMS data files on disk. 
     
         Arguments:
@@ -538,15 +559,16 @@ class RMSDataHandle(object):
         # Create the output directory if it doesn't exist
         mkdirP(self.output_dir)
 
+        # Candidate directory, if running in create or load cands modes
+        self.candidate_dir = os.path.join(self.output_dir, 'candidates')
+        if not self.mc_mode & MCMODE_PHASE2:
+            mkdirP(os.path.join(self.candidate_dir, 'processed'))
+
         # Phase 1 trajectory pickle directory needed to reload previous results.
         self.phase1_dir = os.path.join(self.output_dir, 'phase1')
-
-        # create the directory for phase1 simple trajectories, if needed
         if self.mc_mode & MCMODE_PHASE1:
             mkdirP(os.path.join(self.phase1_dir, 'processed'))
             self.purgePhase1ProcessedData(os.path.join(self.phase1_dir, 'processed'))
-
-        self.remotehost = remotehost
 
         self.verbose = verbose
 
@@ -554,12 +576,17 @@ class RMSDataHandle(object):
 
         # Load database of processed folders
         database_path = os.path.join(self.db_dir, JSON_DB_NAME)
+
         log.info("")
+
+        # Initialise remote data handling, if the config file is present
         remote_cfg = os.path.join(self.db_dir, 'wmpl_remote.cfg')
-        self.remotedatahandler = RemoteDataHandler(remote_cfg)
-        # move any remotely calculated pickles to their target locations
-        if os.path.isdir(os.path.join(self.output_dir, 'remoteuploads')):
-            self.remotedatahandler.moveRemoteData(self.output_dir)
+        if os.path.isfile(remote_cfg):
+            log.info('remote data management requested, initialising')
+            self.RemoteDatahandler = RemoteDataHandler(remote_cfg)
+            self.gatherRemoteData(mcmode, verbose=False)
+        else:
+            self.RemoteDatahandler = None
 
         if mcmode != MCMODE_PHASE2:
             log.info("Loading database: {:s}".format(database_path))
@@ -592,9 +619,6 @@ class RMSDataHandle(object):
             log.info("   ... done!")
 
         else:
-            # retrieve pickles from a remote host, if configured
-            if self.remotehost is not None:
-                self.remotedatahandler.collectRemoteData(remotehost, max_trajs, self.phase1_dir)
 
             # reload the phase1 trajectories
             dt_beg, dt_end = self.loadPhase1Trajectories(max_trajs=max_trajs)
@@ -671,28 +695,14 @@ class RMSDataHandle(object):
                 self.station_code = station
                 self.id = obs_id
 
-        # TODO FIX ME I AM BROKEN BECAUSE OF NOO DATABASE 
         archdate = datetime.datetime.now(datetime.timezone.utc) - relativedelta(months=older_than)
         archdate_jd = datetime2JD(archdate)
+        arch_prefix = archdate.strftime("%Y%m")
 
-        self.observations_db.archiveObsDatabase(self.db_dir, archdate.strftime("%Y%m"), archdate_jd)
+        self.observations_db.archiveObsDatabase(self.db_dir, arch_prefix, archdate_jd)
+        self.db.archiveTrajDatabase(self.db_dir, arch_prefix, archdate_jd)
+        self.old_db.archiveRecords(self.db_dir, arch_prefix, archdate_jd)
 
-        arch_db_path = os.path.join(self.db_dir, f'{archdate.strftime("%Y%m")}_{JSON_DB_NAME}')
-        archdb = DatabaseJSON(arch_db_path, verbose=self.verbose, archiveYM=archdate.strftime("%Y%m"))
-        log.info(f'Archiving db records to {arch_db_path}...')
-
-        for traj in [t for t in self.db.trajectories if t < archdate_jd]:
-            if traj < archdate_jd:
-                archdb.addTrajectory(self.db.trajectories[traj], False)
-                del self.db.trajectories[traj]
-
-        for traj in [t for t in self.db.failed_trajectories if t < archdate_jd]:
-            if traj < archdate_jd:
-                archdb.addTrajectory(self.db.failed_trajectories[traj], True)
-                del self.db.failed_trajectories[traj]
-
-        archdb.save()
-        self.db.save()
         return 
 
     def loadStations(self):
@@ -1328,11 +1338,6 @@ class RMSDataHandle(object):
             # we're including additional observations we need to use the most recent version of the trajectory
             savePickle(traj, os.path.join(self.phase1_dir, 'processed'), traj.pre_mc_longname + '_trajectory.pickle')
 
-            if self.remotehost is not None:
-                log.info('saving to remote host')
-                self.remotedatahandler.uploadDataToRemote(remotehost, traj.file_name + '_trajectory.pickle', output_dir)
-                log.info(' ...done')
-
         # Save the plots
         if save_plots:
             traj.save_results = True
@@ -1591,8 +1596,78 @@ class RMSDataHandle(object):
 
         # Restore the signal functionality
         signal.signal(signal.SIGINT, original_signal)
+    
+    def distributeToChildren(self, verbose=False):
+        """
+        In 'master' mode this distributes candidates or phase1 trajectories to the children
+        """
+        return 
+    
+    def uploadToMaster(self, verbose=False):
+        """
+        In 'child' mode this sends solved data back to the master node
+        """
+        # close the databases and upload the data to the master node
+        self.db.closeTrajDatabase()
+        self.observations_db.closeObsDatabase()
 
-        
+        self.RemoteDatahandler.uploadToMaster(self.output_dir, verbose=True)
+
+        # truncate the tables here so they are clean for the next run
+        self.db = TrajectoryDatabase(self.db_dir, purge_records=True)
+        self.observations_db = ObservationDatabase(self.db_dir, purge_records=True)
+        return
+    
+    def gatherRemoteData(self, mcmode, verbose=False):
+        """
+        In master mode this gathers data thats been uploaded by the children and relocates
+        it to the correct places.
+        In 'child' mode it downloads data from the master for local processing. 
+        """
+        if self.RemoteDatahandler.mode == 'master':
+            # TODO make this bit work properly
+            # move remotely processed data from upload folders to the correct locations on the master node
+            self.RemoteDatahandler.moveRemoteData(self.output_dir)
+            self.RemoteDatahandler.moveRemoteSimpleData(self.output_dir)
+
+        else:
+            # collect candidates or phase1 solutions from the master node
+            if mcmode == MCMODE_PHASE1 or mcmode == MCMODE_BOTH:
+                self.RemoteDatahandler.collectRemoteData('candidates', self.output_dir)
+            elif mcmode == MCMODE_PHASE2:
+                self.RemoteDatahandler.collectRemoteData('phase1', self.output_dir)
+        return 
+
+    def saveCandidates(self, candidate_trajectories):
+        for matched_observations in candidate_trajectories:
+            ref_dt = min([met_obs.reference_dt for _, met_obs, _ in matched_observations])                    
+            picklename = str(ref_dt.timestamp()) + '.pickle'
+
+            if self.RemoteDatahandler:
+                #TODO get candidate folder name here
+                # randomly select a node from the list of nodes then check that its actually listening
+                # and hasn't already received its max allocation. The master node gets anything left
+                while True:
+                    curr_node = list(self.node_list.keys())[randrange(len(self.node_list.keys()))]
+                    save_path = self.node_list[curr_node]['node_path']
+                    if curr_node == platform.uname()[1]:
+                        break
+                    listen_file = os.path.join(save_path, f'{curr_node}.listening')
+                    if os.path.isfile(listen_file):
+                        #  if the folder already has enough candidates then use the master node
+                        if len(glob.glob(os.path.join(save_path, '*.pickle'))) >= self.node_list[curr_node]['node_max']:
+                            save_path = self.node_list[platform.uname()[1]]['node_path']
+                        break
+            else:
+                save_folder = self.candidate_dir
+
+            savePickle(matched_observations, save_folder, picklename)
+
+        log.info("-----------------------")
+        log.info(f'Saved {len(candidate_trajectories)} candidates')
+        log.info("-----------------------")
+
+
 
 
 
@@ -1879,7 +1954,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         dh = RMSDataHandle(
             cml_args.dir_path, dt_range=event_time_range, 
             db_dir=cml_args.dbdir, output_dir=cml_args.outdir,
-            mcmode=mcmode, max_trajs=max_trajs, remotehost=remotehost, verbose=cml_args.verbose, archivemonths=cml_args.archiveoldrecords)
+            mcmode=mcmode, max_trajs=max_trajs, verbose=cml_args.verbose, archivemonths=cml_args.archiveoldrecords)
         
         # If there is nothing to process and we're in Candidate mode, stop
         if not dh.processing_list and (mcmode & MCMODE_CANDS):
@@ -1981,6 +2056,13 @@ contain data folders. Data folders should have FTPdetectinfo files together with
 
             # Store the previous start time
             previous_start_time = copy.deepcopy(t1)
+
+        if dh.RemoteDatahandler:
+            if dh.RemoteDatahandler.mode == 'child':
+                dh.uploadToMaster(verbose=True)
+            else:
+                # dh.distributeForChildren(verbose=True)
+                pass
 
         # Break after one loop if auto mode is not on
         if cml_args.auto is None:
