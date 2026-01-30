@@ -135,15 +135,16 @@ class ObservationDatabase():
         return 
 
     def moveObsJsonRecords(self, paired_obs, dt_range):
-        log.info('-----------------------------')
-        log.info('moving recent observations to sqlite - this may take some time....')
-        i = 0
-
         # only copy recent observations since if we ever run for an historic date
         # its likely we will want to reanalyse all available obs anyway
         dt_end = dt_range[1]
         dt_beg = max(dt_range[0], dt_end + datetime.timedelta(days=-7))
 
+        log.info('-----------------------------')
+        log.info('moving recent observations to sqlite - this may take some time....')
+        log.info(f'observation date range {dt_beg.isoformat()} to {dt_end.isoformat()}')
+
+        i = 0
         keylist = paired_obs.keys()
         for stat_id in keylist:
             for obs_id in paired_obs[stat_id]:
@@ -152,7 +153,7 @@ class ObservationDatabase():
                 except Exception:
                     obs_date = datetime.datetime(2000,1,1,0,0,0)
                 obs_date = obs_date.replace(tzinfo=datetime.timezone.utc)
-                
+
                 if obs_date >= dt_beg and obs_date < dt_end:
                     self.addPairedObs(stat_id, obs_id, obs_date)
                 i += 1
@@ -447,12 +448,14 @@ class TrajectoryDatabase():
         return 
 
     def moveFailedTrajectories(self, failed_trajectories, dt_range):
-        log.info('moving recent trajectories to sqlite - this may take some time....')
 
         # only copy recent records since if we ever run for an historic date
         # its likely we will want to reanalyse all available obs anyway
         jd_end = datetime2JD(dt_range[1])
         jd_beg = max(datetime2JD(dt_range[0]), jd_end - 7)
+
+        log.info('moving recent failed trajectories to sqlite - this may take some time....')
+        log.info(f'observation date range {jd2Date(jd_beg, dt_obj=True).isoformat()} to {dt_range[1].isoformat()}')
 
         keylist = [k for k in failed_trajectories.keys() if float(k) >= jd_beg and float(k) <= jd_end]
         i = 0 # just in case there aren't any trajectories to move
