@@ -134,10 +134,16 @@ class ObservationDatabase():
         cur.close()
         return 
 
-    def moveJsonRecords(self, paired_obs):
+    def moveObsJsonRecords(self, paired_obs, dt_range):
         log.info('-----------------------------')
-        log.info('moving observations to sqlite - this may take some time....')
+        log.info('moving recent observations to sqlite - this may take some time....')
         i = 0
+
+        # only copy recent observations since if we ever run for an historic date
+        # its likely we will want to reanalyse all available obs anyway
+        dt_end = dt_range[1]
+        dt_beg = max(dt_range[0], dt_end + datetime.timedelta(days=-7))
+
         keylist = paired_obs.keys()
         for stat_id in keylist:
             for obs_id in paired_obs[stat_id]:
@@ -145,7 +151,8 @@ class ObservationDatabase():
                     obs_date = datetime.datetime.strptime(obs_id.split('_')[1], '%Y%m%d-%H%M%S.%f')
                 except Exception:
                     obs_date = datetime.datetime(2000,1,1,0,0,0)
-                self.addPairedObs(stat_id, obs_id, obs_date)
+                if obs_date >= dt_beg and obs_date < dt_end:
+                    self.addPairedObs(stat_id, obs_id, obs_date)
                 i += 1
                 if not i % 100000:
                     log.info(f'moved {i} observations')
@@ -437,34 +444,14 @@ class TrajectoryDatabase():
         cur.close()
         return 
 
-    def moveJsonRecords(self, trajectories, failed_trajectories):
-        log.info('-----------------------------')
-        log.info('moving trajectories to sqlite - this may take some time....')
-        i = 0
-        keylist = trajectories.keys()
-        for jdt_ref in keylist:
-            self.addTrajectory(trajectories[jdt_ref])
-            i += 1
-            if not i % 10000:
-                log.info(f'moved {i} trajectories')
-        log.info(f'done - moved {i} trajectories')
-        log.info('-----------------------------')
-        keylist = failed_trajectories.keys()
-        for jdt_ref in keylist:
-            self.addTrajectory(failed_trajectories[jdt_ref], failed=True)
-            i += 1
-            if not i % 10000:
-                log.info(f'moved {i} failed_trajectories')
-        self.commitTrajDatabase()
-        log.info(f'done - moved {i} failed_trajectories')
-        log.info('-----------------------------')
-
-        return 
-
     def moveFailedTrajectories(self, failed_trajectories, dt_range):
-        jd_beg = datetime2JD(dt_range[0])
+        log.info('moving recent trajectories to sqlite - this may take some time....')
+
+        # only copy recent records since if we ever run for an historic date
+        # its likely we will want to reanalyse all available obs anyway
         jd_end = datetime2JD(dt_range[1])
-        log.info('moving trajectories to sqlite - this may take some time....')
+        jd_beg = max(datetime2JD(dt_range[0]), jd_end - 7)
+
         keylist = [k for k in failed_trajectories.keys() if float(k) >= jd_beg and float(k) <= jd_end]
         i = 0 # just in case there aren't any trajectories to move
         for i,jdt_ref in enumerate(keylist):

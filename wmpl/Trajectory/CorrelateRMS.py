@@ -589,17 +589,21 @@ class RMSDataHandle(object):
             self.RemoteDatahandler = None
 
         if mcmode != MCMODE_PHASE2:
-            log.info("Loading database: {:s}".format(database_path))
-            self.old_db = DatabaseJSON(database_path, verbose=self.verbose)
+            
+            # no need to load the legacy JSON file if we already have the sqlite databases
+            if not os.path.isfile(os.path.join(db_dir, 'observations.db')) and \
+               not os.path.isfile(os.path.join(db_dir, 'trajectories.db')):
+                log.info("Loading database: {:s}".format(database_path))
+                self.old_db = DatabaseJSON(database_path, verbose=self.verbose)
+            else:
+                self.old_db = None
 
             self.db = TrajectoryDatabase(db_dir)
             self.observations_db = ObservationDatabase(db_dir)
 
             # move any legacy paired obs data into sqlite
             if hasattr(self.old_db, 'paired_obs'):
-                self.observations_db.moveJsonRecords(self.old_db.paired_obs)
-                del self.old_db.paired_obs
-                self.saveDatabase()
+                self.observations_db.moveObsJsonRecords(self.old_db.paired_obs, dt_range)
 
             if archivemonths != 0:
                 log.info('Archiving older entries....')
