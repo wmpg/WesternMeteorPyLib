@@ -589,7 +589,7 @@ class RMSDataHandle(object):
             self.RemoteDatahandler = None
 
         if mcmode != MCMODE_PHASE2:
-            
+
             # no need to load the legacy JSON file if we already have the sqlite databases
             if not os.path.isfile(os.path.join(db_dir, 'observations.db')) and \
                not os.path.isfile(os.path.join(db_dir, 'trajectories.db')):
@@ -598,12 +598,16 @@ class RMSDataHandle(object):
             else:
                 self.old_db = None
 
-            self.db = TrajectoryDatabase(db_dir)
             self.observations_db = ObservationDatabase(db_dir)
-
-            # move any legacy paired obs data into sqlite
             if hasattr(self.old_db, 'paired_obs'):
+                # move any legacy paired obs data into sqlite
+                log.info(dt_range)
                 self.observations_db.moveObsJsonRecords(self.old_db.paired_obs, dt_range)
+
+            self.db = TrajectoryDatabase(db_dir)
+            if hasattr(self.old_db, 'failed_trajectories'):
+                # move any legacy failed traj data into sqlite
+                self.db.moveFailedTrajectories(self.old_db.failed_trajectories, dt_range)
 
             if archivemonths != 0:
                 log.info('Archiving older entries....')
@@ -2039,10 +2043,6 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                         # load computed trajectories from disk into sqlite
                         dh.loadComputedTrajectories(dt_range=(bin_beg, bin_end))
                         # move any legacy failed traj into sqlite
-                        if hasattr(dh.old_db, 'failed_trajectories'):
-                            dh.db.moveFailedTrajectories(dh.old_db.failed_trajectories, (bin_beg, bin_end))
-                            if dh.old_db.removeTrajectories((bin_beg, bin_end), failed=True) > 0:
-                                dh.saveDatabase()
 
 
                     # Run the trajectory correlator
