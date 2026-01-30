@@ -157,7 +157,7 @@ class ObservationDatabase():
                 if obs_date >= dt_beg and obs_date < dt_end:
                     self.addPairedObs(stat_id, obs_id, obs_date)
                     i += 1
-                if not i % 100000:
+                if not i % 100000 and i != 0:
                     log.info(f'moved {i} observations')
         self.commitObsDatabase()
         log.info(f'done - moved {i} observations')
