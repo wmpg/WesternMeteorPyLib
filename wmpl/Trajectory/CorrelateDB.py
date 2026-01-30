@@ -151,6 +151,8 @@ class ObservationDatabase():
                     obs_date = datetime.datetime.strptime(obs_id.split('_')[1], '%Y%m%d-%H%M%S.%f')
                 except Exception:
                     obs_date = datetime.datetime(2000,1,1,0,0,0)
+                obs_date = obs_date.replace(tzinfo=datetime.timezone.utc)
+                
                 if obs_date >= dt_beg and obs_date < dt_end:
                     self.addPairedObs(stat_id, obs_id, obs_date)
                 i += 1
