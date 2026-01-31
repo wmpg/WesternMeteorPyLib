@@ -708,7 +708,8 @@ class RMSDataHandle(object):
 
         self.observations_db.archiveObsDatabase(self.db_dir, arch_prefix, archdate_jd)
         self.db.archiveTrajDatabase(self.db_dir, arch_prefix, archdate_jd)
-        self.old_db.archiveRecords(self.db_dir, arch_prefix, archdate_jd)
+        if self.old_db:
+            self.old_db.archiveRecords(self.db_dir, arch_prefix, archdate_jd)
 
         return 
 
@@ -1585,6 +1586,8 @@ class RMSDataHandle(object):
 
     def saveDatabase(self):
         """ Save the data base. """
+        if self.old_db is None:
+            return 
 
         def _breakHandler(signum, frame):
             """ Do nothing if CTRL + C is pressed. """
