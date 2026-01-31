@@ -601,7 +601,6 @@ class RMSDataHandle(object):
             self.observations_db = ObservationDatabase(db_dir)
             if hasattr(self.old_db, 'paired_obs'):
                 # move any legacy paired obs data into sqlite
-                log.info(dt_range)
                 self.observations_db.moveObsJsonRecords(self.old_db.paired_obs, dt_range)
 
             self.db = TrajectoryDatabase(db_dir)
