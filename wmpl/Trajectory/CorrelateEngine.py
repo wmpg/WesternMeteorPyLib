@@ -8,7 +8,6 @@ import json
 import multiprocessing
 import logging
 import os
-import platform
 import numpy as np
 
 from wmpl.Trajectory.Trajectory import ObservedPoints, PlaneIntersection, Trajectory, moveStateVector
@@ -249,35 +248,6 @@ class TrajectoryCorrelator(object):
         self.enableOSM = enableOSM
 
         self.candidatemode = None
-
-
-
-    def getCandidateFolders(self):
-        """ get candidate folders, if in multi-node candidate mode 
-        """
-        self.node_list = {}
-        node_file = os.path.join(self.dh.dir_path, 'wmpl_nodes.cfg')
-        if os.path.isfile(node_file):
-            lis = open(node_file, 'r').readlines()
-            nodes = [li for li in lis if '#' not in li and len(li) > 2]
-            for node in nodes:
-                node_name, node_path, node_max = node.split(',')
-                node_name = node_name.strip()
-                node_max = int(node_max.strip())
-                node_path = node_path.strip()
-                if node_path[0]==os.sep or node_path[1]==':':
-                    np = node_path
-                else:
-                    np = os.path.join(self.dh.output_dir, node_path)
-                self.node_list[node_name] = {'node_path': np, 'node_max':node_max}
-                os.makedirs(np, exist_ok=True)
-
-        # add a node for this hardware
-        master_name = platform.uname()[1]
-        np = os.path.join(self.dh.output_dir, 'candidates')
-        self.node_list[master_name] = {'node_path': np, 'node_max':0}
-        return 
-
 
     def trajectoryRangeCheck(self, traj_reduced, platepar):
         """ Check that the trajectory is within the range limits. 
@@ -1597,13 +1567,13 @@ class TrajectoryCorrelator(object):
                         log.info("-----------------------")
 
                         self.dh.saveCandidates(candidate_trajectories)
-                        return
+                        return len(candidate_trajectories)
                     else:
                         log.info("-----------------------")
                         log.info('PROCESSING {} CANDIDATES'.format(len(candidate_trajectories)))
                         log.info("-----------------------")
 
-                # end of 'if self.candidatemode != CANDMODE_LOAD'
+                # end of 'if mcmode & MCMODE_CANDS'
                 ### ###
                 else:
                     # candidatemode is LOAD so load any available candidates for processing
@@ -1612,9 +1582,8 @@ class TrajectoryCorrelator(object):
                     log.info("-----------------------")
                     log.info('LOADING CANDIDATES')
                     log.info("-----------------------")
-                    self.getCandidateFolders()
-                    # only load candidates from this node's candidate folder
-                    save_path = self.node_list[platform.uname()[1]]['node_path']
+
+                    save_path = self.dh.candidate_dir
                     for fil in os.listdir(save_path):
                         if '.pickle' not in fil: 
                             continue
@@ -1850,12 +1819,11 @@ class TrajectoryCorrelator(object):
             # end of "for matched_observations in candidate_trajectories"
             outcomes = [traj_solved_count]
 
-            # Finish the correlation run (update the database with new values)
-            self.dh.saveDatabase()
-
             log.info(f'SOLVED {sum(outcomes)} TRAJECTORIES')
 
             log.info("")
             log.info("-----------------")
             log.info("SOLVING RUN DONE!")
             log.info("-----------------")
+
+            return sum(outcomes)

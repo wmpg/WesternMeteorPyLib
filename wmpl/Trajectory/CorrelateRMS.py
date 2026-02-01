@@ -12,7 +12,6 @@ import copy
 import datetime
 import shutil
 import time
-import signal
 import multiprocessing
 import logging
 import logging.handlers
@@ -222,7 +221,6 @@ class DatabaseJSON(object):
         # do this here because the object dict is overwritten during the load operation above
         self.verbose = verbose
 
-
     def save(self):
         """ Save the database of processed meteors to disk. """
 
@@ -284,9 +282,7 @@ class DatabaseJSON(object):
             if all_match:
                 return True
 
-
         return False
-
 
     def addTrajectory(self, traj_reduced, failed=False):
         """ Add a computed trajectory to the list. 
@@ -320,8 +316,6 @@ class DatabaseJSON(object):
         else:
             traj_dict[traj_reduced.jdt_ref].traj_id = traj_reduced.traj_id
 
-
-
     def removeTrajectory(self, traj_reduced, keepFolder=False):
         """ Remove the trajectory from the data base and disk. """
 
@@ -335,40 +329,6 @@ class DatabaseJSON(object):
             shutil.rmtree(traj_dir, ignore_errors=True)
             if os.path.isfile(traj_reduced.traj_file_path):
                 log.info(f'unable to remove {traj_dir}')        
-
-
-    def removeTrajectories(self, dt_range, failed=False):
-        jd_beg = datetime2JD(dt_range[0])
-        jd_end = datetime2JD(dt_range[1])
-        if not failed:
-            keys = [k for k in self.trajectories.keys() if float(k) >= jd_beg and float(k) <= jd_end]
-            for jdt in keys:
-                del self.trajectories[jdt]
-        else:
-            keys = [k for k in self.failed_trajectories.keys() if float(k) >= jd_beg and float(k) <= jd_end]
-            for jdt in keys:
-                del self.failed_trajectories[jdt]
-        log.info(f'deleted {len(keys)} keys from {"failed_trajectories" if failed else "trajectories"}')
-        return len(keys)
-
-    def archiveRecords(self, db_dir, arch_prefix, archdate_jd):
-        arch_db_path = os.path.join(db_dir, f'{arch_prefix}_{JSON_DB_NAME}')
-        archdb = DatabaseJSON(arch_db_path, verbose=self.verbose, archiveYM=arch_prefix)
-        log.info(f'Archiving db records to {arch_db_path}...')
-
-        for traj in [t for t in self.old_db.trajectories if t < archdate_jd]:
-            if traj < archdate_jd:
-                archdb.addTrajectory(self.old_db.trajectories[traj], False)
-                del self.old_db.trajectories[traj]
-
-        for traj in [t for t in self.old_db.failed_trajectories if t < archdate_jd]:
-            if traj < archdate_jd:
-                archdb.addTrajectory(self.old_db.failed_trajectories[traj], True)
-                del self.old_db.failed_trajectories[traj]
-
-        archdb.save()
-        self.db.save()
-
 
 
 class MeteorPointRMS(object):
@@ -396,7 +356,6 @@ class MeteorPointRMS(object):
         self.intensity_sum = None
 
         self.mag = mag
-
 
 
 class MeteorObsRMS(object):
@@ -584,7 +543,10 @@ class RMSDataHandle(object):
         if os.path.isfile(remote_cfg):
             log.info('remote data management requested, initialising')
             self.RemoteDatahandler = RemoteDataHandler(remote_cfg)
-            self.gatherRemoteData(mcmode, verbose=False)
+            remote_count = self.gatherRemoteData(mcmode, verbose=False)
+            if remote_count == 0:
+                log.info('no remote data yet')
+                # TODO probably want to loop here looking for data for 10-15 minutes
         else:
             self.RemoteDatahandler = None
 
@@ -706,10 +668,9 @@ class RMSDataHandle(object):
         archdate_jd = datetime2JD(archdate)
         arch_prefix = archdate.strftime("%Y%m")
 
+        # TODO check if this works
         self.observations_db.archiveObsDatabase(self.db_dir, arch_prefix, archdate_jd)
         self.db.archiveTrajDatabase(self.db_dir, arch_prefix, archdate_jd)
-        if self.old_db:
-            self.old_db.archiveRecords(self.db_dir, arch_prefix, archdate_jd)
 
         return 
 
@@ -861,11 +822,6 @@ class RMSDataHandle(object):
             if station_code != prev_station:
                 station_count += 1
                 prev_station = station_code
-
-            # Save database to mark those with missing data files (only every 250th station, to speed things up)
-            if (station_count % 250 == 0) and (station_code != prev_station):
-                self.saveDatabase()
-
 
             # Load platepars
             with open(os.path.join(proc_path, platepar_recalibrated_name)) as f:
@@ -1340,6 +1296,7 @@ class RMSDataHandle(object):
         log.info(f'saved {traj.traj_id} to {output_dir}')
 
         if self.mc_mode & MCMODE_PHASE1 and not self.mc_mode & MCMODE_PHASE2:
+            # TODO distribute phase1 pickles here
             savePickle(traj, self.phase1_dir, traj.pre_mc_longname + '_trajectory.pickle')
         elif self.mc_mode & MCMODE_PHASE2:
             # we save this in MC mode the MC phase may alter the trajectory details and if later on 
@@ -1582,35 +1539,15 @@ class RMSDataHandle(object):
                 # if the file couldn't be read, then skip it for now - we'll get it in the next pass
                 log.info(f'File {pick} skipped for now')
         return dt_beg, dt_end
-
-
-    def saveDatabase(self):
-        """ Save the data base. """
-        if self.old_db is None:
-            return 
-
-        def _breakHandler(signum, frame):
-            """ Do nothing if CTRL + C is pressed. """
-            log.info("The data base is being saved, the program cannot be exited right now!")
-            pass
-
-        if self.db is None:
-            return 
-        # Prevent quitting while a data base is being saved
-        original_signal = signal.getsignal(signal.SIGINT)
-        signal.signal(signal.SIGINT, _breakHandler)
-
-        # Save the data base
-        log.info("Saving data base to disk...")
-        self.old_db.save()
-
-        # Restore the signal functionality
-        signal.signal(signal.SIGINT, original_signal)
-    
-    def distributeToChildren(self, verbose=False):
+   
+    def distributeCandsForChildren(self, verbose=False):
         """
         In 'master' mode this distributes candidates or phase1 trajectories to the children
         """
+        if self.mc_mode != MCMODE_CANDS:
+            log.warning('candidate distribution only applicable in MCMODE_CANDS')
+            return
+        # TODO - distribute
         return 
     
     def uploadToMaster(self, verbose=False):
@@ -1621,7 +1558,7 @@ class RMSDataHandle(object):
         self.db.closeTrajDatabase()
         self.observations_db.closeObsDatabase()
 
-        self.RemoteDatahandler.uploadToMaster(self.output_dir, verbose=True)
+        self.RemoteDatahandler.uploadToMaster(self.output_dir, verbose=verbose)
 
         # truncate the tables here so they are clean for the next run
         self.db = TrajectoryDatabase(self.db_dir, purge_records=True)
@@ -1643,10 +1580,10 @@ class RMSDataHandle(object):
         else:
             # collect candidates or phase1 solutions from the master node
             if mcmode == MCMODE_PHASE1 or mcmode == MCMODE_BOTH:
-                self.RemoteDatahandler.collectRemoteData('candidates', self.output_dir)
+                remote_count = self.RemoteDatahandler.collectRemoteData('candidates', self.output_dir, verbose=verbose)
             elif mcmode == MCMODE_PHASE2:
-                self.RemoteDatahandler.collectRemoteData('phase1', self.output_dir)
-        return 
+                remote_count = self.RemoteDatahandler.collectRemoteData('phase1', self.output_dir, verbose=verbose)
+        return remote_count
 
     def saveCandidates(self, candidate_trajectories):
         for matched_observations in candidate_trajectories:
@@ -1654,7 +1591,7 @@ class RMSDataHandle(object):
             picklename = str(ref_dt.timestamp()) + '.pickle'
 
             if self.RemoteDatahandler:
-                #TODO get candidate folder name here
+                # TODO get candidate folder name here
                 # randomly select a node from the list of nodes then check that its actually listening
                 # and hasn't already received its max allocation. The master node gets anything left
                 while True:
@@ -2050,28 +1987,28 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                     # Run the trajectory correlator
                     tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True, enableOSM=cml_args.enableOSM)
                     bin_time_range = [bin_beg, bin_end]
-                    tc.run(event_time_range=event_time_range, mcmode=mcmode, bin_time_range=bin_time_range)
+                    num_done = tc.run(event_time_range=event_time_range, mcmode=mcmode, bin_time_range=bin_time_range)
 
                 if mcmode & MCMODE_CANDS:
                     dh.observations_db.closeObsDatabase()
+
             else:
                 # there were no datasets to process
                 log.info('no data to process yet')
             
             log.info("Total run time: {:s}".format(str(datetime.datetime.now(datetime.timezone.utc) - t1)))
 
+            if dh.RemoteDatahandler and dh.RemoteDatahandler.mode == 'child' and num_done > 0:
+                dh.RemoteDatahandler.uploadToMaster(dh.output_dir, verbose=False)
+
             # Store the previous start time
             previous_start_time = copy.deepcopy(t1)
 
-        if dh.RemoteDatahandler:
-            if dh.RemoteDatahandler.mode == 'child':
-                dh.uploadToMaster(verbose=True)
-            else:
-                # dh.distributeForChildren(verbose=True)
-                pass
+
 
         # Break after one loop if auto mode is not on
         if cml_args.auto is None:
+            dh.RemoteDatahandler.clearReadyFlag()
             break
 
         else:

@@ -87,6 +87,37 @@ class RemoteDataHandler():
         self.initialised = True
         return 
     
+    def getSFTPConnection(self):
+        if not self.initialised:
+            return False
+        log.info(f'Connecting to {self.host}:{self.port} as {self.user}....')
+
+        if not os.path.isfile(os.path.expanduser(self.key)):
+            log.warning(f'ssh keyfile {self.key} missing')
+            return False
+        
+        self.ssh_client = paramiko.SSHClient()
+        self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        pkey = paramiko.RSAKey.from_private_key_file(self.key) 
+        try:
+            self.ssh_client.connect(hostname=self.host, username=self.user, port=self.port, pkey=pkey, look_for_keys=False)
+            self.sftp_client = self.ssh_client.open_sftp()
+            return True
+        
+        except Exception as e:
+
+            log.warning('sftp connection to remote host failed')
+            log.warning(e)
+            self.ssh_client.close()
+            return False
+        
+    def closeSFTPConnection(self):
+        if self.sftp_client: 
+            self.sftp_client.close()
+        if self.ssh_client: 
+            self.ssh_client.close()
+        return
+
     ########################################################    
     # functions used by the client nodes
 
@@ -110,6 +141,11 @@ class RemoteDataHandler():
                 pass
         
         try:
+            readyfile = os.path.join(os.getenv('TMP', default='/tmp'),'ready')
+            open(readyfile,'w').write('ready')
+            self.sftp_client.put(readyfile, 'files/ready')                      
+            log.info('set ready flag')
+
             rem_dir = f'files/{datatype}'
             files = self.sftp_client.listdir(rem_dir)
             files = [f for f in files if '.pickle' in f and 'processing' not in f]
@@ -136,8 +172,7 @@ class RemoteDataHandler():
             log.info(e)
 
         self.closeSFTPConnection()
-        return 
-
+        return len(files)
 
     def uploadToMaster(self, source_dir, verbose=False):
         """
@@ -157,24 +192,26 @@ class RemoteDataHandler():
                 self.sftp_client.mkdir(pth)
             except Exception:
                 pass
-        if os.path.isdir(os.path.join(source_dir, 'phase1')):
+        phase1_dir = os.path.join(source_dir, 'phase1')
+        if os.path.isdir(phase1_dir):
             # upload any phase1 trajectories
             i=0
-            proc_dir = os.path.join(source_dir, 'phase1', 'processed')
+            proc_dir = os.path.join(phase1_dir, 'processed')
             os.makedirs(proc_dir, exist_ok=True)
-            for (dirpath, dirnames, filenames) in os.walk(os.path.join(source_dir, 'phase1')):
-                if len(filenames) > 0 and 'processed' not in dirpath:
-                    for fil in filenames:
-                        local_name = os.path.join(source_dir, 'phase1', fil)
-                        remname = f'files/phase1/{fil}'
-                        if verbose:
-                            log.info(f'uploading {local_name} to {remname}')
-                        self.sftp_client.put(local_name, remname)
-                        if os.path.isfile(os.path.join(proc_dir, fil)):
-                            os.remove(os.path.join(proc_dir, fil))
-                        shutil.move(local_name, proc_dir)
-                        i += 1
-        log.info(f'uploaded {i} phase1 solutions')
+            for fil in os.listdir(phase1_dir):
+                local_name = os.path.join(phase1_dir, fil)
+                if os.path.isdir(local_name):
+                    continue
+                remname = f'files/phase1/{fil}'
+                if verbose:
+                    log.info(f'uploading {local_name} to {remname}')
+                self.sftp_client.put(local_name, remname)
+                if os.path.isfile(os.path.join(proc_dir, fil)):
+                    os.remove(os.path.join(proc_dir, fil))
+                shutil.move(local_name, proc_dir)
+                i += 1
+            if i > 0:
+                log.info(f'uploaded {i} phase1 solutions')
         # now upload any data in the 'trajectories' folder, flattening it to make it simpler
         i=0
         if os.path.isdir(os.path.join(source_dir, 'trajectories')):
@@ -193,7 +230,9 @@ class RemoteDataHandler():
                             log.info(f'uploading {local_name} to {rem_file}')
                         self.sftp_client.put(local_name, rem_file)
                         i += 1
-        log.info(f'uploaded {int(i/2)} trajectories')
+            shutil.rmtree(traj_dir, ignore_errors=True)
+        if i > 0:
+            log.info(f'uploaded {int(i/2)} trajectories')
 
         # finally the databases
         for fname in ['observations.db', 'trajectories.db']:
@@ -209,8 +248,29 @@ class RemoteDataHandler():
         self.closeSFTPConnection()
         return
 
+    def clearReadyFlag(self, verbose=False):
+        """
+        upload the trajectory pickle and report to a remote host for integration
+        into the solved dataset
 
-    def moveRemoteData(output_dir):
+        parameters:
+        source_dir = root folder containing data, generally dh.output_dir
+        """
+
+        if not self.initialised or not self.getSFTPConnection():
+            return 
+        try:
+            self.sftp_client.remove('files/ready')
+            log.info('removed ready flag')
+        except:
+            log.warning('unable to clear ready flag, master continue to assign data')
+        self.closeSFTPConnection()
+        return
+
+    ########################################################    
+    # functions used by the master node
+
+    def moveRemoteData(self, output_dir):
         """
         Move remotely processed pickle files to their target location in the trajectories area,
         making sure we clean up any previously-calculated trajectory and temporary files
@@ -255,35 +315,4 @@ class RemoteDataHandler():
 
             log.info(f'Moved {len(pickles)} trajectories.')
 
-        return
-
-    def getSFTPConnection(self):
-        if not self.initialised:
-            return False
-        log.info(f'Connecting to {self.host}:{self.port} as {self.user}....')
-
-        if not os.path.isfile(os.path.expanduser(self.key)):
-            log.warning(f'ssh keyfile {self.key} missing')
-            return False
-        
-        self.ssh_client = paramiko.SSHClient()
-        self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        pkey = paramiko.RSAKey.from_private_key_file(self.key) 
-        try:
-            self.ssh_client.connect(hostname=self.host, username=self.user, port=self.port, pkey=pkey, look_for_keys=False)
-            self.sftp_client = self.ssh_client.open_sftp()
-            return True
-        
-        except Exception as e:
-
-            log.warning('sftp connection to remote host failed')
-            log.warning(e)
-            self.ssh_client.close()
-            return False
-        
-    def closeSFTPConnection(self):
-        if self.sftp_client: 
-            self.sftp_client.close()
-        if self.ssh_client: 
-            self.ssh_client.close()
         return
