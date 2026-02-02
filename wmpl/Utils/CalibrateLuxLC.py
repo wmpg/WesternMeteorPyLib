@@ -64,11 +64,15 @@ if __name__ == "__main__":
 
     arg_parser.add_argument("lc_peak_ht", help="The height of the light curve peak in km. This will be used to align the light curve with the trajectory.")
 
-    arg_parser.add_argument("time_range", help="The comma-separated relative time range speficying where the fireball is in the LC data.")
+    arg_parser.add_argument("time_range", help="The comma-separated relative time range speficying where the fireball is in the LC data. E.g. 2.5,6.0")
 
-    arg_parser.add_argument("obs_geocoords", help="The comma-separated coordinates of the observer (lat,lon,ele) in degrees and meters.")
+    arg_parser.add_argument("obs_geocoords", help="The comma-separated coordinates of the observer (lat,lon,ele) in degrees and meters. If the latitude is negative, put the coordinates in quotes and have a leading space, e.g. \" -45.0,120.0,100\".")
 
     arg_parser.add_argument("--pointing", help="The pointing direction of the sensor. Assumed zenith by default. If given, it must be a comma-separated list of (az,el) in degrees (azimuth is +E of due N).", default="0,90")
+
+    arg_parser.add_argument("--timehtfit", type=int, choices=[1, 2, 3], default=None, help="If given, a polynomial fit of the specified order (1, 2, or 3) will be used for the time vs height relationship instead of interpolation.")
+
+    arg_parser.add_argument("--tau", type=float, default=None, help="The luminous efficiency of fireballs in %. If given, it will be used instead of the default value of 5% which is appropraite for low speed fireballs.")
 
 
     # Parse the command line arguments
@@ -86,7 +90,10 @@ if __name__ == "__main__":
     LUM_EFFICACY = 0.0079 # 1 lux in W/m^2
 
     # Luminous efficiency of fireballs at low speeds
-    TAU = 5.0/100 # 5%
+    if cml_args.tau is None:
+        TAU = 5.0/100
+    else:
+        TAU = cml_args.tau/100
 
 
     ## Sensor parameters
@@ -196,21 +203,50 @@ if __name__ == "__main__":
 
     ### Fit a line to the lux for background subtraction (use soft l1 for outlier rejection) ###
 
-    # Reject all points outside the 90th percentile before the fit to eliminite the fireball
-    filter_mask = lux_data < np.percentile(lux_data, 95)
-    lux_data_filtered = lux_data[filter_mask]
-    time_data_filtered = time_data[filter_mask]
+    # Iteratively fit a line to the background
+    # Initial mask includes the faintest 80% of data to exclude the fireball peak
+    bg_mask = lux_data < np.percentile(lux_data, 80)
 
-    res_fun = lambda params, time_data, lux_data: lineFunc(time_data, *params) - lux_data
-    res = scipy.optimize.least_squares(res_fun, [0, 0], loss='soft_l1', args=(time_data_filtered, lux_data_filtered))
+    # Perform 10 iterations
+    for _ in range(10):
 
-    print("Background subtraction parameters: {}".format(res.x))
+        # Fit a line to the data
+        bg_params = np.polyfit(time_data[bg_mask], lux_data[bg_mask], 1)
+
+        # Compute the model
+        bg_model = np.polyval(bg_params, time_data)
+
+        # Compute residuals
+        residuals = lux_data - bg_model
+
+        # Compute the standard deviation of the residuals
+        sigma = np.std(residuals[bg_mask])
+
+        # Update the mask (reject positive outliers > 2 sigma)
+        # We only care about positive outliers (fireball)
+        new_bg_mask = residuals < 2*sigma
+
+        # Check if the mask has converged
+        if np.sum(new_bg_mask) == np.sum(bg_mask):
+            bg_mask = new_bg_mask
+            break
+
+        bg_mask = new_bg_mask
+
+    print("Background subtraction parameters: m={:.3e}, k={:.3e} (iterations={:d})".format(bg_params[0], bg_params[1], 10))
+
+    # Convert to the format expected by lineFunc (m, k) -> (x, m, k)
+    # np.polyfit returns (m, k)
+    # lineFunc takes (x, m, k)
+    # So we can just unpack *bg_params in the next step, but be careful of order. 
+    # np.polyfit returns highest power first, so [slope, intercept].
+    # lineFunc definition is m*x + k. So it matches.
 
 
     ### ###
 
     # Compute background-subtracted lux
-    lux_data = lux_data - lineFunc(time_data, *res.x)
+    lux_data = lux_data - np.polyval(bg_params, time_data)
 
 
     # Only take the data within the specified time range and with lux > 0
@@ -253,26 +289,61 @@ if __name__ == "__main__":
     time_data_traj = np.concatenate([obs.time_data for obs in traj.observations])
     ht_data_traj = np.concatenate([obs.model_ht for obs in traj.observations])
 
+
     # Sort the trajectory by time
     sort_idx = np.argsort(time_data_traj)
     time_data_traj, ht_data_traj = time_data_traj[sort_idx], ht_data_traj[sort_idx]
 
-    # Interpolate the trajectory time vs height
-    ht_interp = scipy.interpolate.PchipInterpolator(time_data_traj, ht_data_traj)
 
-    # Compute the interpolated data
-    time_data_interp = np.linspace(time_data_traj[0], time_data_traj[-1], 1000)
-    ht_data_interp = ht_interp(time_data_interp)
+    # Check if a fit should be performed instead of interpolation
+    if cml_args.timehtfit is not None:
 
-    # Smooth the interpolated data
-    ht_data_interp = scipy.signal.savgol_filter(ht_data_interp, 21, 3)
+        print("Fitting a polynomial of order {:d} to time vs height...".format(cml_args.timehtfit))
 
-    # Interpolate again after smoothing
-    ht_interp = scipy.interpolate.PchipInterpolator(time_data_interp, ht_data_interp)
+        # Fit a polynomial to the data
+        poly_ht = np.poly1d(np.polyfit(time_data_traj, ht_data_traj, cml_args.timehtfit))
 
-    # Interpolate the inverse, i.e. height vs time (sort the interpolated data by height first)
-    sort_idx = np.argsort(ht_data_interp)
-    time_ht_interp = scipy.interpolate.PchipInterpolator(ht_data_interp[sort_idx], time_data_interp[sort_idx])
+        # Define the height interpolator as a function of time
+        ht_interp = lambda t: poly_ht(t)
+
+        # Compute the interpolated data for plotting
+        time_data_interp = np.linspace(time_data_traj[0], time_data_traj[-1], 1000)
+        ht_data_interp = ht_interp(time_data_interp)
+
+        # Define the inverse interpolator (time as a function of height)
+        def time_ht_interp(h):
+            
+            # Find the roots of the polynomial minus the height
+            roots = (poly_ht - h).roots
+
+            # Take the real roots
+            roots = roots[np.isreal(roots)].real
+
+            # Take the root that is within the time range
+            # If there are multiple, take the one closest to the middle of the time range
+            if len(roots) > 0:
+                return roots[np.argmin(np.abs(roots - np.mean(time_data_traj)))]
+            else:
+                return np.nan
+
+    else:
+
+        # Interpolate the trajectory time vs height
+        ht_interp = scipy.interpolate.PchipInterpolator(time_data_traj, ht_data_traj)
+
+        # Compute the interpolated data
+        time_data_interp = np.linspace(time_data_traj[0], time_data_traj[-1], 1000)
+        ht_data_interp = ht_interp(time_data_interp)
+
+        # Smooth the interpolated data
+        ht_data_interp = scipy.signal.savgol_filter(ht_data_interp, 21, 3)
+
+        # Interpolate again after smoothing
+        ht_interp = scipy.interpolate.PchipInterpolator(time_data_interp, ht_data_interp)
+
+        # Interpolate the inverse, i.e. height vs time (sort the interpolated data by height first)
+        sort_idx = np.argsort(ht_data_interp)
+        time_ht_interp = scipy.interpolate.PchipInterpolator(ht_data_interp[sort_idx], time_data_interp[sort_idx])
 
 
     ### ###
@@ -306,18 +377,36 @@ if __name__ == "__main__":
     sort_idx = np.argsort(time_data_traj)
     time_data_traj, len_data_traj = time_data_traj[sort_idx], len_data_traj[sort_idx]
 
-    # Interpolate the trajectory time vs length
-    len_interp = scipy.interpolate.PchipInterpolator(time_data_traj, len_data_traj)
 
-    # Compute the interpolated data
-    time_data_interp = np.linspace(time_data_traj[0], time_data_traj[-1], 1000)
-    len_data_interp = len_interp(time_data_interp)
+    # Check if a fit should be performed instead of interpolation
+    if cml_args.timehtfit is not None:
+        
+        print("Fitting a polynomial of order {:d} to time vs length...".format(cml_args.timehtfit))
 
-    # Smooth the interpolated data
-    len_data_interp = scipy.signal.savgol_filter(len_data_interp, 21, 3)
+        # Fit a polynomial to the data
+        poly_len = np.poly1d(np.polyfit(time_data_traj, len_data_traj, cml_args.timehtfit))
 
-    # Interpolate again after smoothing
-    len_interp = scipy.interpolate.PchipInterpolator(time_data_interp, len_data_interp)
+        # Define the length interpolator as a function of time
+        len_interp = lambda t: poly_len(t)
+
+        # Compute the interpolated data for plotting
+        time_data_interp = np.linspace(time_data_traj[0], time_data_traj[-1], 1000)
+        len_data_interp = len_interp(time_data_interp)
+
+    else:
+
+        # Interpolate the trajectory time vs length
+        len_interp = scipy.interpolate.PchipInterpolator(time_data_traj, len_data_traj)
+
+        # Compute the interpolated data
+        time_data_interp = np.linspace(time_data_traj[0], time_data_traj[-1], 1000)
+        len_data_interp = len_interp(time_data_interp)
+
+        # Smooth the interpolated data
+        len_data_interp = scipy.signal.savgol_filter(len_data_interp, 21, 3)
+
+        # Interpolate again after smoothing
+        len_interp = scipy.interpolate.PchipInterpolator(time_data_interp, len_data_interp)
 
     ### ###
 
@@ -434,6 +523,7 @@ if __name__ == "__main__":
         power = P_0M*10**(abs_mag/-2.5)
 
         print("Power: {:.3f} W".format(power))
+        print("Extinction correction: {:.3f} mag".format(extinction))
         print("Absolute magnitude: {:.3f}".format(abs_mag))
 
 
@@ -459,8 +549,13 @@ if __name__ == "__main__":
     # Compute the photometric mass
     mass = calcMass(lc_time_traj, np.array(abs_mag_fireball_data), traj.orbit.v_avg_norot, tau=TAU, P_0m=P_0M)
 
+    print()
+    print("-" * 50)
+    print("Peak absolute magnitude: {:.3f}".format(np.min(abs_mag_fireball_data)))
     print("Average velocity: {:.3f} km/s".format(traj.orbit.v_avg_norot/1000))
     print("Radiated energy: {:.3f} J".format(energy))
+    print("Assumed luminous efficacy (5800 K): {:.3f} lm/W".format(LUM_EFFICACY))
+    print("Assumed luminous efficiency: {:.2f} %".format(100*TAU))
     print("Photometric mass: {:.3f} kg".format(mass))
 
 
