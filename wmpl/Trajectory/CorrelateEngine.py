@@ -1561,7 +1561,6 @@ class TrajectoryCorrelator(object):
 
                     # in candidate mode we want to save the candidates to disk
                     if mcmode == MCMODE_CANDS: 
-                        self.getCandidateFolders()
                         log.info("-----------------------")
                         log.info('SAVING {} CANDIDATES'.format(len(candidate_trajectories)))
                         log.info("-----------------------")

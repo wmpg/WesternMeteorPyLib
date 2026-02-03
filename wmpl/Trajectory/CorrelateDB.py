@@ -175,14 +175,11 @@ class ObservationDatabase():
         cur = self.dbhandle.cursor()
         cur.execute(f"attach database '{source_db_path}' as sourcedb")
         try:
-            # bulk-copy if possible
+            # bulk-copy
             cur.execute('insert or replace into paired_obs select * from sourcedb.paired_obs')
         except Exception:
-            # otherwise, one by one 
-            log.info('Some records already exist, doing row-wise copy')
-            cur.execute('select * from sourcedb.paired_obs')
-            for row in cur.fetchall():
-                self.addPairedObs(row[0], row[1],row[2])
+            log.info('unable to merge child observations')
+
         self.commitObsDatabase()
         cur.execute("detach database 'sourcedb'")
         cur.close()
@@ -302,8 +299,12 @@ class TrajectoryDatabase():
         if verbose:
             log.info(f'adding jdt {traj_reduced.jdt_ref} to {"failed" if failed else "trajectories"}')
         cur = self.dbhandle.cursor()
+
         # remove the output_dir part from the path so that the data are location-independent
         traj_file_path = traj_reduced.traj_file_path[traj_reduced.traj_file_path.find('trajectories'):]
+
+        # and remove windows-style path separators
+        traj_file_path = traj_file_path.replace('\\','/')
 
         if failed:
             # fixup possible bad values
@@ -394,6 +395,25 @@ class TrajectoryDatabase():
                          }
             
             trajs.append(json_dict)
+        return trajs
+
+    def getTrajNames(self, jdt_start=None, jdt_end=None, failed=False, verbose=False):
+
+        table_name = 'failed_trajectories' if failed else 'trajectories'
+        cur = self.dbhandle.cursor()
+        if not jdt_start:
+            cur.execute(f"SELECT * FROM {table_name}")
+            rows = cur.fetchall()
+        elif not jdt_end:
+            cur.execute(f"SELECT * FROM {table_name} WHERE jdt_ref={jdt_start}")
+            rows = cur.fetchall()
+        else:
+            cur.execute(f"SELECT * FROM {table_name} WHERE jdt_ref>={jdt_start} and jdt_ref<={jdt_end}")
+            rows = cur.fetchall()
+        cur.close()
+        trajs = []
+        for rw in rows:
+            trajs.append(rw[2])
         return trajs
 
 

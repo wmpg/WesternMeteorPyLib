@@ -23,16 +23,20 @@
 import os
 import paramiko
 import logging
-import glob
 import shutil
 from configparser import ConfigParser
 
-from wmpl.Utils.OSTools import mkdirP
-from wmpl.Utils.Pickling import loadPickle
-
-
 
 log = logging.getLogger("traj_correlator")
+
+
+class RemoteNode():
+    def __init__(self, nodename, dirpath, capacity, mode, active=False):
+        self.nodename = nodename
+        self.dirpath = dirpath
+        self.capacity = int(capacity)
+        self.mode = int(mode)
+        self.active = active
 
 
 class RemoteDataHandler():
@@ -64,14 +68,13 @@ class RemoteDataHandler():
                 log.warning('remote cfg: children section missing, not enabling remote processing')
                 return 
             
+            # create a list of available nodes, disabling any that are malformed in the config file
             self.nodenames = [k for k in cfg['children'].keys()]
             self.nodes = [k.split(',') for k in cfg['children'].values()]
-            for i in range(len(self.nodes)):
-                if len(self.nodes[i]) < 3:
-                    print(f'disabling node {self.nodenames[i]} due to missing config')
-                    while len(self.nodes[i]) < 3:
-                        self.nodes[i].append(0)
+            self.nodes = [RemoteNode(nn,x[0],x[1],x[2]) for nn,x in zip(self.nodenames,self.nodes) if len(x)==3]
+            self.nodes.append(RemoteNode('localhost', None, -1, -1))
         else:
+            # 'child' mode
             if 'sftp' not in cfg.sections() or 'key' not in cfg['sftp'] or 'host' not in cfg['sftp'] or 'user' not in cfg['sftp']:
                 log.warning('remote cfg: sftp user, key or host missing, not enabling remote processing')
                 return
@@ -90,6 +93,10 @@ class RemoteDataHandler():
     def getSFTPConnection(self):
         if not self.initialised:
             return False
+        
+        if self.sftp_client:
+            return True
+        
         log.info(f'Connecting to {self.host}:{self.port} as {self.user}....')
 
         if not os.path.isfile(os.path.expanduser(self.key)):
@@ -114,8 +121,10 @@ class RemoteDataHandler():
     def closeSFTPConnection(self):
         if self.sftp_client: 
             self.sftp_client.close()
+            self.sftp_client = None
         if self.ssh_client: 
             self.ssh_client.close()
+            self.ssh_client = None
         return
 
     ########################################################    
@@ -131,7 +140,7 @@ class RemoteDataHandler():
         """
 
         if not self.initialised or not self.getSFTPConnection():
-            return 
+            return False
 
         for pth in ['files', 'files/candidates', 'files/phase1', 'files/trajectories', 
                     'files/candidates/processed','files/phase1/processed']:
@@ -141,18 +150,13 @@ class RemoteDataHandler():
                 pass
         
         try:
-            readyfile = os.path.join(os.getenv('TMP', default='/tmp'),'ready')
-            open(readyfile,'w').write('ready')
-            self.sftp_client.put(readyfile, 'files/ready')                      
-            log.info('set ready flag')
-
             rem_dir = f'files/{datatype}'
             files = self.sftp_client.listdir(rem_dir)
             files = [f for f in files if '.pickle' in f and 'processing' not in f]
             if len(files) == 0:
                 log.info('no data available at this time')
                 self.closeSFTPConnection()
-                return
+                return False
             
             for trajfile in files:
                 fullname = f'{rem_dir}/{trajfile}'
@@ -172,7 +176,7 @@ class RemoteDataHandler():
             log.info(e)
 
         self.closeSFTPConnection()
-        return len(files)
+        return True
 
     def uploadToMaster(self, source_dir, verbose=False):
         """
@@ -244,75 +248,28 @@ class RemoteDataHandler():
                 self.sftp_client.put(local_name, rem_file)
 
         log.info('uploaded databases')
-
         self.closeSFTPConnection()
         return
-
-    def clearReadyFlag(self, verbose=False):
-        """
-        upload the trajectory pickle and report to a remote host for integration
-        into the solved dataset
-
-        parameters:
-        source_dir = root folder containing data, generally dh.output_dir
-        """
-
+    
+    def setStopFlag(self, verbose=False):
         if not self.initialised or not self.getSFTPConnection():
             return 
         try:
-            self.sftp_client.remove('files/ready')
-            log.info('removed ready flag')
-        except:
-            log.warning('unable to clear ready flag, master continue to assign data')
+            readyfile = os.path.join(os.getenv('TMP', default='/tmp'),'stop')
+            open(readyfile,'w').write('stop')
+            self.sftp_client.put(readyfile, 'files/stop')                      
+        except Exception:
+            log.warning('unable to set stop flag, master will not continue to assign data')
         self.closeSFTPConnection()
-        return
+        log.info('set stop flag')
 
-    ########################################################    
-    # functions used by the master node
-
-    def moveRemoteData(self, output_dir):
-        """
-        Move remotely processed pickle files to their target location in the trajectories area,
-        making sure we clean up any previously-calculated trajectory and temporary files
-        """
-
-        # TODO NEED TO REWORK THIS
-        phase2_dir = os.path.join(output_dir, 'remoteuploads')
-
-        if os.path.isdir(phase2_dir):
-            log.info('Checking for remotely calculated trajectories...')
-            pickles = glob.glob1(phase2_dir, '*.pickle')
-
-            for pick in pickles:
-                traj = loadPickle(phase2_dir, pick)
-                phase1_name = traj.pre_mc_longname
-                traj_dir = f'{output_dir}/trajectories/{phase1_name[:4]}/{phase1_name[:6]}/{phase1_name[:8]}/{phase1_name}'
-                if os.path.isdir(traj_dir):
-                    shutil.rmtree(traj_dir)
-                processed_traj_file = os.path.join(output_dir, 'phase1', phase1_name + '_trajectory.pickle_processing')
-
-                if os.path.isfile(processed_traj_file):
-                    log.info(f'  Moving {phase1_name} to processed folder...')
-                    dst = os.path.join(output_dir, 'phase1', 'processed', phase1_name + '_trajectory.pickle')
-                    shutil.copyfile(processed_traj_file, dst)
-                    os.remove(processed_traj_file)
-
-                phase2_name = traj.longname
-                traj_dir = f'{output_dir}/trajectories/{phase2_name[:4]}/{phase2_name[:6]}/{phase2_name[:8]}/{phase2_name}'
-                mkdirP(traj_dir)
-                log.info(f'  Moving {phase2_name} to {traj_dir}...')
-                src = os.path.join(phase2_dir, pick)
-                dst = os.path.join(traj_dir, pick[:15]+'_trajectory.pickle')
-
-                shutil.copyfile(src, dst)
-                os.remove(src)
-
-                report_file = src.replace('_trajectory.pickle','_report.txt')
-                if os.path.isfile(report_file):
-                    dst = dst.replace('_trajectory.pickle','_report.txt')
-                    shutil.copyfile(report_file, dst)
-                    os.remove(report_file)
-
-            log.info(f'Moved {len(pickles)} trajectories.')
-
+    def clearStopFlag(self, verbose=False):
+        if not self.initialised or not self.getSFTPConnection():
+            return 
+        try:
+            self.sftp_client.remove('files/stop')
+            log.info('removed stop flag')
+        except:
+            pass
+        self.closeSFTPConnection()
         return
