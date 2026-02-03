@@ -539,22 +539,6 @@ class RMSDataHandle(object):
 
         log.info("")
 
-        # Initialise remote data handling, if the config file is present
-        remote_cfg = os.path.join(self.db_dir, 'wmpl_remote.cfg')
-        if os.path.isfile(remote_cfg):
-            log.info('remote data management requested, initialising')
-            self.RemoteDatahandler = RemoteDataHandler(remote_cfg)
-            if self.RemoteDatahandler.mode == 'child':
-                self.RemoteDatahandler.clearStopFlag()
-                status = self.getRemoteData(verbose=False)
-            else:
-                status = self.moveUploadedData(verbose=False)                
-            if not status:
-                log.info('no remote data yet')
-                # TODO probably want to loop here looking for data for 10-15 minutes
-        else:
-            self.RemoteDatahandler = None
-
         if mcmode != MCMODE_PHASE2:
 
             # no need to load the legacy JSON file if we already have the sqlite databases
@@ -600,6 +584,22 @@ class RMSDataHandle(object):
             self.dt_range=[dt_beg, dt_end]
             self.traj_db = None
             self.observations_db = None
+
+        # Initialise remote data handling, if the config file is present
+        remote_cfg = os.path.join(self.db_dir, 'wmpl_remote.cfg')
+        if os.path.isfile(remote_cfg):
+            log.info('remote data management requested, initialising')
+            self.RemoteDatahandler = RemoteDataHandler(remote_cfg)
+            if self.RemoteDatahandler.mode == 'child':
+                self.RemoteDatahandler.clearStopFlag()
+                status = self.getRemoteData(verbose=False)
+            else:
+                status = self.moveUploadedData(verbose=False)                
+            if not status:
+                log.info('no remote data yet')
+                # TODO probably want to loop here looking for data for 10-15 minutes
+        else:
+            self.RemoteDatahandler = None
 
         ### Define country groups to speed up the proceessing ###
 
@@ -1298,7 +1298,7 @@ class RMSDataHandle(object):
 
         if self.mc_mode & MCMODE_PHASE1 and not self.mc_mode & MCMODE_PHASE2:
             # TODO distribute phase1 pickles here
-            self.savePhase1Trajectory(traj, self.phase1_dir, traj.pre_mc_longname + '_trajectory.pickle', verbose=True)
+            self.savePhase1Trajectory(traj, traj.pre_mc_longname + '_trajectory.pickle', verbose=True)
             
         elif self.mc_mode & MCMODE_PHASE2:
             # the MC phase may alter the trajectory details and if later on 
@@ -1567,9 +1567,11 @@ class RMSDataHandle(object):
             if node.nodename == 'localhost':
                 continue
 
-            # merge the databases
+            # if the remote node upload path doesn't exist skip it
             if not os.path.isdir(os.path.join(node.dirpath,'files')):
                 continue
+
+            # merge the databases
             for obsdb_path in glob.glob(os.path.join(node.dirpath,'files','observations*.db')):
                 self.observations_db.mergeObsDatabase(obsdb_path)
                 os.remove(obsdb_path)
@@ -1579,31 +1581,40 @@ class RMSDataHandle(object):
 
                 rem_db = TrajectoryDatabase(*os.path.split(trajdb_path))
                 i = 0
-                for i, traj in enumerate(i, rem_db.getTrajNames()):
+                for i, traj in enumerate(rem_db.getTrajNames()):
                     traj_path, traj_name = os.path.split(traj)
                     local_path = os.path.split(traj_path)[1]
                     targ_path = os.path.join(self.output_dir, traj_path)
                     src_path = os.path.join(node.dirpath,'files', 'trajectories', local_path)
 
                     src_name = os.path.join(src_path, traj_name)
-                    shutil.copy(src_name, targ_path)
+                    os.makedirs(targ_path, exist_ok=True)
+                    if not os.path.isfile(src_name):
+                        log.info(f'trajectory {src_name} missing')
+                    else:
+                        shutil.copy(src_name, targ_path)
                     src_name = src_name.replace('trajectory.pickle', 'report.txt')
-                    shutil.copy(src_name, targ_path)
+                    if not os.path.isfile(src_name):
+                        log.info(f'report {src_name} missing')
+                    else:
+                        shutil.copy(src_name, targ_path)
 
-                    shutil.rmtree(src_path)
+                    shutil.rmtree(src_path,ignore_errors=True)
+                rem_db.closeTrajDatabase()
                 os.remove(trajdb_path)
                 if i > 0:
-                    log.info(f'moved {i} trajectories in {trajdb_path}')
+                    log.info(f'moved {i+1} trajectories in {trajdb_path}')
 
             remote_ph1dir = os.path.join(node.dirpath, 'files', 'phase1')
-            i = 0
-            for i, fil in enumerate([x for x in os.listdir(remote_ph1dir) if '.pickle' in x]):
-                full_name = os.path.join(remote_ph1dir, fil)
-                shutil.copy(full_name, self.phase1_dir)
-                os.remove(full_name)
+            if os.path.isdir(remote_ph1dir):
+                i = 0
+                for i, fil in enumerate([x for x in os.listdir(remote_ph1dir) if '.pickle' in x]):
+                    full_name = os.path.join(remote_ph1dir, fil)
+                    shutil.copy(full_name, self.phase1_dir)
+                    os.remove(full_name)
 
-            if i > 0:
-                log.info(f'moved {i} phase 1 files from {node.nodename}')
+                if i > 0:
+                    log.info(f'moved {i+1} phase 1 files from {node.nodename}')
             
         return True
 
@@ -1624,13 +1635,14 @@ class RMSDataHandle(object):
             status = False
         return status
     
-    def saveCandidates(self, candidate_trajectories):
+    def saveCandidates(self, candidate_trajectories, verbose=False):
         for matched_observations in candidate_trajectories:
-            ref_dt = min([met_obs.reference_dt for _, met_obs, _ in matched_observations])                    
-            picklename = str(ref_dt.timestamp()) + '.pickle'
+            ref_dt = min([met_obs.reference_dt for _, met_obs, _ in matched_observations])
+            ctries = '_'.join(list(set([met_obs.station_code[:2] for _, met_obs, _ in matched_observations])))
+            picklename = str(ref_dt.timestamp()) + '_' + ctries + '.pickle'
 
             # this function can also save a candidate
-            self.savePhase1Trajectory(matched_observations, picklename, 'candidates', verbose=True)
+            self.savePhase1Trajectory(matched_observations, picklename, 'candidates', verbose=verbose)
 
         log.info("-----------------------")
         log.info(f'Saved {len(candidate_trajectories)} candidates')
@@ -1662,26 +1674,26 @@ class RMSDataHandle(object):
             while bucket_num not in tested_buckets:
                 bucket_num = secrets.randbelow(len(bucket_list))
                 bucket = bucket_list[bucket_num]
-                if verbose:
-                    log.info(f'testing node {bucket.nodename} {bucket.dirpath}, {bucket.capacity}, {bucket.mode}')
                 # if the child isn't in mc mode, skip it
                 if bucket.mode != required_mode and bucket.mode != -1:
-                    log.info(f'wrong mode - {bucket.mode} instead of {required_mode}')
                     tested_buckets.append(bucket_num)
                     continue
-                tmp_save_dir = os.path.join(bucket.dirpath, 'files', savetype)
+                if bucket.nodename != 'localhost':
+                    tmp_save_dir = os.path.join(bucket.dirpath, 'files', savetype)
+                else:
+                    tmp_save_dir = save_dir
                 os.makedirs(tmp_save_dir, exist_ok=True)
                 if os.path.isfile(os.path.join(bucket.dirpath, 'files', 'stop')):
                     tested_buckets.append(bucket_num)
-                    log.info('stopfile present')
                     continue
                 if bucket.capacity < 0 or len(glob.glob(os.path.join(tmp_save_dir, '*.pickle'))) < bucket.capacity:
-                    if verbose:
+                    if bucket.nodename != 'localhost':
                         save_dir = tmp_save_dir
-                        log.info(f'saving {file_name} to {bucket.dirpath}')
                     break
                 tested_buckets.append(bucket_num)
                 
+        if verbose:
+            log.info(f'saving {file_name} to {save_dir}')
         savePickle(traj, save_dir, file_name)
 
 
