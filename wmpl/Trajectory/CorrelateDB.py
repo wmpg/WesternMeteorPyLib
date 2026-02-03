@@ -85,7 +85,7 @@ class ObservationDatabase():
         return True
 
 
-    def unpairObs(self, station_code, obs_id, verbose=False):
+    def unpairObs(self, station_code, obs_id, obs_date, verbose=False):
         # if an entry exists, update the status to 0. 
         # this allows us to mark an observation paired, then unpair it later if the solution fails
         # or we want to force a rerun. 
@@ -94,6 +94,7 @@ class ObservationDatabase():
 
         cur = self.dbhandle.cursor()
         try:
+            cur.execute(f"insert or ignore into paired_obs values ('{station_code}','{obs_id}', {datetime2JD(obs_date)}, 1)")
             cur.execute(f"update paired_obs set status=0 where station_code='{station_code}' and obs_id='{obs_id}'")
             self.dbhandle.commit()
         except Exception:
@@ -130,7 +131,7 @@ class ObservationDatabase():
                     log.info(f'{row[1]} already exists in target')
 
         cur.execute(f'delete from paired_obs where obs_date < {archdate_jd}')
-        self.commitObsDatabase()
+        self.dbhandle.commit()
         cur.close()
         return 
 
@@ -159,7 +160,7 @@ class ObservationDatabase():
                     i += 1
                 if not i % 100000 and i != 0:
                     log.info(f'moved {i} observations')
-        self.commitObsDatabase()
+        self.dbhandle.commit()
         log.info(f'done - moved {i} observations')
         log.info('-----------------------------')
 
@@ -180,7 +181,7 @@ class ObservationDatabase():
         except Exception:
             log.info('unable to merge child observations')
 
-        self.commitObsDatabase()
+        self.dbhandle.commit()
         cur.execute("detach database 'sourcedb'")
         cur.close()
         return 
@@ -212,8 +213,9 @@ class TrajectoryDatabase():
         con = sqlite3.connect(db_full_name)
         cur = con.cursor()
         if purge_records:
-            cur.execute('drop table trajectories')
-            cur.execute('drop table failed_trajectories')
+            cur.execute('drop table if exists trajectories')
+            cur.execute('drop table if exists failed_trajectories')
+            con.commit()
         res = cur.execute("SELECT name FROM sqlite_master WHERE name='trajectories'")
         if res.fetchone() is None:
             cur.execute("""CREATE TABLE trajectories(
@@ -463,7 +465,7 @@ class TrajectoryDatabase():
             except Exception:
                 log.warning(f'unable to archive {table_name}')
 
-        self.commitTrajDatabase()
+        self.dbhandle.commit()
         cur.close()
         return 
 
@@ -485,7 +487,7 @@ class TrajectoryDatabase():
             if not i % 10000:
                 self.commitTrajDatabase()
                 log.info(f'moved {i} failed_trajectories')
-        self.commitTrajDatabase()
+        self.dbhandle.commit()
         log.info(f'done - moved {i} failed_trajectories')
 
         return 
@@ -508,7 +510,7 @@ class TrajectoryDatabase():
                 cur.execute(f'insert or replace into {table_name} select * from sourcedb.{table_name}')
             except Exception:
                 log.warning(f'unable to merge data from {source_db_path}')
-        self.commitTrajDatabase()
+        self.dbhandle.commit()
         cur.execute("detach database 'sourcedb'")
         cur.close()
         return 
