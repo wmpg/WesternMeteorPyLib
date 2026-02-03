@@ -24,6 +24,8 @@ import os
 import paramiko
 import logging
 import shutil
+import uuid
+
 from configparser import ConfigParser
 
 
@@ -239,10 +241,11 @@ class RemoteDataHandler():
             log.info(f'uploaded {int(i/2)} trajectories')
 
         # finally the databases
-        for fname in ['observations.db', 'trajectories.db']:
-            local_name = os.path.join(source_dir, fname)
+        uuid_str = str(uuid.uuid4())
+        for fname in ['observations', 'trajectories']:
+            local_name = os.path.join(source_dir, f'{fname}.db')
             if os.path.isfile(local_name):
-                rem_file = f'files/{fname}'
+                rem_file = f'files/{fname}-{uuid_str}.db'
                 if verbose:
                     log.info(f'uploading {local_name} to {rem_file}')
                 self.sftp_client.put(local_name, rem_file)
