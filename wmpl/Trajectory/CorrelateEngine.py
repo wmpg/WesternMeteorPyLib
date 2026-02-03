@@ -860,7 +860,7 @@ class TrajectoryCorrelator(object):
                 log.info(f"Trajectory at {jdt_ref} skipped and added to fails!")
                 if matched_obs:
                     for _, met_obs_temp, _ in matched_obs:
-                        self.dh.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id, verbose=True)
+                        self.dh.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id, met_obs_temp.mean_dt, verbose=True)
                 return False
 
             # If there are only two stations, make sure to reject solutions which have stations with 
@@ -874,7 +874,7 @@ class TrajectoryCorrelator(object):
                     # Add the trajectory to the list of failed trajectories
                     self.dh.addTrajectory(traj_status, failed_jdt_ref=jdt_ref, verbose=True)
                     for _, met_obs_temp, _ in matched_obs:
-                        self.dh.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id, verbose=True)
+                        self.dh.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id, met_obs_temp.mean_dt, verbose=True)
                     return False
 
 
@@ -1318,7 +1318,7 @@ class TrajectoryCorrelator(object):
 
                             else:
                                 for met_obs_temp, _ in candidate_observations:
-                                    self.dh.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id, verbose=True)
+                                    self.dh.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id, met_obs_temp.mean_dt, verbose=True)
                                 log.info("New trajectory solution failed, keeping the old trajectory...")
 
                     ### ###
@@ -1712,7 +1712,7 @@ class TrajectoryCorrelator(object):
                         self.dh.addTrajectory(failed_traj, failed_traj.jdt_ref, verbose=True)
 
                         for _, met_obs_temp, _ in matched_observations:
-                            self.dh.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id, verbose=True)
+                            self.dh.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id, met_obs_temp.mean_dt, verbose=True)
                         log.info("Trajectory skipped and added to fails!")
                         continue
 
@@ -1778,7 +1778,7 @@ class TrajectoryCorrelator(object):
                     if self.dh.checkTrajIfFailed(traj):
                         log.info("The same trajectory already failed to be computed in previous runs!")
                         for _, met_obs_temp, _ in matched_observations:
-                            self.dh.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id, verbose=True)
+                            self.dh.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id, met_obs_temp.mean_dt, verbose=True)
                         continue
 
                     # pass in matched_observations here so that solveTrajectory can mark them paired if they're used

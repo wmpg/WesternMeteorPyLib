@@ -1425,7 +1425,7 @@ class RMSDataHandle(object):
             if self.checkTrajIfFailed(traj):
                 log.info(f'Trajectory at {jd2Date(traj.jdt_ref,dt_obj=True).isoformat()} already failed, skipping')
                 for _, met_obs_temp, _ in cand:
-                    self.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id, verbose=True)
+                    self.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id, met_obs_temp.mean_dt, verbose=True)
                     remaining_unpaired -= 1
             else:
                 candidate_trajectories.append(cand)
@@ -1544,24 +1544,10 @@ class RMSDataHandle(object):
                 log.info(f'File {pick} skipped for now')
         return dt_beg, dt_end
    
-    def uploadToMaster(self, verbose=False):
-        """
-        Used in 'child' mode: this sends solved data back to the master node
-        """
-        # close the databases and upload the data to the master node
-        self.traj_db.closeTrajDatabase()
-        self.observations_db.closeObsDatabase()
-
-        self.RemoteDatahandler.uploadToMaster(self.output_dir, verbose=verbose)
-
-        # truncate the tables here so they are clean for the next run
-        self.traj_db = TrajectoryDatabase(self.db_dir, purge_records=True)
-        self.observations_db = ObservationDatabase(self.db_dir, purge_records=True)
-        return
-    
     def moveUploadedData(self, verbose=False):
         """
         Used in 'master' mode: this moves uploaded data to the target locations on the server
+        and merges in the databases
         """
         for node in self.RemoteDatahandler.nodes:
             if node.nodename == 'localhost':
@@ -2075,7 +2061,16 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                     num_done = tc.run(event_time_range=event_time_range, mcmode=mcmode, bin_time_range=bin_time_range)
 
                     if dh.RemoteDatahandler and dh.RemoteDatahandler.mode == 'child' and num_done > 0:
+                        log.info('uploading to master node')
+                        # close the databases and upload the data to the master node
+                        dh.traj_db.closeTrajDatabase()
+                        dh.observations_db.closeObsDatabase()
+
                         dh.RemoteDatahandler.uploadToMaster(dh.output_dir, verbose=False)
+
+                        # truncate the tables here so they are clean for the next run
+                        dh.traj_db = TrajectoryDatabase(dh.db_dir, purge_records=True)
+                        dh.observations_db = ObservationDatabase(dh.db_dir, purge_records=True)
 
                 if mcmode & MCMODE_CANDS:
                     dh.observations_db.closeObsDatabase()
