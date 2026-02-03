@@ -1592,6 +1592,7 @@ class RMSDataHandle(object):
                     log.info(f'moved {i+1} trajectories in {trajdb_path}')
 
             remote_ph1dir = os.path.join(node.dirpath, 'files', 'phase1')
+            os.makedirs(self.phase1_dir, exist_ok=True)
             if os.path.isdir(remote_ph1dir):
                 i = 0
                 for i, fil in enumerate([x for x in os.listdir(remote_ph1dir) if '.pickle' in x]):
