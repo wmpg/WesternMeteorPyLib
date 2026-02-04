@@ -186,11 +186,15 @@ class RemoteDataHandler():
                     try:
                         self.sftp_client.get(fullname, localname)
                     except: 
+                        time.sleep(1)
                         i += 1
+                try:
+                    self.sftp_client.rename(fullname, f'{rem_dir}/processed/{trajfile}')
+                except:
                     try:
-                        self.sftp_client.rename(fullname, f'{rem_dir}/processed/{trajfile}')
-                    except:
                         self.sftp_client.remove(fullname)
+                    except:
+                        pass
 
             log.info(f'Obtained {len(files)} {"trajectories" if datatype=="phase1" else "candidates"}')
 
