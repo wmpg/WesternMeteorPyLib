@@ -25,6 +25,7 @@ import paramiko
 import logging
 import shutil
 import uuid
+import time
 
 from configparser import ConfigParser
 
@@ -123,13 +124,26 @@ class RemoteDataHandler():
             return False
         
     def closeSFTPConnection(self):
-        if self.sftp_client: 
+        if self.sftp_client:
             self.sftp_client.close()
             self.sftp_client = None
         if self.ssh_client: 
             self.ssh_client.close()
             self.ssh_client = None
         return
+    
+    def putWithRetry(self, local_name, remname):
+        i = 0
+        while i < 10:
+            try:
+                self.sftp_client.put(local_name, remname)
+            except Exception as e:
+                time.sleep(1)
+                i += 1
+                if i == 10:
+                    log.warning(f'upload of {local_name} failed after 10 retries')
+                    log.warning(e)
+        return 
 
     ########################################################    
     # functions used by the client nodes
@@ -167,11 +181,16 @@ class RemoteDataHandler():
                 localname = os.path.join(output_dir, datatype, trajfile)
                 if verbose:
                     log.info(f'downloading {fullname} to {localname}')
-                self.sftp_client.get(fullname, localname)
-                try:
-                    self.sftp_client.rename(fullname, f'{rem_dir}/processed/{trajfile}')
-                except:
-                    self.sftp_client.remove(fullname)
+                i = 0
+                while i < 10:
+                    try:
+                        self.sftp_client.get(fullname, localname)
+                    except: 
+                        i += 1
+                    try:
+                        self.sftp_client.rename(fullname, f'{rem_dir}/processed/{trajfile}')
+                    except:
+                        self.sftp_client.remove(fullname)
 
             log.info(f'Obtained {len(files)} {"trajectories" if datatype=="phase1" else "candidates"}')
 
@@ -213,7 +232,7 @@ class RemoteDataHandler():
                 remname = f'files/phase1/{fil}'
                 if verbose:
                     log.info(f'uploading {local_name} to {remname}')
-                self.sftp_client.put(local_name, remname)
+                self.putWithRetry(local_name, remname)
                 if os.path.isfile(os.path.join(proc_dir, fil)):
                     os.remove(os.path.join(proc_dir, fil))
                 shutil.move(local_name, proc_dir)
@@ -236,7 +255,7 @@ class RemoteDataHandler():
                         rem_file = f'{rem_path}/{fil}'
                         if verbose:
                             log.info(f'uploading {local_name} to {rem_file}')
-                        self.sftp_client.put(local_name, rem_file)
+                        self.putWithRetry(local_name, rem_file)
                         i += 1
             shutil.rmtree(traj_dir, ignore_errors=True)
         if i > 0:
@@ -250,7 +269,7 @@ class RemoteDataHandler():
                 rem_file = f'files/{fname}-{uuid_str}.db'
                 if verbose:
                     log.info(f'uploading {local_name} to {rem_file}')
-                self.sftp_client.put(local_name, rem_file)
+                self.putWithRetry(local_name, rem_file)
 
         log.info('uploaded databases')
         self.closeSFTPConnection()
@@ -262,7 +281,7 @@ class RemoteDataHandler():
         try:
             readyfile = os.path.join(os.getenv('TMP', default='/tmp'),'stop')
             open(readyfile,'w').write('stop')
-            self.sftp_client.put(readyfile, 'files/stop')                      
+            self.putWithRetry(readyfile, 'files/stop')                      
         except Exception:
             log.warning('unable to set stop flag, master will not continue to assign data')
         self.closeSFTPConnection()
