@@ -1612,9 +1612,10 @@ class TrajectoryCorrelator(object):
                 candidate_trajectories = self.dh.phase1Trajectories
             # end of "if mcmode == MCMODE_PHASE2"
 
+            num_traj = len(candidate_trajectories)
             log.info("")
             log.info("-----------------------")
-            log.info(f'SOLVING {len(candidate_trajectories)} TRAJECTORIES {mcmodestr}')
+            log.info(f'SOLVING {num_traj} TRAJECTORIES {mcmodestr}')
             log.info("-----------------------")
             log.info("")
 
@@ -1623,7 +1624,7 @@ class TrajectoryCorrelator(object):
 
                 log.info("")
                 log.info("-----------------------")
-                log.info(f'processing candidate {i+1}')
+                log.info(f'processing {"candidate" if mcmode==MCMODE_PHASE1 else "trajectory"} {i+1}/{num_traj}')
 
 
                 # if mcmode is not 2, prepare to calculate the intersecting planes solutions
