@@ -1270,7 +1270,7 @@ class RMSDataHandle(object):
         return out_path
 
 
-    def saveTrajectoryResults(self, traj, save_plots):
+    def saveTrajectoryResults(self, traj, save_plots, verbose=False):
         """ Save trajectory results to the disk. """
 
 
@@ -1298,7 +1298,7 @@ class RMSDataHandle(object):
 
         if self.mc_mode & MCMODE_PHASE1 and not self.mc_mode & MCMODE_PHASE2:
             # TODO distribute phase1 pickles here
-            self.savePhase1Trajectory(traj, traj.pre_mc_longname + '_trajectory.pickle', verbose=True)
+            self.savePhase1Trajectory(traj, traj.pre_mc_longname + '_trajectory.pickle', verbose=verbose)
             
         elif self.mc_mode & MCMODE_PHASE2:
             # the MC phase may alter the trajectory details and if later on 
@@ -1393,7 +1393,7 @@ class RMSDataHandle(object):
             savePickle(traj, os.path.join(self.phase1_dir, 'processed'), fldr_name + '_trajectory.pickle')
         return 
 
-    def excludeAlreadyFailedCandidates(self, matched_observations, remaining_unpaired):
+    def excludeAlreadyFailedCandidates(self, matched_observations, remaining_unpaired, verbose=False):
 
         # go through the candidates and check if they correspond to already-failed
         candidate_trajectories=[]
@@ -1425,7 +1425,7 @@ class RMSDataHandle(object):
             if self.checkTrajIfFailed(traj):
                 log.info(f'Trajectory at {jd2Date(traj.jdt_ref,dt_obj=True).isoformat()} already failed, skipping')
                 for _, met_obs_temp, _ in cand:
-                    self.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id, met_obs_temp.mean_dt, verbose=True)
+                    self.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id, met_obs_temp.mean_dt, verbose=verbose)
                     remaining_unpaired -= 1
             else:
                 candidate_trajectories.append(cand)
