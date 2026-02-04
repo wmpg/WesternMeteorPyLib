@@ -1773,7 +1773,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         help="Use best N stations in the solution (default is use 15 stations).")
 
     arg_parser.add_argument('--mcmode', '--mcmode', type=int, default=0,
-        help="Run just simple soln (1), just monte-carlos (2) or both (0, default).")
+        help="Operation mode - see readme. For standalone solving either don't set this or set it to 0")
 
     arg_parser.add_argument('--archiveoldrecords', '--archiveoldrecords', type=int, default=3,
         help="Months back to archive old data. Default 3. Zero means don't archive (useful in testing).")
@@ -1785,6 +1785,8 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         help="Minutes to wait between runs in auto-mode")
     
     arg_parser.add_argument('--verbose', '--verbose', help='Verbose logging.', default=False, action="store_true")
+
+    arg_parser.add_argument('--addlogsuffix', '--addlogsuffix', help='add a suffix to the log to show what stage it is.', default=False, action="store_true")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -1834,6 +1836,12 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     # Init the file handler
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     log_file = os.path.join(log_dir, f"correlate_rms_{timestamp}.log")
+    if cml_args.logsuffix:
+        modestrs = {4:'cands', 1:'simple', 2:'mcphase', 5:'candsimple', 3:'simplemc',7:'full',0:'full'}
+        if cml_args.mcmode in modestrs.keys():
+            modestr = modestrs[cml_args.mcmode]
+            log_file = os.path.join(log_dir, f"correlate_rms_{timestamp}_{modestr}.log")
+       
     file_handler = logging.handlers.TimedRotatingFileHandler(log_file, when="midnight", backupCount=7)
     file_handler.setFormatter(log_formatter)
     log.addHandler(file_handler)
