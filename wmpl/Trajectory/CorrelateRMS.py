@@ -1836,7 +1836,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     # Init the file handler
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     log_file = os.path.join(log_dir, f"correlate_rms_{timestamp}.log")
-    if cml_args.logsuffix:
+    if cml_args.addlogsuffix:
         modestrs = {4:'cands', 1:'simple', 2:'mcphase', 5:'candsimple', 3:'simplemc',7:'full',0:'full'}
         if cml_args.mcmode in modestrs.keys():
             modestr = modestrs[cml_args.mcmode]
