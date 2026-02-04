@@ -611,7 +611,7 @@ class TrajectoryCorrelator(object):
         return traj
 
 
-    def solveTrajectory(self, traj, mc_runs, mcmode=MCMODE_ALL, matched_obs=None, orig_traj=None):
+    def solveTrajectory(self, traj, mc_runs, mcmode=MCMODE_ALL, matched_obs=None, orig_traj=None, verbose=False):
         """ Given an initialized Trajectory object with observation, run the solver and automatically
             reject bad observations.
 
@@ -807,7 +807,7 @@ class TrajectoryCorrelator(object):
 
 
                     # Init a new trajectory object (make sure to use the new reference Julian date)
-                    traj = self.initTrajectory(traj_status.jdt_ref, mc_runs, verbose=False)
+                    traj = self.initTrajectory(traj_status.jdt_ref, mc_runs, verbose=verbose)
 
                     # Disable Monte Carlo runs until an initial stable set of observations is found
                     traj.monte_carlo = False
@@ -860,7 +860,7 @@ class TrajectoryCorrelator(object):
                 log.info(f"Trajectory at {jdt_ref} skipped and added to fails!")
                 if matched_obs:
                     for _, met_obs_temp, _ in matched_obs:
-                        self.dh.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id, met_obs_temp.mean_dt, verbose=True)
+                        self.dh.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id, met_obs_temp.mean_dt, verbose=verbose)
                 return False
 
             # If there are only two stations, make sure to reject solutions which have stations with 
@@ -874,7 +874,7 @@ class TrajectoryCorrelator(object):
                     # Add the trajectory to the list of failed trajectories
                     self.dh.addTrajectory(traj_status, failed_jdt_ref=jdt_ref, verbose=True)
                     for _, met_obs_temp, _ in matched_obs:
-                        self.dh.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id, met_obs_temp.mean_dt, verbose=True)
+                        self.dh.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id, met_obs_temp.mean_dt, verbose=verbose)
                     return False
 
 
@@ -919,7 +919,7 @@ class TrajectoryCorrelator(object):
                 log.info("Stable set of observations found, computing uncertainties using Monte Carlo...")
 
                 # Init a new trajectory object (make sure to use the new reference Julian date)
-                traj = self.initTrajectory(traj_status.jdt_ref, mc_runs, verbose=False)
+                traj = self.initTrajectory(traj_status.jdt_ref, mc_runs, verbose=verbose)
 
                 # Enable Monte Carlo
                 traj.monte_carlo = True
@@ -1064,7 +1064,7 @@ class TrajectoryCorrelator(object):
         return successful_traj_fit
 
 
-    def run(self, event_time_range=None, bin_time_range=None, mcmode=MCMODE_ALL):
+    def run(self, event_time_range=None, bin_time_range=None, mcmode=MCMODE_ALL, verbose=False):
         """ Run meteor corellation using available data. 
 
         Keyword arguments:
@@ -1260,6 +1260,7 @@ class TrajectoryCorrelator(object):
                                 ref_dt=jd2Date(traj_reduced.jdt_ref, dt_obj=True, tzinfo=datetime.timezone.utc))
                             obs_new.id = met_obs.id
                             obs_new.station_code = met_obs.station_code
+                            obs_new.mean_dt = met_obs.mean_dt
 
                             # Get an observation from the trajectory object with the maximum convergence angle to
                             #   the reference observations
@@ -1304,7 +1305,7 @@ class TrajectoryCorrelator(object):
 
                             # Re-run the trajectory fit
                             # pass in orig_traj here so that it can be deleted from disk if the new solution succeeds
-                            successful_traj_fit = self.solveTrajectory(traj_full, traj_full.mc_runs, mcmode=mcmode, orig_traj=traj_reduced)
+                            successful_traj_fit = self.solveTrajectory(traj_full, traj_full.mc_runs, mcmode=mcmode, orig_traj=traj_reduced, verbose=verbose)
                             
                             # If the new trajectory solution succeeded, remove the now-paired observations
                             if successful_traj_fit:
@@ -1318,7 +1319,7 @@ class TrajectoryCorrelator(object):
 
                             else:
                                 for met_obs_temp, _ in candidate_observations:
-                                    self.dh.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id, met_obs_temp.mean_dt, verbose=True)
+                                    self.dh.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id, met_obs_temp.mean_dt, verbose=verbose)
                                 log.info("New trajectory solution failed, keeping the old trajectory...")
 
                     ### ###
@@ -1565,7 +1566,7 @@ class TrajectoryCorrelator(object):
                         log.info('SAVING {} CANDIDATES'.format(len(candidate_trajectories)))
                         log.info("-----------------------")
 
-                        self.dh.saveCandidates(candidate_trajectories)
+                        self.dh.saveCandidates(candidate_trajectories, verbose=verbose)
                         return len(candidate_trajectories)
                     else:
                         log.info("-----------------------")
@@ -1700,7 +1701,7 @@ class TrajectoryCorrelator(object):
                         ref_dt = min([met_obs.reference_dt for _, met_obs, _ in matched_observations])
                         jdt_ref = datetime2JD(ref_dt)
 
-                        failed_traj = self.initTrajectory(jdt_ref, 0, verbose=False)
+                        failed_traj = self.initTrajectory(jdt_ref, 0, verbose=verbose)
                         for obs_temp, met_obs, _ in matched_observations:
                             failed_traj.infillWithObs(obs_temp)
 
@@ -1712,7 +1713,7 @@ class TrajectoryCorrelator(object):
                         self.dh.addTrajectory(failed_traj, failed_traj.jdt_ref, verbose=True)
 
                         for _, met_obs_temp, _ in matched_observations:
-                            self.dh.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id, met_obs_temp.mean_dt, verbose=True)
+                            self.dh.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id, met_obs_temp.mean_dt, verbose=verbose)
                         log.info("Trajectory skipped and added to fails!")
                         continue
 
@@ -1743,7 +1744,7 @@ class TrajectoryCorrelator(object):
                     # Init the solver (use the earliest date as the reference)
                     ref_dt = min([met_obs.reference_dt for _, met_obs, _ in matched_observations])
                     jdt_ref = datetime2JD(ref_dt)
-                    traj = self.initTrajectory(jdt_ref, mc_runs, verbose=False)
+                    traj = self.initTrajectory(jdt_ref, mc_runs, verbose=verbose)
 
 
                     # Feed the observations into the trajectory solver
@@ -1778,11 +1779,11 @@ class TrajectoryCorrelator(object):
                     if self.dh.checkTrajIfFailed(traj):
                         log.info("The same trajectory already failed to be computed in previous runs!")
                         for _, met_obs_temp, _ in matched_observations:
-                            self.dh.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id, met_obs_temp.mean_dt, verbose=True)
+                            self.dh.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id, met_obs_temp.mean_dt, verbose=verbose)
                         continue
 
                     # pass in matched_observations here so that solveTrajectory can mark them paired if they're used
-                    result = self.solveTrajectory(traj, mc_runs, mcmode=mcmode, matched_obs=matched_observations)
+                    result = self.solveTrajectory(traj, mc_runs, mcmode=mcmode, matched_obs=matched_observations, verbose=verbose)
                     traj_solved_count += int(result)
 
                     # end of if mcmode != MCMODE_PHASE2
@@ -1812,7 +1813,7 @@ class TrajectoryCorrelator(object):
                     mc_runs = int(np.ceil(mc_runs/self.traj_constraints.mc_cores)*self.traj_constraints.mc_cores)
 
                     # pass in matched_observations here so that solveTrajectory can mark them unpaired if the solver fails
-                    result = self.solveTrajectory(traj, mc_runs, mcmode=mcmode, matched_obs=matched_observations, orig_traj=traj)
+                    result = self.solveTrajectory(traj, mc_runs, mcmode=mcmode, matched_obs=matched_observations, orig_traj=traj, verbose=verbose)
                     traj_solved_count += int(result)
 
             # end of "for matched_observations in candidate_trajectories"

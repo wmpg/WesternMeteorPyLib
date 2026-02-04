@@ -75,6 +75,8 @@ class RemoteDataHandler():
             self.nodes = [k.split(',') for k in cfg['children'].values()]
             self.nodes = [RemoteNode(nn,x[0],x[1],x[2]) for nn,x in zip(self.nodenames,self.nodes) if len(x)==3]
             self.nodes.append(RemoteNode('localhost', None, -1, -1))
+            activenodes = [n.nodename for n in self.nodes if n.capacity!=0]
+            log.info(f' using nodes {activenodes}')
         else:
             # 'child' mode
             if 'sftp' not in cfg.sections() or 'key' not in cfg['sftp'] or 'host' not in cfg['sftp'] or 'user' not in cfg['sftp']:
