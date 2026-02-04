@@ -8,6 +8,7 @@ import argparse
 import datetime
 import json
 import shutil
+import numpy as np
 
 from wmpl.Utils.TrajConversions import datetime2JD, jd2Date
 
@@ -223,9 +224,9 @@ class TrajectoryDatabase():
                         traj_id VARCHAR UNIQUE,
                         traj_file_path VARCHAR,
                         participating_stations VARCHAR, 
+                        ignored_stations VARCHAR,
                         radiant_eci_mini VARCHAR,
                         state_vect_mini VARCHAR,
-                        ignored_stations VARCHAR,
                         phase_1_only INTEGER,
                         v_init REAL,
                         gravity_factor REAL,
@@ -384,6 +385,7 @@ class TrajectoryDatabase():
         cur.close()
         trajs = []
         for rw in rows:
+            rw = [np.nan if x == 'NaN' else x for x in rw]     
             json_dict = {'jdt_ref':rw[0], 'traj_id':rw[1], 'traj_file_path':os.path.join(output_dir, rw[2]),
                          'participating_stations': json.loads(rw[3]),
                          'ignored_stations': json.loads(rw[4]),
