@@ -592,12 +592,11 @@ class RMSDataHandle(object):
             self.RemoteDatahandler = RemoteDataHandler(remote_cfg)
             if self.RemoteDatahandler.mode == 'child':
                 self.RemoteDatahandler.clearStopFlag()
-                status = self.getRemoteData(verbose=False)
+                status = self.getRemoteData(verbose=True)
             else:
                 status = self.moveUploadedData(verbose=False)                
             if not status:
                 log.info('no remote data yet')
-                # TODO probably want to loop here looking for data for 10-15 minutes
         else:
             self.RemoteDatahandler = None
 
@@ -1805,7 +1804,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         remote_cfg = os.path.join(db_dir, 'wmpl_remote.cfg')
         if os.path.isfile(remote_cfg):
             rdh = RemoteDataHandler(remote_cfg)
-            if rdh.mode == 'child':
+            if rdh and rdh.mode == 'child':
                 rdh.setStopFlag()
         sys.exit(0)
 

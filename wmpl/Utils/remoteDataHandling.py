@@ -95,7 +95,7 @@ class RemoteDataHandler():
         self.initialised = True
         return 
     
-    def getSFTPConnection(self):
+    def getSFTPConnection(self, verbose=False):
         if not self.initialised:
             return False
         
@@ -109,11 +109,20 @@ class RemoteDataHandler():
             return False
         
         self.ssh_client = paramiko.SSHClient()
+        if verbose:
+            log.info('created paramiko ssh client....')
         self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         pkey = paramiko.RSAKey.from_private_key_file(self.key) 
         try:
-            self.ssh_client.connect(hostname=self.host, username=self.user, port=self.port, pkey=pkey, look_for_keys=False)
+            if verbose:
+                log.info('connecting....')
+            self.ssh_client.connect(hostname=self.host, username=self.user, port=self.port, 
+                pkey=pkey, look_for_keys=False, timeout=10)
+            if verbose:
+                log.info('connected....')
             self.sftp_client = self.ssh_client.open_sftp()
+            if verbose:
+                log.info('created client')
             return True
         
         except Exception as e:
@@ -133,16 +142,14 @@ class RemoteDataHandler():
         return
     
     def putWithRetry(self, local_name, remname):
-        i = 0
-        while i < 10:
+        for i in range(10):
             try:
                 self.sftp_client.put(local_name, remname)
-            except Exception as e:
+                break
+            except Exception:
                 time.sleep(1)
-                i += 1
-                if i == 10:
-                    log.warning(f'upload of {local_name} failed after 10 retries')
-                    log.warning(e)
+        if i == 10:
+            log.warning(f'upload of {local_name} failed after 10 retries')
         return 
 
     ########################################################    
@@ -157,7 +164,7 @@ class RemoteDataHandler():
         output_dir = folder to put the pickles into generally dh.output_dir
         """
 
-        if not self.initialised or not self.getSFTPConnection():
+        if not self.initialised or not self.getSFTPConnection(verbose=verbose):
             return False
 
         for pth in ['files', 'files/candidates', 'files/phase1', 'files/trajectories', 
@@ -181,13 +188,12 @@ class RemoteDataHandler():
                 localname = os.path.join(output_dir, datatype, trajfile)
                 if verbose:
                     log.info(f'downloading {fullname} to {localname}')
-                i = 0
-                while i < 10:
+                for i in range(10):
                     try:
                         self.sftp_client.get(fullname, localname)
-                    except: 
+                        break
+                    except Exception: 
                         time.sleep(1)
-                        i += 1
                 try:
                     self.sftp_client.rename(fullname, f'{rem_dir}/processed/{trajfile}')
                 except:
@@ -214,7 +220,7 @@ class RemoteDataHandler():
         source_dir = root folder containing data, generally dh.output_dir
         """
 
-        if not self.initialised or not self.getSFTPConnection():
+        if not self.initialised or not self.getSFTPConnection(verbose=verbose):
             return 
 
         for pth in ['files', 'files/candidates', 'files/phase1', 'files/trajectories', 
@@ -285,11 +291,13 @@ class RemoteDataHandler():
         try:
             readyfile = os.path.join(os.getenv('TMP', default='/tmp'),'stop')
             open(readyfile,'w').write('stop')
-            self.putWithRetry(readyfile, 'files/stop')                      
+            self.sftp_client.put(readyfile, 'files/stop')                      
         except Exception:
             log.warning('unable to set stop flag, master will not continue to assign data')
+        time.sleep(2)
         self.closeSFTPConnection()
         log.info('set stop flag')
+        return
 
     def clearStopFlag(self, verbose=False):
         if not self.initialised or not self.getSFTPConnection():
