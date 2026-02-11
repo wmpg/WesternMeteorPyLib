@@ -1549,7 +1549,7 @@ class RMSDataHandle(object):
         and merges in the databases
         """
         for node in self.RemoteDatahandler.nodes:
-            if node.nodename == 'localhost':
+            if node.nodename == 'localhost' or self.observations_db is None or self.traj_db is None:
                 continue
 
             # if the remote node upload path doesn't exist skip it
