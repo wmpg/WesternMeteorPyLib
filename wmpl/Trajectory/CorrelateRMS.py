@@ -1590,9 +1590,10 @@ class RMSDataHandle(object):
                 if i > 0:
                     log.info(f'moved {i+1} trajectories in {trajdb_path}')
 
+            # if we're in mode 1 then move any uploaded phase1 solutions
             remote_ph1dir = os.path.join(node.dirpath, 'files', 'phase1')
             os.makedirs(self.phase1_dir, exist_ok=True)
-            if os.path.isdir(remote_ph1dir):
+            if os.path.isdir(remote_ph1dir) and node.mode==1:
                 i = 0
                 for i, fil in enumerate([x for x in os.listdir(remote_ph1dir) if '.pickle' in x]):
                     full_name = os.path.join(remote_ph1dir, fil)
