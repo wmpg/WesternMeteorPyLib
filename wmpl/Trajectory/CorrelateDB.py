@@ -192,10 +192,13 @@ class ObservationDatabase():
 
 class DummyTrajReduced():
     # a dummy class for use in a couple of fuctions in the TrajectoryDatabase
-    def __init__(self, jdt_ref, traj_id, traj_file_path):
-        self.jdt_ref = jdt_ref
-        self.traj_id = traj_id
-        self.traj_file_path = traj_file_path
+    def __init__(self, jdt_ref=None, traj_id=None, traj_file_path=None, json_dict=None):
+        if json_dict is None:
+            self.jdt_ref = jdt_ref
+            self.traj_id = traj_id
+            self.traj_file_path = traj_file_path
+        else:
+            self.__dict__ = json_dict
 
 
 class TrajectoryDatabase():
@@ -440,7 +443,7 @@ class TrajectoryDatabase():
             if not os.path.isfile(os.path.join(output_dir, rw[2])):
                 if verbose:
                     log.info(f'removing traj {jd2Date(rw[0], dt_obj=True).strftime("%Y%m%d_%M%M%S.%f")} from database')
-                self.removeTrajectory(DummyTrajReduced(rw[0], rw[1], rw[2]), keepFolder=True)
+                self.removeTrajectory(DummyTrajReduced(jdt_ref=rw[0], traj_id=rw[1], traj_file_path=rw[2]), keepFolder=True)
                 i += 1
         log.info(f'removed {i} deleted trajectories')
         return 
@@ -517,8 +520,30 @@ class TrajectoryDatabase():
         cur.close()
         return 
 
+##################################################################################
+# dummy classes for moving data from the old JSON database. Created here to 
+# avoid a circular import
 
-############################################################
+
+class dummyDatabaseJSON():
+    def __init__(self, db_dir, dt_range=None):
+        self.db_file_path = os.path.join(db_dir, 'processed_trajectories.json')
+        self.paired_obs = {}
+        self.failed_trajectories = {}
+        if os.path.exists(self.db_file_path):
+            self.__dict__ = json.load(open(self.db_file_path))
+            if hasattr(self, 'trajectories'):
+                # Convert trajectories from JSON to TrajectoryReduced objects
+                traj_dict = getattr(self, "failed_trajectories")
+                trajectories_obj_dict = {}
+                for traj_json in traj_dict:
+                    traj_reduced_tmp = DummyTrajReduced(json_dict=traj_dict[traj_json])
+                    trajectories_obj_dict[traj_reduced_tmp.jdt_ref] = traj_reduced_tmp
+                setattr(self, "failed_trajectories", trajectories_obj_dict)
+
+
+##################################################################################
+
 
 if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser(description="""Automatically compute trajectories from RMS data in the given directory.""",
@@ -562,25 +587,50 @@ if __name__ == '__main__':
     console_handler.setFormatter(log_formatter)
     log.addHandler(console_handler)
 
-    dbname = cml_args.database.lower()
+    if cml_args.database:
+        dbname = cml_args.database.lower()
     action = cml_args.action.lower()
 
-    if dbname == 'observations':
-        obsdb = ObservationDatabase(cml_args.dir_path)
-        if action == 'read':
-            cur = obsdb.dbhandle.cursor()
-            cur.execute('select * from paired_obs where status=1')
-            print(f'there are {len(cur.fetchall())} paired obs')
-            cur.execute('select * from paired_obs where status=0')
-            print(f'and       {len(cur.fetchall())} unpaired obs')
-        obsdb.closeObsDatabase()
-    elif dbname == 'trajectories':
-        trajdb = TrajectoryDatabase(cml_args.dir_path)
-        if action == 'read':
-            cur = trajdb.dbhandle.cursor()
-            cur.execute('select * from trajectories where status=1')
-            print(f'there are {len(cur.fetchall())} successful trajectories')
-            cur.execute('select * from failed_trajectories')
-            print(f'and       {len(cur.fetchall())} failed trajectories')
+    dt_range = None
+    if cml_args.timerange is not None:
+        time_beg, time_end = cml_args.timerange.strip("(").strip(")").split(",")
+        dt_beg = datetime.datetime.strptime(time_beg, "%Y%m%d-%H%M%S").replace(tzinfo=datetime.timezone.utc)
+        dt_end = datetime.datetime.strptime(time_end, "%Y%m%d-%H%M%S").replace(tzinfo=datetime.timezone.utc)
+        log.info("Custom time range:")
+        log.info("    BEG: {:s}".format(str(dt_beg)))
+        log.info("    END: {:s}".format(str(dt_end)))
+        dt_range = [dt_beg, dt_end]
+
+
+    if action == 'copy':
+        if dt_range is None:
+            log.info('Date range must be provided for copy operation')
+        else:
+            dt_range_jd = [datetime2JD(dt_range[0]),datetime2JD(dt_range[1])]
+            jsondb = dummyDatabaseJSON(db_dir=cml_args.dir_path)
+            obsdb = ObservationDatabase(cml_args.dir_path)
+            obsdb.moveObsJsonRecords(jsondb.paired_obs, dt_range)
+            obsdb.closeObsDatabase()
+            trajdb = TrajectoryDatabase(cml_args.dir_path)
+            trajdb.moveFailedTrajectories(jsondb.failed_trajectories, dt_range)
+            trajdb.closeTrajDatabase()
     else:
-        log.info('valid database not specified')
+        if dbname == 'observations':
+            obsdb = ObservationDatabase(cml_args.dir_path)
+            if action == 'status':
+                cur = obsdb.dbhandle.cursor()
+                cur.execute('select * from paired_obs where status=1')
+                print(f'there are {len(cur.fetchall())} paired obs')
+                cur.execute('select * from paired_obs where status=0')
+                print(f'and       {len(cur.fetchall())} unpaired obs')
+
+        elif dbname == 'trajectories':
+            trajdb = TrajectoryDatabase(cml_args.dir_path)
+            if action == 'read':
+                cur = trajdb.dbhandle.cursor()
+                cur.execute('select * from trajectories where status=1')
+                print(f'there are {len(cur.fetchall())} successful trajectories')
+                cur.execute('select * from failed_trajectories')
+                print(f'and       {len(cur.fetchall())} failed trajectories')
+        else:
+            log.info('valid database not specified')
