@@ -183,9 +183,12 @@ class RemoteDataHandler():
                 self.closeSFTPConnection()
                 return False
             
+            local_dir = os.path.join(output_dir, datatype)
+            if not os.path.isdir(local_dir):
+                os.makedirs(local_dir, exist_ok=True)
             for trajfile in files:
                 fullname = f'{rem_dir}/{trajfile}'
-                localname = os.path.join(output_dir, datatype, trajfile)
+                localname = os.path.join(local_dir, trajfile)
                 if verbose:
                     log.info(f'downloading {fullname} to {localname}')
                 for i in range(10):
