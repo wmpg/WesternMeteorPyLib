@@ -171,9 +171,9 @@ class RemoteDataHandler():
                     'files/candidates/processed','files/phase1/processed']:
             try:
                 self.sftp_client.mkdir(pth)
-                self.sftp_client.chmod(pth, 0o777)
             except Exception:
                 pass
+            self.sftp_client.chmod(pth, 0o777)
         
         try:
             rem_dir = f'files/{datatype}'
@@ -231,9 +231,10 @@ class RemoteDataHandler():
                     'files/candidates/processed','files/phase1/processed']:
             try:
                 self.sftp_client.mkdir(pth)
-                self.sftp_client.chmod(pth, 0o777)
             except Exception:
                 pass
+            self.sftp_client.chmod(pth, 0o777)
+
         phase1_dir = os.path.join(source_dir, 'phase1')
         if os.path.isdir(phase1_dir):
             # upload any phase1 trajectories
@@ -263,9 +264,9 @@ class RemoteDataHandler():
                     rem_path = f'files/trajectories/{os.path.basename(dirpath)}'
                     try:
                         self.sftp_client.mkdir(rem_path)
-                        self.sftp_client.chmod(rem_path, 0o777)
                     except Exception:
                         pass
+                    self.sftp_client.chmod(rem_path, 0o777)
                     for fil in filenames:
                         local_name = os.path.join(dirpath, fil)
                         rem_file = f'{rem_path}/{fil}'
