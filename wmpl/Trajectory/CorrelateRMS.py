@@ -2079,14 +2079,16 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                     if dh.RemoteDatahandler and dh.RemoteDatahandler.mode == 'child' and num_done > 0:
                         log.info('uploading to master node')
                         # close the databases and upload the data to the master node
-                        dh.traj_db.closeTrajDatabase()
-                        dh.observations_db.closeObsDatabase()
+                        if mcmode != MCMODE_PHASE2:
+                            dh.traj_db.closeTrajDatabase()
+                            dh.observations_db.closeObsDatabase()
 
                         dh.RemoteDatahandler.uploadToMaster(dh.output_dir, verbose=False)
 
                         # truncate the tables here so they are clean for the next run
-                        dh.traj_db = TrajectoryDatabase(dh.db_dir, purge_records=True)
-                        dh.observations_db = ObservationDatabase(dh.db_dir, purge_records=True)
+                        if mcmode != MCMODE_PHASE2:
+                            dh.traj_db = TrajectoryDatabase(dh.db_dir, purge_records=True)
+                            dh.observations_db = ObservationDatabase(dh.db_dir, purge_records=True)
 
                 if mcmode & MCMODE_CANDS:
                     dh.observations_db.closeObsDatabase()
