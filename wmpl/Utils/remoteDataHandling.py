@@ -203,7 +203,7 @@ class RemoteDataHandler():
                     try:
                         self.sftp_client.remove(fullname)
                     except:
-                        pass
+                        log.info(f'unable to rename or remove {fullname}')
 
             log.info(f'Obtained {len(files)} {"trajectories" if datatype=="phase1" else "candidates"}')
 
