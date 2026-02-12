@@ -1302,7 +1302,6 @@ class RMSDataHandle(object):
         log.info(f'saved {traj.traj_id} to {output_dir}')
 
         if self.mc_mode & MCMODE_PHASE1 and not self.mc_mode & MCMODE_PHASE2:
-            # TODO distribute phase1 pickles here
             self.savePhase1Trajectory(traj, traj.pre_mc_longname + '_trajectory.pickle', verbose=verbose)
             
         elif self.mc_mode & MCMODE_PHASE2:
@@ -1567,34 +1566,28 @@ class RMSDataHandle(object):
                 self.observations_db.mergeObsDatabase(obsdb_path)
                 os.remove(obsdb_path)
 
+            
             for trajdb_path in glob.glob(os.path.join(node.dirpath,'files','trajectories*.db')):
                 self.traj_db.mergeTrajDatabase(trajdb_path)
-
-                rem_db = TrajectoryDatabase(*os.path.split(trajdb_path))
-                i = 0
-                for i, traj in enumerate(rem_db.getTrajNames()):
-                    traj_path, traj_name = os.path.split(traj)
-                    local_path = os.path.split(traj_path)[1]
-                    targ_path = os.path.join(self.output_dir, traj_path)
-                    src_path = os.path.join(node.dirpath,'files', 'trajectories', local_path)
-
-                    src_name = os.path.join(src_path, traj_name)
-                    os.makedirs(targ_path, exist_ok=True)
-                    if not os.path.isfile(src_name):
-                        log.info(f'trajectory {src_name} missing')
-                    else:
-                        shutil.copy(src_name, targ_path)
-                    src_name = src_name.replace('trajectory.pickle', 'report.txt')
-                    if not os.path.isfile(src_name):
-                        log.info(f'report {src_name} missing')
-                    else:
-                        shutil.copy(src_name, targ_path)
-
-                    shutil.rmtree(src_path,ignore_errors=True)
-                rem_db.closeTrajDatabase()
                 os.remove(trajdb_path)
-                if i > 0:
-                    log.info(f'moved {i+1} trajectories in {trajdb_path}')
+
+            i = 0
+            remote_trajdir = os.path.join(node.dirpath, 'files', 'trajectories')
+            if os.path.isdir(remote_trajdir):
+                for i,traj in enumerate(os.listdir(remote_trajdir)):
+                    if os.path.isdir(os.path.join(remote_trajdir, traj)):
+                        targ_path = os.path.join(self.output_dir, 'trajectories', traj[:4], traj[:6], traj[:8], traj)
+                        src_path = os.path.join(node.dirpath,'files', 'trajectories', traj)
+                        for src_name in os.path.listdir(src_path):
+                            src_name = os.path.join(src_path, src_name)
+                            if not os.path.isfile(src_name):
+                                log.info(f'{src_name} missing')
+                            else:
+                                os.makedirs(targ_path, exist_ok=True)
+                                shutil.copy(src_name, targ_path)
+                        shutil.rmtree(src_path,ignore_errors=True)
+            if i > 0:
+                log.info(f'moved {i+1} trajectories')
 
             # if the node was in mode 1 then move any uploaded phase1 solutions
             remote_ph1dir = os.path.join(node.dirpath, 'files', 'phase1')
