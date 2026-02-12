@@ -1578,7 +1578,7 @@ class RMSDataHandle(object):
                     if os.path.isdir(os.path.join(remote_trajdir, traj)):
                         targ_path = os.path.join(self.output_dir, 'trajectories', traj[:4], traj[:6], traj[:8], traj)
                         src_path = os.path.join(node.dirpath,'files', 'trajectories', traj)
-                        for src_name in os.path.listdir(src_path):
+                        for src_name in os.listdir(src_path):
                             src_name = os.path.join(src_path, src_name)
                             if not os.path.isfile(src_name):
                                 log.info(f'{src_name} missing')
