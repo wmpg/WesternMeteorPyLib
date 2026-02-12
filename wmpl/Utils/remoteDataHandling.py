@@ -142,7 +142,7 @@ class RemoteDataHandler():
         return
     
     def putWithRetry(self, local_name, remname):
-        for i in range(10):
+        for i in range(10): 
             try:
                 self.sftp_client.put(local_name, remname)
                 break
@@ -171,6 +171,7 @@ class RemoteDataHandler():
                     'files/candidates/processed','files/phase1/processed']:
             try:
                 self.sftp_client.mkdir(pth)
+                self.sftp_client.chmod(pth, 0o777)
             except Exception:
                 pass
         
@@ -230,6 +231,7 @@ class RemoteDataHandler():
                     'files/candidates/processed','files/phase1/processed']:
             try:
                 self.sftp_client.mkdir(pth)
+                self.sftp_client.chmod(pth, 0o777)
             except Exception:
                 pass
         phase1_dir = os.path.join(source_dir, 'phase1')
@@ -261,6 +263,7 @@ class RemoteDataHandler():
                     rem_path = f'files/trajectories/{os.path.basename(dirpath)}'
                     try:
                         self.sftp_client.mkdir(rem_path)
+                        self.sftp_client.chmod(rem_path, 0o777)
                     except Exception:
                         pass
                     for fil in filenames:
