@@ -1807,6 +1807,8 @@ contain data folders. Data folders should have FTPdetectinfo files together with
             rdh = RemoteDataHandler(remote_cfg)
             if rdh and rdh.mode == 'child':
                 rdh.setStopFlag()
+        log.info('DONE')
+        log.info('======================================')
         sys.exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
