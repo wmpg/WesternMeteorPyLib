@@ -1142,7 +1142,7 @@ class TrajectoryCorrelator(object):
         log.info("---------------------------------")
         log.info("")
 
-        log.info(f'mcmode is {mcmode}')
+        log.info(f'mcmode is {mcmodestr}')
 
         # Go though all time bins and split the list of observations
         for bin_beg, bin_end in dt_bin_list:
