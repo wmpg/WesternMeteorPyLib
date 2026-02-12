@@ -576,29 +576,18 @@ class RMSDataHandle(object):
             self.processing_list = self.findUnprocessedFolders(station_list)
             log.info("   ... done!")
 
-        else:
+            # in phase 1, initialise and collect data second as we load candidates dynamically
+            self.initialiseRemoteDataHandling()
 
-            # reload the phase1 trajectories
+        else:
+            # in phase 2, initialise and collect data first as we need the phase1 traj on disk already
+            self.initialiseRemoteDataHandling()
+
             dt_beg, dt_end = self.loadPhase1Trajectories(max_trajs=max_trajs)
             self.processing_list = None
             self.dt_range=[dt_beg, dt_end]
             self.traj_db = None
             self.observations_db = None
-
-        # Initialise remote data handling, if the config file is present
-        remote_cfg = os.path.join(self.db_dir, 'wmpl_remote.cfg')
-        if os.path.isfile(remote_cfg):
-            log.info('remote data management requested, initialising')
-            self.RemoteDatahandler = RemoteDataHandler(remote_cfg)
-            if self.RemoteDatahandler.mode == 'child':
-                self.RemoteDatahandler.clearStopFlag()
-                status = self.getRemoteData(verbose=True)
-            else:
-                status = self.moveUploadedData(verbose=False)                
-            if not status:
-                log.info('no remote data yet')
-        else:
-            self.RemoteDatahandler = None
 
         ### Define country groups to speed up the proceessing ###
 
@@ -621,6 +610,23 @@ class RMSDataHandle(object):
             australia_group]
 
         ### ###
+
+
+    def initialiseRemoteDataHandling(self):
+        # Initialise remote data handling, if the config file is present
+        remote_cfg = os.path.join(self.db_dir, 'wmpl_remote.cfg')
+        if os.path.isfile(remote_cfg):
+            log.info('remote data management requested, initialising')
+            self.RemoteDatahandler = RemoteDataHandler(remote_cfg)
+            if self.RemoteDatahandler.mode == 'child':
+                self.RemoteDatahandler.clearStopFlag()
+                status = self.getRemoteData(verbose=True)
+            else:
+                status = self.moveUploadedData(verbose=False)                
+            if not status:
+                log.info('no remote data yet')
+        else:
+            self.RemoteDatahandler = None
 
 
     def purgePhase1ProcessedData(self, dir_path):
@@ -1590,10 +1596,11 @@ class RMSDataHandle(object):
                 if i > 0:
                     log.info(f'moved {i+1} trajectories in {trajdb_path}')
 
-            # if we're in mode 1 then move any uploaded phase1 solutions
+            # if the node was in mode 1 then move any uploaded phase1 solutions
             remote_ph1dir = os.path.join(node.dirpath, 'files', 'phase1')
-            os.makedirs(self.phase1_dir, exist_ok=True)
             if os.path.isdir(remote_ph1dir) and node.mode==1:
+                if not os.path.isdir(self.phase1_dir):
+                    os.makedirs(self.phase1_dir, exist_ok=True)
                 i = 0
                 for i, fil in enumerate([x for x in os.listdir(remote_ph1dir) if '.pickle' in x]):
                     full_name = os.path.join(remote_ph1dir, fil)
