@@ -1165,7 +1165,7 @@ class RMSDataHandle(object):
         return True
 
 
-    def findTimePairs(self, met_obs, unpaired_observations, max_toffset):
+    def findTimePairs(self, met_obs, unpaired_observations, max_toffset, verbose=False):
         """ Finds pairs in time between the given meteor observations and all other observations from 
             different stations. 
 
@@ -1184,6 +1184,9 @@ class RMSDataHandle(object):
 
         # Go through all meteors from other stations
         for met_obs2 in unpaired_observations:
+
+            if self.observations_db.checkObsPaired(met_obs2.station_code, met_obs2.id, verbose=verbose):
+                continue
 
             # Take only observations from different stations
             if met_obs.station_code == met_obs2.station_code:
@@ -1626,7 +1629,7 @@ class RMSDataHandle(object):
         for matched_observations in candidate_trajectories:
             ref_dt = min([met_obs.reference_dt for _, met_obs, _ in matched_observations])
             ctries = '_'.join(list(set([met_obs.station_code[:2] for _, met_obs, _ in matched_observations])))
-            picklename = str(ref_dt.timestamp()) + '_' + ctries + '.pickle'
+            picklename = f'{ref_dt.timestamp():.6f}_{ctries}.pickle'
 
             # this function can also save a candidate
             self.savePhase1Trajectory(matched_observations, picklename, 'candidates', verbose=verbose)

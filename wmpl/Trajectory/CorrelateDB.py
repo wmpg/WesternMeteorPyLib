@@ -59,7 +59,7 @@ class ObservationDatabase():
         return 
 
 
-    def checkObsPaired(self, station_code, obs_id):
+    def checkObsPaired(self, station_code, obs_id, verbose=False):
         # return True if there is an observation with the correct station code, obs id and with status = 1 
         
         paired = True
@@ -68,6 +68,8 @@ class ObservationDatabase():
         if cur.fetchone() is None:
             paired = False
         cur.close()
+        if verbose:
+            log.info(f'{obs_id} is {"Paired" if paired else "Unpaired"}')
         return paired 
 
 
