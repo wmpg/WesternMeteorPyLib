@@ -1341,6 +1341,9 @@ class TrajectoryCorrelator(object):
                         if met_obs.processed:
                             continue
 
+                        if self.dh.observations_db.checkObsPaired(met_obs.station_code, met_obs.id, verbose=verbose):
+                            continue
+
                         # Get station platepar
                         reference_platepar = self.dh.getPlatepar(met_obs)
                         obs1 = self.initObservationsObject(met_obs, reference_platepar)
@@ -1420,7 +1423,7 @@ class TrajectoryCorrelator(object):
                         # Mark observations as processed
                         for _, met_obs_temp, _ in matched_observations:
                             met_obs_temp.processed = True
-                            if self.dh.observations_db.addPairedObs(met_obs_temp.station_code, met_obs_temp.id, met_obs_temp.mean_dt):
+                            if self.dh.observations_db.addPairedObs(met_obs_temp.station_code, met_obs_temp.id, met_obs_temp.mean_dt, verbose=verbose):
                                 remaining_unpaired -= 1
 
                         # Store candidate trajectories
@@ -1490,8 +1493,9 @@ class TrajectoryCorrelator(object):
                             # Check if there any any common observations between candidate trajectories and merge them
                             #   if that is the case
                             found_match = False
+                            test_ids = [x.id for x in obs_list_test]
                             for obs1 in obs_list_ref:
-                                if obs1 in obs_list_test:
+                                if obs1.id in test_ids:
                                     found_match = True
                                     break
 
