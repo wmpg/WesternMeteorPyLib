@@ -2757,8 +2757,7 @@ class Trajectory(object):
 
 
     def infillTrajectory(self, meas1, meas2, time_data, lat, lon, ele, station_id=None, excluded_time=None,
-        ignore_list=None, magnitudes=None, fov_beg=None, fov_end=None, obs_id=None, comment='', ignore_station=False,
-        verbose=False):
+        ignore_list=None, magnitudes=None, fov_beg=None, fov_end=None, obs_id=None, comment='', ignore_station=False):
         """ Initialize a set of measurements for a given station. 
     
         Arguments:
@@ -2836,7 +2835,7 @@ class Trajectory(object):
 
         # Skip the observation if all points were ignored
         if ignore_list is not None:
-            if np.all(ignore_list) and verbose:
+            if np.all(ignore_list):
                 print('All points from station {:s} are ignored, not using this station in the solution!'.format(station_id))
 
 
