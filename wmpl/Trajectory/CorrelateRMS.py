@@ -1778,7 +1778,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     arg_parser.add_argument('--mcmode', '--mcmode', type=int, default=0,
         help="Operation mode - see readme. For standalone solving either don't set this or set it to 0")
 
-    arg_parser.add_argument('--archiveoldrecords', '--archiveoldrecords', type=int, default=3,
+    arg_parser.add_argument('--archivemonths', '--archivemonths', type=int, default=3,
         help="Months back to archive old data. Default 3. Zero means don't archive (useful in testing).")
 
     arg_parser.add_argument('--maxtrajs', '--maxtrajs', type=int, default=None,
@@ -1800,6 +1800,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     if db_dir is None:
         db_dir = cml_args.dir_path 
 
+    # signal handler created inline here as it needs access to db_dir
     def signal_handler(sig, frame):
         signal.signal(sig, signal.SIG_IGN) # ignore additional signals
         log.info('======================================')
