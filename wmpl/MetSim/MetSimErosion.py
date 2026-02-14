@@ -89,6 +89,9 @@ class Constants(object):
         # Wake extension from the leading fragment (m)
         self.wake_extension = 200
 
+        # Specific heights at which the wake should be simulated (m)
+        self.wake_heights = None
+
         ### ###
 
 
@@ -683,7 +686,7 @@ def killFragment(const, frag):
         const.main_mass_exhaustion_ht = frag.h
 
 
-def ablateAll(fragments, const, compute_wake=False):
+def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
     """ Perform single body ablation of all fragments using the 4th order Runge-Kutta method. 
 
     Arguments:
@@ -692,6 +695,7 @@ def ablateAll(fragments, const, compute_wake=False):
 
     Keyword arguments:
         compute_wake: [bool] If True, the wake profile will be computed. False by default.
+        wake_heights_queue: [list] A list of heights at which the wake should be computed. None by default.
 
     Return:
         ...
@@ -1240,6 +1244,28 @@ def ablateAll(fragments, const, compute_wake=False):
         leading_frag_dyn_press = None
 
     ### Compute the wake profile ###
+    
+    # If the specific wake heights are given, check if the current height is below the next wake height
+    if (wake_heights_queue is not None) and (leading_frag_height is not None):
+
+        # If there are any heights left in the queue
+        if len(wake_heights_queue):
+            
+            # If the current height is below the next wake height, compute the wake
+            if leading_frag_height <= wake_heights_queue[0]:
+                compute_wake = True
+                
+                # Pop all heights that are above the current height (including the one we just passed)
+                while len(wake_heights_queue) and (leading_frag_height <= wake_heights_queue[0]):
+                    wake_heights_queue.pop(0)
+
+            else:
+                compute_wake = False
+        
+        else:
+            compute_wake = False
+
+
 
     if compute_wake and (leading_frag_length is not None):
 
@@ -1354,6 +1380,13 @@ def runSimulation(const, compute_wake=False):
     if const.rho > const.rho_grain:
         const.rho_grain = const.rho
 
+
+    # If the wake heights are given, sort them by height descending
+    wake_heights_queue = None
+    if (const.wake_heights is not None) and compute_wake:
+        wake_heights_queue = sorted(const.wake_heights, reverse=True)
+
+
     # Run the simulation until all fragments stop ablating
     results_list = []
     wake_results = []
@@ -1364,7 +1397,7 @@ def runSimulation(const, compute_wake=False):
             tau_total, tau_main, tau_eroded, brightest_height, brightest_length, brightest_vel, \
             leading_frag_height, leading_frag_length, leading_frag_vel, leading_frag_dyn_press, \
             mass_total_active, main_mass, main_height, main_length, main_vel, main_dyn_press, \
-            wake = ablateAll(fragments, const, compute_wake=compute_wake)
+            wake = ablateAll(fragments, const, compute_wake=compute_wake, wake_heights_queue=wake_heights_queue)
         
         # Track the bottom height of the main fragment
         if main_height > 0:

@@ -1917,8 +1917,16 @@ def extractWake(sr, wake_containers, wake_fraction=0.5, peak_region=20, site_id=
     # Get the two containers with observations
     wake_container_ref = wake_containers[ht_ref_idx]
 
-    # Find the wake index closest to the given wake height, ignoring nana
-    wake_res_indx_ref =  np.nanargmin(np.abs(ht_ref - sr.leading_frag_height_arr))
+    # Find indices where the wake result is not None
+    valid_wake_indices = [i for i, w in enumerate(sr.wake_results) if w is not None]
+    
+    if not valid_wake_indices:
+        # Should ideally handle this gracefully, but for now fallback to previous behavior which might error or return None
+        wake_res_indx_ref = np.nanargmin(np.abs(ht_ref - sr.brightest_height_arr))
+    else:
+        # Find the wake index closest to the given wake height, considering only valid wakes
+        closest_idx_in_valid = np.argmin(np.abs(ht_ref - sr.brightest_height_arr[valid_wake_indices]))
+        wake_res_indx_ref = valid_wake_indices[closest_idx_in_valid]
 
     # Extract the wake results
     wake_ref = sr.wake_results[wake_res_indx_ref]
@@ -2776,10 +2784,15 @@ class MetSimGUI(QMainWindow):
         if self.wake_meas:
             self.wake_heights = []
             for wake_container in self.wake_meas:
-                for wake_pt in wake_container.points:
-                    if int(wake_pt.n ) == 0:
-                        self.wake_heights.append([wake_pt.ht, wake_container])
-                        break
+                
+                # Find the point with the minimum lag (closest to n=0)
+                if len(wake_container.points):
+                    # Sort points by lag n
+                    points_sorted = sorted(wake_container.points, key=lambda x: x.n)
+
+                    # Use the height of the first point
+                    self.wake_heights.append([points_sorted[0].ht, wake_container])
+
 
             # Sort wake height list by height
             self.wake_heights = sorted(self.wake_heights, key=lambda x: x[0])
@@ -2819,8 +2832,8 @@ class MetSimGUI(QMainWindow):
         else:
             self.wake_plot_ht = self.traj.rbeg_ele # m
 
-        self.wake_normalization_method = 'area'
-        self.wake_align_method = 'none'
+        self.wake_normalization_method = 'peak'
+        self.wake_align_method = 'correlate'
 
 
         self.magnitudePlotWakeLines = None
@@ -4910,11 +4923,18 @@ class MetSimGUI(QMainWindow):
         sim_wake_exists = False
         if sr is not None:
 
-            # Find the wake index closest to the given wake height
-            wake_res_indx =  np.argmin(np.abs(self.wake_plot_ht - sr.brightest_height_arr))
+            # Find indices where the wake result is not None
+            valid_wake_indices = [i for i, w in enumerate(sr.wake_results) if w is not None]
+            
+            wake = None
+            if valid_wake_indices:
 
-            # Get the approprate wake results
-            wake = sr.wake_results[wake_res_indx]
+                # Find the wake index closest to the given wake height, considering only valid wakes
+                closest_idx_in_valid = np.argmin(np.abs(self.wake_plot_ht - sr.brightest_height_arr[valid_wake_indices]))
+                wake_res_indx = valid_wake_indices[closest_idx_in_valid]
+
+                # Get the appropriate wake results
+                wake = sr.wake_results[wake_res_indx]
 
             if wake is not None:
 
@@ -5069,11 +5089,18 @@ class MetSimGUI(QMainWindow):
             wake = None
             if sr is not None:
 
-                # Find the wake index closest to the given wake height
-                wake_res_indx =  np.argmin(np.abs(plot_ht - sr.brightest_height_arr))
-
-                # Get the approprate wake results
-                wake = sr.wake_results[wake_res_indx]
+                # Find indices where the wake result is not None
+                valid_wake_indices = [i for i, w in enumerate(sr.wake_results) if w is not None]
+                
+                if not valid_wake_indices:
+                    wake = None
+                else:
+                    # Find the wake index closest to the given wake height, considering only valid wakes
+                    closest_idx_in_valid = np.argmin(np.abs(plot_ht - sr.brightest_height_arr[valid_wake_indices]))
+                    wake_res_indx = valid_wake_indices[closest_idx_in_valid]
+                    
+                    # Get the appropriate wake results
+                    wake = sr.wake_results[wake_res_indx]
 
 
             # Plot the simulated wake
@@ -5178,9 +5205,9 @@ class MetSimGUI(QMainWindow):
 
 
 
-        # Enable/disable wake normalization and alignment dpending on availability of simulated data
-        self.wakeNormalizeGroup.setDisabled(wake is None)
-        self.wakeAlignGroup.setDisabled(wake is None)
+        # Enable/disable wake normalization and alignment depending on availability of simulated data
+        self.wakeNormalizeGroup.setDisabled(not self.wake_on)
+        self.wakeAlignGroup.setDisabled(not self.wake_on)
 
 
 
@@ -5594,6 +5621,12 @@ class MetSimGUI(QMainWindow):
 
         print('Running simulation...')
         t1 = time.time()
+
+        # Pass the observed wake heights to the simulation to speed it up
+        if hasattr(self, 'wake_heights') and (self.wake_heights is not None):
+            self.const.wake_heights = [x[0] for x in self.wake_heights]
+        else:
+            self.const.wake_heights = None
 
         # Run the simulation
         frag_main, results_list, wake_results = runSimulation(self.const, compute_wake=self.wake_on)
@@ -6296,19 +6329,31 @@ if __name__ == "__main__":
     # Get the screen resolution
     app = QApplication([])
     screen = app.primaryScreen()
+    
+    # Get the OS display scale factor (e.g., 200% scaling = 2.0)
+    device_pixel_ratio = screen.devicePixelRatio()
+    
+    # Get the logical screen size (already accounts for OS scaling)
     screen_size = screen.size()
     screen_width = screen_size.width()
     screen_height = screen_size.height()
+    
+    # Calculate the physical resolution by multiplying by device pixel ratio
+    physical_height = int(screen_height * device_pixel_ratio)
 
-    # Only scale the window if the screen resolution is not 1080p
-    if screen_height != 1080:
+    # Only scale the window if the physical screen resolution is not 1080p
+    if physical_height != 1080:
 
         # Compute the scaling factor, taking 1080p as the reference resolution (compute the ratio of 
         # diagonals)
         # Use the screen height as the reference to avoid issues with very wide screens, and assume that the 
         # screen size ratio is 1.6 (16:10)
-        screen_width_calc = int(screen_height*1.6)
-        scaling_factor = np.sqrt(screen_width_calc**2 + screen_height**2) / np.sqrt(1920**2 + 1080**2)
+        screen_width_calc = int(physical_height*1.6)
+        scaling_factor = np.sqrt(screen_width_calc**2 + physical_height**2) / np.sqrt(1920**2 + 1080**2)
+        
+        # Divide by device pixel ratio to account for OS-level scaling
+        # This prevents double scaling (resolution scaling * OS scaling)
+        scaling_factor = scaling_factor / device_pixel_ratio
 
         # If the scaling factor is > 1, reduce it by 2% to avoid too large fonts
         if scaling_factor > 1:
@@ -6320,7 +6365,8 @@ if __name__ == "__main__":
         os.environ["QT_SCALE_FACTOR"] = str(scaling_factor)
 
     else:    
-        scaling_factor = 1
+        scaling_factor = 1.0 / device_pixel_ratio
+        os.environ["QT_SCALE_FACTOR"] = str(scaling_factor)
 
     # Destroy the QApplication object
     app.quit()
@@ -6332,11 +6378,26 @@ if __name__ == "__main__":
     # Init PyQt5 window
     app = QApplication([])
 
-    # Set a font for the whole application
+    # Set font size compensated for QT_SCALE_FACTOR
+    # Base is 7pt, divide by scaling_factor so when Qt scales it back up, it's 7pt effective
     font = QFont()
     font.setFamily("Arial")
-    font.setPointSize(int(np.ceil(8/scaling_factor)))
+    font.setPointSize(int(np.ceil(7 / scaling_factor)))
     app.setFont(font)
+
+    # Scale down checkboxes and radio buttons to compensate for QT_SCALE_FACTOR
+    checkbox_size = int(26 / scaling_factor)  # 26px base size (2x larger than default)
+    stylesheet = f"""
+        QCheckBox::indicator {{
+            width: {checkbox_size}px;
+            height: {checkbox_size}px;
+        }}
+        QRadioButton::indicator {{
+            width: {checkbox_size}px;
+            height: {checkbox_size}px;
+        }}
+    """
+    app.setStyleSheet(stylesheet)
 
     
 
