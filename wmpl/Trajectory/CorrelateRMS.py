@@ -1987,7 +1987,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         dh = RMSDataHandle(
             cml_args.dir_path, dt_range=event_time_range, 
             db_dir=cml_args.dbdir, output_dir=cml_args.outdir,
-            mcmode=mcmode, max_trajs=max_trajs, verbose=cml_args.verbose, archivemonths=cml_args.archiveoldrecords)
+            mcmode=mcmode, max_trajs=max_trajs, verbose=cml_args.verbose, archivemonths=cml_args.archivemonths)
         
         # If there is nothing to process and we're in Candidate mode, stop
         if not dh.processing_list and (mcmode & MCMODE_CANDS):
