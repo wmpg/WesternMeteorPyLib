@@ -581,13 +581,13 @@ class RMSDataHandle(object):
 
         else:
             # in phase 2, initialise and collect data first as we need the phase1 traj on disk already
+            self.traj_db = None
+            self.observations_db = None
             self.initialiseRemoteDataHandling()
 
             dt_beg, dt_end = self.loadPhase1Trajectories(max_trajs=max_trajs)
             self.processing_list = None
             self.dt_range=[dt_beg, dt_end]
-            self.traj_db = None
-            self.observations_db = None
 
         ### Define country groups to speed up the proceessing ###
 
