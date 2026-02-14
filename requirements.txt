@@ -19,4 +19,4 @@ watchdog==3.0.0; python_version == '3.7'
 watchdog; python_version >= '3.8'
 paramiko
 rebound==4.3.0
-reboundx==4.3.0 ; platform_machine != 'win32'
+reboundx==4.3.0 ; sys.platform != 'win32'
