@@ -1426,7 +1426,10 @@ class TrajectoryCorrelator(object):
                             if self.dh.observations_db.addPairedObs(met_obs_temp.station_code, met_obs_temp.id, met_obs_temp.mean_dt, verbose=verbose):
                                 remaining_unpaired -= 1
 
-                        # Store candidate trajectories
+                        # Store candidate trajectory group
+                        # Note that this will include candidate groups that already failed on previous runs. 
+                        # We will exclude these later - we can't do it just yet as if new data has arrived, then 
+                        # in the next step, the group might be merged with another group creating a solvable set. 
                         log.info("")
                         log.info(f" --- ADDING CANDIDATE at {met_obs.reference_dt.isoformat()} ---")
                         candidate_trajectories.append(matched_observations)
@@ -1518,10 +1521,7 @@ class TrajectoryCorrelator(object):
                                 # Add observations that weren't present in the reference candidate
                                 for entry in traj_cand_test:
 
-                                    # Make sure the added observation is not from a station that's already added
-                                    #if entry[1].station_code in ref_stations:
-                                    #    print('station code already in ref stations')
-                                    #    continue
+                                    # Make sure the added observation is not already added
                                     if entry[1] not in obs_list_ref:
 
                                         # Print the reference and the merged radiants
@@ -1558,6 +1558,8 @@ class TrajectoryCorrelator(object):
                     log.info('CHECKING FOR ALREADY-FAILED CANDIDATES')
                     log.info("-----------------------")
 
+                    # okay now we can remove any already-failed combinations. This wasn't safe to do earlier
+                    # because we first needed to see if we could merge any groups. 
                     candidate_trajectories, remaining_unpaired = self.dh.excludeAlreadyFailedCandidates(merged_candidate_trajectories, remaining_unpaired)
 
                     log.info("-----------------------")
