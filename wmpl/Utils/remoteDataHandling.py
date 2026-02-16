@@ -129,7 +129,7 @@ class RemoteDataHandler():
 
             log.warning('sftp connection to remote host failed')
             log.warning(e)
-            self.ssh_client.close()
+            self.closeSFTPConnection()
             return False
         
     def closeSFTPConnection(self):
