@@ -1566,13 +1566,13 @@ class RMSDataHandle(object):
 
             # merge the databases
             for obsdb_path in glob.glob(os.path.join(node.dirpath,'files','observations*.db')):
-                self.observations_db.mergeObsDatabase(obsdb_path)
-                os.remove(obsdb_path)
+                if self.observations_db.mergeObsDatabase(obsdb_path):
+                    os.remove(obsdb_path)
 
             
             for trajdb_path in glob.glob(os.path.join(node.dirpath,'files','trajectories*.db')):
-                self.traj_db.mergeTrajDatabase(trajdb_path)
-                os.remove(trajdb_path)
+                if self.traj_db.mergeTrajDatabase(trajdb_path):
+                    os.remove(trajdb_path)
 
             i = 0
             remote_trajdir = os.path.join(node.dirpath, 'files', 'trajectories')

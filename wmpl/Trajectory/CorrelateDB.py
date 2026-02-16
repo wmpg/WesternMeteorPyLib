@@ -1,3 +1,25 @@
+# The MIT License
+
+# Copyright (c) 2024 Mark McIntyre
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
 """ Python scripts to manage the WMPL SQLite databases
 """
 import os
@@ -181,13 +203,15 @@ class ObservationDatabase():
         try:
             # bulk-copy
             cur.execute('insert or replace into paired_obs select * from sourcedb.paired_obs')
+            status = True
         except Exception:
             log.info('unable to merge child observations')
+            status = False
 
         self.dbhandle.commit()
         cur.execute("detach database 'sourcedb'")
         cur.close()
-        return 
+        return status
 
 
 ############################################################
@@ -511,16 +535,18 @@ class TrajectoryDatabase():
 
         # TODO need to correct the traj_file_path to account for server locations
 
+        status = True
         for table_name in ['trajectories', 'failed_trajectories']:
             try:
                 # bulk-copy if possible
                 cur.execute(f'insert or replace into {table_name} select * from sourcedb.{table_name}')
             except Exception:
                 log.warning(f'unable to merge data from {source_db_path}')
+                status = False
         self.dbhandle.commit()
         cur.execute("detach database 'sourcedb'")
         cur.close()
-        return 
+        return status
 
 ##################################################################################
 # dummy classes for moving data from the old JSON database. Created here to 
