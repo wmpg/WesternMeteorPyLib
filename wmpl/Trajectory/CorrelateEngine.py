@@ -923,9 +923,6 @@ class TrajectoryCorrelator(object):
         if mcmode & MCMODE_PHASE2: 
             traj_status = traj
 
-            # save the traj in case we need to clean it up
-            save_traj = traj
-                
             # Only proceed if the orbit could be computed
             if traj.orbit.ra_g is not None:
 
@@ -980,7 +977,6 @@ class TrajectoryCorrelator(object):
                 except ValueError as e:
                     log.info("Error during trajectory estimation!")
                     print(e)
-                    self.dh.cleanupPhase2TempPickle(save_traj)
                     return False
 
 
@@ -991,7 +987,6 @@ class TrajectoryCorrelator(object):
                     if mcmode != MCMODE_PHASE2:
                         self.dh.addTrajectory(traj, failed_jdt_ref=jdt_ref, verbose=verbose)
                     log.info('Trajectory failed to solve')
-                    self.dh.cleanupPhase2TempPickle(save_traj)
                     return False
 
 
@@ -1004,7 +999,6 @@ class TrajectoryCorrelator(object):
                     log.info("Average velocity outside range: {:.1f} < {:.1f} < {:.1f} km/s, skipping...".format(self.traj_constraints.v_avg_min, 
                         traj.orbit.v_avg/1000, self.traj_constraints.v_avg_max))
 
-                    self.dh.cleanupPhase2TempPickle(save_traj)
                     return False
 
 
@@ -1012,14 +1006,12 @@ class TrajectoryCorrelator(object):
                 for obs in traj.observations:
                     if (obs.rbeg_ele is None) and (not obs.ignore_station):
                         log.info("Heights from observations failed to be estimated!")
-                        self.dh.cleanupPhase2TempPickle(save_traj)
                         return False
 
 
                 # Check that the orbit could be computed
                 if traj.orbit.ra_g is None:
                     log.info("The orbit could not be computed!")
-                    self.dh.cleanupPhase2TempPickle(save_traj)
                     return False
 
                 # Set the trajectory fit as successful
@@ -1044,7 +1036,6 @@ class TrajectoryCorrelator(object):
 
             else:
                 log.info("The orbit could not be computed!")
-                self.dh.cleanupPhase2TempPickle(save_traj)
                 return False
 
 

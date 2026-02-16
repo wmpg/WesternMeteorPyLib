@@ -611,7 +611,6 @@ class RMSDataHandle(object):
 
         ### ###
 
-
     def initialiseRemoteDataHandling(self):
         # Initialise remote data handling, if the config file is present
         remote_cfg = os.path.join(self.db_dir, 'wmpl_remote.cfg')
@@ -627,7 +626,6 @@ class RMSDataHandle(object):
                 log.info('no remote data yet')
         else:
             self.RemoteDatahandler = None
-
 
     def purgePhase1ProcessedData(self, dir_path):
         """ Purge old phase1 processed data if it is older than 90 days. """
@@ -660,7 +658,6 @@ class RMSDataHandle(object):
                         log.error(f"Error removing file {file_path}: {e}")
         
         return result
-
 
     def archiveOldRecords(self, older_than=3):
         """
@@ -701,8 +698,6 @@ class RMSDataHandle(object):
 
 
         return station_list
-
-
 
     def findUnprocessedFolders(self, station_list):
         """ Go through directories and find folders with unprocessed data. """
@@ -746,8 +741,6 @@ class RMSDataHandle(object):
 
         return processing_list
 
-
-
     def initMeteorObs(self, station_code, ftpdetectinfo_path, platepars_recalibrated_dict):
         """ Init meteor observations from the FTPdetectinfo file and recalibrated platepars. """
 
@@ -766,8 +759,6 @@ class RMSDataHandle(object):
 
 
         return meteor_list
-
-
 
     def loadUnpairedObservations(self, processing_list, dt_range=None):
         """ Load unpaired meteor observations, i.e. observations that are not a part of any trajectory. """
@@ -898,7 +889,6 @@ class RMSDataHandle(object):
         log.info("  Finished loading unpaired observations!")
 
         return unpaired_met_obs_list
-    
 
     def yearMonthDayDirInDtRange(self, dir_name):
         """ Given a directory name which is either YYYY, YYYYMM or YYYYMMDD, check if it is in the given 
@@ -988,8 +978,7 @@ class RMSDataHandle(object):
                 return True
             
             else:
-                return False
-            
+                return False      
 
     def trajectoryFileInDtRange(self, file_name, dt_range=None):
         """ Check if the trajectory file is in the given datetime range. """
@@ -1018,7 +1007,6 @@ class RMSDataHandle(object):
         else:
             return False
 
-
     def removeDeletedTrajectories(self):
         """ Purge the database of any trajectories that no longer exist on disk.
             These can arise because the monte-carlo stage may update the data. 
@@ -1041,7 +1029,6 @@ class RMSDataHandle(object):
         self.traj_db.removeDeletedTrajectories(self.output_dir, jdt_start, jdt_end)
 
         return 
-
 
     def loadComputedTrajectories(self, dt_range=None):
         """ Load already estimated trajectories from disk within a date range. 
@@ -1125,8 +1112,6 @@ class RMSDataHandle(object):
 
         dur = (datetime.datetime.now() - start_time).total_seconds()
         log.info(f"  Loaded {counter:6d} trajectories in {dur:.0f} seconds")
-        
-
 
     def getComputedTrajectories(self, jd_beg, jd_end):
         """ Returns a list of computed trajectories between the Julian dates.
@@ -1134,20 +1119,16 @@ class RMSDataHandle(object):
         json_dicts = self.traj_db.getTrajectories(self.output_dir, jd_beg, jd_end)
         trajs = [TrajectoryReduced(None, json_dict=j) for j in json_dicts]
         return trajs
-               
 
     def getPlatepar(self, met_obs):
         """ Return the platepar of the meteor observation. """
 
         return met_obs.platepar
 
-
-
     def getUnpairedObservations(self):
         """ Returns a list of unpaired meteor observations. """
 
         return self.unpaired_observations
-
 
     def countryFilter(self, station_code1, station_code2):
         """ Only pair observations if they are in proximity to a given country. """
@@ -1163,7 +1144,6 @@ class RMSDataHandle(object):
 
         # If a given country is not in any of the groups, allow it to be paired
         return True
-
 
     def findTimePairs(self, met_obs, unpaired_observations, max_toffset, verbose=False):
         """ Finds pairs in time between the given meteor observations and all other observations from 
@@ -1203,7 +1183,6 @@ class RMSDataHandle(object):
 
         return found_pairs
 
-
     def getTrajTimePairs(self, traj_reduced, unpaired_observations, max_toffset):
         """ Find unpaired observations which are close in time to the given trajectory. """
 
@@ -1231,7 +1210,6 @@ class RMSDataHandle(object):
 
 
         return found_traj_obs_pairs
-
 
     def generateTrajOutputDirectoryPath(self, traj, make_dirs=False):
         """ Generate a path to the trajectory output directory. 
@@ -1276,7 +1254,6 @@ class RMSDataHandle(object):
             mkdirP(out_path)
 
         return out_path
-
 
     def saveTrajectoryResults(self, traj, save_plots, verbose=False):
         """ Save trajectory results to the disk. """
@@ -1344,8 +1321,6 @@ class RMSDataHandle(object):
 
         self.traj_db.addTrajectory(traj_reduced, failed=(failed_jdt_ref is not None), verbose=verbose)
 
-
-
     def removeTrajectory(self, traj_reduced, remove_phase1=False):
         """ Remove the trajectory from the data base and disk. """
 
@@ -1360,14 +1335,8 @@ class RMSDataHandle(object):
                 traj_dir = os.path.join(base_dir, traj_reduced.pre_mc_longname)
                 if os.path.isdir(traj_dir):
                     shutil.rmtree(traj_dir, ignore_errors=True)
-                else:
-                    log.warning(f'unable to find {traj_dir}')
-            else:
-                log.warning(f'unable to find {traj_reduced.traj_file_path}')
-
-            # remove the processed pickle now we're done with it
-            self.cleanupPhase2TempPickle(traj_reduced, True)
             return
+
         if self.mcmode & MCMODE_PHASE1 and remove_phase1:
             # remove any solution from the phase1 folder
             phase1_traj = os.path.join(self.phase1_dir, os.path.basename(traj_reduced.traj_file_path))
@@ -1378,27 +1347,6 @@ class RMSDataHandle(object):
                     pass
 
         self.traj_db.removeTrajectory(traj_reduced)
-
-
-    def cleanupPhase2TempPickle(self, traj, success=False):
-        """
-        At the start of phase 2 monte-carlo sim calculation, the phase1 pickles are renamed to indicate they're being processed.
-        Once each one is processed (fail or succeed) we need to clean up the file. If the MC step failed, we still want to keep
-        the pickle, because we might later on get new data and it might become solvable. Otherwise, we can just delete the file 
-        since the MC solver will have saved an updated one already.
-        """
-        if not self.mc_mode & MCMODE_PHASE2:
-            return 
-        fldr_name = os.path.split(self.generateTrajOutputDirectoryPath(traj, make_dirs=False))[-1] 
-        pick = os.path.join(self.phase1_dir, fldr_name + '_trajectory.pickle_processing')
-        if os.path.isfile(pick):
-            os.remove(pick)
-        else:
-            log.warning(f'unable to find _processing file {pick}')
-        if not success:
-            # save the pickle in case we get new data later and can solve it
-            savePickle(traj, os.path.join(self.phase1_dir, 'processed'), fldr_name + '_trajectory.pickle')
-        return 
 
     def excludeAlreadyFailedCandidates(self, matched_observations, remaining_unpaired, verbose=False):
 
@@ -1449,8 +1397,6 @@ class RMSDataHandle(object):
             return
         traj_reduced = TrajectoryReduced(None, traj_obj=traj)
         return self.traj_db.checkTrajIfFailed(traj_reduced)
-
-
 
     def loadFullTraj(self, traj_reduced):
         """ Load the full trajectory object. 
@@ -1534,12 +1480,12 @@ class RMSDataHandle(object):
                 if not hasattr(traj, 'pre_mc_longname'):
                     traj.pre_mc_longname = os.path.split(traj_dir)[-1]
 
-                # Check if the traj object as fixed time offsets
+                # Check if the traj object has fixed time offsets
                 if not hasattr(traj, 'fixed_time_offsets'):
                     traj.fixed_time_offsets = {}
 
-                # now we've loaded the phase 1 solution, move it to prevent accidental reprocessing
-                procfile = os.path.join(self.phase1_dir, pick + '_processing')
+                # now we've loaded the phase 1 solution, move it to prevent reprocessing
+                procfile = os.path.join(self.phase1_dir, 'processed', pick)
                 if os.path.isfile(procfile):
                     os.remove(procfile)
                 os.rename(os.path.join(self.phase1_dir, pick), procfile)
