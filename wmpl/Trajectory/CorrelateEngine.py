@@ -32,6 +32,21 @@ MCMODE_ALL = MCMODE_CANDS + MCMODE_PHASE1 + MCMODE_PHASE2
 log = logging.getLogger("traj_correlator")
 
 
+def getMcModeStr(mcmode, strtype=0):
+    modestrs = {4:'cands', 1:'simple', 2:'mcphase', 5:'candsimple', 3:'simplemc',7:'full',0:'full'}
+    fullmodestrs = {4:'CANDIDATE STAGE', 1:'SIMPLE STAGE', 2:'MONTE CARLO STAGE', 7:'FULL',0:'FULL'}
+    if strtype == 0:
+        if mcmode in fullmodestrs.keys():
+            return fullmodestrs[mcmode]
+        else:
+            return 'MIXED'
+    else:
+        if mcmode in modestrs.keys():
+            return modestrs[mcmode]
+        else:
+            return False
+
+
 def pickBestStations(obslist, max_stns):
     """
     Find the stations with the best statistics
@@ -1074,14 +1089,7 @@ class TrajectoryCorrelator(object):
         """
 
         # a bit of logging to let readers know what we're doing
-        if mcmode == MCMODE_PHASE2: 
-            mcmodestr = ' - MONTE CARLO STAGE'
-        elif mcmode == MCMODE_PHASE1:
-            mcmodestr = ' - SIMPLE STAGE'
-        elif mcmode == MCMODE_CANDS:
-            mcmodestr = ' - CANDIDATE STAGE'
-        else:
-            mcmodestr = 'FULL SOLVER'
+        mcmodestr = getMcModeStr(mcmode, strtype=1)
 
         if mcmode != MCMODE_PHASE2:
             if mcmode & MCMODE_CANDS:

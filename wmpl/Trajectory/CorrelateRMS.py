@@ -23,7 +23,7 @@ import signal
 import secrets
 
 from wmpl.Formats.CAMS import loadFTPDetectInfo
-from wmpl.Trajectory.CorrelateEngine import TrajectoryCorrelator, TrajectoryConstraints
+from wmpl.Trajectory.CorrelateEngine import TrajectoryCorrelator, TrajectoryConstraints, getMcModeStr
 from wmpl.Utils.Math import generateDatetimeBins
 from wmpl.Utils.OSTools import mkdirP
 from wmpl.Utils.Pickling import loadPickle, savePickle
@@ -1800,6 +1800,25 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     if db_dir is None:
         db_dir = cml_args.dir_path 
 
+    # mcmode values
+    # mcmode = 1 -> load candidates and do simple solutions
+    # mcmode = 2 -> load simple solns and do MC solutions
+    # mcmode = 4 -> find candidates only
+    # mcmode = 7 -> do everything
+    # mcmode = 0 -> same as mode 7
+    # bitwise combinations are permissioble so:
+    #   4+1 will find candidates and then run simple solutions to populate "phase1"
+    #   1+2 will load candidates from "candidates" and solve them completely
+    
+    mcmode = MCMODE_ALL if cml_args.mcmode == 0 else cml_args.mcmode
+
+
+    mcmodestr = getMcModeStr(mcmode, 1)
+    pid_file = None
+    if mcmodestr:
+        pid_file = os.path.join(db_dir, f'.{mcmodestr}.pid')
+        open(pid_file,'w').write(f'{os.getpid()}')
+
     # signal handler created inline here as it needs access to db_dir
     def signal_handler(sig, frame):
         signal.signal(sig, signal.SIG_IGN) # ignore additional signals
@@ -1811,6 +1830,8 @@ contain data folders. Data folders should have FTPdetectinfo files together with
             rdh = RemoteDataHandler(remote_cfg)
             if rdh and rdh.mode == 'child':
                 rdh.setStopFlag()
+        if os.path.isfile(pid_file):
+            os.remove(pid_file)
         log.info('DONE')
         log.info('======================================')
         sys.exit(0)
@@ -1843,9 +1864,8 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     log_file = os.path.join(log_dir, f"correlate_rms_{timestamp}.log")
     if cml_args.addlogsuffix:
-        modestrs = {4:'cands', 1:'simple', 2:'mcphase', 5:'candsimple', 3:'simplemc',7:'full',0:'full'}
-        if cml_args.mcmode in modestrs.keys():
-            modestr = modestrs[cml_args.mcmode]
+        modestr = getMcModeStr(cml_args.mcmode, 1)
+        if modestr:
             log_file = os.path.join(log_dir, f"correlate_rms_{timestamp}_{modestr}.log")
        
     file_handler = logging.handlers.TimedRotatingFileHandler(log_file, when="midnight", backupCount=7)
@@ -1896,17 +1916,6 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     if cml_args.maxerr is not None:
         trajectory_constraints.max_arcsec_err = cml_args.maxerr
 
-    # mcmode values
-    # mcmode = 1 -> load candidates and do simple solutions
-    # mcmode = 2 -> load simple solns and do MC solutions
-    # mcmode = 4 -> find candidates only
-    # mcmode = 7 -> do everything
-    # mcmode = 0 -> same as mode 7
-    # bitwise combinations are permissioble so:
-    #   4+1 will find candidates and then run simple solutions to populate "phase1"
-    #   1+2 will load candidates from "candidates" and solve them completely
-    
-    mcmode = MCMODE_ALL if cml_args.mcmode == 0 else cml_args.mcmode
     
     # set the maximum number of trajectories to reprocess when doing the MC uncertainties
     # set a default of 10 for remote processing and 1000 for local processing
@@ -1933,6 +1942,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
 
     # Run processing. If the auto run more is not on, the loop will break after one run
     previous_start_time = None
+
     while True: 
 
         # Clock for measuring script time
@@ -2108,6 +2118,8 @@ contain data folders. Data folders should have FTPdetectinfo files together with
             # clear the remote data ready flag to indicate we're shutting down
             if dh.RemoteDatahandler and dh.RemoteDatahandler.mode == 'child':
                 dh.RemoteDatahandler.setStopFlag()
+            if pid_file and os.path.isfile(pid_file):
+                os.remove(pid_file)
             break
 
         else:
