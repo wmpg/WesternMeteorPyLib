@@ -1378,7 +1378,7 @@ class RMSDataHandle(object):
                 traj.jdt_ref = traj.jdt_ref + t0/86400.0
 
             if self.checkTrajIfFailed(traj):
-                log.info(f'Trajectory at {jd2Date(traj.jdt_ref,dt_obj=True).isoformat()} already failed, skipping')
+                log.info(f'Candidate at {ref_dt.isoformat()} already failed, skipping')
                 for _, met_obs_temp, _ in cand:
                     self.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id, met_obs_temp.mean_dt, verbose=verbose)
                     remaining_unpaired -= 1

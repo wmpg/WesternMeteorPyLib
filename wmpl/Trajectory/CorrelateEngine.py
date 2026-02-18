@@ -869,10 +869,11 @@ class TrajectoryCorrelator(object):
 
             # Skip the trajectory if no good solution was found
             if skip_trajectory:
-
                 # Add the trajectory to the list of failed trajectories
                 self.dh.addTrajectory(traj, failed_jdt_ref=jdt_ref, verbose=verbose)
-                log.info(f"Trajectory at {jdt_ref} skipped and added to fails!")
+                ref_dt = jd2Date(min([met_obs.jdt_ref for met_obs in traj.observations]), dt_obj=True)
+                log.info(f"Trajectory at {ref_dt.isoformat()} skipped and added to fails!")
+
                 if matched_obs:
                     for _, met_obs_temp, _ in matched_obs:
                         self.dh.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id, met_obs_temp.mean_dt, verbose=verbose)
@@ -884,7 +885,9 @@ class TrajectoryCorrelator(object):
                 if np.any([(obstmp.ang_res_std > np.radians(self.traj_constraints.max_arcsec_err/3600)) 
                         for obstmp in traj_status.observations]):
 
+                    ref_dt = jd2Date(min([met_obs.jdt_ref for met_obs in traj.observations]), dt_obj=True)
                     log.info("2 station only solution, one station has an error above the maximum limit, skipping!")
+                    log.info(f"Trajectory at {ref_dt.isoformat()} skipped and added to fails!")
 
                     # Add the trajectory to the list of failed trajectories
                     self.dh.addTrajectory(traj_status, failed_jdt_ref=jdt_ref, verbose=verbose)
@@ -986,7 +989,7 @@ class TrajectoryCorrelator(object):
                     # Add the trajectory to the list of failed trajectories
                     if mcmode != MCMODE_PHASE2:
                         self.dh.addTrajectory(traj, failed_jdt_ref=jdt_ref, verbose=verbose)
-                    log.info('Trajectory failed to solve')
+                    log.info(f"Trajectory at {ref_dt.isoformat()} skipped and added to fails!")
                     return False
 
 
@@ -1430,7 +1433,8 @@ class TrajectoryCorrelator(object):
                         # We will exclude these later - we can't do it just yet as if new data has arrived, then 
                         # in the next step, the group might be merged with another group creating a solvable set. 
                         log.info("")
-                        log.info(f" --- ADDING CANDIDATE at {met_obs.reference_dt.isoformat()} ---")
+                        ref_dt = min([met_obs.reference_dt for _, met_obs, _ in matched_observations])
+                        log.info(f" --- ADDING CANDIDATE at {ref_dt.isoformat()} ---")
                         candidate_trajectories.append(matched_observations)
 
                     ### Merge all candidate trajectories which share the same observations ###
@@ -1720,7 +1724,7 @@ class TrajectoryCorrelator(object):
 
                         for _, met_obs_temp, _ in matched_observations:
                             self.dh.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id, met_obs_temp.mean_dt, verbose=verbose)
-                        log.info("Trajectory skipped and added to fails!")
+                        log.info(f"Trajectory at {ref_dt.isoformat()} skipped and added to fails!")
                         continue
 
 
