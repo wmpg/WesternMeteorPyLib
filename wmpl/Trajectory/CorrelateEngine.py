@@ -989,6 +989,7 @@ class TrajectoryCorrelator(object):
                     # Add the trajectory to the list of failed trajectories
                     if mcmode != MCMODE_PHASE2:
                         self.dh.addTrajectory(traj, failed_jdt_ref=jdt_ref, verbose=verbose)
+                    ref_dt = jd2Date(min([met_obs.jdt_ref for met_obs in traj.observations]), dt_obj=True)
                     log.info(f"Trajectory at {ref_dt.isoformat()} skipped and added to fails!")
                     return False
 
