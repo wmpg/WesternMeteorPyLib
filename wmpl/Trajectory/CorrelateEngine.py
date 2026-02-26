@@ -1073,6 +1073,124 @@ class TrajectoryCorrelator(object):
 
         return successful_traj_fit
 
+    def mergeBrokenCandidates(self, candidate_trajectories):
+        ### Merge all candidate trajectories which share the same observations ###
+        log.info("")
+        log.info("---------------------------")
+        log.info("3) MERGING BROKEN OBSERVATIONS")
+        log.info("---------------------------")
+        merged_candidate_trajectories = []
+        merged_indices = []
+        for i, traj_cand_ref in enumerate(candidate_trajectories):
+
+            # Skip candidate trajectories that have already been merged
+            if i in merged_indices:
+                continue
+
+            
+            # Stop the search if the end has been reached
+            if (i + 1) == len(candidate_trajectories):
+                merged_candidate_trajectories.append(traj_cand_ref)
+                break
+
+
+            # Get the mean time of the reference observation
+            ref_mean_dt = traj_cand_ref[0][1].mean_dt
+
+            obs_list_ref = [entry[1] for entry in traj_cand_ref]
+            merged_candidate = []
+
+            # Compute the mean radiant of the reference solution
+            plane_radiants_ref = [entry[2].radiant_eq for entry in traj_cand_ref]
+            ra_mean_ref = meanAngle([ra for ra, _ in plane_radiants_ref])
+            dec_mean_ref = np.mean([dec for _, dec in plane_radiants_ref])
+
+
+            # Check for pairs
+            found_first_pair = False
+            for j, traj_cand_test in enumerate(candidate_trajectories[(i + 1):]):
+                # Skip same observations
+                if traj_cand_ref[0] == traj_cand_test[0]:
+                    continue
+
+
+                # Get the mean time of the test observation
+                test_mean_dt = traj_cand_test[0][1].mean_dt
+
+                # Make sure the observations that are being compared are within the time window
+                time_diff = (test_mean_dt - ref_mean_dt).total_seconds()
+                if abs(time_diff) > self.traj_constraints.max_toffset:
+                    continue
+
+
+                # Break the search if the time went beyond the search. This can be done as observations 
+                #   are ordered in time
+                if time_diff > self.traj_constraints.max_toffset:
+                    break
+
+
+
+                # Create a list of observations
+                obs_list_test = [entry[1] for entry in traj_cand_test]
+
+                # Check if there any any common observations between candidate trajectories and merge them
+                #   if that is the case
+                found_match = False
+                test_ids = [x.id for x in obs_list_test]
+                for obs1 in obs_list_ref:
+                    if obs1.id in test_ids:
+                        found_match = True
+                        break
+
+
+                # Compute the mean radiant of the reference solution
+                plane_radiants_test = [entry[2].radiant_eq for entry in traj_cand_test]
+                ra_mean_test = meanAngle([ra for ra, _ in plane_radiants_test])
+                dec_mean_test = np.mean([dec for _, dec in plane_radiants_test])
+
+                # Skip the merging attempt if the estimated radiants are too far off
+                if np.degrees(angleBetweenSphericalCoords(dec_mean_ref, ra_mean_ref, dec_mean_test, ra_mean_test)) > self.traj_constraints.max_merge_radiant_angle:
+                    continue
+
+
+                # Add the candidate trajectory to the common list if a match has been found
+                if found_match:
+
+                    ref_stations = [obs.station_code for obs in obs_list_ref]
+
+                    # Add observations that weren't present in the reference candidate
+                    for entry in traj_cand_test:
+
+                        # Make sure the added observation is not already added
+                        if entry[1] not in obs_list_ref:
+
+                            # Print the reference and the merged radiants
+                            if not found_first_pair:
+                                log.info("")
+                                log.info("------")
+                                log.info("Reference time: {:s}".format(str(ref_mean_dt)))
+                                log.info("Reference stations: {:s}".format(", ".join(sorted(ref_stations))))
+                                log.info("Reference radiant: RA = {:.2f}, Dec = {:.2f}".format(np.degrees(ra_mean_ref), np.degrees(dec_mean_ref)))
+                                log.info("")
+                                found_first_pair = True
+
+                            log.info("Merging: {:s} {:s}".format(str(entry[1].mean_dt), str(entry[1].station_code)))
+                            traj_cand_ref.append(entry)
+
+                            log.info("Merged radiant:    RA = {:.2f}, Dec = {:.2f}".format(np.degrees(ra_mean_test), np.degrees(dec_mean_test)))
+                            log.info(f'Candidate contains {len(traj_cand_ref)} obs')
+
+                    # Mark that the current index has been processed
+                    merged_indices.append(i + j + 1)
+
+            # Add the reference candidate observations to the list
+            merged_candidate += traj_cand_ref
+
+            # Add the merged observation to the final list
+            merged_candidate_trajectories.append(merged_candidate)
+
+        return merged_candidate_trajectories
+
 
     def run(self, event_time_range=None, bin_time_range=None, mcmode=MCMODE_ALL, verbose=False):
         """ Run meteor corellation using available data. 
@@ -1123,11 +1241,14 @@ class TrajectoryCorrelator(object):
                 if mcmode & MCMODE_CANDS:
                     dt_beg = unpaired_observations_all[0].reference_dt
                     dt_end = unpaired_observations_all[-1].reference_dt
+                    bin_days = 0.25
                 else: 
                     dt_beg, dt_end = self.dh.dt_range
+                    bin_days = 1
+
                 dt_bin_list = generateDatetimeBins(
                     dt_beg, dt_end, 
-                    bin_days=1, utc_hour_break=12, tzinfo=datetime.timezone.utc, reverse=False
+                    bin_days=bin_days, utc_hour_break=12, tzinfo=datetime.timezone.utc, reverse=False
                 )
                 
         else:
@@ -1158,7 +1279,7 @@ class TrajectoryCorrelator(object):
                 if mcmode & MCMODE_CANDS:
                     log.info("")
                     log.info("-----------------------------------")
-                    log.info("  PAIRING TRAJECTORIES IN TIME BIN:")
+                    log.info("0)  PAIRING TRAJECTORIES IN TIME BIN:")
                     log.info("    BIN BEG: {:s} UTC".format(str(bin_beg)))
                     log.info("    BIN END: {:s} UTC".format(str(bin_end)))
                     log.info("-----------------------------------")
@@ -1438,132 +1559,8 @@ class TrajectoryCorrelator(object):
                         log.info(f" --- ADDING CANDIDATE at {ref_dt.isoformat()} ---")
                         candidate_trajectories.append(matched_observations)
 
-                    ### Merge all candidate trajectories which share the same observations ###
-                    log.info("")
-                    log.info("---------------------------")
-                    log.info("MERGING BROKEN OBSERVATIONS")
-                    log.info("---------------------------")
-                    merged_candidate_trajectories = []
-                    merged_indices = []
-                    for i, traj_cand_ref in enumerate(candidate_trajectories):
-
-                        # Skip candidate trajectories that have already been merged
-                        if i in merged_indices:
-                            continue
-
-                        
-                        # Stop the search if the end has been reached
-                        if (i + 1) == len(candidate_trajectories):
-                            merged_candidate_trajectories.append(traj_cand_ref)
-                            break
-
-
-                        # Get the mean time of the reference observation
-                        ref_mean_dt = traj_cand_ref[0][1].mean_dt
-
-                        obs_list_ref = [entry[1] for entry in traj_cand_ref]
-                        merged_candidate = []
-
-                        # Compute the mean radiant of the reference solution
-                        plane_radiants_ref = [entry[2].radiant_eq for entry in traj_cand_ref]
-                        ra_mean_ref = meanAngle([ra for ra, _ in plane_radiants_ref])
-                        dec_mean_ref = np.mean([dec for _, dec in plane_radiants_ref])
-
-
-                        # Check for pairs
-                        found_first_pair = False
-                        for j, traj_cand_test in enumerate(candidate_trajectories[(i + 1):]):
-                            # Skip same observations
-                            if traj_cand_ref[0] == traj_cand_test[0]:
-                                continue
-
-
-                            # Get the mean time of the test observation
-                            test_mean_dt = traj_cand_test[0][1].mean_dt
-
-                            # Make sure the observations that are being compared are within the time window
-                            time_diff = (test_mean_dt - ref_mean_dt).total_seconds()
-                            if abs(time_diff) > self.traj_constraints.max_toffset:
-                                continue
-
-
-                            # Break the search if the time went beyond the search. This can be done as observations 
-                            #   are ordered in time
-                            if time_diff > self.traj_constraints.max_toffset:
-                                break
-
-
-
-                            # Create a list of observations
-                            obs_list_test = [entry[1] for entry in traj_cand_test]
-
-                            # Check if there any any common observations between candidate trajectories and merge them
-                            #   if that is the case
-                            found_match = False
-                            test_ids = [x.id for x in obs_list_test]
-                            for obs1 in obs_list_ref:
-                                if obs1.id in test_ids:
-                                    found_match = True
-                                    break
-
-
-                            # Compute the mean radiant of the reference solution
-                            plane_radiants_test = [entry[2].radiant_eq for entry in traj_cand_test]
-                            ra_mean_test = meanAngle([ra for ra, _ in plane_radiants_test])
-                            dec_mean_test = np.mean([dec for _, dec in plane_radiants_test])
-
-                            # Skip the merging attempt if the estimated radiants are too far off
-                            if np.degrees(angleBetweenSphericalCoords(dec_mean_ref, ra_mean_ref, dec_mean_test, ra_mean_test)) > self.traj_constraints.max_merge_radiant_angle:
-                                continue
-
-
-                            # Add the candidate trajectory to the common list if a match has been found
-                            if found_match:
-
-                                ref_stations = [obs.station_code for obs in obs_list_ref]
-
-                                # Add observations that weren't present in the reference candidate
-                                for entry in traj_cand_test:
-
-                                    # Make sure the added observation is not already added
-                                    if entry[1] not in obs_list_ref:
-
-                                        # Print the reference and the merged radiants
-                                        if not found_first_pair:
-                                            log.info("")
-                                            log.info("------")
-                                            log.info("Reference time: {:s}".format(str(ref_mean_dt)))
-                                            log.info("Reference stations: {:s}".format(", ".join(sorted(ref_stations))))
-                                            log.info("Reference radiant: RA = {:.2f}, Dec = {:.2f}".format(np.degrees(ra_mean_ref), np.degrees(dec_mean_ref)))
-                                            log.info("")
-                                            found_first_pair = True
-
-                                        log.info("Merging: {:s} {:s}".format(str(entry[1].mean_dt), str(entry[1].station_code)))
-                                        traj_cand_ref.append(entry)
-
-                                        log.info("Merged radiant:    RA = {:.2f}, Dec = {:.2f}".format(np.degrees(ra_mean_test), np.degrees(dec_mean_test)))
-                                        log.info(f'Candidate contains {len(traj_cand_ref)} obs')
-
-                                        
-
-
-                                # Mark that the current index has been processed
-                                merged_indices.append(i + j + 1)
-
-
-                        # Add the reference candidate observations to the list
-                        merged_candidate += traj_cand_ref
-
-
-                        # Add the merged observation to the final list
-                        merged_candidate_trajectories.append(merged_candidate)
-
-                    log.info("-----------------------")
-                    log.info('CHECKING FOR ALREADY-FAILED CANDIDATES')
-                    log.info("-----------------------")
-
-                    # okay now we can remove any already-failed combinations. This wasn't safe to do earlier
-                    # because we first needed to see if we could merge any groups. 
+                    # Check for mergeable candidate combinations then remove any that already failed. 
+                    merged_candidate_trajectories = self.mergeBrokenCandidates(candidate_trajectories)
                     candidate_trajectories, remaining_unpaired = self.dh.excludeAlreadyFailedCandidates(merged_candidate_trajectories, remaining_unpaired)
 
                     log.info("-----------------------")
@@ -1571,16 +1568,17 @@ class TrajectoryCorrelator(object):
                     log.info("-----------------------")
 
                     # in candidate mode we want to save the candidates to disk
-                    if mcmode == MCMODE_CANDS: 
+                    if mcmode == MCMODE_CANDS:
                         log.info("-----------------------")
-                        log.info('SAVING {} CANDIDATES'.format(len(candidate_trajectories)))
+                        log.info('5) SAVING {} CANDIDATES'.format(len(candidate_trajectories)))
                         log.info("-----------------------")
 
                         self.dh.saveCandidates(candidate_trajectories, verbose=verbose)
                         return len(candidate_trajectories)
+                    
                     else:
                         log.info("-----------------------")
-                        log.info('PROCESSING {} CANDIDATES'.format(len(candidate_trajectories)))
+                        log.info('5) PROCESSING {} CANDIDATES'.format(len(candidate_trajectories)))
                         log.info("-----------------------")
 
                 # end of 'if mcmode & MCMODE_CANDS'
