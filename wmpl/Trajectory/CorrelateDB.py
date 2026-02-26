@@ -97,6 +97,12 @@ class ObservationDatabase():
 
     def addPairedObs(self, station_code, obs_id, obs_date, verbose=False):
         # add or update an entry in the database, setting status = 1
+
+        # Note that we do not commit the database as this would cause problems if we have to 
+        # stop and restart processing mid-way through a pairing run. By leaving the data uncommitted
+        # we ensure that if the process crashes, then data will be left unpaired and we can rerun the 
+        # pairing routine safely. 
+
         if verbose:
             log.info(f'adding {obs_id} to paired_obs table')
         cur = self.dbhandle.cursor()
@@ -112,7 +118,7 @@ class ObservationDatabase():
 
     def unpairObs(self, station_code, obs_id, obs_date, verbose=False):
         # if an entry exists, update the status to 0. 
-        # this allows us to mark an observation paired, then unpair it later if the solution fails
+        # this allows us to mark an observation paired during candidate creation, then unpair it later if the solution fails
         # or we want to force a rerun. 
         if verbose:
             log.info(f'unpairing {obs_id}')
@@ -327,6 +333,9 @@ class TrajectoryDatabase():
 
     def addTrajectory(self, traj_reduced, failed=False, verbose=False):
         # add or update an entry in the database, setting status = 1
+
+        # note that unlike the observations db we DO commit here because as soon as a solution is found
+        # we want to ensure we don't try to find it again on a rerun
 
         if verbose:
             log.info(f'adding jdt {traj_reduced.jdt_ref} to {"failed" if failed else "trajectories"}')
