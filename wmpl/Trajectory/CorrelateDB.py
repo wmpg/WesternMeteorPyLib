@@ -57,14 +57,12 @@ class ObservationDatabase():
         log.info(f'opening database {db_full_name}')
         con = sqlite3.connect(db_full_name)
         con.execute('pragma journal_mode=wal')
-        cur = con.cursor()
         if purge_records:
-            cur.execute('drop table paired_obs')
-        cur.execute("SELECT name FROM sqlite_master WHERE name='paired_obs'")
-        if cur.fetchone() is None:
-            cur.execute("CREATE TABLE paired_obs(station_code VARCHAR(8), obs_id VARCHAR(36) UNIQUE, obs_date REAL, status INTEGER)")
+            con.execute('drop table paired_obs')
+        res = con.execute("SELECT name FROM sqlite_master WHERE name='paired_obs'")
+        if res.fetchone() is None:
+            con.execute("CREATE TABLE paired_obs(station_code VARCHAR(8), obs_id VARCHAR(36) UNIQUE, obs_date REAL, status INTEGER)")
         con.commit()
-        cur.close()
         return con
 
     def commitObsDatabase(self):
@@ -89,11 +87,9 @@ class ObservationDatabase():
         # return True if there is an observation with the correct station code, obs id and with status = 1 
         
         paired = True
-        cur = self.dbhandle.cursor()
-        cur.execute(f"SELECT obs_id FROM paired_obs WHERE obs_id='{obs_id}' and status=1")
+        cur = self.dbhandle.execute(f"SELECT obs_id FROM paired_obs WHERE obs_id='{obs_id}' and status=1")
         if cur.fetchone() is None:
             paired = False
-        cur.close()
         if verbose:
             log.info(f'{obs_id} is {"Paired" if paired else "Unpaired"}')
         return paired 
@@ -109,10 +105,8 @@ class ObservationDatabase():
 
         if verbose:
             log.info(f'adding {obs_id} to paired_obs table')
-        cur = self.dbhandle.cursor()
         sqlstr = f"insert or replace into paired_obs values ('{station_code}','{obs_id}', {datetime2JD(obs_date)}, 1)"
-        cur.execute(sqlstr)
-        cur.close()
+        self.dbhandle.execute(sqlstr)
 
         if not self.checkObsPaired(station_code, obs_id):
             log.warning(f'failed to add {obs_id} to paired_obs table')
@@ -120,23 +114,20 @@ class ObservationDatabase():
         return True
 
 
-    def unpairObs(self, station_code, obs_id, obs_date, verbose=False):
+    def unpairObs(self, obs_ids, verbose=True):
         # if an entry exists, update the status to 0. 
         # this allows us to mark an observation paired during candidate creation, then unpair it later if the solution fails
         # or we want to force a rerun. 
         if verbose:
-            log.info(f'unpairing {obs_id}')
-
-        cur = self.dbhandle.cursor()
+            log.info(f'unpairing {obs_ids}')
         try:
-            cur.execute(f"insert or ignore into paired_obs values ('{station_code}','{obs_id}', {datetime2JD(obs_date)}, 1)")
-            cur.execute(f"update paired_obs set status=0 where station_code='{station_code}' and obs_id='{obs_id}'")
-            self.dbhandle.commit()
+            obs_ids_str = ','.join(obs_ids)
+            self.dbhandle.execute(f"update paired_obs set status=0 where obs_id in ('{obs_ids_str}')")
         except Exception:
             # obs wasn't in the database so no need to unpair it
             pass
         
-        cur.close()
+        self.dbhandle.commit()
         return True
 
 
@@ -150,24 +141,22 @@ class ObservationDatabase():
         archdb.close()
 
         # attach the arch db, copy the records then delete them
-        cur = self.dbhandle.cursor()
         archdb_fullname = os.path.join(db_path, f'{archdb_name}')
-        cur.execute(f"attach database '{archdb_fullname}' as archdb")
+        self.dbhandle.execute(f"attach database '{archdb_fullname}' as archdb")
         try:
             # bulk-copy if possible
-            cur.execute(f'insert or replace into archdb.paired_obs select * from paired_obs where obs_date < {archdate_jd}')
+            self.dbhandle.execute(f'insert or replace into archdb.paired_obs select * from paired_obs where obs_date < {archdate_jd}')
         except Exception:
             # otherwise, one by one 
-            cur.execute(f'select * from paired_obs where obs_date < {archdate_jd}')
+            cur = self.dbhandle.execute(f'select * from paired_obs where obs_date < {archdate_jd}')
             for row in cur.fetchall():
                 try:
-                    cur.execute(f"insert into archdb.paired_obs values('{row[0]}','{row[1]}',{row[2]},{row[3]})")
+                    self.dbhandle.execute(f"insert into archdb.paired_obs values('{row[0]}','{row[1]}',{row[2]},{row[3]})")
                 except Exception:
                     log.info(f'{row[1]} already exists in target')
 
-        cur.execute(f'delete from paired_obs where obs_date < {archdate_jd}')
+        self.dbhandle.execute(f'delete from paired_obs where obs_date < {archdate_jd}')
         self.dbhandle.commit()
-        cur.close()
         return 
 
     def moveObsJsonRecords(self, paired_obs, dt_range):
@@ -208,19 +197,17 @@ class ObservationDatabase():
             log.warning(f'source database missing: {source_db_path}')
             return 
         # attach the other db, copy the records then detach it
-        cur = self.dbhandle.cursor()
-        cur.execute(f"attach database '{source_db_path}' as sourcedb")
+        self.dbhandle.execute(f"attach database '{source_db_path}' as sourcedb")
         try:
             # bulk-copy
-            cur.execute('insert or replace into paired_obs select * from sourcedb.paired_obs')
+            self.dbhandle.execute('insert or replace into paired_obs select * from sourcedb.paired_obs')
             status = True
         except Exception:
             log.info('unable to merge child observations')
             status = False
 
         self.dbhandle.commit()
-        cur.execute("detach database 'sourcedb'")
-        cur.close()
+        self.dbhandle.execute("detach database 'sourcedb'")
         return status
 
 
@@ -251,14 +238,13 @@ class TrajectoryDatabase():
         db_full_name = os.path.join(db_path, f'{db_name}')
         log.info(f'opening database {db_full_name}')
         con = sqlite3.connect(db_full_name)
-        cur = con.cursor()
         if purge_records:
-            cur.execute('drop table if exists trajectories')
-            cur.execute('drop table if exists failed_trajectories')
+            con.execute('drop table if exists trajectories')
+            con.execute('drop table if exists failed_trajectories')
             con.commit()
-        res = cur.execute("SELECT name FROM sqlite_master WHERE name='trajectories'")
+        res = con.execute("SELECT name FROM sqlite_master WHERE name='trajectories'")
         if res.fetchone() is None:
-            cur.execute("""CREATE TABLE trajectories(
+            con.execute("""CREATE TABLE trajectories(
                         jdt_ref REAL UNIQUE,
                         traj_id VARCHAR UNIQUE,
                         traj_file_path VARCHAR,
@@ -281,10 +267,10 @@ class TrajectoryDatabase():
                         rend_ele REAL,
                         status INTEGER) """)
 
-        res = cur.execute("SELECT name FROM sqlite_master WHERE name='failed_trajectories'")
+        res = con.execute("SELECT name FROM sqlite_master WHERE name='failed_trajectories'")
         if res.fetchone() is None:
             # note: traj_id not unique here as some fails will have traj-id None
-            cur.execute("""CREATE TABLE failed_trajectories(
+            con.execute("""CREATE TABLE failed_trajectories(
                         jdt_ref REAL UNIQUE,
                         traj_id VARCHAR, 
                         traj_file_path VARCHAR,
@@ -298,7 +284,6 @@ class TrajectoryDatabase():
                         status INTEGER) """)
                         
         con.commit()
-        cur.close()
         return con
 
     def commitTrajDatabase(self):
@@ -332,7 +317,6 @@ class TrajectoryDatabase():
         else:
             traj_stations = list(set(json.loads(row[1]) + json.loads(row[2])))
             found = True if (traj_stations == station_list) else False
-        cur.close()
         return found
 
     def addTrajectory(self, traj_reduced, failed=False, verbose=False):
@@ -343,7 +327,6 @@ class TrajectoryDatabase():
 
         if verbose:
             log.info(f'adding jdt {traj_reduced.jdt_ref} to {"failed" if failed else "trajectories"}')
-        cur = self.dbhandle.cursor()
 
         # remove the output_dir part from the path so that the data are location-independent
         traj_file_path = traj_reduced.traj_file_path[traj_reduced.traj_file_path.find('trajectories'):]
@@ -379,9 +362,8 @@ class TrajectoryDatabase():
                         f"{traj_reduced.rend_lat},{traj_reduced.rend_lon},{traj_reduced.rend_ele},1)")
 
         sql_str = sql_str.replace('nan','"NaN"')
-        cur.execute(sql_str)
+        self.dbhandle.execute(sql_str)
         self.dbhandle.commit()
-        cur.close()
         return True
 
     def removeTrajectory(self, traj_reduced, keepFolder=False, failed=False, verbose=False):
@@ -392,14 +374,12 @@ class TrajectoryDatabase():
             log.info(f'removing {traj_reduced.traj_id}')
         table_name = 'failed_trajectories' if failed else 'trajectories'
 
-        cur = self.dbhandle.cursor()
         try:
-            cur.execute(f"update {table_name} set status=0 where jdt_ref='{traj_reduced.jdt_ref}'")
+            self.dbhandle.execute(f"update {table_name} set status=0 where jdt_ref='{traj_reduced.jdt_ref}'")
             self.dbhandle.commit()
         except Exception:
             # traj wasn't in the database so no action required
             pass
-        cur.close()
 
         # Remove the trajectory folder on the disk
         if not keepFolder and os.path.isfile(traj_reduced.traj_file_path):
@@ -417,16 +397,13 @@ class TrajectoryDatabase():
         if verbose:
             log.info(f'getting trajectories between {jd2Date(jdt_start, dt_obj=True).strftime("%Y%m%d_%M%M%S.%f")} and {jd2Date(jdt_end, dt_obj=True).strftime("%Y%m%d_%M%M%S.%f")}')
 
-        cur = self.dbhandle.cursor()
         if not jdt_end:
-            cur.execute(f"SELECT * FROM {table_name} WHERE jdt_ref={jdt_start}")
+            self.dbhandle.execute(f"SELECT * FROM {table_name} WHERE jdt_ref={jdt_start}")
             rows = cur.fetchall()
         else:
-            cur.execute(f"SELECT * FROM {table_name} WHERE jdt_ref>={jdt_start} and jdt_ref<={jdt_end}")
-            rows = cur.fetchall()
-        cur.close()
+            rows = self.dbhandle.execute(f"SELECT * FROM {table_name} WHERE jdt_ref>={jdt_start} and jdt_ref<={jdt_end}")
         trajs = []
-        for rw in rows:
+        for rw in rows.fetchall():
             rw = [np.nan if x == 'NaN' else x for x in rw]     
             json_dict = {'jdt_ref':rw[0], 'traj_id':rw[1], 'traj_file_path':os.path.join(output_dir, rw[2]),
                          'participating_stations': json.loads(rw[3]),
@@ -446,17 +423,15 @@ class TrajectoryDatabase():
     def getTrajNames(self, jdt_start=None, jdt_end=None, failed=False, verbose=False):
 
         table_name = 'failed_trajectories' if failed else 'trajectories'
-        cur = self.dbhandle.cursor()
         if not jdt_start:
-            cur.execute(f"SELECT * FROM {table_name}")
+            cur = self.dbhandle.execute(f"SELECT * FROM {table_name}")
             rows = cur.fetchall()
         elif not jdt_end:
-            cur.execute(f"SELECT * FROM {table_name} WHERE jdt_ref={jdt_start}")
+            cur = self.dbhandle.execute(f"SELECT * FROM {table_name} WHERE jdt_ref={jdt_start}")
             rows = cur.fetchall()
         else:
-            cur.execute(f"SELECT * FROM {table_name} WHERE jdt_ref>={jdt_start} and jdt_ref<={jdt_end}")
+            cur = self.dbhandle.execute(f"SELECT * FROM {table_name} WHERE jdt_ref>={jdt_start} and jdt_ref<={jdt_end}")
             rows = cur.fetchall()
-        cur.close()
         trajs = []
         for rw in rows:
             trajs.append(rw[2])
@@ -469,14 +444,12 @@ class TrajectoryDatabase():
         if verbose:
             log.info(f'getting trajectories between {jdt_start} and {jdt_end}')
 
-        cur = self.dbhandle.cursor()
         if not jdt_end:
-            cur.execute(f"SELECT * FROM {table_name} WHERE jdt_ref={jdt_start}")
+            cur = self.dbhandle.execute(f"SELECT * FROM {table_name} WHERE jdt_ref={jdt_start}")
             rows = cur.fetchall()
         else:
-            cur.execute(f"SELECT * FROM {table_name} WHERE jdt_ref>={jdt_start} and jdt_ref<={jdt_end}")
+            cur = self.dbhandle.execute(f"SELECT * FROM {table_name} WHERE jdt_ref>={jdt_start} and jdt_ref<={jdt_end}")
             rows = cur.fetchall()
-        cur.close()
         i = 0 
         for rw in rows:
             if not os.path.isfile(os.path.join(output_dir, rw[2])):
@@ -498,9 +471,8 @@ class TrajectoryDatabase():
         archdb.close()
 
         # attach the arch db, copy the records then delete them
-        cur = self.dbhandle.cursor()
         archdb_fullname = os.path.join(db_path, f'{archdb_name}')
-        cur.execute(f"attach database '{archdb_fullname}' as archdb")
+        cur = self.dbhandle.execute(f"attach database '{archdb_fullname}' as archdb")
         for table_name in ['trajectories', 'failed_trajectories']:
             try:
                 # bulk-copy if possible
@@ -510,7 +482,6 @@ class TrajectoryDatabase():
                 log.warning(f'unable to archive {table_name}')
 
         self.dbhandle.commit()
-        cur.close()
         return 
 
     def moveFailedTrajectories(self, failed_trajectories, dt_range):
@@ -531,7 +502,7 @@ class TrajectoryDatabase():
             if not i % 10000:
                 self.commitTrajDatabase()
                 log.info(f'moved {i} failed_trajectories')
-        self.dbhandle.commit()
+        self.commitTrajDatabase()
         log.info(f'done - moved {i} failed_trajectories')
 
         return 
@@ -543,8 +514,7 @@ class TrajectoryDatabase():
             log.warning(f'source database missing: {source_db_path}')
             return 
         # attach the other db, copy the records then detach it
-        cur = self.dbhandle.cursor()
-        cur.execute(f"attach database '{source_db_path}' as sourcedb")
+        cur = self.dbhandle.execute(f"attach database '{source_db_path}' as sourcedb")
 
         # TODO need to correct the traj_file_path to account for server locations
 
@@ -558,7 +528,6 @@ class TrajectoryDatabase():
                 status = False
         self.dbhandle.commit()
         cur.execute("detach database 'sourcedb'")
-        cur.close()
         return status
 
 ##################################################################################
@@ -596,6 +565,8 @@ if __name__ == '__main__':
 
     arg_parser.add_argument('--action', type=str, default=None, help='Action to take on the database')
 
+    arg_parser.add_argument('--stmt', type=str, default=None, help='statement to execute eg "select * from paired_obs"')
+
     arg_parser.add_argument("--logdir", type=str, default=None,
         help="Path to the directory where the log files will be stored. If not given, a logs folder will be created in the database folder")
       
@@ -632,6 +603,8 @@ if __name__ == '__main__':
         dbname = cml_args.database.lower()
     action = cml_args.action.lower()
 
+    stmt = cml_args.stmt
+
     dt_range = None
     if cml_args.timerange is not None:
         time_beg, time_end = cml_args.timerange.strip("(").strip(")").split(",")
@@ -659,19 +632,21 @@ if __name__ == '__main__':
         if dbname == 'observations':
             obsdb = ObservationDatabase(cml_args.dir_path)
             if action == 'status':
-                cur = obsdb.dbhandle.cursor()
-                cur.execute('select * from paired_obs where status=1')
+                cur = obsdb.dbhandle.execute('select * from paired_obs where status=1')
                 print(f'there are {len(cur.fetchall())} paired obs')
-                cur.execute('select * from paired_obs where status=0')
+                cur = obsdb.dbhandle.execute('select * from paired_obs where status=0')
                 print(f'and       {len(cur.fetchall())} unpaired obs')
+            if action == 'execute':
+                print(stmt)
+                cur = obsdb.dbhandle.execute(stmt)
+                print(cur.fetchall())
 
         elif dbname == 'trajectories':
             trajdb = TrajectoryDatabase(cml_args.dir_path)
             if action == 'status':
-                cur = trajdb.dbhandle.cursor()
-                cur.execute('select * from trajectories where status=1')
+                cur = trajdb.dbhandle.execute('select * from trajectories where status=1')
                 print(f'there are {len(cur.fetchall())} successful trajectories')
-                cur.execute('select * from failed_trajectories')
+                cur = trajdb.dbhandle.execute('select * from failed_trajectories')
                 print(f'and       {len(cur.fetchall())} failed trajectories')
         else:
             log.info('valid database not specified')
