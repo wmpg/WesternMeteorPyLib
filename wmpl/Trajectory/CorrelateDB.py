@@ -124,7 +124,6 @@ class ObservationDatabase():
             obs_ids_str = ','.join(obs_ids)
             self.dbhandle.execute(f"update paired_obs set status=0 where obs_id in ('{obs_ids_str}')")
         except Exception:
-            # obs wasn't in the database so no need to unpair it
             pass
         
         self.dbhandle.commit()
@@ -640,6 +639,7 @@ if __name__ == '__main__':
                 print(stmt)
                 cur = obsdb.dbhandle.execute(stmt)
                 print(cur.fetchall())
+            obsdb.closeObsDatabase()
 
         elif dbname == 'trajectories':
             trajdb = TrajectoryDatabase(cml_args.dir_path)
@@ -648,5 +648,6 @@ if __name__ == '__main__':
                 print(f'there are {len(cur.fetchall())} successful trajectories')
                 cur = trajdb.dbhandle.execute('select * from failed_trajectories')
                 print(f'and       {len(cur.fetchall())} failed trajectories')
+            trajdb.closeObsDatabase()
         else:
             log.info('valid database not specified')
