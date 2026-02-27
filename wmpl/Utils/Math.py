@@ -1113,11 +1113,13 @@ def generateDatetimeBins(dt_beg, dt_end, bin_days=7, utc_hour_break=12, tzinfo=N
 
         else:
             bin_beg = dt_beg + datetime.timedelta(days=i * bin_days)
-            bin_beg = bin_beg.replace(hour=int(utc_hour_break), minute=0, second=0, microsecond=0)
+            if bin_days > 0.999:
+                bin_beg = bin_beg.replace(hour=int(utc_hour_break), minute=0, second=0, microsecond=0)
 
         # Generate the bin ending edge
         bin_end = bin_beg + datetime.timedelta(days=bin_days)
-        bin_end = bin_end.replace(hour=int(utc_hour_break), minute=0, second=0, microsecond=0)
+        if bin_days > 0.999:
+            bin_end = bin_end.replace(hour=int(utc_hour_break), minute=0, second=0, microsecond=0)
 
         # Check that the ending bin is not beyond the end dt
         end_reached = False
