@@ -122,7 +122,7 @@ class ObservationDatabase():
             log.info(f'unpairing {obs_ids}')
         try:
             obs_ids_str = ','.join(obs_ids)
-            self.dbhandle.execute(f"update paired_obs set status=0 where obs_id in ('{obs_ids_str}')")
+            self.dbhandle.execute(f"delete from paired_obs where obs_id in ('{obs_ids_str}')")
         except Exception:
             pass
         
