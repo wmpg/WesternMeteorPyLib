@@ -201,8 +201,9 @@ class ObservationDatabase():
             # bulk-copy
             self.dbhandle.execute('insert or replace into paired_obs select * from sourcedb.paired_obs')
             status = True
-        except Exception:
-            log.info('unable to merge child observations')
+        except Exception as e:
+            log.info(f'unable to merge child observations from {source_db_path}')
+            log.info(e)
             status = False
 
         self.dbhandle.commit()
