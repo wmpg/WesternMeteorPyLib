@@ -126,7 +126,11 @@ class ObservationDatabase():
         except Exception:
             pass
         
+        if verbose:
+            log.info('committing')
         self.dbhandle.commit()
+        if verbose:
+            log.info('done')
         return True
 
 
