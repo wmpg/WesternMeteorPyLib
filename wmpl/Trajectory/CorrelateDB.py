@@ -199,7 +199,8 @@ class ObservationDatabase():
         self.dbhandle.execute(f"attach database '{source_db_path}' as sourcedb")
         res = self.dbhandle.execute("SELECT name FROM sourcedb.sqlite_master WHERE name='paired_obs'")
         if res.fetchone() is None:
-            status = False
+            # table is missing so nothing to do
+            status = True
         else:
             try:
                 self.dbhandle.execute('insert or replace into paired_obs select * from sourcedb.paired_obs')
