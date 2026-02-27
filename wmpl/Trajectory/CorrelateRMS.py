@@ -1891,6 +1891,12 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     elif mcmode == MCMODE_ALL:
         log.info('Full processing mode')
 
+    if cml_args.verbose:
+        log.info('verbose flag set')
+        verbose = True
+    else:
+        verbose = False
+
     # Run processing. If the auto run more is not on, the loop will break after one run
     previous_start_time = None
 
@@ -1948,7 +1954,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         dh = RMSDataHandle(
             cml_args.dir_path, dt_range=event_time_range, 
             db_dir=cml_args.dbdir, output_dir=cml_args.outdir,
-            mcmode=mcmode, max_trajs=max_trajs, verbose=cml_args.verbose, archivemonths=cml_args.archivemonths)
+            mcmode=mcmode, max_trajs=max_trajs, verbose=verbose, archivemonths=cml_args.archivemonths)
         
         # If there is nothing to process and we're in Candidate mode, stop
         if not dh.processing_list and (mcmode & MCMODE_CANDS):
@@ -2036,7 +2042,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                     # Run the trajectory correlator
                     tc = TrajectoryCorrelator(dh, trajectory_constraints, cml_args.velpart, data_in_j2000=True, enableOSM=cml_args.enableOSM)
                     bin_time_range = [bin_beg, bin_end]
-                    num_done = tc.run(event_time_range=event_time_range, mcmode=mcmode, bin_time_range=bin_time_range, verbose=cml_args.verbose)
+                    num_done = tc.run(event_time_range=event_time_range, mcmode=mcmode, bin_time_range=bin_time_range, verbose=verbose)
 
                     if dh.RemoteDatahandler and dh.RemoteDatahandler.mode == 'child' and num_done > 0:
                         log.info('uploading to master node')
@@ -2045,7 +2051,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                             dh.traj_db.closeTrajDatabase()
                             dh.observations_db.closeObsDatabase()
 
-                        dh.RemoteDatahandler.uploadToMaster(dh.output_dir, verbose=cml_args.verbose)
+                        dh.RemoteDatahandler.uploadToMaster(dh.output_dir, verbose=verbose)
 
                         # truncate the tables here so they are clean for the next run
                         if mcmode != MCMODE_PHASE2:
@@ -2053,7 +2059,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                             dh.observations_db = ObservationDatabase(dh.db_dir, purge_records=True)
 
                     if dh.RemoteDatahandler and dh.RemoteDatahandler.mode == 'master':
-                        dh.moveUploadedData(verbose=cml_args.verbose)
+                        dh.moveUploadedData(verbose=verbose)
                         pass
                     # If we're in either of these modes, the correlator will have scooped up available data
                     # from candidates or phase1 folders so no need to keep looping. 
