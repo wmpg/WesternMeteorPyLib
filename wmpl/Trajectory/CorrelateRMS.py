@@ -1519,6 +1519,11 @@ class RMSDataHandle(object):
             for obsdb_path in glob.glob(os.path.join(node.dirpath,'files','observations*.db')):
                 if self.observations_db.mergeObsDatabase(obsdb_path):
                     os.remove(obsdb_path)
+                    try:
+                        os.remove(f'{obsdb_path}-wal')
+                        os.remove(f'{obsdb_path}-shm')
+                    except Exception:
+                        pass
 
             
             for trajdb_path in glob.glob(os.path.join(node.dirpath,'files','trajectories*.db')):
