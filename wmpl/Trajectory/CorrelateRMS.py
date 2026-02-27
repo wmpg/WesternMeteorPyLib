@@ -537,6 +537,9 @@ class RMSDataHandle(object):
         # Load database of processed folders
         database_path = os.path.join(self.db_dir, JSON_DB_NAME)
 
+        # create an empty processing list
+        self.processing_list = []
+
         log.info("")
 
         if mcmode != MCMODE_PHASE2:
@@ -567,14 +570,15 @@ class RMSDataHandle(object):
                     pass
                 log.info("   ... done!")
 
-            # Load the list of stations
-            station_list = self.loadStations()
+            if mcmode & MCMODE_CANDS:
+                # Load the list of stations
+                station_list = self.loadStations()
 
-            # Find unprocessed meteor files
-            log.info("")
-            log.info("Finding unprocessed data...")
-            self.processing_list = self.findUnprocessedFolders(station_list)
-            log.info("   ... done!")
+                # Find unprocessed meteor files
+                log.info("")
+                log.info("Finding unprocessed data...")
+                self.processing_list = self.findUnprocessedFolders(station_list)
+                log.info("   ... done!")
 
             # in phase 1, initialise and collect data second as we load candidates dynamically
             self.initialiseRemoteDataHandling()
@@ -684,7 +688,7 @@ class RMSDataHandle(object):
     def loadStations(self):
         """ Load the station names in the processing folder. """
 
-        station_list = []
+        avail_station_list = []
 
         for dir_name in sorted(os.listdir(self.dir_path)):
 
@@ -692,12 +696,12 @@ class RMSDataHandle(object):
             if os.path.isdir(os.path.join(self.dir_path, dir_name)):
                 if re.match("^[A-Z]{2}[A-Z0-9]{4}$", dir_name):
                     log.info("Using station: " + dir_name)
-                    station_list.append(dir_name)
+                    avail_station_list.append(dir_name)
                 else:
                     log.info("Skipping directory: " + dir_name)
 
 
-        return station_list
+        return avail_station_list
 
     def findUnprocessedFolders(self, station_list):
         """ Go through directories and find folders with unprocessed data. """
@@ -1221,11 +1225,11 @@ class RMSDataHandle(object):
         # Generate a list of station codes
         if isinstance(traj, TrajectoryReduced):
             # If the reducted trajectory object is given
-            station_list = traj.participating_stations
+            traj_station_list = traj.participating_stations
 
         else:
             # If the full trajectory object is given
-            station_list = [obs.station_id for obs in traj.observations if obs.ignore_station is False]
+            traj_station_list = [obs.station_id for obs in traj.observations if obs.ignore_station is False]
 
 
         # Datetime of the reference trajectory time
@@ -1243,7 +1247,7 @@ class RMSDataHandle(object):
 
         # Name of the trajectory directory
         # sort the list of country codes otherwise we can end up with duplicate trajectories
-        ctry_list = list(set([stat_id[:2] for stat_id in station_list]))
+        ctry_list = list(set([stat_id[:2] for stat_id in traj_station_list]))
         ctry_list.sort()
         traj_dir = dt.strftime("%Y%m%d_%H%M%S.%f")[:-3] + "_" + "_".join(ctry_list)
 
@@ -1978,10 +1982,12 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                 proc_dir_dt_beg = min(proc_dir_dts)
                 proc_dir_dt_end = max(proc_dir_dts)
 
+                bin_length = 0.25 if mcmode == MCMODE_CANDS else 1.0
+
                 # Split the processing into daily chunks
                 dt_bins = generateDatetimeBins(
                     proc_dir_dt_beg, proc_dir_dt_end, 
-                    bin_days=1, tzinfo=datetime.timezone.utc, reverse=False)
+                    bin_days=bin_length, tzinfo=datetime.timezone.utc, reverse=False)
 
                 # check if we've created an extra bucket (might happen if requested timeperiod is less than 24h)
                 if event_time_range is not None:
@@ -1992,12 +1998,13 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                 dt_bins = [(dh.dt_range[0], dh.dt_range[1])]
 
             if dh.dt_range is not None:
-                # there's some data to process
-                log.info("")
-                log.info("ALL TIME BINS:")
-                log.info("----------")
-                for bin_beg, bin_end in dt_bins:
-                    log.info("{:s}, {:s}".format(str(bin_beg), str(bin_end)))
+                # there's some data to process and we're in candidate mode
+                if mcmode & MCMODE_CANDS:
+                    log.info("")
+                    log.info("ALL TIME BINS:")
+                    log.info("----------")
+                    for bin_beg, bin_end in dt_bins:
+                        log.info("{:s}, {:s}".format(str(bin_beg), str(bin_end)))
 
 
                 ### ###
@@ -2006,14 +2013,13 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                 # Go through all chunks in time
                 for bin_beg, bin_end in dt_bins:
 
-                    log.info("")
-                    log.info("PROCESSING TIME BIN:")
-                    log.info("{:s}, {:s}".format(str(bin_beg), str(bin_end)))
-                    log.info("-----------------------------")
-                    log.info("")
-
-                    # Load data of unprocessed observations only if creating candidates
                     if mcmode & MCMODE_CANDS:
+                        log.info("")
+                        log.info("PROCESSING TIME BIN:")
+                        log.info("{:s}, {:s}".format(str(bin_beg), str(bin_end)))
+                        log.info("-----------------------------")
+                        log.info("")
+
                         dh.unpaired_observations = dh.loadUnpairedObservations(dh.processing_list, 
                             dt_range=(bin_beg, bin_end))
                         log.info(f'loaded {len(dh.unpaired_observations)} observations')
@@ -2044,6 +2050,11 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                         if mcmode != MCMODE_PHASE2:
                             dh.traj_db = TrajectoryDatabase(dh.db_dir, purge_records=True)
                             dh.observations_db = ObservationDatabase(dh.db_dir, purge_records=True)
+
+                    # If we're in either of these modes, the correlator will have scooped up available data
+                    # from candidates or phase1 folders so no need to keep looping. 
+                    if mcmode == MCMODE_PHASE1 or mcmode == MCMODE_PHASE2:
+                        break
 
                 if mcmode & MCMODE_CANDS:
                     dh.observations_db.closeObsDatabase()
