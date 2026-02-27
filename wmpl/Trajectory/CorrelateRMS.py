@@ -523,12 +523,13 @@ class RMSDataHandle(object):
         self.candidate_dir = os.path.join(self.output_dir, 'candidates')
         if not self.mc_mode & MCMODE_PHASE2:
             mkdirP(os.path.join(self.candidate_dir, 'processed'))
+            self.purgeProcessedData(os.path.join(self.candidate_dir, 'processed'))
 
         # Phase 1 trajectory pickle directory needed to reload previous results.
         self.phase1_dir = os.path.join(self.output_dir, 'phase1')
         if self.mc_mode & MCMODE_PHASE1:
             mkdirP(os.path.join(self.phase1_dir, 'processed'))
-            self.purgePhase1ProcessedData(os.path.join(self.phase1_dir, 'processed'))
+            self.purgeProcessedData(os.path.join(self.phase1_dir, 'processed'))
 
         self.verbose = verbose
 
@@ -631,10 +632,10 @@ class RMSDataHandle(object):
         else:
             self.RemoteDatahandler = None
 
-    def purgePhase1ProcessedData(self, dir_path):
-        """ Purge old phase1 processed data if it is older than 90 days. """
+    def purgeProcessedData(self, dir_path, days_back=30):
+        """ Purge processed candidate or phase1 data if it is older than 30 days. """
 
-        refdt = time.time() - 90*86400
+        refdt = time.time() - days_back*86400
         result = []
         for path, _, files in os.walk(dir_path):
 
@@ -1383,9 +1384,9 @@ class RMSDataHandle(object):
 
             if self.checkTrajIfFailed(traj):
                 log.info(f'Candidate at {ref_dt.isoformat()} already failed, skipping')
-                for _, met_obs_temp, _ in cand:
-                    self.observations_db.unpairObs(met_obs_temp.station_code, met_obs_temp.id, met_obs_temp.mean_dt, verbose=verbose)
-                    remaining_unpaired -= 1
+                obs_ids = [met_obs_temp.id for _, met_obs_temp, _ in cand]
+                self.dh.observations_db.unpairObs(obs_ids, verbose=verbose)
+                remaining_unpaired -= len(obs_ids)
             else:
                 candidate_trajectories.append(cand)
     
