@@ -667,7 +667,7 @@ if __name__ == '__main__':
 
         elif dbname == 'trajectories':
             trajdb = TrajectoryDatabase(cml_args.dir_path)
-            if action == 'read':
+            if action == 'status':
                 cur = trajdb.dbhandle.cursor()
                 cur.execute('select * from trajectories where status=1')
                 print(f'there are {len(cur.fetchall())} successful trajectories')
