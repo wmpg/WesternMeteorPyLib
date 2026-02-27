@@ -1574,6 +1574,10 @@ class TrajectoryCorrelator(object):
                         log.info("-----------------------")
 
                         self.dh.saveCandidates(candidate_trajectories, verbose=verbose)
+
+                        # now we've saved the candidates we can commit the changes
+                        self.dh.observations_db.commitObsDatabase()
+                        
                         return len(candidate_trajectories)
                     
                     else:
