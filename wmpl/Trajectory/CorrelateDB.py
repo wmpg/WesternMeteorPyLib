@@ -56,6 +56,7 @@ class ObservationDatabase():
         db_full_name = os.path.join(db_path, f'{db_name}')
         log.info(f'opening database {db_full_name}')
         con = sqlite3.connect(db_full_name)
+        con.execute('pragma journal_mode=wal')
         cur = con.cursor()
         if purge_records:
             cur.execute('drop table paired_obs')
@@ -68,8 +69,11 @@ class ObservationDatabase():
 
     def commitObsDatabase(self):
         # commit the obs db. This function exists so we can do lazy writes in some cases
-
         self.dbhandle.commit()
+        try:
+            self.dbhandle.execute('pragma wal_checkpoint(TRUNCATE)')
+        except Exception:
+            self.dbhandle.execute('pragma wal_checkpoint(PASSIVE)')
         return 
 
     def closeObsDatabase(self):
