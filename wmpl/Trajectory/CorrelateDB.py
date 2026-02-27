@@ -114,23 +114,23 @@ class ObservationDatabase():
         return True
 
 
-    def unpairObs(self, obs_ids, verbose=True):
+    def unpairObs(self, met_obs_list, verbose=True):
         # if an entry exists, update the status to 0. 
         # this allows us to mark an observation paired during candidate creation, then unpair it later if the solution fails
         # or we want to force a rerun. 
+        obs_ids_str = ','.join([f"'{met_obs.id}'" for met_obs in met_obs_list])
+
         if verbose:
-            log.info(f'unpairing {obs_ids}')
-        try:
-            obs_ids_str = ','.join(obs_ids)
-            self.dbhandle.execute(f"delete from paired_obs where obs_id in ('{obs_ids_str}')")
-        except Exception:
-            pass
-        
-        if verbose:
-            log.info('committing')
+            log.info(f'unpairing {obs_ids_str}')
+        self.dbhandle.execute(f"delete from paired_obs where obs_id in ({obs_ids_str})")
+        data = []
+        for met_obs in met_obs_list:
+            data.append(f"('{met_obs.station_code}','{met_obs.id}', {datetime2JD(met_obs.mean_dt)}, 0)")
+        data_str = ','.join(data)
+        sqlstr = f"insert or replace into paired_obs values {data_str}"
+        self.dbhandle.execute(sqlstr)
+
         self.dbhandle.commit()
-        if verbose:
-            log.info('done')
         return True
 
 

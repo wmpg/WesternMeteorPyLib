@@ -1384,9 +1384,8 @@ class RMSDataHandle(object):
 
             if self.checkTrajIfFailed(traj):
                 log.info(f'Candidate at {ref_dt.isoformat()} already failed, skipping')
-                obs_ids = [met_obs_temp.id for _, met_obs_temp, _ in cand]
-                self.dh.observations_db.unpairObs(obs_ids, verbose=verbose)
-                remaining_unpaired -= len(obs_ids)
+                self.dh.observations_db.unpairObs([obs[1] for obs in cand], verbose=verbose)
+                remaining_unpaired -= len(cand)
             else:
                 candidate_trajectories.append(cand)
     
@@ -1584,7 +1583,9 @@ class RMSDataHandle(object):
     def saveCandidates(self, candidate_trajectories, verbose=False):
         for matched_observations in candidate_trajectories:
             ref_dt = min([met_obs.reference_dt for _, met_obs, _ in matched_observations])
-            ctries = '_'.join(list(set([met_obs.station_code[:2] for _, met_obs, _ in matched_observations])))
+            ctry_list = list(set([met_obs.station_code[:2] for _, met_obs, _ in matched_observations]))
+            ctry_list.sort()
+            ctries = '_'.join(ctry_list)
             picklename = f'{ref_dt.timestamp():.6f}_{ctries}.pickle'
 
             # this function can also save a candidate
