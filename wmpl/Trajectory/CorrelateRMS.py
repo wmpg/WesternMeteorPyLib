@@ -1078,6 +1078,7 @@ class RMSDataHandle(object):
             # get a list of any trajectories with exactly the same observations.
             # Then remove whichever one isn't on disk.
             
+            log.info('  - looking for exact matches by observation id')
             same_obs = traj_df.query('obs_ids == obs_ids_next')
             for idx, rw in same_obs.iterrows():
 
@@ -1095,12 +1096,12 @@ class RMSDataHandle(object):
                     else:
                         remove_id = rw.traj_id
                         remove_path = rw.traj_file_path
-                    log.info(f'removing duplicate trajectory {remove_id} from database')
+                    log.info(f'   - removing duplicate trajectory {remove_id} from database')
                     self.trajectory_db.removeTrajectoryById(remove_id)
 
                     # only delete the disk file if they're in different physical locations
                     if rw.traj_file_path != rw.traj_path_next:
-                        log.info(f'   and removing files from {remove_path}')
+                        log.info(f'    - and removing files from {remove_path}')
                         shutil.rmtree(os.path.split(remove_path)[0])
 
                 # remove the row from the dataframe to avoid reprocessing it
@@ -1120,7 +1121,7 @@ class RMSDataHandle(object):
 
                 for idx, rw in common_obs.iterrows():
 
-                    log.info(f'  checking mergeable events {rw.traj_id} and {rw.traj_id_next}')
+                    log.info(f'  - checking mergeable events {rw.traj_id} and {rw.traj_id_next}')
                     traj_ids = rw.obs_ids + rw.ign_obs_ids
                     next_ids = rw.obs_ids_next + rw.ign_obs_ids_next
                     if len(traj_ids) >= len(next_ids):
@@ -1132,16 +1133,16 @@ class RMSDataHandle(object):
                         remove_path = rw.traj_file_path
                         unpair_ids = [id for id in traj_ids if id not in next_ids]
 
-                    log.info(f'    removing {remove_id}')
+                    log.info(f'   - removing {remove_id}')
                     self.trajectory_db.removeTrajectoryById(remove_id)
 
                     if len(unpair_ids) > 0: 
-                        log.info(f'    unpairing {unpair_ids} from {remove_id}')
+                        log.info(f'   - unpairing {unpair_ids} from {remove_id}')
                         self.observations_db.unpairObs(unpair_ids)
 
                     # only remove the physical on-disk files if the locations are different! 
                     if (rw.traj_file_path != rw.traj_path_next) and os.path.isfile(remove_path):
-                        log.info(f'    removing {os.path.split(remove_path)[0]} from disk')
+                        log.info(f'   - removing {os.path.split(remove_path)[0]} from disk')
                         shutil.rmtree(os.path.split(remove_path)[0])
 
         # Finally, scan the disk for trajectories that need to be added to the database.
