@@ -1026,7 +1026,7 @@ class RMSDataHandle(object):
 
         traj_list = self.trajectory_db.getTrajBasics(self.output_dir, jdt_range)
         i = 0
-        for traj in traj_list:
+        for traj in traj_list:  
             if not os.path.isfile(os.path.join(self.output_dir, traj['traj_file_path'])):
                 log.info(f'    removing nonexistent traj {jd2Date(traj["jdt_ref"],dt_obj=True).strftime("%Y%m%d_%H%M%S.%f")} {traj["traj_file_path"]} from database')
                 self.removeTrajectory(TrajectoryReduced(None, json_dict=traj))
@@ -1044,7 +1044,7 @@ class RMSDataHandle(object):
                 return False
             if len(obs_ids)==0 or len(next_obs_ids)==0:
                 return False
-            if type(obs_ids[0])==int or type(next_obs_ids[0])==int:
+            if isinstance(obs_ids[0], int) or isinstance(next_obs_ids[0], int):
                 return False
             return any(i in next_obs_ids for i in obs_ids)
 
@@ -1110,35 +1110,39 @@ class RMSDataHandle(object):
             # So we keep the trajectory with more observations, and unpair the non-shared ones in the other before
             # deleting it. In theory, the next pass will identify the unpaired obs as possibly to add to the remaining
             # trajectory. At worst it will identify the unpaired obs as a potential new candidate.
+            tmpdf = traj_df.apply(lambda row: atleastOneObs(row.obs_ids, row.obs_ids_next), axis=1)
+            if len(tmpdf.shape) > 1:
+                print(f'weirdly shaped result of apply', tmpdf)
+                print(traj_df)
+            else:
+                traj_df['overlapids'] = traj_df.apply(lambda row: atleastOneObs(row.obs_ids, row.obs_ids_next), axis=1)
+                common_obs = traj_df[traj_df.overlapids]
 
-            traj_df['overlapids'] = traj_df.apply(lambda row: atleastOneObs(row.obs_ids, row.obs_ids_next), axis=1)
-            common_obs = traj_df[traj_df.overlapids]
+                for idx, rw in common_obs.iterrows():
 
-            for idx, rw in common_obs.iterrows():
+                    log.info(f'  checking mergeable events {rw.traj_id} and {rw.traj_id_next}')
+                    traj_ids = rw.obs_ids + rw.ign_obs_ids
+                    next_ids = rw.obs_ids_next + rw.ign_obs_ids_next
+                    if len(traj_ids) >= len(next_ids):
+                        remove_id = rw.traj_id_next
+                        remove_path = rw.traj_path_next
+                        unpair_ids = [id for id in next_ids if id not in traj_ids]
+                    else:
+                        remove_id = rw.traj_id
+                        remove_path = rw.traj_file_path
+                        unpair_ids = [id for id in traj_ids if id not in next_ids]
 
-                log.info(f'  checking mergeable events {rw.traj_id} and {rw.traj_id_next}')
-                traj_ids = rw.obs_ids + rw.ign_obs_ids
-                next_ids = rw.obs_ids_next + rw.ign_obs_ids_next
-                if len(traj_ids) >= len(next_ids):
-                    remove_id = rw.traj_id_next
-                    remove_path = rw.traj_path_next
-                    unpair_ids = [id for id in next_ids if id not in traj_ids]
-                else:
-                    remove_id = rw.traj_id
-                    remove_path = rw.traj_file_path
-                    unpair_ids = [id for id in traj_ids if id not in next_ids]
+                    log.info(f'    removing {remove_id}')
+                    self.trajectory_db.removeTrajectoryById(remove_id)
 
-                log.info(f'    removing {remove_id}')
-                self.trajectory_db.removeTrajectoryById(remove_id)
+                    if len(unpair_ids) > 0: 
+                        log.info(f'    unpairing {unpair_ids} from {remove_id}')
+                        self.observations_db.unpairObs(unpair_ids)
 
-                if len(unpair_ids) > 0: 
-                    log.info(f'    unpairing {unpair_ids} from {remove_id}')
-                    self.observations_db.unpairObs(unpair_ids)
-
-                # only remove the physical on-disk files if the locations are different! 
-                if (rw.traj_file_path != rw.traj_path_next) and os.path.isfile(remove_path):
-                    log.info(f'    removing {os.path.split(remove_path)[0]} from disk')
-                    shutil.rmtree(os.path.split(remove_path)[0])
+                    # only remove the physical on-disk files if the locations are different! 
+                    if (rw.traj_file_path != rw.traj_path_next) and os.path.isfile(remove_path):
+                        log.info(f'    removing {os.path.split(remove_path)[0]} from disk')
+                        shutil.rmtree(os.path.split(remove_path)[0])
 
         # Finally, scan the disk for trajectories that need to be added to the database.
         # These can arise during distributed processing or phase2 analysis if the jdt_ref changes significantly.
