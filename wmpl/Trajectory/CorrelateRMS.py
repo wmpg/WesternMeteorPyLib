@@ -1149,8 +1149,6 @@ class RMSDataHandle(object):
         # Finally, scan the disk for trajectories that need to be added to the database.
         # These can arise during distributed processing or phase2 analysis if the jdt_ref changes significantly.
 
-        # defend against the case where there are no existing trajectories and traj_dir_path doesn't exist
-        
         log.info("  Adding found trajectories from: " + traj_dir_path)
         counter = 0
 
