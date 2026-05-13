@@ -430,7 +430,7 @@ class RMSDataHandle(object):
         mkdirP(self.output_dir)
 
         if dt_range is None or dt_range[0] == datetime.datetime(2000,1,1,0,0,0).replace(tzinfo=datetime.timezone.utc):
-            daysback = 14
+            daysback = 21
         else:
             daysback = (datetime.datetime.now().replace(tzinfo=datetime.timezone.utc) - dt_range[0]).days + 1
 
@@ -491,14 +491,9 @@ class RMSDataHandle(object):
 
             if self.old_db:
                 del self.old_db
+
+            self.archiveOldRecords(older_than=archivemonths)
                 
-            if archivemonths != 0:
-                log.info('Archiving older entries....')
-                try:
-                    self.archiveOldRecords(older_than=archivemonths)
-                except: 
-                    pass
-                log.info("   ... done!")
 
             if mcmode & MCMODE_CANDS:
                 # Load the list of stations
@@ -525,7 +520,7 @@ class RMSDataHandle(object):
 
         self.candidate_db = None
         if mcmode == MCMODE_CANDS:
-            self.candidate_db = CandidateDatabase(db_dir)
+            self.candidate_db = CandidateDatabase(db_dir, keep=daysback)
         
 
         ### Define country groups to speed up the proceessing ###
@@ -616,20 +611,32 @@ class RMSDataHandle(object):
 
         Keyword Arguments:
             older_than: [int] number of months to keep, default 3
+
+            if older_than is zero, then purge rather than archiving. To do this, we set arch_prefix to None
+            and archdate_jd to the earlier of dt_range[0] and 21 days ago.
         """
-        class DummyMetObs():
-            def __init__(self, station, obs_id):
-                self.station_code = station
-                self.id = obs_id
 
-        archdate = datetime.datetime.now(datetime.timezone.utc) - relativedelta(months=older_than)
+
+        if older_than != 0:
+            archdate = datetime.datetime.now(datetime.timezone.utc) - relativedelta(months=older_than)
+            if self.dt_range:
+                archdate = min(archdate, self.dt_range[0])
+            arch_prefix = archdate.strftime("%Y%m")
+        else:
+            archdate = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=21)
+            if self.dt_range:
+                archdate = min(archdate, self.dt_range[0])
+            arch_prefix = None
         archdate_jd = datetime2JD(archdate)
-        arch_prefix = archdate.strftime("%Y%m")
 
-        # TODO check if this works
+        log.info(f'{"Purging" if older_than == 0 else "Archiving"} database records prior to {archdate.isoformat()}....')
+
+        # purge or archive the Observations and Trajectories
+        # note: no need to do candidates as we already only keep 21 days of these
         self.observations_db.archiveObsDatabase(self.db_dir, arch_prefix, archdate_jd)
         self.trajectory_db.archiveTrajDatabase(self.db_dir, arch_prefix, archdate_jd)
 
+        log.info("   ... done!")
         return 
     
     def closeObservationsDatabase(self):
@@ -1182,7 +1189,7 @@ class RMSDataHandle(object):
 
                             if self.trajectoryFileInDtRange(file_name, dt_range=dt_range):
 
-                                if self.trajectory_db.addTrajectory(TrajectoryReduced(os.path.join(full_traj_dir, file_name)), force_add=False):
+                                if self.trajectory_db.addTrajectory(TrajectoryReduced(os.path.join(full_traj_dir, file_name)), force_add=False, verbose=True):
                                     counter += 1
 
                                 # Print every 1000th trajectory
@@ -1827,7 +1834,9 @@ class RMSDataHandle(object):
             ref_dt = jd2Date(min([obs.jdt_ref for obs, _, _ in matched_observations]), dt_obj=True, tzinfo=datetime.timezone.utc)
             obs_ids = [met_obs.id for _, met_obs, _ in matched_observations]
 
-            if self.candidate_db.checkAndAddCand(cand_id, ref_dt.timestamp(), obs_ids):
+            # check if the candidate was already found and added to the database.
+
+            if self.candidate_db.checkAndAddCand(cand_id, ref_dt.timestamp(), obs_ids, verbose=False):
                 picklename = f'{cand_id}.pickle'
 
                 if verbose:

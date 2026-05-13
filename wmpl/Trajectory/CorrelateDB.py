@@ -66,6 +66,8 @@ class ObservationsDatabase():
             con.execute('drop table if exists paired_obs')
         res = con.execute("SELECT name FROM sqlite_master WHERE name='paired_obs'")
         if res.fetchone() is None:
+            if verbose:
+                log.info('create table paired_obs')
             con.execute("CREATE TABLE paired_obs(obs_id VARCHAR(36) UNIQUE, obs_dt REAL, status INTEGER)")
         self._commitObsDatabase()
 
@@ -191,48 +193,68 @@ class ObservationsDatabase():
 
         Parameters:
         db_path     : path to the location of the archive database   
-        arch_prefix : prefix to apply - typically of the form yyyymm
-        archdate_jd : julian date before which to archive data
+        arch_prefix : prefix to apply - typically of the form yyyymm. Set this to None to purge without archiving.
+        archdate_jd : julian date before which to archive data. Set this to None to purge anything older than 21 days.
         """
-        # create the database if it doesnt exist
-        archdb_name = f'{arch_prefix}_observations.db'
-        archdb = ObservationsDatabase(db_path, archdb_name)
-        archdb.closeObsDatabase()
 
-        # attach the arch db, copy the records then delete them
-        archdb_fullname = os.path.join(db_path, f'{archdb_name}')
-        self.dbhandle.execute(f"attach database '{archdb_fullname}' as archdb")
-        try:
-            # bulk-copy if possible
-            self.dbhandle.execute(f'insert or replace into archdb.paired_obs select * from paired_obs where obs_date < {archdate_jd}')
-        except Exception:
-            # otherwise, one by one 
-            cur = self.dbhandle.execute(f'select * from paired_obs where obs_date < {archdate_jd}')
-            for row in cur.fetchall():
-                try:
-                    self.dbhandle.execute(f"insert into archdb.paired_obs values('{row[0]}','{row[1]}',{row[2]})")
-                except Exception:
-                    log.info(f'{row[1]} already exists in target')
+        if archdate_jd is None:
+            archdate = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=21)
+            archdate_jd = datetime2JD(archdate)
 
-        log.info('delete: write to obsdb')
-        self.dbhandle.execute(f'delete from paired_obs where obs_date < {archdate_jd}')
+        purge_ok = True
+        log.info(f'{"Archiving" if arch_prefix else "Purging"} observations database')
+        if arch_prefix:
+            # create the database if it doesnt exist
+            archdb_name = f'{arch_prefix}_observations.db'
+            archdb = ObservationsDatabase(db_path, archdb_name)
+            archdb.closeObsDatabase()
+
+            # attach the arch db, copy the records then delete them
+            archdb_fullname = os.path.join(db_path, f'{archdb_name}')
+            self.dbhandle.execute(f"attach database '{archdb_fullname}' as archdb")
+            try:
+                self.dbhandle.execute(f'insert or replace into archdb.paired_obs select * from paired_obs where obs_dt < {archdate_jd}')
+            except Exception:
+                log.warning('unable to archive observations database')
+                purge_ok = False
+
+        if purge_ok:
+            self.purgeObsDatabase(archdate_jd=archdate_jd) 
+        return 
+
+    def purgeObsDatabase(self, archdate_jd=None):
+        """
+        purge records from before a specified julian date. 
+
+        parameters:
+        archdate_jd :    julian date before which to purge. Default None will purge records more than 21 days old
+    
+        """
+        if archdate_jd is None:
+            archdate = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=21)
+            archdate_jd = datetime2JD(archdate)
+
+        cur = self.dbhandle.execute(f'select count(*) from paired_obs where obs_dt < {archdate_jd}')
+        res = cur.fetchone()
+        count = res[0] if res else 0
+        log.info(f'  purging {count} records from paired_obs')
+        self.dbhandle.execute(f'delete from paired_obs where obs_dt < {archdate_jd}')
         self.dbhandle.commit()
         return 
 
-    def copyObsJsonRecords(self, paired_obs, dt_range, max_days=14):
+    def copyObsJsonRecords(self, paired_obs, dt_range):
         """ 
-        Copy recent data from the legacy Json database to the new database.
-        By design this only copies at most the last seven days, but a date-range can be 
-        provided so that relevant data is copied. 
+        Copy data from the legacy Json database to the new database between the dates specified in dt_range. 
+        Note that copying large date ranges will be extremely slow. 
 
         Parameters:
-        paired_obs  : a json list of paired observations from the old database
-        dt_range    : a date range to operate on - at most fourteen days duration
+        paired_obs  : a json list of paired observations from the old database.
+        dt_range    : a date range to operate on.
 
         """
         # only copy recent observations since 
         dt_end = dt_range[1]
-        dt_beg = max(dt_range[0], dt_end + datetime.timedelta(days=-max_days))
+        dt_beg = dt_range[0]
 
         log.info('-----------------------------')
         log.info('moving recent observations to sqlite - this may take some time....')
@@ -317,7 +339,7 @@ class TrajectoryDatabase():
         res = con.execute("SELECT name FROM sqlite_master WHERE name='trajectories'")
         if res.fetchone() is None:
             if verbose:
-                log.info('create table: write to trajdb')
+                log.info('create table trajectories')
             con.execute("""CREATE TABLE trajectories(
                         jdt_ref REAL UNIQUE,
                         traj_id VARCHAR UNIQUE,
@@ -347,7 +369,7 @@ class TrajectoryDatabase():
         if res.fetchone() is None:
             # note: traj_id not set as unique as some fails will have traj-id None
             if verbose:
-                log.info('create table: write to trajdb')
+                log.info('create table failed_trajectories')
             con.execute("""CREATE TABLE failed_trajectories(
                         jdt_ref REAL UNIQUE,
                         traj_id VARCHAR, 
@@ -374,7 +396,7 @@ class TrajectoryDatabase():
         """
 
         if verbose:
-            log.info('commit: write to trajdb')
+            log.info('commit trajdb')
         self.dbhandle.commit()
         return 
 
@@ -384,46 +406,12 @@ class TrajectoryDatabase():
         """
 
         if verbose:
-            log.info('commit: write to trajdb')
+            log.info('close trajdb')
         if self.dbhandle:
-            self._commitTrajDatabase()
+            self._commitTrajDatabase(verbose=verbose)
             self.dbhandle.close()
             self.dbhandle = None
         return 
-
-
-    def checkCandIfProcessed(self, jdt_ref, station_list, verbose=False):
-        """
-        check if a candidate was already processed into the database
-        This function is not currently used. 
-
-        Parameters:
-        jdt_ref         : candidate's julian reference date 
-        station_list    : candidate's list of stations 
-
-        Returns:
-        True if there is a trajectory with the same jdt_ref and matching list of stations as the candidate
-        """
-
-        found = False
-        res = self.dbhandle.execute(f"SELECT traj_id,participating_stations, ignored_stations FROM failed_trajectories WHERE jdt_ref={jdt_ref} and status=1")
-        row = res.fetchone()
-        if row is None:
-            found = False
-        else:
-            traj_stations = list(set(json.loads(row[1]) + json.loads(row[2])))
-            found = True if (traj_stations == station_list) else False
-        if found:
-            return found
-
-        res = self.dbhandle.execute(f"SELECT traj_id,participating_stations, ignored_stations FROM trajectories WHERE jdt_ref={jdt_ref} and status=1")
-        row = res.fetchone()
-        if row is None:
-            found = False
-        else:
-            traj_stations = list(set(json.loads(row[1]) + json.loads(row[2])))
-            found = True if (traj_stations == station_list) else False
-        return found
 
     def checkTrajIfFailed(self, traj_reduced, verbose=False):
         """
@@ -473,7 +461,7 @@ class TrajectoryDatabase():
                 return False
             
         if verbose:
-            log.info(f'adding jdt {traj_reduced.jdt_ref} to {tblname}')
+            log.info(f'    adding jdt {traj_reduced.jdt_ref} to {tblname}')
 
         # remove the output_dir part from the path so that the data are location-independent
         traj_file_path = traj_reduced.traj_file_path[traj_reduced.traj_file_path.find('trajectories'):]
@@ -637,34 +625,67 @@ class TrajectoryDatabase():
 
     def archiveTrajDatabase(self, db_path, arch_prefix, archdate_jd):
         """
-        # archive records older than archdate_jd to a database {arch_prefix}_trajectories.db
+        archive records older than archdate_jd to a database {arch_prefix}_trajectories.db
 
         Parameters:
         db_path     : path to the location of the archive database   
-        arch_prefix : prefix to apply - typically of the form yyyymm
-        archdate_jd : julian date before which to archive data
+        arch_prefix : prefix to apply - typically of the form yyyymm. Set to None to purge data without archiving.
+        archdate_jd : julian date before which to archive data. Default is now-21 dayss
 
         """
+        # if no archdate is set, then set it to 21 days
+        if archdate_jd is None:
+            archdate = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=21)
+            archdate_jd = datetime2JD(archdate)
 
-        # create the archive database if it doesnt exist
-        archdb_name = f'{arch_prefix}_trajectories.db'
-        archdb = TrajectoryDatabase(db_path, archdb_name)
-        archdb.closeTrajDatabase()
+        log.info(f'{"Archiving" if arch_prefix else "Purging"} trajectories database')
 
-        # attach the arch db, copy the records then delete them
-        archdb_fullname = os.path.join(db_path, f'{archdb_name}')
-        cur = self.dbhandle.execute(f"attach database '{archdb_fullname}' as archdb")
-        log.info('delete: write to trajdb')
-        for table_name in ['trajectories', 'failed_trajectories']:
-            try:
-                # bulk-copy if possible
-                cur.execute(f'insert or replace into archdb.{table_name} select * from {table_name} where jdt_ref < {archdate_jd}')
-                cur.execute(f'delete from {table_name} where jdt_ref < {archdate_jd}')
-            except Exception:
-                log.warning(f'unable to archive {table_name}')
+        purge_ok = True
+        if arch_prefix:
+            # create the archive database if it doesnt exist
+            archdb_name = f'{arch_prefix}_trajectories.db'
+            archdb = TrajectoryDatabase(db_path, archdb_name)
+            archdb.closeTrajDatabase()
 
-        self.dbhandle.commit()
+            # attach the arch db, copy the records then delete them
+            archdb_fullname = os.path.join(db_path, f'{archdb_name}')
+            cur = self.dbhandle.execute(f"attach database '{archdb_fullname}' as archdb")
+            for table_name in ['trajectories', 'failed_trajectories']:
+                try:
+                    # bulk-copy if possible
+                    cur.execute(f'insert or replace into archdb.{table_name} select * from {table_name} where jdt_ref < {archdate_jd}')
+                except Exception:
+                    log.warning(f'unable to archive {table_name} in trajectories database')
+                    purge_ok = False
+
+            self.dbhandle.commit()
+
+        if purge_ok:
+            self.purgeTrajDatabase(archdate_jd=archdate_jd)
         return 
+    
+    def purgeTrajDatabase(self, archdate_jd=None):
+        """
+        purge records from before a specified julian date. 
+
+        parameters:
+            archdate_jd:    julian date before which to purge. Default None will purge records more than 21 days old
+    
+        """
+        if archdate_jd is None:
+            archdate = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=21)
+            archdate_jd = datetime2JD(archdate)
+
+        for table_name in ['trajectories', 'failed_trajectories']:
+            cur = self.dbhandle.execute(f'select count(*) from {table_name} where jdt_ref < {archdate_jd}')
+            res = cur.fetchone()
+            count = res[0] if res else 0
+            log.info(f'  purging {count} records from {table_name}')
+            self.dbhandle.execute(f'delete from {table_name} where jdt_ref < {archdate_jd}')
+        self.dbhandle.commit()
+        return         
+
+
 
     def copyTrajJsonRecords(self, trajectories, dt_range, failed=True, max_days=14):
         """
@@ -734,14 +755,14 @@ class CandidateDatabase():
     A class to handle the sqlite candidates database transparently.
     """
 
-    def __init__(self, db_path:str, db_name='candidates.db', keep=3, verbose=False):
+    def __init__(self, db_path:str, db_name='candidates.db', keep=21, verbose=False):
         """
         Create a database instance
 
         Parameters:
         db_path         : path to the location of the database
         db_name         : name to use, typically candidates.db
-        keep            : number of weeks' data to keep. Default 3
+        keep            : Amount of data to keep. Default 21 days
 
         """
         db_full_name = os.path.join(db_path, f'{db_name}')
@@ -751,11 +772,15 @@ class CandidateDatabase():
         con.execute('pragma journal_mode=wal')
         res = con.execute("SELECT name FROM sqlite_master WHERE name='candidates'")
         if res.fetchone() is None:
+            if verbose:
+                log.info('create table candidates')
             con.execute("CREATE TABLE candidates(cand_id VARCHAR UNIQUE, ref_dt REAL, obs_ids VARCHAR, status INTEGER)")
         con.commit()
         self.dbhandle = con
         if keep > 0:
-            self.purgeCands(keep=keep)
+            keep_dt = datetime.datetime.now().replace(tzinfo=datetime.timezone.utc) - datetime.timedelta(days=keep)
+            keep_jd = datetime2JD(keep_dt)
+            self.purgeCandDatabase(archdate_jd=keep_jd)
 
     def _commitCandDatabase(self):
         """
@@ -784,24 +809,25 @@ class CandidateDatabase():
 
         Parameters:
         cand_id     : candidate ID
+        ref_dt      : reference date as a timestamp
         obs_ids     : list of observation IDs
 
         Returns: 
             True if added, False if its already present
         """
         
-        present = True
+        to_be_added = True
         cur = self.dbhandle.execute(f"SELECT * FROM candidates WHERE cand_id='{cand_id}' and status=1")
         if cur.fetchone() is not None:
-            present = False
+            to_be_added = False
         else:
-            present = True
+            to_be_added = True
             obs_ids_str = json.dumps(list(set(obs_ids)))
             self.dbhandle.execute(f"insert into candidates values ('{cand_id}',{ref_dt},'{obs_ids_str}',1)")
             self.dbhandle.commit()
         if verbose:
-            log.info(f'{cand_id} is {"added" if present else "not added"}')
-        return present
+            log.info(f'{cand_id} {"was added to the database" if to_be_added else "already present"}')
+        return to_be_added
 
     def getCandidate(self, cand_id:str, verbose=False):
         """
@@ -823,19 +849,61 @@ class CandidateDatabase():
             log.info(f'{cand_id} contains {obs_ids}')
         return obs_ids
 
-
-    def purgeCands(self,keep=3):
+    def purgeCandDatabase(self, archdate_jd=None):
         """
         purge old candidates after 'keep' weeks
 
         Parameters:
-        keep    : weeks to keep data for, default 3
+        keep    : days to keep data for, default 21
         """
-        keep_dt = datetime.datetime.now().replace(tzinfo=datetime.timezone.utc) - datetime.timedelta(days=keep*7)
+        if archdate_jd is None:
+            keep_dt = datetime.datetime.now().replace(tzinfo=datetime.timezone.utc) - datetime.timedelta(days=21)
+        else:
+            keep_dt = jd2Date(archdate_jd,dt_obj=True)
+
+        log.info(f'purging candidates older than {keep_dt.isoformat()}')
         self.dbhandle.execute(f"delete from candidates where ref_dt < {keep_dt.timestamp()}")
         self.dbhandle.commit()
         return 
     
+    def archiveCandDatabase(self, db_path, arch_prefix, archdate_jd):
+        """
+        archive records older than archdate_jd to a database {arch_prefix}_candidates.db
+
+        Parameters:
+        db_path     : path to the location of the archive database   
+        arch_prefix : prefix to apply - typically of the form yyyymm
+        archdate_jd : julian date before which to archive data
+
+        """
+
+        if archdate_jd is None:
+            keep_dt = datetime.datetime.now().replace(tzinfo=datetime.timezone.utc) - datetime.timedelta(days=21)
+        else:
+            keep_dt = jd2Date(archdate_jd,dt_obj=True)
+
+        purge_ok = True
+        if arch_prefix:
+            # create the archive database if it doesnt exist
+            archdb_name = f'{arch_prefix}_candidates.db'
+            archdb = CandidateDatabase(db_path, archdb_name)
+            archdb.closeCandDatabase()
+
+            # attach the arch db, copy the records then delete them
+            archdb_fullname = os.path.join(db_path, f'{archdb_name}')
+            cur = self.dbhandle.execute(f"attach database '{archdb_fullname}' as archdb")
+            try:
+                cur.execute(f'insert or replace into archdb.candidates select * from candidates where ref_dt < {keep_dt.timestamp()}')
+            except Exception:
+                log.warning(f'unable to archive candidate database')
+                purge_ok = False
+
+        if purge_ok:
+            self.purgeCandDatabase(archdate_jd=archdate_jd)
+
+        self.dbhandle.commit()
+        return 
+
     def mergeCandDatabase(self, source_db_path):
         """
         merge in records from another observation database, for example from a remote node
