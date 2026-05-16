@@ -6460,6 +6460,10 @@ class Trajectory(object):
             # Calculate lag
             self.calcLag(self.observations)
             
+        if self.verbose:
+            log.info('timing data entering optimisation')
+            for obs in self.observations:
+                log.info(f'{obs.station_id}: {obs.time_data}')
 
         # Estimate the timing difference between stations and the initial velocity and update the time
         (
