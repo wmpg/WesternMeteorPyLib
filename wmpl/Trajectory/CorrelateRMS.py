@@ -632,7 +632,7 @@ class RMSDataHandle(object):
         log.info(f'{"Purging" if older_than == 0 else "Archiving"} database records prior to {archdate.isoformat()}....')
 
         # purge or archive the Observations and Trajectories
-        # note: no need to do candidates as we already only keep 21 days of these
+        # note: no need to do candidates as we already only keep at most 21 days of these
         self.observations_db.archiveObsDatabase(self.db_dir, arch_prefix, archdate_jd)
         self.trajectory_db.archiveTrajDatabase(self.db_dir, arch_prefix, archdate_jd)
 
@@ -2008,7 +2008,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         help="Months back to archive old data. Default 0 which means purge don't archive.")
 
     arg_parser.add_argument('--maxtrajs', '--maxtrajs', type=int, default=None,
-        help="Max number of trajectories to reload in each pass when doing the Monte-Carlo phase")
+        help="Max number of trajectories to reload in each pass when doing phase 1 or Monte-Carlo phase solving")
     
     arg_parser.add_argument('--autofreq', '--autofreq', type=int, default=360,
         help="Minutes to wait between runs in auto-mode")
