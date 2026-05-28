@@ -377,7 +377,7 @@ class PlateparDummy:
 
 class RMSDataHandle(object):
     def __init__(self, dir_path, dt_range=None, db_dir=None, output_dir=None, mcmode=MCMODE_ALL, max_trajs=1000, 
-            verbose=False, archivemonths=3, auto=False, max_toffset=10):
+            verbose=False, archivemonths=0, auto=False, max_toffset=10):
         """ Handles data interfacing between the trajectory correlator and RMS data files on disk. 
     
         Arguments:
@@ -605,12 +605,12 @@ class RMSDataHandle(object):
         log.info(f'updated {i} partially-processed files')
         return 
 
-    def archiveOldRecords(self, older_than=3):
+    def archiveOldRecords(self, older_than=0):
         """
         Archive off old records to keep the database size down
 
         Keyword Arguments:
-            older_than: [int] number of months to keep, default 3
+            older_than: [int] number of months to keep, default 0
 
             if older_than is zero, then purge rather than archiving. To do this, we set arch_prefix to None
             and archdate_jd to the earlier of dt_range[0] and 21 days ago.
@@ -2004,8 +2004,8 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     arg_parser.add_argument('--mcmode', '--mcmode', type=int, default=0,
         help="Operation mode - see readme. For standalone solving either don't set this or set it to 0")
 
-    arg_parser.add_argument('--archivemonths', '--archivemonths', type=int, default=3,
-        help="Months back to archive old data. Default 3. Zero means don't archive (useful in testing).")
+    arg_parser.add_argument('--archivemonths', '--archivemonths', type=int, default=0,
+        help="Months back to archive old data. Default 0 which means purge don't archive.")
 
     arg_parser.add_argument('--maxtrajs', '--maxtrajs', type=int, default=None,
         help="Max number of trajectories to reload in each pass when doing the Monte-Carlo phase")
