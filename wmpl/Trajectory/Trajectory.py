@@ -1988,7 +1988,7 @@ def _MCTrajSolve(params):
 
     i, traj, observations = params
 
-    log.info('Run No. {i + 1}')
+    log.info(f'Run No. {i + 1}')
 
     traj.run(_mc_run=True, _orig_obs=observations)
 
