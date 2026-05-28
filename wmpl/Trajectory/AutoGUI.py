@@ -327,17 +327,27 @@ class FileMonitorApp(QMainWindow):
             vinitht = kwargs.vinitht[0]
         
         # Solve the trajectory (MC always disabled!)
-        self.traj = solveTrajectoryGeneric(jdt_ref, meteor_list, self.dir_path, solver=kwargs.solver, \
-            max_toffset=max_toffset, monte_carlo=False, save_results=False, \
-            geometric_uncert=kwargs.uncertgeom, gravity_correction=(not kwargs.disablegravity), 
-            gravity_factor=kwargs.gfact,
-            plot_all_spatial_residuals=False, plot_file_type=kwargs.imgformat, \
-            show_plots=False, v_init_part=kwargs.velpart, v_init_ht=vinitht, \
-            show_jacchia=kwargs.jacchia,
-            estimate_timing_vel=(False if kwargs.notimefit is None else kwargs.notimefit), \
-            fixed_times=kwargs.fixedtimes, mc_noise_std=kwargs.mcstd)
+        try:
+            self.traj = solveTrajectoryGeneric(jdt_ref, meteor_list, self.dir_path, solver=kwargs.solver, \
+                max_toffset=max_toffset, monte_carlo=False, save_results=False, \
+                geometric_uncert=kwargs.uncertgeom, gravity_correction=(not kwargs.disablegravity),
+                gravity_factor=kwargs.gfact,
+                plot_all_spatial_residuals=False, plot_file_type=kwargs.imgformat, \
+                show_plots=False, v_init_part=kwargs.velpart, v_init_ht=vinitht, \
+                show_jacchia=kwargs.jacchia,
+                estimate_timing_vel=(False if kwargs.notimefit is None else kwargs.notimefit), \
+                fixed_times=kwargs.fixedtimes, mc_noise_std=kwargs.mcstd)
+        except Exception as e:
+            print(f"Trajectory solution raised exception: {e}")
+            self.worker.update_status.emit('red', f"Trajectory solution failed: {e}")
+            return False
 
-        
+        if self.traj is None:
+            print("Trajectory solution failed (solver returned None).")
+            self.worker.update_status.emit('red', "Trajectory solution failed!")
+            return False
+
+
         # Save the report and the pickle file
         savePickle(self.traj, self.traj.output_dir, self.traj.file_name + '_trajectory.pickle')
 
