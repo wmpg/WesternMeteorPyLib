@@ -41,7 +41,7 @@ In single-server continuous processing mode, run three instances of the solver, 
 
 Testing suggests running the mode 4 solver with a frequency of 15 minutes (ie with flags `-a` and `--autofreq 15`). Candidate-finding is a quick process, and using a short interval ensures rapid identification and update of candidates as new data arrives on the server. 
 
-Modes 1 and 2 can be run with a period of around 30 minutes (`--autofreq 30`), and mode 2 hould be restricted to at most 500 trajectories at a time, using `--maxtraj 200`. This ensures that data  are processed in reasonable batches without requiring excessive memory. It also supports distributed processing as explained in the next section.  In testing, we found that a 16-core server could create around 6000 candidates per hour, and that phase1 could process around 650 candidates per hour. Phase2 was much slower, managing only 200 full solutions per hour. 
+Modes 1 and 2 can be run with a period of around 30 minutes (`--autofreq 30`), and mode 2 hould be restricted to at most 500 trajectories at a time, using `--maxtraj 200`. This ensures that data  are processed in reasonable batches without requiring excessive memory. It also supports distributed processing as explained in the next section.  In testing, we found that a 16-core server could create around 6000 candidates per hour, while also processing 650 candidates per hour to get phase1 solutions, and around 200 full phase2 monte-carlo solutions per hour. 
 
 ### Distributed Processing
 
