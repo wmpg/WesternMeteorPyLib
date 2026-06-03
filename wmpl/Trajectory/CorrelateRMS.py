@@ -1794,7 +1794,7 @@ class RMSDataHandle(object):
         # collect candidates or phase1 solutions from the master node
         if self.mc_mode == MCMODE_PHASE1 or self.mc_mode == MCMODE_BOTH:
             status = self.RemoteDatahandler.collectRemoteData('candidates', self.output_dir, verbose=verbose)
-        elif mcmode == MCMODE_PHASE2:
+        elif self.mcmode == MCMODE_PHASE2:
             status = self.RemoteDatahandler.collectRemoteData('phase1', self.output_dir, verbose=verbose)
         else:
             status = False
