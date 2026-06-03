@@ -145,13 +145,31 @@ class RemoteDataHandler():
         for i in range(10): 
             try:
                 self.sftp_client.put(local_name, remname)
-                break
+                return True
             except Exception:
                 time.sleep(1)
-        if i == 10:
-            log.warning(f'upload of {local_name} failed after 10 retries')
-            return False
-        return True
+        log.warning(f'upload of {local_name} failed after 10 retries')
+        return False
+
+    def getWithRetry(self, rem_name, local_name):
+        for i in range(10): 
+            try:
+                self.sftp_client.get(rem_name, local_name)
+                return True
+            except Exception:
+                time.sleep(1)
+        log.warning(f'download of {rem_name} failed after 10 retries')
+        return False
+    
+    def renameWithRetry(self, rem_name, new_rem_name):
+        for i in range(10): 
+            try:
+                self.sftp_client.rename(rem_name, new_rem_name)
+                return True
+            except Exception:
+                time.sleep(1)
+        log.warning(f'rename of {rem_name} failed after 10 retries')
+        return False
 
     ########################################################    
     # functions used by the client nodes
@@ -188,26 +206,20 @@ class RemoteDataHandler():
             local_dir = os.path.join(output_dir, datatype)
             if not os.path.isdir(local_dir):
                 os.makedirs(local_dir, exist_ok=True)
+            num_received = 0
             for trajfile in files:
                 fullname = f'{rem_dir}/{trajfile}'
+                processed_name = f'{rem_dir}/processed/{trajfile}'
                 localname = os.path.join(local_dir, trajfile)
                 if verbose:
                     log.info(f'downloading {fullname} to {localname}')
-                for i in range(10):
-                    try:
-                        self.sftp_client.get(fullname, localname)
-                        break
-                    except Exception: 
-                        time.sleep(1)
-                try:
-                    self.sftp_client.rename(fullname, f'{rem_dir}/processed/{trajfile}')
-                except:
-                    try:
-                        self.sftp_client.remove(fullname)
-                    except:
-                        log.info(f'unable to rename or remove {fullname}')
 
-            log.info(f'Obtained {len(files)} {"trajectories" if datatype=="phase1" else "candidates"}')
+                res = self.getWithRetry(fullname, localname)
+                if res:
+                    num_received += 1
+                    self.renameWithRetry(fullname, processed_name)
+
+            log.info(f'Obtained {num_received} {"trajectories" if datatype=="phase1" else "candidates"}')
 
         except Exception as e:
             log.warning('Problem with download')
@@ -274,8 +286,9 @@ class RemoteDataHandler():
 
         # now upload any data in the 'trajectories' folder, flattening it to make it simpler to handle
         i=0
-        if os.path.isdir(os.path.join(source_dir, 'trajectories')):
-            traj_dir = f'{source_dir}/trajectories'
+        
+        traj_dir = os.path.join(source_dir, 'trajectories')
+        if os.path.isdir(traj_dir):
             for (dirpath, dirnames, filenames) in os.walk(traj_dir):
                 if len(filenames) > 0:
 
@@ -311,12 +324,12 @@ class RemoteDataHandler():
                         success_flag = traj_success_flag
 
             
-        if i > 0:
-            log.info(f'uploaded {int(i/2)} trajectories')
+            if i > 0:
+                log.info(f'uploaded {int(i/2)} trajectories')
 
-        # if everything uploaded we can remove the entire 'trajectories' folder
-        if success_flag: 
-            shutil.rmtree(traj_dir, ignore_errors=True)
+            # if everything uploaded we can remove the entire 'trajectories' folder
+            if success_flag: 
+                shutil.rmtree(traj_dir, ignore_errors=True)
 
         # finally the databases - upload these with a random name for uniqueness at the server side
         # Again, if any upload fails mark the status False
