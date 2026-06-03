@@ -829,22 +829,24 @@ class CandidateDatabase():
             log.info(f'{cand_id} {"was added to the database" if to_be_added else "already present"}')
         return to_be_added
 
-    def getCandidate(self, cand_id:str, verbose=False):
+    def getCandidateObs(self, cand_id:str, verbose=False):
         """
-        retrieve details of a candidate
+        retrieve a list of observations linked to a candidate
 
         Parameters:
         cand_id     : candidate ID
 
         Returns: 
             the observations linked to the candidate
+
+        This function is currently unused
         """
         
         obs_ids = []
-        cur = self.dbhandle.execute(f"SELECT * FROM candidates WHERE cand_id='{cand_id}' and status=1")
+        cur = self.dbhandle.execute(f"SELECT obs_ids FROM candidates WHERE cand_id='{cand_id}' and status=1")
         rw = cur.fetchone()
         if rw is not None:
-            obs_ids= json.loads(rw[1])
+            obs_ids= json.loads(rw[0])
         if verbose:
             log.info(f'{cand_id} contains {obs_ids}')
         return obs_ids
