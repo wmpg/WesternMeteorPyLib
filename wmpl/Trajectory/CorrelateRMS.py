@@ -1864,7 +1864,7 @@ class RMSDataHandle(object):
         log.info(f'Saved {num_saved} candidates')
         log.info("-----------------------")
 
-    def saveCandOrTraj(self, traj, file_name, savetype='phase1', verbose=False):
+    def saveCandOrTraj(self, traj, file_name, savetype='phase1', verbose=True):
         """
         Save the candidates (if in candidate-finding mode) or phase 1 trajectories.
         If remote data processing is enabled, this function distributes candidates amongst 
