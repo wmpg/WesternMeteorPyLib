@@ -122,7 +122,10 @@ user = node1
 key = ~/.ssh/somekey  
 port = 22
 
-At startup, the child node will connect to the master and remove the "stop" file, if present. This indicates to the master that it is "open for business". The child will then download any assigned data and processing it. Downloaded files are moved to a subfolder _processed_ on the sftp server. Upon completion it will upload the results to the sftp server, then look for new data to process.
+At startup, the child node will connect to the master and remove the "stop" file, if present. This indicates to the master that it is "open for business". The child will then download all assigned data and begin processing it. Downloaded files are moved to a subfolder _processed_ on the sftp server. Upon completion it will upload the results to the sftp server, then look for new data to process.
+
+Note that the child will download *all* assigned data and the `maxtraj` parameter should not be used when launching WMPL on the child. If this parameter is set, then there's a risk that a backlog of downloaded-but-unprocessed data will build up. For example if the child's capacity is set to 200 on the master node, but the child is limited to 100 via `maxtraj`, then it will download 200 on each pass, but only process and upload 100. 
+
 
 **Stopping a Child Node**
 
