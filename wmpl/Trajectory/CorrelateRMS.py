@@ -1763,6 +1763,7 @@ class RMSDataHandle(object):
                     log.info(f'{node.nodename} idle, giving it extra candidates')
                     i = 0
                     for i, full_name in enumerate(glob.glob(os.path.join(self.candidate_dir, '*.pickle'))):
+                        log.info(f'moving {full_name} to {node.nodename}')
                         shutil.copy(full_name, targ_dir)
                         os.remove(full_name) 
                         i +=1 
@@ -1775,6 +1776,7 @@ class RMSDataHandle(object):
                     log.info(f'{node.nodename} idle, giving it extra phase1 data')
                     i = 0
                     for i, full_name in enumerate(glob.glob(os.path.join(self.phase1_dir, '*.pickle'))):
+                        log.info(f'moving {full_name} to {node.nodename}')
                         shutil.copy(full_name, targ_dir)
                         os.remove(full_name) 
                         i +=1 
