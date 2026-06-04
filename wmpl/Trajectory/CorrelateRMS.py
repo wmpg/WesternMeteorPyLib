@@ -1767,7 +1767,7 @@ class RMSDataHandle(object):
                         shutil.copy(full_name, targ_dir)
                         os.remove(full_name) 
                         i +=1 
-                        if i == node.capacity:
+                        if i >= node.capacity:
                             break
 
                 targ_dir = os.path.join(node.dirpath, 'files', 'phase1')
@@ -1780,7 +1780,7 @@ class RMSDataHandle(object):
                         shutil.copy(full_name, targ_dir)
                         os.remove(full_name) 
                         i +=1 
-                        if i == node.capacity:
+                        if i >= node.capacity:
                             break
 
             # if the files have been in the node folder for more than wait_time hours, move them
