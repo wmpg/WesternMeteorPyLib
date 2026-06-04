@@ -1758,7 +1758,7 @@ class RMSDataHandle(object):
                 # if the stop file isn't present and the nodes are idle, give them something to do
 
                 targ_dir = os.path.join(node.dirpath, 'files', 'candidates')
-                if len(glob.glob(os.path.join(targ_dir, '*.pickle'))) == 0 and node.mode == MCMODE_PHASE1:
+                if len(glob.glob(os.path.join(targ_dir, '*.pickle'))) == 0 and node.mode == MCMODE_PHASE1 and node.capacity !=0:
                     # the node is waiting for data
                     log.info(f'{node.nodename} idle, giving it extra candidates')
                     i = 0
@@ -1771,7 +1771,7 @@ class RMSDataHandle(object):
                             break
 
                 targ_dir = os.path.join(node.dirpath, 'files', 'phase1')
-                if len(glob.glob(os.path.join(targ_dir, '*.pickle'))) == 0 and node.mode == MCMODE_PHASE2:
+                if len(glob.glob(os.path.join(targ_dir, '*.pickle'))) == 0 and node.mode == MCMODE_PHASE2 and node.capacity !=0:
                     # the node is waiting for data
                     log.info(f'{node.nodename} idle, giving it extra phase1 data')
                     i = 0
