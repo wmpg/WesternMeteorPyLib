@@ -162,13 +162,25 @@ class RemoteDataHandler():
         return False
     
     def renameWithRetry(self, rem_name, new_rem_name):
-        for i in range(10): 
+        try:
+            # if stat succeeds, then the remote file was already moved to processed folder
+            # in which case we can simply remove the original remote file 
+            self.sftp_client.stat(new_rem_name)
             try:
-                self.sftp_client.rename(rem_name, new_rem_name)
+                self.sftp_client.remove(rem_name)
                 return True
             except Exception:
-                time.sleep(1)
-        log.warning(f'rename of {rem_name} failed after 10 retries')
+                log.warning(f'processed copy already exists but unable to remove {rem_name}')
+                return False
+        except Exception:
+            # if stat fails then the processed file doesn't exist so we can safely rename 
+            for i in range(10): 
+                try:
+                    self.sftp_client.rename(rem_name, new_rem_name)
+                    return True
+                except Exception:
+                    time.sleep(1)
+            log.warning(f'rename of {rem_name} failed after 10 retries')
         return False
 
     ########################################################    
@@ -312,7 +324,8 @@ class RemoteDataHandler():
                             log.info(f'uploading {local_name} to {rem_file}')
 
                         if self.putWithRetry(local_name, rem_file):
-                            i += 1
+                            if 'pickle' in local_name:
+                                i += 1
                         else:
                             traj_success_flag = False
 
@@ -325,7 +338,7 @@ class RemoteDataHandler():
 
             
             if i > 0:
-                log.info(f'uploaded {int(i/2)} trajectories')
+                log.info(f'uploaded {i} trajectories')
 
             # if everything uploaded we can remove the entire 'trajectories' folder
             if success_flag: 
