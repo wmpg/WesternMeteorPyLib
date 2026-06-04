@@ -39,13 +39,17 @@ Note that in modes 0, 3, 5 and 7, intermediate files (ie candidates and phase1 f
 ### Single-Server Continuous Processing
 In single-server continuous processing mode, run three instances of the solver, one in each of modes 4, 1, and 2.
 
-Testing suggests running the mode 4 solver with a frequency of 15 minutes (ie with flags `-a` and `--autofreq 15`). Candidate-finding is a quick process, and using a short interval ensures rapid identification and update of candidates as new data arrives on the server. 
+In testing, we found that a 16-core server could create around 6000 candidates per hour, while also processing 1000 candidates per hour to get phase1 solutions, and processing around 200 phase1 solutions per hour to get full phase2 monte-carlo solutions. 
 
-Modes 1 and 2 can be run with a period of around 30 minutes (`--autofreq 30`), and mode 2 hould be restricted to at most 500 trajectories at a time, using `--maxtraj 200`. This ensures that data  are processed in reasonable batches without requiring excessive memory. It also supports distributed processing as explained in the next section.  In testing, we found that a 16-core server could create around 6000 candidates per hour, while also processing 650 candidates per hour to get phase1 solutions, and around 200 full phase2 monte-carlo solutions per hour. 
+Thus the mode 4 solver with a frequency of 15 minutes (ie with flags `-a` and `--autofreq 15`). Candidate-finding is a quick process, and using a short interval ensures rapid identification and update of candidates as new data arrives on the server. 
+
+Meanwhile modes 1 and 2 can be run with a period of around 30 minutes (`--autofreq 30`), and should be restricted to around 200 trajectories at a time, using `--maxtraj 200`. This ensures that data  are processed in reasonable batches without long delays between processing runs. 
+
+It also ensures data is available for distributed processing as explained in the next section.
 
 ### Distributed Processing
 
-The solver supports distribution of both candidates and phase1 solutions to child nodes.
+The solver supports distribution of both candidates and phase1 solutions.
 
 To enable distributed processing, we require one master node and one or more child nodes.
 
@@ -191,23 +195,23 @@ Added:
 - \--**addlogsuffix**: default false - this adds a suffix to the logfile to indicate which phase is being run.  
    For example, with this flag passed, the logfile for a run in mode 4 (candidate finding) would be something like \_correlate_rms_20260214_121314_cands.log* whereas a phase-1 log file would be _correlate_rms_20260214_121314_simple.log_.
 
-- **\--archivemonths:** default 0: this specifies the number of months' data to keep in the databases. Data older than this number of months will be archived. A value of zero means purge rather than delete. At least 21 days data will always be kept, and if a time-range is specified when calling CorrelateRMS, then data will only be archived or purged from before this time-range. 
+- **\--archivemonths:** default 0: this specifies the number of months' data to keep in the databases. Data older than this number of months will be archived. A value of zero means purge rather than delete. At least 21 days data will always be kept, and if a time-range is specified when calling CorrelateRMS, then only data older than this will be archived or purged. 
 
 ## Examples of using the Modes
 
 In the below examples, raw camera data is in `$DATADIR`, and the output and any intermediate files are being written to `$TARGDIR`. The `--addlogsuffix` parameter has been used to make sure the logfiles are uniquely named. 
 
-* Run an instance in candidate-finding mode, looking back at the last three days' data and automatically rescanning the data at least every 15 minutes:
+* Run an instance in candidate-finding mode, looking back at the last three days' data and automatically rescanning the data every 15 minutes (or when the last pass completed).
 ``` bash
 python -m wmpl.Trajectory.CorrelateRMS $DATADIR -a 3 --autofreq 15 --mcmode 4 --cpucores 4 --logdir $TARGDIR/logs  --outdir $TARGDIR --dbdir $TARGDIR --addlogsuffix
 ```
 
-* Run an instance in phase-1 solver mode, consuming at most 500 candidates at a time and automatically rescanning the data at least every 30 minutes. Note that its not necessary to specify a value for `-a` as the solver will consume any available candidates:
+* Run an instance in phase-1 solver mode, consuming at most 500 candidates at a time and automatically rescanning the raw data every 30 minutes (or when the last pass completed). Note that its not necessary to specify a value for `-a` as the solver will consume any available candidates.
 ``` bash
 python -m wmpl.Trajectory.CorrelateRMS $DATADIR -a --autofreq 30 --mcmode 1 --cpucores 4 --logdir $TARGDIR/logs  --outdir $TARGDIR --dbdir $TARGDIR --maxtrajs 500 --addlogsuffix
 ```
 
-* Run an instance in phase-2 solver mode, consuming at most 200 phase-1 solutions at a time and automatically rescanning the data at least every 30 minutes. Note that its not necessary to specify a value for `-a` as the solver will consume any available data:
+* Run an instance in phase-2 solver mode, consuming at most 200 phase-1 solutions at a time and automatically rescanning the phase 1 data every 30 minutes (or when the last pass completed). Note that its not necessary to specify a value for `-a` as the solver will consume any available data.
 ``` bash
 python -m wmpl.Trajectory.CorrelateRMS $DATADIR -a --autofreq 30 --mcmode 2 --cpucores 4 --logdir $TARGDIR/logs  --outdir $TARGDIR --dbdir $TARGDIR --maxtrajs 200 --addlogsuffix
 ```
