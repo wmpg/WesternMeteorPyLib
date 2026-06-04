@@ -1690,7 +1690,7 @@ class RMSDataHandle(object):
                     os.remove(full_name)
 
                 if i > 0:
-                    log.info(f'moved {i+1} phase 1 solutions from {node.nodename}')
+                    log.info(f'moved {i+1} new phase 1 solutions from {node.nodename}')
             
             # if the node was in mode 1 then move any uploaded processed candidates
             remote_canddir = os.path.join(node.dirpath, 'files', 'candidates', 'processed')
@@ -1704,6 +1704,20 @@ class RMSDataHandle(object):
 
                 if i > 0:
                     log.info(f'moved {i+1} processed candidates from {node.nodename}')
+            
+            # if the node was in mode 2 then move any processed phase1 solutions
+            remote_ph1dir = os.path.join(node.dirpath, 'files', 'phase1', 'processed')
+            if os.path.isdir(remote_ph1dir) and node.mode==2:
+                targ_dir = os.path.join(self.phase1_dir, 'processed')
+                os.makedirs(targ_dir, exist_ok=True)
+                i = 0
+                for i, fil in enumerate([x for x in os.listdir(remote_ph1dir) if '.pickle' in x]):
+                    full_name = os.path.join(remote_ph1dir, fil)
+                    shutil.copy(full_name, targ_dir)
+                    os.remove(full_name)
+
+                if i > 0:
+                    log.info(f'moved {i+1} processed phase 1 solutions from {node.nodename}')
             
         return True
 
