@@ -124,20 +124,24 @@ port = 22
 
 At startup, the child node will connect to the master and remove the "stop" file, if present. This indicates to the master that it is "open for business". The child will then download all assigned data and begin processing it. Downloaded files are moved to a subfolder _processed_ on the sftp server. Upon completion it will upload the results to the sftp server, then look for new data to process.
 
-Note that the child will download *all* assigned data and the `maxtraj` parameter should not be used when launching WMPL on the child. If this parameter is set, then there's a risk that a backlog of downloaded-but-unprocessed data will build up. For example if the child's capacity is set to 200 on the master node, but the child is limited to 100 via `maxtraj`, then it will download 200 on each pass, but only process and upload 100. 
+Note: do not use the `maxtraj` parameter with child nodes. If this parameter is set, then there's a risk that a backlog of downloaded-but-unprocessed data will build up. For example if the child's capacity is set to 200 on the master node, but the child is limited to 100 via `maxtraj`, then it will download 200 on each pass, but only process and upload 100. 
 
 
 **Stopping a Child Node**
 
-Any node can be terminated by pressing Ctrl-C or by sending SIGINT to its process. The node will stop processing immediately and create a "stop" file on the sftp server.
-
-Note that termination will leave data incompletely processed and no upload will take place, and so it is advisable to wait until the child's logfile indicates it is idle. 
-
-If this is not possible, one can identify the most recent, potentially incomplete, data set that was assigned to the node by looking in the child's _processed_ folders on the server, and copying the data back to the master node's _candidate_ or _phase1_ folders as appropriate.
+Any node can be terminated by pressing Ctrl-C or by sending SIGINT to its process. The node will stop processing promptly and create a "stop" file on the sftp server. Note that termination will leave data incompletely processed and no upload will take place, and so it is advisable to wait until the child's logfile indicates it is idle.  
 
 **Recovering from a Child Node Crash or Shutdown**
 
-If a child node crashes or is otherwise terminated during processing, the data can be recovered and redistributed to the master or other nodes, or indeed to the failed node after it has restarted. This can be done by looking in the _processed_ folders on the child, or if the child node is unavailable, in the child's _processed_ folders on the master node, identifying the most recent data, and moving it as necessary.
+If a child node crashes or has to be shut down while data is being processed, identify the most recent, potentially incomplete, data set and move it back from the `candidates/processed` or `phase1/processed` folder to the master's `candidates` or `phase` folder as appropriate. Depending on what stage was reached, the data may be in the child nodes' folders on the server, or in the master node folder.
+
+The latest data set assigned to a node can be identified by checking the master log files. The example below shows a candidate and a phase1 solution assigned to child nodes node1 and node2. 
+``` bash
+$ egrep "node1|node2" *.log | grep saving
+
+2026/06/05 16:28:07-INFO -CorrelateRMS   :1930 - saving 1780646962.313761_US.pickle to /home/node1/files/candidates
+2026/06/05 16:15:11-INFO -CorrelateRMS   :1930 - saving 20260604_214203.292_HR_trajectory.pickle to /home/node2/files/phase1
+```
 
 ## Duplicate Transaction Checks
 
@@ -157,9 +161,7 @@ This approach was taken because most trajectory and observation database writing
 
 **If The Solver Crashes**
 
-Although most operations are immediately committed to the databases, it is possible for the solver to crash and leave an incomplete transaction. This will be revealed by the existence of write-ahead logs in the database directory e.g. "observations.db-wal".
-
-If this file is present, then upon next startup, SQLite will complete any pending transactions. This minimises the risk of data loss, but at worst may lead to observations being reprocessed. This is preferable to trajectories being missed.
+Although most operations are immediately committed to the databases, it is possible for the solver to crash and leave an incomplete transaction. This will be revealed by the existence of write-ahead logs in the database directory e.g. "observations.db-wal". These files should *not* be deleted as upon next startup, SQLite will complete any pending transactions. This minimises the risk of data loss, and at worst may lead to observations being reprocessed. This is preferable to trajectories being missed.
 
 **The Legacy JSON database**
 
