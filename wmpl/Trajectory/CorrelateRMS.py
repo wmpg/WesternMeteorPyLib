@@ -1927,7 +1927,7 @@ class RMSDataHandle(object):
 
                     if tmp_save_dir != save_dir:
                         # log it if we are saving to a child node, so we can track what got farmed out
-                        log.info(f'saving {file_name} to {save_dir}')
+                        log.info(f'saving {file_name} to {tmp_save_dir}')
                     
                     # set the save dir if the bucket is usable
                     save_dir = tmp_save_dir
