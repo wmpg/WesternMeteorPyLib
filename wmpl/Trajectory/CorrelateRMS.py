@@ -1914,7 +1914,7 @@ class RMSDataHandle(object):
                 if bucket.nodename != 'localhost':
                     tmp_save_dir = os.path.join(bucket.dirpath, 'files', savetype)
                     # limit children to 5000 if set to -1 ie unlimited
-                    bucket_capacity = bucket.capacity if bucket_capacity >= 0 else 5000
+                    bucket_capacity = bucket.capacity if bucket.capacity >= 0 else 5000
                 else:
                     # saving to localhost 
                     tmp_save_dir = save_dir
