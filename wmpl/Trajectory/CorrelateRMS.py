@@ -1762,12 +1762,14 @@ class RMSDataHandle(object):
                     # the node is waiting for data
                     log.info(f'{node.nodename} idle, giving it extra candidates')
                     i = 0
+                    # limit child capacity to 5000 if its set to -1
+                    max_capacity = node.capacity if node.capacity >= 0 else 1000
                     for i, full_name in enumerate(glob.glob(os.path.join(self.candidate_dir, '*.pickle'))):
                         log.info(f'moving {full_name} to {node.nodename}')
                         shutil.copy(full_name, targ_dir)
                         os.remove(full_name) 
                         i +=1 
-                        if i >= node.capacity:
+                        if i >= max_capacity:
                             break
 
                 targ_dir = os.path.join(node.dirpath, 'files', 'phase1')
@@ -1775,12 +1777,14 @@ class RMSDataHandle(object):
                     # the node is waiting for data
                     log.info(f'{node.nodename} idle, giving it extra phase1 data')
                     i = 0
+                    # limit child capacity to 5000 if its set to -1
+                    max_capacity = node.capacity if node.capacity >= 0 else 5000
                     for i, full_name in enumerate(glob.glob(os.path.join(self.phase1_dir, '*.pickle'))):
                         log.info(f'moving {full_name} to {node.nodename}')
                         shutil.copy(full_name, targ_dir)
                         os.remove(full_name) 
                         i +=1 
-                        if i >= node.capacity:
+                        if i >= max_capacity:
                             break
 
             # if the files have been in the node folder for more than wait_time hours, move them
@@ -1909,13 +1913,17 @@ class RMSDataHandle(object):
                 #set a temporary save-dir name so we can check capacity
                 if bucket.nodename != 'localhost':
                     tmp_save_dir = os.path.join(bucket.dirpath, 'files', savetype)
+                    # limit children to 5000 if set to -1 ie unlimited
+                    bucket_capacity = bucket.capacity if bucket_capacity >= 0 else 5000
                 else:
+                    # saving to localhost 
                     tmp_save_dir = save_dir
+                    bucket_capacity = bucket.capacity
 
                 os.makedirs(tmp_save_dir, exist_ok=True)
 
                 current_workload = len(glob.glob(os.path.join(tmp_save_dir, '*.pickle')))
-                if bucket.capacity < 0 or current_workload < bucket.capacity:
+                if bucket_capacity < 0 or current_workload < bucket_capacity:
 
                     # set the save dir if the bucket is usable
                     save_dir = tmp_save_dir
