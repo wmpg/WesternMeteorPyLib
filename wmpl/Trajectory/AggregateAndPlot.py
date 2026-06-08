@@ -1482,8 +1482,11 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
                         dir_full_path = os.path.join(os.path.join(traj_dir_path, dir_name))
 
                         if os.path.exists(dir_full_path):
-                            file_list = os.listdir(dir_full_path)
-                            walk_list.append([dir_full_path, [], file_list])
+                            try:
+                                file_list = os.listdir(dir_full_path)
+                                walk_list.append([dir_full_path, [], file_list])
+                            except OSError:
+                                pass
 
 
     else:

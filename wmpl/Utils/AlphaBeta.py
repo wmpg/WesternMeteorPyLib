@@ -453,7 +453,7 @@ def alphaBetaVelocity(ht_data, alpha, beta, v_init):
 
 
 
-def alphaBetaMasses(alpha, beta, slope, mu=0, dens=3500, shape_coeff=1.21, gamma=0.7):
+def alphaBetaMasses(alpha, beta, slope, mu=0, dens=3500, shape_coeff=0.55, gamma=1.0):
     """ Compute the initial and final mass given alpha, beta, and the assumed physical properties. 
     
     Arguments:
@@ -465,8 +465,9 @@ def alphaBetaMasses(alpha, beta, slope, mu=0, dens=3500, shape_coeff=1.21, gamma
         mu: [float] Shape change coefficient. 0 for no spin, and 2/3 for sufficient spin to equally ablate
             the whole surface.
         dens: [float] Bulk density in kg/m^3.
-        shape_coeff: [float] Shape coefficient. 1.21 for sphere, 1.55 for brick.
-        gamma: [float] Drag coefficient (2*Gamma).
+        shape_coeff: [float] Shape coefficient. 1.21 for sphere, 1.55 for brick. As shape_coeff and Gamma are 
+            factored together, we use the empirical value of gamma*A = 0.55 by default.
+        gamma: [float] Drag coefficient (2*drag factor).
 
     Return:
         (m_init, m_final): [tuple of floats] Initial and final mass in kg.
@@ -475,7 +476,7 @@ def alphaBetaMasses(alpha, beta, slope, mu=0, dens=3500, shape_coeff=1.21, gamma
     rho_atm_0 = 1.225
 
     # Compute the M0_star parameter
-    m0s = (gamma*rho_atm_0*HT_NORM_CONST*shape_coeff/(dens**(2/3.0)))**3
+    m0s = (gamma*shape_coeff*rho_atm_0*HT_NORM_CONST/(dens**(2/3.0)))**3
 
     # Compute the initial mass
     m_init = m0s/((alpha*np.sin(slope))**3)
@@ -515,8 +516,8 @@ if __name__ == "__main__":
         type=float, default=3500)
 
     arg_parser.add_argument('-g', '--ga', metavar='GAMMA_A', \
-        help='The product of the drag coefficient Gamma and the shape coefficient A. Used for computing the dynamic mass. Default is 0.7.', \
-        type=float, default=0.7)
+        help='The product of the drag coefficient Gamma and the shape coefficient A. Used for computing the dynamic mass. Default is 0.55.', \
+        type=float, default=0.55)
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -609,9 +610,9 @@ if __name__ == "__main__":
 
         # Compute initial and final mass
         m_init_mu0, m_final_mu0 = alphaBetaMasses(alpha, beta, traj.orbit.elevation_apparent_norot, \
-            mu=0, dens=cml_args.dens, shape_coeff=cml_args.ga)
+            mu=0, dens=cml_args.dens, shape_coeff=cml_args.ga, gamma=1.0)
         m_init_mu23, m_final_mu23 = alphaBetaMasses(alpha, beta, traj.orbit.elevation_apparent_norot, \
-            mu=2/3.0, dens=cml_args.dens, shape_coeff=cml_args.ga)
+            mu=2/3.0, dens=cml_args.dens, shape_coeff=cml_args.ga, gamma=1.0)
 
 
         print()
@@ -723,7 +724,7 @@ if __name__ == "__main__":
 
                 # Compute the dynamic mass
                 dyn_mass = dynamicMass(cml_args.dens, traj.rend_lat, traj.rend_lon, ht_dyn, traj.jdt_ref, \
-                    v_dyn, 1000*abs(decel), gamma=cml_args.ga, shape_factor=1.0)
+                    v_dyn, 1000*abs(decel), gamma=1.0, shape_factor=cml_args.ga)
 
                 # Plot the point where the dynamic mass is estiamted
                 ax_vel.scatter([v_dyn/1000], [ht_dyn/1000], label='Dynamic mass = {:.3f} kg'.format(dyn_mass),\
