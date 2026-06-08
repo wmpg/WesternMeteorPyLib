@@ -1,0 +1,31 @@
+# Configuration file for WMPL distributed processing. 
+# Rename to `wmpl_remote.cfg` and place in the data directory. 
+
+[mode]
+# if mode is 'master' then [children] lists the child processing nodes and capacity of each
+# if mode is 'child' then the [sftp] section says how the child will connect to the parent.
+# Each node must have its own copy of this file and each child must have its own credentials
+
+mode = child
+
+# details of the child nodes. Each line must have three values separated by commas
+# * folder that each node will use. These must map to each node's sftp user's homedir. 
+# * capacity - number of candidates or trajectories to solve. Allows loadbalancing
+# * operation mode - 0: disabled, 1: solving candidates, 2: monte-carlo phase
+# the node names can be used to differentiate children
+
+[children]
+node1 = c:/temp/wmpl/node1,200,1
+node2 = c:/temp/wmpl/node2,400,1
+node3 = c:/temp/wmpl/node3,0,2
+node4 = c:/temp/wmpl/node4,0,2
+node5 = 
+
+
+[sftp]
+# sftp login details for client to connect to the parent when running in 'child' mode
+# if the port is nonstandard (ie not 22) then uncomment and set as required
+host = testserver.somedomain.com
+user = node1
+key = ~/.ssh/somekey
+#port=2222
