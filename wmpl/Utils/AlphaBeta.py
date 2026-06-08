@@ -486,6 +486,120 @@ def alphaBetaMasses(alpha, beta, slope, mu=0, dens=3500, shape_coeff=0.55, gamma
 
     return m_init, m_final
 
+def alphaBetaMasses(
+        alpha,
+        beta,
+        slope,
+        mu=0,
+        dens=3500,
+        shape_coeff=0.55,
+        gamma=1.0,
+        vel_init=None,
+        vel_end=None,
+        verbose=False):
+    
+    """ Compute the initial and final mass from alpha-beta parameters and assumed physical properties.
+    
+    Arguments:
+        alpha: [float]
+        beta: [float]
+        slope: [float] Fireball entry angle (radians).
+
+    Keyword arguments:
+        mu: [float] Shape change coefficient. 0 for no spin, and 2/3 for sufficient spin to equally ablate
+            the whole surface. Default value is 0.
+        dens: [float] Bulk density in kg/m^3.
+        shape_coeff: [float] Shape coefficient. 1.21 for sphere, 1.55 for brick. As shape_coeff and Gamma are 
+            factored together, we use the empirical value of gamma*A = 0.55 by default.
+        gamma: [float] Drag parameter Γ (= C_D /2).
+        vel_init: [float] Initial velocity in m/s. If both vel_init and vel_end are given, the final
+            mass is computed using the full alpha-beta solution. If either is None, the simple
+            approximation assuming vel_end << vel_init is used.
+        vel_end: [float] Final velocity in m/s. Used together with vel_init to compute the final mass
+            using the full alpha-beta solution.
+        verbose: [bool] If True, print the parameters used in the computation and the resulting
+            initial and final mass estimates.
+    Return:
+        (m_init, m_final): [tuple of floats] Initial and final mass in kg.
+    """
+
+    if alpha <= 0:
+        raise ValueError("alpha must be positive")
+
+    if beta <= 0:
+        raise ValueError("beta must be positive")
+
+    if dens <= 0:
+        raise ValueError("dens must be positive")
+
+    if gamma <= 0:
+        raise ValueError("gamma must be positive")
+
+    if shape_coeff <= 0:
+        raise ValueError("shape_coeff must be positive")
+
+    if vel_init is not None:
+        if vel_init <= 0:
+            raise ValueError("vel_init must be positive")
+
+    if vel_end is not None:
+        if vel_end < 0:
+            raise ValueError("vel_end must be non-negative")
+
+    if (vel_init is not None) and (vel_end is not None):
+        if vel_end > vel_init:
+            raise ValueError("vel_end cannot exceed vel_init")
+
+    if not (0 <= mu <= 2/3):
+        raise ValueError("mu must be between 0 and 2/3")
+
+    rho_atm_0 = 1.225
+
+    # Compute the M0_star parameter
+    m0s = (gamma*shape_coeff*rho_atm_0*HT_NORM_CONST/(dens**(2/3.0)))**3
+
+    # Compute the initial mass
+    m_init = m0s/((alpha*np.sin(slope))**3)
+
+
+    # Compute the final mass
+    if (vel_init is None) or (vel_end is None):
+        # Simple alpha-beta approximation
+        m_final = m_init*np.exp(-beta/(1 - mu))
+
+    else:
+        # General alpha-beta solution
+        m_final = m_init*np.exp(
+            -beta/(1 - mu)
+            *(1 - (vel_end/vel_init)**2)
+        )
+        
+    if verbose:
+
+        print("Alpha-beta mass estimate")
+        print("------------------------")
+
+        print(f"alpha        = {alpha:.3f}")
+        print(f"beta         = {beta:.3f}")
+        print(f"slope        = {np.degrees(slope):.2f} deg")
+        print(f"mu           = {mu:.3f}")
+        print(f"density      = {dens:.1f} kg/m^3")
+        print(f"gamma*A      = {gamma*shape_coeff:.3f}")
+
+        if (vel_init is not None) and (vel_end is not None):
+            print(f"v_init       = {vel_init/1000:.3f} km/s")
+            print(f"v_end        = {vel_end/1000:.3f} km/s")
+            print("solution     = full alpha-beta")
+        else:
+            print("solution     = asymptotic approximation")
+
+        print()
+
+        print(f"m_init       = {m_init:.3e} kg")
+        print(f"m_final      = {m_final:.3e} kg")
+
+    return m_init, m_final
+
 
 
 if __name__ == "__main__":
