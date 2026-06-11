@@ -285,7 +285,6 @@ def lagFitVelocity(time_data, lag_data, vel_data, v0):
     return vel_fit, fit_params
 
 
-
 def minimizeAlphaBeta(v_normed, ht_normed):
     """ initiates and calls the Q4 minimisation given in Gritsevich 2007 -
         'Validity of the photometric formula for estimating the mass of a fireball projectile'
@@ -334,7 +333,6 @@ def minimizeAlphaBeta(v_normed, ht_normed):
     return res.x
 
 
-
 def fitAlphaBeta(v_data, ht_data, v_init=None):
     """ Fit the alpha and beta parameters to the given velocity and height data. 
     
@@ -349,7 +347,7 @@ def fitAlphaBeta(v_data, ht_data, v_init=None):
     Return:
         (v_init, alpha, beta):
             - v_init: [float] Input or derived initial velocity (m/s).
-            - alpha: [float] Balistic coefficient.
+            - alpha: [float] Ballistic coefficient.
             - beta: [float] Mass loss.
     """
 
@@ -379,19 +377,17 @@ def fitAlphaBeta(v_data, ht_data, v_init=None):
     return v_init, alpha, beta
 
 
-
 def alphaBetaHeight(vel_data, alpha, beta, v_init):
     """ Compute the height given the velocity and alpha, beta parameters.
 
     Arguments:
         vel_data: [ndarray] Velocity data (m/s).
-        alpha: [float] Balistic coefficient.
+        alpha: [float] Ballistic coefficient.
         beta: [float] Mass loss.
         v_init: [float] Input or derived initial velocity (m/s).
 
     Return:
         ht_data: [ndarray] Height data (m).
-    
     """
 
     # Normalize the velocity
@@ -406,20 +402,18 @@ def alphaBetaHeight(vel_data, alpha, beta, v_init):
     return ht_data
 
 
-
 def alphaBetaVelocity(ht_data, alpha, beta, v_init):
     """ Compute the velocity given the height and alpha, beta parameters. Unfortunately there is no 
         analytical inverse to the exponential integral, so the solution is found numerically.
 
     Arguments:
-        ht_data: [ndarray] Height data (m).
-        alpha: [float] Balistic coefficient.
+        ht_data: [ndarray or float] Height data (m).
+        alpha: [float] Ballistic coefficient.
         beta: [float] Mass loss.
         v_init: [float] Input or derived initial velocity (m/s).
 
     Return:
-        vel_data: [ndarray] Velocity data (m/s).
-    
+        vel_data: [ndarray or float] Velocity data (m/s).
     """
 
     def _diff(v, alpha, beta, ht_target):
@@ -429,6 +423,11 @@ def alphaBetaVelocity(ht_data, alpha, beta, v_init):
         ht_guess = np.log(alpha) + beta - np.log((scipy.special.expi(beta) - scipy.special.expi(beta*v**2))/2)
         
         return (ht_guess - ht_target)**2
+
+    # Allow both scalar and array height inputs
+    scalar_input = np.isscalar(ht_data)
+    if scalar_input:
+        ht_data = np.array([ht_data])
 
     # Normalize the height
     ht_normed = ht_data/HT_NORM_CONST
@@ -449,42 +448,12 @@ def alphaBetaVelocity(ht_data, alpha, beta, v_init):
     # Compute the velocity in m/s
     vel_data = vel_normed*v_init
 
+    # Return a scalar if the input height was a scalar
+    if scalar_input:
+        return vel_data[0]
+
     return vel_data
 
-
-
-def alphaBetaMasses(alpha, beta, slope, mu=0, dens=3500, shape_coeff=0.55, gamma=1.0):
-    """ Compute the initial and final mass given alpha, beta, and the assumed physical properties. 
-    
-    Arguments:
-        alpha: [float]
-        beta: [float]
-        slope: [float] Fireball entry angle (radians).
-
-    Keyword arguments:
-        mu: [float] Shape change coefficient. 0 for no spin, and 2/3 for sufficient spin to equally ablate
-            the whole surface.
-        dens: [float] Bulk density in kg/m^3.
-        shape_coeff: [float] Shape coefficient. 1.21 for sphere, 1.55 for brick. As shape_coeff and Gamma are 
-            factored together, we use the empirical value of gamma*A = 0.55 by default.
-        gamma: [float] Drag coefficient (2*drag factor).
-
-    Return:
-        (m_init, m_final): [tuple of floats] Initial and final mass in kg.
-    """
-
-    rho_atm_0 = 1.225
-
-    # Compute the M0_star parameter
-    m0s = (gamma*shape_coeff*rho_atm_0*HT_NORM_CONST/(dens**(2/3.0)))**3
-
-    # Compute the initial mass
-    m_init = m0s/((alpha*np.sin(slope))**3)
-
-    # Compute the final mass
-    m_final = m_init*np.exp(-beta/(1 - mu))
-
-    return m_init, m_final
 
 def alphaBetaMasses(
         alpha,
@@ -497,7 +466,6 @@ def alphaBetaMasses(
         vel_init=None,
         vel_end=None,
         verbose=False):
-    
     """ Compute the initial and final mass from alpha-beta parameters and assumed physical properties.
     
     Arguments:
@@ -529,14 +497,20 @@ def alphaBetaMasses(
     if beta <= 0:
         raise ValueError("beta must be positive")
 
+    if not (0 < slope <= np.pi/2):
+        raise ValueError("slope must be between 0 and pi/2 radians")
+
+    if not (0 <= mu <= 2/3):
+        raise ValueError("mu must be between 0 and 2/3")
+
     if dens <= 0:
         raise ValueError("dens must be positive")
+    
+    if shape_coeff <= 0:
+        raise ValueError("shape_coeff must be positive")
 
     if gamma <= 0:
         raise ValueError("gamma must be positive")
-
-    if shape_coeff <= 0:
-        raise ValueError("shape_coeff must be positive")
 
     if vel_init is not None:
         if vel_init <= 0:
@@ -549,9 +523,6 @@ def alphaBetaMasses(
     if (vel_init is not None) and (vel_end is not None):
         if vel_end > vel_init:
             raise ValueError("vel_end cannot exceed vel_init")
-
-    if not (0 <= mu <= 2/3):
-        raise ValueError("mu must be between 0 and 2/3")
 
     rho_atm_0 = 1.225
 
@@ -721,12 +692,14 @@ if __name__ == "__main__":
         # Estimate the alpha, beta parameters
         v_init, alpha, beta = fitAlphaBeta(vel_input, ht_data_rescaled, v_init=traj.v_init)
 
+        # Estimate the final velocity from the fitted alpha-beta solution
+        vel_end = alphaBetaVelocity(ht_data_rescaled[0], alpha, beta, v_init)
 
         # Compute initial and final mass
         m_init_mu0, m_final_mu0 = alphaBetaMasses(alpha, beta, traj.orbit.elevation_apparent_norot, \
-            mu=0, dens=cml_args.dens, shape_coeff=cml_args.ga, gamma=1.0)
+            mu=0, dens=cml_args.dens, shape_coeff=cml_args.ga, gamma=1.0, vel_init=traj.v_init, vel_end=vel_end)
         m_init_mu23, m_final_mu23 = alphaBetaMasses(alpha, beta, traj.orbit.elevation_apparent_norot, \
-            mu=2/3.0, dens=cml_args.dens, shape_coeff=cml_args.ga, gamma=1.0)
+            mu=2/3, dens=cml_args.dens, shape_coeff=cml_args.ga, gamma=1.0, vel_init=traj.v_init, vel_end=vel_end)
 
 
         print()
@@ -743,11 +716,11 @@ if __name__ == "__main__":
         print("Masses with dens = {:d} kg/m^3, sphere:".format(int(cml_args.dens)))
         print(" * - note that the initial masses are usually 4-10x underestimated!")
         print("  mu = 0:")
-        print("    Initial = {:.2f} kg".format(m_init_mu0))
-        print("    Final   = {:.2f} kg".format(m_final_mu0))
+        print("    Initial = {:.2e} kg".format(m_init_mu0))
+        print("    Final   = {:.2e} kg".format(m_final_mu0))
         print("  mu = 2/3:")
-        print("    Initial = {:.2f} kg".format(m_init_mu23))
-        print("    Final   = {:.2f} kg".format(m_final_mu23))
+        print("    Initial = {:.2e} kg".format(m_init_mu23))
+        print("    Final   = {:.2e} kg".format(m_final_mu23))
 
         print("*********************************************")
         print()
@@ -771,11 +744,8 @@ if __name__ == "__main__":
 
 
 
-
-        fig, (ax_ab, ax_vel, ax_lag, ax_lag_res) = plt.subplots(ncols=4, sharey=True, figsize=(14, 6))
-
-
         ### Alpha-beta plot ###
+        fig, (ax_ab, ax_vel, ax_lag, ax_lag_res) = plt.subplots(ncols=4, sharey=True, figsize=(14, 6))
 
         # Plot the data rescaled to an exponential atmosphere
         ax_ab.scatter(vel_data/1000, ht_data_rescaled/1000, s=5, label="Rescaled height to exp. atm")
@@ -793,10 +763,6 @@ if __name__ == "__main__":
         ax_ab.set_ylabel("Height (km)")
 
         ax_ab.legend(loc='upper left')
-
-
-        ### ###
-
 
 
         ### Plot the lag fit ###
@@ -840,7 +806,7 @@ if __name__ == "__main__":
                 dyn_mass = dynamicMass(cml_args.dens, traj.rend_lat, traj.rend_lon, ht_dyn, traj.jdt_ref, \
                     v_dyn, 1000*abs(decel), gamma=1.0, shape_factor=cml_args.ga)
 
-                # Plot the point where the dynamic mass is estiamted
+                # Plot the point where the dynamic mass is estimated
                 ax_vel.scatter([v_dyn/1000], [ht_dyn/1000], label='Dynamic mass = {:.3f} kg'.format(dyn_mass),\
                     color='k')
 
@@ -888,7 +854,7 @@ if __name__ == "__main__":
         ### PLOT METEORITE DROPPING POSSIBILITY
 
         # define x values
-        x_mu = np.arange(0,10, 0.00005)
+        x_mu = np.arange(0, 10, 0.00005)
 
         # function for mu = 0, 50 g possible meteorite:
         fun_50g_mu0 = lambda x_mu:np.log(13.2 - 3*x_mu)
@@ -907,11 +873,19 @@ if __name__ == "__main__":
         y_1kg_mu23 = [fun_1kg_mu23(i) for i in x_mu]
 
         # plot mu0, mu2/3 lines and your poit:
-        plt.plot(x_mu, y_50g_mu0, color='grey', label="50 g meteorite, mu = 0", linestyle='dashed')
-        plt.plot(x_mu, y_50g_mu23, color='k',   label="50 g meteorite, mu = 2/3", linestyle='dashed')
-        plt.plot(x_mu, y_1kg_mu0, color='grey', label="1 kg meteorite, mu = 0")
-        plt.plot(x_mu, y_1kg_mu23, color='k',   label="1 kg meteorite, mu = 2/3")
-        plt.scatter([np.log(alpha*np.sin(traj.orbit.elevation_apparent_norot))], [np.log(beta)], color='r')
+        plt.plot(x_mu, y_50g_mu0, color='grey', label=r"50 g meteorite, $\mu = 0$", linestyle='dashed')
+        plt.plot(x_mu, y_50g_mu23, color='k',   label=r"50 g meteorite, $\mu = 2/3$", linestyle='dashed')
+        plt.plot(x_mu, y_1kg_mu0, color='grey', label=r"1 kg meteorite, $\mu = 0$")
+        plt.plot(x_mu, y_1kg_mu23, color='k',   label=r"1 kg meteorite, $\mu = 2/3$")
+        plt.scatter(
+            [np.log(alpha*np.sin(traj.orbit.elevation_apparent_norot))],
+            [np.log(beta)],
+            color='r',
+            label=(
+            f"$m_{{final}}(\\mu=0)={m_final_mu0:.2e}\\,\\mathrm{{kg}}$\n"
+            f"$m_{{final}}(\\mu=2/3)={m_final_mu23:.2e}\\,\\mathrm{{kg}}$"
+            )
+        )
 
         # defite plot parameters
         plt.xlim((-1, 8))
@@ -1004,7 +978,6 @@ if __name__ == "__main__":
 
 
         ### Plot magnitude vs dynamic pressure ###
-
 
         for obs in traj.observations:
 
