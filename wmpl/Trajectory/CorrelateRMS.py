@@ -1637,13 +1637,17 @@ class RMSDataHandle(object):
         log.info('merging in any remotely processed data')
         for node in self.RemoteDatahandler.nodes:
             if node.nodename == 'localhost' or self.observations_db is None or self.trajectory_db is None:
+                log.info(f'skipping node {node.nodename}')
                 continue
 
             # if the remote node upload path doesn't exist skip it
             if not os.path.isdir(os.path.join(node.dirpath,'files')):
+                log.info(f'skipping node {node.nodename} as no files folder')
                 continue
 
             # merge the databases
+            if verbose:
+                log.info(f"checking for uploaded obs databases in {os.path.join(node.dirpath,'files')}")
             for obsdb_path in glob.glob(os.path.join(node.dirpath,'files','observations*.db')):
                 if self.observations_db.mergeObsDatabase(obsdb_path):
                     os.remove(obsdb_path)
@@ -1655,6 +1659,8 @@ class RMSDataHandle(object):
                         pass
 
             
+            if verbose:
+                log.info(f"checking for uploaded traj databases in {os.path.join(node.dirpath,'files')}")
             for trajdb_path in glob.glob(os.path.join(node.dirpath,'files','trajectories*.db')):
                 if self.trajectory_db.mergeTrajDatabase(trajdb_path):
                     os.remove(trajdb_path)
@@ -1664,24 +1670,41 @@ class RMSDataHandle(object):
             i = 0
             remote_trajdir = os.path.join(node.dirpath, 'files', 'trajectories')
             if os.path.isdir(remote_trajdir):
+                if verbose:
+                    log.info(f'checking for uploaded trajectories in {remote_trajdir}')
                 for i,traj in enumerate(os.listdir(remote_trajdir)):
                     if os.path.isdir(os.path.join(remote_trajdir, traj)):
                         targ_path = os.path.join(self.output_dir, 'trajectories', traj[:4], traj[:6], traj[:8], traj)
-                        src_path = os.path.join(node.dirpath,'files', 'trajectories', traj)
+                        src_path = os.path.join(remote_trajdir, traj)
                         for src_name in os.listdir(src_path):
                             src_name = os.path.join(src_path, src_name)
                             if not os.path.isfile(src_name):
                                 log.warning(f'{src_name} missing')
                             else:
+                                if '.pickle' in src_name:
+                                    log.info(f'moving {src_name} to {targ_path}')
+                                    traj = loadPickle(src_path, src_name)
+                                    if hasattr(traj, 'pre_mc_longname') and traj.pre_mc_longname != traj.longname:
+                                        # When saving MC-phase solns we need to check if the MC phase has changed the reference time
+                                        # slightly, and if so, remove the original folder to ensure no duplicates.
+                                        pretraj = traj.pre_mc_longname
+                                        pre_path = os.path.join(self.output_dir, 'trajectories', pretraj[:4], pretraj[:6], pretraj[:8], pretraj)
+                                        log.info(f'removing {pre_path}')
+                                        if os.path.isdir(pre_path):
+                                            shutil.rmtree(pre_path, ignore_errors=True)
                                 os.makedirs(targ_path, exist_ok=True)
                                 shutil.copy(src_name, targ_path)
-                        shutil.rmtree(src_path,ignore_errors=True)
+                        try:
+                            shutil.rmtree(src_path,ignore_errors=False)
+                        except Exception:
+                            log.warning(f'unable to remove {src_name}, will try later')
             if i > 0:
                 log.info(f'moved {i+1} trajectories')
 
             # if the node was in mode 1 then move any uploaded phase1 solutions
             remote_ph1dir = os.path.join(node.dirpath, 'files', 'phase1')
             if os.path.isdir(remote_ph1dir) and node.mode==1:
+                log.info(f'checking for uploaded phase1 in {remote_ph1dir}')
                 os.makedirs(self.phase1_dir, exist_ok=True)
                 i = 0
                 for i, fil in enumerate([x for x in os.listdir(remote_ph1dir) if '.pickle' in x]):
@@ -1695,6 +1718,7 @@ class RMSDataHandle(object):
             # if the node was in mode 1 then move any uploaded processed candidates
             remote_canddir = os.path.join(node.dirpath, 'files', 'candidates', 'processed')
             if os.path.isdir(remote_canddir) and node.mode==1:
+                log.info(f'checking for processed candidates in {remote_canddir}')
                 i = 0
                 targ_dir = os.path.join(self.candidate_dir, 'processed')
                 for i, fil in enumerate([x for x in os.listdir(remote_canddir) if '.pickle' in x]):
@@ -1708,6 +1732,7 @@ class RMSDataHandle(object):
             # if the node was in mode 2 then move any processed phase1 solutions
             remote_ph1dir = os.path.join(node.dirpath, 'files', 'phase1', 'processed')
             if os.path.isdir(remote_ph1dir) and node.mode==2:
+                log.info(f'checking for processed phase1 in {remote_ph1dir}')
                 targ_dir = os.path.join(self.phase1_dir, 'processed')
                 os.makedirs(targ_dir, exist_ok=True)
                 i = 0
