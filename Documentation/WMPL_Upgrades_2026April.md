@@ -49,15 +49,15 @@ Meanwhile modes 1 and 2 can be run with a period of around 30 minutes (`--autofr
 
 The solver supports distribution of both candidates and phase1 solutions.
 
-To enable distributed processing, we require one master node and one or more child nodes.
+To enable distributed processing, we require one parent node and one or more child nodes.
 
-On the master, we set up the system as for single-server continuous processing, then create a configuration file '**wmpl_remote.cfg**' in the same folder as the databases. The content of the configuration file is explained below and a sample file is included in the repository.
+On the parent, we set up the system as for single-server continuous processing, then create a configuration file '**wmpl_remote.cfg**' in the same folder as the databases. The content of the configuration file is explained below and a sample file is included in the repository.
 
-On each child, we also create a configuration file (see 'Child Node Configuration' below). Child nodes can run in modes 1 or 2, collecting relevant data from the master node and uploading the results upon completion.
+On each child, we also create a configuration file (see 'Child Node Configuration' below). Child nodes can run in modes 1 or 2, collecting relevant data from the parent node and uploading the results upon completion.
 
-SFTP is used to move data between master and child, and each child must therefore have an SFTP account on the server hosting the master.
+SFTP is used to move data between parent and child, and each child must therefore have an SFTP account on the server hosting the parent.
 
-Data are written into a 'files' folder in the sftp account's home directory, and therefore the account running the master instances of the solver must be able to read from, write to and create folders in a "files" directory in the children's home directories. On my test server I achieved this with POSIX ACLs and Unix group membership.
+Data are written into a 'files' folder in the sftp account's home directory, and therefore the account running the parent instances of the solver must be able to read from, write to and create folders this folder. On my test server I achieved this with POSIX ACLs and Unix group membership.
 
 Additionally, the solver itself sets permissions on files and subfolders, and these should not be altered.
 
@@ -65,16 +65,16 @@ The required folder structure for one node is shown below.
 
 ![image](node_structure.png)
 
-**Master Node Configuration**
+**Parent Node Configuration**
 
-The configuration file for the master node specifies the child nodes that are available, the capacity of each node, and the mode that its operating in (modes 1 or 2, no other mode is supported). 
+The configuration file for the parent node specifies the child nodes that are available, the capacity of each node, and the mode that its operating in (modes 1 or 2, no other mode is supported). 
 
 The capacity value can be any integer, with zero meaning the node is disabled and a negative value meaning the node has no capacity limit. Some experimentation may be required to determine the optimal capacity, but in testing I found that my 4-core i7 desktop could process 200 candidates in around 30 minutes, and 200 monte-carlo solutions in around three hours. Limits of 500 for mode 1 and 200 for mode 2 therefore seem reasonable. 
 
-Example master-mode configuration file:
+Example parent-mode configuration file:
 
 \[mode\]  
-mode = master  
+mode = parent  # 'master' can also be used
 \[children\]  
 node1 = /home/node1, 500, 1  
 node2 = /home/node2, 200, 2  
@@ -86,19 +86,19 @@ This indicates that:
 - node 2 is running in mode 2 and has capacity of 200.
 - Node 3 is currently disabled (capacity zero) and will not be assigned data.
 
-If we bring node 3 online, we can change the capacity from zero to some suitable value, and the master will begin assigning candidates to it (see 'Dynamically Adding Nodes' below).
+If we bring node 3 online, we can change the capacity from zero to some suitable value, and the parent will begin assigning candidates to it (see 'Dynamically Adding Nodes' below).
 
-If no nodes are available, or if all nodes are at capacity, any remaining data will be assigned to the master node.
+If no nodes are available, or if all nodes are at capacity, any remaining data will be assigned to the parent node.
 
-The master will also stop assigning data to a node if a special file named "stop" is present in the files folder of the child's SFTP home directory. The child nodes create this file when shutting down but it can also be created manually if necessary.
+The parent will also stop assigning data to a node if a special file named "stop" is present in the files folder of the child's SFTP home directory. The child nodes create this file when shutting down but it can also be created manually if necessary.
 
-Furthermore, if data has not been picked up by a child within six hours, then it will be reassigned to the master node. This ensures that data is not left unprocessed if for example a node crashes unexpectedly or is running very slowly.
+Furthermore, if data has not been picked up by a child within six hours, then it will be reassigned to the parent node. This ensures that data is not left unprocessed if for example a node crashes unexpectedly or is running very slowly.
 
 **Dynamically Adding Nodes**
 
-The master instance of the solver re-reads the remote configuration file on each loop, and so nodes can be added, removed, disabled or enabled on demand, without needing to restart the master.
+The parent instance of the solver re-reads the remote configuration file on each loop, and so nodes can be added, removed, disabled or enabled on demand, without needing to restart the parent.
 
-So, for example, one could create a configuration listing several child nodes with capacity set to zero, which would mean they were initially disabled. The Solver would thus assign all candidates to the master node. However, if volumes rose, an instance of the solver could be started up on a child node and the master configuration file updated. On the candidate finding process's next loop, the file would be re-loaded and data would be automatically assigned to the child.
+So, for example, one could create a configuration listing several child nodes with capacity set to zero, which would mean they were initially disabled. The Solver would thus assign all candidates to the parent node. However, if volumes rose, an instance of the solver could be started up on a child node and the parent configuration file updated. On the candidate finding process's next loop, the file would be re-loaded and data would be automatically assigned to the child.
 
 You can also _manually_ move files between child node folders on the server. For instance, if you want to move some load from node1 to node2 you can move some of the candidate files from node1's _candidates_ folder to node2's _candidates_ folder. The UNIX command to move 100 candidates from node 1 to node 2 would be: 
 
@@ -106,13 +106,13 @@ _ls -1 ~node/files/candidates | head -100 | while read i ; do mv \$i ~node2/file
 
 **Processing Uploaded Data**
 
-Upon each loop round, the master node will scan each node's home directory for uploaded results. These will be integrated into the trajectories data and the databases updated. After integration, a deduplication routine is run. This handles edge cases where a new version of a trajectory is created by a child node. 
+Upon each loop round, the parent node will scan each node's home directory for uploaded results. These will be integrated into the trajectories data and the databases updated. After integration, a deduplication routine is run. This handles edge cases where a new version of a trajectory is created by a child node. 
 
 **Child Node Configuration**
 
 The child must be running in mode 1 or 2 - no other mode is supported at present - and should be run with the `-a --autofreq 15` flags, to ensure that it continues to collect and process data promptly. 
 
-The child configuration file specifies the server, user and key to use for connections to the master node. Port is optional but can be specified if a non-standard SFTP port is in use.
+The child configuration file specifies the server, user and key to use for connections to the parent node. Port is optional but can be specified if a non-standard SFTP port is in use.
 
 \[mode\]  
 mode = child  
@@ -122,9 +122,9 @@ user = node1
 key = ~/.ssh/somekey  
 port = 22
 
-At startup, the child node will connect to the master and remove the "stop" file, if present. This indicates to the master that it is "open for business". The child will then download all assigned data and begin processing it. Downloaded files are moved to a subfolder _processed_ on the sftp server. Upon completion it will upload the results to the sftp server, then look for new data to process.
+At startup, the child node will connect to the parent and remove the "stop" file, if present. This indicates to the parent that it is "open for business". The child will then download all assigned data and begin processing it. Downloaded files are moved to a subfolder _processed_ on the sftp server. Upon completion it will upload the results to the sftp server, then look for new data to process.
 
-Note: do not use the `maxtraj` parameter with child nodes. If this parameter is set, then there's a risk that a backlog of downloaded-but-unprocessed data will build up. For example if the child's capacity is set to 200 on the master node, but the child is limited to 100 via `maxtraj`, then it will download 200 on each pass, but only process and upload 100. 
+Note: do not use the `maxtraj` parameter with child nodes. If this parameter is set, then there's a risk that a backlog of downloaded-but-unprocessed data will build up. For example if the child's capacity is set to 200 on the parent node, but the child is limited to 100 via `maxtraj`, then it will download 200 on each pass, but only process and upload 100. 
 
 
 **Stopping a Child Node**
@@ -133,9 +133,9 @@ Any node can be terminated by pressing Ctrl-C or by sending SIGINT to its proces
 
 **Recovering from a Child Node Crash or Shutdown**
 
-If a child node crashes or has to be shut down while data is being processed, identify the most recent, potentially incomplete, data set and move it back from the `candidates/processed` or `phase1/processed` folder to the master's `candidates` or `phase` folder as appropriate. Depending on what stage was reached, the data may be in the child nodes' folders on the server, or in the master node folder.
+If a child node crashes or has to be shut down while data is being processed, identify the most recent, potentially incomplete, data set and move it back from the `candidates/processed` or `phase1/processed` folder to the parent's `candidates` or `phase` folder as appropriate. Depending on what stage was reached, the data may be in the child nodes' folders on the server, or in the parent node folder.
 
-The latest data set assigned to a node can be identified by checking the master log files. The example below shows a candidate and a phase1 solution assigned to child nodes node1 and node2. 
+The latest data set assigned to a node can be identified by checking the parent log files. The example below shows a candidate and a phase1 solution assigned to child nodes node1 and node2. 
 ``` bash
 $ egrep "node1|node2" *.log | grep saving
 
