@@ -1630,7 +1630,7 @@ class RMSDataHandle(object):
    
     def moveUploadedData(self, verbose=False):
         """
-        Used in 'master' mode: this moves uploaded data to the target locations on the server
+        Used in 'parent' mode: this moves uploaded data to the target locations on the server
         and merges in any uploaded sqlite databases
 
         """
@@ -1914,7 +1914,7 @@ class RMSDataHandle(object):
             save_dir = self.candidate_dir
             required_mode = MCMODE_PHASE1
 
-        if self.RemoteDatahandler and self.RemoteDatahandler.mode == 'master':
+        if self.RemoteDatahandler and self.RemoteDatahandler.mode == 'parent':
 
             # Select a random bucket, check its not already full, and then save the pickle there.
             # Make sure to break out once all buckets have been tested
@@ -2354,8 +2354,10 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                         # Update the trajectory database, removing any that no longer exist on disk,
                         # adding any that exist on disk but are missing in the database, and 
                         # removing any duplicates from both disk and database
-                       
-                        dh.updateTrajectoryDatabase(dt_range=(bin_beg, bin_end))
+                        if mcmode == MCMODE_PHASE1:
+                            dh.updateTrajectoryDatabase(dt_range=(dh.dt_range[0], dh.dt_range[1]))
+                        else:
+                            dh.updateTrajectoryDatabase(dt_range=(bin_beg, bin_end))
 
                     if mcmode & MCMODE_CANDS:
                         log.info("")
@@ -2389,7 +2391,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                                 dh.trajectory_db = TrajectoryDatabase(dh.db_dir, purge_records=True)
                                 dh.observations_db = ObservationsDatabase(dh.db_dir, purge_records=True)
 
-                    if dh.RemoteDatahandler and dh.RemoteDatahandler.mode == 'master':
+                    if dh.RemoteDatahandler and dh.RemoteDatahandler.mode == 'parent':
                         # move any uploaded data and then check and rebalance any pending cands or phase1s
                         dh.moveUploadedData(verbose=verbose)
                         dh.checkAndRedistribCands(wait_time=6, verbose=verbose)

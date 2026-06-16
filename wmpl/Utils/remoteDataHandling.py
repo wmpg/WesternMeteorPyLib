@@ -63,10 +63,11 @@ class RemoteDataHandler():
         cfg = ConfigParser()
         cfg.read(cfg_file)
         self.mode = cfg['mode']['mode'].lower()
-        if self.mode not in ['master', 'child']:
-            log.warning('remote cfg: mode must be master or child, not enabling remote processing')
+        self.mode = 'parent' if self.mode=='master' else self.mode
+        if self.mode not in ['master', 'child', 'parent']:
+            log.warning('remote cfg: mode must be parent or child, not enabling remote processing')
             return 
-        if self.mode == 'master':
+        if self.mode == 'master' or self.mode == 'parent':
             if 'children' not in cfg.sections():
                 log.warning('remote cfg: children section missing, not enabling remote processing')
                 return 
@@ -76,7 +77,7 @@ class RemoteDataHandler():
             self.nodes = [k.split(',') for k in cfg['children'].values()]
             self.nodes = [RemoteNode(nn,x[0],x[1],x[2]) for nn,x in zip(self.nodenames,self.nodes) if len(x)==3]
             self.nodes.append(RemoteNode('localhost', None, -1, -1))
-            activenodes = [n.nodename for n in self.nodes if n.capacity!=0]
+            activenodes = [n.nodename for n in self.nodes if n.capacity!=0 and n.mode!=0]
             log.info(f' using nodes {activenodes}')
         else:
             # 'child' mode
@@ -379,7 +380,7 @@ class RemoteDataHandler():
             open(readyfile,'w').write('stop')
             self.sftp_client.put(readyfile, 'files/stop')                      
         except Exception:
-            log.warning('unable to set stop flag, master will not continue to assign data')
+            log.warning('unable to set stop flag, parent will continue to assign data')
         time.sleep(2)
         self.closeSFTPConnection()
         log.info('set stop flag')
