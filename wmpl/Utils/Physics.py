@@ -246,11 +246,19 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1):
         return _mass_for(lum_eff_mass)
 
     # Otherwise iterate to a self-consistent mass (only models 1-5,7 actually depend on mass, the
-    # others converge on the first pass).
-    mass = 1.0
+    # others converge on the first pass). Convergence is measured as a fraction of the first mass
+    # estimate, so it behaves consistently across orders of magnitude (e.g. ~1e-7 kg meteoroids) and
+    # does not divide by an evolving (possibly tiny) iterate.
+    rel_tol = 1e-4
+
+    # First estimate (mass term of the lum. eff. models is bounded, so a 1 kg seed lands within a
+    # small factor of the true mass regardless of scale).
+    mass = _mass_for(1.0)
+    mass_ref = abs(mass)
+
     for _ in range(50):
         mass_new = _mass_for(mass)
-        if (mass_new > 0) and (abs(mass_new - mass)/mass_new < 1e-4):
+        if abs(mass_new - mass) < rel_tol*mass_ref:
             mass = mass_new
             break
         mass = mass_new
