@@ -65,7 +65,6 @@ def dynamicPressure(lat, lon, height, jd, velocity, gamma=1.0):
     return dyn_pressure
 
 
-
 def dynamicMass(bulk_density, lat, lon, height, jd, velocity, decel, gamma=1.0, shape_factor=1.21):
     """ Calculate dynamic mass at the given point on meteor's trajectory. 
     
@@ -102,7 +101,6 @@ def dynamicMass(bulk_density, lat, lon, height, jd, velocity, decel, gamma=1.0, 
     dyn_mass = (1.0/(bulk_density**2))*((gamma*shape_factor*(velocity**2)*atm_dens)/decel)**3
 
     return dyn_mass
-
 
 
 def calcIntensity(mag_abs, P_0m=840.0):
@@ -158,8 +156,7 @@ def calcRadiatedEnergy(time, mag_abs, P_0m=840.0):
     return intens_int
 
 
-
-def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1):
+def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1, v_init=None):
     """ Calculates the mass of a meteoroid from the time and absolute magnitude.
 
     Arguments:
@@ -186,7 +183,15 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1):
         lum_eff_mass: [float] Meteoroid mass (kg) used to evaluate the mass-dependent luminous efficiency
             models. Ignored for a float tau. If -1 (default), the mass is iterated to self-consistency
             (compute mass -> recompute tau -> repeat until convergence).
-
+        v_init: [float or None] Pre-atmospheric velocity (m/s) used by the ReVelle & Ceplecha (2001)
+            deceleration correction in the luminous efficiency calculation. Default is None.
+            - None: the deceleration correction is not applied.
+            - -1: use the maximum velocity value in the velocity array as the pre-atmospheric velocity.
+              If v_init=-1 and velocity is scalar, the deceleration correction is not applied.
+            - >0: use the supplied value as the pre-atmospheric velocity.
+            NOTE: the velocity array should represent a fitted deceleration curve (i.e. a physically
+            consistent monotonic velocity evolution) rather than individual noisy measurements.
+            
     Return:
         mass: [float] Photometric mass of the meteoroid in kg.
 
@@ -200,14 +205,43 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1):
     #
     # For constant velocity and luminous efficiency this reduces to:
     #   M = (2/(tau*v^2))*integral(I dt)
+    #
+    # If tau is constant but velocity varies along the trajectory:
+    #   M = (2/tau)*integral(I/v^2 dt)
 
-    # A fixed luminous efficiency was given: compute the mass using that constant value.
+    if len(time) != len(mag_abs):
+        raise ValueError(
+            "time and mag_abs must have the same length."
+        )
+    
+    # If a velocity array is given, it must have the same length as the
+    # photometric measurements.
+    if not np.isscalar(velocity) and len(velocity) != len(time):
+        raise ValueError(
+            "Velocity array length ({:d}) does not match the number of "
+            "time/magnitude measurements ({:d}).".format(
+                len(velocity), len(time)
+            )
+        )
+    
+    if lum_eff_mass < 0 and lum_eff_mass != -1:
+        raise ValueError(
+            "lum_eff_mass must be >= 0 or -1 for self-consistent iteration."
+        )
+
+    # Constant luminous efficiency (tau given directly as a ratio).
     if not isinstance(tau, str) and not isinstance(tau, (bool, int)):
+        # Constant velocity
+        if np.isscalar(velocity):
+            intens_int = calcRadiatedEnergy(time, mag_abs, P_0m=P_0m)
+            return (2.0/(tau*velocity**2))*intens_int
 
-        intens_int = calcRadiatedEnergy(time, mag_abs, P_0m=P_0m)
-
-        return (2.0/(tau*velocity**2))*intens_int
-
+        # Velocity array
+        else:
+            intens = calcIntensity(mag_abs, P_0m=P_0m)
+            vel_arr = np.asarray(velocity, dtype=float)
+            dm_dt = 2.0*intens/(tau*vel_arr**2)
+            return simpson(dm_dt, x=time)
 
     # Velocity-dependent model: resolve the lum_eff_type code.
     if isinstance(tau, str):
@@ -226,14 +260,26 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1):
     # Radiated power at every measurement point
     intens = calcIntensity(mag_abs, P_0m=P_0m)
 
-    # Work with array velocity so a single code path handles scalar and array input
+
+    # Convert velocity to an array for the velocity-dependent luminous efficiency calculations.
     vel_arr = np.atleast_1d(np.asarray(velocity, dtype=float))
+
+    if v_init is None:
+        # Disable the ReVelle & Ceplecha deceleration correction
+        v_init_eff = -1.0
+    elif v_init == -1:
+        if np.isscalar(velocity):
+            v_init_eff = -1.0
+        else:
+            v_init_eff = float(np.max(vel_arr))
+    else:
+        v_init_eff = float(v_init)
 
     def _mass_for(mass_assumed):
         """ Compute the photometric mass given an assumed meteoroid mass for the lum. eff. models. """
 
         # Vectorize the scalar Cython call over the velocity points (lum_eff arg only used for type 0)
-        tau_arr = np.array([luminousEfficiency(lum_eff_type, 0.7, v, mass_assumed) for v in vel_arr])
+        tau_arr = np.array([luminousEfficiency(lum_eff_type, 0.7, v, mass_assumed, v_init_eff) for v in vel_arr])
 
         # Integrate the instantaneous mass-loss rate dm/dt = 2*I/(tau*v^2)
         dm_dt = 2.0*intens/(tau_arr*vel_arr**2)
@@ -262,9 +308,13 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1):
             mass = mass_new
             break
         mass = mass_new
+    else:
+        print(
+            "WARNING: luminous efficiency self-consistency iteration "
+            "did not converge after 50 iterations."
+        )
 
     return mass
-
 
 
 def calcKB(lat, lon, ht_beg, jd, v, zenith_angle, gmn_correction=False):
