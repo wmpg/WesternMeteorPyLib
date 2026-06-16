@@ -73,6 +73,7 @@ def dynamicMass(bulk_density, lat, lon, height, jd, velocity, decel, gamma=1.0, 
     Return:
         dyn_mass: [float] Dynamic mass in kg.
 
+
     """
 
     # Calculate the atmosphere density at the given point
@@ -84,19 +85,21 @@ def dynamicMass(bulk_density, lat, lon, height, jd, velocity, decel, gamma=1.0, 
     return dyn_mass
 
 
+
 def calcIntensity(mag_abs, P_0m=840.0):
-    """ Calculate radiated power from absolute magnitudes.
+    """ Calculate the radiated power (intensity) from absolute magnitudes.
 
     Arguments:
         mag_abs: [float or ndarray] Absolute magnitudes.
 
     Keyword arguments:
-        P_0m: [float] Power of a zero-magnitude meteor (W).
+        P_0m: [float] Power of a zero-magnitude meteor (W). See calcRadiatedEnergy() for details.
 
     Return:
         intens: [float or ndarray] Radiated power (W).
 
     """
+
     return P_0m*10**(-0.4*mag_abs)
 
 
@@ -136,76 +139,29 @@ def calcRadiatedEnergy(time, mag_abs, P_0m=840.0):
     return intens_int
 
 
-def luminous_efficiency_RC2001(v):
-    """ Velocity-dependent panchromatic luminous efficiency of
-        ReVelle & Ceplecha (2001) or RC2001.
 
-        The velocity-dependent terms of RC2001 Eq. (8) for PE type-I bolides,
-        i.e. the panchromatic (360-650 nm, T ~ 4500 K) differential luminous
-        efficiency. 
+# Mapping of luminous efficiency model names to the integer lum_eff_type codes used by
+# wmpl.MetSim.MetSimErosionCyTools.luminousEfficiency().
+LUM_EFF_MODELS = {
+    'constant':          0,
+    'rc2001':            1,  # ReVelle & Ceplecha (2001), Type I
+    'rc2001_t1':         1,
+    'rc2001_t2':         2,
+    'rc2001_t3':         3,
+    'borovicka2013':     4,  # Borovicka et al. (2013), Kosice
+    'kosice':            4,
+    'camo':              5,  # CAMO faint meteors (Subasinghe 2018 & Brown 2020)
+    'ceplecha_mccrosky': 6,  # Ceplecha & McCrosky (1976)
+    'cm1976':            6,
+    'borovicka2020':     7,  # Borovicka et al. (2020), Two strengths
+    'pecina_ceplecha':   8,  # Pecina & Ceplecha (1983)
+    'pc1983':            8,
+}
 
-    FORM:
-        ln(tau[%]) = c1 - 10.307 ln v + 9.781 (ln v)^2
-                        - 3.0414 (ln v)^3 + 0.3213 (ln v)^4   for v <  25.372 km/s
-        ln(tau[%]) = c2 + ln v                                for v >= 25.372 km/s
-        (ln = natural log). For type-I bolides: c1 = +0.466, c2  = -1.538
 
-    PHOTOMETRIC CONSISTENCY:
-        tau is panchromatic; when used in a photometric-mass integral, pair it
-        with the matching zero-magnitude power (Borovicka et al. 2022 use the
-        V-band I0 = 1500 W).
+def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1):
+    """ Calculates the mass of a meteoroid from the time and absolute magnitude.
 
-    Arguments:
-        v: [float or ndarray] Velocity in m/s (converted to km/s internally).
-
-    Return:
-        tau: [float or ndarray] Luminous efficiency as a ratio (not percent).
-            Scalar input returns a float; array input returns an ndarray.
-    
-    """
-
-    # Preserve scalar-in / scalar-out behaviour
-    scalar_input = (np.ndim(v) == 0)
-
-    # Ensure array-like behaviour for both scalar and vector inputs
-    v = np.atleast_1d(np.asarray(v, dtype=float))
-
-    if np.any(v <= 0):
-        raise ValueError("Velocity must be strictly positive (m/s).")
-
-    # Convert to km/s as required by the RC2001 parameterization
-    v_kms = v/1000.0
-
-    tau_percent = np.zeros_like(v_kms)
-
-    # Low-velocity branch: 4th-order polynomial in ln(v), v < 25.372 km/s
-    mask = v_kms < 25.372
-
-    lnv = np.log(v_kms[mask])
-
-    tau_percent[mask] = np.exp(
-          0.466
-        - 10.307*lnv
-        + 9.781*lnv**2
-        - 3.0414*lnv**3
-        + 0.3213*lnv**4
-    )
-
-    # High-velocity branch: v >= 25.372 km/s
-    tau_percent[~mask] = np.exp(
-        -1.538 + np.log(v_kms[~mask])
-    )
-
-    # RC2001 gives tau in percent -> convert to ratio
-    tau = tau_percent/100.0
-    if scalar_input:
-        return float(tau[0])
-    return tau
-
- 
-def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0):
-    """ Calculates the mass of a meteoroid from the time and absolute magnitude. 
-    
     Arguments:
         time: [ndarray] Time of individual magnitude measurement (s).
         mag_abs: [ndarray] Absolute magnitudes (i.e. apparent meteor magnitudes @100km).
@@ -213,18 +169,23 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0):
             in m/s.
 
     Keyword arguments:
-        tau: [float or str] Luminous efficiency (ratio, not percent!).
-            - float (default 0.007, i.e. 0.7%; Ceplecha & McCrosky, 1976)
-            - str: name of a velocity-dependent model; tau is then computed from
-              `velocity` on the fly. Supported:
-                'rc2001' -> ReVelle & Ceplecha (2001), PE type-I bolides, panchromatic.
-                            See luminous_efficiency_RC2001().
-
-        P_0m: [float] Power output of a zero absolute magnitude meteor. 840 W by default, as that is the R
-            bandpass for a T = 4500K black body meteor. See: Weryk & Brown, 2013 - "Simultaneous radar and 
-            video meteors - II. Photometry and ionisation" for more details. 
-            Borovicka et al. (2022) combine the RC2001 luminous-efficiency parameterization with a V-band
-            zero-magnitude power of 1500 W following Ceplecha et al. (1998).
+        tau: [float or int or str] Luminous efficiency selector.
+            - float: constant luminous efficiency as a ratio (not percent!). 0.007 (i.e. 0.7%) by default
+              (Ceplecha & McCrosky, 1976). This is the original behaviour.
+            - int: velocity-dependent lum_eff_type code passed to
+              wmpl.MetSim.MetSimErosionCyTools.luminousEfficiency() (0 - constant, 1/2/3 - ReVelle &
+              Ceplecha 2001 Type I/II/III, 4 - Borovicka 2013, 5 - CAMO, 6 - Ceplecha & McCrosky 1976,
+              7 - Borovicka 2020, 8 - Pecina & Ceplecha 1983). tau is then computed per velocity point.
+            - str: model name mapped to the above codes (see LUM_EFF_MODELS), e.g. 'rc2001'.
+        P_0m: [float] Power output of a zero absolute magnitude meteor. 840W by default, as that is the R
+            bandpass for a T = 4500K black body meteor. See: Weryk & Brown, 2013 - "Simultaneous radar and
+            video meteors - II. Photometry and ionisation" for more details.
+            NOTE: the panchromatic models (RC2001, Borovicka, Pecina-Ceplecha) are paired with a V-band
+            zero-magnitude power of P_0m = 1500 W in Borovicka et al. (2022); set P_0m accordingly when
+            using those models.
+        lum_eff_mass: [float] Meteoroid mass (kg) used to evaluate the mass-dependent luminous efficiency
+            models. Ignored for a float tau. If -1 (default), the mass is iterated to self-consistency
+            (compute mass -> recompute tau -> repeat until convergence).
 
     Return:
         mass: [float] Photometric mass of the meteoroid in kg.
@@ -234,34 +195,68 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0):
     # Theory:
     # I = P_0m*10^(-0.4*M_abs)
     #
-    # General:
+    # General (velocity and/or tau vary along the trajectory):
     #   M = integral(2*I/(tau*v^2) dt)
     #
-    # For constant velocity and luminous efficiency:
+    # For constant velocity and luminous efficiency this reduces to:
     #   M = (2/(tau*v^2))*integral(I dt)
 
-    # Resolve a velocity-dependent luminous efficiency model if requested
+    # Constant (float) luminous efficiency - original closed-form behaviour, unchanged.
+    if not isinstance(tau, str) and not isinstance(tau, (bool, int)):
+
+        intens_int = calcRadiatedEnergy(time, mag_abs, P_0m=P_0m)
+
+        return (2.0/(tau*velocity**2))*intens_int
+
+
+    # Velocity-dependent model: resolve the lum_eff_type code.
     if isinstance(tau, str):
         key = tau.strip().lower()
-        if key == 'rc2001':
-            tau = luminous_efficiency_RC2001(velocity)
-        else:
+        if key not in LUM_EFF_MODELS:
             raise ValueError("Unknown luminous efficiency model: {!r}".format(tau))
-
-
-    # Calculate the mass
-    if np.ndim(velocity) == 0:
-        # Compute the radiated energy
-        intens_int = calcRadiatedEnergy(time, mag_abs, P_0m=P_0m)
-        mass = (2.0/(tau*velocity**2))*intens_int
-
+        lum_eff_type = LUM_EFF_MODELS[key]
     else:
-        # Variable velocity/tau case: integrate the instantaneous mass-loss rate (dm/dt)
-        intens = calcIntensity(mag_abs, P_0m=P_0m)
-        dm_dt = 2.0*intens/(tau*velocity**2)
-        mass = simpson(dm_dt, x=time)
+        lum_eff_type = int(tau)
+
+    # Reuse the single source of truth for the lum. eff. models from the MetSim Cython tools.
+    import pyximport
+    pyximport.install(setup_args={'include_dirs': [np.get_include()]})
+    from wmpl.MetSim.MetSimErosionCyTools import luminousEfficiency
+
+    # Radiated power at every measurement point
+    intens = calcIntensity(mag_abs, P_0m=P_0m)
+
+    # Work with array velocity so a single code path handles scalar and array input
+    vel_arr = np.atleast_1d(np.asarray(velocity, dtype=float))
+
+    def _mass_for(mass_assumed):
+        """ Compute the photometric mass given an assumed meteoroid mass for the lum. eff. models. """
+
+        # Vectorize the scalar Cython call over the velocity points (lum_eff arg only used for type 0)
+        tau_arr = np.array([luminousEfficiency(lum_eff_type, 0.7, v, mass_assumed) for v in vel_arr])
+
+        # Integrate the instantaneous mass-loss rate dm/dt = 2*I/(tau*v^2)
+        dm_dt = 2.0*intens/(tau_arr*vel_arr**2)
+
+        return simpson(dm_dt, x=time)
+
+
+    # If the mass is given explicitly, evaluate the models at that mass.
+    if lum_eff_mass >= 0:
+        return _mass_for(lum_eff_mass)
+
+    # Otherwise iterate to a self-consistent mass (only models 1-5,7 actually depend on mass, the
+    # others converge on the first pass).
+    mass = 1.0
+    for _ in range(50):
+        mass_new = _mass_for(mass)
+        if (mass_new > 0) and (abs(mass_new - mass)/mass_new < 1e-4):
+            mass = mass_new
+            break
+        mass = mass_new
 
     return mass
+
 
 
 def calcKB(lat, lon, ht_beg, jd, v, zenith_angle, gmn_correction=False):
