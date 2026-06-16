@@ -15,6 +15,25 @@ except ImportError:
 from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 
 
+# Mapping of luminous efficiency model names to the integer lum_eff_type codes used by
+# wmpl.MetSim.MetSimErosionCyTools.luminousEfficiency().
+LUM_EFF_MODELS = {
+    'constant':          0,
+    'rc2001':            1,  # ReVelle & Ceplecha (2001), Type I
+    'rc2001_t1':         1,
+    'rc2001_t2':         2,
+    'rc2001_t3':         3,
+    'borovicka2013':     4,  # Borovicka et al. (2013), Kosice
+    'kosice':            4,
+    'camo':              5,  # CAMO faint meteors (Subasinghe 2018 & Brown 2020)
+    'ceplecha_mccrosky': 6,  # Ceplecha & McCrosky (1976)
+    'cm1976':            6,
+    'borovicka2020':     7,  # Borovicka et al. (2020), Two strengths
+    'pecina_ceplecha':   8,  # Pecina & Ceplecha (1983)
+    'pc1983':            8,
+}
+
+
 def dynamicPressure(lat, lon, height, jd, velocity, gamma=1.0):
     """ Calculate dynamic pressure at the given point on meteor's trajectory. 
 
@@ -140,25 +159,6 @@ def calcRadiatedEnergy(time, mag_abs, P_0m=840.0):
 
 
 
-# Mapping of luminous efficiency model names to the integer lum_eff_type codes used by
-# wmpl.MetSim.MetSimErosionCyTools.luminousEfficiency().
-LUM_EFF_MODELS = {
-    'constant':          0,
-    'rc2001':            1,  # ReVelle & Ceplecha (2001), Type I
-    'rc2001_t1':         1,
-    'rc2001_t2':         2,
-    'rc2001_t3':         3,
-    'borovicka2013':     4,  # Borovicka et al. (2013), Kosice
-    'kosice':            4,
-    'camo':              5,  # CAMO faint meteors (Subasinghe 2018 & Brown 2020)
-    'ceplecha_mccrosky': 6,  # Ceplecha & McCrosky (1976)
-    'cm1976':            6,
-    'borovicka2020':     7,  # Borovicka et al. (2020), Two strengths
-    'pecina_ceplecha':   8,  # Pecina & Ceplecha (1983)
-    'pc1983':            8,
-}
-
-
 def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1):
     """ Calculates the mass of a meteoroid from the time and absolute magnitude.
 
@@ -171,7 +171,7 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1):
     Keyword arguments:
         tau: [float or int or str] Luminous efficiency selector.
             - float: constant luminous efficiency as a ratio (not percent!). 0.007 (i.e. 0.7%) by default
-              (Ceplecha & McCrosky, 1976). This is the original behaviour.
+              (Ceplecha & McCrosky, 1976).
             - int: velocity-dependent lum_eff_type code passed to
               wmpl.MetSim.MetSimErosionCyTools.luminousEfficiency() (0 - constant, 1/2/3 - ReVelle &
               Ceplecha 2001 Type I/II/III, 4 - Borovicka 2013, 5 - CAMO, 6 - Ceplecha & McCrosky 1976,
@@ -201,7 +201,7 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1):
     # For constant velocity and luminous efficiency this reduces to:
     #   M = (2/(tau*v^2))*integral(I dt)
 
-    # Constant (float) luminous efficiency - original closed-form behaviour, unchanged.
+    # A fixed luminous efficiency was given: compute the mass using that constant value.
     if not isinstance(tau, str) and not isinstance(tau, (bool, int)):
 
         intens_int = calcRadiatedEnergy(time, mag_abs, P_0m=P_0m)
@@ -218,7 +218,7 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1):
     else:
         lum_eff_type = int(tau)
 
-    # Reuse the single source of truth for the lum. eff. models from the MetSim Cython tools.
+    # Compute the luminous efficiency using an analytical velocity-dependent function.
     import pyximport
     pyximport.install(setup_args={'include_dirs': [np.get_include()]})
     from wmpl.MetSim.MetSimErosionCyTools import luminousEfficiency
@@ -245,14 +245,14 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1):
     if lum_eff_mass >= 0:
         return _mass_for(lum_eff_mass)
 
-    # Otherwise iterate to a self-consistent mass (only models 1-5,7 actually depend on mass, the
-    # others converge on the first pass). Convergence is measured as a fraction of the first mass
+    # Otherwise iterate to a self-consistent mass: the luminous efficiency depends on the mass, which
+    # is the quantity being solved for. Convergence is measured as a fraction of the first mass
     # estimate, so it behaves consistently across orders of magnitude (e.g. ~1e-7 kg meteoroids) and
     # does not divide by an evolving (possibly tiny) iterate.
     rel_tol = 1e-4
 
-    # First estimate (mass term of the lum. eff. models is bounded, so a 1 kg seed lands within a
-    # small factor of the true mass regardless of scale).
+    # Seed the iteration with the luminous efficiency evaluated at a mass of 1 kg. The mass term of
+    # the models is bounded, so this seed lands within a small factor of the true mass at any scale.
     mass = _mass_for(1.0)
     mass_ref = abs(mass)
 
