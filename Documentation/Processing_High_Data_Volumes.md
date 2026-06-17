@@ -76,7 +76,7 @@ sudo setfacl -R user:ubuntu:rwx ~node1/files
 replace 'ubuntu' with the account that will run WMPL on the parent. 
 
 ### 1f: Enable Sftp Logins for each Child Node on the Parent
-On the parent, sudo to each child node in turn and enable key-based logins following the example below. 
+On the parent, sudo to each child node account in turn and enable key-based logins following the example below. 
 Additionally while we're still configuring things we don't want WMPL to start trying to distribute data. So we create a 'stop' file in each child's 'files' folder.
 
 ```bash
