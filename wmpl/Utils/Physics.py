@@ -352,6 +352,88 @@ def calcPf(p_max, zangle, mass, v_0):
     return pf, pf_category
 
 
+def calcPE(mass, rho_e=None, zangle=None, v_0=None, traj=None):
+    """ Ceplecha & McCrosky (1976) PE end-height structural criterion.
+
+        PE = log10(rho_e) + A*log10(m) + B*log10(v) + C*log10(cos(zangle))
+
+    NOTE: `mass` MUST be computed with the Ceplecha & McCrosky (1976)
+    luminous efficiency law to stay consistent with the original A, B, C
+    calibration. Compute it via Physics.calcMass() using
+    lum_eff_type=6 (i.e. 'ceplecha_mccrosky' / 'cm1976').
+
+    If `traj` (a solved WMPL Trajectory) is given, rho_e, zangle and v_0 are
+    derived from it and any values passed for those arguments are overridden:
+        - rho_e  <- getAtmDensity_vect at the end point (NRLMSISE-00, kg/m^3)
+        - zangle <- pi/2 - traj.orbit.elevation_apparent_norot (rad)
+        - v_0    <- traj.v_init (m/s)
+
+    Arguments:
+        mass:   [float] Initial photometric mass m_inf (kg).
+        rho_e:  [float] Atmospheric mass density at the end height (kg/m^3).
+                        Ignored if `traj` is given.
+        zangle: [float] Radiant zenith angle (radians), measured from the local
+                        zenith (0 = vertical entry, pi/2 = horizontal entry).
+                        Ignored if `traj` is given.
+        v_0:    [float] Initial (entry) velocity V_inf (m/s). Ignored if `traj` is given.
+        traj:   [Trajectory] Optional solved WMPL Trajectory; if provided,
+                        rho_e, zangle and v_0 are computed from it.
+
+    Return:
+        (pe, pe_group): [tuple]
+            - pe:       [float] PE criterion value.
+            - pe_group: [str]   Structural group: 'I', 'II', 'IIIa', 'IIIb'.
+    """
+
+
+    # Derive rho_e, zangle and v_0 from the trajectory if provided
+    if traj is not None:
+        rho_e  = float(getAtmDensity_vect(traj.rend_lat, traj.rend_lon,
+                                          traj.rend_ele, traj.rend_jd))
+        zangle = np.pi/2 - traj.orbit.elevation_apparent_norot
+        v_0    = traj.v_init
+
+    elif (rho_e is None) or (zangle is None) or (v_0 is None):
+        raise ValueError("Provide either `traj`, or all of rho_e, zangle and v_0.")
+
+    # Input validation
+    if mass <= 0:
+        raise ValueError("mass must be > 0.")
+    if rho_e <= 0:
+        raise ValueError("rho_e must be > 0.")
+    if np.cos(zangle) <= 0:
+        raise ValueError("zangle must satisfy cos(zangle) > 0.")
+    if v_0 <= 0:
+        raise ValueError("v_0 must be > 0.")
+
+    # Least-squares coefficients (Ceplecha & McCrosky 1976)
+    A = -0.42
+    B =  1.49
+    C = -1.29
+
+    ### Convert to Ceplecha & McCrosky (1976) units ###
+    rho_e_cgs = rho_e*1e-3   # kg/m^3 -> g/cm^3
+    mass_g    = mass*1e3     # kg     -> g
+    v_kms     = v_0/1e3      # m/s    -> km/s
+
+    ### ###
+
+    # PE
+    pe = np.log10(rho_e_cgs) + A*np.log10(mass_g) + B*np.log10(v_kms) \
+        + C*np.log10(np.cos(zangle))
+
+    # Structural group (Ceplecha & McCrosky 1976, p. 6260)
+    if pe > -4.60:
+        pe_group = 'I'      # ordinary chondrites
+    elif pe > -5.25:
+        pe_group = 'II'     # early-type carbonaceous chondrites
+    elif pe > -5.70:
+        pe_group = 'IIIa'   # cometary
+    else:
+        pe_group = 'IIIb'   # cometary, Draconid-like (most friable)
+
+    return pe, pe_group
+
 
 if __name__ == "__main__":
 
