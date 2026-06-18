@@ -596,12 +596,26 @@ class RMSDataHandle(object):
     def cleanupPartialProcessing(self):
         log.info('checking for partially-processed phase1 files')
         i=0
-        for i, file_name in enumerate(glob.glob(os.path.join(self.phase1_dir, '*.pickle_processing'))):
+        for file_name in glob.glob(os.path.join(self.phase1_dir, '*.pickle_processing')):
             new_name = file_name.replace('_processing','')
             if os.path.isfile(new_name):
-                os.remove(file_name)
+                try:
+                    os.remove(file_name)
+                    i += 1
+                except FileNotFoundError:
+                    log.warning(f"Unable to remove partially-processed file: {file_name}")
+                    continue
+                except Exception as e:
+                    log.error(f"Unknown error removing partially-processed file: {file_name}: {e}")
             else:
-                os.rename(file_name, new_name)
+                try:
+                    os.rename(file_name, new_name)
+                    i += 1
+                except FileNotFoundError:
+                    log.warning(f"Unable to rename partially-processed file: {file_name}")
+                    continue
+                except Exception as e:
+                    log.error(f"Unknown error renaming partially-processed file: {file_name}: {e}")
         log.info(f'updated {i} partially-processed files')
         return 
 
@@ -1185,11 +1199,13 @@ class RMSDataHandle(object):
                     full_traj_dir = os.path.join(yyyymmdd_dir_path, traj_dir)
                     if os.path.isdir(full_traj_dir) and (full_traj_dir not in dir_paths):
 
-                        for file_name in glob.glob('*_trajectory.pickle', root_dir=full_traj_dir):
+                        for file_name in glob.glob(os.path.join(full_traj_dir,'*_trajectory.pickle')):
+                            short_name = os.path.split(file_name)[1]
+                            if self.trajectoryFileInDtRange(short_name, dt_range=dt_range):
 
-                            if self.trajectoryFileInDtRange(file_name, dt_range=dt_range):
-
-                                if self.trajectory_db.addTrajectory(TrajectoryReduced(os.path.join(full_traj_dir, file_name)), force_add=False, verbose=True):
+                                if verbose:
+                                    log.info(f'adding {short_name} to database')
+                                if self.trajectory_db.addTrajectory(TrajectoryReduced(file_name), force_add=False, verbose=True):
                                     counter += 1
 
                                 # Print every 1000th trajectory
@@ -2355,9 +2371,9 @@ contain data folders. Data folders should have FTPdetectinfo files together with
                         # adding any that exist on disk but are missing in the database, and 
                         # removing any duplicates from both disk and database
                         if mcmode == MCMODE_PHASE1:
-                            dh.updateTrajectoryDatabase(dt_range=(dh.dt_range[0], dh.dt_range[1]))
+                            dh.updateTrajectoryDatabase(dt_range=(dh.dt_range[0], dh.dt_range[1]), verbose=verbose)
                         else:
-                            dh.updateTrajectoryDatabase(dt_range=(bin_beg, bin_end))
+                            dh.updateTrajectoryDatabase(dt_range=(bin_beg, bin_end), verbose=verbose)
 
                     if mcmode & MCMODE_CANDS:
                         log.info("")
