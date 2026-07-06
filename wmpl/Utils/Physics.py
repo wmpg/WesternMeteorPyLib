@@ -184,14 +184,17 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1, v_
             models. Ignored for a float tau. If -1 (default), the mass is iterated to self-consistency
             (compute mass -> recompute tau -> repeat until convergence).
         v_init: [float or None] Pre-atmospheric velocity (m/s) used by the ReVelle & Ceplecha (2001)
-            deceleration correction in the luminous efficiency calculation. Default is None.
+            deceleration correction in the luminous efficiency calculation. Only affects the RC2001
+            models (tau = 1, 2, 3 or 'rc2001*'). Default is None.
             - None: the deceleration correction is not applied.
-            - -1: use the maximum velocity value in the velocity array as the pre-atmospheric velocity.
-              If v_init=-1 and velocity is scalar, the deceleration correction is not applied.
+            - -1: estimate the pre-atmospheric velocity as the median velocity over the first 25% of
+              points (robust to measurement noise). Requires a velocity array.
             - >0: use the supplied value as the pre-atmospheric velocity.
+            The correction is linearly tapered to zero for velocities within 0.1 km/s of v_init and
+            disabled for velocities at or above it (see luminousEfficiency() for details).
             NOTE: the velocity array should represent a fitted deceleration curve (i.e. a physically
             consistent monotonic velocity evolution) rather than individual noisy measurements.
-            
+
     Return:
         mass: [float] Photometric mass of the meteoroid in kg.
 
@@ -210,31 +213,23 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1, v_
     #   M = (2/tau)*integral(I/v^2 dt)
 
     if len(time) != len(mag_abs):
-        raise ValueError(
-            "time and mag_abs must have the same length."
-        )
-    
-    # If a velocity array is given, it must have the same length as the
-    # photometric measurements.
-    if not np.isscalar(velocity) and len(velocity) != len(time):
-        raise ValueError(
-            "Velocity array length ({:d}) does not match the number of "
-            "time/magnitude measurements ({:d}).".format(
-                len(velocity), len(time)
-            )
-        )
-    
+        raise ValueError("time and mag_abs must have the same length.")
+
+    # If a velocity array is given, it must have the same length as the photometric measurements
+    if np.ndim(velocity) > 0 and len(velocity) != len(time):
+        raise ValueError("Velocity array length ({:d}) does not match the number of time/magnitude "
+            "measurements ({:d}).".format(len(velocity), len(time)))
+
     if lum_eff_mass < 0 and lum_eff_mass != -1:
-        raise ValueError(
-            "lum_eff_mass must be >= 0 or -1 for self-consistent iteration."
-        )
+        raise ValueError("lum_eff_mass must be >= 0, or -1 for self-consistent iteration.")
 
     # Constant luminous efficiency (tau given directly as a ratio).
     if not isinstance(tau, str) and not isinstance(tau, (bool, int)):
+
         # Constant velocity
-        if np.isscalar(velocity):
+        if np.ndim(velocity) == 0:
             intens_int = calcRadiatedEnergy(time, mag_abs, P_0m=P_0m)
-            return (2.0/(tau*velocity**2))*intens_int
+            return (2.0/(tau*float(velocity)**2))*intens_int
 
         # Velocity array
         else:
@@ -264,16 +259,38 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1, v_
     # Convert velocity to an array for the velocity-dependent luminous efficiency calculations.
     vel_arr = np.atleast_1d(np.asarray(velocity, dtype=float))
 
+    # Resolve the pre-atmospheric velocity used by the ReVelle & Ceplecha (2001) deceleration
+    # correction (only affects the RC2001 models, types 1-3)
     if v_init is None:
-        # Disable the ReVelle & Ceplecha deceleration correction
+
+        # Disable the deceleration correction
         v_init_eff = -1.0
+
     elif v_init == -1:
-        if np.isscalar(velocity):
-            v_init_eff = -1.0
-        else:
-            v_init_eff = float(np.max(vel_arr))
-    else:
+
+        # A scalar velocity carries no deceleration information to estimate v_init from
+        if np.ndim(velocity) == 0:
+            raise ValueError("v_init=-1 requires a velocity array to estimate the pre-atmospheric "
+                "velocity.")
+
+        # Estimate the pre-atmospheric velocity as the median velocity over the first 25% of points,
+        # which is robust to measurement noise (unlike e.g. the maximum velocity)
+        v_init_eff = float(np.median(vel_arr[:max(1, len(vel_arr)//4)]))
+
+    elif v_init > 0:
+
         v_init_eff = float(v_init)
+
+        # The deceleration correction is tapered/disabled for velocities within 0.1 km/s of v_init,
+        # so warn if the given v_init leaves the fastest points effectively uncorrected
+        if v_init_eff < np.max(vel_arr) + 100:
+            print("WARNING: v_init = {:.1f} m/s is within 100 m/s of the maximum given velocity. "
+                "The ReVelle & Ceplecha (2001) deceleration correction will be tapered or disabled "
+                "at the fastest points.".format(v_init_eff))
+
+    else:
+        raise ValueError("v_init must be None, -1 (automatic estimate), or > 0, "
+            "got {}".format(v_init))
 
     def _mass_for(mass_assumed):
         """ Compute the photometric mass given an assumed meteoroid mass for the lum. eff. models. """
@@ -309,10 +326,8 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1, v_
             break
         mass = mass_new
     else:
-        print(
-            "WARNING: luminous efficiency self-consistency iteration "
-            "did not converge after 50 iterations."
-        )
+        print("WARNING: luminous efficiency self-consistency iteration did not converge "
+            "after 50 iterations.")
 
     return mass
 
