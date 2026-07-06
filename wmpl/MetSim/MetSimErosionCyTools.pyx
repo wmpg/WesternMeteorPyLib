@@ -376,7 +376,7 @@ cpdef double decelerationRK4(double dt, double K, double m, double rho_atm, doub
 
 
 @cython.cdivision(True) 
-cpdef double luminousEfficiency(int lum_eff_type, double lum_eff, double vel, double mass):
+cpdef double luminousEfficiency(int lum_eff_type, double lum_eff, double vel, double mass, double v_init=-1.0):
     """ Compute the luminous efficiency of the given type, velocity, and mass.
     
     Arguments:
@@ -393,13 +393,22 @@ cpdef double luminousEfficiency(int lum_eff_type, double lum_eff, double vel, do
         lum_eff: [double] Value of the constant luminous efficiency (percent).
         vel: [double] Velocity (m/s).
         mass: [double] Mass (kg).
+        v_init: [double] Pre-atmospheric velocity (m/s), only used by the Revelle & Ceplecha (2001)
+            models (types 1-3). If <= 0 (default -1), the deceleration correction term
+            0.26*ln(dv) + 0.0042*ln(dv)^3, where dv = (v_init - vel) in km/s, is not applied.
+            The correction diverges as dv -> 0, so for 0 < dv < 0.1 km/s it is linearly tapered
+            to zero, and for vel >= v_init it is set to zero (instead of producing a NaN).
 
     Return:
         tau: [double] Luminous efficiency (ratio).
 
     """
 
-    cdef double c1, c2
+    cdef double c1, c2, lv, decel, dv
+
+    # Velocity difference (km/s) below which the Revelle & Ceplecha (2001) deceleration correction is
+    # linearly tapered to zero, keeping it bounded as it otherwise diverges to -inf as dv -> 0
+    cdef double dv_min = 0.1
 
     # Constant luminous efficiency
     if lum_eff_type == 0:
@@ -423,15 +432,44 @@ cpdef double luminousEfficiency(int lum_eff_type, double lum_eff, double vel, do
             c1 = -2.670
             c2 = -4.674
 
+        lv = log(vel/1000.0)
+
+        decel = 0.0
+
+        # Deceleration correction using the velocity difference from the pre-atmospheric velocity
+        if v_init > 0:
+
+            dv = (v_init - vel)/1000.0
+
+            if dv >= dv_min:
+                decel = 0.26*log(dv) + 0.0042*log(dv)**3
+
+            # Taper the correction linearly to zero below dv_min (it diverges as dv -> 0), and
+            # disable it for vel >= v_init (physically inconsistent input, avoid log of a
+            # non-positive number)
+            elif dv > 0:
+                decel = (dv/dv_min)*(0.26*log(dv_min) + 0.0042*log(dv_min)**3)
 
         # Slow meteoroids
         if vel < 25372:
-            return (exp(c1 - 10.307*log(vel/1000.0) + 9.781*log(vel/1000.0)**2 - 3.0414*log(vel/1000.0)**3 \
-                + 0.3213*log(vel/1000.0)**4 + 1.15*tanh(0.38*log(mass))))/100.0
+            return exp(
+                c1
+                - 10.307*lv
+                + 9.781*lv**2
+                - 3.0414*lv**3
+                + 0.3213*lv**4
+                + 1.15*tanh(0.38*log(mass))
+                + decel
+            )/100.0
 
         # Fast meteoroids
         else:
-            return (exp(c2 + log(vel/1000.0) + 1.15*tanh(0.38*log(mass))))/100.0
+            return exp(
+                c2
+                + lv
+                + 1.15*tanh(0.38*log(mass))
+                + decel
+            )/100.0
 
     # Borovicka et al. (2013) - Kosice
     elif lum_eff_type == 4:
