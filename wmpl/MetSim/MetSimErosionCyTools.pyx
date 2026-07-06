@@ -393,12 +393,11 @@ cpdef double luminousEfficiency(int lum_eff_type, double lum_eff, double vel, do
         lum_eff: [double] Value of the constant luminous efficiency (percent).
         vel: [double] Velocity (m/s).
         mass: [double] Mass (kg).
-        v_init: [double] Initial velocity (m/s). If <= 0, the
-            velocity-dependent deceleration correction term from
-            Revelle & Ceplecha (2001) is not applied. Default is -1.
-            The Revelle & Ceplecha (2001) deceleration correction contains
-            log(v_init - vel). For v_init = vel, the correction is set to zero.
-            Values with v_init < vel are inconsistent and will fail.
+        v_init: [double] Pre-atmospheric velocity (m/s), only used by the Revelle & Ceplecha (2001)
+            models (types 1-3). If <= 0 (default -1), the deceleration correction term
+            0.26*ln(dv) + 0.0042*ln(dv)^3, where dv = (v_init - vel) in km/s, is not applied.
+            The correction diverges as dv -> 0, so for 0 < dv < 0.1 km/s it is linearly tapered
+            to zero, and for vel >= v_init it is set to zero (instead of producing a NaN).
 
     Return:
         tau: [double] Luminous efficiency (ratio).
@@ -406,6 +405,10 @@ cpdef double luminousEfficiency(int lum_eff_type, double lum_eff, double vel, do
     """
 
     cdef double c1, c2, lv, decel, dv
+
+    # Velocity difference (km/s) below which the Revelle & Ceplecha (2001) deceleration correction is
+    # linearly tapered to zero, keeping it bounded as it otherwise diverges to -inf as dv -> 0
+    cdef double dv_min = 0.1
 
     # Constant luminous efficiency
     if lum_eff_type == 0:
@@ -433,16 +436,19 @@ cpdef double luminousEfficiency(int lum_eff_type, double lum_eff, double vel, do
 
         decel = 0.0
 
+        # Deceleration correction using the velocity difference from the pre-atmospheric velocity
         if v_init > 0:
-            # The Revelle & Ceplecha (2001) deceleration correction contains
-            # log(v_init - vel). For v_init = vel, the correction is set to zero.
-            # Values with v_init < vel are physically inconsistent and will fail.
+
             dv = (v_init - vel)/1000.0
 
-            if dv == 0:
-                decel = 0.0
-            else:
+            if dv >= dv_min:
                 decel = 0.26*log(dv) + 0.0042*log(dv)**3
+
+            # Taper the correction linearly to zero below dv_min (it diverges as dv -> 0), and
+            # disable it for vel >= v_init (physically inconsistent input, avoid log of a
+            # non-positive number)
+            elif dv > 0:
+                decel = (dv/dv_min)*(0.26*log(dv_min) + 0.0042*log(dv_min)**3)
 
         # Slow meteoroids
         if vel < 25372:
