@@ -2,6 +2,7 @@
 
 from __future__ import print_function, division, absolute_import
 
+import warnings
 
 import numpy as np
 import scipy.integrate
@@ -177,9 +178,11 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1, v_
         P_0m: [float] Power output of a zero absolute magnitude meteor. 840W by default, as that is the R
             bandpass for a T = 4500K black body meteor. See: Weryk & Brown, 2013 - "Simultaneous radar and
             video meteors - II. Photometry and ionisation" for more details.
-            NOTE: the panchromatic models (RC2001, Borovicka, Pecina-Ceplecha) are paired with a V-band
-            zero-magnitude power of P_0m = 1500 W in Borovicka et al. (2022); set P_0m accordingly when
-            using those models.
+            NOTE: the panchromatic models (RC2001, Ceplecha & McCrosky 1976, Borovicka,
+            Pecina-Ceplecha) are paired with a zero-magnitude power of P_0m = 1500 W (Borovicka et
+            al. 2022; the cm1976 law has 1500 W baked into its unit conversion in
+            luminousEfficiency()); set P_0m accordingly when using those models. A warning is
+            raised if a different P_0m is used with them.
         lum_eff_mass: [float] Meteoroid mass (kg) used to evaluate the mass-dependent luminous efficiency
             models. Ignored for a float tau. If -1 (default), the mass is iterated to self-consistency
             (compute mass -> recompute tau -> repeat until convergence).
@@ -246,6 +249,14 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1, v_
         lum_eff_type = LUM_EFF_MODELS[key]
     else:
         lum_eff_type = int(tau)
+
+    # The panchromatic models are calibrated for a zero-magnitude power of 1500 W (see the P_0m
+    # docstring note), so warn if a different value is used with them
+    if (lum_eff_type in [1, 2, 3, 6, 7, 8]) and (P_0m != 1500.0):
+        warnings.warn("The chosen luminous efficiency model (lum_eff_type={:d}) is calibrated for "
+            "a panchromatic zero-magnitude power of P_0m = 1500 W, but P_0m = {:g} W was given. "
+            "No correction is applied - the returned mass will be off by a factor of {:.2f} "
+            "compared to using the calibrated value.".format(lum_eff_type, P_0m, P_0m/1500.0))
 
     # Compute the luminous efficiency using an analytical velocity-dependent function.
     import pyximport
@@ -417,6 +428,106 @@ def calcPf(p_max, zangle, mass, v_0):
     return pf, pf_category
 
 
+def calcPE(mass, rho_e=None, zangle=None, v_0=None, traj=None):
+    """ The Ceplecha & McCrosky (1976) PE end-height structural criterion.
+
+        PE = log10(rho_e) - 0.42*log10(m) + 1.49*log10(v) - 1.29*log10(cos(zangle))
+
+    References:
+        Ceplecha & McCrosky (1976) - Fireball end heights: A diagnostic for the structure of meteoric
+            material, JGR 81, 6257.
+        Ceplecha (1988) - Earth's influx of different populations of sporadic meteoroids from
+            photographic and television data, BAICz 39, 221 (Eq. 2, group boundaries in Sec. 2e).
+
+    NOTE: The mass MUST be the initial photometric mass computed with the Ceplecha & McCrosky (1976)
+    luminous efficiency law to stay consistent with the original calibration. Compute it via
+    calcMass() using tau='cm1976' (i.e. lum_eff_type=6) AND P_0m=1500, as the cm1976 law is defined
+    for a panchromatic zero-magnitude power of 1500 W (see luminousEfficiency() in
+    MetSimErosionCyTools.pyx).
+
+    Arguments:
+        mass: [float] Initial photometric mass m_inf (kg).
+
+    Keyword arguments:
+        rho_e: [float] Atmospheric mass density at the end height (kg/m^3). Cannot be given together
+            with traj.
+        zangle: [float] Radiant zenith angle (radians), measured from the local zenith
+            (0 = vertical entry, pi/2 = horizontal entry). Cannot be given together with traj.
+        v_0: [float] Initial (entry) velocity V_inf (m/s). Cannot be given together with traj.
+        traj: [Trajectory] Optional solved WMPL Trajectory. If given, rho_e, zangle and v_0 are
+            derived from it instead of being passed explicitly:
+                - rho_e  <- getAtmDensity_vect at the end point (NRLMSISE-00, kg/m^3)
+                - zangle <- pi/2 - traj.orbit.elevation_apparent_norot (rad)
+                - v_0    <- traj.v_init (m/s)
+
+    Return:
+        (pe, pe_group): [tuple]
+            - pe: [float] PE criterion value.
+            - pe_group: [str] Structural group: 'I', 'II', 'IIIa', 'IIIb'.
+
+    """
+
+    # Derive rho_e, zangle and v_0 from the trajectory if provided
+    if traj is not None:
+
+        # Disallow mixing traj with explicit values, as it is ambiguous which should be used
+        if (rho_e is not None) or (zangle is not None) or (v_0 is not None):
+            raise ValueError("Give either `traj`, or explicit rho_e/zangle/v_0 values, not both.")
+
+        if (getattr(traj, 'orbit', None) is None) \
+            or (traj.orbit.elevation_apparent_norot is None):
+            raise ValueError("The given trajectory does not have a computed orbit, so the radiant "
+                "zenith angle cannot be derived. Pass rho_e, zangle and v_0 explicitly instead.")
+
+        # Atmospheric density at the end point. The original calibration used a 1970s CIRA-type
+        # reference atmosphere, but the difference to NRLMSISE-00 at fireball end heights is
+        # negligible (< ~0.03 dex) compared to the 0.65 dex PE group widths.
+        rho_e  = float(getAtmDensity_vect(traj.rend_lat, traj.rend_lon,
+                                          traj.rend_ele, traj.rend_jd))
+        zangle = np.pi/2 - traj.orbit.elevation_apparent_norot
+        v_0    = traj.v_init
+
+    elif (rho_e is None) or (zangle is None) or (v_0 is None):
+        raise ValueError("Provide either `traj`, or all of rho_e, zangle and v_0.")
+
+    # Input validation
+    if mass <= 0:
+        raise ValueError("mass must be > 0.")
+    if rho_e <= 0:
+        raise ValueError("rho_e must be > 0.")
+    if np.cos(zangle) <= 0:
+        raise ValueError("zangle must satisfy cos(zangle) > 0.")
+    if v_0 <= 0:
+        raise ValueError("v_0 must be > 0.")
+
+    # Least-squares coefficients (Ceplecha & McCrosky 1976)
+    A = -0.42
+    B =  1.49
+    C = -1.29
+
+    ### Convert to Ceplecha & McCrosky (1976) units ###
+    rho_e_cgs = rho_e*1e-3   # kg/m^3 -> g/cm^3
+    mass_g    = mass*1e3     # kg     -> g
+    v_kms     = v_0/1e3      # m/s    -> km/s
+
+    ### ###
+
+    # PE
+    pe = np.log10(rho_e_cgs) + A*np.log10(mass_g) + B*np.log10(v_kms) \
+        + C*np.log10(np.cos(zangle))
+
+    # Structural group (Ceplecha & McCrosky 1976; boundaries as in Ceplecha 1988, Sec. 2e)
+    if pe > -4.60:
+        pe_group = 'I'      # ordinary chondrites
+    elif pe > -5.25:
+        pe_group = 'II'     # early-type carbonaceous chondrites
+    elif pe > -5.70:
+        pe_group = 'IIIa'   # cometary
+    else:
+        pe_group = 'IIIb'   # cometary, Draconid-like (most friable)
+
+    return pe, pe_group
+
 
 if __name__ == "__main__":
 
@@ -472,3 +583,42 @@ if __name__ == "__main__":
         pf, pf_category = calcPf(p_max*1e6, np.radians(90 - entry_angle), mass, v_0*1e3)
 
         print("  - {:s}: Pf = {:.2f}, Pf category = {:d}".format(label, pf, pf_category))
+
+    ### ###
+
+
+
+    ### Test the PE criterion ###
+
+    print()
+    print("Ceplecha & McCrosky (1976) PE criterion calculation:")
+
+    # A 1 kg meteoroid at 15 km/s and a 45 deg zenith angle, ending at different heights - one test
+    # case per structural group. The atmospheric density at the end height is computed using the
+    # NRLMSISE-00 model. The fixed terms sum to
+    # -0.42*log10(1000) + 1.49*log10(15) - 1.29*log10(cos(45 deg)) = +0.687, so the hand-checkable
+    # expected value is PE = log10(rho_e in g/cm^3) + 0.687
+    lat = np.radians(43)
+    lon = np.radians(-81)
+    jd = datetime2JD(datetime.datetime(2018, 6, 15, 7, 15, 0))
+
+    pe_table = [
+        # End height (m), expected PE, expected group
+        [30000.0, -4.03,    'I'],
+        [45000.0, -4.97,   'II'],
+        [54000.0, -5.43, 'IIIa'],
+        [63000.0, -5.92, 'IIIb'],
+    ]
+
+    for ht_end, pe_expected, group_expected in pe_table:
+
+        # Compute the atmospheric density at the end height (kg/m^3)
+        rho_e = float(getAtmDensity_vect(lat, lon, ht_end, jd))
+
+        pe, pe_group = calcPE(1.0, rho_e=rho_e, zangle=np.radians(45), v_0=15e3)
+
+        print("  - End ht {:2.0f} km: rho_e = {:.2e} kg/m^3, PE = {:.2f} (expected {:.2f}), "
+            "group = {:>4s} (expected {:>4s})".format(ht_end/1000, rho_e, pe, pe_expected,
+            pe_group, group_expected))
+
+    ### ###
