@@ -594,22 +594,31 @@ if __name__ == "__main__":
     print("Ceplecha & McCrosky (1976) PE criterion calculation:")
 
     # A 1 kg meteoroid at 15 km/s and a 45 deg zenith angle, ending at different heights - one test
-    # case per structural group. The fixed terms sum to
+    # case per structural group. The atmospheric density at the end height is computed using the
+    # NRLMSISE-00 model. The fixed terms sum to
     # -0.42*log10(1000) + 1.49*log10(15) - 1.29*log10(cos(45 deg)) = +0.687, so the hand-checkable
     # expected value is PE = log10(rho_e in g/cm^3) + 0.687
+    lat = np.radians(43)
+    lon = np.radians(-81)
+    jd = datetime2JD(datetime.datetime(2018, 6, 15, 7, 15, 0))
+
     pe_table = [
-        # rho_e (kg/m^3), ~end height (km), expected PE, expected group
-        [2e-2, 30, -4.01,    'I'],
-        [2e-3, 45, -5.01,   'II'],
-        [6e-4, 54, -5.54, 'IIIa'],
-        [2e-4, 63, -6.01, 'IIIb'],
+        # End height (m), expected PE, expected group
+        [30000.0, -4.03,    'I'],
+        [45000.0, -4.97,   'II'],
+        [54000.0, -5.43, 'IIIa'],
+        [63000.0, -5.92, 'IIIb'],
     ]
 
-    for rho_e, ht_end, pe_expected, group_expected in pe_table:
+    for ht_end, pe_expected, group_expected in pe_table:
+
+        # Compute the atmospheric density at the end height (kg/m^3)
+        rho_e = float(getAtmDensity_vect(lat, lon, ht_end, jd))
 
         pe, pe_group = calcPE(1.0, rho_e=rho_e, zangle=np.radians(45), v_0=15e3)
 
-        print("  - End ht ~{:2d} km: PE = {:.2f} (expected {:.2f}), group = {:>4s} "
-            "(expected {:>4s})".format(ht_end, pe, pe_expected, pe_group, group_expected))
+        print("  - End ht {:2.0f} km: rho_e = {:.2e} kg/m^3, PE = {:.2f} (expected {:.2f}), "
+            "group = {:>4s} (expected {:>4s})".format(ht_end/1000, rho_e, pe, pe_expected,
+            pe_group, group_expected))
 
     ### ###
