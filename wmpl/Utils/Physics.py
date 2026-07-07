@@ -2,6 +2,7 @@
 
 from __future__ import print_function, division, absolute_import
 
+import warnings
 
 import numpy as np
 import scipy.integrate
@@ -177,9 +178,11 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1, v_
         P_0m: [float] Power output of a zero absolute magnitude meteor. 840W by default, as that is the R
             bandpass for a T = 4500K black body meteor. See: Weryk & Brown, 2013 - "Simultaneous radar and
             video meteors - II. Photometry and ionisation" for more details.
-            NOTE: the panchromatic models (RC2001, Borovicka, Pecina-Ceplecha) are paired with a V-band
-            zero-magnitude power of P_0m = 1500 W in Borovicka et al. (2022); set P_0m accordingly when
-            using those models.
+            NOTE: the panchromatic models (RC2001, Ceplecha & McCrosky 1976, Borovicka,
+            Pecina-Ceplecha) are paired with a zero-magnitude power of P_0m = 1500 W (Borovicka et
+            al. 2022; the cm1976 law has 1500 W baked into its unit conversion in
+            luminousEfficiency()); set P_0m accordingly when using those models. A warning is
+            raised if a different P_0m is used with them.
         lum_eff_mass: [float] Meteoroid mass (kg) used to evaluate the mass-dependent luminous efficiency
             models. Ignored for a float tau. If -1 (default), the mass is iterated to self-consistency
             (compute mass -> recompute tau -> repeat until convergence).
@@ -246,6 +249,13 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1, v_
         lum_eff_type = LUM_EFF_MODELS[key]
     else:
         lum_eff_type = int(tau)
+
+    # The panchromatic models are calibrated for a zero-magnitude power of 1500 W (see the P_0m
+    # docstring note), so warn if a different value is used with them
+    if (lum_eff_type in [1, 2, 3, 6, 7, 8]) and (P_0m != 1500.0):
+        warnings.warn("The chosen luminous efficiency model (lum_eff_type={:d}) is calibrated for "
+            "a panchromatic zero-magnitude power of P_0m = 1500 W, but P_0m = {:g} W was given. "
+            "The computed mass will be scaled by the ratio of the two.".format(lum_eff_type, P_0m))
 
     # Compute the luminous efficiency using an analytical velocity-dependent function.
     import pyximport
