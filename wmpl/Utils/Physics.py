@@ -353,41 +353,59 @@ def calcPf(p_max, zangle, mass, v_0):
 
 
 def calcPE(mass, rho_e=None, zangle=None, v_0=None, traj=None):
-    """ Ceplecha & McCrosky (1976) PE end-height structural criterion.
+    """ The Ceplecha & McCrosky (1976) PE end-height structural criterion.
 
-        PE = log10(rho_e) + A*log10(m) + B*log10(v) + C*log10(cos(zangle))
+        PE = log10(rho_e) - 0.42*log10(m) + 1.49*log10(v) - 1.29*log10(cos(zangle))
 
-    NOTE: `mass` MUST be computed with the Ceplecha & McCrosky (1976)
-    luminous efficiency law to stay consistent with the original A, B, C
-    calibration. Compute it via Physics.calcMass() using
-    lum_eff_type=6 (i.e. 'ceplecha_mccrosky' / 'cm1976').
+    References:
+        Ceplecha & McCrosky (1976) - Fireball end heights: A diagnostic for the structure of meteoric
+            material, JGR 81, 6257.
+        Ceplecha (1988) - Earth's influx of different populations of sporadic meteoroids from
+            photographic and television data, BAICz 39, 221 (Eq. 2, group boundaries in Sec. 2e).
 
-    If `traj` (a solved WMPL Trajectory) is given, rho_e, zangle and v_0 are
-    derived from it and any values passed for those arguments are overridden:
-        - rho_e  <- getAtmDensity_vect at the end point (NRLMSISE-00, kg/m^3)
-        - zangle <- pi/2 - traj.orbit.elevation_apparent_norot (rad)
-        - v_0    <- traj.v_init (m/s)
+    NOTE: The mass MUST be the initial photometric mass computed with the Ceplecha & McCrosky (1976)
+    luminous efficiency law to stay consistent with the original calibration. Compute it via
+    calcMass() using tau='cm1976' (i.e. lum_eff_type=6) AND P_0m=1500, as the cm1976 law is defined
+    for a panchromatic zero-magnitude power of 1500 W (see luminousEfficiency() in
+    MetSimErosionCyTools.pyx).
 
     Arguments:
-        mass:   [float] Initial photometric mass m_inf (kg).
-        rho_e:  [float] Atmospheric mass density at the end height (kg/m^3).
-                        Ignored if `traj` is given.
-        zangle: [float] Radiant zenith angle (radians), measured from the local
-                        zenith (0 = vertical entry, pi/2 = horizontal entry).
-                        Ignored if `traj` is given.
-        v_0:    [float] Initial (entry) velocity V_inf (m/s). Ignored if `traj` is given.
-        traj:   [Trajectory] Optional solved WMPL Trajectory; if provided,
-                        rho_e, zangle and v_0 are computed from it.
+        mass: [float] Initial photometric mass m_inf (kg).
+
+    Keyword arguments:
+        rho_e: [float] Atmospheric mass density at the end height (kg/m^3). Cannot be given together
+            with traj.
+        zangle: [float] Radiant zenith angle (radians), measured from the local zenith
+            (0 = vertical entry, pi/2 = horizontal entry). Cannot be given together with traj.
+        v_0: [float] Initial (entry) velocity V_inf (m/s). Cannot be given together with traj.
+        traj: [Trajectory] Optional solved WMPL Trajectory. If given, rho_e, zangle and v_0 are
+            derived from it instead of being passed explicitly:
+                - rho_e  <- getAtmDensity_vect at the end point (NRLMSISE-00, kg/m^3)
+                - zangle <- pi/2 - traj.orbit.elevation_apparent_norot (rad)
+                - v_0    <- traj.v_init (m/s)
 
     Return:
         (pe, pe_group): [tuple]
-            - pe:       [float] PE criterion value.
-            - pe_group: [str]   Structural group: 'I', 'II', 'IIIa', 'IIIb'.
-    """
+            - pe: [float] PE criterion value.
+            - pe_group: [str] Structural group: 'I', 'II', 'IIIa', 'IIIb'.
 
+    """
 
     # Derive rho_e, zangle and v_0 from the trajectory if provided
     if traj is not None:
+
+        # Disallow mixing traj with explicit values, as it is ambiguous which should be used
+        if (rho_e is not None) or (zangle is not None) or (v_0 is not None):
+            raise ValueError("Give either `traj`, or explicit rho_e/zangle/v_0 values, not both.")
+
+        if (getattr(traj, 'orbit', None) is None) \
+            or (traj.orbit.elevation_apparent_norot is None):
+            raise ValueError("The given trajectory does not have a computed orbit, so the radiant "
+                "zenith angle cannot be derived. Pass rho_e, zangle and v_0 explicitly instead.")
+
+        # Atmospheric density at the end point. The original calibration used a 1970s CIRA-type
+        # reference atmosphere, but the difference to NRLMSISE-00 at fireball end heights is
+        # negligible (< ~0.03 dex) compared to the 0.65 dex PE group widths.
         rho_e  = float(getAtmDensity_vect(traj.rend_lat, traj.rend_lon,
                                           traj.rend_ele, traj.rend_jd))
         zangle = np.pi/2 - traj.orbit.elevation_apparent_norot
@@ -422,7 +440,7 @@ def calcPE(mass, rho_e=None, zangle=None, v_0=None, traj=None):
     pe = np.log10(rho_e_cgs) + A*np.log10(mass_g) + B*np.log10(v_kms) \
         + C*np.log10(np.cos(zangle))
 
-    # Structural group (Ceplecha & McCrosky 1976, p. 6260)
+    # Structural group (Ceplecha & McCrosky 1976; boundaries as in Ceplecha 1988, Sec. 2e)
     if pe > -4.60:
         pe_group = 'I'      # ordinary chondrites
     elif pe > -5.25:
@@ -489,3 +507,36 @@ if __name__ == "__main__":
         pf, pf_category = calcPf(p_max*1e6, np.radians(90 - entry_angle), mass, v_0*1e3)
 
         print("  - {:s}: Pf = {:.2f}, Pf category = {:d}".format(label, pf, pf_category))
+
+    ### ###
+
+
+
+    ### Test the PE criterion ###
+
+    print()
+    print("Ceplecha & McCrosky (1976) PE criterion calculation:")
+
+    # Hand-checkable case: PE = -8 - 0.42*3 + 1.49*log10(15) - 1.29*log10(cos(45 deg)) = -7.31
+    pe, pe_group = calcPE(1.0, rho_e=1e-5, zangle=np.radians(45), v_0=15e3)
+    print("PE test (should return ~-7.31, IIIb): PE = {:.2f}, group = {:s}".format(pe, pe_group))
+
+    # With a 1 g mass, vertical entry and v_0 = 10 km/s, the mass and zenith angle terms vanish and
+    # the velocity term reduces to +1.49, so PE = log10(rho_e in g/cm^3) + 1.49
+    # One test case per structural group
+    pe_table = [
+        # rho_e (kg/m^3), expected PE, expected group
+        [      1e-2, -3.51,    'I'],
+        [10**(-3.5), -5.01,   'II'],
+        [      1e-4, -5.51, 'IIIa'],
+        [10**(-4.5), -6.01, 'IIIb'],
+    ]
+
+    for rho_e, pe_expected, group_expected in pe_table:
+
+        pe, pe_group = calcPE(1e-3, rho_e=rho_e, zangle=0.0, v_0=10e3)
+
+        print("  - PE = {:.2f} (expected {:.2f}), group = {:>4s} (expected {:>4s})".format(
+            pe, pe_expected, pe_group, group_expected))
+
+    ### ###
