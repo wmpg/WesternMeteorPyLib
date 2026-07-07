@@ -593,26 +593,23 @@ if __name__ == "__main__":
     print()
     print("Ceplecha & McCrosky (1976) PE criterion calculation:")
 
-    # Hand-checkable case: PE = -8 - 0.42*3 + 1.49*log10(15) - 1.29*log10(cos(45 deg)) = -7.31
-    pe, pe_group = calcPE(1.0, rho_e=1e-5, zangle=np.radians(45), v_0=15e3)
-    print("PE test (should return ~-7.31, IIIb): PE = {:.2f}, group = {:s}".format(pe, pe_group))
-
-    # With a 1 g mass, vertical entry and v_0 = 10 km/s, the mass and zenith angle terms vanish and
-    # the velocity term reduces to +1.49, so PE = log10(rho_e in g/cm^3) + 1.49
-    # One test case per structural group
+    # A 1 kg meteoroid at 15 km/s and a 45 deg zenith angle, ending at different heights - one test
+    # case per structural group. The fixed terms sum to
+    # -0.42*log10(1000) + 1.49*log10(15) - 1.29*log10(cos(45 deg)) = +0.687, so the hand-checkable
+    # expected value is PE = log10(rho_e in g/cm^3) + 0.687
     pe_table = [
-        # rho_e (kg/m^3), expected PE, expected group
-        [      1e-2, -3.51,    'I'],
-        [10**(-3.5), -5.01,   'II'],
-        [      1e-4, -5.51, 'IIIa'],
-        [10**(-4.5), -6.01, 'IIIb'],
+        # rho_e (kg/m^3), ~end height (km), expected PE, expected group
+        [2e-2, 30, -4.01,    'I'],
+        [2e-3, 45, -5.01,   'II'],
+        [6e-4, 54, -5.54, 'IIIa'],
+        [2e-4, 63, -6.01, 'IIIb'],
     ]
 
-    for rho_e, pe_expected, group_expected in pe_table:
+    for rho_e, ht_end, pe_expected, group_expected in pe_table:
 
-        pe, pe_group = calcPE(1e-3, rho_e=rho_e, zangle=0.0, v_0=10e3)
+        pe, pe_group = calcPE(1.0, rho_e=rho_e, zangle=np.radians(45), v_0=15e3)
 
-        print("  - PE = {:.2f} (expected {:.2f}), group = {:>4s} (expected {:>4s})".format(
-            pe, pe_expected, pe_group, group_expected))
+        print("  - End ht ~{:2d} km: PE = {:.2f} (expected {:.2f}), group = {:>4s} "
+            "(expected {:>4s})".format(ht_end, pe, pe_expected, pe_group, group_expected))
 
     ### ###
