@@ -255,7 +255,8 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1, v_
     if (lum_eff_type in [1, 2, 3, 6, 7, 8]) and (P_0m != 1500.0):
         warnings.warn("The chosen luminous efficiency model (lum_eff_type={:d}) is calibrated for "
             "a panchromatic zero-magnitude power of P_0m = 1500 W, but P_0m = {:g} W was given. "
-            "The computed mass will be scaled by the ratio of the two.".format(lum_eff_type, P_0m))
+            "No correction is applied - the returned mass will be off by a factor of {:.2f} "
+            "compared to using the calibrated value.".format(lum_eff_type, P_0m, P_0m/1500.0))
 
     # Compute the luminous efficiency using an analytical velocity-dependent function.
     import pyximport
