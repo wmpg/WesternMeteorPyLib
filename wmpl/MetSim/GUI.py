@@ -6047,16 +6047,28 @@ class MetSimGUI(QMainWindow):
         v_init_diff = self.const.v_init - self.traj.orbit.v_init
 
         # Recompute the orbit with an increased initial velocity
+        # Reuse the same frame convention (moving vs fixed stations) that the original orbit solve used,
+        #   otherwise plane-intersection-solved events would be recomputed with the wrong convention.
+        #   Old pickles without this attribute default to the LoS-success case (moving stations).
+        los_success = getattr(self.traj, 'orbit_los_success', True)
         orb = calcOrbit(self.traj.radiant_eci_mini, self.traj.v_init + v_init_diff, self.traj.v_avg \
-            + v_init_diff, self.traj.state_vect_mini, self.traj.rbeg_jd)
+            + v_init_diff, self.traj.state_vect_mini, self.traj.rbeg_jd, \
+            stations_fixed=(not los_success), reference_init=los_success, \
+            v_init_stddev_direct=self.traj.v_init_stddev)
 
 
         print(orb)
 
-        
+
         # Make a file name for the report
         traj_updated = copy.deepcopy(self.traj)
         traj_updated.orbit = orb
+
+        # Sync the velocities used elsewhere in the report (e.g. the printed ECI state vector) with the
+        #   recomputed orbit, so the state vector and the orbit are internally consistent and integrating
+        #   the printed state vector reproduces the recorded orbit.
+        traj_updated.v_init = orb.v_init
+        traj_updated.v_avg = orb.v_avg
         dir_path, file_name = os.path.split(self.traj_path)
         report_file_name = file_name.replace('trajectory.pickle', '') + 'report_sim.txt'
 

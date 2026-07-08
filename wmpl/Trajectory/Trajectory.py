@@ -6692,6 +6692,11 @@ class Trajectory(object):
             # Calculate the orbit of the meteor
             # If the LoS estimation failed, then the plane intersection solution will be used for the orbit,
             # which needs to have fixed stations and the average velocity should be the reference velocity
+
+            # Store the orbit-solve convention so it can be reused when the orbit is recomputed later
+            #   (e.g. by MetSim's saveUpdatedOrbit)
+            self.orbit_los_success = bool(minimize_solution.success)
+
             self.orbit = calcOrbit(self.radiant_eci_mini, self.v_init, self.v_avg, self.state_vect_mini, \
                 self.rbeg_jd, stations_fixed=(not minimize_solution.success), \
                 reference_init=minimize_solution.success, v_init_stddev_direct=self.v_init_stddev)
