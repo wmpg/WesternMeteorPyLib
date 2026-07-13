@@ -1087,7 +1087,7 @@ class RMSDataHandle(object):
             # If the target is a legacy trajectory without obs_ids, the solver assigns simple numerical IDs rather than
             # true observation ids, which are strings. We can't process these legacy values safely here so exclude them. 
 
-            traj_df['validrow']=traj_df.apply(lambda row: not isinstance(row.obs_ids[0], int), axis=1)
+            traj_df['validrow']=traj_df.apply(lambda row: len(row.obs_ids) > 0 and not isinstance(row.obs_ids[0], int), axis=1)
             traj_df = traj_df[traj_df.validrow]
 
             # Now add a column containing the next trajectory's observations
