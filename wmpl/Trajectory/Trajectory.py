@@ -65,8 +65,17 @@ from wmpl.Utils.PyDomainParallelizer import parallelComputeGenerator
 # Text size of image legends
 LEGEND_TEXT_SIZE = 6
 
-# Grab the logger from the main thread
+# Set up a logger, or get one configured in the calling app if present
 log = logging.getLogger("traj_correlator")
+
+# If no handlers are configured, add a simple console log handler
+# This will be overridden if the calling app sets up its own logger.
+if len(log.handlers) == 0:
+    console_handler = logging.StreamHandler()
+    log_formatter = logging.Formatter()
+    console_handler.setFormatter(log_formatter)
+    log.addHandler(console_handler)
+    log.setLevel(logging.DEBUG)
 
 
 class ObservedPoints(object):
@@ -386,7 +395,7 @@ class ObservedPoints(object):
 
             else:
 
-                log.info(f'Excluded time range {self.excluded_time} is outside the observation times!')
+                log.warning(f'Excluded time range {self.excluded_time} is outside the observation times!')
 
 
         ######################################################################################################
@@ -2073,7 +2082,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
 
     # Break the function of there are no trajectories to process
     if len(mc_results) < 2:
-        log.info('!!! Not enough good Monte Carlo runs for uncertaintly estimation!')
+        log.warning('!!! Not enough good Monte Carlo runs for uncertaintly estimation!')
         return traj, None
 
 
@@ -3210,7 +3219,7 @@ class Trajectory(object):
 
         # If there are less than 4 points, don't estimate the initial velocity this way!
         if len(all_times) < 4:
-            log.info(f'!!! Error, there are less than 4 points for velocity estimation above the given height of {bottom_ht/1000:.2f} km!')
+            log.warning(f'!!! Error, there are less than 4 points for velocity estimation above the given height of {bottom_ht/1000:.2f} km!')
             log.info('Using automated velocity estimation with the sliding fit...')
             return None, None
 
@@ -3446,15 +3455,15 @@ class Trajectory(object):
                     break
 
                 else:
-                    log.info(f'Unsuccessful timing optimization with {opt_method}')
+                    log.warning(f'Unsuccessful timing optimization with {opt_method}')
 
             ### ###
 
             if not timing_mini.success:
 
-                log.info('Timing difference and initial velocity minimization failed with the message:')
-                log.info(timing_mini.message)
-                log.info('Try increasing the range of time offsets!')
+                log.warning('Timing difference and initial velocity minimization failed with the message:')
+                log.warning(timing_mini.message)
+                log.warning('Try increasing the range of time offsets!')
                 v_init_mini = v_init
 
                 velocity_fit = np.zeros(2)
@@ -6316,7 +6325,7 @@ class Trajectory(object):
         # If the minimization diverged, bound the solution to +/-10% of state vector
         if np.max(np.abs(minimize_solution.x[:3] - self.state_vect)/self.state_vect) > 0.1:
 
-            log.info('WARNING! Unbounded state vector optimization failed!')
+            log.warning('WARNING! Unbounded state vector optimization failed!')
             log.info('Trying bounded minimization to +/-10% of state vector position.')
 
             # Limit the minimization to 10% of original estimation in the state vector
@@ -6482,7 +6491,7 @@ class Trajectory(object):
 
         # If estimating the timing failed, skip any further steps
         if not self.timing_minimization_successful:
-            log.warning('unable to minimise timing')
+            log.info('unable to minimise timing', 1)
             return None
 
 
