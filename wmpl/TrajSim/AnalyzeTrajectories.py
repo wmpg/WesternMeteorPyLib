@@ -336,9 +336,9 @@ def plotRadiants(pickle_trajs, plot_type='geocentric', ra_cent=None, dec_cent=No
         ra_stddev = np.degrees(scipy.stats.circstd(x_list))
         dec_stddev = np.degrees(np.std(y_list))
 
-        label += "{:d} orbits, $\sigma_{{RA}}$ = {:.2f}$\degree$".format(len(x_list), ra_stddev)
+        label += "{:d} orbits, $\\sigma_{{RA}}$ = {:.2f}$\\degree$".format(len(x_list), ra_stddev)
         label += ", "
-        label += "$\sigma_{{Dec}}$ = {:.2f}$\degree$".format(dec_stddev)
+        label += "$\\sigma_{{Dec}}$ = {:.2f}$\\degree$".format(dec_stddev)
 
 
     plt_handle.scatter(x_list, y_list, c=z_list, label=label, **kwargs)
@@ -583,7 +583,7 @@ def compareTrajToSim(dir_path, sim_meteors, traj_list, solver_name, radiant_exte
     plt.xlim(0, radiant_extent)
     plt.ylim(-vg_extent, vg_extent)
 
-    plt.title('{:s}, failures: {:d}, $\sigma_R$ = {:.2f} deg, $\sigma_V$ = {:.2f} km/s'.format(solver_name, \
+    plt.title('{:s}, failures: {:d}, $\\sigma_R$ = {:.2f} deg, $\\sigma_V$ = {:.2f} km/s'.format(solver_name, \
         failed_count, radiant_std, vg_std))
 
     plt.xlabel('Radiant difference (deg)')
@@ -1160,9 +1160,9 @@ if __name__ == "__main__":
 
     # label = 'MPF:'
 
-    # label += " $\sigma_{{RA}}$ = {:.2f}$\degree$".format(ra_stddev)
+    # label += " $\\sigma_{{RA}}$ = {:.2f}$\\degree$".format(ra_stddev)
     # label += ", "
-    # label += "$\sigma_{{Dec}}$ = {:.2f}$\degree$".format(dec_stddev)
+    # label += "$\\sigma_{{Dec}}$ = {:.2f}$\\degree$".format(dec_stddev)
 
     # m.scatter(ra_list, dec_list, c=vg_list, label=label, marker='o', s=10)
 

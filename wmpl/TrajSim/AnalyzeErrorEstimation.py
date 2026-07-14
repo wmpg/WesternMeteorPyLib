@@ -190,7 +190,7 @@ if __name__ == "__main__":
 
         plt.xlim(xmax=4)
         plt.ylim([0, 1.0])
-        plt.xlabel('True radiant error ($\sigma$)')
+        plt.xlabel('True radiant error ($\\sigma$)')
         plt.ylabel('Cumulative normalized count')
 
         plt.grid(color='0.8')

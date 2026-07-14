@@ -279,7 +279,7 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
         ref_point_std = np.nanstd(ref_point_unc_list)
         
         plt.scatter(sign*ref_point, slope_pdf, color='r', zorder=5, \
-            label='Reference point = {:.2f} $\pm$ {:.2f}'.format(sign*ref_point, ref_point_std))
+            label='Reference point = {:.2f} $\\pm$ {:.2f}'.format(sign*ref_point, ref_point_std))
 
         plt.scatter(sign*inflection_point, scipy.stats.gamma.pdf(inflection_point, *params), color='r', \
             marker='x', zorder=5, label='Inflection point = {:.2f}'.format(sign*inflection_point))
@@ -336,11 +336,11 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
         # Plot the inflection point
         y_temp = np.log10(scipy.stats.gamma.sf(ref_point, *params))
         plt.scatter(sign*ref_point, 10**y_temp, c='r', \
-            label='Reference point = {:.2f} $\pm$ {:.2f}'.format(sign*ref_point, ref_point_std), zorder=5)
+            label='Reference point = {:.2f} $\\pm$ {:.2f}'.format(sign*ref_point, ref_point_std), zorder=5)
 
         # Plot the tangential line with the slope
         plt.plot(sign*x_arr, logline(-x_arr, slope, intercept), color='r', \
-            label='{:s} = {:.2f} $\pm$ {:.2f}, [{:.2f}, {:.2f}] 95% CI\nKS test D = {:.3f} \nKS test p-value = {:.3f}'.format(\
+            label='{:s} = {:.2f} $\\pm$ {:.2f}, [{:.2f}, {:.2f}] 95% CI\nKS test D = {:.3f} \nKS test p-value = {:.3f}'.format(\
                 slope_name, slope_report, slope_report_std, slope_report_95ci_lower, slope_report_95ci_upper,\
                 kstest.statistic, kstest.pvalue), zorder=5)
 
@@ -357,7 +357,7 @@ def estimateIndex(input_data, ref_point=None, mass=False, show_plots=False, plot
         else:
             lim_label = "Eff. lim. mag"
         plt.scatter(lim_point, 1.0, c='b', marker='s', \
-            label="{:s} = {:+.2f} $\pm$ {:.2f}, [{:.2f}, {:.2f}] 95% CI".format(
+            label="{:s} = {:+.2f} $\\pm$ {:.2f}, [{:.2f}, {:.2f}] 95% CI".format(
                 lim_label, 
                 lim_point, 
                 lim_point_std, 
