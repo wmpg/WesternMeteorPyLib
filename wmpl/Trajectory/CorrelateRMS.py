@@ -2153,7 +2153,7 @@ contain data folders. Data folders should have FTPdetectinfo files together with
         fmt='%(asctime)s-%(levelname)-5s-%(module)-15s:%(lineno)-5d- %(message)s',
         datefmt='%Y/%m/%d %H:%M:%S')
 
-    # Remove any existing handlers - specifically the default one set up in Trajectory.py - 
+    # Remove any existing handlers - in particular the default one set up in Trajectory.py - 
     # This logger is needed for other users of Trajectory but not by correlateRMS. 
     for handler in log.handlers[:]:
         log.removeHandler(handler)
