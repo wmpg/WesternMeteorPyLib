@@ -6491,7 +6491,7 @@ class Trajectory(object):
 
         # If estimating the timing failed, skip any further steps
         if not self.timing_minimization_successful:
-            log.info('unable to minimise timing', 1)
+            log.warning('unable to minimise timing')
             return None
 
 
