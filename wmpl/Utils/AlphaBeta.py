@@ -285,27 +285,60 @@ def lagFitVelocity(time_data, lag_data, vel_data, v0):
     return vel_fit, fit_params
 
 
+def _alphaBetaResidual(alpha, beta, v_normed, ht_normed):
+    """ Compute the residual of equation 7 using the Q4 minimisation given in equation 10 of
+        Gritsevich 2007 - 'Validity of the photometric formula for estimating the mass of a fireball
+        projectile'.
+
+    Arguments:
+        alpha: [float] Ballistic coefficient.
+        beta: [float] Mass loss parameter.
+        v_normed: [ndarray] Velocity data normalized to the initial velocity.
+        ht_normed: [ndarray] Height data normalized to the scale height.
+
+    Return:
+        [float] Sum of absolute residuals (more robust than squared residuals).
+    """
+
+    return np.sum(np.abs(2*alpha*np.exp(-ht_normed) \
+                      - (scipy.special.expi(beta) \
+                         - scipy.special.expi(beta*v_normed**2))*np.exp(-beta)))
+
+
+def _betaFromMasses(mu, mass_initial, mass_final, v_final, v_init):
+    """ Analytically compute beta from the initial/final mass ratio and the observed velocity change,
+        for a given shape change coefficient mu, by inverting the general alpha-beta mass loss solution
+        m_final = m_init*exp(-beta/(1 - mu)*(1 - (v_final/v_init)^2)).
+
+    Arguments:
+        mu: [float] Shape change coefficient.
+        mass_initial: [float] Initial mass (kg).
+        mass_final: [float] Final mass (kg).
+        v_final: [float] Final velocity (m/s).
+        v_init: [float] Initial velocity (m/s).
+
+    Return:
+        [float] Mass loss parameter beta.
+    """
+
+    return (1.0 - mu)*np.log(mass_initial/mass_final)/(1.0 - (v_final/v_init)**2)
+
+
 def minimizeAlphaBeta(v_normed, ht_normed):
     """ initiates and calls the Q4 minimisation given in Gritsevich 2007 -
         'Validity of the photometric formula for estimating the mass of a fireball projectile'
     """
 
     def _alphaBetaMinimization(x, v_normed, ht_normed):
-        """minimises equation 7 using Q4 minimisation given in equation 10 of 
-           Gritsevich 2007 - 'Validity of the photometric formula for estimating 
+        """minimises equation 7 using Q4 minimisation given in equation 10 of
+           Gritsevich 2007 - 'Validity of the photometric formula for estimating
            the mass of a fireball projectile'
 
-        """ 
+        """
 
         alpha, beta = x
 
-        # Compute the sum of absolute residuals (more robust than squared residuals)
-        res = np.sum(np.abs(2*alpha*np.exp(-ht_normed) \
-                         - (scipy.special.expi(beta) \
-                            - scipy.special.expi(beta*v_normed**2))*np.exp(-beta)))
-
-        return res
-
+        return _alphaBetaResidual(alpha, beta, v_normed, ht_normed)
 
     # params = np.vstack((v_normed, ht_normed))
 
@@ -500,17 +533,14 @@ def alphaBetaMasses(
     if not (0 < slope <= np.pi/2):
         raise ValueError("slope must be between 0 and pi/2 radians")
 
-    if not (0 <= mu <= 2/3):
-        raise ValueError("mu must be between 0 and 2/3")
-
     if dens <= 0:
         raise ValueError("dens must be positive")
-    
-    if shape_coeff <= 0:
-        raise ValueError("shape_coeff must be positive")
 
     if gamma <= 0:
         raise ValueError("gamma must be positive")
+
+    if shape_coeff <= 0:
+        raise ValueError("shape_coeff must be positive")
 
     if vel_init is not None:
         if vel_init <= 0:
@@ -523,6 +553,9 @@ def alphaBetaMasses(
     if (vel_init is not None) and (vel_end is not None):
         if vel_end > vel_init:
             raise ValueError("vel_end cannot exceed vel_init")
+
+    if not (0 <= mu <= 2/3):
+        raise ValueError("mu must be between 0 and 2/3")
 
     rho_atm_0 = 1.225
 
@@ -570,6 +603,824 @@ def alphaBetaMasses(
         print(f"m_final      = {m_final:.3e} kg")
 
     return m_init, m_final
+
+
+def fitAlphaBetaMass(
+        v_data,
+        ht_data,
+        slope,
+        mass,
+        mass_constraint="initial",
+        shape_coeff=0.55,
+        gamma=1.0,
+        density=None,
+        v_init=None,
+        v_final=None,
+        verbose=True,
+        plot=False):
+    """ Fit alpha-beta model parameters under initial, final, or both mass constraints,
+    following Peña-Asensio & Gritsevich (2025, 2026). Unlike the simultaneous
+    optimization proposed in those papers, this implementation solves a reduced
+    optimization problem in which only the parameters required by the selected mass
+    constraint are fitted, while the remaining quantities are derived analytically.
+    This reduces the dimensionality of the optimization but does not guarantee full
+    self-consistency of the recovered solution. In general, use
+    mass_constraint="initial" with a photometric initial mass or
+    mass_constraint="final" with a dynamic final mass. The bulk density may
+    optionally be fixed, and either or both of the initial and final velocities
+    may be provided.
+
+    Arguments:
+        v_data: [ndarray] Velocity data (m/s).
+        ht_data: [ndarray] Height data (m).
+        slope: [float] Entry angle (radians).
+        mass: [float or tuple] Initial and/or final mass (kg), depending on mass_constraint.
+                If mass_constraint="initial", mass must be a float containing the initial mass.
+                If mass_constraint="final", mass must be a float containing the final mass.
+                If mass_constraint="both", mass must be a tuple: (mass_initial, mass_final)
+
+    Keyword arguments:
+        mass_constraint: [str] Mass constraint to use: "initial" ("i"), "final" ("f"), or "both" ("b").
+        shape_coeff: [float] Shape coefficient. 1.21 for sphere, 1.55 for brick. As shape_coeff and Gamma
+            are factored together, we use the empirical value of gamma*A = 0.55 by default.
+        gamma: [float] Drag parameter Γ (= C_D /2).
+        density: [float or None] If given, the bulk density (kg/m^3) is held fixed at this
+            value instead of being fitted, removing it as a free parameter (e.g. a recovered
+            meteorite of known/assumed density, or a synthetic trajectory generated at a known
+            density). The optimization problem is reduced accordingly: only beta is fitted
+            under mass_constraint="initial" or "final" (plus mu for their best-fit μ search),
+            and under mass_constraint="both" with μ=0 or μ=2/3 there are zero free parameters
+            left (beta is already analytic), so alpha and beta are computed directly without
+            calling the optimizer. Default is None (density is fitted, as before).
+        v_init: [float or None] If given, used as-is. If None, derived as the median velocity
+            of the top-20% highest-altitude points.
+        v_final: [float or None] If given, used as-is, EXCEPT under mass_constraint="initial"
+            (see Notes below), where it is only used to validate v_final < v_init and is then
+            discarded: the actual v_final is always re-derived from the fitted alpha/beta.
+            If None, derived as the asymptotic minimum of a preliminary alpha-beta velocity
+            model (or, under mass_constraint="initial", of the final fitted model).
+        verbose: [bool] If True, print the parameters used in the computation and the resulting
+            fitted parameters, clearly separating which of density/v_init/v_final were given
+            as input from those that were derived/fitted internally.
+        plot: [bool] If True, show a height vs. velocity plot with the observed data and the
+            fitted alpha-beta curve(s): one for μ=0, one for μ=2/3, and (only when
+            mass_constraint is "final" or "both", where mu_best is computed) a third one
+            for the best-fit μ. Input parameters (as given
+            by the caller) are shown in the title, fitted parameters (per μ branch) in the
+            legend. Blocks execution until the plot window is closed.
+
+    Notes:
+        If mass_constraint="initial", any v_final passed in is NOT used as a fit input: it is
+        only checked against v_init and then overwritten with the value derived from the fitted
+        alpha/beta, since v_final is not a free input under this constraint. Pass verbose=True
+        to confirm whether v_init/v_final/density were used as given or derived.
+        If mass_constraint="initial", a single alpha-beta fit is performed because the
+        alpha-beta velocity solution is independent of μ. In this case, the fitted
+        density, alpha, and beta are identical for μ = 0 and μ = 2/3, and only the
+        derived final masses differ. Since μ has no effect whatsoever on the fit
+        residual in this case, no data-driven best-fit μ is computed
+        (mu_best and its associated outputs are returned as None).
+        If mass_constraint="final", two independent fits are performed, one for μ = 0
+        and one for μ = 2/3, because reconstructing the initial mass from the final
+        mass explicitly depends on μ. Since μ does affect the fit residual here, an
+        additional joint fit over (density, beta, μ) is performed, with μ free within
+        [0, 2/3], to find the data-driven μ that minimizes the fit residual (mu_best).
+        If mass_constraint="both", the initial and final masses are both
+        imposed. In this case beta is computed analytically from the mass
+        ratio and the observed velocity change, and only the density is fitted.
+        Since beta (and hence the residual) still depends on μ through that analytic
+        relation, an additional joint fit over (density, μ) is performed, with μ free
+        within [0, 2/3], to find the μ that minimizes the fit residual (mu_best).
+        The mu_best solution is the value of μ that minimizes the fit residual under
+        the selected mass constraint and is not guaranteed to be physically meaningful.
+        It tends to pull the constrained fit toward the unconstrained alpha-beta
+        solution, and may land on 0 or 2/3 anyway. Treat it as a third, informative
+        data point alongside the μ = 0 and μ = 2/3 physical bounds.
+        Because the optimization is performed in a reduced, partially decoupled parameter
+        space rather than as a simultaneous fit of all quantities, the fitted α-β solution
+        is not guaranteed to reproduce exactly the v_final used to impose the mass constraint.
+        Consequently, under mass_constraint="final" or "both", the resulting solution may not
+        be fully self-consistent. The α-β formulation is a single-body model and is therefore
+        intended for events without significant fragmentation, or where a single dominant body
+        governs the observed dynamics. Reliable parameter estimation also requires measurable
+        deceleration along the observed trajectory.
+
+    Return:
+        (
+            v_init,
+            v_final,
+            density_mu0,
+            alpha_mu0,
+            beta_mu0,
+            m_initial_mu0,
+            m_final_mu0,
+            density_mu23,
+            alpha_mu23,
+            beta_mu23,
+            m_initial_mu23,
+            m_final_mu23,
+            mu_best,
+            density_mu_best,
+            alpha_mu_best,
+            beta_mu_best,
+            m_initial_mu_best,
+            m_final_mu_best
+        ):
+            - v_init: [float] Input or derived initial velocity (m/s).
+            - v_final: [float] Input or derived final velocity (m/s).
+            - density_mu0: [float] Best-fit bulk density (kg/m^3) assuming μ = 0.
+            - alpha_mu0: [float] Derived ballistic coefficient assuming μ = 0.
+            - beta_mu0: [float] Derived mass loss parameter assuming μ = 0.
+            - m_initial_mu0: [float] Initial mass (input or reconstructed from the fitted
+                parameters) assuming μ = 0.
+            - m_final_mu0: [float] Final mass (input or reconstructed from the fitted parameters)
+                assuming μ = 0.
+            - density_mu23: [float] Best-fit bulk density (kg/m^3) assuming μ = 2/3.
+            - alpha_mu23: [float] Derived ballistic coefficient assuming μ = 2/3.
+            - beta_mu23: [float] Derived mass loss parameter assuming μ = 2/3.
+            - m_initial_mu23: [float] Initial mass (input or reconstructed from the fitted
+                parameters) assuming μ = 2/3.
+            - m_final_mu23: [float] Final mass (input or reconstructed from the fitted parameters)
+                assuming μ = 2/3.
+            - mu_best: [float or None] Data-driven μ (within [0, 2/3]) that minimizes the fit
+                residual. None if mass_constraint="initial".
+            - density_mu_best: [float or None] Best-fit bulk density (kg/m^3) at μ = mu_best.
+            - alpha_mu_best: [float or None] Derived ballistic coefficient at μ = mu_best.
+            - beta_mu_best: [float or None] Derived mass loss parameter at μ = mu_best.
+            - m_initial_mu_best: [float or None] Initial mass at μ = mu_best.
+            - m_final_mu_best: [float or None] Final mass at μ = mu_best.
+    """
+
+    mass_constraint = mass_constraint.lower()
+
+    if mass_constraint in ["initial", "i"]:
+        mass_constraint = "initial"
+
+        if not np.isscalar(mass):
+            raise ValueError("For mass_constraint='initial', mass must be a single number (kg).")
+
+        mass_initial = mass
+        mass_final = None
+
+        if mass_initial <= 0:
+            raise ValueError("mass_initial must be positive.")
+
+    elif mass_constraint in ["final", "f"]:
+        mass_constraint = "final"
+
+        if not np.isscalar(mass):
+            raise ValueError("For mass_constraint='final', mass must be a single number (kg).")
+
+        mass_initial = None
+        mass_final = mass
+
+        if mass_final <= 0:
+            raise ValueError("mass_final must be positive.")
+
+    elif mass_constraint in ["both", "b"]:
+        mass_constraint = "both"
+
+        if not isinstance(mass, (tuple, list)) or len(mass) != 2:
+            raise ValueError("For mass_constraint='both', mass must be (mass_initial, mass_final)")
+
+        mass_initial, mass_final = mass
+
+        if mass_initial <= 0:
+            raise ValueError("mass_initial must be positive.")
+
+        if mass_final <= 0:
+            raise ValueError("mass_final must be positive.")
+
+        if mass_final >= mass_initial:
+            raise ValueError("mass_final must be smaller than mass_initial.")
+
+    else:
+        raise ValueError("mass_constraint must be 'initial' ('i'), 'final' ('f'), or 'both' ('b')")
+
+    if len(v_data) != len(ht_data):
+        raise ValueError("v_data and ht_data must have the same length.")
+    if not (0 < slope <= np.pi/2):
+        raise ValueError("slope must be between 0 and pi/2 radians.")
+    if shape_coeff <= 0:
+        raise ValueError("shape_coeff must be > 0.")
+    if gamma <= 0:
+        raise ValueError("gamma must be > 0.")
+    if (density is not None) and (density <= 0):
+        raise ValueError("density must be > 0.")
+
+    fit_density = density is None
+
+    # Remember what the caller actually provided, before v_init/v_final are
+    # possibly overwritten below with derived values, so verbose=True can report
+    # which quantities are inputs and which are derived/fitted.
+    v_init_given = v_init is not None
+    v_final_given = v_final is not None
+    v_final_input = v_final
+
+    rho_atm_0 = 1.225
+
+    # Compute the initial velocity as the median velocity of the top-20% highest-altitude points
+    #   (or a minimum of 10 points), if it wasn't given already
+    if v_init is None:
+
+        # Sort by decreasing height, regardless of input ordering
+        order_desc = np.argsort(-ht_data)
+        v_data_desc = v_data[order_desc]
+
+        max_index = int(0.2*len(v_data_desc))
+        if max_index < 10:
+            max_index = 10
+
+        v_init = np.median(v_data_desc[:max_index])
+
+    if (v_final is not None) and (v_final >= v_init):
+        raise ValueError("v_final must be smaller than v_init.")
+
+    # Run a preliminary unconstrained alpha-beta fit when the final velocity has to be derived from
+    #   the data, and always under the final-mass constraint, where the fitted beta is needed to
+    #   seed the constrained optimization (see below). It is skipped under mass_constraint="initial"
+    #   when v_final is not used by the fit at all - there v_final is always re-derived from the
+    #   fitted alpha/beta after the constrained fit
+    beta_prelim = None
+    if (mass_constraint == "final") or ((v_final is None) and (mass_constraint == "both")):
+
+        # Fit the unconstrained alpha-beta model
+        _, alpha_prelim, beta_prelim = fitAlphaBeta(v_data, ht_data, v_init=v_init)
+
+        # Evaluate the model velocity at the observed heights and take the minimum as the final
+        #   velocity, if it wasn't given already
+        if v_final is None:
+            vel_model = alphaBetaVelocity(ht_data, alpha_prelim, beta_prelim, v_init)
+            v_final = np.min(vel_model)
+
+
+    # Normalize velocity
+    v_normed = v_data/v_init
+
+    # Normalize height
+    ht_normed = ht_data/HT_NORM_CONST
+
+    def _alphaFromDensityAndMass(mass_init, dens):
+        """ Analytically compute alpha from the bulk density and the initial mass, by inverting the
+            initial mass solution used in alphaBetaMasses().
+        """
+
+        return gamma*shape_coeff*rho_atm_0*HT_NORM_CONST \
+            /(dens**(2/3)*np.sin(slope)*mass_init**(1/3))
+
+    def _massesAt(alpha, beta, mu, dens):
+        """ alphaBetaMasses() bound to this fit's slope/shape_coeff/gamma/v_init/v_final, so each
+            mu branch below just supplies the (alpha, beta, mu, dens) it solved for. v_final is read
+            at call time, so this stays correct even where v_final is only finalized right before
+            the first call (mass_constraint="initial").
+        """
+
+        return alphaBetaMasses(alpha, beta, slope, mu=mu, dens=dens, shape_coeff=shape_coeff, \
+            gamma=gamma, vel_init=v_init, vel_end=v_final)
+
+    def _getDensity(x):
+        """ Split the optimizer's parameter vector into (density, remaining free params).
+            If density is set, density isn't part of x at all and x is returned
+            unchanged as the remaining params; otherwise density is x[0] and the rest
+            follow. Every objective below starts by calling this, so fixing the density
+            just shrinks x by one slot without changing any downstream physics.
+        """
+
+        if fit_density:
+            return x[0], x[1:]
+
+        return density, x
+
+    def _densityBetaMinimizationInitialMass(x, v_normed, ht_normed):
+        """ Fit objective for mass_constraint="initial": alpha follows analytically from the fixed
+            initial mass and the density, so only (density, beta) are free.
+        """
+
+        dens, rest = _getDensity(x)
+        beta = rest[0]
+
+        alpha = _alphaFromDensityAndMass(mass_initial, dens)
+
+        return _alphaBetaResidual(alpha, beta, v_normed, ht_normed)
+
+    def _reconstructInitialMassAndAlpha(dens, beta, mu):
+        """ Reconstruct the initial mass from the fixed final mass by inverting the general
+            alpha-beta mass loss solution, then compute alpha from the density and that mass.
+        """
+
+        m_init_fit = mass_final*np.exp(beta/(1.0 - mu)*(1.0 - (v_final/v_init)**2))
+
+        alpha = _alphaFromDensityAndMass(m_init_fit, dens)
+
+        return m_init_fit, alpha
+
+    def _densityBetaMinimizationFinalMass(x, v_normed, ht_normed, mu):
+        """ Fit objective for mass_constraint="final": the initial mass (and with it alpha) is
+            reconstructed from the fixed final mass, so only (density, beta) are free.
+        """
+
+        dens, rest = _getDensity(x)
+        beta = rest[0]
+
+        _, alpha = _reconstructInitialMassAndAlpha(dens, beta, mu)
+
+        return _alphaBetaResidual(alpha, beta, v_normed, ht_normed)
+
+    def _densityBetaMuMinimizationFinalMass(x, v_normed, ht_normed):
+        """ Same as _densityBetaMinimizationFinalMass, but with mu as a free parameter instead of
+            fixed, so the residual-minimizing mu can be found jointly with density and beta.
+        """
+
+        dens, rest = _getDensity(x)
+        beta, mu = rest
+
+        _, alpha = _reconstructInitialMassAndAlpha(dens, beta, mu)
+
+        return _alphaBetaResidual(alpha, beta, v_normed, ht_normed)
+
+    def _solveBothMasses(dens, mu):
+        """ Analytic beta from the mass ratio and mu, and alpha from density and the fixed initial
+            mass, for the mass_constraint="both" case. Shared by the optimization objectives and
+            the post-fit derivation of alpha/beta at mu=0, mu=2/3 and mu=mu_best so both stay in
+            sync if the relations change.
+        """
+
+        beta = _betaFromMasses(mu, mass_initial, mass_final, v_final, v_init)
+
+        alpha = _alphaFromDensityAndMass(mass_initial, dens)
+
+        return alpha, beta
+
+    def _densityMinimizationBothMasses(x, v_normed, ht_normed, mu):
+        """ Fit objective for mass_constraint="both": alpha and beta both follow analytically from
+            the two fixed masses, so only the density is free. Only called when the density is
+            fitted.
+        """
+
+        dens = x[0]
+
+        alpha, beta = _solveBothMasses(dens, mu)
+
+        return _alphaBetaResidual(alpha, beta, v_normed, ht_normed)
+
+    def _densityMuMinimizationBothMasses(x, v_normed, ht_normed):
+        """ Same as _densityMinimizationBothMasses, but with mu as a free parameter instead of
+            fixed, so the residual-minimizing mu can be found jointly with density (beta is still
+            derived analytically from mu and the two masses).
+        """
+
+        dens, rest = _getDensity(x)
+        mu = rest[0]
+
+        alpha, beta = _solveBothMasses(dens, mu)
+
+        return _alphaBetaResidual(alpha, beta, v_normed, ht_normed)
+
+
+    # Initial guess
+    dens0 = 2500
+    beta0 = 1
+
+    # Bounds
+    xmin = [100, 0.001]
+    xmax = [9000, 50]
+
+    # Seed beta with the preliminary unconstrained fit when available. This is essential under the
+    #   final-mass constraint: its reduced objective has a spurious minimum at large beta, where the
+    #   reconstructed initial mass diverges, alpha goes to 0, and the residual vanishes for any
+    #   data, so the optimizer needs to start near the physical solution
+    if beta_prelim is not None:
+        beta0 = float(np.clip(beta_prelim, xmin[1], xmax[1]))
+
+    # Free parameters are (density, beta) if the density is fitted, or just (beta,) if it is set.
+    #   Used for mass_constraint="initial" and the mu=0/mu=2/3 fits of mass_constraint="final",
+    #   which all share this same 2-parameter (or 1-parameter) shape
+    if fit_density:
+        x0 = [dens0, beta0]
+        bnds = ((xmin[0], xmax[0]), (xmin[1], xmax[1]))
+    else:
+        x0 = [beta0]
+        bnds = ((xmin[1], xmax[1]),)
+
+    if mass_constraint == "initial":
+
+        # Fit (density, beta), with alpha following analytically from the fixed initial mass
+        res = scipy.optimize.minimize(_densityBetaMinimizationInitialMass, x0, \
+            args=(v_normed, ht_normed), bounds=bnds, method='Nelder-Mead')
+
+        if not res.success:
+            print(f"WARNING: Optimizer failed: {res.message}")
+
+        # Don't overwrite the input density variable - _getDensity() and the plotting code below
+        #   read it to distinguish the fixed input value from the fitted one
+        density_fit, rest = _getDensity(res.x)
+        beta = rest[0]
+
+        # The fit residual is independent of mu under the initial-mass constraint, so the fitted
+        #   density, alpha, and beta are shared by both mu branches
+        density_mu0, density_mu23 = density_fit, density_fit
+        beta_mu0, beta_mu23 = beta, beta
+
+        alpha = _alphaFromDensityAndMass(mass_initial, density_fit)
+
+        alpha_mu0, alpha_mu23 = alpha, alpha
+
+        # Derive the final velocity from the fitted model (v_final is not a fit input under this
+        #   constraint)
+        vel_model = alphaBetaVelocity(ht_data, alpha, beta, v_init)
+        v_final = np.min(vel_model)
+
+        m_initial_mu0, m_final_mu0 = _massesAt(alpha, beta, 0, density_fit)
+
+        m_initial_mu23, m_final_mu23 = _massesAt(alpha, beta, 2/3, density_fit)
+
+        # mu has zero effect on the fit residual under an initial-mass constraint (see docstring
+        #   notes), so no data-driven best-fit mu exists here
+        mu_best = None
+        density_mu_best = None
+        alpha_mu_best = None
+        beta_mu_best = None
+        m_initial_mu_best = None
+        m_final_mu_best = None
+
+
+    elif mass_constraint == "final":
+
+        # Fit (density, beta) for mu = 0, with the initial mass reconstructed from the fixed
+        #   final mass
+        res_mu0 = scipy.optimize.minimize(_densityBetaMinimizationFinalMass, x0, \
+            args=(v_normed, ht_normed, 0), bounds=bnds, method='Nelder-Mead')
+
+        if not res_mu0.success:
+            print(f"WARNING: Optimizer failed for mu=0: {res_mu0.message}")
+
+        density_mu0, rest = _getDensity(res_mu0.x)
+        beta_mu0 = rest[0]
+
+        # Only alpha is needed here - the masses are computed below with _massesAt(), which
+        #   reproduces the same initial mass by construction
+        _, alpha_mu0 = _reconstructInitialMassAndAlpha(density_mu0, beta_mu0, 0)
+
+        m_initial_mu0, m_final_mu0 = _massesAt(alpha_mu0, beta_mu0, 0, density_mu0)
+
+        # Fit (density, beta) for mu = 2/3
+        res_mu23 = scipy.optimize.minimize(_densityBetaMinimizationFinalMass, x0, \
+            args=(v_normed, ht_normed, 2/3), bounds=bnds, method='Nelder-Mead')
+
+        if not res_mu23.success:
+            print(f"WARNING: Optimizer failed for mu=2/3: {res_mu23.message}")
+
+        density_mu23, rest = _getDensity(res_mu23.x)
+        beta_mu23 = rest[0]
+
+        _, alpha_mu23 = _reconstructInitialMassAndAlpha(density_mu23, beta_mu23, 2/3)
+
+        m_initial_mu23, m_final_mu23 = _massesAt(alpha_mu23, beta_mu23, 2/3, density_mu23)
+
+        # Data-driven best-fit mu: jointly fit (density, beta, mu) with mu free within [0, 2/3],
+        #   since mu affects the residual here (see docstring notes)
+        if fit_density:
+            x0_mu_best = [dens0, beta0, 1/3]
+            bnds_mu_best = ((xmin[0], xmax[0]), (xmin[1], xmax[1]), (0.0, 2/3))
+        else:
+            x0_mu_best = [beta0, 1/3]
+            bnds_mu_best = ((xmin[1], xmax[1]), (0.0, 2/3))
+
+        res_mu_best = scipy.optimize.minimize(_densityBetaMuMinimizationFinalMass, x0_mu_best, \
+            args=(v_normed, ht_normed), bounds=bnds_mu_best, method='Nelder-Mead')
+
+        if not res_mu_best.success:
+            print(f"WARNING: Optimizer failed for best-fit mu: {res_mu_best.message}")
+
+        density_mu_best, rest = _getDensity(res_mu_best.x)
+        beta_mu_best, mu_best = rest
+        mu_best = float(np.clip(mu_best, 0.0, 2/3))
+
+        _, alpha_mu_best = _reconstructInitialMassAndAlpha(density_mu_best, beta_mu_best, mu_best)
+
+        m_initial_mu_best, m_final_mu_best = _massesAt(alpha_mu_best, beta_mu_best, mu_best, \
+            density_mu_best)
+
+    elif mass_constraint == "both":
+
+        # Fit the density for mu = 0 (alpha and beta both follow analytically from the two masses)
+        if fit_density:
+            res_mu0 = scipy.optimize.minimize(_densityMinimizationBothMasses, [dens0], \
+                args=(v_normed, ht_normed, 0), bounds=[(xmin[0], xmax[0])], method='Nelder-Mead')
+
+            if not res_mu0.success:
+                print(f"WARNING: Optimizer failed for mu=0: {res_mu0.message}")
+
+            density_mu0 = res_mu0.x[0]
+
+        else:
+            # Both masses and the density are fixed: beta and alpha follow directly, nothing left
+            #   to optimize
+            density_mu0 = density
+
+        alpha_mu0, beta_mu0 = _solveBothMasses(density_mu0, 0.0)
+
+        m_initial_mu0, m_final_mu0 = _massesAt(alpha_mu0, beta_mu0, 0, density_mu0)
+
+        # Fit the density for mu = 2/3
+        if fit_density:
+            res_mu23 = scipy.optimize.minimize(_densityMinimizationBothMasses, [dens0], \
+                args=(v_normed, ht_normed, 2/3), bounds=[(xmin[0], xmax[0])], method='Nelder-Mead')
+
+            if not res_mu23.success:
+                print(f"WARNING: Optimizer failed for mu=2/3: {res_mu23.message}")
+
+            density_mu23 = res_mu23.x[0]
+
+        else:
+            density_mu23 = density
+
+        alpha_mu23, beta_mu23 = _solveBothMasses(density_mu23, 2.0/3.0)
+
+        m_initial_mu23, m_final_mu23 = _massesAt(alpha_mu23, beta_mu23, 2/3, density_mu23)
+
+        # Data-driven best-fit mu: jointly fit (density, mu) with mu free within [0, 2/3] (or just
+        #   mu, if the density is set); beta is still derived analytically from mu and the two
+        #   given masses
+        if fit_density:
+            x0_mu_best = [dens0, 1/3]
+            bnds_mu_best = [(xmin[0], xmax[0]), (0.0, 2/3)]
+        else:
+            x0_mu_best = [1/3]
+            bnds_mu_best = [(0.0, 2/3)]
+
+        res_mu_best = scipy.optimize.minimize(_densityMuMinimizationBothMasses, x0_mu_best, \
+            args=(v_normed, ht_normed), bounds=bnds_mu_best, method='Nelder-Mead')
+
+        if not res_mu_best.success:
+            print(f"WARNING: Optimizer failed for best-fit mu: {res_mu_best.message}")
+
+        density_mu_best, rest = _getDensity(res_mu_best.x)
+        mu_best = rest[0]
+        mu_best = float(np.clip(mu_best, 0.0, 2/3))
+
+        alpha_mu_best, beta_mu_best = _solveBothMasses(density_mu_best, mu_best)
+
+        m_initial_mu_best, m_final_mu_best = _massesAt(alpha_mu_best, beta_mu_best, mu_best, density_mu_best)
+
+    if verbose:
+
+        print("\n===== Alpha-Beta Mass Fit =====\n")
+
+        print("--- Inputs (as given by the caller) ---")
+        print(f"mass_constraint      = {mass_constraint}")
+        if mass_constraint == "initial":
+            print(f"mass_init            = {mass:.3f} kg  (input)")
+        elif mass_constraint == "final":
+            print(f"mass_final           = {mass:.3f} kg  (input)")
+        elif mass_constraint == "both":
+            print(f"mass_init            = {mass_initial:.3f} kg  (input)")
+            print(f"mass_final           = {mass_final:.3f} kg  (input)")
+        print(f"GAMMA_A              = {shape_coeff*gamma:.3f}  (input)")
+
+        if fit_density:
+            print("density              = not given -> fitted below, separately for each mu")
+        else:
+            print(f"density              = {density:.1f} kg/m^3  (input, held fixed - not fitted)")
+
+        if v_init_given:
+            print(f"v_init               = {v_init/1000:.3f} km/s  (input)")
+        else:
+            print(f"v_init               = {v_init/1000:.3f} km/s  (DERIVED: median of the "
+                  "top-20% highest-altitude points)")
+
+        if mass_constraint == "initial":
+            if v_final_given:
+                print(f"v_final              = {v_final_input/1000:.3f} km/s  (input, but IGNORED: "
+                      "under mass_constraint='initial' v_final is always re-derived from the "
+                      "fitted alpha/beta - see 'DERIVED' value below)")
+            print(f"v_final              = {v_final/1000:.3f} km/s  (DERIVED: minimum velocity "
+                  "predicted by the fitted alpha-beta model)")
+        elif v_final_given:
+            print(f"v_final              = {v_final/1000:.3f} km/s  (input)")
+        else:
+            print(f"v_final              = {v_final/1000:.3f} km/s  (DERIVED: minimum velocity "
+                  "predicted by a preliminary alpha-beta fit)")
+
+        density_note = "  (= fixed input density)" if not fit_density else ""
+
+        print("\n--- mu = 0 ---")
+        print(f"density_mu0          = {density_mu0:.1f} kg/m^3{density_note}")
+        print(f"alpha_mu0            = {alpha_mu0:.6f}")
+        print(f"beta_mu0             = {beta_mu0:.6f}")
+        print(f"m_initial_mu0        = {m_initial_mu0:.3f} kg")
+        print(f"m_final_mu0          = {m_final_mu0:.3f} kg")
+        print("\n--- mu = 2/3 ---")
+        print(f"density_mu23         = {density_mu23:.1f} kg/m^3{density_note}")
+        print(f"alpha_mu23           = {alpha_mu23:.6f}")
+        print(f"beta_mu23            = {beta_mu23:.6f}")
+        print(f"m_initial_mu23       = {m_initial_mu23:.3f} kg")
+        print(f"m_final_mu23         = {m_final_mu23:.3f} kg")
+        if mass_constraint == "initial":
+            print("\n--- Best-fit mu ---")
+            print("not applicable: mu has no effect on the fit under an initial-mass constraint")
+        else:
+            print("\n--- Best-fit mu ---")
+            print(f"mu_best              = {mu_best:.3f}")
+            print(f"density_mu_best      = {density_mu_best:.1f} kg/m^3{density_note}")
+            print(f"alpha_mu_best        = {alpha_mu_best:.6f}")
+            print(f"beta_mu_best         = {beta_mu_best:.6f}")
+            print(f"m_initial_mu_best    = {m_initial_mu_best:.3f} kg")
+            print(f"m_final_mu_best      = {m_final_mu_best:.3f} kg")
+
+
+    ### Fit-quality diagnostics ###
+
+    # Relative distance-to-bound tolerance
+    bound_tol = 1e-2
+    warnings_list = []
+
+    def _checkBound(name, value, lower, upper):
+        """ Warn if a fitted parameter landed within bound_tol (relative to the bound span) of
+            either optimization bound, which usually indicates a poorly constrained fit.
+        """
+
+        span = upper - lower
+
+        if (value - lower)/span < bound_tol:
+            warnings_list.append(f"{name}={value:.6g} is close to the minimization lower "
+                f"bound ({lower:.6g})")
+
+        if (upper - value)/span < bound_tol:
+            warnings_list.append(f"{name}={value:.6g} is close to the minimization upper "
+                f"bound ({upper:.6g})")
+
+    # Check the fitted densities against the optimization bounds
+    if fit_density:
+        _checkBound("density_mu0", density_mu0, xmin[0], xmax[0])
+        _checkBound("density_mu23", density_mu23, xmin[0], xmax[0])
+
+    # Check the fitted betas (under "both" beta is analytic, not fitted, so it's skipped)
+    if mass_constraint in ["initial", "final"]:
+        _checkBound("beta_mu0", beta_mu0, xmin[1], xmax[1])
+        _checkBound("beta_mu23", beta_mu23, xmin[1], xmax[1])
+
+    if fit_density and mass_constraint in ["final", "both"]:
+        _checkBound("density_mu_best", density_mu_best, xmin[0], xmax[0])
+
+    if mass_constraint == "final":
+        _checkBound("beta_mu_best", beta_mu_best, xmin[1], xmax[1])
+
+    def _checkVelocityRecovery(name, alpha, beta):
+        """ Under mass_constraint="final"/"both", beta is derived analytically assuming a
+            particular v_final (given or derived from a preliminary unconstrained fit), but
+            alpha/beta are then fitted to best match the v-h curve shape. Nothing else guarantees
+            that plugging the fitted alpha/beta back into alphaBetaVelocity() actually reproduces
+            that same v_final, so check it explicitly here.
+        """
+
+        v_final_model = np.min(alphaBetaVelocity(ht_data, alpha, beta, v_init))
+        rel_diff = abs(v_final_model - v_final)/v_final
+
+        if rel_diff > bound_tol:
+            warnings_list.append(f"{name}: model v_final from the fitted alpha/beta "
+                f"({v_final_model:.1f} m/s) differs from the v_final used in the mass constraint "
+                f"({v_final:.1f} m/s) by {100*rel_diff:.2f}% (> {100*bound_tol:.3g}%)")
+
+    # Check that the fitted solutions reproduce the v_final used to impose the mass constraint
+    if mass_constraint in ["final", "both"]:
+        _checkVelocityRecovery("v_final_mu0", alpha_mu0, beta_mu0)
+        _checkVelocityRecovery("v_final_mu23", alpha_mu23, beta_mu23)
+        _checkVelocityRecovery("v_final_mu_best", alpha_mu_best, beta_mu_best)
+
+    # Print all collected fit-quality warnings
+    if warnings_list:
+
+        print()
+        print(f"WARNING: One or more fit-quality checks exceeded the {100*bound_tol:.3g}% "
+            "tolerance.")
+        print(f"The fit may be poorly constrained (a fitted parameter landed within "
+            f"{100*bound_tol:.3g}% of an optimization bound) or may not satisfy the imposed "
+            f"constraints self-consistently (the model's recovered v_final differs from the "
+            f"assumed v_final by more than {100*bound_tol:.3g}%).")
+        for warning in warnings_list:
+            print(f"  - {warning}")
+        print()
+
+    ### ###
+
+    if plot:
+
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots(figsize=(9, 6))
+
+        # Observed data
+        ax.scatter(v_data/1000, ht_data/1000, s=10, color='0.5', alpha=0.6, zorder=1, \
+            label="Observed data")
+
+        # Height grid used to draw the fitted curves
+        ht_arr = np.linspace(np.min(ht_data), np.max(ht_data), 200)
+
+        def _fitLabel(mu_label, dens_val, alpha_val, beta_val, m_init_val, m_final_val, v_final_model):
+            """ One parameter per line, so each value can be read on its own instead of
+                several being crammed onto the same line.
+            """
+
+            lines = [mu_label]
+
+            if fit_density:
+                lines.append("$\\rho$ = {:.0f} kg/m$^3$".format(dens_val))
+
+            lines.append("$\\alpha$ = {:.3f}".format(alpha_val))
+            lines.append("$\\beta$ = {:.3f}".format(beta_val))
+            lines.append("$m_i$ = {:.2e} kg".format(m_init_val))
+            lines.append("$m_f$ = {:.2e} kg".format(m_final_val))
+            lines.append("$v_f$ = {:.3f} km/s".format(v_final_model/1000))
+
+            return "\n".join(lines)
+
+        # (label, density, alpha, beta, m_init, m_final, color) per fitted branch
+        curves = [
+            ("$\\mu$ = 0",   density_mu0,  alpha_mu0,  beta_mu0,  m_initial_mu0,  m_final_mu0,  'b'),
+            ("$\\mu$ = 2/3", density_mu23, alpha_mu23, beta_mu23, m_initial_mu23, m_final_mu23, 'g'),
+        ]
+
+        if mu_best is not None:
+            curves.append((
+                "$\\mu$ = {:.2f}".format(mu_best),
+                density_mu_best, alpha_mu_best, beta_mu_best, m_initial_mu_best, m_final_mu_best,
+                'r'
+            ))
+
+        for mu_label, dens_val, alpha_val, beta_val, m_init_val, m_final_val, color in curves:
+
+            vel_arr = alphaBetaVelocity(ht_arr, alpha_val, beta_val, v_init)
+
+            # Computed the same way as in _checkVelocityRecovery() above (min over the
+            # actual ht_data points, not over the ht_arr plotting grid), so the number
+            # shown in the legend always matches what that check evaluates.
+            v_final_model = np.min(alphaBetaVelocity(ht_data, alpha_val, beta_val, v_init))
+
+            ax.plot(vel_arr/1000, ht_arr/1000, color=color, \
+                label=_fitLabel(mu_label, dens_val, alpha_val, beta_val, m_init_val, m_final_val,
+                    v_final_model))
+
+        # Build the input-parameter summary shown in the title (as given by the caller)
+        if mass_constraint == "initial":
+            mass_line = "mass_init = {:.3g} kg (input)".format(mass_initial)
+        elif mass_constraint == "final":
+            mass_line = "mass_final = {:.3g} kg (input)".format(mass_final)
+        else:
+            mass_line = "mass_init = {:.3g} kg, mass_final = {:.3g} kg (input)".format(
+                mass_initial, mass_final)
+
+        v_init_tag = "input" if v_init_given else "derived"
+        v_final_tag = "input" if (v_final_given and mass_constraint != "initial") else "derived"
+
+        density_line = "\ndensity = {:.1f} kg/m$^3$ (fixed input)".format(density) \
+            if not fit_density else ""
+
+        title = (
+            "mass_constraint = '{:s}'   slope = {:.2f}°   $\\Gamma A$ = {:.3f}\n"
+            "{:s}\n"
+            "$v_0$ = {:.2f} km/s ({:s})   $v_f$ = {:.2f} km/s ({:s})"
+            "{:s}"
+        ).format(
+            mass_constraint, np.degrees(slope), gamma*shape_coeff,
+            mass_line,
+            v_init/1000, v_init_tag, v_final/1000, v_final_tag,
+            density_line
+        )
+
+        ax.set_title(title, fontsize=9, loc='left')
+        ax.set_xlabel("Velocity (km/s)")
+        ax.set_ylabel("Height (km)")
+
+        ax.legend(fontsize=8, loc='center left', bbox_to_anchor=(1.02, 0.5))
+
+        fig.tight_layout()
+
+        plt.show()
+
+    return (
+        v_init,
+        v_final,
+
+        density_mu0,
+        alpha_mu0,
+        beta_mu0,
+        m_initial_mu0,
+        m_final_mu0,
+
+        density_mu23,
+        alpha_mu23,
+        beta_mu23,
+        m_initial_mu23,
+        m_final_mu23,
+
+        mu_best,
+        density_mu_best,
+        alpha_mu_best,
+        beta_mu_best,
+        m_initial_mu_best,
+        m_final_mu_best
+    )
 
 
 
