@@ -833,22 +833,25 @@ def fitAlphaBetaMass(
 
         v_init = np.median(v_data_desc[:max_index])
 
-    if v_final is not None:
+    if (v_final is not None) and (v_final >= v_init):
+        raise ValueError("v_final must be smaller than v_init.")
 
-        if v_final >= v_init:
-            raise ValueError("v_final must be smaller than v_init.")
-
-    # Estimate the final velocity from a preliminary unconstrained alpha-beta fit. This is skipped
-    #   under mass_constraint="initial" because there v_final is not used by the fit at all - it is
-    #   always re-derived from the fitted alpha/beta after the constrained fit below
-    elif mass_constraint != "initial":
+    # Run a preliminary unconstrained alpha-beta fit when the final velocity has to be derived from
+    #   the data, and always under the final-mass constraint, where the fitted beta is needed to
+    #   seed the constrained optimization (see below). It is skipped under mass_constraint="initial"
+    #   when v_final is not used by the fit at all - there v_final is always re-derived from the
+    #   fitted alpha/beta after the constrained fit
+    beta_prelim = None
+    if (mass_constraint == "final") or ((v_final is None) and (mass_constraint == "both")):
 
         # Fit the unconstrained alpha-beta model
-        _, alpha, beta = fitAlphaBeta(v_data, ht_data, v_init=v_init)
+        _, alpha_prelim, beta_prelim = fitAlphaBeta(v_data, ht_data, v_init=v_init)
 
-        # Evaluate the model velocity at the observed heights and take the minimum as the final velocity
-        vel_model = alphaBetaVelocity(ht_data, alpha, beta, v_init)
-        v_final = np.min(vel_model)
+        # Evaluate the model velocity at the observed heights and take the minimum as the final
+        #   velocity, if it wasn't given already
+        if v_final is None:
+            vel_model = alphaBetaVelocity(ht_data, alpha_prelim, beta_prelim, v_init)
+            v_final = np.min(vel_model)
 
 
     # Normalize velocity
@@ -982,6 +985,13 @@ def fitAlphaBetaMass(
     xmin = [100, 0.001]
     xmax = [9000, 50]
 
+    # Seed beta with the preliminary unconstrained fit when available. This is essential under the
+    #   final-mass constraint: its reduced objective has a spurious minimum at large beta, where the
+    #   reconstructed initial mass diverges, alpha goes to 0, and the residual vanishes for any
+    #   data, so the optimizer needs to start near the physical solution
+    if beta_prelim is not None:
+        beta0 = float(np.clip(beta_prelim, xmin[1], xmax[1]))
+
     # Free parameters are (density, beta) if the density is fitted, or just (beta,) if it is set.
     #   Used for mass_constraint="initial" and the mu=0/mu=2/3 fits of mass_constraint="final",
     #   which all share this same 2-parameter (or 1-parameter) shape
@@ -996,7 +1006,7 @@ def fitAlphaBetaMass(
 
         # Fit (density, beta), with alpha following analytically from the fixed initial mass
         res = scipy.optimize.minimize(_densityBetaMinimizationInitialMass, x0, \
-            args=(v_normed, ht_normed), bounds=bnds, method='Powell')
+            args=(v_normed, ht_normed), bounds=bnds, method='Nelder-Mead')
 
         if not res.success:
             print(f"WARNING: Optimizer failed: {res.message}")
@@ -1039,7 +1049,7 @@ def fitAlphaBetaMass(
         # Fit (density, beta) for mu = 0, with the initial mass reconstructed from the fixed
         #   final mass
         res_mu0 = scipy.optimize.minimize(_densityBetaMinimizationFinalMass, x0, \
-            args=(v_normed, ht_normed, 0), bounds=bnds, method='Powell')
+            args=(v_normed, ht_normed, 0), bounds=bnds, method='Nelder-Mead')
 
         if not res_mu0.success:
             print(f"WARNING: Optimizer failed for mu=0: {res_mu0.message}")
@@ -1055,7 +1065,7 @@ def fitAlphaBetaMass(
 
         # Fit (density, beta) for mu = 2/3
         res_mu23 = scipy.optimize.minimize(_densityBetaMinimizationFinalMass, x0, \
-            args=(v_normed, ht_normed, 2/3), bounds=bnds, method='Powell')
+            args=(v_normed, ht_normed, 2/3), bounds=bnds, method='Nelder-Mead')
 
         if not res_mu23.success:
             print(f"WARNING: Optimizer failed for mu=2/3: {res_mu23.message}")
@@ -1077,7 +1087,7 @@ def fitAlphaBetaMass(
             bnds_mu_best = ((xmin[1], xmax[1]), (0.0, 2/3))
 
         res_mu_best = scipy.optimize.minimize(_densityBetaMuMinimizationFinalMass, x0_mu_best, \
-            args=(v_normed, ht_normed), bounds=bnds_mu_best, method='Powell')
+            args=(v_normed, ht_normed), bounds=bnds_mu_best, method='Nelder-Mead')
 
         if not res_mu_best.success:
             print(f"WARNING: Optimizer failed for best-fit mu: {res_mu_best.message}")
@@ -1096,7 +1106,7 @@ def fitAlphaBetaMass(
         # Fit the density for mu = 0 (alpha and beta both follow analytically from the two masses)
         if fit_density:
             res_mu0 = scipy.optimize.minimize(_densityMinimizationBothMasses, [dens0], \
-                args=(v_normed, ht_normed, 0), bounds=[(xmin[0], xmax[0])], method='Powell')
+                args=(v_normed, ht_normed, 0), bounds=[(xmin[0], xmax[0])], method='Nelder-Mead')
 
             if not res_mu0.success:
                 print(f"WARNING: Optimizer failed for mu=0: {res_mu0.message}")
@@ -1115,7 +1125,7 @@ def fitAlphaBetaMass(
         # Fit the density for mu = 2/3
         if fit_density:
             res_mu23 = scipy.optimize.minimize(_densityMinimizationBothMasses, [dens0], \
-                args=(v_normed, ht_normed, 2/3), bounds=[(xmin[0], xmax[0])], method='Powell')
+                args=(v_normed, ht_normed, 2/3), bounds=[(xmin[0], xmax[0])], method='Nelder-Mead')
 
             if not res_mu23.success:
                 print(f"WARNING: Optimizer failed for mu=2/3: {res_mu23.message}")
@@ -1140,7 +1150,7 @@ def fitAlphaBetaMass(
             bnds_mu_best = [(0.0, 2/3)]
 
         res_mu_best = scipy.optimize.minimize(_densityMuMinimizationBothMasses, x0_mu_best, \
-            args=(v_normed, ht_normed), bounds=bnds_mu_best, method='Powell')
+            args=(v_normed, ht_normed), bounds=bnds_mu_best, method='Nelder-Mead')
 
         if not res_mu_best.success:
             print(f"WARNING: Optimizer failed for best-fit mu: {res_mu_best.message}")
