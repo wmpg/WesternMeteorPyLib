@@ -520,6 +520,9 @@ def alphaBetaMasses(
     if beta <= 0:
         raise ValueError("beta must be positive")
 
+    if not (0 < slope <= np.pi/2):
+        raise ValueError("slope must be between 0 and pi/2 radians")
+
     if dens <= 0:
         raise ValueError("dens must be positive")
 
@@ -737,6 +740,10 @@ def fitAlphaBetaMass(
 
     if mass_constraint in ["initial", "i"]:
         mass_constraint = "initial"
+
+        if not np.isscalar(mass):
+            raise ValueError("For mass_constraint='initial', mass must be a single number (kg).")
+
         mass_initial = mass
         mass_final = None
 
@@ -745,6 +752,10 @@ def fitAlphaBetaMass(
 
     elif mass_constraint in ["final", "f"]:
         mass_constraint = "final"
+
+        if not np.isscalar(mass):
+            raise ValueError("For mass_constraint='final', mass must be a single number (kg).")
+
         mass_initial = None
         mass_final = mass
 
@@ -780,8 +791,8 @@ def fitAlphaBetaMass(
 
     if len(v_data) != len(ht_data):
         raise ValueError("v_data and ht_data must have the same length.")
-    if np.sin(slope) <= 0:
-        raise ValueError("slope must satisfy sin(slope) > 0.")
+    if not (0 < slope <= np.pi/2):
+        raise ValueError("slope must be between 0 and pi/2 radians.")
     if shape_coeff <= 0:
         raise ValueError("shape_coeff must be > 0.")
     if gamma <= 0:
@@ -812,24 +823,23 @@ def fitAlphaBetaMass(
 
         v_init = np.median(v_data_desc[:max_index])
 
-    if v_final is None:
+    if v_final is not None:
+
+        if v_final >= v_init:
+            raise ValueError("v_final must be smaller than v_init.")
+
+    # Estimate the final velocity from a preliminary unconstrained alpha-beta fit. This is skipped
+    #   under mass_constraint="initial" because there v_final is not used by the fit at all - it is
+    #   always re-derived from the fitted alpha/beta after the constrained fit below
+    elif mass_constraint != "initial":
+
+        # Fit the unconstrained alpha-beta model
         _, alpha, beta = fitAlphaBeta(v_data, ht_data, v_init=v_init)
 
-        vel_model = alphaBetaVelocity(
-            ht_data,
-            alpha,
-            beta,
-            v_init
-        )
-
-        # Final velocity
+        # Evaluate the model velocity at the observed heights and take the minimum as the final velocity
+        vel_model = alphaBetaVelocity(ht_data, alpha, beta, v_init)
         v_final = np.min(vel_model)
-    else:
-        if v_final >= v_init:
-            raise ValueError(
-                "v_final must be smaller than v_init."
-            )
-        
+
 
     # Normalize velocity
     v_normed = v_data/v_init
@@ -1004,31 +1014,28 @@ def fitAlphaBetaMass(
                 f"WARNING: Optimizer failed: {res.message}"
             )
 
-        density, rest = _getDensity(res.x)
+        # Don't overwrite the input density variable - _getDensity() and the plotting code below
+        #   read it to distinguish the fixed input value from the fitted one
+        density_fit, rest = _getDensity(res.x)
         beta = rest[0]
 
-        density_mu0, density_mu23 = density, density
+        # The fit residual is independent of mu under the initial-mass constraint, so the fitted
+        #   density, alpha, and beta are shared by both mu branches
+        density_mu0, density_mu23 = density_fit, density_fit
         beta_mu0, beta_mu23 = beta, beta
 
-        alpha = _alphaFromDensityAndMass(mass_initial, density)
+        alpha = _alphaFromDensityAndMass(mass_initial, density_fit)
 
         alpha_mu0, alpha_mu23 = alpha, alpha
 
-        vel_model = alphaBetaVelocity(
-            ht_data,
-            alpha,
-            beta,
-            v_init
-        )
+        # Derive the final velocity from the fitted model (v_final is not a fit input under this
+        #   constraint)
+        vel_model = alphaBetaVelocity(ht_data, alpha, beta, v_init)
+        v_final = np.min(vel_model)
 
-        vel_end = np.min(vel_model)
-        
-        v_final = vel_end   # overwrite the unconstrained preliminary v_final for consistency
+        m_initial_mu0, m_final_mu0 = _massesAt(alpha, beta, 0, density_fit)
 
-
-        m_initial_mu0, m_final_mu0 = _massesAt(alpha, beta, 0, density)
-
-        m_initial_mu23, m_final_mu23 = _massesAt(alpha, beta, 2/3, density)
+        m_initial_mu23, m_final_mu23 = _massesAt(alpha, beta, 2/3, density_fit)
 
         # μ has zero effect on the fit residual under an initial-mass constraint
         # (see docstring notes), so no data-driven best-fit μ exists here.
@@ -1057,12 +1064,9 @@ def fitAlphaBetaMass(
         density_mu0, rest = _getDensity(res_mu0.x)
         beta_mu0 = rest[0]
 
-        m_initial_mu0, alpha_mu0 = \
-            _reconstructInitialMassAndAlpha(
-                density_mu0,
-                beta_mu0,
-                0
-        )
+        # Only alpha is needed here - the masses are computed below with _massesAt(), which
+        #   reproduces the same initial mass by construction
+        _, alpha_mu0 = _reconstructInitialMassAndAlpha(density_mu0, beta_mu0, 0)
 
         m_initial_mu0, m_final_mu0 = _massesAt(alpha_mu0, beta_mu0, 0, density_mu0)
 
@@ -1082,12 +1086,7 @@ def fitAlphaBetaMass(
         density_mu23, rest = _getDensity(res_mu23.x)
         beta_mu23 = rest[0]
 
-        m_initial_mu23, alpha_mu23 = \
-            _reconstructInitialMassAndAlpha(
-                density_mu23,
-                beta_mu23,
-                2/3
-        )
+        _, alpha_mu23 = _reconstructInitialMassAndAlpha(density_mu23, beta_mu23, 2/3)
 
         m_initial_mu23, m_final_mu23 = _massesAt(alpha_mu23, beta_mu23, 2/3, density_mu23)
 
@@ -1117,14 +1116,10 @@ def fitAlphaBetaMass(
         beta_mu_best, mu_best = rest
         mu_best = float(np.clip(mu_best, 0.0, 2/3))
 
-        m_initial_mu_best, alpha_mu_best = \
-            _reconstructInitialMassAndAlpha(
-                density_mu_best,
-                beta_mu_best,
-                mu_best
-        )
+        _, alpha_mu_best = _reconstructInitialMassAndAlpha(density_mu_best, beta_mu_best, mu_best)
 
-        m_initial_mu_best, m_final_mu_best = _massesAt(alpha_mu_best, beta_mu_best, mu_best, density_mu_best)
+        m_initial_mu_best, m_final_mu_best = _massesAt(alpha_mu_best, beta_mu_best, mu_best, \
+            density_mu_best)
 
     elif mass_constraint == "both":
 
