@@ -341,7 +341,7 @@ def _betaFromMasses(mu, mass_initial, mass_final, v_final, v_init):
     return (1.0 - mu)*np.log(mass_initial/mass_final)/(1.0 - (v_final/v_init)**2)
 
 
-def _makeBoundChecker(warnings_list, tol=1e-2):
+def _makeBoundChecker(warnings_list, tol=1e-2, log=False):
     """ Build a _checkBound(name, value, lower, upper) closure that appends a message to
         warnings_list whenever value lands within a relative tol of lower or upper. Shared by
         fitAlphaBetaMass() and fitAlphaBetaLightCurve() to flag fitted parameters that are
@@ -352,6 +352,12 @@ def _makeBoundChecker(warnings_list, tol=1e-2):
 
     Keyword arguments:
         tol: [float] Relative distance-to-bound tolerance.
+        log: [bool] If True, measure the distance to the bounds in log space instead of linear
+            space. Appropriate for parameters whose bounds span several orders of magnitude
+            (alpha, beta): a linear check would flag almost any physically reasonable value as
+            "close to the lower bound" (e.g. beta=0.33 is only 0.7% of the way across the linear
+            (1e-5, 50) span, but sits comfortably in the middle of it in log space). Requires
+            value, lower and upper to be positive.
 
     Return:
         _checkBound: [callable] (name, value, lower, upper) -> None.
@@ -359,14 +365,19 @@ def _makeBoundChecker(warnings_list, tol=1e-2):
 
     def _checkBound(name, value, lower, upper):
 
-        span = upper - lower
+        if log:
+            check_value, check_lower, check_upper = np.log(value), np.log(lower), np.log(upper)
+        else:
+            check_value, check_lower, check_upper = value, lower, upper
 
-        if (value - lower)/span < tol:
+        span = check_upper - check_lower
+
+        if (check_value - check_lower)/span < tol:
             warnings_list.append(
                 "{:s}={:.6g} is close to the fit lower bound ({:.6g})".format(name, value, lower)
             )
 
-        if (upper - value)/span < tol:
+        if (check_upper - check_value)/span < tol:
             warnings_list.append(
                 "{:s}={:.6g} is close to the fit upper bound ({:.6g})".format(name, value, upper)
             )
@@ -1822,6 +1833,11 @@ def fitAlphaBetaMass(
 
     _checkBound = _makeBoundChecker(warnings_list, tol=bound_tol)
 
+    # Beta spans several orders of magnitude between its bounds, so its distance to them is only
+    #   meaningful in log space (a linear check would flag e.g. beta=0.33 as "close" to the 1e-5
+    #   lower bound) - see _makeBoundChecker()
+    _checkBoundLog = _makeBoundChecker(warnings_list, tol=bound_tol, log=True)
+
     # Check the fitted densities against the optimization bounds
     if fit_density:
         _checkBound("density_mu0", density_mu0, xmin[0], xmax[0])
@@ -1829,14 +1845,14 @@ def fitAlphaBetaMass(
 
     # Check the fitted betas (under "both" beta is analytic, not fitted, so it's skipped)
     if mass_constraint in ["initial", "final"]:
-        _checkBound("beta_mu0", beta_mu0, xmin[1], xmax[1])
-        _checkBound("beta_mu23", beta_mu23, xmin[1], xmax[1])
+        _checkBoundLog("beta_mu0", beta_mu0, xmin[1], xmax[1])
+        _checkBoundLog("beta_mu23", beta_mu23, xmin[1], xmax[1])
 
     if fit_density and mass_constraint in ["final", "both"]:
         _checkBound("density_mu_best", density_mu_best, xmin[0], xmax[0])
 
     if mass_constraint == "final":
-        _checkBound("beta_mu_best", beta_mu_best, xmin[1], xmax[1])
+        _checkBoundLog("beta_mu_best", beta_mu_best, xmin[1], xmax[1])
 
     def _checkVelocityRecovery(name, alpha, beta):
         """ Under mass_constraint="final"/"both", beta is derived analytically assuming a
@@ -2233,6 +2249,15 @@ def fitAlphaBetaLightCurve(
         light curve (height vs. absolute magnitude), following Gritsevich (2007, 2009) for the
         dynamics and Gritsevich & Koschny (2011) for the luminosity.
 
+    WARNING: Like the whole alpha-beta formalism, this fit assumes a SINGLE, non-fragmenting
+        body ablating quasi-continuously. Most real fireballs fragment, and a fragmenting event's
+        light curve (flares, sudden brightenings) does not follow Eq. (13)-(14) below - so this
+        joint fit, and especially the photometric outputs derived from it (M0, K, and any
+        luminous efficiency computed with alphaBetaLuminousEfficiency()), is NOT expected to be
+        valid for the majority of real events. Only apply it to events consistent with
+        single-body ablation, and inspect the light curve fit visually (plot=True) before
+        trusting the photometric results.
+
     Dynamics, dimensionless v = V/V_e, y = h/HT_NORM_CONST (see alphaBetaHeightNormed()):
 
         y = ln(2 alpha) + beta - ln(Delta),   Delta = Ei(beta) - Ei(beta v^2)          (7)
@@ -2539,28 +2564,12 @@ def fitAlphaBetaLightCurve(
     lsq_kwargs = dict(loss='soft_l1', f_scale=f_scale, x_scale='jac')
 
     # Relative distance-to-bound tolerance, checked in the same log-space the optimizer
-    # searches in. Unlike e.g. density in fitAlphaBetaMass(), alpha and beta span several
-    # orders of magnitude between their bounds, so a *linear* check (_makeBoundChecker()) would
-    # flag almost any physically reasonable value as "close to the lower bound"; log-space is
-    # where "close to a bound" is actually meaningful here.
+    # searches in (alpha and beta span several orders of magnitude between their bounds - see
+    # _makeBoundChecker())
     bound_tol = 1e-2
     warnings_list = []
 
-    def _checkLogBound(name, value, log_value, log_lower, log_upper):
-
-        span = log_upper - log_lower
-
-        if (log_value - log_lower)/span < bound_tol:
-            warnings_list.append(
-                "{:s}={:.6g} is close to the fit lower bound ({:.6g})".format(
-                    name, value, np.exp(log_lower))
-            )
-
-        if (log_upper - log_value)/span < bound_tol:
-            warnings_list.append(
-                "{:s}={:.6g} is close to the fit upper bound ({:.6g})".format(
-                    name, value, np.exp(log_upper))
-            )
+    _checkLogBound = _makeBoundChecker(warnings_list, tol=bound_tol, log=True)
 
     fits = {}
     for mu in mu_values:
@@ -2626,8 +2635,8 @@ def fitAlphaBetaLightCurve(
             'success': res.success,
         }
 
-        _checkLogBound("alpha(μ={:.3f})".format(mu), alpha, res.x[0], log_bounds[0][0], log_bounds[1][0])
-        _checkLogBound("beta(μ={:.3f})".format(mu), beta, res.x[1], log_bounds[0][1], log_bounds[1][1])
+        _checkLogBound("alpha(μ={:.3f})".format(mu), alpha, ALPHA_BETA_BOUNDS[0][0], ALPHA_BETA_BOUNDS[0][1])
+        _checkLogBound("beta(μ={:.3f})".format(mu), beta, ALPHA_BETA_BOUNDS[1][0], ALPHA_BETA_BOUNDS[1][1])
 
         if verbose:
             print()
@@ -2712,8 +2721,8 @@ def fitAlphaBetaLightCurve(
         # checker used by fitAlphaBetaMass is the appropriate one here, not _checkLogBound().
         _checkLinearBound = _makeBoundChecker(warnings_list, tol=bound_tol)
         _checkLinearBound("mu(free fit)", mu_free, mu_lo, mu_hi)
-        _checkLogBound("alpha(free fit)", alpha_free, res_free.x[0], log_bounds[0][0], log_bounds[1][0])
-        _checkLogBound("beta(free fit)", beta_free, res_free.x[1], log_bounds[0][1], log_bounds[1][1])
+        _checkLogBound("alpha(free fit)", alpha_free, ALPHA_BETA_BOUNDS[0][0], ALPHA_BETA_BOUNDS[0][1])
+        _checkLogBound("beta(free fit)", beta_free, ALPHA_BETA_BOUNDS[1][0], ALPHA_BETA_BOUNDS[1][1])
 
         if verbose:
             print()
