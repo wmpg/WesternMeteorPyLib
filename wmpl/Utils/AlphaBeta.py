@@ -363,12 +363,12 @@ def _makeBoundChecker(warnings_list, tol=1e-2):
 
         if (value - lower)/span < tol:
             warnings_list.append(
-                f"{name}={value:.6g} is close to the fit lower bound ({lower:.6g})"
+                "{:s}={:.6g} is close to the fit lower bound ({:.6g})".format(name, value, lower)
             )
 
         if (upper - value)/span < tol:
             warnings_list.append(
-                f"{name}={value:.6g} is close to the fit upper bound ({upper:.6g})"
+                "{:s}={:.6g} is close to the fit upper bound ({:.6g})".format(name, value, upper)
             )
 
     return _checkBound
@@ -418,6 +418,10 @@ def _logAlphaBetaBounds():
     """ ALPHA_BETA_BOUNDS in log-space, as used by every least_squares-based fit in this module
         (minimizeAlphaBetaRobust(), fitAlphaBetaLightCurve()), which search in
         (ln alpha, ln beta) directly since alpha/beta span several orders of magnitude.
+
+    Return:
+        (lower, upper): [tuple of ndarrays] Lower and upper (ln alpha, ln beta) bounds, in the
+            format scipy.optimize.least_squares expects.
     """
 
     return (
@@ -434,6 +438,16 @@ def _estimateSigmaV(alpha0, beta0, v_normed, ht_normed, v_init):
         This is an *effective* uncertainty that absorbs both measurement noise and alpha-beta
         model misspecification - it is not a pure instrumental/measurement uncertainty, even
         though it is used as one here.
+
+    Arguments:
+        alpha0: [float] Q4-fitted ballistic coefficient.
+        beta0: [float] Q4-fitted mass loss parameter.
+        v_normed: [ndarray] Normalized velocity in (0, 1).
+        ht_normed: [ndarray] Height normalized to HT_NORM_CONST.
+        v_init: [float] Initial velocity (m/s), used to convert the residuals to physical units.
+
+    Return:
+        sigma_v: [float] Effective velocity uncertainty (m/s), floored at 1 m/s.
     """
 
     v_model0 = alphaBetaVelocityNormed(ht_normed, alpha0, beta0)
@@ -445,8 +459,17 @@ def _estimateSigmaV(alpha0, beta0, v_normed, ht_normed, v_init):
 
 def _dynResiduals(x, v_normed, ht_normed, sigma_v_normed):
     """ Dynamics residual block: model velocity residuals (v_model - v_obs), sigma-normalized.
-        x = (ln alpha, ln beta). Used both as the dynamics half of _jointResiduals()
-        (fitAlphaBetaLightCurve()) and, on its own, by minimizeAlphaBetaRobust().
+        Used both as the dynamics half of _jointResiduals() (fitAlphaBetaLightCurve()) and, on
+        its own, by minimizeAlphaBetaRobust().
+
+    Arguments:
+        x: [ndarray] Fit parameters (ln alpha, ln beta).
+        v_normed: [ndarray] Normalized velocity in (0, 1).
+        ht_normed: [ndarray] Height normalized to HT_NORM_CONST.
+        sigma_v_normed: [float] Normalized velocity uncertainty.
+
+    Return:
+        res: [ndarray] Sigma-normalized velocity residuals.
     """
 
     alpha, beta = np.exp(x)
@@ -1630,7 +1653,6 @@ def fitAlphaBetaMass(
 ### JOINT DYNAMICS + LIGHT CURVE FIT (Gritsevich & Koschny 2011) ###
 
 
-
 def _profiledMagOffset(mag_obs, mag_model_zero, sigma_mag=1.0):
     """ L1-optimal additive magnitude offset (profiled amplitude).
 
@@ -1687,6 +1709,16 @@ def _lightCurveResiduals(x, mu, ht_normed_lc, mag_lc, sigma_mag):
         as the light curve half of _jointResiduals() and, on its own, for the purely photometric
         alpha-beta fit shown when plot=True in fitAlphaBetaLightCurve() (alpha/beta constrained
         by the light curve shape alone, ignoring the dynamics entirely).
+
+    Arguments:
+        x: [ndarray] Fit parameters (ln alpha, ln beta).
+        mu: [float] Shape change coefficient (fixed).
+        ht_normed_lc: [ndarray] Light curve heights normalized to HT_NORM_CONST.
+        mag_lc: [ndarray] Observed absolute magnitudes.
+        sigma_mag: [float or ndarray] Magnitude uncertainty, a scalar or per-point.
+
+    Return:
+        res: [ndarray] Sigma-normalized magnitude residuals.
     """
 
     alpha, beta = np.exp(x)
@@ -1707,6 +1739,21 @@ def _jointResiduals(x, mu, v_normed, ht_normed, ht_normed_lc, mag_lc, sigma_v_no
         dyn_weight/lc_weight multiply their respective (already sigma-normalized) block, so the
         two blocks' relative contribution to the fit can be rebalanced independently of how many
         points each one has - see the dyn_weight/lc_weight docs on fitAlphaBetaLightCurve().
+
+    Arguments:
+        x: [ndarray] Fit parameters (ln alpha, ln beta).
+        mu: [float] Shape change coefficient (fixed).
+        v_normed: [ndarray] Normalized velocity in (0, 1).
+        ht_normed: [ndarray] Dynamics heights normalized to HT_NORM_CONST.
+        ht_normed_lc: [ndarray] Light curve heights normalized to HT_NORM_CONST.
+        mag_lc: [ndarray] Observed absolute magnitudes.
+        sigma_v_normed: [float] Normalized velocity uncertainty.
+        sigma_mag: [float or ndarray] Magnitude uncertainty, a scalar or per-point.
+        dyn_weight: [float] Multiplier on the dynamics residual block.
+        lc_weight: [float] Multiplier on the light curve residual block.
+
+    Return:
+        res: [ndarray] Concatenated (dynamics, light curve) sigma-normalized residuals.
     """
 
     res_dyn = dyn_weight*_dynResiduals(x, v_normed, ht_normed, sigma_v_normed)
@@ -1720,6 +1767,15 @@ def _lightCurveResidualsFreeMu(x, ht_normed_lc, mag_lc, sigma_mag):
         (x = (ln alpha, ln beta, mu)) instead of held fixed. Used only to derive an effective
         sigma_mag for the optional free-mu fit in fitAlphaBetaLightCurve() (fit_free_mu=True),
         mirroring how _lightCurveResiduals() is used to derive sigma_mag at each fixed mu.
+
+    Arguments:
+        x: [ndarray] Fit parameters (ln alpha, ln beta, mu).
+        ht_normed_lc: [ndarray] Light curve heights normalized to HT_NORM_CONST.
+        mag_lc: [ndarray] Observed absolute magnitudes.
+        sigma_mag: [float or ndarray] Magnitude uncertainty, a scalar or per-point.
+
+    Return:
+        res: [ndarray] Sigma-normalized magnitude residuals.
     """
 
     return _lightCurveResiduals(x[:2], x[2], ht_normed_lc, mag_lc, sigma_mag)
@@ -1732,6 +1788,20 @@ def _jointResidualsFreeMu(x, v_normed, ht_normed, ht_normed_lc, mag_lc, sigma_v_
         optional free-mu fit in fitAlphaBetaLightCurve() (fit_free_mu=True), which lets the
         shape-change coefficient itself be estimated from the data instead of only compared at a
         handful of fixed values.
+
+    Arguments:
+        x: [ndarray] Fit parameters (ln alpha, ln beta, mu).
+        v_normed: [ndarray] Normalized velocity in (0, 1).
+        ht_normed: [ndarray] Dynamics heights normalized to HT_NORM_CONST.
+        ht_normed_lc: [ndarray] Light curve heights normalized to HT_NORM_CONST.
+        mag_lc: [ndarray] Observed absolute magnitudes.
+        sigma_v_normed: [float] Normalized velocity uncertainty.
+        sigma_mag: [float or ndarray] Magnitude uncertainty, a scalar or per-point.
+        dyn_weight: [float] Multiplier on the dynamics residual block.
+        lc_weight: [float] Multiplier on the light curve residual block.
+
+    Return:
+        res: [ndarray] Concatenated (dynamics, light curve) sigma-normalized residuals.
     """
 
     return _jointResiduals(x[:2], x[2], v_normed, ht_normed, ht_normed_lc, mag_lc, sigma_v_normed,
