@@ -724,7 +724,7 @@ class RMSDataHandle(object):
 
             # Check if the dir name matches the station name pattern
             if os.path.isdir(os.path.join(self.dir_path, dir_name)):
-                if re.match("^[A-Z]{2}[A-Z0-9]{4}$", dir_name):
+                if re.match(r"^[A-Z]{2}[A-Z0-9]{4}$", dir_name):
                     log.info("Using station: " + dir_name)
                     station_list.append(dir_name)
                 else:
@@ -971,21 +971,21 @@ class RMSDataHandle(object):
             date_fmt = "%Y"
 
             # Check if the directory name starts with a year
-            if not re.match("^\d{4}", dir_name):   # noqa: W605 
+            if not re.match(r"^\d{4}", dir_name):   # noqa: W605 
                 return False
 
         elif len(dir_name) == 6:
             date_fmt = "%Y%m"
 
             # Check if the directory name starts with a year and month
-            if not re.match("^\d{6}", dir_name): # noqa: W605 
+            if not re.match(r"^\d{6}", dir_name): # noqa: W605 
                 return False
 
         elif len(dir_name) == 8:
             date_fmt = "%Y%m%d"
 
             # Check if the directory name starts with a year, month and day
-            if not re.match("^\d{8}", dir_name): # noqa: W605 
+            if not re.match(r"^\d{8}", dir_name): # noqa: W605 
                 return False
 
         else:
