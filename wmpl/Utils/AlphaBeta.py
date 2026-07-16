@@ -492,7 +492,10 @@ def minimizeAlphaBetaRobust(v_normed, ht_normed, sigma_v_normed, loss='soft_l1',
         x0_alpha_beta = minimizeAlphaBeta(v_normed, ht_normed)
 
     log_bounds = _logAlphaBetaBounds()
-    x0 = np.clip(np.log(x0_alpha_beta), log_bounds[0] + 1e-6, log_bounds[1] - 1e-6)
+
+    # Clip the seed strictly inside the bounds in linear space before taking the log (a
+    #   non-positive seed would otherwise produce a NaN that np.clip propagates)
+    x0 = np.log(np.clip(x0_alpha_beta, np.exp(log_bounds[0] + 1e-6), np.exp(log_bounds[1] - 1e-6)))
 
     res = scipy.optimize.least_squares(_dynResiduals, x0, args=(v_normed, ht_normed, sigma_v_normed), \
         bounds=log_bounds, loss=loss, f_scale=f_scale, x_scale='jac')
@@ -528,7 +531,9 @@ def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='
 
     Keyword arguments:
         v_init: [float] Initial velocity (m/s). If None, it will be determined from the first 20% of point
-            (or a minimum of 10 points).
+            (or a minimum of 10 points). Note that this assumes the input arrays are ordered from
+            the beginning to the end of the trajectory (unlike fitAlphaBetaLightCurve(), which
+            sorts its inputs by decreasing height internally).
         method: [str] 'q4' (default) or 'robust'.
         sigma_v: [float] Only used for method='robust'. Velocity uncertainty (m/s) used to weight
             the residuals. If None, estimated from the MAD of the Q4 fit's residuals (floored at
@@ -1626,12 +1631,54 @@ def fitAlphaBetaMass(
 
 
 
-def _profiledMagOffset(mag_obs, mag_model_zero):
-    """ L1-optimal additive magnitude offset (profiled amplitude): the M0 minimizing
-        sum(|mag_obs - (mag_model_zero + M0)|) is the median of (mag_obs - mag_model_zero).
+def _profiledMagOffset(mag_obs, mag_model_zero, sigma_mag=1.0):
+    """ L1-optimal additive magnitude offset (profiled amplitude).
+
+        The M0 minimizing sum(|mag_obs - (mag_model_zero + M0)|/sigma_mag) is the
+        1/sigma_mag-weighted median of (mag_obs - mag_model_zero) - for a scalar sigma_mag this
+        reduces to the plain median. Weighting matters whenever a per-point sigma_mag is given:
+        an unweighted median would let noisy points (e.g. the faint ends of the light curve) pull
+        M0 - and hence K and any derived luminous efficiency - as hard as the precise ones.
+
+        Note that this is the exact conditional optimum of the sigma-normalized L1 cost, and only
+        an approximation to that of the soft-L1 cost the (alpha, beta) search descends - see
+        fitAlphaBetaLightCurve() for the caveat.
+
+    Arguments:
+        mag_obs: [ndarray] Observed magnitudes.
+        mag_model_zero: [ndarray] Model magnitudes computed with a zero offset (M0 = 0).
+
+    Keyword arguments:
+        sigma_mag: [float or ndarray] Magnitude uncertainty, a scalar or per-point. A scalar
+            (default 1.0) weights all points equally.
+
+    Return:
+        mag_offset: [float] The profiled magnitude offset M0.
     """
 
-    return np.median(mag_obs - mag_model_zero)
+    diffs = mag_obs - mag_model_zero
+
+    # Uniform weights - the weighted median reduces to the plain median
+    if np.ndim(sigma_mag) == 0:
+        return np.median(diffs)
+
+    # Weighted median: sort the differences and find where the cumulative weight crosses half of
+    #   the total weight
+    weights = 1.0/np.asarray(sigma_mag, dtype=np.float64)
+
+    sort_indices = np.argsort(diffs)
+    diffs_sorted = diffs[sort_indices]
+    cum_weights = np.cumsum(weights[sort_indices])
+
+    half_weight = 0.5*cum_weights[-1]
+    index = np.searchsorted(cum_weights, half_weight)
+
+    # If the half-weight falls exactly on a point boundary, average the two straddling values
+    #   (this makes the uniform-weight case agree exactly with np.median)
+    if (index < len(diffs_sorted) - 1) and np.isclose(cum_weights[index], half_weight):
+        return 0.5*(diffs_sorted[index] + diffs_sorted[index + 1])
+
+    return diffs_sorted[index]
 
 
 def _lightCurveResiduals(x, mu, ht_normed_lc, mag_lc, sigma_mag):
@@ -1645,7 +1692,7 @@ def _lightCurveResiduals(x, mu, ht_normed_lc, mag_lc, sigma_mag):
     alpha, beta = np.exp(x)
 
     mag_zero, _ = alphaBetaModelMagnitude(ht_normed_lc, alpha, beta, mu)
-    mag_offset = _profiledMagOffset(mag_lc, mag_zero)
+    mag_offset = _profiledMagOffset(mag_lc, mag_zero, sigma_mag)
 
     return (mag_zero + mag_offset - mag_lc)/sigma_mag
 
@@ -1794,7 +1841,10 @@ def fitAlphaBetaLightCurve(
            dy/dv = 2 exp(beta v^2)/(v Delta) > 0), and
            mag_model(y) = M0 - 2.5 log10(f(v_model(y))). The additive magnitude offset M0 (i.e.
            the amplitude K = p0m*10^(-0.4*M0)) is profiled out analytically at every iteration
-           (median => L1-optimal), so the nonlinear search is only 2-dimensional per mu.
+           as the 1/sigma_mag-weighted median of the magnitude differences (the exact conditional
+           optimum of the sigma-normalized L1 cost, and a close approximation to that of the
+           soft-L1 cost actually descended - see _profiledMagOffset()), so the nonlinear search
+           is only 2-dimensional per mu.
         3. Optional (fit_free_mu=True): the same joint problem again, but with mu itself as a 3rd
            free coordinate (bounded to [0, 2/3]) instead of fixed at each mu_values entry - a
            genuine continuous best-fit mu, as opposed to 'best_fixed_mu' below, which is only an argmin
@@ -1813,9 +1863,11 @@ def fitAlphaBetaLightCurve(
         - alpha_std_rel/beta_std_rel (in the returned 'fits') are local curvature estimates from
           the Jacobian of the *robustified* (soft-L1) cost, not rigorous statistical covariances -
           soft-L1 reweights residuals nonlinearly, so (J^T J)^-1 is only a Gauss-Newton
-          approximation, not the inverse Fisher information of Gaussian noise. Treat them as
-          approximate/relative uncertainties and use bootstrap resampling for publication-grade
-          error bars.
+          approximation, not the inverse Fisher information of Gaussian noise. The profiled
+          (weighted-median) M0 also makes the residual vector only piecewise-smooth in
+          (alpha, beta), which further degrades the finite-difference Jacobian these estimates
+          are computed from. Treat them as approximate/relative uncertainties and use bootstrap
+          resampling for publication-grade error bars.
         - When sigma_mag is auto-derived (the default, sigma_mag=None), each mu (and the free-mu
           fit, if fit_free_mu=True) gets its OWN independently-derived sigma_mag from its OWN
           residuals. A mu that fits the light curve worse ends up with a larger self-derived
@@ -1848,9 +1900,11 @@ def fitAlphaBetaLightCurve(
 
     Keyword arguments:
         v_init: [float] Initial velocity (m/s). If None, median of the first 20% of points
-            (min 10 points), same convention as fitAlphaBeta().
-        mu_values: [tuple] Values of the shape change coefficient to fit (fixed per fit). The
-            physically meaningful range is [0, 2/3] (see alphaBetaMasses()); default fits both bounds.
+            (min 10 points), same convention as fitAlphaBeta() - except that here the inputs are
+            first sorted by decreasing height internally, so they don't have to be time-ordered.
+        mu_values: [tuple] Values of the shape change coefficient to fit (fixed per fit). Must be
+            in [0, 1); the physically meaningful range is [0, 2/3] (see alphaBetaMasses()) and a
+            warning is printed for values above it. Default fits both physical bounds.
         dyn_method: [str] 'robust' (default) or 'q4' - which dynamics-only fit becomes the
             'alpha_dyn'/'beta_dyn' reference and the seed for the joint stage below. 'q4' is the
             classic Gritsevich (2007) fit (minimizeAlphaBeta()); 'robust' additionally refines it
@@ -1953,6 +2007,15 @@ def fitAlphaBetaLightCurve(
     if len(ht_lc_data) != len(mag_abs_data):
         raise ValueError("ht_lc_data and mag_abs_data must have the same length.")
 
+    # Validate the shape-change coefficients up front (the luminosity model diverges as mu -> 1,
+    #   see alphaBetaLuminosityF())
+    for mu in mu_values:
+        if (mu < 0) or (mu >= 1):
+            raise ValueError("All mu_values must be in the range [0, 1), got {:g}.".format(mu))
+        if mu > 2.0/3.0:
+            print("WARNING: mu = {:g} is outside the physically expected range [0, 2/3] "
+                "(see alphaBetaMasses()).".format(mu))
+
     # Filter out non-finite points, dynamics and light curve independently (they may come from
     # different stations/instruments and need not share a sampling)
     dyn_mask = np.isfinite(v_data) & np.isfinite(ht_data)
@@ -2051,8 +2114,10 @@ def fitAlphaBetaLightCurve(
 
     # --- Joint stage: robust least squares per fixed mu, same (alpha, beta) bounds as Stage 0 ---
     log_bounds = _logAlphaBetaBounds()
-    x0 = np.log([alpha0, beta0])
-    x0 = np.clip(x0, log_bounds[0] + 1e-6, log_bounds[1] - 1e-6)
+
+    # Clip the seed strictly inside the bounds in linear space before taking the log (a
+    #   non-positive seed would otherwise produce a NaN that np.clip propagates)
+    x0 = np.log(np.clip([alpha0, beta0], np.exp(log_bounds[0] + 1e-6), np.exp(log_bounds[1] - 1e-6)))
 
     # Shared by every scipy.optimize.least_squares() call below (sigma_mag derivation, the
     # per-mu joint fits, the optional free-mu fit, and the plot=True photometry-only diagnostic)
@@ -2114,7 +2179,7 @@ def fitAlphaBetaLightCurve(
 
         # Recompute the profiled amplitude at the solution
         mag_zero, _ = alphaBetaModelMagnitude(ht_normed_lc, alpha, beta, mu)
-        mag_offset = _profiledMagOffset(mag_abs_data, mag_zero)
+        mag_offset = _profiledMagOffset(mag_abs_data, mag_zero, sigma_mag_mu)
 
         # Amplitude K = tau M_e V_e^3 sin(gamma)/(2 h0) in W
         lum_amplitude = p0m*10**(-0.4*mag_offset)
@@ -2200,7 +2265,7 @@ def fitAlphaBetaLightCurve(
         mu_free = float(np.clip(res_free.x[2], mu_lo, mu_hi))
 
         mag_zero_free, _ = alphaBetaModelMagnitude(ht_normed_lc, alpha_free, beta_free, mu_free)
-        mag_offset_free = _profiledMagOffset(mag_abs_data, mag_zero_free)
+        mag_offset_free = _profiledMagOffset(mag_abs_data, mag_zero_free, sigma_mag_free)
         lum_amplitude_free = p0m*10**(-0.4*mag_offset_free)
 
         # Same Gauss-Newton local-curvature caveat as the fixed-mu fits above, now for
@@ -2248,7 +2313,10 @@ def fitAlphaBetaLightCurve(
             print("K                    = {:.3e} W".format(lum_amplitude_free))
             print("cost                 = {:.4f}".format(res_free.cost))
 
-    best_fixed_mu = min(fits, key=lambda k: fits[k]['cost'])
+    # Pick the lowest-cost mu, preferring converged fits over failed ones (only fall back to a
+    #   failed fit if every mu failed)
+    successful_mus = [mu for mu in fits if fits[mu]['success']]
+    best_fixed_mu = min(successful_mus if successful_mus else fits, key=lambda k: fits[k]['cost'])
 
     if verbose:
         print()
@@ -2335,7 +2403,7 @@ def fitAlphaBetaLightCurve(
             # same shape for every mu, only M0 is re-profiled per mu since f(v) depends on mu.
             # Shows how well the dynamics alone would have predicted the light curve shape.
             mag_zero_dyn, _ = alphaBetaModelMagnitude(ht_normed_lc, alpha0, beta0, mu)
-            mag_offset_dyn = _profiledMagOffset(mag_abs_data, mag_zero_dyn)
+            mag_offset_dyn = _profiledMagOffset(mag_abs_data, mag_zero_dyn, fits[mu]['sigma_mag'])
             mag_arr_dyn, _ = alphaBetaModelMagnitude(ht_arr_normed, alpha0, beta0, mu, \
                 mag_offset=mag_offset_dyn)
 
@@ -2350,7 +2418,7 @@ def fitAlphaBetaLightCurve(
 
             alpha_phot, beta_phot = np.exp(res_phot.x)
             mag_zero_phot, _ = alphaBetaModelMagnitude(ht_normed_lc, alpha_phot, beta_phot, mu)
-            mag_offset_phot = _profiledMagOffset(mag_abs_data, mag_zero_phot)
+            mag_offset_phot = _profiledMagOffset(mag_abs_data, mag_zero_phot, fits[mu]['sigma_mag'])
 
             vel_arr_phot = alphaBetaVelocityNormed(ht_arr_normed, alpha_phot, beta_phot)*v_init
             mag_arr_phot, _ = alphaBetaModelMagnitude(ht_arr_normed, alpha_phot, beta_phot, mu, \
