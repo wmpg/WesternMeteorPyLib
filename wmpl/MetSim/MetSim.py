@@ -1122,7 +1122,7 @@ if __name__ == "__main__":
     ##########################    
 
 
-    t1 = time.clock()
+    t1 = time.process_time()
     
     # Run the simulation (full atmosphere)
     fragment_list, time_luminosity_list = runSimulation(met, consts, fragmentation_model=fragmentation_model,\
@@ -1130,7 +1130,7 @@ if __name__ == "__main__":
 
 
 
-    print('Runtime:', time.clock() - t1)
+    print('Runtime:', time.process_time() - t1)
 
 
     def line(x, m, l):
@@ -1340,9 +1340,9 @@ if __name__ == "__main__":
 
 
     # Plot a point at the velocity at the given heights
-    ax_vel.scatter(height_detect, vel_detect, c='red', label='$ v(t_{init}) = ' \
-        + '{:.3f}$ km/s\n'.format(vel_detect) + '$ h(t_{init}) = ' \
-        + '{:.3f}$ km\n'.format(height_detect) + '$\Delta v = {:.3f}$ km/s'.format(vel_detect - met.v_init/1000), \
+    ax_vel.scatter(height_detect, vel_detect, c='red', label='$ v(t_{init})$ = ' \
+        + '{:.3f} km/s\n'.format(vel_detect) + '$ h(t_{init})$ = ' \
+        + '{:.3f} km\n'.format(height_detect) + '$\\Delta$ v = {:.3f} km/s'.format(vel_detect - met.v_init/1000), \
         zorder=4)
 
 
