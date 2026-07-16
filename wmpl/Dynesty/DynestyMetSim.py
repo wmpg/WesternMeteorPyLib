@@ -1761,7 +1761,7 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
         'disruption_mass_max_ratio': r"$m_{max}/m_{disr}$",
         'disruption_mass_grain_ratio': r"$m_{gr}/m_{disr}$",
         'height': r"$h$ [km]",
-        'mass_percent': r"$m_{percent}$ [\%]",
+        'mass_percent': r"$m_{percent}$ [%]",
         'number': r"$N$",
         'sigma': r"$\sigma$ [kg/MJ]",
         'erosion_coeff': r"$\eta$ [kg/MJ]",
@@ -1794,7 +1794,7 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
         'disruption_mass_max_ratio': r"$m_{max}/m_{disr}$",
         'disruption_mass_grain_ratio': r"$m_{gr}/m_{disr}$",
         'height': r"$h$ [m]",
-        'mass_percent': r"$m_{percent}$ [\%]",
+        'mass_percent': r"$m_{percent}$ [%]",
         'number': r"$N$",
         'sigma': r"$\sigma$ [kg/J]",
         'erosion_coeff': r"$\eta$ [kg/J]",
@@ -2422,7 +2422,7 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
 
     """
         for i, label in enumerate(labels):
-            coverage_val = "\ding{51}" if coverage_mask[i] else "\ding{55}"  # Use checkmark/x for coverage
+            coverage_val = r"\ding{51}" if coverage_mask[i] else r"\ding{55}"  # Use checkmark/x for coverage
             latex_str += (f"    {label} & {lower_95[i]:.4g} & {truths[i]:.4g} & {best_guess_table[i]:.4g} & {approx_modes[i]:.4g} "
                         f"& {posterior_mean[i]:.4g} & {posterior_median[i]:.4g} & {upper_95[i]:.4g} "
                         f"& {abs_error[i]:.4g} & {rel_error[i]:.4g}\% & {coverage_val} \\\\\n") #\hline\n
@@ -2452,12 +2452,12 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
 
     # check if the file_name has a _ in it if so put \ before it
     if '_' in file_name:
-        file_name_caption = file_name.replace('_', '\_')
+        file_name_caption = file_name.replace('_', r'\_')
     else:
         file_name_caption = file_name
 
     if hasattr(obs_data, 'const'):
-        latex_str += f"Posterior summary statistics for {file_name_caption} test case. The Best Fit is the simulation with the highest likelihood. Absolute and relative errors are calculated based on the Best Fit. The Cover column indicates whether the true value lies within the 95\% CI."
+        latex_str += f"Posterior summary statistics for {file_name_caption} test case. The Best Fit is the simulation with the highest likelihood. Absolute and relative errors are calculated based on the Best Fit. The Cover column indicates whether the true value lies within the 95% CI."
     else:
         latex_str += f"Posterior summary statistics for {file_name_caption} meteor. The Best Fit is the simulation with the highest likelihood."
     latex_str += r"""}
