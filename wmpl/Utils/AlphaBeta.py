@@ -479,7 +479,7 @@ def _dynResiduals(x, v_normed, ht_normed, sigma_v_normed):
 
 
 def minimizeAlphaBetaRobust(v_normed, ht_normed, sigma_v_normed, loss='soft_l1', f_scale=2.0,
-        x0_alpha_beta=None):
+        x0_alpha_beta=None, return_fit_result=False):
     """ Robust alternative to minimizeAlphaBeta(): least squares (soft-L1 by default) directly on
         the velocity residuals (v_model - v_obs), instead of Q4's transformed residual.
 
@@ -506,9 +506,13 @@ def minimizeAlphaBetaRobust(v_normed, ht_normed, sigma_v_normed, loss='soft_l1',
         f_scale: [float] Robust loss scale, in units of sigma_v_normed.
         x0_alpha_beta: [tuple] Optional (alpha0, beta0) initial guess. If None, derived from
             minimizeAlphaBeta().
+        return_fit_result: [bool] If True, also return the raw scipy.optimize.least_squares
+            result object as a 3rd element, so a caller can reuse its Jacobian/cost for a
+            Gauss-Newton covariance (see fitAlphaBeta()'s estimate_errors) instead of re-fitting
+            or recomputing the Jacobian from scratch.
 
     Return:
-        (alpha, beta): [tuple of floats].
+        (alpha, beta), or (alpha, beta, res) if return_fit_result=True.
     """
 
     if x0_alpha_beta is None:
@@ -526,11 +530,235 @@ def minimizeAlphaBetaRobust(v_normed, ht_normed, sigma_v_normed, loss='soft_l1',
     if not res.success:
         print("WARNING: Optimizer failed: {:s}".format(res.message))
 
+    if return_fit_result:
+        return tuple(np.exp(res.x)) + (res,)
+
     return tuple(np.exp(res.x))
 
 
+def _alphaBetaRobustErrors(fit_res, alpha, beta, v_data, ht_data, v_init, v_init_given, sigma_v,
+        sigma_v_init, loss, f_scale, ci):
+    """ Analytic error estimate for fitAlphaBeta(method='robust', estimate_errors=True).
+
+        Two contributions to the covariance of (ln alpha, ln beta):
+        1. The Gauss-Newton local curvature of the robust-loss least_squares fit itself
+           (fit_res.jac/.cost/.fun, reused from minimizeAlphaBetaRobust() rather than
+           recomputed), treating v_init as if it were exactly known. Same (J^T J)^-1,
+           reduced-chi-square-scaled recipe as fitAlphaBetaLightCurve()'s own
+           alpha_std_rel/beta_std_rel, with the same caveat: soft-L1 reweights residuals
+           nonlinearly, so this is a Gauss-Newton approximation of the local curvature, not the
+           inverse Fisher information of Gaussian noise.
+        2. A rank-1 correction J_v0 sigma_v_init^2 J_v0^T propagating v_init's OWN uncertainty
+           through a numerically estimated sensitivity J_v0 = d(ln alpha, ln beta)/d(v_init) -
+           obtained by refitting fitAlphaBeta() itself at v_init +/- a small step, since v_init is
+           held fixed during the fit that produced fit_res and so never appears in fit_res.jac.
+           Skipped (zero contribution) whenever sigma_v_init is 0 (v_init treated as exact).
+        The two contributions are simply added (v_init's estimation error and the conditional
+        fit's residuals are treated as independent, even though both ultimately come from the
+        same v_data) - a standard plug-in approximation, not a fully joint treatment.
+
+        cov_log/corr_log ((ln alpha, ln beta), the space this model is actually fit in) are
+        propagated to linear (alpha, beta) space via the delta method: since
+        d(alpha)/d(ln alpha) = alpha, the Jacobian of (alpha, beta) w.r.t. (ln alpha, ln beta) is
+        diag(alpha, beta), so cov = diag(alpha, beta) @ cov_log @ diag(alpha, beta). corr comes
+        out numerically identical to corr_log (correlation is invariant under this kind of
+        positive-diagonal rescaling) - both are kept for convenience.
+
+        alpha_ci_gaussian_lower/upper and beta_ci_gaussian_lower/upper are APPROXIMATE confidence
+        intervals based on the local Gaussian approximation in log-space (equivalently: assuming
+        alpha/beta are log-normal), at the `ci` level - exp(ln(alpha) +/- z*alpha_std_rel),
+        asymmetric around alpha and, unlike alpha +/- z*alpha_std, never negative. The "_gaussian"
+        in the name (and "approximate" here) is deliberate: this is NOT the same kind of object as
+        wmpl.Utils.Math.confidenceInterval()'s output elsewhere in this library (e.g. Trajectory.py,
+        REBOUND.py) - those are empirical percentiles of an actual Monte Carlo ensemble, whereas
+        there is no ensemble here, only a parametric approximation. Don't drop the "_gaussian"
+        qualifier when reading these out; it is the one thing standing between this and a false
+        claim of MC-equivalent rigor.
+
+        Two failure modes are handled explicitly, both printing a WARNING and returning NaN for
+        every error field (alpha/beta themselves are still returned - only their errors are NaN):
+        - (alpha, beta) landed within 1% (log-space) of an ALPHA_BETA_BOUNDS edge: the fit is
+          likely poorly constrained by this data, and the local curvature below isn't meaningful
+          around a boundary the optimizer was clipped against rather than converged to.
+        - The Jacobian is near- (but not exactly) singular: (J^T J)^-1 comes out with a negative
+          diagonal - impossible for a real covariance, and NOT the same thing as the outright
+          LinAlgError case below (a near-singular matrix does not raise). This is what a
+          bound-pinned fit typically causes, but is checked independently since it is the actual
+          numerical symptom regardless of cause.
+
+    Arguments:
+        fit_res: [OptimizeResult] From minimizeAlphaBetaRobust(..., return_fit_result=True).
+        alpha: [float] Fitted ballistic coefficient.
+        beta: [float] Fitted mass loss parameter.
+        v_data: [ndarray] Velocity data (m/s), as given to fitAlphaBeta().
+        ht_data: [ndarray] Height data (m), as given to fitAlphaBeta().
+        v_init: [float] Adopted initial velocity (m/s).
+        v_init_given: [bool] Whether v_init was supplied by the caller (vs. derived internally).
+        sigma_v: [float] Velocity uncertainty (m/s) used to weight the fit.
+        sigma_v_init: [float or None] Caller-supplied v_init uncertainty - only used if
+            v_init_given (see fitAlphaBeta()'s docstring).
+        loss: [str] As in fitAlphaBeta().
+        f_scale: [float] As in fitAlphaBeta().
+        ci: [float] Confidence level (0-100, e.g. 95) for alpha_ci_gaussian_lower/upper and
+            beta_ci_gaussian_lower/upper - same convention as
+            wmpl.Utils.Math.confidenceInterval()'s `ci`.
+
+    Return:
+        errors: [dict] 'alpha', 'beta', 'alpha_std_rel', 'beta_std_rel', 'alpha_std', 'beta_std',
+            'cov_log', 'corr_log', 'cov', 'corr', 'alpha_ci_gaussian_lower',
+            'alpha_ci_gaussian_upper', 'beta_ci_gaussian_lower', 'beta_ci_gaussian_upper', 'ci',
+            'sigma_v', 'sigma_v_init' - see fitAlphaBeta()'s docstring for details.
+    """
+
+    # Resolve v_init's own uncertainty up front, so it is available in `errors` even if the
+    #   covariance itself turns out to be degenerate below (see the bound/near-singular checks).
+    if v_init_given:
+
+        if sigma_v_init is None:
+            print("WARNING: v_init was given without sigma_v_init - its uncertainty will NOT be "
+                "propagated into alpha_std_rel/beta_std_rel (v_init is being treated as exactly "
+                "known).")
+            sigma_v_init_used = 0.0
+
+        else:
+            sigma_v_init_used = sigma_v_init
+
+    else:
+        # Standard error of the median (NOT the plain MAD, which measures the dispersion of the
+        #   observations themselves, not the precision of the median as an estimator of v_init)
+        #   of the same leading points fitAlphaBeta() used to derive v_init.
+        max_index = max(int(0.2*len(v_data)), 10)
+        v_head = v_data[:max_index]
+        mad = np.median(np.abs(v_head - np.median(v_head)))
+        sigma_v_init_used = 1.2533*1.4826*mad/np.sqrt(max_index)
+
+    nan_result = {
+        'alpha': alpha, 'beta': beta, 'alpha_std_rel': np.nan, 'beta_std_rel': np.nan,
+        'alpha_std': np.nan, 'beta_std': np.nan, 'cov_log': np.full((2, 2), np.nan),
+        'corr_log': np.nan, 'cov': np.full((2, 2), np.nan), 'corr': np.nan,
+        'alpha_ci_gaussian_lower': np.nan, 'alpha_ci_gaussian_upper': np.nan,
+        'beta_ci_gaussian_lower': np.nan, 'beta_ci_gaussian_upper': np.nan,
+        'ci': ci, 'sigma_v': sigma_v, 'sigma_v_init': sigma_v_init_used,
+    }
+
+    # Warn if the fitted (alpha, beta) landed near an optimization bound, using the same
+    #   log-space tolerance fitAlphaBetaLightCurve() uses for its own bound check (alpha/beta
+    #   span orders of magnitude, so a linear-space check would misfire - see
+    #   _makeBoundChecker()). The Gauss-Newton curvature below is only meaningful around a
+    #   genuine local optimum, and tends to be degenerate (or numerically nonsensical) once the
+    #   fit has been clipped against a box constraint instead of converging to one.
+    log_lower, log_upper = _logAlphaBetaBounds()
+    bound_tol = 1e-2
+    bound_warnings = []
+
+    for name, value, lo, hi in [
+            ("alpha", alpha, log_lower[0], log_upper[0]),
+            ("beta", beta, log_lower[1], log_upper[1])]:
+
+        log_value = np.log(value)
+        span = hi - lo
+
+        if (log_value - lo)/span < bound_tol:
+            bound_warnings.append("{:s}={:.6g} is close to the fit lower bound ({:.6g})".format(
+                name, value, np.exp(lo)))
+
+        if (hi - log_value)/span < bound_tol:
+            bound_warnings.append("{:s}={:.6g} is close to the fit upper bound ({:.6g})".format(
+                name, value, np.exp(hi)))
+
+    if bound_warnings:
+        print()
+        print("WARNING: fitted (alpha, beta) landed within {:.3g}% of an optimization bound - "
+            "the fit may be poorly constrained, and the Gauss-Newton error estimate below may "
+            "be degenerate (NaN) or unreliable as a result.".format(100*bound_tol))
+        for warning in bound_warnings:
+            print("  - {:s}".format(warning))
+        print()
+
+    # Gauss-Newton covariance of (ln alpha, ln beta), v_init held fixed at its adopted value
+    dof = max(len(fit_res.fun) - len(fit_res.x), 1)
+    s2 = 2.0*fit_res.cost/dof
+
+    try:
+        cov_fit = s2*np.linalg.inv(fit_res.jac.T @ fit_res.jac)
+    except np.linalg.LinAlgError:
+        return nan_result
+
+    # A near- (but not exactly) singular Jacobian can produce a numerically "valid" (no
+    #   LinAlgError) inverse with a negative variance on the diagonal - mathematically impossible
+    #   for a real covariance, and NOT caught by the try/except above. Most often seen exactly
+    #   when (alpha, beta) is pinned against a bound (see the warning above): fail cleanly with
+    #   NaN here instead of letting np.sqrt() silently emit a generic RuntimeWarning below.
+    if np.any(np.diag(cov_fit) < 0):
+        print("WARNING: the Gauss-Newton covariance has a negative variance on its diagonal "
+            "(a near-singular Jacobian, most often from a fit pinned against a bound - see "
+            "above). Returning NaN for alpha_std_rel/beta_std_rel/cov/corr/the confidence "
+            "interval instead of a meaningless value.")
+        return nan_result
+
+    # Rank-1 correction from v_init's uncertainty, via a numerical sensitivity. Skipped if there
+    #   is no v_init uncertainty to propagate.
+    if sigma_v_init_used > 0:
+
+        dv = 1e-4*v_init
+
+        def _logAlphaBetaAt(v_init_pert):
+            _, alpha_p, beta_p = fitAlphaBeta(v_data, ht_data, v_init=v_init_pert, \
+                method='robust', sigma_v=sigma_v, loss=loss, f_scale=f_scale)
+            return np.log([alpha_p, beta_p])
+
+        jac_v0 = (_logAlphaBetaAt(v_init + dv) - _logAlphaBetaAt(v_init - dv))/(2*dv)
+
+        cov_v0 = np.outer(jac_v0, jac_v0)*sigma_v_init_used**2
+
+    else:
+        cov_v0 = np.zeros((2, 2))
+
+    # cov_v0 is PSD (an outer product scaled by a non-negative variance), so it cannot turn the
+    #   already-checked non-negative diagonal of cov_fit negative - cov_log's diagonal is
+    #   guaranteed non-negative here too.
+    cov_log = cov_fit + cov_v0
+
+    alpha_std_rel, beta_std_rel = np.sqrt(np.diag(cov_log))
+    corr_log = cov_log[0, 1]/(alpha_std_rel*beta_std_rel)
+
+    # Linear (alpha, beta) space, via the delta method (see the docstring above)
+    scale = np.array([alpha, beta])
+    cov = np.outer(scale, scale)*cov_log
+    alpha_std, beta_std = np.sqrt(np.diag(cov))
+    corr = cov[0, 1]/(alpha_std*beta_std)
+
+    # Parametric (log-normal) confidence interval - see the docstring above for how this differs
+    #   from wmpl.Utils.Math.confidenceInterval()'s empirical percentiles elsewhere in the library
+    z = scipy.special.ndtri(0.5 + ci/200.0)
+    alpha_ci_gaussian_lower = alpha*np.exp(-z*alpha_std_rel)
+    alpha_ci_gaussian_upper = alpha*np.exp(z*alpha_std_rel)
+    beta_ci_gaussian_lower = beta*np.exp(-z*beta_std_rel)
+    beta_ci_gaussian_upper = beta*np.exp(z*beta_std_rel)
+
+    return {
+        'alpha': alpha,
+        'beta': beta,
+        'alpha_std_rel': alpha_std_rel,
+        'beta_std_rel': beta_std_rel,
+        'alpha_std': alpha_std,
+        'beta_std': beta_std,
+        'cov_log': cov_log,
+        'corr_log': corr_log,
+        'cov': cov,
+        'corr': corr,
+        'alpha_ci_gaussian_lower': alpha_ci_gaussian_lower,
+        'alpha_ci_gaussian_upper': alpha_ci_gaussian_upper,
+        'beta_ci_gaussian_lower': beta_ci_gaussian_lower,
+        'beta_ci_gaussian_upper': beta_ci_gaussian_upper,
+        'ci': ci,
+        'sigma_v': sigma_v,
+        'sigma_v_init': sigma_v_init_used,
+    }
+
+
 def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='soft_l1',
-        f_scale=2.0):
+        f_scale=2.0, estimate_errors=False, sigma_v_init=None, ci=95.0, verbose=False):
     """ Fit the alpha and beta parameters to the given velocity and height data.
 
     Two methods are available (see minimizeAlphaBeta()/minimizeAlphaBetaRobust() for the full
@@ -543,7 +771,9 @@ def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='
         - method='robust': least squares directly on the velocity residuals, robustified with
           `loss` (soft-L1 by default), seeded from the Q4 result. Weights the whole trajectory
           much more evenly than Q4 and tracks the deceleration/"knee" more faithfully - this is
-          the same approach fitAlphaBetaLightCurve() uses for its dynamics block.
+          the same approach fitAlphaBetaLightCurve() uses for its dynamics block. Required for
+          estimate_errors=True (see below) - Q4's L1/Nelder-Mead fit has no natural Jacobian to
+          build an analytic error estimate from.
 
     Arguments:
         v_data: [ndarray] Velocity data (m/s).
@@ -558,22 +788,109 @@ def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='
             the beginning to the end of the trajectory (unlike fitAlphaBetaLightCurve(), which
             sorts its inputs by decreasing height internally).
         method: [str] 'q4' (default) or 'robust'.
-        sigma_v: [float] Only used for method='robust'. Velocity uncertainty (m/s) used to weight
-            the residuals. If None, estimated from the MAD of the Q4 fit's residuals (floored at
-            1 m/s, see _estimateSigmaV()) - an *effective* uncertainty that absorbs both
-            measurement noise and alpha-beta model misspecification, not a pure instrumental one.
+        sigma_v: [float] Velocity uncertainty (m/s) used to weight the residuals for
+            method='robust', and (if estimate_errors=True) to scale the error estimate too. If
+            None, estimated from the MAD of the Q4 fit's residuals (floored at 1 m/s, see
+            _estimateSigmaV()) - an *effective* uncertainty that absorbs both measurement noise
+            and alpha-beta model misspecification, not a pure instrumental one.
         loss: [str] Only used for method='robust'. scipy.optimize.least_squares loss.
         f_scale: [float] Only used for method='robust'. Robust loss scale, in units of sigma_v.
+        estimate_errors: [bool] If True, also return a 4th element (a dict, see Return) with an
+            analytic error estimate. Only supported for method='robust' - raises ValueError
+            otherwise (see the method argument above). Off by default, so existing
+            3-tuple-unpacking call sites (v_init, alpha, beta = fitAlphaBeta(...)) are unaffected.
+        sigma_v_init: [float] Uncertainty on v_init (m/s), only used when estimate_errors=True:
+              - v_init given (not None) + sigma_v_init given: propagated into
+                alpha_std_rel/beta_std_rel/cov_log.
+              - v_init given + sigma_v_init=None (default): v_init is treated as exactly known - a
+                warning is printed, since this is an easy way to silently understate alpha/beta's
+                uncertainty if v_init actually has a non-negligible error of its own.
+              - v_init=None (derived internally): this argument is ignored - v_init's uncertainty
+                is instead estimated automatically as the standard error of the median of the same
+                leading points used to derive it (see the Return section), which is the quantity
+                that actually needs to be propagated, not the raw scatter of those points.
+        ci: [float] Confidence level (0-100, e.g. 95, the default) for the approximate
+            alpha_ci_gaussian_lower/upper and beta_ci_gaussian_lower/upper bounds below - only
+            used if estimate_errors=True. Same convention as
+            wmpl.Utils.Math.confidenceInterval()'s `ci`.
+        verbose: [bool] If True, print the adopted v_init/alpha/beta (and, if
+            estimate_errors=True, the error estimate too).
 
     Return:
         (v_init, alpha, beta):
             - v_init: [float] Input or derived initial velocity (m/s).
             - alpha: [float] Ballistic coefficient.
             - beta: [float] Mass loss.
+        If estimate_errors=True, a 4th element `errors` (dict, from _alphaBetaRobustErrors()) is
+        also returned:
+            'alpha', 'beta': echoed back, so the dict is self-contained.
+            'alpha_std_rel', 'beta_std_rel': [float] Relative (fractional) 1-sigma uncertainties
+                of alpha/beta in (ln alpha, ln beta) space, combining the Gauss-Newton curvature
+                of the fit itself with (if applicable) v_init's own uncertainty - see the caveats
+                below.
+            'alpha_std', 'beta_std': [float] The same 1-sigma uncertainties propagated to linear
+                (alpha, beta) space via the delta method (alpha_std = alpha*alpha_std_rel, since
+                d(alpha)/d(ln alpha) = alpha).
+            'cov_log': [ndarray] Full 2x2 covariance matrix of (ln alpha, ln beta) - the space
+                this model is actually fit in.
+            'cov': [ndarray] The same covariance propagated to linear (alpha, beta) space. Use
+                'cov'/'cov_log' instead of the marginal std devs above to propagate into any OTHER
+                derived quantity: alpha and beta are typically strongly correlated (see 'corr'/
+                'corr_log'), so propagating the marginal std devs independently would be wrong.
+            'corr_log', 'corr': [float] Correlation coefficient of (ln alpha, ln beta) / of
+                (alpha, beta) - numerically identical (correlation is invariant under the
+                positive-diagonal rescaling relating the two spaces); both are kept for
+                convenience.
+            'alpha_ci_gaussian_lower', 'alpha_ci_gaussian_upper',
+            'beta_ci_gaussian_lower', 'beta_ci_gaussian_upper': [float] APPROXIMATE confidence
+                intervals based on the local Gaussian approximation in log-space, at the `ci`
+                level - i.e. alpha/beta are treated as log-normal, so these bounds are asymmetric
+                around alpha/beta and, unlike alpha +/- z*alpha_std, can never go negative. The
+                "_gaussian" in the name is deliberate: this is NOT the same kind of object as
+                wmpl.Utils.Math.confidenceInterval()'s output elsewhere in this library (e.g.
+                Trajectory.py, REBOUND.py) - those are empirical percentiles of an actual Monte
+                Carlo ensemble, whereas there is no ensemble here, only a parametric
+                approximation.
+            'ci': [float] The confidence level actually used (echoed back).
+            'sigma_v': [float] The velocity uncertainty actually used (see the sigma_v caveat
+                above).
+            'sigma_v_init': [float] v_init's uncertainty actually used for the propagation above
+                (0.0 if v_init is being treated as exactly known).
+
+    Statistical caveats (estimate_errors=True):
+        - Both contributions to alpha_std_rel/beta_std_rel/cov_log assume independent,
+          diagonal-covariance velocity residuals - the same simplification fitAlphaBetaLightCurve()
+          makes (consecutive points from the same station are not really statistically
+          independent).
+        - The Gauss-Newton contribution is a *local curvature* approximation: soft-L1 reweights
+          residuals nonlinearly, so (J^T J)^-1 is not the inverse Fisher information of Gaussian
+          noise - same caveat as fitAlphaBetaLightCurve()'s alpha_std_rel/beta_std_rel.
+        - The v_init-sensitivity correction and the Gauss-Newton term are simply added
+          (cov_log = cov_fit + cov_v_init), which ignores that v_init and the conditional fit's
+          residuals both ultimately come from the same v_data - a standard plug-in approximation,
+          not a fully joint treatment.
+        - alpha_ci_gaussian_lower/upper and beta_ci_gaussian_lower/upper assume normality in LOG
+          space, which is only ever as good as the two contributions to cov_log above - they are
+          a convenience view of the same Gaussian approximation, not an independently more
+          rigorous one.
+        - If the fitted (alpha, beta) landed within 1% (log-space) of an ALPHA_BETA_BOUNDS edge,
+          or if that produces a near-singular Jacobian (a negative variance on the covariance
+          diagonal - impossible for a real covariance), a WARNING is printed and every error field
+          is NaN (alpha/beta themselves are still returned). Both mean the same thing: the fit is
+          likely poorly constrained by this data, and the local curvature approximation isn't
+          meaningful around a boundary the optimizer was clipped against rather than converged to.
     """
 
+    method = method.lower()
+
+    if estimate_errors and method != 'robust':
+        raise ValueError("estimate_errors=True is only supported for method='robust' - Q4's "
+            "L1/Nelder-Mead fit has no natural Jacobian to build an analytic covariance from.")
+
+    v_init_given = v_init is not None
+
     # Compute the initial velocity, if it wasn't given already
-    if v_init is None:
+    if not v_init_given:
 
         max_index = int(0.2*len(v_data))
         if max_index < 10:
@@ -585,8 +902,6 @@ def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='
     v_normed = v_data/v_init
     ht_normed = ht_data/HT_NORM_CONST
 
-    method = method.lower()
-
     if method == 'q4':
         alpha, beta = minimizeAlphaBeta(v_normed, ht_normed)
 
@@ -596,11 +911,41 @@ def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='
         if sigma_v is None:
             sigma_v = _estimateSigmaV(alpha0, beta0, v_normed, ht_normed, v_init)
 
-        alpha, beta = minimizeAlphaBetaRobust(v_normed, ht_normed, sigma_v/v_init, loss=loss, \
-            f_scale=f_scale, x0_alpha_beta=(alpha0, beta0))
+        if estimate_errors:
+            alpha, beta, fit_res = minimizeAlphaBetaRobust(v_normed, ht_normed, sigma_v/v_init, \
+                loss=loss, f_scale=f_scale, x0_alpha_beta=(alpha0, beta0), return_fit_result=True)
+        else:
+            alpha, beta = minimizeAlphaBetaRobust(v_normed, ht_normed, sigma_v/v_init, loss=loss, \
+                f_scale=f_scale, x0_alpha_beta=(alpha0, beta0))
 
     else:
         raise ValueError("method must be 'q4' or 'robust', got '{:s}'.".format(method))
+
+    if estimate_errors:
+        errors = _alphaBetaRobustErrors(fit_res, alpha, beta, v_data, ht_data, v_init, \
+            v_init_given, sigma_v, sigma_v_init, loss, f_scale, ci)
+
+    if verbose:
+        print()
+        print("--- fitAlphaBeta ({:s}) ---".format(method))
+        print("v_init               = {:.3f} m/s".format(v_init))
+
+        if estimate_errors:
+            print("alpha                = {:.6f} (+/-{:.1%})  [{:.3g}% gaussian CI: {:.6f} - "
+                "{:.6f}]".format(alpha, errors['alpha_std_rel'], ci,
+                errors['alpha_ci_gaussian_lower'], errors['alpha_ci_gaussian_upper']))
+            print("beta                 = {:.6f} (+/-{:.1%})  [{:.3g}% gaussian CI: {:.6f} - "
+                "{:.6f}]".format(beta, errors['beta_std_rel'], ci,
+                errors['beta_ci_gaussian_lower'], errors['beta_ci_gaussian_upper']))
+            print("corr(alpha, beta)    = {:.3f}".format(errors['corr']))
+            print("sigma_v              = {:.3f} m/s".format(errors['sigma_v']))
+            print("sigma_v_init         = {:.3f} m/s".format(errors['sigma_v_init']))
+        else:
+            print("alpha                = {:.6f}".format(alpha))
+            print("beta                 = {:.6f}".format(beta))
+
+    if estimate_errors:
+        return v_init, alpha, beta, errors
 
     return v_init, alpha, beta
 

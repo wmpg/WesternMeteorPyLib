@@ -20,7 +20,7 @@ import numpy as np
 from wmpl.Utils.AlphaBeta import (fitAlphaBetaMass, fitAlphaBeta, fitAlphaBetaLightCurve,
     alphaBetaMasses, alphaBetaVelocity, alphaBetaHeight, alphaBetaVelocityNormed,
     alphaBetaHeightNormed, alphaBetaLuminosityF, alphaBetaModelMagnitude,
-    alphaBetaLuminousEfficiency, _profiledMagOffset, HT_NORM_CONST, P_0M)
+    alphaBetaLuminousEfficiency, _profiledMagOffset, HT_NORM_CONST, P_0M, ALPHA_BETA_BOUNDS)
 
 
 # True parameters used to generate the synthetic trajectory. The height range is chosen so the
@@ -341,6 +341,202 @@ def testFitAlphaBetaRobust():
         raise AssertionError("fitAlphaBeta: ValueError not raised for a bad method name")
 
 
+def testFitAlphaBetaErrorEstimationRejectsQ4():
+    """ estimate_errors=True must be rejected for method='q4' - Q4's L1/Nelder-Mead fit has no
+        natural Jacobian to build an analytic covariance from.
+    """
+
+    v_data, _, _, _, _ = _syntheticTrajectory()
+
+    try:
+        fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, method='q4', estimate_errors=True)
+
+    except ValueError:
+        pass
+
+    else:
+        raise AssertionError(
+            "fitAlphaBeta: ValueError not raised for estimate_errors=True with method='q4'")
+
+
+def testFitAlphaBetaErrorEstimationPointEstimateUnchanged():
+    """ estimate_errors=True must not change the point estimate itself, and the errors dict must
+        echo back the same alpha/beta it was computed from.
+    """
+
+    v_data, _, _, _, _ = _syntheticTrajectory()
+
+    v_init_plain, alpha_plain, beta_plain = fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, \
+        method='robust')
+
+    v_init, alpha, beta, errors = fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, \
+        method='robust', estimate_errors=True)
+
+    assert v_init == v_init_plain
+    assert alpha == alpha_plain
+    assert beta == beta_plain
+    assert errors['alpha'] == alpha
+    assert errors['beta'] == beta
+
+
+def testFitAlphaBetaErrorEstimationCovarianceStructure():
+    """ cov_log/cov must be well-formed (symmetric, positive diagonal), corr_log/corr must be a
+        valid correlation coefficient, and the linear (alpha, beta) space quantities must match
+        the exact delta-method transform of the (ln alpha, ln beta) ones: alpha_std =
+        alpha*alpha_std_rel, cov = diag(alpha, beta) @ cov_log @ diag(alpha, beta), and corr must
+        come out numerically identical to corr_log (correlation is invariant under this kind of
+        positive-diagonal rescaling).
+    """
+
+    v_data, _, _, _, _ = _syntheticTrajectory()
+
+    _, alpha, beta, errors = fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, method='robust', \
+        estimate_errors=True)
+
+    # v_init given, no sigma_v_init: v_init must be treated as exact (zero propagated uncertainty)
+    assert errors['sigma_v_init'] == 0.0
+
+    assert np.isfinite(errors['alpha_std_rel']) and errors['alpha_std_rel'] > 0
+    assert np.isfinite(errors['beta_std_rel']) and errors['beta_std_rel'] > 0
+    assert -1.0 <= errors['corr_log'] <= 1.0
+    assert errors['cov_log'].shape == (2, 2)
+    assert np.allclose(errors['cov_log'], errors['cov_log'].T)
+    assert errors['cov_log'][0, 0] > 0 and errors['cov_log'][1, 1] > 0
+
+    # This trajectory has strong deceleration and moderate noise, so both parameters should be
+    #   well under 100% relative uncertainty
+    assert errors['alpha_std_rel'] < 1.0, "alpha_std_rel implausibly large: {:.3g}".format(
+        errors['alpha_std_rel'])
+    assert errors['beta_std_rel'] < 1.0, "beta_std_rel implausibly large: {:.3g}".format(
+        errors['beta_std_rel'])
+
+    _assertClose(errors['alpha_std'], alpha*errors['alpha_std_rel'], 1e-9, "alpha_std")
+    _assertClose(errors['beta_std'], beta*errors['beta_std_rel'], 1e-9, "beta_std")
+    assert errors['cov'].shape == (2, 2)
+    assert np.allclose(errors['cov'], errors['cov'].T)
+    scale = np.array([alpha, beta])
+    _assertClose(errors['cov'][0, 1], scale[0]*scale[1]*errors['cov_log'][0, 1], 1e-9, "cov[0,1]")
+    _assertClose(errors['corr'], errors['corr_log'], 1e-9, "corr vs corr_log")
+
+
+def testFitAlphaBetaErrorEstimationConfidenceInterval():
+    """ The parametric (Gaussian-in-log-space) confidence interval must bracket the point
+        estimate, and must widen at a higher confidence level.
+    """
+
+    v_data, _, _, _, _ = _syntheticTrajectory()
+
+    _, alpha, beta, errors = fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, method='robust', \
+        estimate_errors=True)
+
+    assert errors['alpha_ci_gaussian_lower'] < alpha < errors['alpha_ci_gaussian_upper']
+    assert errors['beta_ci_gaussian_lower'] < beta < errors['beta_ci_gaussian_upper']
+
+    _, _, _, errors_ci68 = fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, method='robust', \
+        estimate_errors=True, ci=68.27)
+    _, _, _, errors_ci99 = fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, method='robust', \
+        estimate_errors=True, ci=99.0)
+
+    assert (errors_ci99['alpha_ci_gaussian_upper'] - errors_ci99['alpha_ci_gaussian_lower']) > \
+        (errors_ci68['alpha_ci_gaussian_upper'] - errors_ci68['alpha_ci_gaussian_lower'])
+    assert (errors_ci99['beta_ci_gaussian_upper'] - errors_ci99['beta_ci_gaussian_lower']) > \
+        (errors_ci68['beta_ci_gaussian_upper'] - errors_ci68['beta_ci_gaussian_lower'])
+
+
+def testFitAlphaBetaErrorEstimationVerbose():
+    """ verbose=True must not raise, with or without estimate_errors. """
+
+    v_data, _, _, _, _ = _syntheticTrajectory()
+
+    fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, method='robust', verbose=True)
+    fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, method='robust', estimate_errors=True, \
+        verbose=True)
+
+
+def testFitAlphaBetaErrorEstimationVInitPropagation():
+    """ sigma_v_init must only ever widen (never narrow) alpha/beta's uncertainty when supplied
+        explicitly (the correction is a positive-semidefinite rank-1 term added to the same
+        cov_fit), and must be auto-derived as the standard error of the median (NOT the plain
+        MAD) of the same leading points fitAlphaBeta() itself uses to derive v_init, when v_init
+        is left to be derived internally.
+    """
+
+    v_data, _, _, _, _ = _syntheticTrajectory()
+
+    _, _, _, errors = fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, method='robust', \
+        estimate_errors=True)
+
+    # Propagating an explicit sigma_v_init adds a positive-semidefinite rank-1 term to the same
+    #   cov_fit, so it must only ever widen (never narrow) alpha/beta's uncertainty
+    _, _, _, errors_with_v0_unc = fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, \
+        method='robust', estimate_errors=True, sigma_v_init=50.0)
+
+    assert errors_with_v0_unc['sigma_v_init'] == 50.0
+    assert errors_with_v0_unc['alpha_std_rel'] >= errors['alpha_std_rel']
+    assert errors_with_v0_unc['beta_std_rel'] >= errors['beta_std_rel']
+
+    # v_init=None: sigma_v_init must be auto-derived as the standard error of the median (not the
+    #   plain MAD) of the same leading points fitAlphaBeta() itself uses to derive v_init
+    _, _, _, errors_derived = fitAlphaBeta(v_data, HT_DATA, method='robust', estimate_errors=True)
+
+    max_index = max(int(0.2*len(v_data)), 10)
+    v_head = v_data[:max_index]
+    mad = np.median(np.abs(v_head - np.median(v_head)))
+    sigma_v_init_expected = 1.2533*1.4826*mad/np.sqrt(max_index)
+
+    _assertClose(errors_derived['sigma_v_init'], sigma_v_init_expected, 1e-9, "sigma_v_init (auto)")
+    assert errors_derived['sigma_v_init'] > 0
+
+
+def testFitAlphaBetaErrorEstimationBoundPinned():
+    """ When the fitted (alpha, beta) is pinned against an ALPHA_BETA_BOUNDS edge, estimate_errors
+        must fail cleanly - NaN for every error field, no unhandled exception, no raw numpy
+        RuntimeWarning from sqrt() of a negative covariance diagonal - instead of silently
+        propagating a mathematically impossible negative variance. Found via real usage: a fit on
+        an actual trajectory (beta landing at 49.99995, a hair under the upper bound of 50) came
+        back with alpha_std_rel/beta_std_rel/cov_log/etc. all NaN and no explanation.
+
+        The true beta here is set well beyond the upper bound, so the constrained fit has no
+        choice but to pin against that edge - reproduces the same pathology deterministically.
+    """
+
+    beta_true_extreme = 150.0
+
+    v_clean = alphaBetaVelocity(HT_DATA, ALPHA_TRUE, beta_true_extreme, V_INIT_TRUE)
+    rng = np.random.RandomState(42)
+    v_data = v_clean + rng.normal(0, VEL_NOISE_STD, HT_DATA.size)
+
+    v_init, alpha, beta, errors = fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, \
+        method='robust', estimate_errors=True)
+
+    # The fit must indeed have pinned against the beta upper bound (sanity-checks the test setup
+    #   itself, so a future change that stops reproducing this failure mode fails here first,
+    #   with a clear message, rather than via a confusing assertion below)
+    _, beta_upper = ALPHA_BETA_BOUNDS[1]
+    assert beta > 0.99*beta_upper, "test setup didn't actually pin beta against its bound"
+
+    # Must fail cleanly: every error field NaN together, not a partial/mixed NaN state
+    assert np.isnan(errors['alpha_std_rel'])
+    assert np.isnan(errors['beta_std_rel'])
+    assert np.isnan(errors['alpha_std'])
+    assert np.isnan(errors['beta_std'])
+    assert np.all(np.isnan(errors['cov_log']))
+    assert np.isnan(errors['corr_log'])
+    assert np.all(np.isnan(errors['cov']))
+    assert np.isnan(errors['corr'])
+    assert np.isnan(errors['alpha_ci_gaussian_lower'])
+    assert np.isnan(errors['alpha_ci_gaussian_upper'])
+    assert np.isnan(errors['beta_ci_gaussian_lower'])
+    assert np.isnan(errors['beta_ci_gaussian_upper'])
+
+    # alpha/beta themselves, and sigma_v/sigma_v_init, are still real, useful numbers even though
+    #   the covariance failed - only the error fields collapse to NaN
+    assert np.isfinite(alpha) and np.isfinite(beta)
+    assert errors['alpha'] == alpha and errors['beta'] == beta
+    assert np.isfinite(errors['sigma_v']) and errors['sigma_v'] > 0
+    assert errors['sigma_v_init'] == 0.0
+
+
 def testLuminosityModel():
     """ The luminosity function f(v) must be positive on the interior, vanish at both ends, and
         the model magnitude must respond to the offset additively.
@@ -508,6 +704,13 @@ if __name__ == "__main__":
         testInputValidation,
         testAlphaBetaNormedRoundTrip,
         testFitAlphaBetaRobust,
+        testFitAlphaBetaErrorEstimationRejectsQ4,
+        testFitAlphaBetaErrorEstimationPointEstimateUnchanged,
+        testFitAlphaBetaErrorEstimationCovarianceStructure,
+        testFitAlphaBetaErrorEstimationConfidenceInterval,
+        testFitAlphaBetaErrorEstimationVerbose,
+        testFitAlphaBetaErrorEstimationVInitPropagation,
+        testFitAlphaBetaErrorEstimationBoundPinned,
         testLuminosityModel,
         testProfiledMagOffsetWeighted,
         testFitAlphaBetaLightCurve,
