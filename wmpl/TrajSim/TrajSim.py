@@ -54,7 +54,7 @@ def geocentricRadiantToApparent(ra_g, dec_g, v_g, state_vector, jd_ref):
 
 
     # Assume that the velocity at infinity corresponds to the initial velocity
-    v_init = np.sqrt(v_g**2 + (2*6.67408*5.9722)*1e13/vectMag(np.array(state_vector)))
+    v_init = np.sqrt(v_g**2 + (2*6.67408*5.9722)*1e13/vectMag(np.array(state_vector, dtype=np.float64)))
 
     # Numerically find the apparent radiant
     res = scipy.optimize.minimize(_radiantDiff, x0=[ra_g, dec_g], args=(ra_g, dec_g, v_init, state_vector, jd_ref), \
