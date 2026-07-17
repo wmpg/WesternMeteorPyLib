@@ -642,7 +642,10 @@ def _alphaBetaRobustErrors(fit_res, alpha, beta, v_data, ht_data, v_init, v_init
 
         # Standard error of the median (NOT the plain MAD, which measures the dispersion of the
         #   observations themselves, not the precision of the median as an estimator of v_init)
-        #   of the same leading points fitAlphaBeta() used to derive v_init.
+        #   of the same leading points fitAlphaBeta() used to derive v_init. This captures the
+        #   RANDOM error of that estimator, but not its systematic one: the median of a still-
+        #   decelerating leading window is itself biased low relative to the true v_init (see
+        #   fitAlphaBeta()'s docstring caveat on this - no variance term can correct for a bias).
         max_index = max(int(0.2*len(v_data)), 10)
         v_head = v_data[:max_index]
         mad = np.median(np.abs(v_head - np.median(v_head)))
@@ -825,7 +828,11 @@ def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='
                 if it was given a value) - v_init's uncertainty is instead estimated automatically
                 as the standard error of the median of the same leading points used to derive it
                 (see the Return section), which is the quantity that actually needs to be
-                propagated, not the raw scatter of those points.
+                propagated, not the raw scatter of those points. IMPORTANT: this covers only the
+                RANDOM error of that median - it is also systematically biased low by the
+                deceleration trend across the leading window itself (a fixed offset, not
+                something a variance term can correct for), which can meaningfully under-cover
+                alpha_ci_gaussian_lower/upper - see the Statistical caveats below.
         ci: [float] Confidence level (0-100, e.g. 95, the default) for the approximate
             alpha_ci_gaussian_lower/upper and beta_ci_gaussian_lower/upper bounds below - only
             used if estimate_errors=True. Same convention as
@@ -896,6 +903,22 @@ def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='
           is NaN (alpha/beta themselves are still returned). Both mean the same thing: the fit is
           likely poorly constrained by this data, and the local curvature approximation isn't
           meaningful around a boundary the optimizer was clipped against rather than converged to.
+        - With v_init=None (derived internally), alpha_ci_gaussian_lower/upper can under-cover the
+          true alpha/beta by a lot more than the other approximations above: the leading window
+          used to derive v_init is still decelerating, so its median is not just noisy but
+          systematically biased LOW relative to the true v_init (-11 m/s, deterministic, on this
+          module's own synthetic test geometry - a fixed offset, not something sigma_v_init's
+          variance term can correct for). Measured on that same geometry (300-realization Monte
+          Carlo): at the noise level used elsewhere in this test suite, the nominal 95%
+          alpha_ci_gaussian_lower/upper actually covers the true alpha/beta only ~65-71% of the
+          time with a derived v_init - even though alpha_std_rel/beta_std_rel themselves stay
+          accurate - recovering to ~90% at 3x that noise as the fixed bias shrinks relative to the
+          growing scatter. With v_init supplied externally instead (no derivation, hence no
+          bias), coverage is a nominal ~96%. The bias is in the pre-existing v_init derivation,
+          not introduced by estimate_errors - but the confidence interval is what turns a
+          previously-inconsequential offset into a miscalibrated claim. Prefer an external v_init
+          (+ sigma_v_init if it has its own uncertainty) over the internally-derived one whenever
+          interval coverage matters, not just the point estimate.
     """
 
     method = method.lower()
