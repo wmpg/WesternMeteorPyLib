@@ -359,6 +359,27 @@ def testFitAlphaBetaErrorEstimationRejectsQ4():
             "fitAlphaBeta: ValueError not raised for estimate_errors=True with method='q4'")
 
 
+def testFitAlphaBetaErrorEstimationRejectsBadCi():
+    """ estimate_errors=True must reject a ci outside (0, 100) - out-of-range values degrade
+        silently otherwise: ci=100 gives z=inf (0/inf bounds), ci>100 gives z=NaN, ci<0 inverts
+        which bound is 'lower' vs 'upper'.
+    """
+
+    v_data, _, _, _, _ = _syntheticTrajectory()
+
+    for bad_ci in [0.0, 100.0, -5.0, 150.0]:
+
+        try:
+            fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, method='robust', \
+                estimate_errors=True, ci=bad_ci)
+
+        except ValueError:
+            pass
+
+        else:
+            raise AssertionError("fitAlphaBeta: ValueError not raised for ci={!r}".format(bad_ci))
+
+
 def testFitAlphaBetaErrorEstimationPointEstimateUnchanged():
     """ estimate_errors=True must not change the point estimate itself, and the errors dict must
         echo back the same alpha/beta it was computed from.
@@ -486,6 +507,14 @@ def testFitAlphaBetaErrorEstimationVInitPropagation():
 
     _assertClose(errors_derived['sigma_v_init'], sigma_v_init_expected, 1e-9, "sigma_v_init (auto)")
     assert errors_derived['sigma_v_init'] > 0
+
+    # A superfluous sigma_v_init passed alongside v_init=None must be ignored (only a warning is
+    #   printed, not captured here) - the auto-derived value must be unaffected by it
+    _, _, _, errors_derived_with_superfluous = fitAlphaBeta(v_data, HT_DATA, method='robust', \
+        estimate_errors=True, sigma_v_init=999.0)
+
+    _assertClose(errors_derived_with_superfluous['sigma_v_init'], sigma_v_init_expected, 1e-9, \
+        "sigma_v_init (auto, with a superfluous sigma_v_init passed)")
 
 
 def testFitAlphaBetaErrorEstimationBoundPinned():
@@ -705,6 +734,7 @@ if __name__ == "__main__":
         testAlphaBetaNormedRoundTrip,
         testFitAlphaBetaRobust,
         testFitAlphaBetaErrorEstimationRejectsQ4,
+        testFitAlphaBetaErrorEstimationRejectsBadCi,
         testFitAlphaBetaErrorEstimationPointEstimateUnchanged,
         testFitAlphaBetaErrorEstimationCovarianceStructure,
         testFitAlphaBetaErrorEstimationConfidenceInterval,

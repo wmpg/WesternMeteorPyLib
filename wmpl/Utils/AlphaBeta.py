@@ -635,6 +635,11 @@ def _alphaBetaRobustErrors(fit_res, alpha, beta, v_data, ht_data, v_init, v_init
             sigma_v_init_used = sigma_v_init
 
     else:
+        if sigma_v_init is not None:
+            print("WARNING: sigma_v_init was given but v_init is None (derived internally) - "
+                "sigma_v_init is IGNORED in this case; v_init's uncertainty is instead "
+                "auto-derived as the standard error of its median (see below).")
+
         # Standard error of the median (NOT the plain MAD, which measures the dispersion of the
         #   observations themselves, not the precision of the median as an estimator of v_init)
         #   of the same leading points fitAlphaBeta() used to derive v_init.
@@ -816,10 +821,11 @@ def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='
               - v_init given + sigma_v_init=None (default): v_init is treated as exactly known - a
                 warning is printed, since this is an easy way to silently understate alpha/beta's
                 uncertainty if v_init actually has a non-negligible error of its own.
-              - v_init=None (derived internally): this argument is ignored - v_init's uncertainty
-                is instead estimated automatically as the standard error of the median of the same
-                leading points used to derive it (see the Return section), which is the quantity
-                that actually needs to be propagated, not the raw scatter of those points.
+              - v_init=None (derived internally): this argument is IGNORED (a warning is printed
+                if it was given a value) - v_init's uncertainty is instead estimated automatically
+                as the standard error of the median of the same leading points used to derive it
+                (see the Return section), which is the quantity that actually needs to be
+                propagated, not the raw scatter of those points.
         ci: [float] Confidence level (0-100, e.g. 95, the default) for the approximate
             alpha_ci_gaussian_lower/upper and beta_ci_gaussian_lower/upper bounds below - only
             used if estimate_errors=True. Same convention as
@@ -897,6 +903,11 @@ def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='
     if estimate_errors and method != 'robust':
         raise ValueError("estimate_errors=True is only supported for method='robust' - Q4's "
             "L1/Nelder-Mead fit has no natural Jacobian to build an analytic covariance from.")
+
+    if estimate_errors and not (0 < ci < 100):
+        raise ValueError("ci must be strictly between 0 and 100, got {!r}. Out-of-range values "
+            "degrade silently: ci=100 gives z=inf (0/inf bounds), ci>100 gives z=NaN, ci<0 "
+            "inverts which bound is 'lower' vs 'upper'.".format(ci))
 
     v_init_given = v_init is not None
 
