@@ -1,5 +1,12 @@
-""" Defines functions for the alpha-beta fireball characterization by Gritsevich 2012. 
+""" Defines functions for the alpha-beta fireball characterization by Gritsevich 2012.
 Adapted from: https://github.com/desertfireballnetwork/alpha_beta_modules
+
+Besides the dynamics-only fit (fitAlphaBeta) and the mass-constrained fit (fitAlphaBetaMass), this
+module also fits the alpha-beta model jointly to the dynamics AND the light curve
+(fitAlphaBetaLightCurve), following Gritsevich & Koschny (2011) for the luminosity - see that
+function's docstring for the full mathematical formulation. Its light curve amplitude K can be
+turned into a luminous efficiency tau via alphaBetaLuminousEfficiency(), a separate post-processing
+step (it needs a density/shape/drag assumption fitAlphaBetaLightCurve() itself does not make).
 """
 
 
@@ -16,6 +23,16 @@ from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
 
 # Scale height
 HT_NORM_CONST = 7160.0
+
+# Power of a zero absolute magnitude meteor (W), WMPL convention. Used to turn the
+# fitted light curve amplitude (a magnitude offset) into the physical amplitude K of
+# Gritsevich & Koschny (2011) Eq. (13): I = K*f(v), K = P_0M*10^(-0.4*mag_offset).
+P_0M = 840.0
+
+# (alpha, beta) bounds shared by every alpha-beta optimizer in this module (minimizeAlphaBeta()
+# and fitAlphaBetaLightCurve()), so Stage-0 (Q4) and joint fits are always constrained the same way.
+ALPHA_BETA_BOUNDS = ((0.001, 10000.0), (0.00001, 50.0))
+
 
 
 # Example input data
@@ -324,6 +341,50 @@ def _betaFromMasses(mu, mass_initial, mass_final, v_final, v_init):
     return (1.0 - mu)*np.log(mass_initial/mass_final)/(1.0 - (v_final/v_init)**2)
 
 
+def _makeBoundChecker(warnings_list, tol=1e-2, log=False):
+    """ Build a _checkBound(name, value, lower, upper) closure that appends a message to
+        warnings_list whenever value lands within a relative tol of lower or upper. Shared by
+        fitAlphaBetaMass() and fitAlphaBetaLightCurve() to flag fitted parameters that are
+        poorly constrained (landed on an optimization bound rather than an interior optimum).
+
+    Arguments:
+        warnings_list: [list] List that warning strings are appended to.
+
+    Keyword arguments:
+        tol: [float] Relative distance-to-bound tolerance.
+        log: [bool] If True, measure the distance to the bounds in log space instead of linear
+            space. Appropriate for parameters whose bounds span several orders of magnitude
+            (alpha, beta): a linear check would flag almost any physically reasonable value as
+            "close to the lower bound" (e.g. beta=0.33 is only 0.7% of the way across the linear
+            (1e-5, 50) span, but sits comfortably in the middle of it in log space). Requires
+            value, lower and upper to be positive.
+
+    Return:
+        _checkBound: [callable] (name, value, lower, upper) -> None.
+    """
+
+    def _checkBound(name, value, lower, upper):
+
+        if log:
+            check_value, check_lower, check_upper = np.log(value), np.log(lower), np.log(upper)
+        else:
+            check_value, check_lower, check_upper = value, lower, upper
+
+        span = check_upper - check_lower
+
+        if (check_value - check_lower)/span < tol:
+            warnings_list.append(
+                "{:s}={:.6g} is close to the fit lower bound ({:.6g})".format(name, value, lower)
+            )
+
+        if (check_upper - check_value)/span < tol:
+            warnings_list.append(
+                "{:s}={:.6g} is close to the fit upper bound ({:.6g})".format(name, value, upper)
+            )
+
+    return _checkBound
+
+
 def minimizeAlphaBeta(v_normed, ht_normed):
     """ initiates and calls the Q4 minimisation given in Gritsevich 2007 -
         'Validity of the photometric formula for estimating the mass of a fireball projectile'
@@ -348,16 +409,14 @@ def minimizeAlphaBeta(v_normed, ht_normed):
     x0 = [a0, b0]
 
     # Set alpha-beta limits
-    xmin = [    0.001,  0.00001]
-    xmax = [10000.0,   50.0]
-    bnds = ((xmin[0], xmax[0]), (xmin[1], xmax[1]))
+    xmin = [bound[0] for bound in ALPHA_BETA_BOUNDS]
+    xmax = [bound[1] for bound in ALPHA_BETA_BOUNDS]
+    bnds = ALPHA_BETA_BOUNDS
 
     # If the initial guess is outside the bounds, set a middle value
     for i, initial_param in enumerate(x0):
         if (initial_param < xmin[i]) or (initial_param > xmax[i]):
             x0[i] = (xmin[i] + xmax[i])/2
-
-    print("Initial guess:", x0)
 
     # Compute best-fit alpha-beta values
     res = scipy.optimize.minimize(_alphaBetaMinimization, x0, args=(v_normed, ht_normed), bounds=bnds, \
@@ -366,16 +425,156 @@ def minimizeAlphaBeta(v_normed, ht_normed):
     return res.x
 
 
-def fitAlphaBeta(v_data, ht_data, v_init=None):
-    """ Fit the alpha and beta parameters to the given velocity and height data. 
-    
+def _logAlphaBetaBounds():
+    """ ALPHA_BETA_BOUNDS in log-space, as used by every least_squares-based fit in this module
+        (minimizeAlphaBetaRobust(), fitAlphaBetaLightCurve()), which search in
+        (ln alpha, ln beta) directly since alpha/beta span several orders of magnitude.
+
+    Return:
+        (lower, upper): [tuple of ndarrays] Lower and upper (ln alpha, ln beta) bounds, in the
+            format scipy.optimize.least_squares expects.
+    """
+
+    return (
+        np.log([ALPHA_BETA_BOUNDS[0][0], ALPHA_BETA_BOUNDS[1][0]]),
+        np.log([ALPHA_BETA_BOUNDS[0][1], ALPHA_BETA_BOUNDS[1][1]])
+    )
+
+
+def _estimateSigmaV(alpha0, beta0, v_normed, ht_normed, v_init):
+    """ Robust (MAD-based) velocity uncertainty (m/s) from the residuals of a Q4 fit
+        (alpha0, beta0), floored at 1 m/s. Used by minimizeAlphaBetaRobust()/fitAlphaBeta() and
+        fitAlphaBetaLightCurve() whenever sigma_v isn't given explicitly.
+
+        This is an *effective* uncertainty that absorbs both measurement noise and alpha-beta
+        model misspecification - it is not a pure instrumental/measurement uncertainty, even
+        though it is used as one here.
+
+    Arguments:
+        alpha0: [float] Q4-fitted ballistic coefficient.
+        beta0: [float] Q4-fitted mass loss parameter.
+        v_normed: [ndarray] Normalized velocity in (0, 1).
+        ht_normed: [ndarray] Height normalized to HT_NORM_CONST.
+        v_init: [float] Initial velocity (m/s), used to convert the residuals to physical units.
+
+    Return:
+        sigma_v: [float] Effective velocity uncertainty (m/s), floored at 1 m/s.
+    """
+
+    v_model0 = alphaBetaVelocityNormed(ht_normed, alpha0, beta0)
+    res0 = (v_model0 - v_normed)*v_init
+    sigma_v = 1.4826*np.median(np.abs(res0 - np.median(res0)))
+
+    return max(sigma_v, 1.0)
+
+
+def _dynResiduals(x, v_normed, ht_normed, sigma_v_normed):
+    """ Dynamics residual block: model velocity residuals (v_model - v_obs), sigma-normalized.
+        Used both as the dynamics half of _jointResiduals() (fitAlphaBetaLightCurve()) and, on
+        its own, by minimizeAlphaBetaRobust().
+
+    Arguments:
+        x: [ndarray] Fit parameters (ln alpha, ln beta).
+        v_normed: [ndarray] Normalized velocity in (0, 1).
+        ht_normed: [ndarray] Height normalized to HT_NORM_CONST.
+        sigma_v_normed: [float] Normalized velocity uncertainty.
+
+    Return:
+        res: [ndarray] Sigma-normalized velocity residuals.
+    """
+
+    alpha, beta = np.exp(x)
+    v_model = alphaBetaVelocityNormed(ht_normed, alpha, beta)
+
+    return (v_model - v_normed)/sigma_v_normed
+
+
+def minimizeAlphaBetaRobust(v_normed, ht_normed, sigma_v_normed, loss='soft_l1', f_scale=2.0,
+        x0_alpha_beta=None):
+    """ Robust alternative to minimizeAlphaBeta(): least squares (soft-L1 by default) directly on
+        the velocity residuals (v_model - v_obs), instead of Q4's transformed residual.
+
+        Q4's residual (_alphaBetaResidual()) is NOT the velocity residual: its exp(-ht_normed)
+        factor structurally shrinks the residual near the end of the trajectory, so Q4 implicitly
+        under-weights exactly the region where the deceleration/beta signal is concentrated, in
+        favor of the near-constant-velocity beginning. Minimizing the velocity residual directly
+        (up to sigma_v_normed and the robust loss) weights the whole trajectory much more evenly,
+        and tracks the deceleration/"knee" of the v(h) curve more faithfully as a result.
+
+        Seeded from minimizeAlphaBeta()'s own (Q4) result if x0_alpha_beta isn't given: Q4 is
+        cheap and gets close enough that the seed itself is never the issue here (contrast with
+        fitAlphaBetaMass()'s mass_constraint="final", where a poor seed combined with a
+        line-search method walked into a spurious minimum - see that function's comments).
+
+    Arguments:
+        v_normed: [ndarray] Normalized velocity in (0, 1).
+        ht_normed: [ndarray] Height normalized to HT_NORM_CONST.
+        sigma_v_normed: [float] Normalized velocity uncertainty (see _estimateSigmaV() to derive
+            this from a physical-units sigma_v).
+
+    Keyword arguments:
+        loss: [str] scipy.optimize.least_squares loss ('soft_l1', 'huber', 'linear', ...).
+        f_scale: [float] Robust loss scale, in units of sigma_v_normed.
+        x0_alpha_beta: [tuple] Optional (alpha0, beta0) initial guess. If None, derived from
+            minimizeAlphaBeta().
+
+    Return:
+        (alpha, beta): [tuple of floats].
+    """
+
+    if x0_alpha_beta is None:
+        x0_alpha_beta = minimizeAlphaBeta(v_normed, ht_normed)
+
+    log_bounds = _logAlphaBetaBounds()
+
+    # Clip the seed strictly inside the bounds in linear space before taking the log (a
+    #   non-positive seed would otherwise produce a NaN that np.clip propagates)
+    x0 = np.log(np.clip(x0_alpha_beta, np.exp(log_bounds[0] + 1e-6), np.exp(log_bounds[1] - 1e-6)))
+
+    res = scipy.optimize.least_squares(_dynResiduals, x0, args=(v_normed, ht_normed, sigma_v_normed), \
+        bounds=log_bounds, loss=loss, f_scale=f_scale, x_scale='jac')
+
+    if not res.success:
+        print("WARNING: Optimizer failed: {:s}".format(res.message))
+
+    return tuple(np.exp(res.x))
+
+
+def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='soft_l1',
+        f_scale=2.0):
+    """ Fit the alpha and beta parameters to the given velocity and height data.
+
+    Two methods are available (see minimizeAlphaBeta()/minimizeAlphaBetaRobust() for the full
+    math):
+        - method='q4' (default, unchanged from before): the classic Gritsevich (2007) Q4 fit.
+          Its residual is NOT the velocity residual v_model - v_obs - it is a transformed,
+          height-weighted quantity that implicitly under-weights the end of the trajectory
+          (where the deceleration/beta signal actually is) relative to the near-constant-velocity
+          beginning.
+        - method='robust': least squares directly on the velocity residuals, robustified with
+          `loss` (soft-L1 by default), seeded from the Q4 result. Weights the whole trajectory
+          much more evenly than Q4 and tracks the deceleration/"knee" more faithfully - this is
+          the same approach fitAlphaBetaLightCurve() uses for its dynamics block.
+
     Arguments:
         v_data: [ndarray] Velocity data (m/s).
-        ht_data: [ndarray] Height data (m).
+        ht_data: [ndarray] Height data (m), already rescaled to the equivalent simple exponential
+            atmosphere the alpha-beta model assumes (see rescaleHeightToExponentialAtmosphere()) -
+            NOT raw geometric/NRLMSISE heights. The real atmosphere is not a simple exponential,
+            so fitting unrescaled heights directly biases alpha/beta.
 
     Keyword arguments:
         v_init: [float] Initial velocity (m/s). If None, it will be determined from the first 20% of point
-            (or a minimum of 10 points).
+            (or a minimum of 10 points). Note that this assumes the input arrays are ordered from
+            the beginning to the end of the trajectory (unlike fitAlphaBetaLightCurve(), which
+            sorts its inputs by decreasing height internally).
+        method: [str] 'q4' (default) or 'robust'.
+        sigma_v: [float] Only used for method='robust'. Velocity uncertainty (m/s) used to weight
+            the residuals. If None, estimated from the MAD of the Q4 fit's residuals (floored at
+            1 m/s, see _estimateSigmaV()) - an *effective* uncertainty that absorbs both
+            measurement noise and alpha-beta model misspecification, not a pure instrumental one.
+        loss: [str] Only used for method='robust'. scipy.optimize.least_squares loss.
+        f_scale: [float] Only used for method='robust'. Robust loss scale, in units of sigma_v.
 
     Return:
         (v_init, alpha, beta):
@@ -383,7 +582,6 @@ def fitAlphaBeta(v_data, ht_data, v_init=None):
             - alpha: [float] Ballistic coefficient.
             - beta: [float] Mass loss.
     """
-
 
     # Compute the initial velocity, if it wasn't given already
     if v_init is None:
@@ -394,20 +592,50 @@ def fitAlphaBeta(v_data, ht_data, v_init=None):
 
         v_init = np.median(v_data[:max_index])
 
-
-
-    # Normalize the velocity
+    # Normalize the velocity and height
     v_normed = v_data/v_init
-
-    # Normalize the height
     ht_normed = ht_data/HT_NORM_CONST
 
+    method = method.lower()
 
-    # Fit alpha and beta
-    alpha, beta = minimizeAlphaBeta(v_normed, ht_normed)
+    if method == 'q4':
+        alpha, beta = minimizeAlphaBeta(v_normed, ht_normed)
 
+    elif method == 'robust':
+        alpha0, beta0 = minimizeAlphaBeta(v_normed, ht_normed)
+
+        if sigma_v is None:
+            sigma_v = _estimateSigmaV(alpha0, beta0, v_normed, ht_normed, v_init)
+
+        alpha, beta = minimizeAlphaBetaRobust(v_normed, ht_normed, sigma_v/v_init, loss=loss, \
+            f_scale=f_scale, x0_alpha_beta=(alpha0, beta0))
+
+    else:
+        raise ValueError("method must be 'q4' or 'robust', got '{:s}'.".format(method))
 
     return v_init, alpha, beta
+
+
+def alphaBetaHeightNormed(v_normed, alpha, beta):
+    """ Normalized height y(v) of the alpha-beta model, Eq. (7) of Gritsevich (2009):
+
+            y = ln(2 alpha) + beta - ln(Delta),   Delta = Ei(beta) - Ei(beta v^2)
+
+        This is the dimensionless core of alphaBetaHeight()/alphaBetaVelocity() below, and is
+        also used directly (in v, y space) by fitAlphaBetaLightCurve().
+
+    Arguments:
+        v_normed: [float or ndarray] Velocity normalized to v_init, in (0, 1).
+        alpha: [float] Ballistic coefficient.
+        beta: [float] Mass loss parameter.
+
+    Return:
+        y: [float or ndarray] Height normalized to HT_NORM_CONST.
+    """
+
+    delta = scipy.special.expi(beta) - scipy.special.expi(beta*np.asarray(v_normed)**2)
+
+    return np.log(2*alpha) + beta - np.log(delta)
 
 
 def alphaBetaHeight(vel_data, alpha, beta, v_init):
@@ -426,17 +654,56 @@ def alphaBetaHeight(vel_data, alpha, beta, v_init):
     # Normalize the velocity
     vel_normed = vel_data/v_init
 
-    # Compute the normalized height
-    ht_normed = np.log(alpha) + beta - np.log((scipy.special.expi(beta) - scipy.special.expi(beta*vel_normed**2))/2)
-
-    # Compute the height in m
-    ht_data = ht_normed*HT_NORM_CONST
-
-    return ht_data
+    # Compute the normalized height and convert it to meters
+    return alphaBetaHeightNormed(vel_normed, alpha, beta)*HT_NORM_CONST
 
 
-def alphaBetaVelocity(ht_data, alpha, beta, v_init):
-    """ Compute the velocity given the height and alpha, beta parameters. Unfortunately there is no 
+def alphaBetaVelocityNormed(ht_normed, alpha, beta, v_eps=1e-10):
+    """ Invert Eq. (7): normalized velocity v(y) for given (alpha, beta). Unfortunately there is no
+        analytical inverse to the exponential integral, so the solution is found numerically.
+
+        The root is unique because dy/dv = 2 exp(beta v^2)/(v Delta) > 0 on (0, 1), so it can be
+        bracketed and found with Brent's method instead of a general-purpose minimizer - this is
+        both faster and more precise than minimizing (y_guess - y_target)^2 over v. Heights above
+        y(1 - v_eps) are clipped to v = 1 - v_eps, heights below y(v_eps) to v = v_eps.
+
+    Arguments:
+        ht_normed: [float or ndarray] Height normalized to HT_NORM_CONST.
+        alpha: [float] Ballistic coefficient.
+        beta: [float] Mass loss parameter.
+
+    Keyword arguments:
+        v_eps: [float] Bracket margin around (0, 1).
+
+    Return:
+        v_normed: [ndarray] Normalized model velocity at each height.
+    """
+
+    y_arr = np.atleast_1d(np.asarray(ht_normed, dtype=np.float64))
+    v_out = np.empty_like(y_arr)
+
+    v_lo, v_hi = v_eps, 1.0 - v_eps
+
+    def _g(v, y_target):
+        return alphaBetaHeightNormed(v, alpha, beta) - y_target
+
+    for i, y_t in enumerate(y_arr):
+
+        # Clip outside the invertible range
+        if _g(v_hi, y_t) <= 0:
+            v_out[i] = v_hi
+
+        elif _g(v_lo, y_t) >= 0:
+            v_out[i] = v_lo
+
+        else:
+            v_out[i] = scipy.optimize.brentq(_g, v_lo, v_hi, args=(y_t,), xtol=1e-12)
+
+    return v_out
+
+
+def alphaBetaVelocity(ht_data, alpha, beta, v_init, v_eps=1e-10):
+    """ Compute the velocity given the height and alpha, beta parameters. Unfortunately there is no
         analytical inverse to the exponential integral, so the solution is found numerically.
 
     Arguments:
@@ -445,38 +712,22 @@ def alphaBetaVelocity(ht_data, alpha, beta, v_init):
         beta: [float] Mass loss.
         v_init: [float] Input or derived initial velocity (m/s).
 
+    Keyword arguments:
+        v_eps: [float] Bracket margin around (0, 1) normalized velocity, passed to
+            alphaBetaVelocityNormed().
+
     Return:
         vel_data: [ndarray or float] Velocity data (m/s).
     """
-
-    def _diff(v, alpha, beta, ht_target):
-        """ Function to minimize the height. """
-        
-        # Compute the height using a guess velocity
-        ht_guess = np.log(alpha) + beta - np.log((scipy.special.expi(beta) - scipy.special.expi(beta*v**2))/2)
-        
-        return (ht_guess - ht_target)**2
 
     # Allow both scalar and array height inputs
     scalar_input = np.isscalar(ht_data)
     if scalar_input:
         ht_data = np.array([ht_data])
 
-    # Normalize the height
+    # Normalize the height and numerically invert Eq. (7) for the normalized velocity
     ht_normed = ht_data/HT_NORM_CONST
-
-    # Numerically compute the normalized velocity
-    vel_normed = []
-    
-    v_first_guess = 0.5
-    bounds = [(0.0000001, 0.9999999)]
-    for ht_n in ht_normed:
-
-        # Minimize the forward function to find the velocity at the given height
-        res = scipy.optimize.minimize(_diff, v_first_guess, args=(alpha, beta, ht_n), bounds=bounds)
-        vel_normed.append(res.x[0])
-
-    vel_normed = np.array(vel_normed)
+    vel_normed = alphaBetaVelocityNormed(ht_normed, alpha, beta, v_eps=v_eps)
 
     # Compute the velocity in m/s
     vel_data = vel_normed*v_init
@@ -1235,20 +1486,12 @@ def fitAlphaBetaMass(
     bound_tol = 1e-2
     warnings_list = []
 
-    def _checkBound(name, value, lower, upper):
-        """ Warn if a fitted parameter landed within bound_tol (relative to the bound span) of
-            either optimization bound, which usually indicates a poorly constrained fit.
-        """
+    _checkBound = _makeBoundChecker(warnings_list, tol=bound_tol)
 
-        span = upper - lower
-
-        if (value - lower)/span < bound_tol:
-            warnings_list.append(f"{name}={value:.6g} is close to the minimization lower "
-                f"bound ({lower:.6g})")
-
-        if (upper - value)/span < bound_tol:
-            warnings_list.append(f"{name}={value:.6g} is close to the minimization upper "
-                f"bound ({upper:.6g})")
+    # Beta spans several orders of magnitude between its bounds, so its distance to them is only
+    #   meaningful in log space (a linear check would flag e.g. beta=0.33 as "close" to the 1e-5
+    #   lower bound) - see _makeBoundChecker()
+    _checkBoundLog = _makeBoundChecker(warnings_list, tol=bound_tol, log=True)
 
     # Check the fitted densities against the optimization bounds
     if fit_density:
@@ -1257,14 +1500,14 @@ def fitAlphaBetaMass(
 
     # Check the fitted betas (under "both" beta is analytic, not fitted, so it's skipped)
     if mass_constraint in ["initial", "final"]:
-        _checkBound("beta_mu0", beta_mu0, xmin[1], xmax[1])
-        _checkBound("beta_mu23", beta_mu23, xmin[1], xmax[1])
+        _checkBoundLog("beta_mu0", beta_mu0, xmin[1], xmax[1])
+        _checkBoundLog("beta_mu23", beta_mu23, xmin[1], xmax[1])
 
     if fit_density and mass_constraint in ["final", "both"]:
         _checkBound("density_mu_best", density_mu_best, xmin[0], xmax[0])
 
     if mass_constraint == "final":
-        _checkBound("beta_mu_best", beta_mu_best, xmin[1], xmax[1])
+        _checkBoundLog("beta_mu_best", beta_mu_best, xmin[1], xmax[1])
 
     def _checkVelocityRecovery(name, alpha, beta):
         """ Under mass_constraint="final"/"both", beta is derived analytically assuming a
@@ -1421,6 +1664,998 @@ def fitAlphaBetaMass(
         m_initial_mu_best,
         m_final_mu_best
     )
+
+
+### JOINT DYNAMICS + LIGHT CURVE FIT (Gritsevich & Koschny 2011) ###
+
+
+def _profiledMagOffset(mag_obs, mag_model_zero, sigma_mag=1.0):
+    """ L1-optimal additive magnitude offset (profiled amplitude).
+
+        The M0 minimizing sum(|mag_obs - (mag_model_zero + M0)|/sigma_mag) is the
+        1/sigma_mag-weighted median of (mag_obs - mag_model_zero) - for a scalar sigma_mag this
+        reduces to the plain median. Weighting matters whenever a per-point sigma_mag is given:
+        an unweighted median would let noisy points (e.g. the faint ends of the light curve) pull
+        M0 - and hence K and any derived luminous efficiency - as hard as the precise ones.
+
+        Note that this is the exact conditional optimum of the sigma-normalized L1 cost, and only
+        an approximation to that of the soft-L1 cost the (alpha, beta) search descends - see
+        fitAlphaBetaLightCurve() for the caveat.
+
+    Arguments:
+        mag_obs: [ndarray] Observed magnitudes.
+        mag_model_zero: [ndarray] Model magnitudes computed with a zero offset (M0 = 0).
+
+    Keyword arguments:
+        sigma_mag: [float or ndarray] Magnitude uncertainty, a scalar or per-point. A scalar
+            (default 1.0) weights all points equally.
+
+    Return:
+        mag_offset: [float] The profiled magnitude offset M0.
+    """
+
+    diffs = mag_obs - mag_model_zero
+
+    # Uniform weights - the weighted median reduces to the plain median
+    if np.ndim(sigma_mag) == 0:
+        return np.median(diffs)
+
+    # Weighted median: sort the differences and find where the cumulative weight crosses half of
+    #   the total weight
+    weights = 1.0/np.asarray(sigma_mag, dtype=np.float64)
+
+    sort_indices = np.argsort(diffs)
+    diffs_sorted = diffs[sort_indices]
+    cum_weights = np.cumsum(weights[sort_indices])
+
+    half_weight = 0.5*cum_weights[-1]
+    index = np.searchsorted(cum_weights, half_weight)
+
+    # If the half-weight falls exactly on a point boundary, average the two straddling values
+    #   (this makes the uniform-weight case agree exactly with np.median)
+    if (index < len(diffs_sorted) - 1) and np.isclose(cum_weights[index], half_weight):
+        return 0.5*(diffs_sorted[index] + diffs_sorted[index + 1])
+
+    return diffs_sorted[index]
+
+
+def _lightCurveResiduals(x, mu, ht_normed_lc, mag_lc, sigma_mag):
+    """ Light curve residual block: model magnitude residuals with the amplitude (magnitude
+        offset) profiled out analytically at every call (see _profiledMagOffset()). Used both
+        as the light curve half of _jointResiduals() and, on its own, for the purely photometric
+        alpha-beta fit shown when plot=True in fitAlphaBetaLightCurve() (alpha/beta constrained
+        by the light curve shape alone, ignoring the dynamics entirely).
+
+    Arguments:
+        x: [ndarray] Fit parameters (ln alpha, ln beta).
+        mu: [float] Shape change coefficient (fixed).
+        ht_normed_lc: [ndarray] Light curve heights normalized to HT_NORM_CONST.
+        mag_lc: [ndarray] Observed absolute magnitudes.
+        sigma_mag: [float or ndarray] Magnitude uncertainty, a scalar or per-point.
+
+    Return:
+        res: [ndarray] Sigma-normalized magnitude residuals.
+    """
+
+    alpha, beta = np.exp(x)
+
+    mag_zero, _ = alphaBetaModelMagnitude(ht_normed_lc, alpha, beta, mu)
+    mag_offset = _profiledMagOffset(mag_lc, mag_zero, sigma_mag)
+
+    return (mag_zero + mag_offset - mag_lc)/sigma_mag
+
+
+def _jointResiduals(x, mu, v_normed, ht_normed, ht_normed_lc, mag_lc, sigma_v_normed, sigma_mag,
+        dyn_weight, lc_weight):
+    """ Concatenated residual vector used by fitAlphaBetaLightCurve(): dynamics (_dynResiduals(),
+        shared with minimizeAlphaBetaRobust()) + light curve (_lightCurveResiduals()).
+        x = (ln alpha, ln beta); the magnitude offset (amplitude) is profiled out analytically at
+        every call, so it never enters x and the nonlinear search stays 2-dimensional.
+
+        dyn_weight/lc_weight multiply their respective (already sigma-normalized) block, so the
+        two blocks' relative contribution to the fit can be rebalanced independently of how many
+        points each one has - see the dyn_weight/lc_weight docs on fitAlphaBetaLightCurve().
+
+    Arguments:
+        x: [ndarray] Fit parameters (ln alpha, ln beta).
+        mu: [float] Shape change coefficient (fixed).
+        v_normed: [ndarray] Normalized velocity in (0, 1).
+        ht_normed: [ndarray] Dynamics heights normalized to HT_NORM_CONST.
+        ht_normed_lc: [ndarray] Light curve heights normalized to HT_NORM_CONST.
+        mag_lc: [ndarray] Observed absolute magnitudes.
+        sigma_v_normed: [float] Normalized velocity uncertainty.
+        sigma_mag: [float or ndarray] Magnitude uncertainty, a scalar or per-point.
+        dyn_weight: [float] Multiplier on the dynamics residual block.
+        lc_weight: [float] Multiplier on the light curve residual block.
+
+    Return:
+        res: [ndarray] Concatenated (dynamics, light curve) sigma-normalized residuals.
+    """
+
+    res_dyn = dyn_weight*_dynResiduals(x, v_normed, ht_normed, sigma_v_normed)
+    res_lc = lc_weight*_lightCurveResiduals(x, mu, ht_normed_lc, mag_lc, sigma_mag)
+
+    return np.concatenate([res_dyn, res_lc])
+
+
+def _lightCurveResidualsFreeMu(x, ht_normed_lc, mag_lc, sigma_mag):
+    """ Same as _lightCurveResiduals(), but with mu folded into x as a 3rd free parameter
+        (x = (ln alpha, ln beta, mu)) instead of held fixed. Used only to derive an effective
+        sigma_mag for the optional free-mu fit in fitAlphaBetaLightCurve() (fit_free_mu=True),
+        mirroring how _lightCurveResiduals() is used to derive sigma_mag at each fixed mu.
+
+    Arguments:
+        x: [ndarray] Fit parameters (ln alpha, ln beta, mu).
+        ht_normed_lc: [ndarray] Light curve heights normalized to HT_NORM_CONST.
+        mag_lc: [ndarray] Observed absolute magnitudes.
+        sigma_mag: [float or ndarray] Magnitude uncertainty, a scalar or per-point.
+
+    Return:
+        res: [ndarray] Sigma-normalized magnitude residuals.
+    """
+
+    return _lightCurveResiduals(x[:2], x[2], ht_normed_lc, mag_lc, sigma_mag)
+
+
+def _jointResidualsFreeMu(x, v_normed, ht_normed, ht_normed_lc, mag_lc, sigma_v_normed, sigma_mag,
+        dyn_weight, lc_weight):
+    """ Same as _jointResiduals(), but with mu folded into x as a 3rd free parameter
+        (x = (ln alpha, ln beta, mu)) instead of held fixed at one of mu_values. Used only by the
+        optional free-mu fit in fitAlphaBetaLightCurve() (fit_free_mu=True), which lets the
+        shape-change coefficient itself be estimated from the data instead of only compared at a
+        handful of fixed values.
+
+    Arguments:
+        x: [ndarray] Fit parameters (ln alpha, ln beta, mu).
+        v_normed: [ndarray] Normalized velocity in (0, 1).
+        ht_normed: [ndarray] Dynamics heights normalized to HT_NORM_CONST.
+        ht_normed_lc: [ndarray] Light curve heights normalized to HT_NORM_CONST.
+        mag_lc: [ndarray] Observed absolute magnitudes.
+        sigma_v_normed: [float] Normalized velocity uncertainty.
+        sigma_mag: [float or ndarray] Magnitude uncertainty, a scalar or per-point.
+        dyn_weight: [float] Multiplier on the dynamics residual block.
+        lc_weight: [float] Multiplier on the light curve residual block.
+
+    Return:
+        res: [ndarray] Concatenated (dynamics, light curve) sigma-normalized residuals.
+    """
+
+    return _jointResiduals(x[:2], x[2], v_normed, ht_normed, ht_normed_lc, mag_lc, sigma_v_normed,
+        sigma_mag, dyn_weight, lc_weight)
+
+
+def alphaBetaLuminosityF(v_normed, beta, mu):
+    """ Dimensionless luminosity function f(v), Eq. (14) of Gritsevich & Koschny (2011):
+
+            f(v) = v^3 Delta (beta v^2/(1-mu) + 1) exp(beta (mu v^2 - 1)/(1-mu)),
+            Delta = Ei(beta) - Ei(beta v^2)
+
+        Together with an amplitude K, this gives the luminous intensity I = K*f(v), Eq. (13)
+        of the same paper. Note: at mu = 0 the exponential factor reduces to exp(-beta),
+        independent of v.
+
+    Arguments:
+        v_normed: [ndarray] Normalized velocity in (0, 1).
+        beta: [float] Mass loss parameter.
+        mu: [float] Shape change coefficient. mu must be < 1 for Eq. (14) to be defined; the
+            physically meaningful range is [0, 2/3] (see alphaBetaMasses()).
+
+    Return:
+        f: [ndarray] f(v) >= 0.
+    """
+
+    if mu >= 1.0:
+        raise ValueError("mu must be < 1 (mu = 1 requires a separate treatment).")
+
+    v = np.asarray(v_normed, dtype=np.float64)
+
+    delta = scipy.special.expi(beta) - scipy.special.expi(beta*v**2)
+
+    return v**3*delta*(beta*v**2/(1.0 - mu) + 1.0)*np.exp(beta*(mu*v**2 - 1.0)/(1.0 - mu))
+
+
+def alphaBetaModelMagnitude(ht_normed, alpha, beta, mu, mag_offset=0.0):
+    """ Model absolute magnitude at the given normalized heights (up to an additive offset).
+
+            mag(y) = mag_offset - 2.5 log10( f(v(y)) ),   I = P_0M 10^(-0.4 mag)
+
+    Arguments:
+        ht_normed: [ndarray] Height normalized to HT_NORM_CONST.
+        alpha: [float] Ballistic coefficient.
+        beta: [float] Mass loss parameter.
+        mu: [float] Shape change coefficient, see alphaBetaLuminosityF().
+
+    Keyword arguments:
+        mag_offset: [float] Additive magnitude offset M0 (amplitude term, see
+            fitAlphaBetaLightCurve()).
+
+    Return:
+        (mag, v_model): [tuple] Model absolute magnitudes and model normalized velocities.
+    """
+
+    v_model = alphaBetaVelocityNormed(ht_normed, alpha, beta)
+
+    f_val = alphaBetaLuminosityF(v_model, beta, mu)
+
+    # Floor to avoid log of zero at v -> 1 (model is arbitrarily faint there)
+    f_val = np.clip(f_val, 1e-300, None)
+
+    return mag_offset - 2.5*np.log10(f_val), v_model
+
+
+def fitAlphaBetaLightCurve(
+        v_data,
+        ht_data,
+        ht_lc_data,
+        mag_abs_data,
+        v_init=None,
+        mu_values=(0.0, 2.0/3.0),
+        dyn_method='robust',
+        sigma_v=None,
+        sigma_mag=None,
+        dyn_weight=1.0,
+        lc_weight=1.0,
+        f_scale=2.0,
+        p0m=P_0M,
+        fit_free_mu=False,
+        verbose=True,
+        plot=False):
+    """ Simultaneous fit of the alpha-beta model to the dynamics (height vs. velocity) AND the
+        light curve (height vs. absolute magnitude), following Gritsevich (2007, 2009) for the
+        dynamics and Gritsevich & Koschny (2011) for the luminosity.
+
+    WARNING: Like the whole alpha-beta formalism, this fit assumes a SINGLE, non-fragmenting
+        body ablating quasi-continuously. Most real fireballs fragment, and a fragmenting event's
+        light curve (flares, sudden brightenings) does not follow Eq. (13)-(14) below - so this
+        joint fit, and especially the photometric outputs derived from it (M0, K, and any
+        luminous efficiency computed with alphaBetaLuminousEfficiency()), is NOT expected to be
+        valid for the majority of real events. Only apply it to events consistent with
+        single-body ablation, and inspect the light curve fit visually (plot=True) before
+        trusting the photometric results.
+
+    Dynamics, dimensionless v = V/V_e, y = h/HT_NORM_CONST (see alphaBetaHeightNormed()):
+
+        y = ln(2 alpha) + beta - ln(Delta),   Delta = Ei(beta) - Ei(beta v^2)          (7)
+
+    Eq. (7) does not depend on mu: the trajectory h(V) alone constrains only (alpha, beta). mu
+    and the amplitude enter only through the luminosity (see alphaBetaLuminosityF()):
+
+        I = tau M_e V_e^3 sin(gamma)/(2 h0) * f(v) = K * f(v)                          (13)
+        f(v) = v^3 Delta (beta v^2/(1-mu) + 1) exp(beta (mu v^2 - 1)/(1 - mu))         (14)
+
+    Fitting strategy:
+        1. Stage 0: classic Q4 minimization (minimizeAlphaBeta(), dynamics alone)
+           -> initial (alpha_0, beta_0).
+        2. Joint stage, for each fixed mu in mu_values: robust least squares (soft-L1) over
+           x = (ln alpha, ln beta) with residuals
+
+               r_dyn,i = dyn_weight * (v_model(y_i) - v_obs,i) / sigma_v_normed
+               r_lc,j  = lc_weight * (mag_model(y_j) - mag_obs,j) / sigma_mag[j]
+
+           where v_model(y) = alphaBetaVelocityNormed(y) (the unique root of Eq. (7), since
+           dy/dv = 2 exp(beta v^2)/(v Delta) > 0), and
+           mag_model(y) = M0 - 2.5 log10(f(v_model(y))). The additive magnitude offset M0 (i.e.
+           the amplitude K = p0m*10^(-0.4*M0)) is profiled out analytically at every iteration
+           as the 1/sigma_mag-weighted median of the magnitude differences (the exact conditional
+           optimum of the sigma-normalized L1 cost, and a close approximation to that of the
+           soft-L1 cost actually descended - see _profiledMagOffset()), so the nonlinear search
+           is only 2-dimensional per mu.
+        3. Optional (fit_free_mu=True): the same joint problem again, but with mu itself as a 3rd
+           free coordinate (bounded to [0, 2/3]) instead of fixed at each mu_values entry - a
+           genuine continuous best-fit mu, as opposed to 'best_fixed_mu' below, which is only an argmin
+           over the (typically 2) fixed values in mu_values.
+
+    Statistical caveats (see dyn_weight/lc_weight, sigma_v, sigma_mag below for the mitigations
+    this function offers):
+        - Both blocks assume independent, diagonal-covariance residuals. In practice, consecutive
+          dynamics/photometry points from the same station are not statistically independent
+          (shared systematics between frames); this correlation is not modeled here, which is a
+          standard simplification in alpha-beta fitting but worth keeping in mind.
+        - With unit weights and per-point sigma, the total influence of each block scales with
+          its point count, so a light curve with many more samples than the dynamics track (or
+          vice versa) can dominate the fit even if every individual sigma is correctly calibrated;
+          see dyn_weight/lc_weight to rebalance this.
+        - alpha_std_rel/beta_std_rel (in the returned 'fits') are local curvature estimates from
+          the Jacobian of the *robustified* (soft-L1) cost, not rigorous statistical covariances -
+          soft-L1 reweights residuals nonlinearly, so (J^T J)^-1 is only a Gauss-Newton
+          approximation, not the inverse Fisher information of Gaussian noise. The profiled
+          (weighted-median) M0 also makes the residual vector only piecewise-smooth in
+          (alpha, beta), which further degrades the finite-difference Jacobian these estimates
+          are computed from. Treat them as approximate/relative uncertainties and use bootstrap
+          resampling for publication-grade error bars.
+        - When sigma_mag is auto-derived (the default, sigma_mag=None), each mu (and the free-mu
+          fit, if fit_free_mu=True) gets its OWN independently-derived sigma_mag from its OWN
+          residuals. A mu that fits the light curve worse ends up with a larger self-derived
+          sigma_mag, which shrinks its normalized residuals and thus its 'cost' - i.e. a worse mu
+          can look artificially cost-competitive. This means 'cost' is only a fair comparison
+          ACROSS DIFFERENT mu (best_fixed_mu; free-mu vs. a fixed mu) when every branch shares the same
+          sigma_mag, which requires passing it explicitly (scalar or per-point array) instead of
+          leaving it to be auto-derived. Comparisons of alpha/beta/M0 *within* a single mu's fit
+          are unaffected by this - it only concerns comparing 'cost' (or anything derived from it)
+          across different mu.
+
+    Conventions follow WMPL: absolute magnitude (100 km), heights in m, velocities in m/s.
+
+    Like fitAlphaBeta()/fitAlphaBetaMass(), this function does no atmosphere modeling itself: it
+    takes ht_data/ht_lc_data exactly as given (both for the fit AND for the plot=True scatter
+    points) and treats y = ht/HT_NORM_CONST as if HT_NORM_CONST were a literal exponential
+    atmosphere scale height. That is only valid if ht_data/ht_lc_data have ALREADY been rescaled
+    to the equivalent simple exponential atmosphere (see rescaleHeightToExponentialAtmosphere(),
+    used this way in this module's __main__) - the real atmosphere is not a simple exponential, so
+    fitting raw geometric/NRLMSISE heights directly biases the fitted alpha/beta/mu.
+
+    Arguments:
+        v_data: [ndarray] Velocity data (m/s).
+        ht_data: [ndarray] Height data for the dynamics (m), already rescaled to the equivalent
+            exponential atmosphere (see above) - NOT raw geometric/NRLMSISE heights.
+        ht_lc_data: [ndarray] Height data of the photometric points (m), same rescaling
+            requirement as ht_data. May differ from ht_data (different sampling/stations);
+            non-finite points are dropped independently of ht_data.
+        mag_abs_data: [ndarray] Absolute magnitudes (100 km) at ht_lc_data.
+
+    Keyword arguments:
+        v_init: [float] Initial velocity (m/s). If None, median of the first 20% of points
+            (min 10 points), same convention as fitAlphaBeta() - except that here the inputs are
+            first sorted by decreasing height internally, so they don't have to be time-ordered.
+        mu_values: [tuple] Values of the shape change coefficient to fit (fixed per fit). Must be
+            in [0, 1); the physically meaningful range is [0, 2/3] (see alphaBetaMasses()) and a
+            warning is printed for values above it. Default fits both physical bounds.
+        dyn_method: [str] 'robust' (default) or 'q4' - which dynamics-only fit becomes the
+            'alpha_dyn'/'beta_dyn' reference and the seed for the joint stage below. 'q4' is the
+            classic Gritsevich (2007) fit (minimizeAlphaBeta()); 'robust' additionally refines it
+            with minimizeAlphaBetaRobust() (least squares directly on the velocity residuals,
+            robustified with soft-L1 and f_scale below), which tracks the deceleration/"knee" of
+            the trajectory more faithfully than Q4's own transformed residual - see
+            fitAlphaBeta()'s docstring for why. Since the joint stage re-fits (alpha, beta)
+            regardless, dyn_method mainly affects the seed/reference quality, not the final
+            per-mu results - but a better seed can matter on noisier or sparser trajectories.
+        sigma_v: [float] Velocity uncertainty (m/s) used to weight the dynamics residuals. If
+            None, estimated from the MAD of the Q4 fit's velocity residuals (floored at 1 m/s) -
+            always from the Q4 fit specifically, even if dyn_method='robust', to avoid the
+            circularity of a fit weighting itself by its own residuals. Note that this MAD-derived
+            value is an *effective* uncertainty that absorbs both measurement noise and
+            alpha-beta model misspecification - it is not a pure instrumental/measurement
+            uncertainty, even though it is used as one here.
+        sigma_mag: [float, ndarray or None] Photometric uncertainty (mag). Three modes:
+              - None (default): DERIVED separately for each mu, from the MAD of the residuals of
+                an unweighted, soft-L1 photometry-only fit at that mu (mirrors how sigma_v is
+                derived from Stage 0 - but per mu here, since unlike the dynamics, Eq. (7), the
+                light curve model depends on mu; see alphaBetaLuminosityF()). Floored at 0.01 mag.
+                The value(s) actually used end up in the returned 'fits'[mu]['sigma_mag'].
+              - a single value: applied to every point, for every mu.
+              - a per-point array the same length as mag_abs_data (before the non-finite
+                filtering below), applied for every mu.
+            A per-point array (from e.g. RMS/SNR-based photometric error estimates) is the most
+            correct option whenever available: photometric uncertainty is typically much larger
+            near the detection threshold (~0.5-1 mag) than near peak brightness (~0.05 mag), and
+            neither a constant value nor the MAD-derived default capture that - they only avoid
+            the alternative of an arbitrary hardcoded constant.
+        dyn_weight: [float] Extra multiplicative weight on the (already sigma-normalized)
+            dynamics residual block, on top of whatever weight its point count already gives it.
+            Default 1 (no rebalancing beyond sigma_v/sigma_mag). Use together with lc_weight if
+            one block's point count is swamping the other one's contribution to the fit; e.g.
+            lc_weight = sqrt(len(v_data)/len(mag_abs_data)) with dyn_weight = 1 makes the two
+            *blocks* contribute equally in total, rather than each individual point contributing
+            equally regardless of which block it is in.
+        lc_weight: [float] Extra multiplicative weight on the light curve residual block. See
+            dyn_weight.
+        f_scale: [float] soft-L1 scale of scipy.optimize.least_squares (residuals are
+            pre-normalized by sigma [and dyn_weight/lc_weight], so f_scale ~ 2 means the loss
+            transitions at ~2 sigma).
+        p0m: [float] Power of a zero-magnitude meteor (W).
+        fit_free_mu: [bool] If True, additionally run the joint fit with mu itself as a 3rd free
+            parameter (see 'Fitting strategy' step 3 above) and return it as 'mu_free_fit'. Off
+            by default: it is an extra nonlinear fit (small added cost) and, with alpha/beta/mu
+            all free at once, is more prone to being poorly constrained with sparse or noisy
+            light curves than the fixed-mu fits - check 'mu_free_fit'['success'] and the
+            fit-quality warnings before trusting it.
+        verbose: [bool] If True, print the adopted inputs, the Stage-0 result, and, for every mu,
+            the fitted alpha/beta/M0/K and any fit-quality warnings.
+        plot: [bool] If True, show a two-panel plot (height vs. velocity; height vs. magnitude)
+            with the observed data and the fitted curve for every mu (plus the free-mu fit, in a
+            distinct color, if fit_free_mu=True). Blocks execution until the plot window closed.
+
+    Return:
+        results: [dict] With keys:
+            'v_init': adopted initial velocity (m/s),
+            'sigma_v': adopted velocity uncertainty (m/s, see the sigma_v caveat above),
+            'alpha_dyn', 'beta_dyn': Stage-0 (dynamics only, Q4) values,
+            'fits': {mu: {'alpha', 'beta',
+                          'alpha_std_rel', 'beta_std_rel' (approximate, curvature-based - see
+                              the statistical caveats above, not rigorous statistical errors),
+                          'mag_offset',
+                          'K' (= tau M_e V_e^3 sin(slope)/(2 h0), W - see
+                              alphaBetaLuminousEfficiency() to recover tau from K, given an
+                              assumed density/shape/drag and the entry slope),
+                          'sigma_mag' (the value(s) actually used for this mu - only
+                              informative when the sigma_mag argument was None, since it is then
+                              derived independently for each mu; otherwise just echoes the input),
+                          'cost', 'success'}},
+            'best_fixed_mu': mu (from mu_values) with the lowest robust cost - an argmin over the fixed
+                mu_values grid, NOT a continuous optimum (see fit_free_mu for that).
+            'mu_free_fit': None unless fit_free_mu=True, in which case a dict with the same shape
+                as one 'fits'[mu] entry, plus 'mu' (the fitted shape-change coefficient itself)
+                and 'mu_std' (its approximate/relative uncertainty, same Gauss-Newton caveat as
+                alpha_std_rel/beta_std_rel).
+    """
+
+    v_data = np.asarray(v_data, dtype=np.float64)
+    ht_data = np.asarray(ht_data, dtype=np.float64)
+    ht_lc_data = np.asarray(ht_lc_data, dtype=np.float64)
+    mag_abs_data = np.asarray(mag_abs_data, dtype=np.float64)
+
+    # sigma_mag may be None (derived per mu inside the fit loop below - see there and the
+    # docstring), a scalar (applied to every point, for every mu), or a per-point array (also
+    # applied for every mu - track which, so it can be carried through the same
+    # filtering/sorting as mag_abs_data below and so verbose printing can format it appropriately.
+    sigma_mag_given = sigma_mag is not None
+    sigma_mag_per_point = sigma_mag_given and np.ndim(sigma_mag) > 0
+    if sigma_mag_per_point:
+        sigma_mag = np.asarray(sigma_mag, dtype=np.float64)
+        if len(sigma_mag) != len(mag_abs_data):
+            raise ValueError(
+                "sigma_mag must be None, a scalar, or an array the same length as mag_abs_data."
+            )
+
+    if len(v_data) != len(ht_data):
+        raise ValueError("v_data and ht_data must have the same length.")
+    if len(ht_lc_data) != len(mag_abs_data):
+        raise ValueError("ht_lc_data and mag_abs_data must have the same length.")
+
+    # Validate the shape-change coefficients up front (the luminosity model diverges as mu -> 1,
+    #   see alphaBetaLuminosityF())
+    for mu in mu_values:
+        if (mu < 0) or (mu >= 1):
+            raise ValueError("All mu_values must be in the range [0, 1), got {:g}.".format(mu))
+        if mu > 2.0/3.0:
+            print("WARNING: mu = {:g} is outside the physically expected range [0, 2/3] "
+                "(see alphaBetaMasses()).".format(mu))
+
+    # Filter out non-finite points, dynamics and light curve independently (they may come from
+    # different stations/instruments and need not share a sampling)
+    dyn_mask = np.isfinite(v_data) & np.isfinite(ht_data)
+    v_data, ht_data = v_data[dyn_mask], ht_data[dyn_mask]
+
+    lc_mask = np.isfinite(mag_abs_data) & np.isfinite(ht_lc_data)
+    if sigma_mag_per_point:
+        lc_mask &= np.isfinite(sigma_mag)
+    ht_lc_data, mag_abs_data = ht_lc_data[lc_mask], mag_abs_data[lc_mask]
+    if sigma_mag_per_point:
+        sigma_mag = sigma_mag[lc_mask]
+
+    if len(v_data) < 2:
+        raise ValueError("At least 2 finite dynamics points are required.")
+    if len(ht_lc_data) < 2:
+        raise ValueError("At least 2 finite light curve points are required.")
+
+    # Dynamics: sort by decreasing height (beginning -> end of trajectory)
+    order = np.argsort(ht_data)[::-1]
+    ht_data, v_data = ht_data[order], v_data[order]
+
+    # Light curve: sort by decreasing height
+    order = np.argsort(ht_lc_data)[::-1]
+    ht_lc_data, mag_abs_data = ht_lc_data[order], mag_abs_data[order]
+    if sigma_mag_per_point:
+        sigma_mag = sigma_mag[order]
+
+    # Compute the initial velocity if not given (WMPL convention, matches fitAlphaBeta())
+    v_init_given = v_init is not None
+    if not v_init_given:
+
+        max_index = int(0.2*len(v_data))
+        if max_index < 10:
+            max_index = 10
+
+        v_init = np.median(v_data[:max_index])
+
+    # Normalize observables
+    v_normed = v_data/v_init
+    ht_normed = ht_data/HT_NORM_CONST
+    ht_normed_lc = ht_lc_data/HT_NORM_CONST
+
+    dyn_method = dyn_method.lower()
+    if dyn_method not in ('q4', 'robust'):
+        raise ValueError("dyn_method must be 'q4' or 'robust', got '{:s}'.".format(dyn_method))
+
+    # --- Stage 0: dynamics-only fit, used as the seed for the joint stage below and (unless
+    # overridden) as the 'alpha_dyn'/'beta_dyn' reference. Always starts from the classic Q4 fit
+    # (minimizeAlphaBeta()), exactly like fitAlphaBeta() does.
+    alpha0, beta0 = minimizeAlphaBeta(v_normed, ht_normed)
+
+    # Estimate sigma_v from the Q4 residuals if not given (robust MAD estimator, shared with
+    # fitAlphaBeta(method='robust')). Always derived from the Q4 fit specifically, even when
+    # dyn_method='robust' below, to avoid the circularity of a fit weighting itself by its own
+    # residuals.
+    sigma_v_given = sigma_v is not None
+    if not sigma_v_given:
+        sigma_v = _estimateSigmaV(alpha0, beta0, v_normed, ht_normed, v_init)
+
+    sigma_v_normed = sigma_v/v_init
+
+    if dyn_method == 'robust':
+        # Refine the Q4 seed into the robust dynamics-only fit (see fitAlphaBeta()'s docstring
+        # for why this tracks the trajectory - especially its end, where the deceleration/beta
+        # signal actually is - more faithfully than Q4's own transformed residual).
+        alpha0, beta0 = minimizeAlphaBetaRobust(v_normed, ht_normed, sigma_v_normed, \
+            f_scale=f_scale, x0_alpha_beta=(alpha0, beta0))
+
+    if verbose:
+        print()
+        print("===== Alpha-Beta + Light Curve Joint Fit =====")
+        print()
+        print("--- Inputs ---")
+        print("v_init               = {:.3f} km/s  ({:s})".format(v_init/1000,
+            "input" if v_init_given else "DERIVED: median of the top-20% highest points"))
+        print("sigma_v              = {:.1f} m/s  ({:s})".format(sigma_v,
+            "input" if sigma_v_given else "DERIVED: MAD of Stage-0 velocity residuals (effective, "
+            "absorbs model misspecification too - not a pure measurement uncertainty)"))
+        if not sigma_mag_given:
+            print("sigma_mag            = not given -> DERIVED per μ below (MAD of an unweighted "
+                "photometry-only fit at that μ)")
+        elif sigma_mag_per_point:
+            print("sigma_mag            = per-point array (min={:.3f}, median={:.3f}, "
+                "max={:.3f}) mag".format(np.min(sigma_mag), np.median(sigma_mag), np.max(sigma_mag)))
+        else:
+            print("sigma_mag            = {:.3f} mag (constant for every point)".format(sigma_mag))
+        print("n_dynamics           = {:d} points".format(len(v_data)))
+        print("n_light_curve        = {:d} points".format(len(ht_lc_data)))
+        if dyn_weight != 1.0 or lc_weight != 1.0:
+            print("dyn_weight           = {:.3g}".format(dyn_weight))
+            print("lc_weight            = {:.3g}".format(lc_weight))
+        print()
+        print("--- Dynamics only ({:s}) ---".format('Q4' if dyn_method == 'q4' else 'robust, Q4-seeded'))
+        print("alpha_dyn            = {:.6f}".format(alpha0))
+        print("beta_dyn             = {:.6f}".format(beta0))
+
+    # --- Joint stage: robust least squares per fixed mu, same (alpha, beta) bounds as Stage 0 ---
+    log_bounds = _logAlphaBetaBounds()
+
+    # Clip the seed strictly inside the bounds in linear space before taking the log (a
+    #   non-positive seed would otherwise produce a NaN that np.clip propagates)
+    x0 = np.log(np.clip([alpha0, beta0], np.exp(log_bounds[0] + 1e-6), np.exp(log_bounds[1] - 1e-6)))
+
+    # Shared by every scipy.optimize.least_squares() call below (sigma_mag derivation, the
+    # per-mu joint fits, the optional free-mu fit, and the plot=True photometry-only diagnostic)
+    lsq_kwargs = dict(loss='soft_l1', f_scale=f_scale, x_scale='jac')
+
+    # Relative distance-to-bound tolerance, checked in the same log-space the optimizer
+    # searches in (alpha and beta span several orders of magnitude between their bounds - see
+    # _makeBoundChecker())
+    bound_tol = 1e-2
+    warnings_list = []
+
+    _checkLogBound = _makeBoundChecker(warnings_list, tol=bound_tol, log=True)
+
+    fits = {}
+    for mu in mu_values:
+
+        if sigma_mag_given:
+            sigma_mag_mu = sigma_mag
+        else:
+            # No sigma_mag given: derive one *for this mu*. Unlike sigma_v (which uses the single
+            # mu-independent Stage-0 dynamics fit), the light curve model depends on mu (see
+            # alphaBetaLuminosityF()), so there's no single mu-independent "Stage 0" to reuse here
+            # - instead, run an unweighted (sigma_mag=1) preliminary photometry-only fit at this
+            # mu (same soft-L1 robustness as the final fit, so a few bad points don't skew the
+            # scale estimate) and take the MAD of its raw magnitude residuals, exactly mirroring
+            # how sigma_v is derived from the Stage-0 residuals.
+            res_prelim = scipy.optimize.least_squares(_lightCurveResiduals, x0, \
+                args=(mu, ht_normed_lc, mag_abs_data, 1.0), bounds=log_bounds, **lsq_kwargs)
+
+            sigma_mag_mu = 1.4826*np.median(np.abs(res_prelim.fun - np.median(res_prelim.fun)))
+
+            # Floor at 0.01 mag
+            sigma_mag_mu = max(sigma_mag_mu, 0.01)
+
+        res = scipy.optimize.least_squares(_jointResiduals, x0, args=(mu, v_normed, ht_normed, \
+            ht_normed_lc, mag_abs_data, sigma_v_normed, sigma_mag_mu, dyn_weight, lc_weight),
+            bounds=log_bounds, **lsq_kwargs)
+
+        if not res.success:
+            print("WARNING: Optimizer failed for μ={:.3f}: {:s}".format(mu, res.message))
+
+        alpha, beta = np.exp(res.x)
+
+        # Recompute the profiled amplitude at the solution
+        mag_zero, _ = alphaBetaModelMagnitude(ht_normed_lc, alpha, beta, mu)
+        mag_offset = _profiledMagOffset(mag_abs_data, mag_zero, sigma_mag_mu)
+
+        # Amplitude K = tau M_e V_e^3 sin(gamma)/(2 h0) in W
+        lum_amplitude = p0m*10**(-0.4*mag_offset)
+
+        # Local curvature ("covariance") of (ln alpha, ln beta) from the Jacobian of the
+        # *robustified* soft-L1 cost - only a Gauss-Newton approximation of the curvature at the
+        # optimum, NOT a rigorous statistical covariance: soft_l1 reweights residuals nonlinearly,
+        # so (J^T J)^-1 here is not the inverse Fisher information of Gaussian noise. Treat
+        # alpha_std_rel/beta_std_rel as approximate/relative uncertainties; use bootstrap
+        # resampling for publication-grade errors.
+        try:
+            jtj = res.jac.T @ res.jac
+            dof = max(len(res.fun) - len(res.x), 1)
+            s2 = 2.0*res.cost/dof
+            cov_log = s2*np.linalg.inv(jtj)
+            alpha_std_rel, beta_std_rel = np.sqrt(np.diag(cov_log))
+        except np.linalg.LinAlgError:
+            alpha_std_rel = beta_std_rel = np.nan
+
+        fits[mu] = {
+            'alpha': alpha,
+            'beta': beta,
+            'alpha_std_rel': alpha_std_rel,
+            'beta_std_rel': beta_std_rel,
+            'mag_offset': mag_offset,
+            'K': lum_amplitude,
+            'sigma_mag': sigma_mag_mu,
+            'cost': res.cost,
+            'success': res.success,
+        }
+
+        _checkLogBound("alpha(μ={:.3f})".format(mu), alpha, ALPHA_BETA_BOUNDS[0][0], ALPHA_BETA_BOUNDS[0][1])
+        _checkLogBound("beta(μ={:.3f})".format(mu), beta, ALPHA_BETA_BOUNDS[1][0], ALPHA_BETA_BOUNDS[1][1])
+
+        if verbose:
+            print()
+            print("--- μ = {:.3f} ---".format(mu))
+            if not sigma_mag_given:
+                print("sigma_mag            = {:.3f} mag  (DERIVED for this μ: MAD of an "
+                    "unweighted photometry-only fit)".format(sigma_mag_mu))
+            print("alpha                = {:.6f} (±{:.1%})".format(alpha, alpha_std_rel))
+            print("beta                 = {:.6f} (±{:.1%})".format(beta, beta_std_rel))
+            print("M0                   = {:.3f} mag".format(mag_offset))
+            print("K                    = {:.3e} W".format(lum_amplitude))
+            print("cost                 = {:.4f}".format(res.cost))
+
+    # --- Optional: fit mu itself, jointly with (alpha, beta), instead of only comparing it at
+    # the fixed values in mu_values. Unlike the sigma_jit-style "fit the noise scale" idea some
+    # domains use, this is a low-risk extension of the exact same soft-L1 least_squares problem
+    # above: mu just becomes a 3rd free coordinate, bounded to [0, 2/3] (see alphaBetaMasses()),
+    # not a new optimization paradigm - it directly shapes the light curve residuals, so unlike
+    # an unconstrained scale/jitter parameter it is well identified without needing a separate
+    # penalty term. See fitAlphaBetaMass()'s mu_best for the analogous idea applied there.
+    mu_free_fit = None
+    if fit_free_mu:
+
+        mu_lo, mu_hi = 0.0, 2.0/3.0
+        x0_free = np.append(x0, 0.5*(mu_lo + mu_hi))
+        bounds_free = (np.append(log_bounds[0], mu_lo), np.append(log_bounds[1], mu_hi))
+
+        if sigma_mag_given:
+            sigma_mag_free = sigma_mag
+        else:
+            # Same MAD-of-an-unweighted-fit idea as the per-mu derivation above, but with mu
+            # free here too (see _lightCurveResidualsFreeMu()).
+            res_prelim_free = scipy.optimize.least_squares(_lightCurveResidualsFreeMu, x0_free, \
+                args=(ht_normed_lc, mag_abs_data, 1.0), bounds=bounds_free, **lsq_kwargs)
+
+            sigma_mag_free = 1.4826*np.median(
+                np.abs(res_prelim_free.fun - np.median(res_prelim_free.fun)))
+
+            # Floor at 0.01 mag
+            sigma_mag_free = max(sigma_mag_free, 0.01)
+
+        res_free = scipy.optimize.least_squares(_jointResidualsFreeMu, x0_free, args=(v_normed, \
+            ht_normed, ht_normed_lc, mag_abs_data, sigma_v_normed, sigma_mag_free, dyn_weight,
+            lc_weight), bounds=bounds_free, **lsq_kwargs)
+
+        if not res_free.success:
+            print("WARNING: Optimizer failed for the free-μ fit: {:s}".format(res_free.message))
+
+        alpha_free, beta_free = np.exp(res_free.x[:2])
+        mu_free = float(np.clip(res_free.x[2], mu_lo, mu_hi))
+
+        mag_zero_free, _ = alphaBetaModelMagnitude(ht_normed_lc, alpha_free, beta_free, mu_free)
+        mag_offset_free = _profiledMagOffset(mag_abs_data, mag_zero_free, sigma_mag_free)
+        lum_amplitude_free = p0m*10**(-0.4*mag_offset_free)
+
+        # Same Gauss-Newton local-curvature caveat as the fixed-mu fits above, now for
+        # (ln alpha, ln beta, mu) jointly.
+        try:
+            jtj = res_free.jac.T @ res_free.jac
+            dof = max(len(res_free.fun) - len(res_free.x), 1)
+            s2 = 2.0*res_free.cost/dof
+            cov_free = s2*np.linalg.inv(jtj)
+            alpha_std_rel_free, beta_std_rel_free, mu_std_free = np.sqrt(np.diag(cov_free))
+        except np.linalg.LinAlgError:
+            alpha_std_rel_free = beta_std_rel_free = mu_std_free = np.nan
+
+        mu_free_fit = {
+            'mu': mu_free,
+            'alpha': alpha_free,
+            'beta': beta_free,
+            'alpha_std_rel': alpha_std_rel_free,
+            'beta_std_rel': beta_std_rel_free,
+            'mu_std': mu_std_free,
+            'mag_offset': mag_offset_free,
+            'K': lum_amplitude_free,
+            'sigma_mag': sigma_mag_free,
+            'cost': res_free.cost,
+            'success': res_free.success,
+        }
+
+        # mu's bounds are narrow and linear (unlike alpha/beta's), so the plain linear-space
+        # checker used by fitAlphaBetaMass is the appropriate one here, not _checkLogBound().
+        _checkLinearBound = _makeBoundChecker(warnings_list, tol=bound_tol)
+        _checkLinearBound("mu(free fit)", mu_free, mu_lo, mu_hi)
+        _checkLogBound("alpha(free fit)", alpha_free, ALPHA_BETA_BOUNDS[0][0], ALPHA_BETA_BOUNDS[0][1])
+        _checkLogBound("beta(free fit)", beta_free, ALPHA_BETA_BOUNDS[1][0], ALPHA_BETA_BOUNDS[1][1])
+
+        if verbose:
+            print()
+            print("--- Free-μ fit (μ estimated jointly with α, β) ---")
+            if not sigma_mag_given:
+                print("sigma_mag            = {:.3f} mag  (DERIVED: MAD of an unweighted "
+                    "photometry-only fit with μ also free)".format(sigma_mag_free))
+            print("mu                   = {:.3f} (±{:.3f})".format(mu_free, mu_std_free))
+            print("alpha                = {:.6f} (±{:.1%})".format(alpha_free, alpha_std_rel_free))
+            print("beta                 = {:.6f} (±{:.1%})".format(beta_free, beta_std_rel_free))
+            print("M0                   = {:.3f} mag".format(mag_offset_free))
+            print("K                    = {:.3e} W".format(lum_amplitude_free))
+            print("cost                 = {:.4f}".format(res_free.cost))
+
+    # Pick the lowest-cost mu, preferring converged fits over failed ones (only fall back to a
+    #   failed fit if every mu failed)
+    successful_mus = [mu for mu in fits if fits[mu]['success']]
+    best_fixed_mu = min(successful_mus if successful_mus else fits, key=lambda k: fits[k]['cost'])
+
+    if verbose:
+        print()
+        print("Best-fit μ (lowest robust cost among mu_values) = {:.3f}".format(best_fixed_mu))
+
+    # When sigma_mag is auto-derived (None), each mu (and the free-mu fit, if any) gets its OWN
+    # independently-derived sigma_mag from its OWN residuals (see the sigma_mag docs). A mu that
+    # fits the light curve worse ends up with larger residuals -> larger self-derived sigma_mag
+    # -> its normalized residuals (and hence 'cost') are shrunk accordingly, which can make a
+    # worse-fitting mu look artificially cost-competitive against a better one. So 'cost' (and
+    # anything derived from comparing it, like best_fixed_mu, or a free-mu vs. fixed-mu comparison) is
+    # only a fair comparison across mu when every branch shares the same sigma_mag - i.e. when it
+    # was given explicitly (scalar or per-point array), not auto-derived.
+    if (not sigma_mag_given) and (len(mu_values) > 1 or fit_free_mu):
+        print()
+        print(
+            "NOTE: sigma_mag was auto-derived independently for each μ (and for the free-μ fit, "
+            "if requested), so their 'cost' values are NOT on equal footing - comparisons across "
+            "μ (best_fixed_mu, or free-μ vs. fixed-μ cost) should be read qualitatively, not as a "
+            "rigorous likelihood comparison. Pass an explicit sigma_mag (scalar or per-point "
+            "array) if you need directly comparable costs across μ."
+        )
+
+    if warnings_list:
+        print()
+        print(
+            "WARNING: One or more fitted (alpha, beta) landed within {:.3g}% of an "
+            "optimization bound - the fit may be poorly constrained.".format(100*bound_tol)
+        )
+        for warning in warnings_list:
+            print("  - {:s}".format(warning))
+        print()
+
+    if plot:
+
+        import matplotlib.pyplot as plt
+
+        fig, (ax_dyn, ax_lc) = plt.subplots(ncols=2, figsize=(13, 6), sharey=True)
+
+        # Observed data
+        ax_dyn.scatter(v_data/1000, ht_data/1000, s=10, color='0.5', alpha=0.6, zorder=1, \
+            label="Observed dynamics")
+        ax_lc.scatter(mag_abs_data, ht_lc_data/1000, s=10, color='0.5', alpha=0.6, zorder=1, \
+            label="Observed light curve")
+
+        # Height grid spanning both datasets, used to draw the fitted curves
+        ht_all = np.concatenate([ht_data, ht_lc_data])
+        ht_arr = np.linspace(np.min(ht_all), np.max(ht_all), 200)
+        ht_arr_normed = ht_arr/HT_NORM_CONST
+
+        colors = plt.cm.viridis(np.linspace(0, 0.85, len(mu_values)))
+
+        # Every legend entry below is deliberately kept to a single line and names its own role
+        # ("Joint fit"/"Dynamics-only"/"Photometry-only") instead of relying on the reader to
+        # infer it from line style alone - line style (solid/dashed/dotted) and color (mu) are
+        # still used consistently so same-fit-type and same-mu curves can be matched at a
+        # glance, but the label text alone should always say what the curve is.
+
+        # Purely dynamic fit (Stage 0, dynamics alone). Eq. (7) doesn't depend on mu, so this is
+        # a single reference curve on the velocity panel - not one per mu.
+        vel_arr_dyn = alphaBetaVelocityNormed(ht_arr_normed, alpha0, beta0)*v_init
+        ax_dyn.plot(vel_arr_dyn/1000, ht_arr/1000, color='k', linestyle='--', linewidth=1.5, \
+            label="Dynamics-only ({:s}): $\\alpha$={:.2f}, $\\beta$={:.2f}".format(
+                'Q4' if dyn_method == 'q4' else 'robust', alpha0, beta0))
+
+        for mu, color in zip(mu_values, colors):
+
+            fit = fits[mu]
+            alpha, beta = fit['alpha'], fit['beta']
+
+            # --- Joint fit (dynamics + light curve), the main result for this mu ---
+            vel_arr = alphaBetaVelocityNormed(ht_arr_normed, alpha, beta)*v_init
+            mag_arr, _ = alphaBetaModelMagnitude(ht_arr_normed, alpha, beta, mu, \
+                mag_offset=fit['mag_offset'])
+
+            ax_dyn.plot(vel_arr/1000, ht_arr/1000, color=color, \
+                label="Joint fit, $\\mu$={:.2f}: $\\alpha$={:.2f}, $\\beta$={:.2f}".format(
+                    mu, alpha, beta))
+            ax_lc.plot(mag_arr, ht_arr/1000, color=color, \
+                label="Joint fit, $\\mu$={:.2f}: $M_0$={:.2f}, $K$={:.2e} W".format(
+                    mu, fit['mag_offset'], fit['K']))
+
+            # --- Dynamics-only fit (alpha0, beta0 from above), projected onto the light curve:
+            # same shape for every mu, only M0 is re-profiled per mu since f(v) depends on mu.
+            # Shows how well the dynamics alone would have predicted the light curve shape.
+            mag_zero_dyn, _ = alphaBetaModelMagnitude(ht_normed_lc, alpha0, beta0, mu)
+            mag_offset_dyn = _profiledMagOffset(mag_abs_data, mag_zero_dyn, fits[mu]['sigma_mag'])
+            mag_arr_dyn, _ = alphaBetaModelMagnitude(ht_arr_normed, alpha0, beta0, mu, \
+                mag_offset=mag_offset_dyn)
+
+            ax_lc.plot(mag_arr_dyn, ht_arr/1000, color=color, linestyle='--', linewidth=1.5, \
+                label="Dynamics-only, $\\mu$={:.2f}: $M_0$={:.2f}".format(mu, mag_offset_dyn))
+
+            # --- Purely photometric fit: alpha/beta constrained by the light curve alone
+            # (dynamics ignored entirely), for comparison with the joint and dynamics-only fits.
+            res_phot = scipy.optimize.least_squares(_lightCurveResiduals, x0, \
+                args=(mu, ht_normed_lc, mag_abs_data, fits[mu]['sigma_mag']), bounds=log_bounds,
+                **lsq_kwargs)
+
+            alpha_phot, beta_phot = np.exp(res_phot.x)
+            mag_zero_phot, _ = alphaBetaModelMagnitude(ht_normed_lc, alpha_phot, beta_phot, mu)
+            mag_offset_phot = _profiledMagOffset(mag_abs_data, mag_zero_phot, fits[mu]['sigma_mag'])
+
+            vel_arr_phot = alphaBetaVelocityNormed(ht_arr_normed, alpha_phot, beta_phot)*v_init
+            mag_arr_phot, _ = alphaBetaModelMagnitude(ht_arr_normed, alpha_phot, beta_phot, mu, \
+                mag_offset=mag_offset_phot)
+
+            ax_dyn.plot(vel_arr_phot/1000, ht_arr/1000, color=color, linestyle=':', \
+                linewidth=1.5, label="Photometry-only, $\\mu$={:.2f}: $\\alpha$={:.2f}, "
+                    "$\\beta$={:.2f}".format(mu, alpha_phot, beta_phot))
+            ax_lc.plot(mag_arr_phot, ht_arr/1000, color=color, linestyle=':', \
+                linewidth=1.5, label="Photometry-only, $\\mu$={:.2f}: $M_0$={:.2f}".format(
+                    mu, mag_offset_phot))
+
+        # --- Free-mu fit (mu estimated jointly with alpha, beta - see fit_free_mu above), drawn
+        # in a color deliberately outside the mu_values color family so it reads as "its own
+        # thing" rather than being mistaken for one more mu_values branch.
+        if mu_free_fit is not None:
+
+            vel_arr_free = alphaBetaVelocityNormed(ht_arr_normed, mu_free_fit['alpha'],
+                mu_free_fit['beta'])*v_init
+            mag_arr_free, _ = alphaBetaModelMagnitude(ht_arr_normed, mu_free_fit['alpha'],
+                mu_free_fit['beta'], mu_free_fit['mu'], mag_offset=mu_free_fit['mag_offset'])
+
+            ax_dyn.plot(vel_arr_free/1000, ht_arr/1000, color='crimson', linewidth=2.5, zorder=4, \
+                label="Free-$\\mu$ fit: $\\mu$={:.2f}$\\pm${:.2f}, $\\alpha$={:.2f}, "
+                    "$\\beta$={:.2f}".format(mu_free_fit['mu'], mu_free_fit['mu_std'],
+                    mu_free_fit['alpha'], mu_free_fit['beta']))
+            ax_lc.plot(mag_arr_free, ht_arr/1000, color='crimson', linewidth=2.5, zorder=4, \
+                label="Free-$\\mu$ fit: $\\mu$={:.2f}$\\pm${:.2f}, $M_0$={:.2f}".format(
+                    mu_free_fit['mu'], mu_free_fit['mu_std'], mu_free_fit['mag_offset']))
+
+        # Clip the view to the observed data range (with padding): the photometry-only fit at a
+        # mu far from the true value can be poorly constrained and run away outside the data
+        # range (see _lightCurveResiduals()), which would otherwise blow up the axis limits and
+        # squash every other curve into an unreadable sliver.
+        v_pad = 0.1*(np.max(v_data) - np.min(v_data))
+        ax_dyn.set_xlim((np.min(v_data) - v_pad)/1000, (np.max(v_data) + v_pad)/1000)
+
+        mag_pad = 0.1*(np.max(mag_abs_data) - np.min(mag_abs_data))
+        ax_lc.set_xlim(np.max(mag_abs_data) + mag_pad, np.min(mag_abs_data) - mag_pad)
+
+        ax_dyn.set_xlabel("Velocity (km/s)")
+        ax_dyn.set_ylabel("Height (km)")
+        ax_dyn.legend(fontsize=8, loc='best')
+
+        ax_lc.set_xlabel("Absolute magnitude")
+        ax_lc.legend(fontsize=8, loc='best')
+
+        title = "Best $\\mu$ = {:.2f}   $v_0$ = {:.2f} km/s".format(
+            best_fixed_mu, v_init/1000)
+        if mu_free_fit is not None:
+            title += "   |   Free-$\\mu$ fit: $\\mu$ = {:.2f}$\\pm${:.2f}".format(
+                mu_free_fit['mu'], mu_free_fit['mu_std'])
+
+        fig.suptitle(title)
+        fig.tight_layout()
+
+        plt.show()
+
+    return {
+        'v_init': v_init,
+        'sigma_v': sigma_v,
+        'alpha_dyn': alpha0,
+        'beta_dyn': beta0,
+        'fits': fits,
+        'best_fixed_mu': best_fixed_mu,
+        'mu_free_fit': mu_free_fit,
+    }
+
+
+def alphaBetaLuminousEfficiency(K, alpha, beta, slope, v_init, mu=0.0, dens=3500.0,
+        shape_coeff=0.55, gamma=1.0, v_final=None, verbose=False):
+    """ Recover the (dimensionless) luminous efficiency tau from a light curve amplitude K (e.g.
+        fits[mu]['K'] returned by fitAlphaBetaLightCurve()), by combining it with the initial
+        mass M_e that alphaBetaMasses() computes from the SAME alpha/beta/mu under an assumed
+        density/shape/drag, via Eq. (13) of Gritsevich & Koschny (2011):
+
+            K = tau * M_e * V_e^3 * sin(slope) / (2 * HT_NORM_CONST)
+            =>  tau = K * 2 * HT_NORM_CONST / (M_e * V_e^3 * sin(slope))
+
+        This is deliberately a separate post-processing step, not part of fitAlphaBetaLightCurve()
+        itself: M_e depends on density/shape_coeff/gamma/slope, which that fit knows nothing about
+        (see its docstring) - so tau is only as good as those assumptions, on top of whatever
+        alpha/beta/mu/K/v_init were already fitted with. m_final is computed alongside m_init by
+        the same alphaBetaMasses() call (at no extra cost) and returned too, purely as
+        complementary mass context - it plays no role in the tau formula above.
+
+        Naming note: the entry angle is 'slope' here (matching alphaBetaMasses()'s naming), NOT
+        the 'gamma' used for it in the module's Eq. (13) - this function's 'gamma' argument, like
+        alphaBetaMasses()'s, is the drag coefficient Gamma = Cd/2, not the entry angle. That
+        clash in symbol reuse comes from the original papers; 'slope' is used throughout this
+        module for the entry angle specifically to avoid it.
+
+    Arguments:
+        K: [float] Light curve amplitude (W), e.g. fits[mu]['K'] from fitAlphaBetaLightCurve().
+        alpha: [float] Ballistic coefficient (from the same fit branch as K).
+        beta: [float] Mass loss parameter (from the same fit branch as K).
+        slope: [float] Entry angle (radians).
+        v_init: [float] Initial velocity (m/s), e.g. the 'v_init' from fitAlphaBetaLightCurve().
+
+    Keyword arguments:
+        mu: [float] Shape change coefficient (from the same fit branch as K); see
+            alphaBetaMasses().
+        dens: [float] Assumed bulk density (kg/m^3).
+        shape_coeff: [float] Shape coefficient; see alphaBetaMasses().
+        gamma: [float] Drag coefficient Gamma = Cd/2; see alphaBetaMasses() (NOT the entry angle).
+        v_final: [float] Final velocity (m/s). If given (together with v_init), m_final is
+            computed from the full alpha-beta solution; if None (default), alphaBetaMasses()
+            falls back to the simple v_final << v_init approximation. Has no effect on tau.
+        verbose: [bool] If True, print the inputs and the derived M_e, m_final and tau.
+
+    Return:
+        (tau, m_init, m_final): [tuple]
+            - tau: [float] Dimensionless luminous efficiency (fraction of the kinetic energy loss
+                rate radiated in the photometric passband defined by P_0M).
+            - m_init: [float] Initial mass M_e (kg) used to derive tau, from alphaBetaMasses()
+                under the given dens/shape_coeff/gamma/slope - returned for reference, e.g. to
+                cross-check against an independently known initial mass.
+            - m_final: [float] Final mass (kg), from the same alphaBetaMasses() call - reference
+                mass-loss context only, not used in the tau computation.
+    """
+
+    if K <= 0:
+        raise ValueError("K must be positive.")
+    if v_init <= 0:
+        raise ValueError("v_init must be positive.")
+    if np.sin(slope) <= 0:
+        raise ValueError("slope must satisfy sin(slope) > 0.")
+
+    # alphaBetaMasses() validates alpha/beta/dens/gamma/shape_coeff/mu itself
+    m_init, m_final = alphaBetaMasses(alpha, beta, slope, mu=mu, dens=dens,
+        shape_coeff=shape_coeff, gamma=gamma, vel_init=v_init, vel_end=v_final)
+
+    tau = K*2.0*HT_NORM_CONST/(m_init*v_init**3*np.sin(slope))
+
+    if verbose:
+        print()
+        print("===== Luminous Efficiency from K =====")
+        print()
+        print("--- Inputs ---")
+        print("K                    = {:.3e} W".format(K))
+        print("alpha                = {:.6f}".format(alpha))
+        print("beta                 = {:.6f}".format(beta))
+        print("mu                   = {:.3f}".format(mu))
+        print("slope                = {:.2f} deg".format(np.degrees(slope)))
+        print("v_init               = {:.3f} km/s".format(v_init/1000))
+        print("v_final              = {:s}".format(
+            "{:.3f} km/s".format(v_final/1000) if v_final is not None
+            else "not given (simple v_final << v_init approximation used for m_final)"))
+        print("density              = {:.1f} kg/m^3".format(dens))
+        print("shape_coeff          = {:.3f}".format(shape_coeff))
+        print("gamma (drag, Cd/2)   = {:.3f}".format(gamma))
+        print()
+        print("--- Result ---")
+        print("M_e (initial mass)   = {:.3e} kg".format(m_init))
+        print("m_final              = {:.3e} kg".format(m_final))
+        print("tau (luminous eff.)  = {:.3e}  ({:.3f}%)".format(tau, 100*tau))
+
+    return tau, m_init, m_final
 
 
 
