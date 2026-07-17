@@ -630,7 +630,7 @@ def _alphaBetaRobustErrors(fit_res, alpha, beta, v_data, ht_data, v_init, v_init
         max_index = max(int(0.2*len(v_data)), 10)
         v_head = v_data[:max_index]
         mad = np.median(np.abs(v_head - np.median(v_head)))
-        sigma_v_init_used = 1.2533*1.4826*mad/np.sqrt(max_index)
+        sigma_v_init_used = 1.2533*1.4826*mad/np.sqrt(len(v_head))
 
     nan_result = {
         'alpha': alpha, 'beta': beta, 'alpha_std_rel': np.nan, 'beta_std_rel': np.nan,
