@@ -866,10 +866,10 @@ def rotatePolar(azim, dec, azim_rot, elev_rot):
 
 
     # Rotate elevation
-    cartesian_vect = rotateVector(cartesian_vect, np.array([0, 1, 0]), -elev_rot)
+    cartesian_vect = rotateVector(cartesian_vect, np.array([0., 1., 0.]), -elev_rot)
 
     # Rotate azimuth
-    cartesian_vect = rotateVector(cartesian_vect, np.array([0, 0, 1]), azim_rot)
+    cartesian_vect = rotateVector(cartesian_vect, np.array([0., 0., 1.]), azim_rot)
 
 
     # Convert carterian unit vector to polar coordinates
