@@ -921,21 +921,21 @@ class RMSDataHandle(object):
             date_fmt = "%Y"
 
             # Check if the directory name starts with a year
-            if not re.match(r"^\d{4}", dir_name):   
+            if not re.match("^\d{4}", dir_name):   
                 return False
 
         elif len(dir_name) == 6:
             date_fmt = "%Y%m"
 
             # Check if the directory name starts with a year and month
-            if not re.match(r"^\d{6}", dir_name): 
+            if not re.match("^\d{6}", dir_name): 
                 return False
 
         elif len(dir_name) == 8:
             date_fmt = "%Y%m%d"
 
             # Check if the directory name starts with a year, month and day
-            if not re.match(r"^\d{8}", dir_name): 
+            if not re.match("^\d{8}", dir_name): 
                 return False
 
         else:
