@@ -1093,7 +1093,10 @@ def _profileOneParameter(fixed_idx, value_hat, other_hat, cost_best, s2, v_norme
     Return:
         profile: [dict] 'ci_lower', 'ci_upper' (float or None - None if the search grid, bounded
             by ALPHA_BETA_BOUNDS, never crosses the threshold on that side), 'grid',
-            'delta_cost', 'delta_threshold', 'value_hat', 'cost_best', 's2'.
+            'delta_cost', 'delta_threshold', 'value_hat', 'cost_best', 's2', 'ci', 'other_hat',
+            'other_profile' (see profileAlphaBeta()'s Return section for the last three - they
+            exist so a caller (e.g. plotProfileAlphaBeta()) can reconstruct trajectories from the
+            profile without re-running the sweep).
     """
 
     # Grid spans ALPHA_BETA_BOUNDS in LOG space (matching the space the model/optimizer/cov_log
@@ -1114,6 +1117,14 @@ def _profileOneParameter(fixed_idx, value_hat, other_hat, cost_best, s2, v_norme
     chi2_1 = scipy.special.ndtri(0.5 + ci/200.0)**2
 
     delta = np.empty_like(grid)
+
+    # The other (profiled-out) parameter's re-optimized value at each grid point, in LINEAR
+    #   space - free (already computed by the walk below to warm-start the next grid point, and
+    #   previously discarded once used). Lets a caller (e.g. plotProfileAlphaBeta()) reconstruct
+    #   trajectories along the profile ridge without re-optimizing - see profileAlphaBeta()'s
+    #   Statistical caveats for exactly what that ridge does and does not represent.
+    other_profile = np.empty_like(grid)
+
     center_i = np.searchsorted(grid, value_hat)
 
     # Walk outward from value_hat in both directions, warm-starting each step from the last
@@ -1122,12 +1133,14 @@ def _profileOneParameter(fixed_idx, value_hat, other_hat, cost_best, s2, v_norme
         cost, log_other = _profileCostAt(grid[i], fixed_idx, log_other, v_normed, ht_normed,
             sigma_v_normed, other_bounds, loss, f_scale)
         delta[i] = 2.0*(cost - cost_best)/s2
+        other_profile[i] = np.exp(log_other)
 
     log_other = np.log(other_hat)
     for i in range(center_i - 1, -1, -1):
         cost, log_other = _profileCostAt(grid[i], fixed_idx, log_other, v_normed, ht_normed,
             sigma_v_normed, other_bounds, loss, f_scale)
         delta[i] = 2.0*(cost - cost_best)/s2
+        other_profile[i] = np.exp(log_other)
 
     below, above = grid < value_hat, grid > value_hat
 
@@ -1179,6 +1192,9 @@ def _profileOneParameter(fixed_idx, value_hat, other_hat, cost_best, s2, v_norme
         'value_hat': value_hat,
         'cost_best': cost_best,
         's2': s2,
+        'ci': ci,
+        'other_hat': other_hat,
+        'other_profile': other_profile,
     }
 
 
@@ -1271,6 +1287,18 @@ def profileAlphaBeta(v_data, ht_data, fit, sigma_v=None, ci=95.0, param='both', 
                     an identical noise-scaling convention - any difference from the Wald interval
                     is due to the cost surface's actual shape, not a different assumption about
                     how much to trust sigma_v.
+                'ci': [float] Echoes the `ci` argument, so this dict is self-contained.
+                'other_hat': [float] The OTHER parameter's value at the joint optimum (`fit`'s
+                    beta if this is the alpha profile, alpha if this is the beta profile) - the
+                    (value_hat, other_hat) point, with no re-optimization needed to get it.
+                'other_profile': [ndarray] The other parameter, re-optimized at each point of
+                    'grid' (same index alignment) - (grid, other_profile) traces the
+                    profile-likelihood "ridge" through (alpha, beta) space. Free: already
+                    computed by the sweep to warm-start each grid step, previously discarded
+                    once used. Lets a caller (e.g. plotProfileAlphaBeta()) reconstruct
+                    trajectories at any grid point, including inside [ci_lower, ci_upper],
+                    without re-optimizing - see the Statistical caveats below for what that
+                    reconstruction does and does not represent.
 
     Statistical caveats:
         - On the name: despite "profile likelihood" being the term used throughout this function
@@ -1294,6 +1322,18 @@ def profileAlphaBeta(v_data, ht_data, fit, sigma_v=None, ci=95.0, param='both', 
         - Uses the same reduced-chi-square (s2) rescaling as estimate_errors=True, which assumes
           sigma_v is an effective, self-derived scale rather than a true instrumental one (see
           fitAlphaBeta()'s sigma_v caveat).
+        - 'other_profile' lets a caller reconstruct trajectories along the profile ridge, e.g.
+          plotProfileAlphaBeta()'s trajectories panel. That ridge, restricted to
+          [ci_lower, ci_upper], does stay inside the JOINT (alpha, beta) confidence region at the
+          same `ci`: a point with 1-dof delta_cost <= chi2(ci, df=1) automatically also satisfies
+          the looser 2-dof threshold chi2(ci, df=2) that a true joint region would use (e.g.
+          3.841 vs 5.991 at ci=95). But it is NOT that joint region's boundary or an envelope of
+          it - it is the 1-dimensional locus of the other parameter's re-optimized value, clipped
+          to where THIS parameter alone stays within its own marginal (df=1) profile CI. Do not
+          describe the resulting trajectory family as "the `ci`% confidence region for the
+          trajectory" - it is narrower than that, and shows how far the fit trajectory moves if
+          this parameter is pushed to the edge of what's marginally still compatible with the
+          data, not a joint-probability statement about (alpha, beta) together.
     """
 
     v_init, alpha, beta = fit
@@ -1882,6 +1922,258 @@ def plotAlphaBeta(v_data, ht_data, fit, errors=None, band=True, fan=True, band_s
         result_axes = result_axes[0]
 
     return fig, result_axes
+
+
+def plotProfileAlphaBeta(v_data, ht_data, fit, profile, delta_cost=True, degeneracy=True,
+        trajectories=True, n_traj_curves=8, axes=None):
+    """ Plot a profileAlphaBeta() result: up to three panels per profiled parameter, built
+        entirely from `profile` (plus the original data/fit for the trajectories panel) - no
+        re-optimization.
+
+        Panel 1 (`delta_cost`): the standard profile-likelihood plot - 'delta_cost' vs the
+        parameter (log-x), 'delta_threshold' as a horizontal line, 'value_hat'/'ci_lower'/
+        'ci_upper' as vertical lines. This alone already contains the full statistical content
+        of the profile.
+
+        Panel 2 (`degeneracy`): the (parameter, other_profile) curve - the other parameter's
+        best re-optimized value as this one is swept. Shows the alpha/beta degeneracy directly:
+        how much one has to move to compensate for the other and still fit the data comparably
+        well.
+
+        Panel 3 (`trajectories`): reconstructed (velocity, height) trajectories at 'ci_lower',
+        'ci_upper', and `n_traj_curves` points in between (log-spaced in the profiled
+        parameter), each paired with its own re-optimized 'other_profile' value via the same
+        loss/f_scale the original fit used. If exactly one side of the profile CI is open (a
+        weakly-constrained parameter's cost never crosses the threshold before hitting
+        ALPHA_BETA_BOUNDS on that side - itself informative, see profileAlphaBeta()'s Return
+        section), the sweep runs from 'value_hat' out to whichever side IS closed instead of
+        showing nothing, with a note identifying the open side. Degrades to an annotation
+        (rather than raising) only when BOTH sides are open, since there is then no finite
+        interval left to reconstruct across. See the Statistical caveats below - and
+        profileAlphaBeta()'s own - for exactly what this trajectory family does and does not
+        represent: it is NOT the joint (alpha, beta) confidence region for the trajectory.
+
+    Arguments:
+        v_data: [ndarray] Velocity data (m/s), as given to fitAlphaBeta()/profileAlphaBeta().
+        ht_data: [ndarray] Height data (m), as given to fitAlphaBeta()/profileAlphaBeta().
+        fit: [tuple] (v_init, alpha, beta), exactly as returned by fitAlphaBeta() - should be the
+            same fit `profile` was computed from (alpha/beta here are only used for the "Joint
+            fit" curve/marker; they are not re-derived from `profile`).
+        profile: [dict] profileAlphaBeta()'s return value for 'alpha' and/or 'beta' - must be
+            from a profileAlphaBeta() new enough to include 'other_hat'/'other_profile'/'ci' in
+            each per-parameter dict.
+
+    Keyword arguments:
+        delta_cost: [bool] Draw the delta_cost-vs-parameter panel.
+        degeneracy: [bool] Draw the (parameter, other_profile) panel.
+        trajectories: [bool] Draw the reconstructed-trajectories panel.
+        n_traj_curves: [int] Number of intermediate trajectories drawn between 'ci_lower' and
+            'ci_upper' (log-spaced in the profiled parameter), in addition to the two boundary
+            curves and the joint-fit curve.
+        axes: [Axes] An existing matplotlib Axes to draw into, instead of creating a new figure -
+            only accepted when exactly one panel (one profiled parameter, one panel type) is
+            being drawn, same contract as plotAlphaBeta()'s `axes`.
+
+    Return:
+        (fig, axes): [tuple] The Figure (axes.figure if `axes` was given, otherwise newly
+            created) and either a bare Axes (if exactly one panel was drawn) or a nested dict
+            {param_name: {panel_type: Axes}} covering every panel actually drawn.
+
+    Statistical caveats:
+        - See profileAlphaBeta()'s own Statistical caveats for the precise sense in which the
+          trajectories panel's family is, and is not, a confidence region: it is the profile
+          ridge (grid, other_profile) clipped to [ci_lower, ci_upper], which stays inside but
+          does not trace the boundary of the joint (alpha, beta) region at the same `ci`.
+        - The boundary curves at 'ci_lower'/'ci_upper' use 'other_profile' interpolated
+          (log-log, matching how ci_lower/ci_upper themselves were located) rather than a fresh
+          optimizer call exactly at those points - consistent with how those bounds were found,
+          and at the same resolution (profileAlphaBeta()'s n_grid), not exact to machine
+          precision.
+    """
+
+    import matplotlib.pyplot as plt
+
+    param_names = [name for name in ('alpha', 'beta') if name in profile]
+    if not param_names:
+        raise ValueError("profile must contain 'alpha' and/or 'beta'.")
+
+    panel_types = []
+    if delta_cost:
+        panel_types.append('delta_cost')
+    if degeneracy:
+        panel_types.append('degeneracy')
+    if trajectories:
+        panel_types.append('trajectories')
+
+    if not panel_types:
+        raise ValueError("At least one of delta_cost, degeneracy, trajectories must be True.")
+
+    n_rows, n_cols = len(param_names), len(panel_types)
+    n_panels = n_rows*n_cols
+
+    if axes is not None and n_panels > 1:
+        raise ValueError("axes is only accepted for a single-panel plotProfileAlphaBeta() call "
+            "(here {:d} profiled parameter(s) x {:d} panel type(s) = {:d} panels) - pass "
+            "axes=None and let plotProfileAlphaBeta() build its own multi-panel figure "
+            "instead.".format(n_rows, n_cols, n_panels))
+
+    if axes is not None:
+        fig = axes.figure
+        ax_map = {param_names[0]: {panel_types[0]: axes}}
+    else:
+        fig, created_axes = plt.subplots(nrows=n_rows, ncols=n_cols, squeeze=False,
+            figsize=(5.5*n_cols, 4.5*n_rows))
+        ax_map = {name: {} for name in param_names}
+        for row, name in enumerate(param_names):
+            for col, panel in enumerate(panel_types):
+                ax_map[name][panel] = created_axes[row][col]
+
+    v_init, alpha, beta = fit
+    ht_grid = np.linspace(np.min(ht_data), np.max(ht_data), 150)
+    v_pad = 0.1*(np.max(v_data) - np.min(v_data))
+
+    other_param_name = {'alpha': 'beta', 'beta': 'alpha'}
+    symbol = {'alpha': r'$\alpha$', 'beta': r'$\beta$'}
+
+    for name in param_names:
+
+        p = profile[name]
+        other_name = other_param_name[name]
+
+        # ================= Panel 1: delta_cost vs parameter =================
+
+        if delta_cost:
+
+            ax = ax_map[name]['delta_cost']
+
+            ax.plot(p['grid'], p['delta_cost'], color='tab:blue', linewidth=1.5)
+            ax.axhline(p['delta_threshold'], color='0.4', linestyle='--', linewidth=1, \
+                label="{:.3g}% threshold (chi2, df=1)".format(p['ci']))
+            ax.axvline(p['value_hat'], color='k', linewidth=1, \
+                label="{:s} = {:.3g}".format(symbol[name], p['value_hat']))
+
+            for bound, lbl in [(p['ci_lower'], 'CI lower'), (p['ci_upper'], 'CI upper')]:
+                if bound is not None:
+                    ax.axvline(bound, color='tab:orange', linestyle=':', linewidth=1.2, \
+                        label="{:s} = {:.3g}".format(lbl, bound))
+
+            ax.set_xscale('log')
+            ax.set_xlabel(symbol[name])
+            ax.set_ylabel(r"$\Delta$cost = 2(cost $-$ cost$_{best}$)/s$^2$")
+            ax.set_title("{:s} profile".format(name))
+            ax.legend(fontsize=7, loc='best')
+
+        # ================= Panel 2: degeneracy curve =================
+
+        if degeneracy:
+
+            ax = ax_map[name]['degeneracy']
+
+            ax.plot(p['grid'], p['other_profile'], color='tab:blue', linewidth=1.2, \
+                label="Profile ridge")
+            ax.scatter([p['value_hat']], [p['other_hat']], color='k', marker='x', zorder=5, \
+                label="Joint fit")
+
+            if p['ci_lower'] is not None or p['ci_upper'] is not None:
+
+                for bound in (p['ci_lower'], p['ci_upper']):
+                    if bound is not None:
+                        other_at_bound = np.exp(np.interp(np.log(bound), np.log(p['grid']), \
+                            np.log(p['other_profile'])))
+                        ax.scatter([bound], [other_at_bound], color='tab:orange', marker='o', \
+                            s=25, zorder=4)
+
+                ax.scatter([], [], color='tab:orange', marker='o', s=25, label="CI edges")
+
+            ax.set_xscale('log')
+            ax.set_yscale('log')
+            ax.set_xlabel(symbol[name])
+            ax.set_ylabel(symbol[other_name])
+            ax.set_title("{:s}-{:s} degeneracy".format(name, other_name))
+            ax.legend(fontsize=7, loc='best')
+
+        # ================= Panel 3: reconstructed trajectories =================
+
+        if trajectories:
+
+            ax = ax_map[name]['trajectories']
+
+            ax.scatter(v_data/1000, ht_data/1000, s=10, color='0.5', alpha=0.6, zorder=3, \
+                label="Observed")
+
+            v_fit_grid = alphaBetaVelocity(ht_grid, alpha, beta, v_init)
+            ax.plot(v_fit_grid/1000, ht_grid/1000, color='k', linewidth=1.5, zorder=4, \
+                label="Joint fit")
+
+            # (alpha, beta) pair for a given value of THIS parameter, with the other one
+            #   interpolated (log-log) from the already-computed profile ridge
+            def _pairAt(target_value, name=name, p=p):
+                other_value = np.exp(np.interp(np.log(target_value), np.log(p['grid']), \
+                    np.log(p['other_profile'])))
+                return (target_value, other_value) if name == 'alpha' \
+                    else (other_value, target_value)
+
+            bounds_available = [b for b in (p['ci_lower'], p['ci_upper']) if b is not None]
+
+            if not bounds_available:
+                ax.text(0.5, 0.03, "Trajectory family unavailable\n(profile CI open on both "
+                    "sides - see the delta_cost panel)", transform=ax.transAxes, \
+                    ha='center', va='bottom', fontsize=8, color='0.4')
+
+            else:
+
+                # An open side has no finite edge to sweep to, so the interior sweep and the
+                #   boundary curve are only drawn for whichever side(s) are actually closed -
+                #   the open side's own reconstruction would require extrapolating past where
+                #   the data constrains anything at all. Sweeping FROM value_hat (rather than
+                #   omitting that side's contribution entirely) still shows the full family
+                #   compatible with the closed side, instead of discarding it just because the
+                #   other side happens to be open.
+                sweep_lo = p['ci_lower'] if p['ci_lower'] is not None else p['value_hat']
+                sweep_hi = p['ci_upper'] if p['ci_upper'] is not None else p['value_hat']
+
+                interior = np.geomspace(sweep_lo, sweep_hi, n_traj_curves + 2)[1:-1]
+
+                for target_value in interior:
+                    a, b = _pairAt(target_value)
+                    v_curve = alphaBetaVelocity(ht_grid, a, b, v_init)
+                    ax.plot(v_curve/1000, ht_grid/1000, color='tab:blue', alpha=0.2, \
+                        linewidth=0.8, zorder=1)
+
+                if len(interior):
+                    ax.plot([], [], color='tab:blue', alpha=0.6, linewidth=0.8, \
+                        label="{:d} profile CI trajectories".format(len(interior)))
+
+                for bound, lbl in [(p['ci_lower'], "CI lower"), (p['ci_upper'], "CI upper")]:
+                    if bound is None:
+                        continue
+                    a, b = _pairAt(bound)
+                    v_curve = alphaBetaVelocity(ht_grid, a, b, v_init)
+                    ax.plot(v_curve/1000, ht_grid/1000, color='tab:blue', linewidth=1.3, \
+                        zorder=2, label="{:s} ({:s}={:.3g})".format(lbl, symbol[name], bound))
+
+                if len(bounds_available) == 1:
+                    open_side = "Lower" if p['ci_lower'] is None else "Upper"
+                    ax.text(0.5, 0.03, "{:s} side open (unconstrained within "
+                        "ALPHA_BETA_BOUNDS) - only the closed side's family is "
+                        "shown".format(open_side), transform=ax.transAxes, ha='center', \
+                        va='bottom', fontsize=7, color='0.4')
+
+            ax.set_xlim((np.min(v_data) - v_pad)/1000, (np.max(v_data) + v_pad)/1000)
+            ax.set_xlabel("Velocity (km/s)")
+            ax.set_ylabel("Height (km)")
+            ax.set_title("{:s} profile CI trajectories".format(name))
+            ax.legend(fontsize=7, loc='best')
+
+    fig.tight_layout()
+
+    if axes is None:
+        plt.show()
+
+    if n_panels == 1:
+        return fig, ax_map[param_names[0]][panel_types[0]]
+
+    return fig, ax_map
 
 
 def alphaBetaMasses(
