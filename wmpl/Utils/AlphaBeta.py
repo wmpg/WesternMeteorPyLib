@@ -2304,6 +2304,10 @@ def fitAlphaBetaMass(
         density=None,
         v_init=None,
         v_final=None,
+        method='robust',
+        sigma_v=None,
+        loss='soft_l1',
+        f_scale=2.0,
         verbose=True,
         plot=False):
     """ Fit alpha-beta model parameters under initial, final, or both mass constraints,
@@ -2347,6 +2351,32 @@ def fitAlphaBetaMass(
             discarded: the actual v_final is always re-derived from the fitted alpha/beta.
             If None, derived as the asymptotic minimum of a preliminary alpha-beta velocity
             model (or, under mass_constraint="initial", of the final fitted model).
+        method: [str] 'robust' (default) or 'q4' - fitting approach used both for the preliminary
+            unconstrained alpha-beta fit (see Notes below) and for the (density, beta[, mu])
+            optimization under the selected mass_constraint.
+              - 'q4': the classic Gritsevich (2007) Q4 fit throughout (minimizeAlphaBeta() for the
+                preliminary fit; scipy.optimize.minimize(method='Nelder-Mead') on
+                _alphaBetaResidual()'s transformed, height-weighted residual for the constrained
+                optimization) - unchanged from this function's original behavior.
+              - 'robust': fitAlphaBeta(method='robust') for the preliminary fit, and
+                scipy.optimize.least_squares(loss=loss, f_scale=f_scale) directly on the
+                sigma-normalized velocity residuals (_dynResiduals(), the same residual
+                minimizeAlphaBetaRobust() uses) for the constrained optimization. This also fixes
+                a real pathology of the 'q4' path under mass_constraint="final": _alphaBetaResidual()
+                trivially -> 0 as alpha -> 0 (a spurious minimum reached as beta grows and the
+                reconstructed initial mass diverges - see the comment above where beta0 is seeded),
+                which the velocity residual does not share, since alpha -> 0 flattens the model
+                velocity curve instead of vanishing the residual.
+        sigma_v: [float] Velocity uncertainty (m/s), only used for method='robust' (weights the
+            residuals of every least_squares call this function makes, the preliminary fit
+            included). If None, estimated once from the MAD of a Q4 fit's residuals (floored at
+            1 m/s, see _estimateSigmaV()) and reused everywhere in this function, rather than
+            letting each stage derive its own - the same "avoid circularity" reasoning
+            fitAlphaBetaLightCurve() documents for its own sigma_v.
+        loss: [str] Only used for method='robust'. scipy.optimize.least_squares loss, forwarded to
+            every least_squares call this function makes.
+        f_scale: [float] Only used for method='robust'. Robust loss scale (units of sigma_v),
+            forwarded to every least_squares call this function makes.
         verbose: [bool] If True, print the parameters used in the computation and the resulting
             fitted parameters, clearly separating which of density/v_init/v_final were given
             as input from those that were derived/fitted internally.
@@ -2524,6 +2554,32 @@ def fitAlphaBetaMass(
     if (v_final is not None) and (v_final >= v_init):
         raise ValueError("v_final must be smaller than v_init.")
 
+    method = method.lower()
+    if method not in ('q4', 'robust'):
+        raise ValueError("method must be 'q4' or 'robust', got '{:s}'.".format(method))
+
+    # Normalize velocity
+    v_normed = v_data/v_init
+
+    # Normalize height
+    ht_normed = ht_data/HT_NORM_CONST
+
+    # For method='robust', estimate sigma_v (if not given) once, from a Q4 fit, and reuse it
+    #   everywhere below (the preliminary fit and every constrained optimization) - avoids each
+    #   stage deriving its own sigma_v from a fit that is itself being weighted by it (same
+    #   reasoning as fitAlphaBetaLightCurve()'s sigma_v). Not needed at all for method='q4', which
+    #   never weights residuals by sigma_v.
+    sigma_v_given = sigma_v is not None
+    sigma_v_normed = None
+    if method == 'robust':
+
+        alpha0_q4, beta0_q4 = minimizeAlphaBeta(v_normed, ht_normed)
+
+        if not sigma_v_given:
+            sigma_v = _estimateSigmaV(alpha0_q4, beta0_q4, v_normed, ht_normed, v_init)
+
+        sigma_v_normed = sigma_v/v_init
+
     # Run a preliminary unconstrained alpha-beta fit when the final velocity has to be derived from
     #   the data, and always under the final-mass constraint, where the fitted beta is needed to
     #   seed the constrained optimization (see below). It is skipped under mass_constraint="initial"
@@ -2533,7 +2589,8 @@ def fitAlphaBetaMass(
     if (mass_constraint == "final") or ((v_final is None) and (mass_constraint == "both")):
 
         # Fit the unconstrained alpha-beta model
-        _, alpha_prelim, beta_prelim = fitAlphaBeta(v_data, ht_data, v_init=v_init)
+        _, alpha_prelim, beta_prelim = fitAlphaBeta(v_data, ht_data, v_init=v_init, method=method, \
+            sigma_v=sigma_v, loss=loss, f_scale=f_scale)
 
         # Evaluate the model velocity at the observed heights and take the minimum as the final
         #   velocity, if it wasn't given already
@@ -2541,12 +2598,6 @@ def fitAlphaBetaMass(
             vel_model = alphaBetaVelocity(ht_data, alpha_prelim, beta_prelim, v_init)
             v_final = np.min(vel_model)
 
-
-    # Normalize velocity
-    v_normed = v_data/v_init
-
-    # Normalize height
-    ht_normed = ht_data/HT_NORM_CONST
 
     def _alphaFromDensityAndMass(mass_init, dens):
         """ Analytically compute alpha from the bulk density and the initial mass, by inverting the
@@ -2579,6 +2630,42 @@ def fitAlphaBetaMass(
 
         return density, x
 
+    def _massFitResidual(alpha, beta, v_normed, ht_normed):
+        """ Fit residual shared by every (density, beta[, mu]) objective below - only depends on
+            the (alpha, beta) each objective derives from its own free parameters.
+
+            method='q4': _alphaBetaResidual()'s scalar, Q4-transformed residual (for
+            scipy.optimize.minimize(method='Nelder-Mead')) - unchanged original behavior.
+
+            method='robust': _dynResiduals()'s sigma-normalized velocity residual VECTOR (the same
+            residual minimizeAlphaBetaRobust() uses), for scipy.optimize.least_squares(loss=loss,
+            f_scale=f_scale) - see _runMassFit(). Unlike the Q4 residual, this does not vanish as
+            alpha -> 0, so it doesn't share the spurious-minimum pathology _alphaBetaResidual() has
+            under mass_constraint="final" (see the beta0 seeding comment below).
+        """
+
+        if method == 'q4':
+            return _alphaBetaResidual(alpha, beta, v_normed, ht_normed)
+
+        return _dynResiduals(np.log([alpha, beta]), v_normed, ht_normed, sigma_v_normed)
+
+    def _runMassFit(objective, x0, xmin_free, xmax_free, args):
+        """ Runs one (density, beta[, mu]) optimization, dispatching on `method` to match the form
+            `objective` returns (see _massFitResidual()): Nelder-Mead over the scalar Q4 cost for
+            method='q4' (bounds as a tuple of (lo, hi) pairs), or least_squares over the robust
+            residual vector for method='robust' (bounds as a (lo_array, hi_array) pair) - the two
+            optimizers' bounds conventions differ, so this is the one place that needs to know
+            which is active, instead of every call site duplicating the branch.
+        """
+
+        if method == 'q4':
+            bnds = tuple(zip(xmin_free, xmax_free))
+            return scipy.optimize.minimize(objective, x0, args=args, bounds=bnds, \
+                method='Nelder-Mead')
+
+        return scipy.optimize.least_squares(objective, x0, args=args, \
+            bounds=(xmin_free, xmax_free), loss=loss, f_scale=f_scale, x_scale='jac')
+
     def _densityBetaMinimizationInitialMass(x, v_normed, ht_normed):
         """ Fit objective for mass_constraint="initial": alpha follows analytically from the fixed
             initial mass and the density, so only (density, beta) are free.
@@ -2589,7 +2676,7 @@ def fitAlphaBetaMass(
 
         alpha = _alphaFromDensityAndMass(mass_initial, dens)
 
-        return _alphaBetaResidual(alpha, beta, v_normed, ht_normed)
+        return _massFitResidual(alpha, beta, v_normed, ht_normed)
 
     def _reconstructInitialMassAndAlpha(dens, beta, mu):
         """ Reconstruct the initial mass from the fixed final mass by inverting the general
@@ -2612,7 +2699,7 @@ def fitAlphaBetaMass(
 
         _, alpha = _reconstructInitialMassAndAlpha(dens, beta, mu)
 
-        return _alphaBetaResidual(alpha, beta, v_normed, ht_normed)
+        return _massFitResidual(alpha, beta, v_normed, ht_normed)
 
     def _densityBetaMuMinimizationFinalMass(x, v_normed, ht_normed):
         """ Same as _densityBetaMinimizationFinalMass, but with mu as a free parameter instead of
@@ -2624,7 +2711,7 @@ def fitAlphaBetaMass(
 
         _, alpha = _reconstructInitialMassAndAlpha(dens, beta, mu)
 
-        return _alphaBetaResidual(alpha, beta, v_normed, ht_normed)
+        return _massFitResidual(alpha, beta, v_normed, ht_normed)
 
     def _solveBothMasses(dens, mu):
         """ Analytic beta from the mass ratio and mu, and alpha from density and the fixed initial
@@ -2649,7 +2736,7 @@ def fitAlphaBetaMass(
 
         alpha, beta = _solveBothMasses(dens, mu)
 
-        return _alphaBetaResidual(alpha, beta, v_normed, ht_normed)
+        return _massFitResidual(alpha, beta, v_normed, ht_normed)
 
     def _densityMuMinimizationBothMasses(x, v_normed, ht_normed):
         """ Same as _densityMinimizationBothMasses, but with mu as a free parameter instead of
@@ -2662,7 +2749,7 @@ def fitAlphaBetaMass(
 
         alpha, beta = _solveBothMasses(dens, mu)
 
-        return _alphaBetaResidual(alpha, beta, v_normed, ht_normed)
+        return _massFitResidual(alpha, beta, v_normed, ht_normed)
 
 
     # Initial guess
@@ -2673,10 +2760,12 @@ def fitAlphaBetaMass(
     xmin = [100, 0.001]
     xmax = [9000, 50]
 
-    # Seed beta with the preliminary unconstrained fit when available. This is essential under the
-    #   final-mass constraint: its reduced objective has a spurious minimum at large beta, where the
-    #   reconstructed initial mass diverges, alpha goes to 0, and the residual vanishes for any
-    #   data, so the optimizer needs to start near the physical solution
+    # Seed beta with the preliminary unconstrained fit when available. This is especially important
+    #   under the final-mass constraint: for method='q4', the reduced objective has a spurious
+    #   minimum at large beta, where the reconstructed initial mass diverges, alpha goes to 0, and
+    #   _alphaBetaResidual() vanishes for any data, so the optimizer needs to start near the
+    #   physical solution (method='robust' doesn't share this failure mode - see
+    #   _massFitResidual() - but still benefits from starting close to the answer)
     if beta_prelim is not None:
         beta0 = float(np.clip(beta_prelim, xmin[1], xmax[1]))
 
@@ -2685,16 +2774,16 @@ def fitAlphaBetaMass(
     #   which all share this same 2-parameter (or 1-parameter) shape
     if fit_density:
         x0 = [dens0, beta0]
-        bnds = ((xmin[0], xmax[0]), (xmin[1], xmax[1]))
+        xmin_free, xmax_free = [xmin[0], xmin[1]], [xmax[0], xmax[1]]
     else:
         x0 = [beta0]
-        bnds = ((xmin[1], xmax[1]),)
+        xmin_free, xmax_free = [xmin[1]], [xmax[1]]
 
     if mass_constraint == "initial":
 
         # Fit (density, beta), with alpha following analytically from the fixed initial mass
-        res = scipy.optimize.minimize(_densityBetaMinimizationInitialMass, x0, \
-            args=(v_normed, ht_normed), bounds=bnds, method='Nelder-Mead')
+        res = _runMassFit(_densityBetaMinimizationInitialMass, x0, xmin_free, xmax_free, \
+            (v_normed, ht_normed))
 
         if not res.success:
             print(f"WARNING: Optimizer failed: {res.message}")
@@ -2736,8 +2825,8 @@ def fitAlphaBetaMass(
 
         # Fit (density, beta) for mu = 0, with the initial mass reconstructed from the fixed
         #   final mass
-        res_mu0 = scipy.optimize.minimize(_densityBetaMinimizationFinalMass, x0, \
-            args=(v_normed, ht_normed, 0), bounds=bnds, method='Nelder-Mead')
+        res_mu0 = _runMassFit(_densityBetaMinimizationFinalMass, x0, xmin_free, xmax_free, \
+            (v_normed, ht_normed, 0))
 
         if not res_mu0.success:
             print(f"WARNING: Optimizer failed for mu=0: {res_mu0.message}")
@@ -2752,8 +2841,8 @@ def fitAlphaBetaMass(
         m_initial_mu0, m_final_mu0 = _massesAt(alpha_mu0, beta_mu0, 0, density_mu0)
 
         # Fit (density, beta) for mu = 2/3
-        res_mu23 = scipy.optimize.minimize(_densityBetaMinimizationFinalMass, x0, \
-            args=(v_normed, ht_normed, 2/3), bounds=bnds, method='Nelder-Mead')
+        res_mu23 = _runMassFit(_densityBetaMinimizationFinalMass, x0, xmin_free, xmax_free, \
+            (v_normed, ht_normed, 2/3))
 
         if not res_mu23.success:
             print(f"WARNING: Optimizer failed for mu=2/3: {res_mu23.message}")
@@ -2769,13 +2858,13 @@ def fitAlphaBetaMass(
         #   since mu affects the residual here (see docstring notes)
         if fit_density:
             x0_mu_best = [dens0, beta0, 1/3]
-            bnds_mu_best = ((xmin[0], xmax[0]), (xmin[1], xmax[1]), (0.0, 2/3))
+            xmin_mu_best, xmax_mu_best = [xmin[0], xmin[1], 0.0], [xmax[0], xmax[1], 2/3]
         else:
             x0_mu_best = [beta0, 1/3]
-            bnds_mu_best = ((xmin[1], xmax[1]), (0.0, 2/3))
+            xmin_mu_best, xmax_mu_best = [xmin[1], 0.0], [xmax[1], 2/3]
 
-        res_mu_best = scipy.optimize.minimize(_densityBetaMuMinimizationFinalMass, x0_mu_best, \
-            args=(v_normed, ht_normed), bounds=bnds_mu_best, method='Nelder-Mead')
+        res_mu_best = _runMassFit(_densityBetaMuMinimizationFinalMass, x0_mu_best, xmin_mu_best, \
+            xmax_mu_best, (v_normed, ht_normed))
 
         if not res_mu_best.success:
             print(f"WARNING: Optimizer failed for best-fit mu: {res_mu_best.message}")
@@ -2793,8 +2882,8 @@ def fitAlphaBetaMass(
 
         # Fit the density for mu = 0 (alpha and beta both follow analytically from the two masses)
         if fit_density:
-            res_mu0 = scipy.optimize.minimize(_densityMinimizationBothMasses, [dens0], \
-                args=(v_normed, ht_normed, 0), bounds=[(xmin[0], xmax[0])], method='Nelder-Mead')
+            res_mu0 = _runMassFit(_densityMinimizationBothMasses, [dens0], [xmin[0]], [xmax[0]], \
+                (v_normed, ht_normed, 0))
 
             if not res_mu0.success:
                 print(f"WARNING: Optimizer failed for mu=0: {res_mu0.message}")
@@ -2812,8 +2901,8 @@ def fitAlphaBetaMass(
 
         # Fit the density for mu = 2/3
         if fit_density:
-            res_mu23 = scipy.optimize.minimize(_densityMinimizationBothMasses, [dens0], \
-                args=(v_normed, ht_normed, 2/3), bounds=[(xmin[0], xmax[0])], method='Nelder-Mead')
+            res_mu23 = _runMassFit(_densityMinimizationBothMasses, [dens0], [xmin[0]], [xmax[0]], \
+                (v_normed, ht_normed, 2/3))
 
             if not res_mu23.success:
                 print(f"WARNING: Optimizer failed for mu=2/3: {res_mu23.message}")
@@ -2832,13 +2921,13 @@ def fitAlphaBetaMass(
         #   given masses
         if fit_density:
             x0_mu_best = [dens0, 1/3]
-            bnds_mu_best = [(xmin[0], xmax[0]), (0.0, 2/3)]
+            xmin_mu_best, xmax_mu_best = [xmin[0], 0.0], [xmax[0], 2/3]
         else:
             x0_mu_best = [1/3]
-            bnds_mu_best = [(0.0, 2/3)]
+            xmin_mu_best, xmax_mu_best = [0.0], [2/3]
 
-        res_mu_best = scipy.optimize.minimize(_densityMuMinimizationBothMasses, x0_mu_best, \
-            args=(v_normed, ht_normed), bounds=bnds_mu_best, method='Nelder-Mead')
+        res_mu_best = _runMassFit(_densityMuMinimizationBothMasses, x0_mu_best, xmin_mu_best, \
+            xmax_mu_best, (v_normed, ht_normed))
 
         if not res_mu_best.success:
             print(f"WARNING: Optimizer failed for best-fit mu: {res_mu_best.message}")
@@ -2865,6 +2954,12 @@ def fitAlphaBetaMass(
             print(f"mass_init            = {mass_initial:.3f} kg  (input)")
             print(f"mass_final           = {mass_final:.3f} kg  (input)")
         print(f"GAMMA_A              = {shape_coeff*gamma:.3f}  (input)")
+        print(f"method               = {method}")
+        if method == 'robust':
+            print("sigma_v              = {:.1f} m/s  ({:s})".format(sigma_v,
+                "input" if sigma_v_given else "DERIVED: MAD of a Q4 fit's velocity residuals "
+                "(effective, absorbs model misspecification too - not a pure measurement "
+                "uncertainty)"))
 
         if fit_density:
             print("density              = not given -> fitted below, separately for each mu")
