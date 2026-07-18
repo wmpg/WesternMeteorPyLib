@@ -16,11 +16,17 @@ or standalone (no pytest required):
 """
 
 import numpy as np
+import scipy.special
+
+import matplotlib
+matplotlib.use("Agg")  # headless - plotAlphaBeta() tests must not require a display or block
+import matplotlib.pyplot as plt
 
 from wmpl.Utils.AlphaBeta import (fitAlphaBetaMass, fitAlphaBeta, fitAlphaBetaLightCurve,
     alphaBetaMasses, alphaBetaVelocity, alphaBetaHeight, alphaBetaVelocityNormed,
     alphaBetaHeightNormed, alphaBetaLuminosityF, alphaBetaModelMagnitude,
-    alphaBetaLuminousEfficiency, _profiledMagOffset, HT_NORM_CONST, P_0M, ALPHA_BETA_BOUNDS)
+    alphaBetaLuminousEfficiency, plotAlphaBeta, profileAlphaBeta, _profiledMagOffset,
+    _gaussianEllipsePoints, HT_NORM_CONST, P_0M, ALPHA_BETA_BOUNDS)
 
 
 # True parameters used to generate the synthetic trajectory. The height range is chosen so the
@@ -450,18 +456,18 @@ def testFitAlphaBetaErrorEstimationConfidenceInterval():
     _, alpha, beta, errors = fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, method='robust', \
         estimate_errors=True)
 
-    assert errors['alpha_ci_gaussian_lower'] < alpha < errors['alpha_ci_gaussian_upper']
-    assert errors['beta_ci_gaussian_lower'] < beta < errors['beta_ci_gaussian_upper']
+    assert errors['alpha_ci_wald_lower'] < alpha < errors['alpha_ci_wald_upper']
+    assert errors['beta_ci_wald_lower'] < beta < errors['beta_ci_wald_upper']
 
     _, _, _, errors_ci68 = fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, method='robust', \
         estimate_errors=True, ci=68.27)
     _, _, _, errors_ci99 = fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, method='robust', \
         estimate_errors=True, ci=99.0)
 
-    assert (errors_ci99['alpha_ci_gaussian_upper'] - errors_ci99['alpha_ci_gaussian_lower']) > \
-        (errors_ci68['alpha_ci_gaussian_upper'] - errors_ci68['alpha_ci_gaussian_lower'])
-    assert (errors_ci99['beta_ci_gaussian_upper'] - errors_ci99['beta_ci_gaussian_lower']) > \
-        (errors_ci68['beta_ci_gaussian_upper'] - errors_ci68['beta_ci_gaussian_lower'])
+    assert (errors_ci99['alpha_ci_wald_upper'] - errors_ci99['alpha_ci_wald_lower']) > \
+        (errors_ci68['alpha_ci_wald_upper'] - errors_ci68['alpha_ci_wald_lower'])
+    assert (errors_ci99['beta_ci_wald_upper'] - errors_ci99['beta_ci_wald_lower']) > \
+        (errors_ci68['beta_ci_wald_upper'] - errors_ci68['beta_ci_wald_lower'])
 
 
 def testFitAlphaBetaErrorEstimationVerbose():
@@ -553,10 +559,10 @@ def testFitAlphaBetaErrorEstimationBoundPinned():
     assert np.isnan(errors['corr_log'])
     assert np.all(np.isnan(errors['cov']))
     assert np.isnan(errors['corr'])
-    assert np.isnan(errors['alpha_ci_gaussian_lower'])
-    assert np.isnan(errors['alpha_ci_gaussian_upper'])
-    assert np.isnan(errors['beta_ci_gaussian_lower'])
-    assert np.isnan(errors['beta_ci_gaussian_upper'])
+    assert np.isnan(errors['alpha_ci_wald_lower'])
+    assert np.isnan(errors['alpha_ci_wald_upper'])
+    assert np.isnan(errors['beta_ci_wald_lower'])
+    assert np.isnan(errors['beta_ci_wald_upper'])
 
     # alpha/beta themselves, and sigma_v/sigma_v_init, are still real, useful numbers even though
     #   the covariance failed - only the error fields collapse to NaN
@@ -564,6 +570,209 @@ def testFitAlphaBetaErrorEstimationBoundPinned():
     assert errors['alpha'] == alpha and errors['beta'] == beta
     assert np.isfinite(errors['sigma_v']) and errors['sigma_v'] > 0
     assert errors['sigma_v_init'] == 0.0
+
+
+def testGaussianEllipsePoints():
+    """ _gaussianEllipsePoints() must trace a circle of the exact closed-form radius for an
+        identity covariance (chi2(df=2) = Exponential(scale=2), so its p-quantile has an exact
+        closed form, sqrt(-2*ln(1-p))), centered exactly on the given mean, and must orient a
+        correlated covariance's ellipse along the correlation's own sign.
+    """
+
+    mean = np.array([3.0, -2.0])
+    cov_identity = np.eye(2)
+
+    for p in [0.5, 0.6827, 0.95]:
+
+        x, y = _gaussianEllipsePoints(mean, cov_identity, p, n_points=1000)
+
+        expected_radius = np.sqrt(-2.0*np.log(1.0 - p))
+        actual_radius = np.sqrt((x - mean[0])**2 + (y - mean[1])**2)
+
+        assert np.max(np.abs(actual_radius - expected_radius)) < 1e-9, \
+            "ellipse radius off at p={:.4f}".format(p)
+
+    # Positive correlation must stretch the ellipse along the (+1, +1) diagonal, not (+1, -1):
+    #   the point farthest in +x must also be displaced in +y, not -y
+    cov_corr = np.array([[1.0, 0.9], [0.9, 1.0]])
+    x, y = _gaussianEllipsePoints(mean, cov_corr, 0.6827, n_points=1000)
+    assert y[np.argmax(x)] > mean[1]
+
+
+def testPlotAlphaBetaGracefulDegradation():
+    """ plotAlphaBeta() must never raise when errors is None, or when errors is given but its
+        covariance is NaN (a fit pinned against an ALPHA_BETA_BOUNDS edge) - the band/ellipse
+        degrade to data+fit (+ an annotation) instead, and the residuals panel (which only needs
+        `fit` and the raw data) still draws the actual residual scatter either way, just without
+        the sigma_v reference lines/down-weighting.
+    """
+
+    v_data, _, _, _, _ = _syntheticTrajectory()
+
+    v_init, alpha, beta, errors = fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, \
+        method='robust', estimate_errors=True)
+    fit = (v_init, alpha, beta)
+
+    fig, axes = plotAlphaBeta(v_data, HT_DATA, fit, errors=None, residuals=True, seed=0)
+    plt.close(fig)
+
+    # A true beta far beyond ALPHA_BETA_BOUNDS pins the fit against its upper bound, the same
+    #   deterministic setup as testFitAlphaBetaErrorEstimationBoundPinned()
+    beta_true_extreme = 150.0
+    v_clean_extreme = alphaBetaVelocity(HT_DATA, ALPHA_TRUE, beta_true_extreme, V_INIT_TRUE)
+    rng = np.random.RandomState(42)
+    v_data_extreme = v_clean_extreme + rng.normal(0, VEL_NOISE_STD, HT_DATA.size)
+
+    v_init_e, alpha_e, beta_e, errors_e = fitAlphaBeta(v_data_extreme, HT_DATA, \
+        v_init=V_INIT_TRUE, method='robust', estimate_errors=True)
+
+    assert np.isnan(errors_e['alpha_std_rel'])  # sanity-check the test setup itself
+
+    fig, axes = plotAlphaBeta(v_data_extreme, HT_DATA, (v_init_e, alpha_e, beta_e), \
+        errors=errors_e, residuals=True, seed=0)
+    plt.close(fig)
+
+
+def testPlotAlphaBetaAxesContract():
+    """ axes must be reusable for a single-panel call (plotAlphaBeta() must hand back the exact
+        same fig/ax), and must be rejected with ValueError for any multi-panel configuration,
+        since a single Axes can't hold a multi-panel layout.
+    """
+
+    v_data, _, _, _, _ = _syntheticTrajectory()
+
+    v_init, alpha, beta, errors = fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, \
+        method='robust', estimate_errors=True)
+    fit = (v_init, alpha, beta)
+
+    fig_caller, ax_caller = plt.subplots()
+
+    fig_ret, ax_ret = plotAlphaBeta(v_data, HT_DATA, fit, errors=errors, ellipse=False, \
+        residuals=False, axes=ax_caller, seed=0)
+
+    assert fig_ret is fig_caller
+    assert ax_ret is ax_caller
+    plt.close(fig_caller)
+
+    fig_bad, ax_bad = plt.subplots()
+
+    try:
+        plotAlphaBeta(v_data, HT_DATA, fit, errors=errors, ellipse=True, axes=ax_bad)
+
+    except ValueError:
+        pass
+
+    else:
+        raise AssertionError("plotAlphaBeta: ValueError not raised for multi-panel + axes")
+
+    finally:
+        plt.close(fig_bad)
+
+
+def testPlotAlphaBetaRejectsBadCi():
+    """ plotAlphaBeta() must reject a ci outside (0, 100), same as fitAlphaBeta(). """
+
+    v_data, _, _, _, _ = _syntheticTrajectory()
+
+    v_init, alpha, beta, errors = fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, \
+        method='robust', estimate_errors=True)
+    fit = (v_init, alpha, beta)
+
+    for bad_ci in [0.0, 100.0, -5.0, 150.0]:
+
+        try:
+            plotAlphaBeta(v_data, HT_DATA, fit, errors=errors, ci=bad_ci)
+
+        except ValueError:
+            pass
+
+        else:
+            raise AssertionError(
+                "plotAlphaBeta: ValueError not raised for ci={!r}".format(bad_ci))
+
+
+def testProfileAlphaBetaBracketsEstimate():
+    """ profileAlphaBeta() must bracket the point estimate for a well-constrained fit, narrow at a
+        lower confidence level, respect the `param` selector, and work regardless of whether the
+        original point estimate came from method='q4' or 'robust' - unlike estimate_errors=True,
+        it re-derives its own cost from `fit` directly rather than needing the robust fit's
+        Jacobian.
+    """
+
+    v_data, _, _, _, _ = _syntheticTrajectory()
+
+    v_init, alpha, beta, errors = fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, \
+        method='robust', estimate_errors=True)
+    fit = (v_init, alpha, beta)
+
+    profile = profileAlphaBeta(v_data, HT_DATA, fit, sigma_v=errors['sigma_v'])
+
+    assert set(profile.keys()) == {'alpha', 'beta'}
+
+    for key, value in [('alpha', alpha), ('beta', beta)]:
+
+        p = profile[key]
+        assert p['ci_lower'] is not None and p['ci_upper'] is not None
+        assert p['ci_lower'] < value < p['ci_upper']
+        assert p['grid'].shape == p['delta_cost'].shape
+        assert np.isfinite(p['cost_best']) and p['cost_best'] >= 0
+        assert np.isfinite(p['s2']) and p['s2'] > 0
+        assert p['value_hat'] == value
+        _assertClose(p['delta_threshold'], scipy.special.ndtri(0.5 + 95.0/200.0)**2, 1e-9, \
+            "delta_threshold")
+
+    # A lower confidence level must narrow the interval
+    profile_68 = profileAlphaBeta(v_data, HT_DATA, fit, sigma_v=errors['sigma_v'], ci=68.27)
+
+    assert (profile_68['alpha']['ci_upper'] - profile_68['alpha']['ci_lower']) < \
+        (profile['alpha']['ci_upper'] - profile['alpha']['ci_lower'])
+    assert (profile_68['beta']['ci_upper'] - profile_68['beta']['ci_lower']) < \
+        (profile['beta']['ci_upper'] - profile['beta']['ci_lower'])
+
+    # param must restrict the returned keys
+    assert set(profileAlphaBeta(v_data, HT_DATA, fit, sigma_v=errors['sigma_v'], \
+        param='alpha').keys()) == {'alpha'}
+    assert set(profileAlphaBeta(v_data, HT_DATA, fit, sigma_v=errors['sigma_v'], \
+        param='beta').keys()) == {'beta'}
+
+    # Must work from a method='q4' point estimate too
+    v_init_q4, alpha_q4, beta_q4 = fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, method='q4')
+    profile_q4 = profileAlphaBeta(v_data, HT_DATA, (v_init_q4, alpha_q4, beta_q4))
+
+    assert profile_q4['alpha']['ci_lower'] < alpha_q4 < profile_q4['alpha']['ci_upper']
+    assert profile_q4['beta']['ci_lower'] < beta_q4 < profile_q4['beta']['ci_upper']
+
+
+def testProfileAlphaBetaRejectsBadInputs():
+    """ profileAlphaBeta() must reject a ci outside (0, 100) and an unknown `param`, the same
+        input-validation convention as fitAlphaBeta()/plotAlphaBeta().
+    """
+
+    v_data, _, _, _, _ = _syntheticTrajectory()
+
+    v_init, alpha, beta = fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, method='robust')
+    fit = (v_init, alpha, beta)
+
+    for bad_ci in [0.0, 100.0, -5.0, 150.0]:
+
+        try:
+            profileAlphaBeta(v_data, HT_DATA, fit, ci=bad_ci)
+
+        except ValueError:
+            pass
+
+        else:
+            raise AssertionError(
+                "profileAlphaBeta: ValueError not raised for ci={!r}".format(bad_ci))
+
+    try:
+        profileAlphaBeta(v_data, HT_DATA, fit, param='banana')
+
+    except ValueError:
+        pass
+
+    else:
+        raise AssertionError("profileAlphaBeta: ValueError not raised for param='banana'")
 
 
 def testLuminosityModel():
@@ -741,6 +950,12 @@ if __name__ == "__main__":
         testFitAlphaBetaErrorEstimationVerbose,
         testFitAlphaBetaErrorEstimationVInitPropagation,
         testFitAlphaBetaErrorEstimationBoundPinned,
+        testGaussianEllipsePoints,
+        testPlotAlphaBetaGracefulDegradation,
+        testPlotAlphaBetaAxesContract,
+        testPlotAlphaBetaRejectsBadCi,
+        testProfileAlphaBetaBracketsEstimate,
+        testProfileAlphaBetaRejectsBadInputs,
         testLuminosityModel,
         testProfiledMagOffsetWeighted,
         testFitAlphaBetaLightCurve,

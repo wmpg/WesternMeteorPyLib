@@ -575,16 +575,19 @@ def _alphaBetaRobustErrors(fit_res, alpha, beta, v_data, ht_data, v_init, v_init
         out numerically identical to corr_log (correlation is invariant under this kind of
         positive-diagonal rescaling) - both are kept for convenience.
 
-        alpha_ci_gaussian_lower/upper and beta_ci_gaussian_lower/upper are APPROXIMATE confidence
+        alpha_ci_wald_lower/upper and beta_ci_wald_lower/upper are APPROXIMATE confidence
         intervals based on the local Gaussian approximation in log-space (equivalently: assuming
         alpha/beta are log-normal), at the `ci` level - exp(ln(alpha) +/- z*alpha_std_rel),
-        asymmetric around alpha and, unlike alpha +/- z*alpha_std, never negative. The "_gaussian"
+        asymmetric around alpha and, unlike alpha +/- z*alpha_std, never negative. The "_wald"
         in the name (and "approximate" here) is deliberate: this is NOT the same kind of object as
         wmpl.Utils.Math.confidenceInterval()'s output elsewhere in this library (e.g. Trajectory.py,
         REBOUND.py) - those are empirical percentiles of an actual Monte Carlo ensemble, whereas
-        there is no ensemble here, only a parametric approximation. Don't drop the "_gaussian"
-        qualifier when reading these out; it is the one thing standing between this and a false
-        claim of MC-equivalent rigor.
+        there is no ensemble here, only a parametric approximation built on a local quadratic
+        (Wald-type) expansion of the cost function around the optimum - see profileAlphaBeta()
+        for a rigorous, non-quadratic-assuming alternative when that assumption is in doubt (e.g.
+        beta_std_rel large - see the Statistical caveats below). Don't drop the "_wald" qualifier
+        when reading these out; it is the one thing standing between this and a false claim of
+        likelihood-equivalent (let alone MC-equivalent) rigor.
 
         Two failure modes are handled explicitly, both printing a WARNING and returning NaN for
         every error field (alpha/beta themselves are still returned - only their errors are NaN):
@@ -610,15 +613,16 @@ def _alphaBetaRobustErrors(fit_res, alpha, beta, v_data, ht_data, v_init, v_init
             v_init_given (see fitAlphaBeta()'s docstring).
         loss: [str] As in fitAlphaBeta().
         f_scale: [float] As in fitAlphaBeta().
-        ci: [float] Confidence level (0-100, e.g. 95) for alpha_ci_gaussian_lower/upper and
-            beta_ci_gaussian_lower/upper - same convention as
+        ci: [float] Confidence level (0-100, e.g. 95) for alpha_ci_wald_lower/upper and
+            beta_ci_wald_lower/upper - same convention as
             wmpl.Utils.Math.confidenceInterval()'s `ci`.
 
     Return:
-        errors: [dict] 'alpha', 'beta', 'alpha_std_rel', 'beta_std_rel', 'alpha_std', 'beta_std',
-            'cov_log', 'corr_log', 'cov', 'corr', 'alpha_ci_gaussian_lower',
-            'alpha_ci_gaussian_upper', 'beta_ci_gaussian_lower', 'beta_ci_gaussian_upper', 'ci',
-            'sigma_v', 'sigma_v_init' - see fitAlphaBeta()'s docstring for details.
+        errors: [dict] 'alpha', 'beta', 'v_init', 'alpha_std_rel', 'beta_std_rel', 'alpha_std',
+            'beta_std', 'cov_fit', 'cov_log', 'corr_log', 'cov', 'corr',
+            'alpha_ci_wald_lower', 'alpha_ci_wald_upper', 'beta_ci_wald_lower',
+            'beta_ci_wald_upper', 'ci', 'sigma_v', 'sigma_v_init' - see fitAlphaBeta()'s
+            docstring for details.
     """
 
     # Resolve v_init's own uncertainty up front, so it is available in `errors` even if the
@@ -652,38 +656,27 @@ def _alphaBetaRobustErrors(fit_res, alpha, beta, v_data, ht_data, v_init, v_init
         sigma_v_init_used = 1.2533*1.4826*mad/np.sqrt(len(v_head))
 
     nan_result = {
-        'alpha': alpha, 'beta': beta, 'alpha_std_rel': np.nan, 'beta_std_rel': np.nan,
-        'alpha_std': np.nan, 'beta_std': np.nan, 'cov_log': np.full((2, 2), np.nan),
+        'alpha': alpha, 'beta': beta, 'v_init': v_init, 'alpha_std_rel': np.nan,
+        'beta_std_rel': np.nan, 'alpha_std': np.nan, 'beta_std': np.nan,
+        'cov_fit': np.full((2, 2), np.nan), 'cov_log': np.full((2, 2), np.nan),
         'corr_log': np.nan, 'cov': np.full((2, 2), np.nan), 'corr': np.nan,
-        'alpha_ci_gaussian_lower': np.nan, 'alpha_ci_gaussian_upper': np.nan,
-        'beta_ci_gaussian_lower': np.nan, 'beta_ci_gaussian_upper': np.nan,
+        'alpha_ci_wald_lower': np.nan, 'alpha_ci_wald_upper': np.nan,
+        'beta_ci_wald_lower': np.nan, 'beta_ci_wald_upper': np.nan,
         'ci': ci, 'sigma_v': sigma_v, 'sigma_v_init': sigma_v_init_used,
     }
 
-    # Warn if the fitted (alpha, beta) landed near an optimization bound, using the same
-    #   log-space tolerance fitAlphaBetaLightCurve() uses for its own bound check (alpha/beta
-    #   span orders of magnitude, so a linear-space check would misfire - see
-    #   _makeBoundChecker()). The Gauss-Newton curvature below is only meaningful around a
-    #   genuine local optimum, and tends to be degenerate (or numerically nonsensical) once the
-    #   fit has been clipped against a box constraint instead of converging to one.
-    log_lower, log_upper = _logAlphaBetaBounds()
+    # Warn if the fitted (alpha, beta) landed near an optimization bound, reusing the same
+    #   log-space _makeBoundChecker() fitAlphaBetaMass()/fitAlphaBetaLightCurve() already share
+    #   (alpha/beta span orders of magnitude, so a linear-space check would misfire). The
+    #   Gauss-Newton curvature below is only meaningful around a genuine local optimum, and tends
+    #   to be degenerate (or numerically nonsensical) once the fit has been clipped against a box
+    #   constraint instead of converging to one.
     bound_tol = 1e-2
     bound_warnings = []
+    check_bound = _makeBoundChecker(bound_warnings, tol=bound_tol, log=True)
 
-    for name, value, lo, hi in [
-            ("alpha", alpha, log_lower[0], log_upper[0]),
-            ("beta", beta, log_lower[1], log_upper[1])]:
-
-        log_value = np.log(value)
-        span = hi - lo
-
-        if (log_value - lo)/span < bound_tol:
-            bound_warnings.append("{:s}={:.6g} is close to the fit lower bound ({:.6g})".format(
-                name, value, np.exp(lo)))
-
-        if (hi - log_value)/span < bound_tol:
-            bound_warnings.append("{:s}={:.6g} is close to the fit upper bound ({:.6g})".format(
-                name, value, np.exp(hi)))
+    check_bound("alpha", alpha, *ALPHA_BETA_BOUNDS[0])
+    check_bound("beta", beta, *ALPHA_BETA_BOUNDS[1])
 
     if bound_warnings:
         print()
@@ -750,26 +743,28 @@ def _alphaBetaRobustErrors(fit_res, alpha, beta, v_data, ht_data, v_init, v_init
     # Parametric (log-normal) confidence interval - see the docstring above for how this differs
     #   from wmpl.Utils.Math.confidenceInterval()'s empirical percentiles elsewhere in the library
     z = scipy.special.ndtri(0.5 + ci/200.0)
-    alpha_ci_gaussian_lower = alpha*np.exp(-z*alpha_std_rel)
-    alpha_ci_gaussian_upper = alpha*np.exp(z*alpha_std_rel)
-    beta_ci_gaussian_lower = beta*np.exp(-z*beta_std_rel)
-    beta_ci_gaussian_upper = beta*np.exp(z*beta_std_rel)
+    alpha_ci_wald_lower = alpha*np.exp(-z*alpha_std_rel)
+    alpha_ci_wald_upper = alpha*np.exp(z*alpha_std_rel)
+    beta_ci_wald_lower = beta*np.exp(-z*beta_std_rel)
+    beta_ci_wald_upper = beta*np.exp(z*beta_std_rel)
 
     return {
         'alpha': alpha,
         'beta': beta,
+        'v_init': v_init,
         'alpha_std_rel': alpha_std_rel,
         'beta_std_rel': beta_std_rel,
         'alpha_std': alpha_std,
         'beta_std': beta_std,
+        'cov_fit': cov_fit,
         'cov_log': cov_log,
         'corr_log': corr_log,
         'cov': cov,
         'corr': corr,
-        'alpha_ci_gaussian_lower': alpha_ci_gaussian_lower,
-        'alpha_ci_gaussian_upper': alpha_ci_gaussian_upper,
-        'beta_ci_gaussian_lower': beta_ci_gaussian_lower,
-        'beta_ci_gaussian_upper': beta_ci_gaussian_upper,
+        'alpha_ci_wald_lower': alpha_ci_wald_lower,
+        'alpha_ci_wald_upper': alpha_ci_wald_upper,
+        'beta_ci_wald_lower': beta_ci_wald_lower,
+        'beta_ci_wald_upper': beta_ci_wald_upper,
         'ci': ci,
         'sigma_v': sigma_v,
         'sigma_v_init': sigma_v_init_used,
@@ -832,9 +827,9 @@ def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='
                 RANDOM error of that median - it is also systematically biased low by the
                 deceleration trend across the leading window itself (a fixed offset, not
                 something a variance term can correct for), which can meaningfully under-cover
-                alpha_ci_gaussian_lower/upper - see the Statistical caveats below.
+                alpha_ci_wald_lower/upper - see the Statistical caveats below.
         ci: [float] Confidence level (0-100, e.g. 95, the default) for the approximate
-            alpha_ci_gaussian_lower/upper and beta_ci_gaussian_lower/upper bounds below - only
+            alpha_ci_wald_lower/upper and beta_ci_wald_lower/upper bounds below - only
             used if estimate_errors=True. Same convention as
             wmpl.Utils.Math.confidenceInterval()'s `ci`.
         verbose: [bool] If True, print the adopted v_init/alpha/beta (and, if
@@ -847,7 +842,7 @@ def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='
             - beta: [float] Mass loss.
         If estimate_errors=True, a 4th element `errors` (dict, from _alphaBetaRobustErrors()) is
         also returned:
-            'alpha', 'beta': echoed back, so the dict is self-contained.
+            'alpha', 'beta', 'v_init': echoed back, so the dict is self-contained.
             'alpha_std_rel', 'beta_std_rel': [float] Relative (fractional) 1-sigma uncertainties
                 of alpha/beta in (ln alpha, ln beta) space, combining the Gauss-Newton curvature
                 of the fit itself with (if applicable) v_init's own uncertainty - see the caveats
@@ -855,8 +850,13 @@ def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='
             'alpha_std', 'beta_std': [float] The same 1-sigma uncertainties propagated to linear
                 (alpha, beta) space via the delta method (alpha_std = alpha*alpha_std_rel, since
                 d(alpha)/d(ln alpha) = alpha).
+            'cov_fit': [ndarray] The Gauss-Newton contribution to 'cov_log' ALONE (i.e. v_init
+                treated as exactly known, before any sigma_v_init correction is added) - lets a
+                caller (e.g. plotAlphaBeta()) show how much of the total uncertainty in 'cov_log'
+                comes from the fit itself vs. from propagating v_init's own uncertainty.
             'cov_log': [ndarray] Full 2x2 covariance matrix of (ln alpha, ln beta) - the space
-                this model is actually fit in.
+                this model is actually fit in. 'cov_fit' plus the sigma_v_init rank-1 correction
+                (see _alphaBetaRobustErrors()'s docstring).
             'cov': [ndarray] The same covariance propagated to linear (alpha, beta) space. Use
                 'cov'/'cov_log' instead of the marginal std devs above to propagate into any OTHER
                 derived quantity: alpha and beta are typically strongly correlated (see 'corr'/
@@ -865,16 +865,18 @@ def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='
                 (alpha, beta) - numerically identical (correlation is invariant under the
                 positive-diagonal rescaling relating the two spaces); both are kept for
                 convenience.
-            'alpha_ci_gaussian_lower', 'alpha_ci_gaussian_upper',
-            'beta_ci_gaussian_lower', 'beta_ci_gaussian_upper': [float] APPROXIMATE confidence
-                intervals based on the local Gaussian approximation in log-space, at the `ci`
-                level - i.e. alpha/beta are treated as log-normal, so these bounds are asymmetric
-                around alpha/beta and, unlike alpha +/- z*alpha_std, can never go negative. The
-                "_gaussian" in the name is deliberate: this is NOT the same kind of object as
-                wmpl.Utils.Math.confidenceInterval()'s output elsewhere in this library (e.g.
-                Trajectory.py, REBOUND.py) - those are empirical percentiles of an actual Monte
-                Carlo ensemble, whereas there is no ensemble here, only a parametric
-                approximation.
+            'alpha_ci_wald_lower', 'alpha_ci_wald_upper',
+            'beta_ci_wald_lower', 'beta_ci_wald_upper': [float] APPROXIMATE confidence
+                intervals based on the local Gaussian (Wald-type) approximation in log-space, at
+                the `ci` level - i.e. alpha/beta are treated as log-normal, so these bounds are
+                asymmetric around alpha/beta and, unlike alpha +/- z*alpha_std, can never go
+                negative. The "_wald" in the name is deliberate: this is NOT the same kind of
+                object as wmpl.Utils.Math.confidenceInterval()'s output elsewhere in this library
+                (e.g. Trajectory.py, REBOUND.py) - those are empirical percentiles of an actual
+                Monte Carlo ensemble, whereas there is no ensemble here, only a local quadratic
+                approximation of the cost function around the optimum. See profileAlphaBeta()
+                for a profile-based alternative when that approximation is in doubt (see the
+                Statistical caveats below).
             'ci': [float] The confidence level actually used (echoed back).
             'sigma_v': [float] The velocity uncertainty actually used (see the sigma_v caveat
                 above).
@@ -893,7 +895,7 @@ def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='
           (cov_log = cov_fit + cov_v_init), which ignores that v_init and the conditional fit's
           residuals both ultimately come from the same v_data - a standard plug-in approximation,
           not a fully joint treatment.
-        - alpha_ci_gaussian_lower/upper and beta_ci_gaussian_lower/upper assume normality in LOG
+        - alpha_ci_wald_lower/upper and beta_ci_wald_lower/upper assume normality in LOG
           space, which is only ever as good as the two contributions to cov_log above - they are
           a convenience view of the same Gaussian approximation, not an independently more
           rigorous one.
@@ -903,14 +905,14 @@ def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='
           is NaN (alpha/beta themselves are still returned). Both mean the same thing: the fit is
           likely poorly constrained by this data, and the local curvature approximation isn't
           meaningful around a boundary the optimizer was clipped against rather than converged to.
-        - With v_init=None (derived internally), alpha_ci_gaussian_lower/upper can under-cover the
+        - With v_init=None (derived internally), alpha_ci_wald_lower/upper can under-cover the
           true alpha/beta by a lot more than the other approximations above: the leading window
           used to derive v_init is still decelerating, so its median is not just noisy but
           systematically biased LOW relative to the true v_init (-11 m/s, deterministic, on this
           module's own synthetic test geometry - a fixed offset, not something sigma_v_init's
           variance term can correct for). Measured on that same geometry (300-realization Monte
           Carlo): at the noise level used elsewhere in this test suite, the nominal 95%
-          alpha_ci_gaussian_lower/upper actually covers the true alpha/beta only ~65-71% of the
+          alpha_ci_wald_lower/upper actually covers the true alpha/beta only ~65-71% of the
           time with a derived v_init - even though alpha_std_rel/beta_std_rel themselves stay
           accurate - recovering to ~90% at 3x that noise as the fixed bias shrinks relative to the
           growing scatter. With v_init supplied externally instead (no derivation, hence no
@@ -919,6 +921,30 @@ def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='
           previously-inconsequential offset into a miscalibrated claim. Prefer an external v_init
           (+ sigma_v_init if it has its own uncertainty) over the internally-derived one whenever
           interval coverage matters, not just the point estimate.
+        - alpha_ci_wald_lower/upper and beta_ci_wald_lower/upper are derived from a LOCAL
+          quadratic approximation (cov_log) of the cost function around the optimum - this is
+          exactly what covariances/correlations/std devs are for, and remains reliable for that.
+          But when a parameter is only weakly constrained, the reported interval can extend far
+          enough from the optimum that the cost function is no longer well described by that
+          local quadratic shape - and in that regime, the WALD interval can substantially
+          OVERESTIMATE the interval the actual cost surface supports, particularly in the
+          direction the real cost rises fastest. Measured systematically (8 synthetic scenarios
+          spanning well- to weakly-constrained): the discrepancy between the Wald interval and the
+          properly-profiled interval (see profileAlphaBeta()) is negligible
+          (~1x) whenever the relevant *_std_rel is small, and grows sharply (as much as ~140x on
+          the upper bound, occasionally unbounded) once it is large - NOT a one-off pathological
+          case, but a systematic property of this regime. Critically, this affects beta far more
+          readily than alpha at comparable *_std_rel magnitudes (e.g. alpha_std_rel=88.6% gave
+          only a 1.8x discrepancy, while beta_std_rel=111.4% - barely bigger - gave 5.0x): beta
+          enters the model inside Ei(beta*v^2), directly shaping the curve, while alpha enters as
+          a near-linear log-scale shift (ln(2*alpha)) - a structurally more nonlinear role for
+          beta that a local quadratic expansion is expected to describe far less faithfully. This
+          limitation is specific to the CONFIDENCE INTERVAL, not to cov_log/corr_log/alpha_std_rel/
+          beta_std_rel themselves (those keep describing the local curvature correctly regardless
+          - only the extrapolation of that curvature into a "what values are plausible" statement
+          is what breaks down). When beta_std_rel (or alpha_std_rel) is large, prefer
+          profileAlphaBeta() over alpha_ci_wald_lower/upper - beta_ci_wald_lower/upper for
+          inference about which parameter values are actually compatible with the data.
     """
 
     method = method.lower()
@@ -976,12 +1002,12 @@ def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='
         print("v_init               = {:.3f} m/s".format(v_init))
 
         if estimate_errors:
-            print("alpha                = {:.6f} (+/-{:.1%})  [{:.3g}% gaussian CI: {:.6f} - "
+            print("alpha                = {:.6f} (+/-{:.1%})  [{:.3g}% Wald CI: {:.6f} - "
                 "{:.6f}]".format(alpha, errors['alpha_std_rel'], ci,
-                errors['alpha_ci_gaussian_lower'], errors['alpha_ci_gaussian_upper']))
-            print("beta                 = {:.6f} (+/-{:.1%})  [{:.3g}% gaussian CI: {:.6f} - "
+                errors['alpha_ci_wald_lower'], errors['alpha_ci_wald_upper']))
+            print("beta                 = {:.6f} (+/-{:.1%})  [{:.3g}% Wald CI: {:.6f} - "
                 "{:.6f}]".format(beta, errors['beta_std_rel'], ci,
-                errors['beta_ci_gaussian_lower'], errors['beta_ci_gaussian_upper']))
+                errors['beta_ci_wald_lower'], errors['beta_ci_wald_upper']))
             print("corr(alpha, beta)    = {:.3f}".format(errors['corr']))
             print("sigma_v              = {:.3f} m/s".format(errors['sigma_v']))
             print("sigma_v_init         = {:.3f} m/s".format(errors['sigma_v_init']))
@@ -993,6 +1019,335 @@ def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='
         return v_init, alpha, beta, errors
 
     return v_init, alpha, beta
+
+
+def _profileCostAt(fixed_value, fixed_idx, free_log_guess, v_normed, ht_normed, sigma_v_normed,
+        free_bounds, loss, f_scale):
+    """ Cost at a fixed alpha or beta value, re-optimizing the other (profiled-out) parameter -
+        the building block profileAlphaBeta() walks its grid with.
+
+    Arguments:
+        fixed_value: [float] The value (linear space) the profiled parameter is held at.
+        fixed_idx: [int] 0 if fixed_value is alpha (profiling out beta), 1 if it is beta
+            (profiling out alpha) - matches _dynResiduals()'s x = (ln alpha, ln beta) ordering.
+        free_log_guess: [float] Starting guess (ln space) for the other, re-optimized parameter.
+        v_normed: [ndarray] Normalized velocity in (0, 1).
+        ht_normed: [ndarray] Height normalized to HT_NORM_CONST.
+        sigma_v_normed: [float] Normalized velocity uncertainty.
+        free_bounds: [tuple] (log_lower, log_upper) bounds for the re-optimized parameter.
+        loss: [str] scipy.optimize.least_squares loss.
+        f_scale: [float] Robust loss scale.
+
+    Return:
+        (cost, log_free_at_optimum): [tuple] res.cost, and the optimized log-parameter so the
+            next grid point can warm-start from it.
+    """
+
+    def _resid(log_free):
+        x = np.empty(2)
+        x[fixed_idx] = np.log(fixed_value)
+        x[1 - fixed_idx] = log_free[0]
+        return _dynResiduals(x, v_normed, ht_normed, sigma_v_normed)
+
+    res = scipy.optimize.least_squares(_resid, [free_log_guess], \
+        bounds=([free_bounds[0]], [free_bounds[1]]), loss=loss, f_scale=f_scale)
+
+    return res.cost, res.x[0]
+
+
+def _costAtOptimum(alpha, beta, v_normed, ht_normed, sigma_v_normed, log_bounds, loss, f_scale):
+    """ Cost at the already-known joint optimum (alpha, beta) - profileAlphaBeta()'s cost_best
+        reference point every grid point's delta_cost is measured against.
+
+        Direct residual evaluation for loss='soft_l1' (the default, and the only loss this module
+        itself ever actually exercises), via scipy's own published cost formula for that loss:
+        F = 0.5*sum(f_scale**2 * 2*(sqrt(1 + (f/f_scale)**2) - 1)) - verified numerically against
+        scipy.optimize.least_squares's own reported .cost (matched to solver tolerance, ~1e-7).
+        This avoids re-optimizing to reach an answer that is already known: (alpha, beta) being
+        the joint optimum means fixing beta at its own value and re-optimizing alpha must
+        converge back to alpha itself, so a fresh optimizer call here only ever confirms, never
+        discovers, its own starting point.
+
+        Falls back to re-optimizing (via _profileCostAt(), fixing beta and re-optimizing alpha
+        from its own value - the same mechanism every grid point already uses) for any other
+        loss, including a custom callable - not worth hand-rolling scipy's other built-in loss
+        formulas, or trying to support arbitrary callables generically, just to skip what is, for
+        those, already a near-free optimizer call starting exactly at its own answer.
+    """
+
+    if loss == 'soft_l1':
+        residuals = _dynResiduals(np.log([alpha, beta]), v_normed, ht_normed, sigma_v_normed)
+        z = (residuals/f_scale)**2
+        return 0.5*np.sum(f_scale**2 * 2.0*(np.sqrt(1.0 + z) - 1.0))
+
+    cost, _ = _profileCostAt(beta, 1, np.log(alpha), v_normed, ht_normed, sigma_v_normed,
+        (log_bounds[0][0], log_bounds[1][0]), loss, f_scale)
+    return cost
+
+
+def _profileOneParameter(fixed_idx, value_hat, other_hat, cost_best, s2, v_normed, ht_normed,
+        sigma_v_normed, log_bounds, ci, n_grid, loss, f_scale):
+    """ Profile scan and ci-crossing search for one parameter (0=alpha, 1=beta), profiling out the
+        other. See profileAlphaBeta() for the full picture.
+
+    Return:
+        profile: [dict] 'ci_lower', 'ci_upper' (float or None - None if the search grid, bounded
+            by ALPHA_BETA_BOUNDS, never crosses the threshold on that side), 'grid',
+            'delta_cost', 'delta_threshold', 'value_hat', 'cost_best', 's2'.
+    """
+
+    # Grid spans ALPHA_BETA_BOUNDS in LOG space (matching the space the model/optimizer/cov_log
+    #   all actually work in), via linspace + exp rather than converting to linear bounds first and
+    #   letting geomspace re-derive that same log-space grid internally - mathematically identical
+    #   (geomspace IS exp(linspace(log(...)))), just avoids a redundant log/exp round trip and
+    #   keeps the log-space nature of the computation explicit.
+    log_lo = log_bounds[0][fixed_idx] + np.log(1.001)
+    log_hi = log_bounds[1][fixed_idx] + np.log(0.999)
+    log_grid = np.linspace(log_lo, log_hi, n_grid)
+    grid = np.exp(log_grid)
+
+    other_bounds = (log_bounds[0][1 - fixed_idx], log_bounds[1][1 - fixed_idx])
+
+    # chi2(df=1) quantile at `ci`: exact closed form via the standard normal quantile (same
+    #   scipy.stats-avoiding trick as _gaussianEllipsePoints()/alpha_ci_wald_lower):
+    #   chi2.ppf(p, df=1) = ndtri(0.5 + p/2)^2
+    chi2_1 = scipy.special.ndtri(0.5 + ci/200.0)**2
+
+    delta = np.empty_like(grid)
+    center_i = np.searchsorted(grid, value_hat)
+
+    # Walk outward from value_hat in both directions, warm-starting each step from the last
+    log_other = np.log(other_hat)
+    for i in range(center_i, len(grid)):
+        cost, log_other = _profileCostAt(grid[i], fixed_idx, log_other, v_normed, ht_normed,
+            sigma_v_normed, other_bounds, loss, f_scale)
+        delta[i] = 2.0*(cost - cost_best)/s2
+
+    log_other = np.log(other_hat)
+    for i in range(center_i - 1, -1, -1):
+        cost, log_other = _profileCostAt(grid[i], fixed_idx, log_other, v_normed, ht_normed,
+            sigma_v_normed, other_bounds, loss, f_scale)
+        delta[i] = 2.0*(cost - cost_best)/s2
+
+    below, above = grid < value_hat, grid > value_hat
+
+    # Walk outward from value_hat on each side, with (value_hat, 0.0) prepended as an exact anchor
+    #   (delta_cost is 0 there by construction - cost_best IS the cost at value_hat with the other
+    #   parameter re-optimized). Anchoring on value_hat itself, rather than on whatever the fixed
+    #   geomspace grid's nearest surviving point happens to be, matters because that nearest point
+    #   can be on the WRONG side of value_hat when the grid is coarser than the true interval width
+    #   (common for a well-constrained parameter: n_grid is fixed across the full ALPHA_BETA_BOUNDS
+    #   span, so its local spacing can easily exceed a tightly-constrained parameter's actual CI) -
+    #   interpolating from there can then place ci_upper/ci_lower on the wrong side of value_hat
+    #   entirely. Walking outward also keeps delta ascending by construction on both sides, which
+    #   np.interp's docs require of `xp` and silently gives wrong answers for otherwise (the
+    #   previous ci_lower search fed it descending [delta[i], delta[i+1]], since delta strictly
+    #   decreases approaching value_hat from below).
+    log_value_hat = np.log(value_hat)
+    log_grid_above = np.concatenate(([log_value_hat], log_grid[above]))
+    delta_above = np.concatenate(([0.0], delta[above]))
+
+    log_grid_below = np.concatenate(([log_value_hat], log_grid[below][::-1]))
+    delta_below = np.concatenate(([0.0], delta[below][::-1]))
+
+    # Interpolate in LOG space, not linear grid space, then exponentiate back: the model, cov_log,
+    #   and the grid itself are all built on (ln alpha, ln beta), where the cost surface is far
+    #   closer to locally linear/parabolic than it is in linear (alpha, beta) space - interpolating
+    #   there gives a more accurate crossing point at a given grid resolution.
+    ci_upper = None
+    idx = np.where(delta_above > chi2_1)[0]
+    if len(idx):
+        i = idx[0]
+        log_ci_upper = np.interp(chi2_1, [delta_above[i - 1], delta_above[i]],
+            [log_grid_above[i - 1], log_grid_above[i]])
+        ci_upper = np.exp(log_ci_upper)
+
+    ci_lower = None
+    idx = np.where(delta_below > chi2_1)[0]
+    if len(idx):
+        i = idx[0]
+        log_ci_lower = np.interp(chi2_1, [delta_below[i - 1], delta_below[i]],
+            [log_grid_below[i - 1], log_grid_below[i]])
+        ci_lower = np.exp(log_ci_lower)
+
+    return {
+        'ci_lower': ci_lower,
+        'ci_upper': ci_upper,
+        'grid': grid,
+        'delta_cost': delta,
+        'delta_threshold': chi2_1,
+        'value_hat': value_hat,
+        'cost_best': cost_best,
+        's2': s2,
+    }
+
+
+def profileAlphaBeta(v_data, ht_data, fit, sigma_v=None, ci=95.0, param='both', n_grid=250,
+        loss='soft_l1', f_scale=2.0, verbose=False):
+    """ Profile-based confidence interval(s) for alpha and/or beta - commonly called a "profile
+        likelihood" interval (the name this module's own function/parameter names use, since
+        that's the term to search for), though see the Statistical caveats below for the precise
+        sense in which that name applies: what is actually profiled by default is the robust
+        (soft-L1) fitting COST, not a Gaussian log-likelihood. A more direct alternative to
+        fitAlphaBeta(..., estimate_errors=True)'s alpha_ci_wald_lower/upper -
+        beta_ci_wald_lower/upper for when a parameter is weakly constrained (see the Statistical
+        caveats on those fields) and the local quadratic (Wald) approximation those are built on
+        no longer describes the cost surface out at the interval's edge.
+
+        Deliberately a SEPARATE function from estimate_errors=True, not a replacement for it and
+        not an additional field mixed into the same `errors` dict: they answer different
+        questions and mixing them would make it much harder to tell which quantities describe a
+        local approximation and which describe the real cost surface. estimate_errors=True's
+        cov_log/corr_log/alpha_std_rel/beta_std_rel describe the LOCAL curvature of the cost
+        function at the optimum - correct and useful for propagating small uncertainties
+        regardless of anything below (see fitAlphaBeta()'s docstring). This function instead asks
+        "what parameter values are actually compatible with the data" by walking the real
+        (soft-L1) cost function directly: for a grid of values of the profiled parameter, the
+        OTHER parameter is re-optimized at each point (not held at its joint-fit value), and the
+        interval is read off wherever the resulting, appropriately-scaled cost rise crosses the
+        chi-squared(df=1) threshold for `ci` - the same likelihood-ratio-style construction as a
+        true profile likelihood, applied to a cost surface rather than a log-likelihood (see the
+        Statistical caveats below), not an extrapolated quadratic. It makes no assumption that
+        the region it reports on is well-described by a quadratic bowl, which is exactly the
+        assumption that breaks down for a weakly-constrained
+        beta in this model (see fitAlphaBeta()'s docstring for the measured extent of this - up
+        to ~140x on the upper bound in the scenarios checked, growing sharply and systematically
+        once beta_std_rel is large, more so than for alpha given how much more nonlinearly beta
+        enters the model).
+
+        Unlike estimate_errors=True, this does NOT require the original fit to have used
+        method='robust' - it re-derives its own cost from `fit`'s (alpha, beta) directly via the
+        same velocity-residual definition minimizeAlphaBetaRobust() uses, regardless of whether
+        that point estimate itself came from method='q4' or 'robust'.
+
+        Not free: this is an optimization sweep (n_grid re-fits per profiled parameter), not the
+        few extra refits estimate_errors=True's sigma_v_init correction costs.
+
+    Arguments:
+        v_data: [ndarray] Velocity data (m/s), as given to fitAlphaBeta().
+        ht_data: [ndarray] Height data (m), as given to fitAlphaBeta().
+        fit: [tuple] (v_init, alpha, beta), exactly as returned by fitAlphaBeta(). v_init is held
+            fixed at this value throughout - it is not itself profiled (matching
+            estimate_errors=True's own treatment of a given v_init as exactly known unless
+            sigma_v_init says otherwise; there is no equivalent of that correction here).
+
+    Keyword arguments:
+        sigma_v: [float] Velocity uncertainty (m/s), same role as fitAlphaBeta()'s sigma_v. If
+            None, estimated the same way (_estimateSigmaV(), using `fit`'s own alpha/beta as the
+            reference model) - the same *effective*, not purely instrumental, uncertainty
+            fitAlphaBeta() itself would derive.
+        ci: [float] Confidence level (0-100, e.g. 95, the default).
+        param: [str] 'alpha', 'beta' (most relevant given beta is the parameter this matters for
+            in this model - see above), or 'both' (default).
+        n_grid: [int] Number of grid points spanning ALPHA_BETA_BOUNDS for the profiled
+            parameter - determines resolution/cost, not a statistical stability budget like
+            plotAlphaBeta()'s band_samples (this is a deterministic sweep, not a sampling one).
+        loss: [str] scipy.optimize.least_squares loss - should match what the original fit used,
+            for the comparison against its cost to be meaningful.
+        f_scale: [float] Robust loss scale - should match the original fit's.
+        verbose: [bool] If True, print the profiled parameter(s) and their profile-based CI,
+            mirroring fitAlphaBeta(..., verbose=True)'s style.
+
+    Return:
+        profile: [dict] Keyed by whichever of 'alpha'/'beta' was requested via `param`, each a
+            dict with:
+                'ci_lower', 'ci_upper': [float or None] The profile-based interval at `ci` - None
+                    if the grid (bounded by ALPHA_BETA_BOUNDS) never reaches where the cost
+                    crosses the threshold on that side - the data does not constrain that side at
+                    all within the model's own physical bounds, which is itself informative.
+                'grid': [ndarray] The parameter grid the profile was evaluated on.
+                'delta_cost': [ndarray] 2*(cost - cost_best)/s2 at each grid point - compare
+                    directly against 'delta_threshold' (or recompute at a different `ci` via
+                    ndtri(0.5 + ci/200)**2) to reproduce ci_lower/ci_upper, or re-derive the
+                    interval at a different `ci` without re-running the sweep.
+                'delta_threshold': [float] The chi2(df=1) quantile at `ci` that 'delta_cost' is
+                    compared against - exactly ndtri(0.5 + ci/200)**2, exposed directly so a
+                    caller can e.g. plt.axhline(profile['beta']['delta_threshold']) without
+                    recomputing it.
+                'value_hat': [float] The point estimate this parameter was profiled around
+                    (`fit`'s alpha or beta, echoed back so this dict is self-contained).
+                'cost_best', 's2': [float] The same reduced-chi-square scale
+                    fitAlphaBeta(estimate_errors=True) uses for cov_log, so this comparison uses
+                    an identical noise-scaling convention - any difference from the Wald interval
+                    is due to the cost surface's actual shape, not a different assumption about
+                    how much to trust sigma_v.
+
+    Statistical caveats:
+        - On the name: despite "profile likelihood" being the term used throughout this function
+          and its helpers (it's the standard, searchable name for this class of method - fix one
+          parameter, re-optimize the rest, threshold the objective's rise), what is actually
+          profiled by default is a robust soft-L1 fitting COST, not a Gaussian log-likelihood.
+          There is no claim anywhere in this module that soft_l1's cost equals -2*ln(L) for any
+          actual noise model - it doesn't, for any noise model. The chi2(df=1) threshold used to
+          read off ci_lower/ci_upper is exactly Wilks'-theorem-justified only for a genuine
+          Gaussian-noise least-squares cost (loss='linear'); under the default soft-L1 loss it is
+          the same well-motivated but not perfectly theoretically clean comparison this module
+          already accepts elsewhere for its Gauss-Newton covariances (e.g.
+          fitAlphaBetaLightCurve()'s alpha_std_rel/beta_std_rel) - a useful, standard engineering
+          approximation, not a literal likelihood-ratio test.
+        - Not a replacement for estimate_errors=True's cov_log/corr_log/alpha_std_rel/
+          beta_std_rel - those remain the right tool for LOCAL error propagation (e.g. via the
+          delta method into some other derived quantity). This answers a different question
+          (which parameter values are compatible with the data at all) and does not itself
+          provide a covariance or support sampling a band/fan/ellipse - plotAlphaBeta() still
+          needs cov_log for that, regardless of what this function reports.
+        - Uses the same reduced-chi-square (s2) rescaling as estimate_errors=True, which assumes
+          sigma_v is an effective, self-derived scale rather than a true instrumental one (see
+          fitAlphaBeta()'s sigma_v caveat).
+    """
+
+    v_init, alpha, beta = fit
+
+    if param not in ('alpha', 'beta', 'both'):
+        raise ValueError("param must be 'alpha', 'beta', or 'both', got {!r}.".format(param))
+
+    if not (0 < ci < 100):
+        raise ValueError("ci must be strictly between 0 and 100, got {!r}.".format(ci))
+
+    v_normed = v_data/v_init
+    ht_normed = ht_data/HT_NORM_CONST
+
+    if sigma_v is None:
+        sigma_v = _estimateSigmaV(alpha, beta, v_normed, ht_normed, v_init)
+
+    sigma_v_normed = sigma_v/v_init
+    log_bounds = _logAlphaBetaBounds()
+
+    # Reference cost at the joint optimum - see _costAtOptimum()'s docstring for why this is a
+    #   direct evaluation rather than a redundant re-optimization for the default loss.
+    cost_best = _costAtOptimum(alpha, beta, v_normed, ht_normed, sigma_v_normed, log_bounds, loss,
+        f_scale)
+
+    dof = max(len(v_data) - 2, 1)
+    s2 = 2.0*cost_best/dof
+
+    profile = {}
+
+    if param in ('alpha', 'both'):
+        profile['alpha'] = _profileOneParameter(0, alpha, beta, cost_best, s2, v_normed,
+            ht_normed, sigma_v_normed, log_bounds, ci, n_grid, loss, f_scale)
+
+    if param in ('beta', 'both'):
+        profile['beta'] = _profileOneParameter(1, beta, alpha, cost_best, s2, v_normed,
+            ht_normed, sigma_v_normed, log_bounds, ci, n_grid, loss, f_scale)
+
+    if verbose:
+        print()
+        print("--- profileAlphaBeta ---")
+
+        for name, value in [('alpha', alpha), ('beta', beta)]:
+
+            if name not in profile:
+                continue
+
+            p = profile[name]
+            lo = "{:.6f}".format(p['ci_lower']) if p['ci_lower'] is not None else "<= lower bound"
+            hi = "{:.6f}".format(p['ci_upper']) if p['ci_upper'] is not None else ">= upper bound"
+
+            print("{:<21s}= {:.6f}  [{:.3g}% profile CI: {:s} - {:s}]".format(
+                name, value, ci, lo, hi))
+
+    return profile
 
 
 def alphaBetaHeightNormed(v_normed, alpha, beta):
@@ -1066,13 +1421,21 @@ def alphaBetaVelocityNormed(ht_normed, alpha, beta, v_eps=1e-10):
     def _g(v, y_target):
         return alphaBetaHeightNormed(v, alpha, beta) - y_target
 
+    # alphaBetaHeightNormed(v_hi/v_lo, alpha, beta) doesn't depend on y_target, so it's the same
+    #   value on every iteration below - compute it once here (2 Ei() calls total) instead of
+    #   inside the loop (2 Ei() calls per height point, most of which just get thrown away on a
+    #   clip). _g(v_hi, y_t) <= 0 is exactly y_t >= y_hi (and symmetrically for v_lo) - only the
+    #   comparison itself needs to happen per point now.
+    y_hi = alphaBetaHeightNormed(v_hi, alpha, beta)
+    y_lo = alphaBetaHeightNormed(v_lo, alpha, beta)
+
     for i, y_t in enumerate(y_arr):
 
         # Clip outside the invertible range
-        if _g(v_hi, y_t) <= 0:
+        if y_t >= y_hi:
             v_out[i] = v_hi
 
-        elif _g(v_lo, y_t) >= 0:
+        elif y_t <= y_lo:
             v_out[i] = v_lo
 
         else:
@@ -1116,6 +1479,409 @@ def alphaBetaVelocity(ht_data, alpha, beta, v_init, v_eps=1e-10):
         return vel_data[0]
 
     return vel_data
+
+
+def _gaussianEllipsePoints(mean, cov, p, n_points=200):
+    """ Points tracing the boundary of the 2D Gaussian ellipse enclosing probability mass p.
+        Factored out as a standalone helper so other plotting functions (e.g. a future
+        plotAlphaBetaSurvivalDiagram()) can reuse it for any 2-parameter covariance, not just
+        (ln alpha, ln beta).
+
+        The Mahalanobis radius follows the chi-squared distribution with 2 degrees of freedom,
+        which has an exact closed form here (chi2(df=2) is Exponential(scale=2)):
+        chi2.ppf(p, df=2) = -2*ln(1 - p) - used instead of scipy.stats.chi2.ppf() to avoid a new
+        scipy submodule dependency.
+
+    Arguments:
+        mean: [ndarray] (2,) Center of the ellipse.
+        cov: [ndarray] (2, 2) Covariance matrix.
+        p: [float] Probability mass enclosed by the ellipse (0-1) - e.g. 0.6827 for the 2D
+            "1-sigma" ellipse (NOT the same as a unit Mahalanobis distance - that would only
+            enclose ~39% of the mass in 2D, a common point of confusion), or ci/100 for a ci%
+            ellipse.
+
+    Keyword arguments:
+        n_points: [int] Number of points tracing the boundary.
+
+    Return:
+        (x, y): [tuple of ndarrays] Points tracing the ellipse boundary, in the same units as
+            mean/cov.
+    """
+
+    radius = np.sqrt(-2.0*np.log(1.0 - p))
+
+    eigvals, eigvecs = np.linalg.eigh(cov)
+    eigvals = np.clip(eigvals, 0.0, None)  # guard tiny negative eigenvalues from roundoff
+
+    # eigh() already returns ascending eigenvalues (a documented numpy contract, not just this
+    #   function's current behavior), so this doesn't change the resulting ellipse - reordered
+    #   descending anyway so the axis order is explicit in this function's own code rather than
+    #   relying on the reader knowing that contract.
+    order = np.argsort(eigvals)[::-1]
+    eigvals, eigvecs = eigvals[order], eigvecs[:, order]
+
+    theta = np.linspace(0.0, 2*np.pi, n_points)
+    circle = np.vstack([np.cos(theta), np.sin(theta)])
+
+    transform = eigvecs @ np.diag(np.sqrt(eigvals))
+    ellipse = np.asarray(mean)[:, None] + radius*(transform @ circle)
+
+    return ellipse[0], ellipse[1]
+
+
+def plotAlphaBeta(v_data, ht_data, fit, errors=None, band=True, fan=True, band_samples=1000,
+        fan_curves=100, ellipse=True, ellipse_scatter=True, ellipse_scatter_points=300,
+        residuals=False, ci=None, seed=None, axes=None):
+    """ Plot a fitAlphaBeta() result: observed (velocity, height) data and the fitted model
+        curve, plus - if `errors` (from estimate_errors=True) is given - its propagated parameter
+        uncertainty, optionally alongside a (ln alpha, ln beta) ellipse panel and a residuals
+        panel.
+
+        Standalone from fitAlphaBeta() on purpose: re-plotting an already-computed (fit, errors)
+        pair never needs to re-run the fit, and estimate_errors=True's own sensitivity refits
+        (for sigma_v_init's rank-1 correction) are not free - bundling plotting into the fit
+        would force redoing that work just to redraw a figure.
+
+        Naming discipline: the shaded region in the main panel, and the words used for it
+        throughout this function, are "parameter uncertainty band"/"propagated parameter
+        uncertainty", NEVER "confidence band". It is a Monte Carlo propagation of the analytic
+        (ln alpha, ln beta) covariance through the deterministic forward model - not a classical
+        confidence band, and not the same kind of object as wmpl.Utils.Math.confidenceInterval()'s
+        empirical percentiles elsewhere in this library either, even though the same percentile
+        formula is used once the samples exist. Same discipline as the existing "_gaussian"
+        suffix on alpha_ci_wald_lower/upper.
+
+    Arguments:
+        v_data: [ndarray] Velocity data (m/s), as given to fitAlphaBeta().
+        ht_data: [ndarray] Height data (m), as given to fitAlphaBeta().
+        fit: [tuple] (v_init, alpha, beta), exactly as returned by fitAlphaBeta().
+
+    Keyword arguments:
+        errors: [dict or None] The 4th element returned by fitAlphaBeta(..., estimate_errors=
+            True), or None. If None, or if its covariance fields are NaN (e.g. the fit landed on
+            an ALPHA_BETA_BOUNDS edge - see fitAlphaBeta()'s docstring), the band/fan/ellipse
+            content degrades gracefully to an annotation instead of raising.
+        band: [bool] Draw the parameter uncertainty band in the main panel.
+        fan: [bool] Draw individual propagated-uncertainty realizations (a subsample of the same
+            draws used for the band) in the main panel.
+        band_samples: [int] Number of (alpha, beta) draws from the (ln alpha, ln beta) Gaussian
+            approximation (covariance cov_log). The forward model is cheap to evaluate, so this
+            is set by how stable the tail percentiles of the band need to be, not by cost.
+        fan_curves: [int] Number of individual curves drawn for `fan`, subsampled from the same
+            `band_samples` draws (capped at however many landed inside ALPHA_BETA_BOUNDS).
+        ellipse: [bool] Draw the (ln alpha, ln beta) ellipse panel.
+        ellipse_scatter: [bool] Overlay the sampled (ln alpha, ln beta) cloud on the ellipse
+            panel - a visual illustration of the sampled Gaussian approximation, NOT a
+            consistency check of anything: the samples and the ellipses both come from the same
+            N(mean, cov_fit/cov_log), so they cannot meaningfully disagree except via a bug -
+            this just renders the same distribution two ways. Default True; see
+            ellipse_scatter_points to keep it from being too busy.
+        ellipse_scatter_points: [int] Number of points drawn for `ellipse_scatter`, subsampled
+            from the same pool as band/fan if those also drew samples (band_samples-sized),
+            otherwise drawn fresh at this size directly - the ellipse cloud is a visual
+            illustration, not a percentile computation, so it doesn't need band_samples'
+            stability budget.
+        residuals: [bool] Draw the (v_obs - v_model) vs height residuals panel. Off by default -
+            opt-in, since it is a diagnostic view rather than part of the main result. Only needs
+            `fit` and the raw data, so it still draws (without the sigma_v reference lines/
+            down-weighted marking) even if errors is None - e.g. for a method='q4' point
+            estimate, which can never have estimate_errors=True.
+        ci: [float] Confidence level (0-100) for the band and the outer ellipse contour. If None
+            (default), uses errors['ci'] (the level estimate_errors was computed at) if errors is
+            given, else 95.0.
+        seed: [int, Generator or None] Forwarded to numpy.random.default_rng() for reproducible
+            sampling (an existing Generator is returned unaltered) - set this explicitly for any
+            figure meant to be regenerated identically (e.g. for a paper).
+        axes: [Axes] An existing matplotlib Axes to draw the main panel into, instead of creating
+            a new figure. Only accepted when exactly one panel is being drawn (ellipse=False,
+            residuals=False) - raises ValueError otherwise, since a single Axes can't hold a
+            multi-panel layout. When given, plt.show() is NOT called (the caller owns the
+            enclosing figure); when None, plotAlphaBeta() creates its own figure and calls
+            plt.show() before returning, exactly like fitAlphaBetaLightCurve(..., plot=True).
+
+    Return:
+        (fig, axes): [tuple] The Figure (axes.figure if `axes` was given, otherwise newly
+            created) and the Axes used, in (main, [ellipse], [residuals]) order - a bare Axes
+            (not wrapped in a tuple) if only one panel was drawn.
+
+    Statistical caveats:
+        - The parameter uncertainty band/fan/ellipse are only as good as errors['cov_log']
+          itself - see fitAlphaBeta()'s own Statistical caveats (local Gauss-Newton curvature,
+          the v_init bias if derived internally, etc.). This function visualizes that
+          approximation; it does not make it any more or less rigorous.
+        - Samples landing outside ALPHA_BETA_BOUNDS are excluded from the band/fan/ellipse-overlay
+          (a report is printed, never silently absorbed). If that excluded fraction exceeds 5%,
+          the band/fan/ellipse-overlay are suppressed entirely (an annotation explains why, in
+          place of the content) rather than drawn from what remains: past that point, the
+          surviving sample no longer represents the (ln alpha, ln beta) Gaussian approximation
+          itself, it represents that Gaussian CONDITIONED on being physically valid - a quietly
+          different quantity that would be misleading to show under the same "propagated
+          parameter uncertainty" label.
+        - The main panel's x-axis (velocity) is clipped to the observed v_data range (+10%
+          padding), same convention fitAlphaBetaLightCurve(..., plot=True) uses for its own
+          velocity panel. v(h) evaluated over the observed HEIGHT range is NOT thereby
+          constrained to the observed VELOCITY range - a fitted or (especially) sampled (alpha,
+          beta) can still swing toward v=0 within that same height span, in exactly the regime
+          where this model is steepest/least stable. Unclipped, that excursion would dominate the
+          view and read as "the fit/band is very uncertain" when it is really just the model
+          being asked to extrapolate into territory the data says nothing about. This only
+          affects the view (ax.set_xlim) - the underlying curve/band/fan data is untouched, so a
+          caller can always call ax.set_xlim()/set_ylim() again afterwards to see the full extent.
+        - The residuals panel's down-weighted-point marker and its +/-f_scale*sigma_v reference
+          lines use a hardcoded f_scale=2.0 (this module's own default elsewhere) - errors
+          doesn't carry the f_scale an existing fit actually used, so these lines may not exactly
+          match a fit's real soft-L1 transition point if it was fit with a non-default f_scale.
+    """
+
+    v_init, alpha, beta = fit
+
+    have_errors = errors is not None
+    have_cov = (have_errors and np.all(np.isfinite(errors['cov_log']))
+        and np.all(np.isfinite(errors['cov_fit'])))
+
+    if ci is None:
+        ci = errors['ci'] if have_errors else 95.0
+
+    if not (0 < ci < 100):
+        raise ValueError("ci must be strictly between 0 and 100, got {!r}.".format(ci))
+
+    # --- Decide which panels to draw, and enforce the axes/panel-count contract
+    panel_names = ['main']
+    if ellipse:
+        panel_names.append('ellipse')
+    if residuals:
+        panel_names.append('residuals')
+
+    n_panels = len(panel_names)
+
+    if axes is not None and n_panels > 1:
+        raise ValueError("axes is only accepted for a single-panel plotAlphaBeta() call (here "
+            "ellipse={!r}, residuals={!r} would need {:d} panels) - pass axes=None and let "
+            "plotAlphaBeta() build its own multi-panel figure instead.".format(
+            ellipse, residuals, n_panels))
+
+    import matplotlib.pyplot as plt
+
+    if axes is not None:
+        fig = axes.figure
+        ax_map = {'main': axes}
+    else:
+        figsize = (9, 6) if n_panels == 1 else (6.5*n_panels, 6)
+        fig, created_axes = plt.subplots(ncols=n_panels, figsize=figsize)
+        if n_panels == 1:
+            created_axes = [created_axes]
+        ax_map = dict(zip(panel_names, created_axes))
+
+    rng = np.random.default_rng(seed)
+    log_mean = np.log([alpha, beta])
+
+    # --- Draw (alpha, beta) samples from the (ln alpha, ln beta) Gaussian approximation once, if
+    #   anything below needs them. Sized at band_samples if band/fan need it (their forward-model
+    #   evaluation, the expensive part, is done separately below, only when actually needed) - or,
+    #   if only the ellipse panel's optional scatter wants samples, sized at the smaller
+    #   ellipse_scatter_points directly (that overlay is a visual illustration, not a
+    #   percentile computation, so it doesn't need band_samples' stability budget).
+    alpha_valid = beta_valid = None
+    band_fan_suppressed = False
+
+    need_velocity_samples = have_cov and (band or fan)
+    need_ellipse_scatter = have_cov and ellipse and ellipse_scatter
+
+    if need_velocity_samples or need_ellipse_scatter:
+
+        n_draw = band_samples if need_velocity_samples else ellipse_scatter_points
+
+        log_samples = rng.multivariate_normal(log_mean, errors['cov_log'], size=n_draw)
+        alpha_samples, beta_samples = np.exp(log_samples[:, 0]), np.exp(log_samples[:, 1])
+
+        (a_lo, a_hi), (b_lo, b_hi) = ALPHA_BETA_BOUNDS
+        is_valid = ((alpha_samples >= a_lo) & (alpha_samples <= a_hi) &
+            (beta_samples >= b_lo) & (beta_samples <= b_hi))
+        n_valid = int(np.sum(is_valid))
+
+        if n_valid < n_draw:
+
+            n_rejected = n_draw - n_valid
+            rejected_frac = n_rejected/n_draw
+
+            msg = "{:d}/{:d} sampled (alpha, beta) draws fell outside ALPHA_BETA_BOUNDS and " \
+                "were excluded".format(n_rejected, n_draw)
+
+            if rejected_frac > 0.05:
+                band_fan_suppressed = True
+                print("WARNING: {:s} ({:.1%}) - the local Gaussian approximation is likely "
+                    "unreliable this close to a bound. Suppressing the parameter uncertainty "
+                    "band/fan/ellipse-overlay rather than drawing them from what "
+                    "remains.".format(msg, rejected_frac))
+            else:
+                print("{:s}.".format(msg))
+
+        alpha_valid, beta_valid = alpha_samples[is_valid], beta_samples[is_valid]
+
+    # ================= Main panel: data + fit + parameter uncertainty =================
+
+    ax_main = ax_map['main']
+
+    ax_main.scatter(v_data/1000, ht_data/1000, s=10, color='0.5', alpha=0.6, zorder=3, \
+        label="Observed")
+
+    ht_grid = np.linspace(np.min(ht_data), np.max(ht_data), 150)
+    v_fit_grid = alphaBetaVelocity(ht_grid, alpha, beta, v_init)
+
+    ax_main.plot(v_fit_grid/1000, ht_grid/1000, color='k', linewidth=1.5, zorder=4, \
+        label=r"Fit: $\alpha$={:.3g}, $\beta$={:.3g}".format(alpha, beta))
+
+    if have_cov:
+        # A separate (invisible) legend entry rather than folding into the "Fit:" label above,
+        #   so the curve's own label stays short and this can be read independently
+        ax_main.plot([], [], linestyle='none', \
+            label=r"{:.3g}% CI: $\alpha$=[{:.3g}, {:.3g}], $\beta$=[{:.3g}, {:.3g}]".format(
+            ci, errors['alpha_ci_wald_lower'], errors['alpha_ci_wald_upper'],
+            errors['beta_ci_wald_lower'], errors['beta_ci_wald_upper']))
+
+    if band or fan:
+
+        if not have_cov:
+            ax_main.text(0.5, 0.03, "Parameter uncertainty band unavailable\n(no errors given, "
+                "or the fit landed on a bound)", transform=ax_main.transAxes, ha='center', \
+                va='bottom', fontsize=8, color='0.4')
+
+        elif band_fan_suppressed:
+            ax_main.text(0.5, 0.03, "Parameter uncertainty band suppressed\n(too many samples "
+                "landed outside ALPHA_BETA_BOUNDS - see console warning)", \
+                transform=ax_main.transAxes, ha='center', va='bottom', fontsize=8, color='0.4')
+
+        else:
+            v_samples = np.array([alphaBetaVelocity(ht_grid, a, b, v_init)
+                for a, b in zip(alpha_valid, beta_valid)])
+
+            if band:
+                lo_pct, hi_pct = 50.0 - ci/2.0, 50.0 + ci/2.0
+                v_lo, v_hi = np.percentile(v_samples, [lo_pct, hi_pct], axis=0)
+
+                ax_main.fill_betweenx(ht_grid/1000, v_lo/1000, v_hi/1000, color='tab:blue', \
+                    alpha=0.25, zorder=2, \
+                    label="{:.3g}% propagated parameter uncertainty".format(ci))
+
+            if fan:
+                n_fan = min(fan_curves, len(alpha_valid))
+                fan_idx = rng.choice(len(alpha_valid), size=n_fan, replace=False)
+
+                for i in fan_idx:
+                    ax_main.plot(v_samples[i]/1000, ht_grid/1000, color='tab:blue', alpha=0.05, \
+                        linewidth=0.8, zorder=1)
+
+                # One proxy artist for the legend - n_fan individually-labeled lines would flood it
+                ax_main.plot([], [], color='tab:blue', alpha=0.4, linewidth=0.8, \
+                    label="{:d} propagated-uncertainty realizations".format(n_fan))
+
+    # Clip the view to the observed data range (with padding), same convention
+    #   fitAlphaBetaLightCurve(..., plot=True) uses for its own velocity panel: v(h) evaluated
+    #   over the observed HEIGHT range is not thereby constrained to the observed VELOCITY range
+    #   - a fitted or sampled (alpha, beta) can still swing toward v=0 within that same height
+    #   span, precisely in the regime where the model is steepest/least stable. Left unclipped,
+    #   that excursion dominates the view and reads as "the fit/band is very uncertain" when it
+    #   is really just the model being asked to extrapolate into territory the data says nothing
+    #   about.
+    v_pad = 0.1*(np.max(v_data) - np.min(v_data))
+    ax_main.set_xlim((np.min(v_data) - v_pad)/1000, (np.max(v_data) + v_pad)/1000)
+
+    ax_main.set_xlabel("Velocity (km/s)")
+    ax_main.set_ylabel("Height (km)")
+    ax_main.legend(fontsize=8, loc='best')
+
+    # ================= Ellipse panel: (ln alpha, ln beta) =================
+
+    if ellipse:
+
+        ax_ell = ax_map['ellipse']
+
+        if not have_cov:
+            ax_ell.text(0.5, 0.5, "Error estimate unavailable\n(no errors given, or the fit "
+                "landed on a bound)", transform=ax_ell.transAxes, ha='center', va='center', \
+                fontsize=9, color='0.4')
+            ax_ell.set_xticks([])
+            ax_ell.set_yticks([])
+
+        else:
+            for cov_key, color, label_prefix in [
+                    ('cov_fit', 'tab:orange', 'Fit only'),
+                    ('cov_log', 'tab:blue', r'Fit + $v_0$')]:
+
+                cov = errors[cov_key]
+
+                for p, linestyle, level_label in [
+                        (0.6827, '-', r"1$\sigma$"), (ci/100.0, '--', "{:.3g}%".format(ci))]:
+
+                    x, y = _gaussianEllipsePoints(log_mean, cov, p)
+
+                    ax_ell.plot(x, y, color=color, linestyle=linestyle, linewidth=1.5, \
+                        label="{:s}, {:s}".format(label_prefix, level_label))
+
+            if ellipse_scatter and not band_fan_suppressed and alpha_valid is not None:
+                n_ell = min(ellipse_scatter_points, len(alpha_valid))
+                ell_idx = rng.choice(len(alpha_valid), size=n_ell, replace=False)
+
+                ax_ell.scatter(np.log(alpha_valid[ell_idx]), np.log(beta_valid[ell_idx]), \
+                    s=10, color='0.6', alpha=0.15, zorder=0)
+
+            ax_ell.scatter([log_mean[0]], [log_mean[1]], color='k', marker='x', zorder=5, \
+                label=r"Fitted (ln $\alpha$, ln $\beta$)")
+
+            ax_ell.set_xlabel(r"ln $\alpha$")
+            ax_ell.set_ylabel(r"ln $\beta$")
+            ax_ell.legend(fontsize=7, loc='best')
+
+    # ================= Residuals panel (opt-in) =================
+
+    if residuals:
+
+        ax_res = ax_map['residuals']
+
+        v_model_data = alphaBetaVelocity(ht_data, alpha, beta, v_init)
+        resid = v_data - v_model_data
+
+        if not have_errors:
+            ax_res.scatter(resid, ht_data/1000, s=12, color='0.3', label="Residual")
+            ax_res.axvline(0, color='k', linewidth=0.8)
+            ax_res.text(0.5, 0.03, "sigma_v reference lines unavailable\n(no errors given)", \
+                transform=ax_res.transAxes, ha='center', va='bottom', fontsize=8, color='0.4')
+
+        else:
+            sigma_v = errors['sigma_v']
+
+            # This module's own default f_scale elsewhere (fitAlphaBeta(),
+            #   minimizeAlphaBetaRobust()) - errors doesn't carry the f_scale an existing fit
+            #   actually used, so these reference lines may not exactly match a fit's real
+            #   soft-L1 transition point if it was fit with a non-default f_scale
+            f_scale_ref = 2.0
+            is_downweighted = np.abs(resid/sigma_v) > f_scale_ref
+
+            ax_res.scatter(resid[~is_downweighted], ht_data[~is_downweighted]/1000, s=12, \
+                color='0.3', label="Residual")
+            ax_res.scatter(resid[is_downweighted], ht_data[is_downweighted]/1000, s=24, \
+                color='crimson', marker='x', label="Down-weighted (soft-L1)")
+
+            for k, style in [(1.0, ':'), (f_scale_ref, '--')]:
+                ax_res.axvline(k*sigma_v, color='0.4', linestyle=style, linewidth=1)
+                ax_res.axvline(-k*sigma_v, color='0.4', linestyle=style, linewidth=1)
+
+            ax_res.axvline(0, color='k', linewidth=0.8)
+
+        ax_res.set_xlabel(r"$v_{obs} - v_{model}$ (m/s)")
+        ax_res.set_ylabel("Height (km)")
+        ax_res.legend(fontsize=8, loc='best')
+
+    fig.tight_layout()
+
+    if axes is None:
+        plt.show()
+
+    result_axes = tuple(ax_map[name] for name in panel_names)
+    if len(result_axes) == 1:
+        result_axes = result_axes[0]
+
+    return fig, result_axes
 
 
 def alphaBetaMasses(
