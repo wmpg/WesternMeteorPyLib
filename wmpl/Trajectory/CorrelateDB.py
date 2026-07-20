@@ -549,34 +549,45 @@ class TrajectoryDatabase():
         return True
 
     
-    def getTrajectories(self, output_dir, jdt_range, failed=False, verbose=False):
+    def getTrajectories(self, output_dir, jdt_range, failed=False, inc_deleted=False, verbose=False):
         """
         Get a list of trajectories between two julian dates 
 
         Parameters: 
         output_dir  : output_dir specified when invoking CorrelateRMS - will be prepended to the trajectory path
         jdt_range   : tuple of julian dates to retrieve data between. if the 2nd date is None, retrieve all data to today
-        failed  : boolean - if true, retrieve failed traj rather than successful ones
+        failed      : boolean - if true, retrieve failed traj rather than successful ones
+        inc_deleted : include logically-deleted trajectories
 
         Returns:
         trajs: json list of traj_reduced objects
         """
 
         jdt_start, jdt_end = jdt_range
+        sts_test = 'and status=1' if not inc_deleted else ''
 
         table_name = 'failed_trajectories' if failed else 'trajectories'
         if verbose:
             log.info(f'getting trajectories between {jd2Date(jdt_start, dt_obj=True).strftime("%Y%m%d_%M%M%S.%f")} and {jd2Date(jdt_end, dt_obj=True).strftime("%Y%m%d_%M%M%S.%f")}')
 
         if not jdt_end:
-            self.dbhandle.execute(f"SELECT * FROM {table_name} WHERE jdt_ref={jdt_start}")
-            rows = cur.fetchall()
+            rows = self.dbhandle.execute(f"SELECT * FROM {table_name} WHERE jdt_ref>={jdt_start} {sts_test}")
         else:
-            rows = self.dbhandle.execute(f"SELECT * FROM {table_name} WHERE jdt_ref>={jdt_start} and jdt_ref<={jdt_end}")
+            rows = self.dbhandle.execute(f"SELECT * FROM {table_name} WHERE jdt_ref>={jdt_start} and jdt_ref<={jdt_end} {sts_test}")
         trajs = []
         for rw in rows.fetchall():
-            rw = [np.nan if x == 'NaN' else x for x in rw]     
-            json_dict = {'jdt_ref':rw[0], 'traj_id':rw[1], 'traj_file_path':os.path.join(output_dir, rw[2]),
+            rw = [np.nan if x == 'NaN' else x for x in rw]   
+            if failed:
+                json_dict = {'jdt_ref':rw[0], 'traj_id':rw[1], 'traj_file_path':os.path.join(output_dir, rw[2]),
+                         'participating_stations': json.loads(rw[3]),
+                         'ignored_stations': json.loads(rw[4]),
+                         'radiant_eci_mini': json.loads(rw[5]),
+                         'state_vect_mini': json.loads(rw[6]),
+                         'phase_1_only': rw[7], 'v_init': rw[8],'gravity_factor': rw[9],
+                         'obs_ids': json.loads(rw[10]), 'ign_obs_ids': json.loads(rw[11]),
+                         }
+            else:  
+                json_dict = {'jdt_ref':rw[0], 'traj_id':rw[1], 'traj_file_path':os.path.join(output_dir, rw[2]),
                          'participating_stations': json.loads(rw[3]),
                          'ignored_stations': json.loads(rw[4]),
                          'radiant_eci_mini': json.loads(rw[5]),
