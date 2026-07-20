@@ -25,8 +25,8 @@ import matplotlib.pyplot as plt
 from wmpl.Utils.AlphaBeta import (fitAlphaBetaMass, fitAlphaBeta, fitAlphaBetaLightCurve,
     alphaBetaMasses, alphaBetaVelocity, alphaBetaHeight, alphaBetaVelocityNormed,
     alphaBetaHeightNormed, alphaBetaLuminosityF, alphaBetaModelMagnitude,
-    alphaBetaLuminousEfficiency, plotAlphaBeta, profileAlphaBeta, _profiledMagOffset,
-    _gaussianEllipsePoints, HT_NORM_CONST, P_0M, ALPHA_BETA_BOUNDS)
+    alphaBetaLuminousEfficiency, plotAlphaBeta, plotProfileAlphaBeta, profileAlphaBeta,
+    _profiledMagOffset, _gaussianEllipsePoints, HT_NORM_CONST, P_0M, ALPHA_BETA_BOUNDS)
 
 
 # True parameters used to generate the synthetic trajectory. The height range is chosen so the
@@ -195,6 +195,34 @@ def testBothMassConstraint():
 
         assert mu_best is not None
         assert 0 <= mu_best <= 2/3
+
+
+def testMassConstraintQ4Method():
+    """ The legacy Q4 fitting path of fitAlphaBetaMass() (method='q4', the behavior before the
+        `method` argument was added, when robust became the default) must still recover the true
+        parameters. Regression guard for the now-non-default Q4 path, which the other mass tests
+        no longer exercise since they use the robust default.
+    """
+
+    v_data, v_final_true, m_init_true, m_final_mu0_true, m_final_mu23_true = _syntheticTrajectory()
+
+    for density in [DENS_TRUE, None]:
+
+        res = fitAlphaBetaMass(v_data, HT_DATA, SLOPE, m_init_true, mass_constraint="initial", \
+            density=density, v_init=V_INIT_TRUE, method='q4', verbose=False)
+
+        (v_init, v_final,
+            density_mu0, alpha_mu0, beta_mu0, m_initial_mu0, m_final_mu0,
+            density_mu23, alpha_mu23, beta_mu23, m_initial_mu23, m_final_mu23,
+            mu_best, density_mu_best, alpha_mu_best, beta_mu_best, m_initial_mu_best,
+            m_final_mu_best) = res
+
+        _assertClose(alpha_mu0, ALPHA_TRUE, 0.05, "alpha_mu0 (q4)")
+        _assertClose(beta_mu0, BETA_TRUE, 0.05, "beta_mu0 (q4)")
+        _assertClose(density_mu0, DENS_TRUE, 0.05, "density_mu0 (q4)")
+
+        # The imposed initial mass must still be reproduced exactly
+        _assertClose(m_initial_mu0, m_init_true, 1e-6, "m_initial_mu0 (q4)")
 
 
 def testDerivedVelocities():
@@ -775,6 +803,40 @@ def testProfileAlphaBetaRejectsBadInputs():
         raise AssertionError("profileAlphaBeta: ValueError not raised for param='banana'")
 
 
+def testPlotProfileAlphaBeta():
+    """ plotProfileAlphaBeta() must draw a full multi-panel figure without raising, honor the
+        single-panel `axes` contract (reuse the passed-in axes), and reject `axes` for a
+        multi-panel request - mirroring plotAlphaBeta()'s axes contract.
+    """
+
+    v_data, _, _, _, _ = _syntheticTrajectory()
+
+    fit = fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, method='robust')
+    profile = profileAlphaBeta(v_data, HT_DATA, fit)
+
+    # Full multi-panel figure must build and return (fig, ax_map)
+    fig, ax_map = plotProfileAlphaBeta(v_data, HT_DATA, fit, profile)
+    plt.close(fig)
+
+    # A single-panel request (one parameter, one panel type) with axes must reuse them
+    profile_alpha = profileAlphaBeta(v_data, HT_DATA, fit, param='alpha')
+    fig_in, ax_in = plt.subplots()
+    fig_out, ax_out = plotProfileAlphaBeta(v_data, HT_DATA, fit, profile_alpha,
+        degeneracy=False, trajectories=False, axes=ax_in)
+    assert fig_out is fig_in and ax_out is ax_in
+    plt.close(fig_in)
+
+    # Multi-panel + axes must raise
+    try:
+        plotProfileAlphaBeta(v_data, HT_DATA, fit, profile, axes=ax_in)
+
+    except ValueError:
+        pass
+
+    else:
+        raise AssertionError("plotProfileAlphaBeta: ValueError not raised for multi-panel + axes")
+
+
 def testLuminosityModel():
     """ The luminosity function f(v) must be positive on the interior, vanish at both ends, and
         the model magnitude must respond to the offset additively.
@@ -938,6 +1000,7 @@ if __name__ == "__main__":
         testInitialMassConstraint,
         testFinalMassConstraint,
         testBothMassConstraint,
+        testMassConstraintQ4Method,
         testDerivedVelocities,
         testInputValidation,
         testAlphaBetaNormedRoundTrip,
@@ -956,6 +1019,7 @@ if __name__ == "__main__":
         testPlotAlphaBetaRejectsBadCi,
         testProfileAlphaBetaBracketsEstimate,
         testProfileAlphaBetaRejectsBadInputs,
+        testPlotProfileAlphaBeta,
         testLuminosityModel,
         testProfiledMagOffsetWeighted,
         testFitAlphaBetaLightCurve,

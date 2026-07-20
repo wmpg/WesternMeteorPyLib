@@ -1144,18 +1144,14 @@ def _profileOneParameter(fixed_idx, value_hat, other_hat, cost_best, s2, v_norme
 
     below, above = grid < value_hat, grid > value_hat
 
-    # Walk outward from value_hat on each side, with (value_hat, 0.0) prepended as an exact anchor
-    #   (delta_cost is 0 there by construction - cost_best IS the cost at value_hat with the other
-    #   parameter re-optimized). Anchoring on value_hat itself, rather than on whatever the fixed
-    #   geomspace grid's nearest surviving point happens to be, matters because that nearest point
-    #   can be on the WRONG side of value_hat when the grid is coarser than the true interval width
-    #   (common for a well-constrained parameter: n_grid is fixed across the full ALPHA_BETA_BOUNDS
-    #   span, so its local spacing can easily exceed a tightly-constrained parameter's actual CI) -
-    #   interpolating from there can then place ci_upper/ci_lower on the wrong side of value_hat
-    #   entirely. Walking outward also keeps delta ascending by construction on both sides, which
-    #   np.interp's docs require of `xp` and silently gives wrong answers for otherwise (the
-    #   previous ci_lower search fed it descending [delta[i], delta[i+1]], since delta strictly
-    #   decreases approaching value_hat from below).
+    # Split the grid into the two sides of value_hat, with (value_hat, 0.0) prepended as an exact
+    #   anchor (delta_cost is 0 there by construction - cost_best IS the cost at value_hat with the
+    #   other parameter re-optimized). The anchor is the inner end of the root-finding bracket
+    #   below: it is guaranteed to sit below the threshold (delta=0 < chi2_1), so it always pairs
+    #   with the first grid point above the threshold to give a valid sign-changing bracket, even
+    #   when the whole CI is narrower than one grid cell and no grid point falls inside it (the
+    #   common case for a well-constrained parameter, since n_grid is fixed across the full
+    #   ALPHA_BETA_BOUNDS span).
     log_value_hat = np.log(value_hat)
     log_grid_above = np.concatenate(([log_value_hat], log_grid[above]))
     delta_above = np.concatenate(([0.0], delta[above]))
@@ -1163,25 +1159,47 @@ def _profileOneParameter(fixed_idx, value_hat, other_hat, cost_best, s2, v_norme
     log_grid_below = np.concatenate(([log_value_hat], log_grid[below][::-1]))
     delta_below = np.concatenate(([0.0], delta[below][::-1]))
 
-    # Interpolate in LOG space, not linear grid space, then exponentiate back: the model, cov_log,
-    #   and the grid itself are all built on (ln alpha, ln beta), where the cost surface is far
-    #   closer to locally linear/parabolic than it is in linear (alpha, beta) space - interpolating
-    #   there gives a more accurate crossing point at a given grid resolution.
-    ci_upper = None
-    idx = np.where(delta_above > chi2_1)[0]
-    if len(idx):
-        i = idx[0]
-        log_ci_upper = np.interp(chi2_1, [delta_above[i - 1], delta_above[i]],
-            [log_grid_above[i - 1], log_grid_above[i]])
-        ci_upper = np.exp(log_ci_upper)
+    # Locate each CI edge by root-finding the crossing 2*(cost - cost_best)/s2 = chi2_1 in LOG
+    #   space, rather than linearly interpolating between the two bracketing grid points. Linear
+    #   interpolation of the (locally near-quadratic) delta across one grid cell systematically
+    #   MIS-estimates the crossing whenever the true CI is narrower than the grid spacing - and
+    #   because n_grid is fixed across the full ALPHA_BETA_BOUNDS span, that is the common case for
+    #   a well-constrained parameter (its CI can be many times narrower than one cell), where the
+    #   only bracket available is [value_hat (delta=0), first grid point (delta>>chi2_1)] and the
+    #   linear estimate comes out roughly 2x too narrow. A bracketed root-find between the
+    #   value_hat anchor (delta=0 < chi2_1 by construction) and the first grid point above the
+    #   threshold re-optimizes the profiled-out parameter at each trial value, so the reported edge
+    #   is accurate to the solver tolerance regardless of grid resolution (n_grid then only sets
+    #   the resolution of the returned 'grid'/'delta_cost' arrays and the initial bracketing scan).
+    def _delta_minus_threshold(log_value):
+        cost, _ = _profileCostAt(np.exp(log_value), fixed_idx, np.log(other_hat), v_normed,
+            ht_normed, sigma_v_normed, other_bounds, loss, f_scale)
+        return 2.0*(cost - cost_best)/s2 - chi2_1
 
-    ci_lower = None
-    idx = np.where(delta_below > chi2_1)[0]
-    if len(idx):
+    def _crossing(log_side, delta_side):
+        # First grid point (index i, i >= 1 since delta_side[0] is the anchor's 0.0) whose delta
+        #   exceeds the threshold; None if the grid never crosses (the data does not constrain
+        #   this side within ALPHA_BETA_BOUNDS). The root is bracketed by the value_hat anchor
+        #   (delta 0, so _delta_minus_threshold < 0) and that grid point.
+        idx = np.where(delta_side > chi2_1)[0]
+        if not len(idx):
+            return None
+
         i = idx[0]
-        log_ci_lower = np.interp(chi2_1, [delta_below[i - 1], delta_below[i]],
-            [log_grid_below[i - 1], log_grid_below[i]])
-        ci_lower = np.exp(log_ci_lower)
+        try:
+            log_ci = scipy.optimize.brentq(_delta_minus_threshold, log_value_hat, log_side[i],
+                xtol=1e-8)
+        except ValueError:
+            # Re-optimizing inside _delta_minus_threshold warm-starts from other_hat rather than
+            #   from the swept trajectory, so it can land marginally below the threshold right at
+            #   log_side[i] and break the bracket sign. Fall back to interpolating the (ascending)
+            #   swept deltas - never worse than the original linear estimate.
+            log_ci = np.interp(chi2_1, [delta_side[i - 1], delta_side[i]],
+                [log_side[i - 1], log_side[i]])
+        return np.exp(log_ci)
+
+    ci_upper = _crossing(log_grid_above, delta_above)
+    ci_lower = _crossing(log_grid_below, delta_below)
 
     return {
         'ci_lower': ci_lower,
@@ -1251,7 +1269,11 @@ def profileAlphaBeta(v_data, ht_data, fit, sigma_v=None, ci=95.0, param='both', 
         sigma_v: [float] Velocity uncertainty (m/s), same role as fitAlphaBeta()'s sigma_v. If
             None, estimated the same way (_estimateSigmaV(), using `fit`'s own alpha/beta as the
             reference model) - the same *effective*, not purely instrumental, uncertainty
-            fitAlphaBeta() itself would derive.
+            fitAlphaBeta() itself would derive. NOTE: to compare this interval against
+            fitAlphaBeta(estimate_errors=True)'s Wald interval on the identical noise scaling (s2),
+            pass the SAME sigma_v (and loss/f_scale) here that produced that fit - left to default,
+            the re-estimated sigma_v can differ from the fit's, giving a different s2 and hence a
+            differently-scaled interval.
         ci: [float] Confidence level (0-100, e.g. 95, the default).
         param: [str] 'alpha', 'beta' (most relevant given beta is the parameter this matters for
             in this model - see above), or 'both' (default).
@@ -1312,7 +1334,12 @@ def profileAlphaBeta(v_data, ht_data, fit, sigma_v=None, ci=95.0, param='both', 
           the same well-motivated but not perfectly theoretically clean comparison this module
           already accepts elsewhere for its Gauss-Newton covariances (e.g.
           fitAlphaBetaLightCurve()'s alpha_std_rel/beta_std_rel) - a useful, standard engineering
-          approximation, not a literal likelihood-ratio test.
+          approximation, not a literal likelihood-ratio test. There is a second, milder
+          approximation on top of that: because the delta is scaled by the estimated s2 (below),
+          the self-consistent threshold is the F(1, dof) quantile rather than chi2(df=1); the two
+          coincide only in the large-dof limit (chi2(df=1) = dof*F(1, dof) as dof -> inf), so for
+          the point counts typical here (dof in the tens to hundreds) the difference is small, but
+          the interval is very slightly optimistic at small dof.
         - Not a replacement for estimate_errors=True's cov_log/corr_log/alpha_std_rel/
           beta_std_rel - those remain the right tool for LOCAL error propagation (e.g. via the
           delta method into some other derived quantity). This answers a different question
@@ -1370,6 +1397,21 @@ def profileAlphaBeta(v_data, ht_data, fit, sigma_v=None, ci=95.0, param='both', 
     if param in ('beta', 'both'):
         profile['beta'] = _profileOneParameter(1, beta, alpha, cost_best, s2, v_normed,
             ht_normed, sigma_v_normed, log_bounds, ci, n_grid, loss, f_scale)
+
+    # cost_best is the cost at the passed-in (alpha, beta), used as the profile's reference
+    #   minimum. If a profiled-out re-optimization along the grid ever reaches a LOWER cost
+    #   (delta_cost < 0), then (alpha, beta) was not actually the joint minimum of this loss -
+    #   which happens when `fit` came from a different objective than `loss` (e.g. a method='q4'
+    #   point estimate profiled under the default soft_l1): the reference is then off-minimum, so
+    #   the interval is measured from an inflated baseline and can be biased/mis-centered. Warn
+    #   rather than silently reporting it (pass a robust `fit` with matching loss/f_scale to avoid).
+    min_delta = min(float(np.min(p['delta_cost'])) for p in profile.values())
+    if min_delta < -1e-6:
+        print("WARNING: a profiled re-optimization reached a lower cost than the reference "
+            "(min delta_cost = {:.3g} < 0), so the supplied (alpha, beta) is not the joint "
+            "minimum of loss='{:s}'. The profile CI is measured from an off-minimum reference and "
+            "may be biased - pass a fit from fitAlphaBeta(method='robust') with the same "
+            "loss/f_scale.".format(min_delta, loss))
 
     if verbose:
         print()
@@ -1588,7 +1630,7 @@ def plotAlphaBeta(v_data, ht_data, fit, errors=None, band=True, fan=True, band_s
         (ln alpha, ln beta) covariance through the deterministic forward model - not a classical
         confidence band, and not the same kind of object as wmpl.Utils.Math.confidenceInterval()'s
         empirical percentiles elsewhere in this library either, even though the same percentile
-        formula is used once the samples exist. Same discipline as the existing "_gaussian"
+        formula is used once the samples exist. Same discipline as the existing "_wald"
         suffix on alpha_ci_wald_lower/upper.
 
     Arguments:
@@ -1605,8 +1647,11 @@ def plotAlphaBeta(v_data, ht_data, fit, errors=None, band=True, fan=True, band_s
         fan: [bool] Draw individual propagated-uncertainty realizations (a subsample of the same
             draws used for the band) in the main panel.
         band_samples: [int] Number of (alpha, beta) draws from the (ln alpha, ln beta) Gaussian
-            approximation (covariance cov_log). The forward model is cheap to evaluate, so this
-            is set by how stable the tail percentiles of the band need to be, not by cost.
+            approximation (covariance cov_log). Set this by how stable the tail percentiles of the
+            band need to be, but note the cost is NOT negligible: each draw evaluates the forward
+            model (a per-height numerical velocity inversion) once, un-vectorized, so runtime grows
+            roughly linearly with band_samples (order a few seconds at the default 1000 for a
+            typical trajectory - reduce it for quick interactive plots).
         fan_curves: [int] Number of individual curves drawn for `fan`, subsampled from the same
             `band_samples` draws (capped at however many landed inside ALPHA_BETA_BOUNDS).
         ellipse: [bool] Draw the (ln alpha, ln beta) ellipse panel.
@@ -2353,7 +2398,12 @@ def fitAlphaBetaMass(
             model (or, under mass_constraint="initial", of the final fitted model).
         method: [str] 'robust' (default) or 'q4' - fitting approach used both for the preliminary
             unconstrained alpha-beta fit (see Notes below) and for the (density, beta[, mu])
-            optimization under the selected mass_constraint.
+            optimization under the selected mass_constraint. NOTE: 'robust' is the default, which
+            is a change from this function's original behavior - before the fitting `method`
+            argument existed, this function always used the 'q4' path. Existing callers that do
+            not pass `method` will therefore get (generally slightly) different fitted
+            density/alpha/beta/mass values than before. Pass method='q4' to reproduce the
+            pre-change results exactly.
               - 'q4': the classic Gritsevich (2007) Q4 fit throughout (minimizeAlphaBeta() for the
                 preliminary fit; scipy.optimize.minimize(method='Nelder-Mead') on
                 _alphaBetaResidual()'s transformed, height-weighted residual for the constrained
