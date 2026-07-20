@@ -217,7 +217,7 @@ class ObservationsDatabase():
             except Exception:
                 log.warning('unable to archive observations database')
                 purge_ok = False
-
+            self.dbhandle.execute("detach database 'archdb'")
         if purge_ok:
             self.purgeObsDatabase(archdate_jd=archdate_jd) 
         return 
@@ -509,6 +509,7 @@ class TrajectoryDatabase():
         except Exception as e:
             print(e)
             print(sql_str)
+            return False
         self.dbhandle.commit()
         return True
 
@@ -539,6 +540,9 @@ class TrajectoryDatabase():
         traj_id         : a trajectory ID
         failed          : boolean, if true then remove from the fails list
         """
+        if traj_id is None:
+            log.info('not possible to remove if traj_id is None')
+            return False
         if verbose:
             log.info(f'removing {traj_id}')
         table_name = 'failed_trajectories' if failed else 'trajectories'
@@ -669,6 +673,7 @@ class TrajectoryDatabase():
                     log.warning(f'unable to archive {table_name} in trajectories database')
                     purge_ok = False
 
+            self.dbhandle.execute("detach database 'archdb'")
             self.dbhandle.commit()
 
         if purge_ok:
@@ -911,6 +916,7 @@ class CandidateDatabase():
                 log.warning(f'unable to archive candidate database')
                 purge_ok = False
 
+        self.dbhandle.execute("detach database 'archdb'")
         if purge_ok:
             self.purgeCandDatabase(archdate_jd=archdate_jd)
 
