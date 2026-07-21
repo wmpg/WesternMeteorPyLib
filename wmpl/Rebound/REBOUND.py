@@ -33,8 +33,11 @@ try:
 
     REBOUND_FOUND = True
 
-except ImportError:
-    print("REBOUND package not found. Install REBOUND and reboundx packages to use the REBOUND functions.")
+except ImportError as e:
+    # Surface the actual import error instead of a generic "not found" message, so a real failure
+    #   (e.g. a broken dependency) isn't misreported as a missing package the user already has.
+    print("REBOUND/reboundx could not be imported: {}".format(e))
+    print("Install or upgrade the rebound and reboundx packages to use the REBOUND functions.")
     REBOUND_FOUND = False
 
 from wmpl.Config import config
