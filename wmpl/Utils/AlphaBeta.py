@@ -3537,14 +3537,15 @@ def fitAlphaBetaLightCurve(
           its point count, so a light curve with many more samples than the dynamics track (or
           vice versa) can dominate the fit even if every individual sigma is correctly calibrated;
           see dyn_weight/lc_weight to rebalance this.
-        - alpha_std_rel/beta_std_rel (in the returned 'fits') are local curvature estimates from
-          the Jacobian of the *robustified* (soft-L1) cost, not rigorous statistical covariances -
-          soft-L1 reweights residuals nonlinearly, so (J^T J)^-1 is only a Gauss-Newton
-          approximation, not the inverse Fisher information of Gaussian noise. The profiled
-          (weighted-median) M0 also makes the residual vector only piecewise-smooth in
-          (alpha, beta), which further degrades the finite-difference Jacobian these estimates
-          are computed from. Treat them as approximate/relative uncertainties and use bootstrap
-          resampling for publication-grade error bars.
+        - This function does NOT return parameter error estimates: a Gauss-Newton curvature
+          estimate on the *robustified* (soft-L1) joint cost would not be a rigorous statistical
+          covariance (soft-L1 reweights residuals nonlinearly, so (J^T J)^-1 is only a local
+          approximation, not the inverse Fisher information of Gaussian noise - and the profiled
+          weighted-median M0 makes the residual vector only piecewise-smooth in (alpha, beta),
+          which further degrades a finite-difference Jacobian). Rather than surface a rough
+          estimate that could be mistaken for a rigorous one, get error bars separately: run
+          fitAlphaBeta(method='robust', estimate_errors=True) on the dynamics alone, or
+          profileAlphaBeta() for likelihood-based confidence intervals.
         - When sigma_mag is auto-derived (the default, sigma_mag=None), each mu (and the free-mu
           fit, if fit_free_mu=True) gets its OWN independently-derived sigma_mag from its OWN
           residuals. A mu that fits the light curve worse ends up with a larger self-derived
@@ -3643,8 +3644,6 @@ def fitAlphaBetaLightCurve(
             'sigma_v': adopted velocity uncertainty (m/s, see the sigma_v caveat above),
             'alpha_dyn', 'beta_dyn': Stage-0 (dynamics only, Q4) values,
             'fits': {mu: {'alpha', 'beta',
-                          'alpha_std_rel', 'beta_std_rel' (approximate, curvature-based - see
-                              the statistical caveats above, not rigorous statistical errors),
                           'mag_offset',
                           'K' (= tau M_e V_e^3 sin(slope)/(2 h0), W - see
                               alphaBetaLuminousEfficiency() to recover tau from K, given an
@@ -3656,9 +3655,7 @@ def fitAlphaBetaLightCurve(
             'best_fixed_mu': mu (from mu_values) with the lowest robust cost - an argmin over the fixed
                 mu_values grid, NOT a continuous optimum (see fit_free_mu for that).
             'mu_free_fit': None unless fit_free_mu=True, in which case a dict with the same shape
-                as one 'fits'[mu] entry, plus 'mu' (the fitted shape-change coefficient itself)
-                and 'mu_std' (its approximate/relative uncertainty, same Gauss-Newton caveat as
-                alpha_std_rel/beta_std_rel).
+                as one 'fits'[mu] entry, plus 'mu' (the fitted shape-change coefficient itself).
     """
 
     v_data = np.asarray(v_data, dtype=np.float64)
@@ -3845,26 +3842,9 @@ def fitAlphaBetaLightCurve(
         # Amplitude K = tau M_e V_e^3 sin(gamma)/(2 h0) in W
         lum_amplitude = p0m*10**(-0.4*mag_offset)
 
-        # Local curvature ("covariance") of (ln alpha, ln beta) from the Jacobian of the
-        # *robustified* soft-L1 cost - only a Gauss-Newton approximation of the curvature at the
-        # optimum, NOT a rigorous statistical covariance: soft_l1 reweights residuals nonlinearly,
-        # so (J^T J)^-1 here is not the inverse Fisher information of Gaussian noise. Treat
-        # alpha_std_rel/beta_std_rel as approximate/relative uncertainties; use bootstrap
-        # resampling for publication-grade errors.
-        try:
-            jtj = res.jac.T @ res.jac
-            dof = max(len(res.fun) - len(res.x), 1)
-            s2 = 2.0*res.cost/dof
-            cov_log = s2*np.linalg.inv(jtj)
-            alpha_std_rel, beta_std_rel = np.sqrt(np.diag(cov_log))
-        except np.linalg.LinAlgError:
-            alpha_std_rel = beta_std_rel = np.nan
-
         fits[mu] = {
             'alpha': alpha,
             'beta': beta,
-            'alpha_std_rel': alpha_std_rel,
-            'beta_std_rel': beta_std_rel,
             'mag_offset': mag_offset,
             'K': lum_amplitude,
             'sigma_mag': sigma_mag_mu,
@@ -3881,8 +3861,8 @@ def fitAlphaBetaLightCurve(
             if not sigma_mag_given:
                 print("sigma_mag            = {:.3f} mag  (DERIVED for this μ: MAD of an "
                     "unweighted photometry-only fit)".format(sigma_mag_mu))
-            print("alpha                = {:.6f} (±{:.1%})".format(alpha, alpha_std_rel))
-            print("beta                 = {:.6f} (±{:.1%})".format(beta, beta_std_rel))
+            print("alpha                = {:.6f}".format(alpha))
+            print("beta                 = {:.6f}".format(beta))
             print("M0                   = {:.3f} mag".format(mag_offset))
             print("K                    = {:.3e} W".format(lum_amplitude))
             print("cost                 = {:.4f}".format(res.cost))
@@ -3929,24 +3909,10 @@ def fitAlphaBetaLightCurve(
         mag_offset_free = _profiledMagOffset(mag_abs_data, mag_zero_free, sigma_mag_free)
         lum_amplitude_free = p0m*10**(-0.4*mag_offset_free)
 
-        # Same Gauss-Newton local-curvature caveat as the fixed-mu fits above, now for
-        # (ln alpha, ln beta, mu) jointly.
-        try:
-            jtj = res_free.jac.T @ res_free.jac
-            dof = max(len(res_free.fun) - len(res_free.x), 1)
-            s2 = 2.0*res_free.cost/dof
-            cov_free = s2*np.linalg.inv(jtj)
-            alpha_std_rel_free, beta_std_rel_free, mu_std_free = np.sqrt(np.diag(cov_free))
-        except np.linalg.LinAlgError:
-            alpha_std_rel_free = beta_std_rel_free = mu_std_free = np.nan
-
         mu_free_fit = {
             'mu': mu_free,
             'alpha': alpha_free,
             'beta': beta_free,
-            'alpha_std_rel': alpha_std_rel_free,
-            'beta_std_rel': beta_std_rel_free,
-            'mu_std': mu_std_free,
             'mag_offset': mag_offset_free,
             'K': lum_amplitude_free,
             'sigma_mag': sigma_mag_free,
@@ -3967,9 +3933,9 @@ def fitAlphaBetaLightCurve(
             if not sigma_mag_given:
                 print("sigma_mag            = {:.3f} mag  (DERIVED: MAD of an unweighted "
                     "photometry-only fit with μ also free)".format(sigma_mag_free))
-            print("mu                   = {:.3f} (±{:.3f})".format(mu_free, mu_std_free))
-            print("alpha                = {:.6f} (±{:.1%})".format(alpha_free, alpha_std_rel_free))
-            print("beta                 = {:.6f} (±{:.1%})".format(beta_free, beta_std_rel_free))
+            print("mu                   = {:.3f}".format(mu_free))
+            print("alpha                = {:.6f}".format(alpha_free))
+            print("beta                 = {:.6f}".format(beta_free))
             print("M0                   = {:.3f} mag".format(mag_offset_free))
             print("K                    = {:.3e} W".format(lum_amplitude_free))
             print("cost                 = {:.4f}".format(res_free.cost))
@@ -4103,12 +4069,12 @@ def fitAlphaBetaLightCurve(
                 mu_free_fit['beta'], mu_free_fit['mu'], mag_offset=mu_free_fit['mag_offset'])
 
             ax_dyn.plot(vel_arr_free/1000, ht_arr/1000, color='crimson', linewidth=2.5, zorder=4, \
-                label="Free-$\\mu$ fit: $\\mu$={:.2f}$\\pm${:.2f}, $\\alpha$={:.2f}, "
-                    "$\\beta$={:.2f}".format(mu_free_fit['mu'], mu_free_fit['mu_std'],
-                    mu_free_fit['alpha'], mu_free_fit['beta']))
+                label="Free-$\\mu$ fit: $\\mu$={:.2f}, $\\alpha$={:.2f}, "
+                    "$\\beta$={:.2f}".format(mu_free_fit['mu'], mu_free_fit['alpha'],
+                    mu_free_fit['beta']))
             ax_lc.plot(mag_arr_free, ht_arr/1000, color='crimson', linewidth=2.5, zorder=4, \
-                label="Free-$\\mu$ fit: $\\mu$={:.2f}$\\pm${:.2f}, $M_0$={:.2f}".format(
-                    mu_free_fit['mu'], mu_free_fit['mu_std'], mu_free_fit['mag_offset']))
+                label="Free-$\\mu$ fit: $\\mu$={:.2f}, $M_0$={:.2f}".format(
+                    mu_free_fit['mu'], mu_free_fit['mag_offset']))
 
         # Clip the view to the observed data range (with padding): the photometry-only fit at a
         # mu far from the true value can be poorly constrained and run away outside the data
@@ -4130,8 +4096,7 @@ def fitAlphaBetaLightCurve(
         title = "Best $\\mu$ = {:.2f}   $v_0$ = {:.2f} km/s".format(
             best_fixed_mu, v_init/1000)
         if mu_free_fit is not None:
-            title += "   |   Free-$\\mu$ fit: $\\mu$ = {:.2f}$\\pm${:.2f}".format(
-                mu_free_fit['mu'], mu_free_fit['mu_std'])
+            title += "   |   Free-$\\mu$ fit: $\\mu$ = {:.2f}".format(mu_free_fit['mu'])
 
         fig.suptitle(title)
         fig.tight_layout()
