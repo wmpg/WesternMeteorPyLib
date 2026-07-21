@@ -2,6 +2,9 @@
 
 import os
 import re
+import sys
+import time
+import warnings
 import concurrent.futures
 from types import SimpleNamespace
 
@@ -13,9 +16,12 @@ import matplotlib.pyplot as plt
 from jplephem.spk import SPK
 
 try:
-    import rebound as rb
-    import reboundx
-    from reboundx import constants as rbxConstants
+    # Silence the noisy "pkg_resources is deprecated" warning emitted while importing reboundx
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
+        import rebound as rb
+        import reboundx
+        from reboundx import constants as rbxConstants
     import astropy.time
 
     REBOUND_FOUND = True
@@ -610,7 +616,7 @@ def reboundSimulate(
         julian_date, state_vect, traj=None,
         direction="forward", sim_days=60, n_outputs=500, obj_name="obj", obj_mass=0.0, mc_runs=100,
         reference_frame="heliocentric", ephem_source="local", n_cpu=None,
-        verbose=False):
+        show_progress=True, verbose=False):
     """ Takes an state vector (or a Trajectory object), runs REBOUND and produces orbital elements for the 
     object at the end of the simulation or at the specified time.
 
@@ -810,25 +816,51 @@ def reboundSimulate(
         # One task per realization, so each gets its own decoupled adaptive timestep
         tasks = [_make_task([s], [n]) for s, n in zip(mc_states, mc_names)]
 
-        if verbose:
-            print(f"Integrating {len(tasks)} Monte Carlo realizations on {n_cpu} core(s)...")
+        n_total = len(tasks)
+        is_tty = show_progress and sys.stdout.isatty()
+
+        # Live in-place progress bar on a terminal; stay quiet otherwise (avoids spamming log files)
+        def _report(done, t_start):
+            if is_tty:
+                elapsed = time.time() - t_start
+                print("\r  Monte Carlo: {:d}/{:d} realizations integrated ({:.1f} s)".format(
+                    done, n_total, elapsed), end="", flush=True)
+
+        if show_progress:
+            print("Integrating {:d} Monte Carlo realizations on {:d} core(s)...".format(n_total, n_cpu))
+
+        t_mc_start = time.time()
 
         if n_cpu == 1:
-            results = [_integrateParticles(t) for t in tasks]
+            results = []
+            for k, t in enumerate(tasks, start=1):
+                results.append(_integrateParticles(t))
+                _report(k, t_mc_start)
 
         else:
-            results = [None]*len(tasks)
+            results = [None]*n_total
             with concurrent.futures.ProcessPoolExecutor(max_workers=n_cpu) as executor:
                 future_to_idx = {executor.submit(_integrateParticles, t): idx
                                  for idx, t in enumerate(tasks)}
+                done = 0
                 for future in concurrent.futures.as_completed(future_to_idx):
                     idx = future_to_idx[future]
                     try:
                         results[idx] = future.result()
                     except Exception as e:
-                        print(f"Warning: Monte Carlo realization {mc_names[idx]} failed and was "
-                              f"skipped: {e}")
+                        print("\nWarning: Monte Carlo realization {:s} failed and was skipped: {:s}".format(
+                            mc_names[idx], str(e)))
                         results[idx] = None
+                    done += 1
+                    _report(done, t_mc_start)
+
+        n_ok = sum(1 for r in results if r)
+        if show_progress:
+            # Finish the in-place line (newline) on a terminal, or print the single summary otherwise
+            prefix = "\r" if is_tty else "  "
+            print("{:s}Monte Carlo: {:d}/{:d} realizations integrated ({:.1f} s){:s}".format(
+                prefix, n_ok, n_total, time.time() - t_mc_start,
+                "" if n_ok == n_total else "  [{:d} failed]".format(n_total - n_ok)))
 
         for res in results:
             if res:
@@ -913,11 +945,13 @@ if __name__ == "__main__":
 
     
     # Run the simulation for the given number of days from the epoch of the trajectory
+    t_run_start = time.time()
     sim_outputs, sim_outputs_mc = reboundSimulate(
         None, None, traj=traj, direction=direction, sim_days=sim_days,
         obj_name=traj.traj_id, mc_runs=args.mc, reference_frame=reference_frame,
         ephem_source=ephem_source, n_cpu=n_cpu, verbose=args.verbose
         )
+    sim_wall = time.time() - t_run_start
 
     # Compute the 95% CI for the orbital elements from the Monte Carlo realizations
     a_ci_str = ""
@@ -997,39 +1031,68 @@ if __name__ == "__main__":
 
     ###
 
-    # Print the simulation orbital elements
-    print("Orbital elements {:.2f} days from the epoch {:.6f} {:s}".format(sim_days, traj.jdt_ref, direction))
-    print("Epoch= {:.6f} JD (TDB)".format(final_epoch_jd))
-    print("Epoch= {:s} UTC".format(time_utc.iso))
-    print("a    = {:>10.6f}{:s} {:s}".format(sim_outputs[-1][2].a*dist_unit_multiplier, a_ci_str, a_units))
-    print("q    = {:>10.6f}{:s} {:s}".format((1 - sim_outputs[-1][2].e)*sim_outputs[-1][2].a*dist_unit_multiplier, q_ci_str, q_units))
-    print("e    = {:>10.6f}{:s}".format(sim_outputs[-1][2].e, e_ci_str))
-    print("i    = {:>10.6f}{:s} deg".format(np.degrees(sim_outputs[-1][2].inc), incl_ci_str))
-    print("peri = {:>10.6f}{:s} deg".format(np.degrees(sim_outputs[-1][2].Omega), Omega_ci_str))
-    print("node = {:>10.6f}{:s} deg".format(np.degrees(sim_outputs[-1][2].omega), omega_ci_str))
-    print("f    = {:>10.6f}{:s} deg".format(np.degrees(sim_outputs[-1][2].f), f_ci_str))
-
-
-    # Detect close encounters with the planets (and the Moon) using the Hill-sphere criterion
+    # Detect close encounters (Hill-sphere criterion). Needed both for the summary and the report file.
     n_hill = 3.0
     encounters = detectCloseEncounters(sim_outputs, n_hill=n_hill)
 
     # List of bodies for which the distance is tracked (planet_dists dict keys)
     dist_bodies = list(sim_outputs[0][3].keys())
 
-    # Print a summary of the detected close encounters
-    print("\nClose encounters (< {:.0f} Hill radii):".format(n_hill))
-    if encounters:
-        for enc in encounters:
-            print("  {:<8s} min dist = {:10.6f} AU ({:12.1f} km) at t = {:10.4f} d, R_Hill = {:.6f} AU ({:.2f} R_Hill)".format(
-                enc["body"], enc["min_dist_au"], enc["min_dist_au"]*149597870.7,
-                enc["time_days"], enc["hill_radius_au"], enc["n_hill"]))
+    # Nominal final orbital elements. Note the mapping to the wmpl convention:
+    #   peri (argument of perihelion) = REBOUND omega ; node (ascending node) = REBOUND Omega
+    a_val = sim_outputs[-1][2].a*dist_unit_multiplier
+    e_val = sim_outputs[-1][2].e
+    q_val = (1 - e_val)*a_val
+    i_val = np.degrees(sim_outputs[-1][2].inc)
+    peri_val = np.degrees(sim_outputs[-1][2].omega)
+    node_val = np.degrees(sim_outputs[-1][2].Omega)
+    f_val = np.degrees(sim_outputs[-1][2].f)
+
+    # Print a readable summary
+    hdr = "=" * 78
+    print("\n" + hdr)
+    print("  REBOUND orbit integration  |  {:s}".format(str(traj.traj_id)))
+    print(hdr)
+    print("  Ephemeris    : {:s}".format("JPL Horizons (web)" if args.horizons else "local DE430"))
+    print("  Direction    : {:s}, {:.2f} days".format(direction, sim_days))
+    print("  Frame        : {:s}".format(reference_frame))
+    print("  Start epoch  : {:.6f} JD (TDB)".format(traj.jdt_ref))
+    print("  Final epoch  : {:.6f} JD (TDB)  =  {:s} UTC".format(final_epoch_jd, time_utc.iso))
+    if len(sim_outputs_mc):
+        print("  Monte Carlo  : {:d} realizations on {:d} core(s)".format(len(sim_outputs_mc), n_cpu))
+    print("  Runtime      : {:.1f} s".format(sim_wall))
+    print("-" * 78)
+    if len(sim_outputs_mc):
+        print("  Final orbital elements   (nominal  +/- 1 sigma  [95% CI]):")
     else:
-        print("  None detected.")
+        print("  Final orbital elements   (nominal):")
+    print("")
+    print("    a    = {:>13.6f}{:s}  {:s}".format(a_val, a_ci_str, a_units))
+    print("    q    = {:>13.6f}{:s}  {:s}".format(q_val, q_ci_str, q_units))
+    print("    e    = {:>13.6f}{:s}".format(e_val, e_ci_str))
+    print("    i    = {:>13.6f}{:s}  deg".format(i_val, incl_ci_str))
+    print("    peri = {:>13.6f}{:s}  deg".format(peri_val, omega_ci_str))
+    print("    node = {:>13.6f}{:s}  deg".format(node_val, Omega_ci_str))
+    print("    f    = {:>13.6f}{:s}  deg".format(f_val, f_ci_str))
+    print("-" * 78)
+
+    # Close-encounter summary
+    if encounters:
+        print("  Close encounters (< {:.0f} Hill radii):".format(n_hill))
+        for enc in encounters:
+            print("    {:<8s} {:12.6f} AU ({:12.1f} km)  at t = {:+9.3f} d   ({:.2f} R_Hill, R_Hill = {:.6f} AU)".format(
+                enc["body"], enc["min_dist_au"], enc["min_dist_au"]*149597870.7,
+                enc["time_days"], enc["n_hill"], enc["hill_radius_au"]))
+    else:
+        print("  Close encounters (< {:.0f} Hill radii): none detected".format(n_hill))
+    print(hdr)
 
 
     # Save the results to a file
-    with open(os.path.join(os.path.dirname(args.pickle_path), "rebound_simulation_results.txt"), "w") as f:
+    out_dir = os.path.dirname(args.pickle_path)
+    results_txt_path = os.path.join(out_dir, "rebound_simulation_results.txt")
+    plot_png_path = os.path.join(out_dir, "rebound_simulation.png")
+    with open(results_txt_path, "w") as f:
 
         # Save the nominal orbital elements and the errors
         f.write("Orbital elements {:.2f} days from the epoch {:.6f} {:s}\n".format(sim_days, traj.jdt_ref, direction))
@@ -1037,8 +1100,8 @@ if __name__ == "__main__":
         f.write("q    = {:>10.6f}{:s} {:s}\n".format((1 - sim_outputs[-1][2].e)*sim_outputs[-1][2].a*dist_unit_multiplier, q_ci_str, q_units))
         f.write("e    = {:>10.6f}{:s}\n".format(sim_outputs[-1][2].e, e_ci_str))
         f.write("i    = {:>10.6f}{:s} deg\n".format(np.degrees(sim_outputs[-1][2].inc), incl_ci_str))
-        f.write("peri = {:>10.6f}{:s} deg\n".format(np.degrees(sim_outputs[-1][2].Omega), Omega_ci_str))
-        f.write("node = {:>10.6f}{:s} deg\n".format(np.degrees(sim_outputs[-1][2].omega), omega_ci_str))
+        f.write("peri = {:>10.6f}{:s} deg\n".format(np.degrees(sim_outputs[-1][2].omega), omega_ci_str))
+        f.write("node = {:>10.6f}{:s} deg\n".format(np.degrees(sim_outputs[-1][2].Omega), Omega_ci_str))
         f.write("f    = {:>10.6f}{:s} deg\n".format(np.degrees(sim_outputs[-1][2].f), f_ci_str))
 
         # Save the detected close encounters (Hill-sphere criterion)
@@ -1072,8 +1135,8 @@ if __name__ == "__main__":
                 f.write("q    = {:>10.6f} {:s}\n".format((1 - sim_outputs_mc[mc_name][-1][2].e)*sim_outputs_mc[mc_name][-1][2].a*dist_unit_multiplier, q_units))
                 f.write("e    = {:>10.6f}\n".format(sim_outputs_mc[mc_name][-1][2].e))
                 f.write("i    = {:>10.6f} deg\n".format(np.degrees(sim_outputs_mc[mc_name][-1][2].inc)))
-                f.write("peri = {:>10.6f} deg\n".format(np.degrees(sim_outputs_mc[mc_name][-1][2].Omega)))
-                f.write("node = {:>10.6f} deg\n".format(np.degrees(sim_outputs_mc[mc_name][-1][2].omega)))
+                f.write("peri = {:>10.6f} deg\n".format(np.degrees(sim_outputs_mc[mc_name][-1][2].omega)))
+                f.write("node = {:>10.6f} deg\n".format(np.degrees(sim_outputs_mc[mc_name][-1][2].Omega)))
                 f.write("f    = {:>10.6f} deg\n".format(np.degrees(sim_outputs_mc[mc_name][-1][2].f)))
 
     # Plot the orbital elements of the before and after simulation on the same plot (one subplot for each element)
@@ -1221,17 +1284,26 @@ if __name__ == "__main__":
     axs[0, 0].set_ylabel("a [{:s}]".format(a_units))
     axs[0, 1].set_ylabel("e")
     axs[1, 0].set_ylabel("i [deg]")
-    axs[1, 1].set_ylabel("peri [deg]")
-    axs[2, 0].set_ylabel("node [deg]")
+    # axs[1, 1] plots REBOUND Omega (ascending node); axs[2, 0] plots omega (argument of perihelion)
+    axs[1, 1].set_ylabel("node [deg]")
+    axs[2, 0].set_ylabel("peri [deg]")
     axs[2, 1].set_ylabel("f [deg]")
     axs[0, 2].set_ylabel("Earth distance [{:s}]".format(a_units))
 
+    # Only draw a legend on axes that actually have labeled artists (avoids the empty-legend warning)
     for ax in axs.flatten():
-        ax.legend()
+        handles, labels = ax.get_legend_handles_labels()
+        if labels:
+            ax.legend()
 
     plt.tight_layout()
 
     # Save the figure
-    plt.savefig(os.path.join(os.path.dirname(args.pickle_path), "rebound_simulation.png"))
+    plt.savefig(plot_png_path)
+
+    # Report the saved outputs
+    print("  Saved report : {:s}".format(results_txt_path))
+    print("  Saved plot   : {:s}".format(plot_png_path))
+    print(hdr)
 
     plt.show()
