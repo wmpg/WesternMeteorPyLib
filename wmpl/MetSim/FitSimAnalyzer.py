@@ -343,7 +343,7 @@ class FitSimAnalyzer(object):
             # Plot the no-atmosphere velocity from the trajectory solver
             v_init_orig_x = np.zeros(10) + self.traj.orbit.v_inf
             v_init_orig_y = np.linspace(0, full_cost, 10)
-            ax_vel.plot(v_init_orig_x, v_init_orig_y, color='g', zorder=3, label='$V_{\infty}$')
+            ax_vel.plot(v_init_orig_x, v_init_orig_y, color='g', zorder=3, label='$V_{\\infty}$')
 
             ax_vel.set_xlabel('Velocity (m/s)')
 

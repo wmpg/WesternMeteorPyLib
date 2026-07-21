@@ -5,9 +5,10 @@ import pkgutil
 import sys
 
 # Excluded packages
-# "Tests" excludes every Tests subpackage (e.g. Utils.Tests, MetSim.Tests) - test modules may call
-# matplotlib.use(...) or similar process-wide side effects at import time, which must not fire just
-# because something did `import wmpl`
+# Note: "Tests" is excluded because importing the test modules on `import wmpl` executes their
+#   top-level code - e.g. wmpl/Utils/Tests/test_AlphaBeta.py calls matplotlib.use("Agg"), which
+#   would switch the whole process to the non-interactive Agg backend and break plt.show() in any
+#   script that imports wmpl (e.g. `python -m wmpl.Utils.AlphaBeta`).
 exclude = ["MetSim.ML", "GUI", "Tests"]
 
 __all__ = []

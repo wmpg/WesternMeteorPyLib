@@ -843,7 +843,7 @@ class AblationModelVelocity(object):
         out_str += "Gamma     = {:.2f}\n".format(self.Gamma) + "\n"
         out_str += "Lambda    = {:.2f}\n".format(self.Lambda) + "\n"
         out_str += "Abl coeff = {:.2f}\n".format(self.ablation_coeff) + "\n"
-        out_str += "Lum eff   = {:.2f}\%\n".format(100*self.lum_eff) + "\n"
+        out_str += "Lum eff   = {:.2f}%\n".format(100*self.lum_eff) + "\n"
 
         return out_str
 

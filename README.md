@@ -65,12 +65,24 @@ conda install -y -c conda-forge basemap basemap-data-hires
 conda install -y -c conda-forge cartopy paramiko
 ```
 
-Optionally, if you want to use the REBOUND orbital integrator (Linux-only!), install:
+Optionally, if you want to use the REBOUND orbital integrator, install:
 
 ```
 conda install -y -c conda-forge astropy
 conda install -y -c conda-forge rebound
 pip install reboundx
+```
+
+**Platform note:** this works on **Linux and macOS**. It does **not** work on native
+Windows: `reboundx` has no Windows wheel and no conda-forge build, so `pip` compiles it
+from source with MSVC, which fails (`gr_full.c: error C2057: expected constant expression`)
+because `reboundx` uses C99 variable-length arrays that MSVC does not support. On Windows,
+use the **Windows Subsystem for Linux (WSL2)** — install an Ubuntu distribution, set up the
+`wmpl` conda environment inside it, and run the above there; `reboundx` then builds cleanly
+with `gcc`. Installing only `rebound` is not enough — `reboundx` must import too. Verify with:
+
+```
+python -c "import rebound, reboundx; print('ok')"
 ```
 
 
