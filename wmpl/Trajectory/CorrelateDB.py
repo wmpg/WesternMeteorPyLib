@@ -904,7 +904,7 @@ class CandidateDatabase():
         if arch_prefix:
             # create the archive database if it doesnt exist
             archdb_name = f'{arch_prefix}_candidates.db'
-            archdb = CandidateDatabase(db_path, archdb_name)
+            archdb = CandidateDatabase(db_path, archdb_name, keep=0)
             archdb.closeCandDatabase()
 
             # attach the arch db, copy the records then delete them
