@@ -1,9 +1,13 @@
 """ Functions for running REBOUND simulations on wmpl trajectories. """
 
+import re
+
 import numpy as np
 import scipy
 import scipy.stats
 import matplotlib.pyplot as plt
+
+from jplephem.spk import SPK
 
 try:
     import rebound as rb
@@ -17,31 +21,278 @@ except ImportError:
     print("REBOUND package not found. Install REBOUND and reboundx packages to use the REBOUND functions.")
     REBOUND_FOUND = False
 
+from wmpl.Config import config
 from wmpl.Utils.TrajConversions import (
     J2000_JD,
+    J2000_OBLIQUITY,
     equatorialCoordPrecession,
     jd2DynamicalTimeJD,
     eci2RaDec,
     vectMag,
     raDec2ECI
 )
+from wmpl.Utils.Math import rotateVector
 from wmpl.Utils.Earth import calcTrueObliquity
 
 
-def convertToBarycentric(state_vect, jd, log_file_path=""):
-    """ Takes a state vector in ECI coordinates (m and m/s), Julian date and converts from ECI (geocentric) to 
+# Hill-sphere radii in AU used for close-encounter detection. The Moon (Luna) uses its
+# Earth-relative Hill radius. The Sun is excluded (it has no Hill sphere in this context).
+HILL_RADII_AU = {
+    "Mercury": 0.00122,
+    "Venus":   0.00673,
+    "Earth":   0.00981,
+    "Luna":    0.000411,
+    "Mars":    0.00658,
+    "Jupiter": 0.33820,
+    "Saturn":  0.42850,
+    "Uranus":  0.46340,
+    "Neptune": 0.76890,
+}
+
+
+# NAIF-ID segment paths (center, target) used to build each body's state relative to the Solar
+# System barycentre (0) from the local DE430 kernel. States along a path are summed. These are
+# chosen to reproduce exactly the bodies that REBOUND's JPL Horizons queries return: planet
+# centres for Mercury (199) and Venus (299), Earth (399) and Moon (301) w.r.t. the Earth-Moon
+# barycentre (3), and system barycentres for Mars-Neptune (4-8).
+_EPHEM_NAIF_PATHS = {
+    "Sun":     [(0, 10)],
+    "Mercury": [(0, 1), (1, 199)],
+    "Venus":   [(0, 2), (2, 299)],
+    "Earth":   [(0, 3), (3, 399)],
+    "Luna":    [(0, 3), (3, 301)],
+    "Mars":    [(0, 4)],
+    "Jupiter": [(0, 5)],
+    "Saturn":  [(0, 6)],
+    "Uranus":  [(0, 7)],
+    "Neptune": [(0, 8)],
+}
+
+# NAIF ID whose GM (in REBOUND's embedded Horizons mass table) gives each body's mass. These
+# match the bodies resolved by REBOUND's Horizons queries so the masses are identical to the
+# web path.
+_EPHEM_MASS_NAIF = {
+    "Sun": 10, "Mercury": 199, "Venus": 299, "Earth": 399, "Luna": 301,
+    "Mars": 4, "Jupiter": 5, "Saturn": 6, "Uranus": 7, "Neptune": 8,
+}
+
+
+def reboundBodyMassSolar(naif_id):
+    """ Return a body's mass in solar masses, using the same GM table REBOUND uses for its JPL
+    Horizons queries (rebound.horizons.HORIZONS_MASS_DATA).
+
+    The mass is computed as the ratio GM_body/GM_Sun, which equals the mass in solar masses and
+    is exactly the value REBOUND assigns to bodies added via Horizons (up to the Sun's own mass
+    being 1.0 in the G=1, AU, solar-mass, year/2pi unit system used by the simulation).
+
+    Arguments:
+        naif_id: [int] NAIF ID of the body (e.g. 5 for the Jupiter system barycentre).
+
+    Return:
+        [float] Mass of the body in solar masses.
+    """
+
+    import rebound.horizons as rbh
+
+    def _gm(idn):
+        match = re.search(
+            r"BODY{:d}\_GM .* \( *([\.DE\+\-0-9]+ *)\)".format(int(idn)), rbh.HORIZONS_MASS_DATA
+        )
+        return float(match.group(1).replace("D+", "E+"))
+
+    return _gm(naif_id)/_gm(10)
+
+
+def ephemBodyStateRebound(body, jd_tdb, jpl_ephem_data):
+    """ Compute a body's state vector and mass in REBOUND simulation units from the local DE430
+    ephemeris, reproducing the state that REBOUND's JPL Horizons query would add.
+
+    The returned state is barycentric (Solar System barycentre origin) in the ecliptic J2000
+    frame, with positions in AU and velocities in AU/(year/2pi) - i.e. the units of a default
+    REBOUND simulation (G=1, length AU, mass solar masses, time year/2pi).
+
+    Arguments:
+        body: [str] Body name, a key of _EPHEM_NAIF_PATHS (e.g. "Jupiter", "Earth", "Luna").
+        jd_tdb: [float] Julian date in Barycentric Dynamical Time (TDB).
+        jpl_ephem_data: [SPK] An opened jplephem SPK kernel (SPK.open(config.jpl_ephem_file)).
+
+    Return:
+        state: [list] [x, y, z, vx, vy, vz] in AU and AU/(year/2pi).
+        mass: [float] Body mass in solar masses.
+    """
+
+    aum = rb.units.lengths_SI["au"]  # 1 au in m
+    aukm = aum/1e3                   # 1 au in km
+
+    # Sum the segment states along the path to get the body's state relative to the SSB.
+    # compute_and_differentiate returns position in km and velocity in km/day, in the
+    # equatorial ICRF/J2000 frame.
+    pos_km = np.zeros(3)
+    vel_kmday = np.zeros(3)
+    for center, target in _EPHEM_NAIF_PATHS[body]:
+        position, velocity = jpl_ephem_data[center, target].compute_and_differentiate(jd_tdb)
+        pos_km += np.array(position)
+        vel_kmday += np.array(velocity)
+
+    # Rotate from the equatorial J2000 frame to the ecliptic J2000 frame (same convention as
+    # wmpl.Utils.Earth.calcEarthRectangularCoordJPL)
+    pos_km = rotateVector(pos_km, np.array([1.0, 0.0, 0.0]), -J2000_OBLIQUITY)
+    vel_kmday = rotateVector(vel_kmday, np.array([1.0, 0.0, 0.0]), -J2000_OBLIQUITY)
+
+    # Convert to REBOUND units: km -> AU, km/day -> AU/(year/2pi)
+    pos_au = pos_km/aukm
+    vel_reb = vel_kmday/aukm*(365.25/(2*np.pi))
+
+    state = list(pos_au) + list(vel_reb)
+    mass = reboundBodyMassSolar(_EPHEM_MASS_NAIF[body])
+
+    return state, mass
+
+
+def findEarthDepartureIndex(sim_outputs, n_hill=3.0):
+    """ Find the first timestep at which the object leaves the Earth's Hill-sphere neighborhood.
+
+    Meteoroid orbits all start at the Earth, so the object begins inside the Earth's Hill sphere.
+    This returns the index of the first output at which the object-Earth distance first exceeds
+    n_hill times the Earth's Hill radius, i.e. when the object has departed the Earth's
+    neighborhood. Encounter detection for all bodies except the Moon is restricted to timesteps
+    at or after this index (see detectCloseEncounters).
+
+    Arguments:
+        sim_outputs: [list] Per-timestep outputs as returned by reboundSimulate.
+
+    Keyword arguments:
+        n_hill: [float] Multiple of the Earth's Hill radius that defines the departure boundary.
+            Default is 3.0 (matches the close-encounter threshold).
+
+    Return:
+        [int or None] Index of the first output outside n_hill Earth Hill radii, or None if the
+            object never leaves that neighborhood during the simulation.
+    """
+
+    earth_hill = HILL_RADII_AU["Earth"]
+
+    for i, output in enumerate(sim_outputs):
+
+        try:
+            earth_dist = output[3]["Earth"]
+        except (KeyError, IndexError, TypeError):
+            return None
+
+        if earth_dist > n_hill*earth_hill:
+            return i
+
+    return None
+
+
+def detectCloseEncounters(sim_outputs, n_hill=3.0):
+    """ Detect close encounters between the integrated object and the planets (and the Moon).
+
+    A close encounter is flagged when the minimum object-body distance drops below n_hill times
+    the body's Hill-sphere radius (see HILL_RADII_AU). The Hill sphere is the standard criterion
+    for gravitational close encounters; a small multiple (~3 R_Hill) is commonly used as the
+    boundary of significant perturbation.
+
+    Because meteoroid orbits all start at the Earth, the initial period during which the object
+    is still inside the Earth's Hill-sphere neighborhood is excluded from detection for every
+    body EXCEPT the Moon: detection for all other bodies (including a genuine later Earth
+    re-encounter) starts only once the object has left the Earth's neighborhood
+    (see findEarthDepartureIndex). The Moon is always checked over the full simulation, so a real
+    lunar encounter while the object is departing the Earth is still caught. If the object never
+    leaves the Earth's neighborhood, only the Moon is checked.
+
+    Arguments:
+        sim_outputs: [list] List of per-timestep outputs, each [time, state_vect_hel, orb_elem,
+            planet_dists], as returned by reboundSimulate. planet_dists is a dict mapping body
+            name to object-body distance in AU.
+
+    Keyword arguments:
+        n_hill: [float] Multiple of the Hill radius used as the close-encounter threshold and as
+            the Earth-departure boundary. Default is 3.0.
+
+    Return:
+        [list] One dict per detected encounter, sorted by closeness (min_dist/R_Hill ascending):
+            {
+                "body":           [str]   body name,
+                "min_dist_au":    [float] minimum distance during the searched interval in AU,
+                "time_days":      [float] time of closest approach in days from the epoch,
+                "hill_radius_au": [float] body's Hill radius in AU,
+                "n_hill":         [float] min_dist_au/hill_radius_au (closeness in Hill radii),
+                "index":          [int]   index into sim_outputs of the closest approach,
+            }
+    """
+
+    encounters = []
+
+    if not sim_outputs:
+        return encounters
+
+    # Index at which the object leaves the Earth's neighborhood. Detection for all bodies except
+    # the Moon starts here to avoid flagging the trivial initial encounter with the Earth.
+    earth_departure_index = findEarthDepartureIndex(sim_outputs, n_hill=n_hill)
+
+    for body, hill_radius in HILL_RADII_AU.items():
+
+        # Extract the distance series for this body (skip if the body is not tracked)
+        try:
+            dists = [output[3][body] for output in sim_outputs]
+        except (KeyError, IndexError, TypeError):
+            continue
+
+        # The Moon is checked over the full simulation; all other bodies only after the object
+        # has departed the Earth's neighborhood.
+        if body == "Luna":
+            start = 0
+        else:
+            # If the object never leaves the Earth's neighborhood, skip all non-Moon bodies
+            if earth_departure_index is None:
+                continue
+            start = earth_departure_index
+
+        # Find the closest approach within the searched interval
+        search = dists[start:]
+        if not search:
+            continue
+
+        min_index = start + int(np.argmin(search))
+        min_dist = dists[min_index]
+
+        # Flag an encounter if the closest approach is within n_hill Hill radii
+        if min_dist < n_hill*hill_radius:
+            encounters.append({
+                "body": body,
+                "min_dist_au": min_dist,
+                "time_days": sim_outputs[min_index][0]/(2*np.pi)*365.25,
+                "hill_radius_au": hill_radius,
+                "n_hill": min_dist/hill_radius,
+                "index": min_index,
+            })
+
+    # Sort by closeness in Hill radii (closest first)
+    encounters.sort(key=lambda e: e["n_hill"])
+
+    return encounters
+
+
+def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local", jpl_ephem_data=None):
+    """ Takes a state vector in ECI coordinates (m and m/s), Julian date and converts from ECI (geocentric) to
     Solar System barycentric coordiantes. The units are changed to AU and AU/year.
 
     Arguments:
-        state_vect: [list] Position and velocity components in ECI coordinates (epoch of date) in m and m/s, 
+        state_vect: [list] Position and velocity components in ECI coordinates (epoch of date) in m and m/s,
         [x, y, z, vx, vy, vz], as given in the WMPL trajectory solution.
-        jd: [float] Julian date (decimal).
+        jd: [float] Julian date (decimal), in TDB.
 
     Keyword arguments:
         log_file_path: [str] Path to the log file where the output will be written.
+        ephem_source: [str] Source of the Earth's barycentric state used to shift the meteoroid:
+            - "local" (default): the local DE430 ephemeris (fast, offline).
+            - "horizons": the JPL Horizons web service.
+        jpl_ephem_data: [SPK] An opened jplephem SPK kernel. If None and ephem_source is "local",
+            the kernel is opened from config.jpl_ephem_file.
 
     Return:
-        [list] Position and velocity components in barycentric coordinates in AU and AU/year, eg. 
+        [list] Position and velocity components in barycentric coordinates in AU and AU/year, eg.
             [x, y, z, vx, vy, vz]
     """
 
@@ -53,19 +304,29 @@ def convertToBarycentric(state_vect, jd, log_file_path=""):
     # If a log file is specified, open it
     if len(log_file_path):
         log_file = open(log_file_path, "w")
-        
+
         def log(message):
             log_file.write(message + "\n")
 
         log(f"Reference Julian date (TDB): {jd}")
 
-    # Create a REBOUND simulation
-    sim = rb.Simulation()
+    # Get the Earth's barycentric state (AU, AU/(year/2pi), ecliptic J2000) used to shift the
+    # meteoroid from geocentric to barycentric coordinates.
+    if ephem_source == "horizons":
 
-    # Uses JPL Horizons to query for J2000 ecliptic SSB, geometric states vector correction
-    sim.add("Geocenter", date=f"JD{jd:.6f}", hash="Earth")
+        # Use JPL Horizons to query for the J2000 ecliptic SSB Earth state vector
+        sim = rb.Simulation()
+        sim.add("Geocenter", date=f"JD{jd:.6f}", hash="Earth")
+        ps = sim.particles
+        earth_state = [ps["Earth"].x, ps["Earth"].y, ps["Earth"].z,
+                       ps["Earth"].vx, ps["Earth"].vy, ps["Earth"].vz]
 
-    ps = sim.particles
+    else:
+
+        # Use the local DE430 ephemeris
+        if jpl_ephem_data is None:
+            jpl_ephem_data = SPK.open(config.jpl_ephem_file)
+        earth_state, _ = ephemBodyStateRebound("Earth", jd, jpl_ephem_data)
 
     # Convert the state vector to REBOUND units
     aum = rb.units.lengths_SI["au"]
@@ -145,16 +406,16 @@ def convertToBarycentric(state_vect, jd, log_file_path=""):
             f"Meteor state vector in ecliptic ECI, J2000 (AU, AU/year where year = 2pi): {state_vect_rot}"
         )
         log(
-            f"Earth state vector in ecliptic solar system barycentric, J2000 (AU, AU/year where year = 2pi): {[ps['Earth'].x, ps['Earth'].y, ps['Earth'].z, ps['Earth'].vx, ps['Earth'].vy, ps['Earth'].vz]}"
+            f"Earth state vector in ecliptic solar system barycentric, J2000 (AU, AU/year where year = 2pi): {earth_state}"
         )
 
     # Add the Earth's position and velocity to the meteoroid's position and velocity
-    state_vect_rot[0] += ps["Earth"].x
-    state_vect_rot[1] += ps["Earth"].y
-    state_vect_rot[2] += ps["Earth"].z
-    state_vect_rot[3] += ps["Earth"].vx
-    state_vect_rot[4] += ps["Earth"].vy
-    state_vect_rot[5] += ps["Earth"].vz
+    state_vect_rot[0] += earth_state[0]
+    state_vect_rot[1] += earth_state[1]
+    state_vect_rot[2] += earth_state[2]
+    state_vect_rot[3] += earth_state[3]
+    state_vect_rot[4] += earth_state[4]
+    state_vect_rot[5] += earth_state[5]
 
     if len(log_file_path):
         log(
@@ -212,9 +473,9 @@ def extractSimParams(ps, obj_name, planet_names, reference_frame="heliocentric")
 
 
 def reboundSimulate(
-        julian_date, state_vect, traj=None, 
+        julian_date, state_vect, traj=None,
         direction="forward", sim_days=60, n_outputs=500, obj_name="obj", obj_mass=0.0, mc_runs=100,
-        reference_frame="heliocentric",
+        reference_frame="heliocentric", ephem_source="local",
         verbose=False):
     """ Takes an state vector (or a Trajectory object), runs REBOUND and produces orbital elements for the 
     object at the end of the simulation or at the specified time.
@@ -238,6 +499,9 @@ def reboundSimulate(
         reference_frame: [str] Reference frame to use for the state vector. Options:
             - "heliocentric" (default)
             - "geocentric"
+        ephem_source: [str] Source of the planetary positions used to seed the simulation:
+            - "local" (default): the local DE430 ephemeris (fast, offline, no web queries).
+            - "horizons": the JPL Horizons web service (slower, requires network).
         verbose: [bool] If True, print out the progress of the simulation.
 
     Return:
@@ -335,24 +599,39 @@ def reboundSimulate(
 
     # Add the Sun and the planets
     planet_names = [
-        "Sun", 
-        "Mercury", "Venus", "Earth", "Luna", "Mars", 
+        "Sun",
+        "Mercury", "Venus", "Earth", "Luna", "Mars",
         "Jupiter", "Saturn", "Uranus", "Neptune"
     ]
-    sim.add("Sun", date=f"JD{time_tdb:.6f}", hash="Sun")
-    sim.add("Mercury", date=f"JD{time_tdb:.6f}", hash="Mercury")
-    sim.add("Venus", date=f"JD{time_tdb:.6f}", hash="Venus")
-    sim.add("Geocenter", date=f"JD{time_tdb:.6f}", hash="Earth")
-    sim.add("Luna", date=f"JD{time_tdb:.6f}", hash="Luna")
-    sim.add("Mars", date=f"JD{time_tdb:.6f}", hash="Mars")
-    sim.add("Jupiter", date=f"JD{time_tdb:.6f}", hash="Jupiter")
-    sim.add("Saturn", date=f"JD{time_tdb:.6f}", hash="Saturn")
-    sim.add("Uranus", date=f"JD{time_tdb:.6f}", hash="Uranus")
-    sim.add("Neptune", date=f"JD{time_tdb:.6f}", hash="Neptune")
+
+    # Names as resolved by JPL Horizons (used only for the "horizons" ephemeris source)
+    horizons_names = {"Earth": "Geocenter"}
+
+    if ephem_source == "horizons":
+
+        # Seed the planets from the JPL Horizons web service
+        for name in planet_names:
+            sim.add(horizons_names.get(name, name), date=f"JD{time_tdb:.6f}", hash=name)
+
+        jpl_ephem_data = None
+
+    else:
+
+        # Seed the planets from the local DE430 ephemeris (fast, offline)
+        jpl_ephem_data = SPK.open(config.jpl_ephem_file)
+        for name in planet_names:
+            body_state, body_mass = ephemBodyStateRebound(name, time_tdb, jpl_ephem_data)
+            sim.add(
+                m=body_mass,
+                x=body_state[0], y=body_state[1], z=body_state[2],
+                vx=body_state[3], vy=body_state[4], vz=body_state[5],
+                hash=name,
+            )
 
     # To start the meteoroid in the right spot, we need to feed in x,y,z barycentric position in AU
     # The velocity should be in AU/year divided by 2pi
-    state_vect_rot = convertToBarycentric(state_vect, time_tdb)
+    state_vect_rot = convertToBarycentric(state_vect, time_tdb, ephem_source=ephem_source,
+                                          jpl_ephem_data=jpl_ephem_data)
 
     if verbose:
         print("Initial state vector in ECI coordinates:")
@@ -383,7 +662,8 @@ def reboundSimulate(
         if verbose:
             print(f"MC realization {i + 1}: {state_vect_realization}")
 
-        sv_mc_rot = convertToBarycentric(state_vect_realization, time_tdb)
+        sv_mc_rot = convertToBarycentric(state_vect_realization, time_tdb, ephem_source=ephem_source,
+                                         jpl_ephem_data=jpl_ephem_data)
 
         mc_name = f"{obj_name}_MC_{i}"
 
@@ -518,6 +798,10 @@ if __name__ == "__main__":
     parser.add_argument("--geocentric", action="store_true",
                         help="Run the simulation in geocentric reference frame. Default is heliocentric.")
     
+    parser.add_argument("--horizons", action="store_true",
+                        help="Use the JPL Horizons web service for planet positions instead of the "
+                        "local DE430 ephemeris. Slower and requires network access.")
+
     parser.add_argument("--verbose", action="store_true", help="Print out the progress of the simulation.")
 
     args = parser.parse_args()
@@ -525,6 +809,11 @@ if __name__ == "__main__":
     # Extract the number of days from the arguments and the simulation direction
     sim_days = args.days
     direction = "backward" if args.forward is None else "forward"
+
+    # Source of the planetary ephemeris
+    ephem_source = "horizons" if args.horizons else "local"
+    print("Using {:s} for planet positions.".format(
+        "JPL Horizons (web)" if args.horizons else "the local DE430 ephemeris"))
 
     ###
 
@@ -554,7 +843,8 @@ if __name__ == "__main__":
     # Run the simulation for the given number of days from the epoch of the trajectory
     sim_outputs, sim_outputs_mc = reboundSimulate(
         None, None, traj=traj, direction=direction, sim_days=sim_days,
-        obj_name=traj.traj_id, mc_runs=args.mc, reference_frame=reference_frame, verbose=args.verbose
+        obj_name=traj.traj_id, mc_runs=args.mc, reference_frame=reference_frame,
+        ephem_source=ephem_source, verbose=args.verbose
         )
 
     # Compute the 95% CI for the orbital elements from the Monte Carlo realizations
@@ -648,6 +938,24 @@ if __name__ == "__main__":
     print("f    = {:>10.6f}{:s} deg".format(np.degrees(sim_outputs[-1][2].f), f_ci_str))
 
 
+    # Detect close encounters with the planets (and the Moon) using the Hill-sphere criterion
+    n_hill = 3.0
+    encounters = detectCloseEncounters(sim_outputs, n_hill=n_hill)
+
+    # List of bodies for which the distance is tracked (planet_dists dict keys)
+    dist_bodies = list(sim_outputs[0][3].keys())
+
+    # Print a summary of the detected close encounters
+    print("\nClose encounters (< {:.0f} Hill radii):".format(n_hill))
+    if encounters:
+        for enc in encounters:
+            print("  {:<8s} min dist = {:10.6f} AU ({:12.1f} km) at t = {:10.4f} d, R_Hill = {:.6f} AU ({:.2f} R_Hill)".format(
+                enc["body"], enc["min_dist_au"], enc["min_dist_au"]*149597870.7,
+                enc["time_days"], enc["hill_radius_au"], enc["n_hill"]))
+    else:
+        print("  None detected.")
+
+
     # Save the results to a file
     with open(os.path.join(os.path.dirname(args.pickle_path), "rebound_simulation_results.txt"), "w") as f:
 
@@ -661,12 +969,27 @@ if __name__ == "__main__":
         f.write("node = {:>10.6f}{:s} deg\n".format(np.degrees(sim_outputs[-1][2].omega), omega_ci_str))
         f.write("f    = {:>10.6f}{:s} deg\n".format(np.degrees(sim_outputs[-1][2].f), f_ci_str))
 
-        # Save the nominal orbital elements from the initial to end time of the simulation
-        f.write("\nOrbital elements from the initial to end time of the simulation:\n")
+        # Save the detected close encounters (Hill-sphere criterion)
+        f.write("\nClose encounters (< {:.0f} Hill radii):\n".format(n_hill))
+        if encounters:
+            for enc in encounters:
+                f.write("  {:<8s} min dist = {:10.6f} AU ({:12.1f} km) at t = {:10.4f} d, R_Hill = {:.6f} AU ({:.2f} R_Hill)\n".format(
+                    enc["body"], enc["min_dist_au"], enc["min_dist_au"]*149597870.7,
+                    enc["time_days"], enc["hill_radius_au"], enc["n_hill"]))
+        else:
+            f.write("  None detected.\n")
+
+        # Save the nominal orbital elements and per-body distances from the initial to end time
+        # of the simulation. Distances to each body are always in AU.
+        f.write("\nOrbital elements and distances to each body [AU] from the initial to end time of the simulation:\n")
+        f.write("(distance columns: " + ", ".join(dist_bodies) + ")\n")
         for i, output in enumerate(sim_outputs):
 
-            # Save the orbital elements at the given time
-            f.write(f"t = {output[0]/(2*np.pi)*365.25:.6f} d, a = {output[2].a*dist_unit_multiplier:10.6f}, e = {output[2].e:10.6f}, i = {np.degrees(output[2].inc):10.6f}, Omega = {np.degrees(output[2].Omega):10.6f}, omega = {np.degrees(output[2].omega):10.6f}, f = {np.degrees(output[2].f):10.6f}\n")
+            # Build the per-body distance columns (in AU)
+            dist_str = "".join(", {:s} = {:10.6f}".format(body, output[3][body]) for body in dist_bodies)
+
+            # Save the orbital elements and distances at the given time
+            f.write(f"t = {output[0]/(2*np.pi)*365.25:.6f} d, a = {output[2].a*dist_unit_multiplier:10.6f}, e = {output[2].e:10.6f}, i = {np.degrees(output[2].inc):10.6f}, Omega = {np.degrees(output[2].Omega):10.6f}, omega = {np.degrees(output[2].omega):10.6f}, f = {np.degrees(output[2].f):10.6f}{dist_str}\n")
 
         # If the MC was run, save orbital elements of individual MC runs
         if len(sim_outputs_mc):
@@ -699,7 +1022,7 @@ if __name__ == "__main__":
     earth_dist = [x["Earth"] for x in planet_dists]
 
     # Find the time when the object exits the Earth's Hill sphere
-    earth_hill = 0.01 # AU
+    earth_hill = HILL_RADII_AU["Earth"] # AU
     exit_index = None
     for i, dist in enumerate(earth_dist):
         if dist > earth_hill:
@@ -762,6 +1085,35 @@ if __name__ == "__main__":
 
     axs[2, 2].set_ylabel("Distance [AU]")
     axs[2, 2].legend()
+
+
+    # Mark the detected close encounters at the point of closest approach on the distance subplots
+    labeled_axes = set()
+    for enc in encounters:
+        body = enc["body"]
+        t_enc = enc["time_days"]
+        d_enc = enc["min_dist_au"]
+
+        # Determine which distance subplot(s) show this body
+        marks = []
+        if body in inner_planets:
+            marks.append((axs[1, 2], d_enc))
+        if body in outer_planets:
+            marks.append((axs[2, 2], d_enc))
+        if body == "Earth":
+            # The Earth-distance subplot is scaled by the reference-frame unit multiplier
+            marks.append((axs[0, 2], d_enc*dist_unit_multiplier))
+
+        for ax, d_plot in marks:
+
+            # Only add the legend label once per axis
+            label = "Close encounter" if ax not in labeled_axes else None
+            labeled_axes.add(ax)
+
+            ax.plot(t_enc, d_plot, marker="*", color="red", markersize=14, linestyle="none",
+                    zorder=5, label=label)
+            ax.annotate(body, (t_enc, d_plot), textcoords="offset points", xytext=(5, 5),
+                        color="red", fontsize=8)
 
 
     # Set the axis labels
