@@ -1,4 +1,11 @@
-""" Functions for running REBOUND simulations on wmpl trajectories. """
+""" Functions for running REBOUND simulations on wmpl trajectories.
+
+Requires the 'rebound' and 'reboundx' packages. These work on Linux and macOS. They do NOT
+install on native Windows: 'reboundx' has no Windows wheel and does not compile with MSVC
+(it uses C99 variable-length arrays MSVC does not support). On Windows, use the Windows
+Subsystem for Linux (WSL2) - install Ubuntu, set up the wmpl conda environment there, and run
+from that shell. Installing only 'rebound' is not enough; 'reboundx' must import too.
+"""
 
 import os
 import re
