@@ -3051,6 +3051,7 @@ class MetSimGUI(QMainWindow):
         self.checkBoxErosionAblationCoeffChange.stateChanged.connect(self.checkBoxErosionAblationCoeffSignal)
         self.checkBoxDisruption.stateChanged.connect(self.checkBoxDisruptionSignal)
         self.checkBoxDisruptionErosionCoeff.stateChanged.connect(self.checkBoxDisruptionErosionCoeffSignal)
+        self.checkBoxAdaptiveDt.stateChanged.connect(self.checkBoxAdaptiveDtSignal)
 
 
         self.runSimButton.clicked.connect(self.runSimulationGUI)
@@ -3099,6 +3100,7 @@ class MetSimGUI(QMainWindow):
         self.checkBoxDisruptionSignal(None)
         self.checkBoxDisruptionErosionCoeffSignal(None)
         self.checkBoxDisruptionErosionCoeffSignal(None)
+        self.checkBoxAdaptiveDtSignal(None)
         self.toggleWakeNormalizationMethod(None)
         self.toggleWakeAlignMethod(None)
         self.toggleFragmentation(None)
@@ -3276,6 +3278,11 @@ class MetSimGUI(QMainWindow):
         ### Simulation params ###
 
         self.inputTimeStep.setText(str(const.dt))
+
+        # Adaptive time step toggle: when on, dt is only the output cadence and its box is disabled
+        self.checkBoxAdaptiveDt.setChecked(getattr(const, 'adaptive_dt', False))
+        self.inputTimeStep.setEnabled(not self.checkBoxAdaptiveDt.isChecked())
+
         self.inputHtInit.setText("{:.3f}".format(const.h_init/1000))
         self.inputP0M.setText("{:d}".format(int(const.P_0m)))
         self.inputMassKill.setText("{:.1e}".format(const.m_kill))
@@ -3579,6 +3586,14 @@ class MetSimGUI(QMainWindow):
         self.readInputBoxes()
 
 
+    def checkBoxAdaptiveDtSignal(self, event):
+        """ Toggle adaptive per-fragment sub-stepping. When on, dt is only the output cadence, so the
+            fixed time-step box is disabled (the integration step is chosen automatically). """
+
+        self.const.adaptive_dt = self.checkBoxAdaptiveDt.isChecked()
+        self.inputTimeStep.setDisabled(self.const.adaptive_dt)
+
+
     def checkBoxFragmentationShowIndividualLCsSignal(self, event):
         """ Toggle computing light curves of individual fragments during complex fragmentation. """
 
@@ -3660,6 +3675,7 @@ class MetSimGUI(QMainWindow):
         ### Simulation params ###
 
         self.const.dt = self._tryReadBox(self.inputTimeStep, self.const.dt)
+        self.const.adaptive_dt = self.checkBoxAdaptiveDt.isChecked()
         self.const.P_0m = self._tryReadBox(self.inputP0M, self.const.P_0m)
 
         self.const.h_init   = 1000*self._tryReadBox(self.inputHtInit, self.const.h_init/1000)

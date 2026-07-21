@@ -6,7 +6,7 @@ cimport cython
 
 import numpy as np
 cimport numpy as np
-from libc.math cimport sqrt, M_PI, M_PI_2, atan2, tanh, log, exp, log10
+from libc.math cimport sqrt, M_PI, M_PI_2, atan2, tanh, log, exp, log10, cos, fabs, fmax
 
 
 # Define cython types for numpy arrays
@@ -581,3 +581,250 @@ cpdef atmDensityPoly(double ht, np.ndarray[FLOAT_TYPE_t, ndim=1] dens_co):
                + dens_co[5]*(ht/1e6)**5
                + dens_co[6]*(ht/1e6)**6
                )
+
+
+
+### Adaptive per-fragment sub-stepping (used only when const.adaptive_dt is True) ###
+
+
+cdef inline double clampMassC(double dm, double m):
+    """ Reproduce the "ablate at most the whole mass" clamp (MetSimErosion.py mass-loss clamp):
+        if m + dm < 0, cap the loss at exactly -m so the mass floors at 0. """
+    if (m + dm) < 0:
+        return -m
+    return dm
+
+
+@cython.cdivision(True)
+cdef double heightCurvatureC(double h0, double zc, double l, double r_earth):
+    """ Cython twin of heightCurvature() (MetSimErosion.py). Scalar hot-path. """
+    return sqrt((h0 + r_earth)*(h0 + r_earth) - 2*l*cos(zc)*(h0 + r_earth) + l*l) - r_earth
+
+
+@cython.cdivision(True)
+cdef double atmDensityPolyC(double ht, FLOAT_TYPE_t[:] dens_co):
+    """ Cython/memoryview twin of atmDensityPoly() for use inside the substep loop. """
+    cdef double x = ht/1e6
+    return 10**(dens_co[0] + dens_co[1]*x + dens_co[2]*x*x + dens_co[3]*x*x*x
+                + dens_co[4]*x*x*x*x + dens_co[5]*x*x*x*x*x + dens_co[6]*x*x*x*x*x*x)
+
+
+@cython.cdivision(True)
+cdef void advanceVelPosC(double m, double v, double vv, double vh, double length, double grav,
+                         double dm, double decel_rate, double h, double h_at,
+                         double r_earth, double g0, double* out):
+    """ Advance velocity components, speed, along-track length, and gravity-drop for one sub-step of
+        size h, reproducing MetSimErosion.py:773-824 exactly (velocity updated BEFORE length; gravity
+        only drops height, does not enter the velocity magnitude). out layout:
+        [m_new, v_new, vv_new, vh_new, length_new, grav_new, went_up_flag]. """
+    cdef double gv, av, ah, vv_n, vh_n, v_n
+    # Accelerating (decel_rate > 0) or already stopped -> stop the fragment (mirror 773-775)
+    if (decel_rate > 0) or (v <= 0):
+        out[0] = m + dm; out[1] = 0.0; out[2] = 0.0; out[3] = 0.0
+        out[4] = length; out[5] = grav; out[6] = 0.0
+        return
+    gv = g0/((1.0 + h_at/r_earth)*(1.0 + h_at/r_earth))
+    av = -decel_rate*vv/v + vh*v/(r_earth + h_at)
+    ah = -decel_rate*vh/v - vv*v/(r_earth + h_at)
+    vv_n = vv - av*h
+    vh_n = vh - ah*h
+    v_n = sqrt(vv_n*vv_n + vh_n*vh_n)
+    out[0] = m + dm
+    out[1] = v_n
+    out[2] = vv_n
+    out[3] = vh_n
+    out[4] = length + v_n*h            # length uses the UPDATED speed (matches 811-813 -> 824)
+    out[5] = grav + 0.5*gv*h*h
+    out[6] = 1.0 if vv_n > 0 else 0.0  # going up
+
+
+@cython.cdivision(True)
+cpdef adaptiveSingleBodyStep(double dt_macro, double K, double sigma, double erosion_coeff,
+        int erosion_active, double m, double v, double vv, double vh, double length,
+        double h_grav_drop_total, double h_init, double zenith_angle, double r_earth, double g0,
+        FLOAT_TYPE_t[:] dens_co, double rtol, double atol_m, double atol_v, double m_kill,
+        double dt_min, double dt_max, int max_substeps, double h_sub_init):
+    """ Advance ONE fragment across a full macro interval dt_macro using error-controlled adaptive
+        sub-steps (step-doubling on the existing RK4), refreshing atmosphere/height each sub-step.
+        Reproduces the single-body advance of MetSimErosion.py (748-834) in the one-substep limit but
+        drives the local error below (rtol, atol). Events/kills stay at the macro boundary (handled by
+        the caller). Returns a tuple:
+          (m, v, vv, vh, length, h_grav_drop_total, h_new, rho_final,
+           dm_abl_macro, dm_ero_macro, decel_return, went_up, n_substeps, h_sub_last, runaway)
+        where dm_*_macro are the (unclamped, per-species) accumulated mass losses used for the
+        luminosity/electron-density/grain diagnostics, and decel_return is the macro-averaged dv/dt
+        (negative), consistent with the sign of decelerationRK4. """
+
+    cdef double t = 0.0
+    cdef double h_sub, h_cur, rho_atm, rho_mid, rho_last
+    cdef double dm_abl_big, dm_ero_big, dm_tot_big, decel_big
+    cdef double dm_abl_1, dm_ero_1, dm_tot_1, decel_1
+    cdef double dm_abl_2, dm_ero_2, dm_tot_2, decel_2
+    cdef double m_h, v_h, vv_h, vh_h, len_h, grav_h, h_mid
+    cdef double m_big, v_big, m_two, v_two, hh
+    cdef double err_m, err_v, sc_m, sc_v, E, E_prev, fac
+    cdef double dm_abl_macro = 0.0
+    cdef double dm_ero_macro = 0.0
+    cdef double v_start = v
+    cdef int n_substeps = 0
+    cdef int went_up = 0
+    cdef int runaway = 0
+    cdef int at_floor
+    cdef double out1[7]
+    cdef double out2[7]
+    cdef double outb[7]
+    cdef double h_new, decel_return, rho_final
+
+    cdef double safety = 0.9
+    cdef double facmin = 0.2
+    cdef double facmax = 5.0
+
+    # Per-sub-step erosion shedding events (only for eroding fragments), so that ablateAll can spawn
+    #   grains at each sub-step's resolved state instead of dumping the whole macro interval's eroded
+    #   mass at one point. Each entry: (eroded_mass, h, v, vv, vh, length, h_grav_drop_total). None for
+    #   non-eroding fragments (the vast majority) to keep their fast path allocation-free.
+    erosion_events = [] if erosion_active else None
+
+    h_sub = h_sub_init
+    if h_sub <= 0:
+        h_sub = dt_macro
+    if h_sub > dt_max:
+        h_sub = dt_max
+    if h_sub < dt_min:
+        h_sub = dt_min
+    E_prev = 1.0
+    rho_last = 0.0
+
+    while t < dt_macro:
+
+        # Clamp the final sub-step so sub-steps sum to exactly dt_macro (no overshoot)
+        if t + h_sub > dt_macro:
+            h_sub = dt_macro - t
+
+        hh = 0.5*h_sub
+
+        # Height and atmosphere at the CURRENT state (refresh -> shrinks the operator-split/frozen-rho error)
+        h_cur = heightCurvatureC(h_init, zenith_angle, length, r_earth) - h_grav_drop_total
+        rho_atm = atmDensityPolyC(h_cur, dens_co)
+        rho_last = rho_atm
+
+        # --- Big step (size h_sub) ---
+        dm_abl_big = massLossRK4(h_sub, K, sigma, m, rho_atm, v)
+        if erosion_active:
+            dm_ero_big = massLossRK4(h_sub, K, erosion_coeff, m, rho_atm, v)
+        else:
+            dm_ero_big = 0.0
+        dm_tot_big = clampMassC(dm_abl_big + dm_ero_big, m)
+        # Floor the deceleration mass at m_kill: deceleration ~ m^(-1/3) diverges as m -> 0, and a grain
+        #   at/under m_kill is treated as dead (killed at the macro boundary), so this only bounds the
+        #   drag on an already-exhausted grain rather than letting it blow up.
+        decel_big = decelerationRK4(h_sub, K, fmax(m, m_kill), rho_atm, v)
+        advanceVelPosC(m, v, vv, vh, length, h_grav_drop_total, dm_tot_big, decel_big, h_sub, h_cur,
+                       r_earth, g0, outb)
+        m_big = outb[0]
+        v_big = outb[1]
+
+        # --- Two half steps (hh each; rho refreshed at the midpoint) ---
+        dm_abl_1 = massLossRK4(hh, K, sigma, m, rho_atm, v)
+        if erosion_active:
+            dm_ero_1 = massLossRK4(hh, K, erosion_coeff, m, rho_atm, v)
+        else:
+            dm_ero_1 = 0.0
+        dm_tot_1 = clampMassC(dm_abl_1 + dm_ero_1, m)
+        decel_1 = decelerationRK4(hh, K, fmax(m, m_kill), rho_atm, v)
+        advanceVelPosC(m, v, vv, vh, length, h_grav_drop_total, dm_tot_1, decel_1, hh, h_cur,
+                       r_earth, g0, out1)
+        m_h = out1[0]; v_h = out1[1]; vv_h = out1[2]; vh_h = out1[3]; len_h = out1[4]; grav_h = out1[5]
+
+        h_mid = heightCurvatureC(h_init, zenith_angle, len_h, r_earth) - grav_h
+        rho_mid = atmDensityPolyC(h_mid, dens_co)
+
+        dm_abl_2 = massLossRK4(hh, K, sigma, m_h, rho_mid, v_h)
+        if erosion_active:
+            dm_ero_2 = massLossRK4(hh, K, erosion_coeff, m_h, rho_mid, v_h)
+        else:
+            dm_ero_2 = 0.0
+        dm_tot_2 = clampMassC(dm_abl_2 + dm_ero_2, m_h)
+        decel_2 = decelerationRK4(hh, K, fmax(m_h, m_kill), rho_mid, v_h)
+        advanceVelPosC(m_h, v_h, vv_h, vh_h, len_h, grav_h, dm_tot_2, decel_2, hh, h_mid,
+                       r_earth, g0, out2)
+        m_two = out2[0]; v_two = out2[1]
+
+        # --- Error estimate (step doubling, RK4 order p=4 -> denom 2^p - 1 = 15) ---
+        err_m = fabs(m_two - m_big)/15.0
+        err_v = fabs(v_two - v_big)/15.0
+        sc_m = atol_m + rtol*fmax(fabs(m_two), fabs(m_big))
+        sc_v = atol_v + rtol*fmax(fabs(v_two), fabs(v_big))
+        E = sqrt(0.5*((err_m/sc_m)*(err_m/sc_m) + (err_v/sc_v)*(err_v/sc_v)))
+
+        at_floor = 1 if h_sub <= dt_min*(1.0 + 1e-12) else 0
+
+        if (E <= 1.0) or at_floor:
+            # Accept the two-half (more accurate) state; accumulate per-species mass loss (unclamped)
+            dm_abl_macro += dm_abl_1 + dm_abl_2
+            dm_ero_macro += dm_ero_1 + dm_ero_2
+            m = out2[0]; v = out2[1]; vv = out2[2]; vh = out2[3]
+            length = out2[4]; h_grav_drop_total = out2[5]
+            t += h_sub
+            n_substeps += 1
+
+            # Record the eroded mass shed on this sub-step, tagged with the fragment's just-advanced
+            #   state, so ablateAll can spawn grains here (finely resolved along the trajectory) rather
+            #   than dumping the whole macro interval's eroded mass at the end point.
+            if erosion_active and ((dm_ero_1 + dm_ero_2) < 0):
+                erosion_events.append((
+                    -(dm_ero_1 + dm_ero_2),
+                    heightCurvatureC(h_init, zenith_angle, length, r_earth) - h_grav_drop_total,
+                    v, vv, vh, length, h_grav_drop_total))
+
+            if m <= m_kill:        # grain exhausted -> freeze, killed at the macro boundary
+                break
+            if out2[6] > 0.5:      # turned upward mid-interval -> freeze, kill at macro boundary
+                vv = 0.0
+                went_up = 1
+                break
+            if v <= 0:             # stopped (accelerating/decel guard) -> freeze
+                break
+            if n_substeps >= max_substeps:
+                runaway = 1
+                break
+
+            # PI step-size controller (k = p + 1 = 5)
+            if E <= 0:
+                E = 1e-10
+            fac = safety*(E**(-0.7/5.0))*(E_prev**(0.4/5.0))
+            E_prev = E
+            if fac < facmin:
+                fac = facmin
+            if fac > facmax:
+                fac = facmax
+            h_sub = h_sub*fac
+            if h_sub > dt_max:
+                h_sub = dt_max
+            if h_sub < dt_min:
+                h_sub = dt_min
+        else:
+            # Reject: shrink and retry the SAME sub-step (do not advance t)
+            fac = safety*(E**(-1.0/5.0))
+            if fac < facmin:
+                fac = facmin
+            h_sub = h_sub*fac
+            if h_sub < dt_min:
+                h_sub = dt_min
+
+    if went_up:
+        h_new = 0.0
+    else:
+        h_new = heightCurvatureC(h_init, zenith_angle, length, r_earth) - h_grav_drop_total
+
+    # Density for the end-of-interval dynamic pressure; fall back to the last in-loop value if h<=0
+    if h_new > 0:
+        rho_final = atmDensityPolyC(h_new, dens_co)
+    else:
+        rho_final = rho_last
+
+    decel_return = -(v_start - v)/dt_macro   # macro-averaged dv/dt (negative), matches decelerationRK4 sign
+
+    return (m, v, vv, vh, length, h_grav_drop_total, h_new, rho_final,
+            dm_abl_macro, dm_ero_macro, decel_return, went_up, n_substeps, h_sub, runaway,
+            erosion_events)
