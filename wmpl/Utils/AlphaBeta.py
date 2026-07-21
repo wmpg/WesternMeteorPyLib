@@ -1715,9 +1715,10 @@ def alphaBetaVelocityNormedLUT(ht_normed, alpha, beta, v_eps=1e-10, lut=None):
     """ EXPERIMENTAL - LUT-accelerated alternative to alphaBetaVelocityNormed(). Inverts Eq. (7)
         in closed form using a tabulated inverse of Ei() instead of bracketing
         alphaBetaHeightNormed() with brentq per point - see the module comment above for the
-        derivation and known limitations. Not wired into any fitting path; kept alongside
-        alphaBetaVelocityNormed() for benchmarking/validation (test_AlphaBeta.py
-        ::testAlphaBetaVelocityNormedLUT) before it replaces it there.
+        derivation and known limitations. Used by every fast=True code path in this module
+        (alphaBetaVelocityNormed(..., fast=True) dispatches here); kept as a separate function,
+        alongside the brentq-based alphaBetaVelocityNormed(), for direct benchmarking/validation
+        (test_AlphaBeta.py::testAlphaBetaVelocityNormedLUT).
 
     Arguments:
         ht_normed: [float or ndarray] Height normalized to HT_NORM_CONST.
