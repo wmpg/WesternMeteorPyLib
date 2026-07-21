@@ -33,6 +33,17 @@ from configparser import ConfigParser
 log = logging.getLogger("traj_correlator")
 
 
+def getKey(fname):
+    key = None
+    for pkey_class in (paramiko.RSAKey, paramiko.ECDSAKey, paramiko.Ed25519Key):
+        try:
+            key = pkey_class.from_private_key_file(fname)
+            print(f'keytype was', pkey_class.__name__)
+            break
+        except Exception as e:
+            pass
+    return key
+
 class RemoteNode():
     def __init__(self, nodename, dirpath, capacity, mode, active=False):
         self.nodename = nodename
@@ -62,6 +73,10 @@ class RemoteDataHandler():
         
         cfg = ConfigParser()
         cfg.read(cfg_file)
+        if not cfg.has_option('mode', 'mode'):
+            log.warning('remote cfg: [mode] section/key missing, not enabling remote processing')
+            self.mode = 'none'
+            return        
         self.mode = cfg['mode']['mode'].lower()
         self.mode = 'parent' if self.mode=='master' else self.mode
         if self.mode not in ['master', 'child', 'parent']:
@@ -113,7 +128,16 @@ class RemoteDataHandler():
         if verbose:
             log.info('created paramiko ssh client....')
         self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        pkey = paramiko.RSAKey.from_private_key_file(self.key) 
+        pkey = None
+        for pkey_class in (paramiko.RSAKey, paramiko.ECDSAKey, paramiko.Ed25519Key):
+            try:
+                pkey = pkey_class.from_private_key_file(self.key)
+                break
+            except Exception as e:
+                pass
+        if pkey is None:
+            log.warning(f'ssh keyfile {self.key} type unknown, cannot be used')
+            return False
         try:
             if verbose:
                 log.info('connecting....')
@@ -203,9 +227,9 @@ class RemoteDataHandler():
                     'files/candidates/processed','files/phase1/processed']:
             try:
                 self.sftp_client.mkdir(pth)
+                self.sftp_client.chmod(pth, 0o777)
             except Exception:
                 pass
-            self.sftp_client.chmod(pth, 0o777)
         
         try:
             rem_dir = f'files/{datatype}'
@@ -230,7 +254,9 @@ class RemoteDataHandler():
                 res = self.getWithRetry(fullname, localname)
                 if res:
                     num_received += 1
-                    self.renameWithRetry(fullname, processed_name)
+                    if not self.renameWithRetry(fullname, processed_name):
+                        log.warning(f'failed to move {fullname} to processed/, leaving it to be solved again next pass')
+                        os.remove(localname)
 
             log.info(f'Obtained {num_received} {"trajectories" if datatype=="phase1" else "candidates"}')
 
