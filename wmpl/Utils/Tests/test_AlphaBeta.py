@@ -15,6 +15,8 @@ or standalone (no pytest required):
     python -m wmpl.Utils.Tests.test_AlphaBeta
 """
 
+import time
+
 import numpy as np
 import scipy.special
 
@@ -24,9 +26,10 @@ import matplotlib.pyplot as plt
 
 from wmpl.Utils.AlphaBeta import (fitAlphaBetaMass, fitAlphaBeta, fitAlphaBetaLightCurve,
     alphaBetaMasses, alphaBetaVelocity, alphaBetaHeight, alphaBetaVelocityNormed,
-    alphaBetaHeightNormed, alphaBetaLuminosityF, alphaBetaModelMagnitude,
-    alphaBetaLuminousEfficiency, plotAlphaBeta, plotProfileAlphaBeta, profileAlphaBeta,
-    _profiledMagOffset, _gaussianEllipsePoints, HT_NORM_CONST, P_0M, ALPHA_BETA_BOUNDS)
+    alphaBetaVelocityNormedLUT, alphaBetaHeightNormed, alphaBetaLuminosityF,
+    alphaBetaModelMagnitude, alphaBetaLuminousEfficiency, plotAlphaBeta, plotProfileAlphaBeta,
+    profileAlphaBeta, _profiledMagOffset, _gaussianEllipsePoints, getDefaultInverseEiLUT,
+    HT_NORM_CONST, P_0M, ALPHA_BETA_BOUNDS)
 
 
 # True parameters used to generate the synthetic trajectory. The height range is chosen so the
@@ -343,6 +346,188 @@ def testAlphaBetaNormedRoundTrip():
 
     assert np.max(np.abs(ht_back - HT_DATA)) < 0.1, \
         "height round trip error {:.3g} m > 0.1 m".format(np.max(np.abs(ht_back - HT_DATA)))
+
+
+def testAlphaBetaVelocityNormedLUT():
+    """ The experimental LUT-accelerated alphaBetaVelocityNormedLUT() must:
+        (1) recover v_normed as accurately as the brentq-based alphaBetaVelocityNormed() across
+            the (alpha, beta) domain where the underlying Ei(beta) - Ei(beta v^2) formulation
+            itself is well-conditioned in float64 (beta up to ~25 - see the module comment above
+            alphaBetaVelocityNormedLUT() in AlphaBeta.py for why beta >~ 30 is excluded: Ei(beta)
+            there is so much larger than Ei(beta v^2) that the *forward* model already loses
+            precision to cancellation, so brentq is not a trustworthy reference either), and
+        (2) be substantially faster, since that's its only reason to exist.
+    """
+
+    # (alpha, beta) pairs spanning ALPHA_BETA_BOUNDS, capped at beta = 25 for the reason above
+    (alpha_lo, alpha_hi), (beta_lo, _) = ALPHA_BETA_BOUNDS
+    param_grid = [(alpha, beta)
+        for alpha in (alpha_lo, 1.0, ALPHA_TRUE, 100.0, alpha_hi)
+        for beta in (beta_lo, 0.01, 0.5, BETA_TRUE, 10.0, 20.0, 25.0)]
+
+    v_grid = np.linspace(0.02, 0.999, 100)
+
+    max_err_vs_truth = 0.0
+    max_err_vs_brentq = 0.0
+
+    for alpha, beta in param_grid:
+
+        ht_normed = alphaBetaHeightNormed(v_grid, alpha, beta)
+
+        v_lut = alphaBetaVelocityNormedLUT(ht_normed, alpha, beta)
+        v_brentq = alphaBetaVelocityNormed(ht_normed, alpha, beta)
+
+        max_err_vs_truth = max(max_err_vs_truth, np.max(np.abs(v_lut - v_grid)))
+        max_err_vs_brentq = max(max_err_vs_brentq, np.max(np.abs(v_lut - v_brentq)))
+
+    assert max_err_vs_truth < 1e-5, \
+        "LUT max|dv| vs ground truth {:.3g} >= 1e-5".format(max_err_vs_truth)
+    assert max_err_vs_brentq < 1e-5, \
+        "LUT max|dv| vs brentq {:.3g} >= 1e-5".format(max_err_vs_brentq)
+
+    # Edge cases: scalar input, and heights outside the invertible range must clip like
+    #   alphaBetaVelocityNormed() does
+    v_eps = 1e-10
+    assert abs(float(alphaBetaVelocityNormedLUT(-100.0, ALPHA_TRUE, BETA_TRUE)) - v_eps) < 1e-12
+    assert abs(float(alphaBetaVelocityNormedLUT(100.0, ALPHA_TRUE, BETA_TRUE)) - (1 - v_eps)) < 1e-12
+
+    # Speed: the LUT path must be dramatically faster than the per-point brentq loop. Exclude the
+    #   one-time table construction (a real caller builds/reuses it once, not per call) and use a
+    #   generous threshold (measured speedup on the reference machine was ~500x) so the assertion
+    #   only fails on a genuine performance regression, not machine noise
+    ht_normed = alphaBetaHeightNormed(np.linspace(0.05, 0.999, 2000), ALPHA_TRUE, BETA_TRUE)
+
+    alphaBetaVelocityNormedLUT(ht_normed, ALPHA_TRUE, BETA_TRUE)  # warm the default LUT
+
+    t0 = time.perf_counter()
+    alphaBetaVelocityNormedLUT(ht_normed, ALPHA_TRUE, BETA_TRUE)
+    t_lut = time.perf_counter() - t0
+
+    t0 = time.perf_counter()
+    alphaBetaVelocityNormed(ht_normed, ALPHA_TRUE, BETA_TRUE)
+    t_brentq = time.perf_counter() - t0
+
+    speedup = t_brentq/t_lut
+    assert speedup > 20, "LUT speedup {:.1f}x <= 20x".format(speedup)
+
+
+def testFastFlagPropagation():
+    """ fast=True must be accepted end-to-end by every public entry point that inverts velocity
+        (fitAlphaBeta, fitAlphaBetaMass, fitAlphaBetaLightCurve, profileAlphaBeta, plotAlphaBeta,
+        plotProfileAlphaBeta) and must recover essentially the same fit as fast=False - the LUT
+        path is meant to be a faster ROUTE to the same answer within the well-conditioned regime
+        (beta well under the ~30 cancellation ceiling - see the module comment above
+        alphaBetaVelocityNormedLUT()) this synthetic scenario (BETA_TRUE=2) stays in, not a
+        different model.
+    """
+
+    v_data, _, m_init_true, _, _ = _syntheticTrajectory()
+    mag_data, _ = _syntheticLightCurve()
+
+    # --- fitAlphaBeta ---
+    v_init_slow, alpha_slow, beta_slow = fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, \
+        method='robust', verbose=False)
+    v_init_fast, alpha_fast, beta_fast = fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, \
+        method='robust', verbose=False, fast=True)
+
+    assert v_init_fast == v_init_slow
+    _assertClose(alpha_fast, alpha_slow, 1e-3, "fitAlphaBeta alpha (fast vs slow)")
+    _assertClose(beta_fast, beta_slow, 1e-3, "fitAlphaBeta beta (fast vs slow)")
+
+    fit = (v_init_slow, alpha_slow, beta_slow)
+
+    # --- fitAlphaBetaMass ---
+    res_slow = fitAlphaBetaMass(v_data, HT_DATA, SLOPE, m_init_true, mass_constraint="initial", \
+        density=DENS_TRUE, v_init=V_INIT_TRUE, verbose=False)
+    res_fast = fitAlphaBetaMass(v_data, HT_DATA, SLOPE, m_init_true, mass_constraint="initial", \
+        density=DENS_TRUE, v_init=V_INIT_TRUE, verbose=False, fast=True)
+
+    _assertClose(res_fast[3], res_slow[3], 1e-3, "fitAlphaBetaMass alpha_mu0 (fast vs slow)")
+    _assertClose(res_fast[4], res_slow[4], 1e-3, "fitAlphaBetaMass beta_mu0 (fast vs slow)")
+
+    # --- fitAlphaBetaLightCurve ---
+    lc_slow = fitAlphaBetaLightCurve(v_data, HT_DATA, HT_DATA, mag_data, v_init=V_INIT_TRUE, \
+        sigma_mag=MAG_NOISE_STD, verbose=False)
+    lc_fast = fitAlphaBetaLightCurve(v_data, HT_DATA, HT_DATA, mag_data, v_init=V_INIT_TRUE, \
+        sigma_mag=MAG_NOISE_STD, verbose=False, fast=True)
+
+    for mu in lc_slow['fits']:
+        _assertClose(lc_fast['fits'][mu]['alpha'], lc_slow['fits'][mu]['alpha'], 1e-3, \
+            "fitAlphaBetaLightCurve alpha mu={:.3f} (fast vs slow)".format(mu))
+        _assertClose(lc_fast['fits'][mu]['beta'], lc_slow['fits'][mu]['beta'], 1e-3, \
+            "fitAlphaBetaLightCurve beta mu={:.3f} (fast vs slow)".format(mu))
+
+    # --- profileAlphaBeta ---
+    profile_slow = profileAlphaBeta(v_data, HT_DATA, fit, param='beta', n_grid=40, verbose=False)
+    profile_fast = profileAlphaBeta(v_data, HT_DATA, fit, param='beta', n_grid=40, verbose=False, \
+        fast=True)
+
+    _assertClose(profile_fast['beta']['ci_lower'], profile_slow['beta']['ci_lower'], 1e-2, \
+        "profileAlphaBeta beta ci_lower (fast vs slow)")
+    _assertClose(profile_fast['beta']['ci_upper'], profile_slow['beta']['ci_upper'], 1e-2, \
+        "profileAlphaBeta beta ci_upper (fast vs slow)")
+
+    # --- plotAlphaBeta / plotProfileAlphaBeta: must draw without raising under fast=True too ---
+    _, _, _, errors = fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, method='robust', \
+        estimate_errors=True, fast=True)
+
+    fig, _ = plotAlphaBeta(v_data, HT_DATA, fit, errors=errors, band_samples=20, fan_curves=5, \
+        seed=0, fast=True)
+    plt.close(fig)
+
+    fig, _ = plotProfileAlphaBeta(v_data, HT_DATA, fit, profile_fast, degeneracy=False, \
+        fast=True)
+    plt.close(fig)
+
+    # The default LUT getter must be public and reuse the same cached table across calls
+    lut = getDefaultInverseEiLUT()
+    assert lut is getDefaultInverseEiLUT()
+
+
+def testFastPipelineSpeedup():
+    """ fast=True must give a real, substantial speedup at the pipeline level too, not just for
+        the bare alphaBetaVelocityNormedLUT() vs alphaBetaVelocityNormed() call already covered by
+        testAlphaBetaVelocityNormedLUT(). Checks the two consumers that call the dynamics
+        residual (_dynResiduals(), the innermost per-iteration hot path) the most:
+        fitAlphaBeta(method='robust') (one least_squares run) and profileAlphaBeta() (O(n_grid)
+        least_squares runs, one per grid point - the largest beneficiary in this module).
+
+        Thresholds are set well below what was actually measured on the reference machine
+        (~14x for fitAlphaBeta, ~37x for profileAlphaBeta at n_grid=40) so this only fails on a
+        genuine performance regression, not machine noise.
+    """
+
+    v_data, _, _, _, _ = _syntheticTrajectory()
+
+    getDefaultInverseEiLUT()  # warm the default LUT once, excluded from both timings below
+
+    # --- fitAlphaBeta(method='robust') ---
+    t0 = time.perf_counter()
+    fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, method='robust', verbose=False, fast=False)
+    t_slow = time.perf_counter() - t0
+
+    t0 = time.perf_counter()
+    fit = fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, method='robust', verbose=False, \
+        fast=True)
+    t_fast = time.perf_counter() - t0
+
+    speedup = t_slow/t_fast
+
+    assert speedup > 3, "fitAlphaBeta fast=True speedup {:.1f}x <= 3x".format(speedup)
+
+    # --- profileAlphaBeta() --- n_grid reduced from the default (250) to keep the test itself
+    #   fast; the speedup factor doesn't depend on n_grid (every grid point costs the same
+    #   relative amount either way), so this is still representative of the default.
+    t0 = time.perf_counter()
+    profileAlphaBeta(v_data, HT_DATA, fit, param='beta', n_grid=40, verbose=False, fast=False)
+    t_slow = time.perf_counter() - t0
+
+    t0 = time.perf_counter()
+    profileAlphaBeta(v_data, HT_DATA, fit, param='beta', n_grid=40, verbose=False, fast=True)
+    t_fast = time.perf_counter() - t0
+
+    speedup = t_slow/t_fast
+    assert speedup > 10, "profileAlphaBeta fast=True speedup {:.1f}x <= 10x".format(speedup)
 
 
 def testFitAlphaBetaRobust():
@@ -1004,6 +1189,9 @@ if __name__ == "__main__":
         testDerivedVelocities,
         testInputValidation,
         testAlphaBetaNormedRoundTrip,
+        testAlphaBetaVelocityNormedLUT,
+        testFastFlagPropagation,
+        testFastPipelineSpeedup,
         testFitAlphaBetaRobust,
         testFitAlphaBetaErrorEstimationRejectsQ4,
         testFitAlphaBetaErrorEstimationRejectsBadCi,
