@@ -5,7 +5,10 @@ import pkgutil
 import sys
 
 # Excluded packages
-exclude = ["MetSim.ML", "GUI"]
+# "Tests" excludes every Tests subpackage (e.g. Utils.Tests, MetSim.Tests) - test modules may call
+# matplotlib.use(...) or similar process-wide side effects at import time, which must not fire just
+# because something did `import wmpl`
+exclude = ["MetSim.ML", "GUI", "Tests"]
 
 __all__ = []
 for loader, module_name, is_pkg in pkgutil.walk_packages(__path__):
