@@ -1,6 +1,9 @@
 """ Functions for running REBOUND simulations on wmpl trajectories. """
 
+import os
 import re
+import concurrent.futures
+from types import SimpleNamespace
 
 import numpy as np
 import scipy
@@ -274,7 +277,8 @@ def detectCloseEncounters(sim_outputs, n_hill=3.0):
     return encounters
 
 
-def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local", jpl_ephem_data=None):
+def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local", jpl_ephem_data=None,
+                         earth_state=None):
     """ Takes a state vector in ECI coordinates (m and m/s), Julian date and converts from ECI (geocentric) to
     Solar System barycentric coordiantes. The units are changed to AU and AU/year.
 
@@ -290,6 +294,10 @@ def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local",
             - "horizons": the JPL Horizons web service.
         jpl_ephem_data: [SPK] An opened jplephem SPK kernel. If None and ephem_source is "local",
             the kernel is opened from config.jpl_ephem_file.
+        earth_state: [list] Precomputed Earth barycentric state [x, y, z, vx, vy, vz] in REBOUND units
+            (AU, AU/(year/2pi)), ecliptic J2000, at the epoch jd. If given, it is used directly and
+            ephem_source/jpl_ephem_data are ignored - this avoids re-querying the Earth's position,
+            which is identical across Monte Carlo realizations sharing the same epoch.
 
     Return:
         [list] Position and velocity components in barycentric coordinates in AU and AU/year, eg.
@@ -311,8 +319,13 @@ def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local",
         log(f"Reference Julian date (TDB): {jd}")
 
     # Get the Earth's barycentric state (AU, AU/(year/2pi), ecliptic J2000) used to shift the
-    # meteoroid from geocentric to barycentric coordinates.
-    if ephem_source == "horizons":
+    # meteoroid from geocentric to barycentric coordinates. The Earth state at a given epoch is
+    # identical for all Monte Carlo realizations, so it can be precomputed once and passed in.
+    if earth_state is not None:
+
+        pass
+
+    elif ephem_source == "horizons":
 
         # Use JPL Horizons to query for the J2000 ecliptic SSB Earth state vector
         sim = rb.Simulation()
@@ -472,10 +485,131 @@ def extractSimParams(ps, obj_name, planet_names, reference_frame="heliocentric")
     return state_vect_hel, orb_elem, planet_dists
 
 
+def _integrateParticles(task):
+    """ Build a REBOUND simulation from precomputed planet states and integrate one or more test
+    particles through it, returning their per-timestep orbital elements and distances.
+
+    This is a module-level function (picklable) so it can be dispatched to worker processes for
+    parallel Monte Carlo integration. Each call builds an independent simulation, so the adaptive
+    IAS15 timestep of one particle does not affect any other. Workers receive the planets as raw
+    barycentric states and masses and never query the network or the ephemeris kernel.
+
+    Arguments:
+        task: [dict] A picklable task description with the keys:
+            planet_names:    [list] Massive-body names/hashes, in add order.
+            planet_states:   [list] Per-planet [x, y, z, vx, vy, vz] in REBOUND units (AU,
+                                 AU/(year/2pi)), barycentric ecliptic J2000.
+            planet_masses:   [list] Per-planet mass in solar masses.
+            particle_states: [list] Per-particle barycentric [x, y, z, vx, vy, vz] (REBOUND units).
+            particle_names:  [list] Per-particle name/hash (parallel to particle_states).
+            times:           [list] Output times (REBOUND time units) to integrate to.
+            direction:       [str]  "forward" or "backward" (sets the timestep sign).
+            reference_frame: [str]  "heliocentric" or "geocentric" (passed to extractSimParams).
+
+    Return:
+        [dict] {particle_name: [[time, state_vect_hel, orb_ns, planet_dists], ...]}, where orb_ns
+            is a picklable SimpleNamespace with attributes a, e, inc, Omega, omega, f.
+    """
+
+    planet_names = task["planet_names"]
+    planet_states = task["planet_states"]
+    planet_masses = task["planet_masses"]
+    particle_states = task["particle_states"]
+    particle_names = task["particle_names"]
+    times = task["times"]
+    direction = task["direction"]
+    reference_frame = task["reference_frame"]
+
+    aum = rb.units.lengths_SI["au"]  # 1 au in m
+    aukm = aum/1e3  # au in km
+
+    # Constants (gravitational harmonics of Earth, Earth radius)
+    RE_eq = 6378.135/aukm
+    J2 = 1.0826157e-3
+    J4 = -1.620e-6
+    dmin = 4.326e-5  # Earth radius in au
+
+    # Set up the simulation
+    sim = rb.Simulation()
+    rebx = reboundx.Extras(sim)
+    sim.dt = 0.001 if direction == "forward" else -0.001
+
+    # Add the massive bodies from the precomputed barycentric states
+    for name, state, mass in zip(planet_names, planet_states, planet_masses):
+        sim.add(
+            m=mass,
+            x=state[0], y=state[1], z=state[2],
+            vx=state[3], vy=state[4], vz=state[5],
+            hash=name,
+        )
+
+    # Add the test particles (massless)
+    for name, state in zip(particle_names, particle_states):
+        sim.add(
+            x=state[0], y=state[1], z=state[2],
+            vx=state[3], vy=state[4], vz=state[5],
+            hash=name,
+        )
+
+    ps = sim.particles
+
+    # Add the gravitational harmonics of the Earth
+    gh = rebx.load_force("gravitational_harmonics")
+    rebx.add_force(gh)
+    ps["Earth"].params["J2"] = J2
+    ps["Earth"].params["J4"] = J4
+    ps["Earth"].params["R_eq"] = RE_eq
+    ps["Earth"].r = dmin  # set size of Earth
+    ps["Luna"].r = dmin/4  # set size of Moon
+
+    # gr_full is the general relativity correction for all bodies
+    gr = rebx.load_force("gr_full")
+    rebx.add_force(gr)
+    gr.params["c"] = rbxConstants.C
+
+    # Move to the center of momentum frame before integrating
+    sim.move_to_com()
+
+    # Disable collision detection and the influence of the massless particles on the planets
+    sim.collision = "none"
+    sim.N_active = len(planet_names)
+    sim.testparticle_type = 0
+
+    outputs = {name: [] for name in particle_names}
+
+    # Integrate the simulation and save the state vectors and orbital elements. These are not time
+    # steps, but the times at which the simulation state is saved.
+    for time in times:
+
+        sim.move_to_com()
+        sim.integrate(time)
+        sim.move_to_hel()
+
+        for name in particle_names:
+
+            # Skip the particle if it is no longer in the simulation
+            try:
+                ps[name]
+            except rb.ParticleNotFound:
+                continue
+
+            state_vect_hel, orb_elem, planet_dists = extractSimParams(
+                ps, name, planet_names, reference_frame=reference_frame)
+
+            # Convert the rebound Orbit to a picklable object holding the attributes used downstream
+            orb_ns = SimpleNamespace(
+                a=orb_elem.a, e=orb_elem.e, inc=orb_elem.inc,
+                Omega=orb_elem.Omega, omega=orb_elem.omega, f=orb_elem.f)
+
+            outputs[name].append([time, state_vect_hel, orb_ns, planet_dists])
+
+    return outputs
+
+
 def reboundSimulate(
         julian_date, state_vect, traj=None,
         direction="forward", sim_days=60, n_outputs=500, obj_name="obj", obj_mass=0.0, mc_runs=100,
-        reference_frame="heliocentric", ephem_source="local",
+        reference_frame="heliocentric", ephem_source="local", n_cpu=None,
         verbose=False):
     """ Takes an state vector (or a Trajectory object), runs REBOUND and produces orbital elements for the 
     object at the end of the simulation or at the specified time.
@@ -502,18 +636,16 @@ def reboundSimulate(
         ephem_source: [str] Source of the planetary positions used to seed the simulation:
             - "local" (default): the local DE430 ephemeris (fast, offline, no web queries).
             - "horizons": the JPL Horizons web service (slower, requires network).
+        n_cpu: [int] Number of parallel processes used to integrate the Monte Carlo realizations.
+            If None (default), uses max(1, os.cpu_count() - 1). Each realization is integrated in
+            its own independent simulation, so its adaptive timestep does not affect the others.
         verbose: [bool] If True, print out the progress of the simulation.
 
     Return:
-        outputs: [list] List of outputs, each containing the time, state vector and orbital elements at that 
+        outputs: [list] List of outputs, each containing the time, state vector and orbital elements at that
             time.
 
     """
-
-    ### HOTFIX: Solve the cert issue
-    import ssl
-    ssl._create_default_https_context = ssl._create_unverified_context
-    ###
 
     # Skip if REBOUND is not found
     if not REBOUND_FOUND:
@@ -563,38 +695,18 @@ def reboundSimulate(
         
 
 
-    # Set up the simulation
-    sim = rb.Simulation()
-    rebx = reboundx.Extras(sim)
-    
-    aum = rb.units.lengths_SI["au"]  # 1 au in m
-    aukm = aum/1e3  # au in km
-
-
-    # Constants (gravitational harmonics of Earth, Earth radius, time conversion)
-    RE_eq = 6378.135/aukm
-    J2 = 1.0826157e-3
-    J4 = -1.620e-6
-    dmin = 4.326e-5  # Earth radius in au
-    tsimend = sim_days/365.25  # simulation endtime in years
-    year = 2.0*np.pi  # One year in units where G=1
-
+    # Simulation end time in years and the length of one year in units where G=1
+    tsimend = sim_days/365.25
+    year = 2.0*np.pi
 
     # Convert from UTC to TDB
     time_utc = astropy.time.Time(julian_date, format='jd', scale='utc')
     time_tdb = time_utc.tdb.jd
 
-    # # TEST - compare to the already computed dynamical time
-    # print("astropy dynamical time:", time_tdb)
-    # print("computed dynamical time:", jd2DynamicalTimeJD(julian_date))
-
-    # Set up the number of outputs and the time array
+    # Set up the output time array (not integration steps, but the times at which state is saved)
     if direction == "forward":
-        sim.dt = 0.001
         times = np.linspace(0, year*tsimend, n_outputs)
-
     else:
-        sim.dt = -0.001
         times = np.linspace(0, -year*tsimend, n_outputs)
 
     # Add the Sun and the planets
@@ -607,13 +719,20 @@ def reboundSimulate(
     # Names as resolved by JPL Horizons (used only for the "horizons" ephemeris source)
     horizons_names = {"Earth": "Geocenter"}
 
+    # Seed the planets once in a parent simulation. Their raw barycentric states and masses are then
+    # passed to the integration workers, so no worker touches the network or the ephemeris kernel.
+    parent_sim = rb.Simulation()
+
     if ephem_source == "horizons":
+
+        ### HOTFIX: Solve the cert issue for the JPL Horizons web queries
+        import ssl
+        ssl._create_default_https_context = ssl._create_unverified_context
+        ###
 
         # Seed the planets from the JPL Horizons web service
         for name in planet_names:
-            sim.add(horizons_names.get(name, name), date=f"JD{time_tdb:.6f}", hash=name)
-
-        jpl_ephem_data = None
+            parent_sim.add(horizons_names.get(name, name), date=f"JD{time_tdb:.6f}", hash=name)
 
     else:
 
@@ -621,17 +740,25 @@ def reboundSimulate(
         jpl_ephem_data = SPK.open(config.jpl_ephem_file)
         for name in planet_names:
             body_state, body_mass = ephemBodyStateRebound(name, time_tdb, jpl_ephem_data)
-            sim.add(
+            parent_sim.add(
                 m=body_mass,
                 x=body_state[0], y=body_state[1], z=body_state[2],
                 vx=body_state[3], vy=body_state[4], vz=body_state[5],
                 hash=name,
             )
 
-    # To start the meteoroid in the right spot, we need to feed in x,y,z barycentric position in AU
-    # The velocity should be in AU/year divided by 2pi
-    state_vect_rot = convertToBarycentric(state_vect, time_tdb, ephem_source=ephem_source,
-                                          jpl_ephem_data=jpl_ephem_data)
+    # Read the raw barycentric planet states (before move_to_com) and masses to hand to the workers
+    pp = parent_sim.particles
+    planet_states = [[pp[n].x, pp[n].y, pp[n].z, pp[n].vx, pp[n].vy, pp[n].vz] for n in planet_names]
+    planet_masses = [pp[n].m for n in planet_names]
+
+    # The Earth's barycentric state at the epoch is identical for the nominal solution and every
+    # Monte Carlo realization, so it is computed once and reused for all of them.
+    earth_state_ref = planet_states[planet_names.index("Earth")]
+
+    # To start the meteoroid in the right spot, feed in the barycentric position (AU) and velocity
+    # (AU/year divided by 2pi)
+    state_vect_rot = convertToBarycentric(state_vect, time_tdb, earth_state=earth_state_ref)
 
     if verbose:
         print("Initial state vector in ECI coordinates:")
@@ -642,87 +769,18 @@ def reboundSimulate(
         print("[ x,  y,  z] = ", state_vect_rot[:3])
         print("[vx, vy, vz] = ", state_vect_rot[3:])
 
-    # Add the meteoroid to the simulation
-    sim.add(
-        # m=obj_mass, # Ignore the mass of meteoroids
-        x=state_vect_rot[0],
-        y=state_vect_rot[1],
-        z=state_vect_rot[2],
-        vx=state_vect_rot[3],
-        vy=state_vect_rot[4],
-        vz=state_vect_rot[5],
-        hash=obj_name,
-    )
-
-
-    # Add the Monte Carlo realizations to the simulation
-    mc_realization_names = []
-    for i, state_vect_realization in enumerate(state_vect_realizations):
-
-        if verbose:
-            print(f"MC realization {i + 1}: {state_vect_realization}")
-
-        sv_mc_rot = convertToBarycentric(state_vect_realization, time_tdb, ephem_source=ephem_source,
-                                         jpl_ephem_data=jpl_ephem_data)
-
-        mc_name = f"{obj_name}_MC_{i}"
-
-        sim.add(
-            # m=obj_mass, # Ignore the mass of the meteoroid for the Monte Carlo realizations
-            x=sv_mc_rot[0],
-            y=sv_mc_rot[1],
-            z=sv_mc_rot[2],
-            vx=sv_mc_rot[3],
-            vy=sv_mc_rot[4],
-            vz=sv_mc_rot[5],
-            hash=mc_name,
-        )
-
-        mc_realization_names.append(mc_name)
-
-
-
-    # Extract the particles from the simulation
-    ps = sim.particles
-
-    # Add gravitational harmonics of Earth
-    gh = rebx.load_force("gravitational_harmonics")
-    rebx.add_force(gh)
-    ps["Earth"].params["J2"] = J2
-    ps["Earth"].params["J4"] = J4
-    ps["Earth"].params["R_eq"] = RE_eq
-    ps["Earth"].r = dmin  # set size of Earth
-    ps["Luna"].r = dmin/4  # set size of Moon
-
-
-    # gr is the general relativity correction for just the Sun, gr_full is the correction for all bodies
-    gr = rebx.load_force("gr_full")
-    rebx.add_force(gr)
-    gr.params["c"] = rbxConstants.C
-
-    # We always move to the center of momentum frame before an integration
-    sim.move_to_com()
-
-    # # Specify how simulation should resolve collisions
-    # sim.collision = "direct"
-    # sim.collision_resolve = "merge"
-    # sim.collision_resolve_keep_sorted = 1
-    # sim.track_energy_offset = 1
-    
-    # Disable collision detection
-    sim.collision = "none"
-
-    # Set the number of active paticles in the simulation to the number of massive objects (so that the 
-    # interaction between massless particles is not computed)
-    sim.N_active = len(planet_names)
-
-    # Disable the influence of meteoroids on the planets (should already be set to 0 by default)
-    sim.testparticle_type = 0
-
-
-
-    outputs = []
-    outputs_mc = {}
+    # Helper to assemble a picklable task for the integration worker
+    def _make_task(particle_states, particle_names):
+        return {
+            "planet_names": planet_names,
+            "planet_states": planet_states,
+            "planet_masses": planet_masses,
+            "particle_states": particle_states,
+            "particle_names": particle_names,
+            "times": list(times),
+            "direction": direction,
+            "reference_frame": reference_frame,
+        }
 
     if verbose:
         print("Running simulation...")
@@ -730,46 +788,51 @@ def reboundSimulate(
         print(f"Number of outputs: {n_outputs}")
         print(f"Direction: {direction}")
 
-    # Integrate the simulation and save the state vectors and orbital elements in the output list
-    # These are not time steps, but the times at which the simulation state is saved
-    for i, time in enumerate(times):
+    # Nominal solution, integrated in its own simulation (in the main process)
+    nominal_result = _integrateParticles(_make_task([state_vect_rot], [obj_name]))
+    outputs = nominal_result[obj_name]
 
-        sim.move_to_com()
-        sim.integrate(time)
-        sim.move_to_hel()
+    # Monte Carlo realizations, each integrated in its own independent simulation, optionally across
+    # multiple processes
+    outputs_mc = {}
+    if state_vect_realizations:
 
-        # If the particle is not in the simulation anymore, break the loop
-        try:
-            ps[obj_name]
-        except rb.ParticleNotFound:
-            break
+        # Convert each realization to barycentric coordinates (cheap, done in the parent process)
+        mc_names = [f"{obj_name}_MC_{i}" for i in range(len(state_vect_realizations))]
+        mc_states = [convertToBarycentric(sv, time_tdb, earth_state=earth_state_ref)
+                     for sv in state_vect_realizations]
 
-        # Extract the state vector and the orbital elements
-        state_vect_hel, orb_elem, planet_dists = extractSimParams(ps, obj_name, planet_names, 
-                                                                  reference_frame=reference_frame)
+        # Resolve the number of worker processes
+        if n_cpu is None:
+            n_cpu = max(1, (os.cpu_count() or 1) - 1)
+        n_cpu = max(1, min(n_cpu, len(mc_states)))
 
-        if verbose and (i%25 == 0):
-            print(f"{i}: t = {time/(2*np.pi)*365.25:.6f} d, a = {orb_elem.a:10.6f}, e = {orb_elem.e:10.6f}, inc = {np.degrees(orb_elem.inc):10.6f}, Omega = {np.degrees(orb_elem.Omega):10.6f}, omega = {np.degrees(orb_elem.omega):10.6f}, f = {np.degrees(orb_elem.f):10.6f}")
+        # One task per realization, so each gets its own decoupled adaptive timestep
+        tasks = [_make_task([s], [n]) for s, n in zip(mc_states, mc_names)]
 
-        outputs.append([time, state_vect_hel, orb_elem, planet_dists])
+        if verbose:
+            print(f"Integrating {len(tasks)} Monte Carlo realizations on {n_cpu} core(s)...")
 
+        if n_cpu == 1:
+            results = [_integrateParticles(t) for t in tasks]
 
-        # Extract the state vector and the orbital elements for the Monte Carlo realizations
-        for mc_name in mc_realization_names:
+        else:
+            results = [None]*len(tasks)
+            with concurrent.futures.ProcessPoolExecutor(max_workers=n_cpu) as executor:
+                future_to_idx = {executor.submit(_integrateParticles, t): idx
+                                 for idx, t in enumerate(tasks)}
+                for future in concurrent.futures.as_completed(future_to_idx):
+                    idx = future_to_idx[future]
+                    try:
+                        results[idx] = future.result()
+                    except Exception as e:
+                        print(f"Warning: Monte Carlo realization {mc_names[idx]} failed and was "
+                              f"skipped: {e}")
+                        results[idx] = None
 
-            try:
-                ps[mc_name]
-            except rb.ParticleNotFound:
-                continue
-
-            state_vect_hel, orb_elem, planet_dists = extractSimParams(ps, mc_name, planet_names,
-                                                                      reference_frame=reference_frame)
-
-            if mc_name not in outputs_mc:
-                outputs_mc[mc_name] = []
-
-            outputs_mc[mc_name].append([time, state_vect_hel, orb_elem, planet_dists])
-
+        for res in results:
+            if res:
+                outputs_mc.update(res)
 
     return outputs, outputs_mc
 
@@ -802,6 +865,10 @@ if __name__ == "__main__":
                         help="Use the JPL Horizons web service for planet positions instead of the "
                         "local DE430 ephemeris. Slower and requires network access.")
 
+    parser.add_argument("--cores", type=int, default=None,
+                        help="Number of parallel processes used to integrate the Monte Carlo "
+                        "realizations. Default: all but one core.")
+
     parser.add_argument("--verbose", action="store_true", help="Print out the progress of the simulation.")
 
     args = parser.parse_args()
@@ -814,6 +881,11 @@ if __name__ == "__main__":
     ephem_source = "horizons" if args.horizons else "local"
     print("Using {:s} for planet positions.".format(
         "JPL Horizons (web)" if args.horizons else "the local DE430 ephemeris"))
+
+    # Number of parallel processes for the Monte Carlo integration
+    n_cpu = args.cores if args.cores is not None else max(1, (os.cpu_count() or 1) - 1)
+    if args.mc > 1:
+        print("Monte Carlo integration will use up to {:d} core(s).".format(n_cpu))
 
     ###
 
@@ -844,7 +916,7 @@ if __name__ == "__main__":
     sim_outputs, sim_outputs_mc = reboundSimulate(
         None, None, traj=traj, direction=direction, sim_days=sim_days,
         obj_name=traj.traj_id, mc_runs=args.mc, reference_frame=reference_frame,
-        ephem_source=ephem_source, verbose=args.verbose
+        ephem_source=ephem_source, n_cpu=n_cpu, verbose=args.verbose
         )
 
     # Compute the 95% CI for the orbital elements from the Monte Carlo realizations
