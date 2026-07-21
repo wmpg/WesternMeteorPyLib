@@ -478,7 +478,8 @@ def heightCurvature(h0, zc, l, r_earth):
         h: [float] Height at distance l from the origin (m).
     """
 
-    return np.sqrt((h0 + r_earth)**2 - 2*l*np.cos(zc)*(h0 + r_earth) + l**2) - r_earth
+    # Scalar inputs in the per-fragment hot path - math.sqrt/math.cos avoid numpy scalar overhead
+    return math.sqrt((h0 + r_earth)**2 - 2*l*math.cos(zc)*(h0 + r_earth) + l**2) - r_earth
 
 
 def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mass_max, 
@@ -764,6 +765,14 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
     # its just-computed, physically valid position for the tick it died on
     fragments_active_at_tick_start = [frag for frag in fragments if frag.active]
 
+    # Index the complex fragmentation entries by id once, so the per-grain lookup below is O(1) instead
+    #   of a linear scan of all entries for every complex grain on every tick
+    fragmentation_entry_by_id = {frag_entry.id: frag_entry for frag_entry in const.fragmentation_entries}
+
+    # Total active mass (grain-weighted), accumulated inside the loop below instead of a separate
+    #   post-loop scan of the whole fragment list
+    mass_total_active = 0.0
+
     # Go through all active fragments
     for frag in fragments:
 
@@ -951,9 +960,8 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
 
                 if const.fragmentation_show_individual_lcs:
 
-                    # Find the corresponding fragmentation entry
-                    frag_entry = next((x for x in const.fragmentation_entries if x.id == frag.complex_id), \
-                        None)
+                    # Find the corresponding fragmentation entry (O(1) via the id index built above)
+                    frag_entry = fragmentation_entry_by_id.get(frag.complex_id)
 
                     if frag_entry is not None:
 
@@ -1273,6 +1281,11 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
 
             continue
 
+        # Fragment survived this tick - add its grain-weighted mass to the total active mass. Only
+        #   fragments still active at the end of the tick reach here (killed/disrupted ones hit a
+        #   'continue' above), matching the old post-loop "active only" scan exactly
+        mass_total_active += frag.m*frag.n_grains
+
     # Track the leading fragment length (use the tick-start snapshot, not a fresh frag.active filter, so a
     #   fragment that died partway through this tick is still a candidate for it - see the snapshot's own
     #   comment above)
@@ -1344,13 +1357,17 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
     # Add generated fragment children to the list of fragments
     fragments += frag_children_all
 
-    # Compute the total mass of all active fragments (each fragment's mass is per single grain/fragment -
-    #   n_grains identical ones are represented by it, same convention already used for lum/q above)
-    active_fragments = [frag.m*frag.n_grains for frag in fragments if frag.active]
-    if len(active_fragments):
-        mass_total_active = np.sum(active_fragments)
-    else:
-        mass_total_active = 0.0
+    # Fragments/grains created this tick are all active - add their grain-weighted mass to the running
+    #   total accumulated in the loop above (completes the "all active fragments" sum). Same n_grains
+    #   convention already used for lum/q.
+    for frag_child in frag_children_all:
+        mass_total_active += frag_child.m*frag_child.n_grains
+
+    # Drop fully-ablated grains from the fragment list so subsequent ticks don't keep re-scanning them
+    #   (the list otherwise grows monotonically - dead grains are never needed again). Dead non-grains
+    #   (the main fragment, complex-fragmentation daughters) are KEPT: runSimulation() still scans them
+    #   after the run to find the main fragment and to aggregate per-fragmentation final masses.
+    fragments = [frag for frag in fragments if frag.active or (not frag.grain)]
 
     # Increment the running time
     const.total_time += const.dt
