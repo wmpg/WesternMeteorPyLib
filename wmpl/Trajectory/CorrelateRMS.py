@@ -888,7 +888,7 @@ class RMSDataHandle(object):
                     continue
 
                 # Add only unpaired observations
-                if not self.checkIfObsPaired(met_obs.id, verbose=verbose):
+                if not self.checkIfObsPaired(met_obs.id, verbose=self.verbose):
                     # print(" ", station_code, met_obs.reference_dt, rel_proc_path)
                     added_count += 1
                     unpaired_met_obs_list.append(met_obs)
@@ -1126,7 +1126,7 @@ class RMSDataHandle(object):
                         shutil.rmtree(os.path.split(remove_path)[0])
 
                 # remove the row from the dataframe to avoid reprocessing it
-                traj_df.drop(idx)
+                traj_df.drop(idx, inplace=True)
             
             if not traj_df.empty:
                 # If we still have some data, look for trajectories which share at least one observation. 
@@ -1493,15 +1493,6 @@ class RMSDataHandle(object):
                 log.warning(f'unable to remove {traj_dir}')        
 
         self.trajectory_db.removeTrajectory(traj_reduced)
-
-    def checkCandIfFailed(self, candidate):
-        """ 
-        Check if the given candidate has been processed with the same observations and has failed to be
-        computed before.
-        """
-        jdt_ref = min([obs.jdt_ref for obs, _, _ in candidate])
-        stations = [obs.station_id for obs, _, _ in candidate]
-        return self.trajectory_db.checkCandIfFailed(jdt_ref, stations)
 
     def checkTrajIfFailed(self, traj):
         """ 
@@ -2068,21 +2059,21 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     arg_parser.add_argument('-x', '--maxstations', type=int, default=15,
         help="Use best N stations in the solution (default is use 15 stations).")
 
-    arg_parser.add_argument('--mcmode', '--mcmode', type=int, default=0,
+    arg_parser.add_argument('--mcmode', type=int, default=0,
         help="Operation mode - see readme. For standalone solving either don't set this or set it to 0")
 
-    arg_parser.add_argument('--archivemonths', '--archivemonths', type=int, default=0,
+    arg_parser.add_argument('--archivemonths', type=int, default=0,
         help="Months back to archive old data. Default 0 which means purge don't archive.")
 
-    arg_parser.add_argument('--maxtrajs', '--maxtrajs', type=int, default=None,
+    arg_parser.add_argument('--maxtrajs', type=int, default=None,
         help="Max number of trajectories to reload in each pass when doing phase 1 or Monte-Carlo phase solving")
     
-    arg_parser.add_argument('--autofreq', '--autofreq', type=int, default=360,
+    arg_parser.add_argument('--autofreq', type=int, default=360,
         help="Minutes to wait between runs in auto-mode")
     
-    arg_parser.add_argument('--verbose', '--verbose', help='Verbose logging.', default=False, action="store_true")
+    arg_parser.add_argument('--verbose', help='Verbose logging.', default=False, action="store_true")
 
-    arg_parser.add_argument('--addlogsuffix', '--addlogsuffix', help='add a suffix to the log to show what stage it is.', default=False, action="store_true")
+    arg_parser.add_argument('--addlogsuffix', help='add a suffix to the log to show what stage it is.', default=False, action="store_true")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
