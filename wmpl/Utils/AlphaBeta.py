@@ -14,6 +14,7 @@ import sys
 import numpy as np
 import scipy.special
 import scipy.optimize
+import scipy.interpolate
 
 
 from wmpl.Utils.Math import meanAngle
@@ -441,7 +442,7 @@ def _logAlphaBetaBounds():
     )
 
 
-def _estimateSigmaV(alpha0, beta0, v_normed, ht_normed, v_init):
+def _estimateSigmaV(alpha0, beta0, v_normed, ht_normed, v_init, fast=False):
     """ Robust (MAD-based) velocity uncertainty (m/s) from the residuals of a Q4 fit
         (alpha0, beta0), floored at 1 m/s. Used by minimizeAlphaBetaRobust()/fitAlphaBeta() and
         fitAlphaBetaLightCurve() whenever sigma_v isn't given explicitly.
@@ -457,21 +458,26 @@ def _estimateSigmaV(alpha0, beta0, v_normed, ht_normed, v_init):
         ht_normed: [ndarray] Height normalized to HT_NORM_CONST.
         v_init: [float] Initial velocity (m/s), used to convert the residuals to physical units.
 
+    Keyword arguments:
+        fast: [bool] Passed through to alphaBetaVelocityNormed() - see its docstring.
+
     Return:
         sigma_v: [float] Effective velocity uncertainty (m/s), floored at 1 m/s.
     """
 
-    v_model0 = alphaBetaVelocityNormed(ht_normed, alpha0, beta0)
+    v_model0 = alphaBetaVelocityNormed(ht_normed, alpha0, beta0, fast=fast)
     res0 = (v_model0 - v_normed)*v_init
     sigma_v = 1.4826*np.median(np.abs(res0 - np.median(res0)))
 
     return max(sigma_v, 1.0)
 
 
-def _dynResiduals(x, v_normed, ht_normed, sigma_v_normed):
+def _dynResiduals(x, v_normed, ht_normed, sigma_v_normed, fast=False):
     """ Dynamics residual block: model velocity residuals (v_model - v_obs), sigma-normalized.
         Used both as the dynamics half of _jointResiduals() (fitAlphaBetaLightCurve()) and, on
-        its own, by minimizeAlphaBetaRobust().
+        its own, by minimizeAlphaBetaRobust(). This is the innermost per-iteration hot path of
+        every 'robust' fit (called once per scipy.optimize.least_squares iteration), so fast=True
+        here is where alphaBetaVelocityNormedLUT() actually pays off.
 
     Arguments:
         x: [ndarray] Fit parameters (ln alpha, ln beta).
@@ -479,18 +485,21 @@ def _dynResiduals(x, v_normed, ht_normed, sigma_v_normed):
         ht_normed: [ndarray] Height normalized to HT_NORM_CONST.
         sigma_v_normed: [float] Normalized velocity uncertainty.
 
+    Keyword arguments:
+        fast: [bool] Passed through to alphaBetaVelocityNormed() - see its docstring.
+
     Return:
         res: [ndarray] Sigma-normalized velocity residuals.
     """
 
     alpha, beta = np.exp(x)
-    v_model = alphaBetaVelocityNormed(ht_normed, alpha, beta)
+    v_model = alphaBetaVelocityNormed(ht_normed, alpha, beta, fast=fast)
 
     return (v_model - v_normed)/sigma_v_normed
 
 
 def minimizeAlphaBetaRobust(v_normed, ht_normed, sigma_v_normed, loss='soft_l1', f_scale=2.0,
-        x0_alpha_beta=None):
+        x0_alpha_beta=None, return_fit_result=False, fast=False):
     """ Robust alternative to minimizeAlphaBeta(): least squares (soft-L1 by default) directly on
         the velocity residuals (v_model - v_obs), instead of Q4's transformed residual.
 
@@ -517,9 +526,16 @@ def minimizeAlphaBetaRobust(v_normed, ht_normed, sigma_v_normed, loss='soft_l1',
         f_scale: [float] Robust loss scale, in units of sigma_v_normed.
         x0_alpha_beta: [tuple] Optional (alpha0, beta0) initial guess. If None, derived from
             minimizeAlphaBeta().
+        return_fit_result: [bool] If True, also return the raw scipy.optimize.least_squares
+            result object as a 3rd element, so a caller can reuse its Jacobian/cost for a
+            Gauss-Newton covariance (see fitAlphaBeta()'s estimate_errors) instead of re-fitting
+            or recomputing the Jacobian from scratch.
+        fast: [bool] Passed through to _dynResiduals()/alphaBetaVelocityNormed() - see the latter's
+            docstring. This is the residual scipy.optimize.least_squares calls every iteration, so
+            fast=True is where the LUT speedup actually matters for this fit.
 
     Return:
-        (alpha, beta): [tuple of floats].
+        (alpha, beta), or (alpha, beta, res) if return_fit_result=True.
     """
 
     if x0_alpha_beta is None:
@@ -531,17 +547,247 @@ def minimizeAlphaBetaRobust(v_normed, ht_normed, sigma_v_normed, loss='soft_l1',
     #   non-positive seed would otherwise produce a NaN that np.clip propagates)
     x0 = np.log(np.clip(x0_alpha_beta, np.exp(log_bounds[0] + 1e-6), np.exp(log_bounds[1] - 1e-6)))
 
-    res = scipy.optimize.least_squares(_dynResiduals, x0, args=(v_normed, ht_normed, sigma_v_normed), \
+    res = scipy.optimize.least_squares(_dynResiduals, x0, \
+        args=(v_normed, ht_normed, sigma_v_normed, fast), \
         bounds=log_bounds, loss=loss, f_scale=f_scale, x_scale='jac')
 
     if not res.success:
         print("WARNING: Optimizer failed: {:s}".format(res.message))
 
+    if return_fit_result:
+        return tuple(np.exp(res.x)) + (res,)
+
     return tuple(np.exp(res.x))
 
 
+def _alphaBetaRobustErrors(fit_res, alpha, beta, v_data, ht_data, v_init, v_init_given, sigma_v,
+        sigma_v_init, loss, f_scale, ci, fast=False):
+    """ Analytic error estimate for fitAlphaBeta(method='robust', estimate_errors=True).
+
+        Two contributions to the covariance of (ln alpha, ln beta):
+        1. The Gauss-Newton local curvature of the robust-loss least_squares fit itself
+           (fit_res.jac/.cost/.fun, reused from minimizeAlphaBetaRobust() rather than
+           recomputed), treating v_init as if it were exactly known. Same (J^T J)^-1,
+           reduced-chi-square-scaled recipe as fitAlphaBetaLightCurve()'s own
+           alpha_std_rel/beta_std_rel, with the same caveat: soft-L1 reweights residuals
+           nonlinearly, so this is a Gauss-Newton approximation of the local curvature, not the
+           inverse Fisher information of Gaussian noise.
+        2. A rank-1 correction J_v0 sigma_v_init^2 J_v0^T propagating v_init's OWN uncertainty
+           through a numerically estimated sensitivity J_v0 = d(ln alpha, ln beta)/d(v_init) -
+           obtained by refitting fitAlphaBeta() itself at v_init +/- a small step, since v_init is
+           held fixed during the fit that produced fit_res and so never appears in fit_res.jac.
+           Skipped (zero contribution) whenever sigma_v_init is 0 (v_init treated as exact).
+        The two contributions are simply added (v_init's estimation error and the conditional
+        fit's residuals are treated as independent, even though both ultimately come from the
+        same v_data) - a standard plug-in approximation, not a fully joint treatment.
+
+        cov_log/corr_log ((ln alpha, ln beta), the space this model is actually fit in) are
+        propagated to linear (alpha, beta) space via the delta method: since
+        d(alpha)/d(ln alpha) = alpha, the Jacobian of (alpha, beta) w.r.t. (ln alpha, ln beta) is
+        diag(alpha, beta), so cov = diag(alpha, beta) @ cov_log @ diag(alpha, beta). corr comes
+        out numerically identical to corr_log (correlation is invariant under this kind of
+        positive-diagonal rescaling) - both are kept for convenience.
+
+        alpha_ci_wald_lower/upper and beta_ci_wald_lower/upper are APPROXIMATE confidence
+        intervals based on the local Gaussian approximation in log-space (equivalently: assuming
+        alpha/beta are log-normal), at the `ci` level - exp(ln(alpha) +/- z*alpha_std_rel),
+        asymmetric around alpha and, unlike alpha +/- z*alpha_std, never negative. The "_wald"
+        in the name (and "approximate" here) is deliberate: this is NOT the same kind of object as
+        wmpl.Utils.Math.confidenceInterval()'s output elsewhere in this library (e.g. Trajectory.py,
+        REBOUND.py) - those are empirical percentiles of an actual Monte Carlo ensemble, whereas
+        there is no ensemble here, only a parametric approximation built on a local quadratic
+        (Wald-type) expansion of the cost function around the optimum - see profileAlphaBeta()
+        for a rigorous, non-quadratic-assuming alternative when that assumption is in doubt (e.g.
+        beta_std_rel large - see the Statistical caveats below). Don't drop the "_wald" qualifier
+        when reading these out; it is the one thing standing between this and a false claim of
+        likelihood-equivalent (let alone MC-equivalent) rigor.
+
+        Two failure modes are handled explicitly, both printing a WARNING and returning NaN for
+        every error field (alpha/beta themselves are still returned - only their errors are NaN):
+        - (alpha, beta) landed within 1% (log-space) of an ALPHA_BETA_BOUNDS edge: the fit is
+          likely poorly constrained by this data, and the local curvature below isn't meaningful
+          around a boundary the optimizer was clipped against rather than converged to.
+        - The Jacobian is near- (but not exactly) singular: (J^T J)^-1 comes out with a negative
+          diagonal - impossible for a real covariance, and NOT the same thing as the outright
+          LinAlgError case below (a near-singular matrix does not raise). This is what a
+          bound-pinned fit typically causes, but is checked independently since it is the actual
+          numerical symptom regardless of cause.
+
+    Arguments:
+        fit_res: [OptimizeResult] From minimizeAlphaBetaRobust(..., return_fit_result=True).
+        alpha: [float] Fitted ballistic coefficient.
+        beta: [float] Fitted mass loss parameter.
+        v_data: [ndarray] Velocity data (m/s), as given to fitAlphaBeta().
+        ht_data: [ndarray] Height data (m), as given to fitAlphaBeta().
+        v_init: [float] Adopted initial velocity (m/s).
+        v_init_given: [bool] Whether v_init was supplied by the caller (vs. derived internally).
+        sigma_v: [float] Velocity uncertainty (m/s) used to weight the fit.
+        sigma_v_init: [float or None] Caller-supplied v_init uncertainty - only used if
+            v_init_given (see fitAlphaBeta()'s docstring).
+        loss: [str] As in fitAlphaBeta().
+        f_scale: [float] As in fitAlphaBeta().
+        ci: [float] Confidence level (0-100, e.g. 95) for alpha_ci_wald_lower/upper and
+            beta_ci_wald_lower/upper - same convention as
+            wmpl.Utils.Math.confidenceInterval()'s `ci`.
+        fast: [bool] Passed through to the recursive fitAlphaBeta() calls used for the
+            v_init-sensitivity correction - see alphaBetaVelocityNormed()'s docstring.
+
+    Return:
+        errors: [dict] 'alpha', 'beta', 'v_init', 'alpha_std_rel', 'beta_std_rel', 'alpha_std',
+            'beta_std', 'cov_fit', 'cov_log', 'corr_log', 'cov', 'corr',
+            'alpha_ci_wald_lower', 'alpha_ci_wald_upper', 'beta_ci_wald_lower',
+            'beta_ci_wald_upper', 'ci', 'sigma_v', 'sigma_v_init' - see fitAlphaBeta()'s
+            docstring for details.
+    """
+
+    # Resolve v_init's own uncertainty up front, so it is available in `errors` even if the
+    #   covariance itself turns out to be degenerate below (see the bound/near-singular checks).
+    if v_init_given:
+
+        if sigma_v_init is None:
+            print("WARNING: v_init was given without sigma_v_init - its uncertainty will NOT be "
+                "propagated into alpha_std_rel/beta_std_rel (v_init is being treated as exactly "
+                "known).")
+            sigma_v_init_used = 0.0
+
+        else:
+            sigma_v_init_used = sigma_v_init
+
+    else:
+        if sigma_v_init is not None:
+            print("WARNING: sigma_v_init was given but v_init is None (derived internally) - "
+                "sigma_v_init is IGNORED in this case; v_init's uncertainty is instead "
+                "auto-derived as the standard error of its median (see below).")
+
+        # Standard error of the median (NOT the plain MAD, which measures the dispersion of the
+        #   observations themselves, not the precision of the median as an estimator of v_init)
+        #   of the same leading points fitAlphaBeta() used to derive v_init. This captures the
+        #   RANDOM error of that estimator, but not its systematic one: the median of a still-
+        #   decelerating leading window is itself biased low relative to the true v_init (see
+        #   fitAlphaBeta()'s docstring caveat on this - no variance term can correct for a bias).
+        max_index = max(int(0.2*len(v_data)), 10)
+        v_head = v_data[:max_index]
+        mad = np.median(np.abs(v_head - np.median(v_head)))
+        sigma_v_init_used = 1.2533*1.4826*mad/np.sqrt(len(v_head))
+
+    nan_result = {
+        'alpha': alpha, 'beta': beta, 'v_init': v_init, 'alpha_std_rel': np.nan,
+        'beta_std_rel': np.nan, 'alpha_std': np.nan, 'beta_std': np.nan,
+        'cov_fit': np.full((2, 2), np.nan), 'cov_log': np.full((2, 2), np.nan),
+        'corr_log': np.nan, 'cov': np.full((2, 2), np.nan), 'corr': np.nan,
+        'alpha_ci_wald_lower': np.nan, 'alpha_ci_wald_upper': np.nan,
+        'beta_ci_wald_lower': np.nan, 'beta_ci_wald_upper': np.nan,
+        'ci': ci, 'sigma_v': sigma_v, 'sigma_v_init': sigma_v_init_used,
+    }
+
+    # Warn if the fitted (alpha, beta) landed near an optimization bound, reusing the same
+    #   log-space _makeBoundChecker() fitAlphaBetaMass()/fitAlphaBetaLightCurve() already share
+    #   (alpha/beta span orders of magnitude, so a linear-space check would misfire). The
+    #   Gauss-Newton curvature below is only meaningful around a genuine local optimum, and tends
+    #   to be degenerate (or numerically nonsensical) once the fit has been clipped against a box
+    #   constraint instead of converging to one.
+    bound_tol = 1e-2
+    bound_warnings = []
+    check_bound = _makeBoundChecker(bound_warnings, tol=bound_tol, log=True)
+
+    check_bound("alpha", alpha, *ALPHA_BETA_BOUNDS[0])
+    check_bound("beta", beta, *ALPHA_BETA_BOUNDS[1])
+
+    if bound_warnings:
+        print()
+        print("WARNING: fitted (alpha, beta) landed within {:.3g}% of an optimization bound - "
+            "the fit may be poorly constrained, and the Gauss-Newton error estimate below may "
+            "be degenerate (NaN) or unreliable as a result.".format(100*bound_tol))
+        for warning in bound_warnings:
+            print("  - {:s}".format(warning))
+        print()
+
+    # Gauss-Newton covariance of (ln alpha, ln beta), v_init held fixed at its adopted value
+    dof = max(len(fit_res.fun) - len(fit_res.x), 1)
+    s2 = 2.0*fit_res.cost/dof
+
+    try:
+        cov_fit = s2*np.linalg.inv(fit_res.jac.T @ fit_res.jac)
+    except np.linalg.LinAlgError:
+        return nan_result
+
+    # A near- (but not exactly) singular Jacobian can produce a numerically "valid" (no
+    #   LinAlgError) inverse with a negative variance on the diagonal - mathematically impossible
+    #   for a real covariance, and NOT caught by the try/except above. Most often seen exactly
+    #   when (alpha, beta) is pinned against a bound (see the warning above): fail cleanly with
+    #   NaN here instead of letting np.sqrt() silently emit a generic RuntimeWarning below.
+    if np.any(np.diag(cov_fit) < 0):
+        print("WARNING: the Gauss-Newton covariance has a negative variance on its diagonal "
+            "(a near-singular Jacobian, most often from a fit pinned against a bound - see "
+            "above). Returning NaN for alpha_std_rel/beta_std_rel/cov/corr/the confidence "
+            "interval instead of a meaningless value.")
+        return nan_result
+
+    # Rank-1 correction from v_init's uncertainty, via a numerical sensitivity. Skipped if there
+    #   is no v_init uncertainty to propagate.
+    if sigma_v_init_used > 0:
+
+        dv = 1e-4*v_init
+
+        def _logAlphaBetaAt(v_init_pert):
+            _, alpha_p, beta_p = fitAlphaBeta(v_data, ht_data, v_init=v_init_pert, \
+                method='robust', sigma_v=sigma_v, loss=loss, f_scale=f_scale, fast=fast)
+            return np.log([alpha_p, beta_p])
+
+        jac_v0 = (_logAlphaBetaAt(v_init + dv) - _logAlphaBetaAt(v_init - dv))/(2*dv)
+
+        cov_v0 = np.outer(jac_v0, jac_v0)*sigma_v_init_used**2
+
+    else:
+        cov_v0 = np.zeros((2, 2))
+
+    # cov_v0 is PSD (an outer product scaled by a non-negative variance), so it cannot turn the
+    #   already-checked non-negative diagonal of cov_fit negative - cov_log's diagonal is
+    #   guaranteed non-negative here too.
+    cov_log = cov_fit + cov_v0
+
+    alpha_std_rel, beta_std_rel = np.sqrt(np.diag(cov_log))
+    corr_log = cov_log[0, 1]/(alpha_std_rel*beta_std_rel)
+
+    # Linear (alpha, beta) space, via the delta method (see the docstring above)
+    scale = np.array([alpha, beta])
+    cov = np.outer(scale, scale)*cov_log
+    alpha_std, beta_std = np.sqrt(np.diag(cov))
+    corr = cov[0, 1]/(alpha_std*beta_std)
+
+    # Parametric (log-normal) confidence interval - see the docstring above for how this differs
+    #   from wmpl.Utils.Math.confidenceInterval()'s empirical percentiles elsewhere in the library
+    z = scipy.special.ndtri(0.5 + ci/200.0)
+    alpha_ci_wald_lower = alpha*np.exp(-z*alpha_std_rel)
+    alpha_ci_wald_upper = alpha*np.exp(z*alpha_std_rel)
+    beta_ci_wald_lower = beta*np.exp(-z*beta_std_rel)
+    beta_ci_wald_upper = beta*np.exp(z*beta_std_rel)
+
+    return {
+        'alpha': alpha,
+        'beta': beta,
+        'v_init': v_init,
+        'alpha_std_rel': alpha_std_rel,
+        'beta_std_rel': beta_std_rel,
+        'alpha_std': alpha_std,
+        'beta_std': beta_std,
+        'cov_fit': cov_fit,
+        'cov_log': cov_log,
+        'corr_log': corr_log,
+        'cov': cov,
+        'corr': corr,
+        'alpha_ci_wald_lower': alpha_ci_wald_lower,
+        'alpha_ci_wald_upper': alpha_ci_wald_upper,
+        'beta_ci_wald_lower': beta_ci_wald_lower,
+        'beta_ci_wald_upper': beta_ci_wald_upper,
+        'ci': ci,
+        'sigma_v': sigma_v,
+        'sigma_v_init': sigma_v_init_used,
+    }
+
+
 def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='soft_l1',
-        f_scale=2.0):
+        f_scale=2.0, estimate_errors=False, sigma_v_init=None, ci=95.0, verbose=False, fast=False):
     """ Fit the alpha and beta parameters to the given velocity and height data.
 
     Two methods are available (see minimizeAlphaBeta()/minimizeAlphaBetaRobust() for the full
@@ -554,7 +800,9 @@ def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='
         - method='robust': least squares directly on the velocity residuals, robustified with
           `loss` (soft-L1 by default), seeded from the Q4 result. Weights the whole trajectory
           much more evenly than Q4 and tracks the deceleration/"knee" more faithfully - this is
-          the same approach fitAlphaBetaLightCurve() uses for its dynamics block.
+          the same approach fitAlphaBetaLightCurve() uses for its dynamics block. Required for
+          estimate_errors=True (see below) - Q4's L1/Nelder-Mead fit has no natural Jacobian to
+          build an analytic error estimate from.
 
     Arguments:
         v_data: [ndarray] Velocity data (m/s).
@@ -569,22 +817,171 @@ def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='
             the beginning to the end of the trajectory (unlike fitAlphaBetaLightCurve(), which
             sorts its inputs by decreasing height internally).
         method: [str] 'q4' (default) or 'robust'.
-        sigma_v: [float] Only used for method='robust'. Velocity uncertainty (m/s) used to weight
-            the residuals. If None, estimated from the MAD of the Q4 fit's residuals (floored at
-            1 m/s, see _estimateSigmaV()) - an *effective* uncertainty that absorbs both
-            measurement noise and alpha-beta model misspecification, not a pure instrumental one.
+        sigma_v: [float] Velocity uncertainty (m/s) used to weight the residuals for
+            method='robust', and (if estimate_errors=True) to scale the error estimate too. If
+            None, estimated from the MAD of the Q4 fit's residuals (floored at 1 m/s, see
+            _estimateSigmaV()) - an *effective* uncertainty that absorbs both measurement noise
+            and alpha-beta model misspecification, not a pure instrumental one.
         loss: [str] Only used for method='robust'. scipy.optimize.least_squares loss.
         f_scale: [float] Only used for method='robust'. Robust loss scale, in units of sigma_v.
+        estimate_errors: [bool] If True, also return a 4th element (a dict, see Return) with an
+            analytic error estimate. Only supported for method='robust' - raises ValueError
+            otherwise (see the method argument above). Off by default, so existing
+            3-tuple-unpacking call sites (v_init, alpha, beta = fitAlphaBeta(...)) are unaffected.
+        sigma_v_init: [float] Uncertainty on v_init (m/s), only used when estimate_errors=True:
+              - v_init given (not None) + sigma_v_init given: propagated into
+                alpha_std_rel/beta_std_rel/cov_log.
+              - v_init given + sigma_v_init=None (default): v_init is treated as exactly known - a
+                warning is printed, since this is an easy way to silently understate alpha/beta's
+                uncertainty if v_init actually has a non-negligible error of its own.
+              - v_init=None (derived internally): this argument is IGNORED (a warning is printed
+                if it was given a value) - v_init's uncertainty is instead estimated automatically
+                as the standard error of the median of the same leading points used to derive it
+                (see the Return section), which is the quantity that actually needs to be
+                propagated, not the raw scatter of those points. IMPORTANT: this covers only the
+                RANDOM error of that median - it is also systematically biased low by the
+                deceleration trend across the leading window itself (a fixed offset, not
+                something a variance term can correct for), which can meaningfully under-cover
+                alpha_ci_wald_lower/upper - see the Statistical caveats below.
+        ci: [float] Confidence level (0-100, e.g. 95, the default) for the approximate
+            alpha_ci_wald_lower/upper and beta_ci_wald_lower/upper bounds below - only
+            used if estimate_errors=True. Same convention as
+            wmpl.Utils.Math.confidenceInterval()'s `ci`.
+        verbose: [bool] If True, print the adopted v_init/alpha/beta (and, if
+            estimate_errors=True, the error estimate too).
+        fast: [bool] Only affects method='robust' (Q4's residual never inverts velocity, so it is
+            unaffected). If True, use the experimental LUT-accelerated alphaBetaVelocityNormedLUT()
+            instead of brentq everywhere this fit inverts velocity - see its docstring for the
+            accuracy/speed tradeoff and the shared beta >~ 30 precision ceiling. Default False
+            keeps today's exact behavior.
 
     Return:
         (v_init, alpha, beta):
             - v_init: [float] Input or derived initial velocity (m/s).
             - alpha: [float] Ballistic coefficient.
             - beta: [float] Mass loss.
+        If estimate_errors=True, a 4th element `errors` (dict, from _alphaBetaRobustErrors()) is
+        also returned:
+            'alpha', 'beta', 'v_init': echoed back, so the dict is self-contained.
+            'alpha_std_rel', 'beta_std_rel': [float] Relative (fractional) 1-sigma uncertainties
+                of alpha/beta in (ln alpha, ln beta) space, combining the Gauss-Newton curvature
+                of the fit itself with (if applicable) v_init's own uncertainty - see the caveats
+                below.
+            'alpha_std', 'beta_std': [float] The same 1-sigma uncertainties propagated to linear
+                (alpha, beta) space via the delta method (alpha_std = alpha*alpha_std_rel, since
+                d(alpha)/d(ln alpha) = alpha).
+            'cov_fit': [ndarray] The Gauss-Newton contribution to 'cov_log' ALONE (i.e. v_init
+                treated as exactly known, before any sigma_v_init correction is added) - lets a
+                caller (e.g. plotAlphaBeta()) show how much of the total uncertainty in 'cov_log'
+                comes from the fit itself vs. from propagating v_init's own uncertainty.
+            'cov_log': [ndarray] Full 2x2 covariance matrix of (ln alpha, ln beta) - the space
+                this model is actually fit in. 'cov_fit' plus the sigma_v_init rank-1 correction
+                (see _alphaBetaRobustErrors()'s docstring).
+            'cov': [ndarray] The same covariance propagated to linear (alpha, beta) space. Use
+                'cov'/'cov_log' instead of the marginal std devs above to propagate into any OTHER
+                derived quantity: alpha and beta are typically strongly correlated (see 'corr'/
+                'corr_log'), so propagating the marginal std devs independently would be wrong.
+            'corr_log', 'corr': [float] Correlation coefficient of (ln alpha, ln beta) / of
+                (alpha, beta) - numerically identical (correlation is invariant under the
+                positive-diagonal rescaling relating the two spaces); both are kept for
+                convenience.
+            'alpha_ci_wald_lower', 'alpha_ci_wald_upper',
+            'beta_ci_wald_lower', 'beta_ci_wald_upper': [float] APPROXIMATE confidence
+                intervals based on the local Gaussian (Wald-type) approximation in log-space, at
+                the `ci` level - i.e. alpha/beta are treated as log-normal, so these bounds are
+                asymmetric around alpha/beta and, unlike alpha +/- z*alpha_std, can never go
+                negative. The "_wald" in the name is deliberate: this is NOT the same kind of
+                object as wmpl.Utils.Math.confidenceInterval()'s output elsewhere in this library
+                (e.g. Trajectory.py, REBOUND.py) - those are empirical percentiles of an actual
+                Monte Carlo ensemble, whereas there is no ensemble here, only a local quadratic
+                approximation of the cost function around the optimum. See profileAlphaBeta()
+                for a profile-based alternative when that approximation is in doubt (see the
+                Statistical caveats below).
+            'ci': [float] The confidence level actually used (echoed back).
+            'sigma_v': [float] The velocity uncertainty actually used (see the sigma_v caveat
+                above).
+            'sigma_v_init': [float] v_init's uncertainty actually used for the propagation above
+                (0.0 if v_init is being treated as exactly known).
+
+    Statistical caveats (estimate_errors=True):
+        - Both contributions to alpha_std_rel/beta_std_rel/cov_log assume independent,
+          diagonal-covariance velocity residuals - the same simplification fitAlphaBetaLightCurve()
+          makes (consecutive points from the same station are not really statistically
+          independent).
+        - The Gauss-Newton contribution is a *local curvature* approximation: soft-L1 reweights
+          residuals nonlinearly, so (J^T J)^-1 is not the inverse Fisher information of Gaussian
+          noise - same caveat as fitAlphaBetaLightCurve()'s alpha_std_rel/beta_std_rel.
+        - The v_init-sensitivity correction and the Gauss-Newton term are simply added
+          (cov_log = cov_fit + cov_v_init), which ignores that v_init and the conditional fit's
+          residuals both ultimately come from the same v_data - a standard plug-in approximation,
+          not a fully joint treatment.
+        - alpha_ci_wald_lower/upper and beta_ci_wald_lower/upper assume normality in LOG
+          space, which is only ever as good as the two contributions to cov_log above - they are
+          a convenience view of the same Gaussian approximation, not an independently more
+          rigorous one.
+        - If the fitted (alpha, beta) landed within 1% (log-space) of an ALPHA_BETA_BOUNDS edge,
+          or if that produces a near-singular Jacobian (a negative variance on the covariance
+          diagonal - impossible for a real covariance), a WARNING is printed and every error field
+          is NaN (alpha/beta themselves are still returned). Both mean the same thing: the fit is
+          likely poorly constrained by this data, and the local curvature approximation isn't
+          meaningful around a boundary the optimizer was clipped against rather than converged to.
+        - With v_init=None (derived internally), alpha_ci_wald_lower/upper can under-cover the
+          true alpha/beta by a lot more than the other approximations above: the leading window
+          used to derive v_init is still decelerating, so its median is not just noisy but
+          systematically biased LOW relative to the true v_init (-11 m/s, deterministic, on this
+          module's own synthetic test geometry - a fixed offset, not something sigma_v_init's
+          variance term can correct for). Measured on that same geometry (300-realization Monte
+          Carlo): at the noise level used elsewhere in this test suite, the nominal 95%
+          alpha_ci_wald_lower/upper actually covers the true alpha/beta only ~65-71% of the
+          time with a derived v_init - even though alpha_std_rel/beta_std_rel themselves stay
+          accurate - recovering to ~90% at 3x that noise as the fixed bias shrinks relative to the
+          growing scatter. With v_init supplied externally instead (no derivation, hence no
+          bias), coverage is a nominal ~96%. The bias is in the pre-existing v_init derivation,
+          not introduced by estimate_errors - but the confidence interval is what turns a
+          previously-inconsequential offset into a miscalibrated claim. Prefer an external v_init
+          (+ sigma_v_init if it has its own uncertainty) over the internally-derived one whenever
+          interval coverage matters, not just the point estimate.
+        - alpha_ci_wald_lower/upper and beta_ci_wald_lower/upper are derived from a LOCAL
+          quadratic approximation (cov_log) of the cost function around the optimum - this is
+          exactly what covariances/correlations/std devs are for, and remains reliable for that.
+          But when a parameter is only weakly constrained, the reported interval can extend far
+          enough from the optimum that the cost function is no longer well described by that
+          local quadratic shape - and in that regime, the WALD interval can substantially
+          OVERESTIMATE the interval the actual cost surface supports, particularly in the
+          direction the real cost rises fastest. Measured systematically (8 synthetic scenarios
+          spanning well- to weakly-constrained): the discrepancy between the Wald interval and the
+          properly-profiled interval (see profileAlphaBeta()) is negligible
+          (~1x) whenever the relevant *_std_rel is small, and grows sharply (as much as ~140x on
+          the upper bound, occasionally unbounded) once it is large - NOT a one-off pathological
+          case, but a systematic property of this regime. Critically, this affects beta far more
+          readily than alpha at comparable *_std_rel magnitudes (e.g. alpha_std_rel=88.6% gave
+          only a 1.8x discrepancy, while beta_std_rel=111.4% - barely bigger - gave 5.0x): beta
+          enters the model inside Ei(beta*v^2), directly shaping the curve, while alpha enters as
+          a near-linear log-scale shift (ln(2*alpha)) - a structurally more nonlinear role for
+          beta that a local quadratic expansion is expected to describe far less faithfully. This
+          limitation is specific to the CONFIDENCE INTERVAL, not to cov_log/corr_log/alpha_std_rel/
+          beta_std_rel themselves (those keep describing the local curvature correctly regardless
+          - only the extrapolation of that curvature into a "what values are plausible" statement
+          is what breaks down). When beta_std_rel (or alpha_std_rel) is large, prefer
+          profileAlphaBeta() over alpha_ci_wald_lower/upper - beta_ci_wald_lower/upper for
+          inference about which parameter values are actually compatible with the data.
     """
 
+    method = method.lower()
+
+    if estimate_errors and method != 'robust':
+        raise ValueError("estimate_errors=True is only supported for method='robust' - Q4's "
+            "L1/Nelder-Mead fit has no natural Jacobian to build an analytic covariance from.")
+
+    if estimate_errors and not (0 < ci < 100):
+        raise ValueError("ci must be strictly between 0 and 100, got {!r}. Out-of-range values "
+            "degrade silently: ci=100 gives z=inf (0/inf bounds), ci>100 gives z=NaN, ci<0 "
+            "inverts which bound is 'lower' vs 'upper'.".format(ci))
+
+    v_init_given = v_init is not None
+
     # Compute the initial velocity, if it wasn't given already
-    if v_init is None:
+    if not v_init_given:
 
         max_index = int(0.2*len(v_data))
         if max_index < 10:
@@ -596,8 +993,6 @@ def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='
     v_normed = v_data/v_init
     ht_normed = ht_data/HT_NORM_CONST
 
-    method = method.lower()
-
     if method == 'q4':
         alpha, beta = minimizeAlphaBeta(v_normed, ht_normed)
 
@@ -605,15 +1000,474 @@ def fitAlphaBeta(v_data, ht_data, v_init=None, method='q4', sigma_v=None, loss='
         alpha0, beta0 = minimizeAlphaBeta(v_normed, ht_normed)
 
         if sigma_v is None:
-            sigma_v = _estimateSigmaV(alpha0, beta0, v_normed, ht_normed, v_init)
+            sigma_v = _estimateSigmaV(alpha0, beta0, v_normed, ht_normed, v_init, fast=fast)
 
-        alpha, beta = minimizeAlphaBetaRobust(v_normed, ht_normed, sigma_v/v_init, loss=loss, \
-            f_scale=f_scale, x0_alpha_beta=(alpha0, beta0))
+        if estimate_errors:
+            alpha, beta, fit_res = minimizeAlphaBetaRobust(v_normed, ht_normed, sigma_v/v_init, \
+                loss=loss, f_scale=f_scale, x0_alpha_beta=(alpha0, beta0), return_fit_result=True, \
+                fast=fast)
+        else:
+            alpha, beta = minimizeAlphaBetaRobust(v_normed, ht_normed, sigma_v/v_init, loss=loss, \
+                f_scale=f_scale, x0_alpha_beta=(alpha0, beta0), fast=fast)
 
     else:
         raise ValueError("method must be 'q4' or 'robust', got '{:s}'.".format(method))
 
+    if estimate_errors:
+        errors = _alphaBetaRobustErrors(fit_res, alpha, beta, v_data, ht_data, v_init, \
+            v_init_given, sigma_v, sigma_v_init, loss, f_scale, ci, fast=fast)
+
+    if verbose:
+        print()
+        print("--- fitAlphaBeta ({:s}) ---".format(method))
+        print("v_init               = {:.3f} m/s".format(v_init))
+
+        if estimate_errors:
+            print("alpha                = {:.6f} (+/-{:.1%})  [{:.3g}% Wald CI: {:.6f} - "
+                "{:.6f}]".format(alpha, errors['alpha_std_rel'], ci,
+                errors['alpha_ci_wald_lower'], errors['alpha_ci_wald_upper']))
+            print("beta                 = {:.6f} (+/-{:.1%})  [{:.3g}% Wald CI: {:.6f} - "
+                "{:.6f}]".format(beta, errors['beta_std_rel'], ci,
+                errors['beta_ci_wald_lower'], errors['beta_ci_wald_upper']))
+            print("corr(alpha, beta)    = {:.3f}".format(errors['corr']))
+            print("sigma_v              = {:.3f} m/s".format(errors['sigma_v']))
+            print("sigma_v_init         = {:.3f} m/s".format(errors['sigma_v_init']))
+        else:
+            print("alpha                = {:.6f}".format(alpha))
+            print("beta                 = {:.6f}".format(beta))
+
+    if estimate_errors:
+        return v_init, alpha, beta, errors
+
     return v_init, alpha, beta
+
+
+def _profileCostAt(fixed_value, fixed_idx, free_log_guess, v_normed, ht_normed, sigma_v_normed,
+        free_bounds, loss, f_scale, fast=False):
+    """ Cost at a fixed alpha or beta value, re-optimizing the other (profiled-out) parameter -
+        the building block profileAlphaBeta() walks its grid with.
+
+    Arguments:
+        fixed_value: [float] The value (linear space) the profiled parameter is held at.
+        fixed_idx: [int] 0 if fixed_value is alpha (profiling out beta), 1 if it is beta
+            (profiling out alpha) - matches _dynResiduals()'s x = (ln alpha, ln beta) ordering.
+        free_log_guess: [float] Starting guess (ln space) for the other, re-optimized parameter.
+        v_normed: [ndarray] Normalized velocity in (0, 1).
+        ht_normed: [ndarray] Height normalized to HT_NORM_CONST.
+        sigma_v_normed: [float] Normalized velocity uncertainty.
+        free_bounds: [tuple] (log_lower, log_upper) bounds for the re-optimized parameter.
+        loss: [str] scipy.optimize.least_squares loss.
+        f_scale: [float] Robust loss scale.
+
+    Keyword arguments:
+        fast: [bool] Passed through to _dynResiduals()/alphaBetaVelocityNormed() - see the
+            latter's docstring. This is called once per re-optimization at every profile grid
+            point, itself iterated by scipy.optimize.least_squares - one of the largest
+            beneficiaries of fast=True in this module (profileAlphaBeta() calls this O(n_grid)
+            times, each a full least_squares run).
+
+    Return:
+        (cost, log_free_at_optimum): [tuple] res.cost, and the optimized log-parameter so the
+            next grid point can warm-start from it.
+    """
+
+    def _resid(log_free):
+        x = np.empty(2)
+        x[fixed_idx] = np.log(fixed_value)
+        x[1 - fixed_idx] = log_free[0]
+        return _dynResiduals(x, v_normed, ht_normed, sigma_v_normed, fast=fast)
+
+    res = scipy.optimize.least_squares(_resid, [free_log_guess], \
+        bounds=([free_bounds[0]], [free_bounds[1]]), loss=loss, f_scale=f_scale)
+
+    return res.cost, res.x[0]
+
+
+def _costAtOptimum(alpha, beta, v_normed, ht_normed, sigma_v_normed, log_bounds, loss, f_scale,
+        fast=False):
+    """ Cost at the already-known joint optimum (alpha, beta) - profileAlphaBeta()'s cost_best
+        reference point every grid point's delta_cost is measured against.
+
+        Direct residual evaluation for loss='soft_l1' (the default, and the only loss this module
+        itself ever actually exercises), via scipy's own published cost formula for that loss:
+        F = 0.5*sum(f_scale**2 * 2*(sqrt(1 + (f/f_scale)**2) - 1)) - verified numerically against
+        scipy.optimize.least_squares's own reported .cost (matched to solver tolerance, ~1e-7).
+        This avoids re-optimizing to reach an answer that is already known: (alpha, beta) being
+        the joint optimum means fixing beta at its own value and re-optimizing alpha must
+        converge back to alpha itself, so a fresh optimizer call here only ever confirms, never
+        discovers, its own starting point.
+
+        Falls back to re-optimizing (via _profileCostAt(), fixing beta and re-optimizing alpha
+        from its own value - the same mechanism every grid point already uses) for any other
+        loss, including a custom callable - not worth hand-rolling scipy's other built-in loss
+        formulas, or trying to support arbitrary callables generically, just to skip what is, for
+        those, already a near-free optimizer call starting exactly at its own answer.
+    """
+
+    if loss == 'soft_l1':
+        residuals = _dynResiduals(np.log([alpha, beta]), v_normed, ht_normed, sigma_v_normed, \
+            fast=fast)
+        z = (residuals/f_scale)**2
+        return 0.5*np.sum(f_scale**2 * 2.0*(np.sqrt(1.0 + z) - 1.0))
+
+    cost, _ = _profileCostAt(beta, 1, np.log(alpha), v_normed, ht_normed, sigma_v_normed,
+        (log_bounds[0][0], log_bounds[1][0]), loss, f_scale, fast=fast)
+    return cost
+
+
+def _profileOneParameter(fixed_idx, value_hat, other_hat, cost_best, s2, v_normed, ht_normed,
+        sigma_v_normed, log_bounds, ci, n_grid, loss, f_scale, fast=False):
+    """ Profile scan and ci-crossing search for one parameter (0=alpha, 1=beta), profiling out the
+        other. See profileAlphaBeta() for the full picture.
+
+    Keyword arguments:
+        fast: [bool] Passed through to _profileCostAt() - see its docstring.
+
+    Return:
+        profile: [dict] 'ci_lower', 'ci_upper' (float or None - None if the search grid, bounded
+            by ALPHA_BETA_BOUNDS, never crosses the threshold on that side), 'grid',
+            'delta_cost', 'delta_threshold', 'value_hat', 'cost_best', 's2', 'ci', 'other_hat',
+            'other_profile' (see profileAlphaBeta()'s Return section for the last three - they
+            exist so a caller (e.g. plotProfileAlphaBeta()) can reconstruct trajectories from the
+            profile without re-running the sweep).
+    """
+
+    # Grid spans ALPHA_BETA_BOUNDS in LOG space (matching the space the model/optimizer/cov_log
+    #   all actually work in), via linspace + exp rather than converting to linear bounds first and
+    #   letting geomspace re-derive that same log-space grid internally - mathematically identical
+    #   (geomspace IS exp(linspace(log(...)))), just avoids a redundant log/exp round trip and
+    #   keeps the log-space nature of the computation explicit.
+    log_lo = log_bounds[0][fixed_idx] + np.log(1.001)
+    log_hi = log_bounds[1][fixed_idx] + np.log(0.999)
+    log_grid = np.linspace(log_lo, log_hi, n_grid)
+    grid = np.exp(log_grid)
+
+    other_bounds = (log_bounds[0][1 - fixed_idx], log_bounds[1][1 - fixed_idx])
+
+    # chi2(df=1) quantile at `ci`: exact closed form via the standard normal quantile (same
+    #   scipy.stats-avoiding trick as _gaussianEllipsePoints()/alpha_ci_wald_lower):
+    #   chi2.ppf(p, df=1) = ndtri(0.5 + p/2)^2
+    chi2_1 = scipy.special.ndtri(0.5 + ci/200.0)**2
+
+    delta = np.empty_like(grid)
+
+    # The other (profiled-out) parameter's re-optimized value at each grid point, in LINEAR
+    #   space - free (already computed by the walk below to warm-start the next grid point, and
+    #   previously discarded once used). Lets a caller (e.g. plotProfileAlphaBeta()) reconstruct
+    #   trajectories along the profile ridge without re-optimizing - see profileAlphaBeta()'s
+    #   Statistical caveats for exactly what that ridge does and does not represent.
+    other_profile = np.empty_like(grid)
+
+    center_i = np.searchsorted(grid, value_hat)
+
+    # Walk outward from value_hat in both directions, warm-starting each step from the last
+    log_other = np.log(other_hat)
+    for i in range(center_i, len(grid)):
+        cost, log_other = _profileCostAt(grid[i], fixed_idx, log_other, v_normed, ht_normed,
+            sigma_v_normed, other_bounds, loss, f_scale, fast=fast)
+        delta[i] = 2.0*(cost - cost_best)/s2
+        other_profile[i] = np.exp(log_other)
+
+    log_other = np.log(other_hat)
+    for i in range(center_i - 1, -1, -1):
+        cost, log_other = _profileCostAt(grid[i], fixed_idx, log_other, v_normed, ht_normed,
+            sigma_v_normed, other_bounds, loss, f_scale, fast=fast)
+        delta[i] = 2.0*(cost - cost_best)/s2
+        other_profile[i] = np.exp(log_other)
+
+    below, above = grid < value_hat, grid > value_hat
+
+    # Split the grid into the two sides of value_hat, with (value_hat, 0.0) prepended as an exact
+    #   anchor (delta_cost is 0 there by construction - cost_best IS the cost at value_hat with the
+    #   other parameter re-optimized). The anchor is the inner end of the root-finding bracket
+    #   below: it is guaranteed to sit below the threshold (delta=0 < chi2_1), so it always pairs
+    #   with the first grid point above the threshold to give a valid sign-changing bracket, even
+    #   when the whole CI is narrower than one grid cell and no grid point falls inside it (the
+    #   common case for a well-constrained parameter, since n_grid is fixed across the full
+    #   ALPHA_BETA_BOUNDS span).
+    log_value_hat = np.log(value_hat)
+    log_grid_above = np.concatenate(([log_value_hat], log_grid[above]))
+    delta_above = np.concatenate(([0.0], delta[above]))
+
+    log_grid_below = np.concatenate(([log_value_hat], log_grid[below][::-1]))
+    delta_below = np.concatenate(([0.0], delta[below][::-1]))
+
+    # Locate each CI edge by root-finding the crossing 2*(cost - cost_best)/s2 = chi2_1 in LOG
+    #   space, rather than linearly interpolating between the two bracketing grid points. Linear
+    #   interpolation of the (locally near-quadratic) delta across one grid cell systematically
+    #   MIS-estimates the crossing whenever the true CI is narrower than the grid spacing - and
+    #   because n_grid is fixed across the full ALPHA_BETA_BOUNDS span, that is the common case for
+    #   a well-constrained parameter (its CI can be many times narrower than one cell), where the
+    #   only bracket available is [value_hat (delta=0), first grid point (delta>>chi2_1)] and the
+    #   linear estimate comes out roughly 2x too narrow. A bracketed root-find between the
+    #   value_hat anchor (delta=0 < chi2_1 by construction) and the first grid point above the
+    #   threshold re-optimizes the profiled-out parameter at each trial value, so the reported edge
+    #   is accurate to the solver tolerance regardless of grid resolution (n_grid then only sets
+    #   the resolution of the returned 'grid'/'delta_cost' arrays and the initial bracketing scan).
+    def _delta_minus_threshold(log_value):
+        cost, _ = _profileCostAt(np.exp(log_value), fixed_idx, np.log(other_hat), v_normed,
+            ht_normed, sigma_v_normed, other_bounds, loss, f_scale, fast=fast)
+        return 2.0*(cost - cost_best)/s2 - chi2_1
+
+    def _crossing(log_side, delta_side):
+        # First grid point (index i, i >= 1 since delta_side[0] is the anchor's 0.0) whose delta
+        #   exceeds the threshold; None if the grid never crosses (the data does not constrain
+        #   this side within ALPHA_BETA_BOUNDS). The root is bracketed by the value_hat anchor
+        #   (delta 0, so _delta_minus_threshold < 0) and that grid point.
+        idx = np.where(delta_side > chi2_1)[0]
+        if not len(idx):
+            return None
+
+        i = idx[0]
+        try:
+            log_ci = scipy.optimize.brentq(_delta_minus_threshold, log_value_hat, log_side[i],
+                xtol=1e-8)
+        except ValueError:
+            # Re-optimizing inside _delta_minus_threshold warm-starts from other_hat rather than
+            #   from the swept trajectory, so it can land marginally below the threshold right at
+            #   log_side[i] and break the bracket sign. Fall back to interpolating the (ascending)
+            #   swept deltas - never worse than the original linear estimate.
+            log_ci = np.interp(chi2_1, [delta_side[i - 1], delta_side[i]],
+                [log_side[i - 1], log_side[i]])
+        return np.exp(log_ci)
+
+    ci_upper = _crossing(log_grid_above, delta_above)
+    ci_lower = _crossing(log_grid_below, delta_below)
+
+    return {
+        'ci_lower': ci_lower,
+        'ci_upper': ci_upper,
+        'grid': grid,
+        'delta_cost': delta,
+        'delta_threshold': chi2_1,
+        'value_hat': value_hat,
+        'cost_best': cost_best,
+        's2': s2,
+        'ci': ci,
+        'other_hat': other_hat,
+        'other_profile': other_profile,
+    }
+
+
+def profileAlphaBeta(v_data, ht_data, fit, sigma_v=None, ci=95.0, param='both', n_grid=250,
+        loss='soft_l1', f_scale=2.0, verbose=False, fast=False):
+    """ Profile-based confidence interval(s) for alpha and/or beta - commonly called a "profile
+        likelihood" interval (the name this module's own function/parameter names use, since
+        that's the term to search for), though see the Statistical caveats below for the precise
+        sense in which that name applies: what is actually profiled by default is the robust
+        (soft-L1) fitting COST, not a Gaussian log-likelihood. A more direct alternative to
+        fitAlphaBeta(..., estimate_errors=True)'s alpha_ci_wald_lower/upper -
+        beta_ci_wald_lower/upper for when a parameter is weakly constrained (see the Statistical
+        caveats on those fields) and the local quadratic (Wald) approximation those are built on
+        no longer describes the cost surface out at the interval's edge.
+
+        Deliberately a SEPARATE function from estimate_errors=True, not a replacement for it and
+        not an additional field mixed into the same `errors` dict: they answer different
+        questions and mixing them would make it much harder to tell which quantities describe a
+        local approximation and which describe the real cost surface. estimate_errors=True's
+        cov_log/corr_log/alpha_std_rel/beta_std_rel describe the LOCAL curvature of the cost
+        function at the optimum - correct and useful for propagating small uncertainties
+        regardless of anything below (see fitAlphaBeta()'s docstring). This function instead asks
+        "what parameter values are actually compatible with the data" by walking the real
+        (soft-L1) cost function directly: for a grid of values of the profiled parameter, the
+        OTHER parameter is re-optimized at each point (not held at its joint-fit value), and the
+        interval is read off wherever the resulting, appropriately-scaled cost rise crosses the
+        chi-squared(df=1) threshold for `ci` - the same likelihood-ratio-style construction as a
+        true profile likelihood, applied to a cost surface rather than a log-likelihood (see the
+        Statistical caveats below), not an extrapolated quadratic. It makes no assumption that
+        the region it reports on is well-described by a quadratic bowl, which is exactly the
+        assumption that breaks down for a weakly-constrained
+        beta in this model (see fitAlphaBeta()'s docstring for the measured extent of this - up
+        to ~140x on the upper bound in the scenarios checked, growing sharply and systematically
+        once beta_std_rel is large, more so than for alpha given how much more nonlinearly beta
+        enters the model).
+
+        Unlike estimate_errors=True, this does NOT require the original fit to have used
+        method='robust' - it re-derives its own cost from `fit`'s (alpha, beta) directly via the
+        same velocity-residual definition minimizeAlphaBetaRobust() uses, regardless of whether
+        that point estimate itself came from method='q4' or 'robust'.
+
+        Not free: this is an optimization sweep (n_grid re-fits per profiled parameter), not the
+        few extra refits estimate_errors=True's sigma_v_init correction costs.
+
+    Arguments:
+        v_data: [ndarray] Velocity data (m/s), as given to fitAlphaBeta().
+        ht_data: [ndarray] Height data (m), as given to fitAlphaBeta().
+        fit: [tuple] (v_init, alpha, beta), exactly as returned by fitAlphaBeta(). v_init is held
+            fixed at this value throughout - it is not itself profiled (matching
+            estimate_errors=True's own treatment of a given v_init as exactly known unless
+            sigma_v_init says otherwise; there is no equivalent of that correction here).
+
+    Keyword arguments:
+        sigma_v: [float] Velocity uncertainty (m/s), same role as fitAlphaBeta()'s sigma_v. If
+            None, estimated the same way (_estimateSigmaV(), using `fit`'s own alpha/beta as the
+            reference model) - the same *effective*, not purely instrumental, uncertainty
+            fitAlphaBeta() itself would derive. NOTE: to compare this interval against
+            fitAlphaBeta(estimate_errors=True)'s Wald interval on the identical noise scaling (s2),
+            pass the SAME sigma_v (and loss/f_scale) here that produced that fit - left to default,
+            the re-estimated sigma_v can differ from the fit's, giving a different s2 and hence a
+            differently-scaled interval.
+        ci: [float] Confidence level (0-100, e.g. 95, the default).
+        param: [str] 'alpha', 'beta' (most relevant given beta is the parameter this matters for
+            in this model - see above), or 'both' (default).
+        n_grid: [int] Number of grid points spanning ALPHA_BETA_BOUNDS for the profiled
+            parameter - determines resolution/cost, not a statistical stability budget like
+            plotAlphaBeta()'s band_samples (this is a deterministic sweep, not a sampling one).
+        loss: [str] scipy.optimize.least_squares loss - should match what the original fit used,
+            for the comparison against its cost to be meaningful.
+        f_scale: [float] Robust loss scale - should match the original fit's.
+        verbose: [bool] If True, print the profiled parameter(s) and their profile-based CI,
+            mirroring fitAlphaBeta(..., verbose=True)'s style.
+        fast: [bool] Passed through everywhere this sweep inverts velocity - see
+            alphaBetaVelocityNormed()'s docstring. This sweep runs O(n_grid) full
+            scipy.optimize.least_squares fits per profiled parameter, each iterating
+            _dynResiduals() many times, so fast=True is one of the largest speedups available in
+            this module.
+
+    Return:
+        profile: [dict] Keyed by whichever of 'alpha'/'beta' was requested via `param`, each a
+            dict with:
+                'ci_lower', 'ci_upper': [float or None] The profile-based interval at `ci` - None
+                    if the grid (bounded by ALPHA_BETA_BOUNDS) never reaches where the cost
+                    crosses the threshold on that side - the data does not constrain that side at
+                    all within the model's own physical bounds, which is itself informative.
+                'grid': [ndarray] The parameter grid the profile was evaluated on.
+                'delta_cost': [ndarray] 2*(cost - cost_best)/s2 at each grid point - compare
+                    directly against 'delta_threshold' (or recompute at a different `ci` via
+                    ndtri(0.5 + ci/200)**2) to reproduce ci_lower/ci_upper, or re-derive the
+                    interval at a different `ci` without re-running the sweep.
+                'delta_threshold': [float] The chi2(df=1) quantile at `ci` that 'delta_cost' is
+                    compared against - exactly ndtri(0.5 + ci/200)**2, exposed directly so a
+                    caller can e.g. plt.axhline(profile['beta']['delta_threshold']) without
+                    recomputing it.
+                'value_hat': [float] The point estimate this parameter was profiled around
+                    (`fit`'s alpha or beta, echoed back so this dict is self-contained).
+                'cost_best', 's2': [float] The same reduced-chi-square scale
+                    fitAlphaBeta(estimate_errors=True) uses for cov_log, so this comparison uses
+                    an identical noise-scaling convention - any difference from the Wald interval
+                    is due to the cost surface's actual shape, not a different assumption about
+                    how much to trust sigma_v.
+                'ci': [float] Echoes the `ci` argument, so this dict is self-contained.
+                'other_hat': [float] The OTHER parameter's value at the joint optimum (`fit`'s
+                    beta if this is the alpha profile, alpha if this is the beta profile) - the
+                    (value_hat, other_hat) point, with no re-optimization needed to get it.
+                'other_profile': [ndarray] The other parameter, re-optimized at each point of
+                    'grid' (same index alignment) - (grid, other_profile) traces the
+                    profile-likelihood "ridge" through (alpha, beta) space. Free: already
+                    computed by the sweep to warm-start each grid step, previously discarded
+                    once used. Lets a caller (e.g. plotProfileAlphaBeta()) reconstruct
+                    trajectories at any grid point, including inside [ci_lower, ci_upper],
+                    without re-optimizing - see the Statistical caveats below for what that
+                    reconstruction does and does not represent.
+
+    Statistical caveats:
+        - On the name: despite "profile likelihood" being the term used throughout this function
+          and its helpers (it's the standard, searchable name for this class of method - fix one
+          parameter, re-optimize the rest, threshold the objective's rise), what is actually
+          profiled by default is a robust soft-L1 fitting COST, not a Gaussian log-likelihood.
+          There is no claim anywhere in this module that soft_l1's cost equals -2*ln(L) for any
+          actual noise model - it doesn't, for any noise model. The chi2(df=1) threshold used to
+          read off ci_lower/ci_upper is exactly Wilks'-theorem-justified only for a genuine
+          Gaussian-noise least-squares cost (loss='linear'); under the default soft-L1 loss it is
+          the same well-motivated but not perfectly theoretically clean comparison this module
+          already accepts elsewhere for its Gauss-Newton covariances (e.g.
+          fitAlphaBetaLightCurve()'s alpha_std_rel/beta_std_rel) - a useful, standard engineering
+          approximation, not a literal likelihood-ratio test. There is a second, milder
+          approximation on top of that: because the delta is scaled by the estimated s2 (below),
+          the self-consistent threshold is the F(1, dof) quantile rather than chi2(df=1); the two
+          coincide only in the large-dof limit (chi2(df=1) = dof*F(1, dof) as dof -> inf), so for
+          the point counts typical here (dof in the tens to hundreds) the difference is small, but
+          the interval is very slightly optimistic at small dof.
+        - Not a replacement for estimate_errors=True's cov_log/corr_log/alpha_std_rel/
+          beta_std_rel - those remain the right tool for LOCAL error propagation (e.g. via the
+          delta method into some other derived quantity). This answers a different question
+          (which parameter values are compatible with the data at all) and does not itself
+          provide a covariance or support sampling a band/fan/ellipse - plotAlphaBeta() still
+          needs cov_log for that, regardless of what this function reports.
+        - Uses the same reduced-chi-square (s2) rescaling as estimate_errors=True, which assumes
+          sigma_v is an effective, self-derived scale rather than a true instrumental one (see
+          fitAlphaBeta()'s sigma_v caveat).
+        - 'other_profile' lets a caller reconstruct trajectories along the profile ridge, e.g.
+          plotProfileAlphaBeta()'s trajectories panel. That ridge, restricted to
+          [ci_lower, ci_upper], does stay inside the JOINT (alpha, beta) confidence region at the
+          same `ci`: a point with 1-dof delta_cost <= chi2(ci, df=1) automatically also satisfies
+          the looser 2-dof threshold chi2(ci, df=2) that a true joint region would use (e.g.
+          3.841 vs 5.991 at ci=95). But it is NOT that joint region's boundary or an envelope of
+          it - it is the 1-dimensional locus of the other parameter's re-optimized value, clipped
+          to where THIS parameter alone stays within its own marginal (df=1) profile CI. Do not
+          describe the resulting trajectory family as "the `ci`% confidence region for the
+          trajectory" - it is narrower than that, and shows how far the fit trajectory moves if
+          this parameter is pushed to the edge of what's marginally still compatible with the
+          data, not a joint-probability statement about (alpha, beta) together.
+    """
+
+    v_init, alpha, beta = fit
+
+    if param not in ('alpha', 'beta', 'both'):
+        raise ValueError("param must be 'alpha', 'beta', or 'both', got {!r}.".format(param))
+
+    if not (0 < ci < 100):
+        raise ValueError("ci must be strictly between 0 and 100, got {!r}.".format(ci))
+
+    v_normed = v_data/v_init
+    ht_normed = ht_data/HT_NORM_CONST
+
+    if sigma_v is None:
+        sigma_v = _estimateSigmaV(alpha, beta, v_normed, ht_normed, v_init, fast=fast)
+
+    sigma_v_normed = sigma_v/v_init
+    log_bounds = _logAlphaBetaBounds()
+
+    # Reference cost at the joint optimum - see _costAtOptimum()'s docstring for why this is a
+    #   direct evaluation rather than a redundant re-optimization for the default loss.
+    cost_best = _costAtOptimum(alpha, beta, v_normed, ht_normed, sigma_v_normed, log_bounds, loss,
+        f_scale, fast=fast)
+
+    dof = max(len(v_data) - 2, 1)
+    s2 = 2.0*cost_best/dof
+
+    profile = {}
+
+    if param in ('alpha', 'both'):
+        profile['alpha'] = _profileOneParameter(0, alpha, beta, cost_best, s2, v_normed,
+            ht_normed, sigma_v_normed, log_bounds, ci, n_grid, loss, f_scale, fast=fast)
+
+    if param in ('beta', 'both'):
+        profile['beta'] = _profileOneParameter(1, beta, alpha, cost_best, s2, v_normed,
+            ht_normed, sigma_v_normed, log_bounds, ci, n_grid, loss, f_scale, fast=fast)
+
+    # cost_best is the cost at the passed-in (alpha, beta), used as the profile's reference
+    #   minimum. If a profiled-out re-optimization along the grid ever reaches a LOWER cost
+    #   (delta_cost < 0), then (alpha, beta) was not actually the joint minimum of this loss -
+    #   which happens when `fit` came from a different objective than `loss` (e.g. a method='q4'
+    #   point estimate profiled under the default soft_l1): the reference is then off-minimum, so
+    #   the interval is measured from an inflated baseline and can be biased/mis-centered. Warn
+    #   rather than silently reporting it (pass a robust `fit` with matching loss/f_scale to avoid).
+    min_delta = min(float(np.min(p['delta_cost'])) for p in profile.values())
+    if min_delta < -1e-6:
+        print("WARNING: a profiled re-optimization reached a lower cost than the reference "
+            "(min delta_cost = {:.3g} < 0), so the supplied (alpha, beta) is not the joint "
+            "minimum of loss='{:s}'. The profile CI is measured from an off-minimum reference and "
+            "may be biased - pass a fit from fitAlphaBeta(method='robust') with the same "
+            "loss/f_scale.".format(min_delta, loss))
+
+    if verbose:
+        print()
+        print("--- profileAlphaBeta ---")
+
+        for name, value in [('alpha', alpha), ('beta', beta)]:
+
+            if name not in profile:
+                continue
+
+            p = profile[name]
+            lo = "{:.6f}".format(p['ci_lower']) if p['ci_lower'] is not None else "<= lower bound"
+            hi = "{:.6f}".format(p['ci_upper']) if p['ci_upper'] is not None else ">= upper bound"
+
+            print("{:<21s}= {:.6f}  [{:.3g}% profile CI: {:s} - {:s}]".format(
+                name, value, ci, lo, hi))
+
+    return profile
 
 
 def alphaBetaHeightNormed(v_normed, alpha, beta):
@@ -658,7 +1512,7 @@ def alphaBetaHeight(vel_data, alpha, beta, v_init):
     return alphaBetaHeightNormed(vel_normed, alpha, beta)*HT_NORM_CONST
 
 
-def alphaBetaVelocityNormed(ht_normed, alpha, beta, v_eps=1e-10):
+def alphaBetaVelocityNormed(ht_normed, alpha, beta, v_eps=1e-10, fast=False):
     """ Invert Eq. (7): normalized velocity v(y) for given (alpha, beta). Unfortunately there is no
         analytical inverse to the exponential integral, so the solution is found numerically.
 
@@ -674,10 +1528,19 @@ def alphaBetaVelocityNormed(ht_normed, alpha, beta, v_eps=1e-10):
 
     Keyword arguments:
         v_eps: [float] Bracket margin around (0, 1).
+        fast: [bool] If True, use the experimental LUT-accelerated closed-form inversion
+            (alphaBetaVelocityNormedLUT()) instead of the brentq bracket below. Much faster in
+            Monte Carlo/optimizer-heavy contexts (see test_AlphaBeta.py::testAlphaBetaVelocityNormedLUT
+            for accuracy/speed numbers), but inherits its beta >~ 30 precision ceiling - a limit
+            shared with this same brentq path (see the module comment above
+            alphaBetaVelocityNormedLUT() for why). Default False keeps today's exact behavior.
 
     Return:
         v_normed: [ndarray] Normalized model velocity at each height.
     """
+
+    if fast:
+        return alphaBetaVelocityNormedLUT(ht_normed, alpha, beta, v_eps=v_eps)
 
     y_arr = np.atleast_1d(np.asarray(ht_normed, dtype=np.float64))
     v_out = np.empty_like(y_arr)
@@ -687,13 +1550,21 @@ def alphaBetaVelocityNormed(ht_normed, alpha, beta, v_eps=1e-10):
     def _g(v, y_target):
         return alphaBetaHeightNormed(v, alpha, beta) - y_target
 
+    # alphaBetaHeightNormed(v_hi/v_lo, alpha, beta) doesn't depend on y_target, so it's the same
+    #   value on every iteration below - compute it once here (2 Ei() calls total) instead of
+    #   inside the loop (2 Ei() calls per height point, most of which just get thrown away on a
+    #   clip). _g(v_hi, y_t) <= 0 is exactly y_t >= y_hi (and symmetrically for v_lo) - only the
+    #   comparison itself needs to happen per point now.
+    y_hi = alphaBetaHeightNormed(v_hi, alpha, beta)
+    y_lo = alphaBetaHeightNormed(v_lo, alpha, beta)
+
     for i, y_t in enumerate(y_arr):
 
         # Clip outside the invertible range
-        if _g(v_hi, y_t) <= 0:
+        if y_t >= y_hi:
             v_out[i] = v_hi
 
-        elif _g(v_lo, y_t) >= 0:
+        elif y_t <= y_lo:
             v_out[i] = v_lo
 
         else:
@@ -702,7 +1573,7 @@ def alphaBetaVelocityNormed(ht_normed, alpha, beta, v_eps=1e-10):
     return v_out
 
 
-def alphaBetaVelocity(ht_data, alpha, beta, v_init, v_eps=1e-10):
+def alphaBetaVelocity(ht_data, alpha, beta, v_init, v_eps=1e-10, fast=False):
     """ Compute the velocity given the height and alpha, beta parameters. Unfortunately there is no
         analytical inverse to the exponential integral, so the solution is found numerically.
 
@@ -715,6 +1586,7 @@ def alphaBetaVelocity(ht_data, alpha, beta, v_init, v_eps=1e-10):
     Keyword arguments:
         v_eps: [float] Bracket margin around (0, 1) normalized velocity, passed to
             alphaBetaVelocityNormed().
+        fast: [bool] Passed through to alphaBetaVelocityNormed() - see its docstring.
 
     Return:
         vel_data: [ndarray or float] Velocity data (m/s).
@@ -727,7 +1599,7 @@ def alphaBetaVelocity(ht_data, alpha, beta, v_init, v_eps=1e-10):
 
     # Normalize the height and numerically invert Eq. (7) for the normalized velocity
     ht_normed = ht_data/HT_NORM_CONST
-    vel_normed = alphaBetaVelocityNormed(ht_normed, alpha, beta, v_eps=v_eps)
+    vel_normed = alphaBetaVelocityNormed(ht_normed, alpha, beta, v_eps=v_eps, fast=fast)
 
     # Compute the velocity in m/s
     vel_data = vel_normed*v_init
@@ -737,6 +1609,834 @@ def alphaBetaVelocity(ht_data, alpha, beta, v_init, v_eps=1e-10):
         return vel_data[0]
 
     return vel_data
+
+
+# ============================================================================================
+# EXPERIMENTAL: LUT-accelerated inverse of Ei() for alphaBetaVelocityNormed()
+#
+# alphaBetaVelocityNormed() above finds v by bracketing scipy.optimize.brentq on the *forward*
+# model alphaBetaHeightNormed() - each brentq call costs ~30-50 iterations, each evaluating Ei()
+# twice, all inside a per-point Python loop. Eq. (7) can instead be inverted in closed form:
+#
+#   y = ln(2 alpha) + beta - ln(Delta),  Delta = Ei(beta) - Ei(beta v^2)
+#   =>  v = sqrt( Ei^-1( Ei(beta) - 2 alpha exp(beta - y) ) / beta )
+#
+# The only missing piece is Ei^-1, which has no closed form. _InverseEiLUT below tabulates it once,
+# in a log(x) <-> signed-log1p(Ei(x)) space where a modest number of monotone cubic (PCHIP) knots
+# is enough to represent its huge dynamic range accurately, and every subsequent call just
+# evaluates that small interpolator - turning O(iterations) transcendental root-finds per point
+# into a couple of vectorized array ops for the whole height array at once. See
+# test_AlphaBeta.py::testAlphaBetaVelocityNormedLUT for the accuracy/speed validation this
+# experimental status is based on.
+#
+# Known limitation, shared with alphaBetaVelocityNormed(): for beta >~ 30, Ei(beta) is so much
+# larger than Ei(beta v^2) (Ei(50) ~ 1e20) that Delta = Ei(beta) - Ei(beta v^2) loses precision to
+# direct float64 cancellation. That happens in the *forward* model itself, so brentq is not a
+# reliable reference there either - both implementations degrade together above this threshold.
+# This is a limitation of the double-precision formulation, not of either root-finding strategy.
+# ============================================================================================
+
+
+def _signedLog1p(u):
+    """ log(1 + |u|) with the sign of u restored - compresses Ei()'s huge dynamic range into
+        something a small number of interpolation knots can represent.
+    """
+
+    return np.sign(u)*np.log1p(np.abs(u))
+
+
+class _InverseEiLUT:
+    """ Tabulates the inverse of scipy.special.expi(), for fast (experimental) vectorized use by
+        alphaBetaVelocityNormedLUT(). See the module comment above for the motivation.
+    """
+
+    def __init__(self, x_min=1e-10, x_max=55.0, n_points=4097, n_dense=200_000):
+        """
+        Keyword arguments:
+            x_min: [float] Lower end of the tabulated Ei() domain.
+            x_max: [float] Upper end of the tabulated Ei() domain. 55.0 gives margin above the
+                largest beta allowed by ALPHA_BETA_BOUNDS (50.0), since Ei^-1 is only ever
+                evaluated at values of beta*v_normed**2 <= beta.
+            n_points: [int] Number of PCHIP knots. 4097 keeps the max error in recovered v below
+                ~2e-6 across the ALPHA_BETA_BOUNDS domain (excluding the beta >~ 30 cancellation
+                regime described above, where that error is dominated by float64 precision, not
+                table resolution).
+            n_dense: [int] Resolution of the dense ground-truth grid the knots are fit against.
+        """
+
+        logx_dense = np.linspace(np.log(x_min), np.log(x_max), n_dense)
+        ei_dense = scipy.special.expi(np.exp(logx_dense))
+        s_dense = _signedLog1p(ei_dense)
+
+        self.s_min = s_dense[0]
+        self.s_max = s_dense[-1]
+
+        s_grid = np.linspace(self.s_min, self.s_max, n_points)
+        logx_grid = np.interp(s_grid, s_dense, logx_dense)
+
+        self._interp = scipy.interpolate.PchipInterpolator(s_grid, logx_grid)
+
+    def __call__(self, u):
+        """ x = Ei^-1(u), vectorized. Values of u outside the tabulated range are clipped. """
+
+        s = np.clip(_signedLog1p(u), self.s_min, self.s_max)
+
+        return np.exp(self._interp(s))
+
+
+# Ei^-1 doesn't depend on alpha/beta/y, only on the value being inverted, so a single table
+#   (covering the full ALPHA_BETA_BOUNDS beta range) can be built once and reused by every
+#   alphaBetaVelocityNormedLUT() call regardless of the (alpha, beta) it's invoked with.
+_default_inverse_ei_lut = None
+
+
+def getDefaultInverseEiLUT():
+    """ Lazily build (once) and return the process-wide default _InverseEiLUT used by
+        alphaBetaVelocityNormedLUT()/every fast=True call in this module.
+
+        Public so a caller running many fast=True fits (e.g. a Monte Carlo/dynesty driver) can
+        call this once up front to pay the ~5-6 ms build cost before the timing-sensitive part of
+        a run starts, instead of it landing on whichever fast=True call happens to be first.
+        Calling it is entirely optional otherwise - every fast=True code path in this module
+        already calls it lazily on first use and reuses the same table afterwards, within one
+        process. Each process builds (and caches) its own copy - e.g. under multiprocessing, every
+        worker builds its table once independently, not once for the whole pool.
+    """
+
+    global _default_inverse_ei_lut
+
+    if _default_inverse_ei_lut is None:
+        _default_inverse_ei_lut = _InverseEiLUT()
+
+    return _default_inverse_ei_lut
+
+
+def alphaBetaVelocityNormedLUT(ht_normed, alpha, beta, v_eps=1e-10, lut=None):
+    """ EXPERIMENTAL - LUT-accelerated alternative to alphaBetaVelocityNormed(). Inverts Eq. (7)
+        in closed form using a tabulated inverse of Ei() instead of bracketing
+        alphaBetaHeightNormed() with brentq per point - see the module comment above for the
+        derivation and known limitations. Used by every fast=True code path in this module
+        (alphaBetaVelocityNormed(..., fast=True) dispatches here); kept as a separate function,
+        alongside the brentq-based alphaBetaVelocityNormed(), for direct benchmarking/validation
+        (test_AlphaBeta.py::testAlphaBetaVelocityNormedLUT).
+
+    Arguments:
+        ht_normed: [float or ndarray] Height normalized to HT_NORM_CONST.
+        alpha: [float] Ballistic coefficient.
+        beta: [float] Mass loss parameter.
+
+    Keyword arguments:
+        v_eps: [float] Bracket margin around (0, 1), same convention as alphaBetaVelocityNormed().
+        lut: [_InverseEiLUT] Table to use. Defaults to the lazily-built, process-wide table.
+
+    Return:
+        v_normed: [ndarray] Normalized model velocity at each height.
+    """
+
+    if lut is None:
+        lut = getDefaultInverseEiLUT()
+
+    y = np.atleast_1d(np.asarray(ht_normed, dtype=np.float64))
+
+    v_lo, v_hi = v_eps, 1.0 - v_eps
+    y_hi = alphaBetaHeightNormed(v_hi, alpha, beta)
+    y_lo = alphaBetaHeightNormed(v_lo, alpha, beta)
+
+    ei_beta = scipy.special.expi(beta)
+
+    with np.errstate(over='ignore'):
+
+        delta = 2*alpha*np.exp(beta - y)
+
+        # Beta >= 10 is where Ei(beta) can be large enough that a tiny Delta (v close to 1) gets
+        #   lost when computing u = Ei(beta) - Delta directly; a local Taylor expansion of Ei
+        #   around beta avoids that cancellation for v close to 1 specifically. This is a
+        #   different (and fixable) corner from the beta >~ 30 cancellation described in the
+        #   module comment, which affects the whole formulation and both implementations equally.
+        if beta >= 10.0:
+            mask_asymptotic = delta < 1e-8*ei_beta
+        else:
+            mask_asymptotic = np.zeros_like(y, dtype=bool)
+
+        x = np.empty_like(y)
+
+        if np.any(mask_asymptotic):
+            x[mask_asymptotic] = beta - delta[mask_asymptotic]*beta*np.exp(-beta)
+
+        mask_lut = ~mask_asymptotic
+        if np.any(mask_lut):
+            x[mask_lut] = lut(ei_beta - delta[mask_lut])
+
+        v_out = np.sqrt(np.clip(x, 0.0, None)/beta)
+
+    # Clip outside the invertible range, exactly like alphaBetaVelocityNormed()
+    v_out = np.where(y >= y_hi, v_hi, v_out)
+    v_out = np.where(y <= y_lo, v_lo, v_out)
+
+    return v_out
+
+
+def _gaussianEllipsePoints(mean, cov, p, n_points=200):
+    """ Points tracing the boundary of the 2D Gaussian ellipse enclosing probability mass p.
+        Factored out as a standalone helper so other plotting functions (e.g. a future
+        plotAlphaBetaSurvivalDiagram()) can reuse it for any 2-parameter covariance, not just
+        (ln alpha, ln beta).
+
+        The Mahalanobis radius follows the chi-squared distribution with 2 degrees of freedom,
+        which has an exact closed form here (chi2(df=2) is Exponential(scale=2)):
+        chi2.ppf(p, df=2) = -2*ln(1 - p) - used instead of scipy.stats.chi2.ppf() to avoid a new
+        scipy submodule dependency.
+
+    Arguments:
+        mean: [ndarray] (2,) Center of the ellipse.
+        cov: [ndarray] (2, 2) Covariance matrix.
+        p: [float] Probability mass enclosed by the ellipse (0-1) - e.g. 0.6827 for the 2D
+            "1-sigma" ellipse (NOT the same as a unit Mahalanobis distance - that would only
+            enclose ~39% of the mass in 2D, a common point of confusion), or ci/100 for a ci%
+            ellipse.
+
+    Keyword arguments:
+        n_points: [int] Number of points tracing the boundary.
+
+    Return:
+        (x, y): [tuple of ndarrays] Points tracing the ellipse boundary, in the same units as
+            mean/cov.
+    """
+
+    radius = np.sqrt(-2.0*np.log(1.0 - p))
+
+    eigvals, eigvecs = np.linalg.eigh(cov)
+    eigvals = np.clip(eigvals, 0.0, None)  # guard tiny negative eigenvalues from roundoff
+
+    # eigh() already returns ascending eigenvalues (a documented numpy contract, not just this
+    #   function's current behavior), so this doesn't change the resulting ellipse - reordered
+    #   descending anyway so the axis order is explicit in this function's own code rather than
+    #   relying on the reader knowing that contract.
+    order = np.argsort(eigvals)[::-1]
+    eigvals, eigvecs = eigvals[order], eigvecs[:, order]
+
+    theta = np.linspace(0.0, 2*np.pi, n_points)
+    circle = np.vstack([np.cos(theta), np.sin(theta)])
+
+    transform = eigvecs @ np.diag(np.sqrt(eigvals))
+    ellipse = np.asarray(mean)[:, None] + radius*(transform @ circle)
+
+    return ellipse[0], ellipse[1]
+
+
+def plotAlphaBeta(v_data, ht_data, fit, errors=None, band=True, fan=True, band_samples=1000,
+        fan_curves=100, ellipse=True, ellipse_scatter=True, ellipse_scatter_points=300,
+        residuals=False, ci=None, seed=None, axes=None, fast=False):
+    """ Plot a fitAlphaBeta() result: observed (velocity, height) data and the fitted model
+        curve, plus - if `errors` (from estimate_errors=True) is given - its propagated parameter
+        uncertainty, optionally alongside a (ln alpha, ln beta) ellipse panel and a residuals
+        panel.
+
+        Standalone from fitAlphaBeta() on purpose: re-plotting an already-computed (fit, errors)
+        pair never needs to re-run the fit, and estimate_errors=True's own sensitivity refits
+        (for sigma_v_init's rank-1 correction) are not free - bundling plotting into the fit
+        would force redoing that work just to redraw a figure.
+
+        Naming discipline: the shaded region in the main panel, and the words used for it
+        throughout this function, are "parameter uncertainty band"/"propagated parameter
+        uncertainty", NEVER "confidence band". It is a Monte Carlo propagation of the analytic
+        (ln alpha, ln beta) covariance through the deterministic forward model - not a classical
+        confidence band, and not the same kind of object as wmpl.Utils.Math.confidenceInterval()'s
+        empirical percentiles elsewhere in this library either, even though the same percentile
+        formula is used once the samples exist. Same discipline as the existing "_wald"
+        suffix on alpha_ci_wald_lower/upper.
+
+    Arguments:
+        v_data: [ndarray] Velocity data (m/s), as given to fitAlphaBeta().
+        ht_data: [ndarray] Height data (m), as given to fitAlphaBeta().
+        fit: [tuple] (v_init, alpha, beta), exactly as returned by fitAlphaBeta().
+
+    Keyword arguments:
+        errors: [dict or None] The 4th element returned by fitAlphaBeta(..., estimate_errors=
+            True), or None. If None, or if its covariance fields are NaN (e.g. the fit landed on
+            an ALPHA_BETA_BOUNDS edge - see fitAlphaBeta()'s docstring), the band/fan/ellipse
+            content degrades gracefully to an annotation instead of raising.
+        band: [bool] Draw the parameter uncertainty band in the main panel.
+        fan: [bool] Draw individual propagated-uncertainty realizations (a subsample of the same
+            draws used for the band) in the main panel.
+        band_samples: [int] Number of (alpha, beta) draws from the (ln alpha, ln beta) Gaussian
+            approximation (covariance cov_log). Set this by how stable the tail percentiles of the
+            band need to be, but note the cost is NOT negligible: each draw evaluates the forward
+            model (a per-height numerical velocity inversion) once, un-vectorized, so runtime grows
+            roughly linearly with band_samples (order a few seconds at the default 1000 for a
+            typical trajectory - reduce it for quick interactive plots).
+        fan_curves: [int] Number of individual curves drawn for `fan`, subsampled from the same
+            `band_samples` draws (capped at however many landed inside ALPHA_BETA_BOUNDS).
+        ellipse: [bool] Draw the (ln alpha, ln beta) ellipse panel.
+        ellipse_scatter: [bool] Overlay the sampled (ln alpha, ln beta) cloud on the ellipse
+            panel - a visual illustration of the sampled Gaussian approximation, NOT a
+            consistency check of anything: the samples and the ellipses both come from the same
+            N(mean, cov_fit/cov_log), so they cannot meaningfully disagree except via a bug -
+            this just renders the same distribution two ways. Default True; see
+            ellipse_scatter_points to keep it from being too busy.
+        ellipse_scatter_points: [int] Number of points drawn for `ellipse_scatter`, subsampled
+            from the same pool as band/fan if those also drew samples (band_samples-sized),
+            otherwise drawn fresh at this size directly - the ellipse cloud is a visual
+            illustration, not a percentile computation, so it doesn't need band_samples'
+            stability budget.
+        residuals: [bool] Draw the (v_obs - v_model) vs height residuals panel. Off by default -
+            opt-in, since it is a diagnostic view rather than part of the main result. Only needs
+            `fit` and the raw data, so it still draws (without the sigma_v reference lines/
+            down-weighted marking) even if errors is None - e.g. for a method='q4' point
+            estimate, which can never have estimate_errors=True.
+        ci: [float] Confidence level (0-100) for the band and the outer ellipse contour. If None
+            (default), uses errors['ci'] (the level estimate_errors was computed at) if errors is
+            given, else 95.0.
+        seed: [int, Generator or None] Forwarded to numpy.random.default_rng() for reproducible
+            sampling (an existing Generator is returned unaltered) - set this explicitly for any
+            figure meant to be regenerated identically (e.g. for a paper).
+        axes: [Axes] An existing matplotlib Axes to draw the main panel into, instead of creating
+            a new figure. Only accepted when exactly one panel is being drawn (ellipse=False,
+            residuals=False) - raises ValueError otherwise, since a single Axes can't hold a
+            multi-panel layout. When given, plt.show() is NOT called (the caller owns the
+            enclosing figure); when None, plotAlphaBeta() creates its own figure and calls
+            plt.show() before returning, exactly like fitAlphaBetaLightCurve(..., plot=True).
+        fast: [bool] Passed through everywhere this function inverts velocity - see
+            alphaBetaVelocityNormed()'s docstring. The band_samples Monte Carlo loop (one velocity
+            curve per sample, band_samples=1000 by default) is the largest beneficiary here.
+
+    Return:
+        (fig, axes): [tuple] The Figure (axes.figure if `axes` was given, otherwise newly
+            created) and the Axes used, in (main, [ellipse], [residuals]) order - a bare Axes
+            (not wrapped in a tuple) if only one panel was drawn.
+
+    Statistical caveats:
+        - The parameter uncertainty band/fan/ellipse are only as good as errors['cov_log']
+          itself - see fitAlphaBeta()'s own Statistical caveats (local Gauss-Newton curvature,
+          the v_init bias if derived internally, etc.). This function visualizes that
+          approximation; it does not make it any more or less rigorous.
+        - Samples landing outside ALPHA_BETA_BOUNDS are excluded from the band/fan/ellipse-overlay
+          (a report is printed, never silently absorbed). If that excluded fraction exceeds 5%,
+          the band/fan/ellipse-overlay are suppressed entirely (an annotation explains why, in
+          place of the content) rather than drawn from what remains: past that point, the
+          surviving sample no longer represents the (ln alpha, ln beta) Gaussian approximation
+          itself, it represents that Gaussian CONDITIONED on being physically valid - a quietly
+          different quantity that would be misleading to show under the same "propagated
+          parameter uncertainty" label.
+        - The main panel's x-axis (velocity) is clipped to the observed v_data range (+10%
+          padding), same convention fitAlphaBetaLightCurve(..., plot=True) uses for its own
+          velocity panel. v(h) evaluated over the observed HEIGHT range is NOT thereby
+          constrained to the observed VELOCITY range - a fitted or (especially) sampled (alpha,
+          beta) can still swing toward v=0 within that same height span, in exactly the regime
+          where this model is steepest/least stable. Unclipped, that excursion would dominate the
+          view and read as "the fit/band is very uncertain" when it is really just the model
+          being asked to extrapolate into territory the data says nothing about. This only
+          affects the view (ax.set_xlim) - the underlying curve/band/fan data is untouched, so a
+          caller can always call ax.set_xlim()/set_ylim() again afterwards to see the full extent.
+        - The residuals panel's down-weighted-point marker and its +/-f_scale*sigma_v reference
+          lines use a hardcoded f_scale=2.0 (this module's own default elsewhere) - errors
+          doesn't carry the f_scale an existing fit actually used, so these lines may not exactly
+          match a fit's real soft-L1 transition point if it was fit with a non-default f_scale.
+    """
+
+    v_init, alpha, beta = fit
+
+    have_errors = errors is not None
+    have_cov = (have_errors and np.all(np.isfinite(errors['cov_log']))
+        and np.all(np.isfinite(errors['cov_fit'])))
+
+    if ci is None:
+        ci = errors['ci'] if have_errors else 95.0
+
+    if not (0 < ci < 100):
+        raise ValueError("ci must be strictly between 0 and 100, got {!r}.".format(ci))
+
+    # --- Decide which panels to draw, and enforce the axes/panel-count contract
+    panel_names = ['main']
+    if ellipse:
+        panel_names.append('ellipse')
+    if residuals:
+        panel_names.append('residuals')
+
+    n_panels = len(panel_names)
+
+    if axes is not None and n_panels > 1:
+        raise ValueError("axes is only accepted for a single-panel plotAlphaBeta() call (here "
+            "ellipse={!r}, residuals={!r} would need {:d} panels) - pass axes=None and let "
+            "plotAlphaBeta() build its own multi-panel figure instead.".format(
+            ellipse, residuals, n_panels))
+
+    import matplotlib.pyplot as plt
+
+    if axes is not None:
+        fig = axes.figure
+        ax_map = {'main': axes}
+    else:
+        figsize = (9, 6) if n_panels == 1 else (6.5*n_panels, 6)
+        fig, created_axes = plt.subplots(ncols=n_panels, figsize=figsize)
+        if n_panels == 1:
+            created_axes = [created_axes]
+        ax_map = dict(zip(panel_names, created_axes))
+
+    rng = np.random.default_rng(seed)
+    log_mean = np.log([alpha, beta])
+
+    # --- Draw (alpha, beta) samples from the (ln alpha, ln beta) Gaussian approximation once, if
+    #   anything below needs them. Sized at band_samples if band/fan need it (their forward-model
+    #   evaluation, the expensive part, is done separately below, only when actually needed) - or,
+    #   if only the ellipse panel's optional scatter wants samples, sized at the smaller
+    #   ellipse_scatter_points directly (that overlay is a visual illustration, not a
+    #   percentile computation, so it doesn't need band_samples' stability budget).
+    alpha_valid = beta_valid = None
+    band_fan_suppressed = False
+
+    need_velocity_samples = have_cov and (band or fan)
+    need_ellipse_scatter = have_cov and ellipse and ellipse_scatter
+
+    if need_velocity_samples or need_ellipse_scatter:
+
+        n_draw = band_samples if need_velocity_samples else ellipse_scatter_points
+
+        log_samples = rng.multivariate_normal(log_mean, errors['cov_log'], size=n_draw)
+        alpha_samples, beta_samples = np.exp(log_samples[:, 0]), np.exp(log_samples[:, 1])
+
+        (a_lo, a_hi), (b_lo, b_hi) = ALPHA_BETA_BOUNDS
+        is_valid = ((alpha_samples >= a_lo) & (alpha_samples <= a_hi) &
+            (beta_samples >= b_lo) & (beta_samples <= b_hi))
+        n_valid = int(np.sum(is_valid))
+
+        if n_valid < n_draw:
+
+            n_rejected = n_draw - n_valid
+            rejected_frac = n_rejected/n_draw
+
+            msg = "{:d}/{:d} sampled (alpha, beta) draws fell outside ALPHA_BETA_BOUNDS and " \
+                "were excluded".format(n_rejected, n_draw)
+
+            if rejected_frac > 0.05:
+                band_fan_suppressed = True
+                print("WARNING: {:s} ({:.1%}) - the local Gaussian approximation is likely "
+                    "unreliable this close to a bound. Suppressing the parameter uncertainty "
+                    "band/fan/ellipse-overlay rather than drawing them from what "
+                    "remains.".format(msg, rejected_frac))
+            else:
+                print("{:s}.".format(msg))
+
+        alpha_valid, beta_valid = alpha_samples[is_valid], beta_samples[is_valid]
+
+    # ================= Main panel: data + fit + parameter uncertainty =================
+
+    ax_main = ax_map['main']
+
+    ax_main.scatter(v_data/1000, ht_data/1000, s=10, color='0.5', alpha=0.6, zorder=3, \
+        label="Observed")
+
+    ht_grid = np.linspace(np.min(ht_data), np.max(ht_data), 150)
+    v_fit_grid = alphaBetaVelocity(ht_grid, alpha, beta, v_init, fast=fast)
+
+    ax_main.plot(v_fit_grid/1000, ht_grid/1000, color='k', linewidth=1.5, zorder=4, \
+        label=r"Fit: $\alpha$={:.3g}, $\beta$={:.3g}".format(alpha, beta))
+
+    if have_cov:
+        # A separate (invisible) legend entry rather than folding into the "Fit:" label above,
+        #   so the curve's own label stays short and this can be read independently
+        ax_main.plot([], [], linestyle='none', \
+            label=r"{:.3g}% CI: $\alpha$=[{:.3g}, {:.3g}], $\beta$=[{:.3g}, {:.3g}]".format(
+            ci, errors['alpha_ci_wald_lower'], errors['alpha_ci_wald_upper'],
+            errors['beta_ci_wald_lower'], errors['beta_ci_wald_upper']))
+
+    if band or fan:
+
+        if not have_cov:
+            ax_main.text(0.5, 0.03, "Parameter uncertainty band unavailable\n(no errors given, "
+                "or the fit landed on a bound)", transform=ax_main.transAxes, ha='center', \
+                va='bottom', fontsize=8, color='0.4')
+
+        elif band_fan_suppressed:
+            ax_main.text(0.5, 0.03, "Parameter uncertainty band suppressed\n(too many samples "
+                "landed outside ALPHA_BETA_BOUNDS - see console warning)", \
+                transform=ax_main.transAxes, ha='center', va='bottom', fontsize=8, color='0.4')
+
+        else:
+            v_samples = np.array([alphaBetaVelocity(ht_grid, a, b, v_init, fast=fast)
+                for a, b in zip(alpha_valid, beta_valid)])
+
+            if band:
+                lo_pct, hi_pct = 50.0 - ci/2.0, 50.0 + ci/2.0
+                v_lo, v_hi = np.percentile(v_samples, [lo_pct, hi_pct], axis=0)
+
+                ax_main.fill_betweenx(ht_grid/1000, v_lo/1000, v_hi/1000, color='tab:blue', \
+                    alpha=0.25, zorder=2, \
+                    label="{:.3g}% propagated parameter uncertainty".format(ci))
+
+            if fan:
+                n_fan = min(fan_curves, len(alpha_valid))
+                fan_idx = rng.choice(len(alpha_valid), size=n_fan, replace=False)
+
+                for i in fan_idx:
+                    ax_main.plot(v_samples[i]/1000, ht_grid/1000, color='tab:blue', alpha=0.05, \
+                        linewidth=0.8, zorder=1)
+
+                # One proxy artist for the legend - n_fan individually-labeled lines would flood it
+                ax_main.plot([], [], color='tab:blue', alpha=0.4, linewidth=0.8, \
+                    label="{:d} propagated-uncertainty realizations".format(n_fan))
+
+    # Clip the view to the observed data range (with padding), same convention
+    #   fitAlphaBetaLightCurve(..., plot=True) uses for its own velocity panel: v(h) evaluated
+    #   over the observed HEIGHT range is not thereby constrained to the observed VELOCITY range
+    #   - a fitted or sampled (alpha, beta) can still swing toward v=0 within that same height
+    #   span, precisely in the regime where the model is steepest/least stable. Left unclipped,
+    #   that excursion dominates the view and reads as "the fit/band is very uncertain" when it
+    #   is really just the model being asked to extrapolate into territory the data says nothing
+    #   about.
+    v_pad = 0.1*(np.max(v_data) - np.min(v_data))
+    ax_main.set_xlim((np.min(v_data) - v_pad)/1000, (np.max(v_data) + v_pad)/1000)
+
+    ax_main.set_xlabel("Velocity (km/s)")
+    ax_main.set_ylabel("Height (km)")
+    ax_main.legend(fontsize=8, loc='best')
+
+    # ================= Ellipse panel: (ln alpha, ln beta) =================
+
+    if ellipse:
+
+        ax_ell = ax_map['ellipse']
+
+        if not have_cov:
+            ax_ell.text(0.5, 0.5, "Error estimate unavailable\n(no errors given, or the fit "
+                "landed on a bound)", transform=ax_ell.transAxes, ha='center', va='center', \
+                fontsize=9, color='0.4')
+            ax_ell.set_xticks([])
+            ax_ell.set_yticks([])
+
+        else:
+            for cov_key, color, label_prefix in [
+                    ('cov_fit', 'tab:orange', 'Fit only'),
+                    ('cov_log', 'tab:blue', r'Fit + $v_0$')]:
+
+                cov = errors[cov_key]
+
+                for p, linestyle, level_label in [
+                        (0.6827, '-', r"1$\sigma$"), (ci/100.0, '--', "{:.3g}%".format(ci))]:
+
+                    x, y = _gaussianEllipsePoints(log_mean, cov, p)
+
+                    ax_ell.plot(x, y, color=color, linestyle=linestyle, linewidth=1.5, \
+                        label="{:s}, {:s}".format(label_prefix, level_label))
+
+            if ellipse_scatter and not band_fan_suppressed and alpha_valid is not None:
+                n_ell = min(ellipse_scatter_points, len(alpha_valid))
+                ell_idx = rng.choice(len(alpha_valid), size=n_ell, replace=False)
+
+                ax_ell.scatter(np.log(alpha_valid[ell_idx]), np.log(beta_valid[ell_idx]), \
+                    s=10, color='0.6', alpha=0.15, zorder=0)
+
+            ax_ell.scatter([log_mean[0]], [log_mean[1]], color='k', marker='x', zorder=5, \
+                label=r"Fitted (ln $\alpha$, ln $\beta$)")
+
+            ax_ell.set_xlabel(r"ln $\alpha$")
+            ax_ell.set_ylabel(r"ln $\beta$")
+            ax_ell.legend(fontsize=7, loc='best')
+
+    # ================= Residuals panel (opt-in) =================
+
+    if residuals:
+
+        ax_res = ax_map['residuals']
+
+        v_model_data = alphaBetaVelocity(ht_data, alpha, beta, v_init, fast=fast)
+        resid = v_data - v_model_data
+
+        if not have_errors:
+            ax_res.scatter(resid, ht_data/1000, s=12, color='0.3', label="Residual")
+            ax_res.axvline(0, color='k', linewidth=0.8)
+            ax_res.text(0.5, 0.03, "sigma_v reference lines unavailable\n(no errors given)", \
+                transform=ax_res.transAxes, ha='center', va='bottom', fontsize=8, color='0.4')
+
+        else:
+            sigma_v = errors['sigma_v']
+
+            # This module's own default f_scale elsewhere (fitAlphaBeta(),
+            #   minimizeAlphaBetaRobust()) - errors doesn't carry the f_scale an existing fit
+            #   actually used, so these reference lines may not exactly match a fit's real
+            #   soft-L1 transition point if it was fit with a non-default f_scale
+            f_scale_ref = 2.0
+            is_downweighted = np.abs(resid/sigma_v) > f_scale_ref
+
+            ax_res.scatter(resid[~is_downweighted], ht_data[~is_downweighted]/1000, s=12, \
+                color='0.3', label="Residual")
+            ax_res.scatter(resid[is_downweighted], ht_data[is_downweighted]/1000, s=24, \
+                color='crimson', marker='x', label="Down-weighted (soft-L1)")
+
+            for k, style in [(1.0, ':'), (f_scale_ref, '--')]:
+                ax_res.axvline(k*sigma_v, color='0.4', linestyle=style, linewidth=1)
+                ax_res.axvline(-k*sigma_v, color='0.4', linestyle=style, linewidth=1)
+
+            ax_res.axvline(0, color='k', linewidth=0.8)
+
+        ax_res.set_xlabel(r"$v_{obs} - v_{model}$ (m/s)")
+        ax_res.set_ylabel("Height (km)")
+        ax_res.legend(fontsize=8, loc='best')
+
+    fig.tight_layout()
+
+    if axes is None:
+        plt.show()
+
+    result_axes = tuple(ax_map[name] for name in panel_names)
+    if len(result_axes) == 1:
+        result_axes = result_axes[0]
+
+    return fig, result_axes
+
+
+def plotProfileAlphaBeta(v_data, ht_data, fit, profile, delta_cost=True, degeneracy=True,
+        trajectories=True, n_traj_curves=8, axes=None, fast=False):
+    """ Plot a profileAlphaBeta() result: up to three panels per profiled parameter, built
+        entirely from `profile` (plus the original data/fit for the trajectories panel) - no
+        re-optimization.
+
+        Panel 1 (`delta_cost`): the standard profile-likelihood plot - 'delta_cost' vs the
+        parameter (log-x), 'delta_threshold' as a horizontal line, 'value_hat'/'ci_lower'/
+        'ci_upper' as vertical lines. This alone already contains the full statistical content
+        of the profile.
+
+        Panel 2 (`degeneracy`): the (parameter, other_profile) curve - the other parameter's
+        best re-optimized value as this one is swept. Shows the alpha/beta degeneracy directly:
+        how much one has to move to compensate for the other and still fit the data comparably
+        well.
+
+        Panel 3 (`trajectories`): reconstructed (velocity, height) trajectories at 'ci_lower',
+        'ci_upper', and `n_traj_curves` points in between (log-spaced in the profiled
+        parameter), each paired with its own re-optimized 'other_profile' value via the same
+        loss/f_scale the original fit used. If exactly one side of the profile CI is open (a
+        weakly-constrained parameter's cost never crosses the threshold before hitting
+        ALPHA_BETA_BOUNDS on that side - itself informative, see profileAlphaBeta()'s Return
+        section), the sweep runs from 'value_hat' out to whichever side IS closed instead of
+        showing nothing, with a note identifying the open side. Degrades to an annotation
+        (rather than raising) only when BOTH sides are open, since there is then no finite
+        interval left to reconstruct across. See the Statistical caveats below - and
+        profileAlphaBeta()'s own - for exactly what this trajectory family does and does not
+        represent: it is NOT the joint (alpha, beta) confidence region for the trajectory.
+
+    Arguments:
+        v_data: [ndarray] Velocity data (m/s), as given to fitAlphaBeta()/profileAlphaBeta().
+        ht_data: [ndarray] Height data (m), as given to fitAlphaBeta()/profileAlphaBeta().
+        fit: [tuple] (v_init, alpha, beta), exactly as returned by fitAlphaBeta() - should be the
+            same fit `profile` was computed from (alpha/beta here are only used for the "Joint
+            fit" curve/marker; they are not re-derived from `profile`).
+        profile: [dict] profileAlphaBeta()'s return value for 'alpha' and/or 'beta' - must be
+            from a profileAlphaBeta() new enough to include 'other_hat'/'other_profile'/'ci' in
+            each per-parameter dict.
+
+    Keyword arguments:
+        delta_cost: [bool] Draw the delta_cost-vs-parameter panel.
+        degeneracy: [bool] Draw the (parameter, other_profile) panel.
+        trajectories: [bool] Draw the reconstructed-trajectories panel.
+        n_traj_curves: [int] Number of intermediate trajectories drawn between 'ci_lower' and
+            'ci_upper' (log-spaced in the profiled parameter), in addition to the two boundary
+            curves and the joint-fit curve.
+        axes: [Axes] An existing matplotlib Axes to draw into, instead of creating a new figure -
+            only accepted when exactly one panel (one profiled parameter, one panel type) is
+            being drawn, same contract as plotAlphaBeta()'s `axes`.
+        fast: [bool] Passed through everywhere this function inverts velocity (the trajectories
+            panel) - see alphaBetaVelocityNormed()'s docstring.
+
+    Return:
+        (fig, axes): [tuple] The Figure (axes.figure if `axes` was given, otherwise newly
+            created) and either a bare Axes (if exactly one panel was drawn) or a nested dict
+            {param_name: {panel_type: Axes}} covering every panel actually drawn.
+
+    Statistical caveats:
+        - See profileAlphaBeta()'s own Statistical caveats for the precise sense in which the
+          trajectories panel's family is, and is not, a confidence region: it is the profile
+          ridge (grid, other_profile) clipped to [ci_lower, ci_upper], which stays inside but
+          does not trace the boundary of the joint (alpha, beta) region at the same `ci`.
+        - The boundary curves at 'ci_lower'/'ci_upper' use 'other_profile' interpolated
+          (log-log, matching how ci_lower/ci_upper themselves were located) rather than a fresh
+          optimizer call exactly at those points - consistent with how those bounds were found,
+          and at the same resolution (profileAlphaBeta()'s n_grid), not exact to machine
+          precision.
+    """
+
+    import matplotlib.pyplot as plt
+
+    param_names = [name for name in ('alpha', 'beta') if name in profile]
+    if not param_names:
+        raise ValueError("profile must contain 'alpha' and/or 'beta'.")
+
+    panel_types = []
+    if delta_cost:
+        panel_types.append('delta_cost')
+    if degeneracy:
+        panel_types.append('degeneracy')
+    if trajectories:
+        panel_types.append('trajectories')
+
+    if not panel_types:
+        raise ValueError("At least one of delta_cost, degeneracy, trajectories must be True.")
+
+    n_rows, n_cols = len(param_names), len(panel_types)
+    n_panels = n_rows*n_cols
+
+    if axes is not None and n_panels > 1:
+        raise ValueError("axes is only accepted for a single-panel plotProfileAlphaBeta() call "
+            "(here {:d} profiled parameter(s) x {:d} panel type(s) = {:d} panels) - pass "
+            "axes=None and let plotProfileAlphaBeta() build its own multi-panel figure "
+            "instead.".format(n_rows, n_cols, n_panels))
+
+    if axes is not None:
+        fig = axes.figure
+        ax_map = {param_names[0]: {panel_types[0]: axes}}
+    else:
+        fig, created_axes = plt.subplots(nrows=n_rows, ncols=n_cols, squeeze=False,
+            figsize=(5.5*n_cols, 4.5*n_rows))
+        ax_map = {name: {} for name in param_names}
+        for row, name in enumerate(param_names):
+            for col, panel in enumerate(panel_types):
+                ax_map[name][panel] = created_axes[row][col]
+
+    v_init, alpha, beta = fit
+    ht_grid = np.linspace(np.min(ht_data), np.max(ht_data), 150)
+    v_pad = 0.1*(np.max(v_data) - np.min(v_data))
+
+    other_param_name = {'alpha': 'beta', 'beta': 'alpha'}
+    symbol = {'alpha': r'$\alpha$', 'beta': r'$\beta$'}
+
+    for name in param_names:
+
+        p = profile[name]
+        other_name = other_param_name[name]
+
+        # ================= Panel 1: delta_cost vs parameter =================
+
+        if delta_cost:
+
+            ax = ax_map[name]['delta_cost']
+
+            ax.plot(p['grid'], p['delta_cost'], color='tab:blue', linewidth=1.5)
+            ax.axhline(p['delta_threshold'], color='0.4', linestyle='--', linewidth=1, \
+                label="{:.3g}% threshold (chi2, df=1)".format(p['ci']))
+            ax.axvline(p['value_hat'], color='k', linewidth=1, \
+                label="{:s} = {:.3g}".format(symbol[name], p['value_hat']))
+
+            for bound, lbl in [(p['ci_lower'], 'CI lower'), (p['ci_upper'], 'CI upper')]:
+                if bound is not None:
+                    ax.axvline(bound, color='tab:orange', linestyle=':', linewidth=1.2, \
+                        label="{:s} = {:.3g}".format(lbl, bound))
+
+            ax.set_xscale('log')
+            ax.set_xlabel(symbol[name])
+            ax.set_ylabel(r"$\Delta$cost = 2(cost $-$ cost$_{best}$)/s$^2$")
+            ax.set_title("{:s} profile".format(name))
+            ax.legend(fontsize=7, loc='best')
+
+        # ================= Panel 2: degeneracy curve =================
+
+        if degeneracy:
+
+            ax = ax_map[name]['degeneracy']
+
+            ax.plot(p['grid'], p['other_profile'], color='tab:blue', linewidth=1.2, \
+                label="Profile ridge")
+            ax.scatter([p['value_hat']], [p['other_hat']], color='k', marker='x', zorder=5, \
+                label="Joint fit")
+
+            if p['ci_lower'] is not None or p['ci_upper'] is not None:
+
+                for bound in (p['ci_lower'], p['ci_upper']):
+                    if bound is not None:
+                        other_at_bound = np.exp(np.interp(np.log(bound), np.log(p['grid']), \
+                            np.log(p['other_profile'])))
+                        ax.scatter([bound], [other_at_bound], color='tab:orange', marker='o', \
+                            s=25, zorder=4)
+
+                ax.scatter([], [], color='tab:orange', marker='o', s=25, label="CI edges")
+
+            ax.set_xscale('log')
+            ax.set_yscale('log')
+            ax.set_xlabel(symbol[name])
+            ax.set_ylabel(symbol[other_name])
+            ax.set_title("{:s}-{:s} degeneracy".format(name, other_name))
+            ax.legend(fontsize=7, loc='best')
+
+        # ================= Panel 3: reconstructed trajectories =================
+
+        if trajectories:
+
+            ax = ax_map[name]['trajectories']
+
+            ax.scatter(v_data/1000, ht_data/1000, s=10, color='0.5', alpha=0.6, zorder=3, \
+                label="Observed")
+
+            v_fit_grid = alphaBetaVelocity(ht_grid, alpha, beta, v_init, fast=fast)
+            ax.plot(v_fit_grid/1000, ht_grid/1000, color='k', linewidth=1.5, zorder=4, \
+                label="Joint fit")
+
+            # (alpha, beta) pair for a given value of THIS parameter, with the other one
+            #   interpolated (log-log) from the already-computed profile ridge
+            def _pairAt(target_value, name=name, p=p):
+                other_value = np.exp(np.interp(np.log(target_value), np.log(p['grid']), \
+                    np.log(p['other_profile'])))
+                return (target_value, other_value) if name == 'alpha' \
+                    else (other_value, target_value)
+
+            bounds_available = [b for b in (p['ci_lower'], p['ci_upper']) if b is not None]
+
+            if not bounds_available:
+                ax.text(0.5, 0.03, "Trajectory family unavailable\n(profile CI open on both "
+                    "sides - see the delta_cost panel)", transform=ax.transAxes, \
+                    ha='center', va='bottom', fontsize=8, color='0.4')
+
+            else:
+
+                # An open side has no finite edge to sweep to, so the interior sweep and the
+                #   boundary curve are only drawn for whichever side(s) are actually closed -
+                #   the open side's own reconstruction would require extrapolating past where
+                #   the data constrains anything at all. Sweeping FROM value_hat (rather than
+                #   omitting that side's contribution entirely) still shows the full family
+                #   compatible with the closed side, instead of discarding it just because the
+                #   other side happens to be open.
+                sweep_lo = p['ci_lower'] if p['ci_lower'] is not None else p['value_hat']
+                sweep_hi = p['ci_upper'] if p['ci_upper'] is not None else p['value_hat']
+
+                interior = np.geomspace(sweep_lo, sweep_hi, n_traj_curves + 2)[1:-1]
+
+                for target_value in interior:
+                    a, b = _pairAt(target_value)
+                    v_curve = alphaBetaVelocity(ht_grid, a, b, v_init, fast=fast)
+                    ax.plot(v_curve/1000, ht_grid/1000, color='tab:blue', alpha=0.2, \
+                        linewidth=0.8, zorder=1)
+
+                if len(interior):
+                    ax.plot([], [], color='tab:blue', alpha=0.6, linewidth=0.8, \
+                        label="{:d} profile CI trajectories".format(len(interior)))
+
+                for bound, lbl in [(p['ci_lower'], "CI lower"), (p['ci_upper'], "CI upper")]:
+                    if bound is None:
+                        continue
+                    a, b = _pairAt(bound)
+                    v_curve = alphaBetaVelocity(ht_grid, a, b, v_init, fast=fast)
+                    ax.plot(v_curve/1000, ht_grid/1000, color='tab:blue', linewidth=1.3, \
+                        zorder=2, label="{:s} ({:s}={:.3g})".format(lbl, symbol[name], bound))
+
+                if len(bounds_available) == 1:
+                    open_side = "Lower" if p['ci_lower'] is None else "Upper"
+                    ax.text(0.5, 0.03, "{:s} side open (unconstrained within "
+                        "ALPHA_BETA_BOUNDS) - only the closed side's family is "
+                        "shown".format(open_side), transform=ax.transAxes, ha='center', \
+                        va='bottom', fontsize=7, color='0.4')
+
+            ax.set_xlim((np.min(v_data) - v_pad)/1000, (np.max(v_data) + v_pad)/1000)
+            ax.set_xlabel("Velocity (km/s)")
+            ax.set_ylabel("Height (km)")
+            ax.set_title("{:s} profile CI trajectories".format(name))
+            ax.legend(fontsize=7, loc='best')
+
+    fig.tight_layout()
+
+    if axes is None:
+        plt.show()
+
+    if n_panels == 1:
+        return fig, ax_map[param_names[0]][panel_types[0]]
+
+    return fig, ax_map
 
 
 def alphaBetaMasses(
@@ -867,8 +2567,13 @@ def fitAlphaBetaMass(
         density=None,
         v_init=None,
         v_final=None,
+        method='robust',
+        sigma_v=None,
+        loss='soft_l1',
+        f_scale=2.0,
         verbose=True,
-        plot=False):
+        plot=False,
+        fast=False):
     """ Fit alpha-beta model parameters under initial, final, or both mass constraints,
     following Peña-Asensio & Gritsevich (2025, 2026). Unlike the simultaneous
     optimization proposed in those papers, this implementation solves a reduced
@@ -910,6 +2615,37 @@ def fitAlphaBetaMass(
             discarded: the actual v_final is always re-derived from the fitted alpha/beta.
             If None, derived as the asymptotic minimum of a preliminary alpha-beta velocity
             model (or, under mass_constraint="initial", of the final fitted model).
+        method: [str] 'robust' (default) or 'q4' - fitting approach used both for the preliminary
+            unconstrained alpha-beta fit (see Notes below) and for the (density, beta[, mu])
+            optimization under the selected mass_constraint. NOTE: 'robust' is the default, which
+            is a change from this function's original behavior - before the fitting `method`
+            argument existed, this function always used the 'q4' path. Existing callers that do
+            not pass `method` will therefore get (generally slightly) different fitted
+            density/alpha/beta/mass values than before. Pass method='q4' to reproduce the
+            pre-change results exactly.
+              - 'q4': the classic Gritsevich (2007) Q4 fit throughout (minimizeAlphaBeta() for the
+                preliminary fit; scipy.optimize.minimize(method='Nelder-Mead') on
+                _alphaBetaResidual()'s transformed, height-weighted residual for the constrained
+                optimization) - unchanged from this function's original behavior.
+              - 'robust': fitAlphaBeta(method='robust') for the preliminary fit, and
+                scipy.optimize.least_squares(loss=loss, f_scale=f_scale) directly on the
+                sigma-normalized velocity residuals (_dynResiduals(), the same residual
+                minimizeAlphaBetaRobust() uses) for the constrained optimization. This also fixes
+                a real pathology of the 'q4' path under mass_constraint="final": _alphaBetaResidual()
+                trivially -> 0 as alpha -> 0 (a spurious minimum reached as beta grows and the
+                reconstructed initial mass diverges - see the comment above where beta0 is seeded),
+                which the velocity residual does not share, since alpha -> 0 flattens the model
+                velocity curve instead of vanishing the residual.
+        sigma_v: [float] Velocity uncertainty (m/s), only used for method='robust' (weights the
+            residuals of every least_squares call this function makes, the preliminary fit
+            included). If None, estimated once from the MAD of a Q4 fit's residuals (floored at
+            1 m/s, see _estimateSigmaV()) and reused everywhere in this function, rather than
+            letting each stage derive its own - the same "avoid circularity" reasoning
+            fitAlphaBetaLightCurve() documents for its own sigma_v.
+        loss: [str] Only used for method='robust'. scipy.optimize.least_squares loss, forwarded to
+            every least_squares call this function makes.
+        f_scale: [float] Only used for method='robust'. Robust loss scale (units of sigma_v),
+            forwarded to every least_squares call this function makes.
         verbose: [bool] If True, print the parameters used in the computation and the resulting
             fitted parameters, clearly separating which of density/v_init/v_final were given
             as input from those that were derived/fitted internally.
@@ -919,6 +2655,9 @@ def fitAlphaBetaMass(
             for the best-fit μ. Input parameters (as given
             by the caller) are shown in the title, fitted parameters (per μ branch) in the
             legend. Blocks execution until the plot window is closed.
+        fast: [bool] Passed through everywhere this function inverts velocity (the preliminary
+            fitAlphaBeta() call, the method='robust' (density, beta[, mu]) optimization, and the
+            v_final derivation/recovery checks) - see alphaBetaVelocityNormed()'s docstring.
 
     Notes:
         If mass_constraint="initial", any v_final passed in is NOT used as a fit input: it is
@@ -1087,6 +2826,32 @@ def fitAlphaBetaMass(
     if (v_final is not None) and (v_final >= v_init):
         raise ValueError("v_final must be smaller than v_init.")
 
+    method = method.lower()
+    if method not in ('q4', 'robust'):
+        raise ValueError("method must be 'q4' or 'robust', got '{:s}'.".format(method))
+
+    # Normalize velocity
+    v_normed = v_data/v_init
+
+    # Normalize height
+    ht_normed = ht_data/HT_NORM_CONST
+
+    # For method='robust', estimate sigma_v (if not given) once, from a Q4 fit, and reuse it
+    #   everywhere below (the preliminary fit and every constrained optimization) - avoids each
+    #   stage deriving its own sigma_v from a fit that is itself being weighted by it (same
+    #   reasoning as fitAlphaBetaLightCurve()'s sigma_v). Not needed at all for method='q4', which
+    #   never weights residuals by sigma_v.
+    sigma_v_given = sigma_v is not None
+    sigma_v_normed = None
+    if method == 'robust':
+
+        alpha0_q4, beta0_q4 = minimizeAlphaBeta(v_normed, ht_normed)
+
+        if not sigma_v_given:
+            sigma_v = _estimateSigmaV(alpha0_q4, beta0_q4, v_normed, ht_normed, v_init)
+
+        sigma_v_normed = sigma_v/v_init
+
     # Run a preliminary unconstrained alpha-beta fit when the final velocity has to be derived from
     #   the data, and always under the final-mass constraint, where the fitted beta is needed to
     #   seed the constrained optimization (see below). It is skipped under mass_constraint="initial"
@@ -1096,20 +2861,15 @@ def fitAlphaBetaMass(
     if (mass_constraint == "final") or ((v_final is None) and (mass_constraint == "both")):
 
         # Fit the unconstrained alpha-beta model
-        _, alpha_prelim, beta_prelim = fitAlphaBeta(v_data, ht_data, v_init=v_init)
+        _, alpha_prelim, beta_prelim = fitAlphaBeta(v_data, ht_data, v_init=v_init, method=method, \
+            sigma_v=sigma_v, loss=loss, f_scale=f_scale, fast=fast)
 
         # Evaluate the model velocity at the observed heights and take the minimum as the final
         #   velocity, if it wasn't given already
         if v_final is None:
-            vel_model = alphaBetaVelocity(ht_data, alpha_prelim, beta_prelim, v_init)
+            vel_model = alphaBetaVelocity(ht_data, alpha_prelim, beta_prelim, v_init, fast=fast)
             v_final = np.min(vel_model)
 
-
-    # Normalize velocity
-    v_normed = v_data/v_init
-
-    # Normalize height
-    ht_normed = ht_data/HT_NORM_CONST
 
     def _alphaFromDensityAndMass(mass_init, dens):
         """ Analytically compute alpha from the bulk density and the initial mass, by inverting the
@@ -1142,6 +2902,42 @@ def fitAlphaBetaMass(
 
         return density, x
 
+    def _massFitResidual(alpha, beta, v_normed, ht_normed):
+        """ Fit residual shared by every (density, beta[, mu]) objective below - only depends on
+            the (alpha, beta) each objective derives from its own free parameters.
+
+            method='q4': _alphaBetaResidual()'s scalar, Q4-transformed residual (for
+            scipy.optimize.minimize(method='Nelder-Mead')) - unchanged original behavior.
+
+            method='robust': _dynResiduals()'s sigma-normalized velocity residual VECTOR (the same
+            residual minimizeAlphaBetaRobust() uses), for scipy.optimize.least_squares(loss=loss,
+            f_scale=f_scale) - see _runMassFit(). Unlike the Q4 residual, this does not vanish as
+            alpha -> 0, so it doesn't share the spurious-minimum pathology _alphaBetaResidual() has
+            under mass_constraint="final" (see the beta0 seeding comment below).
+        """
+
+        if method == 'q4':
+            return _alphaBetaResidual(alpha, beta, v_normed, ht_normed)
+
+        return _dynResiduals(np.log([alpha, beta]), v_normed, ht_normed, sigma_v_normed, fast=fast)
+
+    def _runMassFit(objective, x0, xmin_free, xmax_free, args):
+        """ Runs one (density, beta[, mu]) optimization, dispatching on `method` to match the form
+            `objective` returns (see _massFitResidual()): Nelder-Mead over the scalar Q4 cost for
+            method='q4' (bounds as a tuple of (lo, hi) pairs), or least_squares over the robust
+            residual vector for method='robust' (bounds as a (lo_array, hi_array) pair) - the two
+            optimizers' bounds conventions differ, so this is the one place that needs to know
+            which is active, instead of every call site duplicating the branch.
+        """
+
+        if method == 'q4':
+            bnds = tuple(zip(xmin_free, xmax_free))
+            return scipy.optimize.minimize(objective, x0, args=args, bounds=bnds, \
+                method='Nelder-Mead')
+
+        return scipy.optimize.least_squares(objective, x0, args=args, \
+            bounds=(xmin_free, xmax_free), loss=loss, f_scale=f_scale, x_scale='jac')
+
     def _densityBetaMinimizationInitialMass(x, v_normed, ht_normed):
         """ Fit objective for mass_constraint="initial": alpha follows analytically from the fixed
             initial mass and the density, so only (density, beta) are free.
@@ -1152,7 +2948,7 @@ def fitAlphaBetaMass(
 
         alpha = _alphaFromDensityAndMass(mass_initial, dens)
 
-        return _alphaBetaResidual(alpha, beta, v_normed, ht_normed)
+        return _massFitResidual(alpha, beta, v_normed, ht_normed)
 
     def _reconstructInitialMassAndAlpha(dens, beta, mu):
         """ Reconstruct the initial mass from the fixed final mass by inverting the general
@@ -1175,7 +2971,7 @@ def fitAlphaBetaMass(
 
         _, alpha = _reconstructInitialMassAndAlpha(dens, beta, mu)
 
-        return _alphaBetaResidual(alpha, beta, v_normed, ht_normed)
+        return _massFitResidual(alpha, beta, v_normed, ht_normed)
 
     def _densityBetaMuMinimizationFinalMass(x, v_normed, ht_normed):
         """ Same as _densityBetaMinimizationFinalMass, but with mu as a free parameter instead of
@@ -1187,7 +2983,7 @@ def fitAlphaBetaMass(
 
         _, alpha = _reconstructInitialMassAndAlpha(dens, beta, mu)
 
-        return _alphaBetaResidual(alpha, beta, v_normed, ht_normed)
+        return _massFitResidual(alpha, beta, v_normed, ht_normed)
 
     def _solveBothMasses(dens, mu):
         """ Analytic beta from the mass ratio and mu, and alpha from density and the fixed initial
@@ -1212,7 +3008,7 @@ def fitAlphaBetaMass(
 
         alpha, beta = _solveBothMasses(dens, mu)
 
-        return _alphaBetaResidual(alpha, beta, v_normed, ht_normed)
+        return _massFitResidual(alpha, beta, v_normed, ht_normed)
 
     def _densityMuMinimizationBothMasses(x, v_normed, ht_normed):
         """ Same as _densityMinimizationBothMasses, but with mu as a free parameter instead of
@@ -1225,7 +3021,7 @@ def fitAlphaBetaMass(
 
         alpha, beta = _solveBothMasses(dens, mu)
 
-        return _alphaBetaResidual(alpha, beta, v_normed, ht_normed)
+        return _massFitResidual(alpha, beta, v_normed, ht_normed)
 
 
     # Initial guess
@@ -1236,10 +3032,12 @@ def fitAlphaBetaMass(
     xmin = [100, 0.001]
     xmax = [9000, 50]
 
-    # Seed beta with the preliminary unconstrained fit when available. This is essential under the
-    #   final-mass constraint: its reduced objective has a spurious minimum at large beta, where the
-    #   reconstructed initial mass diverges, alpha goes to 0, and the residual vanishes for any
-    #   data, so the optimizer needs to start near the physical solution
+    # Seed beta with the preliminary unconstrained fit when available. This is especially important
+    #   under the final-mass constraint: for method='q4', the reduced objective has a spurious
+    #   minimum at large beta, where the reconstructed initial mass diverges, alpha goes to 0, and
+    #   _alphaBetaResidual() vanishes for any data, so the optimizer needs to start near the
+    #   physical solution (method='robust' doesn't share this failure mode - see
+    #   _massFitResidual() - but still benefits from starting close to the answer)
     if beta_prelim is not None:
         beta0 = float(np.clip(beta_prelim, xmin[1], xmax[1]))
 
@@ -1248,16 +3046,16 @@ def fitAlphaBetaMass(
     #   which all share this same 2-parameter (or 1-parameter) shape
     if fit_density:
         x0 = [dens0, beta0]
-        bnds = ((xmin[0], xmax[0]), (xmin[1], xmax[1]))
+        xmin_free, xmax_free = [xmin[0], xmin[1]], [xmax[0], xmax[1]]
     else:
         x0 = [beta0]
-        bnds = ((xmin[1], xmax[1]),)
+        xmin_free, xmax_free = [xmin[1]], [xmax[1]]
 
     if mass_constraint == "initial":
 
         # Fit (density, beta), with alpha following analytically from the fixed initial mass
-        res = scipy.optimize.minimize(_densityBetaMinimizationInitialMass, x0, \
-            args=(v_normed, ht_normed), bounds=bnds, method='Nelder-Mead')
+        res = _runMassFit(_densityBetaMinimizationInitialMass, x0, xmin_free, xmax_free, \
+            (v_normed, ht_normed))
 
         if not res.success:
             print(f"WARNING: Optimizer failed: {res.message}")
@@ -1278,7 +3076,7 @@ def fitAlphaBetaMass(
 
         # Derive the final velocity from the fitted model (v_final is not a fit input under this
         #   constraint)
-        vel_model = alphaBetaVelocity(ht_data, alpha, beta, v_init)
+        vel_model = alphaBetaVelocity(ht_data, alpha, beta, v_init, fast=fast)
         v_final = np.min(vel_model)
 
         m_initial_mu0, m_final_mu0 = _massesAt(alpha, beta, 0, density_fit)
@@ -1299,8 +3097,8 @@ def fitAlphaBetaMass(
 
         # Fit (density, beta) for mu = 0, with the initial mass reconstructed from the fixed
         #   final mass
-        res_mu0 = scipy.optimize.minimize(_densityBetaMinimizationFinalMass, x0, \
-            args=(v_normed, ht_normed, 0), bounds=bnds, method='Nelder-Mead')
+        res_mu0 = _runMassFit(_densityBetaMinimizationFinalMass, x0, xmin_free, xmax_free, \
+            (v_normed, ht_normed, 0))
 
         if not res_mu0.success:
             print(f"WARNING: Optimizer failed for mu=0: {res_mu0.message}")
@@ -1315,8 +3113,8 @@ def fitAlphaBetaMass(
         m_initial_mu0, m_final_mu0 = _massesAt(alpha_mu0, beta_mu0, 0, density_mu0)
 
         # Fit (density, beta) for mu = 2/3
-        res_mu23 = scipy.optimize.minimize(_densityBetaMinimizationFinalMass, x0, \
-            args=(v_normed, ht_normed, 2/3), bounds=bnds, method='Nelder-Mead')
+        res_mu23 = _runMassFit(_densityBetaMinimizationFinalMass, x0, xmin_free, xmax_free, \
+            (v_normed, ht_normed, 2/3))
 
         if not res_mu23.success:
             print(f"WARNING: Optimizer failed for mu=2/3: {res_mu23.message}")
@@ -1332,13 +3130,13 @@ def fitAlphaBetaMass(
         #   since mu affects the residual here (see docstring notes)
         if fit_density:
             x0_mu_best = [dens0, beta0, 1/3]
-            bnds_mu_best = ((xmin[0], xmax[0]), (xmin[1], xmax[1]), (0.0, 2/3))
+            xmin_mu_best, xmax_mu_best = [xmin[0], xmin[1], 0.0], [xmax[0], xmax[1], 2/3]
         else:
             x0_mu_best = [beta0, 1/3]
-            bnds_mu_best = ((xmin[1], xmax[1]), (0.0, 2/3))
+            xmin_mu_best, xmax_mu_best = [xmin[1], 0.0], [xmax[1], 2/3]
 
-        res_mu_best = scipy.optimize.minimize(_densityBetaMuMinimizationFinalMass, x0_mu_best, \
-            args=(v_normed, ht_normed), bounds=bnds_mu_best, method='Nelder-Mead')
+        res_mu_best = _runMassFit(_densityBetaMuMinimizationFinalMass, x0_mu_best, xmin_mu_best, \
+            xmax_mu_best, (v_normed, ht_normed))
 
         if not res_mu_best.success:
             print(f"WARNING: Optimizer failed for best-fit mu: {res_mu_best.message}")
@@ -1356,8 +3154,8 @@ def fitAlphaBetaMass(
 
         # Fit the density for mu = 0 (alpha and beta both follow analytically from the two masses)
         if fit_density:
-            res_mu0 = scipy.optimize.minimize(_densityMinimizationBothMasses, [dens0], \
-                args=(v_normed, ht_normed, 0), bounds=[(xmin[0], xmax[0])], method='Nelder-Mead')
+            res_mu0 = _runMassFit(_densityMinimizationBothMasses, [dens0], [xmin[0]], [xmax[0]], \
+                (v_normed, ht_normed, 0))
 
             if not res_mu0.success:
                 print(f"WARNING: Optimizer failed for mu=0: {res_mu0.message}")
@@ -1375,8 +3173,8 @@ def fitAlphaBetaMass(
 
         # Fit the density for mu = 2/3
         if fit_density:
-            res_mu23 = scipy.optimize.minimize(_densityMinimizationBothMasses, [dens0], \
-                args=(v_normed, ht_normed, 2/3), bounds=[(xmin[0], xmax[0])], method='Nelder-Mead')
+            res_mu23 = _runMassFit(_densityMinimizationBothMasses, [dens0], [xmin[0]], [xmax[0]], \
+                (v_normed, ht_normed, 2/3))
 
             if not res_mu23.success:
                 print(f"WARNING: Optimizer failed for mu=2/3: {res_mu23.message}")
@@ -1395,13 +3193,13 @@ def fitAlphaBetaMass(
         #   given masses
         if fit_density:
             x0_mu_best = [dens0, 1/3]
-            bnds_mu_best = [(xmin[0], xmax[0]), (0.0, 2/3)]
+            xmin_mu_best, xmax_mu_best = [xmin[0], 0.0], [xmax[0], 2/3]
         else:
             x0_mu_best = [1/3]
-            bnds_mu_best = [(0.0, 2/3)]
+            xmin_mu_best, xmax_mu_best = [0.0], [2/3]
 
-        res_mu_best = scipy.optimize.minimize(_densityMuMinimizationBothMasses, x0_mu_best, \
-            args=(v_normed, ht_normed), bounds=bnds_mu_best, method='Nelder-Mead')
+        res_mu_best = _runMassFit(_densityMuMinimizationBothMasses, x0_mu_best, xmin_mu_best, \
+            xmax_mu_best, (v_normed, ht_normed))
 
         if not res_mu_best.success:
             print(f"WARNING: Optimizer failed for best-fit mu: {res_mu_best.message}")
@@ -1428,6 +3226,12 @@ def fitAlphaBetaMass(
             print(f"mass_init            = {mass_initial:.3f} kg  (input)")
             print(f"mass_final           = {mass_final:.3f} kg  (input)")
         print(f"GAMMA_A              = {shape_coeff*gamma:.3f}  (input)")
+        print(f"method               = {method}")
+        if method == 'robust':
+            print("sigma_v              = {:.1f} m/s  ({:s})".format(sigma_v,
+                "input" if sigma_v_given else "DERIVED: MAD of a Q4 fit's velocity residuals "
+                "(effective, absorbs model misspecification too - not a pure measurement "
+                "uncertainty)"))
 
         if fit_density:
             print("density              = not given -> fitted below, separately for each mu")
@@ -1517,7 +3321,7 @@ def fitAlphaBetaMass(
             that same v_final, so check it explicitly here.
         """
 
-        v_final_model = np.min(alphaBetaVelocity(ht_data, alpha, beta, v_init))
+        v_final_model = np.min(alphaBetaVelocity(ht_data, alpha, beta, v_init, fast=fast))
         rel_diff = abs(v_final_model - v_final)/v_final
 
         if rel_diff > bound_tol:
@@ -1593,12 +3397,12 @@ def fitAlphaBetaMass(
 
         for mu_label, dens_val, alpha_val, beta_val, m_init_val, m_final_val, color in curves:
 
-            vel_arr = alphaBetaVelocity(ht_arr, alpha_val, beta_val, v_init)
+            vel_arr = alphaBetaVelocity(ht_arr, alpha_val, beta_val, v_init, fast=fast)
 
             # Computed the same way as in _checkVelocityRecovery() above (min over the
             # actual ht_data points, not over the ht_arr plotting grid), so the number
             # shown in the legend always matches what that check evaluates.
-            v_final_model = np.min(alphaBetaVelocity(ht_data, alpha_val, beta_val, v_init))
+            v_final_model = np.min(alphaBetaVelocity(ht_data, alpha_val, beta_val, v_init, fast=fast))
 
             ax.plot(vel_arr/1000, ht_arr/1000, color=color, \
                 label=_fitLabel(mu_label, dens_val, alpha_val, beta_val, m_init_val, m_final_val,
@@ -1719,7 +3523,7 @@ def _profiledMagOffset(mag_obs, mag_model_zero, sigma_mag=1.0):
     return diffs_sorted[index]
 
 
-def _lightCurveResiduals(x, mu, ht_normed_lc, mag_lc, sigma_mag):
+def _lightCurveResiduals(x, mu, ht_normed_lc, mag_lc, sigma_mag, fast=False):
     """ Light curve residual block: model magnitude residuals with the amplitude (magnitude
         offset) profiled out analytically at every call (see _profiledMagOffset()). Used both
         as the light curve half of _jointResiduals() and, on its own, for the purely photometric
@@ -1733,20 +3537,24 @@ def _lightCurveResiduals(x, mu, ht_normed_lc, mag_lc, sigma_mag):
         mag_lc: [ndarray] Observed absolute magnitudes.
         sigma_mag: [float or ndarray] Magnitude uncertainty, a scalar or per-point.
 
+    Keyword arguments:
+        fast: [bool] Passed through to alphaBetaModelMagnitude() - see alphaBetaVelocityNormed()'s
+            docstring.
+
     Return:
         res: [ndarray] Sigma-normalized magnitude residuals.
     """
 
     alpha, beta = np.exp(x)
 
-    mag_zero, _ = alphaBetaModelMagnitude(ht_normed_lc, alpha, beta, mu)
+    mag_zero, _ = alphaBetaModelMagnitude(ht_normed_lc, alpha, beta, mu, fast=fast)
     mag_offset = _profiledMagOffset(mag_lc, mag_zero, sigma_mag)
 
     return (mag_zero + mag_offset - mag_lc)/sigma_mag
 
 
 def _jointResiduals(x, mu, v_normed, ht_normed, ht_normed_lc, mag_lc, sigma_v_normed, sigma_mag,
-        dyn_weight, lc_weight):
+        dyn_weight, lc_weight, fast=False):
     """ Concatenated residual vector used by fitAlphaBetaLightCurve(): dynamics (_dynResiduals(),
         shared with minimizeAlphaBetaRobust()) + light curve (_lightCurveResiduals()).
         x = (ln alpha, ln beta); the magnitude offset (amplitude) is profiled out analytically at
@@ -1768,17 +3576,23 @@ def _jointResiduals(x, mu, v_normed, ht_normed, ht_normed_lc, mag_lc, sigma_v_no
         dyn_weight: [float] Multiplier on the dynamics residual block.
         lc_weight: [float] Multiplier on the light curve residual block.
 
+    Keyword arguments:
+        fast: [bool] Passed through to _dynResiduals()/_lightCurveResiduals() - see
+            alphaBetaVelocityNormed()'s docstring. This is the residual scipy.optimize.least_squares
+            calls every iteration of fitAlphaBetaLightCurve(), so fast=True is where the LUT
+            speedup actually matters for this fit.
+
     Return:
         res: [ndarray] Concatenated (dynamics, light curve) sigma-normalized residuals.
     """
 
-    res_dyn = dyn_weight*_dynResiduals(x, v_normed, ht_normed, sigma_v_normed)
-    res_lc = lc_weight*_lightCurveResiduals(x, mu, ht_normed_lc, mag_lc, sigma_mag)
+    res_dyn = dyn_weight*_dynResiduals(x, v_normed, ht_normed, sigma_v_normed, fast=fast)
+    res_lc = lc_weight*_lightCurveResiduals(x, mu, ht_normed_lc, mag_lc, sigma_mag, fast=fast)
 
     return np.concatenate([res_dyn, res_lc])
 
 
-def _lightCurveResidualsFreeMu(x, ht_normed_lc, mag_lc, sigma_mag):
+def _lightCurveResidualsFreeMu(x, ht_normed_lc, mag_lc, sigma_mag, fast=False):
     """ Same as _lightCurveResiduals(), but with mu folded into x as a 3rd free parameter
         (x = (ln alpha, ln beta, mu)) instead of held fixed. Used only to derive an effective
         sigma_mag for the optional free-mu fit in fitAlphaBetaLightCurve() (fit_free_mu=True),
@@ -1790,15 +3604,19 @@ def _lightCurveResidualsFreeMu(x, ht_normed_lc, mag_lc, sigma_mag):
         mag_lc: [ndarray] Observed absolute magnitudes.
         sigma_mag: [float or ndarray] Magnitude uncertainty, a scalar or per-point.
 
+    Keyword arguments:
+        fast: [bool] Passed through to _lightCurveResiduals() - see alphaBetaVelocityNormed()'s
+            docstring.
+
     Return:
         res: [ndarray] Sigma-normalized magnitude residuals.
     """
 
-    return _lightCurveResiduals(x[:2], x[2], ht_normed_lc, mag_lc, sigma_mag)
+    return _lightCurveResiduals(x[:2], x[2], ht_normed_lc, mag_lc, sigma_mag, fast=fast)
 
 
 def _jointResidualsFreeMu(x, v_normed, ht_normed, ht_normed_lc, mag_lc, sigma_v_normed, sigma_mag,
-        dyn_weight, lc_weight):
+        dyn_weight, lc_weight, fast=False):
     """ Same as _jointResiduals(), but with mu folded into x as a 3rd free parameter
         (x = (ln alpha, ln beta, mu)) instead of held fixed at one of mu_values. Used only by the
         optional free-mu fit in fitAlphaBetaLightCurve() (fit_free_mu=True), which lets the
@@ -1816,12 +3634,16 @@ def _jointResidualsFreeMu(x, v_normed, ht_normed, ht_normed_lc, mag_lc, sigma_v_
         dyn_weight: [float] Multiplier on the dynamics residual block.
         lc_weight: [float] Multiplier on the light curve residual block.
 
+    Keyword arguments:
+        fast: [bool] Passed through to _jointResiduals() - see alphaBetaVelocityNormed()'s
+            docstring.
+
     Return:
         res: [ndarray] Concatenated (dynamics, light curve) sigma-normalized residuals.
     """
 
     return _jointResiduals(x[:2], x[2], v_normed, ht_normed, ht_normed_lc, mag_lc, sigma_v_normed,
-        sigma_mag, dyn_weight, lc_weight)
+        sigma_mag, dyn_weight, lc_weight, fast=fast)
 
 
 def alphaBetaLuminosityF(v_normed, beta, mu):
@@ -1854,7 +3676,7 @@ def alphaBetaLuminosityF(v_normed, beta, mu):
     return v**3*delta*(beta*v**2/(1.0 - mu) + 1.0)*np.exp(beta*(mu*v**2 - 1.0)/(1.0 - mu))
 
 
-def alphaBetaModelMagnitude(ht_normed, alpha, beta, mu, mag_offset=0.0):
+def alphaBetaModelMagnitude(ht_normed, alpha, beta, mu, mag_offset=0.0, fast=False):
     """ Model absolute magnitude at the given normalized heights (up to an additive offset).
 
             mag(y) = mag_offset - 2.5 log10( f(v(y)) ),   I = P_0M 10^(-0.4 mag)
@@ -1868,12 +3690,13 @@ def alphaBetaModelMagnitude(ht_normed, alpha, beta, mu, mag_offset=0.0):
     Keyword arguments:
         mag_offset: [float] Additive magnitude offset M0 (amplitude term, see
             fitAlphaBetaLightCurve()).
+        fast: [bool] Passed through to alphaBetaVelocityNormed() - see its docstring.
 
     Return:
         (mag, v_model): [tuple] Model absolute magnitudes and model normalized velocities.
     """
 
-    v_model = alphaBetaVelocityNormed(ht_normed, alpha, beta)
+    v_model = alphaBetaVelocityNormed(ht_normed, alpha, beta, fast=fast)
 
     f_val = alphaBetaLuminosityF(v_model, beta, mu)
 
@@ -1899,7 +3722,8 @@ def fitAlphaBetaLightCurve(
         p0m=P_0M,
         fit_free_mu=False,
         verbose=True,
-        plot=False):
+        plot=False,
+        fast=False):
     """ Simultaneous fit of the alpha-beta model to the dynamics (height vs. velocity) AND the
         light curve (height vs. absolute magnitude), following Gritsevich (2007, 2009) for the
         dynamics and Gritsevich & Koschny (2011) for the luminosity.
@@ -1955,14 +3779,15 @@ def fitAlphaBetaLightCurve(
           its point count, so a light curve with many more samples than the dynamics track (or
           vice versa) can dominate the fit even if every individual sigma is correctly calibrated;
           see dyn_weight/lc_weight to rebalance this.
-        - alpha_std_rel/beta_std_rel (in the returned 'fits') are local curvature estimates from
-          the Jacobian of the *robustified* (soft-L1) cost, not rigorous statistical covariances -
-          soft-L1 reweights residuals nonlinearly, so (J^T J)^-1 is only a Gauss-Newton
-          approximation, not the inverse Fisher information of Gaussian noise. The profiled
-          (weighted-median) M0 also makes the residual vector only piecewise-smooth in
-          (alpha, beta), which further degrades the finite-difference Jacobian these estimates
-          are computed from. Treat them as approximate/relative uncertainties and use bootstrap
-          resampling for publication-grade error bars.
+        - This function does NOT return parameter error estimates: a Gauss-Newton curvature
+          estimate on the *robustified* (soft-L1) joint cost would not be a rigorous statistical
+          covariance (soft-L1 reweights residuals nonlinearly, so (J^T J)^-1 is only a local
+          approximation, not the inverse Fisher information of Gaussian noise - and the profiled
+          weighted-median M0 makes the residual vector only piecewise-smooth in (alpha, beta),
+          which further degrades a finite-difference Jacobian). Rather than surface a rough
+          estimate that could be mistaken for a rigorous one, get error bars separately: run
+          fitAlphaBeta(method='robust', estimate_errors=True) on the dynamics alone, or
+          profileAlphaBeta() for likelihood-based confidence intervals.
         - When sigma_mag is auto-derived (the default, sigma_mag=None), each mu (and the free-mu
           fit, if fit_free_mu=True) gets its OWN independently-derived sigma_mag from its OWN
           residuals. A mu that fits the light curve worse ends up with a larger self-derived
@@ -2054,6 +3879,9 @@ def fitAlphaBetaLightCurve(
         plot: [bool] If True, show a two-panel plot (height vs. velocity; height vs. magnitude)
             with the observed data and the fitted curve for every mu (plus the free-mu fit, in a
             distinct color, if fit_free_mu=True). Blocks execution until the plot window closed.
+        fast: [bool] Passed through everywhere this function inverts velocity (every joint/
+            photometric-only least_squares stage, plus the post-fit velocity/magnitude curves used
+            for verbose/plot output) - see alphaBetaVelocityNormed()'s docstring.
 
     Return:
         results: [dict] With keys:
@@ -2061,8 +3889,6 @@ def fitAlphaBetaLightCurve(
             'sigma_v': adopted velocity uncertainty (m/s, see the sigma_v caveat above),
             'alpha_dyn', 'beta_dyn': Stage-0 (dynamics only, Q4) values,
             'fits': {mu: {'alpha', 'beta',
-                          'alpha_std_rel', 'beta_std_rel' (approximate, curvature-based - see
-                              the statistical caveats above, not rigorous statistical errors),
                           'mag_offset',
                           'K' (= tau M_e V_e^3 sin(slope)/(2 h0), W - see
                               alphaBetaLuminousEfficiency() to recover tau from K, given an
@@ -2074,9 +3900,7 @@ def fitAlphaBetaLightCurve(
             'best_fixed_mu': mu (from mu_values) with the lowest robust cost - an argmin over the fixed
                 mu_values grid, NOT a continuous optimum (see fit_free_mu for that).
             'mu_free_fit': None unless fit_free_mu=True, in which case a dict with the same shape
-                as one 'fits'[mu] entry, plus 'mu' (the fitted shape-change coefficient itself)
-                and 'mu_std' (its approximate/relative uncertainty, same Gauss-Newton caveat as
-                alpha_std_rel/beta_std_rel).
+                as one 'fits'[mu] entry, plus 'mu' (the fitted shape-change coefficient itself).
     """
 
     v_data = np.asarray(v_data, dtype=np.float64)
@@ -2168,7 +3992,7 @@ def fitAlphaBetaLightCurve(
     # residuals.
     sigma_v_given = sigma_v is not None
     if not sigma_v_given:
-        sigma_v = _estimateSigmaV(alpha0, beta0, v_normed, ht_normed, v_init)
+        sigma_v = _estimateSigmaV(alpha0, beta0, v_normed, ht_normed, v_init, fast=fast)
 
     sigma_v_normed = sigma_v/v_init
 
@@ -2240,7 +4064,7 @@ def fitAlphaBetaLightCurve(
             # scale estimate) and take the MAD of its raw magnitude residuals, exactly mirroring
             # how sigma_v is derived from the Stage-0 residuals.
             res_prelim = scipy.optimize.least_squares(_lightCurveResiduals, x0, \
-                args=(mu, ht_normed_lc, mag_abs_data, 1.0), bounds=log_bounds, **lsq_kwargs)
+                args=(mu, ht_normed_lc, mag_abs_data, 1.0, fast), bounds=log_bounds, **lsq_kwargs)
 
             sigma_mag_mu = 1.4826*np.median(np.abs(res_prelim.fun - np.median(res_prelim.fun)))
 
@@ -2248,7 +4072,7 @@ def fitAlphaBetaLightCurve(
             sigma_mag_mu = max(sigma_mag_mu, 0.01)
 
         res = scipy.optimize.least_squares(_jointResiduals, x0, args=(mu, v_normed, ht_normed, \
-            ht_normed_lc, mag_abs_data, sigma_v_normed, sigma_mag_mu, dyn_weight, lc_weight),
+            ht_normed_lc, mag_abs_data, sigma_v_normed, sigma_mag_mu, dyn_weight, lc_weight, fast),
             bounds=log_bounds, **lsq_kwargs)
 
         if not res.success:
@@ -2257,32 +4081,15 @@ def fitAlphaBetaLightCurve(
         alpha, beta = np.exp(res.x)
 
         # Recompute the profiled amplitude at the solution
-        mag_zero, _ = alphaBetaModelMagnitude(ht_normed_lc, alpha, beta, mu)
+        mag_zero, _ = alphaBetaModelMagnitude(ht_normed_lc, alpha, beta, mu, fast=fast)
         mag_offset = _profiledMagOffset(mag_abs_data, mag_zero, sigma_mag_mu)
 
         # Amplitude K = tau M_e V_e^3 sin(gamma)/(2 h0) in W
         lum_amplitude = p0m*10**(-0.4*mag_offset)
 
-        # Local curvature ("covariance") of (ln alpha, ln beta) from the Jacobian of the
-        # *robustified* soft-L1 cost - only a Gauss-Newton approximation of the curvature at the
-        # optimum, NOT a rigorous statistical covariance: soft_l1 reweights residuals nonlinearly,
-        # so (J^T J)^-1 here is not the inverse Fisher information of Gaussian noise. Treat
-        # alpha_std_rel/beta_std_rel as approximate/relative uncertainties; use bootstrap
-        # resampling for publication-grade errors.
-        try:
-            jtj = res.jac.T @ res.jac
-            dof = max(len(res.fun) - len(res.x), 1)
-            s2 = 2.0*res.cost/dof
-            cov_log = s2*np.linalg.inv(jtj)
-            alpha_std_rel, beta_std_rel = np.sqrt(np.diag(cov_log))
-        except np.linalg.LinAlgError:
-            alpha_std_rel = beta_std_rel = np.nan
-
         fits[mu] = {
             'alpha': alpha,
             'beta': beta,
-            'alpha_std_rel': alpha_std_rel,
-            'beta_std_rel': beta_std_rel,
             'mag_offset': mag_offset,
             'K': lum_amplitude,
             'sigma_mag': sigma_mag_mu,
@@ -2299,8 +4106,8 @@ def fitAlphaBetaLightCurve(
             if not sigma_mag_given:
                 print("sigma_mag            = {:.3f} mag  (DERIVED for this μ: MAD of an "
                     "unweighted photometry-only fit)".format(sigma_mag_mu))
-            print("alpha                = {:.6f} (±{:.1%})".format(alpha, alpha_std_rel))
-            print("beta                 = {:.6f} (±{:.1%})".format(beta, beta_std_rel))
+            print("alpha                = {:.6f}".format(alpha))
+            print("beta                 = {:.6f}".format(beta))
             print("M0                   = {:.3f} mag".format(mag_offset))
             print("K                    = {:.3e} W".format(lum_amplitude))
             print("cost                 = {:.4f}".format(res.cost))
@@ -2325,7 +4132,7 @@ def fitAlphaBetaLightCurve(
             # Same MAD-of-an-unweighted-fit idea as the per-mu derivation above, but with mu
             # free here too (see _lightCurveResidualsFreeMu()).
             res_prelim_free = scipy.optimize.least_squares(_lightCurveResidualsFreeMu, x0_free, \
-                args=(ht_normed_lc, mag_abs_data, 1.0), bounds=bounds_free, **lsq_kwargs)
+                args=(ht_normed_lc, mag_abs_data, 1.0, fast), bounds=bounds_free, **lsq_kwargs)
 
             sigma_mag_free = 1.4826*np.median(
                 np.abs(res_prelim_free.fun - np.median(res_prelim_free.fun)))
@@ -2335,7 +4142,7 @@ def fitAlphaBetaLightCurve(
 
         res_free = scipy.optimize.least_squares(_jointResidualsFreeMu, x0_free, args=(v_normed, \
             ht_normed, ht_normed_lc, mag_abs_data, sigma_v_normed, sigma_mag_free, dyn_weight,
-            lc_weight), bounds=bounds_free, **lsq_kwargs)
+            lc_weight, fast), bounds=bounds_free, **lsq_kwargs)
 
         if not res_free.success:
             print("WARNING: Optimizer failed for the free-μ fit: {:s}".format(res_free.message))
@@ -2343,28 +4150,15 @@ def fitAlphaBetaLightCurve(
         alpha_free, beta_free = np.exp(res_free.x[:2])
         mu_free = float(np.clip(res_free.x[2], mu_lo, mu_hi))
 
-        mag_zero_free, _ = alphaBetaModelMagnitude(ht_normed_lc, alpha_free, beta_free, mu_free)
+        mag_zero_free, _ = alphaBetaModelMagnitude(ht_normed_lc, alpha_free, beta_free, mu_free, \
+            fast=fast)
         mag_offset_free = _profiledMagOffset(mag_abs_data, mag_zero_free, sigma_mag_free)
         lum_amplitude_free = p0m*10**(-0.4*mag_offset_free)
-
-        # Same Gauss-Newton local-curvature caveat as the fixed-mu fits above, now for
-        # (ln alpha, ln beta, mu) jointly.
-        try:
-            jtj = res_free.jac.T @ res_free.jac
-            dof = max(len(res_free.fun) - len(res_free.x), 1)
-            s2 = 2.0*res_free.cost/dof
-            cov_free = s2*np.linalg.inv(jtj)
-            alpha_std_rel_free, beta_std_rel_free, mu_std_free = np.sqrt(np.diag(cov_free))
-        except np.linalg.LinAlgError:
-            alpha_std_rel_free = beta_std_rel_free = mu_std_free = np.nan
 
         mu_free_fit = {
             'mu': mu_free,
             'alpha': alpha_free,
             'beta': beta_free,
-            'alpha_std_rel': alpha_std_rel_free,
-            'beta_std_rel': beta_std_rel_free,
-            'mu_std': mu_std_free,
             'mag_offset': mag_offset_free,
             'K': lum_amplitude_free,
             'sigma_mag': sigma_mag_free,
@@ -2385,9 +4179,9 @@ def fitAlphaBetaLightCurve(
             if not sigma_mag_given:
                 print("sigma_mag            = {:.3f} mag  (DERIVED: MAD of an unweighted "
                     "photometry-only fit with μ also free)".format(sigma_mag_free))
-            print("mu                   = {:.3f} (±{:.3f})".format(mu_free, mu_std_free))
-            print("alpha                = {:.6f} (±{:.1%})".format(alpha_free, alpha_std_rel_free))
-            print("beta                 = {:.6f} (±{:.1%})".format(beta_free, beta_std_rel_free))
+            print("mu                   = {:.3f}".format(mu_free))
+            print("alpha                = {:.6f}".format(alpha_free))
+            print("beta                 = {:.6f}".format(beta_free))
             print("M0                   = {:.3f} mag".format(mag_offset_free))
             print("K                    = {:.3e} W".format(lum_amplitude_free))
             print("cost                 = {:.4f}".format(res_free.cost))
@@ -2456,7 +4250,7 @@ def fitAlphaBetaLightCurve(
 
         # Purely dynamic fit (Stage 0, dynamics alone). Eq. (7) doesn't depend on mu, so this is
         # a single reference curve on the velocity panel - not one per mu.
-        vel_arr_dyn = alphaBetaVelocityNormed(ht_arr_normed, alpha0, beta0)*v_init
+        vel_arr_dyn = alphaBetaVelocityNormed(ht_arr_normed, alpha0, beta0, fast=fast)*v_init
         ax_dyn.plot(vel_arr_dyn/1000, ht_arr/1000, color='k', linestyle='--', linewidth=1.5, \
             label="Dynamics-only ({:s}): $\\alpha$={:.2f}, $\\beta$={:.2f}".format(
                 'Q4' if dyn_method == 'q4' else 'robust', alpha0, beta0))
@@ -2467,9 +4261,9 @@ def fitAlphaBetaLightCurve(
             alpha, beta = fit['alpha'], fit['beta']
 
             # --- Joint fit (dynamics + light curve), the main result for this mu ---
-            vel_arr = alphaBetaVelocityNormed(ht_arr_normed, alpha, beta)*v_init
+            vel_arr = alphaBetaVelocityNormed(ht_arr_normed, alpha, beta, fast=fast)*v_init
             mag_arr, _ = alphaBetaModelMagnitude(ht_arr_normed, alpha, beta, mu, \
-                mag_offset=fit['mag_offset'])
+                mag_offset=fit['mag_offset'], fast=fast)
 
             ax_dyn.plot(vel_arr/1000, ht_arr/1000, color=color, \
                 label="Joint fit, $\\mu$={:.2f}: $\\alpha$={:.2f}, $\\beta$={:.2f}".format(
@@ -2481,10 +4275,10 @@ def fitAlphaBetaLightCurve(
             # --- Dynamics-only fit (alpha0, beta0 from above), projected onto the light curve:
             # same shape for every mu, only M0 is re-profiled per mu since f(v) depends on mu.
             # Shows how well the dynamics alone would have predicted the light curve shape.
-            mag_zero_dyn, _ = alphaBetaModelMagnitude(ht_normed_lc, alpha0, beta0, mu)
+            mag_zero_dyn, _ = alphaBetaModelMagnitude(ht_normed_lc, alpha0, beta0, mu, fast=fast)
             mag_offset_dyn = _profiledMagOffset(mag_abs_data, mag_zero_dyn, fits[mu]['sigma_mag'])
             mag_arr_dyn, _ = alphaBetaModelMagnitude(ht_arr_normed, alpha0, beta0, mu, \
-                mag_offset=mag_offset_dyn)
+                mag_offset=mag_offset_dyn, fast=fast)
 
             ax_lc.plot(mag_arr_dyn, ht_arr/1000, color=color, linestyle='--', linewidth=1.5, \
                 label="Dynamics-only, $\\mu$={:.2f}: $M_0$={:.2f}".format(mu, mag_offset_dyn))
@@ -2492,16 +4286,18 @@ def fitAlphaBetaLightCurve(
             # --- Purely photometric fit: alpha/beta constrained by the light curve alone
             # (dynamics ignored entirely), for comparison with the joint and dynamics-only fits.
             res_phot = scipy.optimize.least_squares(_lightCurveResiduals, x0, \
-                args=(mu, ht_normed_lc, mag_abs_data, fits[mu]['sigma_mag']), bounds=log_bounds,
-                **lsq_kwargs)
+                args=(mu, ht_normed_lc, mag_abs_data, fits[mu]['sigma_mag'], fast), \
+                bounds=log_bounds, **lsq_kwargs)
 
             alpha_phot, beta_phot = np.exp(res_phot.x)
-            mag_zero_phot, _ = alphaBetaModelMagnitude(ht_normed_lc, alpha_phot, beta_phot, mu)
+            mag_zero_phot, _ = alphaBetaModelMagnitude(ht_normed_lc, alpha_phot, beta_phot, mu, \
+                fast=fast)
             mag_offset_phot = _profiledMagOffset(mag_abs_data, mag_zero_phot, fits[mu]['sigma_mag'])
 
-            vel_arr_phot = alphaBetaVelocityNormed(ht_arr_normed, alpha_phot, beta_phot)*v_init
+            vel_arr_phot = alphaBetaVelocityNormed(ht_arr_normed, alpha_phot, beta_phot, \
+                fast=fast)*v_init
             mag_arr_phot, _ = alphaBetaModelMagnitude(ht_arr_normed, alpha_phot, beta_phot, mu, \
-                mag_offset=mag_offset_phot)
+                mag_offset=mag_offset_phot, fast=fast)
 
             ax_dyn.plot(vel_arr_phot/1000, ht_arr/1000, color=color, linestyle=':', \
                 linewidth=1.5, label="Photometry-only, $\\mu$={:.2f}: $\\alpha$={:.2f}, "
@@ -2516,17 +4312,18 @@ def fitAlphaBetaLightCurve(
         if mu_free_fit is not None:
 
             vel_arr_free = alphaBetaVelocityNormed(ht_arr_normed, mu_free_fit['alpha'],
-                mu_free_fit['beta'])*v_init
+                mu_free_fit['beta'], fast=fast)*v_init
             mag_arr_free, _ = alphaBetaModelMagnitude(ht_arr_normed, mu_free_fit['alpha'],
-                mu_free_fit['beta'], mu_free_fit['mu'], mag_offset=mu_free_fit['mag_offset'])
+                mu_free_fit['beta'], mu_free_fit['mu'], mag_offset=mu_free_fit['mag_offset'], \
+                fast=fast)
 
             ax_dyn.plot(vel_arr_free/1000, ht_arr/1000, color='crimson', linewidth=2.5, zorder=4, \
-                label="Free-$\\mu$ fit: $\\mu$={:.2f}$\\pm${:.2f}, $\\alpha$={:.2f}, "
-                    "$\\beta$={:.2f}".format(mu_free_fit['mu'], mu_free_fit['mu_std'],
-                    mu_free_fit['alpha'], mu_free_fit['beta']))
+                label="Free-$\\mu$ fit: $\\mu$={:.2f}, $\\alpha$={:.2f}, "
+                    "$\\beta$={:.2f}".format(mu_free_fit['mu'], mu_free_fit['alpha'],
+                    mu_free_fit['beta']))
             ax_lc.plot(mag_arr_free, ht_arr/1000, color='crimson', linewidth=2.5, zorder=4, \
-                label="Free-$\\mu$ fit: $\\mu$={:.2f}$\\pm${:.2f}, $M_0$={:.2f}".format(
-                    mu_free_fit['mu'], mu_free_fit['mu_std'], mu_free_fit['mag_offset']))
+                label="Free-$\\mu$ fit: $\\mu$={:.2f}, $M_0$={:.2f}".format(
+                    mu_free_fit['mu'], mu_free_fit['mag_offset']))
 
         # Clip the view to the observed data range (with padding): the photometry-only fit at a
         # mu far from the true value can be poorly constrained and run away outside the data
@@ -2548,8 +4345,7 @@ def fitAlphaBetaLightCurve(
         title = "Best $\\mu$ = {:.2f}   $v_0$ = {:.2f} km/s".format(
             best_fixed_mu, v_init/1000)
         if mu_free_fit is not None:
-            title += "   |   Free-$\\mu$ fit: $\\mu$ = {:.2f}$\\pm${:.2f}".format(
-                mu_free_fit['mu'], mu_free_fit['mu_std'])
+            title += "   |   Free-$\\mu$ fit: $\\mu$ = {:.2f}".format(mu_free_fit['mu'])
 
         fig.suptitle(title)
         fig.tight_layout()
