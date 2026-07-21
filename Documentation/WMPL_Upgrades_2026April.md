@@ -116,7 +116,7 @@ The child configuration file specifies the server, user and key to use for conne
 
 \[mode\]  
 mode = child  
-<br/>\[children\]  
+<br/>\[sftp\]  
 host = testserver.somewhere.com  
 user = node1  
 key = ~/.ssh/somekey  

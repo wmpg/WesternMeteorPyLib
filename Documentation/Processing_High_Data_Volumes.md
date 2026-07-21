@@ -71,7 +71,7 @@ You should end up with a structure like the one below.
 ### 1e: Set Child Node ACLs on the Parent
 Group permissions may not be sufficient to ensure the parent account can access the child accounts. To make certain you can apply extended ACLs to the folders as follows:
 ```bash
-sudo setfacl -R user:ubuntu:rwx ~node1/files
+sudo setfacl -R -m user:ubuntu:rwx ~node1/files
 ```
 replace 'ubuntu' with the account that will run WMPL on the parent. 
 
