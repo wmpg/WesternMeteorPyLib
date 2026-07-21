@@ -877,6 +877,22 @@ if __name__ == "__main__":
     from wmpl.Utils.Pickling import loadPickle
 
 
+    # Exit cleanly with a helpful message if REBOUND/REBOUNDx are not installed, instead of
+    # crashing later with a cryptic "cannot unpack non-iterable NoneType" error.
+    if not REBOUND_FOUND:
+        print("")
+        print("ERROR: the 'rebound' and 'reboundx' packages are required to run this script, "
+              "but they could not be imported.")
+        print("")
+        print("Install them with:  pip install rebound reboundx")
+        print("")
+        print("Note: on Windows, 'reboundx' has no prebuilt wheel and does not compile with the "
+              "MSVC compiler (it uses C features MSVC lacks). Use one of:")
+        print("  - Windows Subsystem for Linux (WSL2, e.g. Ubuntu) - recommended, builds cleanly, or")
+        print("  - a Linux or macOS machine.")
+        print("'rebound' alone is not enough; 'reboundx' must import successfully too.")
+        sys.exit(1)
+
     ###
 
     parser = argparse.ArgumentParser(description="Run REBOUND simulation for a given trajectory pickle file. The simulation is run 60 days backwards by default.")
