@@ -274,7 +274,8 @@ def detectCloseEncounters(sim_outputs, n_hill=3.0):
     return encounters
 
 
-def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local", jpl_ephem_data=None):
+def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local", jpl_ephem_data=None,
+                         earth_state=None):
     """ Takes a state vector in ECI coordinates (m and m/s), Julian date and converts from ECI (geocentric) to
     Solar System barycentric coordiantes. The units are changed to AU and AU/year.
 
@@ -290,6 +291,10 @@ def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local",
             - "horizons": the JPL Horizons web service.
         jpl_ephem_data: [SPK] An opened jplephem SPK kernel. If None and ephem_source is "local",
             the kernel is opened from config.jpl_ephem_file.
+        earth_state: [list] Precomputed Earth barycentric state [x, y, z, vx, vy, vz] in REBOUND units
+            (AU, AU/(year/2pi)), ecliptic J2000, at the epoch jd. If given, it is used directly and
+            ephem_source/jpl_ephem_data are ignored - this avoids re-querying the Earth's position,
+            which is identical across Monte Carlo realizations sharing the same epoch.
 
     Return:
         [list] Position and velocity components in barycentric coordinates in AU and AU/year, eg.
@@ -311,22 +316,25 @@ def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local",
         log(f"Reference Julian date (TDB): {jd}")
 
     # Get the Earth's barycentric state (AU, AU/(year/2pi), ecliptic J2000) used to shift the
-    # meteoroid from geocentric to barycentric coordinates.
-    if ephem_source == "horizons":
+    # meteoroid from geocentric to barycentric coordinates. The Earth state at a given epoch is
+    # identical for all Monte Carlo realizations, so it can be precomputed once and passed in.
+    if earth_state is None:
 
-        # Use JPL Horizons to query for the J2000 ecliptic SSB Earth state vector
-        sim = rb.Simulation()
-        sim.add("Geocenter", date=f"JD{jd:.6f}", hash="Earth")
-        ps = sim.particles
-        earth_state = [ps["Earth"].x, ps["Earth"].y, ps["Earth"].z,
-                       ps["Earth"].vx, ps["Earth"].vy, ps["Earth"].vz]
+        if ephem_source == "horizons":
 
-    else:
+            # Use JPL Horizons to query for the J2000 ecliptic SSB Earth state vector
+            sim = rb.Simulation()
+            sim.add("Geocenter", date=f"JD{jd:.6f}", hash="Earth")
+            ps = sim.particles
+            earth_state = [ps["Earth"].x, ps["Earth"].y, ps["Earth"].z,
+                           ps["Earth"].vx, ps["Earth"].vy, ps["Earth"].vz]
 
-        # Use the local DE430 ephemeris
-        if jpl_ephem_data is None:
-            jpl_ephem_data = SPK.open(config.jpl_ephem_file)
-        earth_state, _ = ephemBodyStateRebound("Earth", jd, jpl_ephem_data)
+        else:
+
+            # Use the local DE430 ephemeris
+            if jpl_ephem_data is None:
+                jpl_ephem_data = SPK.open(config.jpl_ephem_file)
+            earth_state, _ = ephemBodyStateRebound("Earth", jd, jpl_ephem_data)
 
     # Convert the state vector to REBOUND units
     aum = rb.units.lengths_SI["au"]
@@ -628,10 +636,16 @@ def reboundSimulate(
                 hash=name,
             )
 
+    # The Earth's barycentric state at the epoch is identical for the nominal solution and every
+    # Monte Carlo realization. Read it once from the Earth already added to the simulation (before
+    # move_to_com, so it is still in barycentric coordinates) and reuse it, so the planet position
+    # is not resampled for each realization.
+    earth_p = sim.particles["Earth"]
+    earth_state_ref = [earth_p.x, earth_p.y, earth_p.z, earth_p.vx, earth_p.vy, earth_p.vz]
+
     # To start the meteoroid in the right spot, we need to feed in x,y,z barycentric position in AU
     # The velocity should be in AU/year divided by 2pi
-    state_vect_rot = convertToBarycentric(state_vect, time_tdb, ephem_source=ephem_source,
-                                          jpl_ephem_data=jpl_ephem_data)
+    state_vect_rot = convertToBarycentric(state_vect, time_tdb, earth_state=earth_state_ref)
 
     if verbose:
         print("Initial state vector in ECI coordinates:")
@@ -662,8 +676,7 @@ def reboundSimulate(
         if verbose:
             print(f"MC realization {i + 1}: {state_vect_realization}")
 
-        sv_mc_rot = convertToBarycentric(state_vect_realization, time_tdb, ephem_source=ephem_source,
-                                         jpl_ephem_data=jpl_ephem_data)
+        sv_mc_rot = convertToBarycentric(state_vect_realization, time_tdb, earth_state=earth_state_ref)
 
         mc_name = f"{obj_name}_MC_{i}"
 
