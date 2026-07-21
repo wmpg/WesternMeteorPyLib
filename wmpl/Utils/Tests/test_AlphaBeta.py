@@ -1028,8 +1028,12 @@ def testAlphaBetaMassesErrorEstimationMonteCarlo():
     log_ab_samples = rng.multivariate_normal(np.log([alpha, beta]), cov_log, size=n_mc)
     alpha_samples = np.exp(log_ab_samples[:, 0])
     beta_samples = np.exp(log_ab_samples[:, 1])
-    slope_samples = rng.normal(SLOPE, sigma_slope, n_mc)
-    dens_samples = rng.normal(DENS_TRUE, sigma_dens, n_mc)
+    # Clip slope to (0, pi/2] and dens to positive: a rare tail draw outside alphaBetaMasses()'s
+    #   valid domain would otherwise make it raise/return NaN and fail the test spuriously. At
+    #   sigma_slope=1 deg / sigma_dens=200 over 20k draws the clip almost never triggers, so it
+    #   does not bias the comparison against the analytic (unclipped) propagation.
+    slope_samples = np.clip(rng.normal(SLOPE, sigma_slope, n_mc), 1e-6, np.pi/2)
+    dens_samples = np.clip(rng.normal(DENS_TRUE, sigma_dens, n_mc), 1e-6, None)
     vel_init_samples = rng.normal(V_INIT_TRUE, sigma_vel_init, n_mc)
     vel_end_samples = rng.normal(v_final_true, sigma_vel_end, n_mc)
 

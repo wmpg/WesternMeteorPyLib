@@ -2589,7 +2589,10 @@ def _alphaBetaMassErrors(alpha, beta, slope, mu, dens, m_init, m_final, vel_init
     m_final_std_rel = np.sqrt(var_m_final)
 
     if (m_init_std_rel > 0) and (m_final_std_rel > 0):
-        corr_log = cov_m/(m_init_std_rel*m_final_std_rel)
+        # Clip to [-1, 1]: for a valid (PSD) cov_log this is already in range, but a
+        #   caller-supplied cov_log that isn't actually PSD could push it slightly outside, which
+        #   would be a nonsensical correlation coefficient - clamp rather than propagate it.
+        corr_log = np.clip(cov_m/(m_init_std_rel*m_final_std_rel), -1.0, 1.0)
     else:
         corr_log = np.nan
 
@@ -3986,13 +3989,38 @@ def plotAlphaBetaSurvivalDiagram(
         ax.text(0.02, 0.02, "Uncertainty ellipse unavailable\n(cov_log is NaN)", \
             transform=ax.transAxes, ha='left', va='bottom', fontsize=8, color='0.4')
 
-    ax.scatter(
-        [x_point],
-        [y_point],
-        c='blue',
-        zorder=5,
-        label=point_label,
-    )
+    if have_cov:
+
+        # Marginal 1-sigma error bars on the point (sqrt of cov_log's diagonal): a quick-read
+        #   complement to the ellipse above, which additionally shows the (alpha, beta)
+        #   correlation the bars alone cannot. slope is treated as exact, so sigma_x = sigma_ln
+        #   alpha and sigma_y = sigma_ln beta directly.
+        sigma_x = np.sqrt(errors['cov_log'][0, 0])
+        sigma_y = np.sqrt(errors['cov_log'][1, 1])
+
+        ax.errorbar(
+            [x_point],
+            [y_point],
+            xerr=[sigma_x],
+            yerr=[sigma_y],
+            fmt='o',
+            color='blue',
+            ecolor='tab:blue',
+            elinewidth=1.0,
+            capsize=3,
+            capthick=1.0,
+            zorder=5,
+            label=point_label,
+        )
+
+    else:
+        ax.scatter(
+            [x_point],
+            [y_point],
+            c='blue',
+            zorder=5,
+            label=point_label,
+        )
 
     ax.set_xlim(x_range)
     ax.set_ylim(y_range)
@@ -5024,6 +5052,19 @@ if __name__ == "__main__":
         help='The product of the drag coefficient Gamma and the shape coefficient A. Used for computing the dynamic mass. Default is 0.55.', \
         type=float, default=0.55)
 
+    arg_parser.add_argument('-e', '--errors', action="store_true", \
+        help="Estimate and report alpha/beta and initial/final mass uncertainties. Forces a "
+        "robust fit (method='robust'), propagates the fitted (ln alpha, ln beta) covariance into "
+        "the masses, and draws an uncertainty ellipse on the survival diagram.")
+
+    arg_parser.add_argument('--slopeunc', metavar='SLOPE_UNC', type=float, default=None, \
+        help="1-sigma uncertainty on the entry slope, in DEGREES, folded into the mass error "
+        "estimate when --errors is set. Default: the slope is treated as exactly known.")
+
+    arg_parser.add_argument('--densunc', metavar='DENS_UNC', type=float, default=None, \
+        help="1-sigma uncertainty on the bulk density, in kg/m^3, folded into the mass error "
+        "estimate when --errors is set. Default: the density is treated as exactly known.")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -5109,17 +5150,48 @@ if __name__ == "__main__":
         else:
             vel_input = vel_data_smooth
 
-        # Estimate the alpha, beta parameters
-        v_init, alpha, beta = fitAlphaBeta(vel_input, ht_data_rescaled, v_init=traj.v_init)
+        # Estimate the alpha, beta parameters. With --errors, use the robust fit (the only one
+        #   that can produce a covariance - estimate_errors=True is rejected for the q4 default)
+        #   and keep its (ln alpha, ln beta) covariance for the mass error propagation below.
+        if cml_args.errors:
+            v_init, alpha, beta, fit_errors = fitAlphaBeta(vel_input, ht_data_rescaled, \
+                v_init=traj.v_init, method='robust', estimate_errors=True)
+        else:
+            v_init, alpha, beta = fitAlphaBeta(vel_input, ht_data_rescaled, v_init=traj.v_init)
+            fit_errors = None
 
         # Estimate the final velocity from the fitted alpha-beta solution
         vel_end = alphaBetaVelocity(ht_data_rescaled[0], alpha, beta, v_init)
 
-        # Compute initial and final mass
-        m_init_mu0, m_final_mu0 = alphaBetaMasses(alpha, beta, traj.orbit.elevation_apparent_norot, \
-            mu=0, dens=cml_args.dens, shape_coeff=cml_args.ga, gamma=1.0, vel_init=traj.v_init, vel_end=vel_end)
-        m_init_mu23, m_final_mu23 = alphaBetaMasses(alpha, beta, traj.orbit.elevation_apparent_norot, \
-            mu=2/3, dens=cml_args.dens, shape_coeff=cml_args.ga, gamma=1.0, vel_init=traj.v_init, vel_end=vel_end)
+        slope = traj.orbit.elevation_apparent_norot
+
+        # Optional independent slope/density uncertainties (only used with --errors). Velocities
+        #   are deliberately left exact: vel_end above is DERIVED from the fitted alpha/beta, so
+        #   its uncertainty is already carried by cov_log - passing an independent sigma_vel_*
+        #   would double-count it.
+        sigma_slope = np.radians(cml_args.slopeunc) \
+            if (cml_args.errors and (cml_args.slopeunc is not None)) else None
+        sigma_dens = cml_args.densunc if (cml_args.errors and (cml_args.densunc is not None)) else None
+
+        # Compute initial and final mass (with error propagation if --errors was set)
+        if cml_args.errors:
+            m_init_mu0, m_final_mu0, mass_err_mu0 = alphaBetaMasses(alpha, beta, slope, \
+                mu=0, dens=cml_args.dens, shape_coeff=cml_args.ga, gamma=1.0, \
+                vel_init=traj.v_init, vel_end=vel_end, estimate_errors=True, \
+                cov_log=fit_errors['cov_log'], sigma_slope=sigma_slope, sigma_dens=sigma_dens)
+            m_init_mu23, m_final_mu23, mass_err_mu23 = alphaBetaMasses(alpha, beta, slope, \
+                mu=2/3, dens=cml_args.dens, shape_coeff=cml_args.ga, gamma=1.0, \
+                vel_init=traj.v_init, vel_end=vel_end, estimate_errors=True, \
+                cov_log=fit_errors['cov_log'], sigma_slope=sigma_slope, sigma_dens=sigma_dens)
+        else:
+            m_init_mu0, m_final_mu0 = alphaBetaMasses(alpha, beta, slope, \
+                mu=0, dens=cml_args.dens, shape_coeff=cml_args.ga, gamma=1.0, \
+                vel_init=traj.v_init, vel_end=vel_end)
+            m_init_mu23, m_final_mu23 = alphaBetaMasses(alpha, beta, slope, \
+                mu=2/3, dens=cml_args.dens, shape_coeff=cml_args.ga, gamma=1.0, \
+                vel_init=traj.v_init, vel_end=vel_end)
+            mass_err_mu0 = None
+            mass_err_mu23 = None
 
 
         print()
@@ -5127,20 +5199,37 @@ if __name__ == "__main__":
         print()
         print("Alpha-beta analysis")
         print("-------------------")
-        print("Alpha = {:.3f}".format(alpha))
-        print("Beta  = {:.3f}".format(beta))
+        if cml_args.errors:
+            print("Alpha = {:.3f} (+/-{:.1%})".format(alpha, fit_errors['alpha_std_rel']))
+            print("Beta  = {:.3f} (+/-{:.1%})".format(beta, fit_errors['beta_std_rel']))
+            print("corr(alpha, beta) = {:.3f}".format(fit_errors['corr']))
+        else:
+            print("Alpha = {:.3f}".format(alpha))
+            print("Beta  = {:.3f}".format(beta))
         print("-------------------")
         print("ln(beta)             = {:.2f}".format(np.log(beta)))
-        print("ln(alpha*sin(slope)) = {:.2f}".format(np.log(alpha*np.sin(traj.orbit.elevation_apparent_norot))))
+        print("ln(alpha*sin(slope)) = {:.2f}".format(np.log(alpha*np.sin(slope))))
         print("-------------------")
         print("Masses with dens = {:d} kg/m^3, sphere:".format(int(cml_args.dens)))
         print(" * - note that the initial masses are usually 4-10x underestimated!")
+
+        def _printMass(label, mass, mass_err, key):
+            """ Print a single mass line, annotated with its 1-sigma relative error and Wald CI
+                if --errors produced a (finite) estimate for it, plain otherwise.
+            """
+            if (mass_err is not None) and np.isfinite(mass_err[key + '_std_rel']):
+                print("    {:s} = {:.2e} kg (+/-{:.1%})  [{:.3g}% CI: {:.2e} - {:.2e}]".format(
+                    label, mass, mass_err[key + '_std_rel'], mass_err['ci'],
+                    mass_err[key + '_ci_wald_lower'], mass_err[key + '_ci_wald_upper']))
+            else:
+                print("    {:s} = {:.2e} kg".format(label, mass))
+
         print("  mu = 0:")
-        print("    Initial = {:.2e} kg".format(m_init_mu0))
-        print("    Final   = {:.2e} kg".format(m_final_mu0))
+        _printMass("Initial", m_init_mu0, mass_err_mu0, 'm_init')
+        _printMass("Final  ", m_final_mu0, mass_err_mu0, 'm_final')
         print("  mu = 2/3:")
-        print("    Initial = {:.2e} kg".format(m_init_mu23))
-        print("    Final   = {:.2e} kg".format(m_final_mu23))
+        _printMass("Initial", m_init_mu23, mass_err_mu23, 'm_init')
+        _printMass("Final  ", m_final_mu23, mass_err_mu23, 'm_final')
 
         print("*********************************************")
         print()
@@ -5174,10 +5263,29 @@ if __name__ == "__main__":
         ax_ab.scatter(vel_data_smooth/1000, ht_data_rescaled/1000, color='r', s=1, \
             label="Lag-based velocity smoothing")
 
-        # Plot the alpha-beta fit
-        ax_ab.plot(vel_arr/1000, ht_arr/1000, color='k', \
-            label="$v_0$ = {:.2f} km/s\n$\\alpha$ = {:.2f}\n$\\beta$ = {:.2f}".format(v_init/1000, alpha, \
-                beta))
+        # Plot the alpha-beta fit (annotate alpha/beta with their 1-sigma errors if --errors)
+        if cml_args.errors:
+            fit_label = ("$v_0$ = {:.2f} km/s\n$\\alpha$ = {:.2f} $\\pm$ {:.1%}\n"
+                "$\\beta$ = {:.2f} $\\pm$ {:.1%}").format(v_init/1000, alpha, \
+                fit_errors['alpha_std_rel'], beta, fit_errors['beta_std_rel'])
+        else:
+            fit_label = "$v_0$ = {:.2f} km/s\n$\\alpha$ = {:.2f}\n$\\beta$ = {:.2f}".format( \
+                v_init/1000, alpha, beta)
+
+        # If uncertainties are available (finite cov_log), draw a 1-sigma velocity band by
+        #   sampling the fitted (ln alpha, ln beta) covariance and propagating each draw through
+        #   the model velocity curve (v_init held fixed - given as exactly known here)
+        if cml_args.errors and np.all(np.isfinite(fit_errors['cov_log'])):
+            rng = np.random.RandomState(0)
+            log_draws = rng.multivariate_normal(np.log([alpha, beta]), fit_errors['cov_log'], \
+                size=500)
+            vel_draws = np.array([alphaBetaVelocity(ht_arr, np.exp(la), np.exp(lb), v_init) \
+                for la, lb in log_draws])
+            vel_lo, vel_hi = np.percentile(vel_draws, [15.865, 84.135], axis=0)
+            ax_ab.fill_betweenx(ht_arr/1000, vel_lo/1000, vel_hi/1000, color='k', alpha=0.15, \
+                zorder=1, label=r"1$\sigma$ ($\alpha$, $\beta$) band")
+
+        ax_ab.plot(vel_arr/1000, ht_arr/1000, color='k', zorder=2, label=fit_label)
 
         ax_ab.set_xlabel("Velocity (km/s)")
         ax_ab.set_ylabel("Height (km)")
@@ -5276,8 +5384,11 @@ if __name__ == "__main__":
         # Boundary curves derived live from this run's own dens/gamma*shape_coeff (see
         #   plotAlphaBetaSurvivalDiagram()'s docstring) instead of the hardcoded constants this
         #   block used to have, which didn't track --dens/--ga at all
-        plotAlphaBetaSurvivalDiagram(alpha, beta, traj.orbit.elevation_apparent_norot, \
-            mass_thresholds=(1.0, 0.05), dens=cml_args.dens, shape_coeff=cml_args.ga, gamma=1.0)
+        #   With --errors, fit_errors carries the (ln alpha, ln beta) covariance, so an
+        #   uncertainty ellipse is drawn around the point too (fit_errors is None otherwise)
+        plotAlphaBetaSurvivalDiagram(alpha, beta, slope, \
+            mass_thresholds=(1.0, 0.05), dens=cml_args.dens, shape_coeff=cml_args.ga, gamma=1.0, \
+            errors=fit_errors)
 
 
 
