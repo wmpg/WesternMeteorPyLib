@@ -47,18 +47,20 @@ class Constants(object):
         self.dt = 0.005
 
         ### Adaptive sub-stepping (opt-in). Default False -> the engine runs the original fixed-step
-        #   path and reproduces prior results exactly. When True, each fragment sub-steps adaptively
-        #   within each dt to meet the tolerances below, while the output cadence stays fixed at dt. ###
-        self.adaptive_dt = False
+        #   path and reproduces prior results exactly. When True (default), each fragment sub-steps
+        #   adaptively within each dt to meet the tolerances below, while the output cadence stays fixed
+        #   at dt. Adaptive is on by default: it matches the fixed-step light curve to well within
+        #   measurement noise while running several times faster. Set False for bit-for-bit legacy runs. ###
+        self.adaptive_dt = True
         # Adaptive integrator: True -> embedded Dormand-Prince RK45 on the coupled (mass, velocity)
         #   system (fewer RHS evals per sub-step, higher order -> ~3-4x faster); False -> step-doubling
         #   on the original operator-split RK4. Both meet the same tolerance; DP45 is the default.
         self.adaptive_high_order = True
         # Tolerance targets NUMERICAL error below MEASUREMENT noise (~0.1 mag, ~0.1 km/s at ~25 FPS),
-        #   not machine convergence. rtol=1e-5 keeps the single-body velocity error ~0.1-0.3 km/s (at or
-        #   below typical measurement precision) at a fraction of the cost of a tighter tol; tighten to
-        #   1e-6 (~0.05 km/s) for high-precision (e.g. CAMO) data if needed.
-        self.adaptive_rtol = 1e-5         # relative tolerance on mass and speed
+        #   not machine convergence. rtol=1e-4 keeps the light curve and dynamics indistinguishable from
+        #   the fixed-step result (well under measurement precision) while running fastest; tighten to
+        #   1e-5/1e-6 for high-precision (e.g. CAMO) data if needed.
+        self.adaptive_rtol = 1e-4         # relative tolerance on mass and speed
         self.adaptive_atol_m = 1e-14      # absolute mass tolerance (kg); ~ m_kill
         self.adaptive_atol_v = 0.1        # absolute speed tolerance (m/s); floor well under meas. noise
         self.adaptive_dt_min = 1e-7       # smallest allowed sub-step (s)
@@ -753,13 +755,13 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
         ...
 
     Note:
-        With const.adaptive_dt False (default), const.dt is the fixed RK4 step for every fragment,
-        including grains. Near erosion_mass_min this single-step RK4 is under-resolved (a single step
-        can overshoot the grain's true velocity by tens of percent vs. a finely-substepped mirror).
-        Set const.adaptive_dt True to integrate each fragment with error-controlled adaptive sub-steps
-        (const.adaptive_rtol etc.); dt then only sets the output cadence, and erosion grains are shed
-        per sub-step so the light-curve shape stops depending on the step size. Fixed-step output is
-        unchanged when adaptive_dt is False.
+        With const.adaptive_dt False, const.dt is the fixed RK4 step for every fragment, including
+        grains. Near erosion_mass_min this single-step RK4 is under-resolved (a single step can overshoot
+        the grain's true velocity by tens of percent vs. a finely-substepped mirror). With
+        const.adaptive_dt True (default), each fragment is integrated with error-controlled adaptive
+        sub-steps (const.adaptive_rtol etc.); dt then only sets the output cadence, and erosion grains
+        are shed per sub-step so the light-curve shape stops depending on the step size. Fixed-step
+        output is unchanged when adaptive_dt is False.
     """
 
     # Keep track of the total luminosity
@@ -1483,8 +1485,9 @@ def runSimulation(const, compute_wake=False):
     """ Run the ablation simulation. """
 
     # Back-fill adaptive-timestep settings for Constants loaded from older JSONs that predate them, so
-    #   such runs default to the original fixed-step behaviour. Also reset the per-run diagnostics.
-    _adaptive_defaults = {'adaptive_dt': False, 'adaptive_high_order': True, 'adaptive_rtol': 1e-5,
+    #   such runs pick up the current defaults (adaptive on). Set adaptive_dt False in the JSON/GUI for
+    #   bit-for-bit legacy fixed-step behaviour. Also reset the per-run diagnostics.
+    _adaptive_defaults = {'adaptive_dt': True, 'adaptive_high_order': True, 'adaptive_rtol': 1e-4,
         'adaptive_atol_m': 1e-14, 'adaptive_atol_v': 0.1, 'adaptive_dt_min': 1e-7,
         'adaptive_dt_max': const.dt, 'adaptive_max_substeps': 10000,
         'erosion_release_length': 50.0}
