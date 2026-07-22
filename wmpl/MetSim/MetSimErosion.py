@@ -23,7 +23,7 @@ import scipy.integrate
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from wmpl.MetSim.MetSimErosionCyTools import massLossRK4, decelerationRK4, luminousEfficiency, \
-    ionizationEfficiency, atmDensityPoly, adaptiveSingleBodyStep
+    ionizationEfficiency, atmDensityPoly, adaptiveSingleBodyStep, adaptiveDP45Step
 
 
 ### DEFINE CONSTANTS
@@ -50,6 +50,10 @@ class Constants(object):
         #   path and reproduces prior results exactly. When True, each fragment sub-steps adaptively
         #   within each dt to meet the tolerances below, while the output cadence stays fixed at dt. ###
         self.adaptive_dt = False
+        # Adaptive integrator: True -> embedded Dormand-Prince RK45 on the coupled (mass, velocity)
+        #   system (fewer RHS evals per sub-step, higher order -> ~3-4x faster); False -> step-doubling
+        #   on the original operator-split RK4. Both meet the same tolerance; DP45 is the default.
+        self.adaptive_high_order = True
         # Tolerance targets NUMERICAL error below MEASUREMENT noise (~0.1 mag, ~0.1 km/s at ~25 FPS),
         #   not machine convergence. rtol=1e-5 keeps the single-body velocity error ~0.1-0.3 km/s (at or
         #   below typical measurement precision) at a fraction of the cost of a tighter tol; tighten to
@@ -815,10 +819,13 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
 
             erosion_active = 1 if (frag.erosion_enabled and (frag.erosion_coeff > 0)) else 0
 
+            _stepper = adaptiveDP45Step if getattr(const, 'adaptive_high_order', True) \
+                else adaptiveSingleBodyStep
+
             (frag.m, frag.v, frag.vv, frag.vh, frag.length, frag.h_grav_drop_total, frag.h, rho_atm,
                 mass_loss_ablation, mass_loss_erosion, deceleration_total, went_up, n_sub,
                 frag.adaptive_h_sub, runaway, floor_accepts, erosion_events_adaptive) \
-                    = adaptiveSingleBodyStep(
+                    = _stepper(
                     const.dt, frag.K, frag.sigma, frag.erosion_coeff, erosion_active,
                     frag.m, frag.v, frag.vv, frag.vh, frag.length, frag.h_grav_drop_total,
                     const.h_init, const.zenith_angle, const.r_earth, G0, const.dens_co,
@@ -1467,9 +1474,9 @@ def runSimulation(const, compute_wake=False):
 
     # Back-fill adaptive-timestep settings for Constants loaded from older JSONs that predate them, so
     #   such runs default to the original fixed-step behaviour. Also reset the per-run diagnostics.
-    _adaptive_defaults = {'adaptive_dt': False, 'adaptive_rtol': 1e-5, 'adaptive_atol_m': 1e-14,
-        'adaptive_atol_v': 0.1, 'adaptive_dt_min': 1e-7, 'adaptive_dt_max': const.dt,
-        'adaptive_max_substeps': 10000}
+    _adaptive_defaults = {'adaptive_dt': False, 'adaptive_high_order': True, 'adaptive_rtol': 1e-5,
+        'adaptive_atol_m': 1e-14, 'adaptive_atol_v': 0.1, 'adaptive_dt_min': 1e-7,
+        'adaptive_dt_max': const.dt, 'adaptive_max_substeps': 10000}
     for _attr, _default in _adaptive_defaults.items():
         if not hasattr(const, _attr):
             setattr(const, _attr, _default)

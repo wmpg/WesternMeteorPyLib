@@ -855,3 +855,243 @@ cpdef adaptiveSingleBodyStep(double dt_macro, double K, double sigma, double ero
     return (m, v, vv, vh, length, h_grav_drop_total, h_new, rho_final,
             dm_abl_macro, dm_ero_macro, decel_return, went_up, n_substeps, h_sub_carry, runaway,
             floor_accepts, erosion_events)
+
+
+
+@cython.cdivision(True)
+cdef void _rhsDP(double m, double vv, double vh, double length, double h_grav_drop,
+                 double K, double sigma, double erosion_coeff, int erosion_active, double m_kill,
+                 double h_init, double zenith_angle, double r_earth, FLOAT_TYPE_t[:] dens_co,
+                 double* dydt, double* extras):
+    """ Coupled RHS for the Dormand-Prince stepper. State y = [m, vv, vh, length]; dydt is filled with
+        [dm/dt, dvv/dt, dvh/dt, dlength/dt]. extras returns [ablation_rate, erosion_rate, drag_decel, rho]
+        for the per-step diagnostics (luminosity, electron density, grain shedding). Mirrors the fixed
+        model: mass loss ~ m^(2/3), drag ~ m^(-1/3) (floored at m_kill), gravity acts only on the height
+        drop (handled by the caller, not here), and the vv/vh derivatives carry the Earth-curvature term. """
+    cdef double v, h, rho, decel, mm, mpos
+    v = sqrt(vv*vv + vh*vh)
+    h = heightCurvatureC(h_init, zenith_angle, length, r_earth) - h_grav_drop
+    rho = atmDensityPolyC(h, dens_co)
+    mpos = m if m > 0.0 else 0.0
+    extras[0] = massLoss(K, sigma, mpos, rho, v)
+    if erosion_active:
+        extras[1] = massLoss(K, erosion_coeff, mpos, rho, v)
+    else:
+        extras[1] = 0.0
+    mm = fmax(m, m_kill)
+    decel = deceleration(K, mm, rho, v)
+    extras[2] = decel
+    extras[3] = rho
+    dydt[0] = extras[0] + extras[1]
+    if v > 0.0:
+        dydt[1] = decel*vv/v - vh*v/(r_earth + h)
+        dydt[2] = decel*vh/v + vv*v/(r_earth + h)
+    else:
+        dydt[1] = 0.0
+        dydt[2] = 0.0
+    dydt[3] = v
+
+
+@cython.cdivision(True)
+cpdef adaptiveDP45Step(double dt_macro, double K, double sigma, double erosion_coeff,
+        int erosion_active, double m, double v, double vv, double vh, double length,
+        double h_grav_drop_total, double h_init, double zenith_angle, double r_earth, double g0,
+        FLOAT_TYPE_t[:] dens_co, double rtol, double atol_m, double atol_v, double m_kill,
+        double dt_min, double dt_max, int max_substeps, double h_sub_init):
+    """ Same contract as adaptiveSingleBodyStep, but advances the coupled [m, vv, vh, length] system
+        with an embedded Dormand-Prince RK45 pair (5th-order solution, 4th-order error estimate) instead
+        of step-doubling. ~7 RHS evaluations per sub-step vs ~24, and the higher order takes larger
+        steps, so it is substantially faster for the same tolerance. rho is refreshed at every stage
+        (from the stage's height), so there is no operator-split/frozen-rho error. Gravity drop is added
+        once per accepted sub-step (as in the fixed model). Returns the 17-tuple:
+          (m, v, vv, vh, length, h_grav_drop_total, h_new, rho_final, dm_abl_macro, dm_ero_macro,
+           decel_return, went_up, n_substeps, h_sub_carry, runaway, floor_accepts, erosion_events). """
+
+    # Dormand-Prince (RK45) Butcher tableau
+    cdef double a21 = 1.0/5
+    cdef double a31 = 3.0/40, a32 = 9.0/40
+    cdef double a41 = 44.0/45, a42 = -56.0/15, a43 = 32.0/9
+    cdef double a51 = 19372.0/6561, a52 = -25360.0/2187, a53 = 64448.0/6561, a54 = -212.0/729
+    cdef double a61 = 9017.0/3168, a62 = -355.0/33, a63 = 46732.0/5247, a64 = 49.0/176, a65 = -5103.0/18656
+    cdef double a71 = 35.0/384, a73 = 500.0/1113, a74 = 125.0/192, a75 = -2187.0/6784, a76 = 11.0/84
+    # 5th-order weights b = 7th stage row (FSAL); 4th-order embedded weights b*
+    cdef double b1 = 35.0/384, b3 = 500.0/1113, b4 = 125.0/192, b5 = -2187.0/6784, b6 = 11.0/84
+    cdef double bs1 = 5179.0/57600, bs3 = 7571.0/16695, bs4 = 393.0/640, bs5 = -92097.0/339200
+    cdef double bs6 = 187.0/2100, bs7 = 1.0/40
+
+    cdef double t = 0.0
+    cdef double h_sub, hh, gv, h_cur, rho0
+    cdef double y[4]
+    cdef double yt[4]
+    cdef double k1[4]
+    cdef double k2[4]
+    cdef double k3[4]
+    cdef double k4[4]
+    cdef double k5[4]
+    cdef double k6[4]
+    cdef double k7[4]
+    # extras per stage: [ablation_rate, erosion_rate, drag_decel, rho]
+    cdef double e1[4]
+    cdef double e2[4]
+    cdef double e3[4]
+    cdef double e4[4]
+    cdef double e5[4]
+    cdef double e6[4]
+    cdef double e7[4]
+    cdef double m_new, v_new, vv_new, vh_new, len_new
+    cdef double abl_step, ero_step, drag_step, err_m, err_v, sc_m, sc_v, E, E_prev, fac
+    cdef double dm_abl_macro = 0.0, dm_ero_macro = 0.0, dv_drag = 0.0
+    cdef double h_new, decel_return, rho_final, rho_last = 0.0, h_sub_carry
+    cdef int n_substeps = 0, went_up = 0, runaway = 0, at_floor, was_clamped, floor_accepts = 0
+    cdef int c
+    cdef double safety = 0.9, facmin = 0.2, facmax = 5.0
+
+    erosion_events = [] if erosion_active else None
+
+    y[0] = m; y[1] = vv; y[2] = vh; y[3] = length
+
+    h_sub = h_sub_init
+    if h_sub <= 0:
+        h_sub = dt_macro
+    if h_sub > dt_max:
+        h_sub = dt_max
+    if h_sub < dt_min:
+        h_sub = dt_min
+    E_prev = 1.0
+    h_sub_carry = h_sub
+
+    while t < dt_macro:
+
+        was_clamped = 0
+        if t + h_sub > dt_macro:
+            was_clamped = 1
+            h_sub = dt_macro - t
+
+        # Height/gravity at the sub-step start (gravity drop uses the start-of-step g, as in the fixed model)
+        h_cur = heightCurvatureC(h_init, zenith_angle, y[3], r_earth) - h_grav_drop_total
+        gv = g0/((1.0 + h_cur/r_earth)*(1.0 + h_cur/r_earth))
+
+        # --- 7 Dormand-Prince stages (h_grav_drop frozen across the sub-step) ---
+        _rhsDP(y[0], y[1], y[2], y[3], h_grav_drop_total, K, sigma, erosion_coeff, erosion_active,
+               m_kill, h_init, zenith_angle, r_earth, dens_co, k1, e1)
+        rho0 = e1[3]
+        for c in range(4):
+            yt[c] = y[c] + h_sub*a21*k1[c]
+        _rhsDP(yt[0], yt[1], yt[2], yt[3], h_grav_drop_total, K, sigma, erosion_coeff, erosion_active,
+               m_kill, h_init, zenith_angle, r_earth, dens_co, k2, e2)
+        for c in range(4):
+            yt[c] = y[c] + h_sub*(a31*k1[c] + a32*k2[c])
+        _rhsDP(yt[0], yt[1], yt[2], yt[3], h_grav_drop_total, K, sigma, erosion_coeff, erosion_active,
+               m_kill, h_init, zenith_angle, r_earth, dens_co, k3, e3)
+        for c in range(4):
+            yt[c] = y[c] + h_sub*(a41*k1[c] + a42*k2[c] + a43*k3[c])
+        _rhsDP(yt[0], yt[1], yt[2], yt[3], h_grav_drop_total, K, sigma, erosion_coeff, erosion_active,
+               m_kill, h_init, zenith_angle, r_earth, dens_co, k4, e4)
+        for c in range(4):
+            yt[c] = y[c] + h_sub*(a51*k1[c] + a52*k2[c] + a53*k3[c] + a54*k4[c])
+        _rhsDP(yt[0], yt[1], yt[2], yt[3], h_grav_drop_total, K, sigma, erosion_coeff, erosion_active,
+               m_kill, h_init, zenith_angle, r_earth, dens_co, k5, e5)
+        for c in range(4):
+            yt[c] = y[c] + h_sub*(a61*k1[c] + a62*k2[c] + a63*k3[c] + a64*k4[c] + a65*k5[c])
+        _rhsDP(yt[0], yt[1], yt[2], yt[3], h_grav_drop_total, K, sigma, erosion_coeff, erosion_active,
+               m_kill, h_init, zenith_angle, r_earth, dens_co, k6, e6)
+        for c in range(4):
+            yt[c] = y[c] + h_sub*(a71*k1[c] + a73*k3[c] + a74*k4[c] + a75*k5[c] + a76*k6[c])
+        _rhsDP(yt[0], yt[1], yt[2], yt[3], h_grav_drop_total, K, sigma, erosion_coeff, erosion_active,
+               m_kill, h_init, zenith_angle, r_earth, dens_co, k7, e7)
+
+        # 5th-order solution (= yt above, the 7th stage node) and error vs the 4th-order embedded
+        m_new = yt[0]; vv_new = yt[1]; vh_new = yt[2]; len_new = yt[3]
+        v_new = sqrt(vv_new*vv_new + vh_new*vh_new)
+
+        # Error estimate on mass and speed (difference of 5th- and 4th-order weights)
+        err_m = fabs(h_sub*((b1-bs1)*k1[0] + (b3-bs3)*k3[0] + (b4-bs4)*k4[0] + (b5-bs5)*k5[0]
+                            + (b6-bs6)*k6[0] + (0.0-bs7)*k7[0]))
+        # velocity error via the vv/vh error components projected onto speed
+        err_v = fabs(h_sub*((b1-bs1)*k1[1] + (b3-bs3)*k3[1] + (b4-bs4)*k4[1] + (b5-bs5)*k5[1]
+                            + (b6-bs6)*k6[1] + (0.0-bs7)*k7[1]))
+        err_v += fabs(h_sub*((b1-bs1)*k1[2] + (b3-bs3)*k3[2] + (b4-bs4)*k4[2] + (b5-bs5)*k5[2]
+                             + (b6-bs6)*k6[2] + (0.0-bs7)*k7[2]))
+        sc_m = atol_m + rtol*fmax(fabs(m_new), fabs(y[0]))
+        sc_v = atol_v + rtol*fmax(v_new, v)
+        E = sqrt(0.5*((err_m/sc_m)*(err_m/sc_m) + (err_v/sc_v)*(err_v/sc_v)))
+
+        at_floor = 1 if h_sub <= dt_min*(1.0 + 1e-12) else 0
+
+        if (E <= 1.0) or at_floor:
+
+            if at_floor and (E > 1.0):
+                floor_accepts += 1
+
+            # Per-step mass loss split (integral of each rate with the 5th-order weights)
+            abl_step = h_sub*(b1*e1[0] + b3*e3[0] + b4*e4[0] + b5*e5[0] + b6*e6[0])
+            ero_step = h_sub*(b1*e1[1] + b3*e3[1] + b4*e4[1] + b5*e5[1] + b6*e6[1])
+            drag_step = h_sub*(b1*e1[2] + b3*e3[2] + b4*e4[2] + b5*e5[2] + b6*e6[2])
+            dm_abl_macro += abl_step
+            dm_ero_macro += ero_step
+            dv_drag += drag_step
+
+            # Commit the state; floor the mass at 0 and add the gravity drop for this sub-step
+            y[0] = m_new if m_new > 0.0 else 0.0
+            y[1] = vv_new; y[2] = vh_new; y[3] = len_new
+            h_grav_drop_total += 0.5*gv*h_sub*h_sub
+            rho_last = rho0
+            t += h_sub
+            n_substeps += 1
+
+            # Shed the eroded mass at this sub-step's resolved state (see adaptiveSingleBodyStep)
+            if erosion_active and (ero_step < 0):
+                erosion_events.append((
+                    -ero_step,
+                    heightCurvatureC(h_init, zenith_angle, y[3], r_earth) - h_grav_drop_total,
+                    sqrt(y[1]*y[1] + y[2]*y[2]), y[1], y[2], y[3], h_grav_drop_total))
+
+            if y[0] <= m_kill:          # exhausted
+                break
+            if y[1] > 0.0:              # turned upward -> freeze, matches fixed (vv zeroed)
+                y[1] = 0.0
+                went_up = 1
+                break
+            v_new = sqrt(y[1]*y[1] + y[2]*y[2])
+            if v_new <= 0.0:
+                break
+            if n_substeps >= max_substeps:
+                runaway = 1
+                break
+
+            # PI step-size controller (order p=4 for the error estimate -> k=5)
+            if E <= 0:
+                E = 1e-10
+            fac = safety*(E**(-0.7/5.0))*(E_prev**(0.4/5.0))
+            E_prev = E
+            if fac < facmin:
+                fac = facmin
+            if fac > facmax:
+                fac = facmax
+            h_sub = h_sub*fac
+            if h_sub > dt_max:
+                h_sub = dt_max
+            if h_sub < dt_min:
+                h_sub = dt_min
+            if not was_clamped:
+                h_sub_carry = h_sub
+        else:
+            fac = safety*(E**(-1.0/5.0))
+            if fac < facmin:
+                fac = facmin
+            h_sub = h_sub*fac
+            if h_sub < dt_min:
+                h_sub = dt_min
+
+    m = y[0]; vv = y[1]; vh = y[2]; length = y[3]
+    v = sqrt(vv*vv + vh*vh)
+    h_new = heightCurvatureC(h_init, zenith_angle, length, r_earth) - h_grav_drop_total
+    if h_new > 0:
+        rho_final = atmDensityPolyC(h_new, dens_co)
+    else:
+        rho_final = rho_last
+    decel_return = dv_drag/dt_macro
+
+    return (m, v, vv, vh, length, h_grav_drop_total, h_new, rho_final,
+            dm_abl_macro, dm_ero_macro, decel_return, went_up, n_substeps, h_sub_carry, runaway,
+            floor_accepts, erosion_events)
