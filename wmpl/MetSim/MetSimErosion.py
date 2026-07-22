@@ -65,6 +65,16 @@ class Constants(object):
         self.adaptive_dt_max = 0.005      # largest allowed sub-step (s); should be <= dt
         self.adaptive_max_substeps = 10000  # runaway guard, sub-steps per fragment per macro step
 
+        # Along-track grain-release interval (m). In adaptive mode grains are shed once per accepted
+        #   sub-step, so the sub-step cadence sets the grain-birth resolution. Capping an eroding
+        #   fragment's sub-step at erosion_release_length/v releases grains roughly every this many
+        #   metres of flight - a physical resolution independent of dt and the error tolerance, so the
+        #   erosion light-curve shape stops depending on dt. Smaller = finer grain sampling + slower.
+        #   Only used in adaptive mode and only for eroding fragments (grains do not erode further).
+        #   Not shown in the GUI - it is a dt-independent physical default that rarely needs changing;
+        #   tune via the sim-fit JSON if finer/coarser grain sampling is wanted.
+        self.erosion_release_length = 50.0
+
         # Time elapsed since the beginning
         self.total_time = 0
 
@@ -831,7 +841,7 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
                     const.h_init, const.zenith_angle, const.r_earth, G0, const.dens_co,
                     const.adaptive_rtol, const.adaptive_atol_m, const.adaptive_atol_v, const.m_kill,
                     const.adaptive_dt_min, const.adaptive_dt_max, const.adaptive_max_substeps,
-                    frag.adaptive_h_sub)
+                    frag.adaptive_h_sub, getattr(const, 'erosion_release_length', 50.0))
 
             # Diagnostics (feed the cost study; also used to warn once on runaway/under-resolved steps)
             const.adaptive_substeps_total += n_sub
@@ -1476,7 +1486,8 @@ def runSimulation(const, compute_wake=False):
     #   such runs default to the original fixed-step behaviour. Also reset the per-run diagnostics.
     _adaptive_defaults = {'adaptive_dt': False, 'adaptive_high_order': True, 'adaptive_rtol': 1e-5,
         'adaptive_atol_m': 1e-14, 'adaptive_atol_v': 0.1, 'adaptive_dt_min': 1e-7,
-        'adaptive_dt_max': const.dt, 'adaptive_max_substeps': 10000}
+        'adaptive_dt_max': const.dt, 'adaptive_max_substeps': 10000,
+        'erosion_release_length': 50.0}
     for _attr, _default in _adaptive_defaults.items():
         if not hasattr(const, _attr):
             setattr(const, _attr, _default)
