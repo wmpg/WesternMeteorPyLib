@@ -3283,6 +3283,8 @@ class MetSimGUI(QMainWindow):
         self.checkBoxAdaptiveDt.setChecked(getattr(const, 'adaptive_dt', True))
         self.inputTimeStep.setEnabled(not self.checkBoxAdaptiveDt.isChecked())
         self.inputAdaptiveRtol.setText("{:.1e}".format(getattr(const, 'adaptive_rtol', 1e-5)))
+        self.inputErosionReleaseLength.setText(
+            "{:.0f}".format(getattr(const, 'erosion_release_length', 50.0)))
 
         self.inputHtInit.setText("{:.3f}".format(const.h_init/1000))
         self.inputP0M.setText("{:d}".format(int(const.P_0m)))
@@ -3597,6 +3599,8 @@ class MetSimGUI(QMainWindow):
         # rtol only matters in adaptive mode: enable its box/label with the checkbox, disable otherwise
         self.inputAdaptiveRtol.setEnabled(self.const.adaptive_dt)
         self.labelAdaptiveRtol.setEnabled(self.const.adaptive_dt)
+        self.inputErosionReleaseLength.setEnabled(self.const.adaptive_dt)
+        self.labelErosionReleaseLength.setEnabled(self.const.adaptive_dt)
 
 
     def checkBoxFragmentationShowIndividualLCsSignal(self, event):
@@ -3683,6 +3687,8 @@ class MetSimGUI(QMainWindow):
         self.const.adaptive_dt = self.checkBoxAdaptiveDt.isChecked()
         self.const.adaptive_rtol = self._tryReadBox(self.inputAdaptiveRtol,
             getattr(self.const, 'adaptive_rtol', 1e-5))
+        self.const.erosion_release_length = self._tryReadBox(self.inputErosionReleaseLength,
+            getattr(self.const, 'erosion_release_length', 50.0))
         self.const.P_0m = self._tryReadBox(self.inputP0M, self.const.P_0m)
 
         self.const.h_init   = 1000*self._tryReadBox(self.inputHtInit, self.const.h_init/1000)

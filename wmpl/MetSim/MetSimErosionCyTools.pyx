@@ -692,7 +692,7 @@ cpdef adaptiveSingleBodyStep(double dt_macro, double K, double sigma, double ero
         double h_grav_drop_total, double h_init, double zenith_angle, double r_earth, double g0,
         FLOAT_TYPE_t[:] dens_co, double rtol, double atol_m, double atol_v, double m_kill,
         double dt_min, double dt_max, int max_substeps, double h_sub_init,
-        double erosion_release_length):
+        double erosion_release_length, double erosion_release_vref):
     """ Advance ONE fragment across a full macro interval dt_macro using error-controlled adaptive
         sub-steps (step-doubling on the operator-split RK4), refreshing the atmosphere/height each
         sub-step. Reproduces the single-body advance of the fixed engine in the one-sub-step limit, but
@@ -727,8 +727,14 @@ cpdef adaptiveSingleBodyStep(double dt_macro, double K, double sigma, double ero
         max_substeps: [int] Sub-step cap per macro interval (runaway guard).
         h_sub_init: [double] Warm-start sub-step from the previous macro step (s); <= 0 means "use dt_macro".
         erosion_release_length: [double] Along-track grain-release interval (m). For an eroding fragment
-            the sub-step is capped at erosion_release_length/v so grains are shed ~every this many metres,
-            making the grain-birth cadence independent of dt/rtol. Ignored for non-eroding fragments.
+            the sub-step is capped at erosion_release_length/min(v, erosion_release_vref) so grains are
+            shed ~every this many metres, making the grain-birth cadence independent of dt/rtol. Ignored
+            for non-eroding fragments.
+        erosion_release_vref: [double] Reference speed (m/s) above which the along-track cadence is frozen
+            in TIME rather than distance: fragments faster than this cap their sub-step at
+            erosion_release_length/erosion_release_vref instead of .../v, bounding the sub-step count for
+            fast meteors (cost grows with v otherwise). Slower fragments keep the exact distance cadence.
+            Set <= 0 to disable the cap (pure distance cadence, the original behaviour).
 
     Return:
         A 17-tuple:
@@ -753,6 +759,7 @@ cpdef adaptiveSingleBodyStep(double dt_macro, double K, double sigma, double ero
     """
 
     cdef double t = 0.0
+    cdef double v_cap
     cdef double h_sub, h_cur, rho_atm, rho_mid, rho_last
     cdef double dm_abl_big, dm_ero_big, dm_tot_big, decel_big
     cdef double dm_abl_1, dm_ero_1, dm_tot_1, decel_1
@@ -810,8 +817,13 @@ cpdef adaptiveSingleBodyStep(double dt_macro, double K, double sigma, double ero
         # Cap an eroding fragment's sub-step so grains are shed roughly every erosion_release_length
         #   metres of flight, making the grain-birth cadence (and hence the erosion light curve)
         #   independent of dt and the error tolerance. Not applied to non-eroding fragments or grains.
-        if erosion_active and (v > 0) and (erosion_release_length > 0) and (h_sub*v > erosion_release_length):
-            h_sub = erosion_release_length/v
+        #   Above erosion_release_vref the cadence is frozen in time (uses v_cap = vref, not v) so the
+        #   sub-step count stays bounded for fast meteors; slower fragments keep the pure distance cadence.
+        v_cap = v
+        if (erosion_release_vref > 0) and (v > erosion_release_vref):
+            v_cap = erosion_release_vref
+        if erosion_active and (v > 0) and (erosion_release_length > 0) and (h_sub*v_cap > erosion_release_length):
+            h_sub = erosion_release_length/v_cap
 
         hh = 0.5*h_sub
 
@@ -1024,7 +1036,7 @@ cpdef adaptiveDP45Step(double dt_macro, double K, double sigma, double erosion_c
         double h_grav_drop_total, double h_init, double zenith_angle, double r_earth, double g0,
         FLOAT_TYPE_t[:] dens_co, double rtol, double atol_m, double atol_v, double m_kill,
         double dt_min, double dt_max, int max_substeps, double h_sub_init,
-        double erosion_release_length):
+        double erosion_release_length, double erosion_release_vref):
     """ Advance ONE fragment across a full macro interval dt_macro, like adaptiveSingleBodyStep, but with
         an embedded Dormand-Prince RK45 pair (5th-order solution + 4th-order error estimate) on the
         COUPLED system y = [m, vv, vh, length] instead of step-doubling on the operator split. One
@@ -1051,7 +1063,7 @@ cpdef adaptiveDP45Step(double dt_macro, double K, double sigma, double erosion_c
     cdef double bs6 = 187.0/2100, bs7 = 1.0/40
 
     cdef double t = 0.0
-    cdef double h_sub, hh, gv, h_cur, rho0, v_cur
+    cdef double h_sub, hh, gv, h_cur, rho0, v_cur, v_cap
     cdef double y[4]
     cdef double yt[4]
     cdef double k1[4]
@@ -1101,10 +1113,15 @@ cpdef adaptiveDP45Step(double dt_macro, double K, double sigma, double erosion_c
         # Cap an eroding fragment's sub-step so grains are shed roughly every erosion_release_length
         #   metres of flight - a grain-birth cadence independent of dt and the error tolerance (see the
         #   step-doubling stepper for the rationale). Only for eroding fragments; grains do not erode.
+        #   Above erosion_release_vref the cadence is frozen in time (v_cap = vref) to bound the sub-step
+        #   count for fast meteors; slower fragments keep the pure distance cadence.
         v_cur = sqrt(y[1]*y[1] + y[2]*y[2])
+        v_cap = v_cur
+        if (erosion_release_vref > 0) and (v_cur > erosion_release_vref):
+            v_cap = erosion_release_vref
         if erosion_active and (v_cur > 0) and (erosion_release_length > 0) \
-                and (h_sub*v_cur > erosion_release_length):
-            h_sub = erosion_release_length/v_cur
+                and (h_sub*v_cap > erosion_release_length):
+            h_sub = erosion_release_length/v_cap
 
         # Height/gravity at the sub-step start (gravity drop uses the start-of-step g, as in the fixed model)
         h_cur = heightCurvatureC(h_init, zenith_angle, y[3], r_earth) - h_grav_drop_total
