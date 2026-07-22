@@ -4317,9 +4317,16 @@ class MetSimGUI(QMainWindow):
             norm_sim_time = sr.time_arr - self.sim_time_beg
 
 
-            self.norm_sim_ht = sr.leading_frag_height_arr[norm_sim_len > 0]
-            self.norm_sim_time = norm_sim_time[norm_sim_len > 0]
-            self.norm_sim_len = norm_sim_len[norm_sim_len > 0]
+            # Keep only the part of the trajectory past the observed begin (norm_sim_len > 0). If too
+            #   little of the simulation reaches there (< 2 points), fall back to the full arrays so the
+            #   interpolators still build instead of crashing on an empty array.
+            mask = norm_sim_len > 0
+            if np.count_nonzero(mask) < 2:
+                mask = np.ones_like(norm_sim_len, dtype=bool)
+
+            self.norm_sim_ht = sr.leading_frag_height_arr[mask]
+            self.norm_sim_time = norm_sim_time[mask]
+            self.norm_sim_len = norm_sim_len[mask]
 
             # Interpolate the normalized length by time
             self.sim_norm_len_interp = scipy.interpolate.interp1d(self.norm_sim_time, self.norm_sim_len,
@@ -5237,7 +5244,7 @@ class MetSimGUI(QMainWindow):
     def showPreviousResults(self):
         """ Show previous simulation results and parameters. """
 
-        if self.simulation_results_prev is not None:
+        if self.simulationUsable(self.simulation_results_prev):
 
             self.updateInputBoxes(show_previous=True)
             self.updateInterpolations(show_previous=True)
@@ -5248,10 +5255,45 @@ class MetSimGUI(QMainWindow):
 
 
 
+    def simulationUsable(self, sr):
+        """ Check that a SimulationResults has enough valid points to interpolate/plot. A degenerate
+            run (e.g. the meteoroid is killed on the first tick, producing 0-1 rows or all-NaN
+            magnitudes) would otherwise crash the interpolation/plotting chain. """
+
+        if sr is None:
+            return False
+
+        try:
+            # Need at least two samples spanning a height range to build the interpolators
+            if len(sr.time_arr) < 2:
+                return False
+            finite_ht = np.isfinite(sr.leading_frag_height_arr)
+            if np.count_nonzero(finite_ht) < 2:
+                return False
+            if np.nanmin(sr.leading_frag_height_arr) == np.nanmax(sr.leading_frag_height_arr):
+                return False
+            # Need at least some real luminosity to compute magnitudes
+            if not np.any(sr.luminosity_arr > 0):
+                return False
+        except (AttributeError, TypeError, ValueError):
+            return False
+
+        return True
+
+
     def showCurrentResults(self):
         """ Show current simulation results and parameters. """
 
         self.updateInputBoxes(show_previous=False)
+
+        # Guard against a degenerate simulation (e.g. killed on the first tick): skip the
+        #   interpolation/plotting chain with a message instead of crashing the whole app
+        if not self.simulationUsable(self.simulation_results):
+            print("WARNING: the simulation produced no usable output (the meteoroid may be dying "
+                "immediately - check the initial parameters, e.g. velocity/mass/erosion/adaptive "
+                "settings). Skipping the plot update.")
+            return
+
         self.updateInterpolations(show_previous=False)
         self.updateMagnitudePlot(show_previous=False)
         self.updateVelocityPlot(show_previous=False)
