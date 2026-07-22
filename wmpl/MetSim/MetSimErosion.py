@@ -57,10 +57,11 @@ class Constants(object):
         #   on the original operator-split RK4. Both meet the same tolerance; DP45 is the default.
         self.adaptive_high_order = True
         # Tolerance targets NUMERICAL error below MEASUREMENT noise (~0.1 mag, ~0.1 km/s at ~25 FPS),
-        #   not machine convergence. rtol=1e-4 keeps the light curve and dynamics indistinguishable from
-        #   the fixed-step result (well under measurement precision) while running fastest; tighten to
-        #   1e-5/1e-6 for high-precision (e.g. CAMO) data if needed.
-        self.adaptive_rtol = 1e-4         # relative tolerance on mass and speed
+        #   not machine convergence. rtol=1e-5 keeps the light curve and dynamics indistinguishable from
+        #   the fixed-step result (well under measurement precision) at negligible extra cost over 1e-4
+        #   (for eroding meteors the sub-step count is set by erosion_release_length, not rtol); loosen to
+        #   1e-4 for a hair more speed on tolerance-bound cases, or tighten to 1e-6 for CAMO-grade data.
+        self.adaptive_rtol = 1e-5         # relative tolerance on mass and speed
         self.adaptive_atol_m = 1e-14      # absolute mass tolerance (kg); ~ m_kill
         self.adaptive_atol_v = 0.1        # absolute speed tolerance (m/s); floor well under meas. noise
         self.adaptive_dt_min = 1e-7       # smallest allowed sub-step (s)
@@ -1487,7 +1488,7 @@ def runSimulation(const, compute_wake=False):
     # Back-fill adaptive-timestep settings for Constants loaded from older JSONs that predate them, so
     #   such runs pick up the current defaults (adaptive on). Set adaptive_dt False in the JSON/GUI for
     #   bit-for-bit legacy fixed-step behaviour. Also reset the per-run diagnostics.
-    _adaptive_defaults = {'adaptive_dt': True, 'adaptive_high_order': True, 'adaptive_rtol': 1e-4,
+    _adaptive_defaults = {'adaptive_dt': True, 'adaptive_high_order': True, 'adaptive_rtol': 1e-5,
         'adaptive_atol_m': 1e-14, 'adaptive_atol_v': 0.1, 'adaptive_dt_min': 1e-7,
         'adaptive_dt_max': const.dt, 'adaptive_max_substeps': 10000,
         'erosion_release_length': 50.0}

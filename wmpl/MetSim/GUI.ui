@@ -381,7 +381,7 @@
       </rect>
      </property>
      <property name="toolTip">
-      <string>Relative error tolerance for the adaptive time step (only used when 'adaptive' is checked). Each sub-step is accepted only if its estimated relative error in mass and speed is below rtol; otherwise the step is shrunk and retried. Smaller rtol = more accurate but more sub-steps (slower). Rough guide for the single-body velocity error: 1e-4 default (fast; light curve indistinguishable from fixed-step), 1e-5 tighter (~0.3 km/s), 1e-6 high-precision / CAMO-grade (~0.05 km/s). Set it so the numerical error sits below your measurement noise. Ignored when 'adaptive' is off.</string>
+      <string>Relative error tolerance for the adaptive time step (only used when 'adaptive' is checked). Each sub-step is accepted only if its estimated relative error in mass and speed is below rtol; otherwise the step is shrunk and retried. Smaller rtol = more accurate but more sub-steps (slower). Rough guide for the single-body velocity error: 1e-4 fast/coarse (~1 km/s), 1e-5 default (~0.3 km/s; light curve indistinguishable from fixed-step), 1e-6 high-precision / CAMO-grade (~0.05 km/s). Set it so the numerical error sits below your measurement noise. Ignored when 'adaptive' is off.</string>
      </property>
     </widget>
     <widget class="QLabel" name="labelAdaptiveRtol">

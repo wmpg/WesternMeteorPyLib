@@ -3282,7 +3282,7 @@ class MetSimGUI(QMainWindow):
         # Adaptive time step toggle: when on, dt is only the output cadence and its box is disabled
         self.checkBoxAdaptiveDt.setChecked(getattr(const, 'adaptive_dt', True))
         self.inputTimeStep.setEnabled(not self.checkBoxAdaptiveDt.isChecked())
-        self.inputAdaptiveRtol.setText("{:.1e}".format(getattr(const, 'adaptive_rtol', 1e-4)))
+        self.inputAdaptiveRtol.setText("{:.1e}".format(getattr(const, 'adaptive_rtol', 1e-5)))
 
         self.inputHtInit.setText("{:.3f}".format(const.h_init/1000))
         self.inputP0M.setText("{:d}".format(int(const.P_0m)))
