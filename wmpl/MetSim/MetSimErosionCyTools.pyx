@@ -665,6 +665,7 @@ cpdef adaptiveSingleBodyStep(double dt_macro, double K, double sigma, double ero
     cdef double err_m, err_v, sc_m, sc_v, E, E_prev, fac
     cdef double dm_abl_macro = 0.0
     cdef double dm_ero_macro = 0.0
+    cdef double dv_drag = 0.0          # accumulated DRAG-only speed change (excludes gravity/curvature)
     cdef double v_start = v
     cdef int n_substeps = 0
     cdef int went_up = 0
@@ -763,6 +764,10 @@ cpdef adaptiveSingleBodyStep(double dt_macro, double K, double sigma, double ero
             # Accept the two-half (more accurate) state; accumulate per-species mass loss (unclamped)
             dm_abl_macro += dm_abl_1 + dm_abl_2
             dm_ero_macro += dm_ero_1 + dm_ero_2
+            # Accumulate the DRAG-only speed change over this sub-step (decel_1/decel_2 are the pure-drag
+            #   dv/dt from decelerationRK4). This feeds the luminosity deceleration term - unlike the net
+            #   (v_start - v), it excludes the gravity/curvature reallocation, matching the fixed path.
+            dv_drag += (decel_1 + decel_2)*hh
             m = out2[0]; v = out2[1]; vv = out2[2]; vh = out2[3]
             length = out2[4]; h_grav_drop_total = out2[5]
             t += h_sub
@@ -823,7 +828,7 @@ cpdef adaptiveSingleBodyStep(double dt_macro, double K, double sigma, double ero
     else:
         rho_final = rho_last
 
-    decel_return = -(v_start - v)/dt_macro   # macro-averaged dv/dt (negative), matches decelerationRK4 sign
+    decel_return = dv_drag/dt_macro   # macro-averaged DRAG dv/dt (negative), matches decelerationRK4 sign
 
     return (m, v, vv, vh, length, h_grav_drop_total, h_new, rho_final,
             dm_abl_macro, dm_ero_macro, decel_return, went_up, n_substeps, h_sub, runaway,
