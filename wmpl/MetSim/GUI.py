@@ -3282,6 +3282,7 @@ class MetSimGUI(QMainWindow):
         # Adaptive time step toggle: when on, dt is only the output cadence and its box is disabled
         self.checkBoxAdaptiveDt.setChecked(getattr(const, 'adaptive_dt', False))
         self.inputTimeStep.setEnabled(not self.checkBoxAdaptiveDt.isChecked())
+        self.inputAdaptiveRtol.setText("{:.1e}".format(getattr(const, 'adaptive_rtol', 1e-5)))
 
         self.inputHtInit.setText("{:.3f}".format(const.h_init/1000))
         self.inputP0M.setText("{:d}".format(int(const.P_0m)))
@@ -3593,6 +3594,10 @@ class MetSimGUI(QMainWindow):
         self.const.adaptive_dt = self.checkBoxAdaptiveDt.isChecked()
         self.inputTimeStep.setDisabled(self.const.adaptive_dt)
 
+        # rtol only matters in adaptive mode: enable its box/label with the checkbox, disable otherwise
+        self.inputAdaptiveRtol.setEnabled(self.const.adaptive_dt)
+        self.labelAdaptiveRtol.setEnabled(self.const.adaptive_dt)
+
 
     def checkBoxFragmentationShowIndividualLCsSignal(self, event):
         """ Toggle computing light curves of individual fragments during complex fragmentation. """
@@ -3676,6 +3681,8 @@ class MetSimGUI(QMainWindow):
 
         self.const.dt = self._tryReadBox(self.inputTimeStep, self.const.dt)
         self.const.adaptive_dt = self.checkBoxAdaptiveDt.isChecked()
+        self.const.adaptive_rtol = self._tryReadBox(self.inputAdaptiveRtol,
+            getattr(self.const, 'adaptive_rtol', 1e-5))
         self.const.P_0m = self._tryReadBox(self.inputP0M, self.const.P_0m)
 
         self.const.h_init   = 1000*self._tryReadBox(self.inputHtInit, self.const.h_init/1000)

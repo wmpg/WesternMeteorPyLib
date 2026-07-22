@@ -92,17 +92,46 @@
     <widget class="QCheckBox" name="checkBoxAdaptiveDt">
      <property name="geometry">
       <rect>
-       <x>250</x>
-       <y>30</y>
-       <width>135</width>
+       <x>303</x>
+       <y>60</y>
+       <width>88</width>
        <height>20</height>
       </rect>
      </property>
      <property name="toolTip">
-      <string>Use error-controlled adaptive sub-stepping (per fragment) instead of the fixed time step. When on, dt is only the output cadence and the dt box is disabled. Tolerances are set via the sim-fit JSON (adaptive_rtol, adaptive_atol_m/v, ...).</string>
+      <string>Use error-controlled adaptive sub-stepping (per fragment) instead of the fixed time step. When on, dt is only the output cadence, the dt box is disabled, and the integration step is chosen automatically to meet the relative tolerance (rtol).</string>
      </property>
      <property name="text">
-      <string>adaptive dt</string>
+      <string>adaptive</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="labelAdaptiveRtol">
+     <property name="geometry">
+      <rect>
+       <x>300</x>
+       <y>90</y>
+       <width>28</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>rtol</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="inputAdaptiveRtol">
+     <property name="geometry">
+      <rect>
+       <x>330</x>
+       <y>90</y>
+       <width>58</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="toolTip">
+      <string>Relative tolerance for the adaptive step (default 1e-5). Smaller = more accurate + slower. Only used when 'adaptive' is checked.</string>
      </property>
     </widget>
     <widget class="QLabel" name="label">
