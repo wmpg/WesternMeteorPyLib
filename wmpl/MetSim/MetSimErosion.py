@@ -1108,7 +1108,7 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
             def _spawnGrainsFromErosion(eroded_mass):
                 """ Distribute the given eroded mass into grains born from the fragment's current state.
                     Uses the enclosing frag/const. """
-                grain_children, const_out = generateFragments(const, frag, eroded_mass, \
+                grain_children, _ = generateFragments(const, frag, eroded_mass, \
                     frag.erosion_mass_index, frag.erosion_mass_min, frag.erosion_mass_max, \
                     keep_eroding=False, mass_model=const.erosion_grain_distribution)
                 const.n_active += len(grain_children)

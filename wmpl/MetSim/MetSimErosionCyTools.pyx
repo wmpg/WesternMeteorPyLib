@@ -588,8 +588,16 @@ cpdef atmDensityPoly(double ht, np.ndarray[FLOAT_TYPE_t, ndim=1] dens_co):
 
 
 cdef inline double clampMassC(double dm, double m):
-    """ Reproduce the "ablate at most the whole mass" clamp (MetSimErosion.py mass-loss clamp):
-        if m + dm < 0, cap the loss at exactly -m so the mass floors at 0. """
+    """ Reproduce the "ablate at most the whole mass" clamp used by the fixed engine: if the mass loss
+        would drive the mass below zero, cap it at exactly -m so the new mass floors at 0.
+
+    Arguments:
+        dm: [double] Proposed mass change over the (sub-)step (kg, normally negative).
+        m: [double] Current fragment mass (kg).
+
+    Return:
+        dm_clamped: [double] dm, or -m if (m + dm) < 0.
+    """
     if (m + dm) < 0:
         return -m
     return dm
@@ -597,13 +605,33 @@ cdef inline double clampMassC(double dm, double m):
 
 @cython.cdivision(True)
 cdef double heightCurvatureC(double h0, double zc, double l, double r_earth):
-    """ Cython twin of heightCurvature() (MetSimErosion.py). Scalar hot-path. """
+    """ Cython/scalar twin of heightCurvature() (MetSimErosion.py): height at a distance l along the
+        trajectory, accounting for the Earth's curvature.
+
+    Arguments:
+        h0: [double] Initial height (m).
+        zc: [double] Zenith angle (radians).
+        l: [double] Distance travelled along the trajectory from the origin (m).
+        r_earth: [double] Earth radius (m).
+
+    Return:
+        h: [double] Height at distance l (m), before the gravity drop is subtracted.
+    """
     return sqrt((h0 + r_earth)*(h0 + r_earth) - 2*l*cos(zc)*(h0 + r_earth) + l*l) - r_earth
 
 
 @cython.cdivision(True)
 cdef double atmDensityPolyC(double ht, FLOAT_TYPE_t[:] dens_co):
-    """ Cython/memoryview twin of atmDensityPoly() for use inside the substep loop. """
+    """ Cython/memoryview twin of atmDensityPoly() for use inside the sub-step loop (avoids the
+        ndarray-typed cpdef boundary).
+
+    Arguments:
+        ht: [double] Height (m).
+        dens_co: [memoryview of float64] 7 coefficients of the log10(density) height polynomial.
+
+    Return:
+        rho: [double] Atmospheric mass density at height ht (kg/m^3).
+    """
     cdef double x = ht/1e6
     return 10**(dens_co[0] + dens_co[1]*x + dens_co[2]*x*x + dens_co[3]*x*x*x
                 + dens_co[4]*x*x*x*x + dens_co[5]*x*x*x*x*x + dens_co[6]*x*x*x*x*x*x)
@@ -613,10 +641,30 @@ cdef double atmDensityPolyC(double ht, FLOAT_TYPE_t[:] dens_co):
 cdef void advanceVelPosC(double m, double v, double vv, double vh, double length, double grav,
                          double dm, double decel_rate, double h, double h_at,
                          double r_earth, double g0, double* out):
-    """ Advance velocity components, speed, along-track length, and gravity-drop for one sub-step of
-        size h, reproducing MetSimErosion.py:773-824 exactly (velocity updated BEFORE length; gravity
-        only drops height, does not enter the velocity magnitude). out layout:
-        [m_new, v_new, vv_new, vh_new, length_new, grav_new, went_up_flag]. """
+    """ Advance the velocity components, speed, along-track length, and gravity drop of one fragment by
+        one sub-step of size h, reproducing the fixed engine's single-body update exactly (velocity is
+        updated BEFORE the length; gravity only lowers the height, it does not enter the velocity
+        magnitude). Used by the step-doubling stepper (adaptiveSingleBodyStep).
+
+    Arguments:
+        m: [double] Mass at the sub-step start (kg).
+        v: [double] Speed at the sub-step start (m/s).
+        vv: [double] Vertical velocity component (m/s, negative downward).
+        vh: [double] Horizontal velocity component (m/s).
+        length: [double] Along-track length at the sub-step start (m).
+        grav: [double] Accumulated gravity drop so far (m).
+        dm: [double] Mass change over this sub-step (kg, already clamped).
+        decel_rate: [double] Drag deceleration dv/dt (m/s^2, <= 0).
+        h: [double] Sub-step size (s).
+        h_at: [double] Height at which to evaluate gravity/curvature for this sub-step (m).
+        r_earth: [double] Earth radius (m).
+        g0: [double] Surface gravitational acceleration (m/s^2).
+        out: [double*] Output buffer (length 7), filled with
+            [m_new, v_new, vv_new, vh_new, length_new, grav_new, went_up_flag].
+
+    Return:
+        None (results written into 'out').
+    """
     cdef double gv, av, ah, vv_n, vh_n, v_n
     # Accelerating (decel_rate > 0) or already stopped -> stop the fragment (mirror 773-775)
     if (decel_rate > 0) or (v <= 0):
@@ -645,15 +693,60 @@ cpdef adaptiveSingleBodyStep(double dt_macro, double K, double sigma, double ero
         FLOAT_TYPE_t[:] dens_co, double rtol, double atol_m, double atol_v, double m_kill,
         double dt_min, double dt_max, int max_substeps, double h_sub_init):
     """ Advance ONE fragment across a full macro interval dt_macro using error-controlled adaptive
-        sub-steps (step-doubling on the existing RK4), refreshing atmosphere/height each sub-step.
-        Reproduces the single-body advance of MetSimErosion.py (748-834) in the one-substep limit but
-        drives the local error below (rtol, atol). Events/kills stay at the macro boundary (handled by
-        the caller). Returns a tuple:
-          (m, v, vv, vh, length, h_grav_drop_total, h_new, rho_final,
-           dm_abl_macro, dm_ero_macro, decel_return, went_up, n_substeps, h_sub_last, runaway)
-        where dm_*_macro are the (unclamped, per-species) accumulated mass losses used for the
-        luminosity/electron-density/grain diagnostics, and decel_return is the macro-averaged dv/dt
-        (negative), consistent with the sign of decelerationRK4. """
+        sub-steps (step-doubling on the operator-split RK4), refreshing the atmosphere/height each
+        sub-step. Reproduces the single-body advance of the fixed engine in the one-sub-step limit, but
+        drives the local error below (rtol, atol). Grain generation, kill checks, disruption and complex
+        fragmentation stay at the macro boundary and are handled by the caller (ablateAll).
+
+        See adaptiveDP45Step for the (default) embedded Dormand-Prince variant with the same I/O.
+
+    Arguments:
+        dt_macro: [double] Macro (output) interval to advance over (s).
+        K: [double] Shape-density coefficient (m^2/kg^(2/3)).
+        sigma: [double] Ablation coefficient (s^2/m^2).
+        erosion_coeff: [double] Erosion coefficient (s^2/m^2); used only if erosion_active.
+        erosion_active: [int] 1 if this fragment is currently eroding (erosion_enabled and coeff > 0).
+        m: [double] Mass at the interval start (kg).
+        v: [double] Speed at the interval start (m/s).
+        vv: [double] Vertical velocity component (m/s, negative downward).
+        vh: [double] Horizontal velocity component (m/s).
+        length: [double] Along-track length at the interval start (m).
+        h_grav_drop_total: [double] Accumulated gravity drop at the interval start (m).
+        h_init: [double] Initial simulation height (m).
+        zenith_angle: [double] Entry zenith angle (radians).
+        r_earth: [double] Earth radius (m).
+        g0: [double] Surface gravitational acceleration (m/s^2).
+        dens_co: [memoryview of float64] 7 atmosphere log10(density) polynomial coefficients.
+        rtol: [double] Relative error tolerance on mass and speed.
+        atol_m: [double] Absolute mass tolerance (kg).
+        atol_v: [double] Absolute speed tolerance (m/s).
+        m_kill: [double] Kill mass (kg); the drag mass is floored at this to keep m^(-1/3) finite.
+        dt_min: [double] Minimum sub-step (s).
+        dt_max: [double] Maximum sub-step (s).
+        max_substeps: [int] Sub-step cap per macro interval (runaway guard).
+        h_sub_init: [double] Warm-start sub-step from the previous macro step (s); <= 0 means "use dt_macro".
+
+    Return:
+        A 17-tuple:
+            m: [double] Mass at the interval end (kg).
+            v: [double] Speed at the interval end (m/s).
+            vv: [double] Vertical velocity component at the end (m/s).
+            vh: [double] Horizontal velocity component at the end (m/s).
+            length: [double] Along-track length at the end (m).
+            h_grav_drop_total: [double] Accumulated gravity drop at the end (m).
+            h_new: [double] Height at the interval end (m).
+            rho_final: [double] Atmospheric density at h_new, for the end-of-step dynamic pressure (kg/m^3).
+            dm_abl_macro: [double] Unclamped ablation mass loss over the interval (kg, for luminosity/q).
+            dm_ero_macro: [double] Unclamped erosion mass loss over the interval (kg).
+            decel_return: [double] Macro-averaged DRAG dv/dt (m/s^2, negative), for the luminosity term.
+            went_up: [int] 1 if the fragment turned upward during the interval.
+            n_substeps: [int] Number of accepted sub-steps taken.
+            h_sub_carry: [double] Warm-start sub-step to carry to the next macro step (s).
+            runaway: [int] 1 if the max_substeps cap was hit.
+            floor_accepts: [int] Sub-steps accepted at dt_min while still over tolerance (under-resolved).
+            erosion_events: [list or None] Per-sub-step erosion shedding events, each a tuple
+                (eroded_mass, h, v, vv, vh, length, h_grav_drop_total); None for non-eroding fragments.
+    """
 
     cdef double t = 0.0
     cdef double h_sub, h_cur, rho_atm, rho_mid, rho_last
@@ -863,11 +956,34 @@ cdef void _rhsDP(double m, double vv, double vh, double length, double h_grav_dr
                  double K, double sigma, double erosion_coeff, int erosion_active, double m_kill,
                  double h_init, double zenith_angle, double r_earth, FLOAT_TYPE_t[:] dens_co,
                  double* dydt, double* extras):
-    """ Coupled RHS for the Dormand-Prince stepper. State y = [m, vv, vh, length]; dydt is filled with
-        [dm/dt, dvv/dt, dvh/dt, dlength/dt]. extras returns [ablation_rate, erosion_rate, drag_decel, rho]
-        for the per-step diagnostics (luminosity, electron density, grain shedding). Mirrors the fixed
-        model: mass loss ~ m^(2/3), drag ~ m^(-1/3) (floored at m_kill), gravity acts only on the height
-        drop (handled by the caller, not here), and the vv/vh derivatives carry the Earth-curvature term. """
+    """ Coupled right-hand side for the Dormand-Prince stepper: derivatives of the state
+        y = [m, vv, vh, length]. Mirrors the fixed model - mass loss ~ m^(2/3), drag ~ m^(-1/3) (with the
+        drag mass floored at m_kill so it stays finite near exhaustion), and the vv/vh derivatives carry
+        the Earth-curvature term. Gravity acts only on the height drop and is handled by the caller (not
+        here). The height for the atmosphere lookup is derived from length and the (frozen) gravity drop.
+
+    Arguments:
+        m: [double] Mass (kg).
+        vv: [double] Vertical velocity component (m/s).
+        vh: [double] Horizontal velocity component (m/s).
+        length: [double] Along-track length (m).
+        h_grav_drop: [double] Gravity drop to subtract from the curvature height (m), frozen over the step.
+        K: [double] Shape-density coefficient (m^2/kg^(2/3)).
+        sigma: [double] Ablation coefficient (s^2/m^2).
+        erosion_coeff: [double] Erosion coefficient (s^2/m^2); used only if erosion_active.
+        erosion_active: [int] 1 if the fragment is eroding.
+        m_kill: [double] Kill mass (kg); floor for the drag mass.
+        h_init: [double] Initial simulation height (m).
+        zenith_angle: [double] Entry zenith angle (radians).
+        r_earth: [double] Earth radius (m).
+        dens_co: [memoryview of float64] Atmosphere density polynomial coefficients.
+        dydt: [double*] Output buffer (length 4): [dm/dt, dvv/dt, dvh/dt, dlength/dt].
+        extras: [double*] Output buffer (length 4): [ablation_rate, erosion_rate, drag_decel, rho],
+            used by the caller for the per-step luminosity/electron-density/grain-shedding diagnostics.
+
+    Return:
+        None (results written into 'dydt' and 'extras').
+    """
     cdef double v, h, rho, decel, mm, mpos
     v = sqrt(vv*vv + vh*vh)
     h = heightCurvatureC(h_init, zenith_angle, length, r_earth) - h_grav_drop
@@ -898,14 +1014,18 @@ cpdef adaptiveDP45Step(double dt_macro, double K, double sigma, double erosion_c
         double h_grav_drop_total, double h_init, double zenith_angle, double r_earth, double g0,
         FLOAT_TYPE_t[:] dens_co, double rtol, double atol_m, double atol_v, double m_kill,
         double dt_min, double dt_max, int max_substeps, double h_sub_init):
-    """ Same contract as adaptiveSingleBodyStep, but advances the coupled [m, vv, vh, length] system
-        with an embedded Dormand-Prince RK45 pair (5th-order solution, 4th-order error estimate) instead
-        of step-doubling. ~7 RHS evaluations per sub-step vs ~24, and the higher order takes larger
-        steps, so it is substantially faster for the same tolerance. rho is refreshed at every stage
-        (from the stage's height), so there is no operator-split/frozen-rho error. Gravity drop is added
-        once per accepted sub-step (as in the fixed model). Returns the 17-tuple:
-          (m, v, vv, vh, length, h_grav_drop_total, h_new, rho_final, dm_abl_macro, dm_ero_macro,
-           decel_return, went_up, n_substeps, h_sub_carry, runaway, floor_accepts, erosion_events). """
+    """ Advance ONE fragment across a full macro interval dt_macro, like adaptiveSingleBodyStep, but with
+        an embedded Dormand-Prince RK45 pair (5th-order solution + 4th-order error estimate) on the
+        COUPLED system y = [m, vv, vh, length] instead of step-doubling on the operator split. One
+        embedded step yields both solutions in ~7 RHS evaluations (vs ~24 for step-doubling), and its
+        higher order takes larger sub-steps, so it is ~3-4x faster at the same tolerance. The atmosphere
+        density is refreshed at every RK stage (from that stage's height), removing the operator-split /
+        frozen-density error; the gravity drop is added once per accepted sub-step (as in the fixed
+        model). This is the default adaptive stepper (const.adaptive_high_order).
+
+        Arguments and the 17-element return tuple are identical to adaptiveSingleBodyStep() - see its
+        docstring for the full I/O description.
+    """
 
     # Dormand-Prince (RK45) Butcher tableau
     cdef double a21 = 1.0/5
