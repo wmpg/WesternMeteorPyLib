@@ -937,6 +937,30 @@ def _quantiles_from_samples(arr_2d, qs):
         out[name] = np.nanquantile(arr_2d, q, axis=0, method='linear')
     return out
 
+def _weightedHistogramMode(x_valid, w_valid, smooth):
+    """ Weighted, optionally dynesty-style-smoothed histogram of already NaN-filtered samples.
+
+    Arguments:
+        x_valid: [ndarray] 1D sample values, with any NaNs already masked out by the caller.
+        w_valid: [ndarray] Importance weights matching x_valid (need not be renormalized).
+        smooth: [float or int] Number of bins (int) or smoothing fraction used to derive
+            nbins = round(10/smooth) and apply a Gaussian KDE-style smoothing (float).
+
+    Return:
+        centers: [ndarray] Bin centers.
+        hist: [ndarray] (Smoothed) weighted histogram counts, same length as centers.
+
+    """
+    lo, hi = np.min(x_valid), np.max(x_valid)
+    if isinstance(smooth, int):
+        hist, edges = np.histogram(x_valid, bins=smooth, weights=w_valid, range=(lo, hi))
+    else:
+        nbins = int(round(10./smooth))
+        hist, edges = np.histogram(x_valid, bins=nbins, weights=w_valid, range=(lo, hi))
+        hist = norm_kde(hist, 10.0)
+    centers = 0.5*(edges[1:] + edges[:-1])
+    return centers, hist
+
 def _maybe_integrate_luminosity(sim, obs_data):
     """
     If (1/fps_lum) > sim.const.dt, integrate luminosity over fps window and
@@ -2088,14 +2112,7 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
             mode_value = mode_raw[i]
 
             # mode via corner logic
-            lo, hi = np.min(x), np.max(x)
-            if isinstance(smooth, int):
-                hist, edges = np.histogram(x, bins=smooth, weights=w, range=(lo,hi))
-            else:
-                nbins = int(round(10./smooth))
-                hist, edges = np.histogram(x, bins=nbins, weights=w, range=(lo,hi))
-                hist = norm_kde(hist, 10.0)
-            centers = 0.5*(edges[1:] + edges[:-1])
+            centers, hist = _weightedHistogramMode(x_valid, w_valid, smooth)
             mode_Ndim = centers[np.argmax(hist)]
 
             # now apply your log & unit transforms *after* computing stats
@@ -2552,15 +2569,7 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
             continue
 
         # Compute histogram
-        lo, hi = np.min(x_valid), np.max(x_valid)
-        if isinstance(smooth, int):
-            hist, edges = np.histogram(x_valid, bins=smooth, weights=w_valid, range=(lo, hi))
-        else:
-            nbins = int(round(10./smooth))
-            hist, edges = np.histogram(x_valid, bins=nbins, weights=w_valid, range=(lo, hi))
-            hist = norm_kde(hist, 10.0)  # dynesty-style smoothing
-
-        centers = 0.5*(edges[1:] + edges[:-1])
+        centers, hist = _weightedHistogramMode(x_valid, w_valid, smooth)
 
         # Fill under the curve
         ax.fill_between(centers, hist, color='blue', alpha=0.6)
@@ -5858,20 +5867,14 @@ def runSimulationDynesty(parameter_guess, real_event, var_names, fix_var):
 
     """
 
-    # build the const to run the 
+    # build the const to run the
     const_nominal = constructConstants(parameter_guess, real_event, var_names, fix_var)
 
-    try:
-        # Run the simulation
-        frag_main, results_list, wake_results = runSimulation(const_nominal, compute_wake=False)
-        simulation_MetSim_object = SimulationResults(const_nominal, frag_main, results_list, wake_results)
-    except ZeroDivisionError as e:
-        print(f"Error during simulation: {e}")
-        # run again with the nominal values to avoid the error
-        const_nominal = Constants()
-        # Run the simulation
-        frag_main, results_list, wake_results = runSimulation(const_nominal, compute_wake=False)
-        simulation_MetSim_object = SimulationResults(const_nominal, frag_main, results_list, wake_results)
+    # Run the simulation. A ZeroDivisionError means this parameter draw is unphysical;
+    # let it propagate so the caller (logLikelihoodDynesty) can reject the point with
+    # -np.inf instead of silently swapping in an unrelated nominal simulation.
+    frag_main, results_list, wake_results = runSimulation(const_nominal, compute_wake=False)
+    simulation_MetSim_object = SimulationResults(const_nominal, frag_main, results_list, wake_results)
 
     return simulation_MetSim_object
 
@@ -6112,7 +6115,10 @@ def logLikelihoodDynesty(guess_var, obs_metsim_obj, flags_dict, fix_var, timeout
     # check if the OS is not Linux
     if os.name != 'posix':
         # If not Linux, run the simulation without timeout
-        simulation_results = runSimulationDynesty(guess_var, obs_metsim_obj, var_names, fix_var)
+        try:
+            simulation_results = runSimulationDynesty(guess_var, obs_metsim_obj, var_names, fix_var)
+        except ZeroDivisionError:
+            return -np.inf  # unphysical parameter draw, reject the point
     else:
         # Set timeout handler
         signal.signal(signal.SIGALRM, timeout_handler)
@@ -6123,14 +6129,17 @@ def logLikelihoodDynesty(guess_var, obs_metsim_obj, flags_dict, fix_var, timeout
         except TimeoutException:
             print('timeout')
             return -np.inf  # immediately return -np.inf if times out
+        except ZeroDivisionError:
+            return -np.inf  # unphysical parameter draw, reject the point
         finally:
             signal.alarm(0)  # Cancel alarm
         
     ### LUM CALC ###
 
-    simulated_time = np.interp(obs_metsim_obj.height_lum, 
-                                       np.flip(simulation_results.leading_frag_height_arr), 
-                                       np.flip(simulation_results.time_arr))
+    simulated_time = np.interp(obs_metsim_obj.height_lum,
+                                       np.flip(simulation_results.leading_frag_height_arr),
+                                       np.flip(simulation_results.time_arr),
+                                       left=np.nan, right=np.nan)
     # check if the length of the lag_sim is the same as the length of the obs_metsim_obj.lag
     if np.sum(~np.isnan(simulated_time)) != np.sum(~np.isnan(obs_metsim_obj.time_lum)):
         return -np.inf
@@ -6140,11 +6149,15 @@ def logLikelihoodDynesty(guess_var, obs_metsim_obj, flags_dict, fix_var, timeout
     # find the integral of the luminosity in time in between FPS but not valid for CAMO narrowfield cameras as there is no smearing becuse it follows the meteor
     if (1/obs_metsim_obj.fps_lum > simulation_results.const.dt): # and (not any('1T' in station for station in obs_metsim_obj.stations_lum) or not any('2T' in station for station in obs_metsim_obj.stations_lum)): # FPS is lower than the simulation time step need to integrate the luminosity
         simulated_lc_intensity, _ = integrateLuminosity(all_simulated_time,obs_metsim_obj.time_lum,simulation_results.luminosity_arr,simulation_results.const.dt,obs_metsim_obj.fps_lum,obs_metsim_obj.P_0m)
+        # check if the length of the simulated_lc_intensity is the same as the length of the obs_metsim_obj.luminosity
+        if np.sum(~np.isnan(simulated_lc_intensity)) != np.sum(~np.isnan(obs_metsim_obj.luminosity)):
+            return -np.inf
     else:
         # too high frame rate, just interpolate the luminosity
-        simulated_lc_intensity = np.interp(obs_metsim_obj.height_lum, 
-                                           np.flip(simulation_results.leading_frag_height_arr), 
-                                           np.flip(simulation_results.luminosity_arr))
+        simulated_lc_intensity = np.interp(obs_metsim_obj.height_lum,
+                                           np.flip(simulation_results.leading_frag_height_arr),
+                                           np.flip(simulation_results.luminosity_arr),
+                                           left=np.nan, right=np.nan)
         # check if the length of the simulated_lc_intensity is the same as the length of the obs_metsim_obj.luminosity
         if np.sum(~np.isnan(simulated_lc_intensity)) != np.sum(~np.isnan(obs_metsim_obj.luminosity)):
             return -np.inf
@@ -6153,9 +6166,10 @@ def logLikelihoodDynesty(guess_var, obs_metsim_obj, flags_dict, fix_var, timeout
 
     lag_sim = simulation_results.leading_frag_length_arr - (obs_metsim_obj.v_init*simulation_results.time_arr)
 
-    simulated_lag = np.interp(obs_metsim_obj.height_lag, 
-                              np.flip(simulation_results.leading_frag_height_arr), 
-                              np.flip(lag_sim))
+    simulated_lag = np.interp(obs_metsim_obj.height_lag,
+                              np.flip(simulation_results.leading_frag_height_arr),
+                              np.flip(lag_sim),
+                              left=np.nan, right=np.nan)
 
     lag_sim = simulated_lag - simulated_lag[0]
 
