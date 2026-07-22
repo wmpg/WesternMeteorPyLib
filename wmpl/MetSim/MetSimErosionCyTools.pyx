@@ -671,6 +671,9 @@ cpdef adaptiveSingleBodyStep(double dt_macro, double K, double sigma, double ero
     cdef int went_up = 0
     cdef int runaway = 0
     cdef int at_floor
+    cdef int was_clamped        # this sub-step was shortened to land on the macro boundary
+    cdef int floor_accepts = 0  # sub-steps accepted only because at dt_min with E>1 (under-resolved)
+    cdef double h_sub_carry     # controller's natural next step, kept unclamped by the macro boundary
     cdef double out1[7]
     cdef double out2[7]
     cdef double outb[7]
@@ -695,11 +698,16 @@ cpdef adaptiveSingleBodyStep(double dt_macro, double K, double sigma, double ero
         h_sub = dt_min
     E_prev = 1.0
     rho_last = 0.0
+    h_sub_carry = h_sub
 
     while t < dt_macro:
 
-        # Clamp the final sub-step so sub-steps sum to exactly dt_macro (no overshoot)
+        # Clamp the final sub-step so sub-steps sum to exactly dt_macro (no overshoot). Remember whether
+        #   this step was shortened by the boundary so we don't persist the tiny clamped size as the
+        #   warm-start for the next macro step (that would restart every macro step with a tiny sub-step).
+        was_clamped = 0
         if t + h_sub > dt_macro:
+            was_clamped = 1
             h_sub = dt_macro - t
 
         hh = 0.5*h_sub
@@ -761,6 +769,12 @@ cpdef adaptiveSingleBodyStep(double dt_macro, double K, double sigma, double ero
         at_floor = 1 if h_sub <= dt_min*(1.0 + 1e-12) else 0
 
         if (E <= 1.0) or at_floor:
+
+            # Count sub-steps accepted only because they hit the dt_min floor while still over tolerance
+            #   (E > 1) - these are locally under-resolved and otherwise invisible (see runSimulation warn)
+            if at_floor and (E > 1.0):
+                floor_accepts += 1
+
             # Accept the two-half (more accurate) state; accumulate per-species mass loss (unclamped)
             dm_abl_macro += dm_abl_1 + dm_abl_2
             dm_ero_macro += dm_ero_1 + dm_ero_2
@@ -808,6 +822,13 @@ cpdef adaptiveSingleBodyStep(double dt_macro, double K, double sigma, double ero
                 h_sub = dt_max
             if h_sub < dt_min:
                 h_sub = dt_min
+
+            # Persist the controller's natural step as the warm-start, but only from sub-steps that were
+            #   NOT boundary-clamped, so the tiny final sub-step doesn't shrink the next macro step's seed
+            #   (that would restart every macro step with a tiny sub-step). This cuts sub-steps ~2-5x with
+            #   no effect on the visible light curve (only the faint, sub-detection tail shifts slightly).
+            if not was_clamped:
+                h_sub_carry = h_sub
         else:
             # Reject: shrink and retry the SAME sub-step (do not advance t)
             fac = safety*(E**(-1.0/5.0))
@@ -817,10 +838,11 @@ cpdef adaptiveSingleBodyStep(double dt_macro, double K, double sigma, double ero
             if h_sub < dt_min:
                 h_sub = dt_min
 
-    if went_up:
-        h_new = 0.0
-    else:
-        h_new = heightCurvatureC(h_init, zenith_angle, length, r_earth) - h_grav_drop_total
+    # Height from the along-track length (matches the fixed path, MetSimErosion.py: heightCurvature minus
+    #   the gravity drop). Note: on went_up we do NOT force h_new = 0 - the fixed path's frag.h = 0 on
+    #   'going up' is immediately overwritten by this same recompute there, so forcing 0 would kill the
+    #   fragment a tick earlier than fixed mode. went_up already zeroed vv, matching the fixed behaviour.
+    h_new = heightCurvatureC(h_init, zenith_angle, length, r_earth) - h_grav_drop_total
 
     # Density for the end-of-interval dynamic pressure; fall back to the last in-loop value if h<=0
     if h_new > 0:
@@ -831,5 +853,5 @@ cpdef adaptiveSingleBodyStep(double dt_macro, double K, double sigma, double ero
     decel_return = dv_drag/dt_macro   # macro-averaged DRAG dv/dt (negative), matches decelerationRK4 sign
 
     return (m, v, vv, vh, length, h_grav_drop_total, h_new, rho_final,
-            dm_abl_macro, dm_ero_macro, decel_return, went_up, n_substeps, h_sub, runaway,
-            erosion_events)
+            dm_abl_macro, dm_ero_macro, decel_return, went_up, n_substeps, h_sub_carry, runaway,
+            floor_accepts, erosion_events)

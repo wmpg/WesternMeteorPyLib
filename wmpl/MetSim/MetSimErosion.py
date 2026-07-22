@@ -817,7 +817,8 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
 
             (frag.m, frag.v, frag.vv, frag.vh, frag.length, frag.h_grav_drop_total, frag.h, rho_atm,
                 mass_loss_ablation, mass_loss_erosion, deceleration_total, went_up, n_sub,
-                frag.adaptive_h_sub, runaway, erosion_events_adaptive) = adaptiveSingleBodyStep(
+                frag.adaptive_h_sub, runaway, floor_accepts, erosion_events_adaptive) \
+                    = adaptiveSingleBodyStep(
                     const.dt, frag.K, frag.sigma, frag.erosion_coeff, erosion_active,
                     frag.m, frag.v, frag.vv, frag.vh, frag.length, frag.h_grav_drop_total,
                     const.h_init, const.zenith_angle, const.r_earth, G0, const.dens_co,
@@ -825,8 +826,9 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
                     const.adaptive_dt_min, const.adaptive_dt_max, const.adaptive_max_substeps,
                     frag.adaptive_h_sub)
 
-            # Diagnostics (feed the cost study; also used to warn once on a runaway fragment)
+            # Diagnostics (feed the cost study; also used to warn once on runaway/under-resolved steps)
             const.adaptive_substeps_total += n_sub
+            const.adaptive_floor_accepts += floor_accepts
             if runaway:
                 const.adaptive_runaway_events += 1
 
@@ -1097,25 +1099,15 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
         if frag.erosion_enabled:
 
             def _spawnGrainsFromErosion(eroded_mass):
-                """ Distribute the given eroded mass into grains born from the fragment's current state,
-                    and record erosion-begin bookkeeping for the main fragment. Uses the enclosing
-                    frag/const/dyn_press. """
+                """ Distribute the given eroded mass into grains born from the fragment's current state.
+                    Uses the enclosing frag/const. """
                 grain_children, const_out = generateFragments(const, frag, eroded_mass, \
                     frag.erosion_mass_index, frag.erosion_mass_min, frag.erosion_mass_max, \
                     keep_eroding=False, mass_model=const.erosion_grain_distribution)
                 const.n_active += len(grain_children)
                 frag_children_all.extend(grain_children)
 
-                # Record physical parameters at the beginning of erosion for the main fragment
-                if frag.main:
-                    if const.erosion_beg_vel is None:
-                        const.erosion_beg_vel = frag.v
-                        const.erosion_beg_mass = frag.m
-                        const.erosion_beg_dyn_press = dyn_press
-
-                    # Record the mass when erosion is changed
-                    elif (const.erosion_height_change >= frag.h) and (const.mass_at_erosion_change is None):
-                        const.mass_at_erosion_change = frag.m
+            eroded_this_tick = False
 
             if erosion_events_adaptive is not None:
 
@@ -1133,6 +1125,7 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
                         frag.h = e_h; frag.v = e_v; frag.vv = e_vv; frag.vh = e_vh
                         frag.length = e_len; frag.h_grav_drop_total = e_grav
                         _spawnGrainsFromErosion(em)
+                        eroded_this_tick = True
                     (frag.h, frag.v, frag.vv, frag.vh, frag.length, frag.h_grav_drop_total) = _saved_state
 
             else:
@@ -1140,6 +1133,20 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
                 # Fixed step: distribute the whole macro-step erosion loss at the end-of-step state
                 if abs(mass_loss_erosion) > 0:
                     _spawnGrainsFromErosion(abs(mass_loss_erosion))
+                    eroded_this_tick = True
+
+            # Record erosion-begin bookkeeping for the main fragment once, at the END-of-step state so the
+            #   (vel, mass, dyn_press) triple is mutually consistent in both modes (in adaptive mode frag
+            #   has been restored above; the per-event rewind must not leak into these diagnostics)
+            if eroded_this_tick and frag.main:
+                if const.erosion_beg_vel is None:
+                    const.erosion_beg_vel = frag.v
+                    const.erosion_beg_mass = frag.m
+                    const.erosion_beg_dyn_press = dyn_press
+
+                # Record the mass when erosion is changed
+                elif (const.erosion_height_change >= frag.h) and (const.mass_at_erosion_change is None):
+                    const.mass_at_erosion_change = frag.m
 
         # Disrupt the fragment if the dynamic pressure exceeds its strength
         if frag.disruption_enabled and const.disruption_on:
@@ -1468,6 +1475,7 @@ def runSimulation(const, compute_wake=False):
             setattr(const, _attr, _default)
     const.adaptive_substeps_total = 0
     const.adaptive_runaway_events = 0
+    const.adaptive_floor_accepts = 0
 
     # The adaptive Cython stepper needs dens_co as a float64 array (memoryview); coerce once (the fixed
     #   path's atmDensityPoly requires an ndarray too, so this is safe in both modes).
@@ -1563,6 +1571,10 @@ def runSimulation(const, compute_wake=False):
     if const.adaptive_dt and (const.adaptive_runaway_events > 0):
         print("WARNING: adaptive stepper hit max_substeps ({:d}) on {:d} fragment-step(s); results may be "
               "under-resolved there.".format(const.adaptive_max_substeps, const.adaptive_runaway_events))
+    if const.adaptive_dt and (const.adaptive_floor_accepts > 0):
+        print("WARNING: adaptive stepper accepted {:d} sub-step(s) at the dt_min floor ({:g} s) while still "
+              "over tolerance; lower adaptive_dt_min or loosen adaptive_rtol if this is frequent.".format(
+              const.adaptive_floor_accepts, const.adaptive_dt_min))
 
 
     # Find the main fragment and return it with results
