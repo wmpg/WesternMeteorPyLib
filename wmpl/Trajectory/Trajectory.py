@@ -17,6 +17,7 @@ import json
 from operator import attrgetter
 import base64
 import hashlib
+import logging
 
 try:
     import git
@@ -63,6 +64,18 @@ from wmpl.Utils.PyDomainParallelizer import parallelComputeGenerator
 
 # Text size of image legends
 LEGEND_TEXT_SIZE = 6
+
+# Set up a logger, or get one configured in the calling app if present
+log = logging.getLogger("traj_correlator")
+
+# If no handlers are configured, add a simple console log handler
+# This will be overridden if the calling app sets up its own logger.
+if len(log.handlers) == 0:
+    console_handler = logging.StreamHandler()
+    log_formatter = logging.Formatter()
+    console_handler.setFormatter(log_formatter)
+    log.addHandler(console_handler)
+    log.setLevel(logging.DEBUG)
 
 
 class ObservedPoints(object):
@@ -382,7 +395,7 @@ class ObservedPoints(object):
 
             else:
 
-                print('Excluded time range', self.excluded_time, 'is outside the observation times!')
+                log.warning(f'Excluded time range {self.excluded_time} is outside the observation times!')
 
 
         ######################################################################################################
@@ -1961,7 +1974,7 @@ def checkMCTrajectories(mc_results, timing_res=np.inf, geometric_uncert=False):
     mc_results = [mc_traj for mc_traj in mc_results if (mc_traj.orbit.ra_g is not None) \
         and (mc_traj.orbit.dec_g is not None)]
 
-    print("{:d} successful MC runs done...".format(len(mc_results)))
+    log.info(f'{len(mc_results)} successful MC runs done...')
 
     return mc_results
 
@@ -1984,7 +1997,7 @@ def _MCTrajSolve(params):
 
     i, traj, observations = params
 
-    print('Run No.', i + 1)
+    log.info(f'Run No. {i + 1}')
 
     traj.run(_mc_run=True, _orig_obs=observations)
 
@@ -2035,7 +2048,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
         mc_runs = mc_runs*mc_pick_multiplier
 
 
-    print("Doing", mc_runs, "successful Monte Carlo runs...")
+    log.info(f"Doing {mc_runs} successful Monte Carlo runs...")
 
 
     # Init the trajectory noise generator
@@ -2050,7 +2063,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
 
     # If there are no MC runs which were successful, recompute using geometric uncertainties
     if len(mc_results) < 2:
-        print("No successful MC runs, computing geometric uncertanties...")
+        log.info("No successful MC runs, computing geometric uncertanties...")
 
         # Run the MC solutions
         geometric_uncert = True
@@ -2069,7 +2082,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
 
     # Break the function of there are no trajectories to process
     if len(mc_results) < 2:
-        print('!!! Not enough good Monte Carlo runs for uncertaintly estimation!')
+        log.warning('!!! Not enough good Monte Carlo runs for uncertaintly estimation!')
         return traj, None
 
 
@@ -2083,12 +2096,12 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
     # Assign geometric uncertainty flag, if it was changed
     traj_best.geometric_uncert = geometric_uncert
 
-    print('Computing uncertainties...')
+    log.info('Computing uncertainties...')
 
     # Calculate the standard deviation of every trajectory parameter
     uncertainties = calcMCUncertainties(mc_results, traj_best)
 
-    print('Computing covariance matrices...')
+    log.info('Computing covariance matrices...')
 
     # Calculate orbital and inital state vector covariance matrices (angles in degrees)
     traj_best.orbit_cov, traj_best.state_vect_cov = calcCovMatrices(mc_results)
@@ -2451,7 +2464,7 @@ class Trajectory(object):
         mc_noise_std=1.0, geometric_uncert=False, filter_picks=True, calc_orbit=True, show_plots=True, \
         show_jacchia=False, save_results=True, gravity_correction=True, gravity_factor=1.0, \
         plot_all_spatial_residuals=False, plot_file_type='png', traj_id=None, reject_n_sigma_outliers=3, 
-        mc_cores=None, fixed_times=None, mc_runs_max=None, enable_OSM_plot=False):
+        mc_cores=None, fixed_times=None, mc_runs_max=None, enable_OSM_plot=False, l_bfgs_b_cutoff=5):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -2553,7 +2566,7 @@ class Trajectory(object):
                 self.fixed_time_offsets[station] = float(offset)
                 self.fixed_time_offsets_copy[station] = float(offset)
 
-            print("Fixed timing given:", self.fixed_time_offsets)
+            log.info(f"Fixed timing given: {self.fixed_time_offsets}")
 
             self.estimate_timing_vel = False
 
@@ -2562,6 +2575,8 @@ class Trajectory(object):
         else:
             self.estimate_timing_vel = True
 
+        # threshold for switching from SLSQP/TNC/None to L-BFGS-B for timing optimisations.
+        self.l_bfgs_b_cutoff = l_bfgs_b_cutoff
 
         # Extract the fixed times from the fixed time offsets
         self.fixed_times = fixed_times
@@ -2836,7 +2851,7 @@ class Trajectory(object):
         # Skip the observation if all points were ignored
         if ignore_list is not None:
             if np.all(ignore_list):
-                print('All points from station {:s} are ignored, not using this station in the solution!'.format(station_id))
+                log.info(f'All points from station {station_id} are ignored, not using this station in the solution!')
 
 
         # Init a new structure which will contain the observed data from the given site
@@ -3079,7 +3094,7 @@ class Trajectory(object):
                     # RuntimeError: Optimal parameters not found: gtol=0.000000 is too small, func(x) is 
                     # orthogonal to the columns of the Jacobian to machine precision.
                     except RuntimeError:
-                        print("A velocity fit failed with a RuntimeError, skipping this iteration.")
+                        log.info("A velocity fit failed with a RuntimeError, skipping this iteration.")
                         popt = [np.nan]
 
                     velocities_prev_point.append(popt[0])
@@ -3206,8 +3221,8 @@ class Trajectory(object):
 
         # If there are less than 4 points, don't estimate the initial velocity this way!
         if len(all_times) < 4:
-            print('!!! Error, there are less than 4 points for velocity estimation above the given height of {:.2f} km!'.format(bottom_ht/1000))
-            print('Using automated velocity estimation with the sliding fit...')
+            log.warning(f'!!! Error, there are less than 4 points for velocity estimation above the given height of {bottom_ht/1000:.2f} km!')
+            log.info('Using automated velocity estimation with the sliding fit...')
             return None, None
 
         # Fit a line through the time vs. state vector distance data
@@ -3294,7 +3309,7 @@ class Trajectory(object):
             obs.jacchia_fit = np.abs(obs.jacchia_fit)
 
             if self.verbose:
-                print('Jacchia fit params for station:', obs.station_id, ':', obs.jacchia_fit)
+                log.info(f'Jacchia fit params for station: {obs.station_id}: {obs.jacchia_fit}')
 
 
         # Get the time and lag points from all sites
@@ -3398,9 +3413,7 @@ class Trajectory(object):
             
 
             if self.verbose:
-                print('Initial function evaluation:', timingResiduals(p0, observations, 
-                                                                      self.stations_time_dict, 
-                                                                      weights=weights))
+                log.info(f'Initial function evaluation: {timingResiduals(p0, observations, self.stations_time_dict, weights=weights)}')
 
             # Set bounds for timing to +/- given maximum time offset
             bounds = []
@@ -3410,14 +3423,16 @@ class Trajectory(object):
 
             ### Try different methods of optimization until it is successful ##
 
-            # If there are more than 5 stations, use the advanced L-BFGS-B method by default
-            if len(self.observations) >= 5:
+            # If there are more than self.l_bfgs_b_cutoff stations, use the slower L-BFGS-B method.
+            # Default is five, but in testing the correlator delivered more solutions with the cutoff set to seven. (MJMM, 2026)
+
+            if len(self.observations) >= self.l_bfgs_b_cutoff:
                 methods = [None]
                 opt_list = ['maxiter']
                 maxiter_list = [15000]
 
             else:
-                # If there are less than 5, try faster methods first
+                # If there are less than seven, try faster methods first
                 methods = ['SLSQP', 'TNC', None]
                 opt_list = ['maxiter','maxfun','maxiter']
                 maxiter_list = [1000, None, 15000]
@@ -3437,21 +3452,21 @@ class Trajectory(object):
                     self.timing_res = timing_mini.fun
 
                     if self.verbose:
-                        print('Successful timing optimization with', opt_method)
-                        print("Final function evaluation:", timing_mini.fun)
+                        log.info(f'Successful timing optimization with {opt_method}')
+                        log.info(f'Final function evaluation: {timing_mini.fun}')
 
                     break
 
                 else:
-                    print('Unsuccessful timing optimization with', opt_method)
+                    log.warning(f'Unsuccessful timing optimization with {opt_method}')
 
             ### ###
 
             if not timing_mini.success:
 
-                print('Timing difference and initial velocity minimization failed with the message:')
-                print(timing_mini.message)
-                print('Try increasing the range of time offsets!')
+                log.warning('Timing difference and initial velocity minimization failed with the message:')
+                log.warning(timing_mini.message)
+                log.warning('Try increasing the range of time offsets!')
                 v_init_mini = v_init
 
                 velocity_fit = np.zeros(2)
@@ -3491,7 +3506,7 @@ class Trajectory(object):
                     time_diffs[i] = t_diff_copy
 
                     if self.verbose:
-                        print('STATION ' + str(obs.station_id) + ' TIME OFFSET = ' + str(t_diff_copy) + ' s (fixed offset applied)')
+                        log.info(f'STATION {str(obs.station_id)} TIME OFFSET = {str(t_diff_copy)} s (fixed offset applied)')
 
                 # Otherwise read the estimated offset
                 else:
@@ -3502,7 +3517,7 @@ class Trajectory(object):
                     time_diffs[i] = t_diff
 
                     if self.verbose:
-                        print('STATION ' + str(obs.station_id) + ' TIME OFFSET = ' + str(t_diff) + ' s')
+                        log.info(f'STATION {str(obs.station_id)} TIME OFFSET = {str(t_diff)} s')
 
 
                 # Skip NaN and inf time offsets
@@ -3649,7 +3664,7 @@ class Trajectory(object):
 
 
             if self.verbose:
-                print('ESTIMATED Vinit: {:.2f} +/- {:.2f} m/s'.format(v_init_mini, vel_stddev))
+                log.info(f'ESTIMATED Vinit: {v_init_mini:.2f} +/- {vel_stddev:.2f} m/s')
 
             
 
@@ -4147,10 +4162,10 @@ class Trajectory(object):
         """ Convert the Trajectory object to a JSON string. """
 
         # Get a list of builtin types
-        try :
-            import __builtin__
+        if sys.version_info.major < 3:
+            import __builtin__ 
             builtin_types = [t for t in __builtin__.__dict__.itervalues() if isinstance(t, type)]
-        except: 
+        else: 
             # Python 3.x
             import builtins
             builtin_types = [getattr(builtins, d) for d in dir(builtins) if isinstance(getattr(builtins, d), type)]
@@ -4742,7 +4757,7 @@ class Trajectory(object):
             except Exception:
                 pass
         if verbose:
-            print(out_str)
+            log.info(out_str)
 
         # Save the report to a file
         if save_results:
@@ -5672,7 +5687,7 @@ class Trajectory(object):
                     plt.clf()
                     plt.close()            
             except:
-                print('OSM plots not available')
+                log.info('OSM plots not available')
                 pass
         ######################################################################################################
 
@@ -6137,7 +6152,7 @@ class Trajectory(object):
         # Make sure there are at least 2 stations
         if numStationsNotIgnored(self.observations) < 2:
             
-            print('At least 2 sets of measurements from 2 stations are needed to estimate the trajectory!')
+            log.info('At least 2 sets of measurements from 2 stations are needed to estimate the trajectory!')
 
             return None
 
@@ -6190,8 +6205,8 @@ class Trajectory(object):
                 plane_intersection = PlaneIntersection(obs1, obs2)
 
                 if self.verbose:
-                    print('Convergence angle between stations', obs1.station_id, 'and', obs2.station_id)
-                    print(' Q =', np.degrees(plane_intersection.conv_angle), 'deg')
+                    log.info(f'Convergence angle between stations {obs1.station_id} and {obs2.station_id}')
+                    log.info(f' Q = {np.degrees(plane_intersection.conv_angle)} deg')
                 
                 self.intersection_list.append(plane_intersection)
 
@@ -6218,7 +6233,7 @@ class Trajectory(object):
         self.radiant_eq = eci2RaDec(self.avg_radiant)
 
         if self.verbose:
-            print('Multi-Track Weighted IP radiant:', np.degrees(self.radiant_eq))
+            log.info(f'Multi-Track Weighted IP radiant: {np.degrees(self.radiant_eq)}')
 
 
         # Choose the intersection with the largest convergence angle as the best solution
@@ -6227,7 +6242,7 @@ class Trajectory(object):
         self.best_conv_inter = max(self.intersection_list, key=attrgetter('conv_angle'))
 
         if self.verbose:
-            print('Best Convergence Angle IP radiant:', np.degrees(self.best_conv_inter.radiant_eq))
+            log.info(f'Best Convergence Angle IP radiant: {np.degrees(self.best_conv_inter.radiant_eq)}')
 
 
         # Set the 3D position of the radiant line as the state vector, at the beginning point
@@ -6266,18 +6281,18 @@ class Trajectory(object):
 
         # Print weights
         if self.verbose:
-            print('LoS statistical weights:')
+            log.info('LoS statistical weights:')
 
             for obs in self.observations:
-                print("{:>12s}, {:.3f}".format(obs.station_id, obs.weight))
+                log.info(f"{obs.station_id:>12s}, {obs.weight:.3f}")
 
         ######################################################################################################
 
 
         if self.verbose:
-            print('Intersecting planes solution:', self.state_vect)
+            log.info(f'Intersecting planes solution: {self.state_vect}')
             
-            print('Minimizing angle deviations...')
+            log.info('Minimizing angle deviations...')
 
 
         ### LEAST SQUARES SOLUTION ###
@@ -6291,7 +6306,7 @@ class Trajectory(object):
              )
 
         if self.verbose:
-            print('Initial angle sum:', angle_sum)
+            log.info(f'Initial angle sum: {angle_sum}')
 
 
         # Set the initial guess for the state vector and the radiant from the intersecting plane solution
@@ -6313,8 +6328,8 @@ class Trajectory(object):
         # If the minimization diverged, bound the solution to +/-10% of state vector
         if np.max(np.abs(minimize_solution.x[:3] - self.state_vect)/self.state_vect) > 0.1:
 
-            print('WARNING! Unbounded state vector optimization failed!')
-            print('Trying bounded minimization to +/-10% of state vector position.')
+            log.warning('WARNING! Unbounded state vector optimization failed!')
+            log.info('Trying bounded minimization to +/-10% of state vector position.')
 
             # Limit the minimization to 10% of original estimation in the state vector
             bounds = []
@@ -6325,19 +6340,19 @@ class Trajectory(object):
             for val in self.best_conv_inter.radiant_eci:
                 bounds.append(sorted([0.75*val, 1.25*val]))
 
-            print('BOUNDS:', bounds)
-            print('p0:', p0)
+            log.info(f'BOUNDS: {bounds}')
+            log.info(f'p0: {p0}')
             minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=(self.observations, \
                 weights, (_rerun_timing and self.gravity_correction), self.gravity_factor, self.v0z), 
                 bounds=bounds, method='SLSQP')
 
 
         if self.verbose:
-            print('Minimization info:')
-            print(' Message:', minimize_solution.message)
-            print(' Iterations:', minimize_solution.nit)
-            print(' Success:', minimize_solution.success)
-            print(' Final function value:', minimize_solution.fun)
+            log.info('Minimization info:')
+            log.info(f' Message: {minimize_solution.message}')
+            log.info(f' Iterations: {minimize_solution.nit}')
+            log.info(f' Success: {minimize_solution.success}')
+            log.info(f' Final function value:  {minimize_solution.fun}')
 
 
         # Set the minimization status
@@ -6360,13 +6375,13 @@ class Trajectory(object):
             self.radiant_eq_mini = eci2RaDec(self.radiant_eci_mini)
 
             if self.verbose:
-                print('Position and radiant LMS solution:')
-                print(' State vector:', self.state_vect_mini)
-                print(' Ra', np.degrees(self.radiant_eq_mini[0]), 'Dec:', np.degrees(self.radiant_eq_mini[1]))
+                log.info('Position and radiant LMS solution:')
+                log.info(f' State vector: {self.state_vect_mini}')
+                log.info(f' Ra {np.degrees(self.radiant_eq_mini[0])} Dec: {np.degrees(self.radiant_eq_mini[1])}')
 
         else:
 
-            print('Angle minimization failed altogether!')
+            log.info('Angle minimization failed altogether!')
 
             # If the solution did not succeed, set the values to intersecting plates solution
             self.radiant_eci_mini = self.best_conv_inter.radiant_eci
@@ -6407,7 +6422,7 @@ class Trajectory(object):
 
 
         if self.verbose and self.estimate_timing_vel:
-            print('Estimating initial velocity and timing differences...')
+            log.info('Estimating initial velocity and timing differences...')
 
 
 
@@ -6457,6 +6472,10 @@ class Trajectory(object):
             # Calculate lag
             self.calcLag(self.observations)
             
+        if self.verbose:
+            log.info('timing data entering optimisation')
+            for obs in self.observations:
+                log.info(f'{obs.station_id}: {obs.time_data}')
 
         # Estimate the timing difference between stations and the initial velocity and update the time
         (
@@ -6475,7 +6494,7 @@ class Trajectory(object):
 
         # If estimating the timing failed, skip any further steps
         if not self.timing_minimization_successful:
-            print('unable to minimise timing')
+            log.warning('unable to minimise timing')
             return None
 
 
@@ -6522,10 +6541,10 @@ class Trajectory(object):
                 self.observations = []
 
                 if self.verbose:
-                    print()
-                    print("---------------------------------------------------------------------------------")
-                    print("Updating the solution after the timing estimation...")
-                    print("---------------------------------------------------------------------------------")
+                    log.info("")
+                    log.info("---------------------------------------------------------------------------------")
+                    log.info("Updating the solution after the timing estimation...")
+                    log.info("---------------------------------------------------------------------------------")
 
                 # Reinitialize the observations with proper timing
                 for obs in temp_observations:
@@ -6649,10 +6668,10 @@ class Trajectory(object):
                     self.observations = []
 
                     if self.verbose:
-                        print()
-                        print("---------------------------------------------------------------------------------")
-                        print("Updating the solution after rejecting", picks_rejected, "bad picks...")
-                        print("---------------------------------------------------------------------------------")
+                        log.info("")
+                        log.info("---------------------------------------------------------------------------------")
+                        log.info(f"Updating the solution after rejecting {picks_rejected} bad picks...")
+                        log.info("---------------------------------------------------------------------------------")
 
                     # Reinitialize the observations without the bad picks
                     for obs in temp_observations:
@@ -6665,7 +6684,7 @@ class Trajectory(object):
 
                 else:
                     if self.verbose:
-                        print("All picks are within 3 sigma...")
+                        log.info("All picks are within 3 sigma...")
 
 
             else:
@@ -6702,7 +6721,7 @@ class Trajectory(object):
                 reference_init=minimize_solution.success, v_init_stddev_direct=self.v_init_stddev)
 
             if self.verbose:
-                print(self.orbit.__repr__(v_init_ht=self.v_init_ht))
+                log.info(f'{self.orbit.__repr__(v_init_ht=self.v_init_ht)}')
 
 
         ######################################################################################################
@@ -6772,7 +6791,7 @@ class Trajectory(object):
                 if self.save_results:
 
                     if self.verbose:
-                        print('Saving Monte Carlo results...')
+                        log.info('Saving Monte Carlo results...')
 
                     # Save the picked trajectory structure with Monte Carlo points
                     savePickle(traj_best, mc_output_dir, mc_file_name + '_trajectory.pickle')
@@ -6792,7 +6811,7 @@ class Trajectory(object):
             if self.save_results:
 
                 if self.verbose:
-                    print('Saving results with original picks...')
+                    log.info('Saving results with original picks...')
 
                 # Save the picked trajectory structure with original points
                 savePickle(self, self.output_dir, self.file_name + '_trajectory.pickle')
