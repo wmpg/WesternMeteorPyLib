@@ -33,7 +33,7 @@ try:
 
     REBOUND_FOUND = True
 
-except ImportError:
+except ImportError as e:
     # Surface the actual import error instead of a generic "not found" message, so a real failure
     #   (e.g. a broken dependency) isn't misreported as a missing package the user already has.
     print("REBOUND/reboundx could not be imported: {}".format(e))
