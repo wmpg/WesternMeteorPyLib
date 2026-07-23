@@ -70,7 +70,7 @@
       <x>1510</x>
       <y>0</y>
       <width>391</width>
-      <height>145</height>
+      <height>121</height>
      </rect>
     </property>
     <property name="title">
@@ -82,8 +82,8 @@
     <widget class="QLineEdit" name="inputTimeStep">
      <property name="geometry">
       <rect>
-       <x>40</x>
-       <y>30</y>
+       <x>48</x>
+       <y>12</y>
        <width>61</width>
        <height>23</height>
       </rect>
@@ -92,8 +92,8 @@
     <widget class="QLabel" name="label">
      <property name="geometry">
       <rect>
-       <x>-25</x>
-       <y>30</y>
+       <x>-17</x>
+       <y>12</y>
        <width>61</width>
        <height>16</height>
       </rect>
@@ -251,8 +251,8 @@
     <widget class="QLabel" name="label_18">
      <property name="geometry">
       <rect>
-       <x>110</x>
-       <y>30</y>
+       <x>118</x>
+       <y>12</y>
        <width>21</width>
        <height>16</height>
       </rect>
@@ -355,8 +355,8 @@
     <widget class="QCheckBox" name="checkBoxAdaptiveDt">
      <property name="geometry">
       <rect>
-       <x>23</x>
-       <y>60</y>
+       <x>31</x>
+       <y>35</y>
        <width>88</width>
        <height>20</height>
       </rect>
@@ -374,8 +374,8 @@
     <widget class="QLineEdit" name="inputAdaptiveRtol">
      <property name="geometry">
       <rect>
-       <x>40</x>
-       <y>90</y>
+       <x>48</x>
+       <y>58</y>
        <width>61</width>
        <height>23</height>
       </rect>
@@ -387,8 +387,8 @@
     <widget class="QLabel" name="labelAdaptiveRtol">
      <property name="geometry">
       <rect>
-       <x>10</x>
-       <y>90</y>
+       <x>18</x>
+       <y>58</y>
        <width>28</width>
        <height>16</height>
       </rect>
@@ -403,8 +403,8 @@
     <widget class="QLineEdit" name="inputErosionReleaseLength">
      <property name="geometry">
       <rect>
-       <x>40</x>
-       <y>113</y>
+       <x>48</x>
+       <y>90</y>
        <width>61</width>
        <height>23</height>
       </rect>
@@ -416,8 +416,8 @@
     <widget class="QLabel" name="labelErosionReleaseLength">
      <property name="geometry">
       <rect>
-       <x>2</x>
-       <y>113</y>
+       <x>10</x>
+       <y>90</y>
        <width>36</width>
        <height>16</height>
       </rect>
@@ -426,7 +426,7 @@
       <string>Grain-release interval along the trail (m). Larger = faster but coarser erosion tail. Default 50 m.</string>
      </property>
      <property name="text">
-      <string>grain m</string>
+      <string>grain</string>
      </property>
      <property name="alignment">
       <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
@@ -443,6 +443,19 @@
      </property>
      <property name="orientation">
       <enum>Qt::Vertical</enum>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_79">
+     <property name="geometry">
+      <rect>
+       <x>114</x>
+       <y>90</y>
+       <width>21</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>m</string>
      </property>
     </widget>
    </widget>
@@ -1265,7 +1278,7 @@
     <property name="geometry">
      <rect>
       <x>860</x>
-      <y>0</y>
+      <y>4</y>
       <width>641</width>
       <height>551</height>
      </rect>
