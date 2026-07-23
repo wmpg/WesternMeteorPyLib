@@ -46,27 +46,36 @@ class Constants(object):
         #   sub-steps underneath (see adaptive_* below and ablateAll).
         self.dt = 0.005
 
-        ### Adaptive sub-stepping (opt-in). Default False -> the engine runs the original fixed-step
-        #   path and reproduces prior results exactly. When True (default), each fragment sub-steps
-        #   adaptively within each dt to meet the tolerances below, while the output cadence stays fixed
-        #   at dt. Adaptive is on by default: it matches the fixed-step light curve to well within
-        #   measurement noise while running several times faster. Set False for bit-for-bit legacy runs. ###
+        # Adaptive sub-stepping. When True (the default), each fragment sub-steps adaptively within each
+        #   dt to meet the tolerances below, while the output cadence stays fixed at dt; this matches the
+        #   fixed-step light curve to well within measurement noise while running several times faster.
+        #   Set False to run the original fixed-step path, which reproduces prior results bit-for-bit.
         self.adaptive_dt = True
         # Adaptive integrator: True -> embedded Dormand-Prince RK45 on the coupled (mass, velocity)
         #   system (fewer RHS evals per sub-step, higher order -> ~3-4x faster); False -> step-doubling
         #   on the original operator-split RK4. Both meet the same tolerance; DP45 is the default.
         self.adaptive_high_order = True
-        # Tolerance targets NUMERICAL error below MEASUREMENT noise (~0.1 mag, ~0.1 km/s at ~25 FPS),
-        #   not machine convergence. rtol=1e-5 keeps the light curve and dynamics indistinguishable from
-        #   the fixed-step result (well under measurement precision) at negligible extra cost over 1e-4
-        #   (for eroding meteors the sub-step count is set by erosion_release_length, not rtol); loosen to
-        #   1e-4 for a hair more speed on tolerance-bound cases, or tighten to 1e-6 for CAMO-grade data.
-        self.adaptive_rtol = 1e-5         # relative tolerance on mass and speed
-        self.adaptive_atol_m = 1e-14      # absolute mass tolerance (kg); ~ m_kill
-        self.adaptive_atol_v = 0.1        # absolute speed tolerance (m/s); floor well under meas. noise
-        self.adaptive_dt_min = 1e-7       # smallest allowed sub-step (s)
-        self.adaptive_dt_max = 0.005      # largest allowed sub-step (s); should be <= dt
-        self.adaptive_max_substeps = 10000  # runaway guard, sub-steps per fragment per macro step
+        # Relative tolerance on mass and speed. Targets NUMERICAL error below MEASUREMENT noise
+        #   (~0.1 mag, ~0.1 km/s at ~25 FPS), not machine convergence. rtol=1e-5 keeps the light curve
+        #   and dynamics indistinguishable from the fixed-step result at negligible extra cost over 1e-4
+        #   (for eroding meteors the sub-step count is set by erosion_release_length, not rtol); loosen
+        #   to 1e-4 for a hair more speed on tolerance-bound cases, or tighten to 1e-6 for CAMO data.
+        self.adaptive_rtol = 1e-5
+
+        # Absolute mass tolerance (kg); of order m_kill
+        self.adaptive_atol_m = 1e-14
+
+        # Absolute speed tolerance (m/s); floor well under the measurement noise
+        self.adaptive_atol_v = 0.1
+
+        # Smallest allowed sub-step (s)
+        self.adaptive_dt_min = 1e-7
+
+        # Largest allowed sub-step (s); should be <= dt
+        self.adaptive_dt_max = 0.005
+
+        # Runaway guard: maximum sub-steps per fragment per macro step
+        self.adaptive_max_substeps = 10000
 
         # Along-track grain-release interval (m). In adaptive mode grains are shed once per accepted
         #   sub-step, so the sub-step cadence sets the grain-birth resolution. Capping an eroding
@@ -839,12 +848,12 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
 
             erosion_active = 1 if (frag.erosion_enabled and (frag.erosion_coeff > 0)) else 0
 
-            _stepper = adaptiveDP45Step if const.adaptive_high_order else adaptiveSingleBodyStep
+            stepper = adaptiveDP45Step if const.adaptive_high_order else adaptiveSingleBodyStep
 
             (frag.m, frag.v, frag.vv, frag.vh, frag.length, frag.h_grav_drop_total, frag.h, rho_atm,
                 mass_loss_ablation, mass_loss_erosion, deceleration_total, went_up, n_sub,
                 frag.adaptive_h_sub, runaway, floor_accepts, erosion_events_adaptive) \
-                    = _stepper(
+                    = stepper(
                     const.dt, frag.K, frag.sigma, frag.erosion_coeff, erosion_active,
                     frag.m, frag.v, frag.vv, frag.vh, frag.length, frag.h_grav_drop_total,
                     const.h_init, const.zenith_angle, const.r_earth, G0, const.dens_co,
@@ -875,8 +884,8 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
             # Compute the total mass loss
             mass_loss_total = mass_loss_ablation + mass_loss_erosion
 
-            # If the total mass after ablation in this step is below zero, ablate what's left of the whole mass
-            # (i.e. land exactly on m_new = 0, not some arbitrary leftover - see m_new below)
+            # If the total mass after ablation in this step is below zero, ablate what is left of the
+            #   whole mass (i.e. land exactly on m_new = 0, not some arbitrary leftover - see m_new below)
             if (frag.m + mass_loss_total) < 0:
                 mass_loss_total = -frag.m
 
@@ -1124,7 +1133,7 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
         # Create grains for erosion-enabled fragments
         if frag.erosion_enabled:
 
-            def _spawnGrainsFromErosion(eroded_mass):
+            def spawnGrainsFromErosion(eroded_mass):
                 """ Distribute the given eroded mass into grains born from the fragment's current state.
                     Uses the enclosing frag/const. """
                 grain_children, _ = generateFragments(const, frag, eroded_mass, \
@@ -1143,22 +1152,22 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
                 #   current position/velocity into each grain, so temporarily rewind the parent to each
                 #   sub-step's state, spawn, then restore its end-of-macro-step state.
                 if erosion_events_adaptive:
-                    _saved_state = (frag.h, frag.v, frag.vv, frag.vh, frag.length,
+                    saved_state = (frag.h, frag.v, frag.vv, frag.vh, frag.length,
                                     frag.h_grav_drop_total)
                     for (em, e_h, e_v, e_vv, e_vh, e_len, e_grav) in erosion_events_adaptive:
                         if em <= 0:
                             continue
-                        frag.h = e_h; frag.v = e_v; frag.vv = e_vv; frag.vh = e_vh
-                        frag.length = e_len; frag.h_grav_drop_total = e_grav
-                        _spawnGrainsFromErosion(em)
+                        (frag.h, frag.v, frag.vv, frag.vh, frag.length, frag.h_grav_drop_total) \
+                            = (e_h, e_v, e_vv, e_vh, e_len, e_grav)
+                        spawnGrainsFromErosion(em)
                         eroded_this_tick = True
-                    (frag.h, frag.v, frag.vv, frag.vh, frag.length, frag.h_grav_drop_total) = _saved_state
+                    (frag.h, frag.v, frag.vv, frag.vh, frag.length, frag.h_grav_drop_total) = saved_state
 
             else:
 
                 # Fixed step: distribute the whole macro-step erosion loss at the end-of-step state
                 if abs(mass_loss_erosion) > 0:
-                    _spawnGrainsFromErosion(abs(mass_loss_erosion))
+                    spawnGrainsFromErosion(abs(mass_loss_erosion))
                     eroded_this_tick = True
 
             # Record erosion-begin bookkeeping for the main fragment once, at the END-of-step state so the
@@ -1494,13 +1503,13 @@ def runSimulation(const, compute_wake=False):
     # Back-fill adaptive-timestep settings for Constants loaded from older JSONs that predate them, so
     #   such runs pick up the current defaults (adaptive on). Set adaptive_dt False in the JSON/GUI for
     #   bit-for-bit legacy fixed-step behaviour. Also reset the per-run diagnostics.
-    _adaptive_defaults = {'adaptive_dt': True, 'adaptive_high_order': True, 'adaptive_rtol': 1e-5,
+    adaptive_defaults = {'adaptive_dt': True, 'adaptive_high_order': True, 'adaptive_rtol': 1e-5,
         'adaptive_atol_m': 1e-14, 'adaptive_atol_v': 0.1, 'adaptive_dt_min': 1e-7,
         'adaptive_dt_max': const.dt, 'adaptive_max_substeps': 10000,
         'erosion_release_length': 200.0, 'erosion_release_vref': 30000.0}
-    for _attr, _default in _adaptive_defaults.items():
-        if not hasattr(const, _attr):
-            setattr(const, _attr, _default)
+    for attr, default in adaptive_defaults.items():
+        if not hasattr(const, attr):
+            setattr(const, attr, default)
     const.adaptive_substeps_total = 0
     const.adaptive_runaway_events = 0
     const.adaptive_floor_accepts = 0

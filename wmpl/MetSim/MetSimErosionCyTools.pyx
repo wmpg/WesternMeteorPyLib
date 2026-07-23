@@ -598,6 +598,7 @@ cdef inline double clampMassC(double dm, double m):
     Return:
         dm_clamped: [double] dm, or -m if (m + dm) < 0.
     """
+
     if (m + dm) < 0:
         return -m
     return dm
@@ -617,6 +618,7 @@ cdef double heightCurvatureC(double h0, double zc, double l, double r_earth):
     Return:
         h: [double] Height at distance l (m), before the gravity drop is subtracted.
     """
+
     return sqrt((h0 + r_earth)*(h0 + r_earth) - 2*l*cos(zc)*(h0 + r_earth) + l*l) - r_earth
 
 
@@ -632,6 +634,7 @@ cdef double atmDensityPolyC(double ht, FLOAT_TYPE_t[:] dens_co):
     Return:
         rho: [double] Atmospheric mass density at height ht (kg/m^3).
     """
+
     cdef double x = ht/1e6
     return 10**(dens_co[0] + dens_co[1]*x + dens_co[2]*x*x + dens_co[3]*x*x*x
                 + dens_co[4]*x*x*x*x + dens_co[5]*x*x*x*x*x + dens_co[6]*x*x*x*x*x*x)
@@ -665,11 +668,19 @@ cdef void advanceVelPosC(double m, double v, double vv, double vh, double length
     Return:
         None (results written into 'out').
     """
+
     cdef double gv, av, ah, vv_n, vh_n, v_n
-    # Accelerating (decel_rate > 0) or already stopped -> stop the fragment (mirror 773-775)
+
+    # Accelerating (decel_rate > 0) or already stopped -> stop the fragment (mirror the fixed-path
+    #   stop branch in ablateAll)
     if (decel_rate > 0) or (v <= 0):
-        out[0] = m + dm; out[1] = 0.0; out[2] = 0.0; out[3] = 0.0
-        out[4] = length; out[5] = grav; out[6] = 0.0
+        out[0] = m + dm
+        out[1] = 0.0
+        out[2] = 0.0
+        out[3] = 0.0
+        out[4] = length
+        out[5] = grav
+        out[6] = 0.0
         return
     gv = g0/((1.0 + h_at/r_earth)*(1.0 + h_at/r_earth))
     av = -decel_rate*vv/v + vh*v/(r_earth + h_at)
@@ -681,7 +692,7 @@ cdef void advanceVelPosC(double m, double v, double vv, double vh, double length
     out[1] = v_n
     out[2] = vv_n
     out[3] = vh_n
-    out[4] = length + v_n*h            # length uses the UPDATED speed (matches 811-813 -> 824)
+    out[4] = length + v_n*h            # length uses the UPDATED speed, as in the fixed advance
     out[5] = grav + 0.5*gv*h*h
     out[6] = 1.0 if vv_n > 0 else 0.0  # going up
 
@@ -822,7 +833,8 @@ cpdef adaptiveSingleBodyStep(double dt_macro, double K, double sigma, double ero
         v_cap = v
         if (erosion_release_vref > 0) and (v > erosion_release_vref):
             v_cap = erosion_release_vref
-        if erosion_active and (v > 0) and (erosion_release_length > 0) and (h_sub*v_cap > erosion_release_length):
+        if erosion_active and (v > 0) and (erosion_release_length > 0) \
+                and (h_sub*v_cap > erosion_release_length):
             h_sub = erosion_release_length/v_cap
 
         hh = 0.5*h_sub
@@ -858,7 +870,12 @@ cpdef adaptiveSingleBodyStep(double dt_macro, double K, double sigma, double ero
         decel_1 = decelerationRK4(hh, K, fmax(m, m_kill), rho_atm, v)
         advanceVelPosC(m, v, vv, vh, length, h_grav_drop_total, dm_tot_1, decel_1, hh, h_cur,
                        r_earth, g0, out1)
-        m_h = out1[0]; v_h = out1[1]; vv_h = out1[2]; vh_h = out1[3]; len_h = out1[4]; grav_h = out1[5]
+        m_h = out1[0]
+        v_h = out1[1]
+        vv_h = out1[2]
+        vh_h = out1[3]
+        len_h = out1[4]
+        grav_h = out1[5]
 
         h_mid = heightCurvatureC(h_init, zenith_angle, len_h, r_earth) - grav_h
         rho_mid = atmDensityPolyC(h_mid, dens_co)
@@ -872,7 +889,8 @@ cpdef adaptiveSingleBodyStep(double dt_macro, double K, double sigma, double ero
         decel_2 = decelerationRK4(hh, K, fmax(m_h, m_kill), rho_mid, v_h)
         advanceVelPosC(m_h, v_h, vv_h, vh_h, len_h, grav_h, dm_tot_2, decel_2, hh, h_mid,
                        r_earth, g0, out2)
-        m_two = out2[0]; v_two = out2[1]
+        m_two = out2[0]
+        v_two = out2[1]
 
         # --- Error estimate (step doubling, RK4 order p=4 -> denom 2^p - 1 = 15) ---
         err_m = fabs(m_two - m_big)/15.0
@@ -897,8 +915,12 @@ cpdef adaptiveSingleBodyStep(double dt_macro, double K, double sigma, double ero
             #   dv/dt from decelerationRK4). This feeds the luminosity deceleration term - unlike the net
             #   (v_start - v), it excludes the gravity/curvature reallocation, matching the fixed path.
             dv_drag += (decel_1 + decel_2)*hh
-            m = out2[0]; v = out2[1]; vv = out2[2]; vh = out2[3]
-            length = out2[4]; h_grav_drop_total = out2[5]
+            m = out2[0]
+            v = out2[1]
+            vv = out2[2]
+            vh = out2[3]
+            length = out2[4]
+            h_grav_drop_total = out2[5]
             t += h_sub
             n_substeps += 1
 
@@ -1006,6 +1028,7 @@ cdef void _rhsDP(double m, double vv, double vh, double length, double h_grav_dr
     Return:
         None (results written into 'dydt' and 'extras').
     """
+
     cdef double v, h, rho, decel, mm, mpos
     v = sqrt(vv*vv + vh*vh)
     h = heightCurvatureC(h_init, zenith_angle, length, r_earth) - h_grav_drop
@@ -1073,7 +1096,7 @@ cpdef adaptiveDP45Step(double dt_macro, double K, double sigma, double erosion_c
     cdef double k5[4]
     cdef double k6[4]
     cdef double k7[4]
-    # extras per stage: [ablation_rate, erosion_rate, drag_decel, rho]
+    # Extras per stage: [ablation_rate, erosion_rate, drag_decel, rho]
     cdef double e1[4]
     cdef double e2[4]
     cdef double e3[4]
@@ -1091,7 +1114,10 @@ cpdef adaptiveDP45Step(double dt_macro, double K, double sigma, double erosion_c
 
     erosion_events = [] if erosion_active else None
 
-    y[0] = m; y[1] = vv; y[2] = vh; y[3] = length
+    y[0] = m
+    y[1] = vv
+    y[2] = vh
+    y[3] = length
 
     h_sub = h_sub_init
     if h_sub <= 0:
@@ -1157,13 +1183,16 @@ cpdef adaptiveDP45Step(double dt_macro, double K, double sigma, double erosion_c
                m_kill, h_init, zenith_angle, r_earth, dens_co, k7, e7)
 
         # 5th-order solution (= yt above, the 7th stage node) and error vs the 4th-order embedded
-        m_new = yt[0]; vv_new = yt[1]; vh_new = yt[2]; len_new = yt[3]
+        m_new = yt[0]
+        vv_new = yt[1]
+        vh_new = yt[2]
+        len_new = yt[3]
         v_new = sqrt(vv_new*vv_new + vh_new*vh_new)
 
         # Error estimate on mass and speed (difference of 5th- and 4th-order weights)
         err_m = fabs(h_sub*((b1-bs1)*k1[0] + (b3-bs3)*k3[0] + (b4-bs4)*k4[0] + (b5-bs5)*k5[0]
                             + (b6-bs6)*k6[0] + (0.0-bs7)*k7[0]))
-        # velocity error via the vv/vh error components projected onto speed
+        # Velocity error via the vv/vh error components projected onto speed
         err_v = fabs(h_sub*((b1-bs1)*k1[1] + (b3-bs3)*k3[1] + (b4-bs4)*k4[1] + (b5-bs5)*k5[1]
                             + (b6-bs6)*k6[1] + (0.0-bs7)*k7[1]))
         err_v += fabs(h_sub*((b1-bs1)*k1[2] + (b3-bs3)*k3[2] + (b4-bs4)*k4[2] + (b5-bs5)*k5[2]
@@ -1189,7 +1218,9 @@ cpdef adaptiveDP45Step(double dt_macro, double K, double sigma, double erosion_c
 
             # Commit the state; floor the mass at 0 and add the gravity drop for this sub-step
             y[0] = m_new if m_new > 0.0 else 0.0
-            y[1] = vv_new; y[2] = vh_new; y[3] = len_new
+            y[1] = vv_new
+            y[2] = vh_new
+            y[3] = len_new
             h_grav_drop_total += 0.5*gv*h_sub*h_sub
             rho_last = rho0
             t += h_sub
@@ -1239,7 +1270,10 @@ cpdef adaptiveDP45Step(double dt_macro, double K, double sigma, double erosion_c
             if h_sub < dt_min:
                 h_sub = dt_min
 
-    m = y[0]; vv = y[1]; vh = y[2]; length = y[3]
+    m = y[0]
+    vv = y[1]
+    vh = y[2]
+    length = y[3]
     v = sqrt(vv*vv + vh*vh)
     h_new = heightCurvatureC(h_init, zenith_angle, length, r_earth) - h_grav_drop_total
     if h_new > 0:
