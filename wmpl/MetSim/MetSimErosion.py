@@ -839,8 +839,7 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
 
             erosion_active = 1 if (frag.erosion_enabled and (frag.erosion_coeff > 0)) else 0
 
-            _stepper = adaptiveDP45Step if getattr(const, 'adaptive_high_order', True) \
-                else adaptiveSingleBodyStep
+            _stepper = adaptiveDP45Step if const.adaptive_high_order else adaptiveSingleBodyStep
 
             (frag.m, frag.v, frag.vv, frag.vh, frag.length, frag.h_grav_drop_total, frag.h, rho_atm,
                 mass_loss_ablation, mass_loss_erosion, deceleration_total, went_up, n_sub,
@@ -851,8 +850,7 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
                     const.h_init, const.zenith_angle, const.r_earth, G0, const.dens_co,
                     const.adaptive_rtol, const.adaptive_atol_m, const.adaptive_atol_v, const.m_kill,
                     const.adaptive_dt_min, const.adaptive_dt_max, const.adaptive_max_substeps,
-                    frag.adaptive_h_sub, getattr(const, 'erosion_release_length', 200.0),
-                    getattr(const, 'erosion_release_vref', 30000.0))
+                    frag.adaptive_h_sub, const.erosion_release_length, const.erosion_release_vref)
 
             # Diagnostics (feed the cost study; also used to warn once on runaway/under-resolved steps)
             const.adaptive_substeps_total += n_sub

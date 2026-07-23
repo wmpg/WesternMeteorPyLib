@@ -3280,11 +3280,10 @@ class MetSimGUI(QMainWindow):
         self.inputTimeStep.setText(str(const.dt))
 
         # Adaptive time step toggle: when on, dt is only the output cadence and its box is disabled
-        self.checkBoxAdaptiveDt.setChecked(getattr(const, 'adaptive_dt', True))
+        self.checkBoxAdaptiveDt.setChecked(const.adaptive_dt)
         self.inputTimeStep.setEnabled(not self.checkBoxAdaptiveDt.isChecked())
-        self.inputAdaptiveRtol.setText("{:.1e}".format(getattr(const, 'adaptive_rtol', 1e-5)))
-        self.inputErosionReleaseLength.setText(
-            "{:.0f}".format(getattr(const, 'erosion_release_length', 200.0)))
+        self.inputAdaptiveRtol.setText("{:.1e}".format(const.adaptive_rtol))
+        self.inputErosionReleaseLength.setText("{:.0f}".format(const.erosion_release_length))
 
         self.inputHtInit.setText("{:.3f}".format(const.h_init/1000))
         self.inputP0M.setText("{:d}".format(int(const.P_0m)))
@@ -3685,10 +3684,9 @@ class MetSimGUI(QMainWindow):
 
         self.const.dt = self._tryReadBox(self.inputTimeStep, self.const.dt)
         self.const.adaptive_dt = self.checkBoxAdaptiveDt.isChecked()
-        self.const.adaptive_rtol = self._tryReadBox(self.inputAdaptiveRtol,
-            getattr(self.const, 'adaptive_rtol', 1e-5))
+        self.const.adaptive_rtol = self._tryReadBox(self.inputAdaptiveRtol, self.const.adaptive_rtol)
         self.const.erosion_release_length = self._tryReadBox(self.inputErosionReleaseLength,
-            getattr(self.const, 'erosion_release_length', 200.0))
+            self.const.erosion_release_length)
         self.const.P_0m = self._tryReadBox(self.inputP0M, self.const.P_0m)
 
         self.const.h_init   = 1000*self._tryReadBox(self.inputHtInit, self.const.h_init/1000)
