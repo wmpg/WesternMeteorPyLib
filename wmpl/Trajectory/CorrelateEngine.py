@@ -28,7 +28,7 @@ MCMODE_ALL = MCMODE_CANDS + MCMODE_PHASE1 + MCMODE_PHASE2
 
 
 # Grab the logger from the main thread
-log = logging.getLogger("traj_correlator")
+log = logging.getLogger("wmpl_logger")
 
 
 def getMcModeStr(mcmode, strtype=0):

@@ -23,6 +23,7 @@
 """ Python scripts to manage the WMPL SQLite databases
 """
 import os
+import sys
 import sqlite3
 import logging
 import logging.handlers
@@ -34,7 +35,7 @@ import numpy as np
 from wmpl.Utils.TrajConversions import datetime2JD, jd2Date
 
 
-log = logging.getLogger("traj_correlator")
+log = logging.getLogger("wmpl_logger")
 
 ############################################################
 # classes to handle the Observation and Trajectory databases
@@ -1054,7 +1055,7 @@ if __name__ == '__main__':
     log.addHandler(file_handler)
 
     # Init the console handler (i.e. print to console)
-    console_handler = logging.StreamHandler()
+    console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(log_formatter)
     log.addHandler(console_handler)
 

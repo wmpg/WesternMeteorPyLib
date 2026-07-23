@@ -48,7 +48,7 @@ AUTO_RUN_FREQUENCY = 6
 
 ### ###
 
-log = logging.getLogger("traj_correlator")
+log = logging.getLogger("wmpl_logger")
 
 
 class TrajectoryReduced(object):
@@ -2136,7 +2136,6 @@ contain data folders. Data folders should have FTPdetectinfo files together with
     os.makedirs(log_dir, exist_ok=True)
 
     # Init the logger
-    #log = logging.getLogger("traj_correlator")
     log.setLevel(logging.DEBUG)
 
     # Init the log formatter

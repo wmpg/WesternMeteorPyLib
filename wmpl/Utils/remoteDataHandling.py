@@ -30,7 +30,7 @@ import time
 from configparser import ConfigParser
 
 
-log = logging.getLogger("traj_correlator")
+log = logging.getLogger("wmpl_logger")
 
 
 def getKey(fname):
