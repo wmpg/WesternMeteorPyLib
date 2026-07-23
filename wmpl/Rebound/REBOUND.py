@@ -32,13 +32,13 @@ try:
     import astropy.time
 
     REBOUND_FOUND = True
+    rebound_err = None
 
 except ImportError as e:
     # Surface the actual import error instead of a generic "not found" message, so a real failure
     #   (e.g. a broken dependency) isn't misreported as a missing package the user already has.
-    print("REBOUND/reboundx could not be imported: {}".format(e))
-    print("Install or upgrade the rebound and reboundx packages to use the REBOUND functions.")
     REBOUND_FOUND = False
+    rebound_err = e
 
 from wmpl.Config import config
 from wmpl.Utils.TrajConversions import (
@@ -893,6 +893,7 @@ if __name__ == "__main__":
         print("")
         print("ERROR: the 'rebound' and 'reboundx' packages are required to run this script, "
               "but they could not be imported.")
+        print("The error was: {}".format(rebound_err))        
         print("")
         print("Install them with:  pip install rebound reboundx")
         print("")
