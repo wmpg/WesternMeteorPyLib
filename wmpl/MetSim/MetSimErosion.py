@@ -248,9 +248,13 @@ class Constants(object):
         self.mass_at_erosion_change = None
 
         # Energy received per unit cross section prior to to erosion begin
+        # NOTE: never populated by runSimulation()/ablateAll() - always stays None here. The value this
+        #   is meant to hold IS computed, by energyReceivedBeforeErosion() (this module, "es" return
+        #   value), but that function is never called anywhere in this codebase to assign it back here.
         self.energy_per_cs_before_erosion = None
 
         # Energy received per unit mass prior to to erosion begin
+        # NOTE: same as energy_per_cs_before_erosion above (see energyReceivedBeforeErosion()'s "ev")
         self.energy_per_mass_before_erosion = None
 
         # Height at which the main mass was depleeted
@@ -308,6 +312,16 @@ class Fragment(object):
 
         # Erosion coefficient value
         self.erosion_coeff = 0
+
+        # Indicates that this fragment was born from a disruption event and uses a fixed, disruption-
+        #   specific erosion coefficient (const.disruption_erosion_coeff) instead of the ordinary height-
+        #   dependent one, so it's excluded from the height-based erosion_coeff recompute below
+        self.disruption_child = False
+
+        # Indicates that the one-time density/ablation coeff change at erosion_height_change has already
+        #   been applied to this (main) fragment, so it isn't silently re-applied (and doesn't clobber a
+        #   later manual sigma change, e.g. from a complex fragmentation "A" event) on every subsequent tick
+        self.erosion_height_change_applied = False
 
         # Grain mass distribution index
         self.erosion_mass_index = 2.5
@@ -464,7 +478,8 @@ def heightCurvature(h0, zc, l, r_earth):
         h: [float] Height at distance l from the origin (m).
     """
 
-    return np.sqrt((h0 + r_earth)**2 - 2*l*np.cos(zc)*(h0 + r_earth) + l**2) - r_earth
+    # Scalar inputs in the per-fragment hot path - math.sqrt/math.cos avoid numpy scalar overhead
+    return math.sqrt((h0 + r_earth)**2 - 2*l*math.cos(zc)*(h0 + r_earth) + l**2) - r_earth
 
 
 def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mass_max, 
@@ -486,7 +501,7 @@ def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mas
 
     Keyword arguments:
         keep_eroding: [bool] Whether the daughter fragments should keep eroding.
-        disruption: [bool] Indicates that the disruption occured, uses a separate erosion parameter for
+        disruption: [bool] Indicates that the disruption occurred, uses a separate erosion parameter for
             disrupted daughter fragments.
         mass_model: [bool] Fragment mass distribution model to use. Options: 
             - 'powerlaw' (default) - a power law mass distribution, appropriate for fragmentation of rock.
@@ -634,9 +649,10 @@ def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mas
             if keep_eroding:
                 frag_child.erosion_enabled = True
 
-                # If the disruption occured, use a different erosion coefficient for daguhter fragments
+                # If the disruption occurred, use a different erosion coefficient for daughter fragments
                 if disruption:
                     frag_child.erosion_coeff = const.disruption_erosion_coeff
+                    frag_child.disruption_child = True
                 else:
                     frag_child.erosion_coeff = getErosionCoeff(const, frag_parent.h)
 
@@ -699,6 +715,12 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
 
     Return:
         ...
+
+    Note:
+        const.dt is fixed for every fragment, including grains. Near erosion_mass_min this single-step
+        RK4 is under-resolved (a single step can overshoot the grain's true velocity by tens of percent
+        vs. a finely-substepped mirror) - a known accuracy limitation of the fixed-step scheme, not
+        (currently) compensated for with adaptive/sub-stepping.
     """
 
     # Keep track of the total luminosity
@@ -737,6 +759,20 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
 
     frag_children_all = []
 
+    # Snapshot which fragments were active at the start of this tick, before any of them can be killed
+    # below - used for the leading fragment candidacy check further down, so a fragment that dies partway
+    # through this very tick (and so is no longer frag.active by the time we get there) still counts with
+    # its just-computed, physically valid position for the tick it died on
+    fragments_active_at_tick_start = [frag for frag in fragments if frag.active]
+
+    # Index the complex fragmentation entries by id once, so the per-grain lookup below is O(1) instead
+    #   of a linear scan of all entries for every complex grain on every tick
+    fragmentation_entry_by_id = {frag_entry.id: frag_entry for frag_entry in const.fragmentation_entries}
+
+    # Total active mass (grain-weighted), accumulated inside the loop below instead of a separate
+    #   post-loop scan of the whole fragment list
+    mass_total_active = 0.0
+
     # Go through all active fragments
     for frag in fragments:
 
@@ -760,8 +796,9 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
         mass_loss_total = mass_loss_ablation + mass_loss_erosion
 
         # If the total mass after ablation in this step is below zero, ablate what's left of the whole mass
+        # (i.e. land exactly on m_new = 0, not some arbitrary leftover - see m_new below)
         if (frag.m + mass_loss_total) < 0:
-            mass_loss_total = mass_loss_total + frag.m
+            mass_loss_total = -frag.m
 
         # Compute new mass
         m_new = frag.m + mass_loss_total
@@ -834,6 +871,11 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
         frag.h -= frag.h_grav_drop_total
 
         # Get the luminous efficiency
+        # NOTE: frag.v/frag.m here are already this tick's post-step values, while mass_loss_ablation/
+        # deceleration_total above were computed from last tick's pre-step state - a small (~1.6% in
+        # total luminosity) but systematic inconsistency between the state used for the rate terms and
+        # the state used for the efficiency factors converting them to lum/q. Left as-is (not clearly
+        # wrong, no evidence it's an accidental regression) - see beta below for the same pattern.
         tau = luminousEfficiency(const.lum_eff_type, const.lum_eff, frag.v, frag.m)
 
         # # Compute luminosity for one grain/fragment (without the deceleration term)
@@ -885,11 +927,20 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
             main_vel = frag.v
             main_dyn_press = dyn_press
 
+        # Keep track of the brightest fragment (checked before the kill-check below so a fragment's own
+        #   death tick - where m/v/h/lum first cross a kill threshold - still counts as a valid candidate,
+        #   instead of silently vanishing from brightest_* for the tick it actually died on)
+        if frag.lum > brightest_lum:
+            brightest_lum = frag.lum
+            brightest_height = frag.h
+            brightest_length = frag.length
+            brightest_vel = frag.v
+
         # If the fragment is done, stop ablating
         if  (
-            (frag.m <= const.m_kill) 
-            or (frag.v < const.v_kill) 
-            or (frag.h < const.h_kill) 
+            (frag.m <= const.m_kill)
+            or (frag.v < const.v_kill)
+            or (frag.h < const.h_kill)
             or (frag.lum < 0)
             or ((const.len_kill > 0) and (frag.length > const.len_kill))
             ):
@@ -899,24 +950,18 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
             # print('Killing', frag.id)
             continue
 
-        # Keep track of the brightest fragment
-        if frag.lum > brightest_lum:
-            brightest_lum = lum
-            brightest_height = frag.h
-            brightest_length = frag.length
-            brightest_vel = frag.v
-
         # For fragments born out of complex fragmentation, keep track of their luminosity and height
         if not frag.main:
 
-            if const.fragmentation_show_individual_lcs: 
+            # Keep track of magnitudes of complex fragmentation fragments (the per-entry breakdown below is
+            #   only computed if explicitly requested, since it's an O(entries) lookup per grain per tick -
+            #   this must NOT gate the cheap eroded/disrupted totals below, which are tracked unconditionally)
+            if frag.complex:
 
-                # Keep track of magnitudes of complex fragmentation fragments
-                if frag.complex:
+                if const.fragmentation_show_individual_lcs:
 
-                    # Find the corresponding fragmentation entry
-                    frag_entry = next((x for x in const.fragmentation_entries if x.id == frag.complex_id), \
-                        None)
+                    # Find the corresponding fragmentation entry (O(1) via the id index built above)
+                    frag_entry = fragmentation_entry_by_id.get(frag.complex_id)
 
                     if frag_entry is not None:
 
@@ -964,23 +1009,28 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
                                 frag_entry.main_luminosity[-1] += frag.lum
                                 frag_entry.main_tau_over_lum[-1] += tau*frag.lum
 
-                # Keep track of luminosity of eroded and disrupted fragments ejected directly from the main
-                #   fragment
-                else:
+            # Keep track of luminosity of eroded and disrupted fragments ejected directly from the main
+            #   fragment (always tracked, regardless of fragmentation_show_individual_lcs - see above)
+            else:
 
-                    luminosity_eroded += frag.lum
-                    tau_eroded += tau*frag.lum
+                luminosity_eroded += frag.lum
+                tau_eroded += tau*frag.lum
 
         # For non-complex fragmentation only: Check if the erosion should start, given the height,
         #   and create grains
         if (not frag.complex) and (frag.h < const.erosion_height_start) and frag.erosion_enabled \
             and const.erosion_on:
 
-            # Turn on the erosion of the fragment
-            frag.erosion_coeff = getErosionCoeff(const, frag.h)
+            # Turn on the erosion of the fragment (disruption daughters keep the fixed, disruption-specific
+            #   erosion coefficient they were assigned at birth instead - see disruption_child's docstring -
+            #   otherwise this would silently overwrite it with the ordinary height-dependent one)
+            if not frag.disruption_child:
+                frag.erosion_coeff = getErosionCoeff(const, frag.h)
 
             # Update the main fragment physical parameters if it is changed after erosion coefficient change
-            if frag.main and (const.erosion_height_change >= frag.h):
+            # (only once - otherwise this would silently re-apply every tick and clobber any later manual
+            # sigma change, e.g. from a complex fragmentation "A" event)
+            if frag.main and (not frag.erosion_height_change_applied) and (const.erosion_height_change >= frag.h):
 
                 # Update the density
                 frag.rho = const.erosion_rho_change
@@ -988,6 +1038,8 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
 
                 # Update the ablation coeff
                 frag.sigma = const.erosion_sigma_change
+
+                frag.erosion_height_change_applied = True
 
         # Create grains for erosion-enabled fragments
         if frag.erosion_enabled:
@@ -1229,10 +1281,16 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
 
             continue
 
-    # Track the leading fragment length
-    active_fragments = [frag for frag in fragments if frag.active]
-    if len(active_fragments):
-        leading_frag = max(active_fragments, key=lambda x: x.length)
+        # Fragment survived this tick - add its grain-weighted mass to the total active mass. Only
+        #   fragments still active at the end of the tick reach here (killed/disrupted ones hit a
+        #   'continue' above), matching the old post-loop "active only" scan exactly
+        mass_total_active += frag.m*frag.n_grains
+
+    # Track the leading fragment length (use the tick-start snapshot, not a fresh frag.active filter, so a
+    #   fragment that died partway through this tick is still a candidate for it - see the snapshot's own
+    #   comment above)
+    if len(fragments_active_at_tick_start):
+        leading_frag = max(fragments_active_at_tick_start, key=lambda x: x.length)
         leading_frag_length    = leading_frag.length
         leading_frag_height    = leading_frag.h
         leading_frag_vel       = leading_frag.v
@@ -1299,12 +1357,17 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
     # Add generated fragment children to the list of fragments
     fragments += frag_children_all
 
-    # Compute the total mass of all active fragments
-    active_fragments = [frag.m for frag in fragments if frag.active]
-    if len(active_fragments):
-        mass_total_active = np.sum(active_fragments)
-    else:
-        mass_total_active = 0.0
+    # Fragments/grains created this tick are all active - add their grain-weighted mass to the running
+    #   total accumulated in the loop above (completes the "all active fragments" sum). Same n_grains
+    #   convention already used for lum/q.
+    for frag_child in frag_children_all:
+        mass_total_active += frag_child.m*frag_child.n_grains
+
+    # Drop fully-ablated grains from the fragment list so subsequent ticks don't keep re-scanning them
+    #   (the list otherwise grows monotonically - dead grains are never needed again). Dead non-grains
+    #   (the main fragment, complex-fragmentation daughters) are KEPT: runSimulation() still scans them
+    #   after the run to find the main fragment and to aggregate per-fragmentation final masses.
+    fragments = [frag for frag in fragments if frag.active or (not frag.grain)]
 
     # Increment the running time
     const.total_time += const.dt
@@ -1457,7 +1520,7 @@ def runSimulation(const, compute_wake=False):
 
 
 def energyReceivedBeforeErosion(const, lam=1.0):
-    """ Compute the energy the meteoroid receive prior to erosion, assuming no major mass loss occured. 
+    """ Compute the energy the meteoroid receive prior to erosion, assuming no major mass loss occurred.
     
     Arguments:
         const: [Constants]

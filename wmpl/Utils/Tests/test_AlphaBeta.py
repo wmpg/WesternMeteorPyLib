@@ -28,8 +28,8 @@ from wmpl.Utils.AlphaBeta import (fitAlphaBetaMass, fitAlphaBeta, fitAlphaBetaLi
     alphaBetaMasses, alphaBetaVelocity, alphaBetaHeight, alphaBetaVelocityNormed,
     alphaBetaVelocityNormedLUT, alphaBetaHeightNormed, alphaBetaLuminosityF,
     alphaBetaModelMagnitude, alphaBetaLuminousEfficiency, plotAlphaBeta, plotProfileAlphaBeta,
-    profileAlphaBeta, _profiledMagOffset, _gaussianEllipsePoints, getDefaultInverseEiLUT,
-    HT_NORM_CONST, P_0M, ALPHA_BETA_BOUNDS)
+    plotAlphaBetaSurvivalDiagram, profileAlphaBeta, _profiledMagOffset, _gaussianEllipsePoints,
+    getDefaultInverseEiLUT, HT_NORM_CONST, P_0M, ALPHA_BETA_BOUNDS)
 
 
 # True parameters used to generate the synthetic trajectory. The height range is chosen so the
@@ -792,6 +792,276 @@ def testFitAlphaBetaErrorEstimationBoundPinned():
     assert errors['sigma_v_init'] == 0.0
 
 
+def testAlphaBetaMassesErrorEstimationRequiresCovLog():
+    """ estimate_errors=True must be rejected without a cov_log - there is no (alpha, beta)
+        covariance to propagate otherwise.
+    """
+
+    try:
+        alphaBetaMasses(ALPHA_TRUE, BETA_TRUE, SLOPE, mu=0, dens=DENS_TRUE, estimate_errors=True)
+
+    except ValueError:
+        pass
+
+    else:
+        raise AssertionError(
+            "alphaBetaMasses: ValueError not raised for estimate_errors=True without cov_log")
+
+
+def testAlphaBetaMassesErrorEstimationRejectsBadCi():
+    """ estimate_errors=True must reject a ci outside (0, 100), same reasoning as fitAlphaBeta()'s
+        own ci validation.
+    """
+
+    cov_log = np.array([[0.01, 0.0], [0.0, 0.01]])
+
+    for bad_ci in [0.0, 100.0, -5.0, 150.0]:
+
+        try:
+            alphaBetaMasses(ALPHA_TRUE, BETA_TRUE, SLOPE, mu=0, dens=DENS_TRUE, \
+                estimate_errors=True, cov_log=cov_log, ci=bad_ci)
+
+        except ValueError:
+            pass
+
+        else:
+            raise AssertionError(
+                "alphaBetaMasses: ValueError not raised for ci={!r}".format(bad_ci))
+
+
+def testAlphaBetaMassesErrorEstimationPointEstimateUnchanged():
+    """ estimate_errors=True must not change the point estimate itself, and the errors dict must
+        echo back the same m_init/m_final it was computed from.
+    """
+
+    v_data, v_final_true, _, _, _ = _syntheticTrajectory()
+
+    _, alpha, beta, fit_errors = fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, \
+        method='robust', estimate_errors=True)
+
+    m_init_plain, m_final_plain = alphaBetaMasses(alpha, beta, SLOPE, mu=0, dens=DENS_TRUE, \
+        vel_init=V_INIT_TRUE, vel_end=v_final_true)
+
+    m_init, m_final, errors = alphaBetaMasses(alpha, beta, SLOPE, mu=0, dens=DENS_TRUE, \
+        vel_init=V_INIT_TRUE, vel_end=v_final_true, estimate_errors=True, \
+        cov_log=fit_errors['cov_log'])
+
+    assert m_init == m_init_plain
+    assert m_final == m_final_plain
+    assert errors['m_init'] == m_init
+    assert errors['m_final'] == m_final
+
+
+def testAlphaBetaMassesErrorEstimationCovarianceStructure():
+    """ The propagated (ln m_init, ln m_final) covariance must be well-formed (symmetric,
+        positive diagonal), corr_log must be a valid correlation coefficient, m_init_std/
+        m_final_std must match the exact delta-method transform (m_std = m*m_std_rel), and the
+        Wald CI must bracket the point estimate.
+    """
+
+    v_data, v_final_true, _, _, _ = _syntheticTrajectory()
+
+    _, alpha, beta, fit_errors = fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, \
+        method='robust', estimate_errors=True)
+
+    m_init, m_final, errors = alphaBetaMasses(alpha, beta, SLOPE, mu=0, dens=DENS_TRUE, \
+        vel_init=V_INIT_TRUE, vel_end=v_final_true, estimate_errors=True, \
+        cov_log=fit_errors['cov_log'], sigma_slope=np.radians(1.0), sigma_dens=200.0, \
+        sigma_vel_init=30.0, sigma_vel_end=30.0)
+
+    assert np.isfinite(errors['m_init_std_rel']) and errors['m_init_std_rel'] > 0
+    assert np.isfinite(errors['m_final_std_rel']) and errors['m_final_std_rel'] > 0
+    assert -1.0 <= errors['corr_log'] <= 1.0
+
+    assert errors['cov_log'].shape == (2, 2)
+    assert np.allclose(errors['cov_log'], errors['cov_log'].T)
+    assert errors['cov_log'][0, 0] > 0 and errors['cov_log'][1, 1] > 0
+
+    _assertClose(errors['m_init_std'], m_init*errors['m_init_std_rel'], 1e-9, "m_init_std")
+    _assertClose(errors['m_final_std'], m_final*errors['m_final_std_rel'], 1e-9, "m_final_std")
+
+    assert errors['m_init_ci_wald_lower'] < m_init < errors['m_init_ci_wald_upper']
+    assert errors['m_final_ci_wald_lower'] < m_final < errors['m_final_ci_wald_upper']
+
+    assert errors['sigma_slope'] == np.radians(1.0)
+    assert errors['sigma_dens'] == 200.0
+    assert errors['sigma_vel_init'] == 30.0
+    assert errors['sigma_vel_end'] == 30.0
+
+
+def testAlphaBetaMassesErrorEstimationBoundPinnedPropagatesNaN():
+    """ A NaN cov_log (e.g. from a fitAlphaBeta() fit pinned against an ALPHA_BETA_BOUNDS edge -
+        see testFitAlphaBetaErrorEstimationBoundPinned) must propagate to NaN mass errors cleanly,
+        not raise - the same graceful-degradation contract as fitAlphaBeta() itself.
+    """
+
+    beta_true_extreme = 150.0
+
+    v_clean = alphaBetaVelocity(HT_DATA, ALPHA_TRUE, beta_true_extreme, V_INIT_TRUE)
+    rng = np.random.RandomState(42)
+    v_data = v_clean + rng.normal(0, VEL_NOISE_STD, HT_DATA.size)
+
+    _, alpha, beta, fit_errors = fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, \
+        method='robust', estimate_errors=True)
+
+    assert np.all(np.isnan(fit_errors['cov_log']))  # sanity-check the test setup itself
+
+    v_final = np.min(alphaBetaVelocity(HT_DATA, alpha, beta, V_INIT_TRUE))
+
+    m_init, m_final, errors = alphaBetaMasses(alpha, beta, SLOPE, mu=0, dens=DENS_TRUE, \
+        vel_init=V_INIT_TRUE, vel_end=v_final, estimate_errors=True, \
+        cov_log=fit_errors['cov_log'])
+
+    assert np.isfinite(m_init) and np.isfinite(m_final)
+    assert errors['m_init'] == m_init and errors['m_final'] == m_final
+    assert np.isnan(errors['m_init_std_rel'])
+    assert np.isnan(errors['m_final_std_rel'])
+    assert np.isnan(errors['m_init_std'])
+    assert np.isnan(errors['m_final_std'])
+    assert np.all(np.isnan(errors['cov_log']))
+    assert np.isnan(errors['corr_log'])
+    assert np.isnan(errors['m_init_ci_wald_lower'])
+    assert np.isnan(errors['m_init_ci_wald_upper'])
+    assert np.isnan(errors['m_final_ci_wald_lower'])
+    assert np.isnan(errors['m_final_ci_wald_upper'])
+
+
+def testAlphaBetaMassesErrorEstimationIgnoresVelSigmaWithoutFullSolution():
+    """ sigma_vel_init/sigma_vel_end must be ignored (not raise, and not affect m_final_std_rel)
+        when vel_init/vel_end are not both given - the simple mass-loss approximation doesn't
+        depend on either velocity.
+    """
+
+    v_data, _, _, _, _ = _syntheticTrajectory()
+
+    _, alpha, beta, fit_errors = fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, \
+        method='robust', estimate_errors=True)
+
+    _, _, errors_no_vel = alphaBetaMasses(alpha, beta, SLOPE, mu=0, dens=DENS_TRUE, \
+        estimate_errors=True, cov_log=fit_errors['cov_log'])
+
+    _, _, errors_superfluous = alphaBetaMasses(alpha, beta, SLOPE, mu=0, dens=DENS_TRUE, \
+        estimate_errors=True, cov_log=fit_errors['cov_log'], sigma_vel_init=999.0, \
+        sigma_vel_end=999.0)
+
+    assert errors_no_vel['sigma_vel_init'] == 0.0
+    assert errors_no_vel['sigma_vel_end'] == 0.0
+    assert errors_superfluous['sigma_vel_init'] == 0.0
+    assert errors_superfluous['sigma_vel_end'] == 0.0
+
+    _assertClose(errors_superfluous['m_final_std_rel'], errors_no_vel['m_final_std_rel'], 1e-9, \
+        "m_final_std_rel (superfluous sigma_vel_init/sigma_vel_end must be ignored)")
+
+
+def testAlphaBetaMassesErrorEstimationMassRatioIdentity():
+    """ Var(ln(m_final/m_init)) must reduce to exactly (k*beta*beta_std_rel)^2 plus the
+        vel_init/vel_end contribution (from r = vel_end/vel_init inside k) - independent of
+        alpha/slope/dens entirely, since those enter ln(m_init) and ln(m_final) through the exact
+        same additive term and cancel out of the difference (see _alphaBetaMassErrors()'s
+        docstring). This is an exact algebraic identity of the propagation, checked directly
+        rather than via Monte Carlo.
+    """
+
+    v_data, v_final_true, _, _, _ = _syntheticTrajectory()
+
+    _, alpha, beta, fit_errors = fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, \
+        method='robust', estimate_errors=True)
+
+    sigma_vel_init, sigma_vel_end = 50.0, 50.0
+
+    m_init, m_final, errors = alphaBetaMasses(alpha, beta, SLOPE, mu=0, dens=DENS_TRUE, \
+        vel_init=V_INIT_TRUE, vel_end=v_final_true, estimate_errors=True, \
+        cov_log=fit_errors['cov_log'], sigma_slope=np.radians(2.0), sigma_dens=300.0, \
+        sigma_vel_init=sigma_vel_init, sigma_vel_end=sigma_vel_end)
+
+    var_init = errors['cov_log'][0, 0]
+    var_final = errors['cov_log'][1, 1]
+    cov_init_final = errors['cov_log'][0, 1]
+
+    var_ratio = var_init + var_final - 2.0*cov_init_final
+
+    # Pure-beta contribution, k = (1 - r^2)/(1 - mu) with mu = 0
+    r = v_final_true/V_INIT_TRUE
+    k = 1.0 - r**2
+    beta_std_rel = np.sqrt(fit_errors['cov_log'][1, 1])
+    beta_term = (k*beta*beta_std_rel)**2
+
+    # vel_init/vel_end contribution: m_init doesn't depend on either velocity at all, so unlike
+    #   the alpha/slope/dens terms this one does NOT cancel out of the ratio
+    vinit_coef = -2.0*beta*r**2/V_INIT_TRUE
+    vend_coef = 2.0*beta*r/V_INIT_TRUE
+    vel_term = vinit_coef**2*sigma_vel_init**2 + vend_coef**2*sigma_vel_end**2
+
+    _assertClose(var_ratio, beta_term + vel_term, 1e-6, "Var(ln(m_final/m_init))")
+
+
+def testAlphaBetaMassesErrorEstimationMonteCarlo():
+    """ The analytic mass-error propagation must match a direct Monte Carlo propagation of the
+        same (alpha, beta) covariance plus independent slope/density/velocity uncertainties
+        through alphaBetaMasses() itself - both the marginal log-space standard deviations and
+        the (ln m_init, ln m_final) correlation. Unlike fitAlphaBeta()'s own coverage checks (which
+        need an expensive refit per realization), alphaBetaMasses() is a closed-form function, so
+        this Monte Carlo comparison is cheap enough to run as a real automated test rather than a
+        one-off analysis.
+    """
+
+    v_data, v_final_true, _, _, _ = _syntheticTrajectory()
+
+    _, alpha, beta, fit_errors = fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, \
+        method='robust', estimate_errors=True)
+    cov_log = fit_errors['cov_log']
+    assert np.all(np.isfinite(cov_log))
+
+    sigma_slope = np.radians(1.0)
+    sigma_dens = 200.0
+    sigma_vel_init = 30.0
+    sigma_vel_end = 30.0
+
+    _, _, errors = alphaBetaMasses(alpha, beta, SLOPE, mu=0, dens=DENS_TRUE, \
+        vel_init=V_INIT_TRUE, vel_end=v_final_true, estimate_errors=True, cov_log=cov_log, \
+        sigma_slope=sigma_slope, sigma_dens=sigma_dens, sigma_vel_init=sigma_vel_init, \
+        sigma_vel_end=sigma_vel_end)
+
+    rng = np.random.RandomState(123)
+    n_mc = 20000
+
+    log_ab_samples = rng.multivariate_normal(np.log([alpha, beta]), cov_log, size=n_mc)
+    alpha_samples = np.exp(log_ab_samples[:, 0])
+    beta_samples = np.exp(log_ab_samples[:, 1])
+    # Clip slope to (0, pi/2] and dens to positive: a rare tail draw outside alphaBetaMasses()'s
+    #   valid domain would otherwise make it raise/return NaN and fail the test spuriously. At
+    #   sigma_slope=1 deg / sigma_dens=200 over 20k draws the clip almost never triggers, so it
+    #   does not bias the comparison against the analytic (unclipped) propagation.
+    slope_samples = np.clip(rng.normal(SLOPE, sigma_slope, n_mc), 1e-6, np.pi/2)
+    dens_samples = np.clip(rng.normal(DENS_TRUE, sigma_dens, n_mc), 1e-6, None)
+    vel_init_samples = rng.normal(V_INIT_TRUE, sigma_vel_init, n_mc)
+    vel_end_samples = rng.normal(v_final_true, sigma_vel_end, n_mc)
+
+    log_m_init_mc = np.empty(n_mc)
+    log_m_final_mc = np.empty(n_mc)
+
+    for i in range(n_mc):
+        m_init_i, m_final_i = alphaBetaMasses(alpha_samples[i], beta_samples[i], \
+            slope_samples[i], mu=0, dens=dens_samples[i], vel_init=vel_init_samples[i], \
+            vel_end=vel_end_samples[i])
+        log_m_init_mc[i] = np.log(m_init_i)
+        log_m_final_mc[i] = np.log(m_final_i)
+
+    mc_m_init_std_rel = np.std(log_m_init_mc)
+    mc_m_final_std_rel = np.std(log_m_final_mc)
+    mc_corr = np.corrcoef(log_m_init_mc, log_m_final_mc)[0, 1]
+
+    _assertClose(errors['m_init_std_rel'], mc_m_init_std_rel, 0.05, \
+        "m_init_std_rel vs Monte Carlo")
+    _assertClose(errors['m_final_std_rel'], mc_m_final_std_rel, 0.08, \
+        "m_final_std_rel vs Monte Carlo")
+
+    analytic_corr = errors['corr_log']
+    assert abs(analytic_corr - mc_corr) < 0.05, \
+        "corr(ln m_init, ln m_final) mismatch: analytic {:.4f} vs MC {:.4f}".format(
+        analytic_corr, mc_corr)
+
+
 def testGaussianEllipsePoints():
     """ _gaussianEllipsePoints() must trace a circle of the exact closed-form radius for an
         identity covariance (chi2(df=2) = Exponential(scale=2), so its p-quantile has an exact
@@ -909,6 +1179,114 @@ def testPlotAlphaBetaRejectsBadCi():
         else:
             raise AssertionError(
                 "plotAlphaBeta: ValueError not raised for ci={!r}".format(bad_ci))
+
+
+def testPlotAlphaBetaSurvivalDiagramBoundaryMath():
+    """ The boundary curve derivation (beta_boundary(x; mu) = (1-mu)*(ln(m0s/m_th) - 3x)) must be
+        exact: a (alpha, beta) pair constructed to sit exactly on a given (mu, mass_threshold)
+        boundary must, when passed back through alphaBetaMasses()'s own asymptotic approximation,
+        reproduce that exact threshold mass. This is the analytic derivation
+        plotAlphaBetaSurvivalDiagram() draws its lines from, checked independently of the
+        plotting code itself.
+    """
+
+    dens, shape_coeff, gamma = 3500.0, 0.55, 1.0
+    rho_atm_0 = 1.225
+    m0s = (gamma*shape_coeff*rho_atm_0*HT_NORM_CONST/(dens**(2/3.0)))**3
+
+    x = 1.0  # ln(alpha*sin(slope)); kept small so beta_boundary stays positive
+
+    for mu, m_threshold in [(0.0, 1.0), (2/3, 1.0), (0.0, 0.05), (2/3, 0.05)]:
+
+        beta_boundary = (1.0 - mu)*(np.log(m0s/m_threshold) - 3.0*x)
+        alpha = np.exp(x)/np.sin(SLOPE)
+
+        _, m_final = alphaBetaMasses(alpha, beta_boundary, SLOPE, mu=mu, dens=dens, \
+            shape_coeff=shape_coeff, gamma=gamma)
+
+        _assertClose(m_final, m_threshold, 1e-9, \
+            "m_final on the mu={:.3g}, {:.3g} kg boundary".format(mu, m_threshold))
+
+
+def testPlotAlphaBetaSurvivalDiagramRejectsBadInputs():
+    """ Invalid mu_low/mu_high ordering, empty/non-positive mass_thresholds, and a bad ci must all
+        raise ValueError, mirroring the validation style used throughout this module.
+    """
+
+    def _assertRaisesValueError(label, **kwargs):
+
+        call_kwargs = dict(alpha=ALPHA_TRUE, beta=BETA_TRUE, slope=SLOPE)
+        call_kwargs.update(kwargs)
+
+        try:
+            plotAlphaBetaSurvivalDiagram(**call_kwargs)
+
+        except ValueError:
+            plt.close('all')
+            return
+
+        plt.close('all')
+        raise AssertionError("{:s}: ValueError not raised".format(label))
+
+    _assertRaisesValueError("mu_low >= mu_high", mu_low=0.5, mu_high=0.3)
+    _assertRaisesValueError("mu_high > 2/3", mu_low=0.0, mu_high=0.9)
+    _assertRaisesValueError("mu_low < 0", mu_low=-0.1, mu_high=2/3)
+    _assertRaisesValueError("empty mass_thresholds", mass_thresholds=())
+    _assertRaisesValueError("non-positive mass_thresholds", mass_thresholds=(1.0, -0.05))
+
+    for bad_ci in [0.0, 100.0, -5.0, 150.0]:
+        _assertRaisesValueError("ci={!r}".format(bad_ci), ci=bad_ci)
+
+
+def testPlotAlphaBetaSurvivalDiagramRuns():
+    """ plotAlphaBetaSurvivalDiagram() must run without raising for the common cases: no errors,
+        a real finite cov_log (draws the ellipse), and a NaN cov_log (degrades gracefully to an
+        annotation instead of raising or emitting a raw numpy warning) - the same
+        graceful-degradation contract as plotAlphaBeta().
+    """
+
+    v_data, _, _, _, _ = _syntheticTrajectory()
+
+    _, alpha, beta, fit_errors = fitAlphaBeta(v_data, HT_DATA, v_init=V_INIT_TRUE, \
+        method='robust', estimate_errors=True)
+
+    fig1, ax1 = plotAlphaBetaSurvivalDiagram(alpha, beta, SLOPE)
+    plt.close(fig1)
+
+    fig2, ax2 = plotAlphaBetaSurvivalDiagram(alpha, beta, SLOPE, errors=fit_errors)
+    plt.close(fig2)
+
+    # Single reference threshold only (no shading) must also work
+    fig3, ax3 = plotAlphaBetaSurvivalDiagram(alpha, beta, SLOPE, mass_thresholds=(1.0,), \
+        shade=False)
+    plt.close(fig3)
+
+    # A NaN cov_log (bound-pinned fit, same setup as testFitAlphaBetaErrorEstimationBoundPinned)
+    beta_true_extreme = 150.0
+    v_clean_extreme = alphaBetaVelocity(HT_DATA, ALPHA_TRUE, beta_true_extreme, V_INIT_TRUE)
+    rng = np.random.RandomState(42)
+    v_data_extreme = v_clean_extreme + rng.normal(0, VEL_NOISE_STD, HT_DATA.size)
+
+    _, alpha_e, beta_e, fit_errors_e = fitAlphaBeta(v_data_extreme, HT_DATA, v_init=V_INIT_TRUE, \
+        method='robust', estimate_errors=True)
+    assert np.all(np.isnan(fit_errors_e['cov_log']))  # sanity-check the test setup itself
+
+    fig4, ax4 = plotAlphaBetaSurvivalDiagram(alpha_e, beta_e, SLOPE, errors=fit_errors_e)
+    plt.close(fig4)
+
+
+def testPlotAlphaBetaSurvivalDiagramAxesReuse():
+    """ axes must be reusable - plotAlphaBetaSurvivalDiagram() must hand back the exact same
+        fig/ax it was given, same contract as plotAlphaBeta()'s single-panel axes reuse.
+    """
+
+    fig_caller, ax_caller = plt.subplots()
+
+    fig_ret, ax_ret = plotAlphaBetaSurvivalDiagram(ALPHA_TRUE, BETA_TRUE, SLOPE, axes=ax_caller)
+
+    assert fig_ret is fig_caller
+    assert ax_ret is ax_caller
+    plt.close(fig_caller)
 
 
 def testProfileAlphaBetaBracketsEstimate():
@@ -1208,10 +1586,22 @@ if __name__ == "__main__":
         testFitAlphaBetaErrorEstimationVerbose,
         testFitAlphaBetaErrorEstimationVInitPropagation,
         testFitAlphaBetaErrorEstimationBoundPinned,
+        testAlphaBetaMassesErrorEstimationRequiresCovLog,
+        testAlphaBetaMassesErrorEstimationRejectsBadCi,
+        testAlphaBetaMassesErrorEstimationPointEstimateUnchanged,
+        testAlphaBetaMassesErrorEstimationCovarianceStructure,
+        testAlphaBetaMassesErrorEstimationBoundPinnedPropagatesNaN,
+        testAlphaBetaMassesErrorEstimationIgnoresVelSigmaWithoutFullSolution,
+        testAlphaBetaMassesErrorEstimationMassRatioIdentity,
+        testAlphaBetaMassesErrorEstimationMonteCarlo,
         testGaussianEllipsePoints,
         testPlotAlphaBetaGracefulDegradation,
         testPlotAlphaBetaAxesContract,
         testPlotAlphaBetaRejectsBadCi,
+        testPlotAlphaBetaSurvivalDiagramBoundaryMath,
+        testPlotAlphaBetaSurvivalDiagramRejectsBadInputs,
+        testPlotAlphaBetaSurvivalDiagramRuns,
+        testPlotAlphaBetaSurvivalDiagramAxesReuse,
         testProfileAlphaBetaBracketsEstimate,
         testProfileAlphaBetaRejectsBadInputs,
         testPlotProfileAlphaBeta,
