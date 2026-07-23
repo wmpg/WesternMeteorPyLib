@@ -3051,6 +3051,7 @@ class MetSimGUI(QMainWindow):
         self.checkBoxErosionAblationCoeffChange.stateChanged.connect(self.checkBoxErosionAblationCoeffSignal)
         self.checkBoxDisruption.stateChanged.connect(self.checkBoxDisruptionSignal)
         self.checkBoxDisruptionErosionCoeff.stateChanged.connect(self.checkBoxDisruptionErosionCoeffSignal)
+        self.checkBoxAdaptiveDt.stateChanged.connect(self.checkBoxAdaptiveDtSignal)
 
 
         self.runSimButton.clicked.connect(self.runSimulationGUI)
@@ -3099,6 +3100,7 @@ class MetSimGUI(QMainWindow):
         self.checkBoxDisruptionSignal(None)
         self.checkBoxDisruptionErosionCoeffSignal(None)
         self.checkBoxDisruptionErosionCoeffSignal(None)
+        self.checkBoxAdaptiveDtSignal(None)
         self.toggleWakeNormalizationMethod(None)
         self.toggleWakeAlignMethod(None)
         self.toggleFragmentation(None)
@@ -3276,6 +3278,13 @@ class MetSimGUI(QMainWindow):
         ### Simulation params ###
 
         self.inputTimeStep.setText(str(const.dt))
+
+        # Adaptive time step toggle: when on, dt is only the output cadence and its box is disabled
+        self.checkBoxAdaptiveDt.setChecked(const.adaptive_dt)
+        self.inputTimeStep.setEnabled(not self.checkBoxAdaptiveDt.isChecked())
+        self.inputAdaptiveRtol.setText("{:.1e}".format(const.adaptive_rtol))
+        self.inputErosionReleaseLength.setText("{:.0f}".format(const.erosion_release_length))
+
         self.inputHtInit.setText("{:.3f}".format(const.h_init/1000))
         self.inputP0M.setText("{:d}".format(int(const.P_0m)))
         self.inputMassKill.setText("{:.1e}".format(const.m_kill))
@@ -3579,6 +3588,20 @@ class MetSimGUI(QMainWindow):
         self.readInputBoxes()
 
 
+    def checkBoxAdaptiveDtSignal(self, event):
+        """ Toggle adaptive per-fragment sub-stepping. When on, dt is only the output cadence, so the
+            fixed time-step box is disabled (the integration step is chosen automatically). """
+
+        self.const.adaptive_dt = self.checkBoxAdaptiveDt.isChecked()
+        self.inputTimeStep.setDisabled(self.const.adaptive_dt)
+
+        # rtol only matters in adaptive mode: enable its box/label with the checkbox, disable otherwise
+        self.inputAdaptiveRtol.setEnabled(self.const.adaptive_dt)
+        self.labelAdaptiveRtol.setEnabled(self.const.adaptive_dt)
+        self.inputErosionReleaseLength.setEnabled(self.const.adaptive_dt)
+        self.labelErosionReleaseLength.setEnabled(self.const.adaptive_dt)
+
+
     def checkBoxFragmentationShowIndividualLCsSignal(self, event):
         """ Toggle computing light curves of individual fragments during complex fragmentation. """
 
@@ -3660,6 +3683,10 @@ class MetSimGUI(QMainWindow):
         ### Simulation params ###
 
         self.const.dt = self._tryReadBox(self.inputTimeStep, self.const.dt)
+        self.const.adaptive_dt = self.checkBoxAdaptiveDt.isChecked()
+        self.const.adaptive_rtol = self._tryReadBox(self.inputAdaptiveRtol, self.const.adaptive_rtol)
+        self.const.erosion_release_length = self._tryReadBox(self.inputErosionReleaseLength,
+            self.const.erosion_release_length)
         self.const.P_0m = self._tryReadBox(self.inputP0M, self.const.P_0m)
 
         self.const.h_init   = 1000*self._tryReadBox(self.inputHtInit, self.const.h_init/1000)
@@ -4294,9 +4321,16 @@ class MetSimGUI(QMainWindow):
             norm_sim_time = sr.time_arr - self.sim_time_beg
 
 
-            self.norm_sim_ht = sr.leading_frag_height_arr[norm_sim_len > 0]
-            self.norm_sim_time = norm_sim_time[norm_sim_len > 0]
-            self.norm_sim_len = norm_sim_len[norm_sim_len > 0]
+            # Keep only the part of the trajectory past the observed begin (norm_sim_len > 0). If too
+            #   little of the simulation reaches there (< 2 points), fall back to the full arrays so the
+            #   interpolators still build instead of crashing on an empty array.
+            mask = norm_sim_len > 0
+            if np.count_nonzero(mask) < 2:
+                mask = np.ones_like(norm_sim_len, dtype=bool)
+
+            self.norm_sim_ht = sr.leading_frag_height_arr[mask]
+            self.norm_sim_time = norm_sim_time[mask]
+            self.norm_sim_len = norm_sim_len[mask]
 
             # Interpolate the normalized length by time
             self.sim_norm_len_interp = scipy.interpolate.interp1d(self.norm_sim_time, self.norm_sim_len,
@@ -5214,7 +5248,7 @@ class MetSimGUI(QMainWindow):
     def showPreviousResults(self):
         """ Show previous simulation results and parameters. """
 
-        if self.simulation_results_prev is not None:
+        if self.simulationUsable(self.simulation_results_prev):
 
             self.updateInputBoxes(show_previous=True)
             self.updateInterpolations(show_previous=True)
@@ -5225,10 +5259,45 @@ class MetSimGUI(QMainWindow):
 
 
 
+    def simulationUsable(self, sr):
+        """ Check that a SimulationResults has enough valid points to interpolate/plot. A degenerate
+            run (e.g. the meteoroid is killed on the first tick, producing 0-1 rows or all-NaN
+            magnitudes) would otherwise crash the interpolation/plotting chain. """
+
+        if sr is None:
+            return False
+
+        try:
+            # Need at least two samples spanning a height range to build the interpolators
+            if len(sr.time_arr) < 2:
+                return False
+            finite_ht = np.isfinite(sr.leading_frag_height_arr)
+            if np.count_nonzero(finite_ht) < 2:
+                return False
+            if np.nanmin(sr.leading_frag_height_arr) == np.nanmax(sr.leading_frag_height_arr):
+                return False
+            # Need at least some real luminosity to compute magnitudes
+            if not np.any(sr.luminosity_arr > 0):
+                return False
+        except (AttributeError, TypeError, ValueError):
+            return False
+
+        return True
+
+
     def showCurrentResults(self):
         """ Show current simulation results and parameters. """
 
         self.updateInputBoxes(show_previous=False)
+
+        # Guard against a degenerate simulation (e.g. killed on the first tick): skip the
+        #   interpolation/plotting chain with a message instead of crashing the whole app
+        if not self.simulationUsable(self.simulation_results):
+            print("WARNING: the simulation produced no usable output (the meteoroid may be dying "
+                "immediately - check the initial parameters, e.g. velocity/mass/erosion/adaptive "
+                "settings). Skipping the plot update.")
+            return
+
         self.updateInterpolations(show_previous=False)
         self.updateMagnitudePlot(show_previous=False)
         self.updateVelocityPlot(show_previous=False)

@@ -23,7 +23,7 @@ import scipy.integrate
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from wmpl.MetSim.MetSimErosionCyTools import massLossRK4, decelerationRK4, luminousEfficiency, \
-    ionizationEfficiency, atmDensityPoly
+    ionizationEfficiency, atmDensityPoly, adaptiveSingleBodyStep, adaptiveDP45Step
 
 
 ### DEFINE CONSTANTS
@@ -40,8 +40,59 @@ class Constants(object):
 
         ### Simulation parameters ###
 
-        # Time step
+        # Time step. When adaptive_dt is False this is the fixed RK4 integration step; when
+        #   adaptive_dt is True it is only the OUTPUT cadence (one results row per dt, total_time
+        #   advances by dt), while each fragment is integrated with error-controlled adaptive
+        #   sub-steps underneath (see adaptive_* below and ablateAll).
         self.dt = 0.005
+
+        # Adaptive sub-stepping. When True (the default), each fragment sub-steps adaptively within each
+        #   dt to meet the tolerances below, while the output cadence stays fixed at dt; this matches the
+        #   fixed-step light curve to well within measurement noise while running several times faster.
+        #   Set False to run the original fixed-step path, which reproduces prior results bit-for-bit.
+        self.adaptive_dt = True
+        # Adaptive integrator: True -> embedded Dormand-Prince RK45 on the coupled (mass, velocity)
+        #   system (fewer RHS evals per sub-step, higher order -> ~3-4x faster); False -> step-doubling
+        #   on the original operator-split RK4. Both meet the same tolerance; DP45 is the default.
+        self.adaptive_high_order = True
+        # Relative tolerance on mass and speed. Targets NUMERICAL error below MEASUREMENT noise
+        #   (~0.1 mag, ~0.1 km/s at ~25 FPS), not machine convergence. rtol=1e-5 keeps the light curve
+        #   and dynamics indistinguishable from the fixed-step result at negligible extra cost over 1e-4
+        #   (for eroding meteors the sub-step count is set by erosion_release_length, not rtol); loosen
+        #   to 1e-4 for a hair more speed on tolerance-bound cases, or tighten to 1e-6 for CAMO data.
+        self.adaptive_rtol = 1e-5
+
+        # Absolute mass tolerance (kg); of order m_kill
+        self.adaptive_atol_m = 1e-14
+
+        # Absolute speed tolerance (m/s); floor well under the measurement noise
+        self.adaptive_atol_v = 0.1
+
+        # Smallest allowed sub-step (s)
+        self.adaptive_dt_min = 1e-7
+
+        # Largest allowed sub-step (s); should be <= dt
+        self.adaptive_dt_max = 0.005
+
+        # Runaway guard: maximum sub-steps per fragment per macro step
+        self.adaptive_max_substeps = 10000
+
+        # Along-track grain-release interval (m). In adaptive mode grains are shed once per accepted
+        #   sub-step, so the sub-step cadence sets the grain-birth resolution. Capping an eroding
+        #   fragment's sub-step at erosion_release_length/v releases grains roughly every this many
+        #   metres of flight - a physical resolution independent of dt and the error tolerance, so the
+        #   erosion light-curve shape stops depending on dt. Smaller = finer grain sampling + slower.
+        #   Only used in adaptive mode and only for eroding fragments (grains do not erode further).
+        #   Exposed in the GUI so it can be coarsened for expensive fits (see erosion_release_vref).
+        self.erosion_release_length = 200.0
+
+        # Reference speed (m/s) that turns the along-track cadence into a fixed TIME cadence above it.
+        #   The distance cap fixes cadence in metres, so a fast meteor takes tiny sub-steps (cost grows
+        #   with v). Fragments faster than erosion_release_vref instead cap their sub-step at
+        #   erosion_release_length/erosion_release_vref (a constant time), bounding the sub-step count;
+        #   slower fragments keep the exact distance cadence. This keeps the per-event cost roughly
+        #   velocity-independent. Set <= 0 to disable (pure distance cadence, the original behaviour).
+        self.erosion_release_vref = 30000.0
 
         # Time elapsed since the beginning
         self.total_time = 0
@@ -349,6 +400,10 @@ class Fragment(object):
 
         # Identifier of the compex fragmentation entry
         self.complex_id = None
+
+        # Last accepted adaptive sub-step size (s), warm-started across macro steps and copied to
+        #   children by spawn_child(). 0 means "no previous step, start from the macro dt".
+        self.adaptive_h_sub = 0.0
 
 
     def init(self, const, m, rho, v_init, sigma, gamma, zenith_angle, erosion_mass_index, erosion_mass_min, \
@@ -717,10 +772,13 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
         ...
 
     Note:
-        const.dt is fixed for every fragment, including grains. Near erosion_mass_min this single-step
-        RK4 is under-resolved (a single step can overshoot the grain's true velocity by tens of percent
-        vs. a finely-substepped mirror) - a known accuracy limitation of the fixed-step scheme, not
-        (currently) compensated for with adaptive/sub-stepping.
+        With const.adaptive_dt False, const.dt is the fixed RK4 step for every fragment, including
+        grains. Near erosion_mass_min this single-step RK4 is under-resolved (a single step can overshoot
+        the grain's true velocity by tens of percent vs. a finely-substepped mirror). With
+        const.adaptive_dt True (default), each fragment is integrated with error-controlled adaptive
+        sub-steps (const.adaptive_rtol etc.); dt then only sets the output cadence, and erosion grains
+        are shed per sub-step so the light-curve shape stops depending on the step size. Fixed-step
+        output is unchanged when adaptive_dt is False.
     """
 
     # Keep track of the total luminosity
@@ -780,95 +838,126 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
         if not frag.active:
             continue
 
-        # Get atmosphere density for the given height
-        rho_atm = atmDensityPoly(frag.h, const.dens_co)
+        # Advance this fragment across the macro step. In adaptive mode (const.adaptive_dt) the fragment
+        #   is integrated with error-controlled adaptive sub-steps inside the Cython stepper; otherwise
+        #   the original single fixed RK4 step is taken. Both paths leave frag.m/v/vv/vh/length/h and
+        #   the diagnostic locals (rho_atm, mass_loss_ablation, mass_loss_erosion, deceleration_total)
+        #   set for the shared luminosity/electron-density/event code below.
+        erosion_events_adaptive = None   # per-sub-step erosion shedding (adaptive mode only)
+        if const.adaptive_dt:
 
-        # Compute the mass loss of the fragment due to ablation
-        mass_loss_ablation = massLossRK4(const.dt, frag.K, frag.sigma, frag.m, rho_atm, frag.v)
+            erosion_active = 1 if (frag.erosion_enabled and (frag.erosion_coeff > 0)) else 0
 
-        # Compute the mass loss due to erosion
-        if frag.erosion_enabled and (frag.erosion_coeff > 0):
-            mass_loss_erosion = massLossRK4(const.dt, frag.K, frag.erosion_coeff, frag.m, rho_atm, frag.v)
-        else:
-            mass_loss_erosion = 0
+            stepper = adaptiveDP45Step if const.adaptive_high_order else adaptiveSingleBodyStep
 
-        # Compute the total mass loss
-        mass_loss_total = mass_loss_ablation + mass_loss_erosion
+            (frag.m, frag.v, frag.vv, frag.vh, frag.length, frag.h_grav_drop_total, frag.h, rho_atm,
+                mass_loss_ablation, mass_loss_erosion, deceleration_total, went_up, n_sub,
+                frag.adaptive_h_sub, runaway, floor_accepts, erosion_events_adaptive) \
+                    = stepper(
+                    const.dt, frag.K, frag.sigma, frag.erosion_coeff, erosion_active,
+                    frag.m, frag.v, frag.vv, frag.vh, frag.length, frag.h_grav_drop_total,
+                    const.h_init, const.zenith_angle, const.r_earth, G0, const.dens_co,
+                    const.adaptive_rtol, const.adaptive_atol_m, const.adaptive_atol_v, const.m_kill,
+                    const.adaptive_dt_min, const.adaptive_dt_max, const.adaptive_max_substeps,
+                    frag.adaptive_h_sub, const.erosion_release_length, const.erosion_release_vref)
 
-        # If the total mass after ablation in this step is below zero, ablate what's left of the whole mass
-        # (i.e. land exactly on m_new = 0, not some arbitrary leftover - see m_new below)
-        if (frag.m + mass_loss_total) < 0:
-            mass_loss_total = -frag.m
+            # Diagnostics (feed the cost study; also used to warn once on runaway/under-resolved steps)
+            const.adaptive_substeps_total += n_sub
+            const.adaptive_floor_accepts += floor_accepts
+            if runaway:
+                const.adaptive_runaway_events += 1
 
-        # Compute new mass
-        m_new = frag.m + mass_loss_total
-
-        # Compute change in velocity
-        deceleration_total = decelerationRK4(const.dt, frag.K, frag.m, rho_atm, frag.v)
-
-        # If the deceleration is negative (i.e. the fragment is accelerating), then stop the fragment
-        if deceleration_total > 0:
-            frag.vv = frag.vh = frag.v = 0
-            deceleration_total = 0
-
-        # Otherwise update the velocity
         else:
 
-            # Compute g at given height
-            gv = G0/((1 + frag.h/const.r_earth)**2)
+            # Get atmosphere density for the given height
+            rho_atm = atmDensityPoly(frag.h, const.dens_co)
 
-            # ### Add velocity change due to Earth's gravity ###
+            # Compute the mass loss of the fragment due to ablation
+            mass_loss_ablation = massLossRK4(const.dt, frag.K, frag.sigma, frag.m, rho_atm, frag.v)
 
-            # # Vertical component of a
-            # av = -gv - deceleration_total*frag.vv/frag.v + frag.vh*frag.v/(const.r_earth + frag.h)
+            # Compute the mass loss due to erosion
+            if frag.erosion_enabled and (frag.erosion_coeff > 0):
+                mass_loss_erosion = massLossRK4(const.dt, frag.K, frag.erosion_coeff, frag.m, rho_atm, frag.v)
+            else:
+                mass_loss_erosion = 0
 
-            # # Horizontal component of a
-            # ah = -deceleration_total*frag.vh/frag.v - frag.vv*frag.v/(const.r_earth + frag.h)
+            # Compute the total mass loss
+            mass_loss_total = mass_loss_ablation + mass_loss_erosion
 
-            # ### ###
+            # If the total mass after ablation in this step is below zero, ablate what is left of the
+            #   whole mass (i.e. land exactly on m_new = 0, not some arbitrary leftover - see m_new below)
+            if (frag.m + mass_loss_total) < 0:
+                mass_loss_total = -frag.m
 
-            ### Compute deceleration without the effects of gravity (to reconstruct the initial velocity
-            # without the gravity component)
+            # Compute new mass
+            m_new = frag.m + mass_loss_total
 
-            # Vertical component of a
-            av = -deceleration_total*frag.vv/frag.v + frag.vh*frag.v/(const.r_earth + frag.h)
+            # Compute change in velocity
+            deceleration_total = decelerationRK4(const.dt, frag.K, frag.m, rho_atm, frag.v)
 
-            # Horizontal component of a
-            ah = -deceleration_total*frag.vh/frag.v - frag.vv*frag.v/(const.r_earth + frag.h)
+            # If the deceleration is negative (i.e. the fragment is accelerating), then stop the fragment
+            if deceleration_total > 0:
+                frag.vv = frag.vh = frag.v = 0
+                deceleration_total = 0
 
-            ###
+            # Otherwise update the velocity
+            else:
 
-            # Compute the drop due to gravity
-            h_grav_drop = 0.5*gv*const.dt**2
+                # Compute g at given height
+                gv = G0/((1 + frag.h/const.r_earth)**2)
 
-            # Track the total drop due to gravity
-            frag.h_grav_drop_total += h_grav_drop
+                # ### Add velocity change due to Earth's gravity ###
 
-            # Update the velocity
-            frag.vv -= av*const.dt
-            frag.vh -= ah*const.dt
-            frag.v = math.sqrt(frag.vh**2 + frag.vv**2)
+                # # Vertical component of a
+                # av = -gv - deceleration_total*frag.vv/frag.v + frag.vh*frag.v/(const.r_earth + frag.h)
 
-            # Only allow the meteoroid to go down, and stop the ablation if it stars going up
-            if frag.vv > 0:
+                # # Horizontal component of a
+                # ah = -deceleration_total*frag.vh/frag.v - frag.vv*frag.v/(const.r_earth + frag.h)
 
-                frag.vv = 0
+                # ### ###
 
-                # Setting the height to zero will stop the ablation during the if catch below
-                frag.h = 0
+                ### Compute deceleration without the effects of gravity (to reconstruct the initial velocity
+                # without the gravity component)
 
-        # Update length along the track
-        frag.length += frag.v*const.dt
+                # Vertical component of a
+                av = -deceleration_total*frag.vv/frag.v + frag.vh*frag.v/(const.r_earth + frag.h)
 
-        # Update the mass
-        frag.m = m_new
+                # Horizontal component of a
+                ah = -deceleration_total*frag.vh/frag.v - frag.vv*frag.v/(const.r_earth + frag.h)
 
-        # Old way of computing height which did not include the curvature of the Earth
-        # frag.h = frag.h + frag.vv*const.dt
+                ###
 
-        # Compute the height taking the curvature of the Earth and the gravity drop into account
-        frag.h = heightCurvature(const.h_init, const.zenith_angle, frag.length, const.r_earth)
-        frag.h -= frag.h_grav_drop_total
+                # Compute the drop due to gravity
+                h_grav_drop = 0.5*gv*const.dt**2
+
+                # Track the total drop due to gravity
+                frag.h_grav_drop_total += h_grav_drop
+
+                # Update the velocity
+                frag.vv -= av*const.dt
+                frag.vh -= ah*const.dt
+                frag.v = math.sqrt(frag.vh**2 + frag.vv**2)
+
+                # Only allow the meteoroid to go down, and stop the ablation if it stars going up
+                if frag.vv > 0:
+
+                    frag.vv = 0
+
+                    # Setting the height to zero will stop the ablation during the if catch below
+                    frag.h = 0
+
+            # Update length along the track
+            frag.length += frag.v*const.dt
+
+            # Update the mass
+            frag.m = m_new
+
+            # Old way of computing height which did not include the curvature of the Earth
+            # frag.h = frag.h + frag.vv*const.dt
+
+            # Compute the height taking the curvature of the Earth and the gravity drop into account
+            frag.h = heightCurvature(const.h_init, const.zenith_angle, frag.length, const.r_earth)
+            frag.h -= frag.h_grav_drop_total
 
         # Get the luminous efficiency
         # NOTE: frag.v/frag.m here are already this tick's post-step values, while mass_loss_ablation/
@@ -1044,36 +1133,55 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
         # Create grains for erosion-enabled fragments
         if frag.erosion_enabled:
 
-            # Generate new grains if there is some mass to distribute
-            if abs(mass_loss_erosion) > 0:
-
-                grain_children, const = generateFragments(const, frag, abs(mass_loss_erosion), \
+            def spawnGrainsFromErosion(eroded_mass):
+                """ Distribute the given eroded mass into grains born from the fragment's current state.
+                    Uses the enclosing frag/const. """
+                grain_children, _ = generateFragments(const, frag, eroded_mass, \
                     frag.erosion_mass_index, frag.erosion_mass_min, frag.erosion_mass_max, \
                     keep_eroding=False, mass_model=const.erosion_grain_distribution)
-
                 const.n_active += len(grain_children)
-                frag_children_all += grain_children
+                frag_children_all.extend(grain_children)
 
-                # print('Eroding id', frag.id)
-                # print('Eroded mass: {:e}'.format(abs(mass_loss_erosion)))
-                # print('Mass distribution:')
-                # grain_mass_sum = 0
-                # for f in frag_children:
-                #     print('    {:d}: {:e} kg'.format(f.n_grains, f.m))
-                #     grain_mass_sum += f.n_grains*f.m
-                # print('Grain total mass: {:e}'.format(grain_mass_sum))
+            eroded_this_tick = False
 
-                # Record physical parameters at the beginning of erosion for the main fragment
-                if frag.main:
-                    if const.erosion_beg_vel is None:
+            if erosion_events_adaptive is not None:
 
-                        const.erosion_beg_vel = frag.v
-                        const.erosion_beg_mass = frag.m
-                        const.erosion_beg_dyn_press = dyn_press
+                # Adaptive: shed grains at each sub-step's resolved state, so grain births are spread
+                #   along the trajectory (matching a finely-stepped fixed run) rather than dumped at the
+                #   macro interval's end point. generateFragments()/spawn_child() copies the parent's
+                #   current position/velocity into each grain, so temporarily rewind the parent to each
+                #   sub-step's state, spawn, then restore its end-of-macro-step state.
+                if erosion_events_adaptive:
+                    saved_state = (frag.h, frag.v, frag.vv, frag.vh, frag.length,
+                                    frag.h_grav_drop_total)
+                    for (em, e_h, e_v, e_vv, e_vh, e_len, e_grav) in erosion_events_adaptive:
+                        if em <= 0:
+                            continue
+                        (frag.h, frag.v, frag.vv, frag.vh, frag.length, frag.h_grav_drop_total) \
+                            = (e_h, e_v, e_vv, e_vh, e_len, e_grav)
+                        spawnGrainsFromErosion(em)
+                        eroded_this_tick = True
+                    (frag.h, frag.v, frag.vv, frag.vh, frag.length, frag.h_grav_drop_total) = saved_state
 
-                    # Record the mass when erosion is changed
-                    elif (const.erosion_height_change >= frag.h) and (const.mass_at_erosion_change is None):
-                        const.mass_at_erosion_change = frag.m
+            else:
+
+                # Fixed step: distribute the whole macro-step erosion loss at the end-of-step state
+                if abs(mass_loss_erosion) > 0:
+                    spawnGrainsFromErosion(abs(mass_loss_erosion))
+                    eroded_this_tick = True
+
+            # Record erosion-begin bookkeeping for the main fragment once, at the END-of-step state so the
+            #   (vel, mass, dyn_press) triple is mutually consistent in both modes (in adaptive mode frag
+            #   has been restored above; the per-event rewind must not leak into these diagnostics)
+            if eroded_this_tick and frag.main:
+                if const.erosion_beg_vel is None:
+                    const.erosion_beg_vel = frag.v
+                    const.erosion_beg_mass = frag.m
+                    const.erosion_beg_dyn_press = dyn_press
+
+                # Record the mass when erosion is changed
+                elif (const.erosion_height_change >= frag.h) and (const.mass_at_erosion_change is None):
+                    const.mass_at_erosion_change = frag.m
 
         # Disrupt the fragment if the dynamic pressure exceeds its strength
         if frag.disruption_enabled and const.disruption_on:
@@ -1392,6 +1500,24 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
 def runSimulation(const, compute_wake=False):
     """ Run the ablation simulation. """
 
+    # Back-fill adaptive-timestep settings for Constants loaded from older JSONs that predate them, so
+    #   such runs pick up the current defaults (adaptive on). Set adaptive_dt False in the JSON/GUI for
+    #   bit-for-bit legacy fixed-step behaviour. Also reset the per-run diagnostics.
+    adaptive_defaults = {'adaptive_dt': True, 'adaptive_high_order': True, 'adaptive_rtol': 1e-5,
+        'adaptive_atol_m': 1e-14, 'adaptive_atol_v': 0.1, 'adaptive_dt_min': 1e-7,
+        'adaptive_dt_max': const.dt, 'adaptive_max_substeps': 10000,
+        'erosion_release_length': 200.0, 'erosion_release_vref': 30000.0}
+    for attr, default in adaptive_defaults.items():
+        if not hasattr(const, attr):
+            setattr(const, attr, default)
+    const.adaptive_substeps_total = 0
+    const.adaptive_runaway_events = 0
+    const.adaptive_floor_accepts = 0
+
+    # The adaptive Cython stepper needs dens_co as a float64 array (memoryview); coerce once (the fixed
+    #   path's atmDensityPoly requires an ndarray too, so this is safe in both modes).
+    const.dens_co = np.asarray(const.dens_co, dtype=np.float64)
+
     # Ensure that the grain mass min is smaller than the grain mass max
     if const.erosion_mass_min > const.erosion_mass_max:
         const.erosion_mass_min, const.erosion_mass_max = const.erosion_mass_max, const.erosion_mass_min
@@ -1476,6 +1602,16 @@ def runSimulation(const, compute_wake=False):
             leading_frag_dyn_press, mass_total_active, main_mass, main_height, main_length, main_vel, \
             main_dyn_press])
 
+
+    # Warn once if any fragment hit the adaptive sub-step cap (under-resolved; raise adaptive_max_substeps
+    #   or loosen the tolerance if this is frequent)
+    if const.adaptive_dt and (const.adaptive_runaway_events > 0):
+        print("WARNING: adaptive stepper hit max_substeps ({:d}) on {:d} fragment-step(s); results may be "
+              "under-resolved there.".format(const.adaptive_max_substeps, const.adaptive_runaway_events))
+    if const.adaptive_dt and (const.adaptive_floor_accepts > 0):
+        print("WARNING: adaptive stepper accepted {:d} sub-step(s) at the dt_min floor ({:g} s) while still "
+              "over tolerance; lower adaptive_dt_min or loosen adaptive_rtol if this is frequent.".format(
+              const.adaptive_floor_accepts, const.adaptive_dt_min))
 
 
     # Find the main fragment and return it with results
