@@ -2464,7 +2464,7 @@ class Trajectory(object):
         mc_noise_std=1.0, geometric_uncert=False, filter_picks=True, calc_orbit=True, show_plots=True, \
         show_jacchia=False, save_results=True, gravity_correction=True, gravity_factor=1.0, \
         plot_all_spatial_residuals=False, plot_file_type='png', traj_id=None, reject_n_sigma_outliers=3, 
-        mc_cores=None, fixed_times=None, mc_runs_max=None, enable_OSM_plot=False):
+        mc_cores=None, fixed_times=None, mc_runs_max=None, enable_OSM_plot=False, l_bfgs_b_cutoff=5):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -2575,6 +2575,8 @@ class Trajectory(object):
         else:
             self.estimate_timing_vel = True
 
+        # threshold for switching from SLSQP/TNC/None to L-BFGS-B for timing optimisations.
+        self.l_bfgs_b_cutoff = l_bfgs_b_cutoff
 
         # Extract the fixed times from the fixed time offsets
         self.fixed_times = fixed_times
@@ -3421,9 +3423,10 @@ class Trajectory(object):
 
             ### Try different methods of optimization until it is successful ##
 
-            # If there are more than seven stations, use the advanced L-BFGS-B method by default
-            # - threshold increased from five as modern hardware can handle it fine
-            if len(self.observations) >= 7:
+            # If there are more than self.l_bfgs_b_cutoff stations, use the slower L-BFGS-B method.
+            # Default is five, but in testing the correlator delivered more solutions with the cutoff set to seven. (MJMM, 2026)
+
+            if len(self.observations) >= self.l_bfgs_b_cutoff:
                 methods = [None]
                 opt_list = ['maxiter']
                 maxiter_list = [15000]
