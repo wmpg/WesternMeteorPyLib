@@ -410,7 +410,7 @@
       </rect>
      </property>
      <property name="toolTip">
-      <string>Grain-release interval in metres along the trail (only used when 'adaptive' is checked, and only for eroding meteors). In adaptive mode grains are shed once per sub-step, so this sets the grain-birth resolution: the eroding fragment's sub-step is capped so grains are released roughly every this many metres, making the light-curve shape independent of dt and rtol. Smaller = finer grain sampling but slower; larger = faster but coarser (mostly the faint erosion tail; the peak is barely affected). Default 50 m. For fast meteors the cadence is automatically frozen in time above a reference speed (erosion_release_vref, JSON) so cost stays bounded. Ignored when 'adaptive' is off.</string>
+      <string>Grain-release interval in metres along the trail (only used when 'adaptive' is checked, and only for eroding meteors). In adaptive mode grains are shed once per sub-step, so this sets the grain-birth resolution: the eroding fragment's sub-step is capped so grains are released roughly every this many metres, making the light-curve shape independent of dt and rtol. Smaller = finer grain sampling but slower; larger = faster but coarser (mostly the faint erosion tail; the peak is barely affected). Default 200 m. For fast meteors the cadence is automatically frozen in time above a reference speed (erosion_release_vref, JSON) so cost stays bounded. Ignored when 'adaptive' is off.</string>
      </property>
     </widget>
     <widget class="QLabel" name="labelErosionReleaseLength">
@@ -423,7 +423,7 @@
       </rect>
      </property>
      <property name="toolTip">
-      <string>Grain-release interval along the trail (m). Larger = faster but coarser erosion tail. Default 50 m.</string>
+      <string>Grain-release interval along the trail (m). Larger = faster but coarser erosion tail. Default 200 m.</string>
      </property>
      <property name="text">
       <string>grain</string>

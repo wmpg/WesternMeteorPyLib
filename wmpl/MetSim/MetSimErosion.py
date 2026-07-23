@@ -75,7 +75,7 @@ class Constants(object):
         #   erosion light-curve shape stops depending on dt. Smaller = finer grain sampling + slower.
         #   Only used in adaptive mode and only for eroding fragments (grains do not erode further).
         #   Exposed in the GUI so it can be coarsened for expensive fits (see erosion_release_vref).
-        self.erosion_release_length = 50.0
+        self.erosion_release_length = 200.0
 
         # Reference speed (m/s) that turns the along-track cadence into a fixed TIME cadence above it.
         #   The distance cap fixes cadence in metres, so a fast meteor takes tiny sub-steps (cost grows
@@ -851,7 +851,7 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
                     const.h_init, const.zenith_angle, const.r_earth, G0, const.dens_co,
                     const.adaptive_rtol, const.adaptive_atol_m, const.adaptive_atol_v, const.m_kill,
                     const.adaptive_dt_min, const.adaptive_dt_max, const.adaptive_max_substeps,
-                    frag.adaptive_h_sub, getattr(const, 'erosion_release_length', 50.0),
+                    frag.adaptive_h_sub, getattr(const, 'erosion_release_length', 200.0),
                     getattr(const, 'erosion_release_vref', 30000.0))
 
             # Diagnostics (feed the cost study; also used to warn once on runaway/under-resolved steps)
@@ -1499,7 +1499,7 @@ def runSimulation(const, compute_wake=False):
     _adaptive_defaults = {'adaptive_dt': True, 'adaptive_high_order': True, 'adaptive_rtol': 1e-5,
         'adaptive_atol_m': 1e-14, 'adaptive_atol_v': 0.1, 'adaptive_dt_min': 1e-7,
         'adaptive_dt_max': const.dt, 'adaptive_max_substeps': 10000,
-        'erosion_release_length': 50.0, 'erosion_release_vref': 30000.0}
+        'erosion_release_length': 200.0, 'erosion_release_vref': 30000.0}
     for _attr, _default in _adaptive_defaults.items():
         if not hasattr(const, _attr):
             setattr(const, _attr, _default)
