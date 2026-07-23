@@ -122,7 +122,11 @@ class ObservationsDatabase():
         jdt_refs         : list of julian reference dates of the observations
         """
 
-        vals_str = ','.join(map(str,[(id, dt, 1) for id,dt in zip(obs_ids,jdt_refs)]))
+        if obs_ids is None or jdt_refs is None or len(jdt_refs) != len(obs_ids):
+            log.warning(f'malformed observations data')
+            return False
+        
+        vals_str = ','.join(map(str,[(id, float(dt), 1) for id,dt in zip(obs_ids,jdt_refs)]))
 
         if verbose:
             log.info(f'adding {obs_ids} to paired_obs table')
@@ -130,8 +134,10 @@ class ObservationsDatabase():
             self.dbhandle.execute(f"insert or replace into paired_obs values {vals_str}")
             self.dbhandle.commit()
             return True
-        except Exception:
+        except Exception as e:
             log.warning(f'failed to add {obs_ids} to paired_obs table')
+            log.warning(vals_str)
+            log.warning(e)
             return False            
 
         return 
@@ -463,47 +469,52 @@ class TrajectoryDatabase():
         if verbose:
             log.info(f'    adding jdt {traj_reduced.jdt_ref} to {tblname}')
 
-        # remove the output_dir part from the path so that the data are location-independent
-        traj_file_path = traj_reduced.traj_file_path[traj_reduced.traj_file_path.find('trajectories'):]
+        try:
+            # remove the output_dir part from the path so that the data are location-independent
+            traj_file_path = traj_reduced.traj_file_path[traj_reduced.traj_file_path.find('trajectories'):]
 
-        # and remove windows-style path separators
-        traj_file_path = traj_file_path.replace('\\','/')
+            # and remove windows-style path separators
+            traj_file_path = traj_file_path.replace('\\','/')
 
-        obs_ids = 'None' if not hasattr(traj_reduced, 'obs_ids') or traj_reduced.obs_ids is None else traj_reduced.obs_ids
-        ign_obs_ids = 'None' if not hasattr(traj_reduced, 'ign_obs_ids') or traj_reduced.ign_obs_ids is None else traj_reduced.ign_obs_ids
+            obs_ids = 'None' if not hasattr(traj_reduced, 'obs_ids') or traj_reduced.obs_ids is None else traj_reduced.obs_ids
+            ign_obs_ids = 'None' if not hasattr(traj_reduced, 'ign_obs_ids') or traj_reduced.ign_obs_ids is None else traj_reduced.ign_obs_ids
 
-        if failed:
-            # fixup possible bad values
-            traj_id = 'None' if not hasattr(traj_reduced, 'traj_id') or traj_reduced.traj_id is None else traj_reduced.traj_id
-            v_init = 0 if traj_reduced.v_init is None else traj_reduced.v_init
-            radiant_eci_mini = [0,0,0] if traj_reduced.radiant_eci_mini is None else traj_reduced.radiant_eci_mini
-            state_vect_mini = [0,0,0] if traj_reduced.state_vect_mini is None else traj_reduced.state_vect_mini
+            if failed:
+                # fixup possible bad values
+                traj_id = 'None' if not hasattr(traj_reduced, 'traj_id') or traj_reduced.traj_id is None else traj_reduced.traj_id
+                v_init = 0 if traj_reduced.v_init is None else traj_reduced.v_init
+                radiant_eci_mini = [0,0,0] if traj_reduced.radiant_eci_mini is None else traj_reduced.radiant_eci_mini
+                state_vect_mini = [0,0,0] if traj_reduced.state_vect_mini is None else traj_reduced.state_vect_mini
 
-            sql_str = (f'insert or replace into failed_trajectories values ('
-                        f"{traj_reduced.jdt_ref}, '{traj_id}', '{traj_file_path}',"
-                        f"'{json.dumps(traj_reduced.participating_stations)}',"
-                        f"'{json.dumps(traj_reduced.ignored_stations)}',"
-                        f"'{json.dumps(radiant_eci_mini)}',"
-                        f"'{json.dumps(state_vect_mini)}',"
-                        f"0,{v_init},{traj_reduced.gravity_factor},"
-                        f"'{json.dumps(obs_ids)}',"
-                        f"'{json.dumps(ign_obs_ids)}',1)")
-        else:
-            sql_str = (f'insert or replace into trajectories values ('
-                        f"{traj_reduced.jdt_ref}, '{traj_reduced.traj_id}', '{traj_file_path}',"
-                        f"'{json.dumps(traj_reduced.participating_stations)}',"
-                        f"'{json.dumps(traj_reduced.ignored_stations)}',"
-                        f"'{json.dumps(traj_reduced.radiant_eci_mini)}',"
-                        f"'{json.dumps(traj_reduced.state_vect_mini)}',"
-                        f"{traj_reduced.phase_1_only},{traj_reduced.v_init},{traj_reduced.gravity_factor},"
-                        f"{traj_reduced.v0z},{traj_reduced.v_avg},"
-                        f"{traj_reduced.rbeg_jd},{traj_reduced.rend_jd},"
-                        f"{traj_reduced.rbeg_lat},{traj_reduced.rbeg_lon},{traj_reduced.rbeg_ele},"
-                        f"{traj_reduced.rend_lat},{traj_reduced.rend_lon},{traj_reduced.rend_ele},"
-                        f"'{json.dumps(obs_ids)}',"
-                        f"'{json.dumps(ign_obs_ids)}',1)")
+                sql_str = (f'insert or replace into failed_trajectories values ('
+                            f"{traj_reduced.jdt_ref}, '{traj_id}', '{traj_file_path}',"
+                            f"'{json.dumps(traj_reduced.participating_stations)}',"
+                            f"'{json.dumps(traj_reduced.ignored_stations)}',"
+                            f"'{json.dumps(radiant_eci_mini)}',"
+                            f"'{json.dumps(state_vect_mini)}',"
+                            f"0,{v_init},{traj_reduced.gravity_factor},"
+                            f"'{json.dumps(obs_ids)}',"
+                            f"'{json.dumps(ign_obs_ids)}',1)")
+            else:
+                sql_str = (f'insert or replace into trajectories values ('
+                            f"{traj_reduced.jdt_ref}, '{traj_reduced.traj_id}', '{traj_file_path}',"
+                            f"'{json.dumps(traj_reduced.participating_stations)}',"
+                            f"'{json.dumps(traj_reduced.ignored_stations)}',"
+                            f"'{json.dumps(traj_reduced.radiant_eci_mini)}',"
+                            f"'{json.dumps(traj_reduced.state_vect_mini)}',"
+                            f"{traj_reduced.phase_1_only},{traj_reduced.v_init},{traj_reduced.gravity_factor},"
+                            f"{traj_reduced.v0z},{traj_reduced.v_avg},"
+                            f"{traj_reduced.rbeg_jd},{traj_reduced.rend_jd},"
+                            f"{traj_reduced.rbeg_lat},{traj_reduced.rbeg_lon},{traj_reduced.rbeg_ele},"
+                            f"{traj_reduced.rend_lat},{traj_reduced.rend_lon},{traj_reduced.rend_ele},"
+                            f"'{json.dumps(obs_ids)}',"
+                            f"'{json.dumps(ign_obs_ids)}',1)")
 
-        sql_str = sql_str.replace('nan','"NaN"')
+            sql_str = sql_str.replace('nan','"NaN"')
+        except Exception as e:
+            log.warning('malformed trajectory')
+            print(e)
+            return False
         try:
             self.dbhandle.execute(sql_str)
         except Exception as e:
