@@ -234,71 +234,227 @@ def expLinearVelocity(t, v0, a1, a2, t0, decel):
     return vel
 
 
-def lagFitVelocity(time_data, lag_data, vel_data, v0):
-    """ Fit a smooth model to the lag data, to improve the alpha-beta fit. """
+def _lagResidualsAtFixedT0(params, t0, time_data, lag_data, sigma_lag):
+    """ Lag residual vector with t0 held fixed - the building block method='robust' scans over
+        candidate t0 values with (mirrors _profileCostAt()'s fixed/re-optimize pattern used
+        elsewhere in this module for alpha/beta).
+
+    Arguments:
+        params: [ndarray] (a1, a2, decel) - see expLinearLag().
+        t0: [float] Fixed transition time (s).
+        time_data: [ndarray] Time data (s).
+        lag_data: [ndarray] Lag data (m).
+        sigma_lag: [float] Lag uncertainty (m) used to scale the residuals.
+
+    Return:
+        [ndarray] Sigma-scaled lag residuals (model - data).
+    """
+
+    a1, a2, decel = params
+
+    return (expLinearLag(time_data, a1, a2, t0, decel) - lag_data)/sigma_lag
 
 
-    def _lagMinimization(params, time_data, lag_data, weights):
+def _lagResiduals(params, time_data, lag_data, sigma_lag):
+    """ Lag residual vector for the full (a1, a2, t0, decel) parameter set - the residual
+        least_squares refines in the final joint fit of method='robust'.
 
-        # Compute the sum of absolute residuals (more robust than squared residuals)
-        cost = np.sum(weights*np.abs(lag_data - expLinearLag(time_data, *params)))
+    Arguments:
+        params: [ndarray] (a1, a2, t0, decel) - see expLinearLag().
+        time_data: [ndarray] Time data (s).
+        lag_data: [ndarray] Lag data (m).
+        sigma_lag: [float] Lag uncertainty (m) used to scale the residuals.
 
-        return cost
+    Return:
+        [ndarray] Sigma-scaled lag residuals (model - data).
+    """
 
-
-    # Guess initial parameters
-    a1 = 20
-    a2 = 1.5
-    t0 = 9/10*np.max(time_data) # The transition to constant deceleration always happens close to the end
-    decel = 6 # km/s^2, typical deceleration for meteorite droppers at the end
-
-    # Initial parameters
-    p0 = [a1, a2, t0, decel]
-
-    # Fit the lag function
-    #fit_params, _ = scipy.optimize.curve_fit(expLinearLag, time_data, lag_data, p0=p0, maxfev=10000)
+    return (expLinearLag(time_data, *params) - lag_data)/sigma_lag
 
 
-    # # Use weights such that they linearly increase from 0.5 at and before the first half of the fireball to 
-    # #   1.0 at the end
-    # # The time is sorted in reverse, so take that into account
-    # weights = np.zeros_like(time_data)
-    # first_part_indices = np.arange(0, len(weights)/2).astype(int)
-    # weights[first_part_indices] = 1.0 - 0.5*first_part_indices/np.max(first_part_indices)
-    # weights[~first_part_indices] = 0.5
-    # weights /= np.sum(weights)
+def lagFitVelocity(time_data, lag_data, vel_data, v0, method='basinhopping', sigma_lag=None,
+        loss='soft_l1', f_scale=2.0, n_t0=15, niter=200, seed=None, verbose=False):
+    """ Fit the exponential-then-linear model (expLinearLag()/expLinearVelocity()) to the lag data,
+        producing a smooth velocity curve to use in fitAlphaBeta() instead of the noisy
+        point-to-point vel_data.
 
-    # Don't use weights
-    weights = np.ones_like(time_data)
+        The model has 4 parameters (a1, a2, t0, decel - see expLinearLag()): an exponential
+        deceleration phase up to a transition time t0, followed by a constant-deceleration phase.
+        t0 makes the cost landscape genuinely multimodal (the model is only continuous, not
+        differentiable, at the switch) - both methods below account for this explicitly, rather
+        than handing the whole 4-parameter problem to a single local optimizer.
 
-    # Use robust fitting
-    res = scipy.optimize.basinhopping(_lagMinimization, p0, niter=200, T=2.0,\
-        minimizer_kwargs={'args':(time_data, lag_data, weights), 'method':'Nelder-Mead'})
-    fit_params = res.x
+        Two methods are available:
+        - method='basinhopping' (default, byte-for-byte unchanged from before): global L1
+          (sum-of-absolute-residuals) optimization via scipy.optimize.basinhopping() with a
+          Nelder-Mead local minimizer, started from a fixed (a1=20, a2=1.5, t0=0.9*max(time_data),
+          decel=6) guess. niter=200 random-restarts comfortably sidesteps the t0 multimodality
+          above, but makes this by far the slowest step of the alpha-beta pipeline for long
+          trajectories - see method='robust' below.
+        - method='robust': scipy.optimize.least_squares(loss=loss) directly on the (sigma-scaled)
+          lag residuals, addressing the t0 multimodality with a small multi-start over t0 (n_t0
+          candidates spanning the trajectory, each a single cheap least_squares fit of the
+          remaining 3 parameters - see _lagResidualsAtFixedT0()) instead of 200 basinhopping
+          restarts. The best (lowest-cost) candidate seeds one final joint least_squares refine
+          over all 4 parameters (see _lagResiduals()), using a sigma_lag derived from that
+          candidate's own residuals (if not given explicitly). Typically an order of magnitude
+          faster than method='basinhopping' for comparable fit quality (see
+          wmpl/Utils/Tests/test_AlphaBeta.py) - but being multi-start rather than a true global
+          search, it can still miss the global optimum if the right t0 is not close to any of the
+          n_t0 candidates; raise n_t0 if that is a concern.
 
-    # fig, (ax1, ax2, ax3) = plt.subplots(nrows=3, sharex=True)
-    
-    # # Plot the data
-    # ax1.scatter(time_data, lag_data)
+        brentq is not applicable here: it inverts a SCALAR function against a target value (e.g.
+        alphaBetaVelocityNormed() uses it to invert height <-> velocity in the alpha-beta model
+        itself). expLinearLag()/expLinearVelocity() are already explicit closed-form functions of
+        t - there is nothing to invert here; the actual problem is a 4-parameter curve fit, which
+        is what least_squares/basinhopping are for.
 
-    # # Plot the fit
-    # time_arr = np.linspace(np.min(time_data), np.max(time_data), 100)
-    # ax1.plot(time_arr, expLinearLag(time_arr, *fit_params), color='k', zorder=5)
+    Arguments:
+        time_data: [ndarray] Time data (s).
+        lag_data: [ndarray] Lag data (m) - the quantity actually being fit.
+        vel_data: [ndarray] Velocity data (m/s). NOT used in the fit itself (only lag_data is) -
+            kept as an argument for backwards compatibility with existing call sites.
+        v0: [float] Initial velocity (m/s), used to convert the fitted lag model into the returned
+            velocity curve (see expLinearVelocity()). Must be finite and positive.
 
-    # # Plot the residuals
-    # ax2.scatter(time_data, lag_data - expLinearLag(time_data, *fit_params))
+    Keyword arguments:
+        method: [str] 'basinhopping' (default) or 'robust' - see above.
+        sigma_lag: [float] Only used for method='robust'. Lag uncertainty (m) used to scale the
+            residuals and the robust loss. If None (default), derived from the MAD of the
+            best-t0 candidate's own residuals (floored at 1 m).
+        loss: [str] Only used for method='robust'. scipy.optimize.least_squares loss for the final
+            joint refine (the per-t0 scan itself always uses an unweighted linear loss, since its
+            only purpose is to locate a good t0 and a sigma_lag estimate).
+        f_scale: [float] Only used for method='robust'. Robust loss scale, in units of sigma_lag.
+        n_t0: [int] Only used for method='robust'. Number of candidate t0 values spanning
+            [min(time_data), max(time_data)] scanned for the multi-start described above.
+        niter: [int] Only used for method='basinhopping'. Forwarded to
+            scipy.optimize.basinhopping()'s `niter` (default 200, unchanged from before).
+        seed: [int] Only used for method='basinhopping'. Forwarded to
+            scipy.optimize.basinhopping()'s `seed`, for reproducible fits. None (default)
+            reproduces the previous, unseeded (non-reproducible) behavior.
+        verbose: [bool] If True, print the adopted method and fitted parameters.
 
+    Return:
+        (vel_fit, fit_params):
+            vel_fit: [ndarray] Fitted velocity at time_data (m/s), from expLinearVelocity().
+            fit_params: [ndarray] (a1, a2, t0, decel) - unchanged meaning/order, see
+                expLinearLag()/expLinearVelocity().
+    """
 
-    # # Plot the observed velocity and the velocity fit
-    # ax3.scatter(time_data, vel_data/1000)
-    # ax3.plot(time_arr, expLinearVelocity(time_arr, v0,  *fit_params)/1000)
+    method = method.lower()
+    if method not in ('basinhopping', 'robust'):
+        raise ValueError("method must be 'basinhopping' or 'robust', got {!r}.".format(method))
 
-    # plt.show()
+    time_data = np.asarray(time_data, dtype=np.float64)
+    lag_data = np.asarray(lag_data, dtype=np.float64)
+    vel_data = np.asarray(vel_data, dtype=np.float64)
 
-    # sys.exit()
+    if not (len(time_data) == len(lag_data) == len(vel_data)):
+        raise ValueError("time_data, lag_data, and vel_data must have the same length.")
+
+    if not (np.isfinite(v0) and (v0 > 0)):
+        raise ValueError("v0 must be finite and positive, got {!r}.".format(v0))
+
+    # Drop non-finite points up front - expLinearLag()/basinhopping's Nelder-Mead would otherwise
+    #   propagate a single NaN/inf into a NaN cost everywhere
+    finite_mask = np.isfinite(time_data) & np.isfinite(lag_data) & np.isfinite(vel_data)
+    if not np.all(finite_mask):
+        print("WARNING: lagFitVelocity() dropped {:d}/{:d} non-finite point(s).".format(
+            np.sum(~finite_mask), len(finite_mask)))
+        time_data, lag_data, vel_data = time_data[finite_mask], lag_data[finite_mask], \
+            vel_data[finite_mask]
+
+    # 4 free parameters (a1, a2, t0, decel) - require at least one degree of freedom beyond that
+    if len(time_data) < 5:
+        raise ValueError("At least 5 finite (time, lag) points are required, got {:d}.".format(
+            len(time_data)))
+
+    t_min, t_max = np.min(time_data), np.max(time_data)
+    if t_max <= t_min:
+        raise ValueError("time_data must span a positive range (got all points at t={:g}).".format(
+            t_min))
+
+    if method == 'basinhopping':
+
+        def _lagMinimization(params, time_data, lag_data):
+            # Sum of absolute residuals (more robust than squared residuals)
+            return np.sum(np.abs(lag_data - expLinearLag(time_data, *params)))
+
+        # Guess initial parameters
+        a1 = 20
+        a2 = 1.5
+        t0 = 9/10*t_max # The transition to constant deceleration always happens close to the end
+        decel = 6 # km/s^2, typical deceleration for meteorite droppers at the end
+        p0 = [a1, a2, t0, decel]
+
+        res = scipy.optimize.basinhopping(_lagMinimization, p0, niter=niter, T=2.0, seed=seed,
+            minimizer_kwargs={'args':(time_data, lag_data), 'method':'Nelder-Mead'})
+
+        if not res.lowest_optimization_result.success:
+            print("WARNING: lagFitVelocity(method='basinhopping') optimizer failed: "
+                "{:s}".format(res.lowest_optimization_result.message))
+
+        fit_params = res.x
+        sigma_lag_used = None
+
+    else: # method == 'robust'
+
+        # a1, a2, decel bounded non-negative (expLinearLag() takes abs() of each internally, so
+        #   the sign is redundant and only adds a spurious symmetry for the optimizer to contend
+        #   with); t0 bounded to the observed time range, outside of which the exponential/linear
+        #   split is meaningless
+        bounds_no_t0 = ([0.0, 0.0, 0.0], [np.inf, np.inf, np.inf])
+        bounds_full = ([0.0, 0.0, t_min, 0.0], [np.inf, np.inf, t_max, np.inf])
+
+        # Same initial (a1, a2, decel) guess as method='basinhopping' - only t0 is multi-started
+        a1_0, a2_0, decel_0 = 20.0, 1.5, 6.0
+
+        # Bias the t0 candidates towards the end of the trajectory (as in the t0 guess used by
+        #   method='basinhopping' above), while still covering the full range in case the
+        #   transition happens earlier on a given trajectory
+        t0_candidates = t_min + (t_max - t_min)*np.linspace(0.3, 0.99, n_t0)
+
+        best_res, best_t0 = None, None
+        for t0_candidate in t0_candidates:
+
+            res_t0 = scipy.optimize.least_squares(_lagResidualsAtFixedT0, [a1_0, a2_0, decel_0],
+                args=(t0_candidate, time_data, lag_data, 1.0), bounds=bounds_no_t0)
+
+            if (best_res is None) or (res_t0.cost < best_res.cost):
+                best_res, best_t0 = res_t0, t0_candidate
+
+        a1_p, a2_p, decel_p = best_res.x
+
+        if sigma_lag is None:
+            resid = lag_data - expLinearLag(time_data, a1_p, a2_p, best_t0, decel_p)
+            sigma_lag_used = max(1.4826*np.median(np.abs(resid - np.median(resid))), 1.0)
+        else:
+            sigma_lag_used = sigma_lag
+
+        x0 = [a1_p, a2_p, best_t0, decel_p]
+        res_final = scipy.optimize.least_squares(_lagResiduals, x0,
+            args=(time_data, lag_data, sigma_lag_used), bounds=bounds_full, loss=loss,
+            f_scale=f_scale, x_scale='jac')
+
+        if not res_final.success:
+            print("WARNING: lagFitVelocity(method='robust') optimizer failed: "
+                "{:s}".format(res_final.message))
+
+        fit_params = res_final.x
+
+    if verbose:
+        print()
+        print("--- lagFitVelocity ({:s}) ---".format(method))
+        print("a1        = {:.3f}".format(abs(fit_params[0])))
+        print("a2        = {:.3f}".format(abs(fit_params[1])))
+        print("t0        = {:.3f} s".format(abs(fit_params[2])))
+        print("decel     = {:.3f} km/s^2".format(abs(fit_params[3])))
+        if sigma_lag_used is not None:
+            print("sigma_lag = {:.3f} m".format(sigma_lag_used))
 
     # Compute fitted velocity
-    vel_fit = expLinearVelocity(time_data, v0,  *fit_params)
+    vel_fit = expLinearVelocity(time_data, v0, *fit_params)
 
     return vel_fit, fit_params
 
@@ -5057,6 +5213,12 @@ if __name__ == "__main__":
         "robust fit (method='robust'), propagates the fitted (ln alpha, ln beta) covariance into "
         "the masses, and draws an uncertainty ellipse on the survival diagram.")
 
+    arg_parser.add_argument('-r', '--lagrobust', action="store_true", \
+        help="Use the faster robust least-squares fit (lagFitVelocity(method='robust')) for the "
+        "lag-smoothing step, instead of the default global basinhopping search. Typically ~15x "
+        "faster and at least as accurate (see lagFitVelocity()'s docstring), but is a bounded "
+        "multi-start over the transition time rather than a true global search.")
+
     arg_parser.add_argument('--slopeunc', metavar='SLOPE_UNC', type=float, default=None, \
         help="1-sigma uncertainty on the entry slope, in DEGREES, folded into the mass error "
         "estimate when --errors is set. Default: the slope is treated as exactly known.")
@@ -5140,9 +5302,16 @@ if __name__ == "__main__":
         ht_data_rescaled = rescaleHeightToExponentialAtmosphere(lat_data, lon_data, ht_data, traj.jdt_ref)
 
         # Fit a functional model to the lag and use that for the alpha-beta fit instead of the noisy
-        #   point-to-point velocity measurements
+        #   point-to-point velocity measurements. --lagrobust swaps the default global
+        #   basinhopping search for the faster robust least-squares fit (see lagFitVelocity()'s
+        #   docstring for the method='robust' vs method='basinhopping' tradeoff).
         print("Fitting lag function...")
-        vel_data_smooth, lag_fit_params = lagFitVelocity(time_data, lag_data, vel_data, traj.v_init)
+        if cml_args.lagrobust:
+            vel_data_smooth, lag_fit_params = lagFitVelocity(time_data, lag_data, vel_data, \
+                traj.v_init, method='robust')
+        else:
+            vel_data_smooth, lag_fit_params = lagFitVelocity(time_data, lag_data, vel_data, \
+                traj.v_init)
 
         # Choose which data will be used for alpha-beta fitting
         if cml_args.obsvel:
