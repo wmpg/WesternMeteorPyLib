@@ -72,7 +72,7 @@ if __name__ == "__main__":
 
     arg_parser.add_argument("--timehtfit", type=int, choices=[1, 2, 3], default=None, help="If given, a polynomial fit of the specified order (1, 2, or 3) will be used for the time vs height relationship instead of interpolation.")
 
-    arg_parser.add_argument("--tau", type=float, default=None, help="The luminous efficiency of fireballs in %. If given, it will be used instead of the default value of 5% which is appropraite for low speed fireballs.")
+    arg_parser.add_argument("--tau", type=float, default=None, help="The luminous efficiency of fireballs in %%. If given, it will be used instead of the default value of 5%% which is appropriate for low speed fireballs.")
 
 
     # Parse the command line arguments
