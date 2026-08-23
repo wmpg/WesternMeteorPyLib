@@ -15,18 +15,25 @@ from wmpl.Utils.OSTools import mkdirP
 def savePickle(obj, dir_path, file_name):
     """ Dump the given object into a file using Python 'pickling'. The file can be loaded into Python
         ('unpickled') afterwards for further use.
+        We write to a temporary file and then rename to avoid situations where the file might be read
+        before the write is complete. 
 
     Arguments:
     	obj: [object] Object which will be pickled.
         dir_path: [str] Path of the directory where the pickle file will be stored.
-        file_name: [str] Name of the file where the object will be stored.
+        file_name: [str] Name of the file where the object will be stored.  
 
     """
 
     mkdirP(dir_path)
 
-    with open(os.path.join(dir_path, file_name), 'wb') as f:
+    # create a temporary name that does not contain '.pickle' as this is used in many places to filter for pickle files
+    tmp_name = file_name.replace('.p', '_x')
+    with open(os.path.join(dir_path, tmp_name), 'wb') as f:
         pickle.dump(obj, f, protocol=2)
+    if os.path.isfile(os.path.join(dir_path,file_name)):
+        os.remove(os.path.join(dir_path,file_name))
+    os.rename(os.path.join(dir_path,tmp_name), os.path.join(dir_path,file_name))
 
 
 
