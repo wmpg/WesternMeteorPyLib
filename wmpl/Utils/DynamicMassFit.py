@@ -607,7 +607,12 @@ if __name__ == "__main__":
     decel = -vel_fit[0]
     time_eval = np.min(time_data) + eval_point*(np.max(time_data) - np.min(time_data))
     vel_eval = lineFunc(time_eval, *vel_fit)
-    ht_eval = lineFunc(time_eval, *ht_fit)
+
+    # Take the height at the evaluation time from the solver's trajectory model (which includes the gravity
+    #   drop), as computeFragEndParams() does. A line fitted to the measured heights is biased at the window
+    #   centre by the curvature of the decelerating path and by the measurement noise
+    ht_vs_time_interp, _ = interpolateHtVsTimeLen(traj)
+    ht_eval = scipy.optimize.brentq(lambda h: ht_vs_time_interp(h) - time_eval, *ht_vs_time_interp.x[[0, -1]])
 
     # Compute +/- 2 sigma deceleartion
     decel_lo = decel - 2*decel_std
