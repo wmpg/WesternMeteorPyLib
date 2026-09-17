@@ -52,7 +52,7 @@ def calcKresakK(a, e):
 
         K is positive for cometary orbits and negative for asteroidal ones.
 
-        Reference: Kresak (1967), Bull. Astron. Inst. Czech. 18, 27. The form used here, and the
+        Reference: Kresak (1967). The form used here, and the
         sign of the cometary limit, follow Jopek & Williams (2013), MNRAS 430, 2377, eq. 12,
         doi:10.1093/mnras/stt057.
 
@@ -72,7 +72,7 @@ def calcKresakP(a, e):
 
         P exceeds 2.5 yr for cometary orbits.
 
-        Reference: Kresak (1969), Bull. Astron. Inst. Czech. 20, 177. The form used here, and the
+        Reference: Kresak (1969). The form used here, and the
         cometary limit, follow Jopek & Williams (2013), MNRAS 430, 2377, eq. 11,
         doi:10.1093/mnras/stt057.
 

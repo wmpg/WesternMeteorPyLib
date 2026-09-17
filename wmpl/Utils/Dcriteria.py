@@ -574,7 +574,7 @@ def calcRho1(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2, L=1.0):
         satisfies the triangle inequality, and it stays well defined for circular orbits. It is
         built from the difference of the angular momentum vectors and of the eccentricity vectors.
 
-        Reference: Kholshevnikov, Kokhirova, Babadzhanov & Khamroev (1993), MNRAS 462, 2275,
+        Reference: Kholshevnikov, Kokhirova, Babadzhanov & Khamroev (2016), MNRAS 462, 2275,
         doi:10.1093/mnras/stw1712.
 
         No threshold is published for rho_1. Thresholds are not transferable from D_SH or D_D,
