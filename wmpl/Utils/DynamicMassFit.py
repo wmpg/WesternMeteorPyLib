@@ -249,8 +249,7 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
     # Calculate the equatorial coordinates of east from the final point
     ra_east, _ = altAz2RADec(np.pi/2, 0, final_jd, final_lat, final_lon)
 
-    # Calculate the derotated reference velocity vector/radiant. The radiant is the tangent of the path at its
-    #   beginning (the solver models gravity as a drop from it), so use the initial velocity
+    # Calculate the derotated reference velocity vector/radiant, using the initial velocity as Orbit.calcOrbit does
     v_ref_vect = traj.v_init*traj.radiant_eci_mini
     v_ref_nocorr = np.zeros(3)
     v_ref_nocorr[0] = v_ref_vect[0] + v_e*np.cos(ra_east)
@@ -263,9 +262,12 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
     final_azim, final_elev = raDec2AltAz(ra_norot, dec_norot, final_jd, final_lat, final_lon)
 
     # Steepen the elevation by the gravity turn along the path, d(elev)/dt = g*cos(elev)/v, using the average
-    #   speed over the observed part and the simulated speeds after it
+    #   speed over the observed part and the simulated speeds after it. The turn starts where the fitted radiant
+    #   is tangent to the path: its beginning if the solver modelled the gravity drop, otherwise about its middle
+    t_obs = np.concatenate([obs.time_data for obs in traj.observations])
+    t_turn = 0.0 if getattr(traj, 'gravity_correction', True) else (np.min(t_obs) + np.max(t_obs))/2
     v_sim = sr.main_vel_arr[1:]
-    final_elev += 9.81*np.cos(final_elev)*(meas_time/traj.orbit.v_avg_norot \
+    final_elev += 9.81*np.cos(final_elev)*((meas_time - t_turn)/traj.orbit.v_avg_norot \
         + np.sum(np.diff(sr.time_arr)[v_sim > 0]/v_sim[v_sim > 0]))
 
     ###
