@@ -10,7 +10,7 @@ from wmpl.Utils.Math import lineFunc, vectMag
 from wmpl.Utils.TrajConversions import cartesian2Geo, altAz2RADec, eci2RaDec, raDec2AltAz
 from wmpl.Utils.Physics import dynamicMass
 from wmpl.Utils.Pickling import loadPickle
-from wmpl.MetSim.MetSimErosion import Constants, runSimulation
+from wmpl.MetSim.MetSimErosion import Constants, runSimulation, G0
 from wmpl.MetSim.GUI import SimulationResults
 from wmpl.Trajectory.Trajectory import applyGravityDrop
 
@@ -273,9 +273,10 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
     # Steepen the elevation by the gravity turn along the path, d(elev)/dt = g*cos(elev)/v, using the average
     #   speed over the observed part and the simulated speeds after it. The turn starts where the fitted radiant
     #   is tangent to the path: its beginning if the solver modelled the gravity drop, otherwise about its middle
-    t_turn =0.0 if getattr(traj, 'gravity_correction', True) else (np.min(t_obs) + np.max(t_obs))/2
+    t_turn = 0.0 if getattr(traj, 'gravity_correction', True) else (np.min(t_obs) + np.max(t_obs))/2
     v_sim = sr.main_vel_arr[1:]
-    final_elev += 9.81*np.cos(final_elev)*((meas_time - t_turn)/traj.orbit.v_avg_norot \
+    g_final = G0/(1 + final_ele/sr.const.r_earth)**2
+    final_elev += g_final*np.cos(final_elev)*((meas_time - t_turn)/traj.orbit.v_avg_norot \
         + np.sum(np.diff(sr.time_arr)[v_sim > 0]/v_sim[v_sim > 0]))
 
     ###
