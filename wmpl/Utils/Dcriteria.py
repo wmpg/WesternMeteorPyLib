@@ -5,7 +5,7 @@ import math
 
 import numpy as np
 
-from wmpl.Utils.OrbitClassification import calcTisserand, A_JUPITER
+from wmpl.Utils.OrbitClassification import A_JUPITER
 
 
 
@@ -787,13 +787,24 @@ def calcDR(ra1, dec1, sol1, vg1, ra2, dec2, sol2, vg2, w1=1.0):
 def calcDB(e1, i1, O1, w1, e2, i2, O2, w2):
     """ Calculate the Jenniskens (2008) D_B criterion between two orbits.
 
-        D_B compares three combinations of the orbital elements that are approximately conserved
-        while a meteoroid orbit precesses towards an Earth-crossing geometry, each normalised by
-        its observed dispersion in known streams.
+        D_B compares three quantities that are near-invariant under the secular perturbations of a
+        short-period orbit over one nutation cycle, so it asks whether two orbits could have been
+        the same orbit recently, rather than whether they are the same orbit now. C1 follows from
+        the z-component of the angular momentum and the energy, C2 is the Lidov (1961, 1962)
+        integral of the twice-averaged three-body problem, and C3 is the longitude of perihelion,
+        which drifts far more slowly than either angle alone. The three are taken from
+        Babadzhanov (1989).
 
-        Reference: Jenniskens (2008), Icarus 194, 13, doi:10.1016/j.icarus.2007.09.016.
+        Each difference is divided by the dispersion of that quantity over the paper's sample of
+        likely stream and parent-body pairs: 0.13, 0.06 and 14.2 deg respectively.
 
-        No threshold is published for D_B.
+        The paper notes, and does not correct for, the fact that C1, C2 and C3 are not orthogonal.
+
+        Published thresholds: D_B < 1.0 together with D_T < 0.3 identifies parent bodies and
+        siblings of a stream; D_B < 1.5 with D_T < 0.6 also captures bodies related through an
+        earlier fragmentation.
+
+        Reference: Jenniskens (2008), Icarus 194, 13, eq. 18, doi:10.1016/j.icarus.2007.09.016.
 
     Arguments:
         e1: [float] num. eccentricity of the first orbit
@@ -823,19 +834,31 @@ def calcDB(e1, i1, O1, w1, e2, i2, O2, w2):
         + (d_c3/np.radians(14.2))**2)
 
 
-def calcDT(a1, e1, i1, a2, e2, i2, a_planet=A_JUPITER):
+def calcDT(q1, e1, i1, q2, e2, i2, a_planet=A_JUPITER):
     """ Calculate the Jenniskens (2008) D_T criterion between two orbits, the absolute difference
         of their Tisserand parameters.
 
-        Reference: Jenniskens (2008), Icarus 194, 13, doi:10.1016/j.icarus.2007.09.016.
+        The Tisserand parameter is conserved under the same secular perturbations as the D_B
+        invariants, so D_T asks the same question as D_B along a different axis.
 
-        No threshold is published for D_T.
+        The paper writes the Tisserand parameter in terms of the perihelion distance and the
+        eccentricity rather than the semi-major axis, because the observational errors in q and e
+        are smaller than those in a. That form is used here. It is algebraically the same quantity
+        as calcTisserand returns, and stays finite as the eccentricity approaches 1, where the
+        semi-major axis form evaluates to nan.
+
+        Published thresholds: D_T < 0.3 together with D_B < 1.0 identifies parent bodies and
+        siblings of a stream; D_T < 0.6 with D_B < 1.5 also captures bodies related through an
+        earlier fragmentation.
+
+        Reference: Jenniskens (2008), Icarus 194, 13, eqs 13 and 14,
+        doi:10.1016/j.icarus.2007.09.016.
 
     Arguments:
-        a1: [float] semi-major axis of the first orbit (AU)
+        q1: [float] perihelion distance of the first orbit (AU)
         e1: [float] num. eccentricity of the first orbit
         i1: [float] inclination of the first orbit (rad)
-        a2: [float] semi-major axis of the second orbit (AU)
+        q2: [float] perihelion distance of the second orbit (AU)
         e2: [float] num. eccentricity of the second orbit
         i2: [float] inclination of the second orbit (rad)
 
@@ -846,28 +869,41 @@ def calcDT(a1, e1, i1, a2, e2, i2, a_planet=A_JUPITER):
         [float] D_T value
     """
 
-    t1 = calcTisserand(a1, e1, i1, a_planet=a_planet)
-    t2 = calcTisserand(a2, e2, i2, a_planet=a_planet)
+    def tisserandFromPerihelion(q, e, i):
+        return a_planet*(1.0 - e)/q + 2*np.cos(i)*np.sqrt(q*(1.0 + e)/a_planet)
 
-    return np.abs(t1 - t2)
+    return np.abs(tisserandFromPerihelion(q1, e1, i1) - tisserandFromPerihelion(q2, e2, i2))
 
 
-def calcDX(sol1, ra1, dec1, vg1, sol2, ra2, dec2, vg2, w_sol, w_ra, w_dec, w_vg):
+# Weights of the D_X terms as used by Rudawska et al. (2015), chosen there so that each term
+#   contributes comparably and the result is comparable to the other criteria
+DX_W_SOL = 0.17
+DX_W_RA = 1.20
+DX_W_DEC = 1.20
+DX_W_VG = 0.20
+
+
+def calcDX(sol1, ra1, dec1, vg1, sol2, ra2, dec2, vg2, w_sol=DX_W_SOL, w_ra=DX_W_RA,
+    w_dec=DX_W_DEC, w_vg=DX_W_VG):
     """ Calculate the Rudawska et al. (2015) D_X criterion between two orbits.
 
         D_X compares the geocentric quantities directly, which avoids propagating the velocity
         uncertainty into the semi-major axis. The radiant terms are scaled by the velocity
         difference, so a pair of meteors with similar radiants but different speeds is separated.
 
-        The paper leaves the four weights undefined and gives no method for choosing them, so they
-        are required arguments here rather than defaults; it also does not state the units of the
-        geocentric velocity, which matter because the velocity difference enters the radiant terms
-        additively as |Vg1 - Vg2| + 1.
+        The velocity difference enters the radiant terms additively as |Vg1 - Vg2| + 1, so the
+        criterion is not invariant to the unit of the geocentric velocity. The paper tabulates Vg
+        in km/s, which is the unit assumed here.
 
-        Reference: Rudawska, Matlovic, Toth & Kornos (2015), P&SS 118, 38,
+        Note that the criterion is not symmetric: the right ascension term is scaled by the cosine
+        of the first declination and the velocity term by the first velocity, so exchanging the two
+        orbits changes the result slightly. The paper applies it to a group mean against a group
+        mean, where the asymmetry is immaterial.
+
+        Published threshold: groups are merged when D_X <= 0.15.
+
+        Reference: Rudawska, Matlovic, Toth & Kornos (2015), P&SS 118, 38, eq. 2,
         doi:10.1016/j.pss.2015.07.011.
-
-        No threshold is published for D_X.
 
     Arguments:
         sol1: [float] solar longitude of the first orbit (rad)
@@ -878,10 +914,12 @@ def calcDX(sol1, ra1, dec1, vg1, sol2, ra2, dec2, vg2, w_sol, w_ra, w_dec, w_vg)
         ra2: [float] right ascension of the second radiant (rad)
         dec2: [float] declination of the second radiant (rad)
         vg2: [float] geocentric velocity of the second orbit (km/s)
-        w_sol: [float] weight of the solar longitude term
-        w_ra: [float] weight of the right ascension term
-        w_dec: [float] weight of the declination term
-        w_vg: [float] weight of the geocentric velocity term
+
+    Keyword arguments:
+        w_sol: [float] weight of the solar longitude term. Default as published.
+        w_ra: [float] weight of the right ascension term. Default as published.
+        w_dec: [float] weight of the declination term. Default as published.
+        w_vg: [float] weight of the geocentric velocity term. Default as published.
 
     Return:
         [float] D_X value

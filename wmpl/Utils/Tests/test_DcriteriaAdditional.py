@@ -20,7 +20,7 @@ import numpy as np
 
 from wmpl.Utils.Dcriteria import (calcRho1, calcRho2, calcRho5, calcC, calcDR, calcDB, calcDT,
     calcDX, calcDVJopek, calcDACS, calcDSAC, calcDN, calcDD, TC_REFERENCE_A, TC_REFERENCE_E,
-    TC_REFERENCE_INCL, TC_REFERENCE_Q, DACS_A_SCALE)
+    TC_REFERENCE_INCL, TC_REFERENCE_Q, DACS_A_SCALE, DX_W_SOL, DX_W_RA, DX_W_DEC, DX_W_VG)
 from wmpl.Utils.OrbitClassification import (calcTisserand, calcKresakK, calcKresakP,
     calcAphelionDistance, isCometaryQi, isCometaryKi, isCometaryPi, A_JUPITER, JW_INCL_LIMIT)
 
@@ -444,7 +444,9 @@ def test_DB_C3_uses_the_smallest_angular_difference():
 
 
 def test_DT_matches_the_tisserand_difference():
-    """ D_T is the absolute difference of the two Tisserand parameters. """
+    """ D_T is the absolute difference of the two Tisserand parameters. The paper writes the
+        parameter in q and e rather than a, so this pins that form against calcTisserand.
+    """
 
     orbits = [(2.215, 0.848, math.radians(11.70)), (2.234, 0.862, math.radians(4.18)),
               (3.037, 0.795, math.radians(65.82)), (1.5, 0.3, math.radians(2.0))]
@@ -453,10 +455,50 @@ def test_DT_matches_the_tisserand_difference():
         for a2, e2, i2 in orbits:
 
             expected = abs(float(calcTisserand(a1, e1, i1)) - float(calcTisserand(a2, e2, i2)))
-            got = float(calcDT(a1, e1, i1, a2, e2, i2))
+            got = float(calcDT(a1*(1.0 - e1), e1, i1, a2*(1.0 - e2), e2, i2))
 
             assert abs(got - expected) < 1e-12, \
                 "D_T gave {:.8f}, expected {:.8f}".format(got, expected)
+
+
+def test_DT_reproduces_the_jenniskens_tisserand_values():
+    """ Table 1 of Jenniskens (2008) tabulates the Tisserand parameter of each candidate parent
+        body. Comparing an orbit against a hypothetical one of zero Tisserand parameter is not
+        possible, so the values are recovered by differencing against a reference orbit whose
+        Tisserand parameter is known from calcTisserand.
+    """
+
+    # (name, a, e, i in deg, T_J tabulated in the paper)
+    cases = [("2P/Encke", 2.215, 0.848, 11.70, 3.03),
+             ("3200 Phaethon", 1.2712, 0.8898, 22.26, 4.51)]
+
+    # A reference orbit whose Tisserand parameter is exactly 3 by construction
+    ref_a, ref_e, ref_i = A_JUPITER, 0.0, 0.0
+    ref_t = 3.0
+
+    for name, a, e, incl_deg, published in cases:
+
+        d_value = float(calcDT(a*(1.0 - e), e, math.radians(incl_deg),
+            ref_a*(1.0 - ref_e), ref_e, ref_i))
+
+        got = ref_t + d_value
+
+        assert abs(got - published) < 0.01, \
+            "T_J of {:s} came out as {:.4f}, table 1 gives {:.2f}".format(name, got, published)
+
+
+def test_DT_stays_finite_at_unit_eccentricity():
+    """ The reason the paper writes the Tisserand parameter in q and e: at e = 1 the semi-major
+        axis diverges and the (a, e, i) form evaluates to nan, while this form does not.
+    """
+
+    d_value = float(calcDT(0.5, 1.0, 0.0, 0.5, 0.9, 0.0))
+
+    assert np.isfinite(d_value), "D_T was not finite for a parabolic orbit"
+
+    # The (a, e, i) form gives nan for the same orbit
+    assert not np.isfinite(float(calcTisserand(np.inf, 1.0, 0.0))), \
+        "expected the semi-major axis form to fail at e = 1"
 
 
 ### Rudawska D_X ###
@@ -469,8 +511,7 @@ def test_DX_vanishes_on_identical_radiants():
     worst = 0.0
 
     for ra, dec, sol, vg in radiants:
-        worst = max(worst, abs(float(calcDX(sol, ra, dec, vg, sol, ra, dec, vg,
-            1.0, 1.0, 1.0, 1.0))))
+        worst = max(worst, abs(float(calcDX(sol, ra, dec, vg, sol, ra, dec, vg))))
 
     assert worst < 1e-12, "D_X returned {:.4e} for a radiant compared with itself".format(worst)
 
@@ -497,6 +538,74 @@ def test_DX_weights_scale_the_terms():
 
     for k, part in enumerate(parts):
         assert part > 0.0, "term {:d} of D_X vanished for two different radiants".format(k)
+
+
+# Mean geocentric parameters and their dispersions for three established showers, from table 2 of
+#   Rudawska et al. (2015), with the mean D_X the paper quotes for each:
+#   (code, sol, d_sol, ra, d_ra, dec, d_dec, vg, d_vg, mean D_X)
+RUDAWSKA_SHOWERS = [
+    ("GEM", 261.0, 1.8, 112.7, 2.4, 32.4, 1.1, 33.53, 1.47, 0.06),
+    ("PER", 139.4, 4.2,  46.6, 6.3, 57.6, 1.8, 58.20, 1.67, 0.09),
+    ("ORI", 208.1, 3.2,  95.3, 2.7, 15.6, 1.0, 65.44, 1.40, 0.07),
+    ]
+
+
+def test_DX_weights_are_the_published_values():
+    """ The weights are taken from the paper, not chosen here. """
+
+    assert (DX_W_SOL, DX_W_RA, DX_W_DEC, DX_W_VG) == (0.17, 1.20, 1.20, 0.20), \
+        "the D_X weights are not the published ones"
+
+
+def test_DX_reproduces_the_quoted_shower_means():
+    """ The paper quotes the mean D_X within the Geminids, Perseids and Orionids. Drawing members
+        from each shower's mean and its tabulated dispersions reproduces those means, which checks
+        the formula and the overall scale of the weights end to end.
+
+        This is a check on the formula and the scale, not on the four weights individually: unit
+        weights are rejected, but some other weight sets of similar magnitude are not.
+    """
+
+    for code, sol, d_sol, ra, d_ra, dec, d_dec, vg, d_vg, published in RUDAWSKA_SHOWERS:
+
+        rng = np.random.RandomState(7)
+
+        values = []
+        for _ in range(20000):
+
+            values.append(float(calcDX(math.radians(sol), math.radians(ra), math.radians(dec), vg,
+                math.radians(sol + rng.normal(0, d_sol)),
+                math.radians(ra + rng.normal(0, d_ra)),
+                math.radians(dec + rng.normal(0, d_dec)),
+                vg + rng.normal(0, d_vg))))
+
+        got = float(np.mean(values))
+
+        assert abs(got - published) < 0.02, \
+            "mean D_X of the {:s} came out as {:.3f}, the paper quotes {:.2f}".format(code, got,
+                published)
+
+
+def test_DX_separates_the_taurid_branches():
+    """ The paper merges groups only when D_X <= 0.15, and reports that its method keeps the
+        Southern and Northern Taurids apart. Their tabulated mean parameters must therefore give a
+        D_X above the merge threshold.
+    """
+
+    # Table 2: sol, ra, dec, vg for showers 002 STA and 017 NTA
+    sta = (217.0, 48.8, 13.2, 27.56)
+    nta = (224.5, 54.4, 22.1, 27.98)
+
+    for first, second in ((sta, nta), (nta, sta)):
+
+        d_value = float(calcDX(math.radians(first[0]), math.radians(first[1]),
+            math.radians(first[2]), first[3], math.radians(second[0]), math.radians(second[1]),
+            math.radians(second[2]), second[3]))
+
+        assert d_value > 0.15, \
+            "D_X between the Taurid branches came out as {:.4f}, below the merge threshold".format(
+                d_value)
+
 
 
 ### Jopek D_V ###
@@ -968,8 +1077,13 @@ if __name__ == "__main__":
         test_DB_vanishes_on_identical_orbits_and_is_symmetric,
         test_DB_C3_uses_the_smallest_angular_difference,
         test_DT_matches_the_tisserand_difference,
+        test_DT_reproduces_the_jenniskens_tisserand_values,
+        test_DT_stays_finite_at_unit_eccentricity,
         test_DX_vanishes_on_identical_radiants,
         test_DX_weights_scale_the_terms,
+        test_DX_weights_are_the_published_values,
+        test_DX_reproduces_the_quoted_shower_means,
+        test_DX_separates_the_taurid_branches,
         test_DVJopek_vanishes_on_identical_orbits_and_is_symmetric,
         test_DVJopek_energy_term_matches_the_semimajor_axis,
         test_DACS_semimajor_axis_term_bounds_table1,
