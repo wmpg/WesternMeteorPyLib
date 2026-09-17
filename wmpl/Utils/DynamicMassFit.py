@@ -178,7 +178,8 @@ def interpolateHtVsTimeLen(traj, sample_step=0.1, show_plots=False):
 
 def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
     """ The returned final azimuth (+E of due N) and elevation are of the apparent ground-fixed radiant
-        (epoch of date), as traj.orbit.azimuth/elevation_apparent_norot.
+        (epoch of date), as traj.orbit.azimuth/elevation_apparent_norot, with the elevation steepened by the
+        gravity turn along the path.
     """
 
     jd = traj.jdt_ref
@@ -256,6 +257,12 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
     #   is applied
     ra_norot, dec_norot = eci2RaDec(v_ref_nocorr)
     final_azim, final_elev = raDec2AltAz(ra_norot, dec_norot, final_jd, final_lat, final_lon)
+
+    # Steepen the elevation by the gravity turn along the path, d(elev)/dt = g*cos(elev)/v, using the average
+    #   speed over the observed part and the simulated speeds after it
+    v_sim = sr.main_vel_arr[1:]
+    final_elev += 9.81*np.cos(final_elev)*(meas_time/traj.orbit.v_avg_norot \
+        + np.sum(np.diff(sr.time_arr)[v_sim > 0]/v_sim[v_sim > 0]))
 
     ###
 
@@ -718,7 +725,7 @@ if __name__ == "__main__":
     print()
     print("Simulation down to 3 km/s:")
     print("------------------------------------")
-    print("Azim (+E of due N) and Elev: apparent ground-fixed radiant, epoch of date")
+    print("Azim (+E of due N) and Elev: apparent ground-fixed radiant, epoch of date, gravity turn included")
     print("Final end coordinates (-2sigma mass)")
     print("Mass      = {:.3f} kg".format(final_mass_lo))
     print("Lat (+N)  = {:.5f} deg".format(final_lat_lo))
