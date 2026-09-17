@@ -178,6 +178,9 @@ def interpolateHtVsTimeLen(traj, sample_step=0.1, show_plots=False):
 
 
 def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
+    """ The returned final azimuth (+E of due N) and elevation are of the apparent ground-fixed radiant
+        (epoch of date), as traj.orbit.azimuth/elevation_apparent_norot.
+    """
 
     jd = traj.jdt_ref
     lat = np.degrees(traj.rend_lat)
@@ -719,6 +722,7 @@ if __name__ == "__main__":
     print()
     print("Simulation down to 3 km/s:")
     print("------------------------------------")
+    print("Azim (+E of due N) and Elev: apparent ground-fixed radiant, epoch of date")
     print("Final end coordinates (-2sigma mass)")
     print("Mass      = {:.3f} kg".format(final_mass_lo))
     print("Lat (+N)  = {:.5f} deg".format(final_lat_lo))
