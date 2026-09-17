@@ -14,8 +14,7 @@ import matplotlib.pyplot as plt
 import scipy.interpolate
 import scipy.signal
 
-from wmpl.Utils.TrajConversions import cartesian2Geo, eci2RaDec, raDec2AltAz, altAz2RADec, \
-    equatorialCoordPrecession, J2000_JD
+from wmpl.Utils.TrajConversions import cartesian2Geo, eci2RaDec, raDec2AltAz, altAz2RADec
 from wmpl.Utils.Math import lineAndSphereIntersections, vectMag, vectNorm
 from wmpl.Utils.Pickling import loadPickle
 
@@ -277,10 +276,7 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False):
             # Compute the radiant without Earth's rotation included
             ra_norot, dec_norot = eci2RaDec(vectNorm(v_ref_nocorr))
 
-            # Precess to the epoch of date
-            ra_norot, dec_norot = equatorialCoordPrecession(J2000_JD.days, jd, ra_norot, dec_norot)
-
-            # Compute apparent alt/az
+            # Compute apparent alt/az (the ECI coordinates are already in the epoch of date, no precession)
             azim_norot, elev_norot = raDec2AltAz(ra_norot, dec_norot, jd, lat, lon)
 
 
