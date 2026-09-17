@@ -626,6 +626,14 @@ if __name__ == "__main__":
 
     final_decel = final_decel_hi = final_decel_lo = 0
 
+    # Final values stay undefined (NaN) if the evaluation velocity is already below 3 km/s
+    final_mass = final_mass_hi = final_mass_lo = np.nan
+    final_lat = final_lat_hi = final_lat_lo = np.nan
+    final_lon = final_lon_hi = final_lon_lo = np.nan
+    final_ele = final_ele_hi = final_ele_lo = np.nan
+    final_azim = final_azim_hi = final_azim_lo = np.nan
+    final_elev = final_elev_hi = final_elev_lo = np.nan
+
     # Run the fragment until the final velocity of 3 km/s
     if vel_eval > 3000:
 
