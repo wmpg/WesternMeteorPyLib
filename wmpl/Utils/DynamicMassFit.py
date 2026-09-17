@@ -336,7 +336,8 @@ def fitVelocity(time_data, vel_data, p0=(1.0, 1.0), loss='soft_l1', sigma_clip=3
         vel_data: [ndarray] Velocity data points.
         p0: [tuple(float, float)] Initial parameter guess (slope, intercept).
         loss: [str] Loss function for robust fitting.
-        sigma_clip: [float] Sigma threshold for outlier rejection based on slope uncertainty.
+        sigma_clip: [float] Outlier rejection threshold, in units of the robust (MAD) residual standard
+            deviation.
 
     Return:
         popt: [ndarray] Final optimal parameters [m, c].
@@ -418,7 +419,7 @@ if __name__ == "__main__":
         type=float, default=3.0)
     
     arg_parser.add_argument('--maxvel', metavar='MAX_VEL', \
-        help='Maximum velocity in km/s to consider in the height window. Used to remove outliers. No filter by default.', \
+        help='Maximum velocity in km/s to consider in the height window. Used to remove outliers. Default and upper limit is 73 km/s.', \
         type=float, default=None)
     
     arg_parser.add_argument('--maxmass', metavar='MAX_MASS', \
@@ -568,7 +569,7 @@ if __name__ == "__main__":
 
     # Plot the selected outliers as an empty red circle
     ax2.scatter(vel_data[~vel_filter]/1000, time_data[~vel_filter], s=20, marker='o', facecolors='none', 
-        edgecolors='r', label="$5\\sigma$ outliers")
+        edgecolors='r', label="${:g}\\sigma$ outliers".format(cml_args.sigma_clip))
 
 
 
