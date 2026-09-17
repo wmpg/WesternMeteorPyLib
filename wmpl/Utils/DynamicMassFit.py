@@ -180,6 +180,23 @@ def interpolateHtVsTimeLen(traj, sample_step=0.1, show_plots=False):
 
 
 
+def pointOnTrajectory(traj, length, t):
+    """ ECI coordinates on the fitted trajectory at the given length from the state vector and time, with the
+        gravity drop the solver models from the fitted line. Only the component perpendicular to the line is
+        applied, as in the solver's model points, where the along-track part is absorbed by the length.
+    """
+
+    P = traj.state_vect_mini - length*traj.radiant_eci_mini
+
+    if getattr(traj, 'gravity_correction', True):
+        t0 = min(obs.time_data[0] for obs in traj.observations)
+        drop = applyGravityDrop(P, t - t0, vectMag(traj.state_vect_mini), getattr(traj, 'gravity_factor', 1.0), \
+            getattr(traj, 'v0z', None) or 0.0) - P
+        P = P + drop - np.dot(drop, traj.radiant_eci_mini)*traj.radiant_eci_mini
+
+    return P
+
+
 def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
     """ The returned final azimuth (+E of due N) and elevation are of the apparent ground-fixed radiant
         (epoch of date), as traj.orbit.azimuth/elevation_apparent_norot, with the elevation steepened by the
@@ -193,7 +210,7 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
     entry_angle = np.degrees(traj.orbit.elevation_apparent_norot)
 
     # Fit an interpolation function from time to height
-    ht_vs_time_interp, ht_vs_len_interp = interpolateHtVsTimeLen(traj, sample_step=0.1, show_plots=False)
+    ht_vs_time_interp, _ = interpolateHtVsTimeLen(traj, sample_step=0.1, show_plots=False)
 
     # # Compute the dynamic mass (upper range)
     # dyn_mass = dynamicMass(density, np.radians(lat), np.radians(lon), hend, jd, vend, decel, \
@@ -204,9 +221,12 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
     # print("  dyn mass   = {:.3f} kg".format(dyn_mass))
 
 
-    # Get the time and length at the observed point
+    # Get the time at the observed point, and its length from the trajectory geometry. Interpolating the
+    #   length instead mixes the smoothed heights with the raw lengths, which at shallow entry angles turns
+    #   a small height difference into a large length difference
     meas_time = ht_vs_time_interp(hend)
-    meas_len  = ht_vs_len_interp(hend)
+    meas_len = scipy.optimize.brentq(lambda l: cartesian2Geo(traj.jdt_ref + meas_time/86400, \
+        *pointOnTrajectory(traj, l, meas_time))[2] - hend, 0, np.dot(traj.state_vect_mini, traj.radiant_eci_mini))
     
 
     # Run the simulation until ablation stops
@@ -228,15 +248,9 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
     ### Compute the final lat/lon ###
 
     # Initial 3D ECI vector + total length x direction
-    final_eci = traj.state_vect_mini - total_len*traj.radiant_eci_mini
+    final_eci = pointOnTrajectory(traj, total_len, total_time)
 
-    # Apply the gravity drop the solver models from that line, keeping only its component perpendicular to the
-    #   line, as in the solver's model heights (the along-track part is absorbed by the fitted length)
     t_obs = np.concatenate([obs.time_data for obs in traj.observations])
-    if getattr(traj, 'gravity_correction', True):
-        drop = applyGravityDrop(final_eci, total_time - np.min(t_obs), vectMag(traj.state_vect_mini), \
-            getattr(traj, 'gravity_factor', 1.0), getattr(traj, 'v0z', None) or 0.0) - final_eci
-        final_eci = final_eci + drop - np.dot(drop, traj.radiant_eci_mini)*traj.radiant_eci_mini
 
     # Compute exact time of the end
     final_jd = jd + total_time/86400
