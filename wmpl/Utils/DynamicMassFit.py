@@ -33,11 +33,11 @@ def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a
     const.v_init = v_init
     const.h_init = ht_beg
     const.rho = density
-    #const.gamma = 1.0
-    #const.shape_factor = 1.21
-    const.shape_factor = 1.21
-    const.gamma = 0.7
-    
+
+    # Use the same Gamma*A as the dynamic mass
+    const.gamma = 1.0
+    const.shape_factor = gamma_a
+
 
     # Ablation coeff of chondritic material
     const.sigma = 0.005/1e6
