@@ -966,6 +966,9 @@ TC_REFERENCE_A = 2.1
 TC_REFERENCE_E = 0.82
 TC_REFERENCE_INCL = np.radians(4.0)
 
+# Perihelion distance of the same reference orbit as quoted by Steel, Asher & Clube (1991) [AU]
+TC_REFERENCE_Q = 0.375
+
 # Scale normalising the semi-major axis term of D_ACS [AU]
 DACS_A_SCALE = 3.0
 
@@ -992,9 +995,9 @@ def calcDACS(a1, e1, i1, a2, e2, i2):
         adjusted likewise, which moves D by less than 0.01 in nearly all cases. No such adjustment
         is applied here, so passing observed elements will not reproduce the paper's table.
 
-        Steel, Asher & Clube (1991), MNRAS 251, 632, use the same form with the perihelion distance
-        in place of the semi-major axis and no scale factor, which suits meteoroids, whose q is
-        better determined than their a; the form below suits asteroids, whose a is well determined.
+        The companion calcDSAC is the earlier form of Steel, Asher & Clube (1991), which uses the
+        perihelion distance in place of the semi-major axis. That form suits meteoroids, whose q is
+        better determined than their a; this one suits asteroids, whose a is well determined.
 
         Reference: Asher, Clube & Steel (1993), MNRAS 264, 93, eq. 2, doi:10.1093/mnras/264.1.93.
 
@@ -1011,6 +1014,49 @@ def calcDACS(a1, e1, i1, a2, e2, i2):
     """
 
     return np.sqrt(((a1 - a2)/DACS_A_SCALE)**2 + (e1 - e2)**2 + (2*np.sin((i1 - i2)/2.0))**2)
+
+
+def calcDSAC(q1, e1, i1, q2, e2, i2):
+    """ Calculate the Steel, Asher & Clube (1991) Taurid Complex criterion between two orbits.
+
+        This is the perihelion-distance form of the criterion, and the earlier of the two. It is
+        the one to use for meteoroids, whose perihelion distance is better determined than their
+        semi-major axis, since a carries the full weight of the uncertainty in the meteoroid
+        velocity. For asteroids, whose a is well determined, use calcDACS instead, which is the
+        same expression with a scaled semi-major axis term in place of the perihelion term.
+
+        Like calcDACS it carries no node or longitude term, for the same reason: the Taurid Complex
+        is dispersed in longitude of perihelion, so a longitude term appropriate to a narrow stream
+        would dominate the sum.
+
+        The reference orbit is the Taurid Complex core, available as TC_REFERENCE_Q,
+        TC_REFERENCE_E and TC_REFERENCE_INCL.
+
+        The perihelion term carries no scale factor, so it is in AU while the other two terms are
+        dimensionless, and is implicitly divided by 1 AU as in D_SH.
+
+        Published threshold: D = 0.15, which restricts the selection to the core of the complex.
+
+        Unlike calcDACS, the inclination needs no secular adjustment when this form is applied to
+        meteoroids: an orbit has to cross the Earth's to produce a meteor, which already constrains
+        the inclination to be low.
+
+        Reference: Steel, Asher & Clube (1991), MNRAS 251, 632, as eq. 1 of Asher, Clube & Steel
+        (1993), MNRAS 264, 93, doi:10.1093/mnras/264.1.93.
+
+    Arguments:
+        q1: [float] perihelion distance of the first orbit (AU)
+        e1: [float] num. eccentricity of the first orbit
+        i1: [float] inclination of the first orbit (rad)
+        q2: [float] perihelion distance of the second orbit (AU)
+        e2: [float] num. eccentricity of the second orbit
+        i2: [float] inclination of the second orbit (rad)
+
+    Return:
+        [float] D value
+    """
+
+    return np.sqrt((q1 - q2)**2 + (e1 - e2)**2 + (2*np.sin((i1 - i2)/2.0))**2)
 
 
 

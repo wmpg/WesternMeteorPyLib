@@ -19,8 +19,8 @@ import math
 import numpy as np
 
 from wmpl.Utils.Dcriteria import (calcRho1, calcRho2, calcRho5, calcC, calcDR, calcDB, calcDT,
-    calcDX, calcDVJopek, calcDACS, calcDN, calcDD, TC_REFERENCE_A, TC_REFERENCE_E,
-    TC_REFERENCE_INCL, DACS_A_SCALE)
+    calcDX, calcDVJopek, calcDACS, calcDSAC, calcDN, calcDD, TC_REFERENCE_A, TC_REFERENCE_E,
+    TC_REFERENCE_INCL, TC_REFERENCE_Q, DACS_A_SCALE)
 from wmpl.Utils.OrbitClassification import (calcTisserand, calcKresakK, calcKresakP,
     calcAphelionDistance, isCometaryQi, isCometaryKi, isCometaryPi, A_JUPITER, JW_INCL_LIMIT)
 
@@ -739,6 +739,135 @@ def test_DACS_accepts_arrays():
 
 
 
+def test_DSAC_reference_orbit_agrees_with_the_semimajor_axis_form():
+    """ The two forms of the Taurid criterion quote their reference orbit differently, one by
+        perihelion distance and one by semi-major axis, but both must describe the same physical
+        orbit. This is the only cross-check available for the perihelion form, since the 1993 paper
+        tabulates D for the semi-major axis form only and no table exists for this one.
+    """
+
+    implied_q = TC_REFERENCE_A*(1.0 - TC_REFERENCE_E)
+
+    assert abs(implied_q - TC_REFERENCE_Q) < 0.005, \
+        "a1(1 - e1) = {:.4f} AU but the published q1 is {:.3f} AU".format(implied_q,
+            TC_REFERENCE_Q)
+
+    # The agreement is limited by the two significant figures of a1 and the two decimals of e1
+    widest = 2.15*(1.0 - 0.815)
+    narrowest = 2.05*(1.0 - 0.825)
+
+    assert narrowest <= TC_REFERENCE_Q <= widest, \
+        "q1 = {:.3f} AU falls outside [{:.4f}, {:.4f}] AU implied by the quoted a1 and e1".format(
+            TC_REFERENCE_Q, narrowest, widest)
+
+
+def test_DSAC_perihelion_term_is_unscaled():
+    """ The perihelion form carries no scale factor, unlike the semi-major axis form, so a
+        difference of 1 AU in q contributes exactly 1 to D. This is what distinguishes the two.
+    """
+
+    d_value = float(calcDSAC(0.375, 0.5, 0.0, 1.375, 0.5, 0.0))
+
+    assert abs(d_value - 1.0) < 1e-12, \
+        "a 1 AU difference in q gave D = {:.12f}".format(d_value)
+
+    # The same difference in a is divided by 3 AU
+    d_scaled = float(calcDACS(2.1, 0.5, 0.0, 3.1, 0.5, 0.0))
+
+    assert abs(d_scaled - 1.0/DACS_A_SCALE) < 1e-12, \
+        "a 1 AU difference in a gave D = {:.12f}".format(d_scaled)
+
+
+def test_DSAC_and_DACS_share_their_eccentricity_and_inclination_terms():
+    """ The two forms differ only in their first term, so removing it from each must leave the same
+        remainder. This pins the shared part of both expressions at once.
+    """
+
+    orbits = _randomOrbits(300, random_state=18)
+
+    worst = 0.0
+
+    for k in range(len(orbits) - 1):
+
+        q1, e1, i1, _, _ = orbits[k]
+        q2, e2, i2, _, _ = orbits[k + 1]
+
+        a1 = q1/(1.0 - e1)
+        a2 = q2/(1.0 - e2)
+
+        d_sac = float(calcDSAC(q1, e1, i1, q2, e2, i2))
+        d_acs = float(calcDACS(a1, e1, i1, a2, e2, i2))
+
+        remainder_sac = d_sac**2 - (q1 - q2)**2
+        remainder_acs = d_acs**2 - ((a1 - a2)/DACS_A_SCALE)**2
+
+        worst = max(worst, abs(remainder_sac - remainder_acs))
+
+    assert worst < 1e-9, \
+        "the shared eccentricity and inclination terms differed by {:.4e}".format(worst)
+
+
+def test_DSAC_vanishes_on_identical_orbits_and_is_symmetric():
+    """ D must be zero for an orbit compared with itself, and independent of the order. """
+
+    orbits = _randomOrbits(200, random_state=19)
+
+    worst_self = 0.0
+    worst_asym = 0.0
+
+    for k in range(len(orbits) - 1):
+
+        q1, e1, i1, _, _ = orbits[k]
+        q2, e2, i2, _, _ = orbits[k + 1]
+
+        worst_self = max(worst_self, abs(float(calcDSAC(q1, e1, i1, q1, e1, i1))))
+
+        d_ab = float(calcDSAC(q1, e1, i1, q2, e2, i2))
+        d_ba = float(calcDSAC(q2, e2, i2, q1, e1, i1))
+        worst_asym = max(worst_asym, abs(d_ab - d_ba))
+
+    assert worst_self < 1e-12, "D_SAC returned {:.4e} for an orbit compared with itself".format(
+        worst_self)
+    assert worst_asym < 1e-12, "D_SAC was asymmetric by {:.4e}".format(worst_asym)
+
+
+def test_DSAC_takes_only_the_elements_the_command_line_supplies():
+    """ The perihelion form works in the same variables as D_SH, D_D and D_H, so it needs nothing
+        the rest of the module does not already have.
+    """
+
+    import inspect
+
+    try:
+        names = list(inspect.signature(calcDSAC).parameters)
+
+    except AttributeError:
+        names = list(inspect.getargspec(calcDSAC).args)
+
+    assert names == ["q1", "e1", "i1", "q2", "e2", "i2"], \
+        "D_SAC takes {!s}, expected only q, e and i for both orbits".format(names)
+
+
+def test_DSAC_accepts_arrays():
+    """ D_SAC must work elementwise on numpy arrays. """
+
+    q = np.array([a*(1.0 - e) for _, a, e, _, _ in ACS_TABLE_1])
+    e = np.array([e for _, _, e, _, _ in ACS_TABLE_1])
+    incl = np.radians([i for _, _, _, i, _ in ACS_TABLE_1])
+
+    vector = calcDSAC(TC_REFERENCE_Q, TC_REFERENCE_E, TC_REFERENCE_INCL, q, e, incl)
+
+    assert vector.shape == q.shape
+
+    for k in range(len(q)):
+
+        scalar = float(calcDSAC(TC_REFERENCE_Q, TC_REFERENCE_E, TC_REFERENCE_INCL, q[k], e[k],
+            incl[k]))
+
+        assert abs(vector[k] - scalar) < 1e-12
+
+
+
 ### Orbit classification ###
 
 def test_tisserand_is_three_for_a_planet_crossing_circular_orbit():
@@ -851,6 +980,12 @@ if __name__ == "__main__":
         test_DACS_vanishes_on_identical_orbits_and_is_symmetric,
         test_DACS_ignores_the_node_and_perihelion_argument,
         test_DACS_accepts_arrays,
+        test_DSAC_reference_orbit_agrees_with_the_semimajor_axis_form,
+        test_DSAC_perihelion_term_is_unscaled,
+        test_DSAC_and_DACS_share_their_eccentricity_and_inclination_terms,
+        test_DSAC_vanishes_on_identical_orbits_and_is_symmetric,
+        test_DSAC_takes_only_the_elements_the_command_line_supplies,
+        test_DSAC_accepts_arrays,
         test_tisserand_is_three_for_a_planet_crossing_circular_orbit,
         test_tisserand_reproduces_encke,
         test_kresak_and_aphelion_boundaries,
