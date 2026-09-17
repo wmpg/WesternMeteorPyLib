@@ -19,8 +19,12 @@ A_JUPITER = 5.20336
 JW_INCL_LIMIT = np.radians(75.0)
 
 # Cometary limits of the one-parameter criteria, as adopted by Jopek & Williams (2013)
-JW_APHELION_LIMIT = 4.6
-JW_KRESAK_P_LIMIT = 2.5
+JW_APHELION_LIMIT = 4.6      # aphelion distance [AU]
+JW_KRESAK_P_LIMIT = 2.5      # Kresak P [yr]
+JW_ENERGY_LIMIT = -5.28e-5   # orbital energy -k^2/(2a) [AU^2/day^2]
+
+# Square of the Gaussian gravitational constant [AU^3/day^2]
+GAUSS_K_SQUARED = 0.01720209895**2
 
 
 def calcTisserand(a, e, i, a_planet=A_JUPITER):
@@ -105,10 +109,9 @@ def calcAphelionDistance(a, e):
 def isCometaryQi(a, e, i):
     """ Classify an orbit as cometary or asteroidal using the two-parameter Q-i criterion.
 
-        An orbit counts as cometary if its aphelion reaches beyond 4.6 AU, which places it under
-        the dynamical control of Jupiter, or if it is inclined by more than 75 deg, which no
-        collisionally produced asteroid fragment is expected to be. Of the five two-parameter
-        criteria examined, Q-i and E-i were found to be the most reliable.
+        An orbit counts as cometary if its aphelion reaches beyond 4.6 AU, which brings it close
+        to Jupiter's orbit, or if it is inclined by more than 75 deg. Of the five two-parameter
+        criteria the paper examines, Q-i and E-i were the most reliable; E-i is isCometaryEi.
 
         Reference: Jopek & Williams (2013), MNRAS 430, 2377, eq. 8, doi:10.1093/mnras/stt057;
         Williams & Jopek (2014).
@@ -157,3 +160,40 @@ def isCometaryPi(a, e, i):
     """
 
     return (calcKresakP(a, e) > JW_KRESAK_P_LIMIT) | (np.asarray(i) > JW_INCL_LIMIT)
+
+
+def calcOrbitalEnergy(a):
+    """ Calculate the orbital energy of an orbit in the units used by Jopek & Williams (2013).
+
+        Reference: Jopek & Williams (2013), MNRAS 430, 2377, eq. 9, doi:10.1093/mnras/stt057.
+
+    Arguments:
+        a: [float] semi-major axis of the orbit (AU)
+
+    Return:
+        [float] orbital energy (AU^2/day^2)
+    """
+
+    return -GAUSS_K_SQUARED/(2*a)
+
+
+def isCometaryEi(a, e, i):
+    """ Classify an orbit as cometary or asteroidal using the two-parameter E-i criterion.
+
+        The eccentricity is not used: the energy depends only on the semi-major axis. It is kept in
+        the signature so that the five two-parameter criteria can be called interchangeably.
+
+        Together with Q-i this was the more reliable of the five criteria the paper examines.
+
+        Reference: Jopek & Williams (2013), MNRAS 430, 2377, eq. 9, doi:10.1093/mnras/stt057.
+
+    Arguments:
+        a: [float] semi-major axis of the orbit (AU)
+        e: [float] num. eccentricity of the orbit, not used
+        i: [float] inclination of the orbit (rad)
+
+    Return:
+        [bool] True if the orbit is cometary
+    """
+
+    return (calcOrbitalEnergy(a) > JW_ENERGY_LIMIT) | (np.asarray(i) > JW_INCL_LIMIT)

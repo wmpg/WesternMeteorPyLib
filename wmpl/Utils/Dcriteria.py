@@ -577,9 +577,10 @@ def calcRho1(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2, L=1.0):
         Reference: Kholshevnikov, Kokhirova, Babadzhanov & Khamroev (2016), MNRAS 462, 2275,
         doi:10.1093/mnras/stw1712.
 
-        No threshold is published for rho_1. Thresholds are not transferable from D_SH or D_D,
-        since the angular momentum term carries units of length while the eccentricity term is
-        dimensionless.
+        No published threshold was found for rho_1. One would not transfer from D_SH or D_D in
+        any case: the angular momentum difference has units of length and is made dimensionless by
+        dividing by L, so the choice of L fixes how it is weighted against the already
+        dimensionless eccentricity term, and hence fixes the numerical scale of rho_1.
 
     Arguments:
         q1: [float] perihelion distance of the first orbit (AU)
@@ -623,8 +624,8 @@ def calcRho2(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2, L=1.0):
         Reference: Kholshevnikov, Kokhirova, Babadzhanov & Khamroev (2016), MNRAS 462, 2275,
         doi:10.1093/mnras/stw1712.
 
-        No threshold is published for rho_2. With L = 1 AU the value is numerically scaled as
-        sqrt(AU), so D_SH and D_D thresholds do not carry over.
+        No published threshold was found for rho_2. With L = 1 AU it is dimensionless, but its
+        numerical scale is set by that choice, so D_SH and D_D thresholds do not carry over.
 
     Arguments:
         q1: [float] perihelion distance of the first orbit (AU)
@@ -651,7 +652,7 @@ def calcRho2(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2, L=1.0):
     cos_I = _mutualInclinationCos(i1, O1, i2, O2)
     cos_P = _perihelionDirectionCos(i1, O1, w1, i2, O2, w2)
 
-    rho_sqr = ((1.0 + e1**2)*p1 + (1.0 + e2**2)*p2 \
+    rho_sqr = ((1.0 + e1**2)*p1 + (1.0 + e2**2)*p2
         - 2*np.sqrt(p1*p2)*(cos_I + e1*e2*cos_P))/L
 
     return np.sqrt(np.maximum(rho_sqr, 0.0))
@@ -672,7 +673,7 @@ def calcRho5(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2, L=1.0):
         Reference: Kholshevnikov, Kokhirova, Babadzhanov & Khamroev (2016), MNRAS 462, 2275,
         doi:10.1093/mnras/stw1712.
 
-        No threshold is published for rho_5.
+        No published threshold was found for rho_5.
 
     Arguments:
         q1: [float] perihelion distance of the first orbit (AU)
@@ -696,7 +697,7 @@ def calcRho5(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2, L=1.0):
     p1 = q1*(1.0 + e1)
     p2 = q2*(1.0 + e2)
 
-    rho_sqr = ((1.0 + e1**2)*p1 + (1.0 + e2**2)*p2 \
+    rho_sqr = ((1.0 + e1**2)*p1 + (1.0 + e2**2)*p2
         - 2*np.sqrt(p1*p2)*(e1*e2 + np.cos(i1 - i2)))/L
 
     return np.sqrt(np.maximum(rho_sqr, 0.0))
@@ -714,7 +715,8 @@ def calcC(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2):
 
         Reference: Neslusan (2002), in Dynamics of Natural and Artificial Celestial Bodies, 365.
 
-        No threshold is published for C.
+        That volume was not accessible, so whether it publishes a threshold is unchecked. None is
+        supplied here.
 
     Arguments:
         q1: [float] perihelion distance of the first orbit (AU)
@@ -751,7 +753,9 @@ def calcDR(ra1, dec1, sol1, vg1, ra2, dec2, sol2, vg2, w1=1.0):
 
         Reference: Valsecchi, Jopek & Froeschle (1999), MNRAS 304, 743.
 
-        No threshold is published for D_R.
+        That paper recommends no threshold for either D_N or D_R. Jenniskens (2008) reports
+        D_N < 0.20 as the value at which association was implicated; since D_R <= D_N, that is a
+        necessary condition on D_R rather than a threshold for it.
 
     Arguments:
         ra1: [float] right ascension of the first radiant (rad)
@@ -784,6 +788,13 @@ def calcDR(ra1, dec1, sol1, vg1, ra2, dec2, sol2, vg2, w1=1.0):
     return np.sqrt((u2 - u1)**2 + w1*(cos_theta2 - cos_theta1)**2)
 
 
+# Dispersions of the three D_B invariants over the sample of likely stream and parent-body pairs
+#   of Jenniskens (2008), tables 1 and 2. C3 is an angle [rad]
+DB_SIGMA_C1 = 0.13
+DB_SIGMA_C2 = 0.06
+DB_SIGMA_C3 = np.radians(14.2)
+
+
 def calcDB(e1, i1, O1, w1, e2, i2, O2, w2):
     """ Calculate the Jenniskens (2008) D_B criterion between two orbits.
 
@@ -796,7 +807,8 @@ def calcDB(e1, i1, O1, w1, e2, i2, O2, w2):
         Babadzhanov (1989).
 
         Each difference is divided by the dispersion of that quantity over the paper's sample of
-        likely stream and parent-body pairs: 0.13, 0.06 and 14.2 deg respectively.
+        likely stream and parent-body pairs, 0.13, 0.06 and 14.2 deg, available here as
+        DB_SIGMA_C1, DB_SIGMA_C2 and DB_SIGMA_C3.
 
         The paper notes, and does not correct for, the fact that C1, C2 and C3 are not orthogonal.
 
@@ -830,8 +842,8 @@ def calcDB(e1, i1, O1, w1, e2, i2, O2, w2):
     d_c3 = (w1 + O1) - (w2 + O2)
     d_c3 = (d_c3 + np.pi)%(2*np.pi) - np.pi
 
-    return np.sqrt(((c1_1 - c1_2)/0.13)**2 + ((c2_1 - c2_2)/0.06)**2 \
-        + (d_c3/np.radians(14.2))**2)
+    return np.sqrt(((c1_1 - c1_2)/DB_SIGMA_C1)**2 + ((c2_1 - c2_2)/DB_SIGMA_C2)**2
+        + (d_c3/DB_SIGMA_C3)**2)
 
 
 def calcDT(q1, e1, i1, q2, e2, i2, a_planet=A_JUPITER):
@@ -875,15 +887,17 @@ def calcDT(q1, e1, i1, q2, e2, i2, a_planet=A_JUPITER):
     return np.abs(tisserandFromPerihelion(q1, e1, i1) - tisserandFromPerihelion(q2, e2, i2))
 
 
-# Weights of the D_X terms as used by Rudawska et al. (2015), chosen there so that each term
-#   contributes comparably and the result is comparable to the other criteria
+# Weights of the D_X terms, as given by Rudawska et al. (2015). The paper describes them as
+#   normalising each term's contribution; measured over pairs drawn within a shower from the
+#   dispersions of its table 2, the right ascension term still dominates, so they are reproduced
+#   here as published values rather than as a normalisation that can be relied on
 DX_W_SOL = 0.17
 DX_W_RA = 1.20
 DX_W_DEC = 1.20
 DX_W_VG = 0.20
 
 
-def calcDX(sol1, ra1, dec1, vg1, sol2, ra2, dec2, vg2, w_sol=DX_W_SOL, w_ra=DX_W_RA,
+def calcDX(ra1, dec1, sol1, vg1, ra2, dec2, sol2, vg2, w_sol=DX_W_SOL, w_ra=DX_W_RA,
     w_dec=DX_W_DEC, w_vg=DX_W_VG):
     """ Calculate the Rudawska et al. (2015) D_X criterion between two orbits.
 
@@ -900,19 +914,22 @@ def calcDX(sol1, ra1, dec1, vg1, sol2, ra2, dec2, vg2, w_sol=DX_W_SOL, w_ra=DX_W
         orbits changes the result slightly. The paper applies it to a group mean against a group
         mean, where the asymmetry is immaterial.
 
+        The arguments are ordered as in calcDN, calcDR and calcDV rather than as in the paper's
+        equation, so that the geocentric criteria in this module can be called interchangeably.
+
         Published threshold: groups are merged when D_X <= 0.15.
 
         Reference: Rudawska, Matlovic, Toth & Kornos (2015), P&SS 118, 38, eq. 2,
         doi:10.1016/j.pss.2015.07.011.
 
     Arguments:
-        sol1: [float] solar longitude of the first orbit (rad)
         ra1: [float] right ascension of the first radiant (rad)
         dec1: [float] declination of the first radiant (rad)
+        sol1: [float] solar longitude of the first orbit (rad)
         vg1: [float] geocentric velocity of the first orbit (km/s)
-        sol2: [float] solar longitude of the second orbit (rad)
         ra2: [float] right ascension of the second radiant (rad)
         dec2: [float] declination of the second radiant (rad)
+        sol2: [float] solar longitude of the second orbit (rad)
         vg2: [float] geocentric velocity of the second orbit (km/s)
 
     Keyword arguments:
@@ -942,18 +959,22 @@ def calcDVJopek(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2, w_h, w_e, w_E):
         the eccentricity vector, together with the orbital energy. Working with the vectors rather
         than with the angles avoids the branch-cut and circular-orbit problems of the D_SH family.
 
-        The paper defines the weights as the reciprocal dispersions of the corresponding vectorial
+        The weights are defined in terms of the dispersions of the corresponding vectorial
         elements over a reference set of known showers, so no universally valid defaults exist and
-        the three weight triples are required arguments here.
+        they are required arguments here. The paper was not accessible, so neither its tabulated
+        weight values nor the exact definition could be read.
 
         Units are Gaussian, with the solar gravitational parameter taken as unity.
 
         This is a different criterion from calcDV in this module, which implements the unpublished
         Vida criterion; calcDV is left untouched.
 
+        The factors of 1.5 on the h_z term and 2 on the energy term follow the only accessible
+        transcription of the equation and have not been checked against the original.
+
         Reference: Jopek, Rudawska & Bartczak (2008), EM&P 102, 73, doi:10.1007/s11038-007-9197-8.
 
-        No threshold is published for D_V.
+        Whether that paper publishes a threshold is unchecked. None is supplied here.
 
     Arguments:
         q1: [float] perihelion distance of the first orbit (AU)
@@ -994,8 +1015,9 @@ def calcDVJopek(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2, w_h, w_e, w_E):
     en1 = -(1.0 - e1)/(2.0*q1)
     en2 = -(1.0 - e2)/(2.0*q2)
 
-    return np.sqrt(w_h[0]*(hx1 - hx2)**2 + w_h[1]*(hy1 - hy2)**2 + 1.5*w_h[2]*(hz1 - hz2)**2 \
-        + w_e[0]*(ex1 - ex2)**2 + w_e[1]*(ey1 - ey2)**2 + w_e[2]*(ez1 - ez2)**2 \
+    # The 1.5 and the 2 are as transcribed; see the note in the docstring
+    return np.sqrt(w_h[0]*(hx1 - hx2)**2 + w_h[1]*(hy1 - hy2)**2 + 1.5*w_h[2]*(hz1 - hz2)**2
+        + w_e[0]*(ex1 - ex2)**2 + w_e[1]*(ey1 - ey2)**2 + w_e[2]*(ez1 - ez2)**2
         + 2*w_E*(en1 - en2)**2)
 
 
@@ -1091,7 +1113,7 @@ def calcDSAC(q1, e1, i1, q2, e2, i2):
         i2: [float] inclination of the second orbit (rad)
 
     Return:
-        [float] D value
+        [float] D_SAC value
     """
 
     return np.sqrt((q1 - q2)**2 + (e1 - e2)**2 + (2*np.sin((i1 - i2)/2.0))**2)

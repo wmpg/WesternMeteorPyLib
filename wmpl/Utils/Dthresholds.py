@@ -170,6 +170,10 @@ def thresholdReliability(orbit_params, d_func, reliability=0.99, n_trials=100, r
         Only pairs are considered, so this is the threshold for a group of two. Larger minimum
         group sizes need a clustering algorithm, which is a separate concern from the threshold.
 
+        Every pair of every synthetic sample is evaluated, so the cost grows as n_trials times the
+        square of the number of orbits. A few tens of orbits over a hundred trials is quick; a few
+        thousand orbits is not, and wants a chunked or pre-filtered search instead.
+
         Reference: Jopek, Valsecchi & Froeschle (1999), MNRAS 304, 751.
 
     Arguments:

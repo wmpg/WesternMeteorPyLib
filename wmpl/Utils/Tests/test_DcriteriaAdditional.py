@@ -14,6 +14,7 @@ or standalone (no pytest required):
     python -m wmpl.Utils.Tests.test_DcriteriaAdditional
 """
 
+import inspect
 import math
 
 import numpy as np
@@ -22,7 +23,8 @@ from wmpl.Utils.Dcriteria import (calcRho1, calcRho2, calcRho5, calcC, calcDR, c
     calcDX, calcDVJopek, calcDACS, calcDSAC, calcDN, calcDD, TC_REFERENCE_A, TC_REFERENCE_E,
     TC_REFERENCE_INCL, TC_REFERENCE_Q, DACS_A_SCALE, DX_W_SOL, DX_W_RA, DX_W_DEC, DX_W_VG)
 from wmpl.Utils.OrbitClassification import (calcTisserand, calcKresakK, calcKresakP,
-    calcAphelionDistance, isCometaryQi, isCometaryKi, isCometaryPi, A_JUPITER, JW_INCL_LIMIT)
+    calcAphelionDistance, calcOrbitalEnergy, isCometaryQi, isCometaryKi, isCometaryPi,
+    isCometaryEi, A_JUPITER, JW_INCL_LIMIT, JW_ENERGY_LIMIT, GAUSS_K_SQUARED)
 
 
 # Orbits of comet 96P/Machholz 1 and asteroid 2003 EH1 at the 7415 BC epoch, from table 2 of
@@ -463,28 +465,34 @@ def test_DT_matches_the_tisserand_difference():
 
 def test_DT_reproduces_the_jenniskens_tisserand_values():
     """ Table 1 of Jenniskens (2008) tabulates the Tisserand parameter of each candidate parent
-        body. Comparing an orbit against a hypothetical one of zero Tisserand parameter is not
-        possible, so the values are recovered by differencing against a reference orbit whose
-        Tisserand parameter is known from calcTisserand.
+        body, so the parameter itself is checked against the table and D_T is checked to be the
+        difference of two such values.
+
+        D_T is an absolute difference and cannot recover a Tisserand parameter on its own, so the
+        values are taken from calcTisserand rather than reconstructed by offsetting D_T from a
+        reference, which would only be valid for orbits above the reference.
     """
 
     # (name, a, e, i in deg, T_J tabulated in the paper)
     cases = [("2P/Encke", 2.215, 0.848, 11.70, 3.03),
              ("3200 Phaethon", 1.2712, 0.8898, 22.26, 4.51)]
 
-    # A reference orbit whose Tisserand parameter is exactly 3 by construction
-    ref_a, ref_e, ref_i = A_JUPITER, 0.0, 0.0
-    ref_t = 3.0
-
     for name, a, e, incl_deg, published in cases:
 
-        d_value = float(calcDT(a*(1.0 - e), e, math.radians(incl_deg),
-            ref_a*(1.0 - ref_e), ref_e, ref_i))
-
-        got = ref_t + d_value
+        got = float(calcTisserand(a, e, math.radians(incl_deg)))
 
         assert abs(got - published) < 0.01, \
             "T_J of {:s} came out as {:.4f}, table 1 gives {:.2f}".format(name, got, published)
+
+    # D_T between the two must be the difference of the tabulated values
+    (_, a1, e1, i1, t1), (_, a2, e2, i2, t2) = cases
+
+    d_value = float(calcDT(a1*(1.0 - e1), e1, math.radians(i1), a2*(1.0 - e2), e2,
+        math.radians(i2)))
+
+    assert abs(d_value - abs(t1 - t2)) < 0.01, \
+        "D_T between Encke and Phaethon is {:.4f}, the tabulated values differ by {:.2f}".format(
+            d_value, abs(t1 - t2))
 
 
 def test_DT_stays_finite_at_unit_eccentricity():
@@ -511,7 +519,7 @@ def test_DX_vanishes_on_identical_radiants():
     worst = 0.0
 
     for ra, dec, sol, vg in radiants:
-        worst = max(worst, abs(float(calcDX(sol, ra, dec, vg, sol, ra, dec, vg))))
+        worst = max(worst, abs(float(calcDX(ra, dec, sol, vg, ra, dec, sol, vg))))
 
     assert worst < 1e-12, "D_X returned {:.4e} for a radiant compared with itself".format(worst)
 
@@ -521,8 +529,8 @@ def test_DX_weights_scale_the_terms():
         remaining term alone and the whole must be the quadrature sum of the parts.
     """
 
-    args = (math.radians(100.0), math.radians(45.0), math.radians(20.0), 30.0,
-            math.radians(105.0), math.radians(50.0), math.radians(25.0), 35.0)
+    args = (math.radians(45.0), math.radians(20.0), math.radians(100.0), 30.0,
+            math.radians(50.0), math.radians(25.0), math.radians(105.0), 35.0)
 
     parts = []
     for k in range(4):
@@ -573,10 +581,10 @@ def test_DX_reproduces_the_quoted_shower_means():
         values = []
         for _ in range(20000):
 
-            values.append(float(calcDX(math.radians(sol), math.radians(ra), math.radians(dec), vg,
-                math.radians(sol + rng.normal(0, d_sol)),
+            values.append(float(calcDX(math.radians(ra), math.radians(dec), math.radians(sol), vg,
                 math.radians(ra + rng.normal(0, d_ra)),
                 math.radians(dec + rng.normal(0, d_dec)),
+                math.radians(sol + rng.normal(0, d_sol)),
                 vg + rng.normal(0, d_vg))))
 
         got = float(np.mean(values))
@@ -592,9 +600,9 @@ def test_DX_separates_the_taurid_branches():
         D_X above the merge threshold.
     """
 
-    # Table 2: sol, ra, dec, vg for showers 002 STA and 017 NTA
-    sta = (217.0, 48.8, 13.2, 27.56)
-    nta = (224.5, 54.4, 22.1, 27.98)
+    # Table 2: ra, dec, sol, vg for showers 002 STA and 017 NTA
+    sta = (48.8, 13.2, 217.0, 27.56)
+    nta = (54.4, 22.1, 224.5, 27.98)
 
     for first, second in ((sta, nta), (nta, sta)):
 
@@ -816,8 +824,6 @@ def test_DACS_ignores_the_node_and_perihelion_argument():
     """
 
     # The signature admits no angles beyond the inclination, so the property is structural
-    import inspect
-
     try:
         names = list(inspect.signature(calcDACS).parameters)
 
@@ -945,8 +951,6 @@ def test_DSAC_takes_only_the_elements_the_command_line_supplies():
         the rest of the module does not already have.
     """
 
-    import inspect
-
     try:
         names = list(inspect.signature(calcDSAC).parameters)
 
@@ -1044,6 +1048,16 @@ def test_jopek_williams_two_parameter_criteria():
     assert not isCometaryKi(1.5, 0.1, low_incl)
     assert isCometaryKi(1.5, 0.1, high_incl)
     assert isCometaryKi(3.0, 0.9, low_incl)
+
+    # E-i reduces to a cut on the semi-major axis alone, at k^2/(2*|E_limit|)
+    a_limit = GAUSS_K_SQUARED/(-2*JW_ENERGY_LIMIT)
+
+    assert abs(float(calcOrbitalEnergy(a_limit)) - JW_ENERGY_LIMIT) < 1e-18, \
+        "the energy at the limiting semi-major axis is not the published limit"
+
+    assert not isCometaryEi(a_limit*0.99, 0.5, low_incl)
+    assert isCometaryEi(a_limit*1.01, 0.5, low_incl)
+    assert isCometaryEi(a_limit*0.99, 0.5, high_incl)
 
 
 def test_classification_accepts_arrays():
