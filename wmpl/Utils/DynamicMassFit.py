@@ -238,7 +238,7 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
     ###
 
 
-    ### Compute the final ground-fixed azimuth and elevation (as in SampleTrajectoryPositions) ###
+    ### Compute the final ground-fixed azimuth and elevation (as in Orbit.calcOrbit) ###
 
     # Calculate the geocentric latitude of the final point
     lat_geocentric = np.arctan2(final_eci[2], np.sqrt(final_eci[0]**2 + final_eci[1]**2))
@@ -249,8 +249,9 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
     # Calculate the equatorial coordinates of east from the final point
     ra_east, _ = altAz2RADec(np.pi/2, 0, final_jd, final_lat, final_lon)
 
-    # Calculate the derotated reference velocity vector/radiant
-    v_ref_vect = traj.orbit.v_avg_norot*traj.radiant_eci_mini
+    # Calculate the derotated reference velocity vector/radiant. The radiant is the tangent of the path at its
+    #   beginning (the solver models gravity as a drop from it), so use the initial velocity
+    v_ref_vect = traj.v_init*traj.radiant_eci_mini
     v_ref_nocorr = np.zeros(3)
     v_ref_nocorr[0] = v_ref_vect[0] + v_e*np.cos(ra_east)
     v_ref_nocorr[1] = v_ref_vect[1] + v_e*np.sin(ra_east)
