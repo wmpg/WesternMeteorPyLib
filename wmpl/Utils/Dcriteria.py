@@ -35,7 +35,13 @@ def calcDSH(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2):
         rho = -1
 
 
-    I21 = math.acos(math.cos(i1)*math.cos(i2) + math.sin(i1)*math.sin(i2)*math.cos(O2 - O1))
+    acos_val = math.cos(i1)*math.cos(i2) + math.sin(i1)*math.sin(i2)*math.cos(O2 - O1)
+
+    # Make sure the value going into acos is not beyond the bounds due to numerical reasons
+    if abs(acos_val) > 1:
+        acos_val = math.copysign(1.0, acos_val)
+
+    I21 = math.acos(acos_val)
 
 
     asin_val = math.cos((i2 + i1)/2.0)*math.sin((O2 - O1)/2.0)*(1/math.cos(I21/2.0))
@@ -75,7 +81,13 @@ def calcDH(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2):
 
     """
 
-    I21 = math.acos(math.cos(i1)*math.cos(i2) + math.sin(i1)*math.sin(i2)*math.cos(O2 - O1))
+    acos_val = math.cos(i1)*math.cos(i2) + math.sin(i1)*math.sin(i2)*math.cos(O2 - O1)
+
+    # Make sure the value going into acos is not beyond the bounds due to numerical reasons
+    if abs(acos_val) > 1:
+        acos_val = math.copysign(1.0, acos_val)
+
+    I21 = math.acos(acos_val)
 
 
     asin_val = math.cos((i2 + i1)/2.0)*math.sin((O2-O1)/2.0)*1/math.cos(I21/2.0)
@@ -114,7 +126,13 @@ def calcDD(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2):
 
     """
 
-    I21 = math.acos(math.cos(i1)*math.cos(i2) + math.sin(i1)*math.sin(i2)*math.cos(O2 - O1))
+    acos_val = math.cos(i1)*math.cos(i2) + math.sin(i1)*math.sin(i2)*math.cos(O2 - O1)
+
+    # Make sure the value going into acos is not beyond the bounds due to numerical reasons
+    if abs(acos_val) > 1:
+        acos_val = math.copysign(1.0, acos_val)
+
+    I21 = math.acos(acos_val)
 
     lambda1 = O1 + math.atan2(math.cos(i1)*math.sin(w1), math.cos(w1))
 
@@ -124,8 +142,14 @@ def calcDD(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2):
 
     beta2 = math.asin(math.sin(i2)*math.sin(w2))
 
-    theta21 = math.acos(math.sin(beta1)*math.sin(beta2) + math.cos(beta1)*math.cos(beta2)*math.cos(lambda2 \
-        - lambda1))
+    acos_val = math.sin(beta1)*math.sin(beta2) + math.cos(beta1)*math.cos(beta2)*math.cos(lambda2 \
+        - lambda1)
+
+    # Make sure the value going into acos is not beyond the bounds due to numerical reasons
+    if abs(acos_val) > 1:
+        acos_val = math.copysign(1.0, acos_val)
+
+    theta21 = math.acos(acos_val)
 
     DD2 = ((e2 - e1)/(e2 + e1))**2 + ((q2 - q1)/(q2 + q1))**2 + (I21/math.pi)**2 \
         + ((e2 + e1)/2.0)**2*(theta21/math.pi)**2
