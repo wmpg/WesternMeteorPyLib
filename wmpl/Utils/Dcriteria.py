@@ -961,6 +961,58 @@ def calcDVJopek(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2, w_h, w_e, w_E):
         + 2*w_E*(en1 - en2)**2)
 
 
+# Reference orbit of the Taurid Complex core used by Asher, Clube & Steel (1993) [AU, -, rad]
+TC_REFERENCE_A = 2.1
+TC_REFERENCE_E = 0.82
+TC_REFERENCE_INCL = np.radians(4.0)
+
+# Scale normalising the semi-major axis term of D_ACS [AU]
+DACS_A_SCALE = 3.0
+
+
+def calcDACS(a1, e1, i1, a2, e2, i2):
+    """ Calculate the Asher, Clube & Steel (1993) D_ACS criterion between two orbits.
+
+        D_ACS compares only the size, shape and inclination of the two orbits. It carries no node
+        or longitude term by design: the Taurid Complex has been dispersed in longitude of
+        perihelion by Jovian perturbations, so a longitude term appropriate to a narrow stream
+        would dominate the sum. Longitude alignment is instead tested separately, after the
+        criterion has selected on (a, e, i).
+
+        The criterion is normally evaluated against the Taurid Complex core orbit, available here
+        as TC_REFERENCE_A, TC_REFERENCE_E and TC_REFERENCE_INCL.
+
+        Published thresholds: D = 0.15 restricts the selection to the core of the complex, as used
+        with the perihelion-distance form in Steel, Asher & Clube (1991); Asher, Clube & Steel
+        (1993) suggest D of about 0.2 as the value that best defines Taurid Complex asteroids.
+
+        Note that the paper does not feed observed elements into the criterion. The inclination
+        varies by a factor of a few over 10**3 yr, so it is first adjusted by Brouwer (1947) secular
+        perturbation theory to the smallest value the orbit ever reaches, and the eccentricity is
+        adjusted likewise, which moves D by less than 0.01 in nearly all cases. No such adjustment
+        is applied here, so passing observed elements will not reproduce the paper's table.
+
+        Steel, Asher & Clube (1991), MNRAS 251, 632, use the same form with the perihelion distance
+        in place of the semi-major axis and no scale factor, which suits meteoroids, whose q is
+        better determined than their a; the form below suits asteroids, whose a is well determined.
+
+        Reference: Asher, Clube & Steel (1993), MNRAS 264, 93, eq. 2, doi:10.1093/mnras/264.1.93.
+
+    Arguments:
+        a1: [float] semi-major axis of the first orbit (AU)
+        e1: [float] num. eccentricity of the first orbit
+        i1: [float] inclination of the first orbit (rad)
+        a2: [float] semi-major axis of the second orbit (AU)
+        e2: [float] num. eccentricity of the second orbit
+        i2: [float] inclination of the second orbit (rad)
+
+    Return:
+        [float] D_ACS value
+    """
+
+    return np.sqrt(((a1 - a2)/DACS_A_SCALE)**2 + (e1 - e2)**2 + (2*np.sin((i1 - i2)/2.0))**2)
+
+
 
 if __name__ == "__main__":
 

@@ -19,7 +19,8 @@ import math
 import numpy as np
 
 from wmpl.Utils.Dcriteria import (calcRho1, calcRho2, calcRho5, calcC, calcDR, calcDB, calcDT,
-    calcDX, calcDVJopek, calcDN, calcDD)
+    calcDX, calcDVJopek, calcDACS, calcDN, calcDD, TC_REFERENCE_A, TC_REFERENCE_E,
+    TC_REFERENCE_INCL, DACS_A_SCALE)
 from wmpl.Utils.OrbitClassification import (calcTisserand, calcKresakK, calcKresakP,
     calcAphelionDistance, isCometaryQi, isCometaryKi, isCometaryPi, A_JUPITER, JW_INCL_LIMIT)
 
@@ -552,6 +553,192 @@ def test_DVJopek_energy_term_matches_the_semimajor_axis():
     assert worst < 1e-12, "the D_V energy term was off by {:.4e}".format(worst)
 
 
+# Table 1 of Asher, Clube & Steel (1993): the Earth-crossing asteroids with the smallest D_ACS
+#   against the Taurid Complex core, as (name, a [AU], e, observed i [deg], tabulated D)
+ACS_TABLE_1 = [
+    ("1991 AQ",           2.16, 0.77,  3, 0.05),
+    ("(2212) Hephaistos", 2.16, 0.84, 12, 0.06),
+    ("1984 KB",           2.22, 0.76,  5, 0.07),
+    ("(2101) Adonis",     1.87, 0.76,  1, 0.10),
+    ("1991 TB2",          2.40, 0.84,  9, 0.10),
+    ("1990 SM",           2.16, 0.78, 12, 0.12),
+    ("(2201) Oljato",     2.18, 0.71,  3, 0.12),
+    ("(5143) 1991 VL",    1.83, 0.77,  9, 0.13),
+    ("(4197) 1982 TA",    2.30, 0.77, 12, 0.14),
+    ("1991 BA",           2.24, 0.68,  2, 0.16),
+    ("(4341) Poseidon",   1.84, 0.68, 12, 0.16),
+    ("(4486) Mithra",     2.20, 0.66,  3, 0.17),
+    ("1990 TG1",          2.48, 0.69,  9, 0.18),
+    ("1988 VP4",          2.26, 0.65, 12, 0.19),
+    ("1991 GO",           1.96, 0.66, 10, 0.19),
+    ("(4183) Cuno",       1.98, 0.64,  7, 0.19),
+    ("1990 HA",           2.58, 0.69,  4, 0.20),
+    ("1983 VA",           2.61, 0.69, 16, 0.21),
+    ("1983 LC",           2.63, 0.71,  2, 0.22),
+    ("1991 EE",           2.25, 0.62, 10, 0.22),
+    ("(4179) Toutatis",   2.51, 0.64,  0, 0.23),
+    ("1991 CB1",          1.69, 0.62, 16, 0.24),
+    ("6344 P-L",          2.62, 0.64,  5, 0.25),
+    ("1937 UB Hermes",    1.64, 0.62,  6, 0.25),
+    ("1991 XA",           2.27, 0.57,  5, 0.26),
+    ("P/Encke",           2.22, 0.85, 12, 0.04),
+    ]
+
+
+def _dacsSemiMajorAxisTerm(a):
+    """ The semi-major axis term of D_ACS against the Taurid Complex reference orbit.
+
+    Arguments:
+        a: [float] semi-major axis (AU)
+
+    Return:
+        [float] contribution of the semi-major axis term to D_ACS
+    """
+
+    return abs(TC_REFERENCE_A - a)/DACS_A_SCALE
+
+
+def test_DACS_semimajor_axis_term_bounds_table1():
+    """ The paper adjusts the inclination, and the eccentricity, by secular perturbation theory
+        before evaluating D_ACS, while table 1 reports observed values, so the tabulated D cannot be
+        recomputed from the table alone. The semi-major axis is not adjusted, though, and the other
+        two terms are non-negative, so its term is a rigorous lower bound on every tabulated D.
+
+        This bounds the scale of the semi-major axis term from below: a smaller scale would break
+        the bound.
+    """
+
+    for name, a, _, _, d_table in ACS_TABLE_1:
+
+        lower_bound = _dacsSemiMajorAxisTerm(a)
+
+        assert lower_bound <= d_table + 1e-9, \
+            "{:s}: the semi-major axis term {:.4f} exceeds the tabulated D of {:.2f}".format(name,
+                lower_bound, d_table)
+
+
+def test_DACS_semimajor_axis_term_bound_is_attained():
+    """ The companion of the test above, bounding the scale from above. Two objects, P/Encke and
+        1991 TB2, sit exactly on the bound, so their adjusted eccentricity and inclination coincide
+        with the reference orbit. A larger scale would leave the bound slack everywhere.
+
+        Together the two tests fix the scale at 3 AU from the table alone, with no fitting.
+    """
+
+    ratios = [(_dacsSemiMajorAxisTerm(a)/d_table, name) for name, a, _, _, d_table in ACS_TABLE_1]
+
+    largest = max(ratio for ratio, _ in ratios)
+
+    assert abs(largest - 1.0) < 1e-9, \
+        "the largest semi-major axis term to D ratio is {:.4f}, so the bound is not attained".format(
+            largest)
+
+    attaining = sorted(name for ratio, name in ratios if abs(ratio - 1.0) < 1e-9)
+
+    assert attaining == ["1991 TB2", "P/Encke"], \
+        "expected P/Encke and 1991 TB2 on the bound, found {!s}".format(attaining)
+
+
+def test_DACS_encke_matches_the_reference_orbit():
+    """ P/Encke's tabulated D of 0.04 is exactly its semi-major axis term, so evaluating D_ACS with
+        the reference eccentricity and inclination and Encke's own semi-major axis must reproduce
+        it. The Taurid Complex core orbit is essentially Encke's.
+    """
+
+    d_value = float(calcDACS(TC_REFERENCE_A, TC_REFERENCE_E, TC_REFERENCE_INCL,
+        2.22, TC_REFERENCE_E, TC_REFERENCE_INCL))
+
+    assert abs(d_value - 0.04) < 1e-9, \
+        "D_ACS for P/Encke came out as {:.6f}, the paper tabulates 0.04".format(d_value)
+
+
+def test_DACS_table1_is_ordered_by_the_criterion():
+    """ Table 1 is sorted by D, and the paper's selection is by D alone, so no row may fall below an
+        earlier one. This checks the transcription of the table rather than the criterion.
+    """
+
+    tabulated = [d_table for name, _, _, _, d_table in ACS_TABLE_1 if name != "P/Encke"]
+
+    assert tabulated == sorted(tabulated), "table 1 is not in ascending order of D"
+
+
+def test_DACS_scale_makes_three_au_contribute_unity():
+    """ The semi-major axis term is normalised by 3 AU, so that difference alone gives D = 1. """
+
+    d_value = float(calcDACS(2.1, 0.5, 0.0, 2.1 + DACS_A_SCALE, 0.5, 0.0))
+
+    assert abs(d_value - 1.0) < 1e-12, \
+        "a difference of {:.1f} AU in a gave D = {:.12f}".format(DACS_A_SCALE, d_value)
+
+    assert DACS_A_SCALE == 3.0, "the published scale is 3 AU"
+
+
+def test_DACS_vanishes_on_identical_orbits_and_is_symmetric():
+    """ D_ACS must be zero for an orbit compared with itself, and independent of the order. """
+
+    orbits = _randomOrbits(200, random_state=17)
+
+    worst_self = 0.0
+    worst_asym = 0.0
+
+    for k in range(len(orbits) - 1):
+
+        q1, e1, i1, _, _ = orbits[k]
+        q2, e2, i2, _, _ = orbits[k + 1]
+
+        a1 = q1/(1.0 - e1)
+        a2 = q2/(1.0 - e2)
+
+        worst_self = max(worst_self, abs(float(calcDACS(a1, e1, i1, a1, e1, i1))))
+
+        d_ab = float(calcDACS(a1, e1, i1, a2, e2, i2))
+        d_ba = float(calcDACS(a2, e2, i2, a1, e1, i1))
+        worst_asym = max(worst_asym, abs(d_ab - d_ba))
+
+    assert worst_self < 1e-12, "D_ACS returned {:.4e} for an orbit compared with itself".format(
+        worst_self)
+    assert worst_asym < 1e-12, "D_ACS was asymmetric by {:.4e}".format(worst_asym)
+
+
+def test_DACS_ignores_the_node_and_perihelion_argument():
+    """ D_ACS takes no node or argument of perihelion, by design, so it cannot be affected by them.
+        This is what makes it suitable for the Taurid Complex, which is spread in longitude of
+        perihelion, and what makes a longitude-bearing criterion unsuitable.
+    """
+
+    # The signature admits no angles beyond the inclination, so the property is structural
+    import inspect
+
+    try:
+        names = list(inspect.signature(calcDACS).parameters)
+
+    except AttributeError:
+        names = list(inspect.getargspec(calcDACS).args)
+
+    assert names == ["a1", "e1", "i1", "a2", "e2", "i2"], \
+        "D_ACS takes {!s}, expected only a, e and i for both orbits".format(names)
+
+
+def test_DACS_accepts_arrays():
+    """ D_ACS must work elementwise on numpy arrays. """
+
+    a = np.array([a for _, a, _, _, _ in ACS_TABLE_1])
+    e = np.array([e for _, _, e, _, _ in ACS_TABLE_1])
+    incl = np.radians([i for _, _, _, i, _ in ACS_TABLE_1])
+
+    vector = calcDACS(TC_REFERENCE_A, TC_REFERENCE_E, TC_REFERENCE_INCL, a, e, incl)
+
+    assert vector.shape == a.shape
+
+    for k in range(len(a)):
+
+        scalar = float(calcDACS(TC_REFERENCE_A, TC_REFERENCE_E, TC_REFERENCE_INCL, a[k], e[k],
+            incl[k]))
+
+        assert abs(vector[k] - scalar) < 1e-12
+
+
+
 ### Orbit classification ###
 
 def test_tisserand_is_three_for_a_planet_crossing_circular_orbit():
@@ -656,6 +843,14 @@ if __name__ == "__main__":
         test_DX_weights_scale_the_terms,
         test_DVJopek_vanishes_on_identical_orbits_and_is_symmetric,
         test_DVJopek_energy_term_matches_the_semimajor_axis,
+        test_DACS_semimajor_axis_term_bounds_table1,
+        test_DACS_semimajor_axis_term_bound_is_attained,
+        test_DACS_encke_matches_the_reference_orbit,
+        test_DACS_table1_is_ordered_by_the_criterion,
+        test_DACS_scale_makes_three_au_contribute_unity,
+        test_DACS_vanishes_on_identical_orbits_and_is_symmetric,
+        test_DACS_ignores_the_node_and_perihelion_argument,
+        test_DACS_accepts_arrays,
         test_tisserand_is_three_for_a_planet_crossing_circular_orbit,
         test_tisserand_reproduces_encke,
         test_kresak_and_aphelion_boundaries,
