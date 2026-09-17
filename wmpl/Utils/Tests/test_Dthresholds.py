@@ -55,8 +55,8 @@ def test_breakpoint_finds_a_known_break():
     bin_width = np.max(d_values)/n_bins
 
     assert abs(break_point - stream_edge) <= bin_width, \
-        "the break point came out at {:.5f}, more than one bin of {:.5f} from the stream edge at {:.5f}".format(
-            break_point, bin_width, stream_edge)
+        "the break point came out at {:.5f}, more than one bin of {:.5f} from the stream edge " \
+        "at {:.5f}".format(break_point, bin_width, stream_edge)
 
     # It must in any case be usable as a threshold, i.e. separate the two populations
     assert stream_edge - bin_width <= break_point <= 0.30, \
