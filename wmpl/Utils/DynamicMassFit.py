@@ -32,11 +32,14 @@ def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a
     const.v_init = v_init
     const.h_init = ht_beg
     const.rho = density
+    #const.gamma = 1.0
+    #const.shape_factor = 1.21
 
-    # Use the same Gamma*A as the dynamic mass
-    const.gamma = 1.0
-    const.shape_factor = gamma_a
-
+    # Gamma*A is fixed on purpose, not taken from gamma_a: with the same Gamma*A as the dynamic mass, the
+    #   simulated velocity and path would not depend on gamma_a at all (only the mass scales as Gamma*A^3)
+    const.shape_factor = 1.21
+    const.gamma = 0.7
+    
 
     # Ablation coeff of chondritic material
     const.sigma = 0.005/1e6
