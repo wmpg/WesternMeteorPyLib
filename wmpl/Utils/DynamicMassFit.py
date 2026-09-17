@@ -2,7 +2,6 @@ import os
 
 import numpy as np
 import scipy.optimize
-import scipy.linalg
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import cm
 
@@ -281,7 +280,7 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
 
 def _robust_linear_fit(x, y, p0=(1.0, 1.0), loss='soft_l1', **kwargs):
     """ Fit a linear model y = m*x + c using robust least-squares optimization.
-        Covariance is estimated via SVD inversion of the Jacobian.
+        Covariance is estimated from the linear model Jacobian and the robust (MAD) residual variance.
 
     Arguments:
         x: [ndarray] Independent variable.
@@ -309,29 +308,17 @@ def _robust_linear_fit(x, y, p0=(1.0, 1.0), loss='soft_l1', **kwargs):
         raise RuntimeError("least_squares did not find a solution: " + res.message)
 
     popt = res.x
-    J = res.jac
 
-    U, s, VT = scipy.linalg.svd(J, full_matrices=False)
-    eps = np.finfo(float).eps
-    threshold = eps*max(J.shape)*s[0]
-    good = s > threshold
-    if not np.any(good):
-        raise RuntimeError("Jacobian is rank-deficient; cannot compute covariance.")
-
-    s = s[good]
-    VT = VT[:s.size]
-    pcov = np.dot(VT.T / s**2, VT)
+    # Use the Jacobian of the linear model, not res.jac, which is reweighted by the robust loss
+    J = np.column_stack((x, np.ones_like(x)))
+    pcov = np.linalg.inv(J.T @ J)
 
     r_raw = y - lineFunc(x, *popt)
-    
-    # Use robust variance estimation (MAD)
+
+    # Use robust variance estimation (MAD), or the standard deviation if MAD is zero
     mad = np.median(np.abs(r_raw - np.median(r_raw)))
     resid_std = 1.4826*mad if mad > 0 else np.std(r_raw, ddof=1)
-    
-    # Fallback to standard deviation if MAD is zero (e.g. perfect fit)
-    if resid_std == 0:
-        resid_std = np.std(r_raw, ddof=1)
-         
+
     s_sq = resid_std**2
     pcov = pcov*s_sq
 
