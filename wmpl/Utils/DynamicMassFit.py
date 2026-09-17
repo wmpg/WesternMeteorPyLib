@@ -549,9 +549,8 @@ if __name__ == "__main__":
     
 
     # Fit a line to the velocity data in the range
-    popt_robust, pcov_robust, perr_robust = _robust_linear_fit(time_data, vel_data, p0=(1.0, 1.0), loss='soft_l1')
     popt_final, pcov_final, perr_final, vel_filter = fitVelocity(
-        time_data, vel_data, p0=popt_robust, loss='soft_l1', sigma_clip=cml_args.sigma_clip
+        time_data, vel_data, p0=(1.0, 1.0), loss='soft_l1', sigma_clip=cml_args.sigma_clip
     )
 
     vel_fit = popt_final
