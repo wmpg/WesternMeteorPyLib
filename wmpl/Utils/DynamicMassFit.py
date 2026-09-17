@@ -7,8 +7,8 @@ import matplotlib.pyplot as plt
 from matplotlib.pyplot import cm
 
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly
-from wmpl.Utils.Math import lineFunc
-from wmpl.Utils.TrajConversions import cartesian2Geo
+from wmpl.Utils.Math import lineFunc, vectMag
+from wmpl.Utils.TrajConversions import cartesian2Geo, altAz2RADec, eci2RaDec, raDec2AltAz
 from wmpl.Utils.Physics import dynamicMass
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.MetSim.MetSimErosion import Constants, runSimulation
@@ -232,6 +232,32 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
     ###
 
 
+    ### Compute the final ground-fixed azimuth and elevation (as in SampleTrajectoryPositions) ###
+
+    # Calculate the geocentric latitude of the final point
+    lat_geocentric = np.arctan2(final_eci[2], np.sqrt(final_eci[0]**2 + final_eci[1]**2))
+
+    # Calculate the velocity of the Earth rotation at the final point (m/s)
+    v_e = 2*np.pi*vectMag(final_eci)*np.cos(lat_geocentric)/86164.09053
+
+    # Calculate the equatorial coordinates of east from the final point
+    ra_east, _ = altAz2RADec(np.pi/2, 0, final_jd, final_lat, final_lon)
+
+    # Calculate the derotated reference velocity vector/radiant
+    v_ref_vect = traj.orbit.v_avg_norot*traj.radiant_eci_mini
+    v_ref_nocorr = np.zeros(3)
+    v_ref_nocorr[0] = v_ref_vect[0] + v_e*np.cos(ra_east)
+    v_ref_nocorr[1] = v_ref_vect[1] + v_e*np.sin(ra_east)
+    v_ref_nocorr[2] = v_ref_vect[2]
+
+    # Compute the apparent alt/az. The ECI coordinates are already in the epoch of date, so no precession
+    #   is applied
+    ra_norot, dec_norot = eci2RaDec(v_ref_nocorr)
+    final_azim, final_elev = raDec2AltAz(ra_norot, dec_norot, final_jd, final_lat, final_lon)
+
+    ###
+
+
 
     print("  final mass     = {:.3f} kg".format(sr.frag_main.m))
     print("  final vel      = {:.3f} km/s".format(sr.frag_main.v/1000))
@@ -241,9 +267,12 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
     print("  final lat      = {:.5f} deg".format(np.degrees(final_lat)))
     print("  final lon      = {:.5f} deg".format(np.degrees(final_lon)))
     print("  final ht       = {:.3f} km".format(final_ele/1000))
+    print("  final azim     = {:.5f} deg".format(np.degrees(final_azim)))
+    print("  final elev     = {:.5f} deg".format(np.degrees(final_elev)))
 
 
-    return sr, sr.frag_main.m, np.degrees(final_lat), np.degrees(final_lon), final_ele/1000
+    return sr, sr.frag_main.m, np.degrees(final_lat), np.degrees(final_lon), final_ele/1000, \
+        np.degrees(final_azim), np.degrees(final_elev)
 
 
 
@@ -618,8 +647,8 @@ if __name__ == "__main__":
         print("  decel   = {:.2f} km/s^2".format(decel/1000))
         print("  init mass = {:.3f} kg".format(dyn_mass))
         print()
-        final_sr, final_mass, final_lat, final_lon, final_ele = computeFragEndParams(traj, dyn_mass, \
-            bulk_density, ht_eval, vel_eval, gamma_a)
+        final_sr, final_mass, final_lat, final_lon, final_ele, final_azim, final_elev = \
+            computeFragEndParams(traj, dyn_mass, bulk_density, ht_eval, vel_eval, gamma_a)
 
         print()
         print("Running simulation down to 3 km/s (+2 sigma mass)...")
@@ -627,8 +656,8 @@ if __name__ == "__main__":
         print("  decel = {:.2f} km/s^2".format(decel_hi/1000))
         print("  init mass = {:.3f} kg".format(dyn_mass_hi))
         print()
-        final_sr_hi, final_mass_hi, final_lat_hi, final_lon_hi, final_ele_hi = computeFragEndParams(traj, \
-            dyn_mass_hi, bulk_density, ht_eval, vel_eval, gamma_a)
+        final_sr_hi, final_mass_hi, final_lat_hi, final_lon_hi, final_ele_hi, final_azim_hi, final_elev_hi = \
+            computeFragEndParams(traj, dyn_mass_hi, bulk_density, ht_eval, vel_eval, gamma_a)
 
         print()
         print("Running simulation down to 3 km/s (-2 sigma mass)...")
@@ -636,8 +665,8 @@ if __name__ == "__main__":
         print("  decel = {:.2f} km/s^2".format(decel_lo/1000))
         print("  init mass = {:.3f} kg".format(dyn_mass_lo))
         print()
-        final_sr_lo, final_mass_lo, final_lat_lo, final_lon_lo, final_ele_lo = computeFragEndParams(traj, \
-            dyn_mass_lo, bulk_density, ht_eval, vel_eval, gamma_a)
+        final_sr_lo, final_mass_lo, final_lat_lo, final_lon_lo, final_ele_lo, final_azim_lo, final_elev_lo = \
+            computeFragEndParams(traj, dyn_mass_lo, bulk_density, ht_eval, vel_eval, gamma_a)
         
         print()
 
@@ -695,18 +724,24 @@ if __name__ == "__main__":
     print("Lat (+N)  = {:.5f} deg".format(final_lat_lo))
     print("Lon (+E)  = {:.5f} deg".format(final_lon_lo))
     print("Ele MSL   = {:.2f} km".format(final_ele_lo))
+    print("Azim      = {:.5f} deg".format(final_azim_lo))
+    print("Elev      = {:.5f} deg".format(final_elev_lo))
     print("End decel = {:.3f} km/s^2".format(final_decel_lo/1000))
     print("Final end coordinates (nominal mass)")
     print("Mass      = {:.3f} kg".format(final_mass))
     print("Lat (+N)  = {:.5f} deg".format(final_lat))
     print("Lon (+E)  = {:.5f} deg".format(final_lon))
     print("Ele MSL   = {:.2f} km".format(final_ele))
+    print("Azim      = {:.5f} deg".format(final_azim))
+    print("Elev      = {:.5f} deg".format(final_elev))
     print("End decel = {:.3f} km/s^2".format(final_decel/1000))
     print("Final end coordinates (+2sigma mass)")
     print("Mass      = {:.3f} kg".format(final_mass_hi))
     print("Lat (+N)  = {:.5f} deg".format(final_lat_hi))
     print("Lon (+E)  = {:.5f} deg".format(final_lon_hi))
     print("Ele MSL   = {:.2f} km".format(final_ele_hi))
+    print("Azim      = {:.5f} deg".format(final_azim_hi))
+    print("Elev      = {:.5f} deg".format(final_elev_hi))
     print("End decel = {:.3f} km/s^2".format(final_decel_hi/1000))
 
 
