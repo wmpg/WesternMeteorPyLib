@@ -8,6 +8,10 @@ The tests cover two properties that hold independently of any tabulated value:
       selects the negative branch of the Pi_21 arcsine when |O2 - O1| > 180 deg. The convention
       assumes both nodes are given in [0, 360 deg), since the rho test is not 2*pi periodic.
 
+    - Agreement with the independent vector definition of Pi_21. Jopek & Bronikowska (2017) define
+      Pi_21 through the mutual node of the two orbital planes rather than through an arcsine, which
+      has no branch cut to get wrong, so it settles the sign convention outright.
+
     - The acos domain guard. For identical or near-identical orbits the argument of the inclination
       (and, in D_D, of the angular separation of the perihelion directions) evaluates to slightly
       more than 1.0 in double precision, which makes an unguarded math.acos raise a domain error.
@@ -179,6 +183,102 @@ def test_DH_equals_DSH_when_perihelia_sum_to_unity():
         "D_H and D_SH disagreed by {:.4e} for q1 + q2 = 1".format(max_diff)
 
 
+def _piFromVectorDefinition(i1, O1, w1, i2, O2, w2):
+    """ Compute Pi_21 from the mutual node of the two orbital planes, which needs no arcsine and so
+        has no sign branch to choose.
+
+        Jopek & Bronikowska (2017), eqs 4, 5 and 7, define Pi_21 as the difference of the angles
+        from the mutual node to each perihelion direction. Their eq. 7 writes those angles as
+        arccos(N.e), which is unsigned and so cannot tell which side of the node a perihelion lies
+        on; the angles are resolved here within each orbital plane about that orbit's own normal.
+
+    Arguments:
+        i1: [float] inclination of the first orbit (rad)
+        O1: [float] longitude of ascending node of the first orbit (rad)
+        w1: [float] argument of perihelion of the first orbit (rad)
+        i2: [float] inclination of the second orbit (rad)
+        O2: [float] longitude of ascending node of the second orbit (rad)
+        w2: [float] argument of perihelion of the second orbit (rad)
+
+    Return:
+        [float] Pi_21 (rad), or None if the orbits are coplanar and the mutual node undefined
+    """
+
+    def angularMomentum(incl, node):
+        return np.array([math.sin(incl)*math.sin(node), -math.sin(incl)*math.cos(node),
+            math.cos(incl)])
+
+    def perihelionDirection(incl, node, peri):
+        return np.array([
+            math.cos(peri)*math.cos(node) - math.cos(incl)*math.sin(peri)*math.sin(node),
+            math.cos(peri)*math.sin(node) + math.cos(incl)*math.sin(peri)*math.cos(node),
+            math.sin(incl)*math.sin(peri)])
+
+    h1 = angularMomentum(i1, O1)
+    h2 = angularMomentum(i2, O2)
+
+    node_vect = np.cross(h1, h2)
+    node_norm = np.linalg.norm(node_vect)
+
+    if node_norm < 1e-8:
+        return None
+
+    node_vect = node_vect/node_norm
+
+    e1_vect = perihelionDirection(i1, O1, w1)
+    e2_vect = perihelionDirection(i2, O2, w2)
+
+    angle1 = math.atan2(float(np.dot(np.cross(node_vect, e1_vect), h1)),
+        float(np.dot(node_vect, e1_vect)))
+    angle2 = math.atan2(float(np.dot(np.cross(node_vect, e2_vect), h2)),
+        float(np.dot(node_vect, e2_vect)))
+
+    return angle1 - angle2
+
+
+def test_DH_pi21_matches_the_vector_definition():
+    """ D_H must imply the same Pi_21 as the mutual-node construction, which carries no sign
+        convention to get wrong. Only sin(Pi_21/2) squared enters D_H, and with equal perihelion
+        distances and eccentricities it can be recovered from the returned value, so this tests the
+        public result rather than an internal quantity.
+    """
+
+    q, e = 0.7, 0.6
+
+    pairs = _orbitPairs()
+
+    worst = 0.0
+    n_straddling = 0
+
+    for _, _, i1, O1, w1, _, _, i2, O2, w2 in pairs:
+
+        pi21 = _piFromVectorDefinition(i1, O1, w1, i2, O2, w2)
+
+        if pi21 is None:
+            continue
+
+        expected = math.sin(pi21/2.0)**2
+
+        d_value = calcDH(q, e, i1, O1, w1, q, e, i2, O2, w2)
+
+        # With q1 = q2 and e1 = e2 the perihelion and eccentricity terms vanish, leaving
+        #   D_H^2 = (2 sin(I_21/2))^2 + e^2 (2 sin(Pi_21/2))^2
+        cos_I = np.clip(math.cos(i1)*math.cos(i2) + math.sin(i1)*math.sin(i2)*math.cos(O2 - O1),
+            -1.0, 1.0)
+        incl_term = 2*math.sin(math.acos(cos_I)/2.0)
+
+        got = (d_value**2 - incl_term**2)/(4*e**2)
+
+        worst = max(worst, abs(got - expected))
+
+        if abs(O2 - O1) > math.pi:
+            n_straddling += 1
+
+    assert n_straddling > 0, "no test pair exercised the |O2 - O1| > 180 deg branch"
+    assert worst < 1e-9, \
+        "D_H implied a Pi_21 differing from the vector definition by {:.4e}".format(worst)
+
+
 def test_acos_domain_holds_on_self_comparison():
     """ Comparing an orbit with itself must return zero for every criterion, at every inclination,
         rather than raising a math domain error.
@@ -244,6 +344,7 @@ if __name__ == "__main__":
         test_DSH_invariant_under_node_representation,
         test_DH_coplanar_limit_recovers_longitude_of_perihelion,
         test_DH_equals_DSH_when_perihelia_sum_to_unity,
+        test_DH_pi21_matches_the_vector_definition,
         test_acos_domain_holds_on_self_comparison,
         test_acos_domain_holds_for_near_identical_orbits,
         ]
