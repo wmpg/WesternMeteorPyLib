@@ -703,6 +703,7 @@ if __name__ == "__main__":
     print("Decel = {:.2f} +/- {:.2f} km/s^2".format(decel/1000, decel_std/1000))
     print()
     print("Dynamic mass at {:.2f} km and {:.2f} km/s:".format(ht_eval/1000, vel_eval/1000))
+    print("(+/-2 sigma from the deceleration uncertainty only)")
     print("-2sigma = {:.3f} kg".format(dyn_mass_lo))
     print("Nominal = {:.3f} kg".format(dyn_mass))
     print("+2sigma    = {:.3f} kg".format(dyn_mass_hi))
