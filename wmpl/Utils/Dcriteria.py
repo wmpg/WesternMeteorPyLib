@@ -81,6 +81,12 @@ def calcDH(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2):
 
     """
 
+    rho = 1
+
+    if (abs(O2 - O1) > math.pi):
+        rho = -1
+
+
     acos_val = math.cos(i1)*math.cos(i2) + math.sin(i1)*math.sin(i2)*math.cos(O2 - O1)
 
     # Make sure the value going into acos is not beyond the bounds due to numerical reasons
@@ -96,7 +102,7 @@ def calcDH(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2):
     if abs(asin_val) > 1:
         asin_val = math.copysign(1.0, asin_val)
 
-    pi21 = w2 - w1 + 2*math.asin(asin_val)
+    pi21 = w2 - w1 + 2*rho*math.asin(asin_val)
 
     DH2 = (e2 - e1)**2 + ((q2 - q1)/(q2 + q1))**2 + (2*math.sin(I21/2.0))**2 \
         + ((e2 + e1)/2.0)**2*(2*math.sin(pi21/2.0))**2

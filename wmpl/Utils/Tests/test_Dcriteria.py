@@ -1,6 +1,12 @@
 """ Tests for the meteoroid orbit dissimilarity criteria in wmpl.Utils.Dcriteria.
 
-The tests cover a property that holds independently of any tabulated value:
+The tests cover two properties that hold independently of any tabulated value:
+
+    - The node representation invariance of D_SH and D_H. A pair of orbits is unchanged when the
+      second node is written as O2 or as O2 - 360 deg, so a dissimilarity criterion must return the
+      same value for both. This requires the Southworth & Hawkins (1963) sign factor rho, which
+      selects the negative branch of the Pi_21 arcsine when |O2 - O1| > 180 deg. The convention
+      assumes both nodes are given in [0, 360 deg), since the rho test is not 2*pi periodic.
 
     - The acos domain guard. For identical or near-identical orbits the argument of the inclination
       (and, in D_D, of the angular separation of the perihelion directions) evaluates to slightly
@@ -23,6 +29,154 @@ from wmpl.Utils.Dcriteria import calcDSH, calcDD, calcDH
 # A self-comparison cannot return exactly zero: acos has an infinite derivative at 1, so the
 #   1 ulp error in its argument becomes ~2e-8 in the returned angle
 SELF_COMPARISON_TOL = 1e-7
+
+
+def _orbitPairs():
+    """ Generate orbit pairs spanning the physical parameter ranges, including node pairs that
+        straddle 0/360 deg.
+
+    Return:
+        [list] Tuples of (q1, e1, i1, O1, w1, q2, e2, i2, O2, w2), all angles in radians.
+    """
+
+    rng = np.random.RandomState(20250917)
+    n = 5000
+
+    q1 = rng.uniform(0.05, 1.5, n)
+    q2 = rng.uniform(0.05, 1.5, n)
+    e1 = rng.uniform(0.01, 0.99, n)
+    e2 = rng.uniform(0.01, 0.99, n)
+
+    # Sample the inclination isotropically rather than uniformly in angle
+    i1 = np.arccos(rng.uniform(-1, 1, n))
+    i2 = np.arccos(rng.uniform(-1, 1, n))
+
+    O1 = rng.uniform(0, 2*np.pi, n)
+    O2 = rng.uniform(0, 2*np.pi, n)
+    w1 = rng.uniform(0, 2*np.pi, n)
+    w2 = rng.uniform(0, 2*np.pi, n)
+
+    return list(zip(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2))
+
+
+def _principalNodePair(O1, O2):
+    """ Rewrite the second node so that the node difference lies in (-180, 180] deg, which is the
+        same pair of orbits written the other way across the 0/360 deg branch cut.
+
+    Arguments:
+        O1: [double] longitude of ascending node of the first orbit (rad)
+        O2: [double] longitude of ascending node of the second orbit (rad)
+
+    Return:
+        [double] equivalent second node (rad)
+    """
+
+    return O1 + (O2 - O1 + math.pi)%(2*math.pi) - math.pi
+
+
+def test_DH_invariant_under_node_representation():
+    """ D_H must depend on the nodes only through their true angular separation, so writing the
+        second node on the other side of the 0/360 deg branch cut must not change the value.
+    """
+
+    pairs = _orbitPairs()
+
+    max_diff = 0.0
+    n_straddling = 0
+
+    for q1, e1, i1, O1, w1, q2, e2, i2, O2, w2 in pairs:
+
+        O2_alt = _principalNodePair(O1, O2)
+
+        d_ref = calcDH(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2)
+        d_alt = calcDH(q1, e1, i1, O1, w1, q2, e2, i2, O2_alt, w2)
+
+        max_diff = max(max_diff, abs(d_alt - d_ref))
+
+        if abs(O2 - O1) > math.pi:
+            n_straddling += 1
+
+    assert n_straddling > 0, "no test pair exercised the |O2 - O1| > 180 deg branch"
+    assert max_diff < 1e-12, \
+        "D_H changed by {:.4e} when the node was rewritten (max over {:d} pairs)".format(max_diff, \
+            len(pairs))
+
+
+def test_DSH_invariant_under_node_representation():
+    """ D_SH must be invariant to the node representation for the same reason as D_H. """
+
+    pairs = _orbitPairs()
+
+    max_diff = 0.0
+
+    for q1, e1, i1, O1, w1, q2, e2, i2, O2, w2 in pairs:
+
+        O2_alt = _principalNodePair(O1, O2)
+
+        d_ref = calcDSH(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2)
+        d_alt = calcDSH(q1, e1, i1, O1, w1, q2, e2, i2, O2_alt, w2)
+
+        max_diff = max(max_diff, abs(d_alt - d_ref))
+
+    assert max_diff < 1e-12, \
+        "D_SH changed by {:.4e} when the node was rewritten".format(max_diff)
+
+
+def test_DH_coplanar_limit_recovers_longitude_of_perihelion():
+    """ For two coplanar orbits Pi_21 reduces to the difference of the longitudes of perihelion,
+        so D_H must reduce to the corresponding closed form. This pins down the sign of the rho
+        factor without needing a tabulated value.
+    """
+
+    q, e = 0.5, 0.7
+    i = 0.0
+
+    max_diff = 0.0
+
+    for O1_deg in range(0, 360, 13):
+        for O2_deg in range(0, 360, 11):
+            for dw_deg in range(0, 360, 17):
+
+                O1 = math.radians(O1_deg)
+                O2 = math.radians(O2_deg)
+                w1 = math.radians(20.0)
+                w2 = w1 + math.radians(dw_deg)
+
+                d_got = calcDH(q, e, i, O1, w1, q, e, i, O2, w2)
+
+                # Coplanar closed form: I_21 = 0 and Pi_21 = (w2 + O2) - (w1 + O1)
+                pi21 = (w2 + O2) - (w1 + O1)
+                d_expected = math.sqrt(((e + e)/2.0)**2*(2*math.sin(pi21/2.0))**2)
+
+                max_diff = max(max_diff, abs(d_got - d_expected))
+
+    assert max_diff < 1e-12, \
+        "coplanar D_H departed from the longitude of perihelion form by {:.4e}".format(max_diff)
+
+
+def test_DH_equals_DSH_when_perihelia_sum_to_unity():
+    """ D_H differs from D_SH only in normalising the perihelion distance term by (q1 + q2), so
+        the two must agree exactly when q1 + q2 = 1. This ties the D_H node sign convention to
+        the one in D_SH.
+    """
+
+    pairs = _orbitPairs()
+
+    max_diff = 0.0
+
+    for _, e1, i1, O1, w1, _, e2, i2, O2, w2 in pairs:
+
+        # Split unity into the two perihelion distances
+        q1 = 0.37
+        q2 = 1.0 - q1
+
+        d_sh = calcDSH(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2)
+        d_h = calcDH(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2)
+
+        max_diff = max(max_diff, abs(d_sh - d_h))
+
+    assert max_diff < 1e-12, \
+        "D_H and D_SH disagreed by {:.4e} for q1 + q2 = 1".format(max_diff)
 
 
 def test_acos_domain_holds_on_self_comparison():
@@ -86,6 +240,10 @@ def test_acos_domain_holds_for_near_identical_orbits():
 if __name__ == "__main__":
 
     test_functions = [
+        test_DH_invariant_under_node_representation,
+        test_DSH_invariant_under_node_representation,
+        test_DH_coplanar_limit_recovers_longitude_of_perihelion,
+        test_DH_equals_DSH_when_perihelia_sum_to_unity,
         test_acos_domain_holds_on_self_comparison,
         test_acos_domain_holds_for_near_identical_orbits,
         ]
