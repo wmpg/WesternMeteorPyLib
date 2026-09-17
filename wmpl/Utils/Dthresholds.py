@@ -4,8 +4,9 @@ A D criterion is only half of a stream search: the threshold below which two orb
 associated has to be chosen as well, and a threshold taken from the literature is generally tied
 to the criterion, the database size and the sporadic background of the study it came from.
 
-The methods here are independent of which criterion is used, and are passed the criterion as a
-callable where they need one.
+Most of the methods here are independent of which criterion is used, and are passed the criterion
+as a callable where they need one. thresholdRandomPairing is the exception: its thresholds were
+measured per criterion and per population, and it is selected by name.
 """
 
 from __future__ import print_function, division, absolute_import
@@ -18,10 +19,16 @@ def thresholdDr(n_orbits):
 
         The threshold shrinks as the database grows, because the number of pairs available to
         associate by chance grows with it. The reference value of 0.20 applies to a sample of 360
-        orbits.
+        orbits; the formula was calibrated on 359 Super-Schmidt photographic meteors. An equivalent
+        form is 0.8712*N**(-1/4).
+
+        This threshold is far too permissive for pair searches. Jopek & Bronikowska (2017) measured
+        the probability of a coincidental pair at these thresholds as 1.0 for bolide samples of 200
+        to 800 orbits, i.e. two "similar" orbits are certain to be found whether or not any are
+        related. Use thresholdRandomPairing for a threshold tied to a stated probability.
 
         Reference: Southworth & Hawkins (1963), Smithson. Contrib. Astrophys. 7, 261; Lindblad
-        (1971), Smithson. Contrib. Astrophys. 12, 1.
+        (1971), Smithson. Contrib. Astrophys. 12, 1, eq. 1 of Jopek & Bronikowska (2017).
 
     Arguments:
         n_orbits: [int] number of orbits in the database
@@ -33,6 +40,74 @@ def thresholdDr(n_orbits):
     n_orbits = np.asarray(n_orbits, dtype=np.float64)
 
     return 0.20*(360.0/n_orbits)**0.25
+
+
+# Coefficient and exponent of the fitted threshold D_c = A*N**(-b) corresponding to a probability of
+#   0.01 of a coincidental pair, from Jopek & Bronikowska (2017). The bolide entries are their eqs
+#   14 to 16 and the rest are their table 9, eqs 17 to 25
+RANDOM_PAIRING_COEFFS = {
+    ('D_SH', 'bolides'): (0.3186, 0.431),
+    ('D_H',  'bolides'): (0.3143, 0.438),
+    ('D_D',  'bolides'): (0.1240, 0.423),
+    ('D_SH', 'NEAs'):    (0.2558, 0.408),
+    ('D_H',  'NEAs'):    (0.2193, 0.405),
+    ('D_D',  'NEAs'):    (0.1049, 0.408),
+    ('D_SH', 'radar'):   (0.4007, 0.450),
+    ('D_H',  'radar'):   (0.3768, 0.447),
+    ('D_D',  'radar'):   (0.1543, 0.436),
+    ('D_SH', 'video'):   (0.5837, 0.487),
+    ('D_H',  'video'):   (0.4808, 0.464),
+    ('D_D',  'video'):   (0.1724, 0.446),
+    }
+
+# Probability of a coincidental pair that the coefficients above correspond to
+RANDOM_PAIRING_PROBABILITY = 0.01
+
+
+def thresholdRandomPairing(n_orbits, d_criterion='D_SH', population='bolides'):
+    """ Calculate the threshold at which the probability of a coincidental pair is 0.01.
+
+        The threshold depends on the criterion and on the population as well as on the sample size.
+        Both dependencies are substantial: at a fixed sample size the D_D thresholds are about 2.4
+        times smaller than the D_SH ones, and the video thresholds about 1.15 times larger than the
+        NEA ones, so a threshold is not transferable between criteria or between datasets.
+
+        The thresholds were obtained by searching synthetic samples that reproduce the orbital
+        distributions of the observed ones, including the Earth-crossing condition, which matters:
+        drawing the elements uniformly instead inflates the threshold by about a factor of two.
+
+        Reference: Jopek & Bronikowska (2017), P&SS 143, 43, doi:10.1016/j.pss.2016.12.004, eqs 14
+        to 16 and table 9.
+
+        The fits hold over 200 to 1000 orbits for the bolide coefficients and 1000 to 16000 for the
+        others, which the authors expect to extend to about 50000. Nothing is clamped outside those
+        ranges.
+
+    Arguments:
+        n_orbits: [int] number of orbits in the database
+
+    Keyword arguments:
+        d_criterion: [str] criterion the threshold is for, one of 'D_SH', 'D_H' or 'D_D'.
+            Default 'D_SH'.
+        population: [str] population the database is drawn from, one of 'bolides', 'NEAs', 'radar'
+            or 'video'. Default 'bolides'.
+
+    Return:
+        [float] threshold value
+    """
+
+    key = (d_criterion, population)
+
+    if key not in RANDOM_PAIRING_COEFFS:
+        raise ValueError("No published threshold for criterion {!r} and population {!r}. "
+            "Available combinations: {!s}.".format(d_criterion, population,
+                sorted(RANDOM_PAIRING_COEFFS)))
+
+    coeff, exponent = RANDOM_PAIRING_COEFFS[key]
+
+    n_orbits = np.asarray(n_orbits, dtype=np.float64)
+
+    return coeff*n_orbits**(-exponent)
 
 
 def thresholdBreakPoint(d_values, n_bins=100, d_max=None):
