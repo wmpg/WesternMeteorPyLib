@@ -3,6 +3,10 @@ from __future__ import print_function, division, absolute_import
 
 import math
 
+import numpy as np
+
+from wmpl.Utils.OrbitClassification import calcTisserand, A_JUPITER
+
 
 
 # Average speed of Earth [km/s]
@@ -516,6 +520,445 @@ def calcDV(Lh1, Bh1, sol1, Vh1, Lh2, Bh2, sol2, Vh2, d_max=999.0):
 
     return math.sqrt(dissim_2)
 
+
+
+def _mutualInclinationCos(i1, O1, i2, O2):
+    """ Cosine of the mutual inclination of two orbital planes.
+
+    Arguments:
+        i1: [float] inclination of the first orbit (rad)
+        O1: [float] longitude of ascending node of the first orbit (rad)
+        i2: [float] inclination of the second orbit (rad)
+        O2: [float] longitude of ascending node of the second orbit (rad)
+
+    Return:
+        [float] cos I, clipped to [-1, 1]
+    """
+
+    cos_I = np.cos(i1)*np.cos(i2) + np.sin(i1)*np.sin(i2)*np.cos(O1 - O2)
+
+    return np.clip(cos_I, -1.0, 1.0)
+
+
+def _perihelionDirectionCos(i1, O1, w1, i2, O2, w2):
+    """ Cosine of the angle between the perihelion directions of two orbits, i.e. between their
+        Laplace-Runge-Lenz vectors.
+
+    Arguments:
+        i1: [float] inclination of the first orbit (rad)
+        O1: [float] longitude of ascending node of the first orbit (rad)
+        w1: [float] argument of perihelion of the first orbit (rad)
+        i2: [float] inclination of the second orbit (rad)
+        O2: [float] longitude of ascending node of the second orbit (rad)
+        w2: [float] argument of perihelion of the second orbit (rad)
+
+    Return:
+        [float] cos P, clipped to [-1, 1]
+    """
+
+    c1, c2 = np.cos(i1), np.cos(i2)
+    s1, s2 = np.sin(i1), np.sin(i2)
+    delta = O1 - O2
+
+    cos_P = s1*s2*np.sin(w1)*np.sin(w2) \
+        + (np.cos(w1)*np.cos(w2) + c1*c2*np.sin(w1)*np.sin(w2))*np.cos(delta) \
+        + (c2*np.cos(w1)*np.sin(w2) - c1*np.sin(w1)*np.cos(w2))*np.sin(delta)
+
+    return np.clip(cos_P, -1.0, 1.0)
+
+
+def calcRho1(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2, L=1.0):
+    """ Calculate the Kholshevnikov et al. (2016) rho_1 distance between two orbits.
+
+        rho_1 is a true metric on the space of Keplerian orbits: unlike D_SH, D_D and D_H it
+        satisfies the triangle inequality, and it stays well defined for circular orbits. It is
+        built from the difference of the angular momentum vectors and of the eccentricity vectors.
+
+        Reference: Kholshevnikov, Kokhirova, Babadzhanov & Khamroev (1993), MNRAS 462, 2275,
+        doi:10.1093/mnras/stw1712.
+
+        No threshold is published for rho_1. Thresholds are not transferable from D_SH or D_D,
+        since the angular momentum term carries units of length while the eccentricity term is
+        dimensionless.
+
+    Arguments:
+        q1: [float] perihelion distance of the first orbit (AU)
+        e1: [float] num. eccentricity of the first orbit
+        i1: [float] inclination of the first orbit (rad)
+        O1: [float] longitude of ascending node of the first orbit (rad)
+        w1: [float] argument of perihelion of the first orbit (rad)
+        q2: [float] perihelion distance of the second orbit (AU)
+        e2: [float] num. eccentricity of the second orbit
+        i2: [float] inclination of the second orbit (rad)
+        O2: [float] longitude of ascending node of the second orbit (rad)
+        w2: [float] argument of perihelion of the second orbit (rad)
+
+    Keyword arguments:
+        L: [float] scale length used to make the angular momentum term dimensionless (AU).
+            Default 1 AU, as recommended for the Solar system.
+
+    Return:
+        [float] rho_1 value
+    """
+
+    p1 = q1*(1.0 + e1)
+    p2 = q2*(1.0 + e2)
+
+    cos_I = _mutualInclinationCos(i1, O1, i2, O2)
+    cos_P = _perihelionDirectionCos(i1, O1, w1, i2, O2, w2)
+
+    rho_sqr = (p1 + p2 - 2*np.sqrt(p1*p2)*cos_I)/L \
+        + (e1**2 + e2**2 - 2*e1*e2*cos_P)
+
+    return np.sqrt(np.maximum(rho_sqr, 0.0))
+
+
+def calcRho2(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2, L=1.0):
+    """ Calculate the Kholshevnikov et al. (2016) rho_2 distance between two orbits.
+
+        rho_2 is a true metric on the space of Keplerian orbits, built from the two orthogonal
+        vectors u and v with |u| = sqrt(p) and |v| = e*sqrt(p), so both of its terms carry the
+        same units. Like rho_1 it satisfies the triangle inequality and admits circular orbits.
+
+        Reference: Kholshevnikov, Kokhirova, Babadzhanov & Khamroev (2016), MNRAS 462, 2275,
+        doi:10.1093/mnras/stw1712.
+
+        No threshold is published for rho_2. With L = 1 AU the value is numerically scaled as
+        sqrt(AU), so D_SH and D_D thresholds do not carry over.
+
+    Arguments:
+        q1: [float] perihelion distance of the first orbit (AU)
+        e1: [float] num. eccentricity of the first orbit
+        i1: [float] inclination of the first orbit (rad)
+        O1: [float] longitude of ascending node of the first orbit (rad)
+        w1: [float] argument of perihelion of the first orbit (rad)
+        q2: [float] perihelion distance of the second orbit (AU)
+        e2: [float] num. eccentricity of the second orbit
+        i2: [float] inclination of the second orbit (rad)
+        O2: [float] longitude of ascending node of the second orbit (rad)
+        w2: [float] argument of perihelion of the second orbit (rad)
+
+    Keyword arguments:
+        L: [float] scale length used to normalise the metric (AU). Default 1 AU.
+
+    Return:
+        [float] rho_2 value
+    """
+
+    p1 = q1*(1.0 + e1)
+    p2 = q2*(1.0 + e2)
+
+    cos_I = _mutualInclinationCos(i1, O1, i2, O2)
+    cos_P = _perihelionDirectionCos(i1, O1, w1, i2, O2, w2)
+
+    rho_sqr = ((1.0 + e1**2)*p1 + (1.0 + e2**2)*p2 \
+        - 2*np.sqrt(p1*p2)*(cos_I + e1*e2*cos_P))/L
+
+    return np.sqrt(np.maximum(rho_sqr, 0.0))
+
+
+def calcRho5(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2, L=1.0):
+    """ Calculate the Kholshevnikov et al. (2016) rho_5 distance between two orbits.
+
+        rho_5 is the minimum of rho_2 over both nodes and both arguments of perihelion, so it is a
+        metric on the quotient space in which orbits differing only by a rotation about the
+        ecliptic pole and by an apsidal rotation are identified. It measures how close two orbits
+        could be brought by precession alone, which is the relevant comparison for streams whose
+        nodes and apsides have had time to circulate.
+
+        The node and the argument of perihelion are therefore not used, but they are kept in the
+        signature so that rho_5 can be substituted for calcDSH without changing the call.
+
+        Reference: Kholshevnikov, Kokhirova, Babadzhanov & Khamroev (2016), MNRAS 462, 2275,
+        doi:10.1093/mnras/stw1712.
+
+        No threshold is published for rho_5.
+
+    Arguments:
+        q1: [float] perihelion distance of the first orbit (AU)
+        e1: [float] num. eccentricity of the first orbit
+        i1: [float] inclination of the first orbit (rad)
+        O1: [float] longitude of ascending node of the first orbit (rad), not used
+        w1: [float] argument of perihelion of the first orbit (rad), not used
+        q2: [float] perihelion distance of the second orbit (AU)
+        e2: [float] num. eccentricity of the second orbit
+        i2: [float] inclination of the second orbit (rad)
+        O2: [float] longitude of ascending node of the second orbit (rad), not used
+        w2: [float] argument of perihelion of the second orbit (rad), not used
+
+    Keyword arguments:
+        L: [float] scale length used to normalise the metric (AU). Default 1 AU.
+
+    Return:
+        [float] rho_5 value
+    """
+
+    p1 = q1*(1.0 + e1)
+    p2 = q2*(1.0 + e2)
+
+    rho_sqr = ((1.0 + e1**2)*p1 + (1.0 + e2**2)*p2 \
+        - 2*np.sqrt(p1*p2)*(e1*e2 + np.cos(i1 - i2)))/L
+
+    return np.sqrt(np.maximum(rho_sqr, 0.0))
+
+
+def calcC(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2):
+    """ Calculate the Neslusan (2002) C criterion, the length of the difference of the two orbital
+        angular momentum vectors per unit mass.
+
+        The criterion compares orbital planes and sizes only; it carries no information about the
+        apsidal orientation, and nothing in it is specific to meteor showers.
+
+        Units are Gaussian, with the solar gravitational parameter taken as unity, so that the
+        magnitude of the angular momentum vector is sqrt(p) with p in AU.
+
+        Reference: Neslusan (2002), in Dynamics of Natural and Artificial Celestial Bodies, 365.
+
+        No threshold is published for C.
+
+    Arguments:
+        q1: [float] perihelion distance of the first orbit (AU)
+        e1: [float] num. eccentricity of the first orbit
+        i1: [float] inclination of the first orbit (rad)
+        O1: [float] longitude of ascending node of the first orbit (rad)
+        w1: [float] argument of perihelion of the first orbit (rad), not used
+        q2: [float] perihelion distance of the second orbit (AU)
+        e2: [float] num. eccentricity of the second orbit
+        i2: [float] inclination of the second orbit (rad)
+        O2: [float] longitude of ascending node of the second orbit (rad)
+        w2: [float] argument of perihelion of the second orbit (rad), not used
+
+    Return:
+        [float] C value (sqrt(AU))
+    """
+
+    c1 = np.sqrt(q1*(1.0 + e1))
+    c2 = np.sqrt(q2*(1.0 + e2))
+
+    cx1, cy1, cz1 = c1*np.sin(i1)*np.sin(O1), -c1*np.sin(i1)*np.cos(O1), c1*np.cos(i1)
+    cx2, cy2, cz2 = c2*np.sin(i2)*np.sin(O2), -c2*np.sin(i2)*np.cos(O2), c2*np.cos(i2)
+
+    return np.sqrt((cx1 - cx2)**2 + (cy1 - cy2)**2 + (cz1 - cz2)**2)
+
+
+def calcDR(ra1, dec1, sol1, vg1, ra2, dec2, sol2, vg2, w1=1.0):
+    """ Calculate the reduced Valsecchi et al. (1999) D_R criterion between two orbits.
+
+        D_R keeps only the two terms of D_N that are nearly invariant under the principal secular
+        perturbation of meteoroid orbits, the circulation of the argument of perihelion, and drops
+        the terms in the angle phi and the solar longitude. It is therefore a necessary but not a
+        sufficient condition for membership of the same stream.
+
+        Reference: Valsecchi, Jopek & Froeschle (1999), MNRAS 304, 743.
+
+        No threshold is published for D_R.
+
+    Arguments:
+        ra1: [float] right ascension of the first radiant (rad)
+        dec1: [float] declination of the first radiant (rad)
+        sol1: [float] solar longitude of the first orbit (rad)
+        vg1: [float] geocentric velocity of the first orbit (km/s)
+        ra2: [float] right ascension of the second radiant (rad)
+        dec2: [float] declination of the second radiant (rad)
+        sol2: [float] solar longitude of the second orbit (rad)
+        vg2: [float] geocentric velocity of the second orbit (km/s)
+
+    Keyword arguments:
+        w1: [float] weight of the cos(theta) term. The paper leaves the weights undefined and uses
+            unity throughout its application.
+
+    Return:
+        [float] D_R value
+    """
+
+    _, vg_y1, _ = calcVgComponents(ra1, dec1, sol1, vg1)
+    _, vg_y2, _ = calcVgComponents(ra2, dec2, sol2, vg2)
+
+    # U is the geocentric velocity in units of the Earth's orbital speed
+    u1 = vg1/SPEED_EARTH
+    u2 = vg2/SPEED_EARTH
+
+    cos_theta1 = vg_y1/u1
+    cos_theta2 = vg_y2/u2
+
+    return np.sqrt((u2 - u1)**2 + w1*(cos_theta2 - cos_theta1)**2)
+
+
+def calcDB(e1, i1, O1, w1, e2, i2, O2, w2):
+    """ Calculate the Jenniskens (2008) D_B criterion between two orbits.
+
+        D_B compares three combinations of the orbital elements that are approximately conserved
+        while a meteoroid orbit precesses towards an Earth-crossing geometry, each normalised by
+        its observed dispersion in known streams.
+
+        Reference: Jenniskens (2008), Icarus 194, 13, doi:10.1016/j.icarus.2007.09.016.
+
+        No threshold is published for D_B.
+
+    Arguments:
+        e1: [float] num. eccentricity of the first orbit
+        i1: [float] inclination of the first orbit (rad)
+        O1: [float] longitude of ascending node of the first orbit (rad)
+        w1: [float] argument of perihelion of the first orbit (rad)
+        e2: [float] num. eccentricity of the second orbit
+        i2: [float] inclination of the second orbit (rad)
+        O2: [float] longitude of ascending node of the second orbit (rad)
+        w2: [float] argument of perihelion of the second orbit (rad)
+
+    Return:
+        [float] D_B value
+    """
+
+    c1_1 = (1.0 - e1**2)*np.cos(i1)**2
+    c1_2 = (1.0 - e2**2)*np.cos(i2)**2
+
+    c2_1 = e1**2*(0.4 - np.sin(i1)**2*np.sin(w1)**2)
+    c2_2 = e2**2*(0.4 - np.sin(i2)**2*np.sin(w2)**2)
+
+    # C3 is an angle, so the smallest of the two differences around the circle is the relevant one
+    d_c3 = (w1 + O1) - (w2 + O2)
+    d_c3 = (d_c3 + np.pi)%(2*np.pi) - np.pi
+
+    return np.sqrt(((c1_1 - c1_2)/0.13)**2 + ((c2_1 - c2_2)/0.06)**2 \
+        + (d_c3/np.radians(14.2))**2)
+
+
+def calcDT(a1, e1, i1, a2, e2, i2, a_planet=A_JUPITER):
+    """ Calculate the Jenniskens (2008) D_T criterion between two orbits, the absolute difference
+        of their Tisserand parameters.
+
+        Reference: Jenniskens (2008), Icarus 194, 13, doi:10.1016/j.icarus.2007.09.016.
+
+        No threshold is published for D_T.
+
+    Arguments:
+        a1: [float] semi-major axis of the first orbit (AU)
+        e1: [float] num. eccentricity of the first orbit
+        i1: [float] inclination of the first orbit (rad)
+        a2: [float] semi-major axis of the second orbit (AU)
+        e2: [float] num. eccentricity of the second orbit
+        i2: [float] inclination of the second orbit (rad)
+
+    Keyword arguments:
+        a_planet: [float] semi-major axis of the perturbing planet (AU). Default Jupiter.
+
+    Return:
+        [float] D_T value
+    """
+
+    t1 = calcTisserand(a1, e1, i1, a_planet=a_planet)
+    t2 = calcTisserand(a2, e2, i2, a_planet=a_planet)
+
+    return np.abs(t1 - t2)
+
+
+def calcDX(sol1, ra1, dec1, vg1, sol2, ra2, dec2, vg2, w_sol, w_ra, w_dec, w_vg):
+    """ Calculate the Rudawska et al. (2015) D_X criterion between two orbits.
+
+        D_X compares the geocentric quantities directly, which avoids propagating the velocity
+        uncertainty into the semi-major axis. The radiant terms are scaled by the velocity
+        difference, so a pair of meteors with similar radiants but different speeds is separated.
+
+        The paper leaves the four weights undefined and gives no method for choosing them, so they
+        are required arguments here rather than defaults; it also does not state the units of the
+        geocentric velocity, which matter because the velocity difference enters the radiant terms
+        additively as |Vg1 - Vg2| + 1.
+
+        Reference: Rudawska, Matlovic, Toth & Kornos (2015), P&SS 118, 38,
+        doi:10.1016/j.pss.2015.07.011.
+
+        No threshold is published for D_X.
+
+    Arguments:
+        sol1: [float] solar longitude of the first orbit (rad)
+        ra1: [float] right ascension of the first radiant (rad)
+        dec1: [float] declination of the first radiant (rad)
+        vg1: [float] geocentric velocity of the first orbit (km/s)
+        sol2: [float] solar longitude of the second orbit (rad)
+        ra2: [float] right ascension of the second radiant (rad)
+        dec2: [float] declination of the second radiant (rad)
+        vg2: [float] geocentric velocity of the second orbit (km/s)
+        w_sol: [float] weight of the solar longitude term
+        w_ra: [float] weight of the right ascension term
+        w_dec: [float] weight of the declination term
+        w_vg: [float] weight of the geocentric velocity term
+
+    Return:
+        [float] D_X value
+    """
+
+    d_vg = np.abs(vg1 - vg2)
+
+    term_sol = w_sol*(2*np.sin((sol1 - sol2)/2.0))**2
+    term_ra = w_ra*(d_vg + 1.0)*(2*np.sin((ra1 - ra2)/2.0*np.cos(dec1)))**2
+    term_dec = w_dec*(d_vg + 1.0)*(2*np.sin(np.abs(dec1 - dec2)/2.0))**2
+    term_vg = w_vg*(d_vg/vg1)**2
+
+    return np.sqrt(term_sol + term_ra + term_dec + term_vg)
+
+
+def calcDVJopek(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2, w_h, w_e, w_E):
+    """ Calculate the Jopek, Rudawska & Bartczak (2008) D_V criterion between two orbits.
+
+        D_V compares the two vectorial integrals of the two-body problem, the angular momentum and
+        the eccentricity vector, together with the orbital energy. Working with the vectors rather
+        than with the angles avoids the branch-cut and circular-orbit problems of the D_SH family.
+
+        The paper defines the weights as the reciprocal dispersions of the corresponding vectorial
+        elements over a reference set of known showers, so no universally valid defaults exist and
+        the three weight triples are required arguments here.
+
+        Units are Gaussian, with the solar gravitational parameter taken as unity.
+
+        This is a different criterion from calcDV in this module, which implements the unpublished
+        Vida criterion; calcDV is left untouched.
+
+        Reference: Jopek, Rudawska & Bartczak (2008), EM&P 102, 73, doi:10.1007/s11038-007-9197-8.
+
+        No threshold is published for D_V.
+
+    Arguments:
+        q1: [float] perihelion distance of the first orbit (AU)
+        e1: [float] num. eccentricity of the first orbit
+        i1: [float] inclination of the first orbit (rad)
+        O1: [float] longitude of ascending node of the first orbit (rad)
+        w1: [float] argument of perihelion of the first orbit (rad)
+        q2: [float] perihelion distance of the second orbit (AU)
+        e2: [float] num. eccentricity of the second orbit
+        i2: [float] inclination of the second orbit (rad)
+        O2: [float] longitude of ascending node of the second orbit (rad)
+        w2: [float] argument of perihelion of the second orbit (rad)
+        w_h: [list] three weights of the angular momentum components
+        w_e: [list] three weights of the eccentricity vector components
+        w_E: [float] weight of the energy term
+
+    Return:
+        [float] D_V value
+    """
+
+    p1 = q1*(1.0 + e1)
+    p2 = q2*(1.0 + e2)
+
+    h1, h2 = np.sqrt(p1), np.sqrt(p2)
+
+    hx1, hy1, hz1 = h1*np.sin(i1)*np.sin(O1), -h1*np.sin(i1)*np.cos(O1), h1*np.cos(i1)
+    hx2, hy2, hz2 = h2*np.sin(i2)*np.sin(O2), -h2*np.sin(i2)*np.cos(O2), h2*np.cos(i2)
+
+    ex1 = e1*(np.cos(O1)*np.cos(w1) - np.sin(O1)*np.sin(w1)*np.cos(i1))
+    ey1 = e1*(np.sin(O1)*np.cos(w1) + np.cos(O1)*np.sin(w1)*np.cos(i1))
+    ez1 = e1*np.sin(w1)*np.sin(i1)
+
+    ex2 = e2*(np.cos(O2)*np.cos(w2) - np.sin(O2)*np.sin(w2)*np.cos(i2))
+    ey2 = e2*(np.sin(O2)*np.cos(w2) + np.cos(O2)*np.sin(w2)*np.cos(i2))
+    ez2 = e2*np.sin(w2)*np.sin(i2)
+
+    # Energy of an orbit with q and e, i.e. -1/(2a), which stays finite as e approaches 1
+    en1 = -(1.0 - e1)/(2.0*q1)
+    en2 = -(1.0 - e2)/(2.0*q2)
+
+    return np.sqrt(w_h[0]*(hx1 - hx2)**2 + w_h[1]*(hy1 - hy2)**2 + 1.5*w_h[2]*(hz1 - hz2)**2 \
+        + w_e[0]*(ex1 - ex2)**2 + w_e[1]*(ey1 - ey2)**2 + w_e[2]*(ez1 - ez2)**2 \
+        + 2*w_E*(en1 - en2)**2)
 
 
 
