@@ -37,9 +37,10 @@ try:
 
     REBOUND_FOUND = True
 
-except ImportError as e:
+except (ImportError, OSError) as e:
     # Keep optional-dependency failures quiet during import. Report the actual cause only if a
-    #   REBOUND function or the command-line interface is used.
+    #   REBOUND function or the command-line interface is used. OSError covers a reboundx library
+    #   that fails to load because it was compiled against a different REBOUND version.
     _REBOUND_IMPORT_ERROR = str(e)
 
 from wmpl.Config import config
@@ -65,13 +66,100 @@ def _printReboundUnavailable(include_install_help=False):
 
     if include_install_help:
         print("")
-        print("Install them with:  pip install rebound reboundx")
+        print("Install them with:")
+        print("  pip install rebound")
+        print("  pip install --no-build-isolation reboundx")
+        print("('--no-build-isolation' compiles reboundx against the installed rebound.)")
+        print("If reboundx is installed but fails to load, recompile it against the installed rebound:")
+        print("  pip install --force-reinstall --no-deps --no-build-isolation --no-binary reboundx reboundx")
+        print("(see the README for keeping an older rebound).")
         print("")
         print("Note: on Windows, 'reboundx' has no prebuilt wheel and does not compile with the "
               "MSVC compiler (it uses C features MSVC lacks). Use one of:")
         print("  - Windows Subsystem for Linux (WSL2, e.g. Ubuntu) - recommended, builds cleanly, or")
         print("  - a Linux or macOS machine.")
         print("'rebound' alone is not enough; 'reboundx' must import successfully too.")
+
+
+def _addNamedParticle(sim, name, *args, **kwargs):
+    """ Add a particle to a REBOUND simulation so that it can be retrieved as sim.particles[name].
+
+    REBOUND 5 replaced particle hashes with names, so the keyword is 'name' there and 'hash' in
+    REBOUND 4. Lookup by string, sim.particles[name], is the same in both. In REBOUND 5 a body
+    queried from Horizons cannot be named through sim.add (the Horizons query takes 'name' as the
+    body to look up), so it is named after it is added.
+
+    Arguments:
+        sim: [rebound.Simulation] The simulation.
+        name: [str] Name used to identify the particle.
+        *args, **kwargs: Passed on to sim.add (e.g. a Horizons name and date, or m, x, ..., vz).
+    """
+
+    if int(rb.__version__.split(".")[0]) < 5:
+        sim.add(*args, hash=name, **kwargs)
+
+    elif args and isinstance(args[0], str):
+        sim.add(*args, **kwargs)
+        sim.particles[sim.N - 1].name = name
+
+    else:
+        sim.add(*args, name=name, **kwargs)
+
+
+def _setHeartbeat(sim, func):
+    """ Set the heartbeat function of a REBOUND simulation.
+
+    In REBOUND 5.1.1 the 'heartbeat' property setter fails for any function ("'Simulation' object
+    has no attribute '_hb'"), because it stores its ctypes wrapper in an attribute missing from
+    Simulation.__slots__. In that case the C function pointer is set directly.
+
+    Arguments:
+        sim: [rebound.Simulation] The simulation.
+        func: [function] Heartbeat function, called with a pointer to the simulation.
+
+    Return:
+        [object or None] The ctypes wrapper when the pointer was set directly, else None. The caller
+            must keep it alive for the whole integration, or the callback is garbage collected.
+    """
+
+    try:
+        sim.heartbeat = func
+        return None
+
+    except AttributeError as e:
+        if "_hb" not in str(e):
+            raise
+
+        heartbeat_ref = rb.simulation.AFF(func)
+        sim._heartbeat = heartbeat_ref
+
+        return heartbeat_ref
+
+
+def _checkReboundxAttached(sim):
+    """ Raise a clear error if REBOUNDx failed to attach to the simulation.
+
+    reboundx has no prebuilt wheels, so pip compiles it from source, by default in an isolated
+    environment with the newest REBOUND rather than the installed one. If the two versions have a
+    different C simulation structure, reboundx writes its pointer outside the installed REBOUND's
+    structure (overwriting other memory) and sim.extras stays empty. Setting any REBOUNDx parameter
+    then fails with an unhelpful "Need to attach reboundx.Extras instance" error.
+
+    Arguments:
+        sim: [rebound.Simulation] The simulation, just after reboundx.Extras(sim) was created.
+    """
+
+    if not sim.extras:
+        raise RuntimeError(
+            "REBOUNDx did not attach to the REBOUND simulation. This happens when reboundx was compiled "
+            "against a different REBOUND version than the installed one (rebound {:s}, reboundx {:s}). "
+            "Recompile reboundx against the installed REBOUND with:\n"
+            "  pip install --force-reinstall --no-deps --no-build-isolation --no-binary reboundx "
+            "reboundx\n"
+            "This installs the latest reboundx, which needs rebound 5 or newer, so update rebound "
+            "first. To keep this rebound, pin the reboundx released with it instead by appending "
+            "'==<version>' (e.g. reboundx 4.3.0 for rebound 4.3.0); a newer reboundx does not compile "
+            "against an older rebound.".format(rb.__version__, reboundx.__version__))
 
 
 # Hill-sphere radii in AU used for close-encounter detection.
@@ -752,7 +840,7 @@ def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local",
 
         # Use JPL Horizons to query for the J2000 ecliptic SSB Earth state vector
         sim = rb.Simulation()
-        sim.add("Geocenter", date=f"JD{jd:.6f}", hash="Earth")
+        _addNamedParticle(sim, "Earth", "Geocenter", date=f"JD{jd:.6f}")
         ps = sim.particles
         earth_state = [ps["Earth"].x, ps["Earth"].y, ps["Earth"].z,
                        ps["Earth"].vx, ps["Earth"].vy, ps["Earth"].vz]
@@ -919,12 +1007,12 @@ def _integrateParticles(task):
 
     Arguments:
         task: [dict] A picklable task description with the keys:
-            planet_names:    [list] Massive-body names/hashes, in add order.
+            planet_names:    [list] Massive-body names, in add order.
             planet_states:   [list] Per-planet [x, y, z, vx, vy, vz] in REBOUND units (AU,
                                  AU/(year/2pi)), barycentric ecliptic J2000.
             planet_masses:   [list] Per-planet mass in solar masses.
             particle_states: [list] Per-particle barycentric [x, y, z, vx, vy, vz] (REBOUND units).
-            particle_names:  [list] Per-particle name/hash (parallel to particle_states).
+            particle_names:  [list] Per-particle names (parallel to particle_states).
             times:           [list] Output times (REBOUND time units) to integrate to.
             direction:       [str]  "forward" or "backward" (sets the timestep sign).
             reference_frame: [str]  "heliocentric" or "geocentric" (passed to extractSimParams).
@@ -982,23 +1070,24 @@ def _integrateParticles(task):
     # Set up the simulation
     sim = rb.Simulation()
     rebx = reboundx.Extras(sim)
+    _checkReboundxAttached(sim)
     sim.dt = 0.001 if direction == "forward" else -0.001
 
     # Add the massive bodies from the precomputed barycentric states
     for name, state, mass in zip(planet_names, planet_states, planet_masses):
-        sim.add(
+        _addNamedParticle(
+            sim, name,
             m=mass,
             x=state[0], y=state[1], z=state[2],
             vx=state[3], vy=state[4], vz=state[5],
-            hash=name,
         )
 
     # Add the test particles (massless)
     for name, state in zip(particle_names, particle_states):
-        sim.add(
+        _addNamedParticle(
+            sim, name,
             x=state[0], y=state[1], z=state[2],
             vx=state[3], vy=state[4], vz=state[5],
-            hash=name,
         )
 
     ps = sim.particles
@@ -1106,7 +1195,8 @@ def _integrateParticles(task):
                     st["min_dist"][bname] = d
                     st["min_time"][bname] = t_now
 
-    sim.heartbeat = heartbeat
+    # Keep the returned reference alive until the integration ends (see _setHeartbeat)
+    heartbeat_ref = _setHeartbeat(sim, heartbeat)  # noqa: F841
 
     outputs = {name: [] for name in particle_names}
 
@@ -1370,7 +1460,8 @@ def reboundSimulate(
 
         # Seed the planets from the JPL Horizons web service
         for name in planet_names:
-            parent_sim.add(horizons_names.get(name, name), date=f"JD{time_tdb:.6f}", hash=name)
+            _addNamedParticle(parent_sim, name, horizons_names.get(name, name),
+                              date=f"JD{time_tdb:.6f}")
 
     else:
 
@@ -1378,11 +1469,11 @@ def reboundSimulate(
         jpl_ephem_data = SPK.open(config.jpl_ephem_file)
         for name in planet_names:
             body_state, body_mass = ephemBodyStateRebound(name, time_tdb, jpl_ephem_data)
-            parent_sim.add(
+            _addNamedParticle(
+                parent_sim, name,
                 m=body_mass,
                 x=body_state[0], y=body_state[1], z=body_state[2],
                 vx=body_state[3], vy=body_state[4], vz=body_state[5],
-                hash=name,
             )
 
     # Read the raw barycentric planet states (before move_to_com) and masses to hand to the workers
