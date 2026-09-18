@@ -713,7 +713,11 @@ def calcC(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2):
         Units are Gaussian, with the solar gravitational parameter taken as unity, so that the
         magnitude of the angular momentum vector is sqrt(p) with p in AU.
 
-        Reference: Neslusan (2002), in Dynamics of Natural and Artificial Celestial Bodies, 365.
+        Reference: Neslusan, in Dynamics of Natural and Artificial Celestial Bodies, the
+        proceedings of the US/European Celestial Mechanics Workshop held in Poznan in July 2000,
+        365. The volume is dated 2002 in some citations and 2001 in others, including the reference
+        list of Jopek, Rudawska & Bartczak (2008), which also describes the criterion as the
+        difference of the orbital momentum vectors per unit mass, as implemented here.
 
         That volume was not accessible, so whether it publishes a threshold is unchecked. None is
         supplied here.
