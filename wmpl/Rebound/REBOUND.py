@@ -384,6 +384,21 @@ def hermiteClosestApproach(t0, r0, v0, t1, r1, v1):
     return d_min, t_min
 
 
+def _encounterRecord(body, dist_au, time_days):
+    """ One close-encounter entry, in the format shared by all the encounter lists. """
+
+    hill_radius = HILL_RADII_AU[body]
+
+    return {
+        "body": body,
+        "min_dist_au": dist_au,
+        "time_days": time_days,
+        "hill_radius_au": hill_radius,
+        "n_hill": dist_au/hill_radius,
+        "index": None,
+    }
+
+
 def encountersFromMinDistances(min_dist_au, min_time_days, n_hill=3.0):
     """ Build the close-encounter list from the closest-approach distances measured during the
     integration (see the heartbeat tracking in _integrateParticles).
@@ -402,6 +417,10 @@ def encountersFromMinDistances(min_dist_au, min_time_days, n_hill=3.0):
         n_hill: [float] Multiple of the Hill radius used as the close-encounter threshold.
             Default is 3.0.
 
+    This gives at most one encounter per body, its deepest approach. The "encounters" diagnostic of
+    _integrateParticles lists every passage instead, so repeated encounters with the same body are
+    not lost.
+
     Return:
         [list] Encounter dicts in the same format as detectCloseEncounters, sorted by closeness
             (min_dist/R_Hill ascending).
@@ -416,14 +435,7 @@ def encountersFromMinDistances(min_dist_au, min_time_days, n_hill=3.0):
             continue
 
         if dist < n_hill*hill_radius:
-            encounters.append({
-                "body": body,
-                "min_dist_au": dist,
-                "time_days": min_time_days.get(body),
-                "hill_radius_au": hill_radius,
-                "n_hill": dist/hill_radius,
-                "index": None,
-            })
+            encounters.append(_encounterRecord(body, dist, min_time_days.get(body)))
 
     encounters.sort(key=lambda e: e["n_hill"])
 
@@ -994,6 +1006,9 @@ def _integrateParticles(task):
             "diagnostics": {particle_name: {
                 "min_dist_au":   {body: closest approach in AU (None if never tracked)},
                 "min_time_days": {body: time of closest approach in days},
+                "encounters":    [list] every close encounter, in the order it happened: one dict
+                                 per local minimum of an object-body distance inside n_hill Hill
+                                 radii, in the format of encountersFromMinDistances,
                 "departed":      [bool] whether the object left the Earth's neighbourhood,
                 "impact":        None, or {"body", "time_days", "dist_au"} if the object hit a body,
             }},
@@ -1001,6 +1016,8 @@ def _integrateParticles(task):
         The closest approaches are tracked at every internal integrator timestep (via a heartbeat
         callback), not at the output samples, and refined between steps (see
         hermiteClosestApproach), so they are not limited by the output or the step sampling.
+        "min_dist_au" keeps only the deepest approach to each body, while "encounters" keeps each
+        passage, so repeated encounters with the same body are all reported.
     """
 
     planet_names = task["planet_names"]
@@ -1117,7 +1134,8 @@ def _integrateParticles(task):
     # can move millions of km per step past a planet, and the step-end samples can overestimate the
     # minimum by a large fraction of that. The closest approach inside each step is therefore
     # refined on a Hermite interpolant of the relative motion (see hermiteClosestApproach). "prev"
-    # holds the relative state of the previous step for each body.
+    # holds the relative state of the previous step for each body, and "encounters" collects every
+    # refined local minimum that falls inside n_hill Hill radii, as (body, time, distance).
     track = {}
     for name in particle_names:
         track[name] = {
@@ -1127,6 +1145,7 @@ def _integrateParticles(task):
             "impact": None,
             "escaped": None,
             "prev": {},
+            "encounters": [],
         }
 
     def heartbeat(sim_pointer):
@@ -1182,6 +1201,10 @@ def _integrateParticles(task):
                         if d_h < st["min_dist"][bname]:
                             st["min_dist"][bname] = d_h
                             st["min_time"][bname] = t_h
+
+                        # Every such passage inside the Hill-sphere threshold is an encounter
+                        if d_h < n_hill*HILL_RADII_AU.get(bname, 0.0):
+                            st["encounters"].append((bname, t_h, d_h))
 
                 st["prev"][bname] = (t_now, rel, rv)
 
@@ -1290,6 +1313,7 @@ def _integrateParticles(task):
             "min_time_days": {b: (None if not np.isfinite(st["min_time"][b])
                                   else st["min_time"][b]/(2*np.pi)*365.25)
                               for b in planet_names},
+            "encounters": [_encounterRecord(b, d, t/(2*np.pi)*365.25) for b, t, d in st["encounters"]],
             "departed": st["departed"],
             "impact": st["impact"],
             "escaped": st["escaped"],
@@ -1354,8 +1378,9 @@ def reboundSimulate(
             time.
         outputs_mc: [dict] {mc_name: outputs} for the Monte Carlo realizations.
         diagnostics: [dict] Only returned if return_diagnostics is True. Maps each particle name to
-            its closest approaches ("min_dist_au", "min_time_days"), whether it left the
-            Earth's neighbourhood ("departed"), and any impact ("impact"). See _integrateParticles.
+            its closest approaches ("min_dist_au", "min_time_days"), every close encounter
+            ("encounters"), whether it left the Earth's neighbourhood ("departed"), and any impact
+            ("impact"). See _integrateParticles.
 
     """
 
@@ -1754,14 +1779,18 @@ if __name__ == "__main__":
         else:
             clones_survived.append(name)
 
-    # How many clones had a close encounter with each body, and the closest approach over all clones
+    # How many clones had a close encounter with each body, how many encounters they had in total
+    # (a clone can meet the same body more than once), and the closest approach over all clones
     clone_encounters = {}
     for name, diag in clone_diag.items():
-        for enc in encountersFromMinDistances(diag.get("min_dist_au", {}),
-                                              diag.get("min_time_days", {}), n_hill=n_hill):
-            body = enc["body"]
-            entry = clone_encounters.setdefault(body, {"count": 0, "closest_au": np.inf})
+        clone_list = diag.get("encounters", [])
+        for body in {enc["body"] for enc in clone_list}:
+            entry = clone_encounters.setdefault(body, {"count": 0, "n_encounters": 0,
+                                                       "closest_au": np.inf})
             entry["count"] += 1
+        for enc in clone_list:
+            entry = clone_encounters[enc["body"]]
+            entry["n_encounters"] += 1
             entry["closest_au"] = min(entry["closest_au"], enc["min_dist_au"])
 
     # Clones truncated by an impact or an ejection end at a different epoch than the rest, so mixing
@@ -1854,9 +1883,10 @@ if __name__ == "__main__":
     # internal integrator timestep and refined between steps, which resolves the fast Earth/Moon
     # regime that the sampled output cannot. Needed both for the summary and the report file. n_hill
     # is set above, where the clone outcomes are classified with the same threshold.
+    # Every encounter is listed, including repeated ones with the same body, in the order they
+    # happened during the integration (for a backward integration, the latest epoch first).
     nominal_diag = sim_diagnostics.get(traj.traj_id, {})
-    encounters = encountersFromMinDistances(
-        nominal_diag.get("min_dist_au", {}), nominal_diag.get("min_time_days", {}), n_hill=n_hill)
+    encounters = sorted(nominal_diag.get("encounters", []), key=lambda e: abs(e["time_days"]))
 
     # Impact on a body, if any (detected with REBOUND's collision detection)
     impact = nominal_diag.get("impact")
@@ -1949,7 +1979,7 @@ if __name__ == "__main__":
 
     # Close-encounter summary (minima tracked every integrator timestep, refined between steps)
     if encounters:
-        print("  Close encounters (< {:.0f} Hill radii):".format(n_hill))
+        print("  Close encounters (< {:.0f} Hill radii), in the order they happened:".format(n_hill))
         for enc in encounters:
             print("    {:<8s} {:12.6f} AU ({:12.1f} km)  at t = {:+9.3f} d   ({:.2f} R_Hill, R_Hill = {:.6f} AU)".format(
                 enc["body"], enc["min_dist_au"], enc["min_dist_au"]*149597870.7,
@@ -1989,10 +2019,11 @@ if __name__ == "__main__":
             print("  Clones with a close encounter (< {:.0f} Hill radii):".format(n_hill))
             for body in sorted(clone_encounters, key=lambda b: -clone_encounters[b]["count"]):
                 entry = clone_encounters[body]
-                print("    {:<10s} {:5d}/{:<5d} ({:5.1f}%)   closest over all clones: "
-                      "{:.6f} AU ({:.0f} km)".format(
+                print("    {:<10s} {:5d}/{:<5d} ({:5.1f}%)   {:5d} encounter(s)   closest over all "
+                      "clones: {:.6f} AU ({:.0f} km)".format(
                           body, entry["count"], n_clones, 100.0*entry["count"]/n_clones,
-                          entry["closest_au"], entry["closest_au"]*149597870.7))
+                          entry["n_encounters"], entry["closest_au"],
+                          entry["closest_au"]*149597870.7))
         else:
             print("")
             print("  No clone came within {:.0f} Hill radii of any body.".format(n_hill))
@@ -2089,8 +2120,8 @@ if __name__ == "__main__":
 
         # Save the detected close encounters (Hill-sphere criterion). The distances are the minima
         # tracked at every internal integrator timestep and refined between steps, not sampled from
-        # the output below.
-        f.write("\nClose encounters (< {:.0f} Hill radii):\n".format(n_hill))
+        # the output below. Every encounter is listed, in the order it happened.
+        f.write("\nClose encounters (< {:.0f} Hill radii), in the order they happened:\n".format(n_hill))
         if encounters:
             for enc in encounters:
                 f.write("  {:<8s} min dist = {:10.6f} AU ({:12.1f} km) at t = {:10.4f} d, R_Hill = {:.6f} AU ({:.2f} R_Hill)\n".format(
@@ -2144,10 +2175,11 @@ if __name__ == "__main__":
                 f.write("\nClones with a close encounter (< {:.0f} Hill radii):\n".format(n_hill))
                 for body in sorted(clone_encounters, key=lambda b: -clone_encounters[b]["count"]):
                     entry = clone_encounters[body]
-                    f.write("  {:<10s} {:5d}/{:<5d} ({:5.1f}%)   closest over all clones "
-                            "{:.6f} AU ({:.1f} km)\n".format(
+                    f.write("  {:<10s} {:5d}/{:<5d} ({:5.1f}%)   {:5d} encounter(s)   closest over all "
+                            "clones {:.6f} AU ({:.1f} km)\n".format(
                                 body, entry["count"], n_clones, 100.0*entry["count"]/n_clones,
-                                entry["closest_au"], entry["closest_au"]*149597870.7))
+                                entry["n_encounters"], entry["closest_au"],
+                                entry["closest_au"]*149597870.7))
             else:
                 f.write("\nNo clone came within {:.0f} Hill radii of any body.\n".format(n_hill))
 
@@ -2503,6 +2535,7 @@ if __name__ == "__main__":
                          for body, names in clones_impacted.items()},
             "close_encounters": {body: {"count": entry["count"],
                                         "fraction": entry["count"]/len(sim_outputs_mc),
+                                        "n_encounters": entry["n_encounters"],
                                         "closest_au": entry["closest_au"]}
                                  for body, entry in clone_encounters.items()},
             "ci_uses_survivors_only": ci_uses_survivors_only,
@@ -2510,6 +2543,7 @@ if __name__ == "__main__":
         } if len(sim_outputs_mc) else None,
         "clone_closest_approaches_au": {name: diag.get("min_dist_au")
                                         for name, diag in clone_diag.items()},
+        "clone_encounters": {name: diag.get("encounters", []) for name, diag in clone_diag.items()},
         "energy_rel_drift": nominal_diag.get("energy_rel_drift"),
         "divergence": lyap,
         "nominal": _elementSeries(sim_outputs),

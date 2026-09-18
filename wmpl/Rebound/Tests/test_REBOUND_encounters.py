@@ -1,9 +1,9 @@
 """ Regression tests for the closest approaches measured during a real REBOUND integration.
 
 Away from the Earth IAS15 takes steps of 1-2 days, so the distances at the step ends alone can miss
-a planetary flyby's minimum by a large fraction of the step length. These tests integrate a
-synthetic flyby with the integrator's own step choice and check the recorded minimum against a
-dense re-integration of the same flyby. They are skipped when rebound/reboundx are not importable.
+a planetary flyby's minimum by a large fraction of the step length. These tests integrate synthetic
+flybys with the integrator's own step choice and check the recorded minima, and the list of every
+encounter, against dense re-integrations of the same flybys. They are skipped when rebound/reboundx are not importable.
 They need no ephemeris file: the massive bodies are placed on circular orbits.
 """
 
@@ -106,3 +106,76 @@ def testFlybyMinimumIsNotLimitedByTheIntegratorStep(reb, direction):
 
     # The flyby really is an encounter well inside the 3 Hill-radii threshold
     assert d_dense/reb.HILL_RADII_AU["Mercury"] < 2.5
+
+
+def _resonantTask(reb, b_hill, inclination_deg, t_before_days):
+    """ An object with Mercury's orbital period on an orbit inclined to Mercury's, meeting Mercury
+    ~t_before_days after the start. With equal periods and nearly circular orbits the two meet
+    again at the opposite node half an orbit later, and so on every ~44 days.
+    """
+
+    task = _flybyTask(v_rel_kms=10.0, b_hill=b_hill, t_before_days=0.0, direction="forward")
+    mercury = np.array(task["planet_states"][1])
+
+    # Just outside Mercury, moving along Mercury's direction of motion tilted out of its plane, with
+    # the vis-viva speed for Mercury's semi-major axis, so both have the same orbital period
+    inc = np.radians(inclination_deg)
+    r_hat = mercury[:3]/np.linalg.norm(mercury[:3])
+    v = mercury[3:]
+    offset = b_hill*reb.HILL_RADII_AU["Mercury"]*r_hat
+    v_dir = v*np.cos(inc) + np.cross(r_hat, v)*np.sin(inc)
+    v_dir /= np.linalg.norm(v_dir)
+    v_tilted = v_dir*np.sqrt(2.0/np.linalg.norm(mercury[:3] + offset) - 1.0/0.387)
+
+    # Two-body propagation of the object back to the start
+    sim = reb.rb.Simulation()
+    sim.add(m=1.0)
+    sim.add(x=mercury[0] + offset[0], y=mercury[1] + offset[1], z=mercury[2] + offset[2],
+            vx=v_tilted[0], vy=v_tilted[1], vz=v_tilted[2])
+    sim.integrate(-t_before_days*DAY)
+    obj = sim.particles[1]
+
+    # Mercury on its circular orbit at the start
+    phase = np.arctan2(mercury[1], mercury[0]) - np.sqrt(1.0 + 1.66e-7)/0.387**1.5*t_before_days*DAY
+    task["planet_states"][1] = _circular(0.387, 1.66e-7, phase)
+    task["particle_states"] = [[obj.x, obj.y, obj.z, obj.vx, obj.vy, obj.vz]]
+
+    return task
+
+
+def testRepeatedEncountersWithTheSameBodyAreAllListed(reb):
+    """ Three passages by Mercury, half an orbit apart, are all listed in order, while the per-body
+    minimum keeps only the deepest. The list does not depend on the step sampling.
+    """
+
+    task = _resonantTask(reb, b_hill=1.5, inclination_deg=15.0, t_before_days=2.0)
+    rh = reb.HILL_RADII_AU["Mercury"]
+
+    def run(times):
+        diag = reb._integrateParticles(dict(task, times=list(times)))["diagnostics"]["obj"]
+        return diag, [e for e in diag["encounters"] if e["body"] == "Mercury"]
+
+    diag, mercury = run([0.0, 100.0*DAY])
+    _, mercury_dense = run(np.linspace(0.0, 100.0*DAY, 3001))
+
+    # All passages, in order: ~2 days after the start, then every half Mercury orbit (~44 days)
+    assert len(mercury) == 3
+    assert mercury[0]["time_days"] == pytest.approx(2.0, abs=0.1)
+    assert np.diff([e["time_days"] for e in mercury]) == pytest.approx([44.0, 44.0], abs=1.0)
+    assert all(e["n_hill"] < 3.0 for e in mercury)
+
+    # Nothing else comes close in this configuration
+    assert [e["body"] for e in diag["encounters"]] == ["Mercury"]*3
+
+    # The per-body minimum is the deepest passage
+    deepest = min(mercury, key=lambda e: e["min_dist_au"])
+    assert diag["min_dist_au"]["Mercury"] == deepest["min_dist_au"]
+    assert diag["min_time_days"]["Mercury"] == deepest["time_days"]
+
+    # Same passages with forced short steps (these slower, more bent passages leave the refined
+    # distance within ~1e-5 of the dense one)
+    assert len(mercury_dense) == 3
+    for e, e_dense in zip(mercury, mercury_dense):
+        assert e["min_dist_au"] == pytest.approx(e_dense["min_dist_au"], rel=1e-4)
+        assert abs(e["time_days"] - e_dense["time_days"])*1440 < 0.5
+        assert e["hill_radius_au"] == rh
