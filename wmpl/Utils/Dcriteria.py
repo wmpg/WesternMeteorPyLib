@@ -5,7 +5,7 @@ import math
 
 import numpy as np
 
-from wmpl.Utils.OrbitClassification import A_JUPITER
+from wmpl.Utils.OrbitClassification import A_JUPITER, GAUSS_K, GAUSS_K_SQUARED
 
 
 
@@ -952,29 +952,86 @@ def calcDX(ra1, dec1, sol1, vg1, ra2, dec2, sol2, vg2, w_sol=DX_W_SOL, w_ra=DX_W
     return np.sqrt(term_sol + term_ra + term_dec + term_vg)
 
 
-def calcDVJopek(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2, w_h, w_e, w_E):
+# Standard deviations of the vectorial elements within a stream, table 1 of Jopek, Rudawska &
+#   Bartczak (2008), as (angular momentum triple, eccentricity vector triple, energy), in units of
+#   AU, day and solar masses. Keyed by the age of the stream in years, plus the sporadic background
+#   measured from the IAU 2003 data
+DV_DISPERSIONS = {
+    0: ((2.5e-5, 2.4e-5, 2.8e-5), (2.8e-3, 2.8e-3, 2.0e-3), 7.1e-7),
+    2000: ((3.9e-4, 3.4e-4, 1.7e-4), (6.6e-3, 7.1e-3, 1.3e-2), 7.6e-7),
+    4000: ((9.8e-4, 5.9e-4, 4.1e-4), (1.1e-2, 1.6e-2, 2.3e-2), 9.8e-7),
+    5000: ((1.3e-3, 6.8e-4, 5.1e-4), (1.4e-2, 2.0e-2, 2.7e-2), 1.1e-6),
+    6000: ((1.5e-3, 7.9e-4, 6.2e-4), (1.8e-2, 2.3e-2, 3.1e-2), 1.2e-6),
+    'sporadic': ((6.8e-3, 7.8e-3, 1.2e-2), (5.1e-1, 4.9e-1, 3.4e-1), 4.3e-4),
+    }
+
+# Age of the stream whose dispersions the paper used for its own search
+DV_DEFAULT_EPOCH = 4000
+
+# Thresholds at the 99% reliability level, table 2 of the same paper, keyed by the smallest stream
+#   size accepted. The column is headed "D_V x 10^-1", so the tabulated figures are scaled up here
+DV_THRESHOLDS = {
+    8: 2.414, 9: 2.575, 10: 2.707, 11: 2.815, 12: 2.906, 13: 2.985, 14: 3.057, 15: 3.128,
+    }
+
+
+def calcDVWeights(epoch=DV_DEFAULT_EPOCH):
+    """ Calculate the D_V weights from the dispersions of the vectorial elements within a stream.
+
+        A pair of orbits differing by twice the dispersion in a single element contributes exactly
+        1 to the sum, which is what sets the scale of the criterion.
+
+        Reference: Jopek, Rudawska & Bartczak (2008), EM&P 102, 73, eq. 5,
+        doi:10.1007/s11038-007-9197-8.
+
+    Keyword arguments:
+        epoch: [int] age of the stream in years, one of the keys of DV_DISPERSIONS, or the string
+            'sporadic' for the background. Default 4000, which the paper used for its own search.
+
+    Return:
+        [tuple] the three angular momentum weights, the three eccentricity vector weights, and the
+            energy weight
+    """
+
+    if epoch not in DV_DISPERSIONS:
+        raise ValueError("No dispersions published for epoch {!r}. Available: {!s}.".format(epoch,
+            sorted(DV_DISPERSIONS, key=str)))
+
+    sigma_h, sigma_e, sigma_energy = DV_DISPERSIONS[epoch]
+
+    return ([1.0/(2*s)**2 for s in sigma_h], [1.0/(2*s)**2 for s in sigma_e],
+        1.0/(2*sigma_energy)**2)
+
+
+def calcDVJopek(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2, w_h=None, w_e=None, w_E=None):
     """ Calculate the Jopek, Rudawska & Bartczak (2008) D_V criterion between two orbits.
 
         D_V compares the two vectorial integrals of the two-body problem, the angular momentum and
         the eccentricity vector, together with the orbital energy. Working with the vectors rather
         than with the angles avoids the branch-cut and circular-orbit problems of the D_SH family.
 
-        The weights are defined in terms of the dispersions of the corresponding vectorial
-        elements over a reference set of known showers, so no universally valid defaults exist and
-        they are required arguments here. The paper was not accessible, so neither its tabulated
-        weight values nor the exact definition could be read.
+        The weights are the reciprocal squared dispersions of each element within a stream,
+        w = (2*sigma)^-2, so a pair differing by twice the dispersion in one element contributes
+        exactly 1. They default to the dispersions the paper measured for a stream 4000 years after
+        formation, which is the set it used for its own search; calcDVWeights returns the set for
+        any of the tabulated ages, or for the sporadic background.
 
-        Units are Gaussian, with the solar gravitational parameter taken as unity.
+        Units are AU, day and solar masses, so the angular momentum is in AU^2/day and the energy
+        in AU^2/day^2. The weights are dimensional, so they are only meaningful in these units.
 
         This is a different criterion from calcDV in this module, which implements the unpublished
         Vida criterion; calcDV is left untouched.
 
-        The factors of 1.5 on the h_z term and 2 on the energy term follow the only accessible
-        transcription of the equation and have not been checked against the original.
+        The factors of 1.5 on the third angular momentum component and 2 on the energy are
+        deliberate: those two are the invariant and semi-invariant parts of the set, so the paper
+        weights them up beyond what their dispersions alone would give.
 
-        Reference: Jopek, Rudawska & Bartczak (2008), EM&P 102, 73, doi:10.1007/s11038-007-9197-8.
+        Published thresholds, at the 99% reliability level, are in DV_THRESHOLDS, keyed by the
+        smallest stream size accepted. They run from 2.414 for groups of 8 to 3.128 for groups of
+        15.
 
-        Whether that paper publishes a threshold is unchecked. None is supplied here.
+        Reference: Jopek, Rudawska & Bartczak (2008), EM&P 102, 73, eqs 1 to 5,
+        doi:10.1007/s11038-007-9197-8.
 
     Arguments:
         q1: [float] perihelion distance of the first orbit (AU)
@@ -987,18 +1044,28 @@ def calcDVJopek(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2, w_h, w_e, w_E):
         i2: [float] inclination of the second orbit (rad)
         O2: [float] longitude of ascending node of the second orbit (rad)
         w2: [float] argument of perihelion of the second orbit (rad)
-        w_h: [list] three weights of the angular momentum components
-        w_e: [list] three weights of the eccentricity vector components
-        w_E: [float] weight of the energy term
+
+    Keyword arguments:
+        w_h: [list] three weights of the angular momentum components. Default as published.
+        w_e: [list] three weights of the eccentricity vector components. Default as published.
+        w_E: [float] weight of the energy term. Default as published.
 
     Return:
         [float] D_V value
     """
 
+    if w_h is None or w_e is None or w_E is None:
+
+        default_h, default_e, default_energy = calcDVWeights()
+
+        w_h = default_h if w_h is None else w_h
+        w_e = default_e if w_e is None else w_e
+        w_E = default_energy if w_E is None else w_E
+
     p1 = q1*(1.0 + e1)
     p2 = q2*(1.0 + e2)
 
-    h1, h2 = np.sqrt(p1), np.sqrt(p2)
+    h1, h2 = GAUSS_K*np.sqrt(p1), GAUSS_K*np.sqrt(p2)
 
     hx1, hy1, hz1 = h1*np.sin(i1)*np.sin(O1), -h1*np.sin(i1)*np.cos(O1), h1*np.cos(i1)
     hx2, hy2, hz2 = h2*np.sin(i2)*np.sin(O2), -h2*np.sin(i2)*np.cos(O2), h2*np.cos(i2)
@@ -1011,11 +1078,10 @@ def calcDVJopek(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2, w_h, w_e, w_E):
     ey2 = e2*(np.sin(O2)*np.cos(w2) + np.cos(O2)*np.sin(w2)*np.cos(i2))
     ez2 = e2*np.sin(w2)*np.sin(i2)
 
-    # Energy of an orbit with q and e, i.e. -1/(2a), which stays finite as e approaches 1
-    en1 = -(1.0 - e1)/(2.0*q1)
-    en2 = -(1.0 - e2)/(2.0*q2)
+    # Energy of an orbit with q and e, i.e. -mu/(2a), written so it stays finite as e approaches 1
+    en1 = -GAUSS_K_SQUARED*(1.0 - e1)/(2.0*q1)
+    en2 = -GAUSS_K_SQUARED*(1.0 - e2)/(2.0*q2)
 
-    # The 1.5 and the 2 are as transcribed; see the note in the docstring
     return np.sqrt(w_h[0]*(hx1 - hx2)**2 + w_h[1]*(hy1 - hy2)**2 + 1.5*w_h[2]*(hz1 - hz2)**2
         + w_e[0]*(ex1 - ex2)**2 + w_e[1]*(ey1 - ey2)**2 + w_e[2]*(ez1 - ez2)**2
         + 2*w_E*(en1 - en2)**2)

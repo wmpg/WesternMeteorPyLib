@@ -27,8 +27,10 @@ JW_APHELION_LIMIT = 4.6      # aphelion distance [AU]
 JW_KRESAK_P_LIMIT = 2.5      # Kresak P [yr]
 JW_ENERGY_LIMIT = -5.28e-5   # orbital energy -k^2/(2a) [AU^2/day^2]
 
-# Square of the Gaussian gravitational constant [AU^3/day^2]
-GAUSS_K_SQUARED = 0.01720209895**2
+# Gaussian gravitational constant [AU^1.5/day] and its square, the solar gravitational
+#   parameter in units of AU, day and solar masses [AU^3/day^2]
+GAUSS_K = 0.01720209895
+GAUSS_K_SQUARED = GAUSS_K**2
 
 # Semi-major axes of the other giant planets [AU]
 A_SATURN = 9.5826

@@ -20,11 +20,12 @@ import math
 import numpy as np
 
 from wmpl.Utils.Dcriteria import (calcRho1, calcRho2, calcRho5, calcC, calcDR, calcDB, calcDT,
-    calcDX, calcDVJopek, calcDACS, calcDSAC, calcDN, calcDD, TC_REFERENCE_A, TC_REFERENCE_E,
+    calcDX, calcDVJopek, calcDVWeights, calcDACS, calcDSAC, calcDN, calcDD, DV_DISPERSIONS,
+    DV_THRESHOLDS, DV_DEFAULT_EPOCH, TC_REFERENCE_A, TC_REFERENCE_E,
     TC_REFERENCE_INCL, TC_REFERENCE_Q, DACS_A_SCALE, DX_W_SOL, DX_W_RA, DX_W_DEC, DX_W_VG)
 from wmpl.Utils.OrbitClassification import (calcTisserand, calcKresakK, calcKresakP,
     calcAphelionDistance, calcOrbitalEnergy, isCometaryQi, isCometaryKi, isCometaryPi,
-    isCometaryEi, calcHillRadius, calcResonanceSemiMajorAxis, classifyTancrediComet,
+    isCometaryEi, GAUSS_K, calcHillRadius, calcResonanceSemiMajorAxis, classifyTancrediComet,
     classifyTancrediAsteroid, isTancrediResonanceProtected, calcMOID, calcGiantPlanetMOIDs,
     calcResonanceWidth, calcMaxPerihelionForTisserand, calcMinMOIDForTisserand,
     _orbitPosition, A_JUPITER, A_URANUS, JW_INCL_LIMIT, JW_ENERGY_LIMIT, GAUSS_K_SQUARED,
@@ -667,7 +668,7 @@ def test_DVJopek_energy_term_matches_the_semimajor_axis():
 
         a1 = q1/(1.0 - e1)
         a2 = q2/(1.0 - e2)
-        expected = abs(-1.0/(2*a1) + 1.0/(2*a2))
+        expected = GAUSS_K**2*abs(-1.0/(2*a1) + 1.0/(2*a2))
 
         worst = max(worst, abs(isolated - expected))
 
@@ -982,6 +983,130 @@ def test_DSAC_accepts_arrays():
             incl[k]))
 
         assert abs(vector[k] - scalar) < 1e-12
+
+
+
+def test_DV_weights_follow_from_the_published_dispersions():
+    """ The weights are the reciprocal squared dispersions of table 1, w = (2*sigma)^-2. """
+
+    for epoch in DV_DISPERSIONS:
+
+        sigma_h, sigma_e, sigma_energy = DV_DISPERSIONS[epoch]
+        w_h, w_e, w_energy = calcDVWeights(epoch)
+
+        for k in range(3):
+            assert abs(w_h[k] - 1.0/(2*sigma_h[k])**2) < 1e-6*w_h[k]
+            assert abs(w_e[k] - 1.0/(2*sigma_e[k])**2) < 1e-6*w_e[k]
+
+        assert abs(w_energy - 1.0/(2*sigma_energy)**2) < 1e-6*w_energy
+
+    # The paper used the set for a stream 4000 years after formation
+    assert DV_DEFAULT_EPOCH == 4000
+
+    try:
+        calcDVWeights(1234)
+        raise AssertionError("expected a ValueError for an epoch with no published dispersions")
+
+    except ValueError:
+        pass
+
+
+def test_DV_weights_make_two_sigma_contribute_unity():
+    """ What fixes the scale of D_V: a pair differing by twice the dispersion in one element alone
+        contributes exactly 1 to the sum. This is what makes the published thresholds meaningful.
+    """
+
+    _, _, w_energy = calcDVWeights()
+    _, _, sigma_energy = DV_DISPERSIONS[DV_DEFAULT_EPOCH]
+
+    assert abs(w_energy*(2*sigma_energy)**2 - 1.0) < 1e-12
+
+
+def test_DV_dispersions_grow_as_a_stream_ages():
+    """ A stream spreads as it evolves, so every dispersion in table 1 must grow with its age, and
+        the sporadic background must be looser still than any of them.
+    """
+
+    ages = sorted(k for k in DV_DISPERSIONS if k != 'sporadic')
+
+    for index in range(3):
+
+        series = [DV_DISPERSIONS[age][0][index] for age in ages]
+        assert series == sorted(series), "angular momentum dispersion {:d} did not grow".format(index)
+
+        series = [DV_DISPERSIONS[age][1][index] for age in ages]
+        assert series == sorted(series), "eccentricity dispersion {:d} did not grow".format(index)
+
+    energies = [DV_DISPERSIONS[age][2] for age in ages]
+    assert energies == sorted(energies), "the energy dispersion did not grow"
+
+    sporadic_h, sporadic_e, sporadic_energy = DV_DISPERSIONS['sporadic']
+    oldest_h, oldest_e, oldest_energy = DV_DISPERSIONS[ages[-1]]
+
+    assert all(sporadic_h[k] > oldest_h[k] for k in range(3))
+    assert all(sporadic_e[k] > oldest_e[k] for k in range(3))
+    assert sporadic_energy > oldest_energy
+
+
+def test_DV_thresholds_sit_just_above_the_spread_within_a_stream():
+    """ Table 2 is headed "D_V x 10^-1", so the published thresholds are ten times the printed
+        figures. Read that way they sit just above the separation between two members of one
+        stream, which is what an association threshold has to do. Read literally they would fall an
+        order of magnitude below it and admit nothing.
+    """
+
+    sigma_h, sigma_e, sigma_energy = DV_DISPERSIONS[DV_DEFAULT_EPOCH]
+    w_h, w_e, w_energy = calcDVWeights()
+
+    rng = np.random.RandomState(0)
+
+    separations = []
+    for _ in range(20000):
+
+        # Two members each drawn about the mean orbit, so they differ by sqrt(2) times a dispersion
+        d_h = [rng.normal(0, s)*math.sqrt(2) for s in sigma_h]
+        d_e = [rng.normal(0, s)*math.sqrt(2) for s in sigma_e]
+        d_energy = rng.normal(0, sigma_energy)*math.sqrt(2)
+
+        separations.append(math.sqrt(
+            w_h[0]*d_h[0]**2 + w_h[1]*d_h[1]**2 + 1.5*w_h[2]*d_h[2]**2
+            + w_e[0]*d_e[0]**2 + w_e[1]*d_e[1]**2 + w_e[2]*d_e[2]**2
+            + 2*w_energy*d_energy**2))
+
+    separations = np.array(separations)
+    threshold = DV_THRESHOLDS[15]
+
+    assert (separations < threshold).mean() > 0.9, \
+        "only {:.1%} of same-stream pairs fall under the threshold".format(
+            (separations < threshold).mean())
+
+    assert (separations < threshold/10.0).mean() < 0.01, \
+        "the printed figures taken literally would admit {:.1%} of same-stream pairs".format(
+            (separations < threshold/10.0).mean())
+
+    # The threshold loosens as the smallest accepted group grows
+    sizes = sorted(DV_THRESHOLDS)
+    assert [DV_THRESHOLDS[m] for m in sizes] == sorted(DV_THRESHOLDS[m] for m in sizes)
+
+
+def test_DV_uses_astronomical_units_and_days():
+    """ The weights are dimensional, so D_V is only meaningful with the angular momentum in
+        AU^2/day and the energy in AU^2/day^2, which means both carry the Gaussian constant.
+    """
+
+    q, e, incl = 0.5, 0.7, math.radians(20.0)
+    node, peri = math.radians(100.0), math.radians(200.0)
+
+    # Isolate the angular momentum by zeroing the other weights. For two coplanar orbits sharing a
+    #   node the difference is along the pole and equals k*(sqrt(p1) - sqrt(p2))
+    q2 = 0.8
+    isolated = float(calcDVJopek(q, e, 0.0, node, peri, q2, e, 0.0, node, peri,
+        w_h=[0.0, 0.0, 1.0/1.5], w_e=[0.0, 0.0, 0.0], w_E=0.0))
+
+    expected = GAUSS_K*abs(math.sqrt(q*(1 + e)) - math.sqrt(q2*(1 + e)))
+
+    assert abs(isolated - expected) < 1e-12, \
+        "the angular momentum term gave {:.8e}, expected {:.8e}".format(isolated, expected)
 
 
 
@@ -1375,6 +1500,11 @@ if __name__ == "__main__":
         test_DX_separates_the_taurid_branches,
         test_DVJopek_vanishes_on_identical_orbits_and_is_symmetric,
         test_DVJopek_energy_term_matches_the_semimajor_axis,
+        test_DV_weights_follow_from_the_published_dispersions,
+        test_DV_weights_make_two_sigma_contribute_unity,
+        test_DV_dispersions_grow_as_a_stream_ages,
+        test_DV_thresholds_sit_just_above_the_spread_within_a_stream,
+        test_DV_uses_astronomical_units_and_days,
         test_DACS_semimajor_axis_term_bounds_table1,
         test_DACS_semimajor_axis_term_bound_is_attained,
         test_DACS_encke_matches_the_reference_orbit,
