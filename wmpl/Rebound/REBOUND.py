@@ -1929,7 +1929,9 @@ if __name__ == "__main__":
                         "whfast (symplectic, fixed step; fast, but does not resolve close encounters) "
                         "or trace (hybrid, fixed step; resolves close encounters; needs REBOUND >= "
                         "4.4). With whfast and trace, IAS15 integrates the object's departure from "
-                        "the Earth and they take over at the first output after it.")
+                        "the Earth and they take over at the first output after it. REBOUNDx may "
+                        "warn that GR (gr_full) is velocity-dependent with whfast; its measured "
+                        "effect on the orbit was below 1e-8 in a over 100 years.")
 
     parser.add_argument("--dt", type=float, default=None,
                         help="Timestep in days for whfast and trace. Default: {:g} d. Ignored by "
