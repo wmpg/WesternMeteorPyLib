@@ -24,7 +24,10 @@ from wmpl.Utils.Dcriteria import (calcRho1, calcRho2, calcRho5, calcC, calcDR, c
     TC_REFERENCE_INCL, TC_REFERENCE_Q, DACS_A_SCALE, DX_W_SOL, DX_W_RA, DX_W_DEC, DX_W_VG)
 from wmpl.Utils.OrbitClassification import (calcTisserand, calcKresakK, calcKresakP,
     calcAphelionDistance, calcOrbitalEnergy, isCometaryQi, isCometaryKi, isCometaryPi,
-    isCometaryEi, A_JUPITER, JW_INCL_LIMIT, JW_ENERGY_LIMIT, GAUSS_K_SQUARED)
+    isCometaryEi, calcHillRadius, calcResonanceSemiMajorAxis, classifyTancrediComet,
+    classifyTancrediAsteroid, isTancrediResonanceProtected, A_JUPITER, A_URANUS,
+    JW_INCL_LIMIT, JW_ENERGY_LIMIT, GAUSS_K_SQUARED, TANCREDI_RESONANCES, TANCREDI_T_HIGH,
+    Q_JUPITER_APHELION)
 
 
 # Orbits of comet 96P/Machholz 1 and asteroid 2003 EH1 at the 7415 BC epoch, from table 2 of
@@ -1072,6 +1075,143 @@ def test_classification_accepts_arrays():
     assert result.tolist() == [False, True, True], "Q-i gave {!s} on arrays".format(result)
 
 
+# Table 1 of Tancredi (2014): the mean-motion resonances with Jupiter and the semi-major axis at
+#   the centre of each, as (label, semi-major axis in AU)
+TANCREDI_TABLE_1 = [('4:1', 2.065), ('3:1', 2.502), ('5:2', 2.825), ('7:3', 2.958),
+    ('2:1', 3.278), ('3:2', 3.971), ('4:3', 4.295), ('1:1', 5.203)]
+
+# Hill radii of the giant planets quoted in section 2.3, as (name, a in AU, M_sun/M_planet, R_H)
+TANCREDI_HILL_RADII = [('Jupiter', 5.203, 1047.3486, 0.355), ('Saturn', 9.5826, 3497.898, 0.436),
+    ('Uranus', 19.2018, 22902.98, 0.469), ('Neptune', 30.0470, 19412.24, 0.776)]
+
+
+def test_tancredi_resonance_semimajor_axes_match_table1():
+    """ Eq. 3 must reproduce the semi-major axis at the centre of every resonance in table 1. """
+
+    published = dict(TANCREDI_TABLE_1)
+
+    for label, p_plus_q, p, _ in TANCREDI_RESONANCES:
+
+        got = float(calcResonanceSemiMajorAxis(p, p_plus_q))
+
+        assert abs(got - published[label]) < 1e-3, \
+            "the {:s} resonance came out at {:.4f} AU, table 1 gives {:.3f}".format(label, got,
+                published[label])
+
+
+def test_tancredi_hill_radii_match_the_paper():
+    """ Eq. 2 must reproduce the Hill radii quoted for the four giant planets. """
+
+    for name, a_planet, inv_mass, published in TANCREDI_HILL_RADII:
+
+        got = float(calcHillRadius(a_planet, 1.0/inv_mass))
+
+        assert abs(got - published) < 2e-3, \
+            "the Hill radius of {:s} came out as {:.4f} AU, the paper gives {:.3f}".format(name,
+                got, published)
+
+
+def test_tancredi_classifies_la_sagra_as_a_comet_in_an_asteroidal_orbit():
+    """ The paper singles out 233P/La Sagra as a "Comet" in an Asteroidal Orbit it had newly
+        identified, and quotes its orbit and Tisserand parameter, so both are checked.
+    """
+
+    a, e, incl = 3.037, 0.409, math.radians(10.1)
+
+    tisserand = float(calcTisserand(a, e, incl))
+
+    assert abs(tisserand - 3.086) < 1e-3, \
+        "T_Jup of 233P/La Sagra came out as {:.4f}, the paper gives 3.086".format(tisserand)
+
+    assert classifyTancrediComet(a, e, incl) == 'asteroidal orbit', \
+        "233P/La Sagra was classified as {!r}".format(classifyTancrediComet(a, e, incl))
+
+
+def test_tancredi_quasi_hilda_sets_the_upper_tisserand_limit():
+    """ The upper limit of 3.05 is justified in the paper by the quasi-Hildas, which it states have
+        that Tisserand parameter at a = 4.05 AU, e = 0, i = 0. That orbit must therefore fall just
+        inside the Jupiter family class rather than outside it.
+    """
+
+    tisserand = float(calcTisserand(4.05, 0.0, 0.0))
+
+    assert abs(tisserand - 3.05) < 5e-3, \
+        "T_Jup of the quoted quasi-Hilda orbit is {:.4f}, the paper gives about 3.05".format(
+            tisserand)
+
+    assert tisserand < TANCREDI_T_HIGH, "the quasi-Hilda orbit fell outside the Jupiter family cut"
+
+    assert classifyTancrediComet(4.05, 0.0, 0.0) == 'jupiter family'
+
+
+def test_tancredi_comet_classes_split_at_the_tisserand_limits():
+    """ The cometary classes are separated by the Tisserand parameter at 2 and 3.05, with the
+        Centaurs split off by perihelion instead.
+    """
+
+    # 2P/Encke: T_J just under 3.05, perihelion well inside Jupiter's orbit
+    assert classifyTancrediComet(2.215, 0.848, math.radians(11.70)) == 'jupiter family'
+
+    # A retrograde orbit has a low Tisserand parameter
+    assert classifyTancrediComet(17.8, 0.967, math.radians(162.3)) == 'halley'
+
+    # 2060 Chiron: perihelion beyond Jupiter's aphelion but inside Uranus
+    assert classifyTancrediComet(13.65, 0.379, math.radians(6.9)) == 'centaur'
+
+    q_chiron = 13.65*(1.0 - 0.379)
+    assert Q_JUPITER_APHELION < q_chiron < A_URANUS
+
+
+def test_tancredi_asteroid_needs_to_reach_jupiter():
+    """ The condition that separates an asteroid in a cometary orbit from the thousands of stable
+        asteroids sharing its Tisserand parameter is that it actually approaches a giant planet.
+        The same orbit must classify either way on the minimum orbital intersection distance alone.
+    """
+
+    # An orbit with 2 < T_J < 3.05 whose aphelion crosses Jupiter's perihelion
+    a, e, incl = 3.6, 0.45, math.radians(8.0)
+
+    tisserand = float(calcTisserand(a, e, incl))
+    assert 2.0 < tisserand < TANCREDI_T_HIGH, "test orbit is not in the Jupiter family range"
+
+    assert classifyTancrediAsteroid(a, e, incl, 1.0, 1.0) == 'aco jupiter family'
+    assert classifyTancrediAsteroid(a, e, incl, 8.0, 8.0) == 'asteroid'
+
+
+def test_tancredi_resonance_protection_excludes_the_hildas():
+    """ The Hildas sit in the 3:2 resonance and never approach Jupiter despite a Tisserand
+        parameter in the cometary range, which is exactly what the resonance filter is for.
+    """
+
+    a_hilda = float(calcResonanceSemiMajorAxis(2, 3))
+
+    assert abs(a_hilda - 3.971) < 1e-3
+
+    assert isTancrediResonanceProtected(a_hilda, 0.15, 1.0), \
+        "a Hilda orbit was not recognised as resonance protected"
+
+    assert classifyTancrediAsteroid(a_hilda, 0.15, math.radians(5.0), 1.0, 1.0) == 'asteroid'
+
+    # An orbit away from any resonance is not protected
+    assert not isTancrediResonanceProtected(3.6, 0.45, 1.0)
+
+
+def test_tancredi_asteroid_outer_classes():
+    """ The asteroid scheme reuses the cometary Centaur definition, applies no semi-major axis cut
+        to the Halley type, and hands anything beyond Uranus to the transneptunian region.
+    """
+
+    # Retrograde, so the Tisserand parameter is below 2
+    assert classifyTancrediAsteroid(8.0, 0.6, math.radians(150.0), 1.0, 1.0) == 'aco halley'
+
+    # Perihelion between Jupiter's aphelion and Uranus
+    assert classifyTancrediAsteroid(13.65, 0.379, math.radians(6.9), 9.0, 9.0) == 'centaur'
+
+    # Perihelion beyond Uranus
+    assert classifyTancrediAsteroid(45.0, 0.1, math.radians(5.0), 99.0, 99.0) == 'transneptunian'
+
+
+
 if __name__ == "__main__":
 
     test_functions = [
@@ -1119,6 +1259,14 @@ if __name__ == "__main__":
         test_kresak_and_aphelion_boundaries,
         test_jopek_williams_two_parameter_criteria,
         test_classification_accepts_arrays,
+        test_tancredi_resonance_semimajor_axes_match_table1,
+        test_tancredi_hill_radii_match_the_paper,
+        test_tancredi_classifies_la_sagra_as_a_comet_in_an_asteroidal_orbit,
+        test_tancredi_quasi_hilda_sets_the_upper_tisserand_limit,
+        test_tancredi_comet_classes_split_at_the_tisserand_limits,
+        test_tancredi_asteroid_needs_to_reach_jupiter,
+        test_tancredi_resonance_protection_excludes_the_hildas,
+        test_tancredi_asteroid_outer_classes,
         ]
 
     failed = 0
