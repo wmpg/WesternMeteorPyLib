@@ -908,6 +908,48 @@ def extractSimParams(ps, obj_name, planet_names, reference_frame="heliocentric")
     return state_vect_hel, orb_elem, planet_dists
 
 
+# Integrators that can be selected for the integration. IAS15 is adaptive and the default. WHFast
+# and TRACE use a fixed timestep (see FIXED_STEP_DEFAULT_DT_DAYS).
+INTEGRATORS = ("ias15", "whfast", "trace")
+
+# Default timestep in days for the fixed-step integrators. Measured against IAS15 on a real
+# trajectory (100 years backward, 500 outputs): 0.5 d leaves the final a within ~1e-8 for both, at
+# 4.2x (WHFast) and 3x (TRACE) the speed of IAS15; after 10 years the difference was 1.5e-6 (WHFast)
+# and 2e-7 (TRACE). Orbits with very small perihelia need a shorter step with WHFast.
+FIXED_STEP_DEFAULT_DT_DAYS = {"whfast": 0.5, "trace": 0.5}
+
+
+def _grForceName(integrator):
+    """ REBOUNDx general-relativity force used with the given integrator. """
+
+    return "gr_full"
+
+
+def checkIntegratorAvailable(integrator):
+    """ Raise a clear error if the installed REBOUND does not provide the requested integrator.
+
+    Arguments:
+        integrator: [str] One of INTEGRATORS.
+    """
+
+    if integrator not in INTEGRATORS:
+        raise ValueError("Unknown integrator '{:s}'. Choose one of: {:s}.".format(
+            integrator, ", ".join(INTEGRATORS)))
+
+    try:
+        rb.Simulation().integrator = integrator
+    except ValueError:
+        raise ValueError("The installed REBOUND ({:s}) does not provide the {:s} integrator. TRACE was "
+                         "added in REBOUND 4.4.0.".format(rb.__version__, integrator.upper()))
+
+
+def _reverseVelocities(sim):
+    """ Reverse the velocity of every particle, to run an integration in reversed time. """
+
+    for p in sim.particles:
+        p.vx, p.vy, p.vz = -p.vx, -p.vy, -p.vz
+
+
 def _integrateParticles(task):
     """ Build a REBOUND simulation from precomputed planet states and integrate one or more test
     particles through it, returning their per-timestep orbital elements and distances.
@@ -932,6 +974,9 @@ def _integrateParticles(task):
                                  exceed before encounter/impact detection is armed. Default 3.0.
             body_radii:      [dict] Optional. {body: radius in AU} overriding the default physical
                                  radii used for impact detection (Earth 6371 km, Moon 1737.4 km).
+            integrator:      [str]  Optional. "ias15" (default, adaptive), "whfast" or "trace".
+            dt_days:         [float] Optional. Timestep in days for the fixed-step integrators.
+                                 Ignored by IAS15. Default FIXED_STEP_DEFAULT_DT_DAYS[integrator].
 
     Return:
         [dict] {
@@ -959,6 +1004,32 @@ def _integrateParticles(task):
 
     n_hill = task.get("n_hill", 3.0)
 
+    # Integrator. The object starts at the Earth's surface, a deep close encounter that the
+    # fixed-step integrators do not handle: WHFast cannot resolve it at all, and TRACE resolves the
+    # encounter but applies the Earth's J2/J4 force (REBOUNDx gravitational_harmonics) without
+    # sub-stepping it, which leaves the orbit ~1% off in a. A WHFast or TRACE run therefore starts
+    # with IAS15 and switches at the first output after the object has left the Earth's
+    # neighbourhood, where the harmonics are negligible.
+    integrator = task.get("integrator", "ias15")
+    current_integrator = "ias15"
+    dt_fixed = None
+    if integrator != "ias15":
+        dt_fixed = (task.get("dt_days") or FIXED_STEP_DEFAULT_DT_DAYS[integrator])*2*np.pi/365.25
+    switch_time = None
+
+    # TRACE mishandles close encounters when the timestep is negative (a REBOUND bug, present in
+    # 4.6.0 and 5.1.1: a flyby integrated backward comes out ~10% off in a, forward it matches IAS15
+    # to 1e-7). A backward TRACE run is therefore integrated forward in time with every velocity
+    # reversed, which is exact because gravity, GR (gr_full) and the Earth's harmonics are all
+    # time-reversal symmetric. Poynting-Robertson drag is dissipative and is not, so it is refused.
+    reverse_time = (integrator == "trace") and (direction == "backward")
+    if reverse_time and task.get("beta"):
+        raise ValueError("TRACE cannot integrate backward with radiation forces: TRACE is run in "
+                         "reversed time to integrate backward, which Poynting-Robertson drag does not "
+                         "allow. Use IAS15 instead.")
+    time_sign = -1.0 if reverse_time else 1.0
+    integrate_forward = (direction == "forward") or reverse_time
+
     aum = rb.units.lengths_SI["au"]  # 1 au in m
     aukm = aum/1e3  # au in km
 
@@ -982,7 +1053,7 @@ def _integrateParticles(task):
     # Set up the simulation
     sim = rb.Simulation()
     rebx = reboundx.Extras(sim)
-    sim.dt = 0.001 if direction == "forward" else -0.001
+    sim.dt = 0.001 if integrate_forward else -0.001
 
     # Add the massive bodies from the precomputed barycentric states
     for name, state, mass in zip(planet_names, planet_states, planet_masses):
@@ -1003,6 +1074,9 @@ def _integrateParticles(task):
 
     ps = sim.particles
 
+    if reverse_time:
+        _reverseVelocities(sim)
+
     # Add the gravitational harmonics of the Earth
     gh = rebx.load_force("gravitational_harmonics")
     rebx.add_force(gh)
@@ -1014,8 +1088,8 @@ def _integrateParticles(task):
         if bname in planet_names:
             ps[bname].r = brad
 
-    # gr_full is the general relativity correction for all bodies
-    gr = rebx.load_force("gr_full")
+    # General relativity correction (gr_full: for all bodies)
+    gr = rebx.load_force(_grForceName(integrator))
     rebx.add_force(gr)
     gr.params["c"] = rbxConstants.C
 
@@ -1114,6 +1188,9 @@ def _integrateParticles(task):
     # steps, but the times at which the simulation state is saved.
     for t_out in times:
 
+        # Time in the integration's own clock (reversed for a backward TRACE run)
+        t_int = time_sign*t_out
+
         sim.move_to_com()
 
         # Arm impact detection once every remaining particle has left the Earth's neighbourhood
@@ -1122,13 +1199,28 @@ def _integrateParticles(task):
             if active and all(track[n]["departed"] for n in active):
                 sim.collision = "line"
 
+        # WHFast or TRACE run: hand over from IAS15 once every remaining particle has left the Earth
+        if current_integrator != integrator:
+            active = [n for n, i in particle_idx.items() if i < sim.N]
+            if active and all(track[n]["departed"] for n in active):
+                sim.integrator = integrator
+                current_integrator = integrator
+                switch_time = sim.t
+
+        # Fixed-step integrators: use the largest step not above dt_fixed that divides this output
+        # interval exactly, so the integrator never has to shorten a step to land on the output
+        # time (which degrades the symplectic integrators)
+        if (current_integrator != "ias15") and (t_int != sim.t):
+            n_sub = max(1, int(np.ceil(abs(t_int - sim.t)/dt_fixed - 1e-9)))
+            sim.dt = (t_int - sim.t)/n_sub
+
         try:
-            sim.integrate(t_out)
+            sim.integrate(t_int)
 
         except rb.Collision:
 
             # Identify which body was hit (the test particles have no radius of their own)
-            t_impact = sim.t/(2*np.pi)*365.25
+            t_impact = time_sign*sim.t/(2*np.pi)*365.25
             hit_particle = False
             for pname, pidx in particle_idx.items():
                 if pidx >= sim.N:
@@ -1154,13 +1246,13 @@ def _integrateParticles(task):
                 "impact detection disabled for the rest of this integration. Check body_radii.".format(
                     t_impact), RuntimeWarning)
             sim.collision = "none"
-            sim.integrate(t_out)
+            sim.integrate(t_int)
 
         except rb.Escape:
 
             # The object was thrown out of the simulation volume (unbound or ejected). Record it and
             # stop, since integrating a runaway particle only gets more expensive.
-            t_esc = sim.t/(2*np.pi)*365.25
+            t_esc = time_sign*sim.t/(2*np.pi)*365.25
             for pname, pidx in particle_idx.items():
                 if pidx >= sim.N:
                     continue
@@ -1171,6 +1263,10 @@ def _integrateParticles(task):
             break
 
         sim.move_to_hel()
+
+        # Read the outputs with the true velocities
+        if reverse_time:
+            _reverseVelocities(sim)
 
         for name in particle_names:
 
@@ -1189,6 +1285,9 @@ def _integrateParticles(task):
                 Omega=orb_elem.Omega, omega=orb_elem.omega, f=orb_elem.f)
 
             outputs[name].append([t_out, state_vect_hel, orb_ns, planet_dists])
+
+        if reverse_time:
+            _reverseVelocities(sim)
 
     # Relative energy drift over the integration, as an integrator-quality diagnostic. The test
     # particles are massless, so this measures the massive subsystem the object moves through.
@@ -1209,22 +1308,256 @@ def _integrateParticles(task):
             "min_dist_au": {b: (None if not np.isfinite(st["min_dist"][b]) else st["min_dist"][b])
                             for b in planet_names},
             "min_time_days": {b: (None if not np.isfinite(st["min_time"][b])
-                                  else st["min_time"][b]/(2*np.pi)*365.25)
+                                  else time_sign*st["min_time"][b]/(2*np.pi)*365.25)
                               for b in planet_names},
             "departed": st["departed"],
             "impact": st["impact"],
             "escaped": st["escaped"],
             "energy_rel_drift": energy_drift,
+            "integrator": integrator,
+            "fixed_step_from_days": (None if switch_time is None
+                                     else time_sign*switch_time/(2*np.pi)*365.25),
         }
 
     return {"outputs": outputs, "diagnostics": diagnostics}
+
+
+def computeMegno(task, seed=1):
+    """ MEGNO of the integrated object's orbit, from a purely gravitational integration.
+
+    MEGNO (Mean Exponential Growth factor of Nearby Orbits, Cincotta & Simo 2000) follows how fast
+    a small deviation from the orbit grows. Its running mean <Y> tends to 2 for a regular
+    (quasi-periodic) orbit, to 0 for a stable periodic one (e.g. librating in a resonance), and
+    grows without bound, as ~(lambda/2) t, for a chaotic one.
+
+    Only the object's own deviation is followed: a first-order variational test particle is added
+    for it alone, so the planets' deviations cannot mask its growth. REBOUND's init_megno() is not
+    used because it perturbs every body, and the Moon's and planets' linearly growing deviations
+    then hide the object's exponential growth for centuries (an orbit with a 64-year Lyapunov time
+    still read <Y> = 2.01 after 300 years). With d ln|delta|/dt = delta.delta_dot/|delta|^2, the
+    MEGNO integrals only need |delta| at the end of each step:
+
+        Y(t) = (2/t) int_0^t s d(ln|delta|),    <Y>(t) = (1/t) int_0^t Y(s) ds,
+
+    accumulated with the midpoint rule over the IAS15 steps. The same expressions hold for a
+    backward integration (t < 0).
+
+    The integration uses the task's planets, initial state, direction and output times, but only
+    Newtonian gravity (no GR, no Earth harmonics, no radiation forces) and always IAS15, which
+    handles the object's departure from the Earth and supports variational equations (TRACE does
+    not; WHFast cannot resolve the departure).
+
+    Arguments:
+        task: [dict] An _integrateParticles task. Only its first particle is used.
+
+    Keyword arguments:
+        seed: [int] Seed for the random initial deviation, for reproducibility. Default 1.
+
+    Return:
+        [dict] {
+            "times_days":   [list] output times in days (as in the task),
+            "megno":        [list] <Y> at each output time,
+            "a_au":         [list] heliocentric osculating semi-major axis at each output time,
+            "escaped":      [bool] whether the object left the simulation volume (series truncated),
+        }
+    """
+
+    sim = rb.Simulation()
+    sim.integrator = "ias15"
+
+    for name, state, mass in zip(task["planet_names"], task["planet_states"], task["planet_masses"]):
+        sim.add(m=mass, x=state[0], y=state[1], z=state[2], vx=state[3], vy=state[4], vz=state[5])
+
+    state = task["particle_states"][0]
+    sim.add(x=state[0], y=state[1], z=state[2], vx=state[3], vy=state[4], vz=state[5])
+    obj_i = sim.N - 1
+
+    sim.N_active = len(task["planet_names"])
+    sim.testparticle_type = 0
+    sim.move_to_com()
+    sim.dt = 0.001 if task["direction"] == "forward" else -0.001
+    sim.exit_max_distance = task.get("max_dist_au", 1000.0)
+
+    # Variational particle for the object only, with a random initial deviation in phase space
+    var = sim.add_variation(order=1, testparticle=obj_i)
+    rng = np.random.default_rng(seed)
+    dev = rng.normal(size=6)
+    vp = var.particles[0]
+    vp.x, vp.y, vp.z, vp.vx, vp.vy, vp.vz = dev/np.linalg.norm(dev)
+
+    def logDeviation():
+        p = var.particles[0]
+        return 0.5*np.log(p.x**2 + p.y**2 + p.z**2 + p.vx**2 + p.vy**2 + p.vz**2)
+
+    # Running integrals: I = int s d(ln|delta|) and J = int Y ds
+    acc = {"t": sim.t, "ln_d": logDeviation(), "I": 0.0, "J": 0.0, "Y": 0.0}
+
+    def heartbeat(sim_pointer):
+
+        t_now = sim_pointer.contents.t
+        h = t_now - acc["t"]
+        if h == 0:
+            return
+
+        ln_d = logDeviation()
+        acc["I"] += 0.5*(acc["t"] + t_now)*(ln_d - acc["ln_d"])
+        y_now = 2.0*acc["I"]/t_now
+        acc["J"] += 0.5*(acc["Y"] + y_now)*h
+        acc["t"], acc["ln_d"], acc["Y"] = t_now, ln_d, y_now
+
+    sim.heartbeat = heartbeat
+
+    times_days, megno, a_au = [], [], []
+    escaped = False
+    for t_out in task["times"]:
+
+        try:
+            sim.integrate(t_out)
+        except rb.Escape:
+            escaped = True
+            break
+
+        if t_out == 0:
+            continue
+
+        times_days.append(t_out/(2*np.pi)*365.25)
+        megno.append(acc["J"]/acc["t"])
+        a_au.append(sim.particles[obj_i].orbit(primary=sim.particles[0]).a)
+
+    return {"times_days": times_days, "megno": megno, "a_au": a_au, "escaped": escaped}
+
+
+# MEGNO verdict thresholds. A regular orbit's <Y> settles within ~0.05 of 2 after tens of orbits
+# (measured on Keplerian orbits with e = 0.1 and e = 0.947 and on a regular main-belt orbit with the
+# planets); at 8 orbits a very eccentric one was still 0.2 off. Values above 2.5 were only reached
+# by chaotic orbits. <Y> tends to 0 instead of 2 when the deviation stays bounded, as around a
+# stable periodic orbit (e.g. libration in a mean-motion resonance): the example Halley-type
+# meteoroid read 0.2-0.7 after 1000-3000 years, and a shadow particle confirmed that its separation
+# stayed bounded while a oscillated, where it grew steadily without the planets.
+MEGNO_REGULAR_TOL = 0.1
+MEGNO_CHAOTIC_MIN = 2.5
+MEGNO_PERIODIC_MAX = 1.0
+MEGNO_MIN_ORBITS = 20
+
+
+def classifyMegno(times_days, megno, a_au):
+    """ Decide whether a MEGNO series has converged to 2 (regular orbit), is growing (chaotic), or
+    is not conclusive.
+
+    The verdict uses the final <Y> and its mean over the last quarter of the run: both within
+    MEGNO_REGULAR_TOL of 2 means regular, both above MEGNO_CHAOTIC_MIN means chaotic, both below
+    MEGNO_PERIODIC_MAX means a stable periodic orbit (<Y> tending to 0: regular, but not converging
+    to 2), anything else is not converged. No verdict is given for an unbound orbit, or for a run
+    shorter than MEGNO_MIN_ORBITS orbital periods (MEGNO needs many orbits to settle). Every verdict
+    holds over the integrated span only: a sticky chaotic orbit can look regular for a long time.
+
+    Arguments:
+        times_days: [list] Output times in days.
+        megno: [list] <Y> at each output time.
+        a_au: [list] Heliocentric semi-major axis at each output time.
+
+    Return:
+        [dict] {
+            "status":        "regular", "chaotic", "periodic", "not_converged", "too_short" or
+                             "unbound",
+            "final":         final <Y>,
+            "last_quarter":  mean <Y> over the last quarter of the run,
+            "n_orbits":      number of orbital periods spanned (median a), or None if unbound,
+            "lyapunov_time_years": for a chaotic orbit, 1/lambda from <Y> ~ (lambda/2) t fitted over
+                               the second half of the run; otherwise None,
+            "message":       one-line explanation,
+        }
+    """
+
+    y = np.array(megno, dtype=float)
+    t_years = np.abs(np.array(times_days, dtype=float))/365.25
+    a = np.array(a_au, dtype=float)
+
+    result = {"status": None, "final": float(y[-1]) if len(y) else None,
+              "last_quarter": float(np.mean(y[3*len(y)//4:])) if len(y) else None,
+              "n_orbits": None, "lyapunov_time_years": None}
+
+    if len(y) < 8:
+        result.update(status="too_short", message="Too few outputs to judge the MEGNO.")
+        return result
+
+    a_med = float(np.median(a))
+    if a_med <= 0:
+        result.update(status="unbound", message="The orbit is unbound (hyperbolic), so MEGNO is "
+                      "not meaningful: it describes bounded motion.")
+        return result
+
+    n_orbits = t_years[-1]/a_med**1.5
+    result["n_orbits"] = float(n_orbits)
+
+    final, last_quarter = result["final"], result["last_quarter"]
+
+    if n_orbits < MEGNO_MIN_ORBITS:
+        result.update(status="too_short", message="The run covers only {:.1f} orbital periods; MEGNO "
+                      "needs at least {:d} to settle. Integrate for at least {:.0f} years.".format(
+                          n_orbits, MEGNO_MIN_ORBITS, MEGNO_MIN_ORBITS*a_med**1.5))
+        return result
+
+    if (abs(final - 2) <= MEGNO_REGULAR_TOL) and (abs(last_quarter - 2) <= MEGNO_REGULAR_TOL):
+        result.update(status="regular", message="<Y> has converged to 2: the orbit is regular "
+                      "(quasi-periodic) over the integrated span.")
+
+    elif (final > MEGNO_CHAOTIC_MIN) and (last_quarter > MEGNO_CHAOTIC_MIN):
+        half = len(y)//2
+        slope = np.polyfit(t_years[half:], y[half:], 1)[0]
+        if slope > 0:
+            result["lyapunov_time_years"] = float(1.0/(2*slope))
+        result.update(status="chaotic", message="<Y> does not converge to 2 and keeps growing: the "
+                      "orbit is chaotic.")
+
+    elif (final < MEGNO_PERIODIC_MAX) and (last_quarter < MEGNO_PERIODIC_MAX):
+        result.update(status="periodic", message="<Y> tends to 0 rather than 2: the deviation from "
+                      "the orbit stays bounded, the signature of a stable periodic orbit (e.g. "
+                      "libration in a mean-motion resonance). Regular, not chaotic.")
+
+    else:
+        result.update(status="not_converged", message="<Y> has not converged to 2 but is not clearly "
+                      "growing either; integrate for longer to decide.")
+
+    return result
+
+
+def _megnoReportLines(megno):
+    """ Human-readable lines describing a MEGNO result from reboundSimulate(compute_megno=True). """
+
+    v = megno["verdict"]
+    lines = ["MEGNO of the nominal orbit (Newtonian gravity only, IAS15):"]
+    if v["final"] is None:
+        lines.append("  no MEGNO values (the integration produced no outputs)")
+        return lines
+
+    lines.append("  <Y> at the end: {:.3f}   mean over the last quarter: {:.3f}".format(
+        v["final"], v["last_quarter"]))
+    if v["n_orbits"] is not None:
+        lines.append("  span: {:.1f} orbital periods".format(v["n_orbits"]))
+
+    converges = {"regular": "YES", "chaotic": "NO", "periodic": "NO (tends to 0)",
+                 "not_converged": "NO (not yet)"}.get(v["status"])
+    if converges:
+        lines.append("  Converges to 2: {:s}. {:s}".format(converges, v["message"]))
+    else:
+        lines.append("  No verdict: {:s}".format(v["message"]))
+
+    if v["lyapunov_time_years"] is not None:
+        lines.append("  Lyapunov time ~ {:.0f} years (from <Y> ~ (lambda/2) t over the second "
+                     "half).".format(v["lyapunov_time_years"]))
+    if megno.get("escaped"):
+        lines.append("  The object left the simulation volume, so the MEGNO series is truncated.")
+
+    return lines
 
 
 def reboundSimulate(
         julian_date, state_vect, traj=None,
         direction="forward", sim_days=60, n_outputs=500, obj_name="obj", obj_mass=0.0, mc_runs=100,
         reference_frame="heliocentric", ephem_source="local", n_cpu=None,
-        show_progress=True, return_diagnostics=False, random_seed=None, beta=None, verbose=False):
+        show_progress=True, return_diagnostics=False, random_seed=None, beta=None, integrator="ias15",
+        dt_days=None, compute_megno=False, verbose=False):
     """ Takes an state vector (or a Trajectory object), runs REBOUND and produces orbital elements for the 
     object at the end of the simulation or at the specified time.
 
@@ -1268,6 +1601,14 @@ def reboundSimulate(
             radiationPressureBeta to compute it from a size and density). None (default) leaves the
             integration purely gravitational, since a trajectory solution does not constrain the
             object's size and density.
+        integrator: [str] "ias15" (default), "whfast" or "trace" (see INTEGRATORS). IAS15 is adaptive
+            and accurate to machine precision; the other two use a fixed timestep.
+        dt_days: [float] Timestep in days for WHFast and TRACE. None (default) uses
+            FIXED_STEP_DEFAULT_DT_DAYS. Ignored by IAS15.
+        compute_megno: [bool] If True, after the requested integration run a purely gravitational
+            integration of the nominal solution only, over the same span, and store its MEGNO
+            series and verdict (see computeMegno and classifyMegno) under "megno" in the nominal
+            solution's diagnostics. Only returned with return_diagnostics=True. Default False.
         verbose: [bool] If True, print out the progress of the simulation.
 
     Return:
@@ -1284,6 +1625,9 @@ def reboundSimulate(
     if not REBOUND_FOUND:
         _printReboundUnavailable()
         return None
+
+    # Fail early, before any ephemeris work, if the integrator is not available
+    checkIntegratorAvailable(integrator)
 
     # If the trajectory is given, override the julian_date and state_vect arguments
     if traj is not None:
@@ -1419,6 +1763,8 @@ def reboundSimulate(
             "direction": direction,
             "reference_frame": reference_frame,
             "beta": beta,
+            "integrator": integrator,
+            "dt_days": dt_days,
         }
 
     if verbose:
@@ -1501,6 +1847,14 @@ def reboundSimulate(
                 outputs_mc.update(res["outputs"])
                 diagnostics.update(res["diagnostics"])
 
+    # MEGNO of the nominal orbit, from a separate purely gravitational integration
+    if compute_megno:
+        if show_progress:
+            print("Computing the MEGNO of the nominal orbit (Newtonian gravity only, IAS15)...")
+        megno = computeMegno(_make_task([state_vect_rot], [obj_name]))
+        megno["verdict"] = classifyMegno(megno["times_days"], megno["megno"], megno["a_au"])
+        diagnostics[obj_name] = dict(diagnostics[obj_name], megno=megno)
+
     if return_diagnostics:
         return outputs, outputs_mc, diagnostics
 
@@ -1570,6 +1924,23 @@ if __name__ == "__main__":
                         help="Object bulk density in kg/m^3, used with --radius to compute beta. "
                         "Default: 3000.")
 
+    parser.add_argument("--integrator", type=str.lower, default="ias15", choices=INTEGRATORS,
+                        help="Integrator: ias15 (default; adaptive, accurate to machine precision), "
+                        "whfast (symplectic, fixed step; fast, but does not resolve close encounters) "
+                        "or trace (hybrid, fixed step; resolves close encounters; needs REBOUND >= "
+                        "4.4). With whfast and trace, IAS15 integrates the object's departure from "
+                        "the Earth and they take over at the first output after it.")
+
+    parser.add_argument("--dt", type=float, default=None,
+                        help="Timestep in days for whfast and trace. Default: {:g} d. Ignored by "
+                        "ias15.".format(FIXED_STEP_DEFAULT_DT_DAYS["whfast"]))
+
+    parser.add_argument("--compute_megno", action="store_true",
+                        help="After the integration, integrate the nominal solution again with "
+                        "Newtonian gravity only (IAS15) and compute its MEGNO chaos indicator, "
+                        "reporting whether it converges to 2 (regular orbit) or keeps growing "
+                        "(chaotic). MEGNO needs tens of orbital periods: use --days accordingly.")
+
     parser.add_argument("--verbose", action="store_true", help="Print out the progress of the simulation.")
 
     args = parser.parse_args()
@@ -1598,6 +1969,25 @@ if __name__ == "__main__":
             args.radius, args.density, beta))
     elif beta is not None:
         print("Radiation forces ON: beta = {:.4e}".format(beta))
+    ### ###
+
+    ### Integrator ###
+    try:
+        checkIntegratorAvailable(args.integrator)
+    except ValueError as e:
+        parser.error(str(e))
+
+    if (args.integrator == "trace") and (direction == "backward") and beta:
+        parser.error("TRACE cannot integrate backward with radiation forces (it is run in reversed "
+                     "time, which Poynting-Robertson drag does not allow). Use --integrator ias15.")
+
+    dt_days = None
+    if args.integrator != "ias15":
+        dt_days = args.dt if args.dt is not None else FIXED_STEP_DEFAULT_DT_DAYS[args.integrator]
+        print("Integrator: {:s} with a {:g} d timestep (IAS15 until the object has left the "
+              "Earth).".format(args.integrator.upper(), dt_days))
+    else:
+        print("Integrator: IAS15 (adaptive).")
     ### ###
 
     # Source of the planetary ephemeris
@@ -1652,7 +2042,8 @@ if __name__ == "__main__":
         obj_name=traj.traj_id, mc_runs=args.mc, n_outputs=args.outputs,
         reference_frame=reference_frame,
         ephem_source=ephem_source, n_cpu=n_cpu, return_diagnostics=True,
-        random_seed=random_seed, beta=beta, verbose=args.verbose
+        random_seed=random_seed, beta=beta, integrator=args.integrator, dt_days=dt_days,
+        compute_megno=args.compute_megno, verbose=args.verbose
         )
     sim_wall = time.time() - t_run_start
 
@@ -1776,6 +2167,40 @@ if __name__ == "__main__":
     # output cannot. Needed both for the summary and the report file. n_hill is set above, where the
     # clone outcomes are classified with the same threshold.
     nominal_diag = sim_diagnostics.get(traj.traj_id, {})
+
+    # Which integrator actually ran, and from when
+    fixed_from = nominal_diag.get("fixed_step_from_days")
+    if args.integrator == "ias15":
+        integrator_str = "IAS15 (adaptive)"
+    elif fixed_from is None:
+        integrator_str = ("IAS15 throughout: the object never left the Earth, so {:s} was never "
+                          "used".format(args.integrator.upper()))
+    else:
+        integrator_str = "{:s}, dt = {:g} d, from t = {:+.3f} d (IAS15 before, while leaving the Earth)".format(
+            args.integrator.upper(), dt_days, fixed_from)
+
+    # WHFast does not resolve close encounters: flag any that happened while it was integrating
+    whfast_encounters = []
+    if args.integrator == "whfast":
+        for name, diag in sim_diagnostics.items():
+            t_from = diag.get("fixed_step_from_days")
+            if t_from is None:
+                continue
+            for enc in encountersFromMinDistances(diag.get("min_dist_au", {}),
+                                                  diag.get("min_time_days", {}), n_hill=n_hill):
+                if abs(enc["time_days"]) > abs(t_from):
+                    whfast_encounters.append((name, enc))
+
+    whfast_warning = None
+    if whfast_encounters:
+        whfast_warning = ("WARNING: {:d} close encounter(s) (< {:.0f} Hill radii, nominal and clones) "
+                          "happened while WHFast was integrating. WHFast does not resolve close "
+                          "encounters, so the orbits after them can be wrong (measured: 0.3% to 200% "
+                          "in a after flybys inside 0.1 R_Hill). Rerun with --integrator trace or "
+                          "ias15.".format(len(whfast_encounters), n_hill))
+
+    # MEGNO of the nominal orbit, if requested
+    megno = nominal_diag.get("megno")
     encounters = encountersFromMinDistances(
         nominal_diag.get("min_dist_au", {}), nominal_diag.get("min_time_days", {}), n_hill=n_hill)
 
@@ -1824,6 +2249,7 @@ if __name__ == "__main__":
         print("  Monte Carlo  : {:d} realizations on {:d} core(s), seed {:d}".format(
             len(sim_outputs_mc), n_cpu, random_seed))
     print("  Runtime      : {:.1f} s".format(sim_wall))
+    print("  Integrator   : {:s}".format(integrator_str))
 
     # Integrator quality: relative energy drift of the massive subsystem
     energy_drift = nominal_diag.get("energy_rel_drift")
@@ -1877,6 +2303,10 @@ if __name__ == "__main__":
                 enc["time_days"], enc["n_hill"], enc["hill_radius_au"]))
     else:
         print("  Close encounters (< {:.0f} Hill radii): none detected".format(n_hill))
+
+    if whfast_warning:
+        print("")
+        print("  " + whfast_warning)
 
     # Ejection, if the object ran out of the simulation volume
     escaped = nominal_diag.get("escaped")
@@ -1980,6 +2410,11 @@ if __name__ == "__main__":
                 print("    The spread in a grows but not exponentially "
                       "(R2_exp = {:.3f}, R2_lin = {:.3f}).".format(
                           ed["r2_exponential"], ed["r2_linear"]))
+
+    if megno is not None:
+        print("-" * 78)
+        for line in _megnoReportLines(megno):
+            print("  " + line)
     print(hdr)
 
 
@@ -2096,6 +2531,13 @@ if __name__ == "__main__":
         if nominal_diag.get("energy_rel_drift") is not None:
             f.write("Relative energy drift of the massive subsystem: {:.3e}\n".format(
                 nominal_diag["energy_rel_drift"]))
+
+        f.write("Integrator: {:s}\n".format(integrator_str))
+        if whfast_warning:
+            f.write("\n{:s}\n".format(whfast_warning))
+
+        if megno is not None:
+            f.write("\n" + "\n".join(_megnoReportLines(megno)) + "\n")
 
         if nominal_diag.get("escaped"):
             f.write("\nEJECTED: the object left the simulation volume at t = {:.4f} d, "
@@ -2364,6 +2806,22 @@ if __name__ == "__main__":
     # Save the figure
     plt.savefig(plot_png_path)
 
+    # MEGNO evolution, in its own figure
+    megno_png_path = None
+    if (megno is not None) and megno["times_days"]:
+        megno_png_path = os.path.join(out_dir, "rebound_megno.png")
+        fig_m, ax_m = plt.subplots(figsize=(8, 4.5))
+        ax_m.plot(megno["times_days"], megno["megno"], lw=1.2, label="<Y> (MEGNO)")
+        ax_m.axhline(2.0, color="k", ls="--", lw=1, label="2 (regular orbit)")
+        ax_m.axhspan(2 - MEGNO_REGULAR_TOL, 2 + MEGNO_REGULAR_TOL, color="0.85", zorder=0)
+        ax_m.set_xlabel("Time [days]")
+        ax_m.set_ylabel("<Y>")
+        ax_m.set_title("MEGNO of the nominal orbit (Newtonian gravity): {:s}".format(
+            megno["verdict"]["status"].replace("_", " ")))
+        ax_m.legend()
+        fig_m.tight_layout()
+        fig_m.savefig(megno_png_path)
+
     # Report the saved outputs
     ### Machine-readable results, so downstream analysis does not have to parse the text report ###
 
@@ -2398,7 +2856,12 @@ if __name__ == "__main__":
             "mc_runs": len(sim_outputs_mc),
             "random_seed": random_seed,
             "runtime_s": sim_wall,
+            "integrator": args.integrator,
+            "dt_days": dt_days,
+            "fixed_step_from_days": fixed_from,
         },
+        "whfast_encounter_warning": whfast_warning,
+        "megno": megno,
         "final_elements": {
             "a": a_val, "a_units": a_units,
             "q": q_val, "q_units": q_units,
@@ -2443,6 +2906,8 @@ if __name__ == "__main__":
 
     print("  Saved report : {:s}".format(results_txt_path))
     print("  Saved plot   : {:s}".format(plot_png_path))
+    if megno_png_path:
+        print("  Saved MEGNO  : {:s}".format(megno_png_path))
     print("  Saved data   : {:s}".format(results_json_path))
     print(hdr)
 
