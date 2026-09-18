@@ -25,9 +25,10 @@ from wmpl.Utils.Dcriteria import (calcRho1, calcRho2, calcRho5, calcC, calcDR, c
 from wmpl.Utils.OrbitClassification import (calcTisserand, calcKresakK, calcKresakP,
     calcAphelionDistance, calcOrbitalEnergy, isCometaryQi, isCometaryKi, isCometaryPi,
     isCometaryEi, calcHillRadius, calcResonanceSemiMajorAxis, classifyTancrediComet,
-    classifyTancrediAsteroid, isTancrediResonanceProtected, A_JUPITER, A_URANUS,
-    JW_INCL_LIMIT, JW_ENERGY_LIMIT, GAUSS_K_SQUARED, TANCREDI_RESONANCES, TANCREDI_T_HIGH,
-    Q_JUPITER_APHELION)
+    classifyTancrediAsteroid, isTancrediResonanceProtected, calcMOID, calcGiantPlanetMOIDs,
+    calcResonanceWidth, calcMaxPerihelionForTisserand, calcMinMOIDForTisserand,
+    _orbitPosition, A_JUPITER, A_URANUS, JW_INCL_LIMIT, JW_ENERGY_LIMIT, GAUSS_K_SQUARED,
+    TANCREDI_RESONANCES, TANCREDI_T_HIGH, Q_JUPITER_APHELION, RESONANCE_E_MIN, RESONANCE_E_MAX)
 
 
 # Orbits of comet 96P/Machholz 1 and asteroid 2003 EH1 at the 7415 BC epoch, from table 2 of
@@ -1212,6 +1213,140 @@ def test_tancredi_asteroid_outer_classes():
 
 
 
+# Table 1 of Tancredi (2014) also tabulates the maximum libration in semi-major axis of the five
+#   inner resonances, computed by the method of its appendix B, as (label, p + q, p, half width AU)
+TANCREDI_TABLE_1_WIDTHS = [('4:1', 4, 1, 0.0075), ('3:1', 3, 1, 0.0287), ('5:2', 5, 2, 0.0260),
+    ('7:3', 7, 3, 0.0215), ('2:1', 2, 1, 0.1127)]
+
+
+def test_tancredi_resonance_widths_match_table1():
+    """ The libration widths of appendix B must reproduce those tabulated in table 1. The table
+        gives the maximum libration, so it is evaluated at the top of the eccentricity range over
+        which the paper considers the expansion reliable.
+    """
+
+    for label, p_plus_q, p, published in TANCREDI_TABLE_1_WIDTHS:
+
+        got = float(calcResonanceWidth(p, p_plus_q, RESONANCE_E_MAX))
+
+        assert abs(got - published)/published < 0.01, \
+            "the {:s} width came out as {:.5f} AU, table 1 gives {:.4f}".format(label, got,
+                published)
+
+
+def test_tancredi_resonance_width_grows_with_eccentricity_and_is_clamped():
+    """ A resonance widens with eccentricity. Outside the range where the expansion of the
+        disturbing function is reliable the width is held at the value on the nearer edge.
+    """
+
+    widths = [float(calcResonanceWidth(1, 2, e)) for e in (0.05, 0.1, 0.2, 0.3)]
+
+    assert widths == sorted(widths), "the 2:1 width did not grow with eccentricity"
+
+    assert abs(float(calcResonanceWidth(1, 2, 0.001))
+        - float(calcResonanceWidth(1, 2, RESONANCE_E_MIN))) < 1e-12
+    assert abs(float(calcResonanceWidth(1, 2, 0.9))
+        - float(calcResonanceWidth(1, 2, RESONANCE_E_MAX))) < 1e-12
+
+
+def test_moid_matches_a_brute_force_search():
+    """ The minimum found by the four-start search must be the global minimum of the distance
+        surface, which a dense grid over both eccentric anomalies settles independently.
+
+        The orbits are those of figure A.1 of the paper, chosen there because the surface has a
+        second local minimum that a single search can fall into.
+    """
+
+    orbit_1 = (1.0, 0.0, 0.0, 0.0, 0.0)
+    orbit_2 = (1.2, 0.4, math.radians(30.0), math.radians(330.0), math.radians(30.0))
+
+    got = float(calcMOID(*(orbit_1 + orbit_2)))
+
+    grid = np.linspace(0, 2*np.pi, 600)
+    mesh_1, mesh_2 = np.meshgrid(grid, grid, indexing='ij')
+
+    point_1 = _orbitPosition(mesh_1, *orbit_1)
+    point_2 = _orbitPosition(mesh_2, *orbit_2)
+
+    brute = float(np.sqrt(sum((point_1[k] - point_2[k])**2 for k in range(3))).min())
+
+    assert got <= brute + 1e-9, \
+        "the search returned {:.6f} AU, above the grid minimum of {:.6f}".format(got, brute)
+    assert abs(got - brute) < 1e-3, \
+        "the search returned {:.6f} AU against a grid minimum of {:.6f}".format(got, brute)
+
+
+def test_moid_analytic_cases():
+    """ Two coplanar circles are separated everywhere by the difference of their radii, and an
+        orbit is at zero distance from itself.
+    """
+
+    assert abs(float(calcMOID(1.0, 0, 0, 0, 0, 1.2, 0, 0, 0, 0)) - 0.2) < 1e-6
+
+    orbit = (2.5, 0.6, math.radians(12.0), math.radians(40.0), math.radians(200.0))
+
+    assert float(calcMOID(*(orbit + orbit))) < 1e-6
+
+
+def test_moid_is_symmetric():
+    """ The distance between two orbits cannot depend on which is given first. """
+
+    orbit_1 = (2.7, 0.35, math.radians(9.0), math.radians(120.0), math.radians(60.0))
+    orbit_2 = (5.2, 0.05, math.radians(1.3), math.radians(100.0), math.radians(275.0))
+
+    forward = float(calcMOID(*(orbit_1 + orbit_2)))
+    backward = float(calcMOID(*(orbit_2 + orbit_1)))
+
+    assert abs(forward - backward) < 1e-6, \
+        "MOID gave {:.6f} one way and {:.6f} the other".format(forward, backward)
+
+
+def test_forbidden_region_closes_at_tisserand_three():
+    """ Above a Tisserand parameter of 3 an orbit cannot reach the planet, so there is a distance
+        it cannot come inside. That bound has to vanish at 3, where the orbit just touches, and
+        widen above it.
+    """
+
+    assert abs(float(calcMinMOIDForTisserand(3.0))) < 1e-4, \
+        "the forbidden region does not close at a Tisserand parameter of 3"
+
+    bounds = [float(calcMinMOIDForTisserand(t)) for t in (3.05, 3.1, 3.2, 3.4)]
+
+    assert bounds == sorted(bounds), "the forbidden region did not widen with T"
+
+    # The largest perihelion belongs to the circular orbit, which is the planet's own at T = 3
+    assert abs(float(calcMaxPerihelionForTisserand(3.0)) - 1.0) < 1e-6
+
+    try:
+        calcMaxPerihelionForTisserand(2.9)
+        raise AssertionError("expected a ValueError below a Tisserand parameter of 3")
+
+    except ValueError:
+        pass
+
+
+def test_giant_planet_moids_close_the_tancredi_criterion():
+    """ With the MOIDs computed rather than supplied, the classification runs from orbital elements
+        alone, which is what the criterion is for.
+    """
+
+    a, e, incl = 3.6, 0.45, math.radians(8.0)
+    node, peri = math.radians(100.0), math.radians(50.0)
+
+    distances = calcGiantPlanetMOIDs(a, e, incl, node, peri)
+
+    assert set(distances) == {'jupiter', 'saturn', 'uranus', 'neptune'}
+    assert all(v > 0 for v in distances.values())
+
+    # Jupiter is the closest of the four for an orbit of this size
+    assert min(distances, key=distances.get) == 'jupiter'
+
+    label = classifyTancrediAsteroid(a, e, incl, distances['jupiter'], min(distances.values()))
+
+    assert label == 'aco jupiter family', "the orbit classified as {!r}".format(label)
+
+
+
 if __name__ == "__main__":
 
     test_functions = [
@@ -1267,6 +1402,13 @@ if __name__ == "__main__":
         test_tancredi_asteroid_needs_to_reach_jupiter,
         test_tancredi_resonance_protection_excludes_the_hildas,
         test_tancredi_asteroid_outer_classes,
+        test_tancredi_resonance_widths_match_table1,
+        test_tancredi_resonance_width_grows_with_eccentricity_and_is_clamped,
+        test_moid_matches_a_brute_force_search,
+        test_moid_analytic_cases,
+        test_moid_is_symmetric,
+        test_forbidden_region_closes_at_tisserand_three,
+        test_giant_planet_moids_close_the_tancredi_criterion,
         ]
 
     failed = 0
