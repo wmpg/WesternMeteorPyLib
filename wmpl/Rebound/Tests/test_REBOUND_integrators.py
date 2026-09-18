@@ -130,14 +130,26 @@ def testFixedStepIntegratorsMatchIas15(reb, integrator, direction):
     assert (t_moon*np.sign(t_from)) >= 0
 
 
-def testTraceBackwardRefusesRadiationForces(reb):
-    """ The reversed-time TRACE integration cannot handle dissipative Poynting-Robertson drag. """
+@pytest.mark.parametrize("beta", [0.01, 0.1])
+def testTraceBackwardWithRadiationForcesMatchesIas15(reb, beta):
+    """ Poynting-Robertson drag is odd in the velocity, so the reversed-time TRACE integration must
+    flip its sign (c -> -c). With it, TRACE backward matches IAS15 backward; without it the drag
+    acts the wrong way and the orbit drifts away.
+    """
 
     if not _traceAvailable(reb):
         pytest.skip("TRACE needs REBOUND >= 4.4")
 
-    with pytest.raises(ValueError, match="radiation forces"):
-        _finalOrbit(reb, _departureTask("backward", days=10.0), "trace", beta=0.01)
+    task = _departureTask("backward", days=3652.5)
+    ref, _ = _finalOrbit(reb, task, "ias15", beta=beta)
+    orbit, _ = _finalOrbit(reb, task, "trace", dt_days=0.5, beta=beta)
+    no_drag, _ = _finalOrbit(reb, task, "ias15")
+
+    assert orbit.a == pytest.approx(ref.a, rel=2e-5)
+    assert orbit.e == pytest.approx(ref.e, rel=2e-5)
+
+    # The radiation forces genuinely change the orbit, so the comparison is meaningful
+    assert abs(ref.a/no_drag.a - 1) > 1e-3
 
 
 ### MEGNO ###

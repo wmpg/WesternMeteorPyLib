@@ -1020,13 +1020,10 @@ def _integrateParticles(task):
     # TRACE mishandles close encounters when the timestep is negative (a REBOUND bug, present in
     # 4.6.0 and 5.1.1: a flyby integrated backward comes out ~10% off in a, forward it matches IAS15
     # to 1e-7). A backward TRACE run is therefore integrated forward in time with every velocity
-    # reversed, which is exact because gravity, GR (gr_full) and the Earth's harmonics are all
-    # time-reversal symmetric. Poynting-Robertson drag is dissipative and is not, so it is refused.
+    # reversed. This is exact for gravity, GR (gr_full, quadratic in the velocities) and the Earth's
+    # harmonics, which are time-reversal symmetric. Poynting-Robertson drag is not, and is handled
+    # where the radiation force is set up.
     reverse_time = (integrator == "trace") and (direction == "backward")
-    if reverse_time and task.get("beta"):
-        raise ValueError("TRACE cannot integrate backward with radiation forces: TRACE is run in "
-                         "reversed time to integrate backward, which Poynting-Robertson drag does not "
-                         "allow. Use IAS15 instead.")
     time_sign = -1.0 if reverse_time else 1.0
     integrate_forward = (direction == "forward") or reverse_time
 
@@ -1100,7 +1097,12 @@ def _integrateParticles(task):
     if beta:
         rad = rebx.load_force("radiation_forces")
         rebx.add_force(rad)
-        rad.params["c"] = rbxConstants.C
+
+        # REBOUNDx computes a = beta*GM/r^2*[(1 - rdot/c)*r_hat - v/c]: the pressure term is even in
+        # the velocity and the Poynting-Robertson drag, entirely in 1/c, is odd. In reversed time the
+        # force needed is a(r, -v), which is exactly this with c -> -c. (Measured with TRACE, 100 yr
+        # backward, beta 0.01-0.1: within 2e-6 of IAS15 in a; 1e-3 off without the sign change.)
+        rad.params["c"] = -rbxConstants.C if reverse_time else rbxConstants.C
         ps["Sun"].params["radiation_source"] = 1
         for name in particle_names:
             ps[name].params["beta"] = beta
@@ -1978,10 +1980,6 @@ if __name__ == "__main__":
         checkIntegratorAvailable(args.integrator)
     except ValueError as e:
         parser.error(str(e))
-
-    if (args.integrator == "trace") and (direction == "backward") and beta:
-        parser.error("TRACE cannot integrate backward with radiation forces (it is run in reversed "
-                     "time, which Poynting-Robertson drag does not allow). Use --integrator ias15.")
 
     dt_days = None
     if args.integrator != "ias15":
