@@ -34,6 +34,18 @@ List of features:
 
 
 
+## Documentation
+
+Individual functions are documented in their docstrings, and every module can be run directly, so
+```python -m wmpl.<Package>.<Module> --help``` is usually the quickest answer. Task-oriented manuals for
+the larger tools live in [wmpl/Docs](wmpl/Docs):
+
+ * [Solving a trajectory](wmpl/Docs/Trajectory.md) - turning multi-station observations into a trajectory pickle, which is the input to the other tools
+ * [REBOUND orbital integration](wmpl/Docs/REBOUND.md) - integrating a meteoroid orbit back or forward in time, close encounters and impacts, Monte Carlo clones, radiation forces and chaos indicators
+ * [DynestyMetSim](wmpl/Dynesty/README.md) - nested-sampling fits of the erosion ablation model to a meteor light curve and dynamics
+
+
+
 ## Installation
 
 The two sections below describe how to install the library on both Linux and Windows.
@@ -256,7 +268,15 @@ Module interfaces are not 100% complete yet, but individual functions are well d
 python -m wmpl.Trajectory.Trajectory
 ```
 
-or, you can use functions from the library in other scripts. E.g. if you want to run a particular function from the library, you can create a new .py file and do:
+Some modules take command line arguments. E.g. to integrate a solved trajectory 100 years back through the solar system, run:
+
+```
+python -m wmpl.Rebound.REBOUND /path/to/trajectory.pickle --days 36525 --outputs 5000
+```
+
+See [wmpl/Docs](wmpl/Docs) for the manuals covering these in full.
+
+Alternatively, you can use functions from the library in other scripts. E.g. if you want to run a particular function from the library, you can create a new .py file and do:
 
 ```
 import datetime

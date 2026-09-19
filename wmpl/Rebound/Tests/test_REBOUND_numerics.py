@@ -180,6 +180,131 @@ def testHermiteOnAKeplerianFlyby(reb, ecc, tol):
     assert abs(t/tau) < 2*tol
     assert min(np.linalg.norm(r0), np.linalg.norm(r1))/q - 1 > 0.1
 
+### MEGNO verdict ###
+
+def _megnoSeries(y_func, years=1000.0, a_au=1.0, n=200):
+    """ A synthetic MEGNO series <Y>(t) over the given span, with a constant semi-major axis. """
+
+    t_days = np.linspace(years*365.25/n, years*365.25, n)
+    return list(t_days), [y_func(t/365.25) for t in t_days], [a_au]*n
+
+
+def testMegnoConvergedToTwoIsRegular(reb):
+    """ A series settling at 2 (with a small decaying wiggle) is regular. """
+
+    v = reb.classifyMegno(*_megnoSeries(lambda t: 2.0 + 0.3*np.exp(-t/50.0)*np.cos(t)))
+
+    assert v["status"] == "regular"
+    assert v["lyapunov_time_years"] is None
+    assert v["n_orbits"] == pytest.approx(1000.0)
+
+
+def testMegnoGrowingLinearlyIsChaoticWithLyapunovTime(reb):
+    """ <Y> ~ (lambda/2) t is chaotic, and the fitted Lyapunov time is 1/lambda. """
+
+    lyapunov_time = 80.0
+    v = reb.classifyMegno(*_megnoSeries(lambda t: 2.0 + 0.5*t/lyapunov_time))
+
+    assert v["status"] == "chaotic"
+    assert v["lyapunov_time_years"] == pytest.approx(lyapunov_time, rel=1e-6)
+
+
+def testMegnoTendingToZeroIsPeriodic(reb):
+    """ A bounded deviation (<Y> -> 0) is a stable periodic orbit, not a converged one. """
+
+    v = reb.classifyMegno(*_megnoSeries(lambda t: 0.4 + 0.1*np.sin(t)))
+
+    assert v["status"] == "periodic"
+
+
+def testMegnoInBetweenIsNotConverged(reb):
+    """ A series sitting at 2.3 is neither converged to 2 nor clearly chaotic. """
+
+    v = reb.classifyMegno(*_megnoSeries(lambda t: 2.3))
+
+    assert v["status"] == "not_converged"
+
+
+def testMegnoNeedsEnoughOrbits(reb):
+    """ Fewer than MEGNO_MIN_ORBITS orbital periods give no verdict, even for a clean series. """
+
+    # a = 10 AU: a 31.6-year period, so 300 years is ~9.5 orbits
+    v = reb.classifyMegno(*_megnoSeries(lambda t: 2.0, years=300.0, a_au=10.0))
+
+    assert v["status"] == "too_short"
+    assert v["n_orbits"] == pytest.approx(300.0/10.0**1.5)
+
+
+def testMegnoNotMeaningfulForUnboundOrbits(reb):
+    """ A hyperbolic orbit (negative a) gets no MEGNO verdict. """
+
+    v = reb.classifyMegno(*_megnoSeries(lambda t: 2.0, a_au=-3.0))
+
+    assert v["status"] == "unbound"
+    assert v["n_orbits"] is None
+
+
+def testMegnoWithTooFewOutputsGivesNoVerdict(reb):
+    """ Fewer than 8 outputs make the last-quarter mean meaningless, so there is no verdict. """
+
+    v = reb.classifyMegno(*_megnoSeries(lambda t: 2.0, n=5))
+
+    assert v["status"] == "too_short"
+    assert v["n_orbits"] is None, "the orbit count is not computed without a verdict"
+
+
+def testMegnoWithNoOutputsIsHandled(reb):
+    """ An empty series (the object escaped before the first output) must not raise. """
+
+    v = reb.classifyMegno([], [], [])
+
+    assert v["status"] == "too_short"
+    assert v["final"] is None
+    assert v["last_quarter"] is None
+
+
+### MEGNO report lines ###
+
+def _megnoResult(reb, y_func, **kwargs):
+    """ A MEGNO result dict with its verdict, in the form reboundSimulate stores it. """
+
+    times_days, megno, a_au = _megnoSeries(y_func, **kwargs)
+
+    return {"times_days": times_days, "megno": megno, "a_au": a_au, "escaped": False,
+            "verdict": reb.classifyMegno(times_days, megno, a_au)}
+
+
+def testMegnoReportStatesWhetherItConvergesToTwo(reb):
+    """ A regular orbit is reported as converging to 2, a chaotic one as not, with a Lyapunov time. """
+
+    regular = reb._megnoReportLines(_megnoResult(reb, lambda t: 2.0))
+    chaotic = reb._megnoReportLines(_megnoResult(reb, lambda t: 2.0 + 0.5*t/80.0))
+
+    assert any("Converges to 2: YES" in line for line in regular)
+    assert not any("Lyapunov" in line for line in regular)
+
+    assert any("Converges to 2: NO" in line for line in chaotic)
+    assert any("Lyapunov time ~ 80 years" in line for line in chaotic)
+
+
+def testMegnoReportGivesNoVerdictForAnUnboundOrbit(reb):
+    """ The statuses without a verdict are reported as such, not as "does not converge". """
+
+    lines = reb._megnoReportLines(_megnoResult(reb, lambda t: 2.0, a_au=-3.0))
+
+    assert any("No verdict" in line for line in lines)
+    assert not any("Converges to 2" in line for line in lines)
+
+
+def testMegnoReportHandlesAnEmptySeries(reb):
+    """ An empty series is reported in one line instead of raising on a missing value. """
+
+    megno = {"times_days": [], "megno": [], "a_au": [], "escaped": True,
+             "verdict": reb.classifyMegno([], [], [])}
+    lines = reb._megnoReportLines(megno)
+
+    assert any("no MEGNO values" in line for line in lines)
+
 
 ### Earth-departure gating ###
 
