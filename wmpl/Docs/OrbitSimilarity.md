@@ -180,6 +180,13 @@ clustering algorithm assumes a metric space, it is not getting one from `calcDSH
 **Circular orbits break `calcDD`** with a `ZeroDivisionError`, because its eccentricity term divides
 by `e1 + e2`. The rho family handles them.
 
+**D_SH and D_H depend on how you write the ascending node.** Both choose the branch of an arcsine
+from the raw difference of the two nodes, following Southworth & Hawkins, so the convention assumes
+both nodes lie in [0, 360°). A node written as 710° rather than 350° selects the other branch and
+gives a different answer — 0.69872 against 0.26675 on one worked example. Reduce nodes to
+[0, 360°) before calling. The criteria built on vectors rather than on an arcsine, which is the rho
+family and `calcDVJopek`, have no branch to choose and are not affected.
+
 **A self-comparison does not return exactly zero.** The square of the criterion cancels to about
 1e-16 and the square root lifts that to about 1e-8. Compare against a tolerance, not against zero.
 
