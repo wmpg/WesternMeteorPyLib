@@ -103,7 +103,7 @@ python setup.py install
 
 this step might take a while because it will download the DE430 ephemerids.
 
-Note that every time after closing the terminal or Anaconda prompt window, you will have to activate the ```wmpl``` enviroment by:
+Note that every time after closing the terminal or Anaconda prompt window, you will have to activate the ```wmpl``` environment by:
 ```
 conda activate wmpl
 ```
@@ -153,7 +153,7 @@ The installation might differ on Windows. I recommend installing Anaconda, which
 	python setup.py install
 	```
 
-Note that every time after closing the terminal or Anaconda prompt window, you will have to activate the ```wmpl``` enviroment by:
+Note that every time after closing the terminal or Anaconda prompt window, you will have to activate the ```wmpl``` environment by:
 ```
 conda activate wmpl
 ```
@@ -184,7 +184,7 @@ For example on my Windows PC, the location is
 and on my Linux server it is 
 ```$HOME/miniconda3/pkgs/proj-9.3.1-he5811b7_0/share/proj```
 
-Restart any terminal, CMD or Powershell windows, and you should find that the error has been resolved.  If not, try one of the other versions of proj thats probably in your pkgs folder. 
+Restart any terminal, CMD or Powershell windows, and you should find that the error has been resolved.  If not, try one of the other versions of proj that's probably in your pkgs folder. 
 
 ##### Missing epsg file
 If you get this error:
@@ -196,7 +196,7 @@ then you have to manually download the ```epsg``` file ([LINK](https://raw.githu
 
 #### ```ImportError: cannot import name 'dedent' from 'matplotlib.cbook'``` error
 
-In the recent matplotlib versions, the maintainters really droped the ball and started shipping buggy versions. Fortunately, we can revert to an old matplotlib version to fix this:
+In the recent matplotlib versions, the maintainers really dropped the ball and started shipping buggy versions. Fortunately, we can revert to an old matplotlib version to fix this:
 
 ```
 conda install -c conda-forge matplotlib=3.1.2

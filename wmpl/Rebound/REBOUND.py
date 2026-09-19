@@ -703,7 +703,7 @@ def tisserandClass(t_j):
 def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local", jpl_ephem_data=None,
                          earth_state=None):
     """ Takes a state vector in ECI coordinates (m and m/s), Julian date and converts from ECI (geocentric) to
-    Solar System barycentric coordiantes. The units are changed to AU and AU/year.
+    Solar System barycentric coordinates. The units are changed to AU and AU/year.
 
     Arguments:
         state_vect: [list] Position and velocity components in ECI coordinates (epoch of date) in m and m/s,

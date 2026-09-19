@@ -31,7 +31,7 @@ def loadLeapSeconds(leap_seconds_file):
 
     """
 
-    # URL where the leap seconds recored are kept
+    # URL where the leap seconds recorded are kept
     usno_leap_url = "ftp://maia.usno.navy.mil/ser7/tai-utc.dat" 
 
 

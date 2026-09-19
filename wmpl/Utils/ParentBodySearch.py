@@ -1,4 +1,4 @@
-""" Functions for comapring the given orbit with orbits of comets and asteroids. """
+""" Functions for comparing the given orbit with orbits of comets and asteroids. """
 
 # The MIT License
 
@@ -161,7 +161,7 @@ if os.path.isfile(config.meteorites_orbit_file):
 
 def findParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10, meteorites=False):
     """ Compares the given orbit to the orbit of asteroids and comets from the database using the given
-        D criterion function and returns top N best maches.
+        D criterion function and returns top N best matches.
     
     Arguments;
         q: [float] Perihelion distance in AU.
@@ -173,12 +173,12 @@ def findParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10, meteorites=
     Keyword arguments:
         d_crit: [str] D criterion function. 'dsh' for Southworth and Hawkins, 'dd' for Drummond, and 'dh' for 
             Jopek.
-        top_n: [int] How many objects with the heighest orbit similarity will be returned. 10 is default.
+        top_n: [int] How many objects with the highest orbit similarity will be returned. 10 is default.
             If -1 is given, the whole list of bodies will be returned.
         meteorites: [bool] Use known orbits of meteorites for comparison instead of comets and asteroids.
 
     Return:
-        [list] A list of best maching objects: [Object name, q, e, i, peri, node, D criterion value].
+        [list] A list of best matching objects: [Object name, q, e, i, peri, node, D criterion value].
     """
 
 
@@ -212,7 +212,7 @@ def findParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10, meteorites=
     # Calculate D criteria for every comet and asteroid
     for k, body in enumerate(parent_body_elements):
 
-        # Extract body orbital elments
+        # Extract body orbital elements
         name, q2, e2, incl2, peri2, node2 = body[:6]  # Exclude H magnitude
 
         # Convert the body elements to radians

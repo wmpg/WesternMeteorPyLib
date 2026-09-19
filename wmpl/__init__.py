@@ -23,7 +23,7 @@ for loader, module_name, is_pkg in pkgutil.walk_packages(__path__):
         continue
 
 
-    ### Skip exluded packages ###
+    ### Skip excluded packages ###
     skip_package = False
     for exclude_test in exclude:
         if exclude_test in module_name:
