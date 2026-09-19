@@ -70,8 +70,26 @@ Optionally, if you want to use the REBOUND orbital integrator, install:
 ```
 conda install -y -c conda-forge astropy
 conda install -y -c conda-forge rebound
-pip install reboundx
+pip install --no-build-isolation reboundx
 ```
+
+`reboundx` has no prebuilt wheels, so `pip` always compiles it. `--no-build-isolation` makes it
+compile against the `rebound` you just installed (it needs `setuptools`; run
+`pip install setuptools` if it is missing). Without it, `pip` compiles against the newest
+`rebound` on PyPI instead. The same mismatch happens if `rebound` is upgraded after `reboundx` was
+compiled. `reboundx` then fails to import, or fails to attach to the simulation (with
+`rebound` 4.3.0 this shows up as
+`Need to attach reboundx.Extras instance to simulation before setting params`).
+To repair it, recompile `reboundx` against the installed `rebound`:
+
+```
+pip install --force-reinstall --no-deps --no-build-isolation --no-binary reboundx reboundx
+```
+
+This installs the latest `reboundx`, which needs `rebound` 5 or newer, so update `rebound` first
+with the tool you installed it with. To keep an older `rebound`, pin the `reboundx` released with
+it instead (e.g. `reboundx==4.3.0` for `rebound==4.3.0`); a newer `reboundx` does not compile
+against an older `rebound`. The code works with both REBOUND 4 and 5.
 
 **Platform note:** this works on **Linux and macOS**. It does **not** work on native
 Windows: `reboundx` has no Windows wheel and no conda-forge build, so `pip` compiles it
@@ -82,7 +100,7 @@ use the **Windows Subsystem for Linux (WSL2)** — install an Ubuntu distributio
 with `gcc`. Installing only `rebound` is not enough — `reboundx` must import too. Verify with:
 
 ```
-python -c "import rebound, reboundx; print('ok')"
+python -c "import rebound, reboundx; s = rebound.Simulation(); reboundx.Extras(s); print('ok' if s.extras else 'reboundx not attached: reinstall it as described above')"
 ```
 
 
