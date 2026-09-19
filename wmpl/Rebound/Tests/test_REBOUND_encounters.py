@@ -3,8 +3,8 @@
 Away from the Earth IAS15 takes steps of 1-2 days, so the distances at the step ends alone can miss
 a planetary flyby's minimum by a large fraction of the step length. These tests integrate synthetic
 flybys with the integrator's own step choice and check the recorded minima, and the list of every
-encounter, against dense re-integrations of the same flybys. They are skipped when rebound/reboundx are not importable.
-They need no ephemeris file: the massive bodies are placed on circular orbits.
+encounter, against dense re-integrations of the same flybys. They are skipped when rebound/reboundx
+are not importable. They need no ephemeris file: the massive bodies are placed on circular orbits.
 """
 
 import os
@@ -179,3 +179,86 @@ def testRepeatedEncountersWithTheSameBodyAreAllListed(reb):
         assert e["min_dist_au"] == pytest.approx(e_dense["min_dist_au"], rel=1e-4)
         assert abs(e["time_days"] - e_dense["time_days"])*1440 < 0.5
         assert e["hill_radius_au"] == rh
+
+
+### The Hill-radius gate on the encounter list ###
+
+def testDistantPassageRefinesTheMinimumWithoutBeingAnEncounter(reb):
+    """ A passage outside n_hill still refines the recorded minimum, but is not an encounter. """
+
+    task = _flybyTask(30.0, 12.0, 2.0, "forward")
+    task = dict(task, times=list(np.linspace(0.0, 4.0*DAY, 5)))
+    diag = reb._integrateParticles(task)["diagnostics"]["obj"]
+
+    # The flyby is well outside the 3 Hill radii threshold, so nothing is listed
+    assert diag["encounters"] == []
+
+    # The minimum is still refined below what the step ends alone would give
+    d_dense, _ = _closestApproach(reb, task, np.linspace(0.0, 4.0*DAY, 3001))
+    assert diag["min_dist_au"]["Mercury"] == pytest.approx(d_dense, rel=1e-6)
+    assert diag["min_dist_au"]["Mercury"]/reb.HILL_RADII_AU["Mercury"] > 3.0
+
+
+def testTheSunIsNeverAnEncounterBody(reb):
+    """ The Sun has no Hill radius, so it is tracked for its distance but never listed.
+
+    The threshold in the heartbeat is n_hill*HILL_RADII_AU.get(body, 0.0), which no distance can
+    fall below for a body that is not in the table. _encounterRecord refuses such a body outright,
+    so the two would disagree loudly rather than silently if that gate were ever removed.
+    """
+
+    assert "Sun" not in reb.HILL_RADII_AU
+
+    with pytest.raises(KeyError, match="No Hill radius"):
+        reb._encounterRecord("Sun", 0.5, 0.0)
+
+    task = _flybyTask(30.0, 2.0, 2.0, "forward")
+    task = dict(task, times=list(np.linspace(0.0, 4.0*DAY, 5)))
+    diag = reb._integrateParticles(task)["diagnostics"]["obj"]
+
+    assert "Sun" not in [enc["body"] for enc in diag["encounters"]]
+    assert diag["min_dist_au"]["Sun"] is not None, "the Sun distance is still tracked"
+
+
+### Monte Carlo encounter summary ###
+
+def _encounterEntry(body, dist_au):
+    """ One encounter entry, in the format _integrateParticles produces. """
+
+    hill = {"Mercury": 0.001475, "Venus": 0.006759}[body]
+
+    return {"body": body, "min_dist_au": dist_au, "time_days": 0.0,
+            "hill_radius_au": hill, "n_hill": dist_au/hill, "index": None}
+
+
+def _cloneDiag(*encounters):
+    """ A clone diagnostics dict holding the given (body, dist_au) encounters. """
+
+    return {"encounters": [_encounterEntry(b, d) for b, d in encounters]}
+
+
+def testCloneSummaryCountsClonesAndPassagesSeparately(reb):
+    """ "count" is the clones that met a body, "n_encounters" is how many passages they made. """
+
+    clone_diag = {
+        "mc_0": _cloneDiag(("Mercury", 0.002), ("Mercury", 0.003)),
+        "mc_1": _cloneDiag(("Mercury", 0.001)),
+        "mc_2": _cloneDiag(("Venus", 0.01)),
+        "mc_3": {"encounters": []},
+    }
+
+    summary = reb.cloneEncounterSummary(clone_diag)
+
+    assert summary["Mercury"]["count"] == 2, "two clones met Mercury, one of them twice"
+    assert summary["Mercury"]["n_encounters"] == 3
+    assert summary["Mercury"]["closest_au"] == pytest.approx(0.001)
+
+    assert summary["Venus"]["count"] == 1
+    assert summary["Venus"]["n_encounters"] == 1
+
+
+def testCloneSummaryIsEmptyWithoutEncounters(reb):
+    """ Clones that met nothing, or diagnostics without the key, produce no entries. """
+
+    assert reb.cloneEncounterSummary({}) == {}
+    assert reb.cloneEncounterSummary({"mc_0": {}, "mc_1": {"encounters": []}}) == {}
