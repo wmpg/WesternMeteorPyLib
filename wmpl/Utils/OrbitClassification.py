@@ -114,9 +114,14 @@ def calcTisserand(a, e, i, a_planet=A_JUPITER):
         a_planet: [float] semi-major axis of the perturbing planet (AU). Default Jupiter.
 
     Return:
-        [float] Tisserand parameter
+        [float] Tisserand parameter. nan for an unbound orbit (e >= 1), where the parameter is not
+            defined. wmpl.Rebound.REBOUND.tisserandParameterJupiter is the scalar equivalent used by
+            the REBOUND report and returns None in that case instead.
     """
 
+    # An unbound orbit takes the square root of a negative number and gives nan, which is the right
+    #   answer: the parameter describes bounded motion. The classifiers below test for it rather
+    #   than letting every comparison against nan quietly evaluate to False.
     return a_planet/a + 2*np.cos(i)*np.sqrt((a/a_planet)*(1.0 - e**2))
 
 
@@ -274,6 +279,10 @@ def calcHillRadius(a_planet, mass_ratio):
         Inside this radius the planet's attraction dominates the Sun's tidal pull, so it sets the
         scale on which a close encounter perturbs a heliocentric orbit.
 
+        The HILL_RADIUS_* constants are the values the paper quotes rather than values from this
+        function, so that the classification reproduces the paper exactly; the two agree to about
+        2e-3 AU. Use this function for a planet the module does not tabulate.
+
         Reference: Tancredi (2014), Icarus 234, 66, eq. 2, doi:10.1016/j.icarus.2014.02.013.
 
     Arguments:
@@ -331,16 +340,23 @@ def classifyTancrediComet(a, e, i):
     tisserand = float(calcTisserand(a, e, i))
     q = a*(1.0 - e)
 
+    # An unbound orbit has no Tisserand parameter, and every comparison against nan is False, so
+    #   without this it would reach 'unclassified' for the wrong reason
+    if not np.isfinite(tisserand):
+        return 'unclassified'
+
+    # The intervals are half open, so an orbit landing exactly on a limit is classified instead of
+    #   falling through every branch
     if (tisserand < TANCREDI_T_LOW) and (a < A_NEPTUNE):
         return 'halley'
 
-    if (TANCREDI_T_LOW < tisserand < TANCREDI_T_HIGH) and (q < Q_JUPITER_APHELION):
+    if (TANCREDI_T_LOW <= tisserand < TANCREDI_T_HIGH) and (q <= Q_JUPITER_APHELION):
         return 'jupiter family'
 
-    if (tisserand > TANCREDI_T_HIGH) and (q < Q_JUPITER_APHELION):
+    if (tisserand >= TANCREDI_T_HIGH) and (q <= Q_JUPITER_APHELION):
         return 'asteroidal orbit'
 
-    if (tisserand > TANCREDI_T_LOW) and (Q_JUPITER_APHELION < q < A_URANUS):
+    if (tisserand >= TANCREDI_T_LOW) and (Q_JUPITER_APHELION < q < A_URANUS):
         return 'centaur'
 
     return 'unclassified'
@@ -410,8 +426,9 @@ def classifyTancrediAsteroid(a, e, i, moid_jupiter_hill, moid_giants_min_hill):
         selects evolve chaotically like periodic comets.
 
         The two minimum orbital intersection distances are arguments, so that a study can supply
-        values computed against whatever planetary ephemeris it uses. calcGiantPlanetMOIDs
-        computes them from mean elements at J2000 and returns them in the units expected here.
+        values computed against whatever planetary ephemeris it uses. calcGiantPlanetMOIDs computes
+        them from mean elements at J2000, in the Hill radii expected here, as a dictionary keyed by
+        planet: pass its 'jupiter' entry and the smallest of its values.
 
         Reference: Tancredi (2014), Icarus 234, 66, section 6, doi:10.1016/j.icarus.2014.02.013.
 
@@ -482,6 +499,7 @@ def _orbitPosition(ecc_anomaly, a, e, i, node, peri):
         [ndarray] position vector (AU)
     """
 
+    # Position in the orbital plane, with the origin at the focus and x towards perihelion
     x = a*(np.cos(ecc_anomaly) - e)
     y = a*np.sqrt(1.0 - e**2)*np.sin(ecc_anomaly)
 
@@ -489,6 +507,8 @@ def _orbitPosition(ecc_anomaly, a, e, i, node, peri):
     cos_i, sin_i = np.cos(i), np.sin(i)
     cos_O, sin_O = np.cos(node), np.sin(node)
 
+    # Rotate by the argument of perihelion, then by the inclination and the node, i.e. the
+    #   standard 3-1-3 Euler sequence written out
     x_peri = x*cos_w - y*sin_w
     y_peri = x*sin_w + y*cos_w
 
@@ -498,6 +518,10 @@ def _orbitPosition(ecc_anomaly, a, e, i, node, peri):
 
 def calcMOID(a1, e1, i1, O1, w1, a2, e2, i2, O2, w2):
     """ Calculate the minimum orbital intersection distance between two orbits.
+
+        Note the element order: this function takes the semi-major axis first, where every
+        dissimilarity criterion in wmpl.Utils.Dcriteria takes the perihelion distance. The two
+        signatures are otherwise the same shape, so a q passed here is silently accepted.
 
         The distance between a point on each orbit is minimised over the two eccentric anomalies.
         That surface has more than one local minimum, so the search is repeated from the three
@@ -529,10 +553,17 @@ def calcMOID(a1, e1, i1, O1, w1, a2, e2, i2, O2, w2):
             - _orbitPosition(anomalies[1], *orbit2)))
 
     def refine(start):
+
+        # The tolerances are well below the AU-scale distances being compared, so the result is
+        #   limited by which basin the search lands in rather than by how finely it converges
         found = np.atleast_1d(scipy.optimize.fmin_powell(separation, np.asarray(start, dtype=float),
             disp=False, xtol=1e-10, ftol=1e-12))
         return found, separation(found)
 
+    # Powell converges to whichever local minimum it starts nearest, and the separation surface
+    #   has several. The paper restarts from three points reflected about the first result, which
+    #   between them reach the other basins: the opposite side of both orbits, the opposite side of
+    #   the second only, and the two reflections combined.
     first, smallest = refine((0.0, 0.0))
 
     for start in ((first[0] + np.pi, first[1] + np.pi), (first[0], 2*np.pi - first[1]),
@@ -554,6 +585,9 @@ def calcGiantPlanetMOIDs(a, e, i, node, peri):
 
         The planetary elements used are mean elements at J2000. A study spanning a long time base
         should supply its own.
+
+        classifyTancrediAsteroid takes two scalars rather than this dictionary, so a caller passes
+        distances['jupiter'] and min(distances.values()) from the result.
 
     Arguments:
         a: [float] semi-major axis of the orbit (AU)
@@ -649,8 +683,11 @@ def calcLaplaceCoefficient(alpha, j, s):
         [float] Laplace coefficient
     """
 
+    # b_s^(-j) = b_s^(j), so only the magnitude matters and the cache is not split over the sign
     j = abs(int(j))
 
+    # Rounded so that values differing only in the last bits share an entry. The coefficients are
+    #   needed repeatedly for the same handful of resonances, and each one costs a quadrature.
     key = (round(float(alpha), 12), j, round(float(s), 6))
 
     if key not in _LAPLACE_CACHE:
@@ -681,11 +718,15 @@ def calcLaplaceDerivative(alpha, j, s, n):
     if n == 0:
         return calcLaplaceCoefficient(alpha, j, s)
 
+    # The first derivative in terms of coefficients of index s + 1, eq. 6.70
     if n == 1:
         return s*(calcLaplaceCoefficient(alpha, j - 1, s + 1)
             - 2*alpha*calcLaplaceCoefficient(alpha, j, s + 1)
             + calcLaplaceCoefficient(alpha, j + 1, s + 1))
 
+    # Higher derivatives by differentiating eq. 6.70 n - 1 more times, eq. 6.71. The last term
+    #   comes from differentiating the -2*alpha factor and vanishes for n = 1, which is why that
+    #   case is written out separately above rather than folded in here.
     return s*(calcLaplaceDerivative(alpha, j - 1, s + 1, n - 1)
         - 2*alpha*calcLaplaceDerivative(alpha, j, s + 1, n - 1)
         + calcLaplaceDerivative(alpha, j + 1, s + 1, n - 1)
@@ -707,8 +748,15 @@ def calcDisturbingFunctionTerm(alpha, j, order):
         [float] direct term of the disturbing function
     """
 
+    # The expansion is in the Laplace coefficients of index 1/2 and their first four derivatives
+    #   with respect to alpha. All five are computed up front; an order-1 term uses only the first
+    #   two, but the cache in calcLaplaceCoefficient makes the unused ones nearly free.
     b = [calcLaplaceDerivative(alpha, j, 0.5, n) for n in range(5)]
 
+    # Every numerical coefficient below is transcribed from table B.1 of the paper. They are the
+    #   polynomial in j multiplying each derivative, and they have no separate meaning: an error in
+    #   one shows up only as a wrong resonance width, so they are checked against the widths the
+    #   paper tabulates (see test_tancredi_resonance_widths_match_table1).
     if order == 1:
         return 0.5*(-2*j*b[0] - alpha*b[1])
 

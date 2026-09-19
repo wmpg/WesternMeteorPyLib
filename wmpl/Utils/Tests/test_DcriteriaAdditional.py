@@ -29,7 +29,8 @@ from wmpl.Utils.OrbitClassification import (calcTisserand, calcKresakK, calcKres
     classifyTancrediAsteroid, isTancrediResonanceProtected, calcMOID, calcGiantPlanetMOIDs,
     calcResonanceWidth, calcMaxPerihelionForTisserand, calcMinMOIDForTisserand,
     _orbitPosition, A_JUPITER, A_URANUS, JW_INCL_LIMIT, JW_ENERGY_LIMIT, GAUSS_K_SQUARED,
-    TANCREDI_RESONANCES, TANCREDI_T_HIGH, Q_JUPITER_APHELION, RESONANCE_E_MIN, RESONANCE_E_MAX)
+    TANCREDI_RESONANCES, TANCREDI_T_HIGH, TANCREDI_T_LOW, Q_JUPITER_APHELION, RESONANCE_E_MIN,
+    RESONANCE_E_MAX)
 
 
 # Orbits of comet 96P/Machholz 1 and asteroid 2003 EH1 at the 7415 BC epoch, from table 2 of
@@ -597,6 +598,39 @@ def test_DX_reproduces_the_quoted_shower_means():
         assert abs(got - published) < 0.02, \
             "mean D_X of the {:s} came out as {:.3f}, the paper quotes {:.2f}".format(code, got,
                 published)
+
+
+def test_DX_right_ascension_term_scales_the_chord_not_the_angle():
+    """ The paper writes the right-ascension term as [2 sin((a1 - a2)/2) cos(d1)]^2, so cos(d1)
+        multiplies the chord rather than entering the angle.
+
+        The two forms agree to first order in the radiant separation, so no within-shower
+        comparison can tell them apart. They are separated here at a large separation, where the
+        difference reaches tens of per cent.
+    """
+
+    dec = math.radians(60.0)
+
+    for dra_deg in (90.0, 180.0):
+
+        dra = math.radians(dra_deg)
+
+        # The criterion with every other term switched off: same solar longitude, same velocity
+        d_value = float(calcDX(0.0, dec, 0.0, 30.0, dra, dec, 0.0, 30.0, w_sol=0.0, w_ra=1.0,
+            w_dec=0.0, w_vg=0.0))
+
+        # The published closed form of that single term, with the (|dVg| + 1) factor equal to 1
+        published = abs(2*math.sin(dra/2.0)*math.cos(dec))
+
+        assert abs(d_value - published) < 1e-12, \
+            "the right-ascension term at {:.0f} deg came out as {:.6f}, the published form " \
+            "gives {:.6f}".format(dra_deg, d_value, published)
+
+        # The form with cos(d1) inside the sine, which agrees to first order and must not
+        wrong = abs(2*math.sin(dra/2.0*math.cos(dec)))
+
+        assert abs(wrong - published)/published > 0.05, \
+            "this separation is too small to distinguish the two forms"
 
 
 def test_DX_separates_the_taurid_branches():
@@ -1209,6 +1243,47 @@ TANCREDI_TABLE_1 = [('4:1', 2.065), ('3:1', 2.502), ('5:2', 2.825), ('7:3', 2.95
 # Hill radii of the giant planets quoted in section 2.3, as (name, a in AU, M_sun/M_planet, R_H)
 TANCREDI_HILL_RADII = [('Jupiter', 5.203, 1047.3486, 0.355), ('Saturn', 9.5826, 3497.898, 0.436),
     ('Uranus', 19.2018, 22902.98, 0.469), ('Neptune', 30.0470, 19412.24, 0.776)]
+
+
+def test_tancredi_unbound_orbit_is_not_silently_unclassified():
+    """ The Tisserand parameter is not defined for an unbound orbit, so it comes back nan.
+
+        Every comparison against nan is False, so the orbit reaches 'unclassified' either way; the
+        explicit guard in the classifier makes that deliberate rather than accidental. This test
+        pins the behaviour, so a later branch that happens to accept nan cannot pass silently.
+    """
+
+    assert math.isnan(float(calcTisserand(2.0, 1.4, 0.1))), \
+        "a hyperbolic orbit has no Tisserand parameter"
+
+    assert classifyTancrediComet(2.0, 1.4, 0.1) == 'unclassified'
+
+    # A bound orbit with the same elements otherwise still classifies
+    assert classifyTancrediComet(2.0, 0.4, 0.1) != 'unclassified'
+
+
+def test_tancredi_class_limits_are_half_open():
+    """ An orbit landing exactly on a class limit belongs to a class rather than falling through.
+
+        The limits are on the Tisserand parameter, so the orbit is built backwards from the
+        parameter: at zero inclination and a given semi-major axis, T fixes the eccentricity.
+    """
+
+    for tisserand, expected in ((TANCREDI_T_LOW, 'jupiter family'),
+                                (TANCREDI_T_HIGH, 'asteroidal orbit')):
+
+        a = 3.0
+
+        # T = a_J/a + 2 sqrt((a/a_J)(1 - e^2)) at i = 0, solved for e
+        root = (tisserand - A_JUPITER/a)/2.0
+        e = math.sqrt(max(0.0, 1.0 - root**2*A_JUPITER/a))
+
+        assert abs(float(calcTisserand(a, e, 0.0)) - tisserand) < 1e-9, \
+            "the orbit was not built on the limit"
+
+        assert classifyTancrediComet(a, e, 0.0) == expected, \
+            "an orbit exactly on T = {:.2f} came out as {!r}".format(tisserand,
+                classifyTancrediComet(a, e, 0.0))
 
 
 def test_tancredi_resonance_semimajor_axes_match_table1():

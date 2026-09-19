@@ -738,6 +738,12 @@ def calcC(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2):
         [float] C value (sqrt(AU))
     """
 
+    # |c| = sqrt(p) rather than k*sqrt(p), i.e. the Gaussian constant is left out and the result
+    #   carries units of sqrt(AU). calcDVJopek builds the same vector with the k factor included,
+    #   so the two are on scales differing by k = 0.0172. Neslusan's own paper could not be read to
+    #   settle which convention it uses; since the criterion is applied with the break-point method
+    #   rather than a fixed threshold, the scale does not affect a search, but it does mean a C
+    #   value from here cannot be compared against one quoted elsewhere without checking.
     c1 = np.sqrt(q1*(1.0 + e1))
     c2 = np.sqrt(q2*(1.0 + e2))
 
@@ -754,6 +760,9 @@ def calcDR(ra1, dec1, sol1, vg1, ra2, dec2, sol2, vg2, w1=1.0):
         perturbation of meteoroid orbits, the circulation of the argument of perihelion, and drops
         the terms in the angle phi and the solar longitude. It is therefore a necessary but not a
         sufficient condition for membership of the same stream.
+
+        Unlike the other criteria added here this one takes scalars only, because
+        calcVgComponents, which it shares with calcDN, is written with the math module.
 
         Reference: Valsecchi, Jopek & Froeschle (1999), MNRAS 304, 743.
 
@@ -772,8 +781,9 @@ def calcDR(ra1, dec1, sol1, vg1, ra2, dec2, sol2, vg2, w1=1.0):
         vg2: [float] geocentric velocity of the second orbit (km/s)
 
     Keyword arguments:
-        w1: [float] weight of the cos(theta) term. The paper leaves the weights undefined and uses
-            unity throughout its application.
+        w1: [float] weight of the cos(theta) term, not an argument of perihelion despite carrying
+            the name this module uses for one elsewhere. The paper leaves the weights undefined and
+            uses unity throughout its application.
 
     Return:
         [float] D_R value
@@ -949,7 +959,11 @@ def calcDX(ra1, dec1, sol1, vg1, ra2, dec2, sol2, vg2, w_sol=DX_W_SOL, w_ra=DX_W
     d_vg = np.abs(vg1 - vg2)
 
     term_sol = w_sol*(2*np.sin((sol1 - sol2)/2.0))**2
-    term_ra = w_ra*(d_vg + 1.0)*(2*np.sin((ra1 - ra2)/2.0*np.cos(dec1)))**2
+    # cos(dec1) scales the chord, it is not part of the angle: the paper writes the term as
+    #   [2 sin((ra1 - ra2)/2) cos(dec1)]^2. The two forms agree to first order in the radiant
+    #   separation, which is why a within-shower comparison cannot tell them apart, but they
+    #   differ by 41% at 180 deg of right ascension and 60 deg of declination.
+    term_ra = w_ra*(d_vg + 1.0)*(2*np.sin((ra1 - ra2)/2.0)*np.cos(dec1))**2
     term_dec = w_dec*(d_vg + 1.0)*(2*np.sin(np.abs(dec1 - dec2)/2.0))**2
     term_vg = w_vg*(d_vg/vg1)**2
 
@@ -1099,7 +1113,9 @@ TC_REFERENCE_INCL = np.radians(4.0)
 # Perihelion distance of the same reference orbit as quoted by Steel, Asher & Clube (1991) [AU]
 TC_REFERENCE_Q = 0.375
 
-# Scale normalising the semi-major axis term of D_ACS [AU]
+# Scale normalising the semi-major axis term of D_ACS [AU]. Asher, Clube & Steel (1993) print it
+#   in eq. 2 itself, which reads D^2 = ((a1 - a2)/3)^2 + (e1 - e2)^2 + (2 sin((i1 - i2)/2))^2, so it
+#   is a published constant and not one inferred from their table 1
 DACS_A_SCALE = 3.0
 
 
