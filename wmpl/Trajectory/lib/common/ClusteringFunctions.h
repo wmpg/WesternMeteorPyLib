@@ -11,7 +11,7 @@
 //  These clustering functions assume that the user has pre-thresholded the imagery data
 //  and is providing an exceedance count and the pointer offsets to the exceedance pixel
 //  positions per frame. This can be obtained in many ways via pre-processing of the 
-//  imagery sequence. Pre-processing opions one may consider are:
+//  imagery sequence. Pre-processing options one may consider are:
 //    1) Track the temporally running mean (or median) and standard deviation images and
 //       threshold each new frame such that the frame > mean + factor * sigma
 //       to obtain all the pixel exceedance locations in the frame.
@@ -39,7 +39,7 @@
 //  The time attriibute is NOT set upon exit and is up to the user to set this or have 
 //  post-processing functions handle the time assignment. 
 //
-//  The information can be retreived for the k-th spatial cluster as follows:
+//  The information can be retrieved for the k-th spatial cluster as follows:
 //
 //     struct  clusterinfo  cluster;
 //

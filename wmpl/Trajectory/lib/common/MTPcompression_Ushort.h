@@ -583,7 +583,7 @@ struct pixelinfo_US  *pixel_ptr;
 //  "totalframes" has been passed through the function MTPcompression_UShort_Compress. The 
 //  computation of the products for maxpixel, maxframe, avepixel, and stdpixel is performed
 //  and the user can make immediate follow-up calls to MTPcompression_UShort_Compress without
-//  overwritting these products. The previous block's filename is copied to "WritHHpathname", 
+//  overwriting these products. The previous block's filename is copied to "WritHHpathname", 
 //  the previous block's compression arrays are computed and can then be written out using 
 //  MTPcompression_UShort_FileWrite or used directly in processing.
 //
@@ -737,7 +737,7 @@ char *H_ptr, substring[255];
 
    //  directory_pathname... HH_CAMNO_YYYYMMDD_HHMMSS_MSC_FRAMENO.bin
 
-   H_ptr = strrchr( HHpathname, 72 );  //... last occurance of H = ASCII 72 
+   H_ptr = strrchr( HHpathname, 72 );  //... last occurrence of H = ASCII 72 
    
    strncpy( substring, H_ptr-1, 41 );  // 41 characters from HH to .bin
 

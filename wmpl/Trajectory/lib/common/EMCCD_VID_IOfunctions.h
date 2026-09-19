@@ -457,7 +457,7 @@ double  jdt_unixstart, jdt_sinceunix;
 struct  dumpvid_stamp_s  stamp;
 
 
-    //======== Get the "stamp" header which sould be the same dimensions for all frames
+    //======== Get the "stamp" header which should be the same dimensions for all frames
 
     if( dumpvid_stamp_peek( vidinfo, &stamp ) != 0 )  {
 		dumpvid_close( vidinfo );
@@ -516,7 +516,7 @@ double  jdt_unixstart, jdt_sinceunix;
 struct  dumpvid_stamp_s  stamp;
 
 
-    //======== Get the "stamp" header which sould be the same dimensions for all frames
+    //======== Get the "stamp" header which should be the same dimensions for all frames
 
     if( dumpvid_stamp_peek( vidinfo, &stamp ) != 0 )  {
 		dumpvid_close( vidinfo );
