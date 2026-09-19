@@ -27,7 +27,7 @@ import math
 
 import numpy as np
 
-from wmpl.Utils.Dcriteria import calcDSH, calcDD, calcDH
+from wmpl.Utils.Dcriteria import calcDSH, calcDD, calcDH, _clippedAcos
 
 
 # A self-comparison cannot return exactly zero: acos has an infinite derivative at 1, so the
@@ -279,6 +279,74 @@ def test_DH_pi21_matches_the_vector_definition():
         "D_H implied a Pi_21 differing from the vector definition by {:.4e}".format(worst)
 
 
+def test_DH_node_sign_worked_example():
+    """ The worked example that motivated the fix, pinned so the convention cannot be reverted.
+
+        q = 0.5 AU, e = 0.7, i = 15 deg, O1 = 10 deg, w1 = 150 deg, w2 = 190 deg, with the second
+        node written both ways across the branch cut. Before the rho factor the two representations
+        gave 0.69872 and 0.26675; both must now give 0.26675.
+    """
+
+    common = (0.5, 0.7, math.radians(15.0), math.radians(10.0), math.radians(150.0))
+
+    for node_deg in (350.0, -10.0):
+
+        d_value = calcDH(*(common + (0.5, 0.7, math.radians(15.0), math.radians(node_deg),
+            math.radians(190.0))))
+
+        assert abs(d_value - 0.26675) < 1e-5, \
+            "D_H with the second node at {:.0f} deg came out as {:.5f}, expected 0.26675".format(
+                node_deg, d_value)
+
+
+def test_rho_convention_holds_only_within_one_turn():
+    """ The rho test is on the raw node difference, so it is not 2*pi periodic.
+
+        Adding a full turn to a node pushes |O2 - O1| past 180 deg and selects the other branch,
+        which changes the result. This is a property of the Southworth & Hawkins convention rather
+        than of this implementation, and it affects D_SH exactly as it affects D_H.
+
+        The behaviour is pinned here deliberately. It is a known limitation, documented in both
+        docstrings, and this test exists so that a later change to it is a visible decision rather
+        than an accident. The robust alternative is the vector definition of Pi_21 used by
+        _piFromVectorDefinition below, which has no branch to select.
+    """
+
+    common = (0.5, 0.7, math.radians(15.0), math.radians(10.0), math.radians(150.0))
+    second = (0.5, 0.7, math.radians(15.0))
+
+    for criterion in (calcDSH, calcDH):
+
+        within = criterion(*(common + second + (math.radians(350.0), math.radians(190.0))))
+        extra_turn = criterion(*(common + second
+            + (math.radians(350.0) + 2*math.pi, math.radians(190.0))))
+
+        assert abs(within - extra_turn) > 0.1, \
+            "{:s} unexpectedly survived a full turn added to the node; if that is now intended, " \
+            "update this test and both docstrings".format(criterion.__name__)
+
+
+def test_clipped_acos_engages_only_outside_the_domain():
+    """ The guard must change nothing that was already computable. """
+
+    # An argument inside the domain is passed through untouched
+    for value in (-1.0, -0.5, 0.0, 0.25, 1.0):
+        assert _clippedAcos(value) == math.acos(value)
+
+    # One ulp outside, where math.acos raises, is clipped to the endpoint
+    just_above = 1.0 + 2*np.spacing(1.0)
+    just_below = -1.0 - 2*np.spacing(1.0)
+
+    try:
+        math.acos(just_above)
+        raise AssertionError("the test argument is not actually outside the domain")
+    except ValueError:
+        pass
+
+    assert _clippedAcos(just_above) == 0.0
+    assert _clippedAcos(just_below) == math.pi
+
+
 def test_acos_domain_holds_on_self_comparison():
     """ Comparing an orbit with itself must return zero for every criterion, at every inclination,
         rather than raising a math domain error.
@@ -347,6 +415,9 @@ if __name__ == "__main__":
         test_DH_pi21_matches_the_vector_definition,
         test_acos_domain_holds_on_self_comparison,
         test_acos_domain_holds_for_near_identical_orbits,
+        test_DH_node_sign_worked_example,
+        test_rho_convention_holds_only_within_one_turn,
+        test_clipped_acos_engages_only_outside_the_domain,
         ]
 
     failed = 0
