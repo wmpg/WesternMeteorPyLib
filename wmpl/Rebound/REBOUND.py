@@ -376,6 +376,55 @@ def encountersFromMinDistances(min_dist_au, min_time_days, n_hill=3.0):
     return encounters
 
 
+def whfastEncounterWarning(diagnostics, n_hill=3.0):
+    """ Warn if any close encounter happened while WHFast, which cannot resolve one, was integrating.
+
+    WHFast takes a fixed step and applies each perturbation as a single kick, so it does not resolve
+    a close encounter: measured over flybys inside 0.1 Hill radii, the error in the semi-major axis
+    afterwards was 0.3% to 200%, where TRACE stayed within 4e-6. The nominal solution and every Monte
+    Carlo clone are checked, since a clone can pass much closer to a planet than the nominal
+    solution does.
+
+    Arguments:
+        diagnostics: [dict] {particle name: diagnostics} as returned by reboundSimulate with
+            return_diagnostics=True. Only entries with a "fixed_step_from_days" are considered,
+            i.e. those where the fixed-step integrator actually took over.
+
+    Keyword arguments:
+        n_hill: [float] Multiple of the Hill radius used as the close-encounter threshold.
+            Default is 3.0.
+
+    Return:
+        [str or None] The warning to print, or None if no encounter happened under WHFast.
+    """
+
+    n_encounters = 0
+
+    for diag in diagnostics.values():
+
+        # Time at which WHFast took over from IAS15. None means it never did (the particle never
+        #   left the Earth), so everything was integrated with IAS15
+        t_from = diag.get("fixed_step_from_days")
+        if t_from is None:
+            continue
+
+        for enc in encountersFromMinDistances(diag.get("min_dist_au", {}),
+                                              diag.get("min_time_days", {}), n_hill=n_hill):
+
+            # Times run along a signed axis (negative for a backward run), so the comparison is
+            #   made on the elapsed time rather than on the signed value
+            if abs(enc["time_days"]) > abs(t_from):
+                n_encounters += 1
+
+    if not n_encounters:
+        return None
+
+    return ("WARNING: {:d} close encounter(s) (< {:.0f} Hill radii, nominal and clones) happened "
+            "while WHFast was integrating. WHFast does not resolve close encounters, so the orbits "
+            "after them can be wrong (measured: 0.3% to 200% in a after flybys inside 0.1 R_Hill). "
+            "Rerun with --integrator trace or ias15.".format(n_encounters, n_hill))
+
+
 def estimateLyapunovFromMC(sim_outputs, sim_outputs_mc):
     """ Estimate the trajectory divergence timescale from the Monte Carlo ensemble.
 
@@ -919,12 +968,6 @@ INTEGRATORS = ("ias15", "whfast", "trace")
 FIXED_STEP_DEFAULT_DT_DAYS = {"whfast": 0.5, "trace": 0.5}
 
 
-def _grForceName(integrator):
-    """ REBOUNDx general-relativity force used with the given integrator. """
-
-    return "gr_full"
-
-
 def checkIntegratorAvailable(integrator):
     """ Raise a clear error if the installed REBOUND does not provide the requested integrator.
 
@@ -936,11 +979,15 @@ def checkIntegratorAvailable(integrator):
         raise ValueError("Unknown integrator '{:s}'. Choose one of: {:s}.".format(
             integrator, ", ".join(INTEGRATORS)))
 
+    # The only way to find out is to ask REBOUND for it. An unavailable integrator raises a
+    #   ValueError, which is re-raised naming the installed version.
     try:
         rb.Simulation().integrator = integrator
+
     except ValueError:
-        raise ValueError("The installed REBOUND ({:s}) does not provide the {:s} integrator. TRACE was "
-                         "added in REBOUND 4.4.0.".format(rb.__version__, integrator.upper()))
+        hint = " TRACE was added in REBOUND 4.4.0." if integrator == "trace" else ""
+        raise ValueError("The installed REBOUND ({:s}) does not provide the {:s} integrator.{:s}".format(
+            rb.__version__, integrator.upper(), hint))
 
 
 def _reverseVelocities(sim):
@@ -1014,7 +1061,18 @@ def _integrateParticles(task):
     current_integrator = "ias15"
     dt_fixed = None
     if integrator != "ias15":
-        dt_fixed = (task.get("dt_days") or FIXED_STEP_DEFAULT_DT_DAYS[integrator])*2*np.pi/365.25
+
+        # A non-positive step would make the sub-stepping below collapse to a single step spanning
+        #   a whole output interval, which is silently wrong instead of merely inaccurate
+        dt_days = task.get("dt_days")
+        if dt_days is None:
+            dt_days = FIXED_STEP_DEFAULT_DT_DAYS[integrator]
+        if dt_days <= 0:
+            raise ValueError("The timestep must be positive, got {:g} d.".format(dt_days))
+
+        # REBOUND time units (G = 1, AU, M_sun), where one year is 2*pi
+        dt_fixed = dt_days*2*np.pi/365.25
+
     switch_time = None
 
     # TRACE mishandles close encounters when the timestep is negative (a REBOUND bug, present in
@@ -1085,8 +1143,8 @@ def _integrateParticles(task):
         if bname in planet_names:
             ps[bname].r = brad
 
-    # General relativity correction (gr_full: for all bodies)
-    gr = rebx.load_force(_grForceName(integrator))
+    # gr_full is the general relativity correction for all bodies
+    gr = rebx.load_force("gr_full")
     rebx.add_force(gr)
     gr.params["c"] = rbxConstants.C
 
@@ -1201,7 +1259,12 @@ def _integrateParticles(task):
             if active and all(track[n]["departed"] for n in active):
                 sim.collision = "line"
 
-        # WHFast or TRACE run: hand over from IAS15 once every remaining particle has left the Earth
+        # WHFast or TRACE run: hand over from IAS15 once every remaining particle has left the Earth.
+        # WHFast keeps its own Jacobi representation between calls, so it is left in its default safe
+        #   mode, which synchronizes and recalculates those coordinates every step. That is required
+        #   here: move_to_com/move_to_hel modify the particles at every output, and the heartbeat
+        #   reads their positions at every internal step. Turning safe mode off would be faster but
+        #   would silently corrupt both.
         if current_integrator != integrator:
             active = [n for n, i in particle_idx.items() if i < sim.N]
             if active and all(track[n]["departed"] for n in active):
@@ -1364,23 +1427,36 @@ def computeMegno(task, seed=1):
         }
     """
 
+    # Always IAS15: it is the only integrator here that both resolves the object's departure from
+    #   the Earth and supports variational equations. TRACE does not support them (REBOUND 4.6.0
+    #   aborts the process, 5.1.1 silently returns zero) and WHFast cannot resolve the departure.
     sim = rb.Simulation()
     sim.integrator = "ias15"
 
+    # Newtonian gravity only, so no REBOUNDx forces are loaded. MEGNO measures the chaos of the
+    #   gravitational dynamics, and the extra forces are both tiny and, in the case of radiation,
+    #   dissipative, which MEGNO is not defined for.
     for name, state, mass in zip(task["planet_names"], task["planet_states"], task["planet_masses"]):
         sim.add(m=mass, x=state[0], y=state[1], z=state[2], vx=state[3], vy=state[4], vz=state[5])
 
+    # Only the nominal solution is followed, as a massless test particle
     state = task["particle_states"][0]
     sim.add(x=state[0], y=state[1], z=state[2], vx=state[3], vy=state[4], vz=state[5])
     obj_i = sim.N - 1
 
+    # Everything after the planets is a test particle that does not act back on them
     sim.N_active = len(task["planet_names"])
     sim.testparticle_type = 0
     sim.move_to_com()
+
+    # A backward run integrates towards negative times, so the first step is negative
     sim.dt = 0.001 if task["direction"] == "forward" else -0.001
+
+    # Stop following a particle that runs away, as in _integrateParticles
     sim.exit_max_distance = task.get("max_dist_au", 1000.0)
 
-    # Variational particle for the object only, with a random initial deviation in phase space
+    # Variational particle for the object only, with a random initial deviation in phase space. The
+    #   deviation is normalised because only its growth rate matters, not its size.
     var = sim.add_variation(order=1, testparticle=obj_i)
     rng = np.random.default_rng(seed)
     dev = rng.normal(size=6)
@@ -1388,6 +1464,8 @@ def computeMegno(task, seed=1):
     vp.x, vp.y, vp.z, vp.vx, vp.vy, vp.vz = dev/np.linalg.norm(dev)
 
     def logDeviation():
+        """ ln|delta| of the variational particle, over the full 6D phase space. """
+
         p = var.particles[0]
         return 0.5*np.log(p.x**2 + p.y**2 + p.z**2 + p.vx**2 + p.vy**2 + p.vz**2)
 
@@ -1396,8 +1474,13 @@ def computeMegno(task, seed=1):
 
     def heartbeat(sim_pointer):
 
+        # Both integrals are accumulated with the midpoint rule over the integrator's own steps,
+        #   which is why they are updated here rather than at the (far coarser) output times
         t_now = sim_pointer.contents.t
         h = t_now - acc["t"]
+
+        # REBOUND calls the heartbeat once before the first step is taken, and again whenever an
+        #   integrate() call returns without having advanced the time. Both would divide by zero.
         if h == 0:
             return
 
@@ -1411,19 +1494,27 @@ def computeMegno(task, seed=1):
 
     times_days, megno, a_au = [], [], []
     escaped = False
+
+    # Sample <Y> at the same output times as the main integration
     for t_out in task["times"]:
 
         try:
             sim.integrate(t_out)
+
         except rb.Escape:
+
+            # The object left the simulation volume, so the series simply ends here
             escaped = True
             break
 
+        # <Y> is a running mean over the elapsed time and is undefined at the start
         if t_out == 0:
             continue
 
         times_days.append(t_out/(2*np.pi)*365.25)
         megno.append(acc["J"]/acc["t"])
+
+        # Heliocentric osculating semi-major axis, used to count the orbital periods covered
         a_au.append(sim.particles[obj_i].orbit(primary=sim.particles[0]).a)
 
     return {"times_days": times_days, "megno": megno, "a_au": a_au, "escaped": escaped}
@@ -1471,52 +1562,70 @@ def classifyMegno(times_days, megno, a_au):
         }
     """
 
+    # A backward run has negative times, but only the elapsed time matters here
     y = np.array(megno, dtype=float)
     t_years = np.abs(np.array(times_days, dtype=float))/365.25
     a = np.array(a_au, dtype=float)
 
+    # The final value alone is noisy, so it is paired with the mean over the last quarter of the
+    #   run: a series that is still drifting will disagree between the two
     result = {"status": None, "final": float(y[-1]) if len(y) else None,
               "last_quarter": float(np.mean(y[3*len(y)//4:])) if len(y) else None,
               "n_orbits": None, "lyapunov_time_years": None}
 
+    # Not enough points for the last quarter to mean anything (or no points at all)
     if len(y) < 8:
         result.update(status="too_short", message="Too few outputs to judge the MEGNO.")
         return result
 
+    # REBOUND reports a negative semi-major axis for a hyperbolic orbit. The median is used rather
+    #   than the last value, since a itself oscillates along the orbit.
     a_med = float(np.median(a))
     if a_med <= 0:
         result.update(status="unbound", message="The orbit is unbound (hyperbolic), so MEGNO is "
                       "not meaningful: it describes bounded motion.")
         return result
 
+    # Orbital periods covered, from Kepler's third law around the Sun (P in years = a^1.5 with a in
+    #   AU). The series starts at t = 0, so the last time is the elapsed span.
     n_orbits = t_years[-1]/a_med**1.5
     result["n_orbits"] = float(n_orbits)
 
     final, last_quarter = result["final"], result["last_quarter"]
 
+    # <Y> needs many orbits to settle, so a short run gets no verdict at all rather than a wrong one
     if n_orbits < MEGNO_MIN_ORBITS:
         result.update(status="too_short", message="The run covers only {:.1f} orbital periods; MEGNO "
                       "needs at least {:d} to settle. Integrate for at least {:.0f} years.".format(
                           n_orbits, MEGNO_MIN_ORBITS, MEGNO_MIN_ORBITS*a_med**1.5))
         return result
 
+    # Settled on 2: quasi-periodic motion, the deviation grows only linearly
     if (abs(final - 2) <= MEGNO_REGULAR_TOL) and (abs(last_quarter - 2) <= MEGNO_REGULAR_TOL):
         result.update(status="regular", message="<Y> has converged to 2: the orbit is regular "
                       "(quasi-periodic) over the integrated span.")
 
+    # Growing well past 2: the deviation grows exponentially, and <Y> ~ (lambda/2) t gives the
+    #   Lyapunov exponent from the slope. Only the second half is fitted, since the early part
+    #   still carries the transient from the object's departure from the Earth.
     elif (final > MEGNO_CHAOTIC_MIN) and (last_quarter > MEGNO_CHAOTIC_MIN):
         half = len(y)//2
         slope = np.polyfit(t_years[half:], y[half:], 1)[0]
+
+        # A negative slope would give a meaningless negative time, so it is left unreported
         if slope > 0:
             result["lyapunov_time_years"] = float(1.0/(2*slope))
+
         result.update(status="chaotic", message="<Y> does not converge to 2 and keeps growing: the "
                       "orbit is chaotic.")
 
+    # Tending to 0 instead of 2: the deviation stays bounded, which is regular motion too
     elif (final < MEGNO_PERIODIC_MAX) and (last_quarter < MEGNO_PERIODIC_MAX):
         result.update(status="periodic", message="<Y> tends to 0 rather than 2: the deviation from "
                       "the orbit stays bounded, the signature of a stable periodic orbit (e.g. "
                       "libration in a mean-motion resonance). Regular, not chaotic.")
 
+    # Between the thresholds, or the two statistics disagree: the run is simply too short to tell
     else:
         result.update(status="not_converged", message="<Y> has not converged to 2 but is not clearly "
                       "growing either; integrate for longer to decide.")
@@ -1529,15 +1638,20 @@ def _megnoReportLines(megno):
 
     v = megno["verdict"]
     lines = ["MEGNO of the nominal orbit (Newtonian gravity only, IAS15):"]
+
+    # The series can be empty if the object escaped before the first output
     if v["final"] is None:
         lines.append("  no MEGNO values (the integration produced no outputs)")
         return lines
 
     lines.append("  <Y> at the end: {:.3f}   mean over the last quarter: {:.3f}".format(
         v["final"], v["last_quarter"]))
+
+    # Not available for an unbound orbit, where there is no orbital period to count
     if v["n_orbits"] is not None:
         lines.append("  span: {:.1f} orbital periods".format(v["n_orbits"]))
 
+    # The statuses with no entry here ("too_short" and "unbound") are the ones with no verdict
     converges = {"regular": "YES", "chaotic": "NO", "periodic": "NO (tends to 0)",
                  "not_converged": "NO (not yet)"}.get(v["status"])
     if converges:
@@ -1545,9 +1659,11 @@ def _megnoReportLines(megno):
     else:
         lines.append("  No verdict: {:s}".format(v["message"]))
 
+    # Only set for a chaotic orbit with a positive fitted slope
     if v["lyapunov_time_years"] is not None:
         lines.append("  Lyapunov time ~ {:.0f} years (from <Y> ~ (lambda/2) t over the second "
                      "half).".format(v["lyapunov_time_years"]))
+
     if megno.get("escaped"):
         lines.append("  The object left the simulation volume, so the MEGNO series is truncated.")
 
@@ -1610,7 +1726,9 @@ def reboundSimulate(
         compute_megno: [bool] If True, after the requested integration run a purely gravitational
             integration of the nominal solution only, over the same span, and store its MEGNO
             series and verdict (see computeMegno and classifyMegno) under "megno" in the nominal
-            solution's diagnostics. Only returned with return_diagnostics=True. Default False.
+            solution's diagnostics. Requires return_diagnostics=True, which is the only way the
+            result is returned; it is skipped with a warning otherwise, since the extra integration
+            is as expensive as the nominal run. Default False.
         verbose: [bool] If True, print out the progress of the simulation.
 
     Return:
@@ -1850,7 +1968,11 @@ def reboundSimulate(
                 diagnostics.update(res["diagnostics"])
 
     # MEGNO of the nominal orbit, from a separate purely gravitational integration
-    if compute_megno:
+    if compute_megno and (not return_diagnostics):
+        warnings.warn("compute_megno=True has no effect without return_diagnostics=True, as the "
+                      "MEGNO is only returned in the diagnostics. Skipping it.", RuntimeWarning)
+
+    elif compute_megno:
         if show_progress:
             print("Computing the MEGNO of the nominal orbit (Newtonian gravity only, IAS15)...")
         megno = computeMegno(_make_task([state_vect_rot], [obj_name]))
@@ -1976,11 +2098,18 @@ if __name__ == "__main__":
     ### ###
 
     ### Integrator ###
+
+    # Fail before any ephemeris or integration work if the installed REBOUND cannot provide it
     try:
         checkIntegratorAvailable(args.integrator)
     except ValueError as e:
         parser.error(str(e))
 
+    # A non-positive step is silently wrong rather than merely inaccurate, so it is refused here
+    if (args.dt is not None) and (args.dt <= 0):
+        parser.error("--dt must be positive, got {:g}.".format(args.dt))
+
+    # The timestep only applies to the fixed-step integrators
     dt_days = None
     if args.integrator != "ias15":
         dt_days = args.dt if args.dt is not None else FIXED_STEP_DEFAULT_DT_DAYS[args.integrator]
@@ -2180,24 +2309,9 @@ if __name__ == "__main__":
             args.integrator.upper(), dt_days, fixed_from)
 
     # WHFast does not resolve close encounters: flag any that happened while it was integrating
-    whfast_encounters = []
-    if args.integrator == "whfast":
-        for name, diag in sim_diagnostics.items():
-            t_from = diag.get("fixed_step_from_days")
-            if t_from is None:
-                continue
-            for enc in encountersFromMinDistances(diag.get("min_dist_au", {}),
-                                                  diag.get("min_time_days", {}), n_hill=n_hill):
-                if abs(enc["time_days"]) > abs(t_from):
-                    whfast_encounters.append((name, enc))
-
     whfast_warning = None
-    if whfast_encounters:
-        whfast_warning = ("WARNING: {:d} close encounter(s) (< {:.0f} Hill radii, nominal and clones) "
-                          "happened while WHFast was integrating. WHFast does not resolve close "
-                          "encounters, so the orbits after them can be wrong (measured: 0.3% to 200% "
-                          "in a after flybys inside 0.1 R_Hill). Rerun with --integrator trace or "
-                          "ias15.".format(len(whfast_encounters), n_hill))
+    if args.integrator == "whfast":
+        whfast_warning = whfastEncounterWarning(sim_diagnostics, n_hill=n_hill)
 
     # MEGNO of the nominal orbit, if requested
     megno = nominal_diag.get("megno")
@@ -2811,10 +2925,15 @@ if __name__ == "__main__":
     if (megno is not None) and megno["times_days"]:
         megno_png_path = os.path.join(out_dir, "rebound_megno.png")
         fig_m, ax_m = plt.subplots(figsize=(8, 4.5))
-        ax_m.plot(megno["times_days"], megno["megno"], lw=1.2, label="<Y> (MEGNO)")
+
+        # MEGNO only gets a verdict after tens of orbital periods, so the span is always long
+        #   enough that days make an unreadable axis
+        megno_years = [t/365.25 for t in megno["times_days"]]
+
+        ax_m.plot(megno_years, megno["megno"], lw=1.2, label="<Y> (MEGNO)")
         ax_m.axhline(2.0, color="k", ls="--", lw=1, label="2 (regular orbit)")
         ax_m.axhspan(2 - MEGNO_REGULAR_TOL, 2 + MEGNO_REGULAR_TOL, color="0.85", zorder=0)
-        ax_m.set_xlabel("Time [days]")
+        ax_m.set_xlabel("Time [years]")
         ax_m.set_ylabel("<Y>")
         ax_m.set_title("MEGNO of the nominal orbit (Newtonian gravity): {:s}".format(
             megno["verdict"]["status"].replace("_", " ")))
