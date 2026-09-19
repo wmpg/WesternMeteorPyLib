@@ -371,9 +371,12 @@ def hermiteClosestApproach(t0, r0, v0, t1, r1, v1):
     for k in range(3):
         drr = P.polyadd(drr, P.polymul([A[k], B[k], C[k], D[k]], [B[k], 2*C[k], 3*D[k]]))
 
+    # The step ends are always candidates, so a step with no interior minimum returns the closer
+    #   of its two ends. Complex roots and roots outside the step are not minima of this step.
     s_candidates = [0.0, 1.0] + [rt.real for rt in P.polyroots(drr)
                                  if (abs(rt.imag) < 1e-9) and (0.0 < rt.real < 1.0)]
 
+    # The quintic gives every extremum, maxima included, so the candidates are simply compared
     d_min, t_min = np.inf, t0
     for s in s_candidates:
         r = A + B*s + C*s**2 + D*s**3
@@ -385,9 +388,15 @@ def hermiteClosestApproach(t0, r0, v0, t1, r1, v1):
 
 
 def _encounterRecord(body, dist_au, time_days):
-    """ One close-encounter entry, in the format shared by all the encounter lists. """
+    """ One close-encounter entry, in the format shared by all the encounter lists.
 
-    hill_radius = HILL_RADII_AU[body]
+    Only bodies with a Hill radius can be encountered, which is the same gate the callers apply
+    before they get here (the Sun is tracked for its distance but is not an encounter body).
+    """
+
+    hill_radius = HILL_RADII_AU.get(body)
+    if hill_radius is None:
+        raise KeyError("No Hill radius for '{:s}', so it cannot be an encounter body.".format(body))
 
     return {
         "body": body,
@@ -409,6 +418,12 @@ def encountersFromMinDistances(min_dist_au, min_time_days, n_hill=3.0):
     minimum distance badly overestimated. The values used here are tracked at every internal
     integrator timestep and refined between steps instead.
 
+    This gives at most one encounter per body, its deepest approach. The "encounters" diagnostic of
+    _integrateParticles lists every passage instead, so repeated encounters with the same body are
+    not lost, and that is what the command line report uses. This function remains the way to build
+    the list for a caller that only has the closest-approach dictionaries, for example from a
+    diagnostics dict saved by an older version.
+
     Arguments:
         min_dist_au: [dict] {body: closest approach in AU, or None if the body was not tracked}.
         min_time_days: [dict] {body: time of closest approach in days}.
@@ -416,10 +431,6 @@ def encountersFromMinDistances(min_dist_au, min_time_days, n_hill=3.0):
     Keyword arguments:
         n_hill: [float] Multiple of the Hill radius used as the close-encounter threshold.
             Default is 3.0.
-
-    This gives at most one encounter per body, its deepest approach. The "encounters" diagnostic of
-    _integrateParticles lists every passage instead, so repeated encounters with the same body are
-    not lost.
 
     Return:
         [list] Encounter dicts in the same format as detectCloseEncounters, sorted by closeness
@@ -440,6 +451,44 @@ def encountersFromMinDistances(min_dist_au, min_time_days, n_hill=3.0):
     encounters.sort(key=lambda e: e["n_hill"])
 
     return encounters
+
+
+def cloneEncounterSummary(clone_diag):
+    """ Aggregate the close encounters of the Monte Carlo clones, per body.
+
+    A clone can meet the same body more than once, so the number of clones that met it and the
+    number of passages they made are counted separately: the first is what a fraction of the
+    ensemble is meaningful for, the second says how much of the ensemble's history involved that
+    body.
+
+    Arguments:
+        clone_diag: [dict] {clone name: diagnostics} from reboundSimulate, each holding an
+            "encounters" list as built by _integrateParticles.
+
+    Return:
+        [dict] {body: {"count": number of clones with at least one encounter,
+                       "n_encounters": total number of passages over all clones,
+                       "closest_au": closest approach over all clones}}
+    """
+
+    summary = {}
+
+    for diag in clone_diag.values():
+
+        clone_list = diag.get("encounters", [])
+
+        # One increment per clone per body, however many times that clone met it
+        for body in {enc["body"] for enc in clone_list}:
+            summary.setdefault(body, {"count": 0, "n_encounters": 0, "closest_au": np.inf})
+            summary[body]["count"] += 1
+
+        # Every passage counts towards the totals and the closest approach
+        for enc in clone_list:
+            entry = summary[enc["body"]]
+            entry["n_encounters"] += 1
+            entry["closest_au"] = min(entry["closest_au"], enc["min_dist_au"])
+
+    return summary
 
 
 def estimateLyapunovFromMC(sim_outputs, sim_outputs_mc):
@@ -1781,17 +1830,7 @@ if __name__ == "__main__":
 
     # How many clones had a close encounter with each body, how many encounters they had in total
     # (a clone can meet the same body more than once), and the closest approach over all clones
-    clone_encounters = {}
-    for name, diag in clone_diag.items():
-        clone_list = diag.get("encounters", [])
-        for body in {enc["body"] for enc in clone_list}:
-            entry = clone_encounters.setdefault(body, {"count": 0, "n_encounters": 0,
-                                                       "closest_au": np.inf})
-            entry["count"] += 1
-        for enc in clone_list:
-            entry = clone_encounters[enc["body"]]
-            entry["n_encounters"] += 1
-            entry["closest_au"] = min(entry["closest_au"], enc["min_dist_au"])
+    clone_encounters = cloneEncounterSummary(clone_diag)
 
     # Clones truncated by an impact or an ejection end at a different epoch than the rest, so mixing
     # their final elements into the confidence interval would blend different times. Use the clones
@@ -2121,7 +2160,8 @@ if __name__ == "__main__":
         # Save the detected close encounters (Hill-sphere criterion). The distances are the minima
         # tracked at every internal integrator timestep and refined between steps, not sampled from
         # the output below. Every encounter is listed, in the order it happened.
-        f.write("\nClose encounters (< {:.0f} Hill radii), in the order they happened:\n".format(n_hill))
+        f.write("\nClose encounters (< {:.0f} Hill radii), in the order they happened.\n".format(n_hill))
+        f.write("A body can appear more than once, if the object passed it more than once:\n")
         if encounters:
             for enc in encounters:
                 f.write("  {:<8s} min dist = {:10.6f} AU ({:12.1f} km) at t = {:10.4f} d, R_Hill = {:.6f} AU ({:.2f} R_Hill)\n".format(
@@ -2392,12 +2432,22 @@ if __name__ == "__main__":
     axs[2, 2].legend()
 
 
-    # Mark the detected close encounters at the point of closest approach on the distance subplots
+    # Mark the detected close encounters at the point of closest approach on the distance subplots.
+    # Every passage gets a star, but only the deepest one per body is named: an object in resonance
+    #   with a planet meets it over and over, and one text label per passage makes the panel
+    #   unreadable.
     labeled_axes = set()
+    deepest_per_body = {}
+    for enc in encounters:
+        best = deepest_per_body.get(enc["body"])
+        if (best is None) or (enc["min_dist_au"] < best["min_dist_au"]):
+            deepest_per_body[enc["body"]] = enc
+
     for enc in encounters:
         body = enc["body"]
         t_enc = enc["time_days"]
         d_enc = enc["min_dist_au"]
+        name_it = (deepest_per_body[body] is enc)
 
         # Determine which distance subplot(s) show this body
         marks = []
@@ -2417,8 +2467,10 @@ if __name__ == "__main__":
 
             ax.plot(t_enc, d_plot, marker="*", color="red", markersize=14, linestyle="none",
                     zorder=5, label=label)
-            ax.annotate(body, (t_enc, d_plot), textcoords="offset points", xytext=(5, 5),
-                        color="red", fontsize=8)
+
+            if name_it:
+                ax.annotate(body, (t_enc, d_plot), textcoords="offset points", xytext=(5, 5),
+                            color="red", fontsize=8)
 
 
     # Set the axis labels
@@ -2520,6 +2572,8 @@ if __name__ == "__main__":
                 sim_outputs[-1][2].a, e_val, sim_outputs[-1][2].inc)
                 if reference_frame == "heliocentric" else None),
         },
+        # One entry per passage, ordered by time. A body can appear more than once: before the
+        #   encounter minima were refined between steps, only the deepest approach per body was kept.
         "encounters": encounters,
         "closest_approaches_au": nominal_diag.get("min_dist_au"),
         "closest_approach_times_days": nominal_diag.get("min_time_days"),
