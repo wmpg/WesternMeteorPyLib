@@ -5,7 +5,7 @@ import math
 
 import numpy as np
 
-from wmpl.Utils.OrbitClassification import A_JUPITER, GAUSS_K, GAUSS_K_SQUARED
+from wmpl.Utils.OrbitConstants import A_JUPITER, GAUSS_K, GAUSS_K_SQUARED
 
 
 

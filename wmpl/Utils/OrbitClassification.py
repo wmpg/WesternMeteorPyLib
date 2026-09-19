@@ -14,9 +14,12 @@ import numpy as np
 import scipy.integrate
 import scipy.optimize
 
+# Re-exported so that a caller can keep importing them from here
+from wmpl.Utils.OrbitConstants import (GAUSS_K, GAUSS_K_SQUARED, A_JUPITER, A_SATURN, A_URANUS,
+    A_NEPTUNE)
 
-# Semi-major axis of Jupiter [AU]
-A_JUPITER = 5.20336
+
+
 
 # Inclination above which an orbit is taken to be cometary in the two-parameter criteria of
 #   Jopek & Williams (2013) [rad]
@@ -27,15 +30,9 @@ JW_APHELION_LIMIT = 4.6      # aphelion distance [AU]
 JW_KRESAK_P_LIMIT = 2.5      # Kresak P [yr]
 JW_ENERGY_LIMIT = -5.28e-5   # orbital energy -k^2/(2a) [AU^2/day^2]
 
-# Gaussian gravitational constant [AU^1.5/day] and its square, the solar gravitational
-#   parameter in units of AU, day and solar masses [AU^3/day^2]
-GAUSS_K = 0.01720209895
-GAUSS_K_SQUARED = GAUSS_K**2
 
-# Semi-major axes of the other giant planets [AU]
-A_SATURN = 9.5826
-A_URANUS = 19.2018
-A_NEPTUNE = 30.0470
+
+
 
 # Eccentricity of Jupiter, and the perihelion and aphelion distances it gives [AU]. Tancredi (2014)
 #   quotes 4.85 AU for Jupiter's perihelion in the text, 0.1 AU inside the value used here, which
