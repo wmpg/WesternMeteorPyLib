@@ -34,6 +34,18 @@ List of features:
 
 
 
+## Documentation
+
+Individual functions are documented in their docstrings, and every module can be run directly, so
+```python -m wmpl.<Package>.<Module> --help``` is usually the quickest answer. Task-oriented manuals for
+the larger tools live in [wmpl/Docs](wmpl/Docs):
+
+ * [Solving a trajectory](wmpl/Docs/Trajectory.md) - turning multi-station observations into a trajectory pickle, which is the input to the other tools
+ * [REBOUND orbital integration](wmpl/Docs/REBOUND.md) - integrating a meteoroid orbit back or forward in time, close encounters and impacts, Monte Carlo clones, radiation forces and chaos indicators
+ * [DynestyMetSim](wmpl/Dynesty/README.md) - nested-sampling fits of the erosion ablation model to a meteor light curve and dynamics
+
+
+
 ## Installation
 
 The two sections below describe how to install the library on both Linux and Windows.
@@ -70,8 +82,31 @@ Optionally, if you want to use the REBOUND orbital integrator, install:
 ```
 conda install -y -c conda-forge astropy
 conda install -y -c conda-forge rebound
-pip install reboundx
+pip install --no-build-isolation reboundx
 ```
+
+`reboundx` has no prebuilt wheels, so `pip` always compiles it. `--no-build-isolation` makes it
+compile against the `rebound` you just installed (it needs `setuptools`; run
+`pip install setuptools` if it is missing). Without it, `pip` compiles against the newest
+`rebound` on PyPI instead. The same mismatch happens if `rebound` is upgraded after `reboundx` was
+compiled. `reboundx` then fails to import, or fails to attach to the simulation (with
+`rebound` 4.3.0 this shows up as
+`Need to attach reboundx.Extras instance to simulation before setting params`).
+To repair it, recompile `reboundx` against the installed `rebound`:
+
+```
+pip install --force-reinstall --no-deps --no-build-isolation --no-binary reboundx reboundx
+```
+
+This installs the latest `reboundx`, which needs `rebound` 5 or newer, so update `rebound` first
+with the tool you installed it with. To keep an older `rebound`, pin the `reboundx` released with
+it instead (e.g. `reboundx==4.3.0` for `rebound==4.3.0`); a newer `reboundx` does not compile
+against an older `rebound`. The code works with both REBOUND 4 and 5.
+
+Both are also listed in `requirements.txt`, deliberately without version pins: `pip` resolves the
+build dependency and the runtime dependency to the same newest `rebound`, which is the one case
+where the default build isolation produces a working `reboundx`. Pinning `rebound` there does not
+work, because `reboundx` still builds against the newest one.
 
 **Platform note:** this works on **Linux and macOS**. It does **not** work on native
 Windows: `reboundx` has no Windows wheel and no conda-forge build, so `pip` compiles it
@@ -82,7 +117,7 @@ use the **Windows Subsystem for Linux (WSL2)** — install an Ubuntu distributio
 with `gcc`. Installing only `rebound` is not enough — `reboundx` must import too. Verify with:
 
 ```
-python -c "import rebound, reboundx; print('ok')"
+python -c "import rebound, reboundx; s = rebound.Simulation(); reboundx.Extras(s); print('ok' if s.extras else 'reboundx not attached: reinstall it as described above')"
 ```
 
 
@@ -238,7 +273,15 @@ Module interfaces are not 100% complete yet, but individual functions are well d
 python -m wmpl.Trajectory.Trajectory
 ```
 
-or, you can use functions from the library in other scripts. E.g. if you want to run a particular function from the library, you can create a new .py file and do:
+Some modules take command line arguments. E.g. to integrate a solved trajectory 100 years back through the solar system, run:
+
+```
+python -m wmpl.Rebound.REBOUND /path/to/trajectory.pickle --days 36525 --outputs 5000
+```
+
+See [wmpl/Docs](wmpl/Docs) for the manuals covering these in full.
+
+Alternatively, you can use functions from the library in other scripts. E.g. if you want to run a particular function from the library, you can create a new .py file and do:
 
 ```
 import datetime
