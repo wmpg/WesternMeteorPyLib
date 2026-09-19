@@ -136,7 +136,39 @@ def testHeartbeatUnrelatedAttributeErrorPropagates(reb):
         reb._setHeartbeat(OtherSim(), lambda p: None)
 
 
+@pytest.mark.parametrize("version, expected", [
+    ("4.3.0", 4), ("5.1.1", 5), ("5", 5),
+    # A version string that does not start with a number is assumed to be a recent one, since the
+    # naming keyword only changed going forward
+    ("dev", 5), ("", 5),
+])
+def testMajorVersionIsReadOrAssumedRecent(reb, monkeypatch, version, expected):
+
+    monkeypatch.setattr(reb, "rb", SimpleNamespace(__version__=version), raising=False)
+
+    assert reb._reboundMajorVersion() == expected
+
+
+def testUnattachedReboundxIsReportedWithTheFix(reb):
+    """ The whole point of the check: an Extras that did not attach must say how to repair it. """
+
+    detached = SimpleNamespace(extras=None)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        reb._checkReboundxAttached(detached)
+
+    message = str(exc_info.value)
+    assert "did not attach" in message
+    assert "--no-build-isolation" in message, "the error must carry the command that repairs it"
+
+
 ### Installed REBOUND/REBOUNDx ###
+
+
+def testReboundxUsableCheckPassesOnAWorkingInstall(realReb):
+    """ The early check used by reboundSimulate, on a throwaway simulation. """
+
+    realReb.checkReboundxUsable()
 
 
 def testReboundxAttachesToTheSimulation(realReb):

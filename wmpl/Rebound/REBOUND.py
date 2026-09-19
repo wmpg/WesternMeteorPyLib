@@ -81,6 +81,21 @@ def _printReboundUnavailable(include_install_help=False):
         print("'rebound' alone is not enough; 'reboundx' must import successfully too.")
 
 
+def _reboundMajorVersion():
+    """ Major version of the installed REBOUND, or 5 if it cannot be read.
+
+    The version decides which keyword names a particle (see _addNamedParticle). A version string
+    that does not start with a number is assumed to be a recent one, since the naming keyword only
+    changed going forward.
+    """
+
+    try:
+        return int(rb.__version__.split(".")[0])
+
+    except (AttributeError, IndexError, ValueError):
+        return 5
+
+
 def _addNamedParticle(sim, name, *args, **kwargs):
     """ Add a particle to a REBOUND simulation so that it can be retrieved as sim.particles[name].
 
@@ -95,7 +110,7 @@ def _addNamedParticle(sim, name, *args, **kwargs):
         *args, **kwargs: Passed on to sim.add (e.g. a Horizons name and date, or m, x, ..., vz).
     """
 
-    if int(rb.__version__.split(".")[0]) < 5:
+    if _reboundMajorVersion() < 5:
         sim.add(*args, hash=name, **kwargs)
 
     elif args and isinstance(args[0], str):
@@ -127,13 +142,33 @@ def _setHeartbeat(sim, func):
         return None
 
     except AttributeError as e:
+
+        # Any other AttributeError is a real error in the caller's function, not the REBOUND bug
         if "_hb" not in str(e):
             raise
 
+        # What the working setter does, minus the assignment that fails: wrap the function in the
+        #   C callback type and store it in the simulation's function pointer
         heartbeat_ref = rb.simulation.AFF(func)
         sim._heartbeat = heartbeat_ref
 
         return heartbeat_ref
+
+
+def checkReboundxUsable():
+    """ Raise a clear error if the installed REBOUNDx cannot attach to a REBOUND simulation.
+
+    This is the same check _checkReboundxAttached makes, on a throwaway simulation, so that a
+    mis-compiled REBOUNDx is reported before any ephemeris or integration work is done rather than
+    once per worker process partway through a Monte Carlo run.
+    """
+
+    sim = rb.Simulation()
+
+    # The Extras object has to stay referenced while the simulation is checked, or it detaches
+    rebx = reboundx.Extras(sim)
+    _checkReboundxAttached(sim)
+    del rebx
 
 
 def _checkReboundxAttached(sim):
@@ -1374,6 +1409,9 @@ def reboundSimulate(
     if not REBOUND_FOUND:
         _printReboundUnavailable()
         return None
+
+    # Fail early, before any ephemeris work, if REBOUNDx cannot attach to a simulation
+    checkReboundxUsable()
 
     # If the trajectory is given, override the julian_date and state_vect arguments
     if traj is not None:
