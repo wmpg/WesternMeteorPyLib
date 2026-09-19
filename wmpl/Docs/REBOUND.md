@@ -46,25 +46,42 @@ REBOUND is an optional dependency and is not installed by the standard wmpl setu
 ```
 conda install -y -c conda-forge astropy
 conda install -y -c conda-forge rebound
-pip install reboundx
+pip install --no-build-isolation reboundx
 ```
 
-Check that both imported:
+Check that both imported **and that REBOUNDx attached**:
 
 ```
-python -c "import rebound, reboundx; print('ok')"
+python -c "import rebound, reboundx; s = rebound.Simulation(); reboundx.Extras(s); print('ok' if s.extras else 'reboundx not attached: reinstall it')"
 ```
 
 **Both are needed.** `rebound` alone is not enough — the general relativity correction, the Earth's
 gravitational harmonics and the radiation forces all come from `reboundx`.
 
+**`--no-build-isolation` is not optional.** `reboundx` publishes no wheels, so `pip` always compiles
+it, by default against the newest `rebound` on PyPI rather than the one you installed. When the two
+differ, their C simulation structures differ, `reboundx` writes its pointer outside the structure,
+and every parameter assignment fails with `Need to attach reboundx.Extras instance to simulation
+before setting params` — or `import reboundx` fails outright with a missing symbol. The same
+mismatch appears if `rebound` is upgraded after `reboundx` was compiled. To repair an existing
+install:
+
+```
+pip install --force-reinstall --no-deps --no-build-isolation --no-binary reboundx reboundx
+```
+
+That pulls the latest `reboundx`, which needs `rebound` 5 or newer, so update `rebound` first. To
+keep an older `rebound`, pin the `reboundx` released alongside it instead (e.g. `reboundx==4.3.0`
+for `rebound==4.3.0`); a newer `reboundx` does not compile against an older `rebound`.
+
 **Platform note:** this works on Linux and macOS. `reboundx` has no Windows wheel and does not compile
 with MSVC (it uses C99 variable-length arrays, which MSVC does not support), so on Windows use WSL2:
 install Ubuntu, set up the wmpl conda environment inside it, and run from that shell.
 
-**Version note:** the TRACE integrator was added in REBOUND 4.4.0. On an older REBOUND,
-`--integrator trace` fails immediately with a message naming the installed version, before any work
-is done.
+**Version note:** the code works with both REBOUND 4 and REBOUND 5. The TRACE integrator was added
+in REBOUND 4.4.0; on an older REBOUND, `--integrator trace` fails immediately with a message naming
+the installed version, before any work is done. A REBOUNDx that cannot attach is also reported
+before any work is done, with the command that repairs it.
 
 ---
 
@@ -473,6 +490,13 @@ Other functions worth knowing about, all in `wmpl.Rebound.REBOUND`:
 
 **`reboundx` will not install on Windows.** It has no Windows wheel and does not compile with MSVC.
 Use WSL2. Installing only `rebound` is not enough.
+
+**`Need to attach reboundx.Extras instance to simulation before setting params`,** or
+**`REBOUNDx did not attach to the REBOUND simulation`.** `reboundx` was compiled against a different
+`rebound` than the installed one. Recompile it with the `--force-reinstall` command in
+[Requirements](#requirements).
+
+**`import reboundx` fails with a missing symbol.** Same cause, same repair.
 
 **`The installed REBOUND (4.3.0) does not provide the TRACE integrator.`** TRACE was added in REBOUND
 4.4.0. Upgrade, or use `--integrator ias15`.
