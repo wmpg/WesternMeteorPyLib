@@ -207,7 +207,7 @@ def _checkReboundxAttached(sim):
 # (reboundBodyMassSolar), so the table is self-consistent and reproducible.
 #
 # The Moon (Luna) uses its Earth-relative Hill radius, a_moon*(m_moon/(3*m_earth))**(1/3).
-# The Sun is excluded (it has no Hill sphere in this context).
+# The Sun is excluded (it has no Hill sphere in this context, see SUN_ENCOUNTER_AU).
 HILL_RADII_AU = {
     "Mercury": 0.001475,  # a = 0.387098 AU
     "Venus":   0.006759,  # a = 0.723332 AU
@@ -219,6 +219,13 @@ HILL_RADII_AU = {
     "Uranus":  0.469492,  # a = 19.229411 AU
     "Neptune": 0.776641,  # a = 30.103658 AU
 }
+
+# The Sun has no Hill sphere, so a close approach to it is flagged by distance instead: a perihelion
+# passage closer than this is listed with the other close encounters
+SUN_ENCOUNTER_AU = 0.1
+
+# Radius of the Sun in AU, used for impact detection
+SUN_RADIUS_AU = 695700.0/149597870.7
 
 
 # NAIF-ID segment paths (center, target) used to build each body's state relative to the Solar
@@ -513,12 +520,13 @@ def hermiteClosestApproach(t0, r0, v0, t1, r1, v1):
 def _encounterRecord(body, dist_au, time_days):
     """ One close-encounter entry, in the format shared by all the encounter lists.
 
-    Only bodies with a Hill radius can be encountered, which is the same gate the callers apply
-    before they get here (the Sun is tracked for its distance but is not an encounter body).
+    Only bodies with a Hill radius and the Sun can be encountered, which is the same gate the
+    callers apply before they get here. The Sun has no Hill sphere, so its "hill_radius_au" and
+    "n_hill" are None (its threshold is SUN_ENCOUNTER_AU).
     """
 
     hill_radius = HILL_RADII_AU.get(body)
-    if hill_radius is None:
+    if (hill_radius is None) and (body != "Sun"):
         raise KeyError("No Hill radius for '{:s}', so it cannot be an encounter body.".format(body))
 
     return {
@@ -526,7 +534,7 @@ def _encounterRecord(body, dist_au, time_days):
         "min_dist_au": dist_au,
         "time_days": time_days,
         "hill_radius_au": hill_radius,
-        "n_hill": dist_au/hill_radius,
+        "n_hill": None if hill_radius is None else dist_au/hill_radius,
         "index": None,
     }
 
@@ -647,8 +655,9 @@ def whfastEncounterWarning(diagnostics, n_hill=3.0):
 
         for enc in diag.get("encounters", []):
 
-            # The list already holds every passage; only the ones inside the threshold count
-            if enc["n_hill"] >= n_hill:
+            # The list already holds every passage; only the ones inside the threshold count (the
+            #   Sun's threshold is fixed, so all of its passages do)
+            if (enc["n_hill"] is not None) and (enc["n_hill"] >= n_hill):
                 continue
 
             # Times run along a signed axis (negative for a backward run), so the comparison is
@@ -659,10 +668,11 @@ def whfastEncounterWarning(diagnostics, n_hill=3.0):
     if not n_encounters:
         return None
 
-    return ("WARNING: {:d} close encounter(s) (< {:.0f} Hill radii, nominal and clones) happened "
-            "while WHFast was integrating. WHFast does not resolve close encounters, so the orbits "
-            "after them can be wrong (measured: 0.3% to 200% in a after flybys inside 0.1 R_Hill). "
-            "Rerun with --integrator trace or ias15.".format(n_encounters, n_hill))
+    return ("WARNING: {:d} close encounter(s) (< {:.0f} Hill radii, Sun < {:.2f} AU, nominal and "
+            "clones) happened while WHFast was integrating. WHFast does not resolve close "
+            "encounters, so the orbits after them can be wrong (measured: 0.3% to 200% in a after "
+            "flybys inside 0.1 R_Hill). Rerun with --integrator trace or ias15.".format(
+                n_encounters, n_hill, SUN_ENCOUNTER_AU))
 
 
 def estimateLyapunovFromMC(sim_outputs, sim_outputs_mc):
@@ -1260,7 +1270,8 @@ def _integrateParticles(task):
             n_hill:          [float] Optional. Multiple of the Earth's Hill radius the object must
                                  exceed before encounter/impact detection is armed. Default 3.0.
             body_radii:      [dict] Optional. {body: radius in AU} overriding the default physical
-                                 radii used for impact detection (Earth 6371 km, Moon 1737.4 km).
+                                 radii used for impact detection (Sun 695700 km, Earth 6371 km,
+                                 Moon 1737.4 km).
             integrator:      [str]  Optional. "ias15" (default, adaptive), "whfast" or "trace".
             dt_days:         [float] Optional. Timestep in days for the fixed-step integrators.
                                  Ignored by IAS15. Default FIXED_STEP_DEFAULT_DT_DAYS[integrator].
@@ -1341,7 +1352,7 @@ def _integrateParticles(task):
 
     # Physical body radii used for impact (collision) detection, in AU. The task can override them,
     # e.g. to use an atmospheric-entry cross-section instead of the solid-body radius.
-    body_radii = {"Earth": 6371.0/aukm, "Luna": 1737.4/aukm}
+    body_radii = {"Sun": SUN_RADIUS_AU, "Earth": 6371.0/aukm, "Luna": 1737.4/aukm}
     body_radii.update(task.get("body_radii", {}))
 
     # The object starts at the Earth, so encounter and impact detection for every body except the
@@ -1511,8 +1522,14 @@ def _integrateParticles(task):
                             st["min_dist"][bname] = d_h
                             st["min_time"][bname] = t_h
 
-                        # Every such passage inside the Hill-sphere threshold is an encounter
-                        if d_h < n_hill*HILL_RADII_AU.get(bname, 0.0):
+                        # Every such passage inside the threshold is an encounter: n_hill Hill radii,
+                        # or a fixed distance for the Sun, which has no Hill sphere
+                        if bname == "Sun":
+                            threshold = SUN_ENCOUNTER_AU
+                        else:
+                            threshold = n_hill*HILL_RADII_AU.get(bname, 0.0)
+
+                        if d_h < threshold:
                             st["encounters"].append((bname, t_h, d_h))
 
                 st["prev"][bname] = (t_now, rel, rv)
@@ -2466,6 +2483,9 @@ if __name__ == "__main__":
 
     n_hill = 3.0
 
+    # Close-encounter criterion, as printed in the report headers
+    encounter_criterion = "< {:.0f} Hill radii, Sun < {:.2f} AU".format(n_hill, SUN_ENCOUNTER_AU)
+
     # Diagnostics for the clones only (the nominal solution is keyed by the trajectory ID)
     clone_diag = {name: diag for name, diag in sim_diagnostics.items() if name in sim_outputs_mc}
 
@@ -2692,13 +2712,17 @@ if __name__ == "__main__":
 
     # Close-encounter summary (minima tracked every integrator timestep, refined between steps)
     if encounters:
-        print("  Close encounters (< {:.0f} Hill radii), in the order they happened:".format(n_hill))
+        print("  Close encounters ({:s}), in the order they happened:".format(encounter_criterion))
         for enc in encounters:
-            print("    {:<8s} {:12.6f} AU ({:12.1f} km)  at t = {:+9.3f} d   ({:.2f} R_Hill, R_Hill = {:.6f} AU)".format(
+            if enc["n_hill"] is None:
+                closeness = "{:.1f} R_Sun".format(enc["min_dist_au"]/SUN_RADIUS_AU)
+            else:
+                closeness = "{:.2f} R_Hill, R_Hill = {:.6f} AU".format(enc["n_hill"], enc["hill_radius_au"])
+            print("    {:<8s} {:12.6f} AU ({:12.1f} km)  at t = {:+9.3f} d   ({:s})".format(
                 enc["body"], enc["min_dist_au"], enc["min_dist_au"]*149597870.7,
-                enc["time_days"], enc["n_hill"], enc["hill_radius_au"]))
+                enc["time_days"], closeness))
     else:
-        print("  Close encounters (< {:.0f} Hill radii): none detected".format(n_hill))
+        print("  Close encounters ({:s}): none detected".format(encounter_criterion))
 
     if whfast_warning:
         print("")
@@ -2733,7 +2757,7 @@ if __name__ == "__main__":
         # Close encounters across the ensemble, which is what the clones are really there to measure
         if clone_encounters:
             print("")
-            print("  Clones with a close encounter (< {:.0f} Hill radii):".format(n_hill))
+            print("  Clones with a close encounter ({:s}):".format(encounter_criterion))
             for body in sorted(clone_encounters, key=lambda b: -clone_encounters[b]["count"]):
                 entry = clone_encounters[body]
                 print("    {:<10s} {:5d}/{:<5d} ({:5.1f}%)   {:5d} encounter(s)   closest over all "
@@ -2743,7 +2767,7 @@ if __name__ == "__main__":
                           entry["closest_au"]*149597870.7))
         else:
             print("")
-            print("  No clone came within {:.0f} Hill radii of any body.".format(n_hill))
+            print("  No clone had a close encounter ({:s}).".format(encounter_criterion))
 
         if ci_uses_survivors_only:
             print("")
@@ -2840,16 +2864,21 @@ if __name__ == "__main__":
         f.write("node = {:>10.6f}{:s} deg\n".format(np.degrees(sim_outputs[-1][2].Omega), Omega_ci_str))
         f.write("f    = {:>10.6f}{:s} deg\n".format(np.degrees(sim_outputs[-1][2].f), f_ci_str))
 
-        # Save the detected close encounters (Hill-sphere criterion). The distances are the minima
-        # tracked at every internal integrator timestep and refined between steps, not sampled from
-        # the output below. Every encounter is listed, in the order it happened.
-        f.write("\nClose encounters (< {:.0f} Hill radii), in the order they happened.\n".format(n_hill))
+        # Save the detected close encounters (Hill-sphere criterion, a fixed distance for the Sun).
+        # The distances are the minima tracked at every internal integrator timestep and refined
+        # between steps, not sampled from the output below. Every encounter is listed, in the order
+        # it happened.
+        f.write("\nClose encounters ({:s}), in the order they happened.\n".format(encounter_criterion))
         f.write("A body can appear more than once, if the object passed it more than once:\n")
         if encounters:
             for enc in encounters:
-                f.write("  {:<8s} min dist = {:10.6f} AU ({:12.1f} km) at t = {:10.4f} d, R_Hill = {:.6f} AU ({:.2f} R_Hill)\n".format(
+                if enc["n_hill"] is None:
+                    closeness = "{:.1f} R_Sun".format(enc["min_dist_au"]/SUN_RADIUS_AU)
+                else:
+                    closeness = "R_Hill = {:.6f} AU ({:.2f} R_Hill)".format(enc["hill_radius_au"], enc["n_hill"])
+                f.write("  {:<8s} min dist = {:10.6f} AU ({:12.1f} km) at t = {:10.4f} d, {:s}\n".format(
                     enc["body"], enc["min_dist_au"], enc["min_dist_au"]*149597870.7,
-                    enc["time_days"], enc["hill_radius_au"], enc["n_hill"]))
+                    enc["time_days"], closeness))
         else:
             f.write("  None detected.\n")
 
@@ -2895,7 +2924,7 @@ if __name__ == "__main__":
                     100.0*len(clones_escaped)/n_clones))
 
             if clone_encounters:
-                f.write("\nClones with a close encounter (< {:.0f} Hill radii):\n".format(n_hill))
+                f.write("\nClones with a close encounter ({:s}):\n".format(encounter_criterion))
                 for body in sorted(clone_encounters, key=lambda b: -clone_encounters[b]["count"]):
                     entry = clone_encounters[body]
                     f.write("  {:<10s} {:5d}/{:<5d} ({:5.1f}%)   {:5d} encounter(s)   closest over all "
@@ -2904,7 +2933,7 @@ if __name__ == "__main__":
                                 entry["n_encounters"], entry["closest_au"],
                                 entry["closest_au"]*149597870.7))
             else:
-                f.write("\nNo clone came within {:.0f} Hill radii of any body.\n".format(n_hill))
+                f.write("\nNo clone had a close encounter ({:s}).\n".format(encounter_criterion))
 
             if ci_uses_survivors_only:
                 f.write("\nNote: the confidence intervals above use the {:d} clones that completed\n".format(
@@ -3290,6 +3319,7 @@ if __name__ == "__main__":
         },
         # One entry per passage, ordered by time. A body can appear more than once: before the
         #   encounter minima were refined between steps, only the deepest approach per body was kept.
+        #   The Sun has no Hill sphere, so its "hill_radius_au" and "n_hill" are None.
         "encounters": encounters,
         "closest_approaches_au": nominal_diag.get("min_dist_au"),
         "closest_approach_times_days": nominal_diag.get("min_time_days"),
@@ -3310,6 +3340,7 @@ if __name__ == "__main__":
                                  for body, entry in clone_encounters.items()},
             "ci_uses_survivors_only": ci_uses_survivors_only,
             "n_hill_threshold": n_hill,
+            "sun_encounter_au": SUN_ENCOUNTER_AU,
         } if len(sim_outputs_mc) else None,
         "clone_closest_approaches_au": {name: diag.get("min_dist_au")
                                         for name, diag in clone_diag.items()},

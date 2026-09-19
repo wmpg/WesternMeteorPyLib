@@ -225,14 +225,16 @@ and then refined *within* the step. Both steps matter:
   position and velocity across the step, which reproduces straight-line motion exactly and so is
   accurate even when one step spans the whole flyby.
 
-- **Close encounters** are reported for any body approached within **3 Hill radii**, listed in the
-  order they happened. **A body can appear more than once**, if the object passed it more than once:
-  each local minimum of the distance is refined and listed separately. A meteoroid in resonance with
-  a planet commonly meets it many times.
-- **Impacts** are detected against the physical radii of the bodies, using REBOUND's line-of-travel
-  collision mode so a fast mover cannot tunnel through. Detection is armed only once the object has
-  left the Earth's neighbourhood, so the trivial fact that it starts on the Earth is not reported as an
-  impact. An impact ends the integration and is printed as a banner at the top of the report.
+- **Close encounters** are reported for any body approached within **3 Hill radii**, and for the Sun
+  within **0.1 AU** (it has no Hill sphere, so its `n_hill` is `None`), listed in the order they
+  happened. **A body can appear more than once**, if the object passed it more than once: each local
+  minimum of the distance is refined and listed separately. A meteoroid in resonance with a planet
+  commonly meets it many times.
+- **Impacts** are detected against the physical radii of the Sun, the Earth and the Moon, using
+  REBOUND's line-of-travel collision mode so a fast mover cannot tunnel through. Detection is armed
+  only once the object has left the Earth's neighbourhood, so the trivial fact that it starts on the
+  Earth is not reported as an impact. An impact ends the integration and is printed as a banner at
+  the top of the report.
 - **Ejections** are recorded if the object leaves the simulation volume (1000 AU by default), after
   which it stops being integrated.
 
@@ -431,8 +433,10 @@ print("Integrator:", res["run"]["integrator"], "over", res["run"]["integration_d
 print("a = {:.4f} {:s}".format(res["final_elements"]["a"], res["final_elements"]["a_units"]))
 
 for enc in res["encounters"]:
-    print("{:s}: {:.5f} AU ({:.2f} Hill radii) at t = {:.1f} d".format(
-        enc["body"], enc["min_dist_au"], enc["n_hill"], enc["time_days"]))
+    # The Sun has no Hill sphere, so its "n_hill" is None
+    hill_str = "" if enc["n_hill"] is None else " ({:.2f} Hill radii)".format(enc["n_hill"])
+    print("{:s}: {:.5f} AU{:s} at t = {:.1f} d".format(
+        enc["body"], enc["min_dist_au"], hill_str, enc["time_days"]))
 
 if res["megno"] is not None:
     print("MEGNO verdict:", res["megno"]["verdict"]["status"])

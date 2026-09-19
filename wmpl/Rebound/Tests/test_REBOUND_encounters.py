@@ -199,25 +199,47 @@ def testDistantPassageRefinesTheMinimumWithoutBeingAnEncounter(reb):
     assert diag["min_dist_au"]["Mercury"]/reb.HILL_RADII_AU["Mercury"] > 3.0
 
 
-def testTheSunIsNeverAnEncounterBody(reb):
-    """ The Sun has no Hill radius, so it is tracked for its distance but never listed.
-
-    The threshold in the heartbeat is n_hill*HILL_RADII_AU.get(body, 0.0), which no distance can
-    fall below for a body that is not in the table. _encounterRecord refuses such a body outright,
-    so the two would disagree loudly rather than silently if that gate were ever removed.
+def _sunTask(q_au):
+    """ An object released at 0.3 AU from the Sun on an orbit with perihelion q_au, reached ~13 days
+    later. It starts far from the Earth, so the Sun is tracked from the start.
     """
 
-    assert "Sun" not in reb.HILL_RADII_AU
+    task = _flybyTask(30.0, 2.0, 2.0, "forward")
+    v = np.sqrt(2/0.3 - 2/(0.3 + q_au))
+
+    return dict(task, particle_states=[[-0.3, 0.0, 0.0, 0.0, -v, 0.0]],
+                times=list(np.linspace(0.0, 20.0*DAY, 21)))
+
+
+def testACloseSunPassageIsAnEncounter(reb):
+    """ The Sun has no Hill radius, so its passage is listed by distance: inside SUN_ENCOUNTER_AU
+    it is an encounter with no Hill radius, outside it only the closest approach is recorded.
+
+    A body that has neither a Hill radius nor a distance threshold is still refused outright.
+    """
 
     with pytest.raises(KeyError, match="No Hill radius"):
-        reb._encounterRecord("Sun", 0.5, 0.0)
+        reb._encounterRecord("Ceres", 0.5, 0.0)
 
-    task = _flybyTask(30.0, 2.0, 2.0, "forward")
-    task = dict(task, times=list(np.linspace(0.0, 4.0*DAY, 5)))
-    diag = reb._integrateParticles(task)["diagnostics"]["obj"]
+    diag = reb._integrateParticles(_sunTask(0.05))["diagnostics"]["obj"]
+    sun = [enc for enc in diag["encounters"] if enc["body"] == "Sun"]
+
+    assert len(sun) == 1
+    assert sun[0]["min_dist_au"] == pytest.approx(0.05, rel=1e-2)
+    assert (sun[0]["hill_radius_au"] is None) and (sun[0]["n_hill"] is None)
+
+    diag = reb._integrateParticles(_sunTask(0.15))["diagnostics"]["obj"]
 
     assert "Sun" not in [enc["body"] for enc in diag["encounters"]]
-    assert diag["min_dist_au"]["Sun"] is not None, "the Sun distance is still tracked"
+    assert diag["min_dist_au"]["Sun"] == pytest.approx(0.15, rel=1e-2)
+
+
+def testAPerihelionInsideTheSunIsAnImpact(reb):
+    """ The Sun has a physical radius, so an orbit that dives into it ends in an impact. """
+
+    diag = reb._integrateParticles(_sunTask(0.5*reb.SUN_RADIUS_AU))["diagnostics"]["obj"]
+
+    assert diag["impact"]["body"] == "Sun"
 
 
 ### Monte Carlo encounter summary ###
