@@ -160,6 +160,68 @@ def testMegnoNotMeaningfulForUnboundOrbits(reb):
     assert v["n_orbits"] is None
 
 
+def testMegnoWithTooFewOutputsGivesNoVerdict(reb):
+    """ Fewer than 8 outputs make the last-quarter mean meaningless, so there is no verdict. """
+
+    v = reb.classifyMegno(*_megnoSeries(lambda t: 2.0, n=5))
+
+    assert v["status"] == "too_short"
+    assert v["n_orbits"] is None, "the orbit count is not computed without a verdict"
+
+
+def testMegnoWithNoOutputsIsHandled(reb):
+    """ An empty series (the object escaped before the first output) must not raise. """
+
+    v = reb.classifyMegno([], [], [])
+
+    assert v["status"] == "too_short"
+    assert v["final"] is None
+    assert v["last_quarter"] is None
+
+
+### MEGNO report lines ###
+
+def _megnoResult(reb, y_func, **kwargs):
+    """ A MEGNO result dict with its verdict, in the form reboundSimulate stores it. """
+
+    times_days, megno, a_au = _megnoSeries(y_func, **kwargs)
+
+    return {"times_days": times_days, "megno": megno, "a_au": a_au, "escaped": False,
+            "verdict": reb.classifyMegno(times_days, megno, a_au)}
+
+
+def testMegnoReportStatesWhetherItConvergesToTwo(reb):
+    """ A regular orbit is reported as converging to 2, a chaotic one as not, with a Lyapunov time. """
+
+    regular = reb._megnoReportLines(_megnoResult(reb, lambda t: 2.0))
+    chaotic = reb._megnoReportLines(_megnoResult(reb, lambda t: 2.0 + 0.5*t/80.0))
+
+    assert any("Converges to 2: YES" in line for line in regular)
+    assert not any("Lyapunov" in line for line in regular)
+
+    assert any("Converges to 2: NO" in line for line in chaotic)
+    assert any("Lyapunov time ~ 80 years" in line for line in chaotic)
+
+
+def testMegnoReportGivesNoVerdictForAnUnboundOrbit(reb):
+    """ The statuses without a verdict are reported as such, not as "does not converge". """
+
+    lines = reb._megnoReportLines(_megnoResult(reb, lambda t: 2.0, a_au=-3.0))
+
+    assert any("No verdict" in line for line in lines)
+    assert not any("Converges to 2" in line for line in lines)
+
+
+def testMegnoReportHandlesAnEmptySeries(reb):
+    """ An empty series is reported in one line instead of raising on a missing value. """
+
+    megno = {"times_days": [], "megno": [], "a_au": [], "escaped": True,
+             "verdict": reb.classifyMegno([], [], [])}
+    lines = reb._megnoReportLines(megno)
+
+    assert any("no MEGNO values" in line for line in lines)
+
+
 ### Earth-departure gating ###
 
 def testDepartureIndexFoundAndGatingExcludesTheStart(reb):

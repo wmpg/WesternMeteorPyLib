@@ -3,6 +3,9 @@
 These integrate for real and are skipped when rebound/reboundx are not importable; the TRACE tests
 are also skipped with a REBOUND older than 4.4, which does not provide TRACE. They need no
 ephemeris file: the massive bodies are placed on circular orbits.
+
+Unlike the other Rebound test files, which mock the imports so they run without the optional
+dependency, these tests compare real integrations against each other and therefore cannot.
 """
 
 import os
@@ -55,8 +58,9 @@ def _circular(r_au, m, phase, center=None, m_center=1.0):
 
 
 def _departureTask(direction, days=365.25, n_outputs=40):
-    """ A meteoroid leaving the Earth's surface at 20 km/s (backward in time for a backward run),
-    with the Sun, the Earth, the Moon and Jupiter on circular orbits.
+    """ A meteoroid leaving the Earth's surface at 23 km/s (20 km/s geocentric plus the escape
+    speed, backward in time for a backward run), with the Sun, the Earth, the Moon and Jupiter on
+    circular orbits.
     """
 
     m_earth, m_moon, m_jupiter = 3.003e-6, 3.69e-8, 9.546e-4
@@ -86,6 +90,8 @@ def _departureTask(direction, days=365.25, n_outputs=40):
 
 
 def _finalOrbit(reb, task, integrator, dt_days=None, beta=None):
+    """ Orbit at the last output, and the diagnostics, of the task run with the given integrator. """
+
     result = reb._integrateParticles(dict(task, integrator=integrator, dt_days=dt_days, beta=beta))
     orbit = result["outputs"]["obj"][-1][2]
 
@@ -95,8 +101,55 @@ def _finalOrbit(reb, task, integrator, dt_days=None, beta=None):
 ### Integrator selection ###
 
 def testUnknownIntegratorIsRejected(reb):
+    """ An integrator that is not in INTEGRATORS is refused by name. """
+
     with pytest.raises(ValueError, match="Unknown integrator"):
         reb.checkIntegratorAvailable("leapfrog")
+
+
+def testMissingIntegratorMessageOnlyMentionsTraceForTrace(reb, monkeypatch):
+    """ The REBOUND 4.4 version hint applies to TRACE only, so it must not appear for whfast.
+
+    An old REBOUND is simulated by making every integrator assignment fail, which is how REBOUND
+    reports an integrator it does not have.
+    """
+
+    class UnavailableSimulation(object):
+        def __setattr__(self, name, value):
+            raise ValueError("Integrator not found")
+
+    monkeypatch.setattr(reb.rb, "Simulation", UnavailableSimulation)
+
+    with pytest.raises(ValueError) as exc_info:
+        reb.checkIntegratorAvailable("whfast")
+
+    assert "TRACE" not in str(exc_info.value), "the TRACE version hint is only relevant for TRACE"
+
+    with pytest.raises(ValueError) as exc_info:
+        reb.checkIntegratorAvailable("trace")
+
+    assert "4.4.0" in str(exc_info.value), "TRACE needs the version hint"
+
+
+@pytest.mark.parametrize("dt_days", [0.0, -0.5])
+def testNonPositiveTimestepIsRejected(reb, dt_days):
+    """ A zero or negative step would silently collapse to one step per output interval. """
+
+    task = dict(_departureTask("forward", days=10.0, n_outputs=5), integrator="whfast",
+                dt_days=dt_days)
+
+    with pytest.raises(ValueError, match="must be positive"):
+        reb._integrateParticles(task)
+
+
+def testOmittedTimestepUsesTheDefault(reb):
+    """ dt_days = None falls back to FIXED_STEP_DEFAULT_DT_DAYS, rather than being refused. """
+
+    task = _departureTask("forward", days=10.0, n_outputs=5)
+    orbit, diag = _finalOrbit(reb, task, "whfast")
+
+    assert diag["integrator"] == "whfast"
+    assert np.isfinite(orbit.a)
 
 
 @pytest.mark.parametrize("direction", ["forward", "backward"])
@@ -122,12 +175,14 @@ def testFixedStepIntegratorsMatchIas15(reb, integrator, direction):
     # reported on the requested (signed) time axis
     assert diag["integrator"] == integrator
     t_from = diag["fixed_step_from_days"]
-    assert t_from is not None
-    assert np.sign(t_from) == (1 if direction == "forward" else -1)
+    assert t_from is not None, "the fixed-step integrator must have taken over at some point"
+    assert np.sign(t_from) == (1 if direction == "forward" else -1), \
+        "the handover time is reported on the requested signed time axis"
 
     # The closest-approach times are reported on the same signed axis as the outputs
     t_moon = diag["min_time_days"]["Luna"]
-    assert (t_moon*np.sign(t_from)) >= 0
+    assert (t_moon*np.sign(t_from)) >= 0, \
+        "a backward run must not report a positive encounter time"
 
 
 @pytest.mark.parametrize("beta", [0.01, 0.1])
@@ -149,15 +204,15 @@ def testTraceBackwardWithRadiationForcesMatchesIas15(reb, beta):
     assert orbit.e == pytest.approx(ref.e, rel=2e-5)
 
     # The radiation forces genuinely change the orbit, so the comparison is meaningful
-    assert abs(ref.a/no_drag.a - 1) > 1e-3
+    assert abs(ref.a/no_drag.a - 1) > 1e-3, "beta must actually move the orbit for this to test anything"
 
 
 ### MEGNO ###
 
-def _keplerTask(direction, years, a=1.0, e=0.3, with_jupiter=False, jupiter_crosser=False):
+def _keplerTask(reb, direction, years, a=1.0, e=0.3, with_jupiter=False, jupiter_crosser=False):
     """ A test particle around the Sun (optionally with Jupiter), for MEGNO checks. """
 
-    sim = __import__("rebound").Simulation()
+    sim = reb.rb.Simulation()
     sim.add(m=1.0)
     names = ["Sun"]
     if with_jupiter:
@@ -186,21 +241,69 @@ def _keplerTask(direction, years, a=1.0, e=0.3, with_jupiter=False, jupiter_cros
 def testMegnoConvergesToTwoForAKeplerOrbit(reb, direction):
     """ A Keplerian orbit is regular: <Y> converges to 2, in both time directions. """
 
-    megno = reb.computeMegno(_keplerTask(direction, years=200.0))
+    megno = reb.computeMegno(_keplerTask(reb, direction, years=200.0))
     verdict = reb.classifyMegno(megno["times_days"], megno["megno"], megno["a_au"])
 
     assert megno["megno"][-1] == pytest.approx(2.0, abs=0.05)
     assert verdict["status"] == "regular"
-    assert np.sign(megno["times_days"][-1]) == (1 if direction == "forward" else -1)
+    assert np.sign(megno["times_days"][-1]) == (1 if direction == "forward" else -1), \
+        "the MEGNO series keeps the signed time axis of the run"
 
 
 def testMegnoDetectsAChaoticJupiterCrosser(reb):
     """ An orbit crossing Jupiter's is chaotic: <Y> grows well past 2 within 300 years. """
 
-    megno = reb.computeMegno(_keplerTask("backward", years=300.0, with_jupiter=True,
+    megno = reb.computeMegno(_keplerTask(reb, "backward", years=300.0, with_jupiter=True,
                                          jupiter_crosser=True))
     verdict = reb.classifyMegno(megno["times_days"], megno["megno"], megno["a_au"])
 
     assert megno["megno"][-1] > 4.0
     assert verdict["status"] == "chaotic"
     assert 0 < verdict["lyapunov_time_years"] < 300.0
+
+
+### WHFast close-encounter warning ###
+
+def _whfastDiagnostics(t_from, moon_dist_au, t_encounter):
+    """ Minimal per-particle diagnostics, as _integrateParticles returns them. """
+
+    return {"fixed_step_from_days": t_from,
+            "min_dist_au": {"Luna": moon_dist_au},
+            "min_time_days": {"Luna": t_encounter}}
+
+
+def testWhfastWarningRaisedForAnEncounterAfterTheHandover(reb):
+    """ A close encounter that happened while WHFast was integrating must be reported. """
+
+    diagnostics = {"obj": _whfastDiagnostics(-50.0, 1e-5, -900.0)}
+    warning = reb.whfastEncounterWarning(diagnostics)
+
+    assert warning is not None
+    assert "1 close encounter" in warning
+
+
+def testWhfastWarningIgnoresEncountersBeforeTheHandover(reb):
+    """ IAS15 integrates everything up to the handover, so an earlier encounter is resolved. """
+
+    diagnostics = {"obj": _whfastDiagnostics(-900.0, 1e-5, -50.0)}
+
+    assert reb.whfastEncounterWarning(diagnostics) is None
+
+
+def testWhfastWarningIgnoresParticlesThatNeverHandedOver(reb):
+    """ A particle that never left the Earth was integrated with IAS15 throughout. """
+
+    diagnostics = {"obj": _whfastDiagnostics(None, 1e-5, -900.0)}
+
+    assert reb.whfastEncounterWarning(diagnostics) is None
+
+
+def testWhfastWarningCountsTheClonesToo(reb):
+    """ A clone can pass far closer to a planet than the nominal solution, so all are counted. """
+
+    diagnostics = {"obj": _whfastDiagnostics(-50.0, 1e-5, -900.0),
+                   "mc_0": _whfastDiagnostics(-50.0, 1e-5, -800.0),
+                   "mc_1": _whfastDiagnostics(-50.0, 1.0, -700.0)}
+    warning = reb.whfastEncounterWarning(diagnostics)
+
+    assert "2 close encounter" in warning, "the distant clone is outside the threshold"
