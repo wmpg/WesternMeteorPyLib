@@ -645,8 +645,11 @@ def whfastEncounterWarning(diagnostics, n_hill=3.0):
         if t_from is None:
             continue
 
-        for enc in encountersFromMinDistances(diag.get("min_dist_au", {}),
-                                              diag.get("min_time_days", {}), n_hill=n_hill):
+        for enc in diag.get("encounters", []):
+
+            # The list already holds every passage; only the ones inside the threshold count
+            if enc["n_hill"] >= n_hill:
+                continue
 
             # Times run along a signed axis (negative for a backward run), so the comparison is
             #   made on the elapsed time rather than on the signed value
@@ -1650,7 +1653,8 @@ def _integrateParticles(task):
             "min_time_days": {b: (None if not np.isfinite(st["min_time"][b])
                                   else time_sign*st["min_time"][b]/(2*np.pi)*365.25)
                               for b in planet_names},
-            "encounters": [_encounterRecord(b, d, t/(2*np.pi)*365.25) for b, t, d in st["encounters"]],
+            "encounters": [_encounterRecord(b, d, time_sign*t/(2*np.pi)*365.25)
+                           for b, t, d in st["encounters"]],
             "departed": st["departed"],
             "impact": st["impact"],
             "escaped": st["escaped"],
@@ -1766,7 +1770,8 @@ def computeMegno(task, seed=1):
         acc["J"] += 0.5*(acc["Y"] + y_now)*h
         acc["t"], acc["ln_d"], acc["Y"] = t_now, ln_d, y_now
 
-    sim.heartbeat = heartbeat
+    # Keep the returned reference alive until the integration ends (see _setHeartbeat)
+    heartbeat_ref = _setHeartbeat(sim, heartbeat)  # noqa: F841
 
     times_days, megno, a_au = [], [], []
     escaped = False

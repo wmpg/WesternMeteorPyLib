@@ -267,9 +267,13 @@ def testMegnoDetectsAChaoticJupiterCrosser(reb):
 def _whfastDiagnostics(t_from, moon_dist_au, t_encounter):
     """ Minimal per-particle diagnostics, as _integrateParticles returns them. """
 
+    rh = 0.000411
     return {"fixed_step_from_days": t_from,
             "min_dist_au": {"Luna": moon_dist_au},
-            "min_time_days": {"Luna": t_encounter}}
+            "min_time_days": {"Luna": t_encounter},
+            "encounters": [{"body": "Luna", "min_dist_au": moon_dist_au,
+                            "time_days": t_encounter, "hill_radius_au": rh,
+                            "n_hill": moon_dist_au/rh, "index": None}]}
 
 
 def testWhfastWarningRaisedForAnEncounterAfterTheHandover(reb):
