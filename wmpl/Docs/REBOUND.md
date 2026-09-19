@@ -74,6 +74,10 @@ That pulls the latest `reboundx`, which needs `rebound` 5 or newer, so update `r
 keep an older `rebound`, pin the `reboundx` released alongside it instead (e.g. `reboundx==4.3.0`
 for `rebound==4.3.0`); a newer `reboundx` does not compile against an older `rebound`.
 
+Both are listed unpinned in `requirements.txt`, so `pip install -r requirements.txt` also works:
+with no pin, `pip` builds `reboundx` against the same newest `rebound` it installs. Pinning
+`rebound` there does not work, since `reboundx` builds against the newest one regardless.
+
 **Platform note:** this works on Linux and macOS. `reboundx` has no Windows wheel and does not compile
 with MSVC (it uses C99 variable-length arrays, which MSVC does not support), so on Windows use WSL2:
 install Ubuntu, set up the wmpl conda environment inside it, and run from that shell.

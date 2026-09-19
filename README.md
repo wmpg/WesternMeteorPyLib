@@ -103,6 +103,11 @@ with the tool you installed it with. To keep an older `rebound`, pin the `reboun
 it instead (e.g. `reboundx==4.3.0` for `rebound==4.3.0`); a newer `reboundx` does not compile
 against an older `rebound`. The code works with both REBOUND 4 and 5.
 
+Both are also listed in `requirements.txt`, deliberately without version pins: `pip` resolves the
+build dependency and the runtime dependency to the same newest `rebound`, which is the one case
+where the default build isolation produces a working `reboundx`. Pinning `rebound` there does not
+work, because `reboundx` still builds against the newest one.
+
 **Platform note:** this works on **Linux and macOS**. It does **not** work on native
 Windows: `reboundx` has no Windows wheel and no conda-forge build, so `pip` compiles it
 from source with MSVC, which fails (`gr_full.c: error C2057: expected constant expression`)
