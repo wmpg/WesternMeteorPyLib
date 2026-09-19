@@ -192,18 +192,31 @@ bodies — but they are not negligible over long integrations, where they change
 
 ## Close encounters, impacts and ejections
 
-Closest approaches are measured at **every internal integrator timestep**, not at the output samples.
-This matters: near the Earth and the Moon the object can cross a whole detection sphere between two
-output samples, so a sampled scan would miss the encounter entirely or badly overestimate its distance.
+Closest approaches are tracked at **every internal integrator timestep**, not at the output samples,
+and then refined *within* the step. Both steps matter:
 
-- **Close encounters** are reported for any body approached within **3 Hill radii**, sorted by how
-  close the approach was in units of the body's Hill radius.
+- Near the Earth and the Moon the object can cross a whole detection sphere between two output
+  samples, so a scan of the sampled output would miss the encounter entirely or badly overestimate
+  its distance.
+- Away from the Earth, IAS15 takes steps of one to two days, so the object can pass a planet
+  completely inside a single step. The distance at the step ends alone can then be far above the
+  true minimum. The minimum is therefore found on the cubic Hermite interpolant of the relative
+  position and velocity across the step, which reproduces straight-line motion exactly and so is
+  accurate even when one step spans the whole flyby.
+
+- **Close encounters** are reported for any body approached within **3 Hill radii**, listed in the
+  order they happened. **A body can appear more than once**, if the object passed it more than once:
+  each local minimum of the distance is refined and listed separately. A meteoroid in resonance with
+  a planet commonly meets it many times.
 - **Impacts** are detected against the physical radii of the bodies, using REBOUND's line-of-travel
   collision mode so a fast mover cannot tunnel through. Detection is armed only once the object has
   left the Earth's neighbourhood, so the trivial fact that it starts on the Earth is not reported as an
   impact. An impact ends the integration and is printed as a banner at the top of the report.
 - **Ejections** are recorded if the object leaves the simulation volume (1000 AU by default), after
   which it stops being integrated.
+
+On the plot, every passage is marked with a red star, but only the deepest one per body is labelled
+with the body's name, so a long run against a repeatedly-met planet stays readable.
 
 The first close encounter going backwards is almost always the Earth itself — that is the meteoroid
 arriving. What matters is what came before it.
@@ -297,11 +310,12 @@ The JSON keys, at the top level:
 | `traj_id` | Event identifier. |
 | `run` | Run settings: `integration_days`, `direction`, `reference_frame`, `ephemeris`, `n_outputs`, `beta`, `start_epoch_jd_tdb`, `final_epoch_jd_tdb`, `final_epoch_utc`, `mc_runs`, `random_seed`, `runtime_s`, `integrator`, `dt_days`, `fixed_step_from_days`. |
 | `final_elements` | `a`, `q`, `e`, `incl_deg`, `peri_deg`, `node_deg`, `f_deg`, `tisserand_jupiter`, with `a_units`/`q_units` (AU heliocentric, km geocentric). |
-| `encounters` | Close encounters of the nominal solution, each with `body`, `min_dist_au`, `time_days`, `hill_radius_au` and `n_hill`. |
-| `closest_approaches_au`, `closest_approach_times_days` | Closest approach to every tracked body, whether or not it counted as an encounter. |
+| `encounters` | Every close encounter of the nominal solution, ordered by time, each with `body`, `min_dist_au`, `time_days`, `hill_radius_au` and `n_hill`. A body can appear more than once. |
+| `closest_approaches_au`, `closest_approach_times_days` | Closest approach to every tracked body, whether or not it counted as an encounter. This is the deepest approach only, one value per body. |
 | `impact`, `escaped` | The impact or ejection of the nominal solution, or `null`. |
-| `clone_outcomes` | Clone statistics: counts and fractions of impacts and encounters per body, `ci_uses_survivors_only`, `n_hill_threshold`. `null` without `--mc`. |
+| `clone_outcomes` | Clone statistics: counts and fractions of impacts and encounters per body, `ci_uses_survivors_only`, `n_hill_threshold`. Under `close_encounters`, `count` is how many clones met the body and `n_encounters` how many passages they made in total. `null` without `--mc`. |
 | `clone_closest_approaches_au` | Per-clone closest approach to every body. |
+| `clone_encounters` | Each clone's full list of encounters, in the same format as `encounters`. |
 | `energy_rel_drift` | Relative energy drift of the massive subsystem, as an integrator-quality check. |
 | `divergence` | The exponential and linear fits to the clone spread, with `r2_exponential` and `r2_linear`. |
 | `whfast_encounter_warning` | The WHFast close-encounter warning string, or `null`. |
@@ -444,7 +458,9 @@ Other functions worth knowing about, all in `wmpl.Rebound.REBOUND`:
 | Function | Purpose |
 | :--- | :--- |
 | `radiationPressureBeta(radius_m, density_kgm3)` | Beta for a spherical grain. |
-| `encountersFromMinDistances(min_dist_au, min_time_days, n_hill=3.0)` | The close-encounter list from the exact per-timestep minima in the diagnostics. |
+| `encountersFromMinDistances(min_dist_au, min_time_days, n_hill=3.0)` | The close-encounter list from the closest-approach dictionaries, one entry per body. The per-particle `encounters` diagnostic lists every passage instead. |
+| `cloneEncounterSummary(clone_diag)` | Per body, how many clones met it, how many passages they made, and the closest approach over all of them. |
+| `hermiteClosestApproach(t0, r0, v0, t1, r1, v1)` | Closest approach of a relative trajectory inside one integrator step. |
 | `whfastEncounterWarning(diagnostics, n_hill=3.0)` | The WHFast warning string, or `None`. |
 | `computeMegno(task, seed=1)` / `classifyMegno(times_days, megno, a_au)` | MEGNO series and verdict. |
 | `estimateLyapunovFromMC(sim_outputs, sim_outputs_mc)` | The divergence fit over the clone ensemble. |
