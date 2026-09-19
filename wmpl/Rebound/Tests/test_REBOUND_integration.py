@@ -244,4 +244,5 @@ def testEndToEndIntegrationMatchesReference(realReb):
     assert diag["departed"]
     assert diag["impact"] is None
     assert diag["min_dist_au"]["Luna"] == pytest.approx(0.0018192455341135359, rel=rtol)
-    assert diag["min_time_days"]["Luna"] == pytest.approx(-0.0426370612, rel=1e-6)
+    # The within-step refinement added in #99 moves this off the step-end value it had before
+    assert diag["min_time_days"]["Luna"] == pytest.approx(-0.0426156724, rel=1e-6)
