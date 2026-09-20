@@ -857,3 +857,194 @@ def calcResonanceWidth(p, p_plus_q, e, mass_ratio=MASS_RATIO_JUPITER, a_planet=A
             - 2.0/(9*j2*e)*strength
 
     return relative_width*(float(p)/p_plus_q)**(2.0/3.0)*a_planet
+
+
+if __name__ == "__main__":
+
+    import os
+    import sys
+    import argparse
+
+    from wmpl.Utils.Pickling import loadPickle
+
+
+    ### COMMAND LINE ARGUMENTS
+
+    arg_parser = argparse.ArgumentParser(description="Classify one orbit dynamically. The orbit "
+        "is taken either from a trajectory pickle or from orbital elements given on the command "
+        "line. To compare two orbits instead, use wmpl.Utils.Dcriteria.")
+
+    arg_parser.add_argument('traj_path', metavar='TRAJ_PATH', type=str, nargs='?', default=None, \
+        help="Path to the trajectory pickle of the orbit. Omit it to give the orbit with --q or "
+             "--a, --e and --i.")
+
+    elem = arg_parser.add_argument_group('orbit, given by hand',
+        "The size of the orbit is given either as a perihelion distance or as a semi-major axis. "
+        "The node and the argument of perihelion are needed only for the distances to the giant "
+        "planets, and so for the Tancredi classification of an asteroid.")
+    elem.add_argument('-q', '--q', metavar='PERIHELION_DIST', type=float, dest='q', \
+        help="Perihelion distance of the orbit in AU.")
+    elem.add_argument('-a', '--a', metavar='SEMI_MAJOR_AXIS', type=float, dest='a', \
+        help="Semi-major axis of the orbit in AU, in place of the perihelion distance.")
+    elem.add_argument('-e', '--e', metavar='ECCENTRICITY', type=float, dest='e', \
+        help="Eccentricity of the orbit.")
+    elem.add_argument('-i', '--i', metavar='INCLINATION', type=float, dest='i', \
+        help="Inclination of the orbit (deg).")
+    elem.add_argument('-p', '--peri', metavar='ARG_OF_PERI', type=float, dest='peri', \
+        help="Argument of perihelion of the orbit (deg).")
+    elem.add_argument('-n', '--node', metavar='ASCENDING_NODE', type=float, dest='node', \
+        help="Ascending node of the orbit (deg).")
+
+    output = arg_parser.add_argument_group('output')
+    output.add_argument('--quiet', '-Q', action='store_true', \
+        help="Print one 'KEY VALUE' line per quantity and nothing else, for scripted use.")
+
+    cml_args = arg_parser.parse_args()
+
+
+    #########################
+
+
+    def reportError(message):
+        """ Print a message to stderr and stop.
+
+        Arguments:
+            message: [str] what went wrong
+        """
+
+        print(message, file=sys.stderr)
+        sys.exit(1)
+
+
+    # Assemble the orbit, either from a trajectory pickle or from the elements given by hand
+    if cml_args.traj_path is not None:
+
+        orbit = loadPickle(*os.path.split(cml_args.traj_path)).orbit
+        q, e, incl, node, peri = orbit.q, orbit.e, orbit.i, orbit.node, orbit.peri
+
+    else:
+
+        if (cml_args.q is not None) and (cml_args.a is not None):
+            reportError("Give the size of the orbit either as --q or as --a, not as both.")
+
+        if (cml_args.q is None) and (cml_args.a is None):
+            reportError("The orbit needs a size, given either as --q or as --a, or a trajectory "
+                "pickle to take it from.")
+
+        if (cml_args.e is None) or (cml_args.i is None):
+            reportError("The orbit needs an eccentricity and an inclination.")
+
+        if (cml_args.node is None) != (cml_args.peri is None):
+            reportError("The node and the argument of perihelion have to be given together.")
+
+        e = cml_args.e
+        incl = np.radians(cml_args.i)
+
+        q = cml_args.q if cml_args.q is not None else cml_args.a*(1.0 - e)
+
+        node = None if cml_args.node is None else np.radians(cml_args.node)
+        peri = None if cml_args.peri is None else np.radians(cml_args.peri)
+
+    # Every criterion below is a function of the semi-major axis, which an unbound orbit does not
+    #   have. Stopping here says so, instead of dividing by zero or by a negative number and
+    #   printing values that look like classifications
+    if e >= 1.0:
+        reportError("The orbit is not bound, and a dynamical class is defined only for a bound "
+            "orbit. The eccentricity given is {:.5f}.".format(e))
+
+    a = q/(1.0 - e)
+
+    verbose = not cml_args.quiet
+
+
+    if verbose:
+
+        print("Orbit:")
+
+        if cml_args.traj_path is not None:
+            print("  from {:s}".format(cml_args.traj_path))
+
+        print("  q = {:.5f} AU".format(q))
+        print("  e = {:.5f}".format(e))
+        print("  i = {:.5f} deg".format(np.degrees(incl)))
+
+        if peri is not None:
+            print("  w = {:.5f} deg".format(np.degrees(peri)))
+            print("  O = {:.5f} deg".format(np.degrees(node)))
+
+        print("  a = {:.5f} AU".format(a))
+
+
+    ### DYNAMICAL PARAMETERS
+
+    # (key for the quiet output, label, value, format). The energy is a few times 1e-5 over the
+    #   whole range of interest, so a fixed point format would print it as zero
+    parameters = [
+        ('T_J', 'Tisserand parameter T_J', float(calcTisserand(a, e, incl)), '{:14.6f}'),
+        ('K', 'Whipple K', float(calcWhippleK(a, e)), '{:14.6f}'),
+        ('P', 'Kresak P (yr)', float(calcKresakP(a, e)), '{:14.6f}'),
+        ('Q', 'Aphelion Q (AU)', float(calcAphelionDistance(a, e)), '{:14.6f}'),
+        ('E', 'Orbital energy E (AU^2/day^2)', float(calcOrbitalEnergy(a)), '{:14.6e}'),
+        ]
+
+    if verbose:
+        print()
+        print("Dynamical parameters")
+        print("--------------------")
+
+    for key, label, value, fmt in parameters:
+        print(("  {:<30s} " + fmt).format(label, value) if verbose \
+            else "{:s} {:s}".format(key, fmt.format(value).strip()))
+
+
+    ### TWO-PARAMETER COMETARY CLASSIFICATION
+
+    if verbose:
+        print()
+        print("Jopek & Williams (2013) two-parameter classification")
+        print("----------------------------------------------------")
+
+    for label, test in (("Q-i", isCometaryQi), ("E-i", isCometaryEi), ("T-i", isCometaryTi),
+                        ("P-i", isCometaryPi), ("K-i", isCometaryKi)):
+
+        verdict = "cometary" if bool(test(a, e, incl)) else "asteroidal"
+
+        print("  {:<30s} {:>14s}".format(label, verdict) if verbose \
+            else "{:s} {:s}".format(label, verdict))
+
+
+    ### TANCREDI CLASSIFICATION
+
+    if verbose:
+        print()
+        print("Tancredi (2014) classification")
+        print("------------------------------")
+
+    comet_class = classifyTancrediComet(a, e, incl)
+
+    print("  {:<30s} {:>14s}".format("comet class", comet_class) if verbose \
+        else "TANCREDI_COMET {:s}".format(comet_class))
+
+    # The asteroid scheme needs how close the orbit comes to each giant planet, which needs the
+    #   orientation of the orbit in its plane
+    if peri is not None:
+
+        moids = calcGiantPlanetMOIDs(a, e, incl, node, peri)
+
+        for name, _, _, _, _, _, _ in GIANT_PLANETS:
+
+            print("  {:<30s} {:14.4f}".format("MOID " + name.capitalize() + " (Hill radii)",
+                moids[name]) if verbose \
+                else "MOID_{:s} {:.4f}".format(name.upper(), moids[name]))
+
+        asteroid_class = classifyTancrediAsteroid(a, e, incl, moids['jupiter'],
+            min(moids.values()))
+
+        print("  {:<30s} {:>14s}".format("asteroid class", asteroid_class) if verbose \
+            else "TANCREDI_ASTEROID {:s}".format(asteroid_class))
+
+    elif verbose:
+        print()
+        print("The Tancredi classification of an asteroid was skipped: it needs the distances to")
+        print("the giant planets, and so the node and the argument of perihelion, from a")
+        print("trajectory pickle or from the --node and --peri arguments.")
