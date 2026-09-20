@@ -1216,9 +1216,9 @@ if __name__ == "__main__":
 
     # Imported here rather than at module level, so that importing this module does not pull in
     #   OrbitClassification and the scipy it uses
-    from wmpl.Utils.OrbitClassification import (calcTisserand, calcKresakK, calcKresakP,
-        calcAphelionDistance, isCometaryQi, isCometaryEi, isCometaryKi, isCometaryPi,
-        classifyTancrediComet)
+    from wmpl.Utils.OrbitClassification import (calcTisserand, calcWhippleK, calcKresakP,
+        calcAphelionDistance, isCometaryQi, isCometaryEi, isCometaryTi, isCometaryKi,
+        isCometaryPi, classifyTancrediComet)
     from wmpl.Utils.Pickling import loadPickle
 
 
@@ -1552,7 +1552,7 @@ if __name__ == "__main__":
         for label, values in (
             ("Tisserand parameter T_J", (calcTisserand(a1, orbit1[1], orbit1[2]),
                 calcTisserand(a2, orbit2[1], orbit2[2]))),
-            ("Kresak K", (calcKresakK(a1, orbit1[1]), calcKresakK(a2, orbit2[1]))),
+            ("Whipple K", (calcWhippleK(a1, orbit1[1]), calcWhippleK(a2, orbit2[1]))),
             ("Kresak P (yr)", (calcKresakP(a1, orbit1[1]), calcKresakP(a2, orbit2[1]))),
             ("Aphelion Q (AU)", (calcAphelionDistance(a1, orbit1[1]),
                 calcAphelionDistance(a2, orbit2[1]))),
@@ -1560,8 +1560,8 @@ if __name__ == "__main__":
 
             print("  {:<28s} {:18.4f} {:18.4f}".format(label, float(values[0]), float(values[1])))
 
-        for label, test in (("Q-i", isCometaryQi), ("E-i", isCometaryEi), ("K-i", isCometaryKi),
-                            ("P-i", isCometaryPi)):
+        for label, test in (("Q-i", isCometaryQi), ("E-i", isCometaryEi), ("T-i", isCometaryTi),
+                            ("P-i", isCometaryPi), ("K-i", isCometaryKi)):
 
             first = "cometary" if bool(test(a1, orbit1[1], orbit1[2])) else "asteroidal"
             second = "cometary" if bool(test(a2, orbit2[1], orbit2[2])) else "asteroidal"

@@ -23,7 +23,8 @@ from wmpl.Utils.Dcriteria import (calcRho1, calcRho2, calcRho5, calcC, calcDR, c
     calcDX, calcDVJopek, calcDVWeights, calcDACS, calcDSAC, calcDN, calcDD, DV_DISPERSIONS,
     DV_THRESHOLDS, DV_DEFAULT_EPOCH, TC_REFERENCE_A, TC_REFERENCE_E,
     TC_REFERENCE_INCL, TC_REFERENCE_Q, DACS_A_SCALE, DX_W_SOL, DX_W_RA, DX_W_DEC, DX_W_VG)
-from wmpl.Utils.OrbitClassification import (calcTisserand, calcKresakK, calcKresakP,
+from wmpl.Utils.OrbitClassification import (calcTisserand, calcWhippleK, calcKresakP,
+    isCometaryTi, JW_TISSERAND_LIMIT,
     calcAphelionDistance, calcOrbitalEnergy, isCometaryQi, isCometaryKi, isCometaryPi,
     isCometaryEi, GAUSS_K, calcHillRadius, calcResonanceSemiMajorAxis, classifyTancrediComet,
     classifyTancrediAsteroid, isTancrediResonanceProtected, calcMOID, calcGiantPlanetMOIDs,
@@ -1177,14 +1178,63 @@ def test_kresak_and_aphelion_boundaries():
     e = 0.5
     a = 10.0*(1.0 - e)/(1.0 + e)
 
-    assert abs(float(calcKresakK(a, e))) < 1e-12, \
-        "K was {:.4e} at its boundary".format(float(calcKresakK(a, e)))
+    assert abs(float(calcWhippleK(a, e))) < 1e-12, \
+        "K was {:.4e} at its boundary".format(float(calcWhippleK(a, e)))
 
     # P = a^1.5 e
     assert abs(float(calcKresakP(4.0, 0.25)) - 2.0) < 1e-12
 
     # Q = a(1 + e)
     assert abs(float(calcAphelionDistance(2.0, 0.8)) - 3.6) < 1e-12
+
+
+def test_whipple_K_reproduces_the_pribram_and_neuschwanstein_value():
+    """ Jopek & Williams (2013) give the Pribram and Neuschwanstein meteorites as the case where
+        the K criterion fails, quoting K ~ 0.08 for two bodies of asteroidal origin. Reproducing
+        that number fixes the form of the criterion, which is otherwise indistinguishable from the
+        form without the semi-major axis for an orbit with a close to 1 AU.
+    """
+
+    # Orbits of the two meteorite falls, which are near twins of each other
+    for a, e in ((2.401, 0.6711), (2.40, 0.670)):
+
+        k = float(calcWhippleK(a, e))
+
+        assert abs(k - 0.08) < 0.01, \
+            "K was {:.4f} for a = {:.3f}, e = {:.4f}, and the paper quotes 0.08".format(k, a, e)
+
+        # The paper's point is that the sign is wrong, not just the size
+        assert k > 0, "K did not reproduce the misclassification the paper reports"
+
+
+def test_tisserand_limit_is_the_paper_limit_scaled_by_the_jupiter_semi_major_axis():
+    """ Jopek & Williams (2013) write the T-i limit as 0.58, but their eq. 10 defines T as the
+        Tisserand parameter divided by a_J. Comparing a value of calcTisserand against 0.58 as
+        printed would call almost every orbit cometary, so the limit has to be scaled, which puts
+        it at the familiar cut near 3.
+    """
+
+    assert abs(JW_TISSERAND_LIMIT - 3.0) < 0.02, \
+        "the scaled limit was {:.4f}, and the classical Jupiter family cut is 3".format(
+            JW_TISSERAND_LIMIT)
+
+    # The paper's own form of T, evaluated for an arbitrary bound orbit, must equal calcTisserand
+    #   divided by a_J, which is what justifies the scaling
+    a, e, incl = 2.18, 0.63, math.radians(12.0)
+    t_paper = 1.0/a + 2*A_JUPITER**-1.5*math.sqrt(a*(1.0 - e**2))*math.cos(incl)
+
+    assert abs(t_paper*A_JUPITER - float(calcTisserand(a, e, incl))) < 1e-12
+
+    # 21P/Giacobini-Zinner is a Jupiter family comet well inside the cut
+    assert bool(isCometaryTi(3.503, 0.7065, math.radians(31.99)))
+
+    # A main belt orbit is not
+    assert not bool(isCometaryTi(2.77, 0.076, math.radians(11.78)))
+
+    # 2P/Encke, the parent of the Taurids, lands at T = 3.025 and so falls on the asteroidal side
+    #   of a cut placed at 3.018. The criterion is sharp and the orbit is a known borderline case,
+    #   not a defect of the implementation
+    assert not bool(isCometaryTi(2.215, 0.8485, math.radians(11.78)))
 
 
 def test_jopek_williams_two_parameter_criteria():
@@ -1598,6 +1648,8 @@ if __name__ == "__main__":
         test_tisserand_is_three_for_a_planet_crossing_circular_orbit,
         test_tisserand_reproduces_encke,
         test_kresak_and_aphelion_boundaries,
+        test_whipple_K_reproduces_the_pribram_and_neuschwanstein_value,
+        test_tisserand_limit_is_the_paper_limit_scaled_by_the_jupiter_semi_major_axis,
         test_jopek_williams_two_parameter_criteria,
         test_classification_accepts_arrays,
         test_tancredi_resonance_semimajor_axes_match_table1,

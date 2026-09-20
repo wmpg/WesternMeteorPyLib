@@ -30,6 +30,12 @@ JW_APHELION_LIMIT = 4.6      # aphelion distance [AU]
 JW_KRESAK_P_LIMIT = 2.5      # Kresak P [yr]
 JW_ENERGY_LIMIT = -5.28e-5   # orbital energy -k^2/(2a) [AU^2/day^2]
 
+# Tisserand parameter below which an orbit is taken to be cometary. Jopek & Williams (2013) write
+#   the limit as 0.58, but their eq. 10 defines T as 1/a + 2*a_J^-1.5*sqrt(a*(1 - e^2))*cos(i),
+#   which is the Tisserand parameter divided by a_J and so carries units of 1/AU. Multiplying by
+#   a_J puts the limit in the units calcTisserand returns, and recovers the familiar cut at 3
+JW_TISSERAND_LIMIT = 0.58*A_JUPITER
+
 
 
 
@@ -122,13 +128,20 @@ def calcTisserand(a, e, i, a_planet=A_JUPITER):
     return a_planet/a + 2*np.cos(i)*np.sqrt((a/a_planet)*(1.0 - e**2))
 
 
-def calcKresakK(a, e):
-    """ Calculate the Kresak K criterion of an orbit.
+def calcWhippleK(a, e):
+    """ Calculate the Whipple K criterion of an orbit.
 
         K is positive for cometary orbits and negative for asteroidal ones.
 
-        Reference: Kresak (1967). The form used here, and the sign of the cometary limit, follow
-        Jopek & Williams (2013), MNRAS 430, 2377, eq. 12, doi:10.1093/mnras/stt057.
+        The criterion is empirical and has no dynamical basis, so the sign carries no meaning for
+        an orbit that lands near zero. Jopek & Williams (2013) state that it is inconclusive for
+        short-period orbits of low eccentricity, and give the Pribram and Neuschwanstein
+        meteorites, which are of asteroidal origin, as a case where it returns K ~ 0.08. It
+        produced the most exceptions of the five criteria in their reliability test, 16.4 per cent
+        among near-Earth asteroids and 13.8 per cent among periodic comets.
+
+        Reference: Whipple (1954), AJ 59, 201, as eq. 3 of Jopek & Williams (2013), MNRAS 430,
+        2377, doi:10.1093/mnras/stt057, whose eq. 12 gives the sign of the cometary limit.
 
     Arguments:
         a: [float] semi-major axis of the orbit (AU)
@@ -199,6 +212,34 @@ def isCometaryQi(a, e, i):
     return (calcAphelionDistance(a, e) > JW_APHELION_LIMIT) | (np.asarray(i) > JW_INCL_LIMIT)
 
 
+def isCometaryTi(a, e, i, a_planet=A_JUPITER):
+    """ Classify an orbit as cometary or asteroidal using the two-parameter T-i criterion.
+
+        Of the five two-parameter criteria this is the only one with a dynamical basis rather than
+        an empirical one, the Tisserand parameter being conserved under an encounter with the
+        planet. The paper nevertheless found Q-i and E-i to be the more reliable discriminants.
+
+        The paper restricted its sample to elliptical orbits, and so does the comparison here: an
+        unbound orbit gives a Tisserand parameter of nan, which counts as asteroidal.
+
+        Reference: Jopek & Williams (2013), MNRAS 430, 2377, eq. 10, doi:10.1093/mnras/stt057.
+
+    Arguments:
+        a: [float] semi-major axis of the orbit (AU)
+        e: [float] num. eccentricity of the orbit
+        i: [float] inclination of the orbit (rad)
+
+    Keyword arguments:
+        a_planet: [float] semi-major axis of the perturbing planet (AU). Default Jupiter.
+
+    Return:
+        [bool] True if the orbit is cometary
+    """
+
+    return (calcTisserand(a, e, i, a_planet=a_planet) < JW_TISSERAND_LIMIT) \
+        | (np.asarray(i) > JW_INCL_LIMIT)
+
+
 def isCometaryKi(a, e, i):
     """ Classify an orbit as cometary or asteroidal using the two-parameter K-i criterion.
 
@@ -213,7 +254,7 @@ def isCometaryKi(a, e, i):
         [bool] True if the orbit is cometary
     """
 
-    return (calcKresakK(a, e) > 0.0) | (np.asarray(i) > JW_INCL_LIMIT)
+    return (calcWhippleK(a, e) > 0.0) | (np.asarray(i) > JW_INCL_LIMIT)
 
 
 def isCometaryPi(a, e, i):
