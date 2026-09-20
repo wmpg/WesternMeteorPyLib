@@ -1262,6 +1262,10 @@ def getElementCriterion(key):
         The keys are those of ELEMENT_CRITERIA and are not case sensitive, so that a command line
         takes 'dsh' as readily as 'DSH'.
 
+        Warning: the keys and labels of ELEMENT_CRITERIA are shared with
+        wmpl.Utils.ParentBodySearch, which offers them through -d. Editing a key or a label here
+        changes what that module accepts and prints. Keep the two in step.
+
     Arguments:
         key: [str] key of the criterion, such as 'DSH'
 

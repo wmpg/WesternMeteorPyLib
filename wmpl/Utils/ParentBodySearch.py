@@ -1,4 +1,10 @@
-""" Functions for comapring the given orbit with orbits of comets and asteroids. """
+""" Functions for comapring the given orbit with orbits of comets and asteroids.
+
+The D criterion keys and labels this module takes and prints are not its own: they are
+shared with wmpl.Utils.Dcriteria, which defines them in ELEMENT_CRITERIA and offers them
+through -c. A key means the same criterion in both, and editing one module changes the
+other.
+"""
 
 # The MIT License
 
@@ -171,11 +177,13 @@ def findParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10, meteorites=
         node: [float] Ascending node (radians).
 
     Keyword arguments:
-        d_crit: [str] Key of the D criterion function, not case sensitive. The keys are those of
-            wmpl.Utils.Dcriteria.ELEMENT_CRITERIA, which the command line of that module offers
-            through -c, so that a key means the same criterion in both. The criteria that read
-            only part of the orbit, D_T from the Tisserand parameter and D_SAC without a node or
-            a perihelion term, rank large numbers of bodies equally and say little here.
+        d_crit: [str] Key of the D criterion function, not case sensitive. Warning: the keys
+            are not defined here. They are those of wmpl.Utils.Dcriteria.ELEMENT_CRITERIA, which
+            the command line of that module offers through -c, so a key means the same criterion
+            and prints the same label in both, and editing them there changes them here. The
+            criteria that read only part of the orbit, D_T from the Tisserand parameter and D_SAC
+            without a node or a perihelion term, rank large numbers of bodies equally and say
+            little here.
         top_n: [int] How many objects with the heighest orbit similarity will be returned. 10 is default.
             If -1 is given, the whole list of bodies will be returned.
         meteorites: [bool] Use known orbits of meteorites for comparison instead of comets and asteroids.
