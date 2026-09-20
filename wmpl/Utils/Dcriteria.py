@@ -1330,7 +1330,7 @@ if __name__ == "__main__":
     output.add_argument('-c', '--criterion', metavar='KEY', type=str, nargs='+', default=None, \
         help="Compute only these criteria instead of all of them. Keys, case insensitive: "
              + ", ".join(ALL_KEYS) + ".")
-    output.add_argument('--no-classification', action='store_true', \
+    output.add_argument('--no_classification', action='store_true', \
         help="Skip the dynamical classification of each orbit.")
     output.add_argument('--quiet', '-Q', action='store_true', \
         help="Print one 'KEY VALUE' line per criterion and nothing else, for scripted use.")
