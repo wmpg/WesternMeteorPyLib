@@ -64,7 +64,7 @@ if __name__ == "__main__":
 
     arg_parser.add_argument("lc_peak_ht", help="The height of the light curve peak in km. This will be used to align the light curve with the trajectory.")
 
-    arg_parser.add_argument("time_range", help="The comma-separated relative time range speficying where the fireball is in the LC data. E.g. 2.5,6.0")
+    arg_parser.add_argument("time_range", help="The comma-separated relative time range specifying where the fireball is in the LC data. E.g. 2.5,6.0")
 
     arg_parser.add_argument("obs_geocoords", help="The comma-separated coordinates of the observer (lat,lon,ele) in degrees and meters. If the latitude is negative, put the coordinates in quotes and have a leading space, e.g. \" -45.0,120.0,100\".")
 
@@ -182,7 +182,7 @@ if __name__ == "__main__":
     # Note: datasheet says the gain scaling for max gain is 9200/400
     gain_scaling = np.array(lc_data["Gain"].values, dtype=float)/GAIN_HIGH
 
-    # Get watts/m2 from visibale data
+    # Get watts/m2 from visible data
     visible_data = np.array(lc_data["Visible"].values, dtype=float)
     watts_per_square_meter = visible_data/(RE_WHITE_CHANNEL0*gain_scaling)
 

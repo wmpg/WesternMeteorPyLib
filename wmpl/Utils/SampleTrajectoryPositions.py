@@ -365,7 +365,7 @@ if __name__ == "__main__":
 
 
     # # Beginning height of sampling (m)
-    # #   Use -1 for the beginning hieght of the fireball
+    # #   Use -1 for the beginning height of the fireball
     # beg_ht = 50000.0
 
     # # End height of sampling (m)

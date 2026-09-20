@@ -24,11 +24,11 @@ def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a
     # Set minimum simulation height
     const.h_kill = 15000 # m 
 
-    # Set minimum simuation speed
+    # Set minimum simulation speed
     const.v_kill = 3000 # m/s
 
 
-    # Set meteoroid parametrs
+    # Set meteoroid parameters
     const.m_init = mass
     const.v_init = v_init
     const.h_init = ht_beg
@@ -226,7 +226,7 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
     # Compute exact time of the end
     final_jd = jd + total_time/86400
 
-    # Compute the geo coordiantes
+    # Compute the geo coordinates
     final_lat, final_lon, final_ele = cartesian2Geo(final_jd, *final_eci)
 
     ###
@@ -437,7 +437,7 @@ if __name__ == "__main__":
     dir_path = os.path.dirname(cml_args.traj_path)
 
 
-    # Top height (if nagative, e.g. -3, the last 3 km from the bottom will be taken)
+    # Top height (if negative, e.g. -3, the last 3 km from the bottom will be taken)
     if cml_args.ht_max < 0:
         ht_max = traj.rend_ele/1000 - cml_args.ht_max
     else:
@@ -519,7 +519,7 @@ if __name__ == "__main__":
     vel_filter = vel_data < max_vel
 
 
-    # Only take data in the approprite range of heights
+    # Only take data in the appropriate range of heights
     ht_filter = (ht_data/1000 >= ht_min) & (ht_data/1000 <= ht_max)
     vel_data = vel_data[ht_filter & vel_filter]
     time_data = time_data[ht_filter & vel_filter]
