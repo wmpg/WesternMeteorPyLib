@@ -1214,60 +1214,143 @@ if __name__ == "__main__":
 
     import numpy as np
 
+    # Imported here rather than at module level, so that importing this module does not pull in
+    #   OrbitClassification and the scipy it uses
     from wmpl.Utils.OrbitClassification import (calcTisserand, calcKresakK, calcKresakP,
         calcAphelionDistance, isCometaryQi, isCometaryEi, isCometaryKi, isCometaryPi,
         classifyTancrediComet)
     from wmpl.Utils.Pickling import loadPickle
 
 
+    ### CRITERIA OFFERED ON THE COMMAND LINE ###
+
+    # No threshold is reported next to a value, on purpose. The community has not settled on one:
+    #   the usable value depends on the size of the sample being searched, several incompatible
+    #   ways of deriving it are in use, and none of them is defined for a single pair of orbits,
+    #   which is what this tool compares. Quoting one next to a pairwise value would invite it to
+    #   be read as a decision rule. The published figures, kept here for reference only:
+    #     D_SH   0.15 for a sample of 359 orbits, Lindblad (1971)
+    #     D_N    0.20, as quoted by Jenniskens (2008)
+    #     D_X    0.15 for merging two groups, Rudawska et al. (2015)
+    #     D_V    2.414 to 3.128 by group size, Jopek, Rudawska & Bartczak (2008)
+    #     D_B    below 1.0 together with D_T below 0.3, Jenniskens (2008)
+    #     D_ACS  0.15 for the core of the Taurid Complex, about 0.2 for the complex
+    #     D_SAC  0.15 for the core of the complex
+    #   wmpl.Utils.Dthresholds implements the methods that derive a threshold from a sample. It is
+    #   deliberately not imported here, so that nothing this tool prints implies a decision.
+
+    # Criteria on the orbital elements, as (key, label, function of the two element tuples)
+    ELEMENT_CRITERIA = [
+        ('DSH', 'D_SH', lambda o1, o2: calcDSH(*(o1 + o2))),
+        ('DD', 'D_D', lambda o1, o2: calcDD(*(o1 + o2))),
+        ('DH', 'D_H', lambda o1, o2: calcDH(*(o1 + o2))),
+        ('RHO1', 'rho_1', lambda o1, o2: calcRho1(*(o1 + o2))),
+        ('RHO2', 'rho_2', lambda o1, o2: calcRho2(*(o1 + o2))),
+        ('RHO5', 'rho_5', lambda o1, o2: calcRho5(*(o1 + o2))),
+        ('C', 'C', lambda o1, o2: calcC(*(o1 + o2))),
+        ('DV', 'D_V', lambda o1, o2: calcDVJopek(*(o1 + o2))),
+        ('DB', 'D_B', lambda o1, o2: calcDB(*(o1[1:] + o2[1:]))),
+        ('DT', 'D_T', lambda o1, o2: calcDT(o1[0], o1[1], o1[2], o2[0], o2[1], o2[2])),
+        ('DACS', 'D_ACS', lambda o1, o2: calcDACS(o1[0]/(1.0 - o1[1]), o1[1], o1[2],
+            o2[0]/(1.0 - o2[1]), o2[1], o2[2])),
+        ('DSAC', 'D_SAC', lambda o1, o2: calcDSAC(o1[0], o1[1], o1[2], o2[0], o2[1], o2[2])),
+        ]
+
+    # Criteria on the geocentric radiant and speed
+    GEOCENTRIC_CRITERIA = [
+        ('DN', 'D_N', lambda g1, g2: calcDN(*(g1 + g2))),
+        ('DR', 'D_R', lambda g1, g2: calcDR(*(g1 + g2))),
+        ('DX', 'D_X', lambda g1, g2: calcDX(*(g1 + g2))),
+        ]
+
+    # The Vida criterion, which takes the corrected heliocentric direction instead
+    HELIOCENTRIC_CRITERIA = [
+        ('DVVIDA', 'D_V (Vida)', lambda h1, h2: calcDV(*(h1 + h2))),
+        ]
+
+    ALL_KEYS = [k for k, _, _ in ELEMENT_CRITERIA + GEOCENTRIC_CRITERIA + HELIOCENTRIC_CRITERIA]
+
+
     ### COMMAND LINE ARGUMENTS
 
-    # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(description="Compare two trajectory files by computing their D criteria.")
+    arg_parser = argparse.ArgumentParser(description="Compute the orbit dissimilarity criteria "
+        "between two orbits. Each orbit is taken either from a trajectory pickle or from orbital "
+        "elements given on the command line, and the two may be mixed.")
 
-    arg_parser.add_argument('traj_path', metavar='TRAJ_PATH', type=str, \
-        help="Path to a trajectory pickle file.")
+    arg_parser.add_argument('traj_path', metavar='TRAJ_PATH1', type=str, nargs='?', default=None, \
+        help="Path to the trajectory pickle of the first orbit. Omit it to give that orbit with "
+             "--q1, --e1, --i1, --peri1 and --node1.")
 
-    arg_parser.add_argument('traj_path2', metavar='TRAJ_PATH2', type=str, nargs='?', \
-        default=None, \
-        help="Path to an optional second trajectory pickle file. If it's not given, then the orbital parameters need to be specified manually.")
+    arg_parser.add_argument('traj_path2', metavar='TRAJ_PATH2', type=str, nargs='?', default=None, \
+        help="Path to the trajectory pickle of the second orbit. Omit it to give that orbit with "
+             "--q2, --e2 and so on, or with the unnumbered -q, -e, -i, -p and -n.")
 
-    arg_parser.add_argument('-q', '--q', metavar='PERIHELION_DIST', help="Perihelion distance in AU.", \
-        type=float)
+    elem1 = arg_parser.add_argument_group('first orbit, given by hand')
+    elem1.add_argument('--q1', metavar='PERIHELION_DIST1', type=float, \
+        help="Perihelion distance of the first orbit in AU.")
+    elem1.add_argument('--e1', metavar='ECCENTRICITY1', type=float, \
+        help="Eccentricity of the first orbit.")
+    elem1.add_argument('--i1', metavar='INCLINATION1', type=float, \
+        help="Inclination of the first orbit (deg).")
+    elem1.add_argument('--peri1', metavar='ARG_OF_PERI1', type=float, \
+        help="Argument of perihelion of the first orbit (deg).")
+    elem1.add_argument('--node1', metavar='ASCENDING_NODE1', type=float, \
+        help="Ascending node of the first orbit (deg).")
+    elem1.add_argument('--ra1', metavar='RA_G1', type=float, \
+        help="Right ascension of the geocentric radiant of the first orbit (deg).")
+    elem1.add_argument('--dec1', metavar='DEC_G1', type=float, \
+        help="Declination of the geocentric radiant of the first orbit (deg).")
+    elem1.add_argument('--sol1', metavar='SOLAR_LON1', type=float, \
+        help="Solar longitude of the first orbit (deg).")
+    elem1.add_argument('--vg1', metavar='V_G1', type=float, \
+        help="Geocentric velocity of the first orbit (km/s).")
 
-    arg_parser.add_argument('-e', '--e', metavar='ECCENTRICITY', help="Eccentricity.", \
-        type=float)
+    elem2 = arg_parser.add_argument_group('second orbit, given by hand',
+        "The unnumbered forms are kept so that existing command lines keep working.")
+    elem2.add_argument('-q', '--q', '--q2', metavar='PERIHELION_DIST2', type=float, dest='q2', \
+        help="Perihelion distance of the second orbit in AU.")
+    elem2.add_argument('-e', '--e', '--e2', metavar='ECCENTRICITY2', type=float, dest='e2', \
+        help="Eccentricity of the second orbit.")
+    elem2.add_argument('-i', '--i', '--i2', metavar='INCLINATION2', type=float, dest='i2', \
+        help="Inclination of the second orbit (deg).")
+    elem2.add_argument('-p', '--peri', '--peri2', metavar='ARG_OF_PERI2', type=float, \
+        dest='peri2', help="Argument of perihelion of the second orbit (deg).")
+    elem2.add_argument('-n', '--node', '--node2', metavar='ASCENDING_NODE2', type=float, \
+        dest='node2', help="Ascending node of the second orbit (deg).")
+    elem2.add_argument('--ra', '--ra2', metavar='RA_G2', type=float, dest='ra2', \
+        help="Right ascension of the geocentric radiant of the second orbit (deg).")
+    elem2.add_argument('--dec', '--dec2', metavar='DEC_G2', type=float, dest='dec2', \
+        help="Declination of the geocentric radiant of the second orbit (deg).")
+    elem2.add_argument('--sol', '--sol2', metavar='SOLAR_LON2', type=float, dest='sol2', \
+        help="Solar longitude of the second orbit (deg).")
+    elem2.add_argument('--vg', '--vg2', metavar='V_G2', type=float, dest='vg2', \
+        help="Geocentric velocity of the second orbit (km/s).")
 
-    arg_parser.add_argument('-i', '--i', metavar='INCLINATION', help="Inclination (deg).", \
-        type=float)
-
-    arg_parser.add_argument('-p', '--peri', metavar='ARG_OF_PERI', help="Argument of perihelion (deg).", \
-        type=float)
-
-    arg_parser.add_argument('-n', '--node', metavar='ASCENDING_NODE', help="Ascending node (deg).", \
-        type=float)
-
-    arg_parser.add_argument('--ra', metavar='RA_G', type=float, \
-        help="Right ascension of the geocentric radiant (deg). Needed together with --dec, --sol \
-and --vg for the criteria defined on the radiant.")
-
-    arg_parser.add_argument('--dec', metavar='DEC_G', type=float, \
-        help="Declination of the geocentric radiant (deg).")
-
-    arg_parser.add_argument('--sol', metavar='SOLAR_LON', type=float, \
-        help="Solar longitude (deg).")
-
-    arg_parser.add_argument('--vg', metavar='V_G', type=float, \
-        help="Geocentric velocity (km/s).")
+    output = arg_parser.add_argument_group('selection and output')
+    output.add_argument('-c', '--criterion', metavar='KEY', type=str, nargs='+', default=None, \
+        help="Compute only these criteria instead of all of them. Keys, case insensitive: "
+             + ", ".join(ALL_KEYS) + ".")
+    output.add_argument('--no-classification', action='store_true', \
+        help="Skip the dynamical classification of each orbit.")
+    output.add_argument('--quiet', '-Q', action='store_true', \
+        help="Print one 'KEY VALUE' line per criterion and nothing else, for scripted use.")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
     #########################
 
-    print("Input files:")
-    print("First  =", cml_args.traj_path)
-    print("Second =", cml_args.traj_path2)
+
+    def reportError(message):
+        """ Print a message to stderr and stop.
+
+        Arguments:
+            message: [str] what went wrong
+        """
+
+        print(message, file=sys.stderr)
+        sys.exit(1)
+
 
     def geocentricFromOrbit(orbit):
         """ Pull the radiant, the solar longitude and the geocentric speed out of an orbit, in the
@@ -1309,186 +1392,185 @@ and --vg for the criteria defined on the radiant.")
         return (orbit.L_h, orbit.B_h, orbit.la_sun, orbit.v_h/1000.0)
 
 
-    # Load the reference trajectory pickle file
-    traj_ref = loadPickle(*os.path.split(cml_args.traj_path))
+    def loadOrbit(traj_path, elements, geocentric, which):
+        """ Assemble one orbit, either from a trajectory pickle or from elements given by hand.
 
-    # Load orbital elements
-    q_ref = traj_ref.orbit.q
-    e_ref = traj_ref.orbit.e
-    incl_ref = np.degrees(traj_ref.orbit.i)
-    peri_ref = np.degrees(traj_ref.orbit.peri)
-    node_ref = np.degrees(traj_ref.orbit.node)
+        Arguments:
+            traj_path: [str] path to a trajectory pickle, or None
+            elements: [tuple] (q, e, i, peri, node) from the command line, degrees for the angles,
+                any of them None
+            geocentric: [tuple] (ra, dec, solar longitude, speed) from the command line, degrees
+                and km/s, any of them None
+            which: [str] which orbit this is, for the error messages
 
-    # Quantities the criteria defined on the radiant need
-    geo_ref = geocentricFromOrbit(traj_ref.orbit)
-    helio_ref = heliocentricFromOrbit(traj_ref.orbit)
+        Return:
+            [tuple] (elements in radians, geocentric quantities or None, heliocentric or None,
+                degrees for printing)
+        """
 
+        if traj_path is not None:
 
+            traj = loadPickle(*os.path.split(traj_path))
+            orbit = traj.orbit
 
-    # If the trajectory pickle was given as a second argument, load the orbital elements from it
-    if cml_args.traj_path2 is not None:
+            degrees = (orbit.q, orbit.e, np.degrees(orbit.i), np.degrees(orbit.peri),
+                np.degrees(orbit.node))
 
-        # Load the trajectory pickle
-        traj = loadPickle(*os.path.split(cml_args.traj_path2))
+            return ((orbit.q, orbit.e, orbit.i, orbit.node, orbit.peri),
+                geocentricFromOrbit(orbit), heliocentricFromOrbit(orbit), degrees)
 
-        # Load orbital elements
-        q = traj.orbit.q
-        e = traj.orbit.e
-        incl = np.degrees(traj.orbit.i)
-        peri = np.degrees(traj.orbit.peri)
-        node = np.degrees(traj.orbit.node)
+        if any(v is None for v in elements):
 
-        geo_cmp = geocentricFromOrbit(traj.orbit)
-        helio_cmp = heliocentricFromOrbit(traj.orbit)
+            reportError("The {:s} orbit needs either a trajectory pickle or all five of its "
+                "elements.".format(which))
 
-
-    # Otherwise, load orbital elements from the manual entry
-    else:
-
-        # Check that all elements are given
-        if (cml_args.q is not None) and (cml_args.e is not None) and (cml_args.i is not None) \
-            and (cml_args.peri is not None) and (cml_args.node is not None):
-
-            q = cml_args.q
-            e = cml_args.e
-            incl = cml_args.i
-            peri = cml_args.peri
-            node = cml_args.node
-
-        else:
-            print("All orbital elements need to be specified: q, e, i, peri, node!")
-            sys.exit()
-
-        # The Vida criterion needs a heliocentric direction, which is not a command line option
-        helio_cmp = None
+        q, e, incl, peri, node = elements
 
         # The radiant quantities are optional, and all four are needed together
-        geocentric_args = (cml_args.ra, cml_args.dec, cml_args.sol, cml_args.vg)
-
-        if all(v is not None for v in geocentric_args):
-            geo_cmp = (np.radians(cml_args.ra), np.radians(cml_args.dec),
-                np.radians(cml_args.sol), cml_args.vg)
+        if all(v is not None for v in geocentric):
+            ra, dec, sol, vg = geocentric
+            geo = (np.radians(ra), np.radians(dec), np.radians(sol), vg)
 
         else:
-            geo_cmp = None
+            geo = None
 
-            if any(v is not None for v in geocentric_args):
-                print("--ra, --dec, --sol and --vg have to be given together, ignoring them.")
+            if any(v is not None for v in geocentric):
+                reportError("The radiant arguments of the {:s} orbit have to be given together: "
+                    "right ascension, declination, solar longitude and speed.".format(which))
 
-
-
-    # Print reference orbital elements
-    print("Reference orbital elements:")
-    print("  q = {:.5f} AU".format(q_ref))
-    print("  e = {:.5f}".format(e_ref))
-    print("  i = {:.5f} deg".format(incl_ref))
-    print("  w = {:.5f} deg".format(peri_ref))
-    print("  O = {:.5f} deg".format(node_ref))
-    print()
-    print("Comparison orbital elements:")
-    print("  q = {:.5f} AU".format(q))
-    print("  e = {:.5f}".format(e))
-    print("  i = {:.5f} deg".format(incl))
-    print("  w = {:.5f} deg".format(peri))
-    print("  O = {:.5f} deg".format(node))
-    print()
+        # A heliocentric direction cannot be given on the command line
+        return ((q, e, np.radians(incl), np.radians(node), np.radians(peri)), geo, None,
+            (q, e, incl, peri, node))
 
 
-
-    # Orbital elements of both orbits, in the units the criteria take
-    orbit_ref = (q_ref, e_ref, np.radians(incl_ref), np.radians(node_ref), np.radians(peri_ref))
-    orbit_cmp = (q, e, np.radians(incl), np.radians(node), np.radians(peri))
-
-    # The semi-major axis, which two of the criteria and all of the classification take
-    a_ref = q_ref/(1.0 - e_ref)
-    a_cmp = q/(1.0 - e)
-
-    print()
-    print("Criteria on the orbital elements")
-    print("--------------------------------")
-
-    for name, value, threshold in (
-        ("D_SH", calcDSH(*(orbit_ref + orbit_cmp)), "0.15 for a sample of 359 orbits, Lindblad (1971)"),
-        ("D_D", calcDD(*(orbit_ref + orbit_cmp)), "see Dthresholds, scales with the sample size"),
-        ("D_H", calcDH(*(orbit_ref + orbit_cmp)), "see Dthresholds, scales with the sample size"),
-        ("rho_1", calcRho1(*(orbit_ref + orbit_cmp)), "none published"),
-        ("rho_2", calcRho2(*(orbit_ref + orbit_cmp)), "none published"),
-        ("rho_5", calcRho5(*(orbit_ref + orbit_cmp)), "none published"),
-        ("C", calcC(*(orbit_ref + orbit_cmp)), "none published, used with the break-point method"),
-        ("D_V", calcDVJopek(*(orbit_ref + orbit_cmp)), "2.414 to 3.128, Jopek et al. (2008)"),
-        ("D_B", calcDB(*(orbit_ref[1:] + orbit_cmp[1:])), "< 1.0 with D_T < 0.3, Jenniskens (2008)"),
-        ("D_T", calcDT(q_ref, e_ref, np.radians(incl_ref), q, e, np.radians(incl)), \
-            "< 0.3 with D_B < 1.0, Jenniskens (2008)"),
-        ("D_ACS", calcDACS(a_ref, e_ref, np.radians(incl_ref), a_cmp, e, np.radians(incl)), \
-            "0.15 for the core, about 0.2 defines the complex"),
-        ("D_SAC", calcDSAC(q_ref, e_ref, np.radians(incl_ref), q, e, np.radians(incl)), \
-            "0.15 for the core of the complex"),
-        ):
-
-        print("  {:<6s} = {:9.4f}   threshold: {:s}".format(name, float(value), threshold))
-
-    # The criteria defined on the radiant need the geocentric quantities, which come either from a
-    #   second trajectory file or from the command line
-    if (geo_ref is not None) and (geo_cmp is not None):
-
-        print()
-        print("Criteria on the geocentric radiant and speed")
-        print("-------------------------------------------")
-
-        ra_ref, dec_ref, sol_ref, vg_ref = geo_ref
-        ra_cmp, dec_cmp, sol_cmp, vg_cmp = geo_cmp
-
-        geo_args = (ra_ref, dec_ref, sol_ref, vg_ref, ra_cmp, dec_cmp, sol_cmp, vg_cmp)
-
-        for name, value, threshold in (
-            ("D_N", calcDN(*geo_args), "0.20, as quoted by Jenniskens (2008)"),
-            ("D_R", calcDR(*geo_args), "none published, a necessary condition on D_N"),
-            ("D_X", calcDX(*geo_args), "0.15 for merging groups, Rudawska et al. (2015)"),
-            ):
-
-            print("  {:<6s} = {:9.4f}   threshold: {:s}".format(name, float(value), threshold))
-
-        # The Vida criterion needs the corrected heliocentric direction instead
-        if (helio_ref is not None) and (helio_cmp is not None):
-
-            print("  {:<6s} = {:9.4f}   threshold: {:s}".format("D_V*", \
-                float(calcDV(*(helio_ref + helio_cmp))), "none published, unpublished criterion"))
-            print("  (D_V* is the Vida criterion already in this module, not the Jopek D_V above)")
+    # Work out which criteria were asked for
+    if cml_args.criterion is None:
+        selected = set(ALL_KEYS)
 
     else:
+        selected = set(key.upper() for key in cml_args.criterion)
+
+        unknown = sorted(selected - set(ALL_KEYS))
+
+        if unknown:
+            reportError("Unknown criterion {:s}. Available: {:s}.".format(", ".join(unknown),
+                ", ".join(ALL_KEYS)))
+
+    verbose = not cml_args.quiet
+
+
+    # Assemble both orbits
+    orbit1, geo1, helio1, degrees1 = loadOrbit(cml_args.traj_path,
+        (cml_args.q1, cml_args.e1, cml_args.i1, cml_args.peri1, cml_args.node1),
+        (cml_args.ra1, cml_args.dec1, cml_args.sol1, cml_args.vg1), "first")
+
+    orbit2, geo2, helio2, degrees2 = loadOrbit(cml_args.traj_path2,
+        (cml_args.q2, cml_args.e2, cml_args.i2, cml_args.peri2, cml_args.node2),
+        (cml_args.ra2, cml_args.dec2, cml_args.sol2, cml_args.vg2), "second")
+
+
+    if verbose:
+
+        print("First orbit:")
+        if cml_args.traj_path is not None:
+            print("  from {:s}".format(cml_args.traj_path))
+        print("  q = {:.5f} AU".format(degrees1[0]))
+        print("  e = {:.5f}".format(degrees1[1]))
+        print("  i = {:.5f} deg".format(degrees1[2]))
+        print("  w = {:.5f} deg".format(degrees1[3]))
+        print("  O = {:.5f} deg".format(degrees1[4]))
         print()
-        print("Criteria on the geocentric radiant and speed were skipped: they need the radiant,")
-        print("the solar longitude and the geocentric speed of both orbits, from a second")
-        print("trajectory file or from --ra, --dec, --sol and --vg.")
-
-    print()
-    print("Dynamical classification of each orbit")
-    print("--------------------------------------")
-    print("  {:<28s} {:>18s} {:>18s}".format("", "first", "second"))
-
-    for label, values in (
-        ("Tisserand parameter T_J", (calcTisserand(a_ref, e_ref, np.radians(incl_ref)), \
-            calcTisserand(a_cmp, e, np.radians(incl)))),
-        ("Kresak K", (calcKresakK(a_ref, e_ref), calcKresakK(a_cmp, e))),
-        ("Kresak P (yr)", (calcKresakP(a_ref, e_ref), calcKresakP(a_cmp, e))),
-        ("Aphelion Q (AU)", (calcAphelionDistance(a_ref, e_ref), calcAphelionDistance(a_cmp, e))),
-        ):
-
-        print("  {:<28s} {:18.4f} {:18.4f}".format(label, float(values[0]), float(values[1])))
-
-    for label, test in (("Q-i", isCometaryQi), ("E-i", isCometaryEi), ("K-i", isCometaryKi),
-                        ("P-i", isCometaryPi)):
-
-        first = "cometary" if bool(test(a_ref, e_ref, np.radians(incl_ref))) else "asteroidal"
-        second = "cometary" if bool(test(a_cmp, e, np.radians(incl))) else "asteroidal"
-
-        print("  {:<28s} {:>18s} {:>18s}".format("Jopek & Williams " + label, first, second))
-
-    print("  {:<28s} {:>18s} {:>18s}".format("Tancredi class", \
-        classifyTancrediComet(a_ref, e_ref, np.radians(incl_ref)), \
-        classifyTancrediComet(a_cmp, e, np.radians(incl))))
+        print("Second orbit:")
+        if cml_args.traj_path2 is not None:
+            print("  from {:s}".format(cml_args.traj_path2))
+        print("  q = {:.5f} AU".format(degrees2[0]))
+        print("  e = {:.5f}".format(degrees2[1]))
+        print("  i = {:.5f} deg".format(degrees2[2]))
+        print("  w = {:.5f} deg".format(degrees2[3]))
+        print("  O = {:.5f} deg".format(degrees2[4]))
 
 
+    # Criteria on the orbital elements
+    element_results = [(label, float(func(orbit1, orbit2)))
+        for key, label, func in ELEMENT_CRITERIA if key in selected]
+
+    if element_results:
+
+        if verbose:
+            print()
+            print("Criteria on the orbital elements")
+            print("--------------------------------")
+
+        for label, value in element_results:
+            print("  {:<11s} = {:12.6f}".format(label, value) if verbose \
+                else "{:s} {:.6f}".format(label, value))
+
+
+    # Criteria on the geocentric radiant and speed
+    geocentric_wanted = [c for c in GEOCENTRIC_CRITERIA if c[0] in selected]
+    heliocentric_wanted = [c for c in HELIOCENTRIC_CRITERIA if c[0] in selected]
+
+    if geocentric_wanted or heliocentric_wanted:
+
+        rows = []
+
+        if (geo1 is not None) and (geo2 is not None):
+            rows += [(label, float(func(geo1, geo2))) for _, label, func in geocentric_wanted]
+
+        if (helio1 is not None) and (helio2 is not None):
+            rows += [(label, float(func(helio1, helio2))) for _, label, func in heliocentric_wanted]
+
+        if rows:
+
+            if verbose:
+                print()
+                print("Criteria on the geocentric radiant and speed")
+                print("-------------------------------------------")
+
+            for label, value in rows:
+                print("  {:<11s} = {:12.6f}".format(label, value) if verbose \
+                    else "{:s} {:.6f}".format(label, value))
+
+        elif verbose:
+            print()
+            print("The criteria on the radiant were skipped: they need the radiant, the solar")
+            print("longitude and the geocentric speed of both orbits, from a trajectory pickle or")
+            print("from the --ra, --dec, --sol and --vg arguments of each orbit.")
+
+
+    # Dynamical classification of each orbit
+    if verbose and not cml_args.no_classification:
+
+        a1 = orbit1[0]/(1.0 - orbit1[1])
+        a2 = orbit2[0]/(1.0 - orbit2[1])
+
+        print()
+        print("Dynamical classification of each orbit")
+        print("--------------------------------------")
+        print("  {:<28s} {:>18s} {:>18s}".format("", "first", "second"))
+
+        for label, values in (
+            ("Tisserand parameter T_J", (calcTisserand(a1, orbit1[1], orbit1[2]),
+                calcTisserand(a2, orbit2[1], orbit2[2]))),
+            ("Kresak K", (calcKresakK(a1, orbit1[1]), calcKresakK(a2, orbit2[1]))),
+            ("Kresak P (yr)", (calcKresakP(a1, orbit1[1]), calcKresakP(a2, orbit2[1]))),
+            ("Aphelion Q (AU)", (calcAphelionDistance(a1, orbit1[1]),
+                calcAphelionDistance(a2, orbit2[1]))),
+            ):
+
+            print("  {:<28s} {:18.4f} {:18.4f}".format(label, float(values[0]), float(values[1])))
+
+        for label, test in (("Q-i", isCometaryQi), ("E-i", isCometaryEi), ("K-i", isCometaryKi),
+                            ("P-i", isCometaryPi)):
+
+            first = "cometary" if bool(test(a1, orbit1[1], orbit1[2])) else "asteroidal"
+            second = "cometary" if bool(test(a2, orbit2[1], orbit2[2])) else "asteroidal"
+
+            print("  {:<28s} {:>18s} {:>18s}".format("Jopek & Williams " + label, first, second))
+
+        print("  {:<28s} {:>18s} {:>18s}".format("Tancredi class",
+            classifyTancrediComet(a1, orbit1[1], orbit1[2]),
+            classifyTancrediComet(a2, orbit2[1], orbit2[2])))
 
 
     sys.exit()
