@@ -29,7 +29,7 @@ import sys
 import numpy as np
 
 from wmpl.Config import config
-from wmpl.Utils.Dcriteria import calcDSH, calcDH, calcDD
+from wmpl.Utils.Dcriteria import ELEMENT_CRITERIA_KEYS, getElementCriterion
 from wmpl.Utils.Pickling import loadPickle
 
 
@@ -171,8 +171,11 @@ def findParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10, meteorites=
         node: [float] Ascending node (radians).
 
     Keyword arguments:
-        d_crit: [str] D criterion function. 'dsh' for Southworth and Hawkins, 'dd' for Drummond, and 'dh' for 
-            Jopek.
+        d_crit: [str] Key of the D criterion function, not case sensitive. The keys are those of
+            wmpl.Utils.Dcriteria.ELEMENT_CRITERIA, which the command line of that module offers
+            through -c, so that a key means the same criterion in both. The criteria that read
+            only part of the orbit, D_T from the Tisserand parameter and D_SAC without a node or
+            a perihelion term, rank large numbers of bodies equally and say little here.
         top_n: [int] How many objects with the heighest orbit similarity will be returned. 10 is default.
             If -1 is given, the whole list of bodies will be returned.
         meteorites: [bool] Use known orbits of meteorites for comparison instead of comets and asteroids.
@@ -183,18 +186,12 @@ def findParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10, meteorites=
 
 
     # Choose the appropriate D criterion function:
-    if d_crit == 'dsh':
-        dFunc = calcDSH
+    try:
+        _, dFunc = getElementCriterion(d_crit)
 
-    elif d_crit == 'dd':
-        dFunc = calcDD
-
-    elif d_crit == 'dh':
-        dFunc = calcDH
-
-    else:
-        print('The given D criteria function not recognized! Using D_SH by default...')
-        dFunc = calcDSH
+    except ValueError as e:
+        print('{:s} Using D_SH by default...'.format(str(e)))
+        _, dFunc = getElementCriterion('DSH')
 
 
     # Use meteorite orbits instead of comets and asteroids
@@ -221,10 +218,15 @@ def findParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10, meteorites=
         node2 = np.radians(node2)
 
         # Calculate D criterion between the body and the meteoroid
-        d_crit = dFunc(q, e, incl, node, peri, q2, e2, incl2, node2, peri2)
+        d_value = float(dFunc((q, e, incl, node, peri), (q2, e2, incl2, node2, peri2)))
+
+        # A criterion written in terms of the semi-major axis is infinite against the parabolic
+        #   orbits in the comet catalogue, and such a body is not a match under it
+        if not np.isfinite(d_value):
+            continue
 
         # Add the body index and D criterion to list
-        dcrit_list.append([k, d_crit])
+        dcrit_list.append([k, d_value])
 
 
     # Sort the bodies by ascending D criterion value
@@ -287,8 +289,11 @@ if __name__ == "__main__":
     arg_parser.add_argument('-n', '--node', metavar='ASCENDING_NODE', help="Ascending node (deg).", \
         type=float)
 
-    arg_parser.add_argument('-d', '--dcrit', metavar='D_CRIT', help="D criterion type. 'dsh' by default, options are: 'dsh' for Southworth and Hawkins, 'dd' for Drummond, and 'dh' for Jopek.", \
-        type=str, default='dsh')
+    arg_parser.add_argument('-d', '--dcrit', metavar='D_CRIT', help="D criterion type, 'DSH' by "
+        "default. Keys, case insensitive, the same ones the Dcriteria command line takes: "
+        + ", ".join(ELEMENT_CRITERIA_KEYS) + ". DT and DSAC read only part of the orbit and rank "
+        "large numbers of bodies equally, so they say little in a search.", \
+        type=str, default='DSH')
 
     arg_parser.add_argument('-m', '--meteorites', action="store_true", \
         help="""Use meteorites with orbits for comparison instead of asteroids and comets. """
@@ -333,8 +338,17 @@ if __name__ == "__main__":
 
 
 
-    # Extract D criterion type
+    # Extract D criterion type, and its label, which is the one the Dcriteria command line prints.
+    #   findParentBodies warns and falls back to D_SH on an unknown key, but a typed key is worth
+    #   stopping for, so that a run is not silently labelled with a criterion it did not use
     d_crit_type = cml_args.dcrit
+
+    try:
+        d_crit_label, _ = getElementCriterion(d_crit_type)
+
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
 
 
 
@@ -355,7 +369,8 @@ if __name__ == "__main__":
         d_crit=d_crit_type, top_n=10, meteorites=cml_args.meteorites)
 
     print("Top 10 matches:")
-    print('Name                               ,     q,     e,   incl,    peri,    node,  Hmag, D crit', d_crit_type)
+    print('Name                               ,     q,     e,   incl,    peri,    node,  Hmag,',
+        d_crit_label)
     for entry in parent_matches:
         print("{:35s}, {:.3f}, {:.3f}, {:6.2f}, {:7.3f}, {:7.3f}, {:5.2f}, {:.3f}".format(*entry))
 

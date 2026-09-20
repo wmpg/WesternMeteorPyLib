@@ -1206,6 +1206,79 @@ def calcDSAC(q1, e1, i1, q2, e2, i2):
 
 
 
+def _semiMajorAxisForCriteria(q, e):
+    """ Convert a perihelion distance to a semi-major axis, for the criteria written in terms of
+        the semi-major axis.
+
+        A parabolic orbit has no semi-major axis. Returning infinity rather than dividing by zero
+        lets a criterion that needs it return infinity too, which is the right answer for a term
+        that measures a difference of semi-major axes, and sorts last when a catalogue is swept.
+        The comet catalogue distributed with wmpl holds about 1800 orbits with e of exactly 1.
+
+    Arguments:
+        q: [float] perihelion distance of the orbit (AU)
+        e: [float] num. eccentricity of the orbit
+
+    Return:
+        [float] semi-major axis (AU), infinite for a parabolic orbit
+    """
+
+    if e == 1.0:
+        return np.inf
+
+    return q/(1.0 - e)
+
+
+# The criteria on the orbital elements, as (key, label, function of the two orbits). This is the
+#   one vocabulary of criterion keys in the library: the command line of this module offers it
+#   through -c, and wmpl.Utils.ParentBodySearch through -d, so that a key means the same thing and
+#   prints the same label in both.
+#
+#   Each function takes the two orbits as (q, e, i, node, peri) tuples with the angles in radians.
+#   That signature is the only thing the criteria have in common: some read all five elements,
+#   some only three, and D_ACS reads the semi-major axis in place of the perihelion distance.
+ELEMENT_CRITERIA = [
+    ('DSH', 'D_SH', lambda o1, o2: calcDSH(*(o1 + o2))),
+    ('DD', 'D_D', lambda o1, o2: calcDD(*(o1 + o2))),
+    ('DH', 'D_H', lambda o1, o2: calcDH(*(o1 + o2))),
+    ('RHO1', 'rho_1', lambda o1, o2: calcRho1(*(o1 + o2))),
+    ('RHO2', 'rho_2', lambda o1, o2: calcRho2(*(o1 + o2))),
+    ('RHO5', 'rho_5', lambda o1, o2: calcRho5(*(o1 + o2))),
+    ('C', 'C', lambda o1, o2: calcC(*(o1 + o2))),
+    ('DV', 'D_V', lambda o1, o2: calcDVJopek(*(o1 + o2))),
+    ('DB', 'D_B', lambda o1, o2: calcDB(*(o1[1:] + o2[1:]))),
+    ('DT', 'D_T', lambda o1, o2: calcDT(o1[0], o1[1], o1[2], o2[0], o2[1], o2[2])),
+    ('DACS', 'D_ACS', lambda o1, o2: calcDACS(_semiMajorAxisForCriteria(o1[0], o1[1]), o1[1],
+        o1[2], _semiMajorAxisForCriteria(o2[0], o2[1]), o2[1], o2[2])),
+    ('DSAC', 'D_SAC', lambda o1, o2: calcDSAC(o1[0], o1[1], o1[2], o2[0], o2[1], o2[2])),
+    ]
+
+ELEMENT_CRITERIA_KEYS = [key for key, _, _ in ELEMENT_CRITERIA]
+
+
+def getElementCriterion(key):
+    """ Look up one of the criteria on the orbital elements by its key.
+
+        The keys are those of ELEMENT_CRITERIA and are not case sensitive, so that a command line
+        takes 'dsh' as readily as 'DSH'.
+
+    Arguments:
+        key: [str] key of the criterion, such as 'DSH'
+
+    Return:
+        [tuple] (label, function of the two orbits as (q, e, i, node, peri) tuples in radians)
+    """
+
+    for criterion_key, label, func in ELEMENT_CRITERIA:
+
+        if criterion_key == key.upper():
+            return (label, func)
+
+    raise ValueError("Unknown criterion {:s}. Available: {:s}.".format(key,
+        ", ".join(ELEMENT_CRITERIA_KEYS)))
+
+
+
 if __name__ == "__main__":
 
     import os
@@ -1239,23 +1312,6 @@ if __name__ == "__main__":
     #   wmpl.Utils.Dthresholds implements the methods that derive a threshold from a sample. It is
     #   deliberately not imported here, so that nothing this tool prints implies a decision.
 
-    # Criteria on the orbital elements, as (key, label, function of the two element tuples)
-    ELEMENT_CRITERIA = [
-        ('DSH', 'D_SH', lambda o1, o2: calcDSH(*(o1 + o2))),
-        ('DD', 'D_D', lambda o1, o2: calcDD(*(o1 + o2))),
-        ('DH', 'D_H', lambda o1, o2: calcDH(*(o1 + o2))),
-        ('RHO1', 'rho_1', lambda o1, o2: calcRho1(*(o1 + o2))),
-        ('RHO2', 'rho_2', lambda o1, o2: calcRho2(*(o1 + o2))),
-        ('RHO5', 'rho_5', lambda o1, o2: calcRho5(*(o1 + o2))),
-        ('C', 'C', lambda o1, o2: calcC(*(o1 + o2))),
-        ('DV', 'D_V', lambda o1, o2: calcDVJopek(*(o1 + o2))),
-        ('DB', 'D_B', lambda o1, o2: calcDB(*(o1[1:] + o2[1:]))),
-        ('DT', 'D_T', lambda o1, o2: calcDT(o1[0], o1[1], o1[2], o2[0], o2[1], o2[2])),
-        ('DACS', 'D_ACS', lambda o1, o2: calcDACS(o1[0]/(1.0 - o1[1]), o1[1], o1[2],
-            o2[0]/(1.0 - o2[1]), o2[1], o2[2])),
-        ('DSAC', 'D_SAC', lambda o1, o2: calcDSAC(o1[0], o1[1], o1[2], o2[0], o2[1], o2[2])),
-        ]
-
     # Criteria on the geocentric radiant and speed
     GEOCENTRIC_CRITERIA = [
         ('DN', 'D_N', lambda g1, g2: calcDN(*(g1 + g2))),
@@ -1268,7 +1324,8 @@ if __name__ == "__main__":
         ('DVVIDA', 'D_V (Vida)', lambda h1, h2: calcDV(*(h1 + h2))),
         ]
 
-    ALL_KEYS = [k for k, _, _ in ELEMENT_CRITERIA + GEOCENTRIC_CRITERIA + HELIOCENTRIC_CRITERIA]
+    ALL_KEYS = ELEMENT_CRITERIA_KEYS + [k for k, _, _ in GEOCENTRIC_CRITERIA \
+        + HELIOCENTRIC_CRITERIA]
 
 
     ### COMMAND LINE ARGUMENTS

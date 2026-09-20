@@ -21,7 +21,8 @@ import numpy as np
 
 from wmpl.Utils.Dcriteria import (calcRho1, calcRho2, calcRho5, calcC, calcDR, calcDB, calcDT,
     calcDX, calcDVJopek, calcDVWeights, calcDACS, calcDSAC, calcDN, calcDD, DV_DISPERSIONS,
-    DV_THRESHOLDS, DV_DEFAULT_EPOCH, TC_REFERENCE_A, TC_REFERENCE_E,
+    DV_THRESHOLDS, DV_DEFAULT_EPOCH, TC_REFERENCE_A, TC_REFERENCE_E, calcDSH, calcDH,
+    ELEMENT_CRITERIA, ELEMENT_CRITERIA_KEYS, getElementCriterion, _semiMajorAxisForCriteria,
     TC_REFERENCE_INCL, TC_REFERENCE_Q, DACS_A_SCALE, DX_W_SOL, DX_W_RA, DX_W_DEC, DX_W_VG)
 from wmpl.Utils.OrbitClassification import (calcTisserand, calcWhippleK, calcKresakP,
     isCometaryTi, JW_TISSERAND_LIMIT,
@@ -1575,6 +1576,79 @@ def test_forbidden_region_closes_at_tisserand_three():
         pass
 
 
+def test_element_criteria_registry_matches_calling_the_functions_directly():
+    """ The registry is what wmpl.Utils.ParentBodySearch calls, so a criterion reached through it
+        has to return exactly what calling the function with its own argument order returns. The
+        registry packs the elements into tuples, and the criteria do not agree on an order, so a
+        mistake here would be silent.
+    """
+
+    o1 = (0.80583, 0.6306, math.radians(0.61), math.radians(171.1), math.radians(240.9))
+    o2 = (0.80512, 0.6486, math.radians(0.66), math.radians(171.1), math.radians(240.4))
+
+    lookup = dict((key, func) for key, _, func in ELEMENT_CRITERIA)
+
+    assert float(lookup['DSH'](o1, o2)) == float(calcDSH(*(o1 + o2)))
+    assert float(lookup['DH'](o1, o2)) == float(calcDH(*(o1 + o2)))
+    assert float(lookup['DT'](o1, o2)) == float(calcDT(o1[0], o1[1], o1[2], o2[0], o2[1], o2[2]))
+    assert float(lookup['DSAC'](o1, o2)) == float(calcDSAC(o1[0], o1[1], o1[2], o2[0], o2[1],
+        o2[2]))
+
+    # D_B drops the perihelion distance, so it reads the tuple from its second entry on
+    assert float(lookup['DB'](o1, o2)) == float(calcDB(*(o1[1:] + o2[1:])))
+
+    # D_ACS reads the semi-major axis where the others read the perihelion distance
+    assert float(lookup['DACS'](o1, o2)) == float(calcDACS(o1[0]/(1.0 - o1[1]), o1[1], o1[2],
+        o2[0]/(1.0 - o2[1]), o2[1], o2[2]))
+
+
+def test_criterion_lookup_is_case_insensitive_and_names_the_keys_it_knows():
+    """ Both command lines take a key from the user, so the lookup has to accept either case, and
+        an unknown key has to say which keys exist rather than fail silently or default.
+    """
+
+    for key in ('DSH', 'dsh', 'Dsh'):
+        assert getElementCriterion(key)[0] == 'D_SH'
+
+    assert getElementCriterion('rho2')[0] == 'rho_2'
+
+    # Every key in the registry has to resolve, which is what lets a command line advertise them
+    for key in ELEMENT_CRITERIA_KEYS:
+        assert getElementCriterion(key)[1] is not None
+
+    try:
+        getElementCriterion('NOPE')
+
+    except ValueError as e:
+        assert 'NOPE' in str(e), "the message did not name the key that was not understood"
+        assert 'DSH' in str(e), "the message did not list the keys that are available"
+
+    else:
+        assert False, "an unknown criterion key did not raise"
+
+
+def test_semi_major_axis_is_infinite_for_a_parabolic_orbit():
+    """ The comet catalogue wmpl distributes holds about 1800 orbits with e of exactly 1, and
+        sweeping it with a criterion written in terms of the semi-major axis used to divide by
+        zero. Infinity is the right value: a parabolic orbit is unbounded in a, and a difference
+        of semi-major axes against it is infinite, so the body never ranks as a match.
+    """
+
+    assert math.isinf(_semiMajorAxisForCriteria(0.5, 1.0))
+
+    # Away from the singularity it is the ordinary conversion
+    assert abs(_semiMajorAxisForCriteria(0.8, 0.6) - 2.0) < 1e-12
+
+    # A hyperbolic orbit keeps the negative semi-major axis the conversion gives
+    assert _semiMajorAxisForCriteria(0.5, 1.4) < 0
+
+    # Reached through the registry, D_ACS against a parabolic orbit is infinite rather than a crash
+    bound = (0.80583, 0.6306, math.radians(0.61), math.radians(171.1), math.radians(240.9))
+    parabolic = (0.5, 1.0, math.radians(30.0), math.radians(100.0), math.radians(200.0))
+
+    assert math.isinf(float(getElementCriterion('DACS')[1](bound, parabolic)))
+
+
 def test_giant_planet_moids_close_the_tancredi_criterion():
     """ With the MOIDs computed rather than supplied, the classification runs from orbital elements
         alone, which is what the criterion is for.
@@ -1669,6 +1743,9 @@ if __name__ == "__main__":
         test_moid_is_symmetric,
         test_forbidden_region_closes_at_tisserand_three,
         test_giant_planet_moids_close_the_tancredi_criterion,
+        test_element_criteria_registry_matches_calling_the_functions_directly,
+        test_criterion_lookup_is_case_insensitive_and_names_the_keys_it_knows,
+        test_semi_major_axis_is_infinite_for_a_parabolic_orbit,
         ]
 
     failed = 0
