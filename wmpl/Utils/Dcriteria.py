@@ -13,8 +13,88 @@ from wmpl.Utils.OrbitConstants import A_JUPITER, GAUSS_K, GAUSS_K_SQUARED
 SPEED_EARTH = 29.7
 
 
+def _clippedAcos(value):
+    """ Arc cosine with the argument held inside the domain.
+
+    The arguments built below are cosines of real angles, so they cannot leave [-1, 1]
+    mathematically, but they can by a bit or two in double precision. For two identical orbits the
+    inclination argument reduces to cos(i)^2 + sin(i)^2, which rounds above 1 often enough to matter:
+    over an inclination sweep it raises for about 4% of the samples, and a self-comparison is the
+    first thing a distance matrix computes.
+
+    Clipping changes no value that previously computed successfully, since it engages only where
+    math.acos would otherwise have raised.
+
+    Arguments:
+        value: [float] cosine of an angle, possibly a bit outside [-1, 1]
+
+    Return:
+        [float] the angle (rad)
+    """
+
+    if abs(value) > 1:
+        value = math.copysign(1.0, value)
+
+    return math.acos(value)
+
+
+def _mutualNodeAngles(i1, O1, w1, i2, O2, w2):
+    """ Mutual inclination and difference of the longitudes of perihelion of two orbits.
+
+    Both are measured from the mutual node of the two orbital planes, and both are shared unchanged
+    by D_SH and D_H, which differ only in how they normalise the perihelion distance term.
+
+    The arcsine has two branches, and Southworth & Hawkins (1963) resolve it by the position of the
+    nodes: the negative branch applies when the nodes are more than 180 deg apart. Jopek (1993)
+    adopts the same definition of Pi unchanged. Note that the test is on the raw difference, so it
+    assumes both nodes are given in [0, 360 deg); a node carrying an extra full turn pushes the
+    difference past that range and selects the wrong branch. See calcDSH for what that means in
+    practice.
+
+    Arguments:
+        i1: [float] inclination of the first orbit (rad)
+        O1: [float] longitude of ascending node of the first orbit (rad)
+        w1: [float] argument of perihelion of the first orbit (rad)
+        i2: [float] inclination of the second orbit (rad)
+        O2: [float] longitude of ascending node of the second orbit (rad)
+        w2: [float] argument of perihelion of the second orbit (rad)
+
+    Return:
+        (I21, pi21): [tuple of floats] mutual inclination and difference of the longitudes of
+            perihelion, both in radians
+    """
+
+    # Branch of the arcsine, from how far apart the nodes are
+    rho = 1
+
+    if (abs(O2 - O1) > math.pi):
+        rho = -1
+
+    I21 = _clippedAcos(math.cos(i1)*math.cos(i2) + math.sin(i1)*math.sin(i2)*math.cos(O2 - O1))
+
+    asin_val = math.cos((i2 + i1)/2.0)*math.sin((O2 - O1)/2.0)*(1/math.cos(I21/2.0))
+
+    # Make sure the value going into asin is not beyond the bounds due to numerical reasons
+    if abs(asin_val) > 1:
+        asin_val = math.copysign(1.0, asin_val)
+
+    pi21 = w2 - w1 + 2*rho*math.asin(asin_val)
+
+    return I21, pi21
+
+
 def calcDSH(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2):
     """ Calculate the Southworth and Hawking meteoroid orbit dissimilarity criterion.
+
+        The difference of the longitudes of perihelion is measured from the mutual node of the two
+        orbital planes, and the branch of its arcsine is chosen by the Southworth & Hawkins (1963)
+        rule: the negative branch when the nodes are more than 180 deg apart.
+
+        That rule tests the raw difference of the two nodes, so it assumes both are given in
+        [0, 360 deg). A node carrying an extra full turn, for example 710 deg rather than 350 deg,
+        pushes the difference outside that range and selects the wrong branch, which changes the
+        result. Reduce nodes to [0, 360 deg) before calling. The limitation is inherent to the
+        convention and applies equally to calcDH.
 
     Arguments:
         q1: [double] perihelion distance of the first orbit
@@ -33,22 +113,7 @@ def calcDSH(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2):
 
     """
 
-    rho = 1
-
-    if (abs(O2 - O1) > math.pi):
-        rho = -1
-
-
-    I21 = math.acos(math.cos(i1)*math.cos(i2) + math.sin(i1)*math.sin(i2)*math.cos(O2 - O1))
-
-
-    asin_val = math.cos((i2 + i1)/2.0)*math.sin((O2 - O1)/2.0)*(1/math.cos(I21/2.0))
-
-    # Name sure the value going into asin is not beyond the bounds due to numerical reasons
-    if abs(asin_val) > 1:
-        asin_val = math.copysign(1.0, asin_val)
-
-    pi21 = w2 - w1 + 2*rho*math.asin(asin_val)
+    I21, pi21 = _mutualNodeAngles(i1, O1, w1, i2, O2, w2)
 
     DSH2 = pow((e2 - e1), 2) + pow((q2 - q1), 2) + pow((2 * math.sin(I21/2.0)), 2) + \
         pow((e2 + e1)/2.0, 2)*pow((2 * math.sin(pi21 / 2.0)), 2)
@@ -61,6 +126,11 @@ def calcDSH(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2):
 
 def calcDH(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2):
     """ Calculate the Jopek meteoroid orbit dissimilarity criterion.
+
+        This differs from calcDSH only in normalising the perihelion distance term by (q1 + q2).
+        The mutual inclination and the difference of the longitudes of perihelion are the same
+        quantities, computed by the same helper, including the node branch rule and its assumption
+        that both nodes lie in [0, 360 deg). See calcDSH.
 
     Arguments:
         q1: [double] perihelion distance of the first orbit
@@ -79,16 +149,7 @@ def calcDH(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2):
 
     """
 
-    I21 = math.acos(math.cos(i1)*math.cos(i2) + math.sin(i1)*math.sin(i2)*math.cos(O2 - O1))
-
-
-    asin_val = math.cos((i2 + i1)/2.0)*math.sin((O2-O1)/2.0)*1/math.cos(I21/2.0)
-
-    # Name sure the value going into asin is not beyond the bounds due to numerical reasons
-    if abs(asin_val) > 1:
-        asin_val = math.copysign(1.0, asin_val)
-
-    pi21 = w2 - w1 + 2*math.asin(asin_val)
+    I21, pi21 = _mutualNodeAngles(i1, O1, w1, i2, O2, w2)
 
     DH2 = (e2 - e1)**2 + ((q2 - q1)/(q2 + q1))**2 + (2*math.sin(I21/2.0))**2 \
         + ((e2 + e1)/2.0)**2*(2*math.sin(pi21/2.0))**2
@@ -118,7 +179,7 @@ def calcDD(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2):
 
     """
 
-    I21 = math.acos(math.cos(i1)*math.cos(i2) + math.sin(i1)*math.sin(i2)*math.cos(O2 - O1))
+    I21 = _clippedAcos(math.cos(i1)*math.cos(i2) + math.sin(i1)*math.sin(i2)*math.cos(O2 - O1))
 
     lambda1 = O1 + math.atan2(math.cos(i1)*math.sin(w1), math.cos(w1))
 
@@ -128,8 +189,8 @@ def calcDD(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2):
 
     beta2 = math.asin(math.sin(i2)*math.sin(w2))
 
-    theta21 = math.acos(math.sin(beta1)*math.sin(beta2) + math.cos(beta1)*math.cos(beta2)*math.cos(lambda2 \
-        - lambda1))
+    theta21 = _clippedAcos(math.sin(beta1)*math.sin(beta2) + math.cos(beta1)*math.cos(beta2) \
+        *math.cos(lambda2 - lambda1))
 
     DD2 = ((e2 - e1)/(e2 + e1))**2 + ((q2 - q1)/(q2 + q1))**2 + (I21/math.pi)**2 \
         + ((e2 + e1)/2.0)**2*(theta21/math.pi)**2
