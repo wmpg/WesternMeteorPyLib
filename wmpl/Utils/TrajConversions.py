@@ -824,6 +824,54 @@ def raDec2ECI(ra, dec):
 
 
 
+def derotatedRadiantAltAz(v_eci, eci_pos, jd, lat, lon):
+    """ Compute the apparent ground-fixed radiant (azimuth and elevation above a fixed ground, epoch of
+        date) of a velocity vector given in the ECI frame, at the given point on the trajectory.
+
+        The ECI velocity includes the Earth's rotation, so the rotation velocity at the point (eastward,
+        2*pi*r*cos(lat_geocentric)/sidereal day) is added back to obtain the velocity relative to the
+        ground, whose direction is then converted to horizontal coordinates. This is the construction
+        used by Orbit.calcOrbit() for orbit.azimuth_apparent_norot and orbit.elevation_apparent_norot. The
+        ECI frame of the trajectory solver is the true equator and equinox of date, so no precession is
+        applied.
+
+    Arguments:
+        v_eci: [ndarray] Velocity vector in the ECI frame (m/s), pointing along the direction of motion.
+        eci_pos: [ndarray] ECI position of the point on the trajectory (m).
+        jd: [float] Julian date of the point.
+        lat: [float] Geodetic latitude of the point (radians).
+        lon: [float] Longitude of the point (radians).
+
+    Return:
+        (azim, elev, v_norot): [tuple of floats]
+            azim: [float] Azimuth of the radiant, +E of due N (radians).
+            elev: [float] Elevation of the radiant above the horizon (radians).
+            v_norot: [float] Speed relative to the ground (m/s).
+    """
+
+    v_eci = np.asarray(v_eci, dtype=float)
+    eci_pos = np.asarray(eci_pos, dtype=float)
+
+    # Geocentric latitude of the point (the ECI z axis is the rotation axis)
+    lat_geocentric = np.arctan2(eci_pos[2], np.sqrt(eci_pos[0]**2 + eci_pos[1]**2))
+
+    # Speed of the Earth's rotation at the point (m/s), over one sidereal day
+    v_e = 2*np.pi*vectMag(eci_pos)*np.cos(lat_geocentric)/86164.09053
+
+    # Equatorial direction of east at the point
+    ra_east, _ = altAz2RADec(np.pi/2, 0.0, jd, lat, lon)
+
+    # Add the rotation velocity back to get the velocity relative to the ground
+    v_norot_vect = np.array([v_eci[0] + v_e*np.cos(ra_east), v_eci[1] + v_e*np.sin(ra_east), v_eci[2]])
+
+    # The radiant is the direction the meteor comes from, converted to horizontal coordinates at the point
+    ra_norot, dec_norot = eci2RaDec(vectNorm(v_norot_vect))
+    azim, elev = raDec2AltAz(ra_norot, dec_norot, jd, lat, lon)
+
+    return azim, elev, vectMag(v_norot_vect)
+
+
+
 def eci2RaDec(eci):
     """ Convert Earth-centered inertial vector to right ascension and declination. 
 
