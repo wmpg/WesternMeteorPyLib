@@ -49,7 +49,7 @@ def dynamicPressure(lat, lon, height, jd, velocity, gamma=1.0):
         velocity: [float] Velocity of the meteor (m/s).
 
     Keyword arguments:
-        gamma: [flot] Drag coefficient. 1 by defualt.
+        gamma: [flot] Drag coefficient. 1 by default.
 
 
     Return:
@@ -75,14 +75,14 @@ def dynamicMass(bulk_density, lat, lon, height, jd, velocity, decel, gamma=1.0, 
     Arguments:
         bulk_density: [float] Bulk density of the meteoroid in kg/m^3.
         lat: [float] Latitude of the meteor (radians).
-        lon: [flaot] Longitude of the meteor (radians).
+        lon: [float] Longitude of the meteor (radians).
         height: [float] Height of the meteor (meters).
         jd: [float] Julian date of the meteor.
         velocity: [float] Velocity of the meteor (m/s).
         decel: [float] Deceleration in m/s^2.
 
     Keyword arguments:
-        gamma: [flot] Drag coefficient. 1 by defualt.
+        gamma: [flot] Drag coefficient. 1 by default.
         shape_factor: [float] Shape factory for the body. 1.21 (sphere) by default. Other values:
             - sphere      = 1.21
             - hemisphere  = 1.92
@@ -401,7 +401,7 @@ def calcPf(p_max, zangle, mass, v_0):
 
     ### Convert units to match the paper ###
     
-    # Pressue in MPa
+    # Pressure in MPa
     p_max /= 1e6
 
     # Entry speed in km/s

@@ -95,7 +95,7 @@ def floatArguments(func):
     
     @param func: a function to be decorated
 
-    @return :[funtion object] the decorated function
+    @return :[function object] the decorated function
     """
 
     def inner_func(*args, **kwargs):
@@ -539,7 +539,7 @@ def geo2Cartesian(lat_rad, lon_rad, h, julian_date, precess_j2000=False):
 
         ### Precess coordinates to J2000 ###
 
-        # Convert rectangular to spherical coordiantes
+        # Convert rectangular to spherical coordinates
         re, delta_e, alpha_e = cartesianToSpherical(x, y, z)
 
         # Dynamical Julian date
@@ -599,7 +599,7 @@ geo2Cartesian_vect = np.vectorize(geo2Cartesian, excluded=['lat_rad', 'lon_rad',
 #     ye = xg*np.sin(gst_apparent) + yg*np.cos(gst_apparent)
 #     ze = zg
 
-#     # Convert rectangular to spherical coordiantes
+#     # Convert rectangular to spherical coordinates
 #     re, delta_e, alpha_e = cartesianToSpherical(xe, ye, ze)
 
 
@@ -690,7 +690,7 @@ def cartesian2Geo(julian_date, x, y, z, precess_j2000=False):
 
         ### Precess coordinates from J2000 to epoch of date ###
 
-        # Convert rectangular to spherical coordiantes
+        # Convert rectangular to spherical coordinates
         re, delta_e, alpha_e = cartesianToSpherical(x, y, z)
 
 
@@ -825,10 +825,10 @@ def raDec2ECI(ra, dec):
 
 
 def eci2RaDec(eci):
-    """ Convert Earth-centered intertial vector to right ascension and declination. 
+    """ Convert Earth-centered inertial vector to right ascension and declination. 
 
     Arguments:
-        eci: [3 element ndarray] Earth-centered inertial coordinats
+        eci: [3 element ndarray] Earth-centered inertial coordinates
 
     Return:
         (ra, dec): [tuple of floats] right ascension and declinaton (radians)
@@ -959,7 +959,7 @@ def ecliptic2RectangularCoord(L, B, r_au):
 
 
 def rectangular2EclipticCoord(x, y, z):
-    """ Calculate ecliptic coordinats from given rectangular coordinates. Rectangular coordinates must be in
+    """ Calculate ecliptic coordinates from given rectangular coordinates. Rectangular coordinates must be in
         the ecliptic reference frame, J2000 equinox, and in kilometers.
 
     Arguments:
@@ -1170,7 +1170,7 @@ if __name__ == "__main__":
     #
 
 
-    # Test ECEF funtions
+    # Test ECEF functions
     print('Geo -> ECEF -> Geo test')
     lat, lon, h = np.radians(18.5), np.radians(45.3), 90
     print('LLA:', lat, lon, h)
@@ -1231,7 +1231,7 @@ if __name__ == "__main__":
     
 
 
-    ### Corrected heliocentric ecliptic coordinats test (Tsuchiya et al. 2017) example ###
+    ### Corrected heliocentric ecliptic coordinates test (Tsuchiya et al. 2017) example ###
     from jplephem.spk import SPK
 
     ## EXAMPLE 1

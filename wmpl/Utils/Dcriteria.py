@@ -286,7 +286,7 @@ def calcDN(ra1, dec1, sol1, vg1, ra2, dec2, sol2, vg2, d_max=999.0):
 
     vg_x2, vg_y2, vg_z2 = calcVgComponents(ra2, dec2, sol2, vg2)
 
-    # Reaclaulate the speeds to realtive speed to Earth
+    # Reaclaulate the speeds to relative speed to Earth
     vg1 = vg1/SPEED_EARTH
     vg2 = vg2/SPEED_EARTH
 
@@ -483,7 +483,7 @@ def calcDVuncert(Lh1, Lh1_std, Bh1, Bh1_std, sol1, Vh1, Vh1_std, Lh2, Lh2_std, B
     Vz2 = -Vh2*math.sin(Bh2)
 
 
-    # Calculate the dot product between the two vectores
+    # Calculate the dot product between the two vectors
     dot = Vx1*Vx2 + Vy1*Vy2 + Vz1*Vz2
 
     # Calculate the product of vector magnitudes
@@ -550,7 +550,7 @@ def calcDV(Lh1, Bh1, sol1, Vh1, Lh2, Bh2, sol2, Vh2, d_max=999.0):
     Vz2 = -Vh2*math.sin(Bh2)
 
 
-    # Calculate the dot product between the two vectores
+    # Calculate the dot product between the two vectors
     dot = Vx1*Vx2 + Vy1*Vy2 + Vz1*Vz2
 
     # Calculate the product of vector magnitudes

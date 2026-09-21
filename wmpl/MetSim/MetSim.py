@@ -186,10 +186,10 @@ class MeteorProperties(object):
         # Heat of ablation  
         self.q = zero
 
-        # Drag coeficient
+        # Drag coefficient
         self.Gamma = 1.0
 
-        # Heat transfer coeficient
+        # Heat transfer coefficient
         self.Lambda = 0.5
 
         # coefficient of condensation
@@ -282,7 +282,7 @@ class MeteorConstants(object):
 
 
 def printd(*args):
-    """ Special print function which will print the contect only is DEBUG_ON is true. """
+    """ Special print function which will print the context only is DEBUG_ON is true. """
 
     if DEBUG_ON:
         print(*args)
@@ -290,7 +290,7 @@ def printd(*args):
 
 
 def printv(*args):
-    """ Special print function which will print the contect only is VERBOSE_STATE is true. """
+    """ Special print function which will print the context only is VERBOSE_STATE is true. """
 
     if VERBOSE_STATE:
         print(*args)
@@ -433,7 +433,7 @@ def loadInputs(file_name, lat=None, lon=None, jd_ref=None):
         # Initial trail length (m)
         met.s_init = parseFloat(f)
 
-        # Initital speed (m/s)
+        # Initial speed (m/s)
         met.v_init = parseFloat(f)
 
         # Zenith angle (radians)
@@ -649,10 +649,10 @@ def ablate(met, consts, no_atmosphere_end_ht=-1):
     #   Lambda = 0.5
     # }
 
-    # Drag coeficient
+    # Drag coefficient
     #Gamma = 1.0
 
-    # Heat transfer coeficient
+    # Heat transfer coefficient
     #Lambda = 0.5
 
     # Calculation of pressure acting on meteor: atmospheric pressure
@@ -714,7 +714,7 @@ def ablate(met, consts, no_atmosphere_end_ht=-1):
     qa3 = consts.dt*met.Gamma*consts.shape_fact*(met.Vtot**(2/3.0))*rho_atm*((met.v + qa2/2.0)**2)/met.m
     qa4 = consts.dt*met.Gamma*consts.shape_fact*(met.Vtot**(2/3.0))*rho_atm*((met.v + qa3)**2)/met.m
 
-    # Decelaration in m/s**2
+    # Deceleration in m/s**2
     a_current = (qa1/6.0 + qa2/3.0 + qa3/3.0 + qa4/6.0)/consts.dt
 
 
@@ -739,7 +739,7 @@ def ablate(met, consts, no_atmosphere_end_ht=-1):
 
     printd('v_dot', v_dot)
 
-    # Check to make sure dm is less than m, otherwise nonexistant mass will be ablated
+    # Check to make sure dm is less than m, otherwise nonexistent mass will be ablated
     if m_dot*consts.dt > met.m:
 
         # Ablate only what's there
@@ -1077,7 +1077,7 @@ if __name__ == "__main__":
 
     ### METEOR PARAMETERS ###
 
-    # Set drag coeficient
+    # Set drag coefficient
     met.Gamma = 1.0
 
     # Set heat transfer coefficient (cometary)

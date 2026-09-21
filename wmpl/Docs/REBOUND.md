@@ -181,6 +181,21 @@ The report therefore prints a warning whenever a close encounter happened while 
 integrating, for the nominal solution or for any clone. **Take that warning seriously** — rerun with
 `--integrator trace` or `ias15`.
 
+**A small perihelion is a close encounter for this purpose too.** A fixed step that is fine along most
+of an eccentric orbit is far too long through perihelion, and the Sun passages inside 0.1 AU are counted
+in the warning for that reason. Measured on a δ-Aquariid-like orbit (a = 2.6 AU, q = 0.07 AU, i = 27°),
+100 years, with the Sun and five planets:
+
+| Integrator | `--dt` | Final a against IAS15 |
+| :--- | :--- | :--- |
+| IAS15 | adaptive | reference (a = 2.5587 AU) |
+| WHFast | 0.5 d (default) | **ejected** (a = −8.9 AU) |
+| WHFast | 0.1 d | 1.7e-4 |
+| TRACE | 0.5 d (default) | 7e-4 |
+| TRACE | 0.1 d | 2e-9 |
+
+For an orbit with perihelion inside ~0.1 AU use IAS15, or TRACE with `--dt 0.1`.
+
 REBOUNDx will warn that the `gr_full` general relativity correction is velocity-dependent when used
 with WHFast. Its measured effect on the orbit was below 1e-8 in the semi-major axis over 100 years, so
 the warning can be ignored here.
@@ -225,14 +240,27 @@ and then refined *within* the step. Both steps matter:
   position and velocity across the step, which reproduces straight-line motion exactly and so is
   accurate even when one step spans the whole flyby.
 
-- **Close encounters** are reported for any body approached within **3 Hill radii**, listed in the
-  order they happened. **A body can appear more than once**, if the object passed it more than once:
-  each local minimum of the distance is refined and listed separately. A meteoroid in resonance with
-  a planet commonly meets it many times.
-- **Impacts** are detected against the physical radii of the bodies, using REBOUND's line-of-travel
-  collision mode so a fast mover cannot tunnel through. Detection is armed only once the object has
-  left the Earth's neighbourhood, so the trivial fact that it starts on the Earth is not reported as an
-  impact. An impact ends the integration and is printed as a banner at the top of the report.
+- **Close encounters** are reported for any body approached within **3 Hill radii**, and for the Sun
+  within **0.1 AU** (it has no Hill sphere, so its `n_hill` is `None`), listed in the order they
+  happened. **A body can appear more than once**, if the object passed it more than once: each local
+  minimum of the distance is refined and listed separately. A meteoroid in resonance with a planet
+  commonly meets it many times.
+  - *Why 0.1 AU for the Sun.* That is where thermal processing of meteoroids is established: sodium is
+    thermally desorbed at q < 0.1 AU ([Kasuga et al. 2006](https://doi.org/10.1051/0004-6361:20065330),
+    explaining the Na-free meteoroids of Borovička et al. 2005), asteroids disrupt at q ≈ 0.076 AU
+    ([Granvik et al. 2016](https://doi.org/10.1038/nature16934)), and it lies inside the sunskirter zone
+    (q < 33 R☉ = 0.153 AU) of [Jones et al. 2018](https://doi.org/10.1007/s11214-017-0446-5). A Sun
+    passage is a thermal event, not a gravitational perturbation, and is listed for that reason.
+  - *Repeated Sun passages.* An orbit with q < 0.1 AU passes the Sun every revolution, so a
+    low-perihelion stream lists one Sun passage every few years (measured: 24 in 100 yr for a
+    δ-Aquariid-like orbit, against 6 planetary flybys). The terminal and the text report collapse more
+    than three Sun passages into one line with the count, the perihelion range and the time span,
+    placed where the first passage was. The JSON lists every passage.
+- **Impacts** are detected against the physical radii of the Sun, the Earth and the Moon, using
+  REBOUND's line-of-travel collision mode so a fast mover cannot tunnel through. Detection is armed
+  only once the object has left the Earth's neighbourhood, so the trivial fact that it starts on the
+  Earth is not reported as an impact. An impact ends the integration and is printed as a banner at
+  the top of the report.
 - **Ejections** are recorded if the object leaves the simulation volume (1000 AU by default), after
   which it stops being integrated.
 
@@ -329,12 +357,12 @@ The JSON keys, at the top level:
 | Key | Contents |
 | :--- | :--- |
 | `traj_id` | Event identifier. |
-| `run` | Run settings: `integration_days`, `direction`, `reference_frame`, `ephemeris`, `n_outputs`, `beta`, `start_epoch_jd_tdb`, `final_epoch_jd_tdb`, `final_epoch_utc`, `mc_runs`, `random_seed`, `runtime_s`, `integrator`, `dt_days`, `fixed_step_from_days`. |
+| `run` | Run settings: `integration_days`, `direction`, `reference_frame`, `ephemeris`, `n_outputs`, `beta`, `start_epoch_jd_tdb`, `final_epoch_jd_tdb`, `final_epoch_utc`, `mc_runs`, `random_seed`, `runtime_s`, `integrator`, `dt_days`, `fixed_step_from_days`, and the close-encounter gates `n_hill_threshold` and `sun_encounter_au`. |
 | `final_elements` | `a`, `q`, `e`, `incl_deg`, `peri_deg`, `node_deg`, `f_deg`, `tisserand_jupiter`, with `a_units`/`q_units` (AU heliocentric, km geocentric). |
-| `encounters` | Every close encounter of the nominal solution, ordered by time, each with `body`, `min_dist_au`, `time_days`, `hill_radius_au` and `n_hill`. A body can appear more than once. |
+| `encounters` | Every close encounter of the nominal solution, ordered by time, each with `body`, `min_dist_au`, `time_days`, `hill_radius_au` and `n_hill`. A body can appear more than once. For the Sun, `hill_radius_au` and `n_hill` are `null`. |
 | `closest_approaches_au`, `closest_approach_times_days` | Closest approach to every tracked body, whether or not it counted as an encounter. This is the deepest approach only, one value per body. |
 | `impact`, `escaped` | The impact or ejection of the nominal solution, or `null`. |
-| `clone_outcomes` | Clone statistics: counts and fractions of impacts and encounters per body, `ci_uses_survivors_only`, `n_hill_threshold`. Under `close_encounters`, `count` is how many clones met the body and `n_encounters` how many passages they made in total. `null` without `--mc`. |
+| `clone_outcomes` | Clone statistics: counts and fractions of impacts and encounters per body, `ci_uses_survivors_only`, `n_hill_threshold`, `sun_encounter_au`. Under `close_encounters`, `count` is how many clones met the body and `n_encounters` how many passages they made in total. `null` without `--mc`. |
 | `clone_closest_approaches_au` | Per-clone closest approach to every body. |
 | `clone_encounters` | Each clone's full list of encounters, in the same format as `encounters`. |
 | `energy_rel_drift` | Relative energy drift of the massive subsystem, as an integrator-quality check. |
@@ -431,8 +459,10 @@ print("Integrator:", res["run"]["integrator"], "over", res["run"]["integration_d
 print("a = {:.4f} {:s}".format(res["final_elements"]["a"], res["final_elements"]["a_units"]))
 
 for enc in res["encounters"]:
-    print("{:s}: {:.5f} AU ({:.2f} Hill radii) at t = {:.1f} d".format(
-        enc["body"], enc["min_dist_au"], enc["n_hill"], enc["time_days"]))
+    # The Sun has no Hill sphere, so its "n_hill" is None
+    hill_str = "" if enc["n_hill"] is None else " ({:.2f} Hill radii)".format(enc["n_hill"])
+    print("{:s}: {:.5f} AU{:s} at t = {:.1f} d".format(
+        enc["body"], enc["min_dist_au"], hill_str, enc["time_days"]))
 
 if res["megno"] is not None:
     print("MEGNO verdict:", res["megno"]["verdict"]["status"])
@@ -479,7 +509,8 @@ Other functions worth knowing about, all in `wmpl.Rebound.REBOUND`:
 | Function | Purpose |
 | :--- | :--- |
 | `radiationPressureBeta(radius_m, density_kgm3)` | Beta for a spherical grain. |
-| `encountersFromMinDistances(min_dist_au, min_time_days, n_hill=3.0)` | The close-encounter list from the closest-approach dictionaries, one entry per body. The per-particle `encounters` diagnostic lists every passage instead. |
+| `encountersFromMinDistances(min_dist_au, min_time_days, n_hill=3.0)` | The close-encounter list from the closest-approach dictionaries, one entry per body, with the same gates as the integration (Hill radii, and `SUN_ENCOUNTER_AU` for the Sun). The per-particle `encounters` diagnostic lists every passage instead. |
+| `sunPassageSummary(encounters, max_listed=3)` / `formatSunPassageSummary(summary)` | Collapse more than `max_listed` Sun passages into one summary, and its report line. |
 | `cloneEncounterSummary(clone_diag)` | Per body, how many clones met it, how many passages they made, and the closest approach over all of them. |
 | `hermiteClosestApproach(t0, r0, v0, t1, r1, v1)` | Closest approach of a relative trajectory inside one integrator step. |
 | `whfastEncounterWarning(diagnostics, n_hill=3.0)` | The WHFast warning string, or `None`. |

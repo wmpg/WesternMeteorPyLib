@@ -376,7 +376,7 @@ def calcLatitudeOfPerihelion(peri, node, incl):
     ra_p = np.arctan2(Bp, Ap)%(2*np.pi)
     dec_p = np.arcsin(Cp)
     
-    # Longitue of perihelion
+    # Longitude of perihelion
     # pi_t = np.arctan2(np.sin(ra_p)*np.cos(J2000_OBLIQUITY) + np.tan(dec_p)*np.sin(J2000_OBLIQUITY), np.cos(ra_p))%(2*np.pi)
     
     # Latitude of perihelion
@@ -387,7 +387,7 @@ def calcLatitudeOfPerihelion(peri, node, incl):
 
 
 def calcOrbitalElements(jd_ref, ra_g, dec_g, v_g, eci_ref):
-    """ Compute keplerian orbital elements (+ a few other parametrs), given the geocentric radiant and
+    """ Compute keplerian orbital elements (+ a few other parameters), given the geocentric radiant and
         a reference ECI location.
 
     Arguments:
@@ -395,7 +395,7 @@ def calcOrbitalElements(jd_ref, ra_g, dec_g, v_g, eci_ref):
         eci_ref: [ndarry] X, Y, Z components of ECI coordinates at the reference Julian date (meters) in J2000.
         ra_g: [float] Geocentric radiant, right ascension (J2000, radians).
         dec_g: [float] Geocentric radiant, declination (J2000, radians).
-        v_g: [float] Geocentic velocity (m/s).
+        v_g: [float] Geocentric velocity (m/s).
 
     Return:
         (tuple): orbital elements
@@ -621,7 +621,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
             trajectory, where the meteor has the velocity v_init. If False, then the reference point is the
             average point on the trajectory, and the average velocity will be used to do the corrections.
         rotation_correction: [bool] If True, the correction of the initial velocity for Earth's rotation will
-            be performed. False by default. This should ONLY be True if the coordiante system for trajectory
+            be performed. False by default. This should ONLY be True if the coordinate system for trajectory
             estimation was ECEF, i.e. did not rotate with the Earth. In all other cases it should be False, 
             even if fixed station coordinates were used in the ECI coordinate system!
         v_init_stddev_direct: [float] Standard deviation of the direct velocity fit derived without Monte
@@ -807,7 +807,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
     # Make sure the velocity of the meteor is larger than the escape velocity
     if v_init_corr**2 > (2*6.67408*5.9722)*1e13/vectMag(eci_ref):
 
-        # Calculate the geocentric velocity (sqrt of squared inital velocity minus the square of the Earth escape 
+        # Calculate the geocentric velocity (sqrt of squared initial velocity minus the square of the Earth escape 
         # velocity at the height of the trajectory), units are m/s.
         # Square of the escape velocity is: 2GM/r, where G is the 2014 CODATA-recommended value of 
         # 6.67408e-11 m^3/(kg s^2), and the mass of the Earth is M = 5.9722e24 kg
@@ -847,7 +847,7 @@ def calcOrbit(radiant_eci, v_init, v_avg, eci_ref, jd_ref, stations_fixed=False,
 
         ### Precess ECI coordinates to J2000 ###
 
-        # Convert rectangular to spherical coordiantes
+        # Convert rectangular to spherical coordinates
         re, delta_e, alpha_e = cartesianToSpherical(*eci_ref)
 
         # Precess coordinates to J2000
@@ -991,7 +991,7 @@ if __name__ == "__main__":
         action="store_true")
 
     arg_parser.add_argument('-s', '--statfixed', \
-        help="Shoud be used if the stations were fixed during trajectory estimation (e.g. with MILIG).", \
+        help="Should be used if the stations were fixed during trajectory estimation (e.g. with MILIG).", \
         action="store_true")
 
     arg_parser.add_argument('-m', '--milig', \

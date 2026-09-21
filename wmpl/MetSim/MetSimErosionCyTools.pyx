@@ -153,7 +153,7 @@ ctypedef np.float64_t FLOAT_TYPE_t
 #         # Meteoroid compressive strength (Pa)
 #         self.compressive_strength = 2000
 
-#         # Height of disruption (will be assigned when the disruption occures)
+#         # Height of disruption (will be assigned when the disruption occurs)
 #         self.disruption_height = -1
 
 #         # Erosion coefficient to use after disruption

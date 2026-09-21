@@ -149,7 +149,7 @@ def loadMiligInput(file_path):
                 # This number should be 9 if it is the last pick from this station
                 last_pick = int(line[17:20])
 
-                # Next line will containg information about a new station
+                # Next line will containing information about a new station
                 if last_pick == 9:
                     new_station = True
 
@@ -264,7 +264,7 @@ def solveTrajectoryMILIG(dir_path, file_name, solver='original', **kwargs):
 
 def writeMiligInputFile(jdt_ref, meteor_list, file_path, convergation_fact=1.0):
 
-    # If the first element of meteor_list is a StationData object, use the approprite function
+    # If the first element of meteor_list is a StationData object, use the appropriate function
     if isinstance(meteor_list[0], StationData):
         return writeMiligInputFileStationData(jdt_ref, meteor_list, file_path, convergation_fact=convergation_fact)
     
@@ -336,7 +336,7 @@ def writeMiligInputFileStationData(jdt_ref, meteor_list, file_path, convergation
         # Flag indicating that the meteor data ends here
         f.write('-1\n')
 
-        # Initial aproximations
+        # Initial approximations
         f.write(' 0.0 0.0 0.0 0.0 0.0 0.0 0.0\n')
 
         # Optional parameters
