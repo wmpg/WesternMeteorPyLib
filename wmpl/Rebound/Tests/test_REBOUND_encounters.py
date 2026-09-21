@@ -199,25 +199,148 @@ def testDistantPassageRefinesTheMinimumWithoutBeingAnEncounter(reb):
     assert diag["min_dist_au"]["Mercury"]/reb.HILL_RADII_AU["Mercury"] > 3.0
 
 
-def testTheSunIsNeverAnEncounterBody(reb):
-    """ The Sun has no Hill radius, so it is tracked for its distance but never listed.
-
-    The threshold in the heartbeat is n_hill*HILL_RADII_AU.get(body, 0.0), which no distance can
-    fall below for a body that is not in the table. _encounterRecord refuses such a body outright,
-    so the two would disagree loudly rather than silently if that gate were ever removed.
+def _sunTask(q_au):
+    """ An object released at 0.3 AU from the Sun on an orbit with perihelion q_au, reached ~13 days
+    later. It starts far from the Earth, so the Sun is tracked from the start.
     """
 
-    assert "Sun" not in reb.HILL_RADII_AU
+    task = _flybyTask(30.0, 2.0, 2.0, "forward")
+    v = np.sqrt(2/0.3 - 2/(0.3 + q_au))
+
+    return dict(task, particle_states=[[-0.3, 0.0, 0.0, 0.0, -v, 0.0]],
+                times=list(np.linspace(0.0, 20.0*DAY, 21)))
+
+
+def testACloseSunPassageIsAnEncounter(reb):
+    """ The Sun has no Hill radius, so its passage is listed by distance: inside SUN_ENCOUNTER_AU
+    it is an encounter with no Hill radius, outside it only the closest approach is recorded.
+
+    A body that has neither a Hill radius nor a distance threshold is still refused outright.
+    """
 
     with pytest.raises(KeyError, match="No Hill radius"):
-        reb._encounterRecord("Sun", 0.5, 0.0)
+        reb._encounterRecord("Ceres", 0.5, 0.0)
 
-    task = _flybyTask(30.0, 2.0, 2.0, "forward")
-    task = dict(task, times=list(np.linspace(0.0, 4.0*DAY, 5)))
-    diag = reb._integrateParticles(task)["diagnostics"]["obj"]
+    diag = reb._integrateParticles(_sunTask(0.05))["diagnostics"]["obj"]
+    sun = [enc for enc in diag["encounters"] if enc["body"] == "Sun"]
+
+    assert len(sun) == 1
+    assert sun[0]["min_dist_au"] == pytest.approx(0.05, rel=1e-2)
+    assert (sun[0]["hill_radius_au"] is None) and (sun[0]["n_hill"] is None)
+
+    diag = reb._integrateParticles(_sunTask(0.15))["diagnostics"]["obj"]
 
     assert "Sun" not in [enc["body"] for enc in diag["encounters"]]
-    assert diag["min_dist_au"]["Sun"] is not None, "the Sun distance is still tracked"
+    assert diag["min_dist_au"]["Sun"] == pytest.approx(0.15, rel=1e-2)
+
+
+def testSunMinimumIsNotLimitedByTheIntegratorStep(reb):
+    """ The perihelion distance recorded with a single output over the whole span must match a dense
+    re-integration, as for the planetary flybys: the Hermite refinement has to hold through the
+    strongly curved motion at perihelion too. (Measured: 1e-6 down to q = 0.02 AU, 1e-4 at 1 R_Sun.)
+    """
+
+    task = _sunTask(0.02)
+
+    diag_coarse = reb._integrateParticles(dict(task, times=[0.0, 20.0*DAY]))["diagnostics"]["obj"]
+    diag_dense = reb._integrateParticles(dict(task, times=list(np.linspace(0.0, 20.0*DAY, 3001))))["diagnostics"]["obj"]
+
+    assert diag_coarse["min_dist_au"]["Sun"] == pytest.approx(diag_dense["min_dist_au"]["Sun"], rel=1e-5)
+    assert abs(diag_coarse["min_time_days"]["Sun"] - diag_dense["min_time_days"]["Sun"])*1440 < 0.5
+
+    # Both runs list the same single passage
+    for diag in (diag_coarse, diag_dense):
+        sun = [enc for enc in diag["encounters"] if enc["body"] == "Sun"]
+        assert len(sun) == 1
+        assert sun[0]["min_dist_au"] == diag["min_dist_au"]["Sun"]
+
+
+def testABackwardSunPassageIsListedAtNegativeTime(reb):
+    """ In a backward run the Sun passage is listed at the (negative) time it happened, like the
+    planetary flybys, and agrees with the tracked closest-approach time.
+    """
+
+    task = _sunTask(0.05)
+
+    # Reverse the velocity, so the perihelion lies ~13 days in the past instead of the future
+    state = task["particle_states"][0]
+    task = dict(task, direction="backward", times=list(-np.linspace(0.0, 20.0*DAY, 21)),
+                particle_states=[state[:3] + [-v for v in state[3:]]])
+
+    diag = reb._integrateParticles(task)["diagnostics"]["obj"]
+    sun = [enc for enc in diag["encounters"] if enc["body"] == "Sun"]
+
+    assert len(sun) == 1
+    assert sun[0]["time_days"] == pytest.approx(-13.4, abs=0.1)
+    assert sun[0]["time_days"] == diag["min_time_days"]["Sun"]
+
+
+@pytest.mark.parametrize("q_solar_radii", [0.5, 0.99])
+def testAPerihelionInsideTheSunIsAnImpact(reb, q_solar_radii):
+    """ The Sun has a physical radius, so an orbit that dives into it ends in an impact, whether it
+    plunges deep or only grazes. The impact is recorded at the surface, and the aborted passage does
+    not also appear as an encounter.
+    """
+
+    diag = reb._integrateParticles(_sunTask(q_solar_radii*reb.SUN_RADIUS_AU))["diagnostics"]["obj"]
+
+    assert diag["impact"]["body"] == "Sun"
+    assert diag["impact"]["dist_au"] == pytest.approx(reb.SUN_RADIUS_AU, rel=0.02)
+    assert "Sun" not in [enc["body"] for enc in diag["encounters"]]
+
+
+def testAPerihelionJustAboveTheSurfaceIsAnEncounterNotAnImpact(reb):
+    """ One percent above the surface the object survives and the passage is listed. """
+
+    diag = reb._integrateParticles(_sunTask(1.01*reb.SUN_RADIUS_AU))["diagnostics"]["obj"]
+    sun = [enc for enc in diag["encounters"] if enc["body"] == "Sun"]
+
+    assert diag["impact"] is None
+    assert len(sun) == 1
+    assert sun[0]["min_dist_au"] == pytest.approx(1.01*reb.SUN_RADIUS_AU, rel=1e-3)
+    assert sun[0]["hill_radius_au"] is None
+
+
+### Collapsing repeated Sun passages in the report ###
+
+def _passage(body, dist_au, t_days):
+    """ One encounter entry as _integrateParticles builds it, for the Sun or a planet. """
+
+    return {"body": body, "min_dist_au": dist_au, "time_days": t_days,
+            "hill_radius_au": None if body == "Sun" else 0.001475,
+            "n_hill": None if body == "Sun" else dist_au/0.001475, "index": None}
+
+
+def testSunPassageSummaryCollapsesOnlyRepeatedPassages(reb):
+    """ Up to max_listed Sun passages stay in the list; more than that become one summary that keeps
+    the count, the perihelion range, the time span and the place of the first passage. Planets are
+    never collapsed, however often they appear.
+    """
+
+    three_suns = [_passage("Sun", 0.05, 1.0), _passage("Mercury", 0.002, 2.0),
+                  _passage("Sun", 0.06, 5.0), _passage("Sun", 0.04, 9.0)]
+    assert reb.sunPassageSummary(three_suns) is None
+    assert reb.sunPassageSummary([]) is None
+
+    four_suns = [_passage("Mercury", 0.002, 0.5)] + three_suns + [_passage("Sun", 0.055, 13.0)]
+    summary = reb.sunPassageSummary(four_suns)
+
+    assert summary["n"] == 4
+    assert summary["q_min_au"] == 0.04
+    assert summary["q_max_au"] == 0.06
+    assert summary["first_days"] == 1.0
+    assert summary["last_days"] == 13.0
+    assert summary["first_index"] == 1, "the summary line goes where the first passage was"
+
+    # A tighter limit collapses the three as well; many Mercury passages never collapse
+    assert reb.sunPassageSummary(three_suns, max_listed=2)["n"] == 3
+    assert reb.sunPassageSummary([_passage("Mercury", 0.002, t) for t in range(10)]) is None
+
+    line = reb.formatSunPassageSummary(summary)
+    assert line.startswith("Sun ")
+    assert "4 perihelion passages < 0.10 AU" in line
+    assert "q = 0.0400-0.0600 AU" in line
+    assert "t = +1.0 to +13.0 d" in line
 
 
 ### Monte Carlo encounter summary ###
