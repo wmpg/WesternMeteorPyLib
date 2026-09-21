@@ -7,7 +7,7 @@ from matplotlib.pyplot import cm
 
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly
 from wmpl.Utils.Math import lineFunc, vectMag
-from wmpl.Utils.TrajConversions import cartesian2Geo, altAz2RADec, eci2RaDec, raDec2AltAz
+from wmpl.Utils.TrajConversions import cartesian2Geo, derotatedRadiantAltAz
 from wmpl.Utils.Physics import dynamicMass
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.MetSim.MetSimErosion import Constants, runSimulation, G0
@@ -181,26 +181,66 @@ def interpolateHtVsTimeLen(traj, sample_step=0.1, show_plots=False):
 
 
 def pointOnTrajectory(traj, length, t):
-    """ ECI coordinates on the fitted trajectory at the given length from the state vector and time, with the
-        gravity drop the solver models from the fitted line. Only the component perpendicular to the line is
-        applied, as in the solver's model points, where the along-track part is absorbed by the length.
+    """ Compute the ECI coordinates of a point on the fitted trajectory, including the gravity drop.
+
+        The point lies at the given length from the state vector along the radiant, displaced by the gravity
+        drop the solver models from the fitted line (see Trajectory.applyGravityDrop). Only the component of
+        the drop perpendicular to the line is applied, as in the solver's model points, where the along-track
+        part is absorbed by the length.
+
+    Arguments:
+        traj: [Trajectory] Solved trajectory.
+        length: [float] Length from the state vector along the trajectory (m), positive towards the end.
+        t: [float] Time of the point relative to the trajectory reference time (s).
+
+    Return:
+        [ndarray] ECI coordinates of the point (m).
     """
 
     P = traj.state_vect_mini - length*traj.radiant_eci_mini
 
+    # Solutions without the gravity correction have a straight fitted line and nothing to add
     if getattr(traj, 'gravity_correction', True):
+
+        # The solver measures the drop from the first observation of the meteor
         t0 = min(obs.time_data[0] for obs in traj.observations)
+
         drop = applyGravityDrop(P, t - t0, vectMag(traj.state_vect_mini), getattr(traj, 'gravity_factor', 1.0), \
             getattr(traj, 'v0z', None) or 0.0) - P
+
+        # Keep only the component perpendicular to the fitted line
         P = P + drop - np.dot(drop, traj.radiant_eci_mini)*traj.radiant_eci_mini
 
     return P
 
 
 def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
-    """ The returned final azimuth (+E of due N) and elevation are of the apparent ground-fixed radiant
-        (epoch of date), as traj.orbit.azimuth/elevation_apparent_norot, with the elevation steepened by the
-        gravity turn along the path.
+    """ Propagate a fragment of the given dynamic mass from the evaluation point down to 3 km/s with the
+        single-body ablation model, and compute where and in which direction it ends.
+
+        The returned final azimuth and elevation are those of the apparent ground-fixed radiant (epoch of
+        date), as traj.orbit.azimuth_apparent_norot and elevation_apparent_norot, evaluated at the final point
+        and with the elevation steepened by the gravity turn along the path. They are the inputs a dark
+        flight computation needs.
+
+    Arguments:
+        traj: [Trajectory] Solved trajectory.
+        dyn_mass: [float] Dynamic mass at the evaluation point (kg).
+        density: [float] Bulk density of the meteoroid (kg/m^3).
+        hend: [float] Height of the evaluation point (m).
+        vend: [float] Velocity at the evaluation point (m/s).
+        gamma_a: [float] Product of the drag coefficient and the shape factor used for the dynamic mass. Not
+            used by the simulation itself, see runFragSim().
+
+    Return:
+        (sr, final_mass, final_lat, final_lon, final_ele, final_azim, final_elev): [tuple]
+            sr: [SimulationResults] Results of the fragment simulation.
+            final_mass: [float] Mass at the final point (kg).
+            final_lat: [float] Latitude of the final point (deg, +N).
+            final_lon: [float] Longitude of the final point (deg, +E).
+            final_ele: [float] Height of the final point (km).
+            final_azim: [float] Azimuth of the ground-fixed radiant at the final point (deg, +E of due N).
+            final_elev: [float] Elevation of the ground-fixed radiant at the final point (deg).
     """
 
     jd = traj.jdt_ref
@@ -225,8 +265,12 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
     #   length instead mixes the smoothed heights with the raw lengths, which at shallow entry angles turns
     #   a small height difference into a large length difference
     meas_time = ht_vs_time_interp(hend)
+
+    # The height along the line falls from the state vector until the point nearest the Earth's centre, at
+    #   a length of state_vect.radiant, which brackets the root
     meas_len = scipy.optimize.brentq(lambda l: cartesian2Geo(traj.jdt_ref + meas_time/86400, \
-        *pointOnTrajectory(traj, l, meas_time))[2] - hend, 0, np.dot(traj.state_vect_mini, traj.radiant_eci_mini))
+        *pointOnTrajectory(traj, l, meas_time))[2] - hend, 0, \
+        np.dot(traj.state_vect_mini, traj.radiant_eci_mini))
     
 
     # Run the simulation until ablation stops
@@ -263,26 +307,12 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
 
     ### Compute the final ground-fixed azimuth and elevation (as in Orbit.calcOrbit) ###
 
-    # Calculate the geocentric latitude of the final point
-    lat_geocentric = np.arctan2(final_eci[2], np.sqrt(final_eci[0]**2 + final_eci[1]**2))
-
-    # Calculate the velocity of the Earth rotation at the final point (m/s)
-    v_e = 2*np.pi*vectMag(final_eci)*np.cos(lat_geocentric)/86164.09053
-
-    # Calculate the equatorial coordinates of east from the final point
-    ra_east, _ = altAz2RADec(np.pi/2, 0, final_jd, final_lat, final_lon)
-
-    # Calculate the derotated reference velocity vector/radiant, using the initial velocity as Orbit.calcOrbit does
-    v_ref_vect = traj.v_init*traj.radiant_eci_mini
-    v_ref_nocorr = np.zeros(3)
-    v_ref_nocorr[0] = v_ref_vect[0] + v_e*np.cos(ra_east)
-    v_ref_nocorr[1] = v_ref_vect[1] + v_e*np.sin(ra_east)
-    v_ref_nocorr[2] = v_ref_vect[2]
-
-    # Compute the apparent alt/az. The ECI coordinates are already in the epoch of date, so no precession
-    #   is applied
-    ra_norot, dec_norot = eci2RaDec(v_ref_nocorr)
-    final_azim, final_elev = raDec2AltAz(ra_norot, dec_norot, final_jd, final_lat, final_lon)
+    # Derotate the fitted radiant at the final point. The radiant is the tangent of the path at its beginning
+    #   (the solver models gravity as a drop from that line), so it is derotated with the initial velocity, as
+    #   Orbit.calcOrbit does. Drag does not rotate the direction of motion relative to the air, so this
+    #   ground-fixed direction holds along the path up to the gravity turn added below.
+    final_azim, final_elev, _ = derotatedRadiantAltAz(traj.v_init*traj.radiant_eci_mini, final_eci, \
+        final_jd, final_lat, final_lon)
 
     # Steepen the elevation by the gravity turn along the path, d(elev)/dt = g*cos(elev)/v, using the average
     #   speed over the observed part and the simulated speeds after it. The turn starts where the fitted radiant
@@ -347,6 +377,12 @@ def _robust_linear_fit(x, y, p0=(1.0, 1.0), loss='soft_l1', **kwargs):
 
     # Use the Jacobian of the linear model, not res.jac, which is reweighted by the robust loss
     J = np.column_stack((x, np.ones_like(x)))
+
+    # The normal matrix is singular when all points share the same time, in which case no slope is defined
+    if np.ptp(x) == 0:
+        raise RuntimeError("All points have the same time; the velocity slope and its covariance are "
+            "undefined.")
+
     pcov = np.linalg.inv(J.T @ J)
 
     r_raw = y - lineFunc(x, *popt)
@@ -533,8 +569,8 @@ if __name__ == "__main__":
         ht = obs.meas_ht[1:][~ignored]
         t = obs.time_data[1:][~ignored]
 
-        # Only take velocities inside a reasonable range
-        vel_filter = (vel > 0) & (vel < 73_000)
+        # Only take velocities inside a reasonable range (the physical upper limit, or a lower --maxvel)
+        vel_filter = (vel > 0) & (vel < min(max_vel, 73_000))
 
         # Filter out all data
         vel = vel[vel_filter]
@@ -635,7 +671,8 @@ if __name__ == "__main__":
     #   drop), as computeFragEndParams() does. A line fitted to the measured heights is biased at the window
     #   centre by the curvature of the decelerating path and by the measurement noise
     ht_vs_time_interp, _ = interpolateHtVsTimeLen(traj)
-    ht_eval = scipy.optimize.brentq(lambda h: ht_vs_time_interp(h) - time_eval, *ht_vs_time_interp.x[[0, -1]])
+    ht_eval = scipy.optimize.brentq(lambda h: ht_vs_time_interp(h) - time_eval, \
+        *ht_vs_time_interp.x[[0, -1]])
 
     # Compute +/- 2 sigma deceleartion
     decel_lo = decel - 2*decel_std
