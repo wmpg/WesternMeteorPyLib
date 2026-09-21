@@ -648,6 +648,68 @@ def cloneEncounterSummary(clone_diag):
 
     return summary
 
+def sunPassageSummary(encounters, max_listed=3):
+    """ Collapse the Sun passages of an encounter list into one summary, if there are many of them.
+
+    An orbit with perihelion inside SUN_ENCOUNTER_AU passes the Sun once per revolution, so a
+    low-perihelion stream lists one Sun passage every few years (measured: 24 in 100 yr for a
+    delta-Aquariid-like orbit, against 6 planetary flybys) and would bury the planets in a long
+    report. The human-readable outputs therefore print one line for the Sun when it appears more than
+    max_listed times; the JSON keeps every passage.
+
+    Arguments:
+        encounters: [list] Encounter dicts as built by _integrateParticles, in the order they
+            happened.
+
+    Keyword arguments:
+        max_listed: [int] Up to this many Sun passages are left to be listed one by one. Default 3.
+
+    Return:
+        [dict or None] None if the Sun has max_listed passages or fewer. Otherwise
+            {"n":           number of Sun passages,
+             "q_min_au":    closest perihelion distance in AU,
+             "q_max_au":    farthest listed perihelion distance in AU,
+             "first_days":  time of the first passage in days,
+             "last_days":   time of the last passage in days,
+             "first_index": index in the list of the first Sun passage, where the summary line
+                            belongs so the time order of the rest of the list is kept}.
+    """
+
+    sun_idx = [k for k, enc in enumerate(encounters) if enc["body"] == "Sun"]
+
+    if len(sun_idx) <= max_listed:
+        return None
+
+    dists = [encounters[k]["min_dist_au"] for k in sun_idx]
+
+    return {
+        "n": len(sun_idx),
+        "q_min_au": min(dists),
+        "q_max_au": max(dists),
+        "first_days": encounters[sun_idx[0]]["time_days"],
+        "last_days": encounters[sun_idx[-1]]["time_days"],
+        "first_index": sun_idx[0],
+    }
+
+
+def formatSunPassageSummary(summary):
+    """ One report line for the collapsed Sun passages (see sunPassageSummary), without indentation.
+
+    Arguments:
+        summary: [dict] As returned by sunPassageSummary.
+
+    Return:
+        [str] E.g. "Sun      24 perihelion passages < 0.10 AU: q = 0.0441-0.0645 AU (9.5-13.9 R_Sun),
+            t = +3.1 to +99.6 d".
+    """
+
+    return ("{:<8s} {:d} perihelion passages < {:.2f} AU: q = {:.4f}-{:.4f} AU ({:.1f}-{:.1f} R_Sun), "
+            "t = {:+.1f} to {:+.1f} d").format(
+                "Sun", summary["n"], SUN_ENCOUNTER_AU, summary["q_min_au"], summary["q_max_au"],
+                summary["q_min_au"]/SUN_RADIUS_AU, summary["q_max_au"]/SUN_RADIUS_AU,
+                summary["first_days"], summary["last_days"])
+
+
 def whfastEncounterWarning(diagnostics, n_hill=3.0):
     """ Warn if any close encounter happened while WHFast, which cannot resolve one, was integrating.
 
@@ -2735,10 +2797,16 @@ if __name__ == "__main__":
 
     print("-" * 78)
 
-    # Close-encounter summary (minima tracked every integrator timestep, refined between steps)
+    # Close-encounter summary (minima tracked every integrator timestep, refined between steps).
+    # Repeated Sun passages collapse into one line, printed where the first of them happened.
+    sun_summary = sunPassageSummary(encounters)
     if encounters:
         print("  Close encounters ({:s}), in the order they happened:".format(encounter_criterion))
-        for enc in encounters:
+        for k, enc in enumerate(encounters):
+            if (sun_summary is not None) and (enc["body"] == "Sun"):
+                if k == sun_summary["first_index"]:
+                    print("    " + formatSunPassageSummary(sun_summary))
+                continue
             if enc["n_hill"] is None:
                 closeness = "{:.1f} R_Sun".format(enc["min_dist_au"]/SUN_RADIUS_AU)
             else:
@@ -2892,11 +2960,15 @@ if __name__ == "__main__":
         # Save the detected close encounters (Hill-sphere criterion, a fixed distance for the Sun).
         # The distances are the minima tracked at every internal integrator timestep and refined
         # between steps, not sampled from the output below. Every encounter is listed, in the order
-        # it happened.
+        # it happened, except that repeated Sun passages collapse into one line (the JSON keeps them all).
         f.write("\nClose encounters ({:s}), in the order they happened.\n".format(encounter_criterion))
         f.write("A body can appear more than once, if the object passed it more than once:\n")
         if encounters:
-            for enc in encounters:
+            for k, enc in enumerate(encounters):
+                if (sun_summary is not None) and (enc["body"] == "Sun"):
+                    if k == sun_summary["first_index"]:
+                        f.write("  " + formatSunPassageSummary(sun_summary) + "\n")
+                    continue
                 if enc["n_hill"] is None:
                     closeness = "{:.1f} R_Sun".format(enc["min_dist_au"]/SUN_RADIUS_AU)
                 else:

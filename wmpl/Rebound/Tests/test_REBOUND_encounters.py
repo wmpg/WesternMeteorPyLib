@@ -301,6 +301,48 @@ def testAPerihelionJustAboveTheSurfaceIsAnEncounterNotAnImpact(reb):
     assert sun[0]["hill_radius_au"] is None
 
 
+### Collapsing repeated Sun passages in the report ###
+
+def _passage(body, dist_au, t_days):
+    """ One encounter entry as _integrateParticles builds it, for the Sun or a planet. """
+
+    return {"body": body, "min_dist_au": dist_au, "time_days": t_days,
+            "hill_radius_au": None if body == "Sun" else 0.001475,
+            "n_hill": None if body == "Sun" else dist_au/0.001475, "index": None}
+
+
+def testSunPassageSummaryCollapsesOnlyRepeatedPassages(reb):
+    """ Up to max_listed Sun passages stay in the list; more than that become one summary that keeps
+    the count, the perihelion range, the time span and the place of the first passage. Planets are
+    never collapsed, however often they appear.
+    """
+
+    three_suns = [_passage("Sun", 0.05, 1.0), _passage("Mercury", 0.002, 2.0),
+                  _passage("Sun", 0.06, 5.0), _passage("Sun", 0.04, 9.0)]
+    assert reb.sunPassageSummary(three_suns) is None
+    assert reb.sunPassageSummary([]) is None
+
+    four_suns = [_passage("Mercury", 0.002, 0.5)] + three_suns + [_passage("Sun", 0.055, 13.0)]
+    summary = reb.sunPassageSummary(four_suns)
+
+    assert summary["n"] == 4
+    assert summary["q_min_au"] == 0.04
+    assert summary["q_max_au"] == 0.06
+    assert summary["first_days"] == 1.0
+    assert summary["last_days"] == 13.0
+    assert summary["first_index"] == 1, "the summary line goes where the first passage was"
+
+    # A tighter limit collapses the three as well; many Mercury passages never collapse
+    assert reb.sunPassageSummary(three_suns, max_listed=2)["n"] == 3
+    assert reb.sunPassageSummary([_passage("Mercury", 0.002, t) for t in range(10)]) is None
+
+    line = reb.formatSunPassageSummary(summary)
+    assert line.startswith("Sun ")
+    assert "4 perihelion passages < 0.10 AU" in line
+    assert "q = 0.0400-0.0600 AU" in line
+    assert "t = +1.0 to +13.0 d" in line
+
+
 ### Monte Carlo encounter summary ###
 
 def _encounterEntry(body, dist_au):
