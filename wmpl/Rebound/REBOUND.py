@@ -1048,6 +1048,13 @@ def tisserandParameterJupiter(a, e, inc):
         2 < T_J < 3    Jupiter-family-comet-like orbit,
         T_J < 2        Halley-type / long-period comet-like orbit.
 
+    wmpl.Utils.OrbitClassification.calcTisserand computes the same quantity for arrays and for a
+    planet other than Jupiter, and classifyTancrediComet there applies the finer Tancredi (2014)
+    scheme, which splits at 3.05 rather than 3 and adds perihelion cuts. This function is the
+    scalar one used by the REBOUND report, and returns None rather than nan for an unbound orbit.
+    It also uses a = 5.204267 AU where that module uses the 5.20336 AU of Tancredi's own tables;
+    the two differ by 1.7e-4 relative, which moves T_J by about 1e-4.
+
     Arguments:
         a: [float] Semi-major axis in AU (must be positive, i.e. a bound heliocentric orbit).
         e: [float] Eccentricity.

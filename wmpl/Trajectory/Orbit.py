@@ -12,6 +12,7 @@ from jplephem.spk import SPK
 import wmpl
 from wmpl.Config import config
 from wmpl.Utils.Earth import calcEarthRectangularCoordJPL
+from wmpl.Utils.OrbitConstants import GAUSS_K
 from wmpl.Utils.ShowerAssociation import associateShower
 from wmpl.Utils.SolarLongitude import jd2SolLonJPL
 from wmpl.Utils.TrajConversions import J2000_JD, J2000_OBLIQUITY, AU, SUN_MU, SUN_MASS, G, SIDEREAL_YEAR, \
@@ -565,7 +566,7 @@ def calcOrbitalElements(jd_ref, ra_g, dec_g, v_g, eci_ref):
     # Calculate the time in days since the last perihelion passage of the meteoroid
     # not meaningful for non-closed orbits
     if a > 0:
-        dt_perihelion = (mean_anomaly*a**(3.0/2))/0.01720209895
+        dt_perihelion = (mean_anomaly*a**(3.0/2))/GAUSS_K
     else:
         dt_perihelion = np.nan
 

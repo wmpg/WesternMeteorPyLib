@@ -3,6 +3,10 @@ from __future__ import print_function, division, absolute_import
 
 import math
 
+import numpy as np
+
+from wmpl.Utils.OrbitConstants import A_JUPITER, GAUSS_K, GAUSS_K_SQUARED
+
 
 
 # Average speed of Earth [km/s]
@@ -579,6 +583,766 @@ def calcDV(Lh1, Bh1, sol1, Vh1, Lh2, Bh2, sol2, Vh2, d_max=999.0):
 
 
 
+def _mutualInclinationCos(i1, O1, i2, O2):
+    """ Cosine of the mutual inclination of two orbital planes.
+
+    Arguments:
+        i1: [float] inclination of the first orbit (rad)
+        O1: [float] longitude of ascending node of the first orbit (rad)
+        i2: [float] inclination of the second orbit (rad)
+        O2: [float] longitude of ascending node of the second orbit (rad)
+
+    Return:
+        [float] cos I, clipped to [-1, 1]
+    """
+
+    cos_I = np.cos(i1)*np.cos(i2) + np.sin(i1)*np.sin(i2)*np.cos(O1 - O2)
+
+    return np.clip(cos_I, -1.0, 1.0)
+
+
+def _perihelionDirectionCos(i1, O1, w1, i2, O2, w2):
+    """ Cosine of the angle between the perihelion directions of two orbits, i.e. between their
+        Laplace-Runge-Lenz vectors.
+
+    Arguments:
+        i1: [float] inclination of the first orbit (rad)
+        O1: [float] longitude of ascending node of the first orbit (rad)
+        w1: [float] argument of perihelion of the first orbit (rad)
+        i2: [float] inclination of the second orbit (rad)
+        O2: [float] longitude of ascending node of the second orbit (rad)
+        w2: [float] argument of perihelion of the second orbit (rad)
+
+    Return:
+        [float] cos P, clipped to [-1, 1]
+    """
+
+    c1, c2 = np.cos(i1), np.cos(i2)
+    s1, s2 = np.sin(i1), np.sin(i2)
+    delta = O1 - O2
+
+    cos_P = s1*s2*np.sin(w1)*np.sin(w2) \
+        + (np.cos(w1)*np.cos(w2) + c1*c2*np.sin(w1)*np.sin(w2))*np.cos(delta) \
+        + (c2*np.cos(w1)*np.sin(w2) - c1*np.sin(w1)*np.cos(w2))*np.sin(delta)
+
+    return np.clip(cos_P, -1.0, 1.0)
+
+
+def calcRho1(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2, L=1.0):
+    """ Calculate the Kholshevnikov et al. (2016) rho_1 distance between two orbits.
+
+        rho_1 is a true metric on the space of Keplerian orbits: unlike D_SH, D_D and D_H it
+        satisfies the triangle inequality, and it stays well defined for circular orbits. It is
+        built from the difference of the angular momentum vectors and of the eccentricity vectors.
+
+        Reference: Kholshevnikov, Kokhirova, Babadzhanov & Khamroev (2016), MNRAS 462, 2275,
+        doi:10.1093/mnras/stw1712.
+
+        No published threshold was found for rho_1. One would not transfer from D_SH or D_D in
+        any case: the angular momentum difference has units of length and is made dimensionless by
+        dividing by L, so the choice of L fixes how it is weighted against the already
+        dimensionless eccentricity term, and hence fixes the numerical scale of rho_1.
+
+    Arguments:
+        q1: [float] perihelion distance of the first orbit (AU)
+        e1: [float] num. eccentricity of the first orbit
+        i1: [float] inclination of the first orbit (rad)
+        O1: [float] longitude of ascending node of the first orbit (rad)
+        w1: [float] argument of perihelion of the first orbit (rad)
+        q2: [float] perihelion distance of the second orbit (AU)
+        e2: [float] num. eccentricity of the second orbit
+        i2: [float] inclination of the second orbit (rad)
+        O2: [float] longitude of ascending node of the second orbit (rad)
+        w2: [float] argument of perihelion of the second orbit (rad)
+
+    Keyword arguments:
+        L: [float] scale length used to make the angular momentum term dimensionless (AU).
+            Default 1 AU, as recommended for the Solar system.
+
+    Return:
+        [float] rho_1 value
+    """
+
+    p1 = q1*(1.0 + e1)
+    p2 = q2*(1.0 + e2)
+
+    cos_I = _mutualInclinationCos(i1, O1, i2, O2)
+    cos_P = _perihelionDirectionCos(i1, O1, w1, i2, O2, w2)
+
+    rho_sqr = (p1 + p2 - 2*np.sqrt(p1*p2)*cos_I)/L \
+        + (e1**2 + e2**2 - 2*e1*e2*cos_P)
+
+    return np.sqrt(np.maximum(rho_sqr, 0.0))
+
+
+def calcRho2(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2, L=1.0):
+    """ Calculate the Kholshevnikov et al. (2016) rho_2 distance between two orbits.
+
+        rho_2 is a true metric on the space of Keplerian orbits, built from the two orthogonal
+        vectors u and v with |u| = sqrt(p) and |v| = e*sqrt(p), so both of its terms carry the
+        same units. Like rho_1 it satisfies the triangle inequality and admits circular orbits.
+
+        Reference: Kholshevnikov, Kokhirova, Babadzhanov & Khamroev (2016), MNRAS 462, 2275,
+        doi:10.1093/mnras/stw1712.
+
+        No published threshold was found for rho_2. With L = 1 AU it is dimensionless, but its
+        numerical scale is set by that choice, so D_SH and D_D thresholds do not carry over.
+
+    Arguments:
+        q1: [float] perihelion distance of the first orbit (AU)
+        e1: [float] num. eccentricity of the first orbit
+        i1: [float] inclination of the first orbit (rad)
+        O1: [float] longitude of ascending node of the first orbit (rad)
+        w1: [float] argument of perihelion of the first orbit (rad)
+        q2: [float] perihelion distance of the second orbit (AU)
+        e2: [float] num. eccentricity of the second orbit
+        i2: [float] inclination of the second orbit (rad)
+        O2: [float] longitude of ascending node of the second orbit (rad)
+        w2: [float] argument of perihelion of the second orbit (rad)
+
+    Keyword arguments:
+        L: [float] scale length used to normalise the metric (AU). Default 1 AU.
+
+    Return:
+        [float] rho_2 value
+    """
+
+    p1 = q1*(1.0 + e1)
+    p2 = q2*(1.0 + e2)
+
+    cos_I = _mutualInclinationCos(i1, O1, i2, O2)
+    cos_P = _perihelionDirectionCos(i1, O1, w1, i2, O2, w2)
+
+    rho_sqr = ((1.0 + e1**2)*p1 + (1.0 + e2**2)*p2
+        - 2*np.sqrt(p1*p2)*(cos_I + e1*e2*cos_P))/L
+
+    return np.sqrt(np.maximum(rho_sqr, 0.0))
+
+
+def calcRho5(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2, L=1.0):
+    """ Calculate the Kholshevnikov et al. (2016) rho_5 distance between two orbits.
+
+        rho_5 is the minimum of rho_2 over both nodes and both arguments of perihelion, so it is a
+        metric on the quotient space in which orbits differing only by a rotation about the
+        ecliptic pole and by an apsidal rotation are identified. It measures how close two orbits
+        could be brought by precession alone, which is the relevant comparison for streams whose
+        nodes and apsides have had time to circulate.
+
+        The node and the argument of perihelion are therefore not used, but they are kept in the
+        signature so that rho_5 can be substituted for calcDSH without changing the call.
+
+        Reference: Kholshevnikov, Kokhirova, Babadzhanov & Khamroev (2016), MNRAS 462, 2275,
+        doi:10.1093/mnras/stw1712.
+
+        No published threshold was found for rho_5.
+
+    Arguments:
+        q1: [float] perihelion distance of the first orbit (AU)
+        e1: [float] num. eccentricity of the first orbit
+        i1: [float] inclination of the first orbit (rad)
+        O1: [float] longitude of ascending node of the first orbit (rad), not used
+        w1: [float] argument of perihelion of the first orbit (rad), not used
+        q2: [float] perihelion distance of the second orbit (AU)
+        e2: [float] num. eccentricity of the second orbit
+        i2: [float] inclination of the second orbit (rad)
+        O2: [float] longitude of ascending node of the second orbit (rad), not used
+        w2: [float] argument of perihelion of the second orbit (rad), not used
+
+    Keyword arguments:
+        L: [float] scale length used to normalise the metric (AU). Default 1 AU.
+
+    Return:
+        [float] rho_5 value
+    """
+
+    p1 = q1*(1.0 + e1)
+    p2 = q2*(1.0 + e2)
+
+    rho_sqr = ((1.0 + e1**2)*p1 + (1.0 + e2**2)*p2
+        - 2*np.sqrt(p1*p2)*(e1*e2 + np.cos(i1 - i2)))/L
+
+    return np.sqrt(np.maximum(rho_sqr, 0.0))
+
+
+def calcC(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2):
+    """ Calculate the Neslusan (2002) C criterion, the length of the difference of the two orbital
+        angular momentum vectors per unit mass.
+
+        The criterion compares orbital planes and sizes only; it carries no information about the
+        apsidal orientation, and nothing in it is specific to meteor showers.
+
+        Units are Gaussian, with the solar gravitational parameter taken as unity, so that the
+        magnitude of the angular momentum vector is sqrt(p) with p in AU.
+
+        Reference: Neslusan, in Dynamics of Natural and Artificial Celestial Bodies, the
+        proceedings of the US/European Celestial Mechanics Workshop held in Poznan in July 2000,
+        365. The volume is dated 2002 in some citations and 2001 in others, including the reference
+        list of Jopek, Rudawska & Bartczak (2008), which also describes the criterion as the
+        difference of the orbital momentum vectors per unit mass, as implemented here.
+
+        That volume was not accessible, so whether it publishes a threshold is unchecked. None is
+        supplied here.
+
+    Arguments:
+        q1: [float] perihelion distance of the first orbit (AU)
+        e1: [float] num. eccentricity of the first orbit
+        i1: [float] inclination of the first orbit (rad)
+        O1: [float] longitude of ascending node of the first orbit (rad)
+        w1: [float] argument of perihelion of the first orbit (rad), not used
+        q2: [float] perihelion distance of the second orbit (AU)
+        e2: [float] num. eccentricity of the second orbit
+        i2: [float] inclination of the second orbit (rad)
+        O2: [float] longitude of ascending node of the second orbit (rad)
+        w2: [float] argument of perihelion of the second orbit (rad), not used
+
+    Return:
+        [float] C value (sqrt(AU))
+    """
+
+    # |c| = sqrt(p) rather than k*sqrt(p), i.e. the Gaussian constant is left out and the result
+    #   carries units of sqrt(AU). calcDVJopek builds the same vector with the k factor included,
+    #   so the two are on scales differing by k = 0.0172. Neslusan's own paper could not be read to
+    #   settle which convention it uses; since the criterion is applied with the break-point method
+    #   rather than a fixed threshold, the scale does not affect a search, but it does mean a C
+    #   value from here cannot be compared against one quoted elsewhere without checking.
+    c1 = np.sqrt(q1*(1.0 + e1))
+    c2 = np.sqrt(q2*(1.0 + e2))
+
+    cx1, cy1, cz1 = c1*np.sin(i1)*np.sin(O1), -c1*np.sin(i1)*np.cos(O1), c1*np.cos(i1)
+    cx2, cy2, cz2 = c2*np.sin(i2)*np.sin(O2), -c2*np.sin(i2)*np.cos(O2), c2*np.cos(i2)
+
+    return np.sqrt((cx1 - cx2)**2 + (cy1 - cy2)**2 + (cz1 - cz2)**2)
+
+
+def calcDR(ra1, dec1, sol1, vg1, ra2, dec2, sol2, vg2, w1=1.0):
+    """ Calculate the reduced Valsecchi et al. (1999) D_R criterion between two orbits.
+
+        D_R keeps only the two terms of D_N that are nearly invariant under the principal secular
+        perturbation of meteoroid orbits, the circulation of the argument of perihelion, and drops
+        the terms in the angle phi and the solar longitude. It is therefore a necessary but not a
+        sufficient condition for membership of the same stream.
+
+        Unlike the other criteria added here this one takes scalars only, because
+        calcVgComponents, which it shares with calcDN, is written with the math module.
+
+        Reference: Valsecchi, Jopek & Froeschle (1999), MNRAS 304, 743.
+
+        That paper recommends no threshold for either D_N or D_R. Jenniskens (2008) reports
+        D_N < 0.20 as the value at which association was implicated; since D_R <= D_N, that is a
+        necessary condition on D_R rather than a threshold for it.
+
+    Arguments:
+        ra1: [float] right ascension of the first radiant (rad)
+        dec1: [float] declination of the first radiant (rad)
+        sol1: [float] solar longitude of the first orbit (rad)
+        vg1: [float] geocentric velocity of the first orbit (km/s)
+        ra2: [float] right ascension of the second radiant (rad)
+        dec2: [float] declination of the second radiant (rad)
+        sol2: [float] solar longitude of the second orbit (rad)
+        vg2: [float] geocentric velocity of the second orbit (km/s)
+
+    Keyword arguments:
+        w1: [float] weight of the cos(theta) term, not an argument of perihelion despite carrying
+            the name this module uses for one elsewhere. The paper leaves the weights undefined and
+            uses unity throughout its application.
+
+    Return:
+        [float] D_R value
+    """
+
+    _, vg_y1, _ = calcVgComponents(ra1, dec1, sol1, vg1)
+    _, vg_y2, _ = calcVgComponents(ra2, dec2, sol2, vg2)
+
+    # U is the geocentric velocity in units of the Earth's orbital speed
+    u1 = vg1/SPEED_EARTH
+    u2 = vg2/SPEED_EARTH
+
+    cos_theta1 = vg_y1/u1
+    cos_theta2 = vg_y2/u2
+
+    return np.sqrt((u2 - u1)**2 + w1*(cos_theta2 - cos_theta1)**2)
+
+
+# Dispersions of the three D_B invariants over the sample of likely stream and parent-body pairs
+#   of Jenniskens (2008), tables 1 and 2. C3 is an angle [rad]
+DB_SIGMA_C1 = 0.13
+DB_SIGMA_C2 = 0.06
+DB_SIGMA_C3 = np.radians(14.2)
+
+
+def calcDB(e1, i1, O1, w1, e2, i2, O2, w2):
+    """ Calculate the Jenniskens (2008) D_B criterion between two orbits.
+
+        D_B compares three quantities that are near-invariant under the secular perturbations of a
+        short-period orbit over one nutation cycle, so it asks whether two orbits could have been
+        the same orbit recently, rather than whether they are the same orbit now. C1 follows from
+        the z-component of the angular momentum and the energy, C2 is the Lidov (1961, 1962)
+        integral of the twice-averaged three-body problem, and C3 is the longitude of perihelion,
+        which drifts far more slowly than either angle alone. The three are taken from
+        Babadzhanov (1989).
+
+        Each difference is divided by the dispersion of that quantity over the paper's sample of
+        likely stream and parent-body pairs, 0.13, 0.06 and 14.2 deg, available here as
+        DB_SIGMA_C1, DB_SIGMA_C2 and DB_SIGMA_C3.
+
+        The paper notes, and does not correct for, the fact that C1, C2 and C3 are not orthogonal.
+
+        Published thresholds: D_B < 1.0 together with D_T < 0.3 identifies parent bodies and
+        siblings of a stream; D_B < 1.5 with D_T < 0.6 also captures bodies related through an
+        earlier fragmentation.
+
+        Reference: Jenniskens (2008), Icarus 194, 13, eq. 18, doi:10.1016/j.icarus.2007.09.016.
+
+    Arguments:
+        e1: [float] num. eccentricity of the first orbit
+        i1: [float] inclination of the first orbit (rad)
+        O1: [float] longitude of ascending node of the first orbit (rad)
+        w1: [float] argument of perihelion of the first orbit (rad)
+        e2: [float] num. eccentricity of the second orbit
+        i2: [float] inclination of the second orbit (rad)
+        O2: [float] longitude of ascending node of the second orbit (rad)
+        w2: [float] argument of perihelion of the second orbit (rad)
+
+    Return:
+        [float] D_B value
+    """
+
+    c1_1 = (1.0 - e1**2)*np.cos(i1)**2
+    c1_2 = (1.0 - e2**2)*np.cos(i2)**2
+
+    c2_1 = e1**2*(0.4 - np.sin(i1)**2*np.sin(w1)**2)
+    c2_2 = e2**2*(0.4 - np.sin(i2)**2*np.sin(w2)**2)
+
+    # C3 is an angle, so the smallest of the two differences around the circle is the relevant one
+    d_c3 = (w1 + O1) - (w2 + O2)
+    d_c3 = (d_c3 + np.pi)%(2*np.pi) - np.pi
+
+    return np.sqrt(((c1_1 - c1_2)/DB_SIGMA_C1)**2 + ((c2_1 - c2_2)/DB_SIGMA_C2)**2
+        + (d_c3/DB_SIGMA_C3)**2)
+
+
+def calcDT(q1, e1, i1, q2, e2, i2, a_planet=A_JUPITER):
+    """ Calculate the Jenniskens (2008) D_T criterion between two orbits, the absolute difference
+        of their Tisserand parameters.
+
+        The Tisserand parameter is conserved under the same secular perturbations as the D_B
+        invariants, so D_T asks the same question as D_B along a different axis.
+
+        The paper writes the Tisserand parameter in terms of the perihelion distance and the
+        eccentricity rather than the semi-major axis, because the observational errors in q and e
+        are smaller than those in a. That form is used here. It is algebraically the same quantity
+        as calcTisserand returns, and stays finite as the eccentricity approaches 1, where the
+        semi-major axis form evaluates to nan.
+
+        Published thresholds: D_T < 0.3 together with D_B < 1.0 identifies parent bodies and
+        siblings of a stream; D_T < 0.6 with D_B < 1.5 also captures bodies related through an
+        earlier fragmentation.
+
+        Reference: Jenniskens (2008), Icarus 194, 13, eqs 13 and 14,
+        doi:10.1016/j.icarus.2007.09.016.
+
+    Arguments:
+        q1: [float] perihelion distance of the first orbit (AU)
+        e1: [float] num. eccentricity of the first orbit
+        i1: [float] inclination of the first orbit (rad)
+        q2: [float] perihelion distance of the second orbit (AU)
+        e2: [float] num. eccentricity of the second orbit
+        i2: [float] inclination of the second orbit (rad)
+
+    Keyword arguments:
+        a_planet: [float] semi-major axis of the perturbing planet (AU). Default Jupiter.
+
+    Return:
+        [float] D_T value
+    """
+
+    def tisserandFromPerihelion(q, e, i):
+        return a_planet*(1.0 - e)/q + 2*np.cos(i)*np.sqrt(q*(1.0 + e)/a_planet)
+
+    return np.abs(tisserandFromPerihelion(q1, e1, i1) - tisserandFromPerihelion(q2, e2, i2))
+
+
+# Weights of the D_X terms, as given by Rudawska et al. (2015). The paper describes them as
+#   normalising each term's contribution; measured over pairs drawn within a shower from the
+#   dispersions of its table 2, the right ascension term still dominates, so they are reproduced
+#   here as published values rather than as a normalisation that can be relied on
+DX_W_SOL = 0.17
+DX_W_RA = 1.20
+DX_W_DEC = 1.20
+DX_W_VG = 0.20
+
+
+def calcDX(ra1, dec1, sol1, vg1, ra2, dec2, sol2, vg2, w_sol=DX_W_SOL, w_ra=DX_W_RA,
+    w_dec=DX_W_DEC, w_vg=DX_W_VG):
+    """ Calculate the Rudawska et al. (2015) D_X criterion between two orbits.
+
+        D_X compares the geocentric quantities directly, which avoids propagating the velocity
+        uncertainty into the semi-major axis. The radiant terms are scaled by the velocity
+        difference, so a pair of meteors with similar radiants but different speeds is separated.
+
+        The velocity difference enters the radiant terms additively as |Vg1 - Vg2| + 1, so the
+        criterion is not invariant to the unit of the geocentric velocity. The paper tabulates Vg
+        in km/s, which is the unit assumed here.
+
+        Note that the criterion is not symmetric: the right ascension term is scaled by the cosine
+        of the first declination and the velocity term by the first velocity, so exchanging the two
+        orbits changes the result slightly. The paper applies it to a group mean against a group
+        mean, where the asymmetry is immaterial.
+
+        The arguments are ordered as in calcDN, calcDR and calcDV rather than as in the paper's
+        equation, so that the geocentric criteria in this module can be called interchangeably.
+
+        Published threshold: groups are merged when D_X <= 0.15.
+
+        Reference: Rudawska, Matlovic, Toth & Kornos (2015), P&SS 118, 38, eq. 2,
+        doi:10.1016/j.pss.2015.07.011.
+
+    Arguments:
+        ra1: [float] right ascension of the first radiant (rad)
+        dec1: [float] declination of the first radiant (rad)
+        sol1: [float] solar longitude of the first orbit (rad)
+        vg1: [float] geocentric velocity of the first orbit (km/s)
+        ra2: [float] right ascension of the second radiant (rad)
+        dec2: [float] declination of the second radiant (rad)
+        sol2: [float] solar longitude of the second orbit (rad)
+        vg2: [float] geocentric velocity of the second orbit (km/s)
+
+    Keyword arguments:
+        w_sol: [float] weight of the solar longitude term. Default as published.
+        w_ra: [float] weight of the right ascension term. Default as published.
+        w_dec: [float] weight of the declination term. Default as published.
+        w_vg: [float] weight of the geocentric velocity term. Default as published.
+
+    Return:
+        [float] D_X value
+    """
+
+    d_vg = np.abs(vg1 - vg2)
+
+    term_sol = w_sol*(2*np.sin((sol1 - sol2)/2.0))**2
+    # cos(dec1) scales the chord, it is not part of the angle: the paper writes the term as
+    #   [2 sin((ra1 - ra2)/2) cos(dec1)]^2. The two forms agree to first order in the radiant
+    #   separation, which is why a within-shower comparison cannot tell them apart, but they
+    #   differ by 41% at 180 deg of right ascension and 60 deg of declination.
+    term_ra = w_ra*(d_vg + 1.0)*(2*np.sin((ra1 - ra2)/2.0)*np.cos(dec1))**2
+    term_dec = w_dec*(d_vg + 1.0)*(2*np.sin(np.abs(dec1 - dec2)/2.0))**2
+    term_vg = w_vg*(d_vg/vg1)**2
+
+    return np.sqrt(term_sol + term_ra + term_dec + term_vg)
+
+
+# Standard deviations of the vectorial elements within a stream, table 1 of Jopek, Rudawska &
+#   Bartczak (2008), as (angular momentum triple, eccentricity vector triple, energy), in units of
+#   AU, day and solar masses. Keyed by the age of the stream in years, plus the sporadic background
+#   measured from the IAU 2003 data
+DV_DISPERSIONS = {
+    0: ((2.5e-5, 2.4e-5, 2.8e-5), (2.8e-3, 2.8e-3, 2.0e-3), 7.1e-7),
+    2000: ((3.9e-4, 3.4e-4, 1.7e-4), (6.6e-3, 7.1e-3, 1.3e-2), 7.6e-7),
+    4000: ((9.8e-4, 5.9e-4, 4.1e-4), (1.1e-2, 1.6e-2, 2.3e-2), 9.8e-7),
+    5000: ((1.3e-3, 6.8e-4, 5.1e-4), (1.4e-2, 2.0e-2, 2.7e-2), 1.1e-6),
+    6000: ((1.5e-3, 7.9e-4, 6.2e-4), (1.8e-2, 2.3e-2, 3.1e-2), 1.2e-6),
+    'sporadic': ((6.8e-3, 7.8e-3, 1.2e-2), (5.1e-1, 4.9e-1, 3.4e-1), 4.3e-4),
+    }
+
+# Age of the stream whose dispersions the paper used for its own search
+DV_DEFAULT_EPOCH = 4000
+
+# Thresholds at the 99% reliability level, table 2 of the same paper, keyed by the smallest stream
+#   size accepted. The column is headed "D_V x 10^-1", so the tabulated figures are scaled up here
+DV_THRESHOLDS = {
+    8: 2.414, 9: 2.575, 10: 2.707, 11: 2.815, 12: 2.906, 13: 2.985, 14: 3.057, 15: 3.128,
+    }
+
+
+def calcDVWeights(epoch=DV_DEFAULT_EPOCH):
+    """ Calculate the D_V weights from the dispersions of the vectorial elements within a stream.
+
+        A pair of orbits differing by twice the dispersion in a single element contributes exactly
+        1 to the sum, which is what sets the scale of the criterion.
+
+        Reference: Jopek, Rudawska & Bartczak (2008), EM&P 102, 73, eq. 5,
+        doi:10.1007/s11038-007-9197-8.
+
+    Keyword arguments:
+        epoch: [int] age of the stream in years, one of the keys of DV_DISPERSIONS, or the string
+            'sporadic' for the background. Default 4000, which the paper used for its own search.
+
+    Return:
+        [tuple] the three angular momentum weights, the three eccentricity vector weights, and the
+            energy weight
+    """
+
+    if epoch not in DV_DISPERSIONS:
+        raise ValueError("No dispersions published for epoch {!r}. Available: {!s}.".format(epoch,
+            sorted(DV_DISPERSIONS, key=str)))
+
+    sigma_h, sigma_e, sigma_energy = DV_DISPERSIONS[epoch]
+
+    return ([1.0/(2*s)**2 for s in sigma_h], [1.0/(2*s)**2 for s in sigma_e],
+        1.0/(2*sigma_energy)**2)
+
+
+def calcDVJopek(q1, e1, i1, O1, w1, q2, e2, i2, O2, w2, w_h=None, w_e=None, w_E=None):
+    """ Calculate the Jopek, Rudawska & Bartczak (2008) D_V criterion between two orbits.
+
+        D_V compares the two vectorial integrals of the two-body problem, the angular momentum and
+        the eccentricity vector, together with the orbital energy. Working with the vectors rather
+        than with the angles avoids the branch-cut and circular-orbit problems of the D_SH family.
+
+        The weights are the reciprocal squared dispersions of each element within a stream,
+        w = (2*sigma)^-2, so a pair differing by twice the dispersion in one element contributes
+        exactly 1. They default to the dispersions the paper measured for a stream 4000 years after
+        formation, which is the set it used for its own search; calcDVWeights returns the set for
+        any of the tabulated ages, or for the sporadic background.
+
+        Units are AU, day and solar masses, so the angular momentum is in AU^2/day and the energy
+        in AU^2/day^2. The weights are dimensional, so they are only meaningful in these units.
+
+        This is a different criterion from calcDV in this module, which implements the unpublished
+        Vida criterion; calcDV is left untouched.
+
+        The factors of 1.5 on the third angular momentum component and 2 on the energy are
+        deliberate: those two are the invariant and semi-invariant parts of the set, so the paper
+        weights them up beyond what their dispersions alone would give.
+
+        Published thresholds, at the 99% reliability level, are in DV_THRESHOLDS, keyed by the
+        smallest stream size accepted. They run from 2.414 for groups of 8 to 3.128 for groups of
+        15.
+
+        Reference: Jopek, Rudawska & Bartczak (2008), EM&P 102, 73, eqs 1 to 5,
+        doi:10.1007/s11038-007-9197-8.
+
+    Arguments:
+        q1: [float] perihelion distance of the first orbit (AU)
+        e1: [float] num. eccentricity of the first orbit
+        i1: [float] inclination of the first orbit (rad)
+        O1: [float] longitude of ascending node of the first orbit (rad)
+        w1: [float] argument of perihelion of the first orbit (rad)
+        q2: [float] perihelion distance of the second orbit (AU)
+        e2: [float] num. eccentricity of the second orbit
+        i2: [float] inclination of the second orbit (rad)
+        O2: [float] longitude of ascending node of the second orbit (rad)
+        w2: [float] argument of perihelion of the second orbit (rad)
+
+    Keyword arguments:
+        w_h: [list] three weights of the angular momentum components. Default as published.
+        w_e: [list] three weights of the eccentricity vector components. Default as published.
+        w_E: [float] weight of the energy term. Default as published.
+
+    Return:
+        [float] D_V value
+    """
+
+    if w_h is None or w_e is None or w_E is None:
+
+        default_h, default_e, default_energy = calcDVWeights()
+
+        w_h = default_h if w_h is None else w_h
+        w_e = default_e if w_e is None else w_e
+        w_E = default_energy if w_E is None else w_E
+
+    p1 = q1*(1.0 + e1)
+    p2 = q2*(1.0 + e2)
+
+    h1, h2 = GAUSS_K*np.sqrt(p1), GAUSS_K*np.sqrt(p2)
+
+    hx1, hy1, hz1 = h1*np.sin(i1)*np.sin(O1), -h1*np.sin(i1)*np.cos(O1), h1*np.cos(i1)
+    hx2, hy2, hz2 = h2*np.sin(i2)*np.sin(O2), -h2*np.sin(i2)*np.cos(O2), h2*np.cos(i2)
+
+    ex1 = e1*(np.cos(O1)*np.cos(w1) - np.sin(O1)*np.sin(w1)*np.cos(i1))
+    ey1 = e1*(np.sin(O1)*np.cos(w1) + np.cos(O1)*np.sin(w1)*np.cos(i1))
+    ez1 = e1*np.sin(w1)*np.sin(i1)
+
+    ex2 = e2*(np.cos(O2)*np.cos(w2) - np.sin(O2)*np.sin(w2)*np.cos(i2))
+    ey2 = e2*(np.sin(O2)*np.cos(w2) + np.cos(O2)*np.sin(w2)*np.cos(i2))
+    ez2 = e2*np.sin(w2)*np.sin(i2)
+
+    # Energy of an orbit with q and e, i.e. -mu/(2a), written so it stays finite as e approaches 1
+    en1 = -GAUSS_K_SQUARED*(1.0 - e1)/(2.0*q1)
+    en2 = -GAUSS_K_SQUARED*(1.0 - e2)/(2.0*q2)
+
+    return np.sqrt(w_h[0]*(hx1 - hx2)**2 + w_h[1]*(hy1 - hy2)**2 + 1.5*w_h[2]*(hz1 - hz2)**2
+        + w_e[0]*(ex1 - ex2)**2 + w_e[1]*(ey1 - ey2)**2 + w_e[2]*(ez1 - ez2)**2
+        + 2*w_E*(en1 - en2)**2)
+
+
+# Reference orbit of the Taurid Complex core used by Asher, Clube & Steel (1993) [AU, -, rad]
+TC_REFERENCE_A = 2.1
+TC_REFERENCE_E = 0.82
+TC_REFERENCE_INCL = np.radians(4.0)
+
+# Perihelion distance of the same reference orbit as quoted by Steel, Asher & Clube (1991) [AU]
+TC_REFERENCE_Q = 0.375
+
+# Scale normalising the semi-major axis term of D_ACS [AU]. Asher, Clube & Steel (1993) print it
+#   in eq. 2 itself, which reads D^2 = ((a1 - a2)/3)^2 + (e1 - e2)^2 + (2 sin((i1 - i2)/2))^2, so it
+#   is a published constant and not one inferred from their table 1
+DACS_A_SCALE = 3.0
+
+
+def calcDACS(a1, e1, i1, a2, e2, i2):
+    """ Calculate the Asher, Clube & Steel (1993) D_ACS criterion between two orbits.
+
+        D_ACS compares only the size, shape and inclination of the two orbits. It carries no node
+        or longitude term by design: the Taurid Complex has been dispersed in longitude of
+        perihelion by Jovian perturbations, so a longitude term appropriate to a narrow stream
+        would dominate the sum. Longitude alignment is instead tested separately, after the
+        criterion has selected on (a, e, i).
+
+        The criterion is normally evaluated against the Taurid Complex core orbit, available here
+        as TC_REFERENCE_A, TC_REFERENCE_E and TC_REFERENCE_INCL.
+
+        Published thresholds: D = 0.15 restricts the selection to the core of the complex, as used
+        with the perihelion-distance form in Steel, Asher & Clube (1991); Asher, Clube & Steel
+        (1993) suggest D of about 0.2 as the value that best defines Taurid Complex asteroids.
+
+        Note that the paper does not feed observed elements into the criterion. The inclination
+        varies by a factor of a few over 10**3 yr, so it is first adjusted by Brouwer (1947) secular
+        perturbation theory to the smallest value the orbit ever reaches, and the eccentricity is
+        adjusted likewise, which moves D by less than 0.01 in nearly all cases. No such adjustment
+        is applied here, so passing observed elements will not reproduce the paper's table.
+
+        The companion calcDSAC is the earlier form of Steel, Asher & Clube (1991), which uses the
+        perihelion distance in place of the semi-major axis. That form suits meteoroids, whose q is
+        better determined than their a; this one suits asteroids, whose a is well determined.
+
+        Reference: Asher, Clube & Steel (1993), MNRAS 264, 93, eq. 2, doi:10.1093/mnras/264.1.93.
+
+    Arguments:
+        a1: [float] semi-major axis of the first orbit (AU)
+        e1: [float] num. eccentricity of the first orbit
+        i1: [float] inclination of the first orbit (rad)
+        a2: [float] semi-major axis of the second orbit (AU)
+        e2: [float] num. eccentricity of the second orbit
+        i2: [float] inclination of the second orbit (rad)
+
+    Return:
+        [float] D_ACS value
+    """
+
+    return np.sqrt(((a1 - a2)/DACS_A_SCALE)**2 + (e1 - e2)**2 + (2*np.sin((i1 - i2)/2.0))**2)
+
+
+def calcDSAC(q1, e1, i1, q2, e2, i2):
+    """ Calculate the Steel, Asher & Clube (1991) Taurid Complex criterion between two orbits.
+
+        This is the perihelion-distance form of the criterion, and the earlier of the two. It is
+        the one to use for meteoroids, whose perihelion distance is better determined than their
+        semi-major axis, since a carries the full weight of the uncertainty in the meteoroid
+        velocity. For asteroids, whose a is well determined, use calcDACS instead, which is the
+        same expression with a scaled semi-major axis term in place of the perihelion term.
+
+        Like calcDACS it carries no node or longitude term, for the same reason: the Taurid Complex
+        is dispersed in longitude of perihelion, so a longitude term appropriate to a narrow stream
+        would dominate the sum.
+
+        The reference orbit is the Taurid Complex core, available as TC_REFERENCE_Q,
+        TC_REFERENCE_E and TC_REFERENCE_INCL.
+
+        The perihelion term carries no scale factor, so it is in AU while the other two terms are
+        dimensionless, and is implicitly divided by 1 AU as in D_SH.
+
+        Published threshold: D = 0.15, which restricts the selection to the core of the complex.
+
+        Unlike calcDACS, the inclination needs no secular adjustment when this form is applied to
+        meteoroids: an orbit has to cross the Earth's to produce a meteor, which already constrains
+        the inclination to be low.
+
+        Reference: Steel, Asher & Clube (1991), MNRAS 251, 632, as eq. 1 of Asher, Clube & Steel
+        (1993), MNRAS 264, 93, doi:10.1093/mnras/264.1.93.
+
+    Arguments:
+        q1: [float] perihelion distance of the first orbit (AU)
+        e1: [float] num. eccentricity of the first orbit
+        i1: [float] inclination of the first orbit (rad)
+        q2: [float] perihelion distance of the second orbit (AU)
+        e2: [float] num. eccentricity of the second orbit
+        i2: [float] inclination of the second orbit (rad)
+
+    Return:
+        [float] D_SAC value
+    """
+
+    return np.sqrt((q1 - q2)**2 + (e1 - e2)**2 + (2*np.sin((i1 - i2)/2.0))**2)
+
+
+
+def _semiMajorAxisForCriteria(q, e):
+    """ Convert a perihelion distance to a semi-major axis, for the criteria written in terms of
+        the semi-major axis.
+
+        A parabolic orbit has no semi-major axis. Returning infinity rather than dividing by zero
+        lets a criterion that needs it return infinity too, which is the right answer for a term
+        that measures a difference of semi-major axes, and sorts last when a catalogue is swept.
+        The comet catalogue distributed with wmpl holds about 1800 orbits with e of exactly 1.
+
+    Arguments:
+        q: [float] perihelion distance of the orbit (AU)
+        e: [float] num. eccentricity of the orbit
+
+    Return:
+        [float] semi-major axis (AU), infinite for a parabolic orbit
+    """
+
+    if e == 1.0:
+        return np.inf
+
+    return q/(1.0 - e)
+
+
+# The criteria on the orbital elements, as (key, label, function of the two orbits). This is the
+#   one vocabulary of criterion keys in the library: the command line of this module offers it
+#   through -c, and wmpl.Utils.ParentBodySearch through -d, so that a key means the same thing and
+#   prints the same label in both.
+#
+#   Each function takes the two orbits as (q, e, i, node, peri) tuples with the angles in radians.
+#   That signature is the only thing the criteria have in common: some read all five elements,
+#   some only three, and D_ACS reads the semi-major axis in place of the perihelion distance.
+ELEMENT_CRITERIA = [
+    ('DSH', 'D_SH', lambda o1, o2: calcDSH(*(o1 + o2))),
+    ('DD', 'D_D', lambda o1, o2: calcDD(*(o1 + o2))),
+    ('DH', 'D_H', lambda o1, o2: calcDH(*(o1 + o2))),
+    ('RHO1', 'rho_1', lambda o1, o2: calcRho1(*(o1 + o2))),
+    ('RHO2', 'rho_2', lambda o1, o2: calcRho2(*(o1 + o2))),
+    ('RHO5', 'rho_5', lambda o1, o2: calcRho5(*(o1 + o2))),
+    ('C', 'C', lambda o1, o2: calcC(*(o1 + o2))),
+    ('DV', 'D_V', lambda o1, o2: calcDVJopek(*(o1 + o2))),
+    ('DB', 'D_B', lambda o1, o2: calcDB(*(o1[1:] + o2[1:]))),
+    ('DT', 'D_T', lambda o1, o2: calcDT(o1[0], o1[1], o1[2], o2[0], o2[1], o2[2])),
+    ('DACS', 'D_ACS', lambda o1, o2: calcDACS(_semiMajorAxisForCriteria(o1[0], o1[1]), o1[1],
+        o1[2], _semiMajorAxisForCriteria(o2[0], o2[1]), o2[1], o2[2])),
+    ('DSAC', 'D_SAC', lambda o1, o2: calcDSAC(o1[0], o1[1], o1[2], o2[0], o2[1], o2[2])),
+    ]
+
+ELEMENT_CRITERIA_KEYS = [key for key, _, _ in ELEMENT_CRITERIA]
+
+
+def getElementCriterion(key):
+    """ Look up one of the criteria on the orbital elements by its key.
+
+        The keys are those of ELEMENT_CRITERIA and are not case sensitive, so that a command line
+        takes 'dsh' as readily as 'DSH'.
+
+        Warning: the keys and labels of ELEMENT_CRITERIA are shared with
+        wmpl.Utils.ParentBodySearch, which offers them through -d. Editing a key or a label here
+        changes what that module accepts and prints. Keep the two in step.
+
+    Arguments:
+        key: [str] key of the criterion, such as 'DSH'
+
+    Return:
+        [tuple] (label, function of the two orbits as (q, e, i, node, peri) tuples in radians)
+    """
+
+    for criterion_key, label, func in ELEMENT_CRITERIA:
+
+        if criterion_key == key.upper():
+            return (label, func)
+
+    raise ValueError("Unknown criterion {:s}. Available: {:s}.".format(key,
+        ", ".join(ELEMENT_CRITERIA_KEYS)))
+
+
 
 if __name__ == "__main__":
 
@@ -588,122 +1352,347 @@ if __name__ == "__main__":
 
     import numpy as np
 
+    # Imported here rather than at module level, so that importing this module does not pull in
+    #   OrbitClassification and the scipy it uses
+    from wmpl.Utils.OrbitClassification import (calcTisserand, calcWhippleK, calcKresakP,
+        calcAphelionDistance, isCometaryQi, isCometaryEi, isCometaryTi, isCometaryKi,
+        isCometaryPi, classifyTancrediComet)
     from wmpl.Utils.Pickling import loadPickle
+
+
+    ### CRITERIA OFFERED ON THE COMMAND LINE ###
+
+    # No threshold is reported next to a value, on purpose. The community has not settled on one:
+    #   the usable value depends on the size of the sample being searched, several incompatible
+    #   ways of deriving it are in use, and none of them is defined for a single pair of orbits,
+    #   which is what this tool compares. Quoting one next to a pairwise value would invite it to
+    #   be read as a decision rule. The published figures, kept here for reference only:
+    #     D_SH   0.15 for a sample of 359 orbits, Lindblad (1971)
+    #     D_N    0.20, as quoted by Jenniskens (2008)
+    #     D_X    0.15 for merging two groups, Rudawska et al. (2015)
+    #     D_V    2.414 to 3.128 by group size, Jopek, Rudawska & Bartczak (2008)
+    #     D_B    below 1.0 together with D_T below 0.3, Jenniskens (2008)
+    #     D_ACS  0.15 for the core of the Taurid Complex, about 0.2 for the complex
+    #     D_SAC  0.15 for the core of the complex
+    #   wmpl.Utils.Dthresholds implements the methods that derive a threshold from a sample. It is
+    #   deliberately not imported here, so that nothing this tool prints implies a decision.
+
+    # Criteria on the geocentric radiant and speed
+    GEOCENTRIC_CRITERIA = [
+        ('DN', 'D_N', lambda g1, g2: calcDN(*(g1 + g2))),
+        ('DR', 'D_R', lambda g1, g2: calcDR(*(g1 + g2))),
+        ('DX', 'D_X', lambda g1, g2: calcDX(*(g1 + g2))),
+        ]
+
+    # The Vida criterion, which takes the corrected heliocentric direction instead
+    HELIOCENTRIC_CRITERIA = [
+        ('DVVIDA', 'D_V (Vida)', lambda h1, h2: calcDV(*(h1 + h2))),
+        ]
+
+    ALL_KEYS = ELEMENT_CRITERIA_KEYS + [k for k, _, _ in GEOCENTRIC_CRITERIA \
+        + HELIOCENTRIC_CRITERIA]
 
 
     ### COMMAND LINE ARGUMENTS
 
-    # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(description="Compare two trajectory files by computing their D criteria.")
+    arg_parser = argparse.ArgumentParser(description="Compute the orbit dissimilarity criteria "
+        "between two orbits. Each orbit is taken either from a trajectory pickle or from orbital "
+        "elements given on the command line, and the two may be mixed.")
 
-    arg_parser.add_argument('traj_path', metavar='TRAJ_PATH', type=str, \
-        help="Path to a trajectory pickle file.")
+    arg_parser.add_argument('traj_path', metavar='TRAJ_PATH1', type=str, nargs='?', default=None, \
+        help="Path to the trajectory pickle of the first orbit. Omit it to give that orbit with "
+             "--q1, --e1, --i1, --peri1 and --node1.")
 
-    arg_parser.add_argument('traj_path2', metavar='TRAJ_PATH', type=str, \
-        help="Path to an optional second trajectory pickle file. If it's not given, then the orbital parameters need to be specified manually.")
+    arg_parser.add_argument('traj_path2', metavar='TRAJ_PATH2', type=str, nargs='?', default=None, \
+        help="Path to the trajectory pickle of the second orbit. Omit it to give that orbit with "
+             "--q2, --e2 and so on, or with the unnumbered -q, -e, -i, -p and -n.")
 
-    arg_parser.add_argument('-q', '--q', metavar='PERIHELION_DIST', help="Perihelion distance in AU.", \
-        type=float)
+    elem1 = arg_parser.add_argument_group('first orbit, given by hand')
+    elem1.add_argument('--q1', metavar='PERIHELION_DIST1', type=float, \
+        help="Perihelion distance of the first orbit in AU.")
+    elem1.add_argument('--e1', metavar='ECCENTRICITY1', type=float, \
+        help="Eccentricity of the first orbit.")
+    elem1.add_argument('--i1', metavar='INCLINATION1', type=float, \
+        help="Inclination of the first orbit (deg).")
+    elem1.add_argument('--peri1', metavar='ARG_OF_PERI1', type=float, \
+        help="Argument of perihelion of the first orbit (deg).")
+    elem1.add_argument('--node1', metavar='ASCENDING_NODE1', type=float, \
+        help="Ascending node of the first orbit (deg).")
+    elem1.add_argument('--ra1', metavar='RA_G1', type=float, \
+        help="Right ascension of the geocentric radiant of the first orbit (deg).")
+    elem1.add_argument('--dec1', metavar='DEC_G1', type=float, \
+        help="Declination of the geocentric radiant of the first orbit (deg).")
+    elem1.add_argument('--sol1', metavar='SOLAR_LON1', type=float, \
+        help="Solar longitude of the first orbit (deg).")
+    elem1.add_argument('--vg1', metavar='V_G1', type=float, \
+        help="Geocentric velocity of the first orbit (km/s).")
 
-    arg_parser.add_argument('-e', '--e', metavar='ECCENTRICITY', help="Eccentricity.", \
-        type=float)
+    elem2 = arg_parser.add_argument_group('second orbit, given by hand',
+        "The unnumbered forms are kept so that existing command lines keep working.")
+    elem2.add_argument('-q', '--q', '--q2', metavar='PERIHELION_DIST2', type=float, dest='q2', \
+        help="Perihelion distance of the second orbit in AU.")
+    elem2.add_argument('-e', '--e', '--e2', metavar='ECCENTRICITY2', type=float, dest='e2', \
+        help="Eccentricity of the second orbit.")
+    elem2.add_argument('-i', '--i', '--i2', metavar='INCLINATION2', type=float, dest='i2', \
+        help="Inclination of the second orbit (deg).")
+    elem2.add_argument('-p', '--peri', '--peri2', metavar='ARG_OF_PERI2', type=float, \
+        dest='peri2', help="Argument of perihelion of the second orbit (deg).")
+    elem2.add_argument('-n', '--node', '--node2', metavar='ASCENDING_NODE2', type=float, \
+        dest='node2', help="Ascending node of the second orbit (deg).")
+    elem2.add_argument('--ra', '--ra2', metavar='RA_G2', type=float, dest='ra2', \
+        help="Right ascension of the geocentric radiant of the second orbit (deg).")
+    elem2.add_argument('--dec', '--dec2', metavar='DEC_G2', type=float, dest='dec2', \
+        help="Declination of the geocentric radiant of the second orbit (deg).")
+    elem2.add_argument('--sol', '--sol2', metavar='SOLAR_LON2', type=float, dest='sol2', \
+        help="Solar longitude of the second orbit (deg).")
+    elem2.add_argument('--vg', '--vg2', metavar='V_G2', type=float, dest='vg2', \
+        help="Geocentric velocity of the second orbit (km/s).")
 
-    arg_parser.add_argument('-i', '--i', metavar='INCLINATION', help="Inclination (deg).", \
-        type=float)
-
-    arg_parser.add_argument('-p', '--peri', metavar='ARG_OF_PERI', help="Argument of perihelion (deg).", \
-        type=float)
-
-    arg_parser.add_argument('-n', '--node', metavar='ASCENDING_NODE', help="Ascending node (deg).", \
-        type=float)
+    output = arg_parser.add_argument_group('selection and output')
+    output.add_argument('-c', '--criterion', metavar='KEY', type=str, nargs='+', default=None, \
+        help="Compute only these criteria instead of all of them. Keys, case insensitive: "
+             + ", ".join(ALL_KEYS) + ".")
+    output.add_argument('--no_classification', action='store_true', \
+        help="Skip the dynamical classification of each orbit.")
+    output.add_argument('--quiet', '-Q', action='store_true', \
+        help="Print one 'KEY VALUE' line per criterion and nothing else, for scripted use.")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
     #########################
 
-    print("Input files:")
-    print("First  =", cml_args.traj_path)
-    print("Second =", cml_args.traj_path2)
 
-    # Load the reference trajectory pickle file
-    traj_ref = loadPickle(*os.path.split(cml_args.traj_path))
+    def reportError(message):
+        """ Print a message to stderr and stop.
 
-    # Load orbital elements
-    q_ref = traj_ref.orbit.q
-    e_ref = traj_ref.orbit.e
-    incl_ref = np.degrees(traj_ref.orbit.i)
-    peri_ref = np.degrees(traj_ref.orbit.peri)
-    node_ref = np.degrees(traj_ref.orbit.node)
+        Arguments:
+            message: [str] what went wrong
+        """
+
+        print(message, file=sys.stderr)
+        sys.exit(1)
 
 
+    def geocentricFromOrbit(orbit):
+        """ Pull the radiant, the solar longitude and the geocentric speed out of an orbit, in the
+            units the criteria take. The orbit stores speeds in m/s and the criteria expect km/s.
 
-    # If the trajectory pickle was given as a second argument, load the orbital elements from it
-    if cml_args.traj_path2 is not None:
+        Arguments:
+            orbit: [Orbit] orbit of a trajectory
 
-        # Load the trajectory pickle
-        traj = loadPickle(*os.path.split(cml_args.traj_path2))
+        Return:
+            [tuple] (ra, dec, solar longitude, speed) in radians and km/s, or None if the orbit
+                does not carry all four
+        """
 
-        # Load orbital elements
-        q = traj.orbit.q
-        e = traj.orbit.e
-        incl = np.degrees(traj.orbit.i)
-        peri = np.degrees(traj.orbit.peri)
-        node = np.degrees(traj.orbit.node)
+        values = (orbit.ra_g, orbit.dec_g, orbit.la_sun, orbit.v_g)
+
+        if any(v is None for v in values):
+            return None
+
+        return (orbit.ra_g, orbit.dec_g, orbit.la_sun, orbit.v_g/1000.0)
 
 
-    # Otherwise, load orbital elements from the manual entry
-    else:
+    def heliocentricFromOrbit(orbit):
+        """ The same for the corrected heliocentric direction and speed, which the Vida criterion
+            takes.
 
-        # Check that all elements are given
-        if (cml_args.q is not None) and (cml_args.e is not None) and (cml_args.i is not None) \
-            and (cml_args.peri is not None) and (cml_args.node is not None):
+        Arguments:
+            orbit: [Orbit] orbit of a trajectory
 
-            q = cml_args.q
-            e = cml_args.e
-            incl = cml_args.i
-            peri = cml_args.peri
-            node = cml_args.node
+        Return:
+            [tuple] (ecliptic longitude, ecliptic latitude, solar longitude, speed) in radians and
+                km/s, or None if the orbit does not carry all four
+        """
+
+        values = (orbit.L_h, orbit.B_h, orbit.la_sun, orbit.v_h)
+
+        if any(v is None for v in values):
+            return None
+
+        return (orbit.L_h, orbit.B_h, orbit.la_sun, orbit.v_h/1000.0)
+
+
+    def loadOrbit(traj_path, elements, geocentric, which):
+        """ Assemble one orbit, either from a trajectory pickle or from elements given by hand.
+
+        Arguments:
+            traj_path: [str] path to a trajectory pickle, or None
+            elements: [tuple] (q, e, i, peri, node) from the command line, degrees for the angles,
+                any of them None
+            geocentric: [tuple] (ra, dec, solar longitude, speed) from the command line, degrees
+                and km/s, any of them None
+            which: [str] which orbit this is, for the error messages
+
+        Return:
+            [tuple] (elements in radians, geocentric quantities or None, heliocentric or None,
+                degrees for printing)
+        """
+
+        if traj_path is not None:
+
+            traj = loadPickle(*os.path.split(traj_path))
+            orbit = traj.orbit
+
+            degrees = (orbit.q, orbit.e, np.degrees(orbit.i), np.degrees(orbit.peri),
+                np.degrees(orbit.node))
+
+            return ((orbit.q, orbit.e, orbit.i, orbit.node, orbit.peri),
+                geocentricFromOrbit(orbit), heliocentricFromOrbit(orbit), degrees)
+
+        if any(v is None for v in elements):
+
+            reportError("The {:s} orbit needs either a trajectory pickle or all five of its "
+                "elements.".format(which))
+
+        q, e, incl, peri, node = elements
+
+        # The radiant quantities are optional, and all four are needed together
+        if all(v is not None for v in geocentric):
+            ra, dec, sol, vg = geocentric
+            geo = (np.radians(ra), np.radians(dec), np.radians(sol), vg)
 
         else:
-            print("All orbital elements need to be specified: q, e, i, peri, node!")
-            sys.exit()
+            geo = None
+
+            if any(v is not None for v in geocentric):
+                reportError("The radiant arguments of the {:s} orbit have to be given together: "
+                    "right ascension, declination, solar longitude and speed.".format(which))
+
+        # A heliocentric direction cannot be given on the command line
+        return ((q, e, np.radians(incl), np.radians(node), np.radians(peri)), geo, None,
+            (q, e, incl, peri, node))
 
 
+    # Work out which criteria were asked for
+    if cml_args.criterion is None:
+        selected = set(ALL_KEYS)
 
-    # Print reference orbital elements
-    print("Reference orbital elements:")
-    print("  q = {:.5f} AU".format(q_ref))
-    print("  e = {:.5f}".format(e_ref))
-    print("  i = {:.5f} deg".format(incl_ref))
-    print("  w = {:.5f} deg".format(peri_ref))
-    print("  O = {:.5f} deg".format(node_ref))
-    print()
-    print("Comparison orbital elements:")
-    print("  q = {:.5f} AU".format(q))
-    print("  e = {:.5f}".format(e))
-    print("  i = {:.5f} deg".format(incl))
-    print("  w = {:.5f} deg".format(peri))
-    print("  O = {:.5f} deg".format(node))
-    print()
+    else:
+        selected = set(key.upper() for key in cml_args.criterion)
+
+        unknown = sorted(selected - set(ALL_KEYS))
+
+        if unknown:
+            reportError("Unknown criterion {:s}. Available: {:s}.".format(", ".join(unknown),
+                ", ".join(ALL_KEYS)))
+
+    verbose = not cml_args.quiet
 
 
+    # Assemble both orbits
+    orbit1, geo1, helio1, degrees1 = loadOrbit(cml_args.traj_path,
+        (cml_args.q1, cml_args.e1, cml_args.i1, cml_args.peri1, cml_args.node1),
+        (cml_args.ra1, cml_args.dec1, cml_args.sol1, cml_args.vg1), "first")
 
-    # Compute various D criteria
-    d_sh = calcDSH(q_ref, e_ref, np.radians(incl_ref), np.radians(node_ref), np.radians(peri_ref), \
-        q, e, np.radians(incl), np.radians(node), np.radians(peri))
-    d_d = calcDD(q_ref, e_ref, np.radians(incl_ref), np.radians(node_ref), np.radians(peri_ref), \
-        q, e, np.radians(incl), np.radians(node), np.radians(peri))
-    d_h = calcDH(q_ref, e_ref, np.radians(incl_ref), np.radians(node_ref), np.radians(peri_ref), \
-        q, e, np.radians(incl), np.radians(node), np.radians(peri))
-
-    print()
-    print("Results:")
-    print("D_SH = {:.4f}".format(d_sh))
-    print("D_D  = {:.4f}".format(d_d))
-    print("D_H  = {:.4f}".format(d_h))
+    orbit2, geo2, helio2, degrees2 = loadOrbit(cml_args.traj_path2,
+        (cml_args.q2, cml_args.e2, cml_args.i2, cml_args.peri2, cml_args.node2),
+        (cml_args.ra2, cml_args.dec2, cml_args.sol2, cml_args.vg2), "second")
 
 
+    if verbose:
+
+        print("First orbit:")
+        if cml_args.traj_path is not None:
+            print("  from {:s}".format(cml_args.traj_path))
+        print("  q = {:.5f} AU".format(degrees1[0]))
+        print("  e = {:.5f}".format(degrees1[1]))
+        print("  i = {:.5f} deg".format(degrees1[2]))
+        print("  w = {:.5f} deg".format(degrees1[3]))
+        print("  O = {:.5f} deg".format(degrees1[4]))
+        print()
+        print("Second orbit:")
+        if cml_args.traj_path2 is not None:
+            print("  from {:s}".format(cml_args.traj_path2))
+        print("  q = {:.5f} AU".format(degrees2[0]))
+        print("  e = {:.5f}".format(degrees2[1]))
+        print("  i = {:.5f} deg".format(degrees2[2]))
+        print("  w = {:.5f} deg".format(degrees2[3]))
+        print("  O = {:.5f} deg".format(degrees2[4]))
+
+
+    # Criteria on the orbital elements
+    element_results = [(label, float(func(orbit1, orbit2)))
+        for key, label, func in ELEMENT_CRITERIA if key in selected]
+
+    if element_results:
+
+        if verbose:
+            print()
+            print("Criteria on the orbital elements")
+            print("--------------------------------")
+
+        for label, value in element_results:
+            print("  {:<11s} = {:12.6f}".format(label, value) if verbose \
+                else "{:s} {:.6f}".format(label, value))
+
+
+    # Criteria on the geocentric radiant and speed
+    geocentric_wanted = [c for c in GEOCENTRIC_CRITERIA if c[0] in selected]
+    heliocentric_wanted = [c for c in HELIOCENTRIC_CRITERIA if c[0] in selected]
+
+    if geocentric_wanted or heliocentric_wanted:
+
+        rows = []
+
+        if (geo1 is not None) and (geo2 is not None):
+            rows += [(label, float(func(geo1, geo2))) for _, label, func in geocentric_wanted]
+
+        if (helio1 is not None) and (helio2 is not None):
+            rows += [(label, float(func(helio1, helio2))) for _, label, func in heliocentric_wanted]
+
+        if rows:
+
+            if verbose:
+                print()
+                print("Criteria on the geocentric radiant and speed")
+                print("-------------------------------------------")
+
+            for label, value in rows:
+                print("  {:<11s} = {:12.6f}".format(label, value) if verbose \
+                    else "{:s} {:.6f}".format(label, value))
+
+        elif verbose:
+            print()
+            print("The criteria on the radiant were skipped: they need the radiant, the solar")
+            print("longitude and the geocentric speed of both orbits, from a trajectory pickle or")
+            print("from the --ra, --dec, --sol and --vg arguments of each orbit.")
+
+
+    # Dynamical classification of each orbit
+    if verbose and not cml_args.no_classification:
+
+        a1 = orbit1[0]/(1.0 - orbit1[1])
+        a2 = orbit2[0]/(1.0 - orbit2[1])
+
+        print()
+        print("Dynamical classification of each orbit")
+        print("--------------------------------------")
+        print("  {:<28s} {:>18s} {:>18s}".format("", "first", "second"))
+
+        for label, values in (
+            ("Tisserand parameter T_J", (calcTisserand(a1, orbit1[1], orbit1[2]),
+                calcTisserand(a2, orbit2[1], orbit2[2]))),
+            ("Whipple K", (calcWhippleK(a1, orbit1[1]), calcWhippleK(a2, orbit2[1]))),
+            ("Kresak P (yr)", (calcKresakP(a1, orbit1[1]), calcKresakP(a2, orbit2[1]))),
+            ("Aphelion Q (AU)", (calcAphelionDistance(a1, orbit1[1]),
+                calcAphelionDistance(a2, orbit2[1]))),
+            ):
+
+            print("  {:<28s} {:18.4f} {:18.4f}".format(label, float(values[0]), float(values[1])))
+
+        for label, test in (("Q-i", isCometaryQi), ("E-i", isCometaryEi), ("T-i", isCometaryTi),
+                            ("P-i", isCometaryPi), ("K-i", isCometaryKi)):
+
+            first = "cometary" if bool(test(a1, orbit1[1], orbit1[2])) else "asteroidal"
+            second = "cometary" if bool(test(a2, orbit2[1], orbit2[2])) else "asteroidal"
+
+            print("  {:<28s} {:>18s} {:>18s}".format("Jopek & Williams " + label, first, second))
+
+        print("  {:<28s} {:>18s} {:>18s}".format("Tancredi class",
+            classifyTancrediComet(a1, orbit1[1], orbit1[2]),
+            classifyTancrediComet(a2, orbit2[1], orbit2[2])))
 
 
     sys.exit()
