@@ -96,6 +96,32 @@ def testEncountersSortedByClosenessAndUntrackedSkipped(reb):
     assert "Venus" not in [e["body"] for e in encounters]
 
 
+def testEncountersFromMinDistancesIncludesTheSun(reb):
+    """ The Sun is gated on SUN_ENCOUNTER_AU, carries no Hill radius, and sorts by its own threshold.
+
+    The per-particle "encounters" diagnostic already lists Sun passages, so the list rebuilt from
+    the closest-approach dictionaries must agree with it rather than silently drop the Sun.
+    """
+
+    min_dist = {"Sun": 0.5*reb.SUN_ENCOUNTER_AU, "Earth": 2.5*reb.HILL_RADII_AU["Earth"],
+                "Luna": 0.9*reb.HILL_RADII_AU["Luna"]}
+    min_time = {"Sun": -40.0, "Earth": -1.0, "Luna": -2.0}
+
+    encounters = reb.encountersFromMinDistances(min_dist, min_time, n_hill=3.0)
+
+    # Luna at 0.3 of its threshold, the Sun at 0.5 of its own, the Earth at 0.83 of its own
+    assert [e["body"] for e in encounters] == ["Luna", "Sun", "Earth"]
+
+    sun = encounters[1]
+    assert sun["min_dist_au"] == pytest.approx(0.5*reb.SUN_ENCOUNTER_AU)
+    assert sun["time_days"] == -40.0
+    assert (sun["hill_radius_au"] is None) and (sun["n_hill"] is None)
+
+    # Outside the fixed distance the Sun is not an encounter, whatever n_hill is
+    min_dist["Sun"] = 1.5*reb.SUN_ENCOUNTER_AU
+    assert "Sun" not in [e["body"] for e in reb.encountersFromMinDistances(min_dist, min_time, n_hill=30.0)]
+
+
 ### Closest approach inside one integrator step ###
 
 def _hyperbolicFlyby(t, mu, q, e):

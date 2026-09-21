@@ -234,12 +234,71 @@ def testACloseSunPassageIsAnEncounter(reb):
     assert diag["min_dist_au"]["Sun"] == pytest.approx(0.15, rel=1e-2)
 
 
-def testAPerihelionInsideTheSunIsAnImpact(reb):
-    """ The Sun has a physical radius, so an orbit that dives into it ends in an impact. """
+def testSunMinimumIsNotLimitedByTheIntegratorStep(reb):
+    """ The perihelion distance recorded with a single output over the whole span must match a dense
+    re-integration, as for the planetary flybys: the Hermite refinement has to hold through the
+    strongly curved motion at perihelion too. (Measured: 1e-6 down to q = 0.02 AU, 1e-4 at 1 R_Sun.)
+    """
 
-    diag = reb._integrateParticles(_sunTask(0.5*reb.SUN_RADIUS_AU))["diagnostics"]["obj"]
+    task = _sunTask(0.02)
+
+    diag_coarse = reb._integrateParticles(dict(task, times=[0.0, 20.0*DAY]))["diagnostics"]["obj"]
+    diag_dense = reb._integrateParticles(dict(task, times=list(np.linspace(0.0, 20.0*DAY, 3001))))["diagnostics"]["obj"]
+
+    assert diag_coarse["min_dist_au"]["Sun"] == pytest.approx(diag_dense["min_dist_au"]["Sun"], rel=1e-5)
+    assert abs(diag_coarse["min_time_days"]["Sun"] - diag_dense["min_time_days"]["Sun"])*1440 < 0.5
+
+    # Both runs list the same single passage
+    for diag in (diag_coarse, diag_dense):
+        sun = [enc for enc in diag["encounters"] if enc["body"] == "Sun"]
+        assert len(sun) == 1
+        assert sun[0]["min_dist_au"] == diag["min_dist_au"]["Sun"]
+
+
+def testABackwardSunPassageIsListedAtNegativeTime(reb):
+    """ In a backward run the Sun passage is listed at the (negative) time it happened, like the
+    planetary flybys, and agrees with the tracked closest-approach time.
+    """
+
+    task = _sunTask(0.05)
+
+    # Reverse the velocity, so the perihelion lies ~13 days in the past instead of the future
+    state = task["particle_states"][0]
+    task = dict(task, direction="backward", times=list(-np.linspace(0.0, 20.0*DAY, 21)),
+                particle_states=[state[:3] + [-v for v in state[3:]]])
+
+    diag = reb._integrateParticles(task)["diagnostics"]["obj"]
+    sun = [enc for enc in diag["encounters"] if enc["body"] == "Sun"]
+
+    assert len(sun) == 1
+    assert sun[0]["time_days"] == pytest.approx(-13.4, abs=0.1)
+    assert sun[0]["time_days"] == diag["min_time_days"]["Sun"]
+
+
+@pytest.mark.parametrize("q_solar_radii", [0.5, 0.99])
+def testAPerihelionInsideTheSunIsAnImpact(reb, q_solar_radii):
+    """ The Sun has a physical radius, so an orbit that dives into it ends in an impact, whether it
+    plunges deep or only grazes. The impact is recorded at the surface, and the aborted passage does
+    not also appear as an encounter.
+    """
+
+    diag = reb._integrateParticles(_sunTask(q_solar_radii*reb.SUN_RADIUS_AU))["diagnostics"]["obj"]
 
     assert diag["impact"]["body"] == "Sun"
+    assert diag["impact"]["dist_au"] == pytest.approx(reb.SUN_RADIUS_AU, rel=0.02)
+    assert "Sun" not in [enc["body"] for enc in diag["encounters"]]
+
+
+def testAPerihelionJustAboveTheSurfaceIsAnEncounterNotAnImpact(reb):
+    """ One percent above the surface the object survives and the passage is listed. """
+
+    diag = reb._integrateParticles(_sunTask(1.01*reb.SUN_RADIUS_AU))["diagnostics"]["obj"]
+    sun = [enc for enc in diag["encounters"] if enc["body"] == "Sun"]
+
+    assert diag["impact"] is None
+    assert len(sun) == 1
+    assert sun[0]["min_dist_au"] == pytest.approx(1.01*reb.SUN_RADIUS_AU, rel=1e-3)
+    assert sun[0]["hill_radius_au"] is None
 
 
 ### Monte Carlo encounter summary ###

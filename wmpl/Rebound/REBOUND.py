@@ -221,11 +221,33 @@ HILL_RADII_AU = {
 }
 
 # The Sun has no Hill sphere, so a close approach to it is flagged by distance instead: a perihelion
-# passage closer than this is listed with the other close encounters
+# passage closer than this is listed with the other close encounters. 0.1 AU is where the thermal
+# processing of meteoroids is established: Na is thermally desorbed at q < 0.1 AU (Kasuga et al.
+# 2006, A&A 453, L17; the Na-free population of Borovicka et al. 2005), asteroids disrupt at
+# q ~ 0.076 AU (Granvik et al. 2016, Nature 530, 303), and it lies inside the sunskirter zone of
+# Jones et al. (2018, SSRv 214, 20), q < 33 R_Sun = 0.153 AU.
 SUN_ENCOUNTER_AU = 0.1
 
-# Radius of the Sun in AU, used for impact detection
+# Radius of the Sun in AU (IAU 2015 nominal, 695 700 km), used for impact detection
 SUN_RADIUS_AU = 695700.0/149597870.7
+
+
+def _encounterThreshold(body, n_hill):
+    """ Distance below which a passage by the given body counts as a close encounter.
+
+    Arguments:
+        body: [str] Body name, as in HILL_RADII_AU.
+        n_hill: [float] Multiple of the Hill radius used as the threshold for the planets and the Moon.
+
+    Return:
+        [float] Threshold in AU: n_hill Hill radii, SUN_ENCOUNTER_AU for the Sun, and 0.0 for a body
+            with neither, which no distance can fall below.
+    """
+
+    if body == "Sun":
+        return SUN_ENCOUNTER_AU
+
+    return n_hill*HILL_RADII_AU.get(body, 0.0)
 
 
 # NAIF-ID segment paths (center, target) used to build each body's state relative to the Solar
@@ -372,7 +394,8 @@ def detectCloseEncounters(sim_outputs, n_hill=3.0):
     lunar encounter can be missed outright or its minimum distance overestimated (by ~60000 km at
     n_outputs = 100 on a real trajectory). Prefer encountersFromMinDistances, which uses the minima
     tracked at every internal integrator timestep and refined between steps. This function is kept
-    for callers that only have sampled output to work from.
+    for callers that only have sampled output to work from. It does not list the Sun, whose passages
+    are gated on a fixed distance (SUN_ENCOUNTER_AU) rather than a Hill radius.
 
     A close encounter is flagged when the minimum object-body distance drops below n_hill times
     the body's Hill-sphere radius (see HILL_RADII_AU). The Hill sphere is the standard criterion
@@ -553,7 +576,8 @@ def encountersFromMinDistances(min_dist_au, min_time_days, n_hill=3.0):
     _integrateParticles lists every passage instead, so repeated encounters with the same body are
     not lost, and that is what the command line report uses. This function remains the way to build
     the list for a caller that only has the closest-approach dictionaries, for example from a
-    diagnostics dict saved by an older version.
+    diagnostics dict saved by an older version. It applies the same gates as the heartbeat: n_hill
+    Hill radii for the planets and the Moon, SUN_ENCOUNTER_AU for the Sun.
 
     Arguments:
         min_dist_au: [dict] {body: closest approach in AU, or None if the body was not tracked}.
@@ -564,22 +588,25 @@ def encountersFromMinDistances(min_dist_au, min_time_days, n_hill=3.0):
             Default is 3.0.
 
     Return:
-        [list] Encounter dicts in the same format as detectCloseEncounters, sorted by closeness
-            (min_dist/R_Hill ascending).
+        [list] Encounter dicts in the same format as detectCloseEncounters, sorted by closeness in
+            units of each body's own threshold (min_dist/(n_hill*R_Hill), or min_dist/SUN_ENCOUNTER_AU
+            for the Sun, ascending). The Sun's "hill_radius_au" and "n_hill" are None.
     """
 
     encounters = []
 
-    for body, hill_radius in HILL_RADII_AU.items():
+    # The planets and the Moon are gated on their Hill radii, the Sun on a fixed distance
+    for body in list(HILL_RADII_AU) + ["Sun"]:
 
         dist = min_dist_au.get(body)
         if dist is None:
             continue
 
-        if dist < n_hill*hill_radius:
+        if dist < _encounterThreshold(body, n_hill):
             encounters.append(_encounterRecord(body, dist, min_time_days.get(body)))
 
-    encounters.sort(key=lambda e: e["n_hill"])
+    # Closest first, in units of each body's threshold: the Sun has no n_hill to sort on
+    encounters.sort(key=lambda e: e["min_dist_au"]/_encounterThreshold(e["body"], n_hill))
 
     return encounters
 
@@ -670,8 +697,10 @@ def whfastEncounterWarning(diagnostics, n_hill=3.0):
 
     return ("WARNING: {:d} close encounter(s) (< {:.0f} Hill radii, Sun < {:.2f} AU, nominal and "
             "clones) happened while WHFast was integrating. WHFast does not resolve close "
-            "encounters, so the orbits after them can be wrong (measured: 0.3% to 200% in a after "
-            "flybys inside 0.1 R_Hill). Rerun with --integrator trace or ias15.".format(
+            "encounters, and its fixed step does not resolve a perihelion this close to the Sun "
+            "either, so the orbits after them can be wrong (measured: 0.3% to 200% in a after "
+            "flybys inside 0.1 R_Hill; an orbit with q = 0.07 AU was ejected within 100 yr at the "
+            "default 0.5 d step). Rerun with --integrator trace or ias15.".format(
                 n_encounters, n_hill, SUN_ENCOUNTER_AU))
 
 
@@ -1285,7 +1314,8 @@ def _integrateParticles(task):
                 "min_time_days": {body: time of closest approach in days},
                 "encounters":    [list] every close encounter, in the order it happened: one dict
                                  per local minimum of an object-body distance inside n_hill Hill
-                                 radii, in the format of encountersFromMinDistances,
+                                 radii (inside SUN_ENCOUNTER_AU for the Sun), in the format of
+                                 encountersFromMinDistances,
                 "departed":      [bool] whether the object left the Earth's neighbourhood,
                 "impact":        None, or {"body", "time_days", "dist_au"} if the object hit a body,
             }},
@@ -1524,12 +1554,7 @@ def _integrateParticles(task):
 
                         # Every such passage inside the threshold is an encounter: n_hill Hill radii,
                         # or a fixed distance for the Sun, which has no Hill sphere
-                        if bname == "Sun":
-                            threshold = SUN_ENCOUNTER_AU
-                        else:
-                            threshold = n_hill*HILL_RADII_AU.get(bname, 0.0)
-
-                        if d_h < threshold:
+                        if d_h < _encounterThreshold(bname, n_hill):
                             st["encounters"].append((bname, t_h, d_h))
 
                 st["prev"][bname] = (t_now, rel, rv)
@@ -3305,6 +3330,10 @@ if __name__ == "__main__":
             "integrator": args.integrator,
             "dt_days": dt_days,
             "fixed_step_from_days": fixed_from,
+            # The close-encounter gates, so a nominal-only run records them too ("clone_outcomes",
+            #   which repeats them, is null without --mc)
+            "n_hill_threshold": n_hill,
+            "sun_encounter_au": SUN_ENCOUNTER_AU,
         },
         "whfast_encounter_warning": whfast_warning,
         "megno": megno,
