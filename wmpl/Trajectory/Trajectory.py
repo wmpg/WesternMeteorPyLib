@@ -469,7 +469,7 @@ class ObservedPoints(object):
 
 
     def calcECI(self):
-        """ Calculate Earth-centered intertial coordinates from RA and Dec. """
+        """ Calculate Earth-centered inertial coordinates from RA and Dec. """
 
         # Calculate measurement ECI coordinates for the planes intersection method
         self.meas_eci = np.array(raDec2ECI(self.ra_data, self.dec_data)).T
@@ -484,7 +484,7 @@ class ObservedPoints(object):
     def planeFit(self):
         """ Fits a plane through station position and observed points. """
 
-        # Add meteor line of sight positions and station positions to single arays.
+        # Add meteor line of sight positions and station positions to single arrays.
         #   Only use non-ignored points
         x_data = np.append(self.x_eci[self.ignore_list == 0], 0)
         y_data = np.append(self.y_eci[self.ignore_list == 0], 0)
@@ -777,7 +777,7 @@ def angleSumMeasurements2Line(observations, state_vect, radiant_eci, weights=Non
     # Move the state vector to the beginning of the trajectory
     state_vect = moveStateVector(state_vect, radiant_eci, observations)
 
-    # Make sure that the radiant vector is a contigous array for faster calculations
+    # Make sure that the radiant vector is a contiguous array for faster calculations
     radiant_eci = np.ascontiguousarray(radiant_eci)
 
     # Find the earliest point in time
@@ -955,14 +955,14 @@ def calcSpatialResidual(jdt_ref, jd, state_vect, radiant_eci, stat, meas, gravit
     ehy = np.dot(p, hy_eci)
 
     # Explanation of the residuals:
-    # The vertical residuals have a positive sign for any "measured" CPA point lying above the plane of the 
-    # fitted (model) trajectory. The reference frame x-axis points towards the radiant, and as you look 
-    # towards the radiant the y-axis points to your left. The horizontal residual is effectively the dot 
-    # product with the y-axis which therefore has a positive sign for measured CPA's to the left of the model 
-    # trajectory. Since the CPA vector is calculated to be perpendicular to the x-axis, the dot product of 
-    # this is vanishingly small. We retain the form of square root of the x & y axes dot products for 
-    # completeness, and this would also become important if a velocity model was used. It is also important 
-    # that z = x^y for right-handed axes.
+    # The vertical residuals have a positive sign for any "measured" CPA point lying above the plane of the
+    # fitted (model) trajectory. The reference frame x-axis points towards the radiant, and as you look
+    # down the trajectory (radiant behind you) the y-axis points to your right. The horizontal residual is
+    # effectively the dot product with the y-axis which therefore has a positive sign for measured CPA's to
+    # the right of the model trajectory. Since the CPA vector is calculated to be perpendicular to the x-axis,
+    # the dot product of this is vanishingly small. We retain the form of square root of the x & y axes dot
+    # products for completeness, and this would also become important if a velocity model was used. It is
+    # also important that z = x^y for right-handed axes.
                                                     
     # Calculate horizontal residuals
     # Looking along the trajectory (radiant behind you, you're on top of the trajectory), 
@@ -983,7 +983,7 @@ def lineFuncLS(params, x, y, weights):
     
     Arguments:
         params: [list] Line parameters 
-        x: [float] Independant variable
+        x: [float] Independent variable
         y: [float] Estimated values
 
     Keyword arguments:
@@ -1520,7 +1520,7 @@ class MCUncertainties(object):
         self.Tj = None
         self.Tj_ci = None
 
-# Preserve compatibility with pickle files genrated before the typo fix
+# Preserve compatibility with pickle files generated before the typo fix
 MCUncertanties = MCUncertainties
 
 
@@ -1773,7 +1773,7 @@ def calcCovMatrices(mc_traj_list):
     """ Calculate the covariance matrix between orbital elements, and initial state vector using all Monte 
         Carlo trajectories. The covariance matrix is weighted by the timing residuals.
 
-        The orbital covariance matrix is calculated for radians and the inital state vector matrix in meters
+        The orbital covariance matrix is calculated for radians and the initial state vector matrix in meters
         and meters per second.
 
     Arguments:
@@ -1815,11 +1815,11 @@ def calcCovMatrices(mc_traj_list):
     orbit_cov = np.cov(orbit_input, aweights=weights)
 
 
-    # Extract inital state vectors
+    # Extract initial state vectors
     state_vect_list = np.array([traj.state_vect_mini for traj in mc_traj_list])
     initial_vel_vect_list = np.array([traj.v_init*traj.radiant_eci_mini for traj in mc_traj_list])
 
-    # Calculate inital state vector covariance
+    # Calculate initial state vector covariance
     state_vect_input = np.hstack([state_vect_list, initial_vel_vect_list]).T
     state_vect_cov = np.cov(state_vect_input, aweights=weights)
 
@@ -2004,7 +2004,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
         in parallel on all available computer cores.
 
         The uncertanty is taken as the standard deviation of angular measurements. Each point is sampled 
-        mc_pick_multiplier times using a symetric 2D Gaussian kernel.
+        mc_pick_multiplier times using a symmetric 2D Gaussian kernel.
 
     Arguments:
         traj: [Trajectory object] initial trajectory on which Monte Carlo runs will be performed
@@ -2019,7 +2019,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
             the ones with the better cost function value than the pure geometric solution. Use this when
             the lag is not reliable.
         plot_results: [bool] Plot the trajectory and orbit spread. True by default.
-        mc_cores: [int] Number of CPU cores to use for Monte Carlo parallel procesing. None by default,
+        mc_cores: [int] Number of CPU cores to use for Monte Carlo parallel processing. None by default,
             which means that all available cores will be used.
         max_runs: [int] Maximum number of runs. None by default, which will limit the runs to 10x req_num.
     """
@@ -2096,7 +2096,7 @@ def monteCarloTrajectory(traj, mc_runs=None, mc_pick_multiplier=1, noise_sigma=1
 
     log.info('Computing covariance matrices...')
 
-    # Calculate orbital and inital state vector covariance matrices (angles in degrees)
+    # Calculate orbital and initial state vector covariance matrices (angles in degrees)
     traj_best.orbit_cov, traj_best.state_vect_cov = calcCovMatrices(mc_results)
 
 
@@ -2362,7 +2362,7 @@ def applyGravityDrop(eci_coord, t, r0, gravity_factor, vz):
     # Define the mass of the Earth
     earth_mass = 5.9722e24 # kg
 
-    # Determing the sign of the initial time
+    # Determine the sign of the initial time
     time_sign = np.sign(t)
 
     # The derived drop function does not work for small vz's, thus the classical drop function is used
@@ -2508,11 +2508,11 @@ class Trajectory(object):
                 Can be between 0 - 1. Lower values used for lift compensation.
             plot_all_spatial_residuals: [bool] Plot all spatial residuals on one plot (one vs. time, and
                 the other vs. length). False by default.
-            plot_file_type: [str] File extansion of the plot image. 'png' by default, can be 'pdf', 'eps', ...
+            plot_file_type: [str] File extension of the plot image. 'png' by default, can be 'pdf', 'eps', ...
             traj_id: [str] Trajectory solution identifier. None by default.
             reject_n_sigma_outliers: [float] Reject angular outliers that are n sigma outside the fit.
                 This value is 3 (sigma) by default.
-            mc_cores: [int] Number of CPU cores to use for Monte Carlo parallell processing. None by default,
+            mc_cores: [int] Number of CPU cores to use for Monte Carlo parallel processing. None by default,
                 which means that all cores will be used.
             fixed_times: [dict] Dictionary of fixed times for each station. None by default, meaning that
                 all stations will be estimated. Only used if estimate_timing_vel is True.
@@ -2550,7 +2550,7 @@ class Trajectory(object):
             max_toffset = 1.0
         self.max_toffset = max_toffset
 
-        # If verbose True, results and status messages will be printed out, otherwise they will be supressed
+        # If verbose True, results and status messages will be printed out, otherwise they will be suppressed
         self.verbose = verbose
 
         # Fixed part from the beginning of the meteor on which the initial velocity estimation using the 
@@ -2677,7 +2677,7 @@ class Trajectory(object):
         # List of observations
         self.observations = []
 
-        # Minimization status - if True if LoS angle minimization is successfull, False otherwise
+        # Minimization status - if True if LoS angle minimization is successful, False otherwise
         self.los_mini_status = False
 
         # Index of the station with the reference time
@@ -2912,7 +2912,7 @@ class Trajectory(object):
             meas2 = np.pi/2.0 - obs.elev_data
 
 
-        ### PRESERVE COMPATBILITY WITH OLD obs OBJECTS ###
+        ### PRESERVE COMPATIBILITY WITH OLD obs OBJECTS ###
 
         # Check if the observation had any excluded points
         if hasattr(obs, 'excluded_time'):
@@ -2924,7 +2924,7 @@ class Trajectory(object):
         if hasattr(obs, 'ignore_list'):
             ignore_list = obs.ignore_list
 
-            # If the ignore list differens in length from time data, reinit
+            # If the ignore list difference in length from time data, reinit
             if len(ignore_list) != len(obs.time_data):
                 ignore_list = np.zeros(len(obs.time_data), dtype=np.uint8)
 
@@ -3098,7 +3098,7 @@ class Trajectory(object):
                     try:
                         popt, _ = scipy.optimize.curve_fit(lineFunc, time_part, len_part)
 
-                    # Check for this fit error, which happens extrememly rarely:
+                    # Check for this fit error, which happens extremely rarely:
                     # RuntimeError: Optimal parameters not found: gtol=0.000000 is too small, func(x) is 
                     # orthogonal to the columns of the Jacobian to machine precision.
                     except RuntimeError:
@@ -3250,7 +3250,7 @@ class Trajectory(object):
                 stations.
 
         Keyword arguments:
-            velocity_fit: [tuple of float] Initial velocity and fit intercept (m/s and m). None by defualt.
+            velocity_fit: [tuple of float] Initial velocity and fit intercept (m/s and m). None by default.
 
         """
 
@@ -3948,7 +3948,7 @@ class Trajectory(object):
         # Go through observations from all stations
         for obs in observations:
 
-            # Init array for modelled ECI positons
+            # Init array for modelled ECI positions
             obs.model_eci = []
 
             # Init array for modelled RA, Dec positions
@@ -4115,7 +4115,7 @@ class Trajectory(object):
 
                     if app_mag is not None:
                         
-                        # Compute absolute magntiude (apparent magnitude at 100 km)
+                        # Compute absolute magnitude (apparent magnitude at 100 km)
                         abs_mag = app_mag + 5*np.log10(100000/obs.model_range[i])
 
                     else:
@@ -4301,7 +4301,7 @@ class Trajectory(object):
             file_name: [str] Name of the report time.
 
         Keyword arguments:
-            uncertainties: [MCUncertainties object] Object contaning uncertainties of every parameter.
+            uncertainties: [MCUncertainties object] Object containing uncertainties of every parameter.
             verbose: [bool] Print the report to the screen. True by default.
             save_results: [bool] If True, the results will be saved to a file.
         """
@@ -5326,7 +5326,7 @@ class Trajectory(object):
                 ignored_times = obs.time_data[1:][obs.ignore_list[1:] > 0]
                 ignored_velocities = obs.velocities[1:][obs.ignore_list[1:] > 0]
 
-                # Set the label only for the first occurence
+                # Set the label only for the first occurrence
                 if first_ignored_plot:
 
                     ax1.scatter(ignored_velocities/1000, ignored_times, facecolors='none', edgecolors='k', \
@@ -5761,7 +5761,7 @@ class Trajectory(object):
                 ignored_times = obs.time_data[obs.ignore_list > 0]
                 ignored_residuals = res[obs.ignore_list > 0]
 
-                # Plot the label only for the first occurence
+                # Plot the label only for the first occurrence
                 if first_ignored_plot:
                     
                     plt.scatter(ignored_times, ignored_residuals, facecolors='none', edgecolors='k', s=20, \
@@ -6153,7 +6153,7 @@ class Trajectory(object):
 
         Return:
             traj_best: [Trajectory object] The best trajectory from all Monte Carlo runs. If no Monte Carlo
-                runs were preformed, the pure LoS trajectory will be returned.
+                runs were performed, the pure LoS trajectory will be returned.
 
         """
 
@@ -6320,7 +6320,7 @@ class Trajectory(object):
         # Set the initial guess for the state vector and the radiant from the intersecting plane solution
         p0 = np.r_[self.state_vect, self.best_conv_inter.radiant_eci]
 
-        # Perform the minimization of angle deviations. The gravity will only be compansated for after the
+        # Perform the minimization of angle deviations. The gravity will only be compensated for after the
         #   initial estimate of timing differences
         minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=(self.observations, weights, 
             (_rerun_timing and self.gravity_correction), self.gravity_factor, self.v0z), method="Nelder-Mead")
@@ -6366,7 +6366,7 @@ class Trajectory(object):
         # Set the minimization status
         self.los_mini_status = minimize_solution.success
 
-        # If the minimization succeded
+        # If the minimization succeeded
         if minimize_solution.success:
         
             # Unpack the solution
@@ -6650,7 +6650,7 @@ class Trajectory(object):
                 # Remove all picks which deviate more than N sigma in angular residuals
                 for obs in self.observations:
 
-                    # Find the indicies of picks which are within N sigma
+                    # Find the indices of picks which are within N sigma
                     good_picks = obs.ang_res < (np.mean(obs.ang_res) \
                         + self.reject_n_sigma_outliers*obs.ang_res_std)
 
@@ -6753,7 +6753,7 @@ class Trajectory(object):
             if uncertainties is not None:
                 traj_uncer = copy.deepcopy(uncertainties)
 
-                # Remove the list of all MC trajectires (it is unecessarily big)
+                # Remove the list of all MC trajectires (it is unnecessarily big)
                 traj_uncer.mc_traj_list = []
 
                 # Set the uncertainties to the best trajectory (maintain compatibility with older version 

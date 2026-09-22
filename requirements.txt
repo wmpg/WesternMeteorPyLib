@@ -18,5 +18,12 @@ numba
 watchdog==3.0.0; python_version == '3.7'
 watchdog; python_version >= '3.8'
 paramiko
-rebound==4.3.0
-reboundx==4.3.0 ; sys.platform != 'win32' and python_version != '3.11'
+# Deliberately unpinned. reboundx ships no wheels, so pip compiles it, and its pyproject.toml
+# requires 'rebound >= 4.0.0' as a build dependency. With build isolation, which is pip's default
+# and cannot be turned off from a requirements file, that resolves to the newest rebound on PyPI
+# regardless of what is pinned here. Pinning rebound therefore builds reboundx against a different
+# REBOUND than the one installed: at best the two disagree about the C simulation structure and
+# reboundx fails to attach, at worst the build fails outright. Leaving both free makes the build
+# and the runtime resolve to the same newest version. wmpl supports REBOUND 4 and 5.
+rebound
+reboundx ; sys.platform != 'win32'

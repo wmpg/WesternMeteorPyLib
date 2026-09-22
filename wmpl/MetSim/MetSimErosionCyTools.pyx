@@ -153,7 +153,7 @@ ctypedef np.float64_t FLOAT_TYPE_t
 #         # Meteoroid compressive strength (Pa)
 #         self.compressive_strength = 2000
 
-#         # Height of disruption (will be assigned when the disruption occures)
+#         # Height of disruption (will be assigned when the disruption occurs)
 #         self.disruption_height = -1
 
 #         # Erosion coefficient to use after disruption
@@ -396,8 +396,8 @@ cpdef double luminousEfficiency(int lum_eff_type, double lum_eff, double vel, do
         v_init: [double] Pre-atmospheric velocity (m/s), only used by the Revelle & Ceplecha (2001)
             models (types 1-3). If <= 0 (default -1), the deceleration correction term
             0.26*ln(dv) + 0.0042*ln(dv)^3, where dv = (v_init - vel) in km/s, is not applied.
-            The correction diverges as dv -> 0, so for 0 < dv < 0.1 km/s it is linearly tapered
-            to zero, and for vel >= v_init it is set to zero (instead of producing a NaN).
+            The correction diverges as dv -> 0, so dv is floored at 0.1 km/s. The floor also
+            covers vel >= v_init (instead of producing a NaN).
 
     Return:
         tau: [double] Luminous efficiency (ratio).
@@ -406,8 +406,8 @@ cpdef double luminousEfficiency(int lum_eff_type, double lum_eff, double vel, do
 
     cdef double c1, c2, lv, decel, dv
 
-    # Velocity difference (km/s) below which the Revelle & Ceplecha (2001) deceleration correction is
-    # linearly tapered to zero, keeping it bounded as it otherwise diverges to -inf as dv -> 0
+    # Velocity difference (km/s) at which the Revelle & Ceplecha (2001) deceleration correction is
+    # floored, keeping it bounded as it otherwise diverges to -inf as dv -> 0
     cdef double dv_min = 0.1
 
     # Constant luminous efficiency
@@ -441,14 +441,13 @@ cpdef double luminousEfficiency(int lum_eff_type, double lum_eff, double vel, do
 
             dv = (v_init - vel)/1000.0
 
-            if dv >= dv_min:
-                decel = 0.26*log(dv) + 0.0042*log(dv)**3
-
-            # Taper the correction linearly to zero below dv_min (it diverges as dv -> 0), and
-            # disable it for vel >= v_init (physically inconsistent input, avoid log of a
+            # Hold the correction at its dv_min value below dv_min, where it diverges as dv -> 0.
+            # This also covers vel >= v_init (physically inconsistent input, avoid log of a
             # non-positive number)
-            elif dv > 0:
-                decel = (dv/dv_min)*(0.26*log(dv_min) + 0.0042*log(dv_min)**3)
+            if dv < dv_min:
+                dv = dv_min
+
+            decel = 0.26*log(dv) + 0.0042*log(dv)**3
 
         # Slow meteoroids
         if vel < 25372:

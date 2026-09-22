@@ -316,7 +316,7 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, metal_mags, frag_info):
         # A list with results of finding the closest point on the trajectory
         cpa_list = []
 
-        # Go thorugh all fragments and calculate the coordinates of the closest points on the trajectory and 
+        # Go through all fragments and calculate the coordinates of the closest points on the trajectory and 
         # the line of sight
         for frag in fragments:
 
@@ -354,7 +354,7 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, metal_mags, frag_info):
                 jd_data)
 
 
-            # Find closest points of aproach for all measurements
+            # Find closest points of approach for all measurements
             for jd, x, y, z, x_stat, y_stat, z_stat in np.c_[jd_data, x_eci, y_eci, z_eci, x_stat_vect, \
                 y_stat_vect, z_stat_vect]:
                 
@@ -589,7 +589,7 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, metal_mags, frag_info):
             _, time_data, length_data, lat_data, lon_data, height_data = np.array(length_frag).T
 
 
-            # Fit a linear dependance of time vs. height
+            # Fit a linear dependence of time vs. height
             line_fit, _ = scipy.optimize.curve_fit(lineFunc, time_data, height_data)
 
 
@@ -778,7 +778,7 @@ def projectNarrowPicks(dir_path, met, traj, traj_uncert, metal_mags, frag_info):
             _, time_data, length_data, lat_data, lon_data, height_data = np.array(length_frag).T
 
 
-            # Fit a linear dependance of time vs. height
+            # Fit a linear dependence of time vs. height
             line_fit, _ = scipy.optimize.curve_fit(lineFunc, time_data, height_data)
 
 

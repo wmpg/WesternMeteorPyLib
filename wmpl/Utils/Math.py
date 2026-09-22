@@ -30,7 +30,7 @@ def lineFunc(x, m, k):
     """A line function.
 
     Arguments:
-        x: [float] Independant variable.
+        x: [float] Independent variable.
         m: [float] Slope.
         k: [float] Intercept.
 
@@ -157,7 +157,7 @@ def vectorFromPointDirectionAndAngle(pos, dir_hat, angle):
     Arguments:
         pos: [ndarray] Initial position vector.
         dir_path: [ndarray] Direction unit vector.
-        angle: [float] Angle between the inital and the final position vectors (radians).
+        angle: [float] Angle between the initial and the final position vectors (radians).
 
     Return:
         [ndarray] Final position vector.
@@ -283,7 +283,7 @@ def polarToCartesian(theta, phi):
         phi: [float] Azimuth angle in radians.
 
     Return:
-        (x, y, z): [tuple of floats] Coordinates of the point in 3D cartiesian coordinates.
+        (x, y, z): [tuple of floats] Coordinates of the point in 3D cartesian coordinates.
     """
 
     x = np.sin(phi) * np.cos(theta)
@@ -302,7 +302,7 @@ def sphericalToCartesian(r, theta, phi):
         phi: [float] Azimuth angle in radians.
 
     Return:
-        (x, y, z): [tuple of floats] Coordinates of the point in 3D cartiesian coordinates.
+        (x, y, z): [tuple of floats] Coordinates of the point in 3D cartesian coordinates.
     """
 
     x = r * np.sin(theta) * np.cos(phi)
@@ -482,7 +482,7 @@ def findClosestPoints(P, u, Q, v):
 
 
 def lineAndSphereIntersections(centre, radius, origin, direction):
-    """Finds intersections between a sphere of given radius and coordiantes of the centre and a line
+    """Finds intersections between a sphere of given radius and coordinates of the centre and a line
         defined by an origin and a direction vector.
 
     Source: http://www.lighthouse3d.com/tutorials/maths/ray-sphere-intersection/
@@ -803,7 +803,7 @@ def RMSD(x, weights=None):
 
 
 def mergeClosePoints(x_array, y_array, delta, x_datetime=False, method="avg"):
-    """Finds if points have similar sample values on the independant axis x (if they are within delta) and
+    """Finds if points have similar sample values on the independent axis x (if they are within delta) and
         averages all y values.
 
     Arguments:
@@ -915,8 +915,8 @@ def checkContinuity(sequence):
         sequence: [list] A list of 0s and 1s.
 
     Return:
-        (status, first_index, last_index): [bool], [int], [int] True if the sequence contains exaclty one
-            continous string of 1s, False otherwise. first_index and last_index are indices of the beginning
+        (status, first_index, last_index): [bool], [int], [int] True if the sequence contains exactly one
+            continuous string of 1s, False otherwise. first_index and last_index are indices of the beginning
             and the end of the sequence.
 
     Examples:
@@ -939,7 +939,7 @@ def checkContinuity(sequence):
     # Compute element-wise differences
     diffs = sequence[:-1] - sequence[1:]
 
-    # Check if the number of differences is 2 or less, indicating one continous sequence
+    # Check if the number of differences is 2 or less, indicating one continuous sequence
     if np.count_nonzero(diffs) == 0:
         # Make sure there are more then one 1s in the sequence
         if np.count_nonzero(sequence == 1) > 1:
@@ -957,7 +957,7 @@ def checkContinuity(sequence):
             return True, 0, change_indx
 
     elif np.count_nonzero(diffs) == 2:
-        # Check if that continous sequence is a sequence of ones, or a sequence of zeros
+        # Check if that continuous sequence is a sequence of ones, or a sequence of zeros
         first, last = np.argwhere(diffs != 0)
 
         if np.count_nonzero(sequence[first[0] + 1: last[0]] == 1):
@@ -985,8 +985,8 @@ def histogramEdgesEqualDataNumber(x, nbins):
 def padOrTruncate(array, size):
     """Given the array, either pad ti with zeros or cut it to the given size.
 
-    Argumetns:
-        array: [ndarray] Inpout numpy array.
+    Arguments:
+        array: [ndarray] Input numpy array.
         size: [int] Output array size.
 
     Return:
@@ -1015,7 +1015,7 @@ def fitConfidenceInterval(x_data, y_data, conf=0.95, x_array=None, func=None):
 
     Keyword arguments:
         conf: [float] Confidence interval (fraction, 0.0 to 1.0).
-        x_array: [ndarray] Array for evaluating the confidence interval on. Usually used as an independant
+        x_array: [ndarray] Array for evaluating the confidence interval on. Usually used as an independent
             variable array for plotting.
         func: [function] Function to fit. None by default, which means a line will be fit.
 

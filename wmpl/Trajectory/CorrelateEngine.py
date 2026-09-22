@@ -52,7 +52,7 @@ def pickBestStations(obslist, max_stns):
     This is to reduce computation workload and failures in cases where
     many cameras detect the same event. 
 
-    paramters 
+    parameters 
     - obslist[]  - list of observations in a candidate
     - max_stns   - max number of stations to include in solution
 
@@ -267,7 +267,7 @@ class TrajectoryCorrelator(object):
         """ Check that the trajectory is within the range limits. 
         
         Arguments:
-            traj_reduced: [TrajectoryReducted object]
+            traj_reduced: [TrajectoryReduced object]
             platepar: [Platepar object]
 
         Return:
@@ -300,7 +300,7 @@ class TrajectoryCorrelator(object):
         """ Check that the trajectory is within the FOV of the camera. 
         
         Arguments:
-            traj_reduced: [TrajectoryReducted object]
+            traj_reduced: [TrajectoryReduced object]
             platepar: [Platepar object]
 
         Return:
@@ -1221,7 +1221,7 @@ class TrajectoryCorrelator(object):
 
 
     def run(self, event_time_range=None, bin_time_range=None, mcmode=MCMODE_ALL, verbose=False):
-        """ Run meteor corellation using available data. 
+        """ Run meteor correlation using available data. 
 
         Keyword arguments:
             event_time_range: [list] A list of two datetime objects. These are times between which
@@ -1334,7 +1334,7 @@ class TrajectoryCorrelator(object):
                         log.info("")
 
                         # Get a list of all already computed trajectories within the given time bin
-                        #   Reducted trajectory objects are returned
+                        #   Reduced trajectory objects are returned
                         
                         if bin_time_range:
                             # restrict checks to the bin range supplied to run() plus a day to allow for data upload times
@@ -1365,7 +1365,7 @@ class TrajectoryCorrelator(object):
                             traj_time_pairs = self.dh.getTrajTimePairs(traj_reduced, unpaired_observations, 
                                 self.traj_constraints.max_toffset)
 
-                            # Skip trajectory if there are no new obervations
+                            # Skip trajectory if there are no new observations
                             if not traj_time_pairs:
                                 continue
 
@@ -1700,8 +1700,8 @@ class TrajectoryCorrelator(object):
                         log.info('Selecting best {} stations'.format(self.traj_constraints.max_stations))
 
                         # pickBestStations selects the best and marks the others "ignored". This keeps
-                        # them in the dataset without using them in the solver. Otherwise if they're not markeed as used
-                        # on the next pass through the solver they wil be picked up as a different trajectory.
+                        # them in the dataset without using them in the solver. Otherwise if they're not marked as used
+                        # on the next pass through the solver they will be picked up as a different trajectory.
                         matched_observations = pickBestStations(matched_observations, self.traj_constraints.max_stations)
 
                     # Print info about observations which are being solved
