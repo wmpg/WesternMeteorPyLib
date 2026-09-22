@@ -50,9 +50,14 @@ with ZipFile(os.path.join(dbloc,'test_dbs.zip'),'r') as zip_ref:
 
 ###################################################
 ## Candidate database tests
+##
+## Every CandidateDatabase below is opened with keep=0. The default, keep=21, purges rows older than
+## 21 days as the database is opened, so the fixtures (recorded on 20 July 2026) would empty
+## themselves once the calendar moved past them and every expected count here would fail. The purge
+## on open is exercised deliberately in test_CandDbKeepPurgesOnOpen instead.
 
 def test_CandDb():
-    cdb = CandidateDatabase(dbloc, 'test_cands.db')
+    cdb = CandidateDatabase(dbloc, 'test_cands.db', keep=0)
     cand_id = '1784513127.942391_UK'
     ref_dt = 1784513127.942391
     obs_ids = ["UK00A0_20260720-020528.036771_4176", "UK005M_20260720-020528.102589_3959", "UK00AN_20260720-020528.099155_2335"]
@@ -103,7 +108,7 @@ def test_CandDb():
 
 def test_archAndPurgeCandDb():
     shutil.copyfile(os.path.join(dbloc, 'test_cands.db'), os.path.join(dbloc, 'candidates.db'))
-    cdb = CandidateDatabase(dbloc, 'candidates.db')
+    cdb = CandidateDatabase(dbloc, 'candidates.db', keep=0)
     rws = cdb.dbhandle.execute('select ref_dt from candidates order by ref_dt asc').fetchall()
     arch_dt = (float(rws[-1][0])+float(rws[0][0]))/2.0
     arch_jd = datetime2JD(datetime.datetime.fromtimestamp(arch_dt))
@@ -111,7 +116,7 @@ def test_archAndPurgeCandDb():
     rws = cdb.dbhandle.execute('select count(*) from candidates').fetchall()
     assert rws[0][0] == 52
     cdb.closeCandDatabase()
-    cdb = CandidateDatabase(dbloc, 'arch_candidates.db')
+    cdb = CandidateDatabase(dbloc, 'arch_candidates.db', keep=0)
     rws = cdb.dbhandle.execute('select count(*) from candidates').fetchall()
     assert rws[0][0] == 48
     cdb.closeCandDatabase()
@@ -119,7 +124,7 @@ def test_archAndPurgeCandDb():
     os.remove(os.path.join(dbloc, 'arch_candidates.db'))
 
     shutil.copyfile(os.path.join(dbloc, 'test_cands.db'), os.path.join(dbloc, 'candidates.db'))
-    cdb = CandidateDatabase(dbloc, 'candidates.db')
+    cdb = CandidateDatabase(dbloc, 'candidates.db', keep=0)
     sts = cdb.archiveCandDatabase(dbloc, None, arch_jd)
     rws = cdb.dbhandle.execute('select count(*) from candidates').fetchall()
     assert rws[0][0] == 52
@@ -128,12 +133,33 @@ def test_archAndPurgeCandDb():
 
 def test_mergeCandDb():
     shutil.copyfile(os.path.join(dbloc, 'test_cands.db'), os.path.join(dbloc, 'candidates.db'))
-    cdb = CandidateDatabase(dbloc, 'candidates.db')
+    cdb = CandidateDatabase(dbloc, 'candidates.db', keep=0)
     assert cdb.mergeCandDatabase(os.path.join(dbloc, 'test_mc.db'))
     rws = cdb.dbhandle.execute('select count(*) from candidates').fetchall()
     assert rws[0][0] == 131
     cdb.closeCandDatabase()
     os.remove(os.path.join(dbloc, 'candidates.db'))
+
+def test_CandDbKeepPurgesOnOpen():
+    """ Opening with a keep window drops rows older than it, and keep=0 disables that. """
+
+    shutil.copyfile(os.path.join(dbloc, 'test_cands.db'), os.path.join(dbloc, 'candidates.db'))
+
+    # keep=0 leaves the fixture alone, however old it is
+    cdb = CandidateDatabase(dbloc, 'candidates.db', keep=0)
+    n_all = cdb.dbhandle.execute('select count(*) from candidates').fetchall()[0][0]
+    cdb.closeCandDatabase()
+    assert n_all == 100
+
+    # A keep window shorter than the age of the data empties it. The fixture is from 20 July 2026,
+    #   so a window of a few days does this no matter when the test is run.
+    cdb = CandidateDatabase(dbloc, 'candidates.db', keep=3)
+    n_kept = cdb.dbhandle.execute('select count(*) from candidates').fetchall()[0][0]
+    cdb.closeCandDatabase()
+    assert n_kept == 0
+
+    os.remove(os.path.join(dbloc, 'candidates.db'))
+
 
 ###################################################
 ## Observations database tests
@@ -505,6 +531,160 @@ def test_archAndPurgeTrajDb():
     assert rws[0][0] == 34
     cdb.closeTrajDatabase()
     os.remove(os.path.join(dbloc, 'trajectories.db'))
+
+def test_purgeTrajDbClearsBothTables():
+    """ Purging must empty failed_trajectories as well as trajectories.
+
+    Archiving copies rows out and then calls purge to delete them, so a purge that stops after the
+    first table leaves the failed trajectories behind and re-copies them into the archive on every
+    later run.
+    """
+
+    shutil.copyfile(os.path.join(dbloc, 'test_traj.db'), os.path.join(dbloc, 'trajectories.db'))
+    trajdb = TrajectoryDatabase(dbloc, 'trajectories.db')
+
+    def counts():
+        return tuple(trajdb.dbhandle.execute(
+            'select count(*) from {:s}'.format(t)).fetchall()[0][0]
+            for t in ['trajectories', 'failed_trajectories'])
+
+    assert counts() == (49, 49)
+
+    # A cutoff past every row in either table
+    latest = max(trajdb.dbhandle.execute(
+        'select max(jdt_ref) from {:s}'.format(t)).fetchall()[0][0]
+        for t in ['trajectories', 'failed_trajectories'])
+
+    assert trajdb.purgeTrajDatabase(archdate_jd=latest + 1)
+    assert counts() == (0, 0)
+
+    trajdb.closeTrajDatabase()
+    os.remove(os.path.join(dbloc, 'trajectories.db'))
+
+
+def test_clearProcessingFlagResetsAndReports():
+    """ Rows left mid-processing by a crash are returned to the live state, and success is reported. """
+
+    shutil.copyfile(os.path.join(dbloc, 'test_traj.db'), os.path.join(dbloc, 'trajectories.db'))
+    trajdb = TrajectoryDatabase(dbloc, 'trajectories.db')
+
+    trajdb.dbhandle.execute('update trajectories set status=2 where status=1')
+    trajdb.dbhandle.commit()
+    n_stuck = trajdb.dbhandle.execute('select count(*) from trajectories where status=2').fetchall()[0][0]
+    assert n_stuck > 0
+
+    assert trajdb.clearProcessingFlag() is True
+    assert trajdb.dbhandle.execute('select count(*) from trajectories where status=2').fetchall()[0][0] == 0
+    assert trajdb.dbhandle.execute('select count(*) from trajectories where status=1').fetchall()[0][0] == n_stuck
+
+    trajdb.closeTrajDatabase()
+    os.remove(os.path.join(dbloc, 'trajectories.db'))
+
+
+def test_databasesAreDetachedAfterMergeAndArchive():
+    """ Every attached database is detached again, whichever name it was attached under.
+
+    A merge attaches the other database as "sourcedb" and an archive attaches as "archdb". Leaving
+    either attached keeps a file handle open and makes the next attach of the same name fail.
+    """
+
+    shutil.copyfile(os.path.join(dbloc, 'test_traj.db'), os.path.join(dbloc, 'trajectories.db'))
+    trajdb = TrajectoryDatabase(dbloc, 'trajectories.db')
+
+    def attached(db):
+        return sorted(row[1] for row in db.dbhandle.execute('pragma database_list').fetchall())
+
+    assert trajdb.mergeTrajDatabase(os.path.join(dbloc, 'test_mt.db'))
+    assert attached(trajdb) == ['main'], 'sourcedb left attached after a merge'
+
+    latest = trajdb.dbhandle.execute('select max(jdt_ref) from trajectories').fetchall()[0][0]
+    assert trajdb.archiveTrajDatabase(dbloc, 'arch', latest + 1)
+    assert attached(trajdb) == ['main'], 'archdb left attached after an archive'
+
+    trajdb.closeTrajDatabase()
+    os.remove(os.path.join(dbloc, 'trajectories.db'))
+    os.remove(os.path.join(dbloc, 'arch_trajectories.db'))
+
+    # The candidate database attaches under the same two names
+    shutil.copyfile(os.path.join(dbloc, 'test_cands.db'), os.path.join(dbloc, 'candidates.db'))
+    cdb = CandidateDatabase(dbloc, 'candidates.db', keep=0)
+
+    assert cdb.mergeCandDatabase(os.path.join(dbloc, 'test_mc.db'))
+    assert attached(cdb) == ['main'], 'sourcedb left attached after a candidate merge'
+
+    cdb.closeCandDatabase()
+    os.remove(os.path.join(dbloc, 'candidates.db'))
+
+
+def test_failedMergeStillDetachesTheSource():
+    """ A merge that fails must leave nothing attached, or the next merge cannot attach the name.
+
+    The success path detaches explicitly, so only a failure reaches safeDetachDatabase. A source
+    database whose table does not match is the realistic case: it comes from a node running a
+    different version.
+    """
+
+    shutil.copyfile(os.path.join(dbloc, 'test_traj.db'), os.path.join(dbloc, 'trajectories.db'))
+    trajdb = TrajectoryDatabase(dbloc, 'trajectories.db')
+
+    # A source with the right table name but the wrong columns, so the insert fails
+    bad_src = os.path.join(dbloc, 'mismatched_source.db')
+    bad_db = sqlite3.connect(bad_src)
+    bad_db.execute('create table trajectories (jdt_ref real)')
+    bad_db.execute('create table failed_trajectories (jdt_ref real)')
+    bad_db.commit()
+    bad_db.close()
+
+    assert trajdb.mergeTrajDatabase(bad_src) is False
+    assert sorted(row[1] for row in trajdb.dbhandle.execute(
+        'pragma database_list').fetchall()) == ['main'], 'the failed source is still attached'
+
+    # The real consequence: the next merge has to be able to attach the same name again
+    assert trajdb.mergeTrajDatabase(os.path.join(dbloc, 'test_mt.db'))
+
+    trajdb.closeTrajDatabase()
+    os.remove(os.path.join(dbloc, 'trajectories.db'))
+    os.remove(bad_src)
+
+
+def test_safeDetachDatabaseDetachesTheNameItIsGiven():
+    """ safeDetachDatabase must detach the database it is asked to, under either name.
+
+    It runs on the error paths of the merge and archive functions, which attach as "sourcedb" and
+    "archdb" respectively. Those paths are hard to reach from outside, so the helper is exercised
+    directly: a version that detaches a fixed name, or the literal string "dbname", leaves the other
+    one attached and the next attach of that name then fails.
+    """
+
+    shutil.copyfile(os.path.join(dbloc, 'test_traj.db'), os.path.join(dbloc, 'trajectories.db'))
+    shutil.copyfile(os.path.join(dbloc, 'test_cands.db'), os.path.join(dbloc, 'candidates.db'))
+
+    trajdb = TrajectoryDatabase(dbloc, 'trajectories.db')
+    cdb = CandidateDatabase(dbloc, 'candidates.db', keep=0)
+
+    def attached(db):
+        return sorted(row[1] for row in db.dbhandle.execute('pragma database_list').fetchall())
+
+    for db, other in [(trajdb, os.path.join(dbloc, 'test_mt.db')),
+                      (cdb, os.path.join(dbloc, 'test_mc.db'))]:
+
+        for name in ['sourcedb', 'archdb']:
+            db.dbhandle.execute("attach database '{:s}' as {:s}".format(other, name))
+            assert name in attached(db)
+
+            db.safeDetachDatabase(name)
+            assert attached(db) == ['main'], '{:s} was not detached'.format(name)
+
+            # The point of detaching: the same name has to be usable again
+            db.dbhandle.execute("attach database '{:s}' as {:s}".format(other, name))
+            db.safeDetachDatabase(name)
+            assert attached(db) == ['main']
+
+    trajdb.closeTrajDatabase()
+    cdb.closeCandDatabase()
+    os.remove(os.path.join(dbloc, 'trajectories.db'))
+    os.remove(os.path.join(dbloc, 'candidates.db'))
+
 
 def test_mergeTrajDb():
     shutil.copyfile(os.path.join(dbloc, 'test_traj.db'), os.path.join(dbloc, 'trajectories.db'))
