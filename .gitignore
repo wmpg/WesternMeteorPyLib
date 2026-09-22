@@ -37,3 +37,6 @@ wmpl/Trajectory/Tests/correlator/*.log
 wmpl/Trajectory/Tests/**/*.db*
 wmpl/Trajectory/Tests/**/*.pickle*
 **/.coverage
+
+# Local distributed-processing configuration (copy of wmpl_remote.cfg.sample)
+wmpl_remote.cfg

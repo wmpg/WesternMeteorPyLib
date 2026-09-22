@@ -43,6 +43,10 @@ To see the solver working on a synthetic example without any data of your own:
 python -m wmpl.Trajectory.Trajectory
 ```
 
+To run this over a whole archive instead of one event at a time, pairing observations across stations
+automatically, continuously, and optionally across several servers, see
+[the correlator manual](Correlator.md).
+
 ## The trajectory pickle
 
 A successful run writes `<event>_trajectory.pickle` (plus plots and a text report) into the output
