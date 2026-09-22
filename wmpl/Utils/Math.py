@@ -1077,9 +1077,12 @@ def fitConfidenceInterval(x_data, y_data, conf=0.95, x_array=None, func=None):
 
 
 def generateDatetimeBins(dt_beg, dt_end, bin_days=7, utc_hour_break=12, tzinfo=None, reverse=False):
-    """Given a beginning and end datetime, bin this time range into bins bin_days long. The bin edges will
-        be at utc_hour_break UTC. 12:00 UTC is chosen because at that time it is midnight at the International
-        Date Line, and it is very unlikely that there are any meteor cameras there.
+    """Given a beginning and end datetime, bin this time range into bins bin_days long. For bins a day or
+        longer, the bin edges will be at utc_hour_break UTC. 12:00 UTC is chosen because at that time it is
+        midnight at the International Date Line, and it is very unlikely that there are any meteor cameras
+        there, so a night of observations is never split between two bins. Bins shorter than a day are not
+        snapped, since snapping would collapse them all onto the same hour; their edges fall every bin_days
+        after dt_beg, and they do split nights.
 
     Arguments:
         dt_beg: [datetime] Begin datetime.
@@ -1088,7 +1091,7 @@ def generateDatetimeBins(dt_beg, dt_end, bin_days=7, utc_hour_break=12, tzinfo=N
     Keyword arguments:
         bin_days: [float] Length of bin in days.
         utc_hour_break: [float] UTC hour when the break in time will occur, i.e. this will be the edges of the
-            time bins.
+            time bins. Only applied when bin_days is a day or longer.
         tzinfo: [tz] pytz timezone object used for times. None by default.
 
     Return:
