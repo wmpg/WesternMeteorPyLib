@@ -779,11 +779,12 @@ class TrajectoryDatabase():
             try:
                 self.dbhandle.execute('update trajectories set status=1 WHERE status=2')
                 self.dbhandle.commit()
+                return True
             except sqlite3.OperationalError as e:
                 log.warning(f'failed to reset processing flag on trajectory database, retry {retry+1}/10')
                 log.warning(f'reason: {e}')
                 sleep(1)
-            except Exception:
+            except Exception as e:
                 log.warning('failed to reset processing flag on trajectory database')
                 log.warning(f'reason: {e}')
                 return False
@@ -793,7 +794,7 @@ class TrajectoryDatabase():
 
     def safeDetachDatabase(self, dbname):
         try:
-            self.dbhandle.execute("detach database 'archdb'")
+            self.dbhandle.execute(f"detach database '{dbname}'")
         except Exception:
             pass
         return
@@ -861,12 +862,16 @@ class TrajectoryDatabase():
 
         for retry in range(10):
             try:
+                # Both tables must be purged before returning, otherwise archiving copies the failed
+                #   trajectories and then never deletes them, so they accumulate and are duplicated
+                #   into the archive on every run
                 for table_name in ['trajectories', 'failed_trajectories']:
                     res = self.dbhandle.execute(f'select count(*) from {table_name} where jdt_ref<?', (archdate_jd,)).fetchall()
                     log.info(f'  purging {res[0][0]} records from {table_name}')
                     self.dbhandle.execute(f'delete from {table_name} where jdt_ref<?', (archdate_jd,))
                     self.dbhandle.commit()
-                    return True
+
+                return True
             except sqlite3.OperationalError as e:
                 log.warning(f'failed to purge trajectory database, try {retry+1}/10')
                 log.warning(f'reason: {e}')
@@ -1138,11 +1143,12 @@ class CandidateDatabase():
             try:
                 self.dbhandle.execute('update candidates set status=1 WHERE status=2')
                 self.dbhandle.commit()
+                return True
             except sqlite3.OperationalError as e:
                 log.warning(f'failed to reset processing flag on candidate database, retry {retry+1}/10')
                 log.warning(f'reason: {e}')
                 sleep(1)
-            except Exception:
+            except Exception as e:
                 log.warning('failed to reset processing flag on candidate database')
                 log.warning(f'reason: {e}')
                 return False
@@ -1151,7 +1157,7 @@ class CandidateDatabase():
 
     def safeDetachDatabase(self, dbname):
         try:
-            self.dbhandle.execute(f"detach database 'dbname'")
+            self.dbhandle.execute(f"detach database '{dbname}'")
         except Exception:
             pass
         return 
