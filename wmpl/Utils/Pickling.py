@@ -7,7 +7,6 @@ import os
 import sys
 import uuid
 import pickle
-import logging
 
 
 from wmpl.Utils.OSTools import mkdirP
@@ -115,12 +114,6 @@ def loadPickle(dir_path, file_name):
         #   cutoff became a parameter do not carry it, and estimateTimingAndVelocity reads it.
         if not hasattr(p, 'l_bfgs_b_cutoff'):
             p.l_bfgs_b_cutoff = 5
-
-        # If the logger is missing, attach the module's own. Trajectories pickled before Trajectory
-        #   kept its logger on the instance have no "log" attribute, and every method that logs
-        #   reads it. Loggers pickle by name, so newer pickles carry it already.
-        if not hasattr(p, 'log'):
-            p.log = logging.getLogger("wmpl_logger")
 
     return p
 

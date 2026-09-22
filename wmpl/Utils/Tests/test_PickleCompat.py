@@ -24,7 +24,6 @@ or standalone (no pytest required):
 from __future__ import print_function, division, absolute_import
 
 import os
-import logging
 from types import SimpleNamespace
 
 from wmpl.Utils.Pickling import loadPickle, savePickle
@@ -223,33 +222,6 @@ def testLoadBackFillsTheLbfgsbCutoff(tmp_path):
     assert loadPickle(tmp_dir, "explicit_trajectory.pickle").l_bfgs_b_cutoff == 7
 
 
-def testLoadBackFillsTheLogger(tmp_path):
-    """ A trajectory pickled before the logger moved onto the instance still loads with one.
-
-    Trajectory methods log through self.log, so an older pickle without the attribute would raise
-    AttributeError the first time one of them logged. Loggers pickle by name, so newer pickles carry
-    theirs already and must keep it.
-    """
-
-    tmp_dir = os.path.join(str(tmp_path), "logger_backfill")
-    os.makedirs(tmp_dir, exist_ok=True)
-
-    legacy = SimpleNamespace(orbit=None, observations=[])
-    assert not hasattr(legacy, "log")
-
-    savePickle(legacy, tmp_dir, "legacy_trajectory.pickle")
-    loaded = loadPickle(tmp_dir, "legacy_trajectory.pickle")
-
-    assert hasattr(loaded, "log"), "the logger was not back-filled"
-    assert loaded.log.name == "wmpl_logger"
-    loaded.log.debug("usable")
-
-    # A logger already on the object is kept
-    carried = SimpleNamespace(orbit=None, observations=[], log=logging.getLogger("carried_logger"))
-    savePickle(carried, tmp_dir, "carried_trajectory.pickle")
-    assert loadPickle(tmp_dir, "carried_trajectory.pickle").log.name == "carried_logger"
-
-
 def testOrbitSurvivesTheRoundTrip():
     """ The orbit hangs off the trajectory and is the part most often read from an archived file. """
 
@@ -277,7 +249,6 @@ if __name__ == "__main__":
         testLoadBackFillsTheLegacyMisspelling,
         testSavePickleSurvivesAnyFileName,
         testLoadBackFillsTheLbfgsbCutoff,
-        testLoadBackFillsTheLogger,
         ]
 
     tmp_holder = tempfile.mkdtemp()
@@ -287,7 +258,7 @@ if __name__ == "__main__":
 
         try:
             if test_func in (testLoadBackFillsTheLegacyMisspelling, testSavePickleSurvivesAnyFileName,
-                             testLoadBackFillsTheLbfgsbCutoff, testLoadBackFillsTheLogger):
+                             testLoadBackFillsTheLbfgsbCutoff):
                 test_func(tmp_holder)
             else:
                 test_func()

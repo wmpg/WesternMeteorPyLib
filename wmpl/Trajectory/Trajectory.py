@@ -2452,6 +2452,21 @@ class Trajectory(object):
     """
 
 
+    @property
+    def log(self):
+        """ The logger this trajectory writes to, resolved from its name.
+
+        A logger is not picklable, deep-copyable or JSON-serialisable, and a Trajectory is all three,
+        so only the name is stored on the instance. Trajectories restored from pickles written before
+        the logger existed have no name either, and fall back to this module's logger.
+
+        Return:
+            [logging.Logger] The logger to use.
+        """
+
+        return logging.getLogger(getattr(self, "logger_name", None) or log.name)
+
+
     def __init__(self, jdt_ref, output_dir='.', max_toffset=None, meastype=4, verbose=True, v_init_part=None,\
         v_init_ht=None, estimate_timing_vel=True, monte_carlo=True, mc_runs=None, mc_pick_multiplier=1, \
         mc_noise_std=1.0, geometric_uncert=False, filter_picks=True, calc_orbit=True, show_plots=True, \
@@ -2523,14 +2538,17 @@ class Trajectory(object):
 
         """
 
-        # Use the caller's logger if one was given, otherwise this module's own. It is kept on the
-        #   instance rather than rebound on the module, so that constructing one Trajectory cannot
-        #   redirect the logging of every other Trajectory in the same process.
+        # Use the caller's logger if one was given, otherwise this module's own. Only its name is
+        #   stored, and self.log resolves it (see the property below): the logger itself must not go
+        #   into the instance dictionary, because it is neither JSON-serialisable nor deep-copyable,
+        #   and toJson() converts that dictionary wholesale. Storing the name rather than rebinding
+        #   the module global also means one Trajectory cannot redirect the logging of every other
+        #   Trajectory in the process.
         if parentlogger:
-            self.log = parentlogger
+            self.logger_name = parentlogger.name
 
         else:
-            self.log = log
+            self.logger_name = log.name
 
             # Without a parent logger, log to the console. The handler is attached only once: adding
             #   one per construction would repeat every line as many times as there are Trajectory

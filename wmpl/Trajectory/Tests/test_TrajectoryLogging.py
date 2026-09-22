@@ -95,6 +95,43 @@ def testParentLoggerOutputDoesNotReachTheModuleLogger():
     assert module_buffer.getvalue() == "", "the line leaked onto the module logger"
 
 
+def testTheLoggerIsNotStoredOnTheInstance():
+    """ The logger is resolved from a name, so a trajectory stays serialisable.
+
+    A Logger cannot be JSON-encoded and toJson() converts the whole instance dictionary, so holding
+    the logger itself there makes toJson raise "cannot pickle '_thread.RLock' object" for every
+    trajectory. Only the name is stored.
+    """
+
+    import copy
+    import json
+
+    traj = Trajectory(**TRAJ_KWARGS)
+
+    assert "log" not in traj.__dict__, "the logger object is in the instance dictionary"
+    assert traj.__dict__["logger_name"] == TrajectoryModule.log.name
+
+    # The three things a Trajectory has to survive
+    as_json = json.loads(traj.toJson())
+    assert "log" not in as_json
+    assert as_json["logger_name"] == TrajectoryModule.log.name
+
+    assert copy.deepcopy(traj).log is traj.log
+
+    import pickle
+    assert pickle.loads(pickle.dumps(traj, protocol=2)).log is traj.log
+
+
+def testALegacyTrajectoryWithoutALoggerNameStillLogs():
+    """ A trajectory restored from a pickle written before the logger existed falls back cleanly. """
+
+    traj = Trajectory(**TRAJ_KWARGS)
+    del traj.__dict__["logger_name"]
+
+    assert traj.log is TrajectoryModule.log
+    traj.log.debug("usable")
+
+
 if __name__ == "__main__":
 
     import sys
