@@ -2523,18 +2523,24 @@ class Trajectory(object):
 
         """
 
-        global log
+        # Use the caller's logger if one was given, otherwise this module's own. It is kept on the
+        #   instance rather than rebound on the module, so that constructing one Trajectory cannot
+        #   redirect the logging of every other Trajectory in the same process.
         if parentlogger:
-            # if a parent logger was provided, attach to that
-            log = parentlogger
+            self.log = parentlogger
+
         else:
-            # if no parent logger was provided, create a console-only
-            # log so that log statements get printed to stdout
-            console_handler = logging.StreamHandler(sys.stdout)
-            log_formatter = logging.Formatter()
-            console_handler.setFormatter(log_formatter)
-            log.addHandler(console_handler)
-            log.setLevel(logging.INFO)    
+            self.log = log
+
+            # Without a parent logger, log to the console. The handler is attached only once: adding
+            #   one per construction would repeat every line as many times as there are Trajectory
+            #   objects.
+            if not log.handlers:
+                console_handler = logging.StreamHandler(sys.stdout)
+                log_formatter = logging.Formatter()
+                console_handler.setFormatter(log_formatter)
+                log.addHandler(console_handler)
+                log.setLevel(logging.INFO)
 
         # All time data must be given relative to this Julian date
         self.jdt_ref = jdt_ref
@@ -2574,7 +2580,7 @@ class Trajectory(object):
                 self.fixed_time_offsets[station] = float(offset)
                 self.fixed_time_offsets_copy[station] = float(offset)
 
-            log.info(f"Fixed timing given: {self.fixed_time_offsets}")
+            self.log.info(f"Fixed timing given: {self.fixed_time_offsets}")
 
             self.estimate_timing_vel = False
 
@@ -2859,7 +2865,7 @@ class Trajectory(object):
         # Skip the observation if all points were ignored
         if ignore_list is not None:
             if np.all(ignore_list):
-                log.info(f'All points from station {station_id} are ignored, not using this station in the solution!')
+                self.log.info(f'All points from station {station_id} are ignored, not using this station in the solution!')
 
 
         # Init a new structure which will contain the observed data from the given site
@@ -3102,7 +3108,7 @@ class Trajectory(object):
                     # RuntimeError: Optimal parameters not found: gtol=0.000000 is too small, func(x) is 
                     # orthogonal to the columns of the Jacobian to machine precision.
                     except RuntimeError:
-                        log.info("A velocity fit failed with a RuntimeError, skipping this iteration.")
+                        self.log.info("A velocity fit failed with a RuntimeError, skipping this iteration.")
                         popt = [np.nan]
 
                     velocities_prev_point.append(popt[0])
@@ -3229,8 +3235,8 @@ class Trajectory(object):
 
         # If there are less than 4 points, don't estimate the initial velocity this way!
         if len(all_times) < 4:
-            log.warning(f'!!! Error, there are less than 4 points for velocity estimation above the given height of {bottom_ht/1000:.2f} km!')
-            log.info('Using automated velocity estimation with the sliding fit...')
+            self.log.warning(f'!!! Error, there are less than 4 points for velocity estimation above the given height of {bottom_ht/1000:.2f} km!')
+            self.log.info('Using automated velocity estimation with the sliding fit...')
             return None, None
 
         # Fit a line through the time vs. state vector distance data
@@ -3317,7 +3323,7 @@ class Trajectory(object):
             obs.jacchia_fit = np.abs(obs.jacchia_fit)
 
             if self.verbose:
-                log.info(f'Jacchia fit params for station: {obs.station_id}: {obs.jacchia_fit}')
+                self.log.info(f'Jacchia fit params for station: {obs.station_id}: {obs.jacchia_fit}')
 
 
         # Get the time and lag points from all sites
@@ -3421,7 +3427,7 @@ class Trajectory(object):
             
 
             if self.verbose:
-                log.info(f'Initial function evaluation: {timingResiduals(p0, observations, self.stations_time_dict, weights=weights)}')
+                self.log.info(f'Initial function evaluation: {timingResiduals(p0, observations, self.stations_time_dict, weights=weights)}')
 
             # Set bounds for timing to +/- given maximum time offset
             bounds = []
@@ -3460,21 +3466,21 @@ class Trajectory(object):
                     self.timing_res = timing_mini.fun
 
                     if self.verbose:
-                        log.info(f'Successful timing optimization with {opt_method}')
-                        log.info(f'Final function evaluation: {timing_mini.fun}')
+                        self.log.info(f'Successful timing optimization with {opt_method}')
+                        self.log.info(f'Final function evaluation: {timing_mini.fun}')
 
                     break
 
                 else:
-                    log.warning(f'Unsuccessful timing optimization with {opt_method}')
+                    self.log.warning(f'Unsuccessful timing optimization with {opt_method}')
 
             ### ###
 
             if not timing_mini.success:
 
-                log.warning('Timing difference and initial velocity minimization failed with the message:')
-                log.warning(timing_mini.message)
-                log.warning('Try increasing the range of time offsets!')
+                self.log.warning('Timing difference and initial velocity minimization failed with the message:')
+                self.log.warning(timing_mini.message)
+                self.log.warning('Try increasing the range of time offsets!')
                 v_init_mini = v_init
 
                 velocity_fit = np.zeros(2)
@@ -3514,7 +3520,7 @@ class Trajectory(object):
                     time_diffs[i] = t_diff_copy
 
                     if self.verbose:
-                        log.info(f'STATION {str(obs.station_id)} TIME OFFSET = {str(t_diff_copy)} s (fixed offset applied)')
+                        self.log.info(f'STATION {str(obs.station_id)} TIME OFFSET = {str(t_diff_copy)} s (fixed offset applied)')
 
                 # Otherwise read the estimated offset
                 else:
@@ -3525,7 +3531,7 @@ class Trajectory(object):
                     time_diffs[i] = t_diff
 
                     if self.verbose:
-                        log.info(f'STATION {str(obs.station_id)} TIME OFFSET = {str(t_diff)} s')
+                        self.log.info(f'STATION {str(obs.station_id)} TIME OFFSET = {str(t_diff)} s')
 
 
                 # Skip NaN and inf time offsets
@@ -3672,7 +3678,7 @@ class Trajectory(object):
 
 
             if self.verbose:
-                log.info(f'ESTIMATED Vinit: {v_init_mini:.2f} +/- {vel_stddev:.2f} m/s')
+                self.log.info(f'ESTIMATED Vinit: {v_init_mini:.2f} +/- {vel_stddev:.2f} m/s')
 
             
 
@@ -4765,7 +4771,7 @@ class Trajectory(object):
             except Exception:
                 pass
         if verbose:
-            log.info(out_str)
+            self.log.info(out_str)
 
         # Save the report to a file
         if save_results:
@@ -5695,7 +5701,7 @@ class Trajectory(object):
                     plt.clf()
                     plt.close()            
             except:
-                log.info('OSM plots not available')
+                self.log.info('OSM plots not available')
                 pass
         ######################################################################################################
 
@@ -6160,7 +6166,7 @@ class Trajectory(object):
         # Make sure there are at least 2 stations
         if numStationsNotIgnored(self.observations) < 2:
             
-            log.info('At least 2 sets of measurements from 2 stations are needed to estimate the trajectory!')
+            self.log.info('At least 2 sets of measurements from 2 stations are needed to estimate the trajectory!')
 
             return None
 
@@ -6213,8 +6219,8 @@ class Trajectory(object):
                 plane_intersection = PlaneIntersection(obs1, obs2)
 
                 if self.verbose:
-                    log.info(f'Convergence angle between stations {obs1.station_id} and {obs2.station_id}')
-                    log.info(f' Q = {np.degrees(plane_intersection.conv_angle)} deg')
+                    self.log.info(f'Convergence angle between stations {obs1.station_id} and {obs2.station_id}')
+                    self.log.info(f' Q = {np.degrees(plane_intersection.conv_angle)} deg')
                 
                 self.intersection_list.append(plane_intersection)
 
@@ -6241,7 +6247,7 @@ class Trajectory(object):
         self.radiant_eq = eci2RaDec(self.avg_radiant)
 
         if self.verbose:
-            log.info(f'Multi-Track Weighted IP radiant: {np.degrees(self.radiant_eq)}')
+            self.log.info(f'Multi-Track Weighted IP radiant: {np.degrees(self.radiant_eq)}')
 
 
         # Choose the intersection with the largest convergence angle as the best solution
@@ -6250,7 +6256,7 @@ class Trajectory(object):
         self.best_conv_inter = max(self.intersection_list, key=attrgetter('conv_angle'))
 
         if self.verbose:
-            log.info(f'Best Convergence Angle IP radiant: {np.degrees(self.best_conv_inter.radiant_eq)}')
+            self.log.info(f'Best Convergence Angle IP radiant: {np.degrees(self.best_conv_inter.radiant_eq)}')
 
 
         # Set the 3D position of the radiant line as the state vector, at the beginning point
@@ -6289,18 +6295,18 @@ class Trajectory(object):
 
         # Print weights
         if self.verbose:
-            log.info('LoS statistical weights:')
+            self.log.info('LoS statistical weights:')
 
             for obs in self.observations:
-                log.info(f"{obs.station_id:>12s}, {obs.weight:.3f}")
+                self.log.info(f"{obs.station_id:>12s}, {obs.weight:.3f}")
 
         ######################################################################################################
 
 
         if self.verbose:
-            log.info(f'Intersecting planes solution: {self.state_vect}')
+            self.log.info(f'Intersecting planes solution: {self.state_vect}')
             
-            log.info('Minimizing angle deviations...')
+            self.log.info('Minimizing angle deviations...')
 
 
         ### LEAST SQUARES SOLUTION ###
@@ -6314,7 +6320,7 @@ class Trajectory(object):
              )
 
         if self.verbose:
-            log.info(f'Initial angle sum: {angle_sum}')
+            self.log.info(f'Initial angle sum: {angle_sum}')
 
 
         # Set the initial guess for the state vector and the radiant from the intersecting plane solution
@@ -6336,8 +6342,8 @@ class Trajectory(object):
         # If the minimization diverged, bound the solution to +/-10% of state vector
         if np.max(np.abs(minimize_solution.x[:3] - self.state_vect)/self.state_vect) > 0.1:
 
-            log.warning('WARNING! Unbounded state vector optimization failed!')
-            log.info('Trying bounded minimization to +/-10% of state vector position.')
+            self.log.warning('WARNING! Unbounded state vector optimization failed!')
+            self.log.info('Trying bounded minimization to +/-10% of state vector position.')
 
             # Limit the minimization to 10% of original estimation in the state vector
             bounds = []
@@ -6348,19 +6354,19 @@ class Trajectory(object):
             for val in self.best_conv_inter.radiant_eci:
                 bounds.append(sorted([0.75*val, 1.25*val]))
 
-            log.info(f'BOUNDS: {bounds}')
-            log.info(f'p0: {p0}')
+            self.log.info(f'BOUNDS: {bounds}')
+            self.log.info(f'p0: {p0}')
             minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=(self.observations, \
                 weights, (_rerun_timing and self.gravity_correction), self.gravity_factor, self.v0z), 
                 bounds=bounds, method='SLSQP')
 
 
         if self.verbose:
-            log.info('Minimization info:')
-            log.info(f' Message: {minimize_solution.message}')
-            log.info(f' Iterations: {minimize_solution.nit}')
-            log.info(f' Success: {minimize_solution.success}')
-            log.info(f' Final function value:  {minimize_solution.fun}')
+            self.log.info('Minimization info:')
+            self.log.info(f' Message: {minimize_solution.message}')
+            self.log.info(f' Iterations: {minimize_solution.nit}')
+            self.log.info(f' Success: {minimize_solution.success}')
+            self.log.info(f' Final function value:  {minimize_solution.fun}')
 
 
         # Set the minimization status
@@ -6383,13 +6389,13 @@ class Trajectory(object):
             self.radiant_eq_mini = eci2RaDec(self.radiant_eci_mini)
 
             if self.verbose:
-                log.info('Position and radiant LMS solution:')
-                log.info(f' State vector: {self.state_vect_mini}')
-                log.info(f' Ra {np.degrees(self.radiant_eq_mini[0])} Dec: {np.degrees(self.radiant_eq_mini[1])}')
+                self.log.info('Position and radiant LMS solution:')
+                self.log.info(f' State vector: {self.state_vect_mini}')
+                self.log.info(f' Ra {np.degrees(self.radiant_eq_mini[0])} Dec: {np.degrees(self.radiant_eq_mini[1])}')
 
         else:
 
-            log.info('Angle minimization failed altogether!')
+            self.log.info('Angle minimization failed altogether!')
 
             # If the solution did not succeed, set the values to intersecting plates solution
             self.radiant_eci_mini = self.best_conv_inter.radiant_eci
@@ -6430,7 +6436,7 @@ class Trajectory(object):
 
 
         if self.verbose and self.estimate_timing_vel:
-            log.info('Estimating initial velocity and timing differences...')
+            self.log.info('Estimating initial velocity and timing differences...')
 
 
 
@@ -6481,9 +6487,9 @@ class Trajectory(object):
             self.calcLag(self.observations)
             
         if self.verbose:
-            log.info('timing data entering optimisation')
+            self.log.info('timing data entering optimisation')
             for obs in self.observations:
-                log.info(f'{obs.station_id}: {obs.time_data}')
+                self.log.info(f'{obs.station_id}: {obs.time_data}')
 
         # Estimate the timing difference between stations and the initial velocity and update the time
         (
@@ -6502,7 +6508,7 @@ class Trajectory(object):
 
         # If estimating the timing failed, skip any further steps
         if not self.timing_minimization_successful:
-            log.warning('unable to minimise timing')
+            self.log.warning('unable to minimise timing')
             return None
 
 
@@ -6549,10 +6555,10 @@ class Trajectory(object):
                 self.observations = []
 
                 if self.verbose:
-                    log.info("")
-                    log.info("---------------------------------------------------------------------------------")
-                    log.info("Updating the solution after the timing estimation...")
-                    log.info("---------------------------------------------------------------------------------")
+                    self.log.info("")
+                    self.log.info("---------------------------------------------------------------------------------")
+                    self.log.info("Updating the solution after the timing estimation...")
+                    self.log.info("---------------------------------------------------------------------------------")
 
                 # Reinitialize the observations with proper timing
                 for obs in temp_observations:
@@ -6676,10 +6682,10 @@ class Trajectory(object):
                     self.observations = []
 
                     if self.verbose:
-                        log.info("")
-                        log.info("---------------------------------------------------------------------------------")
-                        log.info(f"Updating the solution after rejecting {picks_rejected} bad picks...")
-                        log.info("---------------------------------------------------------------------------------")
+                        self.log.info("")
+                        self.log.info("---------------------------------------------------------------------------------")
+                        self.log.info(f"Updating the solution after rejecting {picks_rejected} bad picks...")
+                        self.log.info("---------------------------------------------------------------------------------")
 
                     # Reinitialize the observations without the bad picks
                     for obs in temp_observations:
@@ -6692,7 +6698,7 @@ class Trajectory(object):
 
                 else:
                     if self.verbose:
-                        log.info("All picks are within 3 sigma...")
+                        self.log.info("All picks are within 3 sigma...")
 
 
             else:
@@ -6729,7 +6735,7 @@ class Trajectory(object):
                 reference_init=minimize_solution.success, v_init_stddev_direct=self.v_init_stddev)
 
             if self.verbose:
-                log.info(f'{self.orbit.__repr__(v_init_ht=self.v_init_ht)}')
+                self.log.info(f'{self.orbit.__repr__(v_init_ht=self.v_init_ht)}')
 
 
         ######################################################################################################
@@ -6799,7 +6805,7 @@ class Trajectory(object):
                 if self.save_results:
 
                     if self.verbose:
-                        log.info('Saving Monte Carlo results...')
+                        self.log.info('Saving Monte Carlo results...')
 
                     # Save the picked trajectory structure with Monte Carlo points
                     savePickle(traj_best, mc_output_dir, mc_file_name + '_trajectory.pickle')
@@ -6819,7 +6825,7 @@ class Trajectory(object):
             if self.save_results:
 
                 if self.verbose:
-                    log.info('Saving results with original picks...')
+                    self.log.info('Saving results with original picks...')
 
                 # Save the picked trajectory structure with original points
                 savePickle(self, self.output_dir, self.file_name + '_trajectory.pickle')
