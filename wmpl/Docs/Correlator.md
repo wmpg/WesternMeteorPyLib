@@ -463,20 +463,20 @@ second, better solution appears for a meteor already solved. Again the better so
 | Flag | Description |
 | :--- | :--- |
 | `--dir_path` | **Required.** Directory holding the databases. |
-| `--database` | `observations`, `trajectories` or `candidates`. |
+| `--database` | `observations` or `trajectories`. The candidate database is not reachable from here. |
 | `--action` | `status`, `copy` or `execute`. |
 | `--stmt` | The SQL to run with `--action execute`. |
 | `-r`, `--timerange` | Time range for `--action copy`. |
-| `--logdir` | Where to write the log. |
+| `--logdir` | Where to write the log. Defaults to a `logs` folder beside the databases. |
 
 | Action | What it does |
 | :--- | :--- |
-| `status` | Prints row counts and date ranges |
-| `copy` | Backfills from the legacy JSON database over `--timerange` |
-| `execute` | Runs the statement in `--stmt` against the database |
+| `status` | Prints how many rows each table holds. Needs `--database` |
+| `copy` | Backfills both databases from the legacy JSON over `--timerange`. Ignores `--database` |
+| `execute` | Runs the statement in `--stmt`. Needs `--database` |
 
 ```
-python -m wmpl.Trajectory.CorrelateDB --dir_path rms_data --action status
+python -m wmpl.Trajectory.CorrelateDB --dir_path rms_data --database trajectories --action status
 python -m wmpl.Trajectory.CorrelateDB --dir_path rms_data --database trajectories --action execute --stmt "select count(*) from trajectories where status=2"
 ```
 
