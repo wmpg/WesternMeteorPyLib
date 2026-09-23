@@ -60,7 +60,7 @@ def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a
     
 
 
-    # Fit the atmosphere density polynomial using NRLMSISE
+    # Fit the atmosphere density polynomial using the MSIS model
     ht_min = const.h_kill
     ht_max = 180000
     const.dens_co = fitAtmPoly(lat, lon, ht_min, ht_max, jd)

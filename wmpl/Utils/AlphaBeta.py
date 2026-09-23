@@ -131,7 +131,7 @@ ALPHA_BETA_BOUNDS = ((0.001, 10000.0), (0.00001, 50.0))
 
 
 def rescaleHeightToExponentialAtmosphere(lat, lon, ht_data, jd):
-    """ Given observed heights, rescale them from the real NRLMSISE model to the a simplified exponential
+    """ Given observed heights, rescale them from the real MSIS atmosphere to the a simplified exponential
         atmosphere model used by the Alpha-Beta procedure.
     
     Arguments:
@@ -175,7 +175,7 @@ def rescaleHeightToExponentialAtmosphere(lat, lon, ht_data, jd):
         return HT_NORM_CONST*np.log(rho_atm_0/air_density)
 
 
-    # Get the atmosphere mass density from the NRLMSISE model for the observed heights
+    # Get the atmosphere mass density from the MSIS model for the observed heights
     atm_dens = getAtmDensity_vect(lat, lon, ht_data, jd)
 
     # Get the equivalent heights using the exponential atmosphre model

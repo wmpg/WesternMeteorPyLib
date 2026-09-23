@@ -57,6 +57,13 @@ def setAtmosphere(cml_args):
 
 
 
+def getMSISVersion():
+    """ Return the MSIS version used for the atmosphere, e.g. "00" or "2.1". """
+
+    return MSIS_VERSION
+
+
+
 def atmDensPoly6th(ht, dens_co):
     """ Compute the atmosphere density using a 6th order polynomial. This is used in the ablation simulation
         for faster execution. 
@@ -231,7 +238,7 @@ if __name__ == "__main__":
 
     atm_densities = getAtmDensity(np.radians(lat), np.radians(lon), heights, jd)
 
-    plt.semilogx(atm_densities, heights/1000, zorder=3, label="MSIS " + MSIS_VERSION)
+    plt.semilogx(atm_densities, heights/1000, zorder=3, label="MSIS " + getMSISVersion())
 
 
     # Fit the 6th order poly model
@@ -249,7 +256,7 @@ if __name__ == "__main__":
 
     plt.grid()
 
-    plt.title('MSIS ' + MSIS_VERSION)
+    plt.title('MSIS ' + getMSISVersion())
 
     # plt.savefig('atm_dens.png', dpi=300)
 

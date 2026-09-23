@@ -33,7 +33,7 @@ from wmpl.MetSim.MetSimErosion import runSimulation, Constants, zenithAngleAtSim
 from wmpl.Trajectory.Trajectory import Trajectory, ObservedPoints, PlaneIntersection
 from wmpl.Trajectory.Orbit import calcOrbit, Orbit
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensity, atmDensPoly, \
-    addAtmosphereArguments, setAtmosphere
+    addAtmosphereArguments, getMSISVersion, setAtmosphere
 from wmpl.Utils.Math import mergeClosePoints, findClosestPoints, vectMag, vectNorm, lineFunc, meanAngle
 from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy
 from wmpl.Utils.Pickling import loadPickle, savePickle
@@ -5257,18 +5257,17 @@ class MetSimGUI(QMainWindow):
         # Generate a height array
         height_arr = np.linspace(self.dens_fit_ht_beg, self.dens_fit_ht_end, 200)
 
-        # Get atmosphere densities from NRLMSISE-00 (use log values for the fit)
-        atm_densities = np.array([getAtmDensity(lat_mean, lon_mean, ht, self.traj.jdt_ref) \
-            for ht in height_arr])
+        # Get atmosphere densities from the MSIS model (use log values for the fit)
+        atm_densities = getAtmDensity(lat_mean, lon_mean, height_arr, self.traj.jdt_ref)
 
 
         # Get atmosphere densities from the fitted polynomial
         atm_densities_poly = atmDensPoly(height_arr, self.const.dens_co)
 
 
-        # Plot the MSISE density
+        # Plot the MSIS density
         self.mpw.canvas.axes.semilogx(atm_densities, height_arr/1000, \
-            label="NRLMSISE-00", color='k')
+            label="MSIS " + getMSISVersion(), color='k')
 
         # Poly poly fit
         self.mpw.canvas.axes.semilogx(atm_densities_poly, height_arr/1000, \

@@ -456,7 +456,7 @@ def calcPE(mass, rho_e=None, zangle=None, v_0=None, traj=None):
         v_0: [float] Initial (entry) velocity V_inf (m/s). Cannot be given together with traj.
         traj: [Trajectory] Optional solved WMPL Trajectory. If given, rho_e, zangle and v_0 are
             derived from it instead of being passed explicitly:
-                - rho_e  <- getAtmDensity_vect at the end point (NRLMSISE-00, kg/m^3)
+                - rho_e  <- getAtmDensity_vect at the end point (MSIS, kg/m^3)
                 - zangle <- pi/2 - traj.orbit.elevation_apparent_norot (rad)
                 - v_0    <- traj.v_init (m/s)
 
