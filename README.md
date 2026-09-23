@@ -24,7 +24,7 @@ List of features:
    * Monte Carlo method
  * Orbit computation
  * Meteor shower/trajectory simulaton
- * Obtaining atmosphere densities using the NRLMSISE-00 model
+ * Obtaining atmosphere densities using the NRL MSIS models (NRLMSISE-00 and NRLMSIS 2.x, through `pymsis`)
  * D criteria functions
  * Parent body search
  * Coordinate system transforms
@@ -208,7 +208,7 @@ If you experience any issues, please see the "Troubleshooting" section below.
 
 If you are getting the following error on Windows: ```Unable to find vcvarsall.bat```, that means you need to install [Visual C++ Build Tools 2015](http://go.microsoft.com/fwlink/?LinkId=691126) or 2022. 
 
-If you are getting this error when running the setup: ```ModuleNotFoundError: No module named 'wmpl.PythonNRLMSISE00.nrlmsise_00_header'```, it means that you haven't cloned the repository as per instructions. Please read this README file more carefully (hint: the answer is at the top of the file).
+If you are getting this error: ```ModuleNotFoundError: No module named 'wmpl.PythonNRLMSISE00.nrlmsise_00_header'```, it means that you haven't cloned the repository as per instructions. Please read this README file more carefully (hint: the answer is at the top of the file). The library itself no longer uses that submodule - the atmosphere densities come from `pymsis` - but the atmosphere regression test still compares against it.
 
 ##### ```KeyError: 'PROJ_LIB'```
 The basemap conda package is terribly broken and no one seems to care to fix it, so we have to do a little bit of "hacking". 
