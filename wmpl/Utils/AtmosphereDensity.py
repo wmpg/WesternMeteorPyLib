@@ -7,7 +7,7 @@ import datetime
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.optimize
-from pymsis import calculate
+from pymsis import calculate, Variable
 
 from wmpl.Utils.TrajConversions import jd2Date, datetime2JD
 
@@ -181,9 +181,10 @@ def getAtmDensity(lat, lon, height, jd):
     f107_arr = np.full(lat.size, 150.0)
     ap_arr = np.full((lat.size, 7), 4.0)
 
-    # Compute the total mass density (the first of the 11 output variables)
+    # Take the total mass density out of the 11 variables that the model returns. Giving all inputs
+    #   the same length makes pymsis return one row per point, instead of a grid
     atm_dens = calculate(dt_arr, lon.ravel(), lat.ravel(), height.ravel()/1000, f107_arr, f107_arr, \
-        ap_arr, version=MSIS_VERSION)[:, 0].astype(np.float64)
+        ap_arr, version=MSIS_VERSION)[:, Variable.MASS_DENSITY].astype(np.float64)
 
     # Return a scalar if only scalars were given
     if lat.ndim == 0:
