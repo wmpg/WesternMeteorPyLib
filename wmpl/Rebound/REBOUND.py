@@ -1039,6 +1039,30 @@ def radiationPressureBeta(radius_m, density_kgm3, q_pr=1.0):
     return 5.7425e-4*q_pr/(density_kgm3*radius_m)
 
 
+def equivalentSphereRadius(mass_kg, density_kgm3):
+    """ Compute the radius of the sphere with the given mass and bulk density,
+
+        s = (3*m/(4*pi*rho))^(1/3)
+
+    which is the size radiationPressureBeta needs. Meteor work gives a mass (photometric, or from a
+    MetSim fit) and an assumed bulk density rather than a size, so the conversion belongs here
+    rather than in the user's head. Beta goes as m^(-1/3), so even a factor of 2 in the assumed
+    mass moves it by only 26%.
+
+    Arguments:
+        mass_kg: [float] Meteoroid mass in kg.
+        density_kgm3: [float] Bulk density in kg/m^3.
+
+    Return:
+        [float] Radius of the equivalent sphere in metres.
+    """
+
+    if (mass_kg <= 0) or (density_kgm3 <= 0):
+        raise ValueError("The mass and the density must both be positive.")
+
+    return (3*mass_kg/(4*np.pi*density_kgm3))**(1/3.0)
+
+
 def tisserandParameterJupiter(a, e, inc):
     """ Compute the Tisserand parameter with respect to Jupiter, a quasi-invariant of the encounter
     geometry that is the standard way to classify the dynamical origin of a small body.
@@ -2108,9 +2132,10 @@ def reboundSimulate(
             is done in the parent process, so results do not depend on the number of cores used.
         beta: [float] Ratio of solar radiation pressure to solar gravity for the integrated object.
             If given, radiation pressure and Poynting-Robertson drag are applied to the object (see
-            radiationPressureBeta to compute it from a size and density). None (default) leaves the
-            integration purely gravitational, since a trajectory solution does not constrain the
-            object's size and density.
+            radiationPressureBeta to compute it from a size and a density, and equivalentSphereRadius
+            to get that size from a mass). None (default) leaves the integration purely
+            gravitational, since a trajectory solution does not constrain the object's size and
+            density.
         integrator: [str] "ias15" (default), "whfast" or "trace" (see INTEGRATORS). IAS15 is adaptive
             and accurate to machine precision; the other two use a fixed timestep.
         dt_days: [float] Timestep in days for WHFast and TRACE. None (default) uses
@@ -2432,18 +2457,24 @@ if __name__ == "__main__":
                         "Increase it for long integrations, where the default 500 samples are "
                         "coarse. Default: 500.")
 
-    parser.add_argument("--beta", type=float, default=None,
-                        help="Include solar radiation pressure and Poynting-Robertson drag with this "
-                        "beta (the ratio of radiation pressure to solar gravity). Mutually exclusive "
-                        "with --radius/--density, which compute beta instead.")
+    # The radiation forces need the object's size, which can be given as a beta, a radius or a mass
+    size_group = parser.add_mutually_exclusive_group()
 
-    parser.add_argument("--radius", type=float, default=None,
+    size_group.add_argument("--beta", type=float, default=None,
+                        help="Include solar radiation pressure and Poynting-Robertson drag with this "
+                        "beta (the ratio of radiation pressure to solar gravity).")
+
+    size_group.add_argument("--radius", type=float, default=None,
                         help="Object radius in metres, used with --density to compute beta and "
                         "include radiation forces. Purely gravitational if not given.")
 
+    size_group.add_argument("--mass", type=float, nargs="?", const=0.0, default=None,
+                        help="Object mass in kg, used with --density to compute beta. Given without "
+                        "a value, the photometric mass of the trajectory light curve is used.")
+
     parser.add_argument("--density", type=float, default=3000.0,
-                        help="Object bulk density in kg/m^3, used with --radius to compute beta. "
-                        "Default: 3000.")
+                        help="Object bulk density in kg/m^3, used with --radius or --mass to compute "
+                        "beta. Default: 3000.")
 
     parser.add_argument("--integrator", type=str.lower, default="ias15", choices=INTEGRATORS,
                         help="Integrator: ias15 (default; adaptive, accurate to machine precision), "
@@ -2481,19 +2512,6 @@ if __name__ == "__main__":
     # can be reproduced afterwards with --seed.
     random_seed = args.seed if args.seed is not None else int(np.random.SeedSequence().entropy % (2**32))
 
-    ### Non-gravitational forces (off by default) ###
-    if (args.beta is not None) and (args.radius is not None):
-        parser.error("Give either --beta or --radius (with --density), not both.")
-
-    beta = args.beta
-    if args.radius is not None:
-        beta = radiationPressureBeta(args.radius, args.density)
-        print("Radiation forces ON: radius {:.4g} m, density {:.0f} kg/m^3 -> beta = {:.4e}".format(
-            args.radius, args.density, beta))
-    elif beta is not None:
-        print("Radiation forces ON: beta = {:.4e}".format(beta))
-    ### ###
-
     ### Integrator ###
 
     # Fail before any ephemeris or integration work if the installed REBOUND cannot provide it
@@ -2530,6 +2548,35 @@ if __name__ == "__main__":
 
     # Load the trajectory data from a pickle file
     traj = loadPickle(*os.path.split(args.pickle_path))
+
+
+    ### Non-gravitational forces (off by default, as they need the object's size) ###
+    beta = args.beta
+    if args.mass is not None:
+
+        if args.mass < 0:
+            parser.error("--mass must be positive, got {:g} kg.".format(args.mass))
+
+        # --mass without a value: take the photometric mass off the light curve, with the same
+        # zero-magnitude power as the trajectory summaries. The import is local because that module
+        # pulls in the whole plotting stack.
+        if args.mass == 0:
+            from wmpl.Trajectory.AggregateAndPlot import computeMass, P_0M
+
+            args.mass = computeMass(traj, P_0M)
+            if not args.mass:
+                parser.error("The trajectory has no photometry, so --mass needs a value in kg.")
+            print("Photometric mass: {:.4g} kg (P_0m = {:g} W, tau = 0.7%).".format(args.mass, P_0M))
+
+        args.radius = equivalentSphereRadius(args.mass, args.density)
+
+    if args.radius is not None:
+        beta = radiationPressureBeta(args.radius, args.density)
+        print("Radiation forces ON: radius {:.4g} m, density {:.0f} kg/m^3 -> beta = {:.4e}".format(
+            args.radius, args.density, beta))
+    elif beta is not None:
+        print("Radiation forces ON: beta = {:.4e}".format(beta))
+    ### ###
 
 
     ### Set reference frame settings ###
