@@ -19,7 +19,7 @@ import scipy.interpolate
 
 from wmpl.Utils.Math import meanAngle
 from wmpl.Utils.Physics import dynamicPressure, dynamicMass
-from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
+from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect, addAtmosphereArguments, setAtmosphere
 
 
 # Scale height
@@ -5069,8 +5069,14 @@ if __name__ == "__main__":
         help="1-sigma uncertainty on the bulk density, in kg/m^3, folded into the mass error "
         "estimate when --errors is set. Default: the density is treated as exactly known.")
 
+    # Add the atmosphere model options
+    addAtmosphereArguments(arg_parser)
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
+
+    # Apply the atmosphere model options
+    setAtmosphere(cml_args)
 
     #########################
 
