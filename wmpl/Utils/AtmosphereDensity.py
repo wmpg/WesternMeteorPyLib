@@ -1,14 +1,66 @@
-""" Plots NRL MSISE atmosphere density model. """
+""" NRL MSIS atmosphere mass density model, evaluated using pymsis. """
 
 from __future__ import print_function, division, absolute_import
+
+import datetime
 
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.optimize
+from pymsis import calculate, Variable
 
-from wmpl.PythonNRLMSISE00.nrlmsise_00_header import *
-from wmpl.PythonNRLMSISE00.nrlmsise_00 import *
-from wmpl.Utils.TrajConversions import jd2Date, jd2LST
+from wmpl.Utils.TrajConversions import jd2Date, datetime2JD
+
+
+# MSIS version used for all atmosphere density evaluations. "00" is NRLMSISE-00, the model WMPL has
+#   always used, "2.0" and "2.1" are the newer NRLMSIS 2.x releases which give up to 20% lower
+#   densities around 85 and 120 km
+MSIS_VERSION = "00"
+
+# Julian date used instead of the one passed to getAtmDensity. Only set when the date cannot be taken
+#   from the input data, e.g. when the model is not run on a trajectory pickle
+MSIS_JD = None
+
+
+
+def addAtmosphereArguments(arg_parser):
+    """ Add the atmosphere model options to a command line argument parser. Apply them by calling
+        setAtmosphere() on the parsed arguments.
+
+    Arguments:
+        arg_parser: [ArgumentParser] Argument parser to add the options to.
+    """
+
+    arg_parser.add_argument('--atm', metavar='MSIS_VERSION', type=str, default=MSIS_VERSION, \
+        choices=['00', '2.0', '2.1'], \
+        help="MSIS atmosphere model: 00 for NRLMSISE-00 (default), 2.0 or 2.1 for NRLMSIS 2.x.")
+
+    arg_parser.add_argument('--atmtime', metavar='ATM_TIME', type=str, default=None, \
+        help="UTC date and time at which the atmosphere is evaluated. Format: YYYYMMDD-HHMMSS. By "
+        "default the reference time of the input data is used, e.g. of the trajectory pickle.")
+
+
+
+def setAtmosphere(cml_args):
+    """ Apply the atmosphere options added by addAtmosphereArguments to all density evaluations.
+
+    Arguments:
+        cml_args: [Namespace] Parsed command line arguments.
+    """
+
+    global MSIS_VERSION, MSIS_JD
+
+    MSIS_VERSION = cml_args.atm
+
+    MSIS_JD = None if cml_args.atmtime is None \
+        else datetime2JD(datetime.datetime.strptime(cml_args.atmtime, "%Y%m%d-%H%M%S"))
+
+
+
+def getMSISVersion():
+    """ Return the MSIS version used for the atmosphere, e.g. "00" or "2.1". """
+
+    return MSIS_VERSION
 
 
 
@@ -88,8 +140,8 @@ def fitAtmPoly(lat, lon, height_min, height_max, jd):
     # Generate a height array
     height_arr = np.linspace(height_min, height_max, 200)
 
-    # Get atmosphere densities from NRLMSISE-00 (use log values for the fit)
-    atm_densities = np.array([getAtmDensity(lat, lon, ht, jd) for ht in height_arr])
+    # Get atmosphere densities from the MSIS model (use log values for the fit)
+    atm_densities = getAtmDensity(lat, lon, height_arr, jd)
     atm_densities_log = np.log10(atm_densities)
 
 
@@ -106,143 +158,73 @@ def fitAtmPoly(lat, lon, height_min, height_max, jd):
     
 
 
-def getAtmDensity(lat, lon, height, jd):
-    """ For the given heights, returns the atmospheric density from NRLMSISE-00 model. 
-    
-    More info: https://github.com/magnific0/nrlmsise-00/blob/master/nrlmsise-00.h
+def getMSISVariable(lat, lon, height, jd, variable):
+    """ For the given heights, returns one of the variables computed by the MSIS model. The model version
+        is given by MSIS_VERSION, see setAtmosphere().
+
+    More info: https://swxtrec.github.io/pymsis/
 
     Arguments:
-        lat: [float] Latitude in radians.
-        lon: [float] Longitude in radians.
-        height: [float] Height in meters.
-        jd: [float] Julian date.
+        lat: [float or ndarray] Latitude in radians.
+        lon: [float or ndarray] Longitude in radians.
+        height: [float or ndarray] Height in meters.
+        jd: [float] Julian date. Ignored if a date was set using setAtmosphere().
+        variable: [Variable] Model output to return, e.g. Variable.MASS_DENSITY or Variable.TEMPERATURE.
+            The model also gives the number densities of N2, O2, O, He, H, Ar, N, anomalous oxygen and NO.
 
     Return:
-        [float] Atmosphere density in kg/m^3.
+        [float or ndarray] The requested variable, in SI units.
 
     """
 
+    # Take the date given on the command line, if there was one
+    if MSIS_JD is not None:
+        jd = MSIS_JD
 
-    # Init the input array
-    inp = nrlmsise_input()
+    # Broadcast the inputs to a common shape, so that pymsis evaluates them point by point
+    lat, lon, height = np.broadcast_arrays(np.degrees(lat), np.degrees(lon), height)
+    dt_arr = np.full(lat.size, np.datetime64(jd2Date(jd, dt_obj=True)))
 
+    # f107, f107A, and ap effects are neither large nor well established below 80 km and these parameters
+    #   should be set to 150., 150., and 4. respectively
+    f107_arr = np.full(lat.size, 150.0)
+    ap_arr = np.full((lat.size, 7), 4.0)
 
-    # Convert the given Julian date to datetime
-    dt = jd2Date(jd, dt_obj=True)
+    # Take the requested variable out of the 11 that the model returns. Giving all inputs the same
+    #   length makes pymsis return one row per point, instead of a grid
+    values = calculate(dt_arr, lon.ravel(), lat.ravel(), height.ravel()/1000, f107_arr, f107_arr, \
+        ap_arr, version=MSIS_VERSION)[:, variable].astype(np.float64)
 
-    # Get the day of year
-    doy = dt.timetuple().tm_yday
+    # Return a scalar if only scalars were given
+    if lat.ndim == 0:
+        return float(values[0])
 
-    # Get the second in day
-    midnight = dt.replace(hour=0, minute=0, second=0, microsecond=0)
-    sec = (dt - midnight).seconds
-
-    # Calculate the Local sidreal time (degrees)
-    lst, _ = jd2LST(jd, np.degrees(lon))
-
-
-    ### INPUT PARAMETERS ###
-    ##########################################################################################################
-    # Set year (no effect)
-    inp.year = 0
-
-    # Day of year
-    inp.doy = doy
-
-    # Seconds in a day
-    inp.sec = sec
-
-    # Altitude in kilometers
-    inp.alt = height/1000.0
-
-    # Geodetic latitude (deg)
-    inp.g_lat = np.degrees(lat)
-
-    # Geodetic longitude (deg)
-    inp.g_long = np.degrees(lon)
-
-    # Local apparent solar time (hours)
-    inp.lst = lst/15
-
-
-    # f107, f107A, and ap effects are neither large nor well established below 80 km and these parameters 
-    # should be set to 150., 150., and 4. respectively.
-
-    # 81 day average of 10.7 cm radio flux (centered on DOY)
-    inp.f107A = 150
-
-    # Daily 10.7 cm radio flux for previous day
-    inp.f107 = 150
-
-    # Magnetic index (daily)
-    inp.ap = 4
-
-    ##########################################################################################################
-
-
-    # Init the flags array
-    flags = nrlmsise_flags()
-
-    # Set output in kilograms and meters
-    flags.switches[0] = 1
-
-    # Set all switches to ON
-    for i in range(1, 24):
-        flags.switches[i] = 1
-
-    
-    # Array containing the following magnetic values:
-    #   0 : daily AP
-    #   1 : 3 hr AP index for current time
-    #   2 : 3 hr AP index for 3 hrs before current time
-    #   3 : 3 hr AP index for 6 hrs before current time
-    #   4 : 3 hr AP index for 9 hrs before current time
-    #   5 : Average of eight 3 hr AP indices from 12 to 33 hrs prior to current time
-    #   6 : Average of eight 3 hr AP indices from 36 to 57 hrs prior to current time 
-    aph = ap_array()
-
-    # Set all AP indices to 100
-    for i in range(7):
-        aph.a[i] = 100
-
-
-    # Init the output array
-    # OUTPUT VARIABLES:
-    #     d[0] - HE NUMBER DENSITY(CM-3)
-    #     d[1] - O NUMBER DENSITY(CM-3)
-    #     d[2] - N2 NUMBER DENSITY(CM-3)
-    #     d[3] - O2 NUMBER DENSITY(CM-3)
-    #     d[4] - AR NUMBER DENSITY(CM-3)                       
-    #     d[5] - TOTAL MASS DENSITY(GM/CM3) [includes d[8] in td7d]
-    #     d[6] - H NUMBER DENSITY(CM-3)
-    #     d[7] - N NUMBER DENSITY(CM-3)
-    #     d[8] - Anomalous oxygen NUMBER DENSITY(CM-3)
-    #     t[0] - EXOSPHERIC TEMPERATURE
-    #     t[1] - TEMPERATURE AT ALT
-    out = nrlmsise_output()
-
-
-    # Evaluate the atmosphere with the given parameters
-    gtd7(inp, flags, out)
-
-
-    # Get the total mass density
-    atm_density = out.d[5]
-
-    return atm_density
+    return values.reshape(lat.shape)
 
 
 
-getAtmDensity_vect = np.vectorize(getAtmDensity, excluded=['jd'])
+def getAtmDensity(lat, lon, height, jd):
+    """ For the given heights, returns the atmosphere mass density in kg/m^3. See getMSISVariable(). """
+
+    return getMSISVariable(lat, lon, height, jd, Variable.MASS_DENSITY)
+
+
+
+def getAtmTemperature(lat, lon, height, jd):
+    """ For the given heights, returns the neutral atmosphere temperature in K. See getMSISVariable(). """
+
+    return getMSISVariable(lat, lon, height, jd, Variable.TEMPERATURE)
+
+
+
+# getAtmDensity handles arrays directly, the alias is kept for backwards compatibility
+getAtmDensity_vect = getAtmDensity
 
 
 
 
 if __name__ == "__main__":
 
-    import datetime
-    from wmpl.Utils.TrajConversions import datetime2JD
-    
     lat = 44.327234
     lon = -81.372350
     jd = datetime2JD(datetime.datetime.now(datetime.timezone.utc))
@@ -254,13 +236,9 @@ if __name__ == "__main__":
     # Density evaluation heights (m)
     heights = np.linspace(height_min, height_max, 100)*1000
 
-    atm_densities = []
-    for height in heights:
-        atm_density = getAtmDensity(np.radians(lat), np.radians(lon), height, jd)
-        atm_densities.append(atm_density)
+    atm_densities = getAtmDensity(np.radians(lat), np.radians(lon), heights, jd)
 
-
-    plt.semilogx(atm_densities, heights/1000, zorder=3, label="NRLMSISE-00")
+    plt.semilogx(atm_densities, heights/1000, zorder=3, label="MSIS " + getMSISVersion())
 
 
     # Fit the 6th order poly model
@@ -278,7 +256,7 @@ if __name__ == "__main__":
 
     plt.grid()
 
-    plt.title('NRLMSISE-00')
+    plt.title('MSIS ' + getMSISVersion())
 
     # plt.savefig('atm_dens.png', dpi=300)
 

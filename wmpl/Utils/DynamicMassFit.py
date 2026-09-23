@@ -5,7 +5,7 @@ import scipy.optimize
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import cm
 
-from wmpl.Utils.AtmosphereDensity import fitAtmPoly
+from wmpl.Utils.AtmosphereDensity import fitAtmPoly, addAtmosphereArguments, setAtmosphere
 from wmpl.Utils.Math import lineFunc, vectMag
 from wmpl.Utils.TrajConversions import cartesian2Geo, derotatedRadiantAltAz
 from wmpl.Utils.Physics import dynamicMass
@@ -60,7 +60,7 @@ def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a
     
 
 
-    # Fit the atmosphere density polynomial using NRLMSISE
+    # Fit the atmosphere density polynomial using the MSIS model
     ht_min = const.h_kill
     ht_max = 180000
     const.dens_co = fitAtmPoly(lat, lon, ht_min, ht_max, jd)
@@ -498,8 +498,14 @@ if __name__ == "__main__":
                             help='Maximum mass in kg for the dynamic mass measurements. Used to avoid inf values. Default is 50 kg.', \
                             type=float, default=50)
 
+    # Add the atmosphere model options
+    addAtmosphereArguments(arg_parser)
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
+
+    # Apply the atmosphere model options
+    setAtmosphere(cml_args)
 
     #########################
 
