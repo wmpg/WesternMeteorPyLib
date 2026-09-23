@@ -23,7 +23,7 @@ import numpy as np
 from wmpl.PythonNRLMSISE00.nrlmsise_00 import gtd7
 from wmpl.PythonNRLMSISE00.nrlmsise_00_header import nrlmsise_input, nrlmsise_flags, nrlmsise_output
 from wmpl.Utils.AtmosphereDensity import addAtmosphereArguments, atmDensPoly, fitAtmPoly, \
-    getAtmDensity, getAtmDensity_vect, setAtmosphere
+    getAtmDensity, getAtmDensity_vect, getAtmTemperature, setAtmosphere
 from wmpl.Utils.TrajConversions import datetime2JD
 
 
@@ -34,8 +34,10 @@ DT_REF = datetime.datetime(2020, 4, 20, 16, 15, 0)
 JD_REF = datetime2JD(DT_REF)
 
 
-def referenceDensity(height, dt=DT_REF):
-    """ Total mass density (kg/m^3) at the reference location from the bundled NRLMSISE-00 port. """
+def referenceMSIS(height, dt=DT_REF):
+    """ Total mass density (kg/m^3) and temperature (K) at the reference location, from the bundled
+        NRLMSISE-00 port.
+    """
 
     inp = nrlmsise_input()
     flags = nrlmsise_flags()
@@ -61,17 +63,20 @@ def referenceDensity(height, dt=DT_REF):
 
     gtd7(inp, flags, out)
 
-    return out.d[5]
+    return out.d[5], out.t[1]
 
 
 def testMSIS00MatchesTheBundledNRLMSISEPort():
-    """ The default model is the same NRLMSISE-00 that WMPL has always used. """
+    """ The default model is the same NRLMSISE-00 that WMPL has always used, for both the density and
+        the temperature.
+    """
 
     for height in np.arange(20000, 180001, 5000):
 
-        dens = getAtmDensity(LAT, LON, float(height), JD_REF)
+        dens_ref, temp_ref = referenceMSIS(height)
 
-        assert abs(dens/referenceDensity(height) - 1) < 1e-4
+        assert abs(getAtmDensity(LAT, LON, float(height), JD_REF)/dens_ref - 1) < 1e-4
+        assert abs(getAtmTemperature(LAT, LON, float(height), JD_REF)/temp_ref - 1) < 1e-4
 
 
 def testScalarAndArrayInputsAgree():

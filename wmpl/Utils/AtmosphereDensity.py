@@ -151,9 +151,9 @@ def fitAtmPoly(lat, lon, height_min, height_max, jd):
     
 
 
-def getAtmDensity(lat, lon, height, jd):
-    """ For the given heights, returns the atmospheric density from the MSIS model. The model version is
-        given by MSIS_VERSION, see setAtmosphere().
+def getMSISVariable(lat, lon, height, jd, variable):
+    """ For the given heights, returns one of the variables computed by the MSIS model. The model version
+        is given by MSIS_VERSION, see setAtmosphere().
 
     More info: https://swxtrec.github.io/pymsis/
 
@@ -162,9 +162,11 @@ def getAtmDensity(lat, lon, height, jd):
         lon: [float or ndarray] Longitude in radians.
         height: [float or ndarray] Height in meters.
         jd: [float] Julian date. Ignored if a date was set using setAtmosphere().
+        variable: [Variable] Model output to return, e.g. Variable.MASS_DENSITY or Variable.TEMPERATURE.
+            The model also gives the number densities of N2, O2, O, He, H, Ar, N, anomalous oxygen and NO.
 
     Return:
-        [float or ndarray] Atmosphere mass density in kg/m^3.
+        [float or ndarray] The requested variable, in SI units.
 
     """
 
@@ -181,16 +183,30 @@ def getAtmDensity(lat, lon, height, jd):
     f107_arr = np.full(lat.size, 150.0)
     ap_arr = np.full((lat.size, 7), 4.0)
 
-    # Take the total mass density out of the 11 variables that the model returns. Giving all inputs
-    #   the same length makes pymsis return one row per point, instead of a grid
-    atm_dens = calculate(dt_arr, lon.ravel(), lat.ravel(), height.ravel()/1000, f107_arr, f107_arr, \
-        ap_arr, version=MSIS_VERSION)[:, Variable.MASS_DENSITY].astype(np.float64)
+    # Take the requested variable out of the 11 that the model returns. Giving all inputs the same
+    #   length makes pymsis return one row per point, instead of a grid
+    values = calculate(dt_arr, lon.ravel(), lat.ravel(), height.ravel()/1000, f107_arr, f107_arr, \
+        ap_arr, version=MSIS_VERSION)[:, variable].astype(np.float64)
 
     # Return a scalar if only scalars were given
     if lat.ndim == 0:
-        return float(atm_dens[0])
+        return float(values[0])
 
-    return atm_dens.reshape(lat.shape)
+    return values.reshape(lat.shape)
+
+
+
+def getAtmDensity(lat, lon, height, jd):
+    """ For the given heights, returns the atmosphere mass density in kg/m^3. See getMSISVariable(). """
+
+    return getMSISVariable(lat, lon, height, jd, Variable.MASS_DENSITY)
+
+
+
+def getAtmTemperature(lat, lon, height, jd):
+    """ For the given heights, returns the neutral atmosphere temperature in K. See getMSISVariable(). """
+
+    return getMSISVariable(lat, lon, height, jd, Variable.TEMPERATURE)
 
 
 
