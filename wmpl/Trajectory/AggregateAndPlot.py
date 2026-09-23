@@ -188,7 +188,7 @@ def writeOrbitSummaryFile(dir_path, traj_list, traj_summary_file_name=TRAJ_SUMMA
         Keyword arguments:
             multi: [float] Uncertanty multiplier. 1.0 by default. This is used to scale the uncertanty to
                 different units (e.g. from m/s to km/s).
-            deg: [bool] Converet radians to degrees if True. False by default.
+            deg: [bool] Convert radians to degrees if True. False by default.
             max_val: [float] Larger number to use the given format. If the value is larger than that, the
                 max_val_format is used.
             max_val_format: [str]
