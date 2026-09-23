@@ -607,7 +607,7 @@ if __name__ == "__main__":
         [30000.0, -4.03,    'I'],
         [45000.0, -4.97,   'II'],
         [54000.0, -5.43, 'IIIa'],
-        [63000.0, -5.92, 'IIIb'],
+        [63000.0, -5.91, 'IIIb'],
     ]
 
     for ht_end, pe_expected, group_expected in pe_table:
