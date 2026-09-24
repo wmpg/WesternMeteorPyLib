@@ -1223,7 +1223,7 @@ class RMSDataHandle(object):
                                     # the trajectory is already in the database but with a different on-disk location
                                     # so remove the second version. 
                                     log.info(f'   - removing {traj_dir} from disk as its a duplicate')
-                                    #shutil.rmtree(full_traj_dir)
+                                    shutil.rmtree(full_traj_dir)
 
                                 # Print every 1000th trajectory
                                 if counter % 1000 == 0 and counter > 0:
