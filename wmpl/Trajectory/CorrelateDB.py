@@ -548,12 +548,12 @@ class TrajectoryDatabase():
                     db_tr_path = rw[1]
                     if new_tr_path == db_tr_path:
                         # database already contains this trajectory, so skip it
-                        if verbose:
-                            log.info(f'{traj_reduced.traj_id} already present, skipping')
+                        #if verbose:
+                        #    log.info(f'{traj_reduced.traj_id} already present, skipping')
                         return 0
                     else:
-                        if verbose:
-                            log.info(f'{new_tr_path} on-disk duplicate of {db_tr_path}, skipping')
+                        #if verbose:
+                        #    log.info(f'{new_tr_path} on-disk duplicate of {db_tr_path}, skipping')
                         return -1
             
         if verbose:

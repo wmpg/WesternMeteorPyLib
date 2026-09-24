@@ -1222,7 +1222,7 @@ class RMSDataHandle(object):
                                 elif add_sts < 0:
                                     # the trajectory is already in the database but with a different on-disk location
                                     # so remove the second version. 
-                                    log.info(f'   - removing {full_traj_dir} from disk as its a duplicate')
+                                    log.info(f'   - removing {traj_dir} from disk as its a duplicate')
                                     #shutil.rmtree(full_traj_dir)
 
                                 # Print every 1000th trajectory
