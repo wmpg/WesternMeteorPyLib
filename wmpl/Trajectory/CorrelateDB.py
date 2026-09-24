@@ -530,20 +530,34 @@ class TrajectoryDatabase():
         failed          : boolean, if true, add the traj to the fails list
 
         Returns:
-            true if the trajectory was added, false if it exists already
+            1 if the trajectory was added, 0 if it exists in the database already, -1 if the trajectory is a duplicate
 
         """
 
         tblname = 'failed_trajectories' if failed else 'trajectories'
+        stsflag = 1
 
         # if force_add is false, don't replace any existing entry
+        # careful though - in distributed mode, an on-disk duplicate may get created with the same traj-id but different path
         if not force_add and hasattr(traj_reduced, 'traj_id') and traj_reduced.traj_id is not None:
-            rws = self.dbhandle.execute(f'select count(traj_id) from {tblname} where status=1 and traj_id=?', (traj_reduced.traj_id,)).fetchall()
-            if rws[0][0] > 0:
-                return False
+            rws = self.dbhandle.execute(f'select traj_id, traj_file_path from {tblname} where status=1 and traj_id=?', (traj_reduced.traj_id,)).fetchall()
+            if len(rws) > 0:
+                # now check if the traj_file_path is the same. 
+                new_tr_path = traj_reduced.traj_file_path[traj_reduced.traj_file_path.find('trajectories'):].replace('\\','/')
+                for rw in rws:
+                    db_tr_path = rw[1]
+                    if new_tr_path == db_tr_path:
+                        # database already contains this trajectory, so skip it
+                        if verbose:
+                            log.info(f'{traj_reduced.traj_id} already present, skipping')
+                        return 0
+                    else:
+                        if verbose:
+                            log.info(f'{new_tr_path} on-disk duplicate of {db_tr_path}, skipping')
+                        return -1
             
         if verbose:
-            log.info(f'    adding {traj_reduced.traj_id if hasattr(traj_reduced, 'traj_id') else traj_reduced.jdt_ref} to {tblname}')
+            log.info(f"    adding {traj_reduced.traj_id if hasattr(traj_reduced, 'traj_id') else traj_reduced.jdt_ref} to {tblname}")
 
         try:
             vals = copy.deepcopy(traj_reduced.__dict__)
@@ -566,26 +580,27 @@ class TrajectoryDatabase():
 
             vals['radiant_eci_mini'] = json.dumps([0,0,0]) if traj_reduced.radiant_eci_mini is None else json.dumps(traj_reduced.radiant_eci_mini)
             vals['state_vect_mini'] = json.dumps([0,0,0]) if traj_reduced.state_vect_mini is None else json.dumps(traj_reduced.state_vect_mini)
+            vals['status'] = stsflag
         except Exception as e:
             log.warning('malformed trajectory')
             log.warning(e)
-            return False
+            return 0
 
         for retry in range(10):
             try:
                 if failed:
                     self.dbhandle.execute('insert or replace into failed_trajectories values(:jdt_ref,:traj_id,:traj_file_path,:participating_stations,:ignored_stations,' \
                                         ':radiant_eci_mini,:state_vect_mini,:phase_1_only,:v_init,:gravity_factor,' \
-                                        ':obs_ids,:ign_obs_ids,1)', \
+                                        ':obs_ids,:ign_obs_ids,:status)', \
                                         vals)
                 else:
                     self.dbhandle.execute('insert or replace into trajectories values(:jdt_ref,:traj_id,:traj_file_path,:participating_stations,:ignored_stations,' \
                                         ':radiant_eci_mini,:state_vect_mini,:phase_1_only,:v_init,:gravity_factor,' \
                                         ':v0z,:v_avg,:rbeg_jd,:rend_jd,:rbeg_lat,:rbeg_lon,:rbeg_ele,:rend_lat,:rend_lon,:rend_ele,' \
-                                        ':obs_ids,:ign_obs_ids,1)', \
+                                        ':obs_ids,:ign_obs_ids,:status)', \
                                         vals)
                 self.dbhandle.commit()
-                return True
+                return 1
             except sqlite3.OperationalError as e:
                 log.warning(f'failed to insert {vals["traj_id"]}, try {retry+1}/10')
                 log.warning(f'reason: {e}')
@@ -593,9 +608,9 @@ class TrajectoryDatabase():
             except Exception as e:
                 log.warning(f'unable to insert {vals["traj_id"]} into traj database')
                 log.warning(f'reason: {e}')
-                return False
+                return 0
         # if we got this far, the retries failed
-        return  False
+        return 0
                 
    
     def removeTrajectoryById(self, traj_id, failed=False, verbose=False):

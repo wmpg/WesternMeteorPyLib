@@ -443,7 +443,7 @@ def test_addTrajectory():
 
     # add to successful table
     traj_reduced = TrajectoryReduced(traj_file_path=os.path.join(dbloc, loaded_traj_path))
-    assert trajdb.addTrajectory(traj_reduced, failed=False) == True
+    assert trajdb.addTrajectory(traj_reduced, failed=False) == 1
     
     cur = trajdb.dbhandle.execute(f"select count(*) from trajectories where traj_id = '{traj_reduced.traj_id}'")
     dta = cur.fetchall()
@@ -453,11 +453,11 @@ def test_addTrajectory():
     # add malformed trajectory with missing elements
     json_data = {'jdt_ref':exact_jdt_fail, 'participating_stations':['UK0005,UK002F'], 'ignored_stations':['UK000S']}
     traj_reduced = TrajectoryReduced(None, json_dict=json_data)
-    assert trajdb.addTrajectory(traj_reduced, failed=False) == False
+    assert trajdb.addTrajectory(traj_reduced, failed=False) == 0
 
     # trying add to failed table
     traj_failed = TrajectoryReduced(traj_file_path=os.path.join(dbloc, loaded_traj_path))
-    assert trajdb.addTrajectory(traj_failed, failed=True) == True
+    assert trajdb.addTrajectory(traj_failed, failed=True) == 1
 
     res = trajdb.checkTrajIfFailed(traj_failed)
     assert res is True
@@ -465,15 +465,15 @@ def test_addTrajectory():
     # add malformed traj to the table with bad data or hackery
     json_data = {'jdt_ref':exact_jdt_fail, 'participating_stations':['UK0005,UK002F'], 'ignored_stations':['UK000S']}
     traj_reduced = TrajectoryReduced(None, json_dict=json_data)
-    assert trajdb.addTrajectory(traj_reduced, failed=False) == False
+    assert trajdb.addTrajectory(traj_reduced, failed=False) == 0
 
     json_data = {'jdt_ref':"notadate", 'participating_stations':['UK0005,UK002F'], 'ignored_stations':['UK000S']}
     traj_reduced = TrajectoryReduced(None, json_dict=json_data)
-    assert trajdb.addTrajectory(traj_reduced, failed=False) == False
+    assert trajdb.addTrajectory(traj_reduced, failed=False) == 0
 
     json_data = {'jdt_ref':"2345678;drop table foo", 'participating_stations':['UK0005,UK002F'], 'ignored_stations':['UK000S']}
     traj_reduced = TrajectoryReduced(None, json_dict=json_data)
-    assert trajdb.addTrajectory(traj_reduced, failed=False) == False
+    assert trajdb.addTrajectory(traj_reduced, failed=False) == 0
 
     trajdb.closeTrajDatabase()
 
