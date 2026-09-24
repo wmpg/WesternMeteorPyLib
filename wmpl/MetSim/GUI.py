@@ -96,8 +96,12 @@ class SimulationResults(object):
         self.abs_magnitude_main[np.isnan(self.abs_magnitude_main)] = np.nanmax(self.abs_magnitude_main)
 
         # Compute the absolute magnitude of the eroded and disruped grains
-        self.abs_magnitude_eroded = -2.5*np.log10(self.luminosity_eroded_arr/self.const.P_0m)
-        self.abs_magnitude_eroded[np.isnan(self.abs_magnitude_eroded)] = np.nanmax(self.abs_magnitude_eroded)   
+        with np.errstate(divide='ignore'):
+            self.abs_magnitude_eroded = -2.5*np.log10(self.luminosity_eroded_arr/self.const.P_0m)
+        eroded_finite = self.abs_magnitude_eroded[np.isfinite(self.abs_magnitude_eroded)]
+        # Fall back to the total magnitude's faintest value if there's no erosion at all
+        fallback_mag = np.nanmax(eroded_finite) if eroded_finite.size else np.nanmax(self.abs_magnitude)
+        self.abs_magnitude_eroded[~np.isfinite(self.abs_magnitude_eroded)] = fallback_mag
 
 
         # Interpolate time vs leading fragment height
