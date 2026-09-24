@@ -543,7 +543,7 @@ class TrajectoryDatabase():
                 return False
             
         if verbose:
-            log.info(f'    adding jdt {traj_reduced.jdt_ref} to {tblname}')
+            log.info(f'    adding {traj_reduced.traj_id if hasattr(traj_reduced, 'traj_id') else traj_reduced.jdt_ref} to {tblname}')
 
         try:
             vals = copy.deepcopy(traj_reduced.__dict__)

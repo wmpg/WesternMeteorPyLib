@@ -1193,6 +1193,7 @@ class RMSDataHandle(object):
 
         for d in range(dt_diff):
             curr_dt = dt_beg + datetime.timedelta(days=d)
+            log.info(f'checking {curr_dt}')
             yyyy = curr_dt.year
             yyyymm = f'{yyyy}{curr_dt.month:02d}'
             yyyymmdd = f'{yyyy}{curr_dt.month:02d}{curr_dt.day:02d}'
