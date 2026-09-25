@@ -5,7 +5,8 @@ from __future__ import print_function, absolute_import, division
 import os
 import sys
 import errno
-
+import uuid
+import shutil
 
 # not used here but required to force-load Cartopy before basemap. Otherwise
 # loadBaseMap() crashes on Windows 10
@@ -13,6 +14,29 @@ try:
     import cartopy.io.img_tiles as cimgt 
 except:
     pass
+
+def safeCopyOrMove(src_name, src_path, targ_path, targ_name=None, move=False):
+    """
+    Safely copy or move a file between locations, using a temporary name to ensure that another instance the solver
+    doesn't read a partially-copied file.
+    
+    """
+    os.makedirs(targ_path, exist_ok=True)
+    full_src_name = os.path.join(src_path, src_name)
+    if not os.path.isfile(full_src_name):
+        return False
+    full_targ_name = os.path.join(targ_path, targ_name) if targ_name else os.path.join(targ_path, src_name)
+    tmp_name = os.path.join(targ_path, f'{src_name.replace(".", "_")}.{str(uuid.uuid4())}')
+    try:
+        shutil.copyfile(full_src_name, tmp_name)
+        if os.path.isfile(full_targ_name):
+            os.remove(full_targ_name)
+        os.rename(tmp_name, full_targ_name)
+        if move:
+            os.remove(full_src_name)
+        return True
+    except Exception:
+        return False
 
 
 def mkdirP(path):

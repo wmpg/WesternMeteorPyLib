@@ -41,6 +41,7 @@ Individual functions are documented in their docstrings, and every module can be
 the larger tools live in [wmpl/Docs](wmpl/Docs):
 
  * [Solving a trajectory](wmpl/Docs/Trajectory.md) - turning multi-station observations into a trajectory pickle, which is the input to the other tools
+ * [Correlating RMS data](wmpl/Docs/Correlator.md) - automatically pairing and solving whole archives of RMS observations, the operation modes, the databases and distributed processing across several servers
  * [REBOUND orbital integration](wmpl/Docs/REBOUND.md) - integrating a meteoroid orbit back or forward in time, close encounters and impacts, Monte Carlo clones, radiation forces and chaos indicators
  * [DynestyMetSim](wmpl/Dynesty/README.md) - nested-sampling fits of the erosion ablation model to a meteor light curve and dynamics
 
