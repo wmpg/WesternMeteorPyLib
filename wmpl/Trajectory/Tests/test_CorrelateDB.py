@@ -686,6 +686,43 @@ def test_safeDetachDatabaseDetachesTheNameItIsGiven():
     os.remove(os.path.join(dbloc, 'candidates.db'))
 
 
+def test_addTrajectoryOnlyFlagsARealDuplicate(tmp_path):
+    """ A second on-disk copy with the same traj_id is a duplicate (-1) only while the copy the
+        database points at exists. If that copy is gone, the row is stale and is pointed at the new copy.
+
+    updateTrajectoryDatabase deletes a folder when addTrajectory returns -1, so a -1 for a stale row
+    deletes the only remaining copy of the trajectory.
+    """
+
+    day_dir = os.path.join(str(tmp_path), 'trajectories', '2026', '202607', '20260712')
+    copies = {}
+    for name in ['20260712_222508.099_UK', '20260712_222508.100_UK']:
+        os.makedirs(os.path.join(day_dir, name))
+        copies[name] = os.path.join(day_dir, name, loaded_traj_path)
+        shutil.copyfile(os.path.join(dbloc, loaded_traj_path), copies[name])
+
+    trajdb = TrajectoryDatabase(str(tmp_path), 'trajectories.db')
+
+    first = TrajectoryReduced(traj_file_path=copies['20260712_222508.099_UK'])
+    second = TrajectoryReduced(traj_file_path=copies['20260712_222508.100_UK'])
+    assert first.traj_id == second.traj_id
+
+    assert trajdb.addTrajectory(first, force_add=False) == 1
+    assert trajdb.addTrajectory(first, force_add=False) == 0, 'same path is already present'
+    assert trajdb.addTrajectory(second, force_add=False) == -1, 'the first copy exists, so this is a duplicate'
+
+    # The recorded copy disappears: the row is now stale, and the second copy must be adopted, not deleted
+    shutil.rmtree(os.path.dirname(copies['20260712_222508.099_UK']))
+    assert trajdb.addTrajectory(second, force_add=False) == 1
+
+    rows = trajdb.dbhandle.execute('select traj_file_path from trajectories where traj_id=? and status=1',
+                                   (second.traj_id,)).fetchall()
+    assert len(rows) == 1
+    assert rows[0][0].split('/')[-2] == '20260712_222508.100_UK'
+
+    trajdb.closeTrajDatabase()
+
+
 def test_mergeTrajDb():
     shutil.copyfile(os.path.join(dbloc, 'test_traj.db'), os.path.join(dbloc, 'trajectories.db'))
     cdb = TrajectoryDatabase(dbloc, 'trajectories.db')

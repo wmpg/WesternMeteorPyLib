@@ -530,7 +530,8 @@ class TrajectoryDatabase():
         failed          : boolean, if true, add the traj to the fails list
 
         Returns:
-            1 if the trajectory was added, 0 if it exists in the database already, -1 if the trajectory is a duplicate
+            1 if the trajectory was added (or its stale path corrected), 0 if it exists in the database
+            already, -1 if it is an on-disk duplicate of a copy the database points at and which exists
 
         """
 
@@ -544,16 +545,22 @@ class TrajectoryDatabase():
             if len(rws) > 0:
                 # now check if the traj_file_path is the same. 
                 new_tr_path = traj_reduced.traj_file_path[traj_reduced.traj_file_path.find('trajectories'):].replace('\\','/')
+
+                # Root of the output tree, for turning the stored relative path back into a file path
+                root_path = traj_reduced.traj_file_path[:traj_reduced.traj_file_path.find('trajectories')]
+
                 for rw in rws:
                     db_tr_path = rw[1]
                     if new_tr_path == db_tr_path:
                         # database already contains this trajectory, so skip it
-                        #if verbose:
-                        #    log.info(f'{traj_reduced.traj_id} already present, skipping')
                         return 0
-                    else:
-                        #if verbose:
-                        #    log.info(f'{new_tr_path} on-disk duplicate of {db_tr_path}, skipping')
+
+                    # A copy at another path is only a duplicate if the copy the database points at still
+                    #   exists. If it does not, the row is stale (the folder was renamed or moved, e.g. by a
+                    #   Monte Carlo run that shifted jdt_ref, without the database being updated) and this is
+                    #   the only copy left, so fall through and point the row at it instead. Returning -1
+                    #   here would make the caller delete the only copy.
+                    if os.path.isfile(os.path.join(root_path, db_tr_path)):
                         return -1
             
         if verbose:
