@@ -1079,8 +1079,10 @@ def fitConfidenceInterval(x_data, y_data, conf=0.95, x_array=None, func=None):
 def generateDatetimeBins(dt_beg, dt_end, bin_days=7, utc_hour_break=12, tzinfo=None, reverse=False):
     """Given a beginning and end datetime, bin this time range into bins bin_days long. For bins a day or
         longer, the bin edges will be at utc_hour_break UTC. 12:00 UTC is chosen because at that time it is
-        midnight at the International Date Line, and it is very unlikely that there are any meteor cameras
-        there, so a night of observations is never split between two bins. Bins shorter than a day are not
+        midnight at the International Date Line, which keeps most nights inside one bin. It does not keep
+        all of them there: 12:00 UTC is local midnight in New Zealand and falls in the evening in Australia,
+        so nights there can straddle an edge. Callers that select data by night folder must therefore also
+        look at the folder from the previous day (CorrelateRMS does). Bins shorter than a day are not
         snapped, since snapping would collapse them all onto the same hour; their edges fall every bin_days
         after dt_beg, and they do split nights.
 

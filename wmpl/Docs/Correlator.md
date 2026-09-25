@@ -112,7 +112,7 @@ trajectories/
 └── 2026/
     └── 202607/
         └── 20260712/
-            └── 20260712_221506.294_UK_4sta/
+            └── 20260712_221506.294_UK/
                 ├── 20260712_221506_trajectory.pickle
                 ├── 20260712_221506_report.txt
                 └── ... plots
@@ -124,7 +124,7 @@ phase1/
 
 | Path | Contents |
 | :--- | :--- |
-| `trajectories/YYYY/YYYYMM/YYYYMMDD/` | One folder per solved trajectory, named from its reference time, country and station count |
+| `trajectories/YYYY/YYYYMM/YYYYMMDD/` | One folder per solved trajectory, named from its reference time to the millisecond and the sorted two-letter country codes of its stations, e.g. `20260712_221506.294_UK` or `20260712_221506.294_BE_FR` |
 | `candidates/` | Candidate observation groups waiting for a simple solution |
 | `phase1/` | Simple solutions waiting for the Monte Carlo stage |
 | `*/processed/` | Inputs already consumed, kept for a while so a crash can be recovered |
