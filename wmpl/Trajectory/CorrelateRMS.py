@@ -1132,7 +1132,7 @@ class RMSDataHandle(object):
                     # only delete the disk file if they're in different physical locations
                     if rw.traj_file_path != rw.traj_path_next:
                         log.info(f'    - and removing files from {remove_path}')
-                        shutil.rmtree(os.path.split(remove_path)[0])
+                        shutil.rmtree(os.path.split(remove_path)[0], ignore_errors=True)
 
                 # remove the row from the dataframe to avoid reprocessing it
                 traj_df.drop(idx, inplace=True)
@@ -1174,7 +1174,7 @@ class RMSDataHandle(object):
                         # only remove the physical on-disk files if the locations are different! 
                         if (rw.traj_file_path != rw.traj_path_next) and os.path.isfile(remove_path):
                             log.info(f'   - removing {os.path.split(remove_path)[0]} from disk')
-                            shutil.rmtree(os.path.split(remove_path)[0])
+                            shutil.rmtree(os.path.split(remove_path)[0], ignore_errors=True)
 
         # Finally, scan the disk for trajectories that need to be added to the database.
         # These can arise during distributed processing or phase2 analysis if the jdt_ref changes significantly.
@@ -1223,7 +1223,7 @@ class RMSDataHandle(object):
                                     # the trajectory is already in the database but with a different on-disk location
                                     # so remove the second version. 
                                     log.info(f'   - removing {traj_dir} from disk as its a duplicate')
-                                    shutil.rmtree(full_traj_dir)
+                                    shutil.rmtree(full_traj_dir, ignore_errors=True)
 
                                 # Print every 1000th trajectory
                                 if counter % 1000 == 0 and counter > 0:
