@@ -4357,8 +4357,10 @@ class Trajectory(object):
 
 
 
-        out_str += "Reference JD: {:20.12f}\n".format(self.jdt_ref)
-        out_str += "Time: " + str(jd2Date(self.orbit.jd_ref, dt_obj=True)) + " UTC\n"
+        # jdt_ref is t = 0 of every relative time in this report; the reference point further down
+        #   (orbit.jd_ref) is the beginning of the trajectory and can be seconds later
+        out_str += "Reference JD: {:20.12f} (t = 0 for all relative times in this report)\n".format(self.jdt_ref)
+        out_str += "Time: " + str(jd2Date(self.jdt_ref, dt_obj=True)) + " UTC\n"
 
         out_str += "\n\n"
 
@@ -4427,8 +4429,11 @@ class Trajectory(object):
         out_str += "\n"
 
         if self.orbit is not None:
-            out_str += "Reference point on the trajectory:\n"
+            out_str += "Reference point on the trajectory (epoch of the state vector, radiant and orbit):\n"
+            out_str += "  JD       = {:20.12f}\n".format(self.orbit.jd_ref)
             out_str += "  Time: " + str(jd2Date(self.orbit.jd_ref, dt_obj=True)) + " UTC\n"
+            out_str += "  t        = {:.6f} s (relative to the reference JD)\n".format(
+                86400*(self.orbit.jd_ref - self.jdt_ref))
             out_str += "  Lat      = {:s} deg\n".format(valueFormat("{:>11.6f}", self.orbit.lat_ref, \
                 '{:6.4f}', uncertainties, 'lat_ref', deg=True))
             out_str += "  Lon      = {:s} deg\n".format(valueFormat("{:>11.6f}", self.orbit.lon_ref, \
