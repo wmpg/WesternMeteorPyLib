@@ -27,6 +27,6 @@ astropy
 # reboundx fails to attach, at worst the build fails outright. Leaving both free makes the build
 # and the runtime resolve to the same newest version. wmpl supports REBOUND 4 and 5.
 # Rebound is only built for the x64 architecture (machine-language incompatible)
-rebound platform_machine != 'aarch64'
+rebound  ; platform_machine != 'aarch64'
 # Reboundx is only available for Linux x64 
 reboundx ; sys.platform != 'win32' and platform_machine != 'aarch64'
