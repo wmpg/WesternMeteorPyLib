@@ -26,7 +26,7 @@ astropy
 # REBOUND than the one installed: at best the two disagree about the C simulation structure and
 # reboundx fails to attach, at worst the build fails outright. Leaving both free makes the build
 # and the runtime resolve to the same newest version. wmpl supports REBOUND 4 and 5.
-# Rebound is not built for the arm64 architecture other than MacOS
+# Rebound is not avaiable from pypi for the arm64 architecture (other than MacOS)
 rebound  ; platform_machine != 'aarch64'
 # Reboundx is built from code and so is only available if rebound is 
 reboundx ; sys.platform != 'win32' and platform_machine != 'aarch64'
