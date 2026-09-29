@@ -1275,9 +1275,8 @@ class GuralTrajectory(object):
         if self.orbit is not None:
             out += '\n'
             out += 'Reference point on the trajectory (epoch of the state vector, radiant and orbit)\n'
-            out += f'  JD      = {self.orbit.jd_ref:20.12f}\n'
-            out += f'  Time: {str(jd2Date(self.orbit.jd_ref, dt_obj=True))} UTC\n'
-            out += f'  t       = {86400*(self.orbit.jd_ref - self.jdt_ref):.6f} s (relative to the reference JD)\n'
+            out += f'  Time: {str(jd2Date(self.orbit.jd_ref, dt_obj=True))} UTC (JD {self.orbit.jd_ref:20.12f}, ' \
+                f't = {86400*(self.orbit.jd_ref - self.jdt_ref):.6f} s from the reference JD)\n'
             out += f'  Lat     = {np.degrees(self.orbit.lat_ref):>11.6f}\n'
             out += f'  Lon     = {np.degrees(_formatLongitude(self.orbit.lon_ref)):>+11.6}\n'
             out += f'  Ht      = {self.orbit.ht_ref}\n'

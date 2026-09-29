@@ -4430,10 +4430,9 @@ class Trajectory(object):
 
         if self.orbit is not None:
             out_str += "Reference point on the trajectory (epoch of the state vector, radiant and orbit):\n"
-            out_str += "  JD       = {:20.12f}\n".format(self.orbit.jd_ref)
-            out_str += "  Time: " + str(jd2Date(self.orbit.jd_ref, dt_obj=True)) + " UTC\n"
-            out_str += "  t        = {:.6f} s (relative to the reference JD)\n".format(
-                86400*(self.orbit.jd_ref - self.jdt_ref))
+            out_str += "  Time: " + str(jd2Date(self.orbit.jd_ref, dt_obj=True)) \
+                + " UTC (JD {:20.12f}, t = {:.6f} s from the reference JD)\n".format(self.orbit.jd_ref, 
+                    86400*(self.orbit.jd_ref - self.jdt_ref))
             out_str += "  Lat      = {:s} deg\n".format(valueFormat("{:>11.6f}", self.orbit.lat_ref, \
                 '{:6.4f}', uncertainties, 'lat_ref', deg=True))
             out_str += "  Lon      = {:s} deg\n".format(valueFormat("{:>11.6f}", self.orbit.lon_ref, \
