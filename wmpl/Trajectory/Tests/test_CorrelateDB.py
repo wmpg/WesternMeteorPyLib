@@ -23,6 +23,7 @@
 # THE SOFTWARE.
 
 import os
+import pytest
 import shutil
 import datetime
 from wmpl.Trajectory.CorrelateDB import TrajectoryDatabase, CandidateDatabase, ObservationsDatabase
@@ -719,6 +720,49 @@ def test_addTrajectoryOnlyFlagsARealDuplicate(tmp_path):
                                    (second.traj_id,)).fetchall()
     assert len(rows) == 1
     assert rows[0][0].split('/')[-2] == '20260712_222508.100_UK'
+
+    trajdb.closeTrajDatabase()
+
+
+@pytest.mark.parametrize("mc_mode", [1, 7])
+def test_updateTrajectoryDatabaseKeepsTrajectoriesWithARelativePath(tmp_path, monkeypatch, mc_mode):
+    """ A relative data path must not make live trajectories look deleted.
+
+    getTrajBasics returns paths already joined to output_dir. Joining output_dir onto them again is
+    harmless when it is absolute, but with a relative one ("data") the checked path becomes
+    data/data/trajectories/..., every trajectory looks missing, and removeTrajectory deletes its folder.
+    Once no phase1 pickle is pending (after mode 2, and always in mode 7), one pass removed them all.
+    """
+
+    import datetime
+    from wmpl.Trajectory.CorrelateRMS import RMSDataHandle
+
+    shutil.copyfile(os.path.join(dbloc, loaded_traj_path), os.path.join(str(tmp_path), loaded_traj_path))
+    monkeypatch.chdir(tmp_path)
+
+    traj_dir = os.path.join('data', 'trajectories', '2026', '202607', '20260712', '20260712_222508.099_UK')
+    os.makedirs(traj_dir)
+    os.makedirs(os.path.join('data', 'phase1', 'processed'))
+    traj_file = os.path.join(traj_dir, loaded_traj_path)
+    shutil.copyfile(loaded_traj_path, traj_file)
+
+    trajdb = TrajectoryDatabase('data', 'trajectories.db')
+    assert trajdb.addTrajectory(TrajectoryReduced(traj_file_path=traj_file)) == 1
+
+    # Only the attributes updateTrajectoryDatabase reads
+    dh = RMSDataHandle.__new__(RMSDataHandle)
+    dh.output_dir = 'data'
+    dh.phase1_dir = os.path.join('data', 'phase1')
+    dh.trajectory_db = trajdb
+    dh.observations_db = None
+    dh.mc_mode = mc_mode
+    dh.dt_range = (datetime.datetime(2026, 7, 12, tzinfo=datetime.timezone.utc),
+                   datetime.datetime(2026, 7, 13, tzinfo=datetime.timezone.utc))
+
+    dh.updateTrajectoryDatabase(dt_range=dh.dt_range)
+
+    assert os.path.isfile(traj_file), 'the trajectory folder was deleted'
+    assert trajdb.dbhandle.execute('select count(*) from trajectories where status=1').fetchall()[0][0] == 1
 
     trajdb.closeTrajDatabase()
 

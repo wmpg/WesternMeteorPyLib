@@ -1054,7 +1054,10 @@ class RMSDataHandle(object):
             try:
                 ph1_path = os.path.split(traj['traj_file_path'])[0]
                 ph1_path = os.path.join(self.phase1_dir, f'{os.path.split(ph1_path)[1]}_trajectory.pickle')
-                traj_path = os.path.join(self.output_dir, traj['traj_file_path'])
+                # getTrajBasics has already joined output_dir onto the stored path, so use it as it is.
+                #   Joining output_dir again is harmless for an absolute output_dir but doubles a relative
+                #   one (data/data/trajectories/...), so every trajectory looks missing and is deleted.
+                traj_path = traj['traj_file_path']
                 if not os.path.isfile(traj_path) and not os.path.isfile(ph1_path):
                     log.info(f'    removing nonexistent traj {jd2Date(traj["jdt_ref"],dt_obj=True).strftime("%Y%m%d_%H%M%S.%f")} {traj["traj_file_path"]} from database')
                     self.removeTrajectory(TrajectoryReduced(None, json_dict=traj))
