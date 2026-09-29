@@ -184,7 +184,7 @@ Three things to watch:
 
 Most of this module is arithmetic, but the MOID is not.
 
-`calcMOID` minimises the separation over two eccentric anomalies with Powell's method, restarted
+`calcMOID` minimizes the separation over two eccentric anomalies with Powell's method, restarted
 from four points because the surface has several local minima. `calcGiantPlanetMOIDs` calls it four
 times, once per giant planet. Classifying a large asteroid catalogue this way is a real computation,
 not a lookup — budget for it, or supply MOIDs computed in bulk elsewhere.

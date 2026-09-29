@@ -86,7 +86,7 @@ where `calcDD` raises `ZeroDivisionError`.
 
 - **rho_1** mixes a length term and a dimensionless term, made commensurate by the scale length `L`.
 - **rho_2** puts both terms in the same units, which is the cleaner construction.
-- **rho_5** is rho_2 minimised over both nodes and both arguments of perihelion, so it measures how
+- **rho_5** is rho_2 minimized over both nodes and both arguments of perihelion, so it measures how
   close two orbits could be brought by precession alone. Use it when the nodes and apsides have had
   time to circulate; it ignores `O` and `w`, which are kept in the signature only so it can be
   substituted for `calcDSH` without changing the call.
