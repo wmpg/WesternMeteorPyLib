@@ -153,9 +153,6 @@ class ObservedPoints(object):
         # Store the number of measurement
         self.kmeas = len(self.time_data)
 
-        # Calculate JD of each point
-        self.JD_data = self.jdt_ref + self.time_data/86400.0
-
         # Station info
         self.lat = lat
         self.lon = lon
@@ -434,6 +431,14 @@ class ObservedPoints(object):
         # ###
 
 
+
+    @property
+    def JD_data(self):
+        """ Julian date of each point. Derived on access because time_data is shifted after 
+            initialization (timing offsets, Monte Carlo copies) and the absolute times must follow it.
+        """
+
+        return self.jdt_ref + self.time_data/86400.0
 
     def calcAzimuthal(self):
         """ Calculate azimuthal coordinates from right ascension and declination. """
@@ -6155,9 +6160,10 @@ class Trajectory(object):
         # If the first time is not 0, normalize times so that the earliest time is 0
         if t0 != 0.0:
 
-            # Offset all times by t0
+            # Offset all times by t0, keeping the absolute time of each point unchanged
             for obs in self.observations:
                 obs.time_data -= t0
+                obs.jdt_ref += t0/86400.0
 
 
             # Recompute the reference JD to corresponds with t0
