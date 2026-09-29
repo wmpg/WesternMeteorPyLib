@@ -1574,13 +1574,16 @@ def calcMCUncertainties(traj_list, traj_best):
 
 
     # Beginning/ending points
+    #   (metric errors use the meridian radius M = N(1 - e^2)/(1 - e^2 sin^2 lat) for latitude and N for
+    #   longitude, both at the height of the point)
     N_beg = EARTH.EQUATORIAL_RADIUS/np.sqrt(1.0 - (EARTH.E**2)*np.sin(traj_best.rbeg_lat)**2)
     un.rbeg_lon = scipy.stats.circstd([traj.rbeg_lon for traj in traj_list])
     un.rbeg_lon_ci = confidenceInterval([traj.rbeg_lon for traj in traj_list], un.ci, angle=True)
-    un.rbeg_lon_m = np.sin(un.rbeg_lon)*np.cos(traj_best.rbeg_lat)*N_beg
+    un.rbeg_lon_m = np.sin(un.rbeg_lon)*np.cos(traj_best.rbeg_lat)*(N_beg + traj_best.rbeg_ele_wgs84)
     un.rbeg_lat = np.std([traj.rbeg_lat for traj in traj_list])
     un.rbeg_lat_ci = confidenceInterval([traj.rbeg_lat for traj in traj_list], un.ci)
-    un.rbeg_lat_m = np.sin(un.rbeg_lat)*N_beg
+    un.rbeg_lat_m = np.sin(un.rbeg_lat)*(N_beg*(1.0 - EARTH.E**2)/(1.0 - (EARTH.E**2)*np.sin(traj_best.rbeg_lat)**2) \
+        + traj_best.rbeg_ele_wgs84)
     un.rbeg_ele = np.std([traj.rbeg_ele for traj in traj_list])
     un.rbeg_ele_ci = confidenceInterval([traj.rbeg_ele for traj in traj_list], un.ci)
     un.rbeg_ele_wgs84 = np.std([traj.rbeg_ele_wgs84 for traj in traj_list])
@@ -1589,10 +1592,11 @@ def calcMCUncertainties(traj_list, traj_best):
     N_end = EARTH.EQUATORIAL_RADIUS/np.sqrt(1.0 - (EARTH.E**2)*np.sin(traj_best.rend_lat)**2)
     un.rend_lon = scipy.stats.circstd([traj.rend_lon for traj in traj_list])
     un.rend_lon_ci = confidenceInterval([traj.rend_lon for traj in traj_list], un.ci, angle=True)
-    un.rend_lon_m = np.sin(un.rend_lon)*np.cos(traj_best.rend_lat)*N_end
+    un.rend_lon_m = np.sin(un.rend_lon)*np.cos(traj_best.rend_lat)*(N_end + traj_best.rend_ele_wgs84)
     un.rend_lat = np.std([traj.rend_lat for traj in traj_list])
     un.rend_lat_ci = confidenceInterval([traj.rend_lat for traj in traj_list], un.ci)
-    un.rend_lat_m = np.sin(un.rend_lat)*N_end
+    un.rend_lat_m = np.sin(un.rend_lat)*(N_end*(1.0 - EARTH.E**2)/(1.0 - (EARTH.E**2)*np.sin(traj_best.rend_lat)**2) \
+        + traj_best.rend_ele_wgs84)
     un.rend_ele = np.std([traj.rend_ele for traj in traj_list])
     un.rend_ele_ci = confidenceInterval([traj.rend_ele for traj in traj_list], un.ci)
     un.rend_ele_wgs84 = np.std([traj.rend_ele_wgs84 for traj in traj_list])
@@ -1602,10 +1606,11 @@ def calcMCUncertainties(traj_list, traj_best):
     N_end = EARTH.EQUATORIAL_RADIUS/np.sqrt(1.0 - (EARTH.E**2)*np.sin(traj_best.htmin_lat)**2)
     un.htmin_lon = scipy.stats.circstd([traj.htmin_lon for traj in traj_list])
     un.htmin_lon_ci = confidenceInterval([traj.htmin_lon for traj in traj_list], un.ci, angle=True)
-    un.htmin_lon_m = np.sin(un.htmin_lon)*np.cos(traj_best.htmin_lat)*N_end
+    un.htmin_lon_m = np.sin(un.htmin_lon)*np.cos(traj_best.htmin_lat)*(N_end + traj_best.htmin_ele_wgs84)
     un.htmin_lat = np.std([traj.htmin_lat for traj in traj_list])
     un.htmin_lat_ci = confidenceInterval([traj.htmin_lat for traj in traj_list], un.ci)
-    un.htmin_lat_m = np.sin(un.htmin_lat)*N_end
+    un.htmin_lat_m = np.sin(un.htmin_lat)*(N_end*(1.0 - EARTH.E**2)/(1.0 - (EARTH.E**2)*np.sin(traj_best.htmin_lat)**2) \
+        + traj_best.htmin_ele_wgs84)
     un.htmin_ele = np.std([traj.htmin_ele for traj in traj_list])
     un.htmin_ele_ci = confidenceInterval([traj.htmin_ele for traj in traj_list], un.ci)
     un.htmin_ele_wgs84 = np.std([traj.htmin_ele_wgs84 for traj in traj_list])
