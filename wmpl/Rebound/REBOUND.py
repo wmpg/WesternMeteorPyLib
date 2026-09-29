@@ -186,7 +186,7 @@ def _checkReboundxAttached(sim):
     """
 
     if not sim.extras:
-        if platform.machine() != 'aaarch64' and sys.platform != 'win32':
+        if platform.machine() != 'aarch64' and sys.platform != 'win32':
             raise RuntimeError(
                 "REBOUNDx did not attach to the REBOUND simulation. This happens when reboundx was compiled "
                 "against a different REBOUND version than the installed one (rebound {:s}, reboundx {:s}). "
