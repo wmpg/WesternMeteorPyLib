@@ -270,7 +270,7 @@ def readEvFileIntoMeteorObject(ev_file_path):
         [MeteorObservation instance]
     """
 
-    # Store the ev file contants into a StationData object
+    # Store the ev file contents into a StationData object
     sd = readEvFile(*os.path.split(ev_file_path))
 
     # Skip bad ev files

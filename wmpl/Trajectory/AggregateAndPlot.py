@@ -188,7 +188,7 @@ def writeOrbitSummaryFile(dir_path, traj_list, traj_summary_file_name=TRAJ_SUMMA
         Keyword arguments:
             multi: [float] Uncertanty multiplier. 1.0 by default. This is used to scale the uncertanty to
                 different units (e.g. from m/s to km/s).
-            deg: [bool] Converet radians to degrees if True. False by defualt.
+            deg: [bool] Converet radians to degrees if True. False by default.
             max_val: [float] Larger number to use the given format. If the value is larger than that, the
                 max_val_format is used.
             max_val_format: [str]
@@ -591,7 +591,7 @@ def plotSCE(x_data, y_data, color_data, plot_title, colorbar_title, output_dir,
 
             ### Plot a circle around the shower centre ###
 
-            # If the shower dispersion is availabe, use it. Over otherwise, use a default value
+            # If the shower dispersion is available, use it. Over otherwise, use a default value
             if shower_obj.dispersion is not None:
                 shower_radius = np.degrees(shower_obj.dispersion)
             else:
@@ -931,7 +931,7 @@ def generateShowerPlots(dir_path, traj_list, min_members=30, max_radiant_err=0.5
         min_members: [int] Minimum number of shower members to plot the shower. 30 by default
         max_radiant_err: [float] Maximum radiant error in degrees. 0.5 deg by default
         P_0m: [float] Power of a zero magnitue meteors (watts) in the given camera bandpass. 1210 W by 
-            defualt.
+            default.
 
     """
 
@@ -1586,7 +1586,7 @@ def loadTrajectoryPickles(dir_path, traj_quality_params, time_beg=None, time_end
                         print("Loaded {:d} trajectories...".format(loaded_trajs_count))
 
 
-                ### DELETE UNECESSARY OBJECTS AND ARGUMENTS TO CONSERVE MEMORY ###
+                ### DELETE UNNECESSARY OBJECTS AND ARGUMENTS TO CONSERVE MEMORY ###
 
                 # Delete all stored MC runs to conserve memory
                 if traj.uncertainties is not None:
@@ -2217,10 +2217,10 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-a', '--auto', metavar='PREV_SOLS', type=int, default=None, const=10, 
         nargs='?', 
-        help="""Run continously taking the data in the last PREV_SOLS degrees of solar longitudes to generate new plots and reports, and update old ones.""")
+        help="""Run continuously taking the data in the last PREV_SOLS degrees of solar longitudes to generate new plots and reports, and update old ones.""")
 
     arg_parser.add_argument('-f', '--autofirst', metavar='FIRST_PREV_SOLS', type=int, 
-        help="""During the first continous run, go back FIRST_PREV_SOLS to generate the plots and report. After that, use PREV_SOLS to run.""")
+        help="""During the first continuous run, go back FIRST_PREV_SOLS to generate the plots and report. After that, use PREV_SOLS to run.""")
 
     arg_parser.add_argument('-p', '--plot_all_showers', action="store_true", 
         help="""Plot showers on the maps showing the whole date ramge.""")
@@ -2231,7 +2231,7 @@ if __name__ == "__main__":
     arg_parser.add_argument('-o', '--output', metavar='OUTPUT_DIR', type=str, 
         help="""Output directory. If not given, the data directory will be used.""")
     
-    # Add custom specifcation for the trajectory quality parameters
+    # Add custom specification for the trajectory quality parameters
     arg_parser.add_argument('--min_traj_points', metavar='MIN_POINTS', type=int,
         help='Minimum number of points on the trajectory for the station with the most points.')
     

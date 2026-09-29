@@ -118,7 +118,7 @@ class SimulationResults(object):
                     frag_entry.main_abs_mag = -2.5*np.log10(np.array(frag_entry.main_luminosity)
                                                                 /self.const.P_0m)
 
-                    # Compute the luminosity weigthed tau
+                    # Compute the luminosity weighted tau
                     frag_entry.main_tau = np.array(frag_entry.main_tau_over_lum)\
                                             /np.array(frag_entry.main_luminosity)
 
@@ -135,7 +135,7 @@ class SimulationResults(object):
                     frag_entry.grains_abs_mag = -2.5*np.log10(np.array(frag_entry.grains_luminosity)
                                                                 /self.const.P_0m)
 
-                    # Compute the luminosity weigthed tau
+                    # Compute the luminosity weighted tau
                     frag_entry.grains_tau = np.array(frag_entry.grains_tau_over_lum) \
                                                 /np.array(frag_entry.grains_luminosity)
 
@@ -539,7 +539,7 @@ class WakePoint(object):
 
 class WakeContainter(object):
     def __init__(self, site_id, frame_n):
-        """ Containter for wake profile data extracted from mirfit wid files. 
+        """ Container for wake profile data extracted from mirfit wid files. 
         
         Arguments:
             site_id: [str] Name of the site.
@@ -575,7 +575,7 @@ class FragmentationEntry(object):
         ### STATUS FLAGS ###
 
 
-        # Unique identifer of the fragmentation entry, will be assigned at the beginning of simulation
+        # Unique identifier of the fragmentation entry, will be assigned at the beginning of simulation
         self.id = None
 
         # Indicates that the fragmentation was not performed yet
@@ -922,7 +922,7 @@ class FragmentationContainer(object):
 
 
     def loadFragmentationFile(self):
-        """ Load fragmentation paramters from the fragmentation file. """
+        """ Load fragmentation parameters from the fragmentation file. """
 
         string = ""
         with open(self.fragmentation_file_path) as f:
@@ -963,7 +963,7 @@ class FragmentationContainer(object):
 #
 #                             INPUTS (leave unchanged fields empty)                                      #        OUTPUTS  (do not fill in!)                                  #
 # ------------------------------------------------------------------------------------------------------ # ------------------------------------------------------------------ #
-# Type, Height (km), Number, Mass (%), Ablation coeff, Gamma, Erosion coeff, Grain MIN, Grain MAX, Mass  #  Time (s),  Dyn pres, Velocity, Parent mass, Mass (kg), Final mass #
+# Type, Height (km), Number, Mass (%), Ablation coeff, Gamma, Erosion coeff, Grain MIN, Grain MAX, Mass  #  Time (s),  Dyn press, Velocity, Parent mass, Mass (kg), Final mass #
 #     ,            ,       ,         , (s^2 km^-2)   ,      , (s^2 km^-2)  , mass (kg), mass (kg), index #          ,  (kPa)   , (km/s)  , (kg)       ,          , (kg)       #
 #-----,------------,-------,---------,---------------,------,--------------,----------,----------,-------#----------,----------,---------,------------,----------,----------- #
 """
@@ -1043,7 +1043,7 @@ class FragmentationContainer(object):
         self.loadFragmentationFile()
 
 
-        # Change paramters of the main fragment
+        # Change parameters of the main fragment
         if frag_type == "M":
             frag_entry = FragmentationEntry(frag_type=frag_type,
                                             height=100000.0000,
@@ -1057,7 +1057,7 @@ class FragmentationContainer(object):
                                             mass_index=None
                                             )
 
-        # Change paramters of all fragments
+        # Change parameters of all fragments
         elif frag_type == "A":
             frag_entry = FragmentationEntry(frag_type=frag_type,
                                             height=100000.0,
@@ -1184,7 +1184,7 @@ class MinimizationParameterNormalization(object):
 
 
     def normalizeScaling(self, scaling_list, bounds=None):
-        """ Normalize the parameters by specifying a scale for every paramter. 
+        """ Normalize the parameters by specifying a scale for every parameter. 
     
         Arguments:
             scaling_list: [list] A list of values used for scaling each parameter to approx the 0 to 1 range
@@ -1196,9 +1196,9 @@ class MinimizationParameterNormalization(object):
 
         Return;
             if bounds is None:
-                params_normed: [list] A list of scaled paramters.
+                params_normed: [list] A list of scaled parameters.
             else:
-                params_normed: [list] A list of scaled paramters.
+                params_normed: [list] A list of scaled parameters.
                 bounds_normed: [list] A list of scaled boundaries.
         """
 
@@ -1254,7 +1254,7 @@ class MinimizationParameterNormalization(object):
 
                 bound_min, bound_max = bound
 
-                # Denormalize the paramer to original bounds
+                # Denormalize the parameter to original bounds
                 p = p_normed*(bound_max - bound_min) + bound_min
 
                 params.append(p)
@@ -1477,7 +1477,7 @@ def loadConstants(sim_fit_json):
         # constants
         if 'const' in const_json:
             
-            # Open the constants parameter part of .json file for simulaitons
+            # Open the constants parameter part of .json file for simulations
             for key in const_json['const']:
                 setattr(const, key, const_json['const'][key])
 
@@ -1507,7 +1507,7 @@ def loadConstants(sim_fit_json):
     if isinstance(const.wake_psf, float):
         const.wake_psf = [const.wake_psf]
 
-    # If the wake PSF wake list lenght is different from the wake PSF list lenght, set all weights to 1
+    # If the wake PSF wake list length is different from the wake PSF list length, set all weights to 1
     if len(const.wake_psf) != len(const.wake_psf_weights):
         const.wake_psf_weights = np.ones(len(const.wake_psf))
         
@@ -1535,7 +1535,7 @@ def saveConstants(const, dir_path, file_name):
     if isinstance(const.dens_co, np.ndarray):
         const.dens_co = const.dens_co.tolist()
 
-    # Remove fragments from entries becuase they can't be saved in JSON
+    # Remove fragments from entries because they can't be saved in JSON
     for frag_entry in const.fragmentation_entries:
         del frag_entry.fragments
         frag_entry.resetOutputParameters()
@@ -1611,7 +1611,7 @@ def loadUSGInputFile(dir_path, usg_file):
     # Get the reference point in ECI
     eci_ref = np.array(geo2Cartesian(np.radians(data.lat), np.radians(data.lon), 1000*data.ht, data.jd))
 
-    # Get the radiant in ECI coordiantes
+    # Get the radiant in ECI coordinates
     ra_rad, dec_rad = altAz2RADec(np.radians(data.azimuth), np.radians(data.entry_angle), data.jd, \
         np.radians(data.lat), np.radians(data.lon))
     eci_rad = vectNorm(np.array(raDec2ECI(ra_rad, dec_rad)))
@@ -2117,7 +2117,7 @@ def plotObsAndSimComparison(traj, sr, ecsv_obs, met_obs, lc_data, plot_dir,
     # Define plot properties for CAMO (wake_containers are given or "camo" is True)
     if (wake_containers is not None) or camo:
 
-        # Set the camo varaible to True if any wake is given, so the correct plot parameters are used
+        # Set the camo variable to True if any wake is given, so the correct plot parameters are used
         camo = True
 
         plot_params_dict["sites-narrow"] = \
@@ -2221,13 +2221,13 @@ def plotObsAndSimComparison(traj, sr, ecsv_obs, met_obs, lc_data, plot_dir,
     sim_vel_interp = scipy.interpolate.interp1d(sr.leading_frag_height_arr, sr.leading_frag_vel_arr,
                                                 bounds_error=False, fill_value='extrapolate')
 
-    # Find the simulated length at the trajectory begining
+    # Find the simulated length at the trajectory beginning
     sim_len_beg = sim_len_interp(traj.rbeg_ele)
 
-    # Find the simulated time at the trajectory begining
+    # Find the simulated time at the trajectory beginning
     sim_time_beg = sim_time_interp(traj.rbeg_ele)
 
-    # Find the simulated velocity at the trajectory begining
+    # Find the simulated velocity at the trajectory beginning
     sim_vel_beg = sim_vel_interp(traj.rbeg_ele)
 
     # Set the simulated length at the beginning of observations to zero
@@ -3683,7 +3683,7 @@ class MetSimGUI(QMainWindow):
         self.const.zenith_angle = np.radians(self._tryReadBox(self.inputZenithAngle, \
             np.degrees(self.const.zenith_angle)))
 
-        # If the bulk density is higher than the grain density, set the grain density to the bulk denisty
+        # If the bulk density is higher than the grain density, set the grain density to the bulk density
         if self.const.rho > self.const.rho_grain:
             self.const.rho_grain = self.const.rho
 
@@ -4278,13 +4278,13 @@ class MetSimGUI(QMainWindow):
                 bounds_error=False, fill_value='extrapolate')
 
 
-            # Find the simulated length at the trajectory begining
+            # Find the simulated length at the trajectory beginning
             self.sim_len_beg = self.sim_len_interp(self.traj.rbeg_ele)
 
-            # Find the simulated time at the trajectory begining
+            # Find the simulated time at the trajectory beginning
             self.sim_time_beg = self.sim_time_interp(self.traj.rbeg_ele)
 
-            # Find the simulated velocity at the trajectory begining
+            # Find the simulated velocity at the trajectory beginning
             self.sim_vel_beg = self.sim_vel_interp(self.traj.rbeg_ele)
 
             # Set the simulated length at the beginning of observations to zero
@@ -5643,7 +5643,7 @@ class MetSimGUI(QMainWindow):
         # Store simulation results
         self.simulation_results = SimulationResults(self.const, frag_main, results_list, wake_results)
 
-        # Save simulated parametrs to file
+        # Save simulated parameters to file
         self.simulation_results.writeCSV(self.dir_path, SIM_RESULTS_CSV)
         print("Saved simulation results to:", os.path.join(self.dir_path, SIM_RESULTS_CSV))
 
@@ -6273,7 +6273,7 @@ if __name__ == "__main__":
     arg_parser.add_argument('traj_pickle', metavar='TRAJ_PICKLE', type=str, \
         help="Either the .pickle file with the trajectory solution and the magnitudes, or the path to the \
         folder when the --all option is given. If the --usg option is given, the trajectory will be loaded \
-        from a file specifing a reference points and a light curve.")
+        from a file specifying a reference points and a light curve.")
 
     arg_parser.add_argument('--usg', \
         help=""" Flag for US government (CNEOS) data. The trajectory is given in a special input file \
@@ -6498,7 +6498,7 @@ if __name__ == "__main__":
     load_file = None
     if cml_args.load == '.':
 
-        # Extract the directory (or more) where the JSON file with fit parametrs could be
+        # Extract the directory (or more) where the JSON file with fit parameters could be
         if os.path.isfile(cml_args.traj_pickle):
             dir_path = os.path.abspath(os.path.dirname(cml_args.traj_pickle))
 
@@ -6513,7 +6513,7 @@ if __name__ == "__main__":
             if not os.path.isdir(dir_path):
                 continue
 
-            # Find the file with fit parametres (but not the latest file, just the saved parameters)
+            # Find the file with fit parameters (but not the latest file, just the saved parameters)
             for file_name in sorted(os.listdir(dir_path)):
 
                 if file_name.endswith("sim_fit.json"):

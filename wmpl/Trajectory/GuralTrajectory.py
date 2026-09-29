@@ -46,7 +46,7 @@ PPPDOUBLE = ct.POINTER(PPDOUBLE)
 
 
 class PSO_info(ct.Structure):
-    """ Mimicks PSO_info structure from the TrajectorySolution.h file, in Python-understandable
+    """ Mimics PSO_info structure from the TrajectorySolution.h file, in Python-understandable
         ctypes format.
     """
 
@@ -65,7 +65,7 @@ class PSO_info(ct.Structure):
 
 
 class TrajectoryInfo(ct.Structure):
-    """ Mimicks the TrajectoryInfo structure from the TrajectorySolution.h file, in Python-understandable
+    """ Mimics the TrajectoryInfo structure from the TrajectorySolution.h file, in Python-understandable
         ctypes format.
     """
 
@@ -533,9 +533,9 @@ class GuralTrajectory(object):
         self.dec_sigma = 0
         # Standard deviation of vbegin in km/sec
         self.vbegin_sigma = 0
-        # Standard deviation of decceleration term 1
+        # Standard deviation of deceleration term 1
         self.decel1_sigma = 0
-        # Standard deviation of decceleration term 2
+        # Standard deviation of deceleration term 2
         self.decel2_sigma = 0
 
         # Array of geodetic latitudes closest to trail for each measurement
@@ -1210,7 +1210,7 @@ class GuralTrajectory(object):
             file_name: [str] Name of the report time.
 
         Keyword arguments:
-            uncertainties: [MCUncertainties object] (UNUSED) Object contaning uncertainties of every parameter.
+            uncertainties: [MCUncertainties object] (UNUSED) Object containing uncertainties of every parameter.
             verbose: [bool] Print the report to the screen. True by default.
             save_results: [bool] If True, the results will be saved to a file.
         """

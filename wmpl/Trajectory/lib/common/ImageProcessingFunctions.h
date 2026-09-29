@@ -59,7 +59,7 @@
 //            MultiFrameMatchedFilterRefinementInterpolated
 //            MultiFrameMeasurements
 //
-//    Miscelaneous functions
+//    Miscellaneous functions
 //            Allocate2Darray
 //            Free2Darray
 //            FindClosestRingBufferTime
@@ -636,7 +636,7 @@ FILE           *writefile;
 	}
 
 
-	//======== Open file, write scaled flat field mulitplier, close the file
+	//======== Open file, write scaled flat field multiplier, close the file
 
     if( ( writefile = fopen( filename, "wb" ) ) == NULL )  {
 		printf(" ERROR ===>  Cannot open output file %s in WriteFlatFieldMultiplier\n", filename );
@@ -650,7 +650,7 @@ FILE           *writefile;
 	fclose( writefile );
 
 
-	//======== free memeory
+	//======== free memory
 
 	free( flatscaledby4k );
 
@@ -1168,7 +1168,7 @@ unsigned short  ksigma;
 // the same first steps but also convolves the resultant image with a user
 // defined PSF. The function Demean just removes the mean.
 //
-// The function CovarianceInverse assumes the covariance matrix posseses the
+// The function CovarianceInverse assumes the covariance matrix possesses the
 // property that noise is pixel-to-pixel independent and thus diagonal elements
 // only make up each pixel's variance estimate. The covariance inverse array
 // is just a diagonal array (vector) of 1/variance per pixel.
@@ -1185,7 +1185,7 @@ unsigned short  ksigma;
 // discretized (integer) stepping. The function GenerateMFtemplatePSFsubpixel
 // does the same, but samples the thin line streak at floating point positions
 // along the streak at 1/10 pixel resolution to build up the blurred template.
-// In both cases tha template is normalized to a max value of unity and
+// In both cases the template is normalized to a max value of unity and
 // generated at an output sampling equivalent to integer pixel resolution.
 //
 // The GenerateMFsubtemplateLine generates a normalized thin line streak point
@@ -1888,7 +1888,7 @@ double  rowtrailingedge, coltrailingedge, frow, fcol, flength, deltarow, deltaco
 			}
 
 
-			//-------- Add the Guassian PSF value to the template pixel at the distance of the pixel center
+			//-------- Add the Gaussian PSF value to the template pixel at the distance of the pixel center
 			//              from the current subpixel segment position.
 
 			rsq = ( frow - (double)row ) * ( frow - (double)row )
@@ -3160,7 +3160,7 @@ struct  MFtemplate       MFstreakAOI;
 	    FreeMFtemplate( &MFstreakAOI );
 
 
-		//-------- Convet the row and column centroid to azimuth and zenith angles
+		//-------- Convert the row and column centroid to azimuth and zenith angles
 
 		trackmeasurements[sigframe].row = track->detected[sigframe].rowcentroid + rowdelta_leadingedge;
 		trackmeasurements[sigframe].col = track->detected[sigframe].colcentroid + coldelta_leadingedge;

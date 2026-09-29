@@ -478,12 +478,12 @@ def cams2MiligInput(meteor_list, file_path):
 
 
 def computeAbsoluteMagnitudes(traj, meteor_list):
-    """ Given the trajectory, compute the absolute mangitude (visual mangitude @100km). """
+    """ Given the trajectory, compute the absolute magnitude (visual magnitude @100km). """
 
     # Go though every observation of the meteor
     for i, meteor_obs in enumerate(meteor_list):
 
-        # Go through all magnitudes and compute absolute mangitudes
+        # Go through all magnitudes and compute absolute magnitudes
         for dist, mag in zip(traj.observations[i].model_range, meteor_obs.mag_data):
 
             # Skip nonexistent magnitudes
@@ -600,7 +600,7 @@ if __name__ == "__main__":
     # meteor2 = meteor_list[2:4]
 
     
-    # Assume all entires in the FTPdetectinfo path should be used for one meteor
+    # Assume all entries in the FTPdetectinfo path should be used for one meteor
     meteor_proc_list = [meteor_list]
 
 
@@ -635,7 +635,7 @@ if __name__ == "__main__":
     # # Override default DPI for saving from the interactive window
     # matplotlib.rcParams['savefig.dpi'] = 300
 
-    # # Compute absolute mangitudes
+    # # Compute absolute magnitudes
     # computeAbsoluteMagnitudes(traj, meteor)
 
     # # List of photometric uncertainties per station

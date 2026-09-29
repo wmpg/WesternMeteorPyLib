@@ -74,7 +74,7 @@ def velFromHtPhysicalParams(ht_arr, v_inf, m_inf, sigma, zr, K, dens_interp):
     """
 
 
-    # Convert to km as it keeps the values in the Ei intergral small
+    # Convert to km as it keeps the values in the Ei integral small
     ht_arr = np.array(ht_arr)/1000
     v_inf /= 1000
     sigma *= 1e6
@@ -133,12 +133,12 @@ def velFromHtPhysicalParams(ht_arr, v_inf, m_inf, sigma, zr, K, dens_interp):
 def velFromHt(ht_arr, h0, v0, v_inf, sigma, c, zr, dens_interp):
     """ Compute the velocity given the height and parameters as defined by Pecina & Ceplecha (1984) model. 
     
-    Arugments:
+    Arguments:
         ht_arr: [ndarray] Height in km.
         h0: [float] Height of the reference point (seconds).
         v0: [float] Velocity at the reference point (km/s).
         v_inf: [float] Velocity at infinity (km/s).
-        sigma: [float] Ablation coefficeint km^2/s^2.
+        sigma: [float] Ablation coefficient km^2/s^2.
         c: [float] Height-length constant (km).
         zr: [float] Zenith angle (radians).
         dens_interp: [scipy.interpol handle] Interpolation handle for the air mass density in kg/m^3 where input is in meters.
@@ -198,13 +198,13 @@ def velFromHt(ht_arr, h0, v0, v_inf, sigma, c, zr, dens_interp):
 def timeFromLen(len_arr, t0, l0, v0, v_inf, sigma, c, zr, dens_interp):
     """ Compute the time given the length of a Pecina & Ceplecha (1984) model.
 
-    Arugments:
+    Arguments:
         len_arr: [ndarray] Length in km.
         t0: [float] Time of the reference point (seconds).
         l0: [float] Length of the reference point (km).
         v0: [float] Velocity at the reference point (km/s).
         v_inf: [float] Velocity at infinity (km/s).
-        sigma: [float] Ablation coefficeint km^2/s^2.
+        sigma: [float] Ablation coefficient km^2/s^2.
         c: [float] Height-length constant (km).
         zr: [float] Zenith angle (radians).
         dens_interp: [scipy.interpol handle] Interpolation handle for the air mass density in kg/m^3 where input is in meters.
@@ -280,7 +280,7 @@ def fitPecinaCeplecha84Model(lat, lon, jd, time_data, ht_data, len_data, dens_in
         l0: [float] Length of the reference point (km).
         v0: [float] Velocity at the reference point (km/s).
         v_inf: [float] Velocity at infinity (km/s).
-        sigma: [float] Ablation coefficeint km^2/s^2.
+        sigma: [float] Ablation coefficient km^2/s^2.
         c: [float] Height-length constant (km).
         zr: [float] Zenith angle (radians).
         dens_interp: [scipy.interpol handle] Interpolation handle for the air mass density in kg/m^3 where 
@@ -302,7 +302,7 @@ def fitPecinaCeplecha84Model(lat, lon, jd, time_data, ht_data, len_data, dens_in
         print("Fitting atmosphere polynomial...")
         dens_co = fitAtmPoly(lat, lon, 1000*ht_min, 1000*HT_CEILING, jd)
 
-        # Create a convinience function for compute the density at the given height
+        # Create a convenience function for compute the density at the given height
         dens_interp = lambda h: atmDensPoly(h, dens_co)
 
         print("   ... done!")
@@ -729,7 +729,7 @@ if __name__ == "__main__":
     print("Fitting atmosphere polynomial...")
     dens_co = fitAtmPoly(lat, lon, 1000*ht_min, 1000*HT_CEILING, jd)
 
-    # Create a convinience function for compute the density at the given height
+    # Create a convenience function for compute the density at the given height
     dens_interp = lambda h: atmDensPoly(h, dens_co)
 
     print("   ... done!")

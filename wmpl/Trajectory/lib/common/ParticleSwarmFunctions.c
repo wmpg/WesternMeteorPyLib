@@ -34,7 +34,7 @@
 //  in an iteration. Embedded in a while loop, the user computes the cost function for
 //  a test vector pso.xtest[*] that gets updated internally in the PSO structure. For
 //  each processing pass, the while loop runs sequentially over iterations and particles.
-//  Convergence criteria are based on either acheiving a consistently small change in
+//  Convergence criteria are based on either achieving a consistently small change in
 //  the cost function, a low variance in the best parameter set, or a maximum iteration
 //  limit is reached. Any of the three conditions halts the processing by terminating
 //  the while loop. A pseudo-code example is shown below.
@@ -82,7 +82,7 @@
 //
 //  Do something with minimized solution stored in vector  pso.gbest[*]
 //
-//  Number of cost fucntion evaluations = pso.ncostevals
+//  Number of cost function evaluations = pso.ncostevals
 //
 //  Halting condition = pso.processing
 //

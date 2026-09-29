@@ -59,7 +59,7 @@ def _series(n_samples, sep_func, a_func=None, day_step=1.0, helio_r=1.0):
     return nominal, outputs_mc
 
 
-### Close-encounter detection from exact minima ###
+### Close-encounter detection from the tracked minima ###
 
 def testEncounterFlaggedOnlyInsideThreshold(reb):
     """ A body is reported only when its closest approach is inside n_hill Hill radii. """
@@ -94,6 +94,242 @@ def testEncountersSortedByClosenessAndUntrackedSkipped(reb):
 
     assert [e["body"] for e in encounters] == ["Luna", "Mars", "Earth"]
     assert "Venus" not in [e["body"] for e in encounters]
+
+
+def testEncountersFromMinDistancesIncludesTheSun(reb):
+    """ The Sun is gated on SUN_ENCOUNTER_AU, carries no Hill radius, and sorts by its own threshold.
+
+    The per-particle "encounters" diagnostic already lists Sun passages, so the list rebuilt from
+    the closest-approach dictionaries must agree with it rather than silently drop the Sun.
+    """
+
+    min_dist = {"Sun": 0.5*reb.SUN_ENCOUNTER_AU, "Earth": 2.5*reb.HILL_RADII_AU["Earth"],
+                "Luna": 0.9*reb.HILL_RADII_AU["Luna"]}
+    min_time = {"Sun": -40.0, "Earth": -1.0, "Luna": -2.0}
+
+    encounters = reb.encountersFromMinDistances(min_dist, min_time, n_hill=3.0)
+
+    # Luna at 0.3 of its threshold, the Sun at 0.5 of its own, the Earth at 0.83 of its own
+    assert [e["body"] for e in encounters] == ["Luna", "Sun", "Earth"]
+
+    sun = encounters[1]
+    assert sun["min_dist_au"] == pytest.approx(0.5*reb.SUN_ENCOUNTER_AU)
+    assert sun["time_days"] == -40.0
+    assert (sun["hill_radius_au"] is None) and (sun["n_hill"] is None)
+
+    # Outside the fixed distance the Sun is not an encounter, whatever n_hill is
+    min_dist["Sun"] = 1.5*reb.SUN_ENCOUNTER_AU
+    assert "Sun" not in [e["body"] for e in reb.encountersFromMinDistances(min_dist, min_time, n_hill=30.0)]
+
+
+### Closest approach inside one integrator step ###
+
+def _hyperbolicFlyby(t, mu, q, e):
+    """ Two-body hyperbolic flyby (periapsis q at t = 0): relative position and velocity at t. """
+
+    a = q/(e - 1)
+    n = np.sqrt(mu/a**3)
+    M = n*t
+
+    # Solve the hyperbolic Kepler equation e*sinh(F) - F = M
+    F = np.arcsinh(M/e)
+    for _ in range(50):
+        F -= (e*np.sinh(F) - F - M)/(e*np.cosh(F) - 1)
+
+    F_dot = n/(e*np.cosh(F) - 1)
+    k = np.sqrt(e**2 - 1)
+    r = np.array([a*(e - np.cosh(F)), a*k*np.sinh(F), 0.0])
+    v = np.array([-a*np.sinh(F)*F_dot, a*k*np.cosh(F)*F_dot, 0.0])
+
+    return r, v
+
+
+def testHermiteFindsStraightLineMinimumInsideALongStep(reb):
+    """ A step spanning the whole flyby: the step ends are far off, the interpolant is exact. """
+
+    b = np.array([0.0, 1.0, 0.0])
+    v = np.array([2.0, 0.0, 0.0])
+    t0, t1 = -3.0, 5.0
+
+    d, t = reb.hermiteClosestApproach(t0, b + v*t0, v, t1, b + v*t1, v)
+
+    assert d == pytest.approx(1.0, rel=1e-12)
+    assert t == pytest.approx(0.0, abs=1e-12)
+
+    # The step-end samples alone overestimate the minimum by a factor of ~6
+    assert min(np.linalg.norm(b + v*t0), np.linalg.norm(b + v*t1)) > 6.0
+
+
+def testHermiteWorksForBackwardSteps(reb):
+    """ Backward integration steps (t1 < t0) give the same minimum and time. """
+
+    b = np.array([0.0, 0.0, 0.5])
+    v = np.array([-1.0, 1.0, 0.0])
+    t0, t1 = 4.0, -2.5
+
+    d, t = reb.hermiteClosestApproach(t0, b + v*t0, v, t1, b + v*t1, v)
+
+    assert d == pytest.approx(0.5, rel=1e-12)
+    assert t == pytest.approx(0.0, abs=1e-12)
+
+
+def testHermiteReturnsTheStepEndWhenThereIsNoMinimumInside(reb):
+    """ A receding step has no interior minimum, so the closer step end is returned. """
+
+    b = np.array([0.0, 1.0, 0.0])
+    v = np.array([1.0, 0.0, 0.0])
+    t0, t1 = 1.0, 3.0
+
+    d, t = reb.hermiteClosestApproach(t0, b + v*t0, v, t1, b + v*t1, v)
+
+    assert d == pytest.approx(np.sqrt(2.0), rel=1e-12)
+    assert t == t0
+
+
+@pytest.mark.parametrize("ecc, tol", [(1000.0, 1e-4), (20.0, 5e-3), (3.0, 2e-2)])
+def testHermiteOnAKeplerianFlyby(reb, ecc, tol):
+    """ On a real (bent) hyperbolic flyby spanned by a step of ~1.6 encounter times, the refined
+    minimum is close to the true periapsis and far better than the step-end samples. Deflection
+    makes the interpolant slightly underestimate it; the error shrinks as the flyby gets straighter.
+    """
+
+    mu, q = 1.0, 1.0
+    tau = q/np.sqrt(mu*(ecc + 1)/q)
+    t0, t1 = -0.7*tau, 0.9*tau
+
+    r0, v0 = _hyperbolicFlyby(t0, mu, q, ecc)
+    r1, v1 = _hyperbolicFlyby(t1, mu, q, ecc)
+
+    d, t = reb.hermiteClosestApproach(t0, r0, v0, t1, r1, v1)
+
+    assert abs(d/q - 1) < tol
+    assert abs(t/tau) < 2*tol
+    assert min(np.linalg.norm(r0), np.linalg.norm(r1))/q - 1 > 0.1
+
+### MEGNO verdict ###
+
+def _megnoSeries(y_func, years=1000.0, a_au=1.0, n=200):
+    """ A synthetic MEGNO series <Y>(t) over the given span, with a constant semi-major axis. """
+
+    t_days = np.linspace(years*365.25/n, years*365.25, n)
+    return list(t_days), [y_func(t/365.25) for t in t_days], [a_au]*n
+
+
+def testMegnoConvergedToTwoIsRegular(reb):
+    """ A series settling at 2 (with a small decaying wiggle) is regular. """
+
+    v = reb.classifyMegno(*_megnoSeries(lambda t: 2.0 + 0.3*np.exp(-t/50.0)*np.cos(t)))
+
+    assert v["status"] == "regular"
+    assert v["lyapunov_time_years"] is None
+    assert v["n_orbits"] == pytest.approx(1000.0)
+
+
+def testMegnoGrowingLinearlyIsChaoticWithLyapunovTime(reb):
+    """ <Y> ~ (lambda/2) t is chaotic, and the fitted Lyapunov time is 1/lambda. """
+
+    lyapunov_time = 80.0
+    v = reb.classifyMegno(*_megnoSeries(lambda t: 2.0 + 0.5*t/lyapunov_time))
+
+    assert v["status"] == "chaotic"
+    assert v["lyapunov_time_years"] == pytest.approx(lyapunov_time, rel=1e-6)
+
+
+def testMegnoTendingToZeroIsPeriodic(reb):
+    """ A bounded deviation (<Y> -> 0) is a stable periodic orbit, not a converged one. """
+
+    v = reb.classifyMegno(*_megnoSeries(lambda t: 0.4 + 0.1*np.sin(t)))
+
+    assert v["status"] == "periodic"
+
+
+def testMegnoInBetweenIsNotConverged(reb):
+    """ A series sitting at 2.3 is neither converged to 2 nor clearly chaotic. """
+
+    v = reb.classifyMegno(*_megnoSeries(lambda t: 2.3))
+
+    assert v["status"] == "not_converged"
+
+
+def testMegnoNeedsEnoughOrbits(reb):
+    """ Fewer than MEGNO_MIN_ORBITS orbital periods give no verdict, even for a clean series. """
+
+    # a = 10 AU: a 31.6-year period, so 300 years is ~9.5 orbits
+    v = reb.classifyMegno(*_megnoSeries(lambda t: 2.0, years=300.0, a_au=10.0))
+
+    assert v["status"] == "too_short"
+    assert v["n_orbits"] == pytest.approx(300.0/10.0**1.5)
+
+
+def testMegnoNotMeaningfulForUnboundOrbits(reb):
+    """ A hyperbolic orbit (negative a) gets no MEGNO verdict. """
+
+    v = reb.classifyMegno(*_megnoSeries(lambda t: 2.0, a_au=-3.0))
+
+    assert v["status"] == "unbound"
+    assert v["n_orbits"] is None
+
+
+def testMegnoWithTooFewOutputsGivesNoVerdict(reb):
+    """ Fewer than 8 outputs make the last-quarter mean meaningless, so there is no verdict. """
+
+    v = reb.classifyMegno(*_megnoSeries(lambda t: 2.0, n=5))
+
+    assert v["status"] == "too_short"
+    assert v["n_orbits"] is None, "the orbit count is not computed without a verdict"
+
+
+def testMegnoWithNoOutputsIsHandled(reb):
+    """ An empty series (the object escaped before the first output) must not raise. """
+
+    v = reb.classifyMegno([], [], [])
+
+    assert v["status"] == "too_short"
+    assert v["final"] is None
+    assert v["last_quarter"] is None
+
+
+### MEGNO report lines ###
+
+def _megnoResult(reb, y_func, **kwargs):
+    """ A MEGNO result dict with its verdict, in the form reboundSimulate stores it. """
+
+    times_days, megno, a_au = _megnoSeries(y_func, **kwargs)
+
+    return {"times_days": times_days, "megno": megno, "a_au": a_au, "escaped": False,
+            "verdict": reb.classifyMegno(times_days, megno, a_au)}
+
+
+def testMegnoReportStatesWhetherItConvergesToTwo(reb):
+    """ A regular orbit is reported as converging to 2, a chaotic one as not, with a Lyapunov time. """
+
+    regular = reb._megnoReportLines(_megnoResult(reb, lambda t: 2.0))
+    chaotic = reb._megnoReportLines(_megnoResult(reb, lambda t: 2.0 + 0.5*t/80.0))
+
+    assert any("Converges to 2: YES" in line for line in regular)
+    assert not any("Lyapunov" in line for line in regular)
+
+    assert any("Converges to 2: NO" in line for line in chaotic)
+    assert any("Lyapunov time ~ 80 years" in line for line in chaotic)
+
+
+def testMegnoReportGivesNoVerdictForAnUnboundOrbit(reb):
+    """ The statuses without a verdict are reported as such, not as "does not converge". """
+
+    lines = reb._megnoReportLines(_megnoResult(reb, lambda t: 2.0, a_au=-3.0))
+
+    assert any("No verdict" in line for line in lines)
+    assert not any("Converges to 2" in line for line in lines)
+
+
+def testMegnoReportHandlesAnEmptySeries(reb):
+    """ An empty series is reported in one line instead of raising on a missing value. """
+
+    megno = {"times_days": [], "megno": [], "a_au": [], "escaped": True,
+             "verdict": reb.classifyMegno([], [], [])}
+    lines = reb._megnoReportLines(megno)
+
+    assert any("no MEGNO values" in line for line in lines)
 
 
 ### Earth-departure gating ###

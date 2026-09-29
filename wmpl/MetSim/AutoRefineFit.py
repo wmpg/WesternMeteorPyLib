@@ -62,13 +62,13 @@ def costFunc(traj, met_obs, sr, mag_sigma, len_sigma, plot_residuals=False):
         bounds_error=False, fill_value='extrapolate')
 
     
-    # Find the simulated length at the trajectory begining
+    # Find the simulated length at the trajectory beginning
     sim_len_beg = sim_len_interp(traj.rbeg_ele)
 
-    # Find the simulated time at the trajectory begining
+    # Find the simulated time at the trajectory beginning
     sim_time_beg = sim_time_interp(traj.rbeg_ele)
 
-    # Find the simulated velocity at the trajectory begining
+    # Find the simulated velocity at the trajectory beginning
     sim_vel_beg = sim_vel_interp(traj.rbeg_ele)
 
     # Set the simulated length at the beginning of observations to zero
@@ -437,7 +437,7 @@ Exiting...
 ******************************************************************************
         """.format(param_name)
         
-        # If the intial parameter value is outside the bounds, then throw an error
+        # If the initial parameter value is outside the bounds, then throw an error
         if (bound_min is not None) and (param_val < bound_min):
             print(bound_error_text)
             print("Initial parameter value is smaller than the lower bound: {} < {}".format(
@@ -542,7 +542,7 @@ if __name__ == "__main__":
         help="Name of the file containing the fit options. It is assumed the file is located in the same directory as the meteor data.")
 
     arg_parser.add_argument('--updated', action='store_true', \
-        help="Load the updated simulation JSON file insted of the original one.")
+        help="Load the updated simulation JSON file instead of the original one.")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -802,13 +802,13 @@ if __name__ == "__main__":
         bounds_error=False, fill_value='extrapolate')
 
 
-    # Find the simulated length at the trajectory begining
+    # Find the simulated length at the trajectory beginning
     sim_len_beg = sim_len_interp(traj.rbeg_ele)
 
-    # Find the simulated time at the trajectory begining
+    # Find the simulated time at the trajectory beginning
     sim_time_beg = sim_time_interp(traj.rbeg_ele)
 
-    # Find the simulated velocity at the trajectory begining
+    # Find the simulated velocity at the trajectory beginning
     sim_vel_beg = sim_vel_interp(traj.rbeg_ele)
 
     # Set the simulated length at the beginning of observations to zero

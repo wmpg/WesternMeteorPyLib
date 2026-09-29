@@ -15,8 +15,12 @@ import pytest
 REBOUND_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "REBOUND.py")
 
 
-def _mockReboundImports(monkeypatch, reboundx_found):
-    """ Mock the optional REBOUND imports without changing the installed environment. """
+def _mockReboundImports(monkeypatch, reboundx_found, reboundx_error=None):
+    """ Mock the optional REBOUND imports without changing the installed environment.
+
+    reboundx_error, if given, is the exception raised when reboundx is imported (instead of the
+    default ImportError when reboundx_found is False).
+    """
 
     real_import = builtins.__import__
     rebound = types.ModuleType("rebound")
@@ -29,6 +33,9 @@ def _mockReboundImports(monkeypatch, reboundx_found):
             return rebound
 
         if (name == "reboundx") or name.startswith("reboundx."):
+            if reboundx_error is not None:
+                raise reboundx_error
+
             if not reboundx_found:
                 raise ImportError("No module named 'reboundx'")
 
@@ -75,6 +82,19 @@ def testMissingReboundxIsSilentUntilUsed(monkeypatch):
         assert "The error was: No module named 'reboundx'" in stdout.getvalue()
 
 
+def testUnloadableReboundxIsSilentUntilUsed(monkeypatch):
+    """ A reboundx library compiled against another REBOUND fails in dlopen with OSError, which must
+    be reported like a missing dependency instead of breaking the import. """
+
+    error = OSError("dlopen(libreboundx.so): Symbol not found: _reb_integrator_ias15_part2")
+    _mockReboundImports(monkeypatch, reboundx_found=True, reboundx_error=error)
+    module, import_output = _loadReboundModule()
+
+    assert import_output == ""
+    assert not module.REBOUND_FOUND
+    assert "Symbol not found" in module._REBOUND_IMPORT_ERROR
+
+
 def testMissingReboundxCommandLineError(monkeypatch):
     """ Direct command-line use must report the cause, guidance, and a failing exit status. """
 
@@ -87,7 +107,7 @@ def testMissingReboundxCommandLineError(monkeypatch):
 
     assert exc_info.value.code == 1
     assert "The error was: No module named 'reboundx'" in stdout.getvalue()
-    assert "pip install rebound reboundx" in stdout.getvalue()
+    assert "pip install --no-build-isolation reboundx" in stdout.getvalue()
     assert "Windows Subsystem for Linux" in stdout.getvalue()
 
 

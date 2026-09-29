@@ -30,7 +30,7 @@ def pickBestStations(obslist, max_stns):
     This is to reduce computation workload and failures in cases where
     many cameras detect the same event. 
 
-    paramters 
+    parameters 
     - obslist[]  - list of observations in a candidate
     - max_stns   - max number of stations to include in solution
 
@@ -1055,7 +1055,7 @@ class TrajectoryCorrelator(object):
 
 
     def run(self, event_time_range=None, bin_time_range=None, mcmode=0):
-        """ Run meteor corellation using available data. 
+        """ Run meteor correlation using available data. 
 
         Keyword arguments:
             event_time_range: [list] A list of two datetime objects. These are times between which
@@ -1158,7 +1158,7 @@ class TrajectoryCorrelator(object):
                 log.info("")
 
                 # Get a list of all already computed trajectories within the given time bin
-                #   Reducted trajectory objects are returned
+                #   Reduced trajectory objects are returned
                 
                 if bin_time_range:
                     # restrict checks to the bin range supplied to run() plus a day to allow for data upload times
@@ -1189,7 +1189,7 @@ class TrajectoryCorrelator(object):
                     traj_time_pairs = self.dh.getTrajTimePairs(traj_reduced, unpaired_observations, 
                         self.traj_constraints.max_toffset)
 
-                    # Skip trajectory if there are no new obervations
+                    # Skip trajectory if there are no new observations
                     if not traj_time_pairs:
                         continue
 
@@ -1604,7 +1604,7 @@ class TrajectoryCorrelator(object):
 
                         # pickBestStations selects the best and marks the others "ignored". This keeps
                         # them in the dataset without using them in the solver. Otherwise if they're not markeed as used
-                        # on the next pass through the solver they wil be picked up as a different trajectory.
+                        # on the next pass through the solver they will be picked up as a different trajectory.
                         matched_observations = pickBestStations(matched_observations, self.traj_constraints.max_stations)
 
                     # Print info about observations which are being solved

@@ -26,7 +26,7 @@ def markFragments(out_dir, vid, met, site_id, traj=None, crop=None):
         site_id: [str] ID of the site used for loading proper picks from the met object.
 
     Keyword arguments:
-        traj: [Trajectory object] Optional trajectory object from which the height of the meteor at evey frame
+        traj: [Trajectory object] Optional trajectory object from which the height of the meteor at every frame
             will be estimated and plotted on the image. None by default (no height will be plotted on the
             image).
         crop: [list] A list of Xmin, Xmax, Ymin, Ymax crop window.

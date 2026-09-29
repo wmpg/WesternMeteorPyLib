@@ -8,6 +8,8 @@ from __future__ import print_function, division, absolute_import
 
 import numpy as np
 
+from wmpl.Utils.OrbitConstants import GAUSS_K
+
 
 # Predefined standard epochs
 JDE_B1900 = 2415020.3135
@@ -15,8 +17,9 @@ JDE_B1950 = 2433282.4235
 JDE_J2000 = 2451545.00
 JDE_J2050 = 2469807.50
 
-# Gauss's gravitational constant, sqrt(GM)
-GAUSS_GRAVITY_CONST = 0.01720209895
+# Gauss's gravitational constant, sqrt(GM). Kept under its own name here for the callers that
+#   import it, but defined once in wmpl.Utils.OrbitConstants
+GAUSS_GRAVITY_CONST = GAUSS_K
 AU = 1.495978707e+11  #m
 M_SUN = 1.989e+30     #kg
 MU_SUN = GAUSS_GRAVITY_CONST**2

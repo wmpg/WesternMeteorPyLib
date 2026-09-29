@@ -149,7 +149,7 @@ def dispersionFunction(sol, sol_ref_beg, disp_beg, sol_ref_mid, disp_mid, sol_re
     sol_ref_diff_end = sol_ref_end - sol_ref_mid
     sol_ref_diff_end = (sol_ref_diff_end + 180)%360 - 180
 
-    # Multipy the peak dispersion by the dispersion factor
+    # Multiply the peak dispersion by the dispersion factor
     disp_mid = disp_mid*dispersion_peak_factor
 
     # Compute the dispersion for the given sol
@@ -228,7 +228,7 @@ if __name__ == "__main__":
     # Solar longitude delta for sampling the table (deg)
     sol_delta = 0.2
 
-    # Median dispersion mulitplier
+    # Median dispersion multiplier
     dispersion_peak_factor = 2.5
 
     # New lookup table file name
@@ -853,7 +853,7 @@ if __name__ == "__main__":
             ### PLOTTING ###
 
 
-            # Generate indepentant varable data for the plot, taking the 0/360 boundary into account
+            # Generate indepentant variable data for the plot, taking the 0/360 boundary into account
             sol_lon_plot = np.linspace(sol_lon_min_95, sol_lon_max_95, 100)
             sol_lon_plot_normed = (sol_lon_plot - sol_lon_ref + 180)%360 - 180
 
@@ -991,7 +991,7 @@ if __name__ == "__main__":
                 gridsize=gridsize, cmap='inferno', mincnt=0, extent=extent
                 )
 
-            # Get the associated hexbin bin coordiantes and counts
+            # Get the associated hexbin bin coordinates and counts
             hbin_associated_x = hbin_associated.get_offsets()[:,0]
             hbin_associated_y = hbin_associated.get_offsets()[:,1]
             hbin_associated_counts = hbin_associated.get_array()

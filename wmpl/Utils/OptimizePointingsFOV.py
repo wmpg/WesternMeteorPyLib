@@ -196,7 +196,7 @@ def explorePointings(station_list, fixed_cameras, min_height, max_height, moving
 
     Arguments:
         station_list: [list] A list of SimStation objects.
-        fixed_cameras: [list] A list of bools indiciating if the camera is fixed or it can be moved to
+        fixed_cameras: [list] A list of bools indicating if the camera is fixed or it can be moved to
             optimize the overlap.
         min_height: [float] Minimum height of the FOV polyhedron (meters).
         max_height: [float] Maximum height of the FOV polyhedron (meters).
@@ -449,7 +449,7 @@ if __name__ == "__main__":
     # Do an assessment for the whole range of given rights
     explorePointings(station_list, fixed_cameras, min_height, max_height, moving_ranges, steps, parallel_jobs)
 
-    # # Do the anaysis for ranges of heights
+    # # Do the analysis for ranges of heights
 
     # # Height step in kilometers
     # height_step = 5

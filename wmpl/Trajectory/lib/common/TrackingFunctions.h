@@ -34,7 +34,7 @@
 //  sequence of time, row, and column measurements of the track.
 //
 //  The output product is a track whose temporally historical values have been retained 
-//  for each "detection" passed to the tracker. The information can be retreived for 
+//  for each "detection" passed to the tracker. The information can be retrieved for 
 //  the k-th temporal value as follows:
 //
 //     struct  trackerinfo  track;
@@ -110,7 +110,7 @@
 //  Date        Author      Change Description
 //  ----------  ----------  -------------------------------------------------------------
 //  2015-12-21  Gural       Original code based on AIMIT tracking algorithms
-//  2016-01-26  Gural       Revised base code for arbitary # of attributes passed
+//  2016-01-26  Gural       Revised base code for arbitrary # of attributes passed
 //  2016-07-30  Gural       Added track linearity and velocity
 //  2016-10-04  Gural       Numerous improvements to the matched filter processing
 //
@@ -158,7 +158,7 @@ struct   trackerinfo
 	//        Alpha-Beta tracker components
 	//-------------------------------------------------------------------------------
     double    alpha;        // Alpha coefficient for linear motion
-    double    beta;         // Beta coefficent for linear motion
+    double    beta;         // Beta coefficient for linear motion
 
 	double    timeupdate;   // Last tracker update time
 	double    timemeas;     // Last tracker "detected" measurement time
@@ -390,8 +390,8 @@ double dtime;
 //     nmeas        Number of measurements in rowmeas and colmeas
 //    *rowmeas      Pointer to the vector of row position measurements 
 //    *colmeas      Pointer to the vector of col position measurements 
-//     time         Time stamp of the measurments
-//     dtolerance   Spatial proximty to associate meas to track (pixels)
+//     time         Time stamp of the measurements
+//     dtolerance   Spatial proximity to associate meas to track (pixels)
 //    *trak         Pointer to the trackerinfo structure containing the track
 //
 // OUTPUT:
@@ -493,7 +493,7 @@ long    k, klimit, hits, misses;
        
     //======== If the last "ndown" measurements were non-detections and
 	//            the track is firmly established, then downgrade
-	//            to a TROUBLED track but maintain its existance.
+	//            to a TROUBLED track but maintain its existence.
        
     if( trak->status == FIRM  &&  trak->numhist > 1 )  {
        
@@ -562,7 +562,7 @@ long    k, klimit, hits, misses;
 
 						  
 //###################################################################################
-// The AlphaBeta function builds tracker coeficients based on a constant
+// The AlphaBeta function builds tracker coefficients based on a constant
 // linear motion assumption with no acceleration.
 //
 //===================================================================================
@@ -704,7 +704,7 @@ double   dtimeupdate, dtimemeas, alpha, beta;
                trak->colfilt = trak->colpred + alpha * ( measurement->colcentroid - trak->colpred );
            }
 
-		   //-------- Update the tracker time and the last "detected" measurment time
+		   //-------- Update the tracker time and the last "detected" measurement time
 
 		   trak->timeupdate = time;
 		   trak->timemeas   = time;
@@ -765,7 +765,7 @@ double   dtimeupdate, dtimemeas, alpha, beta;
 //     nmeas        Number of measurements in rowmeas and colmeas
 //    *measurements Pointer to the attribute structure containing the measurements
 //     time         Time of this set of measurements
-//     dtolerance   Spatial proximty to associate measurements to tracks (pixels)
+//     dtolerance   Spatial proximity to associate measurements to tracks (pixels)
 //    *trackers     Pointer to the maxtracks length vector of all tracks
 //
 // OUTPUT:

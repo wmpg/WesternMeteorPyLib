@@ -14,8 +14,7 @@ import matplotlib.pyplot as plt
 import scipy.interpolate
 import scipy.signal
 
-from wmpl.Utils.TrajConversions import cartesian2Geo, eci2RaDec, raDec2AltAz, altAz2RADec, \
-    equatorialCoordPrecession, J2000_JD
+from wmpl.Utils.TrajConversions import cartesian2Geo, derotatedRadiantAltAz
 from wmpl.Utils.Math import lineAndSphereIntersections, vectMag, vectNorm
 from wmpl.Utils.Pickling import loadPickle
 
@@ -246,45 +245,15 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False):
 
             ### Compute the ground-fixed alt/az
 
-            eci_x, eci_y, eci_z = height_eci
-
-            # Calculate the geocentric latitude (latitude which considers the Earth as an elipsoid) of the reference 
-            # trajectory point
-            lat_geocentric = np.arctan2(eci_z, np.sqrt(eci_x**2 + eci_y**2))
-
-
-            # Calculate the velocity of the Earth rotation at the position of the reference trajectory point (m/s)
-            v_e = 2*np.pi*vectMag(height_eci)*np.cos(lat_geocentric)/86164.09053
-
-            
-            # Calculate the equatorial coordinates of east from the reference position on the trajectory
-            azimuth_east = np.pi/2
-            altitude_east = 0
-            ra_east, dec_east = altAz2RADec(azimuth_east, altitude_east, jd, lat, lon)
-
-
             # The reference velocity vector has the average velocity and the given direction
             # Note that ideally this would be the instantaneous velocity
             v_ref_vect = traj.orbit.v_avg_norot*direction_vect
 
-            v_ref_nocorr = np.zeros(3)
+            # Derotate it at this point of the trajectory. The ECI coordinates are already in the epoch of
+            #   date, so no precession is applied
+            azim_norot, elev_norot, _ = derotatedRadiantAltAz(v_ref_vect, height_eci, jd, lat, lon)
 
-            # Calculate the derotated reference velocity vector/radiant
-            v_ref_nocorr[0] = v_ref_vect[0] + v_e*np.cos(ra_east)
-            v_ref_nocorr[1] = v_ref_vect[1] + v_e*np.sin(ra_east)
-            v_ref_nocorr[2] = v_ref_vect[2]
-
-            # Compute the radiant without Earth's rotation included
-            ra_norot, dec_norot = eci2RaDec(vectNorm(v_ref_nocorr))
-
-            # Precess to the epoch of date
-            ra_norot, dec_norot = equatorialCoordPrecession(J2000_JD.days, jd, ra_norot, dec_norot)
-
-            # Compute apparent alt/az
-            azim_norot, elev_norot = raDec2AltAz(ra_norot, dec_norot, jd, lat, lon)
-
-
-            ### 
+            ###
 
 
         else:
@@ -365,7 +334,7 @@ if __name__ == "__main__":
 
 
     # # Beginning height of sampling (m)
-    # #   Use -1 for the beginning hieght of the fireball
+    # #   Use -1 for the beginning height of the fireball
     # beg_ht = 50000.0
 
     # # End height of sampling (m)

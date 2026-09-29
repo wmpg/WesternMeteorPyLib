@@ -426,7 +426,7 @@ class MonteCarloPicks(object):
     def samplePicks(self, n):
         """ Sample picks from distributions defined by the transverse and longitudinal uncertainties. """
 
-        # Determine the directon of phase progression of the meteor through time
+        # Determine the direction of phase progression of the meteor through time
         self.determinePhaseProgression()
 
         # Draw n number of trajectories

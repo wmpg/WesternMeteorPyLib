@@ -66,7 +66,7 @@ class SimStation(object):
 
         """
 
-        # Station geographical coordiantes
+        # Station geographical coordinates
         self.lat = lat
         self.lon = lon
         self.elev = elev
@@ -877,7 +877,7 @@ class FovStateVectorModel(object):
 
 
         # Calculate FOV boxes for all stations with a larger height range, to avoid geometric problems
-        # when a point near the heighest/lowest heights is being generated
+        # when a point near the highest/lowest heights is being generated
         fov_boxes_all = []
         for stat in station_list:
 
@@ -1242,7 +1242,7 @@ def stationFovOverlap(station_list, jd, height_min, height_max):
 
     The algorithm uses a crude collision detection method, where first it is checked is points from one FOV
     convex hull are in other station's FOV convex hull. If not, the algorithm pairs all points in from one 
-    convex hull with each other, finds the point that is between those two and checkes if that point is inside
+    convex hull with each other, finds the point that is between those two and checks if that point is inside
     other convex hulls.
 
     Arguments:
@@ -1315,7 +1315,7 @@ def stationFovOverlap(station_list, jd, height_min, height_max):
 
 
 
-    ### FIRST CHECK - VECTICES FROM ONE CONVEX HULL IN ANOTHER ###
+    ### FIRST CHECK - VERTICES FROM ONE CONVEX HULL IN ANOTHER ###
     ##########################################################################################################
 
     for i, stat1 in enumerate(station_list):
@@ -1462,7 +1462,7 @@ def applyGravityDrop(eci_coord, t, r0, vz):
     """ Given the ECI position of the meteor and the duration of flight, this function calculates the
         drop caused by gravity and returns ECI coordinates of the meteor corrected for gravity drop. As the 
         gravitational acceleration changes with height, the drop is changes too. We assumed that the vertical
-        component of the meteor's velocity is constant dervied the modified drop equation.
+        component of the meteor's velocity is constant derived the modified drop equation.
 
     Arguments:
         eci_coord: [ndarray] (x, y, z) ECI coordinates of the meteor at the given time t (meters).
@@ -1472,7 +1472,7 @@ def applyGravityDrop(eci_coord, t, r0, vz):
 
     """
 
-    # Determing the sign of the initial time
+    # Determine the sign of the initial time
     time_sign = np.sign(t)
 
     # The derived drop function does not work for small vz's, thus the classical drop function is used
@@ -1771,7 +1771,7 @@ def simulateMeteorShower(station_list, meteor_velocity_models, n_meteors, met_sh
             etc.)
         n_meteors: [int] Number of simulated meteor radiants to draw.
         met_shower_model: [MeteorShower instance] Object which contains meteor shower parameters.
-        state_vect_model: [object] Method of computing state vectors, either an istance of FovStateVectorModel
+        state_vect_model: [object] Method of computing state vectors, either an instance of FovStateVectorModel
             or GeoStateVectorModel.
         beg_height: [float] Mean of Gaussian beginning height profile (km).
         beg_height_sigma: [float] Standard deviation of beginning height profile (km).
@@ -1782,10 +1782,10 @@ def simulateMeteorShower(station_list, meteor_velocity_models, n_meteors, met_sh
             default.
         output_dir: [str] Directory where the plots will be saved.
         save_plot: [str] Save plots if True.
-        orbit_limits: [list] A list of limits per orbital element. None by defualt. The syntax is the 
+        orbit_limits: [list] A list of limits per orbital element. None by default. The syntax is the 
             following: ['param_name', param_min, param_max], the fist element is the name of the orbital 
             parameter (it has to be a variable name from the Orbit class), the second is the minimum value 
-            of the parameter, and the third element is the maxium value. If angles are being limited, they 
+            of the parameter, and the third element is the maximum value. If angles are being limited, they 
             should be in radians.
             Example: if we want to limit the semimajor axis and the inclination, then
                 orbit_limits = [['a', 2.2, 2.23], ['incl', np.radians(2), np.radians(10)]]
@@ -1871,7 +1871,7 @@ def simulateMeteorShower(station_list, meteor_velocity_models, n_meteors, met_sh
                 meteor_jd, np.degrees(sample.la_sun)))
 
         else:
-            print('The generated meteor occured during daytime, skipping it!')
+            print('The generated meteor occurred during daytime, skipping it!')
 
             # print('Night start     :', night_start)
             # print('Meteor candidate:', jd2Date(meteor_jd, dt_obj=True))
@@ -3044,7 +3044,7 @@ if __name__ == "__main__":
 
     # ## Geminids ###
 
-    # # Make the beginning heights heigher, as the trajectory points will be determined by simulated
+    # # Make the beginning heights higher, as the trajectory points will be determined by simulated
     # # magnitudes
     # beg_height = 120
     # beg_height_sigma = 0
@@ -3055,10 +3055,10 @@ if __name__ == "__main__":
     # # Ablation coefficient (s^2/km^2) (asteroidal)
     # ablation_coeff = 0.042
 
-    # # Drag coeficient
+    # # Drag coefficient
     # Gamma = 1.0
 
-    # # Heat transfer coeficient
+    # # Heat transfer coefficient
     # Lambda = 0.5
 
     # # Mass index
@@ -3086,7 +3086,7 @@ if __name__ == "__main__":
 
 
     # ## 2011 Draconids ###
-    # # Make the beginning heights heigher, as the trajectory points will be determined by simulated
+    # # Make the beginning heights higher, as the trajectory points will be determined by simulated
     # #   magnitudes
     # beg_height = 110
     # beg_height_sigma = 0
@@ -3097,10 +3097,10 @@ if __name__ == "__main__":
     # # Ablation coefficient (s^2/km^2)
     # ablation_coeff = 0.21 # Ceplecha et al. 1998, D type
 
-    # # Drag coeficient
+    # # Drag coefficient
     # Gamma = 1.0
 
-    # # Heat transfer coeficient
+    # # Heat transfer coefficient
     # Lambda = 0.5
 
 
@@ -3134,7 +3134,7 @@ if __name__ == "__main__":
 
     # ## Perseids ###
 
-    # # Make the beginning heights heigher, as the trajectory points will be determined by simulated
+    # # Make the beginning heights higher, as the trajectory points will be determined by simulated
     # # magnitudes
     # beg_height = 130
     # beg_height_sigma = 0
@@ -3145,10 +3145,10 @@ if __name__ == "__main__":
     # # Ablation coefficient (s^2/km^2) (cometary)
     # ablation_coeff = 0.1
 
-    # # Drag coeficient
+    # # Drag coefficient
     # Gamma = 1.0
 
-    # # Heat transfer coeficient
+    # # Heat transfer coefficient
     # Lambda = 0.5
 
     # # Mass index
@@ -3187,7 +3187,7 @@ if __name__ == "__main__":
 
     # ## Ursids ###
 
-    # # Make the beginning heights heigher, as the trajectory points will be determined by simulated
+    # # Make the beginning heights higher, as the trajectory points will be determined by simulated
     # # magnitudes
     # beg_height = 120
     # beg_height_sigma = 0
@@ -3198,10 +3198,10 @@ if __name__ == "__main__":
     # # Ablation coefficient (s^2/km^2) (cometary)
     # ablation_coeff = 0.1
 
-    # # Drag coeficient
+    # # Drag coefficient
     # Gamma = 1.0
 
-    # # Heat transfer coeficient
+    # # Heat transfer coefficient
     # Lambda = 0.5
 
     # # Mass index
@@ -3236,7 +3236,7 @@ if __name__ == "__main__":
 
     # ## SDA ###
 
-    # # Make the beginning heights heigher, as the trajectory points will be determined by simulated
+    # # Make the beginning heights higher, as the trajectory points will be determined by simulated
     # # magnitudes
     # beg_height = 120
     # beg_height_sigma = 0
@@ -3247,10 +3247,10 @@ if __name__ == "__main__":
     # # Ablation coefficient (s^2/km^2) (cometary)
     # ablation_coeff = 0.1
 
-    # # Drag coeficient
+    # # Drag coefficient
     # Gamma = 1.0
 
-    # # Heat transfer coeficient
+    # # Heat transfer coefficient
     # Lambda = 0.5
 
     # # Mass index
@@ -3285,7 +3285,7 @@ if __name__ == "__main__":
 
     # ## Taurids ###
 
-    # # Make the beginning heights heigher, as the trajectory points will be determined by simulated
+    # # Make the beginning heights higher, as the trajectory points will be determined by simulated
     # # magnitudes
     # beg_height = 120
     # beg_height_sigma = 0
@@ -3296,10 +3296,10 @@ if __name__ == "__main__":
     # # Ablation coefficient (s^2/km^2) (cometary)
     # ablation_coeff = 0.1
 
-    # # Drag coeficient
+    # # Drag coefficient
     # Gamma = 1.0
 
-    # # Heat transfer coeficient
+    # # Heat transfer coefficient
     # Lambda = 0.5
 
     # # Mass index

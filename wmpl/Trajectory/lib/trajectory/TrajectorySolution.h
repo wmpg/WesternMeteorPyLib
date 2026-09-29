@@ -21,7 +21,7 @@
 //
 // The multi-parameter fit algorithm and implemented software can handle two or more
 // cameras and also deal with multiple cameras from the same site. It uses a
-// particle swarm optimzation (PSO) algorithm to fit the best propagating linear-path
+// particle swarm optimization (PSO) algorithm to fit the best propagating linear-path
 // motion-model to the measurements provided. The parameters solved for are the
 // radiant direction, begin point velocity, deceleration terms, timing offsets
 // between the unsynchronized camera measurements, begin and end point LLA positions,
@@ -226,7 +226,7 @@ struct PSO_info
     int       particle_distribution_flag; // Uniformly random or Gaussian
     double    epsilon_convergence;        // Relative residual error criteria
     double    weight_inertia;             // Weight for inertia - (typically 0.8)
-    double    weight_stubborness;         // Weight for stubborness (typically 1.0)
+    double    weight_stubborness;         // Weight for stubbornness (typically 1.0)
     double    weight_grouppressure;       // Weight for grouppressure (typically 2.0)
 };
 
@@ -350,8 +350,8 @@ struct trajectory_info
     double    ra_sigma;          // Standard deviation of radiant right ascension in radians
     double    dec_sigma;         // Standard deviation of radiant declination in radians
     double    vbegin_sigma;      // Standard deviation of vbegin in km/sec
-    double    decel1_sigma;      // Standard deviation of decceleration term 1
-    double    decel2_sigma;      // Standard deviation of decceleration term 2
+    double    decel1_sigma;      // Standard deviation of deceleration term 1
+    double    decel2_sigma;      // Standard deviation of deceleration term 2
 
     //----------------------------- Intermediate bootstrapping solutions
 

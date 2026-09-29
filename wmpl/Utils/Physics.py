@@ -49,7 +49,7 @@ def dynamicPressure(lat, lon, height, jd, velocity, gamma=1.0):
         velocity: [float] Velocity of the meteor (m/s).
 
     Keyword arguments:
-        gamma: [flot] Drag coefficient. 1 by defualt.
+        gamma: [flot] Drag coefficient. 1 by default.
 
 
     Return:
@@ -75,14 +75,14 @@ def dynamicMass(bulk_density, lat, lon, height, jd, velocity, decel, gamma=1.0, 
     Arguments:
         bulk_density: [float] Bulk density of the meteoroid in kg/m^3.
         lat: [float] Latitude of the meteor (radians).
-        lon: [flaot] Longitude of the meteor (radians).
+        lon: [float] Longitude of the meteor (radians).
         height: [float] Height of the meteor (meters).
         jd: [float] Julian date of the meteor.
         velocity: [float] Velocity of the meteor (m/s).
         decel: [float] Deceleration in m/s^2.
 
     Keyword arguments:
-        gamma: [flot] Drag coefficient. 1 by defualt.
+        gamma: [flot] Drag coefficient. 1 by default.
         shape_factor: [float] Shape factory for the body. 1.21 (sphere) by default. Other values:
             - sphere      = 1.21
             - hemisphere  = 1.92
@@ -193,8 +193,8 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1, v_
             - -1: estimate the pre-atmospheric velocity as the median velocity over the first 25% of
               points (robust to measurement noise). Requires a velocity array.
             - >0: use the supplied value as the pre-atmospheric velocity.
-            The correction is linearly tapered to zero for velocities within 0.1 km/s of v_init and
-            disabled for velocities at or above it (see luminousEfficiency() for details).
+            The correction is held at its dv = 0.1 km/s value for velocities within 0.1 km/s of
+            v_init or above it (see luminousEfficiency() for details).
             NOTE: the velocity array should represent a fitted deceleration curve (i.e. a physically
             consistent monotonic velocity evolution) rather than individual noisy measurements.
 
@@ -292,11 +292,11 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1, v_
 
         v_init_eff = float(v_init)
 
-        # The deceleration correction is tapered/disabled for velocities within 0.1 km/s of v_init,
-        # so warn if the given v_init leaves the fastest points effectively uncorrected
+        # The deceleration correction is floored for velocities within 0.1 km/s of v_init, so warn
+        # if the given v_init leaves the fastest points on the floor
         if v_init_eff < np.max(vel_arr) + 100:
             print("WARNING: v_init = {:.1f} m/s is within 100 m/s of the maximum given velocity. "
-                "The ReVelle & Ceplecha (2001) deceleration correction will be tapered or disabled "
+                "The ReVelle & Ceplecha (2001) deceleration correction will be held at its floor "
                 "at the fastest points.".format(v_init_eff))
 
     else:
@@ -401,7 +401,7 @@ def calcPf(p_max, zangle, mass, v_0):
 
     ### Convert units to match the paper ###
     
-    # Pressue in MPa
+    # Pressure in MPa
     p_max /= 1e6
 
     # Entry speed in km/s

@@ -187,8 +187,8 @@ double  max_convergence, vbegin, vapprox, decel1, decel2;
 
 
     //======== Since we now use an inverse of the noise variance per measurement to weight
-    //         the minimzation cost function, first look for any zero valued standard 
-    //         deviations input by the user (reseting them to the minimum sigma found), 
+    //         the minimization cost function, first look for any zero valued standard 
+    //         deviations input by the user (resetting them to the minimum sigma found), 
     //         then compute the weights as the inverse variance with the weight sum
     //         normalized to unity.
 
@@ -2564,7 +2564,7 @@ double  fsum, cosangle, r[3], rmeas[3], radiant_hat_ECI[3], rmagnitude, cpa_dist
                         ro_ECI, radiant_hat_ECI, r,
                         &cpa_distance );
 
-            //-------- The weighting of 1/variance is based on the per measurment noise standard deviation
+            //-------- The weighting of 1/variance is based on the per measurement noise standard deviation
 
             weight = traj->weight[kcamera][kmeas];
 
@@ -2636,7 +2636,7 @@ double  vbegin, rmagnitude, cosangle, weight, wsum;
 
             tt = traj->meashat_ECI[kcamera][kmeas][T] + toffset[kcamera];
 
-            //-------- The weighting of 1/variance is based on the per measurment noise standard deviation
+            //-------- The weighting of 1/variance is based on the per measurement noise standard deviation
 
             weight = traj->weight[kcamera][kmeas];
 
@@ -3693,7 +3693,7 @@ int  kcamera, kmeas;
     traj->tref_offsets[kcamera] = 0.0;
 
 
-    traj->numcameras = kcamera + 1;  //... Increment the active camera counter for next camera's measurments
+    traj->numcameras = kcamera + 1;  //... Increment the active camera counter for next camera's measurements
 
 
 }

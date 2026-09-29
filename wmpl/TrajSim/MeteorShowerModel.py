@@ -398,7 +398,7 @@ if __name__ == "__main__":
     # Combine the shower and the sporadic background
     source_list = [met_shower_model, sporadic_model]
 
-    # Refine relative fluxes betweent the shower and the sporadic background
+    # Refine relative fluxes between the shower and the sporadic background
     relative_fluxes = [100.0, 8.0]
 
     combined_model = CombinedSources(source_list, relative_fluxes, start_jd, end_jd)

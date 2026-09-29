@@ -119,7 +119,7 @@ def importBasemap():
             import_error = ModuleNotFoundError
 
         try:
-            # If PROJ_LIB could not be found, add it to the enviroment
+            # If PROJ_LIB could not be found, add it to the environment
             import os
 
             try:

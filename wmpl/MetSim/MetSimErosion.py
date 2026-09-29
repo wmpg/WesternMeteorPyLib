@@ -184,7 +184,7 @@ class Constants(object):
         # Meteoroid compressive strength (Pa)
         self.compressive_strength = 2000
 
-        # Height of disruption (will be assigned when the disruption occures)
+        # Height of disruption (will be assigned when the disruption occurs)
         self.disruption_height = None
 
         # Erosion coefficient to use after disruption
@@ -347,7 +347,7 @@ class Fragment(object):
         # Indicate that this is born out of complex fragmentation
         self.complex = False
 
-        # Identifier of the compex fragmentation entry
+        # Identifier of the complex fragmentation entry
         self.complex_id = None
 
 
@@ -429,7 +429,7 @@ class Wake(object):
         self.luminosity_points = np.array([frag.lum for frag in self.frag_list])
 
 
-        # Evalute the Gaussian at every fragment an add to the estimated wake
+        # Evaluate the Gaussian at every fragment an add to the estimated wake
         self.wake_luminosity_profile = np.zeros_like(length_array)
 
         # If there is not entry for the wake PSF weights, initialize it
@@ -489,7 +489,7 @@ def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mas
         - a gamma distribution - appropriate for spraying of droplets (iron meteoroids).
 
     Masses are binned and one daughter fragment may represent several fragments/grains, which is specified 
-    with the n_grains atribute.
+    with the n_grains attribute.
 
     Arguments:
         const: [object] Constants instance.
@@ -543,7 +543,7 @@ def generateFragments(const, frag_parent, eroded_mass, mass_index, mass_min, mas
             m_mean = log_range/(1.0/mass_min - 1.0/mass_max)
 
         else:
-            # For other mass indices, compute the mean using the formula, computing each step separatelly to save time
+            # For other mass indices, compute the mean using the formula, computing each step separately to save time
             a = 2 - mass_index
             b = 1 - mass_index
             m_max_a = mass_max**a
@@ -1122,7 +1122,7 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
                     frag_children_all += grain_children
                     const.n_active += len(grain_children)
 
-                # Deactive the disrupted fragment
+                # Deactivate the disrupted fragment
                 frag.m = 0
                 killFragment(const, frag)
 
@@ -1208,7 +1208,7 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
                                 # Assign the complex fragmentation ID
                                 frag_new.complex_id = frag_entry.id
 
-                                # Assing the mass to the new fragment
+                                # Assign the mass to the new fragment
                                 frag_new.m = new_frag_mass
 
                                 # Assign possible new ablation coeff to this fragment
@@ -1229,7 +1229,7 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
                                     # Disable erosion for single-body fragments
                                     frag_new.erosion_enabled = False
 
-                                # Add the new fragment to the list of childern
+                                # Add the new fragment to the list of children
                                 frag_children_all.append(frag_new)
                                 const.n_active += 1
 
@@ -1673,7 +1673,7 @@ if __name__ == "__main__":
     plt.gca().invert_yaxis()
 
     plt.xlabel("Time (s)")
-    plt.ylabel("Absolulte magnitude")
+    plt.ylabel("Absolute magnitude")
 
     plt.show()
 

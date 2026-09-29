@@ -59,7 +59,7 @@ class MeteorObservation(object):
         """ Adds the measurement point to the meteor.
 
         Arguments:
-            frame_n: [flaot] Frame number from the reference time.
+            frame_n: [float] Frame number from the reference time.
             x: [float] X image coordinate.
             y: [float] X image coordinate.
             azim: [float] Azimuth, J2000 in degrees.
@@ -375,7 +375,7 @@ def writeMiligInputFileMeteorObservation(jdt_ref, meteor_list, file_path, conver
         # Flag indicating that the meteor data ends here
         f.write('-1\n')
 
-        # Initial aproximations
+        # Initial approximations
         f.write(' 0.0 0.0 0.0 0.0 0.0 0.0 0.0\n')
 
         # Optional parameters
@@ -443,7 +443,7 @@ def addSolverOptions(arg_parser, skip_velpart=False):
         type=float, default=1.0)
 
     arg_parser.add_argument('-l', '--plotallspatial', \
-        help='Plot a collection of plots showing the residuals vs. time, lenght and height.', \
+        help='Plot a collection of plots showing the residuals vs. time, length and height.', \
         action="store_true")
 
     arg_parser.add_argument('-j', '--jacchia', \

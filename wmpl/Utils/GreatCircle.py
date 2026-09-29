@@ -133,7 +133,7 @@ if __name__ == "__main__":
     # Fit the great circle
     C, theta0, phi0 = fitGreatCircle(x_data, y_data, z_data)
 
-    # Make a grid of independant variables
+    # Make a grid of independent variables
     X,Y = np.meshgrid(np.arange(-1.0, 1.0, 0.1), np.arange(-1.0, 1.0, 0.1))
 
     # Generate the Z component of the plane

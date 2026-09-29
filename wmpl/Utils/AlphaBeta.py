@@ -5052,10 +5052,14 @@ if __name__ == "__main__":
         help='The product of the drag coefficient Gamma and the shape coefficient A. Used for computing the dynamic mass. Default is 0.55.', \
         type=float, default=0.55)
 
+    arg_parser.add_argument('-r', '--robust', action="store_true", \
+        help="Fit alpha-beta with the robust velocity-residual fit (method='robust') instead of "
+        "the default Q4 fit. Implied by --errors, which always uses the robust fit.")
+
     arg_parser.add_argument('-e', '--errors', action="store_true", \
-        help="Estimate and report alpha/beta and initial/final mass uncertainties. Forces a "
-        "robust fit (method='robust'), propagates the fitted (ln alpha, ln beta) covariance into "
-        "the masses, and draws an uncertainty ellipse on the survival diagram.")
+        help="Estimate and report alpha/beta and initial/final mass uncertainties. Always uses "
+        "the robust fit (method='robust'), propagates the fitted (ln alpha, ln beta) covariance "
+        "into the masses, and draws an uncertainty ellipse on the survival diagram.")
 
     arg_parser.add_argument('--slopeunc', metavar='SLOPE_UNC', type=float, default=None, \
         help="1-sigma uncertainty on the entry slope, in DEGREES, folded into the mass error "
@@ -5157,7 +5161,8 @@ if __name__ == "__main__":
             v_init, alpha, beta, fit_errors = fitAlphaBeta(vel_input, ht_data_rescaled, \
                 v_init=traj.v_init, method='robust', estimate_errors=True)
         else:
-            v_init, alpha, beta = fitAlphaBeta(vel_input, ht_data_rescaled, v_init=traj.v_init)
+            v_init, alpha, beta = fitAlphaBeta(vel_input, ht_data_rescaled, v_init=traj.v_init, \
+                method='robust' if cml_args.robust else 'q4')
             fit_errors = None
 
         # Estimate the final velocity from the fitted alpha-beta solution
