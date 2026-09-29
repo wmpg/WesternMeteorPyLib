@@ -1077,9 +1077,14 @@ def fitConfidenceInterval(x_data, y_data, conf=0.95, x_array=None, func=None):
 
 
 def generateDatetimeBins(dt_beg, dt_end, bin_days=7, utc_hour_break=12, tzinfo=None, reverse=False):
-    """Given a beginning and end datetime, bin this time range into bins bin_days long. The bin edges will
-        be at utc_hour_break UTC. 12:00 UTC is chosen because at that time it is midnight at the International
-        Date Line, and it is very unlikely that there are any meteor cameras there.
+    """Given a beginning and end datetime, bin this time range into bins bin_days long. For bins a day or
+        longer, the bin edges will be at utc_hour_break UTC. 12:00 UTC is chosen because at that time it is
+        midnight at the International Date Line, which keeps most nights inside one bin. It does not keep
+        all of them there: 12:00 UTC is local midnight in New Zealand and falls in the evening in Australia,
+        so nights there can straddle an edge. Callers that select data by night folder must therefore also
+        look at the folder from the previous day (CorrelateRMS does). Bins shorter than a day are not
+        snapped, since snapping would collapse them all onto the same hour; their edges fall every bin_days
+        after dt_beg, and they do split nights.
 
     Arguments:
         dt_beg: [datetime] Begin datetime.
@@ -1088,7 +1093,7 @@ def generateDatetimeBins(dt_beg, dt_end, bin_days=7, utc_hour_break=12, tzinfo=N
     Keyword arguments:
         bin_days: [float] Length of bin in days.
         utc_hour_break: [float] UTC hour when the break in time will occur, i.e. this will be the edges of the
-            time bins.
+            time bins. Only applied when bin_days is a day or longer.
         tzinfo: [tz] pytz timezone object used for times. None by default.
 
     Return:
@@ -1113,11 +1118,13 @@ def generateDatetimeBins(dt_beg, dt_end, bin_days=7, utc_hour_break=12, tzinfo=N
 
         else:
             bin_beg = dt_beg + datetime.timedelta(days=i * bin_days)
-            bin_beg = bin_beg.replace(hour=int(utc_hour_break), minute=0, second=0, microsecond=0)
+            if bin_days > 0.999:
+                bin_beg = bin_beg.replace(hour=int(utc_hour_break), minute=0, second=0, microsecond=0)
 
         # Generate the bin ending edge
         bin_end = bin_beg + datetime.timedelta(days=bin_days)
-        bin_end = bin_end.replace(hour=int(utc_hour_break), minute=0, second=0, microsecond=0)
+        if bin_days > 0.999:
+            bin_end = bin_end.replace(hour=int(utc_hour_break), minute=0, second=0, microsecond=0)
 
         # Check that the ending bin is not beyond the end dt
         end_reached = False

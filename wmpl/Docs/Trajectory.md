@@ -36,12 +36,17 @@ Run any of them with `--help` for the full list of options. The ones that matter
 | `-t`, `--maxtoffset` | Maximum timing offset allowed between stations, in seconds. |
 | `-v`, `--vinitht` | Estimate the initial velocity as the average above this height, in km. |
 | `-l`, `--plotallspatial` | Save the full set of diagnostic plots. |
+| `-w`, `--walk` | Search the given folder recursively and solve every event found in it, instead of one event. Available in `ECSV`, `RMSJSON` and `Fripon`, not in `CAMS` or `Met`. `ECSV` skips folders whose name contains `REJECT`. |
 
 To see the solver working on a synthetic example without any data of your own:
 
 ```
 python -m wmpl.Trajectory.Trajectory
 ```
+
+To run this over a whole archive instead of one event at a time, pairing observations across stations
+automatically, continuously, and optionally across several servers, see
+[the correlator manual](Correlator.md).
 
 ## The trajectory pickle
 
