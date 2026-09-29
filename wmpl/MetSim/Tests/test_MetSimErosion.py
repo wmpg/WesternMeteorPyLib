@@ -103,9 +103,13 @@ def _makeComplexScenarioConstants(m_init=0.5, v_init=16000.0, h_init=80000.0, ze
     return const
 
 
-def _runComplexScenario():
-    """ Run the complex scenario once and return (const, results) with results as a float ndarray. """
+def _runComplexScenario(adaptive=False, rtol=1e-5):
+    """ Run the complex scenario once and return (const, results) with results as a float ndarray.
+        If adaptive is True, use error-controlled adaptive sub-stepping. """
     const = _makeComplexScenarioConstants()
+    if adaptive:
+        const.adaptive_dt = True
+        const.adaptive_rtol = rtol
     _, results_list, _ = MetSimErosion.runSimulation(const)
     return const, np.array(results_list, dtype=float)
 
@@ -158,6 +162,35 @@ def test_brightest_height_not_spuriously_zero_while_luminous():
         "brightest_height was 0 on a tick where the meteor was still luminous"
 
 
+def test_adaptive_dt_runs_and_stays_stable():
+    """ Adaptive sub-stepping must run the same complex scenario without NaN/inf, without negative
+    mass, and with eroded/disrupted light tracked and brightest_height valid while luminous - i.e.
+    small grains stay numerically stable while ablating (the m^(-1/3) drag near mass exhaustion is
+    floored, not blown up). """
+    const, results = _runComplexScenario(adaptive=True)
+    assert const.adaptive_dt is True
+    assert const.disruption_height > 0, "disruption not triggered in adaptive mode"
+    assert np.all(np.isfinite(results)), "non-finite output in adaptive mode (grain instability?)"
+    assert np.all(results[:, COL_MAIN_MASS] >= 0), "main mass went negative (adaptive)"
+    assert np.all(results[:, COL_MASS_TOTAL_ACTIVE] >= 0), "total active mass went negative (adaptive)"
+    assert np.nanmax(results[:, COL_LUM_ERODED]) > 0, "eroded light not tracked (adaptive)"
+    luminous = results[:, COL_LUM_TOTAL] > 0
+    assert np.all(results[luminous, COL_BRIGHTEST_HEIGHT] > 0), \
+        "brightest_height spuriously 0 while luminous (adaptive)"
+
+
+def test_adaptive_conserves_radiated_energy_vs_fixed():
+    """ Turning on adaptive sub-stepping must not change the bulk energetics: the time-integrated
+    total luminosity should match the fixed-step run to a few percent (same physics, finer
+    integration + finer grain shedding). """
+    _, r_fixed = _runComplexScenario(adaptive=False)
+    _, r_adapt = _runComplexScenario(adaptive=True)
+    e_fixed = np.trapz(r_fixed[:, COL_LUM_TOTAL], r_fixed[:, COL_TIME])
+    e_adapt = np.trapz(r_adapt[:, COL_LUM_TOTAL], r_adapt[:, COL_TIME])
+    assert abs(e_adapt - e_fixed)/e_fixed < 0.05, \
+        "adaptive changed total radiated energy by >5% vs fixed (energy/mass not conserved?)"
+
+
 def _savePlot(save_path=None):
     """ New-engine-only diagnostic figure (LC, mass, velocity, height vs time). Optional, for eyeballing. """
     import matplotlib
@@ -197,6 +230,8 @@ if __name__ == "__main__":
     test_total_active_mass_is_grain_weighted()
     test_lum_eroded_tracked_by_default()
     test_brightest_height_not_spuriously_zero_while_luminous()
+    test_adaptive_dt_runs_and_stays_stable()
+    test_adaptive_conserves_radiated_energy_vs_fixed()
     print("All MetSimErosion regression checks passed.")
 
     if "--plot" in sys.argv:
