@@ -44,6 +44,9 @@ the larger tools live in [wmpl/Docs](wmpl/Docs):
  * [Correlating RMS data](wmpl/Docs/Correlator.md) - automatically pairing and solving whole archives of RMS observations, the operation modes, the databases and distributed processing across several servers
  * [REBOUND orbital integration](wmpl/Docs/REBOUND.md) - integrating a meteoroid orbit back or forward in time, close encounters and impacts, Monte Carlo clones, radiation forces and chaos indicators
  * [DynestyMetSim](wmpl/Dynesty/README.md) - nested-sampling fits of the erosion ablation model to a meteor light curve and dynamics
+ * [Orbit dissimilarity criteria](wmpl/Docs/OrbitSimilarity.md) - measuring how similar two orbits are, which criterion to pick, and why their thresholds are not interchangeable
+ * [Classifying a single orbit](wmpl/Docs/OrbitClassification.md) - the Tisserand parameter, the cometary tests, and the Tancredi scheme for asteroids in cometary orbits
+ * [Choosing a D-criterion threshold](wmpl/Docs/DThresholds.md) - the other half of a stream search, and why the traditional threshold is too permissive to use
 
 
 
