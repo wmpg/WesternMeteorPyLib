@@ -234,8 +234,13 @@ def expLinearVelocity(t, v0, a1, a2, t0, decel):
     return vel
 
 
-def lagFitVelocity(time_data, lag_data, vel_data, v0):
-    """ Fit a smooth model to the lag data, to improve the alpha-beta fit. """
+def lagFitVelocity(time_data, lag_data, vel_data, v0, seed=0):
+    """ Fit a smooth model to the lag data, to improve the alpha-beta fit.
+
+    Keyword arguments:
+        seed: [int or None] Random seed for the basinhopping global optimizer, so that repeated runs
+            on the same data give the same fit. None draws a fresh seed on every call.
+    """
 
 
     def _lagMinimization(params, time_data, lag_data, weights):
@@ -273,7 +278,7 @@ def lagFitVelocity(time_data, lag_data, vel_data, v0):
 
     # Use robust fitting
     res = scipy.optimize.basinhopping(_lagMinimization, p0, niter=200, T=2.0,\
-        minimizer_kwargs={'args':(time_data, lag_data, weights), 'method':'Nelder-Mead'})
+        minimizer_kwargs={'args':(time_data, lag_data, weights), 'method':'Nelder-Mead'}, seed=seed)
     fit_params = res.x
 
     # fig, (ax1, ax2, ax3) = plt.subplots(nrows=3, sharex=True)
@@ -5305,11 +5310,37 @@ if __name__ == "__main__":
             rng = np.random.RandomState(0)
             log_draws = rng.multivariate_normal(np.log([alpha, beta]), fit_errors['cov_log'], \
                 size=500)
-            vel_draws = np.array([alphaBetaVelocity(ht_arr, np.exp(la), np.exp(lb), v_init) \
-                for la, lb in log_draws])
-            vel_lo, vel_hi = np.percentile(vel_draws, [15.865, 84.135], axis=0)
-            ax_ab.fill_betweenx(ht_arr/1000, vel_lo/1000, vel_hi/1000, color='k', alpha=0.15, \
-                zorder=1, label=r"1$\sigma$ ($\alpha$, $\beta$) band")
+            alpha_draws, beta_draws = np.exp(log_draws[:, 0]), np.exp(log_draws[:, 1])
+
+            # Exclude the draws outside ALPHA_BETA_BOUNDS, the same way plotAlphaBeta() does - a
+            #   large enough beta overflows Ei(beta) and the velocity inversion fails on the NaN
+            (a_lo, a_hi), (b_lo, b_hi) = ALPHA_BETA_BOUNDS
+            is_valid = ((alpha_draws >= a_lo) & (alpha_draws <= a_hi) &
+                (beta_draws >= b_lo) & (beta_draws <= b_hi))
+            n_rejected = len(log_draws) - int(np.sum(is_valid))
+            rejected_frac = n_rejected/len(log_draws)
+
+            if n_rejected > 0:
+                msg = "{:d}/{:d} sampled (alpha, beta) draws fell outside ALPHA_BETA_BOUNDS and " \
+                    "were excluded".format(n_rejected, len(log_draws))
+
+            # Too many draws out of bounds means the fit sits on a bound, where the Gaussian
+            #   approximation is not meaningful - skip the band rather than draw it from what remains
+            if rejected_frac > 0.05:
+                print()
+                print("WARNING: {:s} ({:.1%}) - the local Gaussian approximation is likely "
+                    "unreliable this close to a bound. Not drawing the 1-sigma velocity "
+                    "band.".format(msg, rejected_frac))
+
+            else:
+                if n_rejected > 0:
+                    print("{:s}.".format(msg))
+
+                vel_draws = np.array([alphaBetaVelocity(ht_arr, a, b, v_init) \
+                    for a, b in zip(alpha_draws[is_valid], beta_draws[is_valid])])
+                vel_lo, vel_hi = np.percentile(vel_draws, [15.865, 84.135], axis=0)
+                ax_ab.fill_betweenx(ht_arr/1000, vel_lo/1000, vel_hi/1000, color='k', alpha=0.15, \
+                    zorder=1, label=r"1$\sigma$ ($\alpha$, $\beta$) band")
 
         ax_ab.plot(vel_arr/1000, ht_arr/1000, color='k', zorder=2, label=fit_label)
 
