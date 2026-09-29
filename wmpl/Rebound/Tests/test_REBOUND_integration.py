@@ -9,8 +9,6 @@ changes between major versions, and a reboundx compiled against a different REBO
 import os
 import importlib.util
 from types import SimpleNamespace
-import sys
-import platform
 
 import numpy as np
 import pytest
@@ -151,18 +149,18 @@ def testMajorVersionIsReadOrAssumedRecent(reb, monkeypatch, version, expected):
     assert reb._reboundMajorVersion() == expected
 
 
-def testUnattachedReboundxIsReportedWithTheFix(reb):
+def testUnattachedReboundxIsReportedWithTheFix(realReb):
     """ The whole point of the check: an Extras that did not attach must say how to repair it. """
 
     detached = SimpleNamespace(extras=None)
 
-    if sys.platform != 'win32' and platform.machine() != 'aarch64':
-        with pytest.raises(RuntimeError) as exc_info:
-            reb._checkReboundxAttached(detached)
+    # The message names the installed rebound and reboundx versions, so this needs them importable
+    with pytest.raises(RuntimeError) as exc_info:
+        realReb._checkReboundxAttached(detached)
 
-        message = str(exc_info.value)
-        assert "did not attach" in message
-        assert "--no-build-isolation" in message, "the error must carry the command that repairs it"
+    message = str(exc_info.value)
+    assert "did not attach" in message
+    assert "--no-build-isolation" in message, "the error must carry the command that repairs it"
 
 
 ### Installed REBOUND/REBOUNDx ###
