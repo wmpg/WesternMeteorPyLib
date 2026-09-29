@@ -8,6 +8,7 @@ import os
 import runpy
 import types
 import sys
+import platform 
 
 import pytest
 
@@ -118,10 +119,11 @@ def testAvailableReboundDependenciesAreSilent(monkeypatch):
     module, import_output = _loadReboundModule()
 
     assert import_output == ""
-    if sys.platform != 'win32':
-        assert module.REBOUND_FOUND
+    if sys.platform != 'win32' and platform.machine() != 'aarch64':
+        # test the error message first otherwise we get no indication of why a failure arose
         assert module._REBOUND_IMPORT_ERROR is None
+        assert module.REBOUND_FOUND
     else:
-        # on Windows we expect the loader to error out
+        # on Windows and ARM64 we expect the loader to error out
         assert module.REBOUND_FOUND is False
         assert module._REBOUND_IMPORT_ERROR is not None
