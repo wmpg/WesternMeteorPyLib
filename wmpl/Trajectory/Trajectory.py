@@ -153,9 +153,6 @@ class ObservedPoints(object):
         # Store the number of measurement
         self.kmeas = len(self.time_data)
 
-        # Calculate JD of each point
-        self.JD_data = self.jdt_ref + self.time_data/86400.0
-
         # Station info
         self.lat = lat
         self.lon = lon
@@ -434,6 +431,14 @@ class ObservedPoints(object):
         # ###
 
 
+
+    @property
+    def JD_data(self):
+        """ Julian date of each point. Derived on access because time_data is shifted after 
+            initialization (timing offsets, Monte Carlo copies) and the absolute times must follow it.
+        """
+
+        return self.jdt_ref + self.time_data/86400.0
 
     def calcAzimuthal(self):
         """ Calculate azimuthal coordinates from right ascension and declination. """
@@ -4357,8 +4362,10 @@ class Trajectory(object):
 
 
 
-        out_str += "Reference JD: {:20.12f}\n".format(self.jdt_ref)
-        out_str += "Time: " + str(jd2Date(self.orbit.jd_ref, dt_obj=True)) + " UTC\n"
+        # jdt_ref is t = 0 of every relative time in this report; the reference point further down
+        #   (orbit.jd_ref) is the beginning of the trajectory and can be seconds later
+        out_str += "Reference JD: {:20.12f} (t = 0 for all relative times in this report)\n".format(self.jdt_ref)
+        out_str += "Time: " + str(jd2Date(self.jdt_ref, dt_obj=True)) + " UTC\n"
 
         out_str += "\n\n"
 
@@ -4427,8 +4434,10 @@ class Trajectory(object):
         out_str += "\n"
 
         if self.orbit is not None:
-            out_str += "Reference point on the trajectory:\n"
-            out_str += "  Time: " + str(jd2Date(self.orbit.jd_ref, dt_obj=True)) + " UTC\n"
+            out_str += "Reference point on the trajectory (epoch of the state vector, radiant and orbit):\n"
+            out_str += "  Time: " + str(jd2Date(self.orbit.jd_ref, dt_obj=True)) \
+                + " UTC (JD {:20.12f}, t = {:.6f} s from the reference JD)\n".format(self.orbit.jd_ref, 
+                    86400*(self.orbit.jd_ref - self.jdt_ref))
             out_str += "  Lat      = {:s} deg\n".format(valueFormat("{:>11.6f}", self.orbit.lat_ref, \
                 '{:6.4f}', uncertainties, 'lat_ref', deg=True))
             out_str += "  Lon      = {:s} deg\n".format(valueFormat("{:>11.6f}", self.orbit.lon_ref, \
@@ -6151,9 +6160,10 @@ class Trajectory(object):
         # If the first time is not 0, normalize times so that the earliest time is 0
         if t0 != 0.0:
 
-            # Offset all times by t0
+            # Offset all times by t0, keeping the absolute time of each point unchanged
             for obs in self.observations:
                 obs.time_data -= t0
+                obs.jdt_ref += t0/86400.0
 
 
             # Recompute the reference JD to corresponds with t0
