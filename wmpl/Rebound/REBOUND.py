@@ -13,7 +13,6 @@ import sys
 import json
 import time
 import warnings
-import platform
 import concurrent.futures
 from types import SimpleNamespace
 
@@ -186,19 +185,19 @@ def _checkReboundxAttached(sim):
     """
 
     if not sim.extras:
-        if platform.machine() != 'aarch64' and sys.platform != 'win32':
-            raise RuntimeError(
-                "REBOUNDx did not attach to the REBOUND simulation. This happens when reboundx was compiled "
-                "against a different REBOUND version than the installed one (rebound {:s}, reboundx {:s}). "
-                "Recompile reboundx against the installed REBOUND with:\n"
-                "  pip install --force-reinstall --no-deps --no-build-isolation --no-binary reboundx "
-                "reboundx\n"
-                "This installs the latest reboundx, which needs rebound 5 or newer, so update rebound "
-                "first. To keep this rebound, pin the reboundx released with it instead by appending "
-                "'==<version>' (e.g. reboundx 4.3.0 for rebound 4.3.0); a newer reboundx does not compile "
-                "against an older rebound.".format(rb.__version__, reboundx.__version__))
-        else:
-            raise RuntimeError('REBOUNDx not avaialble for this platform')
+        raise RuntimeError(
+            "REBOUNDx did not attach to the REBOUND simulation. This happens when reboundx was compiled "
+            "against a different REBOUND version than the installed one (rebound {:s}, reboundx {:s}). "
+            "Recompile reboundx against the installed REBOUND with:\n"
+            "  pip install --force-reinstall --no-deps --no-build-isolation --no-binary reboundx "
+            "reboundx\n"
+            "This installs the latest reboundx, which needs rebound 5 or newer, so update rebound "
+            "first. To keep this rebound, pin the reboundx released with it instead by appending "
+            "'==<version>' (e.g. reboundx 4.3.0 for rebound 4.3.0); a newer reboundx does not compile "
+            "against an older rebound. If reboundx cannot be built on this platform at all, uninstall it "
+            "(pip uninstall reboundx): wmpl then reports REBOUND as unavailable instead of failing "
+            "here.".format(rb.__version__, reboundx.__version__))
+
 
 # Hill-sphere radii in AU used for close-encounter detection.
 #

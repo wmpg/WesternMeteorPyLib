@@ -161,6 +161,7 @@ def testUnattachedReboundxIsReportedWithTheFix(realReb):
     message = str(exc_info.value)
     assert "did not attach" in message
     assert "--no-build-isolation" in message, "the error must carry the command that repairs it"
+    assert "pip uninstall reboundx" in message, "and the way out where reboundx cannot be built"
 
 
 ### Installed REBOUND/REBOUNDx ###
