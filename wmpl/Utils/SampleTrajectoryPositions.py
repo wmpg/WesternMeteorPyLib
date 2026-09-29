@@ -86,7 +86,7 @@ class TrajectorySamples(object):
         self.elev_norot.append(elev_norot)
 
 
-def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False):
+def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False, by_time=False):
     """ Given the trajectory, beginning, end and step in km, this function will interpolate the 
         fireball height vs. distance and return the coordinates of sampled positions and compute the azimuth
         and elevation for every point.
@@ -94,15 +94,19 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False):
     Arguments:
 
 
+    Keyword arguments:
+        by_time: [bool] If True, beg_ht, end_ht and sample_step are times (s, relative to traj.jdt_ref)
+            instead of heights (m), and the samples are taken at those times.
+
     Return:
     """
 
 
     # Set begin and end heights, if not given
-    if beg_ht < 0:
+    if (beg_ht < 0) and not by_time:
         beg_ht = traj.rbeg_ele
 
-    if end_ht < 0:
+    if (end_ht < 0) and not by_time:
         end_ht = traj.rend_ele
 
 
@@ -159,6 +163,14 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False):
     ht_arr = np.linspace(np.min(height_data), np.max(height_data), 1000)
     time_arr = ht_vs_time_interp(ht_arr)
 
+    # If sampling by time, invert the time vs. height fit to get the height at every sampled time. Times
+    #   after the end of the fireball are extrapolated with the fixed velocity of 3 km/s
+    if by_time:
+        time_array = np.arange(beg_ht, end_ht + sample_step/2, sample_step)
+        t_end = ht_vs_time_interp(traj.rend_ele)
+        height_array = np.where(time_array > t_end, traj.rend_ele - 3000*(time_array - t_end),
+            scipy.interpolate.interp1d(time_arr, ht_arr, fill_value='extrapolate')(time_array))
+
     if show_plots:
         plt.plot(time_arr, ht_arr/1000, label='Interpolation', zorder=3)
 
@@ -201,7 +213,7 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False):
     #   as well as the point-to-point azimuth and elevation
     prev_eci = None
     good_data = False
-    for ht, radius in zip(height_array, radius_array):
+    for i, (ht, radius) in enumerate(zip(height_array, radius_array)):
 
         # If the height is lower than the eng height, use a fixed velocity of 3 km/s
 
@@ -214,6 +226,10 @@ def sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=False):
             # Estimate the fireball time at the given height using interpolated values
             t_est = ht_vs_time_interp(ht)
             time_marker = " "
+
+        # When sampling by time, keep the exact requested time
+        if by_time:
+            t_est = time_array[i]
 
         # Compute the intersection between the trajectory line and the sphere of radius at the given height
         intersections = lineAndSphereIntersections(np.array([0, 0, 0]), radius, traj.state_vect_mini, 
@@ -309,6 +325,8 @@ if __name__ == "__main__":
     arg_parser.add_argument('end_height', type=float, help='Sampling end height (km). -1 to use the real end height')
     arg_parser.add_argument('height_step', type=float, help='Sampling step (km).')
 
+    arg_parser.add_argument('-t', '--time', action='store_true', help='Sample by time instead of height. The begin, end and step are then given in seconds.')
+
 
 
     # Parse the command line arguments
@@ -318,10 +336,11 @@ if __name__ == "__main__":
     # Unpack the file name and the directory path from the given arguments
     dir_path, file_name = os.path.split(cml_args.traj_pickle_file)
 
-    # Convert units to meters
-    beg_ht = 1000*cml_args.beg_height
-    end_ht = 1000*cml_args.end_height
-    sample_step = 1000*cml_args.height_step
+    # Convert units to meters (times are kept in seconds)
+    unit = 1 if cml_args.time else 1000
+    beg_ht = unit*cml_args.beg_height
+    end_ht = unit*cml_args.end_height
+    sample_step = unit*cml_args.height_step
 
     ############################
 
@@ -350,7 +369,7 @@ if __name__ == "__main__":
 
 
     # Run trajectory sampling
-    sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=True)
+    sampleTrajectory(traj, beg_ht, end_ht, sample_step, show_plots=True, by_time=cml_args.time)
 
 
     # # Test the line and sphere intersection
