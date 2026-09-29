@@ -5069,6 +5069,13 @@ if __name__ == "__main__":
         help="1-sigma uncertainty on the bulk density, in kg/m^3, folded into the mass error "
         "estimate when --errors is set. Default: the density is treated as exactly known.")
 
+    arg_parser.add_argument('-x', '--hideplots', action="store_true", \
+        help="Don't show the plots on the screen. Combine with --saveplots to only write them to disk.")
+
+    arg_parser.add_argument('-s', '--saveplots', action="store_true", \
+        help="Save the plots as PNGs to the trajectory pickle directory, named after the trajectory "
+        "timestamp (e.g. 20191023_091225_alpha_beta_fit.png).")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -5080,6 +5087,20 @@ if __name__ == "__main__":
 
         # Load the trajectory pickle
         traj = loadPickle(*os.path.split(cml_args.traj_path))
+
+        # Plots are saved next to the trajectory pickle
+        dir_path = os.path.dirname(cml_args.traj_path)
+
+        def _finishPlot(fig, suffix):
+            """ Save the figure (if --saveplots) and show it (unless --hideplots). """
+
+            if cml_args.saveplots:
+                fig.savefig(os.path.join(dir_path, traj.file_name + "_" + suffix + ".png"), dpi=300)
+
+            if cml_args.hideplots:
+                plt.close(fig)
+            else:
+                plt.show()
 
         # Dictionary for storing time, height, and velocity data per station
         ht_data_dict = {}
@@ -5223,11 +5244,11 @@ if __name__ == "__main__":
                 if --errors produced a (finite) estimate for it, plain otherwise.
             """
             if (mass_err is not None) and np.isfinite(mass_err[key + '_std_rel']):
-                print("    {:s} = {:.2e} kg (+/-{:.1%})  [{:.3g}% CI: {:.2e} - {:.2e}]".format(
+                print("    {:s} = {:.3e} kg (+/-{:.1%})  [{:.3g}% CI: {:.3e} - {:.3e}]".format(
                     label, mass, mass_err[key + '_std_rel'], mass_err['ci'],
                     mass_err[key + '_ci_wald_lower'], mass_err[key + '_ci_wald_upper']))
             else:
-                print("    {:s} = {:.2e} kg".format(label, mass))
+                print("    {:s} = {:.3e} kg".format(label, mass))
 
         print("  mu = 0:")
         _printMass("Initial", m_init_mu0, mass_err_mu0, 'm_init')
@@ -5380,7 +5401,7 @@ if __name__ == "__main__":
 
         plt.subplots_adjust(wspace=0)
 
-        plt.show()
+        _finishPlot(fig, "alpha_beta_fit")
 
 
 
@@ -5391,9 +5412,13 @@ if __name__ == "__main__":
         #   block used to have, which didn't track --dens/--ga at all
         #   With --errors, fit_errors carries the (ln alpha, ln beta) covariance, so an
         #   uncertainty ellipse is drawn around the point too (fit_errors is None otherwise)
+        #   The axes are passed in so that the function doesn't call plt.show() itself
+        fig_surv, ax_surv = plt.subplots(figsize=(7.5, 6))
         plotAlphaBetaSurvivalDiagram(alpha, beta, slope, \
             mass_thresholds=(1.0, 0.05), dens=cml_args.dens, shape_coeff=cml_args.ga, gamma=1.0, \
-            errors=fit_errors)
+            errors=fit_errors, axes=ax_surv)
+
+        _finishPlot(fig_surv, "alpha_beta_survival")
 
 
 
@@ -5409,7 +5434,20 @@ if __name__ == "__main__":
         # Compute the dynamic pressure with the lag fit
         dyn_pressure_lag = dynamicPressure(lat_mean, lon_mean, ht_data_rescaled, traj.jdt_ref, 
             vel_data_smooth)
-        
+
+        def findPeakDynPressure(dyn_pressure, ht_arr):
+            """Find the peak dynamic pressure. """
+            peak_dyn_pressure_index = np.argmax(dyn_pressure)
+            peak_dyn_pressure = dyn_pressure[peak_dyn_pressure_index]/1e6
+            peak_dyn_pressure_ht = ht_arr[peak_dyn_pressure_index]/1000
+            return peak_dyn_pressure_index, peak_dyn_pressure, peak_dyn_pressure_ht
+
+        # Find the alpha-beta and the lag fit dyn pressure peaks
+        peak_dyn_pressure_index, peak_dyn_pressure, peak_dyn_pressure_ht = findPeakDynPressure( \
+            dyn_pressure, ht_arr)
+        peak_dyn_pressure_index_lag, peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag = \
+            findPeakDynPressure(dyn_pressure_lag, ht_data_rescaled)
+
 
         # Print height, model velocity (from alpha-beta and lag), and the dynamic pressure computed from both
         print()
@@ -5441,26 +5479,27 @@ if __name__ == "__main__":
                 )
                 )
 
+        print()
+        print("Peak dynamic pressure:")
+        print("----------------------")
+        print("AlphaBeta model = {:6.3f} MPa at {:6.2f} km (v = {:5.2f} km/s)".format(
+            peak_dyn_pressure, peak_dyn_pressure_ht, vel_arr[peak_dyn_pressure_index]/1000))
+        print("Lag fit         = {:6.3f} MPa at {:6.2f} km (v = {:5.2f} km/s)".format(
+            peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag,
+            vel_data_smooth[peak_dyn_pressure_index_lag]/1000))
+        print("----------------------")
+
 
         # Plot dyn pressure
+        fig_dyn = plt.figure()
         plt.plot(dyn_pressure/1e6, ht_arr/1000, color='k', label='AlphaBeta')
         plt.plot(dyn_pressure_lag/1e6, ht_data_rescaled/1000, color='r', label='Lag fit')
 
-        def findPeakDynPressure(dyn_pressure, ht_arr):
-            """Find the peak dynamic pressure. """
-            peak_dyn_pressure_index = np.argmax(dyn_pressure)
-            peak_dyn_pressure = dyn_pressure[peak_dyn_pressure_index]/1e6
-            peak_dyn_pressure_ht = ht_arr[peak_dyn_pressure_index]/1000
-            return peak_dyn_pressure, peak_dyn_pressure_ht
-
-        # Compute and mark alpha-beta dyn pressure peak on the graph
-        peak_dyn_pressure, peak_dyn_pressure_ht = findPeakDynPressure(dyn_pressure, ht_arr)
+        # Mark alpha-beta dyn pressure peak on the graph
         plt.scatter(peak_dyn_pressure, peak_dyn_pressure_ht, c='k', \
             label="Peak P = {:.2f} MPa\nHt = {:.2f} km".format(peak_dyn_pressure, peak_dyn_pressure_ht))
 
-        # Compute and mark lag fit dyn pressure peak on the graph
-        peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag = findPeakDynPressure(dyn_pressure_lag, 
-            ht_data_rescaled)
+        # Mark lag fit dyn pressure peak on the graph
         plt.scatter(peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag, c='r', \
             label="Peak P = {:.2f} MPa\nHt = {:.2f} km".format(peak_dyn_pressure_lag, peak_dyn_pressure_ht_lag))
 
@@ -5470,7 +5509,7 @@ if __name__ == "__main__":
         plt.ylabel("Height (km)")
         plt.xlabel("Dynamic pressure (MPa)")
 
-        plt.show()
+        _finishPlot(fig_dyn, "alpha_beta_dyn_pressure")
 
 
         ### ###
@@ -5478,6 +5517,8 @@ if __name__ == "__main__":
 
         ### Plot magnitude vs dynamic pressure ###
 
+        fig_mag = plt.figure()
+        mag_plotted = False
         for obs in traj.observations:
 
             if obs.absolute_magnitudes is not None:
@@ -5495,17 +5536,23 @@ if __name__ == "__main__":
 
                     # Plot the magnitude
                     plt.plot(dyn_pres_station[mag_filter]/1e6, obs.absolute_magnitudes[mag_filter], label=obs.station_id)
+                    mag_plotted = True
 
 
 
+        # Skip the plot if no station had magnitudes
+        if mag_plotted:
 
-        plt.xlabel("Dynamic pressure (MPa)")
-        plt.ylabel("Absolute magnitude")
-        plt.gca().invert_yaxis()
+            plt.xlabel("Dynamic pressure (MPa)")
+            plt.ylabel("Absolute magnitude")
+            plt.gca().invert_yaxis()
 
-        plt.legend()
+            plt.legend()
 
-        plt.show()
+            _finishPlot(fig_mag, "alpha_beta_mag_vs_dyn_pressure")
+
+        else:
+            plt.close(fig_mag)
 
 
 
