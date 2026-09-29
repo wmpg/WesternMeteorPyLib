@@ -76,7 +76,7 @@ candidates in memory and goes straight on to solving them, so `candidates/` stay
 single-stage modes hand work to the next stage through the file system, which is what makes the
 stages separable across processes and servers.
 
-**An unrecognized value is treated as a full run.** `getMcModeStr` only knows 0, 1, 2, 3, 4, 5 and
+**An unrecognised value is treated as a full run.** `getMcModeStr` only knows 0, 1, 2, 3, 4, 5 and
 7, and anything else falls through to the full pipeline with a log suffix of `MIXED`.
 
 ## What it reads
@@ -428,7 +428,7 @@ JSON file is then never read again and is left in place as a historical record.
 ### Historic reruns
 
 Because only the window was copied, a run over data from before the cutover finds no paired
-observations and no failed trajectories, and reanalyzes the raw data from scratch. To avoid that,
+observations and no failed trajectories, and reanalyses the raw data from scratch. To avoid that,
 backfill the databases for the period you are about to process:
 
 ```
@@ -532,7 +532,7 @@ that is not yet empty, since a node is only topped up once it has drained.
 **`candidates/` stays empty although the correlator is running.** The combined modes keep
 intermediate results in memory. Only `--mcmode 4`, `1` and `2` individually write the handover files.
 
-**A `--mcmode` value behaves like a full run.** Only 0, 1, 2, 3, 4, 5 and 7 are recognized; anything
+**A `--mcmode` value behaves like a full run.** Only 0, 1, 2, 3, 4, 5 and 7 are recognised; anything
 else falls through to the full pipeline and logs its stage as `MIXED`.
 
 **A historic rerun resolves everything from scratch.** The migration only copied the lookback

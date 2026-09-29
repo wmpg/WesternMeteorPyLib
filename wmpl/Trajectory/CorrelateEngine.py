@@ -1700,7 +1700,7 @@ class TrajectoryCorrelator(object):
                         log.info('Selecting best {} stations'.format(self.traj_constraints.max_stations))
 
                         # pickBestStations selects the best and marks the others "ignored". This keeps
-                        # them in the dataset without using them in the solver. Otherwise if they're not marked as used
+                        # them in the dataset without using them in the solver. Otherwise if they're not markeed as used
                         # on the next pass through the solver they will be picked up as a different trajectory.
                         matched_observations = pickBestStations(matched_observations, self.traj_constraints.max_stations)
 

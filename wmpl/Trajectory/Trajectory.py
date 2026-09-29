@@ -2456,7 +2456,7 @@ class Trajectory(object):
     def log(self):
         """ The logger this trajectory writes to, resolved from its name.
 
-        A logger is not picklable, deep-copyable or JSON-serializable, and a Trajectory is all three,
+        A logger is not picklable, deep-copyable or JSON-serialisable, and a Trajectory is all three,
         so only the name is stored on the instance. Trajectories restored from pickles written before
         the logger existed have no name either, and fall back to this module's logger.
 
@@ -2540,7 +2540,7 @@ class Trajectory(object):
 
         # Use the caller's logger if one was given, otherwise this module's own. Only its name is
         #   stored, and self.log resolves it (see the property below): the logger itself must not go
-        #   into the instance dictionary, because it is neither JSON-serializable nor deep-copyable,
+        #   into the instance dictionary, because it is neither JSON-serialisable nor deep-copyable,
         #   and toJson() converts that dictionary wholesale. Storing the name rather than rebinding
         #   the module global also means one Trajectory cannot redirect the logging of every other
         #   Trajectory in the process.

@@ -96,7 +96,7 @@ def testParentLoggerOutputDoesNotReachTheModuleLogger():
 
 
 def testTheLoggerIsNotStoredOnTheInstance():
-    """ The logger is resolved from a name, so a trajectory stays serializable.
+    """ The logger is resolved from a name, so a trajectory stays serialisable.
 
     A Logger cannot be JSON-encoded and toJson() converts the whole instance dictionary, so holding
     the logger itself there makes toJson raise "cannot pickle '_thread.RLock' object" for every
