@@ -66,7 +66,7 @@ def dynamicPressure(lat, lon, height, jd, velocity, gamma=1.0):
     return dyn_pressure
 
 
-def dynamicMass(bulk_density, lat, lon, height, jd, velocity, decel, gamma=1.0, shape_factor=1.21):
+def dynamicMass(bulk_density, lat, lon, height, jd, velocity, decel, gamma=1.0, shape_factor=1.21, atm_dens=None):
     """ Calculate dynamic mass at the given point on meteor's trajectory. 
     
     Either a single set of values can be given (i.e. every argument is a float number), or all arguments 
@@ -88,6 +88,8 @@ def dynamicMass(bulk_density, lat, lon, height, jd, velocity, decel, gamma=1.0, 
             - hemisphere  = 1.92
             - cube        = 1.0
             - brick 2:3:5 = 1.55
+        atm_dens: [float] Air density at the point in kg/m^3. None by default, in which case it is computed
+            from the atmosphere model at the given location and time.
 
     Return:
         dyn_mass: [float] Dynamic mass in kg.
@@ -95,8 +97,9 @@ def dynamicMass(bulk_density, lat, lon, height, jd, velocity, decel, gamma=1.0, 
 
     """
 
-    # Calculate the atmosphere density at the given point
-    atm_dens = getAtmDensity_vect(lat, lon, height, jd)
+    # Calculate the atmosphere density at the given point, unless it was given
+    if atm_dens is None:
+        atm_dens = getAtmDensity_vect(lat, lon, height, jd)
 
     # Calculate the dynamic mass
     dyn_mass = (1.0/(bulk_density**2))*((gamma*shape_factor*(velocity**2)*atm_dens)/decel)**3

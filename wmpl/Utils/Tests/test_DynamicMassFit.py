@@ -23,7 +23,10 @@ import pytest
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.TrajConversions import derotatedRadiantAltAz, cartesian2Geo
 from wmpl.Utils.SampleTrajectoryPositions import sampleTrajectory
-from wmpl.Utils.DynamicMassFit import pointOnTrajectory, _robust_linear_fit, fitVelocity, runFragSim
+from wmpl.Utils.DynamicMassFit import pointOnTrajectory, _robust_linear_fit, fitVelocity, runFragSim, \
+    SIM_HT_MIN
+from wmpl.Utils.AtmosphereProfile import AtmosphereProfile
+from wmpl.Utils.Physics import dynamicMass
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly
 from wmpl.Utils.Math import lineFunc
 
@@ -203,6 +206,41 @@ def testFragmentSimulationFitsTheAtmosphereAtTheGivenLocation(traj):
     dens_co = fitAtmPoly(traj.rend_lat, traj.rend_lon, sr.const.h_kill, 180000, traj.jdt_ref)
 
     assert sr.const.dens_co == pytest.approx(dens_co, rel=1e-12)
+
+
+def testFragmentSimulationUsesTheAtmosphereProfile(traj, tmp_path):
+    """ With an atmosphere profile, the simulation's density polynomial is the profile's own fit over the
+        heights the simulation descends through.
+    """
+
+    heights = np.arange(0.0, 60100.0, 100.0)
+    path = str(tmp_path/"profile.csv")
+    with open(path, 'w') as f:
+        f.write("height,temperature,pressure,relative_humidity,wind_horizontal,wind_direction,wind_east,"
+            "wind_north,wind_up,density\n")
+        for ht in heights:
+            f.write("{:.1f},250,1000,1,10,270,10,0,0,{:.10e}\n".format(ht, 1.3*np.exp(-ht/6900.0)))
+
+    prof = AtmosphereProfile(path)
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        sr = runFragSim(0.1, 3500, np.degrees(traj.rend_lat), np.degrees(traj.rend_lon), traj.jdt_ref, 30000, \
+            5000, 45, 0.55, atm_profile=prof)
+
+    assert sr.const.dens_co == pytest.approx(prof.fitPoly(SIM_HT_MIN, 30000)[0], rel=1e-12)
+
+
+### The dynamic mass ###
+
+def testDynamicMassUsesTheGivenAirDensity():
+    """ A given air density replaces the atmosphere model, and the mass goes as its cube. """
+
+    args = (3500.0, 0.9, -0.03, 30000.0, 2459274.4, 6300.0, 3200.0)
+
+    mass = dynamicMass(*args, gamma=1.0, shape_factor=0.55, atm_dens=0.02)
+
+    assert mass == pytest.approx((0.55*6300.0**2*0.02/3200.0)**3/3500.0**2, rel=1e-12)
+    assert dynamicMass(*args, gamma=1.0, shape_factor=0.55, atm_dens=0.04) == pytest.approx(8*mass, rel=1e-12)
 
 
 if __name__ == "__main__":

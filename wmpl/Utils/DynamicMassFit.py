@@ -13,19 +13,36 @@ from wmpl.Utils.Physics import dynamicMass
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PyDomainParallelizer import domainParallelizer
 from wmpl.Utils.DynamicMassFitExport import ejectionState, buildDynMassFitOutput, saveDynMassFitPickle
+from wmpl.Utils.AtmosphereProfile import AtmosphereProfile, PROFILE_TYPES
+
+
+# Lowest height of the fragment simulation (m)
+SIM_HT_MIN = 15000
+
+
+def _airDensity(atm_profile, height):
+    """ Air density (kg/m^3) at the given height (m) from the atmosphere profile, or None if there is no
+        profile, in which case dynamicMass() computes it from the MSIS model.
+    """
+
+    if atm_profile is None:
+        return None
+
+    return atm_profile.density(height)
 from wmpl.MetSim.MetSimErosion import Constants, runSimulation, G0
 from wmpl.MetSim.GUI import SimulationResults
 from wmpl.Trajectory.Trajectory import applyGravityDrop
 
 
-def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a, v_kill=3000):
+def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a, v_kill=3000, \
+    atm_profile=None):
 
     # Init simulation constants
     const = Constants()
 
 
     # Set minimum simulation height
-    const.h_kill = 15000 # m
+    const.h_kill = SIM_HT_MIN
 
     # Set minimum simulation speed, where ablation is taken to stop (m/s)
     const.v_kill = v_kill
@@ -63,11 +80,18 @@ def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a
     
 
 
-    # Fit the atmosphere density polynomial using NRLMSISE. The location is given in degrees, while
-    #   fitAtmPoly() takes it in radians
+    # Fit the atmosphere density polynomial, to the MSIS model or to the given atmosphere profile
     ht_min = const.h_kill
     ht_max = 180000
-    const.dens_co = fitAtmPoly(np.radians(lat), np.radians(lon), ht_min, ht_max, jd)
+    if atm_profile is None:
+
+        # The location is given in degrees, while fitAtmPoly() takes it in radians
+        const.dens_co = fitAtmPoly(np.radians(lat), np.radians(lon), ht_min, ht_max, jd)
+
+    else:
+
+        # The simulation only descends from its starting height, so the profile only has to cover that
+        const.dens_co, _ = atm_profile.fitPoly(ht_min, ht_beg)
 
     # Run the simulation
     frag_main, results_list, wake_results = runSimulation(const)
@@ -218,7 +242,7 @@ def pointOnTrajectory(traj, length, t):
     return P
 
 
-def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a, v_kill=3000):
+def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a, v_kill=3000, atm_profile=None):
     """ Propagate a fragment of the given dynamic mass from the evaluation point down to the speed where
         ablation is taken to stop (3 km/s by default) with the single-body ablation model, and compute where
         and in which direction it ends.
@@ -239,6 +263,8 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a, v_kill=30
 
     Keyword arguments:
         v_kill: [float] Speed at which the simulation stops (m/s). 3000 by default.
+        atm_profile: [AtmosphereProfile] Atmosphere for the simulation. None by default, which uses the MSIS
+            model.
 
     Return:
         (sr, final_mass, final_lat, final_lon, final_ele, final_azim, final_elev, final_time): [tuple]
@@ -283,7 +309,8 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a, v_kill=30
     
 
     # Run the simulation until ablation stops
-    sr = runFragSim(dyn_mass, density, lat, lon, jd, hend, vend, entry_angle, gamma_a, v_kill=v_kill)
+    sr = runFragSim(dyn_mass, density, lat, lon, jd, hend, vend, entry_angle, gamma_a, v_kill=v_kill, \
+        atm_profile=atm_profile)
 
     # Extract the final height
     final_ht = 0
@@ -549,7 +576,7 @@ def findMCUncertaintiesPickle(traj_path):
 
 
 def dynMassFromTraj(traj, ht_max, ht_min, eval_point, bulk_density, gamma_a, max_vel, mass_max, \
-    sigma_clip=3.0):
+    sigma_clip=3.0, atm_profile=None):
     """ Compute the dynamic mass at the evaluation point for a single trajectory solution, following the
         same steps as the dynamic mass fit in __main__ (velocity vs. time fit in the height window, then
         dynamic mass at the evaluation point). Used for the individual Monte Carlo trajectory realizations.
@@ -564,6 +591,7 @@ def dynMassFromTraj(traj, ht_max, ht_min, eval_point, bulk_density, gamma_a, max
         max_vel: [float] Maximum velocity to consider (m/s).
         mass_max: [float] Maximum dynamic mass allowed (kg), used to clip runaway values.
         sigma_clip: [float] Outlier rejection threshold for the velocity fit (see fitVelocity()).
+        atm_profile: [AtmosphereProfile] Atmosphere for the dynamic mass. None uses the MSIS model.
 
     Return:
         [dict or None] None if there isn't enough data in the height window to fit a line. Otherwise a dict
@@ -627,7 +655,7 @@ def dynMassFromTraj(traj, ht_max, ht_min, eval_point, bulk_density, gamma_a, max
         decel = 0
 
     dyn_mass = dynamicMass(bulk_density, traj.rend_lat, traj.rend_lon, ht_eval, traj.jdt_ref, vel_eval, \
-        decel, gamma=1.0, shape_factor=gamma_a)
+        decel, gamma=1.0, shape_factor=gamma_a, atm_dens=_airDensity(atm_profile, ht_eval))
     dyn_mass = np.clip(dyn_mass, 0, mass_max)
 
     return {
@@ -642,7 +670,7 @@ MC_FINAL_KEYS = ['final_mass', 'final_lat', 'final_lon', 'final_ele', 'final_azi
 
 
 def _mcRealization(traj_mc, traj_index, seed, label, ht_max, ht_min, eval_point, bulk_density, gamma_a, max_vel, \
-    mass_max, sigma_clip, run_final_sim, v_kill, v_kill_sigma, density_sigma):
+    mass_max, sigma_clip, run_final_sim, v_kill, v_kill_sigma, density_sigma, atm_profile):
     """ Process one Monte Carlo trajectory realization for runMonteCarloDynMass(). It is a module-level
         function so it can be sent to the worker processes.
 
@@ -652,7 +680,7 @@ def _mcRealization(traj_mc, traj_index, seed, label, ht_max, ht_min, eval_point,
         seed: [int] Random seed for the draws of this realization.
         label: [str] Realization label used in the printouts.
         ht_max, ht_min, eval_point, bulk_density, gamma_a, max_vel, mass_max, sigma_clip, run_final_sim,
-            v_kill, v_kill_sigma, density_sigma: See runMonteCarloDynMass().
+            v_kill, v_kill_sigma, density_sigma, atm_profile: See runMonteCarloDynMass().
 
     Return:
         [dict or None] The values of this realization (see runMonteCarloDynMass()), or None if no velocity fit
@@ -662,7 +690,7 @@ def _mcRealization(traj_mc, traj_index, seed, label, ht_max, ht_min, eval_point,
     traj_mc = _ensureTrajDefaults(traj_mc)
 
     fit_res = dynMassFromTraj(traj_mc, ht_max, ht_min, eval_point, bulk_density, gamma_a, max_vel, \
-        mass_max, sigma_clip=sigma_clip)
+        mass_max, sigma_clip=sigma_clip, atm_profile=atm_profile)
 
     if fit_res is None:
         print("MC realization {:s} skipped: no valid velocity fit or evaluation height in the height "
@@ -684,7 +712,8 @@ def _mcRealization(traj_mc, traj_index, seed, label, ht_max, ht_min, eval_point,
             density = rng.normal(bulk_density, density_sigma)
 
     dyn_mass = dynamicMass(density, traj_mc.rend_lat, traj_mc.rend_lon, fit_res['ht_eval'], \
-        traj_mc.jdt_ref, vel_eval, decel, gamma=1.0, shape_factor=gamma_a)
+        traj_mc.jdt_ref, vel_eval, decel, gamma=1.0, shape_factor=gamma_a, \
+        atm_dens=_airDensity(atm_profile, fit_res['ht_eval']))
     dyn_mass = np.clip(dyn_mass, 0, mass_max)
 
     res = {
@@ -716,7 +745,7 @@ def _mcRealization(traj_mc, traj_index, seed, label, ht_max, ht_min, eval_point,
         try:
             sr_mc, final_mass, final_lat, final_lon, final_ele, final_azim, final_elev, final_time = \
                 computeFragEndParams(traj_mc, dyn_mass, density, fit_res['ht_eval'], vel_eval, gamma_a, \
-                    v_kill=v_kill)
+                    v_kill=v_kill, atm_profile=atm_profile)
 
             final_decel = (sr_mc.main_vel_arr[-1] - sr_mc.main_vel_arr[-2]) \
                 /(sr_mc.time_arr[-1] - sr_mc.time_arr[-2])
@@ -735,7 +764,7 @@ def _mcRealization(traj_mc, traj_index, seed, label, ht_max, ht_min, eval_point,
 
 def runMonteCarloDynMass(mc_traj_list, ht_max, ht_min, eval_point, bulk_density, gamma_a, max_vel, \
     mass_max, sigma_clip, n_samples=None, run_final_sim=True, rng_seed=None, cores=None, v_kill=3000, \
-    v_kill_sigma=0, density_sigma=0):
+    v_kill_sigma=0, density_sigma=0, atm_profile=None):
     """ Propagate the uncertainties through the dynamic mass fit (and, optionally, through the final fragment
         simulation down to the speed where ablation stops) over the WMPL trajectory solver's Monte Carlo
         realizations.
@@ -766,6 +795,8 @@ def runMonteCarloDynMass(mc_traj_list, ht_max, ht_min, eval_point, bulk_density,
         density_sigma: [float] Standard deviation of the bulk density (kg/m^3). If above 0, every realization
             draws its own density from a normal distribution centred on bulk_density, redrawing non-positive
             values, and uses it for both its dynamic mass and its final simulation.
+        atm_profile: [AtmosphereProfile] Atmosphere for the dynamic mass and the final simulation. None uses
+            the MSIS model.
 
     Return:
         results: [dict of ndarray] One entry per successfully fitted realization:
@@ -798,7 +829,7 @@ def runMonteCarloDynMass(mc_traj_list, ht_max, ht_min, eval_point, bulk_density,
 
     domain = [[traj_mc, traj_index, seed, "{:d}/{:d}".format(i + 1, n_total), ht_max, ht_min, eval_point, bulk_density, \
         gamma_a, max_vel, mass_max, sigma_clip, run_final_sim, v_kill, v_kill_sigma, \
-        density_sigma] for i, (traj_mc, traj_index, seed) \
+        density_sigma, atm_profile] for i, (traj_mc, traj_index, seed) \
         in enumerate(zip(traj_samples, traj_indices, seeds))]
 
     # Do not start more processes than there are realizations
@@ -928,6 +959,17 @@ if __name__ == "__main__":
         'draws its own kill speed from a normal distribution centred on --vkill (non-positive draws are '
         'redrawn). Default is 0, i.e. a fixed kill speed.')
 
+    arg_parser.add_argument('--atm_profile', metavar='PATH', type=str, default=None, \
+        help='Atmosphere profile file to take the air density from, for both the dynamic mass and the final '
+        'simulation, instead of the MSIS model. It is read and interpolated as OpenDarkflight does, so a dark '
+        'flight run with the same file continues in the same atmosphere. It has to cover the heights from the '
+        'top of the fit window down to 15 km. See --atm_profile_type for the formats.')
+
+    arg_parser.add_argument('--atm_profile_type', metavar='TYPE', type=str, default='wrf', \
+        choices=PROFILE_TYPES, \
+        help="Format of the --atm_profile file, as in OpenDarkflight: 'wrf' (default; the CSV every model "
+        "profile is written in), 'wyoming' (University of Wyoming radiosonde) or 'supracenter'.")
+
     arg_parser.add_argument('--save_pickle', metavar='PATH', nargs='?', const='', default=None, \
         help='Save the results to a pickle made only of built-in Python types, readable without wmpl, with '
         'the ejection states for a dark flight code (see wmpl.Utils.DynamicMassFitExport). If no path is '
@@ -992,6 +1034,12 @@ if __name__ == "__main__":
 
     if ht_max < ht_min:
         raise ValueError("The min height has to be lower than the max height! ht_max = {:.2f} km, ht_min = {:.2f} km".format(ht_max, ht_min))
+
+    # The atmosphere profile has to cover the fit window down to the bottom of the simulation
+    atm_profile = None
+    if cml_args.atm_profile is not None:
+        atm_profile = AtmosphereProfile(cml_args.atm_profile, profile_type=cml_args.atm_profile_type)
+        atm_profile.checkCoverage(SIM_HT_MIN, 1000*ht_max)
 
 
     #################
@@ -1140,11 +1188,11 @@ if __name__ == "__main__":
 
     # Compute the dynamic mass (and +/- 2 sigma)
     dyn_mass = dynamicMass(bulk_density, traj.rend_lat, traj.rend_lon, ht_eval, traj.jdt_ref, \
-        vel_eval, decel, gamma=1.0, shape_factor=gamma_a)
+        vel_eval, decel, gamma=1.0, shape_factor=gamma_a, atm_dens=_airDensity(atm_profile, ht_eval))
     dyn_mass_hi = dynamicMass(bulk_density, traj.rend_lat, traj.rend_lon, ht_eval, traj.jdt_ref, \
-        vel_eval, decel_lo, gamma=1.0, shape_factor=gamma_a)
+        vel_eval, decel_lo, gamma=1.0, shape_factor=gamma_a, atm_dens=_airDensity(atm_profile, ht_eval))
     dyn_mass_lo = dynamicMass(bulk_density, traj.rend_lat, traj.rend_lon, ht_eval, traj.jdt_ref, \
-        vel_eval, decel_hi, gamma=1.0, shape_factor=gamma_a)
+        vel_eval, decel_hi, gamma=1.0, shape_factor=gamma_a, atm_dens=_airDensity(atm_profile, ht_eval))
     
 
     # Limit the dynamic mass to a 0 - maxmass range
@@ -1178,7 +1226,8 @@ if __name__ == "__main__":
         print("  init mass = {:.3f} kg".format(dyn_mass))
         print()
         final_sr, final_mass, final_lat, final_lon, final_ele, final_azim, final_elev, final_time = \
-            computeFragEndParams(traj, dyn_mass, bulk_density, ht_eval, vel_eval, gamma_a, v_kill=v_kill)
+            computeFragEndParams(traj, dyn_mass, bulk_density, ht_eval, vel_eval, gamma_a, v_kill=v_kill, \
+                atm_profile=atm_profile)
 
         print()
         print("Running simulation down to {:g} km/s (+2 sigma mass)...".format(v_kill/1000))
@@ -1188,7 +1237,8 @@ if __name__ == "__main__":
         print()
         final_sr_hi, final_mass_hi, final_lat_hi, final_lon_hi, final_ele_hi, final_azim_hi, final_elev_hi, \
             final_time_hi = \
-            computeFragEndParams(traj, dyn_mass_hi, bulk_density, ht_eval, vel_eval, gamma_a, v_kill=v_kill)
+            computeFragEndParams(traj, dyn_mass_hi, bulk_density, ht_eval, vel_eval, gamma_a, v_kill=v_kill, \
+                atm_profile=atm_profile)
 
         print()
         print("Running simulation down to {:g} km/s (-2 sigma mass)...".format(v_kill/1000))
@@ -1198,7 +1248,8 @@ if __name__ == "__main__":
         print()
         final_sr_lo, final_mass_lo, final_lat_lo, final_lon_lo, final_ele_lo, final_azim_lo, final_elev_lo, \
             final_time_lo = \
-            computeFragEndParams(traj, dyn_mass_lo, bulk_density, ht_eval, vel_eval, gamma_a, v_kill=v_kill)
+            computeFragEndParams(traj, dyn_mass_lo, bulk_density, ht_eval, vel_eval, gamma_a, v_kill=v_kill, \
+                atm_profile=atm_profile)
         
         print()
 
@@ -1247,7 +1298,7 @@ if __name__ == "__main__":
                 gamma_a, max_vel, mass_max, cml_args.sigma_clip, n_samples=cml_args.mc_samples, \
                 run_final_sim=(not cml_args.mc_no_final_sim), rng_seed=cml_args.mc_seed, \
                 cores=cml_args.mc_cores, v_kill=v_kill, v_kill_sigma=v_kill_sigma, \
-                density_sigma=cml_args.dens_sigma)
+                density_sigma=cml_args.dens_sigma, atm_profile=atm_profile)
 
             print()
             print("Monte Carlo uncertainty summary (95% CI):")
@@ -1306,6 +1357,10 @@ if __name__ == "__main__":
     print()
     print("Density = {:d} kg/m^3".format(int(bulk_density)))
     print("Gamma*A = {:.2f}".format(gamma_a))
+    if atm_profile is not None:
+        print("Atmosphere = {:s} profile {:s}".format(atm_profile.profile_type, atm_profile.path))
+        print("            (simulation polynomial within {:.3f}% of it between {:.1f} and {:.1f} km)".format( \
+            100*atm_profile.fitPoly(SIM_HT_MIN, ht_eval)[1], SIM_HT_MIN/1000, ht_eval/1000))
     print("Decel = {:.2f} +/- {:.2f} km/s^2".format(decel/1000, decel_std/1000))
     print()
     print("Dynamic mass at {:.2f} km and {:.2f} km/s:".format(ht_eval/1000, vel_eval/1000))
@@ -1411,8 +1466,19 @@ if __name__ == "__main__":
         model = {
             'gamma_a': gamma_a, 'density': bulk_density, 'density_sigma': cml_args.dens_sigma, \
             'v_kill': v_kill/1000, 'v_kill_sigma': v_kill_sigma/1000, 'mass_max': mass_max, \
-            'atmosphere': 'NRLMSISE-00 polynomial fit (wmpl.Utils.AtmosphereDensity.fitAtmPoly)'
+            'atmosphere': 'NRLMSISE-00 polynomial fit (wmpl.Utils.AtmosphereDensity.fitAtmPoly)', \
+            'atm_profile': None
         }
+
+        # The atmosphere profile, so a dark flight code can check it uses the same one
+        if atm_profile is not None:
+            model['atmosphere'] = 'profile file, see atm_profile'
+            model['atm_profile'] = {
+                'path': os.path.abspath(atm_profile.path), 'type': atm_profile.profile_type, \
+                'sha256': atm_profile.sha256, 'ht_min': atm_profile.ht_min/1000, \
+                'ht_max': atm_profile.ht_max/1000, \
+                'sim_poly_max_rel_err': atm_profile.fitPoly(SIM_HT_MIN, ht_eval)[1]
+            }
 
         # Constants of the single-body ablation simulation
         if final_sr is not None:
