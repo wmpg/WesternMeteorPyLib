@@ -2,7 +2,6 @@ import os
 import multiprocessing
 
 import numpy as np
-import scipy.integrate
 import scipy.optimize
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import cm
@@ -76,6 +75,49 @@ def _airSpeed(atm_profile, traj, height, vel):
 
     return vectMag(vel*_motionENU(traj.orbit.azimuth_apparent_norot, traj.orbit.elevation_apparent_norot) \
         - wind)
+
+
+def _windResponse(times, heights, speeds, direction, wind0, atm_profile):
+    """ Bring the end of a simulation run in the frame of the wind at its start back to the ground frame,
+        including the wind changing with height along the path, which that simulation does not see.
+
+        To first order, the change of wind dw pulls the velocity at the rate the drag responds to it: linearizing
+        the drag -k|u|u gives lambda = a/|u| across the motion and 2*lambda along it. The simulation also stopped
+        at the kill speed relative to the wind at its start, so the stop is moved to where the speed relative to
+        the local wind gets there, at the final deceleration.
+
+    Arguments:
+        times, heights, speeds: [ndarray] Time (s), height (m) and speed relative to the air (m/s) along the
+            simulation, from its start.
+        direction: [ndarray] Unit vector (east, north, up) of the velocity relative to the air at the end.
+        wind0: [ndarray] Wind velocity (east, north, up) at the start (m/s).
+        atm_profile: [AtmosphereProfile] The profile giving the wind.
+
+    Return:
+        (dx, vel_end, dt_stop): [tuple]
+            dx: [ndarray] Change of the final position (m) from the simulation moved along with wind0.
+            vel_end: [ndarray] Final velocity relative to the ground (m/s).
+            dt_stop: [float] Change of the final time (s).
+    """
+
+    rates = -np.gradient(speeds, times)/speeds
+    wind_change = np.column_stack([atm_profile.wind(heights), np.zeros(len(heights))]) - wind0
+
+    dx, dv = np.zeros(3), np.zeros(3)
+    for i in range(1, len(times)):
+        dt = times[i] - times[i - 1]
+        pull = wind_change[i] - dv
+        dv = dv + dt*rates[i]*(pull + np.dot(pull, direction)*direction)
+        dx = dx + dt*dv
+
+    vel_end = speeds[-1]*direction + wind0 + dv
+
+    # Move the stop to where the speed relative to the local wind reaches the kill speed
+    vel_rel = vel_end - wind_change[-1] - wind0
+    decel_end = rates[-1]*speeds[-1]
+    dt_stop = (vectMag(vel_rel) - speeds[-1])/decel_end if decel_end > 0 else 0.0
+
+    return dx + vel_end*dt_stop, vel_end + (speeds[-1] - vectMag(vel_rel))*vel_rel/vectMag(vel_rel), dt_stop
 
 
 def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a, v_kill=3000, \
@@ -421,17 +463,18 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a, v_kill=30
     final_vel = sr.frag_main.v
 
     # Back to the ground frame: the air-frame path is tilted from the ground one by the wind, the air carried the
-    #   fragment along during the whole simulation, and the wind adds to its final velocity
+    #   fragment along during the whole simulation, and the wind adds to its final velocity. The wind changing
+    #   with height along the path is added as the response of the fragment to it
     if wind is not None:
         tilt = vel_air/vend - motion
-        drift = scipy.integrate.trapezoid(atm_profile.wind(np.append(hend, sr.main_height_arr)), \
-            np.append(0.0, sr.time_arr), axis=0)
-        shift = sr.frag_main.length*tilt + np.append(drift, 0.0)
+        motion_end = _motionENU(final_azim, final_elev) + tilt
+        dx, vel_end, dt_stop = _windResponse(np.append(0.0, sr.time_arr), np.append(hend, sr.main_height_arr), \
+            np.append(vend, sr.main_vel_arr), motion_end/vectMag(motion_end), wind, atm_profile)
+        shift = sr.frag_main.length*tilt + wind*final_time + dx
+        total_time += dt_stop
         final_lat += shift[1]/(sr.const.r_earth + final_ele)
         final_lon += shift[0]/((sr.const.r_earth + final_ele)*np.cos(final_lat))
         final_ele += shift[2]
-        motion_end = _motionENU(final_azim, final_elev) + tilt
-        vel_end = sr.frag_main.v*motion_end/vectMag(motion_end) + _windENU(atm_profile, final_ele)
         final_vel = vectMag(vel_end)
         final_azim = np.arctan2(-vel_end[0], -vel_end[1])%(2*np.pi)
         final_elev = np.arcsin(-vel_end[2]/final_vel)
