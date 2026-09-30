@@ -114,14 +114,15 @@ def testMissingReboundxCommandLineError(monkeypatch):
 def testAvailableReboundDependenciesAreSilent(monkeypatch):
     """ Successful optional imports must preserve the normal REBOUND execution path. """
 
+    # rebound and reboundx are mocked, so the platform does not matter here; astropy is the one real
+    #   import in REBOUND.py's optional block, and without it the loader reports it missing
+    pytest.importorskip("astropy")
+
     _mockReboundImports(monkeypatch, reboundx_found=True)
     module, import_output = _loadReboundModule()
 
     assert import_output == ""
-    if sys.platform != 'win32':
-        assert module.REBOUND_FOUND
-        assert module._REBOUND_IMPORT_ERROR is None
-    else:
-        # on Windows we expect the loader to error out
-        assert module.REBOUND_FOUND is False
-        assert module._REBOUND_IMPORT_ERROR is not None
+
+    # test the error message first otherwise we get no indication of why a failure arose
+    assert module._REBOUND_IMPORT_ERROR is None
+    assert module.REBOUND_FOUND
