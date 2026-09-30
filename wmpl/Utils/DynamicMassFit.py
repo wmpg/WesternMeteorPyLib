@@ -60,10 +60,11 @@ def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a
     
 
 
-    # Fit the atmosphere density polynomial using NRLMSISE
+    # Fit the atmosphere density polynomial using NRLMSISE. The location is given in degrees, while
+    #   fitAtmPoly() takes it in radians
     ht_min = const.h_kill
     ht_max = 180000
-    const.dens_co = fitAtmPoly(lat, lon, ht_min, ht_max, jd)
+    const.dens_co = fitAtmPoly(np.radians(lat), np.radians(lon), ht_min, ht_max, jd)
 
     # Run the simulation
     frag_main, results_list, wake_results = runSimulation(const)
