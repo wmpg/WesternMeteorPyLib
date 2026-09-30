@@ -5,7 +5,7 @@ import scipy.optimize
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import cm
 
-from wmpl.Utils.AtmosphereDensity import fitAtmPoly
+from wmpl.Utils.AtmosphereDensity import fitAtmPoly, addAtmosphereArguments, setAtmosphere
 from wmpl.Utils.Math import lineFunc, vectMag
 from wmpl.Utils.TrajConversions import cartesian2Geo, derotatedRadiantAltAz
 from wmpl.Utils.Physics import dynamicMass
@@ -60,10 +60,10 @@ def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a
     
 
 
-    # Fit the atmosphere density polynomial using NRLMSISE
-    ht_min = const.h_kill
-    ht_max = 180000
-    const.dens_co = fitAtmPoly(lat, lon, ht_min, ht_max, jd)
+    # Fit the atmosphere density polynomial using the MSIS model. The location is given in degrees, while
+    #   fitAtmPoly() takes it in radians. The simulation only descends from its starting height, and a 7th order
+    #   polynomial fitted up to 180 km misses the stratosphere by 10-30%, so it is fitted over those heights only
+    const.dens_co = fitAtmPoly(np.radians(lat), np.radians(lon), const.h_kill, ht_beg, jd)
 
     # Run the simulation
     frag_main, results_list, wake_results = runSimulation(const)
@@ -498,8 +498,14 @@ if __name__ == "__main__":
                             help='Maximum mass in kg for the dynamic mass measurements. Used to avoid inf values. Default is 50 kg.', \
                             type=float, default=50)
 
+    # Add the atmosphere model options
+    addAtmosphereArguments(arg_parser)
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
+
+    # Apply the atmosphere model options
+    setAtmosphere(cml_args)
 
     #########################
 

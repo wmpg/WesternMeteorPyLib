@@ -19,7 +19,7 @@ import scipy.interpolate
 
 from wmpl.Utils.Math import meanAngle
 from wmpl.Utils.Physics import dynamicPressure, dynamicMass
-from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect
+from wmpl.Utils.AtmosphereDensity import getAtmDensity_vect, addAtmosphereArguments, setAtmosphere
 
 
 # Scale height
@@ -131,7 +131,7 @@ ALPHA_BETA_BOUNDS = ((0.001, 10000.0), (0.00001, 50.0))
 
 
 def rescaleHeightToExponentialAtmosphere(lat, lon, ht_data, jd):
-    """ Given observed heights, rescale them from the real NRLMSISE model to the a simplified exponential
+    """ Given observed heights, rescale them from the real MSIS atmosphere to the a simplified exponential
         atmosphere model used by the Alpha-Beta procedure.
     
     Arguments:
@@ -175,7 +175,7 @@ def rescaleHeightToExponentialAtmosphere(lat, lon, ht_data, jd):
         return HT_NORM_CONST*np.log(rho_atm_0/air_density)
 
 
-    # Get the atmosphere mass density from the NRLMSISE model for the observed heights
+    # Get the atmosphere mass density from the MSIS model for the observed heights
     atm_dens = getAtmDensity_vect(lat, lon, ht_data, jd)
 
     # Get the equivalent heights using the exponential atmosphre model
@@ -5081,8 +5081,14 @@ if __name__ == "__main__":
         help="Save the plots as PNGs to the trajectory pickle directory, named after the trajectory "
         "timestamp (e.g. 20191023_091225_alpha_beta_fit.png).")
 
+    # Add the atmosphere model options
+    addAtmosphereArguments(arg_parser)
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
+
+    # Apply the atmosphere model options
+    setAtmosphere(cml_args)
 
     #########################
 
