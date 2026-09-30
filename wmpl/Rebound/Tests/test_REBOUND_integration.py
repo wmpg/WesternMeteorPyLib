@@ -149,17 +149,19 @@ def testMajorVersionIsReadOrAssumedRecent(reb, monkeypatch, version, expected):
     assert reb._reboundMajorVersion() == expected
 
 
-def testUnattachedReboundxIsReportedWithTheFix(reb):
+def testUnattachedReboundxIsReportedWithTheFix(realReb):
     """ The whole point of the check: an Extras that did not attach must say how to repair it. """
 
     detached = SimpleNamespace(extras=None)
 
+    # The message names the installed rebound and reboundx versions, so this needs them importable
     with pytest.raises(RuntimeError) as exc_info:
-        reb._checkReboundxAttached(detached)
+        realReb._checkReboundxAttached(detached)
 
     message = str(exc_info.value)
     assert "did not attach" in message
     assert "--no-build-isolation" in message, "the error must carry the command that repairs it"
+    assert "pip uninstall reboundx" in message, "and the way out where reboundx cannot be built"
 
 
 ### Installed REBOUND/REBOUNDx ###
