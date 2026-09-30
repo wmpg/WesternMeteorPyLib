@@ -15,6 +15,9 @@ from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PyDomainParallelizer import domainParallelizer
 from wmpl.Utils.DynamicMassFitExport import ejectionState, buildDynMassFitOutput, saveDynMassFitPickle
 from wmpl.Utils.AtmosphereProfile import AtmosphereProfile, PROFILE_TYPES
+from wmpl.MetSim.MetSimErosion import Constants, runSimulation, G0
+from wmpl.MetSim.GUI import SimulationResults
+from wmpl.Trajectory.Trajectory import applyGravityDrop
 
 
 # Lowest height of the fragment simulation (m)
@@ -62,9 +65,6 @@ def _airSpeed(atm_profile, traj, height, vel):
 
     return vectMag(vel*_motionENU(traj.orbit.azimuth_apparent_norot, traj.orbit.elevation_apparent_norot) \
         - wind)
-from wmpl.MetSim.MetSimErosion import Constants, runSimulation, G0
-from wmpl.MetSim.GUI import SimulationResults
-from wmpl.Trajectory.Trajectory import applyGravityDrop
 
 
 def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a, v_kill=3000, \
