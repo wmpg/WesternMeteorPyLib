@@ -27,7 +27,7 @@ from wmpl.Utils.DynamicMassFit import pointOnTrajectory, _robust_linear_fit, fit
     SIM_HT_MIN, computeFragEndParams, _airSpeed, _motionENU, _endDecel, _windResponse
 from wmpl.Utils.AtmosphereProfile import AtmosphereProfile
 from wmpl.Utils.Physics import dynamicMass
-from wmpl.Utils.AtmosphereDensity import fitAtmPoly
+from wmpl.Utils.AtmosphereDensity import fitAtmPoly, atmDensPoly, getAtmDensity
 from wmpl.Utils.Math import lineFunc, vectMag
 
 
@@ -203,7 +203,7 @@ def testFragmentSimulationFitsTheAtmosphereAtTheGivenLocation(traj):
         sr = runFragSim(0.1, 3500, np.degrees(traj.rend_lat), np.degrees(traj.rend_lon), traj.jdt_ref, 30000, \
             5000, 45, 0.55)
 
-    dens_co = fitAtmPoly(traj.rend_lat, traj.rend_lon, sr.const.h_kill, 180000, traj.jdt_ref)
+    dens_co = fitAtmPoly(traj.rend_lat, traj.rend_lon, sr.const.h_kill, 30000, traj.jdt_ref)
 
     assert sr.const.dens_co == pytest.approx(dens_co, rel=1e-12)
 
@@ -391,6 +391,21 @@ def testWindsAreHandledInTheAirFrame(traj, tmp_path):
 
     assert np.dot(shift, across) == pytest.approx( \
         np.dot(wind, across)*(sr.time_arr[-1] - sr.frag_main.length/u0), abs=1.0)
+
+
+def testFragmentSimulationAtmosphereFollowsMSISOverTheSimulatedHeights(traj):
+    """ The simulation only descends from its starting height, so its density polynomial has to follow MSIS
+        there. A 7th order polynomial fitted up to 180 km misses it by 10-30% in the stratosphere.
+    """
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        sr = runFragSim(0.1, 3500, np.degrees(traj.rend_lat), np.degrees(traj.rend_lon), traj.jdt_ref, 30000, \
+            5000, 45, 0.55)
+
+    heights = np.linspace(sr.const.h_kill, 30000, 50)
+    msis = np.array([getAtmDensity(traj.rend_lat, traj.rend_lon, ht, traj.jdt_ref) for ht in heights])
+
+    assert atmDensPoly(heights, sr.const.dens_co) == pytest.approx(msis, rel=0.01)
 
 
 if __name__ == "__main__":

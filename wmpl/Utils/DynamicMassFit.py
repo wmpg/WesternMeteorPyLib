@@ -166,18 +166,16 @@ def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a
     
 
 
-    # Fit the atmosphere density polynomial, to the MSIS model or to the given atmosphere profile
-    ht_min = const.h_kill
-    ht_max = 180000
+    # Fit the atmosphere density polynomial, to the MSIS model or to the given atmosphere profile. The simulation
+    #   only descends from its starting height, and a 7th order polynomial fitted up to 180 km misses the
+    #   stratosphere by 10-30%, so it is fitted over those heights only
     if atm_profile is None:
 
         # The location is given in degrees, while fitAtmPoly() takes it in radians
-        const.dens_co = fitAtmPoly(np.radians(lat), np.radians(lon), ht_min, ht_max, jd)
+        const.dens_co = fitAtmPoly(np.radians(lat), np.radians(lon), const.h_kill, ht_beg, jd)
 
     else:
-
-        # The simulation only descends from its starting height, so the profile only has to cover that
-        const.dens_co, _ = atm_profile.fitPoly(ht_min, ht_beg)
+        const.dens_co, _ = atm_profile.fitPoly(const.h_kill, ht_beg)
 
     # Run the simulation
     frag_main, results_list, wake_results = runSimulation(const)
