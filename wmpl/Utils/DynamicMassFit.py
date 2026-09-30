@@ -625,7 +625,7 @@ MC_FINAL_KEYS = ['final_mass', 'final_lat', 'final_lon', 'final_ele', 'final_azi
 
 
 def _mcRealization(traj_mc, seed, label, ht_max, ht_min, eval_point, bulk_density, gamma_a, max_vel, \
-    mass_max, sigma_clip, run_final_sim, v_kill, v_kill_sigma):
+    mass_max, sigma_clip, run_final_sim, v_kill, v_kill_sigma, density_sigma):
     """ Process one Monte Carlo trajectory realization for runMonteCarloDynMass(). It is a module-level
         function so it can be sent to the worker processes.
 
@@ -634,7 +634,7 @@ def _mcRealization(traj_mc, seed, label, ht_max, ht_min, eval_point, bulk_densit
         seed: [int] Random seed for the draws of this realization.
         label: [str] Realization label used in the printouts.
         ht_max, ht_min, eval_point, bulk_density, gamma_a, max_vel, mass_max, sigma_clip, run_final_sim,
-            v_kill, v_kill_sigma: See runMonteCarloDynMass().
+            v_kill, v_kill_sigma, density_sigma: See runMonteCarloDynMass().
 
     Return:
         [dict or None] The values of this realization (see runMonteCarloDynMass()), or None if no velocity fit
@@ -658,13 +658,21 @@ def _mcRealization(traj_mc, seed, label, ht_max, ht_min, eval_point, bulk_densit
     decel = max(-slope, 0)
     vel_eval = lineFunc(fit_res['time_eval'], slope, intercept)
 
-    dyn_mass = dynamicMass(bulk_density, traj_mc.rend_lat, traj_mc.rend_lon, fit_res['ht_eval'], \
+    # Draw the bulk density, redrawing non-positive values
+    density = bulk_density
+    if density_sigma > 0:
+        density = rng.normal(bulk_density, density_sigma)
+        while density <= 0:
+            density = rng.normal(bulk_density, density_sigma)
+
+    dyn_mass = dynamicMass(density, traj_mc.rend_lat, traj_mc.rend_lon, fit_res['ht_eval'], \
         traj_mc.jdt_ref, vel_eval, decel, gamma=1.0, shape_factor=gamma_a)
     dyn_mass = np.clip(dyn_mass, 0, mass_max)
 
     res = {
         'dyn_mass': dyn_mass, 'decel': decel, 'vel_eval': vel_eval, 'dyn_mass_geom': fit_res['dyn_mass'], \
-        'decel_geom': fit_res['decel'], 'ht_eval': fit_res['ht_eval'], 'time_eval': fit_res['time_eval']
+        'decel_geom': fit_res['decel'], 'ht_eval': fit_res['ht_eval'], 'time_eval': fit_res['time_eval'], \
+        'density': density
     }
 
     if not run_final_sim:
@@ -689,7 +697,7 @@ def _mcRealization(traj_mc, seed, label, ht_max, ht_min, eval_point, bulk_densit
     else:
         try:
             sr_mc, final_mass, final_lat, final_lon, final_ele, final_azim, final_elev = \
-                computeFragEndParams(traj_mc, dyn_mass, bulk_density, fit_res['ht_eval'], vel_eval, gamma_a, \
+                computeFragEndParams(traj_mc, dyn_mass, density, fit_res['ht_eval'], vel_eval, gamma_a, \
                     v_kill=v_kill)
 
             final_decel = (sr_mc.main_vel_arr[-1] - sr_mc.main_vel_arr[-2]) \
@@ -708,7 +716,7 @@ def _mcRealization(traj_mc, seed, label, ht_max, ht_min, eval_point, bulk_densit
 
 def runMonteCarloDynMass(mc_traj_list, ht_max, ht_min, eval_point, bulk_density, gamma_a, max_vel, \
     mass_max, sigma_clip, n_samples=None, run_final_sim=True, rng_seed=None, cores=None, v_kill=3000, \
-    v_kill_sigma=0):
+    v_kill_sigma=0, density_sigma=0):
     """ Propagate the uncertainties through the dynamic mass fit (and, optionally, through the final fragment
         simulation down to the speed where ablation stops) over the WMPL trajectory solver's Monte Carlo
         realizations.
@@ -736,11 +744,16 @@ def runMonteCarloDynMass(mc_traj_list, ht_max, ht_min, eval_point, bulk_density,
         v_kill: [float] Nominal speed where ablation is taken to stop and the final simulation ends (m/s).
         v_kill_sigma: [float] Standard deviation of v_kill (m/s). If above 0, every realization draws its own
             v_kill from a normal distribution, redrawing non-positive values.
+        density_sigma: [float] Standard deviation of the bulk density (kg/m^3). If above 0, every realization
+            draws its own density from a normal distribution centred on bulk_density, redrawing non-positive
+            values, and uses it for both its dynamic mass and its final simulation.
 
     Return:
         results: [dict of ndarray] One entry per successfully fitted realization:
             dyn_mass, decel, vel_eval: with the velocity fit parameters drawn from their covariance.
-            dyn_mass_geom, decel_geom: with the best-fit parameters, i.e. the geometric uncertainty only.
+            density: bulk density of the realization.
+            dyn_mass_geom, decel_geom: with the best-fit parameters and the nominal density, i.e. the
+                geometric uncertainty only.
             ht_eval, time_eval: evaluation point of the realization.
             final_mass, final_lat, final_lon, final_ele, final_azim, final_elev, final_decel: if
                 run_final_sim is True, NaN where the simulation could not be run.
@@ -761,7 +774,8 @@ def runMonteCarloDynMass(mc_traj_list, ht_max, ht_min, eval_point, bulk_density,
     seeds = rng.integers(0, 2**63 - 1, size=n_total)
 
     domain = [[traj_mc, seed, "{:d}/{:d}".format(i + 1, n_total), ht_max, ht_min, eval_point, bulk_density, \
-        gamma_a, max_vel, mass_max, sigma_clip, run_final_sim, v_kill, v_kill_sigma] for i, (traj_mc, seed) \
+        gamma_a, max_vel, mass_max, sigma_clip, run_final_sim, v_kill, v_kill_sigma, \
+        density_sigma] for i, (traj_mc, seed) \
         in enumerate(zip(traj_samples, seeds))]
 
     # Do not start more processes than there are realizations
@@ -773,7 +787,7 @@ def runMonteCarloDynMass(mc_traj_list, ht_max, ht_min, eval_point, bulk_density,
 
     res_list = [res for res in domainParallelizer(domain, _mcRealization, cores=cores) if res is not None]
 
-    keys = ['dyn_mass', 'decel', 'vel_eval', 'dyn_mass_geom', 'decel_geom', 'ht_eval', 'time_eval']
+    keys = ['dyn_mass', 'decel', 'vel_eval', 'dyn_mass_geom', 'decel_geom', 'ht_eval', 'time_eval', 'density']
     if run_final_sim:
         keys += MC_FINAL_KEYS + ['v_kill']
 
@@ -834,6 +848,12 @@ if __name__ == "__main__":
     arg_parser.add_argument('-d', '--dens', metavar='DENS', \
         help='Bulk density in kg/m^3 used to compute the final dynamic mass. Default is 3500 kg/m^3.', \
         type=float, default=3500)
+
+    arg_parser.add_argument('--dens_sigma', metavar='DENS_SIGMA', type=float, default=0.0, \
+        help='Standard deviation in kg/m^3 of the bulk density, used with --mc: every Monte Carlo realization '
+        'draws its own density from a normal distribution centred on --dens (non-positive draws are '
+        'redrawn) and uses it for both its dynamic mass and its final simulation. Default is 0, i.e. a fixed '
+        'density.')
 
     arg_parser.add_argument('-g', '--ga', metavar='GAMMA_A', \
         help='The product of the drag coefficient Gamma and the shape coefficient A. Used for computing the dynamic mass. Default is 0.55.', \
@@ -919,6 +939,11 @@ if __name__ == "__main__":
         raise ValueError("--vkill_sigma cannot be negative, got {:g} km/s".format(cml_args.vkill_sigma))
     v_kill = 1000*cml_args.vkill
     v_kill_sigma = 1000*cml_args.vkill_sigma
+
+    if cml_args.dens <= 0:
+        raise ValueError("--dens has to be positive, got {:g} kg/m^3".format(cml_args.dens))
+    if cml_args.dens_sigma < 0:
+        raise ValueError("--dens_sigma cannot be negative, got {:g} kg/m^3".format(cml_args.dens_sigma))
 
 
     # Load the trajectory
@@ -1185,7 +1210,8 @@ if __name__ == "__main__":
             mc_results = runMonteCarloDynMass(mc_traj_list, ht_max, ht_min, eval_point, bulk_density, \
                 gamma_a, max_vel, mass_max, cml_args.sigma_clip, n_samples=cml_args.mc_samples, \
                 run_final_sim=(not cml_args.mc_no_final_sim), rng_seed=cml_args.mc_seed, \
-                cores=cml_args.mc_cores, v_kill=v_kill, v_kill_sigma=v_kill_sigma)
+                cores=cml_args.mc_cores, v_kill=v_kill, v_kill_sigma=v_kill_sigma, \
+                density_sigma=cml_args.dens_sigma)
 
             print()
             print("Monte Carlo uncertainty summary (95% CI):")
@@ -1257,12 +1283,19 @@ if __name__ == "__main__":
         dmg_lo, dmg_med, dmg_hi = np.percentile(mc_results['dyn_mass_geom'], [2.5, 50, 97.5])
         print()
         print("Monte Carlo over {:d} trajectory solver realizations (95% CI):".format(n_mc_fit))
-        print("(velocity fit uncertainty + trajectory geometry uncertainty)")
+        if cml_args.dens_sigma > 0:
+            print("(velocity fit uncertainty + trajectory geometry uncertainty + density uncertainty)")
+        else:
+            print("(velocity fit uncertainty + trajectory geometry uncertainty)")
         print("MC 2.5%  = {:.3f} kg".format(dm_lo))
         print("MC Median= {:.3f} kg".format(dm_med))
         print("MC 97.5% = {:.3f} kg".format(dm_hi))
         print("(trajectory geometry uncertainty only: {:.3f} [{:.3f}, {:.3f}] kg)".format(dmg_med, dmg_lo, \
             dmg_hi))
+
+        if cml_args.dens_sigma > 0:
+            de_lo, de_med, de_hi = np.percentile(mc_results['density'], [2.5, 50, 97.5])
+            print("(bulk density drawn: {:.0f} [{:.0f}, {:.0f}] kg/m^3)".format(de_med, de_lo, de_hi))
 
     print()
     print("Simulation down to {:g} km/s:".format(v_kill/1000))
