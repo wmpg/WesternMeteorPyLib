@@ -2,6 +2,7 @@ import os
 import multiprocessing
 
 import numpy as np
+import scipy.integrate
 import scipy.optimize
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import cm
@@ -29,6 +30,38 @@ def _airDensity(atm_profile, height):
         return None
 
     return atm_profile.density(height)
+
+
+def _motionENU(azim, elev):
+    """ Unit vector (east, north, up) of the direction of motion, opposite to a radiant at the given azimuth
+        (+E of due N) and elevation, in radians.
+    """
+
+    return -np.array([np.sin(azim)*np.cos(elev), np.cos(azim)*np.cos(elev), np.sin(elev)])
+
+
+def _windENU(atm_profile, height):
+    """ Wind velocity (east, north, up) in m/s at the given height (m) from the atmosphere profile, or None if
+        there is no profile or its winds are switched off.
+    """
+
+    if (atm_profile is None) or (not atm_profile.use_winds):
+        return None
+
+    return np.append(atm_profile.wind(height), 0.0)
+
+
+def _airSpeed(atm_profile, traj, height, vel):
+    """ Speed relative to the air (m/s), which the drag depends on, for the given speed along the trajectory
+        (m/s) at the given height (m). Without winds it is the given speed.
+    """
+
+    wind = _windENU(atm_profile, height)
+    if wind is None:
+        return vel
+
+    return vectMag(vel*_motionENU(traj.orbit.azimuth_apparent_norot, traj.orbit.elevation_apparent_norot) \
+        - wind)
 from wmpl.MetSim.MetSimErosion import Constants, runSimulation, G0
 from wmpl.MetSim.GUI import SimulationResults
 from wmpl.Trajectory.Trajectory import applyGravityDrop
@@ -267,7 +300,7 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a, v_kill=30
             model.
 
     Return:
-        (sr, final_mass, final_lat, final_lon, final_ele, final_azim, final_elev, final_time): [tuple]
+        (sr, final_mass, final_lat, final_lon, final_ele, final_azim, final_elev, final_time, final_vel): [tuple]
             sr: [SimulationResults] Results of the fragment simulation.
             final_mass: [float] Mass at the final point (kg).
             final_lat: [float] Latitude of the final point (deg, +N).
@@ -276,6 +309,7 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a, v_kill=30
             final_azim: [float] Azimuth of the ground-fixed radiant at the final point (deg, +E of due N).
             final_elev: [float] Elevation of the ground-fixed radiant at the final point (deg).
             final_time: [float] Time of the final point after traj.jdt_ref (s).
+            final_vel: [float] Speed at the final point relative to the ground (m/s).
     """
 
     jd = traj.jdt_ref
@@ -307,6 +341,16 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a, v_kill=30
         *pointOnTrajectory(traj, l, meas_time))[2] - hend, 0, \
         np.dot(traj.state_vect_mini, traj.radiant_eci_mini))
     
+
+    # With winds the drag acts on the velocity relative to the air, so the simulation runs in the frame moving
+    #   with the wind at the evaluation point, and its end is brought back to the ground frame below. Gravity
+    #   acts the same in both frames
+    wind = _windENU(atm_profile, hend)
+    if wind is not None:
+        motion = _motionENU(traj.orbit.azimuth_apparent_norot, traj.orbit.elevation_apparent_norot)
+        vel_air = vend*motion - wind
+        vend = vectMag(vel_air)
+        entry_angle = np.degrees(np.arcsin(-vel_air[2]/vend))
 
     # Run the simulation until ablation stops
     sr = runFragSim(dyn_mass, density, lat, lon, jd, hend, vend, entry_angle, gamma_a, v_kill=v_kill, \
@@ -363,8 +407,26 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a, v_kill=30
 
 
 
+    final_vel = sr.frag_main.v
+
+    # Back to the ground frame: the air-frame path is tilted from the ground one by the wind, the air carried the
+    #   fragment along during the whole simulation, and the wind adds to its final velocity
+    if wind is not None:
+        tilt = vel_air/vend - motion
+        drift = scipy.integrate.trapezoid(atm_profile.wind(np.append(hend, sr.main_height_arr)), \
+            np.append(0.0, sr.time_arr), axis=0)
+        shift = sr.frag_main.length*tilt + np.append(drift, 0.0)
+        final_lat += shift[1]/(sr.const.r_earth + final_ele)
+        final_lon += shift[0]/((sr.const.r_earth + final_ele)*np.cos(final_lat))
+        final_ele += shift[2]
+        motion_end = _motionENU(final_azim, final_elev) + tilt
+        vel_end = sr.frag_main.v*motion_end/vectMag(motion_end) + _windENU(atm_profile, final_ele)
+        final_vel = vectMag(vel_end)
+        final_azim = np.arctan2(-vel_end[0], -vel_end[1])%(2*np.pi)
+        final_elev = np.arcsin(-vel_end[2]/final_vel)
+
     print("  final mass     = {:.3f} kg".format(sr.frag_main.m))
-    print("  final vel      = {:.3f} km/s".format(sr.frag_main.v/1000))
+    print("  final vel      = {:.3f} km/s".format(final_vel/1000))
     print("  final ht (sim) = {:.3f} km".format(final_ht/1000))
     print("  total len      = {:.3f} km".format(total_len/1000))
     print("  total time     = {:.3f} s".format(total_time))
@@ -376,7 +438,7 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a, v_kill=30
 
 
     return sr, sr.frag_main.m, np.degrees(final_lat), np.degrees(final_lon), final_ele/1000, \
-        np.degrees(final_azim), np.degrees(final_elev), total_time
+        np.degrees(final_azim), np.degrees(final_elev), total_time, final_vel
 
 
 
@@ -654,8 +716,9 @@ def dynMassFromTraj(traj, ht_max, ht_min, eval_point, bulk_density, gamma_a, max
     if decel < 0:
         decel = 0
 
-    dyn_mass = dynamicMass(bulk_density, traj.rend_lat, traj.rend_lon, ht_eval, traj.jdt_ref, vel_eval, \
-        decel, gamma=1.0, shape_factor=gamma_a, atm_dens=_airDensity(atm_profile, ht_eval))
+    dyn_mass = dynamicMass(bulk_density, traj.rend_lat, traj.rend_lon, ht_eval, traj.jdt_ref, \
+        _airSpeed(atm_profile, traj, ht_eval, vel_eval), decel, gamma=1.0, shape_factor=gamma_a, \
+        atm_dens=_airDensity(atm_profile, ht_eval))
     dyn_mass = np.clip(dyn_mass, 0, mass_max)
 
     return {
@@ -712,7 +775,8 @@ def _mcRealization(traj_mc, traj_index, seed, label, ht_max, ht_min, eval_point,
             density = rng.normal(bulk_density, density_sigma)
 
     dyn_mass = dynamicMass(density, traj_mc.rend_lat, traj_mc.rend_lon, fit_res['ht_eval'], \
-        traj_mc.jdt_ref, vel_eval, decel, gamma=1.0, shape_factor=gamma_a, \
+        traj_mc.jdt_ref, _airSpeed(atm_profile, traj_mc, fit_res['ht_eval'], vel_eval), decel, gamma=1.0, \
+        shape_factor=gamma_a, \
         atm_dens=_airDensity(atm_profile, fit_res['ht_eval']))
     dyn_mass = np.clip(dyn_mass, 0, mass_max)
 
@@ -743,7 +807,8 @@ def _mcRealization(traj_mc, traj_index, seed, label, ht_max, ht_min, eval_point,
 
     else:
         try:
-            sr_mc, final_mass, final_lat, final_lon, final_ele, final_azim, final_elev, final_time = \
+            sr_mc, final_mass, final_lat, final_lon, final_ele, final_azim, final_elev, final_time, \
+                final_vel = \
                 computeFragEndParams(traj_mc, dyn_mass, density, fit_res['ht_eval'], vel_eval, gamma_a, \
                     v_kill=v_kill, atm_profile=atm_profile)
 
@@ -751,7 +816,7 @@ def _mcRealization(traj_mc, traj_index, seed, label, ht_max, ht_min, eval_point,
                 /(sr_mc.time_arr[-1] - sr_mc.time_arr[-2])
 
             final_vals = [final_mass, final_lat, final_lon, final_ele, final_azim, final_elev, final_decel, \
-                sr_mc.frag_main.v, final_time]
+                final_vel, final_time]
 
         except Exception as e:
             print("MC realization {:s}: the final simulation failed ({}).".format(label, e))
@@ -970,6 +1035,11 @@ if __name__ == "__main__":
         help="Format of the --atm_profile file, as in OpenDarkflight: 'wrf' (default; the CSV every model "
         "profile is written in), 'wyoming' (University of Wyoming radiosonde) or 'supracenter'.")
 
+    arg_parser.add_argument('--no_winds', action='store_true', \
+        help='Ignore the winds of the --atm_profile file. By default they are used: the drag depends on the '
+        'velocity relative to the air, both for the dynamic mass and for the final simulation, whose end point '
+        'and velocity are given relative to the ground.')
+
     arg_parser.add_argument('--save_pickle', metavar='PATH', nargs='?', const='', default=None, \
         help='Save the results to a pickle made only of built-in Python types, readable without wmpl, with '
         'the ejection states for a dark flight code (see wmpl.Utils.DynamicMassFitExport). If no path is '
@@ -1040,6 +1110,7 @@ if __name__ == "__main__":
     if cml_args.atm_profile is not None:
         atm_profile = AtmosphereProfile(cml_args.atm_profile, profile_type=cml_args.atm_profile_type)
         atm_profile.checkCoverage(SIM_HT_MIN, 1000*ht_max)
+        atm_profile.use_winds = not cml_args.no_winds
 
 
     #################
@@ -1187,12 +1258,13 @@ if __name__ == "__main__":
         decel_hi = 0
 
     # Compute the dynamic mass (and +/- 2 sigma)
+    vel_air = _airSpeed(atm_profile, traj, ht_eval, vel_eval)
     dyn_mass = dynamicMass(bulk_density, traj.rend_lat, traj.rend_lon, ht_eval, traj.jdt_ref, \
-        vel_eval, decel, gamma=1.0, shape_factor=gamma_a, atm_dens=_airDensity(atm_profile, ht_eval))
+        vel_air, decel, gamma=1.0, shape_factor=gamma_a, atm_dens=_airDensity(atm_profile, ht_eval))
     dyn_mass_hi = dynamicMass(bulk_density, traj.rend_lat, traj.rend_lon, ht_eval, traj.jdt_ref, \
-        vel_eval, decel_lo, gamma=1.0, shape_factor=gamma_a, atm_dens=_airDensity(atm_profile, ht_eval))
+        vel_air, decel_lo, gamma=1.0, shape_factor=gamma_a, atm_dens=_airDensity(atm_profile, ht_eval))
     dyn_mass_lo = dynamicMass(bulk_density, traj.rend_lat, traj.rend_lon, ht_eval, traj.jdt_ref, \
-        vel_eval, decel_hi, gamma=1.0, shape_factor=gamma_a, atm_dens=_airDensity(atm_profile, ht_eval))
+        vel_air, decel_hi, gamma=1.0, shape_factor=gamma_a, atm_dens=_airDensity(atm_profile, ht_eval))
     
 
     # Limit the dynamic mass to a 0 - maxmass range
@@ -1212,6 +1284,7 @@ if __name__ == "__main__":
     final_azim = final_azim_hi = final_azim_lo = np.nan
     final_elev = final_elev_hi = final_elev_lo = np.nan
     final_time = final_time_hi = final_time_lo = np.nan
+    final_vel = final_vel_hi = final_vel_lo = np.nan
     final_sr = final_sr_hi = final_sr_lo = None
 
     # Run the fragment until the speed where ablation stops
@@ -1225,7 +1298,7 @@ if __name__ == "__main__":
         print("  decel   = {:.2f} km/s^2".format(decel/1000))
         print("  init mass = {:.3f} kg".format(dyn_mass))
         print()
-        final_sr, final_mass, final_lat, final_lon, final_ele, final_azim, final_elev, final_time = \
+        final_sr, final_mass, final_lat, final_lon, final_ele, final_azim, final_elev, final_time, final_vel = \
             computeFragEndParams(traj, dyn_mass, bulk_density, ht_eval, vel_eval, gamma_a, v_kill=v_kill, \
                 atm_profile=atm_profile)
 
@@ -1236,7 +1309,7 @@ if __name__ == "__main__":
         print("  init mass = {:.3f} kg".format(dyn_mass_hi))
         print()
         final_sr_hi, final_mass_hi, final_lat_hi, final_lon_hi, final_ele_hi, final_azim_hi, final_elev_hi, \
-            final_time_hi = \
+            final_time_hi, final_vel_hi = \
             computeFragEndParams(traj, dyn_mass_hi, bulk_density, ht_eval, vel_eval, gamma_a, v_kill=v_kill, \
                 atm_profile=atm_profile)
 
@@ -1247,7 +1320,7 @@ if __name__ == "__main__":
         print("  init mass = {:.3f} kg".format(dyn_mass_lo))
         print()
         final_sr_lo, final_mass_lo, final_lat_lo, final_lon_lo, final_ele_lo, final_azim_lo, final_elev_lo, \
-            final_time_lo = \
+            final_time_lo, final_vel_lo = \
             computeFragEndParams(traj, dyn_mass_lo, bulk_density, ht_eval, vel_eval, gamma_a, v_kill=v_kill, \
                 atm_profile=atm_profile)
         
@@ -1359,6 +1432,10 @@ if __name__ == "__main__":
     print("Gamma*A = {:.2f}".format(gamma_a))
     if atm_profile is not None:
         print("Atmosphere = {:s} profile {:s}".format(atm_profile.profile_type, atm_profile.path))
+        if atm_profile.use_winds:
+            wind = atm_profile.wind(ht_eval)
+            print("            (wind {:.1f} m/s towards {:.0f} deg at {:.2f} km; speed relative to the air {:.3f} "
+                "km/s)".format(np.hypot(*wind), np.degrees(np.arctan2(*wind))%360, ht_eval/1000, vel_air/1000))
         print("            (simulation polynomial within {:.3f}% of it between {:.1f} and {:.1f} km)".format( \
             100*atm_profile.fitPoly(SIM_HT_MIN, ht_eval)[1], SIM_HT_MIN/1000, ht_eval/1000))
     print("Decel = {:.2f} +/- {:.2f} km/s^2".format(decel/1000, decel_std/1000))
@@ -1451,10 +1528,10 @@ if __name__ == "__main__":
     # Save the results for a dark flight computation
     if cml_args.save_pickle is not None:
 
-        def _state(sr, mass, lat, lon, ele, azim, elev, t):
+        def _state(sr, vel, mass, lat, lon, ele, azim, elev, t):
             if sr is None:
                 return None
-            return ejectionState(lat, lon, ele, sr.frag_main.v/1000, azim, elev, t, mass, bulk_density)
+            return ejectionState(lat, lon, ele, vel/1000, azim, elev, t, mass, bulk_density)
 
         fit = {
             'ht_min': ht_min, 'ht_max': ht_max, 'eval_point': eval_point, 'ht_eval': ht_eval/1000, \
@@ -1477,7 +1554,8 @@ if __name__ == "__main__":
                 'path': os.path.abspath(atm_profile.path), 'type': atm_profile.profile_type, \
                 'sha256': atm_profile.sha256, 'ht_min': atm_profile.ht_min/1000, \
                 'ht_max': atm_profile.ht_max/1000, \
-                'sim_poly_max_rel_err': atm_profile.fitPoly(SIM_HT_MIN, ht_eval)[1]
+                'sim_poly_max_rel_err': atm_profile.fitPoly(SIM_HT_MIN, ht_eval)[1], \
+                'winds': atm_profile.use_winds
             }
 
         # Constants of the single-body ablation simulation
@@ -1486,11 +1564,11 @@ if __name__ == "__main__":
                 'sim_ablation_coeff': final_sr.const.sigma*1e6})
 
         output = buildDynMassFitOutput(traj.jdt_ref, fit, model, \
-            nominal=_state(final_sr, final_mass, final_lat, final_lon, final_ele, final_azim, final_elev, \
+            nominal=_state(final_sr, final_vel, final_mass, final_lat, final_lon, final_ele, final_azim, final_elev, \
                 final_time), \
-            minus_2sigma=_state(final_sr_lo, final_mass_lo, final_lat_lo, final_lon_lo, final_ele_lo, \
+            minus_2sigma=_state(final_sr_lo, final_vel_lo, final_mass_lo, final_lat_lo, final_lon_lo, final_ele_lo, \
                 final_azim_lo, final_elev_lo, final_time_lo), \
-            plus_2sigma=_state(final_sr_hi, final_mass_hi, final_lat_hi, final_lon_hi, final_ele_hi, \
+            plus_2sigma=_state(final_sr_hi, final_vel_hi, final_mass_hi, final_lat_hi, final_lon_hi, final_ele_hi, \
                 final_azim_hi, final_elev_hi, final_time_hi), \
             mc_results=mc_results, mc_realizations=mc_realizations, traj_path=cml_args.traj_path, \
             mc_path=(mcUncertaintiesPath(cml_args.traj_path) if mc_results is not None else None), \

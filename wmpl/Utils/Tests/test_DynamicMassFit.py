@@ -24,11 +24,11 @@ from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.TrajConversions import derotatedRadiantAltAz, cartesian2Geo
 from wmpl.Utils.SampleTrajectoryPositions import sampleTrajectory
 from wmpl.Utils.DynamicMassFit import pointOnTrajectory, _robust_linear_fit, fitVelocity, runFragSim, \
-    SIM_HT_MIN
+    SIM_HT_MIN, computeFragEndParams, _airSpeed, _motionENU
 from wmpl.Utils.AtmosphereProfile import AtmosphereProfile
 from wmpl.Utils.Physics import dynamicMass
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly
-from wmpl.Utils.Math import lineFunc
+from wmpl.Utils.Math import lineFunc, vectMag
 
 
 # A solved trajectory shipped with the repository (2019-10-23, four stations, gravity correction on)
@@ -241,6 +241,79 @@ def testDynamicMassUsesTheGivenAirDensity():
 
     assert mass == pytest.approx((0.55*6300.0**2*0.02/3200.0)**3/3500.0**2, rel=1e-12)
     assert dynamicMass(*args, gamma=1.0, shape_factor=0.55, atm_dens=0.04) == pytest.approx(8*mass, rel=1e-12)
+
+
+### Winds ###
+
+def _windProfile(path, speed, direction):
+    """ An exponential atmosphere with a constant wind of the given speed (m/s), blowing from the given
+        direction (deg). """
+
+    with open(path, 'w') as f:
+        f.write("height,temperature,pressure,relative_humidity,wind_horizontal,wind_direction,wind_east,"
+            "wind_north,wind_up,density\n")
+        for ht in np.arange(0.0, 120100.0, 100.0):
+            f.write("{:.1f},250,1000,1,{:.3f},{:.3f},0,0,0,{:.10e}\n".format(ht, speed, direction, \
+                1.3*np.exp(-ht/7000.0)))
+
+    return AtmosphereProfile(path)
+
+
+def _endState(traj, prof):
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        return computeFragEndParams(traj, 1000.0, 3500, 100000.0, 20000.0, 0.55, atm_profile=prof)
+
+
+def testDynamicMassUsesTheSpeedRelativeToTheAir(traj, tmp_path):
+    """ A headwind adds its component along the motion to the speed the drag acts on. """
+
+    elev = traj.orbit.elevation_apparent_norot
+    headwind = _windProfile(str(tmp_path/"head.csv"), 50.0, np.degrees(traj.orbit.azimuth_apparent_norot) + 180)
+
+    assert _airSpeed(headwind, traj, 100000.0, 20000.0) == pytest.approx( \
+        np.sqrt(20000.0**2 + 2*20000.0*50.0*np.cos(elev) + 50.0**2), rel=1e-12)
+
+    headwind.use_winds = False
+    assert _airSpeed(headwind, traj, 100000.0, 20000.0) == 20000.0
+    assert _airSpeed(None, traj, 100000.0, 20000.0) == 20000.0
+
+
+def testWindsAreHandledInTheAirFrame(traj, tmp_path):
+    """ In still air the wind path ends where the one without winds does. With a constant crosswind the final
+        velocity relative to the air is the simulation's final speed, and the end moves across the track by
+        the wind drift over the simulated time T minus the tilt of the path relative to the air, of length L:
+        (w.c)*(T - L/|u0|), with c the horizontal direction across the track and u0 the initial velocity
+        relative to the air.
+    """
+
+    still = _windProfile(str(tmp_path/"still.csv"), 0.0, 0.0)
+    with_winds = _endState(traj, still)
+    still.use_winds = False
+    without_winds = _endState(traj, still)
+
+    assert with_winds[1:5] + with_winds[6:] == pytest.approx(without_winds[1:5] + without_winds[6:], rel=1e-9)
+    assert (with_winds[5] - without_winds[5] + 180)%360 - 180 == pytest.approx(0.0, abs=1e-7)
+
+    windy = _windProfile(str(tmp_path/"windy.csv"), 50.0, 250.0)
+    sr, _, lat, lon, ele, azim, elev, _, vel = _endState(traj, windy)
+    wind = windy.wind(1000*ele)
+
+    vel_air = vel*_motionENU(np.radians(azim), np.radians(elev)) - np.append(wind, 0.0)
+    assert vectMag(vel_air) == pytest.approx(sr.frag_main.v, rel=1e-9)
+
+    motion = _motionENU(traj.orbit.azimuth_apparent_norot, traj.orbit.elevation_apparent_norot)
+    u0 = vectMag(20000.0*motion - np.append(windy.wind(100000.0), 0.0))
+
+    # Across the track at the end, where the two runs differ only by the wind correction
+    azim_motion = np.radians(without_winds[5]) + np.pi
+    across = np.array([np.cos(azim_motion), -np.sin(azim_motion)])
+    r = sr.const.r_earth + 1000*ele
+    shift = np.array([np.radians(lon - without_winds[3])*r*np.cos(np.radians(lat)), \
+        np.radians(lat - without_winds[2])*r])
+
+    assert np.dot(shift, across) == pytest.approx( \
+        np.dot(wind, across)*(sr.time_arr[-1] - sr.frag_main.length/u0), abs=1.0)
 
 
 if __name__ == "__main__":

@@ -12,7 +12,8 @@ The three formats OpenDarkflight reads are supported:
 
 For the wyoming and supracenter formats the density comes from the pressure and temperature with the ideal gas
 law and OpenDarkflight's gas constants. Between levels, the logarithm of the density is interpolated linearly,
-also as in OpenDarkflight. Outside the height range of the file no density is returned: OpenDarkflight
+also as in OpenDarkflight. The horizontal wind is interpolated as OpenDarkflight does too, component by
+component with a PCHIP interpolator. Outside the height range of the file no density is returned: OpenDarkflight
 extrapolates above the top of a profile, and evaluating it differently here would break the continuity the
 profile is meant to give. Use a profile that covers the heights needed instead.
 """
@@ -20,6 +21,7 @@ profile is meant to give. Use a profile that covers the heights needed instead.
 import hashlib
 
 import numpy as np
+import scipy.interpolate
 import scipy.optimize
 
 from wmpl.Utils.AtmosphereDensity import atmDensPoly
@@ -50,7 +52,7 @@ def densityFromPressure(pressure, temperature):
 
 def _readWrf(path):
 
-    heights, densities = [], []
+    heights, densities, speeds, directions = [], [], [], []
 
     with open(path) as f:
 
@@ -69,15 +71,18 @@ def _readWrf(path):
 
             heights.append(float(values[0]))
             densities.append(float(values[9]))
+            speeds.append(float(values[4]))
+            directions.append(float(values[5]))
 
-    return np.array(heights), np.array(densities)
+    return heights, densities, speeds, directions
 
 
 
 def _readWyoming(path):
 
-    heights, densities = [], []
+    heights, densities, speeds, directions = [], [], [], []
     data_start = False
+    speed_mult = 0.514
 
     with open(path) as f:
 
@@ -88,6 +93,12 @@ def _readWyoming(path):
             # The data starts at the first row of 11 values that begins with two numbers. That row itself is
             #   skipped, as in OpenDarkflight
             if not data_start:
+
+                # Wind speeds are in knots, unless the header gives them in m/s
+                if "SKNT" in values:
+                    speed_mult = 0.514
+                elif "SPED" in values:
+                    speed_mult = 1.0
 
                 if len(values) == 11:
                     try:
@@ -107,14 +118,16 @@ def _readWyoming(path):
                 pressure, height, temp = float(values[0]), float(values[1]), float(values[2]) + 273.15
                 heights.append(height)
                 densities.append(densityFromPressure(pressure, temp))
+                speeds.append(float(values[7])*speed_mult)
+                directions.append(float(values[6]))
 
-    return np.array(heights), np.array(densities)
+    return heights, densities, speeds, directions
 
 
 
 def _readSupracenter(path):
 
-    heights, densities = [], []
+    heights, densities, speeds, directions = [], [], [], []
 
     with open(path) as f:
 
@@ -124,11 +137,13 @@ def _readSupracenter(path):
             if not values:
                 continue
 
-            height, temp, _, _, pressure = [float(val) for val in values]
+            height, temp, speed, direction, pressure = [float(val) for val in values]
             heights.append(height)
             densities.append(densityFromPressure(pressure, temp + 273.15))
+            speeds.append(speed)
+            directions.append(direction)
 
-    return np.array(heights), np.array(densities)
+    return heights, densities, speeds, directions
 
 
 
@@ -152,7 +167,7 @@ class AtmosphereProfile(object):
         self.profile_type = profile_type
 
         reader = {'wrf': _readWrf, 'wyoming': _readWyoming, 'supracenter': _readSupracenter}[profile_type]
-        heights, densities = reader(path)
+        heights, densities, speeds, directions = [np.array(arr) for arr in reader(path)]
 
         if len(heights) < 2:
             raise ValueError("The atmosphere profile {:s} has fewer than two levels".format(path))
@@ -161,6 +176,15 @@ class AtmosphereProfile(object):
         heights, indices = np.unique(heights, return_index=True)
         self.heights = heights
         self.densities = densities[indices]
+
+        # Components of the vector towards where the wind blows from (east, north), interpolated as in
+        #   OpenDarkflight
+        directions = np.radians(directions[indices])
+        self._wind_from = scipy.interpolate.PchipInterpolator(self.heights, \
+            np.column_stack([speeds[indices]*np.sin(directions), speeds[indices]*np.cos(directions)]))
+
+        # The wind can be switched off to compare with a still atmosphere
+        self.use_winds = True
 
         self.ht_min = self.heights[0]
         self.ht_max = self.heights[-1]
@@ -186,6 +210,19 @@ class AtmosphereProfile(object):
         rho = np.exp(np.interp(height, self.heights, np.log(self.densities)))
 
         return float(rho) if rho.ndim == 0 else rho
+
+
+    def wind(self, height):
+        """ Horizontal wind velocity (m/s), the direction the air moves in, at the given height (m).
+
+        Return:
+            [ndarray] East and north components, with a leading axis for an array of heights.
+        """
+
+        height = np.asarray(height, dtype=float)
+        self.checkCoverage(np.min(height), np.max(height))
+
+        return -self._wind_from(height)
 
 
     def fitPoly(self, ht_min, ht_max):

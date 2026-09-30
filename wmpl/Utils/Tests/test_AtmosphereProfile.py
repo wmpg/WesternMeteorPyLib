@@ -23,6 +23,22 @@ def _writeWrf(path, heights, densities):
             f.write("{:.1f},250.0,1000.0,1.0,10.0,270.0,10.0,0.0,0.0,{:.10e}\n".format(ht, rho))
 
 
+def testWindIsTheVelocityOfTheAirFromTheSpeedAndTheDirectionItBlowsFrom(tmp_path):
+    """ wrf and supracenter give the speed in m/s, wyoming in knots, and all give the direction the wind
+        blows from; the wind returned is the velocity the air moves with.
+    """
+
+    path = str(tmp_path/"profile.csv")
+    _writeWrf(path, [10000.0, 20000.0], [0.4, 0.09])
+    assert AtmosphereProfile(path).wind(15000.0) == pytest.approx([10.0, 0.0], abs=1e-12)
+
+    path = str(tmp_path/"supra.txt")
+    with open(path, 'w') as f:
+        f.write("   100   -3.8   8.0  180.0  1015.125\n   200   -0.9   8.0  180.0  1002.426\n")
+    assert AtmosphereProfile(path, profile_type='supracenter').wind(150.0) == pytest.approx([0.0, 8.0], \
+        abs=1e-12)
+
+
 def _exponentialProfile(path, ht_top=60000.0, step=100.0, scale_height=7000.0):
     heights = np.arange(0.0, ht_top + step, step)
     _writeWrf(path, heights, 1.225*np.exp(-heights/scale_height))
@@ -96,6 +112,9 @@ def testWyomingSkipsTheFirstDataRowAndIncompleteRows(tmp_path):
     prof = AtmosphereProfile(path, profile_type='wyoming')
 
     assert list(prof.heights) == [183.0, 5500.0]
+
+    # 40 knots from the west
+    assert prof.wind(5500.0) == pytest.approx([40*0.514, 0.0], abs=1e-9)
     assert prof.density([183.0, 5500.0]) == pytest.approx( \
         [100*1007.0*M_AIR/(R_GAS*270.15), 100*500.0*M_AIR/(R_GAS*243.15)], rel=1e-12)
 

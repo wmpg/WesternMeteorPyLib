@@ -22,7 +22,8 @@ Contents of the dict:
     fit: [dict] Dynamic mass fit on the nominal trajectory.
     model: [dict] Physical assumptions of the dynamic mass and the ablation simulation. Its atm_profile entry
         describes the atmosphere profile file used instead of the MSIS model (path, format, sha256, height range
-        in km), or is None, so a dark flight code can check it uses the same atmosphere.
+        in km, and whether its winds were used), or is None, so a dark flight code can check it uses the same
+        atmosphere.
     provenance: [dict] Input files, DynamicMassFit options, wmpl commit and creation time.
 """
 
@@ -46,7 +47,7 @@ UNITS = {
     'lat': 'deg, geodetic, +N',
     'lon': 'deg, +E',
     'ht': 'km above the geoid (EGM96)',
-    'vel': 'km/s',
+    'vel': 'km/s, relative to the ground',
     'az': 'deg, azimuth of the ground-fixed radiant, +E of due N',
     'alt': 'deg, elevation of the ground-fixed radiant',
     'ref_time_ds': 's after ref_time',
