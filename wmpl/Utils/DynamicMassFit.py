@@ -529,7 +529,7 @@ def dynMassFromTraj(traj, ht_max, ht_min, eval_point, bulk_density, gamma_a, max
     sigma_clip=3.0):
     """ Compute the dynamic mass at the evaluation point for a single trajectory solution, following the
         same steps as the dynamic mass fit in __main__ (velocity vs. time fit in the height window, then
-        dynamic mass at the evaluation point). Used both for individual Monte Carlo trajectory realizations.
+        dynamic mass at the evaluation point). Used for the individual Monte Carlo trajectory realizations.
 
     Arguments:
         traj: [Trajectory] Trajectory (or Monte Carlo realization) to fit.
@@ -544,7 +544,8 @@ def dynMassFromTraj(traj, ht_max, ht_min, eval_point, bulk_density, gamma_a, max
 
     Return:
         [dict or None] None if there isn't enough data in the height window to fit a line. Otherwise a dict
-            with keys: decel, decel_std, vel_eval, ht_eval, time_eval, dyn_mass.
+            with keys: decel, decel_std, vel_eval, ht_eval, time_eval, dyn_mass, popt, pcov (the velocity
+            fit [slope, intercept] and its covariance).
     """
 
     vel_data, ht_data, time_data = [], [], []
@@ -579,9 +580,10 @@ def dynMassFromTraj(traj, ht_max, ht_min, eval_point, bulk_density, gamma_a, max
     if len(vel_data) < 2:
         return None
 
+    # Start the robust fit from the least-squares line; from (1, 1) it often runs out of function evaluations
     try:
-        popt, _, perr, _ = fitVelocity(time_data, vel_data, p0=(1.0, 1.0), loss='soft_l1', \
-            sigma_clip=sigma_clip)
+        popt, pcov, perr, _ = fitVelocity(time_data, vel_data, p0=np.polyfit(time_data, vel_data, 1), \
+            loss='soft_l1', sigma_clip=sigma_clip)
     except RuntimeError:
         return None
 
@@ -607,16 +609,22 @@ def dynMassFromTraj(traj, ht_max, ht_min, eval_point, bulk_density, gamma_a, max
 
     return {
         'decel': decel, 'decel_std': decel_std, 'vel_eval': vel_eval, 'ht_eval': ht_eval, \
-        'time_eval': time_eval, 'dyn_mass': dyn_mass
+        'time_eval': time_eval, 'dyn_mass': dyn_mass, 'popt': popt, 'pcov': pcov
     }
 
 
 
 def runMonteCarloDynMass(mc_traj_list, ht_max, ht_min, eval_point, bulk_density, gamma_a, max_vel, \
     mass_max, sigma_clip, n_samples=None, run_final_sim=True, rng_seed=None):
-    """ Propagate the WMPL trajectory Monte Carlo solver's uncertainties through the dynamic mass fit (and,
-        optionally, through the final fragment simulation down to 3 km/s) by repeating dynMassFromTraj() and
-        computeFragEndParams() on every individual Monte Carlo trajectory realization.
+    """ Propagate the uncertainties through the dynamic mass fit (and, optionally, through the final fragment
+        simulation down to 3 km/s) over the WMPL trajectory solver's Monte Carlo realizations.
+
+        The solver perturbs only the lines of sight to get each realization's radiant and state vector, and
+        then computes the point velocities and heights from the original, un-noised observations (see
+        Trajectory.run(), _mc_run). Every realization therefore fits the same measurement scatter, and the
+        spread between realizations carries only the geometric (radiant, state vector, timing offset)
+        uncertainty. The velocity fit uncertainty is added by drawing the slope and intercept of each
+        realization's fit from its covariance, so the propagated distribution holds both terms.
 
     Arguments:
         mc_traj_list: [list] List of Trajectory objects, one per Monte Carlo realization (see
@@ -627,25 +635,30 @@ def runMonteCarloDynMass(mc_traj_list, ht_max, ht_min, eval_point, bulk_density,
             subset of this size is drawn without replacement. None uses all realizations.
         run_final_sim: [bool] Also run the final fragment simulation (down to 3 km/s) for every realization,
             to get the final mass, position and radiant uncertainty. Slower.
-        rng_seed: [int or None] Random seed used for subsampling.
+        rng_seed: [int or None] Random seed used for subsampling and for drawing the velocity fit parameters.
 
     Return:
-        results: [dict of ndarray] Arrays of dyn_mass, decel, vel_eval, ht_eval over the successfully fitted
-            realizations, plus final_mass, final_lat, final_lon, final_ele, final_azim, final_elev,
-            final_decel if run_final_sim is True.
+        results: [dict of ndarray] One entry per successfully fitted realization:
+            dyn_mass, decel, vel_eval: with the velocity fit parameters drawn from their covariance.
+            dyn_mass_geom, decel_geom: with the best-fit parameters, i.e. the geometric uncertainty only.
+            ht_eval, time_eval: evaluation point of the realization.
+            final_mass, final_lat, final_lon, final_ele, final_azim, final_elev, final_decel: if
+                run_final_sim is True, NaN where the simulation could not be run.
     """
+
+    rng = np.random.default_rng(rng_seed)
 
     traj_samples = mc_traj_list
 
     if (n_samples is not None) and (len(traj_samples) > n_samples):
-        rng = np.random.default_rng(rng_seed)
         indices = rng.choice(len(traj_samples), size=n_samples, replace=False)
         traj_samples = [traj_samples[i] for i in indices]
 
-    keys = ['dyn_mass', 'decel', 'vel_eval', 'ht_eval', 'time_eval']
+    keys = ['dyn_mass', 'decel', 'vel_eval', 'dyn_mass_geom', 'decel_geom', 'ht_eval', 'time_eval']
+    final_keys = ['final_mass', 'final_lat', 'final_lon', 'final_ele', 'final_azim', 'final_elev', \
+        'final_decel']
     if run_final_sim:
-        keys += ['final_mass', 'final_lat', 'final_lon', 'final_ele', 'final_azim', 'final_elev', \
-            'final_decel']
+        keys += final_keys
 
     results = {key: [] for key in keys}
 
@@ -661,42 +674,60 @@ def runMonteCarloDynMass(mc_traj_list, ht_max, ht_min, eval_point, bulk_density,
             mass_max, sigma_clip=sigma_clip)
 
         if fit_res is None:
-            print("  Skipped: not enough data in the height window.")
+            print("  Skipped: no valid velocity fit or evaluation height in the height window.")
             continue
 
-        if run_final_sim:
+        # Draw the velocity fit parameters from the fit covariance of this realization
+        slope, intercept = rng.multivariate_normal(fit_res['popt'], fit_res['pcov'])
+        decel = max(-slope, 0)
+        vel_eval = lineFunc(fit_res['time_eval'], slope, intercept)
 
-            if fit_res['vel_eval'] <= 3000:
-                print("  Skipped: evaluation velocity already below 3 km/s.")
-                continue
+        dyn_mass = dynamicMass(bulk_density, traj_mc.rend_lat, traj_mc.rend_lon, fit_res['ht_eval'], \
+            traj_mc.jdt_ref, vel_eval, decel, gamma=1.0, shape_factor=gamma_a)
+        dyn_mass = np.clip(dyn_mass, 0, mass_max)
 
-            try:
-                sr_mc, final_mass, final_lat, final_lon, final_ele, final_azim, final_elev = \
-                    computeFragEndParams(traj_mc, fit_res['dyn_mass'], bulk_density, fit_res['ht_eval'], \
-                        fit_res['vel_eval'], gamma_a)
-            except Exception as e:
-                print("  Skipped: fragment simulation failed ({}).".format(e))
-                continue
-
-            results['final_mass'].append(final_mass)
-            results['final_lat'].append(final_lat)
-            results['final_lon'].append(final_lon)
-            results['final_ele'].append(final_ele)
-            results['final_azim'].append(final_azim)
-            results['final_elev'].append(final_elev)
-            results['final_decel'].append((sr_mc.main_vel_arr[-1] - sr_mc.main_vel_arr[-2]) \
-                /(sr_mc.time_arr[-1] - sr_mc.time_arr[-2]))
-
-        results['dyn_mass'].append(fit_res['dyn_mass'])
-        results['decel'].append(fit_res['decel'])
-        results['vel_eval'].append(fit_res['vel_eval'])
+        results['dyn_mass'].append(dyn_mass)
+        results['decel'].append(decel)
+        results['vel_eval'].append(vel_eval)
+        results['dyn_mass_geom'].append(fit_res['dyn_mass'])
+        results['decel_geom'].append(fit_res['decel'])
         results['ht_eval'].append(fit_res['ht_eval'])
         results['time_eval'].append(fit_res['time_eval'])
 
-    results = {key: np.array(val) for key, val in results.items()}
+        if not run_final_sim:
+            continue
+
+        # Keep the realization in the dynamic mass statistics even if its end point cannot be simulated
+        final_vals = [np.nan]*len(final_keys)
+
+        if vel_eval <= 3000:
+            print("  No final simulation: evaluation velocity already below 3 km/s.")
+
+        else:
+            try:
+                sr_mc, final_mass, final_lat, final_lon, final_ele, final_azim, final_elev = \
+                    computeFragEndParams(traj_mc, dyn_mass, bulk_density, fit_res['ht_eval'], vel_eval, \
+                        gamma_a)
+
+                final_decel = (sr_mc.main_vel_arr[-1] - sr_mc.main_vel_arr[-2]) \
+                    /(sr_mc.time_arr[-1] - sr_mc.time_arr[-2])
+
+                final_vals = [final_mass, final_lat, final_lon, final_ele, final_azim, final_elev, \
+                    final_decel]
+
+            except Exception as e:
+                print("  No final simulation: it failed ({}).".format(e))
+
+        for key, val in zip(final_keys, final_vals):
+            results[key].append(val)
+
+    results = {key: np.array(val, dtype=float) for key, val in results.items()}
 
     print()
-    print("Monte Carlo propagation: {:d}/{:d} realizations used.".format(len(results['dyn_mass']), n_total))
+    print("Monte Carlo propagation: {:d}/{:d} realizations fitted.".format(len(results['dyn_mass']), n_total))
+
+    if run_final_sim:
+        print("Final simulation run for {:d} of them.".format(np.count_nonzero(~np.isnan(results['final_mass']))))
 
     return results
 
@@ -711,6 +742,8 @@ def printMCPercentiles(results, ci=95.0):
     hi_pct = 100 - lo_pct
 
     for key, arr in results.items():
+
+        arr = arr[~np.isnan(arr)]
 
         if len(arr) == 0:
             continue
@@ -1111,14 +1144,21 @@ if __name__ == "__main__":
             int(bulk_density),
             gamma_a)
 
-    if mc_results is not None and len(mc_results['dyn_mass']) > 0:
+    # Number of MC realizations with a velocity fit, and of those with a final simulation
+    n_mc_fit = n_mc_final = 0
+    if mc_results is not None:
+        n_mc_fit = len(mc_results['dyn_mass'])
+        if 'final_mass' in mc_results:
+            n_mc_final = np.count_nonzero(~np.isnan(mc_results['final_mass']))
+
+    if n_mc_fit > 0:
         dyn_mass_mc_lo, dyn_mass_mc_hi = np.percentile(mc_results['dyn_mass'], [2.5, 97.5])
         label_text += "\nDyn $m$ (MC 95% CI) = [{:.3f}, {:.3f}] kg".format(dyn_mass_mc_lo, dyn_mass_mc_hi)
 
-        if len(mc_results.get('final_mass', [])) > 0:
-            final_mass_mc_lo, final_mass_mc_hi = np.percentile(mc_results['final_mass'], [2.5, 97.5])
-            label_text += "\nFinal $m$ (MC 95% CI) = [{:.3f}, {:.3f}] kg".format(final_mass_mc_lo, \
-                final_mass_mc_hi)
+    if n_mc_final > 0:
+        final_mass_mc_lo, final_mass_mc_hi = np.nanpercentile(mc_results['final_mass'], [2.5, 97.5])
+        label_text += "\nFinal $m$ (MC 95% CI) = [{:.3f}, {:.3f}] kg".format(final_mass_mc_lo, \
+            final_mass_mc_hi)
 
     ax2.scatter(vel_eval/1000, time_eval, color='g', marker='o', s=50, label=label_text)
 
@@ -1129,32 +1169,30 @@ if __name__ == "__main__":
     print("Decel = {:.2f} +/- {:.2f} km/s^2".format(decel/1000, decel_std/1000))
     print()
     print("Dynamic mass at {:.2f} km and {:.2f} km/s:".format(ht_eval/1000, vel_eval/1000))
-    if mc_results is not None and len(mc_results['dyn_mass']) > 0:
-        print("(+/-2 sigma from the deceleration uncertainty only; local estimate on the nominal "
-            "trajectory, superseded by the MC 95% CI below, which also propagates the trajectory "
-            "solver's radiant/geometry/timing uncertainty)")
-    else:
-        print("(+/-2 sigma from the deceleration uncertainty only)")
+    print("(+/-2 sigma from the deceleration uncertainty only)")
     print("-2sigma = {:.3f} kg".format(dyn_mass_lo))
     print("Nominal = {:.3f} kg".format(dyn_mass))
     print("+2sigma    = {:.3f} kg".format(dyn_mass_hi))
 
-    if mc_results is not None and len(mc_results['dyn_mass']) > 0:
+    if n_mc_fit > 0:
         dm_lo, dm_med, dm_hi = np.percentile(mc_results['dyn_mass'], [2.5, 50, 97.5])
+        dmg_lo, dmg_med, dmg_hi = np.percentile(mc_results['dyn_mass_geom'], [2.5, 50, 97.5])
         print()
-        print("(Monte Carlo propagation of the WMPL trajectory solver uncertainties, {:d} "
-            "realizations, 95% CI)".format(len(mc_results['dyn_mass'])))
+        print("Monte Carlo over {:d} trajectory solver realizations (95% CI):".format(n_mc_fit))
+        print("(velocity fit uncertainty + trajectory geometry uncertainty)")
         print("MC 2.5%  = {:.3f} kg".format(dm_lo))
         print("MC Median= {:.3f} kg".format(dm_med))
         print("MC 97.5% = {:.3f} kg".format(dm_hi))
+        print("(trajectory geometry uncertainty only: {:.3f} [{:.3f}, {:.3f}] kg)".format(dmg_med, dmg_lo, \
+            dmg_hi))
 
     print()
     print("Simulation down to 3 km/s:")
     print("------------------------------------")
     print("Azim (+E of due N) and Elev: apparent ground-fixed radiant, epoch of date, gravity turn included")
-    if mc_results is not None and len(mc_results.get('final_mass', [])) > 0:
-        print("(-2sigma/nominal/+2sigma below vary only the dynamic mass on the nominal trajectory; "
-            "see the MC block below for the full solver-uncertainty propagation)")
+    if n_mc_final > 0:
+        print("(-2sigma/nominal/+2sigma below vary only the deceleration on the nominal trajectory; the "
+            "MC block after them also includes the trajectory geometry uncertainty)")
     print("Final end coordinates (-2sigma mass)")
     print("Mass      = {:.3f} kg".format(final_mass_lo))
     print("Lat (+N)  = {:.5f} deg".format(final_lat_lo))
@@ -1180,18 +1218,18 @@ if __name__ == "__main__":
     print("Elev      = {:.5f} deg".format(final_elev_hi))
     print("End decel = {:.3f} km/s^2".format(final_decel_hi/1000))
 
-    if mc_results is not None and len(mc_results.get('final_mass', [])) > 0:
-        n_mc = len(mc_results['final_mass'])
-        mass_lo, mass_med, mass_hi = np.percentile(mc_results['final_mass'], [2.5, 50, 97.5])
-        lat_lo, lat_med, lat_hi = np.percentile(mc_results['final_lat'], [2.5, 50, 97.5])
-        lon_lo, lon_med, lon_hi = np.percentile(mc_results['final_lon'], [2.5, 50, 97.5])
-        ele_lo, ele_med, ele_hi = np.percentile(mc_results['final_ele'], [2.5, 50, 97.5])
-        azim_lo, azim_med, azim_hi = np.percentile(mc_results['final_azim'], [2.5, 50, 97.5])
-        elev_lo, elev_med, elev_hi = np.percentile(mc_results['final_elev'], [2.5, 50, 97.5])
-        fdecel_lo, fdecel_med, fdecel_hi = np.percentile(mc_results['final_decel'], [2.5, 50, 97.5])
+    if n_mc_final > 0:
+        pct = [2.5, 50, 97.5]
+        mass_lo, mass_med, mass_hi = np.nanpercentile(mc_results['final_mass'], pct)
+        lat_lo, lat_med, lat_hi = np.nanpercentile(mc_results['final_lat'], pct)
+        lon_lo, lon_med, lon_hi = np.nanpercentile(mc_results['final_lon'], pct)
+        ele_lo, ele_med, ele_hi = np.nanpercentile(mc_results['final_ele'], pct)
+        azim_lo, azim_med, azim_hi = np.nanpercentile(mc_results['final_azim'], pct)
+        elev_lo, elev_med, elev_hi = np.nanpercentile(mc_results['final_elev'], pct)
+        fdecel_lo, fdecel_med, fdecel_hi = np.nanpercentile(mc_results['final_decel'], pct)
 
         print()
-        print("Final end coordinates (Monte Carlo, {:d} realizations, 95% CI)".format(n_mc))
+        print("Final end coordinates (Monte Carlo, {:d} realizations, 95% CI)".format(n_mc_final))
         print("Mass      = {:.3f} kg     [{:.3f}, {:.3f}]".format(mass_med, mass_lo, mass_hi))
         print("Lat (+N)  = {:.5f} deg    [{:.5f}, {:.5f}]".format(lat_med, lat_lo, lat_hi))
         print("Lon (+E)  = {:.5f} deg    [{:.5f}, {:.5f}]".format(lon_med, lon_lo, lon_hi))
@@ -1201,12 +1239,6 @@ if __name__ == "__main__":
         print("End decel = {:.3f} km/s^2 [{:.3f}, {:.3f}]".format(fdecel_med/1000, fdecel_lo/1000, \
             fdecel_hi/1000))
 
-    elif mc_results is not None:
-        # Ran with --mc_no_final_sim: only the dynamic mass at the evaluation point was propagated
-        print()
-        print("Monte Carlo uncertainty propagation (WMPL trajectory solver uncertainties, 95% CI):")
-        print("------------------------------------")
-        printMCPercentiles(mc_results)
 
 
     ax2.invert_yaxis()
