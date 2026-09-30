@@ -17,17 +17,17 @@ from wmpl.MetSim.GUI import SimulationResults
 from wmpl.Trajectory.Trajectory import applyGravityDrop
 
 
-def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a):
+def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a, v_kill=3000):
 
     # Init simulation constants
     const = Constants()
 
 
     # Set minimum simulation height
-    const.h_kill = 15000 # m 
+    const.h_kill = 15000 # m
 
-    # Set minimum simulation speed
-    const.v_kill = 3000 # m/s
+    # Set minimum simulation speed, where ablation is taken to stop (m/s)
+    const.v_kill = v_kill
 
 
     # Set meteoroid parameters
@@ -216,9 +216,10 @@ def pointOnTrajectory(traj, length, t):
     return P
 
 
-def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
-    """ Propagate a fragment of the given dynamic mass from the evaluation point down to 3 km/s with the
-        single-body ablation model, and compute where and in which direction it ends.
+def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a, v_kill=3000):
+    """ Propagate a fragment of the given dynamic mass from the evaluation point down to the speed where
+        ablation is taken to stop (3 km/s by default) with the single-body ablation model, and compute where
+        and in which direction it ends.
 
         The returned final azimuth and elevation are those of the apparent ground-fixed radiant (epoch of
         date), as traj.orbit.azimuth_apparent_norot and elevation_apparent_norot, evaluated at the final point
@@ -233,6 +234,9 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
         vend: [float] Velocity at the evaluation point (m/s).
         gamma_a: [float] Product of the drag coefficient and the shape factor used for the dynamic mass. Not
             used by the simulation itself, see runFragSim().
+
+    Keyword arguments:
+        v_kill: [float] Speed at which the simulation stops (m/s). 3000 by default.
 
     Return:
         (sr, final_mass, final_lat, final_lon, final_ele, final_azim, final_elev): [tuple]
@@ -276,7 +280,7 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
     
 
     # Run the simulation until ablation stops
-    sr = runFragSim(dyn_mass, density, lat, lon, jd, hend, vend, entry_angle, gamma_a)
+    sr = runFragSim(dyn_mass, density, lat, lon, jd, hend, vend, entry_angle, gamma_a, v_kill=v_kill)
 
     # Extract the final height
     final_ht = 0
@@ -621,16 +625,16 @@ MC_FINAL_KEYS = ['final_mass', 'final_lat', 'final_lon', 'final_ele', 'final_azi
 
 
 def _mcRealization(traj_mc, seed, label, ht_max, ht_min, eval_point, bulk_density, gamma_a, max_vel, \
-    mass_max, sigma_clip, run_final_sim):
+    mass_max, sigma_clip, run_final_sim, v_kill, v_kill_sigma):
     """ Process one Monte Carlo trajectory realization for runMonteCarloDynMass(). It is a module-level
         function so it can be sent to the worker processes.
 
     Arguments:
         traj_mc: [Trajectory] Monte Carlo trajectory realization.
-        seed: [int] Random seed for drawing the velocity fit parameters of this realization.
+        seed: [int] Random seed for the draws of this realization.
         label: [str] Realization label used in the printouts.
-        ht_max, ht_min, eval_point, bulk_density, gamma_a, max_vel, mass_max, sigma_clip, run_final_sim: See
-            runMonteCarloDynMass().
+        ht_max, ht_min, eval_point, bulk_density, gamma_a, max_vel, mass_max, sigma_clip, run_final_sim,
+            v_kill, v_kill_sigma: See runMonteCarloDynMass().
 
     Return:
         [dict or None] The values of this realization (see runMonteCarloDynMass()), or None if no velocity fit
@@ -647,8 +651,10 @@ def _mcRealization(traj_mc, seed, label, ht_max, ht_min, eval_point, bulk_densit
             "window.".format(label))
         return None
 
+    rng = np.random.default_rng(seed)
+
     # Draw the velocity fit parameters from the fit covariance of this realization
-    slope, intercept = np.random.default_rng(seed).multivariate_normal(fit_res['popt'], fit_res['pcov'])
+    slope, intercept = rng.multivariate_normal(fit_res['popt'], fit_res['pcov'])
     decel = max(-slope, 0)
     vel_eval = lineFunc(fit_res['time_eval'], slope, intercept)
 
@@ -664,17 +670,27 @@ def _mcRealization(traj_mc, seed, label, ht_max, ht_min, eval_point, bulk_densit
     if not run_final_sim:
         return res
 
+    # Draw the speed where ablation stops, redrawing non-positive values
+    v_kill_nominal = v_kill
+    if v_kill_sigma > 0:
+        v_kill = rng.normal(v_kill_nominal, v_kill_sigma)
+        while v_kill <= 0:
+            v_kill = rng.normal(v_kill_nominal, v_kill_sigma)
+
+    res['v_kill'] = v_kill
+
     # Keep the realization in the dynamic mass statistics even if its end point cannot be simulated
     final_vals = [np.nan]*len(MC_FINAL_KEYS)
 
-    if vel_eval <= 3000:
+    if vel_eval <= v_kill:
         print("MC realization {:s}: no final simulation, the evaluation velocity is already below "
-            "3 km/s.".format(label))
+            "{:.2f} km/s.".format(label, v_kill/1000))
 
     else:
         try:
             sr_mc, final_mass, final_lat, final_lon, final_ele, final_azim, final_elev = \
-                computeFragEndParams(traj_mc, dyn_mass, bulk_density, fit_res['ht_eval'], vel_eval, gamma_a)
+                computeFragEndParams(traj_mc, dyn_mass, bulk_density, fit_res['ht_eval'], vel_eval, gamma_a, \
+                    v_kill=v_kill)
 
             final_decel = (sr_mc.main_vel_arr[-1] - sr_mc.main_vel_arr[-2]) \
                 /(sr_mc.time_arr[-1] - sr_mc.time_arr[-2])
@@ -691,9 +707,11 @@ def _mcRealization(traj_mc, seed, label, ht_max, ht_min, eval_point, bulk_densit
 
 
 def runMonteCarloDynMass(mc_traj_list, ht_max, ht_min, eval_point, bulk_density, gamma_a, max_vel, \
-    mass_max, sigma_clip, n_samples=None, run_final_sim=True, rng_seed=None, cores=None):
+    mass_max, sigma_clip, n_samples=None, run_final_sim=True, rng_seed=None, cores=None, v_kill=3000, \
+    v_kill_sigma=0):
     """ Propagate the uncertainties through the dynamic mass fit (and, optionally, through the final fragment
-        simulation down to 3 km/s) over the WMPL trajectory solver's Monte Carlo realizations.
+        simulation down to the speed where ablation stops) over the WMPL trajectory solver's Monte Carlo
+        realizations.
 
         The solver perturbs only the lines of sight to get each realization's radiant and state vector, and
         then computes the point velocities and heights from the original, un-noised observations (see
@@ -709,12 +727,15 @@ def runMonteCarloDynMass(mc_traj_list, ht_max, ht_min, eval_point, bulk_density,
             dynMassFromTraj() / computeFragEndParams().
         n_samples: [int or None] Maximum number of realizations to use. If mc_traj_list is larger, a random
             subset of this size is drawn without replacement. None uses all realizations.
-        run_final_sim: [bool] Also run the final fragment simulation (down to 3 km/s) for every realization,
+        run_final_sim: [bool] Also run the final fragment simulation (down to v_kill) for every realization,
             to get the final mass, position and radiant uncertainty. Slower.
-        rng_seed: [int or None] Random seed used for subsampling and for drawing the velocity fit parameters.
-            Each realization gets its own seed from it, so the results do not depend on the number of cores.
+        rng_seed: [int or None] Random seed used for subsampling and for all the draws. Each realization gets
+            its own seed from it, so the results do not depend on the number of cores.
         cores: [int or None] Number of processes used to run the realizations in parallel. None uses all
             available cores, 1 runs them serially.
+        v_kill: [float] Nominal speed where ablation is taken to stop and the final simulation ends (m/s).
+        v_kill_sigma: [float] Standard deviation of v_kill (m/s). If above 0, every realization draws its own
+            v_kill from a normal distribution, redrawing non-positive values.
 
     Return:
         results: [dict of ndarray] One entry per successfully fitted realization:
@@ -723,6 +744,7 @@ def runMonteCarloDynMass(mc_traj_list, ht_max, ht_min, eval_point, bulk_density,
             ht_eval, time_eval: evaluation point of the realization.
             final_mass, final_lat, final_lon, final_ele, final_azim, final_elev, final_decel: if
                 run_final_sim is True, NaN where the simulation could not be run.
+            v_kill: if run_final_sim is True, the speed where the simulation of the realization stops.
     """
 
     rng = np.random.default_rng(rng_seed)
@@ -739,7 +761,7 @@ def runMonteCarloDynMass(mc_traj_list, ht_max, ht_min, eval_point, bulk_density,
     seeds = rng.integers(0, 2**63 - 1, size=n_total)
 
     domain = [[traj_mc, seed, "{:d}/{:d}".format(i + 1, n_total), ht_max, ht_min, eval_point, bulk_density, \
-        gamma_a, max_vel, mass_max, sigma_clip, run_final_sim] for i, (traj_mc, seed) \
+        gamma_a, max_vel, mass_max, sigma_clip, run_final_sim, v_kill, v_kill_sigma] for i, (traj_mc, seed) \
         in enumerate(zip(traj_samples, seeds))]
 
     # Do not start more processes than there are realizations
@@ -753,7 +775,7 @@ def runMonteCarloDynMass(mc_traj_list, ht_max, ht_min, eval_point, bulk_density,
 
     keys = ['dyn_mass', 'decel', 'vel_eval', 'dyn_mass_geom', 'decel_geom', 'ht_eval', 'time_eval']
     if run_final_sim:
-        keys += MC_FINAL_KEYS
+        keys += MC_FINAL_KEYS + ['v_kill']
 
     results = {key: np.array([res[key] for res in res_list], dtype=float) for key in keys}
 
@@ -796,7 +818,7 @@ if __name__ == "__main__":
     ### COMMAND LINE ARGUMENTS
 
     # Init the command line arguments parser
-    arg_parser = argparse.ArgumentParser(description="Compute the final dynamic mass of a fireball by defining the height range of the final portion where the mass is measured. A simulation is run to propagate the fragment to a speed of 3 km/s and estimate the final mass and location.")
+    arg_parser = argparse.ArgumentParser(description="Compute the final dynamic mass of a fireball by defining the height range of the final portion where the mass is measured. A simulation is run to propagate the fragment down to the speed where ablation stops (3 km/s by default, see --vkill) and estimate the final mass and location.")
 
     arg_parser.add_argument('traj_path', metavar='TRAJ_PATH', type=str, \
         help="Path to the trajectory pickle file.")
@@ -847,12 +869,20 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('--mc_no_final_sim', action='store_true', \
         help='When propagating Monte Carlo uncertainties, skip the final fragment ablation simulation (down '
-        'to 3 km/s) for every realization and only propagate the dynamic mass at the evaluation point. Much '
+        'to the kill speed) for every realization and only propagate the dynamic mass at the evaluation point. Much '
         'faster, but does not give final mass/position/radiant uncertainties.')
 
     arg_parser.add_argument('--mc_seed', metavar='SEED', type=int, default=None, \
         help='Random seed for subsampling the Monte Carlo realizations and drawing their velocity fit '
         'parameters. The results do not depend on --mc_cores.')
+
+    arg_parser.add_argument('--vkill', metavar='V_KILL', type=float, default=3.0, \
+        help='Speed in km/s where ablation is taken to stop and the final simulation ends. Default is 3 km/s.')
+
+    arg_parser.add_argument('--vkill_sigma', metavar='V_KILL_SIGMA', type=float, default=0.0, \
+        help='Standard deviation in km/s of the kill speed, used with --mc: every Monte Carlo realization '
+        'draws its own kill speed from a normal distribution centred on --vkill (non-positive draws are '
+        'redrawn). Default is 0, i.e. a fixed kill speed.')
 
     arg_parser.add_argument('--mc_cores', metavar='CORES', type=int, default=None, \
         help='Number of CPU cores used to process the Monte Carlo realizations in parallel. Default is all '
@@ -881,7 +911,15 @@ if __name__ == "__main__":
     
     else:
         max_vel = 73_000
-    
+
+    # Speed where ablation stops, and its spread for the Monte Carlo (m/s)
+    if cml_args.vkill <= 0:
+        raise ValueError("--vkill has to be positive, got {:g} km/s".format(cml_args.vkill))
+    if cml_args.vkill_sigma < 0:
+        raise ValueError("--vkill_sigma cannot be negative, got {:g} km/s".format(cml_args.vkill_sigma))
+    v_kill = 1000*cml_args.vkill
+    v_kill_sigma = 1000*cml_args.vkill_sigma
+
 
     # Load the trajectory
     traj = loadPickle(*os.path.split(os.path.abspath(cml_args.traj_path)))
@@ -1064,7 +1102,7 @@ if __name__ == "__main__":
 
     final_decel = final_decel_hi = final_decel_lo = 0
 
-    # Final values stay undefined (NaN) if the evaluation velocity is already below 3 km/s
+    # Final values stay undefined (NaN) if the evaluation velocity is already below the kill speed
     final_mass = final_mass_hi = final_mass_lo = np.nan
     final_lat = final_lat_hi = final_lat_lo = np.nan
     final_lon = final_lon_hi = final_lon_lo = np.nan
@@ -1072,11 +1110,11 @@ if __name__ == "__main__":
     final_azim = final_azim_hi = final_azim_lo = np.nan
     final_elev = final_elev_hi = final_elev_lo = np.nan
 
-    # Run the fragment until the final velocity of 3 km/s
-    if vel_eval > 3000:
+    # Run the fragment until the speed where ablation stops
+    if vel_eval > v_kill:
 
         print()
-        print("Running simulation down to 3 km/s...")
+        print("Running simulation down to {:g} km/s...".format(v_kill/1000))
         print()
         print("  init vel = {:.2f} km/s".format(vel_eval/1000))
         print("  init ht  = {:.2f} km".format(ht_eval/1000))
@@ -1084,25 +1122,25 @@ if __name__ == "__main__":
         print("  init mass = {:.3f} kg".format(dyn_mass))
         print()
         final_sr, final_mass, final_lat, final_lon, final_ele, final_azim, final_elev = \
-            computeFragEndParams(traj, dyn_mass, bulk_density, ht_eval, vel_eval, gamma_a)
+            computeFragEndParams(traj, dyn_mass, bulk_density, ht_eval, vel_eval, gamma_a, v_kill=v_kill)
 
         print()
-        print("Running simulation down to 3 km/s (+2 sigma mass)...")
+        print("Running simulation down to {:g} km/s (+2 sigma mass)...".format(v_kill/1000))
         print()
         print("  decel = {:.2f} km/s^2".format(decel_hi/1000))
         print("  init mass = {:.3f} kg".format(dyn_mass_hi))
         print()
         final_sr_hi, final_mass_hi, final_lat_hi, final_lon_hi, final_ele_hi, final_azim_hi, final_elev_hi = \
-            computeFragEndParams(traj, dyn_mass_hi, bulk_density, ht_eval, vel_eval, gamma_a)
+            computeFragEndParams(traj, dyn_mass_hi, bulk_density, ht_eval, vel_eval, gamma_a, v_kill=v_kill)
 
         print()
-        print("Running simulation down to 3 km/s (-2 sigma mass)...")
+        print("Running simulation down to {:g} km/s (-2 sigma mass)...".format(v_kill/1000))
         print()
         print("  decel = {:.2f} km/s^2".format(decel_lo/1000))
         print("  init mass = {:.3f} kg".format(dyn_mass_lo))
         print()
         final_sr_lo, final_mass_lo, final_lat_lo, final_lon_lo, final_ele_lo, final_azim_lo, final_elev_lo = \
-            computeFragEndParams(traj, dyn_mass_lo, bulk_density, ht_eval, vel_eval, gamma_a)
+            computeFragEndParams(traj, dyn_mass_lo, bulk_density, ht_eval, vel_eval, gamma_a, v_kill=v_kill)
         
         print()
 
@@ -1147,7 +1185,7 @@ if __name__ == "__main__":
             mc_results = runMonteCarloDynMass(mc_traj_list, ht_max, ht_min, eval_point, bulk_density, \
                 gamma_a, max_vel, mass_max, cml_args.sigma_clip, n_samples=cml_args.mc_samples, \
                 run_final_sim=(not cml_args.mc_no_final_sim), rng_seed=cml_args.mc_seed, \
-                cores=cml_args.mc_cores)
+                cores=cml_args.mc_cores, v_kill=v_kill, v_kill_sigma=v_kill_sigma)
 
             print()
             print("Monte Carlo uncertainty summary (95% CI):")
@@ -1227,7 +1265,7 @@ if __name__ == "__main__":
             dmg_hi))
 
     print()
-    print("Simulation down to 3 km/s:")
+    print("Simulation down to {:g} km/s:".format(v_kill/1000))
     print("------------------------------------")
     print("Azim (+E of due N) and Elev: apparent ground-fixed radiant, epoch of date, gravity turn included")
     if n_mc_final > 0:
@@ -1278,6 +1316,11 @@ if __name__ == "__main__":
         print("Elev      = {:.5f} deg    [{:.5f}, {:.5f}]".format(elev_med, elev_lo, elev_hi))
         print("End decel = {:.3f} km/s^2 [{:.3f}, {:.3f}]".format(fdecel_med/1000, fdecel_lo/1000, \
             fdecel_hi/1000))
+
+        if v_kill_sigma > 0:
+            v_kill_sim = mc_results['v_kill'][~np.isnan(mc_results['final_mass'])]
+            vk_lo, vk_med, vk_hi = np.percentile(v_kill_sim, pct)
+            print("V kill    = {:.3f} km/s   [{:.3f}, {:.3f}]".format(vk_med/1000, vk_lo/1000, vk_hi/1000))
 
 
 
