@@ -35,6 +35,17 @@ def _airDensity(atm_profile, height):
     return atm_profile.density(height)
 
 
+def _endDecel(sr):
+    """ Deceleration at the end of a fragment simulation (m/s^2), or NaN if it took a single step, which
+        happens when it starts less than one step above the kill speed.
+    """
+
+    if len(sr.time_arr) < 2:
+        return np.nan
+
+    return (sr.main_vel_arr[-1] - sr.main_vel_arr[-2])/(sr.time_arr[-1] - sr.time_arr[-2])
+
+
 def _motionENU(azim, elev):
     """ Unit vector (east, north, up) of the direction of motion, opposite to a radiant at the given azimuth
         (+E of due N) and elevation, in radians.
@@ -774,9 +785,9 @@ def _mcRealization(traj_mc, traj_index, seed, label, ht_max, ht_min, eval_point,
         while density <= 0:
             density = rng.normal(bulk_density, density_sigma)
 
+    vel_air = _airSpeed(atm_profile, traj_mc, fit_res['ht_eval'], vel_eval)
     dyn_mass = dynamicMass(density, traj_mc.rend_lat, traj_mc.rend_lon, fit_res['ht_eval'], \
-        traj_mc.jdt_ref, _airSpeed(atm_profile, traj_mc, fit_res['ht_eval'], vel_eval), decel, gamma=1.0, \
-        shape_factor=gamma_a, \
+        traj_mc.jdt_ref, vel_air, decel, gamma=1.0, shape_factor=gamma_a, \
         atm_dens=_airDensity(atm_profile, fit_res['ht_eval']))
     dyn_mass = np.clip(dyn_mass, 0, mass_max)
 
@@ -801,7 +812,7 @@ def _mcRealization(traj_mc, traj_index, seed, label, ht_max, ht_min, eval_point,
     # Keep the realization in the dynamic mass statistics even if its end point cannot be simulated
     final_vals = [np.nan]*len(MC_FINAL_KEYS)
 
-    if vel_eval <= v_kill:
+    if vel_air <= v_kill:
         print("MC realization {:s}: no final simulation, the evaluation velocity is already below "
             "{:.2f} km/s.".format(label, v_kill/1000))
 
@@ -812,8 +823,7 @@ def _mcRealization(traj_mc, traj_index, seed, label, ht_max, ht_min, eval_point,
                 computeFragEndParams(traj_mc, dyn_mass, density, fit_res['ht_eval'], vel_eval, gamma_a, \
                     v_kill=v_kill, atm_profile=atm_profile)
 
-            final_decel = (sr_mc.main_vel_arr[-1] - sr_mc.main_vel_arr[-2]) \
-                /(sr_mc.time_arr[-1] - sr_mc.time_arr[-2])
+            final_decel = _endDecel(sr_mc)
 
             final_vals = [final_mass, final_lat, final_lon, final_ele, final_azim, final_elev, final_decel, \
                 final_vel, final_time]
@@ -1287,8 +1297,8 @@ if __name__ == "__main__":
     final_vel = final_vel_hi = final_vel_lo = np.nan
     final_sr = final_sr_hi = final_sr_lo = None
 
-    # Run the fragment until the speed where ablation stops
-    if vel_eval > v_kill:
+    # Run the fragment until the speed where ablation stops, which is a speed relative to the air
+    if vel_air > v_kill:
 
         print()
         print("Running simulation down to {:g} km/s...".format(v_kill/1000))
@@ -1327,12 +1337,9 @@ if __name__ == "__main__":
         print()
 
         # Get the deceleration in the last point
-        final_decel = (final_sr.main_vel_arr[-1] - final_sr.main_vel_arr[-2]) \
-            /(final_sr.time_arr[-1] - final_sr.time_arr[-2])
-        final_decel_hi = (final_sr_hi.main_vel_arr[-1] - final_sr_hi.main_vel_arr[-2]) \
-            /(final_sr_hi.time_arr[-1] - final_sr_hi.time_arr[-2])
-        final_decel_lo = (final_sr_lo.main_vel_arr[-1] - final_sr_lo.main_vel_arr[-2]) \
-            /(final_sr_lo.time_arr[-1] - final_sr_lo.time_arr[-2])
+        final_decel = _endDecel(final_sr)
+        final_decel_hi = _endDecel(final_sr_hi)
+        final_decel_lo = _endDecel(final_sr_lo)
 
         # Plot the simulated velocity until the end (time plot)
         ax2.plot(final_sr_lo.main_vel_arr/1000, final_sr_lo.time_arr + time_eval, label='Simulation (-2sigma)', color='k', linestyle='dashed')

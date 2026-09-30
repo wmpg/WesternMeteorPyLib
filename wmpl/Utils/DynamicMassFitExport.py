@@ -53,7 +53,7 @@ UNITS = {
     'ref_time_ds': 's after ref_time',
     'mass': 'kg',
     'density': 'kg/m^3',
-    'v_kill': 'km/s',
+    'v_kill': 'km/s, relative to the air',
     'dyn_mass': 'kg',
     'decel': 'km/s^2',
     'ht_eval': 'km',

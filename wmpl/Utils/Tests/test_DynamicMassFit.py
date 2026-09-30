@@ -24,7 +24,7 @@ from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.TrajConversions import derotatedRadiantAltAz, cartesian2Geo
 from wmpl.Utils.SampleTrajectoryPositions import sampleTrajectory
 from wmpl.Utils.DynamicMassFit import pointOnTrajectory, _robust_linear_fit, fitVelocity, runFragSim, \
-    SIM_HT_MIN, computeFragEndParams, _airSpeed, _motionENU
+    SIM_HT_MIN, computeFragEndParams, _airSpeed, _motionENU, _endDecel
 from wmpl.Utils.AtmosphereProfile import AtmosphereProfile
 from wmpl.Utils.Physics import dynamicMass
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly
@@ -228,6 +228,23 @@ def testFragmentSimulationUsesTheAtmosphereProfile(traj, tmp_path):
             5000, 45, 0.55, atm_profile=prof)
 
     assert sr.const.dens_co == pytest.approx(prof.fitPoly(SIM_HT_MIN, 30000)[0], rel=1e-12)
+
+
+def testEndDecelerationOfASingleStepSimulationIsNaN(traj):
+    """ A simulation that starts less than one step above the kill speed takes a single step, which has no
+        deceleration; a normal one has the deceleration of its last step.
+    """
+
+    args = (0.1, 3500, np.degrees(traj.rend_lat), np.degrees(traj.rend_lon), traj.jdt_ref, 30000, 5000, 45, 0.55)
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        single = runFragSim(*args, v_kill=4999)
+        normal = runFragSim(*args)
+
+    assert len(single.time_arr) == 1
+    assert np.isnan(_endDecel(single))
+    assert _endDecel(normal) == pytest.approx((normal.main_vel_arr[-1] - normal.main_vel_arr[-2]) \
+        /(normal.time_arr[-1] - normal.time_arr[-2]), rel=1e-12)
 
 
 ### The dynamic mass ###
