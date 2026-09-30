@@ -24,7 +24,7 @@ from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.TrajConversions import derotatedRadiantAltAz, cartesian2Geo
 from wmpl.Utils.SampleTrajectoryPositions import sampleTrajectory
 from wmpl.Utils.DynamicMassFit import pointOnTrajectory, _robust_linear_fit, fitVelocity, runFragSim, \
-    SIM_HT_MIN, computeFragEndParams, _airSpeed, _motionENU, _endDecel, _windResponse
+    SIM_HT_MIN, computeFragEndParams, _airSpeed, _motionENU, _endDecel
 from wmpl.Utils.AtmosphereProfile import AtmosphereProfile
 from wmpl.Utils.Physics import dynamicMass
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly, atmDensPoly, getAtmDensity
@@ -282,66 +282,6 @@ def _endState(traj, prof):
         return computeFragEndParams(traj, 1000.0, 3500, 100000.0, 20000.0, 0.55, atm_profile=prof)
 
 
-def _referenceRun(prof, h0, vel0, m0, wind, v_kill=3000.0, dt=1e-3):
-    """ Single-body integration with MetSim's physics (drag and ablation on the velocity relative to the air,
-        no gravity in the velocity), here on a flat Earth, with the wind given as a function of height and
-        evaluated at every step. It reproduces MetSim without wind to within MetSim's time step.
-    """
-
-    K = 0.7*1.21*3500.0**(-2/3.0)
-
-    def deriv(s):
-        u = s[3:6] - wind(s[2])
-        rho = prof.density(s[2])
-        return np.concatenate([s[3:6], -K*s[6]**(-1/3.0)*rho*vectMag(u)*u, \
-            [-K*0.005e-6*s[6]**(2/3.0)*rho*vectMag(u)**3]])
-
-    s = np.concatenate([[0.0, 0.0, h0], vel0, [m0]])
-    times, heights, speeds = [0.0], [h0], [vectMag(vel0 - wind(h0))]
-    while speeds[-1] > v_kill:
-        k1 = deriv(s); k2 = deriv(s + dt/2*k1); k3 = deriv(s + dt/2*k2); k4 = deriv(s + dt*k3)
-        s = s + dt/6*(k1 + 2*k2 + 2*k3 + k4)
-        times.append(times[-1] + dt); heights.append(s[2]); speeds.append(vectMag(s[3:6] - wind(s[2])))
-
-    return np.array(times), np.array(heights), np.array(speeds), s[0:3], s[3:6]
-
-
-def _angle(a, b):
-    return np.degrees(np.arccos(np.clip(np.dot(a, b)/vectMag(a)/vectMag(b), -1, 1)))
-
-
-def testWindResponseMatchesAnIntegrationWithTheWindChangingWithHeight(tmp_path):
-    """ The simulation runs in the frame of the wind at its start. Bringing its end back to the ground with
-        the response to the wind changing with height, and the stop moved to the local wind, lands on an
-        integration where the wind changes at every step.
-    """
-
-    # Wind from 10 m/s at 20 km to 70 m/s at 32 km, turning from 250 to 300 deg
-    path = str(tmp_path/"shear.csv")
-    with open(path, 'w') as f:
-        f.write("height,temperature,pressure,relative_humidity,wind_horizontal,wind_direction,wind_east,"
-            "wind_north,wind_up,density\n")
-        for ht in np.arange(0.0, 60100.0, 100.0):
-            frac = np.clip((ht - 20000.0)/12000.0, 0, 1)
-            f.write("{:.1f},250,1000,1,{:.3f},{:.3f},0,0,0,{:.10e}\n".format(ht, 10 + 60*frac, 250 + 50*frac, \
-                1.3*np.exp(-ht/7000.0)))
-    prof = AtmosphereProfile(path)
-    wind = lambda h: np.append(prof.wind(h), 0.0)
-
-    vel0 = 6300.0*_motionENU(np.radians(264.0), np.radians(41.4))
-    _, _, _, x_exact, v_exact = _referenceRun(prof, 30000.0, vel0, 0.112, wind)
-
-    wind0 = wind(30000.0)
-    times, heights, speeds, x_fixed, v_fixed = _referenceRun(prof, 30000.0, vel0, 0.112, lambda h: wind0)
-    dx, vel_end, _ = _windResponse(times, heights, speeds, (vel0 - wind0)/vectMag(vel0 - wind0), wind0, prof)
-
-    # Without the correction the direction is off by ~0.1 deg, the position by ~5 m and the speed by ~5 m/s
-    assert _angle(v_fixed, v_exact) > 0.05
-    assert _angle(vel_end, v_exact) < 0.005
-    assert vectMag(x_fixed + dx - x_exact) < 0.5
-    assert vectMag(vel_end) == pytest.approx(vectMag(v_exact), abs=0.5)
-
-
 def testDynamicMassUsesTheSpeedRelativeToTheAir(traj, tmp_path):
     """ A headwind adds its component along the motion to the speed the drag acts on. """
 
@@ -356,12 +296,11 @@ def testDynamicMassUsesTheSpeedRelativeToTheAir(traj, tmp_path):
     assert _airSpeed(None, traj, 100000.0, 20000.0) == 20000.0
 
 
-def testWindsAreHandledInTheAirFrame(traj, tmp_path):
-    """ In still air the wind path ends where the one without winds does. With a constant crosswind the final
-        velocity relative to the air is the simulation's final speed, and the end moves across the track by
-        the wind drift over the simulated time T minus the tilt of the path relative to the air, of length L:
-        (w.c)*(T - L/|u0|), with c the horizontal direction across the track and u0 the initial velocity
-        relative to the air.
+def testWindsInTheSimulationMoveTheEndAsExpected(traj, tmp_path):
+    """ In still air the simulation with winds ends where the one without winds does. With a constant crosswind
+        the final velocity relative to the air has the simulation's final speed, and the end moves across the track by the drift of the air over the simulated time T minus the tilt of
+        the path relative to the air, of length L: (w.c)*(T - L/|u0|), with c the horizontal direction across the
+        track and u0 the initial velocity relative to the air.
     """
 
     still = _windProfile(str(tmp_path/"still.csv"), 0.0, 0.0)
@@ -369,20 +308,34 @@ def testWindsAreHandledInTheAirFrame(traj, tmp_path):
     still.use_winds = False
     without_winds = _endState(traj, still)
 
-    assert with_winds[1:5] + with_winds[6:] == pytest.approx(without_winds[1:5] + without_winds[6:], rel=1e-9)
-    assert (with_winds[5] - without_winds[5] + 180)%360 - 180 == pytest.approx(0.0, abs=1e-7)
+    # Without winds MetSim turns its velocity to follow the local vertical, which in a discrete step adds a second
+    #   order change to the speed; with winds it moves in 3D without that term. Over this 100 km run the two
+    #   drift apart by a few parts in 1e7
+    assert with_winds[1:5] + with_winds[6:] == pytest.approx(without_winds[1:5] + without_winds[6:], rel=1e-6)
+    assert (with_winds[5] - without_winds[5] + 180)%360 - 180 == pytest.approx(0.0, abs=1e-5)
 
     windy = _windProfile(str(tmp_path/"windy.csv"), 50.0, 250.0)
     sr, _, lat, lon, ele, azim, elev, _, vel = _endState(traj, windy)
     wind = windy.wind(1000*ele)
 
+    vel_sim = np.array([sr.frag_main.vx, sr.frag_main.vy, sr.frag_main.vz])
     vel_air = vel*_motionENU(np.radians(azim), np.radians(elev)) - np.append(wind, 0.0)
     assert vectMag(vel_air) == pytest.approx(sr.frag_main.v, rel=1e-9)
+
+    # The final direction turns from the one without winds by as much as MetSim's velocity turned
+    angle = lambda a, b: np.degrees(np.arccos(np.clip(np.dot(a, b)/vectMag(a)/vectMag(b), -1, 1)))
+    motion0 = _motionENU(traj.orbit.azimuth_apparent_norot, traj.orbit.elevation_apparent_norot)
+    turn = angle(_motionENU(np.radians(azim), np.radians(elev)), \
+        _motionENU(np.radians(without_winds[5]), np.radians(without_winds[6])))
+    assert angle(vel_sim, motion0) > 0.01
+    assert turn == pytest.approx(angle(vel_sim, motion0), abs=1e-3)
 
     motion = _motionENU(traj.orbit.azimuth_apparent_norot, traj.orbit.elevation_apparent_norot)
     u0 = vectMag(20000.0*motion - np.append(windy.wind(100000.0), 0.0))
 
-    # Across the track at the end, where the two runs differ only by the wind correction
+    # Across the track at the end, where the two runs differ only by the wind. The path length relative to the
+    #   air is that of the simulation's speeds, which are relative to the air
+    length_air = np.sum(sr.main_vel_arr)*sr.const.dt
     azim_motion = np.radians(without_winds[5]) + np.pi
     across = np.array([np.cos(azim_motion), -np.sin(azim_motion)])
     r = sr.const.r_earth + 1000*ele
@@ -390,7 +343,7 @@ def testWindsAreHandledInTheAirFrame(traj, tmp_path):
         np.radians(lat - without_winds[2])*r])
 
     assert np.dot(shift, across) == pytest.approx( \
-        np.dot(wind, across)*(sr.time_arr[-1] - sr.frag_main.length/u0), abs=1.0)
+        np.dot(wind, across)*(sr.time_arr[-1] - length_air/u0), abs=1.0)
 
 
 def testFragmentSimulationAtmosphereFollowsMSISOverTheSimulatedHeights(traj):

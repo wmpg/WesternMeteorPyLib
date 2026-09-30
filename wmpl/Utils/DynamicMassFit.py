@@ -77,51 +77,8 @@ def _airSpeed(atm_profile, traj, height, vel):
         - wind)
 
 
-def _windResponse(times, heights, speeds, direction, wind0, atm_profile):
-    """ Bring the end of a simulation run in the frame of the wind at its start back to the ground frame,
-        including the wind changing with height along the path, which that simulation does not see.
-
-        To first order, the change of wind dw pulls the velocity at the rate the drag responds to it: linearizing
-        the drag -k|u|u gives lambda = a/|u| across the motion and 2*lambda along it. The simulation also stopped
-        at the kill speed relative to the wind at its start, so the stop is moved to where the speed relative to
-        the local wind gets there, at the final deceleration.
-
-    Arguments:
-        times, heights, speeds: [ndarray] Time (s), height (m) and speed relative to the air (m/s) along the
-            simulation, from its start.
-        direction: [ndarray] Unit vector (east, north, up) of the velocity relative to the air at the end.
-        wind0: [ndarray] Wind velocity (east, north, up) at the start (m/s).
-        atm_profile: [AtmosphereProfile] The profile giving the wind.
-
-    Return:
-        (dx, vel_end, dt_stop): [tuple]
-            dx: [ndarray] Change of the final position (m) from the simulation moved along with wind0.
-            vel_end: [ndarray] Final velocity relative to the ground (m/s).
-            dt_stop: [float] Change of the final time (s).
-    """
-
-    rates = -np.gradient(speeds, times)/speeds
-    wind_change = np.column_stack([atm_profile.wind(heights), np.zeros(len(heights))]) - wind0
-
-    dx, dv = np.zeros(3), np.zeros(3)
-    for i in range(1, len(times)):
-        dt = times[i] - times[i - 1]
-        pull = wind_change[i] - dv
-        dv = dv + dt*rates[i]*(pull + np.dot(pull, direction)*direction)
-        dx = dx + dt*dv
-
-    vel_end = speeds[-1]*direction + wind0 + dv
-
-    # Move the stop to where the speed relative to the local wind reaches the kill speed
-    vel_rel = vel_end - wind_change[-1] - wind0
-    decel_end = rates[-1]*speeds[-1]
-    dt_stop = (vectMag(vel_rel) - speeds[-1])/decel_end if decel_end > 0 else 0.0
-
-    return dx + vel_end*dt_stop, vel_end + (speeds[-1] - vectMag(vel_rel))*vel_rel/vectMag(vel_rel), dt_stop
-
-
 def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a, v_kill=3000, \
-    atm_profile=None):
+    atm_profile=None, radiant_azimuth=0.0):
 
     # Init simulation constants
     const = Constants()
@@ -176,6 +133,12 @@ def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a
 
     else:
         const.dens_co, _ = atm_profile.fitPoly(const.h_kill, ht_beg)
+
+        # MetSim uses the profile's winds at each height, relative to the direction of motion (radiant_azimuth in
+        #   degrees, +E of due N)
+        if atm_profile.use_winds:
+            const.wind_profile = atm_profile
+            const.radiant_azimuth = np.radians(radiant_azimuth)
 
     # Run the simulation
     frag_main, results_list, wake_results = runSimulation(const)
@@ -393,19 +356,9 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a, v_kill=30
         np.dot(traj.state_vect_mini, traj.radiant_eci_mini))
     
 
-    # With winds the drag acts on the velocity relative to the air, so the simulation runs in the frame moving
-    #   with the wind at the evaluation point, and its end is brought back to the ground frame below. Gravity
-    #   acts the same in both frames
-    wind = _windENU(atm_profile, hend)
-    if wind is not None:
-        motion = _motionENU(traj.orbit.azimuth_apparent_norot, traj.orbit.elevation_apparent_norot)
-        vel_air = vend*motion - wind
-        vend = vectMag(vel_air)
-        entry_angle = np.degrees(np.arcsin(-vel_air[2]/vend))
-
-    # Run the simulation until ablation stops
+    # Run the simulation until ablation stops. With the profile's winds, MetSim uses the wind at each height
     sr = runFragSim(dyn_mass, density, lat, lon, jd, hend, vend, entry_angle, gamma_a, v_kill=v_kill, \
-        atm_profile=atm_profile)
+        atm_profile=atm_profile, radiant_azimuth=np.degrees(traj.orbit.azimuth_apparent_norot))
 
     # Extract the final height
     final_ht = 0
@@ -415,8 +368,16 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a, v_kill=30
     # Extract the total simulation time
     final_time = np.max(sr.time_arr)
 
-    # Compute the total length and time since the first observed point on the trajectory
-    total_len = meas_len + sr.frag_main.length
+    # Compute the total length and time since the first observed point on the trajectory. With winds MetSim moved
+    #   the fragment in 3D, and the length is its displacement along the observed direction of motion
+    winds = sr.const.wind_profile is not None
+    if winds:
+        motion = _motionENU(traj.orbit.azimuth_apparent_norot, traj.orbit.elevation_apparent_norot)
+        displacement = np.array([sr.frag_main.px, sr.frag_main.py, sr.frag_main.pz])
+        sim_len = np.dot(displacement, motion)
+    else:
+        sim_len = sr.frag_main.length
+    total_len = meas_len + sim_len
     total_time = meas_time + final_time
 
 
@@ -460,19 +421,18 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a, v_kill=30
 
     final_vel = sr.frag_main.v
 
-    # Back to the ground frame: the air-frame path is tilted from the ground one by the wind, the air carried the
-    #   fragment along during the whole simulation, and the wind adds to its final velocity. The wind changing
-    #   with height along the path is added as the response of the fragment to it
-    if wind is not None:
-        tilt = vel_air/vend - motion
-        motion_end = _motionENU(final_azim, final_elev) + tilt
-        dx, vel_end, dt_stop = _windResponse(np.append(0.0, sr.time_arr), np.append(hend, sr.main_height_arr), \
-            np.append(vend, sr.main_vel_arr), motion_end/vectMag(motion_end), wind, atm_profile)
-        shift = sr.frag_main.length*tilt + wind*final_time + dx
-        total_time += dt_stop
+    # With winds, add where MetSim's 3D path left the straight line of the observed motion, and take the velocity
+    #   MetSim ends with. The gravity turn above was computed with MetSim's speeds, which are relative to the air,
+    #   so it turns the velocity relative to the air, and the wind is added back after it
+    if winds:
+        shift = displacement - sim_len*motion
         final_lat += shift[1]/(sr.const.r_earth + final_ele)
         final_lon += shift[0]/((sr.const.r_earth + final_ele)*np.cos(final_lat))
         final_ele += shift[2]
+        wind_end = np.append(sr.const.wind_profile.wind(sr.frag_main.h), 0.0)
+        vel_rel = np.array([sr.frag_main.vx, sr.frag_main.vy, sr.frag_main.vz]) - wind_end
+        motion_end = _motionENU(final_azim, final_elev) + vel_rel/vectMag(vel_rel) - motion
+        vel_end = vectMag(vel_rel)*motion_end/vectMag(motion_end) + wind_end
         final_vel = vectMag(vel_end)
         final_azim = np.arctan2(-vel_end[0], -vel_end[1])%(2*np.pi)
         final_elev = np.arcsin(-vel_end[2]/final_vel)

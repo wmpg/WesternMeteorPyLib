@@ -116,6 +116,16 @@ class Constants(object):
         # Zenith angle (radians)
         self.zenith_angle = math.radians(45)
 
+        # Optional winds: an object whose wind(height) method gives the east and north wind velocity (m/s) at a
+        #   height (m), such as wmpl.Utils.AtmosphereProfile.AtmosphereProfile. With winds, drag, ablation and
+        #   light use the velocity relative to the air at each height, and the fragments move in 3D. None, the
+        #   default, runs without winds
+        self.wind_profile = None
+
+        # Azimuth of the radiant (radians, +E of due N), used only with winds to know how the wind blows
+        #   relative to the motion
+        self.radiant_azimuth = 0.0
+
         # Drag coefficient
         self.gamma = 1.0
 
@@ -295,6 +305,11 @@ class Fragment(object):
         self.vv = 0
         self.vh = 0
 
+        # Velocity (east, north, up) relative to the ground (m/s) and position (east, north, up) from the start
+        #   of the simulation (m), used only with winds. They are scalars so spawn_child() copies them
+        self.vx = self.vy = self.vz = 0
+        self.px = self.py = self.pz = 0
+
         # Total drop due to gravity (m)
         self.h_grav_drop_total = 0
 
@@ -375,6 +390,15 @@ class Fragment(object):
         # Compute velocity components
         self.vv = -v_init*math.cos(zenith_angle)
         self.vh = v_init*math.sin(zenith_angle)
+
+        # With winds, v_init is the speed relative to the ground and the fragment's speed is the one relative to
+        #   the air
+        if const.wind_profile is not None:
+            self.vx = -self.vh*math.sin(const.radiant_azimuth)
+            self.vy = -self.vh*math.cos(const.radiant_azimuth)
+            self.vz = self.vv
+            wind_e, wind_n = const.wind_profile.wind(self.h)
+            self.v = math.sqrt((self.vx - wind_e)**2 + (self.vy - wind_n)**2 + self.vz**2)
 
         self.active = True
         self.n_grains = 1
@@ -773,12 +797,20 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
     #   post-loop scan of the whole fragment list
     mass_total_active = 0.0
 
+    # Checked once per call, since the per-fragment loop below is the hot path
+    winds = const.wind_profile is not None
+
     # Go through all active fragments
     for frag in fragments:
 
         # Skip the fragment if it's not active
         if not frag.active:
             continue
+
+        # With winds, drag, ablation and light depend on the speed relative to the air at the current height
+        if winds:
+            wind_e, wind_n = const.wind_profile.wind(frag.h)
+            frag.v = math.sqrt((frag.vx - wind_e)**2 + (frag.vy - wind_n)**2 + frag.vz**2)
 
         # Get atmosphere density for the given height
         rho_atm = atmDensityPoly(frag.h, const.dens_co)
@@ -809,7 +841,20 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
         # If the deceleration is negative (i.e. the fragment is accelerating), then stop the fragment
         if deceleration_total > 0:
             frag.vv = frag.vh = frag.v = 0
+            frag.vx = frag.vy = frag.vz = 0
             deceleration_total = 0
+
+        # With winds, drag slows the velocity relative to the air along its own direction, and the fragment keeps
+        #   the velocity of the air around it
+        elif winds:
+            scale = 1 + deceleration_total*const.dt/frag.v
+            frag.vx = wind_e + (frag.vx - wind_e)*scale
+            frag.vy = wind_n + (frag.vy - wind_n)*scale
+            frag.vz *= scale
+            frag.v *= scale
+
+            # The same negligible gravity drop as without winds
+            frag.h_grav_drop_total += 0.5*G0/((1 + frag.h/const.r_earth)**2)*const.dt**2
 
         # Otherwise update the velocity
         else:
@@ -858,7 +903,15 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
                 frag.h = 0
 
         # Update length along the track
-        frag.length += frag.v*const.dt
+        if not winds:
+            frag.length += frag.v*const.dt
+
+        # With winds, move the fragment in 3D, and measure the length along its path over the ground
+        else:
+            frag.px += frag.vx*const.dt
+            frag.py += frag.vy*const.dt
+            frag.pz += frag.vz*const.dt
+            frag.length += math.sqrt(frag.vx**2 + frag.vy**2 + frag.vz**2)*const.dt
 
         # Update the mass
         frag.m = m_new
@@ -867,7 +920,14 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
         # frag.h = frag.h + frag.vv*const.dt
 
         # Compute the height taking the curvature of the Earth and the gravity drop into account
-        frag.h = heightCurvature(const.h_init, const.zenith_angle, frag.length, const.r_earth)
+        if not winds:
+            frag.h = heightCurvature(const.h_init, const.zenith_angle, frag.length, const.r_earth)
+
+        # With winds, the height of the 3D position over a spherical Earth
+        else:
+            frag.h = math.sqrt(frag.px**2 + frag.py**2 + (const.r_earth + const.h_init + frag.pz)**2) \
+                - const.r_earth
+
         frag.h -= frag.h_grav_drop_total
 
         # Get the luminous efficiency
