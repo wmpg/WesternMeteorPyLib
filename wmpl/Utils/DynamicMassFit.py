@@ -1,4 +1,5 @@
 import os
+import multiprocessing
 
 import numpy as np
 import scipy.optimize
@@ -10,6 +11,7 @@ from wmpl.Utils.Math import lineFunc, vectMag
 from wmpl.Utils.TrajConversions import cartesian2Geo, derotatedRadiantAltAz
 from wmpl.Utils.Physics import dynamicMass
 from wmpl.Utils.Pickling import loadPickle
+from wmpl.Utils.PyDomainParallelizer import domainParallelizer
 from wmpl.MetSim.MetSimErosion import Constants, runSimulation, G0
 from wmpl.MetSim.GUI import SimulationResults
 from wmpl.Trajectory.Trajectory import applyGravityDrop
@@ -614,8 +616,82 @@ def dynMassFromTraj(traj, ht_max, ht_min, eval_point, bulk_density, gamma_a, max
 
 
 
+MC_FINAL_KEYS = ['final_mass', 'final_lat', 'final_lon', 'final_ele', 'final_azim', 'final_elev', \
+    'final_decel']
+
+
+def _mcRealization(traj_mc, seed, label, ht_max, ht_min, eval_point, bulk_density, gamma_a, max_vel, \
+    mass_max, sigma_clip, run_final_sim):
+    """ Process one Monte Carlo trajectory realization for runMonteCarloDynMass(). It is a module-level
+        function so it can be sent to the worker processes.
+
+    Arguments:
+        traj_mc: [Trajectory] Monte Carlo trajectory realization.
+        seed: [int] Random seed for drawing the velocity fit parameters of this realization.
+        label: [str] Realization label used in the printouts.
+        ht_max, ht_min, eval_point, bulk_density, gamma_a, max_vel, mass_max, sigma_clip, run_final_sim: See
+            runMonteCarloDynMass().
+
+    Return:
+        [dict or None] The values of this realization (see runMonteCarloDynMass()), or None if no velocity fit
+            could be made.
+    """
+
+    traj_mc = _ensureTrajDefaults(traj_mc)
+
+    fit_res = dynMassFromTraj(traj_mc, ht_max, ht_min, eval_point, bulk_density, gamma_a, max_vel, \
+        mass_max, sigma_clip=sigma_clip)
+
+    if fit_res is None:
+        print("MC realization {:s} skipped: no valid velocity fit or evaluation height in the height "
+            "window.".format(label))
+        return None
+
+    # Draw the velocity fit parameters from the fit covariance of this realization
+    slope, intercept = np.random.default_rng(seed).multivariate_normal(fit_res['popt'], fit_res['pcov'])
+    decel = max(-slope, 0)
+    vel_eval = lineFunc(fit_res['time_eval'], slope, intercept)
+
+    dyn_mass = dynamicMass(bulk_density, traj_mc.rend_lat, traj_mc.rend_lon, fit_res['ht_eval'], \
+        traj_mc.jdt_ref, vel_eval, decel, gamma=1.0, shape_factor=gamma_a)
+    dyn_mass = np.clip(dyn_mass, 0, mass_max)
+
+    res = {
+        'dyn_mass': dyn_mass, 'decel': decel, 'vel_eval': vel_eval, 'dyn_mass_geom': fit_res['dyn_mass'], \
+        'decel_geom': fit_res['decel'], 'ht_eval': fit_res['ht_eval'], 'time_eval': fit_res['time_eval']
+    }
+
+    if not run_final_sim:
+        return res
+
+    # Keep the realization in the dynamic mass statistics even if its end point cannot be simulated
+    final_vals = [np.nan]*len(MC_FINAL_KEYS)
+
+    if vel_eval <= 3000:
+        print("MC realization {:s}: no final simulation, the evaluation velocity is already below "
+            "3 km/s.".format(label))
+
+    else:
+        try:
+            sr_mc, final_mass, final_lat, final_lon, final_ele, final_azim, final_elev = \
+                computeFragEndParams(traj_mc, dyn_mass, bulk_density, fit_res['ht_eval'], vel_eval, gamma_a)
+
+            final_decel = (sr_mc.main_vel_arr[-1] - sr_mc.main_vel_arr[-2]) \
+                /(sr_mc.time_arr[-1] - sr_mc.time_arr[-2])
+
+            final_vals = [final_mass, final_lat, final_lon, final_ele, final_azim, final_elev, final_decel]
+
+        except Exception as e:
+            print("MC realization {:s}: the final simulation failed ({}).".format(label, e))
+
+    res.update(zip(MC_FINAL_KEYS, final_vals))
+
+    return res
+
+
+
 def runMonteCarloDynMass(mc_traj_list, ht_max, ht_min, eval_point, bulk_density, gamma_a, max_vel, \
-    mass_max, sigma_clip, n_samples=None, run_final_sim=True, rng_seed=None):
+    mass_max, sigma_clip, n_samples=None, run_final_sim=True, rng_seed=None, cores=None):
     """ Propagate the uncertainties through the dynamic mass fit (and, optionally, through the final fragment
         simulation down to 3 km/s) over the WMPL trajectory solver's Monte Carlo realizations.
 
@@ -636,6 +712,9 @@ def runMonteCarloDynMass(mc_traj_list, ht_max, ht_min, eval_point, bulk_density,
         run_final_sim: [bool] Also run the final fragment simulation (down to 3 km/s) for every realization,
             to get the final mass, position and radiant uncertainty. Slower.
         rng_seed: [int or None] Random seed used for subsampling and for drawing the velocity fit parameters.
+            Each realization gets its own seed from it, so the results do not depend on the number of cores.
+        cores: [int or None] Number of processes used to run the realizations in parallel. None uses all
+            available cores, 1 runs them serially.
 
     Return:
         results: [dict of ndarray] One entry per successfully fitted realization:
@@ -654,74 +733,29 @@ def runMonteCarloDynMass(mc_traj_list, ht_max, ht_min, eval_point, bulk_density,
         indices = rng.choice(len(traj_samples), size=n_samples, replace=False)
         traj_samples = [traj_samples[i] for i in indices]
 
-    keys = ['dyn_mass', 'decel', 'vel_eval', 'dyn_mass_geom', 'decel_geom', 'ht_eval', 'time_eval']
-    final_keys = ['final_mass', 'final_lat', 'final_lon', 'final_ele', 'final_azim', 'final_elev', \
-        'final_decel']
-    if run_final_sim:
-        keys += final_keys
-
-    results = {key: [] for key in keys}
-
     n_total = len(traj_samples)
 
-    for i, traj_mc in enumerate(traj_samples):
+    # One seed per realization, so the draws do not depend on how the realizations are split among cores
+    seeds = rng.integers(0, 2**63 - 1, size=n_total)
 
-        traj_mc = _ensureTrajDefaults(traj_mc)
+    domain = [[traj_mc, seed, "{:d}/{:d}".format(i + 1, n_total), ht_max, ht_min, eval_point, bulk_density, \
+        gamma_a, max_vel, mass_max, sigma_clip, run_final_sim] for i, (traj_mc, seed) \
+        in enumerate(zip(traj_samples, seeds))]
 
-        print("MC realization {:d}/{:d}...".format(i + 1, n_total))
+    # Do not start more processes than there are realizations
+    if cores is None:
+        cores = multiprocessing.cpu_count()
+    cores = max(1, min(cores, n_total))
 
-        fit_res = dynMassFromTraj(traj_mc, ht_max, ht_min, eval_point, bulk_density, gamma_a, max_vel, \
-            mass_max, sigma_clip=sigma_clip)
+    print("Running {:d} Monte Carlo realizations on {:d} core(s)...".format(n_total, cores))
 
-        if fit_res is None:
-            print("  Skipped: no valid velocity fit or evaluation height in the height window.")
-            continue
+    res_list = [res for res in domainParallelizer(domain, _mcRealization, cores=cores) if res is not None]
 
-        # Draw the velocity fit parameters from the fit covariance of this realization
-        slope, intercept = rng.multivariate_normal(fit_res['popt'], fit_res['pcov'])
-        decel = max(-slope, 0)
-        vel_eval = lineFunc(fit_res['time_eval'], slope, intercept)
+    keys = ['dyn_mass', 'decel', 'vel_eval', 'dyn_mass_geom', 'decel_geom', 'ht_eval', 'time_eval']
+    if run_final_sim:
+        keys += MC_FINAL_KEYS
 
-        dyn_mass = dynamicMass(bulk_density, traj_mc.rend_lat, traj_mc.rend_lon, fit_res['ht_eval'], \
-            traj_mc.jdt_ref, vel_eval, decel, gamma=1.0, shape_factor=gamma_a)
-        dyn_mass = np.clip(dyn_mass, 0, mass_max)
-
-        results['dyn_mass'].append(dyn_mass)
-        results['decel'].append(decel)
-        results['vel_eval'].append(vel_eval)
-        results['dyn_mass_geom'].append(fit_res['dyn_mass'])
-        results['decel_geom'].append(fit_res['decel'])
-        results['ht_eval'].append(fit_res['ht_eval'])
-        results['time_eval'].append(fit_res['time_eval'])
-
-        if not run_final_sim:
-            continue
-
-        # Keep the realization in the dynamic mass statistics even if its end point cannot be simulated
-        final_vals = [np.nan]*len(final_keys)
-
-        if vel_eval <= 3000:
-            print("  No final simulation: evaluation velocity already below 3 km/s.")
-
-        else:
-            try:
-                sr_mc, final_mass, final_lat, final_lon, final_ele, final_azim, final_elev = \
-                    computeFragEndParams(traj_mc, dyn_mass, bulk_density, fit_res['ht_eval'], vel_eval, \
-                        gamma_a)
-
-                final_decel = (sr_mc.main_vel_arr[-1] - sr_mc.main_vel_arr[-2]) \
-                    /(sr_mc.time_arr[-1] - sr_mc.time_arr[-2])
-
-                final_vals = [final_mass, final_lat, final_lon, final_ele, final_azim, final_elev, \
-                    final_decel]
-
-            except Exception as e:
-                print("  No final simulation: it failed ({}).".format(e))
-
-        for key, val in zip(final_keys, final_vals):
-            results[key].append(val)
-
-    results = {key: np.array(val, dtype=float) for key, val in results.items()}
+    results = {key: np.array([res[key] for res in res_list], dtype=float) for key in keys}
 
     print()
     print("Monte Carlo propagation: {:d}/{:d} realizations fitted.".format(len(results['dyn_mass']), n_total))
@@ -817,7 +851,12 @@ if __name__ == "__main__":
         'faster, but does not give final mass/position/radiant uncertainties.')
 
     arg_parser.add_argument('--mc_seed', metavar='SEED', type=int, default=None, \
-        help='Random seed used when subsampling Monte Carlo realizations with --mc_samples.')
+        help='Random seed for subsampling the Monte Carlo realizations and drawing their velocity fit '
+        'parameters. The results do not depend on --mc_cores.')
+
+    arg_parser.add_argument('--mc_cores', metavar='CORES', type=int, default=None, \
+        help='Number of CPU cores used to process the Monte Carlo realizations in parallel. Default is all '
+        'available cores; 1 runs them serially.')
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -1107,7 +1146,8 @@ if __name__ == "__main__":
 
             mc_results = runMonteCarloDynMass(mc_traj_list, ht_max, ht_min, eval_point, bulk_density, \
                 gamma_a, max_vel, mass_max, cml_args.sigma_clip, n_samples=cml_args.mc_samples, \
-                run_final_sim=(not cml_args.mc_no_final_sim), rng_seed=cml_args.mc_seed)
+                run_final_sim=(not cml_args.mc_no_final_sim), rng_seed=cml_args.mc_seed, \
+                cores=cml_args.mc_cores)
 
             print()
             print("Monte Carlo uncertainty summary (95% CI):")
