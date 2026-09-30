@@ -12,6 +12,7 @@ from wmpl.Utils.TrajConversions import cartesian2Geo, derotatedRadiantAltAz
 from wmpl.Utils.Physics import dynamicMass
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PyDomainParallelizer import domainParallelizer
+from wmpl.Utils.DynamicMassFitExport import ejectionState, buildDynMassFitOutput, saveDynMassFitPickle
 from wmpl.MetSim.MetSimErosion import Constants, runSimulation, G0
 from wmpl.MetSim.GUI import SimulationResults
 from wmpl.Trajectory.Trajectory import applyGravityDrop
@@ -239,7 +240,7 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a, v_kill=30
         v_kill: [float] Speed at which the simulation stops (m/s). 3000 by default.
 
     Return:
-        (sr, final_mass, final_lat, final_lon, final_ele, final_azim, final_elev): [tuple]
+        (sr, final_mass, final_lat, final_lon, final_ele, final_azim, final_elev, final_time): [tuple]
             sr: [SimulationResults] Results of the fragment simulation.
             final_mass: [float] Mass at the final point (kg).
             final_lat: [float] Latitude of the final point (deg, +N).
@@ -247,6 +248,7 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a, v_kill=30
             final_ele: [float] Height of the final point (km).
             final_azim: [float] Azimuth of the ground-fixed radiant at the final point (deg, +E of due N).
             final_elev: [float] Elevation of the ground-fixed radiant at the final point (deg).
+            final_time: [float] Time of the final point after traj.jdt_ref (s).
     """
 
     jd = traj.jdt_ref
@@ -346,7 +348,7 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a, v_kill=30
 
 
     return sr, sr.frag_main.m, np.degrees(final_lat), np.degrees(final_lon), final_ele/1000, \
-        np.degrees(final_azim), np.degrees(final_elev)
+        np.degrees(final_azim), np.degrees(final_elev), total_time
 
 
 
@@ -488,22 +490,16 @@ def _ensureTrajDefaults(traj):
 
 
 
-def findMCUncertaintiesPickle(traj_path):
-    """ Locate the Monte Carlo uncertainties pickle that the WMPL trajectory solver saves next to the main
-        trajectory pickle, and return the individual Monte Carlo trajectory realizations it holds.
-
-        The solver saves this as "Monte Carlo/<file_name>_mc_uncertainties.pickle", next to the main
-        "<file_name>_trajectory.pickle" (see Trajectory.run() in wmpl/Trajectory/Trajectory.py). Unlike
-        traj.uncertainties on the main pickle, whose mc_traj_list is stripped to save space, this file keeps
-        every accepted Monte Carlo run as a full, independently re-solved Trajectory object.
+def mcUncertaintiesPath(traj_path):
+    """ Path of the Monte Carlo uncertainties pickle that the WMPL trajectory solver saves next to the main
+        trajectory pickle, as "Monte Carlo/<file_name>_mc_uncertainties.pickle" (see Trajectory.run() in
+        wmpl/Trajectory/Trajectory.py). The file may not exist.
 
     Arguments:
         traj_path: [str] Path to the main "*_trajectory.pickle" file.
 
     Return:
-        mc_traj_list: [list or None] List of Trajectory objects, one per accepted Monte Carlo run, or None
-            if no Monte Carlo uncertainties pickle was found next to the trajectory pickle, or it did not
-            contain any runs.
+        [str] Absolute path of the Monte Carlo uncertainties pickle.
     """
 
     dir_path = os.path.dirname(os.path.abspath(traj_path))
@@ -514,13 +510,33 @@ def findMCUncertaintiesPickle(traj_path):
     else:
         file_name_core = os.path.splitext(file_name)[0]
 
-    mc_dir = os.path.join(dir_path, 'Monte Carlo')
-    mc_file = file_name_core + '_mc_uncertainties.pickle'
+    return os.path.join(dir_path, 'Monte Carlo', file_name_core + '_mc_uncertainties.pickle')
 
-    if not os.path.isfile(os.path.join(mc_dir, mc_file)):
+
+
+def findMCUncertaintiesPickle(traj_path):
+    """ Locate the Monte Carlo uncertainties pickle that the WMPL trajectory solver saves next to the main
+        trajectory pickle (see mcUncertaintiesPath()), and return the individual Monte Carlo trajectory
+        realizations it holds.
+
+        Unlike traj.uncertainties on the main pickle, whose mc_traj_list is stripped to save space, this file
+        keeps every accepted Monte Carlo run as a full, independently re-solved Trajectory object.
+
+    Arguments:
+        traj_path: [str] Path to the main "*_trajectory.pickle" file.
+
+    Return:
+        mc_traj_list: [list or None] List of Trajectory objects, one per accepted Monte Carlo run, or None
+            if no Monte Carlo uncertainties pickle was found next to the trajectory pickle, or it did not
+            contain any runs.
+    """
+
+    mc_path = mcUncertaintiesPath(traj_path)
+
+    if not os.path.isfile(mc_path):
         return None
 
-    traj_unc = loadPickle(mc_dir, mc_file)
+    traj_unc = loadPickle(*os.path.split(mc_path))
 
     mc_traj_list = getattr(traj_unc, 'mc_traj_list', None)
 
@@ -621,16 +637,17 @@ def dynMassFromTraj(traj, ht_max, ht_min, eval_point, bulk_density, gamma_a, max
 
 
 MC_FINAL_KEYS = ['final_mass', 'final_lat', 'final_lon', 'final_ele', 'final_azim', 'final_elev', \
-    'final_decel']
+    'final_decel', 'final_vel', 'final_time']
 
 
-def _mcRealization(traj_mc, seed, label, ht_max, ht_min, eval_point, bulk_density, gamma_a, max_vel, \
+def _mcRealization(traj_mc, traj_index, seed, label, ht_max, ht_min, eval_point, bulk_density, gamma_a, max_vel, \
     mass_max, sigma_clip, run_final_sim, v_kill, v_kill_sigma, density_sigma):
     """ Process one Monte Carlo trajectory realization for runMonteCarloDynMass(). It is a module-level
         function so it can be sent to the worker processes.
 
     Arguments:
         traj_mc: [Trajectory] Monte Carlo trajectory realization.
+        traj_index: [int] Index of the realization in the solver's list of Monte Carlo trajectories.
         seed: [int] Random seed for the draws of this realization.
         label: [str] Realization label used in the printouts.
         ht_max, ht_min, eval_point, bulk_density, gamma_a, max_vel, mass_max, sigma_clip, run_final_sim,
@@ -672,7 +689,7 @@ def _mcRealization(traj_mc, seed, label, ht_max, ht_min, eval_point, bulk_densit
     res = {
         'dyn_mass': dyn_mass, 'decel': decel, 'vel_eval': vel_eval, 'dyn_mass_geom': fit_res['dyn_mass'], \
         'decel_geom': fit_res['decel'], 'ht_eval': fit_res['ht_eval'], 'time_eval': fit_res['time_eval'], \
-        'density': density
+        'density': density, 'jdt_ref': traj_mc.jdt_ref, 'traj_index': traj_index
     }
 
     if not run_final_sim:
@@ -696,14 +713,15 @@ def _mcRealization(traj_mc, seed, label, ht_max, ht_min, eval_point, bulk_densit
 
     else:
         try:
-            sr_mc, final_mass, final_lat, final_lon, final_ele, final_azim, final_elev = \
+            sr_mc, final_mass, final_lat, final_lon, final_ele, final_azim, final_elev, final_time = \
                 computeFragEndParams(traj_mc, dyn_mass, density, fit_res['ht_eval'], vel_eval, gamma_a, \
                     v_kill=v_kill)
 
             final_decel = (sr_mc.main_vel_arr[-1] - sr_mc.main_vel_arr[-2]) \
                 /(sr_mc.time_arr[-1] - sr_mc.time_arr[-2])
 
-            final_vals = [final_mass, final_lat, final_lon, final_ele, final_azim, final_elev, final_decel]
+            final_vals = [final_mass, final_lat, final_lon, final_ele, final_azim, final_elev, final_decel, \
+                sr_mc.frag_main.v, final_time]
 
         except Exception as e:
             print("MC realization {:s}: the final simulation failed ({}).".format(label, e))
@@ -752,31 +770,35 @@ def runMonteCarloDynMass(mc_traj_list, ht_max, ht_min, eval_point, bulk_density,
         results: [dict of ndarray] One entry per successfully fitted realization:
             dyn_mass, decel, vel_eval: with the velocity fit parameters drawn from their covariance.
             density: bulk density of the realization.
+            jdt_ref: reference Julian date of the realization's trajectory.
+            traj_index: index of the realization in mc_traj_list.
             dyn_mass_geom, decel_geom: with the best-fit parameters and the nominal density, i.e. the
                 geometric uncertainty only.
             ht_eval, time_eval: evaluation point of the realization.
-            final_mass, final_lat, final_lon, final_ele, final_azim, final_elev, final_decel: if
-                run_final_sim is True, NaN where the simulation could not be run.
+            final_mass, final_lat, final_lon, final_ele, final_azim, final_elev, final_decel, final_vel,
+                final_time: if run_final_sim is True, NaN where the simulation could not be run. final_vel
+                is the speed at the final point (m/s), final_time its time after jdt_ref (s).
             v_kill: if run_final_sim is True, the speed where the simulation of the realization stops.
     """
 
     rng = np.random.default_rng(rng_seed)
 
-    traj_samples = mc_traj_list
+    traj_indices = list(range(len(mc_traj_list)))
 
-    if (n_samples is not None) and (len(traj_samples) > n_samples):
-        indices = rng.choice(len(traj_samples), size=n_samples, replace=False)
-        traj_samples = [traj_samples[i] for i in indices]
+    if (n_samples is not None) and (len(mc_traj_list) > n_samples):
+        traj_indices = [int(i) for i in rng.choice(len(mc_traj_list), size=n_samples, replace=False)]
+
+    traj_samples = [mc_traj_list[i] for i in traj_indices]
 
     n_total = len(traj_samples)
 
     # One seed per realization, so the draws do not depend on how the realizations are split among cores
     seeds = rng.integers(0, 2**63 - 1, size=n_total)
 
-    domain = [[traj_mc, seed, "{:d}/{:d}".format(i + 1, n_total), ht_max, ht_min, eval_point, bulk_density, \
+    domain = [[traj_mc, traj_index, seed, "{:d}/{:d}".format(i + 1, n_total), ht_max, ht_min, eval_point, bulk_density, \
         gamma_a, max_vel, mass_max, sigma_clip, run_final_sim, v_kill, v_kill_sigma, \
-        density_sigma] for i, (traj_mc, seed) \
-        in enumerate(zip(traj_samples, seeds))]
+        density_sigma] for i, (traj_mc, traj_index, seed) \
+        in enumerate(zip(traj_samples, traj_indices, seeds))]
 
     # Do not start more processes than there are realizations
     if cores is None:
@@ -787,7 +809,8 @@ def runMonteCarloDynMass(mc_traj_list, ht_max, ht_min, eval_point, bulk_density,
 
     res_list = [res for res in domainParallelizer(domain, _mcRealization, cores=cores) if res is not None]
 
-    keys = ['dyn_mass', 'decel', 'vel_eval', 'dyn_mass_geom', 'decel_geom', 'ht_eval', 'time_eval', 'density']
+    keys = ['dyn_mass', 'decel', 'vel_eval', 'dyn_mass_geom', 'decel_geom', 'ht_eval', 'time_eval', 'density', \
+        'jdt_ref', 'traj_index']
     if run_final_sim:
         keys += MC_FINAL_KEYS + ['v_kill']
 
@@ -903,6 +926,11 @@ if __name__ == "__main__":
         help='Standard deviation in km/s of the kill speed, used with --mc: every Monte Carlo realization '
         'draws its own kill speed from a normal distribution centred on --vkill (non-positive draws are '
         'redrawn). Default is 0, i.e. a fixed kill speed.')
+
+    arg_parser.add_argument('--save_pickle', metavar='PATH', nargs='?', const='', default=None, \
+        help='Save the results to a pickle made only of built-in Python types, readable without wmpl, with '
+        'the ejection states for a dark flight code (see wmpl.Utils.DynamicMassFitExport). If no path is '
+        'given, it is saved next to the trajectory pickle as <name>_dyn_mass_fit.pickle.')
 
     arg_parser.add_argument('--mc_cores', metavar='CORES', type=int, default=None, \
         help='Number of CPU cores used to process the Monte Carlo realizations in parallel. Default is all '
@@ -1134,6 +1162,8 @@ if __name__ == "__main__":
     final_ele = final_ele_hi = final_ele_lo = np.nan
     final_azim = final_azim_hi = final_azim_lo = np.nan
     final_elev = final_elev_hi = final_elev_lo = np.nan
+    final_time = final_time_hi = final_time_lo = np.nan
+    final_sr = final_sr_hi = final_sr_lo = None
 
     # Run the fragment until the speed where ablation stops
     if vel_eval > v_kill:
@@ -1146,7 +1176,7 @@ if __name__ == "__main__":
         print("  decel   = {:.2f} km/s^2".format(decel/1000))
         print("  init mass = {:.3f} kg".format(dyn_mass))
         print()
-        final_sr, final_mass, final_lat, final_lon, final_ele, final_azim, final_elev = \
+        final_sr, final_mass, final_lat, final_lon, final_ele, final_azim, final_elev, final_time = \
             computeFragEndParams(traj, dyn_mass, bulk_density, ht_eval, vel_eval, gamma_a, v_kill=v_kill)
 
         print()
@@ -1155,7 +1185,8 @@ if __name__ == "__main__":
         print("  decel = {:.2f} km/s^2".format(decel_hi/1000))
         print("  init mass = {:.3f} kg".format(dyn_mass_hi))
         print()
-        final_sr_hi, final_mass_hi, final_lat_hi, final_lon_hi, final_ele_hi, final_azim_hi, final_elev_hi = \
+        final_sr_hi, final_mass_hi, final_lat_hi, final_lon_hi, final_ele_hi, final_azim_hi, final_elev_hi, \
+            final_time_hi = \
             computeFragEndParams(traj, dyn_mass_hi, bulk_density, ht_eval, vel_eval, gamma_a, v_kill=v_kill)
 
         print()
@@ -1164,7 +1195,8 @@ if __name__ == "__main__":
         print("  decel = {:.2f} km/s^2".format(decel_lo/1000))
         print("  init mass = {:.3f} kg".format(dyn_mass_lo))
         print()
-        final_sr_lo, final_mass_lo, final_lat_lo, final_lon_lo, final_ele_lo, final_azim_lo, final_elev_lo = \
+        final_sr_lo, final_mass_lo, final_lat_lo, final_lon_lo, final_ele_lo, final_azim_lo, final_elev_lo, \
+            final_time_lo = \
             computeFragEndParams(traj, dyn_mass_lo, bulk_density, ht_eval, vel_eval, gamma_a, v_kill=v_kill)
         
         print()
@@ -1190,12 +1222,15 @@ if __name__ == "__main__":
     ### Propagate the WMPL trajectory Monte Carlo solver's uncertainties, if requested ###
 
     mc_results = None
+    mc_realizations = None
 
     if cml_args.mc:
 
         print()
         print("Looking for the Monte Carlo uncertainties pickle...")
         mc_traj_list = findMCUncertaintiesPickle(cml_args.traj_path)
+        if mc_traj_list is not None:
+            mc_realizations = len(mc_traj_list)
 
         if mc_traj_list is None:
             print("  No 'Monte Carlo/*_mc_uncertainties.pickle' file with Monte Carlo trajectory "
@@ -1355,6 +1390,53 @@ if __name__ == "__main__":
             vk_lo, vk_med, vk_hi = np.percentile(v_kill_sim, pct)
             print("V kill    = {:.3f} km/s   [{:.3f}, {:.3f}]".format(vk_med/1000, vk_lo/1000, vk_hi/1000))
 
+
+
+    # Save the results for a dark flight computation
+    if cml_args.save_pickle is not None:
+
+        def _state(sr, mass, lat, lon, ele, azim, elev, t):
+            if sr is None:
+                return None
+            return ejectionState(lat, lon, ele, sr.frag_main.v/1000, azim, elev, t, mass, bulk_density)
+
+        fit = {
+            'ht_min': ht_min, 'ht_max': ht_max, 'eval_point': eval_point, 'ht_eval': ht_eval/1000, \
+            'vel_eval': vel_eval/1000, 'time_eval': time_eval, 'decel': decel/1000, \
+            'decel_std': decel_std/1000, 'dyn_mass': dyn_mass, 'dyn_mass_minus_2sigma': dyn_mass_lo, \
+            'dyn_mass_plus_2sigma': dyn_mass_hi, 'sigma_clip': cml_args.sigma_clip
+        }
+
+        model = {
+            'gamma_a': gamma_a, 'density': bulk_density, 'density_sigma': cml_args.dens_sigma, \
+            'v_kill': v_kill/1000, 'v_kill_sigma': v_kill_sigma/1000, 'mass_max': mass_max, \
+            'atmosphere': 'NRLMSISE-00 polynomial fit (wmpl.Utils.AtmosphereDensity.fitAtmPoly)'
+        }
+
+        # Constants of the single-body ablation simulation
+        if final_sr is not None:
+            model.update({'sim_gamma': final_sr.const.gamma, 'sim_shape_factor': final_sr.const.shape_factor, \
+                'sim_ablation_coeff': final_sr.const.sigma*1e6})
+
+        output = buildDynMassFitOutput(traj.jdt_ref, fit, model, \
+            nominal=_state(final_sr, final_mass, final_lat, final_lon, final_ele, final_azim, final_elev, \
+                final_time), \
+            minus_2sigma=_state(final_sr_lo, final_mass_lo, final_lat_lo, final_lon_lo, final_ele_lo, \
+                final_azim_lo, final_elev_lo, final_time_lo), \
+            plus_2sigma=_state(final_sr_hi, final_mass_hi, final_lat_hi, final_lon_hi, final_ele_hi, \
+                final_azim_hi, final_elev_hi, final_time_hi), \
+            mc_results=mc_results, mc_realizations=mc_realizations, traj_path=cml_args.traj_path, \
+            mc_path=(mcUncertaintiesPath(cml_args.traj_path) if mc_results is not None else None), \
+            dmf_args=vars(cml_args))
+
+        pickle_path = cml_args.save_pickle
+        if not pickle_path:
+            pickle_path = os.path.join(dir_path, traj.file_name + "_dyn_mass_fit.pickle")
+
+        saveDynMassFitPickle(pickle_path, output)
+
+        print()
+        print("Saved the results to: {:s}".format(pickle_path))
 
 
     ax2.invert_yaxis()
