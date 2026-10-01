@@ -196,8 +196,9 @@ to 180 km, as before, misses the stratosphere by 10–30%.
 **With `--atm_profile`**, the density (and the winds, see below) come from a profile file instead. Two
 reasons to do so:
 
-- **The mass.** The real atmosphere of the night differs from the MSIS climatology. For the Pampeano
-  fireball an ERA5 profile is 4–5% denser than MSIS-00 at 20–30 km, which is 11–16% in the dynamic mass.
+- **The mass.** The real atmosphere of the night differs from the MSIS climatology. For Winchcombe the
+  ERA5 profile of the night is 9–10% denser than MSIS-00 at 20–30 km, which makes the dynamic mass 34%
+  larger: 0.121 kg instead of 0.090 kg.
 - **Continuity with the dark flight.** The dark flight starts where this tool ends, and should continue in
   the same atmosphere.
 
@@ -253,9 +254,11 @@ the ground's. What the wind changes is the drag, and with it how long the body t
 which the gravity turn builds up. Both are in the same integration, so this comes out by itself.
 
 **Validation.** MetSim with winds was compared with an independent integration of the same equations, with
-the wind evaluated at every step and a converged time step, using the ERA5 winds of the Pampeano event.
-They agree to within what MetSim's 5 ms steps leave without winds: a few metres to a few tens of metres in
-position, 0.002° in direction and 0.06% in mass, while ignoring the wind is off by 0.36° in direction.
+the wind evaluated at every step and a converged time step. Two winds were used: the ERA5 winds of the
+Winchcombe night, weak at these heights (1–10 m/s), and a wind turning from 250° to 300° and growing from
+10 to 70 m/s between 20 and 32 km. They agree to within what MetSim's 5 ms steps leave without winds: 1–12 m
+in position, 0.001° in direction and 0.06% in mass. Ignoring the wind is off by 0.05° in direction with the
+ERA5 winds and by 0.36° with the stronger ones.
 Tests in `wmpl/MetSim/Tests/test_MetSimErosion.py` repeat that comparison with a wind that turns and grows
 with height, with and without gravity and the Coriolis acceleration.
 
