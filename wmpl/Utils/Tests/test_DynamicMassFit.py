@@ -21,10 +21,13 @@ import numpy as np
 import pytest
 
 from wmpl.Utils.Pickling import loadPickle
-from wmpl.Utils.TrajConversions import derotatedRadiantAltAz, cartesian2Geo
+from wmpl.Utils.TrajConversions import derotatedRadiantAltAz, cartesian2Geo, jd2LST, latLonAlt2ECEF, \
+    altAz2RADec, raDec2ECI, eci2RaDec, raDec2AltAz
+from wmpl.Utils.GeoidHeightEGM96 import mslToWGS84Height
+from wmpl.MetSim import MetSimErosion
 from wmpl.Utils.SampleTrajectoryPositions import sampleTrajectory
 from wmpl.Utils.DynamicMassFit import pointOnTrajectory, _robust_linear_fit, fitVelocity, runFragSim, \
-    SIM_HT_MIN, computeFragEndParams, _airSpeed, _motionENU, _endDecel
+    SIM_HT_MIN, computeFragEndParams, _airSpeed, _motionENU, _endDecel, groundSpeed, evalPointState
 from wmpl.Utils.AtmosphereProfile import AtmosphereProfile
 from wmpl.Utils.Physics import dynamicMass
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly, atmDensPoly, getAtmDensity
@@ -285,22 +288,144 @@ def _endState(traj, prof):
 def testDynamicMassUsesTheSpeedRelativeToTheAir(traj, tmp_path):
     """ A headwind adds its component along the motion to the speed the drag acts on. """
 
-    elev = traj.orbit.elevation_apparent_norot
-    headwind = _windProfile(str(tmp_path/"head.csv"), 50.0, np.degrees(traj.orbit.azimuth_apparent_norot) + 180)
+    azim, elev = traj.orbit.azimuth_apparent_norot, traj.orbit.elevation_apparent_norot
+    headwind = _windProfile(str(tmp_path/"head.csv"), 50.0, np.degrees(azim) + 180)
 
-    assert _airSpeed(headwind, traj, 100000.0, 20000.0) == pytest.approx( \
+    assert _airSpeed(headwind, 100000.0, 20000.0, azim, elev) == pytest.approx( \
         np.sqrt(20000.0**2 + 2*20000.0*50.0*np.cos(elev) + 50.0**2), rel=1e-12)
 
     headwind.use_winds = False
-    assert _airSpeed(headwind, traj, 100000.0, 20000.0) == 20000.0
-    assert _airSpeed(None, traj, 100000.0, 20000.0) == 20000.0
+    assert _airSpeed(headwind, 100000.0, 20000.0, azim, elev) == 20000.0
+    assert _airSpeed(None, 100000.0, 20000.0, azim, elev) == 20000.0
+
+
+def testGroundSpeedRemovesTheEarthRotationFromTheSolverSpeeds(traj):
+    """ The solver's point speeds are measured in the ECI frame. The speeds of its model points in a frame fixed
+        to the ground, by finite differences after rotating them with the Earth, are the ground speeds. """
+
+    for obs in traj.observations:
+        t = obs.time_data
+        eci = np.asarray(obs.model_eci)
+        gst = np.radians([jd2LST(traj.jdt_ref + ti/86400, 0)[0] for ti in t])
+        ecef = np.column_stack([np.cos(gst)*eci[:, 0] + np.sin(gst)*eci[:, 1], \
+            -np.sin(gst)*eci[:, 0] + np.cos(gst)*eci[:, 1], eci[:, 2]])
+
+        v_eci = np.linalg.norm(np.diff(eci, axis=0), axis=1)/np.diff(t)
+        v_ground = np.linalg.norm(np.diff(ecef, axis=0), axis=1)/np.diff(t)
+
+        assert groundSpeed(traj, eci[1:], v_eci) == pytest.approx(v_ground, rel=1e-4)
+        assert np.max(np.abs(v_eci - v_ground)) > 40, "the rotation is a sizeable part of the speed"
+
+
+def _local(lat, lon, ele_msl):
+    """ ECEF position (m) of a point given by geodetic latitude and longitude (radians) and height above the
+        sea level (m), and its east-north-up basis, independent of the ECI conversions of DynamicMassFit. """
+
+    ecef = np.array(latLonAlt2ECEF(lat, lon, mslToWGS84Height(lat, lon, ele_msl)))
+    basis = np.column_stack([[-np.sin(lon), np.cos(lon), 0.0], \
+        [-np.sin(lat)*np.cos(lon), -np.sin(lat)*np.sin(lon), np.cos(lat)], \
+        [np.cos(lat)*np.cos(lon), np.cos(lat)*np.sin(lon), np.sin(lat)]])
+
+    return ecef, basis
+
+
+def testEndOfAblationIsWhereMetSimTookTheBodyOverTheGround(traj, tmp_path):
+    """ The final point is the evaluation point displaced by MetSim's 3D displacement in the ground-fixed frame of
+        the evaluation point, and the final direction is MetSim's final velocity seen from the final point. Checked
+        with plain geodetic conversions, without the Earth rotation or sidereal time used by DynamicMassFit; a
+        missing rotation of the Earth would move the end by its rotation speed times the simulated time, hundreds
+        of metres. """
+
+    still = _windProfile(str(tmp_path/"still.csv"), 0.0, 0.0)
+    sr, _, lat, lon, ele, azim, elev, time, vel = _endState(traj, still)
+    frag = sr.frag_main
+
+    meas_time, _, _, _, eval_lat, eval_lon, _, _ = evalPointState(traj, 100000.0)
+    eval_ecef, eval_basis = _local(eval_lat, eval_lon, 100000.0)
+    end_ecef, end_basis = _local(np.radians(lat), np.radians(lon), 1000*ele)
+
+    assert eval_basis.T @ (end_ecef - eval_ecef) == pytest.approx([frag.px, frag.py, frag.pz], abs=1.0)
+    assert end_basis.T @ eval_basis @ np.array([frag.vx, frag.vy, frag.vz]) == pytest.approx( \
+        vel*_motionENU(np.radians(azim), np.radians(elev)), abs=1e-3)
+    assert time == pytest.approx(meas_time + sr.time_arr[-1], abs=1e-9)
+
+
+def _inertialRun(traj, sr, height, vel, dt=2e-3):
+    """ The single body of the simulation integrated with RK4 in the inertial ECI frame, where the drag acts on
+        v - omega x r and the rotation of the Earth needs no Coriolis term, with the effective gravity of MetSim
+        towards the centre of its sphere, plus the centripetal acceleration it leaves out. Only wmpl's horizontal
+        coordinate conversions are shared with DynamicMassFit. Returns the final latitude, longitude (deg), height
+        (km), radiant azimuth and elevation (deg), time (s) and mass (kg). """
+
+    const = sr.const
+    _, _, eci, jd, lat, lon, azim, elev = evalPointState(traj, height)
+    omega = np.array([0.0, 0.0, MetSimErosion.EARTH_ROTATION_RATE])
+    radiant = np.array(raDec2ECI(*altAz2RADec(azim, elev, jd, lat, lon)))
+    up = np.array(raDec2ECI(*altAz2RADec(0.0, np.pi/2, jd, lat, lon)))
+    centre0 = eci - (const.r_earth + height)*up
+    K = const.gamma*const.shape_factor*const.rho**(-2/3.0)
+
+    def centre(t):
+        a = MetSimErosion.EARTH_ROTATION_RATE*t
+        return np.array([[np.cos(a), -np.sin(a), 0.0], [np.sin(a), np.cos(a), 0.0], [0.0, 0.0, 1.0]]) @ centre0
+
+    def deriv(t, s):
+        r, v, m = s[:3], s[3:6], s[6]
+        down = centre(t) - r
+        h = np.linalg.norm(down) - const.r_earth
+        u = v - np.cross(omega, r)
+        rho = atmDensPoly(h, const.dens_co)
+        acc = -K*m**(-1/3.0)*rho*np.linalg.norm(u)*u \
+            + MetSimErosion.G0*(const.r_earth/(const.r_earth + h))**2*down/np.linalg.norm(down) \
+            + np.cross(omega, np.cross(omega, r))
+        return np.concatenate([v, acc, [-K*const.sigma*m**(2/3.0)*rho*np.linalg.norm(u)**3]])
+
+    s, t = np.concatenate([eci, -vel*radiant + np.cross(omega, eci), [const.m_init]]), 0.0
+    while (np.linalg.norm(s[3:6] - np.cross(omega, s[:3])) > const.v_kill) \
+            and (np.linalg.norm(s[:3] - centre(t)) - const.r_earth > const.h_kill):
+        k1 = deriv(t, s); k2 = deriv(t + dt/2, s + dt/2*k1); k3 = deriv(t + dt/2, s + dt/2*k2)
+        k4 = deriv(t + dt, s + dt*k3)
+        s, t = s + dt/6*(k1 + 2*k2 + 2*k3 + k4), t + dt
+
+    jd += t/86400
+    lat, lon, ele = cartesian2Geo(jd, *s[:3])
+    v_ground = s[3:6] - np.cross(omega, s[:3])
+    azim, elev = raDec2AltAz(*eci2RaDec(-v_ground/np.linalg.norm(v_ground)), jd, lat, lon)
+
+    return np.degrees(lat), np.degrees(lon), ele/1000, np.degrees(azim), np.degrees(elev), t, s[6]
+
+
+def testEndOfAblationMatchesAnIntegrationInTheInertialFrame(traj):
+    """ MetSim in the ground-fixed frame with gravity and the Coriolis acceleration, and the conversion of its end
+        state, agree with an integration of the same body in the inertial frame. Here the path lasts 5 s and gravity
+        turns it by 0.08-0.13 deg; without the Coriolis term the direction would be 0.04 deg off, with its sign flipped
+        0.08 deg. """
+
+    for mass in [1.0, 1000.0]:
+        with contextlib.redirect_stdout(io.StringIO()):
+            sr, final_mass, lat, lon, ele, azim, elev, _, _ = computeFragEndParams(traj, mass, 3500, 100000.0, \
+                20000.0, 0.55)
+        ref_lat, ref_lon, ref_ele, ref_azim, ref_elev, ref_time, ref_mass = _inertialRun(traj, sr, 100000.0, \
+            20000.0)
+
+        angle = np.degrees(np.arccos(np.clip(np.dot(_motionENU(np.radians(azim), np.radians(elev)), \
+            _motionENU(np.radians(ref_azim), np.radians(ref_elev))), -1, 1)))
+        horizontal = np.hypot(np.radians(lat - ref_lat), np.radians(lon - ref_lon)*np.cos(np.radians(lat))) \
+            *sr.const.r_earth
+
+        assert angle < 0.002
+        assert horizontal < 30.0
+        assert 1000*abs(ele - ref_ele) < 40.0
+        assert sr.time_arr[-1] == pytest.approx(ref_time, abs=0.01)
+        assert final_mass == pytest.approx(ref_mass, rel=0.01)
 
 
 def testWindsInTheSimulationMoveTheEndAsExpected(traj, tmp_path):
     """ In still air the simulation with winds ends where the one without winds does. With a constant crosswind
-        the final velocity relative to the air has the simulation's final speed, and the end moves across the track by the drift of the air over the simulated time T minus the tilt of
-        the path relative to the air, of length L: (w.c)*(T - L/|u0|), with c the horizontal direction across the
-        track and u0 the initial velocity relative to the air.
+        the final velocity relative to the air has the simulation's final speed, and the end moves across the
+        track by the drift of the air over the simulated time T minus the tilt of the path relative to the air,
+        of length L: (w.c)*(T - L/|u0|), with c the horizontal direction across the track and u0 the initial
+        velocity relative to the air.
     """
 
     still = _windProfile(str(tmp_path/"still.csv"), 0.0, 0.0)
@@ -308,30 +433,22 @@ def testWindsInTheSimulationMoveTheEndAsExpected(traj, tmp_path):
     still.use_winds = False
     without_winds = _endState(traj, still)
 
-    # Without winds MetSim turns its velocity to follow the local vertical, which in a discrete step adds a second
-    #   order change to the speed; with winds it moves in 3D without that term. Over this 100 km run the two
-    #   drift apart by a few parts in 1e7
-    assert with_winds[1:5] + with_winds[6:] == pytest.approx(without_winds[1:5] + without_winds[6:], rel=1e-6)
-    assert (with_winds[5] - without_winds[5] + 180)%360 - 180 == pytest.approx(0.0, abs=1e-5)
+    assert with_winds[1:] == pytest.approx(without_winds[1:], rel=1e-9)
 
     windy = _windProfile(str(tmp_path/"windy.csv"), 50.0, 250.0)
     sr, _, lat, lon, ele, azim, elev, _, vel = _endState(traj, windy)
     wind = windy.wind(1000*ele)
 
-    vel_sim = np.array([sr.frag_main.vx, sr.frag_main.vy, sr.frag_main.vz])
     vel_air = vel*_motionENU(np.radians(azim), np.radians(elev)) - np.append(wind, 0.0)
-    assert vectMag(vel_air) == pytest.approx(sr.frag_main.v, rel=1e-9)
+    assert vectMag(vel_air) == pytest.approx(sr.frag_main.v, rel=1e-4)
 
-    # The final direction turns from the one without winds by as much as MetSim's velocity turned
+    # The wind turns the final direction away from the one in still air
     angle = lambda a, b: np.degrees(np.arccos(np.clip(np.dot(a, b)/vectMag(a)/vectMag(b), -1, 1)))
-    motion0 = _motionENU(traj.orbit.azimuth_apparent_norot, traj.orbit.elevation_apparent_norot)
-    turn = angle(_motionENU(np.radians(azim), np.radians(elev)), \
-        _motionENU(np.radians(without_winds[5]), np.radians(without_winds[6])))
-    assert angle(vel_sim, motion0) > 0.01
-    assert turn == pytest.approx(angle(vel_sim, motion0), abs=1e-3)
+    assert angle(_motionENU(np.radians(azim), np.radians(elev)), \
+        _motionENU(np.radians(without_winds[5]), np.radians(without_winds[6]))) > 0.01
 
-    motion = _motionENU(traj.orbit.azimuth_apparent_norot, traj.orbit.elevation_apparent_norot)
-    u0 = vectMag(20000.0*motion - np.append(windy.wind(100000.0), 0.0))
+    _, _, _, _, _, _, eval_azim, eval_elev = evalPointState(traj, 100000.0)
+    u0 = vectMag(20000.0*_motionENU(eval_azim, eval_elev) - np.append(windy.wind(100000.0), 0.0))
 
     # Across the track at the end, where the two runs differ only by the wind. The path length relative to the
     #   air is that of the simulation's speeds, which are relative to the air

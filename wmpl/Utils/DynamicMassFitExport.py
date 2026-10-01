@@ -57,7 +57,7 @@ UNITS = {
     'dyn_mass': 'kg',
     'decel': 'km/s^2',
     'ht_eval': 'km',
-    'vel_eval': 'km/s',
+    'vel_eval': 'km/s, relative to the ground',
     'time_eval': 's after ref_time',
     'sim_ablation_coeff': 's^2/km^2',
 }

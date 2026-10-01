@@ -2,8 +2,10 @@
     ablation ends, as the starting conditions of a dark flight computation.
 
 The deceleration is fitted to the point velocities of a solved trajectory over a height window, and the drag
-equation gives the dynamic mass, m = (Gamma*A*rho_air*v^2/a)^3/rho_m^2. A single-body MetSim simulation then
-follows that mass down to the speed where ablation is taken to stop.
+equation gives the dynamic mass, m = (Gamma*A*rho_air*v^2/a)^3/rho_m^2. The solver's velocities are inertial
+(ECI), so they are first taken relative to the ground, which the air moves with. A single-body MetSim simulation
+then follows that mass from the evaluation point down to the speed where ablation is taken to stop, in 3D in a
+frame fixed to the ground, with gravity and the Coriolis acceleration in its velocity.
 
 Since the mass goes as the cube of the air density and the sixth power of the speed relative to the air, the air
 density and the winds can be taken from an atmosphere profile file, read as OpenDarkflight reads it, so that a
@@ -24,19 +26,137 @@ from matplotlib.pyplot import cm
 
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly
 from wmpl.Utils.Math import lineFunc, vectMag
-from wmpl.Utils.TrajConversions import cartesian2Geo, derotatedRadiantAltAz
+from wmpl.Utils.TrajConversions import cartesian2Geo, derotatedRadiantAltAz, jd2LST
 from wmpl.Utils.Physics import dynamicMass
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PyDomainParallelizer import domainParallelizer
 from wmpl.Utils.DynamicMassFitExport import ejectionState, buildDynMassFitOutput, saveDynMassFitPickle
 from wmpl.Utils.AtmosphereProfile import AtmosphereProfile, PROFILE_TYPES
-from wmpl.MetSim.MetSimErosion import Constants, runSimulation, G0
+from wmpl.MetSim.MetSimErosion import Constants, runSimulation, G0, EARTH_ROTATION_RATE
 from wmpl.MetSim.GUI import SimulationResults
 from wmpl.Trajectory.Trajectory import applyGravityDrop
 
 
 # Lowest height of the fragment simulation (m)
 SIM_HT_MIN = 15000
+
+
+def _rotationVelocity(eci_pos):
+    """ Velocity (m/s) of the ground at the given ECI position(s) (m), from the rotation of the Earth around the
+        z axis of the ECI frame of date.
+    """
+
+    eci_pos = np.asarray(eci_pos, dtype=float)
+
+    return EARTH_ROTATION_RATE*np.stack([-eci_pos[..., 1], eci_pos[..., 0], np.zeros_like(eci_pos[..., 0])], \
+        axis=-1)
+
+
+def groundSpeed(traj, eci_pos, vel):
+    """ Speed relative to the ground (m/s) of a point on the trajectory, from the speed along the fitted line that
+        the solver measures.
+
+        The solver works in the ECI frame with moving stations, so its point velocities are inertial: they include
+        the component of the Earth's rotation along the motion (217 m/s for an eastward fireball at 52 deg N).
+        Drag acts on the speed relative to the air, which moves with the ground, and the mass goes as its sixth
+        power, so the dynamic mass and the end of ablation need the ground speed. Relative to the ground the body
+        moves along the fixed direction of the apparent ground-fixed radiant, so the speed along the line is that
+        speed projected on the line plus the rotation velocity projected on it.
+
+    Arguments:
+        traj: [Trajectory] Solved trajectory.
+        eci_pos: [ndarray] ECI position(s) of the point(s) (m), shape (3,) or (N, 3).
+        vel: [float or ndarray] Speed(s) along the fitted line in the ECI frame (m/s).
+
+    Return:
+        [float or ndarray] Speed(s) relative to the ground (m/s).
+    """
+
+    motion = -traj.radiant_eci_mini
+    direction_ground = traj.v_init*motion - _rotationVelocity(traj.state_vect_mini)
+    direction_ground /= np.sqrt(direction_ground @ direction_ground)
+
+    return (vel - _rotationVelocity(eci_pos) @ motion)/np.dot(direction_ground, motion)
+
+
+def _enuToECI(lat, lon, jd):
+    """ Matrix whose columns are the east, north and up unit vectors in the ECI frame of date at the given
+        geodetic latitude and longitude (radians) and Julian date, so that it takes a vector from the local
+        east-north-up frame to the ECI frame.
+    """
+
+    lst = np.radians(jd2LST(jd, np.degrees(lon))[0])
+
+    return np.column_stack([
+        [-np.sin(lst), np.cos(lst), 0.0],
+        [-np.sin(lat)*np.cos(lst), -np.sin(lat)*np.sin(lst), np.cos(lat)],
+        [np.cos(lat)*np.cos(lst), np.cos(lat)*np.sin(lst), np.sin(lat)]])
+
+
+def _earthRotation(jd_beg, jd_end):
+    """ Matrix that takes the ECI position of a point fixed to the ground at jd_beg to its ECI position at jd_end.
+    """
+
+    angle = np.radians((jd2LST(jd_end, 0)[0] - jd2LST(jd_beg, 0)[0] + 180)%360 - 180)
+
+    return np.array([[np.cos(angle), -np.sin(angle), 0.0], [np.sin(angle), np.cos(angle), 0.0], [0.0, 0.0, 1.0]])
+
+
+def evalPointState(traj, height, ht_vs_time_interp=None):
+    """ Where the body is and where it moves, relative to the ground, at the given height of the trajectory.
+
+        The direction is the apparent ground-fixed radiant at that point, as Orbit.calcOrbit() computes it at the
+        reference point, steepened by the gravity turn since the point where the fitted radiant is tangent to the
+        path: its beginning if the solver modelled the gravity drop, otherwise about its middle. The turn uses the
+        average speed relative to the ground, g*cos(elev)*t/v_avg.
+
+    Arguments:
+        traj: [Trajectory] Solved trajectory.
+        height: [float] Height of the point (m).
+
+    Keyword arguments:
+        ht_vs_time_interp: [callable] Time as a function of height, from interpolateHtVsTimeLen(), if it is
+            already at hand.
+
+    Return:
+        (time, length, eci, jd, lat, lon, azim, elev): [tuple]
+            time: [float] Time of the point after traj.jdt_ref (s).
+            length: [float] Length from the state vector along the fitted line (m).
+            eci: [ndarray] ECI position of the point, gravity drop included (m).
+            jd: [float] Julian date of the point.
+            lat, lon: [float] Geodetic latitude and longitude of the point (radians).
+            azim, elev: [float] Azimuth (+E of due N) and elevation of the apparent ground-fixed radiant at the
+                point, gravity turn included (radians).
+    """
+
+    if ht_vs_time_interp is None:
+        ht_vs_time_interp, _ = interpolateHtVsTimeLen(traj, sample_step=0.1, show_plots=False)
+
+    # Get the time at the point, and its length from the trajectory geometry. Interpolating the length instead
+    #   mixes the smoothed heights with the raw lengths, which at shallow entry angles turns a small height
+    #   difference into a large length difference
+    time = float(ht_vs_time_interp(height))
+
+    # The height along the line falls from the state vector until the point nearest the Earth's centre, at a
+    #   length of state_vect.radiant, which brackets the root
+    length = scipy.optimize.brentq(lambda l: cartesian2Geo(traj.jdt_ref + time/86400, \
+        *pointOnTrajectory(traj, l, time))[2] - height, 0, np.dot(traj.state_vect_mini, traj.radiant_eci_mini))
+
+    eci = pointOnTrajectory(traj, length, time)
+    jd = traj.jdt_ref + time/86400
+    lat, lon, _ = cartesian2Geo(jd, *eci)
+
+    # Derotate the fitted radiant at the point. The radiant is the tangent of the path at its beginning (the solver
+    #   models gravity as a drop from that line), so it is derotated with the initial velocity, as
+    #   Orbit.calcOrbit() does. Drag does not rotate the direction of motion relative to the air, so this
+    #   ground-fixed direction holds along the path up to the gravity turn
+    azim, elev, _ = derotatedRadiantAltAz(traj.v_init*traj.radiant_eci_mini, eci, jd, lat, lon)
+
+    t_obs = np.concatenate([obs.time_data for obs in traj.observations])
+    t_turn = 0.0 if getattr(traj, 'gravity_correction', True) else (np.min(t_obs) + np.max(t_obs))/2
+    elev += G0/(1 + height/Constants().r_earth)**2*np.cos(elev)*(time - t_turn)/traj.orbit.v_avg_norot
+
+    return time, length, eci, jd, lat, lon, azim, elev
 
 
 def _airDensity(atm_profile, height):
@@ -80,17 +200,17 @@ def _windENU(atm_profile, height):
     return np.append(atm_profile.wind(height), 0.0)
 
 
-def _airSpeed(atm_profile, traj, height, vel):
-    """ Speed relative to the air (m/s), which the drag depends on, for the given speed along the trajectory
-        (m/s) at the given height (m). Without winds it is the given speed.
+def _airSpeed(atm_profile, height, vel, azim, elev):
+    """ Speed relative to the air (m/s), which the drag depends on, for the given speed relative to the ground
+        (m/s) at the given height (m), moving opposite to a radiant at the given azimuth and elevation (radians).
+        Without winds it is the given speed, and the direction is not used.
     """
 
     wind = _windENU(atm_profile, height)
     if wind is None:
         return vel
 
-    return vectMag(vel*_motionENU(traj.orbit.azimuth_apparent_norot, traj.orbit.elevation_apparent_norot) \
-        - wind)
+    return vectMag(vel*_motionENU(azim, elev) - wind)
 
 
 def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a, v_kill=3000, \
@@ -98,28 +218,34 @@ def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a
     """ Run a single-body MetSim simulation (no erosion or fragmentation) from the given point down to the
         speed where ablation is taken to stop, or to SIM_HT_MIN.
 
+        MetSim follows the body in 3D, in the ground-fixed frame of the initial point, with gravity and the
+        Coriolis acceleration in its velocity (Constants.gravity_3d) and with the winds of the atmosphere profile
+        if there are any, so the gravity turn and drop come out of the same integration as the drag. Its default
+        straight path with a negligible drop runs through thinner air than the real, curving one, and on long
+        shallow paths ends hundreds of metres further along.
+
     Arguments:
         mass: [float] Initial mass (kg).
         density: [float] Bulk density (kg/m^3).
-        lat: [float] Latitude for the MSIS atmosphere (deg).
-        lon: [float] Longitude for the MSIS atmosphere (deg).
+        lat: [float] Geodetic latitude of the initial point (deg), for the MSIS atmosphere and the Coriolis
+            acceleration.
+        lon: [float] Longitude of the initial point for the MSIS atmosphere (deg).
         jd: [float] Julian date for the MSIS atmosphere.
         ht_beg: [float] Initial height (m).
-        v_init: [float] Initial speed (m/s). With winds it is the speed along the trajectory, relative to the
-            ground, and MetSim works out the speed relative to the air.
-        entry_angle: [float] Elevation of the radiant (deg).
+        v_init: [float] Initial speed relative to the ground (m/s). With winds, MetSim works out the speed
+            relative to the air.
+        entry_angle: [float] Elevation of the radiant at the initial point (deg).
         gamma_a: [float] Not used, Gamma*A is fixed (see below). Kept for the callers.
 
     Keyword arguments:
         v_kill: [float] Speed relative to the air where the simulation stops (m/s). 3000 by default.
         atm_profile: [AtmosphereProfile] Take the air density, and the winds unless its use_winds is False,
             from this profile. None by default, which uses the MSIS model.
-        radiant_azimuth: [float] Azimuth of the radiant (deg, +E of due N), used only with winds to know how
-            the wind blows relative to the motion.
+        radiant_azimuth: [float] Azimuth of the radiant at the initial point (deg, +E of due N).
 
     Return:
-        sr: [SimulationResults] With winds, sr.frag_main also holds the 3D displacement (px, py, pz) and
-            velocity relative to the ground (vx, vy, vz) in the east-north-up frame of the start (m, m/s).
+        sr: [SimulationResults] sr.frag_main also holds the 3D displacement (px, py, pz) and velocity relative
+            to the ground (vx, vy, vz) in the east-north-up frame of the initial point (m, m/s).
     """
 
     # Init simulation constants
@@ -150,8 +276,13 @@ def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a
     # Ablation coeff of chondritic material
     const.sigma = 0.005/1e6
 
-    # Zenith angle
+    # Direction of the radiant at the initial point
     const.zenith_angle = np.radians(90 - entry_angle)
+    const.radiant_azimuth = np.radians(radiant_azimuth)
+
+    # Follow the body in 3D with gravity and the Coriolis acceleration in its velocity
+    const.gravity_3d = True
+    const.latitude = np.radians(lat)
 
     # Use Borovicka 2020 luminous efficiency (not really used here)
     const.lum_eff_type = 7
@@ -176,11 +307,9 @@ def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a
     else:
         const.dens_co, _ = atm_profile.fitPoly(const.h_kill, ht_beg)
 
-        # MetSim uses the profile's winds at each height, relative to the direction of motion (radiant_azimuth in
-        #   degrees, +E of due N)
+        # MetSim uses the profile's winds at each height
         if atm_profile.use_winds:
             const.wind_profile = atm_profile
-            const.radiant_azimuth = np.radians(radiant_azimuth)
 
     # Run the simulation
     frag_main, results_list, wake_results = runSimulation(const)
@@ -336,27 +465,28 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a, v_kill=30
         ablation is taken to stop (3 km/s by default) with the single-body ablation model, and compute where
         and in which direction it ends.
 
-        The returned final azimuth and elevation are those of the apparent ground-fixed radiant (epoch of
-        date), as traj.orbit.azimuth_apparent_norot and elevation_apparent_norot, evaluated at the final point
-        and with the elevation steepened by the gravity turn along the path. They are the inputs a dark
-        flight computation needs.
+        The simulation starts at the evaluation point, on the solver's trajectory with its gravity drop, moving
+        relative to the ground in the direction evalPointState() gives. MetSim follows it in 3D with gravity in
+        its velocity and, with the winds of an atmosphere profile, with the wind of each height, so drag and
+        ablation act on the velocity relative to the air. Its final position and velocity, in the east-north-up
+        frame of the evaluation point fixed to the ground, are taken to geographic coordinates and to the local
+        horizon of the final point.
 
-        With the winds of an atmosphere profile, MetSim runs with the wind of each height, so drag and ablation
-        act on the velocity relative to the air. The end point is then moved by where MetSim's 3D path left the
-        straight line, and the final direction and speed are those of MetSim's final velocity relative to the
-        ground, with the gravity turn applied to the velocity relative to the air.
+        The returned final azimuth and elevation are those of the apparent ground-fixed radiant (epoch of date) at
+        the final point, as traj.orbit.azimuth_apparent_norot and elevation_apparent_norot are at the reference
+        point. They are the inputs a dark flight computation needs.
 
     Arguments:
         traj: [Trajectory] Solved trajectory.
         dyn_mass: [float] Dynamic mass at the evaluation point (kg).
         density: [float] Bulk density of the meteoroid (kg/m^3).
         hend: [float] Height of the evaluation point (m).
-        vend: [float] Velocity at the evaluation point (m/s).
+        vend: [float] Speed relative to the ground at the evaluation point (m/s), see groundSpeed().
         gamma_a: [float] Product of the drag coefficient and the shape factor used for the dynamic mass. Not
             used by the simulation itself, see runFragSim().
 
     Keyword arguments:
-        v_kill: [float] Speed at which the simulation stops (m/s). 3000 by default.
+        v_kill: [float] Speed relative to the air at which the simulation stops (m/s). 3000 by default.
         atm_profile: [AtmosphereProfile] Atmosphere for the simulation. None by default, which uses the MSIS
             model.
 
@@ -373,39 +503,15 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a, v_kill=30
             final_vel: [float] Speed at the final point relative to the ground (m/s).
     """
 
-    jd = traj.jdt_ref
-    lat = np.degrees(traj.rend_lat)
-    lon = np.degrees(traj.rend_lon)
+    meas_time, meas_len, eval_eci, eval_jd, eval_lat, eval_lon, eval_azim, eval_elev = \
+        evalPointState(traj, hend)
 
-    entry_angle = np.degrees(traj.orbit.elevation_apparent_norot)
+    # Run the simulation from the evaluation point until ablation stops
+    sr = runFragSim(dyn_mass, density, np.degrees(eval_lat), np.degrees(eval_lon), eval_jd, hend, vend, \
+        np.degrees(eval_elev), gamma_a, v_kill=v_kill, atm_profile=atm_profile, \
+        radiant_azimuth=np.degrees(eval_azim))
 
-    # Fit an interpolation function from time to height
-    ht_vs_time_interp, _ = interpolateHtVsTimeLen(traj, sample_step=0.1, show_plots=False)
-
-    # # Compute the dynamic mass (upper range)
-    # dyn_mass = dynamicMass(density, np.radians(lat), np.radians(lon), hend, jd, vend, decel, \
-    #     gamma=1.0, shape_factor=gamma_a)
-
-    # print("  vel        = {:.2f} km/s".format(vend/1000))
-    # print("  decel      = {:.2f} km/s^2".format(decel/1000))
-    # print("  dyn mass   = {:.3f} kg".format(dyn_mass))
-
-
-    # Get the time at the observed point, and its length from the trajectory geometry. Interpolating the
-    #   length instead mixes the smoothed heights with the raw lengths, which at shallow entry angles turns
-    #   a small height difference into a large length difference
-    meas_time = ht_vs_time_interp(hend)
-
-    # The height along the line falls from the state vector until the point nearest the Earth's centre, at
-    #   a length of state_vect.radiant, which brackets the root
-    meas_len = scipy.optimize.brentq(lambda l: cartesian2Geo(traj.jdt_ref + meas_time/86400, \
-        *pointOnTrajectory(traj, l, meas_time))[2] - hend, 0, \
-        np.dot(traj.state_vect_mini, traj.radiant_eci_mini))
-    
-
-    # Run the simulation until ablation stops. With the profile's winds, MetSim uses the wind at each height
-    sr = runFragSim(dyn_mass, density, lat, lon, jd, hend, vend, entry_angle, gamma_a, v_kill=v_kill, \
-        atm_profile=atm_profile, radiant_azimuth=np.degrees(traj.orbit.azimuth_apparent_norot))
+    frag = sr.frag_main
 
     # Extract the final height
     final_ht = 0
@@ -414,77 +520,31 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a, v_kill=30
 
     # Extract the total simulation time
     final_time = np.max(sr.time_arr)
-
-    # Compute the total length and time since the first observed point on the trajectory. With winds MetSim moved
-    #   the fragment in 3D, and the length is its displacement along the observed direction of motion
-    winds = sr.const.wind_profile is not None
-    if winds:
-        motion = _motionENU(traj.orbit.azimuth_apparent_norot, traj.orbit.elevation_apparent_norot)
-        displacement = np.array([sr.frag_main.px, sr.frag_main.py, sr.frag_main.pz])
-        sim_len = np.dot(displacement, motion)
-    else:
-        sim_len = sr.frag_main.length
-    total_len = meas_len + sim_len
+    total_len = meas_len + frag.length
     total_time = meas_time + final_time
+    final_jd = eval_jd + final_time/86400
 
 
-    ### Compute the final lat/lon ###
+    ### Take MetSim's final state to the final point ###
 
-    # Initial 3D ECI vector + total length x direction
-    final_eci = pointOnTrajectory(traj, total_len, total_time)
-
-    t_obs = np.concatenate([obs.time_data for obs in traj.observations])
-
-    # Compute exact time of the end
-    final_jd = jd + total_time/86400
-
-    # Compute the geo coordinates
+    # The frame of the simulation is fixed to the ground, so its displacement is added to the evaluation point
+    #   where the ground was at the evaluation time, and then carried by the Earth's rotation to the final time
+    enu_to_eci = _enuToECI(eval_lat, eval_lon, eval_jd)
+    rotation = _earthRotation(eval_jd, final_jd)
+    final_eci = rotation @ (eval_eci + enu_to_eci @ np.array([frag.px, frag.py, frag.pz]))
     final_lat, final_lon, final_ele = cartesian2Geo(final_jd, *final_eci)
 
-    ###
-
-
-    ### Compute the final ground-fixed azimuth and elevation (as in Orbit.calcOrbit) ###
-
-    # Derotate the fitted radiant at the final point. The radiant is the tangent of the path at its beginning
-    #   (the solver models gravity as a drop from that line), so it is derotated with the initial velocity, as
-    #   Orbit.calcOrbit does. Drag does not rotate the direction of motion relative to the air, so this
-    #   ground-fixed direction holds along the path up to the gravity turn added below.
-    final_azim, final_elev, _ = derotatedRadiantAltAz(traj.v_init*traj.radiant_eci_mini, final_eci, \
-        final_jd, final_lat, final_lon)
-
-    # Steepen the elevation by the gravity turn along the path, d(elev)/dt = g*cos(elev)/v, using the average
-    #   speed over the observed part and the simulated speeds after it. The turn starts where the fitted radiant
-    #   is tangent to the path: its beginning if the solver modelled the gravity drop, otherwise about its middle
-    t_turn = 0.0 if getattr(traj, 'gravity_correction', True) else (np.min(t_obs) + np.max(t_obs))/2
-    v_sim = sr.main_vel_arr[1:]
-    g_final = G0/(1 + final_ele/sr.const.r_earth)**2
-    final_elev += g_final*np.cos(final_elev)*((meas_time - t_turn)/traj.orbit.v_avg_norot \
-        + np.sum(np.diff(sr.time_arr)[v_sim > 0]/v_sim[v_sim > 0]))
+    # The final velocity relative to the ground, in the local east-north-up frame of the final point
+    vel_end = _enuToECI(final_lat, final_lon, final_jd).T @ rotation @ enu_to_eci \
+        @ np.array([frag.vx, frag.vy, frag.vz])
+    final_vel = vectMag(vel_end)
+    final_azim = np.arctan2(-vel_end[0], -vel_end[1])%(2*np.pi)
+    final_elev = np.arcsin(-vel_end[2]/final_vel)
 
     ###
 
 
-
-    final_vel = sr.frag_main.v
-
-    # With winds, add where MetSim's 3D path left the straight line of the observed motion, and take the velocity
-    #   MetSim ends with. The gravity turn above was computed with MetSim's speeds, which are relative to the air,
-    #   so it turns the velocity relative to the air, and the wind is added back after it
-    if winds:
-        shift = displacement - sim_len*motion
-        final_lat += shift[1]/(sr.const.r_earth + final_ele)
-        final_lon += shift[0]/((sr.const.r_earth + final_ele)*np.cos(final_lat))
-        final_ele += shift[2]
-        wind_end = np.append(sr.const.wind_profile.wind(sr.frag_main.h), 0.0)
-        vel_rel = np.array([sr.frag_main.vx, sr.frag_main.vy, sr.frag_main.vz]) - wind_end
-        motion_end = _motionENU(final_azim, final_elev) + vel_rel/vectMag(vel_rel) - motion
-        vel_end = vectMag(vel_rel)*motion_end/vectMag(motion_end) + wind_end
-        final_vel = vectMag(vel_end)
-        final_azim = np.arctan2(-vel_end[0], -vel_end[1])%(2*np.pi)
-        final_elev = np.arcsin(-vel_end[2]/final_vel)
-
-    print("  final mass     = {:.3f} kg".format(sr.frag_main.m))
+    print("  final mass     = {:.3f} kg".format(frag.m))
     print("  final vel      = {:.3f} km/s".format(final_vel/1000))
     print("  final ht (sim) = {:.3f} km".format(final_ht/1000))
     print("  total len      = {:.3f} km".format(total_len/1000))
@@ -496,7 +556,7 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a, v_kill=30
     print("  final elev     = {:.5f} deg".format(np.degrees(final_elev)))
 
 
-    return sr, sr.frag_main.m, np.degrees(final_lat), np.degrees(final_lon), final_ele/1000, \
+    return sr, frag.m, np.degrees(final_lat), np.degrees(final_lon), final_ele/1000, \
         np.degrees(final_azim), np.degrees(final_elev), total_time, final_vel
 
 
@@ -716,8 +776,9 @@ def dynMassFromTraj(traj, ht_max, ht_min, eval_point, bulk_density, gamma_a, max
 
     Return:
         [dict or None] None if there isn't enough data in the height window to fit a line. Otherwise a dict
-            with keys: decel, decel_std, vel_eval, ht_eval, time_eval, dyn_mass, popt, pcov (the velocity
-            fit [slope, intercept] and its covariance).
+            with keys: decel, decel_std, vel_eval (relative to the ground), ht_eval, time_eval, dyn_mass, popt,
+            pcov (the velocity fit [slope, intercept] and its covariance), azim_eval, elev_eval (the
+            ground-fixed radiant at the evaluation point, see evalPointState(), or None without winds).
     """
 
     vel_data, ht_data, time_data = [], [], []
@@ -726,7 +787,8 @@ def dynMassFromTraj(traj, ht_max, ht_min, eval_point, bulk_density, gamma_a, max
 
         ignored = obs.ignore_list[1:] > 0
 
-        vel = obs.velocities[1:][~ignored]
+        # Speeds relative to the ground, which the drag depends on, from the solver's ECI speeds
+        vel = groundSpeed(traj, obs.model_eci[1:][~ignored], obs.velocities[1:][~ignored])
         ht = obs.meas_ht[1:][~ignored]
         t = obs.time_data[1:][~ignored]
 
@@ -769,6 +831,12 @@ def dynMassFromTraj(traj, ht_max, ht_min, eval_point, bulk_density, gamma_a, max
         ht_vs_time_interp, _ = interpolateHtVsTimeLen(traj)
         ht_eval = scipy.optimize.brentq(lambda h: ht_vs_time_interp(h) - time_eval, \
             *ht_vs_time_interp.x[[0, -1]])
+
+        # The direction of motion is only needed to add the wind
+        azim_eval = elev_eval = None
+        if _windENU(atm_profile, ht_eval) is not None:
+            azim_eval, elev_eval = evalPointState(traj, ht_eval, ht_vs_time_interp=ht_vs_time_interp)[6:]
+
     except Exception:
         return None
 
@@ -776,13 +844,14 @@ def dynMassFromTraj(traj, ht_max, ht_min, eval_point, bulk_density, gamma_a, max
         decel = 0
 
     dyn_mass = dynamicMass(bulk_density, traj.rend_lat, traj.rend_lon, ht_eval, traj.jdt_ref, \
-        _airSpeed(atm_profile, traj, ht_eval, vel_eval), decel, gamma=1.0, shape_factor=gamma_a, \
-        atm_dens=_airDensity(atm_profile, ht_eval))
+        _airSpeed(atm_profile, ht_eval, vel_eval, azim_eval, elev_eval), decel, gamma=1.0, \
+        shape_factor=gamma_a, atm_dens=_airDensity(atm_profile, ht_eval))
     dyn_mass = np.clip(dyn_mass, 0, mass_max)
 
     return {
         'decel': decel, 'decel_std': decel_std, 'vel_eval': vel_eval, 'ht_eval': ht_eval, \
-        'time_eval': time_eval, 'dyn_mass': dyn_mass, 'popt': popt, 'pcov': pcov
+        'time_eval': time_eval, 'dyn_mass': dyn_mass, 'popt': popt, 'pcov': pcov, 'azim_eval': azim_eval, \
+        'elev_eval': elev_eval
     }
 
 
@@ -833,7 +902,7 @@ def _mcRealization(traj_mc, traj_index, seed, label, ht_max, ht_min, eval_point,
         while density <= 0:
             density = rng.normal(bulk_density, density_sigma)
 
-    vel_air = _airSpeed(atm_profile, traj_mc, fit_res['ht_eval'], vel_eval)
+    vel_air = _airSpeed(atm_profile, fit_res['ht_eval'], vel_eval, fit_res['azim_eval'], fit_res['elev_eval'])
     dyn_mass = dynamicMass(density, traj_mc.rend_lat, traj_mc.rend_lon, fit_res['ht_eval'], \
         traj_mc.jdt_ref, vel_air, decel, gamma=1.0, shape_factor=gamma_a, \
         atm_dens=_airDensity(atm_profile, fit_res['ht_eval']))
@@ -1195,7 +1264,8 @@ if __name__ == "__main__":
         ignored = obs.ignore_list[1:] > 0
 
 
-        vel = obs.velocities[1:][~ignored]
+        # Speeds relative to the ground, which the drag depends on, from the solver's ECI speeds
+        vel = groundSpeed(traj, obs.model_eci[1:][~ignored], obs.velocities[1:][~ignored])
         ht = obs.meas_ht[1:][~ignored]
         t = obs.time_data[1:][~ignored]
 
@@ -1222,7 +1292,7 @@ if __name__ == "__main__":
     if ht_min > 0:
         ax1.axhline(y=ht_min, color='k', linestyle='dashed', label='Ht min')
 
-    ax1.set_xlabel("Velocity (km/s)")
+    ax1.set_xlabel("Velocity relative to the ground (km/s)")
     ax1.set_ylabel("Height (km)")
 
 
@@ -1251,9 +1321,11 @@ if __name__ == "__main__":
     ax2.scatter(vel_data/1000, time_data, s=5, label="Measurements")
     
 
-    # Fit a line to the velocity data in the range
+    # Fit a line to the velocity data in the range, starting from the least-squares line as dynMassFromTraj()
+    #   does; from (1, 1) it can run out of function evaluations
     popt_final, pcov_final, perr_final, vel_filter = fitVelocity(
-        time_data, vel_data, p0=(1.0, 1.0), loss='soft_l1', sigma_clip=cml_args.sigma_clip
+        time_data, vel_data, p0=np.polyfit(time_data, vel_data, 1), loss='soft_l1', \
+        sigma_clip=cml_args.sigma_clip
     )
 
     vel_fit = popt_final
@@ -1304,6 +1376,11 @@ if __name__ == "__main__":
     ht_eval = scipy.optimize.brentq(lambda h: ht_vs_time_interp(h) - time_eval, \
         *ht_vs_time_interp.x[[0, -1]])
 
+    # The direction of motion is only needed to add the wind
+    azim_eval = elev_eval = None
+    if _windENU(atm_profile, ht_eval) is not None:
+        azim_eval, elev_eval = evalPointState(traj, ht_eval, ht_vs_time_interp=ht_vs_time_interp)[6:]
+
     # Compute +/- 2 sigma deceleartion
     decel_lo = decel - 2*decel_std
     decel_hi = decel + 2*decel_std
@@ -1317,7 +1394,7 @@ if __name__ == "__main__":
         decel_hi = 0
 
     # Compute the dynamic mass (and +/- 2 sigma)
-    vel_air = _airSpeed(atm_profile, traj, ht_eval, vel_eval)
+    vel_air = _airSpeed(atm_profile, ht_eval, vel_eval, azim_eval, elev_eval)
     dyn_mass = dynamicMass(bulk_density, traj.rend_lat, traj.rend_lon, ht_eval, traj.jdt_ref, \
         vel_air, decel, gamma=1.0, shape_factor=gamma_a, atm_dens=_airDensity(atm_profile, ht_eval))
     dyn_mass_hi = dynamicMass(bulk_density, traj.rend_lat, traj.rend_lon, ht_eval, traj.jdt_ref, \
@@ -1642,7 +1719,7 @@ if __name__ == "__main__":
 
     ax2.invert_yaxis()
     ax2.set_ylabel("Time (s)")
-    ax2.set_xlabel("Velocity (km/s)")
+    ax2.set_xlabel("Velocity relative to the ground (km/s)")
     
     ax1.legend()
     ax2.legend()

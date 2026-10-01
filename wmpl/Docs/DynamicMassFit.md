@@ -95,6 +95,16 @@ The cubes matter: an error of a few percent in the air density, or in the speed 
 becomes three or six times larger in the mass. That is why the atmosphere and the winds below are worth
 getting right.
 
+**The speeds are taken relative to the ground.** The trajectory solver works in the inertial ECI frame
+with moving stations, so its point velocities include the part of the Earth's rotation along the motion.
+For Winchcombe, moving east at 52° N, that is 217 m/s: 6.30 km/s in ECI at 30 km is 6.09 km/s relative to
+the ground. Drag acts on the speed relative to the air, which turns with the ground, and with m ∝ v⁶ the
+ECI speed made the dynamic mass 24% too large there (0.112 instead of 0.090 kg). For a westward fireball
+the error has the opposite sign. Every point speed is converted before the fit (`groundSpeed()`): relative
+to the ground the body moves along the fixed direction of the apparent ground-fixed radiant, so the speed
+along the fitted line is that speed projected on the line plus the rotation velocity projected on it. The
+deceleration is barely affected, since the rotation adds an almost constant offset.
+
 ## The end of ablation
 
 From the evaluation point, a single-body MetSim simulation (`MetSimErosion`, with erosion and
@@ -102,10 +112,44 @@ fragmentation off) follows the body until its speed relative to the air drops be
 reaches 15 km. The simulation uses Γ = 0.7 and A = 1.21 regardless of `--ga`, on purpose: with the same ΓA
 as the dynamic mass the simulated path would not depend on it at all.
 
-The end point is placed on the solver's trajectory line, including its gravity drop. The direction given
-is that of the apparent ground-fixed radiant at the end point, steepened by the gravity turn along the
-path (MetSim does not put gravity in the velocity, so the turn is added afterwards). These are the inputs
-a dark flight computation needs.
+The simulation starts at the evaluation point of the solver's trajectory, with its gravity drop, and moves
+relative to the ground in the direction of the apparent ground-fixed radiant at that point, steepened by
+the gravity turn accumulated since the radiant was tangent to the path (`evalPointState()`). MetSim then
+follows the body in 3D in the east-north-up frame of that point, which is fixed to the ground, with gravity
+towards the Earth's centre and the Coriolis acceleration in its velocity (`Constants.gravity_3d` and
+`Constants.latitude`), and with the wind of each height if there is a profile. The final position and
+velocity are carried to the ECI frame and to the local horizon of the final point. The final point, the
+direction of the apparent ground-fixed radiant there, and the speed relative to the ground are the inputs a
+dark flight computation needs.
+
+**Why gravity goes in the simulation.** MetSim's default path is a straight line with a negligible drop.
+Earlier versions started it with the elevation of the radiant at the reference point of the trajectory,
+placed the end on the solver's straight line with its drag-free gravity drop extrapolated, and added the
+gravity turn to the final direction afterwards. The direction came out right to 0.001°, but the simulated
+body flew above the real, curving path, through thinner air, and went too far. Compared with an
+integration of the same body with gravity at every step, that put the end 2 m off for Winchcombe, but
+278 m along the track for a 20 kg body entering at 8 km/s and 15°, whose last 4.7 s are simulated. The
+elevation of the radiant also changes along the trajectory as the horizon turns, by 0.5° between the
+beginning and the end of Winchcombe. With gravity in the simulation and the start taken at the evaluation
+point, the turn, the drop and the drag come out of the same integration.
+
+**Why Coriolis too.** The simulation runs in a frame fixed to the ground, because the air moves with it.
+In that frame the Earth's rotation turns the path with the Coriolis acceleration, by up to 0.008°/s: 0.04°
+over the 5 s of the test case below, where gravity turns the path by 0.08–0.13°.
+
+**Validation.** The end state was compared with an integration of the same body in the inertial frame,
+where the drag acts on v − ω × r and the rotation of the Earth needs no Coriolis term to be written, so it
+shares nothing with MetSim's formulation or with DynamicMassFit's frame conversions. For a 1 kg and a
+1000 kg body entering at 20 km/s, the final direction agrees to 0.0003° and 0.00004°, and the position
+to 3–20 m, the distance travelled in one of MetSim's 5 ms steps; without the Coriolis term the direction
+would be 0.04° off, and with its sign flipped 0.08°. `wmpl/Utils/Tests/test_DynamicMassFit.py` repeats
+that comparison, and also checks the final point and direction with plain geodetic conversions, without
+the sidereal time and Earth rotation the tool uses; a missing rotation would move the end by hundreds of
+metres.
+
+**What changed for Winchcombe** with the speeds relative to the ground and the 3D simulation: the dynamic
+mass went from 0.112 to 0.090 kg and the final mass from 0.103 to 0.084 kg; the end of ablation is 200 m
+higher and 50 m away horizontally, and its direction within 0.007°.
 
 ---
 
@@ -122,13 +166,13 @@ dynamic mass and end-of-ablation simulation. Two things are worth knowing about 
   the lines of sight to get each realization's radiant and state vector, but then computes the point
   velocities from the original, un-noised observations (`Trajectory.run()`, `_mc_run`). Every
   realization therefore fits the same velocity scatter. On Winchcombe the realizations alone give a
-  dynamic mass of 0.097–0.104 kg, against 0.071–0.190 kg from the deceleration fit. So each realization
+  dynamic mass of 0.078–0.084 kg, against 0.058–0.154 kg from the deceleration fit. So each realization
   also draws its fit slope and intercept from the fit's covariance, and the Monte Carlo interval carries
-  both: 0.065–0.149 kg on Winchcombe, with 24 solver realizations. The geometry-only interval is printed
-  next to it.
+  both: 0.057–0.156 kg on Winchcombe, with 24 solver realizations and the nominal solution. The
+  geometry-only interval is printed next to it.
 - **The physical assumptions can vary too.** `--dens_sigma` and `--vkill_sigma` give every realization its
   own bulk density and kill speed. The kill speed is a convention more than a measurement, and on
-  Winchcombe a sigma of 0.5 km/s moves the end height over 25.5–27.8 km instead of 26.5–27.3 km.
+  Winchcombe a sigma of 0.5 km/s moves the end height over 26.3–28.3 km instead of 26.9–27.8 km.
 
 Realizations whose end of ablation cannot be simulated (already below the kill speed, or a failed
 simulation) stay in the dynamic mass statistics with no end point, instead of being silently dropped.
@@ -202,20 +246,22 @@ little.
 
 **Gravity** is not affected by a horizontal wind: it accelerates the body the same in the air's frame and
 the ground's. What the wind changes is the drag, and with it how long the body takes to slow down, over
-which the gravity turn builds up.
+which the gravity turn builds up. Both are in the same integration, so this comes out by itself.
 
 **Validation.** MetSim with winds was compared with an independent integration of the same equations, with
 the wind evaluated at every step and a converged time step, using the ERA5 winds of the Pampeano event.
 They agree to within what MetSim's 5 ms steps leave without winds: a few metres to a few tens of metres in
 position, 0.002° in direction and 0.06% in mass, while ignoring the wind is off by 0.36° in direction.
 Tests in `wmpl/MetSim/Tests/test_MetSimErosion.py` repeat that comparison with a wind that turns and grows
-with height.
+with height, with and without gravity and the Coriolis acceleration.
 
-**Cost.** Without winds MetSimErosion is unchanged: bit-identical results on a single body, the default
-erosion run and a Winchcombe fit with complex fragmentation, and run times within 1% of before (−0.2% and
-+0.6%, inside the run-to-run scatter). With winds the wind is looked up for every fragment at every step:
-the single-body simulation of this tool goes from 2.1 to 3.4 ms with a profile, and the Winchcombe
-fragmentation fit takes 2.1 times as long.
+**Cost.** MetSimErosion without winds or `gravity_3d`, as every fit uses it, is unchanged: bit-identical
+results on a single body, the default erosion run and a Winchcombe fit with complex fragmentation, and run
+times within 1% of before, inside the run-to-run scatter. In 3D, the single-body simulation of this tool
+takes 3.05 ms instead of 2.91 ms with gravity, and 4.8 ms with gravity and the winds of a profile, out of
+about 50 ms for the whole end of ablation (most of it fitting the atmosphere). A Monte Carlo of Winchcombe
+takes as long as before. A complex fragmentation fit with winds takes 2.1 times as long, because the wind
+is looked up for every fragment at every step.
 
 ---
 
@@ -278,9 +324,14 @@ python -m wmpl.Utils.DynamicMassFit traj.pickle 35 27.5 --atm_profile profile.cs
   of the wind are not modelled. The wind is applied in the east-north frame of the start of the
   simulation, which turns by less than 1° over 100 km of path. Vertical wind is ignored, as in
   OpenDarkflight.
+- **The gravity turn before the evaluation point** is estimated as g·cos(e)·t/v<sub>avg</sub>, with the
+  average speed of the trajectory. For a body that slowed down a lot, ∫dt/v is larger; on Winchcombe the
+  two differ by 0.005–0.016°, depending on where the radiant is tangent to the path.
+- **A sphere for the heights.** MetSim measures heights over a sphere of the Earth's mean radius centred
+  below the evaluation point; over 100 km of path that differs from the ellipsoid by about a metre.
+- **Moving stations.** The conversion of the speeds and of the radiant to the ground assumes the solver used
+  moving stations, as it does unless its line-of-sight solution fails.
 - **No wind uncertainty.** The Monte Carlo does not vary the wind.
-- **The gravity turn** is added analytically after the simulation, since MetSim does not include gravity
-  in the velocity.
 
 ---
 
