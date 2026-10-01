@@ -25,9 +25,9 @@ from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.TrajConversions import derotatedRadiantAltAz, cartesian2Geo, jd2LST, latLonAlt2ECEF
 from wmpl.Utils.GeoidHeightEGM96 import mslToWGS84Height
 from wmpl.Utils.SampleTrajectoryPositions import sampleTrajectory
-from wmpl.Utils.DynamicMassFit import pointOnTrajectory, _robust_linear_fit, fitVelocity, groundSpeed, \
-    computeFragEndParams, interpolateHtVsTimeLen
+from wmpl.Utils.DynamicMassFit import pointOnTrajectory, _robust_linear_fit, fitVelocity
 from wmpl.Utils.Math import lineFunc
+from wmpl.Utils.DynamicMassFit import groundSpeed, computeFragEndParams, interpolateHtVsTimeLen
 
 
 # A solved trajectory shipped with the repository (2019-10-23, four stations, gravity correction on)
@@ -150,47 +150,6 @@ def testPointOnTrajectoryStartsAtTheStateVectorAndDropsPerpendicularly(traj):
     assert np.dot(drop, on_line) < 0, "the drop points towards the Earth"
 
 
-### The velocity fit ###
-
-def testRobustFitCovarianceIsTheLinearModelCovariance():
-    """ On clean data the covariance equals sigma^2 (J^T J)^-1 of the linear model, with sigma from the
-        MAD of the residuals; a fit of points that all share one time is refused with a clear error.
-    """
-
-    rng = np.random.default_rng(3)
-    t = np.linspace(0.0, 1.0, 40)
-    v = 20000.0 - 4000.0*t + rng.normal(0.0, 30.0, t.size)
-
-    popt, pcov, perr = _robust_linear_fit(t, v, p0=(1.0, 1.0), loss='soft_l1', f_scale=30.0)
-
-    resid = v - lineFunc(t, *popt)
-    sigma = 1.4826*np.median(np.abs(resid - np.median(resid)))
-    J = np.column_stack((t, np.ones_like(t)))
-
-    assert popt[0] == pytest.approx(-4000.0, abs=200.0)
-    assert pcov == pytest.approx(sigma**2*np.linalg.inv(J.T @ J), rel=1e-9)
-    assert perr == pytest.approx(np.sqrt(np.diag(pcov)), rel=1e-12)
-
-    with pytest.raises(RuntimeError, match="same time"):
-        _robust_linear_fit(np.full(5, 0.3), v[:5], p0=(1.0, 1.0), loss='soft_l1')
-
-
-def testFitVelocityRejectsOutliersAtTheRequestedSigma():
-    """ A gross outlier is excluded from the final fit and the slope is recovered. """
-
-    rng = np.random.default_rng(5)
-    t = np.linspace(0.0, 1.0, 30)
-    v = 20000.0 - 4000.0*t + rng.normal(0.0, 30.0, t.size)
-    v[12] += 3000.0
-
-    with contextlib.redirect_stdout(io.StringIO()):
-        popt, pcov, perr, mask = fitVelocity(t, v, p0=(1.0, 1.0), loss='soft_l1', sigma_clip=3.0)
-
-    assert not mask[12]
-    assert mask.sum() == t.size - 1
-    assert popt[0] == pytest.approx(-4000.0, abs=150.0)
-
-
 ### Speeds relative to the ground ###
 
 def testGroundSpeedRemovesTheEarthRotationFromTheSolverSpeeds(traj):
@@ -253,6 +212,47 @@ def testEndOfAblationMovesWithTheGround(traj):
 
     assert np.dot(displacement, motion) == pytest.approx(sr.frag_main.length, abs=2.0)
     assert np.dot(displacement, across) == pytest.approx(0.0, abs=2.0)
+
+
+### The velocity fit ###
+
+def testRobustFitCovarianceIsTheLinearModelCovariance():
+    """ On clean data the covariance equals sigma^2 (J^T J)^-1 of the linear model, with sigma from the
+        MAD of the residuals; a fit of points that all share one time is refused with a clear error.
+    """
+
+    rng = np.random.default_rng(3)
+    t = np.linspace(0.0, 1.0, 40)
+    v = 20000.0 - 4000.0*t + rng.normal(0.0, 30.0, t.size)
+
+    popt, pcov, perr = _robust_linear_fit(t, v, p0=(1.0, 1.0), loss='soft_l1', f_scale=30.0)
+
+    resid = v - lineFunc(t, *popt)
+    sigma = 1.4826*np.median(np.abs(resid - np.median(resid)))
+    J = np.column_stack((t, np.ones_like(t)))
+
+    assert popt[0] == pytest.approx(-4000.0, abs=200.0)
+    assert pcov == pytest.approx(sigma**2*np.linalg.inv(J.T @ J), rel=1e-9)
+    assert perr == pytest.approx(np.sqrt(np.diag(pcov)), rel=1e-12)
+
+    with pytest.raises(RuntimeError, match="same time"):
+        _robust_linear_fit(np.full(5, 0.3), v[:5], p0=(1.0, 1.0), loss='soft_l1')
+
+
+def testFitVelocityRejectsOutliersAtTheRequestedSigma():
+    """ A gross outlier is excluded from the final fit and the slope is recovered. """
+
+    rng = np.random.default_rng(5)
+    t = np.linspace(0.0, 1.0, 30)
+    v = 20000.0 - 4000.0*t + rng.normal(0.0, 30.0, t.size)
+    v[12] += 3000.0
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        popt, pcov, perr, mask = fitVelocity(t, v, p0=(1.0, 1.0), loss='soft_l1', sigma_clip=3.0)
+
+    assert not mask[12]
+    assert mask.sum() == t.size - 1
+    assert popt[0] == pytest.approx(-4000.0, abs=150.0)
 
 
 if __name__ == "__main__":
