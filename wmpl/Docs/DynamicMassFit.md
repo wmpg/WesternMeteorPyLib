@@ -334,6 +334,9 @@ python -m wmpl.Utils.DynamicMassFit traj.pickle 35 27.5 --atm_profile profile.cs
 - **The gravity turn before the evaluation point** is estimated as g·cos(e)·t/v<sub>avg</sub>, with the
   average speed of the trajectory. For a body that slowed down a lot, ∫dt/v is larger; on Winchcombe the
   two differ by 0.005–0.016°, depending on where the radiant is tangent to the path.
+- **The direction at the evaluation point** is the fitted radiant derotated there, which assumes a path
+  straight in the inertial frame before that point, as the solver's line does; the Coriolis turn is only
+  simulated after it. The difference is at most Ω·t, 0.03° for the 7 s before the evaluation point of Winchcombe.
 - **A sphere for the heights.** MetSim measures heights over a sphere of the Earth's mean radius centred
   below the evaluation point; over 100 km of path that differs from the ellipsoid by about a metre.
 - **Moving stations.** The conversion of the speeds and of the radiant to the ground assumes the solver used

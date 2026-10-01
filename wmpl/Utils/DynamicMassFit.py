@@ -1487,12 +1487,15 @@ if __name__ == "__main__":
         final_decel_lo = _endDecel(final_sr_lo)
 
         # Plot the simulated velocity until the end (time plot)
-        ax2.plot(final_sr_lo.main_vel_arr/1000, final_sr_lo.time_arr + time_eval, label='Simulation (-2sigma)', color='k', linestyle='dashed')
-        ax2.plot(final_sr.main_vel_arr/1000, final_sr.time_arr + time_eval, label='Simulation (nominal)', color='k', linestyle='solid')
-        ax2.plot(final_sr_hi.main_vel_arr/1000, final_sr_hi.time_arr + time_eval, label='Simulation (+2sigma)', color='k', linestyle='dotted')
+        # With winds, MetSim's speeds are relative to the air, not to the ground like the measurements
+        sim_frame = ", relative to the air" if final_sr.const.wind_profile is not None else ""
+
+        ax2.plot(final_sr_lo.main_vel_arr/1000, final_sr_lo.time_arr + time_eval, label='Simulation (-2sigma{:s})'.format(sim_frame), color='k', linestyle='dashed')
+        ax2.plot(final_sr.main_vel_arr/1000, final_sr.time_arr + time_eval, label='Simulation (nominal{:s})'.format(sim_frame), color='k', linestyle='solid')
+        ax2.plot(final_sr_hi.main_vel_arr/1000, final_sr_hi.time_arr + time_eval, label='Simulation (+2sigma{:s})'.format(sim_frame), color='k', linestyle='dotted')
 
         # Plot the simulated velocity until the end (height plot)
-        ax1.plot(final_sr.main_vel_arr/1000, final_sr.main_height_arr/1000, label='Simulation (nominal)', color='k', linestyle='solid')
+        ax1.plot(final_sr.main_vel_arr/1000, final_sr.main_height_arr/1000, label='Simulation (nominal{:s})'.format(sim_frame), color='k', linestyle='solid')
 
 
 
