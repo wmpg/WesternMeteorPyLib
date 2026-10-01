@@ -25,8 +25,8 @@ import matplotlib.pyplot as plt
 from matplotlib.pyplot import cm
 
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly, addAtmosphereArguments, setAtmosphere
-from wmpl.Utils.Math import lineFunc, vectMag
-from wmpl.Utils.TrajConversions import cartesian2Geo, derotatedRadiantAltAz, jd2LST
+from wmpl.Utils.Math import lineFunc, vectMag, rotateVector
+from wmpl.Utils.TrajConversions import cartesian2Geo, derotatedRadiantAltAz, jd2LST, enu2ECEF, ecef2ENU
 from wmpl.Utils.Physics import dynamicMass
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.PyDomainParallelizer import domainParallelizer
@@ -77,29 +77,6 @@ def groundSpeed(traj, eci_pos, vel):
     direction_ground /= np.sqrt(direction_ground @ direction_ground)
 
     return (vel - _rotationVelocity(eci_pos) @ motion)/np.dot(direction_ground, motion)
-
-
-def _enuToECI(lat, lon, jd):
-    """ Matrix whose columns are the east, north and up unit vectors in the ECI frame of date at the given
-        geodetic latitude and longitude (radians) and Julian date, so that it takes a vector from the local
-        east-north-up frame to the ECI frame.
-    """
-
-    lst = np.radians(jd2LST(jd, np.degrees(lon))[0])
-
-    return np.column_stack([
-        [-np.sin(lst), np.cos(lst), 0.0],
-        [-np.sin(lat)*np.cos(lst), -np.sin(lat)*np.sin(lst), np.cos(lat)],
-        [np.cos(lat)*np.cos(lst), np.cos(lat)*np.sin(lst), np.sin(lat)]])
-
-
-def _earthRotation(jd_beg, jd_end):
-    """ Matrix that takes the ECI position of a point fixed to the ground at jd_beg to its ECI position at jd_end.
-    """
-
-    angle = np.radians((jd2LST(jd_end, 0)[0] - jd2LST(jd_beg, 0)[0] + 180)%360 - 180)
-
-    return np.array([[np.cos(angle), -np.sin(angle), 0.0], [np.sin(angle), np.cos(angle), 0.0], [0.0, 0.0, 1.0]])
 
 
 def evalPointState(traj, height, ht_vs_time_interp=None):
@@ -554,15 +531,18 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a, v_kill=30
     ### Take MetSim's final state to the final point ###
 
     # The frame of the simulation is fixed to the ground, so its displacement is added to the evaluation point
-    #   where the ground was at the evaluation time, and then carried by the Earth's rotation to the final time
-    enu_to_eci = _enuToECI(eval_lat, eval_lon, eval_jd)
-    rotation = _earthRotation(eval_jd, final_jd)
-    final_eci = rotation @ (eval_eci + enu_to_eci @ np.array([frag.px, frag.py, frag.pz]))
+    #   where the ground was at the evaluation time, and then carried by the Earth's rotation to the final time.
+    #   In the ECI frame of a given time, the east-north-up axes of a point are those of a longitude equal to its
+    #   local sidereal time
+    eval_lst = np.radians(jd2LST(eval_jd, np.degrees(eval_lon))[0])
+    z_axis, earth_turn = np.array([0.0, 0.0, 1.0]), EARTH_ROTATION_RATE*final_time
+    final_eci = rotateVector(eval_eci + np.array(enu2ECEF(eval_lat, eval_lst, frag.px, frag.py, frag.pz)), \
+        z_axis, earth_turn)
     final_lat, final_lon, final_ele = cartesian2Geo(final_jd, *final_eci)
 
     # The final velocity relative to the ground, in the local east-north-up frame of the final point
-    vel_end = _enuToECI(final_lat, final_lon, final_jd).T @ rotation @ enu_to_eci \
-        @ np.array([frag.vx, frag.vy, frag.vz])
+    vel_eci = rotateVector(np.array(enu2ECEF(eval_lat, eval_lst, frag.vx, frag.vy, frag.vz)), z_axis, earth_turn)
+    vel_end = np.array(ecef2ENU(final_lat, np.radians(jd2LST(final_jd, np.degrees(final_lon))[0]), *vel_eci))
     final_vel = vectMag(vel_end)
     final_azim = np.arctan2(-vel_end[0], -vel_end[1])%(2*np.pi)
     final_elev = np.arcsin(-vel_end[2]/final_vel)

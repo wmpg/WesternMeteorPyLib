@@ -23,7 +23,7 @@ import pytest
 
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.Utils.TrajConversions import derotatedRadiantAltAz, cartesian2Geo, jd2LST, latLonAlt2ECEF, \
-    altAz2RADec, raDec2ECI, eci2RaDec, raDec2AltAz
+    altAz2RADec, raDec2ECI, eci2RaDec, raDec2AltAz, ecef2ENU, enu2ECEF
 from wmpl.Utils.GeoidHeightEGM96 import mslToWGS84Height
 from wmpl.MetSim import MetSimErosion
 from wmpl.Utils.SampleTrajectoryPositions import sampleTrajectory
@@ -319,16 +319,11 @@ def testGroundSpeedRemovesTheEarthRotationFromTheSolverSpeeds(traj):
         assert np.max(np.abs(v_eci - v_ground)) > 40, "the rotation is a sizeable part of the speed"
 
 
-def _local(lat, lon, ele_msl):
+def _ecef(lat, lon, ele_msl):
     """ ECEF position (m) of a point given by geodetic latitude and longitude (radians) and height above the
-        sea level (m), and its east-north-up basis, independent of the ECI conversions of DynamicMassFit. """
+        sea level (m), independent of the ECI conversions of DynamicMassFit. """
 
-    ecef = np.array(latLonAlt2ECEF(lat, lon, mslToWGS84Height(lat, lon, ele_msl)))
-    basis = np.column_stack([[-np.sin(lon), np.cos(lon), 0.0], \
-        [-np.sin(lat)*np.cos(lon), -np.sin(lat)*np.sin(lon), np.cos(lat)], \
-        [np.cos(lat)*np.cos(lon), np.cos(lat)*np.sin(lon), np.sin(lat)]])
-
-    return ecef, basis
+    return np.array(latLonAlt2ECEF(lat, lon, mslToWGS84Height(lat, lon, ele_msl)))
 
 
 def testEndOfAblationIsWhereMetSimTookTheBodyOverTheGround(traj, tmp_path):
@@ -343,12 +338,12 @@ def testEndOfAblationIsWhereMetSimTookTheBodyOverTheGround(traj, tmp_path):
     frag = sr.frag_main
 
     meas_time, _, _, _, eval_lat, eval_lon, _, _ = evalPointState(traj, 100000.0)
-    eval_ecef, eval_basis = _local(eval_lat, eval_lon, 100000.0)
-    end_ecef, end_basis = _local(np.radians(lat), np.radians(lon), 1000*ele)
+    lat, lon = np.radians(lat), np.radians(lon)
+    displacement = ecef2ENU(eval_lat, eval_lon, *(_ecef(lat, lon, 1000*ele) - _ecef(eval_lat, eval_lon, 100000.0)))
+    vel_end = ecef2ENU(lat, lon, *enu2ECEF(eval_lat, eval_lon, frag.vx, frag.vy, frag.vz))
 
-    assert eval_basis.T @ (end_ecef - eval_ecef) == pytest.approx([frag.px, frag.py, frag.pz], abs=1.0)
-    assert end_basis.T @ eval_basis @ np.array([frag.vx, frag.vy, frag.vz]) == pytest.approx( \
-        vel*_motionENU(np.radians(azim), np.radians(elev)), abs=1e-3)
+    assert displacement == pytest.approx([frag.px, frag.py, frag.pz], abs=1.0)
+    assert vel_end == pytest.approx(vel*_motionENU(np.radians(azim), np.radians(elev)), abs=1e-3)
     assert time == pytest.approx(meas_time + sr.time_arr[-1], abs=1e-9)
 
 
