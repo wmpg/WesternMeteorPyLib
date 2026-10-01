@@ -118,8 +118,10 @@ class Constants(object):
 
         # Optional winds: an object whose wind(height) method gives the east and north wind velocity (m/s) at a
         #   height (m), such as wmpl.Utils.AtmosphereProfile.AtmosphereProfile. With winds, drag, ablation and
-        #   light use the velocity relative to the air at each height, and the fragments move in 3D. None, the
-        #   default, runs without winds
+        #   light use the velocity relative to the air at each height, and the fragments move in 3D. The motion
+        #   is followed in the east-north-up frame of the starting point, which turns by less than 1 deg over
+        #   100 km of path, and the wind is horizontal. Gravity is handled as without winds, as a drop in height.
+        #   None, the default, runs without winds, with results identical to before winds were added
         self.wind_profile = None
 
         # Azimuth of the radiant (radians, +E of due N), used only with winds to know how the wind blows
@@ -305,11 +307,6 @@ class Fragment(object):
         self.vv = 0
         self.vh = 0
 
-        # Velocity (east, north, up) relative to the ground (m/s) and position (east, north, up) from the start
-        #   of the simulation (m), used only with winds. They are scalars so spawn_child() copies them
-        self.vx = self.vy = self.vz = 0
-        self.px = self.py = self.pz = 0
-
         # Total drop due to gravity (m)
         self.h_grav_drop_total = 0
 
@@ -392,8 +389,12 @@ class Fragment(object):
         self.vh = v_init*math.sin(zenith_angle)
 
         # With winds, v_init is the speed relative to the ground and the fragment's speed is the one relative to
-        #   the air
+        #   the air. The fragment then also carries its velocity (east, north, up) relative to the ground (m/s) and
+        #   its position (east, north, up) from the start of the simulation (m), in the local frame of the start.
+        #   They are scalars, so spawn_child() copies them to the grains and fragments it creates, and they only
+        #   exist with winds, so runs without winds copy no more state than before
         if const.wind_profile is not None:
+            self.px = self.py = self.pz = 0.0
             self.vx = -self.vh*math.sin(const.radiant_azimuth)
             self.vy = -self.vh*math.cos(const.radiant_azimuth)
             self.vz = self.vv
@@ -841,13 +842,17 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
         # If the deceleration is negative (i.e. the fragment is accelerating), then stop the fragment
         if deceleration_total > 0:
             frag.vv = frag.vh = frag.v = 0
-            frag.vx = frag.vy = frag.vz = 0
+            if winds:
+                frag.vx = frag.vy = frag.vz = 0
             deceleration_total = 0
 
         # With winds, drag slows the velocity relative to the air along its own direction, and the fragment keeps
         #   the velocity of the air around it
         elif winds:
-            scale = 1 + deceleration_total*const.dt/frag.v
+
+            # A step that would take away more than the whole speed stops the fragment relative to the air
+            #   instead of reversing it, as the vv > 0 check below does without winds
+            scale = max(0.0, 1 + deceleration_total*const.dt/frag.v)
             frag.vx = wind_e + (frag.vx - wind_e)*scale
             frag.vy = wind_n + (frag.vy - wind_n)*scale
             frag.vz *= scale
@@ -902,29 +907,25 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
                 # Setting the height to zero will stop the ablation during the if catch below
                 frag.h = 0
 
-        # Update length along the track
-        if not winds:
-            frag.length += frag.v*const.dt
-
-        # With winds, move the fragment in 3D, and measure the length along its path over the ground
-        else:
-            frag.px += frag.vx*const.dt
-            frag.py += frag.vy*const.dt
-            frag.pz += frag.vz*const.dt
-            frag.length += math.sqrt(frag.vx**2 + frag.vy**2 + frag.vz**2)*const.dt
-
         # Update the mass
         frag.m = m_new
 
         # Old way of computing height which did not include the curvature of the Earth
         # frag.h = frag.h + frag.vv*const.dt
 
-        # Compute the height taking the curvature of the Earth and the gravity drop into account
+        # Update the length along the track, and compute the height taking the curvature of the Earth and the
+        #   gravity drop into account
         if not winds:
+            frag.length += frag.v*const.dt
             frag.h = heightCurvature(const.h_init, const.zenith_angle, frag.length, const.r_earth)
 
-        # With winds, the height of the 3D position over a spherical Earth
+        # With winds, move the fragment in 3D, measure the length along its path over the ground, and take the
+        #   height of its position over a spherical Earth
         else:
+            frag.px += frag.vx*const.dt
+            frag.py += frag.vy*const.dt
+            frag.pz += frag.vz*const.dt
+            frag.length += math.sqrt(frag.vx**2 + frag.vy**2 + frag.vz**2)*const.dt
             frag.h = math.sqrt(frag.px**2 + frag.py**2 + (const.r_earth + const.h_init + frag.pz)**2) \
                 - const.r_earth
 

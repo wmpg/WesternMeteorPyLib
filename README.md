@@ -42,6 +42,7 @@ the larger tools live in [wmpl/Docs](wmpl/Docs):
 
  * [Solving a trajectory](wmpl/Docs/Trajectory.md) - turning multi-station observations into a trajectory pickle, which is the input to the other tools
  * [REBOUND orbital integration](wmpl/Docs/REBOUND.md) - integrating a meteoroid orbit back or forward in time, close encounters and impacts, Monte Carlo clones, radiation forces and chaos indicators
+ * [Dynamic mass and end of ablation](wmpl/Docs/DynamicMassFit.md) - the mass of a fireball from its deceleration, where ablation ends, Monte Carlo uncertainties, atmosphere profiles and winds, and the hand-over to a dark flight
  * [DynestyMetSim](wmpl/Dynesty/README.md) - nested-sampling fits of the erosion ablation model to a meteor light curve and dynamics
  * [Orbit dissimilarity criteria](wmpl/Docs/OrbitSimilarity.md) - measuring how similar two orbits are, which criterion to pick, and why their thresholds are not interchangeable
  * [Classifying a single orbit](wmpl/Docs/OrbitClassification.md) - the Tisserand parameter, the cometary tests, and the Tancredi scheme for asteroids in cometary orbits

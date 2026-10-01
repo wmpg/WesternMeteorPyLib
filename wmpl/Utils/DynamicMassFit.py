@@ -1,3 +1,19 @@
+""" Dynamic mass of a fireball near the end of its luminous path, and where, in which direction and how fast
+    ablation ends, as the starting conditions of a dark flight computation.
+
+The deceleration is fitted to the point velocities of a solved trajectory over a height window, and the drag
+equation gives the dynamic mass, m = (Gamma*A*rho_air*v^2/a)^3/rho_m^2. A single-body MetSim simulation then
+follows that mass down to the speed where ablation is taken to stop.
+
+Since the mass goes as the cube of the air density and the sixth power of the speed relative to the air, the air
+density and the winds can be taken from an atmosphere profile file, read as OpenDarkflight reads it, so that a
+dark flight continues in the same atmosphere. With winds, the speed relative to the air is used for the mass, and
+the simulation runs MetSim with the wind of each height. The uncertainty of the trajectory solver can be propagated
+with its Monte Carlo realizations (--mc), and the results saved for a dark flight code (--save_pickle).
+
+See wmpl/Docs/DynamicMassFit.md for the full description, the reasons behind each choice, and examples.
+"""
+
 import os
 import multiprocessing
 
@@ -79,6 +95,32 @@ def _airSpeed(atm_profile, traj, height, vel):
 
 def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a, v_kill=3000, \
     atm_profile=None, radiant_azimuth=0.0):
+    """ Run a single-body MetSim simulation (no erosion or fragmentation) from the given point down to the
+        speed where ablation is taken to stop, or to SIM_HT_MIN.
+
+    Arguments:
+        mass: [float] Initial mass (kg).
+        density: [float] Bulk density (kg/m^3).
+        lat: [float] Latitude for the MSIS atmosphere (deg).
+        lon: [float] Longitude for the MSIS atmosphere (deg).
+        jd: [float] Julian date for the MSIS atmosphere.
+        ht_beg: [float] Initial height (m).
+        v_init: [float] Initial speed (m/s). With winds it is the speed along the trajectory, relative to the
+            ground, and MetSim works out the speed relative to the air.
+        entry_angle: [float] Elevation of the radiant (deg).
+        gamma_a: [float] Not used, Gamma*A is fixed (see below). Kept for the callers.
+
+    Keyword arguments:
+        v_kill: [float] Speed relative to the air where the simulation stops (m/s). 3000 by default.
+        atm_profile: [AtmosphereProfile] Take the air density, and the winds unless its use_winds is False,
+            from this profile. None by default, which uses the MSIS model.
+        radiant_azimuth: [float] Azimuth of the radiant (deg, +E of due N), used only with winds to know how
+            the wind blows relative to the motion.
+
+    Return:
+        sr: [SimulationResults] With winds, sr.frag_main also holds the 3D displacement (px, py, pz) and
+            velocity relative to the ground (vx, vy, vz) in the east-north-up frame of the start (m, m/s).
+    """
 
     # Init simulation constants
     const = Constants()
@@ -298,6 +340,11 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a, v_kill=30
         date), as traj.orbit.azimuth_apparent_norot and elevation_apparent_norot, evaluated at the final point
         and with the elevation steepened by the gravity turn along the path. They are the inputs a dark
         flight computation needs.
+
+        With the winds of an atmosphere profile, MetSim runs with the wind of each height, so drag and ablation
+        act on the velocity relative to the air. The end point is then moved by where MetSim's 3D path left the
+        straight line, and the final direction and speed are those of MetSim's final velocity relative to the
+        ground, with the gravity turn applied to the velocity relative to the air.
 
     Arguments:
         traj: [Trajectory] Solved trajectory.
@@ -1028,7 +1075,8 @@ if __name__ == "__main__":
         'parameters. The results do not depend on --mc_cores.')
 
     arg_parser.add_argument('--vkill', metavar='V_KILL', type=float, default=3.0, \
-        help='Speed in km/s where ablation is taken to stop and the final simulation ends. Default is 3 km/s.')
+        help='Speed in km/s, relative to the air, where ablation is taken to stop and the final simulation ends. '
+        'Default is 3 km/s.')
 
     arg_parser.add_argument('--vkill_sigma', metavar='V_KILL_SIGMA', type=float, default=0.0, \
         help='Standard deviation in km/s of the kill speed, used with --mc: every Monte Carlo realization '
