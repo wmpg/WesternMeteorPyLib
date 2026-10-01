@@ -15,6 +15,7 @@ Run under pytest, or directly:
 
 import io
 import os
+import argparse
 import contextlib
 
 import numpy as np
@@ -27,7 +28,8 @@ from wmpl.Utils.GeoidHeightEGM96 import mslToWGS84Height
 from wmpl.MetSim import MetSimErosion
 from wmpl.Utils.SampleTrajectoryPositions import sampleTrajectory
 from wmpl.Utils.DynamicMassFit import pointOnTrajectory, _robust_linear_fit, fitVelocity, runFragSim, \
-    SIM_HT_MIN, computeFragEndParams, _airSpeed, _motionENU, _endDecel, groundSpeed, evalPointState
+    SIM_HT_MIN, computeFragEndParams, _airSpeed, _motionENU, _endDecel, groundSpeed, evalPointState, \
+    runMonteCarloDynMass, setAtmosphere
 from wmpl.Utils.AtmosphereProfile import AtmosphereProfile
 from wmpl.Utils.Physics import dynamicMass
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly, atmDensPoly, getAtmDensity
@@ -461,6 +463,27 @@ def testWindsInTheSimulationMoveTheEndAsExpected(traj, tmp_path):
 
     assert np.dot(shift, across) == pytest.approx( \
         np.dot(wind, across)*(sr.time_arr[-1] - length_air/u0), abs=1.0)
+
+
+def testMonteCarloWorkersUseTheMSISModelOfTheMainProcess(traj):
+    """ --atm selects the MSIS model in this process only. Where worker processes are spawned (macOS, Windows)
+        they start from NRLMSISE-00, so runMonteCarloDynMass() hands the model to them: the realizations give
+        the same masses on one core and on two, and not those of NRLMSISE-00. """
+
+    args = ([traj, traj], traj.rbeg_ele/1000, traj.rend_ele/1000, 0.5, 3500, 0.55, 73000, 50, 3.0)
+    kwargs = dict(run_final_sim=False, rng_seed=1)
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        default = runMonteCarloDynMass(*args, cores=1, **kwargs)['dyn_mass_geom']
+        setAtmosphere(argparse.Namespace(atm='2.1', atmtime=None))
+        try:
+            serial = runMonteCarloDynMass(*args, cores=1, **kwargs)['dyn_mass_geom']
+            parallel = runMonteCarloDynMass(*args, cores=2, **kwargs)['dyn_mass_geom']
+        finally:
+            setAtmosphere(argparse.Namespace(atm='00', atmtime=None))
+
+    assert parallel == pytest.approx(serial, rel=1e-12)
+    assert abs(serial[0]/default[0] - 1) > 0.01
 
 
 def testFragmentSimulationAtmosphereFollowsMSISOverTheSimulatedHeights(traj):

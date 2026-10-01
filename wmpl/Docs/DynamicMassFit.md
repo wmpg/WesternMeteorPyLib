@@ -73,6 +73,8 @@ python -m wmpl.Utils.DynamicMassFit traj.pickle 35 27.5 --mc --dens_sigma 300 --
 | `--mc_cores` | all | Processes for the Monte Carlo. The results do not depend on it. |
 | `--dens_sigma` | 0 | With `--mc`, each realization draws its bulk density from N(`--dens`, sigma), in kg/m³. |
 | `--vkill_sigma` | 0 | With `--mc`, each realization draws its kill speed from N(`--vkill`, sigma), in km/s. |
+| `--atm` | `00` | MSIS model when there is no profile: `00` (NRLMSISE-00), `2.0` or `2.1` (NRLMSIS 2.x). |
+| `--atmtime` | trajectory | Evaluate MSIS at this UTC time instead, as `YYYYMMDD-HHMMSS`. |
 | `--atm_profile` | MSIS | Take the air density and winds from this profile file. |
 | `--atm_profile_type` | `wrf` | Its format: `wrf`, `wyoming` or `supracenter`. |
 | `--no_winds` | off | Use the profile's density but not its winds. |
@@ -185,9 +187,11 @@ instead of 36 s.
 
 ## The atmosphere
 
-**By default** the air density comes from the MSIS model at the end of the trajectory. The end-of-ablation
-simulation fits MetSim's density polynomial only over the heights it goes through, from 15 km up to its
-start: a single polynomial fitted up to 180 km, as before, misses the stratosphere by 10–30%.
+**By default** the air density comes from the MSIS model at the end of the trajectory: NRLMSISE-00, or
+NRLMSIS 2.0 or 2.1 with `--atm`, evaluated at the time of the trajectory unless `--atmtime` gives another one.
+The Monte Carlo realizations use the same model. The end-of-ablation simulation fits MetSim's density
+polynomial only over the heights it goes through, from 15 km up to its start: a single polynomial fitted up
+to 180 km, as before, misses the stratosphere by 10–30%.
 
 **With `--atm_profile`**, the density (and the winds, see below) come from a profile file instead. Two
 reasons to do so:

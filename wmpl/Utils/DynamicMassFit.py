@@ -170,6 +170,32 @@ def _airDensity(atm_profile, height):
     return atm_profile.density(height)
 
 
+def _msisSettings():
+    """ The MSIS options of this process (version and date, see AtmosphereDensity.setAtmosphere()), to hand
+        them to the Monte Carlo workers. Where processes are spawned instead of forked (macOS, Windows) the
+        workers start from the defaults, and would otherwise use NRLMSISE-00 whatever --atm says.
+    """
+
+    module = fitAtmPoly.__globals__
+
+    return module['MSIS_VERSION'], module['MSIS_JD']
+
+
+def _msisName():
+    """ Name of the MSIS model selected with --atm (see AtmosphereDensity.setAtmosphere()). """
+
+    version = _msisSettings()[0]
+
+    return "NRLMSISE-00" if version == "00" else "NRLMSIS " + version
+
+
+def _setMSISSettings(settings):
+    """ Apply the MSIS options returned by _msisSettings() in this process. """
+
+    module = fitAtmPoly.__globals__
+    module['MSIS_VERSION'], module['MSIS_JD'] = settings
+
+
 def _endDecel(sr):
     """ Deceleration at the end of a fragment simulation (m/s^2), or NaN if it took a single step, which
         happens when it starts less than one step above the kill speed.
@@ -861,7 +887,7 @@ MC_FINAL_KEYS = ['final_mass', 'final_lat', 'final_lon', 'final_ele', 'final_azi
 
 
 def _mcRealization(traj_mc, traj_index, seed, label, ht_max, ht_min, eval_point, bulk_density, gamma_a, max_vel, \
-    mass_max, sigma_clip, run_final_sim, v_kill, v_kill_sigma, density_sigma, atm_profile):
+    mass_max, sigma_clip, run_final_sim, v_kill, v_kill_sigma, density_sigma, atm_profile, msis_settings):
     """ Process one Monte Carlo trajectory realization for runMonteCarloDynMass(). It is a module-level
         function so it can be sent to the worker processes.
 
@@ -872,6 +898,7 @@ def _mcRealization(traj_mc, traj_index, seed, label, ht_max, ht_min, eval_point,
         label: [str] Realization label used in the printouts.
         ht_max, ht_min, eval_point, bulk_density, gamma_a, max_vel, mass_max, sigma_clip, run_final_sim,
             v_kill, v_kill_sigma, density_sigma, atm_profile: See runMonteCarloDynMass().
+        msis_settings: [tuple] MSIS options of the main process, see _msisSettings().
 
     Return:
         [dict or None] The values of this realization (see runMonteCarloDynMass()), or None if no velocity fit
@@ -879,6 +906,9 @@ def _mcRealization(traj_mc, traj_index, seed, label, ht_max, ht_min, eval_point,
     """
 
     traj_mc = _ensureTrajDefaults(traj_mc)
+
+    # Use the MSIS model of the main process
+    _setMSISSettings(msis_settings)
 
     fit_res = dynMassFromTraj(traj_mc, ht_max, ht_min, eval_point, bulk_density, gamma_a, max_vel, \
         mass_max, sigma_clip=sigma_clip, atm_profile=atm_profile)
@@ -1021,7 +1051,7 @@ def runMonteCarloDynMass(mc_traj_list, ht_max, ht_min, eval_point, bulk_density,
 
     domain = [[traj_mc, traj_index, seed, "{:d}/{:d}".format(i + 1, n_total), ht_max, ht_min, eval_point, bulk_density, \
         gamma_a, max_vel, mass_max, sigma_clip, run_final_sim, v_kill, v_kill_sigma, \
-        density_sigma, atm_profile] for i, (traj_mc, traj_index, seed) \
+        density_sigma, atm_profile, _msisSettings()] for i, (traj_mc, traj_index, seed) \
         in enumerate(zip(traj_samples, traj_indices, seeds))]
 
     # Do not start more processes than there are realizations
@@ -1245,6 +1275,9 @@ if __name__ == "__main__":
         atm_profile = AtmosphereProfile(cml_args.atm_profile, profile_type=cml_args.atm_profile_type)
         atm_profile.checkCoverage(SIM_HT_MIN, 1000*ht_max)
         atm_profile.use_winds = not cml_args.no_winds
+
+        if (cml_args.atm != "00") or (cml_args.atmtime is not None):
+            print("Note: --atm and --atmtime select the MSIS model, which is not used with --atm_profile")
 
 
     #################
@@ -1569,7 +1602,10 @@ if __name__ == "__main__":
     print()
     print("Density = {:d} kg/m^3".format(int(bulk_density)))
     print("Gamma*A = {:.2f}".format(gamma_a))
-    if atm_profile is not None:
+    if atm_profile is None:
+        print("Atmosphere = {:s}{:s}".format(_msisName(), "" if cml_args.atmtime is None \
+            else " at {:s} UTC".format(cml_args.atmtime)))
+    else:
         print("Atmosphere = {:s} profile {:s}".format(atm_profile.profile_type, atm_profile.path))
         if atm_profile.use_winds:
             wind = atm_profile.wind(ht_eval)
@@ -1682,8 +1718,8 @@ if __name__ == "__main__":
         model = {
             'gamma_a': gamma_a, 'density': bulk_density, 'density_sigma': cml_args.dens_sigma, \
             'v_kill': v_kill/1000, 'v_kill_sigma': v_kill_sigma/1000, 'mass_max': mass_max, \
-            'atmosphere': 'NRLMSISE-00 polynomial fit (wmpl.Utils.AtmosphereDensity.fitAtmPoly)', \
-            'atm_profile': None
+            'atmosphere': '{:s} polynomial fit (wmpl.Utils.AtmosphereDensity.fitAtmPoly)'.format(_msisName()), \
+            'msis_version': _msisSettings()[0], 'msis_time': cml_args.atmtime, 'atm_profile': None
         }
 
         # The atmosphere profile, so a dark flight code can check it uses the same one

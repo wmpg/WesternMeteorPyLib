@@ -20,10 +20,11 @@ Contents of the dict:
     mc_fit: [dict of lists or None] Dynamic mass of every Monte Carlo realization with a velocity fit.
     mc_counts: [dict or None] Number of Monte Carlo realizations in the solver file, fitted and simulated.
     fit: [dict] Dynamic mass fit on the nominal trajectory.
-    model: [dict] Physical assumptions of the dynamic mass and the ablation simulation. Its atm_profile entry
-        describes the atmosphere profile file used instead of the MSIS model (path, format, sha256, height range
-        in km, and whether its winds were used), or is None, so a dark flight code can check it uses the same
-        atmosphere.
+    model: [dict] Physical assumptions of the dynamic mass and the ablation simulation. msis_version and
+        msis_time give the MSIS model (--atm, e.g. "00" or "2.1") and the time it was evaluated at if --atmtime
+        set one. Its atm_profile entry describes the atmosphere profile file used instead of the MSIS model (path,
+        format, sha256, height range in km, and whether its winds were used), or is None, so a dark flight code
+        can check it uses the same atmosphere.
     provenance: [dict] Input files, DynamicMassFit options, wmpl commit and creation time.
 """
 
