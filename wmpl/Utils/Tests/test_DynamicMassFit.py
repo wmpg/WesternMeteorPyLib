@@ -22,7 +22,7 @@ import pytest
 import scipy.optimize
 
 from wmpl.Utils.Pickling import loadPickle
-from wmpl.Utils.TrajConversions import derotatedRadiantAltAz, cartesian2Geo, jd2LST, latLonAlt2ECEF
+from wmpl.Utils.TrajConversions import derotatedRadiantAltAz, cartesian2Geo, jd2LST, latLonAlt2ECEF, ecef2ENU
 from wmpl.Utils.GeoidHeightEGM96 import mslToWGS84Height
 from wmpl.Utils.SampleTrajectoryPositions import sampleTrajectory
 from wmpl.Utils.DynamicMassFit import pointOnTrajectory, _robust_linear_fit, fitVelocity
@@ -170,16 +170,11 @@ def testGroundSpeedRemovesTheEarthRotationFromTheSolverSpeeds(traj):
         assert np.max(np.abs(v_eci - v_ground)) > 40, "the rotation is a sizeable part of the speed"
 
 
-def _local(lat, lon, ele_msl):
+def _ecef(lat, lon, ele_msl):
     """ ECEF position (m) of a point given by geodetic latitude and longitude (radians) and height above the
-        sea level (m), and its east-north-up basis, independent of the ECI frame. """
+        sea level (m), independent of the ECI frame. """
 
-    ecef = np.array(latLonAlt2ECEF(lat, lon, mslToWGS84Height(lat, lon, ele_msl)))
-    basis = np.column_stack([[-np.sin(lon), np.cos(lon), 0.0], \
-        [-np.sin(lat)*np.cos(lon), -np.sin(lat)*np.sin(lon), np.cos(lat)], \
-        [np.cos(lat)*np.cos(lon), np.cos(lat)*np.sin(lon), np.sin(lat)]])
-
-    return ecef, basis
+    return np.array(latLonAlt2ECEF(lat, lon, mslToWGS84Height(lat, lon, ele_msl)))
 
 
 def testEndOfAblationMovesWithTheGround(traj):
@@ -206,9 +201,8 @@ def testEndOfAblationMovesWithTheGround(traj):
     motion = -np.array([np.sin(azim)*np.cos(elev), np.cos(azim)*np.cos(elev), np.sin(elev)])
     across = np.array([np.cos(azim), -np.sin(azim), 0.0])
 
-    eval_ecef, eval_basis = _local(eval_lat, eval_lon, height)
-    end_ecef, _ = _local(np.radians(lat), np.radians(lon), 1000*ele)
-    displacement = eval_basis.T @ (end_ecef - eval_ecef)
+    displacement = np.array(ecef2ENU(eval_lat, eval_lon, *(_ecef(np.radians(lat), np.radians(lon), 1000*ele) \
+        - _ecef(eval_lat, eval_lon, height))))
 
     assert np.dot(displacement, motion) == pytest.approx(sr.frag_main.length, abs=2.0)
     assert np.dot(displacement, across) == pytest.approx(0.0, abs=2.0)

@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from matplotlib.pyplot import cm
 
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly
-from wmpl.Utils.Math import lineFunc, vectMag
+from wmpl.Utils.Math import lineFunc, vectMag, rotateVector
 from wmpl.Utils.TrajConversions import cartesian2Geo, derotatedRadiantAltAz
 from wmpl.Utils.Physics import dynamicMass
 from wmpl.Utils.Pickling import loadPickle
@@ -344,11 +344,8 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
     direction_ground = -traj.v_init*traj.radiant_eci_mini \
         - _rotationVelocity(pointOnTrajectory(traj, meas_len, meas_time))
     direction_ground /= vectMag(direction_ground)
-    angle = EARTH_ROTATION_RATE*final_time
-    rotation = np.array([[np.cos(angle), -np.sin(angle), 0.0], [np.sin(angle), np.cos(angle), 0.0], \
-        [0.0, 0.0, 1.0]])
-    final_eci = rotation @ (pointOnTrajectory(traj, meas_len, total_time) \
-        + sr.frag_main.length*direction_ground)
+    final_eci = rotateVector(pointOnTrajectory(traj, meas_len, total_time) \
+        + sr.frag_main.length*direction_ground, np.array([0.0, 0.0, 1.0]), EARTH_ROTATION_RATE*final_time)
 
     t_obs = np.concatenate([obs.time_data for obs in traj.observations])
 
