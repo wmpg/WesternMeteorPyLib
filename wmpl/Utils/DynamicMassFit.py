@@ -24,7 +24,7 @@ import scipy.optimize
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import cm
 
-from wmpl.Utils.AtmosphereDensity import fitAtmPoly
+from wmpl.Utils.AtmosphereDensity import fitAtmPoly, addAtmosphereArguments, setAtmosphere
 from wmpl.Utils.Math import lineFunc, vectMag
 from wmpl.Utils.TrajConversions import cartesian2Geo, derotatedRadiantAltAz, jd2LST
 from wmpl.Utils.Physics import dynamicMass
@@ -1177,8 +1177,14 @@ if __name__ == "__main__":
         help='Number of CPU cores used to process the Monte Carlo realizations in parallel. Default is all '
         'available cores; 1 runs them serially.')
 
+    # Add the atmosphere model options
+    addAtmosphereArguments(arg_parser)
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
+
+    # Apply the atmosphere model options
+    setAtmosphere(cml_args)
 
     #########################
 
