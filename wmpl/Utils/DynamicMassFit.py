@@ -13,6 +13,49 @@ from wmpl.Utils.Pickling import loadPickle
 from wmpl.MetSim.MetSimErosion import Constants, runSimulation, G0
 from wmpl.MetSim.GUI import SimulationResults
 from wmpl.Trajectory.Trajectory import applyGravityDrop
+from wmpl.Utils.Math import rotateVector
+
+
+# Rotation rate of the Earth (rad/s), over one sidereal day
+EARTH_ROTATION_RATE = 2*np.pi/86164.09053
+
+
+def _rotationVelocity(eci_pos):
+    """ Velocity (m/s) of the ground at the given ECI position(s) (m), from the rotation of the Earth around the
+        z axis of the ECI frame of date.
+    """
+
+    eci_pos = np.asarray(eci_pos, dtype=float)
+
+    return EARTH_ROTATION_RATE*np.stack([-eci_pos[..., 1], eci_pos[..., 0], np.zeros_like(eci_pos[..., 0])], \
+        axis=-1)
+
+
+def groundSpeed(traj, eci_pos, vel):
+    """ Speed relative to the ground (m/s) of a point on the trajectory, from the speed along the fitted line that
+        the solver measures.
+
+        The solver works in the ECI frame with moving stations, so its point velocities are inertial: they include
+        the component of the Earth's rotation along the motion (217 m/s for an eastward fireball at 52 deg N).
+        Drag acts on the speed relative to the air, which moves with the ground, and the mass goes as its sixth
+        power, so the dynamic mass and the end of ablation need the ground speed. Relative to the ground the body
+        moves along the fixed direction of the apparent ground-fixed radiant, so the speed along the line is that
+        speed projected on the line plus the rotation velocity projected on it.
+
+    Arguments:
+        traj: [Trajectory] Solved trajectory.
+        eci_pos: [ndarray] ECI position(s) of the point(s) (m), shape (3,) or (N, 3).
+        vel: [float or ndarray] Speed(s) along the fitted line in the ECI frame (m/s).
+
+    Return:
+        [float or ndarray] Speed(s) relative to the ground (m/s).
+    """
+
+    motion = -traj.radiant_eci_mini
+    direction_ground = traj.v_init*motion - _rotationVelocity(traj.state_vect_mini)
+    direction_ground /= np.sqrt(direction_ground @ direction_ground)
+
+    return (vel - _rotationVelocity(eci_pos) @ motion)/np.dot(direction_ground, motion)
 
 
 def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a):
@@ -223,12 +266,16 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
         and with the elevation steepened by the gravity turn along the path. They are the inputs a dark
         flight computation needs.
 
+        The simulation works relative to the ground, which the air moves with. Over the simulated time the
+        body therefore moves, in the ECI frame of the trajectory, along the ground-fixed direction of motion by
+        the simulated length, and with the ground under it.
+
     Arguments:
         traj: [Trajectory] Solved trajectory.
         dyn_mass: [float] Dynamic mass at the evaluation point (kg).
         density: [float] Bulk density of the meteoroid (kg/m^3).
         hend: [float] Height of the evaluation point (m).
-        vend: [float] Velocity at the evaluation point (m/s).
+        vend: [float] Speed relative to the ground at the evaluation point (m/s), see groundSpeed().
         gamma_a: [float] Product of the drag coefficient and the shape factor used for the dynamic mass. Not
             used by the simulation itself, see runFragSim().
 
@@ -291,8 +338,15 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
 
     ### Compute the final lat/lon ###
 
-    # Initial 3D ECI vector + total length x direction
-    final_eci = pointOnTrajectory(traj, total_len, total_time)
+    # The simulated length and speeds are relative to the ground. The body ends that length away from the
+    #   evaluation point along the ground-fixed direction of motion (the derotated radiant), at a point fixed to
+    #   the ground that the Earth's rotation then carries to its ECI position at the final time. The gravity
+    #   drop of the solver is taken at the final time
+    direction_ground = -traj.v_init*traj.radiant_eci_mini \
+        - _rotationVelocity(pointOnTrajectory(traj, meas_len, meas_time))
+    direction_ground /= vectMag(direction_ground)
+    final_eci = rotateVector(pointOnTrajectory(traj, meas_len, total_time) \
+        + sr.frag_main.length*direction_ground, np.array([0.0, 0.0, 1.0]), EARTH_ROTATION_RATE*final_time)
 
     t_obs = np.concatenate([obs.time_data for obs in traj.observations])
 
@@ -565,7 +619,8 @@ if __name__ == "__main__":
         ignored = obs.ignore_list[1:] > 0
 
 
-        vel = obs.velocities[1:][~ignored]
+        # Speeds relative to the ground, which the drag depends on, from the solver's ECI speeds
+        vel = groundSpeed(traj, obs.model_eci[1:][~ignored], obs.velocities[1:][~ignored])
         ht = obs.meas_ht[1:][~ignored]
         t = obs.time_data[1:][~ignored]
 
@@ -592,7 +647,7 @@ if __name__ == "__main__":
     if ht_min > 0:
         ax1.axhline(y=ht_min, color='k', linestyle='dashed', label='Ht min')
 
-    ax1.set_xlabel("Velocity (km/s)")
+    ax1.set_xlabel("Velocity relative to the ground (km/s)")
     ax1.set_ylabel("Height (km)")
 
 
@@ -621,9 +676,11 @@ if __name__ == "__main__":
     ax2.scatter(vel_data/1000, time_data, s=5, label="Measurements")
     
 
-    # Fit a line to the velocity data in the range
+    # Fit a line to the velocity data in the range, starting from the least-squares line; from (1, 1) it can
+    #   run out of function evaluations
     popt_final, pcov_final, perr_final, vel_filter = fitVelocity(
-        time_data, vel_data, p0=(1.0, 1.0), loss='soft_l1', sigma_clip=cml_args.sigma_clip
+        time_data, vel_data, p0=np.polyfit(time_data, vel_data, 1), loss='soft_l1', \
+        sigma_clip=cml_args.sigma_clip
     )
 
     vel_fit = popt_final
@@ -825,7 +882,7 @@ if __name__ == "__main__":
 
     ax2.invert_yaxis()
     ax2.set_ylabel("Time (s)")
-    ax2.set_xlabel("Velocity (km/s)")
+    ax2.set_xlabel("Velocity relative to the ground (km/s)")
     
     ax1.legend()
     ax2.legend()
