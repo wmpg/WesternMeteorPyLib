@@ -24,7 +24,7 @@ List of features:
    * Monte Carlo method
  * Orbit computation
  * Meteor shower/trajectory simulaton
- * Obtaining atmosphere densities using the NRLMSISE-00 model
+ * Obtaining atmosphere densities using the NRL MSIS models (NRLMSISE-00 and NRLMSIS 2.x, through `pymsis`)
  * D criteria functions
  * Parent body search
  * Coordinate system transforms
@@ -42,6 +42,7 @@ the larger tools live in [wmpl/Docs](wmpl/Docs):
 
  * [Solving a trajectory](wmpl/Docs/Trajectory.md) - turning multi-station observations into a trajectory pickle, which is the input to the other tools
  * [REBOUND orbital integration](wmpl/Docs/REBOUND.md) - integrating a meteoroid orbit back or forward in time, close encounters and impacts, Monte Carlo clones, radiation forces and chaos indicators
+ * [Dynamic mass and end of ablation](wmpl/Docs/DynamicMassFit.md) - the mass of a fireball from its deceleration, where ablation ends, Monte Carlo uncertainties, atmosphere profiles and winds, and the hand-over to a dark flight
  * [DynestyMetSim](wmpl/Dynesty/README.md) - nested-sampling fits of the erosion ablation model to a meteor light curve and dynamics
  * [Orbit dissimilarity criteria](wmpl/Docs/OrbitSimilarity.md) - measuring how similar two orbits are, which criterion to pick, and why their thresholds are not interchangeable
  * [Classifying a single orbit](wmpl/Docs/OrbitClassification.md) - the Tisserand parameter, the cometary tests, and the Tancredi scheme for asteroids in cometary orbits
@@ -78,6 +79,13 @@ conda install -y -c conda-forge watchdog h5py
 conda install -y -c conda-forge numba
 conda install -y -c conda-forge basemap basemap-data-hires
 conda install -y -c conda-forge cartopy paramiko
+```
+
+The atmosphere mass density is computed with the MSIS models through `pymsis`, which is only
+available on PyPI (it replaces the bundled `PythonNRLMSISE00` submodule, which is no longer used):
+
+```
+pip install pymsis
 ```
 
 Optionally, if you want to use the REBOUND orbital integrator, install:
@@ -174,6 +182,7 @@ The installation might differ on Windows. I recommend installing Anaconda, which
 	conda install -y -c conda-forge basemap basemap-data-hires
  	conda install -y -c conda-forge cartopy paramiko
 	conda install -y -c astropy astropy
+	pip install pymsis
 	```
 
 3) Download and install git: [https://git-scm.com/downloads](https://git-scm.com/downloads)
@@ -203,7 +212,7 @@ If you experience any issues, please see the "Troubleshooting" section below.
 
 If you are getting the following error on Windows: ```Unable to find vcvarsall.bat```, that means you need to install [Visual C++ Build Tools 2015](http://go.microsoft.com/fwlink/?LinkId=691126) or 2022. 
 
-If you are getting this error when running the setup: ```ModuleNotFoundError: No module named 'wmpl.PythonNRLMSISE00.nrlmsise_00_header'```, it means that you haven't cloned the repository as per instructions. Please read this README file more carefully (hint: the answer is at the top of the file).
+If you are getting this error: ```ModuleNotFoundError: No module named 'wmpl.PythonNRLMSISE00.nrlmsise_00_header'```, it means that you haven't cloned the repository as per instructions. Please read this README file more carefully (hint: the answer is at the top of the file). The library itself no longer uses that submodule - the atmosphere densities come from `pymsis` - but the atmosphere regression test still compares against it.
 
 ##### ```KeyError: 'PROJ_LIB'```
 The basemap conda package is terribly broken and no one seems to care to fix it, so we have to do a little bit of "hacking". 

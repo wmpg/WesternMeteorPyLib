@@ -1,6 +1,7 @@
 numpy < 2.0
 cython
 scipy
+pymsis
 matplotlib
 jplephem
 pyephem

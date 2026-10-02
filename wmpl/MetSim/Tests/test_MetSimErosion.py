@@ -26,7 +26,7 @@ import numpy as np
 
 import wmpl.MetSim.MetSimErosion as MetSimErosion
 from wmpl.MetSim.GUI import FragmentationEntry
-from wmpl.Utils.AtmosphereDensity import fitAtmPoly
+from wmpl.Utils.AtmosphereDensity import fitAtmPoly, atmDensPoly
 from wmpl.Utils.TrajConversions import date2JD
 
 
@@ -158,6 +158,129 @@ def test_brightest_height_not_spuriously_zero_while_luminous():
         "brightest_height was 0 on a tick where the meteor was still luminous"
 
 
+### Winds ###
+
+class _ShearedWind(object):
+    """ Wind turning from 250 to 300 deg (the direction it blows from) and growing from 10 to 70 m/s between 20
+        and 32 km, constant outside. MetSim only needs its wind(height) method. """
+
+    def __init__(self, scale=1.0):
+        self.scale = scale
+
+    def wind(self, height):
+        frac = np.clip((np.asarray(height, dtype=float) - 20000.0)/12000.0, 0, 1)
+        speed, direction = self.scale*(10 + 60*frac), np.radians(250 + 50*frac)
+        return -np.array([speed*np.sin(direction), speed*np.cos(direction)])
+
+
+def _makeSingleBodyConstants(wind_profile=None, gravity_3d=False):
+    """ A single body at the end of a fireball, as DynamicMassFit simulates it. """
+
+    const = MetSimErosion.Constants()
+    const.h_kill, const.v_kill = 15000, 3000
+    const.m_init, const.v_init, const.h_init, const.rho = 0.112, 6303.0, 30000.0, 3500.0
+    const.shape_factor, const.gamma, const.sigma = 1.21, 0.7, 0.005/1e6
+    const.zenith_angle = np.radians(90 - 41.4)
+    const.erosion_on, const.disruption_on, const.fragmentation_on = False, False, False
+    const.dens_co = fitAtmPoly(np.radians(51.94), np.radians(-2.10), const.h_kill, const.h_init, 2459274.41)
+    const.wind_profile, const.radiant_azimuth, const.gravity_3d = wind_profile, np.radians(264.0), gravity_3d
+
+    return const
+
+
+def _motion(const):
+    """ Unit vector (east, north, up) of the initial direction of motion. """
+
+    az, zc = const.radiant_azimuth, const.zenith_angle
+    return np.array([-np.sin(zc)*np.sin(az), -np.sin(zc)*np.cos(az), -np.cos(zc)])
+
+
+def _referenceRun(const):
+    """ MetSim's single-body equations with the wind evaluated at every step, and gravity towards the Earth's
+        centre and the Coriolis acceleration with const.gravity_3d, integrated with RK4 in 0.1 ms steps (converged) in 3D over a spherical
+        Earth, as an independent check of MetSim in 3D. Returns the final position (east, north, up) from the
+        start, the velocity relative to the ground and the mass. """
+
+    K = const.gamma*const.shape_factor*const.rho**(-2/3.0)
+    if const.wind_profile is None:
+        wind = lambda h: np.zeros(3)
+    else:
+        wind = lambda h: np.append(const.wind_profile.wind(h), 0.0)
+    centre = np.array([0.0, 0.0, -(const.r_earth + const.h_init)])
+    height = lambda x: np.linalg.norm(x - centre) - const.r_earth
+
+    def deriv(s):
+        h = height(s[:3])
+        u = s[3:6] - wind(h)
+        rho = atmDensPoly(h, const.dens_co)
+        acc = -K*s[6]**(-1/3.0)*rho*np.linalg.norm(u)*u
+        if const.gravity_3d:
+            acc = acc - MetSimErosion.G0*(const.r_earth/(const.r_earth + h))**2*(s[:3] - centre) \
+                /np.linalg.norm(s[:3] - centre)
+            if const.latitude is not None:
+                omega = MetSimErosion.EARTH_ROTATION_RATE*np.array([0.0, np.cos(const.latitude), \
+                    np.sin(const.latitude)])
+                acc = acc - 2*np.cross(omega, s[3:6])
+        return np.concatenate([s[3:6], acc, [-K*const.sigma*s[6]**(2/3.0)*rho*np.linalg.norm(u)**3]])
+
+    s, dt = np.concatenate([np.zeros(3), const.v_init*_motion(const), [const.m_init]]), 1e-4
+    while np.linalg.norm(s[3:6] - wind(height(s[:3]))) > const.v_kill:
+        k1 = deriv(s); k2 = deriv(s + dt/2*k1); k3 = deriv(s + dt/2*k2); k4 = deriv(s + dt*k3)
+        s = s + dt/6*(k1 + 2*k2 + 2*k3 + k4)
+
+    return s[:3], s[3:6], s[6]
+
+
+def _angle(a, b):
+    return np.degrees(np.arccos(np.clip(np.dot(a, b)/np.linalg.norm(a)/np.linalg.norm(b), -1, 1)))
+
+
+def test_winds_in_still_air_reproduce_the_simulation_without_winds():
+    frag_still, _, _ = MetSimErosion.runSimulation(_makeSingleBodyConstants(_ShearedWind(scale=0.0)))
+    frag_none, _, _ = MetSimErosion.runSimulation(_makeSingleBodyConstants())
+
+    for name in ['m', 'v', 'h', 'length']:
+        assert np.isclose(getattr(frag_still, name), getattr(frag_none, name), rtol=1e-9, atol=0), name
+
+
+def test_winds_match_an_integration_with_the_wind_at_every_step():
+    """ With a wind that turns and grows with height, MetSim matches the reference to within what its 5 ms steps
+        leave without winds (a few metres and ~0.1% in mass), while ignoring the wind is off by much more. """
+
+    const = _makeSingleBodyConstants(_ShearedWind())
+    frag, _, _ = MetSimErosion.runSimulation(const)
+    x_ref, v_ref, m_ref = _referenceRun(const)
+
+    vel = np.array([frag.vx, frag.vy, frag.vz])
+    assert np.linalg.norm(np.array([frag.px, frag.py, frag.pz]) - x_ref) < 15.0
+    assert _angle(vel, v_ref) < 0.01
+    assert abs(frag.m/m_ref - 1) < 0.002
+
+    # Without winds the fragment keeps its initial direction, which the wind turns by much more than the above
+    assert _angle(_motion(const), v_ref) > 0.1
+
+
+def test_gravity_3d_matches_an_integration_with_gravity_at_every_step():
+    """ With gravity and the Coriolis acceleration in the velocity, with and without winds, MetSim matches the
+        reference to within what its 5 ms steps leave (a few metres, 0.001 deg), while gravity itself turns the path
+        by 0.1 deg here. """
+
+    for wind in [None, _ShearedWind()]:
+        const = _makeSingleBodyConstants(wind, gravity_3d=True)
+        const.latitude = np.radians(51.94)
+        frag, _, _ = MetSimErosion.runSimulation(const)
+        x_ref, v_ref, m_ref = _referenceRun(const)
+
+        vel = np.array([frag.vx, frag.vy, frag.vz])
+        assert np.linalg.norm(np.array([frag.px, frag.py, frag.pz]) - x_ref) < 15.0
+        assert _angle(vel, v_ref) < 0.005
+        assert abs(frag.m/m_ref - 1) < 0.002
+
+        const.gravity_3d = False
+        _, v_ref_no_gravity, _ = _referenceRun(const)
+        assert _angle(v_ref_no_gravity, v_ref) > 0.05
+
+
 def _savePlot(save_path=None):
     """ New-engine-only diagnostic figure (LC, mass, velocity, height vs time). Optional, for eyeballing. """
     import matplotlib
@@ -197,6 +320,9 @@ if __name__ == "__main__":
     test_total_active_mass_is_grain_weighted()
     test_lum_eroded_tracked_by_default()
     test_brightest_height_not_spuriously_zero_while_luminous()
+    test_winds_in_still_air_reproduce_the_simulation_without_winds()
+    test_winds_match_an_integration_with_the_wind_at_every_step()
+    test_gravity_3d_matches_an_integration_with_gravity_at_every_step()
     print("All MetSimErosion regression checks passed.")
 
     if "--plot" in sys.argv:

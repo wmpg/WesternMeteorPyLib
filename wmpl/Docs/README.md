@@ -8,6 +8,9 @@ and what the options are for.
   input to most of the other tools.
 - [REBOUND orbital integration](REBOUND.md) — integrating a meteoroid orbit backwards or forwards,
   close encounters and impacts, Monte Carlo clones, radiation forces, and chaos indicators.
+- [Dynamic mass and end of ablation](DynamicMassFit.md) — the mass of a fireball from its
+  deceleration, where ablation ends, Monte Carlo uncertainties, atmosphere profiles and winds, and the
+  hand-over to a dark flight.
 - [DynestyMetSim](../Dynesty/README.md) — nested-sampling fits of the erosion ablation model to a
   meteor light curve and dynamics.
 - [Orbit dissimilarity criteria](OrbitSimilarity.md) — measuring how similar two orbits are, which
