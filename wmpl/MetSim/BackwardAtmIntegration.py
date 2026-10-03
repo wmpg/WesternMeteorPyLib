@@ -6,7 +6,7 @@
 
 From the command line, to a height or for a time, with or without Monte Carlo realizations:
 
-    python -m wmpl.MetSim.BackwardAtmIntegration traj.pickle --atm_height 180 --mc 100
+    python -m wmpl.MetSim.BackwardAtmIntegration traj.pickle --mass 0.5 --atm_height 180 --mc 100
 
 State vectors are [x, y, z, vx, vy, vz] in ECI (true equator and equinox of date), in m and m/s, with the
 velocity pointing to the radiant, as the solver gives them and reboundSimulate() takes them.
@@ -19,9 +19,7 @@ import os
 import numpy as np
 
 from wmpl.MetSim.MetSimErosion import Constants, EARTH_ROTATION_RATE, runSimulation
-from wmpl.Trajectory.AggregateAndPlot import computeMass
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly
-from wmpl.Utils.Physics import LUM_EFF_MODELS, PANCHROMATIC_LUM_EFF_TYPES
 from wmpl.Utils.TrajConversions import cartesian2Geo, derotatedRadiantAltAz, enu2ECEF, jd2LST
 
 
@@ -160,56 +158,25 @@ def backwardStates(jd_ref, state_vects, m_init, h_kill=180000.0, t_kill=-1, cons
     return jd, states, masses
 
 
-def photometricMass(traj, lum_eff, P_0m=None):
-    """ Photometric mass of the trajectory (kg), from its whole light curve, which is the mass at its reference
-        point if it ablated completely.
-
-    Arguments:
-        traj: [Trajectory]
-        lum_eff: [str] Luminous efficiency: a model name from wmpl.Utils.Physics.LUM_EFF_MODELS (e.g.
-            'borovicka2020'), or a constant in percent (e.g. '0.7').
-
-    Keyword arguments:
-        P_0m: [float] Power of a zero-magnitude meteor (W). None, the default, takes 1500 W for the panchromatic
-            models and 840 W otherwise.
-    """
-
-    key = lum_eff.strip().lower()
-    tau = key if key in LUM_EFF_MODELS else float(lum_eff)/100
-
-    if P_0m is None:
-        P_0m = 1500.0 if (key in LUM_EFF_MODELS) and (LUM_EFF_MODELS[key] in PANCHROMATIC_LUM_EFF_TYPES) else 840.0
-
-    return computeMass(traj, P_0m, tau=tau)
-
-
 def addBackwardArguments(arg_parser):
     """ Add the command-line arguments for the mass and the physical parameters of the meteoroid in a run back
         through the atmosphere, shared by this module's command line and REBOUND's. """
 
     arg_parser.add_argument("--mass", type=float, default=None,
-        help="Mass at the trajectory's reference point in kg. By default, the photometric mass from the whole "
-        "light curve, with --lum_eff and --P_0m.")
+        help="Mass of the meteoroid at the trajectory's reference point in kg, e.g. a photometric mass.")
 
-    arg_parser.add_argument("--lum_eff", type=str, default="0.7",
-        help="Luminous efficiency for the photometric mass: a constant in percent, or a model name: "
-        "{:s}. Default: 0.7.".format(", ".join(LUM_EFF_MODELS)))
-
-    arg_parser.add_argument("--P_0m", type=float, default=None,
-        help="Power of a zero-magnitude meteor in W for the photometric mass. Default: 1500 for the panchromatic "
-        "models (rc2001*, cm1976, borovicka2020, pc1983), 840 otherwise.")
-
-    arg_parser.add_argument("--mag_sigma", type=float, default=0.0,
-        help="Uncertainty of the photometric calibration in magnitudes. Each Monte Carlo realization shifts the "
-        "whole light curve by a normal draw with this sigma, which multiplies its mass by 10^(-0.4 shift). "
-        "Default: 0.")
+    arg_parser.add_argument("--mass_sigma", type=float, default=0.0,
+        help="1-sigma uncertainty of --mass in kg. Each Monte Carlo realization starts with a mass drawn from a "
+        "log-normal distribution with --mass as its mean and this standard deviation, which keeps every mass "
+        "positive. Default: 0.")
 
     arg_parser.add_argument("--freeze_mass", action="store_true",
         help="Keep the mass constant instead of growing it back as the ablation is undone.")
 
     arg_parser.add_argument("--ablation_coeff", type=float, default=Constants().sigma*1e6,
-        help="Ablation coefficient in s^2/km^2, which sets how fast the mass grows back. Default: MetSim's, "
-        "{:g}.".format(Constants().sigma*1e6))
+        help="Ablation coefficient in s^2/km^2: the mass lost for the kinetic energy lost to the drag "
+        "(dm = sigma m v dv), so it sets how fast the mass grows back. Default: MetSim's, {:g}.".format(
+        Constants().sigma*1e6))
 
     arg_parser.add_argument("--density", type=float, default=3000.0,
         help="Bulk density of the meteoroid in kg/m^3, which with the mass sets the drag, and in REBOUND the "
@@ -218,19 +185,19 @@ def addBackwardArguments(arg_parser):
 
 def backwardStatesFromArguments(traj, state_vects, args, h_kill, t_kill=-1, random_seed=None):
     """ backwardStates() from the trajectory's reference point, with the mass and physical parameters given by the
-        command-line arguments of addBackwardArguments(). The masses of the realizations carry the photometric
-        uncertainty --mag_sigma, drawn with random_seed. Also returns the starting masses. """
+        command-line arguments of addBackwardArguments(). The masses of the realizations are drawn with
+        random_seed from --mass and --mass_sigma. Also returns the starting masses. """
 
     const = Constants()
     const.freeze_mass = args.freeze_mass
     const.sigma = args.ablation_coeff/1e6
     const.rho = args.density
 
-    m_init = args.mass if (args.mass is not None) else photometricMass(traj, args.lum_eff, args.P_0m)
-
-    # A generator of its own, so the state vector draws stay those of sampleStateVectors with the same seed
+    # Log-normal with mean args.mass and standard deviation args.mass_sigma, from a generator of its own, so the
+    #   state vector draws stay those of sampleStateVectors with the same seed
+    sigma_ln = np.sqrt(np.log(1 + (args.mass_sigma/args.mass)**2))
     rng = np.random.default_rng(None if (random_seed is None) else [1, random_seed])
-    m_inits = [m_init] + list(m_init*10**(-0.4*rng.normal(0.0, args.mag_sigma, len(state_vects) - 1)))
+    m_inits = [args.mass] + list(args.mass*np.exp(sigma_ln*rng.normal(size=len(state_vects) - 1) - sigma_ln**2/2))
 
     return backwardStates(traj.jdt_ref, state_vects, m_inits, h_kill=h_kill, t_kill=t_kill, const=const), m_inits
 
@@ -262,6 +229,9 @@ if __name__ == "__main__":
     addBackwardArguments(arg_parser)
 
     args = arg_parser.parse_args()
+
+    if args.mass is None:
+        arg_parser.error("the meteoroid's --mass is required.")
 
     traj = loadPickle(*os.path.split(args.pickle_path))
     state_vect = np.concatenate([traj.state_vect_mini, traj.v_init*traj.radiant_eci_mini])

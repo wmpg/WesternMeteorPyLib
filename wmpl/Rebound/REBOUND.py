@@ -2472,14 +2472,17 @@ if __name__ == "__main__":
                         help="Start the orbit integration above the atmosphere instead of at the trajectory's "
                         "reference point: run the nominal solution back up to this height in km (180 if no "
                         "value is given) with MetSim (single body, drag, gravity, Coriolis), and each Monte "
-                        "Carlo realization back for the same time, with --mass or the photometric mass, "
-                        "--mag_sigma, --freeze_mass, --ablation_coeff and --density.")
+                        "Carlo realization back for the same time, with --mass (required), --mass_sigma, "
+                        "--freeze_mass, --ablation_coeff and --density.")
 
     addBackwardArguments(parser)
 
     parser.add_argument("--verbose", action="store_true", help="Print out the progress of the simulation.")
 
     args = parser.parse_args()
+
+    if (args.atm_height is not None) and (args.mass is None):
+        parser.error("--atm_height needs the meteoroid's --mass.")
 
     # Extract the number of days from the arguments and the simulation direction. --forward may be
     # given on its own (use --days) or with its own number of days.

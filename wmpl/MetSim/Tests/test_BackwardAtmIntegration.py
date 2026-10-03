@@ -14,10 +14,9 @@ from types import SimpleNamespace
 import numpy as np
 
 from wmpl.MetSim.BackwardAtmIntegration import addBackwardArguments, backwardConstants, backwardState, \
-    backwardStates, backwardStatesFromArguments, photometricMass
+    backwardStates, backwardStatesFromArguments
 from wmpl.MetSim.MetSimErosion import Constants, Fragment, runSimulation
 from wmpl.Rebound.REBOUND import sampleStateVectors
-from wmpl.Trajectory.AggregateAndPlot import computeMass
 from wmpl.Utils.Pickling import loadPickle, savePickle
 from wmpl.Utils.TrajConversions import cartesian2Geo
 
@@ -122,18 +121,6 @@ def test_backward_run_for_a_time_stops_below_h_kill():
         assert 140000 < cartesian2Geo(jd, *sv[:3])[2] < 150000
 
 
-def test_photometric_mass_follows_the_luminous_efficiency_conventions():
-    """ A number is a constant luminous efficiency in percent with P_0m = 840 W, and a model name from
-        LUM_EFF_MODELS takes 1500 W if it is panchromatic, unless P_0m is given. """
-
-    traj, _ = _exampleStart()
-
-    assert np.isclose(photometricMass(traj, "0.7"), computeMass(traj, 840.0, tau=0.007), rtol=1e-12, atol=0)
-    assert photometricMass(traj, "Borovicka2020") == computeMass(traj, 1500.0, tau="borovicka2020")
-    assert photometricMass(traj, "camo") == computeMass(traj, 840.0, tau="camo")
-    assert photometricMass(traj, "cm1976", P_0m=1210.0) == computeMass(traj, 1210.0, tau="cm1976")
-
-
 def _parseArguments(*argv):
     parser = argparse.ArgumentParser()
     addBackwardArguments(parser)
@@ -142,44 +129,44 @@ def _parseArguments(*argv):
 
 
 def test_command_line_arguments_set_the_mass_and_the_physical_parameters():
-    """ Without --mass the start is the photometric mass, which --freeze_mass keeps, a lower ablation coefficient
-        grows it back less, and a lower density lets the drag slow it down more going forwards, so it comes back
-        faster. """
+    """ The run starts with --mass, which grows back unless --freeze_mass keeps it, less with a lower ablation
+        coefficient, and a lower density lets the drag slow the meteoroid down more going forwards, so it comes
+        back faster. """
 
     traj, state_vect = _exampleStart()
 
     def run(*argv):
-        (_, states, masses), m_inits = backwardStatesFromArguments(traj, [state_vect], _parseArguments(*argv),
-            180000.0)
+        (_, states, masses), m_inits = backwardStatesFromArguments(traj, [state_vect],
+            _parseArguments("--mass", "1e-6", *argv), 180000.0)
         return m_inits[0], masses[0], np.linalg.norm(states[0][3:])
 
     m_init, m_end, _ = run()
-    assert m_init == photometricMass(traj, "0.7") and m_end > m_init
+    assert m_init == 1e-6 and m_end > m_init
     assert run("--freeze_mass")[1] == m_init
 
-    _, m_low, v_dense = run("--mass", "1e-6", "--ablation_coeff", "0.005", "--density", "3500")
-    _, m_high, v_light = run("--mass", "1e-6", "--ablation_coeff", "0.05", "--density", "1000")
-    assert 1e-6 < m_low < m_high and v_dense < v_light
+    _, m_low, v_dense = run("--ablation_coeff", "0.005", "--density", "3500")
+    _, m_high, v_light = run("--ablation_coeff", "0.05", "--density", "1000")
+    assert m_init < m_low < m_high and v_dense < v_light
 
 
-def test_photometric_uncertainty_spreads_the_masses_of_the_realizations():
-    """ --mag_sigma shifts the light curve of each realization by a normal draw, so its mass is the nominal one
-        times 10^(-0.4 shift): the shifts recovered from 400 realizations have the given sigma (0.3 mag, within
-        10%), the nominal mass is unchanged, and the state vectors are the draws sampleStateVectors makes with the
-        same seed, so runs with and without it can be compared realization by realization. """
+def test_mass_uncertainty_spreads_the_masses_of_the_realizations():
+    """ With --mass_sigma the realizations start with log-normal masses of mean --mass and standard deviation
+        --mass_sigma: 2000 realizations of 1 +/- 0.4 g have a mean within 2% and a standard deviation within 5%,
+        all positive. The nominal mass is unchanged, and the state vectors are the draws sampleStateVectors makes
+        with the same seed, so runs with and without it can be compared realization by realization. """
 
     traj, state_vect = _exampleStart()
     traj.uncertainties = SimpleNamespace()
     traj.state_vect_cov = np.diag([50.0**2]*6)
-    realizations = sampleStateVectors(traj, 400, random_seed=5)
+    realizations = sampleStateVectors(traj, 2000, random_seed=5)
 
     (_, states, _), m_inits = backwardStatesFromArguments(traj, [state_vect] + realizations,
-        _parseArguments("--mass", "1e-3", "--mag_sigma", "0.3"), 180000.0, random_seed=5)
-    shifts = -2.5*np.log10(np.array(m_inits[1:])/1e-3)
+        _parseArguments("--mass", "1e-3", "--mass_sigma", "4e-4"), 180000.0, random_seed=5)
+    masses = np.array(m_inits[1:])
 
-    assert m_inits[0] == 1e-3
-    assert abs(np.std(shifts)/0.3 - 1) < 0.1 and abs(np.mean(shifts)) < 0.05
-    assert np.array_equal(realizations, sampleStateVectors(traj, 400, random_seed=5))
+    assert m_inits[0] == 1e-3 and np.all(masses > 0)
+    assert abs(np.mean(masses)/1e-3 - 1) < 0.02 and abs(np.std(masses)/4e-4 - 1) < 0.05
+    assert np.array_equal(realizations, sampleStateVectors(traj, 2000, random_seed=5))
 
     (_, _, _), m_inits_none = backwardStatesFromArguments(traj, [state_vect] + realizations[:3],
         _parseArguments("--mass", "1e-3"), 180000.0, random_seed=5)
@@ -196,7 +183,7 @@ def test_command_line_saves_the_nominal_solution_and_its_realizations(tmp_path, 
     savePickle(traj, str(tmp_path), "traj.pickle")
 
     monkeypatch.setattr(sys, "argv", ["BackwardAtmIntegration", str(tmp_path/"traj.pickle"), "--mc", "3",
-        "--seed", "1", "--mass", "1e-3", "--mag_sigma", "0.2"])
+        "--seed", "1", "--mass", "1e-3", "--mass_sigma", "2e-4"])
     runpy.run_module("wmpl.MetSim.BackwardAtmIntegration", run_name="__main__")
 
     rows = np.loadtxt(str(tmp_path/"traj_backward_atm.txt"))
@@ -214,7 +201,6 @@ if __name__ == "__main__":
     test_backward_run_ends_at_h_kill_on_the_radiant_line()
     test_realizations_end_at_the_nominal_epoch_carrying_their_offsets()
     test_backward_run_for_a_time_stops_below_h_kill()
-    test_photometric_mass_follows_the_luminous_efficiency_conventions()
     test_command_line_arguments_set_the_mass_and_the_physical_parameters()
-    test_photometric_uncertainty_spreads_the_masses_of_the_realizations()
+    test_mass_uncertainty_spreads_the_masses_of_the_realizations()
     print("All BackwardAtmIntegration checks passed.")
