@@ -214,7 +214,6 @@ if __name__ == "__main__":
 
     from wmpl.Rebound.REBOUND import sampleStateVectors
     from wmpl.Utils.Pickling import loadPickle
-    from wmpl.Utils.TrajConversions import cartesian2Geo
 
     arg_parser = argparse.ArgumentParser(description="Run a trajectory, and optionally its Monte Carlo "
         "realizations, back up through the atmosphere from its reference point with MetSim (single body, drag, "
@@ -269,5 +268,6 @@ if __name__ == "__main__":
     np.savetxt(out_path, rows, fmt=["%d"] + ["%.10g"]*12, header="JD {:.10f} (UTC), {:.6f} s from the reference "
         "point. Row 0 is the nominal solution, the others its realizations. State vectors in ECI, true equator and "
         "equinox of date, velocity to the radiant.\nrow, mass at the reference point (kg), lat (deg), lon (deg), "
-        "height MSL (m), speed (m/s), mass (kg), x (m), y (m), z (m), vx (m/s), vy (m/s), vz (m/s)".format(jd, (jd - traj.jdt_ref)*86400))
+        "height MSL (m), speed (m/s), mass (kg), x (m), y (m), z (m), vx (m/s), vy (m/s), vz (m/s)".format(jd,
+        (jd - traj.jdt_ref)*86400))
     print("Saved:", out_path)
