@@ -19,10 +19,12 @@ Run under pytest, or directly:
     python -m wmpl.MetSim.Tests.test_MetSimErosion --plot  # also save a diagnostic figure
 """
 
+import copy
 import os
 import sys
 
 import numpy as np
+import pytest
 
 import wmpl.MetSim.MetSimErosion as MetSimErosion
 from wmpl.MetSim.GUI import FragmentationEntry
@@ -281,6 +283,130 @@ def test_gravity_3d_matches_an_integration_with_gravity_at_every_step():
         assert _angle(v_ref_no_gravity, v_ref) > 0.05
 
 
+### Backward runs ###
+
+def _makeFireballConstants(gravity_3d=False):
+    """ A single body from 120 km down to 50 km at 20 km/s, which loses 1.2 km/s and 27% of its mass on the way,
+        so a backward run has something to undo. """
+
+    const = MetSimErosion.Constants()
+    const.h_init, const.h_kill, const.v_kill = 120000.0, 50000.0, 3000.0
+    const.m_init, const.v_init, const.rho, const.sigma = 1.0, 20000.0, 3500.0, 0.014/1e6
+    const.zenith_angle, const.radiant_azimuth = np.radians(45.0), np.radians(90.0)
+    const.erosion_on, const.disruption_on, const.fragmentation_on = False, False, False
+    const.dens_co = fitAtmPoly(np.radians(45.0), 0.0, 40000.0, 130000.0, 2460000.5)
+    const.gravity_3d = gravity_3d
+    if gravity_3d:
+        const.latitude = np.radians(45.0)
+
+    return const
+
+
+def _backwardFrom(const, frag):
+    """ Constants that run back up to const.h_init from where a forward run of const stopped, starting with the
+        fragment's speed, mass and direction there. """
+
+    back = copy.deepcopy(const)
+    back.dt, back.h_kill = -const.dt, const.h_init
+    back.h_init, back.v_init, back.m_init = frag.h, frag.v, frag.m
+
+    if const.gravity_3d:
+
+        # Local frame at the end of the forward run, which is where the backward run's frame starts
+        up = np.array([frag.px, frag.py, frag.pz + const.r_earth + const.h_init])
+        up /= np.linalg.norm(up)
+        axis = np.array([0.0, np.cos(const.latitude), np.sin(const.latitude)])
+        north = axis - np.dot(axis, up)*up
+        north /= np.linalg.norm(north)
+        radiant = -np.array([frag.vx, frag.vy, frag.vz])/frag.v
+        back.zenith_angle = np.arccos(np.dot(radiant, up))
+        back.radiant_azimuth = np.arctan2(np.dot(radiant, np.cross(north, up)), np.dot(radiant, north))
+        back.latitude = np.arcsin(np.dot(axis, up))
+
+    # The 2D path is a straight line, whose zenith angle grows going down. The (vv, vh) velocity components do
+    #   not follow it, so they cannot give it
+    else:
+        back.zenith_angle = np.arcsin((const.r_earth + const.h_init)/(const.r_earth + frag.h) \
+            *np.sin(const.zenith_angle))
+
+    return back
+
+
+def _roundTripErrors(gravity_3d, dt):
+    """ Run forward, then backward from where the forward run stopped, and return the relative errors in the
+        speed and mass recovered at the start, and the difference between the two run times (s). """
+
+    const = _makeFireballConstants(gravity_3d)
+    const.dt = dt
+    frag, results, _ = MetSimErosion.runSimulation(const)
+    frag_back, results_back, _ = MetSimErosion.runSimulation(_backwardFrom(const, frag))
+
+    return frag_back.v/const.v_init - 1, frag_back.m/const.m_init - 1, \
+        results[-1][COL_TIME] + results_back[-1][COL_TIME]
+
+
+def test_backward_run_returns_to_the_start_of_a_forward_run():
+    """ In 2D and with gravity in 3D, running back from where a forward run stopped recovers the starting speed
+        and mass, the mass growing back from 0.73 to 1 kg. The error is first order in the time step, 10 times
+        smaller with 10 times smaller steps, so it comes from the integration and not from the backward run. """
+
+    for gravity_3d in [False, True]:
+        errors = [np.abs(_roundTripErrors(gravity_3d, dt)) for dt in [0.005, 0.0005]]
+        assert errors[1][0] < 1e-4 and errors[1][1] < 5e-4 and errors[1][2] < 1e-3, errors[1]
+        assert np.all(errors[0][:2] > 7*errors[1][:2]), errors
+
+
+def test_backward_run_stops_at_h_kill_or_t_kill():
+    """ Running backwards, h_kill is the height to stop at, and t_kill stops it after that long, both within one
+        step. """
+
+    const = _makeFireballConstants()
+    frag, _, _ = MetSimErosion.runSimulation(const)
+    back = _backwardFrom(const, frag)
+    step_height = const.v_init*abs(back.dt)
+
+    frag_back, results_back, _ = MetSimErosion.runSimulation(back)
+    assert back.h_kill < frag_back.h < back.h_kill + step_height
+
+    back.t_kill = 1.0
+    frag_back, results_back, _ = MetSimErosion.runSimulation(back)
+    assert back.t_kill <= -results_back[-1][COL_TIME] < back.t_kill + 1.5*abs(back.dt)
+    assert frag_back.h < back.h_kill
+
+
+def test_freeze_mass_keeps_the_mass_in_both_directions():
+    """ With freeze_mass, the mass stays at m_init going forwards and backwards, and the light, only the drag
+        term, stays positive. """
+
+    const = _makeFireballConstants()
+    const.freeze_mass = True
+    frag, results, _ = MetSimErosion.runSimulation(const)
+    frag_back, results_back, _ = MetSimErosion.runSimulation(_backwardFrom(const, frag))
+
+    assert frag.m == const.m_init and frag_back.m == const.m_init
+    assert min(row[COL_LUM_TOTAL] for row in results + results_back) > 0
+
+
+def test_backward_run_refuses_what_it_cannot_undo():
+    """ Erosion, disruption, fragmentation and the wake cannot be run backwards, and a backward run must have a
+        height to stop at above its start. """
+
+    const = _makeFireballConstants()
+    const.dt, const.h_init, const.h_kill = -0.005, 50000.0, 120000.0
+    for name in ['erosion_on', 'disruption_on', 'fragmentation_on']:
+        bad = copy.deepcopy(const)
+        setattr(bad, name, True)
+        with pytest.raises(ValueError):
+            MetSimErosion.runSimulation(bad)
+
+    with pytest.raises(ValueError):
+        MetSimErosion.runSimulation(const, compute_wake=True)
+
+    const.h_kill = 40000.0
+    with pytest.raises(ValueError):
+        MetSimErosion.runSimulation(const)
+
+
 def _savePlot(save_path=None):
     """ New-engine-only diagnostic figure (LC, mass, velocity, height vs time). Optional, for eyeballing. """
     import matplotlib
@@ -323,6 +449,10 @@ if __name__ == "__main__":
     test_winds_in_still_air_reproduce_the_simulation_without_winds()
     test_winds_match_an_integration_with_the_wind_at_every_step()
     test_gravity_3d_matches_an_integration_with_gravity_at_every_step()
+    test_backward_run_returns_to_the_start_of_a_forward_run()
+    test_backward_run_stops_at_h_kill_or_t_kill()
+    test_freeze_mass_keeps_the_mass_in_both_directions()
+    test_backward_run_refuses_what_it_cannot_undo()
     print("All MetSimErosion regression checks passed.")
 
     if "--plot" in sys.argv:

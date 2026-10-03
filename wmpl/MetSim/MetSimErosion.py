@@ -43,7 +43,10 @@ class Constants(object):
 
         ### Simulation parameters ###
 
-        # Time step
+        # Time step (s). A negative step runs the simulation backwards in time, from a state observed lower down back
+        #   up the trajectory, with the mass growing as the ablation is undone. Erosion, disruption and fragmentation
+        #   cannot be undone, so a backward run needs them off, and h_kill is then the height to stop at, above
+        #   h_init
         self.dt = 0.005
 
         # Time elapsed since the beginning
@@ -58,8 +61,16 @@ class Constants(object):
         # Minimum ablation velocity (m/s)
         self.v_kill = 3000
 
-        # Minimum height (m)
+        # Minimum height (m), or the maximum height when running backwards (dt < 0)
         self.h_kill = 60000
+
+        # Maximum time (s) from the start, in either direction, after which the simulation will stop
+        # -1 means no limit
+        self.t_kill = -1
+
+        # Keep the mass constant, without ablation or erosion, so a backward run does not grow it. The light is then
+        #   only the drag term
+        self.freeze_mass = False
 
         # Maximum length along the trajectory (m) after which the simulation will stop
         # -1 means no limit
@@ -820,6 +831,8 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
     gravity_3d = const.gravity_3d
     motion_3d = winds or gravity_3d
     wind_e = wind_n = 0.0
+    backward = const.dt < 0
+    freeze_mass = const.freeze_mass
 
     # Twice the Earth's rotation vector (north and up components) in the frame of the start, for the Coriolis
     #   acceleration
@@ -851,6 +864,9 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
             mass_loss_erosion = massLossRK4(const.dt, frag.K, frag.erosion_coeff, frag.m, rho_atm, frag.v)
         else:
             mass_loss_erosion = 0
+
+        if freeze_mass:
+            mass_loss_ablation = mass_loss_erosion = 0
 
         # Compute the total mass loss
         mass_loss_total = mass_loss_ablation + mass_loss_erosion
@@ -1037,13 +1053,15 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
             brightest_length = frag.length
             brightest_vel = frag.v
 
-        # If the fragment is done, stop ablating
+        # If the fragment is done, stop ablating. total_time is only advanced after all fragments, so the state just
+        #   computed is at total_time + dt
         if  (
             (frag.m <= const.m_kill)
             or (frag.v < const.v_kill)
-            or (frag.h < const.h_kill)
+            or ((frag.h > const.h_kill) if backward else (frag.h < const.h_kill))
             or (frag.lum < 0)
             or ((const.len_kill > 0) and (frag.length > const.len_kill))
+            or ((const.t_kill > 0) and (abs(const.total_time + const.dt) >= const.t_kill))
             ):
 
             killFragment(const, frag)
@@ -1492,6 +1510,12 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
 
 def runSimulation(const, compute_wake=False):
     """ Run the ablation simulation. """
+
+    if const.dt < 0:
+        if const.erosion_on or const.disruption_on or const.fragmentation_on or compute_wake:
+            raise ValueError("A backward run (dt < 0) needs erosion, disruption, fragmentation and the wake off.")
+        if const.h_kill <= const.h_init:
+            raise ValueError("A backward run (dt < 0) stops at h_kill, which must be above h_init.")
 
     # Ensure that the grain mass min is smaller than the grain mass max
     if const.erosion_mass_min > const.erosion_mass_max:
