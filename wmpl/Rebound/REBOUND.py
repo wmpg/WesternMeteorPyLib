@@ -46,6 +46,7 @@ except (ImportError, OSError) as e:
 from wmpl.Config import config
 from wmpl.Utils.TrajConversions import (
     J2000_JD,
+    cartesian2Geo,
     J2000_OBLIQUITY,
     equatorialCoordPrecession,
     jd2DynamicalTimeJD,
@@ -2064,12 +2065,28 @@ def _megnoReportLines(megno):
     return lines
 
 
+def sampleStateVectors(traj, mc_runs, random_seed=None):
+    """ Draw Monte Carlo realizations of the trajectory's state vector (traj.state_vect_mini and
+        traj.v_init*traj.radiant_eci_mini) from its covariance, traj.state_vect_cov. The draws come from a
+        generator seeded with random_seed, so a run can be reproduced exactly. Returns an empty list without
+        uncertainties or with mc_runs <= 1.
+    """
+
+    if (mc_runs <= 1) or (traj.uncertainties is None):
+        return []
+
+    state_vect = np.concatenate([traj.state_vect_mini, traj.v_init*traj.radiant_eci_mini])
+    rng = np.random.default_rng(random_seed)
+
+    return [rng.multivariate_normal(state_vect, traj.state_vect_cov) for _ in range(mc_runs)]
+
+
 def reboundSimulate(
         julian_date, state_vect, traj=None,
         direction="forward", sim_days=60, n_outputs=500, obj_name="obj", obj_mass=0.0, mc_runs=100,
         reference_frame="heliocentric", ephem_source="local", n_cpu=None,
         show_progress=True, return_diagnostics=False, random_seed=None, beta=None, integrator="ias15",
-        dt_days=None, compute_megno=False, verbose=False):
+        dt_days=None, compute_megno=False, verbose=False, state_vect_realizations=None):
     """ Takes an state vector (or a Trajectory object), runs REBOUND and produces orbital elements for the 
     object at the end of the simulation or at the specified time.
 
@@ -2124,6 +2141,9 @@ def reboundSimulate(
             result is returned; it is skipped with a warning otherwise, since the extra integration
             is as expensive as the nominal run. Default False.
         verbose: [bool] If True, print out the progress of the simulation.
+        state_vect_realizations: [list] Monte Carlo realizations of state_vect at julian_date, to integrate
+            instead of the ones drawn from traj (see sampleStateVectors), e.g. the realizations run back through
+            the atmosphere by wmpl.MetSim.BackwardAtmIntegration.backwardStates. mc_runs is then ignored.
 
     Return:
         outputs: [list] List of outputs, each containing the time, state vector and orbital elements at that
@@ -2168,29 +2188,14 @@ def reboundSimulate(
     
 
 
-    # If the number of Monte Carlo simulations is given and the trajectory has uncertainties defined,
-    # sample the state vector from the uncertainties
-    state_vect_realizations = []
-    if (mc_runs > 1) and (traj is not None) and (traj.uncertainties is not None):
+    # Unless realizations are given, sample them from the trajectory's uncertainties. The sampling happens here in
+    #   the parent process, so the results do not depend on how many cores the integration is spread over
+    if state_vect_realizations is None:
+        state_vect_realizations = sampleStateVectors(traj, mc_runs, random_seed) if (traj is not None) else []
 
-        # Extract the state vector covariance matrix
-        cov = traj.state_vect_cov
-
-        # Draw the realizations from a seeded generator so a run can be reproduced exactly. The
-        # sampling happens here in the parent process, so the results do not depend on how many
-        # cores the integration is spread over.
-        rng = np.random.default_rng(random_seed)
-
-        # Sample the state vector from the uncertainties
-        for i in range(mc_runs):
-
-            # Sample the state vector from the uncertainties
-            sv_realization = rng.multivariate_normal(state_vect, cov)
-
-            state_vect_realizations.append(sv_realization)
-
-            if verbose:
-                print(f"MC realization {i}: {sv_realization}")
+    if verbose:
+        for i, sv_realization in enumerate(state_vect_realizations):
+            print(f"MC realization {i}: {sv_realization}")
 
         
 
@@ -2389,6 +2394,8 @@ if __name__ == "__main__":
     import os
     import argparse
 
+    from wmpl.MetSim.BackwardAtmIntegration import addBackwardArguments, backwardStatesFromArguments, \
+        checkBackwardArguments
     from wmpl.Utils.Pickling import loadPickle
 
 
@@ -2443,10 +2450,6 @@ if __name__ == "__main__":
                         help="Object radius in metres, used with --density to compute beta and "
                         "include radiation forces. Purely gravitational if not given.")
 
-    parser.add_argument("--density", type=float, default=3000.0,
-                        help="Object bulk density in kg/m^3, used with --radius to compute beta. "
-                        "Default: 3000.")
-
     parser.add_argument("--integrator", type=str.lower, default="ias15", choices=INTEGRATORS,
                         help="Integrator: ias15 (default; adaptive, accurate to machine precision), "
                         "whfast (symplectic, fixed step; fast, but does not resolve close encounters) "
@@ -2466,9 +2469,24 @@ if __name__ == "__main__":
                         "reporting whether it converges to 2 (regular orbit) or keeps growing "
                         "(chaotic). MEGNO needs tens of orbital periods: use --days accordingly.")
 
+    parser.add_argument("--atm_height", type=float, nargs="?", const=180.0, default=None,
+                        help="Start the orbit integration above the atmosphere instead of at the trajectory's "
+                        "reference point: run the nominal solution back up to this height in km (180 if no "
+                        "value is given) with MetSim (single body, drag, gravity, Coriolis), and each Monte "
+                        "Carlo realization back for the same time, with --mass (required), --mass_sigma, "
+                        "--freeze_mass, --ablation_coeff, --density and --ga.")
+
+    addBackwardArguments(parser)
+
     parser.add_argument("--verbose", action="store_true", help="Print out the progress of the simulation.")
 
     args = parser.parse_args()
+
+    if args.atm_height is not None:
+        if args.forward is not None:
+            parser.error("--atm_height starts a backward integration above the atmosphere, so it cannot be used "
+                "with --forward.")
+        checkBackwardArguments(parser, args)
 
     # Extract the number of days from the arguments and the simulation direction. --forward may be
     # given on its own (use --days) or with its own number of days.
@@ -2533,6 +2551,19 @@ if __name__ == "__main__":
     # Load the trajectory data from a pickle file
     traj = loadPickle(*os.path.split(args.pickle_path))
 
+    # Start from the trajectory's reference point, or with --atm_height from above the atmosphere, after running
+    #   the nominal solution and each realization back through it to a common epoch
+    jd_start = traj.jdt_ref
+    state_vect = np.concatenate([traj.state_vect_mini, traj.v_init*traj.radiant_eci_mini])
+    state_vect_realizations = sampleStateVectors(traj, args.mc, random_seed)
+    if args.atm_height is not None:
+        (jd_start, states, masses), m_inits = backwardStatesFromArguments(traj,
+            [state_vect] + state_vect_realizations, args, 1000*args.atm_height, random_seed=random_seed)
+        state_vect, state_vect_realizations = states[0], states[1:]
+        print("Ran {:d} state vector(s) back through the atmosphere for {:.3f} s, to {:.1f} km, from {:.6g} kg "
+            "at the reference point to {:.6g} kg.".format(len(states), (traj.jdt_ref - jd_start)*86400,
+            cartesian2Geo(jd_start, *state_vect[:3])[2]/1000, m_inits[0], masses[0]))
+
 
     ### Set reference frame settings ###
     reference_frame = "heliocentric"
@@ -2559,15 +2590,15 @@ if __name__ == "__main__":
     
     # State the integration span up front, so it is visible while the integration is running and
     # not only in the summary printed at the end
-    print("Integrating {:.2f} days {:s} from the reference epoch {:.6f} JD (TDB) = {:s} UTC.".format(
-        sim_days, direction, traj.jdt_ref,
-        astropy.time.Time(traj.jdt_ref, format='jd', scale='utc').iso))
+    print("Integrating {:.2f} days {:s} from the epoch {:.6f} JD (TDB) = {:s} UTC.".format(
+        sim_days, direction, jd_start,
+        astropy.time.Time(jd_start, format='jd', scale='utc').iso))
 
     # Run the simulation for the given number of days from the epoch of the trajectory
     t_run_start = time.time()
     sim_outputs, sim_outputs_mc, sim_diagnostics = reboundSimulate(
-        None, None, traj=traj, direction=direction, sim_days=sim_days,
-        obj_name=traj.traj_id, mc_runs=args.mc, n_outputs=args.outputs,
+        jd_start, state_vect, state_vect_realizations=state_vect_realizations, direction=direction,
+        sim_days=sim_days, obj_name=traj.traj_id, n_outputs=args.outputs,
         reference_frame=reference_frame,
         ephem_source=ephem_source, n_cpu=n_cpu, return_diagnostics=True,
         random_seed=random_seed, beta=beta, integrator=args.integrator, dt_days=dt_days,
@@ -2680,7 +2711,7 @@ if __name__ == "__main__":
     final_sim_days = sim_outputs[-1][0]/(2*np.pi)*365.25
 
     # Compute the final epoch
-    final_epoch_jd = traj.jdt_ref + final_sim_days
+    final_epoch_jd = jd_start + final_sim_days
 
     # Convert the epoch to UTC
     time_utc = astropy.time.Time(final_epoch_jd, format='jd', scale='utc')
@@ -2755,7 +2786,7 @@ if __name__ == "__main__":
     print("  Forces       : {:s}".format(
         "gravity + GR + Earth J2/J4" if beta is None
         else "gravity + GR + Earth J2/J4 + radiation (beta = {:.3e})".format(beta)))
-    print("  Start epoch  : {:.6f} JD (TDB)".format(traj.jdt_ref))
+    print("  Start epoch  : {:.6f} JD (TDB)".format(jd_start))
     print("  Final epoch  : {:.6f} JD (TDB)  =  {:s} UTC".format(final_epoch_jd, time_utc.iso))
     if len(sim_outputs_mc):
         print("  Monte Carlo  : {:d} realizations on {:d} core(s), seed {:d}".format(
@@ -2955,7 +2986,7 @@ if __name__ == "__main__":
             f.write("*** state before the impact, not a surviving orbit.\n\n")
 
         f.write("Orbital elements {:.2f} days {:s} from the epoch {:.6f} JD (TDB){:s}\n".format(
-            achieved_days, direction, traj.jdt_ref,
+            achieved_days, direction, jd_start,
             "" if abs(achieved_days - sim_days) <= 1e-6
             else " (requested {:.2f} days, stopped early)".format(sim_days)))
         f.write("a    = {:>10.6f}{:s} {:s}\n".format(sim_outputs[-1][2].a*dist_unit_multiplier, a_ci_str, a_units))
@@ -3402,7 +3433,7 @@ if __name__ == "__main__":
             "ephemeris": "horizons" if args.horizons else "local_de430",
             "n_outputs": args.outputs,
             "beta": beta,
-            "start_epoch_jd_tdb": traj.jdt_ref,
+            "start_epoch_jd_tdb": jd_start,
             "final_epoch_jd_tdb": final_epoch_jd,
             "final_epoch_utc": time_utc.iso,
             "mc_runs": len(sim_outputs_mc),
