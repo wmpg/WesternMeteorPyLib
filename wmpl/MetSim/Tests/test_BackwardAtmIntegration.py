@@ -149,6 +149,27 @@ def test_command_line_arguments_set_the_mass_and_the_physical_parameters():
     assert m_init < m_low < m_high and v_dense < v_light
 
 
+def test_gamma_a_sets_the_drag_as_metsims_gamma_times_shape_factor():
+    """ --gamma_a gives the same run as setting MetSim's gamma and shape_factor to that product directly, and a
+        larger one, more drag going forwards, brings the meteoroid back faster. """
+
+    traj, state_vect = _exampleStart()
+
+    (_, states, masses), _ = backwardStatesFromArguments(traj, [state_vect],
+        _parseArguments("--mass", "1e-6", "--gamma_a", "0.55"), 180000.0)
+
+    const = Constants()
+    const.rho, const.gamma, const.shape_factor = 3000.0, 1.0, 0.55
+    _, states_direct, masses_direct = backwardStates(traj.jdt_ref, [state_vect], 1e-6, const=const)
+
+    assert np.allclose(states[0], states_direct[0], rtol=1e-12, atol=1e-6)
+    assert np.isclose(masses[0], masses_direct[0], rtol=1e-12, atol=0)
+
+    (_, states_more, _), _ = backwardStatesFromArguments(traj, [state_vect],
+        _parseArguments("--mass", "1e-6", "--gamma_a", "1.21"), 180000.0)
+    assert np.linalg.norm(states_more[0][3:]) > np.linalg.norm(states[0][3:])
+
+
 def test_mass_uncertainty_spreads_the_masses_of_the_realizations():
     """ With --mass_sigma the realizations start with log-normal masses of mean --mass and standard deviation
         --mass_sigma: 2000 realizations of 1 +/- 0.4 g have a mean within 2% and a standard deviation within 5%,
@@ -202,5 +223,6 @@ if __name__ == "__main__":
     test_realizations_end_at_the_nominal_epoch_carrying_their_offsets()
     test_backward_run_for_a_time_stops_below_h_kill()
     test_command_line_arguments_set_the_mass_and_the_physical_parameters()
+    test_gamma_a_sets_the_drag_as_metsims_gamma_times_shape_factor()
     test_mass_uncertainty_spreads_the_masses_of_the_realizations()
     print("All BackwardAtmIntegration checks passed.")

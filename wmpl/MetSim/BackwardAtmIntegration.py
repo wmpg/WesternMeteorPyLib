@@ -182,6 +182,10 @@ def addBackwardArguments(arg_parser):
         help="Bulk density of the meteoroid in kg/m^3, which with the mass sets the drag, and in REBOUND the "
         "radiation pressure with --radius. Default: 3000.")
 
+    arg_parser.add_argument("--gamma_a", type=float, default=Constants().gamma*Constants().shape_factor,
+        help="Product of the drag coefficient Gamma and the shape coefficient A. Default: MetSim's, {:g}.".format(
+        Constants().gamma*Constants().shape_factor))
+
 
 def backwardStatesFromArguments(traj, state_vects, args, h_kill, t_kill=-1, random_seed=None):
     """ backwardStates() from the trajectory's reference point, with the mass and physical parameters given by the
@@ -192,6 +196,9 @@ def backwardStatesFromArguments(traj, state_vects, args, h_kill, t_kill=-1, rand
     const.freeze_mass = args.freeze_mass
     const.sigma = args.ablation_coeff/1e6
     const.rho = args.density
+
+    # MetSim's drag only takes the product gamma*shape_factor, so the shape factor keeps its default
+    const.gamma = args.gamma_a/const.shape_factor
 
     # Log-normal with mean args.mass and standard deviation args.mass_sigma, from a generator of its own, so the
     #   state vector draws stay those of sampleStateVectors with the same seed
