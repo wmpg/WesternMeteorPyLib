@@ -2394,6 +2394,7 @@ if __name__ == "__main__":
     import os
     import argparse
 
+    from wmpl.MetSim.BackwardAtmIntegration import addBackwardArguments, backwardStatesFromArguments
     from wmpl.Utils.Pickling import loadPickle
 
 
@@ -2471,15 +2472,14 @@ if __name__ == "__main__":
                         "reporting whether it converges to 2 (regular orbit) or keeps growing "
                         "(chaotic). MEGNO needs tens of orbital periods: use --days accordingly.")
 
-    parser.add_argument("--atm_mass", type=float, default=None,
-                        help="Before the orbit, run the meteoroid, and each Monte Carlo realization, back "
-                        "up through the atmosphere from the trajectory's reference point with MetSim (single "
-                        "body, drag, gravity, Coriolis), starting with this mass in kg, e.g. the photometric "
-                        "mass. Its other physical parameters are MetSim's defaults.")
+    parser.add_argument("--atm_height", type=float, nargs="?", const=180.0, default=None,
+                        help="Start the orbit integration above the atmosphere instead of at the trajectory's "
+                        "reference point: run the nominal solution back up to this height in km (180 if no "
+                        "value is given) with MetSim (single body, drag, gravity, Coriolis), and each Monte "
+                        "Carlo realization back for the same time. See the --atm_* options for the mass and "
+                        "the physical parameters.")
 
-    parser.add_argument("--atm_height", type=float, default=180.0,
-                        help="Height in km up to which --atm_mass runs the nominal solution back; the "
-                        "realizations are run back for the same time. Default: 180.")
+    addBackwardArguments(parser)
 
     parser.add_argument("--verbose", action="store_true", help="Print out the progress of the simulation.")
 
@@ -2548,18 +2548,18 @@ if __name__ == "__main__":
     # Load the trajectory data from a pickle file
     traj = loadPickle(*os.path.split(args.pickle_path))
 
-    # Start from the trajectory's reference point, or with --atm_mass from above the atmosphere, after running the
-    #   nominal solution and each realization back through it to a common epoch
+    # Start from the trajectory's reference point, or with --atm_height from above the atmosphere, after running
+    #   the nominal solution and each realization back through it to a common epoch
     jd_start = traj.jdt_ref
     state_vect = np.concatenate([traj.state_vect_mini, traj.v_init*traj.radiant_eci_mini])
     state_vect_realizations = sampleStateVectors(traj, args.mc, random_seed)
-    if args.atm_mass is not None:
-        from wmpl.MetSim.BackwardAtmIntegration import backwardStates
-        jd_start, states = backwardStates(traj.jdt_ref, [state_vect] + state_vect_realizations, args.atm_mass,
-            h_kill=1000*args.atm_height)
+    if args.atm_height is not None:
+        (jd_start, states, masses), m_init = backwardStatesFromArguments(traj,
+            [state_vect] + state_vect_realizations, args, 1000*args.atm_height)
         state_vect, state_vect_realizations = states[0], states[1:]
-        print("Ran {:d} state vector(s) back through the atmosphere for {:.3f} s, to {:.1f} km.".format(
-            len(states), (traj.jdt_ref - jd_start)*86400, cartesian2Geo(jd_start, *state_vect[:3])[2]/1000))
+        print("Ran {:d} state vector(s) back through the atmosphere for {:.3f} s, to {:.1f} km, from {:.6g} kg "
+            "at the reference point to {:.6g} kg.".format(len(states), (traj.jdt_ref - jd_start)*86400,
+            cartesian2Geo(jd_start, *state_vect[:3])[2]/1000, m_init, masses[0]))
 
 
     ### Set reference frame settings ###

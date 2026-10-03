@@ -34,6 +34,9 @@ LUM_EFF_MODELS = {
     'pc1983':            8,
 }
 
+# The lum_eff_type codes of the panchromatic models, which are calibrated for a zero-magnitude power P_0m = 1500 W
+PANCHROMATIC_LUM_EFF_TYPES = [1, 2, 3, 6, 7, 8]
+
 
 def dynamicPressure(lat, lon, height, jd, velocity, gamma=1.0):
     """ Calculate dynamic pressure at the given point on meteor's trajectory. 
@@ -252,7 +255,7 @@ def calcMass(time, mag_abs, velocity, tau=0.007, P_0m=840.0, lum_eff_mass=-1, v_
 
     # The panchromatic models are calibrated for a zero-magnitude power of 1500 W (see the P_0m
     # docstring note), so warn if a different value is used with them
-    if (lum_eff_type in [1, 2, 3, 6, 7, 8]) and (P_0m != 1500.0):
+    if (lum_eff_type in PANCHROMATIC_LUM_EFF_TYPES) and (P_0m != 1500.0):
         warnings.warn("The chosen luminous efficiency model (lum_eff_type={:d}) is calibrated for "
             "a panchromatic zero-magnitude power of P_0m = 1500 W, but P_0m = {:g} W was given. "
             "No correction is applied - the returned mass will be off by a factor of {:.2f} "

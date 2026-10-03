@@ -2,18 +2,26 @@
     where it ended in the trajectory solver's ECI frame, ready for wmpl.Rebound.REBOUND.reboundSimulate().
 
     state_vect = np.r_[traj.state_vect_mini, traj.v_init*traj.radiant_eci_mini]
-    jd, state_vects = backwardStates(traj.jdt_ref, [state_vect] + realizations, m_init)
+    jd, state_vects, masses = backwardStates(traj.jdt_ref, [state_vect] + realizations, m_init)
+
+From the command line, to a height or for a time, with or without Monte Carlo realizations:
+
+    python -m wmpl.MetSim.BackwardAtmIntegration traj.pickle --atm_height 180 --mc 100
 
 State vectors are [x, y, z, vx, vy, vz] in ECI (true equator and equinox of date), in m and m/s, with the
 velocity pointing to the radiant, as the solver gives them and reboundSimulate() takes them.
 """
 
+import argparse
 import copy
+import os
 
 import numpy as np
 
 from wmpl.MetSim.MetSimErosion import Constants, EARTH_ROTATION_RATE, runSimulation
+from wmpl.Trajectory.AggregateAndPlot import computeMass
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly
+from wmpl.Utils.Physics import LUM_EFF_MODELS, PANCHROMATIC_LUM_EFF_TYPES
 from wmpl.Utils.TrajConversions import cartesian2Geo, derotatedRadiantAltAz, enu2ECEF, jd2LST
 
 
@@ -102,10 +110,11 @@ def backwardState(jd_ref, state_vect, frag, t):
     return jd, np.concatenate([pos, -vel])
 
 
-def backwardStates(jd_ref, state_vects, m_init, h_kill=180000.0, const=None):
+def backwardStates(jd_ref, state_vects, m_init, h_kill=180000.0, t_kill=-1, const=None):
     """ Run several state vectors back through the atmosphere to a common epoch, so the nominal solution and its
         Monte Carlo realizations can go into reboundSimulate() together. The first state vector, the nominal one,
-        is run up to h_kill, and the others for the same time, so they end near h_kill.
+        is run up to h_kill, or for t_kill seconds if it is given and h_kill is not reached first, and the others
+        for the same time.
 
     Arguments:
         jd_ref: [float] Julian date of the state vectors.
@@ -114,16 +123,19 @@ def backwardStates(jd_ref, state_vects, m_init, h_kill=180000.0, const=None):
 
     Keyword arguments:
         h_kill, const: As in backwardConstants().
+        t_kill: [float] Time to run back for (s). -1, the default, runs back to h_kill.
 
     Return:
-        (jd, state_vects): The common Julian date and the state vectors there, in the same order.
+        (jd, state_vects, masses): The common Julian date, and the state vectors and masses (kg) there, in the same
+            order.
     """
 
     const = backwardConstants(jd_ref, state_vects[0], m_init, h_kill=h_kill, const=const)
+    const.t_kill = t_kill
     frag, results, _ = runSimulation(const)
     t = results[-1][0]
     jd, state_vect = backwardState(jd_ref, state_vects[0], frag, t)
-    states = [state_vect]
+    states, masses = [state_vect], [frag.m]
 
     # The realizations stop by time alone, after as many steps as the nominal run, since the time adds up the same
     #   steps, and keep its atmosphere fit, made at practically the same place
@@ -140,5 +152,133 @@ def backwardStates(jd_ref, state_vects, m_init, h_kill=180000.0, const=None):
                 results[-1][0], t))
 
         states.append(backwardState(jd_ref, sv, frag, t)[1])
+        masses.append(frag.m)
 
-    return jd, states
+    return jd, states, masses
+
+
+def photometricMass(traj, lum_eff, P_0m=None):
+    """ Photometric mass of the trajectory (kg), from its whole light curve, which is the mass at its reference
+        point if it ablated completely.
+
+    Arguments:
+        traj: [Trajectory]
+        lum_eff: [str] Luminous efficiency: a model name from wmpl.Utils.Physics.LUM_EFF_MODELS (e.g.
+            'borovicka2020'), or a constant in percent (e.g. '0.7').
+
+    Keyword arguments:
+        P_0m: [float] Power of a zero-magnitude meteor (W). None, the default, takes 1500 W for the panchromatic
+            models and 840 W otherwise.
+    """
+
+    key = lum_eff.strip().lower()
+    tau = key if key in LUM_EFF_MODELS else float(lum_eff)/100
+
+    if P_0m is None:
+        P_0m = 1500.0 if (key in LUM_EFF_MODELS) and (LUM_EFF_MODELS[key] in PANCHROMATIC_LUM_EFF_TYPES) else 840.0
+
+    return computeMass(traj, P_0m, tau=tau)
+
+
+def addBackwardArguments(arg_parser):
+    """ Add the command-line arguments for the mass and the physical parameters of a run back through the
+        atmosphere, shared by this module's command line and REBOUND's. """
+
+    arg_parser.add_argument("--atm_mass", type=float, default=None,
+        help="Mass at the trajectory's reference point in kg. By default, the photometric mass from the whole "
+        "light curve, with --atm_lum_eff and --atm_P_0m.")
+
+    arg_parser.add_argument("--atm_lum_eff", type=str, default="0.7",
+        help="Luminous efficiency for the photometric mass: a constant in percent, or a model name: "
+        "{:s}. Default: 0.7.".format(", ".join(LUM_EFF_MODELS)))
+
+    arg_parser.add_argument("--atm_P_0m", type=float, default=None,
+        help="Power of a zero-magnitude meteor in W for the photometric mass. Default: 1500 for the panchromatic "
+        "models (rc2001*, cm1976, borovicka2020, pc1983), 840 otherwise.")
+
+    arg_parser.add_argument("--atm_freeze_mass", action="store_true",
+        help="Keep the mass constant instead of growing it back as the ablation is undone.")
+
+    arg_parser.add_argument("--atm_sigma", type=float, default=None,
+        help="Ablation coefficient in s^2/km^2, which sets how fast the mass grows back. Default: MetSim's, "
+        "{:g}.".format(Constants().sigma*1e6))
+
+    arg_parser.add_argument("--atm_rho", type=float, default=None,
+        help="Bulk density in kg/m^3, which with the mass sets the drag. Default: MetSim's, {:g}.".format(
+        Constants().rho))
+
+
+def backwardStatesFromArguments(traj, state_vects, args, h_kill, t_kill=-1):
+    """ backwardStates() from the trajectory's reference point, with the mass and physical parameters given by the
+        command-line arguments of addBackwardArguments(). Also returns the starting mass. """
+
+    const = Constants()
+    const.freeze_mass = args.atm_freeze_mass
+    if args.atm_sigma is not None:
+        const.sigma = args.atm_sigma/1e6
+    if args.atm_rho is not None:
+        const.rho = args.atm_rho
+
+    m_init = args.atm_mass if (args.atm_mass is not None) else photometricMass(traj, args.atm_lum_eff, args.atm_P_0m)
+
+    return backwardStates(traj.jdt_ref, state_vects, m_init, h_kill=h_kill, t_kill=t_kill, const=const), m_init
+
+
+if __name__ == "__main__":
+
+    from wmpl.Rebound.REBOUND import sampleStateVectors
+    from wmpl.Utils.Pickling import loadPickle
+    from wmpl.Utils.TrajConversions import cartesian2Geo
+
+    arg_parser = argparse.ArgumentParser(description="Run a trajectory, and optionally its Monte Carlo "
+        "realizations, back up through the atmosphere from its reference point with MetSim (single body, drag, "
+        "gravity, Coriolis), to a height or for a time. Saves where each one ended next to the pickle.")
+
+    arg_parser.add_argument("pickle_path", type=str, help="Path to the trajectory pickle file.")
+
+    arg_parser.add_argument("--atm_height", type=float, default=180.0,
+        help="Height in km to run back to. Default: 180.")
+
+    arg_parser.add_argument("--atm_time", type=float, default=-1,
+        help="Run back for this many seconds instead, unless --atm_height is reached first.")
+
+    arg_parser.add_argument("--mc", type=int, default=1,
+        help="Number of Monte Carlo realizations drawn from the trajectory's state vector covariance, run back for "
+        "as long as the nominal solution. Default: 1, the nominal solution only.")
+
+    arg_parser.add_argument("--seed", type=int, default=None, help="Seed for the Monte Carlo realizations.")
+
+    addBackwardArguments(arg_parser)
+
+    args = arg_parser.parse_args()
+
+    traj = loadPickle(*os.path.split(args.pickle_path))
+    state_vect = np.concatenate([traj.state_vect_mini, traj.v_init*traj.radiant_eci_mini])
+    state_vects = [state_vect] + sampleStateVectors(traj, args.mc, args.seed)
+
+    (jd, states, masses), m_init = backwardStatesFromArguments(traj, state_vects, args, 1000*args.atm_height,
+        t_kill=args.atm_time)
+
+    rows = []
+    for i, (sv, m) in enumerate(zip(states, masses)):
+        lat, lon, ht = cartesian2Geo(jd, *sv[:3])
+        rows.append([i, np.degrees(lat), np.degrees(lon), ht, np.linalg.norm(sv[3:]), m] + list(sv))
+    rows = np.array(rows)
+
+    print("Mass at the reference point: {:.6g} kg{:s}".format(m_init,
+        ", frozen" if args.atm_freeze_mass else ""))
+    print("Ran {:d} state vector(s) back {:.4f} s, to JD {:.8f}".format(len(states), (traj.jdt_ref - jd)*86400,
+        jd))
+    print("Nominal: lat {:.5f} deg, lon {:.5f} deg, height {:.1f} m, speed {:.2f} m/s, mass {:.6g} kg".format(
+        *rows[0, 1:6]))
+    if len(rows) > 1:
+        for name, col, unit in [("height", 3, "m"), ("speed", 4, "m/s"), ("mass", 5, "kg")]:
+            print("Realizations {:s}: 2.5/50/97.5 percentiles {:s} {:s}".format(name,
+                " / ".join("{:.6g}".format(v) for v in np.percentile(rows[1:, col], [2.5, 50, 97.5])), unit))
+
+    out_path = os.path.splitext(args.pickle_path)[0] + "_backward_atm.txt"
+    np.savetxt(out_path, rows, fmt=["%d"] + ["%.10g"]*11, header="JD {:.10f} (UTC), {:.6f} s from the reference "
+        "point. Row 0 is the nominal solution, the others its realizations. State vectors in ECI, true equator and "
+        "equinox of date, velocity to the radiant.\nrow, lat (deg), lon (deg), height MSL (m), speed (m/s), "
+        "mass (kg), x (m), y (m), z (m), vx (m/s), vy (m/s), vz (m/s)".format(jd, (jd - traj.jdt_ref)*86400))
+    print("Saved:", out_path)

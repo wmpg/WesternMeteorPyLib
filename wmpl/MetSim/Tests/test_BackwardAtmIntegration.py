@@ -5,15 +5,20 @@ Run under pytest, or directly:
     python -m wmpl.MetSim.Tests.test_BackwardAtmIntegration
 """
 
+import argparse
 import os
+import runpy
+import sys
 from types import SimpleNamespace
 
 import numpy as np
 
-from wmpl.MetSim.BackwardAtmIntegration import backwardConstants, backwardState, backwardStates
+from wmpl.MetSim.BackwardAtmIntegration import addBackwardArguments, backwardConstants, backwardState, \
+    backwardStates, backwardStatesFromArguments, photometricMass
 from wmpl.MetSim.MetSimErosion import Fragment, runSimulation
 from wmpl.Rebound.REBOUND import sampleStateVectors
-from wmpl.Utils.Pickling import loadPickle
+from wmpl.Trajectory.AggregateAndPlot import computeMass
+from wmpl.Utils.Pickling import loadPickle, savePickle
 from wmpl.Utils.TrajConversions import cartesian2Geo
 
 
@@ -87,7 +92,7 @@ def test_realizations_end_at_the_nominal_epoch_carrying_their_offsets():
     traj.state_vect_cov = np.diag([50.0**2]*6)
     realizations = sampleStateVectors(traj, 20, random_seed=1)
 
-    jd, states = backwardStates(traj.jdt_ref, [state_vect, state_vect.copy()] + realizations, 1e-3)
+    jd, states, masses = backwardStates(traj.jdt_ref, [state_vect, state_vect.copy()] + realizations, 1e-3)
     t = (jd - traj.jdt_ref)*86400.0
 
     assert np.array_equal(states[0], states[1])
@@ -96,12 +101,91 @@ def test_realizations_end_at_the_nominal_epoch_carrying_their_offsets():
         assert np.linalg.norm(offset_end[3:] - offset_start[3:]) < 0.03
         assert np.linalg.norm(offset_end[:3] - (offset_start[:3] - offset_start[3:]*t)) < 0.03
 
-    jd_nominal, states_nominal = backwardStates(traj.jdt_ref, [state_vect], 1e-3)
+    jd_nominal, states_nominal, masses_nominal = backwardStates(traj.jdt_ref, [state_vect], 1e-3)
     assert jd_nominal == jd and len(states_nominal) == 1 and np.array_equal(states_nominal[0], states[0])
+    assert masses_nominal == masses[:1]
+
+
+def test_backward_run_for_a_time_stops_below_h_kill():
+    """ With t_kill, the nominal solution and its realizations run back for that long, within one step, and stop
+        below h_kill: 0.5 s from 116 km reaches 146 km. """
+
+    traj, state_vect = _exampleStart()
+    traj.uncertainties = SimpleNamespace()
+    traj.state_vect_cov = np.diag([50.0**2]*6)
+
+    jd, states, _ = backwardStates(traj.jdt_ref, [state_vect] + sampleStateVectors(traj, 3, random_seed=1), 1e-3,
+        t_kill=0.5)
+
+    assert 0.5 <= (traj.jdt_ref - jd)*86400.0 < 0.5 + 0.0051
+    for sv in states:
+        assert 140000 < cartesian2Geo(jd, *sv[:3])[2] < 150000
+
+
+def test_photometric_mass_follows_the_luminous_efficiency_conventions():
+    """ A number is a constant luminous efficiency in percent with P_0m = 840 W, and a model name from
+        LUM_EFF_MODELS takes 1500 W if it is panchromatic, unless P_0m is given. """
+
+    traj, _ = _exampleStart()
+
+    assert np.isclose(photometricMass(traj, "0.7"), computeMass(traj, 840.0, tau=0.007), rtol=1e-12, atol=0)
+    assert photometricMass(traj, "Borovicka2020") == computeMass(traj, 1500.0, tau="borovicka2020")
+    assert photometricMass(traj, "camo") == computeMass(traj, 840.0, tau="camo")
+    assert photometricMass(traj, "cm1976", P_0m=1210.0) == computeMass(traj, 1210.0, tau="cm1976")
+
+
+def _parseArguments(*argv):
+    parser = argparse.ArgumentParser()
+    addBackwardArguments(parser)
+
+    return parser.parse_args(list(argv))
+
+
+def test_command_line_arguments_set_the_mass_and_the_physical_parameters():
+    """ Without --atm_mass the start is the photometric mass, which --atm_freeze_mass keeps, and a lower ablation
+        coefficient grows it back less. """
+
+    traj, state_vect = _exampleStart()
+
+    (_, _, masses), m_init = backwardStatesFromArguments(traj, [state_vect], _parseArguments(), 180000.0)
+    assert m_init == photometricMass(traj, "0.7") and masses[0] > m_init
+
+    (_, _, masses_frozen), _ = backwardStatesFromArguments(traj, [state_vect],
+        _parseArguments("--atm_freeze_mass"), 180000.0)
+    assert masses_frozen[0] == m_init
+
+    (_, _, masses_low), m_low = backwardStatesFromArguments(traj, [state_vect],
+        _parseArguments("--atm_mass", "1e-3", "--atm_sigma", "0.005", "--atm_rho", "3500"), 180000.0)
+    (_, _, masses_high), _ = backwardStatesFromArguments(traj, [state_vect],
+        _parseArguments("--atm_mass", "1e-3", "--atm_sigma", "0.05", "--atm_rho", "3500"), 180000.0)
+    assert m_low == 1e-3 and m_low < masses_low[0] < masses_high[0]
+
+
+def test_command_line_saves_the_nominal_solution_and_its_realizations(tmp_path, monkeypatch):
+    """ The command line runs the nominal solution and --mc realizations back and saves one row for each, the
+        nominal one first, as backwardStates gives them. """
+
+    traj, state_vect = _exampleStart()
+    traj.uncertainties = SimpleNamespace()
+    traj.state_vect_cov = np.diag([50.0**2]*6)
+    savePickle(traj, str(tmp_path), "traj.pickle")
+
+    monkeypatch.setattr(sys, "argv", ["BackwardAtmIntegration", str(tmp_path/"traj.pickle"), "--mc", "3",
+        "--seed", "1", "--atm_mass", "1e-3"])
+    runpy.run_module("wmpl.MetSim.BackwardAtmIntegration", run_name="__main__")
+
+    rows = np.loadtxt(str(tmp_path/"traj_backward_atm.txt"))
+    _, states, masses = backwardStates(traj.jdt_ref, [state_vect] + sampleStateVectors(traj, 3, 1), 1e-3)
+
+    assert rows.shape == (4, 12)
+    assert np.allclose(rows[:, 6:], states, rtol=1e-9, atol=1e-6) and np.allclose(rows[:, 5], masses, rtol=1e-9)
 
 
 if __name__ == "__main__":
     test_state_at_the_start_is_the_solver_state()
     test_backward_run_ends_at_h_kill_on_the_radiant_line()
     test_realizations_end_at_the_nominal_epoch_carrying_their_offsets()
+    test_backward_run_for_a_time_stops_below_h_kill()
+    test_photometric_mass_follows_the_luminous_efficiency_conventions()
+    test_command_line_arguments_set_the_mass_and_the_physical_parameters()
     print("All BackwardAtmIntegration checks passed.")

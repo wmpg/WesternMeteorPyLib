@@ -81,8 +81,9 @@ P_0M = 1210
 
 
 
-def computeMass(traj, P_0m):
-    """ Compute the mass given the trajectory and a power of a zero magnitude meteor. """
+def computeMass(traj, P_0m, tau=0.007):
+    """ Compute the mass given the trajectory and a power of a zero magnitude meteor, with the luminous efficiency
+        tau as calcMass() takes it. """
 
 
     time_mag_arr = []
@@ -124,7 +125,7 @@ def computeMass(traj, P_0m):
     time_arr, mag_arr = mergeClosePoints(time_arr, mag_arr, avg_t_diff_max, method='min')
 
     # Compute the photometric mass
-    mass = calcMass(np.array(time_arr), np.array(mag_arr), traj.orbit.v_avg_norot, P_0m=P_0m)
+    mass = calcMass(np.array(time_arr), np.array(mag_arr), traj.orbit.v_avg_norot, tau=tau, P_0m=P_0m)
 
 
     return mass
