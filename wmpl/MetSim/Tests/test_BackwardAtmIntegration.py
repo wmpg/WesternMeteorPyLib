@@ -12,9 +12,10 @@ import sys
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from wmpl.MetSim.BackwardAtmIntegration import addBackwardArguments, backwardConstants, backwardState, \
-    backwardStates, backwardStatesFromArguments
+    backwardStates, backwardStatesFromArguments, checkBackwardArguments
 from wmpl.MetSim.MetSimErosion import Constants, Fragment, runSimulation
 from wmpl.Rebound.REBOUND import sampleStateVectors
 from wmpl.Utils.Pickling import loadPickle, savePickle
@@ -194,6 +195,20 @@ def test_mass_uncertainty_spreads_the_masses_of_the_realizations():
     assert m_inits_none == [1e-3]*4
 
 
+def test_command_line_refuses_a_mass_the_run_cannot_start_from():
+    """ A missing, zero or negative --mass, or a negative --mass_sigma, is a command-line error instead of a
+        division by zero or a complex power deep in MetSim. """
+
+    parser = argparse.ArgumentParser()
+    addBackwardArguments(parser)
+
+    for argv in [[], ["--mass", "0"], ["--mass", "-1"], ["--mass", "1", "--mass_sigma", "-0.1"]]:
+        with pytest.raises(SystemExit):
+            checkBackwardArguments(parser, parser.parse_args(argv))
+
+    checkBackwardArguments(parser, parser.parse_args(["--mass", "1", "--mass_sigma", "0.1"]))
+
+
 def test_command_line_saves_the_nominal_solution_and_its_realizations(tmp_path, monkeypatch):
     """ The command line runs the nominal solution and --mc realizations back and saves one row for each, the
         nominal one first, as backwardStates gives them. """
@@ -225,4 +240,5 @@ if __name__ == "__main__":
     test_command_line_arguments_set_the_mass_and_the_physical_parameters()
     test_gamma_a_sets_the_drag_as_metsims_gamma_times_shape_factor()
     test_mass_uncertainty_spreads_the_masses_of_the_realizations()
+    test_command_line_refuses_a_mass_the_run_cannot_start_from()
     print("All BackwardAtmIntegration checks passed.")

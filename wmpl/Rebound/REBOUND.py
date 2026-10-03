@@ -2394,7 +2394,8 @@ if __name__ == "__main__":
     import os
     import argparse
 
-    from wmpl.MetSim.BackwardAtmIntegration import addBackwardArguments, backwardStatesFromArguments
+    from wmpl.MetSim.BackwardAtmIntegration import addBackwardArguments, backwardStatesFromArguments, \
+        checkBackwardArguments
     from wmpl.Utils.Pickling import loadPickle
 
 
@@ -2481,8 +2482,11 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    if (args.atm_height is not None) and (args.mass is None):
-        parser.error("--atm_height needs the meteoroid's --mass.")
+    if args.atm_height is not None:
+        if args.forward is not None:
+            parser.error("--atm_height starts a backward integration above the atmosphere, so it cannot be used "
+                "with --forward.")
+        checkBackwardArguments(parser, args)
 
     # Extract the number of days from the arguments and the simulation direction. --forward may be
     # given on its own (use --days) or with its own number of days.
@@ -2586,7 +2590,7 @@ if __name__ == "__main__":
     
     # State the integration span up front, so it is visible while the integration is running and
     # not only in the summary printed at the end
-    print("Integrating {:.2f} days {:s} from the reference epoch {:.6f} JD (TDB) = {:s} UTC.".format(
+    print("Integrating {:.2f} days {:s} from the epoch {:.6f} JD (TDB) = {:s} UTC.".format(
         sim_days, direction, jd_start,
         astropy.time.Time(jd_start, format='jd', scale='utc').iso))
 

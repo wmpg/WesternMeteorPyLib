@@ -188,10 +188,23 @@ def addBackwardArguments(arg_parser):
         "{:g}.".format(Constants().gamma*Constants().shape_factor))
 
 
+def checkBackwardArguments(arg_parser, args):
+    """ Stop with a command-line error for a mass a run back through the atmosphere cannot start from. """
+
+    if (args.mass is None) or (args.mass <= 0):
+        arg_parser.error("the meteoroid's --mass is required, and must be positive.")
+
+    if args.mass_sigma < 0:
+        arg_parser.error("--mass_sigma cannot be negative.")
+
+
 def backwardStatesFromArguments(traj, state_vects, args, h_kill, t_kill=-1, random_seed=None):
     """ backwardStates() from the trajectory's reference point, with the mass and physical parameters given by the
         command-line arguments of addBackwardArguments(). The masses of the realizations are drawn with
         random_seed from --mass and --mass_sigma. Also returns the starting masses. """
+
+    if (args.mass_sigma > 0) and (len(state_vects) == 1):
+        print("--mass_sigma has no effect without Monte Carlo realizations.")
 
     const = Constants()
     const.freeze_mass = args.freeze_mass
@@ -237,15 +250,17 @@ if __name__ == "__main__":
 
     args = arg_parser.parse_args()
 
-    if args.mass is None:
-        arg_parser.error("the meteoroid's --mass is required.")
+    checkBackwardArguments(arg_parser, args)
+
+    # As in REBOUND's command line, draw a seed if none was given and report it, so the run can be reproduced
+    random_seed = args.seed if args.seed is not None else int(np.random.SeedSequence().entropy % (2**32))
 
     traj = loadPickle(*os.path.split(args.pickle_path))
     state_vect = np.concatenate([traj.state_vect_mini, traj.v_init*traj.radiant_eci_mini])
-    state_vects = [state_vect] + sampleStateVectors(traj, args.mc, args.seed)
+    state_vects = [state_vect] + sampleStateVectors(traj, args.mc, random_seed)
 
     (jd, states, masses), m_inits = backwardStatesFromArguments(traj, state_vects, args, 1000*args.atm_height,
-        t_kill=args.atm_time, random_seed=args.seed)
+        t_kill=args.atm_time, random_seed=random_seed)
 
     rows = []
     for i, (sv, m_ref, m) in enumerate(zip(states, m_inits, masses)):
@@ -259,6 +274,7 @@ if __name__ == "__main__":
     print("Nominal: lat {:.5f} deg, lon {:.5f} deg, height {:.1f} m, speed {:.2f} m/s, mass {:.6g} kg".format(
         *rows[0, 2:7]))
     if len(rows) > 1:
+        print("Monte Carlo seed: {:d}".format(random_seed))
         for name, col, unit in [("mass at the reference point", 1, "kg"), ("height", 4, "m"),
                 ("speed", 5, "m/s"), ("mass", 6, "kg")]:
             print("Realizations {:s}: 2.5/50/97.5 percentiles {:s} {:s}".format(name,
