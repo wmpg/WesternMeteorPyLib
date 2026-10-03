@@ -119,7 +119,7 @@ def backwardStates(jd_ref, state_vects, m_init, h_kill=180000.0, t_kill=-1, cons
     Arguments:
         jd_ref: [float] Julian date of the state vectors.
         state_vects: [list] State vectors (see the module docstring), the nominal one first.
-        m_init: [float] Mass at the start (kg), the same for all of them.
+        m_init: [float or list] Mass at the start (kg), for all of them or for each one.
 
     Keyword arguments:
         h_kill, const: As in backwardConstants().
@@ -130,7 +130,9 @@ def backwardStates(jd_ref, state_vects, m_init, h_kill=180000.0, t_kill=-1, cons
             order.
     """
 
-    const = backwardConstants(jd_ref, state_vects[0], m_init, h_kill=h_kill, const=const)
+    m_inits = [m_init]*len(state_vects) if np.ndim(m_init) == 0 else m_init
+
+    const = backwardConstants(jd_ref, state_vects[0], m_inits[0], h_kill=h_kill, const=const)
     const.t_kill = t_kill
     frag, results, _ = runSimulation(const)
     t = results[-1][0]
@@ -141,9 +143,10 @@ def backwardStates(jd_ref, state_vects, m_init, h_kill=180000.0, t_kill=-1, cons
     #   steps, and keep its atmosphere fit, made at practically the same place
     const.h_kill, const.t_kill = np.inf, abs(t)
 
-    for sv in state_vects[1:]:
+    for sv, m in zip(state_vects[1:], m_inits[1:]):
 
         const_mc = copy.deepcopy(const)
+        const_mc.m_init = m
         _startFrom(const_mc, jd_ref, sv)
         frag, results, _ = runSimulation(const_mc)
 
@@ -181,47 +184,55 @@ def photometricMass(traj, lum_eff, P_0m=None):
 
 
 def addBackwardArguments(arg_parser):
-    """ Add the command-line arguments for the mass and the physical parameters of a run back through the
-        atmosphere, shared by this module's command line and REBOUND's. """
+    """ Add the command-line arguments for the mass and the physical parameters of the meteoroid in a run back
+        through the atmosphere, shared by this module's command line and REBOUND's. """
 
-    arg_parser.add_argument("--atm_mass", type=float, default=None,
+    arg_parser.add_argument("--mass", type=float, default=None,
         help="Mass at the trajectory's reference point in kg. By default, the photometric mass from the whole "
-        "light curve, with --atm_lum_eff and --atm_P_0m.")
+        "light curve, with --lum_eff and --P_0m.")
 
-    arg_parser.add_argument("--atm_lum_eff", type=str, default="0.7",
+    arg_parser.add_argument("--lum_eff", type=str, default="0.7",
         help="Luminous efficiency for the photometric mass: a constant in percent, or a model name: "
         "{:s}. Default: 0.7.".format(", ".join(LUM_EFF_MODELS)))
 
-    arg_parser.add_argument("--atm_P_0m", type=float, default=None,
+    arg_parser.add_argument("--P_0m", type=float, default=None,
         help="Power of a zero-magnitude meteor in W for the photometric mass. Default: 1500 for the panchromatic "
         "models (rc2001*, cm1976, borovicka2020, pc1983), 840 otherwise.")
 
-    arg_parser.add_argument("--atm_freeze_mass", action="store_true",
+    arg_parser.add_argument("--mag_sigma", type=float, default=0.0,
+        help="Uncertainty of the photometric calibration in magnitudes. Each Monte Carlo realization shifts the "
+        "whole light curve by a normal draw with this sigma, which multiplies its mass by 10^(-0.4 shift). "
+        "Default: 0.")
+
+    arg_parser.add_argument("--freeze_mass", action="store_true",
         help="Keep the mass constant instead of growing it back as the ablation is undone.")
 
-    arg_parser.add_argument("--atm_sigma", type=float, default=None,
+    arg_parser.add_argument("--ablation_coeff", type=float, default=Constants().sigma*1e6,
         help="Ablation coefficient in s^2/km^2, which sets how fast the mass grows back. Default: MetSim's, "
         "{:g}.".format(Constants().sigma*1e6))
 
-    arg_parser.add_argument("--atm_rho", type=float, default=None,
-        help="Bulk density in kg/m^3, which with the mass sets the drag. Default: MetSim's, {:g}.".format(
-        Constants().rho))
+    arg_parser.add_argument("--density", type=float, default=3000.0,
+        help="Bulk density of the meteoroid in kg/m^3, which with the mass sets the drag, and in REBOUND the "
+        "radiation pressure with --radius. Default: 3000.")
 
 
-def backwardStatesFromArguments(traj, state_vects, args, h_kill, t_kill=-1):
+def backwardStatesFromArguments(traj, state_vects, args, h_kill, t_kill=-1, random_seed=None):
     """ backwardStates() from the trajectory's reference point, with the mass and physical parameters given by the
-        command-line arguments of addBackwardArguments(). Also returns the starting mass. """
+        command-line arguments of addBackwardArguments(). The masses of the realizations carry the photometric
+        uncertainty --mag_sigma, drawn with random_seed. Also returns the starting masses. """
 
     const = Constants()
-    const.freeze_mass = args.atm_freeze_mass
-    if args.atm_sigma is not None:
-        const.sigma = args.atm_sigma/1e6
-    if args.atm_rho is not None:
-        const.rho = args.atm_rho
+    const.freeze_mass = args.freeze_mass
+    const.sigma = args.ablation_coeff/1e6
+    const.rho = args.density
 
-    m_init = args.atm_mass if (args.atm_mass is not None) else photometricMass(traj, args.atm_lum_eff, args.atm_P_0m)
+    m_init = args.mass if (args.mass is not None) else photometricMass(traj, args.lum_eff, args.P_0m)
 
-    return backwardStates(traj.jdt_ref, state_vects, m_init, h_kill=h_kill, t_kill=t_kill, const=const), m_init
+    # A generator of its own, so the state vector draws stay those of sampleStateVectors with the same seed
+    rng = np.random.default_rng(None if (random_seed is None) else [1, random_seed])
+    m_inits = [m_init] + list(m_init*10**(-0.4*rng.normal(0.0, args.mag_sigma, len(state_vects) - 1)))
+
+    return backwardStates(traj.jdt_ref, state_vects, m_inits, h_kill=h_kill, t_kill=t_kill, const=const), m_inits
 
 
 if __name__ == "__main__":
@@ -256,29 +267,29 @@ if __name__ == "__main__":
     state_vect = np.concatenate([traj.state_vect_mini, traj.v_init*traj.radiant_eci_mini])
     state_vects = [state_vect] + sampleStateVectors(traj, args.mc, args.seed)
 
-    (jd, states, masses), m_init = backwardStatesFromArguments(traj, state_vects, args, 1000*args.atm_height,
-        t_kill=args.atm_time)
+    (jd, states, masses), m_inits = backwardStatesFromArguments(traj, state_vects, args, 1000*args.atm_height,
+        t_kill=args.atm_time, random_seed=args.seed)
 
     rows = []
-    for i, (sv, m) in enumerate(zip(states, masses)):
+    for i, (sv, m_ref, m) in enumerate(zip(states, m_inits, masses)):
         lat, lon, ht = cartesian2Geo(jd, *sv[:3])
-        rows.append([i, np.degrees(lat), np.degrees(lon), ht, np.linalg.norm(sv[3:]), m] + list(sv))
+        rows.append([i, m_ref, np.degrees(lat), np.degrees(lon), ht, np.linalg.norm(sv[3:]), m] + list(sv))
     rows = np.array(rows)
 
-    print("Mass at the reference point: {:.6g} kg{:s}".format(m_init,
-        ", frozen" if args.atm_freeze_mass else ""))
+    print("Mass at the reference point: {:.6g} kg{:s}".format(m_inits[0], ", frozen" if args.freeze_mass else ""))
     print("Ran {:d} state vector(s) back {:.4f} s, to JD {:.8f}".format(len(states), (traj.jdt_ref - jd)*86400,
         jd))
     print("Nominal: lat {:.5f} deg, lon {:.5f} deg, height {:.1f} m, speed {:.2f} m/s, mass {:.6g} kg".format(
-        *rows[0, 1:6]))
+        *rows[0, 2:7]))
     if len(rows) > 1:
-        for name, col, unit in [("height", 3, "m"), ("speed", 4, "m/s"), ("mass", 5, "kg")]:
+        for name, col, unit in [("mass at the reference point", 1, "kg"), ("height", 4, "m"),
+                ("speed", 5, "m/s"), ("mass", 6, "kg")]:
             print("Realizations {:s}: 2.5/50/97.5 percentiles {:s} {:s}".format(name,
                 " / ".join("{:.6g}".format(v) for v in np.percentile(rows[1:, col], [2.5, 50, 97.5])), unit))
 
     out_path = os.path.splitext(args.pickle_path)[0] + "_backward_atm.txt"
-    np.savetxt(out_path, rows, fmt=["%d"] + ["%.10g"]*11, header="JD {:.10f} (UTC), {:.6f} s from the reference "
+    np.savetxt(out_path, rows, fmt=["%d"] + ["%.10g"]*12, header="JD {:.10f} (UTC), {:.6f} s from the reference "
         "point. Row 0 is the nominal solution, the others its realizations. State vectors in ECI, true equator and "
-        "equinox of date, velocity to the radiant.\nrow, lat (deg), lon (deg), height MSL (m), speed (m/s), "
-        "mass (kg), x (m), y (m), z (m), vx (m/s), vy (m/s), vz (m/s)".format(jd, (jd - traj.jdt_ref)*86400))
+        "equinox of date, velocity to the radiant.\nrow, mass at the reference point (kg), lat (deg), lon (deg), "
+        "height MSL (m), speed (m/s), mass (kg), x (m), y (m), z (m), vx (m/s), vy (m/s), vz (m/s)".format(jd, (jd - traj.jdt_ref)*86400))
     print("Saved:", out_path)

@@ -2449,10 +2449,6 @@ if __name__ == "__main__":
                         help="Object radius in metres, used with --density to compute beta and "
                         "include radiation forces. Purely gravitational if not given.")
 
-    parser.add_argument("--density", type=float, default=3000.0,
-                        help="Object bulk density in kg/m^3, used with --radius to compute beta. "
-                        "Default: 3000.")
-
     parser.add_argument("--integrator", type=str.lower, default="ias15", choices=INTEGRATORS,
                         help="Integrator: ias15 (default; adaptive, accurate to machine precision), "
                         "whfast (symplectic, fixed step; fast, but does not resolve close encounters) "
@@ -2476,8 +2472,8 @@ if __name__ == "__main__":
                         help="Start the orbit integration above the atmosphere instead of at the trajectory's "
                         "reference point: run the nominal solution back up to this height in km (180 if no "
                         "value is given) with MetSim (single body, drag, gravity, Coriolis), and each Monte "
-                        "Carlo realization back for the same time. See the --atm_* options for the mass and "
-                        "the physical parameters.")
+                        "Carlo realization back for the same time, with --mass or the photometric mass, "
+                        "--mag_sigma, --freeze_mass, --ablation_coeff and --density.")
 
     addBackwardArguments(parser)
 
@@ -2554,12 +2550,12 @@ if __name__ == "__main__":
     state_vect = np.concatenate([traj.state_vect_mini, traj.v_init*traj.radiant_eci_mini])
     state_vect_realizations = sampleStateVectors(traj, args.mc, random_seed)
     if args.atm_height is not None:
-        (jd_start, states, masses), m_init = backwardStatesFromArguments(traj,
-            [state_vect] + state_vect_realizations, args, 1000*args.atm_height)
+        (jd_start, states, masses), m_inits = backwardStatesFromArguments(traj,
+            [state_vect] + state_vect_realizations, args, 1000*args.atm_height, random_seed=random_seed)
         state_vect, state_vect_realizations = states[0], states[1:]
         print("Ran {:d} state vector(s) back through the atmosphere for {:.3f} s, to {:.1f} km, from {:.6g} kg "
             "at the reference point to {:.6g} kg.".format(len(states), (traj.jdt_ref - jd_start)*86400,
-            cartesian2Geo(jd_start, *state_vect[:3])[2]/1000, m_init, masses[0]))
+            cartesian2Geo(jd_start, *state_vect[:3])[2]/1000, m_inits[0], masses[0]))
 
 
     ### Set reference frame settings ###
