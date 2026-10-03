@@ -2473,7 +2473,7 @@ if __name__ == "__main__":
                         "reference point: run the nominal solution back up to this height in km (180 if no "
                         "value is given) with MetSim (single body, drag, gravity, Coriolis), and each Monte "
                         "Carlo realization back for the same time, with --mass (required), --mass_sigma, "
-                        "--freeze_mass, --ablation_coeff, --density and --gamma_a.")
+                        "--freeze_mass, --ablation_coeff, --density and --ga.")
 
     addBackwardArguments(parser)
 

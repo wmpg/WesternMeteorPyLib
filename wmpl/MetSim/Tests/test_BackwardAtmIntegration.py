@@ -150,13 +150,13 @@ def test_command_line_arguments_set_the_mass_and_the_physical_parameters():
 
 
 def test_gamma_a_sets_the_drag_as_metsims_gamma_times_shape_factor():
-    """ --gamma_a gives the same run as setting MetSim's gamma and shape_factor to that product directly, and a
+    """ --ga gives the same run as setting MetSim's gamma and shape_factor to that product directly, and a
         larger one, more drag going forwards, brings the meteoroid back faster. """
 
     traj, state_vect = _exampleStart()
 
     (_, states, masses), _ = backwardStatesFromArguments(traj, [state_vect],
-        _parseArguments("--mass", "1e-6", "--gamma_a", "0.55"), 180000.0)
+        _parseArguments("--mass", "1e-6", "--ga", "0.55"), 180000.0)
 
     const = Constants()
     const.rho, const.gamma, const.shape_factor = 3000.0, 1.0, 0.55
@@ -166,7 +166,7 @@ def test_gamma_a_sets_the_drag_as_metsims_gamma_times_shape_factor():
     assert np.isclose(masses[0], masses_direct[0], rtol=1e-12, atol=0)
 
     (_, states_more, _), _ = backwardStatesFromArguments(traj, [state_vect],
-        _parseArguments("--mass", "1e-6", "--gamma_a", "1.21"), 180000.0)
+        _parseArguments("--mass", "1e-6", "--ga", "1.21"), 180000.0)
     assert np.linalg.norm(states_more[0][3:]) > np.linalg.norm(states[0][3:])
 
 
