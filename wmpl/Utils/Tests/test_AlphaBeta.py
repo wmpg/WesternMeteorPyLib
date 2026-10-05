@@ -31,7 +31,7 @@ from wmpl.Utils.AlphaBeta import (fitAlphaBetaMass, fitAlphaBeta, fitAlphaBetaLi
     alphaBetaModelMagnitude, alphaBetaLuminousEfficiency, plotAlphaBeta, plotProfileAlphaBeta,
     plotAlphaBetaSurvivalDiagram, profileAlphaBeta, _profiledMagOffset, _gaussianEllipsePoints,
     getDefaultInverseEiLUT, fitAlphaBetaLag, exponentialAtmosphereHeights, alphaBetaEntryVelocityWithGravity,
-    HT_NORM_CONST, P_0M, ALPHA_BETA_BOUNDS, RHO_ATM_0)
+    alphaBetaResidualTrend, HT_NORM_CONST, P_0M, ALPHA_BETA_BOUNDS, RHO_ATM_0, RESIDUAL_TREND_SIGMA)
 
 
 # True parameters used to generate the synthetic trajectory. The height range is chosen so the
@@ -1818,6 +1818,55 @@ def testEntryVelocityWithGravityUndoesTheGravityAboveTheFirstPoint():
         assert abs(alphaBetaEntryVelocityWithGravity(v_first, h_first) - v_top) < 0.05
 
 
+def _deepModelData(seed=0, sigma_v=50.0):
+    """ Velocities from the alpha-beta model itself (alpha 20, beta 1, 20 km/s) over a deep window, with noise. """
+
+    ht = np.linspace(9.0, 2.5, 80)*HT_NORM_CONST
+    v = alphaBetaVelocity(ht, 20.0, 1.0, 20000.0) + np.random.default_rng(seed).normal(0, sigma_v, len(ht))
+
+    return ht, v
+
+
+def testFreeInitialVelocityIsNotPinnedByAnOutlierAtTheTop():
+    """ A single outlier of +1500 m/s at the highest point used to set the lower bound of the fitted initial
+        velocity (from the fastest speed seen) and pinned it 1300 m/s high; bounded by the median speed of the
+        highest points, the fit stays within 3 sigma of the true 20 km/s. The conditional (ln alpha, ln beta)
+        covariance, with v_init held fixed, is not larger than the marginal one. """
+
+    ht, v = _deepModelData()
+    v[np.argmax(ht)] += 1500.0
+
+    v_init, alpha, beta, errors = fitAlphaBeta(v, ht, method='robust', sigma_v=50.0, fit_v_init=True,
+        estimate_errors=True)
+
+    assert abs(v_init - 20000.0) < 3*errors['v_init_std']
+    assert abs(alpha/20.0 - 1) < 0.05 and abs(beta - 1) < 0.1
+    assert np.all(np.diag(errors['cov_fit']) <= np.diag(errors['cov_log']) + 1e-15)
+
+
+def testResidualTrendFlagsAFragmentationNotNoise():
+    """ Residuals of a single body scatter around zero at every height; a break below which the body
+        decelerates three times as fast leaves them trending with height, which is flagged, while pure noise is
+        not. """
+
+    ht, v = _deepModelData()
+    v_init, alpha, beta = fitAlphaBeta(v, ht, method='robust', sigma_v=50.0, fit_v_init=True)
+    bands, significant = alphaBetaResidualTrend(v, ht, v_init, alpha, beta)
+    assert (not significant) and max(abs(b[4]) for b in bands) < RESIDUAL_TREND_SIGMA
+
+    # Below the break, the curve of a body with three times the ballistic coefficient, joined at the break
+    ht_break = 5.5*HT_NORM_CONST
+    below = ht < ht_break
+    v_frag = v.copy()
+    v_frag[below] = (alphaBetaVelocity(ht[below], 60.0, 1.0, 20000.0)
+        - alphaBetaVelocity(ht_break, 60.0, 1.0, 20000.0) + alphaBetaVelocity(ht_break, 20.0, 1.0, 20000.0)
+        + np.random.default_rng(1).normal(0, 50.0, int(np.sum(below))))
+
+    v_init, alpha, beta = fitAlphaBeta(v_frag, ht, method='robust', sigma_v=50.0, fit_v_init=True)
+    _, significant = alphaBetaResidualTrend(v_frag, ht, v_init, alpha, beta)
+    assert significant
+
+
 if __name__ == "__main__":
 
     # Standalone runner so the tests can be executed without pytest installed
@@ -1874,6 +1923,8 @@ if __name__ == "__main__":
         testColumnRescalingKeepsTheFitExactInANonExponentialAtmosphere,
         testFittingTheInitialVelocityNeedsTheRobustFit,
         testEntryVelocityWithGravityUndoesTheGravityAboveTheFirstPoint,
+        testFreeInitialVelocityIsNotPinnedByAnOutlierAtTheTop,
+        testResidualTrendFlagsAFragmentationNotNoise,
     ]
 
     failed = 0
