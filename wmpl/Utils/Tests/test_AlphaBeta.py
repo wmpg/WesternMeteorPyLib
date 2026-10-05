@@ -30,7 +30,8 @@ from wmpl.Utils.AlphaBeta import (fitAlphaBetaMass, fitAlphaBeta, fitAlphaBetaLi
     alphaBetaVelocityNormedLUT, alphaBetaHeightNormed, alphaBetaLuminosityF,
     alphaBetaModelMagnitude, alphaBetaLuminousEfficiency, plotAlphaBeta, plotProfileAlphaBeta,
     plotAlphaBetaSurvivalDiagram, profileAlphaBeta, _profiledMagOffset, _gaussianEllipsePoints,
-    getDefaultInverseEiLUT, fitAlphaBetaLag, HT_NORM_CONST, P_0M, ALPHA_BETA_BOUNDS)
+    getDefaultInverseEiLUT, fitAlphaBetaLag, exponentialAtmosphereHeights, alphaBetaEntryVelocityWithGravity,
+    HT_NORM_CONST, P_0M, ALPHA_BETA_BOUNDS, RHO_ATM_0)
 
 
 # True parameters used to generate the synthetic trajectory. The height range is chosen so the
@@ -1719,6 +1720,104 @@ def testLightCurveInputValidation():
     _assertRaisesValueError("bad dyn_method", dyn_method="banana")
 
 
+def _nonExponentialAtmosphere():
+    """ A density profile whose scale height goes from 6 km at 40 km to 8 km at 100 km, constant outside. """
+
+    hts = np.arange(15e3, 1000e3 + 1, 100.0)
+    scale = np.interp(hts, [40e3, 100e3], [6000.0, 8000.0])
+    ln_rho = np.log(RHO_ATM_0) - 15e3/6000.0 - np.concatenate([[0],
+        np.cumsum(np.diff(hts)/((scale[1:] + scale[:-1])/2))])
+
+    return hts, np.exp(ln_rho)
+
+
+def _deepFireball(hts, rho, v_e=20000.0, b_e=1.6e-3, sigma=1.5e-8, slope=np.radians(45), h_first=50e3):
+    """ Speeds at 60 heights of a body observed from h_first until it is down to 40% of its speed, integrating
+        the drag and ablation equations of the alpha-beta model (mu = 2/3, no gravity) from 200 km through the
+        given atmosphere. Also returns the true alpha and beta. """
+
+    def deriv(h, y):
+        v, mass_ratio = y
+        r = np.exp(np.interp(h, hts, np.log(rho)))
+        mass_ratio = max(mass_ratio, 1e-12)
+        return [b_e*mass_ratio**(-1/3)*r*v/np.sin(slope), sigma*b_e*mass_ratio**(2/3)*r*v**2/np.sin(slope)]
+
+    sol = scipy.integrate.solve_ivp(deriv, [200e3, 20e3], [v_e, 1.0], dense_output=True, rtol=1e-10,
+        atol=1e-8, max_step=200)
+    grid = np.linspace(200e3, 20e3, 20000)
+    h_last = grid[np.nonzero(sol.sol(grid)[0] < 0.4*v_e)[0][0]]
+    h_obs = np.linspace(h_first, h_last, 60)
+
+    return h_obs, sol.sol(h_obs)[0], b_e*RHO_ATM_0*HT_NORM_CONST/np.sin(slope), sigma*v_e**2/6
+
+
+def testColumnRescalingIsTheIdentityInTheExponentialAtmosphere():
+    """ In the model's own exponential atmosphere, both the column and the density rescalings leave the heights
+        as they are. """
+
+    hts = np.arange(15e3, 1000e3 + 1, 100.0)
+    rho = RHO_ATM_0*np.exp(-hts/HT_NORM_CONST)
+    ht_data = np.linspace(30e3, 130e3, 50)
+
+    for method in ("column", "density"):
+        assert np.allclose(exponentialAtmosphereHeights(ht_data, hts, rho, method=method), ht_data, atol=1.0)
+
+
+def testColumnRescalingKeepsTheFitExactInANonExponentialAtmosphere():
+    """ A fireball at 20 km/s (alpha 19.8, beta 1.0) seen from 50 km in an atmosphere whose scale height goes from
+        6 to 8 km. Fitting its initial velocity too, the column rescaling recovers it within 15 m/s and its
+        uncertainty, alpha within 3% and beta within 5%; the density rescaling put alpha 16% low. With the
+        initial velocity taken from the leading points instead, it is over 50 m/s low. """
+
+    hts, rho = _nonExponentialAtmosphere()
+    h_obs, v_true, alpha_true, beta_true = _deepFireball(hts, rho)
+
+    for seed in range(3):
+        v_obs = v_true + np.random.default_rng(seed).normal(0, 50.0, len(v_true))
+
+        ht_column = exponentialAtmosphereHeights(h_obs, hts, rho, method="column")
+        v_init, alpha, beta, errors = fitAlphaBeta(v_obs, ht_column, method='robust', sigma_v=50.0,
+            fit_v_init=True, estimate_errors=True)
+        assert abs(v_init - 20000.0) < min(15.0, 3*errors['v_init_std'])
+        assert abs(alpha/alpha_true - 1) < 0.03 and abs(beta/beta_true - 1) < 0.05
+        assert errors['cov_full'].shape == (3, 3) and np.isfinite(errors['alpha_std_rel'])
+
+        ht_density = exponentialAtmosphereHeights(h_obs, hts, rho, method="density")
+        _, alpha_density, _ = fitAlphaBeta(v_obs, ht_density, method='robust', sigma_v=50.0, fit_v_init=True)
+        assert alpha_density/alpha_true < 0.9
+
+        v_init_leading, _, _ = fitAlphaBeta(v_obs, ht_column, method='robust', sigma_v=50.0)
+        assert v_init_leading < 20000.0 - 50.0
+
+
+def testFittingTheInitialVelocityNeedsTheRobustFit():
+    """ fit_v_init=True fits the velocity residuals, so the Q4 fit refuses it. """
+
+    hts, rho = _nonExponentialAtmosphere()
+    h_obs, v_true, _, _ = _deepFireball(hts, rho)
+
+    try:
+        fitAlphaBeta(v_true, exponentialAtmosphereHeights(h_obs, hts, rho), method='q4', fit_v_init=True)
+    except ValueError:
+        return
+
+    raise AssertionError("fit_v_init=True with method='q4' did not raise ValueError")
+
+
+def testEntryVelocityWithGravityUndoesTheGravityAboveTheFirstPoint():
+    """ Falling under gravity alone from 180 km, a body at 20 km/s gains 57 m/s by 60 km, and one at 12 km/s
+        110 m/s by 40 km; the correction takes both back to their speed at 180 km within 0.05 m/s. """
+
+    def g(h):
+        return 9.81*(6371008.7714/(6371008.7714 + h))**2
+
+    for v_top, h_first in [(20000.0, 60e3), (12000.0, 40e3)]:
+        sol = scipy.integrate.solve_ivp(lambda h, v: [-g(h)/v[0]], [180e3, h_first], [v_top], rtol=1e-12)
+        v_first = sol.y[0][-1]
+        assert v_first - v_top > 50.0
+        assert abs(alphaBetaEntryVelocityWithGravity(v_first, h_first) - v_top) < 0.05
+
+
 if __name__ == "__main__":
 
     # Standalone runner so the tests can be executed without pytest installed
@@ -1771,6 +1870,10 @@ if __name__ == "__main__":
         testFitAlphaBetaLightCurve,
         testLuminousEfficiency,
         testLightCurveInputValidation,
+        testColumnRescalingIsTheIdentityInTheExponentialAtmosphere,
+        testColumnRescalingKeepsTheFitExactInANonExponentialAtmosphere,
+        testFittingTheInitialVelocityNeedsTheRobustFit,
+        testEntryVelocityWithGravityUndoesTheGravityAboveTheFirstPoint,
     ]
 
     failed = 0
