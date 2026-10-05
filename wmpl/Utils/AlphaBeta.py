@@ -216,7 +216,36 @@ def exponentialAtmosphereHeights(ht_data, profile_hts, profile_dens, method="col
     return HT_NORM_CONST*np.log(RHO_ATM_0*HT_NORM_CONST/column_data)
 
 
-def rescaleHeightToExponentialAtmosphere(lat, lon, ht_data, jd, method="column"):
+def exponentialAtmosphereDensityRatio(ht_data, profile_hts, profile_dens, method="column"):
+    """ Real air density at the given heights over the density of the exponential atmosphere at their rescaled
+        heights (see exponentialAtmosphereHeights()), the factor the alpha-beta luminosity needs.
+
+    The luminosity, I = -tau d(m v^2/2)/dt, is proportional to the local air density through dv/dt and dm/dt,
+    which the model takes from its exponential atmosphere at the rescaled height. With the column mapping the
+    velocity and mass are right but that density is M/HT_NORM_CONST, not the real one: the model's magnitudes
+    are too faint by 2.5 log10(ratio), where the ratio is HT_NORM_CONST over the column's scale height M/rho.
+    Through NRLMSISE-00 that is +0.04 to +0.10 mag at 30 km, about -0.1 at 50 km, +0.1 at 70 km, +0.24 to +0.39 at 90 km
+    and about -0.12 at 110 km, varying with height, so a light curve fit cannot absorb it into its amplitude. With
+    the density mapping the ratio is 1, but the velocity and mass are not right.
+
+    Arguments:
+        ht_data, profile_hts, profile_dens, method: As in exponentialAtmosphereHeights().
+
+    Return:
+        [ndarray] rho_real/rho_model at ht_data.
+    """
+
+    profile_hts = np.asarray(profile_hts, dtype=np.float64)
+    log_dens = np.log(np.asarray(profile_dens, dtype=np.float64))
+
+    ht_rescaled = exponentialAtmosphereHeights(ht_data, profile_hts, profile_dens, method=method)
+    log_rho_real = np.interp(ht_data, profile_hts, log_dens)
+    log_rho_model = np.log(RHO_ATM_0) - ht_rescaled/HT_NORM_CONST
+
+    return np.exp(log_rho_real - log_rho_model)
+
+
+def rescaleHeightToExponentialAtmosphere(lat, lon, ht_data, jd, method="column", return_density_ratio=False):
     """ Given observed heights, rescale them from the real NRLMSISE model to the simplified exponential
         atmosphere model used by the Alpha-Beta procedure (see exponentialAtmosphereHeights()).
 
@@ -231,16 +260,20 @@ def rescaleHeightToExponentialAtmosphere(lat, lon, ht_data, jd, method="column")
             solution exact in the real atmosphere. "density": the height with the same local density, what this
             function did before, kept to reproduce earlier results. With "column", the profile is taken at the
             mean location of the points.
+        return_density_ratio: [bool] Also return the real density over the model's at the rescaled heights
+            (see exponentialAtmosphereDensityRatio()), which a light curve fit with the column mapping needs
+            (fitAlphaBetaLightCurve(lc_density_ratio=...)). It is 1 with the density mapping. False by default.
 
     Return:
-        rescaled_ht_data
+        rescaled_ht_data, or (rescaled_ht_data, density_ratio) with return_density_ratio
     """
 
     ht_data = np.asarray(ht_data, dtype=np.float64)
 
     if method == "density":
         atm_dens = getAtmDensity_vect(lat, lon, ht_data, jd)
-        return HT_NORM_CONST*np.log(RHO_ATM_0/atm_dens)
+        ht_rescaled = HT_NORM_CONST*np.log(RHO_ATM_0/atm_dens)
+        return (ht_rescaled, np.ones_like(ht_rescaled)) if return_density_ratio else ht_rescaled
 
     lat_mean = np.arctan2(np.mean(np.sin(lat)), np.mean(np.cos(lat)))
     lon_mean = meanAngle(np.atleast_1d(lon))
@@ -249,7 +282,11 @@ def rescaleHeightToExponentialAtmosphere(lat, lon, ht_data, jd, method="column")
         RESCALE_STEP_FINE), np.arange(RESCALE_FINE_TOP, RESCALE_COLUMN_TOP + 1, RESCALE_STEP_COARSE)])
     profile_dens = getAtmDensity_vect(lat_mean, lon_mean, profile_hts, jd)
 
-    return exponentialAtmosphereHeights(ht_data, profile_hts, profile_dens, method=method)
+    ht_rescaled = exponentialAtmosphereHeights(ht_data, profile_hts, profile_dens, method=method)
+    if return_density_ratio:
+        return ht_rescaled, exponentialAtmosphereDensityRatio(ht_data, profile_hts, profile_dens, method=method)
+
+    return ht_rescaled
 
 
 def expLinearLag(t, a1, a2, t0, decel):
@@ -5003,7 +5040,8 @@ def fitAlphaBetaLightCurve(
         fit_free_mu=False,
         verbose=True,
         plot=False,
-        fast=False):
+        fast=False,
+        lc_density_ratio=None):
     """ Simultaneous fit of the alpha-beta model to the dynamics (height vs. velocity) AND the
         light curve (height vs. absolute magnitude), following Gritsevich (2007, 2009) for the
         dynamics and Gritsevich & Koschny (2011) for the luminosity.
@@ -5099,6 +5137,13 @@ def fitAlphaBetaLightCurve(
         mag_abs_data: [ndarray] Absolute magnitudes (100 km) at ht_lc_data.
 
     Keyword arguments:
+        lc_density_ratio: [ndarray] The real air density over the model's at the light curve points, from
+            rescaleHeightToExponentialAtmosphere(..., return_density_ratio=True). The luminosity is proportional
+            to the local density, which with the column mapping (the default) the model gets wrong by this ratio:
+            without it, the model magnitudes are too faint by 2.5 log10(ratio), up to about 0.4 mag near 90 km and
+            varying with height (see exponentialAtmosphereDensityRatio()). The observed magnitudes are corrected
+            by +2.5 log10(ratio) for the fit, and shown so in the plot. None by default, for heights rescaled by
+            density, where it is 1.
         v_init: [float] Initial velocity (m/s). If None, median of the first 20% of points
             (min 10 points), same convention as fitAlphaBeta() - except that here the inputs are
             first sorted by decreasing height internally, so they don't have to be time-ordered.
@@ -5205,6 +5250,12 @@ def fitAlphaBetaLightCurve(
         raise ValueError("v_data and ht_data must have the same length.")
     if len(ht_lc_data) != len(mag_abs_data):
         raise ValueError("ht_lc_data and mag_abs_data must have the same length.")
+
+    # The luminosity takes the model's air density at the rescaled heights: correct the observed magnitudes for
+    #   the real density there, which is the same as correcting the model (see lc_density_ratio above)
+    if lc_density_ratio is not None:
+        lc_density_ratio = np.broadcast_to(np.asarray(lc_density_ratio, dtype=np.float64), mag_abs_data.shape)
+        mag_abs_data = mag_abs_data + 2.5*np.log10(lc_density_ratio)
 
     # Validate the shape-change coefficients up front (the luminosity model diverges as mu -> 1,
     #   see alphaBetaLuminosityF())
@@ -5513,7 +5564,8 @@ def fitAlphaBetaLightCurve(
         ax_dyn.scatter(v_data/1000, ht_data/1000, s=10, color='0.5', alpha=0.6, zorder=1, \
             label="Observed dynamics")
         ax_lc.scatter(mag_abs_data, ht_lc_data/1000, s=10, color='0.5', alpha=0.6, zorder=1, \
-            label="Observed light curve")
+            label="Observed light curve" if lc_density_ratio is None else \
+            "Observed light curve, corrected to the model's air density")
 
         # Height grid spanning both datasets, used to draw the fitted curves
         ht_all = np.concatenate([ht_data, ht_lc_data])

@@ -31,7 +31,8 @@ from wmpl.Utils.AlphaBeta import (fitAlphaBetaMass, fitAlphaBeta, fitAlphaBetaLi
     alphaBetaModelMagnitude, alphaBetaLuminousEfficiency, plotAlphaBeta, plotProfileAlphaBeta,
     plotAlphaBetaSurvivalDiagram, profileAlphaBeta, _profiledMagOffset, _gaussianEllipsePoints,
     getDefaultInverseEiLUT, fitAlphaBetaLag, exponentialAtmosphereHeights, alphaBetaEntryVelocityWithGravity,
-    alphaBetaResidualTrend, HT_NORM_CONST, P_0M, ALPHA_BETA_BOUNDS, RHO_ATM_0, RESIDUAL_TREND_SIGMA)
+    alphaBetaResidualTrend, exponentialAtmosphereDensityRatio, HT_NORM_CONST, P_0M, ALPHA_BETA_BOUNDS, RHO_ATM_0,
+    RESIDUAL_TREND_SIGMA)
 
 
 # True parameters used to generate the synthetic trajectory. The height range is chosen so the
@@ -1867,6 +1868,49 @@ def testResidualTrendFlagsAFragmentationNotNoise():
     assert significant
 
 
+def testLightCurveNeedsTheDensityRatioWithTheColumnMapping():
+    """ The luminosity of a single body, I = -tau d(m v^2/2)/dt, integrated through an atmosphere whose scale height
+        goes from 6 to 8 km, against the model magnitudes at the column-rescaled heights with the true alpha, beta
+        and mu = 2/3, from 85 to 45 km. Corrected by the density ratio they follow the true light curve exactly
+        after an offset (to 1e-4 mag); without it they are off by up to 0.11 mag after the best offset, 0.21 mag
+        from end to end, varying with height, which the amplitude cannot absorb. """
+
+    hts, rho = _nonExponentialAtmosphere()
+    v_e, b_e, sigma, slope = 20000.0, 1.6e-3, 1.5e-8, np.radians(45)
+    log_rho = np.log(rho)
+
+    def deriv(h, y):
+        v, mass_ratio = y
+        r = np.exp(np.interp(h, hts, log_rho))
+        mass_ratio = max(mass_ratio, 1e-12)
+        return [b_e*mass_ratio**(-1/3)*r*v/np.sin(slope), sigma*b_e*mass_ratio**(2/3)*r*v**2/np.sin(slope)]
+
+    sol = scipy.integrate.solve_ivp(deriv, [200e3, 20e3], [v_e, 1.0], dense_output=True, rtol=1e-10, atol=1e-12,
+        max_step=200)
+    h_lc = np.linspace(85e3, 45e3, 40)
+    v, mass_ratio = sol.sol(h_lc)
+    r = np.exp(np.interp(h_lc, hts, log_rho))
+
+    # -d(m v^2/2)/dt per unit mass and tau, with dv/dt = -B rho v^2 and dm/dt = -sigma B m rho v^3
+    lum = b_e*mass_ratio**(2/3)*r*v**3*(sigma*v**2/2 + 1)
+    mag_true = -2.5*np.log10(lum)
+
+    ht_column = exponentialAtmosphereHeights(h_lc, hts, rho, method="column")
+    ratio = exponentialAtmosphereDensityRatio(h_lc, hts, rho, method="column")
+    mag_model, _ = alphaBetaModelMagnitude(ht_column/HT_NORM_CONST, b_e*RHO_ATM_0*HT_NORM_CONST/np.sin(slope),
+        sigma*v_e**2/6, 2/3.0)
+
+    def shapeError(mag):
+        diff = mag - mag_true
+        return np.max(np.abs(diff - np.mean(diff)))
+
+    assert shapeError(mag_model - 2.5*np.log10(ratio)) < 0.01
+    assert shapeError(mag_model) > 0.05
+
+    # With the density mapping the ratio is 1
+    assert np.allclose(exponentialAtmosphereDensityRatio(h_lc, hts, rho, method="density"), 1.0)
+
+
 if __name__ == "__main__":
 
     # Standalone runner so the tests can be executed without pytest installed
@@ -1925,6 +1969,7 @@ if __name__ == "__main__":
         testEntryVelocityWithGravityUndoesTheGravityAboveTheFirstPoint,
         testFreeInitialVelocityIsNotPinnedByAnOutlierAtTheTop,
         testResidualTrendFlagsAFragmentationNotNoise,
+        testLightCurveNeedsTheDensityRatioWithTheColumnMapping,
     ]
 
     failed = 0
