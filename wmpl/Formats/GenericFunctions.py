@@ -293,6 +293,10 @@ def solveTrajectoryGeneric(jdt_ref, meteor_list, dir_path, solver='original', **
     # Solve the trajectory
     traj = traj.run()
 
+    # Keep the solver options, so that other trajectories (e.g. of other fragments) can be solved with them
+    if traj is not None:
+        traj.solver_kwargs = dict(kwargs, solver=solver)
+
     return traj
 
 

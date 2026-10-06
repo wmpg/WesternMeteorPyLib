@@ -6829,6 +6829,11 @@ class Trajectory(object):
 
         # Return the best trajectory
         if self.monte_carlo:
+
+            # Keep the Monte Carlo trajectories in memory, so that other quantities can be propagated through 
+            #   them (they are not in the saved pickles)
+            traj_best.mc_traj_list = uncertainties.mc_traj_list if (uncertainties is not None) else []
+
             return traj_best
 
         else:
