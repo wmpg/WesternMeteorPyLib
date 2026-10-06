@@ -327,10 +327,6 @@ def expLinearVelocity(t, v0, a1, a2, t0, decel):
 def lagFitVelocity(time_data, lag_data, vel_data, v0, seed=0):
     """ Fit a smooth model to the lag data, to improve the alpha-beta fit.
 
-    The smoothed velocity, v0 - |a1 a2| exp(|a2| t) and then decreasing, never exceeds v0, so for a meteor already
-    decelerating at its first point, where the trajectory's v0 is low, it is low too: do not fit the initial
-    velocity on it (see fitAlphaBeta(fit_v_init=True)).
-
     Keyword arguments:
         seed: [int or None] Random seed for the basinhopping global optimizer, so that repeated runs
             on the same data give the same fit. None draws a fresh seed on every call.
