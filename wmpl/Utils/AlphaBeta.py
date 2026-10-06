@@ -5819,6 +5819,14 @@ if __name__ == "__main__":
         "of the fit of the lag. Propagates the fitted (ln alpha, ln beta) covariance into the masses, and "
         "draws an uncertainty ellipse on the survival diagram.")
 
+    arg_parser.add_argument('--slopeunc', metavar='SLOPE_UNC', type=float, default=None, \
+        help="1-sigma uncertainty on the entry slope, in DEGREES, folded into the mass error "
+        "estimate when --errors is set. Default: the slope is treated as exactly known.")
+
+    arg_parser.add_argument('--densunc', metavar='DENS_UNC', type=float, default=None, \
+        help="1-sigma uncertainty on the bulk density, in kg/m^3, folded into the mass error "
+        "estimate when --errors is set. Default: the density is treated as exactly known.")
+
     arg_parser.add_argument('--fitvinit', action="store_true", \
         help="Fit the initial velocity together with alpha and beta (robust fit, on the observed velocities, "
         "as the lag-smoothed ones never exceed the trajectory's initial velocity), starting from the "
@@ -5832,14 +5840,6 @@ if __name__ == "__main__":
         "to the height with the same air column above, which the alpha-beta solution depends on; or 'density', "
         "to the height with the same local density, as before, which biases alpha and beta where the local "
         "scale height differs from 7.16 km.")
-
-    arg_parser.add_argument('--slopeunc', metavar='SLOPE_UNC', type=float, default=None, \
-        help="1-sigma uncertainty on the entry slope, in DEGREES, folded into the mass error "
-        "estimate when --errors is set. Default: the slope is treated as exactly known.")
-
-    arg_parser.add_argument('--densunc', metavar='DENS_UNC', type=float, default=None, \
-        help="1-sigma uncertainty on the bulk density, in kg/m^3, folded into the mass error "
-        "estimate when --errors is set. Default: the density is treated as exactly known.")
 
     arg_parser.add_argument('-x', '--hideplots', action="store_true", \
         help="Don't show the plots on the screen. Combine with --saveplots to only write them to disk.")
