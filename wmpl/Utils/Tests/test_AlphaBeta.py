@@ -25,14 +25,14 @@ import matplotlib
 matplotlib.use("Agg")  # headless - plotAlphaBeta() tests must not require a display or block
 import matplotlib.pyplot as plt
 
+from wmpl.Utils.AlphaBeta import (exponentialAtmosphereHeights, alphaBetaEntryVelocityWithGravity,
+    alphaBetaResidualTrend, exponentialAtmosphereDensityRatio, RHO_ATM_0, RESIDUAL_TREND_SIGMA)
 from wmpl.Utils.AlphaBeta import (fitAlphaBetaMass, fitAlphaBeta, fitAlphaBetaLightCurve,
     alphaBetaMasses, alphaBetaVelocity, alphaBetaHeight, alphaBetaVelocityNormed,
     alphaBetaVelocityNormedLUT, alphaBetaHeightNormed, alphaBetaLuminosityF,
     alphaBetaModelMagnitude, alphaBetaLuminousEfficiency, plotAlphaBeta, plotProfileAlphaBeta,
     plotAlphaBetaSurvivalDiagram, profileAlphaBeta, _profiledMagOffset, _gaussianEllipsePoints,
-    getDefaultInverseEiLUT, fitAlphaBetaLag, exponentialAtmosphereHeights, alphaBetaEntryVelocityWithGravity,
-    alphaBetaResidualTrend, exponentialAtmosphereDensityRatio, HT_NORM_CONST, P_0M, ALPHA_BETA_BOUNDS, RHO_ATM_0,
-    RESIDUAL_TREND_SIGMA)
+    getDefaultInverseEiLUT, fitAlphaBetaLag, HT_NORM_CONST, P_0M, ALPHA_BETA_BOUNDS)
 
 
 # True parameters used to generate the synthetic trajectory. The height range is chosen so the
