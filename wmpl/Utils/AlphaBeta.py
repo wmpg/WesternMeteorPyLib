@@ -246,7 +246,7 @@ def exponentialAtmosphereDensityRatio(ht_data, profile_hts, profile_dens, method
 
 
 def rescaleHeightToExponentialAtmosphere(lat, lon, ht_data, jd, method="column", return_density_ratio=False):
-    """ Given observed heights, rescale them from the real NRLMSISE model to the simplified exponential
+    """ Given observed heights, rescale them from the real MSIS atmosphere to the simplified exponential
         atmosphere model used by the Alpha-Beta procedure (see exponentialAtmosphereHeights()).
 
     Arguments:
