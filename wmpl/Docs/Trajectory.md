@@ -43,6 +43,36 @@ To see the solver working on a synthetic example without any data of your own:
 python -m wmpl.Trajectory.Trajectory
 ```
 
+### Additional fragments in ECSV files
+
+ECSV files can describe more fragments than the main one, as in Appendix 4 of the GFE standard: one row
+per frame, with the columns of each additional fragment carrying its number as a suffix (`datetime1`,
+`ra1`, `dec1`, `azimuth1`, `altitude1`, ...), empty on the frames where it was not measured. The main
+fragment, fragment 0, is always solved from the columns without a suffix (or with the optional suffix 0),
+leaving out its points with `trajectory_use` = False (e.g. saturated flares kept in the file).
+
+```
+python -m wmpl.Formats.ECSV /path/to/event/*.ecsv --fragments
+```
+
+| Flag | Description |
+| :--- | :--- |
+| `--fragments` | After the main fragment, solve every additional fragment seen from at least 2 stations with the same options (Monte Carlo included), save each one in a `fragment_k` folder of the output directory, and print how it differs from the main one: radiant, velocities, heights, distance from the main path and how far ahead of the main fragment it is at the same time. |
+| `--fragtimefit` | Estimate the station time offsets for every fragment, instead of reusing those of the main trajectory, which its larger number of points constrains better. |
+
+Two solutions differ slightly even for identical data, as each goes through its own iterations of the
+timing and velocity estimation: in tests, by about 0.001 deg and tens of metres with well spread stations,
+and up to about 0.1 deg and a few hundred metres with nearly parallel ones. With the Monte Carlo runs, the
+solutions compared are still those with the original picks (not the best Monte Carlo runs, which differ by
+about 1 sigma even for identical data), and the differences are also given in units of the combined
+uncertainty. The time offsets reused by the fragments are also those of the main solution with the original
+picks, the ones in its report.
+
+If the solver fits the initial velocity with a drag and ablation model, it does so for every fragment from its
+own first point, so the velocity of a fragment is the one at its first point, and a height limit of the fit
+leaves out the fragments that appear below it, which keep the straight line. The comparison says which method
+every solution used.
+
 ## The trajectory pickle
 
 A successful run writes `<event>_trajectory.pickle` (plus plots and a text report) into the output
