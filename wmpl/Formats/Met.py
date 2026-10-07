@@ -11,6 +11,7 @@ import numpy as np
 import scipy.stats
 import matplotlib.pyplot as plt
 
+from wmpl.Utils.AtmosphereDensity import setAtmosphere
 from wmpl.Formats.GenericFunctions import addSolverOptions
 from wmpl.Formats.Plates import AffPlate, AstPlate, plateExactMap, plateScaleMap
 from wmpl.Trajectory.Trajectory import Trajectory
@@ -844,6 +845,9 @@ if __name__ == "__main__":
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
+
+    # Atmosphere model for any density the solver evaluates, also in its Monte Carlo processes
+    setAtmosphere(cml_args)
 
     #########################
 

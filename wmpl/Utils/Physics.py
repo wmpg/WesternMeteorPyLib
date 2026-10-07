@@ -66,7 +66,7 @@ def dynamicPressure(lat, lon, height, jd, velocity, gamma=1.0):
     return dyn_pressure
 
 
-def dynamicMass(bulk_density, lat, lon, height, jd, velocity, decel, gamma=1.0, shape_factor=1.21):
+def dynamicMass(bulk_density, lat, lon, height, jd, velocity, decel, gamma=1.0, shape_factor=1.21, atm_dens=None):
     """ Calculate dynamic mass at the given point on meteor's trajectory. 
     
     Either a single set of values can be given (i.e. every argument is a float number), or all arguments 
@@ -88,6 +88,8 @@ def dynamicMass(bulk_density, lat, lon, height, jd, velocity, decel, gamma=1.0, 
             - hemisphere  = 1.92
             - cube        = 1.0
             - brick 2:3:5 = 1.55
+        atm_dens: [float] Air density at the point in kg/m^3. None by default, in which case it is computed
+            from the atmosphere model at the given location and time.
 
     Return:
         dyn_mass: [float] Dynamic mass in kg.
@@ -95,8 +97,9 @@ def dynamicMass(bulk_density, lat, lon, height, jd, velocity, decel, gamma=1.0, 
 
     """
 
-    # Calculate the atmosphere density at the given point
-    atm_dens = getAtmDensity_vect(lat, lon, height, jd)
+    # Calculate the atmosphere density at the given point, unless it was given
+    if atm_dens is None:
+        atm_dens = getAtmDensity_vect(lat, lon, height, jd)
 
     # Calculate the dynamic mass
     dyn_mass = (1.0/(bulk_density**2))*((gamma*shape_factor*(velocity**2)*atm_dens)/decel)**3
@@ -456,7 +459,7 @@ def calcPE(mass, rho_e=None, zangle=None, v_0=None, traj=None):
         v_0: [float] Initial (entry) velocity V_inf (m/s). Cannot be given together with traj.
         traj: [Trajectory] Optional solved WMPL Trajectory. If given, rho_e, zangle and v_0 are
             derived from it instead of being passed explicitly:
-                - rho_e  <- getAtmDensity_vect at the end point (NRLMSISE-00, kg/m^3)
+                - rho_e  <- getAtmDensity_vect at the end point (MSIS, kg/m^3)
                 - zangle <- pi/2 - traj.orbit.elevation_apparent_norot (rad)
                 - v_0    <- traj.v_init (m/s)
 
@@ -607,7 +610,7 @@ if __name__ == "__main__":
         [30000.0, -4.03,    'I'],
         [45000.0, -4.97,   'II'],
         [54000.0, -5.43, 'IIIa'],
-        [63000.0, -5.92, 'IIIb'],
+        [63000.0, -5.91, 'IIIb'],
     ]
 
     for ht_end, pe_expected, group_expected in pe_table:
