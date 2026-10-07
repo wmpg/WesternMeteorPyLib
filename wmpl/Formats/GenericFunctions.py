@@ -459,4 +459,7 @@ def addSolverOptions(arg_parser, skip_velpart=False):
     arg_parser.add_argument('-o', '--enableOSM', 
         help="Enable OSM based groung plots. Internet connection required.", action="store_true")
 
+    arg_parser.add_argument('-k', '--kml', 
+        help="Save a 3D KML (*_3D.kml) with projected points, lines of sight and residuals.", action="store_true")
+
     return arg_parser
