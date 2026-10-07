@@ -32,7 +32,8 @@ from wmpl.MetSim.GUITools import MatplotlibPopupWindow
 from wmpl.MetSim.MetSimErosion import runSimulation, Constants, zenithAngleAtSimulationBegin
 from wmpl.Trajectory.Trajectory import Trajectory, ObservedPoints, PlaneIntersection
 from wmpl.Trajectory.Orbit import calcOrbit, Orbit
-from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensity, atmDensPoly
+from wmpl.Utils.AtmosphereDensity import fitAtmPoly, getAtmDensity, atmDensPoly, getAtmDensityTable, \
+    atmDensTable
 from wmpl.Utils.Math import mergeClosePoints, findClosestPoints, vectMag, vectNorm, lineFunc, meanAngle
 from wmpl.Utils.Physics import calcMass, dynamicPressure, calcRadiatedEnergy
 from wmpl.Utils.Pickling import loadPickle, savePickle
@@ -1535,6 +1536,11 @@ def saveConstants(const, dir_path, file_name):
     if isinstance(const.dens_co, np.ndarray):
         const.dens_co = const.dens_co.tolist()
 
+    # Convert the density table to lists
+    for table_key in ['atm_table_ht', 'atm_table_log10_rho']:
+        if isinstance(getattr(const, table_key, None), np.ndarray):
+            setattr(const, table_key, getattr(const, table_key).tolist())
+
     # Remove fragments from entries because they can't be saved in JSON
     for frag_entry in const.fragmentation_entries:
         del frag_entry.fragments
@@ -2992,9 +2998,10 @@ class MetSimGUI(QMainWindow):
         if self.dens_fit_ht_end < 14000:
             self.dens_fit_ht_end = 14000
 
-        # Fit the polynomail describing the density
-        dens_co = self.fitAtmosphereDensity(self.dens_fit_ht_beg, self.dens_fit_ht_end)
+        # Fit the polynomial describing the density and tabulate the density (the simulation uses the table)
+        dens_co, atm_table = self.fitAtmosphereDensity(self.dens_fit_ht_beg, self.dens_fit_ht_end)
         self.const.dens_co = dens_co
+        self.const.atm_table_ht, self.const.atm_table_log10_rho = atm_table
 
         print("Atmospheric mass density fit for the range of heights: {:.2f} - {:.2f} km".format(\
             self.dens_fit_ht_end/1000, self.dens_fit_ht_beg/1000))
@@ -3113,11 +3120,15 @@ class MetSimGUI(QMainWindow):
 
 
     def fitAtmosphereDensity(self, dens_fit_ht_beg, dens_fit_ht_end):
-        """ Fit the atmosphere density coefficients for the given day and location. 
+        """ Fit the atmosphere density coefficients and tabulate the density for the given day and location. 
         
         Arguments:
             dens_fit_ht_beg: [float] Begin height (top) for which the fit is valid (meters).
             dens_fit_ht_end: [float] End height - bottom (meters).
+
+        Return:
+            (dens_co, (atm_table_ht, atm_table_log10_rho)): Polynomial coefficients and the density table,
+                see fitAtmPoly and getAtmDensityTable.
 
         """
 
@@ -3125,7 +3136,10 @@ class MetSimGUI(QMainWindow):
         lat_mean = np.mean([self.traj.rbeg_lat, self.traj.rend_lat])
         lon_mean = meanAngle([self.traj.rbeg_lon, self.traj.rend_lon])
 
-        return fitAtmPoly(lat_mean, lon_mean, dens_fit_ht_end, dens_fit_ht_beg, self.traj.jdt_ref)
+        dens_co = fitAtmPoly(lat_mean, lon_mean, dens_fit_ht_end, dens_fit_ht_beg, self.traj.jdt_ref)
+        atm_table = getAtmDensityTable(lat_mean, lon_mean, dens_fit_ht_end, dens_fit_ht_beg, self.traj.jdt_ref)
+
+        return dens_co, atm_table
     
     def computeSimZenithAngle(self):
         """ Compute the zenith angle at the beginning of the simulation, taking Earth's curvature into 
@@ -5269,9 +5283,19 @@ class MetSimGUI(QMainWindow):
         self.mpw.canvas.axes.semilogx(atm_densities, height_arr/1000, \
             label="NRLMSISE-00", color='k')
 
+        # Plot the density table used by the simulation (if any)
+        if getattr(self.const, 'atm_table_ht', None) is not None:
+            atm_densities_table = atmDensTable(height_arr, self.const.atm_table_ht, 
+                self.const.atm_table_log10_rho)
+            self.mpw.canvas.axes.semilogx(atm_densities_table, height_arr/1000, \
+                label="Table (used by the simulation)", color='tab:blue', linestyle="dotted")
+            poly_label = "Polynomial fit (not used)"
+        else:
+            poly_label = "Polynomial fit"
+
         # Poly poly fit
         self.mpw.canvas.axes.semilogx(atm_densities_poly, height_arr/1000, \
-            label="Polynomial fit", color='red', linestyle="dashed")
+            label=poly_label, color='red', linestyle="dashed")
 
 
         self.mpw.canvas.axes.legend()
