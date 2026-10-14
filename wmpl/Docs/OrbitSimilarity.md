@@ -170,7 +170,7 @@ not reproduce the paper's table 1.
 
 **`wmpl.Utils.ParentBodySearch`** ranks the comets, asteroids and meteorites with orbits of the
 catalogues by similarity to an orbit. Any key of this module can be used there, the ones on the
-elements and the ones on the geocentric radiant (D_N, D_R, D_X) alike.
+elements, the ones on the geocentric radiant (D_N, D_R, D_X) and the Vida D_V alike.
 
 ```
 python -m wmpl.Utils.ParentBodySearch traj.pickle -d DSH DN DD
@@ -189,6 +189,11 @@ python -m wmpl.Utils.ParentBodySearch traj.pickle -d DSH DN DD
   for uses its measured radiant if it has one (a pickle, or `--ra --dec --sol --vg`) and the
   derived one otherwise. For Phaethon the derived radiant is 1.6 deg and 0.4 km/s from the
   Geminids.
+- **The Vida criterion** (`DVVIDA`), on the corrected heliocentric direction and speed, works the same
+  way: `calcHeliocentricFromElements` takes the heliocentric velocity at the same points, in the
+  convention of `correctedEclipticCoord`, which the tests check it against. The orbit searched for
+  uses `L_h`, `B_h`, `v_h` from the pickle, or the radiant given by hand converted with
+  `calcHeliocentricFromGeocentric`.
 - **Epoch.** The ranking uses the catalogue elements as they are, each at its own epoch. `--propagate`
   does not change it. It brings the top N bodies to the reference epoch of the meteor, with
   the Sun and the planets from DE430 and no non-gravitational forces, and lists and saves their elements and

@@ -20,7 +20,9 @@ import tempfile
 import numpy as np
 
 import wmpl.Utils.ParentBodySearch as pbs
-from wmpl.Utils.Dcriteria import calcGeocentricFromElements, calcDN, calcDSH, SPEED_EARTH
+from wmpl.Utils.Dcriteria import (calcGeocentricFromElements, calcHeliocentricFromElements,
+    calcHeliocentricFromGeocentric, calcDN, calcDV, SPEED_EARTH)
+from wmpl.Utils.TrajConversions import correctedEclipticCoord
 
 
 # The Geminid shower radiant at its peak and the elements of (3200) Phaethon, its parent body
@@ -354,6 +356,71 @@ def test_loaders_read_the_epoch_and_the_mean_anomaly():
         assert a[0] == "2026 SB"
         assert a[8] == 344.8
         assert abs(a[7] - pbs._calendarToJD(2026, 6, 9)) < 1e-9
+
+
+def test_heliocentric_from_elements_follows_the_wmpl_convention():
+    """ The corrected heliocentric direction derived from the elements has to be what
+        correctedEclipticCoord, which the trajectory solver uses, makes of the derived geocentric
+        radiant, and the same as converting that radiant directly. """
+
+    eps = 0.40909280
+
+    for q, e, i, node, peri in ((0.14, 0.89, 22.25, 265.2, 322.2), (0.5749, 0.96794, 162.19, 59.1, 112.24),
+                                (0.5, 0.6, 2.0, 10.0, 40.0)):
+
+        el = (q, e, np.radians(i), np.radians(node), np.radians(peri))
+
+        geo = calcGeocentricFromElements(*el)
+        helio = calcHeliocentricFromElements(*el)
+
+        assert len(geo) == len(helio) >= 1
+
+        for (ra, dec, sol, vg), (l_h, b_h, sol_h, v_h) in zip(geo, helio):
+
+            x, y, z = np.cos(dec)*np.cos(ra), np.cos(dec)*np.sin(ra), np.sin(dec)
+            l_g = np.arctan2(y*np.cos(eps) + z*np.sin(eps), x)
+            b_g = np.arcsin(-y*np.sin(eps) + z*np.cos(eps))
+
+            lon = sol - np.pi
+            earth_vel = SPEED_EARTH*np.array([-np.sin(lon), np.cos(lon), 0.0])
+
+            l_ref, b_ref, v_ref = correctedEclipticCoord(l_g, b_g, vg, earth_vel)
+
+            assert abs(l_h - l_ref) < 1e-9
+            assert abs(b_h - b_ref) < 1e-9
+            assert abs(v_h - np.linalg.norm(v_ref)) < 1e-9
+            assert sol_h == sol
+
+            assert np.allclose(calcHeliocentricFromGeocentric(ra, dec, sol, vg), (l_h, b_h, sol_h, v_h),
+                atol=1e-9)
+
+
+def test_vida_criterion_is_offered_and_uses_the_heliocentric_direction():
+
+    search = _search(['DVVIDA', 'DSH'], top_n=-1)
+
+    assert search['labels'] == ['D_V (Vida)', 'D_SH']
+    assert search['heliocentric_source'] == 'elements'
+    assert search['geocentric_source'] is None
+    assert search['matches'][0]['name'] == 'Phaethon'
+
+    query = search['query_heliocentric']
+
+    for m in search['matches']:
+
+        body = calcHeliocentricFromElements(m['q'], m['e'], np.radians(m['incl']),
+            np.radians(m['node']), np.radians(m['peri']))
+
+        expected = min(calcDV(*(h1 + h2)) for h1 in query for h2 in body)
+
+        assert abs(m['d_values'][0] - expected) < 1e-12
+
+    # A given direction is used instead
+    given = calcHeliocentricFromGeocentric(*GEMINID_RADIANT)
+    search = _search(['DVVIDA'], top_n=1, heliocentric=given)
+
+    assert search['heliocentric_source'] == 'given'
+    assert search['query_heliocentric'] == [given]
 
 
 if __name__ == "__main__":

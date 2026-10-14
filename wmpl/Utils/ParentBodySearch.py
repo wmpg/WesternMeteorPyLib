@@ -42,8 +42,9 @@ import datetime
 import numpy as np
 
 from wmpl.Config import config
-from wmpl.Utils.Dcriteria import (ELEMENT_CRITERIA_KEYS, GEOCENTRIC_CRITERIA_KEYS, getElementCriterion,
-    getGeocentricCriterion, calcGeocentricFromElements)
+from wmpl.Utils.Dcriteria import (ELEMENT_CRITERIA_KEYS, GEOCENTRIC_CRITERIA_KEYS,
+    HELIOCENTRIC_CRITERIA_KEYS, getElementCriterion, getGeocentricCriterion, getHeliocentricCriterion,
+    calcGeocentricFromElements, calcHeliocentricFromElements, calcHeliocentricFromGeocentric)
 from wmpl.Utils.OrbitConstants import GAUSS_K
 from wmpl.Utils.Pickling import loadPickle
 
@@ -260,31 +261,40 @@ if os.path.isfile(config.meteorites_orbit_file):
     meteorites_elements = loadMeteoritesElements(config.meteorites_orbit_file)
 
 
+# Every criterion key this module takes
+ALL_CRITERIA_KEYS = ELEMENT_CRITERIA_KEYS + GEOCENTRIC_CRITERIA_KEYS + HELIOCENTRIC_CRITERIA_KEYS
+
+# What each kind of criterion compares, and how a body that has only its elements gets it
+_DERIVED_FROM_ELEMENTS = {
+    'geocentric': calcGeocentricFromElements,
+    'heliocentric': calcHeliocentricFromElements,
+    }
+
+
 def lookupCriterion(key):
-    """ Look up a D criterion by its key among the criteria on the orbital elements and those on the
-        geocentric radiant of wmpl.Utils.Dcriteria.
+    """ Look up a D criterion by its key among the criteria of wmpl.Utils.Dcriteria: on the orbital
+        elements, on the geocentric radiant, and on the corrected heliocentric direction.
 
     Arguments:
-        key: [str] Key of the criterion, such as 'DSH' or 'DN', not case sensitive.
+        key: [str] Key of the criterion, such as 'DSH', 'DN' or 'DVVIDA', not case sensitive.
 
     Return:
-        [tuple] (key in upper case, label, function, True if it takes the geocentric radiant).
+        [tuple] (key in upper case, label, function, kind), the kind being 'elements', 'geocentric'
+            or 'heliocentric'.
     """
 
-    try:
-        label, func = getElementCriterion(key)
-        return key.upper(), label, func, False
+    for kind, getter in (('elements', getElementCriterion), ('geocentric', getGeocentricCriterion),
+        ('heliocentric', getHeliocentricCriterion)):
 
-    except ValueError:
-        pass
+        try:
+            label, func = getter(key)
+            return key.upper(), label, func, kind
 
-    try:
-        label, func = getGeocentricCriterion(key)
-        return key.upper(), label, func, True
+        except ValueError:
+            pass
 
-    except ValueError:
-        raise ValueError("Unknown criterion {:s}. Available: {:s}.".format(key,
-            ", ".join(ELEMENT_CRITERIA_KEYS + GEOCENTRIC_CRITERIA_KEYS)))
+    raise ValueError("Unknown criterion {:s}. Available: {:s}.".format(key,
+        ", ".join(ALL_CRITERIA_KEYS)))
 
 
 def _resolveCriteria(d_crit):
@@ -315,18 +325,19 @@ def _resolveCriteria(d_crit):
     return criteria
 
 
-def _geocentricMin(func, geo_list1, geo_list2):
-    """ Value of a geocentric criterion between two orbits, each of which may cut the Earth's orbit in
-        two places: the smallest value over the pairs, and infinity if either orbit does not reach 1 AU.
+def _radiantMin(func, list1, list2):
+    """ Value of a criterion on the radiant between two orbits, each of which may meet the Earth's
+        orbit in two places: the smallest value over the pairs, and infinity if either orbit does
+        not reach 1 AU.
     """
 
-    values = [float(func(g1, g2)) for g1 in geo_list1 for g2 in geo_list2]
+    values = [float(func(g1, g2)) for g1 in list1 for g2 in list2]
 
     return min(values) if values else np.inf
 
 
 def searchParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10, meteorites=False,
-    geocentric=None):
+    geocentric=None, heliocentric=None):
     """ Compares the given orbit to the orbit of asteroids and comets from the database using the given
         D criteria and returns the top N best matches, ranked by the first criterion.
 
@@ -341,7 +352,8 @@ def searchParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10, meteorite
         d_crit: [str or list] Key of the D criterion function, or a list of keys, not case
             sensitive. The bodies are ranked by the first key and the values of the others are
             carried along. Warning: the keys are not defined here. They are those of
-            wmpl.Utils.Dcriteria, ELEMENT_CRITERIA and GEOCENTRIC_CRITERIA, which the command line
+            wmpl.Utils.Dcriteria, ELEMENT_CRITERIA, GEOCENTRIC_CRITERIA and HELIOCENTRIC_CRITERIA,
+            which the command line
             of that module offers through -c, so a key means the same criterion and prints the same
             label in both, and editing them there changes them here. The criteria that read only
             part of the orbit, D_T from the Tisserand parameter and D_SAC without a node or a
@@ -350,40 +362,47 @@ def searchParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10, meteorite
             body of the catalogues has only its elements, so its radiant is derived from them at the
             place where its orbit comes within 0.05 AU of the Earth's, or comes closest to it (see
             wmpl.Utils.Dcriteria.calcGeocentricFromElements), and a body that does not reach 1 AU has an
-            infinite value, which excludes it if the criterion is the first one.
+            infinite value, which excludes it if the criterion is the first one. The Vida
+            criterion (DVVIDA), on the corrected heliocentric direction, gets it from the same
+            place with calcHeliocentricFromElements.
         top_n: [int] How many objects with the highest orbit similarity will be returned. 10 is default.
             If -1 is given, the whole list of bodies will be returned.
         meteorites: [bool] Use known orbits of meteorites for comparison instead of comets and asteroids.
         geocentric: [tuple] (ra, dec, solar longitude (radians), geocentric speed (km/s)) of the given
             orbit, for the criteria on the radiant. If None, they are derived from its elements.
+        heliocentric: [tuple] (Lh, Bh, solar longitude (radians), heliocentric speed (km/s)) of the
+            given orbit, the corrected heliocentric direction of the Vida criterion. If None, they are
+            derived from its elements.
 
     Return:
         [dict] 'keys' and 'labels' of the criteria used, in order; 'query_geocentric', a list of
             the radiants of the given orbit that the criteria on the radiant used; 'geocentric_source',
-            'given', 'elements' or None; 'matches', a list of dictionaries sorted by the first
+            'given', 'elements' or None; 'query_heliocentric' and 'heliocentric_source', the same for
+            the Vida criterion; 'matches', a list of dictionaries sorted by the first
             criterion with 'name', 'q', 'e', 'incl', 'peri', 'node' (degrees), 'h_mag',
             'd_values' (a value per criterion, in order), and 'epoch_jd' and 'mean_anomaly' (deg) of the
             catalogue elements, which are None if the catalogue does not give them.
     """
 
     criteria = _resolveCriteria(d_crit)
-    need_geocentric = any(c[3] for c in criteria)
 
     query = (q, e, incl, node, peri)
 
-    # Radiant of the given orbit, for the criteria that need one
-    query_geo = []
-    geocentric_source = None
+    # Radiant of the given orbit for each kind of criterion that needs one, the given one if there
+    #   is one, otherwise derived from the elements
+    given = {'geocentric': geocentric, 'heliocentric': heliocentric}
+    query_radiants = {'geocentric': [], 'heliocentric': []}
+    sources = {'geocentric': None, 'heliocentric': None}
 
-    if need_geocentric:
+    for kind in set(c[3] for c in criteria if c[3] != 'elements'):
 
-        if geocentric is not None:
-            query_geo = [tuple(geocentric)]
-            geocentric_source = 'given'
+        if given[kind] is not None:
+            query_radiants[kind] = [tuple(given[kind])]
+            sources[kind] = 'given'
 
         else:
-            query_geo = calcGeocentricFromElements(q, e, incl, node, peri)
-            geocentric_source = 'elements'
+            query_radiants[kind] = _DERIVED_FROM_ELEMENTS[kind](q, e, incl, node, peri)
+            sources[kind] = 'elements'
 
 
     # Use meteorite orbits instead of comets and asteroids
@@ -411,22 +430,21 @@ def searchParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10, meteorite
         node2 = np.radians(node2)
 
         body_orbit = (q2, e2, incl2, node2, peri2)
-        body_geo = None
+        body_radiants = {}
 
         values = []
 
         # Calculate the D criteria between the body and the meteoroid
-        for _, _, dFunc, is_geo in criteria:
+        for _, _, dFunc, kind in criteria:
 
-            if is_geo:
-
-                if body_geo is None:
-                    body_geo = calcGeocentricFromElements(*body_orbit)
-
-                values.append(_geocentricMin(dFunc, query_geo, body_geo))
-
-            else:
+            if kind == 'elements':
                 values.append(float(dFunc(query, body_orbit)))
+                continue
+
+            if kind not in body_radiants:
+                body_radiants[kind] = _DERIVED_FROM_ELEMENTS[kind](*body_orbit)
+
+            values.append(_radiantMin(dFunc, query_radiants[kind], body_radiants[kind]))
 
         # A criterion written in terms of the semi-major axis is infinite against the parabolic
         #   orbits in the comet catalogue, and such a body is not a match under it. The same holds
@@ -464,11 +482,13 @@ def searchParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10, meteorite
 
 
     return {'keys': [c[0] for c in criteria], 'labels': [c[1] for c in criteria],
-        'query_geocentric': query_geo, 'geocentric_source': geocentric_source, 'matches': matches}
+        'query_geocentric': query_radiants['geocentric'], 'geocentric_source': sources['geocentric'],
+        'query_heliocentric': query_radiants['heliocentric'],
+        'heliocentric_source': sources['heliocentric'], 'matches': matches}
 
 
 def findParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10, meteorites=False,
-    geocentric=None):
+    geocentric=None, heliocentric=None):
     """ Compares the given orbit to the orbit of asteroids and comets from the database using the given
         D criterion function and returns top N best matches.
 
@@ -482,7 +502,7 @@ def findParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10, meteorites=
     """
 
     search = searchParentBodies(q, e, incl, peri, node, d_crit=d_crit, top_n=top_n,
-        meteorites=meteorites, geocentric=geocentric)
+        meteorites=meteorites, geocentric=geocentric, heliocentric=heliocentric)
 
     return [[m['name'], m['q'], m['e'], m['incl'], m['peri'], m['node'], m['h_mag']] + m['d_values'] \
         for m in search['matches']]
@@ -801,6 +821,7 @@ def saveMatches(file_path, search, meteor=None, propagated=None):
 
         out = {'meteor': meteor, 'criteria': search['labels'], 'ranked_by': search['labels'][0],
             'geocentric_source': search['geocentric_source'],
+            'heliocentric_source': search['heliocentric_source'],
             'frame': 'heliocentric ecliptic J2000, AU and AU/day' if propagated is not None else None,
             'matches': matches}
 
@@ -921,6 +942,9 @@ if __name__ == "__main__":
   --vg, and where they are missing they are derived from the elements. The bodies of the
   catalogues have only elements, so theirs are always derived where their orbit comes within 0.05 AU
   of the Earth's, or comes closest to it, and a body that does not reach 1 AU has no value (n/a).
+  The Vida criterion (DVVIDA) takes the corrected heliocentric direction and speed instead. A
+  pickle has them, a radiant given by hand is converted to them, and otherwise they are derived
+  from the elements at the same place.
 
   The ranking uses the catalogue elements as they are. --propagate does not change it: it brings the
   top N to the reference epoch of the meteor, to be used as initial conditions of a REBOUND integration.
@@ -958,7 +982,7 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-d', '--dcrit', metavar='D_CRIT', nargs='+', help="D criterion type, 'DSH' by "
         "default. One or more keys, case insensitive: "
-        + ", ".join(ELEMENT_CRITERIA_KEYS + GEOCENTRIC_CRITERIA_KEYS) + ". With several the bodies are "
+        + ", ".join(ALL_CRITERIA_KEYS) + ". With several the bodies are "
         "ranked by the first. DT and DSAC read only part of the orbit and rank "
         "large numbers of bodies equally, so they say little in a search. The keys are those the "
         "Dcriteria command line takes.", \
@@ -997,6 +1021,7 @@ if __name__ == "__main__":
 
     # If the trajectory pickle was given, load the orbital elements from it
     geocentric = None
+    heliocentric = None
     jd_ref = cml_args.jd
 
     if cml_args.traj_path is not None:
@@ -1016,6 +1041,10 @@ if __name__ == "__main__":
 
         if all(v is not None for v in (orbit.ra_g, orbit.dec_g, orbit.la_sun, orbit.v_g)):
             geocentric = (orbit.ra_g, orbit.dec_g, orbit.la_sun, orbit.v_g/1000.0)
+
+        # The corrected heliocentric direction and speed, for the Vida criterion
+        if all(getattr(orbit, name, None) is not None for name in ('L_h', 'B_h', 'la_sun', 'v_h')):
+            heliocentric = (orbit.L_h, orbit.B_h, orbit.la_sun, orbit.v_h/1000.0)
 
         if (jd_ref is None) and (getattr(traj, 'jdt_ref', None) is not None):
             jd_ref = traj.jdt_ref
@@ -1039,6 +1068,9 @@ if __name__ == "__main__":
             if all(v is not None for v in radiant):
                 geocentric = (np.radians(radiant[0]), np.radians(radiant[1]), np.radians(radiant[2]),
                     radiant[3])
+
+                # The Vida criterion uses the same measured radiant, not the elements
+                heliocentric = calcHeliocentricFromGeocentric(*geocentric)
 
             elif any(v is not None for v in radiant):
                 print("The radiant needs --ra, --dec, --sol and --vg all together!")
@@ -1082,37 +1114,50 @@ if __name__ == "__main__":
 
     # Find parent bodies for the given orbit
     search = searchParentBodies(q, e, np.radians(incl), np.radians(peri), np.radians(node), \
-        d_crit=d_crit_keys, top_n=cml_args.top_n, meteorites=cml_args.meteorites, geocentric=geocentric)
+        d_crit=d_crit_keys, top_n=cml_args.top_n, meteorites=cml_args.meteorites, geocentric=geocentric,
+        heliocentric=heliocentric)
 
     labels = search['labels']
     matches = search['matches']
 
 
-    if search['geocentric_source'] is not None:
+    # The radiant of the given orbit that each kind of criterion on the radiant used
+    for kind, keys, line in (
+        ('geocentric', GEOCENTRIC_CRITERIA_KEYS,
+            "  RA = {:.3f} deg, Dec = {:.3f} deg, solar longitude = {:.3f} deg, Vg = {:.3f} km/s"),
+        ('heliocentric', HELIOCENTRIC_CRITERIA_KEYS,
+            "  Lh = {:.3f} deg, Bh = {:.3f} deg, solar longitude = {:.3f} deg, Vh = {:.3f} km/s")):
 
-        print("Radiant for {:s}".format(", ".join(l for l, k in zip(labels, search['keys']) \
-            if k in GEOCENTRIC_CRITERIA_KEYS)) + (" (given):" if search['geocentric_source'] == 'given' \
+        source = search[kind + '_source']
+
+        if source is None:
+            continue
+
+        print("{:s} radiant for {:s}".format(kind.capitalize(), ", ".join(l for l, k \
+            in zip(labels, search['keys']) if k in keys)) + (" (given):" if source == 'given' \
             else " (derived from the elements, where the orbit comes closest to the Earth's):"))
 
-        if not search['query_geocentric']:
+        if not search['query_' + kind]:
             print("  The orbit does not reach 1 AU, so it has no radiant and these criteria have no value.")
 
-        for ra_g, dec_g, sol_g, vg_g in search['query_geocentric']:
-            print("  RA = {:.3f} deg, Dec = {:.3f} deg, solar longitude = {:.3f} deg, Vg = {:.3f} km/s".format(
-                np.degrees(ra_g), np.degrees(dec_g), np.degrees(sol_g), vg_g))
+        for lon, lat, sol, speed in search['query_' + kind]:
+            print(line.format(np.degrees(lon), np.degrees(lat), np.degrees(sol), speed))
 
         print()
 
 
     print("Top {:d} matches, ranked by {:s}:".format(len(matches), labels[0]))
+    # Each column as wide as its label, so that the values line up under it
+    widths = [max(8, len(l)) for l in labels]
+
     print('Name                               ,     q,     e,   incl,    peri,    node,  Hmag,',
-        ', '.join('{:>8s}'.format(l) for l in labels))
+        ', '.join('{:>{:d}s}'.format(l, w) for l, w in zip(labels, widths)))
 
     for m in matches:
         print("{:35s}, {:.3f}, {:.3f}, {:6.2f}, {:7.3f}, {:7.3f}, {:5.2f}, ".format(m['name'], m['q'],
             m['e'], m['incl'], m['peri'], m['node'], m['h_mag']) \
-            + ", ".join("{:8.3f}".format(v) if np.isfinite(v) else "{:>8s}".format("n/a") \
-            for v in m['d_values']))
+            + ", ".join("{:{:d}.3f}".format(v, w) if np.isfinite(v) else "{:>{:d}s}".format("n/a", w) \
+            for v, w in zip(m['d_values'], widths)))
 
 
     # Bring the bodies to the reference epoch of the meteor
@@ -1155,6 +1200,11 @@ if __name__ == "__main__":
             ra_g, dec_g, sol_g, vg_g = search['query_geocentric'][0]
             meteor.update({'ra_g_deg': np.degrees(ra_g), 'dec_g_deg': np.degrees(dec_g),
                 'solar_longitude_deg': np.degrees(sol_g), 'v_g_kms': vg_g})
+
+        if search['query_heliocentric']:
+            l_h, b_h, sol_h, v_h = search['query_heliocentric'][0]
+            meteor.update({'L_h_deg': np.degrees(l_h), 'B_h_deg': np.degrees(b_h),
+                'solar_longitude_deg': np.degrees(sol_h), 'v_h_kms': v_h})
 
         saveMatches(cml_args.save, search, meteor=meteor, propagated=propagated)
 
