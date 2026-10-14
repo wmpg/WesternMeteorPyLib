@@ -242,6 +242,126 @@ def calcVgComponents(ra, dec, sol, vg):
 
 
 
+def calcGeocentricFromElements(q, e, i, node, peri, max_distance=0.05):
+    """ Derive the geocentric radiant and speed an orbit would show at Earth, from its elements alone.
+
+        The Valsecchi-type criteria compare the geocentric radiant, the solar longitude and the
+        geocentric speed, which a catalogue of asteroids and comets does not hold. They are
+        reconstructed in the Opik way: the Earth is taken on a circular orbit of 1 AU in the
+        ecliptic, the orbit is cut where its heliocentric distance is 1 AU, and the geocentric
+        velocity is the heliocentric velocity at that point less the velocity of the Earth.
+
+        An orbit cuts the sphere of 1 AU in two points, one on each side of perihelion, but the
+        Earth is on that sphere only in the ecliptic, so a point well out of the ecliptic is a
+        place the Earth is never at, and not a place where the orbit can meet it. The points kept
+        are those that are within max_distance of the Earth's orbit. If neither is, the one that
+        is closest is kept, which is where the orbit comes nearest to the Earth's, so that the
+        orbit still gets the radiant it would show there. An orbit with both points in the
+        ecliptic, such as a low inclination one, gets two radiants, at different solar longitudes.
+        An orbit that does not reach 1 AU has no geocentric radiant and gives an empty list.
+
+        The elements are referred to J2000, so the solar longitude is J2000 too, and the
+        precession since then (0.36 deg in 25 years) is left in. The speed is scaled with
+        SPEED_EARTH, the same constant calcDN divides by, so that the dimensionless speed the
+        criterion works with comes out exact.
+
+    Arguments:
+        q: [float] perihelion distance (AU)
+        e: [float] num. eccentricity
+        i: [float] inclination (radians)
+        node: [float] longitude of ascending node (radians)
+        peri: [float] argument of perihelion (radians)
+
+    Keyword arguments:
+        max_distance: [float] how far from the Earth's orbit, in AU, a point of 1 AU can be and
+            still be kept
+
+    Return:
+        [list] A (ra, dec, sol, vg) tuple for each point kept, with the angles in radians and the
+            speed in km/s: the arguments of calcDN, calcDR and calcDX.
+    """
+
+    # A circular orbit has no perihelion to speak of, and cuts 1 AU everywhere or nowhere
+    if e <= 0:
+        return []
+
+    # Semi-latus rectum, which is defined for the parabolic and hyperbolic orbits too
+    p = q*(1.0 + e)
+
+    # The orbit is at 1 AU where p/(1 + e cos(f)) = 1
+    cos_f = (p - 1.0)/e
+
+    if abs(cos_f) > 1.0:
+        return []
+
+    sin_f_abs = math.sqrt(1.0 - cos_f**2)
+
+    cos_i, sin_i = math.cos(i), math.sin(i)
+    cos_O, sin_O = math.cos(node), math.sin(node)
+
+    # Components of the heliocentric velocity along the radius and across it, in units of the
+    #   circular speed at 1 AU, for which GM = 1
+    sqrt_inv_p = 1.0/math.sqrt(p)
+
+    candidates = []
+
+    for sin_f in (sin_f_abs, -sin_f_abs):
+
+        # Argument of latitude of the point
+        f = math.atan2(sin_f, cos_f)
+        u = peri + f
+        cos_u, sin_u = math.cos(u), math.sin(u)
+
+        # Unit vectors along the radius and across it, in the ecliptic frame
+        r_hat = np.array([cos_O*cos_u - sin_O*sin_u*cos_i, sin_O*cos_u + cos_O*sin_u*cos_i,
+            sin_u*sin_i])
+        t_hat = np.array([-cos_O*sin_u - sin_O*cos_u*cos_i, -sin_O*sin_u + cos_O*cos_u*cos_i,
+            cos_u*sin_i])
+
+        v_helio = sqrt_inv_p*(e*sin_f*r_hat + (1.0 + e*cos_f)*t_hat)
+
+        # The Earth is below or above the point, on a circle of 1 AU, moving across the radius
+        earth_lon = math.atan2(r_hat[1], r_hat[0])
+        v_earth = np.array([-math.sin(earth_lon), math.cos(earth_lon), 0.0])
+
+        v_geo = v_helio - v_earth
+        vg = float(np.sqrt(np.dot(v_geo, v_geo)))
+
+        # An orbit that matches the Earth's has no radiant
+        if vg < 1e-9:
+            continue
+
+        # The radiant is where the meteoroid comes from, against its velocity. Rotate it from the
+        #   ecliptic to the equator, with the same obliquity as calcVgComponents
+        radiant = -v_geo/vg
+        eps = 0.40909280
+        x = radiant[0]
+        y = radiant[1]*math.cos(eps) - radiant[2]*math.sin(eps)
+        z = radiant[1]*math.sin(eps) + radiant[2]*math.cos(eps)
+
+        ra = math.atan2(y, x) % (2*math.pi)
+        dec = math.asin(max(-1.0, min(1.0, z)))
+
+        # The Sun is opposite the Earth
+        sol = (earth_lon + math.pi) % (2*math.pi)
+
+        # The distance of the point from the Earth's orbit is its height above the ecliptic
+        candidates.append((abs(r_hat[2]), (ra, dec, sol, vg*SPEED_EARTH)))
+
+    if not candidates:
+        return []
+
+    near = [c for dist, c in candidates if dist <= max_distance]
+
+    # Nothing within reach: keep the point that is closest
+    if not near:
+        near = [min(candidates, key=lambda c: c[0])[1]]
+
+    return near
+
+
+
+
 def calcDN(ra1, dec1, sol1, vg1, ra2, dec2, sol2, vg2, d_max=999.0):
     """ Calculate the Valsecchi D criterion between two orbits. Only parameters used are ra, dec, sol, vg, 
         other are disregarded.
@@ -1343,6 +1463,41 @@ def getElementCriterion(key):
         ", ".join(ELEMENT_CRITERIA_KEYS)))
 
 
+# The criteria on the geocentric radiant and speed, as (key, label, function of the two radiants).
+#   They are not in ELEMENT_CRITERIA because their arguments are different: each radiant is a
+#   (ra, dec, solar longitude, speed) tuple, with the angles in radians and the speed in km/s.
+#   An orbit given only by its elements gets one from calcGeocentricFromElements.
+GEOCENTRIC_CRITERIA = [
+    ('DN', 'D_N', lambda g1, g2: calcDN(*(g1 + g2))),
+    ('DR', 'D_R', lambda g1, g2: calcDR(*(g1 + g2))),
+    ('DX', 'D_X', lambda g1, g2: calcDX(*(g1 + g2))),
+    ]
+
+GEOCENTRIC_CRITERIA_KEYS = [key for key, _, _ in GEOCENTRIC_CRITERIA]
+
+
+def getGeocentricCriterion(key):
+    """ Look up one of the criteria on the geocentric radiant and speed by its key.
+
+        The keys are those of GEOCENTRIC_CRITERIA and are not case sensitive. The same warning as
+        for getElementCriterion applies: wmpl.Utils.ParentBodySearch offers them through -d.
+
+    Arguments:
+        key: [str] key of the criterion, such as 'DN'
+
+    Return:
+        [tuple] (label, function of the two (ra, dec, solar longitude, speed) tuples)
+    """
+
+    for criterion_key, label, func in GEOCENTRIC_CRITERIA:
+
+        if criterion_key == key.upper():
+            return (label, func)
+
+    raise ValueError("Unknown criterion {:s}. Available: {:s}.".format(key,
+        ", ".join(GEOCENTRIC_CRITERIA_KEYS)))
+
+
 
 if __name__ == "__main__":
 
@@ -1376,13 +1531,6 @@ if __name__ == "__main__":
     #     D_SAC  0.15 for the core of the complex
     #   wmpl.Utils.Dthresholds implements the methods that derive a threshold from a sample. It is
     #   deliberately not imported here, so that nothing this tool prints implies a decision.
-
-    # Criteria on the geocentric radiant and speed
-    GEOCENTRIC_CRITERIA = [
-        ('DN', 'D_N', lambda g1, g2: calcDN(*(g1 + g2))),
-        ('DR', 'D_R', lambda g1, g2: calcDR(*(g1 + g2))),
-        ('DX', 'D_X', lambda g1, g2: calcDX(*(g1 + g2))),
-        ]
 
     # The Vida criterion, which takes the corrected heliocentric direction instead
     HELIOCENTRIC_CRITERIA = [

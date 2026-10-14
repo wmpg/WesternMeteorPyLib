@@ -12,6 +12,7 @@ they are not on a common scale, and most of them are not distances in the mathem
 - [Criteria on orbital elements](#criteria-on-orbital-elements)
 - [Criteria on geocentric quantities](#criteria-on-geocentric-quantities)
 - [Criteria for the Taurid Complex](#criteria-for-the-taurid-complex)
+- [Searching a catalogue of parent bodies](#searching-a-catalogue-of-parent-bodies)
 - [Pitfalls](#pitfalls)
 - [Worked examples](#worked-examples)
 - [Verification status](#verification-status)
@@ -162,6 +163,40 @@ The reference orbit of the complex core is available as `TC_REFERENCE_A`, `TC_RE
 into the criterion. It first adjusts the inclination and eccentricity to their secular minima using
 Brouwer (1947) theory. These functions apply no such adjustment, so passing observed elements will
 not reproduce the paper's table 1.
+
+---
+
+## Searching a catalogue of parent bodies
+
+**`wmpl.Utils.ParentBodySearch`** ranks the comets, asteroids and meteorites with orbits of the
+catalogues by similarity to an orbit. Any key of this module can be used there, the ones on the
+elements and the ones on the geocentric radiant (D_N, D_R, D_X) alike.
+
+```
+python -m wmpl.Utils.ParentBodySearch traj.pickle -d DSH DN DD
+```
+
+- **Several criteria.** Give them to `-d` one after another, or as a list to `d_crit`. The bodies are
+  ranked by the **first** one, which is the one the top N is taken by, and the others are printed
+  beside it for the same bodies. With more than one criterion a bar plot, a panel per criterion
+  with the bodies in the ranking order, is saved by default beside the pickle (`--no_plot` to
+  skip it, `--plot_path` to place it).
+- **The radiant of a catalogue body.** A body has only its elements, so the criteria on the radiant
+  need one derived from them: `calcGeocentricFromElements` cuts the orbit where it is 1 AU from
+  the Sun, takes the point or points within 0.05 AU of the Earth's orbit, or the closest one if
+  there is none, and subtracts the Earth's velocity there. A body that does not reach 1 AU has no
+  value (`n/a`), and it is left out if the criterion is the first. The orbit that is searched
+  for uses its measured radiant if it has one (a pickle, or `--ra --dec --sol --vg`) and the
+  derived one otherwise. For Phaethon the derived radiant is 1.6 deg and 0.4 km/s from the
+  Geminids.
+- **Epoch.** The ranking uses the catalogue elements as they are, each at its own epoch. `--propagate`
+  does not change it. It brings the top N bodies to the reference epoch of the meteor, with
+  the Sun and the planets from DE430 and no non-gravitational forces, and lists and saves their elements and
+  heliocentric state there (ecliptic J2000, AU and AU/day), to be used as the initial
+  conditions of a REBOUND integration. Bodies with no epoch in the catalogue, on parabolic or hyperbolic
+  orbits, or outside the ephemeris are not propagated.
+- **Saving.** `--save matches.csv` or `--save matches.json` writes the matches with the value of every
+  criterion that was given, in the order given, plus the propagated state with `--propagate`.
 
 ---
 
