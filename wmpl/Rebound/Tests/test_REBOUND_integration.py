@@ -6,7 +6,9 @@ example trajectory are unavailable. They catch what the pure-numerics tests cann
 changes between major versions, and a reboundx compiled against a different REBOUND version.
 """
 
+import io
 import os
+import sys
 import importlib.util
 from types import SimpleNamespace
 
@@ -248,3 +250,53 @@ def testEndToEndIntegrationMatchesReference(realReb):
     assert diag["min_dist_au"]["Luna"] == pytest.approx(0.0018192455341135359, rel=rtol)
     # The within-step refinement added in #99 moves this off the step-end value it had before
     assert diag["min_time_days"]["Luna"] == pytest.approx(-0.0426156724, rel=1e-6)
+
+
+def testLiveProgressReportsTheTimeIntegrated(realReb, monkeypatch):
+    """ On a terminal the nominal orbit and the Monte Carlo realizations report their progress live,
+    and showing it does not change the result. """
+
+    from wmpl.Config import config
+    from wmpl.Utils.Pickling import loadPickle
+
+    if not os.path.isfile(config.jpl_ephem_file):
+        pytest.skip("DE430 ephemeris not found: {}".format(config.jpl_ephem_file))
+
+    if not os.path.isfile(os.path.join(EXAMPLE_DIR, EXAMPLE_FILE)):
+        pytest.skip("Example trajectory not found")
+
+    traj = loadPickle(EXAMPLE_DIR, EXAMPLE_FILE)
+
+    # The example has no uncertainties, so give it a covariance (100 m, 1 m/s) for the clones
+    traj.uncertainties = SimpleNamespace()
+    traj.state_vect_cov = np.diag([100.0**2]*3 + [1.0**2]*3)
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    # Report at every step instead of twice a second, so a short run reports too
+    out = Terminal()
+    monkeypatch.setattr(sys, "stdout", out)
+    monkeypatch.setattr(realReb, "PROGRESS_INTERVAL_S", 0.0)
+
+    sim_outputs, sim_outputs_mc = realReb.reboundSimulate(
+        None, None, traj=traj, direction="backward", sim_days=60, n_outputs=50, mc_runs=2, n_cpu=1,
+        show_progress=True, random_seed=42)
+
+    frames = out.getvalue().split("\r")
+    nominal = [f for f in frames if f.startswith("  Nominal orbit: ")]
+    mc = [f for f in frames if f.startswith("  Monte Carlo: ")]
+
+    # The time integrated grows from frame to frame and reaches the end of the run
+    days = [float(f.split()[2]) for f in nominal]
+    assert len(days) > 1
+    assert days == sorted(days)
+    assert days[-1] == pytest.approx(60, abs=1)
+
+    assert any("0/2 realizations done" in f for f in mc)
+    assert "2/2 realizations integrated" in out.getvalue()
+
+    # Same nominal solution as in testEndToEndIntegrationMatchesReference
+    assert sim_outputs[-1][2].a == pytest.approx(10.984662940935554, rel=1e-7)
+    assert len(sim_outputs_mc) == 2
