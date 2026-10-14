@@ -16,6 +16,7 @@ Monte Carlo clones, and can optionally include radiation forces and measure how 
 - [Close encounters, impacts and ejections](#close-encounters-impacts-and-ejections)
 - [Monte Carlo clones](#monte-carlo-clones)
 - [Chaos: MEGNO](#chaos-megno)
+- [Parent bodies](#parent-bodies)
 - [What it writes](#what-it-writes)
 - [Worked examples](#worked-examples)
 - [Using it as a library](#using-it-as-a-library)
@@ -129,6 +130,9 @@ python -m wmpl.Rebound.REBOUND --help
 | `--radius METRES` | Object radius in metres. With `--density`, beta is computed from it. Purely gravitational if not given. |
 | `--density KG_M3` | Bulk density in kg/m³, used with `--radius`. Default: `3000`. |
 | `--compute_megno` | After the integration, measure the MEGNO chaos indicator of the nominal orbit. See [Chaos: MEGNO](#chaos-megno). |
+| `--parent_bodies FILE` | Integrate the parent body candidates saved by `ParentBodySearch --save` (JSON) over the same span and compare them with the meteoroid. See [Parent bodies](#parent-bodies). |
+| `--parent_dcrit KEY [KEY ...]` | D criteria for `--parent_bodies`, keys of `wmpl.Utils.Dcriteria`. Default: those the search used. |
+| `--parent_top N` | Use only the first N bodies of the file. |
 | `--verbose` | Print the progress of the simulation. |
 
 `--beta` and `--radius` are mutually exclusive: give the beta directly, or give the size and density
@@ -339,6 +343,43 @@ next to a full run with the Monte Carlo clones. It is skipped, with a warning, i
 
 ---
 
+## Parent bodies
+
+`wmpl.Utils.ParentBodySearch` ranks the comets and asteroids of the catalogues by D criteria against
+the orbit of a trajectory. `--parent_bodies` takes its matches and integrates them alongside the
+meteoroid, to see whether the orbits stay similar back in time, for the nominal solution and the
+clones:
+
+```
+python -m wmpl.Utils.ParentBodySearch traj.pickle -t 5 -d DSH DD DN --propagate --save matches.json
+python -m wmpl.Rebound.REBOUND traj.pickle --days 3652.5 --mc 100 --parent_bodies matches.json
+```
+
+- **Starting point.** Every body starts at the reference epoch of the trajectory. With `--propagate`
+  the search has already brought the top N there with the same integrator (Sun, planets and Moon from
+  DE430, the Earth's J2 and J4, general relativity), and the state saved in the file is used as it is.
+  Otherwise the body is brought there from its catalogue elements when the file is read. Bodies
+  without an epoch or a mean anomaly in the catalogue (the meteorites, the parabolic and hyperbolic
+  comets) cannot be, and are listed as not used.
+- **Integration.** The bodies are massless, like the meteoroid, and run in a simulation of their own
+  over the same output times. They do not depend on the meteoroid, so they are integrated once and
+  compared with the nominal solution and with every clone. Non-gravitational forces are not modelled,
+  which matters for comets.
+- **Departure from the Earth.** The meteoroid starts at the Earth's surface, where its osculating
+  heliocentric orbit carries the Earth's pull: in a Winchcombe run D_SH with its best candidate is
+  0.55 at the start, against 0.03 from the orbit of the trajectory solution, which removes the
+  Earth's attraction. The criteria are therefore compared from the first output at which the
+  meteoroid is beyond 3 Hill radii of the Earth (the `departure` value), as the close encounters are.
+- **Criteria on the radiant.** D_N, D_R, D_X and D_V (Vida) read radiants derived from the
+  osculating elements of both orbits along the run. The search gave the meteoroid its measured
+  radiant instead, so its value for these criteria differs from the one at the departure (0.30
+  against 0.14 for the best Winchcombe candidate, while D_SH went from 0.033 to 0.027).
+- **Output.** The report lists per body and criterion the catalogue value, the value at the departure
+  and at the end, the smallest and when, and with clones the median and 95% range at the end and of
+  each clone's minimum. No threshold is applied: see [choosing a threshold](DThresholds.md).
+
+---
+
 ## What it writes
 
 All output goes into the directory containing the input pickle, under **fixed names**. Two runs on
@@ -351,6 +392,8 @@ options.
 | `rebound_simulation.png` | A 3×3 panel figure of the element evolution for the nominal solution and the clones. |
 | `rebound_megno.png` | Only with `--compute_megno`: the evolution of ⟨Y⟩ against time in years, with the ⟨Y⟩ = 2 line marked. |
 | `rebound_simulation_results.json` | The same results in machine-readable form, so downstream analysis does not have to parse the text. |
+| `rebound_parent_bodies.csv` | Only with `--parent_bodies`: every D criterion between the meteoroid and every body at every output time, for the nominal solution and as the median and 2.5–97.5 percentiles of the clones. |
+| `rebound_parent_bodies.png` | Only with `--parent_bodies`: the same against time, a panel per criterion. |
 
 The JSON keys, at the top level:
 
@@ -369,6 +412,7 @@ The JSON keys, at the top level:
 | `divergence` | The exponential and linear fits to the clone spread, with `r2_exponential` and `r2_linear`. |
 | `whfast_encounter_warning` | The WHFast close-encounter warning string, or `null`. |
 | `megno` | With `--compute_megno`: `times_days`, `megno`, `a_au`, `escaped` and the `verdict` dict. `null` otherwise. |
+| `parent_bodies` | Only with `--parent_bodies`: the `file`, the `criteria`, and per body its `rank`, `catalogue_criteria` (the values of the search), `summary` per criterion (`departure`, `end`, `min`, `min_time_days`, `clones_end`, `clones_min`), the closest approach to the meteoroid at the output times, and the body's own `encounters`, `impact` and `escaped`. |
 | `nominal`, `monte_carlo` | Full element series: `time_days`, `a_au`, `e`, `incl_deg`, `peri_deg`, `node_deg`, `f_deg`, `body_distances_au`. |
 
 A quick sanity check on any run is `energy_rel_drift`. It measures the massive subsystem the object

@@ -42,16 +42,12 @@ import datetime
 import numpy as np
 
 from wmpl.Config import config
-from wmpl.Utils.Dcriteria import (ELEMENT_CRITERIA_KEYS, GEOCENTRIC_CRITERIA_KEYS,
-    HELIOCENTRIC_CRITERIA_KEYS, getElementCriterion, getGeocentricCriterion, getHeliocentricCriterion,
-    calcGeocentricFromElements, calcHeliocentricFromElements, calcHeliocentricFromGeocentric)
+from wmpl.Utils.Dcriteria import (GEOCENTRIC_CRITERIA_KEYS, HELIOCENTRIC_CRITERIA_KEYS,
+    ALL_CRITERIA_KEYS, DERIVED_FROM_ELEMENTS, lookupCriterion, radiantCriterionMin,
+    calcHeliocentricFromGeocentric, RADIANT_MAX_DISTANCE)
 from wmpl.Utils.OrbitConstants import GAUSS_K
 from wmpl.Utils.Pickling import loadPickle
 
-
-# The simulation time unit of REBOUND with G = 1, AU and solar masses, in days: the year/2pi that
-#   wmpl.Rebound.REBOUND converts the velocities with
-SIM_TIME_DAYS = 365.25/(2*np.pi)
 
 # Reference Julian date of J2000.0
 JD_J2000 = 2451545.0
@@ -261,42 +257,6 @@ if os.path.isfile(config.meteorites_orbit_file):
     meteorites_elements = loadMeteoritesElements(config.meteorites_orbit_file)
 
 
-# Every criterion key this module takes
-ALL_CRITERIA_KEYS = ELEMENT_CRITERIA_KEYS + GEOCENTRIC_CRITERIA_KEYS + HELIOCENTRIC_CRITERIA_KEYS
-
-# What each kind of criterion compares, and how a body that has only its elements gets it
-_DERIVED_FROM_ELEMENTS = {
-    'geocentric': calcGeocentricFromElements,
-    'heliocentric': calcHeliocentricFromElements,
-    }
-
-
-def lookupCriterion(key):
-    """ Look up a D criterion by its key among the criteria of wmpl.Utils.Dcriteria: on the orbital
-        elements, on the geocentric radiant, and on the corrected heliocentric direction.
-
-    Arguments:
-        key: [str] Key of the criterion, such as 'DSH', 'DN' or 'DVVIDA', not case sensitive.
-
-    Return:
-        [tuple] (key in upper case, label, function, kind), the kind being 'elements', 'geocentric'
-            or 'heliocentric'.
-    """
-
-    for kind, getter in (('elements', getElementCriterion), ('geocentric', getGeocentricCriterion),
-        ('heliocentric', getHeliocentricCriterion)):
-
-        try:
-            label, func = getter(key)
-            return key.upper(), label, func, kind
-
-        except ValueError:
-            pass
-
-    raise ValueError("Unknown criterion {:s}. Available: {:s}.".format(key,
-        ", ".join(ALL_CRITERIA_KEYS)))
-
-
 def _resolveCriteria(d_crit):
     """ Turn a criterion key, or a list of them, into a list of lookups. A key that is unknown is
         reported and dropped, and D_SH is used if none is left. A repeated key is used once.
@@ -325,17 +285,6 @@ def _resolveCriteria(d_crit):
     return criteria
 
 
-def _radiantMin(func, list1, list2):
-    """ Value of a criterion on the radiant between two orbits, each of which may meet the Earth's
-        orbit in two places: the smallest value over the pairs, and infinity if either orbit does
-        not reach 1 AU.
-    """
-
-    values = [float(func(g1, g2)) for g1 in list1 for g2 in list2]
-
-    return min(values) if values else np.inf
-
-
 def searchParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10, meteorites=False,
     geocentric=None, heliocentric=None):
     """ Compares the given orbit to the orbit of asteroids and comets from the database using the given
@@ -360,9 +309,10 @@ def searchParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10, meteorite
             perihelion term, rank large numbers of bodies equally and say little here.
             The criteria on the geocentric radiant (DN, DR, DX) need the radiant of each orbit. A
             body of the catalogues has only its elements, so its radiant is derived from them at the
-            place where its orbit comes within 0.05 AU of the Earth's, or comes closest to it (see
-            wmpl.Utils.Dcriteria.calcGeocentricFromElements), and a body that does not reach 1 AU has an
-            infinite value, which excludes it if the criterion is the first one. The Vida
+            places where its orbit comes closest to the Earth's (see
+            wmpl.Utils.Dcriteria.calcGeocentricFromElements), and a body whose orbit never comes
+            within 0.25 AU of the Earth's has an infinite value, which excludes it if the criterion is
+            the first one. The Vida
             criterion (DVVIDA), on the corrected heliocentric direction, gets it from the same
             place with calcHeliocentricFromElements.
         top_n: [int] How many objects with the highest orbit similarity will be returned. 10 is default.
@@ -401,7 +351,7 @@ def searchParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10, meteorite
             sources[kind] = 'given'
 
         else:
-            query_radiants[kind] = _DERIVED_FROM_ELEMENTS[kind](q, e, incl, node, peri)
+            query_radiants[kind] = DERIVED_FROM_ELEMENTS[kind](q, e, incl, node, peri)
             sources[kind] = 'elements'
 
 
@@ -442,9 +392,9 @@ def searchParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10, meteorite
                 continue
 
             if kind not in body_radiants:
-                body_radiants[kind] = _DERIVED_FROM_ELEMENTS[kind](*body_orbit)
+                body_radiants[kind] = DERIVED_FROM_ELEMENTS[kind](*body_orbit)
 
-            values.append(_radiantMin(dFunc, query_radiants[kind], body_radiants[kind]))
+            values.append(radiantCriterionMin(dFunc, query_radiants[kind], body_radiants[kind]))
 
         # A criterion written in terms of the semi-major axis is infinite against the parabolic
         #   orbits in the comet catalogue, and such a body is not a match under it. The same holds
@@ -510,141 +460,16 @@ def findParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10, meteorites=
 
 
 
-def _stateFromElements(q, e, incl, node, peri, mean_anomaly):
-    """ Heliocentric state vector of an elliptic orbit, in the units of a REBOUND simulation with
-        G = 1, AU and solar masses.
+def propagateBodies(bodies, jd_target):
+    """ Bring bodies of the catalogues to the reference epoch of a meteor, so that they can be handed
+        to a REBOUND integration with the meteoroid (wmpl.Rebound.REBOUND, --parent_bodies).
 
-    Arguments:
-        q: [float] Perihelion distance (AU).
-        e: [float] Eccentricity, less than 1.
-        incl: [float] Inclination (radians).
-        node: [float] Ascending node (radians).
-        peri: [float] Argument of perihelion (radians).
-        mean_anomaly: [float] Mean anomaly (radians).
-
-    Return:
-        [tuple] Position (AU) and velocity (AU per simulation time unit) as numpy arrays, in the
-            ecliptic frame the elements are given in.
-    """
-
-    a = q/(1.0 - e)
-    m = mean_anomaly % (2*np.pi)
-
-    # Solve Kepler's equation
-    ecc_anom = m if e < 0.8 else np.pi
-
-    for _ in range(100):
-
-        delta = (ecc_anom - e*np.sin(ecc_anom) - m)/(1.0 - e*np.cos(ecc_anom))
-        ecc_anom -= delta
-
-        if abs(delta) < 1e-14:
-            break
-
-    cos_E, sin_E = np.cos(ecc_anom), np.sin(ecc_anom)
-    sqrt_1me2 = np.sqrt(1.0 - e**2)
-
-    r = a*(1.0 - e*cos_E)
-    n = a**-1.5
-
-    # Position and velocity in the orbital plane
-    pos = np.array([a*(cos_E - e), a*sqrt_1me2*sin_E])
-    vel = np.array([-a**2*n*sin_E/r, a**2*n*sqrt_1me2*cos_E/r])
-
-    cos_O, sin_O = np.cos(node), np.sin(node)
-    cos_w, sin_w = np.cos(peri), np.sin(peri)
-    cos_i, sin_i = np.cos(incl), np.sin(incl)
-
-    # Rotation from the orbital plane to the ecliptic
-    rot = np.array([
-        [cos_O*cos_w - sin_O*sin_w*cos_i, -cos_O*sin_w - sin_O*cos_w*cos_i],
-        [sin_O*cos_w + cos_O*sin_w*cos_i, -sin_O*sin_w + cos_O*cos_w*cos_i],
-        [sin_w*sin_i,                      cos_w*sin_i]])
-
-    return rot @ pos, rot @ vel
-
-
-def _elementsFromState(r_vec, v_vec):
-    """ Elements of the heliocentric orbit through a state vector, in the units of a REBOUND
-        simulation with G = 1, AU and solar masses.
-
-    Return:
-        [dict] 'q', 'a' (AU), 'e', 'incl', 'node', 'peri' (radians) and 'mean_anomaly' (radians, None
-            for an orbit that is not elliptic).
-    """
-
-    r = np.sqrt(r_vec @ r_vec)
-    v2 = v_vec @ v_vec
-
-    h_vec = np.cross(r_vec, v_vec)
-    h = np.sqrt(h_vec @ h_vec)
-
-    e_vec = np.cross(v_vec, h_vec) - r_vec/r
-    e = np.sqrt(e_vec @ e_vec)
-
-    q = h**2/(1.0 + e)
-    incl = np.arccos(np.clip(h_vec[2]/h, -1.0, 1.0))
-
-    node_vec = np.array([-h_vec[1], h_vec[0], 0.0])
-    node_mag = np.sqrt(node_vec @ node_vec)
-
-    if node_mag > 1e-12*h:
-
-        node = np.arctan2(node_vec[1], node_vec[0]) % (2*np.pi)
-        peri = np.arccos(np.clip((node_vec @ e_vec)/(node_mag*e), -1.0, 1.0))
-
-        if e_vec[2] < 0:
-            peri = 2*np.pi - peri
-
-    # No ascending node for an orbit in the ecliptic
-    else:
-        node = 0.0
-        peri = np.arctan2(e_vec[1], e_vec[0])*np.sign(h_vec[2]) % (2*np.pi)
-
-    energy = 0.5*v2 - 1.0/r
-
-    a = np.inf
-    mean_anomaly = None
-
-    if abs(energy) > 1e-14:
-        a = -0.5/energy
-
-    if (e < 1.0) and np.isfinite(a):
-
-        cos_E = (1.0 - r/a)/e
-        sin_E = (r_vec @ v_vec)/(e*np.sqrt(a))
-        ecc_anom = np.arctan2(sin_E, cos_E)
-        mean_anomaly = (ecc_anom - e*sin_E) % (2*np.pi)
-
-    return {'q': q, 'a': a, 'e': e, 'incl': incl, 'node': node, 'peri': peri,
-        'mean_anomaly': mean_anomaly}
-
-
-def _stateRecord(r_vec, v_vec, jd):
-    """ A heliocentric state in the form propagateBodies returns it: elements in degrees and AU, the
-        position in AU and the velocity in AU/day, in the ecliptic J2000 frame.
-    """
-
-    el = _elementsFromState(r_vec, v_vec)
-
-    return {'jd': jd, 'q': float(el['q']), 'a': float(el['a']), 'e': float(el['e']),
-        'incl': float(np.degrees(el['incl'])), 'peri': float(np.degrees(el['peri'])),
-        'node': float(np.degrees(el['node'])),
-        'mean_anomaly': None if el['mean_anomaly'] is None else float(np.degrees(el['mean_anomaly'])),
-        'position': [float(x) for x in r_vec],
-        'velocity': [float(x/SIM_TIME_DAYS) for x in v_vec]}
-
-
-def propagateBodies(bodies, jd_target, planet_names=("Mercury", "Venus", "Earth", "Mars", "Jupiter",
-    "Saturn", "Uranus", "Neptune")):
-    """ Bring bodies of the catalogues to a common epoch, the reference epoch of a meteor, so that they
-        can be handed to a REBOUND integration with the meteoroid.
-
-        Each body is integrated from the epoch of its catalogue elements to the target epoch under
-        the Sun and the planets, with the planet states from the local DE430 ephemeris and the Moon's
-        mass added to the Earth. The bodies are massless and do not disturb each other, so those
-        that share an epoch, which is every asteroid, are integrated in one simulation. Non-
-        gravitational forces are not modelled, which matters for comets.
+        The integration is that of wmpl.Rebound.REBOUND.propagateBodiesToEpoch: the same simulation
+        the meteoroid is integrated in, with the Sun, the planets and the Moon from DE430, the Earth's
+        J2 and J4 and general relativity. Non-gravitational forces are not modelled, which matters for
+        comets. The catalogue epochs are taken as TDB (they are TT, which differs from it by less than
+        2 ms), and the reference epoch of the meteor, which is UTC, is converted to TDB, as
+        wmpl.Rebound.REBOUND does with the trajectory.
 
         This is for preparing the initial conditions. The ranking of the bodies is not redone with
         the propagated elements.
@@ -652,99 +477,35 @@ def propagateBodies(bodies, jd_target, planet_names=("Mercury", "Venus", "Earth"
     Arguments:
         bodies: [list] Dictionaries of the matches of searchParentBodies, which need 'q', 'e', 'incl',
             'peri', 'node', 'epoch_jd' and 'mean_anomaly'.
-        jd_target: [float] Julian date to bring the bodies to.
-
-    Keyword arguments:
-        planet_names: [tuple] Planets to include.
+        jd_target: [float] Julian date (UTC) to bring the bodies to, the reference time of the
+            trajectory.
 
     Return:
         [list] For each body, None if it could not be propagated (no epoch or mean anomaly in the
-            catalogue, a parabolic or hyperbolic orbit, an epoch outside the ephemeris), or a
-            dictionary: 'jd', 'q', 'a' (AU), 'e', 'incl', 'peri', 'node', 'mean_anomaly' (degrees),
-            'position' (AU) and 'velocity' (AU/day), heliocentric in the ecliptic J2000 frame.
+            catalogue, a parabolic or hyperbolic orbit, an epoch outside the ephemeris, an impact or
+            an escape on the way), or a dictionary: 'jd' (UTC) and 'jd_tdb', 'q', 'a' (AU), 'e',
+            'incl', 'peri', 'node', 'mean_anomaly' (degrees), 'position' (AU) and 'velocity'
+            (AU/day), heliocentric in the ecliptic J2000 frame.
     """
 
-    import rebound
-    from jplephem.spk import SPK
-    from wmpl.Rebound.REBOUND import ephemBodyStateRebound
+    from wmpl.Rebound import REBOUND as reb
 
-    results = [None]*len(bodies)
+    if not reb.REBOUND_FOUND:
+        raise ImportError(reb._REBOUND_IMPORT_ERROR)
 
-    # Group the bodies by the epoch of their elements
-    groups = {}
+    # A REBOUNDx that cannot attach would fail inside the integration with a less helpful message
+    reb.checkReboundxUsable()
 
-    for k, body in enumerate(bodies):
+    jd_tdb = reb.utcToTdb(jd_target)
 
-        if (body['epoch_jd'] is None) or (body['mean_anomaly'] is None) or (body['e'] >= 1.0):
-            continue
+    elements = [{'q': b['q'], 'e': b['e'], 'incl': b['incl'], 'peri': b['peri'], 'node': b['node'],
+        'mean_anomaly': b['mean_anomaly'], 'epoch_jd': b['epoch_jd']} for b in bodies]
 
-        groups.setdefault(body['epoch_jd'], []).append(k)
+    results = reb.propagateBodiesToEpoch(elements, jd_tdb)
 
-
-    ephem = SPK.open(config.jpl_ephem_file)
-
-    for epoch_jd, indices in groups.items():
-
-        # Elements and state of every body at the epoch of its elements
-        states = []
-
-        for k in indices:
-
-            b = bodies[k]
-            states.append(_stateFromElements(b['q'], b['e'], np.radians(b['incl']),
-                np.radians(b['node']), np.radians(b['peri']), np.radians(b['mean_anomaly'])))
-
-        # Already at the target epoch
-        if abs(jd_target - epoch_jd) < 1e-6:
-
-            for k, (r_vec, v_vec) in zip(indices, states):
-                results[k] = _stateRecord(r_vec, v_vec, jd_target)
-
-            continue
-
-
-        try:
-
-            sim = rebound.Simulation()
-            sim.integrator = "ias15"
-
-            # The Sun first, then the planets, at the epoch of the elements
-            for name in ["Sun"] + list(planet_names):
-
-                state, mass = ephemBodyStateRebound(name, epoch_jd, ephem)
-
-                if name == "Earth":
-                    mass += ephemBodyStateRebound("Luna", epoch_jd, ephem)[1]
-
-                sim.add(m=mass, x=state[0], y=state[1], z=state[2], vx=state[3], vy=state[4],
-                    vz=state[5])
-
-            sim.N_active = sim.N
-
-            # The bodies are massless and heliocentric elements are relative to the Sun
-            sun = sim.particles[0]
-
-            for r_vec, v_vec in states:
-                sim.add(x=sun.x + r_vec[0], y=sun.y + r_vec[1], z=sun.z + r_vec[2],
-                    vx=sun.vx + v_vec[0], vy=sun.vy + v_vec[1], vz=sun.vz + v_vec[2])
-
-            t_target = (jd_target - epoch_jd)/SIM_TIME_DAYS
-            sim.dt = 0.01 if t_target > 0 else -0.01
-            sim.integrate(t_target)
-
-            sun = sim.particles[0]
-
-            for j, k in enumerate(indices):
-
-                p = sim.particles[sim.N_active + j]
-                r_vec = np.array([p.x - sun.x, p.y - sun.y, p.z - sun.z])
-                v_vec = np.array([p.vx - sun.vx, p.vy - sun.vy, p.vz - sun.vz])
-
-                results[k] = _stateRecord(r_vec, v_vec, jd_target)
-
-        # An epoch outside of the ephemeris leaves the bodies of the group not propagated
-        except ValueError:
-            continue
+    for rec in results:
+        if rec is not None:
+            rec['jd'] = jd_target
 
     return results
 
@@ -759,15 +520,16 @@ def _bodyRows(search, propagated=None):
         row = [('rank', rank + 1), ('name', match['name']), ('q_AU', match['q']),
             ('e', match['e']), ('incl_deg', match['incl']), ('peri_deg', match['peri']),
             ('node_deg', match['node']), ('h_mag', match['h_mag']),
-            ('catalogue_epoch_jd', match['epoch_jd'])]
+            ('catalogue_epoch_jd', match['epoch_jd']),
+            ('catalogue_mean_anomaly_deg', match['mean_anomaly'])]
 
         row += [(label, value) for label, value in zip(search['labels'], match['d_values'])]
 
         if propagated is not None:
 
             p = propagated[rank]
-            keys = ['jd', 'q', 'a', 'e', 'incl', 'peri', 'node', 'mean_anomaly']
-            names = ['jd', 'q_AU', 'a_AU', 'e', 'incl_deg', 'peri_deg', 'node_deg',
+            keys = ['jd', 'jd_tdb', 'q', 'a', 'e', 'incl', 'peri', 'node', 'mean_anomaly']
+            names = ['jd', 'jd_tdb', 'q_AU', 'a_AU', 'e', 'incl_deg', 'peri_deg', 'node_deg',
                 'mean_anomaly_deg']
 
             for key, name in zip(keys, names):
@@ -819,7 +581,8 @@ def saveMatches(file_path, search, meteor=None, propagated=None):
             entry['at_epoch'] = None if propagated is None else propagated[len(matches)]
             matches.append(entry)
 
-        out = {'meteor': meteor, 'criteria': search['labels'], 'ranked_by': search['labels'][0],
+        out = {'meteor': meteor, 'criteria': search['labels'], 'criteria_keys': search['keys'],
+            'ranked_by': search['labels'][0],
             'geocentric_source': search['geocentric_source'],
             'heliocentric_source': search['heliocentric_source'],
             'frame': 'heliocentric ecliptic J2000, AU and AU/day' if propagated is not None else None,
@@ -940,8 +703,9 @@ if __name__ == "__main__":
   The criteria on the radiant (DN, DR, DX) need a geocentric radiant, solar longitude and speed. A
   pickle has them, orbital elements given by hand may be completed with --ra, --dec, --sol and
   --vg, and where they are missing they are derived from the elements. The bodies of the
-  catalogues have only elements, so theirs are always derived where their orbit comes within 0.05 AU
-  of the Earth's, or comes closest to it, and a body that does not reach 1 AU has no value (n/a).
+  catalogues have only elements, so theirs are always derived where their orbit comes closest to the
+  Earth's (one radiant near each node, such as the eta Aquariids and the Orionids of 1P/Halley), and a
+  body whose orbit never comes within 0.25 AU of the Earth's has no value (n/a).
   The Vida criterion (DVVIDA) takes the corrected heliocentric direction and speed instead. A
   pickle has them, a radiant given by hand is converted to them, and otherwise they are derived
   from the elements at the same place.
@@ -1000,9 +764,11 @@ if __name__ == "__main__":
         ".json, a CSV table otherwise.")
 
     arg_parser.add_argument('--propagate', action="store_true", \
-        help="Bring the top N bodies to the reference epoch of the meteor with REBOUND and list their "
-        "elements there, and save them with --save. The epoch is that of the pickle, or --jd. This "
-        "does not change the ranking.")
+        help="Bring the top N bodies to the reference epoch of the meteor with the integrator of "
+        "wmpl.Rebound.REBOUND and list their elements there, and save them with --save. The epoch is "
+        "that of the pickle, or --jd (UTC). This does not change the ranking. The JSON saved with it "
+        "can be given to wmpl.Rebound.REBOUND --parent_bodies, which then starts the bodies from "
+        "these states instead of propagating them again.")
 
     arg_parser.add_argument('--jd', metavar='JD', type=float, \
         help="Reference epoch of the meteor as a Julian date, if there is no pickle.")
@@ -1138,7 +904,8 @@ if __name__ == "__main__":
             else " (derived from the elements, where the orbit comes closest to the Earth's):"))
 
         if not search['query_' + kind]:
-            print("  The orbit does not reach 1 AU, so it has no radiant and these criteria have no value.")
+            print("  The orbit does not come within {:.2f} AU of the Earth's, so it has no radiant and these "
+                "criteria have no value.".format(RADIANT_MAX_DISTANCE))
 
         for lon, lat, sol, speed in search['query_' + kind]:
             print(line.format(np.degrees(lon), np.degrees(lat), np.degrees(sol), speed))
@@ -1171,7 +938,13 @@ if __name__ == "__main__":
             propagated = propagateBodies(matches, jd_ref)
 
         except ImportError as err:
-            print("REBOUND is needed to propagate the bodies: {:s}".format(str(err)), file=sys.stderr)
+            print("REBOUND and REBOUNDx are needed to propagate the bodies: {:s}".format(str(err)),
+                file=sys.stderr)
+            sys.exit(1)
+
+        # A REBOUNDx compiled against another REBOUND, which wmpl.Rebound.REBOUND explains
+        except RuntimeError as err:
+            print(str(err), file=sys.stderr)
             sys.exit(1)
 
         print("Heliocentric elements at the reference epoch of the meteor, JD {:.5f} (ecliptic J2000):".format(

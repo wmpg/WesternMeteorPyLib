@@ -182,9 +182,14 @@ python -m wmpl.Utils.ParentBodySearch traj.pickle -d DSH DN DD
   with the bodies in the ranking order, is saved by default beside the pickle (`--no_plot` to
   skip it, `--plot_path` to place it).
 - **The radiant of a catalogue body.** A body has only its elements, so the criteria on the radiant
-  need one derived from them: `calcGeocentricFromElements` cuts the orbit where it is 1 AU from
-  the Sun, takes the point or points within 0.05 AU of the Earth's orbit, or the closest one if
-  there is none, and subtracts the Earth's velocity there. A body that does not reach 1 AU has no
+  need one derived from them: `calcGeocentricFromElements` takes the points where the orbit comes
+  closest to the Earth's (a circle of 1 AU), one near each node, keeps those within 0.25 AU
+  (`RADIANT_MAX_DISTANCE`), and subtracts the Earth's velocity there. The 0.25 AU is set by the
+  known parents: the Orionid branch of 1P/Halley is 0.15 AU out and the November Taurid branch of
+  2P/Encke 0.19 AU, while the far points of Phaethon (0.36 AU) and Swift-Tuttle (0.71 AU) give no
+  shower. Taking the closest points rather than the crossings of 1 AU also covers parents that never
+  reach 1 AU: 8P/Tuttle (q = 1.03 AU, Ursids) and 21P/Giacobini-Zinner (q = 1.01 AU, Draconids). A
+  body whose orbit never comes within 0.25 AU of the Earth's has no
   value (`n/a`), and it is left out if the criterion is the first. The orbit that is searched
   for uses its measured radiant if it has one (a pickle, or `--ra --dec --sol --vg`) and the
   derived one otherwise. For Phaethon the derived radiant is 1.6 deg and 0.4 km/s from the
@@ -195,13 +200,17 @@ python -m wmpl.Utils.ParentBodySearch traj.pickle -d DSH DN DD
   uses `L_h`, `B_h`, `v_h` from the pickle, or the radiant given by hand converted with
   `calcHeliocentricFromGeocentric`.
 - **Epoch.** The ranking uses the catalogue elements as they are, each at its own epoch. `--propagate`
-  does not change it. It brings the top N bodies to the reference epoch of the meteor, with
-  the Sun and the planets from DE430 and no non-gravitational forces, and lists and saves their elements and
+  does not change it. It brings the top N bodies to the reference epoch of the meteor with the
+  integrator of `wmpl.Rebound.REBOUND` (Sun, planets and Moon from DE430, the Earth's J2 and J4,
+  general relativity, no non-gravitational forces), and lists and saves their elements and
   heliocentric state there (ecliptic J2000, AU and AU/day), to be used as the initial
   conditions of a REBOUND integration. Bodies with no epoch in the catalogue, on parabolic or hyperbolic
   orbits, or outside the ephemeris are not propagated.
 - **Saving.** `--save matches.csv` or `--save matches.json` writes the matches with the value of every
   criterion that was given, in the order given, plus the propagated state with `--propagate`.
+- **Integrating the candidates.** The JSON can be given to `wmpl.Rebound.REBOUND --parent_bodies`,
+  which integrates the bodies alongside the meteoroid and its clones and follows the D criteria
+  between them over time. See [REBOUND, parent bodies](REBOUND.md#parent-bodies).
 
 ---
 

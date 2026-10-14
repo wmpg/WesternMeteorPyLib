@@ -30,6 +30,27 @@ GEMINID_RADIANT = (np.radians(112.3), np.radians(32.3), np.radians(262.1), 33.8)
 PHAETHON = (0.1400, 0.8900, 22.25, 322.2, 265.2)
 
 
+def _elementsFromState(r_vec, v_vec):
+    """ Heliocentric elements through a state, for GM = 1: 'q', 'e', 'incl', 'node', 'peri' (radians).
+    """
+
+    r = np.sqrt(r_vec @ r_vec)
+    h_vec = np.cross(r_vec, v_vec)
+    h = np.sqrt(h_vec @ h_vec)
+    e_vec = np.cross(v_vec, h_vec) - r_vec/r
+    e = np.sqrt(e_vec @ e_vec)
+
+    node_vec = np.array([-h_vec[1], h_vec[0], 0.0])
+    node_mag = np.sqrt(node_vec @ node_vec)
+
+    peri = np.arccos(np.clip((node_vec @ e_vec)/(node_mag*e), -1.0, 1.0))
+    if e_vec[2] < 0:
+        peri = 2*np.pi - peri
+
+    return {'q': h**2/(1.0 + e), 'e': e, 'incl': np.arccos(np.clip(h_vec[2]/h, -1.0, 1.0)),
+        'node': np.arctan2(node_vec[1], node_vec[0]) % (2*np.pi), 'peri': peri}
+
+
 def _catalogue():
     """ A small catalogue in the format of the loaders: name, q, e, i, peri, node, H, epoch JD and
         mean anomaly. """
@@ -94,10 +115,12 @@ def test_geocentric_from_elements_recovers_the_orbit():
         v_geo = -radiant_ecl*vg/SPEED_EARTH
         v_earth = np.array([-np.sin(lon), np.cos(lon), 0.0])
 
-        el = pbs._elementsFromState(np.array([np.cos(lon), np.sin(lon), 0.0]), v_geo + v_earth)
+        el = _elementsFromState(np.array([np.cos(lon), np.sin(lon), 0.0]), v_geo + v_earth)
 
+        # The closest point is found on a grid refined to about 0.003 deg, so the orbit comes back to
+        #   that order
         if np.allclose([el['q'], el['e'], el['incl'], el['node'], el['peri']],
-            [q, e, incl, node, peri], atol=1e-8):
+            [q, e, incl, node, peri], atol=1e-4):
             found = True
 
     assert found
@@ -123,8 +146,46 @@ def test_geocentric_from_elements_gives_the_geminid_radiant_for_phaethon():
 
 def test_orbit_that_does_not_reach_the_earth_has_no_radiant():
 
+    # Perihelion beyond, and aphelion inside, the reach of 0.25 AU
     assert calcGeocentricFromElements(1.8, 0.2, 0.1, 0.5, 0.5) == []
     assert calcGeocentricFromElements(0.3, 0.1, 0.1, 0.5, 0.5) == []
+
+    # A hyperbolic orbit that passes 0.38 AU from the Earth's
+    assert calcGeocentricFromElements(0.9, 1.002, np.radians(70), np.radians(200), np.radians(100)) == []
+
+
+def test_known_parents_give_the_radiants_of_their_showers():
+    """ Parent bodies and their showers, among them two parents that never reach 1 AU (8P/Tuttle,
+        21P/Giacobini-Zinner) and one with a shower at each node (1P/Halley). The D_N limits are
+        loose bounds around what this derivation gives against the IAU MDC shower radiants. """
+
+    showers = {
+        "Geminids": (112.3, 32.3, 262.1, 33.8), "Orionids": (95.5, 15.9, 208.0, 66.5),
+        "eta Aquariids": (338.0, -1.0, 45.5, 65.5), "Perseids": (48.2, 58.1, 140.0, 59.1),
+        "Leonids": (153.6, 21.6, 235.3, 70.0), "Ursids": (219.4, 75.3, 270.7, 32.9),
+        "Draconids": (263.1, 55.8, 195.4, 20.4)}
+
+    # q, e, i, node, peri, the showers, and the largest D_N accepted
+    parents = [
+        ((0.140, 0.890, 22.25, 265.2, 322.2), ["Geminids"], 0.05),
+        ((0.575, 0.968, 162.19, 59.1, 112.24), ["Orionids", "eta Aquariids"], 0.2),
+        ((0.960, 0.963, 113.45, 139.38, 152.98), ["Perseids"], 0.05),
+        ((0.976, 0.906, 162.49, 235.27, 172.5), ["Leonids"], 0.05),
+        ((1.027, 0.820, 54.98, 270.34, 207.51), ["Ursids"], 0.08),
+        ((1.010, 0.710, 31.99, 195.4, 172.8), ["Draconids"], 0.05)]
+
+    for (q, e, i, node, peri), names, limit in parents:
+
+        radiants = calcGeocentricFromElements(q, e, np.radians(i), np.radians(node), np.radians(peri))
+
+        assert radiants
+
+        for name in names:
+
+            ra, dec, sol, vg = showers[name]
+            shower = (np.radians(ra), np.radians(dec), np.radians(sol), vg)
+
+            assert min(calcDN(*(shower + r)) for r in radiants) < limit, name
 
 
 def test_single_criterion_keeps_the_original_return_shape():
@@ -263,33 +324,21 @@ def test_bar_plot_is_written():
         assert os.path.getsize(path) > 1000
 
 
-def test_state_and_elements_are_inverses():
+def test_propagation_goes_through_rebound_py_and_leaves_unusable_bodies_alone():
+    """ The bodies are brought to the epoch by wmpl.Rebound.REBOUND, and integrating back to the
+        starting epoch returns the starting elements. """
 
-    for q, e, i, peri, node, m in ((0.14, 0.89, 22.0, 322.0, 265.0, 231.0),
-                                   (0.9, 0.3, 160.0, 12.0, 300.0, 5.0),
-                                   (1.2, 0.1, 0.5, 200.0, 20.0, 359.0)):
+    from wmpl.Rebound import REBOUND as reb
 
-        r_vec, v_vec = pbs._stateFromElements(q, e, np.radians(i), np.radians(node),
-            np.radians(peri), np.radians(m))
-
-        el = pbs._elementsFromState(r_vec, v_vec)
-
-        assert abs(el['q'] - q) < 1e-10
-        assert abs(el['e'] - e) < 1e-10
-        assert abs(np.degrees(el['incl']) - i) < 1e-8
-        assert abs(np.degrees(el['node']) - node) < 1e-8
-        assert abs(np.degrees(el['peri']) - peri) < 1e-8
-        assert abs(np.degrees(el['mean_anomaly']) - m) < 1e-7
-
-
-def test_propagation_is_reversible_and_leaves_unusable_bodies_alone():
+    if not reb.REBOUND_FOUND:
+        print("  (skipped, REBOUND is not available)")
+        return
 
     try:
-        import rebound
-        from wmpl.Rebound.REBOUND import ephemBodyStateRebound
+        reb.checkReboundxUsable()
 
-    except ImportError:
-        print("  (skipped, REBOUND is not available)")
+    except RuntimeError:
+        print("  (skipped, REBOUNDx does not attach to REBOUND in this environment)")
         return
 
     if not os.path.isfile(pbs.config.jpl_ephem_file):
@@ -301,26 +350,38 @@ def test_propagation_is_reversible_and_leaves_unusable_bodies_alone():
     parabolic = dict(body, e=1.0)
     no_epoch = dict(body, epoch_jd=None)
 
-    out = pbs.propagateBodies([body, parabolic, no_epoch], 2459000.5)
+    jd_utc = 2459000.5
+    out = pbs.propagateBodies([body, parabolic, no_epoch], jd_utc)
 
     assert out[1] is None and out[2] is None
 
     there = out[0]
 
+    assert there['jd'] == jd_utc
+    assert abs(there['jd_tdb'] - reb.utcToTdb(jd_utc)) < 1e-12
+
     # Over six years the elements move, but only a little for an orbit like this
     assert abs(there['q'] - 0.8) < 0.05
-    assert there['jd'] == 2459000.5
 
-    # Integrating back to the starting epoch returns the starting elements
-    back = pbs.propagateBodies([{'q': there['q'], 'e': there['e'], 'incl': there['incl'],
-        'peri': there['peri'], 'node': there['node'], 'epoch_jd': 2459000.5,
+    # The saved state is the one of the saved elements
+    state = reb.heliocentricStateFromElements(there['q'], there['e'], there['incl'], there['node'],
+        there['peri'], there['mean_anomaly'])
+
+    assert np.allclose(state, there['position'] + there['velocity'], atol=1e-9)
+
+    # Integrating back to the starting epoch returns the starting elements. Not to machine precision:
+    #   each leg starts the planets from DE430 at its own epoch rather than from where the other leg
+    #   left them (the integrated Moon drifts from the ephemeris in six years), which leaves 1e-6 in
+    #   q and e and 0.003 deg in the mean anomaly after the twelve years there and back
+    back = reb.propagateBodiesToEpoch([{'q': there['q'], 'e': there['e'], 'incl': there['incl'],
+        'peri': there['peri'], 'node': there['node'], 'epoch_jd': there['jd_tdb'],
         'mean_anomaly': there['mean_anomaly']}], 2461200.5)[0]
 
     assert abs(back['q'] - 0.8) < 1e-5
     assert abs(back['e'] - 0.5) < 1e-5
-    assert abs(back['incl'] - 10.0) < 1e-3
-    assert abs(back['peri'] - 60.0) < 1e-2
-    assert abs(back['node'] - 120.0) < 1e-2
+    assert abs(back['incl'] - 10.0) < 1e-4
+    assert abs(back['peri'] - 60.0) < 1e-3
+    assert abs(back['node'] - 120.0) < 1e-3
     assert abs(((back['mean_anomaly'] - 200.0) + 180) % 360 - 180) < 1e-2
 
 

@@ -242,19 +242,61 @@ def calcVgComponents(ra, dec, sol, vg):
 
 
 
-def _earthPointsFromElements(q, e, i, node, peri, max_distance=0.05):
-    """ The points of an orbit that are 1 AU from the Sun and within reach of the Earth's orbit, with
-        the heliocentric velocity there and the Earth's. Shared by the conversions to the geocentric
-        and to the heliocentric radiant.
+# How far from the Earth's orbit, in AU, an orbit may pass and still be given a radiant. The
+#   streams of known parents are this far out: the Orionid branch of 1P/Halley is 0.15 AU from the
+#   Earth's orbit and the November Taurid branch of 2P/Encke 0.19 AU, while the far points of
+#   Phaethon and Swift-Tuttle, which no shower comes from, are 0.36 AU and 0.71 AU out.
+RADIANT_MAX_DISTANCE = 0.25
 
-        An orbit cuts the sphere of 1 AU in two points, one on each side of perihelion, but the
-        Earth is on that sphere only in the ecliptic, so a point well out of the ecliptic is a
-        place the Earth is never at, and not a place where the orbit can meet it. The points kept
-        are those that are within max_distance of the Earth's orbit. If neither is, the one that
-        is closest is kept, which is where the orbit comes nearest to the Earth's, so that the
-        orbit still gets the radiant it would show there. An orbit with both points in the
-        ecliptic, such as a low inclination one, keeps two, at different solar longitudes. An
-        orbit that does not reach 1 AU has none.
+
+def _orbitPointAndVelocity(f, p, e, cos_i, sin_i, cos_O, sin_O, peri):
+    """ Heliocentric position and velocity at a true anomaly, for GM = 1. """
+
+    u = peri + f
+    cos_u, sin_u = math.cos(u), math.sin(u)
+
+    r = p/(1.0 + e*math.cos(f))
+
+    r_hat = np.array([cos_O*cos_u - sin_O*sin_u*cos_i, sin_O*cos_u + cos_O*sin_u*cos_i, sin_u*sin_i])
+    t_hat = np.array([-cos_O*sin_u - sin_O*cos_u*cos_i, -sin_O*sin_u + cos_O*cos_u*cos_i, cos_u*sin_i])
+
+    v = (e*math.sin(f)*r_hat + (1.0 + e*math.cos(f))*t_hat)/math.sqrt(p)
+
+    return r*r_hat, v
+
+
+def _distancesToEarthOrbit(f, p, e, cos_i, sin_i, cos_O, sin_O, peri):
+    """ Distance of the points of an orbit at the given true anomalies (an array) from the Earth's
+        orbit, a circle of 1 AU in the ecliptic. """
+
+    u = peri + f
+    cos_u, sin_u = np.cos(u), np.sin(u)
+    r = p/(1.0 + e*np.cos(f))
+
+    x = r*(cos_O*cos_u - sin_O*sin_u*cos_i)
+    y = r*(sin_O*cos_u + cos_O*sin_u*cos_i)
+    z = r*sin_u*sin_i
+
+    return np.sqrt((np.sqrt(x*x + y*y) - 1.0)**2 + z*z)
+
+
+def _earthPointsFromElements(q, e, i, node, peri, max_distance=RADIANT_MAX_DISTANCE):
+    """ The points of an orbit that are closest to the Earth's orbit, with the heliocentric velocity
+        there and the Earth's. Shared by the conversions to the geocentric and to the heliocentric
+        radiant.
+
+        The Earth is taken on a circular orbit of 1 AU in the ecliptic. The distance from it along
+        the orbit has a local minimum near each node, which are the places where meteoroids on the
+        orbit can come closest to the Earth: they are the minimum orbit intersection distance with a
+        circular Earth, and an orbit generally has two of them, which are two showers at two solar
+        longitudes (the eta Aquariids and the Orionids of 1P/Halley). The minima within max_distance
+        are kept. An orbit that comes no closer than that has no radiant, which also covers an orbit
+        that stays well inside or outside 1 AU.
+
+        The Earth is put at the longitude of the point, and moves on its circle. The point is not on
+        the Earth's orbit unless the distance is zero, so the radiant is the one the orbit would
+        show there, as for a stream displaced onto the Earth: the heliocentric velocity is that of
+        the orbit at its own distance from the Sun.
 
         Speeds are in units of the circular speed at 1 AU, for which GM = 1.
 
@@ -266,78 +308,91 @@ def _earthPointsFromElements(q, e, i, node, peri, max_distance=0.05):
         peri: [float] argument of perihelion (radians)
 
     Keyword arguments:
-        max_distance: [float] how far from the Earth's orbit, in AU, a point of 1 AU can be and
-            still be kept
+        max_distance: [float] how far from the Earth's orbit, in AU, a point can be and still be kept
 
     Return:
         [list] A (heliocentric velocity, Earth velocity, Earth ecliptic longitude) tuple for each
             point kept, the velocities as ecliptic vectors.
     """
 
-    # A circular orbit has no perihelion to speak of, and cuts 1 AU everywhere or nowhere
-    if e <= 0:
+    if (q <= 0) or (e < 0):
         return []
 
-    # Semi-latus rectum, which is defined for the parabolic and hyperbolic orbits too
+    # No point of the orbit is closer to the Earth's orbit than its distance from the sphere of 1 AU,
+    #   so an orbit that stays further than max_distance inside or outside it has no radiant
+    if q > 1.0 + max_distance:
+        return []
+
+    if (e < 1.0) and (q*(1.0 + e)/(1.0 - e) < 1.0 - max_distance):
+        return []
+
     p = q*(1.0 + e)
+    args = (p, e, math.cos(i), math.sin(i), math.cos(node), math.sin(node), peri)
 
-    # The orbit is at 1 AU where p/(1 + e cos(f)) = 1
-    cos_f = (p - 1.0)/e
+    # The range of true anomaly: the whole circle for an ellipse, between the asymptotes otherwise
+    if e < 1.0:
+        f_lo, f_hi = -math.pi, math.pi
+        cyclic = True
 
-    if abs(cos_f) > 1.0:
-        return []
+    else:
+        f_lim = math.acos(-1.0/e) if e > 1.0 else math.pi
+        f_lo, f_hi = -f_lim + 1e-6, f_lim - 1e-6
+        cyclic = False
 
-    sin_f_abs = math.sqrt(1.0 - cos_f**2)
+    # Bracket the local minima on a grid of 1 deg
+    n_grid = 360
+    f_grid = np.linspace(f_lo, f_hi, n_grid, endpoint=not cyclic)
+    d_grid = _distancesToEarthOrbit(f_grid, *args)
+    step = f_grid[1] - f_grid[0]
 
-    cos_i, sin_i = math.cos(i), math.sin(i)
-    cos_O, sin_O = math.cos(node), math.sin(node)
+    if cyclic:
+        is_min = (d_grid <= np.roll(d_grid, 1)) & (d_grid < np.roll(d_grid, -1))
 
-    # Components of the heliocentric velocity along the radius and across it
-    sqrt_inv_p = 1.0/math.sqrt(p)
+    else:
+        is_min = np.zeros(n_grid, dtype=bool)
+        is_min[1:-1] = (d_grid[1:-1] <= d_grid[:-2]) & (d_grid[1:-1] < d_grid[2:])
 
-    candidates = []
+    # Refine each minimum on two finer grids around it, to about 0.003 deg
+    minima = []
+    for f_k in f_grid[is_min]:
 
-    for sin_f in (sin_f_abs, -sin_f_abs):
+        f_best, half = f_k, step
+        for _ in range(2):
+            f_fine = f_best + np.linspace(-half, half, 41)
+            d_fine = _distancesToEarthOrbit(f_fine, *args)
+            f_best = f_fine[np.argmin(d_fine)]
+            half = half/20.0
 
-        # Argument of latitude of the point
-        f = math.atan2(sin_f, cos_f)
-        u = peri + f
-        cos_u, sin_u = math.cos(u), math.sin(u)
+        minima.append((float(_distancesToEarthOrbit(np.array([f_best]), *args)[0]), float(f_best)))
 
-        # Unit vectors along the radius and across it, in the ecliptic frame
-        r_hat = np.array([cos_O*cos_u - sin_O*sin_u*cos_i, sin_O*cos_u + cos_O*sin_u*cos_i,
-            sin_u*sin_i])
-        t_hat = np.array([-cos_O*sin_u - sin_O*cos_u*cos_i, -sin_O*sin_u + cos_O*cos_u*cos_i,
-            cos_u*sin_i])
+    points = []
+    for dist, f_min in minima:
 
-        v_helio = sqrt_inv_p*(e*sin_f*r_hat + (1.0 + e*cos_f)*t_hat)
+        if dist > max_distance:
+            continue
 
-        # The Earth is below or above the point, on a circle of 1 AU, moving across the radius
-        earth_lon = math.atan2(r_hat[1], r_hat[0])
+        pos, v_helio = _orbitPointAndVelocity(f_min, *args)
+
+        # The Earth at the longitude of the point, moving across its radius
+        earth_lon = math.atan2(pos[1], pos[0])
         v_earth = np.array([-math.sin(earth_lon), math.cos(earth_lon), 0.0])
 
-        # The distance of the point from the Earth's orbit is its height above the ecliptic
-        candidates.append((abs(r_hat[2]), (v_helio, v_earth, earth_lon)))
+        points.append((v_helio, v_earth, earth_lon))
 
-    near = [c for dist, c in candidates if dist <= max_distance]
-
-    # Nothing within reach: keep the point that is closest
-    if not near:
-        near = [min(candidates, key=lambda c: c[0])[1]]
-
-    return near
+    return points
 
 
-def calcGeocentricFromElements(q, e, i, node, peri, max_distance=0.05):
+def calcGeocentricFromElements(q, e, i, node, peri, max_distance=RADIANT_MAX_DISTANCE):
     """ Derive the geocentric radiant and speed an orbit would show at Earth, from its elements alone.
 
         The Valsecchi-type criteria compare the geocentric radiant, the solar longitude and the
         geocentric speed, which a catalogue of asteroids and comets does not hold. They are
         reconstructed in the Opik way: the Earth is taken on a circular orbit of 1 AU in the
-        ecliptic, the orbit is taken where it is 1 AU from the Sun and within max_distance of the
-        Earth's orbit, or at its closest to it (see _earthPointsFromElements), and the geocentric
-        velocity is the heliocentric velocity there less the velocity of the Earth. An orbit with
-        two such points gets two radiants, and an orbit that does not reach 1 AU gets none.
+        ecliptic, the orbit is taken at the points where it comes closest to the Earth's, if they
+        are within max_distance of it (see _earthPointsFromElements), and the geocentric velocity
+        is the heliocentric velocity there less the velocity of the Earth. An orbit with two such
+        points gets two radiants, at two solar longitudes, and one that never comes that close
+        gets none.
 
         The elements are referred to J2000, so the solar longitude is J2000 too, and the
         precession since then (0.36 deg in 25 years) is left in. The speed is scaled with
@@ -352,8 +407,8 @@ def calcGeocentricFromElements(q, e, i, node, peri, max_distance=0.05):
         peri: [float] argument of perihelion (radians)
 
     Keyword arguments:
-        max_distance: [float] how far from the Earth's orbit, in AU, a point of 1 AU can be and
-            still be kept
+        max_distance: [float] how far from the Earth's orbit, in AU, the orbit can pass and still
+            be given a radiant there
 
     Return:
         [list] A (ra, dec, sol, vg) tuple for each point kept, with the angles in radians and the
@@ -390,7 +445,7 @@ def calcGeocentricFromElements(q, e, i, node, peri, max_distance=0.05):
     return results
 
 
-def calcHeliocentricFromElements(q, e, i, node, peri, max_distance=0.05):
+def calcHeliocentricFromElements(q, e, i, node, peri, max_distance=RADIANT_MAX_DISTANCE):
     """ Derive the corrected heliocentric direction and speed of an orbit at Earth, from its elements
         alone, which are the arguments of the Vida criterion calcDV.
 
@@ -409,8 +464,8 @@ def calcHeliocentricFromElements(q, e, i, node, peri, max_distance=0.05):
         peri: [float] argument of perihelion (radians)
 
     Keyword arguments:
-        max_distance: [float] how far from the Earth's orbit, in AU, a point of 1 AU can be and
-            still be kept
+        max_distance: [float] how far from the Earth's orbit, in AU, the orbit can pass and still
+            be given a radiant there
 
     Return:
         [list] A (Lh, Bh, sol, Vh) tuple for each point kept, with the angles in radians and the
@@ -1612,6 +1667,87 @@ def getHeliocentricCriterion(key):
 
     raise ValueError("Unknown criterion {:s}. Available: {:s}.".format(key,
         ", ".join(HELIOCENTRIC_CRITERIA_KEYS)))
+
+
+# Every criterion key, of the three kinds
+ALL_CRITERIA_KEYS = ELEMENT_CRITERIA_KEYS + GEOCENTRIC_CRITERIA_KEYS + HELIOCENTRIC_CRITERIA_KEYS
+
+# How an orbit that has only its elements gets what the criteria on the radiant compare
+DERIVED_FROM_ELEMENTS = {
+    'geocentric': calcGeocentricFromElements,
+    'heliocentric': calcHeliocentricFromElements,
+    }
+
+
+def lookupCriterion(key):
+    """ Look up a criterion of any kind by its key: on the orbital elements, on the geocentric
+        radiant, or on the corrected heliocentric direction.
+
+    Arguments:
+        key: [str] key of the criterion, such as 'DSH', 'DN' or 'DVVIDA', not case sensitive
+
+    Return:
+        [tuple] (key in upper case, label, function, kind), the kind being 'elements',
+            'geocentric' or 'heliocentric'
+    """
+
+    for kind, getter in (('elements', getElementCriterion), ('geocentric', getGeocentricCriterion),
+        ('heliocentric', getHeliocentricCriterion)):
+
+        try:
+            label, func = getter(key)
+            return key.upper(), label, func, kind
+
+        except ValueError:
+            pass
+
+    raise ValueError("Unknown criterion {:s}. Available: {:s}.".format(key,
+        ", ".join(ALL_CRITERIA_KEYS)))
+
+
+def radiantCriterionMin(func, radiants1, radiants2):
+    """ Value of a criterion on the radiant between two orbits, each of which may meet the Earth's
+        orbit in two places: the smallest value over the pairs, and infinity if either orbit has no
+        radiant because it does not come close enough to the Earth's orbit.
+
+    Arguments:
+        func: [function] function of the two radiants, from GEOCENTRIC_CRITERIA or
+            HELIOCENTRIC_CRITERIA
+        radiants1: [list] radiants of the first orbit
+        radiants2: [list] radiants of the second orbit
+
+    Return:
+        [float] the smallest value
+    """
+
+    values = [float(func(r1, r2)) for r1 in radiants1 for r2 in radiants2]
+
+    return min(values) if values else np.inf
+
+
+def calcCriterionFromElements(criterion, orbit1, orbit2):
+    """ Value of a criterion of any kind between two orbits given only by their elements. A
+        criterion on the radiant reads the radiants derived from the elements (see
+        DERIVED_FROM_ELEMENTS).
+
+    Arguments:
+        criterion: [tuple] return of lookupCriterion
+        orbit1: [tuple] (q, e, i, node, peri) of the first orbit, the angles in radians
+        orbit2: [tuple] the same for the second orbit
+
+    Return:
+        [float] value of the criterion, infinite for a criterion on the radiant when either orbit
+            does not come close enough to the Earth's orbit
+    """
+
+    _, _, func, kind = criterion
+
+    if kind == 'elements':
+        return float(func(tuple(orbit1), tuple(orbit2)))
+
+    derive = DERIVED_FROM_ELEMENTS[kind]
+
+    return radiantCriterionMin(func, derive(*orbit1), derive(*orbit2))
 
 
 def getGeocentricCriterion(key):
