@@ -568,3 +568,19 @@ def testMoonEncounterIsGeometricallyReachableOnlyNearEarth(reb):
     earth_radius_au = 6371.0/149597870.7
 
     assert (moon_perigee_au - earth_radius_au) > 3.0*reb.HILL_RADII_AU["Luna"]
+
+
+def testTimeSpanUsesTheUnitThatSuitsItsLength(reb):
+    """ Spans of a year or more lead with years, spans under a day add hours, and the days are
+    always printed. The sign is ignored, since the direction is stated separately.
+    """
+
+    assert reb.formatTimeSpan(60) == "60.00 days"
+    assert reb.formatTimeSpan(-60) == "60.00 days"
+    assert reb.formatTimeSpan(36525) == "100.00 years (36525.00 days)"
+    assert reb.formatTimeSpan(-365.25) == "1.00 years (365.25 days)"
+    assert reb.formatTimeSpan(0.25) == "0.25 days (6.00 h)"
+    assert reb.formatTimeSpan(0.0123, decimals=4) == "0.0123 days (0.2952 h)"
+
+    # Years keep a decimal even when the days have none, so 1288 d does not read as "4 years"
+    assert reb.formatTimeSpan(1288.3, decimals=0) == "3.5 years (1288 days)"

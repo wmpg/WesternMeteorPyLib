@@ -234,6 +234,37 @@ SUN_ENCOUNTER_AU = 0.1
 SUN_RADIUS_AU = 695700.0/149597870.7
 
 
+def formatTimeSpan(days, decimals=2):
+    """ Format a time span given in days in the unit that suits its length.
+
+    Spans of a Julian year or more lead with years and keep the days in parentheses, spans shorter
+    than a day add the hours, and everything in between is given in days. The days are always
+    printed, so the exact span stays readable at any scale. Years get at least one decimal, so that
+    e.g. 1288 days is not rounded to "4 years".
+
+    Arguments:
+        days: [float] Time span in days. Its sign is ignored: callers state the direction.
+
+    Keyword arguments:
+        decimals: [int] Decimal places of the days and hours, and of the years if not 0. Default 2.
+
+    Return:
+        [str] E.g. "36525.00 days" -> "100.00 years (36525.00 days)", "0.25 days" ->
+            "0.25 days (6.00 h)", "60.00 days" -> "60.00 days".
+    """
+
+    days = abs(days)
+
+    if days >= 365.25:
+        return "{:.{ny}f} years ({:.{n}f} days)".format(days/365.25, days, ny=max(decimals, 1),
+                                                         n=decimals)
+
+    if days < 1.0:
+        return "{:.{n}f} days ({:.{n}f} h)".format(days, 24*days, n=decimals)
+
+    return "{:.{n}f} days".format(days, n=decimals)
+
+
 def _encounterThreshold(body, n_hill):
     """ Distance below which a passage by the given body counts as a close encounter.
 
@@ -2288,7 +2319,7 @@ def reboundSimulate(
 
     if verbose:
         print("Running simulation...")
-        print(f"Simulation time: {tsimend:.2f} years ({tsimend*365.25:.2f} days)")
+        print("Simulation time: {:s}".format(formatTimeSpan(sim_days)))
         print(f"Number of outputs: {n_outputs}")
         print(f"Direction: {direction}")
 
@@ -2559,8 +2590,8 @@ if __name__ == "__main__":
     
     # State the integration span up front, so it is visible while the integration is running and
     # not only in the summary printed at the end
-    print("Integrating {:.2f} days {:s} from the reference epoch {:.6f} JD (TDB) = {:s} UTC.".format(
-        sim_days, direction, traj.jdt_ref,
+    print("Integrating {:s} {:s} from the reference epoch {:.6f} JD (TDB) = {:s} UTC.".format(
+        formatTimeSpan(sim_days), direction, traj.jdt_ref,
         astropy.time.Time(traj.jdt_ref, format='jd', scale='utc').iso))
 
     # Run the simulation for the given number of days from the epoch of the trajectory
@@ -2746,10 +2777,10 @@ if __name__ == "__main__":
     # short of the request (for example because the object impacted a body)
     achieved_days = abs(final_sim_days)
     if abs(achieved_days - sim_days) > 1e-6:
-        print("  Integration  : {:.2f} days {:s}  (requested {:.2f} days, stopped early)".format(
-            achieved_days, direction, sim_days))
+        print("  Integration  : {:s} {:s}  (requested {:s}, stopped early)".format(
+            formatTimeSpan(achieved_days), direction, formatTimeSpan(sim_days)))
     else:
-        print("  Integration  : {:.2f} days {:s}".format(achieved_days, direction))
+        print("  Integration  : {:s} {:s}".format(formatTimeSpan(achieved_days), direction))
 
     print("  Frame        : {:s}".format(reference_frame))
     print("  Forces       : {:s}".format(
@@ -2772,8 +2803,8 @@ if __name__ == "__main__":
     # If the object hit something, say so before anything else: the elements below are the state at
     # the last step before the impact, not a surviving orbit.
     if impact:
-        print("  *** IMPACT: the object hit {:s} after {:.4f} days ***".format(
-            impact["body"], abs(impact["time_days"])))
+        print("  *** IMPACT: the object hit {:s} after {:s} ***".format(
+            impact["body"], formatTimeSpan(impact["time_days"], decimals=4)))
         print("  The elements below are the last state before the impact, not a surviving orbit.")
         print("-" * 78)
 
@@ -2833,8 +2864,9 @@ if __name__ == "__main__":
     # Ejection, if the object ran out of the simulation volume
     escaped = nominal_diag.get("escaped")
     if escaped:
-        print("  *** EJECTED: the object left the simulation volume after {:.4f} days "
-              "({:.1f} AU from the Sun) ***".format(abs(escaped["time_days"]), escaped["dist_au"]))
+        print("  *** EJECTED: the object left the simulation volume after {:s} "
+              "({:.1f} AU from the Sun) ***".format(
+                  formatTimeSpan(escaped["time_days"], decimals=4), escaped["dist_au"]))
 
     # What happened to the Monte Carlo clones, as a fraction of the whole ensemble
     if len(sim_outputs_mc):
@@ -2889,14 +2921,17 @@ if __name__ == "__main__":
             print("    {:d} realization(s) ended early and contributed only over their own span.".format(
                 lyap["n_truncated"]))
         if lyap["truncated_at_saturation"] and not lyap["saturated"]:
-            print("    Fitted over the first {:.0f} d of {:.0f} d, while the ensemble was still "
-                  "compact".format(lyap["fit_window_days"], lyap["total_span_days"]))
-            print("    (separation {:.3e} AU at the end of that window, {:d} samples).".format(
-                lyap["separation_fit_end_au"], lyap["n_samples_used"]))
+            print("    Fitted over the first {:s} of {:s},".format(
+                formatTimeSpan(lyap["fit_window_days"], decimals=0),
+                formatTimeSpan(lyap["total_span_days"], decimals=0)))
+            print("    while the ensemble was still compact (separation {:.3e} AU at the end".format(
+                lyap["separation_fit_end_au"]))
+            print("    of that window, {:d} samples).".format(lyap["n_samples_used"]))
         if lyap["growth"] == "exponential":
-            print("    Growth is exponential: Lyapunov time ~ {:.1f} d  "
+            print("    Growth is exponential: Lyapunov time ~ {:s}  "
                   "(lambda = {:.4f} /d, R2 = {:.3f})".format(
-                      lyap["lyapunov_time_days"], lyap["lambda_per_day"], lyap["r2_exponential"]))
+                      formatTimeSpan(lyap["lyapunov_time_days"], decimals=1), lyap["lambda_per_day"],
+                      lyap["r2_exponential"]))
             print("    The integration loses predictive value on timescales beyond this.")
         elif lyap["growth"] == "linear":
             print("    Growth is linear (regular motion, R2 = {:.3f}); no exponential divergence "
@@ -2917,12 +2952,13 @@ if __name__ == "__main__":
         # Semi-major-axis spread: the chaos indicator that is not corrupted by phase drift
         ed = lyap.get("element_divergence")
         if ed is not None:
-            print("    Spread in a over {:.0f} d: {:.3e} -> {:.3e} AU (x{:.2f})".format(
-                ed["span_days"], ed["sigma_a_start_au"], ed["sigma_a_end_au"],
-                ed["sigma_a_growth_factor"]))
+            print("    Spread in a over {:s}: {:.3e} -> {:.3e} AU (x{:.2f})".format(
+                formatTimeSpan(ed["span_days"], decimals=0), ed["sigma_a_start_au"],
+                ed["sigma_a_end_au"], ed["sigma_a_growth_factor"]))
             if ed["growth"] == "exponential":
-                print("    The spread in a grows exponentially: Lyapunov time ~ {:.1f} d "
-                      "(R2 = {:.3f}).".format(ed["lyapunov_time_days"], ed["r2_exponential"]))
+                print("    The spread in a grows exponentially: Lyapunov time ~ {:s} "
+                      "(R2 = {:.3f}).".format(formatTimeSpan(ed["lyapunov_time_days"], decimals=1),
+                                              ed["r2_exponential"]))
                 print("    This is the chaos estimate to trust; unlike the position separation it is")
                 print("    not corrupted by Keplerian phase drift.")
             elif ed["growth"] == "regular":
@@ -2950,14 +2986,14 @@ if __name__ == "__main__":
         # Save the nominal orbital elements and the errors
         # If the object hit something, state it at the very top of the report
         if impact:
-            f.write("*** IMPACT: the object hit {:s} after {:.4f} days. The elements below are the "
-                    "last\n".format(impact["body"], abs(impact["time_days"])))
+            f.write("*** IMPACT: the object hit {:s} after {:s}. The elements below are the "
+                    "last\n".format(impact["body"], formatTimeSpan(impact["time_days"], decimals=4)))
             f.write("*** state before the impact, not a surviving orbit.\n\n")
 
-        f.write("Orbital elements {:.2f} days {:s} from the epoch {:.6f} JD (TDB){:s}\n".format(
-            achieved_days, direction, traj.jdt_ref,
+        f.write("Orbital elements {:s} {:s} from the epoch {:.6f} JD (TDB){:s}\n".format(
+            formatTimeSpan(achieved_days), direction, traj.jdt_ref,
             "" if abs(achieved_days - sim_days) <= 1e-6
-            else " (requested {:.2f} days, stopped early)".format(sim_days)))
+            else " (requested {:s}, stopped early)".format(formatTimeSpan(sim_days))))
         f.write("a    = {:>10.6f}{:s} {:s}\n".format(sim_outputs[-1][2].a*dist_unit_multiplier, a_ci_str, a_units))
         f.write("q    = {:>10.6f}{:s} {:s}\n".format((1 - sim_outputs[-1][2].e)*sim_outputs[-1][2].a*dist_unit_multiplier, q_ci_str, q_units))
         f.write("e    = {:>10.6f}{:s}\n".format(sim_outputs[-1][2].e, e_ci_str))
@@ -3098,14 +3134,16 @@ if __name__ == "__main__":
                 f.write("  {:d} realization(s) ended early (e.g. impacted) and contributed only "
                         "over their own span.\n".format(lyap["n_truncated"]))
             if lyap["truncated_at_saturation"] and not lyap["saturated"]:
-                f.write("  Fitted over the first {:.1f} d of {:.1f} d, i.e. the leading window in "
-                        "which the\n".format(lyap["fit_window_days"], lyap["total_span_days"]))
-                f.write("  ensemble was still a compact cloud (separation {:.6e} AU at the end of "
-                        "that window).\n".format(lyap["separation_fit_end_au"]))
+                f.write("  Fitted over the first {:s} of {:s},\n".format(
+                    formatTimeSpan(lyap["fit_window_days"], decimals=1),
+                    formatTimeSpan(lyap["total_span_days"], decimals=1)))
+                f.write("  i.e. the leading window in which the ensemble was still a compact cloud\n")
+                f.write("  (separation {:.6e} AU at the end of that window).\n".format(
+                    lyap["separation_fit_end_au"]))
             if lyap["growth"] == "exponential":
                 f.write("  Growth is exponential: lambda = {:.6f} /day, "
-                        "Lyapunov time = {:.2f} days.\n".format(
-                            lyap["lambda_per_day"], lyap["lyapunov_time_days"]))
+                        "Lyapunov time = {:s}.\n".format(
+                            lyap["lambda_per_day"], formatTimeSpan(lyap["lyapunov_time_days"])))
                 f.write("  The integration loses predictive value beyond this timescale.\n")
             elif lyap["growth"] == "linear":
                 f.write("  Growth is linear, i.e. the motion is regular over this interval and no\n")
@@ -3126,16 +3164,16 @@ if __name__ == "__main__":
             # Semi-major-axis spread, which is not corrupted by Keplerian phase drift
             ed = lyap.get("element_divergence")
             if ed is not None:
-                f.write("\n  Spread in the semi-major axis over {:.1f} d: {:.6e} -> {:.6e} AU "
+                f.write("\n  Spread in the semi-major axis over {:s}: {:.6e} -> {:.6e} AU "
                         "(factor {:.3f})\n".format(
-                            ed["span_days"], ed["sigma_a_start_au"], ed["sigma_a_end_au"],
-                            ed["sigma_a_growth_factor"]))
+                            formatTimeSpan(ed["span_days"], decimals=1), ed["sigma_a_start_au"],
+                            ed["sigma_a_end_au"], ed["sigma_a_growth_factor"]))
                 f.write("  Fit quality: R2(exponential) = {:.4f}, R2(linear) = {:.4f}\n".format(
                     ed["r2_exponential"], ed["r2_linear"]))
                 if ed["growth"] == "exponential":
                     f.write("  The spread in a grows exponentially: lambda = {:.6e} /day, "
-                            "Lyapunov time = {:.2f} days.\n".format(
-                                ed["lambda_per_day"], ed["lyapunov_time_days"]))
+                            "Lyapunov time = {:s}.\n".format(
+                                ed["lambda_per_day"], formatTimeSpan(ed["lyapunov_time_days"])))
                     f.write("  This is the chaos estimate to prefer: unlike the position\n")
                     f.write("  separation it is not corrupted by Keplerian phase drift, which\n")
                     f.write("  smears the cloud along the orbit whether or not the motion is chaotic.\n")
