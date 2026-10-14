@@ -2198,12 +2198,95 @@ def heliocentricStateFromElements(q, e, incl, node, peri, mean_anomaly):
     return [p.x, p.y, p.z, p.vx/SIM_TIME_DAYS, p.vy/SIM_TIME_DAYS, p.vz/SIM_TIME_DAYS]
 
 
+def heliocentricStateFromPerihelionTime(q, e, incl, node, peri, perihelion_jd, jd):
+    """ Heliocentric state of a body at a given time from its time of perihelion, for any conic: the
+    way the comet catalogues place parabolic and hyperbolic comets, which have no mean anomaly. Kepler's
+    equation is solved in its elliptic, parabolic (Barker's equation) or hyperbolic form, around a Sun
+    of one solar mass, as in the integration.
+
+    Arguments:
+        q: [float] Perihelion distance (AU).
+        e: [float] Eccentricity.
+        incl: [float] Inclination (deg).
+        node: [float] Ascending node (deg).
+        peri: [float] Argument of perihelion (deg).
+        perihelion_jd: [float] Julian date of the perihelion passage.
+        jd: [float] Julian date of the state, on the same time scale.
+
+    Return:
+        [list] [x, y, z, vx, vy, vz] in AU and AU/day, in the frame of the elements.
+    """
+
+    # Time from perihelion in simulation units, for which GM = 1
+    tau = (jd - perihelion_jd)/SIM_TIME_DAYS
+
+    if abs(e - 1.0) < 1e-10:
+
+        # Barker's equation: tau = sqrt(2 q^3) (D + D^3/3), D = tan(f/2), monotonic in D
+        target = tau/np.sqrt(2.0*q**3)
+        d = np.cbrt(3.0*target)
+        for _ in range(100):
+            delta = (d + d**3/3.0 - target)/(1.0 + d**2)
+            d -= delta
+            if abs(delta) < 1e-15*max(1.0, abs(d)):
+                break
+        f = 2.0*np.arctan(d)
+
+    elif e > 1.0:
+
+        # Hyperbolic Kepler's equation: M = e sinh(H) - H
+        a = q/(e - 1.0)
+        m = tau/a**1.5
+        h = np.arcsinh(m/e)
+        for _ in range(100):
+            delta = (e*np.sinh(h) - h - m)/(e*np.cosh(h) - 1.0)
+            h -= delta
+            if abs(delta) < 1e-15*max(1.0, abs(h)):
+                break
+        f = 2.0*np.arctan(np.sqrt((e + 1.0)/(e - 1.0))*np.tanh(h/2.0))
+
+    else:
+
+        a = q/(1.0 - e)
+        m = (tau/a**1.5 + np.pi) % (2*np.pi) - np.pi
+        ecc_anom = m if e < 0.8 else np.pi*np.sign(m)
+        for _ in range(100):
+            delta = (ecc_anom - e*np.sin(ecc_anom) - m)/(1.0 - e*np.cos(ecc_anom))
+            ecc_anom -= delta
+            if abs(delta) < 1e-15:
+                break
+        f = 2.0*np.arctan2(np.sqrt(1.0 + e)*np.sin(ecc_anom/2.0), np.sqrt(1.0 - e)*np.cos(ecc_anom/2.0))
+
+    # Position and velocity on the conic at the true anomaly f
+    p = q*(1.0 + e)
+    r = p/(1.0 + e*np.cos(f))
+
+    i_r, node_r, peri_r = np.radians(incl), np.radians(node), np.radians(peri)
+    u = peri_r + f
+    cos_u, sin_u = np.cos(u), np.sin(u)
+    cos_O, sin_O = np.cos(node_r), np.sin(node_r)
+    cos_i, sin_i = np.cos(i_r), np.sin(i_r)
+
+    r_hat = np.array([cos_O*cos_u - sin_O*sin_u*cos_i, sin_O*cos_u + cos_O*sin_u*cos_i, sin_u*sin_i])
+    t_hat = np.array([-cos_O*sin_u - sin_O*cos_u*cos_i, -sin_O*sin_u + cos_O*cos_u*cos_i, cos_u*sin_i])
+
+    pos = r*r_hat
+    vel = (e*np.sin(f)*r_hat + (1.0 + e*np.cos(f))*t_hat)/np.sqrt(p)
+
+    return list(pos) + list(vel/SIM_TIME_DAYS)
+
+
 def _heliocentricRecord(state_vect_hel, orb, jd_tdb):
     """ A body's heliocentric state at an epoch, from an output of _integrateParticles, in the form
     the parent body search saves it: elements in degrees and AU, position in AU and velocity in AU/day.
     """
 
     a, e = orb.a, orb.e
+
+    # The perihelion distance from the angular momentum, q = h^2/(GM (1 + e)) with GM = 1, which unlike
+    #   a (1 - e) stays exact for a near-parabolic orbit, whose a is very large or infinite
+    h_vec = np.cross(np.array(state_vect_hel[:3]), np.array(state_vect_hel[3:]))
+    q = float(np.dot(h_vec, h_vec)/(1.0 + e))
 
     # Mean anomaly of an elliptic orbit, from the true anomaly
     mean_anomaly = None
@@ -2213,7 +2296,7 @@ def _heliocentricRecord(state_vect_hel, orb, jd_tdb):
 
     return {
         "jd_tdb": jd_tdb,
-        "q": float(a*(1.0 - e)), "a": float(a), "e": float(e),
+        "q": q, "a": float(a) if np.isfinite(a) else None, "e": float(e),
         "incl": float(np.degrees(orb.inc)), "peri": float(np.degrees(orb.omega) % 360),
         "node": float(np.degrees(orb.Omega) % 360), "mean_anomaly": mean_anomaly,
         "position": [float(x) for x in state_vect_hel[:3]],
@@ -2281,8 +2364,11 @@ def propagateBodiesToEpoch(bodies, jd_tdb_target, ephem_source="local", n_output
     Non-gravitational forces are not modelled, which matters for comets.
 
     Arguments:
-        bodies: [list] Dictionaries with 'q' (AU), 'e', 'incl', 'peri', 'node', 'mean_anomaly' (deg),
-            heliocentric ecliptic J2000, and 'epoch_jd', the Julian date (TDB) of the elements.
+        bodies: [list] Dictionaries with 'q' (AU), 'e', 'incl', 'peri', 'node' (deg), heliocentric
+            ecliptic J2000, 'epoch_jd', the Julian date (TDB) of the elements, and the place of the
+            body on its orbit: 'mean_anomaly' (deg) at the epoch for an elliptic orbit, or
+            'perihelion_jd', the time of perihelion (TDB), for any orbit. The mean anomaly is used if
+            both are given.
         jd_tdb_target: [float] Julian date (TDB) to bring the bodies to.
 
     Keyword arguments:
@@ -2291,10 +2377,11 @@ def propagateBodiesToEpoch(bodies, jd_tdb_target, ephem_source="local", n_output
             and impact detection of _integrateParticles is armed at an output, so a few are taken.
 
     Return:
-        [list] For each body, None if it could not be brought to the epoch (no epoch or mean anomaly,
-            not an elliptic orbit, an epoch outside the ephemeris, or it hit a body or escaped on the
-            way), or a dictionary with 'jd_tdb', 'q', 'a' (AU), 'e', 'incl', 'peri', 'node',
-            'mean_anomaly' (deg), 'position' (AU) and 'velocity' (AU/day), heliocentric ecliptic J2000.
+        [list] For each body, None if it could not be brought to the epoch (no epoch, no place on its
+            orbit, an epoch outside the ephemeris, or it hit a body or escaped on the way), or a
+            dictionary with 'jd_tdb', 'q', 'a' (AU, None if infinite), 'e', 'incl', 'peri', 'node',
+            'mean_anomaly' (deg, None if the orbit is not elliptic), 'position' (AU) and 'velocity'
+            (AU/day), heliocentric ecliptic J2000.
     """
 
     results = [None]*len(bodies)
@@ -2303,7 +2390,11 @@ def propagateBodiesToEpoch(bodies, jd_tdb_target, ephem_source="local", n_output
     groups = {}
     for k, body in enumerate(bodies):
 
-        if (body.get("epoch_jd") is None) or (body.get("mean_anomaly") is None) or (body["e"] >= 1.0):
+        if body.get("epoch_jd") is None:
+            continue
+
+        has_mean_anomaly = (body.get("mean_anomaly") is not None) and (body["e"] < 1.0)
+        if (not has_mean_anomaly) and (body.get("perihelion_jd") is None):
             continue
 
         groups.setdefault(body["epoch_jd"], []).append(k)
@@ -2311,9 +2402,14 @@ def propagateBodiesToEpoch(bodies, jd_tdb_target, ephem_source="local", n_output
     for epoch_jd, indices in groups.items():
 
         names = ["body_{:d}".format(k) for k in indices]
-        states = [heliocentricStateFromElements(bodies[k]["q"], bodies[k]["e"], bodies[k]["incl"],
-                                                bodies[k]["node"], bodies[k]["peri"],
-                                                bodies[k]["mean_anomaly"]) for k in indices]
+        def _state(b):
+            if (b.get("mean_anomaly") is not None) and (b["e"] < 1.0):
+                return heliocentricStateFromElements(b["q"], b["e"], b["incl"], b["node"], b["peri"],
+                                                     b["mean_anomaly"])
+            return heliocentricStateFromPerihelionTime(b["q"], b["e"], b["incl"], b["node"], b["peri"],
+                                                       b["perihelion_jd"], epoch_jd)
+
+        states = [_state(bodies[k]) for k in indices]
 
         # Already at the target epoch
         if abs(jd_tdb_target - epoch_jd) < 1e-9:
@@ -2405,6 +2501,7 @@ def loadParentBodies(file_path, jd_tdb, ephem_source="local", top_n=None):
         elements = [{"q": matches[k]["q_AU"], "e": matches[k]["e"], "incl": matches[k]["incl_deg"],
                      "peri": matches[k]["peri_deg"], "node": matches[k]["node_deg"],
                      "mean_anomaly": matches[k].get("catalogue_mean_anomaly_deg"),
+                     "perihelion_jd": matches[k].get("catalogue_perihelion_jd"),
                      "epoch_jd": matches[k].get("catalogue_epoch_jd")} for k in to_propagate]
 
         for k, rec in zip(to_propagate, propagateBodiesToEpoch(elements, jd_tdb, ephem_source=ephem_source)):

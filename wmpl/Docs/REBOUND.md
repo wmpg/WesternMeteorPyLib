@@ -358,9 +358,10 @@ python -m wmpl.Rebound.REBOUND traj.pickle --days 3652.5 --mc 100 --parent_bodie
 - **Starting point.** Every body starts at the reference epoch of the trajectory. With `--propagate`
   the search has already brought the top N there with the same integrator (Sun, planets and Moon from
   DE430, the Earth's J2 and J4, general relativity), and the state saved in the file is used as it is.
-  Otherwise the body is brought there from its catalogue elements when the file is read. Bodies
-  without an epoch or a mean anomaly in the catalogue (the meteorites, the parabolic and hyperbolic
-  comets) cannot be, and are listed as not used.
+  Otherwise the body is brought there from its catalogue elements when the file is read, an
+  asteroid from its mean anomaly and a comet, parabolic and hyperbolic ones included, from its time
+  of perihelion. Bodies without an epoch (the meteorites) or outside the DE430 span cannot be, and are
+  listed as not used.
 - **Integration.** The bodies are massless, like the meteoroid, and run in a simulation of their own
   over the same output times. They do not depend on the meteoroid, so they are integrated once and
   compared with the nominal solution and with every clone. Non-gravitational forces are not modelled,

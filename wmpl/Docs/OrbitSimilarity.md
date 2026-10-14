@@ -204,8 +204,17 @@ python -m wmpl.Utils.ParentBodySearch traj.pickle -d DSH DN DD
   integrator of `wmpl.Rebound.REBOUND` (Sun, planets and Moon from DE430, the Earth's J2 and J4,
   general relativity, no non-gravitational forces), and lists and saves their elements and
   heliocentric state there (ecliptic J2000, AU and AU/day), to be used as the initial
-  conditions of a REBOUND integration. Bodies with no epoch in the catalogue, on parabolic or hyperbolic
-  orbits, or outside the ephemeris are not propagated.
+  conditions of a REBOUND integration. It also prints and saves every criterion again with the
+  propagated elements, beside the catalogue values, to show how much they move when both orbits
+  refer to the same epoch; the ranking stays the catalogue one. An asteroid is placed on its orbit
+  by its mean anomaly at the epoch. A comet is placed by its time of perihelion, which also covers
+  the parabolic and hyperbolic ones (more than half of the JPL list), with Kepler's equation in its
+  elliptic, parabolic or hyperbolic form. Meteorites have no epoch, and bodies outside the DE430 span
+  (1550 to 2650) cannot be propagated.
+  For a long-period comet the values at the meteor epoch need care: decades from perihelion it is
+  far out, where its heliocentric osculating elements follow the Sun's motion about the barycentre
+  (q of C/1893 N1 goes from 0.67 AU in the catalogue to 0.76 AU at the 2019 epoch of the example
+  Orionid), so a change there is not a change of its orbit around the Solar System.
 - **Saving.** `--save matches.csv` or `--save matches.json` writes the matches with the value of every
   criterion that was given, in the order given, plus the propagated state with `--propagate`.
 - **Integrating the candidates.** The JSON can be given to `wmpl.Rebound.REBOUND --parent_bodies`,

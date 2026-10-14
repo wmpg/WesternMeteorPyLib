@@ -52,15 +52,15 @@ def _elementsFromState(r_vec, v_vec):
 
 
 def _catalogue():
-    """ A small catalogue in the format of the loaders: name, q, e, i, peri, node, H, epoch JD and
-        mean anomaly. """
+    """ A small catalogue in the format of the loaders: name, q, e, i, peri, node, H, epoch JD, mean
+        anomaly and time of perihelion. """
 
     return [
-        ["Phaethon", 0.1400, 0.8900, 22.25, 322.2, 265.2, 14.4, 2461200.5, 100.0],
-        ["Near twin", 0.1500, 0.8800, 22.00, 320.0, 263.0, 20.0, 2461200.5, 10.0],
-        ["Apollo", 0.8000, 0.5000, 10.00, 60.0, 120.0, 18.0, 2461200.5, 200.0],
-        ["Never reaches Earth", 1.8000, 0.2000, 5.00, 30.0, 40.0, 17.0, 2461200.5, 5.0],
-        ["Parabolic comet", 0.9000, 1.0000, 70.00, 100.0, 200.0, -1, None, None],
+        ["Phaethon", 0.1400, 0.8900, 22.25, 322.2, 265.2, 14.4, 2461200.5, 100.0, None],
+        ["Near twin", 0.1500, 0.8800, 22.00, 320.0, 263.0, 20.0, 2461200.5, 10.0, None],
+        ["Apollo", 0.8000, 0.5000, 10.00, 60.0, 120.0, 18.0, 2461200.5, 200.0, None],
+        ["Never reaches Earth", 1.8000, 0.2000, 5.00, 30.0, 40.0, 17.0, 2461200.5, 5.0, None],
+        ["Parabolic comet", 0.9000, 1.0000, 70.00, 100.0, 200.0, -1, 2451800.5, None, 2451820.5],
         ]
 
 
@@ -414,9 +414,73 @@ def test_loaders_read_the_epoch_and_the_mean_anomaly():
 
         assert abs(c[8] - expected) < 1e-9
         assert -180.0 < c[8] <= 180.0
+
+        # The time of perihelion is kept, for the comets that have no mean anomaly
+        assert abs(c[9] - tp_jd) < 1e-9
+        assert a[9] is None
         assert a[0] == "2026 SB"
         assert a[8] == 344.8
         assert abs(a[7] - pbs._calendarToJD(2026, 6, 9)) < 1e-9
+
+
+def test_criteria_at_the_epoch_are_those_of_the_propagated_elements():
+    """ The values printed with --propagate are the criteria of the search, with the body's
+        propagated elements in place of its catalogue ones, against the same meteor orbit. """
+
+    search = _search(['DSH', 'DN', 'DVVIDA'], top_n=3)
+    q, e, i, peri, node = PHAETHON
+
+    # Stand-in propagated records: the catalogue elements nudged, and one body not propagated
+    propagated = []
+    for k, m in enumerate(search['matches']):
+        propagated.append(None if k == 1 else {'q': m['q'] + 0.01, 'e': m['e'], 'incl': m['incl'] + 0.5,
+            'peri': m['peri'], 'node': m['node'] + 1.0})
+
+    values = pbs.criteriaAtEpoch(search, propagated, q, e, np.radians(i), np.radians(peri),
+        np.radians(node))
+
+    assert values[1] is None
+
+    from wmpl.Utils.Dcriteria import lookupCriterion, calcCriterionFromElements
+
+    query = (q, e, np.radians(i), np.radians(node), np.radians(peri))
+
+    for k in (0, 2):
+
+        p = propagated[k]
+        orbit = (p['q'], p['e'], np.radians(p['incl']), np.radians(p['node']), np.radians(p['peri']))
+
+        for c, key in enumerate(search['keys']):
+            assert values[k][c] == calcCriterionFromElements(lookupCriterion(key), query, orbit)
+
+        # Not the catalogue values: the elements moved
+        assert values[k][0] != search['matches'][k]['d_values'][0]
+
+    # Saved beside the propagated state, in the JSON and in the CSV
+    for k in (0, 2):
+        propagated[k].update({'jd': 2459000.5, 'jd_tdb': 2459000.5008, 'a': None, 'mean_anomaly': None,
+            'position': [1.0, 0.0, 0.0], 'velocity': [0.0, 0.017, 0.0]})
+
+    with tempfile.TemporaryDirectory() as tmp:
+
+        json_path = os.path.join(tmp, "m.json")
+        pbs.saveMatches(json_path, search, propagated=propagated, at_epoch_values=values)
+
+        with open(json_path) as f:
+            data = json.load(f)
+
+        assert data['matches'][1]['at_epoch'] is None
+        assert data['matches'][0]['at_epoch']['criteria']['D_SH'] == values[0][0]
+        assert not any(key.startswith('at_epoch_') for key in data['matches'][0])
+
+        csv_path = os.path.join(tmp, "m.csv")
+        pbs.saveMatches(csv_path, search, propagated=propagated, at_epoch_values=values)
+
+        with open(csv_path) as f:
+            rows = list(csv.DictReader(f))
+
+        assert float(rows[0]['at_epoch_D_SH']) == values[0][0]
+        assert rows[1]['at_epoch_D_SH'] == ''
 
 
 def test_heliocentric_from_elements_follows_the_wmpl_convention():

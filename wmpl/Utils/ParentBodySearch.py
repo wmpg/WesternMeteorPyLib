@@ -95,10 +95,12 @@ def _meanAnomalyFromPerihelionTime(q, e, epoch_jd, tp_jd):
     return float(np.degrees((m + np.pi) % (2*np.pi) - np.pi))
 
 
-# Every body of the catalogues is [name, q, e, incl, peri, node, h_mag, epoch_jd, mean_anomaly]: the
-#   angles in degrees, the epoch the osculating elements refer to as a Julian date and the mean
-#   anomaly at that epoch. The last two are None when the file does not give them, and they are
-#   only used to bring the body to another epoch.
+# Every body of the catalogues is [name, q, e, incl, peri, node, h_mag, epoch_jd, mean_anomaly,
+#   perihelion_jd]: the angles in degrees, the epoch the osculating elements refer to as a Julian
+#   date, the mean anomaly at that epoch, and the time of perihelion as a Julian date. The last three
+#   are None when the file does not give them, and they are only used to bring the body to another
+#   epoch. The mean anomaly exists only for an elliptic orbit, so a parabolic or hyperbolic comet is
+#   placed on its orbit by its time of perihelion instead.
 
 def loadCometsElements(comets_file):
     """ Loads the orbital elements of comets from the JPL comets element list. """
@@ -125,6 +127,7 @@ def loadCometsElements(comets_file):
             # The epoch is a modified Julian date and the time of perihelion is YYYYMMDD.dddd
             epoch_jd = None
             mean_anomaly = None
+            tp_jd = None
 
             try:
                 epoch_jd = float(line[44:52]) + 2400000.5
@@ -136,7 +139,8 @@ def loadCometsElements(comets_file):
             except (ValueError, IndexError):
                 pass
 
-            comets_list.append([comet_name, q, e, incl, peri, node, h_mag, epoch_jd, mean_anomaly])
+            comets_list.append([comet_name, q, e, incl, peri, node, h_mag, epoch_jd, mean_anomaly,
+                tp_jd])
 
     return comets_list
 
@@ -183,7 +187,8 @@ def loadAsteroidsElements(asteroids_file):
                 epoch_jd = None
                 mean_anomaly = None
 
-            asteroids_list.append([asteroid_name, q, e, incl, peri, node, h_mag, epoch_jd, mean_anomaly])
+            asteroids_list.append([asteroid_name, q, e, incl, peri, node, h_mag, epoch_jd, mean_anomaly,
+                None])
 
 
     return asteroids_list
@@ -234,7 +239,7 @@ def loadMeteoritesElements(meteorites_file):
             # Meteorites do not have H magnitude in the orbit file, nor an epoch for the elements
             h_mag = -1
 
-            meteorites_list.append([meteorite_name, q, e, incl, peri, node, h_mag, None, None])
+            meteorites_list.append([meteorite_name, q, e, incl, peri, node, h_mag, None, None, None])
 
 
     return meteorites_list
@@ -330,8 +335,9 @@ def searchParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10, meteorite
             'given', 'elements' or None; 'query_heliocentric' and 'heliocentric_source', the same for
             the Vida criterion; 'matches', a list of dictionaries sorted by the first
             criterion with 'name', 'q', 'e', 'incl', 'peri', 'node' (degrees), 'h_mag',
-            'd_values' (a value per criterion, in order), and 'epoch_jd' and 'mean_anomaly' (deg) of the
-            catalogue elements, which are None if the catalogue does not give them.
+            'd_values' (a value per criterion, in order), and 'epoch_jd', 'mean_anomaly' (deg) and
+            'perihelion_jd' of the catalogue elements, which are None if the catalogue does not give
+            them.
     """
 
     criteria = _resolveCriteria(d_crit)
@@ -428,7 +434,7 @@ def searchParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10, meteorite
 
         matches.append({'name': body[0], 'q': body[1], 'e': body[2], 'incl': body[3],
             'peri': body[4], 'node': body[5], 'h_mag': body[6], 'd_values': values_list[j],
-            'epoch_jd': body[7], 'mean_anomaly': body[8]})
+            'epoch_jd': body[7], 'mean_anomaly': body[8], 'perihelion_jd': body[9]})
 
 
     return {'keys': [c[0] for c in criteria], 'labels': [c[1] for c in criteria],
@@ -476,14 +482,15 @@ def propagateBodies(bodies, jd_target):
 
     Arguments:
         bodies: [list] Dictionaries of the matches of searchParentBodies, which need 'q', 'e', 'incl',
-            'peri', 'node', 'epoch_jd' and 'mean_anomaly'.
+            'peri', 'node', 'epoch_jd', and 'mean_anomaly' or, for a parabolic or hyperbolic comet,
+            'perihelion_jd'.
         jd_target: [float] Julian date (UTC) to bring the bodies to, the reference time of the
             trajectory.
 
     Return:
-        [list] For each body, None if it could not be propagated (no epoch or mean anomaly in the
-            catalogue, a parabolic or hyperbolic orbit, an epoch outside the ephemeris, an impact or
-            an escape on the way), or a dictionary: 'jd' (UTC) and 'jd_tdb', 'q', 'a' (AU), 'e',
+        [list] For each body, None if it could not be propagated (no epoch, or neither a mean anomaly
+            nor a time of perihelion in the catalogue, an epoch outside the ephemeris, an impact or an
+            escape on the way), or a dictionary: 'jd' (UTC) and 'jd_tdb', 'q', 'a' (AU), 'e',
             'incl', 'peri', 'node', 'mean_anomaly' (degrees), 'position' (AU) and 'velocity'
             (AU/day), heliocentric in the ecliptic J2000 frame.
     """
@@ -499,7 +506,8 @@ def propagateBodies(bodies, jd_target):
     jd_tdb = reb.utcToTdb(jd_target)
 
     elements = [{'q': b['q'], 'e': b['e'], 'incl': b['incl'], 'peri': b['peri'], 'node': b['node'],
-        'mean_anomaly': b['mean_anomaly'], 'epoch_jd': b['epoch_jd']} for b in bodies]
+        'mean_anomaly': b['mean_anomaly'], 'perihelion_jd': b.get('perihelion_jd'),
+        'epoch_jd': b['epoch_jd']} for b in bodies]
 
     results = reb.propagateBodiesToEpoch(elements, jd_tdb)
 
@@ -510,7 +518,57 @@ def propagateBodies(bodies, jd_target):
     return results
 
 
-def _bodyRows(search, propagated=None):
+def criteriaAtEpoch(search, propagated, q, e, incl, peri, node):
+    """ Value of the criteria of a search with the elements of the bodies brought to the reference epoch
+        of the meteor (propagateBodies), against the same orbit of the meteor the search used.
+
+        The ranking stays the one of the catalogue elements. This shows how much the values move
+        when both orbits refer to the same epoch. A criterion on the radiant reads the radiant the
+        search used for the meteor (measured, or derived from its elements) and the one derived from
+        the propagated elements for the body.
+
+    Arguments:
+        search: [dict] Return of searchParentBodies.
+        propagated: [list] Return of propagateBodies for its matches.
+        q, e, incl, peri, node: [float] The orbit of the meteor, as given to searchParentBodies.
+
+    Return:
+        [list] For each match, None if it was not propagated, or a list of the values of the criteria
+            in the order of the search, infinite for a criterion on the radiant when the propagated
+            orbit does not come close enough to the Earth's.
+    """
+
+    criteria = [lookupCriterion(key) for key in search['keys']]
+    query = (q, e, incl, node, peri)
+
+    out = []
+
+    for p in propagated:
+
+        if p is None:
+            out.append(None)
+            continue
+
+        body_orbit = (p['q'], p['e'], np.radians(p['incl']), np.radians(p['node']),
+            np.radians(p['peri']))
+
+        values = []
+
+        for _, _, func, kind in criteria:
+
+            if kind == 'elements':
+                values.append(float(func(query, body_orbit)))
+
+            else:
+                values.append(radiantCriterionMin(func, search['query_' + kind],
+                    DERIVED_FROM_ELEMENTS[kind](*body_orbit)))
+
+        out.append(values)
+
+    return out
+
+
+def _bodyRows(search, propagated=None, at_epoch_values=None):
     """ The matches of a search as flat rows of (name, value) pairs, for the saved files. """
 
     rows = []
@@ -521,7 +579,8 @@ def _bodyRows(search, propagated=None):
             ('e', match['e']), ('incl_deg', match['incl']), ('peri_deg', match['peri']),
             ('node_deg', match['node']), ('h_mag', match['h_mag']),
             ('catalogue_epoch_jd', match['epoch_jd']),
-            ('catalogue_mean_anomaly_deg', match['mean_anomaly'])]
+            ('catalogue_mean_anomaly_deg', match['mean_anomaly']),
+            ('catalogue_perihelion_jd', match.get('perihelion_jd'))]
 
         row += [(label, value) for label, value in zip(search['labels'], match['d_values'])]
 
@@ -541,18 +600,26 @@ def _bodyRows(search, propagated=None):
             for axis, value in zip('xyz', [None]*3 if p is None else p['velocity']):
                 row.append(('at_epoch_v' + axis + '_AU_day', value))
 
+            if at_epoch_values is not None:
+
+                values = at_epoch_values[rank]
+
+                for c, label in enumerate(search['labels']):
+                    row.append(('at_epoch_' + label, None if values is None else values[c]))
+
         rows.append(row)
 
     return rows
 
 
-def saveMatches(file_path, search, meteor=None, propagated=None):
+def saveMatches(file_path, search, meteor=None, propagated=None, at_epoch_values=None):
     """ Save the matches of a search, with the value of every D criterion that was used.
 
         The format follows the extension: JSON for .json, a CSV table otherwise. The CSV has a row
         per body with its elements, a column per criterion in the order they were given, which is
         also the ranking order, and, if the bodies were propagated, their elements and heliocentric
-        state at the epoch. The JSON also holds the orbit that was searched for.
+        state at the epoch and the criteria with them. The JSON also holds the orbit that was
+        searched for.
 
     Arguments:
         file_path: [str] Path of the file to write.
@@ -561,9 +628,14 @@ def saveMatches(file_path, search, meteor=None, propagated=None):
     Keyword arguments:
         meteor: [dict] The orbit that was searched for, saved to the JSON file.
         propagated: [list] Return of propagateBodies for the matches, in the same order.
+        at_epoch_values: [list] Return of criteriaAtEpoch for them.
     """
 
-    rows = _bodyRows(search, propagated)
+    def _finite(v):
+        """ Infinite values are not JSON. """
+        return v if (v is not None) and np.isfinite(v) else None
+
+    rows = _bodyRows(search, propagated, at_epoch_values)
 
     if file_path.lower().endswith('.json'):
 
@@ -571,14 +643,23 @@ def saveMatches(file_path, search, meteor=None, propagated=None):
 
         for row, match in zip(rows, search['matches']):
 
-            entry = dict((k, v) for k, v in row if k not in search['labels'])
-            entry['criteria'] = dict(zip(search['labels'], match['d_values']))
+            k = len(matches)
 
-            # Infinite values are not JSON
-            entry['criteria'] = dict((k, (v if np.isfinite(v) else None)) \
-                for k, v in entry['criteria'].items())
+            # The flat columns of the state at the epoch are kept in 'at_epoch' instead
+            entry = dict((name, v) for name, v in row
+                if (name not in search['labels']) and (not name.startswith('at_epoch_')))
+            entry['criteria'] = dict((label, _finite(v)) for label, v in zip(search['labels'],
+                match['d_values']))
 
-            entry['at_epoch'] = None if propagated is None else propagated[len(matches)]
+            entry['at_epoch'] = None
+            if (propagated is not None) and (propagated[k] is not None):
+
+                entry['at_epoch'] = dict(propagated[k])
+
+                if at_epoch_values is not None:
+                    entry['at_epoch']['criteria'] = dict((label, _finite(v))
+                        for label, v in zip(search['labels'], at_epoch_values[k]))
+
             matches.append(entry)
 
         out = {'meteor': meteor, 'criteria': search['labels'], 'criteria_keys': search['keys'],
@@ -765,10 +846,12 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('--propagate', action="store_true", \
         help="Bring the top N bodies to the reference epoch of the meteor with the integrator of "
-        "wmpl.Rebound.REBOUND and list their elements there, and save them with --save. The epoch is "
-        "that of the pickle, or --jd (UTC). This does not change the ranking. The JSON saved with it "
-        "can be given to wmpl.Rebound.REBOUND --parent_bodies, which then starts the bodies from "
-        "these states instead of propagating them again.")
+        "wmpl.Rebound.REBOUND, and list their elements there with every D criterion recomputed from "
+        "them, and save both with --save. Comets, parabolic and hyperbolic ones included, are placed "
+        "by their time of perihelion. The epoch is that of the pickle, or --jd (UTC). This does not "
+        "change the ranking. The JSON saved with it can be given to wmpl.Rebound.REBOUND "
+        "--parent_bodies, which then starts the bodies from these states instead of propagating "
+        "them again.")
 
     arg_parser.add_argument('--jd', metavar='JD', type=float, \
         help="Reference epoch of the meteor as a Julian date, if there is no pickle.")
@@ -929,6 +1012,7 @@ if __name__ == "__main__":
 
     # Bring the bodies to the reference epoch of the meteor
     propagated = None
+    at_epoch_values = None
 
     if cml_args.propagate:
 
@@ -947,20 +1031,26 @@ if __name__ == "__main__":
             print(str(err), file=sys.stderr)
             sys.exit(1)
 
-        print("Heliocentric elements at the reference epoch of the meteor, JD {:.5f} (ecliptic J2000):".format(
-            jd_ref))
-        print('Name                               ,      q,      e,   incl,    peri,    node,   M, catalogue epoch')
+        at_epoch_values = criteriaAtEpoch(search, propagated, q, e, np.radians(incl), np.radians(peri),
+            np.radians(node))
 
-        for m, p in zip(matches, propagated):
+        print("At the reference epoch of the meteor, JD {:.5f}: heliocentric elements (ecliptic J2000) "
+            "and the".format(jd_ref))
+        print("criteria with them. The ranking above, from the catalogue elements, is kept.")
+        print('Name                               ,      q,      e,   incl,    peri,    node, cat. epoch,',
+            ', '.join('{:>{:d}s}'.format(l, w) for l, w in zip(labels, widths)))
+
+        for m, p, values in zip(matches, propagated, at_epoch_values):
 
             if p is None:
-                print("{:35s}, not propagated: no epoch or mean anomaly in the catalogue, or not an "
-                    "elliptic orbit, or outside the ephemeris".format(m['name']))
+                print("{:35s}, not propagated: no epoch, mean anomaly or time of perihelion in the "
+                    "catalogue, or outside the ephemeris".format(m['name']))
                 continue
 
-            print("{:35s}, {:.4f}, {:.4f}, {:6.2f}, {:7.3f}, {:7.3f}, {:7.3f}, {:s}".format(m['name'],
-                p['q'], p['e'], p['incl'], p['peri'], p['node'], p['mean_anomaly'],
-                _jdToString(m['epoch_jd'])))
+            print("{:35s}, {:.4f}, {:.4f}, {:6.2f}, {:7.3f}, {:7.3f}, {:>10s}, ".format(m['name'],
+                p['q'], p['e'], p['incl'], p['peri'], p['node'], _jdToString(m['epoch_jd'])) \
+                + ", ".join("{:{:d}.3f}".format(v, w) if np.isfinite(v) else "{:>{:d}s}".format("n/a", w) \
+                for v, w in zip(values, widths)))
 
 
     # Save the matches
@@ -979,7 +1069,8 @@ if __name__ == "__main__":
             meteor.update({'L_h_deg': np.degrees(l_h), 'B_h_deg': np.degrees(b_h),
                 'solar_longitude_deg': np.degrees(sol_h), 'v_h_kms': v_h})
 
-        saveMatches(cml_args.save, search, meteor=meteor, propagated=propagated)
+        saveMatches(cml_args.save, search, meteor=meteor, propagated=propagated,
+            at_epoch_values=at_epoch_values)
 
         print()
         print("Saved the matches to", cml_args.save)

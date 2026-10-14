@@ -144,6 +144,46 @@ def testPlotIsWritten(reb, tmp_path):
     assert os.path.getsize(path) > 1000
 
 
+@pytest.mark.parametrize("q, e", [(0.5, 0.7), (0.3, 1.0), (0.674, 1.0011), (1.2, 2.5)])
+def testStateFromPerihelionTimeFollowsTheTwoBodyMotion(reb, q, e):
+    """ For every conic, the state from the time of perihelion is at q at perihelion, and moves as a
+        two-body integration moves it. """
+
+    if not reb.REBOUND_FOUND:
+        pytest.skip("rebound not importable")
+
+    tp, t1, t2 = 2451545.0, 2451545.0 - 300.0, 2451545.0 + 500.0
+    days = reb.SIM_TIME_DAYS
+
+    at_peri = reb.heliocentricStateFromPerihelionTime(q, e, 30.0, 40.0, 50.0, tp, tp)
+    assert np.linalg.norm(at_peri[:3]) == pytest.approx(q, abs=1e-14)
+
+    s1 = reb.heliocentricStateFromPerihelionTime(q, e, 30.0, 40.0, 50.0, tp, t1)
+    s2 = reb.heliocentricStateFromPerihelionTime(q, e, 30.0, 40.0, 50.0, tp, t2)
+
+    sim = reb.rb.Simulation()
+    sim.add(m=1.0)
+    sim.add(x=s1[0], y=s1[1], z=s1[2], vx=s1[3]*days, vy=s1[4]*days, vz=s1[5]*days)
+    sim.integrate((t2 - t1)/days)
+
+    p = sim.particles[1]
+    assert np.allclose([p.x, p.y, p.z], s2[:3], atol=1e-12)
+    assert np.allclose([p.vx/days, p.vy/days, p.vz/days], s2[3:], atol=1e-14)
+
+
+def testEllipticStateFromPerihelionTimeIsTheOneFromTheMeanAnomaly(reb):
+
+    if not reb.REBOUND_FOUND:
+        pytest.skip("rebound not importable")
+
+    q, e, tp, t = 0.8, 0.5, 2451545.0, 2451545.0 + 123.4
+    a = q/(1 - e)
+    mean_anomaly = np.degrees(((t - tp)/reb.SIM_TIME_DAYS/a**1.5) % (2*np.pi))
+
+    assert np.allclose(reb.heliocentricStateFromPerihelionTime(q, e, 30, 40, 50, tp, t),
+                       reb.heliocentricStateFromElements(q, e, 30, 40, 50, mean_anomaly), atol=1e-14)
+
+
 ### Real integrations ###
 
 
@@ -166,11 +206,38 @@ def testBodiesAtTheirOwnEpochAreNotMovedAndUnusableOnesAreSkipped(realReb):
     out = realReb.propagateBodiesToEpoch([body, dict(body, e=1.0), dict(body, mean_anomaly=None),
                                           dict(body, epoch_jd=None)], 2459000.5)
 
+    # A parabolic orbit has no mean anomaly, and without a time of perihelion it cannot be placed
     assert out[1] is None and out[2] is None and out[3] is None
 
     rec = out[0]
     for key in ("q", "e", "incl", "peri", "node", "mean_anomaly"):
         assert rec[key] == pytest.approx(body[key], abs=1e-9)
+
+
+def testParabolicAndHyperbolicCometsArePropagatedFromTheirPerihelionTime(realReb):
+    """ Comets with no mean anomaly are placed by their time of perihelion and propagated. At their
+        own epoch they come back with their catalogue elements, q from the angular momentum included. """
+
+    jd = 2459000.5
+    comets = [{"q": 0.9, "e": 1.0, "incl": 70.0, "peri": 100.0, "node": 200.0, "mean_anomaly": None,
+               "perihelion_jd": jd + 20.0, "epoch_jd": jd},
+              {"q": 0.674, "e": 1.0011, "incl": 160.0, "peri": 47.1, "node": 338.9, "mean_anomaly": None,
+               "perihelion_jd": jd - 40.0, "epoch_jd": jd}]
+
+    here = realReb.propagateBodiesToEpoch(comets, jd)
+
+    for comet, rec in zip(comets, here):
+        assert rec["q"] == pytest.approx(comet["q"], abs=1e-10)
+        assert rec["e"] == pytest.approx(comet["e"], abs=1e-10)
+        assert rec["mean_anomaly"] is None
+
+    # A year later they have moved, and are still on (nearly) the same conics
+    later = realReb.propagateBodiesToEpoch(comets, jd + 365.25)
+
+    for k, (comet, rec) in enumerate(zip(comets, later)):
+        assert rec is not None
+        assert rec["q"] == pytest.approx(comet["q"], abs=0.05)
+        assert not np.allclose(rec["position"], here[k]["position"], atol=0.1)
 
 
 def testMatchesFileIsReadAtTheEpochOrPropagated(realReb, tmp_path):
