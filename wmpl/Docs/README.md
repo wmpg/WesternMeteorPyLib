@@ -12,8 +12,8 @@ and what the options are for.
   meteor light curve and dynamics.
 - [Orbit dissimilarity criteria](OrbitSimilarity.md) — measuring how similar two orbits are, which
   criterion to pick, and why their thresholds are not interchangeable.
-- [Classifying a single orbit](OrbitClassification.md) — Tisserand, the cometary tests, and the
-  Tancredi scheme for asteroids in cometary orbits.
+- [Classifying a single orbit](OrbitClassification.md) — Tisserand, the cometary tests, the
+  Atira/Aten/Apollo/Amor/Arjuna classes, and the Tancredi scheme for asteroids in cometary orbits.
 - [Choosing a D-criterion threshold](DThresholds.md) — the other half of a stream search, and why
   the traditional threshold is too permissive to use.
 

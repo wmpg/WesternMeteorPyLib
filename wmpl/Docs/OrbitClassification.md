@@ -3,12 +3,13 @@
 **`wmpl.Utils.OrbitClassification`** answers a different question from the
 [dissimilarity criteria](OrbitSimilarity.md): not "are these two orbits related?" but "what kind of
 orbit is this one?" — asteroidal or cometary, Jupiter family or Halley type, Centaur or
-transneptunian.
+transneptunian, and for a near-Earth orbit, Atira, Aten, Apollo or Amor.
 
 ## Table of Contents
 
 - [Quick start](#quick-start)
 - [The Tisserand parameter](#the-tisserand-parameter)
+- [Orbital classes](#orbital-classes)
 - [One-parameter criteria](#one-parameter-criteria)
 - [Two-parameter cometary tests](#two-parameter-cometary-tests)
 - [The Tancredi scheme](#the-tancredi-scheme)
@@ -64,6 +65,93 @@ comparison against `nan` is False, so test for it rather than relying on a chain
 outputs: they use slightly different values for Jupiter's semi-major axis (5.204267 AU against the
 5.20336 AU of Tancredi's tables), which shifts T_J by about 1e-4 — far below any class boundary, but
 enough to make two numbers disagree in the fourth decimal.
+
+---
+
+## Orbital classes
+
+Class labels and flags that need only the **perihelion distance, eccentricity and inclination**,
+which is what a trajectory solution gives directly. They take `q` rather than `a` because the
+perihelion distance exists for every orbit, a parabolic one included, where the semi-major axis does
+not. All accept scalars or numpy arrays; a scalar gives a plain `str`.
+
+```python
+import numpy as np
+from wmpl.Utils.OrbitClassification import (classifyNEO, isArjuna, classifyTisserand,
+    isEarthCrossing, isProgrograde)
+
+q, e, i = 0.97, 0.03, np.radians(1.5)
+
+classifyNEO(q, e)            # 'Apollo'
+isArjuna(q, e, i)            # True
+classifyTisserand(q, e, i)   # 'asteroidal-like'
+isEarthCrossing(q, e)        # True
+```
+
+`python -m wmpl.Utils.OrbitClassification` prints all of them for an orbit, with `--quiet` giving
+`KEY VALUE` lines.
+
+### Near-Earth classes: `classifyNEO(q, e)`
+
+| Class | Criterion |
+| :--- | :--- |
+| Atira | a < 1 AU and Q < 0.983 AU: entirely inside the Earth's orbit |
+| Aten | a < 1 AU and Q ≥ 0.983 AU |
+| Apollo | a ≥ 1 AU and q < 1.017 AU |
+| Amor | a ≥ 1 AU and 1.017 ≤ q < 1.3 AU |
+| non-NEO | a ≥ 1 AU and q ≥ 1.3 AU |
+
+0.983 and 1.017 AU are the Earth's perihelion and aphelion distances. An orbit at exactly a = 1 AU
+goes with the larger orbits so that no semi-major axis falls between the classes. An unbound orbit
+(`e >= 1`) returns `'unbound'`: these are classes of bound asteroid orbits, and a hyperbolic
+meteoroid has none.
+
+### Arjuna: `isArjuna(q, e, i)`
+
+Arjuna is **not** a fifth class beside the four above, because its members are also Atens, Apollos
+or Amors. It is a subset picked out by Earth-like elements, so it is a flag to read alongside
+`classifyNEO`. An orbit is in the Arjuna domain if
+
+> 0.985 < a < 1.013 AU, e < 0.1, i < 8.56°
+
+with strict comparisons, as in de la Fuente Marcos & de la Fuente Marcos (2015, Astron. Nachr. 336,
+5, section 2.1). The paper gives these as *approximate*, derived from the short-term dynamics of four
+objects, and the real criterion is episodes of 1:1 resonance with the Earth. Falling inside the box
+makes an orbit a candidate, not a confirmed member.
+
+### Tisserand classes: `classifyTisserand(q, e, i)`
+
+| Class | Criterion |
+| :--- | :--- |
+| `'asteroidal-like'` | T_J > 3 |
+| `'jupiter-family-comet-like'` | 2 ≤ T_J ≤ 3 |
+| `'halley-type-comet-like'` | T_J < 2 and P ≤ 200 yr |
+| `'long-period-comet-like'` | T_J < 2 and P > 200 yr |
+
+The labels say what the orbit *resembles*, not what the body is. The period is P = a^1.5 yr, and is
+infinite for a parabolic or hyperbolic orbit, which is therefore long-period-comet-like wherever
+T_J < 2; the Tisserand parameter is computed from `q` and `e` so that it stays finite there.
+
+**These are the classical limits, and differ from `classifyTancrediComet`.** Tancredi puts the
+asteroidal limit at 3.05, so an orbit with T_J between 3 and 3.05 — 2P/Encke at 3.0253 — is
+`'asteroidal-like'` here and `'jupiter family'` there. For a meteoroid, which carries no information
+on whether its parent is a comet, the classical limits are the usual ones.
+
+### Flags
+
+| Function | True when |
+| :--- | :--- |
+| `isSunApproaching(q, q_limit=0.2)` | q < 0.2 AU |
+| `isProgrograde(i)` | i < 90° |
+| `isRetrograde(i)` | i > 90° |
+| `isEarthCrossing(q, e)` | q ≤ 1 AU ≤ Q |
+
+An orbit at exactly 90° is neither prograde nor retrograde.
+
+`isEarthCrossing` tests the **heliocentric distance range only**: the orbit passes through the
+distances at which the Earth moves, with the Earth's orbit taken as a circle of 1 AU. It does not
+say the two orbits intersect in space, which depends on their orientation — use `calcMOID` for that.
+An unbound orbit has no aphelion and crosses if its perihelion is inside 1 AU.
 
 ---
 
@@ -201,6 +289,9 @@ resonances are ever needed.
 | :--- | :--- |
 | Tisserand parameter, Kresák K and P, aphelion, orbital energy | **Verified** — standard definitions, and the Encke and Phaethon values reproduce published figures |
 | The two-parameter cometary tests | **Verified** against the limits as published |
+| Atira, Aten, Apollo, Amor limits | **Verified** against the standard definitions (Earth's perihelion 0.983 and aphelion 1.017 AU, q < 1.3 AU for near-Earth) and one known object of each class |
+| Arjuna limits | **Verified** against the text of de la Fuente Marcos & de la Fuente Marcos (2015), section 2.1. The paper calls them approximate |
+| Tisserand classes, flags | **Verified** against one known body of each class. The limits are the classical conventions and the 200 yr period split, as given in the request, not a single published scheme |
 | Tancredi class structure and the 3.05 limit | **Verified indirectly** — the primary paper (Icarus 234, 66) is paywalled and the author's own site no longer resolves, but a 2025 paper co-authored by Tancredi restates the class definitions and the 3.05 cut verbatim |
 | Tancredi Hill radii, table 1 resonances and widths, appendix A and B formulae | **Unverified** — the primary source could not be read. The implementation reproduces the tabulated resonance centres and widths to the printed precision, which is strong but indirect evidence |
 
