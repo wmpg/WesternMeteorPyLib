@@ -291,7 +291,7 @@ resonances are ever needed.
 | The two-parameter cometary tests | **Verified** against the limits as published |
 | Atira, Aten, Apollo, Amor limits | **Verified** against the standard definitions (Earth's perihelion 0.983 and aphelion 1.017 AU, q < 1.3 AU for near-Earth) and one known object of each class |
 | Arjuna limits | **Verified** against the text of de la Fuente Marcos & de la Fuente Marcos (2015), section 2.1. The paper calls them approximate |
-| Tisserand classes, flags | **Verified** against one known body of each class. The limits are the classical conventions and the 200 yr period split, as given in the request, not a single published scheme |
+| Tisserand classes, flags | **Verified** against one known body of each class. The limits are the classical conventions and the 200 yr period split of the long-period comets, not a single published scheme |
 | Tancredi class structure and the 3.05 limit | **Verified indirectly** — the primary paper (Icarus 234, 66) is paywalled and the author's own site no longer resolves, but a 2025 paper co-authored by Tancredi restates the class definitions and the 3.05 cut verbatim |
 | Tancredi Hill radii, table 1 resonances and widths, appendix A and B formulae | **Unverified** — the primary source could not be read. The implementation reproduces the tabulated resonance centres and widths to the printed precision, which is strong but indirect evidence |
 
