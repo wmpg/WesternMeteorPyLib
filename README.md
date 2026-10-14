@@ -267,6 +267,8 @@ If you want to use the most recent lists of comets and asteroids, download these
  * [MPC Apollos](http://cgi.minorplanetcenter.net/cgi-bin/textversion.cgi?f=lists/Apollos.html)
  * [MPC Atens](http://cgi.minorplanetcenter.net/cgi-bin/textversion.cgi?f=lists/Atens.html)
 
+Running ```UpdateOrbitFiles.py``` also refreshes the list of meteorites with photographic orbits (```wmpl/share/Meteorites_with_Orbits.csv```) from [meteoriteorbits.info](https://www.meteoriteorbits.info/). The existing file is kept if the page cannot be read completely.
+
 
 ## Usage
 
