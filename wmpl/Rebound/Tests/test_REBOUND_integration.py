@@ -210,9 +210,11 @@ def testNamedParticlesAndHeartbeatWorkOnTheInstalledVersion(realReb):
 def testEndToEndIntegrationMatchesReference(realReb):
     """ Integrate the example trajectory 60 days back and compare with a reference solution.
 
-    The reference was computed with rebound 4.3.0 and reboundx 4.3.0 (compiled against it) and
-    reproduced with rebound 5.1.1 and reboundx 5.1.0 to ~1e-13. The tolerance leaves room for
-    floating-point differences between platforms, while catching any real change in the dynamics.
+    The reference was computed with rebound 4.4.10 and reboundx 4.4.2, after the time unit was made
+    consistent with G = 1 (DAYS_PER_SIM_TIME). The previous reference, from rebound 4.3.0 and 5.1.1,
+    used the Julian year over 2 pi and had a = 10.98466 AU, 0.0119 AU further from the solver's own
+    orbit (10.99652 AU) than now. The tolerance leaves room for floating-point differences between
+    platforms, while catching any real change in the dynamics.
     """
 
     from wmpl.Config import config
@@ -235,16 +237,90 @@ def testEndToEndIntegrationMatchesReference(realReb):
 
     orbit = sim_outputs[-1][2]
     rtol = 1e-7
-    assert orbit.a == pytest.approx(10.984662940935554, rel=rtol)
-    assert orbit.e == pytest.approx(0.9469750833346323, rel=rtol)
-    assert np.degrees(orbit.inc) == pytest.approx(164.56525202758945, rel=rtol)
-    assert np.degrees(orbit.Omega) == pytest.approx(29.396553080685386, rel=rtol)
-    assert np.degrees(orbit.omega) == pytest.approx(81.51628083264556, rel=rtol)
+    assert orbit.a == pytest.approx(10.9937899741892, rel=rtol)
+    assert orbit.e == pytest.approx(0.9470181770710294, rel=rtol)
+    assert np.degrees(orbit.inc) == pytest.approx(164.56527442912162, rel=rtol)
+    assert np.degrees(orbit.Omega) == pytest.approx(29.396553069608316, rel=rtol)
+    assert np.degrees(orbit.omega) == pytest.approx(81.5139061407715, rel=rtol)
 
     # The Moon's closest approach comes from the heartbeat, so this also checks that it ran
     diag = next(iter(diagnostics.values()))
     assert diag["departed"]
     assert diag["impact"] is None
-    assert diag["min_dist_au"]["Luna"] == pytest.approx(0.0018192455341135359, rel=rtol)
+    assert diag["min_dist_au"]["Luna"] == pytest.approx(0.0018192453834511423, rel=rtol)
     # The within-step refinement added in #99 moves this off the step-end value it had before
-    assert diag["min_time_days"]["Luna"] == pytest.approx(-0.0426156724, rel=1e-6)
+    assert diag["min_time_days"]["Luna"] == pytest.approx(-0.0426156510, rel=1e-6)
+
+
+### Units ###
+
+
+def testTimeUnitIsTheOneOfGEqualsOne(realReb):
+    """ With G = 1, AU and solar masses, the time unit is REBOUND's yr2pi, sqrt(AU^3/GM_Sun). The
+    planets added from Horizons and REBOUNDx's speed of light use it, so the local ephemeris and the
+    meteoroid must too. """
+
+    rb = realReb.rb
+
+    assert realReb.DAYS_PER_SIM_TIME == pytest.approx(rb.units.times_SI["yr2pi"]/86400, rel=1e-14)
+
+    # A simulation in the units REBOUND sets for Horizons queries has G = 1
+    sim = rb.Simulation()
+    sim.units = ("AU", "yr2pi", "Msun")
+    assert sim.G == pytest.approx(1.0, rel=1e-12)
+
+    # REBOUNDx's speed of light, in AU per time unit
+    c_au_day = 299792.458*86400/149597870.7
+    assert realReb.rbxConstants.C == pytest.approx(c_au_day*realReb.DAYS_PER_SIM_TIME, rel=1e-12)
+
+    # The conversions are inverses of each other, and a Julian year is not 2 pi
+    assert realReb.simTimeToDays(realReb.daysToSimTime(123.4)) == pytest.approx(123.4, rel=1e-15)
+    assert realReb.daysToSimTime(365.25) == pytest.approx(2*np.pi*(1 - 1.89e-5), rel=1e-7)
+
+
+def testPlanetsFollowTheEphemeris(realReb):
+    """ The planets started from the local ephemeris and integrated for 10 years stay within tens of
+    km of where the ephemeris puts them. With the Julian year over 2 pi as the time unit, the Earth
+    was 720 000 km off, because G = 1 made the Sun 3.8e-5 too massive. """
+
+    from wmpl.Config import config
+
+    if not os.path.isfile(config.jpl_ephem_file):
+        pytest.skip("DE430 ephemeris not found: {}".format(config.jpl_ephem_file))
+
+    rb = realReb.rb
+    eph = realReb.SPK.open(config.jpl_ephem_file)
+
+    names = ["Sun", "Mercury", "Venus", "Earth", "Luna", "Mars", "Jupiter", "Saturn", "Uranus",
+             "Neptune"]
+    jd = 2458779.88
+    days = -3652.5
+
+    sim = rb.Simulation()
+    for name in names:
+        state, mass = realReb.ephemBodyStateRebound(name, jd, eph)
+        realReb._addNamedParticle(sim, name, m=mass, x=state[0], y=state[1], z=state[2],
+                                  vx=state[3], vy=state[4], vz=state[5])
+
+    # General relativity, as in the integrations (Mercury drifts by ~1900 km in 10 years without it)
+    rebx = realReb.reboundx.Extras(sim)
+    gr = rebx.load_force("gr_full")
+    rebx.add_force(gr)
+    gr.params["c"] = realReb.rbxConstants.C
+
+    sim.move_to_com()
+    sim.integrate(realReb.daysToSimTime(days))
+
+    def position(name):
+        p = sim.particles[name]
+        return np.array([p.x, p.y, p.z])
+
+    # Measured: Mercury 1 km, Venus 0, Earth 1, Mars 4, Jupiter 26, Moon (from the Earth) 62 km
+    au_km = 149597870.7
+    for name, centre, limit_km in [("Mercury", "Sun", 20), ("Venus", "Sun", 20), ("Earth", "Sun", 20),
+                                   ("Mars", "Sun", 40), ("Jupiter", "Sun", 100),
+                                   ("Luna", "Earth", 300)]:
+        ref = (np.array(realReb.ephemBodyStateRebound(name, jd + days, eph)[0][:3])
+               - np.array(realReb.ephemBodyStateRebound(centre, jd + days, eph)[0][:3]))
+        err_km = np.linalg.norm(position(name) - position(centre) - ref)*au_km
+        assert err_km < limit_km, "{:s} is {:.0f} km off the ephemeris".format(name, err_km)
