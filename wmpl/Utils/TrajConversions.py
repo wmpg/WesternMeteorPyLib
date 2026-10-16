@@ -948,14 +948,14 @@ def raDec2Ecliptic(jd, ra, dec):
     # Calculate ecliptic longitude
     L = np.arctan2(np.sin(eps)*np.sin(dec) + np.sin(ra)*np.cos(dec)*np.cos(eps), np.cos(ra)*np.cos(dec))
 
-    # Calculate ecliptic latitude
-    B = np.arcsin(np.cos(eps)*np.sin(dec) - np.sin(ra)*np.cos(dec)*np.sin(eps))
+    # Calculate ecliptic latitude (the argument is clipped, as rounding can take it past +/-1 at a pole)
+    B = np.arcsin(np.clip(np.cos(eps)*np.sin(dec) - np.sin(ra)*np.cos(dec)*np.sin(eps), -1.0, 1.0))
 
     # Wrap the longitude to [0, 2pi] range
     L = L%(2*np.pi)
 
-    # Wrap latitude to [-pi/2, pi/2] range
-    B = (B + np.pi/2)%np.pi - np.pi/2
+    # The latitude is already in the [-pi/2, pi/2] range. It must not be wrapped with a modulo, which
+    #   would turn +pi/2 (the north ecliptic pole) into -pi/2.
 
     return L, B
 
@@ -980,13 +980,14 @@ def ecliptic2RaDec(jd, L, B):
 
     ra = np.arctan2(np.cos(eps)*np.sin(L)*np.cos(B) - np.sin(eps)*np.sin(B), np.cos(L)*np.cos(B))
 
-    dec = np.arcsin(np.sin(eps)*np.sin(L)*np.cos(B) + np.cos(eps)*np.sin(B))
+    # The argument is clipped, as rounding can take it past +/-1 at a pole
+    dec = np.arcsin(np.clip(np.sin(eps)*np.sin(L)*np.cos(B) + np.cos(eps)*np.sin(B), -1.0, 1.0))
 
     # Wrap the right ascension to [0, 2pi] range
     ra = ra%(2*np.pi)
 
-    # Wrap the declination to [-pi/2, pi/2] range
-    dec = (dec + np.pi/2)%np.pi - np.pi/2
+    # The declination is already in the [-pi/2, pi/2] range. It must not be wrapped with a modulo,
+    #   which would turn +pi/2 (the north celestial pole) into -pi/2.
 
     return ra, dec
 
@@ -1141,17 +1142,18 @@ def equatorialCoordPrecession(start_epoch, final_epoch, ra, dec):
     # Calculate right ascension
     ra_corr = np.arctan2(A, B) + z
 
-    # Calculate declination (apply a different equation if close to the pole, closer then 0.5 degrees)
+    # Calculate declination (apply a different equation if close to the pole, closer then 0.5 degrees).
+    #   The arguments are clipped, as rounding can take them past 1.
     if (np.pi/2 - np.abs(dec)) < np.radians(0.5):
-        dec_corr = np.sign(C)*np.arccos(np.sqrt(A**2 + B**2))
+        dec_corr = np.sign(C)*np.arccos(min(np.sqrt(A**2 + B**2), 1.0))
     else:
-        dec_corr = np.arcsin(C)
+        dec_corr = np.arcsin(np.clip(C, -1.0, 1.0))
 
     # Wrap right ascension to [0, 2*pi] range
     ra_corr = ra_corr%(2*np.pi)
 
-    # Wrap declination to [-pi/2, pi/2] range
-    dec_corr = (dec_corr + np.pi/2)%np.pi - np.pi/2
+    # The declination is already in the [-pi/2, pi/2] range. It must not be wrapped with a modulo,
+    #   which would turn +pi/2 (the north celestial pole) into -pi/2.
 
     return ra_corr, dec_corr
 
