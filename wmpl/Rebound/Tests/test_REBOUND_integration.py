@@ -419,3 +419,72 @@ def testHarmonicsAreSymmetricAboutTheSpinAxis(realReb):
     assert dv_same < 1e-6
     # The ecliptic pole as the axis is m/s off (measured 5.2 m/s on Winchcombe)
     assert dv_z > 0.5
+
+
+### The Sun's J2 ###
+
+
+def testSunSpinAxisIsTheIauPole(reb):
+    """ The Sun's rotation pole (IAU: RA 286.13 deg, Dec 63.87 deg) is 7.25 deg from the ecliptic
+    pole, and the solar equator crosses the ecliptic at a longitude of 75.77 deg (J2000). """
+
+    pole = np.array(reb.sunSpinAxisEcliptic())
+
+    assert np.linalg.norm(pole) == pytest.approx(1.0, abs=1e-15)
+    assert np.degrees(np.arccos(pole[2])) == pytest.approx(7.25, abs=0.005)
+    assert np.degrees(np.arctan2(pole[0], -pole[1])) % 360 == pytest.approx(75.77, abs=0.02)
+
+
+def testSunJ2KeepsMercuryOnTheEphemeris(realReb):
+    """ DE430 includes the Sun's J2. With it, Mercury integrated from DE430 for 100 years stays within
+    a km of the ephemeris (measured 0.6 km), against 13 km without it. """
+
+    from wmpl.Config import config
+
+    if not os.path.isfile(config.jpl_ephem_file):
+        pytest.skip("DE430 ephemeris not found: {}".format(config.jpl_ephem_file))
+
+    if not realReb.harmonicsSpinAxisSupported():
+        pytest.skip("REBOUNDx < 4.4.0 cannot orient the harmonics")
+
+    rb = realReb.rb
+    eph = realReb.SPK.open(config.jpl_ephem_file)
+    names = ["Sun", "Mercury", "Venus", "Earth", "Luna", "Mars", "Jupiter", "Saturn", "Uranus",
+             "Neptune"]
+    jd = 2458779.88
+    days = -36525.0
+
+    def mercuryError(sun_j2):
+
+        sim = rb.Simulation()
+        for name in names:
+            state, mass = realReb.ephemBodyStateRebound(name, jd, eph)
+            realReb._addNamedParticle(sim, name, m=mass, x=state[0], y=state[1], z=state[2],
+                                      vx=state[3], vy=state[4], vz=state[5])
+
+        rebx = realReb.reboundx.Extras(sim)
+        gr = rebx.load_force("gr_full")
+        rebx.add_force(gr)
+        gr.params["c"] = realReb.rbxConstants.C
+
+        if sun_j2:
+            gh = rebx.load_force("gravitational_harmonics")
+            rebx.add_force(gh)
+            sun = sim.particles["Sun"]
+            sun.params["J2"] = realReb.SUN_J2
+            sun.params["R_eq"] = realReb.SUN_J2_RADIUS_AU
+            sun.params["Omega"] = rb.Vec3d(*realReb.sunSpinAxisEcliptic())
+
+        sim.move_to_com()
+        sim.integrate(realReb.daysToSimTime(days))
+
+        ps = sim.particles
+        rel = np.array([ps["Mercury"].x - ps["Sun"].x, ps["Mercury"].y - ps["Sun"].y,
+                        ps["Mercury"].z - ps["Sun"].z])
+        ref = (np.array(realReb.ephemBodyStateRebound("Mercury", jd + days, eph)[0][:3])
+               - np.array(realReb.ephemBodyStateRebound("Sun", jd + days, eph)[0][:3]))
+
+        return np.linalg.norm(rel - ref)*149597870.7
+
+    assert mercuryError(True) < 2.0
+    assert mercuryError(False) > 8.0

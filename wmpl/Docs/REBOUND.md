@@ -60,8 +60,9 @@ gravitational harmonics and the radiation forces all come from `reboundx`.
 
 **Use REBOUNDx ≥ 4.4.0.** The simulations run in the ecliptic J2000 frame, and the Earth's J2/J4 are
 made symmetric about its rotation pole of date (precessed from J2000, about 20″ per year) through the
-`Omega` spin-axis parameter that REBOUNDx added in 4.4.0. Older versions ignore it and make them
-symmetric about the ecliptic pole, 23.4° off; the run then warns, and the report says so. The effect
+`Omega` spin-axis parameter that REBOUNDx added in 4.4.0, and so is the Sun's J2 about its IAU
+rotation pole. Older versions ignore it and make both symmetric about the ecliptic pole, 23.4° and
+7.25° off; the run then warns, and the report says so. The effect
 is a few m/s on the departure of a slow meteoroid (5.2 m/s for Winchcombe, at 14 km/s).
 
 **`--no-build-isolation` is not optional.** `reboundx` publishes no wheels, so `pip` always compiles
@@ -134,6 +135,7 @@ python -m wmpl.Rebound.REBOUND --help
 | `--beta BETA` | Include solar radiation pressure and Poynting–Robertson drag with this beta. Mutually exclusive with `--radius`/`--density`. |
 | `--radius METRES` | Object radius in metres. With `--density`, beta is computed from it. Purely gravitational if not given. |
 | `--density KG_M3` | Bulk density in kg/m³, used with `--radius`. Default: `3000`. |
+| `--no_sun_j2` | Leave out the Sun's J2. It is on by default (DE430's J2 = 2.11e-7, reference radius 696 000 km, about the Sun's IAU rotation pole). It keeps Mercury within 1 km of DE430 over 100 years (13 km without it); on meteoroids it is tiny, 0.02″ on the perihelion of a q = 0.14 AU orbit in 400 years. |
 | `--compute_megno` | After the integration, measure the MEGNO chaos indicator of the nominal orbit. See [Chaos: MEGNO](#chaos-megno). |
 | `--verbose` | Print the progress of the simulation. |
 
@@ -549,7 +551,7 @@ Use WSL2. Installing only `rebound` is not enough.
 **`The installed REBOUND (4.3.0) does not provide the TRACE integrator.`** TRACE was added in REBOUND
 4.4.0. Upgrade, or use `--integrator ias15`.
 
-**`REBOUNDx ... cannot orient the Earth's J2/J4 along its rotation axis`.** REBOUNDx is older than
+**`REBOUNDx ... cannot orient the Earth's J2/J4 and the Sun's J2 along their rotation axes`.** REBOUNDx is older than
 4.4.0. Upgrade it with the `--force-reinstall` command in [Requirements](#requirements).
 
 **`--dt must be positive.`** A zero or negative step would silently collapse to a single step per

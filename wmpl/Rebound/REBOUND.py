@@ -174,6 +174,23 @@ def harmonicsSpinAxisSupported():
     return version >= (4, 4)
 
 
+def sunSpinAxisEcliptic():
+    """ Unit vector along the Sun's rotation pole (SUN_POLE_RA_DEC_DEG), in the ecliptic J2000 frame
+    of the simulations. It is the axis of symmetry of the Sun's J2.
+
+    Return:
+        [list] [x, y, z] unit vector.
+    """
+
+    ra, dec = np.radians(SUN_POLE_RA_DEC_DEG)
+    pole = np.array([np.cos(dec)*np.cos(ra), np.cos(dec)*np.sin(ra), np.sin(dec)])
+
+    # Rotate from the equatorial J2000 frame to the ecliptic J2000 frame (as ephemBodyStateRebound)
+    pole = rotateVector(pole, np.array([1.0, 0.0, 0.0]), -J2000_OBLIQUITY)
+
+    return [float(v) for v in pole/np.linalg.norm(pole)]
+
+
 def earthSpinAxisEcliptic(jd_tdb):
     """ Unit vector along the Earth's mean rotation pole of date, in the ecliptic J2000 frame of the
     simulations. It is the axis of symmetry of the Earth's J2 and J4.
@@ -282,6 +299,13 @@ SUN_ENCOUNTER_AU = 0.1
 
 # Radius of the Sun in AU (IAU 2015 nominal, 695 700 km), used for impact detection
 SUN_RADIUS_AU = 695700.0/149597870.7
+
+# The Sun's oblateness, as in DE430 (header constants J2SUN and ASUN, its reference radius; DE440 has
+#   J2SUN = 2.196e-7). Its axis of symmetry is the Sun's rotation pole, IAU WGCCRE: RA = 286.13 deg,
+#   Dec = 63.87 deg (J2000), 7.25 deg from the ecliptic pole.
+SUN_J2 = 2.1106088532726840e-07
+SUN_J2_RADIUS_AU = 696000.0/149597870.7
+SUN_POLE_RA_DEC_DEG = (286.13, 63.87)
 
 # Time unit of the simulations. They use G = 1 with lengths in AU and masses in solar masses, so the
 #   time unit is the one in which GM_Sun = 1 AU^3: sqrt(AU^3/GM_Sun) = 58.13244 days, a Gaussian year
@@ -1449,6 +1473,8 @@ def _integrateParticles(task):
                                  radii used for impact detection (Sun 695700 km, Earth 6371 km,
                                  Moon 1737.4 km).
             integrator:      [str]  Optional. "ias15" (default, adaptive), "whfast" or "trace".
+            sun_j2:          [bool] Optional. Include the Sun's J2 (SUN_J2), symmetric about its
+                                 rotation axis (sunSpinAxisEcliptic). Default True.
             earth_spin_axis: [list] Optional. Direction of the Earth's rotation axis in the
                                  simulation frame, the axis of symmetry of its J2 and J4 (see
                                  earthSpinAxisEcliptic). Needs REBOUNDx >= 4.4.0. None (default)
@@ -1582,6 +1608,14 @@ def _integrateParticles(task):
     earth_spin_axis = task.get("earth_spin_axis")
     if earth_spin_axis is not None:
         ps["Earth"].params["Omega"] = rb.Vec3d(*earth_spin_axis)
+
+    # The Sun's J2, about its rotation axis (7.25 deg from the ecliptic pole, which an old REBOUNDx
+    #   uses instead). It acts on the planets as well as on the object.
+    if task.get("sun_j2", True):
+        ps["Sun"].params["J2"] = SUN_J2
+        ps["Sun"].params["R_eq"] = SUN_J2_RADIUS_AU
+        if harmonicsSpinAxisSupported():
+            ps["Sun"].params["Omega"] = rb.Vec3d(*sunSpinAxisEcliptic())
     # Assign the body radii used for impact detection
     for bname, brad in body_radii.items():
         if bname in planet_names:
@@ -2154,7 +2188,7 @@ def reboundSimulate(
         direction="forward", sim_days=60, n_outputs=500, obj_name="obj", obj_mass=0.0, mc_runs=100,
         reference_frame="heliocentric", ephem_source="local", n_cpu=None,
         show_progress=True, return_diagnostics=False, random_seed=None, beta=None, integrator="ias15",
-        dt_days=None, compute_megno=False, verbose=False):
+        dt_days=None, compute_megno=False, sun_j2=True, verbose=False):
     """ Takes an state vector (or a Trajectory object), runs REBOUND and produces orbital elements for the 
     object at the end of the simulation or at the specified time.
 
@@ -2202,6 +2236,9 @@ def reboundSimulate(
             and accurate to machine precision; the other two use a fixed timestep.
         dt_days: [float] Timestep in days for WHFast and TRACE. None (default) uses
             FIXED_STEP_DEFAULT_DT_DAYS. Ignored by IAS15.
+        sun_j2: [bool] Include the Sun's J2 (SUN_J2, about its rotation axis). Default True. It moves
+            Mercury's perihelion by 0.03 arcsec per century, and a meteoroid's in proportion to
+            (R_Sun/q)^2, so it matters most for small perihelia.
         compute_megno: [bool] If True, after the requested integration run a purely gravitational
             integration of the nominal solution only, over the same span, and store its MEGNO
             series and verdict (see computeMegno and classifyMegno) under "megno" in the nominal
@@ -2293,9 +2330,9 @@ def reboundSimulate(
     if harmonicsSpinAxisSupported():
         earth_spin_axis = earthSpinAxisEcliptic(time_tdb)
     else:
-        warnings.warn("REBOUNDx {:s} cannot orient the Earth's J2/J4 along its rotation axis (this "
-                      "needs REBOUNDx >= 4.4.0), so they are symmetric about the ecliptic pole, 23.4 "
-                      "deg off. Upgrade REBOUNDx to fix it.".format(
+        warnings.warn("REBOUNDx {:s} cannot orient the Earth's J2/J4 and the Sun's J2 along their "
+                      "rotation axes (this needs REBOUNDx >= 4.4.0), so they are symmetric about the "
+                      "ecliptic pole, 23.4 and 7.25 deg off. Upgrade REBOUNDx to fix it.".format(
                           getattr(reboundx, "__version__", "?")), RuntimeWarning)
 
     # Set up the output time array (not integration steps, but the times at which state is saved)
@@ -2380,6 +2417,7 @@ def reboundSimulate(
             "integrator": integrator,
             "dt_days": dt_days,
             "earth_spin_axis": earth_spin_axis,
+            "sun_j2": sun_j2,
         }
 
     if verbose:
@@ -2556,6 +2594,10 @@ if __name__ == "__main__":
                         help="Timestep in days for whfast and trace. Default: {:g} d. Ignored by "
                         "ias15.".format(FIXED_STEP_DEFAULT_DT_DAYS["whfast"]))
 
+    parser.add_argument("--no_sun_j2", action="store_true",
+                        help="Leave out the Sun's J2 (on by default: J2 = {:.4e}, about the Sun's rotation "
+                        "axis). It matters most for small perihelion distances.".format(SUN_J2))
+
     parser.add_argument("--compute_megno", action="store_true",
                         help="After the integration, integrate the nominal solution again with "
                         "Newtonian gravity only (IAS15) and compute its MEGNO chaos indicator, "
@@ -2667,7 +2709,7 @@ if __name__ == "__main__":
         reference_frame=reference_frame,
         ephem_source=ephem_source, n_cpu=n_cpu, return_diagnostics=True,
         random_seed=random_seed, beta=beta, integrator=args.integrator, dt_days=dt_days,
-        compute_megno=args.compute_megno, verbose=args.verbose
+        compute_megno=args.compute_megno, sun_j2=not args.no_sun_j2, verbose=args.verbose
         )
     sim_wall = time.time() - t_run_start
 
@@ -2849,9 +2891,10 @@ if __name__ == "__main__":
 
     print("  Frame        : {:s}".format(reference_frame))
     j2_axis = "" if harmonicsSpinAxisSupported() else " (about the ecliptic pole: REBOUNDx < 4.4.0)"
-    print("  Forces       : {:s}".format(
-        "gravity + GR + Earth J2/J4" + j2_axis if beta is None
-        else "gravity + GR + Earth J2/J4{:s} + radiation (beta = {:.3e})".format(j2_axis, beta)))
+    forces_str = "gravity + GR + {:s}Earth J2/J4{:s}".format("" if args.no_sun_j2 else "Sun J2 + ", j2_axis)
+    if beta is not None:
+        forces_str += " + radiation (beta = {:.3e})".format(beta)
+    print("  Forces       : {:s}".format(forces_str))
     print("  Start epoch  : {:.6f} JD (TDB)".format(traj.jdt_ref))
     print("  Final epoch  : {:.6f} JD (TDB)  =  {:s} UTC".format(final_epoch_jd, time_utc.iso))
     if len(sim_outputs_mc):
@@ -3508,6 +3551,7 @@ if __name__ == "__main__":
             "integrator": args.integrator,
             "dt_days": dt_days,
             "fixed_step_from_days": fixed_from,
+            "sun_j2": None if args.no_sun_j2 else SUN_J2,
             # Axis of the Earth's J2/J4 in the ecliptic J2000 frame (null: the ecliptic pole was used,
             #   REBOUNDx < 4.4.0)
             "earth_spin_axis": (earthSpinAxisEcliptic(astropy.time.Time(
