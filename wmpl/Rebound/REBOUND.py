@@ -12,6 +12,8 @@ import re
 import sys
 import json
 import time
+import pickle
+import shutil
 import warnings
 import functools
 import multiprocessing
@@ -338,6 +340,298 @@ class _ProgressLine(object):
         if self.enabled and self.width:
             print("\r" + " "*self.width + "\r", end="", flush=True)
             self.width = 0
+
+
+# Size of one output sample of one integrated orbit (time, heliocentric state, orbital elements and
+#   the distances to the 10 bodies), measured with tracemalloc on CPython 3.9 64-bit: ~1780 B kept
+#   by reboundSimulate (10 years, 5000 outputs, 5 orbits) plus ~270 B for the element series built
+#   for the JSON file; ~414 B in the JSON file (indent=1) and ~374 B in the checkpoint pickle.
+OUTPUT_SAMPLE_MEMORY_BYTES = 1780 + 270
+OUTPUT_SAMPLE_JSON_BYTES = 420
+OUTPUT_SAMPLE_CHECKPOINT_BYTES = 380
+
+# A worker process holds the outputs of the orbit it integrates, plus their pickled copy when it
+#   sends them back
+OUTPUT_SAMPLE_WORKER_BYTES = 1780 + 380
+
+# Estimated outputs above this size are reported before the integration starts
+OUTPUT_SIZE_REPORT_BYTES = 100*1024**2
+
+# Fraction of the memory that the outputs may fill before a warning is given
+OUTPUT_MEMORY_WARN_FRACTION = 0.5
+
+
+def estimateOutputSize(n_outputs, n_orbits, n_workers=0):
+    """ Estimate how much memory and disk the integration outputs will need.
+
+    All the outputs are kept in memory until the end of the run, so they grow as the number of
+    output samples times the number of integrated orbits (the nominal plus the Monte Carlo clones).
+    The integrators themselves need comparatively little memory.
+
+    Arguments:
+        n_outputs: [int] Output samples per orbit.
+        n_orbits: [int] Number of integrated orbits.
+
+    Keyword arguments:
+        n_workers: [int] Number of worker processes integrating the Monte Carlo realizations in
+            parallel, 0 (default) if they are integrated in this process.
+
+    Return:
+        [dict] Sizes in bytes: "memory" (outputs in memory, the workers included), "json" (the
+            results JSON file written by the command line interface) and "checkpoint" (the
+            checkpoint file).
+    """
+
+    n_outputs = max(int(n_outputs), 0)
+    n_samples = n_outputs*max(int(n_orbits), 0)
+
+    return {
+        "memory": (n_samples*OUTPUT_SAMPLE_MEMORY_BYTES
+                   + max(int(n_workers), 0)*n_outputs*OUTPUT_SAMPLE_WORKER_BYTES),
+        "json": n_samples*OUTPUT_SAMPLE_JSON_BYTES,
+        "checkpoint": n_samples*OUTPUT_SAMPLE_CHECKPOINT_BYTES,
+    }
+
+
+def formatBytes(n_bytes):
+    """ Format a size in bytes in kB, MB, GB or TB (powers of 1024), e.g. "3.2 GB". """
+
+    size = float(n_bytes)
+    for unit in ("B", "kB", "MB", "GB"):
+        if size < 1024:
+            return "{:.0f} {:s}".format(size, unit) if unit == "B" else "{:.1f} {:s}".format(size, unit)
+        size /= 1024
+
+    return "{:.1f} TB".format(size)
+
+
+def availableMemoryBytes():
+    """ Memory available to this process, in bytes, or None if it cannot be determined.
+
+    Uses psutil when it is installed (the memory not in use), otherwise the total physical memory,
+    which is an upper limit.
+    """
+
+    try:
+        import psutil
+        return int(psutil.virtual_memory().available)
+    except Exception:
+        pass
+
+    try:
+        return int(os.sysconf("SC_PAGE_SIZE"))*int(os.sysconf("SC_PHYS_PAGES"))
+    except (AttributeError, ValueError, OSError):
+        pass
+
+    # Windows
+    try:
+        import ctypes
+
+        class _MemoryStatus(ctypes.Structure):
+            _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                        ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong),
+                        ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong),
+                        ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+
+        status = _MemoryStatus()
+        status.dwLength = ctypes.sizeof(_MemoryStatus)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+            return int(status.ullAvailPhys)
+    except Exception:
+        pass
+
+    return None
+
+
+def outputMemoryWarning(n_outputs, n_orbits, n_workers=0, available_bytes=None):
+    """ A warning if the outputs of the integration may not fit in memory, or None.
+
+    Arguments:
+        n_outputs: [int] Output samples per orbit.
+        n_orbits: [int] Number of integrated orbits.
+
+    Keyword arguments:
+        n_workers: [int] Number of worker processes (see estimateOutputSize). Default 0.
+        available_bytes: [int] Available memory in bytes. None (default) asks the system
+            (availableMemoryBytes).
+
+    Return:
+        [str] or None.
+    """
+
+    if available_bytes is None:
+        available_bytes = availableMemoryBytes()
+    if not available_bytes:
+        return None
+
+    need = estimateOutputSize(n_outputs, n_orbits, n_workers=n_workers)["memory"]
+    if need <= OUTPUT_MEMORY_WARN_FRACTION*available_bytes:
+        return None
+
+    return ("the outputs of {:d} orbits x {:d} samples need ~{:s} of memory, {:.0f}% of the {:s} "
+            "available. The run may fail or swap heavily; reduce --outputs or --mc.".format(
+                int(n_orbits), int(n_outputs), formatBytes(need), 100*need/available_bytes,
+                formatBytes(available_bytes)))
+
+
+### Checkpoint of the integrated orbits ###
+#
+# A checkpoint is a file of consecutive pickle records: a header with the run parameters, then one
+#   record per orbit as soon as its integration ends (the nominal, each Monte Carlo clone and the
+#   MEGNO run). Each record is flushed to disk on its own, so a run that is cut keeps every orbit
+#   integrated so far, and a run started again with the same parameters integrates only the rest.
+#   A record cut while it was being written is dropped when the file is read back.
+
+CHECKPOINT_VERSION = 1
+
+# Name of the checkpoint file the command line interface writes next to the trajectory pickle
+CHECKPOINT_FILE_NAME = "rebound_checkpoint.pkl"
+
+# Record key of the MEGNO run in the checkpoint (orbit records are keyed by the particle name)
+_CHECKPOINT_MEGNO_KEY = "__megno__"
+
+
+class ReboundCheckpointMismatch(ValueError):
+    """ The checkpoint was written by a run with different parameters, so it cannot be resumed.
+
+    Attributes:
+        differences: [list] (parameter, value in the checkpoint, value of this run) tuples.
+    """
+
+    def __init__(self, path, differences):
+
+        self.path = path
+        self.differences = differences
+
+        text = ", ".join("{:s} ({} in the checkpoint, {} now)".format(k, a, b)
+                         for k, a, b in differences)
+        super(ReboundCheckpointMismatch, self).__init__(
+            "The checkpoint {:s} belongs to a run with different parameters: {:s}".format(path, text))
+
+
+def readReboundCheckpoint(path):
+    """ Read a checkpoint file written by reboundSimulate.
+
+    Arguments:
+        path: [str] Path to the checkpoint file.
+
+    Return:
+        (header, records, valid_size):
+            header: [dict] The run parameters ("signature") and the checkpoint version, or None if
+                the file is missing or has no complete header.
+            records: [dict] {key: record} for every complete record, keyed by the particle name
+                (or _CHECKPOINT_MEGNO_KEY).
+            valid_size: [int] Size in bytes of the readable part of the file. Anything after it is
+                a record cut while it was being written.
+    """
+
+    header = None
+    records = {}
+    valid_size = 0
+
+    if not os.path.isfile(path):
+        return header, records, valid_size
+
+    with open(path, "rb") as f:
+        while True:
+            try:
+                entry = pickle.load(f)
+            except EOFError:
+                break
+            except Exception:
+                # A record cut while it was written raises many kinds of errors while unpickling
+                break
+
+            if not isinstance(entry, dict):
+                break
+
+            if entry.get("kind") == "header":
+                if header is not None:
+                    break
+                header = entry
+
+            elif (header is not None) and (entry.get("kind") == "record"):
+                records[entry["key"]] = entry["data"]
+
+            else:
+                break
+
+            valid_size = f.tell()
+
+    if header is None:
+        return None, {}, 0
+
+    return header, records, valid_size
+
+
+def _checkpointDifferences(saved, current):
+    """ The run parameters that differ between a checkpoint and this run, as (key, saved, current). """
+
+    differences = []
+    for key in sorted(set(saved) | set(current)):
+        a, b = saved.get(key), current.get(key)
+
+        # The Monte Carlo seed is only compared if this run sets one
+        if (key == "random_seed") and (b is None):
+            continue
+
+        if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)) and (len(a) == len(b)):
+            if np.allclose(np.array(a, dtype=float), np.array(b, dtype=float), rtol=1e-12, atol=0):
+                continue
+
+        elif isinstance(a, float) and isinstance(b, float):
+            if np.isclose(a, b, rtol=1e-12, atol=0):
+                continue
+
+        elif a == b:
+            continue
+
+        differences.append((key, a, b))
+
+    return differences
+
+
+class _CheckpointWriter(object):
+    """ Appends records to a checkpoint file, each one flushed to disk as soon as it is written.
+
+    Arguments:
+        path: [str] Path to the checkpoint file.
+        signature: [dict] Run parameters, written as the header of a new file.
+        valid_size: [int] Readable size of an existing checkpoint to continue (see
+            readReboundCheckpoint), or None to start a new file.
+    """
+
+    def __init__(self, path, signature, valid_size=None):
+
+        self.path = path
+
+        if valid_size:
+            # Continue the existing file, cutting off a record left incomplete by the interruption
+            with open(path, "r+b") as f:
+                f.truncate(valid_size)
+
+        else:
+            self._write({"kind": "header", "version": CHECKPOINT_VERSION, "signature": signature},
+                        mode="wb")
+
+    def _write(self, entry, mode="ab"):
+
+        # The file is opened for each record, so nothing is left open if the run is cut
+        with open(self.path, mode) as f:
+            pickle.dump(entry, f, protocol=pickle.HIGHEST_PROTOCOL)
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except OSError:
+                pass
+
+    def add(self, key, data):
+        """ Append the record of one integrated orbit. """
+
+        self._write({"kind": "record", "key": key, "data": data})
 
 
 def _encounterThreshold(body, n_hill):
@@ -2204,7 +2498,7 @@ def reboundSimulate(
         direction="forward", sim_days=60, n_outputs=500, obj_name="obj", obj_mass=0.0, mc_runs=100,
         reference_frame="heliocentric", ephem_source="local", n_cpu=None,
         show_progress=True, return_diagnostics=False, random_seed=None, beta=None, integrator="ias15",
-        dt_days=None, compute_megno=False, verbose=False):
+        dt_days=None, compute_megno=False, checkpoint_path=None, verbose=False):
     """ Takes an state vector (or a Trajectory object), runs REBOUND and produces orbital elements for the 
     object at the end of the simulation or at the specified time.
 
@@ -2261,6 +2555,14 @@ def reboundSimulate(
             solution's diagnostics. Requires return_diagnostics=True, which is the only way the
             result is returned; it is skipped with a warning otherwise, since the extra integration
             is as expensive as the nominal run. Default False.
+        checkpoint_path: [str] If given, save each orbit to this file as soon as its integration
+            ends (the nominal, each Monte Carlo realization and the MEGNO run), so that a run that is
+            cut keeps what it had integrated. If the file already holds a checkpoint of a run with
+            the same parameters, the orbits in it are read back instead of integrated again, and
+            the run goes on from there. If random_seed is None, the seed is taken from the
+            checkpoint (or drawn and stored in a new one), so the Monte Carlo realizations are the
+            same as before the interruption. The file is left in place at the end: delete it once
+            the results are saved. None (default) saves nothing. See readReboundCheckpoint.
         verbose: [bool] If True, print out the progress of the simulation.
 
     Return:
@@ -2271,6 +2573,10 @@ def reboundSimulate(
             its closest approaches ("min_dist_au", "min_time_days"), every close encounter
             ("encounters"), whether it left the Earth's neighbourhood ("departed"), and any impact
             ("impact"). See _integrateParticles.
+
+    Raises:
+        ReboundCheckpointMismatch: if checkpoint_path holds a checkpoint of a run with different
+            parameters.
 
     """
 
@@ -2306,10 +2612,80 @@ def reboundSimulate(
     
 
 
+    # Monte Carlo realizations are drawn if their number is given and the trajectory has uncertainties
+    with_mc = (mc_runs > 1) and (traj is not None) and (traj.uncertainties is not None)
+
+    # Checkpoint: write each orbit as soon as it has been integrated, and read back the orbits a cut
+    #   run with the same parameters had already integrated
+    checkpoint = None
+    checkpoint_records = {}
+    if checkpoint_path:
+
+        header, checkpoint_records, valid_size = readReboundCheckpoint(checkpoint_path)
+
+        # Without a seed, resume with the one of the checkpoint, so the realizations are the same.
+        #   A new checkpoint needs a seed of its own for the same reason.
+        if with_mc and (random_seed is None):
+            if header is not None:
+                random_seed = header["signature"].get("random_seed")
+            if random_seed is None:
+                random_seed = int(np.random.SeedSequence().entropy % (2**32))
+
+        signature = {
+            "julian_date": float(julian_date),
+            "state_vect": [float(v) for v in state_vect],
+            "state_vect_cov": (np.asarray(traj.state_vect_cov, dtype=float).ravel().tolist()
+                               if with_mc else None),
+            "mc_runs": int(mc_runs) if with_mc else 0,
+            "random_seed": random_seed if with_mc else None,
+            "obj_name": str(obj_name),
+            "direction": direction,
+            "sim_days": float(sim_days),
+            "n_outputs": int(n_outputs),
+            "reference_frame": reference_frame,
+            "ephem_source": ephem_source,
+            "beta": None if beta is None else float(beta),
+            "integrator": integrator,
+            "dt_days": None if dt_days is None else float(dt_days),
+        }
+
+        if header is not None:
+            differences = _checkpointDifferences(header["signature"], signature)
+            if differences:
+                raise ReboundCheckpointMismatch(checkpoint_path, differences)
+
+        checkpoint = _CheckpointWriter(checkpoint_path, signature,
+                                       valid_size=(valid_size if header is not None else None))
+
+        if show_progress:
+            n_orbits_saved = len([k for k in checkpoint_records if k != _CHECKPOINT_MEGNO_KEY])
+            if n_orbits_saved:
+                print("Resuming from the checkpoint {:s}: {:d} of {:d} orbits already "
+                      "integrated.".format(checkpoint_path, n_orbits_saved,
+                                           1 + (mc_runs if with_mc else 0)))
+            else:
+                print("Saving each integrated orbit to the checkpoint {:s}".format(checkpoint_path))
+
+    # All the outputs stay in memory until the end, so warn up front if they may not fit
+    n_orbits = 1 + (mc_runs if with_mc else 0)
+    n_workers = 0
+    if with_mc:
+        n_workers = n_cpu if n_cpu is not None else max(1, (os.cpu_count() or 1) - 1)
+        n_workers = min(n_workers, mc_runs) if n_workers > 1 else 0
+    output_size = estimateOutputSize(n_outputs, n_orbits, n_workers=n_workers)
+    if show_progress and (output_size["memory"] >= OUTPUT_SIZE_REPORT_BYTES):
+        print("Outputs of {:d} orbit(s) x {:d} samples: ~{:s} in memory.".format(
+            n_orbits, n_outputs, formatBytes(output_size["memory"])))
+    memory_warning = outputMemoryWarning(n_outputs, n_orbits, n_workers=n_workers)
+    if memory_warning and show_progress:
+        print("Warning: " + memory_warning)
+    elif memory_warning:
+        warnings.warn("The outputs may not fit in memory: " + memory_warning, RuntimeWarning)
+
     # If the number of Monte Carlo simulations is given and the trajectory has uncertainties defined,
     # sample the state vector from the uncertainties
     state_vect_realizations = []
-    if (mc_runs > 1) and (traj is not None) and (traj.uncertainties is not None):
+    if with_mc:
 
         # Extract the state vector covariance matrix
         cov = traj.state_vect_cov
@@ -2438,10 +2814,18 @@ def reboundSimulate(
             label, formatTimeSpan(t_days, decimals=0)), t_days/sim_days)
 
     # Nominal solution, integrated in its own simulation (in the main process)
-    progress_line = _ProgressLine(show_progress)
-    nominal_result = _integrateParticles(_make_task([state_vect_rot], [obj_name]),
-                                         progress=_spanProgress(progress_line, "Nominal orbit"))
-    progress_line.end()
+    if obj_name in checkpoint_records:
+        nominal_result = checkpoint_records[obj_name]
+
+    else:
+        progress_line = _ProgressLine(show_progress)
+        nominal_result = _integrateParticles(_make_task([state_vect_rot], [obj_name]),
+                                             progress=_spanProgress(progress_line, "Nominal orbit"))
+        progress_line.end()
+
+        if checkpoint is not None:
+            checkpoint.add(obj_name, nominal_result)
+
     outputs = nominal_result["outputs"][obj_name]
     diagnostics = dict(nominal_result["diagnostics"])
 
@@ -2465,26 +2849,41 @@ def reboundSimulate(
 
         n_total = len(tasks)
 
-        if show_progress:
-            print("Integrating {:d} Monte Carlo realizations on {:d} core(s)...".format(n_total, n_cpu))
+        # The realizations read back from the checkpoint are not integrated again
+        results = [checkpoint_records.get(n) for n in mc_names]
+        todo = [idx for idx, res in enumerate(results) if res is None]
+        n_resumed = n_total - len(todo)
+        n_cpu = max(1, min(n_cpu, len(todo)))
 
-        # Live in-place progress on a terminal: the realizations done, and the share of the whole
-        #   ensemble's span integrated so far, counting the realizations still running
+        if show_progress and todo:
+            print("Integrating {:d} Monte Carlo realizations on {:d} core(s)...".format(
+                len(todo), n_cpu))
+
+        # Live in-place progress on a terminal: the realizations done, and the share of the
+        #   realizations left to integrate done so far, counting the ones still running
         progress_line = _ProgressLine(show_progress)
 
         def _report(n_done, done_equiv):
-            progress_line.show("Monte Carlo: {:d}/{:d} realizations done".format(n_done, n_total),
-                               done_equiv/n_total)
+            progress_line.show("Monte Carlo: {:d}/{:d} realizations done".format(
+                n_resumed + n_done, n_total), done_equiv/len(todo))
+
+        # Save each realization to the checkpoint as soon as it is done
+        def _finished(idx):
+            if (checkpoint is not None) and results[idx]:
+                checkpoint.add(mc_names[idx], results[idx])
 
         t_mc_start = time.time()
 
-        if n_cpu == 1:
-            results = []
-            for k, t in enumerate(tasks):
+        if not todo:
+            pass
+
+        elif n_cpu == 1:
+            for k, idx in enumerate(todo):
                 progress = None
                 if progress_line.enabled:
                     progress = (lambda t_days, k=k: _report(k, k + min(t_days/sim_days, 1.0)))
-                results.append(_integrateParticles(t, progress=progress))
+                results[idx] = _integrateParticles(tasks[idx], progress=progress)
+                _finished(idx)
                 _report(k + 1, k + 1)
 
         else:
@@ -2495,14 +2894,13 @@ def reboundSimulate(
             shared = manager.dict() if manager is not None else None
 
             try:
-                results = [None]*n_total
                 with concurrent.futures.ProcessPoolExecutor(max_workers=n_cpu) as executor:
                     future_to_idx = {
                         executor.submit(
-                            _integrateParticles, t,
+                            _integrateParticles, tasks[idx],
                             None if shared is None else functools.partial(_storeProgress, shared, idx)
                         ): idx
-                        for idx, t in enumerate(tasks)}
+                        for idx in todo}
                     pending = set(future_to_idx)
                     finished_idx = set()
 
@@ -2523,6 +2921,7 @@ def reboundSimulate(
                                 print("Warning: Monte Carlo realization {:s} failed and was skipped: "
                                       "{:s}".format(mc_names[idx], str(e)))
                                 results[idx] = None
+                            _finished(idx)
 
                         if progress_line.enabled:
                             running = {k: v for k, v in shared.items() if k not in finished_idx}
@@ -2537,8 +2936,9 @@ def reboundSimulate(
 
         n_ok = sum(1 for r in results if r)
         if show_progress:
-            print("  Monte Carlo: {:d}/{:d} realizations integrated ({:.1f} s){:s}".format(
+            print("  Monte Carlo: {:d}/{:d} realizations integrated ({:.1f} s){:s}{:s}".format(
                 n_ok, n_total, time.time() - t_mc_start,
+                "  [{:d} from the checkpoint]".format(n_resumed) if n_resumed else "",
                 "" if n_ok == n_total else "  [{:d} failed]".format(n_total - n_ok)))
 
         for res in results:
@@ -2552,12 +2952,16 @@ def reboundSimulate(
                       "MEGNO is only returned in the diagnostics. Skipping it.", RuntimeWarning)
 
     elif compute_megno:
-        if show_progress:
-            print("Computing the MEGNO of the nominal orbit (Newtonian gravity only, IAS15)...")
-        progress_line = _ProgressLine(show_progress)
-        megno = computeMegno(_make_task([state_vect_rot], [obj_name]),
-                             progress=_spanProgress(progress_line, "MEGNO"))
-        progress_line.end()
+        megno = checkpoint_records.get(_CHECKPOINT_MEGNO_KEY)
+        if megno is None:
+            if show_progress:
+                print("Computing the MEGNO of the nominal orbit (Newtonian gravity only, IAS15)...")
+            progress_line = _ProgressLine(show_progress)
+            megno = computeMegno(_make_task([state_vect_rot], [obj_name]),
+                                 progress=_spanProgress(progress_line, "MEGNO"))
+            progress_line.end()
+            if checkpoint is not None:
+                checkpoint.add(_CHECKPOINT_MEGNO_KEY, megno)
         megno["verdict"] = classifyMegno(megno["times_days"], megno["megno"], megno["a_au"])
         diagnostics[obj_name] = dict(diagnostics[obj_name], megno=megno)
 
@@ -2648,6 +3052,12 @@ if __name__ == "__main__":
                         "Newtonian gravity only (IAS15) and compute its MEGNO chaos indicator, "
                         "reporting whether it converges to 2 (regular orbit) or keeps growing "
                         "(chaotic). MEGNO needs tens of orbital periods: use --days accordingly.")
+
+    parser.add_argument("--no_checkpoint", action="store_true",
+                        help="Do not save the orbits to {:s} next to the pickle as they are integrated. "
+                        "By default each orbit is saved as soon as it is done, so a run that is cut "
+                        "can be started again with the same command and goes on where it stopped. "
+                        "The file is deleted once the results are saved.".format(CHECKPOINT_FILE_NAME))
 
     parser.add_argument("--verbose", action="store_true", help="Print out the progress of the simulation.")
 
@@ -2740,6 +3150,44 @@ if __name__ == "__main__":
     ### ###
 
     
+    # All the results are saved next to the trajectory pickle
+    out_dir = os.path.dirname(args.pickle_path)
+
+    ### Size of the outputs and the checkpoint ###
+
+    checkpoint_path = None if args.no_checkpoint else os.path.join(out_dir, CHECKPOINT_FILE_NAME)
+
+    # A run cut before its end is resumed from its checkpoint. Without --seed, take the seed of the
+    #   checkpoint, so that the remaining Monte Carlo realizations are drawn as they were before.
+    if checkpoint_path is not None:
+        checkpoint_header = readReboundCheckpoint(checkpoint_path)[0]
+        if (checkpoint_header is not None) and (args.seed is None):
+            checkpoint_seed = checkpoint_header["signature"].get("random_seed")
+            if checkpoint_seed is not None:
+                random_seed = checkpoint_seed
+
+    # The JSON file and the checkpoint grow as the outputs do, so check the free disk space before
+    #   integrating rather than finding out at the end
+    with_mc = (args.mc > 1) and (traj.uncertainties is not None)
+    output_size = estimateOutputSize(args.outputs, 1 + (args.mc if with_mc else 0))
+    disk_need = output_size["json"] + (0 if checkpoint_path is None else output_size["checkpoint"])
+    if disk_need >= OUTPUT_SIZE_REPORT_BYTES:
+        print("Results on disk: ~{:s} JSON{:s}.".format(
+            formatBytes(output_size["json"]),
+            "" if checkpoint_path is None else
+            " + ~{:s} checkpoint while it runs".format(formatBytes(output_size["checkpoint"]))))
+    try:
+        disk_free = shutil.disk_usage(out_dir or ".").free
+    except OSError:
+        disk_free = None
+    if (disk_free is not None) and (disk_need > disk_free):
+        print("Warning: the results need ~{:s} on disk but only {:s} are free in {:s}. Reduce --outputs "
+              "or --mc{:s}.".format(formatBytes(disk_need), formatBytes(disk_free),
+                                    os.path.abspath(out_dir or "."),
+                                    "" if checkpoint_path is None else ", or use --no_checkpoint"))
+
+    ### ###
+
     # State the integration span up front, so it is visible while the integration is running and
     # not only in the summary printed at the end
     print("Integrating {:s} {:s} from the reference epoch {:.6f} JD (TDB) = {:s} UTC.".format(
@@ -2747,15 +3195,30 @@ if __name__ == "__main__":
         astropy.time.Time(traj.jdt_ref, format='jd', scale='utc').iso))
 
     # Run the simulation for the given number of days from the epoch of the trajectory
+    def _runSimulation():
+        return reboundSimulate(
+            None, None, traj=traj, direction=direction, sim_days=sim_days,
+            obj_name=traj.traj_id, mc_runs=args.mc, n_outputs=args.outputs,
+            reference_frame=reference_frame,
+            ephem_source=ephem_source, n_cpu=n_cpu, return_diagnostics=True,
+            random_seed=random_seed, beta=beta, integrator=args.integrator, dt_days=dt_days,
+            compute_megno=args.compute_megno, checkpoint_path=checkpoint_path, verbose=args.verbose
+            )
+
     t_run_start = time.time()
-    sim_outputs, sim_outputs_mc, sim_diagnostics = reboundSimulate(
-        None, None, traj=traj, direction=direction, sim_days=sim_days,
-        obj_name=traj.traj_id, mc_runs=args.mc, n_outputs=args.outputs,
-        reference_frame=reference_frame,
-        ephem_source=ephem_source, n_cpu=n_cpu, return_diagnostics=True,
-        random_seed=random_seed, beta=beta, integrator=args.integrator, dt_days=dt_days,
-        compute_megno=args.compute_megno, verbose=args.verbose
-        )
+    try:
+        sim_outputs, sim_outputs_mc, sim_diagnostics = _runSimulation()
+
+    except ReboundCheckpointMismatch as e:
+
+        # The checkpoint left by a cut run with other parameters is kept aside, not overwritten
+        checkpoint_prev = checkpoint_path + ".prev"
+        os.replace(checkpoint_path, checkpoint_prev)
+        print("The checkpoint of the previous run cannot be resumed, its parameters differ: {:s}.".format(
+            ", ".join("{:s} ({} -> {})".format(k, a, b) for k, a, b in e.differences)))
+        print("  Moved it to {:s} and starting a new run.".format(checkpoint_prev))
+        sim_outputs, sim_outputs_mc, sim_diagnostics = _runSimulation()
+
     sim_wall = time.time() - t_run_start
 
     ### Work out what happened to each Monte Carlo clone ###
@@ -3130,7 +3593,6 @@ if __name__ == "__main__":
 
 
     # Save the results to a file
-    out_dir = os.path.dirname(args.pickle_path)
     results_txt_path = os.path.join(out_dir, "rebound_simulation_results.txt")
     plot_png_path = os.path.join(out_dir, "rebound_simulation.png")
     with open(results_txt_path, "w") as f:
@@ -3653,6 +4115,10 @@ if __name__ == "__main__":
 
     with open(results_json_path, "w") as jf:
         json.dump(results_json, jf, indent=1, default=float)
+
+    # Every result is saved now, so the checkpoint is no longer needed
+    if (checkpoint_path is not None) and os.path.isfile(checkpoint_path):
+        os.remove(checkpoint_path)
 
     ### ###
 

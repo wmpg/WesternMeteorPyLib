@@ -16,6 +16,7 @@ Monte Carlo clones, and can optionally include radiation forces and measure how 
 - [Close encounters, impacts and ejections](#close-encounters-impacts-and-ejections)
 - [Monte Carlo clones](#monte-carlo-clones)
 - [Chaos: MEGNO](#chaos-megno)
+- [Long runs: memory and checkpoints](#long-runs-memory-and-checkpoints)
 - [What it writes](#what-it-writes)
 - [Worked examples](#worked-examples)
 - [Using it as a library](#using-it-as-a-library)
@@ -129,6 +130,7 @@ python -m wmpl.Rebound.REBOUND --help
 | `--radius METRES` | Object radius in metres. With `--density`, beta is computed from it. Purely gravitational if not given. |
 | `--density KG_M3` | Bulk density in kg/m³, used with `--radius`. Default: `3000`. |
 | `--compute_megno` | After the integration, measure the MEGNO chaos indicator of the nominal orbit. See [Chaos: MEGNO](#chaos-megno). |
+| `--no_checkpoint` | Do not save the orbits to `rebound_checkpoint.pkl` as they are integrated. See [Long runs: memory and checkpoints](#long-runs-memory-and-checkpoints). |
 | `--verbose` | Print the progress of the simulation. |
 
 `--beta` and `--radius` are mutually exclusive: give the beta directly, or give the size and density
@@ -339,6 +341,50 @@ next to a full run with the Monte Carlo clones. It is skipped, with a warning, i
 
 ---
 
+## Long runs: memory and checkpoints
+
+Every output sample of every orbit is kept in memory until the end of the run, when the report, the
+figure and the JSON file are written. The memory therefore grows as `--outputs` times the number of
+orbits (the nominal plus `--mc` clones), at about 2 kB per sample per orbit (measured), plus about
+2 kB per sample for each worker process while it integrates. The JSON file takes about 0.4 kB per
+sample per orbit, and so does the checkpoint.
+
+| `--outputs` | `--mc` | Memory | JSON |
+| ---: | ---: | ---: | ---: |
+| 500 | 100 | ~100 MB | ~20 MB |
+| 5000 | 200 | ~2 GB | ~400 MB |
+| 100000 | 1000 | ~190 GB | ~40 GB |
+
+When the outputs exceed 100 MB, the run prints its estimate before integrating, and it warns if they
+would fill more than half of the available memory, or if the JSON file and the checkpoint would not
+fit on the disk. These are warnings only: the run goes ahead, so stop it and reduce `--outputs` or
+`--mc` if the numbers are out of reach. The integrations themselves need little memory, so a long
+integration with few outputs is cheap to hold.
+
+**Checkpoints.** Each orbit is written to `rebound_checkpoint.pkl`, next to the pickle, as soon as
+its integration ends: the nominal, each clone, and the MEGNO run. Every record is flushed to disk on
+its own, so if the run is cut (a crash, a killed job, a power cut), everything integrated so far is
+kept. **Run the same command again** and it goes on from there:
+
+```
+Resuming from the checkpoint .../rebound_checkpoint.pkl: 9 of 13 orbits already integrated.
+Integrating 4 Monte Carlo realizations on 4 core(s)...
+  Monte Carlo: 12/12 realizations integrated (6.3 s)  [8 from the checkpoint]
+```
+
+A resumed run gives the same results as one that was never cut (checked bit for bit against an
+uninterrupted run). The clones are drawn in the parent process from the seed, so without `--seed`
+the run takes the seed stored in the checkpoint. Clones that were still integrating when the run was
+cut are integrated again, and a record cut while it was being written is dropped.
+
+The checkpoint is resumed only if the run has the same parameters: trajectory, span, direction,
+`--outputs`, `--mc`, `--seed` (if given), frame, ephemeris, beta, integrator and timestep. If any of
+them differ, the old checkpoint is moved to `rebound_checkpoint.pkl.prev` and a new run starts. The
+number of cores can change between runs. The checkpoint is deleted once all the results are saved.
+Pass `--no_checkpoint` to skip it, e.g. when the disk is short.
+
+---
+
 ## What it writes
 
 All output goes into the directory containing the input pickle, under **fixed names**. Two runs on
@@ -351,6 +397,7 @@ options.
 | `rebound_simulation.png` | A 3×3 panel figure of the element evolution for the nominal solution and the clones. |
 | `rebound_megno.png` | Only with `--compute_megno`: the evolution of ⟨Y⟩ against time in years, with the ⟨Y⟩ = 2 line marked. |
 | `rebound_simulation_results.json` | The same results in machine-readable form, so downstream analysis does not have to parse the text. |
+| `rebound_checkpoint.pkl` | Only while the run is going on, or after it was cut: the orbits integrated so far. See [Long runs: memory and checkpoints](#long-runs-memory-and-checkpoints). |
 
 The JSON keys, at the top level:
 
@@ -504,6 +551,10 @@ print(diagnostics[traj.traj_id]["megno"]["verdict"]["status"])
 `compute_megno=True` needs `return_diagnostics=True`, since the diagnostics are the only place the
 result is returned.
 
+`checkpoint_path="..."` saves each orbit as it is integrated, and resumes from the file if it holds a
+checkpoint of a run with the same parameters (it raises `ReboundCheckpointMismatch` otherwise). The
+library leaves the file in place at the end; delete it once the results are saved.
+
 Other functions worth knowing about, all in `wmpl.Rebound.REBOUND`:
 
 | Function | Purpose |
@@ -518,6 +569,8 @@ Other functions worth knowing about, all in `wmpl.Rebound.REBOUND`:
 | `estimateLyapunovFromMC(sim_outputs, sim_outputs_mc)` | The divergence fit over the clone ensemble. |
 | `checkIntegratorAvailable(integrator)` | Raises if the installed REBOUND does not have it. |
 | `findEarthDepartureIndex(sim_outputs, n_hill=3.0)` | First output at which the object left the Earth's neighbourhood. |
+| `estimateOutputSize(n_outputs, n_orbits, n_workers=0)` / `outputMemoryWarning(...)` | Memory, JSON and checkpoint size of a run, and the memory warning string or `None`. |
+| `readReboundCheckpoint(path)` | The header and the orbit records of a checkpoint, dropping a record cut while it was written. |
 
 ---
 
@@ -552,6 +605,16 @@ figure windows. The files are already written by that point.
 
 **Results changed between two runs with the same arguments.** Pass `--seed`. Without it the Monte
 Carlo seed is drawn at random (and reported, so an old run can be reproduced from its report).
+
+**`Warning: the outputs of N orbits x M samples need ~X of memory`.** All the outputs are kept in
+memory until the end. Reduce `--outputs` or `--mc`, or run on a machine with more memory. See
+[Long runs: memory and checkpoints](#long-runs-memory-and-checkpoints).
+
+**A long run was cut.** Run the same command again: it resumes from `rebound_checkpoint.pkl`.
+
+**`The checkpoint of the previous run cannot be resumed, its parameters differ`.** The run was
+started with other options than the one that was cut. The old checkpoint is kept as
+`rebound_checkpoint.pkl.prev`; rerun with the original options to use it.
 
 **Two runs overwrote each other.** Output names are fixed and go next to the input pickle. Copy the
 results out, or keep the pickles in separate directories.
