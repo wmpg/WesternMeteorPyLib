@@ -458,6 +458,19 @@ def updateMeteoriteOrbits(url="https://www.meteoriteorbits.info/", min_meteorite
 
 if __name__ == "__main__":
 
-	updateOrbitFiles()
+	import argparse
 
-	updateMeteoriteOrbits()
+	arg_parser = argparse.ArgumentParser(description="Updates the asteroid and comet orbit files, or with --meteorites "
+		"the table of meteorites with orbits.")
+
+	arg_parser.add_argument('--meteorites', action='store_true', help="""Instead of the asteroid and comet files,
+		check the table of meteorites with orbits (wmpl/share/Meteorites_with_Orbits.csv) against meteoriteorbits.info:
+		all the new meteorites are added, and for the existing ones that differ you are asked, one by one, whether to
+		update them. This is never done automatically, to keep the manual corrections of the table.""")
+
+	cml_args = arg_parser.parse_args()
+
+	if cml_args.meteorites:
+		updateMeteoriteOrbits()
+	else:
+		updateOrbitFiles()
