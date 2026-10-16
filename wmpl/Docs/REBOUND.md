@@ -58,6 +58,12 @@ python -c "import rebound, reboundx; s = rebound.Simulation(); reboundx.Extras(s
 **Both are needed.** `rebound` alone is not enough — the general relativity correction, the Earth's
 gravitational harmonics and the radiation forces all come from `reboundx`.
 
+**Use REBOUNDx ≥ 4.4.0.** The simulations run in the ecliptic J2000 frame, and the Earth's J2/J4 are
+made symmetric about its rotation pole of date (precessed from J2000, about 20″ per year) through the
+`Omega` spin-axis parameter that REBOUNDx added in 4.4.0. Older versions ignore it and make them
+symmetric about the ecliptic pole, 23.4° off; the run then warns, and the report says so. The effect
+is a few m/s on the departure of a slow meteoroid (5.2 m/s for Winchcombe, at 14 km/s).
+
 **`--no-build-isolation` is not optional.** `reboundx` publishes no wheels, so `pip` always compiles
 it, by default against the newest `rebound` on PyPI rather than the one you installed. When the two
 differ, their C simulation structures differ, `reboundx` writes its pointer outside the structure,
@@ -542,6 +548,9 @@ Use WSL2. Installing only `rebound` is not enough.
 
 **`The installed REBOUND (4.3.0) does not provide the TRACE integrator.`** TRACE was added in REBOUND
 4.4.0. Upgrade, or use `--integrator ias15`.
+
+**`REBOUNDx ... cannot orient the Earth's J2/J4 along its rotation axis`.** REBOUNDx is older than
+4.4.0. Upgrade it with the `--force-reinstall` command in [Requirements](#requirements).
 
 **`--dt must be positive.`** A zero or negative step would silently collapse to a single step per
 output interval, so it is refused rather than accepted.

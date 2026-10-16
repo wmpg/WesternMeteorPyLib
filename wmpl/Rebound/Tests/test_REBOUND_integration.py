@@ -210,11 +210,11 @@ def testNamedParticlesAndHeartbeatWorkOnTheInstalledVersion(realReb):
 def testEndToEndIntegrationMatchesReference(realReb):
     """ Integrate the example trajectory 60 days back and compare with a reference solution.
 
-    The reference was computed with rebound 4.4.10 and reboundx 4.4.2, after the time unit was made
-    consistent with G = 1 (DAYS_PER_SIM_TIME). The previous reference, from rebound 4.3.0 and 5.1.1,
-    used the Julian year over 2 pi and had a = 10.98466 AU, 0.0119 AU further from the solver's own
-    orbit (10.99652 AU) than now. The tolerance leaves room for floating-point differences between
-    platforms, while catching any real change in the dynamics.
+    The reference was computed with rebound 4.4.10 and reboundx 4.4.2, with the time unit consistent
+    with G = 1 (DAYS_PER_SIM_TIME) and the Earth's J2/J4 symmetric about its pole of date. With the
+    J2/J4 about the ecliptic pole instead, a was 10.99379 AU, and with the Julian time unit as well
+    10.98466 AU. The tolerance leaves room for floating-point differences between platforms, while
+    catching any real change in the dynamics. It needs REBOUNDx >= 4.4.0, which orients the J2/J4.
     """
 
     from wmpl.Config import config
@@ -225,6 +225,9 @@ def testEndToEndIntegrationMatchesReference(realReb):
 
     if not os.path.isfile(os.path.join(EXAMPLE_DIR, EXAMPLE_FILE)):
         pytest.skip("Example trajectory not found")
+
+    if not realReb.harmonicsSpinAxisSupported():
+        pytest.skip("REBOUNDx < 4.4.0 cannot orient the Earth's J2/J4")
 
     traj = loadPickle(EXAMPLE_DIR, EXAMPLE_FILE)
 
@@ -237,19 +240,19 @@ def testEndToEndIntegrationMatchesReference(realReb):
 
     orbit = sim_outputs[-1][2]
     rtol = 1e-7
-    assert orbit.a == pytest.approx(10.9937899741892, rel=rtol)
-    assert orbit.e == pytest.approx(0.9470181770710294, rel=rtol)
-    assert np.degrees(orbit.inc) == pytest.approx(164.56527442912162, rel=rtol)
-    assert np.degrees(orbit.Omega) == pytest.approx(29.396553069608316, rel=rtol)
-    assert np.degrees(orbit.omega) == pytest.approx(81.5139061407715, rel=rtol)
+    assert orbit.a == pytest.approx(10.999618455077444, rel=rtol)
+    assert orbit.e == pytest.approx(0.9470454373170485, rel=rtol)
+    assert np.degrees(orbit.inc) == pytest.approx(164.56525762377314, rel=rtol)
+    assert np.degrees(orbit.Omega) == pytest.approx(29.396553077832916, rel=rtol)
+    assert np.degrees(orbit.omega) == pytest.approx(81.51210470078942, rel=rtol)
 
     # The Moon's closest approach comes from the heartbeat, so this also checks that it ran
     diag = next(iter(diagnostics.values()))
     assert diag["departed"]
     assert diag["impact"] is None
-    assert diag["min_dist_au"]["Luna"] == pytest.approx(0.0018192453834511423, rel=rtol)
+    assert diag["min_dist_au"]["Luna"] == pytest.approx(0.001819247055906065, rel=rtol)
     # The within-step refinement added in #99 moves this off the step-end value it had before
-    assert diag["min_time_days"]["Luna"] == pytest.approx(-0.0426156510, rel=1e-6)
+    assert diag["min_time_days"]["Luna"] == pytest.approx(-0.0426152665, rel=1e-6)
 
 
 ### Units ###
@@ -324,3 +327,95 @@ def testPlanetsFollowTheEphemeris(realReb):
                - np.array(realReb.ephemBodyStateRebound(centre, jd + days, eph)[0][:3]))
         err_km = np.linalg.norm(position(name) - position(centre) - ref)*au_km
         assert err_km < limit_km, "{:s} is {:.0f} km off the ephemeris".format(name, err_km)
+
+
+### Axis of the Earth's J2/J4 ###
+
+
+def testEarthSpinAxisIsThePoleOfDate(reb):
+    """ At J2000 the pole is at (0, sin eps, cos eps) in the ecliptic frame, 23.44 deg from the
+    ecliptic pole; it then precesses by ~20 arcsec per year about the ecliptic pole. """
+
+    eps = reb.J2000_OBLIQUITY
+    pole_j2000 = np.array([0.0, np.sin(eps), np.cos(eps)])
+
+    assert np.allclose(reb.earthSpinAxisEcliptic(reb.J2000_JD.days), pole_j2000, atol=1e-15)
+
+    for years in [21.16, 100.0, -400.0]:
+        pole = np.array(reb.earthSpinAxisEcliptic(reb.J2000_JD.days + years*365.25))
+        assert np.linalg.norm(pole) == pytest.approx(1.0, abs=1e-15)
+
+        # ~20.04 arcsec per year away from the J2000 pole, staying ~23.44 deg from the ecliptic pole
+        moved = np.degrees(np.arccos(np.clip(pole @ pole_j2000, -1, 1)))*3600
+        assert moved/abs(years) == pytest.approx(20.04, rel=0.005)
+        assert np.degrees(np.arccos(pole[2])) == pytest.approx(np.degrees(eps), abs=0.001)
+
+    # Same pole as precessing the coordinates with equatorialCoordPrecession (away from J2000,
+    #   where it wraps a declination of exactly +90 deg to -90 deg)
+    from wmpl.Utils.TrajConversions import equatorialCoordPrecession
+    jd = 2459274.41
+    ra, dec = equatorialCoordPrecession(jd, reb.J2000_JD.days, 0.0, np.pi/2)
+    expected = reb.rotateVector(np.array([np.cos(dec)*np.cos(ra), np.cos(dec)*np.sin(ra), np.sin(dec)]),
+                                np.array([1.0, 0.0, 0.0]), -eps)
+    assert np.allclose(reb.earthSpinAxisEcliptic(jd), expected, atol=1e-12)
+
+
+def _slowDepartureTask(reb, spin_axis, rotation=None):
+    """ A meteoroid leaving the Earth from 100 km up at 14 km/s, with the Sun, the Earth and the Moon.
+    rotation, if given, is a 3x3 matrix applied to every state, to integrate in a rotated frame. """
+
+    au_km = 149597870.7
+    day = 1.0/reb.DAYS_PER_SIM_TIME
+    km_s = (86400.0/day)/au_km
+    m_earth, m_moon = 3.003e-6, 3.69e-8
+
+    earth = np.array([1.0, 0.0, 0.0, 0.0, 1.0, 0.0])
+    moon = earth + np.array([0.0, 384400/au_km, 0.0, -1.022*km_s, 0.0, 0.0])
+    u = np.array([0.5, 0.2, 0.84])
+    u /= np.linalg.norm(u)
+    obj = np.concatenate([earth[:3] + u*6471.0/au_km, earth[3:] - u*np.sqrt(9.0**2 + 11.1**2)*km_s])
+
+    states = [np.zeros(6), earth, moon, obj]
+    if rotation is not None:
+        states = [np.concatenate([rotation @ s[:3], rotation @ s[3:]]) for s in states]
+
+    return {
+        "planet_names": ["Sun", "Earth", "Luna"],
+        "planet_states": [list(s) for s in states[:3]],
+        "planet_masses": [1.0, m_earth, m_moon],
+        "particle_states": [list(states[3])],
+        "particle_names": ["obj"],
+        "times": list(-np.linspace(0.0, 10*day, 5)),
+        "direction": "backward",
+        "reference_frame": "heliocentric",
+        "earth_spin_axis": spin_axis,
+    }
+
+
+def testHarmonicsAreSymmetricAboutTheSpinAxis(realReb):
+    """ Giving the Earth's spin axis gives the same orbit as rotating the whole simulation so that
+    the axis is the z axis, which is what REBOUNDx uses by default. """
+
+    if not realReb.harmonicsSpinAxisSupported():
+        pytest.skip("REBOUNDx < 4.4.0 cannot orient the harmonics")
+
+    reb = realReb
+    eps = reb.J2000_OBLIQUITY
+    axis = [0.0, np.sin(eps), np.cos(eps)]
+
+    # Rotation about x taking the axis to z (ecliptic to equatorial)
+    rot = np.array([[1.0, 0.0, 0.0], [0.0, np.cos(eps), -np.sin(eps)], [0.0, np.sin(eps), np.cos(eps)]])
+
+    with_axis = reb._integrateParticles(_slowDepartureTask(reb, axis))["outputs"]["obj"][-1][1]
+    rotated = reb._integrateParticles(_slowDepartureTask(reb, None, rot))["outputs"]["obj"][-1][1]
+    ecliptic_z = reb._integrateParticles(_slowDepartureTask(reb, None))["outputs"]["obj"][-1][1]
+
+    rotated_back = np.concatenate([rot.T @ np.array(rotated[:3]), rot.T @ np.array(rotated[3:])])
+
+    ms = 149597870.7e3/reb.DAYS_PER_SIM_TIME/86400
+    dv_same = np.linalg.norm(np.array(with_axis[3:]) - rotated_back[3:])*ms
+    dv_z = np.linalg.norm(np.array(with_axis[3:]) - np.array(ecliptic_z[3:]))*ms
+
+    assert dv_same < 1e-6
+    # The ecliptic pole as the axis is m/s off (measured 5.2 m/s on Winchcombe)
+    assert dv_z > 0.5
