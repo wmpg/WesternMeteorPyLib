@@ -184,9 +184,86 @@ def _meteoriteIdentity(line):
 	return name, (fields[0], fields[4])
 
 
+def _changedMeteorites(file_lines, new_lines):
+	""" Find the meteorites of the existing table whose downloaded line is not the same.
+
+	Arguments:
+		file_lines: [list] Lines of the existing table.
+		new_lines: [list] Lines of the downloaded table.
+
+	Return:
+		[list] Tuples (index in file_lines, existing line, downloaded line).
+	"""
+
+	by_name = {}
+	by_ident = {}
+	for i, line in enumerate(file_lines):
+		name, ident = _meteoriteIdentity(line)
+		by_name[name] = i
+		by_ident[ident] = i
+
+	changed = []
+	for line in new_lines:
+
+		name, ident = _meteoriteIdentity(line)
+		i = by_name.get(name, by_ident.get(ident))
+
+		if (i is not None) and (file_lines[i] != line):
+			changed.append((i, file_lines[i], line))
+
+	return changed
+
+
+def _askUpdates(changed):
+	""" Show how the downloaded values differ from the existing ones and ask which meteorites to update. The
+		default answer is to keep the existing line.
+
+	Arguments:
+		changed: [list] Tuples (index, existing line, downloaded line) from _changedMeteorites().
+
+	Return:
+		[list] The tuples of the meteorites to update.
+	"""
+
+	field_names = [name.lstrip('# ') for name in METEORITES_HEADER.split(';')]
+
+	print()
+	print('{:d} meteorites in the file differ from the list. The file is kept unless you say yes.'.format(
+		len(changed)))
+
+	updates = []
+	for k, (i, old, new) in enumerate(changed):
+
+		old_fields = old.split(';')
+		new_fields = new.split(';')
+
+		print()
+		print('[{:d}/{:d}] {:s} ({:s})'.format(k + 1, len(changed), old_fields[1], old_fields[0]))
+		for name, old_value, new_value in zip(field_names, old_fields, new_fields):
+			if old_value != new_value:
+				print('    {:s}: "{:s}" -> "{:s}"'.format(name, old_value, new_value))
+
+		try:
+			answer = input('Update it? [y]es / [N]o / [a]ll the rest / [q]uit asking: ').strip().lower()
+		except EOFError:
+			answer = 'q'
+
+		if answer.startswith('q'):
+			break
+
+		if answer.startswith('a'):
+			updates += changed[k:]
+			break
+
+		if answer.startswith('y'):
+			updates.append((i, old, new))
+
+	return updates
+
+
 def _addNewMeteorites(file_lines, new_lines):
 	""" Add to the lines of the existing table the downloaded meteorites that it does not have yet. The existing lines
-		are never changed, so manual corrections and entries that are not in the downloaded list survive.
+		are not changed, so manual corrections and entries that are not in the downloaded list survive.
 
 	Arguments:
 		file_lines: [list] Lines of the existing table, newest meteorite first.
@@ -230,16 +307,19 @@ def _addNewMeteorites(file_lines, new_lines):
 	return merged, added
 
 
-def updateMeteoriteOrbits(url="https://www.meteoriteorbits.info/", min_meteorites=40, overwrite=False):
+def updateMeteoriteOrbits(url="https://www.meteoriteorbits.info/", min_meteorites=40, overwrite=False, ask=None):
 	""" Updates wmpl/share/Meteorites_with_Orbits.csv from the list of meteorites with photographic orbits kept at
-		meteoriteorbits.info. By default only the meteorites that the file does not have are added, so manual
-		corrections and entries that are not in the list are kept. The existing file is not touched if the new
-		table is not read completely; the reason is printed.
+		meteoriteorbits.info. All the meteorites that the file does not have are added. The ones it already has are
+		never changed unless you say so: for each one that differs from the list, the differences are shown and you
+		are asked whether to update it, so manual corrections and entries that are not in the list are kept. The
+		existing file is not touched if the new table is not read completely; the reason is printed.
 
 	Keyword arguments:
 		url: [str] Address of the list.
 		min_meteorites: [int] Minimum number of meteorites for the download to be accepted.
 		overwrite: [bool] Replace the whole file by the downloaded list, losing any manual changes.
+		ask: [bool] Ask which of the existing meteorites that differ from the list to update. None (default) asks
+			only when run from a terminal; without asking the existing meteorites are left as they are.
 
 	Return:
 		[bool] True if the file was updated.
@@ -328,20 +408,38 @@ def updateMeteoriteOrbits(url="https://www.meteoriteorbits.info/", min_meteorite
 	except Exception:
 		list_date = datetime.datetime.utcnow()
 
-	# Add only the new meteorites to the existing file
+	# Add the new meteorites to the existing file, and update the existing ones only if asked to
 	if (not overwrite) and os.path.isfile(file_path):
 
 		with open(file_path, 'r', encoding='utf-8', newline='') as f:
 			file_lines = [line.rstrip('\r\n') for line in f if line.strip() and not line.startswith('#')]
 
+		if ask is None:
+			ask = sys.stdin.isatty()
+
+		updated = []
+		changed = _changedMeteorites(file_lines, lines)
+		if changed:
+			if ask:
+				updated = _askUpdates(changed)
+			else:
+				print('{:d} meteorites in the file differ from the list and are left as they are.'.format(
+					len(changed)))
+
+		for i, old, new in updated:
+			file_lines[i] = new
+
 		lines, added = _addNewMeteorites(file_lines, lines)
 
-		if not added:
-			print(' ... done! No new meteorites among the {:d} of the list, the file is unchanged.'.format(
-				n_downloaded))
+		if (not added) and (not updated):
+			print(' ... done! Nothing was added or updated among the {:d} meteorites of the list, the file is '
+				'unchanged.'.format(n_downloaded))
 			return False
 
-		print('Added {:d} new meteorites: {:s}'.format(len(added), ', '.join(l.split(';')[1] for l in added)))
+		if added:
+			print('Added {:d} new meteorites: {:s}'.format(len(added), ', '.join(l.split(';')[1] for l in added)))
+		if updated:
+			print('Updated {:d} meteorites: {:s}'.format(len(updated), ', '.join(l[2].split(';')[1] for l in updated)))
 
 	with open(temp_path, 'w', encoding='utf-8', newline='') as f:
 		f.write('# Updated on: {:s}'.format(list_date.strftime('%Y/%m/%d')) + ';'*18 + '\n')
