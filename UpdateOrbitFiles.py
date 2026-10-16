@@ -9,6 +9,7 @@ import ssl
 import socket
 import shutil
 import datetime
+import unicodedata
 
 # Fix certificates error
 ssl._create_default_https_context = ssl._create_unverified_context
@@ -169,14 +170,76 @@ def _valueError(cell):
 	return None, None
 
 
-def updateMeteoriteOrbits(url="https://www.meteoriteorbits.info/", min_meteorites=40):
+def _meteoriteIdentity(line):
+	""" Identify a line of the meteorite table. Return the name without accents, case and punctuation, and the
+		abbreviation with the date; either one matching means it is the same meteorite (the second catches names
+		that were corrected or are spelled differently).
+	"""
+
+	fields = line.split(';')
+
+	name = unicodedata.normalize('NFKD', fields[1])
+	name = ''.join(c.lower() for c in name if c.isalnum() and not unicodedata.combining(c))
+
+	return name, (fields[0], fields[4])
+
+
+def _addNewMeteorites(file_lines, new_lines):
+	""" Add to the lines of the existing table the downloaded meteorites that it does not have yet. The existing lines
+		are never changed, so manual corrections and entries that are not in the downloaded list survive.
+
+	Arguments:
+		file_lines: [list] Lines of the existing table, newest meteorite first.
+		new_lines: [list] Lines of the downloaded table.
+
+	Return:
+		[list] The lines of the merged table (the new ones inserted by date), [list] the lines that were added.
+	"""
+
+	merged = list(file_lines)
+
+	names = set()
+	ids = set()
+	for line in file_lines:
+		name, ident = _meteoriteIdentity(line)
+		names.add(name)
+		ids.add(ident)
+
+	added = []
+	for line in new_lines:
+
+		name, ident = _meteoriteIdentity(line)
+		if (name in names) or (ident in ids):
+			continue
+
+		names.add(name)
+		ids.add(ident)
+		added.append(line)
+
+		# Keep the table sorted with the most recent fall first, as in the source
+		fields = line.split(';')
+		index = len(merged)
+		for i, other in enumerate(merged):
+			other_fields = other.split(';')
+			if (other_fields[4], other_fields[5]) < (fields[4], fields[5]):
+				index = i
+				break
+
+		merged.insert(index, line)
+
+	return merged, added
+
+
+def updateMeteoriteOrbits(url="https://www.meteoriteorbits.info/", min_meteorites=40, overwrite=False):
 	""" Updates wmpl/share/Meteorites_with_Orbits.csv from the list of meteorites with photographic orbits kept at
-		meteoriteorbits.info. The existing file is only replaced if the new table is read completely; otherwise it
-		is kept and the reason is printed.
+		meteoriteorbits.info. By default only the meteorites that the file does not have are added, so manual
+		corrections and entries that are not in the list are kept. The existing file is not touched if the new
+		table is not read completely; the reason is printed.
 
 	Keyword arguments:
 		url: [str] Address of the list.
 		min_meteorites: [int] Minimum number of meteorites for the download to be accepted.
+		overwrite: [bool] Replace the whole file by the downloaded list, losing any manual changes.
 
 	Return:
 		[bool] True if the file was updated.
@@ -255,6 +318,8 @@ def updateMeteoriteOrbits(url="https://www.meteoriteorbits.info/", min_meteorite
 		print('Only {:d} meteorites were read, the existing file is kept.'.format(len(lines)))
 		return False
 
+	n_downloaded = len(lines)
+
 	# Date of the list, e.g. "As of September 22nd, 2026"
 	date_match = re.search(r'As of\s+([A-Za-z]+)\s+(\d+)\s*(?:st|nd|rd|th)?\s*,\s*(\d{4})',
 		re.sub(r'<[^>]+>', ' ', html_text))
@@ -262,6 +327,21 @@ def updateMeteoriteOrbits(url="https://www.meteoriteorbits.info/", min_meteorite
 		list_date = datetime.datetime.strptime('{:s} {:s} {:s}'.format(*date_match.groups()), '%B %d %Y')
 	except Exception:
 		list_date = datetime.datetime.utcnow()
+
+	# Add only the new meteorites to the existing file
+	if (not overwrite) and os.path.isfile(file_path):
+
+		with open(file_path, 'r', encoding='utf-8', newline='') as f:
+			file_lines = [line.rstrip('\r\n') for line in f if line.strip() and not line.startswith('#')]
+
+		lines, added = _addNewMeteorites(file_lines, lines)
+
+		if not added:
+			print(' ... done! No new meteorites among the {:d} of the list, the file is unchanged.'.format(
+				n_downloaded))
+			return False
+
+		print('Added {:d} new meteorites: {:s}'.format(len(added), ', '.join(l.split(';')[1] for l in added)))
 
 	with open(temp_path, 'w', encoding='utf-8', newline='') as f:
 		f.write('# Updated on: {:s}'.format(list_date.strftime('%Y/%m/%d')) + ';'*18 + '\n')
