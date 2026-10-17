@@ -4,6 +4,7 @@ These cover the parts that are pure numerics and need no integration, so they ru
 or REBOUNDx installed, plus the Hill-radius table's internal consistency.
 """
 
+import json
 import os
 import importlib.util
 from types import SimpleNamespace
@@ -1058,3 +1059,131 @@ def testMoidLinesAndBandsInTheApproachesPanel(reb, agg):
     assert {"MOID (nominal)", "MOID 16-84% (clones)", "Earth", "Jupiter"} <= set(labels)
     assert "Mercury" not in labels
     assert ax.get_ylim()[0] >= reb.MOID_PLOT_MIN_HILL
+
+
+### Redrawing the figure from a results file ###
+
+def _resultsFor(nominal, clones, bodies=("Earth", "Sun", "Mars"), reference_frame="heliocentric", moid=None):
+    """ A results dict like the one rebound_simulation_results.json holds, from synthetic outputs. """
+
+    def series(rows):
+        return {"time_days": [r[0]*reb_days_per_unit for r in rows],
+                "a_au": [r[2].a for r in rows], "e": [r[2].e for r in rows],
+                "incl_deg": [np.degrees(r[2].inc) for r in rows],
+                "peri_deg": [np.degrees(r[2].omega) for r in rows],
+                "node_deg": [np.degrees(r[2].Omega) for r in rows],
+                "f_deg": [np.degrees(r[2].f) for r in rows],
+                "body_distances_au": {b: [r[3].get(b, 1.0) for r in rows] for b in bodies}}
+
+    reb_days_per_unit = np.sqrt(149597870700.0**3/1.3271244004193938e20)/86400.0
+
+    return {"run": {"reference_frame": reference_frame, "n_hill_threshold": 3.0},
+            "nominal": series(nominal), "monte_carlo": {n: series(rows) for n, rows in clones.items()},
+            "encounters": [{"body": "Earth", "min_dist_au": 0.01, "time_days": -365.25*30}],
+            "clone_encounters": {"obj_MC_0": [{"body": "Earth", "min_dist_au": 0.02, "time_days": -365.25*20}]},
+            "closest_approaches_au": {"Earth": 0.01, "Mars": 0.04, "Sun": 0.5},
+            "closest_approach_times_days": {"Earth": -365.25*30, "Mars": -365.25*50, "Sun": -365.25*10},
+            "predictability": None, "moid": moid}
+
+
+def testReplotFromResultsMatchesTheDirectFigure(reb, agg):
+    """ The figure redrawn from a results file has the elements of the one drawn from the outputs, with the
+    time in the same units. """
+
+    nominal, clones = _plotOutputs(n_clones=25)
+    results = _resultsFor(nominal, clones)
+
+    _, direct = reb.plotReboundOrbits(nominal, clones, results["encounters"],
+                                      clone_encounters=results["clone_encounters"])
+    _, again = reb.replotReboundFromResults(results)
+
+    for panel in ("a", "e", "q", "i", "node", "varpi"):
+        lines_direct = [line for line in direct[panel].get_lines() if line.get_linewidth() > 1]
+        lines_again = [line for line in again[panel].get_lines() if line.get_linewidth() > 1]
+        assert len(lines_direct) == len(lines_again) == 1
+        assert np.allclose(lines_direct[0].get_xdata(), lines_again[0].get_xdata(), rtol=1e-9, atol=1e-9)
+        assert np.allclose(np.array(lines_direct[0].get_ydata(), dtype=float),
+                           np.array(lines_again[0].get_ydata(), dtype=float), rtol=1e-9, atol=1e-9,
+                           equal_nan=True)
+
+    assert again["a"].get_xlabel() == direct["a"].get_xlabel()
+    assert again["a"].get_ylabel() == direct["a"].get_ylabel() == "a [AU]"
+
+
+def testReplotWithoutTheMoidBringsBackTheRings(reb, agg, tmp_path):
+    """ use_moid=False leaves the MOID out even if the file has it, and the planets it covered get their
+    "never closer" ring again; the same results with the MOID draw it and no ring for those. """
+
+    nominal, clones = _plotOutputs(n_clones=25)
+    hill = reb.HILL_RADII_AU
+    n = len(nominal)
+    pct = [2.5, 16, 50, 84, 97.5]
+    moid = {"bodies": ["Mars"], "percentiles": pct, "n_clones": 25,
+            "nominal_au": {"Mars": [6*hill["Mars"]]*n},
+            "clones_au": {"Mars": [[6*hill["Mars"]]*n]*5}}
+    results = _resultsFor(nominal, clones, moid=moid)
+
+    _, with_moid = reb.replotReboundFromResults(results)
+    assert set(_byGid(with_moid["encounters"], "moid:")) == {"Mars"}
+    assert not _byGid(with_moid["encounters"], "closest:")
+
+    path = str(tmp_path/"no_moid.png")
+    _, without = reb.replotReboundFromResults(results, file_path=path, use_moid=False)
+    assert not _byGid(without["encounters"], "moid:")
+    assert set(_byGid(without["encounters"], "closest:")) == {"Mars"}
+    assert (tmp_path/"no_moid.png").exists()
+
+    labels = [text.get_text() for text in without["encounters"].get_legend().get_texts()]
+    assert "never closer" in labels and "MOID (nominal)" not in labels
+
+    # A file without a MOID, from an older run, is drawn the same either way
+    results["moid"] = None
+    _, old_file = reb.replotReboundFromResults(results)
+    assert not _byGid(old_file["encounters"], "moid:")
+    assert set(_byGid(old_file["encounters"], "closest:")) == {"Mars"}
+
+
+def testReplotInTheGeocentricFrameIsInKilometres(reb, agg):
+
+    nominal, clones = _plotOutputs(n_clones=0)
+    _, axes = reb.replotReboundFromResults(_resultsFor(nominal, clones, reference_frame="geocentric"))
+    assert axes["a"].get_ylabel() == "a [km]"
+    assert reb.lengthUnitOfFrame("heliocentric") == ("AU", 1.0)
+    assert reb.lengthUnitOfFrame("geocentric")[0] == "km"
+
+
+def testReplotCommandLine(reb, tmp_path):
+    """ --replot reads a results file and saves the figure next to it without a pickle, under another name
+    with --no_moid or where --out says; without --replot the pickle is still required. """
+
+    import subprocess
+    import sys
+
+    if not reb.REBOUND_FOUND:
+        pytest.skip("rebound/reboundx not importable: {}".format(reb._REBOUND_IMPORT_ERROR))
+
+    nominal, clones = _plotOutputs(n_clones=25)
+    results_path = tmp_path/"rebound_simulation_results.json"
+    results_path.write_text(json.dumps(_resultsFor(nominal, clones)))
+
+    repo = os.path.dirname(os.path.dirname(os.path.dirname(REBOUND_PATH)))
+    env = dict(os.environ, MPLBACKEND="Agg", PYTHONPATH=repo + os.pathsep + os.environ.get("PYTHONPATH", ""))
+
+    def run(*args):
+        return subprocess.run([sys.executable, "-m", "wmpl.Rebound.REBOUND", *args], cwd=repo, env=env,
+                              capture_output=True, text=True, timeout=300)
+
+    done = run("--replot", str(results_path))
+    assert done.returncode == 0, done.stderr[-500:]
+    assert (tmp_path/"rebound_simulation.png").exists()
+    assert "Saved plot" in done.stdout
+
+    done = run("--replot", str(results_path), "--no_moid")
+    assert done.returncode == 0, done.stderr[-500:]
+    assert (tmp_path/"rebound_simulation_no_moid.png").exists()
+
+    done = run("--replot", str(results_path), "--out", str(tmp_path/"mine.png"))
+    assert done.returncode == 0 and (tmp_path/"mine.png").exists()
+
+    done = run()
+    assert done.returncode != 0 and "pickle_path" in done.stderr

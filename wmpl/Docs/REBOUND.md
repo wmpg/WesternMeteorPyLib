@@ -141,7 +141,9 @@ python -m wmpl.Rebound.REBOUND --help
 | `--gr {gr_full,gr}` | General relativity. `gr_full` (default) is the post-Newtonian interaction between all pairs of bodies (EIH); `gr` is the Sun's post-Newtonian correction on every body (Anderson et al. 1975), 3.3× faster with the same results to ~1e-7 in a. See [General relativity](#general-relativity). |
 | `--no_sun_j2` | Leave out the Sun's J2. It is on by default (DE430's J2 = 2.11e-7, reference radius 696 000 km, about the Sun's IAU rotation pole). It keeps Mercury within 1 km of DE430 over 100 years (13 km without it); on meteoroids it is tiny, 0.02″ on the perihelion of a q = 0.14 AU orbit in 400 years. |
 | `--compute_megno` | After the integration, measure the MEGNO chaos indicator of the nominal orbit. See [Chaos: MEGNO](#chaos-megno). |
-| `--no_moid` | Do not compute the MOID with the planets, which is on by default. See [MOID with the planets](#moid-with-the-planets). |
+| `--no_moid` | Do not compute the MOID with the planets, which is on by default. See [MOID with the planets](#moid-with-the-planets). With `--replot`, leave it out of the figure. |
+| `--replot RESULTS_JSON` | Do not integrate: redraw the figure of an earlier run from its results file. The trajectory pickle is not needed. See [Redrawing the figure](#redrawing-the-figure). |
+| `--out FIGURE_PNG` | With `--replot`, where to save the figure. |
 | `--verbose` | Print the progress of the simulation. |
 
 `--beta` and `--radius` are mutually exclusive: give the beta directly, or give the size and density
@@ -535,6 +537,28 @@ options.
   exactly. The palette and the sizes live in `wmpl.Utils.PlanetStyle` and are shared with the solver's
   `_orbit_top`/`_orbit_side` plots, where the outline is black on the light background and white on
   the dark one.
+
+#### Redrawing the figure
+
+The figure can be redrawn from the results file of a run, without integrating again, which is useful to try
+the figure with other options, or to keep two versions of it:
+
+```
+python -m wmpl.Rebound.REBOUND --replot rebound_simulation_results.json              # the figure of the run
+python -m wmpl.Rebound.REBOUND --replot rebound_simulation_results.json --no_moid    # without the MOID
+python -m wmpl.Rebound.REBOUND --replot rebound_simulation_results.json --out my_figure.png
+```
+
+- **Where it is saved.** Next to the results file, as `rebound_simulation.png`, or as
+  `rebound_simulation_no_moid.png` with `--no_moid`, or where `--out` says. The report and the JSON are left as
+  they are.
+- **`--no_moid`** leaves the MOID out of the figure even if the file has it, and the planets it covered get
+  their "never closer" ring again, as in a run with `--no_moid`. A file from a run before the MOID was
+  computed is drawn without it either way.
+- **Cost.** It reads the whole file: ~20 s and ~12 GB of memory for a 3 GB file (1000 clones with 7000
+  outputs), then 15–30 s to draw.
+- **From Python,** `replotReboundFromResults(results, file_path=None, use_moid=True)` takes the dictionary
+  `json.load` returns and gives back `(fig, axes)`.
 
 The JSON keys, at the top level:
 
