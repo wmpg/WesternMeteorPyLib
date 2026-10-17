@@ -261,7 +261,7 @@ def testEndToEndIntegrationMatchesReference(realReb):
     moid = diag["moid_au"]
     assert set(moid) == set(realReb.MOID_BODIES)
     assert all(len(v) == len(sim_outputs) for v in moid.values())
-    assert min(moid["Jupiter"]) <= diag["min_dist_au"]["Jupiter"]
+    assert np.nanmin(moid["Jupiter"]) <= diag["min_dist_au"]["Jupiter"]
 
 
 ### Units ###

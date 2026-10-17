@@ -1601,11 +1601,13 @@ def _moidSeries(planet_rows, object_rows, bodies):
         bodies: [list] Body names.
 
     Return:
-        [dict] {body: [MOID in AU, or None where an orbit is not elliptical]}.
+        [dict] {body: ndarray of the MOID in AU at each output, NaN where an orbit is not elliptical}.
+            Arrays rather than lists: a 1000-clone run with 7000 outputs keeps 56 million values, 450 MB
+            as float64 against ~1.8 GB as Python floats.
     """
 
     if not object_rows:
-        return {b: [] for b in bodies}
+        return {b: np.zeros(0) for b in bodies}
 
     k = np.array([row[0] for row in object_rows])
     obj = np.array([row[1] for row in object_rows])              # (n, 5)
@@ -1613,7 +1615,16 @@ def _moidSeries(planet_rows, object_rows, bodies):
 
     moid = calcMOID(*[obj[:, None, j] for j in range(5)], *[planets[:, :, j] for j in range(5)])
 
-    return {b: [float(x) if np.isfinite(x) else None for x in moid[:, i]] for i, b in enumerate(bodies)}
+    return {b: np.ascontiguousarray(moid[:, i]) for i, b in enumerate(bodies)}
+
+
+def _moidAsArray(values):
+    """ A MOID series as a float array, NaN where it is missing (None), from an array or a list. """
+
+    if isinstance(values, np.ndarray):
+        return values.astype(float, copy=False)
+
+    return np.array([np.nan if x is None else x for x in values], dtype=float)
 
 
 def moidSummary(nominal_diag, clone_diag, percentiles=MOID_PERCENTILES):
@@ -1622,7 +1633,8 @@ def moidSummary(nominal_diag, clone_diag, percentiles=MOID_PERCENTILES):
 
     Arguments:
         nominal_diag: [dict] Diagnostics of the nominal solution (see reboundSimulate).
-        clone_diag: [dict] {clone name: diagnostics}, possibly empty.
+        clone_diag: [dict] {clone name: diagnostics}, possibly empty. The series can be arrays (as the
+            integration returns them) or lists with None for the missing values.
 
     Keyword arguments:
         percentiles: [tuple] Percentiles of the clones kept. Default MOID_PERCENTILES.
@@ -1643,13 +1655,16 @@ def moidSummary(nominal_diag, clone_diag, percentiles=MOID_PERCENTILES):
     n = max(len(v) for v in nominal.values())
     clones = [d["moid_au"] for d in (clone_diag or {}).values() if d.get("moid_au")]
 
+    # The nominal's series as lists with None for the missing values, ready for the JSON file
+    nominal = {b: [float(x) if np.isfinite(x) else None for x in _moidAsArray(nominal[b])] for b in bodies}
+
     clones_au = None
     if clones:
         clones_au = {}
         for body in bodies:
             stack = np.full((len(clones), n), np.nan)
             for j, c in enumerate(clones):
-                v = np.array([np.nan if x is None else x for x in c.get(body, [])], dtype=float)[:n]
+                v = _moidAsArray(c.get(body, []))[:n]
                 stack[j, :len(v)] = v
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", RuntimeWarning)
