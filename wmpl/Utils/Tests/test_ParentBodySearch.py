@@ -557,6 +557,9 @@ def test_moid_criterion_ranks_every_body_including_open_comets():
 
     search = _search(['MOID', 'DSH'], top_n=-1)
     assert search['keys'] == ['MOID', 'DSH']
+
+    # Unlike the D criteria the MOID has a unit, which its label carries into every table and file
+    assert search['labels'] == ['MOID (AU)', 'D_SH']
     assert len(search['matches']) == len(_catalogue())
 
     q, e, i, peri, node = PHAETHON

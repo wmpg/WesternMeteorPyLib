@@ -1597,7 +1597,7 @@ ELEMENT_CRITERIA = [
     ('DACS', 'D_ACS', lambda o1, o2: calcDACS(_semiMajorAxisForCriteria(o1[0], o1[1]), o1[1],
         o1[2], _semiMajorAxisForCriteria(o2[0], o2[1]), o2[1], o2[2])),
     ('DSAC', 'D_SAC', lambda o1, o2: calcDSAC(o1[0], o1[1], o1[2], o2[0], o2[1], o2[2])),
-    ('MOID', 'MOID', lambda o1, o2: calcMOIDFromPerihelion(*(tuple(o1) + tuple(o2)))),
+    ('MOID', 'MOID (AU)', lambda o1, o2: calcMOIDFromPerihelion(*(tuple(o1) + tuple(o2)))),
     ]
 
 ELEMENT_CRITERIA_KEYS = [key for key, _, _ in ELEMENT_CRITERIA]
@@ -1610,6 +1610,10 @@ ELEMENT_CRITERIA_KEYS = [key for key, _, _ in ELEMENT_CRITERIA]
 #   criterion. It handles parabolic and hyperbolic orbits against an elliptical one, and is NaN for two
 #   open orbits.
 VECTORISED_CRITERIA = ('MOID',)
+
+# Decimals to print a criterion with, where the usual ones (3 in tables, 4 in reports) would lose it: a
+#   MOID in AU of 0.0004, an Earth-crossing orbit, would read 0.000. 5 decimals resolve ~1500 km
+CRITERIA_DECIMALS = {'MOID': 5}
 
 
 def getElementCriterion(key):

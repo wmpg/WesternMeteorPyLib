@@ -4133,7 +4133,7 @@ if __name__ == "__main__":
     parent_criteria = None
     if args.parent_bodies is not None:
 
-        from wmpl.Utils.Dcriteria import lookupCriterion
+        from wmpl.Utils.Dcriteria import lookupCriterion, CRITERIA_DECIMALS
 
         # The criteria compare heliocentric orbits
         if reference_frame != "heliocentric":
@@ -4624,11 +4624,16 @@ if __name__ == "__main__":
     # Parent bodies
     if parent_results:
 
-        def _fmt(x):
-            return "{:7.4f}".format(x) if (x is not None) and np.isfinite(x) else "    n/a"
+        # Decimals per criterion label: the MOID needs more than the D criteria (see CRITERIA_DECIMALS)
+        decimals_of = {c[1]: CRITERIA_DECIMALS.get(c[0], 4) for c in parent_criteria}
 
-        def _fmtBand(b):
-            return "{:s} [{:s}, {:s}]".format(_fmt(b[0]), _fmt(b[1]), _fmt(b[2])) if b else ""
+        def _fmt(x, label=None):
+            d = decimals_of.get(label, 4)
+            return "{:{:d}.{:d}f}".format(x, d + 3, d) if (x is not None) and np.isfinite(x) \
+                else "n/a".rjust(d + 3)
+
+        def _fmtBand(b, label=None):
+            return "{:s} [{:s}, {:s}]".format(_fmt(b[0], label), _fmt(b[1], label), _fmt(b[2], label)) if b else ""
 
         print()
         print("Parent bodies, D criteria with the meteoroid over the integration, from its departure from "
@@ -4641,12 +4646,13 @@ if __name__ == "__main__":
 
             for label, sm in pr["summary"].items():
                 line = "    {:<11s} catalogue {:s}  departure {:s}  end {:s}  min {:s} at {:9.1f} d".format(
-                    label, _fmt(pr["catalogue_criteria"].get(label)), _fmt(sm["departure"]), _fmt(sm["end"]),
-                    _fmt(sm["min"]), sm["min_time_days"] if sm["min_time_days"] is not None else np.nan)
+                    label, _fmt(pr["catalogue_criteria"].get(label), label), _fmt(sm["departure"], label),
+                    _fmt(sm["end"], label), _fmt(sm["min"], label),
+                    sm["min_time_days"] if sm["min_time_days"] is not None else np.nan)
                 print(line)
                 if sm["clones_end"]:
                     print("    {:<11s} clones at the end: median {:s}   min over time: median {:s}".format(
-                        "", _fmtBand(sm["clones_end"]), _fmtBand(sm["clones_min"])))
+                        "", _fmtBand(sm["clones_end"], label), _fmtBand(sm["clones_min"], label)))
 
             if pr["body_diagnostics"].get("impact") or pr["body_diagnostics"].get("escaped"):
                 print("    The body's integration stopped early: {:s}".format(

@@ -50,7 +50,7 @@ import numpy as np
 from wmpl.Config import config
 from wmpl.Utils.Dcriteria import (GEOCENTRIC_CRITERIA_KEYS, HELIOCENTRIC_CRITERIA_KEYS,
     ALL_CRITERIA_KEYS, DERIVED_FROM_ELEMENTS, lookupCriterion, radiantCriterionMin,
-    calcHeliocentricFromGeocentric, RADIANT_MAX_DISTANCE, VECTORISED_CRITERIA)
+    calcHeliocentricFromGeocentric, RADIANT_MAX_DISTANCE, VECTORISED_CRITERIA, CRITERIA_DECIMALS)
 from wmpl.Utils.OrbitConstants import GAUSS_K
 from wmpl.Utils.Pickling import loadPickle
 
@@ -1023,8 +1023,10 @@ if __name__ == "__main__":
 
 
     print("Top {:d} matches, ranked by {:s}:".format(len(matches), labels[0]))
-    # Each column as wide as its label, so that the values line up under it
-    widths = [max(8, len(l)) for l in labels]
+    # Each column as wide as its label, so that the values line up under it, with the decimals of its
+    #   criterion (the MOID needs more than the D criteria)
+    decimals = [CRITERIA_DECIMALS.get(k, 3) for k in search['keys']]
+    widths = [max(8, len(l), d + 3) for l, d in zip(labels, decimals)]
 
     print('Name                               ,     q,     e,   incl,    peri,    node,  Hmag,',
         ', '.join('{:>{:d}s}'.format(l, w) for l, w in zip(labels, widths)))
@@ -1032,8 +1034,8 @@ if __name__ == "__main__":
     for m in matches:
         print("{:35s}, {:.3f}, {:.3f}, {:6.2f}, {:7.3f}, {:7.3f}, {:5.2f}, ".format(m['name'], m['q'],
             m['e'], m['incl'], m['peri'], m['node'], m['h_mag']) \
-            + ", ".join("{:{:d}.3f}".format(v, w) if np.isfinite(v) else "{:>{:d}s}".format("n/a", w) \
-            for v, w in zip(m['d_values'], widths)))
+            + ", ".join("{:{:d}.{:d}f}".format(v, w, d) if np.isfinite(v) else "{:>{:d}s}".format("n/a", w) \
+            for v, w, d in zip(m['d_values'], widths, decimals)))
 
 
     # Bring the bodies to the reference epoch of the meteor
@@ -1075,8 +1077,8 @@ if __name__ == "__main__":
 
             print("{:35s}, {:.4f}, {:.4f}, {:6.2f}, {:7.3f}, {:7.3f}, {:>10s}, ".format(m['name'],
                 p['q'], p['e'], p['incl'], p['peri'], p['node'], _jdToString(m['epoch_jd'])) \
-                + ", ".join("{:{:d}.3f}".format(v, w) if np.isfinite(v) else "{:>{:d}s}".format("n/a", w) \
-                for v, w in zip(values, widths)))
+                + ", ".join("{:{:d}.{:d}f}".format(v, w, d) if np.isfinite(v) else "{:>{:d}s}".format("n/a", w) \
+                for v, w, d in zip(values, widths, decimals)))
 
 
     # Save the matches

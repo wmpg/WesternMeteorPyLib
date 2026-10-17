@@ -1685,6 +1685,13 @@ def test_moid_criterion_is_offered_and_takes_arrays():
     criterion = lookupCriterion('moid')
     assert criterion[0] == 'MOID' and criterion[3] == 'elements'
 
+    # The label has the unit, as the D criteria have none; it is printed with more decimals, so that a
+    #   crossing orbit's 0.0004 AU does not read 0.000
+    assert criterion[1] == 'MOID (AU)'
+
+    from wmpl.Utils.Dcriteria import CRITERIA_DECIMALS
+    assert CRITERIA_DECIMALS['MOID'] >= 5
+
     meteoroid = (0.98, 0.62, math.radians(0.5), math.radians(160.0), math.radians(352.0))
     bodies = [(1.0, 0.0167, 0.0, 0.0, math.radians(102.9)), (0.9, 1.0, math.radians(70.0), 1.0, 2.0),
               (2.0, 0.3, math.radians(5.0), 3.0, 4.0)]
