@@ -12,6 +12,7 @@ Monte Carlo clones, and can optionally include radiation forces and measure how 
 - [What it reads](#what-it-reads)
 - [Command line reference](#command-line-reference)
 - [Choosing an integrator](#choosing-an-integrator)
+- [General relativity](#general-relativity)
 - [Radiation forces](#radiation-forces)
 - [Close encounters, impacts and ejections](#close-encounters-impacts-and-ejections)
 - [Monte Carlo clones](#monte-carlo-clones)
@@ -135,6 +136,7 @@ python -m wmpl.Rebound.REBOUND --help
 | `--beta BETA` | Include solar radiation pressure and Poynting–Robertson drag with this beta. Mutually exclusive with `--radius`/`--density`. |
 | `--radius METRES` | Object radius in metres. With `--density`, beta is computed from it. Purely gravitational if not given. |
 | `--density KG_M3` | Bulk density in kg/m³, used with `--radius`. Default: `3000`. |
+| `--gr {gr_full,gr}` | General relativity. `gr_full` (default) is the post-Newtonian interaction between all pairs of bodies (EIH); `gr` is the Sun's post-Newtonian correction on every body (Anderson et al. 1975), 3.3× faster with the same results to ~1e-7 in a. See [General relativity](#general-relativity). |
 | `--no_sun_j2` | Leave out the Sun's J2. It is on by default (DE430's J2 = 2.11e-7, reference radius 696 000 km, about the Sun's IAU rotation pole). It keeps Mercury within 1 km of DE430 over 100 years (13 km without it); on meteoroids it is tiny, 0.02″ on the perihelion of a q = 0.14 AU orbit in 400 years. |
 | `--compute_megno` | After the integration, measure the MEGNO chaos indicator of the nominal orbit. See [Chaos: MEGNO](#chaos-megno). |
 | `--verbose` | Print the progress of the simulation. |
@@ -204,9 +206,35 @@ in the warning for that reason. Measured on a δ-Aquariid-like orbit (a = 2.6 AU
 
 For an orbit with perihelion inside ~0.1 AU use IAS15, or TRACE with `--dt 0.1`.
 
-REBOUNDx will warn that the `gr_full` general relativity correction is velocity-dependent when used
-with WHFast. Its measured effect on the orbit was below 1e-8 in the semi-major axis over 100 years, so
+REBOUNDx will warn that the general relativity correction is velocity-dependent when used with
+WHFast. Its measured effect on the orbit was below 1e-8 in the semi-major axis over 100 years, so
 the warning can be ignored here.
+
+---
+
+## General relativity
+
+By default (`--gr gr_full`) general relativity is the full post-Newtonian interaction between every
+pair of bodies (REBOUNDx `gr_full`, the EIH equations used by the JPL ephemerides), whose cost grows
+as the cube of the number of bodies and is most of the run time. `--gr gr` uses instead the
+post-Newtonian correction of the Sun's field, applied to every body (REBOUNDx `gr`, Anderson et al.
+1975). It gets the perihelion precessions and the mean motions right and ignores terms smaller by the
+planet-to-Sun mass ratio.
+
+Measured with the Sun's and the Earth's harmonics on, `gr` against `gr_full`:
+
+| | `gr` against `gr_full` | For scale: 1 m/s on the initial velocity |
+| :--- | ---: | ---: |
+| Example trajectory, 100 years back | 2 000 km, Δa = 6e-7 AU | 4 million km |
+| Phaethon-like orbit (q = 0.14 AU), 400 years | 0.1″ of the 40.6″ GR perihelion shift (0.26 %) | |
+| Winchcombe, 200 clones of 1 m/s, 100 years | same distributions of a, e, i (KS p = 1.00) | |
+| Planets against DE430, 100 years | Earth 9.3 instead of 4.5 km, Mercury 1.5 instead of 0.6 km | |
+| Run time | 3.2–3.6× faster (200 clones, 100 yr, 7 cores: 50 s instead of 164 s) | |
+
+The planets follow DE430 slightly better with `gr_full`, since DE430 was integrated with the EIH
+equations, and it is the model REBOUND.py has always used. `--gr gr` gives the same meteoroid orbits
+well inside their measurement uncertainty, so use it to speed up large Monte Carlo runs or long
+integrations.
 
 ---
 

@@ -231,9 +231,10 @@ def testEndToEndIntegrationMatchesReference(realReb):
 
     traj = loadPickle(EXAMPLE_DIR, EXAMPLE_FILE)
 
+    # The reference is the full post-Newtonian interaction between all bodies (the default)
     sim_outputs, sim_outputs_mc, diagnostics = realReb.reboundSimulate(
         None, None, traj=traj, direction="backward", sim_days=60, n_outputs=200, mc_runs=1, n_cpu=1,
-        show_progress=False, return_diagnostics=True, random_seed=42)
+        show_progress=False, return_diagnostics=True, random_seed=42, gr="gr_full")
 
     assert len(sim_outputs) == 200
     assert sim_outputs_mc == {}
@@ -488,3 +489,39 @@ def testSunJ2KeepsMercuryOnTheEphemeris(realReb):
 
     assert mercuryError(True) < 2.0
     assert mercuryError(False) > 8.0
+
+
+
+### General relativity model ###
+
+
+def testSunOnlyGrMatchesTheFullOne(realReb):
+    """ The Sun's post-Newtonian correction on every body (--gr gr) gives the same orbit as the
+    default, the interaction between all pairs of bodies, to ~1e-7 in a over 60 days (measured 9e-8
+    on the example; a 1 m/s change of the initial velocity moves a by 1e-3). """
+
+    from wmpl.Config import config
+    from wmpl.Utils.Pickling import loadPickle
+
+    if not os.path.isfile(config.jpl_ephem_file):
+        pytest.skip("DE430 ephemeris not found: {}".format(config.jpl_ephem_file))
+
+    if not os.path.isfile(os.path.join(EXAMPLE_DIR, EXAMPLE_FILE)):
+        pytest.skip("Example trajectory not found")
+
+    traj = loadPickle(EXAMPLE_DIR, EXAMPLE_FILE)
+
+    def finalOrbit(**kwargs):
+        outputs, _ = realReb.reboundSimulate(
+            None, None, traj=traj, direction="backward", sim_days=60, n_outputs=50, mc_runs=1,
+            n_cpu=1, show_progress=False, **kwargs)
+        return outputs[-1][2]
+
+    sun_only, default = finalOrbit(gr="gr"), finalOrbit()
+
+    assert sun_only.a == pytest.approx(default.a, rel=3e-7)
+    assert sun_only.a != default.a
+    assert sun_only.e == pytest.approx(default.e, abs=1e-7)
+
+    with pytest.raises(ValueError):
+        finalOrbit(gr="gr_potential")
