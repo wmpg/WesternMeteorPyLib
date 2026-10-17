@@ -158,7 +158,8 @@ class Planet(object):
         x, y, z = orbitalElements2Cartesian(self.a, self.e, self.I, self.lon_of_peri - self.node, 
             self.node, E)
 
-        ax.plot(x, y, z, color=self.color, linestyle='-', linewidth=0.5)
+        # Dashed, so the meteoroid's solid orbit stands out
+        ax.plot(x, y, z, color=self.color, linestyle='--', linewidth=0.5)
 
 
 
