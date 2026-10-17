@@ -635,3 +635,19 @@ def testProgressLineRewritesItselfInPlace(reb, monkeypatch):
 
     line.end()
     assert out.getvalue().endswith("\r" + " "*len(second) + "\r")
+
+
+def testEncounterTablesUseCompactDistancesAndTimes(reb):
+    """ Distances keep 3 significant figures in AU and km, and epochs use the unit that suits them. """
+
+    assert reb.formatDistance(0.018503) == "0.0185 AU (2.77 Mkm)"
+    assert reb.formatDistance(0.0024430) == "0.00244 AU (365,000 km)"
+    assert reb.formatDistance(26.799538) == "26.8 AU (4,010 Mkm)"
+    assert reb.formatDistance(1.863751) == "1.86 AU (279 Mkm)"
+    assert reb.formatDistance(0.0) == "0 AU (0 km)"
+
+    assert reb.formatTimeStamp(-106537.3739) == "-291.7 yr"
+    assert reb.formatTimeStamp(-1.0e6) == "-2738 yr"
+    assert reb.formatTimeStamp(45.31) == "+45.3 d"
+    assert reb.formatTimeStamp(-0.25) == "-6.0 h"
+    assert reb.formatTimeStamp(0.0) == "0 d"

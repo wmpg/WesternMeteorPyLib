@@ -235,6 +235,9 @@ SUN_ENCOUNTER_AU = 0.1
 # Radius of the Sun in AU (IAU 2015 nominal, 695 700 km), used for impact detection
 SUN_RADIUS_AU = 695700.0/149597870.7
 
+# Kilometres in one AU
+AU_KM = 149597870.7
+
 
 def formatTimeSpan(days, decimals=2):
     """ Format a time span given in days in the unit that suits its length.
@@ -265,6 +268,66 @@ def formatTimeSpan(days, decimals=2):
         return "{:.{n}f} days ({:.{n}f} h)".format(days, 24*days, n=decimals)
 
     return "{:.{n}f} days".format(days, n=decimals)
+
+
+def formatTimeStamp(days):
+    """ Format a signed epoch, in days from the start, compactly in the unit that suits its size.
+
+    Meant for tables of events, where the exact day is noise: years beyond a year, hours under a day,
+    days otherwise. The sign is kept, since it tells the direction of the integration.
+
+    Arguments:
+        days: [float] Time in days.
+
+    Return:
+        [str] E.g. -106537.37 -> "-291.7 yr", 45.3 -> "+45.3 d", -0.25 -> "-6.0 h", 0 -> "0 d".
+    """
+
+    if days == 0:
+        return "0 d"
+
+    sign = "-" if days < 0 else "+"
+    days = abs(days)
+
+    if days >= 365.25:
+        years = days/365.25
+        return "{:s}{:.{n}f} yr".format(sign, years, n=1 if years < 1000 else 0)
+
+    if days < 1.0:
+        return "{:s}{:.1f} h".format(sign, 24*days)
+
+    return "{:s}{:.1f} d".format(sign, days)
+
+
+def formatDistance(dist_au):
+    """ Format a distance given in AU as AU plus km, both to 3 significant figures.
+
+    Close approaches span 1e-5 to 1e1 AU and the integrator does not justify more than 3 figures, so
+    the AU value keeps 3 significant digits and the km value is rounded the same way, in millions of
+    km (Mkm) from a million up.
+
+    Arguments:
+        dist_au: [float] Distance in AU.
+
+    Return:
+        [str] E.g. 0.018503 -> "0.0185 AU (2.77 Mkm)", 0.0024 -> "0.00244 AU (365,000 km)".
+    """
+
+    if dist_au <= 0:
+        return "0 AU (0 km)"
+
+    decimals = max(0, 2 - int(np.floor(np.log10(dist_au))))
+    dist_km = dist_au*AU_KM
+
+    if dist_km >= 1e9:
+        km_str = "{:,.0f} Mkm".format(float("{:.3g}".format(dist_km/1e6)))
+    elif dist_km >= 1e6:
+        km_str = "{:.3g} Mkm".format(dist_km/1e6)
+    else:
+        magnitude = 10**(int(np.floor(np.log10(max(dist_km, 1.0)))) - 2)
+        km_str = "{:,.0f} km".format(round(dist_km/magnitude)*magnitude)
+
+    return "{:.{n}f} AU ({:s})".format(dist_au, km_str, n=decimals)
 
 
 # Wall-clock interval between two live progress updates, in seconds. The integrations check it in
@@ -808,14 +871,14 @@ def formatSunPassageSummary(summary):
 
     Return:
         [str] E.g. "Sun      24 perihelion passages < 0.10 AU: q = 0.0441-0.0645 AU (9.5-13.9 R_Sun),
-            t = +3.1 to +99.6 d".
+            t = +3.1 d to +99.6 d".
     """
 
     return ("{:<8s} {:d} perihelion passages < {:.2f} AU: q = {:.4f}-{:.4f} AU ({:.1f}-{:.1f} R_Sun), "
-            "t = {:+.1f} to {:+.1f} d").format(
+            "t = {:s} to {:s}").format(
                 "Sun", summary["n"], SUN_ENCOUNTER_AU, summary["q_min_au"], summary["q_max_au"],
                 summary["q_min_au"]/SUN_RADIUS_AU, summary["q_max_au"]/SUN_RADIUS_AU,
-                summary["first_days"], summary["last_days"])
+                formatTimeStamp(summary["first_days"]), formatTimeStamp(summary["last_days"]))
 
 
 def whfastEncounterWarning(diagnostics, n_hill=3.0):
@@ -3002,10 +3065,9 @@ if __name__ == "__main__":
             if enc["n_hill"] is None:
                 closeness = "{:.1f} R_Sun".format(enc["min_dist_au"]/SUN_RADIUS_AU)
             else:
-                closeness = "{:.2f} R_Hill, R_Hill = {:.6f} AU".format(enc["n_hill"], enc["hill_radius_au"])
-            print("    {:<8s} {:12.6f} AU ({:12.1f} km)  at t = {:+9.3f} d   ({:s})".format(
-                enc["body"], enc["min_dist_au"], enc["min_dist_au"]*149597870.7,
-                enc["time_days"], closeness))
+                closeness = "{:.2f} R_Hill, R_Hill = {:s}".format(enc["n_hill"], formatDistance(enc["hill_radius_au"]))
+            print("    {:<8s} {:<26s} at t = {:>9s}   ({:s})".format(
+                enc["body"], formatDistance(enc["min_dist_au"]), formatTimeStamp(enc["time_days"]), closeness))
     else:
         print("  Close encounters ({:s}): none detected".format(encounter_criterion))
 
@@ -3047,10 +3109,9 @@ if __name__ == "__main__":
             for body in sorted(clone_encounters, key=lambda b: -clone_encounters[b]["count"]):
                 entry = clone_encounters[body]
                 print("    {:<10s} {:5d}/{:<5d} ({:5.1f}%)   {:5d} encounter(s)   closest over all "
-                      "clones: {:.6f} AU ({:.0f} km)".format(
+                      "clones: {:s}".format(
                           body, entry["count"], n_clones, 100.0*entry["count"]/n_clones,
-                          entry["n_encounters"], entry["closest_au"],
-                          entry["closest_au"]*149597870.7))
+                          entry["n_encounters"], formatDistance(entry["closest_au"])))
         else:
             print("")
             print("  No clone had a close encounter ({:s}).".format(encounter_criterion))
@@ -3169,10 +3230,9 @@ if __name__ == "__main__":
                 if enc["n_hill"] is None:
                     closeness = "{:.1f} R_Sun".format(enc["min_dist_au"]/SUN_RADIUS_AU)
                 else:
-                    closeness = "R_Hill = {:.6f} AU ({:.2f} R_Hill)".format(enc["hill_radius_au"], enc["n_hill"])
-                f.write("  {:<8s} min dist = {:10.6f} AU ({:12.1f} km) at t = {:10.4f} d, {:s}\n".format(
-                    enc["body"], enc["min_dist_au"], enc["min_dist_au"]*149597870.7,
-                    enc["time_days"], closeness))
+                    closeness = "R_Hill = {:s} ({:.2f} R_Hill)".format(formatDistance(enc["hill_radius_au"]), enc["n_hill"])
+                f.write("  {:<8s} min dist = {:<26s} at t = {:>9s}, {:s}\n".format(
+                    enc["body"], formatDistance(enc["min_dist_au"]), formatTimeStamp(enc["time_days"]), closeness))
         else:
             f.write("  None detected.\n")
 
@@ -3192,8 +3252,8 @@ if __name__ == "__main__":
             else:
                 hill = HILL_RADII_AU.get(body)
                 hill_str = "" if hill is None else "  ({:.2f} R_Hill)".format(d_min/hill)
-                f.write("  {:<8s} {:12.6f} AU ({:14.1f} km) at t = {:10.4f} d{:s}\n".format(
-                    body, d_min, d_min*149597870.7, t_min, hill_str))
+                f.write("  {:<8s} {:<26s} at t = {:>9s}{:s}\n".format(
+                    body, formatDistance(d_min), formatTimeStamp(t_min), hill_str))
 
         # Save what happened to the Monte Carlo clones
         if len(sim_outputs_mc):
@@ -3222,10 +3282,9 @@ if __name__ == "__main__":
                 for body in sorted(clone_encounters, key=lambda b: -clone_encounters[b]["count"]):
                     entry = clone_encounters[body]
                     f.write("  {:<10s} {:5d}/{:<5d} ({:5.1f}%)   {:5d} encounter(s)   closest over all "
-                            "clones {:.6f} AU ({:.1f} km)\n".format(
+                            "clones {:s}\n".format(
                                 body, entry["count"], n_clones, 100.0*entry["count"]/n_clones,
-                                entry["n_encounters"], entry["closest_au"],
-                                entry["closest_au"]*149597870.7))
+                                entry["n_encounters"], formatDistance(entry["closest_au"])))
             else:
                 f.write("\nNo clone had a close encounter ({:s}).\n".format(encounter_criterion))
 
