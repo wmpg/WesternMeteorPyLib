@@ -2353,8 +2353,14 @@ def applyGravityDrop(eci_coord, t, r0, gravity_factor, vz):
 
     """
 
-    # Define the mass of the Earth
-    earth_mass = 5.9722e24 # kg
+    # Make sure r0 is not 0
+    if r0 == 0:
+        r0 = 1e-10
+
+    # Gravitational parameter of the Earth along the radial direction, including the J2 term of its flattening
+    #   at the geocentric latitude of the meteor (WGS84 GM in m^3/s^2, J2, and equatorial radius in m)
+    sin_lat2 = eci_coord[2]**2/np.sum(eci_coord**2)
+    gm = 3.986004418e14*(1.0 - 1.5*1.08262668355e-3*(6378137.0/r0)**2*(3.0*sin_lat2 - 1.0))
 
     # Determine the sign of the initial time
     time_sign = np.sign(t)
@@ -2362,12 +2368,8 @@ def applyGravityDrop(eci_coord, t, r0, gravity_factor, vz):
     # The derived drop function does not work for small vz's, thus the classical drop function is used
     if abs(vz) < 100:
 
-        # Make sure r0 is not 0
-        if r0 == 0:
-            r0 = 1e-10
-
         # Calculate gravitational acceleration at given ECI coordinates
-        g = G*earth_mass/r0**2
+        g = gm/r0**2
 
         # Calculate the amount of gravity drop from a straight trajectory
         drop = time_sign*(1.0/2)*g*t**2
@@ -2375,16 +2377,13 @@ def applyGravityDrop(eci_coord, t, r0, gravity_factor, vz):
 
     else:
 
-        if r0 == 0:
-            r0 = 1e-10
-
         # Compute the denominator to check it's not 0
         denominator = r0 + vz*t
         if denominator == 0:
             denominator = 1e-10
 
         # Compute the drop using a drop model with a constant vertical velocity
-        drop = time_sign*(G*earth_mass/vz**2)*(r0/denominator + np.log(denominator/r0) - 1)
+        drop = time_sign*(gm/vz**2)*(r0/denominator + np.log(denominator/r0) - 1)
 
 
     # Apply gravity drop to ECI coordinates
