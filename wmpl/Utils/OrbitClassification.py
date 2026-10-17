@@ -15,6 +15,7 @@ import scipy.integrate
 import scipy.optimize
 
 # Re-exported so that a caller can keep importing them from here
+from wmpl.Utils.MOID import calcMOID  # noqa: F401 (also part of this module's interface)
 from wmpl.Utils.OrbitConstants import (GAUSS_K, GAUSS_K_SQUARED, A_JUPITER, A_SATURN, A_URANUS,
     A_NEPTUNE)
 
@@ -520,97 +521,6 @@ def classifyTancrediAsteroid(a, e, i, moid_jupiter_hill, moid_giants_min_hill):
         reaches = False
 
     return 'aco jupiter family' if reaches else 'asteroid'
-
-
-def _orbitPosition(ecc_anomaly, a, e, i, node, peri):
-    """ Heliocentric position of a point on an orbit, given its eccentric anomaly.
-
-    Arguments:
-        ecc_anomaly: [float] eccentric anomaly (rad)
-        a: [float] semi-major axis (AU)
-        e: [float] num. eccentricity
-        i: [float] inclination (rad)
-        node: [float] longitude of ascending node (rad)
-        peri: [float] argument of perihelion (rad)
-
-    Return:
-        [ndarray] position vector (AU)
-    """
-
-    # Position in the orbital plane, with the origin at the focus and x towards perihelion
-    x = a*(np.cos(ecc_anomaly) - e)
-    y = a*np.sqrt(1.0 - e**2)*np.sin(ecc_anomaly)
-
-    cos_w, sin_w = np.cos(peri), np.sin(peri)
-    cos_i, sin_i = np.cos(i), np.sin(i)
-    cos_O, sin_O = np.cos(node), np.sin(node)
-
-    # Rotate by the argument of perihelion, then by the inclination and the node, i.e. the
-    #   standard 3-1-3 Euler sequence written out
-    x_peri = x*cos_w - y*sin_w
-    y_peri = x*sin_w + y*cos_w
-
-    return np.array([x_peri*cos_O - y_peri*cos_i*sin_O, x_peri*sin_O + y_peri*cos_i*cos_O,
-        y_peri*sin_i])
-
-
-def calcMOID(a1, e1, i1, O1, w1, a2, e2, i2, O2, w2):
-    """ Calculate the minimum orbital intersection distance between two orbits.
-
-        Note the element order: this function takes the semi-major axis first, where every
-        dissimilarity criterion in wmpl.Utils.Dcriteria takes the perihelion distance. The two
-        signatures are otherwise the same shape, so a q passed here is silently accepted.
-
-        The distance between a point on each orbit is minimised over the two eccentric anomalies.
-        That surface has more than one local minimum, so the search is repeated from the three
-        further starting points the paper prescribes and the smallest of the four results is taken.
-
-        Reference: Tancredi (2014), Icarus 234, 66, appendix A, doi:10.1016/j.icarus.2014.02.013.
-
-    Arguments:
-        a1: [float] semi-major axis of the first orbit (AU)
-        e1: [float] num. eccentricity of the first orbit
-        i1: [float] inclination of the first orbit (rad)
-        O1: [float] longitude of ascending node of the first orbit (rad)
-        w1: [float] argument of perihelion of the first orbit (rad)
-        a2: [float] semi-major axis of the second orbit (AU)
-        e2: [float] num. eccentricity of the second orbit
-        i2: [float] inclination of the second orbit (rad)
-        O2: [float] longitude of ascending node of the second orbit (rad)
-        w2: [float] argument of perihelion of the second orbit (rad)
-
-    Return:
-        [float] minimum orbital intersection distance (AU)
-    """
-
-    orbit1 = (a1, e1, i1, O1, w1)
-    orbit2 = (a2, e2, i2, O2, w2)
-
-    def separation(anomalies):
-        return float(np.linalg.norm(_orbitPosition(anomalies[0], *orbit1)
-            - _orbitPosition(anomalies[1], *orbit2)))
-
-    def refine(start):
-
-        # The tolerances are well below the AU-scale distances being compared, so the result is
-        #   limited by which basin the search lands in rather than by how finely it converges
-        found = np.atleast_1d(scipy.optimize.fmin_powell(separation, np.asarray(start, dtype=float),
-            disp=False, xtol=1e-10, ftol=1e-12))
-        return found, separation(found)
-
-    # Powell converges to whichever local minimum it starts nearest, and the separation surface
-    #   has several. The paper restarts from three points reflected about the first result, which
-    #   between them reach the other basins: the opposite side of both orbits, the opposite side of
-    #   the second only, and the two reflections combined.
-    first, smallest = refine((0.0, 0.0))
-
-    for start in ((first[0] + np.pi, first[1] + np.pi), (first[0], 2*np.pi - first[1]),
-                  (first[0] + np.pi, np.pi - first[1])):
-
-        _, distance = refine(start)
-        smallest = min(smallest, distance)
-
-    return smallest
 
 
 def calcGiantPlanetMOIDs(a, e, i, node, peri):

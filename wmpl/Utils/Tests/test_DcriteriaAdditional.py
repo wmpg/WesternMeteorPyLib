@@ -24,13 +24,14 @@ from wmpl.Utils.Dcriteria import (calcRho1, calcRho2, calcRho5, calcC, calcDR, c
     DV_THRESHOLDS, DV_DEFAULT_EPOCH, TC_REFERENCE_A, TC_REFERENCE_E, calcDSH, calcDH,
     ELEMENT_CRITERIA, ELEMENT_CRITERIA_KEYS, getElementCriterion, _semiMajorAxisForCriteria,
     TC_REFERENCE_INCL, TC_REFERENCE_Q, DACS_A_SCALE, DX_W_SOL, DX_W_RA, DX_W_DEC, DX_W_VG)
+from wmpl.Utils.MOID import _orbitPosition
 from wmpl.Utils.OrbitClassification import (calcTisserand, calcWhippleK, calcKresakP,
     isCometaryTi, JW_TISSERAND_LIMIT,
     calcAphelionDistance, calcOrbitalEnergy, isCometaryQi, isCometaryKi, isCometaryPi,
     isCometaryEi, GAUSS_K, calcHillRadius, calcResonanceSemiMajorAxis, classifyTancrediComet,
     classifyTancrediAsteroid, isTancrediResonanceProtected, calcMOID, calcGiantPlanetMOIDs,
     calcResonanceWidth, calcMaxPerihelionForTisserand, calcMinMOIDForTisserand,
-    _orbitPosition, A_JUPITER, A_URANUS, JW_INCL_LIMIT, JW_ENERGY_LIMIT, GAUSS_K_SQUARED,
+    A_JUPITER, A_URANUS, JW_INCL_LIMIT, JW_ENERGY_LIMIT, GAUSS_K_SQUARED,
     TANCREDI_RESONANCES, TANCREDI_T_HIGH, TANCREDI_T_LOW, Q_JUPITER_APHELION, RESONANCE_E_MIN,
     RESONANCE_E_MAX)
 

@@ -233,6 +233,7 @@ def testMegnoGrowingLinearlyIsChaoticWithLyapunovTime(reb):
 
     assert v["status"] == "chaotic"
     assert v["lyapunov_time_years"] == pytest.approx(lyapunov_time, rel=1e-6)
+    assert v["lyapunov_method"] == "megno_second_half"
 
 
 def testMegnoTendingToZeroIsPeriodic(reb):
@@ -568,3 +569,484 @@ def testMoonEncounterIsGeometricallyReachableOnlyNearEarth(reb):
     earth_radius_au = 6371.0/149597870.7
 
     assert (moon_perigee_au - earth_radius_au) > 3.0*reb.HILL_RADII_AU["Luna"]
+
+
+
+### Lyapunov time from ln|delta| ###
+
+
+def _megnoFromLnDelta(t_years, ln_delta):
+    """ <Y> from ln|delta| with the integrals of computeMegno (midpoint rule), starting at t = 0. """
+
+    t = np.concatenate([[0.0], t_years])
+    l = np.concatenate([[ln_delta[0]], ln_delta])
+    I = np.concatenate([[0.0], np.cumsum(0.5*(t[1:] + t[:-1])*np.diff(l))])
+    Y = np.where(t > 0, 2*I/np.where(t > 0, t, 1), 0.0)
+    J = np.concatenate([[0.0], np.cumsum(0.5*(Y[1:] + Y[:-1])*np.diff(t))])
+
+    return (J/np.where(t > 0, t, 1))[1:]
+
+
+def _lnDeltaSeries(reb, ln_func, years=1000.0, a_au=1.0, n=2000):
+    """ Times (days), <Y>, a and ln|delta| for a given ln|delta|(t in years). """
+
+    t_years = np.linspace(years/n, years, n)
+    ln_delta = np.array([ln_func(t) for t in t_years])
+
+    return list(t_years*365.25), list(_megnoFromLnDelta(t_years, ln_delta)), [a_au]*n, list(ln_delta)
+
+
+def testLyapunovTimeComesFromTheGrowthOfLnDelta(reb):
+    """ A deviation that grows like a regular one (ln t) and then exponentially from 300 years on: the
+    Lyapunov time is that of the exponential phase, in every window of it. """
+
+    tau = 40.0
+    times, megno, a, ln_delta = _lnDeltaSeries(
+        reb, lambda t: np.log(min(t, 300.0)) + (max(t - 300.0, 0.0)/tau))
+
+    v = reb.classifyMegno(times, megno, a, ln_delta=ln_delta)
+
+    assert v["status"] == "chaotic"
+    assert v["lyapunov_method"] == "ln_delta"
+    assert v["lyapunov_time_years"] == pytest.approx(tau, rel=0.02)
+    assert v["lyapunov_time_range_years"][0] == pytest.approx(tau, rel=0.05)
+    assert v["lyapunov_time_range_years"][1] == pytest.approx(tau, rel=0.05)
+    assert v["lyapunov_onset_years"] > 300.0
+
+
+def testRegularDeviationGrowthIsRegular(reb):
+    """ ln|delta| growing as ln t (a regular orbit) gives <Y> -> 2 and no Lyapunov time. """
+
+    v = reb.classifyMegno(*_lnDeltaSeries(reb, lambda t: np.log(t))[:3],
+                          ln_delta=_lnDeltaSeries(reb, lambda t: np.log(t))[3])
+
+    assert v["status"] == "regular"
+    assert v["lyapunov_time_years"] is None
+
+
+def testNoLyapunovTimeFromAShortGrowthPhase(reb):
+    """ Exponential growth over fewer than LYAPUNOV_MIN_ORBITS periods is not timed. """
+
+    t = np.linspace(1.0, 1000.0, 2000)
+    period = 11.9
+    ln_delta = np.log(t) + np.maximum(t - 1000.0 + 0.5*reb.LYAPUNOV_MIN_ORBITS*period, 0.0)/5.0
+    megno = 2.0 + np.maximum(t - 900.0, 0.0)
+
+    assert reb.lyapunovFromDeviation(t, ln_delta, megno, period) is None
+
+    # Over enough periods it is timed
+    ln_delta = np.log(t) + np.maximum(t - 500.0, 0.0)/5.0
+    fit = reb.lyapunovFromDeviation(t, ln_delta, 2.0 + np.maximum(t - 500.0, 0.0), period)
+    assert fit["lyapunov_time_years"] == pytest.approx(5.0, rel=0.01)
+
+
+### Predictability horizon from the clones ###
+
+
+def _cloneOutputs(n_clones=40, n_out=200, scramble_at=None, seed=0, e_scramble_at=None):
+    """ Nominal and clone outputs whose a (and e) keep the order of their start until scramble_at,
+    and are shuffled among the clones after it. Time step 1 year (backward). """
+
+    rng = np.random.default_rng(seed)
+    day = 365.25
+    times = [-k*day for k in range(n_out)]
+
+    def rows(a, e):
+        out = []
+        for k, t in enumerate(times):
+            orbit = SimpleNamespace(a=a[k], e=e[k], inc=0.1 + 0.001*a[k], Omega=0.0, omega=0.0, f=0.0)
+            out.append([t*2*np.pi/365.25, None, orbit, {"Earth": 0.0 if k == 0 else 1.0}])
+        return out
+
+    a0 = 2.0 + 0.01*rng.normal(size=n_clones)
+    e0 = 0.6 + 0.001*rng.normal(size=n_clones)
+    a = np.tile(a0, (n_out, 1)) + 1e-5*rng.normal(size=(n_out, n_clones))
+    e = np.tile(e0, (n_out, 1))
+    if scramble_at is not None:
+        for k in range(scramble_at, n_out):
+            a[k] = rng.permutation(a0)
+    if e_scramble_at is not None:
+        for k in range(e_scramble_at, n_out):
+            e[k] = rng.permutation(e0)
+
+    nominal = rows(np.full(n_out, 2.0), np.full(n_out, 0.6))
+    clones = {"obj_MC_{:d}".format(j): rows(a[:, j], e[:, j]) for j in range(n_clones)}
+
+    return nominal, clones
+
+
+def testHorizonIsWhereTheClonesLoseTheOrderOfTheirStart(reb):
+
+    nominal, clones = _cloneOutputs(scramble_at=60, e_scramble_at=120)
+
+    h = reb.predictabilityHorizon(nominal, clones)
+
+    assert h["n_clones"] == 40
+    assert abs(h["elements"]["a"]["horizon_days"])/365.25 == pytest.approx(59, abs=1)
+    assert abs(h["elements"]["e"]["horizon_days"])/365.25 == pytest.approx(119, abs=1)
+
+    # The horizon of the run is the earliest one
+    assert abs(h["horizon_days"])/365.25 == pytest.approx(59, abs=1)
+    assert abs(h["elements"]["a"]["rank_corr_end"]) < 0.5
+
+    lines = reb._predictabilityReportLines(h, 199*365.25)
+    assert any("Beyond ~59 years" in line for line in lines)
+
+
+def testHorizonNotReachedOnAShortRun(reb):
+    """ The default run, 60 days: the clones keep their order, so there is no horizon. """
+
+    nominal, clones = _cloneOutputs(n_out=60)
+
+    h = reb.predictabilityHorizon(nominal, clones)
+
+    assert h["horizon_days"] is None
+    assert all(el["horizon_days"] is None for el in h["elements"].values())
+    assert h["elements"]["a"]["rank_corr_end"] > 0.99
+
+    lines = reb._predictabilityReportLines(h, 60.0)
+    assert any("Not reached within the 60 days" in line for line in lines)
+
+
+def testHorizonNeedsEnoughClonesOverTheWholeSpan(reb):
+
+    nominal, clones = _cloneOutputs(n_clones=reb.PREDICTABILITY_MIN_CLONES - 1)
+    assert reb.predictabilityHorizon(nominal, clones) is None
+
+    # Clones that ended early (impacted) are left out
+    nominal, clones = _cloneOutputs(n_clones=reb.PREDICTABILITY_MIN_CLONES + 2)
+    for name in list(clones)[:3]:
+        clones[name] = clones[name][:50]
+    assert reb.predictabilityHorizon(nominal, clones) is None
+
+
+def testHorizonReportsTheFirstEncounters(reb):
+    """ The time of each clone's first close encounter, without the Sun passages. """
+
+    nominal, clones = _cloneOutputs(n_clones=20)
+    diag = {}
+    for j, name in enumerate(clones):
+        encounters = [{"body": "Sun", "time_days": -1.0}]
+        if j < 10:
+            encounters += [{"body": "Earth", "time_days": -365.25*(10 + j)},
+                           {"body": "Luna", "time_days": -365.25*(100 + j)}]
+        diag[name] = {"encounters": encounters}
+
+    fe = reb.predictabilityHorizon(nominal, clones, clone_diag=diag)["first_encounter_days"]
+
+    assert fe["fraction"] == pytest.approx(0.5)
+    assert fe["p50"]/365.25 == pytest.approx(14.5, abs=0.01)
+    assert fe["p05"]/365.25 >= 10.0
+
+
+### Figure of the orbit ###
+
+
+def _plotOutputs(n_out=300, years=100.0, direction=-1, n_clones=0, node_start=355.0, seed=1,
+                 truncate=None):
+    """ Synthetic outputs for plotReboundOrbits: the node crosses 360 deg, the object leaves the Earth
+    at the third output, and the clones scatter around the nominal solution. """
+
+    rng = np.random.default_rng(seed)
+    t_days = direction*np.linspace(0, years*365.25, n_out)
+
+    # REBOUND time unit in days (DAYS_PER_SIM_TIME)
+    days_per_unit = np.sqrt(149597870700.0**3/1.3271244004193938e20)/86400.0
+
+    def rows(da, dnode, length=n_out):
+        out = []
+        for k in range(length):
+            frac = k/(n_out - 1)
+            orbit = SimpleNamespace(a=2.0 + da*frac, e=0.6, inc=np.radians(1.0),
+                                    Omega=np.radians((node_start + 10.0*frac + dnode*frac) % 360.0),
+                                    omega=np.radians(100.0), f=0.0)
+            earth = 1e-5 if k < 2 else 1.0
+            out.append([t_days[k]/days_per_unit, None, orbit, {"Earth": earth, "Sun": 1.0}])
+        return out
+
+    nominal = rows(0.0, 0.0)
+    clones = {"obj_MC_{:d}".format(j): rows(0.1*rng.normal(), rng.normal(), length=(
+        truncate if (truncate is not None and j == 0) else n_out)) for j in range(n_clones)}
+
+    return nominal, clones
+
+
+@pytest.fixture
+def agg():
+    import matplotlib
+    import matplotlib.pyplot as plt
+    matplotlib.use("Agg")
+    yield
+    plt.close("all")
+
+
+def testForwardRunShowsTheWholeSpan(reb, agg):
+    """ The x axis covers the whole run forward in time, not only the departure from the Earth (the
+    old figure set the shared x limit to the departure time). """
+
+    nominal, clones = _plotOutputs(direction=1, n_clones=5)
+    fig, axes = reb.plotReboundOrbits(nominal, clones, [])
+
+    lo, hi = axes["a"].get_xlim()
+    assert lo == pytest.approx(0.0) and hi == pytest.approx(100.0)
+    assert axes["a"].get_xlabel() == "" and axes["varpi"].get_xlabel() == "Time [years]"
+
+
+def testShortRunIsInDays(reb, agg):
+
+    nominal, clones = _plotOutputs(years=60/365.25, n_clones=3)
+    _, axes = reb.plotReboundOrbits(nominal, clones, [])
+
+    assert axes["varpi"].get_xlabel() == "Time [days]"
+    assert axes["a"].get_xlim()[0] == pytest.approx(-60.0)
+
+
+def testManyClonesAreBandsAndTheAxesCoverThem(reb, agg):
+    """ With many clones they are drawn as percentile bands, the y axis covers the 2.5-97.5% band,
+    and only a sample of clones is drawn individually. """
+
+    nominal, clones = _plotOutputs(n_clones=200)
+    _, axes = reb.plotReboundOrbits(nominal, clones, [])
+
+    ax = axes["a"]
+    assert len(ax.collections) >= 2
+
+    final_a = np.array([rows[-1][2].a for rows in clones.values()])
+    lo, hi = ax.get_ylim()
+    assert lo <= np.percentile(final_a, 2.5) and hi >= np.percentile(final_a, 97.5)
+
+    thin = [line for line in ax.get_lines() if line.get_linewidth() < 0.5]
+    assert len(thin) == reb.PLOT_SAMPLE_CLONES
+
+
+def testAnglesAreUnwrapped(reb, agg):
+    """ A node crossing 360 deg is drawn as a continuous line, and the clones follow it. """
+
+    nominal, clones = _plotOutputs(n_clones=30, node_start=355.0)
+    _, axes = reb.plotReboundOrbits(nominal, clones, [])
+
+    nominal_line = [line for line in axes["node"].get_lines() if line.get_linewidth() > 1][0]
+    y = np.array(nominal_line.get_ydata(), dtype=float)
+    y = y[np.isfinite(y)]
+    assert np.max(np.abs(np.diff(y))) < 1.0
+    assert 0.0 <= y[0] < 360.0 and y[-1] > 360.0
+
+    # The longitude of perihelion starts within 0-360 deg as well
+    varpi_line = [line for line in axes["varpi"].get_lines() if line.get_linewidth() > 1][0]
+    v = np.array(varpi_line.get_ydata(), dtype=float)
+    assert 0.0 <= v[np.isfinite(v)][0] < 360.0
+
+
+def testElementsBeforeTheDepartureAreLeftOut(reb, agg):
+
+    nominal, clones = _plotOutputs(n_clones=0)
+    _, axes = reb.plotReboundOrbits(nominal, clones, [])
+
+    y = np.array([line for line in axes["a"].get_lines() if line.get_linewidth() > 1][0].get_ydata(),
+                 dtype=float)
+    assert np.all(np.isnan(y[:2])) and np.isfinite(y[2])
+
+
+def testFigureWithoutClonesOrWithAShortClone(reb, agg, tmp_path):
+    """ Without clones the last panel is the heliocentric distance; a clone that ended early (an
+    impact) is padded, and the figure is saved. """
+
+    nominal, _ = _plotOutputs()
+    _, axes = reb.plotReboundOrbits(nominal, {}, [], file_path=str(tmp_path/"a.png"))
+    assert axes["predictability"].get_ylabel() == "heliocentric distance [AU]"
+    assert (tmp_path/"a.png").exists()
+
+    nominal, clones = _plotOutputs(n_clones=25, truncate=50)
+    encounters = [{"body": "Earth", "min_dist_au": 0.01, "time_days": -365.25*30},
+                  {"body": "Jupiter", "min_dist_au": 0.9, "time_days": -365.25*60}]
+    _, axes = reb.plotReboundOrbits(nominal, clones, encounters, file_path=str(tmp_path/"b.png"))
+    labels = [text.get_text() for text in axes["encounters"].get_legend().get_texts()]
+    assert "Earth" in labels and "Jupiter" in labels
+
+
+def testTheHorizonLegendGivesItsTime(reb, agg):
+
+    nominal, clones = _plotOutputs(n_clones=25)
+    horizon = reb.predictabilityHorizon(nominal, clones)
+    horizon["horizon_days"] = -365.25*31
+    _, axes = reb.plotReboundOrbits(nominal, clones, [], horizon=horizon)
+
+    labels = axes["predictability"].get_legend_handles_labels()[1]
+    assert "predictability horizon (31 years)" in labels
+
+
+def _byGid(ax, prefix):
+    """ The lines of an axis whose gid starts with prefix, by the rest of the gid (the body). """
+    return {line.get_gid()[len(prefix):]: line for line in ax.get_lines()
+            if (line.get_gid() or "").startswith(prefix)}
+
+
+def testEncountersAreInHillRadii(reb, agg):
+    """ Each encounter of the nominal is drawn at its distance in units of the body's Hill radius. The
+    Sun is scaled so that its gate falls on the n_hill line. """
+
+    nominal, clones = _plotOutputs(n_clones=25)
+    encounters = [{"body": "Earth", "min_dist_au": 0.01, "time_days": -365.25*30},
+                  {"body": "Luna", "min_dist_au": 0.001, "time_days": -365.25*30},
+                  {"body": "Jupiter", "min_dist_au": 0.9, "time_days": -365.25*60},
+                  {"body": "Sun", "min_dist_au": 0.05, "time_days": -365.25*70}]
+    _, axes = reb.plotReboundOrbits(nominal, clones, encounters)
+
+    marks = _byGid(axes["encounters"], "encounter:")
+    assert marks["Earth"].get_ydata()[0] == pytest.approx(0.01/reb.HILL_RADII_AU["Earth"])
+    assert marks["Luna"].get_ydata()[0] == pytest.approx(0.001/reb.HILL_RADII_AU["Luna"])
+    assert marks["Jupiter"].get_ydata()[0] == pytest.approx(0.9/reb.HILL_RADII_AU["Jupiter"])
+    assert marks["Sun"].get_ydata()[0] == pytest.approx(3.0*0.05/reb.SUN_ENCOUNTER_AU)
+    assert axes["encounters"].get_ylabel() == "distance [Hill radii]"
+
+    labels = [text.get_text() for text in axes["encounters"].get_legend().get_texts()]
+    assert {"Sun", "Earth", "Moon", "Jupiter", "encounter (nominal)"} <= set(labels)
+
+
+def testCloneEncountersAndClosestApproaches(reb, agg):
+    """ The clones' encounters are one faint series per body, and a body with neither these nor a nominal
+    encounter gets its closest approach as a ring, only within APPROACH_MAX_HILL Hill radii. """
+
+    nominal, clones = _plotOutputs(n_clones=25)
+    clone_encounters = {"obj_MC_0": [{"body": "Mars", "min_dist_au": 0.01, "time_days": -365.25*40}],
+                        "obj_MC_1": [{"body": "Mars", "min_dist_au": 0.02, "time_days": -365.25*45},
+                                     {"body": "Earth", "min_dist_au": 0.02, "time_days": -365.25*5}]}
+    closest_au = {"Earth": 0.01, "Jupiter": 3.0, "Mars": 0.5, "Venus": 0.4, "Mercury": 0.6, "Sun": 0.9}
+    closest_time = {"Earth": -365.25*30, "Jupiter": -365.25*50, "Mars": -365.25*80, "Venus": -365.25*90,
+                    "Mercury": -365.25*60, "Sun": -365.25*20}
+    _, axes = reb.plotReboundOrbits(nominal, clones, [], clone_encounters=clone_encounters,
+                                    closest_au=closest_au, closest_time_days=closest_time)
+    ax = axes["encounters"]
+
+    faint = _byGid(ax, "clone_encounter:")
+    assert set(faint) == {"Mars", "Earth"} and len(faint["Mars"].get_xdata()) == 2
+
+    # Mars and the Earth have clone encounters; Mercury is beyond APPROACH_MAX_HILL (400 Hill radii);
+    #   the Sun never gets a ring (its closest approach is the perihelion)
+    rings = _byGid(ax, "closest:")
+    assert set(rings) == {"Venus", "Jupiter"}
+    assert rings["Jupiter"].get_ydata()[0] == pytest.approx(3.0/reb.HILL_RADII_AU["Jupiter"])
+
+    labels = [text.get_text() for text in ax.get_legend().get_texts()]
+    assert {"encounter (clones)", "never closer", "Venus", "Mars"} <= set(labels)
+    assert "Mercury" not in labels
+
+
+def testTheEarthDistanceIsDrawnOnlyInShortRuns(reb, agg):
+
+    nominal, _ = _plotOutputs(years=60/365.25)
+    _, axes = reb.plotReboundOrbits(nominal, {}, [])
+    labels = [text.get_text() for text in axes["encounters"].get_legend().get_texts()]
+    assert "distance to the Earth" in labels
+
+    nominal, _ = _plotOutputs()
+    _, axes = reb.plotReboundOrbits(nominal, {}, [])
+    labels = [text.get_text() for text in axes["encounters"].get_legend().get_texts()]
+    assert "distance to the Earth" not in labels
+
+
+def testEncountersAreDrawnAsTheirBodies(reb, agg):
+    """ Each encounter of the nominal is a disc in its body's colour and size (wmpl.Utils.PlanetStyle),
+    outlined, with the smaller bodies on top. """
+
+    from matplotlib.colors import to_hex
+    from wmpl.Utils.PlanetStyle import planetColor, planetMarkerSize
+
+    nominal, clones = _plotOutputs(n_clones=25)
+    encounters = [{"body": "Earth", "min_dist_au": 0.01, "time_days": -365.25*30},
+                  {"body": "Luna", "min_dist_au": 0.001, "time_days": -365.25*30},
+                  {"body": "Jupiter", "min_dist_au": 0.9, "time_days": -365.25*60}]
+    _, axes = reb.plotReboundOrbits(nominal, clones, encounters)
+
+    discs = _byGid(axes["encounters"], "encounter:")
+    for body in ("Earth", "Luna", "Jupiter"):
+        line = discs[body]
+        assert line.get_marker() == "o"
+        assert to_hex(line.get_color()) == to_hex(planetColor(body))
+        assert line.get_markersize() == pytest.approx(planetMarkerSize(body))
+        assert to_hex(line.get_markeredgecolor()) == "#000000"
+    assert discs["Luna"].get_zorder() > discs["Earth"].get_zorder() > discs["Jupiter"].get_zorder()
+
+
+### MOID with the planets ###
+
+def testMoidSeriesMapsEachOutputToItsPlanets(reb):
+    """ Each output of the particle is paired with the planets' orbits of the same output, and a
+    hyperbolic orbit gives None. """
+
+    # Two outputs; the planet's circular orbit grows from 1.0 to 1.2 AU
+    planet_rows = [[(1.0, 0.0, 0.0, 0.0, 0.0)], [(1.2, 0.0, 0.0, 0.0, 0.0)]]
+    object_rows = [(1, (1.5, 0.0, 0.0, 0.0, 0.0)), (0, (2.0, 1.5, 0.0, 0.0, 0.0))]
+    out = reb._moidSeries(planet_rows, object_rows, ["Earth"])
+    assert out["Earth"][0] == pytest.approx(0.3, abs=1e-12)
+    assert out["Earth"][1] is None
+    assert reb._moidSeries(planet_rows, [], ["Earth"]) == {"Earth": []}
+
+
+def testMoidSummaryPercentilesOverTheClones(reb):
+
+    nominal = {"moid_au": {"Earth": [0.1, 0.2, 0.3]}}
+    clones = {"c{:d}".format(k): {"moid_au": {"Earth": [0.01*k, 0.02*k, 0.03*k]}} for k in range(1, 101)}
+    clones["short"] = {"moid_au": {"Earth": [5.0]}}   # ended early: counts only at the first output
+    clones["none"] = {"moid_au": None}                # MOID not computed for this one
+
+    summary = reb.moidSummary(nominal, clones)
+    assert summary["bodies"] == ["Earth"] and summary["n_clones"] == 101
+    p50 = summary["clones_au"]["Earth"][summary["percentiles"].index(50)]
+    assert p50[2] == pytest.approx(np.percentile(0.03*np.arange(1, 101), 50))
+    assert p50[0] == pytest.approx(np.percentile(np.append(0.01*np.arange(1, 101), 5.0), 50))
+
+    assert reb.moidSummary({"moid_au": None}, clones) is None
+    assert reb.moidSummary(nominal, {})["clones_au"] is None
+
+
+def testMoidReportGivesTheMinimumAndTheClonesInside(reb):
+
+    hill = reb.HILL_RADII_AU["Earth"]
+    moid = {"bodies": ["Earth", "Mercury"], "percentiles": [2.5, 16, 50, 84, 97.5], "n_clones": 50,
+            "nominal_au": {"Earth": [0.5, 0.1, 0.02, 0.05], "Mercury": [0.5]*4},
+            "clones_au": {"Earth": [[0.0]*3 + [x*hill] for x in (0.5, 1.0, 2.0, 4.0, 9.0)],
+                          "Mercury": [[0.5]*4]*5}}
+    lines = reb._moidReportLines(moid, [0.0, -365.25*10, -365.25*20, -365.25*30], 3.0, k_dep=1)
+    assert len(lines) == 2, "Mercury, 340 Hill radii away, is left out"
+    assert "0.02000 AU" in lines[1] and "t = -20 years" in lines[1]
+    assert "within 3 Hill radii at the end: > 50%" in lines[1]
+
+
+def _moidSummaryFor(n, bodies_au, clones=True):
+    """ A moidSummary-like dict with constant MOIDs over n outputs: {body: (nominal, p16, p84)} in AU. """
+    pct = [2.5, 16, 50, 84, 97.5]
+    return {"bodies": list(bodies_au), "percentiles": pct, "n_clones": 30 if clones else 0,
+            "nominal_au": {b: [v[0]]*n for b, v in bodies_au.items()},
+            "clones_au": {b: [[v[1]]*n, [v[1]]*n, [v[0]]*n, [v[2]]*n, [v[2]]*n] for b, v in bodies_au.items()}
+            if clones else None}
+
+
+def testMoidLinesAndBandsInTheApproachesPanel(reb, agg):
+    """ A line per body within APPROACH_MAX_HILL; the clones' band only where 16% of them come within
+    the encounter threshold; no ring for a body with a MOID line. """
+
+    nominal, clones = _plotOutputs(n_clones=25)
+    hill = reb.HILL_RADII_AU
+    moid = _moidSummaryFor(len(nominal), {
+        "Earth": (0.5*hill["Earth"], 0.2*hill["Earth"], 8*hill["Earth"]),     # band: p16 inside 3
+        "Jupiter": (10*hill["Jupiter"], 6*hill["Jupiter"], 20*hill["Jupiter"]),  # line only
+        "Mercury": (500*hill["Mercury"], 400*hill["Mercury"], 600*hill["Mercury"])})  # left out
+    _, axes = reb.plotReboundOrbits(nominal, clones, [], moid=moid, closest_au={"Jupiter": 3.0},
+                                    closest_time_days={"Jupiter": -365.25*10})
+    ax = axes["encounters"]
+
+    lines = _byGid(ax, "moid:")
+    assert set(lines) == {"Earth", "Jupiter"}
+    y = np.array(lines["Earth"].get_ydata(), dtype=float)
+    assert np.all(np.isnan(y[:2])), "nothing before the departure"
+    assert y[-1] == pytest.approx(0.5)
+
+    bands = {c.get_gid() for c in ax.collections if (c.get_gid() or "").startswith("moid_band:")}
+    assert bands == {"moid_band:Earth"}
+    assert not _byGid(ax, "closest:"), "Jupiter has its MOID line, so no ring"
+
+    labels = [text.get_text() for text in ax.get_legend().get_texts()]
+    assert {"MOID (nominal)", "MOID 16-84% (clones)", "Earth", "Jupiter"} <= set(labels)
+    assert "Mercury" not in labels
+    assert ax.get_ylim()[0] >= reb.MOID_PLOT_MIN_HILL

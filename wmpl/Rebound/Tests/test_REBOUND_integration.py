@@ -255,6 +255,14 @@ def testEndToEndIntegrationMatchesReference(realReb):
     # The within-step refinement added in #99 moves this off the step-end value it had before
     assert diag["min_time_days"]["Luna"] == pytest.approx(-0.0426152665, rel=1e-6)
 
+    # The MOID with each planet at every output (on by default). No distance can be smaller than the
+    #   MOID of the orbits at that time, and the orbits barely change between outputs far from
+    #   Jupiter, so the closest approach to it is at least its smallest MOID
+    moid = diag["moid_au"]
+    assert set(moid) == set(realReb.MOID_BODIES)
+    assert all(len(v) == len(sim_outputs) for v in moid.values())
+    assert min(moid["Jupiter"]) <= diag["min_dist_au"]["Jupiter"]
+
 
 ### Units ###
 
@@ -525,3 +533,72 @@ def testSunOnlyGrMatchesTheFullOne(realReb):
 
     with pytest.raises(ValueError):
         finalOrbit(gr="gr_potential")
+
+
+### Chaos indicators on the default run ###
+
+
+def _exampleWithCovariance(realReb):
+
+    from wmpl.Config import config
+    from wmpl.Utils.Pickling import loadPickle
+
+    if not os.path.isfile(config.jpl_ephem_file):
+        pytest.skip("DE430 ephemeris not found: {}".format(config.jpl_ephem_file))
+    if not os.path.isfile(os.path.join(EXAMPLE_DIR, EXAMPLE_FILE)):
+        pytest.skip("Example trajectory not found")
+
+    traj = loadPickle(EXAMPLE_DIR, EXAMPLE_FILE)
+    traj.uncertainties = SimpleNamespace()
+    traj.state_vect_cov = np.diag([100.0**2]*3 + [1.0**2]*3)
+
+    return traj
+
+
+def testDefaultRunGivesNoHorizonAndNoMegnoVerdict(realReb):
+    """ With the default span of 60 days the clones keep the order of their start, so there is no
+    predictability horizon, and the MEGNO is too short for a verdict; both say so instead of failing,
+    and the MEGNO still returns ln|delta| and the departure. """
+
+    traj = _exampleWithCovariance(realReb)
+
+    outputs, outputs_mc, diag = realReb.reboundSimulate(
+        None, None, traj=traj, direction="backward", sim_days=60, n_outputs=100, mc_runs=12, n_cpu=1,
+        show_progress=False, return_diagnostics=True, random_seed=3, compute_megno=True,
+        obj_name=traj.traj_id)
+
+    megno = diag[traj.traj_id]["megno"]
+    assert len(megno["ln_delta"]) == len(megno["megno"]) == len(megno["times_days"])
+    # 3 Earth Hill radii (4.5 million km) take about a day at the example's speed
+    assert megno["departure_days"] is not None and -3.0 < megno["departure_days"] < 0
+    assert megno["verdict"]["status"] == "too_short"
+    assert megno["verdict"]["lyapunov_time_years"] is None
+
+    clone_diag = {name: d for name, d in diag.items() if name in outputs_mc}
+    h = realReb.predictabilityHorizon(outputs, outputs_mc, clone_diag=clone_diag)
+    assert h["n_clones"] == 12
+    assert h["horizon_days"] is None
+    assert h["elements"]["a"]["rank_corr_end"] > 0.9
+    assert h["first_encounter_days"]["fraction"] == 0.0
+
+
+def testMegnoRescalingLeavesTheDeviationUnchanged(realReb, monkeypatch):
+    """ Rescaling the deviation to unit length at the outputs (so that it never overflows) changes
+    neither ln|delta| nor <Y>: the variational equations are linear. """
+
+    traj = _exampleWithCovariance(realReb)
+
+    def megno():
+        _, _, diag = realReb.reboundSimulate(
+            None, None, traj=traj, direction="backward", sim_days=365.25, n_outputs=60, mc_runs=1,
+            n_cpu=1, show_progress=False, return_diagnostics=True, compute_megno=True,
+            obj_name=traj.traj_id)
+        return diag[traj.traj_id]["megno"]
+
+    reference = megno()
+    monkeypatch.setattr(realReb, "MEGNO_RESCALE_ABOVE", 1.5)
+    rescaled = megno()
+
+    assert max(reference["ln_delta"]) > np.log(1.5)
+    assert np.allclose(rescaled["ln_delta"], reference["ln_delta"], rtol=0, atol=1e-8)
+    assert np.allclose(rescaled["megno"], reference["megno"], rtol=1e-9, atol=1e-12)
