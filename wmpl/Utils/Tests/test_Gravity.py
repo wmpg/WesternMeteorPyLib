@@ -61,9 +61,9 @@ def testGravityIsSymmetricInLatitudeAndFallsWithHeight():
 @pytest.mark.parametrize('lat_deg', [0.0, 10.0, 45.0, 60.0, 89.0])
 @pytest.mark.parametrize('height', [10000.0, 30000.0, 100000.0])
 def testFallOfGravityWithHeightMatchesTheEllipsoidalPotential(lat_deg, height):
-    """ A plain inverse square law with the Earth radius is off by up to 6e-4 m/s^2 at 30 km, worst at the
-        equator and the poles. The tolerance here is 20 times tighter, and also covers the J6 and higher
-        terms the reference leaves out.
+    """ The constant 9.81 m/s^2 with an inverse square law and the mean Earth radius is off by up to
+        2.4e-4 m/s^2 at 30 km, worst at the equator. The tolerance here is 8 times tighter, and also covers the
+        J6 and higher terms the reference leaves out.
     """
 
     lat = math.radians(lat_deg)

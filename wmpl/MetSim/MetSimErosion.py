@@ -27,6 +27,15 @@ from wmpl.MetSim.MetSimErosionCyTools import massLossRK4, decelerationRK4, lumin
 from wmpl.Utils.TrajConversions import gravity
 
 
+### DEFINE CONSTANTS
+
+# Earth acceleration in m/s^2 on the surface. Not used any more, kept for scripts that import it: gravity()
+#   gives it at any latitude and height
+G0 = 9.81
+
+###
+
+
 class Constants(object):
     def __init__(self):
         """ Constant parameters for the ablation modelling. """

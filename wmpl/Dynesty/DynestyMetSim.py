@@ -1866,6 +1866,7 @@ def plotDynestyResults(dynesty_run_results, obs_data, flags_dict, fixed_values, 
     constjson_bestfit.__dict__['dt'] = obs_data.dt
     constjson_bestfit.__dict__['h_kill'] = obs_data.h_kill
     constjson_bestfit.__dict__['v_kill'] = obs_data.v_kill
+    constjson_bestfit.__dict__['lat'] = getattr(obs_data, 'lat', constjson_bestfit.lat)
 
     # change Constants that have the same variable names and the one fixed
     for variable in variables:
@@ -3925,6 +3926,7 @@ class ObservationData:
 
             # Fit the polynomail describing the density
             self.dens_co = fitAtmPoly(lat_mean, lon_mean, dens_fit_ht_end, dens_fit_ht_beg, jd_dat)
+            self.lat = lat_mean
             zenith_angle_list.append(zenithAngleAtSimulationBegin(const.h_init, traj.rbeg_ele, traj.orbit.zc, const.r_earth))
             time_mag_arr = []
             avg_t_diff_max = 0
@@ -4462,6 +4464,7 @@ class ObservationData:
             self.m_init = self.const.m_init
 
             self.dens_co = np.array(self.const.dens_co) 
+            self.lat = getattr(self.const, 'lat', Constants().lat)
 
             # Compute absolute magnitudes
             absolute_magnitudes_check = -2.5*np.log10(lum_obs_data/self.P_0m)
@@ -5781,6 +5784,9 @@ def constructConstants(parameter_guess, real_event, var_names, fix_var, dir_path
     # if the real_event has an initial velocity lower than 30000 set "dt": 0.005 to "dt": 0.01
     const_nominal.dt = real_event.dt
     # const_nominal.erosion_bins_per_10mass = 5
+
+    # Latitude of the event, for the gravity
+    const_nominal.lat = getattr(real_event, 'lat', const_nominal.lat)
 
     const_nominal.P_0m = real_event.P_0m
 

@@ -112,15 +112,17 @@ def _gravityCoeffs(lat):
 
 
 def gravity(lat, h):
-    """ Gravitational acceleration of the WGS84 ellipsoid at a given latitude and height. It accounts for
-        the flattening and the rotation of the Earth, and for the fall of gravity with height.
+    """ Normal gravity of the WGS84 ellipsoid at a given latitude and height. It accounts for the flattening
+        of the Earth and for the fall of gravity with height, and includes the centrifugal acceleration of the
+        Earth's rotation, so it is the gravity felt in the Earth-fixed frame.
 
     Arguments:
         lat: [float] Geodetic latitude (radians, +north). Must be a scalar.
-        h: [float] Height above the WGS84 ellipsoid (meters).
+        h: [float] Height above the WGS84 ellipsoid (meters). A height above the sea level can be used too:
+            the geoid is within ~100 m of the ellipsoid, which changes g by up to ~3e-4 m/s^2.
 
     Return:
-        g: [float] Gravitational acceleration (m/s^2).
+        g: [float] Gravity (m/s^2).
 
     """
 
