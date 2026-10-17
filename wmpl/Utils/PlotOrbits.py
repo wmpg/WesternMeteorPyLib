@@ -37,6 +37,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from wmpl.Utils.Plotting import savePlot, Arrow3D, set3DEqualAxes
+from wmpl.Utils.PlanetStyle import planetColor, planetMarkerSize, PLANET_EDGE_COLOR, PLANET_EDGE_WIDTH
 
 # Define Julian epoch
 J2000_EPOCH = datetime(2000, 1, 1, 12) # At the noon of 2000/01/01 UTC
@@ -132,12 +133,15 @@ class Planet(object):
 
 
 
-    def plotPlanet(self, ax, time):
+    def plotPlanet(self, ax, time, edgecolor='face'):
         """ Plot the planet and its orbit on a 3D plot. 
 
         Arguments:
             ax: [matplotlib object] 3D plot axis handle
             time: [float] years from J2000.0 epoch
+
+        Keyword arguments:
+            edgecolor: [str] Colour of the planet's outline, 'face' for none. Default 'face'.
 
         """
 
@@ -146,7 +150,8 @@ class Planet(object):
 
         # Plot the planet
         x, y, z = self.getPosition(time)
-        ax.scatter(x, y, z, c=self.color, s=self.size, edgecolors='face')
+        ax.scatter(x, y, z, c=self.color, s=self.size, edgecolors=edgecolor,
+                   linewidths=(0 if edgecolor == 'face' else PLANET_EDGE_WIDTH))
 
         # Plot planet's orbit
         x, y, z = orbitalElements2Cartesian(self.a, self.e, self.I, self.lon_of_peri - self.node, 
@@ -208,33 +213,43 @@ def orbitalElements2Cartesian(a, e, I, peri, node, E):
 
 
 
-def plotPlanets(ax, time):
+def plotPlanets(ax, time, edgecolor='face'):
     """ Plots the Solar system planets. 
 
     Arguments:
         ax: [matplotlib object] 3D plot axis handle
         time: [float] years from J2000.0 epoch
 
+    Keyword arguments:
+        edgecolor: [str] Colour of the bodies' outline, 'face' for none. Default 'face'.
+
     """
 
+    # The colours and sizes are those of wmpl.Utils.PlanetStyle, shared with the REBOUND figures. The
+    #   sizes are scatter areas, with the Earth at 5 points across.
+    def style(name):
+        return {"color": planetColor(name), "size": planetMarkerSize(name, earth_size=5.0)**2}
+
     # Define orbital elements of planets (J2000.0 epoch)
-    mercury = Planet(0.3871, 252.25, 0.20564, 7.006, 77.46, 48.34, 0.241, color='#ecd67e', size=10)
-    venus = Planet(0.7233, 181.98, 0.00676, 3.398, 131.77, 76.67, 0.615, color='#e7d520', size=30)
-    earth = Planet(1.0000, 100.47, 0.01673, 0.000, 102.93, 0, 1.000, color='#1c7ff2', size=30)
-    mars = Planet(1.5237, 355.43, 0.09337, 1.852, 336.08, 49.71, 1.881, color='#cc1e2c', size=20)
-    jupiter = Planet(5.2025, 34.33, 0.04854, 1.299, 14.27, 100.29, 11.87, color='#D8CA9D', size=55)
-    saturn = Planet(9.5415, 50.08, 0.05551, 2.494, 92.86, 113.64, 29.47, color='#ead6b8', size=45)
-    uranus = Planet(19.188, 314.20, 0.04686, 0.773, 172.43, 73.96, 84.05, color='#287290', size=40)
-    neptune = Planet(30.070, 304.22, 0.00895, 1.770, 46.68, 131.79, 164.9, color='#70B7BA', size=40)
+    mercury = Planet(0.3871, 252.25, 0.20564, 7.006, 77.46, 48.34, 0.241, **style("Mercury"))
+    venus = Planet(0.7233, 181.98, 0.00676, 3.398, 131.77, 76.67, 0.615, **style("Venus"))
+    earth = Planet(1.0000, 100.47, 0.01673, 0.000, 102.93, 0, 1.000, **style("Earth"))
+    mars = Planet(1.5237, 355.43, 0.09337, 1.852, 336.08, 49.71, 1.881, **style("Mars"))
+    jupiter = Planet(5.2025, 34.33, 0.04854, 1.299, 14.27, 100.29, 11.87, **style("Jupiter"))
+    saturn = Planet(9.5415, 50.08, 0.05551, 2.494, 92.86, 113.64, 29.47, **style("Saturn"))
+    uranus = Planet(19.188, 314.20, 0.04686, 0.773, 172.43, 73.96, 84.05, **style("Uranus"))
+    neptune = Planet(30.070, 304.22, 0.00895, 1.770, 46.68, 131.79, 164.9, **style("Neptune"))
 
     planets = [mercury, venus, earth, mars, jupiter, saturn, uranus, neptune]
 
     # Plot the Sun
-    ax.scatter(0, 0, 0, c='yellow', s=100)
+    sun = style("Sun")
+    ax.scatter(0, 0, 0, c=sun["color"], s=sun["size"], edgecolors=edgecolor,
+               linewidths=(0 if edgecolor == 'face' else PLANET_EDGE_WIDTH))
 
     # Plot planets
     for planet in planets:
-        planet.plotPlanet(ax, time)
+        planet.plotPlanet(ax, time, edgecolor=edgecolor)
 
 
 
@@ -252,6 +267,9 @@ class OrbitPlotColorScheme(object):
         self.vernal_eq = 'w'
         self.planet_default = '#32CD32'
 
+        # No outline on a dark background, where a dark one would not show
+        self.planet_edge = 'face'
+
 
     def light(self):
         """ Light orbit plot color scheme. """
@@ -259,6 +277,9 @@ class OrbitPlotColorScheme(object):
         self.background = '0.99'
         self.vernal_eq = 'black'
         self.planet_default = '#32CD32'
+
+        # A thin dark outline keeps the pale planets visible on the light background
+        self.planet_edge = PLANET_EDGE_COLOR
 
 
 
@@ -333,7 +354,7 @@ def plotOrbits(orb_elements, time, orbit_colors=None, plot_planets=True, plot_eq
 
     # Plot the solar system planets
     if plot_planets:
-        plotPlanets(ax, years_diff)
+        plotPlanets(ax, years_diff, edgecolor=cs.planet_edge)
 
     # Plot the arrow pointing towards the vernal equinox
     if plot_equinox:

@@ -54,6 +54,7 @@ from wmpl.Utils.TrajConversions import (
     raDec2ECI
 )
 from wmpl.Utils.Math import rotateVector
+from wmpl.Utils.PlanetStyle import planetColor, planetMarkerSize, PLANET_EDGE_COLOR, PLANET_EDGE_WIDTH
 from wmpl.Utils.Earth import calcTrueObliquity
 
 
@@ -2632,14 +2633,16 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
     ax.axhline(n_hill*HILL_RADII_AU["Earth"]*dist_unit_multiplier, color="0.3", ls=":", lw=1,
                label="{:g} Earth Hill radii".format(n_hill))
 
-    # One colour per body, each star at the closest approach to that body
-    body_colors = {"Earth": "red", "Luna": "magenta", "Venus": "orange", "Mars": "saddlebrown",
-                   "Mercury": "teal", "Jupiter": "purple", "Saturn": "olive", "Sun": "gold"}
+    # Each encounter at the closest approach to its body, drawn as that body: its colour and a size
+    #   that grows with its radius (see wmpl.Utils.PlanetStyle, shared with the solver's orbit plots).
+    #   Smaller bodies go on top, so the Moon stays visible next to the Earth.
     seen = set()
     for enc in encounters:
         body = enc["body"]
-        ax.plot(enc["time_days"]/t_scale, enc["min_dist_au"]*dist_unit_multiplier, marker="*",
-                color=body_colors.get(body, "0.3"), markersize=10, ls="none", zorder=5,
+        size = planetMarkerSize(body)
+        ax.plot(enc["time_days"]/t_scale, enc["min_dist_au"]*dist_unit_multiplier, marker="o",
+                color=planetColor(body), markersize=size, markeredgecolor=PLANET_EDGE_COLOR,
+                markeredgewidth=PLANET_EDGE_WIDTH, ls="none", zorder=5 + 1.0/size,
                 label="encounter: {:s}".format(body) if body not in seen else None)
         seen.add(body)
     ax.set_yscale("log")
@@ -2671,7 +2674,8 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
             ax.axvline(t[k_dep], color="0.6", ls=":", lw=0.8)
         if (horizon is not None) and (horizon.get("horizon_days") is not None):
             ax.axvline(horizon["horizon_days"]/t_scale, color="red", ls="--", lw=0.9,
-                       label="predictability horizon" if ax is axes["predictability"] else None)
+                       label="predictability horizon ({:s})".format(_spanText(horizon["horizon_days"]))
+                       if ax is axes["predictability"] else None)
         if ax in axs[-1]:
             ax.set_xlabel(t_label)
         if ax.get_yscale() == "linear":
