@@ -12,6 +12,7 @@ they are not on a common scale, and most of them are not distances in the mathem
 - [Criteria on orbital elements](#criteria-on-orbital-elements)
 - [Criteria on geocentric quantities](#criteria-on-geocentric-quantities)
 - [Criteria for the Taurid Complex](#criteria-for-the-taurid-complex)
+- [Searching a catalogue of parent bodies](#searching-a-catalogue-of-parent-bodies)
 - [Pitfalls](#pitfalls)
 - [Worked examples](#worked-examples)
 - [Verification status](#verification-status)
@@ -162,6 +163,63 @@ The reference orbit of the complex core is available as `TC_REFERENCE_A`, `TC_RE
 into the criterion. It first adjusts the inclination and eccentricity to their secular minima using
 Brouwer (1947) theory. These functions apply no such adjustment, so passing observed elements will
 not reproduce the paper's table 1.
+
+---
+
+## Searching a catalogue of parent bodies
+
+**`wmpl.Utils.ParentBodySearch`** ranks the comets, asteroids and meteorites with orbits of the
+catalogues by similarity to an orbit. Any key of this module can be used there, the ones on the
+elements, the ones on the geocentric radiant (D_N, D_R, D_X) and the Vida D_V alike.
+
+```
+python -m wmpl.Utils.ParentBodySearch traj.pickle -d DSH DN DD
+```
+
+- **Several criteria.** Give them to `-d` one after another, or as a list to `d_crit`. The bodies are
+  ranked by the **first** one, which is the one the top N is taken by, and the others are printed
+  beside it for the same bodies. With more than one criterion a bar plot, a panel per criterion
+  with the bodies in the ranking order, is saved by default beside the pickle (`--no_plot` to
+  skip it, `--plot_path` to place it).
+- **The radiant of a catalogue body.** A body has only its elements, so the criteria on the radiant
+  need one derived from them: `calcGeocentricFromElements` takes the points where the orbit comes
+  closest to the Earth's (a circle of 1 AU), one near each node, keeps those within 0.25 AU
+  (`RADIANT_MAX_DISTANCE`), and subtracts the Earth's velocity there. The 0.25 AU is set by the
+  known parents: the Orionid branch of 1P/Halley is 0.15 AU out and the November Taurid branch of
+  2P/Encke 0.19 AU, while the far points of Phaethon (0.36 AU) and Swift-Tuttle (0.71 AU) give no
+  shower. Taking the closest points rather than the crossings of 1 AU also covers parents that never
+  reach 1 AU: 8P/Tuttle (q = 1.03 AU, Ursids) and 21P/Giacobini-Zinner (q = 1.01 AU, Draconids). A
+  body whose orbit never comes within 0.25 AU of the Earth's has no
+  value (`n/a`), and it is left out if the criterion is the first. The orbit that is searched
+  for uses its measured radiant if it has one (a pickle, or `--ra --dec --sol --vg`) and the
+  derived one otherwise. For Phaethon the derived radiant is 1.6 deg and 0.4 km/s from the
+  Geminids.
+- **The Vida criterion** (`DVVIDA`), on the corrected heliocentric direction and speed, works the same
+  way: `calcHeliocentricFromElements` takes the heliocentric velocity at the same points, in the
+  convention of `correctedEclipticCoord`, which the tests check it against. The orbit searched for
+  uses `L_h`, `B_h`, `v_h` from the pickle, or the radiant given by hand converted with
+  `calcHeliocentricFromGeocentric`.
+- **Epoch.** The ranking uses the catalogue elements as they are, each at its own epoch. `--propagate`
+  does not change it. It brings the top N bodies to the reference epoch of the meteor with the
+  integrator of `wmpl.Rebound.REBOUND` (Sun, planets and Moon from DE430, the Earth's J2 and J4,
+  general relativity, no non-gravitational forces), and lists and saves their elements and
+  heliocentric state there (ecliptic J2000, AU and AU/day), to be used as the initial
+  conditions of a REBOUND integration. It also prints and saves every criterion again with the
+  propagated elements, beside the catalogue values, to show how much they move when both orbits
+  refer to the same epoch; the ranking stays the catalogue one. An asteroid is placed on its orbit
+  by its mean anomaly at the epoch. A comet is placed by its time of perihelion, which also covers
+  the parabolic and hyperbolic ones (more than half of the JPL list), with Kepler's equation in its
+  elliptic, parabolic or hyperbolic form. Meteorites have no epoch, and bodies outside the DE430 span
+  (1550 to 2650) cannot be propagated.
+  For a long-period comet the values at the meteor epoch need care: decades from perihelion it is
+  far out, where its heliocentric osculating elements follow the Sun's motion about the barycentre
+  (q of C/1893 N1 goes from 0.67 AU in the catalogue to 0.76 AU at the 2019 epoch of the example
+  Orionid), so a change there is not a change of its orbit around the Solar System.
+- **Saving.** `--save matches.csv` or `--save matches.json` writes the matches with the value of every
+  criterion that was given, in the order given, plus the propagated state with `--propagate`.
+- **Integrating the candidates.** The JSON can be given to `wmpl.Rebound.REBOUND --parent_bodies`,
+  which integrates the bodies alongside the meteoroid and its clones and follows the D criteria
+  between them over time. See [REBOUND, parent bodies](REBOUND.md#parent-bodies).
 
 ---
 
