@@ -12,7 +12,7 @@ Run with pytest:
 import numpy as np
 import pytest
 
-from wmpl.Utils.MOID import calcMOID, _orbitFrame, _ellipsePoint
+from wmpl.Utils.MOID import calcMOID, calcMOIDTancredi, _orbitFrame, _ellipsePoint
 
 
 DEG = np.pi/180
@@ -166,3 +166,23 @@ def testNearlyTangentNearlyCoplanarOrbit():
     moid = calcMOID(*el, *EARTH)
     assert moid == pytest.approx(_reference(el, EARTH), abs=1e-9)
     assert moid == pytest.approx(0.000325, abs=1e-6)
+
+
+def testTancredisMethodAgreesAgainstAPlanetAndCanFailForTwoEccentricOrbits():
+    """ calcMOIDTancredi, the previous implementation kept for comparison, agrees with calcMOID for an
+    orbit against a planet, but for two eccentric, nearly coplanar orbits it can stop at a local
+    minimum: 0.0260 AU instead of 0.0206 AU. """
+
+    el = (2.7, 0.35, 9.0*DEG, 120.0*DEG, 60.0*DEG)
+    jupiter = (5.2026, 0.0484, 1.30*DEG, 100.5*DEG, 273.9*DEG)
+    assert calcMOIDTancredi(*el, *jupiter) == pytest.approx(calcMOID(*el, *jupiter), abs=1e-9)
+    assert calcMOIDTancredi(*el, *EARTH) == pytest.approx(calcMOID(*el, *EARTH), abs=1e-9)
+
+    first = (1.8016966282783817, 0.9366182083023309, 0.01616476440422377, 0.9110513728559121,
+             5.872217594000542)
+    second = (4.875250718459687, 0.8100686542094118, 0.027625249736020496, 3.548227600137555,
+              6.084396306232671)
+    ref = _reference(first, second)
+    assert calcMOID(*first, *second) == pytest.approx(ref, abs=1e-9)
+    assert ref == pytest.approx(0.020621, abs=1e-6)
+    assert calcMOIDTancredi(*first, *second) == pytest.approx(0.026040, abs=1e-6)
