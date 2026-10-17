@@ -155,6 +155,73 @@ def _setHeartbeat(sim, func):
         return heartbeat_ref
 
 
+def harmonicsSpinAxisSupported():
+    """ Whether the installed REBOUNDx orients gravitational_harmonics along each body's spin axis.
+
+    REBOUNDx 4.4.0 added the "Omega" particle parameter, whose direction is the axis of symmetry of
+    the body's J2 and J4. Earlier versions always use the z axis of the simulation, which here is the
+    ecliptic pole, 23.4 degrees away from the Earth's.
+
+    Return:
+        [bool]
+    """
+
+    try:
+        version = tuple(int(v) for v in re.findall(r"\d+", reboundx.__version__)[:2])
+    except (AttributeError, NameError, ValueError):
+        return False
+
+    return version >= (4, 4)
+
+
+def sunSpinAxisEcliptic():
+    """ Unit vector along the Sun's rotation pole (SUN_POLE_RA_DEC_DEG), in the ecliptic J2000 frame
+    of the simulations. It is the axis of symmetry of the Sun's J2.
+
+    Return:
+        [list] [x, y, z] unit vector.
+    """
+
+    ra, dec = np.radians(SUN_POLE_RA_DEC_DEG)
+    pole = np.array([np.cos(dec)*np.cos(ra), np.cos(dec)*np.sin(ra), np.sin(dec)])
+
+    # Rotate from the equatorial J2000 frame to the ecliptic J2000 frame (as ephemBodyStateRebound)
+    pole = rotateVector(pole, np.array([1.0, 0.0, 0.0]), -J2000_OBLIQUITY)
+
+    return [float(v) for v in pole/np.linalg.norm(pole)]
+
+
+def earthSpinAxisEcliptic(jd_tdb):
+    """ Unit vector along the Earth's mean rotation pole of date, in the ecliptic J2000 frame of the
+    simulations. It is the axis of symmetry of the Earth's J2 and J4.
+
+    The precession matrix from J2000 to the date is R3(-z) R2(theta) R3(-zeta), so the pole of date
+    is, in J2000 equatorial coordinates, (sin(theta) cos(zeta), -sin(theta) sin(zeta), cos(theta)),
+    with the IAU 1976 angles used by equatorialCoordPrecession (Meeus, Astronomical Algorithms, p.
+    134). Nutation (< 10 arcsec) is left out. From J2000 the pole moves by ~20 arcsec per year.
+
+    Arguments:
+        jd_tdb: [float] Julian date (TDB) of the epoch.
+
+    Return:
+        [list] [x, y, z] unit vector.
+    """
+
+    # Julian centuries from J2000
+    t = (jd_tdb - J2000_JD.days)/36525.0
+
+    zeta = np.radians((2306.2181*t + 0.30188*t**2 + 0.017998*t**3)/3600)
+    theta = np.radians((2004.3109*t - 0.42665*t**2 - 0.041833*t**3)/3600)
+
+    # J2000 equatorial coordinates of the pole of date
+    pole = np.array([np.sin(theta)*np.cos(zeta), -np.sin(theta)*np.sin(zeta), np.cos(theta)])
+
+    # Rotate from the equatorial J2000 frame to the ecliptic J2000 frame (as ephemBodyStateRebound)
+    pole = rotateVector(pole, np.array([1.0, 0.0, 0.0]), -J2000_OBLIQUITY)
+
+    return [float(v) for v in pole/np.linalg.norm(pole)]
+
+
 def checkReboundxUsable():
     """ Raise a clear error if the installed REBOUNDx cannot attach to a REBOUND simulation.
 
@@ -233,6 +300,35 @@ SUN_ENCOUNTER_AU = 0.1
 # Radius of the Sun in AU (IAU 2015 nominal, 695 700 km), used for impact detection
 SUN_RADIUS_AU = 695700.0/149597870.7
 
+# The Sun's oblateness, as in DE430 (header constants J2SUN and ASUN, its reference radius; DE440 has
+#   J2SUN = 2.196e-7). Its axis of symmetry is the Sun's rotation pole, IAU WGCCRE: RA = 286.13 deg,
+#   Dec = 63.87 deg (J2000), 7.25 deg from the ecliptic pole.
+SUN_J2 = 2.1106088532726840e-07
+SUN_J2_RADIUS_AU = 696000.0/149597870.7
+SUN_POLE_RA_DEC_DEG = (286.13, 63.87)
+
+# Time unit of the simulations. They use G = 1 with lengths in AU and masses in solar masses, so the
+#   time unit is the one in which GM_Sun = 1 AU^3: sqrt(AU^3/GM_Sun) = 58.13244 days, a Gaussian year
+#   (365.25690 d) over 2 pi. REBOUND calls it "yr2pi" and uses it for the bodies added from JPL
+#   Horizons, and REBOUNDx's speed of light is expressed in it. The Julian year over 2 pi (58.13134 d)
+#   is 1.9e-5 shorter: used with G = 1 it makes the Sun 3.8e-5 too massive and every mean motion 7.6e-5
+#   too fast, and the Earth drifts ~700 000 km away from DE430 in 10 years.
+GM_SUN_SI = 1.3271244004193938e20  # m^3/s^2, as in rebound.units (DE430: 1.32712440041e20)
+AU_M = 149597870700.0
+DAYS_PER_SIM_TIME = np.sqrt(AU_M**3/GM_SUN_SI)/86400.0
+
+
+def daysToSimTime(days):
+    """ Convert a time in days to REBOUND simulation time units (see DAYS_PER_SIM_TIME). """
+
+    return days/DAYS_PER_SIM_TIME
+
+
+def simTimeToDays(t):
+    """ Convert a time in REBOUND simulation units to days (see DAYS_PER_SIM_TIME). """
+
+    return t*DAYS_PER_SIM_TIME
+
 
 def _encounterThreshold(body, n_hill):
     """ Distance below which a passage by the given body counts as a close encounter.
@@ -285,7 +381,8 @@ def reboundBodyMassSolar(naif_id):
 
     The mass is computed as the ratio GM_body/GM_Sun, which equals the mass in solar masses and
     is exactly the value REBOUND assigns to bodies added via Horizons (up to the Sun's own mass
-    being 1.0 in the G=1, AU, solar-mass, year/2pi unit system used by the simulation).
+    being 1.0 in the G=1, AU, solar-mass unit system used by the simulation, whose time unit is
+    DAYS_PER_SIM_TIME).
 
     Arguments:
         naif_id: [int] NAIF ID of the body (e.g. 5 for the Jupiter system barycentre).
@@ -310,8 +407,9 @@ def ephemBodyStateRebound(body, jd_tdb, jpl_ephem_data):
     ephemeris, reproducing the state that REBOUND's JPL Horizons query would add.
 
     The returned state is barycentric (Solar System barycentre origin) in the ecliptic J2000
-    frame, with positions in AU and velocities in AU/(year/2pi) - i.e. the units of a default
-    REBOUND simulation (G=1, length AU, mass solar masses, time year/2pi).
+    frame, with positions in AU and velocities in AU per time unit - i.e. the units of a default
+    REBOUND simulation (G=1, length AU, mass solar masses, time unit DAYS_PER_SIM_TIME days, which
+    REBOUND calls yr2pi).
 
     Arguments:
         body: [str] Body name, a key of _EPHEM_NAIF_PATHS (e.g. "Jupiter", "Earth", "Luna").
@@ -319,7 +417,7 @@ def ephemBodyStateRebound(body, jd_tdb, jpl_ephem_data):
         jpl_ephem_data: [SPK] An opened jplephem SPK kernel (SPK.open(config.jpl_ephem_file)).
 
     Return:
-        state: [list] [x, y, z, vx, vy, vz] in AU and AU/(year/2pi).
+        state: [list] [x, y, z, vx, vy, vz] in AU and AU per time unit.
         mass: [float] Body mass in solar masses.
     """
 
@@ -341,9 +439,9 @@ def ephemBodyStateRebound(body, jd_tdb, jpl_ephem_data):
     pos_km = rotateVector(pos_km, np.array([1.0, 0.0, 0.0]), -J2000_OBLIQUITY)
     vel_kmday = rotateVector(vel_kmday, np.array([1.0, 0.0, 0.0]), -J2000_OBLIQUITY)
 
-    # Convert to REBOUND units: km -> AU, km/day -> AU/(year/2pi)
+    # Convert to REBOUND units: km -> AU, km/day -> AU per time unit
     pos_au = pos_km/aukm
-    vel_reb = vel_kmday/aukm*(365.25/(2*np.pi))
+    vel_reb = vel_kmday/aukm*DAYS_PER_SIM_TIME
 
     state = list(pos_au) + list(vel_reb)
     mass = reboundBodyMassSolar(_EPHEM_MASS_NAIF[body])
@@ -473,7 +571,7 @@ def detectCloseEncounters(sim_outputs, n_hill=3.0):
             encounters.append({
                 "body": body,
                 "min_dist_au": min_dist,
-                "time_days": sim_outputs[min_index][0]/(2*np.pi)*365.25,
+                "time_days": simTimeToDays(sim_outputs[min_index][0]),
                 "hill_radius_au": hill_radius,
                 "n_hill": min_dist/hill_radius,
                 "index": min_index,
@@ -862,7 +960,7 @@ def estimateLyapunovFromMC(sim_outputs, sim_outputs_mc):
         return None
 
     delta = np.sqrt(sq_sum[:last]/counts[:last])
-    t_days = np.array([abs(sim_outputs[i][0] - sim_outputs[0][0])/(2*np.pi)*365.25
+    t_days = np.array([simTimeToDays(abs(sim_outputs[i][0] - sim_outputs[0][0]))
                        for i in range(last)])
 
     # Heliocentric distance of the nominal solution at each sample
@@ -1102,7 +1200,8 @@ def tisserandClass(t_j):
 def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local", jpl_ephem_data=None,
                          earth_state=None):
     """ Takes a state vector in ECI coordinates (m and m/s), Julian date and converts from ECI (geocentric) to
-    Solar System barycentric coordinates. The units are changed to AU and AU/year.
+    Solar System barycentric coordinates. The units are changed to AU and AU per REBOUND time unit
+    (DAYS_PER_SIM_TIME days).
 
     Arguments:
         state_vect: [list] Position and velocity components in ECI coordinates (epoch of date) in m and m/s,
@@ -1117,12 +1216,13 @@ def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local",
         jpl_ephem_data: [SPK] An opened jplephem SPK kernel. If None and ephem_source is "local",
             the kernel is opened from config.jpl_ephem_file.
         earth_state: [list] Precomputed Earth barycentric state [x, y, z, vx, vy, vz] in REBOUND units
-            (AU, AU/(year/2pi)), ecliptic J2000, at the epoch jd. If given, it is used directly and
+            (AU, AU per time unit), ecliptic J2000, at the epoch jd. If given, it is used directly and
             ephem_source/jpl_ephem_data are ignored - this avoids re-querying the Earth's position,
             which is identical across Monte Carlo realizations sharing the same epoch.
 
     Return:
-        [list] Position and velocity components in barycentric coordinates in AU and AU/year, eg.
+        [list] Position and velocity components in barycentric coordinates in AU and AU per time
+            unit, eg.
             [x, y, z, vx, vy, vz]
     """
 
@@ -1140,7 +1240,7 @@ def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local",
 
         log(f"Reference Julian date (TDB): {jd}")
 
-    # Get the Earth's barycentric state (AU, AU/(year/2pi), ecliptic J2000) used to shift the
+    # Get the Earth's barycentric state (AU, AU per time unit, ecliptic J2000) used to shift the
     # meteoroid from geocentric to barycentric coordinates. The Earth state at a given epoch is
     # identical for all Monte Carlo realizations, so it can be precomputed once and passed in.
     if earth_state is not None:
@@ -1229,19 +1329,19 @@ def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local",
     if len(log_file_path):
         log(f"Velocity vector in ecliptic ECI, J2000: {vel_vec_rot}")
 
-    # Convert the state vector to AU and AU/year
+    # Convert the state vector to AU and AU per time unit
     state_vect_rot = np.concatenate((pos_vec_rot, vel_vec_rot))
     state_vect_rot = [x/aum for x in state_vect_rot]
-    state_vect_rot[3] *= 60*60*24*365.25/(2*np.pi)
-    state_vect_rot[4] *= 60*60*24*365.25/(2*np.pi)
-    state_vect_rot[5] *= 60*60*24*365.25/(2*np.pi)
+    state_vect_rot[3] *= 86400*DAYS_PER_SIM_TIME
+    state_vect_rot[4] *= 86400*DAYS_PER_SIM_TIME
+    state_vect_rot[5] *= 86400*DAYS_PER_SIM_TIME
 
     if len(log_file_path):
         log(
-            f"Meteor state vector in ecliptic ECI, J2000 (AU, AU/year where year = 2pi): {state_vect_rot}"
+            f"Meteor state vector in ecliptic ECI, J2000 (AU, AU per REBOUND time unit): {state_vect_rot}"
         )
         log(
-            f"Earth state vector in ecliptic solar system barycentric, J2000 (AU, AU/year where year = 2pi): {earth_state}"
+            f"Earth state vector in ecliptic solar system barycentric, J2000 (AU, AU per REBOUND time unit): {earth_state}"
         )
 
     # Add the Earth's position and velocity to the meteoroid's position and velocity
@@ -1254,7 +1354,7 @@ def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local",
 
     if len(log_file_path):
         log(
-            f"Meteor state vector in barycentric, J2000 (AU, AU/year where year = 2pi): {state_vect_rot}"
+            f"Meteor state vector in barycentric, J2000 (AU, AU per REBOUND time unit): {state_vect_rot}"
         )
         log_file.close()
 
@@ -1306,6 +1406,12 @@ def extractSimParams(ps, obj_name, planet_names, reference_frame="heliocentric")
 
     return state_vect_hel, orb_elem, planet_dists
 
+
+# General relativity models (REBOUNDx effects). "gr" (Anderson et al. 1975) is the post-Newtonian
+#   correction from the dominant body, the Sun, applied to every body: it gets the perihelion
+#   precession and the mean motions right. "gr_full" (Newhall et al. 1983, the EIH equations) is the
+#   interaction between every pair of bodies; its cost grows as the cube of the number of bodies.
+GR_MODELS = ("gr", "gr_full")
 
 # Integrators that can be selected for the integration. IAS15 is adaptive and the default. WHFast
 # and TRACE use a fixed timestep (see FIXED_STEP_DEFAULT_DT_DAYS).
@@ -1360,7 +1466,7 @@ def _integrateParticles(task):
         task: [dict] A picklable task description with the keys:
             planet_names:    [list] Massive-body names, in add order.
             planet_states:   [list] Per-planet [x, y, z, vx, vy, vz] in REBOUND units (AU,
-                                 AU/(year/2pi)), barycentric ecliptic J2000.
+                                 AU per time unit), barycentric ecliptic J2000.
             planet_masses:   [list] Per-planet mass in solar masses.
             particle_states: [list] Per-particle barycentric [x, y, z, vx, vy, vz] (REBOUND units).
             particle_names:  [list] Per-particle names (parallel to particle_states).
@@ -1373,6 +1479,15 @@ def _integrateParticles(task):
                                  radii used for impact detection (Sun 695700 km, Earth 6371 km,
                                  Moon 1737.4 km).
             integrator:      [str]  Optional. "ias15" (default, adaptive), "whfast" or "trace".
+            gr:              [str]  Optional. General relativity: "gr_full" (default), the
+                                 post-Newtonian interaction between all pairs of bodies, or "gr",
+                                 the correction of the Sun's field on every body (see GR_MODELS).
+            sun_j2:          [bool] Optional. Include the Sun's J2 (SUN_J2), symmetric about its
+                                 rotation axis (sunSpinAxisEcliptic). Default True.
+            earth_spin_axis: [list] Optional. Direction of the Earth's rotation axis in the
+                                 simulation frame, the axis of symmetry of its J2 and J4 (see
+                                 earthSpinAxisEcliptic). Needs REBOUNDx >= 4.4.0. None (default)
+                                 leaves REBOUNDx's default, the z axis (the ecliptic pole).
             dt_days:         [float] Optional. Timestep in days for the fixed-step integrators.
                                  Ignored by IAS15. Default FIXED_STEP_DEFAULT_DT_DAYS[integrator].
 
@@ -1428,15 +1543,15 @@ def _integrateParticles(task):
         if dt_days <= 0:
             raise ValueError("The timestep must be positive, got {:g} d.".format(dt_days))
 
-        # REBOUND time units (G = 1, AU, M_sun), where one year is 2*pi
-        dt_fixed = dt_days*2*np.pi/365.25
+        # REBOUND time units (G = 1, AU, M_sun)
+        dt_fixed = daysToSimTime(dt_days)
 
     switch_time = None
 
     # TRACE mishandles close encounters when the timestep is negative (a REBOUND bug, present in
     # 4.6.0 and 5.1.1: a flyby integrated backward comes out ~10% off in a, forward it matches IAS15
     # to 1e-7). A backward TRACE run is therefore integrated forward in time with every velocity
-    # reversed. This is exact for gravity, GR (gr_full, quadratic in the velocities) and the Earth's
+    # reversed. This is exact for gravity, GR (gr and gr_full, quadratic in the velocities) and the Earth's
     # harmonics, which are time-reversal symmetric. Poynting-Robertson drag is not, and is handled
     # where the radiation force is set up.
     reverse_time = (integrator == "trace") and (direction == "backward")
@@ -1491,19 +1606,35 @@ def _integrateParticles(task):
     if reverse_time:
         _reverseVelocities(sim)
 
-    # Add the gravitational harmonics of the Earth
+    # Add the gravitational harmonics of the Earth, symmetric about its rotation axis. The simulation
+    #   frame is the ecliptic, so the axis has to be given: REBOUNDx would otherwise use the z axis,
+    #   the ecliptic pole, 23.4 deg from the Earth's (5 m/s on the departure of a 14 km/s meteoroid).
     gh = rebx.load_force("gravitational_harmonics")
     rebx.add_force(gh)
     ps["Earth"].params["J2"] = J2
     ps["Earth"].params["J4"] = J4
     ps["Earth"].params["R_eq"] = RE_eq
+    earth_spin_axis = task.get("earth_spin_axis")
+    if earth_spin_axis is not None:
+        ps["Earth"].params["Omega"] = rb.Vec3d(*earth_spin_axis)
+
+    # The Sun's J2, about its rotation axis (7.25 deg from the ecliptic pole, which an old REBOUNDx
+    #   uses instead). It acts on the planets as well as on the object.
+    if task.get("sun_j2", True):
+        ps["Sun"].params["J2"] = SUN_J2
+        ps["Sun"].params["R_eq"] = SUN_J2_RADIUS_AU
+        if harmonicsSpinAxisSupported():
+            ps["Sun"].params["Omega"] = rb.Vec3d(*sunSpinAxisEcliptic())
     # Assign the body radii used for impact detection
     for bname, brad in body_radii.items():
         if bname in planet_names:
             ps[bname].r = brad
 
-    # gr_full is the general relativity correction for all bodies
-    gr = rebx.load_force("gr_full")
+    # General relativity (see GR_MODELS). "gr" takes the first particle, the Sun, as the only source.
+    gr_model = task.get("gr", "gr_full")
+    if gr_model not in GR_MODELS:
+        raise ValueError("Unknown GR model {:s}, use one of {:s}.".format(str(gr_model), ", ".join(GR_MODELS)))
+    gr = rebx.load_force(gr_model)
     rebx.add_force(gr)
     gr.params["c"] = rbxConstants.C
 
@@ -1676,7 +1807,7 @@ def _integrateParticles(task):
         except rb.Collision:
 
             # Identify which body was hit (the test particles have no radius of their own)
-            t_impact = time_sign*sim.t/(2*np.pi)*365.25
+            t_impact = time_sign*simTimeToDays(sim.t)
             hit_particle = False
             for pname, pidx in particle_idx.items():
                 if pidx >= sim.N:
@@ -1708,7 +1839,7 @@ def _integrateParticles(task):
 
             # The object was thrown out of the simulation volume (unbound or ejected). Record it and
             # stop, since integrating a runaway particle only gets more expensive.
-            t_esc = time_sign*sim.t/(2*np.pi)*365.25
+            t_esc = time_sign*simTimeToDays(sim.t)
             for pname, pidx in particle_idx.items():
                 if pidx >= sim.N:
                     continue
@@ -1764,9 +1895,9 @@ def _integrateParticles(task):
             "min_dist_au": {b: (None if not np.isfinite(st["min_dist"][b]) else st["min_dist"][b])
                             for b in planet_names},
             "min_time_days": {b: (None if not np.isfinite(st["min_time"][b])
-                                  else time_sign*st["min_time"][b]/(2*np.pi)*365.25)
+                                  else time_sign*simTimeToDays(st["min_time"][b]))
                               for b in planet_names},
-            "encounters": [_encounterRecord(b, d, time_sign*t/(2*np.pi)*365.25)
+            "encounters": [_encounterRecord(b, d, time_sign*simTimeToDays(t))
                            for b, t, d in st["encounters"]],
             "departed": st["departed"],
             "impact": st["impact"],
@@ -1774,7 +1905,7 @@ def _integrateParticles(task):
             "energy_rel_drift": energy_drift,
             "integrator": integrator,
             "fixed_step_from_days": (None if switch_time is None
-                                     else time_sign*switch_time/(2*np.pi)*365.25),
+                                     else time_sign*simTimeToDays(switch_time)),
         }
 
     return {"outputs": outputs, "diagnostics": diagnostics}
@@ -1905,7 +2036,7 @@ def computeMegno(task, seed=1):
         if t_out == 0:
             continue
 
-        times_days.append(t_out/(2*np.pi)*365.25)
+        times_days.append(simTimeToDays(t_out))
         megno.append(acc["J"]/acc["t"])
 
         # Heliocentric osculating semi-major axis, used to count the orbital periods covered
@@ -2069,7 +2200,7 @@ def reboundSimulate(
         direction="forward", sim_days=60, n_outputs=500, obj_name="obj", obj_mass=0.0, mc_runs=100,
         reference_frame="heliocentric", ephem_source="local", n_cpu=None,
         show_progress=True, return_diagnostics=False, random_seed=None, beta=None, integrator="ias15",
-        dt_days=None, compute_megno=False, verbose=False):
+        dt_days=None, compute_megno=False, sun_j2=True, gr="gr_full", verbose=False):
     """ Takes an state vector (or a Trajectory object), runs REBOUND and produces orbital elements for the 
     object at the end of the simulation or at the specified time.
 
@@ -2117,6 +2248,12 @@ def reboundSimulate(
             and accurate to machine precision; the other two use a fixed timestep.
         dt_days: [float] Timestep in days for WHFast and TRACE. None (default) uses
             FIXED_STEP_DEFAULT_DT_DAYS. Ignored by IAS15.
+        gr: [str] General relativity model, "gr_full" (default; the post-Newtonian interaction between
+            all pairs of bodies) or "gr" (the Sun's post-Newtonian correction on every body, 3.3 times
+            faster, with the same results to ~1e-7 in a). See GR_MODELS.
+        sun_j2: [bool] Include the Sun's J2 (SUN_J2, about its rotation axis). Default True. It moves
+            Mercury's perihelion by 0.03 arcsec per century, and a meteoroid's in proportion to
+            (R_Sun/q)^2, so it matters most for small perihelia.
         compute_megno: [bool] If True, after the requested integration run a purely gravitational
             integration of the nominal solution only, over the same span, and store its MEGNO
             series and verdict (see computeMegno and classifyMegno) under "megno" in the nominal
@@ -2146,6 +2283,9 @@ def reboundSimulate(
 
     # Fail early, before any ephemeris work, if the integrator is not available
     checkIntegratorAvailable(integrator)
+
+    if gr not in GR_MODELS:
+        raise ValueError("Unknown GR model {:s}, use one of {:s}.".format(str(gr), ", ".join(GR_MODELS)))
 
     # If the trajectory is given, override the julian_date and state_vect arguments
     if traj is not None:
@@ -2195,19 +2335,29 @@ def reboundSimulate(
         
 
 
-    # Simulation end time in years and the length of one year in units where G=1
+    # Simulation end time in years, for the printout
     tsimend = sim_days/365.25
-    year = 2.0*np.pi
 
     # Convert from UTC to TDB
     time_utc = astropy.time.Time(julian_date, format='jd', scale='utc')
     time_tdb = time_utc.tdb.jd
 
+    # Axis of the Earth's J2 and J4: its rotation pole at the epoch. Older REBOUNDx versions cannot
+    #   orient them and use the ecliptic pole instead.
+    earth_spin_axis = None
+    if harmonicsSpinAxisSupported():
+        earth_spin_axis = earthSpinAxisEcliptic(time_tdb)
+    else:
+        warnings.warn("REBOUNDx {:s} cannot orient the Earth's J2/J4 and the Sun's J2 along their "
+                      "rotation axes (this needs REBOUNDx >= 4.4.0), so they are symmetric about the "
+                      "ecliptic pole, 23.4 and 7.25 deg off. Upgrade REBOUNDx to fix it.".format(
+                          getattr(reboundx, "__version__", "?")), RuntimeWarning)
+
     # Set up the output time array (not integration steps, but the times at which state is saved)
     if direction == "forward":
-        times = np.linspace(0, year*tsimend, n_outputs)
+        times = np.linspace(0, daysToSimTime(sim_days), n_outputs)
     else:
-        times = np.linspace(0, -year*tsimend, n_outputs)
+        times = np.linspace(0, -daysToSimTime(sim_days), n_outputs)
 
     # Add the Sun and the planets
     planet_names = [
@@ -2258,7 +2408,7 @@ def reboundSimulate(
     earth_state_ref = planet_states[planet_names.index("Earth")]
 
     # To start the meteoroid in the right spot, feed in the barycentric position (AU) and velocity
-    # (AU/year divided by 2pi)
+    # (AU per time unit)
     state_vect_rot = convertToBarycentric(state_vect, time_tdb, earth_state=earth_state_ref)
 
     if verbose:
@@ -2284,6 +2434,9 @@ def reboundSimulate(
             "beta": beta,
             "integrator": integrator,
             "dt_days": dt_days,
+            "earth_spin_axis": earth_spin_axis,
+            "sun_j2": sun_j2,
+            "gr": gr,
         }
 
     if verbose:
@@ -2453,12 +2606,22 @@ if __name__ == "__main__":
                         "or trace (hybrid, fixed step; resolves close encounters; needs REBOUND >= "
                         "4.4). With whfast and trace, IAS15 integrates the object's departure from "
                         "the Earth and they take over at the first output after it. REBOUNDx may "
-                        "warn that GR (gr_full) is velocity-dependent with whfast; its measured "
-                        "effect on the orbit was below 1e-8 in a over 100 years.")
+                        "warn that GR is velocity-dependent with whfast; its measured effect on the "
+                        "orbit was below 1e-8 in a over 100 years.")
 
     parser.add_argument("--dt", type=float, default=None,
                         help="Timestep in days for whfast and trace. Default: {:g} d. Ignored by "
                         "ias15.".format(FIXED_STEP_DEFAULT_DT_DAYS["whfast"]))
+
+    parser.add_argument("--gr", type=str.lower, default="gr_full", choices=GR_MODELS,
+                        help="General relativity: gr_full (default), the post-Newtonian interaction "
+                        "between all pairs of bodies, or gr, the Sun's post-Newtonian correction on "
+                        "every body. gr is 3.3 times faster and changes the orbits by ~1e-7 in a over "
+                        "100 years; use it for large Monte Carlo runs.")
+
+    parser.add_argument("--no_sun_j2", action="store_true",
+                        help="Leave out the Sun's J2 (on by default: J2 = {:.4e}, about the Sun's rotation "
+                        "axis). It matters most for small perihelion distances.".format(SUN_J2))
 
     parser.add_argument("--compute_megno", action="store_true",
                         help="After the integration, integrate the nominal solution again with "
@@ -2571,7 +2734,7 @@ if __name__ == "__main__":
         reference_frame=reference_frame,
         ephem_source=ephem_source, n_cpu=n_cpu, return_diagnostics=True,
         random_seed=random_seed, beta=beta, integrator=args.integrator, dt_days=dt_days,
-        compute_megno=args.compute_megno, verbose=args.verbose
+        compute_megno=args.compute_megno, sun_j2=not args.no_sun_j2, gr=args.gr, verbose=args.verbose
         )
     sim_wall = time.time() - t_run_start
 
@@ -2677,7 +2840,7 @@ if __name__ == "__main__":
     ### Compute the epoch of the final simulation
 
     # Extract the final time in days
-    final_sim_days = sim_outputs[-1][0]/(2*np.pi)*365.25
+    final_sim_days = simTimeToDays(sim_outputs[-1][0])
 
     # Compute the final epoch
     final_epoch_jd = traj.jdt_ref + final_sim_days
@@ -2752,9 +2915,12 @@ if __name__ == "__main__":
         print("  Integration  : {:.2f} days {:s}".format(achieved_days, direction))
 
     print("  Frame        : {:s}".format(reference_frame))
-    print("  Forces       : {:s}".format(
-        "gravity + GR + Earth J2/J4" if beta is None
-        else "gravity + GR + Earth J2/J4 + radiation (beta = {:.3e})".format(beta)))
+    j2_axis = "" if harmonicsSpinAxisSupported() else " (about the ecliptic pole: REBOUNDx < 4.4.0)"
+    forces_str = "gravity + GR ({:s}) + {:s}Earth J2/J4{:s}".format(
+        "Sun" if args.gr == "gr" else "all bodies", "" if args.no_sun_j2 else "Sun J2 + ", j2_axis)
+    if beta is not None:
+        forces_str += " + radiation (beta = {:.3e})".format(beta)
+    print("  Forces       : {:s}".format(forces_str))
     print("  Start epoch  : {:.6f} JD (TDB)".format(traj.jdt_ref))
     print("  Final epoch  : {:.6f} JD (TDB)  =  {:s} UTC".format(final_epoch_jd, time_utc.iso))
     if len(sim_outputs_mc):
@@ -3155,7 +3321,7 @@ if __name__ == "__main__":
             dist_str = "".join(", {:s} = {:10.6f}".format(body, output[3][body]) for body in dist_bodies)
 
             # Save the orbital elements and distances at the given time
-            f.write(f"t = {output[0]/(2*np.pi)*365.25:.6f} d, a = {output[2].a*dist_unit_multiplier:10.6f}, e = {output[2].e:10.6f}, i = {np.degrees(output[2].inc):10.6f}, Omega = {np.degrees(output[2].Omega):10.6f}, omega = {np.degrees(output[2].omega):10.6f}, f = {np.degrees(output[2].f):10.6f}{dist_str}\n")
+            f.write(f"t = {simTimeToDays(output[0]):.6f} d, a = {output[2].a*dist_unit_multiplier:10.6f}, e = {output[2].e:10.6f}, i = {np.degrees(output[2].inc):10.6f}, Omega = {np.degrees(output[2].Omega):10.6f}, omega = {np.degrees(output[2].omega):10.6f}, f = {np.degrees(output[2].f):10.6f}{dist_str}\n")
 
         # If the MC was run, save orbital elements of individual MC runs
         if len(sim_outputs_mc):
@@ -3174,7 +3340,7 @@ if __name__ == "__main__":
     fig, axs = plt.subplots(3, 3, figsize=(14, 10), sharex=True)
 
     # Time in days
-    t = [x[0]/(2*np.pi)*365.25 for x in sim_outputs]
+    t = [simTimeToDays(x[0]) for x in sim_outputs]
 
     a = [x[2].a*dist_unit_multiplier for x in sim_outputs]
     e = [x[2].e for x in sim_outputs]
@@ -3313,7 +3479,7 @@ if __name__ == "__main__":
         # Each realization gets its own time axis: a realization truncated early (for example by an
         # impact) is shorter than the nominal solution, and plotting it against the nominal time
         # axis would raise a dimension-mismatch error.
-        t_mc = [x[0]/(2*np.pi)*365.25 for x in sim_outputs_mc[mc_name]]
+        t_mc = [simTimeToDays(x[0]) for x in sim_outputs_mc[mc_name]]
 
         a_mc = [x[2].a*dist_unit_multiplier for x in sim_outputs_mc[mc_name]]
         e_mc = [x[2].e for x in sim_outputs_mc[mc_name]]
@@ -3382,7 +3548,7 @@ if __name__ == "__main__":
     def _elementSeries(rows):
         """ Convert one run's outputs into plain lists of floats. """
         return {
-            "time_days": [row[0]/(2*np.pi)*365.25 for row in rows],
+            "time_days": [simTimeToDays(row[0]) for row in rows],
             "a_au": [row[2].a for row in rows],
             "e": [row[2].e for row in rows],
             "incl_deg": [np.degrees(row[2].inc) for row in rows],
@@ -3411,6 +3577,13 @@ if __name__ == "__main__":
             "integrator": args.integrator,
             "dt_days": dt_days,
             "fixed_step_from_days": fixed_from,
+            "sun_j2": None if args.no_sun_j2 else SUN_J2,
+            "gr": args.gr,
+            # Axis of the Earth's J2/J4 in the ecliptic J2000 frame (null: the ecliptic pole was used,
+            #   REBOUNDx < 4.4.0)
+            "earth_spin_axis": (earthSpinAxisEcliptic(astropy.time.Time(
+                traj.jdt_ref, format="jd", scale="utc").tdb.jd)
+                if harmonicsSpinAxisSupported() else None),
             # The close-encounter gates, so a nominal-only run records them too ("clone_outcomes",
             #   which repeats them, is null without --mc)
             "n_hill_threshold": n_hill,
