@@ -862,33 +862,3 @@ def testFigureWithoutClonesOrWithAShortClone(reb, agg, tmp_path):
     _, axes = reb.plotReboundOrbits(nominal, clones, encounters, file_path=str(tmp_path/"b.png"))
     labels = axes["encounters"].get_legend_handles_labels()[1]
     assert "encounter: Earth" in labels and "encounter: Jupiter" in labels
-
-
-def testEncountersAreDrawnAsTheirBodiesAndTheHorizonIsTimed(reb, agg):
-    """ Each encounter is a disc in its body's colour and size (wmpl.Utils.PlanetStyle), outlined,
-    with the smaller bodies on top; the horizon legend entry gives its time. """
-
-    from matplotlib.colors import to_hex
-    from wmpl.Utils.PlanetStyle import planetColor, planetMarkerSize
-
-    nominal, clones = _plotOutputs(n_clones=25)
-    horizon = reb.predictabilityHorizon(nominal, clones)
-    horizon["horizon_days"] = -365.25*31
-    encounters = [{"body": "Earth", "min_dist_au": 0.01, "time_days": -365.25*30},
-                  {"body": "Luna", "min_dist_au": 0.01, "time_days": -365.25*30},
-                  {"body": "Jupiter", "min_dist_au": 0.9, "time_days": -365.25*60}]
-    _, axes = reb.plotReboundOrbits(nominal, clones, encounters, horizon=horizon)
-
-    discs = {line.get_label(): line for line in axes["encounters"].get_lines()
-             if line.get_label().startswith("encounter: ")}
-    for body in ("Earth", "Luna", "Jupiter"):
-        line = discs["encounter: " + body]
-        assert line.get_marker() == "o"
-        assert to_hex(line.get_color()) == to_hex(planetColor(body))
-        assert line.get_markersize() == pytest.approx(planetMarkerSize(body))
-        assert to_hex(line.get_markeredgecolor()) == "#000000"
-    assert discs["encounter: Luna"].get_zorder() > discs["encounter: Earth"].get_zorder() \
-        > discs["encounter: Jupiter"].get_zorder()
-
-    labels = axes["predictability"].get_legend_handles_labels()[1]
-    assert "predictability horizon (31 years)" in labels

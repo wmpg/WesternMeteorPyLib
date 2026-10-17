@@ -301,10 +301,8 @@ and then refined *within* the step. Both steps matter:
 - **Ejections** are recorded if the object leaves the simulation volume (1000 AU by default), after
   which it stops being integrated.
 
-On the plot, every passage is marked with a disc drawn as the body it passed: its colour and a size that
-grows with its radius, the same as in the trajectory solver's orbit plots (see
-[The figure](#the-figure)). Only one passage per body is labelled, so a long run against a
-repeatedly-met planet stays readable.
+On the plot, every passage is marked with a red star, but only the deepest one per body is labelled
+with the body's name, so a long run against a repeatedly-met planet stays readable.
 
 The first close encounter going backwards is almost always the Earth itself — that is the meteoroid
 arriving. What matters is what came before it.
@@ -465,14 +463,7 @@ options.
   line) carry the Earth's pull and are not drawn, and the vertical axes are scaled to the rest of the
   run, so they cover the clones as well as the nominal solution.
 - **Time** in years for spans of two years or more, in days otherwise. The predictability horizon is
-  the dashed red vertical line on every panel, and its time is given in the legend.
-- **Encounters as the bodies.** On the distance panel each close encounter is a disc at its closest
-  approach, in the body's colour (blue Earth, grey Moon, rust Mars, tan Jupiter, ...) with a thin black
-  outline, sized as radius^0.3 so the order of the real sizes is kept without Jupiter covering the
-  panel: Jupiter is 2.1 times the Earth, the Moon 0.67 times. Smaller bodies are drawn on top. The
-  palette and the sizes live in `wmpl.Utils.PlanetStyle` and are shared with the solver's
-  `_orbit_top`/`_orbit_side` plots, where the outline is black on the light background and white on
-  the dark one.
+  the dashed red vertical line on every panel.
 
 The JSON keys, at the top level:
 
