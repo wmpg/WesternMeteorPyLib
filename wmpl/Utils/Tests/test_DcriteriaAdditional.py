@@ -24,13 +24,14 @@ from wmpl.Utils.Dcriteria import (calcRho1, calcRho2, calcRho5, calcC, calcDR, c
     DV_THRESHOLDS, DV_DEFAULT_EPOCH, TC_REFERENCE_A, TC_REFERENCE_E, calcDSH, calcDH,
     ELEMENT_CRITERIA, ELEMENT_CRITERIA_KEYS, getElementCriterion, _semiMajorAxisForCriteria,
     TC_REFERENCE_INCL, TC_REFERENCE_Q, DACS_A_SCALE, DX_W_SOL, DX_W_RA, DX_W_DEC, DX_W_VG)
+from wmpl.Utils.MOID import _orbitPosition
 from wmpl.Utils.OrbitClassification import (calcTisserand, calcWhippleK, calcKresakP,
     isCometaryTi, JW_TISSERAND_LIMIT,
     calcAphelionDistance, calcOrbitalEnergy, isCometaryQi, isCometaryKi, isCometaryPi,
     isCometaryEi, GAUSS_K, calcHillRadius, calcResonanceSemiMajorAxis, classifyTancrediComet,
     classifyTancrediAsteroid, isTancrediResonanceProtected, calcMOID, calcGiantPlanetMOIDs,
     calcResonanceWidth, calcMaxPerihelionForTisserand, calcMinMOIDForTisserand,
-    _orbitPosition, A_JUPITER, A_URANUS, JW_INCL_LIMIT, JW_ENERGY_LIMIT, GAUSS_K_SQUARED,
+    A_JUPITER, A_URANUS, JW_INCL_LIMIT, JW_ENERGY_LIMIT, GAUSS_K_SQUARED,
     TANCREDI_RESONANCES, TANCREDI_T_HIGH, TANCREDI_T_LOW, Q_JUPITER_APHELION, RESONANCE_E_MIN,
     RESONANCE_E_MAX)
 
@@ -1669,6 +1670,38 @@ def test_giant_planet_moids_close_the_tancredi_criterion():
 
     assert label == 'aco jupiter family', "the orbit classified as {!r}".format(label)
 
+
+
+def test_moid_criterion_is_offered_and_takes_arrays():
+    """ MOID is a criterion on the elements, looked up like the others, and its function takes arrays
+        for one of the orbits, as the parent body search uses it. """
+
+    from wmpl.Utils.Dcriteria import (lookupCriterion, calcCriterionFromElements, ELEMENT_CRITERIA_KEYS,
+        VECTORISED_CRITERIA)
+    from wmpl.Utils.MOID import calcMOIDFromPerihelion
+
+    assert 'MOID' in ELEMENT_CRITERIA_KEYS and 'MOID' in VECTORISED_CRITERIA
+
+    criterion = lookupCriterion('moid')
+    assert criterion[0] == 'MOID' and criterion[3] == 'elements'
+
+    # The label has the unit, as the D criteria have none; it is printed with more decimals, so that a
+    #   crossing orbit's 0.0004 AU does not read 0.000
+    assert criterion[1] == 'MOID (AU)'
+
+    from wmpl.Utils.Dcriteria import CRITERIA_DECIMALS
+    assert CRITERIA_DECIMALS['MOID'] >= 5
+
+    meteoroid = (0.98, 0.62, math.radians(0.5), math.radians(160.0), math.radians(352.0))
+    bodies = [(1.0, 0.0167, 0.0, 0.0, math.radians(102.9)), (0.9, 1.0, math.radians(70.0), 1.0, 2.0),
+              (2.0, 0.3, math.radians(5.0), 3.0, 4.0)]
+
+    one_by_one = [calcCriterionFromElements(criterion, meteoroid, body) for body in bodies]
+    for value, body in zip(one_by_one, bodies):
+        assert abs(value - calcMOIDFromPerihelion(*(meteoroid + body))) < 1e-15
+
+    arrays = tuple(np.array(column) for column in zip(*bodies))
+    assert np.allclose(criterion[2](meteoroid, arrays), one_by_one, rtol=0, atol=1e-15)
 
 
 if __name__ == "__main__":
