@@ -3639,6 +3639,69 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
     return fig, axes
 
 
+# Length unit of the orbital elements of a run: the heliocentric elements are in AU and the geocentric ones in
+#   km. It applies only to a and q: the distances between bodies are always in AU
+def lengthUnitOfFrame(reference_frame):
+    """ Name of the length unit of a and q in a reference frame, and its factor from AU. """
+
+    if reference_frame == "geocentric":
+        return "km", 149597870.7
+
+    return "AU", 1.0
+
+
+def replotReboundFromResults(results, file_path=None, use_moid=True):
+    """ Redraw the figure of a run from its results file (rebound_simulation_results.json), without
+    integrating again.
+
+    The figure is the one the run drew (see plotReboundOrbits), from what the file holds: the elements and the
+    distances to the Earth and the Sun of the nominal solution and of every clone, the encounters, the
+    closest approaches, the predictability horizon and the MOID.
+
+    Arguments:
+        results: [dict] The results file, as json.load reads it.
+
+    Keyword arguments:
+        file_path: [str] Where to save the figure, or None not to save it.
+        use_moid: [bool] Draw the MOID if the file has it. False leaves it out, and the bodies it
+            would have covered get their "never closer" ring again, as in a run with --no_moid.
+            Default True.
+
+    Return:
+        (fig, axes): see plotReboundOrbits.
+    """
+
+    run = results["run"]
+    length_units, dist_unit_multiplier = lengthUnitOfFrame(run.get("reference_frame", "heliocentric"))
+    sim_time_per_day = daysToSimTime(1.0)
+
+    def rows(series, bodies=None):
+        """ The outputs of one run in the format of _integrateParticles (without the state vector,
+        which the figure does not use), keeping only the distances to the given bodies. """
+
+        distances = series["body_distances_au"]
+        bodies = list(distances) if bodies is None else [b for b in bodies if b in distances]
+        inc, node, peri, f = (np.radians(series[k]) for k in ("incl_deg", "node_deg", "peri_deg", "f_deg"))
+
+        return [[series["time_days"][k]*sim_time_per_day, None,
+                 SimpleNamespace(a=series["a_au"][k], e=series["e"][k], inc=inc[k], Omega=node[k],
+                                 omega=peri[k], f=f[k]),
+                 {b: distances[b][k] for b in bodies}] for k in range(len(series["time_days"]))]
+
+    nominal = rows(results["nominal"])
+
+    # The figure uses only the Earth's distance of the clones, and the file is large
+    clones = {name: rows(series, ["Earth"]) for name, series in (results.get("monte_carlo") or {}).items()}
+
+    return plotReboundOrbits(
+        nominal, clones, results.get("encounters") or [], file_path=file_path,
+        dist_unit_multiplier=dist_unit_multiplier, length_units=length_units,
+        horizon=results.get("predictability"), n_hill=run.get("n_hill_threshold", 3.0),
+        clone_encounters=results.get("clone_encounters"), closest_au=results.get("closest_approaches_au"),
+        closest_time_days=results.get("closest_approach_times_days"),
+        moid=results.get("moid") if use_moid else None)
+
+
 def reboundSimulate(
         julian_date, state_vect, traj=None,
         direction="forward", sim_days=60, n_outputs=500, obj_name="obj", obj_mass=0.0, mc_runs=100,
@@ -3959,7 +4022,17 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Run REBOUND simulation for a given trajectory pickle file. The simulation is run 60 days backwards by default.")
 
-    parser.add_argument("pickle_path", type=str, help="Path to the pickle file with the trajectory data.")
+    parser.add_argument("pickle_path", type=str, nargs="?", default=None,
+                        help="Path to the pickle file with the trajectory data. Not needed with --replot.")
+
+    parser.add_argument("--replot", type=str, default=None, metavar="RESULTS_JSON",
+                        help="Do not integrate: redraw the figure of an earlier run from its results file "
+                        "(rebound_simulation_results.json), in ~30 s for a 3 GB file. It saves the figure next "
+                        "to the file, as rebound_simulation.png or, with --no_moid, rebound_simulation_no_moid.png, "
+                        "or where --out says. The report and the JSON are left as they are.")
+
+    parser.add_argument("--out", type=str, default=None, metavar="FIGURE_PNG",
+                        help="With --replot, where to save the figure.")
 
     parser.add_argument("--days", type=float, help="Run the simulation for the given number of days.", default=60)
 
@@ -4049,11 +4122,36 @@ if __name__ == "__main__":
 
     parser.add_argument("--no_moid", action="store_true",
                         help="Do not compute the MOID (minimum orbit intersection distance) with the planets "
-                        "at every output, which is drawn in the figure and saved to the JSON by default.")
+                        "at every output, which is drawn in the figure and saved to the JSON by default. With "
+                        "--replot, leave the MOID out of the figure.")
 
     parser.add_argument("--verbose", action="store_true", help="Print out the progress of the simulation.")
 
     args = parser.parse_args()
+
+    # Redraw the figure of an earlier run from its results file, without integrating
+    if args.replot is not None:
+
+        t_replot = time.time()
+        print("Reading {:s} ...".format(args.replot))
+        with open(args.replot) as jf:
+            results = json.load(jf)
+        print("  read in {:.0f} s".format(time.time() - t_replot))
+
+        out_path = args.out
+        if out_path is None:
+            out_path = os.path.join(os.path.dirname(os.path.abspath(args.replot)),
+                                    "rebound_simulation_no_moid.png" if args.no_moid else "rebound_simulation.png")
+
+        if (not args.no_moid) and (results.get("moid") is None):
+            print("  The file has no MOID (a run before it was computed, or with --no_moid): the figure is drawn without it.")
+
+        replotReboundFromResults(results, file_path=out_path, use_moid=not args.no_moid)
+        print("  Saved plot   : {:s}".format(out_path))
+        sys.exit(0)
+
+    if args.pickle_path is None:
+        parser.error("the pickle_path argument is required, except with --replot.")
 
     # Extract the number of days from the arguments and the simulation direction. --forward may be
     # given on its own (use --days) or with its own number of days.
@@ -4131,13 +4229,8 @@ if __name__ == "__main__":
     # distances and the divergence figures are always reported in AU (with km given alongside where
     # it helps), because they are distances between bodies rather than orbit sizes and so do not
     # depend on the frame the elements are expressed in.
-    a_units = "AU"
-    q_units = "AU"
-    dist_unit_multiplier = 1.0  # Default is AU
-    if reference_frame == "geocentric":
-        a_units = "km"
-        q_units = "km"
-        dist_unit_multiplier = 149597870.7  # Convert AU to km
+    a_units, dist_unit_multiplier = lengthUnitOfFrame(reference_frame)
+    q_units = a_units
 
     ### ###
 
