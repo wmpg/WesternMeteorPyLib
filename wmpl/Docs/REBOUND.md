@@ -445,9 +445,25 @@ options.
 | File | Contents |
 | :--- | :--- |
 | `rebound_simulation_results.txt` | The human-readable report: run settings, the integrator that actually ran, final elements with confidence intervals, close encounters, impacts, clone outcomes, energy drift, divergence, and the MEGNO verdict. |
-| `rebound_simulation.png` | A 3×3 panel figure of the element evolution for the nominal solution and the clones. |
+| `rebound_simulation.png` | The evolution of the orbit, 3×3 panels: a, e, q; i, node, argument of perihelion; longitude of perihelion, distance to the Earth (log scale) with the close encounters coloured by body, and the predictability horizon (the heliocentric distance without clones). See [The figure](#the-figure). |
 | `rebound_megno.png` | Only with `--compute_megno`: the evolution of ⟨Y⟩ against time in years, with the ⟨Y⟩ = 2 line marked. |
 | `rebound_simulation_results.json` | The same results in machine-readable form, so downstream analysis does not have to parse the text. |
+
+### The figure
+
+- **Clones as bands.** With 20 clones or more, they are drawn as their 2.5–97.5% and 16–84% bands and
+  median at each time, with 10 of them drawn individually to show how single trajectories behave; with
+  fewer, every clone is drawn. The nominal solution is the black line. Clones that ended early (e.g.
+  impacted) count only over their own span.
+- **Angles without wraps.** The node, the argument of perihelion and the longitude of perihelion are
+  unwrapped along the nominal solution, and each clone is drawn as its difference from it, so crossing
+  0/360° draws no vertical lines. For a nearly ecliptic orbit the node and the argument of perihelion
+  are poorly defined, and the longitude of perihelion ϖ = Ω + ω is the angle to read.
+- **From the departure.** The elements before the object leaves 3 Earth Hill radii (dotted vertical
+  line) carry the Earth's pull and are not drawn, and the vertical axes are scaled to the rest of the
+  run, so they cover the clones as well as the nominal solution.
+- **Time** in years for spans of two years or more, in days otherwise. The predictability horizon is
+  the dashed red vertical line on every panel.
 
 The JSON keys, at the top level:
 

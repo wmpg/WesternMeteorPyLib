@@ -2485,6 +2485,214 @@ def _megnoReportLines(megno):
     return lines
 
 
+# With more clones than this, the figure shows their percentile bands instead of every clone
+PLOT_BANDS_MIN_CLONES = 20
+
+# Clones drawn individually on top of the bands, to show how single trajectories behave
+PLOT_SAMPLE_CLONES = 10
+
+
+def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, dist_unit_multiplier=1.0,
+                      length_units="AU", horizon=None, n_hill=3.0):
+    """ Figure of the evolution of the orbit: the nominal solution and the Monte Carlo clones.
+
+    Panels: a, e, q; i, node, argument of perihelion; longitude of perihelion, distance to the Earth
+    with the close encounters, and the predictability horizon (see predictabilityHorizon), or the
+    heliocentric distance without clones.
+
+    With PLOT_BANDS_MIN_CLONES clones or more, the clones are shown as the 2.5-97.5% and 16-84%
+    bands and the median at each time, with PLOT_SAMPLE_CLONES of them drawn individually; with fewer,
+    every clone is drawn. The angles are unwrapped along the nominal solution and each clone is drawn
+    as its difference from it, so that crossing 0/360 deg does not draw vertical lines. The vertical
+    axes cover the run from the departure from the Earth, before which the osculating heliocentric
+    elements carry the Earth's pull. The time is in years for spans of two years or more.
+
+    Arguments:
+        sim_outputs: [list] Outputs of the nominal solution (see reboundSimulate).
+        sim_outputs_mc: [dict] {name: outputs} of the clones, possibly empty.
+        encounters: [list] Close encounters of the nominal solution (see encountersFromMinDistances).
+
+    Keyword arguments:
+        file_path: [str] Where to save the figure, or None not to save it.
+        dist_unit_multiplier: [float] Factor from AU to the length unit of a and q. Default 1.
+        length_units: [str] Name of that unit. Default "AU".
+        horizon: [dict] Return of predictabilityHorizon, or None.
+        n_hill: [float] Earth Hill radii of the departure and of the encounter threshold. Default 3.
+
+    Return:
+        (fig, axes): the figure and a dict of its axes by panel name.
+    """
+
+    t_days = np.array([simTimeToDays(row[0]) for row in sim_outputs])
+    in_years = abs(t_days[-1] - t_days[0]) >= 2*365.25
+    t_scale = 365.25 if in_years else 1.0
+    t = t_days/t_scale
+    t_label = "Time [years]" if in_years else "Time [days]"
+    n = len(t)
+
+    k_dep = findEarthDepartureIndex(sim_outputs, n_hill=n_hill)
+    k_dep = 0 if k_dep is None else k_dep
+
+    def series(rows):
+        """ The plotted quantities of one run, padded with NaN to the nominal length. """
+
+        out = {key: np.full(n, np.nan) for key in ("a", "e", "q", "i", "node", "peri", "varpi", "earth", "sun")}
+        for k, row in enumerate(rows[:n]):
+            orb = row[2]
+            out["a"][k] = orb.a*dist_unit_multiplier
+            out["e"][k] = orb.e
+            out["q"][k] = orb.a*(1 - orb.e)*dist_unit_multiplier
+            out["i"][k] = np.degrees(orb.inc)
+            out["node"][k] = np.degrees(orb.Omega)
+            out["peri"][k] = np.degrees(orb.omega)
+            out["varpi"][k] = np.degrees(orb.Omega + orb.omega) % 360.0
+            out["earth"][k] = row[3].get("Earth", np.nan)*dist_unit_multiplier
+            out["sun"][k] = row[3].get("Sun", np.nan)
+        return out
+
+    nominal = series(sim_outputs)
+    clones = [series(rows) for rows in sim_outputs_mc.values()]
+
+    # Before the departure the osculating heliocentric elements carry the Earth's pull, and would draw
+    #   a misleading jump at the start: they are left out of the element panels
+    element_keys = ("a", "e", "q", "i", "node", "peri", "varpi")
+    for run in [nominal] + clones:
+        for key in element_keys:
+            run[key][:k_dep] = np.nan
+
+    # Angles: unwrap the nominal solution, and draw each clone as its (wrapped) difference from it
+    angles = ("node", "peri", "varpi")
+    for key in angles:
+        nom = nominal[key]
+        ok = np.isfinite(nom)
+        unwrapped = nom.copy()
+        unwrapped[ok] = np.degrees(np.unwrap(np.radians(nom[ok])))
+
+        # Start the unwrapped series within 0-360 deg
+        if ok.any():
+            unwrapped -= 360.0*np.floor(unwrapped[ok][0]/360.0)
+        for c in clones:
+            with np.errstate(invalid="ignore"):
+                c[key] = unwrapped + ((c[key] - nom + 180.0) % 360.0 - 180.0)
+        nominal[key] = unwrapped
+
+    fig, axs = plt.subplots(3, 3, figsize=(15, 11), sharex=True)
+    names = [["a", "e", "q"], ["i", "node", "peri"], ["varpi", "encounters", "predictability"]]
+    axes = {name: axs[r, c] for r, row in enumerate(names) for c, name in enumerate(row)}
+    labels = {"a": "a [{:s}]".format(length_units), "e": "e", "q": "q [{:s}]".format(length_units),
+              "i": "i [deg]", "node": "node [deg]", "peri": "argument of perihelion [deg]",
+              "varpi": "longitude of perihelion [deg]"}
+
+    use_bands = len(clones) >= PLOT_BANDS_MIN_CLONES
+    if use_bands:
+        sample = clones[::max(1, len(clones)//PLOT_SAMPLE_CLONES)][:PLOT_SAMPLE_CLONES]
+    else:
+        sample = clones
+
+    for key, label in labels.items():
+
+        ax = axes[key]
+        limits = [nominal[key][k_dep:]]
+
+        if use_bands:
+            stack = np.array([c[key] for c in clones])
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                p = np.nanpercentile(stack, [2.5, 16, 50, 84, 97.5], axis=0)
+            ax.fill_between(t, p[0], p[4], color="C0", alpha=0.18, lw=0,
+                            label="clones 2.5-97.5%" if key == "a" else None)
+            ax.fill_between(t, p[1], p[3], color="C0", alpha=0.35, lw=0,
+                            label="clones 16-84%" if key == "a" else None)
+            ax.plot(t, p[2], color="C0", lw=1.0, ls="--", label="clones median" if key == "a" else None)
+            limits += [p[0][k_dep:], p[4][k_dep:]]
+
+        for j, c in enumerate(sample):
+            ax.plot(t, c[key], color="0.35", lw=0.4, alpha=0.6,
+                    label=("{:d} sample clones".format(len(sample)) if use_bands else "clones")
+                    if (key == "a" and j == 0) else None)
+            if not use_bands:
+                limits.append(c[key][k_dep:])
+
+        ax.plot(t, nominal[key], color="k", lw=1.4, label="nominal" if key == "a" else None)
+        ax.set_ylabel(label)
+
+        # Scale to the run from the departure, not to the osculating elements still inside the
+        #   Earth's neighbourhood
+        values = np.concatenate([v[np.isfinite(v)] for v in limits]) if limits else np.array([])
+        if len(values):
+            lo, hi = values.min(), values.max()
+            pad = 0.05*(hi - lo) if hi > lo else max(abs(hi)*1e-6, 1e-12)
+            ax.set_ylim(lo - pad, hi + pad)
+
+    # Distance to the Earth (nominal), on a log scale, with the encounter threshold and the
+    #   encounters with every body at their closest approach
+    ax = axes["encounters"]
+    earth = nominal["earth"]
+    ax.plot(t, np.where(earth > 0, earth, np.nan), color="0.55", lw=0.4, label="distance to the Earth")
+    ax.axhline(n_hill*HILL_RADII_AU["Earth"]*dist_unit_multiplier, color="0.3", ls=":", lw=1,
+               label="{:g} Earth Hill radii".format(n_hill))
+
+    # One colour per body, each star at the closest approach to that body
+    body_colors = {"Earth": "red", "Luna": "magenta", "Venus": "orange", "Mars": "saddlebrown",
+                   "Mercury": "teal", "Jupiter": "purple", "Saturn": "olive", "Sun": "gold"}
+    seen = set()
+    for enc in encounters:
+        body = enc["body"]
+        ax.plot(enc["time_days"]/t_scale, enc["min_dist_au"]*dist_unit_multiplier, marker="*",
+                color=body_colors.get(body, "0.3"), markersize=10, ls="none", zorder=5,
+                label="encounter: {:s}".format(body) if body not in seen else None)
+        seen.add(body)
+    ax.set_yscale("log")
+    ax.set_ylabel("distance [{:s}]".format(length_units))
+
+    # Predictability: rank correlation of the clones with their start, and the horizon
+    ax = axes["predictability"]
+    if horizon is not None:
+        t_h = np.array(horizon["time_days"])/t_scale
+        for key, color in (("a", "C0"), ("e", "C1"), ("i", "C2")):
+            rho = horizon["rank_corr"].get(key)
+            if rho is not None:
+                ax.plot(t_h, [np.nan if v is None else v for v in rho], color=color, lw=1, label=key)
+        ax.axhline(horizon["threshold"], color="0.5", ls=":", lw=1)
+        fe = horizon.get("first_encounter_days")
+        if fe is not None and fe.get("p05") is not None:
+            sign = 1.0 if t_days[-1] >= t_days[0] else -1.0
+            ax.axvspan(sign*fe["p05"]/t_scale, sign*fe["p95"]/t_scale, color="red", alpha=0.08,
+                       label="first encounters (5-95%)")
+        ax.set_ylim(-0.3, 1.05)
+        ax.set_ylabel("rank correlation with the start")
+    else:
+        ax.plot(t, nominal["sun"], color="k", lw=0.8, label="nominal")
+        ax.set_ylabel("heliocentric distance [AU]")
+
+    # The departure and the predictability horizon on every panel
+    for ax in axs.flatten():
+        if k_dep > 0:
+            ax.axvline(t[k_dep], color="0.6", ls=":", lw=0.8)
+        if (horizon is not None) and (horizon.get("horizon_days") is not None):
+            ax.axvline(horizon["horizon_days"]/t_scale, color="red", ls="--", lw=0.9,
+                       label="predictability horizon" if ax is axes["predictability"] else None)
+        if ax in axs[-1]:
+            ax.set_xlabel(t_label)
+        if ax.get_yscale() == "linear":
+            ax.ticklabel_format(axis="y", useOffset=False, style="plain")
+
+    ax_min, ax_max = min(t[0], t[-1]), max(t[0], t[-1])
+    axs[0, 0].set_xlim(ax_min, ax_max)
+
+    for ax in axs.flatten():
+        handles, lab = ax.get_legend_handles_labels()
+        if lab:
+            ax.legend(fontsize=7, loc="best")
+
+    fig.tight_layout()
+
+    if file_path is not None:
+        fig.savefig(file_path, dpi=150)
+
+    return fig, axes
+
+
 def reboundSimulate(
         julian_date, state_vect, traj=None,
         direction="forward", sim_days=60, n_outputs=500, obj_name="obj", obj_mass=0.0, mc_runs=100,
@@ -3638,188 +3846,10 @@ if __name__ == "__main__":
                 f.write("node = {:>10.6f} deg\n".format(np.degrees(sim_outputs_mc[mc_name][-1][2].Omega)))
                 f.write("f    = {:>10.6f} deg\n".format(np.degrees(sim_outputs_mc[mc_name][-1][2].f)))
 
-    # Plot the orbital elements of the before and after simulation on the same plot (one subplot for each element)
-    fig, axs = plt.subplots(3, 3, figsize=(14, 10), sharex=True)
-
-    # Time in days
-    t = [simTimeToDays(x[0]) for x in sim_outputs]
-
-    a = [x[2].a*dist_unit_multiplier for x in sim_outputs]
-    e = [x[2].e for x in sim_outputs]
-    incl = [x[2].inc for x in sim_outputs]
-    Omega = [x[2].Omega for x in sim_outputs]
-    omega = [x[2].omega for x in sim_outputs]
-    f = [x[2].f for x in sim_outputs]
-
-    # Distance from the planets
-    planet_dists = [x[3] for x in sim_outputs]
-    earth_dist = [x["Earth"] for x in planet_dists]
-
-    # Find the time when the object exits the Earth's Hill sphere
-    earth_hill = HILL_RADII_AU["Earth"] # AU
-    exit_index = None
-    for i, dist in enumerate(earth_dist):
-        if dist > earth_hill:
-            exit_index = i
-            break
-
-    axs[0, 0].plot(t, a)
-    axs[0, 1].plot(t, e)
-    axs[1, 0].plot(t, np.degrees(incl))
-    axs[1, 1].plot(t, np.degrees(Omega))
-    axs[2, 0].plot(t, np.degrees(omega))
-    axs[2, 1].plot(t, np.degrees(f))
-
-    # Create filtered arrays for the exit from the Earth's Hill sphere
-    if exit_index is not None:
-        t_exit = t[exit_index:]
-        a_exit = a[exit_index:]
-        e_exit = e[exit_index:]
-        incl_exit = incl[exit_index:]
-        Omega_exit = Omega[exit_index:]
-        omega_exit = omega[exit_index:]
-        f_exit = f[exit_index:]
-
-        # Adjust Y axis limits for the exit from the Earth
-        axs[0, 0].set_ylim(ymin=min(a_exit), ymax=max(a_exit))
-        axs[0, 1].set_ylim(ymin=min(e_exit), ymax=max(e_exit))
-        axs[1, 0].set_ylim(ymin=min(np.degrees(incl_exit)), ymax=max(np.degrees(incl_exit)))
-        axs[1, 1].set_ylim(ymin=min(np.degrees(Omega_exit)), ymax=max(np.degrees(Omega_exit)))
-        axs[2, 0].set_ylim(ymin=min(np.degrees(omega_exit)), ymax=max(np.degrees(omega_exit)))
-        axs[2, 1].set_ylim(ymin=min(np.degrees(f_exit)), ymax=max(np.degrees(f_exit)))
-                           
-
-
-    # Plot the distance from the Earth
-    axs[0, 2].plot(t, np.array(earth_dist)*dist_unit_multiplier)
-
-    # Mark the exit from the Earth's Hill sphere
-    if exit_index is not None:
-        axs[0, 2].axvline(t[exit_index], color="red", linestyle="--", label="Exit from Earth's Hill sphere")
-
-        # Set the X axis limit so the maximum time is at the exit from the Earth's Hill sphere
-        axs[0, 2].set_xlim(xmax=t[exit_index])
-
-
-
-    # Plot the distance from the Sun + inner planets
-    inner_planets = ["Sun", "Mercury", "Venus", "Earth", "Luna", "Mars"]
-    for planet in inner_planets:
-        planet_dist = [x[3][planet] for x in sim_outputs]
-        axs[1, 2].plot(t, planet_dist, label=planet)
-
-    axs[1, 2].set_ylabel("Distance [AU]")
-    axs[1, 2].legend()
-
-    # Plot the distance from the outer planets
-    outer_planets = ["Jupiter", "Saturn", "Uranus", "Neptune"]
-    for planet in outer_planets:
-        planet_dist = [x[3][planet] for x in sim_outputs]
-        axs[2, 2].plot(t, planet_dist, label=planet)
-
-    axs[2, 2].set_ylabel("Distance [AU]")
-
-    # Start the outer-planet distance axis at zero, so the distances are read against the Sun
-    axs[2, 2].set_ylim(ymin=0)
-
-    axs[2, 2].legend()
-
-
-    # Mark the detected close encounters at the point of closest approach on the distance subplots.
-    # Every passage gets a star, but only the deepest one per body is named: an object in resonance
-    #   with a planet meets it over and over, and one text label per passage makes the panel
-    #   unreadable.
-    labeled_axes = set()
-    deepest_per_body = {}
-    for enc in encounters:
-        best = deepest_per_body.get(enc["body"])
-        if (best is None) or (enc["min_dist_au"] < best["min_dist_au"]):
-            deepest_per_body[enc["body"]] = enc
-
-    for enc in encounters:
-        body = enc["body"]
-        t_enc = enc["time_days"]
-        d_enc = enc["min_dist_au"]
-        name_it = (deepest_per_body[body] is enc)
-
-        # Determine which distance subplot(s) show this body
-        marks = []
-        if body in inner_planets:
-            marks.append((axs[1, 2], d_enc))
-        if body in outer_planets:
-            marks.append((axs[2, 2], d_enc))
-        if body == "Earth":
-            # The Earth-distance subplot is scaled by the reference-frame unit multiplier
-            marks.append((axs[0, 2], d_enc*dist_unit_multiplier))
-
-        for ax, d_plot in marks:
-
-            # Only add the legend label once per axis
-            label = "Close encounter" if ax not in labeled_axes else None
-            labeled_axes.add(ax)
-
-            ax.plot(t_enc, d_plot, marker="*", color="red", markersize=14, linestyle="none",
-                    zorder=5, label=label)
-
-            if name_it:
-                ax.annotate(body, (t_enc, d_plot), textcoords="offset points", xytext=(5, 5),
-                            color="red", fontsize=8)
-
-
-    # Set the axis labels
-    for ax in axs.flatten():
-
-        ax.set_xlabel("Time [days]")
-
-        # Disable offset and scientific notation
-        ax.ticklabel_format(useOffset=False, style='plain')
-
-
-    # Plot the MC realizations (all in thin alpha=0.5 lines)
-    for mc_name in sim_outputs_mc:
-
-        # Each realization gets its own time axis: a realization truncated early (for example by an
-        # impact) is shorter than the nominal solution, and plotting it against the nominal time
-        # axis would raise a dimension-mismatch error.
-        t_mc = [simTimeToDays(x[0]) for x in sim_outputs_mc[mc_name]]
-
-        a_mc = [x[2].a*dist_unit_multiplier for x in sim_outputs_mc[mc_name]]
-        e_mc = [x[2].e for x in sim_outputs_mc[mc_name]]
-        incl_mc = [x[2].inc for x in sim_outputs_mc[mc_name]]
-        Omega_mc = [x[2].Omega for x in sim_outputs_mc[mc_name]]
-        omega_mc = [x[2].omega for x in sim_outputs_mc[mc_name]]
-        f_mc = [x[2].f for x in sim_outputs_mc[mc_name]]
-        earth_dist = [x[3]["Earth"] for x in sim_outputs_mc[mc_name]]
-
-        axs[0, 0].plot(t_mc, a_mc, alpha=0.5, color='k', lw=0.5)
-        axs[0, 1].plot(t_mc, e_mc, alpha=0.5, color='k', lw=0.5)
-        axs[1, 0].plot(t_mc, np.degrees(incl_mc), alpha=0.5, color='k', lw=0.5)
-        axs[1, 1].plot(t_mc, np.degrees(Omega_mc), alpha=0.5, color='k', lw=0.5)
-        axs[2, 0].plot(t_mc, np.degrees(omega_mc), alpha=0.5, color='k', lw=0.5)
-        axs[2, 1].plot(t_mc, np.degrees(f_mc), alpha=0.5, color='k', lw=0.5)
-        axs[0, 2].plot(t_mc, np.array(earth_dist)*dist_unit_multiplier, alpha=0.5, color='k', lw=0.5)
-
-    
-    
-    axs[0, 0].set_ylabel("a [{:s}]".format(a_units))
-    axs[0, 1].set_ylabel("e")
-    axs[1, 0].set_ylabel("i [deg]")
-    # axs[1, 1] plots REBOUND Omega (ascending node); axs[2, 0] plots omega (argument of perihelion)
-    axs[1, 1].set_ylabel("node [deg]")
-    axs[2, 0].set_ylabel("peri [deg]")
-    axs[2, 1].set_ylabel("f [deg]")
-    axs[0, 2].set_ylabel("Earth distance [{:s}]".format(a_units))
-
-    # Only draw a legend on axes that actually have labeled artists (avoids the empty-legend warning)
-    for ax in axs.flatten():
-        handles, labels = ax.get_legend_handles_labels()
-        if labels:
-            ax.legend()
-
-    plt.tight_layout()
-
-    # Save the figure
-    plt.savefig(plot_png_path)
+    # Evolution of the orbit, the clones as percentile bands (see plotReboundOrbits)
+    plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=plot_png_path,
+                      dist_unit_multiplier=dist_unit_multiplier, length_units=a_units, horizon=horizon,
+                      n_hill=n_hill)
 
     # MEGNO evolution, in its own figure
     megno_png_path = None

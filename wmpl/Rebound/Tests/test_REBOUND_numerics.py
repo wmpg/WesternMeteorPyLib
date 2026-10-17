@@ -737,3 +737,128 @@ def testHorizonReportsTheFirstEncounters(reb):
     assert fe["fraction"] == pytest.approx(0.5)
     assert fe["p50"]/365.25 == pytest.approx(14.5, abs=0.01)
     assert fe["p05"]/365.25 >= 10.0
+
+
+### Figure of the orbit ###
+
+
+def _plotOutputs(n_out=300, years=100.0, direction=-1, n_clones=0, node_start=355.0, seed=1,
+                 truncate=None):
+    """ Synthetic outputs for plotReboundOrbits: the node crosses 360 deg, the object leaves the Earth
+    at the third output, and the clones scatter around the nominal solution. """
+
+    rng = np.random.default_rng(seed)
+    t_days = direction*np.linspace(0, years*365.25, n_out)
+
+    # REBOUND time unit in days (DAYS_PER_SIM_TIME)
+    days_per_unit = np.sqrt(149597870700.0**3/1.3271244004193938e20)/86400.0
+
+    def rows(da, dnode, length=n_out):
+        out = []
+        for k in range(length):
+            frac = k/(n_out - 1)
+            orbit = SimpleNamespace(a=2.0 + da*frac, e=0.6, inc=np.radians(1.0),
+                                    Omega=np.radians((node_start + 10.0*frac + dnode*frac) % 360.0),
+                                    omega=np.radians(100.0), f=0.0)
+            earth = 1e-5 if k < 2 else 1.0
+            out.append([t_days[k]/days_per_unit, None, orbit, {"Earth": earth, "Sun": 1.0}])
+        return out
+
+    nominal = rows(0.0, 0.0)
+    clones = {"obj_MC_{:d}".format(j): rows(0.1*rng.normal(), rng.normal(), length=(
+        truncate if (truncate is not None and j == 0) else n_out)) for j in range(n_clones)}
+
+    return nominal, clones
+
+
+@pytest.fixture
+def agg():
+    import matplotlib
+    import matplotlib.pyplot as plt
+    matplotlib.use("Agg")
+    yield
+    plt.close("all")
+
+
+def testForwardRunShowsTheWholeSpan(reb, agg):
+    """ The x axis covers the whole run forward in time, not only the departure from the Earth (the
+    old figure set the shared x limit to the departure time). """
+
+    nominal, clones = _plotOutputs(direction=1, n_clones=5)
+    fig, axes = reb.plotReboundOrbits(nominal, clones, [])
+
+    lo, hi = axes["a"].get_xlim()
+    assert lo == pytest.approx(0.0) and hi == pytest.approx(100.0)
+    assert axes["a"].get_xlabel() == "" and axes["varpi"].get_xlabel() == "Time [years]"
+
+
+def testShortRunIsInDays(reb, agg):
+
+    nominal, clones = _plotOutputs(years=60/365.25, n_clones=3)
+    _, axes = reb.plotReboundOrbits(nominal, clones, [])
+
+    assert axes["varpi"].get_xlabel() == "Time [days]"
+    assert axes["a"].get_xlim()[0] == pytest.approx(-60.0)
+
+
+def testManyClonesAreBandsAndTheAxesCoverThem(reb, agg):
+    """ With many clones they are drawn as percentile bands, the y axis covers the 2.5-97.5% band,
+    and only a sample of clones is drawn individually. """
+
+    nominal, clones = _plotOutputs(n_clones=200)
+    _, axes = reb.plotReboundOrbits(nominal, clones, [])
+
+    ax = axes["a"]
+    assert len(ax.collections) >= 2
+
+    final_a = np.array([rows[-1][2].a for rows in clones.values()])
+    lo, hi = ax.get_ylim()
+    assert lo <= np.percentile(final_a, 2.5) and hi >= np.percentile(final_a, 97.5)
+
+    thin = [line for line in ax.get_lines() if line.get_linewidth() < 0.5]
+    assert len(thin) == reb.PLOT_SAMPLE_CLONES
+
+
+def testAnglesAreUnwrapped(reb, agg):
+    """ A node crossing 360 deg is drawn as a continuous line, and the clones follow it. """
+
+    nominal, clones = _plotOutputs(n_clones=30, node_start=355.0)
+    _, axes = reb.plotReboundOrbits(nominal, clones, [])
+
+    nominal_line = [line for line in axes["node"].get_lines() if line.get_linewidth() > 1][0]
+    y = np.array(nominal_line.get_ydata(), dtype=float)
+    y = y[np.isfinite(y)]
+    assert np.max(np.abs(np.diff(y))) < 1.0
+    assert 0.0 <= y[0] < 360.0 and y[-1] > 360.0
+
+    # The longitude of perihelion starts within 0-360 deg as well
+    varpi_line = [line for line in axes["varpi"].get_lines() if line.get_linewidth() > 1][0]
+    v = np.array(varpi_line.get_ydata(), dtype=float)
+    assert 0.0 <= v[np.isfinite(v)][0] < 360.0
+
+
+def testElementsBeforeTheDepartureAreLeftOut(reb, agg):
+
+    nominal, clones = _plotOutputs(n_clones=0)
+    _, axes = reb.plotReboundOrbits(nominal, clones, [])
+
+    y = np.array([line for line in axes["a"].get_lines() if line.get_linewidth() > 1][0].get_ydata(),
+                 dtype=float)
+    assert np.all(np.isnan(y[:2])) and np.isfinite(y[2])
+
+
+def testFigureWithoutClonesOrWithAShortClone(reb, agg, tmp_path):
+    """ Without clones the last panel is the heliocentric distance; a clone that ended early (an
+    impact) is padded, and the figure is saved. """
+
+    nominal, _ = _plotOutputs()
+    _, axes = reb.plotReboundOrbits(nominal, {}, [], file_path=str(tmp_path/"a.png"))
+    assert axes["predictability"].get_ylabel() == "heliocentric distance [AU]"
+    assert (tmp_path/"a.png").exists()
+
+    nominal, clones = _plotOutputs(n_clones=25, truncate=50)
+    encounters = [{"body": "Earth", "min_dist_au": 0.01, "time_days": -365.25*30},
+                  {"body": "Jupiter", "min_dist_au": 0.9, "time_days": -365.25*60}]
+    _, axes = reb.plotReboundOrbits(nominal, clones, encounters, file_path=str(tmp_path/"b.png"))
+    labels = axes["encounters"].get_legend_handles_labels()[1]
+    assert "encounter: Earth" in labels and "encounter: Jupiter" in labels
