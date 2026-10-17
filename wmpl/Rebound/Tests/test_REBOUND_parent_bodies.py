@@ -69,12 +69,13 @@ def _row(t, orb, earth_dist):
 
 
 def testOutputTimesAreTheOnesReboundSimulateUsed(reb):
-    """ The refactored output times are the ones reboundSimulate used to compute inline. """
+    """ The refactored output times are the ones reboundSimulate used to compute inline, in the time
+    unit of the simulations (DAYS_PER_SIM_TIME), whatever it is. """
 
     for direction, sign in (("forward", 1.0), ("backward", -1.0)):
 
         times = reb.outputTimes(3652.5, 200, direction)
-        expected = np.linspace(0, sign*2.0*np.pi*(3652.5/365.25), 200)
+        expected = np.linspace(0, sign*reb.daysToSimTime(3652.5), 200)
 
         assert np.allclose(times, expected, rtol=0, atol=1e-12)
 
@@ -320,3 +321,22 @@ def testBodiesRunOverTheSameTimesAsTheMeteoroid(realReb):
     # The orbit of the trajectory solution removes the Earth's attraction, and so does the departure,
     #   so the two orbits agree to the precision of that correction
     assert np.all(compared < 0.05)
+
+
+def testParentBodiesAreIntegratedWithTheMeteoroidForces(reb, monkeypatch):
+    """ The candidates get the same forces as the meteoroid: the Earth's J2/J4 about its pole of date,
+        and the Sun's J2 and the GR model as chosen for the run. """
+
+    tasks = []
+    monkeypatch.setattr(reb, "_integrateParticles", lambda task: tasks.append(task) or {})
+
+    jd = 2459274.41
+    planets = (["Sun", "Earth"], [[0.0]*6, [1.0, 0, 0, 0, 1.0, 0]], [1.0, 3.0e-6])
+    reb.integrateHeliocentricBodies(["body"], [[1.5, 0, 0, 0, 0.0136, 0]], jd, [0.0, -1.0],
+                                    planets=planets, sun_j2=False, gr="gr")
+
+    task = tasks[0]
+    assert task["sun_j2"] is False
+    assert task["gr"] == "gr"
+    if reb.harmonicsSpinAxisSupported():
+        assert np.allclose(task["earth_spin_axis"], reb.earthSpinAxisEcliptic(jd))
