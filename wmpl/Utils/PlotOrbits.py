@@ -37,7 +37,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from wmpl.Utils.Plotting import savePlot, Arrow3D, set3DEqualAxes
-from wmpl.Utils.PlanetStyle import planetColor, planetMarkerSize, PLANET_EDGE_COLOR, PLANET_EDGE_WIDTH
+from wmpl.Utils.PlanetStyle import planetColor, planetMarkerSize, PLANET_EDGE_COLOR, PLANET_EDGE_COLOR_DARK, \
+    PLANET_EDGE_WIDTH
 
 # Define Julian epoch
 J2000_EPOCH = datetime(2000, 1, 1, 12) # At the noon of 2000/01/01 UTC
@@ -267,8 +268,8 @@ class OrbitPlotColorScheme(object):
         self.vernal_eq = 'w'
         self.planet_default = '#32CD32'
 
-        # No outline on a dark background, where a dark one would not show
-        self.planet_edge = 'face'
+        # A thin white outline keeps the dark planets visible on the black background
+        self.planet_edge = PLANET_EDGE_COLOR_DARK
 
 
     def light(self):

@@ -471,7 +471,8 @@ options.
   outline, sized as radius^0.3 so the order of the real sizes is kept without Jupiter covering the
   panel: Jupiter is 2.1 times the Earth, the Moon 0.67 times. Smaller bodies are drawn on top. The
   palette and the sizes live in `wmpl.Utils.PlanetStyle` and are shared with the solver's
-  `_orbit_top`/`_orbit_side` plots, where the outline is used on the light background only.
+  `_orbit_top`/`_orbit_side` plots, where the outline is black on the light background and white on
+  the dark one.
 
 The JSON keys, at the top level:
 

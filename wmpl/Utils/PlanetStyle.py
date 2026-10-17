@@ -36,9 +36,11 @@ PLANET_RADII_KM = {
     "Neptune": 24622.0,
 }
 
-# Thin dark outline that keeps the pale bodies (Moon, Saturn, Uranus, Venus) visible on a light
-#   background; on a dark one the face colour is used instead
+# Thin outline that keeps the bodies visible against the background: black on a light one, for the
+#   pale bodies (Moon, Saturn, Uranus, Venus), and white on a dark one, for the dark bodies (Neptune,
+#   Earth, Mars)
 PLANET_EDGE_COLOR = "black"
+PLANET_EDGE_COLOR_DARK = "white"
 PLANET_EDGE_WIDTH = 0.5
 
 # Marker sizes grow as radius**PLANET_SIZE_EXPONENT, a compression of the real ratios (Jupiter is 11
