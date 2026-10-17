@@ -1672,6 +1672,31 @@ def test_giant_planet_moids_close_the_tancredi_criterion():
 
 
 
+def test_moid_criterion_is_offered_and_takes_arrays():
+    """ MOID is a criterion on the elements, looked up like the others, and its function takes arrays
+        for one of the orbits, as the parent body search uses it. """
+
+    from wmpl.Utils.Dcriteria import (lookupCriterion, calcCriterionFromElements, ELEMENT_CRITERIA_KEYS,
+        VECTORISED_CRITERIA)
+    from wmpl.Utils.MOID import calcMOIDFromPerihelion
+
+    assert 'MOID' in ELEMENT_CRITERIA_KEYS and 'MOID' in VECTORISED_CRITERIA
+
+    criterion = lookupCriterion('moid')
+    assert criterion[0] == 'MOID' and criterion[3] == 'elements'
+
+    meteoroid = (0.98, 0.62, math.radians(0.5), math.radians(160.0), math.radians(352.0))
+    bodies = [(1.0, 0.0167, 0.0, 0.0, math.radians(102.9)), (0.9, 1.0, math.radians(70.0), 1.0, 2.0),
+              (2.0, 0.3, math.radians(5.0), 3.0, 4.0)]
+
+    one_by_one = [calcCriterionFromElements(criterion, meteoroid, body) for body in bodies]
+    for value, body in zip(one_by_one, bodies):
+        assert abs(value - calcMOIDFromPerihelion(*(meteoroid + body))) < 1e-15
+
+    arrays = tuple(np.array(column) for column in zip(*bodies))
+    assert np.allclose(criterion[2](meteoroid, arrays), one_by_one, rtol=0, atol=1e-15)
+
+
 if __name__ == "__main__":
 
     test_functions = [

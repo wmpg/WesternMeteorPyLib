@@ -6,6 +6,7 @@ import math
 import numpy as np
 
 from wmpl.Utils.OrbitConstants import A_JUPITER, GAUSS_K, GAUSS_K_SQUARED
+from wmpl.Utils.MOID import calcMOIDFromPerihelion
 
 
 
@@ -1596,9 +1597,19 @@ ELEMENT_CRITERIA = [
     ('DACS', 'D_ACS', lambda o1, o2: calcDACS(_semiMajorAxisForCriteria(o1[0], o1[1]), o1[1],
         o1[2], _semiMajorAxisForCriteria(o2[0], o2[1]), o2[1], o2[2])),
     ('DSAC', 'D_SAC', lambda o1, o2: calcDSAC(o1[0], o1[1], o1[2], o2[0], o2[1], o2[2])),
+    ('MOID', 'MOID', lambda o1, o2: calcMOIDFromPerihelion(*(tuple(o1) + tuple(o2)))),
     ]
 
 ELEMENT_CRITERIA_KEYS = [key for key, _, _ in ELEMENT_CRITERIA]
+
+# Criteria whose function also takes arrays for the elements of either orbit, and returns an array:
+#   a caller comparing one orbit with many evaluates them in one call. The MOID (minimum orbit
+#   intersection distance, in AU, see wmpl.Utils.MOID) costs ~1 ms in a call of its own and 40-120 us
+#   per pair in a call over many. Unlike the D criteria it is not a similarity of the orbits but how
+#   close they come in space: two very different orbits can cross, so it is best read alongside a D
+#   criterion. It handles parabolic and hyperbolic orbits against an elliptical one, and is NaN for two
+#   open orbits.
+VECTORISED_CRITERIA = ('MOID',)
 
 
 def getElementCriterion(key):

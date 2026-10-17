@@ -433,6 +433,10 @@ python -m wmpl.Rebound.REBOUND traj.pickle --days 3652.5 --mc 100 --parent_bodie
   osculating elements of both orbits along the run. The search gave the meteoroid its measured
   radiant instead, so its value for these criteria differs from the one at the departure (0.30
   against 0.14 for the best Winchcombe candidate, while D_SH went from 0.033 to 0.027).
+- **MOID.** `MOID` can be one of the criteria, in the search and in `--parent_dcrit`: the minimum orbit
+  intersection distance between the meteoroid's orbit and the body's, in AU (see
+  [MOID with the planets](#moid-with-the-planets)), evaluated over all the outputs in one call. It
+  says how close the orbits come, not how similar they are, so read it beside a D criterion.
 - **Output.** The report lists per body and criterion the catalogue value, the value at the departure
   and at the end, the smallest and when, and with clones the median and 95% range at the end and of
   each clone's minimum. No threshold is applied: see [choosing a threshold](DThresholds.md).

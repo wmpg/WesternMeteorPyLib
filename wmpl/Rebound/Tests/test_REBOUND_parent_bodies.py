@@ -110,6 +110,32 @@ def testCriteriaAreLeftOutUntilTheMeteoroidLeavesTheEarth(reb):
     assert np.allclose(t_days, times*reb.SIM_TIME_DAYS)
 
 
+
+def testTheMoidIsEvaluatedOverAllOutputsAtOnce(reb):
+    """ The MOID takes arrays (Dcriteria.VECTORISED_CRITERIA), so it is evaluated over every output in
+        one call; the values are those of one call per output, alongside a criterion that is not. """
+
+    hill = reb.HILL_RADII_AU["Earth"]
+    times = np.linspace(0, -1.0, 8)
+
+    meteoroid = [_row(t, _orb(0.9 + 0.01*k, 0.6, peri=2.0 + 0.01*k), (k + 0.5)*hill*1.5)
+                 for k, t in enumerate(times)]
+    body = [_row(t, _orb(0.95, 0.62, peri=2.05 - 0.005*k), 1.0) for k, t in enumerate(times)]
+
+    criteria = [lookupCriterion("DSH"), lookupCriterion("MOID")]
+    _, values = reb.parentBodyCriteria(meteoroid, body, criteria)
+
+    departure = reb.findEarthDepartureIndex(meteoroid)
+    assert np.all(np.isnan(values[:, :departure]))
+
+    for j in range(departure, len(times)):
+        m, b = meteoroid[j][2], body[j][2]
+        orbit_m = (m.a*(1 - m.e), m.e, m.inc, m.Omega, m.omega)
+        orbit_b = (b.a*(1 - b.e), b.e, b.inc, b.Omega, b.omega)
+        for c, criterion in enumerate(criteria):
+            assert values[c, j] == pytest.approx(calcCriterionFromElements(criterion, orbit_m, orbit_b),
+                                                 abs=1e-12)
+
 def testSummaryStartsAtTheDepartureAndBandsTheClones(reb):
 
     t = np.array([0.0, -1.0, -2.0, -3.0])

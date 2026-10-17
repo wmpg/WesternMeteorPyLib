@@ -548,6 +548,37 @@ def test_vida_criterion_is_offered_and_uses_the_heliocentric_direction():
     assert search['query_heliocentric'] == [given]
 
 
+def test_moid_criterion_ranks_every_body_including_open_comets():
+    """ MOID is offered like the D criteria: as the first criterion it ranks the whole catalogue,
+        the parabolic comet included, with the values of the MOID between the orbits, and the other
+        criteria are carried along. """
+
+    from wmpl.Utils.MOID import calcMOIDFromPerihelion
+
+    search = _search(['MOID', 'DSH'], top_n=-1)
+    assert search['keys'] == ['MOID', 'DSH']
+    assert len(search['matches']) == len(_catalogue())
+
+    q, e, i, peri, node = PHAETHON
+    moids = []
+    for match in search['matches']:
+        expected = calcMOIDFromPerihelion(q, e, np.radians(i), np.radians(node), np.radians(peri),
+            match['q'], match['e'], np.radians(match['incl']), np.radians(match['node']),
+            np.radians(match['peri']))
+        assert abs(match['d_values'][0] - expected) < 1e-12
+        moids.append(match['d_values'][0])
+
+    assert moids == sorted(moids)
+    assert search['matches'][0]['name'] == 'Phaethon' and moids[0] < 1e-9
+    assert 'Parabolic comet' in [m['name'] for m in search['matches']]
+
+    # As a second criterion it is carried beside the first, with the same values
+    by_dsh = _search(['DSH', 'MOID'], top_n=-1)
+    moid_of = {m['name']: m['d_values'][0] for m in search['matches']}
+    for match in by_dsh['matches']:
+        assert abs(match['d_values'][1] - moid_of[match['name']]) < 1e-12
+
+
 if __name__ == "__main__":
 
     test_functions = [obj for name, obj in sorted(globals().items()) \

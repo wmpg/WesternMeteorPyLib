@@ -8,6 +8,12 @@ editing one module changes the other.
 Several criteria can be given at once, with -d on the command line or a list for d_crit. The
 bodies are ranked by the first one and the others are printed beside it. With more than one
 criterion a bar plot of the matches is saved too.
+
+MOID is one of the keys: the minimum orbit intersection distance between the given orbit and each
+body's, in AU (wmpl.Utils.MOID), parabolic and hyperbolic comets included. It says how close the two
+orbits come in space, not how similar they are, so two unrelated orbits can cross; it is best given
+with a D criterion, -d DSH MOID to rank by similarity and check the distance, or -d MOID DSH the other
+way round. It is evaluated over the whole catalogue in one call (~2 s for the ~46 000 bodies).
 """
 
 # The MIT License
@@ -44,7 +50,7 @@ import numpy as np
 from wmpl.Config import config
 from wmpl.Utils.Dcriteria import (GEOCENTRIC_CRITERIA_KEYS, HELIOCENTRIC_CRITERIA_KEYS,
     ALL_CRITERIA_KEYS, DERIVED_FROM_ELEMENTS, lookupCriterion, radiantCriterionMin,
-    calcHeliocentricFromGeocentric, RADIANT_MAX_DISTANCE)
+    calcHeliocentricFromGeocentric, RADIANT_MAX_DISTANCE, VECTORISED_CRITERIA)
 from wmpl.Utils.OrbitConstants import GAUSS_K
 from wmpl.Utils.Pickling import loadPickle
 
@@ -374,6 +380,19 @@ def searchParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10, meteorite
     dcrit_list = []
     values_list = []
 
+    # The criteria that take arrays (see wmpl.Utils.Dcriteria.VECTORISED_CRITERIA) are evaluated over
+    #   the whole catalogue in one call: the MOID takes ~2 s for ~46 000 bodies this way, against ~40 s
+    #   one body at a time
+    precomputed = {}
+    vectorised = [c for c, criterion in enumerate(criteria)
+                  if (criterion[3] == 'elements') and (criterion[0] in VECTORISED_CRITERIA)]
+    if vectorised and parent_body_elements:
+        elements = np.array([body[1:6] for body in parent_body_elements], dtype=float)
+        catalogue_orbits = (elements[:, 0], elements[:, 1], np.radians(elements[:, 2]),
+                            np.radians(elements[:, 4]), np.radians(elements[:, 3]))
+        for c in vectorised:
+            precomputed[c] = np.asarray(criteria[c][2](query, catalogue_orbits), dtype=float)
+
     # Calculate D criteria for every comet and asteroid
     for k, body in enumerate(parent_body_elements):
 
@@ -391,7 +410,11 @@ def searchParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10, meteorite
         values = []
 
         # Calculate the D criteria between the body and the meteoroid
-        for _, _, dFunc, kind in criteria:
+        for c, (_, _, dFunc, kind) in enumerate(criteria):
+
+            if c in precomputed:
+                values.append(float(precomputed[c][k]))
+                continue
 
             if kind == 'elements':
                 values.append(float(dFunc(query, body_orbit)))
@@ -405,7 +428,8 @@ def searchParentBodies(q, e, incl, peri, node, d_crit='dsh', top_n=10, meteorite
         # A criterion written in terms of the semi-major axis is infinite against the parabolic
         #   orbits in the comet catalogue, and such a body is not a match under it. The same holds
         #   for the first criterion, by which the bodies are ranked, of a body whose orbit does not
-        #   reach the Earth. The others are kept as infinite values
+        #   reach the Earth, and for the MOID between two open orbits (NaN). The others are kept as
+        #   they are
         if not np.isfinite(values[0]):
             continue
 
@@ -829,7 +853,9 @@ if __name__ == "__main__":
         "default. One or more keys, case insensitive: "
         + ", ".join(ALL_CRITERIA_KEYS) + ". With several the bodies are "
         "ranked by the first. DT and DSAC read only part of the orbit and rank "
-        "large numbers of bodies equally, so they say little in a search. The keys are those the "
+        "large numbers of bodies equally, so they say little in a search. MOID is the minimum orbit "
+        "intersection distance in AU: how close the orbits come in space, not how similar they are, "
+        "so give it with a D criterion (e.g. -d DSH MOID). The keys are those the "
         "Dcriteria command line takes.", \
         type=str, default=['DSH'])
 

@@ -3128,7 +3128,7 @@ def parentBodyCriteria(meteoroid_outputs, body_outputs, criteria, n_hill=3.0):
             stops (an impact or an escape).
     """
 
-    from wmpl.Utils.Dcriteria import calcCriterionFromElements
+    from wmpl.Utils.Dcriteria import calcCriterionFromElements, VECTORISED_CRITERIA
 
     n = min(len(meteoroid_outputs), len(body_outputs))
     time_days = np.array([row[0]*SIM_TIME_DAYS for row in meteoroid_outputs[:n]])
@@ -3142,13 +3142,24 @@ def parentBodyCriteria(meteoroid_outputs, body_outputs, criteria, n_hill=3.0):
     if departure is None:
         return time_days, values
 
+    # The criteria that take arrays (the MOID, see wmpl.Utils.Dcriteria.VECTORISED_CRITERIA) are
+    #   evaluated over all the outputs in one call, the others output by output
+    vectorised = [c for c, criterion in enumerate(criteria)
+                  if (criterion[3] == 'elements') and (criterion[0] in VECTORISED_CRITERIA)]
+    if vectorised:
+        orbits_m = np.array([_orbit(row[2]) for row in meteoroid_outputs[departure:n]]).T
+        orbits_b = np.array([_orbit(row[2]) for row in body_outputs[departure:n]]).T
+        for c in vectorised:
+            values[c, departure:n] = criteria[c][2](tuple(orbits_m), tuple(orbits_b))
+
     for j in range(departure, n):
 
         orbit_m = _orbit(meteoroid_outputs[j][2])
         orbit_b = _orbit(body_outputs[j][2])
 
         for c, criterion in enumerate(criteria):
-            values[c, j] = calcCriterionFromElements(criterion, orbit_m, orbit_b)
+            if c not in vectorised:
+                values[c, j] = calcCriterionFromElements(criterion, orbit_m, orbit_b)
 
     return time_days, values
 
