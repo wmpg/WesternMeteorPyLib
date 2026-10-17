@@ -452,7 +452,8 @@ osculating orbits of the object and of the planets in the simulation itself, so 
 and works beyond the DE430 range. It runs inside each worker after its integration, at ~40
 microseconds per output and planet, ~1 s per orbit with 3000 outputs: measured 4% of a 300-year run
 with 24 clones (85 s of clone integration against 84 s without it), and less for longer spans with
-the same number of outputs, since its cost grows with the outputs and not with the span. `--no_moid`
+the same number of outputs, since its cost grows with the outputs and not with the span. The series are
+kept as float arrays, 450 MB for 1000 clones with 7000 outputs, against ~1.8 GB as lists. `--no_moid`
 turns it off.
 
 The calculation is `calcMOID` in `wmpl.Utils.MOID`, vectorised over any number of orbit pairs and usable

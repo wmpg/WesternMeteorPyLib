@@ -978,9 +978,10 @@ def testMoidSeriesMapsEachOutputToItsPlanets(reb):
     planet_rows = [[(1.0, 0.0, 0.0, 0.0, 0.0)], [(1.2, 0.0, 0.0, 0.0, 0.0)]]
     object_rows = [(1, (1.5, 0.0, 0.0, 0.0, 0.0)), (0, (2.0, 1.5, 0.0, 0.0, 0.0))]
     out = reb._moidSeries(planet_rows, object_rows, ["Earth"])
+    assert isinstance(out["Earth"], np.ndarray)
     assert out["Earth"][0] == pytest.approx(0.3, abs=1e-12)
-    assert out["Earth"][1] is None
-    assert reb._moidSeries(planet_rows, [], ["Earth"]) == {"Earth": []}
+    assert np.isnan(out["Earth"][1])
+    assert len(reb._moidSeries(planet_rows, [], ["Earth"])["Earth"]) == 0
 
 
 def testMoidSummaryPercentilesOverTheClones(reb):
@@ -989,12 +990,19 @@ def testMoidSummaryPercentilesOverTheClones(reb):
     clones = {"c{:d}".format(k): {"moid_au": {"Earth": [0.01*k, 0.02*k, 0.03*k]}} for k in range(1, 101)}
     clones["short"] = {"moid_au": {"Earth": [5.0]}}   # ended early: counts only at the first output
     clones["none"] = {"moid_au": None}                # MOID not computed for this one
+    clones["array"] = {"moid_au": {"Earth": np.array([0.5, np.nan, 0.5])}}   # as the integration gives it
 
     summary = reb.moidSummary(nominal, clones)
-    assert summary["bodies"] == ["Earth"] and summary["n_clones"] == 101
+    assert summary["bodies"] == ["Earth"] and summary["n_clones"] == 102
     p50 = summary["clones_au"]["Earth"][summary["percentiles"].index(50)]
-    assert p50[2] == pytest.approx(np.percentile(0.03*np.arange(1, 101), 50))
-    assert p50[0] == pytest.approx(np.percentile(np.append(0.01*np.arange(1, 101), 5.0), 50))
+    assert p50[2] == pytest.approx(np.percentile(np.append(0.03*np.arange(1, 101), 0.5), 50), abs=1e-12)
+    assert p50[0] == pytest.approx(np.percentile(np.append(0.01*np.arange(1, 101), [5.0, 0.5]), 50),
+                                   abs=1e-12)
+    assert summary["nominal_au"]["Earth"] == [0.1, 0.2, 0.3]
+
+    # The nominal can be an array too, with NaN becoming None for the JSON
+    as_array = reb.moidSummary({"moid_au": {"Earth": np.array([0.1, np.nan, 0.3])}}, {})
+    assert as_array["nominal_au"]["Earth"] == [0.1, None, 0.3]
 
     assert reb.moidSummary({"moid_au": None}, clones) is None
     assert reb.moidSummary(nominal, {})["clones_au"] is None
