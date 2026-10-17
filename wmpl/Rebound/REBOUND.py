@@ -2530,8 +2530,8 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
     predictabilityHorizon), or the heliocentric distance without clones.
 
     The approaches panel shows the nominal's encounters as stars in the colour of their body, its other
-    passages as small dots, the clones' encounters as faint dots, and, for a body with none of these,
-    its closest approach as a ring. The Sun has no Hill sphere: its
+    passages as a line per body, the clones' encounters as faint dots, and, for a body with none of
+    these, its closest approach as a ring if within PASSAGE_MAX_HILL. The Sun has no Hill sphere: its
     distance is scaled so that its SUN_ENCOUNTER_AU gate falls on the n_hill line of the others. The
     distance to the Earth at the outputs is drawn too in runs shorter than two years, where it shows
     the departure; in longer runs the output sampling misses the approaches.
@@ -2710,13 +2710,13 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
                 markeredgewidth=0, alpha=0.3, zorder=2, gid="clone_encounter:{:s}".format(body))
         drawn.add(body)
 
-    # Every passage of the nominal solution, as small dots
+    # Every passage of the nominal solution, as a thin line through them: one track per body,
+    #   which shows the approach passage by passage and does not read as the clones' scattered dots
     for body in [b for b in PLANET_ORDER if plotted(b)]:
         pas = [p for p in (passages or []) if p["body"] == body]
         if pas:
             ax.plot([p["time_days"]/t_scale for p in pas], [hillUnits(body, p["min_dist_au"]) for p in pas],
-                    marker="o", ls="none", color=planetColor(body), markersize=3, markeredgewidth=0,
-                    zorder=3, gid="passage:{:s}".format(body))
+                    ls="-", lw=0.5, color=planetColor(body), zorder=3, gid="passage:{:s}".format(body))
             drawn.add(body)
 
     # The nominal's encounters, as stars
@@ -2732,12 +2732,15 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
         nominal_encountered.add(body)
 
     # A body with none of the above (no passages recorded, e.g. a results file from an older version,
-    #   or none close enough) still gets its closest approach of the run, as a ring. The Sun's is the
-    #   perihelion, which the other panels show already.
+    #   or none close enough) gets its closest approach of the run as a ring, if it is within
+    #   PASSAGE_MAX_HILL Hill radii: further out the body never mattered. The Sun's closest approach is
+    #   the perihelion, which the q panel shows already.
     rings = set()
     for body, dist in (closest_au or {}).items():
         t_min = (closest_time_days or {}).get(body)
         if (body == "Sun") or (body not in HILL_RADII_AU) or (body in drawn) or (dist is None) or (t_min is None):
+            continue
+        if hillUnits(body, dist) > PASSAGE_MAX_HILL:
             continue
         ax.plot(t_min/t_scale, hillUnits(body, dist), marker="o", ls="none", markersize=6,
                 markerfacecolor="none", markeredgecolor=planetColor(body), markeredgewidth=1.2, zorder=4,
@@ -2760,8 +2763,7 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
         approach_handles.append(Line2D([], [], marker="*", ls="none", color="k", markersize=9,
                                        label="encounter (nominal)"))
     if passages:
-        approach_handles.append(Line2D([], [], marker="o", ls="none", color="k", markersize=3,
-                                       markeredgewidth=0, label="passage (nominal)"))
+        approach_handles.append(Line2D([], [], ls="-", lw=0.5, color="k", label="passage (nominal)"))
     if clone_points:
         approach_handles.append(Line2D([], [], marker="o", ls="none", color="k", markersize=2.5,
                                        markeredgewidth=0, alpha=0.5, label="encounter (clones)"))
