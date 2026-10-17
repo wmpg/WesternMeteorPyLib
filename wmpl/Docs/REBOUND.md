@@ -18,6 +18,7 @@ Monte Carlo clones, and can optionally include radiation forces and measure how 
 - [Monte Carlo clones](#monte-carlo-clones)
 - [Chaos: MEGNO](#chaos-megno)
 - [Predictability horizon](#predictability-horizon)
+- [MOID with the planets](#moid-with-the-planets)
 - [What it writes](#what-it-writes)
 - [Worked examples](#worked-examples)
 - [Using it as a library](#using-it-as-a-library)
@@ -140,6 +141,7 @@ python -m wmpl.Rebound.REBOUND --help
 | `--gr {gr_full,gr}` | General relativity. `gr_full` (default) is the post-Newtonian interaction between all pairs of bodies (EIH); `gr` is the Sun's post-Newtonian correction on every body (Anderson et al. 1975), 3.3× faster with the same results to ~1e-7 in a. See [General relativity](#general-relativity). |
 | `--no_sun_j2` | Leave out the Sun's J2. It is on by default (DE430's J2 = 2.11e-7, reference radius 696 000 km, about the Sun's IAU rotation pole). It keeps Mercury within 1 km of DE430 over 100 years (13 km without it); on meteoroids it is tiny, 0.02″ on the perihelion of a q = 0.14 AU orbit in 400 years. |
 | `--compute_megno` | After the integration, measure the MEGNO chaos indicator of the nominal orbit. See [Chaos: MEGNO](#chaos-megno). |
+| `--no_moid` | Do not compute the MOID with the planets, which is on by default. See [MOID with the planets](#moid-with-the-planets). |
 | `--verbose` | Print the progress of the simulation. |
 
 `--beta` and `--radius` are mutually exclusive: give the beta directly, or give the size and density
@@ -435,6 +437,47 @@ run is chaotic, with a Lyapunov time of ~67 years (range 24–104 over four wind
 
 ---
 
+## MOID with the planets
+
+The minimum orbit intersection distance (MOID) is the smallest distance between two orbits taken as
+fixed curves in space, wherever the bodies are on them. No passage can come closer than the MOID, and
+a passage near it happens whenever the two bodies arrive at the right place together. The distance of a
+single passage depends on that phasing, which is the chaotic part of the problem; the MOID depends only
+on the orbital elements, which evolve slowly. It is therefore the quantity to read beyond the
+predictability horizon: whether, and with which planets, close encounters are possible at all.
+
+The MOID with each planet (Mercury to Neptune; the Moon orbits the Earth, whose MOID stands for both)
+is computed at every output, for the nominal solution and every clone, from the heliocentric
+osculating orbits of the object and of the planets in the simulation itself, so it needs no ephemeris
+and works beyond the DE430 range. It runs inside each worker after its integration, at ~40
+microseconds per output and planet, ~1 s per orbit with 3000 outputs: measured 4% of a 300-year run
+with 24 clones (85 s of clone integration against 84 s without it), and less for longer spans with
+the same number of outputs, since its cost grows with the outputs and not with the span. `--no_moid`
+turns it off.
+
+The calculation is `calcMOID` in `wmpl.Utils.MOID`, vectorised over any number of orbit pairs and usable
+on its own:
+
+```python
+from wmpl.Utils.MOID import calcMOID
+moid = calcMOID(a1, e1, i1, node1, peri1, a2, e2, i2, node2, peri2)   # angles in radians
+```
+
+It samples the first orbit, finds the closest point of the second ellipse to each sample, and refines
+the deepest local minima with Newton's method on both eccentric anomalies, each also started from its
+neighbouring samples. Against a dense grid refined with a tight minimiser it agrees to ~1e-15 AU on
+600 meteoroid-like orbits, including Earth-crossing orbits inclined by less than 2 deg, the hard case:
+there the minima are narrow, and near tangency two of them can fall within one sampling step (without
+the neighbouring starts, one orbit with q = 0.992 AU and i = 0.06 deg came out at 0.0008 AU instead of
+0.0003 AU). It returns NaN for hyperbolic orbits.
+
+The report lists, per planet the object comes within 100 Hill radii of, the nominal's smallest MOID
+after the departure from the Earth and when, and what fraction of the clones is within the encounter
+threshold at the end of the run. The JSON keeps the nominal's MOID at every output and the clones'
+percentiles; the figure draws both (see [The figure](#the-figure)).
+
+---
+
 ## What it writes
 
 All output goes into the directory containing the input pickle, under **fixed names**. Two runs on
@@ -473,6 +516,9 @@ options.
     times the Earth, the Moon 0.72 times), the smaller bodies on top;
   - the **clones' encounters** as faint dots, which show when and with which planets the ensemble meets,
     as opposed to the single nominal history;
+  - the **MOID** with each planet the object comes within 100 Hill radii of, the nominal's as a line in
+    the planet's colour, and the clones' 16–84% band for a planet that a sixth of the clones or more come
+    within the encounter threshold of at some time (see [MOID with the planets](#moid-with-the-planets));
   - for a body with none of these, its **closest approach** of the run as a ring ("never closer": the
     object never came closer to that body), if it is within 100 Hill radii; further out the body never
     mattered.
@@ -501,6 +547,7 @@ The JSON keys, at the top level:
 | `divergence` | The exponential and linear fits to the clone spread, with `r2_exponential` and `r2_linear`. |
 | `whfast_encounter_warning` | The WHFast close-encounter warning string, or `null`. |
 | `megno` | With `--compute_megno`: `times_days`, `megno`, `ln_delta` (logarithm of the deviation), `a_au`, `departure_days`, `escaped` and the `verdict` dict, with `lyapunov_time_years`, `lyapunov_time_range_years`, `lyapunov_onset_years` and `lyapunov_method`. `null` otherwise. |
+| `moid` | Unless `--no_moid`: `bodies`, `nominal_au` (per body, the nominal's MOID in AU at every output, `null` where the orbit is not elliptical), `percentiles` and `clones_au` (per body, the clones' MOID at those percentiles at every output; `null` without clones), and `n_clones`. |
 | `predictability` | With clones: `n_clones`, `threshold`, `reference_days`, `horizon_days` (`null` if not reached), per element (`a`, `e`, `i`) its `horizon_days` and `rank_corr_end`, the series `time_days` and `rank_corr`, and `first_encounter_days` (`fraction` and percentiles `p05`–`p95`). `null` with fewer than 10 clones over the whole span. |
 | `nominal`, `monte_carlo` | Full element series: `time_days`, `a_au`, `e`, `incl_deg`, `peri_deg`, `node_deg`, `f_deg`, `body_distances_au`. |
 
@@ -658,6 +705,7 @@ Other functions worth knowing about, all in `wmpl.Rebound.REBOUND`:
 | `estimateLyapunovFromMC(sim_outputs, sim_outputs_mc)` | The divergence fit over the clone ensemble. |
 | `checkIntegratorAvailable(integrator)` | Raises if the installed REBOUND does not have it. |
 | `findEarthDepartureIndex(sim_outputs, n_hill=3.0)` | First output at which the object left the Earth's neighbourhood. |
+| `moidSummary(nominal_diag, clone_diag)` | The nominal's MOID with each planet at every output and the clones' percentiles, from the `moid_au` diagnostics. |
 
 ---
 
