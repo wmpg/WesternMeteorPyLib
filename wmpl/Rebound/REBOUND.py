@@ -12,7 +12,11 @@ import re
 import sys
 import json
 import time
+import pickle
+import shutil
 import warnings
+import functools
+import multiprocessing
 import concurrent.futures
 from types import SimpleNamespace
 
@@ -232,6 +236,457 @@ SUN_ENCOUNTER_AU = 0.1
 
 # Radius of the Sun in AU (IAU 2015 nominal, 695 700 km), used for impact detection
 SUN_RADIUS_AU = 695700.0/149597870.7
+
+
+def formatTimeSpan(days, decimals=2):
+    """ Format a time span given in days in the unit that suits its length.
+
+    Spans of a Julian year or more lead with years and keep the days in parentheses, spans shorter
+    than a day add the hours, and everything in between is given in days. The days are always
+    printed, so the exact span stays readable at any scale. Years get at least one decimal, so that
+    e.g. 1288 days is not rounded to "4 years".
+
+    Arguments:
+        days: [float] Time span in days. Its sign is ignored: callers state the direction.
+
+    Keyword arguments:
+        decimals: [int] Decimal places of the days and hours, and of the years if not 0. Default 2.
+
+    Return:
+        [str] E.g. "36525.00 days" -> "100.00 years (36525.00 days)", "0.25 days" ->
+            "0.25 days (6.00 h)", "60.00 days" -> "60.00 days".
+    """
+
+    days = abs(days)
+
+    if days >= 365.25:
+        return "{:.{ny}f} years ({:.{n}f} days)".format(days/365.25, days, ny=max(decimals, 1),
+                                                         n=decimals)
+
+    if days < 1.0:
+        return "{:.{n}f} days ({:.{n}f} h)".format(days, 24*days, n=decimals)
+
+    return "{:.{n}f} days".format(days, n=decimals)
+
+
+# Wall-clock interval between two live progress updates, in seconds. The integrations check it in
+#   their heartbeat, so the progress costs one clock read per step whatever the length of the run.
+PROGRESS_INTERVAL_S = 0.5
+
+
+def _storeProgress(store, key, t_days):
+    """ Progress callback for a worker process: record in a shared dict how far its integration has
+    gone, in days. It is a module-level function so that a functools.partial of it can be sent to the
+    worker.
+    """
+
+    store[key] = t_days
+
+
+def _durationText(seconds):
+    """ A wall-clock duration in seconds, minutes or hours, e.g. "45 s", "12 min", "2.5 h". """
+
+    if seconds < 100:
+        return "{:.0f} s".format(seconds)
+
+    if seconds < 6000:
+        return "{:.0f} min".format(seconds/60)
+
+    return "{:.1f} h".format(seconds/3600)
+
+
+class _ProgressLine(object):
+    """ One line of live progress, rewritten in place on a terminal.
+
+    Off a terminal it prints nothing, so log files are not filled with intermediate states.
+
+    Arguments:
+        enabled: [bool] Show the progress at all.
+    """
+
+    def __init__(self, enabled):
+
+        self.enabled = enabled and sys.stdout.isatty()
+        self.t_start = time.time()
+        self.width = 0
+
+    def show(self, text, fraction):
+        """ Rewrite the line with the given text, the percentage done and the time left.
+
+        Arguments:
+            text: [str] What has been integrated so far.
+            fraction: [float] Fraction of the work done, 0 to 1, used for the time left.
+        """
+
+        if not self.enabled:
+            return
+
+        fraction = min(max(fraction, 0.0), 1.0)
+        line = "  {:s}, {:.0f}%".format(text, 100*fraction)
+
+        # Time left, assuming the rest goes at the average rate so far
+        if fraction > 0:
+            elapsed = time.time() - self.t_start
+            line += ", ~{:s} left".format(_durationText(elapsed*(1 - fraction)/fraction))
+
+        # Pad with spaces to overwrite a longer previous line
+        line = line.ljust(self.width)
+        print("\r" + line, end="", flush=True)
+        self.width = len(line)
+
+    def end(self):
+        """ Erase the line, so whatever is printed next starts on a clean line. """
+
+        if self.enabled and self.width:
+            print("\r" + " "*self.width + "\r", end="", flush=True)
+            self.width = 0
+
+
+# Size of one output sample of one integrated orbit (time, heliocentric state, orbital elements and
+#   the distances to the 10 bodies), measured with tracemalloc on CPython 3.9 64-bit: ~1780 B kept
+#   by reboundSimulate (10 years, 5000 outputs, 5 orbits) plus ~270 B for the element series built
+#   for the JSON file; ~414 B in the JSON file (indent=1) and ~374 B in the checkpoint pickle.
+OUTPUT_SAMPLE_MEMORY_BYTES = 1780 + 270
+OUTPUT_SAMPLE_JSON_BYTES = 420
+OUTPUT_SAMPLE_CHECKPOINT_BYTES = 380
+
+# A worker process holds the outputs of the orbit it integrates, plus their pickled copy when it
+#   sends them back
+OUTPUT_SAMPLE_WORKER_BYTES = 1780 + 380
+
+# Estimated outputs above this size are reported before the integration starts
+OUTPUT_SIZE_REPORT_BYTES = 100*1024**2
+
+# Fraction of the memory that the outputs may fill before a warning is given
+OUTPUT_MEMORY_WARN_FRACTION = 0.5
+
+
+def estimateOutputSize(n_outputs, n_orbits, n_workers=0):
+    """ Estimate how much memory and disk the integration outputs will need.
+
+    All the outputs are kept in memory until the end of the run, so they grow as the number of
+    output samples times the number of integrated orbits (the nominal plus the Monte Carlo clones).
+    The integrators themselves need comparatively little memory.
+
+    Arguments:
+        n_outputs: [int] Output samples per orbit.
+        n_orbits: [int] Number of integrated orbits.
+
+    Keyword arguments:
+        n_workers: [int] Number of worker processes integrating the Monte Carlo realizations in
+            parallel, 0 (default) if they are integrated in this process.
+
+    Return:
+        [dict] Sizes in bytes: "memory" (outputs in memory, the workers included), "json" (the
+            results JSON file written by the command line interface) and "checkpoint" (the
+            checkpoint file).
+    """
+
+    n_outputs = max(int(n_outputs), 0)
+    n_samples = n_outputs*max(int(n_orbits), 0)
+
+    return {
+        "memory": (n_samples*OUTPUT_SAMPLE_MEMORY_BYTES
+                   + max(int(n_workers), 0)*n_outputs*OUTPUT_SAMPLE_WORKER_BYTES),
+        "json": n_samples*OUTPUT_SAMPLE_JSON_BYTES,
+        "checkpoint": n_samples*OUTPUT_SAMPLE_CHECKPOINT_BYTES,
+    }
+
+
+def formatBytes(n_bytes):
+    """ Format a size in bytes in kB, MB, GB or TB (powers of 1024), e.g. "3.2 GB". """
+
+    size = float(n_bytes)
+    for unit in ("B", "kB", "MB", "GB"):
+        if size < 1024:
+            return "{:.0f} {:s}".format(size, unit) if unit == "B" else "{:.1f} {:s}".format(size, unit)
+        size /= 1024
+
+    return "{:.1f} TB".format(size)
+
+
+def availableMemoryBytes():
+    """ Memory available to this process, in bytes, or None if it cannot be determined.
+
+    Uses psutil when it is installed (the memory not in use), otherwise the total physical memory,
+    which is an upper limit.
+    """
+
+    try:
+        import psutil
+        return int(psutil.virtual_memory().available)
+    except Exception:
+        pass
+
+    try:
+        return int(os.sysconf("SC_PAGE_SIZE"))*int(os.sysconf("SC_PHYS_PAGES"))
+    except (AttributeError, ValueError, OSError):
+        pass
+
+    # Windows
+    try:
+        import ctypes
+
+        class _MemoryStatus(ctypes.Structure):
+            _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                        ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong),
+                        ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong),
+                        ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+
+        status = _MemoryStatus()
+        status.dwLength = ctypes.sizeof(_MemoryStatus)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+            return int(status.ullAvailPhys)
+    except Exception:
+        pass
+
+    return None
+
+
+def outputMemoryWarning(n_outputs, n_orbits, n_workers=0, available_bytes=None):
+    """ A warning if the outputs of the integration may not fit in memory, or None.
+
+    Arguments:
+        n_outputs: [int] Output samples per orbit.
+        n_orbits: [int] Number of integrated orbits.
+
+    Keyword arguments:
+        n_workers: [int] Number of worker processes (see estimateOutputSize). Default 0.
+        available_bytes: [int] Available memory in bytes. None (default) asks the system
+            (availableMemoryBytes).
+
+    Return:
+        [str] or None.
+    """
+
+    if available_bytes is None:
+        available_bytes = availableMemoryBytes()
+    if not available_bytes:
+        return None
+
+    need = estimateOutputSize(n_outputs, n_orbits, n_workers=n_workers)["memory"]
+    if need <= OUTPUT_MEMORY_WARN_FRACTION*available_bytes:
+        return None
+
+    return ("the outputs of {:d} orbits x {:d} samples need ~{:s} of memory, {:.0f}% of the {:s} "
+            "available. The run may fail or swap heavily; reduce --outputs or --mc.".format(
+                int(n_orbits), int(n_outputs), formatBytes(need), 100*need/available_bytes,
+                formatBytes(available_bytes)))
+
+
+### Checkpoint of the integrated orbits ###
+#
+# A checkpoint is a file of consecutive pickle records: a header with the run parameters, then one
+#   record per orbit as soon as its integration ends (the nominal, each Monte Carlo clone and the
+#   MEGNO run). Each record is flushed to disk on its own, so a run that is cut keeps every orbit
+#   integrated so far, and a run started again with the same parameters integrates only the rest.
+#   A record cut while it was being written is dropped when the file is read back.
+
+CHECKPOINT_VERSION = 1
+
+# Name of the checkpoint file the command line interface writes next to the trajectory pickle
+CHECKPOINT_FILE_NAME = "rebound_checkpoint.pkl"
+
+# Record key of the MEGNO run in the checkpoint (orbit records are keyed by the particle name)
+_CHECKPOINT_MEGNO_KEY = "__megno__"
+
+
+class ReboundCheckpointMismatch(ValueError):
+    """ The checkpoint was written by a run with different parameters, so it cannot be resumed.
+
+    Attributes:
+        differences: [list] (parameter, value in the checkpoint, value of this run) tuples.
+    """
+
+    def __init__(self, path, differences):
+
+        self.path = path
+        self.differences = differences
+
+        text = ", ".join("{:s} ({} in the checkpoint, {} now)".format(k, a, b)
+                         for k, a, b in differences)
+        super(ReboundCheckpointMismatch, self).__init__(
+            "The checkpoint {:s} belongs to a run with different parameters: {:s}".format(path, text))
+
+
+def readReboundCheckpoint(path):
+    """ Read a checkpoint file written by reboundSimulate.
+
+    Arguments:
+        path: [str] Path to the checkpoint file.
+
+    Return:
+        (header, records, valid_size):
+            header: [dict] The run parameters ("signature") and the checkpoint version, or None if
+                the file is missing or has no complete header.
+            records: [dict] {key: record} for every complete record, keyed by the particle name
+                (or _CHECKPOINT_MEGNO_KEY).
+            valid_size: [int] Size in bytes of the readable part of the file. Anything after it is
+                a record cut while it was being written.
+    """
+
+    header = None
+    records = {}
+    valid_size = 0
+
+    if not os.path.isfile(path):
+        return header, records, valid_size
+
+    with open(path, "rb") as f:
+        while True:
+            try:
+                entry = pickle.load(f)
+            except EOFError:
+                break
+            except Exception:
+                # A record cut while it was written raises many kinds of errors while unpickling
+                break
+
+            if not isinstance(entry, dict):
+                break
+
+            if entry.get("kind") == "header":
+                if header is not None:
+                    break
+                header = entry
+
+            elif (header is not None) and (entry.get("kind") == "record"):
+                records[entry["key"]] = entry["data"]
+
+            else:
+                break
+
+            valid_size = f.tell()
+
+    if header is None:
+        return None, {}, 0
+
+    return header, records, valid_size
+
+
+def _sha1(obj):
+    """ SHA-1 of a JSON-serialisable structure, with the floats at full precision (their shortest exact
+    representation), for the checkpoint signature. """
+
+    import hashlib
+
+    return hashlib.sha1(json.dumps(obj, sort_keys=True, default=float).encode()).hexdigest()
+
+
+def checkpointSignature(task, julian_date, state_vect, realizations, random_seed, obj_name, sim_days,
+                        n_outputs, ephem_source):
+    """ The run parameters a checkpoint is resumed against (see reboundSimulate).
+
+    It keeps the main parameters by value, so that a mismatch can be reported, and two hashes that make
+    the comparison complete: one of the integration task without the particles (the planets, the output
+    times and every setting of the dynamics, including any added later), and one of the Monte Carlo
+    realizations themselves, which may have been sampled or given.
+
+    Arguments:
+        task: [dict] The integration task (see _integrateParticles), particles left out of the hash.
+        julian_date: [float] Reference Julian date of the run.
+        state_vect: [list] Nominal state vector (ECI, m and m/s).
+        realizations: [list] Monte Carlo realizations of state_vect, possibly empty.
+        random_seed: [int] Seed the realizations were drawn with, or None.
+        obj_name: [str] Name of the nominal solution.
+        sim_days: [float] Length of the integration in days.
+        n_outputs: [int] Number of output times.
+        ephem_source: [str] Source of the planet positions.
+
+    Return:
+        [dict] The signature.
+    """
+
+    settings = {k: v for k, v in task.items() if k not in ("particle_states", "particle_names")}
+    with_mc = len(realizations) > 0
+
+    return {
+        "julian_date": float(julian_date),
+        "state_vect": [float(v) for v in state_vect],
+        "mc_runs": len(realizations),
+        "random_seed": random_seed if with_mc else None,
+        "obj_name": str(obj_name),
+        "direction": task.get("direction"),
+        "sim_days": float(sim_days),
+        "n_outputs": int(n_outputs),
+        "reference_frame": task.get("reference_frame"),
+        "ephem_source": ephem_source,
+        "beta": task.get("beta"),
+        "integrator": task.get("integrator"),
+        "dt_days": task.get("dt_days"),
+        "integration_sha1": _sha1(settings),
+        "realizations_sha1": _sha1(np.asarray(realizations, dtype=float).tolist()) if with_mc else None,
+    }
+
+
+def _checkpointDifferences(saved, current):
+    """ The run parameters that differ between a checkpoint and this run, as (key, saved, current). """
+
+    differences = []
+    for key in sorted(set(saved) | set(current)):
+        a, b = saved.get(key), current.get(key)
+
+        # The Monte Carlo seed is only compared if this run sets one
+        if (key == "random_seed") and (b is None):
+            continue
+
+        if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)) and (len(a) == len(b)):
+            if np.allclose(np.array(a, dtype=float), np.array(b, dtype=float), rtol=1e-12, atol=0):
+                continue
+
+        elif isinstance(a, float) and isinstance(b, float):
+            if np.isclose(a, b, rtol=1e-12, atol=0):
+                continue
+
+        elif a == b:
+            continue
+
+        differences.append((key, a, b))
+
+    return differences
+
+
+class _CheckpointWriter(object):
+    """ Appends records to a checkpoint file, each one flushed to disk as soon as it is written.
+
+    Arguments:
+        path: [str] Path to the checkpoint file.
+        signature: [dict] Run parameters, written as the header of a new file.
+        valid_size: [int] Readable size of an existing checkpoint to continue (see
+            readReboundCheckpoint), or None to start a new file.
+    """
+
+    def __init__(self, path, signature, valid_size=None):
+
+        self.path = path
+
+        if valid_size:
+            # Continue the existing file, cutting off a record left incomplete by the interruption
+            with open(path, "r+b") as f:
+                f.truncate(valid_size)
+
+        else:
+            self._write({"kind": "header", "version": CHECKPOINT_VERSION, "signature": signature},
+                        mode="wb")
+
+    def _write(self, entry, mode="ab"):
+
+        # The file is opened for each record, so nothing is left open if the run is cut
+        with open(self.path, mode) as f:
+            pickle.dump(entry, f, protocol=pickle.HIGHEST_PROTOCOL)
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except OSError:
+                pass
+
+    def add(self, key, data):
+        """ Append the record of one integrated orbit. """
+
+        self._write({"kind": "record", "key": key, "data": data})
 
 
 def _encounterThreshold(body, n_hill):
@@ -1347,7 +1802,7 @@ def _reverseVelocities(sim):
         p.vx, p.vy, p.vz = -p.vx, -p.vy, -p.vz
 
 
-def _integrateParticles(task):
+def _integrateParticles(task, progress=None):
     """ Build a REBOUND simulation from precomputed planet states and integrate one or more test
     particles through it, returning their per-timestep orbital elements and distances.
 
@@ -1375,6 +1830,11 @@ def _integrateParticles(task):
             integrator:      [str]  Optional. "ias15" (default, adaptive), "whfast" or "trace".
             dt_days:         [float] Optional. Timestep in days for the fixed-step integrators.
                                  Ignored by IAS15. Default FIXED_STEP_DEFAULT_DT_DAYS[integrator].
+
+    Keyword arguments:
+        progress: [callable] Optional. Called as progress(t_days) with the time integrated so far,
+            in days, at most once every PROGRESS_INTERVAL_S seconds of wall clock. It must be
+            picklable if the task is sent to a worker process (see _storeProgress). Default None.
 
     Return:
         [dict] {
@@ -1569,11 +2029,23 @@ def _integrateParticles(task):
             "encounters": [],
         }
 
+    # Wall-clock time of the next progress report. The first one waits a full interval, so a short
+    #   integration reports nothing.
+    next_progress = [time.time() + PROGRESS_INTERVAL_S]
+
     def heartbeat(sim_pointer):
 
         s = sim_pointer.contents
         p = s.particles
         t_now = s.t
+
+        # Live progress. A failing report (e.g. a closed terminal) must never stop the integration.
+        if (progress is not None) and (time.time() >= next_progress[0]):
+            next_progress[0] = time.time() + PROGRESS_INTERVAL_S
+            try:
+                progress(abs(t_now)/(2*np.pi)*365.25)
+            except Exception:
+                pass
 
         for pname, pidx in particle_idx.items():
 
@@ -1780,7 +2252,7 @@ def _integrateParticles(task):
     return {"outputs": outputs, "diagnostics": diagnostics}
 
 
-def computeMegno(task, seed=1):
+def computeMegno(task, seed=1, progress=None):
     """ MEGNO of the integrated object's orbit, from a purely gravitational integration.
 
     MEGNO (Mean Exponential Growth factor of Nearby Orbits, Cincotta & Simo 2000) follows how fast
@@ -1810,6 +2282,8 @@ def computeMegno(task, seed=1):
 
     Keyword arguments:
         seed: [int] Seed for the random initial deviation, for reproducibility. Default 1.
+        progress: [callable] Optional. Called as progress(t_days), as in _integrateParticles.
+            Default None.
 
     Return:
         [dict] {
@@ -1865,11 +2339,21 @@ def computeMegno(task, seed=1):
     # Running integrals: I = int s d(ln|delta|) and J = int Y ds
     acc = {"t": sim.t, "ln_d": logDeviation(), "I": 0.0, "J": 0.0, "Y": 0.0}
 
+    # Wall-clock time of the next progress report (see _integrateParticles)
+    next_progress = [time.time() + PROGRESS_INTERVAL_S]
+
     def heartbeat(sim_pointer):
 
         # Both integrals are accumulated with the midpoint rule over the integrator's own steps,
         #   which is why they are updated here rather than at the (far coarser) output times
         t_now = sim_pointer.contents.t
+
+        if (progress is not None) and (time.time() >= next_progress[0]):
+            next_progress[0] = time.time() + PROGRESS_INTERVAL_S
+            try:
+                progress(abs(t_now)/(2*np.pi)*365.25)
+            except Exception:
+                pass
         h = t_now - acc["t"]
 
         # REBOUND calls the heartbeat once before the first step is taken, and again whenever an
@@ -2069,7 +2553,7 @@ def reboundSimulate(
         direction="forward", sim_days=60, n_outputs=500, obj_name="obj", obj_mass=0.0, mc_runs=100,
         reference_frame="heliocentric", ephem_source="local", n_cpu=None,
         show_progress=True, return_diagnostics=False, random_seed=None, beta=None, integrator="ias15",
-        dt_days=None, compute_megno=False, verbose=False):
+        dt_days=None, compute_megno=False, checkpoint_path=None, verbose=False):
     """ Takes an state vector (or a Trajectory object), runs REBOUND and produces orbital elements for the 
     object at the end of the simulation or at the specified time.
 
@@ -2101,7 +2585,10 @@ def reboundSimulate(
         n_cpu: [int] Number of parallel processes used to integrate the Monte Carlo realizations.
             If None (default), uses max(1, os.cpu_count() - 1). Each realization is integrated in
             its own independent simulation, so its adaptive timestep does not affect the others.
-        show_progress: [bool] If True (default), report Monte Carlo integration progress.
+        show_progress: [bool] If True (default), show the progress of the integrations live on a
+            terminal: the time integrated so far for the nominal orbit and the MEGNO, the share of
+            the Monte Carlo realizations done, and the time left. Off a terminal only the Monte
+            Carlo summary is printed.
         return_diagnostics: [bool] If True, also return the per-particle diagnostics dictionary
             (closest approaches and impacts measured during the integration). Default False,
             which preserves the two-value return signature.
@@ -2123,6 +2610,14 @@ def reboundSimulate(
             solution's diagnostics. Requires return_diagnostics=True, which is the only way the
             result is returned; it is skipped with a warning otherwise, since the extra integration
             is as expensive as the nominal run. Default False.
+        checkpoint_path: [str] If given, save each orbit to this file as soon as its integration
+            ends (the nominal, each Monte Carlo realization and the MEGNO run), so that a run that is
+            cut keeps what it had integrated. If the file already holds a checkpoint of a run with
+            the same parameters, the orbits in it are read back instead of integrated again, and
+            the run goes on from there. If random_seed is None, the seed is taken from the
+            checkpoint (or drawn and stored in a new one), so the Monte Carlo realizations are the
+            same as before the interruption. The file is left in place at the end: delete it once
+            the results are saved. None (default) saves nothing. See readReboundCheckpoint.
         verbose: [bool] If True, print out the progress of the simulation.
 
     Return:
@@ -2133,6 +2628,10 @@ def reboundSimulate(
             its closest approaches ("min_dist_au", "min_time_days"), every close encounter
             ("encounters"), whether it left the Earth's neighbourhood ("departed"), and any impact
             ("impact"). See _integrateParticles.
+
+    Raises:
+        ReboundCheckpointMismatch: if checkpoint_path holds a checkpoint of a run with different
+            parameters.
 
     """
 
@@ -2168,10 +2667,46 @@ def reboundSimulate(
     
 
 
+    # Monte Carlo realizations are drawn if their number is given and the trajectory has uncertainties
+    with_mc = (mc_runs > 1) and (traj is not None) and (traj.uncertainties is not None)
+
+    # Checkpoint: write each orbit as soon as it has been integrated, and read back the orbits a cut
+    #   run with the same parameters had already integrated
+    checkpoint = None
+    checkpoint_records = {}
+    header, valid_size = None, 0
+    if checkpoint_path:
+
+        header, checkpoint_records, valid_size = readReboundCheckpoint(checkpoint_path)
+
+        # Without a seed, resume with the one of the checkpoint, so the realizations are the same.
+        #   A new checkpoint needs a seed of its own for the same reason.
+        if with_mc and (random_seed is None):
+            if header is not None:
+                random_seed = header["signature"].get("random_seed")
+            if random_seed is None:
+                random_seed = int(np.random.SeedSequence().entropy % (2**32))
+
+    # All the outputs stay in memory until the end, so warn up front if they may not fit
+    n_orbits = 1 + (mc_runs if with_mc else 0)
+    n_workers = 0
+    if with_mc:
+        n_workers = n_cpu if n_cpu is not None else max(1, (os.cpu_count() or 1) - 1)
+        n_workers = min(n_workers, mc_runs) if n_workers > 1 else 0
+    output_size = estimateOutputSize(n_outputs, n_orbits, n_workers=n_workers)
+    if show_progress and (output_size["memory"] >= OUTPUT_SIZE_REPORT_BYTES):
+        print("Outputs of {:d} orbit(s) x {:d} samples: ~{:s} in memory.".format(
+            n_orbits, n_outputs, formatBytes(output_size["memory"])))
+    memory_warning = outputMemoryWarning(n_outputs, n_orbits, n_workers=n_workers)
+    if memory_warning and show_progress:
+        print("Warning: " + memory_warning)
+    elif memory_warning:
+        warnings.warn("The outputs may not fit in memory: " + memory_warning, RuntimeWarning)
+
     # If the number of Monte Carlo simulations is given and the trajectory has uncertainties defined,
     # sample the state vector from the uncertainties
     state_vect_realizations = []
-    if (mc_runs > 1) and (traj is not None) and (traj.uncertainties is not None):
+    if with_mc:
 
         # Extract the state vector covariance matrix
         cov = traj.state_vect_cov
@@ -2288,12 +2823,54 @@ def reboundSimulate(
 
     if verbose:
         print("Running simulation...")
-        print(f"Simulation time: {tsimend:.2f} years ({tsimend*365.25:.2f} days)")
+        print("Simulation time: {:s}".format(formatTimeSpan(sim_days)))
         print(f"Number of outputs: {n_outputs}")
         print(f"Direction: {direction}")
 
+    # Live progress of a single integration, as the time reached
+    def _spanProgress(line, label):
+        if not line.enabled:
+            return None
+        return lambda t_days: line.show("{:s}: {:s} integrated".format(
+            label, formatTimeSpan(t_days, decimals=0)), t_days/sim_days)
+
+    # Checkpoint: its signature holds the whole integration task (without the particles), so any setting
+    #   that changes the dynamics is compared, and the realizations themselves
+    if checkpoint_path:
+
+        signature = checkpointSignature(
+            _make_task([], []), julian_date, state_vect, state_vect_realizations, random_seed, obj_name,
+            sim_days, n_outputs, ephem_source)
+
+        if header is not None:
+            differences = _checkpointDifferences(header["signature"], signature)
+            if differences:
+                raise ReboundCheckpointMismatch(checkpoint_path, differences)
+
+        checkpoint = _CheckpointWriter(checkpoint_path, signature,
+                                       valid_size=(valid_size if header is not None else None))
+
+        if show_progress:
+            n_orbits_saved = len([k for k in checkpoint_records if k != _CHECKPOINT_MEGNO_KEY])
+            if n_orbits_saved:
+                print("Resuming from the checkpoint {:s}: {:d} of {:d} orbits already "
+                      "integrated.".format(checkpoint_path, n_orbits_saved, 1 + len(state_vect_realizations)))
+            else:
+                print("Saving each integrated orbit to the checkpoint {:s}".format(checkpoint_path))
+
     # Nominal solution, integrated in its own simulation (in the main process)
-    nominal_result = _integrateParticles(_make_task([state_vect_rot], [obj_name]))
+    if obj_name in checkpoint_records:
+        nominal_result = checkpoint_records[obj_name]
+
+    else:
+        progress_line = _ProgressLine(show_progress)
+        nominal_result = _integrateParticles(_make_task([state_vect_rot], [obj_name]),
+                                             progress=_spanProgress(progress_line, "Nominal orbit"))
+        progress_line.end()
+
+        if checkpoint is not None:
+            checkpoint.add(obj_name, nominal_result)
+
     outputs = nominal_result["outputs"][obj_name]
     diagnostics = dict(nominal_result["diagnostics"])
 
@@ -2316,49 +2893,97 @@ def reboundSimulate(
         tasks = [_make_task([s], [n]) for s, n in zip(mc_states, mc_names)]
 
         n_total = len(tasks)
-        is_tty = show_progress and sys.stdout.isatty()
 
-        # Live in-place progress bar on a terminal; stay quiet otherwise (avoids spamming log files)
-        def _report(done, t_start):
-            if is_tty:
-                elapsed = time.time() - t_start
-                print("\r  Monte Carlo: {:d}/{:d} realizations integrated ({:.1f} s)".format(
-                    done, n_total, elapsed), end="", flush=True)
+        # The realizations read back from the checkpoint are not integrated again
+        results = [checkpoint_records.get(n) for n in mc_names]
+        todo = [idx for idx, res in enumerate(results) if res is None]
+        n_resumed = n_total - len(todo)
+        n_cpu = max(1, min(n_cpu, len(todo)))
 
-        if show_progress:
-            print("Integrating {:d} Monte Carlo realizations on {:d} core(s)...".format(n_total, n_cpu))
+        if show_progress and todo:
+            print("Integrating {:d} Monte Carlo realizations on {:d} core(s)...".format(
+                len(todo), n_cpu))
+
+        # Live in-place progress on a terminal: the realizations done, and the share of the
+        #   realizations left to integrate done so far, counting the ones still running
+        progress_line = _ProgressLine(show_progress)
+
+        def _report(n_done, done_equiv):
+            progress_line.show("Monte Carlo: {:d}/{:d} realizations done".format(
+                n_resumed + n_done, n_total), done_equiv/len(todo))
+
+        # Save each realization to the checkpoint as soon as it is done
+        def _finished(idx):
+            if (checkpoint is not None) and results[idx]:
+                checkpoint.add(mc_names[idx], results[idx])
 
         t_mc_start = time.time()
 
-        if n_cpu == 1:
-            results = []
-            for k, t in enumerate(tasks, start=1):
-                results.append(_integrateParticles(t))
-                _report(k, t_mc_start)
+        if not todo:
+            pass
+
+        elif n_cpu == 1:
+            for k, idx in enumerate(todo):
+                progress = None
+                if progress_line.enabled:
+                    progress = (lambda t_days, k=k: _report(k, k + min(t_days/sim_days, 1.0)))
+                results[idx] = _integrateParticles(tasks[idx], progress=progress)
+                _finished(idx)
+                _report(k + 1, k + 1)
 
         else:
-            results = [None]*n_total
-            with concurrent.futures.ProcessPoolExecutor(max_workers=n_cpu) as executor:
-                future_to_idx = {executor.submit(_integrateParticles, t): idx
-                                 for idx, t in enumerate(tasks)}
-                done = 0
-                for future in concurrent.futures.as_completed(future_to_idx):
-                    idx = future_to_idx[future]
-                    try:
-                        results[idx] = future.result()
-                    except Exception as e:
-                        print("\nWarning: Monte Carlo realization {:s} failed and was skipped: {:s}".format(
-                            mc_names[idx], str(e)))
-                        results[idx] = None
-                    done += 1
-                    _report(done, t_mc_start)
+
+            # The workers report how far they have got through a shared dict, which is only set up
+            #   when there is a terminal to show it on (the manager is an extra process)
+            manager = multiprocessing.Manager() if progress_line.enabled else None
+            shared = manager.dict() if manager is not None else None
+
+            try:
+                with concurrent.futures.ProcessPoolExecutor(max_workers=n_cpu) as executor:
+                    future_to_idx = {
+                        executor.submit(
+                            _integrateParticles, tasks[idx],
+                            None if shared is None else functools.partial(_storeProgress, shared, idx)
+                        ): idx
+                        for idx in todo}
+                    pending = set(future_to_idx)
+                    finished_idx = set()
+
+                    while pending:
+
+                        # Wake up at least every PROGRESS_INTERVAL_S to refresh the progress
+                        finished, pending = concurrent.futures.wait(
+                            pending, timeout=PROGRESS_INTERVAL_S,
+                            return_when=concurrent.futures.FIRST_COMPLETED)
+
+                        for future in finished:
+                            idx = future_to_idx[future]
+                            finished_idx.add(idx)
+                            try:
+                                results[idx] = future.result()
+                            except Exception as e:
+                                progress_line.end()
+                                print("Warning: Monte Carlo realization {:s} failed and was skipped: "
+                                      "{:s}".format(mc_names[idx], str(e)))
+                                results[idx] = None
+                            _finished(idx)
+
+                        if progress_line.enabled:
+                            running = {k: v for k, v in shared.items() if k not in finished_idx}
+                            _report(len(finished_idx), len(finished_idx) + sum(
+                                min(v/sim_days, 1.0) for v in running.values()))
+
+            finally:
+                if manager is not None:
+                    manager.shutdown()
+
+        progress_line.end()
 
         n_ok = sum(1 for r in results if r)
         if show_progress:
-            # Finish the in-place line (newline) on a terminal, or print the single summary otherwise
-            prefix = "\r" if is_tty else "  "
-            print("{:s}Monte Carlo: {:d}/{:d} realizations integrated ({:.1f} s){:s}".format(
-                prefix, n_ok, n_total, time.time() - t_mc_start,
+            print("  Monte Carlo: {:d}/{:d} realizations integrated ({:.1f} s){:s}{:s}".format(
+                n_ok, n_total, time.time() - t_mc_start,
+                "  [{:d} from the checkpoint]".format(n_resumed) if n_resumed else "",
                 "" if n_ok == n_total else "  [{:d} failed]".format(n_total - n_ok)))
 
         for res in results:
@@ -2372,9 +2997,16 @@ def reboundSimulate(
                       "MEGNO is only returned in the diagnostics. Skipping it.", RuntimeWarning)
 
     elif compute_megno:
-        if show_progress:
-            print("Computing the MEGNO of the nominal orbit (Newtonian gravity only, IAS15)...")
-        megno = computeMegno(_make_task([state_vect_rot], [obj_name]))
+        megno = checkpoint_records.get(_CHECKPOINT_MEGNO_KEY)
+        if megno is None:
+            if show_progress:
+                print("Computing the MEGNO of the nominal orbit (Newtonian gravity only, IAS15)...")
+            progress_line = _ProgressLine(show_progress)
+            megno = computeMegno(_make_task([state_vect_rot], [obj_name]),
+                                 progress=_spanProgress(progress_line, "MEGNO"))
+            progress_line.end()
+            if checkpoint is not None:
+                checkpoint.add(_CHECKPOINT_MEGNO_KEY, megno)
         megno["verdict"] = classifyMegno(megno["times_days"], megno["megno"], megno["a_au"])
         diagnostics[obj_name] = dict(diagnostics[obj_name], megno=megno)
 
@@ -2465,6 +3097,12 @@ if __name__ == "__main__":
                         "Newtonian gravity only (IAS15) and compute its MEGNO chaos indicator, "
                         "reporting whether it converges to 2 (regular orbit) or keeps growing "
                         "(chaotic). MEGNO needs tens of orbital periods: use --days accordingly.")
+
+    parser.add_argument("--no_checkpoint", action="store_true",
+                        help="Do not save the orbits to {:s} next to the pickle as they are integrated. "
+                        "By default each orbit is saved as soon as it is done, so a run that is cut "
+                        "can be started again with the same command and goes on where it stopped. "
+                        "The file is deleted once the results are saved.".format(CHECKPOINT_FILE_NAME))
 
     parser.add_argument("--verbose", action="store_true", help="Print out the progress of the simulation.")
 
@@ -2557,22 +3195,75 @@ if __name__ == "__main__":
     ### ###
 
     
+    # All the results are saved next to the trajectory pickle
+    out_dir = os.path.dirname(args.pickle_path)
+
+    ### Size of the outputs and the checkpoint ###
+
+    checkpoint_path = None if args.no_checkpoint else os.path.join(out_dir, CHECKPOINT_FILE_NAME)
+
+    # A run cut before its end is resumed from its checkpoint. Without --seed, take the seed of the
+    #   checkpoint, so that the remaining Monte Carlo realizations are drawn as they were before.
+    if checkpoint_path is not None:
+        checkpoint_header = readReboundCheckpoint(checkpoint_path)[0]
+        if (checkpoint_header is not None) and (args.seed is None):
+            checkpoint_seed = checkpoint_header["signature"].get("random_seed")
+            if checkpoint_seed is not None:
+                random_seed = checkpoint_seed
+
+    # The JSON file and the checkpoint grow as the outputs do, so check the free disk space before
+    #   integrating rather than finding out at the end
+    with_mc = (args.mc > 1) and (traj.uncertainties is not None)
+    output_size = estimateOutputSize(args.outputs, 1 + (args.mc if with_mc else 0))
+    disk_need = output_size["json"] + (0 if checkpoint_path is None else output_size["checkpoint"])
+    if disk_need >= OUTPUT_SIZE_REPORT_BYTES:
+        print("Results on disk: ~{:s} JSON{:s}.".format(
+            formatBytes(output_size["json"]),
+            "" if checkpoint_path is None else
+            " + ~{:s} checkpoint while it runs".format(formatBytes(output_size["checkpoint"]))))
+    try:
+        disk_free = shutil.disk_usage(out_dir or ".").free
+    except OSError:
+        disk_free = None
+    if (disk_free is not None) and (disk_need > disk_free):
+        print("Warning: the results need ~{:s} on disk but only {:s} are free in {:s}. Reduce --outputs "
+              "or --mc{:s}.".format(formatBytes(disk_need), formatBytes(disk_free),
+                                    os.path.abspath(out_dir or "."),
+                                    "" if checkpoint_path is None else ", or use --no_checkpoint"))
+
+    ### ###
+
     # State the integration span up front, so it is visible while the integration is running and
     # not only in the summary printed at the end
-    print("Integrating {:.2f} days {:s} from the reference epoch {:.6f} JD (TDB) = {:s} UTC.".format(
-        sim_days, direction, traj.jdt_ref,
+    print("Integrating {:s} {:s} from the reference epoch {:.6f} JD (TDB) = {:s} UTC.".format(
+        formatTimeSpan(sim_days), direction, traj.jdt_ref,
         astropy.time.Time(traj.jdt_ref, format='jd', scale='utc').iso))
 
     # Run the simulation for the given number of days from the epoch of the trajectory
+    def _runSimulation():
+        return reboundSimulate(
+            None, None, traj=traj, direction=direction, sim_days=sim_days,
+            obj_name=traj.traj_id, mc_runs=args.mc, n_outputs=args.outputs,
+            reference_frame=reference_frame,
+            ephem_source=ephem_source, n_cpu=n_cpu, return_diagnostics=True,
+            random_seed=random_seed, beta=beta, integrator=args.integrator, dt_days=dt_days,
+            compute_megno=args.compute_megno, checkpoint_path=checkpoint_path, verbose=args.verbose
+            )
+
     t_run_start = time.time()
-    sim_outputs, sim_outputs_mc, sim_diagnostics = reboundSimulate(
-        None, None, traj=traj, direction=direction, sim_days=sim_days,
-        obj_name=traj.traj_id, mc_runs=args.mc, n_outputs=args.outputs,
-        reference_frame=reference_frame,
-        ephem_source=ephem_source, n_cpu=n_cpu, return_diagnostics=True,
-        random_seed=random_seed, beta=beta, integrator=args.integrator, dt_days=dt_days,
-        compute_megno=args.compute_megno, verbose=args.verbose
-        )
+    try:
+        sim_outputs, sim_outputs_mc, sim_diagnostics = _runSimulation()
+
+    except ReboundCheckpointMismatch as e:
+
+        # The checkpoint left by a cut run with other parameters is kept aside, not overwritten
+        checkpoint_prev = checkpoint_path + ".prev"
+        os.replace(checkpoint_path, checkpoint_prev)
+        print("The checkpoint of the previous run cannot be resumed, its parameters differ: {:s}.".format(
+            ", ".join("{:s} ({} -> {})".format(k, a, b) for k, a, b in e.differences)))
+        print("  Moved it to {:s} and starting a new run.".format(checkpoint_prev))
+        sim_outputs, sim_outputs_mc, sim_diagnostics = _runSimulation()
+
     sim_wall = time.time() - t_run_start
 
     ### Work out what happened to each Monte Carlo clone ###
@@ -2746,10 +3437,10 @@ if __name__ == "__main__":
     # short of the request (for example because the object impacted a body)
     achieved_days = abs(final_sim_days)
     if abs(achieved_days - sim_days) > 1e-6:
-        print("  Integration  : {:.2f} days {:s}  (requested {:.2f} days, stopped early)".format(
-            achieved_days, direction, sim_days))
+        print("  Integration  : {:s} {:s}  (requested {:s}, stopped early)".format(
+            formatTimeSpan(achieved_days), direction, formatTimeSpan(sim_days)))
     else:
-        print("  Integration  : {:.2f} days {:s}".format(achieved_days, direction))
+        print("  Integration  : {:s} {:s}".format(formatTimeSpan(achieved_days), direction))
 
     print("  Frame        : {:s}".format(reference_frame))
     print("  Forces       : {:s}".format(
@@ -2772,8 +3463,8 @@ if __name__ == "__main__":
     # If the object hit something, say so before anything else: the elements below are the state at
     # the last step before the impact, not a surviving orbit.
     if impact:
-        print("  *** IMPACT: the object hit {:s} after {:.4f} days ***".format(
-            impact["body"], abs(impact["time_days"])))
+        print("  *** IMPACT: the object hit {:s} after {:s} ***".format(
+            impact["body"], formatTimeSpan(impact["time_days"], decimals=4)))
         print("  The elements below are the last state before the impact, not a surviving orbit.")
         print("-" * 78)
 
@@ -2833,8 +3524,9 @@ if __name__ == "__main__":
     # Ejection, if the object ran out of the simulation volume
     escaped = nominal_diag.get("escaped")
     if escaped:
-        print("  *** EJECTED: the object left the simulation volume after {:.4f} days "
-              "({:.1f} AU from the Sun) ***".format(abs(escaped["time_days"]), escaped["dist_au"]))
+        print("  *** EJECTED: the object left the simulation volume after {:s} "
+              "({:.1f} AU from the Sun) ***".format(
+                  formatTimeSpan(escaped["time_days"], decimals=4), escaped["dist_au"]))
 
     # What happened to the Monte Carlo clones, as a fraction of the whole ensemble
     if len(sim_outputs_mc):
@@ -2889,14 +3581,17 @@ if __name__ == "__main__":
             print("    {:d} realization(s) ended early and contributed only over their own span.".format(
                 lyap["n_truncated"]))
         if lyap["truncated_at_saturation"] and not lyap["saturated"]:
-            print("    Fitted over the first {:.0f} d of {:.0f} d, while the ensemble was still "
-                  "compact".format(lyap["fit_window_days"], lyap["total_span_days"]))
-            print("    (separation {:.3e} AU at the end of that window, {:d} samples).".format(
-                lyap["separation_fit_end_au"], lyap["n_samples_used"]))
+            print("    Fitted over the first {:s} of {:s},".format(
+                formatTimeSpan(lyap["fit_window_days"], decimals=0),
+                formatTimeSpan(lyap["total_span_days"], decimals=0)))
+            print("    while the ensemble was still compact (separation {:.3e} AU at the end".format(
+                lyap["separation_fit_end_au"]))
+            print("    of that window, {:d} samples).".format(lyap["n_samples_used"]))
         if lyap["growth"] == "exponential":
-            print("    Growth is exponential: Lyapunov time ~ {:.1f} d  "
+            print("    Growth is exponential: Lyapunov time ~ {:s}  "
                   "(lambda = {:.4f} /d, R2 = {:.3f})".format(
-                      lyap["lyapunov_time_days"], lyap["lambda_per_day"], lyap["r2_exponential"]))
+                      formatTimeSpan(lyap["lyapunov_time_days"], decimals=1), lyap["lambda_per_day"],
+                      lyap["r2_exponential"]))
             print("    The integration loses predictive value on timescales beyond this.")
         elif lyap["growth"] == "linear":
             print("    Growth is linear (regular motion, R2 = {:.3f}); no exponential divergence "
@@ -2917,12 +3612,13 @@ if __name__ == "__main__":
         # Semi-major-axis spread: the chaos indicator that is not corrupted by phase drift
         ed = lyap.get("element_divergence")
         if ed is not None:
-            print("    Spread in a over {:.0f} d: {:.3e} -> {:.3e} AU (x{:.2f})".format(
-                ed["span_days"], ed["sigma_a_start_au"], ed["sigma_a_end_au"],
-                ed["sigma_a_growth_factor"]))
+            print("    Spread in a over {:s}: {:.3e} -> {:.3e} AU (x{:.2f})".format(
+                formatTimeSpan(ed["span_days"], decimals=0), ed["sigma_a_start_au"],
+                ed["sigma_a_end_au"], ed["sigma_a_growth_factor"]))
             if ed["growth"] == "exponential":
-                print("    The spread in a grows exponentially: Lyapunov time ~ {:.1f} d "
-                      "(R2 = {:.3f}).".format(ed["lyapunov_time_days"], ed["r2_exponential"]))
+                print("    The spread in a grows exponentially: Lyapunov time ~ {:s} "
+                      "(R2 = {:.3f}).".format(formatTimeSpan(ed["lyapunov_time_days"], decimals=1),
+                                              ed["r2_exponential"]))
                 print("    This is the chaos estimate to trust; unlike the position separation it is")
                 print("    not corrupted by Keplerian phase drift.")
             elif ed["growth"] == "regular":
@@ -2942,7 +3638,6 @@ if __name__ == "__main__":
 
 
     # Save the results to a file
-    out_dir = os.path.dirname(args.pickle_path)
     results_txt_path = os.path.join(out_dir, "rebound_simulation_results.txt")
     plot_png_path = os.path.join(out_dir, "rebound_simulation.png")
     with open(results_txt_path, "w") as f:
@@ -2950,14 +3645,14 @@ if __name__ == "__main__":
         # Save the nominal orbital elements and the errors
         # If the object hit something, state it at the very top of the report
         if impact:
-            f.write("*** IMPACT: the object hit {:s} after {:.4f} days. The elements below are the "
-                    "last\n".format(impact["body"], abs(impact["time_days"])))
+            f.write("*** IMPACT: the object hit {:s} after {:s}. The elements below are the "
+                    "last\n".format(impact["body"], formatTimeSpan(impact["time_days"], decimals=4)))
             f.write("*** state before the impact, not a surviving orbit.\n\n")
 
-        f.write("Orbital elements {:.2f} days {:s} from the epoch {:.6f} JD (TDB){:s}\n".format(
-            achieved_days, direction, traj.jdt_ref,
+        f.write("Orbital elements {:s} {:s} from the epoch {:.6f} JD (TDB){:s}\n".format(
+            formatTimeSpan(achieved_days), direction, traj.jdt_ref,
             "" if abs(achieved_days - sim_days) <= 1e-6
-            else " (requested {:.2f} days, stopped early)".format(sim_days)))
+            else " (requested {:s}, stopped early)".format(formatTimeSpan(sim_days))))
         f.write("a    = {:>10.6f}{:s} {:s}\n".format(sim_outputs[-1][2].a*dist_unit_multiplier, a_ci_str, a_units))
         f.write("q    = {:>10.6f}{:s} {:s}\n".format((1 - sim_outputs[-1][2].e)*sim_outputs[-1][2].a*dist_unit_multiplier, q_ci_str, q_units))
         f.write("e    = {:>10.6f}{:s}\n".format(sim_outputs[-1][2].e, e_ci_str))
@@ -3098,14 +3793,16 @@ if __name__ == "__main__":
                 f.write("  {:d} realization(s) ended early (e.g. impacted) and contributed only "
                         "over their own span.\n".format(lyap["n_truncated"]))
             if lyap["truncated_at_saturation"] and not lyap["saturated"]:
-                f.write("  Fitted over the first {:.1f} d of {:.1f} d, i.e. the leading window in "
-                        "which the\n".format(lyap["fit_window_days"], lyap["total_span_days"]))
-                f.write("  ensemble was still a compact cloud (separation {:.6e} AU at the end of "
-                        "that window).\n".format(lyap["separation_fit_end_au"]))
+                f.write("  Fitted over the first {:s} of {:s},\n".format(
+                    formatTimeSpan(lyap["fit_window_days"], decimals=1),
+                    formatTimeSpan(lyap["total_span_days"], decimals=1)))
+                f.write("  i.e. the leading window in which the ensemble was still a compact cloud\n")
+                f.write("  (separation {:.6e} AU at the end of that window).\n".format(
+                    lyap["separation_fit_end_au"]))
             if lyap["growth"] == "exponential":
                 f.write("  Growth is exponential: lambda = {:.6f} /day, "
-                        "Lyapunov time = {:.2f} days.\n".format(
-                            lyap["lambda_per_day"], lyap["lyapunov_time_days"]))
+                        "Lyapunov time = {:s}.\n".format(
+                            lyap["lambda_per_day"], formatTimeSpan(lyap["lyapunov_time_days"])))
                 f.write("  The integration loses predictive value beyond this timescale.\n")
             elif lyap["growth"] == "linear":
                 f.write("  Growth is linear, i.e. the motion is regular over this interval and no\n")
@@ -3126,16 +3823,16 @@ if __name__ == "__main__":
             # Semi-major-axis spread, which is not corrupted by Keplerian phase drift
             ed = lyap.get("element_divergence")
             if ed is not None:
-                f.write("\n  Spread in the semi-major axis over {:.1f} d: {:.6e} -> {:.6e} AU "
+                f.write("\n  Spread in the semi-major axis over {:s}: {:.6e} -> {:.6e} AU "
                         "(factor {:.3f})\n".format(
-                            ed["span_days"], ed["sigma_a_start_au"], ed["sigma_a_end_au"],
-                            ed["sigma_a_growth_factor"]))
+                            formatTimeSpan(ed["span_days"], decimals=1), ed["sigma_a_start_au"],
+                            ed["sigma_a_end_au"], ed["sigma_a_growth_factor"]))
                 f.write("  Fit quality: R2(exponential) = {:.4f}, R2(linear) = {:.4f}\n".format(
                     ed["r2_exponential"], ed["r2_linear"]))
                 if ed["growth"] == "exponential":
                     f.write("  The spread in a grows exponentially: lambda = {:.6e} /day, "
-                            "Lyapunov time = {:.2f} days.\n".format(
-                                ed["lambda_per_day"], ed["lyapunov_time_days"]))
+                            "Lyapunov time = {:s}.\n".format(
+                                ed["lambda_per_day"], formatTimeSpan(ed["lyapunov_time_days"])))
                     f.write("  This is the chaos estimate to prefer: unlike the position\n")
                     f.write("  separation it is not corrupted by Keplerian phase drift, which\n")
                     f.write("  smears the cloud along the orbit whether or not the motion is chaotic.\n")
@@ -3463,6 +4160,10 @@ if __name__ == "__main__":
 
     with open(results_json_path, "w") as jf:
         json.dump(results_json, jf, indent=1, default=float)
+
+    # Every result is saved now, so the checkpoint is no longer needed
+    if (checkpoint_path is not None) and os.path.isfile(checkpoint_path):
+        os.remove(checkpoint_path)
 
     ### ###
 
