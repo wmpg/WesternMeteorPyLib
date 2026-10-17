@@ -301,11 +301,10 @@ PLANET_ORDER = ["Sun", "Mercury", "Venus", "Earth", "Luna", "Mars", "Jupiter", "
 # Jones et al. (2018, SSRv 214, 20), q < 33 R_Sun = 0.153 AU.
 SUN_ENCOUNTER_AU = 0.1
 
-# Passages of the nominal solution by a planet or the Moon are recorded out to this many Hill radii, so
-#   the figure can show how close the object came at every passage, not only inside the encounter
-#   threshold. Further out they say nothing about the planet's pull (Mercury, seen from an
-#   Earth-crossing orbit, stays hundreds of Hill radii away).
-PASSAGE_MAX_HILL = 100.0
+# The close-approach panel of the figure leaves out a body the object never came within this many of
+#   its Hill radii of: it never mattered (Mercury, seen from an Earth-crossing orbit, stays hundreds of
+#   Hill radii away)
+APPROACH_MAX_HILL = 100.0
 
 # Radius of the Sun in AU (IAU 2015 nominal, 695 700 km), used for impact detection
 SUN_RADIUS_AU = 695700.0/149597870.7
@@ -1611,9 +1610,6 @@ def _integrateParticles(task):
                                  leaves REBOUNDx's default, the z axis (the ecliptic pole).
             dt_days:         [float] Optional. Timestep in days for the fixed-step integrators.
                                  Ignored by IAS15. Default FIXED_STEP_DEFAULT_DT_DAYS[integrator].
-            track_passages:  [bool] Optional. Also record every passage by a planet or the Moon
-                                 within PASSAGE_MAX_HILL Hill radii ("passages" in the diagnostics).
-                                 Used for the nominal solution only. Default False.
 
     Return:
         [dict] {
@@ -1626,9 +1622,6 @@ def _integrateParticles(task):
                                  per local minimum of an object-body distance inside n_hill Hill
                                  radii (inside SUN_ENCOUNTER_AU for the Sun), in the format of
                                  encountersFromMinDistances,
-                "passages":      [list] with track_passages, every local minimum of the distance to a
-                                 planet or the Moon within PASSAGE_MAX_HILL Hill radii, in the
-                                 format of the encounters; None without it,
                 "departed":      [bool] whether the object left the Earth's neighbourhood,
                 "impact":        None, or {"body", "time_days", "dist_au"} if the object hit a body,
             }},
@@ -1650,11 +1643,6 @@ def _integrateParticles(task):
     reference_frame = task["reference_frame"]
 
     n_hill = task.get("n_hill", 3.0)
-
-    # Passages are recorded within PASSAGE_MAX_HILL Hill radii of the planets and the Moon (the Sun has
-    #   no Hill sphere, and its passages are the perihelia)
-    track_passages = task.get("track_passages", False)
-    passage_limit = {b: PASSAGE_MAX_HILL*r for b, r in HILL_RADII_AU.items()}
 
     # Integrator. The object starts at the Earth's surface, a deep close encounter that the
     # fixed-step integrators do not handle: WHFast cannot resolve it at all, and TRACE resolves the
@@ -1830,7 +1818,6 @@ def _integrateParticles(task):
             "escaped": None,
             "prev": {},
             "encounters": [],
-            "passages": [],
         }
 
     def heartbeat(sim_pointer):
@@ -1891,10 +1878,6 @@ def _integrateParticles(task):
                         # or a fixed distance for the Sun, which has no Hill sphere
                         if d_h < _encounterThreshold(bname, n_hill):
                             st["encounters"].append((bname, t_h, d_h))
-
-                        # Every passage, close or not, for the figure
-                        if track_passages and (d_h < passage_limit.get(bname, -1.0)):
-                            st["passages"].append((bname, t_h, d_h))
 
                 st["prev"][bname] = (t_now, rel, rv)
 
@@ -2036,8 +2019,6 @@ def _integrateParticles(task):
                               for b in planet_names},
             "encounters": [_encounterRecord(b, d, time_sign*simTimeToDays(t))
                            for b, t, d in st["encounters"]],
-            "passages": ([_encounterRecord(b, d, time_sign*simTimeToDays(t)) for b, t, d in st["passages"]]
-                         if track_passages else None),
             "departed": st["departed"],
             "impact": st["impact"],
             "escaped": st["escaped"],
@@ -2521,17 +2502,17 @@ PLOT_SAMPLE_CLONES = 10
 
 
 def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, dist_unit_multiplier=1.0,
-                      length_units="AU", horizon=None, n_hill=3.0, passages=None, clone_encounters=None,
-                      closest_au=None, closest_time_days=None):
+                      length_units="AU", horizon=None, n_hill=3.0, clone_encounters=None, closest_au=None,
+                      closest_time_days=None):
     """ Figure of the evolution of the orbit: the nominal solution and the Monte Carlo clones.
 
     Panels: a, e, q; i, node, argument of perihelion; longitude of perihelion, the close approaches to
     every body in units of its Hill radius, and the predictability horizon (see
     predictabilityHorizon), or the heliocentric distance without clones.
 
-    The approaches panel shows the nominal's encounters as stars in the colour of their body, its other
-    passages as a line per body, the clones' encounters as faint dots, and, for a body with none of
-    these, its closest approach as a ring if within PASSAGE_MAX_HILL. The Sun has no Hill sphere: its
+    The approaches panel shows the nominal's encounters as stars in the colour of their body, the
+    clones' encounters as faint dots, and, for a body with neither, its closest approach as a ring if
+    within APPROACH_MAX_HILL. The Sun has no Hill sphere: its
     distance is scaled so that its SUN_ENCOUNTER_AU gate falls on the n_hill line of the others. The
     distance to the Earth at the outputs is drawn too in runs shorter than two years, where it shows
     the departure; in longer runs the output sampling misses the approaches.
@@ -2554,8 +2535,6 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
         length_units: [str] Name of that unit. Default "AU".
         horizon: [dict] Return of predictabilityHorizon, or None.
         n_hill: [float] Earth Hill radii of the departure and of the encounter threshold. Default 3.
-        passages: [list] Every passage of the nominal solution within PASSAGE_MAX_HILL Hill radii
-            ("passages" in the diagnostics of reboundSimulate), or None.
         clone_encounters: [dict] {clone name: encounters of that clone}, or None.
         closest_au: [dict] {body: closest approach of the nominal solution in AU}, or None.
         closest_time_days: [dict] {body: time of that closest approach in days}, or None.
@@ -2689,7 +2668,7 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
     drawn = set()
 
     # In a short run the distance to the Earth at the outputs shows the departure; in a long one the
-    #   output sampling misses the approaches, which the passages below give exactly
+    #   output sampling misses the approaches, which the encounters below give exactly
     if not in_years:
         earth = nominal["earth"]
         ax.plot(t, np.where(earth > 0, earth, np.nan)/HILL_RADII_AU["Earth"], color="0.55", lw=0.6,
@@ -2710,15 +2689,6 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
                 markeredgewidth=0, alpha=0.3, zorder=2, gid="clone_encounter:{:s}".format(body))
         drawn.add(body)
 
-    # Every passage of the nominal solution, as a thin line through them: one track per body,
-    #   which shows the approach passage by passage and does not read as the clones' scattered dots
-    for body in [b for b in PLANET_ORDER if plotted(b)]:
-        pas = [p for p in (passages or []) if p["body"] == body]
-        if pas:
-            ax.plot([p["time_days"]/t_scale for p in pas], [hillUnits(body, p["min_dist_au"]) for p in pas],
-                    ls="-", lw=0.5, color=planetColor(body), zorder=3, gid="passage:{:s}".format(body))
-            drawn.add(body)
-
     # The nominal's encounters, as stars
     nominal_encountered = set()
     for enc in encounters:
@@ -2731,16 +2701,15 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
         drawn.add(body)
         nominal_encountered.add(body)
 
-    # A body with none of the above (no passages recorded, e.g. a results file from an older version,
-    #   or none close enough) gets its closest approach of the run as a ring, if it is within
-    #   PASSAGE_MAX_HILL Hill radii: further out the body never mattered. The Sun's closest approach is
-    #   the perihelion, which the q panel shows already.
+    # A body with none of the above gets its closest approach of the run as a ring, if it is within
+    #   APPROACH_MAX_HILL Hill radii: further out the body never mattered. The Sun's closest approach
+    #   is the perihelion, which the q panel shows already.
     rings = set()
     for body, dist in (closest_au or {}).items():
         t_min = (closest_time_days or {}).get(body)
         if (body == "Sun") or (body not in HILL_RADII_AU) or (body in drawn) or (dist is None) or (t_min is None):
             continue
-        if hillUnits(body, dist) > PASSAGE_MAX_HILL:
+        if hillUnits(body, dist) > APPROACH_MAX_HILL:
             continue
         ax.plot(t_min/t_scale, hillUnits(body, dist), marker="o", ls="none", markersize=6,
                 markerfacecolor="none", markeredgecolor=planetColor(body), markeredgewidth=1.2, zorder=4,
@@ -2762,8 +2731,6 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
     if nominal_encountered:
         approach_handles.append(Line2D([], [], marker="*", ls="none", color="k", markersize=9,
                                        label="encounter (nominal)"))
-    if passages:
-        approach_handles.append(Line2D([], [], ls="-", lw=0.5, color="k", label="passage (nominal)"))
     if clone_points:
         approach_handles.append(Line2D([], [], marker="o", ls="none", color="k", markersize=2.5,
                                        markeredgewidth=0, alpha=0.5, label="encounter (clones)"))
@@ -3074,10 +3041,7 @@ def reboundSimulate(
         print(f"Direction: {direction}")
 
     # Nominal solution, integrated in its own simulation (in the main process)
-    #   It also records every passage by a planet, for the figure (see PASSAGE_MAX_HILL)
-    nominal_task = _make_task([state_vect_rot], [obj_name])
-    nominal_task["track_passages"] = True
-    nominal_result = _integrateParticles(nominal_task)
+    nominal_result = _integrateParticles(_make_task([state_vect_rot], [obj_name]))
     outputs = nominal_result["outputs"][obj_name]
     diagnostics = dict(nominal_result["diagnostics"])
 
@@ -3982,7 +3946,7 @@ if __name__ == "__main__":
     # Evolution of the orbit, the clones as percentile bands (see plotReboundOrbits)
     plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=plot_png_path,
                       dist_unit_multiplier=dist_unit_multiplier, length_units=a_units, horizon=horizon,
-                      n_hill=n_hill, passages=nominal_diag.get("passages"),
+                      n_hill=n_hill,
                       clone_encounters={name: diag.get("encounters", []) for name, diag in clone_diag.items()},
                       closest_au=nominal_diag.get("min_dist_au"),
                       closest_time_days=nominal_diag.get("min_time_days"))
@@ -4072,9 +4036,6 @@ if __name__ == "__main__":
         #   encounter minima were refined between steps, only the deepest approach per body was kept.
         #   The Sun has no Hill sphere, so its "hill_radius_au" and "n_hill" are None.
         "encounters": encounters,
-        # Every passage of the nominal solution by a planet or the Moon within PASSAGE_MAX_HILL Hill
-        #   radii, encounters included, ordered by time, in the same format
-        "passages": nominal_diag.get("passages"),
         "closest_approaches_au": nominal_diag.get("min_dist_au"),
         "closest_approach_times_days": nominal_diag.get("min_time_days"),
         "impact": impact,

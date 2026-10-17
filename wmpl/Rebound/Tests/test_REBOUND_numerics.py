@@ -903,39 +903,33 @@ def testEncountersAreInHillRadii(reb, agg):
     assert {"Sun", "Earth", "Moon", "Jupiter", "encounter (nominal)"} <= set(labels)
 
 
-def testPassagesCloneEncountersAndClosestApproaches(reb, agg):
-    """ The nominal's passages are small dots per body, the clones' encounters one faint series per
-    body, and a body with neither gets its closest approach as a ring. """
+def testCloneEncountersAndClosestApproaches(reb, agg):
+    """ The clones' encounters are one faint series per body, and a body with neither these nor a nominal
+    encounter gets its closest approach as a ring, only within APPROACH_MAX_HILL Hill radii. """
 
     nominal, clones = _plotOutputs(n_clones=25)
-    passages = [{"body": "Earth", "min_dist_au": d, "time_days": -365.25*y}
-                for y, d in ((10, 0.3), (20, 0.1), (30, 0.01))] + \
-               [{"body": "Jupiter", "min_dist_au": 3.0, "time_days": -365.25*50}]
     clone_encounters = {"obj_MC_0": [{"body": "Mars", "min_dist_au": 0.01, "time_days": -365.25*40}],
                         "obj_MC_1": [{"body": "Mars", "min_dist_au": 0.02, "time_days": -365.25*45},
                                      {"body": "Earth", "min_dist_au": 0.02, "time_days": -365.25*5}]}
-    closest_au = {"Earth": 0.01, "Jupiter": 3.0, "Mars": 0.5, "Venus": 0.4, "Sun": 0.9}
+    closest_au = {"Earth": 0.01, "Jupiter": 3.0, "Mars": 0.5, "Venus": 0.4, "Mercury": 0.6, "Sun": 0.9}
     closest_time = {"Earth": -365.25*30, "Jupiter": -365.25*50, "Mars": -365.25*80, "Venus": -365.25*90,
-                    "Sun": -365.25*20}
-    _, axes = reb.plotReboundOrbits(nominal, clones, [], passages=passages,
-                                    clone_encounters=clone_encounters, closest_au=closest_au,
-                                    closest_time_days=closest_time)
+                    "Mercury": -365.25*60, "Sun": -365.25*20}
+    _, axes = reb.plotReboundOrbits(nominal, clones, [], clone_encounters=clone_encounters,
+                                    closest_au=closest_au, closest_time_days=closest_time)
     ax = axes["encounters"]
-
-    dots = _byGid(ax, "passage:")
-    assert set(dots) == {"Earth", "Jupiter"}
-    assert len(dots["Earth"].get_xdata()) == 3
-    assert dots["Earth"].get_ydata() == pytest.approx(np.array([0.3, 0.1, 0.01])/reb.HILL_RADII_AU["Earth"])
 
     faint = _byGid(ax, "clone_encounter:")
     assert set(faint) == {"Mars", "Earth"} and len(faint["Mars"].get_xdata()) == 2
 
-    # Mars has clone encounters and Earth and Jupiter passages: only Venus is left for a ring, and
-    #   the Sun never gets one (its closest approach is the perihelion)
-    assert set(_byGid(ax, "closest:")) == {"Venus"}
+    # Mars and the Earth have clone encounters; Mercury is beyond APPROACH_MAX_HILL (400 Hill radii);
+    #   the Sun never gets a ring (its closest approach is the perihelion)
+    rings = _byGid(ax, "closest:")
+    assert set(rings) == {"Venus", "Jupiter"}
+    assert rings["Jupiter"].get_ydata()[0] == pytest.approx(3.0/reb.HILL_RADII_AU["Jupiter"])
 
     labels = [text.get_text() for text in ax.get_legend().get_texts()]
-    assert {"passage (nominal)", "encounter (clones)", "never closer", "Venus", "Mars"} <= set(labels)
+    assert {"encounter (clones)", "never closer", "Venus", "Mars"} <= set(labels)
+    assert "Mercury" not in labels
 
 
 def testTheEarthDistanceIsDrawnOnlyInShortRuns(reb, agg):
