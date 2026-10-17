@@ -24,14 +24,7 @@ import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from wmpl.MetSim.MetSimErosionCyTools import massLossRK4, decelerationRK4, luminousEfficiency, \
     ionizationEfficiency, atmDensityPoly
-
-
-### DEFINE CONSTANTS
-
-# Earth acceleration in m/s^2 on the surface
-G0 = 9.81
-
-###
+from wmpl.Utils.TrajConversions import gravity
 
 
 class Constants(object):
@@ -74,6 +67,9 @@ class Constants(object):
         
         # Radius of the Earth (m)
         self.r_earth = 6_371_008.7714
+
+        # Latitude (radians) used to compute the gravity
+        self.lat = np.radians(45.0)
 
         self.total_fragments = 0
 
@@ -815,7 +811,7 @@ def ablateAll(fragments, const, compute_wake=False, wake_heights_queue=None):
         else:
 
             # Compute g at given height
-            gv = G0/((1 + frag.h/const.r_earth)**2)
+            gv = gravity(const.lat, frag.h)
 
             # ### Add velocity change due to Earth's gravity ###
 

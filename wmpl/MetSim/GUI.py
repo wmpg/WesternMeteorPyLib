@@ -2955,7 +2955,10 @@ class MetSimGUI(QMainWindow):
                     (np.cos(lat)*a)**2 + (np.sin(lat)*b)**2
                 )
             )
-            
+
+            # Use the same latitude for the gravity
+            self.const.lat = lat
+
 
             # Set the constants value from the trajectory
             self.const.v_init = self.traj.orbit.v_init
