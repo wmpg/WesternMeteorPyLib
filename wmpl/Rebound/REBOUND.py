@@ -866,6 +866,117 @@ def whfastEncounterWarning(diagnostics, n_hill=3.0):
                 n_encounters, n_hill, SUN_ENCOUNTER_AU))
 
 
+# Rank correlation below which the clones no longer keep the order of their initial conditions
+PREDICTABILITY_RANK_THRESHOLD = 0.5
+
+# Fewest clones that run the whole span for a predictability horizon to be given
+PREDICTABILITY_MIN_CLONES = 10
+
+
+def predictabilityHorizon(sim_outputs, sim_outputs_mc, clone_diag=None, n_hill=3.0,
+                          threshold=PREDICTABILITY_RANK_THRESHOLD):
+    """ How far the integration keeps the memory of the measured initial conditions, from the clones.
+
+    The clones are drawn from the measurement uncertainty. While the dynamics is predictable, a clone
+    that starts with a larger semi-major axis than another keeps it: the rank correlation (Spearman)
+    of the clones' elements with their values just after the departure from the Earth stays near 1.
+    Close encounters scramble that order, and once the correlation has dropped below the threshold
+    the individual trajectory is no longer set by the measurement: only the distribution of the
+    clones means something, not the nominal orbit. Unlike the MEGNO of the nominal orbit, this is a
+    property of the whole ensemble, and it needs no extra integration.
+
+    Arguments:
+        sim_outputs: [list] Outputs of the nominal solution (see reboundSimulate).
+        sim_outputs_mc: [dict] {name: outputs} of the clones.
+
+    Keyword arguments:
+        clone_diag: [dict] {name: diagnostics} of the clones, for the time of their first close
+            encounter. Default None.
+        n_hill: [float] Earth Hill radii that define the departure (see findEarthDepartureIndex).
+        threshold: [float] Rank correlation that marks the horizon. Default
+            PREDICTABILITY_RANK_THRESHOLD.
+
+    Return:
+        [dict] or None with fewer than PREDICTABILITY_MIN_CLONES clones over the whole span: {
+            "n_clones":           clones used (those that ran the whole span),
+            "threshold":          the rank correlation of the horizon,
+            "reference_days":     time of the reference output, just after the departure,
+            "elements":           {"a"/"e"/"i": {"horizon_days": last time with a correlation at
+                                  or above the threshold before it stays below (None if never
+                                  below), "rank_corr_end": correlation at the end}},
+            "horizon_days":       earliest horizon of the three, or None if none is reached,
+            "time_days":          [list] output times, "rank_corr": {element: [list]} the series,
+            "first_encounter_days": {"fraction": share of clones with a close encounter (Sun
+                                  passages left out), "p05"/"p25"/"p50"/"p75"/"p95": percentiles of
+                                  the time of their first one} or None without clone_diag,
+        }
+    """
+
+    n_out = len(sim_outputs)
+    full = [rows for rows in sim_outputs_mc.values() if len(rows) == n_out]
+    if (len(full) < PREDICTABILITY_MIN_CLONES) or (n_out < 3):
+        return None
+
+    # Reference: the first output after the departure from the Earth, before which the osculating
+    #   elements still carry the Earth's pull
+    k_ref = findEarthDepartureIndex(sim_outputs, n_hill=n_hill)
+    if k_ref is None:
+        k_ref = 1
+    k_ref = min(k_ref, n_out - 2)
+
+    time_days = np.array([simTimeToDays(row[0]) for row in sim_outputs])
+
+    getters = {"a": lambda o: o.a, "e": lambda o: o.e, "i": lambda o: o.inc}
+    elements, series = {}, {}
+    for key, get in getters.items():
+
+        x = np.array([[get(row[2]) for row in rows] for rows in full])
+
+        # Spearman correlation of every column with the reference one, as the Pearson correlation of
+        #   the ranks
+        r = scipy.stats.rankdata(x, axis=0)
+        r -= r.mean(axis=0)
+        norm = np.sqrt((r**2).sum(axis=0))
+        if norm[k_ref] == 0:
+            continue
+        with np.errstate(invalid="ignore", divide="ignore"):
+            rho = (r*r[:, [k_ref]]).sum(axis=0)/(norm*norm[k_ref])
+        rho[:k_ref] = np.nan
+
+        # The horizon is the last time the correlation is still at or above the threshold, so a
+        #   brief dip that recovers does not count
+        above = np.where(rho[k_ref:] >= threshold)[0] + k_ref
+        last_above = above[-1] if len(above) else k_ref
+        horizon = float(time_days[last_above]) if last_above < n_out - 1 else None
+
+        elements[key] = {"horizon_days": horizon, "rank_corr_end": float(rho[-1])}
+        series[key] = [None if not np.isfinite(v) else float(v) for v in rho]
+
+    reached = [abs(v["horizon_days"]) for v in elements.values() if v["horizon_days"] is not None]
+    horizon_days = None
+    if reached:
+        horizon_days = float(min(reached))*(1 if time_days[-1] >= 0 else -1)
+
+    # When the clones had their first close encounter, which is what scrambles their order
+    first_encounter = None
+    if clone_diag is not None:
+        firsts = []
+        for name in sim_outputs_mc:
+            times = [abs(e["time_days"]) for e in clone_diag.get(name, {}).get("encounters", [])
+                     if e.get("body") != "Sun"]
+            if times:
+                firsts.append(min(times))
+        first_encounter = {"fraction": len(firsts)/len(sim_outputs_mc)}
+        if firsts:
+            first_encounter.update({"p{:02d}".format(q): float(np.percentile(firsts, q))
+                                    for q in (5, 25, 50, 75, 95)})
+
+    return {"n_clones": len(full), "threshold": threshold,
+            "reference_days": float(time_days[k_ref]), "elements": elements,
+            "horizon_days": horizon_days, "time_days": [float(t) for t in time_days],
+            "rank_corr": series, "first_encounter_days": first_encounter}
+
+
 def estimateLyapunovFromMC(sim_outputs, sim_outputs_mc):
     """ Estimate the trajectory divergence timescale from the Monte Carlo ensemble.
 
@@ -1911,6 +2022,10 @@ def _integrateParticles(task):
     return {"outputs": outputs, "diagnostics": diagnostics}
 
 
+# Size of the MEGNO deviation above which it is rescaled to unit length at an output (see computeMegno)
+MEGNO_RESCALE_ABOVE = 1e20
+
+
 def computeMegno(task, seed=1):
     """ MEGNO of the integrated object's orbit, from a purely gravitational integration.
 
@@ -1947,6 +2062,10 @@ def computeMegno(task, seed=1):
             "times_days":   [list] output times in days (as in the task),
             "megno":        [list] <Y> at each output time,
             "a_au":         [list] heliocentric osculating semi-major axis at each output time,
+            "ln_delta":     [list] ln|delta| of the deviation at each output time, from ln|delta| = 0
+                            at the start; its slope is the Lyapunov exponent (see classifyMegno),
+            "departure_days": [float] first output time at which the object is beyond n_hill (task,
+                            default 3) Earth Hill radii, or None if it never is (or there is no Earth),
             "escaped":      [bool] whether the object left the simulation volume (series truncated),
         }
     """
@@ -1987,11 +2106,17 @@ def computeMegno(task, seed=1):
     vp = var.particles[0]
     vp.x, vp.y, vp.z, vp.vx, vp.vy, vp.vz = dev/np.linalg.norm(dev)
 
+    # The deviation grows as exp(lambda t) on a chaotic orbit and would overflow past exp(709), so it
+    #   is rescaled to unit length at the output times once it is large, and the logarithm of the
+    #   factor is kept here. The variational equations are linear, so this is exact (measured: ln|delta|
+    #   within 2e-12 of an unscaled run over 400 years).
+    norm = {"offset": 0.0}
+
     def logDeviation():
         """ ln|delta| of the variational particle, over the full 6D phase space. """
 
         p = var.particles[0]
-        return 0.5*np.log(p.x**2 + p.y**2 + p.z**2 + p.vx**2 + p.vy**2 + p.vz**2)
+        return norm["offset"] + 0.5*np.log(p.x**2 + p.y**2 + p.z**2 + p.vx**2 + p.vy**2 + p.vz**2)
 
     # Running integrals: I = int s d(ln|delta|) and J = int Y ds
     acc = {"t": sim.t, "ln_d": logDeviation(), "I": 0.0, "J": 0.0, "Y": 0.0}
@@ -2017,8 +2142,14 @@ def computeMegno(task, seed=1):
     # Keep the returned reference alive until the integration ends (see _setHeartbeat)
     heartbeat_ref = _setHeartbeat(sim, heartbeat)  # noqa: F841
 
-    times_days, megno, a_au = [], [], []
+    times_days, megno, a_au, ln_delta = [], [], [], []
     escaped = False
+
+    # The departure from the Earth's neighbourhood, where the deviation grows by orders of magnitude
+    #   during the initial close passage, which is not the orbit's own chaos
+    earth_i = task["planet_names"].index("Earth") if "Earth" in task["planet_names"] else None
+    departure_radius = task.get("n_hill", 3.0)*HILL_RADII_AU["Earth"]
+    departure_days = None
 
     # Sample <Y> at the same output times as the main integration
     for t_out in task["times"]:
@@ -2038,11 +2169,25 @@ def computeMegno(task, seed=1):
 
         times_days.append(simTimeToDays(t_out))
         megno.append(acc["J"]/acc["t"])
+        ln_delta.append(logDeviation())
 
         # Heliocentric osculating semi-major axis, used to count the orbital periods covered
         a_au.append(sim.particles[obj_i].orbit(primary=sim.particles[0]).a)
 
-    return {"times_days": times_days, "megno": megno, "a_au": a_au, "escaped": escaped}
+        if (departure_days is None) and (earth_i is not None):
+            o, e = sim.particles[obj_i], sim.particles[earth_i]
+            if ((o.x - e.x)**2 + (o.y - e.y)**2 + (o.z - e.z)**2)**0.5 > departure_radius:
+                departure_days = times_days[-1]
+
+        # Rescale a large deviation to unit length (see norm)
+        p = var.particles[0]
+        size = (p.x**2 + p.y**2 + p.z**2 + p.vx**2 + p.vy**2 + p.vz**2)**0.5
+        if size > MEGNO_RESCALE_ABOVE:
+            p.x, p.y, p.z, p.vx, p.vy, p.vz = p.x/size, p.y/size, p.z/size, p.vx/size, p.vy/size, p.vz/size
+            norm["offset"] += np.log(size)
+
+    return {"times_days": times_days, "megno": megno, "a_au": a_au, "ln_delta": ln_delta,
+            "departure_days": departure_days, "escaped": escaped}
 
 
 # MEGNO verdict thresholds. A regular orbit's <Y> settles within ~0.05 of 2 after tens of orbits
@@ -2058,7 +2203,65 @@ MEGNO_PERIODIC_MAX = 1.0
 MEGNO_MIN_ORBITS = 20
 
 
-def classifyMegno(times_days, megno, a_au):
+# Fewest orbital periods of exponential growth from which a Lyapunov time is given. Measured on an orbit
+#   with its aphelion near Jupiter: from 4 periods of growth the fit gave 229 years, from 33 and 74
+#   periods 54 and 66 years.
+LYAPUNOV_MIN_ORBITS = 10
+
+
+def lyapunovFromDeviation(t_years, ln_delta, megno, period_years):
+    """ Lyapunov time of a chaotic orbit from the growth of ln|delta| (see computeMegno).
+
+    The fit starts when <Y> rises above MEGNO_CHAOTIC_MIN for the last time, i.e. when the
+    exponential growth sets in: before it, the deviation can stay flat or even shrink for centuries
+    (e.g. on an Earth-crossing orbit until its first deep encounter), and including that biases the
+    time high. ln|delta| is fitted directly, rather than <Y>, which is a double running average and
+    lags the growth. Chaos driven by close encounters grows in steps, so the time is also fitted in
+    four windows of the growth phase, whose spread is returned as the range.
+
+    Arguments:
+        t_years: [ndarray] Elapsed time of each output in years (positive).
+        ln_delta: [ndarray] ln|delta| at each output.
+        megno: [ndarray] <Y> at each output.
+        period_years: [float] Orbital period in years.
+
+    Return:
+        [dict] or None if there is no growth phase to fit (shorter than a tenth of the run or than
+        LYAPUNOV_MIN_ORBITS periods, or not growing): {
+            "lyapunov_time_years": 1/lambda over the growth phase,
+            "lyapunov_time_range_years": [min, max] over the windows (None if too few points),
+            "onset_years": start of the growth phase,
+        }
+    """
+
+    below = np.where(megno <= MEGNO_CHAOTIC_MIN)[0]
+    k0 = (below[-1] + 1) if len(below) else 0
+
+    # At least a tenth of the run and LYAPUNOV_MIN_ORBITS periods, and enough points for a fit
+    if k0 >= len(t_years) - 10:
+        return None
+    span = t_years[-1] - t_years[k0]
+    if (span < 0.1*t_years[-1]) or (span < LYAPUNOV_MIN_ORBITS*period_years):
+        return None
+
+    t, l = t_years[k0:], ln_delta[k0:]
+    slope = np.polyfit(t, l, 1)[0]
+    if slope <= 0:
+        return None
+
+    taus = []
+    if len(t) >= 40:
+        for w in np.array_split(np.arange(len(t)), 4):
+            s_w = np.polyfit(t[w], l[w], 1)[0]
+            if s_w > 0:
+                taus.append(1.0/s_w)
+
+    return {"lyapunov_time_years": float(1.0/slope),
+            "lyapunov_time_range_years": [float(min(taus)), float(max(taus))] if taus else None,
+            "onset_years": float(t[0])}
+
+
+def classifyMegno(times_days, megno, a_au, ln_delta=None):
     """ Decide whether a MEGNO series has converged to 2 (regular orbit), is growing (chaotic), or
     is not conclusive.
 
@@ -2074,6 +2277,11 @@ def classifyMegno(times_days, megno, a_au):
         megno: [list] <Y> at each output time.
         a_au: [list] Heliocentric semi-major axis at each output time.
 
+    Keyword arguments:
+        ln_delta: [list] ln|delta| at each output time (see computeMegno). If given, the Lyapunov
+            time of a chaotic orbit comes from its growth (lyapunovFromDeviation); otherwise from the
+            slope of <Y> over the second half of the run. Default None.
+
     Return:
         [dict] {
             "status":        "regular", "chaotic", "periodic", "not_converged", "too_short" or
@@ -2081,8 +2289,11 @@ def classifyMegno(times_days, megno, a_au):
             "final":         final <Y>,
             "last_quarter":  mean <Y> over the last quarter of the run,
             "n_orbits":      number of orbital periods spanned (median a), or None if unbound,
-            "lyapunov_time_years": for a chaotic orbit, 1/lambda from <Y> ~ (lambda/2) t fitted over
-                               the second half of the run; otherwise None,
+            "lyapunov_time_years": for a chaotic orbit, 1/lambda (see ln_delta); otherwise None,
+            "lyapunov_time_range_years": [min, max] of the time over windows of the growth phase,
+                               or None,
+            "lyapunov_onset_years": start of the fitted growth phase, or None,
+            "lyapunov_method":  "ln_delta" or "megno_second_half", or None,
             "message":       one-line explanation,
         }
     """
@@ -2096,7 +2307,8 @@ def classifyMegno(times_days, megno, a_au):
     #   run: a series that is still drifting will disagree between the two
     result = {"status": None, "final": float(y[-1]) if len(y) else None,
               "last_quarter": float(np.mean(y[3*len(y)//4:])) if len(y) else None,
-              "n_orbits": None, "lyapunov_time_years": None}
+              "n_orbits": None, "lyapunov_time_years": None, "lyapunov_time_range_years": None,
+              "lyapunov_onset_years": None, "lyapunov_method": None}
 
     # Not enough points for the last quarter to mean anything (or no points at all)
     if len(y) < 8:
@@ -2120,7 +2332,7 @@ def classifyMegno(times_days, megno, a_au):
 
     # <Y> needs many orbits to settle, so a short run gets no verdict at all rather than a wrong one
     if n_orbits < MEGNO_MIN_ORBITS:
-        result.update(status="too_short", message="The run covers only {:.1f} orbital periods; MEGNO "
+        result.update(status="too_short", message="The run covers only {:.3g} orbital periods; MEGNO "
                       "needs at least {:d} to settle. Integrate for at least {:.0f} years.".format(
                           n_orbits, MEGNO_MIN_ORBITS, MEGNO_MIN_ORBITS*a_med**1.5))
         return result
@@ -2134,12 +2346,26 @@ def classifyMegno(times_days, megno, a_au):
     #   Lyapunov exponent from the slope. Only the second half is fitted, since the early part
     #   still carries the transient from the object's departure from the Earth.
     elif (final > MEGNO_CHAOTIC_MIN) and (last_quarter > MEGNO_CHAOTIC_MIN):
-        half = len(y)//2
-        slope = np.polyfit(t_years[half:], y[half:], 1)[0]
 
-        # A negative slope would give a meaningless negative time, so it is left unreported
-        if slope > 0:
-            result["lyapunov_time_years"] = float(1.0/(2*slope))
+        # From the growth of ln|delta| when it is available (see lyapunovFromDeviation). If its growth
+        #   phase is too short no time is given, rather than one from <Y>, which is no better there.
+        if (ln_delta is not None) and (len(ln_delta) == len(y)):
+            fit = lyapunovFromDeviation(t_years, np.array(ln_delta, dtype=float), y, a_med**1.5)
+            result["lyapunov_method"] = "ln_delta"
+            if fit is not None:
+                result.update(lyapunov_time_years=fit["lyapunov_time_years"],
+                              lyapunov_time_range_years=fit["lyapunov_time_range_years"],
+                              lyapunov_onset_years=fit["onset_years"])
+
+        # Otherwise from <Y> ~ (lambda/2) t over the second half
+        else:
+            half = len(y)//2
+            slope = np.polyfit(t_years[half:], y[half:], 1)[0]
+
+            # A negative slope would give a meaningless negative time, so it is left unreported
+            if slope > 0:
+                result.update(lyapunov_time_years=float(1.0/(2*slope)),
+                              lyapunov_method="megno_second_half")
 
         result.update(status="chaotic", message="<Y> does not converge to 2 and keeps growing: the "
                       "orbit is chaotic.")
@@ -2147,8 +2373,10 @@ def classifyMegno(times_days, megno, a_au):
     # Tending to 0 instead of 2: the deviation stays bounded, which is regular motion too
     elif (final < MEGNO_PERIODIC_MAX) and (last_quarter < MEGNO_PERIODIC_MAX):
         result.update(status="periodic", message="<Y> tends to 0 rather than 2: the deviation from "
-                      "the orbit stays bounded, the signature of a stable periodic orbit (e.g. "
-                      "libration in a mean-motion resonance). Regular, not chaotic.")
+                      "the orbit stayed bounded over this span, as around a stable periodic orbit (e.g. "
+                      "libration in a mean-motion resonance). An Earth-crossing orbit can also do this "
+                      "for a while before its first deep encounter: this is about the nominal orbit "
+                      "over this span, not the clones (see the predictability horizon).")
 
     # Between the thresholds, or the two statistics disagree: the run is simply too short to tell
     else:
@@ -2156,6 +2384,53 @@ def classifyMegno(times_days, megno, a_au):
                       "growing either; integrate for longer to decide.")
 
     return result
+
+
+def _spanText(days):
+    """ A time span in days as text, in years from a year up, e.g. "45 years" or "60 days". """
+
+    days = abs(days)
+    if days >= 365.25:
+        return "{:.0f} years".format(days/365.25)
+
+    return "{:.0f} days".format(days)
+
+
+def _predictabilityReportLines(horizon, span_days):
+    """ Human-readable lines describing a predictabilityHorizon result. """
+
+    lines = ["Predictability horizon (from {:d} Monte Carlo clones):".format(horizon["n_clones"])]
+
+    names = {"a": "a", "e": "e", "i": "i"}
+    parts = []
+    for key, el in horizon["elements"].items():
+        if el["horizon_days"] is None:
+            parts.append("{:s} beyond the span".format(names[key]))
+        else:
+            parts.append("{:s} {:s}".format(names[key], _spanText(el["horizon_days"])))
+    lines.append("  The clones keep the order of their initial {:s} (rank correlation >= {:.1f}) "
+                 "for:".format(", ".join(names[k] for k in horizon["elements"]), horizon["threshold"]))
+    lines.append("    " + "; ".join(parts))
+
+    if horizon["horizon_days"] is None:
+        lines.append("  Not reached within the {:s} integrated: the individual trajectory is still set by "
+                     "the measurement.".format(_spanText(span_days)))
+    else:
+        lines.append("  Beyond ~{:s} the individual trajectory is no longer set by the measurement: use "
+                     "the".format(_spanText(horizon["horizon_days"])))
+        lines.append("  distribution of the clones, not the nominal orbit.")
+
+    fe = horizon.get("first_encounter_days")
+    if fe is not None:
+        if fe.get("p50") is not None:
+            lines.append("  First close encounter of the clones: {:.0f}% had one; median {:s} "
+                         "(5-95%: {:s} to {:s}).".format(100*fe["fraction"],
+                             _spanText(fe["p50"]), _spanText(fe["p05"]),
+                             _spanText(fe["p95"])))
+        else:
+            lines.append("  No clone had a close encounter.")
+
+    return lines
 
 
 def _megnoReportLines(megno):
@@ -2174,7 +2449,7 @@ def _megnoReportLines(megno):
 
     # Not available for an unbound orbit, where there is no orbital period to count
     if v["n_orbits"] is not None:
-        lines.append("  span: {:.1f} orbital periods".format(v["n_orbits"]))
+        lines.append("  span: {:.3g} orbital periods".format(v["n_orbits"]))
 
     # The statuses with no entry here ("too_short" and "unbound") are the ones with no verdict
     converges = {"regular": "YES", "chaotic": "NO", "periodic": "NO (tends to 0)",
@@ -2184,10 +2459,25 @@ def _megnoReportLines(megno):
     else:
         lines.append("  No verdict: {:s}".format(v["message"]))
 
+    # A chaotic orbit whose exponential growth is still too short to time
+    if (v["status"] == "chaotic") and (v["lyapunov_time_years"] is None) \
+            and (v.get("lyapunov_method") == "ln_delta"):
+        lines.append("  Lyapunov time not determined: the exponential growth of ln|delta| covers fewer than "
+                     "{:d}".format(LYAPUNOV_MIN_ORBITS))
+        lines.append("  orbital periods (or a tenth of the run). Integrate for longer to time it.")
+
     # Only set for a chaotic orbit with a positive fitted slope
     if v["lyapunov_time_years"] is not None:
-        lines.append("  Lyapunov time ~ {:.0f} years (from <Y> ~ (lambda/2) t over the second "
-                     "half).".format(v["lyapunov_time_years"]))
+        if v.get("lyapunov_method") == "ln_delta":
+            rng = v.get("lyapunov_time_range_years")
+            lines.append("  Lyapunov time ~ {:.0f} years{:s}.".format(v["lyapunov_time_years"],
+                         "" if rng is None else " (range {:.0f}-{:.0f} over four windows)".format(*rng)))
+            lines.append("  Fitted to the growth of ln|delta| since <Y> last exceeded {:.1f}, {:s} back.".format(
+                MEGNO_CHAOTIC_MIN, _spanText(365.25*v["lyapunov_onset_years"])))
+            lines.append("  Encounter-driven chaos grows in steps, so quote the range.")
+        else:
+            lines.append("  Lyapunov time ~ {:.0f} years (from <Y> ~ (lambda/2) t over the second "
+                         "half).".format(v["lyapunov_time_years"]))
 
     if megno.get("escaped"):
         lines.append("  The object left the simulation volume, so the MEGNO series is truncated.")
@@ -2528,7 +2818,8 @@ def reboundSimulate(
         if show_progress:
             print("Computing the MEGNO of the nominal orbit (Newtonian gravity only, IAS15)...")
         megno = computeMegno(_make_task([state_vect_rot], [obj_name]))
-        megno["verdict"] = classifyMegno(megno["times_days"], megno["megno"], megno["a_au"])
+        megno["verdict"] = classifyMegno(megno["times_days"], megno["megno"], megno["a_au"],
+                                         ln_delta=megno["ln_delta"])
         diagnostics[obj_name] = dict(diagnostics[obj_name], megno=megno)
 
     if return_diagnostics:
@@ -2885,6 +3176,9 @@ if __name__ == "__main__":
     # Estimate the divergence/Lyapunov timescale from the Monte Carlo ensemble (free when MC is run)
     lyap = estimateLyapunovFromMC(sim_outputs, sim_outputs_mc)
 
+    # How long the clones keep the memory of the measured initial conditions
+    horizon = predictabilityHorizon(sim_outputs, sim_outputs_mc, clone_diag=clone_diag, n_hill=n_hill)
+
     # List of bodies for which the distance is tracked (planet_dists dict keys)
     dist_bodies = list(sim_outputs[0][3].keys())
 
@@ -3100,6 +3394,11 @@ if __name__ == "__main__":
                       "(R2_exp = {:.3f}, R2_lin = {:.3f}).".format(
                           ed["r2_exponential"], ed["r2_linear"]))
 
+    if horizon is not None:
+        print("-" * 78)
+        for line in _predictabilityReportLines(horizon, achieved_days):
+            print("  " + line)
+
     if megno is not None:
         print("-" * 78)
         for line in _megnoReportLines(megno):
@@ -3236,6 +3535,9 @@ if __name__ == "__main__":
         f.write("Integrator: {:s}\n".format(integrator_str))
         if whfast_warning:
             f.write("\n{:s}\n".format(whfast_warning))
+
+        if horizon is not None:
+            f.write("\n" + "\n".join(_predictabilityReportLines(horizon, achieved_days)) + "\n")
 
         if megno is not None:
             f.write("\n" + "\n".join(_megnoReportLines(megno)) + "\n")
@@ -3630,6 +3932,7 @@ if __name__ == "__main__":
         "clone_encounters": {name: diag.get("encounters", []) for name, diag in clone_diag.items()},
         "energy_rel_drift": nominal_diag.get("energy_rel_drift"),
         "divergence": lyap,
+        "predictability": horizon,
         "nominal": _elementSeries(sim_outputs),
         "monte_carlo": {name: _elementSeries(rows) for name, rows in sim_outputs_mc.items()},
     }

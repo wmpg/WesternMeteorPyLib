@@ -17,6 +17,7 @@ Monte Carlo clones, and can optionally include radiation forces and measure how 
 - [Close encounters, impacts and ejections](#close-encounters-impacts-and-ejections)
 - [Monte Carlo clones](#monte-carlo-clones)
 - [Chaos: MEGNO](#chaos-megno)
+- [Predictability horizon](#predictability-horizon)
 - [What it writes](#what-it-writes)
 - [Worked examples](#worked-examples)
 - [Using it as a library](#using-it-as-a-library)
@@ -355,11 +356,31 @@ The verdict is based on the final ⟨Y⟩ and its mean over the last quarter of 
 | Verdict | Meaning |
 | :--- | :--- |
 | `regular` | Both within 0.1 of 2. Quasi-periodic motion over the integrated span. |
-| `chaotic` | Both above 2.5. A Lyapunov time is estimated from the slope over the second half of the run. |
-| `periodic` | Both below 1. The deviation stays bounded, e.g. libration in a mean-motion resonance. Regular, but not converging to 2. |
+| `chaotic` | Both above 2.5. A Lyapunov time is fitted to the growth of the deviation (see below). |
+| `periodic` | Both below 1. The deviation stayed bounded over the span, e.g. libration in a mean-motion resonance. An Earth-crossing orbit can also do this for a while before its first deep encounter, so this describes the nominal orbit over the span, not the clones (see [Predictability horizon](#predictability-horizon)). |
 | `not_converged` | Anything else. Integrate for longer to decide. |
 | `too_short` | The run covers fewer than 20 orbital periods. No verdict; the report says how long the run would need to be. |
 | `unbound` | The orbit is hyperbolic, so MEGNO — which describes bounded motion — does not apply. |
+
+**Lyapunov time.** It is fitted to ln|δ|, the logarithm of the deviation, which grows as λ·t on a
+chaotic orbit, rather than to ⟨Y⟩, a double running average that lags the growth. The fit starts
+when ⟨Y⟩ rises above 2.5 for the last time: before that the deviation can stay flat or even shrink for
+a long time, e.g. on an Earth-crossing orbit until its first deep encounter, and including it biases
+the time high. Chaos driven by close encounters grows in steps, so the time is also fitted in four
+windows of the growth phase, and the report gives their spread as a range: quote the range, not only
+the central value. No time is given if the growth phase covers fewer than 10 orbital periods (or a
+tenth of the run), since the fit is not reliable there.
+
+Measured on an orbit with its aphelion near Jupiter (a = 3.6 AU, e = 0.45):
+
+| Span | This fit (range) | ⟨Y⟩ over the second half (before) |
+| ---: | ---: | ---: |
+| 200 years | not given (4 periods of growth) | 17 years |
+| 400 years | 54 years (19–74) | 34 years |
+| 1000 years | 66 years (42–174) | 71 years |
+
+The deviation is rescaled to unit length at the outputs once it is large, so that it never overflows;
+the variational equations are linear, so this changes nothing (measured to 2e-12 in ln|δ|).
 
 **MEGNO needs tens of orbital periods to settle**, so set `--days` accordingly. For an orbit with
 a = 3 AU (a period of about 5.2 years) that is at least 100 years, i.e. `--days 36525`. A run that is
@@ -372,6 +393,46 @@ are dissipative, and MEGNO is not defined for them.
 The extra integration costs roughly what a gravity-only run of the same span costs, which is small
 next to a full run with the Monte Carlo clones. It is skipped, with a warning, if you call
 `reboundSimulate` with `return_diagnostics=False`, since that is the only way the result comes back.
+
+---
+
+## Predictability horizon
+
+With Monte Carlo clones, the report gives how long the integration keeps the memory of the measured
+initial conditions. The clones are drawn from the measurement uncertainty, and while the dynamics is
+predictable a clone that starts with a larger semi-major axis than another keeps it. The horizon is
+the last time the rank correlation (Spearman) of the clones' a, e and i with their values just after
+the departure from the Earth is still at least 0.5; the earliest of the three is the horizon of the
+run. Close encounters scramble that order, so the report also gives when the clones had their first
+close encounter (Sun passages left out).
+
+Beyond the horizon the individual trajectory is no longer set by the measurement: the nominal orbit
+means nothing on its own, and only the distribution of the clones does. The integration still makes
+sense statistically: the distribution of a, e, i and of the longitude of perihelion can stay narrow
+and informative for much longer than the horizon.
+
+This is a property of the whole ensemble, which the MEGNO of the nominal orbit is not: a planet-crossing
+nominal orbit becomes chaotic only after its own first deep encounter, which can come centuries after
+most clones have had theirs. It needs no extra integration and takes a few seconds even with 1000
+clones and 7000 outputs.
+
+A short run, like the default 60 days, reports that the horizon was not reached: the clones keep the
+order of their start over the whole span.
+
+For example, Winchcombe integrated 1000 years back with 200 clones (from a covariance of 100 m and
+1 m/s per axis):
+
+```
+  Predictability horizon (from 200 Monte Carlo clones):
+    The clones keep the order of their initial a, e, i (rank correlation >= 0.5) for:
+      a 138 years; e 30 years; i 30 years
+    Beyond ~30 years the individual trajectory is no longer set by the measurement: use the
+    distribution of the clones, not the nominal orbit.
+    First close encounter of the clones: 100% had one; median 30 years (5-95%: 25 years to 43 years).
+```
+
+The memory is lost exactly when the clones meet the Earth. The MEGNO of the nominal orbit of the same
+run is chaotic, with a Lyapunov time of ~67 years (range 24–104 over four windows).
 
 ---
 
@@ -404,7 +465,8 @@ The JSON keys, at the top level:
 | `energy_rel_drift` | Relative energy drift of the massive subsystem, as an integrator-quality check. |
 | `divergence` | The exponential and linear fits to the clone spread, with `r2_exponential` and `r2_linear`. |
 | `whfast_encounter_warning` | The WHFast close-encounter warning string, or `null`. |
-| `megno` | With `--compute_megno`: `times_days`, `megno`, `a_au`, `escaped` and the `verdict` dict. `null` otherwise. |
+| `megno` | With `--compute_megno`: `times_days`, `megno`, `ln_delta` (logarithm of the deviation), `a_au`, `departure_days`, `escaped` and the `verdict` dict, with `lyapunov_time_years`, `lyapunov_time_range_years`, `lyapunov_onset_years` and `lyapunov_method`. `null` otherwise. |
+| `predictability` | With clones: `n_clones`, `threshold`, `reference_days`, `horizon_days` (`null` if not reached), per element (`a`, `e`, `i`) its `horizon_days` and `rank_corr_end`, the series `time_days` and `rank_corr`, and `first_encounter_days` (`fraction` and percentiles `p05`–`p95`). `null` with fewer than 10 clones over the whole span. |
 | `nominal`, `monte_carlo` | Full element series: `time_days`, `a_au`, `e`, `incl_deg`, `peri_deg`, `node_deg`, `f_deg`, `body_distances_au`. |
 
 A quick sanity check on any run is `energy_rel_drift`. It measures the massive subsystem the object
