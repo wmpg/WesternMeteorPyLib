@@ -16,6 +16,10 @@ The tests cover two properties that hold independently of any tabulated value:
       (and, in D_D, of the angular separation of the perihelion directions) evaluates to slightly
       more than 1.0 in double precision, which makes an unguarded math.acos raise a domain error.
 
+    - Array arguments. Every criterion on the orbital elements takes numpy arrays, broadcast
+      against each other, and must return what a loop of scalar calls returns, pair by pair, with
+      the node branch rule and the circular-orbit failure of D_D applied per pair.
+
 Run with pytest:
     python -m pytest wmpl/Utils/Tests/test_Dcriteria.py -v
 
@@ -27,7 +31,8 @@ import math
 
 import numpy as np
 
-from wmpl.Utils.Dcriteria import calcDSH, calcDD, calcDH, _clippedAcos
+from wmpl.Utils.Dcriteria import calcDSH, calcDD, calcDH, _clippedAcos, ELEMENT_CRITERIA, \
+    _semiMajorAxisForCriteria
 
 
 # A self-comparison cannot return exactly zero: acos has an infinite derivative at 1, so the
@@ -405,6 +410,131 @@ def test_acos_domain_holds_for_near_identical_orbits():
                     math.degrees(incl))
 
 
+# Array and scalar calls run the same operations, but numpy may evaluate an array with SIMD routines
+#   whose last bit differs from the scalar ones. D_V carries weights of order 1e8, so its tolerance
+#   is relative
+ARRAY_SCALAR_RTOL = 1e-12
+
+
+def _pairArrays(pairs):
+    """ Turn a list of (q1, e1, i1, O1, w1, q2, e2, i2, O2, w2) pairs into the two orbits as tuples
+        of arrays, the form ELEMENT_CRITERIA takes.
+    """
+
+    columns = [np.array(c) for c in zip(*pairs)]
+
+    return tuple(columns[:5]), tuple(columns[5:])
+
+
+def test_element_criteria_accept_arrays():
+    """ An array call must return, pair by pair, what the scalar call returns. The test pairs
+        include ones whose nodes straddle 0/360 deg, so the D_SH and D_H branch rule is checked per
+        element rather than once for the whole array.
+    """
+
+    pairs = _orbitPairs()
+    orbit1, orbit2 = _pairArrays(pairs)
+
+    assert np.any(np.abs(orbit2[3] - orbit1[3]) > np.pi), \
+        "no test pair exercised the |O2 - O1| > 180 deg branch"
+
+    for key, label, func in ELEMENT_CRITERIA:
+
+        vector = func(orbit1, orbit2)
+
+        assert np.shape(vector) == (len(pairs),), \
+            "{:s} did not return one value per pair".format(label)
+
+        scalar = np.array([func(p[:5], p[5:]) for p in pairs])
+
+        assert np.allclose(vector, scalar, rtol=ARRAY_SCALAR_RTOL, atol=0.0), \
+            "{:s} disagreed between array and scalar calls by up to {:.3e}".format(label, \
+                np.max(np.abs(vector - scalar)))
+
+
+def test_element_criteria_broadcast_one_orbit_against_many():
+    """ One orbit given as scalars against a catalogue given as arrays is the call a parent body
+        search makes, and must agree with comparing the orbit with each entry in turn.
+    """
+
+    pairs = _orbitPairs()[:500]
+    _, catalogue = _pairArrays(pairs)
+
+    orbit = pairs[0][:5]
+
+    for key, label, func in ELEMENT_CRITERIA:
+
+        vector = func(orbit, catalogue)
+
+        assert np.shape(vector) == (len(pairs),), \
+            "{:s} did not broadcast one orbit against the catalogue".format(label)
+
+        scalar = np.array([func(orbit, p[5:]) for p in pairs])
+
+        assert np.allclose(vector, scalar, rtol=ARRAY_SCALAR_RTOL, atol=0.0), \
+            "{:s} disagreed between a broadcast and scalar calls".format(label)
+
+
+def test_element_criteria_return_scalars_for_scalars():
+    """ Making the criteria take arrays must not turn a scalar result into a 0-d array, which
+        formats and compares differently.
+    """
+
+    pair = _orbitPairs()[0]
+
+    for key, label, func in ELEMENT_CRITERIA:
+
+        value = func(pair[:5], pair[5:])
+
+        assert isinstance(value, float) and np.ndim(value) == 0, \
+            "{:s} returned {!r} for a scalar pair".format(label, type(value))
+
+
+def test_DD_circular_orbits_fail_per_pair_in_arrays():
+    """ Two circular orbits leave the D_D eccentricity term undefined. Called with floats it must
+        still raise, as it always has. Called with arrays it must return nan for that pair alone,
+        so one circular pair cannot spoil a whole catalogue.
+    """
+
+    circular_1 = (1.0, 0.0, math.radians(5.0), math.radians(30.0), math.radians(0.0))
+    circular_2 = (1.2, 0.0, math.radians(7.0), math.radians(35.0), math.radians(0.0))
+
+    try:
+        calcDD(*(circular_1 + circular_2))
+        raise AssertionError("expected D_D to raise for two circular orbits given as floats")
+
+    except ZeroDivisionError:
+        pass
+
+    pairs = _orbitPairs()[:10]
+    pairs[3] = circular_1 + circular_2
+
+    orbit1, orbit2 = _pairArrays(pairs)
+
+    with np.errstate(invalid='ignore'):
+        vector = calcDD(*(orbit1 + orbit2))
+
+    assert np.isnan(vector[3]), "D_D was not nan for the circular pair"
+    assert np.all(np.isfinite(np.delete(vector, 3))), "a circular pair spoilt the other pairs"
+
+
+def test_semi_major_axis_for_criteria_takes_arrays():
+    """ A parabolic orbit has an infinite semi-major axis whether it comes alone or in an array. """
+
+    assert _semiMajorAxisForCriteria(1.0, 1.0) == np.inf
+    assert np.ndim(_semiMajorAxisForCriteria(1.0, 0.5)) == 0
+    assert _semiMajorAxisForCriteria(1.0, 0.5) == 2.0
+
+    q = np.array([1.0, 0.5, 0.2])
+    e = np.array([0.5, 1.0, 1.2])
+
+    a = _semiMajorAxisForCriteria(q, e)
+
+    assert a[0] == 2.0
+    assert a[1] == np.inf
+    assert abs(a[2] - (-1.0)) < 1e-12, "a hyperbolic orbit must keep its negative semi-major axis"
+
+
 if __name__ == "__main__":
 
     test_functions = [
@@ -418,6 +548,11 @@ if __name__ == "__main__":
         test_DH_node_sign_worked_example,
         test_rho_convention_holds_only_within_one_turn,
         test_clipped_acos_engages_only_outside_the_domain,
+        test_element_criteria_accept_arrays,
+        test_element_criteria_broadcast_one_orbit_against_many,
+        test_element_criteria_return_scalars_for_scalars,
+        test_DD_circular_orbits_fail_per_pair_in_arrays,
+        test_semi_major_axis_for_criteria_takes_arrays,
         ]
 
     failed = 0
