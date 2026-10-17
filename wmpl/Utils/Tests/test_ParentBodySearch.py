@@ -312,6 +312,178 @@ def test_save_csv_and_json_hold_every_criterion():
         assert set(data['matches'][0]['criteria']) == {'D_SH', 'D_N', 'D_D'}
 
 
+def _chancePopulation(tmp):
+    """ A small debiased population around Phaethon's orbit: ten orbits differing from it only in q,
+        by 0.01 to 0.10 AU, so at those values of D_SH, and 490 far away. """
+
+    import gzip
+    import wmpl.Utils.DebiasedNEOPopulation as dnp
+
+    q, e, i, peri, node = PHAETHON
+
+    rows = [[(q + dq)/(1.0 - e), e, i, node, peri, 0.0, 0.0] for dq in 0.01*np.arange(1, 11)]
+    rows += [[0.2/(1.0 - 0.1), 0.1, 30.0, 200.0, 100.0, 0.0, 0.0]]*490
+
+    rows = np.array(rows)
+    rows[:, 6] = np.linspace(17.01, 24.99, len(rows))
+
+    path = os.path.join(tmp, 'population.dat.gz')
+
+    with gzip.open(path, 'wt') as f:
+        np.savetxt(f, rows, fmt='%.9f')
+
+    return dnp.loadDebiasedNEOPopulation(file_path=path)
+
+
+def test_chance_neo_gives_p_values_to_asteroids_only_and_skips_the_radiant():
+    """ --chance_neo evaluates every criterion on the elements, skips those on the radiant, gives a
+        p-value to the asteroids and none to the comets, and its values reach the saved files. """
+
+    q, e, i, peri, node = PHAETHON
+
+    with tempfile.TemporaryDirectory() as tmp, _Catalogue():
+
+        population = _chancePopulation(tmp)
+
+        search = pbs.searchParentBodies(q, e, np.radians(i), np.radians(peri), np.radians(node),
+            d_crit=['DSH', 'DN', 'RHO2'], top_n=-1)
+
+        chance = pbs.chanceNEO(search, q, e, np.radians(i), np.radians(peri), np.radians(node),
+            population=population)
+
+        assert chance['labels'] == ['D_SH', 'rho_2']
+        assert chance['skipped'] == ['D_N']
+        assert chance['meteor_in_model']
+
+        names = [m['name'] for m in search['matches']]
+        results = dict(zip(names, chance['results']['D_SH']))
+
+        # Phaethon itself is at D_SH ~0, closer than every synthetic orbit, and brighter than the
+        #   model: only the known NEOs of the catalogue as bright count (itself, H = 14.4)
+        assert results['Phaethon']['n_closer'] == 0
+        assert results['Phaethon']['n_at_least_as_large'] == 1
+        assert results['Phaethon']['p_value_upper'] > 0
+
+        # The near twin, at D_SH = d of Phaethon's orbit, counts the synthetic orbits up to d
+        twin = search['matches'][names.index('Near twin')]
+        expected_k = int(np.count_nonzero(0.01*np.arange(1, 11) <= twin['d_values'][0] + 1e-12))
+        assert results['Near twin']['n_closer'] == expected_k
+
+        # A comet has no absolute magnitude
+        assert results['Parabolic comet']['p_value'] is None
+        assert 'absolute magnitude' in results['Parabolic comet']['reason']
+
+        lines = pbs.formatChanceNEO(chance, search)
+        text = "\n".join(lines)
+
+        assert 'Skipped D_N' in text
+        assert 'Granvik' in text
+        assert 'p_global' in text and 'sigma' in text
+
+        csv_path = os.path.join(tmp, "matches.csv")
+        pbs.saveMatches(csv_path, search, chance=chance)
+
+        with open(csv_path) as f:
+            rows = list(csv.DictReader(f))
+
+        assert rows[0]['chance_neo_D_SH_n_closer'] == '0'
+        assert 'chance_neo_rho_2_p_value' in rows[0]
+        assert not any(name.startswith('chance_neo_D_N') for name in rows[0])
+
+        json_path = os.path.join(tmp, "matches.json")
+        pbs.saveMatches(json_path, search, chance=chance)
+
+        with open(json_path) as f:
+            data = json.load(f)
+
+        assert data['chance_neo']['labels'] == ['D_SH', 'rho_2']
+        assert data['chance_neo']['skipped'] == ['D_N']
+        assert set(data['matches'][0]['chance_neo']) == {'D_SH', 'rho_2'}
+        assert not any(name.startswith('chance_neo_') for name in data['matches'][0])
+
+
+def test_chance_neo_ranks_the_catalogue_by_p_and_saves_the_ranking():
+    """ Ranked by p, the most significant body comes first whatever its D; the first matches of a
+        search of the whole catalogue are those of a search of the top N; and the ranking reaches the
+        JSON and a CSV beside the main one. """
+
+    q, e, i, peri, node = PHAETHON
+
+    with tempfile.TemporaryDirectory() as tmp, _Catalogue():
+
+        population = _chancePopulation(tmp)
+        orbit = (q, e, np.radians(i), np.radians(peri), np.radians(node))
+
+        search_all = pbs.searchParentBodies(*orbit, d_crit=['DSH', 'DD'], top_n=-1)
+        chance_all = pbs.chanceNEO(search_all, *orbit, population=population)
+
+        search_top = pbs.searchParentBodies(*orbit, d_crit=['DSH', 'DD'], top_n=2)
+        search, chance = pbs.firstMatches(search_all, chance_all, 2)
+
+        assert [m['name'] for m in search['matches']] == [m['name'] for m in search_top['matches']]
+        assert len(chance['results']['D_SH']) == 2
+
+        ranked = pbs.rankByChance(search_all, chance_all, 'D_SH', top_n=-1)
+
+        p_values = [r['p_value'] for _, _, r in ranked]
+        assert p_values == sorted(p_values)
+        assert ranked[0][0]['name'] == 'Phaethon'
+
+        # Only bodies with a p-value are ranked: the comet is not
+        assert 'Parabolic comet' not in [m['name'] for m, _, _ in ranked]
+
+        text = "\n".join(pbs.formatChanceNEO(chance, search, top_n=3, search_all=search_all,
+            chance_all=chance_all))
+        assert 'most significant' in text
+
+        ranked_top = dict((label, pbs.rankByChance(search_all, chance_all, label, top_n=3))
+            for label in chance_all['labels'])
+
+        csv_path = os.path.join(tmp, "matches.csv")
+        written = pbs.saveMatches(csv_path, search, chance=chance, ranked=ranked_top)
+
+        assert written == [csv_path, os.path.join(tmp, "matches_chance_neo.csv")]
+
+        with open(written[1]) as f:
+            rows = list(csv.DictReader(f))
+
+        assert [r['criterion'] for r in rows] == ['D_SH']*3 + ['D_D']*3
+        assert rows[0]['name'] == 'Phaethon'
+        assert 'p_value_global' in rows[0] and 'sigma' in rows[0]
+
+        json_path = os.path.join(tmp, "matches.json")
+        pbs.saveMatches(json_path, search, chance=chance, ranked=ranked_top)
+
+        with open(json_path) as f:
+            data = json.load(f)
+
+        most = data['chance_neo']['most_significant']
+        assert set(most) == {'D_SH', 'D_D'}
+        assert most['D_SH'][0]['name'] == 'Phaethon'
+        assert data['chance_neo']['n_background'] == chance_all['n_background']
+
+
+def test_chance_neo_reports_a_meteoroid_outside_the_model():
+    """ Outside q < 1.3 AU and a < 4.2 AU the model is empty, so no p-value is given and the output
+        says why. """
+
+    q, e, i, peri, node = (0.9, 0.85, 10.0, 100.0, 50.0)
+
+    with tempfile.TemporaryDirectory() as tmp, _Catalogue():
+
+        population = _chancePopulation(tmp)
+
+        search = pbs.searchParentBodies(q, e, np.radians(i), np.radians(peri), np.radians(node),
+            d_crit='DSH', top_n=3)
+
+        chance = pbs.chanceNEO(search, q, e, np.radians(i), np.radians(peri), np.radians(node),
+            population=population)
+
+        assert not chance['meteor_in_model']
+        assert all(r['p_value'] is None for r in chance['results']['D_SH'])
+        assert 'outside the model' in "\n".join(pbs.formatChanceNEO(chance, search))
+
+
 def test_bar_plot_is_written():
 
     search = _search(['DSH', 'DN'], top_n=4)
