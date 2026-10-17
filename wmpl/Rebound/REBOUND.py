@@ -55,6 +55,7 @@ from wmpl.Utils.TrajConversions import (
     raDec2ECI
 )
 from wmpl.Utils.Math import rotateVector
+from wmpl.Utils.PlanetStyle import planetColor, planetMarkerSize, PLANET_EDGE_COLOR, PLANET_EDGE_WIDTH
 from wmpl.Utils.Earth import calcTrueObliquity
 
 
@@ -2510,9 +2511,9 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
     every body in units of its Hill radius, and the predictability horizon (see
     predictabilityHorizon), or the heliocentric distance without clones.
 
-    The approaches panel shows the nominal's encounters as stars in the colour of their body, the
-    clones' encounters as faint dots, and, for a body with neither, its closest approach as a ring if
-    within APPROACH_MAX_HILL. The Sun has no Hill sphere: its
+    The approaches panel shows the nominal's encounters as discs drawn as their bodies (see
+    wmpl.Utils.PlanetStyle), the clones' encounters as faint dots, and, for a body with neither, its
+    closest approach as a ring if within APPROACH_MAX_HILL. The Sun has no Hill sphere: its
     distance is scaled so that its SUN_ENCOUNTER_AU gate falls on the n_hill line of the others. The
     distance to the Earth at the outputs is drawn too in runs shorter than two years, where it shows
     the departure; in longer runs the output sampling misses the approaches.
@@ -2657,14 +2658,6 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
     def plotted(body):
         return (body == "Sun") or (body in HILL_RADII_AU)
 
-    # One colour per body
-    body_colors = {"Sun": "gold", "Mercury": "teal", "Venus": "orange", "Earth": "red", "Luna": "magenta",
-                   "Mars": "saddlebrown", "Jupiter": "purple", "Saturn": "olive", "Uranus": "c",
-                   "Neptune": "navy"}
-
-    def planetColor(body):
-        return body_colors.get(body, "0.3")
-
     drawn = set()
 
     # In a short run the distance to the Earth at the outputs shows the departure; in a long one the
@@ -2689,14 +2682,18 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
                 markeredgewidth=0, alpha=0.3, zorder=2, gid="clone_encounter:{:s}".format(body))
         drawn.add(body)
 
-    # The nominal's encounters, as stars
+    # The nominal's encounters, drawn as their bodies: colour and a size that grows with the radius
+    #   (see wmpl.Utils.PlanetStyle, shared with the solver's orbit plots). Smaller bodies go on top,
+    #   so the Moon stays visible next to the Earth.
     nominal_encountered = set()
     for enc in encounters:
         body = enc["body"]
         if not plotted(body):
             continue
-        ax.plot(enc["time_days"]/t_scale, hillUnits(body, enc["min_dist_au"]), marker="*",
-                color=planetColor(body), markersize=10, ls="none", zorder=5,
+        size = planetMarkerSize(body)
+        ax.plot(enc["time_days"]/t_scale, hillUnits(body, enc["min_dist_au"]), marker="o",
+                color=planetColor(body), markersize=size, markeredgecolor=PLANET_EDGE_COLOR,
+                markeredgewidth=PLANET_EDGE_WIDTH, ls="none", zorder=5 + 1.0/size,
                 gid="encounter:{:s}".format(body))
         drawn.add(body)
         nominal_encountered.add(body)
@@ -2720,16 +2717,17 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
     ax.set_yscale("log")
     ax.set_ylabel("distance [Hill radii]")
 
-    # The legend: one entry per body in its colour, then one per kind of marker, in black, apart from
-    #   the body colours
+    # The legend: one entry per body in its colour, then one per kind of marker, in black (grey would
+    #   read as Mercury or the Moon)
     approach_handles = [Line2D([], [], marker="o", ls="none", color=planetColor(b), markersize=6,
+                               markeredgecolor=PLANET_EDGE_COLOR, markeredgewidth=PLANET_EDGE_WIDTH,
                                label="Moon" if b == "Luna" else b)
                         for b in PLANET_ORDER if b in drawn]
     if not in_years:
         approach_handles.append(Line2D([], [], color="0.55", lw=0.6, label="distance to the Earth"))
     approach_handles.append(Line2D([], [], color="0.3", ls=":", lw=1, label="{:g} Hill radii".format(n_hill)))
     if nominal_encountered:
-        approach_handles.append(Line2D([], [], marker="*", ls="none", color="k", markersize=9,
+        approach_handles.append(Line2D([], [], marker="o", ls="none", color="k", markersize=7,
                                        label="encounter (nominal)"))
     if clone_points:
         approach_handles.append(Line2D([], [], marker="o", ls="none", color="k", markersize=2.5,

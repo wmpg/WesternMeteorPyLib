@@ -301,8 +301,7 @@ and then refined *within* the step. Both steps matter:
 - **Ejections** are recorded if the object leaves the simulation volume (1000 AU by default), after
   which it stops being integrated.
 
-On the plot every encounter is a star in the colour of the body it passed (see
-[The figure](#the-figure)).
+On the plot every encounter is a disc drawn as the body it passed (see [The figure](#the-figure)).
 
 The first close encounter going backwards is almost always the Earth itself — that is the meteoroid
 arriving. What matters is what came before it.
@@ -468,7 +467,10 @@ options.
   Hill radius of the body, so that one dotted line is the encounter threshold (3 Hill radii by default)
   for all of them, and a Jupiter encounter at 0.9 AU (2.5 Hill radii) reads as deep as an Earth one at
   0.025 AU. It shows:
-  - the nominal's **encounters** as stars in the body's colour;
+  - the nominal's **encounters** as discs drawn as their bodies: the body's colour (yellow Sun, blue
+    Earth, grey Moon, red Mars, burnt orange Jupiter, ...) with a thin black outline, sized as
+    radius^0.25 so the order of the real sizes is kept without Jupiter covering the panel (Jupiter 1.8
+    times the Earth, the Moon 0.72 times), the smaller bodies on top;
   - the **clones' encounters** as faint dots, which show when and with which planets the ensemble meets,
     as opposed to the single nominal history;
   - for a body with none of these, its **closest approach** of the run as a ring ("never closer": the
@@ -478,7 +480,9 @@ options.
   The Sun has no Hill sphere: its distance is scaled so that its 0.1 AU gate falls on the same line.
   In runs shorter than two years the distance to the Earth at the outputs is drawn too, as it shows the
   departure; in longer ones the output sampling misses the approaches, which the encounters give
-  exactly.
+  exactly. The palette and the sizes live in `wmpl.Utils.PlanetStyle` and are shared with the solver's
+  `_orbit_top`/`_orbit_side` plots, where the outline is black on the light background and white on
+  the dark one.
 
 The JSON keys, at the top level:
 

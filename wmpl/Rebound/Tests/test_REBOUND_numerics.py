@@ -943,3 +943,26 @@ def testTheEarthDistanceIsDrawnOnlyInShortRuns(reb, agg):
     _, axes = reb.plotReboundOrbits(nominal, {}, [])
     labels = [text.get_text() for text in axes["encounters"].get_legend().get_texts()]
     assert "distance to the Earth" not in labels
+
+
+def testEncountersAreDrawnAsTheirBodies(reb, agg):
+    """ Each encounter of the nominal is a disc in its body's colour and size (wmpl.Utils.PlanetStyle),
+    outlined, with the smaller bodies on top. """
+
+    from matplotlib.colors import to_hex
+    from wmpl.Utils.PlanetStyle import planetColor, planetMarkerSize
+
+    nominal, clones = _plotOutputs(n_clones=25)
+    encounters = [{"body": "Earth", "min_dist_au": 0.01, "time_days": -365.25*30},
+                  {"body": "Luna", "min_dist_au": 0.001, "time_days": -365.25*30},
+                  {"body": "Jupiter", "min_dist_au": 0.9, "time_days": -365.25*60}]
+    _, axes = reb.plotReboundOrbits(nominal, clones, encounters)
+
+    discs = _byGid(axes["encounters"], "encounter:")
+    for body in ("Earth", "Luna", "Jupiter"):
+        line = discs[body]
+        assert line.get_marker() == "o"
+        assert to_hex(line.get_color()) == to_hex(planetColor(body))
+        assert line.get_markersize() == pytest.approx(planetMarkerSize(body))
+        assert to_hex(line.get_markeredgecolor()) == "#000000"
+    assert discs["Luna"].get_zorder() > discs["Earth"].get_zorder() > discs["Jupiter"].get_zorder()
