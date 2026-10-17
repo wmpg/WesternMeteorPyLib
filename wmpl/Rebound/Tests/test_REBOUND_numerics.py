@@ -860,8 +860,8 @@ def testFigureWithoutClonesOrWithAShortClone(reb, agg, tmp_path):
     encounters = [{"body": "Earth", "min_dist_au": 0.01, "time_days": -365.25*30},
                   {"body": "Jupiter", "min_dist_au": 0.9, "time_days": -365.25*60}]
     _, axes = reb.plotReboundOrbits(nominal, clones, encounters, file_path=str(tmp_path/"b.png"))
-    labels = axes["encounters"].get_legend_handles_labels()[1]
-    assert "encounter: Earth" in labels and "encounter: Jupiter" in labels
+    labels = [text.get_text() for text in axes["encounters"].get_legend().get_texts()]
+    assert "Earth" in labels and "Jupiter" in labels
 
 
 def testTheHorizonLegendGivesItsTime(reb, agg):
@@ -873,3 +873,79 @@ def testTheHorizonLegendGivesItsTime(reb, agg):
 
     labels = axes["predictability"].get_legend_handles_labels()[1]
     assert "predictability horizon (31 years)" in labels
+
+
+def _byGid(ax, prefix):
+    """ The lines of an axis whose gid starts with prefix, by the rest of the gid (the body). """
+    return {line.get_gid()[len(prefix):]: line for line in ax.get_lines()
+            if (line.get_gid() or "").startswith(prefix)}
+
+
+def testEncountersAreInHillRadii(reb, agg):
+    """ Each encounter of the nominal is drawn at its distance in units of the body's Hill radius. The
+    Sun is scaled so that its gate falls on the n_hill line. """
+
+    nominal, clones = _plotOutputs(n_clones=25)
+    encounters = [{"body": "Earth", "min_dist_au": 0.01, "time_days": -365.25*30},
+                  {"body": "Luna", "min_dist_au": 0.001, "time_days": -365.25*30},
+                  {"body": "Jupiter", "min_dist_au": 0.9, "time_days": -365.25*60},
+                  {"body": "Sun", "min_dist_au": 0.05, "time_days": -365.25*70}]
+    _, axes = reb.plotReboundOrbits(nominal, clones, encounters)
+
+    marks = _byGid(axes["encounters"], "encounter:")
+    assert marks["Earth"].get_ydata()[0] == pytest.approx(0.01/reb.HILL_RADII_AU["Earth"])
+    assert marks["Luna"].get_ydata()[0] == pytest.approx(0.001/reb.HILL_RADII_AU["Luna"])
+    assert marks["Jupiter"].get_ydata()[0] == pytest.approx(0.9/reb.HILL_RADII_AU["Jupiter"])
+    assert marks["Sun"].get_ydata()[0] == pytest.approx(3.0*0.05/reb.SUN_ENCOUNTER_AU)
+    assert axes["encounters"].get_ylabel() == "distance [Hill radii]"
+
+    labels = [text.get_text() for text in axes["encounters"].get_legend().get_texts()]
+    assert {"Sun", "Earth", "Moon", "Jupiter", "encounter (nominal)"} <= set(labels)
+
+
+def testPassagesCloneEncountersAndClosestApproaches(reb, agg):
+    """ The nominal's passages are small dots per body, the clones' encounters one faint series per
+    body, and a body with neither gets its closest approach as a ring. """
+
+    nominal, clones = _plotOutputs(n_clones=25)
+    passages = [{"body": "Earth", "min_dist_au": d, "time_days": -365.25*y}
+                for y, d in ((10, 0.3), (20, 0.1), (30, 0.01))] + \
+               [{"body": "Jupiter", "min_dist_au": 3.0, "time_days": -365.25*50}]
+    clone_encounters = {"obj_MC_0": [{"body": "Mars", "min_dist_au": 0.01, "time_days": -365.25*40}],
+                        "obj_MC_1": [{"body": "Mars", "min_dist_au": 0.02, "time_days": -365.25*45},
+                                     {"body": "Earth", "min_dist_au": 0.02, "time_days": -365.25*5}]}
+    closest_au = {"Earth": 0.01, "Jupiter": 3.0, "Mars": 0.5, "Venus": 0.4, "Sun": 0.9}
+    closest_time = {"Earth": -365.25*30, "Jupiter": -365.25*50, "Mars": -365.25*80, "Venus": -365.25*90,
+                    "Sun": -365.25*20}
+    _, axes = reb.plotReboundOrbits(nominal, clones, [], passages=passages,
+                                    clone_encounters=clone_encounters, closest_au=closest_au,
+                                    closest_time_days=closest_time)
+    ax = axes["encounters"]
+
+    dots = _byGid(ax, "passage:")
+    assert set(dots) == {"Earth", "Jupiter"}
+    assert len(dots["Earth"].get_xdata()) == 3
+    assert dots["Earth"].get_ydata() == pytest.approx(np.array([0.3, 0.1, 0.01])/reb.HILL_RADII_AU["Earth"])
+
+    faint = _byGid(ax, "clone_encounter:")
+    assert set(faint) == {"Mars", "Earth"} and len(faint["Mars"].get_xdata()) == 2
+
+    # Mars has clone encounters and Earth and Jupiter passages: only Venus is left for a ring, and
+    #   the Sun never gets one (its closest approach is the perihelion)
+    assert set(_byGid(ax, "closest:")) == {"Venus"}
+
+    labels = [text.get_text() for text in ax.get_legend().get_texts()]
+    assert {"passage (nominal)", "encounter (clones)", "never closer", "Venus", "Mars"} <= set(labels)
+
+
+def testTheEarthDistanceIsDrawnOnlyInShortRuns(reb, agg):
+
+    nominal, _ = _plotOutputs(years=60/365.25)
+    _, axes = reb.plotReboundOrbits(nominal, {}, [])
+    labels = [text.get_text() for text in axes["encounters"].get_legend().get_texts()]
+    assert "distance to the Earth" in labels
+
+    nominal, _ = _plotOutputs()
+    _, axes = reb.plotReboundOrbits(nominal, {}, [])
+    labels = [text.get_text() for text in axes["encounters"].get_legend().get_texts()]
+    assert "distance to the Earth" not in labels

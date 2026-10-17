@@ -301,8 +301,10 @@ and then refined *within* the step. Both steps matter:
 - **Ejections** are recorded if the object leaves the simulation volume (1000 AU by default), after
   which it stops being integrated.
 
-On the plot, every passage is marked with a red star, but only the deepest one per body is labelled
-with the body's name, so a long run against a repeatedly-met planet stays readable.
+The nominal solution also records every passage by a planet or the Moon out to 100 Hill radii
+(`PASSAGE_MAX_HILL`), encounters included, so the figure can show how close the object came at each
+passage and not only inside the threshold. On the plot every encounter is a star in the colour of
+the body it passed (see [The figure](#the-figure)).
 
 The first close encounter going backwards is almost always the Earth itself — that is the meteoroid
 arriving. What matters is what came before it.
@@ -445,7 +447,7 @@ options.
 | File | Contents |
 | :--- | :--- |
 | `rebound_simulation_results.txt` | The human-readable report: run settings, the integrator that actually ran, final elements with confidence intervals, close encounters, impacts, clone outcomes, energy drift, divergence, and the MEGNO verdict. |
-| `rebound_simulation.png` | The evolution of the orbit, 3×3 panels: a, e, q; i, node, argument of perihelion; longitude of perihelion, distance to the Earth (log scale) with the close encounters coloured by body, and the predictability horizon (the heliocentric distance without clones). See [The figure](#the-figure). |
+| `rebound_simulation.png` | The evolution of the orbit, 3×3 panels: a, e, q; i, node, argument of perihelion; longitude of perihelion, the close approaches to every body in Hill radii (log scale), and the predictability horizon (the heliocentric distance without clones). See [The figure](#the-figure). |
 | `rebound_megno.png` | Only with `--compute_megno`: the evolution of ⟨Y⟩ against time in years, with the ⟨Y⟩ = 2 line marked. |
 | `rebound_simulation_results.json` | The same results in machine-readable form, so downstream analysis does not have to parse the text. |
 
@@ -464,6 +466,23 @@ options.
   run, so they cover the clones as well as the nominal solution.
 - **Time** in years for spans of two years or more, in days otherwise. The predictability horizon is
   the dashed red vertical line on every panel, and its time is given in the legend.
+- **Close approaches in Hill radii.** The bottom middle panel gives every distance in units of the
+  Hill radius of the body, so that one dotted line is the encounter threshold (3 Hill radii by default)
+  for all of them, and a Jupiter encounter at 0.9 AU (2.5 Hill radii) reads as deep as an Earth one at
+  0.025 AU. It shows:
+  - the nominal's **encounters** as stars in the body's colour;
+  - the nominal's other **passages**, out to 100 Hill radii, as small dots in the body's colour, so the
+    approach to a planet can be followed passage by passage;
+  - the **clones' encounters** as faint dots, which show when and with which planets the ensemble meets,
+    as opposed to the single nominal history;
+  - for a body with none of these, its **closest approach** of the run as a ring ("never closer": the
+    object never came closer to that body), so every tracked body appears. This is also what a results
+    file from an older version, without passages, shows.
+
+  The Sun has no Hill sphere: its distance is scaled so that its 0.1 AU gate falls on the same line.
+  In runs shorter than two years the distance to the Earth at the outputs is drawn too, as it shows the
+  departure; in longer ones the output sampling misses the approaches, which the passages give
+  exactly.
 
 The JSON keys, at the top level:
 
@@ -473,6 +492,7 @@ The JSON keys, at the top level:
 | `run` | Run settings: `integration_days`, `direction`, `reference_frame`, `ephemeris`, `n_outputs`, `beta`, `start_epoch_jd_tdb`, `final_epoch_jd_tdb`, `final_epoch_utc`, `mc_runs`, `random_seed`, `runtime_s`, `integrator`, `dt_days`, `fixed_step_from_days`, and the close-encounter gates `n_hill_threshold` and `sun_encounter_au`. |
 | `final_elements` | `a`, `q`, `e`, `incl_deg`, `peri_deg`, `node_deg`, `f_deg`, `tisserand_jupiter`, with `a_units`/`q_units` (AU heliocentric, km geocentric). |
 | `encounters` | Every close encounter of the nominal solution, ordered by time, each with `body`, `min_dist_au`, `time_days`, `hill_radius_au` and `n_hill`. A body can appear more than once. For the Sun, `hill_radius_au` and `n_hill` are `null`. |
+| `passages` | Every passage of the nominal solution by a planet or the Moon within 100 Hill radii (`PASSAGE_MAX_HILL`), encounters included, ordered by time, in the same format as `encounters`. |
 | `closest_approaches_au`, `closest_approach_times_days` | Closest approach to every tracked body, whether or not it counted as an encounter. This is the deepest approach only, one value per body. |
 | `impact`, `escaped` | The impact or ejection of the nominal solution, or `null`. |
 | `clone_outcomes` | Clone statistics: counts and fractions of impacts and encounters per body, `ci_uses_survivors_only`, `n_hill_threshold`, `sun_encounter_au`. Under `close_encounters`, `count` is how many clones met the body and `n_encounters` how many passages they made in total. `null` without `--mc`. |

@@ -20,6 +20,7 @@ import numpy as np
 import scipy
 import scipy.stats
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 
 from jplephem.spk import SPK
 
@@ -289,6 +290,9 @@ HILL_RADII_AU = {
     "Neptune": 0.776641,  # a = 30.103658 AU
 }
 
+# Order of the bodies in the figure legends, from the Sun out
+PLANET_ORDER = ["Sun", "Mercury", "Venus", "Earth", "Luna", "Mars", "Jupiter", "Saturn", "Uranus", "Neptune"]
+
 # The Sun has no Hill sphere, so a close approach to it is flagged by distance instead: a perihelion
 # passage closer than this is listed with the other close encounters. 0.1 AU is where the thermal
 # processing of meteoroids is established: Na is thermally desorbed at q < 0.1 AU (Kasuga et al.
@@ -296,6 +300,12 @@ HILL_RADII_AU = {
 # q ~ 0.076 AU (Granvik et al. 2016, Nature 530, 303), and it lies inside the sunskirter zone of
 # Jones et al. (2018, SSRv 214, 20), q < 33 R_Sun = 0.153 AU.
 SUN_ENCOUNTER_AU = 0.1
+
+# Passages of the nominal solution by a planet or the Moon are recorded out to this many Hill radii, so
+#   the figure can show how close the object came at every passage, not only inside the encounter
+#   threshold. Further out they say nothing about the planet's pull (Mercury, seen from an
+#   Earth-crossing orbit, stays hundreds of Hill radii away).
+PASSAGE_MAX_HILL = 100.0
 
 # Radius of the Sun in AU (IAU 2015 nominal, 695 700 km), used for impact detection
 SUN_RADIUS_AU = 695700.0/149597870.7
@@ -1601,6 +1611,9 @@ def _integrateParticles(task):
                                  leaves REBOUNDx's default, the z axis (the ecliptic pole).
             dt_days:         [float] Optional. Timestep in days for the fixed-step integrators.
                                  Ignored by IAS15. Default FIXED_STEP_DEFAULT_DT_DAYS[integrator].
+            track_passages:  [bool] Optional. Also record every passage by a planet or the Moon
+                                 within PASSAGE_MAX_HILL Hill radii ("passages" in the diagnostics).
+                                 Used for the nominal solution only. Default False.
 
     Return:
         [dict] {
@@ -1613,6 +1626,9 @@ def _integrateParticles(task):
                                  per local minimum of an object-body distance inside n_hill Hill
                                  radii (inside SUN_ENCOUNTER_AU for the Sun), in the format of
                                  encountersFromMinDistances,
+                "passages":      [list] with track_passages, every local minimum of the distance to a
+                                 planet or the Moon within PASSAGE_MAX_HILL Hill radii, in the
+                                 format of the encounters; None without it,
                 "departed":      [bool] whether the object left the Earth's neighbourhood,
                 "impact":        None, or {"body", "time_days", "dist_au"} if the object hit a body,
             }},
@@ -1634,6 +1650,11 @@ def _integrateParticles(task):
     reference_frame = task["reference_frame"]
 
     n_hill = task.get("n_hill", 3.0)
+
+    # Passages are recorded within PASSAGE_MAX_HILL Hill radii of the planets and the Moon (the Sun has
+    #   no Hill sphere, and its passages are the perihelia)
+    track_passages = task.get("track_passages", False)
+    passage_limit = {b: PASSAGE_MAX_HILL*r for b, r in HILL_RADII_AU.items()}
 
     # Integrator. The object starts at the Earth's surface, a deep close encounter that the
     # fixed-step integrators do not handle: WHFast cannot resolve it at all, and TRACE resolves the
@@ -1809,6 +1830,7 @@ def _integrateParticles(task):
             "escaped": None,
             "prev": {},
             "encounters": [],
+            "passages": [],
         }
 
     def heartbeat(sim_pointer):
@@ -1869,6 +1891,10 @@ def _integrateParticles(task):
                         # or a fixed distance for the Sun, which has no Hill sphere
                         if d_h < _encounterThreshold(bname, n_hill):
                             st["encounters"].append((bname, t_h, d_h))
+
+                        # Every passage, close or not, for the figure
+                        if track_passages and (d_h < passage_limit.get(bname, -1.0)):
+                            st["passages"].append((bname, t_h, d_h))
 
                 st["prev"][bname] = (t_now, rel, rv)
 
@@ -2010,6 +2036,8 @@ def _integrateParticles(task):
                               for b in planet_names},
             "encounters": [_encounterRecord(b, d, time_sign*simTimeToDays(t))
                            for b, t, d in st["encounters"]],
+            "passages": ([_encounterRecord(b, d, time_sign*simTimeToDays(t)) for b, t, d in st["passages"]]
+                         if track_passages else None),
             "departed": st["departed"],
             "impact": st["impact"],
             "escaped": st["escaped"],
@@ -2493,12 +2521,20 @@ PLOT_SAMPLE_CLONES = 10
 
 
 def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, dist_unit_multiplier=1.0,
-                      length_units="AU", horizon=None, n_hill=3.0):
+                      length_units="AU", horizon=None, n_hill=3.0, passages=None, clone_encounters=None,
+                      closest_au=None, closest_time_days=None):
     """ Figure of the evolution of the orbit: the nominal solution and the Monte Carlo clones.
 
-    Panels: a, e, q; i, node, argument of perihelion; longitude of perihelion, distance to the Earth
-    with the close encounters, and the predictability horizon (see predictabilityHorizon), or the
-    heliocentric distance without clones.
+    Panels: a, e, q; i, node, argument of perihelion; longitude of perihelion, the close approaches to
+    every body in units of its Hill radius, and the predictability horizon (see
+    predictabilityHorizon), or the heliocentric distance without clones.
+
+    The approaches panel shows the nominal's encounters as stars in the colour of their body, its other
+    passages as small dots, the clones' encounters as faint dots, and, for a body with none of these,
+    its closest approach as a ring. The Sun has no Hill sphere: its
+    distance is scaled so that its SUN_ENCOUNTER_AU gate falls on the n_hill line of the others. The
+    distance to the Earth at the outputs is drawn too in runs shorter than two years, where it shows
+    the departure; in longer runs the output sampling misses the approaches.
 
     With PLOT_BANDS_MIN_CLONES clones or more, the clones are shown as the 2.5-97.5% and 16-84%
     bands and the median at each time, with PLOT_SAMPLE_CLONES of them drawn individually; with fewer,
@@ -2518,6 +2554,11 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
         length_units: [str] Name of that unit. Default "AU".
         horizon: [dict] Return of predictabilityHorizon, or None.
         n_hill: [float] Earth Hill radii of the departure and of the encounter threshold. Default 3.
+        passages: [list] Every passage of the nominal solution within PASSAGE_MAX_HILL Hill radii
+            ("passages" in the diagnostics of reboundSimulate), or None.
+        clone_encounters: [dict] {clone name: encounters of that clone}, or None.
+        closest_au: [dict] {body: closest approach of the nominal solution in AU}, or None.
+        closest_time_days: [dict] {body: time of that closest approach in days}, or None.
 
     Return:
         (fig, axes): the figure and a dict of its axes by panel name.
@@ -2546,7 +2587,7 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
             out["node"][k] = np.degrees(orb.Omega)
             out["peri"][k] = np.degrees(orb.omega)
             out["varpi"][k] = np.degrees(orb.Omega + orb.omega) % 360.0
-            out["earth"][k] = row[3].get("Earth", np.nan)*dist_unit_multiplier
+            out["earth"][k] = row[3].get("Earth", np.nan)
             out["sun"][k] = row[3].get("Sun", np.nan)
         return out
 
@@ -2624,26 +2665,109 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
             pad = 0.05*(hi - lo) if hi > lo else max(abs(hi)*1e-6, 1e-12)
             ax.set_ylim(lo - pad, hi + pad)
 
-    # Distance to the Earth (nominal), on a log scale, with the encounter threshold and the
-    #   encounters with every body at their closest approach
+    # Close approaches to every body in units of its Hill radius, so that one line is the encounter
+    #   threshold for all of them, on a log scale
     ax = axes["encounters"]
-    earth = nominal["earth"]
-    ax.plot(t, np.where(earth > 0, earth, np.nan), color="0.55", lw=0.4, label="distance to the Earth")
-    ax.axhline(n_hill*HILL_RADII_AU["Earth"]*dist_unit_multiplier, color="0.3", ls=":", lw=1,
-               label="{:g} Earth Hill radii".format(n_hill))
 
-    # One colour per body, each star at the closest approach to that body
-    body_colors = {"Earth": "red", "Luna": "magenta", "Venus": "orange", "Mars": "saddlebrown",
-                   "Mercury": "teal", "Jupiter": "purple", "Saturn": "olive", "Sun": "gold"}
-    seen = set()
+    def hillUnits(body, dist_au):
+        """ Distance in Hill radii of the body; for the Sun, scaled so its gate is at n_hill. """
+        if body == "Sun":
+            return n_hill*dist_au/SUN_ENCOUNTER_AU
+        return dist_au/HILL_RADII_AU[body]
+
+    def plotted(body):
+        return (body == "Sun") or (body in HILL_RADII_AU)
+
+    # One colour per body
+    body_colors = {"Sun": "gold", "Mercury": "teal", "Venus": "orange", "Earth": "red", "Luna": "magenta",
+                   "Mars": "saddlebrown", "Jupiter": "purple", "Saturn": "olive", "Uranus": "c",
+                   "Neptune": "navy"}
+
+    def planetColor(body):
+        return body_colors.get(body, "0.3")
+
+    drawn = set()
+
+    # In a short run the distance to the Earth at the outputs shows the departure; in a long one the
+    #   output sampling misses the approaches, which the passages below give exactly
+    if not in_years:
+        earth = nominal["earth"]
+        ax.plot(t, np.where(earth > 0, earth, np.nan)/HILL_RADII_AU["Earth"], color="0.55", lw=0.6,
+                zorder=1)
+
+    ax.axhline(n_hill, color="0.3", ls=":", lw=1, zorder=1)
+
+    # Encounters of the clones, faint, below everything else
+    clone_points = {}
+    for encs in (clone_encounters or {}).values():
+        for enc in encs:
+            if plotted(enc["body"]):
+                clone_points.setdefault(enc["body"], []).append(
+                    (enc["time_days"]/t_scale, hillUnits(enc["body"], enc["min_dist_au"])))
+    for body, pts in clone_points.items():
+        pts = np.array(pts)
+        ax.plot(pts[:, 0], pts[:, 1], marker="o", ls="none", color=planetColor(body), markersize=2.5,
+                markeredgewidth=0, alpha=0.3, zorder=2, gid="clone_encounter:{:s}".format(body))
+        drawn.add(body)
+
+    # Every passage of the nominal solution, as small dots
+    for body in [b for b in PLANET_ORDER if plotted(b)]:
+        pas = [p for p in (passages or []) if p["body"] == body]
+        if pas:
+            ax.plot([p["time_days"]/t_scale for p in pas], [hillUnits(body, p["min_dist_au"]) for p in pas],
+                    marker="o", ls="none", color=planetColor(body), markersize=3, markeredgewidth=0,
+                    zorder=3, gid="passage:{:s}".format(body))
+            drawn.add(body)
+
+    # The nominal's encounters, as stars
+    nominal_encountered = set()
     for enc in encounters:
         body = enc["body"]
-        ax.plot(enc["time_days"]/t_scale, enc["min_dist_au"]*dist_unit_multiplier, marker="*",
-                color=body_colors.get(body, "0.3"), markersize=10, ls="none", zorder=5,
-                label="encounter: {:s}".format(body) if body not in seen else None)
-        seen.add(body)
+        if not plotted(body):
+            continue
+        ax.plot(enc["time_days"]/t_scale, hillUnits(body, enc["min_dist_au"]), marker="*",
+                color=planetColor(body), markersize=10, ls="none", zorder=5,
+                gid="encounter:{:s}".format(body))
+        drawn.add(body)
+        nominal_encountered.add(body)
+
+    # A body with none of the above (no passages recorded, e.g. a results file from an older version,
+    #   or none close enough) still gets its closest approach of the run, as a ring. The Sun's is the
+    #   perihelion, which the other panels show already.
+    rings = set()
+    for body, dist in (closest_au or {}).items():
+        t_min = (closest_time_days or {}).get(body)
+        if (body == "Sun") or (body not in HILL_RADII_AU) or (body in drawn) or (dist is None) or (t_min is None):
+            continue
+        ax.plot(t_min/t_scale, hillUnits(body, dist), marker="o", ls="none", markersize=6,
+                markerfacecolor="none", markeredgecolor=planetColor(body), markeredgewidth=1.2, zorder=4,
+                gid="closest:{:s}".format(body))
+        drawn.add(body)
+        rings.add(body)
+
     ax.set_yscale("log")
-    ax.set_ylabel("distance [{:s}]".format(length_units))
+    ax.set_ylabel("distance [Hill radii]")
+
+    # The legend: one entry per body in its colour, then one per kind of marker, in black, apart from
+    #   the body colours
+    approach_handles = [Line2D([], [], marker="o", ls="none", color=planetColor(b), markersize=6,
+                               label="Moon" if b == "Luna" else b)
+                        for b in PLANET_ORDER if b in drawn]
+    if not in_years:
+        approach_handles.append(Line2D([], [], color="0.55", lw=0.6, label="distance to the Earth"))
+    approach_handles.append(Line2D([], [], color="0.3", ls=":", lw=1, label="{:g} Hill radii".format(n_hill)))
+    if nominal_encountered:
+        approach_handles.append(Line2D([], [], marker="*", ls="none", color="k", markersize=9,
+                                       label="encounter (nominal)"))
+    if passages:
+        approach_handles.append(Line2D([], [], marker="o", ls="none", color="k", markersize=3,
+                                       markeredgewidth=0, label="passage (nominal)"))
+    if clone_points:
+        approach_handles.append(Line2D([], [], marker="o", ls="none", color="k", markersize=2.5,
+                                       markeredgewidth=0, alpha=0.5, label="encounter (clones)"))
+    if rings:
+        approach_handles.append(Line2D([], [], marker="o", ls="none", markersize=6, markerfacecolor="none",
+                                       markeredgecolor="k", markeredgewidth=1.2, label="never closer"))
 
     # Predictability: rank correlation of the clones with their start, and the horizon
     ax = axes["predictability"]
@@ -2682,6 +2806,9 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
     axs[0, 0].set_xlim(ax_min, ax_max)
 
     for ax in axs.flatten():
+        if ax is axes["encounters"]:
+            ax.legend(handles=approach_handles, fontsize=6.5, ncol=2, loc="best")
+            continue
         handles, lab = ax.get_legend_handles_labels()
         if lab:
             ax.legend(fontsize=7, loc="best")
@@ -2945,7 +3072,10 @@ def reboundSimulate(
         print(f"Direction: {direction}")
 
     # Nominal solution, integrated in its own simulation (in the main process)
-    nominal_result = _integrateParticles(_make_task([state_vect_rot], [obj_name]))
+    #   It also records every passage by a planet, for the figure (see PASSAGE_MAX_HILL)
+    nominal_task = _make_task([state_vect_rot], [obj_name])
+    nominal_task["track_passages"] = True
+    nominal_result = _integrateParticles(nominal_task)
     outputs = nominal_result["outputs"][obj_name]
     diagnostics = dict(nominal_result["diagnostics"])
 
@@ -3850,7 +3980,10 @@ if __name__ == "__main__":
     # Evolution of the orbit, the clones as percentile bands (see plotReboundOrbits)
     plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=plot_png_path,
                       dist_unit_multiplier=dist_unit_multiplier, length_units=a_units, horizon=horizon,
-                      n_hill=n_hill)
+                      n_hill=n_hill, passages=nominal_diag.get("passages"),
+                      clone_encounters={name: diag.get("encounters", []) for name, diag in clone_diag.items()},
+                      closest_au=nominal_diag.get("min_dist_au"),
+                      closest_time_days=nominal_diag.get("min_time_days"))
 
     # MEGNO evolution, in its own figure
     megno_png_path = None
@@ -3937,6 +4070,9 @@ if __name__ == "__main__":
         #   encounter minima were refined between steps, only the deepest approach per body was kept.
         #   The Sun has no Hill sphere, so its "hill_radius_au" and "n_hill" are None.
         "encounters": encounters,
+        # Every passage of the nominal solution by a planet or the Moon within PASSAGE_MAX_HILL Hill
+        #   radii, encounters included, ordered by time, in the same format
+        "passages": nominal_diag.get("passages"),
         "closest_approaches_au": nominal_diag.get("min_dist_au"),
         "closest_approach_times_days": nominal_diag.get("min_time_days"),
         "impact": impact,
