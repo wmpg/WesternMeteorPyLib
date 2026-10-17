@@ -862,3 +862,14 @@ def testFigureWithoutClonesOrWithAShortClone(reb, agg, tmp_path):
     _, axes = reb.plotReboundOrbits(nominal, clones, encounters, file_path=str(tmp_path/"b.png"))
     labels = axes["encounters"].get_legend_handles_labels()[1]
     assert "encounter: Earth" in labels and "encounter: Jupiter" in labels
+
+
+def testTheHorizonLegendGivesItsTime(reb, agg):
+
+    nominal, clones = _plotOutputs(n_clones=25)
+    horizon = reb.predictabilityHorizon(nominal, clones)
+    horizon["horizon_days"] = -365.25*31
+    _, axes = reb.plotReboundOrbits(nominal, clones, [], horizon=horizon)
+
+    labels = axes["predictability"].get_legend_handles_labels()[1]
+    assert "predictability horizon (31 years)" in labels

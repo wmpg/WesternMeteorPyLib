@@ -2671,7 +2671,8 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
             ax.axvline(t[k_dep], color="0.6", ls=":", lw=0.8)
         if (horizon is not None) and (horizon.get("horizon_days") is not None):
             ax.axvline(horizon["horizon_days"]/t_scale, color="red", ls="--", lw=0.9,
-                       label="predictability horizon" if ax is axes["predictability"] else None)
+                       label="predictability horizon ({:s})".format(_spanText(horizon["horizon_days"]))
+                       if ax is axes["predictability"] else None)
         if ax in axs[-1]:
             ax.set_xlabel(t_label)
         if ax.get_yscale() == "linear":

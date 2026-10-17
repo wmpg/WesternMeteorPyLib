@@ -463,7 +463,7 @@ options.
   line) carry the Earth's pull and are not drawn, and the vertical axes are scaled to the rest of the
   run, so they cover the clones as well as the nominal solution.
 - **Time** in years for spans of two years or more, in days otherwise. The predictability horizon is
-  the dashed red vertical line on every panel.
+  the dashed red vertical line on every panel, and its time is given in the legend.
 
 The JSON keys, at the top level:
 
