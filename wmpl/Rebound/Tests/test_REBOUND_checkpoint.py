@@ -262,7 +262,39 @@ def testCheckpointOfOtherParametersIsRefused(reb, exampleTraj, tmp_path):
     with pytest.raises(reb.ReboundCheckpointMismatch) as err:
         _run(reb, exampleTraj, path, mc_runs=1, sim_days=30)
 
-    assert err.value.differences == [("sim_days", 60.0, 30.0)]
+    # The span is reported by value, and also changes the output times held in the integration hash
+    keys = [k for k, _, _ in err.value.differences]
+    assert ("sim_days", 60.0, 30.0) in err.value.differences
+    assert keys == ["integration_sha1", "sim_days"]
+
+
+def testSignatureCoversEveryIntegrationSettingAndTheRealizations(reb):
+    """ Any setting of the integration task, including one the signature does not list, and any change
+    of a realization make the checkpoint a different run; the particles of the task do not count. """
+
+    task = {"planet_names": ["Sun"], "planet_states": [[0.0]*6], "planet_masses": [1.0],
+            "particle_states": [[1.0, 0, 0, 0, 1.0, 0]], "particle_names": ["obj"], "times": [0.0, -1.0],
+            "direction": "backward", "reference_frame": "heliocentric", "beta": None,
+            "integrator": "ias15", "dt_days": None}
+    realizations = [np.arange(6.0), np.arange(6.0) + 1]
+
+    def signature(task, realizations):
+        return reb.checkpointSignature(task, 2459274.4, list(range(6)), realizations, 7, "obj", 60.0, 2,
+                                       "local")
+
+    base = signature(task, realizations)
+
+    # Other particles: the same run
+    assert reb._checkpointDifferences(base, signature(dict(task, particle_states=[[9.0]*6]), realizations)) == []
+
+    # A setting that is not listed by value, e.g. a force added later
+    differences = reb._checkpointDifferences(base, signature(dict(task, new_force=True), realizations))
+    assert [k for k, _, _ in differences] == ["integration_sha1"]
+
+    # A realization changed by 1 mm/s
+    changed = [realizations[0], realizations[1] + np.array([0, 0, 0, 1e-3, 0, 0])]
+    differences = reb._checkpointDifferences(base, signature(task, changed))
+    assert [k for k, _, _ in differences] == ["realizations_sha1"]
 
 
 def testMegnoIsCheckpointed(reb, exampleTraj, tmp_path, monkeypatch):

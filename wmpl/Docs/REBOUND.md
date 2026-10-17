@@ -377,9 +377,12 @@ uninterrupted run). The clones are drawn in the parent process from the seed, so
 the run takes the seed stored in the checkpoint. Clones that were still integrating when the run was
 cut are integrated again, and a record cut while it was being written is dropped.
 
-The checkpoint is resumed only if the run has the same parameters: trajectory, span, direction,
-`--outputs`, `--mc`, `--seed` (if given), frame, ephemeris, beta, integrator and timestep. If any of
-them differ, the old checkpoint is moved to `rebound_checkpoint.pkl.prev` and a new run starts. The
+The checkpoint is resumed only if the run is the same: trajectory, span, direction, `--outputs`,
+`--mc`, `--seed` (if given), frame, ephemeris, beta, integrator and timestep, and also everything
+else that sets the dynamics and the clones. The checkpoint holds a hash of the whole integration
+setup (planets, output times and every force setting, including options added later) and one of the
+clones' initial states. If anything differs, the old checkpoint is moved to
+`rebound_checkpoint.pkl.prev` and a new run starts. The
 number of cores can change between runs. The checkpoint is deleted once all the results are saved.
 Pass `--no_checkpoint` to skip it, e.g. when the disk is short.
 
