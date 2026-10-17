@@ -469,7 +469,9 @@ neighbouring samples. Against a dense grid refined with a tight minimiser it agr
 600 meteoroid-like orbits, including Earth-crossing orbits inclined by less than 2 deg, the hard case:
 there the minima are narrow, and near tangency two of them can fall within one sampling step (without
 the neighbouring starts, one orbit with q = 0.992 AU and i = 0.06 deg came out at 0.0008 AU instead of
-0.0003 AU). It returns NaN for hyperbolic orbits. It is also the `calcMOID` of
+0.0003 AU). It returns NaN for hyperbolic orbits; `calcMOIDFromPerihelion(q1, e1, ..., q2, e2, ...)`
+takes perihelion distances instead and handles a parabolic or hyperbolic orbit against an elliptical one
+(a meteoroid against a long-period comet), validated the same way. It is also the `calcMOID` of
 `wmpl.Utils.OrbitClassification`, which used Powell's method from four starting points (Tancredi 2014)
 before; that version is kept as `calcMOIDTancredi` in the same module, for comparison: it is ~700 times
 slower and, for two eccentric orbits, can stop at a local minimum.

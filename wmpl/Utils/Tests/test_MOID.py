@@ -12,7 +12,7 @@ Run with pytest:
 import numpy as np
 import pytest
 
-from wmpl.Utils.MOID import calcMOID, calcMOIDTancredi, _orbitFrame, _ellipsePoint
+from wmpl.Utils.MOID import calcMOID, calcMOIDFromPerihelion, calcMOIDTancredi, _orbitFrame, _ellipsePoint
 
 
 DEG = np.pi/180
@@ -186,3 +186,98 @@ def testTancredisMethodAgreesAgainstAPlanetAndCanFailForTwoEccentricOrbits():
     assert calcMOID(*first, *second) == pytest.approx(ref, abs=1e-9)
     assert ref == pytest.approx(0.020621, abs=1e-6)
     assert calcMOIDTancredi(*first, *second) == pytest.approx(0.026040, abs=1e-6)
+
+
+### Parabolic and hyperbolic orbits ###
+
+def _referenceConic(el1, el2, r_max=50.0, n=1500, n_starts=8):
+    """ Independent MOID of an ellipse (q1, e1 < 1) and any conic (q2, e2), as in _reference: a dense
+    grid in the eccentric anomaly of the ellipse and the true anomaly of the conic (out to r_max),
+    refined with Nelder-Mead from the deepest distinct grid points. """
+
+    from scipy.optimize import minimize
+
+    q1, e1, i1, node1, peri1 = el1
+    q2, e2, i2, node2, peri2 = el2
+    P1, Q1 = _orbitFrame(i1, node1, peri1)
+    P2, Q2 = _orbitFrame(i2, node2, peri2)
+    a1 = q1/(1 - e1)
+
+    def ellipse(E):
+        return _ellipsePoint(a1, a1*np.sqrt(1 - e1**2), e1, P1, Q1, np.asarray(E))[0]
+
+    nu_lim = np.arccos(np.clip((q2*(1 + e2)/r_max - 1)/e2, -1, 1)) if e2 >= 1 else np.pi
+
+    def conic(nu):
+        nu = np.clip(np.asarray(nu), -nu_lim, nu_lim)[..., None]
+        r = q2*(1 + e2)/(1 + e2*np.cos(nu))
+        return r*np.cos(nu)*P2 + r*np.sin(nu)*Q2
+
+    E = np.linspace(0, 2*np.pi, n, endpoint=False)
+    nu = np.linspace(-nu_lim, nu_lim, n)
+    d2 = np.sum((ellipse(E)[:, None, :] - conic(nu)[None, :, :])**2, axis=-1)
+
+    def f(x):
+        return np.sum((ellipse(x[0]) - conic(x[1]))**2)
+
+    best, seen = np.inf, []
+    for k in np.argsort(d2, axis=None)[:4000]:
+        iu, iv = np.unravel_index(k, d2.shape)
+        if any((abs(iu - su) < n//20) and (abs(iv - sv) < n//20) for su, sv in seen):
+            continue
+        seen.append((iu, iv))
+        res = minimize(f, [E[iu], nu[iv]], method="Nelder-Mead",
+                       options={"xatol": 1e-12, "fatol": 1e-22, "maxiter": 4000})
+        best = min(best, res.fun)
+        if len(seen) >= n_starts:
+            break
+
+    return np.sqrt(best)
+
+
+def testParabolaAgainstACircle():
+    """ A coplanar parabola crosses a circle of radius r > q, and is closest at its perihelion to one of
+    radius r < q (out of the plane, the perihelion is no longer the closest point). """
+
+    assert calcMOIDFromPerihelion(0.5, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0) == pytest.approx(0, abs=1e-10)
+    assert calcMOIDFromPerihelion(1.5, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0) == pytest.approx(0.5, abs=1e-10)
+    # The same for a coplanar hyperbola, whatever its orientation in the plane
+    assert calcMOIDFromPerihelion(1.5, 1.3, 0.0, 1.0, 2.0, 1.0, 0.0, 0.0, 0.0, 0.0) == pytest.approx(0.5, abs=1e-10)
+
+
+def testOpenOrbitsAndTheEllipticalWrapper():
+
+    el = (2.0, 0.5, 0.1, 0.0, 0.0)
+    q_el = (1.0, 0.5, 0.1, 0.0, 0.0)
+    # The same ellipse given by a or by q
+    assert calcMOID(*el, *EARTH) == pytest.approx(calcMOIDFromPerihelion(*q_el, 1.0 - 0.0167, *EARTH[1:]),
+                                                   abs=1e-12)
+    # calcMOID takes ellipses only; two open orbits are not handled
+    assert np.isnan(calcMOID(2.0, 1.2, 0.1, 0.0, 0.0, *EARTH))
+    assert np.isnan(calcMOIDFromPerihelion(1.0, 1.0, 0.1, 0.0, 0.0, 2.0, 1.1, 0.2, 0.0, 0.0))
+    assert np.isnan(calcMOIDFromPerihelion(1.0, -0.1, 0.1, 0.0, 0.0, *q_el))
+
+
+@pytest.mark.parametrize("seed, low_inclination", [(3, True), (4, False)])
+def testOpenOrbitsAgreeWithAnIndependentReference(seed, low_inclination):
+    """ Meteoroid-like ellipses against parabolic (40%) and hyperbolic (e up to 1.6) comet-like orbits,
+    in either order. """
+
+    rng = np.random.default_rng(seed)
+    n = 25
+    q1 = rng.uniform(0.3, 1.05, n)
+    a = q1 + rng.uniform(0.5, 3.0, n)
+    e1 = 1 - q1/a
+    q2 = rng.uniform(0.1, 3.0, n)
+    e2 = np.where(rng.random(n) < 0.4, 1.0, rng.uniform(1.0, 1.6, n))
+
+    def incl():
+        return (10**rng.uniform(-2, np.log10(3.0), n) if low_inclination else rng.uniform(0, 180, n))*DEG
+
+    meteoroid = (q1, e1, incl(), rng.uniform(0, 2*np.pi, n), rng.uniform(0, 2*np.pi, n))
+    comet = (q2, e2, incl(), rng.uniform(0, 2*np.pi, n), rng.uniform(0, 2*np.pi, n))
+
+    ref = np.array([_referenceConic(tuple(x[k] for x in meteoroid), tuple(x[k] for x in comet))
+                    for k in range(n)])
+    assert calcMOIDFromPerihelion(*meteoroid, *comet) == pytest.approx(ref, abs=1e-9)
+    assert calcMOIDFromPerihelion(*comet, *meteoroid) == pytest.approx(ref, abs=1e-9)
