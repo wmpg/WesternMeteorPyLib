@@ -146,6 +146,9 @@ def loadECSVs(ecsv_paths, no_prepare=False):
             meteor = MeteorObservation(jdt_ref, station_id, np.radians(station_lat), \
                 np.radians(station_lon), station_ele, FPS, ff_name=comment)
 
+            # The R.A./Dec. above were computed at each point's own time
+            meteor.radec_per_point = True
+
             # Add data to meteor object
             for t_rel, x_centroid, y_centroid, ra, dec, azim, alt, mag in zip(time_data, x_data, y_data, \
                 np.degrees(ra_data), np.degrees(dec_data), azim_data, alt_data, mag_data):
