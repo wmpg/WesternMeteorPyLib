@@ -340,7 +340,7 @@ def testSunPassageSummaryCollapsesOnlyRepeatedPassages(reb):
     assert line.startswith("Sun ")
     assert "4 perihelion passages < 0.10 AU" in line
     assert "q = 0.0400-0.0600 AU" in line
-    assert "t = +1.0 to +13.0 d" in line
+    assert "t = +1.0 d to +13.0 d" in line
 
 
 ### Monte Carlo encounter summary ###
