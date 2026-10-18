@@ -312,9 +312,9 @@ def test_save_csv_and_json_hold_every_criterion():
         assert set(data['matches'][0]['criteria']) == {'D_SH', 'D_N', 'D_D'}
 
 
-def _chancePopulation(tmp):
+def _chancePopulation(tmp, n_far=490):
     """ A small debiased population around Phaethon's orbit: ten orbits differing from it only in q,
-        by 0.01 to 0.10 AU, so at those values of D_SH, and 490 far away. """
+        by 0.01 to 0.10 AU, so at those values of D_SH, and n_far far away. """
 
     import gzip
     import wmpl.Utils.DebiasedNEOPopulation as dnp
@@ -322,7 +322,7 @@ def _chancePopulation(tmp):
     q, e, i, peri, node = PHAETHON
 
     rows = [[(q + dq)/(1.0 - e), e, i, node, peri, 0.0, 0.0] for dq in 0.01*np.arange(1, 11)]
-    rows += [[0.2/(1.0 - 0.1), 0.1, 30.0, 200.0, 100.0, 0.0, 0.0]]*490
+    rows += [[0.2/(1.0 - 0.1), 0.1, 30.0, 200.0, 100.0, 0.0, 0.0]]*n_far
 
     rows = np.array(rows)
     rows[:, 6] = np.linspace(17.01, 24.99, len(rows))
@@ -461,6 +461,129 @@ def test_chance_neo_ranks_the_catalogue_by_p_and_saves_the_ranking():
         assert set(most) == {'D_SH', 'D_D'}
         assert most['D_SH'][0]['name'] == 'Phaethon'
         assert data['chance_neo']['n_background'] == chance_all['n_background']
+
+
+def test_probabilities_and_sigmas_are_formatted_to_be_read():
+    """ Plain decimals above 0.001, scientific notation below, never 1.00 for a certainty; sigma to one
+        decimal from 1 up and '<1' below; a limit marked. """
+
+    assert pbs.formatProbability(0.392) == "0.392"
+    assert pbs.formatProbability(0.0892) == "0.0892"
+    assert pbs.formatProbability(0.5) == "0.5"
+    assert pbs.formatProbability(0.00123) == "0.00123"
+    assert pbs.formatProbability(2.99e-5) == "2.99e-05"
+    assert pbs.formatProbability(0.9996) == ">0.999"
+    assert pbs.formatProbability(1.0) == ">0.999"
+    assert pbs.formatProbability(2.99e-5, limit=True) == "<=2.99e-05"
+
+    assert pbs.formatSigma(0.0) == "<1"
+    assert pbs.formatSigma(0.99) == "<1"
+    assert pbs.formatSigma(1.04) == "1.0"
+    assert pbs.formatSigma(3.5247) == "3.5"
+    assert pbs.formatSigma(3.5247, limit=True) == ">=3.5"
+    assert pbs.formatSigma(0.4, limit=True) == ">=0.4"
+
+    assert pbs.formatOdds(0.5) == ""
+    assert pbs.formatOdds(4.24e-4) == "1 in 2 400"
+    assert pbs.formatOdds(0.0455) == "1 in 22"
+    assert pbs.formatOdds(0.0027) == "1 in 370"
+    assert pbs.formatOdds(5.7e-7) == "1 in 1 800 000"
+
+
+def _chanceOutput(n_far, orbit=PHAETHON):
+    """ The text of --chance_neo for a synthetic population of n_far far orbits, and its pieces. """
+
+    q, e, i, peri, node = orbit
+
+    with tempfile.TemporaryDirectory() as tmp, _Catalogue():
+
+        population = _chancePopulation(tmp, n_far=n_far)
+        elements = (q, e, np.radians(i), np.radians(peri), np.radians(node))
+
+        search_all = pbs.searchParentBodies(*elements, d_crit=['DSH', 'DD'], top_n=-1)
+        chance_all = pbs.chanceNEO(search_all, *elements, population=population)
+        search, chance = pbs.firstMatches(search_all, chance_all, 3)
+
+        lines = pbs.formatChanceNEO(chance, search, top_n=3, search_all=search_all,
+            chance_all=chance_all)
+
+    return "\n".join(lines), search_all, chance_all
+
+
+def test_summary_says_nothing_is_significant_when_it_is_not():
+    """ A meteoroid on the orbit of the dense cluster of the population, far from every body: all the
+        synthetic orbits are closer than any body, no body reaches 2 sigma, and the summary says so,
+        names the best body, counts what could not be tested, and warns about the reading. """
+
+    text, search_all, chance_all = _chanceOutput(490, orbit=(0.2, 0.1, 30.0, 100.0, 200.0))
+
+    summary = text[text.index("Summary"):]
+
+    assert "Summary, for D_SH" in summary
+    assert "Tested: 4 of the 5 bodies searched. 0 asteroids are fainter than H = 25 and 1 comets or " \
+        "meteorites have no H" in summary
+    assert "Verdict: no body is distinguishable from chance" in summary
+    assert "None reaches 2 sigma" in summary
+    assert "Most significant:" in summary
+    assert "<1 sigma" in summary
+    assert "not that the body is the parent" in summary
+    assert "Other criteria" in summary and "D_D:" in summary
+    assert "body reaches" not in summary and "bodies reach" not in summary
+    assert "p is at most" not in summary, "nothing here is a limit: every synthetic orbit is closer"
+
+    # The summary closes the output
+    assert text.rstrip().endswith("is taken as exact.")
+
+
+def test_summary_calls_two_sigma_a_hint_and_three_sigma_evidence():
+    """ With the same body at the same D, a larger population resolves a smaller p. In the small one
+        Phaethon reaches 2 sigma but not 3, a hint, and in the large one it reaches 3, evidence. Both
+        are limits, as no synthetic orbit is as close as Phaethon itself. """
+
+    hint_text, _, hint_chance = _chanceOutput(490)
+    evidence_text, _, evidence_chance = _chanceOutput(20000)
+
+    sigma_hint = hint_chance['results']['D_SH'][0]['sigma']
+    sigma_evidence = evidence_chance['results']['D_SH'][0]['sigma']
+
+    assert 2.0 <= sigma_hint < 3.0 <= sigma_evidence, (sigma_hint, sigma_evidence)
+
+    assert "Verdict: a hint, not evidence" in hint_text
+    assert "2 sigma" in hint_text.split("Summary")[1]
+    assert "Verdict: 1 body reaches at least 3 sigma" in evidence_text
+    assert "Verdict: a hint" not in evidence_text
+
+    for text in (hint_text, evidence_text):
+        assert "p is at most and their sigma at least" in text
+        assert " or rarer" in text
+
+
+def test_a_limit_is_marked_in_the_tables_and_the_files():
+    """ A body closer than every synthetic orbit has p at most, and sigma at least, the value shown: the
+        tables mark it, and the saved files say so. """
+
+    text, search_all, chance_all = _chanceOutput(490)
+
+    phaethon_row = [line for line in text.splitlines() if line.startswith("Phaethon")][0]
+
+    assert "<=" in phaethon_row and ">=" in phaethon_row
+
+    results = dict(zip([m['name'] for m in search_all['matches']], chance_all['results']['D_SH']))
+
+    assert results['Phaethon']['is_limit'] is True
+    assert results['Near twin']['is_limit'] is False
+
+    with tempfile.TemporaryDirectory() as tmp:
+
+        path = os.path.join(tmp, "matches.csv")
+        search, chance = pbs.firstMatches(search_all, chance_all, 2)
+        pbs.saveMatches(path, search, chance=chance)
+
+        with open(path) as f:
+            rows = list(csv.DictReader(f))
+
+        assert rows[0]['chance_neo_D_SH_is_limit'] == 'True'
+        assert rows[1]['chance_neo_D_SH_is_limit'] == 'False'
 
 
 def test_chance_neo_reports_a_meteoroid_outside_the_model():

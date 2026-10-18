@@ -407,8 +407,10 @@ def chanceAssociation(meteor_orbit, candidates, criterion_key, population, known
             (lambda), the same from the Poisson upper limit on k as 'p_value_upper',
             'p_value_global_upper', 'expected_upper' and 'expected_global_upper', 'n_closer' (k,
             synthetic orbits at least as close), 'n_population', 'p1', 'n_at_least_as_large' with its
-            'n_known' and 'n_model' parts, 'n_background', and 'reason', None if the values were
-            computed or why not, in which case they are None.
+            'n_known' and 'n_model' parts, 'n_background', 'is_limit' (True when no synthetic orbit is
+            as close, so that p is at most and sigma at least the value given, which the size of the
+            population cannot resolve), and 'reason', None if the values were computed or why not, in
+            which case they are None.
     """
 
     key, label, func, kind = lookupCriterion(criterion_key)
@@ -426,7 +428,7 @@ def chanceAssociation(meteor_orbit, candidates, criterion_key, population, known
 
     fields = ['p_value', 'p_value_global', 'sigma', 'expected', 'expected_global', 'p_value_upper',
         'p_value_global_upper', 'expected_upper', 'expected_global_upper', 'n_closer', 'p1',
-        'n_at_least_as_large', 'n_known', 'n_model']
+        'n_at_least_as_large', 'n_known', 'n_model', 'is_limit']
 
     empty = dict((field, None) for field in fields)
     empty.update({'n_population': n_population, 'n_background': n_background, 'reason': None})
@@ -495,7 +497,7 @@ def chanceAssociation(meteor_orbit, candidates, criterion_key, population, known
             'p_value_global_upper': -np.expm1(-expected_global_upper),
             'expected_upper': expected_upper, 'expected_global_upper': expected_global_upper,
             'n_closer': k, 'p1': p1, 'n_at_least_as_large': n_large, 'n_known': n_known,
-            'n_model': n_model}
+            'n_model': n_model, 'is_limit': k == 0}
 
     results = []
     j = 0
@@ -510,8 +512,14 @@ def chanceAssociation(meteor_orbit, candidates, criterion_key, population, known
 
         for field, array in values.items():
             value = np.atleast_1d(array)[j]
-            result[field] = int(value) if field in ('n_closer', 'n_at_least_as_large', 'n_known',
-                'n_model') else float(value)
+            if field == 'is_limit':
+                result[field] = bool(value)
+
+            elif field in ('n_closer', 'n_at_least_as_large', 'n_known', 'n_model'):
+                result[field] = int(value)
+
+            else:
+                result[field] = float(value)
 
         results.append(result)
         j += 1

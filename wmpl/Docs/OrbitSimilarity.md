@@ -263,13 +263,36 @@ python -m wmpl.Utils.ParentBodySearch traj.pickle -d DSH DN DD
     λ_global = Σ_n min(1, λ/n), about 14·λ for the 802 448 background NEOs. Measured on the synthetic
     population itself over 200 Earth-crossing orbits, the true count is 0.6 to 1.0 times λ_global,
     so it is conservative.
-  - **Is it significant?** `sigma` is the two-sided Gaussian equivalent of `p_global`. 2 sigma is
-    p_global = 0.0455 and 3 sigma is 0.0027, and a match reaching either level is flagged. With
-    several criteria, choose one before looking: the smallest p over several criteria is not itself
-    a p-value.
-  - **Examples.** Phaethon against the Geminids: p = 3.0×10⁻⁵, p_global = 4.2×10⁻⁴, 3.5 sigma with
-    D_SH and with rho_2. Nothing else comes near 2 sigma. Winchcombe: the most significant body is
-    (433) Eros at D_SH = 0.51, with p = 0.16 and p_global = 0.91, so there is no association to claim.
+  - **Reading it.** `sigma` is the two-sided Gaussian equivalent of `p_global`, the convention of
+    physics:
+
+    | sigma | p_global | one in | reading |
+    | ---: | ---: | ---: | :--- |
+    | < 2 | > 0.046 | fewer than 22 | consistent with chance |
+    | 2 | 0.046 | 22 | a hint, not conclusive |
+    | 3 | 0.0027 | 370 | evidence |
+    | 5 | 6×10⁻⁷ | 1.7 million | discovery |
+
+    A match reaching 2 or 3 sigma is flagged in the tables. Below 1 sigma the number measures
+    nothing and is printed `<1`. From 1 up it has one decimal, which is all it supports:
+    `p_global` is conservative by up to 1.6 times, which moves 3.5 sigma by 0.1.
+  - **Probabilities** are printed as plain decimals with 3 significant digits above 0.001 and in
+    scientific notation below it. What rounds to certainty is printed `>0.999`.
+  - **Limits.** When no synthetic orbit is as close as the body (`closer` = 0), the population cannot
+    resolve how unusual it is: p is at most, and sigma at least, the value shown, printed `<=` and
+    `>=`. With 802 000 orbits a body can reach about 3.5 sigma this way. Saved files carry it as
+    `is_limit`.
+  - **The summary.** The output closes with one for the criterion the bodies were ranked by: how many
+    bodies could be tested and how many could not (H > 25, or no H), the most significant body, a
+    verdict, how many of the closest bodies could not be tested, and the most significant body under
+    each other criterion as a check. The verdict is one of: no body is distinguishable from chance
+    (none reaches 2 sigma); a hint (some reach 2 sigma, none 3); or evidence (some reach 3 sigma),
+    listing them with their odds. With several criteria, choose one before looking: the smallest p
+    over several criteria is not itself a p-value.
+  - **Examples.** Phaethon against the Geminids: p_global at most 4.2×10⁻⁴ (1 in 2 400 or rarer), at
+    least 3.5 sigma with D_SH and with rho_2, a limit. Nothing else comes near 2 sigma. Winchcombe:
+    the most significant body is (433) Eros at D_SH = 0.51, with p = 0.16 and p_global = 0.91, so there
+    is no association to claim.
   - **Why not random pairs.** Drawing pairs of synthetic NEOs until one is as close as the observed
     pair, as earlier works do, treats the meteoroid as a typical NEO. It is not one: a meteoroid has
     to hit the Earth, which favours the dense low-inclination Earth-crossing region. Measured with

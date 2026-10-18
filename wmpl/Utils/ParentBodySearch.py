@@ -49,6 +49,7 @@ from __future__ import print_function, division, absolute_import, unicode_litera
 import os
 import sys
 import csv
+import math
 import json
 import datetime
 import numpy as np
@@ -519,7 +520,8 @@ def chanceNEO(search, q, e, incl, peri, node, population=None, download=True, co
 
     Return:
         [dict] 'model', 'reference', 'license', 'file_path' and 'n_population' of the population, and
-            'n_background', the NEOs to its faint end; 'confidence'; 'meteor_in_model' and
+            'n_background', the NEOs to its faint end, and 'h_max', the absolute magnitude it reaches;
+            'confidence'; 'meteor_in_model' and
             'meteor_outside_reason'; 'labels', the criteria evaluated, in the order of the search,
             and 'skipped', those on the radiant; and 'results', for each label a list with a
             dictionary per match, as returned by wmpl.Utils.DebiasedNEOPopulation.chanceAssociation.
@@ -561,6 +563,7 @@ def chanceNEO(search, q, e, incl, peri, node, population=None, download=True, co
     return {'model': model['name'], 'reference': model['reference'], 'license': model['license'],
         'file_path': population['file_path'], 'n_population': len(population['q']),
         'n_background': sum(dnp.countAtLeastAsLarge(model['h_max'], population, known_h_mags)),
+        'h_max': model['h_max'],
         'confidence': confidence, 'meteor_in_model': inside, 'meteor_outside_reason': reason,
         'labels': labels, 'skipped': skipped, 'results': results}
 
@@ -608,43 +611,201 @@ def rankByChance(search, chance, label, top_n=10):
     return ranked if top_n == -1 else ranked[:top_n]
 
 
-def _significanceText(sigma):
-    """ The flag of a significance level, at 2 and 3 sigma. """
+# The significance levels the output flags, in Gaussian sigma: 2 sigma is a hint, 3 sigma is the usual
+#   bar for evidence in physics
+SIGMA_HINT = 2.0
+SIGMA_EVIDENCE = 3.0
 
-    if sigma >= 3.0:
+
+def formatProbability(p_value, limit=False):
+    """ A probability for the tables: plain decimals with 3 significant digits above 0.001, scientific
+        notation below it, and '>0.999' for what rounds to certainty, which would otherwise be printed
+        as 1.00. A limit (no synthetic orbit is as close) is prefixed with '<=': the population cannot
+        resolve it.
+    """
+
+    if p_value >= 0.9995:
+        text = ">0.999"
+
+    elif p_value >= 0.001:
+        text = "{:.3g}".format(p_value)
+
+    else:
+        text = "{:.2e}".format(p_value)
+
+    return ("<=" + text) if limit else text
+
+
+def formatSigma(sigma, limit=False):
+    """ A significance for the tables: one decimal from 1 sigma up, '<1' below it, where the number
+        measures nothing, and prefixed with '>=' for a limit. One decimal is all the value supports:
+        p_global is conservative by up to 1.6 times, which moves it by 0.1 sigma at 3.5 sigma.
+    """
+
+    if sigma < 1.0:
+        return "<1" if not limit else ">={:.1f}".format(sigma)
+
+    return "{:s}{:.1f}".format(">=" if limit else "", sigma)
+
+
+def formatOdds(p_value):
+    """ A probability as '1 in N' with 2 significant digits, for the ones small enough to be read that
+        way. """
+
+    if p_value >= 0.1:
+        return ""
+
+    odds = 1.0/p_value
+    digits = 2 - 1 - int(np.floor(np.log10(odds)))
+
+    return "1 in {:,.0f}".format(round(odds, digits)).replace(",", " ")
+
+
+def _significanceText(sigma):
+    """ The flag of a significance level. """
+
+    if sigma >= SIGMA_EVIDENCE:
         return "3 sigma"
 
-    if sigma >= 2.0:
+    if sigma >= SIGMA_HINT:
         return "2 sigma"
 
     return ""
 
 
+def summariseChanceNEO(chance, search, search_all, chance_all):
+    """ The summary that closes the output of --chance_neo: what was tested, the most significant
+        body, whether anything is distinguishable from chance, and what cannot be concluded.
+
+        It is written for the criterion the bodies were ranked by, which is the one to choose before
+        looking, with one line for each of the others as a check. """
+
+    h_max = chance_all['h_max']
+
+    # The criterion the bodies were ranked by, if it was evaluated
+    primary = search['labels'][0] if search['labels'][0] in chance_all['labels'] \
+        else chance_all['labels'][0]
+
+    asteroids = [m for m in search_all['matches'] if m['h_mag'] >= 0]
+
+    ranked = rankByChance(search_all, chance_all, primary, top_n=-1)
+    n_tested = len(ranked)
+    n_faint = sum(1 for m in asteroids if m['h_mag'] > h_max)
+    n_other = len(search_all['matches']) - len(asteroids)
+
+    def _describe(entry, label):
+
+        match, d_value, r = entry
+
+        p_text = formatProbability(r['p_value_global'], r['is_limit'])
+
+        # A limit reads as "p_global <= x", a value as "p_global = x"
+        text = "{:s}, {:s} = {:.3f}, H = {:.1f}, p_global {:s}{:s} ({:s} sigma)".format(match['name'],
+            label, d_value, match['h_mag'], "" if p_text.startswith("<=") else "= ", p_text,
+            formatSigma(r['sigma'], r['is_limit']))
+
+        odds = formatOdds(r['p_value_global'])
+
+        if odds:
+            text += ", " + odds + (" or rarer" if r['is_limit'] else "")
+
+        return text
+
+    lines = ["Summary, for {:s}, the criterion the bodies were ranked by:".format(primary)]
+    lines.append("  Tested: {:d} of the {:d} bodies searched. {:d} asteroids are fainter than H = {:.0f} and "
+        "{:d} comets or meteorites have no H, so the".format(n_tested, len(search_all['matches']),
+            n_faint, h_max, n_other))
+    lines.append("  model cannot say whether they are a chance match.")
+
+    if not ranked:
+        lines.append("  No body could be tested.")
+        return lines
+
+    significant = [entry for entry in ranked if entry[2]['sigma'] >= SIGMA_EVIDENCE]
+    hints = [entry for entry in ranked if SIGMA_HINT <= entry[2]['sigma'] < SIGMA_EVIDENCE]
+
+    lines.append("  Most significant: " + _describe(ranked[0], primary) + ".")
+
+    if significant:
+
+        lines.append("  Verdict: {:d} {:s} {:s} {:.0f} sigma, the usual bar for evidence:".format(
+            len(significant), "body reaches" if len(significant) == 1 else "bodies reach",
+            "at least", SIGMA_EVIDENCE))
+
+        for entry in significant[:5]:
+            lines.append("    " + _describe(entry, primary))
+
+        if len(significant) > 5:
+            lines.append("    and {:d} more.".format(len(significant) - 5))
+
+    elif hints:
+
+        lines.append("  Verdict: a hint, not evidence. {:d} {:s} {:.0f} sigma but none {:.0f}, the usual bar:"
+            .format(len(hints), "body reaches" if len(hints) == 1 else "bodies reach", SIGMA_HINT,
+                SIGMA_EVIDENCE))
+
+        for entry in hints[:5]:
+            lines.append("    " + _describe(entry, primary))
+
+    else:
+        lines.append("  Verdict: no body is distinguishable from chance. None reaches {:.0f} sigma "
+            "(p_global > {:.3f}).".format(SIGMA_HINT, math.erfc(SIGMA_HINT/math.sqrt(2.0))))
+
+    if any(entry[2]['is_limit'] for entry in (significant + hints)[:5] + ranked[:1]):
+        lines.append("  No synthetic orbit is as close as some of these, so their p is at most and their sigma "
+            "at least the value shown: the {:d} synthetic orbits cannot resolve more.".format(
+                chance_all['n_population']))
+
+    # How many of the closest bodies could not be tested
+    n_closest = len(search['matches'])
+    n_untested = sum(1 for r in chance['results'][primary] if r['reason'] is not None)
+
+    if n_untested:
+        lines.append("  {:d} of the {:d} closest by {:s} could not be tested. A small parent body cannot be "
+            "ruled in or out by this method.".format(n_untested, n_closest, search['labels'][0]))
+
+    others = [label for label in chance_all['labels'] if label != primary]
+
+    if others:
+
+        lines.append("  Other criteria, as a check and not to pick the best of (the smallest p over several "
+            "criteria is not a p-value):")
+
+        for label in others:
+
+            other = rankByChance(search_all, chance_all, label, top_n=1)
+
+            lines.append("    {:s}: ".format(label) + (_describe(other[0], label) if other
+                else "no body could be tested"))
+
+    lines.append("  A low p says the match is unlikely by chance, not that the body is the parent. "
+        "The meteoroid's orbit is taken as exact.")
+
+    return lines
+
+
 def formatChanceNEO(chance, search, top_n=10, search_all=None, chance_all=None):
     """ The lines that print the result of chanceNEO: for each criterion the matches of the search,
         and, given the search and chanceNEO of the whole catalogue, the top_n most significant
-        asteroids. """
+        asteroids, and the summary. """
 
     model_range = "17 < H < 25, q < 1.3 AU, a < 4.2 AU"
 
     lines = ["Chance coincidence with the debiased NEO population of {:s}: {:d} synthetic NEOs "
         "({:s}), with the known ones with".format(chance['model'], chance['n_population'],
             model_range),
-        "H <= 17, {:d} background NEOs to H = 25.".format(chance['n_background']),
+        "H <= 17, {:d} background NEOs to H = {:.0f}.".format(chance['n_background'], chance['h_max']),
         "  N(H<=Hmag)  NEOs at least as large as the body.",
         "  closer      synthetic orbits at least as close to the meteoroid's as the body's.",
         "  expected    NEOs at least as large expected as close by chance, "
             "N(H<=Hmag)*(closer + 1)/{:d}.".format(chance['n_population'] + 1),
-        "  p           probability of at least one: the p-value of this body, if it was named before "
-            "the search.",
-        "  p_global    probability that some background NEO, of any size to H = 25, has a p as low: "
-            "the p-value to",
-        "              quote for a body the search found. Conservative.",
-        "  sigma       two-sided Gaussian equivalent of p_global: 2 sigma is p_global = 0.0455, 3 sigma "
-            "is 0.0027.",
-        "  Asteroids only, the meteoroid's orbit taken as exact. With several criteria, choose one "
-            "before looking:",
-        "  the smallest p over several criteria is not itself a p-value."]
+        "  p           probability of at least one. Valid for a body named before the search.",
+        "  p_global    the same counting a search over bodies of every size: the one to quote for a "
+            "body the search found.",
+        "  sigma       p_global as Gaussian standard deviations: 2 is a hint (p_global 0.046), 3 is "
+            "evidence (0.0027).",
+        "              Below 1 it measures nothing and is printed <1. A <= or >= marks a limit.",
+        "  A summary follows the tables."]
 
     if chance['skipped']:
         lines.append("  Skipped {:s}: a criterion on the radiant needs the radiant of every synthetic "
@@ -657,8 +818,8 @@ def formatChanceNEO(chance, search, top_n=10, search_all=None, chance_all=None):
 
     def _table(label, entries):
 
-        rows = ["Name                               ,  Hmag, {:>9s}, N(H<=Hmag),  closer,  expected,"
-            "         p,  p_global, sigma,".format(label[:9])]
+        rows = ["Name                               ,  Hmag, {:>9s}, N(H<=Hmag),  closer,   expected,"
+            "          p,   p_global,  sigma,".format(label[:9])]
 
         for match, d_value, r in entries:
 
@@ -670,9 +831,13 @@ def formatChanceNEO(chance, search, top_n=10, search_all=None, chance_all=None):
                 rows.append(start + "n/a: " + r['reason'])
                 continue
 
-            rows.append(start + "{:10d}, {:7d}, {:9.3g}, {:9.2e}, {:9.2e}, {:5.2f}, {:s}".format(
-                r['n_at_least_as_large'], r['n_closer'], r['expected'], r['p_value'],
-                r['p_value_global'], r['sigma'], _significanceText(r['sigma'])))
+            limit = r['is_limit']
+
+            rows.append(start + "{:10d}, {:7d}, {:>10s}, {:>10s}, {:>10s}, {:>6s}, {:s}".format(
+                r['n_at_least_as_large'], r['n_closer'],
+                ("<=" if limit else "") + "{:.3g}".format(r['expected']),
+                formatProbability(r['p_value'], limit), formatProbability(r['p_value_global'], limit),
+                formatSigma(r['sigma'], limit), _significanceText(r['sigma'])).rstrip())
 
         return rows
 
@@ -696,6 +861,10 @@ def formatChanceNEO(chance, search, top_n=10, search_all=None, chance_all=None):
 
     lines.append("")
     lines.append("Please cite " + chance['reference'] + ".")
+
+    if (search_all is not None) and (chance_all is not None):
+        lines.append("")
+        lines += summariseChanceNEO(chance, search, search_all, chance_all)
 
     return lines
 
@@ -806,7 +975,8 @@ def criteriaAtEpoch(search, propagated, q, e, incl, peri, node):
 
 # The values of chanceNEO saved per match and criterion, as chance_neo_<label>_<name>
 CHANCE_NEO_FIELDS = ['n_at_least_as_large', 'n_closer', 'expected', 'p_value', 'expected_global',
-    'p_value_global', 'sigma', 'expected_upper', 'p_value_upper', 'p_value_global_upper', 'reason']
+    'p_value_global', 'sigma', 'is_limit', 'expected_upper', 'p_value_upper', 'p_value_global_upper',
+    'reason']
 
 
 def _bodyRows(search, propagated=None, at_epoch_values=None, chance=None):
@@ -954,7 +1124,7 @@ def saveMatches(file_path, search, meteor=None, propagated=None, at_epoch_values
 
         if chance is not None:
             out['chance_neo'] = dict((name, chance[name]) for name in ('model', 'reference', 'license',
-                'n_population', 'n_background', 'confidence', 'meteor_in_model',
+                'n_population', 'n_background', 'h_max', 'confidence', 'meteor_in_model',
                 'meteor_outside_reason', 'labels', 'skipped'))
 
             if ranked is not None:
@@ -1115,9 +1285,9 @@ Is a match more than chance?
   as large expected as close to the orbit by chance and the probability of at least one, from the
   debiased NEO population of Granvik et al. (2018): p for a body named before the search, p_global
   corrected for having searched bodies of every size, the one to quote for a body the search found,
-  and its sigma (2 sigma = 0.0455, 3 sigma = 0.0027). It lists the top N by D and the N most
-  significant asteroids of the whole catalogue. The population, 28 MB, is downloaded to wmpl/share
-  the first time:
+  and its sigma (2 sigma = 0.046 is a hint, 3 sigma = 0.0027 is evidence). It lists the top N by D and the N
+  most significant asteroids of the whole catalogue, and ends with a summary and a verdict. The
+  population, 28 MB, is downloaded to wmpl/share the first time:
 
       python -m wmpl.Utils.ParentBodySearch traj.pickle -d DSH RHO2 --chance_neo""")
 
@@ -1188,8 +1358,8 @@ Is a match more than chance?
         help="For each asteroid, the probability that a NEO at least as large lies at least as close "
         "to the orbit by chance (the p-value of the match), alone and corrected for the search "
         "(p_global, with its sigma), for every criterion on the orbital elements given with -d, "
-        "against the debiased NEO population of Granvik et al. (2018), and the N most significant "
-        "asteroids of the catalogue. The population (28 MB) is downloaded to wmpl/share on first use. "
+        "against the debiased NEO population of Granvik et al. (2018), the N most significant "
+        "asteroids of the catalogue, and a summary with a verdict. The population (28 MB) is downloaded to wmpl/share on first use. "
         "Comets, meteorites and asteroids fainter than H = 25 get no p-value, and the criteria on the "
         "radiant are skipped. See wmpl.Utils.DebiasedNEOPopulation.")
 
