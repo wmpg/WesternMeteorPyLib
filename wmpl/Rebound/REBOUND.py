@@ -235,9 +235,6 @@ SUN_ENCOUNTER_AU = 0.1
 # Radius of the Sun in AU (IAU 2015 nominal, 695 700 km), used for impact detection
 SUN_RADIUS_AU = 695700.0/149597870.7
 
-# Kilometres in one AU
-AU_KM = 149597870.7
-
 
 def formatTimeSpan(days, decimals=2):
     """ Format a time span given in days in the unit that suits its length.
@@ -297,6 +294,11 @@ def formatTimeStamp(days):
         return "{:s}{:.1f} h".format(sign, 24*days)
 
     return "{:s}{:.1f} d".format(sign, days)
+
+
+# Kilometres in one AU, next to the function that uses it and not in the constants at the top, which is
+#   where other changes add theirs
+AU_KM = 149597870.7
 
 
 def formatDistance(dist_au):
