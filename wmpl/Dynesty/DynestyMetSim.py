@@ -3921,12 +3921,12 @@ class ObservationData:
                 dens_fit_ht_end = 14000
 
             lat_mean = np.mean([traj.rbeg_lat, traj.rend_lat])
+            self.lat = lat_mean
             lon_mean = meanAngle([traj.rbeg_lon, traj.rend_lon])
             jd_dat=traj.jdt_ref
 
             # Fit the polynomail describing the density
             self.dens_co = fitAtmPoly(lat_mean, lon_mean, dens_fit_ht_end, dens_fit_ht_beg, jd_dat)
-            self.lat = lat_mean
             zenith_angle_list.append(zenithAngleAtSimulationBegin(const.h_init, traj.rbeg_ele, traj.orbit.zc, const.r_earth))
             time_mag_arr = []
             avg_t_diff_max = 0
@@ -4462,9 +4462,9 @@ class ObservationData:
             self.v_init = self.const.v_init
             self.zenith_angle = self.const.zenith_angle
             self.m_init = self.const.m_init
+            self.lat = getattr(self.const, 'lat', Constants().lat)
 
             self.dens_co = np.array(self.const.dens_co) 
-            self.lat = getattr(self.const, 'lat', Constants().lat)
 
             # Compute absolute magnitudes
             absolute_magnitudes_check = -2.5*np.log10(lum_obs_data/self.P_0m)

@@ -7,10 +7,11 @@ from matplotlib.pyplot import cm
 
 from wmpl.Utils.AtmosphereDensity import fitAtmPoly
 from wmpl.Utils.Math import lineFunc, vectMag
-from wmpl.Utils.TrajConversions import cartesian2Geo, derotatedRadiantAltAz, gravity
+from wmpl.Utils.TrajConversions import cartesian2Geo, derotatedRadiantAltAz
 from wmpl.Utils.Physics import dynamicMass
+from wmpl.Utils.TrajConversions import gravity
 from wmpl.Utils.Pickling import loadPickle
-from wmpl.MetSim.MetSimErosion import Constants, runSimulation
+from wmpl.MetSim.MetSimErosion import Constants, runSimulation, G0
 from wmpl.MetSim.GUI import SimulationResults
 from wmpl.Trajectory.Trajectory import applyGravityDrop
 
