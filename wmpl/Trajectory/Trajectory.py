@@ -1917,7 +1917,9 @@ def trajNoiseGenerator(traj, noise_sigma):
             
         # Do not show plots or perform additional optimizations
         traj_mc.verbose = False
-        traj_mc.estimate_timing_vel = True
+        # Estimate the timing only if the solution being perturbed did: otherwise the runs would have clock
+        #   offsets the user fixed, and with them smaller timing residuals that always win the ranking
+        traj_mc.estimate_timing_vel = traj.estimate_timing_vel
         traj_mc.filter_picks = False
         traj_mc.show_plots = False
         traj_mc.save_results = False
@@ -3360,6 +3362,12 @@ class Trajectory(object):
         time_diffs = np.zeros(len(observations))
 
         if not estimate_timing_vel:
+
+            # The timing residual of the clocks as given (any fixed offsets are already in time_data). The
+            #   Monte Carlo runs filter and rank their solutions by it, and add this one to them
+            fixed_time_dict = {str(obs.station_id): 0.0 for obs in observations}
+            self.timing_res = timingResiduals(np.zeros(1), observations, fixed_time_dict, weights=weights)
+
             return True, np.zeros(2), v_init, 0, time_diffs, observations
 
         # Run timing offset estimation if it needs to be done
