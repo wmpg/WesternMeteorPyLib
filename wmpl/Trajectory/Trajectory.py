@@ -6118,7 +6118,8 @@ class Trajectory(object):
         Keyword arguments (internal flags, DO NOT SPECIFY MANUALLY!):
             _rerun_timing: [bool] Internal flag. Is it True when everything is recalculated upon estimating 
                 the difference in timings, so it breaks the second trajectory run after updating the values
-                of R.A., Dec, velocity, etc.
+                of R.A., Dec, velocity, etc. The second pass also runs with no timing to estimate when the
+                gravity correction is on, as it is the pass that applies the gravity drop.
             _rerun_bad_picks: [bool] Internal flag. Is is True when a second pass of trajectory estimation is
                 run with bad picks removed, thus improving the solution.
             _mc_run: [bool] Internal flag. True if the solver is calculating the Carlo Run.
@@ -6297,8 +6298,8 @@ class Trajectory(object):
         # Set the initial guess for the state vector and the radiant from the intersecting plane solution
         p0 = np.r_[self.state_vect, self.best_conv_inter.radiant_eci]
 
-        # Perform the minimization of angle deviations. The gravity will only be compensated for after the
-        #   initial estimate of timing differences
+        # Perform the minimization of angle deviations. The gravity will only be compensated for in the second
+        #   pass, which has the vertical velocity from the first
         minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=(self.observations, weights, 
             (_rerun_timing and self.gravity_correction), self.gravity_factor, self.v0z), method="Nelder-Mead")
 
@@ -6480,8 +6481,9 @@ class Trajectory(object):
 
 
         # Calculate velocity at each point with updated timings
+        # Timing residuals only exist when the timing was estimated
         self.calcVelocity(self.state_vect_mini, self.radiant_eci_mini, self.observations, weights,
-            calc_res=_rerun_timing)
+            calc_res=(_rerun_timing and self.estimate_timing_vel))
 
 
         ### RERUN THE TRAJECTORY ESTIMATION WITH UPDATED TIMINGS ###
@@ -6499,8 +6501,10 @@ class Trajectory(object):
                 self.time_diffs_final += self.time_diffs
 
 
-            # After the timing has been estimated, everything needs to be recalculated from scratch
-            if self.estimate_timing_vel:
+            # After the timing has been estimated, everything needs to be recalculated from scratch. So it does
+            #   for the gravity drop even with no timing to estimate: the first pass fits a straight line,
+            #   because the drop needs the vertical velocity, which comes out of that pass
+            if self.estimate_timing_vel or self.gravity_correction:
 
 
                 # If doing a Monte Carlo run, switch back to noisy observations
