@@ -21,7 +21,7 @@ from wmpl.Utils.TrajConversions import J2000_JD, datetime2JD, altAz2RADec_vect, 
 FPS = 15
 
 
-def loadECSVs(ecsv_paths, no_prepare=False):
+def loadECSVs(ecsv_paths, no_prepare=False, radec_per_point=True):
     """ Load meteor observations from ECSV files. 
     
     Arguments:
@@ -29,6 +29,10 @@ def loadECSVs(ecsv_paths, no_prepare=False):
 
     Keyword arguments:
         no_prepare: [bool] If True, only load the observations, do not prepare them for the solver.
+        radec_per_point: [bool] Have the solver convert each point's R.A./Dec. back to azimuth/altitude at
+            that point's own time, at which they were computed from the file. True by default. False
+            reproduces solutions from before this option existed, which converted them all at the reference
+            time and rotated each line of sight by the Earth's rotation since then.
     
     """
 
@@ -147,7 +151,7 @@ def loadECSVs(ecsv_paths, no_prepare=False):
                 np.radians(station_lon), station_ele, FPS, ff_name=comment)
 
             # The R.A./Dec. above were computed at each point's own time
-            meteor.radec_per_point = True
+            meteor.radec_per_point = radec_per_point
 
             # Add data to meteor object
             for t_rel, x_centroid, y_centroid, ra, dec, azim, alt, mag in zip(time_data, x_data, y_data, \
@@ -349,6 +353,10 @@ if __name__ == "__main__":
     arg_parser.add_argument('--writemilig', metavar='MILIG_PATH', type=str, \
         help="Write the observations to a MILIG input file and exit. The MILIG_PATH argument is the path to the output file.")
 
+    arg_parser.add_argument('--radec_at_ref', \
+        help="Convert every point's R.A./Dec. to azimuth/altitude at the reference time, as before this option existed, instead of at the time each was computed. Only to reproduce older solutions: it rotates each line of sight by the Earth's rotation since the reference time.", \
+        action="store_true")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -407,7 +415,7 @@ if __name__ == "__main__":
 
 
     # Load the observations into container objects
-    jdt_ref, meteor_list = loadECSVs(ecsv_paths)
+    jdt_ref, meteor_list = loadECSVs(ecsv_paths, radec_per_point=not cml_args.radec_at_ref)
 
 
     # Write the observations to a MILIG input file and exit
