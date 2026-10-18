@@ -2996,7 +2996,7 @@ class Trajectory(object):
 
 
 
-    def calcVelocity(self, state_vect, radiant_eci, observations, weights, calc_res=False):
+    def calcVelocity(self, state_vect, radiant_eci, observations, weights, calc_res=False, gravity=False):
         """ Calculates point to point velocity for the given solution, as well as the average velocity 
             including all previous points up to the given point.
 
@@ -3011,9 +3011,13 @@ class Trajectory(object):
         Keyword arguments:
             calc_res: [bool] If True, the cost of lag residuals will be calculated. The timing offsets first 
                 need to be calculated for this to work.
+            gravity: [bool] Measure the lengths on the gravity-dropped trajectory, as the line-of-sight fit
+                does when it applies the drop. False by default.
 
         """
 
+        # Same reference time as the line-of-sight fit
+        t0 = min([obs.time_data[0] for obs in observations])
 
         # Go through observations from all stations
         for obs in observations:
@@ -3025,22 +3029,41 @@ class Trajectory(object):
             state_vect_dist = []
 
             # Go through all individual position measurement from each site
-            for i, (stat, meas) in enumerate(zip(obs.stat_eci_los, obs.meas_eci_los)):
+            for i, (t, stat, meas) in enumerate(zip(obs.time_data, obs.stat_eci_los, obs.meas_eci_los)):
 
                 # Calculate closest points of approach (observed line of sight to radiant line)
                 obs_cpa, rad_cpa, d = findClosestPoints(stat, meas, state_vect, radiant_eci)
+
+                # The line was fitted with the gravity drop, so the measurement is on the dropped trajectory, not
+                #   on the line: find it there as angleSumMeasurements2Line does, then add the drop back. The
+                #   lengths are those of the undropped line, which is what the velocity and lag describe
+                if gravity:
+
+                    v0z = self.v0z if self.v0z is not None else 0.0
+                    rad_cpa_grav = applyGravityDrop(rad_cpa, t - t0, vectMag(rad_cpa), self.gravity_factor,
+                        v0z)
+                    _, rad_cpa_dropped, _ = findClosestPoints(stat, meas, rad_cpa_grav, radiant_eci)
+                    rad_cpa = rad_cpa_dropped + (rad_cpa - rad_cpa_grav)
 
                 # Take the position of the first point as the reference point
                 if i == 0:
                     ref_point = np.copy(rad_cpa)
 
                 # Calculate the distance from the first observed point to the projected point on the radiant line
-                dist = vectMag(ref_point - rad_cpa)
+                #   and from the state vector. With the drop, along the radiant line, which the point added back
+                #   is only nearly on
+                if gravity:
+                    dist = abs(np.dot(ref_point - rad_cpa, radiant_eci))
+                    sv_dist = abs(np.dot(state_vect - rad_cpa, radiant_eci))
+
+                else:
+                    dist = vectMag(ref_point - rad_cpa)
+                    sv_dist = vectMag(state_vect - rad_cpa)
                 
                 first_pt_distances.append(dist)
 
                 # Distance from the state vector to the projected point on the radiant line
-                state_vect_dist.append(vectMag(state_vect - rad_cpa))
+                state_vect_dist.append(sv_dist)
 
 
             # Convert the distances (length along the trail) into a numpy array
@@ -6403,7 +6426,8 @@ class Trajectory(object):
 
 
         # Calculate velocity at each point
-        self.calcVelocity(self.state_vect_mini, self.radiant_eci_mini, self.observations, weights)
+        self.calcVelocity(self.state_vect_mini, self.radiant_eci_mini, self.observations, weights,
+            gravity=(_rerun_timing and self.gravity_correction))
 
 
         if self.verbose and self.estimate_timing_vel:
@@ -6481,7 +6505,7 @@ class Trajectory(object):
 
         # Calculate velocity at each point with updated timings
         self.calcVelocity(self.state_vect_mini, self.radiant_eci_mini, self.observations, weights,
-            calc_res=_rerun_timing)
+            calc_res=_rerun_timing, gravity=(_rerun_timing and self.gravity_correction))
 
 
         ### RERUN THE TRAJECTORY ESTIMATION WITH UPDATED TIMINGS ###
