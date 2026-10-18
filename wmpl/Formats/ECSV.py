@@ -11,8 +11,7 @@ import numpy as np
 
 from wmpl.Formats.GenericFunctions import addSolverOptions, solveTrajectoryGeneric, MeteorObservation, \
     prepareObservations, writeMiligInputFileMeteorObservation
-from wmpl.Utils.TrajConversions import J2000_JD, datetime2JD, altAz2RADec_vect, \
-    equatorialCoordPrecession_vect, jd2Date
+from wmpl.Utils.TrajConversions import datetime2JD, altAz2RADec_vect, equatorialCoordDateToJ2000_vect, jd2Date
 
 
 
@@ -136,8 +135,8 @@ def loadECSVs(ecsv_paths, no_prepare=False):
             ra_data, dec_data = altAz2RADec_vect(np.radians(azim_data), np.radians(alt_data), jd_data, \
                 np.radians(station_lat), np.radians(station_lon))
 
-            # Precess to J2000
-            ra_data, dec_data = equatorialCoordPrecession_vect(jdt_ref, J2000_JD.days, ra_data, dec_data)
+            # Precess to J2000, from the true equator and equinox of date altAz2RADec_vect gives
+            ra_data, dec_data = equatorialCoordDateToJ2000_vect(jdt_ref, ra_data, dec_data)
 
             comment = '{"ff_name":' + f'"{image_file}"' +'}'
 
@@ -293,7 +292,7 @@ def saveECSV(dir_path, meteor_observations,
 
 
             # Precess RA/Dec to J2000
-            ra_J2000, dec_J2000 = equatorialCoordPrecession_vect(meteor.jdt_ref, J2000_JD.days, ra, dec)
+            ra_J2000, dec_J2000 = equatorialCoordDateToJ2000_vect(meteor.jdt_ref, ra, dec)
 
 
             # Add an entry to the ECSV file

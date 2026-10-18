@@ -47,8 +47,7 @@ from wmpl.Config import config
 from wmpl.Utils.TrajConversions import (
     J2000_JD,
     J2000_OBLIQUITY,
-    equatorialCoordPrecession,
-    jd2DynamicalTimeJD,
+    equatorialCoordDateToJ2000,
     eci2RaDec,
     vectMag,
     raDec2ECI
@@ -1178,11 +1177,7 @@ def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local",
     re = vectMag(eci_pos)
     alpha_e, delta_e = eci2RaDec(eci_pos)
 
-    # Convert the Julian date to dynamical time
-    jd_dyn = jd2DynamicalTimeJD(jd)
-    alpha_ej, delta_ej = equatorialCoordPrecession(
-        jd_dyn, J2000_JD.days, alpha_e, delta_e
-    )
+    alpha_ej, delta_ej = equatorialCoordDateToJ2000(jd, alpha_e, delta_e)
 
     if len(log_file_path):
         log(f"RA precessed to J2000: {alpha_ej}")
@@ -1209,9 +1204,7 @@ def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local",
 
     v_inf = vectMag(eci_vel)
     alpha_e_vel, delta_e_vel = eci2RaDec(eci_vel)
-    alpha_ej_vel, delta_ej_vel = equatorialCoordPrecession(
-        jd_dyn, J2000_JD.days, alpha_e_vel, delta_e_vel
-    )
+    alpha_ej_vel, delta_ej_vel = equatorialCoordDateToJ2000(jd, alpha_e_vel, delta_e_vel)
 
     if len(log_file_path):
         log(f"RA of velocity direction precessed to J2000: {alpha_ej_vel}")

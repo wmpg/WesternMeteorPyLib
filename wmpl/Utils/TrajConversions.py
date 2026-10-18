@@ -539,6 +539,9 @@ def geo2Cartesian(lat_rad, lon_rad, h, julian_date, precess_j2000=False):
 
         ### Precess coordinates to J2000 ###
 
+        # From the true to the mean equator and equinox of date
+        x, y, z = nutationMatrix(julian_date).T.dot(np.array([x, y, z]))
+
         # Convert rectangular to spherical coordinates
         re, delta_e, alpha_e = cartesianToSpherical(x, y, z)
 
@@ -702,6 +705,9 @@ def cartesian2Geo(julian_date, x, y, z, precess_j2000=False):
 
         # Convert coordinates back to rectangular
         x, y, z = sphericalToCartesian(re, delta_ej, alpha_ej)
+
+        # From the mean to the true equator and equinox of date
+        x, y, z = nutationMatrix(julian_date).dot(np.array([x, y, z]))
 
         ###
 
@@ -1157,6 +1163,85 @@ def equatorialCoordPrecession(start_epoch, final_epoch, ra, dec):
 
 # Vectorize the equatorialCoordPrecession, so ra and dec can be passed as numpy arrays
 equatorialCoordPrecession_vect = np.vectorize(equatorialCoordPrecession, excluded=['start_epoch'])
+
+
+
+def nutationMatrix(julian_date):
+    """ Rotation matrix from the mean to the true equator and equinox of date.
+
+    WMPL's ECI coordinates are on the true equator and equinox of date: geo2Cartesian and raDec2AltAz use
+    the apparent sidereal time, which is the mean one plus the equation of the equinoxes, delta_psi*cos(eps).
+    Precession alone takes J2000 coordinates only to the mean equator and equinox of date; this takes them
+    the rest of the way, with the same nutation components and obliquity as the sidereal time.
+
+    Matches the IAU convention, N = R1(-eps_true) R3(-delta_psi) R1(eps_mean) (ERFA's numat).
+
+    Arguments:
+        julian_date: [float] Julian date.
+
+    Return:
+        [ndarray] 3x3 rotation matrix, applied to column vectors.
+    """
+
+    delta_psi, delta_eps = wmpl.Utils.Earth.calcNutationComponents(jd2DynamicalTimeJD(julian_date))
+    eps_true = wmpl.Utils.Earth.calcTrueObliquity(julian_date)
+    eps_mean = eps_true - delta_eps
+
+    def rotX(angle):
+        c, s = np.cos(angle), np.sin(angle)
+        return np.array([[1, 0, 0], [0, c, s], [0, -s, c]])
+
+    def rotZ(angle):
+        c, s = np.cos(angle), np.sin(angle)
+        return np.array([[c, s, 0], [-s, c, 0], [0, 0, 1]])
+
+    return rotX(-eps_true).dot(rotZ(-delta_psi)).dot(rotX(eps_mean))
+
+
+
+def equatorialCoordJ2000ToDate(julian_date, ra, dec):
+    """ Convert J2000 right ascension and declination to the true equator and equinox of date, the frame of
+        WMPL's ECI coordinates: precession, then nutation.
+
+    Arguments:
+        julian_date: [float] Julian date of the epoch of date.
+        ra: [float] Right ascension, J2000, in radians.
+        dec: [float] Declination, J2000, in radians.
+
+    Return:
+        (ra, dec): [tuple of floats] Right ascension and declination of date, in radians.
+    """
+
+    ra_mean, dec_mean = equatorialCoordPrecession(J2000_JD.days, julian_date, ra, dec)
+    eci = nutationMatrix(julian_date).dot(np.array(raDec2ECI(ra_mean, dec_mean)))
+
+    return eci2RaDec(eci)
+
+
+
+def equatorialCoordDateToJ2000(julian_date, ra, dec):
+    """ Convert right ascension and declination on the true equator and equinox of date, the frame of WMPL's
+        ECI coordinates, to J2000: nutation removed, then precession. The inverse of
+        equatorialCoordJ2000ToDate.
+
+    Arguments:
+        julian_date: [float] Julian date of the epoch of date.
+        ra: [float] Right ascension of date, in radians.
+        dec: [float] Declination of date, in radians.
+
+    Return:
+        (ra, dec): [tuple of floats] Right ascension and declination, J2000, in radians.
+    """
+
+    eci = nutationMatrix(julian_date).T.dot(np.array(raDec2ECI(ra, dec)))
+    ra_mean, dec_mean = eci2RaDec(eci)
+
+    return equatorialCoordPrecession(julian_date, J2000_JD.days, ra_mean, dec_mean)
+
+
+# Vectorize, so ra and dec (and the Julian date) can be passed as numpy arrays
+equatorialCoordJ2000ToDate_vect = np.vectorize(equatorialCoordJ2000ToDate)
+equatorialCoordDateToJ2000_vect = np.vectorize(equatorialCoordDateToJ2000)
 
 
 
