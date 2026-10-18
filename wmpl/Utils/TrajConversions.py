@@ -33,6 +33,7 @@ from __future__ import print_function, division, absolute_import
 
 import math
 import numpy as np
+from functools import lru_cache
 from datetime import datetime, timedelta, MINYEAR
 
 
@@ -81,8 +82,54 @@ class EARTH_CONSTANTS(object):
         # Earth mass (kg)
         self.MASS = 5.9722e24
 
+        # Geocentric gravitational constant (m^3/s^2) and angular velocity (rad/s) (source: WGS84)
+        self.GM = 3.986004418e14
+        self.OMEGA = 7.292115e-5
+
+        # Normal gravity at the equator and at the poles (m/s^2) (source: WGS84)
+        self.G_EQUATOR = 9.7803253359
+        self.G_POLE = 9.8321849378
+
 # Initialize Earth shape constants object
 EARTH = EARTH_CONSTANTS()
+
+
+@lru_cache(maxsize=256)
+def _gravityCoeffs(lat):
+    """ Gravity on the WGS84 ellipsoid at the given latitude, and the coefficients of its fall with height
+        (1/m and 1/m^2). Cached, as the latitude is usually fixed while the height changes.
+    """
+
+    a, b = EARTH.EQUATORIAL_RADIUS, EARTH.POLAR_RADIUS
+    f = 1.0 - b/a
+    m = EARTH.OMEGA**2*a**2*b/EARTH.GM
+    s2 = math.sin(lat)**2
+
+    # Somigliana's formula for the gravity on the ellipsoid
+    g = (a*EARTH.G_EQUATOR*(1.0 - s2) + b*EARTH.G_POLE*s2)/math.sqrt(a**2*(1.0 - s2) + b**2*s2)
+
+    return g, 2.0/a*(1.0 + f + m - 2.0*f*s2), 3.0/a**2
+
+
+def gravity(lat, h):
+    """ Normal gravity of the WGS84 ellipsoid at a given latitude and height. It accounts for the flattening
+        of the Earth and for the fall of gravity with height, and includes the centrifugal acceleration of the
+        Earth's rotation, so it is the gravity felt in the Earth-fixed frame.
+
+    Arguments:
+        lat: [float] Geodetic latitude (radians, +north). Must be a scalar.
+        h: [float] Height above the WGS84 ellipsoid (meters). A height above the sea level can be used too:
+            the geoid is within ~100 m of the ellipsoid, which changes g by up to ~3e-4 m/s^2.
+
+    Return:
+        g: [float] Gravity (m/s^2).
+
+    """
+
+    g, k1, k2 = _gravityCoeffs(lat)
+
+    # Second-order expansion of the fall of gravity with height (Heiskanen and Moritz, eq. 2-215)
+    return g*(1.0 - k1*h + k2*h*h)
 
 
 #################

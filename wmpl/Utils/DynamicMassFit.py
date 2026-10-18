@@ -9,6 +9,7 @@ from wmpl.Utils.AtmosphereDensity import fitAtmPoly
 from wmpl.Utils.Math import lineFunc, vectMag
 from wmpl.Utils.TrajConversions import cartesian2Geo, derotatedRadiantAltAz
 from wmpl.Utils.Physics import dynamicMass
+from wmpl.Utils.TrajConversions import gravity
 from wmpl.Utils.Pickling import loadPickle
 from wmpl.MetSim.MetSimErosion import Constants, runSimulation, G0
 from wmpl.MetSim.GUI import SimulationResults
@@ -47,6 +48,9 @@ def runFragSim(mass, density, lat, lon, jd, ht_beg, v_init, entry_angle, gamma_a
 
     # Zenith angle
     const.zenith_angle = np.radians(90 - entry_angle)
+
+    # Latitude, for the gravity
+    const.lat = np.radians(lat)
 
     # Use Borovicka 2020 luminous efficiency (not really used here)
     const.lum_eff_type = 7
@@ -319,7 +323,7 @@ def computeFragEndParams(traj, dyn_mass, density, hend, vend, gamma_a):
     #   is tangent to the path: its beginning if the solver modelled the gravity drop, otherwise about its middle
     t_turn = 0.0 if getattr(traj, 'gravity_correction', True) else (np.min(t_obs) + np.max(t_obs))/2
     v_sim = sr.main_vel_arr[1:]
-    g_final = G0/(1 + final_ele/sr.const.r_earth)**2
+    g_final = gravity(final_lat, final_ele)
     final_elev += g_final*np.cos(final_elev)*((meas_time - t_turn)/traj.orbit.v_avg_norot \
         + np.sum(np.diff(sr.time_arr)[v_sim > 0]/v_sim[v_sim > 0]))
 
