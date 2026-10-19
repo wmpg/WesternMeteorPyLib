@@ -182,9 +182,12 @@ integrating, for the nominal solution or for any clone. **Take that warning seri
 `--integrator trace` or `ias15`.
 
 **A small perihelion is a close encounter for this purpose too.** A fixed step that is fine along most
-of an eccentric orbit is far too long through perihelion, and the Sun passages inside 0.1 AU are counted
-in the warning for that reason. Measured on a δ-Aquariid-like orbit (a = 2.6 AU, q = 0.07 AU, i = 27°),
-100 years, with the Sun and five planets:
+of an eccentric orbit is far too long through perihelion, and the Sun passages inside 0.1 AU
+(`WHFAST_SUN_WARNING_AU`) are counted in the warning for that reason. Sun passages are listed out to
+0.2 AU, but beyond 0.1 AU the default step is enough: on orbits with a = 1.27 and 2.6 AU (i = 25°,
+100 years, the Sun and five planets) WHFast at 0.5 d was 9e-4 to 1e-2 off in a at q = 0.07 AU, 5e-6 to
+6e-6 at 0.10 AU, 1e-6 to 4e-6 at 0.14 AU and below 7e-7 from 0.17 AU. Measured on a δ-Aquariid-like
+orbit (a = 2.6 AU, q = 0.07 AU, i = 27°), 100 years, with the Sun and five planets:
 
 | Integrator | `--dt` | Final a against IAS15 |
 | :--- | :--- | :--- |
@@ -241,17 +244,22 @@ and then refined *within* the step. Both steps matter:
   accurate even when one step spans the whole flyby.
 
 - **Close encounters** are reported for any body approached within **3 Hill radii**, and for the Sun
-  within **0.1 AU** (it has no Hill sphere, so its `n_hill` is `None`), listed in the order they
+  within **0.2 AU** (it has no Hill sphere, so its `n_hill` is `None`), listed in the order they
   happened. **A body can appear more than once**, if the object passed it more than once: each local
   minimum of the distance is refined and listed separately. A meteoroid in resonance with a planet
   commonly meets it many times.
-  - *Why 0.1 AU for the Sun.* That is where thermal processing of meteoroids is established: sodium is
-    thermally desorbed at q < 0.1 AU ([Kasuga et al. 2006](https://doi.org/10.1051/0004-6361:20065330),
-    explaining the Na-free meteoroids of Borovička et al. 2005), asteroids disrupt at q ≈ 0.076 AU
-    ([Granvik et al. 2016](https://doi.org/10.1038/nature16934)), and it lies inside the sunskirter zone
-    (q < 33 R☉ = 0.153 AU) of [Jones et al. 2018](https://doi.org/10.1007/s11214-017-0446-5). A Sun
-    passage is a thermal event, not a gravitational perturbation, and is listed for that reason.
-  - *Repeated Sun passages.* An orbit with q < 0.1 AU passes the Sun every revolution, so a
+  - *Why 0.2 AU for the Sun.* It is the limit of the Sun-approaching orbital class of
+    [Borovička et al. 2005](https://doi.org/10.1016/j.icarus.2004.09.011), the one meteor studies use:
+    almost all meteoroids inside it are Na-free or Na-poor
+    ([Vojáček et al. 2019](https://doi.org/10.1051/0004-6361/201833289), section 3.3). Inside 0.1 AU all
+    of them are, the sodium being thermally desorbed
+    ([Kasuga et al. 2006](https://doi.org/10.1051/0004-6361:20065330)), asteroids disrupt at
+    q ≈ 0.076 AU ([Granvik et al. 2016](https://doi.org/10.1038/nature16934)), and the sunskirter zone
+    (q < 33 R☉ = 0.153 AU) of [Jones et al. 2018](https://doi.org/10.1007/s11214-017-0446-5) lies inside
+    it. Kasuga et al. found no sodium loss down to q = 0.14 AU among larger shower meteoroids, so the
+    limit is that of the small meteoroids. A Sun passage is a thermal event, not a gravitational
+    perturbation, and is listed for that reason.
+  - *Repeated Sun passages.* An orbit with q < 0.2 AU passes the Sun every revolution, so a
     low-perihelion stream lists one Sun passage every few years (measured: 24 in 100 yr for a
     δ-Aquariid-like orbit, against 6 planetary flybys). The terminal and the text report collapse more
     than three Sun passages into one line with the count, the perihelion range and the time span,

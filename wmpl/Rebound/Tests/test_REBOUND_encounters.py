@@ -228,10 +228,12 @@ def testACloseSunPassageIsAnEncounter(reb):
     assert sun[0]["min_dist_au"] == pytest.approx(0.05, rel=1e-2)
     assert (sun[0]["hill_radius_au"] is None) and (sun[0]["n_hill"] is None)
 
-    diag = reb._integrateParticles(_sunTask(0.15))["diagnostics"]["obj"]
+    # Outside 0.2 AU the perihelion comes ~26 days after the release
+    task = dict(_sunTask(0.25), times=list(np.linspace(0.0, 40.0*DAY, 41)))
+    diag = reb._integrateParticles(task)["diagnostics"]["obj"]
 
     assert "Sun" not in [enc["body"] for enc in diag["encounters"]]
-    assert diag["min_dist_au"]["Sun"] == pytest.approx(0.15, rel=1e-2)
+    assert diag["min_dist_au"]["Sun"] == pytest.approx(0.25, rel=1e-2)
 
 
 def testSunMinimumIsNotLimitedByTheIntegratorStep(reb):
@@ -338,7 +340,7 @@ def testSunPassageSummaryCollapsesOnlyRepeatedPassages(reb):
 
     line = reb.formatSunPassageSummary(summary)
     assert line.startswith("Sun ")
-    assert "4 perihelion passages < 0.10 AU" in line
+    assert "4 perihelion passages < 0.20 AU" in line
     assert "q = 0.0400-0.0600 AU" in line
     assert "t = +1.0 to +13.0 d" in line
 
