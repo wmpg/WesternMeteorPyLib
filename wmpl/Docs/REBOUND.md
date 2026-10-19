@@ -475,7 +475,7 @@ options.
     object never came closer to that body), if it is within 100 Hill radii; further out the body never
     mattered.
 
-  The Sun has no Hill sphere: its distance is scaled so that its 0.1 AU gate falls on the same line.
+  The Sun has no Hill sphere: its distance is scaled so that its distance gate falls on the same line.
   In runs shorter than two years the distance to the Earth at the outputs is drawn too, as it shows the
   departure; in longer ones the output sampling misses the approaches, which the encounters give
   exactly.
