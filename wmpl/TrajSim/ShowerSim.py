@@ -18,9 +18,9 @@ from wmpl.TrajSim.MeteorShowerModel import MeteorShower, sampleActivityModel
 from wmpl.Trajectory.Trajectory import ObservedPoints, Trajectory
 from wmpl.Trajectory.GuralTrajectory import GuralTrajectory
 from wmpl.Trajectory.Orbit import calcOrbit
-from wmpl.Utils.TrajConversions import J2000_JD, G, EARTH, altAz2RADec, raDec2ECI, rotatePolar, jd2Date, datetime2JD, \
+from wmpl.Utils.TrajConversions import G, EARTH, altAz2RADec, raDec2ECI, rotatePolar, jd2Date, datetime2JD, \
     jd2DynamicalTimeJD, jd2LST, cartesian2Geo, geo2Cartesian, eci2RaDec, raDec2AltAz, \
-    equatorialCoordPrecession
+    equatorialCoordJ2000ToDate
 from wmpl.Utils.Ephem import astronomicalNight
 from wmpl.Utils.SolarLongitude import solLon2jdJPL
 from wmpl.Utils.PlotMap import GroundMap
@@ -382,7 +382,7 @@ class SimMeteor(object):
 
 
         # Calculate the geocentric radiant in the epoch of date
-        ra_g_eod, dec_g_eod = equatorialCoordPrecession(J2000_JD.days, self.jdt_ref, self.ra_g, self.dec_g)
+        ra_g_eod, dec_g_eod = equatorialCoordJ2000ToDate(self.jdt_ref, self.ra_g, self.dec_g)
         out_str += "Radiant (geocentric, epoch of date):\n"
         out_str += "  R.A.   = {:>9.5f} deg\n".format(np.degrees(ra_g_eod))
         out_str += "  Dec    = {:>+9.5f} deg\n".format(np.degrees(dec_g_eod))
