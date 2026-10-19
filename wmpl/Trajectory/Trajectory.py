@@ -2451,7 +2451,7 @@ class Trajectory(object):
         mc_noise_std=1.0, geometric_uncert=False, filter_picks=True, calc_orbit=True, show_plots=True, \
         show_jacchia=False, save_results=True, gravity_correction=True, gravity_factor=1.0, \
         plot_all_spatial_residuals=False, plot_file_type='png', traj_id=None, reject_n_sigma_outliers=3, 
-        mc_cores=None, fixed_times=None, mc_runs_max=None, enable_OSM_plot=False):
+        mc_cores=None, fixed_times=None, mc_runs_max=None, enable_OSM_plot=False, los_restarts=0):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -2512,6 +2512,14 @@ class Trajectory(object):
             mc_runs_max: [int] Maximum number of Monte Carlo runs. None by default, which will limit the runs
                 to 10x req_num.
             enable_OSM_plot: [bool] plot the ground track using OS maps as well as the default 
+            los_restarts: [int] Restart the Nelder-Mead minimization of the line-of-sight fit this many times
+                from its own solution. 0 by default. Only for when the last fraction of an arcsecond matters,
+                e.g. comparing solutions of the same event that differ by little; not advisable in general.
+                The parameters mix metres with the components of a unit vector, and the simplex can stall 
+                short of the minimum. On 24 noisy synthetic events (about 20 arcsec of noise), one restart 
+                brought the median stop from the minimum from 0.012-0.042 to 0.003-0.005 arcsec and the worst 
+                in the first pass from 3.3 to 1.2, but not the worst in the gravity pass (3.0 to 5.5), for 41-46%
+                more CPU time per solution and no change in the error against the truth, which the noise sets.
 
         """
 
@@ -2595,6 +2603,8 @@ class Trajectory(object):
 
         # Enable OSM plot if required
         self.enable_OSM_plot = enable_OSM_plot         
+
+        self.los_restarts = los_restarts
 
         # If True, pure geometric uncertainties will be computed and culling of solutions based on cost
         #   function value will not be done
@@ -6299,8 +6309,16 @@ class Trajectory(object):
 
         # Perform the minimization of angle deviations. The gravity will only be compensated for after the
         #   initial estimate of timing differences
-        minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=(self.observations, weights, 
-            (_rerun_timing and self.gravity_correction), self.gravity_factor, self.v0z), method="Nelder-Mead")
+        minimize_args = (self.observations, weights, (_rerun_timing and self.gravity_correction), 
+            self.gravity_factor, self.v0z)
+        minimize_solution = scipy.optimize.minimize(minimizeAngleCost, p0, args=minimize_args, 
+            method="Nelder-Mead")
+
+        # Restart from the solution if asked (see los_restarts). Tighter tolerances instead do not help, at 30
+        #   times the cost
+        for _ in range(self.los_restarts):
+            minimize_solution = scipy.optimize.minimize(minimizeAngleCost, minimize_solution.x, 
+                args=minimize_args, method="Nelder-Mead")
 
         # NOTE
         # Other minimization methods were tried as well, but all produce higher fit residuals than Nelder-Mead.
