@@ -61,8 +61,8 @@ comparison against `nan` is False, so test for it rather than relying on a chain
 
 **There is a second implementation in the repository.**
 `wmpl.Rebound.REBOUND.tisserandParameterJupiter` computes the same quantity for scalars, returns
-`None` instead of `nan` for an unbound orbit, and is what the REBOUND report prints. Its companion
-`tisserandClass` gives three classes split at T = 3. Use whichever suits, but do not mix their
+`None` instead of `nan` for an unbound orbit, and is what the REBOUND report prints; the report's
+orbital class comes from `classifyBorovicka`, below. Use whichever suits, but do not mix their
 outputs: they use slightly different values for Jupiter's semi-major axis (5.204267 AU against the
 5.20336 AU of Tancredi's tables), which shifts T_J by about 1e-4 — far below any class boundary, but
 enough to make two numbers disagree in the fourth decimal.

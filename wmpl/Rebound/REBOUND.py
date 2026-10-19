@@ -55,6 +55,7 @@ from wmpl.Utils.TrajConversions import (
 )
 from wmpl.Utils.Math import rotateVector
 from wmpl.Utils.Earth import calcTrueObliquity
+from wmpl.Utils.OrbitClassification import classifyBorovicka
 
 
 def _printReboundUnavailable(include_install_help=False):
@@ -1076,27 +1077,25 @@ def tisserandParameterJupiter(a, e, inc):
     return a_jupiter/a + 2.0*np.cos(inc)*np.sqrt((a/a_jupiter)*(1.0 - e**2))
 
 
-def tisserandClass(t_j):
-    """ Return the conventional dynamical class implied by a Tisserand parameter (see
-    tisserandParameterJupiter).
+def borovickaClass(a, e, inc):
+    """ Return the meteoroid orbital class of Borovicka et al. (2005) of an orbit, as
+    wmpl.Utils.OrbitClassification.classifyBorovicka gives it from the perihelion distance,
+    eccentricity and inclination: 'sun-approaching', 'halley-type', 'jupiter-family' or
+    'asteroidal-chondritic'. The fifth class, 'ecliptic-shower', is membership of a shower, which
+    the integration does not know, so it is never given here.
+
+    Unlike the Tisserand parameter, the class is defined for an unbound orbit too.
 
     Arguments:
-        t_j: [float or None] Tisserand parameter with respect to Jupiter.
+        a: [float] Semi-major axis in AU, negative for a hyperbolic orbit as REBOUND gives it.
+        e: [float] Eccentricity.
+        inc: [float] Inclination in radians.
 
     Return:
-        [str] A short description of the dynamical class.
+        [str] The class.
     """
 
-    if t_j is None:
-        return "undefined (unbound orbit)"
-
-    if t_j > 3.0:
-        return "asteroidal (T_J > 3)"
-
-    if t_j > 2.0:
-        return "Jupiter-family-comet-like (2 < T_J < 3)"
-
-    return "Halley-type/long-period-comet-like (T_J < 2)"
+    return classifyBorovicka(a*(1.0 - e), e, inc)
 
 
 def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local", jpl_ephem_data=None,
@@ -2795,14 +2794,16 @@ if __name__ == "__main__":
     print("    node = {:>13.6f}{:s}  deg".format(node_val, Omega_ci_str))
     print("    f    = {:>13.6f}{:s}  deg".format(f_val, f_ci_str))
 
-    # Tisserand parameter with respect to Jupiter and the dynamical class it implies. Only
-    # meaningful for a heliocentric orbit.
+    # Tisserand parameter with respect to Jupiter and the meteoroid orbital class of Borovicka et
+    # al. (2005). Only meaningful for a heliocentric orbit.
     if reference_frame == "heliocentric":
         t_j = tisserandParameterJupiter(sim_outputs[-1][2].a, e_val, sim_outputs[-1][2].inc)
         if t_j is None:
-            print("    T_J  =        undefined  ({:s})".format(tisserandClass(t_j)))
+            print("    T_J  =        undefined  (unbound orbit)")
         else:
-            print("    T_J  = {:>13.6f}       {:s}".format(t_j, tisserandClass(t_j)))
+            print("    T_J  = {:>13.6f}".format(t_j))
+        print("    class: {:s} (Borovicka et al. 2005)".format(
+            borovickaClass(sim_outputs[-1][2].a, e_val, sim_outputs[-1][2].inc)))
 
     print("-" * 78)
 
@@ -3047,16 +3048,16 @@ if __name__ == "__main__":
                 f.write("the full span. Clones that impacted or were ejected ended at a different\n")
                 f.write("epoch, so mixing their final elements in would blend different times.\n")
 
-        # Save the Tisserand parameter and the run's provenance
+        # Save the Tisserand parameter, the orbital class and the run's provenance
         if reference_frame == "heliocentric":
             t_j = tisserandParameterJupiter(sim_outputs[-1][2].a, sim_outputs[-1][2].e,
                                             sim_outputs[-1][2].inc)
             if t_j is None:
-                f.write("\nTisserand parameter w.r.t. Jupiter: undefined ({:s})\n".format(
-                    tisserandClass(t_j)))
+                f.write("\nTisserand parameter w.r.t. Jupiter: undefined (unbound orbit)\n")
             else:
-                f.write("\nTisserand parameter w.r.t. Jupiter: T_J = {:.6f}  -> {:s}\n".format(
-                    t_j, tisserandClass(t_j)))
+                f.write("\nTisserand parameter w.r.t. Jupiter: T_J = {:.6f}\n".format(t_j))
+            f.write("Orbital class (Borovicka et al. 2005): {:s}\n".format(borovickaClass(
+                sim_outputs[-1][2].a, sim_outputs[-1][2].e, sim_outputs[-1][2].inc)))
 
         if len(sim_outputs_mc):
             f.write("\nMonte Carlo: {:d} realizations, random seed {:d} "
@@ -3425,6 +3426,8 @@ if __name__ == "__main__":
             "incl_deg": i_val, "peri_deg": peri_val, "node_deg": node_val, "f_deg": f_val,
             "tisserand_jupiter": (tisserandParameterJupiter(
                 sim_outputs[-1][2].a, e_val, sim_outputs[-1][2].inc)
+                if reference_frame == "heliocentric" else None),
+            "orbital_class": (borovickaClass(sim_outputs[-1][2].a, e_val, sim_outputs[-1][2].inc)
                 if reference_frame == "heliocentric" else None),
         },
         # One entry per passage, ordered by time. A body can appear more than once: before the

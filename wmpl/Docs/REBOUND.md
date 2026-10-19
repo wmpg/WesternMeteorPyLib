@@ -285,7 +285,11 @@ python -m wmpl.Rebound.REBOUND traj.pickle --days 36525 --mc 200 --cores 8 --see
 The report gives the final elements with 95 % confidence intervals from the clone ensemble, how many
 clones impacted which body, how many escaped, and how many had a close encounter with each body. If
 some clones did not survive, the confidence intervals are computed from the survivors only and the
-report says so (`ci_uses_survivors_only` in the JSON).
+report says so (`ci_uses_survivors_only` in the JSON). Under the final elements come the Tisserand
+parameter and the orbital class of the final orbit: the meteoroid class of Borovička et al. (2005), from
+`wmpl.Utils.OrbitClassification.classifyBorovicka` (`final_elements.orbital_class` in the JSON, see
+[Classifying a single orbit](OrbitClassification.md)). The ecliptic-shower class needs a shower
+association, which the integration does not have, so it is never given.
 
 The ensemble also gives a divergence estimate for free: the clones are trajectories started from
 slightly different state vectors, so their spread over time is exactly what a Lyapunov analysis
