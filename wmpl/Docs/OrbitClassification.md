@@ -3,7 +3,8 @@
 **`wmpl.Utils.OrbitClassification`** answers a different question from the
 [dissimilarity criteria](OrbitSimilarity.md): not "are these two orbits related?" but "what kind of
 orbit is this one?" — asteroidal or cometary, Jupiter family or Halley type, Centaur or
-transneptunian, and for a near-Earth orbit, Atira, Aten, Apollo or Amor.
+transneptunian, the meteoroid orbital class of Borovička et al. (2005), and for a near-Earth orbit,
+Atira, Aten, Apollo or Amor.
 
 ## Table of Contents
 
@@ -77,14 +78,14 @@ not. All accept scalars or numpy arrays; a scalar gives a plain `str`.
 
 ```python
 import numpy as np
-from wmpl.Utils.OrbitClassification import (classifyNEO, isArjuna, classifyTisserand,
+from wmpl.Utils.OrbitClassification import (classifyNEO, isArjuna, classifyBorovicka,
     isEarthCrossing, isProgrograde)
 
 q, e, i = 0.97, 0.03, np.radians(1.5)
 
 classifyNEO(q, e)            # 'Apollo'
 isArjuna(q, e, i)            # True
-classifyTisserand(q, e, i)   # 'asteroidal-like'
+classifyBorovicka(q, e, i)   # 'asteroidal-chondritic'
 isEarthCrossing(q, e)        # True
 ```
 
@@ -119,29 +120,66 @@ with strict comparisons, as in de la Fuente Marcos & de la Fuente Marcos (2015, 
 objects, and the real criterion is episodes of 1:1 resonance with the Earth. Falling inside the box
 makes an orbit a candidate, not a confirmed member.
 
-### Tisserand classes: `classifyTisserand(q, e, i)`
+### Meteoroid orbital classes: `classifyBorovicka(q, e, i, ecliptic_shower=False)`
+
+The five orbital classes of Borovička et al. (2005), the scheme commonly used in meteor studies
+(Borovička et al. 2005; Kikwaya et al. 2011; Vojáček et al. 2019), with the limits as Vojáček et al.
+(2019, section 3.3) give them:
 
 | Class | Criterion |
 | :--- | :--- |
-| `'asteroidal-like'` | T_J > 3 |
-| `'jupiter-family-comet-like'` | 2 ≤ T_J ≤ 3 |
-| `'halley-type-comet-like'` | T_J < 2 and P ≤ 200 yr |
-| `'long-period-comet-like'` | T_J < 2 and P > 200 yr |
+| `'sun-approaching'` | q < 0.2 AU |
+| `'ecliptic-shower'` | member of an ecliptic shower, such as the Taurids |
+| `'halley-type'` | T_J < 2, or 2 < T_J < 3 and i > 45° |
+| `'jupiter-family'` | 2 < T_J < 3, i < 45° and Q > 4.5 AU |
+| `'asteroidal-chondritic'` | T_J > 3, or Q < 4.5 AU |
 
-The labels say what the orbit *resembles*, not what the body is. The period is P = a^1.5 yr, and is
-infinite for a parabolic or hyperbolic orbit, which is therefore long-period-comet-like wherever
-T_J < 2; the Tisserand parameter is computed from `q` and `e` so that it stays finite there.
+The Sun-approaching limit is where the meteoroids lose their sodium: almost all of those inside
+q = 0.2 AU are Na-free or Na-poor (Vojáček et al. 2019, section 3.3.2).
 
-**These are the classical limits, and differ from `classifyTancrediComet`.** Tancredi puts the
-asteroidal limit at 3.05, so an orbit with T_J between 3 and 3.05 — 2P/Encke at 3.0253 — is
-`'asteroidal-like'` here and `'jupiter family'` there. For a meteoroid, which carries no information
-on whether its parent is a comet, the classical limits are the usual ones.
+**The definitions overlap, so the classes are tested in the order of the table and the first that
+holds is taken.**
+
+- An orbit with q < 0.2 AU is Sun-approaching whatever its other elements, as fig. 4 of Vojáček et
+  al. (2019) draws it. 3200 Phaethon (T_J = 4.51) and 96P/Machholz (T_J = 1.95) are both
+  Sun-approaching.
+- An orbit with T_J < 3 and i > 45° that stays inside Q = 4.5 AU fits both the Halley-type and the
+  asteroidal-chondritic definitions. The published list does not say which wins; the order makes it
+  Halley type.
+
+**The ecliptic-shower class is not a function of the elements.** Its members, the Taurids and other
+showers with orbits near the boundary between the asteroids and the Jupiter-family comets, are
+defined by membership of the shower, which has to come from a shower association: pass
+`ecliptic_shower=True`, or a boolean array. Without it a Taurid orbit (q = 0.34 AU, e = 0.85,
+i = 5.4°, so T_J = 2.99 and Q = 4.19 AU) is asteroidal-chondritic. The command line has no shower
+association and never gives this class.
+
+The published limits are strict inequalities, which leaves the limits themselves unassigned. Here
+T_J = 2 and i = 45° do not make an orbit Halley type, and T_J = 3 and Q = 4.5 AU do not make it
+asteroidal-chondritic. T_J is computed from `q` and `e` so that it stays finite for an unbound orbit,
+which has no aphelion and so is never asteroidal-chondritic by Q.
+
+**The asteroidal limit of T_J = 3 differs from `classifyTancrediComet`**, which puts it at 3.05, so
+an orbit with T_J between 3 and 3.05 — 2P/Encke at 3.0253 — is `'asteroidal-chondritic'` here and
+`'jupiter family'` there. Encke's aphelion of 4.09 AU also puts it inside the asteroidal limit here.
+
+References:
+
+- Borovička, J., Koten, P., Spurný, P., Boček, J., Štork, R. (2005). A survey of meteor spectra and
+  orbits: evidence for three populations of Na-free meteoroids. *Icarus* 174, 15–30.
+- Kikwaya, J.-B., Campbell-Brown, M., Brown, P. G. (2011). Bulk density of small meteoroids.
+  *A&A* 530, A113.
+- Vojáček, V., Borovička, J., Koten, P., Spurný, P., Štork, R. (2019). Properties of small
+  meteoroids studied by meteor video observations. *A&A* 621, A68.
+- Subasinghe, D., Campbell-Brown, M. (2018). Luminous efficiency estimates of meteors II.
+  Application to Canadian Automated Meteor Observatory meteor events. *AJ*,
+  doi:10.3847/1538-3881/aaa3e0. Table 3 gives the same limits.
 
 ### Flags
 
 | Function | True when |
 | :--- | :--- |
-| `isSunApproaching(q, q_limit=0.2)` | q < 0.2 AU |
+| `isSunApproaching(q, q_limit=0.2)` | q < 0.2 AU, the Sun-approaching class of Borovička et al. (2005) |
 | `isProgrograde(i)` | i < 90° |
 | `isRetrograde(i)` | i > 90° |
 | `isEarthCrossing(q, e)` | q ≤ 1 AU ≤ Q |
@@ -291,7 +329,8 @@ resonances are ever needed.
 | The two-parameter cometary tests | **Verified** against the limits as published |
 | Atira, Aten, Apollo, Amor limits | **Verified** against the standard definitions (Earth's perihelion 0.983 and aphelion 1.017 AU, q < 1.3 AU for near-Earth) and one known object of each class |
 | Arjuna limits | **Verified** against the text of de la Fuente Marcos & de la Fuente Marcos (2015), section 2.1. The paper calls them approximate |
-| Tisserand classes, flags | **Verified** against one known body of each class. The limits are the classical conventions and the 200 yr period split of the long-period comets, not a single published scheme |
+| Borovička et al. (2005) classes | **Verified indirectly** — the 2005 paper (Icarus 174, 15) is paywalled and Kikwaya et al. (2011) could not be read, but Vojáček et al. (2019, section 3.3), co-authored by Borovička, give the five classes and their limits, and table 3 of Subasinghe & Campbell-Brown (2018) gives the same. Fig. 4 of Vojáček et al. (2019) puts q < 0.2 AU first; the rest of the order of the overlapping classes follows the published list. Checked against one known body of each class and the two Halley-type iron meteoroids of Vojáček et al. (2019, table 1) |
+| Flags | **Verified** — direct definitions |
 | Tancredi class structure and the 3.05 limit | **Verified indirectly** — the primary paper (Icarus 234, 66) is paywalled and the author's own site no longer resolves, but a 2025 paper co-authored by Tancredi restates the class definitions and the 3.05 cut verbatim |
 | Tancredi Hill radii, table 1 resonances and widths, appendix A and B formulae | **Unverified** — the primary source could not be read. The implementation reproduces the tabulated resonance centres and widths to the printed precision, which is strong but indirect evidence |
 

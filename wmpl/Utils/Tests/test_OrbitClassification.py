@@ -1,5 +1,6 @@
 """ Tests for the orbital class labels of wmpl.Utils.OrbitClassification: the near-Earth classes,
-    the Arjuna orbital domain, the Tisserand classes and the orbit flags.
+    the Arjuna orbital domain, the meteoroid orbital classes of Borovicka et al. (2005) and the orbit
+    flags.
 
 The class labels are checked against well-known objects, whose elements are those published for
 them, and against orbits built exactly on each limit, to pin which side of a limit belongs to which
@@ -16,10 +17,11 @@ import math
 
 import numpy as np
 
-from wmpl.Utils.OrbitClassification import (classifyNEO, isArjuna, classifyTisserand,
+from wmpl.Utils.OrbitClassification import (classifyNEO, isArjuna, classifyBorovicka,
     isSunApproaching, isProgrograde, isRetrograde, isEarthCrossing, calcTisserand,
     EARTH_PERIHELION, EARTH_APHELION, NEO_Q_LIMIT, ARJUNA_A_MIN, ARJUNA_A_MAX, ARJUNA_E_MAX,
-    ARJUNA_INCL_MAX, LONG_PERIOD_LIMIT, A_JUPITER, _tisserandFromPerihelion)
+    ARJUNA_INCL_MAX, HALLEY_INCL_LIMIT, ASTEROIDAL_APHELION_LIMIT, SUN_APPROACHING_Q_LIMIT,
+    A_JUPITER, _tisserandFromPerihelion)
 
 
 def _q(a, e):
@@ -109,57 +111,101 @@ def test_arjuna_members_are_also_in_a_neo_class():
         assert classifyNEO(_q(a, e), e) in ('Aten', 'Apollo', 'Amor', 'Atira')
 
 
-def test_tisserand_class_of_known_bodies():
-    """ A body of each class, from its published elements (inclination in degrees). """
-
-    # (name, a [AU], e, i [deg], class)
-    objects = [("1 Ceres", 2.7675, 0.0758, 10.59, 'asteroidal-like'),
-               ("67P/Churyumov-Gerasimenko", 3.4630, 0.6410, 7.04, 'jupiter-family-comet-like'),
-               ("1P/Halley", 17.834, 0.96714, 162.26, 'halley-type-comet-like'),
-               ("109P/Swift-Tuttle", 26.092, 0.96363, 113.45, 'halley-type-comet-like'),
-               ("C/1995 O1 Hale-Bopp", 186.0, 0.9951, 89.43, 'long-period-comet-like')]
-
-    for name, a, e, incl, expected in objects:
-        label = classifyTisserand(_q(a, e), e, np.radians(incl))
-        assert label == expected, "{:s} came out as {!r}".format(name, label)
-
-
-def test_tisserand_limits_and_period_limit():
-    """ T_J = 3 belongs to the Jupiter family and T_J = 2 to the Jupiter family too, as the table
-        gives asteroidal as T_J > 3 and Halley type as T_J < 2. At T_J < 2 the period decides.
+def test_borovicka_class_of_known_bodies():
+    """ A body of each class, from its published elements (inclination in degrees), and the two iron
+        meteoroids on Halley-type orbits of Vojacek et al. (2019), table 1, T_J = 1.9 and 1.7.
     """
 
-    def orbitWithTisserand(tisserand, a):
-        # T = a_J/a + 2 sqrt((a/a_J)(1 - e^2)) at i = 0, solved for e
-        root = (tisserand - A_JUPITER/a)/2.0
+    # (name, a [AU], e, i [deg], class)
+    objects = [("1 Ceres", 2.7675, 0.0758, 10.59, 'asteroidal-chondritic'),
+               ("67P/Churyumov-Gerasimenko", 3.4630, 0.6410, 7.04, 'jupiter-family'),
+               ("1P/Halley", 17.834, 0.96714, 162.26, 'halley-type'),
+               ("109P/Swift-Tuttle", 26.092, 0.96363, 113.45, 'halley-type'),
+               ("C/1995 O1 Hale-Bopp", 186.0, 0.9951, 89.43, 'halley-type'),
+               ("3200 Phaethon", 1.2712, 0.8898, 22.26, 'sun-approaching'),
+               ("96P/Machholz", 3.018, 0.9592, 58.3, 'sun-approaching'),
+               ("SZ2410", 3.50, 1.0 - 0.654/3.50, 63.2, 'halley-type'),
+               ("SX1938", 3.6, 1.0 - 0.486/3.6, 63.0, 'halley-type')]
+
+    for name, a, e, incl, expected in objects:
+        label = classifyBorovicka(_q(a, e), e, np.radians(incl))
+        assert label == expected, "{:s} came out as {!r}".format(name, label)
+
+    # 2P/Encke has T_J = 3.03 and Q = 4.09 AU, so it is asteroidal-chondritic on both counts,
+    #   unlike in the Tancredi scheme, whose asteroidal limit is 3.05
+    a, e = 2.2150, 0.8483
+    assert classifyBorovicka(_q(a, e), e, np.radians(11.78)) == 'asteroidal-chondritic'
+
+
+def test_borovicka_limits():
+    """ T_J = 2 and i = 45 deg are not Halley type, T_J = 3 and Q = 4.5 AU are not asteroidal, and
+        q = 0.2 AU is not Sun-approaching, as the published limits are all strict.
+    """
+
+    def orbitWithTisserand(tisserand, a, incl=0.0):
+        # T = a_J/a + 2 cos(i) sqrt((a/a_J)(1 - e^2)), solved for e
+        root = (tisserand - A_JUPITER/a)/(2.0*math.cos(incl))
         e = math.sqrt(1.0 - root**2*A_JUPITER/a)
-        assert abs(float(calcTisserand(a, e, 0.0)) - tisserand) < 1e-9
+        assert abs(float(calcTisserand(a, e, incl)) - tisserand) < 1e-9
         return _q(a, e), e
 
+    # These orbits stay outside q = 0.2 AU and reach beyond Q = 4.5 AU, so only T_J decides. The
+    #   sizes are ones at which the class sees the limit itself, not a value one rounding off it
     q, e = orbitWithTisserand(3.0, 3.0)
-    assert classifyTisserand(q, e, 0.0) == 'jupiter-family-comet-like'
+    assert float(_tisserandFromPerihelion(q, e, 0.0)) == 3.0
+    assert classifyBorovicka(q, e, 0.0) == 'jupiter-family'
 
     q, e = orbitWithTisserand(3.0 + 1e-6, 3.0)
-    assert classifyTisserand(q, e, 0.0) == 'asteroidal-like'
+    assert classifyBorovicka(q, e, 0.0) == 'asteroidal-chondritic'
 
-    q, e = orbitWithTisserand(2.0, 3.0)
-    assert classifyTisserand(q, e, 0.0) == 'jupiter-family-comet-like'
+    q, e = orbitWithTisserand(2.0, 4.0)
+    assert float(_tisserandFromPerihelion(q, e, 0.0)) == 2.0
+    assert classifyBorovicka(q, e, 0.0) == 'jupiter-family'
 
-    q, e = orbitWithTisserand(2.0 - 1e-6, 3.0)
-    assert classifyTisserand(q, e, 0.0) == 'halley-type-comet-like'
+    q, e = orbitWithTisserand(2.0 - 1e-6, 4.0)
+    assert classifyBorovicka(q, e, 0.0) == 'halley-type'
 
-    # The same T_J < 2 on either side of a 200 yr period, a = 200^(2/3) AU
-    a_limit = LONG_PERIOD_LIMIT**(2.0/3.0)
+    # Above 45 deg, T_J = 3 is still Halley type, though this orbit stays inside Q = 4.5 AU
+    incl = np.radians(60.0)
+    q, e = orbitWithTisserand(3.0, 2.0, incl)
+    assert float(_tisserandFromPerihelion(q, e, incl)) == 3.0
+    assert classifyBorovicka(q, e, incl) == 'halley-type'
 
-    for a, expected in ((a_limit*(1.0 - 1e-6), 'halley-type-comet-like'),
-                        (a_limit, 'halley-type-comet-like'),
-                        (a_limit*(1.0 + 1e-6), 'long-period-comet-like')):
+    # The inclination limit, on the orbit of 67P (T_J = 2.39 at 45 deg)
+    a, e = 3.4630, 0.6410
+    assert classifyBorovicka(_q(a, e), e, HALLEY_INCL_LIMIT) == 'jupiter-family'
+    assert classifyBorovicka(_q(a, e), e, HALLEY_INCL_LIMIT + 1e-9) == 'halley-type'
 
-        # q = 0.5 AU, i = 0 puts T_J well under 2 at these sizes
-        e = 1.0 - 0.5/a
-        assert float(calcTisserand(a, e, 0.0)) < 2.0
-        assert classifyTisserand(0.5, e, 0.0) == expected, \
-            "a = {:.4f} AU came out as {!r}".format(a, classifyTisserand(0.5, e, 0.0))
+    # The aphelion limit: q = 1.5 AU and e = 0.5 give Q = 4.5 AU exactly, and T_J = 2.87 at 30 deg
+    assert 1.5*(1.0 + 0.5)/(1.0 - 0.5) == ASTEROIDAL_APHELION_LIMIT
+    assert classifyBorovicka(1.5, 0.5, np.radians(30.0)) == 'jupiter-family'
+    assert classifyBorovicka(1.5*(1.0 - 1e-9), 0.5, np.radians(30.0)) == 'asteroidal-chondritic'
+
+    # The perihelion limit, on an orbit that would otherwise be Halley type
+    assert classifyBorovicka(SUN_APPROACHING_Q_LIMIT, 0.95, np.radians(150.0)) == 'halley-type'
+    assert classifyBorovicka(SUN_APPROACHING_Q_LIMIT*(1.0 - 1e-9), 0.95, np.radians(150.0)) \
+        == 'sun-approaching'
+
+
+def test_borovicka_order_of_the_classes():
+    """ The definitions overlap, and the class is the first in the published order that holds. """
+
+    # Q = 4.375 AU with 2 < T_J < 3 (2.94) and a low inclination: Jupiter family by T_J and i, but
+    #   the aphelion makes it asteroidal-chondritic
+    assert classifyBorovicka(0.625, 0.75, np.radians(20.0)) == 'asteroidal-chondritic'
+
+    # T_J = 2.68 at i = 60 deg inside Q = 3.75 AU fits both Halley type and asteroidal-chondritic
+    assert classifyBorovicka(1.25, 0.5, np.radians(60.0)) == 'halley-type'
+
+    # A Taurid orbit is asteroidal-chondritic by its elements (T_J = 2.99, Q = 4.19 AU), and an
+    #   ecliptic shower only by membership
+    q, e, incl = 0.34, 0.85, np.radians(5.4)
+    assert classifyBorovicka(q, e, incl) == 'asteroidal-chondritic'
+    assert classifyBorovicka(q, e, incl, ecliptic_shower=True) == 'ecliptic-shower'
+
+    # A Sun-approaching member of an ecliptic shower is Sun-approaching
+    assert classifyBorovicka(0.14, 0.89, np.radians(22.0), ecliptic_shower=True) \
+        == 'sun-approaching'
 
 
 def test_tisserand_from_perihelion_matches_calcTisserand_for_bound_orbits():
@@ -173,16 +219,18 @@ def test_tisserand_from_perihelion_matches_calcTisserand_for_bound_orbits():
             - float(calcTisserand(a, e, incl))) < 1e-9, "a = {:.1f} AU".format(a)
 
 
-def test_tisserand_class_of_unbound_orbits():
-    """ A parabolic or hyperbolic orbit has an infinite period, so it is long period wherever its
-        Tisserand parameter is under 2, and is classified rather than left as nan.
+def test_borovicka_class_of_unbound_orbits():
+    """ A parabolic or hyperbolic orbit has no aphelion, so it is never asteroidal-chondritic by its
+        aphelion, and is classified rather than left as nan.
     """
 
     for e in (1.0, 1.0005, 1.5):
-        assert classifyTisserand(0.5, e, np.radians(30.0)) == 'long-period-comet-like'
+        assert classifyBorovicka(0.5, e, np.radians(30.0)) == 'halley-type'
 
     # A tight, low-inclination hyperbolic orbit has T_J under 2 only through its first term
-    assert classifyTisserand(0.5, 1.0, 0.0) == 'long-period-comet-like'
+    assert classifyBorovicka(0.5, 1.0, 0.0) == 'halley-type'
+
+    assert classifyBorovicka(0.1, 1.2, np.radians(30.0)) == 'sun-approaching'
 
 
 def test_flags():
@@ -219,15 +267,17 @@ def test_classification_accepts_arrays():
 
     assert classifyNEO(q, e).tolist() == ['Aten', 'Amor', 'Apollo', 'unbound']
     assert isArjuna(q, e, i).tolist() == [False, False, True, False]
-    assert classifyTisserand(q, e, i).tolist() == ['asteroidal-like',
-        'jupiter-family-comet-like', 'asteroidal-like', 'long-period-comet-like']
+    assert classifyBorovicka(q, e, i).tolist() == ['asteroidal-chondritic', 'halley-type',
+        'asteroidal-chondritic', 'halley-type']
+    assert classifyBorovicka(q, e, i, ecliptic_shower=np.array([True, False, False, False])
+        ).tolist() == ['ecliptic-shower', 'halley-type', 'asteroidal-chondritic', 'halley-type']
     assert isSunApproaching(q).tolist() == [False, False, False, False]
     assert isProgrograde(i).tolist() == [True, False, True, True]
     assert isRetrograde(i).tolist() == [False, True, False, False]
     assert isEarthCrossing(q, e).tolist() == [True, False, True, False]
 
     assert type(classifyNEO(0.7, 0.3)) is str
-    assert type(classifyTisserand(0.7, 0.3, 0.1)) is str
+    assert type(classifyBorovicka(0.7, 0.3, 0.1)) is str
 
 
 if __name__ == "__main__":
@@ -239,10 +289,11 @@ if __name__ == "__main__":
         test_neo_unbound_orbit_is_labelled_unbound,
         test_arjuna_domain_and_its_limits,
         test_arjuna_members_are_also_in_a_neo_class,
-        test_tisserand_class_of_known_bodies,
-        test_tisserand_limits_and_period_limit,
+        test_borovicka_class_of_known_bodies,
+        test_borovicka_limits,
+        test_borovicka_order_of_the_classes,
         test_tisserand_from_perihelion_matches_calcTisserand_for_bound_orbits,
-        test_tisserand_class_of_unbound_orbits,
+        test_borovicka_class_of_unbound_orbits,
         test_flags,
         test_classification_accepts_arrays,
         ]

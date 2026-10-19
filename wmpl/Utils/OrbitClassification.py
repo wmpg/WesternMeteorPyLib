@@ -4,8 +4,8 @@ These criteria take one orbit and return a dynamical class, rather than comparin
 they are kept apart from the dissimilarity criteria in wmpl.Utils.Dcriteria.
 
 All functions take angles in radians. The single-parameter criteria, the two-parameter cometary
-tests and the near-Earth and Tisserand classes accept scalars or numpy arrays; the Tancredi (2014)
-classifiers return a label and take scalars only.
+tests and the near-Earth and meteoroid orbital classes accept scalars or numpy arrays; the Tancredi
+(2014) classifiers return a label and take scalars only.
 """
 
 from __future__ import print_function, division, absolute_import
@@ -59,14 +59,20 @@ ARJUNA_A_MAX = 1.013     # [AU]
 ARJUNA_E_MAX = 0.1
 ARJUNA_INCL_MAX = np.radians(8.56)   # [rad]
 
-# Tisserand parameter limits of the classical Tisserand-based classes, with respect to Jupiter
+# Limits of the meteoroid orbital classes of Borovicka et al. (2005), Icarus 174, 15, as restated
+#   by Vojacek et al. (2019), A&A 621, A68, sect. 3.3. Tisserand parameter with respect to Jupiter
 TISSERAND_ASTEROIDAL_LIMIT = 3.0
 TISSERAND_HALLEY_LIMIT = 2.0
 
-# Orbital period above which a comet-like orbit is long-period rather than Halley type [yr]
-LONG_PERIOD_LIMIT = 200.0
+# Inclination above which an orbit with 2 < T_J < 3 is Halley type rather than Jupiter family [rad]
+HALLEY_INCL_LIMIT = np.radians(45.0)
 
-# Perihelion distance below which an orbit is taken to approach the Sun closely [AU]
+# Aphelion distance inside which an orbit is asteroidal-chondritic, and beyond which a
+#   Jupiter-family orbit has to reach [AU]
+ASTEROIDAL_APHELION_LIMIT = 4.5
+
+# Perihelion distance below which an orbit is Sun-approaching [AU], the first class of the same
+#   scheme. Almost all meteoroids inside it are Na-free or Na-poor (Vojacek et al. 2019, 3.3.2)
 SUN_APPROACHING_Q_LIMIT = 0.2
 
 
@@ -466,27 +472,38 @@ def _tisserandFromPerihelion(q, e, i, a_planet=A_JUPITER):
     return a_planet*(1.0 - e)/q + 2*np.cos(i)*np.sqrt(q*(1.0 + e)/a_planet)
 
 
-def classifyTisserand(q, e, i, a_planet=A_JUPITER):
-    """ Classify an orbit as asteroidal-like, Jupiter-family-comet-like, Halley-type-comet-like or
-        long-period-comet-like from its Tisserand parameter and period.
+def classifyBorovicka(q, e, i, ecliptic_shower=False):
+    """ Classify a meteoroid orbit into the five orbital classes of Borovicka et al. (2005), the
+        scheme commonly used in meteor studies (Borovicka et al. 2005, Icarus 174, 15; Kikwaya et
+        al. 2011, A&A 530, A113; Vojacek et al. 2019, A&A 621, A68). As Vojacek et al. (2019) give
+        it in sect. 3.3:
 
-            T_J > 3                             asteroidal-like
-            2 <= T_J <= 3                       Jupiter-family-comet-like
-            T_J < 2 and P <= 200 yr             Halley-type-comet-like
-            T_J < 2 and P > 200 yr              long-period-comet-like
+            q < 0.2 AU                                  sun-approaching
+            member of an ecliptic shower                ecliptic-shower
+            T_J < 2, or 2 < T_J < 3 and i > 45 deg      halley-type
+            2 < T_J < 3, i < 45 deg and Q > 4.5 AU      jupiter-family
+            T_J > 3, or Q < 4.5 AU                      asteroidal-chondritic
 
-        The class says what the orbit resembles, not what the body is. These are the classical
-        limits of the Tisserand parameter. They differ from the Tancredi (2014) scheme of
-        classifyTancrediComet, which puts the asteroidal limit at 3.05, so an orbit with T_J between
-        3 and 3.05, such as comet 2P/Encke, is asteroidal-like here and Jupiter family there.
+        The definitions overlap, so the classes are tested in this order and the first that holds
+        is taken. An orbit with q < 0.2 AU is Sun-approaching whatever its other elements, as in
+        fig. 4 of Vojacek et al. (2019). The order also decides one case the list leaves open: an
+        orbit with T_J < 3 and i > 45 deg that stays inside Q = 4.5 AU fits both the Halley-type and
+        the asteroidal-chondritic definitions, and is Halley type here.
 
-        The period is taken from Kepler's third law with the Sun as the only mass, P = a^1.5, and
-        is infinite for a parabolic or hyperbolic orbit, which is therefore long-period-comet-like
-        wherever its Tisserand parameter is under 2.
+        The ecliptic showers, such as the Taurids, have orbits close to the boundary between the
+        asteroids and the Jupiter-family comets, and the class is given by membership of the shower,
+        not by the elements. The caller has to supply it from a shower association.
 
-        A period over 200 yr is applied only to orbits under T_J = 2. Between the planets an orbit
-        of such a period cannot have a larger parameter while reaching the inner Solar System, so
-        for a meteoroid orbit the order of the two tests does not matter.
+        The published limits are strict inequalities and leave the limits themselves unassigned.
+        Here T_J = 2 and i = 45 deg do not make an orbit Halley type, and T_J = 3 and Q = 4.5 AU do
+        not make it asteroidal-chondritic.
+
+        The Tisserand parameter is computed from q and e, so it stays finite for an unbound orbit,
+        which has no aphelion and is therefore never asteroidal-chondritic by its aphelion distance.
+
+        The asteroidal limit of T_J = 3 differs from the 3.05 of the Tancredi (2014) scheme of
+        classifyTancrediComet, so an orbit with T_J between 3 and 3.05, such as comet 2P/Encke, is
+        asteroidal-chondritic here and Jupiter family there.
 
     Arguments:
         q: [float] perihelion distance of the orbit (AU)
@@ -494,30 +511,38 @@ def classifyTisserand(q, e, i, a_planet=A_JUPITER):
         i: [float] inclination of the orbit (rad)
 
     Keyword arguments:
-        a_planet: [float] semi-major axis of the perturbing planet (AU). Default Jupiter.
+        ecliptic_shower: [bool] True if the meteoroid belongs to an ecliptic shower. Default False.
 
     Return:
-        [str] one of 'asteroidal-like', 'jupiter-family-comet-like', 'halley-type-comet-like' or
-            'long-period-comet-like'. A numpy array of these if the input is an array.
+        [str] one of 'sun-approaching', 'ecliptic-shower', 'halley-type', 'jupiter-family' or
+            'asteroidal-chondritic'. A numpy array of these if the input is an array.
     """
 
     q, e, i = np.asarray(q, dtype=float), np.asarray(e, dtype=float), np.asarray(i, dtype=float)
 
-    tisserand = _tisserandFromPerihelion(q, e, i, a_planet=a_planet)
+    tisserand = _tisserandFromPerihelion(q, e, i)
 
-    # An unbound orbit has an infinite period, and is not allowed to reach the square root below
+    # An unbound orbit has no aphelion, and is not allowed to reach the division below
     with np.errstate(divide='ignore', invalid='ignore'):
-        period = np.where(e < 1.0, (q/(1.0 - e))**1.5, np.inf)
+        aphelion = np.where(e < 1.0, q*(1.0 + e)/(1.0 - e), np.inf)
 
-    return _asLabel([tisserand > TISSERAND_ASTEROIDAL_LIMIT,
-                     tisserand >= TISSERAND_HALLEY_LIMIT,
-                     period <= LONG_PERIOD_LIMIT],
-                    ['asteroidal-like', 'jupiter-family-comet-like', 'halley-type-comet-like'],
-                    'long-period-comet-like')
+    # Each test sees only the orbits the ones before it left, so the Jupiter-family test needs no
+    #   lower limit on T_J and no limit on the inclination
+    return _asLabel([q < SUN_APPROACHING_Q_LIMIT,
+                     np.asarray(ecliptic_shower, dtype=bool),
+                     (tisserand < TISSERAND_HALLEY_LIMIT)
+                        | ((tisserand <= TISSERAND_ASTEROIDAL_LIMIT) & (i > HALLEY_INCL_LIMIT)),
+                     (tisserand <= TISSERAND_ASTEROIDAL_LIMIT)
+                        & (aphelion >= ASTEROIDAL_APHELION_LIMIT)],
+                    ['sun-approaching', 'ecliptic-shower', 'halley-type', 'jupiter-family'],
+                    'asteroidal-chondritic')
 
 
 def isSunApproaching(q, q_limit=SUN_APPROACHING_Q_LIMIT):
     """ Test whether an orbit passes close to the Sun.
+
+        The default limit is the Sun-approaching class of Borovicka et al. (2005), the first test
+        of classifyBorovicka.
 
     Arguments:
         q: [float] perihelion distance of the orbit (AU)
@@ -1289,7 +1314,7 @@ if __name__ == "__main__":
     for key, label, value in (
             ('NEO_CLASS', "near-Earth class", classifyNEO(q, e)),
             ('ARJUNA', "Arjuna orbital domain", "yes" if bool(isArjuna(q, e, incl)) else "no"),
-            ('TISSERAND_CLASS', "Tisserand class", classifyTisserand(q, e, incl)),
+            ('BOROVICKA_CLASS', "Borovicka et al. (2005) class", classifyBorovicka(q, e, incl)),
             ('DIRECTION', "direction", direction),
             ('EARTH_CROSSING', "Earth crossing", "yes" if bool(isEarthCrossing(q, e)) else "no"),
             ('SUN_APPROACHING', "Sun approaching (q < {:.1f} AU)".format(SUN_APPROACHING_Q_LIMIT),
