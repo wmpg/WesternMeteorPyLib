@@ -64,6 +64,11 @@ from wmpl.Utils.PyDomainParallelizer import parallelComputeGenerator
 # Text size of image legends
 LEGEND_TEXT_SIZE = 6
 
+# With timing_reruns, the pass that follows the timing estimate is repeated while it moves any station's
+#   clock by more than this many seconds. The stations move with the Earth at up to 465 m/s: 1e-5 s is at
+#   most 5 mm
+TIMING_RERUN_TOLERANCE = 1e-5
+
 
 class ObservedPoints(object):
     def __init__(self, jdt_ref, meas1, meas2, time_data, lat, lon, ele, meastype, station_id=None, \
@@ -2492,7 +2497,7 @@ class Trajectory(object):
         mc_noise_std=1.0, geometric_uncert=False, filter_picks=True, calc_orbit=True, show_plots=True, \
         show_jacchia=False, save_results=True, gravity_correction=True, gravity_factor=1.0, \
         plot_all_spatial_residuals=False, plot_file_type='png', traj_id=None, reject_n_sigma_outliers=3, 
-        mc_cores=None, fixed_times=None, mc_runs_max=None, enable_OSM_plot=False):
+        mc_cores=None, fixed_times=None, mc_runs_max=None, enable_OSM_plot=False, timing_reruns=0):
         """ Init the Ceplecha trajectory solver.
 
         Arguments:
@@ -2553,6 +2558,17 @@ class Trajectory(object):
             mc_runs_max: [int] Maximum number of Monte Carlo runs. None by default, which will limit the runs
                 to 10x req_num.
             enable_OSM_plot: [bool] plot the ground track using OS maps as well as the default 
+            timing_reruns: [int] Extra passes after the one that follows the timing estimate. That pass
+                recomputes the solution with the estimated clock offsets and estimates them again, but the
+                station positions and lines of sight it fits were computed at the times it began with. An
+                extra pass is run, up to this many, while the last one moved any clock by more than
+                TIMING_RERUN_TOLERANCE. 0 by default, the single pass. For data precise enough that the
+                stations' motion over the clock change shows: noise-free, a 4 s trajectory at 17.5 km/s seen
+                nearly end-on by one station kept 0.13 m of residual with clocks set exactly, and 0.013 m with
+                one extra pass (test_TimingReruns.py). With measurement noise the estimated offsets themselves
+                move by milliseconds between passes, the extra passes brought no measurable gain over 40
+                synthetic events, and each costs as much as the pass it repeats (47-79% more CPU there). Not
+                advisable in general.
 
         """
 
@@ -2636,6 +2652,9 @@ class Trajectory(object):
 
         # Enable OSM plot if required
         self.enable_OSM_plot = enable_OSM_plot         
+
+        # Extra passes after the timing rerun, see TIMING_RERUN_TOLERANCE
+        self.timing_reruns = timing_reruns
 
         # If True, pure geometric uncertainties will be computed and culling of solutions based on cost
         #   function value will not be done
@@ -6540,49 +6559,57 @@ class Trajectory(object):
             # After the timing has been estimated, everything needs to be recalculated from scratch
             if self.estimate_timing_vel:
 
+                # Repeated with timing_reruns while the recalculation moves the clocks. getattr for
+                #   trajectories pickled before the option existed
+                for _ in range(1 + getattr(self, "timing_reruns", 0)):
 
-                # If doing a Monte Carlo run, switch back to noisy observations
-                if _mc_run and (_orig_obs is not None):
+                    # If doing a Monte Carlo run, switch back to noisy observations
+                    if _mc_run and (_orig_obs is not None):
 
-                    # Keep the updated timings
-                    for obs, obs_noise in zip(self.observations, self.obs_noisy):
-                        obs_noise.time_data = np.copy(obs.time_data)
+                        # Keep the updated timings
+                        for obs, obs_noise in zip(self.observations, self.obs_noisy):
+                            obs_noise.time_data = np.copy(obs.time_data)
 
-                    # Switch back to noisy observations, but with updated timing
-                    self.observations = self.obs_noisy
+                        # Switch back to noisy observations, but with updated timing
+                        self.observations = self.obs_noisy
 
 
-                # Make a copy of observations
-                temp_observations = copy.deepcopy(self.observations)
+                    # Make a copy of observations
+                    temp_observations = copy.deepcopy(self.observations)
 
                 
-                # Reset the observation points
-                self.observations = []
+                    # Reset the observation points
+                    self.observations = []
 
-                if self.verbose:
-                    print()
-                    print("---------------------------------------------------------------------------------")
-                    print("Updating the solution after the timing estimation...")
-                    print("---------------------------------------------------------------------------------")
+                    if self.verbose:
+                        print()
+                        print("---------------------------------------------------------------------------------")
+                        print("Updating the solution after the timing estimation...")
+                        print("---------------------------------------------------------------------------------")
 
-                # Reinitialize the observations with proper timing
-                for obs in temp_observations:
-                    self.infillWithObs(obs)
+                    # Reinitialize the observations with proper timing
+                    for obs in temp_observations:
+                        self.infillWithObs(obs)
 
-                # Reset fixed times to 0, as the timing offsets have already been applied
-                for station in self.fixed_time_offsets:
-                    self.fixed_time_offsets[station] = 0.0
+                    # Reset fixed times to 0, as the timing offsets have already been applied
+                    for station in self.fixed_time_offsets:
+                        self.fixed_time_offsets[station] = 0.0
 
-                # The gravity pass needs the vertical velocity, which this pass's initial velocity gives.
-                #   calcLLA computes it too, but only after the second pass has run
-                if self.gravity_correction:
-                    eci0, self.gravity_r0 = gravityDropReference(self.observations, self.state_vect_mini, 
-                        self.radiant_eci_mini)
-                    self.calcV0z(eci0, self.radiant_eci_mini)
+                    # The gravity pass needs the vertical velocity, which this pass's initial velocity gives.
+                    #   calcLLA computes it too, but only after the second pass has run
+                    if self.gravity_correction:
+                        eci0, self.gravity_r0 = gravityDropReference(self.observations, self.state_vect_mini, 
+                            self.radiant_eci_mini)
+                        self.calcV0z(eci0, self.radiant_eci_mini)
 
-                # Re-run the trajectory estimation with updated timings. This will update all calculated
-                # values up to this point
-                self.run(_rerun_timing=True, _prev_toffsets=self.time_diffs, _orig_obs=_orig_obs)
+                    # Re-run the trajectory estimation with updated timings. This will update all calculated
+                    # values up to this point
+                    self.run(_rerun_timing=True, _prev_toffsets=self.time_diffs, _orig_obs=_orig_obs)
+
+                    # Done once a pass leaves the clocks where it found them, or cannot estimate them
+                    if (not self.timing_minimization_successful) \
+                        or (np.max(np.abs(self.time_diffs)) <= TIMING_RERUN_TOLERANCE):
+                        break
 
 
         else:
