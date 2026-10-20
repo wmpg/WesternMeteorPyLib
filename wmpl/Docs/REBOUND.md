@@ -525,8 +525,10 @@ options.
   - the **clones' encounters** as faint dots, which show when and with which planets the ensemble meets,
     as opposed to the single nominal history;
   - the **MOID** with each planet the object comes within 100 Hill radii of, the nominal's as a line in
-    the planet's colour, and the clones' 16–84% band for a planet that a sixth of the clones or more come
-    within the encounter threshold of at some time (see [MOID with the planets](#moid-with-the-planets));
+    the planet's colour, and the clones' 1σ band (16–84%) around it. For a planet the clones never come
+    near, their MOID spreads little and the band can be as thin as the line: for Winchcombe, 1000 years
+    back with 200 clones, it is 0.14 dex wide for Venus and under 0.01 dex for Saturn, Uranus and
+    Neptune, against 1 dex for the Earth (see [MOID with the planets](#moid-with-the-planets));
   - for a body with none of these, its **closest approach** of the run as a ring ("never closer": the
     object never came closer to that body), if it is within 100 Hill radii; further out the body never
     mattered.

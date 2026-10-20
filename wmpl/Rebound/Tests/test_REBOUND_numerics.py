@@ -1032,14 +1032,14 @@ def _moidSummaryFor(n, bodies_au, clones=True):
 
 
 def testMoidLinesAndBandsInTheApproachesPanel(reb, agg):
-    """ A line per body within APPROACH_MAX_HILL; the clones' band only where 16% of them come within
-    the encounter threshold; no ring for a body with a MOID line. """
+    """ A line per body within APPROACH_MAX_HILL, each with the clones' 1 sigma band; no ring for a
+    body with a MOID line. """
 
     nominal, clones = _plotOutputs(n_clones=25)
     hill = reb.HILL_RADII_AU
     moid = _moidSummaryFor(len(nominal), {
         "Earth": (0.5*hill["Earth"], 0.2*hill["Earth"], 8*hill["Earth"]),     # band: p16 inside 3
-        "Jupiter": (10*hill["Jupiter"], 6*hill["Jupiter"], 20*hill["Jupiter"]),  # line only
+        "Jupiter": (10*hill["Jupiter"], 6*hill["Jupiter"], 20*hill["Jupiter"]),  # beyond the threshold
         "Mercury": (500*hill["Mercury"], 400*hill["Mercury"], 600*hill["Mercury"])})  # left out
     _, axes = reb.plotReboundOrbits(nominal, clones, [], moid=moid, closest_au={"Jupiter": 3.0},
                                     closest_time_days={"Jupiter": -365.25*10})
@@ -1052,11 +1052,11 @@ def testMoidLinesAndBandsInTheApproachesPanel(reb, agg):
     assert y[-1] == pytest.approx(0.5)
 
     bands = {c.get_gid() for c in ax.collections if (c.get_gid() or "").startswith("moid_band:")}
-    assert bands == {"moid_band:Earth"}
+    assert bands == {"moid_band:Earth", "moid_band:Jupiter"}
     assert not _byGid(ax, "closest:"), "Jupiter has its MOID line, so no ring"
 
     labels = [text.get_text() for text in ax.get_legend().get_texts()]
-    assert {"MOID (nominal)", "MOID 16-84% (clones)", "Earth", "Jupiter"} <= set(labels)
+    assert {"MOID (nominal)", "MOID 1$\\sigma$ (clones)", "Earth", "Jupiter"} <= set(labels)
     assert "Mercury" not in labels
     assert ax.get_ylim()[0] >= reb.MOID_PLOT_MIN_HILL
 

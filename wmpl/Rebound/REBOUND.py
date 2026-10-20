@@ -2671,8 +2671,8 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
 
     The approaches panel shows the nominal's encounters as discs drawn as their bodies (see
     wmpl.Utils.PlanetStyle), the clones' encounters as faint dots, the MOID with each body that comes
-    within APPROACH_MAX_HILL Hill radii (a line for the nominal, and the clones' 16-84% band for a body
-    that a sixth of the clones or more could encounter), and, for a body with none of these, its
+    within APPROACH_MAX_HILL Hill radii (a line for the nominal, and the clones' 1 sigma band, their
+    16-84% percentiles, around it), and, for a body with none of these, its
     closest approach as a ring if within APPROACH_MAX_HILL. The Sun has no Hill sphere: its
     distance is scaled so that its SUN_ENCOUNTER_AU gate falls on the n_hill line of the others. The
     distance to the Earth at the outputs is drawn too in runs shorter than two years, where it shows
@@ -2843,10 +2843,11 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
                 markeredgewidth=0, alpha=0.3, zorder=2, gid="clone_encounter:{:s}".format(body))
         drawn.add(body)
 
-    # MOID with each body, in Hill radii: the nominal's as a line, and the clones' 16-84% band where at
-    #   least 16% of them come within the encounter threshold at some time (an encounter is then
-    #   possible for them). Before the departure the heliocentric orbit carries the Earth's pull, as for
-    #   the elements. Bodies that never come within APPROACH_MAX_HILL Hill radii are left out.
+    # MOID with each body, in Hill radii: the nominal's as a line, and the clones' 1 sigma band (16-84%)
+    #   for every body with a line, however thin: for a planet the clones never come near, their MOID
+    #   spreads little and the band is about as wide as the line. Before the departure the heliocentric
+    #   orbit carries the Earth's pull, as for the elements. Bodies that never come within
+    #   APPROACH_MAX_HILL Hill radii are left out.
     moid_lines, moid_bands = set(), set()
     if moid is not None:
 
@@ -2872,7 +2873,7 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
             if (not series) or (np.nanmin(np.concatenate(series)) > APPROACH_MAX_HILL):
                 continue
 
-            if (lo is not None) and np.any(lo < n_hill):
+            if (lo is not None) and np.any(np.isfinite(lo)):
                 ax.fill_between(t, lo, hi, color=planetColor(body), alpha=0.2, lw=0, zorder=1,
                                 gid="moid_band:{:s}".format(body))
                 moid_bands.add(body)
@@ -2937,7 +2938,7 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
     if moid_lines:
         approach_handles.append(Line2D([], [], color="k", lw=0.9, label="MOID (nominal)"))
     if moid_bands:
-        approach_handles.append(Patch(facecolor="k", alpha=0.2, lw=0, label="MOID 16-84% (clones)"))
+        approach_handles.append(Patch(facecolor="k", alpha=0.2, lw=0, label="MOID 1$\\sigma$ (clones)"))
     if rings:
         approach_handles.append(Line2D([], [], marker="o", ls="none", markersize=6, markerfacecolor="none",
                                        markeredgecolor="k", markeredgewidth=1.2, label="never closer"))
