@@ -286,10 +286,23 @@ The report gives the final elements with 95 % confidence intervals from the clon
 clones impacted which body, how many escaped, and how many had a close encounter with each body. If
 some clones did not survive, the confidence intervals are computed from the survivors only and the
 report says so (`ci_uses_survivors_only` in the JSON). Under the final elements come the Tisserand
-parameter and the orbital class of the final orbit: the meteoroid class of Borovička et al. (2005), from
-`wmpl.Utils.OrbitClassification.classifyBorovicka` (`final_elements.orbital_class` in the JSON, see
-[Classifying a single orbit](OrbitClassification.md)). The ecliptic-shower class needs a shower
-association, which the integration does not have, so it is never given.
+parameter and the orbital class at the end of the run: the meteoroid class of Borovička et al. (2005),
+from `wmpl.Utils.OrbitClassification.classifyBorovicka` (`final_elements.orbital_class` in the JSON, see
+[Classifying a single orbit](OrbitClassification.md)). Like the elements, they are the nominal's, and
+with clones T_J has their 1σ and 95% interval and the class the fraction of the clones in each class
+(`final_elements.clones_tisserand_and_class`). For Winchcombe, 1000 years back with 200 clones:
+
+```
+Tisserand parameter w.r.t. Jupiter and orbital class (Borovicka et al. 2005) at the end of the run,
+nominal +/- 1 sigma [95% CI] of the 200 clones:
+  T_J   = 3.083673 +/- 0.029853 [  2.995651,   3.112674]
+  class = asteroidal-chondritic (nominal); clones: asteroidal-chondritic 97.0%, jupiter-family 3.0%
+```
+
+Beyond the predictability horizon the nominal's class is that of one clone among many, and the
+clones' fractions are the ones to quote. The class of the observed orbit is that of the trajectory
+solution, before any integration. The ecliptic-shower class needs a shower association, which the
+integration does not have, so it is never given.
 
 The ensemble also gives a divergence estimate for free: the clones are trajectories started from
 slightly different state vectors, so their spread over time is exactly what a Lyapunov analysis
