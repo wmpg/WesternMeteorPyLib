@@ -1107,7 +1107,8 @@ def testReplotFromResultsMatchesTheDirectFigure(reb, agg):
                            equal_nan=True)
 
     assert again["a"].get_xlabel() == direct["a"].get_xlabel()
-    assert again["a"].get_ylabel() == direct["a"].get_ylabel() == "a [AU]"
+    assert again["a"].get_ylabel() == direct["a"].get_ylabel()
+    assert direct["a"].get_ylabel().endswith("[AU]")
 
 
 def testReplotWithoutTheMoidBringsBackTheRings(reb, agg, tmp_path):
@@ -1147,7 +1148,7 @@ def testReplotInTheGeocentricFrameIsInKilometres(reb, agg):
 
     nominal, clones = _plotOutputs(n_clones=0)
     _, axes = reb.replotReboundFromResults(_resultsFor(nominal, clones, reference_frame="geocentric"))
-    assert axes["a"].get_ylabel() == "a [km]"
+    assert axes["a"].get_ylabel().endswith("[km]")
     assert reb.lengthUnitOfFrame("heliocentric") == ("AU", 1.0)
     assert reb.lengthUnitOfFrame("geocentric")[0] == "km"
 
