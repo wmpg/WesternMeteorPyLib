@@ -468,7 +468,7 @@ options.
   for all of them, and a Jupiter encounter at 0.9 AU (2.5 Hill radii) reads as deep as an Earth one at
   0.025 AU. It shows:
   - the nominal's **encounters** as discs drawn as their bodies: the body's colour (yellow Sun, blue
-    Earth, grey Moon, red Mars, burnt orange Jupiter, ...) with a thin black outline, sized as
+    Earth, grey Moon, red Mars, brown Jupiter, ...) with a thin black outline, sized as
     radius^0.25 so the order of the real sizes is kept without Jupiter covering the panel (Jupiter 1.8
     times the Earth, the Moon 0.72 times), the smaller bodies on top;
   - the **clones' encounters** as faint dots, which show when and with which planets the ensemble meets,

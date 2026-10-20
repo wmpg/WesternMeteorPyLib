@@ -8,8 +8,10 @@ from __future__ import print_function, division, absolute_import
 
 
 # Colour of each body, close to its appearance and with distinct hues so the bodies tell apart: yellow
-#   Sun, grey Mercury, amber Venus, blue Earth, light grey Moon, red Mars, burnt orange Jupiter, sand
-#   Saturn, cyan Uranus and violet Neptune
+#   Sun, grey Mercury, amber Venus, blue Earth, light grey Moon, red Mars, brown Jupiter, olive gold
+#   Saturn, cyan Uranus and violet Neptune. Mars, Jupiter, Saturn and Venus are at least 15 apart in
+#   OKLab (x100), and at least 7.9 for protanopia and deuteranopia (Machado et al. 2009), where a
+#   burnt orange Jupiter was 10 from the red Mars (2 for deuteranopia) and a sand Saturn 10 from Venus
 PLANET_COLORS = {
     "Sun": "#f0dc5a",
     "Mercury": "#7f7f7f",
@@ -17,8 +19,8 @@ PLANET_COLORS = {
     "Earth": "#1f6fe0",
     "Moon": "#b0b0b0",
     "Mars": "#e0301e",
-    "Jupiter": "#c26a2e",
-    "Saturn": "#d8b98a",
+    "Jupiter": "#7d3f17",
+    "Saturn": "#9e9f1e",
     "Uranus": "#4fd0d6",
     "Neptune": "#6a48d8",
 }
@@ -38,7 +40,7 @@ PLANET_RADII_KM = {
 }
 
 # Thin outline that keeps the bodies visible against the background: black on a light one, for the
-#   pale bodies (Sun, Moon, Saturn, Uranus), and white on a dark one, for the dark bodies (Neptune,
+#   pale bodies (Sun, Moon, Uranus), and white on a dark one, for the dark bodies (Jupiter, Neptune,
 #   Earth, Mars)
 PLANET_EDGE_COLOR = "black"
 PLANET_EDGE_COLOR_DARK = "white"
