@@ -194,3 +194,21 @@ def testRankCorrelationBandIsFishers(reb, agg):
     s = np.sqrt(1.06/100.0)
     assert band.min() == pytest.approx(np.tanh(np.arctanh(0.5) - s), abs=1e-6)
     assert band.max() == pytest.approx(np.tanh(np.arctanh(0.5) + s), abs=1e-6)
+
+
+def testCircularIntervalOfTheReport(reb):
+    """ The report's 95% interval of an angle: about the circular mean, with low > high across 0, where
+    percentiles in 0-2 pi would cover almost the whole circle; away from 0 it is the usual one. """
+
+    rng = np.random.default_rng(4)
+    across = np.radians((350.0 + 10.0*rng.normal(size=20000)) % 360.0)
+    lo, hi = reb._circularInterval(across)
+    assert np.degrees(lo) == pytest.approx(350.0 - 19.6, abs=0.6)
+    assert np.degrees(hi) == pytest.approx(350.0 + 19.6 - 360.0, abs=0.6)
+    assert lo > hi
+
+    naive = np.degrees(np.percentile(across, [2.5, 97.5]))
+    assert naive[1] - naive[0] > 300.0
+
+    away = np.radians(120.0 + 10.0*rng.normal(size=20000))
+    assert reb._circularInterval(away) == pytest.approx(tuple(np.percentile(away, [2.5, 97.5])), abs=1e-6)

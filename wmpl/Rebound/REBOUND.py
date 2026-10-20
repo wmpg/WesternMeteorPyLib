@@ -2566,6 +2566,16 @@ def _turnShifts(series, lo, hi):
     return [360.0*k for k in range(int(np.ceil((v.min() - hi)/360.0)), int(np.floor((v.max() - lo)/360.0)) + 1)]
 
 
+def _circularInterval(angles, low=2.5, high=97.5):
+    """ The low-high percentile interval of angles in radians, taken about their circular mean (see
+    _circularPercentiles), as (low, high) within 0-2 pi: low > high when the interval runs through 0. Taken
+    in 0-2 pi directly, a cloud across 0 would give an interval running round almost the whole circle. """
+
+    p = _circularPercentiles(np.degrees(np.asarray(angles, dtype=float))[:, None], [low, high])[:, 0]
+
+    return tuple(float(x) for x in np.radians(p % 360.0))
+
+
 def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, dist_unit_multiplier=1.0,
                       length_units="AU", horizon=None, n_hill=3.0, clone_encounters=None, closest_au=None,
                       closest_time_days=None):
@@ -3520,12 +3530,11 @@ if __name__ == "__main__":
         e_95ci_high = np.percentile(e_mc, 97.5)
         incl_95ci_low = np.percentile(incl_mc, 2.5)
         incl_95ci_high = np.percentile(incl_mc, 97.5)
-        Omega_95ci_low = np.percentile(Omega_mc, 2.5)
-        Omega_95ci_high = np.percentile(Omega_mc, 97.5)
-        omega_95ci_low = np.percentile(omega_mc, 2.5)
-        omega_95ci_high = np.percentile(omega_mc, 97.5)
-        f_95ci_low = np.percentile(f_mc, 2.5)
-        f_95ci_high = np.percentile(f_mc, 97.5)
+
+        # The angles' interval is taken about their circular mean (see _circularInterval)
+        Omega_95ci_low, Omega_95ci_high = _circularInterval(Omega_mc)
+        omega_95ci_low, omega_95ci_high = _circularInterval(omega_mc)
+        f_95ci_low, f_95ci_high = _circularInterval(f_mc)
 
         # Compute the standard deviation of the orbital elements
         a_std = ((a_95ci_high - a_95ci_low)/2.0)/1.96 # Use 95% CI to ignore outliers
@@ -3544,6 +3553,11 @@ if __name__ == "__main__":
         Omega_ci_str = f" +/- {np.degrees(Omega_std):.6f} [{np.degrees(Omega_95ci_low):10.6f}, {np.degrees(Omega_95ci_high):10.6f}]"
         omega_ci_str = f" +/- {np.degrees(omega_std):.6f} [{np.degrees(omega_95ci_low):10.6f}, {np.degrees(omega_95ci_high):10.6f}]"
         f_ci_str = f" +/- {np.degrees(f_std):.6f} [{np.degrees(f_95ci_low):10.6f}, {np.degrees(f_95ci_high):10.6f}]"
+
+        # An angle's interval that runs through 0 has low > high, which the report says
+        Omega_ci_str += " (across 0)" if Omega_95ci_low > Omega_95ci_high else ""
+        omega_ci_str += " (across 0)" if omega_95ci_low > omega_95ci_high else ""
+        f_ci_str += " (across 0)" if f_95ci_low > f_95ci_high else ""
 
 
     ### Compute the epoch of the final simulation

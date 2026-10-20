@@ -462,7 +462,10 @@ options.
   each line is drawn at every whole turn that falls on it. The bands are taken about the clones'
   circular mean at each time, so a cloud that straddles 0/360°, or lies away from the nominal
   solution, is not cut through. For a nearly ecliptic orbit Ω and ω are poorly defined, and
-  ϖ = Ω + ω is the angle to read.
+  ϖ = Ω + ω is the angle to read: clones whose inclination comes near 0 scatter their Ω and ω and
+  widen those bands, while ϖ stays narrow. The report's 95% intervals of the final Ω, ω and f are
+  taken about the clones' circular mean as well, and an interval that runs through 0 is given with
+  low > high and marked "(across 0)".
 - **From the departure.** The elements before the object leaves 3 Earth Hill radii (dotted vertical
   line) carry the Earth's pull and are not drawn, and the vertical axes are scaled to the rest of the
   run, so they cover the clones as well as the nominal solution.
