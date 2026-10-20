@@ -178,6 +178,11 @@ def testMegnoFigureShowsEachQuarter(reb, agg, tmp_path):
     assert d_t/d_ln == pytest.approx(tau, rel=0.01)
     assert slope[2].endswith("= {:.0f} yr".format(tau))
 
+    # The limits of the verdicts are in the legend of <Y>
+    top = axes[0].get_legend_handles_labels()[1]
+    assert "regular if it ends within 0.1 of 2" in top
+    assert "chaotic above 2.5; the fit starts at the last crossing" in top
+
     labels = axes[1].get_legend_handles_labels()[1]
     assert "Lyapunov time {:.0f} years".format(result["verdict"]["lyapunov_time_years"]) in labels
     assert "each quarter" in labels

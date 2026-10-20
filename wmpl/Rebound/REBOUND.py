@@ -2482,10 +2482,16 @@ def plotMegno(megno, file_path=None):
     ax = axes[0]
     ax.plot(t, megno["megno"], lw=1.2, label="<Y> (MEGNO)")
     ax.axhline(2.0, color="k", ls="--", lw=1, label="2 (regular orbit)")
-    ax.axhspan(2 - MEGNO_REGULAR_TOL, 2 + MEGNO_REGULAR_TOL, color="0.85", zorder=0)
+
+    # The limits of the verdicts (see classifyMegno): regular within MEGNO_REGULAR_TOL of 2, chaotic above
+    #   MEGNO_CHAOTIC_MIN, whose last crossing starts the Lyapunov fit of the panel below
+    ax.axhspan(2 - MEGNO_REGULAR_TOL, 2 + MEGNO_REGULAR_TOL, color="0.85", zorder=0,
+               label="regular if it ends within {:g} of 2".format(MEGNO_REGULAR_TOL))
+    ax.axhline(MEGNO_CHAOTIC_MIN, color="C1", ls=":", lw=1.2,
+               label="chaotic above {:g}; the fit starts at the last crossing".format(MEGNO_CHAOTIC_MIN))
     ax.set_ylabel("<Y>")
     ax.set_title("MEGNO of the nominal orbit (Newtonian gravity): {:s}".format(v["status"].replace("_", " ")))
-    ax.legend()
+    ax.legend(fontsize=8)
 
     if with_deviation:
         ax = axes[1]
