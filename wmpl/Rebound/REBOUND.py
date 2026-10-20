@@ -2505,6 +2505,11 @@ PLOT_SAMPLE_CLONES = 10
 #   normal distribution, and the median
 PLOT_SIGMA_PERCENTILES = (2.275, 15.866, 50.0, 84.134, 97.725)
 
+# The predictability horizon in dark red on every panel, and the clones' first encounters in a lighter
+#   red: 28 apart in OKLab (x100), with normal vision and with protanopia or deuteranopia
+PLOT_HORIZON_COLOR = "darkred"
+PLOT_FIRST_ENCOUNTER_COLOR = "#f25f6b"
+
 
 def _unwrapDegrees(values):
     """ An angle series in degrees made continuous in time, so that it can run past 0 or 360 deg. NaN
@@ -2870,10 +2875,11 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
         fe = horizon.get("first_encounter_days")
         if fe is not None and fe.get("p05") is not None:
             sign = 1.0 if t_days[-1] >= t_days[0] else -1.0
-            ax.axvspan(sign*fe["p05"]/t_scale, sign*fe["p95"]/t_scale, color="red", alpha=0.08,
-                       label="first encounters (5-95%)")
+            # A lighter red than the horizon's, so that the two tell apart where they coincide
+            ax.axvspan(sign*fe["p05"]/t_scale, sign*fe["p95"]/t_scale, color=PLOT_FIRST_ENCOUNTER_COLOR,
+                       alpha=0.1, lw=0, label="first encounters (5-95%)")
             if fe.get("p50") is not None:
-                ax.axvline(sign*fe["p50"]/t_scale, color="darkred", ls="-.", lw=0.9,
+                ax.axvline(sign*fe["p50"]/t_scale, color=PLOT_FIRST_ENCOUNTER_COLOR, ls="-.", lw=0.9,
                            label="first encounters (median)")
         ax.set_ylim(-0.3, 1.05)
         ax.set_ylabel("rank correlation with the start")
@@ -2886,7 +2892,7 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
         if k_dep > 0:
             ax.axvline(t[k_dep], color="0.6", ls=":", lw=0.8)
         if (horizon is not None) and (horizon.get("horizon_days") is not None):
-            ax.axvline(horizon["horizon_days"]/t_scale, color="red", ls="--", lw=0.9,
+            ax.axvline(horizon["horizon_days"]/t_scale, color=PLOT_HORIZON_COLOR, ls="--", lw=0.9,
                        label="predictability horizon ({:s})".format(_spanText(horizon["horizon_days"]))
                        if ax is axes["predictability"] else None)
         if ax in axs[-1]:

@@ -212,3 +212,32 @@ def testCircularIntervalOfTheReport(reb):
 
     away = np.radians(120.0 + 10.0*rng.normal(size=20000))
     assert reb._circularInterval(away) == pytest.approx(tuple(np.percentile(away, [2.5, 97.5])), abs=1e-6)
+
+
+def testTheHorizonAndTheFirstEncountersHaveTheirOwnReds(reb, agg):
+    """ The horizon is dark red on every panel; the first encounters, span and median, a lighter red. """
+
+    from matplotlib.colors import to_hex
+
+    nominal, clones = _outputs(lambda frac, j: 30.0, n_clones=25)
+    horizon = reb.predictabilityHorizon(nominal, clones)
+    horizon["horizon_days"] = -365.25*31
+    horizon["first_encounter_days"] = {"fraction": 1.0, "p05": 365.25*10, "p50": 365.25*30, "p95": 365.25*60}
+    _, axes = reb.plotReboundOrbits(nominal, clones, [], horizon=horizon)
+
+    def line(ax, label):
+        return [x for x in ax.get_lines() if x.get_label() == label][0]
+
+    ax = axes["predictability"]
+    horizon_color = to_hex(line(ax, "predictability horizon (31 years)").get_color())
+    median_color = to_hex(line(ax, "first encounters (median)").get_color())
+    span = [c for c in ax.patches + ax.collections if c.get_label() == "first encounters (5-95%)"][0]
+
+    assert horizon_color == to_hex(reb.PLOT_HORIZON_COLOR)
+    assert median_color == to_hex(reb.PLOT_FIRST_ENCOUNTER_COLOR) == to_hex(span.get_facecolor())
+    assert horizon_color != median_color
+
+    # The horizon is drawn in its colour on every panel
+    for name in ("a", "node", "encounters"):
+        dashed = [x for x in axes[name].get_lines() if x.get_linestyle() == "--" and len(x.get_xdata()) == 2]
+        assert any(to_hex(x.get_color()) == horizon_color for x in dashed)
