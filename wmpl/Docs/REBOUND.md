@@ -451,19 +451,26 @@ options.
 
 ### The figure
 
-- **Clones as bands.** With 20 clones or more, they are drawn as their 2.5–97.5% and 16–84% bands and
-  median at each time, with 10 of them drawn individually to show how single trajectories behave; with
+- **Clones as bands.** With 20 clones or more, they are drawn as their 2σ and 1σ bands (the
+  2.275–97.725% and 15.87–84.13% percentiles, those of a normal distribution) and median at each time, with 10 of them drawn individually to show how single trajectories behave; with
   fewer, every clone is drawn. The nominal solution is the black line. Clones that ended early (e.g.
   impacted) count only over their own span.
-- **Angles without wraps.** The node, the argument of perihelion and the longitude of perihelion are
-  unwrapped along the nominal solution, and each clone is drawn as its difference from it, so crossing
-  0/360° draws no vertical lines. For a nearly ecliptic orbit the node and the argument of perihelion
-  are poorly defined, and the longitude of perihelion ϖ = Ω + ω is the angle to read.
+- **Angles within 0–360°, without jumps.** The longitude of the node Ω, the argument of perihelion ω
+  and the longitude of perihelion ϖ are labelled within 0–360°, but drawn continuous, so crossing
+  0/360° draws no vertical line. The axis covers the data alone when they span less than a turn, and
+  its labels then run on through 0 (…, 330, 0, 30, …); otherwise it covers one full turn, 0–360°, and
+  each line is drawn at every whole turn that falls on it. The bands are taken about the clones'
+  circular mean at each time, so a cloud that straddles 0/360°, or lies away from the nominal
+  solution, is not cut through. For a nearly ecliptic orbit Ω and ω are poorly defined, and
+  ϖ = Ω + ω is the angle to read.
 - **From the departure.** The elements before the object leaves 3 Earth Hill radii (dotted vertical
   line) carry the Earth's pull and are not drawn, and the vertical axes are scaled to the rest of the
   run, so they cover the clones as well as the nominal solution.
 - **Time** in years for spans of two years or more, in days otherwise. The predictability horizon is
-  the dashed red vertical line on every panel, and its time is given in the legend.
+  the dashed red vertical line on every panel, and its time is given in the legend. The last panel
+  gives the rank correlation of a, e and i with its 1σ sampling band from the number of clones (σ =
+  √(1.06/(n − 3)) in atanh ρ; Fieller, Hartley & Pearson 1957), the 0.5 threshold of the horizon, and
+  the median and 5–95% of the clones' first encounters.
 - **Close approaches in Hill radii.** The bottom middle panel gives every distance in units of the
   Hill radius of the body, so that one dotted line is the encounter threshold (3 Hill radii by default)
   for all of them, and a Jupiter encounter at 0.9 AU (2.5 Hill radii) reads as deep as an Earth one at

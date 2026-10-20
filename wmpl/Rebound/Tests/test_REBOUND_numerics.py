@@ -819,22 +819,26 @@ def testManyClonesAreBandsAndTheAxesCoverThem(reb, agg):
     assert len(thin) == reb.PLOT_SAMPLE_CLONES
 
 
-def testAnglesAreUnwrapped(reb, agg):
-    """ A node crossing 360 deg is drawn as a continuous line, and the clones follow it. """
+def testAnglesAreContinuousAndLabelledWithin360(reb, agg):
+    """ A node crossing 360 deg is drawn as a continuous line on an axis that covers the data alone,
+    with its labels within 0-360 deg. """
 
     nominal, clones = _plotOutputs(n_clones=30, node_start=355.0)
-    _, axes = reb.plotReboundOrbits(nominal, clones, [])
+    fig, axes = reb.plotReboundOrbits(nominal, clones, [])
+    fig.canvas.draw()
 
     nominal_line = [line for line in axes["node"].get_lines() if line.get_linewidth() > 1][0]
     y = np.array(nominal_line.get_ydata(), dtype=float)
     y = y[np.isfinite(y)]
     assert np.max(np.abs(np.diff(y))) < 1.0
-    assert 0.0 <= y[0] < 360.0 and y[-1] > 360.0
 
-    # The longitude of perihelion starts within 0-360 deg as well
-    varpi_line = [line for line in axes["varpi"].get_lines() if line.get_linewidth() > 1][0]
-    v = np.array(varpi_line.get_ydata(), dtype=float)
-    assert 0.0 <= v[np.isfinite(v)][0] < 360.0
+    lo, hi = axes["node"].get_ylim()
+    assert hi - lo < 30.0
+    visible = [(y, text.get_text()) for y, text in zip(axes["node"].get_yticks(), axes["node"].get_yticklabels())
+               if lo <= y <= hi]
+    labels = [float(text) for _, text in visible]
+    assert labels and all(0.0 <= v < 360.0 for v in labels)
+    assert 0.0 in labels
 
 
 def testElementsBeforeTheDepartureAreLeftOut(reb, agg):

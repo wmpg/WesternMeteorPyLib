@@ -20,6 +20,7 @@ import numpy as np
 import scipy
 import scipy.stats
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter, MaxNLocator, MultipleLocator, ScalarFormatter
 from matplotlib.lines import Line2D
 
 from jplephem.spk import SPK
@@ -2500,6 +2501,70 @@ PLOT_BANDS_MIN_CLONES = 20
 # Clones drawn individually on top of the bands, to show how single trajectories behave
 PLOT_SAMPLE_CLONES = 10
 
+# Percentiles of the clones' bands: those of 2 and 1 standard deviations either side of the mean of a
+#   normal distribution, and the median
+PLOT_SIGMA_PERCENTILES = (2.275, 15.866, 50.0, 84.134, 97.725)
+
+
+def _unwrapDegrees(values):
+    """ An angle series in degrees made continuous in time, so that it can run past 0 or 360 deg. NaN
+    values are kept, and the series is continuous across them. """
+
+    y = np.array(values, dtype=float)
+    ok = np.isfinite(y)
+    y[ok] = np.degrees(np.unwrap(np.radians(y[ok])))
+
+    return y
+
+
+def _turnOffset(values, reference):
+    """ The whole turns (in degrees) to add to a continuous angle series so that its first value
+    shared with the reference series lies within 180 deg of it, or 0 if they share none. """
+
+    both = np.isfinite(values) & np.isfinite(reference)
+    if not both.any():
+        return 0.0
+    k = np.argmax(both)
+
+    return 360.0*np.round((reference[k] - values[k])/360.0)
+
+
+def _circularPercentiles(stack, percentiles):
+    """ Percentiles of angles at each time, taken about their circular mean: the angles are measured
+    from the mean in -180 to 180 deg, so the cut falls opposite the cloud, where the fewest clones are.
+    Taken directly in 0-360 deg, or about one clone (e.g. the nominal), a cloud across 0/360 deg or
+    off that clone would be cut through and its percentiles would jump.
+
+    Arguments:
+        stack: [ndarray] Angles in degrees, one row per clone and one column per time (NaN where a
+            clone has no value).
+        percentiles: [list] Percentiles to return.
+
+    Return:
+        [ndarray] One row per percentile, continuous in time (not reduced to 0-360 deg).
+    """
+
+    rad = np.radians(stack)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        centre = np.degrees(np.arctan2(np.nanmean(np.sin(rad), axis=0), np.nanmean(np.cos(rad), axis=0)))
+        centre = _unwrapDegrees(centre)
+        offsets = (stack - centre + 180.0) % 360.0 - 180.0
+
+        return centre + np.nanpercentile(offsets, percentiles, axis=0)
+
+
+def _turnShifts(series, lo, hi):
+    """ Whole turns (in degrees) to subtract from angle series so that each copy overlaps [lo, hi]:
+    drawn at all of them, the series show modulo 360 deg without a jump at 0/360 deg. """
+
+    v = np.concatenate([np.asarray(s, dtype=float).ravel() for s in series])
+    v = v[np.isfinite(v)]
+    if not len(v):
+        return [0.0]
+
+    return [360.0*k for k in range(int(np.ceil((v.min() - hi)/360.0)), int(np.floor((v.max() - lo)/360.0)) + 1)]
+
 
 def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, dist_unit_multiplier=1.0,
                       length_units="AU", horizon=None, n_hill=3.0, clone_encounters=None, closest_au=None,
@@ -2517,12 +2582,19 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
     distance to the Earth at the outputs is drawn too in runs shorter than two years, where it shows
     the departure; in longer runs the output sampling misses the approaches.
 
-    With PLOT_BANDS_MIN_CLONES clones or more, the clones are shown as the 2.5-97.5% and 16-84%
-    bands and the median at each time, with PLOT_SAMPLE_CLONES of them drawn individually; with fewer,
-    every clone is drawn. The angles are unwrapped along the nominal solution and each clone is drawn
-    as its difference from it, so that crossing 0/360 deg does not draw vertical lines. The vertical
-    axes cover the run from the departure from the Earth, before which the osculating heliocentric
-    elements carry the Earth's pull. The time is in years for spans of two years or more.
+    With PLOT_BANDS_MIN_CLONES clones or more, the clones are shown as their 2 and 1 sigma bands (the
+    percentiles of PLOT_SIGMA_PERCENTILES) and the median at each time, with PLOT_SAMPLE_CLONES of them
+    drawn individually; with fewer, every clone is drawn. The angles are labelled within 0-360 deg but
+    drawn continuous, so that crossing 0/360 deg draws no vertical line: each series is followed in
+    time, the axis covers either the data alone (its labels then run on past 360 as 0, 10, ...) or one
+    full turn, and the series are drawn at every whole turn that falls on it. Their bands are taken
+    about the clones' circular mean (see _circularPercentiles). The vertical axes cover the run from
+    the departure from the Earth, before which the osculating heliocentric elements carry the Earth's
+    pull. The time is in years for spans of two years or more.
+
+    The predictability panel gives the rank correlation of each element with its 1 sigma sampling
+    band from the number of clones, the threshold of the horizon, and the median and 5-95% of the
+    clones' first encounters.
 
     Arguments:
         sim_outputs: [list] Outputs of the nominal solution (see reboundSimulate).
@@ -2580,28 +2652,24 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
         for key in element_keys:
             run[key][:k_dep] = np.nan
 
-    # Angles: unwrap the nominal solution, and draw each clone as its (wrapped) difference from it
+    # Angles: each series is made continuous in time, and the clones start on the nominal's turn. The
+    #   bands are computed from the angles themselves, about the clones' circular mean.
     angles = ("node", "peri", "varpi")
+    raw_angles = {key: np.array([c[key] for c in clones]) for key in angles}
     for key in angles:
-        nom = nominal[key]
-        ok = np.isfinite(nom)
-        unwrapped = nom.copy()
-        unwrapped[ok] = np.degrees(np.unwrap(np.radians(nom[ok])))
-
-        # Start the unwrapped series within 0-360 deg
-        if ok.any():
-            unwrapped -= 360.0*np.floor(unwrapped[ok][0]/360.0)
+        nominal[key] = _unwrapDegrees(nominal[key])
         for c in clones:
-            with np.errstate(invalid="ignore"):
-                c[key] = unwrapped + ((c[key] - nom + 180.0) % 360.0 - 180.0)
-        nominal[key] = unwrapped
+            c[key] = _unwrapDegrees(c[key])
+            c[key] += _turnOffset(c[key], nominal[key])
 
     fig, axs = plt.subplots(3, 3, figsize=(15, 11), sharex=True)
     names = [["a", "e", "q"], ["i", "node", "peri"], ["varpi", "encounters", "predictability"]]
     axes = {name: axs[r, c] for r, row in enumerate(names) for c, name in enumerate(row)}
-    labels = {"a": "a [{:s}]".format(length_units), "e": "e", "q": "q [{:s}]".format(length_units),
-              "i": "i [deg]", "node": "node [deg]", "peri": "argument of perihelion [deg]",
-              "varpi": "longitude of perihelion [deg]"}
+    # Each element by its name and its symbol
+    labels = {"a": "semi-major axis $a$ [{:s}]".format(length_units), "e": "eccentricity $e$",
+              "q": "perihelion distance $q$ [{:s}]".format(length_units), "i": "inclination $i$ [deg]",
+              "node": r"longitude of the node $\Omega$ [deg]", "peri": r"argument of perihelion $\omega$ [deg]",
+              "varpi": r"longitude of perihelion $\varpi$ [deg]"}
 
     use_bands = len(clones) >= PLOT_BANDS_MIN_CLONES
     if use_bands:
@@ -2614,35 +2682,61 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
         ax = axes[key]
         limits = [nominal[key][k_dep:]]
 
+        p = None
         if use_bands:
-            stack = np.array([c[key] for c in clones])
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", RuntimeWarning)
-                p = np.nanpercentile(stack, [2.5, 16, 50, 84, 97.5], axis=0)
-            ax.fill_between(t, p[0], p[4], color="C0", alpha=0.18, lw=0,
-                            label="clones 2.5-97.5%" if key == "a" else None)
-            ax.fill_between(t, p[1], p[3], color="C0", alpha=0.35, lw=0,
-                            label="clones 16-84%" if key == "a" else None)
-            ax.plot(t, p[2], color="C0", lw=1.0, ls="--", label="clones median" if key == "a" else None)
+            if key in angles:
+                p = _circularPercentiles(raw_angles[key], PLOT_SIGMA_PERCENTILES)
+                p += _turnOffset(p[2], nominal[key])
+            else:
+                stack = np.array([c[key] for c in clones])
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", RuntimeWarning)
+                    p = np.nanpercentile(stack, PLOT_SIGMA_PERCENTILES, axis=0)
             limits += [p[0][k_dep:], p[4][k_dep:]]
-
-        for j, c in enumerate(sample):
-            ax.plot(t, c[key], color="0.35", lw=0.4, alpha=0.6,
-                    label=("{:d} sample clones".format(len(sample)) if use_bands else "clones")
-                    if (key == "a" and j == 0) else None)
-            if not use_bands:
-                limits.append(c[key][k_dep:])
-
-        ax.plot(t, nominal[key], color="k", lw=1.4, label="nominal" if key == "a" else None)
-        ax.set_ylabel(label)
+        else:
+            limits += [c[key][k_dep:] for c in sample]
 
         # Scale to the run from the departure, not to the osculating elements still inside the
         #   Earth's neighbourhood
         values = np.concatenate([v[np.isfinite(v)] for v in limits]) if limits else np.array([])
-        if len(values):
-            lo, hi = values.min(), values.max()
-            pad = 0.05*(hi - lo) if hi > lo else max(abs(hi)*1e-6, 1e-12)
-            ax.set_ylim(lo - pad, hi + pad)
+        lo, hi = (values.min(), values.max()) if len(values) else (0.0, 1.0)
+        pad = 0.05*(hi - lo) if hi > lo else max(abs(hi)*1e-6, 1e-12)
+        lo, hi = lo - pad, hi + pad
+
+        # An angle covers either its data, labelled modulo 360 deg, or one full turn
+        if key in angles:
+            if hi - lo < 360.0:
+                base = 360.0*np.floor(0.5*(lo + hi)/360.0)
+                lo, hi = lo - base, hi - base
+                ax.yaxis.set_major_locator(MaxNLocator(nbins=6, steps=[1, 2, 3, 6, 9, 10]))
+                ax.yaxis.set_major_formatter(FuncFormatter(
+                    lambda y, pos: "{:g}".format(float(np.round(y % 360.0, 6)) % 360.0)))
+            else:
+                lo, hi = 0.0, 360.0
+                ax.yaxis.set_major_locator(MultipleLocator(90))
+
+        def shifts(*series):
+            return _turnShifts(series, lo, hi) if key in angles else [0.0]
+
+        if p is not None:
+            for j, s in enumerate(shifts(p[0], p[4])):
+                first = (key == "a") and (j == 0)
+                ax.fill_between(t, p[0] - s, p[4] - s, color="C0", alpha=0.18, lw=0,
+                                label="clones 2$\\sigma$" if first else None)
+                ax.fill_between(t, p[1] - s, p[3] - s, color="C0", alpha=0.35, lw=0,
+                                label="clones 1$\\sigma$" if first else None)
+                ax.plot(t, p[2] - s, color="C0", lw=1.0, ls="--", label="clones median" if first else None)
+
+        for j, c in enumerate(sample):
+            for m, s in enumerate(shifts(c[key])):
+                ax.plot(t, c[key] - s, color="0.35", lw=0.4, alpha=0.6,
+                        label=("{:d} sample clones".format(len(sample)) if use_bands else "clones")
+                        if (key == "a" and j == 0 and m == 0) else None)
+
+        for m, s in enumerate(shifts(nominal[key])):
+            ax.plot(t, nominal[key] - s, color="k", lw=1.4, label="nominal" if (key == "a" and m == 0) else None)
+        ax.set_ylabel(label)
+        ax.set_ylim(lo, hi)
 
     # Close approaches to every body in units of its Hill radius, so that one line is the encounter
     #   threshold for all of them, on a log scale
@@ -2742,16 +2836,35 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
     ax = axes["predictability"]
     if horizon is not None:
         t_h = np.array(horizon["time_days"])/t_scale
+
+        # The 1 sigma sampling uncertainty of a rank correlation from n clones: sqrt(1.06/(n - 3)) in
+        #   its Fisher transform, atanh(rho) (Fieller, Hartley & Pearson 1957)
+        n_corr = horizon.get("n_clones") or 0
+        sigma_z = np.sqrt(1.06/(n_corr - 3)) if n_corr > 3 else None
+
+        names = {"a": "semi-major axis $a$", "e": "eccentricity $e$", "i": "inclination $i$"}
         for key, color in (("a", "C0"), ("e", "C1"), ("i", "C2")):
             rho = horizon["rank_corr"].get(key)
             if rho is not None:
-                ax.plot(t_h, [np.nan if v is None else v for v in rho], color=color, lw=1, label=key)
-        ax.axhline(horizon["threshold"], color="0.5", ls=":", lw=1)
+                rho = np.array([np.nan if v is None else v for v in rho], dtype=float)
+                ax.plot(t_h, rho, color=color, lw=1, label=names[key])
+                if sigma_z is not None:
+                    z = np.arctanh(np.clip(rho, -0.999999, 0.999999))
+                    ax.fill_between(t_h, np.tanh(z - sigma_z), np.tanh(z + sigma_z), color=color, alpha=0.25,
+                                    lw=0)
+        if sigma_z is not None:
+            ax.fill_between([], [], [], color="0.5", alpha=0.4, lw=0,
+                            label="1$\\sigma$ (sampling, {:d} clones)".format(n_corr))
+        ax.axhline(horizon["threshold"], color="0.5", ls=":", lw=1,
+                   label="horizon threshold ({:g})".format(horizon["threshold"]))
         fe = horizon.get("first_encounter_days")
         if fe is not None and fe.get("p05") is not None:
             sign = 1.0 if t_days[-1] >= t_days[0] else -1.0
             ax.axvspan(sign*fe["p05"]/t_scale, sign*fe["p95"]/t_scale, color="red", alpha=0.08,
                        label="first encounters (5-95%)")
+            if fe.get("p50") is not None:
+                ax.axvline(sign*fe["p50"]/t_scale, color="darkred", ls="-.", lw=0.9,
+                           label="first encounters (median)")
         ax.set_ylim(-0.3, 1.05)
         ax.set_ylabel("rank correlation with the start")
     else:
@@ -2768,7 +2881,7 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
                        if ax is axes["predictability"] else None)
         if ax in axs[-1]:
             ax.set_xlabel(t_label)
-        if ax.get_yscale() == "linear":
+        if (ax.get_yscale() == "linear") and isinstance(ax.yaxis.get_major_formatter(), ScalarFormatter):
             ax.ticklabel_format(axis="y", useOffset=False, style="plain")
 
     ax_min, ax_max = min(t[0], t[-1]), max(t[0], t[-1])
