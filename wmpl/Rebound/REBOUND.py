@@ -2490,7 +2490,10 @@ def plotMegno(megno, file_path=None):
     if with_deviation:
         ax = axes[1]
         l = np.array(ln_delta, dtype=float)
-        ax.plot(t, l, color="k", lw=1.0, label="ln|delta|")
+        ax.plot(t, l, color="k", lw=1.0, label="$\\ln|\\delta|$")
+
+        # Labels on the curve stay readable on a white ground
+        ground = dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.8)
 
         if v.get("lyapunov_onset_years") is not None:
             elapsed = np.abs(t)
@@ -2510,6 +2513,25 @@ def plotMegno(megno, file_path=None):
                 ax.plot(*fitted, color="C1", lw=1.6, label="Lyapunov time {:.0f} years".format(
                     v["lyapunov_time_years"]))
 
+                # Where the time comes from: the fit rises by d_ln over d_t, and tau = d_t/d_ln, the time
+                #   in which |delta| grows by a factor e. Drawn as the triangle under the fit.
+                (x0, x1), (y0, y1) = (fitted[0][0], fitted[0][-1]), (fitted[1][0], fitted[1][-1])
+                d_t, d_ln = abs(x1 - x0), y1 - y0
+                if d_ln > 0:
+                    inward = 1 if x1 < x0 else -1
+                    ax.plot([x0, x1, x1], [y0, y0, y1], color="C1", lw=0.8, ls=":", zorder=1)
+                    ax.annotate("$\\Delta t$ = {:.0f} yr".format(d_t), (0.5*(x0 + x1), y0),
+                                textcoords="offset points", xytext=(0, -11), ha="center", fontsize=8,
+                                color="C1", gid="slope", bbox=ground)
+                    ax.annotate("$\\Delta\\ln|\\delta|$ = {:.1f}".format(d_ln), (x1, 0.5*(y0 + y1)),
+                                textcoords="offset points", xytext=(4*inward, 0),
+                                ha="left" if inward > 0 else "right", va="center", fontsize=8, color="C1",
+                                gid="slope", bbox=ground)
+                    ax.annotate("$\\tau = \\Delta t\\,/\\,\\Delta\\ln|\\delta|$ = {:.0f}/{:.1f} = {:.0f} yr".format(
+                                d_t, d_ln, d_t/d_ln), (x1, y0), textcoords="offset points",
+                                xytext=(4*inward, 4), ha="left" if inward > 0 else "right", va="bottom",
+                                fontsize=8, color="C1", gid="slope", bbox=ground)
+
             # Each quarter with its own fit and time, or "no growth"
             for k, w in enumerate(v.get("lyapunov_windows") or []):
                 fitted = fitLine(w["start_years"], w["end_years"])
@@ -2519,11 +2541,11 @@ def plotMegno(megno, file_path=None):
                 ax.plot(*fitted, color="C3", lw=1.0, ls="--", label="each quarter" if k == 0 else None)
                 ax.annotate("no growth" if tau_w is None else "{:.0f} yr".format(tau_w),
                             (np.mean(fitted[0]), np.max(fitted[1])), textcoords="offset points",
-                            xytext=(0, 6), ha="center", fontsize=8, color="C3")
+                            xytext=(0, 6), ha="center", fontsize=8, color="C3", gid="quarter", bbox=ground)
                 if k > 0:
                     ax.axvline(sign*w["start_years"], color="C3", ls=":", lw=0.6)
 
-        ax.set_ylabel("ln|delta|")
+        ax.set_ylabel("$\\ln|\\delta|$  (+1 = $\\times e$)")
         ax.legend(fontsize=8)
 
     axes[-1].set_xlabel("Time [years]")

@@ -165,8 +165,18 @@ def testMegnoFigureShowsEachQuarter(reb, agg, tmp_path):
     assert (tmp_path/"megno.png").exists()
     assert len(axes) == 2
 
-    notes = {text.get_text() for text in axes[1].texts}
+    notes = {text.get_text() for text in axes[1].texts if text.get_gid() == "quarter"}
     assert notes == {"20 yr", "50 yr", "100 yr", "no growth"}
+
+    # The triangle under the fit gives the time as the span over the rise of ln|delta|
+    tau = result["verdict"]["lyapunov_time_years"]
+    slope = [text.get_text() for text in axes[1].texts if text.get_gid() == "slope"]
+    assert len(slope) == 3
+    d_t = float(slope[0].split("= ")[1].split(" yr")[0])
+    d_ln = float(slope[1].split("= ")[1])
+    assert d_t == pytest.approx(1000.0 - result["verdict"]["lyapunov_onset_years"], abs=1.0)
+    assert d_t/d_ln == pytest.approx(tau, rel=0.01)
+    assert slope[2].endswith("= {:.0f} yr".format(tau))
 
     labels = axes[1].get_legend_handles_labels()[1]
     assert "Lyapunov time {:.0f} years".format(result["verdict"]["lyapunov_time_years"]) in labels
