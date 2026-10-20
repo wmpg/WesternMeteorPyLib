@@ -372,8 +372,11 @@ report lists every quarter with its time, and their spread is the range: quote t
 the central value. A quarter in which ln|δ| does not grow (it can shrink for a while between
 encounters) is listed as "no growth" and left out of the range. In the JSON the quarters are the
 verdict's `lyapunov_windows`: `start_years`, `end_years` and `lyapunov_time_years` (`null` where
-ln|δ| does not grow). No time is given if the growth phase covers fewer than 10 orbital periods (or a
-tenth of the run), since the fit is not reliable there.
+ln|δ| does not grow). The lower panel of `rebound_megno.png` draws ln|δ| with the growth phase, its
+fit and the fit of each quarter, labelled with its time. No time is given if the growth phase covers
+fewer than 10 orbital periods (or a tenth of the run), since the fit is not reliable there. The
+Lyapunov time is of the nominal orbit alone, in its Newtonian re-integration: for the clones, see
+the [Predictability horizon](#predictability-horizon).
 
 Measured on an orbit with its aphelion near Jupiter (a = 3.6 AU, e = 0.45), whose growth phase starts
 171 years back:
@@ -444,7 +447,8 @@ run is chaotic:
     <Y> at the end: 10.645   mean over the last quarter: 10.631
     span: 211 orbital periods
     Converges to 2: NO. <Y> does not converge to 2 and keeps growing: the orbit is chaotic.
-    Lyapunov time ~ 67 years: fitted to the growth of ln|delta| from 32 to 1000 years back,
+    Lyapunov time ~ 67 years, of the nominal orbit alone (for the clones, see the predictability
+    horizon). Fitted to the growth of ln|delta| from 32 to 1000 years back,
     i.e. since <Y> last exceeded 2.5.
     Encounter-driven chaos grows in steps, so the same fit in each quarter of that span gives:
         32-274 years back: 24 years

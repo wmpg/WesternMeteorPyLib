@@ -2446,6 +2446,95 @@ def _predictabilityReportLines(horizon, span_days):
     return lines
 
 
+def plotMegno(megno, file_path=None):
+    """ Figure of the MEGNO of the nominal orbit (see computeMegno and classifyMegno): <Y> against
+    time and, when the series has ln|delta|, the deviation itself with the fit of the Lyapunov time
+    over its growth phase and over each quarter of it (see lyapunovFromDeviation), each labelled with
+    its time, as the report lists them.
+
+    Arguments:
+        megno: [dict] MEGNO result with its verdict, as reboundSimulate stores it.
+
+    Keyword arguments:
+        file_path: [str] Where to save the figure, or None not to save it.
+
+    Return:
+        (fig, axes): the figure and its axes, one or two.
+    """
+
+    v = megno["verdict"]
+    times_days = np.array(megno["times_days"], dtype=float)
+
+    # MEGNO only gets a verdict after tens of orbital periods, so the span is always long enough that
+    #   days make an unreadable axis
+    t = times_days/365.25
+    sign = -1.0 if (len(t) and t[-1] < 0) else 1.0
+
+    ln_delta = megno.get("ln_delta")
+    with_deviation = (ln_delta is not None) and (len(ln_delta) == len(t))
+
+    if with_deviation:
+        fig, axes = plt.subplots(2, 1, figsize=(8, 7), sharex=True)
+    else:
+        fig, ax = plt.subplots(figsize=(8, 4.5))
+        axes = [ax]
+
+    ax = axes[0]
+    ax.plot(t, megno["megno"], lw=1.2, label="<Y> (MEGNO)")
+    ax.axhline(2.0, color="k", ls="--", lw=1, label="2 (regular orbit)")
+    ax.axhspan(2 - MEGNO_REGULAR_TOL, 2 + MEGNO_REGULAR_TOL, color="0.85", zorder=0)
+    ax.set_ylabel("<Y>")
+    ax.set_title("MEGNO of the nominal orbit (Newtonian gravity): {:s}".format(v["status"].replace("_", " ")))
+    ax.legend()
+
+    if with_deviation:
+        ax = axes[1]
+        l = np.array(ln_delta, dtype=float)
+        ax.plot(t, l, color="k", lw=1.0, label="ln|delta|")
+
+        if v.get("lyapunov_onset_years") is not None:
+            elapsed = np.abs(t)
+            onset = v["lyapunov_onset_years"]
+            ax.axvspan(sign*onset, t[-1], color="C1", alpha=0.08, lw=0, label="growth phase (fitted)")
+
+            def fitLine(lo, hi):
+                """ The straight fit of ln|delta| over elapsed times lo to hi, as (t, fitted). """
+                k = (elapsed >= lo - 1e-9) & (elapsed <= hi + 1e-9) & np.isfinite(l)
+                if k.sum() < 2:
+                    return None
+                coef = np.polyfit(elapsed[k], l[k], 1)
+                return t[k], np.polyval(coef, elapsed[k])
+
+            fitted = fitLine(onset, elapsed[-1])
+            if fitted is not None:
+                ax.plot(*fitted, color="C1", lw=1.6, label="Lyapunov time {:.0f} years".format(
+                    v["lyapunov_time_years"]))
+
+            # Each quarter with its own fit and time, or "no growth"
+            for k, w in enumerate(v.get("lyapunov_windows") or []):
+                fitted = fitLine(w["start_years"], w["end_years"])
+                if fitted is None:
+                    continue
+                tau_w = w["lyapunov_time_years"]
+                ax.plot(*fitted, color="C3", lw=1.0, ls="--", label="each quarter" if k == 0 else None)
+                ax.annotate("no growth" if tau_w is None else "{:.0f} yr".format(tau_w),
+                            (np.mean(fitted[0]), np.max(fitted[1])), textcoords="offset points",
+                            xytext=(0, 6), ha="center", fontsize=8, color="C3")
+                if k > 0:
+                    ax.axvline(sign*w["start_years"], color="C3", ls=":", lw=0.6)
+
+        ax.set_ylabel("ln|delta|")
+        ax.legend(fontsize=8)
+
+    axes[-1].set_xlabel("Time [years]")
+    fig.tight_layout()
+
+    if file_path is not None:
+        fig.savefig(file_path)
+
+    return fig, axes
+
+
 def _megnoReportLines(megno):
     """ Human-readable lines describing a MEGNO result from reboundSimulate(compute_megno=True). """
 
@@ -2486,9 +2575,11 @@ def _megnoReportLines(megno):
             # Times are counted from the start of the run, back from it in a backward run
             when = "back" if megno["times_days"][-1] < 0 else "after the start"
 
-            lines.append("  Lyapunov time ~ {:.0f} years: fitted to the growth of ln|delta| from {:.0f} to "
-                         "{:.0f} years {:s},".format(v["lyapunov_time_years"], v["lyapunov_onset_years"],
-                                                     abs(megno["times_days"][-1])/365.25, when))
+            # It describes the nominal orbit alone, in the re-integration above, and not the clones
+            lines.append("  Lyapunov time ~ {:.0f} years, of the nominal orbit alone (for the clones, see the "
+                         "predictability".format(v["lyapunov_time_years"]))
+            lines.append("  horizon). Fitted to the growth of ln|delta| from {:.0f} to {:.0f} years {:s},".format(
+                v["lyapunov_onset_years"], abs(megno["times_days"][-1])/365.25, when))
             lines.append("  i.e. since <Y> last exceeded {:.1f}.".format(MEGNO_CHAOTIC_MIN))
 
             # Each window of the growth phase with its own time, so that the range can be traced back
@@ -3861,22 +3952,7 @@ if __name__ == "__main__":
     megno_png_path = None
     if (megno is not None) and megno["times_days"]:
         megno_png_path = os.path.join(out_dir, "rebound_megno.png")
-        fig_m, ax_m = plt.subplots(figsize=(8, 4.5))
-
-        # MEGNO only gets a verdict after tens of orbital periods, so the span is always long
-        #   enough that days make an unreadable axis
-        megno_years = [t/365.25 for t in megno["times_days"]]
-
-        ax_m.plot(megno_years, megno["megno"], lw=1.2, label="<Y> (MEGNO)")
-        ax_m.axhline(2.0, color="k", ls="--", lw=1, label="2 (regular orbit)")
-        ax_m.axhspan(2 - MEGNO_REGULAR_TOL, 2 + MEGNO_REGULAR_TOL, color="0.85", zorder=0)
-        ax_m.set_xlabel("Time [years]")
-        ax_m.set_ylabel("<Y>")
-        ax_m.set_title("MEGNO of the nominal orbit (Newtonian gravity): {:s}".format(
-            megno["verdict"]["status"].replace("_", " ")))
-        ax_m.legend()
-        fig_m.tight_layout()
-        fig_m.savefig(megno_png_path)
+        plotMegno(megno, file_path=megno_png_path)
 
     # Report the saved outputs
     ### Machine-readable results, so downstream analysis does not have to parse the text report ###

@@ -139,3 +139,47 @@ def testReportSaysWhenThereAreTooFewOutputsForQuarters(reb):
     assert "Lyapunov time ~ 30 years" in text
     assert "Too few outputs in the growth phase" in text
     assert "Quote the range" not in text
+
+
+@pytest.fixture
+def agg():
+    import matplotlib
+    import matplotlib.pyplot as plt
+    matplotlib.use("Agg")
+    yield
+    plt.close("all")
+
+
+def testMegnoFigureShowsEachQuarter(reb, agg, tmp_path):
+    """ With ln|delta|, the figure has a second panel with the fit over the growth phase and one per
+    quarter, each labelled with its time or "no growth"; it is saved. """
+
+    t, ln_delta, megno = _steppedGrowth()
+    times_days = list(-t*365.25)
+    a = [1.0]*len(t)
+    result = {"times_days": times_days, "megno": list(megno), "ln_delta": list(ln_delta), "a_au": a,
+              "escaped": False,
+              "verdict": reb.classifyMegno(times_days, list(megno), a, ln_delta=list(ln_delta))}
+
+    fig, axes = reb.plotMegno(result, file_path=str(tmp_path/"megno.png"))
+    assert (tmp_path/"megno.png").exists()
+    assert len(axes) == 2
+
+    notes = {text.get_text() for text in axes[1].texts}
+    assert notes == {"20 yr", "50 yr", "100 yr", "no growth"}
+
+    labels = axes[1].get_legend_handles_labels()[1]
+    assert "Lyapunov time {:.0f} years".format(result["verdict"]["lyapunov_time_years"]) in labels
+    assert "each quarter" in labels
+
+
+def testMegnoFigureWithoutTheDeviationHasOnePanel(reb, agg):
+
+    t = np.linspace(0.5, 1000.0, 2000)
+    times_days = list(-t*365.25)
+    result = {"times_days": times_days, "megno": [2.0]*len(t), "a_au": [1.0]*len(t), "escaped": False,
+              "verdict": reb.classifyMegno(times_days, [2.0]*len(t), [1.0]*len(t))}
+
+    _, axes = reb.plotMegno(result)
+    assert len(axes) == 1
+    assert axes[0].get_title() == "MEGNO of the nominal orbit (Newtonian gravity): regular"
