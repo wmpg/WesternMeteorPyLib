@@ -12,10 +12,13 @@ Monte Carlo clones, and can optionally include radiation forces and measure how 
 - [What it reads](#what-it-reads)
 - [Command line reference](#command-line-reference)
 - [Choosing an integrator](#choosing-an-integrator)
+- [General relativity](#general-relativity)
 - [Radiation forces](#radiation-forces)
 - [Close encounters, impacts and ejections](#close-encounters-impacts-and-ejections)
 - [Monte Carlo clones](#monte-carlo-clones)
 - [Chaos: MEGNO](#chaos-megno)
+- [Predictability horizon](#predictability-horizon)
+- [MOID with the planets](#moid-with-the-planets)
 - [What it writes](#what-it-writes)
 - [Worked examples](#worked-examples)
 - [Using it as a library](#using-it-as-a-library)
@@ -57,6 +60,13 @@ python -c "import rebound, reboundx; s = rebound.Simulation(); reboundx.Extras(s
 
 **Both are needed.** `rebound` alone is not enough — the general relativity correction, the Earth's
 gravitational harmonics and the radiation forces all come from `reboundx`.
+
+**Use REBOUNDx ≥ 4.4.0.** The simulations run in the ecliptic J2000 frame, and the Earth's J2/J4 are
+made symmetric about its rotation pole of date (precessed from J2000, about 20″ per year) through the
+`Omega` spin-axis parameter that REBOUNDx added in 4.4.0, and so is the Sun's J2 about its IAU
+rotation pole. Older versions ignore it and make both symmetric about the ecliptic pole, 23.4° and
+7.25° off; the run then warns, and the report says so. The effect
+is a few m/s on the departure of a slow meteoroid (5.2 m/s for Winchcombe, at 14 km/s).
 
 **`--no-build-isolation` is not optional.** `reboundx` publishes no wheels, so `pip` always compiles
 it, by default against the newest `rebound` on PyPI rather than the one you installed. When the two
@@ -128,7 +138,12 @@ python -m wmpl.Rebound.REBOUND --help
 | `--beta BETA` | Include solar radiation pressure and Poynting–Robertson drag with this beta. Mutually exclusive with `--radius`/`--density`. |
 | `--radius METRES` | Object radius in metres. With `--density`, beta is computed from it. Purely gravitational if not given. |
 | `--density KG_M3` | Bulk density in kg/m³, used with `--radius`. Default: `3000`. |
+| `--gr {gr_full,gr}` | General relativity. `gr_full` (default) is the post-Newtonian interaction between all pairs of bodies (EIH); `gr` is the Sun's post-Newtonian correction on every body (Anderson et al. 1975), 3.3× faster with the same results to ~1e-7 in a. See [General relativity](#general-relativity). |
+| `--no_sun_j2` | Leave out the Sun's J2. It is on by default (DE430's J2 = 2.11e-7, reference radius 696 000 km, about the Sun's IAU rotation pole). It keeps Mercury within 1 km of DE430 over 100 years (13 km without it); on meteoroids it is tiny, 0.02″ on the perihelion of a q = 0.14 AU orbit in 400 years. |
 | `--compute_megno` | After the integration, measure the MEGNO chaos indicator of the nominal orbit. See [Chaos: MEGNO](#chaos-megno). |
+| `--no_moid` | Do not compute the MOID with the planets, which is on by default. See [MOID with the planets](#moid-with-the-planets). With `--replot`, leave it out of the figure. |
+| `--replot RESULTS_JSON` | Do not integrate: redraw the figure of an earlier run from its results file. The trajectory pickle is not needed. See [Redrawing the figure](#redrawing-the-figure). |
+| `--out FIGURE_PNG` | With `--replot`, where to save the figure. |
 | `--verbose` | Print the progress of the simulation. |
 
 `--beta` and `--radius` are mutually exclusive: give the beta directly, or give the size and density
@@ -196,9 +211,35 @@ in the warning for that reason. Measured on a δ-Aquariid-like orbit (a = 2.6 AU
 
 For an orbit with perihelion inside ~0.1 AU use IAS15, or TRACE with `--dt 0.1`.
 
-REBOUNDx will warn that the `gr_full` general relativity correction is velocity-dependent when used
-with WHFast. Its measured effect on the orbit was below 1e-8 in the semi-major axis over 100 years, so
+REBOUNDx will warn that the general relativity correction is velocity-dependent when used with
+WHFast. Its measured effect on the orbit was below 1e-8 in the semi-major axis over 100 years, so
 the warning can be ignored here.
+
+---
+
+## General relativity
+
+By default (`--gr gr_full`) general relativity is the full post-Newtonian interaction between every
+pair of bodies (REBOUNDx `gr_full`, the EIH equations used by the JPL ephemerides), whose cost grows
+as the cube of the number of bodies and is most of the run time. `--gr gr` uses instead the
+post-Newtonian correction of the Sun's field, applied to every body (REBOUNDx `gr`, Anderson et al.
+1975). It gets the perihelion precessions and the mean motions right and ignores terms smaller by the
+planet-to-Sun mass ratio.
+
+Measured with the Sun's and the Earth's harmonics on, `gr` against `gr_full`:
+
+| | `gr` against `gr_full` | For scale: 1 m/s on the initial velocity |
+| :--- | ---: | ---: |
+| Example trajectory, 100 years back | 2 000 km, Δa = 6e-7 AU | 4 million km |
+| Phaethon-like orbit (q = 0.14 AU), 400 years | 0.1″ of the 40.6″ GR perihelion shift (0.26 %) | |
+| Winchcombe, 200 clones of 1 m/s, 100 years | same distributions of a, e, i (KS p = 1.00) | |
+| Planets against DE430, 100 years | Earth 9.3 instead of 4.5 km, Mercury 1.5 instead of 0.6 km | |
+| Run time | 3.2–3.6× faster (200 clones, 100 yr, 7 cores: 50 s instead of 164 s) | |
+
+The planets follow DE430 slightly better with `gr_full`, since DE430 was integrated with the EIH
+equations, and it is the model REBOUND.py has always used. `--gr gr` gives the same meteoroid orbits
+well inside their measurement uncertainty, so use it to speed up large Monte Carlo runs or long
+integrations.
 
 ---
 
@@ -264,8 +305,7 @@ and then refined *within* the step. Both steps matter:
 - **Ejections** are recorded if the object leaves the simulation volume (1000 AU by default), after
   which it stops being integrated.
 
-On the plot, every passage is marked with a red star, but only the deepest one per body is labelled
-with the body's name, so a long run against a repeatedly-met planet stays readable.
+On the plot every encounter is a disc drawn as the body it passed (see [The figure](#the-figure)).
 
 The first close encounter going backwards is almost always the Earth itself — that is the meteoroid
 arriving. What matters is what came before it.
@@ -319,11 +359,31 @@ The verdict is based on the final ⟨Y⟩ and its mean over the last quarter of 
 | Verdict | Meaning |
 | :--- | :--- |
 | `regular` | Both within 0.1 of 2. Quasi-periodic motion over the integrated span. |
-| `chaotic` | Both above 2.5. A Lyapunov time is estimated from the slope over the second half of the run. |
-| `periodic` | Both below 1. The deviation stays bounded, e.g. libration in a mean-motion resonance. Regular, but not converging to 2. |
+| `chaotic` | Both above 2.5. A Lyapunov time is fitted to the growth of the deviation (see below). |
+| `periodic` | Both below 1. The deviation stayed bounded over the span, e.g. libration in a mean-motion resonance. An Earth-crossing orbit can also do this for a while before its first deep encounter, so this describes the nominal orbit over the span, not the clones (see [Predictability horizon](#predictability-horizon)). |
 | `not_converged` | Anything else. Integrate for longer to decide. |
 | `too_short` | The run covers fewer than 20 orbital periods. No verdict; the report says how long the run would need to be. |
 | `unbound` | The orbit is hyperbolic, so MEGNO — which describes bounded motion — does not apply. |
+
+**Lyapunov time.** It is fitted to ln|δ|, the logarithm of the deviation, which grows as λ·t on a
+chaotic orbit, rather than to ⟨Y⟩, a double running average that lags the growth. The fit starts
+when ⟨Y⟩ rises above 2.5 for the last time: before that the deviation can stay flat or even shrink for
+a long time, e.g. on an Earth-crossing orbit until its first deep encounter, and including it biases
+the time high. Chaos driven by close encounters grows in steps, so the time is also fitted in four
+windows of the growth phase, and the report gives their spread as a range: quote the range, not only
+the central value. No time is given if the growth phase covers fewer than 10 orbital periods (or a
+tenth of the run), since the fit is not reliable there.
+
+Measured on an orbit with its aphelion near Jupiter (a = 3.6 AU, e = 0.45):
+
+| Span | This fit (range) | ⟨Y⟩ over the second half (before) |
+| ---: | ---: | ---: |
+| 200 years | not given (4 periods of growth) | 17 years |
+| 400 years | 54 years (19–74) | 34 years |
+| 1000 years | 66 years (42–174) | 71 years |
+
+The deviation is rescaled to unit length at the outputs once it is large, so that it never overflows;
+the variational equations are linear, so this changes nothing (measured to 2e-12 in ln|δ|).
 
 **MEGNO needs tens of orbital periods to settle**, so set `--days` accordingly. For an orbit with
 a = 3 AU (a period of about 5.2 years) that is at least 100 years, i.e. `--days 36525`. A run that is
@@ -339,6 +399,93 @@ next to a full run with the Monte Carlo clones. It is skipped, with a warning, i
 
 ---
 
+## Predictability horizon
+
+With Monte Carlo clones, the report gives how long the integration keeps the memory of the measured
+initial conditions. The clones are drawn from the measurement uncertainty, and while the dynamics is
+predictable a clone that starts with a larger semi-major axis than another keeps it. The horizon is
+the last time the rank correlation (Spearman) of the clones' a, e and i with their values just after
+the departure from the Earth is still at least 0.5; the earliest of the three is the horizon of the
+run. Close encounters scramble that order, so the report also gives when the clones had their first
+close encounter (Sun passages left out).
+
+Beyond the horizon the individual trajectory is no longer set by the measurement: the nominal orbit
+means nothing on its own, and only the distribution of the clones does. The integration still makes
+sense statistically: the distribution of a, e, i and of the longitude of perihelion can stay narrow
+and informative for much longer than the horizon.
+
+This is a property of the whole ensemble, which the MEGNO of the nominal orbit is not: a planet-crossing
+nominal orbit becomes chaotic only after its own first deep encounter, which can come centuries after
+most clones have had theirs. It needs no extra integration and takes a few seconds even with 1000
+clones and 7000 outputs.
+
+A short run, like the default 60 days, reports that the horizon was not reached: the clones keep the
+order of their start over the whole span.
+
+For example, Winchcombe integrated 1000 years back with 200 clones (from a covariance of 100 m and
+1 m/s per axis):
+
+```
+  Predictability horizon (from 200 Monte Carlo clones):
+    The clones keep the order of their initial a, e, i (rank correlation >= 0.5) for:
+      a 138 years; e 30 years; i 30 years
+    Beyond ~30 years the individual trajectory is no longer set by the measurement: use the
+    distribution of the clones, not the nominal orbit.
+    First close encounter of the clones: 100% had one; median 30 years (5-95%: 25 years to 43 years).
+```
+
+The memory is lost exactly when the clones meet the Earth. The MEGNO of the nominal orbit of the same
+run is chaotic, with a Lyapunov time of ~67 years (range 24–104 over four windows).
+
+---
+
+## MOID with the planets
+
+The minimum orbit intersection distance (MOID) is the smallest distance between two orbits taken as
+fixed curves in space, wherever the bodies are on them. No passage can come closer than the MOID, and
+a passage near it happens whenever the two bodies arrive at the right place together. The distance of a
+single passage depends on that phasing, which is the chaotic part of the problem; the MOID depends only
+on the orbital elements, which evolve slowly. It is therefore the quantity to read beyond the
+predictability horizon: whether, and with which planets, close encounters are possible at all.
+
+The MOID with each planet (Mercury to Neptune; the Moon orbits the Earth, whose MOID stands for both)
+is computed at every output, for the nominal solution and every clone, from the heliocentric
+osculating orbits of the object and of the planets in the simulation itself, so it needs no ephemeris
+and works beyond the DE430 range. It runs inside each worker after its integration, at ~40
+microseconds per output and planet, ~1 s per orbit with 3000 outputs: measured 4% of a 300-year run
+with 24 clones (85 s of clone integration against 84 s without it), and less for longer spans with
+the same number of outputs, since its cost grows with the outputs and not with the span. The series are
+kept as float arrays, 450 MB for 1000 clones with 7000 outputs, against ~1.8 GB as lists. `--no_moid`
+turns it off.
+
+The calculation is `calcMOID` in `wmpl.Utils.MOID`, vectorised over any number of orbit pairs and usable
+on its own:
+
+```python
+from wmpl.Utils.MOID import calcMOID
+moid = calcMOID(a1, e1, i1, node1, peri1, a2, e2, i2, node2, peri2)   # angles in radians
+```
+
+It samples the first orbit, finds the closest point of the second ellipse to each sample, and refines
+the deepest local minima with Newton's method on both eccentric anomalies, each also started from its
+neighbouring samples. Against a dense grid refined with a tight minimiser it agrees to ~1e-15 AU on
+600 meteoroid-like orbits, including Earth-crossing orbits inclined by less than 2 deg, the hard case:
+there the minima are narrow, and near tangency two of them can fall within one sampling step (without
+the neighbouring starts, one orbit with q = 0.992 AU and i = 0.06 deg came out at 0.0008 AU instead of
+0.0003 AU). It returns NaN for hyperbolic orbits; `calcMOIDFromPerihelion(q1, e1, ..., q2, e2, ...)`
+takes perihelion distances instead and handles a parabolic or hyperbolic orbit against an elliptical one
+(a meteoroid against a long-period comet), validated the same way. It is also the `calcMOID` of
+`wmpl.Utils.OrbitClassification`, which used Powell's method from four starting points (Tancredi 2014)
+before; that version is kept as `calcMOIDTancredi` in the same module, for comparison: it is ~700 times
+slower and, for two eccentric orbits, can stop at a local minimum.
+
+The report lists, per planet the object comes within 100 Hill radii of, the nominal's smallest MOID
+after the departure from the Earth and when, and what fraction of the clones is within the encounter
+threshold at the end of the run. The JSON keeps the nominal's MOID at every output and the clones'
+percentiles; the figure draws both (see [The figure](#the-figure)).
+
+---
+
 ## What it writes
 
 All output goes into the directory containing the input pickle, under **fixed names**. Two runs on
@@ -348,9 +495,72 @@ options.
 | File | Contents |
 | :--- | :--- |
 | `rebound_simulation_results.txt` | The human-readable report: run settings, the integrator that actually ran, final elements with confidence intervals, close encounters, impacts, clone outcomes, energy drift, divergence, and the MEGNO verdict. |
-| `rebound_simulation.png` | A 3×3 panel figure of the element evolution for the nominal solution and the clones. |
+| `rebound_simulation.png` | The evolution of the orbit, 3×3 panels: a, e, q; i, node, argument of perihelion; longitude of perihelion, the close approaches to every body in Hill radii (log scale), and the predictability horizon (the heliocentric distance without clones). See [The figure](#the-figure). |
 | `rebound_megno.png` | Only with `--compute_megno`: the evolution of ⟨Y⟩ against time in years, with the ⟨Y⟩ = 2 line marked. |
 | `rebound_simulation_results.json` | The same results in machine-readable form, so downstream analysis does not have to parse the text. |
+
+### The figure
+
+- **Clones as bands.** With 20 clones or more, they are drawn as their 2.5–97.5% and 16–84% bands and
+  median at each time, with 10 of them drawn individually to show how single trajectories behave; with
+  fewer, every clone is drawn. The nominal solution is the black line. Clones that ended early (e.g.
+  impacted) count only over their own span.
+- **Angles without wraps.** The node, the argument of perihelion and the longitude of perihelion are
+  unwrapped along the nominal solution, and each clone is drawn as its difference from it, so crossing
+  0/360° draws no vertical lines. For a nearly ecliptic orbit the node and the argument of perihelion
+  are poorly defined, and the longitude of perihelion ϖ = Ω + ω is the angle to read.
+- **From the departure.** The elements before the object leaves 3 Earth Hill radii (dotted vertical
+  line) carry the Earth's pull and are not drawn, and the vertical axes are scaled to the rest of the
+  run, so they cover the clones as well as the nominal solution.
+- **Time** in years for spans of two years or more, in days otherwise. The predictability horizon is
+  the dashed red vertical line on every panel, and its time is given in the legend.
+- **Close approaches in Hill radii.** The bottom middle panel gives every distance in units of the
+  Hill radius of the body, so that one dotted line is the encounter threshold (3 Hill radii by default)
+  for all of them, and a Jupiter encounter at 0.9 AU (2.5 Hill radii) reads as deep as an Earth one at
+  0.025 AU. It shows:
+  - the nominal's **encounters** as discs drawn as their bodies: the body's colour (yellow Sun, blue
+    Earth, grey Moon, red Mars, burnt orange Jupiter, ...) with a thin black outline, sized as
+    radius^0.25 so the order of the real sizes is kept without Jupiter covering the panel (Jupiter 1.8
+    times the Earth, the Moon 0.72 times), the smaller bodies on top;
+  - the **clones' encounters** as faint dots, which show when and with which planets the ensemble meets,
+    as opposed to the single nominal history;
+  - the **MOID** with each planet the object comes within 100 Hill radii of, the nominal's as a line in
+    the planet's colour, and the clones' 1σ band (16–84%) around it. For a planet the clones never come
+    near, their MOID spreads little and the band can be as thin as the line: for Winchcombe, 1000 years
+    back with 200 clones, it is 0.14 dex wide for Venus and under 0.01 dex for Saturn, Uranus and
+    Neptune, against 1 dex for the Earth (see [MOID with the planets](#moid-with-the-planets));
+  - for a body with none of these, its **closest approach** of the run as a ring ("never closer": the
+    object never came closer to that body), if it is within 100 Hill radii; further out the body never
+    mattered.
+
+  The Sun has no Hill sphere: its distance is scaled so that its 0.1 AU gate falls on the same line.
+  In runs shorter than two years the distance to the Earth at the outputs is drawn too, as it shows the
+  departure; in longer ones the output sampling misses the approaches, which the encounters give
+  exactly. The palette and the sizes live in `wmpl.Utils.PlanetStyle` and are shared with the solver's
+  `_orbit_top`/`_orbit_side` plots, where the outline is black on the light background and white on
+  the dark one.
+
+#### Redrawing the figure
+
+The figure can be redrawn from the results file of a run, without integrating again, which is useful to try
+the figure with other options, or to keep two versions of it:
+
+```
+python -m wmpl.Rebound.REBOUND --replot rebound_simulation_results.json              # the figure of the run
+python -m wmpl.Rebound.REBOUND --replot rebound_simulation_results.json --no_moid    # without the MOID
+python -m wmpl.Rebound.REBOUND --replot rebound_simulation_results.json --out my_figure.png
+```
+
+- **Where it is saved.** Next to the results file, as `rebound_simulation.png`, or as
+  `rebound_simulation_no_moid.png` with `--no_moid`, or where `--out` says. The report and the JSON are left as
+  they are.
+- **`--no_moid`** leaves the MOID out of the figure even if the file has it, and the planets it covered get
+  their "never closer" ring again, as in a run with `--no_moid`. A file from a run before the MOID was
+  computed is drawn without it either way.
+- **Cost.** It reads the whole file: ~20 s and ~12 GB of memory for a 3 GB file (1000 clones with 7000
+  outputs), then 15–30 s to draw.
+- **From Python,** `replotReboundFromResults(results, file_path=None, use_moid=True)` takes the dictionary
+  `json.load` returns and gives back `(fig, axes)`.
 
 The JSON keys, at the top level:
 
@@ -368,7 +578,9 @@ The JSON keys, at the top level:
 | `energy_rel_drift` | Relative energy drift of the massive subsystem, as an integrator-quality check. |
 | `divergence` | The exponential and linear fits to the clone spread, with `r2_exponential` and `r2_linear`. |
 | `whfast_encounter_warning` | The WHFast close-encounter warning string, or `null`. |
-| `megno` | With `--compute_megno`: `times_days`, `megno`, `a_au`, `escaped` and the `verdict` dict. `null` otherwise. |
+| `megno` | With `--compute_megno`: `times_days`, `megno`, `ln_delta` (logarithm of the deviation), `a_au`, `departure_days`, `escaped` and the `verdict` dict, with `lyapunov_time_years`, `lyapunov_time_range_years`, `lyapunov_onset_years` and `lyapunov_method`. `null` otherwise. |
+| `moid` | Unless `--no_moid`: `bodies`, `nominal_au` (per body, the nominal's MOID in AU at every output, `null` where the orbit is not elliptical), `percentiles` and `clones_au` (per body, the clones' MOID at those percentiles at every output; `null` without clones), and `n_clones`. |
+| `predictability` | With clones: `n_clones`, `threshold`, `reference_days`, `horizon_days` (`null` if not reached), per element (`a`, `e`, `i`) its `horizon_days` and `rank_corr_end`, the series `time_days` and `rank_corr`, and `first_encounter_days` (`fraction` and percentiles `p05`–`p95`). `null` with fewer than 10 clones over the whole span. |
 | `nominal`, `monte_carlo` | Full element series: `time_days`, `a_au`, `e`, `incl_deg`, `peri_deg`, `node_deg`, `f_deg`, `body_distances_au`. |
 
 A quick sanity check on any run is `energy_rel_drift`. It measures the massive subsystem the object
@@ -504,6 +716,13 @@ print(diagnostics[traj.traj_id]["megno"]["verdict"]["status"])
 `compute_megno=True` needs `return_diagnostics=True`, since the diagnostics are the only place the
 result is returned.
 
+**Units.** Each output row is `[t, state_vect_hel, orbit, planet_dists]`, in REBOUND's units: G = 1,
+lengths in AU, masses in solar masses, so the time unit is sqrt(AU³/GM☉) = 58.13244 days
+(`DAYS_PER_SIM_TIME`; REBOUND calls it `yr2pi`, a Gaussian year over 2π). Convert times with
+`simTimeToDays(t)` and `daysToSimTime(days)`. Do not use 365.25/(2π): the Julian year is 1.9e-5
+shorter, which before this was fixed made the Sun 3.8e-5 too massive and moved the Earth ~700 000 km
+off the ephemeris in 10 years.
+
 Other functions worth knowing about, all in `wmpl.Rebound.REBOUND`:
 
 | Function | Purpose |
@@ -518,6 +737,7 @@ Other functions worth knowing about, all in `wmpl.Rebound.REBOUND`:
 | `estimateLyapunovFromMC(sim_outputs, sim_outputs_mc)` | The divergence fit over the clone ensemble. |
 | `checkIntegratorAvailable(integrator)` | Raises if the installed REBOUND does not have it. |
 | `findEarthDepartureIndex(sim_outputs, n_hill=3.0)` | First output at which the object left the Earth's neighbourhood. |
+| `moidSummary(nominal_diag, clone_diag)` | The nominal's MOID with each planet at every output and the clones' percentiles, from the `moid_au` diagnostics. |
 
 ---
 
@@ -535,6 +755,9 @@ Use WSL2. Installing only `rebound` is not enough.
 
 **`The installed REBOUND (4.3.0) does not provide the TRACE integrator.`** TRACE was added in REBOUND
 4.4.0. Upgrade, or use `--integrator ias15`.
+
+**`REBOUNDx ... cannot orient the Earth's J2/J4 and the Sun's J2 along their rotation axes`.** REBOUNDx is older than
+4.4.0. Upgrade it with the `--force-reinstall` command in [Requirements](#requirements).
 
 **`--dt must be positive.`** A zero or negative step would silently collapse to a single step per
 output interval, so it is refused rather than accepted.

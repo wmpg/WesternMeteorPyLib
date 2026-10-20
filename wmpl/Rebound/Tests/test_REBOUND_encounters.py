@@ -17,7 +17,9 @@ import pytest
 REBOUND_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "REBOUND.py")
 
 AU_KM = 149597870.7
-DAY = 2*np.pi/365.25                   # REBOUND time units (G = 1, AU, M_sun) per day
+# REBOUND time units (G = 1, AU, M_sun) per day: the time unit is sqrt(AU^3/GM_Sun), as
+#   DAYS_PER_SIM_TIME in REBOUND.py
+DAY = 1.0/(np.sqrt(149597870700.0**3/1.3271244004193938e20)/86400.0)
 KM_S = (86400.0/DAY)/AU_KM             # REBOUND velocity units per km/s
 
 
