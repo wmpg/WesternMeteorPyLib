@@ -366,18 +366,23 @@ The verdict is based on the final ⟨Y⟩ and its mean over the last quarter of 
 chaotic orbit, rather than to ⟨Y⟩, a double running average that lags the growth. The fit starts
 when ⟨Y⟩ rises above 2.5 for the last time: before that the deviation can stay flat or even shrink for
 a long time, e.g. on an Earth-crossing orbit until its first deep encounter, and including it biases
-the time high. Chaos driven by close encounters grows in steps, so the time is also fitted in four
-windows of the growth phase, and the report gives their spread as a range: quote the range, not only
-the central value. No time is given if the growth phase covers fewer than 10 orbital periods (or a
+the time high. Chaos driven by close encounters grows in steps, so the growth phase is also split
+into four consecutive windows of equal length, its quarters, and each is fitted on its own. The
+report lists every quarter with its time, and their spread is the range: quote the range, not only
+the central value. A quarter in which ln|δ| does not grow (it can shrink for a while between
+encounters) is listed as "no growth" and left out of the range. In the JSON the quarters are the
+verdict's `lyapunov_windows`: `start_years`, `end_years` and `lyapunov_time_years` (`null` where
+ln|δ| does not grow). No time is given if the growth phase covers fewer than 10 orbital periods (or a
 tenth of the run), since the fit is not reliable there.
 
-Measured on an orbit with its aphelion near Jupiter (a = 3.6 AU, e = 0.45):
+Measured on an orbit with its aphelion near Jupiter (a = 3.6 AU, e = 0.45), whose growth phase starts
+171 years back:
 
-| Span | This fit (range) | ⟨Y⟩ over the second half (before) |
-| ---: | ---: | ---: |
-| 200 years | not given (4 periods of growth) | 17 years |
-| 400 years | 54 years (19–74) | 34 years |
-| 1000 years | 66 years (42–174) | 71 years |
+| Span | This fit (range) | Each quarter, from the start of the growth phase | ⟨Y⟩ over the second half (before) |
+| ---: | ---: | :--- | ---: |
+| 200 years | not given (4 periods of growth) | | 17 years |
+| 400 years | 54 years (19–74) | no growth, 19, 74, no growth | 34 years |
+| 1000 years | 66 years (42–174) | 44, 42, 125, 174 | 71 years |
 
 The deviation is rescaled to unit length at the outputs once it is large, so that it never overflows;
 the variational equations are linear, so this changes nothing (measured to 2e-12 in ln|δ|).
@@ -432,7 +437,25 @@ For example, Winchcombe integrated 1000 years back with 200 clones (from a covar
 ```
 
 The memory is lost exactly when the clones meet the Earth. The MEGNO of the nominal orbit of the same
-run is chaotic, with a Lyapunov time of ~67 years (range 24–104 over four windows).
+run is chaotic:
+
+```
+  MEGNO of the nominal orbit (Newtonian gravity only, IAS15):
+    <Y> at the end: 10.645   mean over the last quarter: 10.631
+    span: 211 orbital periods
+    Converges to 2: NO. <Y> does not converge to 2 and keeps growing: the orbit is chaotic.
+    Lyapunov time ~ 67 years: fitted to the growth of ln|delta| from 32 to 1000 years back,
+    i.e. since <Y> last exceeded 2.5.
+    Encounter-driven chaos grows in steps, so the same fit in each quarter of that span gives:
+        32-274 years back: 24 years
+       274-516 years back: 104 years
+       516-758 years back: 48 years
+      758-1000 years back: no growth (left out of the range)
+    Quote the range, 24-104 years, rather than the single value.
+```
+
+Most of the growth comes in the first quarter, which holds the nominal orbit's deepest encounter with
+the Earth (0.13 Hill radii, 43 years back); over the last quarter its deviation even shrinks.
 
 ---
 
@@ -539,9 +562,14 @@ report ends with a MEGNO block:
     <Y> at the end: 0.512   mean over the last quarter: 0.498
     span: 91.2 orbital periods
     Converges to 2: NO (tends to 0). <Y> tends to 0 rather than 2: the deviation from the orbit
-    stays bounded, the signature of a stable periodic orbit (e.g. libration in a mean-motion
-    resonance). Regular, not chaotic.
+    stayed bounded over this span, as around a stable periodic orbit (e.g. libration in a
+    mean-motion resonance). An Earth-crossing orbit can also do this for a while before its first
+    deep encounter: this is about the nominal orbit over this span, not the clones (see the
+    predictability horizon).
 ```
+
+A chaotic orbit also gets a Lyapunov time, with the time fitted in each quarter of its growth phase
+(see [Predictability horizon](#predictability-horizon) for an example).
 
 If it says `too_short`, the message tells you how many years the run needs.
 

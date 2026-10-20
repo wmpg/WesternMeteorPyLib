@@ -2216,8 +2216,10 @@ def lyapunovFromDeviation(t_years, ln_delta, megno, period_years):
     exponential growth sets in: before it, the deviation can stay flat or even shrink for centuries
     (e.g. on an Earth-crossing orbit until its first deep encounter), and including that biases the
     time high. ln|delta| is fitted directly, rather than <Y>, which is a double running average and
-    lags the growth. Chaos driven by close encounters grows in steps, so the time is also fitted in
-    four windows of the growth phase, whose spread is returned as the range.
+    lags the growth. Chaos driven by close encounters grows in steps, so the growth phase is also
+    split into four consecutive windows of equal length (its quarters), each fitted on its own. The
+    spread of their times is returned as the range. A window in which ln|delta| does not grow (it can
+    shrink for a while between encounters) has no time and is left out of the range.
 
     Arguments:
         t_years: [ndarray] Elapsed time of each output in years (positive).
@@ -2229,8 +2231,12 @@ def lyapunovFromDeviation(t_years, ln_delta, megno, period_years):
         [dict] or None if there is no growth phase to fit (shorter than a tenth of the run or than
         LYAPUNOV_MIN_ORBITS periods, or not growing): {
             "lyapunov_time_years": 1/lambda over the growth phase,
-            "lyapunov_time_range_years": [min, max] over the windows (None if too few points),
+            "lyapunov_time_range_years": [min, max] over the windows that grow (None if none does,
+                or if there are too few points for windows),
             "onset_years": start of the growth phase,
+            "windows": [list] one dict per window, {"start_years", "end_years",
+                "lyapunov_time_years" (None if ln|delta| does not grow in it)}, or None if there are
+                too few points (fewer than 40) for windows,
         }
     """
 
@@ -2249,16 +2255,20 @@ def lyapunovFromDeviation(t_years, ln_delta, megno, period_years):
     if slope <= 0:
         return None
 
-    taus = []
+    # The outputs are evenly spaced, so equal numbers of points make windows of equal length
+    windows = []
     if len(t) >= 40:
         for w in np.array_split(np.arange(len(t)), 4):
             s_w = np.polyfit(t[w], l[w], 1)[0]
-            if s_w > 0:
-                taus.append(1.0/s_w)
+            windows.append({"start_years": float(t[w[0]]), "end_years": float(t[w[-1]]),
+                            "lyapunov_time_years": float(1.0/s_w) if s_w > 0 else None})
+
+    taus = [w["lyapunov_time_years"] for w in windows if w["lyapunov_time_years"] is not None]
 
     return {"lyapunov_time_years": float(1.0/slope),
             "lyapunov_time_range_years": [float(min(taus)), float(max(taus))] if taus else None,
-            "onset_years": float(t[0])}
+            "onset_years": float(t[0]),
+            "windows": windows if windows else None}
 
 
 def classifyMegno(times_days, megno, a_au, ln_delta=None):
@@ -2292,6 +2302,8 @@ def classifyMegno(times_days, megno, a_au, ln_delta=None):
             "lyapunov_time_years": for a chaotic orbit, 1/lambda (see ln_delta); otherwise None,
             "lyapunov_time_range_years": [min, max] of the time over windows of the growth phase,
                                or None,
+            "lyapunov_windows": the windows of the growth phase and the time fitted in each (see
+                               lyapunovFromDeviation), or None,
             "lyapunov_onset_years": start of the fitted growth phase, or None,
             "lyapunov_method":  "ln_delta" or "megno_second_half", or None,
             "message":       one-line explanation,
@@ -2308,7 +2320,7 @@ def classifyMegno(times_days, megno, a_au, ln_delta=None):
     result = {"status": None, "final": float(y[-1]) if len(y) else None,
               "last_quarter": float(np.mean(y[3*len(y)//4:])) if len(y) else None,
               "n_orbits": None, "lyapunov_time_years": None, "lyapunov_time_range_years": None,
-              "lyapunov_onset_years": None, "lyapunov_method": None}
+              "lyapunov_windows": None, "lyapunov_onset_years": None, "lyapunov_method": None}
 
     # Not enough points for the last quarter to mean anything (or no points at all)
     if len(y) < 8:
@@ -2355,6 +2367,7 @@ def classifyMegno(times_days, megno, a_au, ln_delta=None):
             if fit is not None:
                 result.update(lyapunov_time_years=fit["lyapunov_time_years"],
                               lyapunov_time_range_years=fit["lyapunov_time_range_years"],
+                              lyapunov_windows=fit["windows"],
                               lyapunov_onset_years=fit["onset_years"])
 
         # Otherwise from <Y> ~ (lambda/2) t over the second half
@@ -2469,12 +2482,35 @@ def _megnoReportLines(megno):
     # Only set for a chaotic orbit with a positive fitted slope
     if v["lyapunov_time_years"] is not None:
         if v.get("lyapunov_method") == "ln_delta":
-            rng = v.get("lyapunov_time_range_years")
-            lines.append("  Lyapunov time ~ {:.0f} years{:s}.".format(v["lyapunov_time_years"],
-                         "" if rng is None else " (range {:.0f}-{:.0f} over four windows)".format(*rng)))
-            lines.append("  Fitted to the growth of ln|delta| since <Y> last exceeded {:.1f}, {:s} back.".format(
-                MEGNO_CHAOTIC_MIN, _spanText(365.25*v["lyapunov_onset_years"])))
-            lines.append("  Encounter-driven chaos grows in steps, so quote the range.")
+
+            # Times are counted from the start of the run, back from it in a backward run
+            when = "back" if megno["times_days"][-1] < 0 else "after the start"
+
+            lines.append("  Lyapunov time ~ {:.0f} years: fitted to the growth of ln|delta| from {:.0f} to "
+                         "{:.0f} years {:s},".format(v["lyapunov_time_years"], v["lyapunov_onset_years"],
+                                                     abs(megno["times_days"][-1])/365.25, when))
+            lines.append("  i.e. since <Y> last exceeded {:.1f}.".format(MEGNO_CHAOTIC_MIN))
+
+            # Each window of the growth phase with its own time, so that the range can be traced back
+            windows = v.get("lyapunov_windows")
+            if windows:
+                lines.append("  Encounter-driven chaos grows in steps, so the same fit in each quarter of "
+                             "that span gives:")
+                spans = ["{:.0f}-{:.0f} years {:s}".format(w["start_years"], w["end_years"], when)
+                         for w in windows]
+                width = max(len(s) for s in spans)
+                for s, w in zip(spans, windows):
+                    lines.append("    {:>{:d}s}: {:s}".format(s, width,
+                                 "no growth (left out of the range)" if w["lyapunov_time_years"] is None
+                                 else "{:.0f} years".format(w["lyapunov_time_years"])))
+
+                rng = v.get("lyapunov_time_range_years")
+                if rng is not None:
+                    lines.append("  Quote the range, {:.0f}-{:.0f} years, rather than the single value.".format(
+                        *rng))
+            else:
+                lines.append("  Too few outputs in the growth phase to also fit it by quarters, so no range "
+                             "is given.")
         else:
             lines.append("  Lyapunov time ~ {:.0f} years (from <Y> ~ (lambda/2) t over the second "
                          "half).".format(v["lyapunov_time_years"]))
