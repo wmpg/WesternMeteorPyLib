@@ -987,6 +987,427 @@ def predictabilityHorizon(sim_outputs, sim_outputs_mc, clone_diag=None, n_hill=3
             "rank_corr": series, "first_encounter_days": first_encounter}
 
 
+def orbitVectors(a, e, inc, Omega, omega):
+    """ The angular momentum and eccentricity vectors of orbits (the Milankovitch elements), six numbers
+    per orbit: sqrt(p) times the unit normal of the orbital plane, with p = a(1 - e^2) the semi-latus
+    rectum (the angular momentum is sqrt(GM p)), and e times the unit vector towards the perihelion, in
+    the frame of the elements. They fix the size, the shape and the orientation of the orbit, but not
+    where the body is on it. Unlike the angles they do not wrap at 360 deg, and they stay defined where
+    the node or the perihelion is not (i = 0, e = 0) and for hyperbolic orbits.
+
+    Arguments:
+        a, e, inc, Omega, omega: [float or ndarray] The elements, the angles in radians, of any shapes
+            that broadcast together.
+
+    Return:
+        [ndarray] Shape (..., 6): the angular momentum vector, then the eccentricity vector.
+    """
+
+    a, e, inc, Omega, omega = np.broadcast_arrays(*(np.asarray(x, dtype=float)
+                                                    for x in (a, e, inc, Omega, omega)))
+
+    h = np.sqrt(a*(1 - e**2))[..., None]*np.stack(
+        [np.sin(inc)*np.sin(Omega), -np.sin(inc)*np.cos(Omega), np.cos(inc)], axis=-1)
+    to_peri = np.stack([np.cos(omega)*np.cos(Omega) - np.sin(omega)*np.sin(Omega)*np.cos(inc),
+                        np.cos(omega)*np.sin(Omega) + np.sin(omega)*np.cos(Omega)*np.cos(inc),
+                        np.sin(omega)*np.sin(inc)], axis=-1)
+
+    return np.concatenate([h, e[..., None]*to_peri], axis=-1)
+
+
+def _spreadUnits(vectors):
+    """ The transform that measures orbit vectors (see orbitVectors) in units of the clones' own spread.
+
+    The clones' vectors are taken from their mean, and the direction normal to the surface h.e = 0, on
+    which every orbit lies, is left out: along it the clones spread only through the curvature of the
+    surface, so scaling it to unit spread would blow up a difference of second order. Each principal
+    axis of the covariance of the other five directions is then scaled by its standard deviation, so
+    that the clones have a unit covariance: a distance is a Mahalanobis distance.
+
+    Arguments:
+        vectors: [ndarray] Shape (n, 6), the orbit vectors of the clones.
+
+    Return:
+        (centre, matrix): z = (x - centre) @ matrix are the coordinates of the orbit vectors x, or None if
+            the clones do not spread.
+    """
+
+    centre = vectors.mean(axis=0)
+    normal = np.concatenate([centre[3:], centre[:3]])
+    normal /= np.linalg.norm(normal)
+    basis = np.linalg.svd(np.eye(6) - np.outer(normal, normal))[0][:, :5]
+
+    var, axes = np.linalg.eigh(np.atleast_2d(np.cov(((vectors - centre) @ basis).T)))
+    if not var.max() > 0:
+        return None
+    keep = var > var.max()*1e-14
+
+    return centre, basis @ (axes[:, keep]/np.sqrt(var[keep]))
+
+
+def _distanceSums(z, z_clones, block=1000):
+    """ For each row of z, the sum of its distances to the rows of z_clones, in blocks of rows so that
+    a few thousand clones need little memory. """
+
+    norms = (z_clones**2).sum(axis=1)
+    sums = np.empty(len(z))
+    for s in range(0, len(z), block):
+        zz = z[s:s + block]
+        d2 = (zz**2).sum(axis=1)[:, None] + norms[None, :] - 2*zz @ z_clones.T
+        sums[s:s + block] = np.sqrt(np.maximum(d2, 0)).sum(axis=1)
+
+    return sums
+
+
+def _orbitArrays(orbits):
+    """ a, e, inc, Omega, omega and f of a list of REBOUND orbits, as arrays. """
+
+    return tuple(np.array([getattr(o, key) for o in orbits], dtype=float)
+                 for key in ("a", "e", "inc", "Omega", "omega", "f"))
+
+
+def _cloneSpread(orbits):
+    """ The clones' spread in each element as in the report of the final elements: 1 sigma from the
+    95% interval (the circular standard deviation for the angles), the interval (about the circular
+    mean for the angles, see _circularInterval) and the median (about the circular mean for the
+    angles). Lengths in AU, angles in degrees, keyed as the elements of representativeOrbit. """
+
+    a, e, inc, Omega, omega, f = _orbitArrays(orbits)
+    spread = {}
+    for key, x in (("a_au", a), ("q_au", a*(1 - e)), ("e", e), ("incl_deg", np.degrees(inc))):
+        lo, med, hi = np.percentile(x, [2.5, 50, 97.5])
+        spread[key] = {"median": float(med), "sigma": float((hi - lo)/2.0/1.96),
+                       "ci95": [float(lo), float(hi)]}
+    for key, x in (("peri_deg", omega), ("node_deg", Omega), ("varpi_deg", Omega + omega), ("f_deg", f)):
+        med = _circularPercentiles(np.degrees(x)[:, None], [50])[0, 0] % 360.0
+        spread[key] = {"median": float(med), "sigma": float(np.degrees(scipy.stats.circstd(x))),
+                       "ci95": [float(np.degrees(v)) for v in _circularInterval(x)]}
+
+    return spread
+
+
+def _orbitElements(orbit):
+    """ The elements of a REBOUND orbit, lengths in AU and angles in degrees, keyed as in
+    representativeOrbit. """
+
+    return {"a_au": float(orbit.a), "q_au": float(orbit.a*(1 - orbit.e)), "e": float(orbit.e),
+            "incl_deg": float(np.degrees(orbit.inc)), "peri_deg": float(np.degrees(orbit.omega) % 360.0),
+            "node_deg": float(np.degrees(orbit.Omega) % 360.0),
+            "varpi_deg": float(np.degrees(orbit.Omega + orbit.omega) % 360.0),
+            "f_deg": float(np.degrees(orbit.f) % 360.0)}
+
+
+def orbitAtHorizon(sim_outputs, sim_outputs_mc, horizon):
+    """ The nominal orbit at the predictability horizon (see predictabilityHorizon), the last time the
+    measurement still sets it, with the spread of the clones there.
+
+    Arguments:
+        sim_outputs: [list] Outputs of the nominal solution (see reboundSimulate).
+        sim_outputs_mc: [dict] {name: outputs} of the clones.
+        horizon: [dict] Return of predictabilityHorizon, or None.
+
+    Return:
+        [dict] or None without a horizon reached: {
+            "time_days": time of the output at the horizon,
+            "n_clones":  clones that reached it,
+            "nominal":   the nominal's elements there (see representativeOrbit),
+            "clones":    the clones' spread there, {element: {"median", "sigma", "ci95": [low, high]}},
+                         1 sigma and the interval as in the report of the final elements,
+        }
+    """
+
+    if (horizon is None) or (horizon.get("horizon_days") is None):
+        return None
+
+    time_days = np.array([simTimeToDays(row[0]) for row in sim_outputs])
+    k = int(np.argmin(np.abs(time_days - horizon["horizon_days"])))
+    orbits = [rows[k][2] for rows in sim_outputs_mc.values() if len(rows) > k]
+    if len(orbits) < 2:
+        return None
+
+    return {"time_days": float(time_days[k]), "n_clones": len(orbits),
+            "nominal": _orbitElements(sim_outputs[k][2]), "clones": _cloneSpread(orbits)}
+
+
+# Outputs from the predictability horizon to the end at which the path of the representative clone is
+#   ranked among the clones
+REPRESENTATIVE_PATH_OUTPUTS = 50
+
+
+def _centralityRanks(vectors, others=None):
+    """ For each clone, and for each of the other orbits, the share of the clones more central than it:
+    0 for the clones' medoid, about one half for a typical clone. A clone's centrality is the sum of its
+    distances to the clones in units of their spread (see _spreadUnits).
+
+    Arguments:
+        vectors: [ndarray] Shape (n, 6), the orbit vectors of the clones (see orbitVectors).
+
+    Keyword arguments:
+        others: [ndarray] Shape (m, 6), orbit vectors of other orbits to rank among the clones, e.g. the
+            nominal's. Default None.
+
+    Return:
+        (sums, ranks, other_ranks): the clones' sums of distances, their ranks, and the other orbits'
+            ranks (None without others), or None if the clones do not spread.
+    """
+
+    units = _spreadUnits(vectors)
+    if units is None:
+        return None
+    centre, matrix = units
+
+    z = (vectors - centre) @ matrix
+    sums = _distanceSums(z, z)
+
+    # Every other clone more central than the clone itself
+    order = np.sort(sums)
+    ranks = (np.searchsorted(order, sums, side="left"))/max(len(sums) - 1, 1)
+
+    other_ranks = None
+    if others is not None:
+        other_sums = _distanceSums((np.atleast_2d(others) - centre) @ matrix, z)
+        other_ranks = np.searchsorted(order, other_sums, side="left")/len(sums)
+
+    return sums, ranks, other_ranks
+
+
+def representativeOrbit(sim_outputs, sim_outputs_mc, horizon=None):
+    """ The clone that represents the clones at the end of the run: their median in the space of the
+    orbits, taken among the clones themselves so that it is a real orbit.
+
+    Beyond the predictability horizon (see predictabilityHorizon) the nominal orbit is one realization
+    among the clones, no more likely than any of them. Nor do the medians of the elements taken one by
+    one make an orbit: they come from different clones, so that a(1 - e) is not the median q, and
+    together they may fit no clone. The representative clone is the medoid instead: the clone with the
+    smallest sum of distances to all the others, in the space of their orbits (the angular momentum and
+    eccentricity vectors, see orbitVectors), each direction in units of the clones' spread along it (see
+    _spreadUnits). In one dimension the medoid is the median; here it is the median corrected for the
+    spread in each direction and for the correlations between the elements. Where the body is on its
+    orbit is left out, since the clones spread along the whole orbit long before the horizon.
+
+    Being a clone, it is a trajectory of the equations of motion from a state drawn from the
+    uncertainty of the measurement. It is chosen at the end only: chaos keeps any one trajectory from
+    staying the most central at every time, so its path from the horizon to the end is ranked as well.
+
+    Arguments:
+        sim_outputs: [list] Outputs of the nominal solution (see reboundSimulate).
+        sim_outputs_mc: [dict] {name: outputs} of the clones.
+
+    Keyword arguments:
+        horizon: [dict] Return of predictabilityHorizon, to rank the representative's path from the
+            horizon on, or None. Default None.
+
+    Return:
+        [dict] or None with fewer than PREDICTABILITY_MIN_CLONES clones over the whole span, or if they
+        do not spread. The ranks are the share of the clones more central than an orbit (see
+        _centralityRanks): {
+            "clone":         name of the representative clone,
+            "n_clones":      clones it was chosen among (those that ran the whole span),
+            "time_days":     time of the end of the run,
+            "elements":      its elements there: "a_au", "q_au", "e", "incl_deg", "peri_deg", "node_deg",
+                             "varpi_deg" (the longitude of the perihelion, node + peri) and "f_deg",
+            "outside_ci95":  the elements of the representative outside the clones' 95% CI of each
+                             taken alone (see the report: the orbit is central as a whole),
+            "clones":        the clones' spread there (see orbitAtHorizon),
+            "nominal_rank":  rank of the nominal orbit at the end,
+            "start_sigma":   Mahalanobis distance of the representative's initial state from the
+                             nominal's, in the spread of the clones' initial states, or None without
+                             the state vectors in the outputs,
+            "start_dof":     dimensions of that spread,
+            "start_closer":  share of draws from the measurement's normal distribution closer to the
+                             nominal than the representative (chi-square with start_dof dimensions),
+            "path":          {"horizon_rank": its rank at the horizon, "median_rank": its median rank
+                             at REPRESENTATIVE_PATH_OUTPUTS outputs from the horizon to the end} or
+                             None without a horizon reached,
+        }
+    """
+
+    n_out = len(sim_outputs)
+    full = {name: rows for name, rows in sim_outputs_mc.items() if len(rows) == n_out}
+    if len(full) < PREDICTABILITY_MIN_CLONES:
+        return None
+    names = list(full)
+
+    def vectorsAt(k):
+        """ The orbit vectors of the clones at output k, and which of them are finite. """
+        a, e, inc, Omega, omega, _ = _orbitArrays([full[name][k][2] for name in names])
+        v = orbitVectors(a, e, inc, Omega, omega)
+        return v, np.isfinite(v).all(axis=1)
+
+    vectors, ok = vectorsAt(n_out - 1)
+    if ok.sum() < PREDICTABILITY_MIN_CLONES:
+        return None
+    nominal_orbit = sim_outputs[-1][2]
+    nominal_vector = orbitVectors(nominal_orbit.a, nominal_orbit.e, nominal_orbit.inc, nominal_orbit.Omega,
+                                  nominal_orbit.omega)[None, :]
+    finite_nominal = bool(np.isfinite(nominal_vector).all())
+    ranked = _centralityRanks(vectors[ok], nominal_vector if finite_nominal else None)
+    if ranked is None:
+        return None
+    sums, _, nominal_rank = ranked
+
+    kept = [name for name, good in zip(names, ok) if good]
+    rep = kept[int(np.argmin(sums))]
+    rep_rows = full[rep]
+
+    result = {"clone": rep, "n_clones": len(kept), "time_days": float(simTimeToDays(sim_outputs[-1][0])),
+              "elements": _orbitElements(rep_rows[-1][2]),
+              "clones": _cloneSpread([full[name][-1][2] for name in kept]),
+              "nominal_rank": float(nominal_rank[0]) if finite_nominal else None, "outside_ci95": [],
+              "start_sigma": None, "start_dof": None, "start_closer": None, "path": None}
+
+    # The elements in which the representative is not central taken alone (where it is on its orbit
+    #   does not count: it was not chosen by it)
+    for key, value in result["elements"].items():
+        if key == "f_deg":
+            continue
+        lo, hi = result["clones"][key]["ci95"]
+        if key in ("peri_deg", "node_deg", "varpi_deg", "f_deg"):
+            # Within the arc from lo to hi, which runs through 0 when lo > hi
+            inside = ((value - lo) % 360.0) <= ((hi - lo) % 360.0)
+        else:
+            inside = lo <= value <= hi
+        if not inside:
+            result["outside_ci95"].append(key)
+
+    # How far from the nominal the representative started, in the spread of the clones' initial states
+    #   (as offsets from the nominal's state, so that the small spread of the positions keeps its digits)
+    if all(rows[0][1] is not None for rows in full.values()) and (sim_outputs[0][1] is not None):
+        start_nominal = np.array(sim_outputs[0][1], dtype=float)
+        offsets = np.array([full[name][0][1] for name in kept], dtype=float) - start_nominal
+        var, axes = np.linalg.eigh(np.atleast_2d(np.cov(offsets.T)))
+        if var.max() > 0:
+            keep = var > var.max()*1e-14
+            start = ((np.array(rep_rows[0][1], dtype=float) - start_nominal) @ axes[:, keep])/np.sqrt(var[keep])
+            result["start_sigma"] = float(np.sqrt((start**2).sum()))
+            result["start_dof"] = int(keep.sum())
+            result["start_closer"] = float(scipy.stats.chi2.cdf(result["start_sigma"]**2, keep.sum()))
+
+    # Its rank along the way, from the horizon to the end
+    if (horizon is not None) and (horizon.get("horizon_days") is not None):
+        time_days = np.array([simTimeToDays(row[0]) for row in sim_outputs])
+        k_h = int(np.argmin(np.abs(time_days - horizon["horizon_days"])))
+        i_rep = names.index(rep)
+        path = []
+        for k in np.unique(np.linspace(k_h, n_out - 1, REPRESENTATIVE_PATH_OUTPUTS).astype(int)):
+            v, good = vectorsAt(k)
+            if (not good[i_rep]) or (good.sum() < PREDICTABILITY_MIN_CLONES):
+                continue
+            ranked_k = _centralityRanks(v[good])
+            if ranked_k is not None:
+                path.append(ranked_k[1][int(good[:i_rep].sum())])
+        if path:
+            result["path"] = {"horizon_rank": float(path[0]), "median_rank": float(np.median(path))}
+
+    return result
+
+
+def _elementLines(values, spread, dist_unit_multiplier=1.0, length_units="AU", nominal=True):
+    """ Report lines of one orbit's elements with the clones' spread: "value +/- 1 sigma [95% CI]" for
+    the nominal orbit, as in the final elements, or "value   median [95% CI]" for a clone. """
+
+    lines = []
+    for label, key, unit in (("a", "a_au", length_units), ("q", "q_au", length_units), ("e", "e", ""),
+                             ("i", "incl_deg", "deg"), ("peri", "peri_deg", "deg"),
+                             ("node", "node_deg", "deg"), ("varpi", "varpi_deg", "deg"), ("f", "f_deg", "deg")):
+        scale = dist_unit_multiplier if key.endswith("_au") else 1.0
+        s = spread[key]
+        lo, hi = s["ci95"][0]*scale, s["ci95"][1]*scale
+        if nominal:
+            text = "{:>13.6f} +/- {:.6f} [{:10.6f}, {:10.6f}]".format(values[key]*scale, s["sigma"]*scale, lo, hi)
+        else:
+            text = "{:>13.6f}   {:>13.6f} [{:10.6f}, {:10.6f}]".format(values[key]*scale, s["median"]*scale, lo, hi)
+        across = " (across 0)" if key.endswith("_deg") and key != "incl_deg" and lo > hi else ""
+        lines.append("  {:<5s}= {:s}{:s}{:s}".format(label, text, "  " + unit if unit else "", across))
+
+    return lines
+
+
+def _beyondHorizonReportLines(horizon, n_clones, dist_unit_multiplier=1.0, length_units="AU"):
+    """ Report lines on which orbit to use at the end of the run: the nominal one while the run ends
+    before the predictability horizon, and beyond it the nominal at the horizon and the representative
+    clone at the end.
+
+    Arguments:
+        horizon: [dict] Return of predictabilityHorizon with "orbit_at_horizon" (see orbitAtHorizon) and
+            "representative" (see representativeOrbit) added, or None.
+        n_clones: [int] Monte Carlo clones of the run.
+
+    Keyword arguments:
+        dist_unit_multiplier: [float] Factor from AU to the length unit of a and q. Default 1.
+        length_units: [str] Name of that unit. Default "AU".
+
+    Return:
+        [list] Lines of text.
+    """
+
+    if horizon is None:
+        return ["No predictability horizon: it takes at least {:d} Monte Carlo clones that run the whole "
+                "span (--mc).".format(PREDICTABILITY_MIN_CLONES),
+                "Without it, whether the measurement still sets the nominal orbit at the end is unknown."]
+
+    rep = horizon.get("representative")
+    nominal_rank = None if rep is None else rep.get("nominal_rank")
+
+    if horizon.get("horizon_days") is None:
+        lines = ["The integration ended before the predictability horizon: the clones still keep the order "
+                 "of their",
+                 "initial conditions, so the measurement still sets the nominal orbit at the end, with the "
+                 "spread of the",
+                 "{:d} clones (the 1 sigma and 95% CI above) as its uncertainty. Integrate longer to find "
+                 "the horizon.".format(n_clones)]
+        if nominal_rank is not None:
+            lines.append("At the end {:.0f}% of the clones are more central than the nominal orbit (about 50% "
+                         "for a typical clone).".format(100*nominal_rank))
+        return lines
+
+    lines = ["Beyond the predictability horizon (~{:s}) the nominal orbit is one realization among the "
+             "clones.".format(_spanText(horizon["horizon_days"]))]
+
+    at = horizon.get("orbit_at_horizon")
+    if at is not None:
+        lines += ["", "Nominal orbit at the horizon, {:s} {:s} (the last time the measurement sets it),".format(
+                      _spanText(at["time_days"]), "back" if at["time_days"] < 0 else "after the start"),
+                  "+/- 1 sigma [95% CI] of the {:d} clones:".format(at["n_clones"])]
+        lines += _elementLines(at["nominal"], at["clones"], dist_unit_multiplier, length_units)
+
+    if rep is not None:
+        lines += ["", "Representative orbit at the end: clone {:s}, the median of the {:d} clones in the "
+                      "space of the orbits".format(rep["clone"], rep["n_clones"]),
+                  "(the clone with the smallest sum of distances to the others, each direction in units of "
+                  "their spread):",
+                  "{:>22s}{:>16s} {:s}".format("clone", "clones: median", "[95% CI]")]
+        lines += _elementLines(rep["elements"], rep["clones"], dist_unit_multiplier, length_units, nominal=False)
+        outside = rep.get("outside_ci95") or []
+        if outside:
+            labels = {"a_au": "a", "q_au": "q", "e": "e", "incl_deg": "i", "peri_deg": "peri", "node_deg": "node",
+                      "varpi_deg": "varpi", "f_deg": "f"}
+            lines.append("Its {:s} {:s} outside the clones' 95% CI taken alone: it is the orbit as a whole that "
+                         "is central.".format(", ".join(labels[k] for k in outside),
+                                              "is" if len(outside) == 1 else "are"))
+            lo_i, hi_i = rep["clones"]["incl_deg"]["ci95"]
+            if lo_i < hi_i - lo_i:
+                lines.append("Here i is small next to its spread: i is the tilt of the orbit plane whatever its "
+                             "direction, so the")
+                lines.append("median i is not the tilt of the central plane, and node and peri are not defined "
+                             "on their own, only varpi.")
+        if rep.get("start_sigma") is not None:
+            lines.append("It is a real trajectory, from an initial state {:.1f} sigma from the nominal's "
+                         "({:d}-D: {:.0f}% of the draws".format(rep["start_sigma"], rep["start_dof"],
+                                                                 100*rep["start_closer"]))
+            lines.append("from the measurement are closer to the nominal).")
+        if rep.get("path") is not None:
+            lines.append("Chosen at the end, it is not the most central all along: at the horizon {:.0f}% of the "
+                         "clones".format(100*rep["path"]["horizon_rank"]))
+            lines.append("were more central than it, and from there to the end {:.0f}% (median).".format(
+                100*rep["path"]["median_rank"]))
+        if nominal_rank is not None:
+            lines.append("At the end {:.0f}% of the clones are more central than the nominal orbit (about 50% "
+                         "for a typical clone).".format(100*nominal_rank))
+
+    return lines
+
+
 def estimateLyapunovFromMC(sim_outputs, sim_outputs_mc):
     """ Estimate the trajectory divergence timescale from the Monte Carlo ensemble.
 
@@ -2510,6 +2931,10 @@ PLOT_SIGMA_PERCENTILES = (2.275, 15.866, 50.0, 84.134, 97.725)
 PLOT_HORIZON_COLOR = "darkred"
 PLOT_FIRST_ENCOUNTER_COLOR = "#f25f6b"
 
+# The representative clone (see representativeOrbit): at least 21 in OKLab (x100) from the nominal, the
+#   sample clones, the bands and the horizon, with normal vision and with protanopia or deuteranopia
+PLOT_REPRESENTATIVE_COLOR = "darkorange"
+
 
 def _unwrapDegrees(values):
     """ An angle series in degrees made continuous in time, so that it can run past 0 or 360 deg. NaN
@@ -2607,6 +3032,9 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
     the departure from the Earth, before which the osculating heliocentric elements carry the Earth's
     pull. The time is in years for spans of two years or more.
 
+    Beyond the predictability horizon, the path of the representative clone (see representativeOrbit)
+    is drawn in PLOT_REPRESENTATIVE_COLOR over the element panels.
+
     The predictability panel gives the rank correlation of each element with its 1 sigma sampling
     band from the number of clones, the threshold of the horizon, and the median and 5-95% of the
     clones' first encounters.
@@ -2620,7 +3048,8 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
         file_path: [str] Where to save the figure, or None not to save it.
         dist_unit_multiplier: [float] Factor from AU to the length unit of a and q. Default 1.
         length_units: [str] Name of that unit. Default "AU".
-        horizon: [dict] Return of predictabilityHorizon, or None.
+        horizon: [dict] Return of predictabilityHorizon, or None. Under "representative", the return of
+            representativeOrbit, whose clone is drawn if the horizon was reached.
         n_hill: [float] Earth Hill radii of the departure and of the encounter threshold. Default 3.
         clone_encounters: [dict] {clone name: encounters of that clone}, or None.
         closest_au: [dict] {body: closest approach of the nominal solution in AU}, or None.
@@ -2676,6 +3105,19 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
         for c in clones:
             c[key] = _unwrapDegrees(c[key])
             c[key] += _turnOffset(c[key], nominal[key])
+
+    # Beyond the predictability horizon, the path of the clone that represents the clones at the end
+    rep_name = None
+    if (horizon is not None) and (horizon.get("horizon_days") is not None):
+        rep_name = (horizon.get("representative") or {}).get("clone")
+    representative = None
+    if rep_name in sim_outputs_mc:
+        representative = series(sim_outputs_mc[rep_name])
+        for key in element_keys:
+            representative[key][:k_dep] = np.nan
+        for key in angles:
+            representative[key] = _unwrapDegrees(representative[key])
+            representative[key] += _turnOffset(representative[key], nominal[key])
 
     fig, axs = plt.subplots(3, 3, figsize=(15, 11), sharex=True)
     names = [["a", "e", "q"], ["i", "node", "peri"], ["varpi", "encounters", "predictability"]]
@@ -2747,6 +3189,11 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
                 ax.plot(t, c[key] - s, color="0.35", lw=0.4, alpha=0.6,
                         label=("{:d} sample clones".format(len(sample)) if use_bands else "clones")
                         if (key == "a" and j == 0 and m == 0) else None)
+
+        if representative is not None:
+            for m, s in enumerate(shifts(representative[key])):
+                ax.plot(t, representative[key] - s, color=PLOT_REPRESENTATIVE_COLOR, lw=1.1,
+                        label="representative clone" if (key == "a" and m == 0) else None)
 
         for m, s in enumerate(shifts(nominal[key])):
             ax.plot(t, nominal[key] - s, color="k", lw=1.4, label="nominal" if (key == "a" and m == 0) else None)
@@ -3617,6 +4064,13 @@ if __name__ == "__main__":
     # How long the clones keep the memory of the measured initial conditions
     horizon = predictabilityHorizon(sim_outputs, sim_outputs_mc, clone_diag=clone_diag, n_hill=n_hill)
 
+    # Beyond the horizon the nominal is one realization among the clones: the nominal orbit at the
+    #   horizon, and the clone that represents them at the end, kept with the horizon so that the
+    #   results file and the figure have them
+    if horizon is not None:
+        horizon["orbit_at_horizon"] = orbitAtHorizon(sim_outputs, sim_outputs_mc, horizon)
+        horizon["representative"] = representativeOrbit(sim_outputs, sim_outputs_mc, horizon=horizon)
+
     # List of bodies for which the distance is tracked (planet_dists dict keys)
     dist_bodies = list(sim_outputs[0][3].keys())
 
@@ -3702,6 +4156,14 @@ if __name__ == "__main__":
         else:
             print("    T_J  = {:>13.6f}       {:s}".format(t_j, tisserandClass(t_j)))
 
+    print("-" * 78)
+
+    # Which orbit to use at the end: the nominal before the predictability horizon, beyond it the
+    #   nominal at the horizon and the representative clone at the end
+    beyond_horizon_lines = _beyondHorizonReportLines(horizon, len(sim_outputs_mc), dist_unit_multiplier,
+                                                     a_units)
+    for line in beyond_horizon_lines:
+        print("  " + line)
     print("-" * 78)
 
     # Close-encounter summary (minima tracked every integrator timestep, refined between steps).
@@ -3868,6 +4330,8 @@ if __name__ == "__main__":
         f.write("peri = {:>10.6f}{:s} deg\n".format(np.degrees(sim_outputs[-1][2].omega), omega_ci_str))
         f.write("node = {:>10.6f}{:s} deg\n".format(np.degrees(sim_outputs[-1][2].Omega), Omega_ci_str))
         f.write("f    = {:>10.6f}{:s} deg\n".format(np.degrees(sim_outputs[-1][2].f), f_ci_str))
+
+        f.write("\n" + "\n".join(beyond_horizon_lines) + "\n")
 
         # Save the detected close encounters (Hill-sphere criterion, a fixed distance for the Sun).
         # The distances are the minima tracked at every internal integrator timestep and refined

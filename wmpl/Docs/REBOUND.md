@@ -19,6 +19,7 @@ Monte Carlo clones, and can optionally include radiation forces and measure how 
 - [Chaos: MEGNO](#chaos-megno)
 - [Predictability horizon](#predictability-horizon)
 - [What it writes](#what-it-writes)
+- [The orbit to use at the end](#the-orbit-to-use-at-the-end)
 - [Worked examples](#worked-examples)
 - [Using it as a library](#using-it-as-a-library)
 - [Troubleshooting](#troubleshooting)
@@ -409,7 +410,8 @@ close encounter (Sun passages left out).
 Beyond the horizon the individual trajectory is no longer set by the measurement: the nominal orbit
 means nothing on its own, and only the distribution of the clones does. The integration still makes
 sense statistically: the distribution of a, e, i and of the longitude of perihelion can stay narrow
-and informative for much longer than the horizon.
+and informative for much longer than the horizon. The report then gives the nominal orbit at the
+horizon and a representative clone at the end (see [The orbit to use at the end](#the-orbit-to-use-at-the-end)).
 
 This is a property of the whole ensemble, which the MEGNO of the nominal orbit is not: a planet-crossing
 nominal orbit becomes chaotic only after its own first deep encounter, which can come centuries after
@@ -513,6 +515,113 @@ The JSON keys, at the top level:
 A quick sanity check on any run is `energy_rel_drift`. It measures the massive subsystem the object
 moves through, not the object itself (which is massless), but a large drift means the integration is
 not to be trusted.
+
+---
+
+## The orbit to use at the end
+
+The final elements of the nominal solution mean something on their own only if the integration ends
+before the [predictability horizon](#predictability-horizon). Beyond it the nominal orbit is one
+realization among the clones, no better than any of them: in Winchcombe integrated 1000 years back
+with 200 clones, 86% of the clones end closer to the centre of the clones than the nominal does, about
+what any one clone would give. Nor do the medians of the elements make an orbit: each comes from a
+different clone, so that a(1 - e) is not the median q, and near i = 0 the median i is not even the
+tilt of the central orbit plane (see below). The report therefore follows the final elements with a
+block on which orbit to use, in one of three forms.
+
+**Without a horizon** (fewer than 10 clones over the whole span, or no `--mc`), it says that whether the
+measurement still sets the nominal orbit at the end is unknown.
+
+**If the run ended before the horizon**, the clones still keep the order of their initial conditions,
+so the measurement still sets the nominal orbit at the end, and the clones' spread (the 1 sigma and
+95% CI of the final elements) is its uncertainty. The report says so, and that a longer run is needed
+to find the horizon. It also gives the share of the clones more central than the nominal at the end,
+which is then small: 2% for the same Winchcombe run cut 20 years back.
+
+**If the run went past the horizon**, it gives:
+
+- The nominal orbit at the horizon, the last output at which the measurement still sets it, with the
+  1 sigma and 95% CI of the clones there, as for the final elements.
+- The representative orbit at the end, next to the clones' median and 95% CI of each element.
+- How far the representative's initial state was from the nominal's, how central it was along the way,
+  and the share of the clones more central than the nominal at the end.
+
+The representative is the clones' median in the space of the orbits, taken among the clones themselves.
+The orbits are compared by their angular momentum and eccentricity vectors (the Milankovitch elements,
+`orbitVectors`): six numbers that fix the size, the shape and the orientation of an orbit, but not where
+the body is on it, with no wrap at 360 deg and no singularity at i = 0 or e = 0. Each direction is
+measured in units of the clones' spread along it, so that the clones have a unit covariance (a
+Mahalanobis distance; the direction normal to the surface h.e = 0, on which every orbit lies, is left
+out). The representative is the clone with the smallest sum of distances to all the others, the medoid:
+in one dimension that is the median, and here it is the median corrected for the spread in each direction
+and for the correlations between the elements. Where the body is on its orbit (f) is not used: beyond the
+horizon the clones are spread along the whole orbit.
+
+Being a clone, it is a real trajectory: the equations of motion integrated from a state drawn from the
+measurement's uncertainty. The report gives the Mahalanobis distance of that state from the nominal's in
+the spread of the clones' initial states, and the share of the draws that are closer (a chi-square in
+six dimensions, in which a typical draw is 2.3 sigma away, not 1).
+
+It is chosen at the end. Once the dynamics is chaotic, no trajectory stays the most central at every
+time: in the Winchcombe run, the clone most central at the end was at the edge of the clones at the
+horizon, with 96% of them more central, and 19% over the rest of the run (median). The clone most central
+on average over the run is not a better choice: with the clones resampled (100 bootstrap draws), the
+final q of the representative varies by 0.008 AU, a sixth of the clones' spread (0.050 AU), but that of the
+clone most central on average varies by 0.050 AU, as much as the whole cloud. For a representative orbit at
+another epoch, end the run there.
+
+Read the representative's elements together, as one orbit. Taken one at a time they can fall outside the
+clones' 95% CI, and the report says so. This happens at low inclination: i is the tilt of the orbit plane
+whatever its direction, so for tilts spread around the pole of the frame the median i is larger than the
+tilt of the central plane, and the node and the argument of perihelion are not defined on their own, only
+their sum, the longitude of perihelion varpi, which the report adds. For example, Winchcombe 150 years
+back with 40 clones (seed 7; the pickle has no trajectory ID, hence the clone names `None_MC_...`):
+
+```
+  Beyond the predictability horizon (~25 years) the nominal orbit is one realization among the clones.
+
+  Nominal orbit at the horizon, 25 years back (the last time the measurement sets it),
+  +/- 1 sigma [95% CI] of the 40 clones:
+    a    =      2.648639 +/- 0.000116 [  2.648362,   2.648816]  AU
+    q    =      0.983485 +/- 0.000718 [  0.982203,   0.985019]  AU
+    e    =      0.628683 +/- 0.000288 [  0.628064,   0.629191]
+    i    =      0.301091 +/- 0.000800 [  0.299275,   0.302412]  deg
+    peri =    348.069446 +/- 0.047726 [347.987413, 348.147867]  deg
+    node =    163.115122 +/- 0.052968 [163.029889, 163.202841]  deg
+    varpi=    151.184568 +/- 0.005939 [151.173745, 151.192602]  deg
+    f    =    112.168001 +/- 0.861532 [110.544309, 113.421983]  deg
+
+  Representative orbit at the end: clone None_MC_19, the median of the 40 clones in the space of the orbits
+  (the clone with the smallest sum of distances to the others, each direction in units of their spread):
+                   clone  clones: median [95% CI]
+    a    =      2.666875        2.652922 [  2.605153,   2.678882]  AU
+    q    =      1.007813        0.975517 [  0.924398,   1.037934]  AU
+    e    =      0.622100        0.628965 [  0.612263,   0.650014]
+    i    =      0.052499        0.171211 [  0.052586,   0.879094]  deg
+    peri =    223.032201      186.569881 [170.059164, 245.062871]  deg
+    node =    286.149587      322.025746 [264.573004, 336.597868]  deg
+    varpi=    149.181788      148.912912 [146.633437, 149.666002]  deg
+    f    =    155.967760      151.832639 [128.367687, 259.300592]  deg
+  Its i is outside the clones' 95% CI taken alone: it is the orbit as a whole that is central.
+  Here i is small next to its spread: i is the tilt of the orbit plane whatever its direction, so the
+  median i is not the tilt of the central plane, and node and peri are not defined on their own, only varpi.
+  It is a real trajectory, from an initial state 2.2 sigma from the nominal's (6-D: 45% of the draws
+  from the measurement are closer to the nominal).
+  Chosen at the end, it is not the most central all along: at the horizon 56% of the clones
+  were more central than it, and from there to the end 29% (median).
+  At the end 82% of the clones are more central than the nominal orbit (about 50% for a typical clone).
+```
+
+There the representative's i is just below the clones' 95% CI and its node and peri are 36 deg from their
+medians, in opposite directions, but its varpi is 0.27 deg from the median, within an interval 3 deg wide.
+
+`orbitAtHorizon` and `representativeOrbit` are kept with the horizon, under `orbit_at_horizon` and
+`representative` in the `predictability` dict of the JSON: the elements (lengths in AU, angles in
+degrees, keyed `a_au`, `q_au`, `e`, `incl_deg`, `peri_deg`, `node_deg`, `varpi_deg`, `f_deg`), the clones'
+`median`, `sigma` and `ci95` of each, and for the representative its `clone` name, `nominal_rank`,
+`start_sigma`, `start_dof`, `start_closer`, `outside_ci95` and `path` (`horizon_rank`, `median_rank`).
+A rank is the share of the clones more central than the orbit. The figure draws the representative's path
+in orange beyond the horizon.
 
 ---
 
