@@ -446,7 +446,7 @@ options.
 | :--- | :--- |
 | `rebound_simulation_results.txt` | The human-readable report: run settings, the integrator that actually ran, final elements with confidence intervals, close encounters, impacts, clone outcomes, energy drift, divergence, and the MEGNO verdict. |
 | `rebound_simulation.png` | The evolution of the orbit, 3×3 panels: a, e, q; i, node, argument of perihelion; longitude of perihelion, the close approaches to every body in Hill radii (log scale), and the predictability horizon (the heliocentric distance without clones). See [The figure](#the-figure). |
-| `rebound_megno.png` | Only with `--compute_megno`: the evolution of ⟨Y⟩ against time in years, with the ⟨Y⟩ = 2 line marked. |
+| `rebound_megno_lyapunov.png` | Only with `--compute_megno`: the evolution of ⟨Y⟩ against time in years, with the ⟨Y⟩ = 2 line and the limits of the verdicts marked, and below it ln\|δ\| with the Lyapunov fit over its growth phase and each quarter of it (see [Chaos: MEGNO](#chaos-megno)). |
 | `rebound_simulation_results.json` | The same results in machine-readable form, so downstream analysis does not have to parse the text. |
 
 ### The figure
