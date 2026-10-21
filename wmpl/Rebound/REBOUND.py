@@ -2620,7 +2620,7 @@ def plotMegno(megno, file_path=None):
                 if k > 0:
                     ax.axvline(sign*w["start_years"], color="C3", ls=":", lw=0.6)
 
-        ax.set_ylabel("$\\ln|\\delta|$  (+1 = $\\times e$)")
+        ax.set_ylabel("$\\ln|\\delta|$  (each unit: the deviation $\\times$ 2.72)")
         ax.legend(fontsize=8)
 
     # The time fitted from the onset to every later time, from the end of the first quarter on (shorter

@@ -170,6 +170,7 @@ def testMegnoFigureShowsEachQuarter(reb, agg, tmp_path):
     fig, axes = reb.plotMegno(result, file_path=str(tmp_path/"megno.png"))
     assert (tmp_path/"megno.png").exists()
     assert len(axes) == 3
+    assert axes[1].get_ylabel() == "$\\ln|\\delta|$  (each unit: the deviation $\\times$ 2.72)"
     assert axes[0].get_title() == "MEGNO and Lyapunov time of the nominal orbit (Newtonian gravity): chaotic"
 
     # The third panel: the time fitted from the onset, the quarters' ends on it, and the time with its 1 sigma
