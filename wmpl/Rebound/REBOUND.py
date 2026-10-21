@@ -2966,7 +2966,7 @@ PLOT_FIRST_ENCOUNTER_COLOR = "#f25f6b"
 #   (orange is the eccentricity in the predictability panel), with a white edge: protanopia and
 #   deuteranopia turn the fuchsia into a dark grey-blue that the blue bands would swallow
 PLOT_REPRESENTATIVE_COLOR = "#cf027e"
-PLOT_REPRESENTATIVE_EDGE = [patheffects.Stroke(linewidth=1.8, foreground="white"), patheffects.Normal()]
+PLOT_REPRESENTATIVE_EDGE = [patheffects.Stroke(linewidth=2.5, foreground="white"), patheffects.Normal()]
 
 
 def _unwrapDegrees(values):
@@ -3225,7 +3225,7 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
 
         if representative is not None:
             for m, s in enumerate(shifts(representative[key])):
-                ax.plot(t, representative[key] - s, color=PLOT_REPRESENTATIVE_COLOR, lw=1.0,
+                ax.plot(t, representative[key] - s, color=PLOT_REPRESENTATIVE_COLOR, lw=1.2,
                         path_effects=PLOT_REPRESENTATIVE_EDGE,
                         label="representative clone" if (key == "a" and m == 0) else None)
 
