@@ -2209,6 +2209,37 @@ MEGNO_MIN_ORBITS = 20
 LYAPUNOV_MIN_ORBITS = 10
 
 
+# The Lyapunov time counts as settled when its fit from the onset changes by less than this fraction over
+#   the last quarter of the growth phase
+LYAPUNOV_SETTLED_TOL = 0.2
+
+
+def cumulativeSlopes(t, y):
+    """ The slope of the least-squares line through the first k points of (t, y), for every k at once
+    (NaN for k < 2), from running sums. Used for the Lyapunov fit from the onset of the growth to every
+    later time, which shows whether the fitted time has settled.
+
+    Arguments:
+        t: [ndarray] Times, increasing.
+        y: [ndarray] Values at those times.
+
+    Return:
+        [ndarray] The slope over points 0..k, for each k.
+    """
+
+    # Times from the first one, so the sums stay small
+    t = np.asarray(t, dtype=float) - t[0]
+    y = np.asarray(y, dtype=float)
+    n = np.arange(1, len(t) + 1, dtype=float)
+    st, sy, stt, sty = np.cumsum(t), np.cumsum(y), np.cumsum(t*t), np.cumsum(t*y)
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        slopes = (n*sty - st*sy)/(n*stt - st**2)
+    slopes[:2] = np.nan
+
+    return slopes
+
+
 def lyapunovFromDeviation(t_years, ln_delta, megno, period_years):
     """ Lyapunov time of a chaotic orbit from the growth of ln|delta| (see computeMegno).
 
@@ -2220,6 +2251,12 @@ def lyapunovFromDeviation(t_years, ln_delta, megno, period_years):
     split into four consecutive windows of equal length (its quarters), each fitted on its own. The
     spread of their times is returned as the range. A window in which ln|delta| does not grow (it can
     shrink for a while between encounters) has no time and is left out of the range.
+
+    The 1 sigma of the time comes from the scatter of the windows' growth rates: their standard
+    deviation over the square root of their number is the standard error of the rate lambda, and
+    1/(lambda + sigma) to 1/(lambda - sigma) is the interval of the time, asymmetric since the time is
+    1/lambda (no upper limit when lambda - sigma <= 0). The fit from the onset to the end of each window
+    (cumulative) shows whether the time has settled: see LYAPUNOV_SETTLED_TOL.
 
     Arguments:
         t_years: [ndarray] Elapsed time of each output in years (positive).
@@ -2237,6 +2274,10 @@ def lyapunovFromDeviation(t_years, ln_delta, megno, period_years):
             "windows": [list] one dict per window, {"start_years", "end_years",
                 "lyapunov_time_years" (None if ln|delta| does not grow in it)}, or None if there are
                 too few points (fewer than 40) for windows,
+            "lyapunov_time_1sigma_years": [low, high] 1 sigma interval of the time (high None when
+                unbounded), or None without windows,
+            "cumulative": [list] one dict per window, {"end_years", "lyapunov_time_years"} of the fit
+                from the onset to the end of that window, or None without windows,
         }
     """
 
@@ -2256,19 +2297,32 @@ def lyapunovFromDeviation(t_years, ln_delta, megno, period_years):
         return None
 
     # The outputs are evenly spaced, so equal numbers of points make windows of equal length
-    windows = []
+    windows, rates, cumulative = [], [], []
     if len(t) >= 40:
+        cum_slopes = cumulativeSlopes(t, l)
         for w in np.array_split(np.arange(len(t)), 4):
             s_w = np.polyfit(t[w], l[w], 1)[0]
+            rates.append(s_w)
             windows.append({"start_years": float(t[w[0]]), "end_years": float(t[w[-1]]),
                             "lyapunov_time_years": float(1.0/s_w) if s_w > 0 else None})
+            s_c = cum_slopes[w[-1]]
+            cumulative.append({"end_years": float(t[w[-1]]),
+                               "lyapunov_time_years": float(1.0/s_c) if s_c > 0 else None})
 
     taus = [w["lyapunov_time_years"] for w in windows if w["lyapunov_time_years"] is not None]
+
+    # The standard error of the rate from the windows' scatter
+    sigma = None
+    if rates:
+        se = float(np.std(rates, ddof=1)/np.sqrt(len(rates)))
+        sigma = [float(1.0/(slope + se)), float(1.0/(slope - se)) if slope - se > 0 else None]
 
     return {"lyapunov_time_years": float(1.0/slope),
             "lyapunov_time_range_years": [float(min(taus)), float(max(taus))] if taus else None,
             "onset_years": float(t[0]),
-            "windows": windows if windows else None}
+            "windows": windows if windows else None,
+            "lyapunov_time_1sigma_years": sigma,
+            "cumulative": cumulative if cumulative else None}
 
 
 def classifyMegno(times_days, megno, a_au, ln_delta=None):
@@ -2305,6 +2359,10 @@ def classifyMegno(times_days, megno, a_au, ln_delta=None):
             "lyapunov_windows": the windows of the growth phase and the time fitted in each (see
                                lyapunovFromDeviation), or None,
             "lyapunov_onset_years": start of the fitted growth phase, or None,
+            "lyapunov_time_1sigma_years": [low, high] 1 sigma interval of the time (high None when
+                               unbounded), or None,
+            "lyapunov_cumulative": the time fitted from the onset to the end of each window (see
+                               lyapunovFromDeviation), or None,
             "lyapunov_method":  "ln_delta" or "megno_second_half", or None,
             "message":       one-line explanation,
         }
@@ -2320,7 +2378,8 @@ def classifyMegno(times_days, megno, a_au, ln_delta=None):
     result = {"status": None, "final": float(y[-1]) if len(y) else None,
               "last_quarter": float(np.mean(y[3*len(y)//4:])) if len(y) else None,
               "n_orbits": None, "lyapunov_time_years": None, "lyapunov_time_range_years": None,
-              "lyapunov_windows": None, "lyapunov_onset_years": None, "lyapunov_method": None}
+              "lyapunov_windows": None, "lyapunov_onset_years": None, "lyapunov_method": None,
+              "lyapunov_time_1sigma_years": None, "lyapunov_cumulative": None}
 
     # Not enough points for the last quarter to mean anything (or no points at all)
     if len(y) < 8:
@@ -2368,6 +2427,8 @@ def classifyMegno(times_days, megno, a_au, ln_delta=None):
                 result.update(lyapunov_time_years=fit["lyapunov_time_years"],
                               lyapunov_time_range_years=fit["lyapunov_time_range_years"],
                               lyapunov_windows=fit["windows"],
+                              lyapunov_time_1sigma_years=fit["lyapunov_time_1sigma_years"],
+                              lyapunov_cumulative=fit["cumulative"],
                               lyapunov_onset_years=fit["onset_years"])
 
         # Otherwise from <Y> ~ (lambda/2) t over the second half
@@ -2473,7 +2534,12 @@ def plotMegno(megno, file_path=None):
     ln_delta = megno.get("ln_delta")
     with_deviation = (ln_delta is not None) and (len(ln_delta) == len(t))
 
-    if with_deviation:
+    # With a Lyapunov fit, a third panel gives the time fitted from the onset to every later time
+    with_fit = with_deviation and (v.get("lyapunov_onset_years") is not None)
+
+    if with_fit:
+        fig, axes = plt.subplots(3, 1, figsize=(8, 9.5), sharex=True, gridspec_kw={"height_ratios": [1, 1.25, 0.9]})
+    elif with_deviation:
         fig, axes = plt.subplots(2, 1, figsize=(8, 7), sharex=True)
     else:
         fig, ax = plt.subplots(figsize=(8, 4.5))
@@ -2517,8 +2583,9 @@ def plotMegno(megno, file_path=None):
 
             fitted = fitLine(onset, elapsed[-1])
             if fitted is not None:
-                ax.plot(*fitted, color="C1", lw=1.6, label="Lyapunov time {:.0f} years".format(
-                    v["lyapunov_time_years"]))
+                sigma_text = lyapunovSigmaText(v["lyapunov_time_years"], v.get("lyapunov_time_1sigma_years"))
+                ax.plot(*fitted, color="C1", lw=1.6, label="Lyapunov time {:.0f} years{:s}".format(
+                    v["lyapunov_time_years"], sigma_text.replace("1 sigma", "1$\\sigma$")))
 
                 # Where the time comes from: the fit rises by d_ln over d_t, and tau = d_t/d_ln, the time
                 #   in which |delta| grows by a factor e. Drawn as the triangle under the fit.
@@ -2555,6 +2622,39 @@ def plotMegno(megno, file_path=None):
         ax.set_ylabel("$\\ln|\\delta|$  (+1 = $\\times e$)")
         ax.legend(fontsize=8)
 
+    # The time fitted from the onset to every later time, from the end of the first quarter on (shorter
+    #   fits swing to thousands of years where the growth pauses): where it levels off, it has settled
+    if with_fit:
+        ax = axes[2]
+        tau, sigma = v["lyapunov_time_years"], v.get("lyapunov_time_1sigma_years")
+        on = np.where(elapsed >= onset - 1e-9)[0]
+        slopes = cumulativeSlopes(elapsed[on], l[on])
+        with np.errstate(divide="ignore", invalid="ignore"):
+            tau_cum = np.where(slopes > 0, 1.0/slopes, np.nan)
+        cumulative = v.get("lyapunov_cumulative") or []
+        if cumulative:
+            shown = elapsed[on] >= cumulative[0]["end_years"] - 1e-9
+        else:
+            period = np.nanmedian(np.array(megno["a_au"], dtype=float))**1.5
+            shown = (elapsed[on] - onset) >= LYAPUNOV_MIN_ORBITS*period
+        ax.plot(t[on][shown], tau_cum[shown], color="C1", lw=1.0, label="fitted from the onset to t")
+
+        ends = [(sign*c["end_years"], c["lyapunov_time_years"]) for c in cumulative
+                if c["lyapunov_time_years"] is not None]
+        if ends:
+            ax.plot(*zip(*ends), marker="o", ls="none", color="C3", markersize=5,
+                    label="to the end of each quarter")
+        ax.axhline(tau, color="C1", ls="--", lw=1.0, label="Lyapunov time {:.0f} years".format(tau))
+
+        values = [x for x in tau_cum[shown] if np.isfinite(x)] + [tau] + [x for x in (sigma or []) if x is not None]
+        ax.set_yscale("log")
+        ax.set_ylim(0.7*min(values), 1.4*max(values))
+        if sigma is not None:
+            ax.axhspan(sigma[0], sigma[1] if sigma[1] is not None else ax.get_ylim()[1], color="C1", alpha=0.15,
+                       lw=0, label="1$\\sigma$")
+        ax.set_ylabel("Lyapunov time [years]")
+        ax.legend(fontsize=8)
+
     axes[-1].set_xlabel("Time [years]")
     fig.tight_layout()
 
@@ -2562,6 +2662,18 @@ def plotMegno(megno, file_path=None):
         fig.savefig(file_path)
 
     return fig, axes
+
+
+def lyapunovSigmaText(tau, sigma):
+    """ The 1 sigma of a Lyapunov time as text, e.g. " (+59/-14, 1 sigma)": asymmetric, since the time is
+    1/lambda and the sigma is that of lambda (see lyapunovFromDeviation). Empty without a sigma. """
+
+    if sigma is None:
+        return ""
+    if sigma[1] is None:
+        return " (-{:.0f}/+inf, 1 sigma: the rate is within 1 sigma of 0)".format(tau - sigma[0])
+
+    return " (+{:.0f}/-{:.0f}, 1 sigma)".format(sigma[1] - tau, tau - sigma[0])
 
 
 def _megnoReportLines(megno):
@@ -2605,10 +2717,12 @@ def _megnoReportLines(megno):
             when = "back" if megno["times_days"][-1] < 0 else "after the start"
 
             # It describes the nominal orbit alone, in the re-integration above, and not the clones
-            lines.append("  Lyapunov time ~ {:.0f} years, of the nominal orbit alone (for the clones, see the "
-                         "predictability".format(v["lyapunov_time_years"]))
-            lines.append("  horizon). Fitted to the growth of ln|delta| from {:.0f} to {:.0f} years {:s},".format(
-                v["lyapunov_onset_years"], abs(megno["times_days"][-1])/365.25, when))
+            lines.append("  Lyapunov time ~ {:.0f} years{:s}, of the nominal orbit alone (for the clones,".format(
+                v["lyapunov_time_years"], lyapunovSigmaText(v["lyapunov_time_years"],
+                                                            v.get("lyapunov_time_1sigma_years"))))
+            lines.append("  see the predictability horizon). Fitted to the growth of ln|delta| from {:.0f} to "
+                         "{:.0f} years {:s},".format(v["lyapunov_onset_years"], abs(megno["times_days"][-1])/365.25,
+                                                     when))
             lines.append("  i.e. since <Y> last exceeded {:.1f}.".format(MEGNO_CHAOTIC_MIN))
 
             # Each window of the growth phase with its own time, so that the range can be traced back
@@ -2621,13 +2735,27 @@ def _megnoReportLines(megno):
                 width = max(len(s) for s in spans)
                 for s, w in zip(spans, windows):
                     lines.append("    {:>{:d}s}: {:s}".format(s, width,
-                                 "no growth (left out of the range)" if w["lyapunov_time_years"] is None
+                                 "no growth" if w["lyapunov_time_years"] is None
                                  else "{:.0f} years".format(w["lyapunov_time_years"])))
+                lines.append("  The 1 sigma is the scatter of the quarters' growth rates over the square root of "
+                             "their number.")
 
-                rng = v.get("lyapunov_time_range_years")
-                if rng is not None:
-                    lines.append("  Quote the range, {:.0f}-{:.0f} years, rather than the single value.".format(
-                        *rng))
+                # The fit from the onset to the end of each quarter, and whether it has settled
+                cumulative = v.get("lyapunov_cumulative")
+                if cumulative:
+                    taus = [c["lyapunov_time_years"] for c in cumulative]
+                    lines.append("  Fitted from the onset to the end of each quarter: {:s} years.".format(", ".join(
+                        "no growth" if x is None else "{:.0f}".format(x) for x in taus)))
+                    if (taus[-1] is None) or (taus[-2] is None):
+                        lines.append("  It has not settled: integrate for longer to time it.")
+                    else:
+                        change = abs(taus[-1] - taus[-2])/taus[-1]
+                        if change > LYAPUNOV_SETTLED_TOL:
+                            lines.append("  It still changes by {:.0f}% over the last quarter, so it has not "
+                                         "settled: integrate for longer.".format(100*change))
+                        else:
+                            lines.append("  It changes by {:.0f}% over the last quarter: settled.".format(
+                                100*change))
             else:
                 lines.append("  Too few outputs in the growth phase to also fit it by quarters, so no range "
                              "is given.")

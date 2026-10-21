@@ -368,12 +368,22 @@ when ⟨Y⟩ rises above 2.5 for the last time: before that the deviation can st
 a long time, e.g. on an Earth-crossing orbit until its first deep encounter, and including it biases
 the time high. Chaos driven by close encounters grows in steps, so the growth phase is also split
 into four consecutive windows of equal length, its quarters, and each is fitted on its own. The
-report lists every quarter with its time, and their spread is the range: quote the range, not only
-the central value. A quarter in which ln|δ| does not grow (it can shrink for a while between
-encounters) is listed as "no growth" and left out of the range. In the JSON the quarters are the
-verdict's `lyapunov_windows`: `start_years`, `end_years` and `lyapunov_time_years` (`null` where
-ln|δ| does not grow). The lower panel of `rebound_megno_lyapunov.png` draws ln|δ| with the growth phase, its
-fit and the fit of each quarter, labelled with its time. No time is given if the growth phase covers
+report lists every quarter with its time; a quarter in which ln|δ| does not grow (it can shrink for a
+while between encounters) is listed as "no growth".
+
+- **1σ.** The scatter of the quarters' growth rates gives the uncertainty of the time: their standard
+  deviation over √4 is the standard error of λ, and since the time is 1/λ its interval is asymmetric,
+  e.g. 67 (+132/−27) years, with no upper limit when λ is within 1σ of 0.
+- **Has it settled?** The time fitted from the onset to the end of each quarter (cumulative) shows
+  whether it has: the report warns when it still changes by more than 20% over the last quarter, and
+  then the run is too short to time the chaos well.
+
+In the JSON the quarters are the verdict's `lyapunov_windows` (`start_years`, `end_years` and
+`lyapunov_time_years`, `null` where ln|δ| does not grow), the 1σ interval is
+`lyapunov_time_1sigma_years` (its upper end `null` when unbounded) and the cumulative fits are
+`lyapunov_cumulative`. In `rebound_megno_lyapunov.png` the middle panel draws ln|δ| with the growth
+phase, its fit and the fit of each quarter, labelled with its time, and the lower panel the time fitted
+from the onset to every later time, with the quarters' ends and the 1σ band. No time is given if the growth phase covers
 fewer than 10 orbital periods (or a tenth of the run), since the fit is not reliable there. The
 Lyapunov time is of the nominal orbit alone, in its Newtonian re-integration: for the clones, see
 the [Predictability horizon](#predictability-horizon).
@@ -381,11 +391,11 @@ the [Predictability horizon](#predictability-horizon).
 Measured on an orbit with its aphelion near Jupiter (a = 3.6 AU, e = 0.45), whose growth phase starts
 171 years back:
 
-| Span | This fit (range) | Each quarter, from the start of the growth phase | ⟨Y⟩ over the second half (before) |
-| ---: | ---: | :--- | ---: |
-| 200 years | not given (4 periods of growth) | | 17 years |
-| 400 years | 54 years (19–74) | no growth, 19, 74, no growth | 34 years |
-| 1000 years | 66 years (42–174) | 44, 42, 125, 174 | 71 years |
+| Span | This fit (1σ) | Each quarter, from the start of the growth phase | Fitted from the start to each quarter's end | ⟨Y⟩ over the second half (before) |
+| ---: | ---: | :--- | :--- | ---: |
+| 200 years | not given (4 periods of growth) | | | 17 years |
+| 400 years | 54 years (−29/+∞) | no growth, 19, 74, no growth | no growth, 26, 44, 54 | 34 years |
+| 1000 years | 66 years (+30/−16) | 44, 42, 125, 174 | 44, 58, 55, 66 | 71 years |
 
 The deviation is rescaled to unit length at the outputs once it is large, so that it never overflows;
 the variational equations are linear, so this changes nothing (measured to 2e-12 in ln|δ|).
@@ -447,19 +457,23 @@ run is chaotic:
     <Y> at the end: 10.645   mean over the last quarter: 10.631
     span: 211 orbital periods
     Converges to 2: NO. <Y> does not converge to 2 and keeps growing: the orbit is chaotic.
-    Lyapunov time ~ 67 years, of the nominal orbit alone (for the clones, see the predictability
-    horizon). Fitted to the growth of ln|delta| from 32 to 1000 years back,
+    Lyapunov time ~ 67 years (+132/-27, 1 sigma), of the nominal orbit alone (for the clones,
+    see the predictability horizon). Fitted to the growth of ln|delta| from 32 to 1000 years back,
     i.e. since <Y> last exceeded 2.5.
     Encounter-driven chaos grows in steps, so the same fit in each quarter of that span gives:
         32-274 years back: 24 years
        274-516 years back: 104 years
        516-758 years back: 48 years
-      758-1000 years back: no growth (left out of the range)
-    Quote the range, 24-104 years, rather than the single value.
+      758-1000 years back: no growth
+    The 1 sigma is the scatter of the quarters' growth rates over the square root of their number.
+    Fitted from the onset to the end of each quarter: 24, 53, 52, 67 years.
+    It still changes by 22% over the last quarter, so it has not settled: integrate for longer.
 ```
 
 Most of the growth comes in the first quarter, which holds the nominal orbit's deepest encounter with
-the Earth (0.13 Hill radii, 43 years back); over the last quarter its deviation even shrinks.
+the Earth (0.13 Hill radii, 43 years back); over the last quarter its deviation even shrinks. The fit
+from the onset holds at 52–53 years over the middle quarters and ends at 67: close to settled, but not
+yet.
 
 ---
 

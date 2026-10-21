@@ -109,9 +109,15 @@ def testReportListsEveryQuarterOfABackwardRun(reb):
     assert any(line.strip() == "200-400 years back: 20 years" for line in lines)
     assert any(line.strip() == "400-600 years back: 50 years" for line in lines)
     assert any(line.strip() == "600-800 years back: 100 years" for line in lines)
-    assert any(line.strip() == "800-1000 years back: no growth (left out of the range)" for line in lines)
-    assert "Quote the range, 20-100 years" in text
+    assert any(line.strip() == "800-1000 years back: no growth" for line in lines)
     assert "four windows" not in text
+
+    # The 1 sigma from the scatter of the quarters' rates, and the fit from the onset to each quarter's end
+    v = reb.classifyMegno(*[list(x) for x in (-_steppedGrowth()[0]*365.25, _steppedGrowth()[2], [1.0]*2000)],
+                          ln_delta=list(_steppedGrowth()[1]))
+    assert reb.lyapunovSigmaText(v["lyapunov_time_years"], v["lyapunov_time_1sigma_years"]) in text
+    cum = ", ".join("{:.0f}".format(c["lyapunov_time_years"]) for c in v["lyapunov_cumulative"])
+    assert "Fitted from the onset to the end of each quarter: {:s} years.".format(cum) in text
 
 
 def testReportCountsTheQuartersFromTheStartOfAForwardRun(reb):
@@ -136,9 +142,9 @@ def testReportSaysWhenThereAreTooFewOutputsForQuarters(reb):
     assert fit["lyapunov_time_range_years"] is None
 
     text = "\n".join(_report(reb, t, ln_delta, megno, sign=-1))
-    assert "Lyapunov time ~ 30 years" in text
+    assert "Lyapunov time ~ 30 years," in text
     assert "Too few outputs in the growth phase" in text
-    assert "Quote the range" not in text
+    assert "1 sigma" not in text and "Fitted from the onset to the end" not in text
 
 
 @pytest.fixture
@@ -163,8 +169,22 @@ def testMegnoFigureShowsEachQuarter(reb, agg, tmp_path):
 
     fig, axes = reb.plotMegno(result, file_path=str(tmp_path/"megno.png"))
     assert (tmp_path/"megno.png").exists()
-    assert len(axes) == 2
+    assert len(axes) == 3
     assert axes[0].get_title() == "MEGNO and Lyapunov time of the nominal orbit (Newtonian gravity): chaotic"
+
+    # The third panel: the time fitted from the onset, the quarters' ends on it, and the time with its 1 sigma
+    v = result["verdict"]
+    dots = [x for x in axes[2].get_lines() if x.get_label() == "to the end of each quarter"][0]
+    assert np.allclose(dots.get_ydata(), [c["lyapunov_time_years"] for c in v["lyapunov_cumulative"]])
+    final = [x for x in axes[2].get_lines() if x.get_label().startswith("Lyapunov time")][0]
+    assert final.get_ydata()[0] == pytest.approx(v["lyapunov_time_years"])
+    band = [c for c in axes[2].patches + axes[2].collections if c.get_label() == "1$\\sigma$"][0]
+    if hasattr(band, "get_height"):
+        ys = [band.get_y(), band.get_y() + band.get_height()]
+    else:
+        ys = np.array(band.get_xy())[:, 1]
+    assert min(ys) == pytest.approx(v["lyapunov_time_1sigma_years"][0])
+    assert max(ys) == pytest.approx(v["lyapunov_time_1sigma_years"][1])
 
     notes = {text.get_text() for text in axes[1].texts if text.get_gid() == "quarter"}
     assert notes == {"20 yr", "50 yr", "100 yr", "no growth"}
@@ -185,7 +205,8 @@ def testMegnoFigureShowsEachQuarter(reb, agg, tmp_path):
     assert "chaotic above 2.5; the fit starts at the last crossing" in top
 
     labels = axes[1].get_legend_handles_labels()[1]
-    assert "Lyapunov time {:.0f} years".format(result["verdict"]["lyapunov_time_years"]) in labels
+    sigma = reb.lyapunovSigmaText(tau, result["verdict"]["lyapunov_time_1sigma_years"]).replace("1 sigma", "1$\\sigma$")
+    assert "Lyapunov time {:.0f} years{:s}".format(tau, sigma) in labels
     assert "each quarter" in labels
 
 
@@ -199,3 +220,51 @@ def testMegnoFigureWithoutTheDeviationHasOnePanel(reb, agg):
     _, axes = reb.plotMegno(result)
     assert len(axes) == 1
     assert axes[0].get_title() == "MEGNO of the nominal orbit (Newtonian gravity): regular"
+
+
+def testCumulativeSlopesAreTheLeastSquaresFits(reb):
+
+    rng = np.random.default_rng(5)
+    t = np.sort(rng.uniform(100.0, 1000.0, 300))
+    y = 0.03*t + rng.normal(size=300)
+    slopes = reb.cumulativeSlopes(t, y)
+
+    assert np.all(np.isnan(slopes[:2]))
+    for k in (2, 10, 150, 299):
+        assert slopes[k] == pytest.approx(np.polyfit(t[:k + 1], y[:k + 1], 1)[0], rel=1e-9)
+
+
+def testOneSigmaOfTheTimeComesFromTheQuartersRates(reb):
+    """ The rate's standard error is the quarters' scatter over sqrt(4); the time's interval is its
+    inverse, asymmetric, and without an upper limit when the rate is within 1 sigma of 0. """
+
+    t, ln_delta, megno = _steppedGrowth()
+    fit = reb.lyapunovFromDeviation(t, ln_delta, megno, 1.0)
+
+    on = t > 200.0
+    slope = np.polyfit(t[on], ln_delta[on], 1)[0]
+    se = np.std([1/20.0, 1/50.0, 1/100.0, -1/50.0], ddof=1)/2.0
+    assert fit["lyapunov_time_1sigma_years"] == pytest.approx([1/(slope + se), 1/(slope - se)], rel=1e-3)
+    assert [c["lyapunov_time_years"] for c in fit["cumulative"]] == pytest.approx(
+        [1/np.polyfit(t[on][:k], ln_delta[on][:k], 1)[0] for k in (400, 800, 1200, 1600)], rel=1e-9)
+
+    tau = fit["lyapunov_time_years"]
+    lo, hi = fit["lyapunov_time_1sigma_years"]
+    assert reb.lyapunovSigmaText(tau, [lo, hi]) == " (+{:.0f}/-{:.0f}, 1 sigma)".format(hi - tau, tau - lo)
+    assert reb.lyapunovSigmaText(54.0, [25.0, None]).startswith(" (-29/+inf, 1 sigma")
+    assert reb.lyapunovSigmaText(54.0, None) == ""
+
+
+def testReportSaysWhetherTheTimeHasSettled(reb):
+    """ A steady exponential settles; the stepped growth, whose fit from the onset still moves over the
+    last quarter, does not. """
+
+    t = np.linspace(0.5, 1000.0, 2000)
+    steady = np.where(t > 200.0, (t - 200.0)/40.0, 0.0)
+    megno = np.where(t > 200.0, 10.0, 2.0)
+    text = "\n".join(_report(reb, t, steady, megno, sign=-1))
+    assert "Fitted from the onset to the end of each quarter: 40, 40, 40, 40 years." in text
+    assert "It changes by 0% over the last quarter: settled." in text
+
+    text = "\n".join(_report(reb, *_steppedGrowth(), sign=-1))
+    assert "so it has not settled: integrate for longer." in text
