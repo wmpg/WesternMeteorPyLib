@@ -193,6 +193,8 @@ def testMegnoFigureShowsEachQuarter(reb, agg, tmp_path):
     tau = result["verdict"]["lyapunov_time_years"]
     slope = [text.get_text() for text in axes[1].texts if text.get_gid() == "slope"]
     assert len(slope) == 3
+    rise = [x for x in axes[1].texts if x.get_gid() == "slope"][1]
+    assert rise.get_rotation() == 90, "the rise runs along the vertical leg"
     d_t = float(slope[0].split("= ")[1].split(" yr")[0])
     d_ln = float(slope[1].split("= ")[1])
     assert d_t == pytest.approx(1000.0 - result["verdict"]["lyapunov_onset_years"], abs=1.0)

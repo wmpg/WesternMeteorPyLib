@@ -2597,8 +2597,9 @@ def plotMegno(megno, file_path=None):
                     ax.annotate("$\\Delta t$ = {:.0f} yr".format(d_t), (0.5*(x0 + x1), y0),
                                 textcoords="offset points", xytext=(0, -11), ha="center", fontsize=8,
                                 color="C1", gid="slope", bbox=ground)
+                    # Along the vertical leg, as the span is along the horizontal one
                     ax.annotate("$\\Delta\\ln|\\delta|$ = {:.1f}".format(d_ln), (x1, 0.5*(y0 + y1)),
-                                textcoords="offset points", xytext=(4*inward, 0),
+                                textcoords="offset points", xytext=(3*inward, 0), rotation=90,
                                 ha="left" if inward > 0 else "right", va="center", fontsize=8, color="C1",
                                 gid="slope", bbox=ground)
                     ax.annotate("$\\tau = \\Delta t\\,/\\,\\Delta\\ln|\\delta|$ = {:.0f}/{:.1f} = {:.0f} yr".format(
