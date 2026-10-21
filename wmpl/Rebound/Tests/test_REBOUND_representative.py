@@ -371,6 +371,7 @@ def testFigureDrawsTheRepresentativeBeyondTheHorizon(reb, agg):
     lines = [l for l in axes["a"].get_lines() if l.get_label() == "representative clone"]
     assert len(lines) == 1
     assert lines[0].get_color() == reb.PLOT_REPRESENTATIVE_COLOR
+    assert lines[0].get_path_effects() == reb.PLOT_REPRESENTATIVE_EDGE
     a_rep = np.array([row[2].a for row in clones[horizon["representative"]["clone"]]])
     assert np.allclose(lines[0].get_ydata()[2:], a_rep[2:])
 

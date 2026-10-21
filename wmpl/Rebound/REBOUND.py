@@ -20,6 +20,7 @@ import numpy as np
 import scipy
 import scipy.stats
 import matplotlib.pyplot as plt
+import matplotlib.patheffects as patheffects
 from matplotlib.ticker import FuncFormatter, MaxNLocator, MultipleLocator, ScalarFormatter
 from matplotlib.lines import Line2D
 
@@ -2931,9 +2932,11 @@ PLOT_SIGMA_PERCENTILES = (2.275, 15.866, 50.0, 84.134, 97.725)
 PLOT_HORIZON_COLOR = "darkred"
 PLOT_FIRST_ENCOUNTER_COLOR = "#f25f6b"
 
-# The representative clone (see representativeOrbit): at least 21 in OKLab (x100) from the nominal, the
-#   sample clones, the bands and the horizon, with normal vision and with protanopia or deuteranopia
-PLOT_REPRESENTATIVE_COLOR = "darkorange"
+# The representative clone (see representativeOrbit) in fuchsia, a colour no other line of the figure has
+#   (orange is the eccentricity in the predictability panel), with a white edge: protanopia and
+#   deuteranopia turn the fuchsia into a dark grey-blue that the blue bands would swallow
+PLOT_REPRESENTATIVE_COLOR = "#cf027e"
+PLOT_REPRESENTATIVE_EDGE = [patheffects.Stroke(linewidth=3.2, foreground="white"), patheffects.Normal()]
 
 
 def _unwrapDegrees(values):
@@ -3033,7 +3036,7 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
     pull. The time is in years for spans of two years or more.
 
     Beyond the predictability horizon, the path of the representative clone (see representativeOrbit)
-    is drawn in PLOT_REPRESENTATIVE_COLOR over the element panels.
+    is drawn in PLOT_REPRESENTATIVE_COLOR, with a white edge, over the element panels.
 
     The predictability panel gives the rank correlation of each element with its 1 sigma sampling
     band from the number of clones, the threshold of the horizon, and the median and 5-95% of the
@@ -3192,7 +3195,8 @@ def plotReboundOrbits(sim_outputs, sim_outputs_mc, encounters, file_path=None, d
 
         if representative is not None:
             for m, s in enumerate(shifts(representative[key])):
-                ax.plot(t, representative[key] - s, color=PLOT_REPRESENTATIVE_COLOR, lw=1.1,
+                ax.plot(t, representative[key] - s, color=PLOT_REPRESENTATIVE_COLOR, lw=1.4,
+                        path_effects=PLOT_REPRESENTATIVE_EDGE,
                         label="representative clone" if (key == "a" and m == 0) else None)
 
         for m, s in enumerate(shifts(nominal[key])):

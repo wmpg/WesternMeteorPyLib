@@ -621,7 +621,8 @@ degrees, keyed `a_au`, `q_au`, `e`, `incl_deg`, `peri_deg`, `node_deg`, `varpi_d
 `median`, `sigma` and `ci95` of each, and for the representative its `clone` name, `nominal_rank`,
 `start_sigma`, `start_dof`, `start_closer`, `outside_ci95` and `path` (`horizon_rank`, `median_rank`).
 A rank is the share of the clones more central than the orbit. The figure draws the representative's path
-in orange beyond the horizon.
+beyond the horizon in fuchsia with a white edge: no other line of the figure is pink, and the edge keeps it
+visible over the blue bands with protanopia or deuteranopia, which turn the fuchsia into a dark grey-blue.
 
 ---
 
