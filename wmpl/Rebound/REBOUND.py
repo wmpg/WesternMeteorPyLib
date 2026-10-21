@@ -155,6 +155,73 @@ def _setHeartbeat(sim, func):
         return heartbeat_ref
 
 
+def harmonicsSpinAxisSupported():
+    """ Whether the installed REBOUNDx orients gravitational_harmonics along each body's spin axis.
+
+    REBOUNDx 4.4.0 added the "Omega" particle parameter, whose direction is the axis of symmetry of
+    the body's J2 and J4. Earlier versions always use the z axis of the simulation, which here is the
+    ecliptic pole, 23.4 degrees away from the Earth's.
+
+    Return:
+        [bool]
+    """
+
+    try:
+        version = tuple(int(v) for v in re.findall(r"\d+", reboundx.__version__)[:2])
+    except (AttributeError, NameError, ValueError):
+        return False
+
+    return version >= (4, 4)
+
+
+def sunSpinAxisEcliptic():
+    """ Unit vector along the Sun's rotation pole (SUN_POLE_RA_DEC_DEG), in the ecliptic J2000 frame
+    of the simulations. It is the axis of symmetry of the Sun's J2.
+
+    Return:
+        [list] [x, y, z] unit vector.
+    """
+
+    ra, dec = np.radians(SUN_POLE_RA_DEC_DEG)
+    pole = np.array([np.cos(dec)*np.cos(ra), np.cos(dec)*np.sin(ra), np.sin(dec)])
+
+    # Rotate from the equatorial J2000 frame to the ecliptic J2000 frame (as ephemBodyStateRebound)
+    pole = rotateVector(pole, np.array([1.0, 0.0, 0.0]), -J2000_OBLIQUITY)
+
+    return [float(v) for v in pole/np.linalg.norm(pole)]
+
+
+def earthSpinAxisEcliptic(jd_tdb):
+    """ Unit vector along the Earth's mean rotation pole of date, in the ecliptic J2000 frame of the
+    simulations. It is the axis of symmetry of the Earth's J2 and J4.
+
+    The precession matrix from J2000 to the date is R3(-z) R2(theta) R3(-zeta), so the pole of date
+    is, in J2000 equatorial coordinates, (sin(theta) cos(zeta), -sin(theta) sin(zeta), cos(theta)),
+    with the IAU 1976 angles used by equatorialCoordPrecession (Meeus, Astronomical Algorithms, p.
+    134). Nutation (< 10 arcsec) is left out. From J2000 the pole moves by ~20 arcsec per year.
+
+    Arguments:
+        jd_tdb: [float] Julian date (TDB) of the epoch.
+
+    Return:
+        [list] [x, y, z] unit vector.
+    """
+
+    # Julian centuries from J2000
+    t = (jd_tdb - J2000_JD.days)/36525.0
+
+    zeta = np.radians((2306.2181*t + 0.30188*t**2 + 0.017998*t**3)/3600)
+    theta = np.radians((2004.3109*t - 0.42665*t**2 - 0.041833*t**3)/3600)
+
+    # J2000 equatorial coordinates of the pole of date
+    pole = np.array([np.sin(theta)*np.cos(zeta), -np.sin(theta)*np.sin(zeta), np.cos(theta)])
+
+    # Rotate from the equatorial J2000 frame to the ecliptic J2000 frame (as ephemBodyStateRebound)
+    pole = rotateVector(pole, np.array([1.0, 0.0, 0.0]), -J2000_OBLIQUITY)
+
+    return [float(v) for v in pole/np.linalg.norm(pole)]
+
+
 def checkReboundxUsable():
     """ Raise a clear error if the installed REBOUNDx cannot attach to a REBOUND simulation.
 
@@ -233,6 +300,35 @@ SUN_ENCOUNTER_AU = 0.1
 # Radius of the Sun in AU (IAU 2015 nominal, 695 700 km), used for impact detection
 SUN_RADIUS_AU = 695700.0/149597870.7
 
+# The Sun's oblateness, as in DE430 (header constants J2SUN and ASUN, its reference radius; DE440 has
+#   J2SUN = 2.196e-7). Its axis of symmetry is the Sun's rotation pole, IAU WGCCRE: RA = 286.13 deg,
+#   Dec = 63.87 deg (J2000), 7.25 deg from the ecliptic pole.
+SUN_J2 = 2.1106088532726840e-07
+SUN_J2_RADIUS_AU = 696000.0/149597870.7
+SUN_POLE_RA_DEC_DEG = (286.13, 63.87)
+
+# Time unit of the simulations. They use G = 1 with lengths in AU and masses in solar masses, so the
+#   time unit is the one in which GM_Sun = 1 AU^3: sqrt(AU^3/GM_Sun) = 58.13244 days, a Gaussian year
+#   (365.25690 d) over 2 pi. REBOUND calls it "yr2pi" and uses it for the bodies added from JPL
+#   Horizons, and REBOUNDx's speed of light is expressed in it. The Julian year over 2 pi (58.13134 d)
+#   is 1.9e-5 shorter: used with G = 1 it makes the Sun 3.8e-5 too massive and every mean motion 7.6e-5
+#   too fast, and the Earth drifts ~700 000 km away from DE430 in 10 years.
+GM_SUN_SI = 1.3271244004193938e20  # m^3/s^2, as in rebound.units (DE430: 1.32712440041e20)
+AU_M = 149597870700.0
+DAYS_PER_SIM_TIME = np.sqrt(AU_M**3/GM_SUN_SI)/86400.0
+
+
+def daysToSimTime(days):
+    """ Convert a time in days to REBOUND simulation time units (see DAYS_PER_SIM_TIME). """
+
+    return days/DAYS_PER_SIM_TIME
+
+
+def simTimeToDays(t):
+    """ Convert a time in REBOUND simulation units to days (see DAYS_PER_SIM_TIME). """
+
+    return t*DAYS_PER_SIM_TIME
+
 
 def _encounterThreshold(body, n_hill):
     """ Distance below which a passage by the given body counts as a close encounter.
@@ -285,7 +381,8 @@ def reboundBodyMassSolar(naif_id):
 
     The mass is computed as the ratio GM_body/GM_Sun, which equals the mass in solar masses and
     is exactly the value REBOUND assigns to bodies added via Horizons (up to the Sun's own mass
-    being 1.0 in the G=1, AU, solar-mass, year/2pi unit system used by the simulation).
+    being 1.0 in the G=1, AU, solar-mass unit system used by the simulation, whose time unit is
+    DAYS_PER_SIM_TIME).
 
     Arguments:
         naif_id: [int] NAIF ID of the body (e.g. 5 for the Jupiter system barycentre).
@@ -310,8 +407,9 @@ def ephemBodyStateRebound(body, jd_tdb, jpl_ephem_data):
     ephemeris, reproducing the state that REBOUND's JPL Horizons query would add.
 
     The returned state is barycentric (Solar System barycentre origin) in the ecliptic J2000
-    frame, with positions in AU and velocities in AU/(year/2pi) - i.e. the units of a default
-    REBOUND simulation (G=1, length AU, mass solar masses, time year/2pi).
+    frame, with positions in AU and velocities in AU per time unit - i.e. the units of a default
+    REBOUND simulation (G=1, length AU, mass solar masses, time unit DAYS_PER_SIM_TIME days, which
+    REBOUND calls yr2pi).
 
     Arguments:
         body: [str] Body name, a key of _EPHEM_NAIF_PATHS (e.g. "Jupiter", "Earth", "Luna").
@@ -319,7 +417,7 @@ def ephemBodyStateRebound(body, jd_tdb, jpl_ephem_data):
         jpl_ephem_data: [SPK] An opened jplephem SPK kernel (SPK.open(config.jpl_ephem_file)).
 
     Return:
-        state: [list] [x, y, z, vx, vy, vz] in AU and AU/(year/2pi).
+        state: [list] [x, y, z, vx, vy, vz] in AU and AU per time unit.
         mass: [float] Body mass in solar masses.
     """
 
@@ -341,9 +439,9 @@ def ephemBodyStateRebound(body, jd_tdb, jpl_ephem_data):
     pos_km = rotateVector(pos_km, np.array([1.0, 0.0, 0.0]), -J2000_OBLIQUITY)
     vel_kmday = rotateVector(vel_kmday, np.array([1.0, 0.0, 0.0]), -J2000_OBLIQUITY)
 
-    # Convert to REBOUND units: km -> AU, km/day -> AU/(year/2pi)
+    # Convert to REBOUND units: km -> AU, km/day -> AU per time unit
     pos_au = pos_km/aukm
-    vel_reb = vel_kmday/aukm*(365.25/(2*np.pi))
+    vel_reb = vel_kmday/aukm*DAYS_PER_SIM_TIME
 
     state = list(pos_au) + list(vel_reb)
     mass = reboundBodyMassSolar(_EPHEM_MASS_NAIF[body])
@@ -473,7 +571,7 @@ def detectCloseEncounters(sim_outputs, n_hill=3.0):
             encounters.append({
                 "body": body,
                 "min_dist_au": min_dist,
-                "time_days": sim_outputs[min_index][0]/(2*np.pi)*365.25,
+                "time_days": simTimeToDays(sim_outputs[min_index][0]),
                 "hill_radius_au": hill_radius,
                 "n_hill": min_dist/hill_radius,
                 "index": min_index,
@@ -768,6 +866,117 @@ def whfastEncounterWarning(diagnostics, n_hill=3.0):
                 n_encounters, n_hill, SUN_ENCOUNTER_AU))
 
 
+# Rank correlation below which the clones no longer keep the order of their initial conditions
+PREDICTABILITY_RANK_THRESHOLD = 0.5
+
+# Fewest clones that run the whole span for a predictability horizon to be given
+PREDICTABILITY_MIN_CLONES = 10
+
+
+def predictabilityHorizon(sim_outputs, sim_outputs_mc, clone_diag=None, n_hill=3.0,
+                          threshold=PREDICTABILITY_RANK_THRESHOLD):
+    """ How far the integration keeps the memory of the measured initial conditions, from the clones.
+
+    The clones are drawn from the measurement uncertainty. While the dynamics is predictable, a clone
+    that starts with a larger semi-major axis than another keeps it: the rank correlation (Spearman)
+    of the clones' elements with their values just after the departure from the Earth stays near 1.
+    Close encounters scramble that order, and once the correlation has dropped below the threshold
+    the individual trajectory is no longer set by the measurement: only the distribution of the
+    clones means something, not the nominal orbit. Unlike the MEGNO of the nominal orbit, this is a
+    property of the whole ensemble, and it needs no extra integration.
+
+    Arguments:
+        sim_outputs: [list] Outputs of the nominal solution (see reboundSimulate).
+        sim_outputs_mc: [dict] {name: outputs} of the clones.
+
+    Keyword arguments:
+        clone_diag: [dict] {name: diagnostics} of the clones, for the time of their first close
+            encounter. Default None.
+        n_hill: [float] Earth Hill radii that define the departure (see findEarthDepartureIndex).
+        threshold: [float] Rank correlation that marks the horizon. Default
+            PREDICTABILITY_RANK_THRESHOLD.
+
+    Return:
+        [dict] or None with fewer than PREDICTABILITY_MIN_CLONES clones over the whole span: {
+            "n_clones":           clones used (those that ran the whole span),
+            "threshold":          the rank correlation of the horizon,
+            "reference_days":     time of the reference output, just after the departure,
+            "elements":           {"a"/"e"/"i": {"horizon_days": last time with a correlation at
+                                  or above the threshold before it stays below (None if never
+                                  below), "rank_corr_end": correlation at the end}},
+            "horizon_days":       earliest horizon of the three, or None if none is reached,
+            "time_days":          [list] output times, "rank_corr": {element: [list]} the series,
+            "first_encounter_days": {"fraction": share of clones with a close encounter (Sun
+                                  passages left out), "p05"/"p25"/"p50"/"p75"/"p95": percentiles of
+                                  the time of their first one} or None without clone_diag,
+        }
+    """
+
+    n_out = len(sim_outputs)
+    full = [rows for rows in sim_outputs_mc.values() if len(rows) == n_out]
+    if (len(full) < PREDICTABILITY_MIN_CLONES) or (n_out < 3):
+        return None
+
+    # Reference: the first output after the departure from the Earth, before which the osculating
+    #   elements still carry the Earth's pull
+    k_ref = findEarthDepartureIndex(sim_outputs, n_hill=n_hill)
+    if k_ref is None:
+        k_ref = 1
+    k_ref = min(k_ref, n_out - 2)
+
+    time_days = np.array([simTimeToDays(row[0]) for row in sim_outputs])
+
+    getters = {"a": lambda o: o.a, "e": lambda o: o.e, "i": lambda o: o.inc}
+    elements, series = {}, {}
+    for key, get in getters.items():
+
+        x = np.array([[get(row[2]) for row in rows] for rows in full])
+
+        # Spearman correlation of every column with the reference one, as the Pearson correlation of
+        #   the ranks
+        r = scipy.stats.rankdata(x, axis=0)
+        r -= r.mean(axis=0)
+        norm = np.sqrt((r**2).sum(axis=0))
+        if norm[k_ref] == 0:
+            continue
+        with np.errstate(invalid="ignore", divide="ignore"):
+            rho = (r*r[:, [k_ref]]).sum(axis=0)/(norm*norm[k_ref])
+        rho[:k_ref] = np.nan
+
+        # The horizon is the last time the correlation is still at or above the threshold, so a
+        #   brief dip that recovers does not count
+        above = np.where(rho[k_ref:] >= threshold)[0] + k_ref
+        last_above = above[-1] if len(above) else k_ref
+        horizon = float(time_days[last_above]) if last_above < n_out - 1 else None
+
+        elements[key] = {"horizon_days": horizon, "rank_corr_end": float(rho[-1])}
+        series[key] = [None if not np.isfinite(v) else float(v) for v in rho]
+
+    reached = [abs(v["horizon_days"]) for v in elements.values() if v["horizon_days"] is not None]
+    horizon_days = None
+    if reached:
+        horizon_days = float(min(reached))*(1 if time_days[-1] >= 0 else -1)
+
+    # When the clones had their first close encounter, which is what scrambles their order
+    first_encounter = None
+    if clone_diag is not None:
+        firsts = []
+        for name in sim_outputs_mc:
+            times = [abs(e["time_days"]) for e in clone_diag.get(name, {}).get("encounters", [])
+                     if e.get("body") != "Sun"]
+            if times:
+                firsts.append(min(times))
+        first_encounter = {"fraction": len(firsts)/len(sim_outputs_mc)}
+        if firsts:
+            first_encounter.update({"p{:02d}".format(q): float(np.percentile(firsts, q))
+                                    for q in (5, 25, 50, 75, 95)})
+
+    return {"n_clones": len(full), "threshold": threshold,
+            "reference_days": float(time_days[k_ref]), "elements": elements,
+            "horizon_days": horizon_days, "time_days": [float(t) for t in time_days],
+            "rank_corr": series, "first_encounter_days": first_encounter}
+
+
 def estimateLyapunovFromMC(sim_outputs, sim_outputs_mc):
     """ Estimate the trajectory divergence timescale from the Monte Carlo ensemble.
 
@@ -862,7 +1071,7 @@ def estimateLyapunovFromMC(sim_outputs, sim_outputs_mc):
         return None
 
     delta = np.sqrt(sq_sum[:last]/counts[:last])
-    t_days = np.array([abs(sim_outputs[i][0] - sim_outputs[0][0])/(2*np.pi)*365.25
+    t_days = np.array([simTimeToDays(abs(sim_outputs[i][0] - sim_outputs[0][0]))
                        for i in range(last)])
 
     # Heliocentric distance of the nominal solution at each sample
@@ -1102,7 +1311,8 @@ def tisserandClass(t_j):
 def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local", jpl_ephem_data=None,
                          earth_state=None):
     """ Takes a state vector in ECI coordinates (m and m/s), Julian date and converts from ECI (geocentric) to
-    Solar System barycentric coordinates. The units are changed to AU and AU/year.
+    Solar System barycentric coordinates. The units are changed to AU and AU per REBOUND time unit
+    (DAYS_PER_SIM_TIME days).
 
     Arguments:
         state_vect: [list] Position and velocity components in ECI coordinates (epoch of date) in m and m/s,
@@ -1117,12 +1327,13 @@ def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local",
         jpl_ephem_data: [SPK] An opened jplephem SPK kernel. If None and ephem_source is "local",
             the kernel is opened from config.jpl_ephem_file.
         earth_state: [list] Precomputed Earth barycentric state [x, y, z, vx, vy, vz] in REBOUND units
-            (AU, AU/(year/2pi)), ecliptic J2000, at the epoch jd. If given, it is used directly and
+            (AU, AU per time unit), ecliptic J2000, at the epoch jd. If given, it is used directly and
             ephem_source/jpl_ephem_data are ignored - this avoids re-querying the Earth's position,
             which is identical across Monte Carlo realizations sharing the same epoch.
 
     Return:
-        [list] Position and velocity components in barycentric coordinates in AU and AU/year, eg.
+        [list] Position and velocity components in barycentric coordinates in AU and AU per time
+            unit, eg.
             [x, y, z, vx, vy, vz]
     """
 
@@ -1140,7 +1351,7 @@ def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local",
 
         log(f"Reference Julian date (TDB): {jd}")
 
-    # Get the Earth's barycentric state (AU, AU/(year/2pi), ecliptic J2000) used to shift the
+    # Get the Earth's barycentric state (AU, AU per time unit, ecliptic J2000) used to shift the
     # meteoroid from geocentric to barycentric coordinates. The Earth state at a given epoch is
     # identical for all Monte Carlo realizations, so it can be precomputed once and passed in.
     if earth_state is not None:
@@ -1229,19 +1440,19 @@ def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local",
     if len(log_file_path):
         log(f"Velocity vector in ecliptic ECI, J2000: {vel_vec_rot}")
 
-    # Convert the state vector to AU and AU/year
+    # Convert the state vector to AU and AU per time unit
     state_vect_rot = np.concatenate((pos_vec_rot, vel_vec_rot))
     state_vect_rot = [x/aum for x in state_vect_rot]
-    state_vect_rot[3] *= 60*60*24*365.25/(2*np.pi)
-    state_vect_rot[4] *= 60*60*24*365.25/(2*np.pi)
-    state_vect_rot[5] *= 60*60*24*365.25/(2*np.pi)
+    state_vect_rot[3] *= 86400*DAYS_PER_SIM_TIME
+    state_vect_rot[4] *= 86400*DAYS_PER_SIM_TIME
+    state_vect_rot[5] *= 86400*DAYS_PER_SIM_TIME
 
     if len(log_file_path):
         log(
-            f"Meteor state vector in ecliptic ECI, J2000 (AU, AU/year where year = 2pi): {state_vect_rot}"
+            f"Meteor state vector in ecliptic ECI, J2000 (AU, AU per REBOUND time unit): {state_vect_rot}"
         )
         log(
-            f"Earth state vector in ecliptic solar system barycentric, J2000 (AU, AU/year where year = 2pi): {earth_state}"
+            f"Earth state vector in ecliptic solar system barycentric, J2000 (AU, AU per REBOUND time unit): {earth_state}"
         )
 
     # Add the Earth's position and velocity to the meteoroid's position and velocity
@@ -1254,7 +1465,7 @@ def convertToBarycentric(state_vect, jd, log_file_path="", ephem_source="local",
 
     if len(log_file_path):
         log(
-            f"Meteor state vector in barycentric, J2000 (AU, AU/year where year = 2pi): {state_vect_rot}"
+            f"Meteor state vector in barycentric, J2000 (AU, AU per REBOUND time unit): {state_vect_rot}"
         )
         log_file.close()
 
@@ -1306,6 +1517,12 @@ def extractSimParams(ps, obj_name, planet_names, reference_frame="heliocentric")
 
     return state_vect_hel, orb_elem, planet_dists
 
+
+# General relativity models (REBOUNDx effects). "gr" (Anderson et al. 1975) is the post-Newtonian
+#   correction from the dominant body, the Sun, applied to every body: it gets the perihelion
+#   precession and the mean motions right. "gr_full" (Newhall et al. 1983, the EIH equations) is the
+#   interaction between every pair of bodies; its cost grows as the cube of the number of bodies.
+GR_MODELS = ("gr", "gr_full")
 
 # Integrators that can be selected for the integration. IAS15 is adaptive and the default. WHFast
 # and TRACE use a fixed timestep (see FIXED_STEP_DEFAULT_DT_DAYS).
@@ -1360,7 +1577,7 @@ def _integrateParticles(task):
         task: [dict] A picklable task description with the keys:
             planet_names:    [list] Massive-body names, in add order.
             planet_states:   [list] Per-planet [x, y, z, vx, vy, vz] in REBOUND units (AU,
-                                 AU/(year/2pi)), barycentric ecliptic J2000.
+                                 AU per time unit), barycentric ecliptic J2000.
             planet_masses:   [list] Per-planet mass in solar masses.
             particle_states: [list] Per-particle barycentric [x, y, z, vx, vy, vz] (REBOUND units).
             particle_names:  [list] Per-particle names (parallel to particle_states).
@@ -1373,6 +1590,15 @@ def _integrateParticles(task):
                                  radii used for impact detection (Sun 695700 km, Earth 6371 km,
                                  Moon 1737.4 km).
             integrator:      [str]  Optional. "ias15" (default, adaptive), "whfast" or "trace".
+            gr:              [str]  Optional. General relativity: "gr_full" (default), the
+                                 post-Newtonian interaction between all pairs of bodies, or "gr",
+                                 the correction of the Sun's field on every body (see GR_MODELS).
+            sun_j2:          [bool] Optional. Include the Sun's J2 (SUN_J2), symmetric about its
+                                 rotation axis (sunSpinAxisEcliptic). Default True.
+            earth_spin_axis: [list] Optional. Direction of the Earth's rotation axis in the
+                                 simulation frame, the axis of symmetry of its J2 and J4 (see
+                                 earthSpinAxisEcliptic). Needs REBOUNDx >= 4.4.0. None (default)
+                                 leaves REBOUNDx's default, the z axis (the ecliptic pole).
             dt_days:         [float] Optional. Timestep in days for the fixed-step integrators.
                                  Ignored by IAS15. Default FIXED_STEP_DEFAULT_DT_DAYS[integrator].
 
@@ -1428,15 +1654,15 @@ def _integrateParticles(task):
         if dt_days <= 0:
             raise ValueError("The timestep must be positive, got {:g} d.".format(dt_days))
 
-        # REBOUND time units (G = 1, AU, M_sun), where one year is 2*pi
-        dt_fixed = dt_days*2*np.pi/365.25
+        # REBOUND time units (G = 1, AU, M_sun)
+        dt_fixed = daysToSimTime(dt_days)
 
     switch_time = None
 
     # TRACE mishandles close encounters when the timestep is negative (a REBOUND bug, present in
     # 4.6.0 and 5.1.1: a flyby integrated backward comes out ~10% off in a, forward it matches IAS15
     # to 1e-7). A backward TRACE run is therefore integrated forward in time with every velocity
-    # reversed. This is exact for gravity, GR (gr_full, quadratic in the velocities) and the Earth's
+    # reversed. This is exact for gravity, GR (gr and gr_full, quadratic in the velocities) and the Earth's
     # harmonics, which are time-reversal symmetric. Poynting-Robertson drag is not, and is handled
     # where the radiation force is set up.
     reverse_time = (integrator == "trace") and (direction == "backward")
@@ -1491,19 +1717,35 @@ def _integrateParticles(task):
     if reverse_time:
         _reverseVelocities(sim)
 
-    # Add the gravitational harmonics of the Earth
+    # Add the gravitational harmonics of the Earth, symmetric about its rotation axis. The simulation
+    #   frame is the ecliptic, so the axis has to be given: REBOUNDx would otherwise use the z axis,
+    #   the ecliptic pole, 23.4 deg from the Earth's (5 m/s on the departure of a 14 km/s meteoroid).
     gh = rebx.load_force("gravitational_harmonics")
     rebx.add_force(gh)
     ps["Earth"].params["J2"] = J2
     ps["Earth"].params["J4"] = J4
     ps["Earth"].params["R_eq"] = RE_eq
+    earth_spin_axis = task.get("earth_spin_axis")
+    if earth_spin_axis is not None:
+        ps["Earth"].params["Omega"] = rb.Vec3d(*earth_spin_axis)
+
+    # The Sun's J2, about its rotation axis (7.25 deg from the ecliptic pole, which an old REBOUNDx
+    #   uses instead). It acts on the planets as well as on the object.
+    if task.get("sun_j2", True):
+        ps["Sun"].params["J2"] = SUN_J2
+        ps["Sun"].params["R_eq"] = SUN_J2_RADIUS_AU
+        if harmonicsSpinAxisSupported():
+            ps["Sun"].params["Omega"] = rb.Vec3d(*sunSpinAxisEcliptic())
     # Assign the body radii used for impact detection
     for bname, brad in body_radii.items():
         if bname in planet_names:
             ps[bname].r = brad
 
-    # gr_full is the general relativity correction for all bodies
-    gr = rebx.load_force("gr_full")
+    # General relativity (see GR_MODELS). "gr" takes the first particle, the Sun, as the only source.
+    gr_model = task.get("gr", "gr_full")
+    if gr_model not in GR_MODELS:
+        raise ValueError("Unknown GR model {:s}, use one of {:s}.".format(str(gr_model), ", ".join(GR_MODELS)))
+    gr = rebx.load_force(gr_model)
     rebx.add_force(gr)
     gr.params["c"] = rbxConstants.C
 
@@ -1676,7 +1918,7 @@ def _integrateParticles(task):
         except rb.Collision:
 
             # Identify which body was hit (the test particles have no radius of their own)
-            t_impact = time_sign*sim.t/(2*np.pi)*365.25
+            t_impact = time_sign*simTimeToDays(sim.t)
             hit_particle = False
             for pname, pidx in particle_idx.items():
                 if pidx >= sim.N:
@@ -1708,7 +1950,7 @@ def _integrateParticles(task):
 
             # The object was thrown out of the simulation volume (unbound or ejected). Record it and
             # stop, since integrating a runaway particle only gets more expensive.
-            t_esc = time_sign*sim.t/(2*np.pi)*365.25
+            t_esc = time_sign*simTimeToDays(sim.t)
             for pname, pidx in particle_idx.items():
                 if pidx >= sim.N:
                     continue
@@ -1764,9 +2006,9 @@ def _integrateParticles(task):
             "min_dist_au": {b: (None if not np.isfinite(st["min_dist"][b]) else st["min_dist"][b])
                             for b in planet_names},
             "min_time_days": {b: (None if not np.isfinite(st["min_time"][b])
-                                  else time_sign*st["min_time"][b]/(2*np.pi)*365.25)
+                                  else time_sign*simTimeToDays(st["min_time"][b]))
                               for b in planet_names},
-            "encounters": [_encounterRecord(b, d, time_sign*t/(2*np.pi)*365.25)
+            "encounters": [_encounterRecord(b, d, time_sign*simTimeToDays(t))
                            for b, t, d in st["encounters"]],
             "departed": st["departed"],
             "impact": st["impact"],
@@ -1774,10 +2016,14 @@ def _integrateParticles(task):
             "energy_rel_drift": energy_drift,
             "integrator": integrator,
             "fixed_step_from_days": (None if switch_time is None
-                                     else time_sign*switch_time/(2*np.pi)*365.25),
+                                     else time_sign*simTimeToDays(switch_time)),
         }
 
     return {"outputs": outputs, "diagnostics": diagnostics}
+
+
+# Size of the MEGNO deviation above which it is rescaled to unit length at an output (see computeMegno)
+MEGNO_RESCALE_ABOVE = 1e20
 
 
 def computeMegno(task, seed=1):
@@ -1816,6 +2062,10 @@ def computeMegno(task, seed=1):
             "times_days":   [list] output times in days (as in the task),
             "megno":        [list] <Y> at each output time,
             "a_au":         [list] heliocentric osculating semi-major axis at each output time,
+            "ln_delta":     [list] ln|delta| of the deviation at each output time, from ln|delta| = 0
+                            at the start; its slope is the Lyapunov exponent (see classifyMegno),
+            "departure_days": [float] first output time at which the object is beyond n_hill (task,
+                            default 3) Earth Hill radii, or None if it never is (or there is no Earth),
             "escaped":      [bool] whether the object left the simulation volume (series truncated),
         }
     """
@@ -1856,11 +2106,17 @@ def computeMegno(task, seed=1):
     vp = var.particles[0]
     vp.x, vp.y, vp.z, vp.vx, vp.vy, vp.vz = dev/np.linalg.norm(dev)
 
+    # The deviation grows as exp(lambda t) on a chaotic orbit and would overflow past exp(709), so it
+    #   is rescaled to unit length at the output times once it is large, and the logarithm of the
+    #   factor is kept here. The variational equations are linear, so this is exact (measured: ln|delta|
+    #   within 2e-12 of an unscaled run over 400 years).
+    norm = {"offset": 0.0}
+
     def logDeviation():
         """ ln|delta| of the variational particle, over the full 6D phase space. """
 
         p = var.particles[0]
-        return 0.5*np.log(p.x**2 + p.y**2 + p.z**2 + p.vx**2 + p.vy**2 + p.vz**2)
+        return norm["offset"] + 0.5*np.log(p.x**2 + p.y**2 + p.z**2 + p.vx**2 + p.vy**2 + p.vz**2)
 
     # Running integrals: I = int s d(ln|delta|) and J = int Y ds
     acc = {"t": sim.t, "ln_d": logDeviation(), "I": 0.0, "J": 0.0, "Y": 0.0}
@@ -1886,8 +2142,14 @@ def computeMegno(task, seed=1):
     # Keep the returned reference alive until the integration ends (see _setHeartbeat)
     heartbeat_ref = _setHeartbeat(sim, heartbeat)  # noqa: F841
 
-    times_days, megno, a_au = [], [], []
+    times_days, megno, a_au, ln_delta = [], [], [], []
     escaped = False
+
+    # The departure from the Earth's neighbourhood, where the deviation grows by orders of magnitude
+    #   during the initial close passage, which is not the orbit's own chaos
+    earth_i = task["planet_names"].index("Earth") if "Earth" in task["planet_names"] else None
+    departure_radius = task.get("n_hill", 3.0)*HILL_RADII_AU["Earth"]
+    departure_days = None
 
     # Sample <Y> at the same output times as the main integration
     for t_out in task["times"]:
@@ -1905,13 +2167,27 @@ def computeMegno(task, seed=1):
         if t_out == 0:
             continue
 
-        times_days.append(t_out/(2*np.pi)*365.25)
+        times_days.append(simTimeToDays(t_out))
         megno.append(acc["J"]/acc["t"])
+        ln_delta.append(logDeviation())
 
         # Heliocentric osculating semi-major axis, used to count the orbital periods covered
         a_au.append(sim.particles[obj_i].orbit(primary=sim.particles[0]).a)
 
-    return {"times_days": times_days, "megno": megno, "a_au": a_au, "escaped": escaped}
+        if (departure_days is None) and (earth_i is not None):
+            o, e = sim.particles[obj_i], sim.particles[earth_i]
+            if ((o.x - e.x)**2 + (o.y - e.y)**2 + (o.z - e.z)**2)**0.5 > departure_radius:
+                departure_days = times_days[-1]
+
+        # Rescale a large deviation to unit length (see norm)
+        p = var.particles[0]
+        size = (p.x**2 + p.y**2 + p.z**2 + p.vx**2 + p.vy**2 + p.vz**2)**0.5
+        if size > MEGNO_RESCALE_ABOVE:
+            p.x, p.y, p.z, p.vx, p.vy, p.vz = p.x/size, p.y/size, p.z/size, p.vx/size, p.vy/size, p.vz/size
+            norm["offset"] += np.log(size)
+
+    return {"times_days": times_days, "megno": megno, "a_au": a_au, "ln_delta": ln_delta,
+            "departure_days": departure_days, "escaped": escaped}
 
 
 # MEGNO verdict thresholds. A regular orbit's <Y> settles within ~0.05 of 2 after tens of orbits
@@ -1927,7 +2203,129 @@ MEGNO_PERIODIC_MAX = 1.0
 MEGNO_MIN_ORBITS = 20
 
 
-def classifyMegno(times_days, megno, a_au):
+# Fewest orbital periods of exponential growth from which a Lyapunov time is given. Measured on an orbit
+#   with its aphelion near Jupiter: from 4 periods of growth the fit gave 229 years, from 33 and 74
+#   periods 54 and 66 years.
+LYAPUNOV_MIN_ORBITS = 10
+
+
+# The Lyapunov time counts as settled when its fit from the onset changes by less than this fraction over
+#   the last quarter of the growth phase
+LYAPUNOV_SETTLED_TOL = 0.2
+
+
+def cumulativeSlopes(t, y):
+    """ The slope of the least-squares line through the first k points of (t, y), for every k at once
+    (NaN for k < 2), from running sums. Used for the Lyapunov fit from the onset of the growth to every
+    later time, which shows whether the fitted time has settled.
+
+    Arguments:
+        t: [ndarray] Times, increasing.
+        y: [ndarray] Values at those times.
+
+    Return:
+        [ndarray] The slope over points 0..k, for each k.
+    """
+
+    # Times from the first one, so the sums stay small
+    t = np.asarray(t, dtype=float) - t[0]
+    y = np.asarray(y, dtype=float)
+    n = np.arange(1, len(t) + 1, dtype=float)
+    st, sy, stt, sty = np.cumsum(t), np.cumsum(y), np.cumsum(t*t), np.cumsum(t*y)
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        slopes = (n*sty - st*sy)/(n*stt - st**2)
+    slopes[:2] = np.nan
+
+    return slopes
+
+
+def lyapunovFromDeviation(t_years, ln_delta, megno, period_years):
+    """ Lyapunov time of a chaotic orbit from the growth of ln|delta| (see computeMegno).
+
+    The fit starts when <Y> rises above MEGNO_CHAOTIC_MIN for the last time, i.e. when the
+    exponential growth sets in: before it, the deviation can stay flat or even shrink for centuries
+    (e.g. on an Earth-crossing orbit until its first deep encounter), and including that biases the
+    time high. ln|delta| is fitted directly, rather than <Y>, which is a double running average and
+    lags the growth. Chaos driven by close encounters grows in steps, so the growth phase is also
+    split into four consecutive windows of equal length (its quarters), each fitted on its own. The
+    spread of their times is returned as the range. A window in which ln|delta| does not grow (it can
+    shrink for a while between encounters) has no time and is left out of the range.
+
+    The 1 sigma of the time comes from the scatter of the windows' growth rates: their standard
+    deviation over the square root of their number is the standard error of the rate lambda, and
+    1/(lambda + sigma) to 1/(lambda - sigma) is the interval of the time, asymmetric since the time is
+    1/lambda (no upper limit when lambda - sigma <= 0). The fit from the onset to the end of each window
+    (cumulative) shows whether the time has settled: see LYAPUNOV_SETTLED_TOL.
+
+    Arguments:
+        t_years: [ndarray] Elapsed time of each output in years (positive).
+        ln_delta: [ndarray] ln|delta| at each output.
+        megno: [ndarray] <Y> at each output.
+        period_years: [float] Orbital period in years.
+
+    Return:
+        [dict] or None if there is no growth phase to fit (shorter than a tenth of the run or than
+        LYAPUNOV_MIN_ORBITS periods, or not growing): {
+            "lyapunov_time_years": 1/lambda over the growth phase,
+            "lyapunov_time_range_years": [min, max] over the windows that grow (None if none does,
+                or if there are too few points for windows),
+            "onset_years": start of the growth phase,
+            "windows": [list] one dict per window, {"start_years", "end_years",
+                "lyapunov_time_years" (None if ln|delta| does not grow in it)}, or None if there are
+                too few points (fewer than 40) for windows,
+            "lyapunov_time_1sigma_years": [low, high] 1 sigma interval of the time (high None when
+                unbounded), or None without windows,
+            "cumulative": [list] one dict per window, {"end_years", "lyapunov_time_years"} of the fit
+                from the onset to the end of that window, or None without windows,
+        }
+    """
+
+    below = np.where(megno <= MEGNO_CHAOTIC_MIN)[0]
+    k0 = (below[-1] + 1) if len(below) else 0
+
+    # At least a tenth of the run and LYAPUNOV_MIN_ORBITS periods, and enough points for a fit
+    if k0 >= len(t_years) - 10:
+        return None
+    span = t_years[-1] - t_years[k0]
+    if (span < 0.1*t_years[-1]) or (span < LYAPUNOV_MIN_ORBITS*period_years):
+        return None
+
+    t, l = t_years[k0:], ln_delta[k0:]
+    slope = np.polyfit(t, l, 1)[0]
+    if slope <= 0:
+        return None
+
+    # The outputs are evenly spaced, so equal numbers of points make windows of equal length
+    windows, rates, cumulative = [], [], []
+    if len(t) >= 40:
+        cum_slopes = cumulativeSlopes(t, l)
+        for w in np.array_split(np.arange(len(t)), 4):
+            s_w = np.polyfit(t[w], l[w], 1)[0]
+            rates.append(s_w)
+            windows.append({"start_years": float(t[w[0]]), "end_years": float(t[w[-1]]),
+                            "lyapunov_time_years": float(1.0/s_w) if s_w > 0 else None})
+            s_c = cum_slopes[w[-1]]
+            cumulative.append({"end_years": float(t[w[-1]]),
+                               "lyapunov_time_years": float(1.0/s_c) if s_c > 0 else None})
+
+    taus = [w["lyapunov_time_years"] for w in windows if w["lyapunov_time_years"] is not None]
+
+    # The standard error of the rate from the windows' scatter
+    sigma = None
+    if rates:
+        se = float(np.std(rates, ddof=1)/np.sqrt(len(rates)))
+        sigma = [float(1.0/(slope + se)), float(1.0/(slope - se)) if slope - se > 0 else None]
+
+    return {"lyapunov_time_years": float(1.0/slope),
+            "lyapunov_time_range_years": [float(min(taus)), float(max(taus))] if taus else None,
+            "onset_years": float(t[0]),
+            "windows": windows if windows else None,
+            "lyapunov_time_1sigma_years": sigma,
+            "cumulative": cumulative if cumulative else None}
+
+
+def classifyMegno(times_days, megno, a_au, ln_delta=None):
     """ Decide whether a MEGNO series has converged to 2 (regular orbit), is growing (chaotic), or
     is not conclusive.
 
@@ -1943,6 +2341,11 @@ def classifyMegno(times_days, megno, a_au):
         megno: [list] <Y> at each output time.
         a_au: [list] Heliocentric semi-major axis at each output time.
 
+    Keyword arguments:
+        ln_delta: [list] ln|delta| at each output time (see computeMegno). If given, the Lyapunov
+            time of a chaotic orbit comes from its growth (lyapunovFromDeviation); otherwise from the
+            slope of <Y> over the second half of the run. Default None.
+
     Return:
         [dict] {
             "status":        "regular", "chaotic", "periodic", "not_converged", "too_short" or
@@ -1950,8 +2353,17 @@ def classifyMegno(times_days, megno, a_au):
             "final":         final <Y>,
             "last_quarter":  mean <Y> over the last quarter of the run,
             "n_orbits":      number of orbital periods spanned (median a), or None if unbound,
-            "lyapunov_time_years": for a chaotic orbit, 1/lambda from <Y> ~ (lambda/2) t fitted over
-                               the second half of the run; otherwise None,
+            "lyapunov_time_years": for a chaotic orbit, 1/lambda (see ln_delta); otherwise None,
+            "lyapunov_time_range_years": [min, max] of the time over windows of the growth phase,
+                               or None,
+            "lyapunov_windows": the windows of the growth phase and the time fitted in each (see
+                               lyapunovFromDeviation), or None,
+            "lyapunov_onset_years": start of the fitted growth phase, or None,
+            "lyapunov_time_1sigma_years": [low, high] 1 sigma interval of the time (high None when
+                               unbounded), or None,
+            "lyapunov_cumulative": the time fitted from the onset to the end of each window (see
+                               lyapunovFromDeviation), or None,
+            "lyapunov_method":  "ln_delta" or "megno_second_half", or None,
             "message":       one-line explanation,
         }
     """
@@ -1965,7 +2377,9 @@ def classifyMegno(times_days, megno, a_au):
     #   run: a series that is still drifting will disagree between the two
     result = {"status": None, "final": float(y[-1]) if len(y) else None,
               "last_quarter": float(np.mean(y[3*len(y)//4:])) if len(y) else None,
-              "n_orbits": None, "lyapunov_time_years": None}
+              "n_orbits": None, "lyapunov_time_years": None, "lyapunov_time_range_years": None,
+              "lyapunov_windows": None, "lyapunov_onset_years": None, "lyapunov_method": None,
+              "lyapunov_time_1sigma_years": None, "lyapunov_cumulative": None}
 
     # Not enough points for the last quarter to mean anything (or no points at all)
     if len(y) < 8:
@@ -1989,7 +2403,7 @@ def classifyMegno(times_days, megno, a_au):
 
     # <Y> needs many orbits to settle, so a short run gets no verdict at all rather than a wrong one
     if n_orbits < MEGNO_MIN_ORBITS:
-        result.update(status="too_short", message="The run covers only {:.1f} orbital periods; MEGNO "
+        result.update(status="too_short", message="The run covers only {:.3g} orbital periods; MEGNO "
                       "needs at least {:d} to settle. Integrate for at least {:.0f} years.".format(
                           n_orbits, MEGNO_MIN_ORBITS, MEGNO_MIN_ORBITS*a_med**1.5))
         return result
@@ -2003,12 +2417,29 @@ def classifyMegno(times_days, megno, a_au):
     #   Lyapunov exponent from the slope. Only the second half is fitted, since the early part
     #   still carries the transient from the object's departure from the Earth.
     elif (final > MEGNO_CHAOTIC_MIN) and (last_quarter > MEGNO_CHAOTIC_MIN):
-        half = len(y)//2
-        slope = np.polyfit(t_years[half:], y[half:], 1)[0]
 
-        # A negative slope would give a meaningless negative time, so it is left unreported
-        if slope > 0:
-            result["lyapunov_time_years"] = float(1.0/(2*slope))
+        # From the growth of ln|delta| when it is available (see lyapunovFromDeviation). If its growth
+        #   phase is too short no time is given, rather than one from <Y>, which is no better there.
+        if (ln_delta is not None) and (len(ln_delta) == len(y)):
+            fit = lyapunovFromDeviation(t_years, np.array(ln_delta, dtype=float), y, a_med**1.5)
+            result["lyapunov_method"] = "ln_delta"
+            if fit is not None:
+                result.update(lyapunov_time_years=fit["lyapunov_time_years"],
+                              lyapunov_time_range_years=fit["lyapunov_time_range_years"],
+                              lyapunov_windows=fit["windows"],
+                              lyapunov_time_1sigma_years=fit["lyapunov_time_1sigma_years"],
+                              lyapunov_cumulative=fit["cumulative"],
+                              lyapunov_onset_years=fit["onset_years"])
+
+        # Otherwise from <Y> ~ (lambda/2) t over the second half
+        else:
+            half = len(y)//2
+            slope = np.polyfit(t_years[half:], y[half:], 1)[0]
+
+            # A negative slope would give a meaningless negative time, so it is left unreported
+            if slope > 0:
+                result.update(lyapunov_time_years=float(1.0/(2*slope)),
+                              lyapunov_method="megno_second_half")
 
         result.update(status="chaotic", message="<Y> does not converge to 2 and keeps growing: the "
                       "orbit is chaotic.")
@@ -2016,8 +2447,10 @@ def classifyMegno(times_days, megno, a_au):
     # Tending to 0 instead of 2: the deviation stays bounded, which is regular motion too
     elif (final < MEGNO_PERIODIC_MAX) and (last_quarter < MEGNO_PERIODIC_MAX):
         result.update(status="periodic", message="<Y> tends to 0 rather than 2: the deviation from "
-                      "the orbit stays bounded, the signature of a stable periodic orbit (e.g. "
-                      "libration in a mean-motion resonance). Regular, not chaotic.")
+                      "the orbit stayed bounded over this span, as around a stable periodic orbit (e.g. "
+                      "libration in a mean-motion resonance). An Earth-crossing orbit can also do this "
+                      "for a while before its first deep encounter: this is about the nominal orbit "
+                      "over this span, not the clones (see the predictability horizon).")
 
     # Between the thresholds, or the two statistics disagree: the run is simply too short to tell
     else:
@@ -2025,6 +2458,242 @@ def classifyMegno(times_days, megno, a_au):
                       "growing either; integrate for longer to decide.")
 
     return result
+
+
+def _spanText(days):
+    """ A time span in days as text, in years from a year up, e.g. "45 years" or "60 days". """
+
+    days = abs(days)
+    if days >= 365.25:
+        return "{:.0f} years".format(days/365.25)
+
+    return "{:.0f} days".format(days)
+
+
+def _predictabilityReportLines(horizon, span_days):
+    """ Human-readable lines describing a predictabilityHorizon result. """
+
+    lines = ["Predictability horizon (from {:d} Monte Carlo clones):".format(horizon["n_clones"])]
+
+    names = {"a": "a", "e": "e", "i": "i"}
+    parts = []
+    for key, el in horizon["elements"].items():
+        if el["horizon_days"] is None:
+            parts.append("{:s} beyond the span".format(names[key]))
+        else:
+            parts.append("{:s} {:s}".format(names[key], _spanText(el["horizon_days"])))
+    lines.append("  The clones keep the order of their initial {:s} (rank correlation >= {:.1f}) "
+                 "for:".format(", ".join(names[k] for k in horizon["elements"]), horizon["threshold"]))
+    lines.append("    " + "; ".join(parts))
+
+    if horizon["horizon_days"] is None:
+        lines.append("  Not reached within the {:s} integrated: the individual trajectory is still set by "
+                     "the measurement.".format(_spanText(span_days)))
+    else:
+        lines.append("  Beyond ~{:s} the individual trajectory is no longer set by the measurement: use "
+                     "the".format(_spanText(horizon["horizon_days"])))
+        lines.append("  distribution of the clones, not the nominal orbit.")
+
+    fe = horizon.get("first_encounter_days")
+    if fe is not None:
+        if fe.get("p50") is not None:
+            lines.append("  First close encounter of the clones: {:.0f}% had one; median {:s} "
+                         "(5-95%: {:s} to {:s}).".format(100*fe["fraction"],
+                             _spanText(fe["p50"]), _spanText(fe["p05"]),
+                             _spanText(fe["p95"])))
+        else:
+            lines.append("  No clone had a close encounter.")
+
+    return lines
+
+
+def plotMegno(megno, file_path=None):
+    """ Figure of the MEGNO of the nominal orbit (see computeMegno and classifyMegno): <Y> against
+    time and, when the series has ln|delta|, the deviation itself with the fit of the Lyapunov time
+    over its growth phase and over each quarter of it (see lyapunovFromDeviation), each labelled with
+    its time, as the report lists them.
+
+    Arguments:
+        megno: [dict] MEGNO result with its verdict, as reboundSimulate stores it.
+
+    Keyword arguments:
+        file_path: [str] Where to save the figure, or None not to save it.
+
+    Return:
+        (fig, axes): the figure and its axes, one or two.
+    """
+
+    v = megno["verdict"]
+    times_days = np.array(megno["times_days"], dtype=float)
+
+    # MEGNO only gets a verdict after tens of orbital periods, so the span is always long enough that
+    #   days make an unreadable axis
+    t = times_days/365.25
+    sign = -1.0 if (len(t) and t[-1] < 0) else 1.0
+
+    ln_delta = megno.get("ln_delta")
+    with_deviation = (ln_delta is not None) and (len(ln_delta) == len(t))
+
+    # With a Lyapunov fit, a third panel gives the time fitted from the onset to every later time
+    with_fit = with_deviation and (v.get("lyapunov_onset_years") is not None)
+
+    if with_fit:
+        fig, axes = plt.subplots(3, 1, figsize=(8, 9.5), sharex=True, gridspec_kw={"height_ratios": [1, 1.25, 0.9]})
+    elif with_deviation:
+        fig, axes = plt.subplots(2, 1, figsize=(8, 7), sharex=True)
+    else:
+        fig, ax = plt.subplots(figsize=(8, 4.5))
+        axes = [ax]
+
+    ax = axes[0]
+    ax.plot(t, megno["megno"], lw=1.2, label="<Y> (MEGNO)")
+    ax.axhline(2.0, color="k", ls="--", lw=1, label="2 (regular orbit)")
+
+    # The limits of the verdicts (see classifyMegno): regular within MEGNO_REGULAR_TOL of 2, chaotic above
+    #   MEGNO_CHAOTIC_MIN, whose last crossing starts the Lyapunov fit of the panel below
+    ax.axhspan(2 - MEGNO_REGULAR_TOL, 2 + MEGNO_REGULAR_TOL, color="0.85", zorder=0,
+               label="regular if it ends within {:g} of 2".format(MEGNO_REGULAR_TOL))
+    ax.axhline(MEGNO_CHAOTIC_MIN, color="C1", ls=":", lw=1.2,
+               label="chaotic above {:g}; the fit starts at the last crossing".format(MEGNO_CHAOTIC_MIN))
+    ax.set_ylabel("<Y>")
+    ax.set_title("{:s} of the nominal orbit (Newtonian gravity): {:s}".format(
+        "MEGNO and Lyapunov time" if with_deviation else "MEGNO", v["status"].replace("_", " ")))
+    ax.legend(fontsize=8)
+
+    if with_deviation:
+        ax = axes[1]
+        l = np.array(ln_delta, dtype=float)
+        ax.plot(t, l, color="k", lw=1.0, label="$\\ln|\\delta|$")
+
+        # Labels on the curve stay readable on a white ground
+        ground = dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.8)
+
+        if v.get("lyapunov_onset_years") is not None:
+            elapsed = np.abs(t)
+            onset = v["lyapunov_onset_years"]
+            ax.axvspan(sign*onset, t[-1], color="C1", alpha=0.08, lw=0, label="growth phase (fitted)")
+
+            def fitLine(lo, hi):
+                """ The straight fit of ln|delta| over elapsed times lo to hi, as (t, fitted). """
+                k = (elapsed >= lo - 1e-9) & (elapsed <= hi + 1e-9) & np.isfinite(l)
+                if k.sum() < 2:
+                    return None
+                coef = np.polyfit(elapsed[k], l[k], 1)
+                return t[k], np.polyval(coef, elapsed[k])
+
+            fitted = fitLine(onset, elapsed[-1])
+            if fitted is not None:
+                sigma_text = lyapunovSigmaText(v["lyapunov_time_years"], v.get("lyapunov_time_1sigma_years"))
+                ax.plot(*fitted, color="C1", lw=1.6, label="Lyapunov time {:.0f} years{:s}".format(
+                    v["lyapunov_time_years"], sigma_text.replace("1 sigma", "1$\\sigma$")))
+
+                # Where the time comes from: the fit rises by d_ln over d_t, and tau = d_t/d_ln, the time
+                #   in which |delta| grows by a factor e. Drawn as the triangle under the fit.
+                (x0, x1), (y0, y1) = (fitted[0][0], fitted[0][-1]), (fitted[1][0], fitted[1][-1])
+                d_t, d_ln = abs(x1 - x0), y1 - y0
+                if d_ln > 0:
+                    inward = 1 if x1 < x0 else -1
+                    ax.plot([x0, x1, x1], [y0, y0, y1], color="C1", lw=0.8, ls=":", zorder=1)
+                    ax.annotate("$\\Delta t$ = {:.0f} yr".format(d_t), (0.5*(x0 + x1), y0),
+                                textcoords="offset points", xytext=(0, -11), ha="center", fontsize=8,
+                                color="C1", gid="slope", bbox=ground)
+                    # Along the vertical leg, as the span is along the horizontal one
+                    ax.annotate("$\\Delta\\ln|\\delta|$ = {:.1f}".format(d_ln), (x1, 0.5*(y0 + y1)),
+                                textcoords="offset points", xytext=(3*inward, 0), rotation=90,
+                                ha="left" if inward > 0 else "right", va="center", fontsize=8, color="C1",
+                                gid="slope", bbox=ground)
+                    ax.annotate("$\\tau = \\Delta t\\,/\\,\\Delta\\ln|\\delta|$ = {:.0f}/{:.1f} = {:.0f} yr".format(
+                                d_t, d_ln, d_t/d_ln), (x1, y0), textcoords="offset points",
+                                xytext=(4*inward, 4), ha="left" if inward > 0 else "right", va="bottom",
+                                fontsize=8, color="C1", gid="slope", bbox=ground)
+
+            # Each quarter with its own fit and time, or "no growth"
+            for k, w in enumerate(v.get("lyapunov_windows") or []):
+                fitted = fitLine(w["start_years"], w["end_years"])
+                if fitted is None:
+                    continue
+                tau_w = w["lyapunov_time_years"]
+                ax.plot(*fitted, color="C3", lw=1.0, ls="--", label="each quarter" if k == 0 else None)
+                ax.annotate("no growth" if tau_w is None else "{:.0f} yr".format(tau_w),
+                            (np.mean(fitted[0]), np.max(fitted[1])), textcoords="offset points",
+                            xytext=(0, 6), ha="center", fontsize=8, color="C3", gid="quarter", bbox=ground)
+                if k > 0:
+                    ax.axvline(sign*w["start_years"], color="C3", ls=":", lw=0.6)
+
+        ax.set_ylabel("$\\ln|\\delta|$  (each unit: deviation $\\times$ 2.72)")
+        ax.legend(fontsize=8)
+
+    # The time fitted from the onset to every later time, from the end of the first quarter on (shorter
+    #   fits swing to thousands of years where the growth pauses): where it levels off, it has settled
+    if with_fit:
+        ax = axes[2]
+        tau, sigma = v["lyapunov_time_years"], v.get("lyapunov_time_1sigma_years")
+        on = np.where(elapsed >= onset - 1e-9)[0]
+        slopes = cumulativeSlopes(elapsed[on], l[on])
+        with np.errstate(divide="ignore", invalid="ignore"):
+            tau_cum = np.where(slopes > 0, 1.0/slopes, np.nan)
+        cumulative = v.get("lyapunov_cumulative") or []
+        if cumulative:
+            shown = elapsed[on] >= cumulative[0]["end_years"] - 1e-9
+        else:
+            period = np.nanmedian(np.array(megno["a_au"], dtype=float))**1.5
+            shown = (elapsed[on] - onset) >= LYAPUNOV_MIN_ORBITS*period
+        # The same growth phase and quarters as in the panel above
+        ax.axvspan(sign*onset, t[-1], color="C1", alpha=0.08, lw=0, label="growth phase (fitted)")
+        for w in (v.get("lyapunov_windows") or [])[1:]:
+            ax.axvline(sign*w["start_years"], color="C3", ls=":", lw=0.6)
+
+        ax.plot(t[on][shown], tau_cum[shown], color="C1", lw=1.0, label="cumulative fit, from the onset to t")
+
+        # The ends of the quarters with their times; the last one is the whole fit, the time above
+        ends = [(sign*c["end_years"], c["lyapunov_time_years"]) for c in cumulative
+                if c["lyapunov_time_years"] is not None]
+        if ends:
+            ax.plot(*zip(*ends), marker="o", ls="none", color="C3", markersize=5, label="cumulative quarters")
+            for k, (x, y) in enumerate(ends):
+                ax.annotate("{:.0f} yr{:s}".format(y, " (whole fit)" if k == len(ends) - 1 else ""), (x, y),
+                            textcoords="offset points", xytext=(0, 6), ha="center", fontsize=8, color="C3",
+                            gid="cumulative", bbox=ground)
+        # The time and its 1 sigma hold over the fitted span only
+        span_x = [sign*onset, t[-1]]
+        ax.plot(span_x, [tau, tau], color="C1", ls="--", lw=1.0, label="Lyapunov time {:.0f} years (the fit above)".format(tau))
+
+        values = [x for x in tau_cum[shown] if np.isfinite(x)] + [tau] + [x for x in (sigma or []) if x is not None]
+        ax.set_yscale("log")
+        ax.set_ylim(0.7*min(values), 1.4*max(values))
+        if sigma is not None:
+            ax.fill_between(span_x, sigma[0], sigma[1] if sigma[1] is not None else ax.get_ylim()[1], color="C1",
+                            alpha=0.15, lw=0, label="1$\\sigma$")
+        ax.set_ylabel("Lyapunov time [years]")
+        ax.legend(fontsize=8)
+
+    # The start of the fit, where <Y> last crossed MEGNO_CHAOTIC_MIN, is the same time in every panel
+    if with_fit:
+        for k, ax in enumerate(axes):
+            ax.axvline(sign*onset, color="C1", ls="-.", lw=1.0, zorder=3,
+                       label="start of the fit ({:.0f} years {:s})".format(
+                           onset, "back" if sign < 0 else "after the start") if k == 0 else None)
+        axes[0].legend(fontsize=8)
+
+    axes[-1].set_xlabel("Time [years]")
+    fig.tight_layout()
+
+    if file_path is not None:
+        fig.savefig(file_path)
+
+    return fig, axes
+
+
+def lyapunovSigmaText(tau, sigma):
+    """ The 1 sigma of a Lyapunov time as text, e.g. " (+59/-14, 1 sigma)": asymmetric, since the time is
+    1/lambda and the sigma is that of lambda (see lyapunovFromDeviation). Empty without a sigma. """
+
+    if sigma is None:
+        return ""
+    if sigma[1] is None:
+        return " (-{:.0f}/+inf, 1 sigma: the rate is within 1 sigma of 0)".format(tau - sigma[0])
+
+    return " (+{:.0f}/-{:.0f}, 1 sigma)".format(sigma[1] - tau, tau - sigma[0])
 
 
 def _megnoReportLines(megno):
@@ -2043,7 +2712,7 @@ def _megnoReportLines(megno):
 
     # Not available for an unbound orbit, where there is no orbital period to count
     if v["n_orbits"] is not None:
-        lines.append("  span: {:.1f} orbital periods".format(v["n_orbits"]))
+        lines.append("  span: {:.3g} orbital periods".format(v["n_orbits"]))
 
     # The statuses with no entry here ("too_short" and "unbound") are the ones with no verdict
     converges = {"regular": "YES", "chaotic": "NO", "periodic": "NO (tends to 0)",
@@ -2053,10 +2722,66 @@ def _megnoReportLines(megno):
     else:
         lines.append("  No verdict: {:s}".format(v["message"]))
 
+    # A chaotic orbit whose exponential growth is still too short to time
+    if (v["status"] == "chaotic") and (v["lyapunov_time_years"] is None) \
+            and (v.get("lyapunov_method") == "ln_delta"):
+        lines.append("  Lyapunov time not determined: the exponential growth of ln|delta| covers fewer than "
+                     "{:d}".format(LYAPUNOV_MIN_ORBITS))
+        lines.append("  orbital periods (or a tenth of the run). Integrate for longer to time it.")
+
     # Only set for a chaotic orbit with a positive fitted slope
     if v["lyapunov_time_years"] is not None:
-        lines.append("  Lyapunov time ~ {:.0f} years (from <Y> ~ (lambda/2) t over the second "
-                     "half).".format(v["lyapunov_time_years"]))
+        if v.get("lyapunov_method") == "ln_delta":
+
+            # Times are counted from the start of the run, back from it in a backward run
+            when = "back" if megno["times_days"][-1] < 0 else "after the start"
+
+            # It describes the nominal orbit alone, in the re-integration above, and not the clones
+            lines.append("  Lyapunov time ~ {:.0f} years{:s}, of the nominal orbit alone (for the clones,".format(
+                v["lyapunov_time_years"], lyapunovSigmaText(v["lyapunov_time_years"],
+                                                            v.get("lyapunov_time_1sigma_years"))))
+            lines.append("  see the predictability horizon). Fitted to the growth of ln|delta| from {:.0f} to "
+                         "{:.0f} years {:s},".format(v["lyapunov_onset_years"], abs(megno["times_days"][-1])/365.25,
+                                                     when))
+            lines.append("  i.e. since <Y> last exceeded {:.1f}.".format(MEGNO_CHAOTIC_MIN))
+
+            # Each window of the growth phase with its own time, so that the range can be traced back
+            windows = v.get("lyapunov_windows")
+            if windows:
+                lines.append("  Encounter-driven chaos grows in steps, so the same fit in each quarter of "
+                             "that span gives:")
+                spans = ["{:.0f}-{:.0f} years {:s}".format(w["start_years"], w["end_years"], when)
+                         for w in windows]
+                width = max(len(s) for s in spans)
+                for s, w in zip(spans, windows):
+                    lines.append("    {:>{:d}s}: {:s}".format(s, width,
+                                 "no growth" if w["lyapunov_time_years"] is None
+                                 else "{:.0f} years".format(w["lyapunov_time_years"])))
+                lines.append("  The 1 sigma is the scatter of the quarters' growth rates over the square root of "
+                             "their number.")
+
+                # The fit from the onset to the end of each quarter, and whether it has settled
+                cumulative = v.get("lyapunov_cumulative")
+                if cumulative:
+                    taus = [c["lyapunov_time_years"] for c in cumulative]
+                    lines.append("  Fitted from the onset to the end of each quarter: {:s} years.".format(", ".join(
+                        "no growth" if x is None else "{:.0f}".format(x) for x in taus)))
+                    if (taus[-1] is None) or (taus[-2] is None):
+                        lines.append("  It has not settled: integrate for longer to time it.")
+                    else:
+                        change = abs(taus[-1] - taus[-2])/taus[-1]
+                        if change > LYAPUNOV_SETTLED_TOL:
+                            lines.append("  It still changes by {:.0f}% over the last quarter, so it has not "
+                                         "settled: integrate for longer.".format(100*change))
+                        else:
+                            lines.append("  It changes by {:.0f}% over the last quarter: settled.".format(
+                                100*change))
+            else:
+                lines.append("  Too few outputs in the growth phase to also fit it by quarters, so no range "
+                             "is given.")
+        else:
+            lines.append("  Lyapunov time ~ {:.0f} years (from <Y> ~ (lambda/2) t over the second "
+                         "half).".format(v["lyapunov_time_years"]))
 
     if megno.get("escaped"):
         lines.append("  The object left the simulation volume, so the MEGNO series is truncated.")
@@ -2069,7 +2794,7 @@ def reboundSimulate(
         direction="forward", sim_days=60, n_outputs=500, obj_name="obj", obj_mass=0.0, mc_runs=100,
         reference_frame="heliocentric", ephem_source="local", n_cpu=None,
         show_progress=True, return_diagnostics=False, random_seed=None, beta=None, integrator="ias15",
-        dt_days=None, compute_megno=False, verbose=False):
+        dt_days=None, compute_megno=False, sun_j2=True, gr="gr_full", verbose=False):
     """ Takes an state vector (or a Trajectory object), runs REBOUND and produces orbital elements for the 
     object at the end of the simulation or at the specified time.
 
@@ -2117,6 +2842,12 @@ def reboundSimulate(
             and accurate to machine precision; the other two use a fixed timestep.
         dt_days: [float] Timestep in days for WHFast and TRACE. None (default) uses
             FIXED_STEP_DEFAULT_DT_DAYS. Ignored by IAS15.
+        gr: [str] General relativity model, "gr_full" (default; the post-Newtonian interaction between
+            all pairs of bodies) or "gr" (the Sun's post-Newtonian correction on every body, 3.3 times
+            faster, with the same results to ~1e-7 in a). See GR_MODELS.
+        sun_j2: [bool] Include the Sun's J2 (SUN_J2, about its rotation axis). Default True. It moves
+            Mercury's perihelion by 0.03 arcsec per century, and a meteoroid's in proportion to
+            (R_Sun/q)^2, so it matters most for small perihelia.
         compute_megno: [bool] If True, after the requested integration run a purely gravitational
             integration of the nominal solution only, over the same span, and store its MEGNO
             series and verdict (see computeMegno and classifyMegno) under "megno" in the nominal
@@ -2146,6 +2877,9 @@ def reboundSimulate(
 
     # Fail early, before any ephemeris work, if the integrator is not available
     checkIntegratorAvailable(integrator)
+
+    if gr not in GR_MODELS:
+        raise ValueError("Unknown GR model {:s}, use one of {:s}.".format(str(gr), ", ".join(GR_MODELS)))
 
     # If the trajectory is given, override the julian_date and state_vect arguments
     if traj is not None:
@@ -2195,19 +2929,29 @@ def reboundSimulate(
         
 
 
-    # Simulation end time in years and the length of one year in units where G=1
+    # Simulation end time in years, for the printout
     tsimend = sim_days/365.25
-    year = 2.0*np.pi
 
     # Convert from UTC to TDB
     time_utc = astropy.time.Time(julian_date, format='jd', scale='utc')
     time_tdb = time_utc.tdb.jd
 
+    # Axis of the Earth's J2 and J4: its rotation pole at the epoch. Older REBOUNDx versions cannot
+    #   orient them and use the ecliptic pole instead.
+    earth_spin_axis = None
+    if harmonicsSpinAxisSupported():
+        earth_spin_axis = earthSpinAxisEcliptic(time_tdb)
+    else:
+        warnings.warn("REBOUNDx {:s} cannot orient the Earth's J2/J4 and the Sun's J2 along their "
+                      "rotation axes (this needs REBOUNDx >= 4.4.0), so they are symmetric about the "
+                      "ecliptic pole, 23.4 and 7.25 deg off. Upgrade REBOUNDx to fix it.".format(
+                          getattr(reboundx, "__version__", "?")), RuntimeWarning)
+
     # Set up the output time array (not integration steps, but the times at which state is saved)
     if direction == "forward":
-        times = np.linspace(0, year*tsimend, n_outputs)
+        times = np.linspace(0, daysToSimTime(sim_days), n_outputs)
     else:
-        times = np.linspace(0, -year*tsimend, n_outputs)
+        times = np.linspace(0, -daysToSimTime(sim_days), n_outputs)
 
     # Add the Sun and the planets
     planet_names = [
@@ -2258,7 +3002,7 @@ def reboundSimulate(
     earth_state_ref = planet_states[planet_names.index("Earth")]
 
     # To start the meteoroid in the right spot, feed in the barycentric position (AU) and velocity
-    # (AU/year divided by 2pi)
+    # (AU per time unit)
     state_vect_rot = convertToBarycentric(state_vect, time_tdb, earth_state=earth_state_ref)
 
     if verbose:
@@ -2284,6 +3028,9 @@ def reboundSimulate(
             "beta": beta,
             "integrator": integrator,
             "dt_days": dt_days,
+            "earth_spin_axis": earth_spin_axis,
+            "sun_j2": sun_j2,
+            "gr": gr,
         }
 
     if verbose:
@@ -2375,7 +3122,8 @@ def reboundSimulate(
         if show_progress:
             print("Computing the MEGNO of the nominal orbit (Newtonian gravity only, IAS15)...")
         megno = computeMegno(_make_task([state_vect_rot], [obj_name]))
-        megno["verdict"] = classifyMegno(megno["times_days"], megno["megno"], megno["a_au"])
+        megno["verdict"] = classifyMegno(megno["times_days"], megno["megno"], megno["a_au"],
+                                         ln_delta=megno["ln_delta"])
         diagnostics[obj_name] = dict(diagnostics[obj_name], megno=megno)
 
     if return_diagnostics:
@@ -2453,12 +3201,22 @@ if __name__ == "__main__":
                         "or trace (hybrid, fixed step; resolves close encounters; needs REBOUND >= "
                         "4.4). With whfast and trace, IAS15 integrates the object's departure from "
                         "the Earth and they take over at the first output after it. REBOUNDx may "
-                        "warn that GR (gr_full) is velocity-dependent with whfast; its measured "
-                        "effect on the orbit was below 1e-8 in a over 100 years.")
+                        "warn that GR is velocity-dependent with whfast; its measured effect on the "
+                        "orbit was below 1e-8 in a over 100 years.")
 
     parser.add_argument("--dt", type=float, default=None,
                         help="Timestep in days for whfast and trace. Default: {:g} d. Ignored by "
                         "ias15.".format(FIXED_STEP_DEFAULT_DT_DAYS["whfast"]))
+
+    parser.add_argument("--gr", type=str.lower, default="gr_full", choices=GR_MODELS,
+                        help="General relativity: gr_full (default), the post-Newtonian interaction "
+                        "between all pairs of bodies, or gr, the Sun's post-Newtonian correction on "
+                        "every body. gr is 3.3 times faster and changes the orbits by ~1e-7 in a over "
+                        "100 years; use it for large Monte Carlo runs.")
+
+    parser.add_argument("--no_sun_j2", action="store_true",
+                        help="Leave out the Sun's J2 (on by default: J2 = {:.4e}, about the Sun's rotation "
+                        "axis). It matters most for small perihelion distances.".format(SUN_J2))
 
     parser.add_argument("--compute_megno", action="store_true",
                         help="After the integration, integrate the nominal solution again with "
@@ -2571,7 +3329,7 @@ if __name__ == "__main__":
         reference_frame=reference_frame,
         ephem_source=ephem_source, n_cpu=n_cpu, return_diagnostics=True,
         random_seed=random_seed, beta=beta, integrator=args.integrator, dt_days=dt_days,
-        compute_megno=args.compute_megno, verbose=args.verbose
+        compute_megno=args.compute_megno, sun_j2=not args.no_sun_j2, gr=args.gr, verbose=args.verbose
         )
     sim_wall = time.time() - t_run_start
 
@@ -2677,7 +3435,7 @@ if __name__ == "__main__":
     ### Compute the epoch of the final simulation
 
     # Extract the final time in days
-    final_sim_days = sim_outputs[-1][0]/(2*np.pi)*365.25
+    final_sim_days = simTimeToDays(sim_outputs[-1][0])
 
     # Compute the final epoch
     final_epoch_jd = traj.jdt_ref + final_sim_days
@@ -2722,6 +3480,9 @@ if __name__ == "__main__":
     # Estimate the divergence/Lyapunov timescale from the Monte Carlo ensemble (free when MC is run)
     lyap = estimateLyapunovFromMC(sim_outputs, sim_outputs_mc)
 
+    # How long the clones keep the memory of the measured initial conditions
+    horizon = predictabilityHorizon(sim_outputs, sim_outputs_mc, clone_diag=clone_diag, n_hill=n_hill)
+
     # List of bodies for which the distance is tracked (planet_dists dict keys)
     dist_bodies = list(sim_outputs[0][3].keys())
 
@@ -2752,9 +3513,12 @@ if __name__ == "__main__":
         print("  Integration  : {:.2f} days {:s}".format(achieved_days, direction))
 
     print("  Frame        : {:s}".format(reference_frame))
-    print("  Forces       : {:s}".format(
-        "gravity + GR + Earth J2/J4" if beta is None
-        else "gravity + GR + Earth J2/J4 + radiation (beta = {:.3e})".format(beta)))
+    j2_axis = "" if harmonicsSpinAxisSupported() else " (about the ecliptic pole: REBOUNDx < 4.4.0)"
+    forces_str = "gravity + GR ({:s}) + {:s}Earth J2/J4{:s}".format(
+        "Sun" if args.gr == "gr" else "all bodies", "" if args.no_sun_j2 else "Sun J2 + ", j2_axis)
+    if beta is not None:
+        forces_str += " + radiation (beta = {:.3e})".format(beta)
+    print("  Forces       : {:s}".format(forces_str))
     print("  Start epoch  : {:.6f} JD (TDB)".format(traj.jdt_ref))
     print("  Final epoch  : {:.6f} JD (TDB)  =  {:s} UTC".format(final_epoch_jd, time_utc.iso))
     if len(sim_outputs_mc):
@@ -2934,6 +3698,11 @@ if __name__ == "__main__":
                       "(R2_exp = {:.3f}, R2_lin = {:.3f}).".format(
                           ed["r2_exponential"], ed["r2_linear"]))
 
+    if horizon is not None:
+        print("-" * 78)
+        for line in _predictabilityReportLines(horizon, achieved_days):
+            print("  " + line)
+
     if megno is not None:
         print("-" * 78)
         for line in _megnoReportLines(megno):
@@ -3071,6 +3840,9 @@ if __name__ == "__main__":
         if whfast_warning:
             f.write("\n{:s}\n".format(whfast_warning))
 
+        if horizon is not None:
+            f.write("\n" + "\n".join(_predictabilityReportLines(horizon, achieved_days)) + "\n")
+
         if megno is not None:
             f.write("\n" + "\n".join(_megnoReportLines(megno)) + "\n")
 
@@ -3155,7 +3927,7 @@ if __name__ == "__main__":
             dist_str = "".join(", {:s} = {:10.6f}".format(body, output[3][body]) for body in dist_bodies)
 
             # Save the orbital elements and distances at the given time
-            f.write(f"t = {output[0]/(2*np.pi)*365.25:.6f} d, a = {output[2].a*dist_unit_multiplier:10.6f}, e = {output[2].e:10.6f}, i = {np.degrees(output[2].inc):10.6f}, Omega = {np.degrees(output[2].Omega):10.6f}, omega = {np.degrees(output[2].omega):10.6f}, f = {np.degrees(output[2].f):10.6f}{dist_str}\n")
+            f.write(f"t = {simTimeToDays(output[0]):.6f} d, a = {output[2].a*dist_unit_multiplier:10.6f}, e = {output[2].e:10.6f}, i = {np.degrees(output[2].inc):10.6f}, Omega = {np.degrees(output[2].Omega):10.6f}, omega = {np.degrees(output[2].omega):10.6f}, f = {np.degrees(output[2].f):10.6f}{dist_str}\n")
 
         # If the MC was run, save orbital elements of individual MC runs
         if len(sim_outputs_mc):
@@ -3174,7 +3946,7 @@ if __name__ == "__main__":
     fig, axs = plt.subplots(3, 3, figsize=(14, 10), sharex=True)
 
     # Time in days
-    t = [x[0]/(2*np.pi)*365.25 for x in sim_outputs]
+    t = [simTimeToDays(x[0]) for x in sim_outputs]
 
     a = [x[2].a*dist_unit_multiplier for x in sim_outputs]
     e = [x[2].e for x in sim_outputs]
@@ -3313,7 +4085,7 @@ if __name__ == "__main__":
         # Each realization gets its own time axis: a realization truncated early (for example by an
         # impact) is shorter than the nominal solution, and plotting it against the nominal time
         # axis would raise a dimension-mismatch error.
-        t_mc = [x[0]/(2*np.pi)*365.25 for x in sim_outputs_mc[mc_name]]
+        t_mc = [simTimeToDays(x[0]) for x in sim_outputs_mc[mc_name]]
 
         a_mc = [x[2].a*dist_unit_multiplier for x in sim_outputs_mc[mc_name]]
         e_mc = [x[2].e for x in sim_outputs_mc[mc_name]]
@@ -3356,23 +4128,8 @@ if __name__ == "__main__":
     # MEGNO evolution, in its own figure
     megno_png_path = None
     if (megno is not None) and megno["times_days"]:
-        megno_png_path = os.path.join(out_dir, "rebound_megno.png")
-        fig_m, ax_m = plt.subplots(figsize=(8, 4.5))
-
-        # MEGNO only gets a verdict after tens of orbital periods, so the span is always long
-        #   enough that days make an unreadable axis
-        megno_years = [t/365.25 for t in megno["times_days"]]
-
-        ax_m.plot(megno_years, megno["megno"], lw=1.2, label="<Y> (MEGNO)")
-        ax_m.axhline(2.0, color="k", ls="--", lw=1, label="2 (regular orbit)")
-        ax_m.axhspan(2 - MEGNO_REGULAR_TOL, 2 + MEGNO_REGULAR_TOL, color="0.85", zorder=0)
-        ax_m.set_xlabel("Time [years]")
-        ax_m.set_ylabel("<Y>")
-        ax_m.set_title("MEGNO of the nominal orbit (Newtonian gravity): {:s}".format(
-            megno["verdict"]["status"].replace("_", " ")))
-        ax_m.legend()
-        fig_m.tight_layout()
-        fig_m.savefig(megno_png_path)
+        megno_png_path = os.path.join(out_dir, "rebound_megno_lyapunov.png")
+        plotMegno(megno, file_path=megno_png_path)
 
     # Report the saved outputs
     ### Machine-readable results, so downstream analysis does not have to parse the text report ###
@@ -3382,7 +4139,7 @@ if __name__ == "__main__":
     def _elementSeries(rows):
         """ Convert one run's outputs into plain lists of floats. """
         return {
-            "time_days": [row[0]/(2*np.pi)*365.25 for row in rows],
+            "time_days": [simTimeToDays(row[0]) for row in rows],
             "a_au": [row[2].a for row in rows],
             "e": [row[2].e for row in rows],
             "incl_deg": [np.degrees(row[2].inc) for row in rows],
@@ -3411,6 +4168,13 @@ if __name__ == "__main__":
             "integrator": args.integrator,
             "dt_days": dt_days,
             "fixed_step_from_days": fixed_from,
+            "sun_j2": None if args.no_sun_j2 else SUN_J2,
+            "gr": args.gr,
+            # Axis of the Earth's J2/J4 in the ecliptic J2000 frame (null: the ecliptic pole was used,
+            #   REBOUNDx < 4.4.0)
+            "earth_spin_axis": (earthSpinAxisEcliptic(astropy.time.Time(
+                traj.jdt_ref, format="jd", scale="utc").tdb.jd)
+                if harmonicsSpinAxisSupported() else None),
             # The close-encounter gates, so a nominal-only run records them too ("clone_outcomes",
             #   which repeats them, is null without --mc)
             "n_hill_threshold": n_hill,
@@ -3457,6 +4221,7 @@ if __name__ == "__main__":
         "clone_encounters": {name: diag.get("encounters", []) for name, diag in clone_diag.items()},
         "energy_rel_drift": nominal_diag.get("energy_rel_drift"),
         "divergence": lyap,
+        "predictability": horizon,
         "nominal": _elementSeries(sim_outputs),
         "monte_carlo": {name: _elementSeries(rows) for name, rows in sim_outputs_mc.items()},
     }

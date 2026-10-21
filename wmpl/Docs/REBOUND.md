@@ -12,10 +12,12 @@ Monte Carlo clones, and can optionally include radiation forces and measure how 
 - [What it reads](#what-it-reads)
 - [Command line reference](#command-line-reference)
 - [Choosing an integrator](#choosing-an-integrator)
+- [General relativity](#general-relativity)
 - [Radiation forces](#radiation-forces)
 - [Close encounters, impacts and ejections](#close-encounters-impacts-and-ejections)
 - [Monte Carlo clones](#monte-carlo-clones)
 - [Chaos: MEGNO](#chaos-megno)
+- [Predictability horizon](#predictability-horizon)
 - [What it writes](#what-it-writes)
 - [Worked examples](#worked-examples)
 - [Using it as a library](#using-it-as-a-library)
@@ -57,6 +59,13 @@ python -c "import rebound, reboundx; s = rebound.Simulation(); reboundx.Extras(s
 
 **Both are needed.** `rebound` alone is not enough — the general relativity correction, the Earth's
 gravitational harmonics and the radiation forces all come from `reboundx`.
+
+**Use REBOUNDx ≥ 4.4.0.** The simulations run in the ecliptic J2000 frame, and the Earth's J2/J4 are
+made symmetric about its rotation pole of date (precessed from J2000, about 20″ per year) through the
+`Omega` spin-axis parameter that REBOUNDx added in 4.4.0, and so is the Sun's J2 about its IAU
+rotation pole. Older versions ignore it and make both symmetric about the ecliptic pole, 23.4° and
+7.25° off; the run then warns, and the report says so. The effect
+is a few m/s on the departure of a slow meteoroid (5.2 m/s for Winchcombe, at 14 km/s).
 
 **`--no-build-isolation` is not optional.** `reboundx` publishes no wheels, so `pip` always compiles
 it, by default against the newest `rebound` on PyPI rather than the one you installed. When the two
@@ -128,6 +137,8 @@ python -m wmpl.Rebound.REBOUND --help
 | `--beta BETA` | Include solar radiation pressure and Poynting–Robertson drag with this beta. Mutually exclusive with `--radius`/`--density`. |
 | `--radius METRES` | Object radius in metres. With `--density`, beta is computed from it. Purely gravitational if not given. |
 | `--density KG_M3` | Bulk density in kg/m³, used with `--radius`. Default: `3000`. |
+| `--gr {gr_full,gr}` | General relativity. `gr_full` (default) is the post-Newtonian interaction between all pairs of bodies (EIH); `gr` is the Sun's post-Newtonian correction on every body (Anderson et al. 1975), 3.3× faster with the same results to ~1e-7 in a. See [General relativity](#general-relativity). |
+| `--no_sun_j2` | Leave out the Sun's J2. It is on by default (DE430's J2 = 2.11e-7, reference radius 696 000 km, about the Sun's IAU rotation pole). It keeps Mercury within 1 km of DE430 over 100 years (13 km without it); on meteoroids it is tiny, 0.02″ on the perihelion of a q = 0.14 AU orbit in 400 years. |
 | `--compute_megno` | After the integration, measure the MEGNO chaos indicator of the nominal orbit. See [Chaos: MEGNO](#chaos-megno). |
 | `--verbose` | Print the progress of the simulation. |
 
@@ -196,9 +207,35 @@ in the warning for that reason. Measured on a δ-Aquariid-like orbit (a = 2.6 AU
 
 For an orbit with perihelion inside ~0.1 AU use IAS15, or TRACE with `--dt 0.1`.
 
-REBOUNDx will warn that the `gr_full` general relativity correction is velocity-dependent when used
-with WHFast. Its measured effect on the orbit was below 1e-8 in the semi-major axis over 100 years, so
+REBOUNDx will warn that the general relativity correction is velocity-dependent when used with
+WHFast. Its measured effect on the orbit was below 1e-8 in the semi-major axis over 100 years, so
 the warning can be ignored here.
+
+---
+
+## General relativity
+
+By default (`--gr gr_full`) general relativity is the full post-Newtonian interaction between every
+pair of bodies (REBOUNDx `gr_full`, the EIH equations used by the JPL ephemerides), whose cost grows
+as the cube of the number of bodies and is most of the run time. `--gr gr` uses instead the
+post-Newtonian correction of the Sun's field, applied to every body (REBOUNDx `gr`, Anderson et al.
+1975). It gets the perihelion precessions and the mean motions right and ignores terms smaller by the
+planet-to-Sun mass ratio.
+
+Measured with the Sun's and the Earth's harmonics on, `gr` against `gr_full`:
+
+| | `gr` against `gr_full` | For scale: 1 m/s on the initial velocity |
+| :--- | ---: | ---: |
+| Example trajectory, 100 years back | 2 000 km, Δa = 6e-7 AU | 4 million km |
+| Phaethon-like orbit (q = 0.14 AU), 400 years | 0.1″ of the 40.6″ GR perihelion shift (0.26 %) | |
+| Winchcombe, 200 clones of 1 m/s, 100 years | same distributions of a, e, i (KS p = 1.00) | |
+| Planets against DE430, 100 years | Earth 9.3 instead of 4.5 km, Mercury 1.5 instead of 0.6 km | |
+| Run time | 3.2–3.6× faster (200 clones, 100 yr, 7 cores: 50 s instead of 164 s) | |
+
+The planets follow DE430 slightly better with `gr_full`, since DE430 was integrated with the EIH
+equations, and it is the model REBOUND.py has always used. `--gr gr` gives the same meteoroid orbits
+well inside their measurement uncertainty, so use it to speed up large Monte Carlo runs or long
+integrations.
 
 ---
 
@@ -319,11 +356,52 @@ The verdict is based on the final ⟨Y⟩ and its mean over the last quarter of 
 | Verdict | Meaning |
 | :--- | :--- |
 | `regular` | Both within 0.1 of 2. Quasi-periodic motion over the integrated span. |
-| `chaotic` | Both above 2.5. A Lyapunov time is estimated from the slope over the second half of the run. |
-| `periodic` | Both below 1. The deviation stays bounded, e.g. libration in a mean-motion resonance. Regular, but not converging to 2. |
+| `chaotic` | Both above 2.5. A Lyapunov time is fitted to the growth of the deviation (see below). |
+| `periodic` | Both below 1. The deviation stayed bounded over the span, e.g. libration in a mean-motion resonance. An Earth-crossing orbit can also do this for a while before its first deep encounter, so this describes the nominal orbit over the span, not the clones (see [Predictability horizon](#predictability-horizon)). |
 | `not_converged` | Anything else. Integrate for longer to decide. |
 | `too_short` | The run covers fewer than 20 orbital periods. No verdict; the report says how long the run would need to be. |
 | `unbound` | The orbit is hyperbolic, so MEGNO — which describes bounded motion — does not apply. |
+
+**Lyapunov time.** It is fitted to ln|δ|, the logarithm of the deviation, which grows as λ·t on a
+chaotic orbit, rather than to ⟨Y⟩, a double running average that lags the growth. The fit starts
+when ⟨Y⟩ rises above 2.5 for the last time: before that the deviation can stay flat or even shrink for
+a long time, e.g. on an Earth-crossing orbit until its first deep encounter, and including it biases
+the time high. Chaos driven by close encounters grows in steps, so the growth phase is also split
+into four consecutive windows of equal length, its quarters, and each is fitted on its own. The
+report lists every quarter with its time; a quarter in which ln|δ| does not grow (it can shrink for a
+while between encounters) is listed as "no growth".
+
+- **1σ.** The scatter of the quarters' growth rates gives the uncertainty of the time: their standard
+  deviation over √4 is the standard error of λ, and since the time is 1/λ its interval is asymmetric,
+  e.g. 67 (+132/−27) years, with no upper limit when λ is within 1σ of 0.
+- **Has it settled?** The time fitted from the onset to the end of each quarter (cumulative) shows
+  whether it has: the report warns when it still changes by more than 20% over the last quarter, and
+  then the run is too short to time the chaos well.
+
+In the JSON the quarters are the verdict's `lyapunov_windows` (`start_years`, `end_years` and
+`lyapunov_time_years`, `null` where ln|δ| does not grow), the 1σ interval is
+`lyapunov_time_1sigma_years` (its upper end `null` when unbounded) and the cumulative fits are
+`lyapunov_cumulative`. In `rebound_megno_lyapunov.png` the middle panel draws ln|δ| with the growth
+phase, its fit and the fit of each quarter, labelled with its time, and the lower panel the time fitted
+from the onset to every later time: the fit of the middle panel stopped there, so its last point is the
+time of the whole fit. The ends of the quarters (the cumulative quarters) are marked with their times,
+the time and its 1σ band span the fitted growth phase only, and the start of the fit, where ⟨Y⟩ last crosses 2.5 in the upper panel, is one line across all three. No time is
+given if the growth phase covers
+fewer than 10 orbital periods (or a tenth of the run), since the fit is not reliable there. The
+Lyapunov time is of the nominal orbit alone, in its Newtonian re-integration: for the clones, see
+the [Predictability horizon](#predictability-horizon).
+
+Measured on an orbit with its aphelion near Jupiter (a = 3.6 AU, e = 0.45), whose growth phase starts
+171 years back:
+
+| Span | This fit (1σ) | Each quarter, from the start of the growth phase | Fitted from the start to each quarter's end | ⟨Y⟩ over the second half (before) |
+| ---: | ---: | :--- | :--- | ---: |
+| 200 years | not given (4 periods of growth) | | | 17 years |
+| 400 years | 54 years (−29/+∞) | no growth, 19, 74, no growth | no growth, 26, 44, 54 | 34 years |
+| 1000 years | 66 years (+30/−16) | 44, 42, 125, 174 | 44, 58, 55, 66 | 71 years |
+
+The deviation is rescaled to unit length at the outputs once it is large, so that it never overflows;
+the variational equations are linear, so this changes nothing (measured to 2e-12 in ln|δ|).
 
 **MEGNO needs tens of orbital periods to settle**, so set `--days` accordingly. For an orbit with
 a = 3 AU (a period of about 5.2 years) that is at least 100 years, i.e. `--days 36525`. A run that is
@@ -336,6 +414,69 @@ are dissipative, and MEGNO is not defined for them.
 The extra integration costs roughly what a gravity-only run of the same span costs, which is small
 next to a full run with the Monte Carlo clones. It is skipped, with a warning, if you call
 `reboundSimulate` with `return_diagnostics=False`, since that is the only way the result comes back.
+
+---
+
+## Predictability horizon
+
+With Monte Carlo clones, the report gives how long the integration keeps the memory of the measured
+initial conditions. The clones are drawn from the measurement uncertainty, and while the dynamics is
+predictable a clone that starts with a larger semi-major axis than another keeps it. The horizon is
+the last time the rank correlation (Spearman) of the clones' a, e and i with their values just after
+the departure from the Earth is still at least 0.5; the earliest of the three is the horizon of the
+run. Close encounters scramble that order, so the report also gives when the clones had their first
+close encounter (Sun passages left out).
+
+Beyond the horizon the individual trajectory is no longer set by the measurement: the nominal orbit
+means nothing on its own, and only the distribution of the clones does. The integration still makes
+sense statistically: the distribution of a, e, i and of the longitude of perihelion can stay narrow
+and informative for much longer than the horizon.
+
+This is a property of the whole ensemble, which the MEGNO of the nominal orbit is not: a planet-crossing
+nominal orbit becomes chaotic only after its own first deep encounter, which can come centuries after
+most clones have had theirs. It needs no extra integration and takes a few seconds even with 1000
+clones and 7000 outputs.
+
+A short run, like the default 60 days, reports that the horizon was not reached: the clones keep the
+order of their start over the whole span.
+
+For example, Winchcombe integrated 1000 years back with 200 clones (from a covariance of 100 m and
+1 m/s per axis):
+
+```
+  Predictability horizon (from 200 Monte Carlo clones):
+    The clones keep the order of their initial a, e, i (rank correlation >= 0.5) for:
+      a 138 years; e 30 years; i 30 years
+    Beyond ~30 years the individual trajectory is no longer set by the measurement: use the
+    distribution of the clones, not the nominal orbit.
+    First close encounter of the clones: 100% had one; median 30 years (5-95%: 25 years to 43 years).
+```
+
+The memory is lost exactly when the clones meet the Earth. The MEGNO of the nominal orbit of the same
+run is chaotic:
+
+```
+  MEGNO of the nominal orbit (Newtonian gravity only, IAS15):
+    <Y> at the end: 10.645   mean over the last quarter: 10.631
+    span: 211 orbital periods
+    Converges to 2: NO. <Y> does not converge to 2 and keeps growing: the orbit is chaotic.
+    Lyapunov time ~ 67 years (+132/-27, 1 sigma), of the nominal orbit alone (for the clones,
+    see the predictability horizon). Fitted to the growth of ln|delta| from 32 to 1000 years back,
+    i.e. since <Y> last exceeded 2.5.
+    Encounter-driven chaos grows in steps, so the same fit in each quarter of that span gives:
+        32-274 years back: 24 years
+       274-516 years back: 104 years
+       516-758 years back: 48 years
+      758-1000 years back: no growth
+    The 1 sigma is the scatter of the quarters' growth rates over the square root of their number.
+    Fitted from the onset to the end of each quarter: 24, 53, 52, 67 years.
+    It still changes by 22% over the last quarter, so it has not settled: integrate for longer.
+```
+
+Most of the growth comes in the first quarter, which holds the nominal orbit's deepest encounter with
+the Earth (0.13 Hill radii, 43 years back); over the last quarter its deviation even shrinks. The fit
+from the onset holds at 52–53 years over the middle quarters and ends at 67: close to settled, but not
+yet.
 
 ---
 
@@ -368,7 +509,8 @@ The JSON keys, at the top level:
 | `energy_rel_drift` | Relative energy drift of the massive subsystem, as an integrator-quality check. |
 | `divergence` | The exponential and linear fits to the clone spread, with `r2_exponential` and `r2_linear`. |
 | `whfast_encounter_warning` | The WHFast close-encounter warning string, or `null`. |
-| `megno` | With `--compute_megno`: `times_days`, `megno`, `a_au`, `escaped` and the `verdict` dict. `null` otherwise. |
+| `megno` | With `--compute_megno`: `times_days`, `megno`, `ln_delta` (logarithm of the deviation), `a_au`, `departure_days`, `escaped` and the `verdict` dict, with `lyapunov_time_years`, `lyapunov_time_range_years`, `lyapunov_onset_years` and `lyapunov_method`. `null` otherwise. |
+| `predictability` | With clones: `n_clones`, `threshold`, `reference_days`, `horizon_days` (`null` if not reached), per element (`a`, `e`, `i`) its `horizon_days` and `rank_corr_end`, the series `time_days` and `rank_corr`, and `first_encounter_days` (`fraction` and percentiles `p05`–`p95`). `null` with fewer than 10 clones over the whole span. |
 | `nominal`, `monte_carlo` | Full element series: `time_days`, `a_au`, `e`, `incl_deg`, `peri_deg`, `node_deg`, `f_deg`, `body_distances_au`. |
 
 A quick sanity check on any run is `energy_rel_drift`. It measures the massive subsystem the object
@@ -441,9 +583,14 @@ report ends with a MEGNO block:
     <Y> at the end: 0.512   mean over the last quarter: 0.498
     span: 91.2 orbital periods
     Converges to 2: NO (tends to 0). <Y> tends to 0 rather than 2: the deviation from the orbit
-    stays bounded, the signature of a stable periodic orbit (e.g. libration in a mean-motion
-    resonance). Regular, not chaotic.
+    stayed bounded over this span, as around a stable periodic orbit (e.g. libration in a
+    mean-motion resonance). An Earth-crossing orbit can also do this for a while before its first
+    deep encounter: this is about the nominal orbit over this span, not the clones (see the
+    predictability horizon).
 ```
+
+A chaotic orbit also gets a Lyapunov time, with the time fitted in each quarter of its growth phase
+(see [Predictability horizon](#predictability-horizon) for an example).
 
 If it says `too_short`, the message tells you how many years the run needs.
 
@@ -504,6 +651,13 @@ print(diagnostics[traj.traj_id]["megno"]["verdict"]["status"])
 `compute_megno=True` needs `return_diagnostics=True`, since the diagnostics are the only place the
 result is returned.
 
+**Units.** Each output row is `[t, state_vect_hel, orbit, planet_dists]`, in REBOUND's units: G = 1,
+lengths in AU, masses in solar masses, so the time unit is sqrt(AU³/GM☉) = 58.13244 days
+(`DAYS_PER_SIM_TIME`; REBOUND calls it `yr2pi`, a Gaussian year over 2π). Convert times with
+`simTimeToDays(t)` and `daysToSimTime(days)`. Do not use 365.25/(2π): the Julian year is 1.9e-5
+shorter, which before this was fixed made the Sun 3.8e-5 too massive and moved the Earth ~700 000 km
+off the ephemeris in 10 years.
+
 Other functions worth knowing about, all in `wmpl.Rebound.REBOUND`:
 
 | Function | Purpose |
@@ -535,6 +689,9 @@ Use WSL2. Installing only `rebound` is not enough.
 
 **`The installed REBOUND (4.3.0) does not provide the TRACE integrator.`** TRACE was added in REBOUND
 4.4.0. Upgrade, or use `--integrator ias15`.
+
+**`REBOUNDx ... cannot orient the Earth's J2/J4 and the Sun's J2 along their rotation axes`.** REBOUNDx is older than
+4.4.0. Upgrade it with the `--force-reinstall` command in [Requirements](#requirements).
 
 **`--dt must be positive.`** A zero or negative step would silently collapse to a single step per
 output interval, so it is refused rather than accepted.
